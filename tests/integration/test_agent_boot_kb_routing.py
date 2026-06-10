@@ -14,9 +14,7 @@ def _tables_in(db_path) -> set[str]:
     with sqlite3.connect(db_path) as conn:
         return {
             row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
 
 
@@ -58,8 +56,8 @@ def test_kb_tables_absent_from_main_agent_db(tmp_path) -> None:
         assert "knowledge_chunks" not in tables
 
 
-def test_other_stores_still_use_ensure_schema(tmp_path) -> None:
-    """traces, memory_items, reflection tables stay in the main db via ensure_schema."""
+def test_memory_still_uses_ensure_schema_in_main_db(tmp_path) -> None:
+    """memory_items remains in the main db via ensure_schema (not yet migrated to Y)."""
     from fleetent.runtime.agent_app import _init_agent_db_schema
 
     data_dir = tmp_path / "data"
@@ -71,6 +69,25 @@ def test_other_stores_still_use_ensure_schema(tmp_path) -> None:
     main_db_path = data_dir / "fleetent.db"
     assert main_db_path.exists()
     tables = _tables_in(main_db_path)
-    assert "traces" in tables
     assert "memory_items" in tables
-    assert "reflection_reports" in tables
+    # traces and reflection_reports are now Y-managed in per-agent agent_state.db (3b-2).
+    assert "traces" not in tables
+    assert "reflection_reports" not in tables
+
+
+def test_traces_and_reflection_land_in_agent_state_db(tmp_path) -> None:
+    """traces + reflection_reports are now Y-managed in per-agent agent_state.db (3b-2)."""
+    from fleetent.runtime.agent_app import _init_agent_db_schema
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    db_url = f"sqlite:///{data_dir / 'fleetent.db'}"
+
+    _init_agent_db_schema(db_url, agent_id="test-agent")
+
+    agent_state_path = data_dir / "default" / "test-agent" / "agent_state.db"
+    assert agent_state_path.exists()
+    agent_tables = _tables_in(agent_state_path)
+    assert "traces" in agent_tables
+    assert "reflection_reports" in agent_tables
+    assert "sessions" in agent_tables

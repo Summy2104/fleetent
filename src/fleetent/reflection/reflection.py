@@ -943,7 +943,7 @@ def _as_utc(value: datetime) -> datetime:
 
 
 def ensure_schema(db: SQLiteDatabase) -> None:
-    """Create reflection_reports table and index if they do not exist. Idempotent. (migration 005)"""
+    """Create reflection_reports table and index if they do not exist. Idempotent."""
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS reflection_reports (
@@ -962,7 +962,19 @@ def ensure_schema(db: SQLiteDatabase) -> None:
     )
 
 
+_state_db: SQLiteDatabase | None = None
+
+
+def set_state_db(db: SQLiteDatabase) -> None:
+    """Inject the per-agent state DB.  Called once at agent boot via agent_app."""
+    global _state_db
+    _state_db = db
+
+
 def _database() -> SQLiteDatabase:
+    """Return the per-agent state DB if injected, else fall back to Settings().database_url."""
+    if _state_db is not None:
+        return _state_db
     return create_database(Settings().database_url)
 
 

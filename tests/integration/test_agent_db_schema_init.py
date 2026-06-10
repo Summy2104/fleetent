@@ -164,12 +164,13 @@ def test_init_agent_db_schema_creates_all_agent_tables(
 
     _init_agent_db_schema(database_url, agent_id="test-agent")
 
-    # Non-KB/non-session agent-side stores land in the main agent db via ensure_schema.
+    # memory_items / schedule still land in the main agent db via ensure_schema (3b-3/4 pending).
     main_tables = _table_names(SQLiteDatabase(path=db_path))
-    assert "traces" in main_tables
     assert "memory_items" in main_tables
-    assert "reflection_reports" in main_tables
-    # sessions table is now in the per-agent agent_state.db (3b-1)
+    # traces and reflection_reports are now Y-managed in agent_state.db (3b-2).
+    assert "traces" not in main_tables
+    assert "reflection_reports" not in main_tables
+    # sessions never in main db (3b-1).
     assert "sessions" not in main_tables
     # KB tables must NOT be in the main db — Y-managed in tenant-scoped db.
     assert "knowledge_bases" not in main_tables
@@ -185,11 +186,13 @@ def test_init_agent_db_schema_creates_all_agent_tables(
     assert "knowledge_chunks_fts" in kb_tables
     assert "knowledge_source_states" in kb_tables
 
-    # sessions table lands in per-agent agent_state.db via agent_scope + Y (3b-1).
+    # sessions + traces + reflection_reports land in per-agent agent_state.db (3b-1/3b-2).
     agent_state_db_path = tmp_path / "default" / "test-agent" / "agent_state.db"
     assert agent_state_db_path.exists()
     agent_tables = _table_names(SQLiteDatabase(path=agent_state_db_path))
     assert "sessions" in agent_tables
+    assert "traces" in agent_tables
+    assert "reflection_reports" in agent_tables
 
 
 def test_init_agent_db_schema_idempotent(tmp_path: Path) -> None:
@@ -200,8 +203,10 @@ def test_init_agent_db_schema_idempotent(tmp_path: Path) -> None:
 
     _init_agent_db_schema(database_url, agent_id="test-agent")
     _init_agent_db_schema(database_url, agent_id="test-agent")
+    # traces is now in per-agent agent_state.db (3b-2), not the main db.
+    agent_state_db_path = tmp_path / "default" / "test-agent" / "agent_state.db"
     assert (
-        SQLiteDatabase(path=db_path)
+        SQLiteDatabase(path=agent_state_db_path)
         .execute("SELECT name FROM sqlite_master WHERE name='traces'")
         .fetchone()
         is not None

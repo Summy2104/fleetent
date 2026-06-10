@@ -16,6 +16,21 @@ _MAX_STRING_LENGTH = 2048
 _MAX_SEQUENCE_LENGTH = 50
 _RAW_CONTENT_KEYS = frozenset({"content", "text", "transcript"})
 
+_state_db: SQLiteDatabase | None = None
+
+
+def set_state_db(db: SQLiteDatabase) -> None:
+    """Inject the per-agent state DB.  Called once at agent boot via agent_app."""
+    global _state_db
+    _state_db = db
+
+
+def _db() -> SQLiteDatabase:
+    """Return the per-agent state DB if injected, else fall back to DATABASE_URL (platform path)."""
+    if _state_db is not None:
+        return _state_db
+    return create_database(_database_url())
+
 
 @dataclass(frozen=True)
 class TraceEvent:
@@ -92,8 +107,7 @@ def record_trace_event(event: TraceEvent) -> None:
     event_id = event.id or str(uuid.uuid4())
     ts = event.ts or datetime.now(UTC)
     payload = _prepare_payload(event.payload)
-    database = create_database(_database_url())
-    database.execute(
+    _db().execute(
         """
         INSERT INTO traces (
             id, run_id, span_id, parent_span_id, session_id, user_id, agent_id,
@@ -136,7 +150,7 @@ def query_trace_events(query: TraceQuery) -> Iterator[TraceEvent]:
         params["end_ts"] = query.end_ts.isoformat()
 
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    rows = create_database(_database_url()).execute(
+    rows = _db().execute(
         f"""
         SELECT
             id, run_id, span_id, parent_span_id, session_id, user_id, agent_id,
