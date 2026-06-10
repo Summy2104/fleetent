@@ -6,6 +6,6 @@
 
 ## 2. 回归与收尾
 
-- [ ] 2.1 跑既有 integration（DB/store/runtime）确认 WAL/busy_timeout 不破坏现有行为；确认 `tmp_path` 测试隔离不受 `-wal`/`-shm` sidecar 影响
-- [ ] 2.2 全仓确认无新增裸 `sqlite3.connect`（收敛到 `_connect` 入口）；运维文档注明备份/拷贝库需带 `-wal`/`-shm`
-- [ ] 2.3 change 收尾：`make test-pr` 全绿 + `uv run pytest tests/integration -q` 对照 main 基线无新增失败 + `openspec validate sqlite-wal-concurrency --strict`
+- [x] 2.1 跑既有 integration（DB/store/runtime）确认 WAL/busy_timeout 不破坏现有行为；确认 `tmp_path` 测试隔离不受 `-wal`/`-shm` sidecar 影响
+- [x] 2.2 全仓确认无新增裸 `sqlite3.connect`（收敛到 `_connect` 入口）；运维文档注明备份/拷贝库需带 `-wal`/`-shm`
+- [x] 2.3 change 收尾：`make test-pr` 全绿 + `uv run pytest tests/integration -q` 对照 main 基线无新增失败 + `openspec validate sqlite-wal-concurrency --strict`

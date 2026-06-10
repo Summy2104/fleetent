@@ -21,6 +21,7 @@
 ## Risks / Trade-offs
 
 - **`-wal`/`-shm` sidecar 文件**：WAL 正常产物。→ 测试 `tmp_path` 隔离不受影响；备份/拷贝库文件需带上 sidecar（运维文档注明）。
+  - **运维操作规范**：备份或拷贝任何由 `db.py` 管理的 SQLite 库时（`fleetent.db`、per-agent 库、KB 库等），必须同时拷贝同目录下的 `<dbfile>-wal` 和 `<dbfile>-shm` 文件（如存在）。仅拷贝 `.db` 主文件会导致 WAL 中未刷回的写入丢失。如需单文件备份，可先用 `sqlite3 <source> "PRAGMA wal_checkpoint(TRUNCATE)"` 强制将 WAL 内容刷回主文件，再拷贝主文件。
 - **WAL 要求本地文件系统**（不支持某些网络 FS 的 mmap）。→ on-prem 本地部署满足；将来分布式走 PG 后端、不依赖 SQLite WAL。
 - **既有测试受影响?** → WAL/busy_timeout 是连接行为增强、不改数据语义；跑全量确认无回归。
 
