@@ -25,29 +25,6 @@ SHALL create all agent-side tables in the DB pointed to by `DATABASE_URL`.
 - **WHEN** `_init_agent_db_schema()` is called on a DB that already has all tables
 - **THEN** no error is raised and no data is modified
 
-### Requirement: Each agent-side store exposes ensure_schema
-
-`traces.py`, `memory/store.py`, and `reflection.py` SHALL each expose a public
-`ensure_schema(db: SQLiteDatabase) -> None` function that creates the store's tables and
-indices using `CREATE TABLE IF NOT EXISTS` and `CREATE INDEX IF NOT EXISTS`（过渡态，后续切片迁入
-嵌入式迁移 Y）。`knowledge_base/operations.py` SHALL NOT 再以 `ensure_schema` 自建——KB 关系库 schema
-改由 `embedded-schema-migration`（Y）管理（KB 为 Y 首个消费者）。
-
-#### Scenario: ensure_schema creates tables idempotently
-
-- **WHEN** `ensure_schema(db)` is called on an empty DB
-- **THEN** the store's tables and indices are created
-
-#### Scenario: ensure_schema is safe to call repeatedly
-
-- **WHEN** `ensure_schema(db)` is called twice on the same DB
-- **THEN** the second call does not raise an error
-
-#### Scenario: KB schema 不再走 ensure_schema
-
-- **WHEN** 初始化 KB 关系库
-- **THEN** 其 schema 由嵌入式迁移引擎（Y）建立，而非 `knowledge_base/operations.py:ensure_schema()`
-
 ### Requirement: ensure_schema 与 alembic 保持一致（漂移护栏）
 
 每个**仍以 `ensure_schema()` 自建**的 agent-side store（traces/memory/reflection），其所建表的列定义 SHALL
@@ -102,3 +79,17 @@ agent-side 表在 boot 时一并建立于 per-agent 库。
 
 - **WHEN** 迁移后写入/读取 trace 或 reflection_report
 - **THEN** 语义与迁移前一致（仅连接来源与 schema 机制改变）
+
+### Requirement: approvals 经 per-agent Y 建 schema、agent 侧唯一真相源
+
+`governance/approval_store.py`（`approvals` 表）与 `approval_allowlist_store.py` 的 schema SHALL 经 per-agent `agent_state.db`（`agent_scope` 解析）的嵌入式 Y 建立；MUST NOT 再 `ensure_schema`-into-global。agent 侧 `approval_store` SHALL 为 approvals 的**唯一真相源**（R1：agent 全权写、platform 只读投影）；管理库 alembic SHALL NOT 再定义 `approvals` 表（孤立定义经迁移 drop）。
+
+#### Scenario: approvals schema 经 agent_scope + Y 建立
+
+- **WHEN** 初始化某 agent 的审批存储
+- **THEN** `approvals` 经 `agent_scope` 取 `agent_state.db` 后由嵌入式 Y 建立
+
+#### Scenario: 管理库不再定义 approvals
+
+- **WHEN** `alembic upgrade head` 跑到最新
+- **THEN** 管理库不含 `approvals` 表（孤立定义已 drop），approvals 仅存在于 per-agent 库
