@@ -17,10 +17,7 @@ _ASKIT_TABLES = {"askit_tasks", "askit_task_logs", "askit_workspaces"}
 def _tables(db_path: Path) -> set[str]:
     conn = sqlite3.connect(db_path)
     try:
-        return {
-            row[0]
-            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        }
+        return {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     finally:
         conn.close()
 
@@ -30,7 +27,9 @@ def _run_alembic(db_path: Path, target: str) -> None:
     cfg.set_main_option("script_location", _MIGRATIONS_DIR)
     cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
     if target == "head" or target.startswith("+") or target.startswith("-"):
-        command.upgrade(cfg, target) if not target.startswith("-") else command.downgrade(cfg, target)
+        command.upgrade(cfg, target) if not target.startswith("-") else command.downgrade(
+            cfg, target
+        )
     else:
         command.upgrade(cfg, target)
 
@@ -77,6 +76,6 @@ def test_downgrade_restores_askit_tables(tmp_path):
     _upgrade(db)
     _downgrade(db, "063")
     tables = _tables(db)
-    assert _ASKIT_TABLES <= tables, (
+    assert tables >= _ASKIT_TABLES, (
         f"downgrade did not restore askit tables; missing: {_ASKIT_TABLES - tables}"
     )

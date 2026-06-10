@@ -32,7 +32,6 @@ def test_create_user_returns_user():
     assert len(user.id) == 36  # uuid4
 
 
-
 def _assert_derivation_in_clean_env(code: str) -> None:
     """Run an import-time derivation assertion in a child interpreter.
 

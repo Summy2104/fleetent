@@ -6,8 +6,6 @@ runtime path resolution, so they must stay relative.
 """
 
 
-
-
 def _assert_derivation_in_clean_env(code: str) -> None:
     """Run an import-time derivation assertion in a child interpreter.
 

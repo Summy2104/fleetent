@@ -20,10 +20,7 @@ _QUOTA_TABLES = {"quotas", "quota_usage"}
 def _tables(db_path: Path) -> set[str]:
     conn = sqlite3.connect(db_path)
     try:
-        return {
-            row[0]
-            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        }
+        return {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     finally:
         conn.close()
 
@@ -110,6 +107,6 @@ def test_downgrade_restores_quota_tables(tmp_path):
     _upgrade(db)
     _downgrade(db, "064")
     tables = _tables(db)
-    assert _QUOTA_TABLES <= tables, (
+    assert tables >= _QUOTA_TABLES, (
         f"downgrade did not restore quota tables; missing: {_QUOTA_TABLES - tables}"
     )

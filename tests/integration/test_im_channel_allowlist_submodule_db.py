@@ -1,4 +1,5 @@
 from tests.integration._migration_template import apply_migrations
+
 """DB-backed channel allowlist submodule behavior."""
 
 

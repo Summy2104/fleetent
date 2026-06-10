@@ -76,9 +76,7 @@ async def test_resolve_approval_happy_path(monkeypatch, tmp_path):
 
     monkeypatch.setattr(outbound_mod, "send_to", AsyncMock(return_value=True))
     monkeypatch.setattr(outbound_mod, "is_reachable", AsyncMock(return_value=True))
-    routing = ApprovalRouting(
-        by_risk={"medium": {"approvers": ["slack:U_LEAD"], "policy": "any"}}
-    )
+    routing = ApprovalRouting(by_risk={"medium": {"approvers": ["slack:U_LEAD"], "policy": "any"}})
 
     approval_id = uuid.uuid4().hex[:12]
     task = asyncio.create_task(

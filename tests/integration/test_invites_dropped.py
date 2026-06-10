@@ -28,10 +28,7 @@ _INVITES_DDL = """
 def _tables(db_path: Path) -> set[str]:
     conn = sqlite3.connect(db_path)
     try:
-        return {
-            row[0]
-            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        }
+        return {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     finally:
         conn.close()
 
