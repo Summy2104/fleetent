@@ -5,19 +5,18 @@ appends here rather than carrying its own list.  The Y engine's single-file
 user_version stamp means independent lists on the same file would collide.
 
 Version history:
-  v1   sessions          (3b-1) session metadata index
-  v2   traces            (3b-2) agent run trace event table
+  v1   sessions           (3b-1) session metadata index
+  v2   traces             (3b-2) agent run trace event table
   v3   idx_traces_run_id
   v4   idx_traces_user_ts
   v5   idx_traces_agent_ts
   v6   idx_traces_tenant_event_ts
   v7   reflection_reports (3b-2) reflection summary table
   v8   idx_reflection_reports_scope_created
-  v9+  reserved for 3b-3 (memory), 3b-4 (approvals), …
-
-DDL is lifted verbatim from the originating ensure_schema() functions; schema is
-intentionally unchanged so existing rows remain valid after the DB is moved to
-the per-agent agent_state.db.
+  v9   memory_items       (3b-3) per-user memory records (no namespace col)
+  v10  idx_memory_items_user_type
+  v11  idx_memory_items_user_expires
+  v12+ reserved for 3b-4 (approvals), …
 """
 
 from __future__ import annotations
@@ -82,5 +81,26 @@ MIGRATIONS: list[tuple[int, str]] = [
         8,
         "CREATE INDEX IF NOT EXISTS idx_reflection_reports_scope_created"
         " ON reflection_reports (scope, created_at)",
+    ),
+    # ── v9-v11: user memory items (3b-3) ─────────────────────────────────────
+    (
+        9,
+        """
+        CREATE TABLE IF NOT EXISTS memory_items (
+            id          TEXT PRIMARY KEY,
+            user_id     TEXT NOT NULL,
+            type        TEXT NOT NULL,
+            content     TEXT NOT NULL,
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL,
+            expires_at  TEXT
+        )
+        """,
+    ),
+    (10, "CREATE INDEX IF NOT EXISTS idx_memory_items_user_type ON memory_items (user_id, type)"),
+    (
+        11,
+        "CREATE INDEX IF NOT EXISTS idx_memory_items_user_expires"
+        " ON memory_items (user_id, expires_at)",
     ),
 ]
