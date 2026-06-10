@@ -388,6 +388,7 @@ async def _route_assistant_message(
         progress_func=progress_func,
         channel_id=channel,
         upload_func=_make_upload_func(client, channel, thread_ts),
+        outbound_connectors={"slack": client},
     )
     await route(msg)
 
