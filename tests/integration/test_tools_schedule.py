@@ -181,3 +181,76 @@ async def test_schedule_create_explicit_notify_coexists_with_auto_origin():
         "target_type": "channel",
         "thread_id": None,
     }
+
+
+# ── Live registration through the facade (schedule-live-registration) ────────
+
+
+async def test_schedule_create_registers_live_job(isolated_schedule_db):
+    import fleetent.cron_scheduler as cs
+    import fleetent.schedule_store as ss
+
+    scheduler = cs.CronScheduler()
+    await scheduler.start()
+    try:
+        payload = '{"action":"create","name":"live","cron_expr":"0 9 * * *","message":"go"}'
+        result = await dispatch("schedule", payload)
+
+        rows = ss.list_tasks()
+        assert len(rows) == 1
+        assert rows[0]["id"] in result
+        assert scheduler.get_job(rows[0]["id"]) is not None
+    finally:
+        await scheduler.shutdown()
+
+
+async def test_schedule_remove_pause_resume_sync_live_job(isolated_schedule_db):
+    import fleetent.cron_scheduler as cs
+    import fleetent.schedule_store as ss
+
+    scheduler = cs.CronScheduler()
+    await scheduler.start()
+    try:
+        await dispatch(
+            "schedule", '{"action":"create","name":"t","cron_expr":"0 9 * * *","message":"x"}'
+        )
+        task_id = ss.list_tasks()[0]["id"]
+
+        await dispatch("schedule", f'{{"action":"pause","task_id":"{task_id}"}}')
+        assert scheduler.get_job(task_id) is None
+
+        await dispatch("schedule", f'{{"action":"resume","task_id":"{task_id}"}}')
+        assert scheduler.get_job(task_id) is not None
+
+        await dispatch("schedule", f'{{"action":"remove","task_id":"{task_id}"}}')
+        assert scheduler.get_job(task_id) is None
+        assert ss.get(task_id) is None
+    finally:
+        await scheduler.shutdown()
+
+
+async def test_schedule_create_without_scheduler_degrades_honestly(isolated_schedule_db):
+    import fleetent.cron_scheduler as cs
+    import fleetent.schedule_store as ss
+
+    assert cs.current() is None  # no scheduler running in this test
+
+    payload = '{"action":"create","name":"later","cron_expr":"0 9 * * *","message":"go"}'
+    result = await dispatch("schedule", payload)
+
+    assert len(ss.list_tasks()) == 1
+    assert "takes effect when the agent service is running" in result
+    assert "active" not in result.lower()
+
+
+def test_tools_layer_does_not_import_schedule_store():
+    """Dependency guardrail: all task mutations go through the cron_scheduler facade."""
+    import pathlib
+
+    import fleetent.tools as tools_pkg
+
+    pkg_dir = pathlib.Path(tools_pkg.__file__).parent
+    offenders = [
+        py.name for py in pkg_dir.glob("*.py") if "schedule_store" in py.read_text(encoding="utf-8")
+    ]
+    assert offenders == []

@@ -404,7 +404,7 @@ async def schedule(
     otherwise it defaults back to the chat/thread the task was created in. pause/resume
     toggle a task; remove deletes it; run_now fires it immediately; list shows all tasks.
     """
-    from fleetent import schedule_store
+    from fleetent import cron_scheduler
 
     if action == "create":
         deliver = None
@@ -416,7 +416,7 @@ async def schedule(
                 "target_type": notify_target_type,
             }
         origin = _origin_from_context(tool_context)
-        task = schedule_store.create(
+        task = cron_scheduler.create_task(
             name=name,
             cron_expr=cron_expr or None,
             timezone=timezone,
@@ -429,10 +429,21 @@ async def schedule(
             origin=origin,
             deliver=deliver,
         )
-        return f"Scheduled task created: id={task['id']!r} name={name!r} kind={schedule_kind!r}"
+        if cron_scheduler.current() is None:
+            # No live scheduler in this process — be truthful so the AI does not
+            # promise the user a fire time that will never come.
+            return (
+                f"Scheduled task saved: id={task['id']!r} name={name!r} "
+                f"kind={schedule_kind!r} — takes effect when the agent service is running "
+                "(no scheduler in this process)"
+            )
+        return (
+            f"Scheduled task created and registered: id={task['id']!r} "
+            f"name={name!r} kind={schedule_kind!r}"
+        )
 
     if action == "list":
-        tasks = schedule_store.list_tasks(include_disabled=True)
+        tasks = cron_scheduler.list_tasks(include_disabled=True)
         if not tasks:
             return "No scheduled tasks"
         lines = [
@@ -443,24 +454,21 @@ async def schedule(
         return "\n".join(lines)
 
     if action == "remove":
-        deleted = schedule_store.delete(task_id)
+        deleted = cron_scheduler.remove_task(task_id)
         if not deleted:
             return f"error: task {task_id!r} not found"
         return f"Scheduled task {task_id!r} removed"
 
     if action in ("pause", "resume"):
-        matched = schedule_store.set_enabled(task_id, action == "resume")
+        matched = cron_scheduler.set_task_enabled(task_id, action == "resume")
         if not matched:
             return f"error: task {task_id!r} not found"
         return f"Scheduled task {task_id!r} {action}d"
 
     if action == "run_now":
-        from fleetent import cron_scheduler
-
-        existing = schedule_store.get(task_id)
-        if existing is None:
+        fired = await cron_scheduler.run_task_now(task_id)
+        if not fired:
             return f"error: task {task_id!r} not found"
-        await cron_scheduler._fire(existing)
         return f"Scheduled task {task_id!r} fired"
 
     return f"error: unknown action {action!r} (use create/list/remove/run_now/pause/resume)"

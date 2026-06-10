@@ -444,3 +444,150 @@ async def test_fire_missing_connector_records_error(tmp_path, monkeypatch):
 
     assert captured.get("last_status") == "error"
     assert "connector" in (captured.get("last_error") or "")
+
+
+# ── Live mutation through a single owner (schedule-live-registration) ────────
+
+
+async def test_create_task_registers_job_and_persists(isolated_schedule_db):
+    import fleetent.cron_scheduler as cs
+    import fleetent.schedule_store as store
+
+    scheduler = cs.CronScheduler()
+    await scheduler.start()
+    try:
+        task = scheduler.create_task(
+            name="morning",
+            schedule_kind="cron",
+            cron_expr="0 9 * * 1-5",
+            user_id="u-1",
+            message="hi",
+            source="tool",
+        )
+        assert scheduler.get_job(task["id"]) is not None
+        assert store.get(task["id"]) is not None
+    finally:
+        await scheduler.shutdown()
+
+
+async def test_remove_task_deletes_row_and_job(isolated_schedule_db):
+    import fleetent.cron_scheduler as cs
+    import fleetent.schedule_store as store
+
+    scheduler = cs.CronScheduler()
+    await scheduler.start()
+    try:
+        task = scheduler.create_task(
+            name="t", schedule_kind="cron", cron_expr="0 9 * * *", user_id="u-1", message="x"
+        )
+        assert scheduler.remove_task(task["id"]) is True
+        assert scheduler.get_job(task["id"]) is None
+        assert store.get(task["id"]) is None
+    finally:
+        await scheduler.shutdown()
+
+
+async def test_set_task_enabled_toggles_live_job(isolated_schedule_db):
+    import fleetent.cron_scheduler as cs
+    import fleetent.schedule_store as store
+
+    scheduler = cs.CronScheduler()
+    await scheduler.start()
+    try:
+        task = scheduler.create_task(
+            name="t", schedule_kind="cron", cron_expr="0 9 * * *", user_id="u-1", message="x"
+        )
+        assert scheduler.set_task_enabled(task["id"], False) is True
+        assert scheduler.get_job(task["id"]) is None
+        assert store.get(task["id"])["enabled"] in (0, False)
+
+        assert scheduler.set_task_enabled(task["id"], True) is True
+        assert scheduler.get_job(task["id"]) is not None
+        assert store.get(task["id"])["enabled"] in (1, True)
+    finally:
+        await scheduler.shutdown()
+
+
+async def test_current_registered_on_start_cleared_on_shutdown(isolated_schedule_db):
+    import fleetent.cron_scheduler as cs
+
+    scheduler = cs.CronScheduler()
+    await scheduler.start()
+    assert cs.current() is scheduler
+    await scheduler.shutdown()
+    assert cs.current() is None
+
+
+# ── Fire-time revalidation against the store ─────────────────────────────────
+
+
+async def test_fired_job_skips_deleted_task(tmp_path, monkeypatch, isolated_schedule_db):
+    import fleetent.cron_scheduler as cs
+    import fleetent.schedule_store as store
+
+    monkeypatch.setattr(cs, "_resolve_cron_principal", lambda uid: _STUB_PRINCIPAL)
+    run_mock = AsyncMock(return_value="reply")
+    monkeypatch.setattr(cs, "_agent_run", run_mock)
+
+    scheduler = cs.CronScheduler()
+    await scheduler.start()
+    try:
+        task = scheduler.create_task(
+            name="t", schedule_kind="cron", cron_expr="0 9 * * *", user_id="u-1", message="x"
+        )
+        store.delete(task["id"])  # bypass the facade
+
+        await scheduler.get_job(task["id"]).func()
+
+        run_mock.assert_not_called()
+        assert scheduler.get_job(task["id"]) is None
+    finally:
+        await scheduler.shutdown()
+
+
+async def test_fired_job_skips_disabled_task(tmp_path, monkeypatch, isolated_schedule_db):
+    import fleetent.cron_scheduler as cs
+    import fleetent.schedule_store as store
+
+    monkeypatch.setattr(cs, "_resolve_cron_principal", lambda uid: _STUB_PRINCIPAL)
+    run_mock = AsyncMock(return_value="reply")
+    monkeypatch.setattr(cs, "_agent_run", run_mock)
+
+    scheduler = cs.CronScheduler()
+    await scheduler.start()
+    try:
+        task = scheduler.create_task(
+            name="t", schedule_kind="cron", cron_expr="0 9 * * *", user_id="u-1", message="x"
+        )
+        store.set_enabled(task["id"], False)  # bypass the facade
+
+        await scheduler.get_job(task["id"]).func()
+
+        run_mock.assert_not_called()
+        assert scheduler.get_job(task["id"]) is None
+    finally:
+        await scheduler.shutdown()
+
+
+async def test_once_task_marked_completed_after_fire(tmp_path, monkeypatch, isolated_schedule_db):
+    import fleetent.cron_scheduler as cs
+    import fleetent.schedule_store as store
+    import fleetent.session.manager as session_mgr
+
+    monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(cs, "_resolve_cron_principal", lambda uid: _STUB_PRINCIPAL)
+    monkeypatch.setattr(cs, "_agent_run", AsyncMock(return_value="done"))
+
+    scheduler = cs.CronScheduler()
+    await scheduler.start()
+    try:
+        task = scheduler.create_task(
+            name="t", schedule_kind="once", run_at="+1h", user_id="u-1", message="x"
+        )
+        await scheduler.get_job(task["id"]).func()
+
+        row = store.get(task["id"])
+        assert row["enabled"] in (0, False)
+        assert row["last_status"] == "completed"
+    finally:
+        await scheduler.shutdown()
