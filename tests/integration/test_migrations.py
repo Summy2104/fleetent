@@ -38,9 +38,6 @@ def test_upgrade_creates_tables(tmp_path):
     # scheduled_tasks dropped from the management DB (agent-owned-scheduled-tasks):
     # it is now a pure agent-side table created only by schedule_store.ensure_schema.
     assert "scheduled_tasks" not in tables
-    assert "traces" in tables
-    assert "memory_items" in tables
-    assert "reflection_reports" in tables
     assert "memory_maintenance_proposals" in tables
     assert "knowledge_bases" in tables
     assert "knowledge_documents" in tables
@@ -55,34 +52,25 @@ def test_upgrade_creates_tables(tmp_path):
     assert "kb_reflection_reports" in tables
     assert "skill_proposals" in tables
     assert "shared_memory_items" in tables
+    assert {"traces", "memory_items", "reflection_reports"}.isdisjoint(tables)
 
 
-def test_upgrade_creates_trace_indexes(tmp_path):
+def test_upgrade_does_not_create_trace_indexes_in_management_db(tmp_path):
     db = tmp_path / "test.db"
     apply_migrations(db)
     conn = sqlite3.connect(db)
-    indexes = {row[1] for row in conn.execute("PRAGMA index_list(traces)")}
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     conn.close()
-
-    assert indexes >= {
-        "idx_traces_run_id",
-        "idx_traces_user_ts",
-        "idx_traces_agent_ts",
-        "idx_traces_tenant_event_ts",
-    }
+    assert "traces" not in tables
 
 
-def test_upgrade_creates_memory_item_indexes(tmp_path):
+def test_upgrade_does_not_create_memory_item_indexes_in_management_db(tmp_path):
     db = tmp_path / "test.db"
     apply_migrations(db)
     conn = sqlite3.connect(db)
-    indexes = {row[1] for row in conn.execute("PRAGMA index_list(memory_items)")}
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     conn.close()
-
-    assert indexes >= {
-        "idx_memory_items_user_type",
-        "idx_memory_items_user_expires",
-    }
+    assert "memory_items" not in tables
 
 
 def test_upgrade_creates_knowledge_base_fts_index(tmp_path):
@@ -147,25 +135,6 @@ def test_column_structure(tmp_path):
     agent_cols = {row[1] for row in conn.execute("PRAGMA table_info(agents)")}
     assert agent_cols >= {"id", "name", "system_prompt", "allowed_tools", "created_at"}
 
-    memory_cols = {row[1] for row in conn.execute("PRAGMA table_info(memory_items)")}
-    assert memory_cols >= {
-        "id",
-        "user_id",
-        "type",
-        "content",
-        "created_at",
-        "updated_at",
-        "expires_at",
-    }
-    reflection_cols = {row[1] for row in conn.execute("PRAGMA table_info(reflection_reports)")}
-    assert reflection_cols >= {
-        "id",
-        "scope",
-        "time_window_start",
-        "time_window_end",
-        "findings_json",
-        "created_at",
-    }
     maintenance_cols = {
         row[1] for row in conn.execute("PRAGMA table_info(memory_maintenance_proposals)")
     }
@@ -312,38 +281,21 @@ def test_column_structure(tmp_path):
         "extraction_run_id",
         "created_at",
     }
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     conn.close()
+    assert {"traces", "memory_items", "reflection_reports"}.isdisjoint(tables)
 
 
-def test_memory_items_has_namespace_column(tmp_path):
+def test_management_db_does_not_define_memory_items_namespace(tmp_path):
     db = tmp_path / "test.db"
     apply_migrations(db)
     conn = sqlite3.connect(db)
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(memory_items)")}
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     conn.close()
-    assert "namespace" in cols
+    assert "memory_items" not in tables
 
 
-def test_memory_namespace_server_default_backfills_existing_rows(tmp_path):
-    db = tmp_path / "test.db"
-    apply_migrations(db)
-    conn = sqlite3.connect(db)
-    now = "2026-01-01T00:00:00+00:00"
-    # Insert without specifying namespace: server default must apply.
-    conn.execute(
-        """
-        INSERT INTO memory_items (id, user_id, type, content, created_at, updated_at)
-        VALUES ('m1', 'u1', 'identity', 'fact', ?, ?)
-        """,
-        (now, now),
-    )
-    conn.commit()
-    namespace = conn.execute("SELECT namespace FROM memory_items WHERE id = 'm1'").fetchone()[0]
-    conn.close()
-    assert namespace == "default"
-
-
-def test_downgrade_removes_namespace_column(tmp_path):
+def test_downgrade_keeps_runtime_tables_out_of_management_db(tmp_path):
     db = tmp_path / "test.db"
     apply_migrations(db)
     downgrade_migrations(db)
@@ -470,6 +422,81 @@ def test_approvals_not_in_management_db_after_upgrade(tmp_path):
         "approvals must not exist in the management DB after upgrade head; "
         "it is now owned by agent_state.db (per-agent MIGRATIONS v12)"
     )
+
+
+def test_agent_runtime_tables_not_in_management_db_after_upgrade(tmp_path):
+    """agent_state-owned runtime tables must be absent from the management DB."""
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    conn.close()
+
+    unexpected = {"traces", "memory_items", "reflection_reports"} & tables
+    assert not unexpected, (
+        "agent runtime tables must not exist in the management DB after upgrade head; "
+        f"found unexpected tables: {sorted(unexpected)}"
+    )
+
+
+def test_downgrade_recreates_agent_runtime_tables_in_management_db(tmp_path):
+    """Downgrading below 074 recreates the dropped empty compatibility tables."""
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+
+    cfg = Config()
+    cfg.set_main_option("script_location", _MIGRATIONS_DIR)
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db}")
+    command.downgrade(cfg, "073")
+
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    traces_cols = {row[1] for row in conn.execute("PRAGMA table_info(traces)")}
+    memory_cols = {row[1] for row in conn.execute("PRAGMA table_info(memory_items)")}
+    reflection_cols = {row[1] for row in conn.execute("PRAGMA table_info(reflection_reports)")}
+    indexes = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+    conn.close()
+
+    assert {"traces", "memory_items", "reflection_reports"} <= tables
+    assert traces_cols == {
+        "id",
+        "run_id",
+        "span_id",
+        "parent_span_id",
+        "session_id",
+        "user_id",
+        "agent_id",
+        "tenant_id",
+        "event_type",
+        "ts",
+        "payload_json",
+    }
+    assert memory_cols == {
+        "id",
+        "user_id",
+        "type",
+        "content",
+        "created_at",
+        "updated_at",
+        "expires_at",
+    }
+    assert reflection_cols == {
+        "id",
+        "scope",
+        "time_window_start",
+        "time_window_end",
+        "findings_json",
+        "created_at",
+    }
+    assert {
+        "idx_traces_run_id",
+        "idx_traces_user_ts",
+        "idx_traces_agent_ts",
+        "idx_traces_tenant_event_ts",
+        "idx_memory_items_user_type",
+        "idx_memory_items_user_expires",
+        "idx_reflection_reports_scope_created",
+    } <= indexes
 
 
 def test_agent_mcp_server_bindings_table_created(tmp_path):

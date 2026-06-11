@@ -7,8 +7,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import fleetent.runtime.loop as agent_loop
-from fleetent.identity import Principal
 from fleetent.agent_config import AgentModels, ModelRouteEntry, ModelTarget
+from fleetent.db import SQLiteDatabase
+from fleetent.identity import Principal
 from fleetent.long_term_ctx import BuiltContext, ContextSource
 from fleetent.model import ModelPolicySnapshot
 from fleetent.observability import (
@@ -18,6 +19,8 @@ from fleetent.observability import (
     get_usage_summary,
     query_trace_events,
 )
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 from tests.integration.test_migrations import apply_migrations
 
 
@@ -25,7 +28,10 @@ from tests.integration.test_migrations import apply_migrations
 def trace_db(tmp_path, monkeypatch):
     db_path = tmp_path / "observability_contracts.db"
     apply_migrations(db_path)
+    db = SQLiteDatabase(path=db_path)
+    migrate(db, AGENT_STATE_MIGRATIONS)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setattr("fleetent.observability.traces._state_db", db)
     return db_path
 
 

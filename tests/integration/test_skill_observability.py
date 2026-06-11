@@ -2,8 +2,11 @@
 
 import pytest
 
+from fleetent.db import SQLiteDatabase
 from fleetent.observability.traces import TraceEvent, record_trace_event
 from fleetent.platform.skill_management import skill_admin_store
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 from tests.integration._migration_template import apply_migrations
 
 
@@ -11,8 +14,11 @@ from tests.integration._migration_template import apply_migrations
 def db(tmp_path, monkeypatch):
     db_path = tmp_path / "users.db"
     apply_migrations(db_path)
+    db = SQLiteDatabase(path=db_path)
+    migrate(db, AGENT_STATE_MIGRATIONS)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setattr("fleetent.observability.traces._state_db", db)
     return db_path
 
 

@@ -10,6 +10,8 @@ import pytest
 from fleetent.db import SQLiteDatabase
 from fleetent.memory import extraction
 from fleetent.memory import store as memory_store
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 from tests.integration.test_migrations import apply_migrations
 
 
@@ -25,9 +27,14 @@ def _use_db(monkeypatch, db_path) -> None:
     memory/traces stores that still resolve it.
     """
     from fleetent import reflection
+    from fleetent.observability import traces
 
     monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
-    monkeypatch.setattr(reflection, "_state_db", SQLiteDatabase(path=db_path))
+    db_handle = SQLiteDatabase(path=db_path)
+    migrate(db_handle, AGENT_STATE_MIGRATIONS)
+    monkeypatch.setattr(reflection, "_state_db", db_handle)
+    monkeypatch.setattr(memory_store, "_state_db", db_handle)
+    monkeypatch.setattr(traces, "_state_db", db_handle)
 
 
 def test_memory_maintenance_public_api_is_importable():

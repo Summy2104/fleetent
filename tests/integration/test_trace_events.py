@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from fleetent.db import SQLiteDatabase
 from fleetent.observability import (
     InjectedContextTrace,
     TraceEvent,
@@ -12,6 +13,8 @@ from fleetent.observability import (
     record_injected_context,
     record_trace_event,
 )
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 from tests.integration.test_migrations import apply_migrations
 
 
@@ -60,7 +63,10 @@ def test_injected_context_trace_public_api_can_be_constructed():
 def trace_db(tmp_path, monkeypatch):
     db_path = tmp_path / "traces.db"
     apply_migrations(db_path)
+    db = SQLiteDatabase(path=db_path)
+    migrate(db, AGENT_STATE_MIGRATIONS)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setattr("fleetent.observability.traces._state_db", db)
     return db_path
 
 

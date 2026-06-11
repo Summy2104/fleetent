@@ -4,7 +4,9 @@ from datetime import UTC, datetime
 import pytest
 
 from fleetent import memory
-from fleetent.db import create_database
+from fleetent.db import SQLiteDatabase, create_database
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 
 
 def _patch_trend_db(monkeypatch, tmp_path):
@@ -13,8 +15,10 @@ def _patch_trend_db(monkeypatch, tmp_path):
 
     db_path = tmp_path / "trends.db"
     apply_migrations(db_path)
+    migrate(SQLiteDatabase(path=db_path), AGENT_STATE_MIGRATIONS)
     database = create_database(f"sqlite:///{db_path}")
     monkeypatch.setattr(store, "database", lambda: database)
+    monkeypatch.setattr(store, "_state_db", database)
     return database
 
 

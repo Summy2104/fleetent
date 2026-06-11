@@ -165,34 +165,6 @@ def query_trace_events(query: TraceQuery) -> Iterator[TraceEvent]:
     return (_trace_event_from_row(row) for row in rows.fetchall())
 
 
-def ensure_schema(db: SQLiteDatabase) -> None:
-    """Create traces table and indices if they do not exist. Idempotent. (migration 003)"""
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS traces (
-            id              TEXT PRIMARY KEY,
-            run_id          TEXT NOT NULL,
-            span_id         TEXT,
-            parent_span_id  TEXT,
-            session_id      TEXT,
-            user_id         TEXT,
-            agent_id        TEXT,
-            tenant_id       TEXT NOT NULL DEFAULT 'default',
-            event_type      TEXT NOT NULL,
-            ts              TEXT NOT NULL,
-            payload_json    TEXT NOT NULL
-        )
-        """
-    )
-    db.execute("CREATE INDEX IF NOT EXISTS idx_traces_run_id ON traces (run_id)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_traces_user_ts ON traces (user_id, ts)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_traces_agent_ts ON traces (agent_id, ts)")
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_traces_tenant_event_ts"
-        " ON traces (tenant_id, event_type, ts)"
-    )
-
-
 def _database_url() -> str:
     default = f"sqlite:///{paths.data_dir() / 'management.db'}"
     return os.environ.get("DATABASE_URL", default)
