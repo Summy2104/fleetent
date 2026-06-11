@@ -62,7 +62,7 @@ agent runtime ──✗──→ platform        # 严格禁止反向依赖
 - platform 需要 agent 数据时读 agent 侧产物，而非要求 agent 反向写入 platform 表
 - **验证基线**：任何改动后，agent 必须能在「无 platform、platform 的 DB 表不存在」环境下完成 `fleetent agent run` 对话
 
-> 2026-06-10 审计：`im_gateway/telegram`、`tools/builtin_tools` 的反向 import 已清理。仍存一处根因：`user_store.authenticate` import `platform.user_management.api_key_store`——由 #4 Identity 端口结构性根除。不得新增同类反向依赖。
+> 2026-06-11 审计：`im_gateway/telegram`、`tools/builtin_tools` 的反向 import 已清理。`user_store.authenticate` 的根因已由 **#4 Identity 端口落地根除**——`authenticate` 改用注入的 `_api_key_resolver`（platform 启动时 `set_api_key_resolver` 注入，standalone agent 留 None），不再 import platform。残留仅 `migrate_api_keys()`（一次性 key 迁移工具）内有懒加载 platform import，非 agent 运行时热路径。不得新增同类反向依赖。
 
 ---
 
@@ -101,11 +101,11 @@ src/fleetent/
 
 ## 数据与 Schema 生命周期
 
-当前单库 `data/fleetent.db`（目标：5 物理库，见 `docs/architecture/data-model.md`）。
+**5 物理库 + 按主体物理分区已落地**（持久层 #3，详见 `docs/architecture/data-model.md`）：管理库（单库、跨主体）+ per-agent 运行库 + per-tenant 共享记忆库 / KB 关系库 + 向量底座，多主体时按 `<tenant>/<agent_id>/` 目录物理隔离。管理库当前真实文件仍是 `data/fleetent.db`（概念名 `management.db`，改名待办）。
 
 **双权威**：
-- **管理表**（users/api_keys/tenants/teams/scheduled_tasks 等）→ 仅由 **Alembic** 维护，不在 store 中 `_init_db()` 建表
-- **agent 侧表**（traces/memory_items/sessions/approvals/KB/reflection 等）→ `ensure_schema()` 自建，DDL 与 alembic head 保持一致（漂移护栏强制）；目标态改用嵌入式 forward-only 迁移（`user_version` 戳）
+- **管理表**（users/api_keys/tenants/teams/scheduled_tasks 等，管理库）→ 仅由 **Alembic** 维护，不在 store 中 `_init_db()` 建表
+- **agent 侧表**（traces/memory_items/sessions/approvals/KB/reflection 等，per-agent / per-tenant 库）→ **嵌入式 forward-only 迁移（Y）已落地**：每物理文件一份有序 `MIGRATIONS=[(ver,sql)]` + `PRAGMA user_version` + migrate-on-open + 版本闸（`agent_state_migrations.py`、`knowledge_base/core/migrations.py`、`memory/shared_memory_migrations.py`），脱离 Alembic 单机自建
 
 测试用 `tmp_path + monkeypatch` 隔离，绝不触碰 `data/`。
 

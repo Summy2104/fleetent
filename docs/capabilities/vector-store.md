@@ -13,10 +13,10 @@
 
 **调用关系**：
 - 依赖：embedding 模型（默认 deterministic，可由 active Agent `models.routes.embedding` 指向 HTTP provider）、向量后端（memory 或普通 SQLite persistent backend；sqlite-vec / Qdrant 后置）、Agent / Platform config
-- 被依赖：`fleetent.intelligence.memory`（记忆条目的写入与检索）、knowledge_base（文档 chunk 的写入与检索）
+- 被依赖：`fleetent.memory`（记忆条目的写入与检索）、knowledge_base（文档 chunk 的写入与检索）
 
 **模块归属**：
-- owning package：`intelligence.vector_store`
+- owning package：`fleetent.vector_store`
 - public API：`upsert(id, text, namespace)`、`search(query, namespace, limit)`、`delete(id, namespace)`、`clear_namespace(namespace)`、`reindex(ReindexRequest)`、`SearchResult`、`IndexableItem`、`ReindexSummary`
 - owned tables：`vector_items`（SQLite persistent backend owns）
 - config namespace：Agent `models.routes.embedding` / `models.routes.rerank`、Agent `embedding.*` / `rerank.*` compatibility blocks、`vector_store.*`
@@ -102,7 +102,7 @@ def reindex(request: ReindexRequest) -> ReindexSummary:
 **foundation 已完成**：`2026-05-31-vector-store-foundation` 已归档。
 
 已实现内容：
-- `fleetent.intelligence.vector_store` public API：`upsert()`、`search()`、`delete()`、`clear_namespace()`、`reindex()`、`SearchResult`、`IndexableItem`、`ReindexRequest`、`ReindexSummary`
+- `fleetent.vector_store` public API：`upsert()`、`search()`、`delete()`、`clear_namespace()`、`reindex()`、`SearchResult`、`IndexableItem`、`ReindexRequest`、`ReindexSummary`
 - namespace helper：`memory_namespace(user_id)`、`knowledge_namespace(tenant_id, kb_id)`
 - embedding provider abstraction：deterministic provider 用于测试和本地开发，HTTP provider 兼容
   OpenAI-style `/v1/embeddings`
@@ -115,7 +115,7 @@ def reindex(request: ReindexRequest) -> ReindexSummary:
 - 同步 reindex 边界支持 memory / knowledge-base 的 dry-run 和 rebuild；`rebuild` 先清空目标 namespace，再逐条 upsert 当前 source records，单条失败计入 failed 并继续后续 item
 - combined memory+KB embedding evaluation 使用 deterministic embedding 默认验证 memory 和 KB 都能通过 reindex 后检索；真实 HTTP embedding smoke 显式 opt-in
 
-当前定位：可支持 `fleetent.intelligence.memory`、long-term-ctx 和测试场景；SQLite backend 解决重启后索引丢失问题，但不是大规模 ANN 检索后端。
+当前定位：可支持 `fleetent.memory`、long-term-ctx 和测试场景；SQLite backend 解决重启后索引丢失问题，但不是大规模 ANN 检索后端。
 rerank provider 已接入 knowledge-base hybrid search 的显式 rerank 路径；默认仍为 disabled，不会静默调用真实外部服务。
 
 ## 规划中（v1.0）
@@ -164,7 +164,7 @@ rerank provider 已接入 knowledge-base hybrid search 的显式 rerank 路径�
 ## 服务化 / 目录边界判断
 
 vector-store 未来有独立服务潜力，尤其是 embedding provider 和 Qdrant 管理。但当前应保持模块化单体内的
-`intelligence.vector_store` package：先稳定 public API 和 backend adapter，再决定是否拆成 sidecar 或独立服务。
+`fleetent.vector_store` package：先稳定 public API 和 backend adapter，再决定是否拆成 sidecar 或独立服务。
 
 ## 验收标准
 

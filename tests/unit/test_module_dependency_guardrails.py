@@ -345,7 +345,6 @@ _CONTROL_FACE_PREFIXES = (
     "fleetent.platform.reflection_management",
     "fleetent.platform.admin_cli",
     "fleetent.platform.agent_statistics",
-    "fleetent.platform.resource_monitoring",
     "fleetent.platform.im_gateway_management",
 )
 

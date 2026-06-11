@@ -37,15 +37,16 @@ agent 工具执行前的治理层：在 agent 即将调用某个工具的那一�
 |---|---|
 | **性质** | 不可逆操作的自我意图确认（防注入，非授权） |
 | **范围** | 极小：删除 / 外发邮件消息 / 转账 / 对外发布等不可逆高影响动作。读操作、可逆操作**一律不审批** |
-| **确认人** | 发起人本人（self-confirm）。因为要回答"这是不是**你**的本意"，只有本人能答 |
-| **时序** | 同步 —— 人就在会话里，几秒内响应 |
-| **作用域** | **限定在 session 内**，是会话流里的一个对话回合（类似 agent 问澄清问题），不是跨会话的权限子系统 |
+| **确认人** | 由 agent 的 `ApprovalRouting` 决定（R1）：可路由给**发起人本人**（`REQUESTER_SENTINEL`）或**指定审批人**（team/tenant approver）。审批人经 `im_gateway` **外呼 DM** 触达；无可达审批人 → default-closed 立即 reject |
+| **归属** | **agent 全权**：审批请求与门状态的唯一真相源是 agent 侧 `approval_store`（`approvals`/`approval_allowlist`），actor 存不透明标签；platform 只读下游投影（R1）|
+| **时序** | 请求阻塞到 resolve 或超时；审批人经 DM 异步触达，进程内用 `asyncio.Event` 唤醒（跨节点唤醒属多机部署 open question）|
+| **作用域** | 当前限定在 owning node 的进程内门控；状态已落 `approval_store` 可被 platform 只读投影 |
 | **超时** | fail-closed：超时未确认按"未批准"处理，中止该工具 |
-| **留痕** | 确认 / 取消结果交 observability audit event |
+| **留痕** | 确认 / 取消结果交 observability audit event；审批请求/状态持久化在 `approval_store` |
 
 明确不做（留口，v1 之外）：
-- ❌ **外部 / 双人审批（dual-control）**：需要任务注册中心（挂起-恢复基础设施），太重。仅组织级影响 / 强合规场景才需要
-- ❌ **异步审批**：审批人不在场才需要异步；自我审批人就在会话里，同步即可。等真有外部审批需求再做
+- ❌ **双人审批（dual-control）/ 跨会话挂起-恢复**：需要任务注册中心，太重；仅组织级影响 / 强合规场景才需要
+- ❌ **跨节点审批信令**：单机内 `asyncio.Event` 唤醒已够；多机部署需 Redis pub/sub 或 owning-node 路由（见 platform 多机集群 open question）
 
 ## 模块图
 

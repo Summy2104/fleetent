@@ -41,7 +41,7 @@
   - 当前不要求 PostgreSQL；数据库访问通过统一 DB runtime 边界，避免把业务层写死到 SQLite
   - `database_url` 默认指向 `sqlite:///data/fleetent.db`；非 SQLite backend 当前 fail fast
   - 存量本地 `data/users.db` 不会自动迁移、复制或 fallback；需要保留数据时由 operator 手动重命名为 `data/fleetent.db`，或选择重新初始化
-  - 不引入 ORM；schema lifecycle 由 alembic 统一管理
+  - 不引入 ORM；schema lifecycle 双权威（按库分）：**管理库** = Alembic；**agent 侧库**（per-agent / 共享记忆 / KB）= 嵌入式 forward-only 迁移（Y，`user_version` migrate-on-open），不经 Alembic
 
 - ✅ **observability 数据落点已明确**：运行观测数据按用途分层持久化
   - agent traces v1.0 使用 SQLite `traces` 表，通过 DB runtime 访问

@@ -21,7 +21,7 @@
 
 ```
 data/
-  management.db                                   # 管理库（单库·跨主体·Alembic）
+  management.db                                   # 管理库（单库·跨主体·Alembic）—— ⚠️ 概念名；当前真实文件仍是 fleetent.db（改名 fleetent.db→management.db 待办，见文末）
   <tenant>/
     kb.db / kb_vectors.db                         # KB 关系 / 向量（per-tenant）
     shared_memory.db / shared_memory_vectors.db   # 共享记忆 关系 / 向量（per-tenant）
@@ -112,3 +112,7 @@ erDiagram
 ## 6. platform 读侧投影
 
 platform 控制面经**只读连接**（不迁移、`mode=ro`）+ 共享 store 读函数 + management.db registry 读 agent 侧库；不物化副本、不要求 agent 反向写。详见 [`target-architecture.md` §7](./target-architecture.md)。
+
+## 待办 · 命名对齐
+
+- **管理库文件改名**：本文与 target-architecture.md / specs / `read_projection.py` 注释统一用概念名 `management.db`，但当前真实文件仍是 `fleetent.db`（`config.py` 默认、`alembic.ini`、安装脚本、备份脚本均指它）。#3 拆分后该库只剩管理表，改名 `fleetent.db → management.db` 是收尾项——涉及 `database_url` 默认、`alembic.ini`、`scripts/install*.sh`、`scripts/upgrade.py` 备份路径，随多库备份/运维改造（待定 change）一并处理。

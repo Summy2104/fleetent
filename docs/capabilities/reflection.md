@@ -17,11 +17,11 @@ reflection 默认不直接修改 User Memory、skills 或 knowledge-base。
 - **knowledge base reflection**：per-tenant，观察知识库使用质量，上报缺口与问题；只读报告，不自动写 KB、不触发 sync
 
 **调用关系**：
-- 依赖：observability（`query_trace_events(query)` 读取情节记忆事件）、`fleetent.intelligence.memory`（只读信号 + 已批准 proposal 的 public mutation API）、config
+- 依赖：observability（`query_trace_events(query)` 读取情节记忆事件）、`fleetent.memory`（只读信号 + 已批准 proposal 的 public mutation API）、config
 - 被依赖：cron_scheduler（定期触发）
 
 **模块归属**：
-- owning package：`intelligence.reflection`
+- owning package：`fleetent.reflection`
 - public API：`run_reflection(scope)`、`generate_memory_maintenance_proposals(user_id, findings)`、proposal create / approve / reject / apply API、`KnowledgeBaseReflectionReport`、`KnowledgeBaseReflectionFinding`、`run_kb_reflection_report(scope)`、`SkillProposal`、`generate_skill_proposals()`、`approve_skill_proposal()`、`reject_skill_proposal()`、`apply_skill_proposal()`；后续扩展 `run_skill_reflection(agent_id)`
 - owned tables：`reflection_reports`、`memory_maintenance_proposals`、`kb_reflection_reports`、`skill_proposals`
 - config namespace：`reflection.*`
@@ -31,12 +31,12 @@ reflection 默认不直接修改 User Memory、skills 或 knowledge-base。
 当前有两条流程：只读 report 生成，以及 User Memory maintenance proposal lifecycle。skill、knowledge base 三条反射应用流程后续再拆成独立 specs。
 
 **并发安全说明**：reflection 只写 reflection-owned `reflection_reports` / `memory_maintenance_proposals`，通过 observability public API
-只读 trace events，通过 `fleetent.intelligence.memory` public API 读取 memory 信号。proposal 创建不修改 User Memory；apply 阶段只通过 `fleetent.intelligence.memory` public mutation API 修改 owner-scoped User Memory，不直接写 `memory_items` / `skills/`。
+只读 trace events，通过 `fleetent.memory` public API 读取 memory 信号。proposal 创建不修改 User Memory；apply 阶段只通过 `fleetent.memory` public mutation API 修改 owner-scoped User Memory，不直接写 `memory_items` / `skills/`。
 
 ```mermaid
 flowchart TD
     A[cron_scheduler 或 admin 触发] --> B[调用 observability.query_trace_events\n按 scope + time window 过滤]
-    B --> C["读取 fleetent.intelligence.memory 只读信号"]
+    B --> C["读取 fleetent.memory 只读信号"]
     C --> D[分析重复事实 / 冲突事实 / 高频任务模式]
     D --> E[生成 ReflectionReport]
     E --> F[保存 reflection_reports]
@@ -44,7 +44,7 @@ flowchart TD
     G -->|是| H[生成 memory_maintenance_proposals]
     G -->|否| I[管理员或后续流程查看 report]
     H --> J[owner approve / reject\n或显式 low-risk auto apply]
-    J --> K["通过 fleetent.intelligence.memory public API apply"]
+    J --> K["通过 fleetent.memory public API apply"]
 ```
 
 ## 数据模型
@@ -190,7 +190,7 @@ def get_reflection_trend_summary(query: ReflectionTrendQuery) -> ReflectionTrend
 - `ReflectionTrendQuery` / `ReflectionTrendBucket` / `ReflectionTrendSummary` 和
   `get_reflection_trend_summary()` on-demand API
 - 只通过 observability public API 读取 traces
-- 只读 `fleetent.intelligence.memory` 信号；proposal apply 只通过 memory public API
+- 只读 `fleetent.memory` 信号；proposal apply 只通过 memory public API
 - 支持三类 finding：`memory_candidate`、`memory_conflict`、`skill_opportunity`
 - 支持 `pending` / `approved` / `rejected` / `applied` / `expired` proposal 状态
 - 支持 owner approval、low-risk explicit auto policy、high-risk delete approval gate
@@ -290,7 +290,7 @@ def get_reflection_trend_summary(query: ReflectionTrendQuery) -> ReflectionTrend
 
 **需要 mock 的依赖**：
 - `observability.query_trace_events`：注入可控的历史 trace events
-- `fleetent.intelligence.memory`：注入可控的记忆数据，确认不发生写回
+- `fleetent.memory`：注入可控的记忆数据，确认不发生写回
 - SQLite DB 路径：仅 reflection 自有表需要 `monkeypatch` 到 `tmp_path`
 
 ## 待决问题
@@ -324,4 +324,4 @@ def get_reflection_trend_summary(query: ReflectionTrendQuery) -> ReflectionTrend
 ## 服务化 / 目录边界判断
 
 reflection 更像离线 job / worker，未来可以独立调度甚至独立服务化。但当前应先保持在
-`intelligence.reflection` 内，等 report schema、评估集和应用策略稳定后再拆 worker。
+`fleetent.reflection` 内，等 report schema、评估集和应用策略稳定后再拆 worker。

@@ -6,7 +6,7 @@
 
 User Memory 的提取、存储与检索，让 agent 在多次对话中积累单个用户授权范围内的长期事实。
 
-**负责**：从对话中提取用户相关事实，按类型结构化存储，支持向量相似度检索，并向 vector_store reindex 暴露当前可索引记忆。当前 `fleetent.intelligence.memory` 已实现 User Memory，并提供 Shared Memory 数据层；Shared Memory 保存已确认的团队 / 租户级上下文、偏好和流程。
+**负责**：从对话中提取用户相关事实，按类型结构化存储，支持向量相似度检索，并向 vector_store reindex 暴露当前可索引记忆。当前 `fleetent.memory` 已实现 User Memory，并提供 Shared Memory 数据层；Shared Memory 保存已确认的团队 / 租户级上下文、偏好和流程。
 
 **不负责**：企业文档知识（→ knowledge_base）、注入 system prompt 的协调与 token 预算（→ long_term_ctx）、未经 owner 确认的 reflection 写回。Shared Memory 的 prompt 注入由 long_term_ctx 按 agent 归属（tenant / team）的 context policy 协调，memory 只提供 `search_shared_memory` 检索 API。
 
@@ -16,12 +16,12 @@ fleetent 的记忆系统借鉴认知科学的四类记忆划分，每类由不�
 
 | 类型 | 内容 | 存储位置 | 负责模块 |
 |------|------|---------|---------|
-| **语义记忆** | 用户身份、偏好、临时状态等跨 session 事实 | SQLite `memory_items` + vector_store | `fleetent.intelligence.memory`（本模块）|
+| **语义记忆** | 用户身份、偏好、临时状态等跨 session 事实 | SQLite `memory_items` + vector_store | `fleetent.memory`（本模块）|
 | **情节记忆** | 对话与工具执行的完整历史轨迹 | SQLite `traces` 表 | `observability` |
 | **程序记忆** | agent 完成特定任务的技能与方法 | `skills/` 目录 | `skill_registry` |
 | **工作记忆** | 当前 session 的对话上下文（session 结束即释放） | 内存 | `context_mgr` |
 
-本模块（`fleetent.intelligence.memory`）负责两类语义记忆：User Memory 按 `identity` / `preferences` / `context`
+本模块（`fleetent.memory`）负责两类语义记忆：User Memory 按 `identity` / `preferences` / `context`
 三类结构化存储用户事实，owner 是 `user_id`，vector namespace 是 `mem:{user_id}`；Shared Memory 按 `team` /
 `tenant` scope 保存 `context` / `preference` / `procedure`，表为 `shared_memory_items`，vector namespace 是
 `shared:{scope_type}:{scope_id}`。其余三类由各自模块独立管理，`reflection` 跨模块读取情节记忆（traces）与
@@ -33,7 +33,7 @@ maintenance proposal 或用户显式开启的低风险自动策略。
 - 被依赖：long_term_ctx（检索注入内容）、reflection（读取现有记忆、通过受控 public API 应用已批准维护 proposal）
 
 **模块归属**：
-- owning package：`fleetent.intelligence.memory`
+- owning package：`fleetent.memory`
 - public API：`search(user_id, query, limit)`、`extract_and_update(user_id, conversation)`、`iter_indexable_memories(user_id)`、`update_user_memory_content()`、`mark_user_memory_stale()`、`delete_user_memory()`、`merge_user_memories()`、`MemoryItem`、`SharedMemoryItem`、`create_shared_memory()`、`update_shared_memory()`、`archive_shared_memory()`、`search_shared_memory()`、`iter_indexable_shared_memories()`、`MemoryQualityTrendQuery`、`MemoryQualityTrendBucket`、`MemoryQualityTrendSummary`、`get_memory_quality_trend_summary()`
 - owned tables：`memory_items`、`shared_memory_items`
 - config namespace：`memory.*`
@@ -153,7 +153,7 @@ def get_memory_quality_trend_summary(query: MemoryQualityTrendQuery) -> MemoryQu
 - 写入 memory 后同步写入 vector_store，namespace 为 `mem:{user_id}`
 - `search()` 通过 vector_store 查相关 memory ids，回查 SQLite 并过滤过期 context
 - `iter_indexable_memories(user_id)` public API 返回当前未过期 memory source records，供 vector_store 同步 reindex 使用
-- reflection maintenance apply 只通过 `fleetent.intelligence.memory` public mutation API，不直接写 `memory_items`
+- reflection maintenance apply 只通过 `fleetent.memory` public mutation API，不直接写 `memory_items`
 - Shared Memory 数据层已完成：`shared_memory_items` 表、`SharedMemoryItem` public API、team / tenant scope、`shared:{scope_type}:{scope_id}` vector namespace、reflection proposal apply 入口和最小 admin CLI；prompt 注入由 long_term_ctx 按 agent 归属的 context policy 协调（tenant 默认 + agent 覆盖，默认关闭）
 - Memory Quality Trend summary 已完成：按 day / week 只读聚合 User Memory type counts、expired context、exact duplicate candidates、Shared Memory type counts，以及 reflection maintenance proposal 的 status / action / risk counts
 - 删除旧 JSONL memory 兼容和 `load_memories()` 直接注入路径
@@ -239,7 +239,7 @@ def get_memory_quality_trend_summary(query: MemoryQualityTrendQuery) -> MemoryQu
 
 ## 服务化 / 目录边界判断
 
-User Memory 应继续作为模块化单体内的 `fleetent.intelligence.memory` 边界。未来如果要独立服务化，
+User Memory 应继续作为模块化单体内的 `fleetent.memory` 边界。未来如果要独立服务化，
 更可能拆出的是“memory evaluation / maintenance job”，而不是最早拆运行时读写路径。
 
 ## 验收标准
@@ -261,7 +261,7 @@ User Memory 应继续作为模块化单体内的 `fleetent.intelligence.memory` 
 
 **场景 4：向量检索（v1.0）**
 - Given：用户有 50 条历史记忆，当前话题是"Python 调试"
-- When：long_term_ctx 调用 `fleetent.intelligence.memory.search()`
+- When：long_term_ctx 调用 `fleetent.memory.search()`
 - Then：返回与"Python 调试"相关的记忆条目，而非固定最近 20 条
 
 **场景 5：context 类记忆过期（v1.0）**
