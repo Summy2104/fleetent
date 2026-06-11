@@ -1,4 +1,4 @@
-"""Integration: budget_usage table created by unified AGENT_STATE_MIGRATIONS (retire-raw-sqlite-connect).
+"""Integration: budget_usage table created by unified AGENT_STATE_MIGRATIONS.
 
 Verifies that opening a fresh agent_state.db via the unified MIGRATIONS produces the
 budget_usage table with the exact columns from the original layered_budget.init_db DDL.
@@ -20,7 +20,9 @@ def _open_agent_db(tmp_path: Path, agent_id: str = "agent"):
 
 def _tables(db_path: Path) -> set[str]:
     conn = sqlite3.connect(db_path)
-    names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    names = {
+        r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
     conn.close()
     return names
 

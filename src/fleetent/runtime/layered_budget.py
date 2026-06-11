@@ -191,17 +191,26 @@ class BudgetStore:
               turns = turns + excluded.turns,
               tokens = tokens + excluded.tokens
             """,
-            {"scope": scope.value, "key": key, "period": period,
-             "turns": delta.turns, "tokens": delta.tokens},
+            {
+                "scope": scope.value,
+                "key": key,
+                "period": period,
+                "turns": delta.turns,
+                "tokens": delta.tokens,
+            },
         )
 
     def get(self, scope: BudgetScope, key: str, *, now: datetime) -> ScopeUsage:
         period = self._period(scope, now)
-        row = _db().execute(
-            "SELECT turns, tokens FROM budget_usage"
-            " WHERE scope = :scope AND key = :key AND period = :period",
-            {"scope": scope.value, "key": key, "period": period},
-        ).fetchone()
+        row = (
+            _db()
+            .execute(
+                "SELECT turns, tokens FROM budget_usage"
+                " WHERE scope = :scope AND key = :key AND period = :period",
+                {"scope": scope.value, "key": key, "period": period},
+            )
+            .fetchone()
+        )
         if row is None:
             return ScopeUsage()
         return ScopeUsage(turns=row["turns"], tokens=row["tokens"])

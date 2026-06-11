@@ -120,7 +120,6 @@ def test_checker_skips_missing_key(tmp_path):
 
 async def test_agent_loop_dormant_without_caps(tmp_path):
     """Default (no caps): layered budget is dormant — no checker, no DB written."""
-    import fleetent.runtime.layered_budget as lbud
     import fleetent.runtime.loop as al
 
     # Even with state_db injected, dormant config must not touch it

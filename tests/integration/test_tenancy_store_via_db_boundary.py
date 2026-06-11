@@ -56,7 +56,7 @@ def test_create_tenant_returns_dict() -> None:
 def test_get_tenant_found() -> None:
     from fleetent.platform.tenancy.store import create_tenant, get_tenant
 
-    t = create_tenant(id="t-x1", name="Beta LLC")
+    create_tenant(id="t-x1", name="Beta LLC")
     found = get_tenant("t-x1")
     assert found is not None
     assert found["name"] == "Beta LLC"

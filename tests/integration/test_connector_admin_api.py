@@ -17,6 +17,7 @@ def client(tmp_path, monkeypatch):
     apply_migrations(db_path)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+
     # Keep endpoint tests hermetic: the live-runtime sync/probe seams must not touch
     # the network. Tests that exercise them monkeypatch these explicitly.
     async def _noop_sync(server_id: str, agent_id: int | None) -> None:

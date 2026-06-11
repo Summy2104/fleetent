@@ -21,6 +21,6 @@
 - [x] 4.1 grep 全仓确认无「作为 DB 入口」的 `user_store.DB_PATH` importer（`context`/`sub_agent` 已由前序 change 去除；本 change 去除 `layered_budget`/`tenancy`）
 - [x] 4.2 移除 `user_store` 的 `DB_PATH` re-export 作为 DB 入口的用法；受影响测试改用 DB fixture / `Settings()` 注入隔离，不再 monkeypatch `DB_PATH`
 - [x] 4.3 grep 自查：业务层无裸 `sqlite3.connect`（仅剩 `db.py` 边界与 `schema_migrations` 引擎）
-- [ ] 4.4 同步 `docs/architecture/data-model.md` §3.3：`budget_usage` 列入 per-agent（10 表 → 11 表）并补进 §3.3 明细图
-- [ ] 4.5 验证基线：无 platform、管理库表不存在下 `fleetent agent run` 可完成，`budget_usage` 落 agent 自己的 `agent_state.db`
+- [x] 4.4 同步 `docs/architecture/data-model.md` §3.3：`budget_usage` 列入 per-agent（10 表 → 11 表）并补进 §3.3 明细图
+- [x] 4.5 验证基线：无 platform、管理库表不存在下 `fleetent agent run` 可完成，`budget_usage` 落 agent 自己的 `agent_state.db`
 - [ ] 4.6 change 收尾：`make test-pr` 全绿 + `uv run pytest tests/integration -q`（对照 main 基线，无新增失败）

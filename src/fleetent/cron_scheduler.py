@@ -16,6 +16,7 @@ import fleetent.user_store as user_store
 from fleetent import outbound
 from fleetent.config import SchedulingSettings
 from fleetent.identity import SYSTEM_PRINCIPAL, Principal
+
 logger = logging.getLogger(__name__)
 
 # A fired task whose final reply is exactly this sentinel runs successfully but

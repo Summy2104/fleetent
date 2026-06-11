@@ -90,6 +90,7 @@ def test_set_tenant_approver_cli(tmp_path: Path) -> None:
     )
     assert code == 0, stderr
     from fleetent.platform.tenancy.store import get_tenant
+
     tenant = get_tenant("default")
     assert tenant is not None
     assert tenant["approver_user_id"] == approver.id
@@ -104,6 +105,7 @@ def test_set_team_approver_cli(tmp_path: Path) -> None:
     )
     assert code == 0, stderr
     from fleetent.platform.tenancy.store import get_team
+
     team = get_team("team3")
     assert team is not None
     assert team["approver_user_id"] == approver.id
@@ -125,9 +127,7 @@ def _make_api(monkeypatch: pytest.MonkeyPatch, *, is_admin: bool = True):
         monkeypatch.setattr(admin_api.auth, "validate_session", lambda token, idle: viewer.id)
 
     audits: list[tuple[object, ...]] = []
-    monkeypatch.setattr(
-        admin_api.audit_log, "write_audit", lambda *a, **kw: audits.append(a)
-    )
+    monkeypatch.setattr(admin_api.audit_log, "write_audit", lambda *a, **kw: audits.append(a))
     return admin_api, "Session token", audits
 
 

@@ -50,9 +50,11 @@ def create_tenant(
 
 
 def get_tenant(tenant_id: str) -> dict[str, Any] | None:
-    row = _db().execute(
-        f"SELECT {_TENANT_COLS} FROM tenants WHERE id = :id", {"id": tenant_id}
-    ).fetchone()
+    row = (
+        _db()
+        .execute(f"SELECT {_TENANT_COLS} FROM tenants WHERE id = :id", {"id": tenant_id})
+        .fetchone()
+    )
     return dict(row) if row else None
 
 
@@ -98,18 +100,22 @@ def create_team(
 
 
 def get_team(team_id: str) -> dict[str, Any] | None:
-    row = _db().execute(
-        f"SELECT {_TEAM_COLS} FROM teams WHERE id = :id", {"id": team_id}
-    ).fetchone()
+    row = (
+        _db().execute(f"SELECT {_TEAM_COLS} FROM teams WHERE id = :id", {"id": team_id}).fetchone()
+    )
     return dict(row) if row else None
 
 
 def list_teams(tenant_id: str | None = None) -> list[dict[str, Any]]:
     if tenant_id is not None:
-        rows = _db().execute(
-            f"SELECT {_TEAM_COLS} FROM teams WHERE tenant_id = :tid ORDER BY created_at",
-            {"tid": tenant_id},
-        ).fetchall()
+        rows = (
+            _db()
+            .execute(
+                f"SELECT {_TEAM_COLS} FROM teams WHERE tenant_id = :tid ORDER BY created_at",
+                {"tid": tenant_id},
+            )
+            .fetchall()
+        )
     else:
         rows = _db().execute(f"SELECT {_TEAM_COLS} FROM teams ORDER BY created_at").fetchall()
     return [dict(r) for r in rows]
@@ -130,9 +136,13 @@ def set_user_tenant(user_id: str, tenant_id: str) -> None:
     """Assign a user to a tenant.  Raises KeyError if either does not exist."""
     if get_tenant(tenant_id) is None:
         raise KeyError(f"Tenant not found: {tenant_id!r}")
-    row = _db().execute(
-        "UPDATE users SET tenant_id = :tenant_id WHERE id = :user_id RETURNING id",
-        {"tenant_id": tenant_id, "user_id": user_id},
-    ).fetchone()
+    row = (
+        _db()
+        .execute(
+            "UPDATE users SET tenant_id = :tenant_id WHERE id = :user_id RETURNING id",
+            {"tenant_id": tenant_id, "user_id": user_id},
+        )
+        .fetchone()
+    )
     if row is None:
         raise KeyError(f"User not found: {user_id!r}")

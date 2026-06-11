@@ -65,7 +65,6 @@ def _conn():
     """
     import sqlite3  # noqa: PLC0415 — kept local, this is a shim on the removal path
 
-    from fleetent.config import Settings
     from fleetent.db import _connect
 
     db = _db()  # resolves Settings().database_url to a Path
@@ -131,9 +130,11 @@ def get_by_api_key(api_key: str) -> User | None:
 
 
 def _get_by_legacy_key(api_key: str) -> User | None:
-    row = _db().execute(
-        f"SELECT {_FULL_COLS} FROM users WHERE api_key = :api_key", {"api_key": api_key}
-    ).fetchone()
+    row = (
+        _db()
+        .execute(f"SELECT {_FULL_COLS} FROM users WHERE api_key = :api_key", {"api_key": api_key})
+        .fetchone()
+    )
     return _row_to_user(row) if row else None
 
 
@@ -172,17 +173,19 @@ def migrate_api_keys() -> list[str]:
 
 def get_by_id(user_id: str) -> User | None:
     """Look up a user by id. Returns None if not found."""
-    row = _db().execute(
-        f"SELECT {_FULL_COLS} FROM users WHERE id = :id", {"id": user_id}
-    ).fetchone()
+    row = (
+        _db().execute(f"SELECT {_FULL_COLS} FROM users WHERE id = :id", {"id": user_id}).fetchone()
+    )
     return _row_to_user(row) if row else None
 
 
 def get_by_email(email: str) -> User | None:
     """Look up a user by email. Returns None if not found."""
-    row = _db().execute(
-        f"SELECT {_FULL_COLS} FROM users WHERE email = :email", {"email": email}
-    ).fetchone()
+    row = (
+        _db()
+        .execute(f"SELECT {_FULL_COLS} FROM users WHERE email = :email", {"email": email})
+        .fetchone()
+    )
     return _row_to_user(row) if row else None
 
 
@@ -195,10 +198,14 @@ def list_users() -> list[User]:
 def rotate_key(user_id: str) -> User:
     """Generate a new API key for user_id. Raises KeyError if user not found."""
     new_key = f"ma-{secrets.token_hex(32)}"
-    row = _db().execute(
-        f"UPDATE users SET api_key = :key WHERE id = :id RETURNING {_FULL_COLS}",
-        {"key": new_key, "id": user_id},
-    ).fetchone()
+    row = (
+        _db()
+        .execute(
+            f"UPDATE users SET api_key = :key WHERE id = :id RETURNING {_FULL_COLS}",
+            {"key": new_key, "id": user_id},
+        )
+        .fetchone()
+    )
     if row is None:
         raise KeyError(f"User not found: {user_id}")
     return _row_to_user(row)
@@ -206,9 +213,11 @@ def rotate_key(user_id: str) -> User:
 
 def get_builtin_admin() -> User | None:
     """Return the built-in admin user, if seeded."""
-    row = _db().execute(
-        f"SELECT {_FULL_COLS} FROM users WHERE role = 'built_in_admin' LIMIT 1"
-    ).fetchone()
+    row = (
+        _db()
+        .execute(f"SELECT {_FULL_COLS} FROM users WHERE role = 'built_in_admin' LIMIT 1")
+        .fetchone()
+    )
     return _row_to_user(row) if row else None
 
 
@@ -327,7 +336,9 @@ def _guard_not_builtin_admin(user_id: str, op: str) -> None:
 
 def _update_field(user_id: str, column: str, value: object) -> None:
     with _db().transaction() as conn:
-        conn.execute(f"UPDATE users SET {column} = :val WHERE id = :id", {"val": value, "id": user_id})
+        conn.execute(
+            f"UPDATE users SET {column} = :val WHERE id = :id", {"val": value, "id": user_id}
+        )
 
 
 def get_or_create_im_user(owner_id: str, platform: str, platform_user_id: str) -> "User":

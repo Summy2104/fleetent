@@ -59,7 +59,9 @@ def test_budget_does_not_land_in_management_db(tmp_path: Path) -> None:
 
     # management.db must have no budget_usage rows
     conn = sqlite3.connect(mgmt_db)
-    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    tables = {
+        r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
     conn.close()
     assert "budget_usage" not in tables, "budget_usage must not exist in management DB"
 
