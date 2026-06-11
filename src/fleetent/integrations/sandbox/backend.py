@@ -138,6 +138,15 @@ class BaseSandboxBackend(ABC):
         """Read a workspace's stamped config-hash; None means 'conservatively reuse'."""
         return None
 
+    def is_workspace_missing(self, result: ExecResult) -> bool:
+        """Classify an exec result as a container-missing infrastructure failure.
+
+        Lets the exec layer self-heal (deregister + re-acquire) instead of surfacing
+        a dead container as a tool-level "path not found". Backends override with
+        their own error signatures; the base default never claims missing.
+        """
+        return False
+
     # ── session-snapshot continuity template (shared by all backends) ─────────
 
     async def exec(

@@ -50,3 +50,30 @@ async def test_available_false_when_cli_missing() -> None:
         "asyncio.create_subprocess_exec", AsyncMock(side_effect=FileNotFoundError("docker"))
     ):
         assert await backend.available() is False
+
+
+# --- container-missing error classification (sandbox-liveness-reacquire) ----
+
+
+def test_is_workspace_missing_detects_dead_container() -> None:
+    from fleetent.integrations.sandbox.backend import ExecResult
+    from fleetent.integrations.sandbox.backends.docker import DockerBackend
+
+    dead = ExecResult("", "Error response from daemon: No such container: 0d22badd11c4", 1)
+    assert DockerBackend().is_workspace_missing(dead) is True
+
+
+def test_is_workspace_missing_detects_not_running() -> None:
+    from fleetent.integrations.sandbox.backend import ExecResult
+    from fleetent.integrations.sandbox.backends.docker import DockerBackend
+
+    stopped = ExecResult("", "Error response from daemon: container abc is not running", 1)
+    assert DockerBackend().is_workspace_missing(stopped) is True
+
+
+def test_is_workspace_missing_false_on_ordinary_command_failure() -> None:
+    from fleetent.integrations.sandbox.backend import ExecResult
+    from fleetent.integrations.sandbox.backends.docker import DockerBackend
+
+    res = ExecResult("", "ls: cannot access '/x': No such file or directory", 2)
+    assert DockerBackend().is_workspace_missing(res) is False

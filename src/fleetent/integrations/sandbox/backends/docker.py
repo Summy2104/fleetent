@@ -226,6 +226,13 @@ class DockerBackend(BaseSandboxBackend):
         value = stdout.decode().strip()
         return value or None
 
+    # docker daemon error signatures meaning the exec target is gone/stopped —
+    # an infrastructure failure, never a property of the path being operated on.
+    _MISSING_MARKERS = ("No such container", "is not running", "No such exec instance")
+
+    def is_workspace_missing(self, result: ExecResult) -> bool:
+        return result.exit_code != 0 and any(m in result.stderr for m in self._MISSING_MARKERS)
+
     async def find_workspace(self, name: str) -> str | None:
         """Return the id of a running container named `name`, or None if absent.
 

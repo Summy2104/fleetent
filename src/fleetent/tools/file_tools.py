@@ -207,13 +207,52 @@ class _ContainerBackend:
     client: BaseSandboxBackend
     ws_id: str
     session_id: str
+    # Self-healing identity: lets _exec rebuild the container when it died between
+    # acquire and exec (sandbox-liveness-reacquire). None disables healing (legacy
+    # constructions keep their semantics).
+    manager: SandboxManager | None = None
+    agent_name: str = "default"
+    env: dict[str, str] | None = None
 
-    async def _exec(self, command: str) -> ExecResult:
-        return await self.client.exec(self.ws_id, command, session_id=self.session_id)
+    async def _exec(self, command: str, stdin: bytes | None = None) -> ExecResult:
+        async def _call() -> ExecResult:
+            if stdin is None:
+                return await self.client.exec(self.ws_id, command, session_id=self.session_id)
+            return await self.client.exec(
+                self.ws_id, command, session_id=self.session_id, stdin=stdin
+            )
+
+        res = await _call()
+        if (
+            self.manager is not None
+            and res.exit_code != 0
+            and self.manager.backend.is_workspace_missing(res)
+        ):
+            # Container died after acquire: drop the stale registration, rebuild
+            # (the host-mounted workspace survives), retry exactly once.
+            self.manager.invalidate(self.manager.scope, self.session_id, self.agent_name)
+            self.ws_id = await self.manager.acquire(
+                self.manager.scope, self.session_id, self.agent_name, env=self.env
+            )
+            res = await _call()
+        return res
+
+    def _infra_failure(self, res: ExecResult) -> bool:
+        """True when the exec failed at the infrastructure level (dead container).
+
+        Such a result carries no information about the path being operated on and
+        must never be parsed into a path status like "missing" or "no match" —
+        that lie is exactly what sent the model down the "file lost, please
+        re-upload" path in the original incident.
+        """
+        checker = getattr(self.client, "is_workspace_missing", None)
+        return res.exit_code != 0 and bool(checker is not None and checker(res))
 
     async def probe(self, path: str) -> _Stat:
         rp = fsio.resolve_ws_path(path)
         res = await self._exec(fsio.build_probe_command(rp))
+        if self._infra_failure(res):
+            raise _BackendError(f"沙箱容器不可用，请重试: {res.stderr.strip()[:200]}")
         return _parse_probe(res.stdout)
 
     async def read_bytes(self, path: str) -> bytes:
@@ -229,13 +268,13 @@ class _ContainerBackend:
     async def list_dir(self, path: str) -> list[_DirEntry]:
         rp = fsio.resolve_ws_path(path)
         res = await self._exec(fsio.build_listdir_command(rp))
+        if self._infra_failure(res):
+            raise _BackendError(f"沙箱容器不可用，请重试: {res.stderr.strip()[:200]}")
         return _parse_listdir(res.stdout)
 
     async def write_bytes(self, path: str, data: bytes) -> None:
         rp = fsio.resolve_ws_path(path)
-        res = await self.client.exec(
-            self.ws_id, fsio.build_write_command(rp), session_id=self.session_id, stdin=data
-        )
+        res = await self._exec(fsio.build_write_command(rp), stdin=data)
         if res.exit_code != 0:
             raise _BackendError(res.stderr.strip() or "写入文件失败")
 
@@ -249,6 +288,8 @@ class _ContainerBackend:
     async def search_files(self, pattern: str, path: str, max_results: int) -> str:
         rp = fsio.resolve_ws_path(path)
         res = await self._exec(fsio.build_find_command(pattern, rp))
+        if self._infra_failure(res):
+            return f"error: 沙箱容器不可用，请重试: {res.stderr.strip()[:200]}"
         return _format_file_results(res.stdout.splitlines(), max_results)
 
 
@@ -338,7 +379,14 @@ async def _select_backend(tool_context: ToolContext | None) -> _ContainerBackend
     features = tool_context.features if tool_context else {}
     env = build_sandbox_env(agent_env=features.get("sandbox_env"))
     ws_id = await manager.acquire(manager.scope, session_id, agent_name, env=env)
-    return _ContainerBackend(client=manager.backend, ws_id=ws_id, session_id=session_id)
+    return _ContainerBackend(
+        client=manager.backend,
+        ws_id=ws_id,
+        session_id=session_id,
+        manager=manager,
+        agent_name=agent_name,
+        env=env,
+    )
 
 
 # ── tools ─────────────────────────────────────────────────────────────────────

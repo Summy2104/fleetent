@@ -120,3 +120,78 @@ async def test_container_search_files_truncates() -> None:
     backend = _backend(_CannedClient({"find": ExecResult(out, "", 0)}))
     result = await backend.search_files("*.py", ".", 5)
     assert "截断" in result
+
+
+# --- exec self-healing on missing container (sandbox-liveness-reacquire) ----
+
+
+class _DyingThenHealthyClient:
+    """exec hits container-missing on the dead ws id, succeeds on the healed one."""
+
+    def __init__(self) -> None:
+        self.ws_seen: list[str] = []
+
+    async def exec(
+        self, ws_id: str, command: str, session_id: str | None = None, stdin: bytes | None = None
+    ) -> ExecResult:
+        self.ws_seen.append(ws_id)
+        if ws_id == "ws-dead":
+            return ExecResult("", "Error response from daemon: No such container: ws-dead", 1)
+        return ExecResult("file 11\n", "", 0)
+
+    def is_workspace_missing(self, res: ExecResult) -> bool:
+        return "No such container" in res.stderr
+
+
+async def test_container_exec_heals_missing_container() -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    client = _DyingThenHealthyClient()
+    manager = MagicMock()
+    manager.backend = client
+    manager.invalidate = MagicMock()
+    manager.acquire = AsyncMock(return_value="ws-new")
+
+    backend = file_tools._ContainerBackend(
+        client=client, ws_id="ws-dead", session_id="s", manager=manager, agent_name="bot"
+    )
+    stat = await backend.probe("a.txt")
+
+    assert stat.kind == "file"
+    manager.invalidate.assert_called_once()
+    assert client.ws_seen == ["ws-dead", "ws-new"]
+
+
+# --- infrastructure failures must not masquerade as path status --------------
+
+
+def _dead_client(marker: str) -> _CannedClient:
+    client = _CannedClient(
+        {marker: ExecResult("", "Error response from daemon: No such container: x", 1)}
+    )
+    client.is_workspace_missing = lambda res: "No such container" in res.stderr  # type: ignore[attr-defined]
+    return client
+
+
+async def test_container_probe_raises_on_infra_failure() -> None:
+    import pytest
+
+    backend = _backend(_dead_client("[ -d"))
+    with pytest.raises(file_tools._BackendError) as ei:
+        await backend.probe("a.txt")
+    assert "沙箱" in str(ei.value)
+
+
+async def test_container_search_files_reports_infra_failure() -> None:
+    backend = _backend(_dead_client("-name"))
+    out = await backend.search_files("*.xlsx", ".", 50)
+    assert "沙箱" in out
+    assert "无匹配" not in out
+
+
+async def test_container_list_dir_raises_on_infra_failure() -> None:
+    import pytest
+
+    backend = _backend(_dead_client("-printf"))
+    with pytest.raises(file_tools._BackendError):
+        await backend.list_dir(".")
