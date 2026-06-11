@@ -14,7 +14,6 @@ from __future__ import annotations
 import shutil
 import sqlite3
 from pathlib import Path
-from subprocess import CompletedProcess
 
 import pytest
 
@@ -108,13 +107,11 @@ def test_stopped_agent_db_is_discovered_and_missing_registry_subject_warns(
         "CREATE TABLE tenants (id TEXT PRIMARY KEY, name TEXT, status TEXT, created_at TEXT)"
     )
     mgmt.execute(
-        "INSERT INTO tenants (id, name, status, created_at) VALUES "
-        "(:id, :name, :status, :ts)",
+        "INSERT INTO tenants (id, name, status, created_at) VALUES (:id, :name, :status, :ts)",
         {"id": "tenantA", "name": "A", "status": "active", "ts": "2026-06-11"},
     )
     mgmt.execute(
-        "INSERT INTO tenants (id, name, status, created_at) VALUES "
-        "(:id, :name, :status, :ts)",
+        "INSERT INTO tenants (id, name, status, created_at) VALUES (:id, :name, :status, :ts)",
         {"id": "ghost-tenant", "name": "Ghost", "status": "active", "ts": "2026-06-11"},
     )
     backup_root = tmp_path / "backups"
@@ -136,9 +133,7 @@ def test_backup_only_covers_all_databases(tmp_path: Path, monkeypatch: pytest.Mo
     data_dir = tmp_path / "data"
     layout = _build_multi_db_data_dir(data_dir)
     backup_root = tmp_path / "backups"
-    monkeypatch.setattr(
-        upgrade, "run_alembic_upgrade", lambda: pytest.fail("alembic must not run")
-    )
+    monkeypatch.setattr(upgrade, "run_alembic_upgrade", lambda: pytest.fail("alembic must not run"))
 
     exit_code = upgrade.main(
         [

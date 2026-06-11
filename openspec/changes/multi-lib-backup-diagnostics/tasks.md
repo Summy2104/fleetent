@@ -28,4 +28,4 @@
 
 - [x] 5.1 更新 `docs/capabilities/deployment.md`：备份/恢复多库 + WAL checkpoint、`management.db` 默认与改名说明、backup 路径镜像结构
 - [x] 5.2 勾除 `docs/architecture/data-model.md` 文末「命名对齐」待办（改名已落地），并把 §1 layout 注释从「概念名」改为现状
-- [ ] 5.3 change 收尾：`make test-pr` 全绿 + `uv run pytest tests/integration -q`（对照 main 基线，无新增失败）
+- [x] 5.3 change 收尾：`make test-pr` 全绿 + `uv run pytest tests/integration -q`（对照 main 基线，无新增失败）
