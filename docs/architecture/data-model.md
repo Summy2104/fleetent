@@ -87,7 +87,7 @@ graph TD
   end
   memory_items -. user_id .-> users
   traces -. agent_id .-> agents
-  approvals -. agent_id .-> agents
+  approvals -. requester_user_id .-> users
   shared_memory_items -. tenant_id .-> tenants
   agent_kbs -. kb_id .-> knowledge_bases
   vector_items -. "mem:/shared:/kb: 家族" .-> memory_items
