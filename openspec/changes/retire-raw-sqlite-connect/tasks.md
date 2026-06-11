@@ -1,10 +1,10 @@
 ## 1. budget_usage 归位 per-agent agent_state.db
 
-- [ ] 1.1 写测试（integration）：以统一 `MIGRATIONS` 打开全新 `agent_state.db` 后含 `budget_usage`，列集与原 `init_db` DDL 一致 —— 见红
-- [ ] 1.2 把 `budget_usage` 的 `CREATE TABLE` 原样 lift 进 `runtime/agent_state_migrations.py`，版本号取当前 max+1 起 append（不硬编码、不改列） —— 见绿
-- [ ] 1.3 写测试（integration）：platform 下两个 agent 各自累计预算，分别落各自 `agent_state.db`、互不可见、均不落管理库 —— 见红
-- [ ] 1.4 `runtime/layered_budget.py`：`_conn` 改经 `agent_scope` + `db.py`（删 `from user_store import DB_PATH` + 裸 `sqlite3.connect`），建表交统一 MIGRATIONS；读写改 `db.execute`/`transaction` —— 见绿
-- [ ] 1.5 grep 自查：`runtime/layered_budget.py` 无 `sqlite3.connect` / `user_store import DB_PATH`
+- [x] 1.1 写测试（integration）：以统一 `MIGRATIONS` 打开全新 `agent_state.db` 后含 `budget_usage`，列集与原 `init_db` DDL 一致 —— 见红
+- [x] 1.2 把 `budget_usage` 的 `CREATE TABLE` 原样 lift 进 `runtime/agent_state_migrations.py`，版本号取当前 max+1 起 append（不硬编码、不改列） —— 见绿
+- [x] 1.3 写测试（integration）：platform 下两个 agent 各自累计预算，分别落各自 `agent_state.db`、互不可见、均不落管理库 —— 见红
+- [x] 1.4 `runtime/layered_budget.py`：`_conn` 改经 `agent_scope` + `db.py`（删 `from user_store import DB_PATH` + 裸 `sqlite3.connect`），建表交统一 MIGRATIONS；读写改 `db.execute`/`transaction` —— 见绿
+- [x] 1.5 grep 自查：`runtime/layered_budget.py` 无 `sqlite3.connect` / `user_store import DB_PATH`
 
 ## 2. user_store 迁入 db.py 边界 + named SQL
 
