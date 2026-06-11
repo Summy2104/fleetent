@@ -30,7 +30,7 @@
 | 3 | sandbox-file-egress | ✅ | ✅ | ✅ | **完成** |
 | 4 | sandbox-workspace-scope-split | ✅ | ✅ | ✅ | **完成(2 个后续项见下)** |
 | 5 | sandbox-approval-relaxation | ✅ | ✅ | ✅ | **完成** |
-| 6 | skill-frontmatter-agentskills-compliance | ⏳ | - | - | 进行中 |
+| 6 | skill-frontmatter-agentskills-compliance | ✅ | ✅ | ✅ | **完成** |
 
 ## 决策与问题日志
 
@@ -77,4 +77,23 @@
 - 验证:边界/层 OK;make test-pr 2856 passed(仅预存失败);工具可见性/access 回归 112 passed;#1-#4 既有测试全绿(107);mypy 87=基线;无全树污染。
 - archive,specs 同步(改 approval-minimization/tool-access-control/sandbox-enablement-control)。
 
-<!-- 后续每个 change 的决策、遇到的问题、解决方式追加于此 -->
+### #6 skill-frontmatter-agentskills-compliance — 完成 2026-06-11(独立)
+- 实现:skills/registry.py 新增 string→type 归一化 helper + `_build_entry` 集中「metadata.fleetent-<key>(权威)→ 旧顶层(回落)→ 缺省」解析顺序;SkillEntry 加可选 compatibility 字段;迁移唯一内置 skill getting-started/SKILL.md 到标准形态(tags/version/enabled_by_default → metadata.fleetent-*)。旧顶层写法仍兼容读取(现有文件零改动生效),未知 metadata 被忽略不报错(优雅降级)。不含 requires-bins 沙箱门控(不耦合执行世界)。
+- 验证:边界/层 OK;skill registry 112 测试绿;make test-pr 2867 passed(仅预存失败);mypy registry.py 零 error;无全树污染。
+- archive,specs 同步(改 skill-yaml-frontmatter)。
+
+---
+
+## 最终汇总(2026-06-11 夜 → 06-12 晨)
+
+**6 个 change 全部完成:实现 + TDD + 门禁 + archive + specs 同步,全部叠加在基础分支 `feat/sandbox-first-execution`。**
+
+- 每个 change 均经:严格 TDD(红→绿)、模块边界 EXIT 0、测试层 EXIT 0、ruff(仅自身文件)、mypy 无新增、`make test-pr` 无新增失败(唯一持续失败 `test_intelligence_directory_shim_removed` 为 main 预存基线、与本批无关)、sandbox 全量 integration 无回归。
+- 我对每个 agent 产出独立核验(自跑门禁 + 审 diff),并**回退了 #2 时 `ruff format src tests` 误改的 22 个无关文件**;#3-#6 agent 已遵守「只格式化自己文件」。
+- 安全核心达成:碰撞修复(默认部署 P0 跨用户泄露根除)、无 docker=不免审批(fail-closed)、单根 /workspace + 路径对应(AAA-8053 实测根除)、send_file 收件人 harness 固定、run_code 唯一执行面(无审批后门)、docker-commit 投毒泄露根除(声明式不可变镜像)、免审批为显式部署选择(默认仍 approval)。
+
+**待你审批 / 后续项**:
+1. **PR `feat/sandbox-first-execution → main` 已建、未合并**,留你审核(CI 非阻塞轮询)。
+2. **#4 multi_user 平台接线**:护栏已落地,platform 共享 IM 入口传 multi_user=True 的接线待 platform 侧补(详见 #4 条目)。
+3. **#4 agent-tier 运行期 read_only rootfs**:defense-in-depth,留后续 hardening(核心隔离已由声明式不可变镜像满足)。
+4. microsandbox 声明式 build 端到端未真跑(环境未装 runtime),契约由 unit 覆盖。
