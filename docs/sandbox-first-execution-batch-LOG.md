@@ -27,8 +27,8 @@
 |---|--------|------|------|---------|------|
 | 1 | sandbox-isolation-foundation | ✅ | ✅ | ✅ | **完成** |
 | 2 | sandbox-execution-world | ✅ | ✅ | ✅ | **完成** |
-| 3 | sandbox-file-egress | ⏳ | - | - | 进行中 |
-| 4 | sandbox-workspace-scope-split | - | - | - | 待 |
+| 3 | sandbox-file-egress | ✅ | ✅ | ✅ | **完成** |
+| 4 | sandbox-workspace-scope-split | ⏳ | - | - | 进行中 |
 | 5 | sandbox-approval-relaxation | - | - | - | 待 |
 | 6 | skill-frontmatter-agentskills-compliance | - | - | - | 待 |
 
@@ -54,5 +54,11 @@
 
 ### ⚠️ 全局 gotcha(影响所有 change 的验证)
 实现 agent 易跑 `ruff format src tests`(格式化**全树**),误改大量无关文件的存量风格漂移(#2 时误改 22 个,含 platform/ 文件,可能与在途 schema-residue-cleanup 冲突)。**我在每个 change 提交前核查 diff、回退所有范围外纯格式化改动**,只保留本 change 真正触碰的文件。#3+ 的 agent 指令已加「只格式化自己改的文件」。
+
+### #3 sandbox-file-egress — 完成 2026-06-11
+- 实现:outbound.send_file_to(平台分派统一原语:Slack files_upload_v2 / Telegram send_document)+ im_gateway/outbound shim re-export;builtin_tools.send_file 工具(risk=none,schema 仅 path,收件人从 session_context 固定,免审批⟺session∧dm∧context非空否则 fail-closed,无连接器/不可达/缺文件/投递失败均返说明文本不抛);normalizer 退役正则回流(_extract_generated_image_paths 删),改 _turn_has_generated_product + 显式 _EGRESS_NOTICE;slack._make_upload_func 收敛到原语。
+- **决策**:send_file 体内不可直接调 _get_manager()——会触发 #2 的 exec-face 护栏(字符串匹配 `_get_manager(`),抽到非工具辅助 `_workspace_scope_and_root`。Telegram bot 本在 outbound_connectors,send_document 自动接通,telegram.py 无需改。
+- 验证:边界/层 OK;32 本 change 测试绿;make test-pr 2824 passed(仅预存 intelligence 失败);mypy 87=基线无新增;agent 遵守「只格式化自己文件」,无全树污染。
+- archive,specs 同步(新 cap sandbox-file-send;改 im-generated-image-upload)。
 
 <!-- 后续每个 change 的决策、遇到的问题、解决方式追加于此 -->
