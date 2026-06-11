@@ -523,7 +523,9 @@ def sub_agent(tasks: str) -> str:
 
 
 @tool(risk_level="medium")
-async def invoke_agent(agent_name: str, message: str) -> str:
+async def invoke_agent(
+    agent_name: str, message: str, tool_context: ToolContext | None = None
+) -> str:
     """Delegate a message to another named agent and return its reply."""
     # Lazy import: the loop imports tools at module load (circular otherwise).
     from fleetent.runtime import load_active
@@ -536,10 +538,14 @@ async def invoke_agent(agent_name: str, message: str) -> str:
         {"role": "system", "content": snapshot.system_prompt},
         {"role": "user", "content": message},
     ]
+    # Identity-port「继承」: forward the current turn's Principal to the called agent
+    # so the internal call is not principal-less (tenant_id stays bound, no re-auth).
+    principal = getattr(tool_context, "principal", None) if tool_context else None
     # Parameter-style run (next<-main integration chose params over snapshot): the
     # system prompt rides in `messages`; pass the snapshot's allowlist + name through.
     return await agent_loop.run(
         messages,
+        principal=principal,
         is_sub_agent=True,
         allowed_tools=snapshot.allowed_tools,
         agent_name=agent_name,

@@ -12,6 +12,7 @@ import uuid
 from typing import Any, Literal, cast
 
 from fleetent.governance import permission_gate
+from fleetent.identity import Principal
 from fleetent.runtime import CancelToken, run_stream
 from fleetent.session import manager as session_mgr
 from fleetent.structured_logging import get_logger
@@ -32,12 +33,27 @@ def _new_session_id(user_id: str) -> str:
 
 
 class Connection:
-    """Per-connection gateway state."""
+    """Per-connection gateway state.
 
-    def __init__(self, user_id: str, transport: Transport, session_id: str | None = None) -> None:
-        self.user_id = user_id
+    Holds the resolved ``Principal`` so the run path (``run_stream``) stays identity-
+    bearing end-to-end (identity-port). ``user_id`` is derived from it for session
+    scoping. The principal-less ``user_id`` ctor form is the no-identity baseline only.
+    """
+
+    def __init__(
+        self,
+        transport: Transport,
+        *,
+        principal: Principal | None = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> None:
+        if principal is None:
+            principal = Principal(user_id=user_id or "default", tenant_id="default")
+        self.principal = principal
+        self.user_id = principal.user_id
         self.transport = transport
-        self.session_id = session_id or _new_session_id(user_id)
+        self.session_id = session_id or _new_session_id(self.user_id)
         self.cancel_tokens: dict[str, CancelToken] = {}
         self._tasks: set[asyncio.Task[None]] = set()
 
@@ -54,7 +70,7 @@ async def _stream_run(
     saw_terminal = False
     try:
         async for event in run_stream(
-            message, user_id=conn.user_id, session_id=session_id, cancel_token=token
+            message, principal=conn.principal, session_id=session_id, cancel_token=token
         ):
             event_type = str(event.get("type", ""))
             payload = {k: v for k, v in event.items() if k != "type"}

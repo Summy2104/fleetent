@@ -618,6 +618,7 @@ async def _plan_run_slots(
     is_sub_agent: bool,
     reply_func: ReplyFunc | None,
     user_id: str,
+    principal: Principal | None = None,
     session_id: str | None,
     governance: GovernanceConfig | None = None,
     agent_name: str | None = None,
@@ -671,9 +672,17 @@ async def _plan_run_slots(
             )
 
             async def _sub_agent_runner(tasks: Any = tasks) -> tuple[str, bool]:
+                # Identity-port「继承」: sub-agent inherits the parent/turn Principal
+                # (full fields incl. tenant_id). Fall back to a user_id-only Principal
+                # only on the principal-less standalone baseline.
+                inherited_principal = (
+                    principal
+                    if principal is not None
+                    else Principal(user_id=user_id, tenant_id="default")
+                )
                 sub_results = await SubAgentExecutor().run(
                     tasks=tasks,
-                    parent_principal=Principal(user_id=user_id, tenant_id="default"),
+                    parent_principal=inherited_principal,
                     parent_agent_id=None,
                     parent_session_id="",
                 )
@@ -1820,6 +1829,7 @@ async def _run_inner(
             is_sub_agent=is_sub_agent,
             reply_func=reply_func,
             user_id=user_id,
+            principal=principal,
             session_id=session_id,
             governance=governance,
             agent_name=agent_name,
