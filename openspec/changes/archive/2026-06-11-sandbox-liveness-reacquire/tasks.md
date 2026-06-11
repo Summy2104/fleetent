@@ -16,4 +16,4 @@
 ## 4. 收尾
 
 - [x] 4.1 `make test-pr` 全绿；`uv run pytest tests/integration -q`（不带 `-x`）对照 main 基线无新增失败
-- [ ] 4.2 Slack 真机复现验证：重装重启 my-bot → ① API 上传 xlsx，bot 能读出内容；② `docker rm -f` 杀掉该会话容器后再次让 bot 读文件，自愈重建并成功读取（事故场景闭环）
+- [x] 4.2 Slack 真机复现验证 —— **用户豁免**（2026-06-11 决定：开发完成后直接归档合并，跳过真机验证；单元/集成层已覆盖事故场景）
