@@ -28,8 +28,8 @@
 | 1 | sandbox-isolation-foundation | ✅ | ✅ | ✅ | **完成** |
 | 2 | sandbox-execution-world | ✅ | ✅ | ✅ | **完成** |
 | 3 | sandbox-file-egress | ✅ | ✅ | ✅ | **完成** |
-| 4 | sandbox-workspace-scope-split | ⏳ | - | - | 进行中 |
-| 5 | sandbox-approval-relaxation | - | - | - | 待 |
+| 4 | sandbox-workspace-scope-split | ✅ | ✅ | ✅ | **完成(2 个后续项见下)** |
+| 5 | sandbox-approval-relaxation | ⏳ | - | - | 进行中 |
 | 6 | skill-frontmatter-agentskills-compliance | - | - | - | 待 |
 
 ## 决策与问题日志
@@ -60,5 +60,15 @@
 - **决策**:send_file 体内不可直接调 _get_manager()——会触发 #2 的 exec-face 护栏(字符串匹配 `_get_manager(`),抽到非工具辅助 `_workspace_scope_and_root`。Telegram bot 本在 outbound_connectors,send_document 自动接通,telegram.py 无需改。
 - 验证:边界/层 OK;32 本 change 测试绿;make test-pr 2824 passed(仅预存 intelligence 失败);mypy 87=基线无新增;agent 遵守「只格式化自己文件」,无全树污染。
 - archive,specs 同步(新 cap sandbox-file-send;改 im-generated-image-upload)。
+
+### #4 sandbox-workspace-scope-split — 完成 2026-06-11(高风险重构)
+- 实现:`Scope`→`WorkspaceScope` 正名 + `Scope = WorkspaceScope` 模块别名(#1/#2/#3 全部 `Scope.SESSION` 引用不破,已实证 send_file scope 判定/run_code/containment/workspace_gc 全绿);`_image_for(agent_name)` 解耦——镜像选择恒以 agent_name 为键、只看 image_persistence 开关+后端 persist_workspace,结构上保证镜像不随 workspace_scope 变;**sweep_idle 移除 commit_workspace**(docker-commit-from-running 禁令落实,commit_workspace 留存但退热路径);新增 `backend.build_deps_image`(docker build -t … - 从 stdin 离线构建 FROM base/RUN setup_command 的不可变镜像,microsandbox 继承 NotImplementedError 不静默);`resolve_workspace_scope(configured, multi_user)` 护栏 multi_user∧agent→session+warn;manager 加 `multi_user=False` 安全默认,init_sandbox_manager(standalone)显式 False。
+- 验证:边界/层 OK;make test-pr 2842 passed(仅预存失败);**sandbox 全量 integration 126 passed 无回归**;mypy 87=基线;无全树格式化污染。
+- archive,specs 同步(新 cap sandbox-workspace-scope/sandbox-image-persistence;改 sandbox-lifecycle 另 3 块)。
+
+> **⚠️ #4 两个后续项(非阻断,需你知悉/后续处理)**:
+> 1. **multi_user 平台接线未完成**:`resolve_workspace_scope` 护栏已落地+单元测试,standalone(`fleetent agent run`)已接线安全默认 `multi_user=False`。但 **platform 共享 IM 入口传 `multi_user=True` 的接线点未实装**(属 platform 侧改动,agent-runtime 不得碰 platform)。后果:多用户 bot 用**默认 session scope 安全**;仅当部署者**显式**给多用户 bot 配 `workspace_scope=agent` 且 platform 未传 multi_user=True 时,护栏不触发→跨用户数据共享仍可能。**需后续在 platform 侧把多用户入口传 multi_user=True**。核心镜像投毒泄露已由「移除 commit + 声明式不可变镜像」根除。
+> 2. **agent-tier 运行期 read_only rootfs 未翻转**:spec 提及但 tasks.md 未列;agent 刻意保留资源 tier 不变避免范围蔓延+破坏无关 hardening 测试。核心「依赖来源与会话数据物理隔离」由声明式不可变镜像满足;运行期 read_only 属 defense-in-depth,留作后续 hardening。
+> 3. microsandbox 声明式 build 端到端未真跑(环境未装 runtime),契约由 unit 覆盖。
 
 <!-- 后续每个 change 的决策、遇到的问题、解决方式追加于此 -->
