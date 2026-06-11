@@ -47,9 +47,7 @@ async def _say(text, thread_ts=None):
 
 
 async def test_slack_handler_resolves_identity_without_platform_db(monkeypatch):
-    fn, routed = _build_slack_handler(
-        monkeypatch, "support", {"bot_token": "b", "app_token": "a"}
-    )
+    fn, routed = _build_slack_handler(monkeypatch, "support", {"bot_token": "b", "app_token": "a"})
     # Must not raise (no platform user_store read) and must use the native slack id.
     await fn({"user": "U_native", "text": "hi", "ts": "1", "channel": "C1"}, _say)
     assert routed["msg"].user_id == "U_native"

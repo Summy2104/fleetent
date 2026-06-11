@@ -105,3 +105,70 @@ async def test_unauthorized_resolve_does_not_resume(_resume_env, monkeypatch):
 
     resume.assert_not_awaited()
     msg.reply_func.assert_awaited()  # a "not found / unauthorized" notice
+
+
+async def test_text_approve_uses_run_session_not_message_session(monkeypatch):
+    """In a plain DM, the approve command is its own session; the pending lives in the
+    ORIGINAL run's session. The handler must resolve the run session from the approval
+    row (like the button path), not from the approve message's session."""
+    import contextlib
+
+    from fleetent.governance import approval_store
+    from fleetent.governance.permission_gate import _default_gate
+    from fleetent.session import manager as session_mgr
+
+    run_session = "slack:dm:U_REQ:1111.0001"  # where the run suspended + stored pending
+    entry = {
+        "approval_id": "abcd1234",
+        "tool_call_id": "tc_1",
+        "tool_name": "run_code",
+        "tool_args": {"code": "print(1)"},
+        "risk": "medium",
+        "approver_ids": ["U_REQ"],
+    }
+
+    # approval row carries the run's session id.
+    monkeypatch.setattr(
+        approval_store, "get_approval", lambda aid: {"session_id": run_session, "status": "pending"}
+    )
+
+    # get_pending_approval only finds the entry under the RUN session (not the approve msg's).
+    async def fake_get_pending(sid, aid):
+        return dict(entry) if sid == run_session else None
+
+    monkeypatch.setattr(session_mgr, "get_pending_approval", fake_get_pending)
+    monkeypatch.setattr(session_mgr, "load", AsyncMock(return_value=[]))
+    monkeypatch.setattr(session_mgr, "save", AsyncMock())
+
+    @contextlib.asynccontextmanager
+    async def _noop_lock(_sid):
+        yield
+
+    monkeypatch.setattr(session_mgr, "session_lock", _noop_lock)
+    monkeypatch.setattr(_default_gate, "resolve", AsyncMock(return_value=True))
+
+    resume = AsyncMock(return_value="完成")
+    monkeypatch.setattr(normalizer, "resume_pending_approval", resume, raising=False)
+
+    from fleetent.agent_config import AgentFile, default_models
+
+    agent = AgentFile(name="my-bot", version=1, models=default_models())
+    monkeypatch.setattr(normalizer.agent_config, "current", lambda: {"my-bot": agent})
+
+    # The approve command arrives in a DIFFERENT session than the run.
+    msg = NormalizedMessage(
+        platform="slack",
+        session_id="slack:dm:U_REQ:9999.0009",
+        user_id="U_REQ",
+        text="approve abcd1234",
+        attachments=[],
+        reply_func=AsyncMock(),
+        agent_name="my-bot",
+        session_context=SessionContext(platform="slack", sender_id="U_REQ"),
+        outbound_connectors={"slack": object()},
+    )
+    await normalizer.route(msg)
+
+    # Resume must target the RUN's session, not the approve message's session.
+    assert resume.await_args is not None, "resume was not triggered (looked up wrong session)"
+    assert resume.await_args.kwargs["session_id"] == run_session
