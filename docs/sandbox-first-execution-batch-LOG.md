@@ -29,8 +29,8 @@
 | 2 | sandbox-execution-world | ✅ | ✅ | ✅ | **完成** |
 | 3 | sandbox-file-egress | ✅ | ✅ | ✅ | **完成** |
 | 4 | sandbox-workspace-scope-split | ✅ | ✅ | ✅ | **完成(2 个后续项见下)** |
-| 5 | sandbox-approval-relaxation | ⏳ | - | - | 进行中 |
-| 6 | skill-frontmatter-agentskills-compliance | - | - | - | 待 |
+| 5 | sandbox-approval-relaxation | ✅ | ✅ | ✅ | **完成** |
+| 6 | skill-frontmatter-agentskills-compliance | ⏳ | - | - | 进行中 |
 
 ## 决策与问题日志
 
@@ -70,5 +70,11 @@
 > 1. **multi_user 平台接线未完成**:`resolve_workspace_scope` 护栏已落地+单元测试,standalone(`fleetent agent run`)已接线安全默认 `multi_user=False`。但 **platform 共享 IM 入口传 `multi_user=True` 的接线点未实装**(属 platform 侧改动,agent-runtime 不得碰 platform)。后果:多用户 bot 用**默认 session scope 安全**;仅当部署者**显式**给多用户 bot 配 `workspace_scope=agent` 且 platform 未传 multi_user=True 时,护栏不触发→跨用户数据共享仍可能。**需后续在 platform 侧把多用户入口传 multi_user=True**。核心镜像投毒泄露已由「移除 commit + 声明式不可变镜像」根除。
 > 2. **agent-tier 运行期 read_only rootfs 未翻转**:spec 提及但 tasks.md 未列;agent 刻意保留资源 tier 不变避免范围蔓延+破坏无关 hardening 测试。核心「依赖来源与会话数据物理隔离」由声明式不可变镜像满足;运行期 read_only 属 defense-in-depth,留作后续 hardening。
 > 3. microsandbox 声明式 build 端到端未真跑(环境未装 runtime),契约由 unit 覆盖。
+
+### #5 sandbox-approval-relaxation — 完成 2026-06-11(免审批兑现)
+- 实现:**免审批是显式部署选择**——`action_gate_medium_mode` 代码默认仍 `approval`(snapshot.py/agent_config.py 未改默认),example/文档给出「封闭部署推荐 sandbox」指引。bash_exec 默认移除落在**工具可见性解析层**:新 governance.agent_policy `OPT_IN_TOOLS={"bash_exec"}` + `is_tool_visible`,统一 snapshot.filter_tool_schemas/registry.dispatch/loop schema 组装,使 opt-in 工具即便在 allow-all(None)下也不默认暴露,schema 可见性与 dispatch 放行同源;运维 agent 经 allowed_tools 显式具名 opt-in 才有。docs/capabilities/governance.md 新增 Action Gate 章(mode 表+选型+迁移)。
+- **未改 resolve_action_mode 契约/risk 常量/SANDBOX_BACKED_TOOLS**(锁定测试:test_sandbox_backed_tools_constant_unchanged、test_high_not_relaxed_with_medium_sandbox、test_code_default_medium_mode_remains_approval 全绿)。
+- 验证:边界/层 OK;make test-pr 2856 passed(仅预存失败);工具可见性/access 回归 112 passed;#1-#4 既有测试全绿(107);mypy 87=基线;无全树污染。
+- archive,specs 同步(改 approval-minimization/tool-access-control/sandbox-enablement-control)。
 
 <!-- 后续每个 change 的决策、遇到的问题、解决方式追加于此 -->
