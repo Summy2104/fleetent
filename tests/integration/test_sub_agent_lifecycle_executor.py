@@ -7,11 +7,22 @@ from unittest.mock import patch
 from fleetent.runtime.sub_agent import SubAgentExecutor
 
 
+def _bind_state_db(sal, tmp_path):
+    """Inject a migrated per-agent agent_state.db (replaces the old DB_PATH monkeypatch)."""
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS
+    from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
+
+    router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path / "data"))
+    db = router.agent_scope("default", "agent").open_state_db(MIGRATIONS)
+    sal.set_state_db(db)
+    return db
+
+
 async def test_tasks_run_concurrently_not_sequentially(tmp_path, monkeypatch):
     """asyncio.gather should overlap task execution, not serialize it."""
     import fleetent.runtime.sub_agent_lifecycle as sal
 
-    monkeypatch.setattr(sal, "DB_PATH", tmp_path / "users.db")
+    _bind_state_db(sal, tmp_path)
     start_times: list[float] = []
 
     async def timed_run(messages, **kwargs):
@@ -44,7 +55,7 @@ def _iso_set(*vals):
 async def test_lifecycle_records_succeeded_with_timestamps(tmp_path, monkeypatch):
     import fleetent.runtime.sub_agent_lifecycle as sal
 
-    monkeypatch.setattr(sal, "DB_PATH", tmp_path / "users.db")
+    _bind_state_db(sal, tmp_path)
     executor = SubAgentExecutor()
 
     async def fake_run(messages, **kwargs):
@@ -67,7 +78,7 @@ async def test_cancel_token_passed_with_parent_link(tmp_path, monkeypatch):
     import fleetent.runtime.sub_agent_lifecycle as sal
     from fleetent.runtime.cancellation import CancelToken
 
-    monkeypatch.setattr(sal, "DB_PATH", tmp_path / "users.db")
+    _bind_state_db(sal, tmp_path)
     executor = SubAgentExecutor()
     captured: dict[str, object] = {}
 
@@ -95,7 +106,7 @@ async def test_one_task_times_out_others_succeed(tmp_path, monkeypatch):
 
     import fleetent.runtime.sub_agent_lifecycle as sal
 
-    monkeypatch.setattr(sal, "DB_PATH", tmp_path / "users.db")
+    _bind_state_db(sal, tmp_path)
     executor = SubAgentExecutor()
 
     async def fake_run(messages, **kwargs):
@@ -124,7 +135,7 @@ async def test_one_task_times_out_others_succeed(tmp_path, monkeypatch):
 async def test_parent_cancel_marks_cancelled(tmp_path, monkeypatch):
     import fleetent.runtime.sub_agent_lifecycle as sal
 
-    monkeypatch.setattr(sal, "DB_PATH", tmp_path / "users.db")
+    _bind_state_db(sal, tmp_path)
     executor = SubAgentExecutor()
 
     async def fake_run(messages, **kwargs):
@@ -147,7 +158,7 @@ async def test_pending_cancelled_when_batch_precancelled(tmp_path, monkeypatch):
     import fleetent.runtime.sub_agent_lifecycle as sal
     from fleetent.runtime.cancellation import CancelToken
 
-    monkeypatch.setattr(sal, "DB_PATH", tmp_path / "users.db")
+    _bind_state_db(sal, tmp_path)
     executor = SubAgentExecutor()
     called = {"n": 0}
 
@@ -174,7 +185,7 @@ async def test_pending_cancelled_when_batch_precancelled(tmp_path, monkeypatch):
 async def test_failure_marks_failed_with_error(tmp_path, monkeypatch):
     import fleetent.runtime.sub_agent_lifecycle as sal
 
-    monkeypatch.setattr(sal, "DB_PATH", tmp_path / "users.db")
+    _bind_state_db(sal, tmp_path)
     executor = SubAgentExecutor()
 
     async def fake_run(messages, **kwargs):

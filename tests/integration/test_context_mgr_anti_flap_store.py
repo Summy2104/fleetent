@@ -1,4 +1,8 @@
-"""DB-backed anti-flap persistence tests."""
+"""DB-backed anti-flap persistence tests.
+
+session_anti_flap lives in the per-agent agent_state.db (unified AGENT_STATE_MIGRATIONS);
+tests inject that migrated handle rather than monkeypatching a global DB_PATH
+(agent-runtime-db-routing-cleanup)."""
 
 import fleetent.runtime.context as _cm
 from fleetent.runtime.context import (
@@ -7,6 +11,17 @@ from fleetent.runtime.context import (
     load_anti_flap_state,
     save_anti_flap_state,
 )
+
+
+def _bind_state_db(tmp_path, agent_id="agent"):
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS
+    from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
+
+    router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path / "data"))
+    db = router.agent_scope("default", agent_id).open_state_db(MIGRATIONS)
+    _cm.set_state_db(db)
+    return db
+
 
 _BIG = {
     "max_tokens": 10_000,
@@ -28,7 +43,7 @@ def _big_msgs():
 
 
 def test_anti_flap_persistence_roundtrip(tmp_path, monkeypatch):
-    monkeypatch.setattr(_cm, "DB_PATH", tmp_path / "users.db")
+    _bind_state_db(tmp_path)
     st = AntiFlapState(recent_savings=(0.05, 0.2), turns_since_last_compress=3, auto_disabled=True)
     save_anti_flap_state("sess-rt", st)
     loaded = load_anti_flap_state("sess-rt")
@@ -38,7 +53,7 @@ def test_anti_flap_persistence_roundtrip(tmp_path, monkeypatch):
 
 
 def test_anti_flap_load_absent_returns_default(tmp_path, monkeypatch):
-    monkeypatch.setattr(_cm, "DB_PATH", tmp_path / "users.db")
+    _bind_state_db(tmp_path)
     assert load_anti_flap_state("never-seen") == AntiFlapState()
 
 
@@ -46,7 +61,7 @@ def test_cross_run_accumulation_circuit_breaks(tmp_path, monkeypatch):
     # Simulate 3 separate runs (3 user messages): each run loads state from
     # users.db, does one low-savings auto compress, saves back. The savings window
     # must accumulate ACROSS runs (not reset per run) and trip the breaker on #3.
-    monkeypatch.setattr(_cm, "DB_PATH", tmp_path / "users.db")
+    _bind_state_db(tmp_path)
     monkeypatch.setattr(_cm, "_summarize", lambda m, prev_summary=None, config=None: "x" * 200000)
     sid = "sess-cross"
     cfg = {**_FLAP_CFG, "min_interval_turns": 1}

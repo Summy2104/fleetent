@@ -77,11 +77,22 @@ def mock_client(monkeypatch) -> AsyncMock:
     return client
 
 
+def _bind_context_state_db(cm, monkeypatch, tmp_path):
+    """Inject a migrated per-agent agent_state.db into runtime.context (replaces DB_PATH)."""
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS
+    from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
+
+    router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path / "data"))
+    db = router.agent_scope("default", "agent").open_state_db(MIGRATIONS)
+    monkeypatch.setattr(cm, "_state_db", db)
+    return db
+
+
 async def test_run_loads_and_saves_flap_state(mock_client, monkeypatch, tmp_path):
     import fleetent.runtime.context as cm
     from fleetent.runtime.context import AntiFlapState
 
-    monkeypatch.setattr(cm, "DB_PATH", tmp_path / "users.db")
+    _bind_context_state_db(cm, monkeypatch, tmp_path)
     cm.save_anti_flap_state("sess-flap", AntiFlapState(turns_since_last_compress=7))
 
     captured: dict = {}
@@ -103,7 +114,9 @@ async def test_run_loads_and_saves_flap_state(mock_client, monkeypatch, tmp_path
 async def test_run_without_session_id_does_not_touch_flap_db(mock_client, monkeypatch, tmp_path):
     import fleetent.runtime.context as cm
 
-    monkeypatch.setattr(cm, "DB_PATH", tmp_path / "users.db")
+    # Bind a fresh per-agent state DB; with no session_id the loop must not engage anti-flap
+    # at all, so nothing is written to session_anti_flap.
+    db = _bind_context_state_db(cm, monkeypatch, tmp_path)
     called = {"apply": 0}
     monkeypatch.setattr(
         al, "apply_anti_flap", lambda *a, **k: called.__setitem__("apply", called["apply"] + 1)
@@ -111,7 +124,8 @@ async def test_run_without_session_id_does_not_touch_flap_db(mock_client, monkey
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("done"))
     await al.run([{"role": "user", "content": "x"}])  # no session_id
     assert called["apply"] == 0  # ungated AR12 path; anti-flap not engaged
-    assert not (tmp_path / "users.db").exists()  # no DB created
+    rows = db.execute("SELECT COUNT(*) AS n FROM session_anti_flap").fetchone()
+    assert rows["n"] == 0  # no anti-flap state persisted
 
 
 async def test_run_layered_budget_trips_and_logs_scope(mock_client, monkeypatch, tmp_path):
@@ -134,7 +148,12 @@ async def test_run_layered_budget_trips_and_logs_scope(mock_client, monkeypatch,
 
     mock_client.chat.completions.create = AsyncMock(side_effect=_resp)
 
-    await al.run([{"role": "user", "content": "x"}], principal=Principal(user_id="u1", tenant_id="default"), session_id="s1", max_turns=50)
+    await al.run(
+        [{"role": "user", "content": "x"}],
+        principal=Principal(user_id="u1", tenant_id="default"),
+        session_id="s1",
+        max_turns=50,
+    )
     assert captured.get("stop_reason") == StopReason.budget_exceeded
     assert captured.get("budget_scope") == "user"  # layered user scope reported
     from datetime import UTC, datetime

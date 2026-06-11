@@ -3,7 +3,41 @@ import sqlite3
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
+import pytest
+
+from fleetent.db import SQLiteDatabase
 from tests.integration.test_migrations import apply_migrations
+
+
+@pytest.fixture(autouse=True)
+def _reflection_state_db(tmp_path, monkeypatch):
+    """Inject a default migrated reflection state DB for every test.
+
+    reflection no longer falls back to DATABASE_URL (agent-runtime-db-routing-cleanup); tests
+    that read back from a specific db_path override this via _use_db().
+    """
+    from fleetent import reflection
+    from fleetent.memory import store as memory_store
+    from fleetent.observability import traces
+
+    db_path = tmp_path / "_reflection_autostate.db"
+    apply_migrations(db_path)
+    db = SQLiteDatabase(path=db_path)
+    monkeypatch.setattr(reflection, "_state_db", db)
+    monkeypatch.setattr(traces, "_state_db", db)
+    monkeypatch.setattr(memory_store, "_state_db", db)
+
+
+def _use_db(monkeypatch, db_path) -> None:
+    """Point env + reflection state at an Alembic-migrated db.
+
+    reflection no longer falls back to DATABASE_URL (agent-runtime-db-routing-cleanup), so
+    its per-agent state DB is injected explicitly; DATABASE_URL stays set for traces/memory.
+    """
+    from fleetent import reflection
+
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setattr(reflection, "_state_db", SQLiteDatabase(path=db_path))
 
 
 async def test_reflection_public_api_is_importable():
@@ -246,7 +280,7 @@ async def test_run_reflection_persists_report_without_raw_transcript(tmp_path, m
             user_id="user-1",
         ),
     ]
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    _use_db(monkeypatch, db_path)
     monkeypatch.setattr(observability, "query_trace_events", lambda query: events)
     monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=[]))
 
@@ -344,7 +378,7 @@ async def test_memory_findings_do_not_modify_memory_items_table(tmp_path, monkey
             user_id="user-1",
         ),
     ]
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    _use_db(monkeypatch, db_path)
     monkeypatch.setattr(observability, "query_trace_events", lambda query: events)
     monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=memories))
 

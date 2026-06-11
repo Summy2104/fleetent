@@ -188,6 +188,8 @@ def _init_agent_db_schema(database_url: str, *, agent_id: str, tenant_id: str = 
     from fleetent.memory import store as memory_store
     from fleetent.memory.shared_memory_migrations import MIGRATIONS as SHARED_MEMORY_MIGRATIONS
     from fleetent.observability import traces
+    from fleetent.runtime import context as runtime_context
+    from fleetent.runtime import sub_agent_lifecycle
     from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
     from fleetent.session import index as session_index
     from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
@@ -211,6 +213,8 @@ def _init_agent_db_schema(database_url: str, *, agent_id: str, tenant_id: str = 
     memory_store.set_state_db(agent_state_db)
     approval_store.set_state_db(agent_state_db)
     allowlist_store.set_state_db(agent_state_db)
+    runtime_context.set_state_db(agent_state_db)
+    sub_agent_lifecycle.set_state_db(agent_state_db)
 
 
 async def _start_infra(agent: AgentFile) -> None:

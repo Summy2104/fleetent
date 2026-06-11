@@ -18,6 +18,13 @@ Version history:
   v11  idx_memory_items_user_expires
   v12  approvals          (3b-4) tool approval requests
   v13  approval_allowlist (3b-4) allow-always grants
+  v14  session_anti_flap  (routing-cleanup) compression anti-flap, per session
+  v15  sub_agent_runs     (routing-cleanup) sub-agent lifecycle records
+  v16  idx_sub_agent_runs_parent
+  v17  memory_maintenance_proposals (routing-cleanup) User Memory maintenance proposals
+  v18  idx_memory_maintenance_user_status
+  v19  skill_proposals    (routing-cleanup) Skill reflection proposals
+  v20  idx_skill_proposals_status_updated
 """
 
 from __future__ import annotations
@@ -133,5 +140,99 @@ MIGRATIONS: list[tuple[int, str]] = [
             created_by  TEXT
         )
         """,
+    ),
+    # ── v14: compression anti-flap state (routing-cleanup) ───────────────────
+    # Lifted verbatim from runtime/context.init_anti_flap_db so the per-session
+    # circuit-breaker state lands in agent_state.db, not the shared management DB.
+    (
+        14,
+        """
+        CREATE TABLE IF NOT EXISTS session_anti_flap (
+          session_id        TEXT PRIMARY KEY,
+          recent_savings    TEXT NOT NULL,
+          turns_since       INTEGER NOT NULL,
+          auto_disabled     INTEGER NOT NULL
+        )
+        """,
+    ),
+    # ── v15-v16: sub-agent lifecycle records (routing-cleanup) ───────────────
+    # Lifted verbatim from runtime/sub_agent_lifecycle.init_db.
+    (
+        15,
+        """
+        CREATE TABLE IF NOT EXISTS sub_agent_runs (
+          run_id            TEXT PRIMARY KEY,
+          parent_session_id TEXT NOT NULL,
+          name              TEXT NOT NULL,
+          state             TEXT NOT NULL,
+          timeout_seconds   INTEGER NOT NULL,
+          created_at        TEXT NOT NULL,
+          started_at        TEXT,
+          ended_at          TEXT,
+          error             TEXT
+        )
+        """,
+    ),
+    (
+        16,
+        "CREATE INDEX IF NOT EXISTS idx_sub_agent_runs_parent ON sub_agent_runs(parent_session_id)",
+    ),
+    # ── v17-v18: User Memory maintenance proposals (routing-cleanup) ─────────
+    # Lifted from Alembic migration 010 (management-DB orphan); column set and
+    # index preserved so the agent-side store reads/writes identically.
+    (
+        17,
+        """
+        CREATE TABLE IF NOT EXISTS memory_maintenance_proposals (
+          id                      TEXT PRIMARY KEY,
+          user_id                 TEXT NOT NULL,
+          action                  TEXT NOT NULL,
+          target_memory_ids_json  TEXT NOT NULL,
+          proposed_content        TEXT,
+          metadata_patch_json     TEXT NOT NULL,
+          risk                    TEXT NOT NULL,
+          reason                  TEXT NOT NULL,
+          evidence_ids_json       TEXT NOT NULL,
+          status                  TEXT NOT NULL,
+          created_at              DATETIME NOT NULL,
+          updated_at              DATETIME NOT NULL,
+          expires_at              DATETIME
+        )
+        """,
+    ),
+    (
+        18,
+        "CREATE INDEX IF NOT EXISTS idx_memory_maintenance_user_status"
+        " ON memory_maintenance_proposals (user_id, status, updated_at)",
+    ),
+    # ── v19-v20: Skill reflection proposals (routing-cleanup) ────────────────
+    # Lifted from Alembic migration 028 (management-DB orphan).
+    (
+        19,
+        """
+        CREATE TABLE IF NOT EXISTS skill_proposals (
+          id                  TEXT PRIMARY KEY,
+          type                TEXT NOT NULL,
+          target_skill        TEXT NOT NULL,
+          reason              TEXT NOT NULL,
+          evidence_refs_json  TEXT NOT NULL,
+          risk_level          TEXT NOT NULL,
+          suggested_draft     TEXT,
+          suggested_diff      TEXT,
+          status              TEXT NOT NULL,
+          reviewer_user_id    TEXT,
+          reviewed_at         TEXT,
+          rejection_reason    TEXT,
+          actor_user_id       TEXT,
+          applied_at          TEXT,
+          created_at          TEXT NOT NULL,
+          updated_at          TEXT NOT NULL
+        )
+        """,
+    ),
+    (
+        20,
+        "CREATE INDEX IF NOT EXISTS idx_skill_proposals_status_updated"
+        " ON skill_proposals (status, updated_at)",
     ),
 ]

@@ -6,7 +6,23 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from fleetent.db import SQLiteDatabase
 from tests.integration.test_migrations import apply_migrations
+
+
+def _use_db(monkeypatch, db_path) -> None:
+    """Point env + reflection state at an Alembic-migrated db.
+
+    reflection no longer falls back to DATABASE_URL (agent-runtime-db-routing-cleanup), so
+    its per-agent state DB must be injected; DATABASE_URL stays set for memory/traces.
+    """
+    from fleetent import reflection
+    from fleetent.memory import store as memory_store
+
+    db_handle = SQLiteDatabase(path=db_path)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setattr(reflection, "_state_db", db_handle)
+    monkeypatch.setattr(memory_store, "_state_db", db_handle)
 
 
 async def test_memory_candidate_generates_pending_proposal_without_modifying_memory(
@@ -17,7 +33,7 @@ async def test_memory_candidate_generates_pending_proposal_without_modifying_mem
 
     db_path = tmp_path / "reflection_maintenance.db"
     apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    _use_db(monkeypatch, db_path)
     before = _memory_rows(db_path)
     events = [
         observability.TraceEvent(
@@ -104,7 +120,7 @@ async def test_memory_conflict_generates_owner_review_proposal_without_memory_wr
             expires_at=None,
         ),
     ]
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    _use_db(monkeypatch, db_path)
     monkeypatch.setattr(
         observability,
         "query_trace_events",
@@ -137,7 +153,7 @@ async def test_team_or_project_fact_suggests_shared_memory_or_kb(tmp_path, monke
 
     db_path = tmp_path / "reflection_maintenance.db"
     apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    _use_db(monkeypatch, db_path)
     events = [
         observability.TraceEvent(
             id="trace-1",
@@ -192,7 +208,7 @@ async def test_memory_layer_public_mutation_rejects_cross_user_target(tmp_path, 
                 None,
             ),
         )
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    _use_db(monkeypatch, db_path)
 
     with pytest.raises(ValueError, match="does not exist for user"):
         await memory_layer.update_user_memory_content(

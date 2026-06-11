@@ -8,12 +8,26 @@ from unittest.mock import AsyncMock
 import pytest
 
 from fleetent.db import SQLiteDatabase
-from fleetent.memory import extraction, store as memory_store
+from fleetent.memory import extraction
+from fleetent.memory import store as memory_store
 from tests.integration.test_migrations import apply_migrations
 
 
 def _db_url(db_path) -> str:
     return f"sqlite:///{db_path}"
+
+
+def _use_db(monkeypatch, db_path) -> None:
+    """Point the agent-side stores at an Alembic-migrated db.
+
+    reflection no longer falls back to DATABASE_URL (agent-runtime-db-routing-cleanup), so
+    its per-agent state DB must be injected explicitly; DATABASE_URL stays set for the
+    memory/traces stores that still resolve it.
+    """
+    from fleetent import reflection
+
+    monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
+    monkeypatch.setattr(reflection, "_state_db", SQLiteDatabase(path=db_path))
 
 
 def test_memory_maintenance_public_api_is_importable():
@@ -80,7 +94,7 @@ def test_create_proposal_defaults_to_pending_and_persists_json_fields(tmp_path, 
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
+    _use_db(monkeypatch, db_path)
 
     proposal = reflection.create_memory_maintenance_proposal(
         user_id="user-1",
@@ -106,7 +120,7 @@ def test_pending_proposal_can_be_approved_or_rejected(tmp_path, monkeypatch):
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
+    _use_db(monkeypatch, db_path)
     approved = reflection.create_memory_maintenance_proposal(
         user_id="user-1",
         action="rewrite",
@@ -142,7 +156,7 @@ async def test_rejected_or_expired_proposal_cannot_apply(tmp_path, monkeypatch, 
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
+    _use_db(monkeypatch, db_path)
     update_memory = AsyncMock()
     monkeypatch.setattr(reflection.memory, "update_user_memory_content", update_memory)
     proposal = reflection.create_memory_maintenance_proposal(
@@ -173,7 +187,7 @@ async def test_apply_approved_proposal_updates_status_to_applied(tmp_path, monke
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
+    _use_db(monkeypatch, db_path)
     update_memory = AsyncMock()
     monkeypatch.setattr(reflection.memory, "update_user_memory_content", update_memory)
     proposal = reflection.create_memory_maintenance_proposal(
@@ -201,7 +215,7 @@ async def test_apply_requires_owner_for_default_path(tmp_path, monkeypatch):
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
+    _use_db(monkeypatch, db_path)
     delete_memory = AsyncMock()
     monkeypatch.setattr(reflection.memory, "delete_user_memory", delete_memory)
     proposal = reflection.create_memory_maintenance_proposal(
@@ -229,7 +243,7 @@ async def test_high_risk_delete_cannot_be_auto_applied(tmp_path, monkeypatch):
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
+    _use_db(monkeypatch, db_path)
     delete_memory = AsyncMock()
     monkeypatch.setattr(reflection.memory, "delete_user_memory", delete_memory)
     proposal = reflection.create_memory_maintenance_proposal(
@@ -256,7 +270,7 @@ async def test_low_risk_mark_stale_can_auto_apply_when_policy_enabled(tmp_path, 
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
+    _use_db(monkeypatch, db_path)
     mark_stale = AsyncMock()
     monkeypatch.setattr(reflection.memory, "mark_user_memory_stale", mark_stale)
     proposal = reflection.create_memory_maintenance_proposal(
@@ -285,7 +299,7 @@ async def test_medium_risk_actions_need_owner_approval(tmp_path, monkeypatch, ac
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
+    _use_db(monkeypatch, db_path)
     monkeypatch.setattr(reflection.memory, "update_user_memory_content", AsyncMock())
     monkeypatch.setattr(reflection.memory, "merge_user_memories", AsyncMock())
     proposal = reflection.create_memory_maintenance_proposal(
@@ -310,7 +324,7 @@ async def test_suggest_shared_memory_or_kb_does_not_write_user_memory(tmp_path, 
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
+    _use_db(monkeypatch, db_path)
     update_memory = AsyncMock()
     monkeypatch.setattr(reflection.memory, "update_user_memory_content", update_memory)
     proposal = reflection.create_memory_maintenance_proposal(
@@ -338,7 +352,7 @@ async def test_proposal_lifecycle_events_are_recorded(tmp_path, monkeypatch):
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
+    _use_db(monkeypatch, db_path)
     monkeypatch.setattr(reflection.memory, "update_user_memory_content", AsyncMock())
     events: list[observability.TraceEvent] = []
     monkeypatch.setattr(observability, "record_trace_event", events.append)
@@ -368,7 +382,7 @@ async def test_extract_ignores_unsupported_shared_memory_or_kb_actions(tmp_path,
 
     db_path = tmp_path / "memory.db"
     apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
+    _use_db(monkeypatch, db_path)
     monkeypatch.setattr(memory_store, "_state_db", SQLiteDatabase(path=db_path))
     monkeypatch.setattr(extraction.vector_store, "upsert", AsyncMock())
     _patch_extraction(
@@ -405,7 +419,7 @@ async def test_context_update_refreshes_ttl_and_rejects_cross_type_target(tmp_pa
 
     db_path = tmp_path / "memory.db"
     apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
+    _use_db(monkeypatch, db_path)
     monkeypatch.setattr(memory_store, "_state_db", SQLiteDatabase(path=db_path))
     monkeypatch.setattr(extraction.vector_store, "upsert", AsyncMock())
     created_at = datetime(2026, 5, 1, tzinfo=UTC).isoformat()
