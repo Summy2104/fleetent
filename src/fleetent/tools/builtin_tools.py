@@ -328,6 +328,15 @@ async def run_code(
     start = time.monotonic()
     child = CancelToken(deadline=start + exec_timeout, parent=token)
     result = await _exec_or_cancel(manager.backend, ws_id, command, child, session_id=session_id)
+    if result is not None and manager.backend.is_workspace_missing(result):
+        # Container died between acquire and exec (sandbox-liveness-reacquire):
+        # drop the stale registration, rebuild on the same host-mounted workspace,
+        # retry exactly once instead of surfacing an infrastructure error.
+        manager.invalidate(scope, session_id, agent_name or "default")
+        ws_id = await manager.acquire(scope, session_id, agent_name or "default", env=env)
+        result = await _exec_or_cancel(
+            manager.backend, ws_id, command, child, session_id=session_id
+        )
     elapsed = time.monotonic() - start
     if result is None:
         manager.forget(manager.container_name(scope, session_id, agent_name or "default"))
