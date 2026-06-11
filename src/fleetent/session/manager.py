@@ -586,13 +586,19 @@ def _write_envelope(
 
 
 async def add_pending_approval(session_id: str, approval_id: str, entry: dict[str, object]) -> None:
-    """Record a suspended tool call awaiting approval under ``meta.pending_approvals``."""
-    async with session_lock(session_id):
-        messages, meta = _read(session_id)
-        pending = dict(meta.get(_PENDING_APPROVALS_KEY) or {})
-        pending[approval_id] = entry
-        meta[_PENDING_APPROVALS_KEY] = pending
-        _write_envelope(session_id, messages, meta)
+    """Record a suspended tool call awaiting approval under ``meta.pending_approvals``.
+
+    The caller MUST already hold this session's lock — the loop persists pending from
+    inside the normalizer's ``session_lock``; resume and reconcile likewise hold it.
+    This helper does NOT re-acquire it: ``session_lock`` is non-reentrant, so a second
+    acquire from the same task would deadlock the run (which kept ``is_running`` True
+    and made steering swallow every later same-session message).
+    """
+    messages, meta = _read(session_id)
+    pending = dict(meta.get(_PENDING_APPROVALS_KEY) or {})
+    pending[approval_id] = entry
+    meta[_PENDING_APPROVALS_KEY] = pending
+    _write_envelope(session_id, messages, meta)
 
 
 async def get_pending_approval(session_id: str, approval_id: str) -> dict[str, object] | None:
@@ -611,14 +617,17 @@ async def list_pending_approvals(session_id: str) -> dict[str, dict[str, object]
 
 
 async def remove_pending_approval(session_id: str, approval_id: str) -> None:
-    """Drop a resolved/expired pending-approval entry (no-op if absent)."""
-    async with session_lock(session_id):
-        messages, meta = _read(session_id)
-        pending = dict(meta.get(_PENDING_APPROVALS_KEY) or {})
-        if approval_id in pending:
-            del pending[approval_id]
-            meta[_PENDING_APPROVALS_KEY] = pending
-            _write_envelope(session_id, messages, meta)
+    """Drop a resolved/expired pending-approval entry (no-op if absent).
+
+    Caller MUST hold this session's lock (see ``add_pending_approval``); this helper
+    does not re-acquire the non-reentrant lock.
+    """
+    messages, meta = _read(session_id)
+    pending = dict(meta.get(_PENDING_APPROVALS_KEY) or {})
+    if approval_id in pending:
+        del pending[approval_id]
+        meta[_PENDING_APPROVALS_KEY] = pending
+        _write_envelope(session_id, messages, meta)
 
 
 async def save(
