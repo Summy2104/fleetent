@@ -7,9 +7,9 @@
 
 ## 2. Upgrade-time 改名迁移（兼容旧部署）
 
-- [ ] 2.1 写测试（integration）：数据目录有 `fleetent.db`(+`-wal`/`-shm`)无 `management.db` → upgrade 后三件套重命名为 `management.db*`，在 backup 之后、migrate 之前 —— 见红
-- [ ] 2.2 写测试（integration）：已存在 `management.db` → 迁移幂等不重命名；显式 `DATABASE_URL` 自定义文件名 → 不被改名 —— 见红
-- [ ] 2.3 在 `scripts/upgrade.py` 实现改名步骤（backup 成功后、`alembic upgrade head` 前，幂等，含 WAL sidecar） —— 见绿
+- [x] 2.1 写测试（integration）：数据目录有 `fleetent.db`(+`-wal`/`-shm`)无 `management.db` → upgrade 后三件套重命名为 `management.db*`，在 backup 之后、migrate 之前 —— 见红
+- [x] 2.2 写测试（integration）：已存在 `management.db` → 迁移幂等不重命名；显式 `DATABASE_URL` 自定义文件名 → 不被改名 —— 见红
+- [x] 2.3 在 `scripts/upgrade.py` 实现改名步骤（backup 成功后、`alembic upgrade head` 前，幂等，含 WAL sidecar） —— 见绿
 
 ## 3. 备份/恢复覆盖全部物理库 + WAL checkpoint
 
