@@ -209,7 +209,7 @@ class Settings(BaseSettings):
 
     log_format: str = "console"
     database_url: str = Field(
-        default_factory=lambda: f"sqlite:///{paths.data_dir() / 'fleetent.db'}"
+        default_factory=lambda: f"sqlite:///{paths.data_dir() / 'management.db'}"
     )
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
 

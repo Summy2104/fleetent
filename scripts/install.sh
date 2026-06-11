@@ -120,7 +120,7 @@ main() {
         local tmp_ini
         tmp_ini="$(mktemp)"
         sed -e "s|^script_location = .*|script_location = $REPO_ROOT/migrations|" \
-            -e "s|^sqlalchemy.url = .*|sqlalchemy.url = sqlite:///$FLEETENT_HOME/data/fleetent.db|" \
+            -e "s|^sqlalchemy.url = .*|sqlalchemy.url = sqlite:///$FLEETENT_HOME/data/management.db|" \
             "$REPO_ROOT/alembic.ini" > "$tmp_ini"
         uv run --project "$REPO_ROOT" alembic -c "$tmp_ini" upgrade head \
             && log_success "Platform database ready"

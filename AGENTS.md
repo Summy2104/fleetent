@@ -101,7 +101,7 @@ src/fleetent/
 
 ## 数据与 Schema 生命周期
 
-**5 物理库 + 按主体物理分区已落地**（持久层 #3，详见 `docs/architecture/data-model.md`）：管理库（单库、跨主体）+ per-agent 运行库 + per-tenant 共享记忆库 / KB 关系库 + 向量底座，多主体时按 `<tenant>/<agent_id>/` 目录物理隔离。管理库当前真实文件仍是 `data/fleetent.db`（概念名 `management.db`，改名待办）。
+**5 物理库 + 按主体物理分区已落地**（持久层 #3，详见 `docs/architecture/data-model.md`）：管理库（单库、跨主体）+ per-agent 运行库 + per-tenant 共享记忆库 / KB 关系库 + 向量底座，多主体时按 `<tenant>/<agent_id>/` 目录物理隔离。管理库真实文件为 `data/management.db`（旧 `fleetent.db` 已改名落地；存量部署经 `scripts/upgrade.py` 的 upgrade-time 重命名平滑迁移）。
 
 **双权威**：
 - **管理表**（users/api_keys/tenants/teams/scheduled_tasks 等，管理库）→ 仅由 **Alembic** 维护，不在 store 中 `_init_db()` 建表

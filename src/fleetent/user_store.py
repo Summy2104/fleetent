@@ -10,7 +10,7 @@ from typing import Any
 
 from fleetent import paths
 
-DB_PATH = paths.data_dir() / "fleetent.db"
+DB_PATH = paths.data_dir() / "management.db"
 
 # Injectable hook for resolving api_keys table entries.
 # Platform startup wires this to api_key_store.resolve; standalone agents leave it None,

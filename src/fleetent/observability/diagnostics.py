@@ -311,11 +311,15 @@ def _write_json(archive: zipfile.ZipFile, name: str, payload: object) -> str:
 def _forbidden_skips(data_dir: Path, secrets_dir: Path | None) -> list[dict[str, str]]:
     skipped: list[dict[str, str]] = []
     if data_dir.exists():
-        for path in sorted(data_dir.iterdir()):
+        # Recurse the whole tree: persistence layer #3 places per-tenant / per-agent
+        # libraries under subdirectories, so a top-level scan would miss (and fail to
+        # record) nested *.db files and their -wal/-shm sidecars.
+        for path in sorted(data_dir.rglob("*")):
             if path.is_file() and (
                 path.suffix in {".db", ".sqlite", ".sqlite3"} or ".db" in path.name
             ):
-                skipped.append({"name": f"data/{path.name}", "reason": "sqlite database excluded"})
+                rel = path.relative_to(data_dir).as_posix()
+                skipped.append({"name": f"data/{rel}", "reason": "sqlite database excluded"})
     if secrets_dir and secrets_dir.exists():
         for path in sorted(secrets_dir.iterdir()):
             if path.is_file():

@@ -15,8 +15,22 @@ def isolate_settings_dotenv(tmp_path, monkeypatch):
 
 def test_settings_defaults():
     s = Settings()
-    assert s.database_url == f"sqlite:///{paths.data_dir() / 'fleetent.db'}"
+    assert s.database_url == f"sqlite:///{paths.data_dir() / 'management.db'}"
     assert s.log_format == "console"
+
+
+def test_default_database_url_is_management_db_not_legacy_fleetent_db():
+    # Persistence layer #3 renamed the management library file to align with its
+    # conceptual name; the legacy fleetent.db name must no longer be the default.
+    s = Settings()
+    assert s.database_url.endswith("/management.db")
+    assert "fleetent.db" not in s.database_url
+
+
+def test_user_store_db_path_defaults_to_management_db():
+    from fleetent import user_store
+
+    assert user_store.DB_PATH.name == "management.db"
 
 
 # Agent-runtime fields dissolved into agent.yaml (dissolve-global-settings); the slim
@@ -237,10 +251,11 @@ def test_mcp_server_yaml_parser_requires_explicit_path(tmp_path):
     assert [server.id for server in servers] == ["docs"]
 
 
-def test_alembic_ini_uses_default_fleetent_database_url():
+def test_alembic_ini_uses_default_management_database_url():
     alembic_ini = (Path(__file__).parents[2] / "alembic.ini").read_text()
 
-    assert "sqlalchemy.url = sqlite:///data/fleetent.db" in alembic_ini
+    assert "sqlalchemy.url = sqlite:///data/management.db" in alembic_ini
+    assert "sqlalchemy.url = sqlite:///data/fleetent.db" not in alembic_ini
     assert "sqlalchemy.url = sqlite:///data/users.db" not in alembic_ini
 
 
@@ -251,7 +266,7 @@ def test_settings_missing_yaml_file_uses_typed_defaults(tmp_path, monkeypatch):
 
     s = Settings()
 
-    assert s.database_url == f"sqlite:///{paths.data_dir() / 'fleetent.db'}"
+    assert s.database_url == f"sqlite:///{paths.data_dir() / 'management.db'}"
     assert s.log_format == "console"
 
 

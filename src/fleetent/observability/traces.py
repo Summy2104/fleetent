@@ -194,7 +194,7 @@ def ensure_schema(db: SQLiteDatabase) -> None:
 
 
 def _database_url() -> str:
-    default = f"sqlite:///{paths.data_dir() / 'fleetent.db'}"
+    default = f"sqlite:///{paths.data_dir() / 'management.db'}"
     return os.environ.get("DATABASE_URL", default)
 
 

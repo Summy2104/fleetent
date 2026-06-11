@@ -39,8 +39,9 @@
 - ✅ **SQLite-first 默认存储**：无需独立数据库服务
   - 数据在 data/ 目录，挂载 volume 持久化
   - 当前不要求 PostgreSQL；数据库访问通过统一 DB runtime 边界，避免把业务层写死到 SQLite
-  - `database_url` 默认指向 `sqlite:///data/fleetent.db`；非 SQLite backend 当前 fail fast
-  - 存量本地 `data/users.db` 不会自动迁移、复制或 fallback；需要保留数据时由 operator 手动重命名为 `data/fleetent.db`，或选择重新初始化
+  - `database_url` 默认指向 `sqlite:///data/management.db`（管理库文件名与概念名对齐）；非 SQLite backend 当前 fail fast
+  - 存量部署的旧管理库 `data/fleetent.db` 由 upgrade 脚本在 backup 之后、migrate 之前自动重命名为 `data/management.db`（含 `-wal`/`-shm` sidecar，幂等）；显式 `DATABASE_URL` 指向自定义文件名者不被改名
+  - 存量本地 `data/users.db` 不会自动迁移、复制或 fallback；需要保留数据时由 operator 手动重命名为 `data/management.db`，或选择重新初始化
   - 不引入 ORM；schema lifecycle 双权威（按库分）：**管理库** = Alembic；**agent 侧库**（per-agent / 共享记忆 / KB）= 嵌入式 forward-only 迁移（Y，`user_version` migrate-on-open），不经 Alembic
 
 - ✅ **observability 数据落点已明确**：运行观测数据按用途分层持久化
@@ -52,12 +53,15 @@
 - ✅ **SQLite 升级备份脚本**：`scripts/upgrade.py`
   - `--database-url` 优先于 `DATABASE_URL`，`DATABASE_URL` 优先于 `Settings().database_url`
   - 当前只支持本地 SQLite database URL；非 SQLite、远程 SQLite、`:memory:` 都会 fail fast
-  - 默认备份写入 `data/backups/YYYYMMDD-HHMMSS/fleetent.db`
+  - **备份覆盖数据目录下全部物理库**（持久层 #3）：递归枚举 `data/` 下任意深度的 `*.db`（管理库 + per-tenant 的 KB / 共享记忆库 + per-agent 运行库 + 各向量库），逐库经统一 `db.py` 入口执行 `PRAGMA wal_checkpoint(TRUNCATE)` 后复制（含 `-wal`/`-shm` sidecar），避免 WAL 中未落盘的写丢失
+  - 备份写入 `data/backups/YYYYMMDD-HHMMSS/`，按原数据目录相对结构**镜像**每一个库（含 `<tenant>/` 与 `<tenant>/<agent_id>/` 子目录）
+  - 备份发现以递归扫文件为主、管理库 registry（tenants）兜底交叉核对：登记但目录缺失的主体以告警形式提示，停机 agent 的库仍被递归发现并备份
   - `--backup-dir` 可覆盖备份根目录，便于自定义部署和测试
   - `--dry-run` 只校验 database URL 并输出 backup / migration 计划，不要求 DB 文件存在，不创建备份，不运行 Alembic
-  - `--backup-only` 只创建备份，不运行 Alembic
-  - 非 dry-run 模式下 DB 文件不存在会 fail fast；backup 成功后才会运行 migration
+  - `--backup-only` 只创建备份（同样覆盖全部物理库），不运行 Alembic
+  - 非 dry-run 模式下管理库文件不存在（且无可迁移的旧 `fleetent.db`）会 fail fast；backup 成功后才会运行 migration
   - migration 失败时不会自动 rollback；已创建 backup 会保留，脚本返回非 0
+  - 备份语义假定 upgrade 运行在停服 / 静默窗口（与既有 upgrade 语义一致），非在线一致性快照
 
 - ✅ **Pilot connector operations CLI**：`fleetent-admin kb connectors ...`
   - `list` 列出 Platform Knowledge config / DB snapshot 中的 Google Drive / Confluence connector 安全摘要
@@ -101,14 +105,16 @@ docker compose run --rm fleetent uv run python scripts/upgrade.py
 ```bash
 docker compose run --rm fleetent uv run python scripts/upgrade.py --dry-run
 docker compose run --rm fleetent uv run python scripts/upgrade.py --backup-only
-docker compose run --rm fleetent uv run python scripts/upgrade.py --database-url sqlite:///data/fleetent.db --backup-dir data/backups
+docker compose run --rm fleetent uv run python scripts/upgrade.py --database-url sqlite:///data/management.db --backup-dir data/backups
 ```
 
-如果 migration 失败，脚本不会自动 rollback。手动恢复步骤：
+如果 migration 失败，脚本不会自动 rollback。手动恢复步骤（覆盖多物理库）：
 
 1. 停止 fleetent 服务。
-2. 用脚本输出的 backup DB 文件替换当前 DB 文件，例如将 `data/backups/YYYYMMDD-HHMMSS/fleetent.db` 复制回 `data/fleetent.db`。
+2. 用同一个备份批次目录 `data/backups/YYYYMMDD-HHMMSS/` 整体替换数据目录下对应的全部库文件——按镜像结构把每个库（含 `<tenant>/` 与 `<tenant>/<agent_id>/` 子目录下的库及其 `-wal`/`-shm` sidecar）复制回 `data/` 对应位置，例如将 `data/backups/YYYYMMDD-HHMMSS/management.db` 复制回 `data/management.db`。
 3. 重启 fleetent 服务。
+
+务必使用**同一个备份批次**的各库，保证恢复后多库互相一致，不要混用不同时间点的备份。
 
 ## Connector 运维
 
@@ -189,7 +195,7 @@ uv run fleetent-admin observability performance --agent-id agent-1 --limit 100
   - 升级前自动备份 SQLite 文件；migration 失败不自动 rollback
 
 - ✅ **统一 database_url 配置**：以 SQLite 为默认后端，保留后续 PostgreSQL 接入空间
-  - 默认值指向本机 `data/fleetent.db`
+  - 默认值指向本机 `data/management.db`
   - 业务 store 通过统一 DB runtime 获取连接和事务，不直接依赖 SQLite 文件路径
 
 ## 当前缺口
