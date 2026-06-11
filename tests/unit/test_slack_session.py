@@ -116,7 +116,6 @@ async def test_assistant_message_populates_session_context(monkeypatch):
         say=AsyncMock(),
         client=MagicMock(),
         agent_name="a",
-        owner_id="o",
         bot_token="b",
     )
     sc = routed["msg"].session_context

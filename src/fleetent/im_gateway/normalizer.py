@@ -99,10 +99,6 @@ class NormalizedMessage:
     reply_func: Callable[[str], Coroutine[Any, Any, None]]
     channel_id: str = field(default="")
     workspace_id: str = field(default="")
-    # Owning tenant of the IM connector that produced this message (multi-tenant IM
-    # gateway). Empty = single-tenant/legacy. Namespaces the allowlist scope and the
-    # session id so the same platform/channel under two owners never collides.
-    owner_id: str = field(default="")
     # Pre-resolved agent name (per-agent-slack-connector): set when the receiving
     # connection already identifies the agent (Slack). Empty = resolve via the index.
     agent_name: str = field(default="")
@@ -368,8 +364,7 @@ async def route(msg: NormalizedMessage) -> None:
         # fingerprint (approval-minimization); only meaningful on approve.
         always = m.group(2) is not None and action == "approve"
         approval_id = m.group(3)
-        # Owner-namespaced session id (matches how the run persisted the pending entry).
-        session_id = f"{msg.owner_id}:{msg.session_id}" if msg.owner_id else msg.session_id
+        session_id = msg.session_id
 
         # Recover authorized decision actors from the persisted pending entry so the
         # gate's authorization check survives a process restart (approval-suspend-resume).
@@ -441,9 +436,7 @@ async def route(msg: NormalizedMessage) -> None:
     from fleetent.session import manager as session_mgr
     from fleetent.skills import available_skills_prompt, collect_disabled_trace
 
-    # Namespace the session by owner so the same platform/channel under two owners
-    # never shares conversation state.
-    session_id = f"{msg.owner_id}:{msg.session_id}" if msg.owner_id else msg.session_id
+    session_id = msg.session_id
 
     governance = _governance_from_file(agent) if agent else None
     # Build the user content once (images are analyzed here) — reused by both the

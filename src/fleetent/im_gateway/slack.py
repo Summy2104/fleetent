@@ -367,7 +367,6 @@ async def _route_assistant_message(
     say: Any,
     client: Any,
     agent_name: str,
-    owner_id: str,
     bot_token: str,
 ) -> None:
     """Route one Assistant-thread user message through the agent pipeline.
@@ -411,7 +410,6 @@ async def _route_assistant_message(
 
     msg = NormalizedMessage(
         platform="slack",
-        owner_id=owner_id,
         agent_name=agent_name,
         session_id=_derive_session_id(
             channel_type="im",
@@ -440,14 +438,13 @@ async def _route_assistant_message(
     await route(msg)
 
 
-def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object:
+def create_app(agent_name: str, config: dict[str, Any]) -> object:
     """Create a slack-bolt AsyncApp bound to one agent's Slack connection.
 
     The receiving connection identifies the agent (per-agent-slack-connector): the
-    handler stamps ``agent_name`` so routing skips channel→agent lookup. ``owner_id``
-    still scopes user mapping / allowlist (per-agent isolation of those is deferred to
-    per-agent-im-access). Channel access is enforced by the normalizer access gate,
-    not this handler.
+    handler stamps ``agent_name`` so routing skips channel→agent lookup. Channel access
+    is enforced by the normalizer access gate, not this handler. The connector carries
+    no owner_id and reads no platform table.
 
     DM / assistant-pane conversations are handled by the Assistant container so the
     native status indicator binds to the real assistant thread; ``app_mention`` keeps
@@ -493,7 +490,6 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
             say=say,
             client=client,
             agent_name=agent_name,
-            owner_id=owner_id,
             bot_token=bot_token,
         )
 
@@ -527,7 +523,6 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
 
         msg = NormalizedMessage(
             platform="slack",
-            owner_id=owner_id,
             agent_name=agent_name,
             session_id=session_id,
             session_context=SessionContext(
@@ -572,7 +567,7 @@ async def _run_socket_mode(app: object, app_token: str) -> None:
     await handler.start_async()  # type: ignore[no-untyped-call]
 
 
-async def run(agent_name: str, owner_id: str, config: dict[str, Any]) -> None:
+async def run(agent_name: str, config: dict[str, Any]) -> None:
     """Run one agent's Slack connection until cancelled (network seam).
 
     Per-agent connection status is owned by the connector supervisor, which catches
@@ -580,7 +575,7 @@ async def run(agent_name: str, owner_id: str, config: dict[str, Any]) -> None:
     """
     from fleetent.im_gateway import connector_registry
 
-    app = create_app(agent_name, owner_id, config)
+    app = create_app(agent_name, config)
     # Register the live web client so the cron scheduler can deliver fired-task replies
     # to this agent's Slack at fire time (resolved per fire, cleared on disconnect).
     client = getattr(app, "client", None)

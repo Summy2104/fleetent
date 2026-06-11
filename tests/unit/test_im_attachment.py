@@ -31,7 +31,7 @@ def _capture_slack_handler(monkeypatch):
         import fleetent.im_gateway.slack as slack_mod
 
         slack_mod.create_app(
-            "support", "owner1", {"bot_token": "xoxb-test-token", "app_token": "xapp-test-token"}
+            "support", {"bot_token": "xoxb-test-token", "app_token": "xapp-test-token"}
         )
     return captured["handler"]
 
@@ -157,7 +157,7 @@ def _capture_telegram_handler(monkeypatch):
         mock_cls.builder.return_value = mock_builder
         import fleetent.im_gateway.telegram as tg_mod
 
-        tg_mod.create_app("support", "owner1", {"bot_token": "tg-test-token"})
+        tg_mod.create_app("support", {"bot_token": "tg-test-token"})
 
     handler_obj = mock_app.add_handler.call_args[0][0]
     return handler_obj

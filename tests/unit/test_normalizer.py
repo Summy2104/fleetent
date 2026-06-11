@@ -3,13 +3,12 @@
 from fleetent.im_gateway import normalizer
 
 
-def _msg(owner_id, replies, *, session_id="s1", channel_id="C1"):
+def _msg(replies, *, session_id="s1", channel_id="C1"):
     async def reply_func(text):
         replies.append(text)
 
     return normalizer.NormalizedMessage(
         platform="slack",
-        owner_id=owner_id,
         session_id=session_id,
         user_id="u1",
         text="hi",
@@ -19,8 +18,9 @@ def _msg(owner_id, replies, *, session_id="s1", channel_id="C1"):
     )
 
 
-async def test_session_namespaced_by_owner(monkeypatch, tmp_path):
+async def test_session_id_not_owner_prefixed(monkeypatch, tmp_path):
     import contextlib
+    from dataclasses import fields
 
     from fleetent.agent_config import (
         AgentConnectors,
@@ -62,9 +62,12 @@ async def test_session_namespaced_by_owner(monkeypatch, tmp_path):
     monkeypatch.setattr(session_mgr, "save", lambda *a, **k: _async(None))
     monkeypatch.setattr(agent_loop, "run", lambda **k: _async("ok"))
 
-    await normalizer.route(_msg("ownerA", []))
-    await normalizer.route(_msg("ownerB", []))
-    assert seen == ["ownerA:s1", "ownerB:s1"]
+    await normalizer.route(_msg([]))
+    await normalizer.route(_msg([]))
+    # No owner prefix: session id is the adapter-derived id as-is.
+    assert seen == ["s1", "s1"]
+    # owner_id is removed from the message contract entirely.
+    assert "owner_id" not in {f.name for f in fields(normalizer.NormalizedMessage)}
 
 
 def _async(value):
@@ -124,7 +127,7 @@ async def test_normalizer_propagates_permission_gate_config(monkeypatch, tmp_pat
 
     monkeypatch.setattr(agent_loop, "run", capture_run)
 
-    await normalizer.route(_msg("ownerC", []))
+    await normalizer.route(_msg([]))
 
     assert captured, "loop.run should have been called"
     assert captured[0].get("permission_gate_enabled") is False
