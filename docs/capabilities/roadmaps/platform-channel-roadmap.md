@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | Platform | [../platform.md](../platform.md) | admin API、admin CLI、console、agent/user/provider/connector/resource management |
 | Governance | [../governance.md](../governance.md) | approval、quota、audit、agent policy、blocklist、role / permission boundary |
-| User Center | [../user-center.md](../user-center.md) | user、tenant、team、API key、identity mapping |
+| User Center | [../platform.md](../platform.md)（user-center 规划已归档至 `docs/archive/user-center.md`） | user、tenant、team、API key、identity mapping |
 | Connectors | [../connectors.md](../connectors.md) | 用户级外部工具授权连接器；区别于 KB 数据源 connector |
 | IM Gateway | [../im-gateway.md](../im-gateway.md) | Slack / Telegram / WhatsApp 接入、user / channel 映射、allowlist |
 | Scheduling | [../scheduling.md](../scheduling.md) | Cron scheduled tasks、Webhook triggers、session binding、automation entrypoints |

@@ -157,4 +157,4 @@ flowchart TD
 - [ ] `scope=agent` 的容器是否支持手动重建（清空已安装依赖）？触发方式：admin CLI 还是 agent 配置变更？（负责人：待认领）
 - [ ] 符号链接攻击防护：是在 v1.0 中修复，还是接受当前防护层为足够？容器加固（`--read-only` + `/tmp` `nosuid` + session 档非 root + `--cap-drop ALL` + `no-new-privileges`）已显著收敛符号链接/提权的可利用面，但未专门防护 symlink 跨越。（负责人：待认领）
 
-> 延后项（本批不做，理由见 `sandbox-improvements.md`）：网络出站白名单与 `public_only` 实装、磁盘配额 `--storage-opt`、自定义 seccomp/AppArmor profile。
+> 延后项（本批不做，理由见 `docs/records/sandbox-improvements.md`）：网络出站白名单与 `public_only` 实装、磁盘配额 `--storage-opt`、自定义 seccomp/AppArmor profile。

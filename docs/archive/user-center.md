@@ -1,5 +1,11 @@
 # user-center
 
+> **已归档（2026-06-11）**：本文档描述的邮箱前置验证 / 多渠道绑定 / `account_bindings` 等规划从未实现，
+> 且与后来定稿的身份模型冲突（一切是 User、认证属 edge、`Principal{user_id, tenant_id}`，
+> 见 `docs/architecture/target-architecture.md` §6）。自动注册等已在 trim-user-auth 中 descope。
+> 当前真实实现：`im_user_store` 维护 IM 身份映射 + allowlist；用户由管理员经 `fleetent-admin` 创建。
+> 仅留档作历史参考，不代表任何当前规划。
+
 > 写作提醒：功能描述只写可观察的行为，不写内部实现细节。验收标准只写端到端可验证的行为。
 
 ## 概述
