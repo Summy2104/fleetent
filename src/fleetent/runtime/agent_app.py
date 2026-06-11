@@ -169,9 +169,7 @@ def _configure_logging_from_agent(agent: AgentFile, home_dir: Path) -> None:
     )
 
 
-def _init_agent_db_schema(
-    database_url: str, *, agent_id: str, tenant_id: str = "default"
-) -> None:
+def _init_agent_db_schema(database_url: str, *, agent_id: str, tenant_id: str = "default") -> None:
     """Create all agent-side DB tables in database_url if they do not exist.
 
     Called once at boot after DATABASE_URL is redirected to the per-agent path.
@@ -567,6 +565,9 @@ def build_app(agent_name: str) -> FastAPI:
         principal: Principal = Depends(_authenticate),  # noqa: B008
     ) -> StreamingResponse:
         agent = agent_config.current().get(agent_name)
+        agent_tenant = agent.tenant_id if agent is not None else "default"
+        if not _check_tenant(principal, agent_tenant):
+            raise HTTPException(status_code=403, detail="cross-tenant access denied")
         kwargs: dict[str, Any] = {"principal": principal, "agent_name": agent_name}
         if agent is not None:
             kwargs["system_prompt"] = agent.system_prompt
@@ -605,9 +606,15 @@ def build_app(agent_name: str) -> FastAPI:
             )
             await websocket.close(code=1008)
             return
+        agent = agent_config.current().get(agent_name)
+        agent_tenant = agent.tenant_id if agent is not None else "default"
+        if not _check_tenant(tui_principal, agent_tenant):
+            _logger.warn("tui_ws_cross_tenant_rejected", agent_tenant=agent_tenant)
+            await websocket.close(code=1008)
+            return
         await websocket.accept()
         transport = WSTransport(websocket)
-        conn = tui_dispatch.Connection(user_id=tui_principal.user_id, transport=transport)
+        conn = tui_dispatch.Connection(principal=tui_principal, transport=transport)
         await transport.write(tui_proto.make_event(tui_proto.EVENT_GATEWAY_READY, {}))
         try:
             while True:
