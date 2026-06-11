@@ -1,9 +1,9 @@
 ## 1. 管理库改名 fleetent.db → management.db（默认与硬编码引用）
 
-- [ ] 1.1 写测试（unit）：未显式配置时默认 `database_url` 指向 `data/management.db`；旧 `fleetent.db` 不再是默认 —— 见红
-- [ ] 1.2 改 `config.py` `database_url` 默认 factory → `management.db`；`observability/traces.py` 默认 URL → `management.db`；`user_store.py` `DB_PATH` → `management.db` —— 见绿
-- [ ] 1.3 改 `alembic.ini` 默认 `sqlalchemy.url` 与 `scripts/install.sh` / `scripts/install-platform.sh` 中 sed 替换的 `fleetent.db` → `management.db`
-- [ ] 1.4 收尾 `grep -rn "fleetent\.db" src scripts alembic.ini`：确认仅剩有意的兼容迁移引用，无残留默认硬编码
+- [x] 1.1 写测试（unit）：未显式配置时默认 `database_url` 指向 `data/management.db`；旧 `fleetent.db` 不再是默认 —— 见红
+- [x] 1.2 改 `config.py` `database_url` 默认 factory → `management.db`；`observability/traces.py` 默认 URL → `management.db`；`user_store.py` `DB_PATH` → `management.db` —— 见绿
+- [x] 1.3 改 `alembic.ini` 默认 `sqlalchemy.url` 与 `scripts/install.sh` / `scripts/install-platform.sh` 中 sed 替换的 `fleetent.db` → `management.db`
+- [x] 1.4 收尾 `grep -rn "fleetent\.db" src scripts alembic.ini`：确认仅剩有意的兼容迁移引用（`runtime/agent_app.py` standalone-agent DB + 概念性 docstring，非管理库），无残留管理库默认硬编码
 
 ## 2. Upgrade-time 改名迁移（兼容旧部署）
 
