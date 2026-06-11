@@ -23,7 +23,10 @@
 
 ## 现状
 
-尚未实现。
+骨架已就位、核心流程未实现：
+- `connectors` 表已存在（管理库，迁移 040 重建为 agent-scoped：nullable `agent_id`，NULL = 全局默认），`agent_oauth_bindings` 表见迁移 045
+- `src/fleetent/connectors.py` 已定义 `Credential` / `NeedsConsent` / `CredentialProvider` 契约；默认 provider 恒返回 `NeedsConsent`（注入 seam，待真实 OAuth store 实现）
+- OAuth consent 流程、token 加密存储与 refresh、调用时凭证注入、`connector_grants` 持久化均**未实现**（仍为下方规划）
 
 ## 规划中（v1.0）
 

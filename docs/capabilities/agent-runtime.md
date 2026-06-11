@@ -209,12 +209,12 @@ flowchart TD
 
 **场景 3：model fallback**
 - Given：RouteConfig 配置了 fallbacks，主模型返回 429
-- When：agent_loop 发起 LLM 调用
+- When：runtime.loop 发起 LLM 调用
 - Then：自动切换到 fallback 模型重试；trace 记录实际使用的模型；用户无感知
 
 **场景 4：高风险工具审批**
 - Given：工具 `risk_level="high"`
-- When：agent_loop 准备调用该工具
+- When：runtime.loop 准备调用该工具
 - Then：暂停执行，通知用户审批；用户 approve 后继续；用户 reject 后取消；超时按拒绝处理
 
 **场景 5：上下文压缩**

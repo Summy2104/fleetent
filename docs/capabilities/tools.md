@@ -46,7 +46,7 @@ def my_tool(param: str) -> str:
 
 - **schema 自动构建**：参数类型注解 → JSON Schema，LLM 可见
 - **隐藏参数**：`*, client` 这类 keyword-only 参数不进入 LLM schema，由框架注入
-- **副作用注册**：`tools.py` 的每个 `@tool` 在 import 时注册到全局 registry；`agent_loop.py` 顶部必须 `import tools`，否则 `get_schemas()` 返回空
+- **副作用注册**：`tools/builtin_tools.py` 的每个 `@tool` 在 import 时注册到全局 registry；`runtime/loop.py` 顶部必须 `import fleetent.tools`（其 `__init__.py` 承载副作用），否则 `get_schemas()` 返回空
 
 ## 接口定义
 
