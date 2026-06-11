@@ -123,7 +123,7 @@ def create(
     """创建定时任务并写入 SQLite，返回完整任务字典。"""
 
 def list_tasks() -> list[dict[str, Any]]:
-    """返回所有 enabled=1 的任务，server 启动时用于恢复调度。"""
+    """返回所有 enabled=1 的任务，agent 进程 boot 时用于恢复调度。"""
 
 def delete(task_id: str) -> bool:
     """删除指定任务，返回是否成功找到并删除。"""
@@ -141,14 +141,14 @@ def extract_message(template: str | None, payload: Any) -> str:
 
 ### 定时任务
 
-- ✅ **APScheduler Cron 任务**：server 启动时初始化，支持标准五字段 cron 表达式和时区（IANA 格式，默认 UTC）
+- ✅ **APScheduler Cron 任务**：agent 进程启动时初始化，支持标准五字段 cron 表达式和时区（IANA 格式，默认 UTC）
   - `schedule_task` 工具：创建 cron 任务，指定名称、cron 表达式、消息内容、时区、user_id
   - `cancel_task` 工具：取消指定任务（`risk_level=medium`，需审批）
   - `fleetent-admin list-schedules`：查看所有任务（id、name、cron_expr、user_id）
   - `fleetent-admin add-schedule --cron <expr> ...`：CLI 创建任务
   - `fleetent-admin remove-schedule --id <task_id>`：CLI 删除任务
 
-- ✅ **任务持久化**：`scheduled_tasks` 属管理表，存 SQLite 管理库（`data/management.db`），server 重启后自动恢复调度
+- ✅ **任务持久化**：`scheduled_tasks` 是 **agent 侧 per-agent 表**，存该 agent 的 `agent_state.db`（嵌入式 Y 维护，非 Alembic、不在管理库），由 **agent 进程**的 `CronScheduler` 在 boot 时恢复调度（平台 managed 侧不触发用户定时任务，只跑自身维护）
 
 - ✅ **全局调度配置**：`platform.yaml` 中只保存 `scheduling.enabled` 和 `scheduling.default_timezone`
   - 旧 `config/cron.yaml` 不再读取；文件存在时启动失败并提示通过 SQLite-backed runtime management 创建任务

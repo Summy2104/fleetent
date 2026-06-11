@@ -218,4 +218,5 @@ platform 控制面经**只读连接**（不迁移、`mode=ro`）+ 共享 store �
 
 ## 命名对齐（已落地）
 
-- **管理库文件改名 `fleetent.db → management.db`**：已落地。`database_url` 默认、`alembic.ini`、`scripts/install*.sh`、`scripts/upgrade.py` 与 `read_projection.py` 注释均指真实文件 `management.db`；存量部署经 `scripts/upgrade.py` 的 upgrade-time 重命名（backup 后、migrate 前、幂等、含 `-wal`/`-shm` sidecar）平滑迁移。standalone agent 的 `runtime/agent_app.py` DB 属 agent 侧、不在此改名范围内。
+- **管理库文件改名 `fleetent.db → management.db`**：已落地。`database_url` 默认、`alembic.ini`、`scripts/install*.sh`、`scripts/upgrade.py` 与 `read_projection.py` 注释均指真实文件 `management.db`；存量部署经 `scripts/upgrade.py` 的 upgrade-time 重命名（backup 后、migrate 前、幂等、含 `-wal`/`-shm` sidecar）平滑迁移。
+- **standalone agent `fleetent.db` 已退役**（`retire-standalone-fleetent-db`）：standalone agent 不再创建 `fleetent.db`，原唯一住客 `scheduled_tasks` 已迁入 per-agent `agent_state.db`（嵌入式 Y v27），boot 改以 `data_dir` 锚点路由、不再设 `DATABASE_URL`；`db.default_database()` 兜底入口一并移除。上方"管理库 `fleetent.db→management.db`"指的是受管模式管理库的历史改名，与已退役的 standalone agent DB 无关。
