@@ -52,7 +52,7 @@ def _build_handlers(monkeypatch):
 
     app.event = event_deco
     with patch("slack_bolt.async_app.AsyncApp", return_value=app):
-        slack.create_app("my-bot", "owner", {"bot_token": "b", "app_token": "a"})
+        slack.create_app("my-bot", {"bot_token": "b", "app_token": "a"})
     return handlers, routed
 
 
@@ -121,7 +121,6 @@ async def test_assistant_routes_file_attachment(monkeypatch):
             say=AsyncMock(),
             client=MagicMock(),
             agent_name="my-bot",
-            owner_id="owner",
             bot_token="b",
         )
     files = _file_attachments(routed["msg"].attachments)

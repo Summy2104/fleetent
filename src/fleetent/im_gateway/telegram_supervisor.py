@@ -12,27 +12,25 @@ import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from fleetent import agent_config, user_store
+from fleetent import agent_config
 from fleetent.agent_config import TelegramConnector
 from fleetent.im_gateway import telegram
 from fleetent.structured_logging import get_logger
 
 _logger = get_logger("im_gateway.telegram")
 
-# Runner signature: (agent_name, owner_id, config) -> runs until cancelled.
-Runner = Callable[[str, str, dict[str, Any]], Awaitable[None]]
+# Runner signature: (agent_name, config) -> runs until cancelled.
+Runner = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 
 class TelegramSupervisor:
     def __init__(
         self,
         runner: Runner | None = None,
-        owner_id_provider: Callable[[], str] | None = None,
     ) -> None:
         # When no runner is injected, telegram.run is resolved at call time so it can be
         # monkeypatched (the module-level supervisor is built at import).
         self._runner: Runner | None = runner
-        self._owner_id_provider = owner_id_provider or user_store.admin_owner_id
         self._tasks: dict[str, asyncio.Task[Any]] = {}
         self._status: dict[str, str] = {}
         self._configs: dict[str, dict[str, Any]] = {}
@@ -63,7 +61,7 @@ class TelegramSupervisor:
         self._status[agent_name] = "connected"
         runner = self._runner or telegram.run
         try:
-            await runner(agent_name, self._owner_id_provider(), config)
+            await runner(agent_name, config)
         except asyncio.CancelledError:
             self._status[agent_name] = "stopped"
             raise

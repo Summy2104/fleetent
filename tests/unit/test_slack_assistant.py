@@ -48,7 +48,7 @@ def test_create_app_registers_assistant_and_keeps_fallback():
     fake_app.event.return_value = lambda fn: fn  # @app.event(...) decorator passthrough
 
     with patch("slack_bolt.async_app.AsyncApp", return_value=fake_app):
-        slack_mod.create_app("agent1", "ownerA", {"bot_token": "xoxb-test"})
+        slack_mod.create_app("agent1", {"bot_token": "xoxb-test"})
 
     # Assistant container registered for the assistant-pane / DM path.
     assert fake_app.assistant.called
@@ -101,7 +101,6 @@ async def test_assistant_message_routes_with_bound_status(monkeypatch):
         say=say,
         client=client,
         agent_name="agent1",
-        owner_id="ownerA",
         bot_token="xoxb-test",
     )
 
@@ -126,7 +125,6 @@ async def test_assistant_progress_aggregates_batch(monkeypatch):
         say=say,
         client=MagicMock(),
         agent_name="a",
-        owner_id="o",
         bot_token="b",
     )
     await routed["msg"].progress_func(
@@ -154,7 +152,6 @@ async def test_assistant_reply_clears_status_and_says(monkeypatch):
         say=say,
         client=MagicMock(),
         agent_name="a",
-        owner_id="o",
         bot_token="b",
     )
     await routed["msg"].reply_func("final answer")
@@ -179,7 +176,6 @@ async def test_assistant_degrade_setstatus_fails_still_says(monkeypatch):
         say=say,
         client=MagicMock(),
         agent_name="a",
-        owner_id="o",
         bot_token="b",
     )
     # progress must swallow the failure; reply must still deliver.
@@ -204,7 +200,6 @@ async def test_assistant_progress_passes_loading_messages(monkeypatch):
         say=say,
         client=MagicMock(),
         agent_name="a",
-        owner_id="o",
         bot_token="b",
     )
     set_status.reset_mock()  # drop the initial "thinking" call
@@ -236,7 +231,6 @@ async def test_assistant_initial_status_passes_loading_messages(monkeypatch):
         say=AsyncMock(),
         client=MagicMock(),
         agent_name="a",
-        owner_id="o",
         bot_token="b",
     )
 
@@ -260,7 +254,6 @@ async def test_assistant_message_carries_outbound_connectors(monkeypatch):
         say=AsyncMock(),
         client=client,
         agent_name="agent1",
-        owner_id="ownerA",
         bot_token="xoxb-test",
     )
 

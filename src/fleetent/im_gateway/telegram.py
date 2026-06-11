@@ -39,13 +39,13 @@ def _derive_session_id(chat_type: str, user_id: int, reply_to_id: int | None) ->
     return f"user:{user_id}"
 
 
-def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object:
+def create_app(agent_name: str, config: dict[str, Any]) -> object:
     """Create a python-telegram-bot Application bound to one agent's Telegram connection.
 
     The receiving connection identifies the agent (per-agent-telegram-connector): the
-    handler stamps ``agent_name`` so routing skips channel→agent lookup. ``owner_id`` still
-    scopes user mapping / allowlist. ``config.channels``, when non-empty, filters which
-    chats the agent responds in.
+    handler stamps ``agent_name`` so routing skips channel→agent lookup. The connector
+    carries no owner_id and reads no platform table; chat access is enforced by the
+    access gate.
     """
     try:
         from telegram.ext import Application
@@ -102,7 +102,6 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
 
         msg = NormalizedMessage(
             platform="telegram",
-            owner_id=owner_id,
             agent_name=agent_name,
             session_id=session_id,
             session_context=SessionContext(
@@ -141,7 +140,7 @@ async def _run_polling(app: object) -> None:
     await asyncio.Event().wait()
 
 
-async def run(agent_name: str, owner_id: str, config: dict[str, Any]) -> None:
+async def run(agent_name: str, config: dict[str, Any]) -> None:
     """Run one agent's Telegram connection until cancelled (network seam).
 
     Per-agent connection status is owned by the connector supervisor, which catches
@@ -149,7 +148,7 @@ async def run(agent_name: str, owner_id: str, config: dict[str, Any]) -> None:
     """
     from fleetent.im_gateway import connector_registry
 
-    app = create_app(agent_name, owner_id, config)
+    app = create_app(agent_name, config)
     # Register the live bot so the cron scheduler can deliver fired-task replies to this
     # agent's Telegram at fire time (resolved per fire, cleared on disconnect).
     bot = getattr(app, "bot", None)
