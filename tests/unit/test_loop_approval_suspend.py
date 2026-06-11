@@ -187,7 +187,9 @@ async def test_run_injects_outstanding_approval_note(monkeypatch):
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     monkeypatch.setattr(al, "collect_disabled_trace", lambda *a, **k: None)
     monkeypatch.setattr(
-        al, "resolve_limits", lambda max_turns=None, max_consecutive_failures=None, config=None: (50, 3)
+        al,
+        "resolve_limits",
+        lambda max_turns=None, max_consecutive_failures=None, config=None: (50, 3),
     )
     monkeypatch.setattr(al, "_build_async_client", lambda r, k: _client())
     monkeypatch.setattr(al, "build_context", AsyncMock(return_value=MagicMock(text="", sources=[])))
@@ -199,7 +201,10 @@ async def test_run_injects_outstanding_approval_note(monkeypatch):
         AsyncMock(return_value={"a1": {"tool_name": "send_im_message"}}),
     )
 
-    messages = [{"role": "system", "content": "you are a bot"}, {"role": "user", "content": "天气?"}]
+    messages = [
+        {"role": "system", "content": "you are a bot"},
+        {"role": "user", "content": "天气?"},
+    ]
     await al.run(
         messages=messages,
         principal=Principal(user_id="U_REQ", tenant_id="default"),

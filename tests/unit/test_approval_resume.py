@@ -7,7 +7,7 @@ session_mgr and tool dispatch are mocked (no real files / tools).
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -29,9 +29,7 @@ def _seeded(monkeypatch):
     }
     removed: list[str] = []
 
-    monkeypatch.setattr(
-        ar.session_mgr, "get_pending_approval", AsyncMock(return_value=dict(entry))
-    )
+    monkeypatch.setattr(ar.session_mgr, "get_pending_approval", AsyncMock(return_value=dict(entry)))
 
     async def fake_remove(sid, aid):
         removed.append(aid)

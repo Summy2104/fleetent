@@ -44,9 +44,7 @@ def _resume_env(monkeypatch):
     }
     import contextlib
 
-    monkeypatch.setattr(
-        session_mgr, "get_pending_approval", AsyncMock(return_value=dict(entry))
-    )
+    monkeypatch.setattr(session_mgr, "get_pending_approval", AsyncMock(return_value=dict(entry)))
     monkeypatch.setattr(session_mgr, "load", AsyncMock(return_value=[]))
     monkeypatch.setattr(session_mgr, "save", AsyncMock())
 

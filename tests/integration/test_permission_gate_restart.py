@@ -44,9 +44,7 @@ async def test_resolve_after_restart_finalizes_pending(db):
     # Fresh gate = post-restart: no in-memory _pending / _authorized.
     gate = PermissionGate()
 
-    ok = await gate.resolve(
-        "a1", "approved", approver_user_id="U_REQ", authorized_actors={"U_REQ"}
-    )
+    ok = await gate.resolve("a1", "approved", approver_user_id="U_REQ", authorized_actors={"U_REQ"})
 
     assert ok is True
     row = approval_store.get_approval("a1")

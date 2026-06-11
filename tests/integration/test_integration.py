@@ -147,9 +147,7 @@ async def test_permission_gate_pending_then_resolve_finalizes(isolated_db, monke
 
     def _status() -> str:
         conn = sqlite3.connect(isolated_db / "agent.db")
-        row = conn.execute(
-            "SELECT status FROM approvals WHERE id = ?", ("test-appr-1",)
-        ).fetchone()
+        row = conn.execute("SELECT status FROM approvals WHERE id = ?", ("test-appr-1",)).fetchone()
         conn.close()
         return row[0]
 
