@@ -52,6 +52,10 @@ class SkillEntry:
     # Env vars needed before the skill can run, each {"name", optional?: bool}. Metadata
     # only — surfaced by skill_readiness(); never blocks the catalog.
     required_env_vars: list[dict[str, Any]] = field(default_factory=list)
+    # Standard Agent Skills `compatibility` field (free-text environment requirement).
+    # Recognized and carried so it is a known field rather than ignored; this change
+    # only identifies + carries it (no runtime matching semantics here).
+    compatibility: str | None = None
 
 
 _index: dict[str, SkillEntry] = {}
@@ -319,20 +323,67 @@ def _scan_dir(
                 continue
         description = str(frontmatter.get("description", ""))
         blocked = _audit_skill(path, _body_after_frontmatter(raw), description)
-        index[name] = SkillEntry(
-            description=description,
-            path=path,
-            tags=_as_str_list(frontmatter.get("tags")),
-            platforms=_as_str_list(frontmatter.get("platforms")),
-            version=_as_opt_str(frontmatter.get("version")),
-            enabled_by_default=bool(frontmatter.get("enabled_by_default", True)),
-            enabled=bool(frontmatter.get("enabled", True)),
-            builtin=builtin,
-            audit_blocked=blocked,
-            disable_model_invocation=bool(frontmatter.get("disable_model_invocation", False)),
-            requires_tools=_as_str_list(frontmatter.get("requires_tools")),
-            required_env_vars=_as_env_var_list(frontmatter.get("required_env_vars")),
-        )
+        index[name] = _build_entry(frontmatter, description, path, builtin, blocked)
+
+
+def _build_entry(
+    frontmatter: dict[str, Any],
+    description: str,
+    path: str,
+    builtin: bool,
+    blocked: bool,
+) -> SkillEntry:
+    """Construct a SkillEntry, resolving each extension field per the standard protocol.
+
+    For every fleetent extension the resolution order is fixed (D1):
+    `metadata.fleetent-<key>` (standard, authoritative) → legacy top-level `<key>`
+    (backward-compatible fallback) → default. `metadata` values are strings (D2):
+    bools as `"true"`/`"false"`, lists as space-separated, env optional via `name?`.
+    A non-`fleetent-` `metadata` key or an unrecognized `fleetent-*` key is ignored
+    (D4: graceful degradation). The standard `compatibility` field is carried (D3).
+    """
+    meta = frontmatter.get("metadata")
+    if not isinstance(meta, dict):
+        meta = {}
+
+    def _list_field(meta_key: str, legacy_key: str) -> list[str]:
+        if meta_key in meta:
+            return _split_ws(meta[meta_key])
+        return _as_str_list(frontmatter.get(legacy_key))
+
+    def _bool_field(meta_key: str, legacy_key: str, default: bool) -> bool:
+        decoded = _as_bool_meta(meta.get(meta_key))
+        if decoded is not None:
+            return decoded
+        return bool(frontmatter.get(legacy_key, default))
+
+    if "fleetent-required-env" in meta:
+        required_env_vars = _as_env_var_list_from_meta(meta["fleetent-required-env"])
+    else:
+        required_env_vars = _as_env_var_list(frontmatter.get("required_env_vars"))
+
+    if "fleetent-version" in meta:
+        version = _as_opt_str(meta["fleetent-version"])
+    else:
+        version = _as_opt_str(frontmatter.get("version"))
+
+    return SkillEntry(
+        description=description,
+        path=path,
+        tags=_list_field("fleetent-tags", "tags"),
+        platforms=_list_field("fleetent-platforms", "platforms"),
+        version=version,
+        enabled_by_default=_bool_field("fleetent-enabled-by-default", "enabled_by_default", True),
+        enabled=_bool_field("fleetent-enabled", "enabled", True),
+        builtin=builtin,
+        audit_blocked=blocked,
+        disable_model_invocation=_bool_field(
+            "fleetent-disable-model-invocation", "disable_model_invocation", False
+        ),
+        requires_tools=_list_field("fleetent-requires-tools", "requires_tools"),
+        required_env_vars=required_env_vars,
+        compatibility=_as_opt_str(frontmatter.get("compatibility")),
+    )
 
 
 def _validate_skill_bundle(content: str, path: str) -> None:
@@ -765,4 +816,49 @@ def _as_env_var_list(value: Any) -> list[dict[str, Any]]:
         if not name:
             continue
         out.append({"name": str(name), "optional": bool(item.get("optional", False))})
+    return out
+
+
+def _as_bool_meta(value: Any) -> bool | None:
+    """Decode a `metadata` string into a bool, or None when unrecognized.
+
+    `metadata` is string→string per the Agent Skills protocol, so booleans are
+    encoded as `"true"`/`"false"` (case-insensitive). Any other value (including
+    None or non-str) returns None so the caller falls back to the legacy field or
+    the default rather than silently flipping semantics.
+    """
+    if not isinstance(value, str):
+        return None
+    lowered = value.strip().lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    return None
+
+
+def _split_ws(value: Any) -> list[str]:
+    """Split a whitespace-delimited `metadata` string into a list of tokens.
+
+    Empty / whitespace-only / non-str input yields []. This is the string-value
+    encoding for list extensions (e.g. `fleetent-tags: "intro onboarding help"`).
+    """
+    if not isinstance(value, str):
+        return []
+    return value.split()
+
+
+def _as_env_var_list_from_meta(value: Any) -> list[dict[str, Any]]:
+    """Decode `fleetent-required-env` (space-separated names) into env-var dicts.
+
+    Each token is a variable name; a trailing `?` marks it optional (POSIX env
+    names never contain `?`, so the marker is unambiguous). Produces the same
+    shape as `_as_env_var_list` so downstream `skill_readiness` is unchanged.
+    """
+    out: list[dict[str, Any]] = []
+    for token in _split_ws(value):
+        if token.endswith("?"):
+            out.append({"name": token[:-1], "optional": True})
+        else:
+            out.append({"name": token, "optional": False})
     return out
