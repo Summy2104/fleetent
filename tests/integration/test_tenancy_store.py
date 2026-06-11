@@ -18,9 +18,6 @@ def _db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db = tmp_path / "test.db"
     apply_migrations(db)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
-    monkeypatch.setattr(user_store, "DB_PATH", db)
-    from fleetent.platform.tenancy import store as tenancy_store
-    monkeypatch.setattr(tenancy_store, "DB_PATH", db)
 
 
 # ── Task 4.1/4.2: tenancy store CRUD + approver ──────────────────────────────

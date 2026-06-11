@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 
 import fleetent.agent_store as agent_store
 import fleetent.auth as auth
-import fleetent.governance.audit_log as audit
 import fleetent.platform.agent_lifecycle.credential_slots as credential_slots
 import fleetent.platform.agent_lifecycle.secret_store as secret_store
 import fleetent.platform.agent_management_console.agent_admin_api as api
@@ -33,6 +32,7 @@ def _patch_all_stores(mp_or_monkeypatch, db_path: object) -> None:
     fixture. Direct attribute patching bypasses that env-var dependency.
     """
     db_instance = create_database(f"sqlite:///{db_path}")
+    mp_or_monkeypatch.setattr(user_store, "_db", lambda: db_instance)
     mp_or_monkeypatch.setattr(agent_store, "_db", lambda: db_instance)
     mp_or_monkeypatch.setattr(skill_admin_store, "_database", lambda: db_instance)
     mp_or_monkeypatch.setattr(agent_kbs_store, "_database", lambda: db_instance)
@@ -41,8 +41,7 @@ def _patch_all_stores(mp_or_monkeypatch, db_path: object) -> None:
     mp_or_monkeypatch.setattr(connector_config_store, "_database", lambda: db_instance)
     mp_or_monkeypatch.setattr(credential_slots, "_database", lambda: db_instance)
     mp_or_monkeypatch.setattr(secret_store, "_database", lambda: db_instance)
-    mp_or_monkeypatch.setattr(user_store, "DB_PATH", db_path)
-    mp_or_monkeypatch.setattr(audit, "DB_PATH", db_path)
+    mp_or_monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
 
 @pytest.fixture(scope="module")
@@ -57,7 +56,6 @@ def client(tmp_path_factory):
     db_path = tmp_path / "users.db"
     apply_migrations(db_path)
     _patch_all_stores(mp, db_path)
-    user_store._init_db()
     app = FastAPI()
     app.include_router(api.router)
     yield TestClient(app, raise_server_exceptions=True)
@@ -70,7 +68,6 @@ def fresh_client(tmp_path, monkeypatch):
     db_path = tmp_path / "users.db"
     apply_migrations(db_path)
     _patch_all_stores(monkeypatch, db_path)
-    user_store._init_db()
     app = FastAPI()
     app.include_router(api.router)
     return TestClient(app, raise_server_exceptions=True)

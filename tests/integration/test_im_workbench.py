@@ -1,18 +1,14 @@
 import pytest
 
 import fleetent.governance.audit_log as audit
-import fleetent.user_store as user_store
 from fleetent.platform.im_gateway_management import identity as im_user_store
 from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture
 def db(tmp_path, monkeypatch):
-    for mod in (user_store, im_user_store, audit):
-        monkeypatch.setattr(mod, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
     apply_migrations(tmp_path / "users.db")
-    user_store._init_db()
-    im_user_store._init_db()
     return tmp_path / "users.db"
 
 

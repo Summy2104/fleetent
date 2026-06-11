@@ -1,23 +1,25 @@
 """Five-layer turns/tokens budget control (AR18): task/session/user/agent/global.
 
 AR2's `budget.py` is the per-run turns/tokens budget. This module adds cross-run,
-layered turns/tokens budgets persisted in `fleetent.db` keyed by (scope, key, period),
-reusing AR2's NO_LIMIT sentinel and turns/tokens accumulation semantics. The cost
-dimension was dropped (post-review: cost tracking has no real meaning here), so
-this is purely a usage (turns/tokens) governance layer. Standard-library sqlite3
-only; injectable clock and DB_PATH for tests.
+layered turns/tokens budgets persisted in the per-agent agent_state.db keyed by
+(scope, key, period), reusing AR2's NO_LIMIT sentinel and turns/tokens accumulation
+semantics. The cost dimension was dropped (post-review: cost tracking has no real
+meaning here), so this is purely a usage (turns/tokens) governance layer.
+
+The budget_usage schema is owned by the unified AGENT_STATE_MIGRATIONS (v21); this
+module never builds its own connection or DDL — the injected SQLiteDatabase handles
+both. Call set_state_db(db) once at agent boot (agent_app._init_agent_db_schema).
 """
 
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 
+from fleetent.db import SQLiteDatabase
 from fleetent.runtime.budget import NO_LIMIT
-from fleetent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export for monkeypatch
 
 
 class BudgetScope(StrEnum):
@@ -131,38 +133,38 @@ class LayeredBudgetConfig:
         return cls(per_scope=per)
 
 
-def _conn() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    return sqlite3.connect(DB_PATH)
+# Per-agent state DB, injected once at boot via agent_app._init_agent_db_schema.
+# The budget_usage table is created by the unified AGENT_STATE_MIGRATIONS (v21),
+# so this module never owns DDL or a raw connection — keeping budget counters
+# physically scoped to the running agent's agent_state.db, not a shared management DB.
+_state_db: SQLiteDatabase | None = None
 
 
-def init_db() -> None:
-    with _conn() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS budget_usage (
-              scope     TEXT NOT NULL,
-              key       TEXT NOT NULL,
-              period    TEXT NOT NULL,
-              turns     INTEGER NOT NULL,
-              tokens    INTEGER NOT NULL,
-              PRIMARY KEY (scope, key, period)
-            )
-            """
+def set_state_db(db: SQLiteDatabase) -> None:
+    """Inject the per-agent state DB.  Called once at agent boot."""
+    global _state_db
+    _state_db = db
+
+
+def _db() -> SQLiteDatabase:
+    if _state_db is None:
+        raise RuntimeError(
+            "runtime/layered_budget: state_db not initialized — call set_state_db(db) at boot"
         )
+    return _state_db
 
 
 class BudgetStore:
-    """Cross-run usage accumulation keyed by (scope, key, period) in fleetent.db.
+    """Cross-run usage accumulation keyed by (scope, key, period) in agent_state.db.
 
     Only the four cross-run scopes persist; task scope is per-run (AR2) and is
     rejected. `period` is derived from each scope's window and an injected `now`,
     so a new period naturally starts a fresh row (emergent reset, no cron).
+    Schema is owned by unified AGENT_STATE_MIGRATIONS v21; no DDL here.
     """
 
     def __init__(self, windows: dict[BudgetScope, BudgetWindow] | None = None) -> None:
         self.windows = windows if windows is not None else dict(_DEFAULT_WINDOW)
-        init_db()
 
     def _period(self, scope: BudgetScope, now: datetime) -> str:
         return period_for(self.windows.get(scope, _DEFAULT_WINDOW[scope]), now)
@@ -181,28 +183,37 @@ class BudgetStore:
         delta = ScopeUsage()
         delta.add(prompt_tokens, completion_tokens)
         period = self._period(scope, now)
-        with _conn() as conn:
-            conn.execute(
-                """
-                INSERT INTO budget_usage (scope, key, period, turns, tokens)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(scope, key, period) DO UPDATE SET
-                  turns = turns + excluded.turns,
-                  tokens = tokens + excluded.tokens
-                """,
-                (scope.value, key, period, delta.turns, delta.tokens),
-            )
+        _db().execute(
+            """
+            INSERT INTO budget_usage (scope, key, period, turns, tokens)
+            VALUES (:scope, :key, :period, :turns, :tokens)
+            ON CONFLICT(scope, key, period) DO UPDATE SET
+              turns = turns + excluded.turns,
+              tokens = tokens + excluded.tokens
+            """,
+            {
+                "scope": scope.value,
+                "key": key,
+                "period": period,
+                "turns": delta.turns,
+                "tokens": delta.tokens,
+            },
+        )
 
     def get(self, scope: BudgetScope, key: str, *, now: datetime) -> ScopeUsage:
         period = self._period(scope, now)
-        with _conn() as conn:
-            row = conn.execute(
-                "SELECT turns, tokens FROM budget_usage WHERE scope = ? AND key = ? AND period = ?",
-                (scope.value, key, period),
-            ).fetchone()
+        row = (
+            _db()
+            .execute(
+                "SELECT turns, tokens FROM budget_usage"
+                " WHERE scope = :scope AND key = :key AND period = :period",
+                {"scope": scope.value, "key": key, "period": period},
+            )
+            .fetchone()
+        )
         if row is None:
             return ScopeUsage()
-        return ScopeUsage(turns=row[0], tokens=row[1])
+        return ScopeUsage(turns=row["turns"], tokens=row["tokens"])
 
 
 class LayeredBudgetChecker:

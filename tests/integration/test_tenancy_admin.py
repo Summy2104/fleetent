@@ -6,17 +6,14 @@ Verifies admin auth guard and audit log writes.
 
 from __future__ import annotations
 
-import json
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-import fleetent.agent_store as agent_store
-from fleetent import audit_log, user_store
+from fleetent import user_store
 from fleetent.platform.admin_cli.main import main as admin_cli_main
-from fleetent.platform.im_gateway_management import identity as im_user_store
 from tests.integration.test_migrations import apply_migrations
 
 
@@ -25,11 +22,6 @@ def tmp_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db = tmp_path / "test.db"
     apply_migrations(db)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
-    monkeypatch.setattr(user_store, "DB_PATH", db)
-    monkeypatch.setattr(im_user_store, "DB_PATH", db)
-    monkeypatch.setattr(audit_log, "DB_PATH", db)
-    from fleetent.platform.tenancy import store as tenancy_store
-    monkeypatch.setattr(tenancy_store, "DB_PATH", db)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
 
@@ -98,6 +90,7 @@ def test_set_tenant_approver_cli(tmp_path: Path) -> None:
     )
     assert code == 0, stderr
     from fleetent.platform.tenancy.store import get_tenant
+
     tenant = get_tenant("default")
     assert tenant is not None
     assert tenant["approver_user_id"] == approver.id
@@ -112,6 +105,7 @@ def test_set_team_approver_cli(tmp_path: Path) -> None:
     )
     assert code == 0, stderr
     from fleetent.platform.tenancy.store import get_team
+
     team = get_team("team3")
     assert team is not None
     assert team["approver_user_id"] == approver.id
@@ -133,9 +127,7 @@ def _make_api(monkeypatch: pytest.MonkeyPatch, *, is_admin: bool = True):
         monkeypatch.setattr(admin_api.auth, "validate_session", lambda token, idle: viewer.id)
 
     audits: list[tuple[object, ...]] = []
-    monkeypatch.setattr(
-        admin_api.audit_log, "write_audit", lambda *a, **kw: audits.append(a)
-    )
+    monkeypatch.setattr(admin_api.audit_log, "write_audit", lambda *a, **kw: audits.append(a))
     return admin_api, "Session token", audits
 
 

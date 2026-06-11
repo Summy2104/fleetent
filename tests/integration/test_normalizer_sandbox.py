@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock
 import yaml
 
 import fleetent.agent_config as agent_config
-import fleetent.user_store as user_store
 from fleetent.im_gateway import access, normalizer
 from tests.integration._migration_template import apply_migrations
 
@@ -14,7 +13,6 @@ from tests.integration._migration_template import apply_migrations
 def _setup_db(tmp_path, monkeypatch):
 
     db_path = tmp_path / "users.db"
-    monkeypatch.setattr(user_store, "DB_PATH", db_path)
     # normalizer routing queries agent_store, which runs on the unified db runtime.
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     apply_migrations(db_path)

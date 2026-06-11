@@ -6,10 +6,10 @@ from tests.integration._migration_template import apply_migrations
 
 @pytest.fixture
 def db(tmp_path, monkeypatch):
-    monkeypatch.setattr(user_store, "DB_PATH", tmp_path / "users.db")
-    apply_migrations(tmp_path / "users.db")
-    user_store._init_db()
-    return tmp_path / "users.db"
+    db_path = tmp_path / "users.db"
+    apply_migrations(db_path)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    return db_path
 
 
 def _columns(db_path):

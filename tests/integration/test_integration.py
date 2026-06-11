@@ -13,9 +13,7 @@ import fleetent.governance.approval_allowlist_store as approval_allowlist_store
 import fleetent.governance.approval_store as approval_store
 import fleetent.im_gateway.outbound as outbound_mod
 import fleetent.session.manager as session_mgr
-import fleetent.user_store as user_store
 from fleetent.db import SQLiteDatabase
-from fleetent.platform.im_gateway_management import identity as im_user_store
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
 from fleetent.schema_migrations import migrate
 from tests.integration._migration_template import apply_migrations as _apply_migrations
@@ -52,15 +50,11 @@ def _bind_default_agent(tmp_path: Path, user_id: str, monkeypatch) -> None:
 def isolated_db(tmp_path, monkeypatch):
     """Redirect all data paths to tmp_path.
 
-    Legacy stores share ``users.db`` via DB_PATH; approval_store (agent-side)
-    uses a separate SQLite in tmp_path; the managed agent_store uses a separate
-    Alembic-managed database so schemas do not collide.
+    approval_store (agent-side) uses a separate SQLite in tmp_path; the managed
+    agent_store uses a separate Alembic-managed database so schemas do not collide.
     """
-    db = tmp_path / "users.db"
     managed_db = tmp_path / "managed.db"
     approval_db = tmp_path / "agent.db"
-    monkeypatch.setattr(user_store, "DB_PATH", db)
-    monkeypatch.setattr(im_user_store, "DB_PATH", db)
     state_db = SQLiteDatabase(path=approval_db)
     migrate(state_db, AGENT_STATE_MIGRATIONS)
     monkeypatch.setattr(approval_store, "_state_db", state_db)

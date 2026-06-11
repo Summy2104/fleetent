@@ -21,9 +21,6 @@ def client(tmp_path, monkeypatch):
     apply_migrations(db_path)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-    for mod in (user_store, audit):
-        monkeypatch.setattr(mod, "DB_PATH", db_path)
-    user_store._init_db()
     # no references and no agent defs by default; tests override
     monkeypatch.setattr(api, "references_for", lambda name: {"users": [], "channels": []})
     monkeypatch.setattr(api, "get_agent_def", lambda name: None)

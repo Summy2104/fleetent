@@ -25,6 +25,7 @@ Version history:
   v18  idx_memory_maintenance_user_status
   v19  skill_proposals    (routing-cleanup) Skill reflection proposals
   v20  idx_skill_proposals_status_updated
+  v21  budget_usage       (retire-raw-sqlite-connect) per-agent layered budget counters
 """
 
 from __future__ import annotations
@@ -234,5 +235,21 @@ MIGRATIONS: list[tuple[int, str]] = [
         20,
         "CREATE INDEX IF NOT EXISTS idx_skill_proposals_status_updated"
         " ON skill_proposals (status, updated_at)",
+    ),
+    # ── v21: per-agent layered budget counters (retire-raw-sqlite-connect) ───────
+    # Lifted verbatim from runtime/layered_budget.init_db so cross-run budget
+    # usage lands in agent_state.db, not the shared management DB.
+    (
+        21,
+        """
+        CREATE TABLE IF NOT EXISTS budget_usage (
+          scope     TEXT NOT NULL,
+          key       TEXT NOT NULL,
+          period    TEXT NOT NULL,
+          turns     INTEGER NOT NULL,
+          tokens    INTEGER NOT NULL,
+          PRIMARY KEY (scope, key, period)
+        )
+        """,
     ),
 ]

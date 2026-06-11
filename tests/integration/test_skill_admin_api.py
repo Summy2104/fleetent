@@ -23,9 +23,6 @@ def client(tmp_path, monkeypatch):
     apply_migrations(db_path)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-    for mod in (user_store, audit):
-        monkeypatch.setattr(mod, "DB_PATH", db_path)
-    user_store._init_db()
     # reflection no longer falls back to DATABASE_URL (agent-runtime-db-routing-cleanup):
     # inject the proposals DB the real-reflection tests write to via _insert_proposal.
     from fleetent import reflection

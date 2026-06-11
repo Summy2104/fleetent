@@ -109,7 +109,7 @@ def test_chat_streams_and_applies_agent(tmp_path, monkeypatch):
     # Functional /chat: proves the route is wired (not just present) and applies the
     # home agent's config to run_stream. (Regression guard: an earlier annotation bug
     # made the routes build but fail at request time.)
-    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
     apply_migrations(tmp_path / "users.db")
     user = us.create_user("ChatUser")
     home = _write_home(tmp_path, allowed_tools=["shell"], allowed_skills=["weather"])
@@ -141,7 +141,7 @@ def test_chat_streams_and_applies_agent(tmp_path, monkeypatch):
 
 
 def test_chat_requires_auth(tmp_path, monkeypatch):
-    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
     apply_migrations(tmp_path / "users.db")
     app = agent_app.build_app("support")
     with TestClient(app) as client:

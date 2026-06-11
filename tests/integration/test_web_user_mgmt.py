@@ -1,17 +1,14 @@
 import pytest
 
 import fleetent.auth as auth
-import fleetent.platform.user_management.api_key_store as aks
 import fleetent.user_store as user_store
 from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture
 def db(tmp_path, monkeypatch):
-    for mod in (user_store, aks):
-        monkeypatch.setattr(mod, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
     apply_migrations(tmp_path / "users.db")
-    user_store._init_db()
     return tmp_path / "users.db"
 
 

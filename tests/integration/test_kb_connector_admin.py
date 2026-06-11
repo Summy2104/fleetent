@@ -7,7 +7,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import fleetent.auth as auth
-import fleetent.governance.audit_log as audit
 import fleetent.platform.knowledge_base_management.kb_admin_api as api
 import fleetent.platform.knowledge_base_management.kb_connector_store as store
 import fleetent.user_store as user_store
@@ -20,9 +19,6 @@ def client(tmp_path, monkeypatch):
     apply_migrations(db_path)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-    for mod in (user_store, audit):
-        monkeypatch.setattr(mod, "DB_PATH", db_path)
-    user_store._init_db()
     app = FastAPI()
     app.include_router(api.router)
     return TestClient(app, raise_server_exceptions=True)
