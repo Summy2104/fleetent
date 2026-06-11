@@ -329,8 +329,9 @@ reflection SHALL 提供 Skill proposal lifecycle，用于把 skill opportunity �
 - **THEN** 导入成功
 
 #### Scenario: Skill proposals are persisted
-- **WHEN** 数据库 migration 运行到最新版本
-- **THEN** 数据库包含 reflection-owned `skill_proposals` 表
+- **WHEN** per-agent `agent_state.db` 的嵌入式迁移运行到最新版本
+- **THEN** Skill proposal 持久化在统一的 `reflection_proposals` 表（`domain='skill'`），不存在独立的 `skill_proposals` 表
+- **AND** 管理库中不存在 `skill_proposals` 表
 
 ### Requirement: Skill proposal types
 系统 SHALL 支持 create、update 和 deprecate 三类 Skill proposal。
@@ -510,4 +511,3 @@ memory / skill 提案的审批触达 SHALL 复用 **agent-owned** 审批基础�
 #### Scenario: 全 agent 侧、不依赖 platform
 - **WHEN** standalone agent（无 platform）运行自进化审批
 - **THEN** 审批人解析与 DM 触达全在 agent 侧完成，不调用 platform console
-

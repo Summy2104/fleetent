@@ -311,7 +311,9 @@ def test_memory_trends_buckets_counts_and_filters_with_fake_store(monkeypatch):
             risk="high",
         ),
     ]
-    monkeypatch.setattr(trends.store, "database", lambda: FakeDb())
+    fake_db = FakeDb()
+    monkeypatch.setattr(trends.store, "database", lambda: fake_db)
+    monkeypatch.setattr(trends.shared, "_shared_memory_db", fake_db)
     monkeypatch.setattr(trends, "_list_memory_maintenance_proposals", lambda user_id: proposals)
 
     summary = trends.get_memory_quality_trend_summary(query)

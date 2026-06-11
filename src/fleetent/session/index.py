@@ -1,7 +1,7 @@
 """Lightweight per-session metadata index stored in the per-agent state DB.
 
-Records creation/last-active time, message count, owning user and agent name for
-each session.  Physically separate from the session message files (manager);
+Records creation/last-active time, message count, and owning user for each
+session. Physically separate from the session message files (manager);
 written as a best-effort side effect after a successful message save.
 
 Connection source: the per-agent agent_state.db obtained via agent_scope in
@@ -10,11 +10,10 @@ any reads or writes.
 """
 
 import time
-from typing import Union
 
 from fleetent.db import ReadOnlySQLiteDatabase, SQLiteDatabase
 
-_AnyDatabase = Union[SQLiteDatabase, ReadOnlySQLiteDatabase]
+_AnyDatabase = SQLiteDatabase | ReadOnlySQLiteDatabase
 
 _state_db: SQLiteDatabase | None = None
 
@@ -37,25 +36,23 @@ def record_activity(
     session_id: str,
     user_id: str | None,
     message_count: int,
-    agent_name: str | None,
 ) -> None:
     """Upsert metadata for a session.
 
     First write sets `created_at == updated_at == now`. A conflicting write keeps
     the original `created_at`, refreshes `updated_at`, and overwrites
-    `message_count` / `user_id` / `agent_name`.
+    `message_count` / `user_id`.
     """
     now = time.time()
     _db().execute(
         """
         INSERT INTO sessions
-               (session_id, user_id, created_at, updated_at, message_count, agent_name)
-        VALUES (:session_id, :user_id, :created_at, :updated_at, :message_count, :agent_name)
+               (session_id, user_id, created_at, updated_at, message_count)
+        VALUES (:session_id, :user_id, :created_at, :updated_at, :message_count)
         ON CONFLICT(session_id) DO UPDATE SET
             user_id = excluded.user_id,
             updated_at = excluded.updated_at,
-            message_count = excluded.message_count,
-            agent_name = excluded.agent_name
+            message_count = excluded.message_count
         """,
         {
             "session_id": session_id,
@@ -63,12 +60,11 @@ def record_activity(
             "created_at": now,
             "updated_at": now,
             "message_count": message_count,
-            "agent_name": agent_name,
         },
     )
 
 
-_SELECT_COLS = "session_id, user_id, created_at, updated_at, message_count, agent_name"
+_SELECT_COLS = "session_id, user_id, created_at, updated_at, message_count"
 
 
 def _row_to_dict(row: dict[str, object]) -> dict[str, object]:
@@ -78,7 +74,6 @@ def _row_to_dict(row: dict[str, object]) -> dict[str, object]:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "message_count": row["message_count"],
-        "agent_name": row["agent_name"],
     }
 
 

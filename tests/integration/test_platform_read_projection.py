@@ -179,7 +179,6 @@ def _seed_agent_db(data_dir: Path, tenant_id: str, agent_id: str) -> None:
         session_id=f"sess-{tenant_id}-{agent_id}",
         user_id="user1",
         message_count=3,
-        agent_name=agent_id,
     )
 
 

@@ -15,8 +15,8 @@ from pathlib import Path
 import pytest
 
 from fleetent.db import SQLiteDatabase
-from fleetent.schema_migrations import migrate
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as SESSION_MIGRATIONS
+from fleetent.schema_migrations import migrate
 
 # ── Guard: no self-connection in session/index.py ──────────────────────────
 
@@ -71,7 +71,7 @@ def test_session_index_writes_to_injected_db(
     migrate(db, SESSION_MIGRATIONS)
     monkeypatch.setattr(session_index, "_state_db", db)
 
-    session_index.record_activity("s-inject", "u1", 3, "bot")
+    session_index.record_activity("s-inject", "u1", 3)
     row = db.execute(
         "SELECT session_id FROM sessions WHERE session_id = :sid", {"sid": "s-inject"}
     ).fetchone()
@@ -88,7 +88,7 @@ def test_session_index_get_uses_injected_db(
     migrate(db, SESSION_MIGRATIONS)
     monkeypatch.setattr(session_index, "_state_db", db)
 
-    session_index.record_activity("s-get", "u1", 1, "bot")
+    session_index.record_activity("s-get", "u1", 1)
     row = session_index.get("s-get")
     assert row is not None
     assert row["session_id"] == "s-get"

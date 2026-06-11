@@ -5,7 +5,7 @@ TBD - created by archiving change session-metadata-index. Update Purpose after a
 ## Requirements
 ### Requirement: session 元数据存储
 
-系统 SHALL 在 **per-agent `agent_state.db`**（由 `agent_scope(tenant, agent_id)` 解析，见 `tenant-scoped-db-routing`）的 `sessions` 表中为每个 session 维护轻量元数据，至少包含 `session_id`、`user_id`、`created_at`、`updated_at`（最后活跃时间）、`message_count`、`agent_name`。元数据 MUST 存于数据库表，与 session 的消息 JSON 文件物理分离，MUST NOT 增加消息文件本身的体积。`session/index.py` 的 schema SHALL 经 per-agent 库的**嵌入式 forward-only 迁移（Y，migrate-on-open）**建立，**SHALL NOT** 再以 `ensure_schema`-into-global（`fleetent.db.create_database` + `ensure_schema`）建于 `DATABASE_URL` 单库；连接经 `agent_scope` 取得，SHALL NOT 使用裸 `sqlite3.connect`，SHALL NOT 写入独立 `users.db`。
+系统 SHALL 在 **per-agent `agent_state.db`**（由 `agent_scope(tenant, agent_id)` 解析，见 `tenant-scoped-db-routing`）的 `sessions` 表中为每个 session 维护轻量元数据，至少包含 `session_id`、`user_id`、`created_at`、`updated_at`（最后活跃时间）、`message_count`。元数据 SHALL NOT 包含 `agent_name` 列——per-agent 物理库内归属由文件边界圈定，该列恒为常量、无下游消费（platform 跨 agent 语义由管理库 `session_meta.agent_name` 承担，不在本表）。元数据 MUST 存于数据库表，与 session 的消息 JSON 文件物理分离，MUST NOT 增加消息文件本身的体积。`session/index.py` 的 schema SHALL 经 per-agent 库的**嵌入式 forward-only 迁移（Y，migrate-on-open）**建立，**SHALL NOT** 再以 `ensure_schema`-into-global（`fleetent.db.create_database` + `ensure_schema`）建于 `DATABASE_URL` 单库；连接经 `agent_scope` 取得，SHALL NOT 使用裸 `sqlite3.connect`，SHALL NOT 写入独立 `users.db`。
 
 #### Scenario: 首次记录创建元数据
 - **WHEN** 某 session 首次被记录活跃
@@ -22,6 +22,11 @@ TBD - created by archiving change session-metadata-index. Update Purpose after a
 
 - **WHEN** `session/index.py` 读写元数据
 - **THEN** 连接经 `agent_scope(tenant, agent_id)` 取得、schema 经嵌入式 Y 建立，模块内不出现 `sqlite3.connect`、不走 `ensure_schema`-into-global
+
+#### Scenario: 遗留 agent_name 列经 Y 移除
+- **WHEN** 旧版 `agent_state.db`（`sessions` 表含 `agent_name` 列）被 migrate-on-open 升级到最新版本
+- **THEN** `sessions` 表不再含 `agent_name` 列，既有行的其余元数据保留
+- **AND** `session/index.py` 的写入与查询路径不再引用 `agent_name`
 
 ### Requirement: 活跃时元数据 upsert 更新
 
@@ -82,4 +87,3 @@ session 消息持久化 SHALL 在元数据更新之前完成；元数据更新�
 #### Scenario: 索引更新失败不影响消息写入
 - **WHEN** session 消息文件已原子写成功，但随后的元数据更新抛出异常
 - **THEN** 消息文件保持已写入状态不被回滚，异常被记录为日志，`save()` 不向上抛出该异常
-

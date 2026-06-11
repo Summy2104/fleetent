@@ -13,10 +13,8 @@ GOVERNANCE_PUBLIC_APIS = {
         "list_approvals",
     },
     "blocklist": {
-        "DB_PATH",
         "ban_registration",
         "is_registration_blocked",
-        "_init_db",
     },
     "agent_policy": {"check_tool_access"},
 }
