@@ -33,7 +33,7 @@ no agent runtime table may be written through a global `DB_PATH` + raw `sqlite3.
 - **WHEN** `fleetent agent run my-bot` completes `_start_infra()`
 - **THEN** `agents/my-bot/data/fleetent.db` SHALL contain all agent-side tables
   (`traces`, `memory_items`, `reflection_reports`, `session_anti_flap`, `sub_agent_runs`,
-  `memory_maintenance_proposals`, `skill_proposals`, knowledge base tables)
+  `memory_maintenance_proposals`, `skill_proposals`, `budget_usage`, knowledge base tables)
 
 #### Scenario: IM approvals land in agent home
 
