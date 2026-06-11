@@ -25,8 +25,8 @@
 
 | # | change | 实现 | 门禁 | archive | 状态 |
 |---|--------|------|------|---------|------|
-| 1 | sandbox-isolation-foundation | ⏳ | - | - | 进行中 |
-| 2 | sandbox-execution-world | - | - | - | 待 |
+| 1 | sandbox-isolation-foundation | ✅ | ✅ | ✅ | **完成** |
+| 2 | sandbox-execution-world | ⏳ | - | - | 进行中 |
 | 3 | sandbox-file-egress | - | - | - | 待 |
 | 4 | sandbox-workspace-scope-split | - | - | - | 待 |
 | 5 | sandbox-approval-relaxation | - | - | - | 待 |
@@ -36,5 +36,12 @@
 
 ### D0(上述执行模型)— 2026-06-11
 基础分支栈式叠加,不逐 change merge to main。理由见上。
+
+### #1 sandbox-isolation-foundation — 完成 2026-06-11
+- 实现:`_name_key`(manager.py)收口 key 派生——短 key 原样直通(保可读+不破既有断言),sanitised 超 47 字符 budget 才截断+追加完整 key 的 sha256 hex 后缀(12 字符);`_container_name`/`_agent_image_tag`/`workspace_host_path` 三处共用。`runtime_sandbox_capable`(loop.py)= is_sandbox_backed ∧ mode!=OFF ∧ 容器内执行(workspace_mount);run_code 只需 mode!=OFF,文件工具额外需 mount(与 _select_backend 降级同源);复用 action_gate fail-closed,未改其契约。新 `workspace_gc.py`:gc_session_workspace(整目录 rmtree)/gc_agent_workspace(mtime 清理),双护栏 is_blocked_mount+realpath-in-root。session/manager.py 经 public API 接入 session GC。
+- **决策 D1**:GC 由调用方按 scope 显式触发(session/agent workspace 目录名无 scope 前缀无法仅凭名区分),session GC 接 release/TTL 点、agent GC 接 idle sweep。
+- **决策 D2**:manager↔workspace_gc 循环导入 → manager 内懒导入 workspace_gc。
+- 验证:模块边界 EXIT 0;新改 54 unit + 79 integration 全绿;`make test-pr` 2767 passed,唯一失败 `test_intelligence_directory_shim_removed` 与本 change 无关(diff 不碰 intelligence/,预先存在);mypy 90→87 无新增。
+- 已 archive,specs 同步(新 cap sandbox-containment-gating/sandbox-workspace-gc;改 sandbox-lifecycle/sandbox-workspace-mount)。
 
 <!-- 后续每个 change 的决策、遇到的问题、解决方式追加于此 -->
