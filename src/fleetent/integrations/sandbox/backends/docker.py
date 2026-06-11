@@ -17,6 +17,7 @@ from fleetent.integrations.sandbox.backend import (
     BackendCapabilities,
     BaseSandboxBackend,
     ExecResult,
+    SkillMount,
 )
 from fleetent.integrations.sandbox.config import NetworkPolicy, SandboxResources
 from fleetent.integrations.sandbox.secrets import is_sensitive_name
@@ -31,6 +32,12 @@ _KILL_GRACE_SECONDS = 5.0
 # Container-side mount point for the per-scope host workspace directory
 # (sandbox-workspace-mount). The host path is the caller/manager's responsibility.
 _WORKSPACE_MOUNT = "/workspace"
+
+# Container-side mount point + env var for the host skills root (sandbox-skill-mount).
+# Fixed so skill scripts locate their resources via `$SKILLS_DIR` regardless of the
+# host layout; lives under /workspace so it shares the single-root world the model sees.
+_SKILLS_MOUNT = "/workspace/skills"
+_SKILLS_DIR_ENV = "SKILLS_DIR"
 
 
 class DockerBackend(BaseSandboxBackend):
@@ -150,6 +157,47 @@ class DockerBackend(BaseSandboxBackend):
         return ["-v", f"{workspace_host_path}:{_WORKSPACE_MOUNT}"]
 
     @staticmethod
+    def _skill_mount_flags(skill_mount: SkillMount | None) -> list[str]:
+        """Bind-mount the host skills root into the container at /workspace/skills.
+
+        Default read_only adds the `:ro` suffix so the agent runtime cannot rewrite
+        author/operator-maintained skill assets; read_only=False drops it. None keeps
+        the no-mount behaviour (backward compatible / unsupported backend)."""
+        if skill_mount is None:
+            return []
+        spec = f"{skill_mount.host_src}:{_SKILLS_MOUNT}"
+        if skill_mount.read_only:
+            spec += ":ro"
+        return ["-v", spec]
+
+    @staticmethod
+    def _skills_env(skill_mount: SkillMount | None) -> dict[str, str]:
+        """Return the SKILLS_DIR env mapping for a skill mount (empty when None)."""
+        if skill_mount is None:
+            return {}
+        return {_SKILLS_DIR_ENV: _SKILLS_MOUNT}
+
+    @staticmethod
+    def _merge_skills_env(
+        env: dict[str, str] | None, skill_mount: SkillMount | None
+    ) -> dict[str, str]:
+        """Overlay the platform SKILLS_DIR injection on top of `sandbox_env`.
+
+        Platform injection wins (sandbox-skill-mount): a `sandbox_env`-supplied
+        SKILLS_DIR is overridden by `/workspace/skills` and the conflict is logged, so
+        an agent cannot redirect the skills root out from under the mount."""
+        merged = dict(env or {})
+        skills = DockerBackend._skills_env(skill_mount)
+        if skills and _SKILLS_DIR_ENV in merged and merged[_SKILLS_DIR_ENV] != _SKILLS_MOUNT:
+            _logger.warn(
+                "sandbox_skills_dir_env_override",
+                supplied=merged[_SKILLS_DIR_ENV],
+                using=_SKILLS_MOUNT,
+            )
+        merged.update(skills)
+        return merged
+
+    @staticmethod
     def _label_flags(config_hash: str | None) -> list[str]:
         """Stamp the container with its config-hash so reuse can detect stale config."""
         if not config_hash:
@@ -164,6 +212,7 @@ class DockerBackend(BaseSandboxBackend):
         env: dict[str, str] | None = None,
         workspace_host_path: str | None = None,
         config_hash: str | None = None,
+        skill_mount: SkillMount | None = None,
     ) -> str:
         """Start an isolated container, return container ID as workspace_id.
 
@@ -178,10 +227,13 @@ class DockerBackend(BaseSandboxBackend):
         `workspace_host_path` bind-mounts a host directory at /workspace
         (sandbox-workspace-mount); None keeps the container with no host mount.
         `config_hash` (sandbox-hardening) stamps a label so a later reuse can
-        rebuild on config change; None omits the label.
+        rebuild on config change; None omits the label. `skill_mount`
+        (sandbox-skill-mount) bind-mounts the host skills root at /workspace/skills
+        and injects `SKILLS_DIR`; None keeps the prior no-skills behaviour.
         """
         if resources is None:
             resources = SandboxResources()
+        effective_env = self._merge_skills_env(env, skill_mount)
         proc = await asyncio.create_subprocess_exec(
             "docker",
             "run",
@@ -189,8 +241,9 @@ class DockerBackend(BaseSandboxBackend):
             "--name",
             name,
             *self._resource_flags(resources),
-            *self._env_flags(env),
+            *self._env_flags(effective_env),
             *self._workspace_flags(workspace_host_path),
+            *self._skill_mount_flags(skill_mount),
             *self._label_flags(config_hash),
             image or self._image,
             "sleep",

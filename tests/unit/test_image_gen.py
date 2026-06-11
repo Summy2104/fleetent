@@ -1,7 +1,6 @@
 """Tests for image generation: config constant, client, storage, and tool."""
 
 import base64
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -10,17 +9,25 @@ import pytest
 from fleetent.agent_config import AgentFile
 
 
-def test_generated_dir_constant_exists():
-    import fleetent.tools.builtin_tools as tl
+def _ws_ctx(monkeypatch, tmp_path):
+    """Isolate the per-scope workspace to tmp and return a ToolContext for it.
 
-    assert isinstance(tl.GENERATED_DIR, Path)
+    generate_image / _save_image now land in the per-scope workspace `generated/`
+    (sandbox-workspace-root); tests redirect `workspaces_dir` rather than the retired
+    `GENERATED_DIR` constant.
+    """
+    from fleetent import paths
+    from fleetent.tools.builtin_tools import _get_manager
+    from fleetent.tools.registry import ToolContext
+
+    monkeypatch.setattr(paths, "workspaces_dir", lambda: tmp_path / "ws")
+    ctx = ToolContext(session_id="img-sess", agent_name="bot")
+    return ctx, _get_manager()
 
 
-def test_generated_dir_monkeypatchable(monkeypatch, tmp_path):
-    import fleetent.tools.builtin_tools as tl
-
-    monkeypatch.setattr(tl, "GENERATED_DIR", tmp_path / "gen")
-    assert tmp_path / "gen" == tl.GENERATED_DIR
+def _generated_dir(monkeypatch, tmp_path):
+    ctx, mgr = _ws_ctx(monkeypatch, tmp_path)
+    return ctx, mgr.workspace_host_path(mgr.scope, "img-sess", "bot") / "generated"
 
 
 # ── image_gen_client ──────────────────────────────────────────────────────────
@@ -174,22 +181,22 @@ def test_generate_fetches_url_when_no_b64(monkeypatch):
 def test_save_image_writes_to_generated_dir(monkeypatch, tmp_path):
     import fleetent.tools.builtin_tools as tl
 
-    monkeypatch.setattr(tl, "GENERATED_DIR", tmp_path / "gen")
-    ref = tl._save_image(PNG_BYTES)
+    ctx, gen = _generated_dir(monkeypatch, tmp_path)
+    ref = tl._save_image(PNG_BYTES, ctx)
 
-    written = list((tmp_path / "gen").glob("*.png"))
+    written = list(gen.glob("*.png"))
     assert len(written) == 1
     assert written[0].read_bytes() == PNG_BYTES
-    # reference points at the file path
-    assert str(written[0]) in ref or written[0].name in ref
+    # reference is the workspace-relative form generated/<name>.png
+    assert ref == f"generated/{written[0].name}"
 
 
 def test_save_image_uses_uuid_png_name(monkeypatch, tmp_path):
     import fleetent.tools.builtin_tools as tl
 
-    monkeypatch.setattr(tl, "GENERATED_DIR", tmp_path / "gen")
-    tl._save_image(PNG_BYTES)
-    name = next((tmp_path / "gen").glob("*.png")).name
+    ctx, gen = _generated_dir(monkeypatch, tmp_path)
+    tl._save_image(PNG_BYTES, ctx)
+    name = next(gen.glob("*.png")).name
     # uuid4 hex (32) + ".png"
     assert name.endswith(".png")
     stem = name[:-4]
@@ -200,9 +207,9 @@ def test_save_image_uses_uuid_png_name(monkeypatch, tmp_path):
 def test_save_image_reference_has_no_base64(monkeypatch, tmp_path):
     import fleetent.tools.builtin_tools as tl
 
-    monkeypatch.setattr(tl, "GENERATED_DIR", tmp_path / "gen")
+    ctx, _gen = _generated_dir(monkeypatch, tmp_path)
     b64 = base64.b64encode(PNG_BYTES).decode("ascii")
-    ref = tl._save_image(PNG_BYTES)
+    ref = tl._save_image(PNG_BYTES, ctx)
     assert b64 not in ref
 
 
@@ -228,7 +235,7 @@ def test_generate_image_in_schemas():
 def test_generate_image_success_returns_reference(monkeypatch, tmp_path):
     import fleetent.tools.builtin_tools as tl
 
-    monkeypatch.setattr(tl, "GENERATED_DIR", tmp_path / "gen")
+    ctx, gen = _generated_dir(monkeypatch, tmp_path)
 
     async def fake_generate(prompt, *, size=None, config=None):
         assert prompt == "a blue circle"
@@ -236,24 +243,24 @@ def test_generate_image_success_returns_reference(monkeypatch, tmp_path):
 
     monkeypatch.setattr(tl.image_gen_client, "generate", fake_generate)
 
-    result = asyncio_run(tl.generate_image(prompt="a blue circle"))
+    result = asyncio_run(tl.generate_image(prompt="a blue circle", tool_context=ctx))
 
-    written = list((tmp_path / "gen").glob("*.png"))
+    written = list(gen.glob("*.png"))
     assert len(written) == 1
-    assert written[0].name in result or str(written[0]) in result
+    assert f"generated/{written[0].name}" in result
 
 
 def test_generate_image_result_has_no_base64(monkeypatch, tmp_path):
     import fleetent.tools.builtin_tools as tl
 
-    monkeypatch.setattr(tl, "GENERATED_DIR", tmp_path / "gen")
+    ctx, _gen = _generated_dir(monkeypatch, tmp_path)
 
     async def fake_generate(prompt, *, size=None, config=None):
         return PNG_BYTES
 
     monkeypatch.setattr(tl.image_gen_client, "generate", fake_generate)
 
-    result = asyncio_run(tl.generate_image(prompt="x"))
+    result = asyncio_run(tl.generate_image(prompt="x", tool_context=ctx))
     b64 = base64.b64encode(PNG_BYTES).decode("ascii")
     assert b64 not in result
 
@@ -262,18 +269,18 @@ def test_generate_image_failure_normalized_not_raised(monkeypatch, tmp_path):
     import fleetent.tools.builtin_tools as tl
     from fleetent.tools.image_gen_client import ImageGenError
 
-    monkeypatch.setattr(tl, "GENERATED_DIR", tmp_path / "gen")
+    ctx, gen = _generated_dir(monkeypatch, tmp_path)
 
     async def fake_generate(prompt, *, size=None, config=None):
         raise ImageGenError("endpoint not configured")
 
     monkeypatch.setattr(tl.image_gen_client, "generate", fake_generate)
 
-    result = asyncio_run(tl.generate_image(prompt="x"))
+    result = asyncio_run(tl.generate_image(prompt="x", tool_context=ctx))
     assert result.startswith("error:")
     assert "endpoint not configured" in result
     # nothing written on failure
-    assert not list((tmp_path / "gen").glob("*.png")) if (tmp_path / "gen").exists() else True
+    assert not list(gen.glob("*.png")) if gen.exists() else True
 
 
 # ── trace guard ───────────────────────────────────────────────────────────────
@@ -287,13 +294,13 @@ def test_tool_result_message_in_trace_has_no_base64(monkeypatch, tmp_path):
     import fleetent.tools.builtin_tools as tl
     from fleetent import eval_logger
 
-    monkeypatch.setattr(tl, "GENERATED_DIR", tmp_path / "gen")
+    ctx, _gen = _generated_dir(monkeypatch, tmp_path)
 
     async def fake_generate(prompt, *, size=None, config=None):
         return PNG_BYTES
 
     monkeypatch.setattr(tl.image_gen_client, "generate", fake_generate)
-    result = asyncio_run(tl.generate_image(prompt="x"))
+    result = asyncio_run(tl.generate_image(prompt="x", tool_context=ctx))
 
     tool_msg = {"role": "tool", "tool_call_id": "call_1", "content": result}
     serialized = eval_logger._serialize(tool_msg)
@@ -422,8 +429,8 @@ def test_openai_provider_decodes_b64_json(monkeypatch):
     client = _mock_openai_images_client(SimpleNamespace(b64_json=b64, url=None))
     monkeypatch.setattr(openai_provider, "_build_client", lambda *a, **kw: client)
 
-    from fleetent.tools.image_gen.openai import OpenAIImagesProvider
     from fleetent.model.resolver import ModelPolicySnapshot
+    from fleetent.tools.image_gen.openai import OpenAIImagesProvider
 
     provider = OpenAIImagesProvider()
     policy = ModelPolicySnapshot.from_agent(_openai_image_agent())
@@ -447,8 +454,8 @@ def test_openai_provider_uses_endpoint_and_model(monkeypatch):
 
     monkeypatch.setattr(openai_provider, "_build_client", fake_build)
 
-    from fleetent.tools.image_gen.openai import OpenAIImagesProvider
     from fleetent.model.resolver import ModelPolicySnapshot
+    from fleetent.tools.image_gen.openai import OpenAIImagesProvider
 
     provider = OpenAIImagesProvider()
     policy = ModelPolicySnapshot.from_agent(_openai_image_agent())
@@ -468,8 +475,8 @@ def test_openai_provider_endpoint_error_raises(monkeypatch):
     client.images.generate = AsyncMock(side_effect=RuntimeError("boom"))
     monkeypatch.setattr(openai_provider, "_build_client", lambda *a, **kw: client)
 
-    from fleetent.tools.image_gen.openai import OpenAIImagesProvider
     from fleetent.model.resolver import ModelPolicySnapshot
+    from fleetent.tools.image_gen.openai import OpenAIImagesProvider
 
     provider = OpenAIImagesProvider()
     policy = ModelPolicySnapshot.from_agent(_openai_image_agent())
@@ -486,8 +493,8 @@ def test_openai_provider_empty_data_raises(monkeypatch):
     client.images.generate = AsyncMock(return_value=SimpleNamespace(data=[]))
     monkeypatch.setattr(openai_provider, "_build_client", lambda *a, **kw: client)
 
-    from fleetent.tools.image_gen.openai import OpenAIImagesProvider
     from fleetent.model.resolver import ModelPolicySnapshot
+    from fleetent.tools.image_gen.openai import OpenAIImagesProvider
 
     provider = OpenAIImagesProvider()
     policy = ModelPolicySnapshot.from_agent(_openai_image_agent())
@@ -510,8 +517,8 @@ def test_openai_provider_fetches_url_when_no_b64(monkeypatch):
 
     monkeypatch.setattr(openai_provider, "_fetch_url", fake_fetch)
 
-    from fleetent.tools.image_gen.openai import OpenAIImagesProvider
     from fleetent.model.resolver import ModelPolicySnapshot
+    from fleetent.tools.image_gen.openai import OpenAIImagesProvider
 
     provider = OpenAIImagesProvider()
     policy = ModelPolicySnapshot.from_agent(_openai_image_agent())
@@ -563,8 +570,8 @@ def test_chat_provider_extracts_data_uri_jpeg(monkeypatch):
     client = _mock_chat_client(content)
     monkeypatch.setattr(chat_mod, "_build_chat_client", lambda *a, **kw: client)
 
-    from fleetent.tools.image_gen.chat import ChatImageProvider
     from fleetent.model.resolver import ModelPolicySnapshot
+    from fleetent.tools.image_gen.chat import ChatImageProvider
 
     provider = ChatImageProvider()
     policy = ModelPolicySnapshot.from_agent(_chat_agent())
@@ -581,8 +588,8 @@ def test_chat_provider_extracts_data_uri_png(monkeypatch):
     client = _mock_chat_client(content)
     monkeypatch.setattr(chat_mod, "_build_chat_client", lambda *a, **kw: client)
 
-    from fleetent.tools.image_gen.chat import ChatImageProvider
     from fleetent.model.resolver import ModelPolicySnapshot
+    from fleetent.tools.image_gen.chat import ChatImageProvider
 
     provider = ChatImageProvider()
     policy = ModelPolicySnapshot.from_agent(_chat_agent())
@@ -604,8 +611,8 @@ def test_chat_provider_fetches_bare_url_fallback(monkeypatch):
 
     monkeypatch.setattr(chat_mod, "_fetch_url", fake_fetch)
 
-    from fleetent.tools.image_gen.chat import ChatImageProvider
     from fleetent.model.resolver import ModelPolicySnapshot
+    from fleetent.tools.image_gen.chat import ChatImageProvider
 
     provider = ChatImageProvider()
     policy = ModelPolicySnapshot.from_agent(_chat_agent())
@@ -621,8 +628,8 @@ def test_chat_provider_empty_response_raises(monkeypatch):
     client = _mock_chat_client("")
     monkeypatch.setattr(chat_mod, "_build_chat_client", lambda *a, **kw: client)
 
-    from fleetent.tools.image_gen.chat import ChatImageProvider
     from fleetent.model.resolver import ModelPolicySnapshot
+    from fleetent.tools.image_gen.chat import ChatImageProvider
 
     provider = ChatImageProvider()
     policy = ModelPolicySnapshot.from_agent(_chat_agent())
@@ -638,8 +645,8 @@ def test_chat_provider_no_image_in_text_raises(monkeypatch):
     client = _mock_chat_client("Sorry, I cannot generate images.")
     monkeypatch.setattr(chat_mod, "_build_chat_client", lambda *a, **kw: client)
 
-    from fleetent.tools.image_gen.chat import ChatImageProvider
     from fleetent.model.resolver import ModelPolicySnapshot
+    from fleetent.tools.image_gen.chat import ChatImageProvider
 
     provider = ChatImageProvider()
     policy = ModelPolicySnapshot.from_agent(_chat_agent())
@@ -754,4 +761,3 @@ def test_openai_image_chat_missing_model_raises():
                 },
             }
         )
-

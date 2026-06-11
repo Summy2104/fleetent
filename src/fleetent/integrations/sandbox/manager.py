@@ -26,12 +26,15 @@ from fleetent.integrations.sandbox.backend import (
     _SAFE_NAME,
     SANDBOX_NAME_PREFIX,
     BaseSandboxBackend,
+    SkillMount,
 )
 from fleetent.integrations.sandbox.backends.docker import DockerBackend
 from fleetent.integrations.sandbox.config import (
     SandboxResources,
+    SkillMountConfig,
     build_resources_by_scope,
     load_sandbox_lifecycle,
+    load_skill_mount_config,
 )
 from fleetent.integrations.sandbox.hardening import config_hash, is_blocked_mount
 from fleetent.structured_logging import get_logger
@@ -117,10 +120,13 @@ class SandboxManager:
     scope: Scope = field(default=Scope.SESSION)
     idle_hours: float = 2.0
     resources_by_scope: dict[Scope, SandboxResources] | None = None
+    skill_mount: SkillMountConfig | None = None
     clock: Callable[[], float] = time.monotonic
     _registry: dict[str, _Entry] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
+        if self.skill_mount is None:
+            self.skill_mount = load_skill_mount_config()
         if self.resources_by_scope is None:
             lifecycle = load_sandbox_lifecycle()
             by_scope = build_resources_by_scope()
@@ -138,6 +144,32 @@ class SandboxManager:
     def resources_for(self, scope: Scope) -> SandboxResources:
         assert self.resources_by_scope is not None
         return self.resources_by_scope[scope]
+
+    def _resolve_skill_mount(self) -> SkillMount | None:
+        """Resolve the skills bind-mount for a fresh create, or None when off (D2-D4).
+
+        Returns None when the skill mount is disabled or the backend cannot bind-mount
+        (degraded backends fall back to the OFF skills-supply contract elsewhere).
+        Otherwise resolves the effective (user) skills root, materializes package
+        builtin skills into it so their resources are reachable under `$SKILLS_DIR`,
+        and validates the source against `is_blocked_mount` before constructing the
+        `SkillMount` — a source under a sensitive root raises rather than mounting.
+        """
+        cfg = self.skill_mount
+        if cfg is None or not cfg.enabled:
+            return None
+        if not self.backend.capabilities.workspace_mount:
+            return None
+        # Lazy import: skills.registry is a sibling agent-runtime package; importing it
+        # at module load would risk a cycle through paths/agent_config.
+        from fleetent.skills import registry as skill_registry
+
+        source = cfg.source
+        root = skill_registry.effective_skill_root(source)
+        skill_registry.materialize_builtin_skills(source)
+        if is_blocked_mount(root):
+            raise ValueError(f"refusing to mount skills under a blocked host path: {root}")
+        return SkillMount(host_src=str(root), read_only=cfg.read_only)
 
     async def acquire(
         self,
@@ -187,7 +219,13 @@ class SandboxManager:
                 "sandbox_workspace_mount_unsupported", backend=self.backend.name, name=name
             )
         host_path = str(ws_path) if ws_path is not None else None
-        desired_hash = config_hash(image, self.resources_for(scope), env, host_path)
+        # sandbox-skill-mount: resolve before the reuse decision so the mount source/mode
+        # contributes to config_hash — changing it rebuilds a reused container. A blocked
+        # source raises here, before any create.
+        skill_mount = self._resolve_skill_mount()
+        desired_hash = config_hash(
+            image, self.resources_for(scope), env, host_path, skill_mount=skill_mount
+        )
 
         existing = await self.backend.find_workspace(name)
         if existing is not None:
@@ -213,6 +251,7 @@ class SandboxManager:
             env=env,
             workspace_host_path=host_path,
             config_hash=desired_hash,
+            skill_mount=skill_mount,
         )
         self._registry[name] = _Entry(workspace_id, scope, key, now)
         return workspace_id

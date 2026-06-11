@@ -147,15 +147,20 @@ _IMAGE_GENERATED_RE = re.compile(r"image generated: (.+)")
 _FILE_WRITTEN_RE = re.compile(r"written \d+ bytes to (.+)")
 
 
-def _extract_generated_image_paths(messages: list[dict[str, Any]]) -> list[str]:
+def _extract_generated_image_paths(
+    messages: list[dict[str, Any]], workspace_root: Path | None = None
+) -> list[str]:
     """Extract local file paths from tool results that wrote or generated files.
 
     Matches two formats produced by built-in tools:
-    - ``generate_image``: ``"image generated: <path>"``
-    - ``write_file``:     ``"written N bytes to <path>"``
+    - ``generate_image``: ``"image generated: <ref>"``
+    - ``write_file``:     ``"written N bytes to <ref>"``
 
-    Only scans messages with role == "tool". Paths that no longer exist on disk
-    are silently skipped.
+    `generate_image` now returns a workspace-relative ref (`generated/<name>.png`,
+    sandbox-workspace-root); a relative ref is resolved under ``workspace_root`` (the
+    per-session host workspace dir = container `/workspace`) to a real host path for
+    upload. A legacy host-absolute ref is used as-is. Only scans role == "tool";
+    refs that no longer exist on disk are silently skipped.
     """
     paths: list[str] = []
     for msg in messages:
@@ -167,9 +172,14 @@ def _extract_generated_image_paths(messages: list[dict[str, Any]]) -> list[str]:
         for pattern in (_IMAGE_GENERATED_RE, _FILE_WRITTEN_RE):
             m = pattern.search(content)
             if m:
-                p = m.group(1).strip()
-                if p and Path(p).is_file():
-                    paths.append(p)
+                ref = m.group(1).strip()
+                if not ref:
+                    break
+                candidate = Path(ref)
+                if not candidate.is_absolute() and workspace_root is not None:
+                    candidate = workspace_root / ref
+                if candidate.is_file():
+                    paths.append(str(candidate))
                 break
     return paths
 
@@ -256,10 +266,15 @@ async def _build_user_content(msg: NormalizedMessage, session_id: str) -> str:
 
     if images:
         from fleetent.tools import builtin_tools, vision_client
+        from fleetent.tools.registry import ToolContext
 
         instruction = msg.text or "Describe this image."
+        # agent_name=None mirrors the tools' own fallback ("default") since route()
+        # does not pass agent_name to run(); the workspace key thus matches the
+        # per-session workspace read_file / run_code are fenced to.
+        upload_ctx = ToolContext(session_id=session_id, agent_name=None)
         for data, mime in images:
-            ref = builtin_tools._save_upload(data, mime)
+            ref = builtin_tools._save_upload(data, mime, upload_ctx)
             try:
                 analysis = await vision_client.analyze(data, instruction)
             except vision_client.VisionError as exc:
@@ -608,6 +623,12 @@ async def route(msg: NormalizedMessage) -> None:
     # Upload any images generated during this turn. Only scan new messages added by the
     # loop (history[history_len_before:]) so historical tool results are never re-sent.
     if msg.upload_func is not None:
-        file_paths = _extract_generated_image_paths(history[history_len_before:])
+        # Resolve workspace-relative refs (generate_image now returns generated/<name>)
+        # against the per-session workspace dir so the upload sees a real host path.
+        from fleetent.tools.builtin_tools import _get_manager
+
+        manager = _get_manager()
+        workspace_root = manager.workspace_host_path(manager.scope, session_id, "default")
+        file_paths = _extract_generated_image_paths(history[history_len_before:], workspace_root)
         if file_paths:
             await msg.upload_func(file_paths)

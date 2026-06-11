@@ -48,6 +48,22 @@ class ExecResult:
 
 
 @dataclass(frozen=True)
+class SkillMount:
+    """A host skills directory to bind-mount into the container at /workspace/skills.
+
+    `host_src` is the already-resolved host skills root (the manager validates it
+    against `is_blocked_mount` before constructing this). `read_only` defaults to
+    True: skill assets are author/operator-maintained and the agent runtime should
+    not rewrite them; an operator can flip it to allow in-container writes. Frozen so
+    a mount spec threaded through acquire→create_workspace is an immutable contract
+    and can contribute stably to `config_hash`.
+    """
+
+    host_src: str
+    read_only: bool = True
+
+
+@dataclass(frozen=True)
 class BackendCapabilities:
     """What a backend can do beyond the mandatory core surface.
 
@@ -94,8 +110,14 @@ class BaseSandboxBackend(ABC):
         env: dict[str, str] | None = None,
         workspace_host_path: str | None = None,
         config_hash: str | None = None,
+        skill_mount: SkillMount | None = None,
     ) -> str:
-        """Start an isolated workspace under `name`, returning its workspace id."""
+        """Start an isolated workspace under `name`, returning its workspace id.
+
+        `skill_mount` (sandbox-skill-mount) optionally bind-mounts a host skills root
+        at /workspace/skills and injects `SKILLS_DIR`; None keeps the prior behaviour
+        (backward compatible) and is ignored by backends without `workspace_mount`.
+        """
 
     @abstractmethod
     async def find_workspace(self, name: str) -> str | None:

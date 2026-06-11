@@ -25,6 +25,7 @@ from fleetent.integrations.sandbox.backend import (
     BackendCapabilities,
     BaseSandboxBackend,
     ExecResult,
+    SkillMount,
 )
 from fleetent.integrations.sandbox.config import NetworkPolicy, SandboxResources
 from fleetent.integrations.sandbox.secrets import is_sensitive_name
@@ -34,6 +35,9 @@ _logger = get_logger("sandbox.microsandbox")
 
 # Container-side mount point for the host workspace dir (mirrors the Docker backend).
 _WORKSPACE_MOUNT = "/workspace"
+# Skills mount point + env var (mirrors the Docker backend, sandbox-skill-mount).
+_SKILLS_MOUNT = "/workspace/skills"
+_SKILLS_DIR_ENV = "SKILLS_DIR"
 
 
 class MicrosandboxBackend(BaseSandboxBackend):
@@ -89,13 +93,17 @@ class MicrosandboxBackend(BaseSandboxBackend):
         env: dict[str, str] | None = None,
         workspace_host_path: str | None = None,
         config_hash: str | None = None,
+        skill_mount: SkillMount | None = None,
     ) -> str:
         """Start a microVM named `name`, returning the name as the workspace id.
 
         Generic resource fields map to SDK kwargs; Docker-only hardening fields are
         ignored. `workspace_host_path` becomes a `Volume.bind` at /workspace (honouring
         `read_only`). `config_hash` has no SDK equivalent (no label mechanism) and is
-        accepted but unused. The filtered env is stored for per-exec injection.
+        accepted but unused. `skill_mount` (sandbox-skill-mount) adds a second
+        `Volume.bind` at /workspace/skills and injects `SKILLS_DIR` into the per-exec
+        env (platform injection wins over a sandbox_env clash). The filtered env is
+        stored for per-exec injection.
         """
         import microsandbox
 
@@ -107,15 +115,29 @@ class MicrosandboxBackend(BaseSandboxBackend):
             "memory": resources.memory,
             "network": self._map_network(resources.network),
         }
+        volumes: dict[str, Any] = {}
         if workspace_host_path:
-            create_kwargs["volumes"] = {
-                _WORKSPACE_MOUNT: microsandbox.Volume.bind(
-                    workspace_host_path, readonly=resources.read_only
-                )
-            }
+            volumes[_WORKSPACE_MOUNT] = microsandbox.Volume.bind(
+                workspace_host_path, readonly=resources.read_only
+            )
+        if skill_mount is not None:
+            volumes[_SKILLS_MOUNT] = microsandbox.Volume.bind(
+                skill_mount.host_src, readonly=skill_mount.read_only
+            )
+        if volumes:
+            create_kwargs["volumes"] = volumes
         handle = await microsandbox.Sandbox.create(name, **create_kwargs)
         self._handles[name] = handle
-        self._env[name] = self._filter_env(env)
+        stored_env = self._filter_env(env)
+        if skill_mount is not None:
+            if _SKILLS_DIR_ENV in stored_env and stored_env[_SKILLS_DIR_ENV] != _SKILLS_MOUNT:
+                _logger.warn(
+                    "sandbox_skills_dir_env_override",
+                    supplied=stored_env[_SKILLS_DIR_ENV],
+                    using=_SKILLS_MOUNT,
+                )
+            stored_env[_SKILLS_DIR_ENV] = _SKILLS_MOUNT
+        self._env[name] = stored_env
         _logger.info("microsandbox_created", name=name)
         return name
 

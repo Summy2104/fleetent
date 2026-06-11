@@ -84,6 +84,47 @@ def _resolve_skills_dir(skills_dir: str | None) -> str:
     return skills_dir
 
 
+def effective_skill_root(skills_dir: str | None = None) -> str:
+    """Return the single effective skills root mounted at /workspace/skills (D3).
+
+    `/workspace/skills` can bind only one host dir, while the index draws from two
+    physical roots (package `BUILTIN_SKILLS_DIR` + the user root). The effective root
+    is the USER root (operator-writable, customizable, where `write_skill` lands), so
+    builtin skills are materialized into it (`materialize_builtin_skills`) rather than
+    the package dir being mounted. Idempotent: creates the root if missing.
+    """
+    resolved = _resolve_skills_dir(skills_dir)
+    Path(resolved).mkdir(parents=True, exist_ok=True)
+    return resolved
+
+
+def materialize_builtin_skills(skills_dir: str | None = None) -> None:
+    """Copy package builtin skills into the effective (user) root, idempotently (D3).
+
+    So a builtin skill's same-directory resources are reachable under
+    `$SKILLS_DIR/<name>/` once the user root is mounted at /workspace/skills. A user
+    skill of the same name is never overwritten (sustains the user-overrides-builtin
+    semantics): a destination dir that already exists is left untouched. A copy
+    failure is logged (never silently swallowed) and skipped so one bad builtin
+    cannot abort the rest or block the mount.
+    """
+    root = Path(effective_skill_root(skills_dir))
+    if not BUILTIN_SKILLS_DIR.is_dir():
+        return
+    for src in BUILTIN_SKILLS_DIR.iterdir():
+        if not src.is_dir() or not (src / "SKILL.md").is_file():
+            continue
+        dest = root / src.name
+        if dest.exists():
+            # User-authored (or already-materialized) skill of this name wins; do not
+            # clobber operator customization with the package copy.
+            continue
+        try:
+            shutil.copytree(src, dest)
+        except OSError as exc:
+            logger.warning("skill_materialize_failed", name=src.name, error=str(exc))
+
+
 def _build_index(
     skills_dir: str | None = None,
     errors: list[dict[str, str]] | None = None,
@@ -456,8 +497,45 @@ _SKILLS_INSTRUCTION = (
     "When exactly one skill's description clearly matches the task, call the "
     "`read_skill` tool with its <name> to load the full SKILL.md, then follow it. "
     "If several could apply, pick the most specific one. If none clearly apply, "
-    "do not read any."
+    "do not read any. "
+    "Run any skill script via the container execution tool (`run_code`); inside it, "
+    "resolve skill paths under `$SKILLS_DIR` (= /workspace/skills), e.g. run_code calling "
+    "subprocess on `$SKILLS_DIR/<name>/script.py`."
 )
+
+# Fixed guidance appended to a successful read_skill load (skill-read-on-demand): run
+# the skill's scripts via run_code and resolve paths under $SKILLS_DIR. Constant text so
+# the addition does not vary per skill.
+_READ_SKILL_GUIDANCE = (
+    "\n\n---\n"
+    "[执行提示] 该 Skill 的脚本须经容器内执行面 `run_code` 运行；脚本内路径以 "
+    "`$SKILLS_DIR`（= /workspace/skills）为根，例如 `$SKILLS_DIR/<name>/script.py`。"
+)
+
+# Container-side skills root the catalog renders locations against (sandbox-skill-mount):
+# the model sees a single /workspace world, so a skill's location is shown as
+# `$SKILLS_DIR/<rel>` rather than a host-absolute path it cannot reach.
+_SKILLS_DIR_PLACEHOLDER = "$SKILLS_DIR"
+
+
+def _location_under_skills_dir(entry_path: str) -> str:
+    """Render a skill's SKILL.md location as a `$SKILLS_DIR`-rooted path (D3/D7).
+
+    Computes the path relative to the effective skills root when the SKILL.md lives
+    under it; otherwise falls back to `<dir-name>/SKILL.md` (a builtin materialized
+    into the root keeps the same basename). Never emits a host-absolute path.
+    """
+    p = Path(entry_path)
+    root = Path(_last_skills_dir) if _last_skills_dir else None
+    rel: str | None = None
+    if root is not None:
+        try:
+            rel = str(p.relative_to(root))
+        except ValueError:
+            rel = None
+    if rel is None:
+        rel = f"{p.parent.name}/{p.name}"
+    return f"{_SKILLS_DIR_PLACEHOLDER}/{rel}"
 
 
 def available_skills_prompt(
@@ -548,7 +626,7 @@ def _render_catalog(shown: list[tuple[str, "SkillEntry"]], total: int, *, compac
         lines.append(f"    <name>{name}</name>")
         if not compact:
             lines.append(f"    <description>{entry.description}</description>")
-        lines.append(f"    <location>{entry.path}</location>")
+        lines.append(f"    <location>{_location_under_skills_dir(entry.path)}</location>")
         lines.append("  </skill>")
     lines.append("</available_skills>")
     return "\n".join(lines)

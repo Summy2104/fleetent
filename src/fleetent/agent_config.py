@@ -244,19 +244,37 @@ class SandboxMicrosandboxSettings(BaseModel):
     image: str | None = None
 
 
+class SandboxSkillMountSettings(BaseModel):
+    """Per-agent skills-mount options (sandbox-skill-mount).
+
+    `enabled` toggles bind-mounting the host skills root into `/workspace/skills`;
+    `read_only` mounts it ro (default) so the agent cannot rewrite skill assets;
+    `source` optionally overrides the resolved effective skills root (``None`` →
+    the registry's resolved user root).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    read_only: bool = True
+    source: str | None = None
+
+
 class SandboxSettings(BaseModel):
     """Per-agent sandbox backend selection (sandbox-backend-abstraction).
 
     `backend` (``docker`` | ``microsandbox``) overrides the platform default for this
     agent; ``None`` inherits the platform-level `sandbox.backend`. An invalid value is
     not rejected here — the factory warns and falls back to docker — so a typo never
-    blocks the agent from loading.
+    blocks the agent from loading. `skill_mount` (sandbox-skill-mount) configures the
+    host skills bind-mount into `/workspace/skills`.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     backend: str | None = None
     microsandbox: SandboxMicrosandboxSettings = Field(default_factory=SandboxMicrosandboxSettings)
+    skill_mount: SandboxSkillMountSettings = Field(default_factory=SandboxSkillMountSettings)
 
 
 class AgentFile(BaseModel):

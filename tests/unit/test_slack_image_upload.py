@@ -69,6 +69,29 @@ def test_only_scans_provided_messages(tmp_path):
     assert result == [str(img)]
 
 
+def test_relative_ref_resolved_under_workspace(tmp_path):
+    # generate_image now returns a workspace-relative ref; it must resolve against
+    # the per-session workspace root to a real host path for upload (D6).
+    ws = tmp_path / "ws"
+    (ws / "generated").mkdir(parents=True)
+    img = ws / "generated" / "x.png"
+    img.write_bytes(b"PNG")
+
+    from fleetent.im_gateway.normalizer import _extract_generated_image_paths
+
+    msgs = [{"role": "tool", "content": "image generated: generated/x.png"}]
+    result = _extract_generated_image_paths(msgs, workspace_root=ws)
+    assert result == [str(img)]
+
+
+def test_relative_ref_without_root_skipped():
+    # No workspace root → a relative ref cannot be located; silently skipped (no crash).
+    from fleetent.im_gateway.normalizer import _extract_generated_image_paths
+
+    msgs = [{"role": "tool", "content": "image generated: generated/x.png"}]
+    assert _extract_generated_image_paths(msgs) == []
+
+
 def test_multiple_images_extracted(tmp_path):
     imgs = [tmp_path / f"img{i}.png" for i in range(3)]
     for img in imgs:

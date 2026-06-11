@@ -68,6 +68,43 @@ class SandboxLifecycle:
 
 
 @dataclass
+class SkillMountConfig:
+    """Skills-mount policy from the `sandbox.skill_mount` section (sandbox-skill-mount).
+
+    `enabled` toggles mounting the host skills root into `/workspace/skills`;
+    `read_only` mounts it ro (default) so the agent cannot rewrite skill assets;
+    `source` optionally overrides the resolved effective skills root (None → the
+    registry's resolved user root). Defaults mount the user root read-only.
+    """
+
+    enabled: bool = True
+    read_only: bool = True
+    source: str | None = None
+
+
+def load_skill_mount_config(path: Path | None = None) -> SkillMountConfig:
+    """Load `sandbox.skill_mount.{enabled,read_only,source}`, falling back per field.
+
+    A missing file / `sandbox:` section / `skill_mount:` subsection yields all
+    defaults (mount the user root read-only). Present-but-invalid bool fields fall
+    back with a warning rather than being silently accepted.
+    """
+    sandbox = _read_sandbox_section(path or SETTINGS_PATH)
+    if sandbox is None:
+        return SkillMountConfig()
+    section = sandbox.get("skill_mount")
+    if not isinstance(section, dict):
+        return SkillMountConfig()
+    defaults = SkillMountConfig()
+    source = section.get("source")
+    return SkillMountConfig(
+        enabled=_load_bool(section, "enabled", defaults.enabled),
+        read_only=_load_bool(section, "read_only", defaults.read_only),
+        source=source if isinstance(source, str) and source.strip() else None,
+    )
+
+
+@dataclass
 class SandboxBackendConfig:
     """Backend selection from the `sandbox:` section (sandbox-backend-abstraction).
 
