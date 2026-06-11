@@ -13,6 +13,7 @@ from fleetent.skills.registry import (
     BUILTIN_SKILLS_DIR,
     SkillEntry,
     SkillIndex,
+    SkillWriteProvenance,
     available_skills_prompt,
     collect_disabled_trace,
     list_skills,
@@ -21,12 +22,14 @@ from fleetent.skills.registry import (
     match,
     reload,
     scan,
+    write_skill,
 )
 
 __all__ = [
     "BUILTIN_SKILLS_DIR",
     "SkillEntry",
     "SkillIndex",
+    "SkillWriteProvenance",
     "available_skills_prompt",
     "collect_disabled_trace",
     "list_skills",
@@ -35,4 +38,5 @@ __all__ = [
     "match",
     "reload",
     "scan",
+    "write_skill",
 ]

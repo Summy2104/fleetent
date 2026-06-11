@@ -302,19 +302,20 @@ async def test_run_reflection_persists_report_without_raw_transcript(tmp_path, m
     with sqlite3.connect(db_path) as conn:
         row = conn.execute(
             """
-            SELECT scope, time_window_start, time_window_end, findings_json, created_at
+            SELECT domain, scope, time_window_start, time_window_end, findings_json, created_at
             FROM reflection_reports
             WHERE id = ?
             """,
             (report.id,),
         ).fetchone()
     assert row is not None
-    assert row[0] == "user-1"
-    assert datetime.fromisoformat(row[1]) == report.time_window[0]
-    assert datetime.fromisoformat(row[2]) == report.time_window[1]
-    assert datetime.fromisoformat(row[4]) == report.created_at
+    assert row[0] == "memory"
+    assert row[1] == "user-1"
+    assert datetime.fromisoformat(row[2]) == report.time_window[0]
+    assert datetime.fromisoformat(row[3]) == report.time_window[1]
+    assert datetime.fromisoformat(row[5]) == report.created_at
 
-    findings_payload = json.loads(row[3])
+    findings_payload = json.loads(row[4])
     assert findings_payload == [
         {
             "type": "memory_candidate",
@@ -323,7 +324,7 @@ async def test_run_reflection_persists_report_without_raw_transcript(tmp_path, m
             "metadata": {"fact": "User prefers Python", "count": "2"},
         }
     ]
-    persisted = row[3]
+    persisted = row[4]
     assert raw_user_input not in persisted
     assert raw_agent_reply not in persisted
 

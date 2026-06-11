@@ -1,7 +1,7 @@
 """Integration tests for shared memory apply-proposal flow.
 
 Updated for shared-memory-lib (3c): patches inject set_shared_memory_db
-for the shared memory DB; reflection proposals still use the alembic-migrated DB.
+for the shared memory DB; reflection proposals now live in agent_state.db.
 """
 
 from __future__ import annotations
@@ -12,28 +12,29 @@ from typing import Any
 
 import pytest
 
-from fleetent.db import create_database
+from fleetent.db import SQLiteDatabase, create_database
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 
 
 def _patch_db(monkeypatch: Any, tmp_path: Path) -> tuple[Path, list[tuple[str, str, str]]]:
     """Set up the test DB fixtures and inject shared memory state.
 
     Returns:
-        Tuple of (alembic_db_path, upsert_calls) where upsert_calls accumulates
+        Tuple of (agent_state_db_path, upsert_calls) where upsert_calls accumulates
         (id, content_or_any, namespace) from the shared memory vector backend.
     """
     from fleetent import reflection
     from fleetent.memory import shared, store
     from fleetent.memory.shared_memory_migrations import MIGRATIONS
     from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
-    from tests.integration.test_migrations import apply_migrations
 
-    # Alembic-migrated DB for reflection proposals + memory store
+    # Agent-side state DB for reflection proposals + memory store
     db_path = tmp_path / "shared-memory-apply.db"
-    apply_migrations(db_path)
+    migrate(SQLiteDatabase(path=db_path), AGENT_STATE_MIGRATIONS)
     database = create_database(f"sqlite:///{db_path}")
     monkeypatch.setattr(store, "database", lambda: database)
-    monkeypatch.setattr(reflection, "_database", lambda: database)
+    monkeypatch.setattr(reflection, "_state_db", SQLiteDatabase(path=db_path))
     monkeypatch.setattr(reflection.observability, "record_trace_event", lambda event: None)
 
     # Per-tenant shared_memory.db for shared memory items
@@ -94,10 +95,10 @@ async def test_approved_shared_memory_proposal_apply_creates_item(
     assert item.source_ref == proposal.id
     # vector backend received upsert with correct namespace
     assert any(id_ == item.id and ns == "shared:team:eng" for id_, _, ns in upsert_calls)
-    # proposal marked applied in alembic DB
+    # proposal marked applied in agent_state.db
     with sqlite3.connect(db_path) as conn:
         row = conn.execute(
-            "SELECT status FROM memory_maintenance_proposals WHERE id = ?",
+            "SELECT status FROM reflection_proposals WHERE id = ?",
             (proposal.id,),
         ).fetchone()
     assert row == ("applied",)
@@ -132,7 +133,7 @@ async def test_shared_memory_proposal_apply_allows_non_owner_admin_actor(
     assert any(id_ == item.id and ns == "shared:tenant:acme" for id_, _, ns in upsert_calls)
     with sqlite3.connect(db_path) as conn:
         proposal_row = conn.execute(
-            "SELECT status FROM memory_maintenance_proposals WHERE id = ?",
+            "SELECT status FROM reflection_proposals WHERE id = ?",
             (proposal.id,),
         ).fetchone()
         # shared item lives in shared_memory.db (per-tenant), not the alembic DB

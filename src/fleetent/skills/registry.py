@@ -1,6 +1,8 @@
 """Skill registry: scan skills/, match user input, load SKILL.md content."""
 
 import os
+import shutil
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -53,6 +55,7 @@ class SkillEntry:
 
 
 _index: dict[str, SkillEntry] = {}
+_last_skills_dir: str | None = None
 
 # Skills skipped during the last scan() because their SKILL.md could not be parsed.
 # A malformed skill is isolated (skipped, never crashes the scan) but recorded here
@@ -61,6 +64,15 @@ _index: dict[str, SkillEntry] = {}
 _load_errors: list[dict[str, str]] = []
 
 _STOP_WORDS = {"the", "a", "an", "when", "use", "for", "to", "and", "or", "is", "are", "want"}
+
+
+@dataclass(frozen=True)
+class SkillWriteProvenance:
+    """Audit metadata injected into a reflected skill bundle."""
+
+    source: str
+    proposal_id: str
+    applied_at: str
 
 
 def _resolve_skills_dir(skills_dir: str | None) -> str:
@@ -109,6 +121,8 @@ def scan(skills_dir: str | None = None) -> None:
     """
     new_errors: list[dict[str, str]] = []
     new_index = _build_index(skills_dir, new_errors)
+    global _last_skills_dir
+    _last_skills_dir = _resolve_skills_dir(skills_dir)
     _index.clear()
     _index.update(new_index)
     _load_errors.clear()
@@ -134,7 +148,7 @@ def reload(skills_dir: str | None = None) -> dict[str, Any]:
     Returns a summary: ``{"status": "ok", "loaded": N, "failed": M}`` on success,
     or ``{"status": "failed", "skills_dir": ..., "reason": ...}`` on failure.
     """
-    global _index, _load_errors
+    global _index, _load_errors, _last_skills_dir
     resolved = _resolve_skills_dir(skills_dir)
     new_errors: list[dict[str, str]] = []
     try:
@@ -146,9 +160,53 @@ def reload(skills_dir: str | None = None) -> dict[str, Any]:
     # (all access `_index` through the module, none capture it at def time).
     _index = new_index
     _load_errors = new_errors
+    _last_skills_dir = resolved
     if new_errors:
         logger.warning("skill_reload_complete", loaded=len(new_index), failed=len(new_errors))
     return {"status": "ok", "loaded": len(new_index), "failed": len(new_errors)}
+
+
+def write_skill(
+    name: str,
+    files: dict[str, str],
+    provenance: SkillWriteProvenance,
+    *,
+    skills_dir: str | None = None,
+) -> Path:
+    """Atomically write one full skill bundle and hot-reload the registry."""
+    resolved_root = Path(skills_dir or _last_skills_dir or _resolve_skills_dir(None))
+    if "SKILL.md" not in files:
+        raise ValueError("skill bundle must include SKILL.md")
+
+    skill_root = resolved_root / name
+    tmp_parent = resolved_root / ".tmp"
+    tmp_parent.mkdir(parents=True, exist_ok=True)
+    resolved_root.mkdir(parents=True, exist_ok=True)
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix=f"{name}-", dir=tmp_parent))
+    try:
+        for relpath, content in files.items():
+            dest = tmp_dir / relpath
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if relpath == "SKILL.md":
+                content = _inject_skill_provenance(content, provenance)
+                _validate_skill_bundle(content, str(dest))
+            dest.write_text(content, encoding="utf-8")
+
+        backup_dir = skill_root.with_name(f"{skill_root.name}.bak")
+        if backup_dir.exists():
+            shutil.rmtree(backup_dir)
+        if skill_root.exists():
+            skill_root.rename(backup_dir)
+        tmp_dir.rename(skill_root)
+        if backup_dir.exists():
+            shutil.rmtree(backup_dir)
+        reload(str(resolved_root))
+        return skill_root
+    except Exception:
+        if tmp_dir.exists():
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise
 
 
 def load_errors() -> list[dict[str, str]]:
@@ -234,6 +292,26 @@ def _scan_dir(
             requires_tools=_as_str_list(frontmatter.get("requires_tools")),
             required_env_vars=_as_env_var_list(frontmatter.get("required_env_vars")),
         )
+
+
+def _validate_skill_bundle(content: str, path: str) -> None:
+    frontmatter = _parse_frontmatter(content)
+    if frontmatter is None:
+        raise ValueError("SKILL.md must contain valid frontmatter")
+    description = str(frontmatter.get("description", ""))
+    if _audit_skill(path, _body_after_frontmatter(content), description):
+        raise ValueError("SKILL.md failed severe injection audit")
+
+
+def _inject_skill_provenance(content: str, provenance: SkillWriteProvenance) -> str:
+    frontmatter = _parse_frontmatter(content)
+    if frontmatter is None:
+        raise ValueError("SKILL.md must contain valid frontmatter")
+    frontmatter["source"] = provenance.source
+    frontmatter["proposal_id"] = provenance.proposal_id
+    frontmatter["applied_at"] = provenance.applied_at
+    body = _body_after_frontmatter(content).lstrip("\n")
+    return f"---\n{yaml.safe_dump(frontmatter, sort_keys=False).strip()}\n---\n{body}"
 
 
 def _body_after_frontmatter(raw: str) -> str:

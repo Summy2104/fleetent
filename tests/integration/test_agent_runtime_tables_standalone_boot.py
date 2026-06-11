@@ -1,5 +1,5 @@
 """agent-runtime-db-routing-cleanup baseline: with no platform and no management-DB tables,
-agent boot creates the four runtime tables in the agent's own agent_state.db, and the
+agent boot creates the runtime tables in the agent's own agent_state.db, and the
 agent-side stores persist there — never in the (absent) shared management library."""
 
 import sqlite3
@@ -23,8 +23,8 @@ def _restore_runtime_state_dbs():
 _RUNTIME_TABLES = (
     "session_anti_flap",
     "sub_agent_runs",
-    "memory_maintenance_proposals",
-    "skill_proposals",
+    "reflection_reports",
+    "reflection_proposals",
 )
 
 
@@ -89,7 +89,7 @@ def test_standalone_boot_lands_runtime_tables_in_agent_state_db(
     try:
         assert conn.execute("SELECT COUNT(*) FROM session_anti_flap").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM sub_agent_runs").fetchone()[0] == 1
-        assert conn.execute("SELECT COUNT(*) FROM memory_maintenance_proposals").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM reflection_proposals").fetchone()[0] == 1
     finally:
         conn.close()
     # ...and proposal_store reads them back from that same physical file.

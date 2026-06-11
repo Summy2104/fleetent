@@ -14,9 +14,10 @@ Skill 管理层，负责 Skill 的发现、加载、匹配和注入，将领域�
 - 依赖：skills/ 目录（SKILL.md 文件）、config（`FLEETENT_SKILLS_DIR` 环境变量）
 - 被依赖：agent_loop（在每次请求前触发匹配，将 Skill 内容注入 system_prompt）
 
-Reflection 可生成 `SkillProposal` 并持久化到 `skill_proposals`，proposal 类型包括
-`create_skill`、`update_skill`、`deprecate_skill`。这些 proposal 初始状态为 `pending`，不自动改 skill；
-审批后的 apply 必须通过 Skill public boundary 执行。
+Reflection 可生成 `SkillProposal` 并持久化到统一 `reflection_proposals(domain=skill)`，
+proposal 类型包括 `create_skill`、`update_skill`、`deprecate_skill`。这些 proposal 初始状态为
+`pending`，不自动改 skill；审批与触达由 agent-owned reflection / governance 流程处理，
+approved 后的 apply 必须通过 Skill public boundary 执行。
 
 ## 关键流程
 

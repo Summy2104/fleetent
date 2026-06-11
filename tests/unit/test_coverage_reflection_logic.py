@@ -29,9 +29,7 @@ class _ReflectionDb:
         self.executed: list[tuple[str, dict[str, object]]] = []
         self.tables = {
             "reflection_reports",
-            "kb_reflection_reports",
-            "memory_maintenance_proposals",
-            "skill_proposals",
+            "reflection_proposals",
         }
         self.rows_by_table: dict[str, list[dict[str, Any]]] = {}
         self.row_by_id: dict[str, dict[str, Any]] = {}
@@ -43,17 +41,27 @@ class _ReflectionDb:
             name = str(params["name"])
             return _Cursor(row={"name": name} if name in self.tables else None)
         if "FROM reflection_reports" in sql:
-            return _Cursor(self.rows_by_table.get("reflection_reports", []))
-        if "FROM kb_reflection_reports" in sql:
-            return _Cursor(self.rows_by_table.get("kb_reflection_reports", []))
-        if "FROM memory_maintenance_proposals" in sql and "WHERE id = :id" in sql:
+            rows = self.rows_by_table.get("reflection_reports", [])
+            domain = params.get("domain")
+            domain_keys = sorted(key for key in params if key.startswith("domain_"))
+            if domain_keys:
+                allowed = {str(params[key]) for key in domain_keys}
+                rows = [row for row in rows if row.get("domain") in allowed]
+            elif domain is not None:
+                rows = [row for row in rows if row.get("domain") == domain]
+            return _Cursor(rows)
+        if "FROM reflection_proposals" in sql and "WHERE id = :id" in sql:
             return _Cursor(row=self.row_by_id.get(str(params["id"])))
-        if "FROM memory_maintenance_proposals" in sql:
-            return _Cursor(self.rows_by_table.get("memory_maintenance_proposals", []))
-        if "FROM skill_proposals" in sql and "WHERE id = :id" in sql:
-            return _Cursor(row=self.row_by_id.get(str(params["id"])))
-        if "FROM skill_proposals" in sql:
-            return _Cursor(self.rows_by_table.get("skill_proposals", []))
+        if "FROM reflection_proposals" in sql:
+            rows = self.rows_by_table.get("reflection_proposals", [])
+            domain = params.get("domain")
+            if domain is not None:
+                rows = [row for row in rows if row.get("domain") == domain]
+            elif "domain = 'memory'" in sql:
+                rows = [row for row in rows if row.get("domain") == "memory"]
+            elif "domain = 'skill'" in sql:
+                rows = [row for row in rows if row.get("domain") == "skill"]
+            return _Cursor(rows)
         return _Cursor()
 
 
@@ -130,7 +138,7 @@ def _skill_proposal(
         reason="Repeated work",
         evidence_refs=["e1", "e2"],
         risk_level="medium",
-        suggested_draft="draft",
+        suggested_draft="---\nname: triage-alerts\ndescription: triage alerts\n---\nbody",
         suggested_diff=None,
         status=status,  # type: ignore[arg-type]
         created_at=now,
@@ -319,39 +327,40 @@ def test_reflection_trend_summary_aggregates_fake_database(monkeypatch):
     db = _ReflectionDb()
     db.rows_by_table["reflection_reports"] = [
         {
+            "domain": "memory",
             "findings_json": json.dumps(
                 [{"type": "memory_candidate"}, {"type": "skill_opportunity"}, "ignored"]
             ),
             "created_at": "2026-01-01T02:00:00+00:00",
-        }
-    ]
-    db.rows_by_table["kb_reflection_reports"] = [
+        },
         {
+            "domain": "knowledge_base",
             "findings_json": json.dumps([{"type": "missing_knowledge"}]),
             "created_at": "2026-01-02T02:00:00+00:00",
-        }
+        },
     ]
-    db.rows_by_table["memory_maintenance_proposals"] = [
+    db.rows_by_table["reflection_proposals"] = [
         {
-            "action": "delete",
+            "domain": "memory",
+            "kind": "delete",
             "risk": "high",
             "status": "applied",
             "created_at": "2026-01-01T03:00:00+00:00",
         },
         {
-            "action": "merge",
+            "domain": "memory",
+            "kind": "merge",
             "risk": "medium",
             "status": "rejected",
             "created_at": "2026-01-02T03:00:00+00:00",
         },
-    ]
-    db.rows_by_table["skill_proposals"] = [
         {
-            "type": "create_skill",
-            "risk_level": "medium",
+            "domain": "skill",
+            "kind": "create_skill",
+            "risk": "medium",
             "status": "applied",
             "created_at": "2026-01-01T04:00:00+00:00",
-        }
+        },
     ]
     monkeypatch.setattr(reflection, "_database", lambda: db)
 
@@ -425,7 +434,12 @@ def test_reflection_save_and_row_mapping_helpers(monkeypatch):
         )
     )
     assert any("INSERT INTO reflection_reports" in sql for sql, _params in db.executed)
-    assert any("INSERT INTO kb_reflection_reports" in sql for sql, _params in db.executed)
+    assert sum("INSERT INTO reflection_reports" in sql for sql, _params in db.executed) == 2
+    assert any(
+        params.get("domain") == "knowledge_base"
+        for sql, params in db.executed
+        if "INSERT INTO reflection_reports" in sql
+    )
 
     proposal = _maintenance_proposal(metadata_patch={"target": "shared_memory"})
     params = reflection._proposal_params(proposal)  # noqa: SLF001
@@ -448,7 +462,7 @@ def test_reflection_memory_proposal_lifecycle_uses_fake_store(monkeypatch):
     db = _ReflectionDb()
     proposal = _maintenance_proposal()
     db.row_by_id[proposal.id] = reflection._proposal_params(proposal)  # noqa: SLF001
-    db.rows_by_table["memory_maintenance_proposals"] = [reflection._proposal_params(proposal)]  # noqa: SLF001
+    db.rows_by_table["reflection_proposals"] = [reflection._proposal_params(proposal)]  # noqa: SLF001
     events: list[tuple[str, str]] = []
     monkeypatch.setattr(reflection, "_database", lambda: db)
     monkeypatch.setattr(
@@ -629,18 +643,25 @@ async def test_reflection_skill_proposal_lifecycle(monkeypatch):
     assert result.actor_user_id == "actor"
     assert applied == ["sp1"]
 
-    with pytest.raises(RuntimeError, match="apply boundary"):
+    import fleetent.skills as skills
+
+    monkeypatch.setattr(
+        skills,
+        "write_skill",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("apply boundary failed")),
+    )
+    with pytest.raises(RuntimeError, match="apply boundary failed"):
         await default_apply_boundary(approved)
 
 
 def test_reflection_list_skill_proposals_uses_fake_database(monkeypatch):
     db = _ReflectionDb()
     proposal = _skill_proposal()
-    db.rows_by_table["skill_proposals"] = [reflection._skill_proposal_params(proposal)]  # noqa: SLF001
+    db.rows_by_table["reflection_proposals"] = [reflection._skill_proposal_params(proposal)]  # noqa: SLF001
     monkeypatch.setattr(reflection, "_database", lambda: db)
 
     assert [item.id for item in reflection.list_skill_proposals()] == ["sp1"]
     assert [item.id for item in reflection.list_skill_proposals(status=None)] == ["sp1"]
 
-    db.tables.remove("skill_proposals")
+    db.tables.remove("reflection_proposals")
     assert reflection.list_skill_proposals() == []

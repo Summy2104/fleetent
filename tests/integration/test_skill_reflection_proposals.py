@@ -1,14 +1,15 @@
-from fleetent.db import create_database
-from tests.integration.test_migrations import apply_migrations
+from fleetent.db import SQLiteDatabase
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 
 
 def _patch_reflection_db(monkeypatch, tmp_path):
     from fleetent import reflection
 
     db_path = tmp_path / "skill-proposals.db"
-    apply_migrations(db_path)
-    database = create_database(f"sqlite:///{db_path}")
-    monkeypatch.setattr(reflection, "_database", lambda: database)
+    database = SQLiteDatabase(path=db_path)
+    migrate(database, AGENT_STATE_MIGRATIONS)
+    monkeypatch.setattr(reflection, "_state_db", database)
     return database
 
 
@@ -34,15 +35,15 @@ def test_skill_proposal_persistence_redacts_raw_transcript(monkeypatch, tmp_path
 
     row = database.execute(
         """
-        SELECT reason, evidence_refs_json, suggested_draft
-        FROM skill_proposals
+        SELECT reason, evidence_json, payload_json
+        FROM reflection_proposals
         WHERE id = :id
         """,
         {"id": proposal.id},
     ).fetchone()
 
     assert row is not None
-    persisted = row["reason"] + row["evidence_refs_json"] + row["suggested_draft"]
+    persisted = row["reason"] + row["evidence_json"] + row["payload_json"]
     assert "summarize launch notes" in persisted
     assert "trace-a" in persisted
     assert raw_transcript not in persisted

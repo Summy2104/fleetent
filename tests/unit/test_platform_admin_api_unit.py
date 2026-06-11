@@ -56,7 +56,6 @@ def test_skill_admin_route_handlers_cover_lifecycle(monkeypatch: pytest.MonkeyPa
     bindings: dict[tuple[str, str], bool] = {}
     disabled: list[tuple[str, bool]] = []
     reloaded: list[str] = []
-    proposals: list[str] = []
 
     def state(name: str) -> dict[str, Any]:
         return states.setdefault(
@@ -101,16 +100,6 @@ def test_skill_admin_route_handlers_cover_lifecycle(monkeypatch: pytest.MonkeyPa
         skill_admin_api,
         "reflection_proposal_diff",
         lambda proposal_id: {"proposal_id": proposal_id, "diff": "+body"},
-    )
-    monkeypatch.setattr(
-        skill_admin_api,
-        "reflection_apply_proposal",
-        lambda proposal_id, reviewer_user_id: proposals.append(f"apply:{proposal_id}"),
-    )
-    monkeypatch.setattr(
-        skill_admin_api,
-        "reflection_close_proposal",
-        lambda proposal_id, reviewer_user_id, reason: proposals.append(f"close:{proposal_id}"),
     )
     monkeypatch.setattr(
         skill_admin_api,
@@ -231,9 +220,12 @@ def test_skill_admin_route_handlers_cover_lifecycle(monkeypatch: pytest.MonkeyPa
     assert skill_admin_api.discard_skill("s", auth_header)["action"] == "discard"
     assert skill_admin_api.list_proposals(auth_header) == [{"id": "p1"}]
     assert skill_admin_api.proposal_diff("p1", auth_header)["diff"] == "+body"
-    assert skill_admin_api.approve_proposal("p1", auth_header, "true")["status"] == "approved"
-    assert skill_admin_api.reject_proposal("p2", auth_header)["status"] == "rejected"
-    assert proposals == ["apply:p1", "close:p2"]
+    with pytest.raises(HTTPException) as approve_blocked:
+        skill_admin_api.approve_proposal("p1", auth_header, "true")
+    assert approve_blocked.value.status_code == 409
+    with pytest.raises(HTTPException) as reject_blocked:
+        skill_admin_api.reject_proposal("p2", auth_header)
+    assert reject_blocked.value.status_code == 409
     assert reloaded
     assert audits
 

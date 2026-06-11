@@ -265,7 +265,7 @@ def test_resolve_review_channel_shared_memory_proposal_goes_im(monkeypatch) -> N
     assert channel == "im"
 
 
-def test_resolve_review_channel_kb_memory_proposal_goes_platform_console(monkeypatch) -> None:
+def test_resolve_review_channel_kb_memory_proposal_goes_im(monkeypatch) -> None:
     proposal = _memory_proposal(
         id="kb-1",
         action="suggest_shared_memory_or_kb",
@@ -277,14 +277,14 @@ def test_resolve_review_channel_kb_memory_proposal_goes_platform_console(monkeyp
 
     channel = reflection_gate.resolve_review_channel("kb-1")
 
-    assert channel == "platform_console"
+    assert channel == "im"
 
 
-def test_resolve_review_channel_skill_proposal_goes_platform_console(monkeypatch) -> None:
+def test_resolve_review_channel_skill_proposal_goes_im(monkeypatch) -> None:
     proposal = _skill_proposal()
     monkeypatch.setattr(store, "_get_maintenance_proposal", lambda _id: None)
     monkeypatch.setattr(store, "_get_skill_proposal", lambda _id: proposal)
 
     channel = reflection_gate.resolve_review_channel("skill-1")
 
-    assert channel == "platform_console"
+    assert channel == "im"

@@ -110,7 +110,7 @@ flowchart TB
 | `user_store` | 鉴权 + 用户 CRUD + IM 身份，且反向 import platform/governance | **authn→基座 `Identity` 端口**、用户/key 管理→②控制面、IM 身份→①边缘；解开与 governance 的循环、消除 platform 泄漏(#1)。详见 §6 |
 | `knowledge_base` | retrieval(消费) 与 ingest(管道) 同包 | retrieval→核、ingest→④面；用现有护栏升级为硬边界 |
 | `governance` | 执行门(policy/permission/blocklist) 与 管理 API 与 审计数据 混在一起（`quota` v1 descope） | **执行→核**、**管理 API→②**、**审计/策略数据→基座**（详见下表） |
-| `reflection` | 反思「生成」与「管理 API」分属不同面（`platform/reflection_management` 已半成形） | **生成→核**、**review/approve API→②**（详见下表） |
+| `reflection` | 反思「生成」与只读投影分属不同面（`platform/reflection_management` 已半成形） | **生成→核**、**read projection→②**（详见下表） |
 
 **一般规则**：一个模块若横跨两个面，就是该拆的信号。
 
@@ -131,8 +131,8 @@ flowchart TB
 | 现成员 | 职责 | 目标归属 |
 |---|---|---|
 | 反思**生成**（`reflection.py`：读 trace/memory/KB → 产出 skill/memory/KB 改进建议） | 自进化元能力本体（纵向贯穿各能力域） | **核** |
-| `platform/reflection_management` | 建议 review / approve API | **② 控制面** |
-| 反思建议**存储**（skill_proposals / kb_reflection_reports） | 核产出的数据 | **基座 / agent 侧 store**——核**写 agent 侧产物**，②的管理 API **只读**它做 review，**不可让核反向写 platform 表**（遵 §1 解耦：platform 读 agent 产物，不要求 agent 反向写入） |
+| `platform/reflection_management` | 建议 inbox / diff / trend 的只读投影 | **② 控制面** |
+| 反思建议**存储**（`reflection_reports` / `reflection_proposals`） | 核产出的数据 | **基座 / agent 侧 store**——核**写 agent 侧产物**，②的管理 API **只读**它做 review，**不可让核反向写 platform 表**（遵 §1 解耦：platform 读 agent 产物，不要求 agent 反向写入） |
 
 注：建议经审批后的「落地写」遵 §1 自进化规则——**真相源**（memory/shared-memory/skill）经门直接写、**派生视图**（KB）不直接写（走 agent-curated 沉淀源 → connector sync）。
 
@@ -144,11 +144,11 @@ flowchart TB
 |---|---|---|
 | user memory | IM（agent 自主，`reply_func` 式推送） | 该 user 本人 |
 | shared memory | IM（agent 自主） | team/tenant 负责人 |
-| skill | platform console（`list_*` 拉取展示） | 管理员 |
-| KB（经 agent-curated 沉淀源） | platform console | 管理员 |
+| skill | IM / DM（agent-owned 外呼） | team/tenant 负责人（非 requester） |
+| KB | 不进 proposal；只产 report | 无 agent-side approver |
 
-- **判据 = 影响范围/权限层级**：个人贴身·轻量·高频 → agent 自主 IM；组织级·重·影响面大 → platform 集中审。
-- **落地**：门 `resolve()` 后**调对应真相源的写接口**（memory/shared 直接写、skill 写 skill 库、KB 写沉淀源 → sync）。**reflection 只「分析 + 生成 proposal」，memory 不 import reflection——memory↔reflection 循环经审批门居中而破。**
+- **判据 = 影响范围/权限层级**：个人贴身与 agent 自有资产的修改由 agent-owned 审批门外呼；tenant 共享知识库 remediation 不在本流程，留给平台 / ingest 面后续 change。
+- **落地**：门 `resolve()` 后**调对应真相源的写接口**（memory 直接写、skill 写 agent-local skill 库）。KB 在本 change 中只生成 `reflection_reports(domain=knowledge_base)`，不创建 proposal、不触发 sync。**reflection 只「分析 + 生成 report/proposal」，memory 不 import reflection——memory↔reflection 循环经审批门居中而破。**
 
 ### knowledge_base 组件内四分
 

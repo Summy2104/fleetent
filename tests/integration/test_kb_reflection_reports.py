@@ -1,16 +1,17 @@
 import json
 from types import SimpleNamespace
 
-from fleetent.db import create_database
-from tests.integration.test_migrations import apply_migrations
+from fleetent.db import SQLiteDatabase
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 
 
 async def test_run_kb_reflection_report_persists_redacted_payload(tmp_path, monkeypatch):
     from fleetent import reflection
 
     db_path = tmp_path / "reflection-kb.db"
-    apply_migrations(db_path)
-    database = create_database(f"sqlite:///{db_path}")
+    database = SQLiteDatabase(path=db_path)
+    migrate(database, AGENT_STATE_MIGRATIONS)
     raw_transcript = "USER SECRET FULL TRANSCRIPT SHOULD NOT BE STORED"
 
     monkeypatch.setattr(reflection, "_database", lambda: database)
@@ -37,14 +38,15 @@ async def test_run_kb_reflection_report_persists_redacted_payload(tmp_path, monk
 
     row = database.execute(
         """
-        SELECT findings_json, signal_summary_json
-        FROM kb_reflection_reports
+        SELECT domain, findings_json, signal_summary_json
+        FROM reflection_reports
         WHERE id = :id
         """,
         {"id": report.id},
     ).fetchone()
 
     assert row is not None
+    assert row["domain"] == "knowledge_base"
     persisted = row["findings_json"] + row["signal_summary_json"]
     assert "missing_knowledge" in persisted
     assert "trace-1" in persisted

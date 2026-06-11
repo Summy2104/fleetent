@@ -23,6 +23,13 @@ def downgrade_migrations(db_path: Path) -> None:
     command.downgrade(cfg, "base")
 
 
+def _migration_config(db_path: Path) -> Config:
+    cfg = Config()
+    cfg.set_main_option("script_location", _MIGRATIONS_DIR)
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+    return cfg
+
+
 def test_upgrade_creates_tables(tmp_path):
     db = tmp_path / "test.db"
     apply_migrations(db)
@@ -49,10 +56,34 @@ def test_upgrade_creates_tables(tmp_path):
     assert "kb_entities" in tables
     assert "kb_entity_mentions" in tables
     assert "kb_relations" in tables
-    assert "kb_reflection_reports" in tables
     assert "skill_proposals" in tables
     assert "shared_memory_items" in tables
     assert {"traces", "memory_items", "reflection_reports"}.isdisjoint(tables)
+
+
+def test_head_drops_kb_reflection_reports_and_downgrade_restores_it(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+
+    conn = sqlite3.connect(db)
+    try:
+        tables = {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        assert "kb_reflection_reports" not in tables
+    finally:
+        conn.close()
+
+    command.downgrade(_migration_config(db), "074")
+
+    conn = sqlite3.connect(db)
+    try:
+        tables = {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        assert "kb_reflection_reports" in tables
+    finally:
+        conn.close()
 
 
 def test_upgrade_does_not_create_trace_indexes_in_management_db(tmp_path):
@@ -209,18 +240,6 @@ def test_column_structure(tmp_path):
         "failed_count",
         "error_summary",
         "metadata_json",
-    }
-    kb_reflection_cols = {
-        row[1] for row in conn.execute("PRAGMA table_info(kb_reflection_reports)")
-    }
-    assert kb_reflection_cols >= {
-        "id",
-        "scope",
-        "time_window_start",
-        "time_window_end",
-        "findings_json",
-        "signal_summary_json",
-        "created_at",
     }
     skill_proposal_cols = {row[1] for row in conn.execute("PRAGMA table_info(skill_proposals)")}
     assert skill_proposal_cols >= {

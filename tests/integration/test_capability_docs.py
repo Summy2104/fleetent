@@ -88,7 +88,7 @@ def test_capability_docs_describe_kb_reflection_reports_scope():
 
     for content in [reflection_doc, kb_doc, roadmap]:
         assert "run_kb_reflection_report" in content
-        assert "kb_reflection_reports" in content
+        assert "reflection_reports(domain=knowledge_base)" in content
         assert "missing_knowledge" in content
         assert "connector_sync_issue" in content
         assert "只读报告" in content
@@ -103,7 +103,7 @@ def test_capability_docs_describe_skill_reflection_proposals_scope():
 
     for content in [reflection_doc, skill_doc, roadmap]:
         assert "SkillProposal" in content
-        assert "skill_proposals" in content
+        assert "reflection_proposals(domain=skill)" in content
         assert "create_skill" in content
         assert "update_skill" in content
         assert "deprecate_skill" in content

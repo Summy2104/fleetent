@@ -132,19 +132,25 @@ erDiagram
 ```
 
 ### 3.3 per-agent 运行库（嵌入式 Y · `agent_state.db` · agent 侧）
-统一 MIGRATIONS（`runtime/agent_state_migrations.py`，单文件单 `user_version`）建 **11 张表**：`sessions`(会话元数据索引) · `traces`(append-only 运行轨迹) · `reflection_reports`(反思报告) · `memory_items`(per-user 语义记忆，**无 namespace 列**，agent 隔离靠物理库) · `approvals`/`approval_allowlist`(审批请求+门状态，**agent 全权真相源**，actor 为不透明标签) · `session_anti_flap`(压缩防抖，per session) · `sub_agent_runs`(子 agent 生命周期) · `memory_maintenance_proposals`(User Memory 维护建议) · `skill_proposals`(Skill 反思建议) · `budget_usage`(预算滑窗累计，PK `(scope,key,period)`，**per-agent 物理隔离**，不落管理库)。后五张归属本 change 及前序 change：`session_anti_flap`/`sub_agent_runs` 改经 `agent_scope` + `db.py`（去 `user_store.DB_PATH` + 裸 `sqlite3.connect`），`memory_maintenance_proposals`/`skill_proposals` 折进统一 `MIGRATIONS`（不再依赖 legacy `ensure_schema`），`budget_usage` 由 `retire-raw-sqlite-connect` 从管理库迁入。
+统一 MIGRATIONS（`runtime/agent_state_migrations.py`，单文件单 `user_version`）建 **10 张表**：`sessions`(会话元数据索引) · `traces`(append-only 运行轨迹) · `reflection_reports`(统一反思观察日志，domain=`memory|skill|knowledge_base|legacy`) · `reflection_proposals`(统一 memory/skill 提案与审批生命周期，domain=`memory|skill`) · `memory_items`(per-user 语义记忆，**无 namespace 列**，agent 隔离靠物理库) · `approvals`/`approval_allowlist`(审批请求+门状态，**agent 全权真相源**，actor 为不透明标签) · `session_anti_flap`(压缩防抖，per session) · `sub_agent_runs`(子 agent 生命周期) · `budget_usage`(预算滑窗累计，PK `(scope,key,period)`，**per-agent 物理隔离**，不落管理库)。后四张归属本 change 及前序 change：`session_anti_flap`/`sub_agent_runs` 改经 `agent_scope` + `db.py`（去 `user_store.DB_PATH` + 裸 `sqlite3.connect`），reflection 域收口到 `reflection_reports` + `reflection_proposals` 两表，`budget_usage` 由 `retire-raw-sqlite-connect` 从管理库迁入。
 
 ```mermaid
 erDiagram
   sessions ||--o{ approvals : "session_id"
   sessions ||--o{ session_anti_flap : "session_id"
   sessions ||--o{ sub_agent_runs : "parent_session_id"
-  memory_items ||--o{ memory_maintenance_proposals : "维护建议"
+  memory_items ||--o{ reflection_proposals : "memory 维护建议"
   traces {
     string run_id
   }
   reflection_reports {
     string scope
+    string domain
+  }
+  reflection_proposals {
+    string domain
+    string kind
+    string status
   }
   approval_allowlist {
     string fingerprint
@@ -156,12 +162,6 @@ erDiagram
   sub_agent_runs {
     string run_id
     string state
-  }
-  memory_maintenance_proposals {
-    string status
-  }
-  skill_proposals {
-    string status
   }
   budget_usage {
     string scope
@@ -181,7 +181,7 @@ erDiagram
 ### 3.5 KB 关系库（嵌入式 Y · `kb.db` · agent 侧 · per-tenant）
 **已在本库（`core/migrations.py` 的 Y，核心 5 表）**：`knowledge_bases`(PK `(tenant_id,kb_id)`) · `knowledge_documents` · `knowledge_chunks`(+`chunks_fts`) · `knowledge_source_states`。
 
-> ⚠️ **仍在管理库（alembic）、尚未 lift 进本 per-tenant 库**：知识图谱 `kb_entities` / `kb_entity_mentions` / `kb_relations`、抽取 `kb_extraction_runs`、`knowledge_connector_status`（建于 alembic 013/026，未被 drop）。当年 KB lift 只覆盖核心 5 表，这几张留在管理库（跨主体，与 per-tenant 隔离不符）——**第二处 #3 未切干净**，与 `budget_usage` 同类，待后续 change 归位。`kb_reflection_reports` 落点待确认（alembic 027 add 后又 drop）。下方 ER 为 **KB 概念模型/目标归属**，物理现状以本注为准。
+> ⚠️ **仍在管理库（alembic）、尚未 lift 进本 per-tenant 库**：知识图谱 `kb_entities` / `kb_entity_mentions` / `kb_relations`、抽取 `kb_extraction_runs`、`knowledge_connector_status`（建于 alembic 013/026，未被 drop）。当年 KB lift 只覆盖核心 5 表，这几张留在管理库（跨主体，与 per-tenant 隔离不符）——**第二处 #3 未切干净**，与 `budget_usage` 同类，待后续 change 归位。KB reflection report 现已统一落 agent 自己的 `agent_state.db.reflection_reports(domain=knowledge_base)`；KB remediation 仍在平台 / 摄取面后续 change 处理。下方 ER 为 **KB 概念模型/目标归属**，物理现状以本注为准。
 
 ```mermaid
 erDiagram
@@ -195,7 +195,6 @@ erDiagram
   knowledge_bases ||--o{ kb_extraction_runs : "explicit run"
   knowledge_bases ||--o{ knowledge_source_states : "同步态"
   knowledge_bases ||--o{ knowledge_connector_status : "connector 态"
-  knowledge_bases ||--o{ kb_reflection_reports : "KB 自进化"
 ```
 
 > ingest 单写、agent/retrieval 只读；agent 可用的 KB 由 `agent_kbs`（管理库，绑定真相源，经 `kb_id` 跨库引用本库）materialize 进 `agent.yaml`，运行时读配置不查表。

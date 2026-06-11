@@ -387,7 +387,7 @@ def get_connector_status(connector_id: str) -> ConnectorStatus:
 
 `search()` 保持显式底层模式，不改 `search()` 为 auto，也不要求调用方使用 planner。`plan_knowledge_search()` 是独立的规则型 API：普通 query 默认选择 hybrid；entity / relation-like query 先 graph search、不足时 hybrid fill；`rerank=True` 只标记 hybrid step。planner 不接 LLM planner、不做 query rewrite，不改变 vector / keyword / hybrid / graph / rerank 底层契约。
 
-`run_kb_reflection_report()` 由 reflection 拥有，用 knowledge-base public API 与 observability 信号生成 KB 质量只读报告，finding 类型包括 `missing_knowledge`、`stale_document`、`low_retrieval_quality`、`connector_sync_issue` 和 `entity_graph_gap`。报告持久化到 reflection-owned `kb_reflection_reports`，不自动写 KB、不触发 sync，也不创建 KB mutation proposal。
+`run_kb_reflection_report()` 由 reflection 拥有，用 knowledge-base public API 与 observability 信号生成 KB 质量只读报告，finding 类型包括 `missing_knowledge`、`stale_document`、`low_retrieval_quality`、`connector_sync_issue` 和 `entity_graph_gap`。报告持久化到 agent 侧 `reflection_reports(domain=knowledge_base)`，不自动写 KB、不触发 sync，也不创建 KB mutation proposal。
 
 ## 现状
 
