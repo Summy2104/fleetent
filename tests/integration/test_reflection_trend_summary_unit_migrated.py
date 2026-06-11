@@ -17,10 +17,13 @@ def test_skill_proposals_are_only_counted_for_global_scope(monkeypatch, tmp_path
 
     from fleetent import reflection
     from fleetent.db import create_database
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+    from fleetent.schema_migrations import migrate
     from tests.integration.test_migrations import apply_migrations
 
     db_path = tmp_path / "reflection-trend-scope.db"
     apply_migrations(db_path)
+    migrate(create_database(f"sqlite:///{db_path}"), AGENT_STATE_MIGRATIONS)
     database = create_database(f"sqlite:///{db_path}")
     monkeypatch.setattr(reflection, "_database", lambda: database)
 

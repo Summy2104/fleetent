@@ -3,8 +3,9 @@
 Thin platform-side shell over the agent's reflection store. The capability
 itself — the self-evolution engine, the approval gate, and proposal/report
 storage — stays agent-side under ``fleetent.reflection`` / ``fleetent.governance``.
-This module only *reads* that store to expose listing, the skill-proposal review
-surface, and trend queries to the platform console; it holds no capability.
+This module is read-only: it exposes listing, diff viewing, and trend queries to
+the platform console, but approval and application stay in the agent-owned DM
+workflow.
 """
 
 from typing import Any
@@ -25,8 +26,6 @@ __all__ = [
     "list_skill_proposals",
     "reflection_list_proposals",
     "reflection_proposal_diff",
-    "reflection_apply_proposal",
-    "reflection_close_proposal",
 ]
 
 
@@ -64,19 +63,3 @@ def reflection_proposal_diff(proposal_id: str) -> dict[str, Any]:
         "diff": p.suggested_diff or "",
         "draft": p.suggested_draft or "",
     }
-
-
-def reflection_apply_proposal(proposal_id: str, reviewer_user_id: str) -> None:
-    """Approve a Skill proposal (status -> approved)."""
-    from fleetent import reflection
-
-    reflection.approve_skill_proposal(proposal_id, reviewer_user_id=reviewer_user_id)
-
-
-def reflection_close_proposal(
-    proposal_id: str, reviewer_user_id: str, reason: str = "rejected via admin console"
-) -> None:
-    """Reject a Skill proposal without changing the skill."""
-    from fleetent import reflection
-
-    reflection.reject_skill_proposal(proposal_id, reviewer_user_id=reviewer_user_id, reason=reason)

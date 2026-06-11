@@ -26,6 +26,11 @@ Version history:
   v19  skill_proposals    (routing-cleanup) Skill reflection proposals
   v20  idx_skill_proposals_status_updated
   v21  budget_usage       (retire-raw-sqlite-connect) per-agent layered budget counters
+  v22  reflection_reports.domain
+  v23  reflection_reports.signal_summary_json
+  v24  reflection_proposals (unified memory/skill lifecycle)
+  v25  drop memory_maintenance_proposals
+  v26  drop skill_proposals
 """
 
 from __future__ import annotations
@@ -252,4 +257,46 @@ MIGRATIONS: list[tuple[int, str]] = [
         )
         """,
     ),
+    # ── v22-v26: unified self-evolution reports/proposals ───────────────────
+    (
+        22,
+        """
+        ALTER TABLE reflection_reports
+        ADD COLUMN domain TEXT
+        """,
+    ),
+    (
+        23,
+        """
+        ALTER TABLE reflection_reports
+        ADD COLUMN signal_summary_json TEXT
+        """,
+    ),
+    (
+        24,
+        """
+        CREATE TABLE IF NOT EXISTS reflection_proposals (
+          id                TEXT PRIMARY KEY,
+          domain            TEXT NOT NULL,
+          kind              TEXT NOT NULL,
+          subject_user_id   TEXT,
+          target_ref        TEXT,
+          payload_json      TEXT NOT NULL,
+          reason            TEXT NOT NULL,
+          evidence_json     TEXT NOT NULL,
+          risk              TEXT NOT NULL,
+          status            TEXT NOT NULL,
+          reviewer_user_id  TEXT,
+          reviewed_at       TEXT,
+          rejection_reason  TEXT,
+          actor_user_id     TEXT,
+          applied_at        TEXT,
+          expires_at        TEXT,
+          created_at        TEXT NOT NULL,
+          updated_at        TEXT NOT NULL
+        )
+        """,
+    ),
+    (25, "DROP TABLE IF EXISTS memory_maintenance_proposals"),
+    (26, "DROP TABLE IF EXISTS skill_proposals"),
 ]

@@ -200,14 +200,14 @@ flowchart TD
 
 已完成 spec：
 
-- `reflection-knowledge-base-reports`：已完成 `run_kb_reflection_report` 只读报告和 reflection-owned `kb_reflection_reports` 持久化；基于 retrieval traces、source attribution、KB sync 状态和用户问题，发现 `missing_knowledge`、过期文档、低命中主题、`connector_sync_issue` 和 entity graph gap；不自动写 KB、不触发 sync。
-- `skill-reflection-proposals`：基于 trace / tool usage / repeated tasks 发现可沉淀为 skill 的机会，生成 `SkillProposal` 并持久化到 `skill_proposals`；类型包括 `create_skill`、`update_skill`、`deprecate_skill`，初始状态为 `pending`，owner-reviewed 后才可 apply；不自动改 skill。
-- `reflection-trend-summary`：已完成 `get_reflection_trend_summary` 只读趋势聚合；基于 reflection reports、KB reflection reports、User Memory maintenance proposals 和 `SkillProposal` lifecycle，按 UTC day / week bucket 统计 findings 与 proposal outcome；不自动写 Memory / KB / Skill。
+- `reflection-knowledge-base-reports`：已完成 `run_kb_reflection_report` 只读报告，并统一持久化到 agent 侧 `reflection_reports(domain=knowledge_base)`；基于 retrieval traces、source attribution、KB sync 状态和用户问题，发现 `missing_knowledge`、过期文档、低命中主题、`connector_sync_issue` 和 entity graph gap；不自动写 KB、不触发 sync。
+- `skill-reflection-proposals`：基于 trace / tool usage / repeated tasks 发现可沉淀为 skill 的机会，生成 `SkillProposal` 并持久化到 `reflection_proposals(domain=skill)`；类型包括 `create_skill`、`update_skill`、`deprecate_skill`，初始状态为 `pending`，经 agent-owned DM 审批后才可 apply；不自动改 skill。
+- `reflection-trend-summary`：已完成 `get_reflection_trend_summary` 只读趋势聚合；基于 `reflection_reports` 与 `reflection_proposals` 按 UTC day / week bucket 统计 findings 与 proposal outcome；不自动写 Memory / KB / Skill。
 
 剩余缺口：
 
 - review UI / scheduler 尚未实现。
-- `skill_proposals` 当前没有 agent / tenant scope；scope-aware SkillProposal 归属需要后续单独设计。
+- `reflection_proposals(domain=skill)` 当前没有独立 agent / tenant scope 列；scope-aware SkillProposal 归属需要后续单独设计。
 - 自动知识库修复和自动 skill 发布暂缓，不进入当前 Pilot 后增强首批。
 
 依赖顺序：

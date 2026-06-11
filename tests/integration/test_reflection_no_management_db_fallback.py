@@ -1,6 +1,7 @@
 """agent-runtime-db-routing-cleanup: reflection must not fall back to the management DB
 (Settings().database_url) when no per-agent _state_db is injected. Without injection it
-refuses rather than creating/writing skill_proposals in the shared management library."""
+refuses rather than creating/writing reflection-owned tables in the shared management
+library."""
 
 import pytest
 
@@ -19,7 +20,7 @@ def test_reflection_database_refuses_without_state_injection(monkeypatch):
     with pytest.raises(RuntimeError):
         reflection._database()  # noqa: SLF001 — guarding the private fallback branch
 
-    assert not _has_skill_proposals(mgmt_path)
+    assert not _has_reflection_tables(mgmt_path)
 
 
 def test_list_skill_proposals_refuses_without_state_injection(monkeypatch):
@@ -31,19 +32,20 @@ def test_list_skill_proposals_refuses_without_state_injection(monkeypatch):
     with pytest.raises(RuntimeError):
         reflection.list_skill_proposals("pending")
 
-    assert not _has_skill_proposals(mgmt_path)
+    assert not _has_reflection_tables(mgmt_path)
 
 
-def _has_skill_proposals(db_path) -> bool:
+def _has_reflection_tables(db_path) -> bool:
     import sqlite3
 
     if not db_path.exists():
         return False
     conn = sqlite3.connect(db_path)
     try:
-        row = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='skill_proposals'"
-        ).fetchone()
-        return row is not None
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+            "('reflection_reports', 'reflection_proposals')"
+        ).fetchall()
+        return bool(rows)
     finally:
         conn.close()

@@ -1,5 +1,4 @@
-"""agent-runtime-db-routing-cleanup: the four agent-runtime tables join the
-unified per-agent MIGRATIONS so they land in agent_state.db, not the management DB."""
+"""Self-evolution tables are unified in agent_state.db via the embedded Y migrations."""
 
 import sqlite3
 
@@ -28,36 +27,33 @@ _EXPECTED_COLUMNS = {
         "ended_at",
         "error",
     },
-    "memory_maintenance_proposals": {
+    "reflection_reports": {
         "id",
-        "user_id",
-        "action",
-        "target_memory_ids_json",
-        "proposed_content",
-        "metadata_patch_json",
-        "risk",
-        "reason",
-        "evidence_ids_json",
-        "status",
+        "domain",
+        "scope",
+        "time_window_start",
+        "time_window_end",
+        "findings_json",
+        "signal_summary_json",
         "created_at",
-        "updated_at",
-        "expires_at",
     },
-    "skill_proposals": {
+    "reflection_proposals": {
         "id",
-        "type",
-        "target_skill",
+        "domain",
+        "kind",
+        "subject_user_id",
+        "target_ref",
+        "payload_json",
         "reason",
-        "evidence_refs_json",
-        "risk_level",
-        "suggested_draft",
-        "suggested_diff",
+        "evidence_json",
+        "risk",
         "status",
         "reviewer_user_id",
         "reviewed_at",
         "rejection_reason",
         "actor_user_id",
         "applied_at",
+        "expires_at",
         "created_at",
         "updated_at",
     },
@@ -65,8 +61,7 @@ _EXPECTED_COLUMNS = {
 
 _EXPECTED_INDEXES = {
     "idx_sub_agent_runs_parent",
-    "idx_memory_maintenance_user_status",
-    "idx_skill_proposals_status_updated",
+    "idx_reflection_reports_scope_created",
 }
 
 
@@ -76,7 +71,7 @@ def _open_migrated(tmp_path) -> SQLiteDatabase:
     return db
 
 
-def test_unified_migrations_create_four_runtime_tables(tmp_path):
+def test_unified_migrations_create_unified_runtime_tables(tmp_path):
     db = _open_migrated(tmp_path)
     conn = sqlite3.connect(db.path)
     try:
@@ -92,6 +87,8 @@ def test_unified_migrations_create_four_runtime_tables(tmp_path):
             row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")
         }
         assert indexes >= _EXPECTED_INDEXES
+        assert "memory_maintenance_proposals" not in tables
+        assert "skill_proposals" not in tables
     finally:
         conn.close()
 

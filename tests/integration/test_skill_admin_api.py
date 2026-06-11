@@ -14,13 +14,20 @@ import fleetent.governance.audit_log as audit
 import fleetent.platform.skill_management.skill_admin_api as api
 import fleetent.platform.skill_management.skill_admin_store as store
 import fleetent.user_store as user_store
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
 from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
+    import sqlite3
+
     db_path = tmp_path / "users.db"
     apply_migrations(db_path)
+    with sqlite3.connect(db_path) as conn:
+        for version, sql in AGENT_STATE_MIGRATIONS:
+            conn.execute(sql)
+            conn.execute(f"PRAGMA user_version = {version}")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     # reflection no longer falls back to DATABASE_URL (agent-runtime-db-routing-cleanup):
@@ -232,28 +239,20 @@ def test_force_publish_requires_confirm(client):
 # --- proposal inbox (场景 54/55) ---------------------------------------------
 
 
-def test_approve_proposal_applies_via_reflection(client, monkeypatch):
-    applied = []
-    monkeypatch.setattr(
-        api, "reflection_apply_proposal", lambda pid, reviewer: applied.append((pid, reviewer))
-    )
+def test_approve_proposal_is_read_only_projection(client):
     token, uid = _session_for("admin")
     r = client.post("/admin/skills/proposals/p1/approve", headers=_hdr(token, confirm=True))
-    assert r.status_code == 200
-    assert applied == [("p1", uid)]
-    assert any(a["action"] == "skill.proposal_approve" for a in audit.search_audit())
+    assert uid
+    assert r.status_code == 409
+    assert "read-only" in r.json()["detail"]
+    assert not any(a["action"] == "skill.proposal_approve" for a in audit.search_audit())
 
 
-def test_reject_proposal_closes_without_change(client, monkeypatch):
-    closed, applied = [], []
-    monkeypatch.setattr(
-        api, "reflection_close_proposal", lambda pid, reviewer, reason: closed.append(pid)
-    )
-    monkeypatch.setattr(api, "reflection_apply_proposal", lambda pid, reviewer: applied.append(pid))
+def test_reject_proposal_is_read_only_projection(client):
     token, _ = _session_for("admin")
     r = client.post("/admin/skills/proposals/p2/reject", headers=_hdr(token))
-    assert r.status_code == 200
-    assert closed == ["p2"] and applied == []
+    assert r.status_code == 409
+    assert "read-only" in r.json()["detail"]
 
 
 def test_list_proposals_uses_reflection(client, monkeypatch):
@@ -264,24 +263,38 @@ def test_list_proposals_uses_reflection(client, monkeypatch):
 
 
 def _insert_proposal(db_path, pid="pr1", status="pending"):
+    import json
     import sqlite3
 
     now = "2026-06-04T00:00:00+00:00"
+    payload_json = json.dumps(
+        {
+            "name": "demo",
+            "description": "demo skill",
+            "suggested_draft": "---\nname: demo\ndescription: demo\n---\nbody",
+            "suggested_diff": "@@ -1 +1 @@",
+            "files": {"SKILL.md": "---\nname: demo\ndescription: demo\n---\nbody"},
+        }
+    )
     conn = sqlite3.connect(db_path)
     conn.execute(
-        """INSERT INTO skill_proposals
-           (id, type, target_skill, reason, evidence_refs_json, risk_level,
-            suggested_draft, suggested_diff, status, created_at, updated_at)
-           VALUES (?, 'creation', 'demo', 'because logs', '["t1"]', 'low',
-                   '---\nname: demo\n---\nbody', '@@ -1 +1 @@', ?, ?, ?)""",
-        (pid, status, now, now),
+        """INSERT INTO reflection_proposals
+           (id, domain, kind, subject_user_id, target_ref, payload_json, reason,
+            evidence_json, risk, status, reviewer_user_id, reviewed_at,
+            rejection_reason, actor_user_id, applied_at, expires_at, created_at, updated_at)
+           VALUES (?, 'skill', 'create_skill', NULL, 'demo',
+                   ?,
+                   'because logs', '["t1"]', 'low', ?, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)""",
+        (pid, payload_json, status, now, now),
     )
     conn.commit()
     conn.close()
 
 
-def test_list_proposals_real_reflection(client, tmp_path):
-    _insert_proposal(tmp_path / "users.db")
+def test_list_proposals_real_reflection(client):
+    from fleetent import reflection
+
+    _insert_proposal(reflection._state_db.path)
     token, _ = _session_for("admin")
     rows = client.get("/admin/skills/proposals", headers=_hdr(token)).json()
     assert any(p["id"] == "pr1" and p["target_skill"] == "demo" for p in rows)
@@ -289,22 +302,26 @@ def test_list_proposals_real_reflection(client, tmp_path):
     assert rows[0]["has_diff"] is True
 
 
-def test_proposal_diff_real_reflection(client, tmp_path):
-    _insert_proposal(tmp_path / "users.db", pid="pr2")
+def test_proposal_diff_real_reflection(client):
+    from fleetent import reflection
+
+    _insert_proposal(reflection._state_db.path, pid="pr2")
     token, _ = _session_for("admin")
     r = client.get("/admin/skills/proposals/pr2/diff", headers=_hdr(token)).json()
     assert "@@" in r["diff"]
     assert r["target_skill"] == "demo"
 
 
-def test_approve_proposal_real_reflection_updates_status(client, tmp_path):
-    _insert_proposal(tmp_path / "users.db", pid="pr3")
+def test_approve_proposal_real_reflection_is_blocked(client):
+    from fleetent import reflection
+
+    _insert_proposal(reflection._state_db.path, pid="pr3")
     token, _ = _session_for("admin")
     r = client.post("/admin/skills/proposals/pr3/approve", headers=_hdr(token, confirm=True))
-    assert r.status_code == 200
-    # no longer pending
+    assert r.status_code == 409
+    # proposal stays pending because platform only exposes a read projection.
     rows = client.get("/admin/skills/proposals", headers=_hdr(token)).json()
-    assert all(p["id"] != "pr3" for p in rows)
+    assert any(p["id"] == "pr3" for p in rows)
 
 
 def test_skill_content_endpoint(client, monkeypatch):

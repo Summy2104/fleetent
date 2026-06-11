@@ -28,7 +28,7 @@ DecisionInput = Literal[
 
 
 DecisionState = Literal["approve", "reject", "expire", "apply"]
-ReviewRoute = Literal["im", "platform_console"]
+ReviewRoute = Literal["im"]
 
 
 def _default_shared_memory_reviewer(
@@ -57,16 +57,8 @@ def resolve_review_channel(
     actor_user_id: str | None = None,
 ) -> ReviewRoute:
     """Return the review channel for one proposal id."""
-    kind, proposal = _load_proposal_type(proposal_id)
-    if kind == "memory":
-        memory_proposal = cast(MemoryMaintenanceProposal, proposal)
-        if (
-            memory_proposal.action == "suggest_shared_memory_or_kb"
-            and memory_proposal.metadata_patch.get("target") == "knowledge_base"
-        ):
-            return "platform_console"
-        return "im"
-    return "platform_console"
+    _kind, _proposal = _load_proposal_type(proposal_id)
+    return "im"
 
 
 def _decision(decision: DecisionInput) -> DecisionState:
@@ -446,9 +438,7 @@ async def _apply_maintenance_action(
             )
             return
         if target == "knowledge_base":
-            raise RuntimeError(
-                "knowledge base proposal must be handled by KB reflection management"
-            )
+            raise RuntimeError("knowledge base proposals are no longer handled on the agent side")
         raise ValueError("proposal target is not shared_memory")
 
     raise ValueError(f"unsupported maintenance action: {proposal.action}")

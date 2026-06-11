@@ -65,35 +65,34 @@ def test_memory_maintenance_public_api_is_importable():
     assert callable(create_memory_maintenance_proposal)
 
 
-def test_migration_creates_memory_maintenance_proposals_table(tmp_path):
+def test_migration_creates_unified_reflection_proposals_table(tmp_path):
     db_path = tmp_path / "maintenance.db"
 
-    apply_migrations(db_path)
+    migrate(SQLiteDatabase(path=db_path), AGENT_STATE_MIGRATIONS)
 
     with sqlite3.connect(db_path) as conn:
-        columns = {
-            row[1] for row in conn.execute("PRAGMA table_info(memory_maintenance_proposals)")
-        }
-        indexes = {
-            row[1] for row in conn.execute("PRAGMA index_list(memory_maintenance_proposals)")
-        }
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(reflection_proposals)")}
 
     assert columns >= {
         "id",
-        "user_id",
-        "action",
-        "target_memory_ids_json",
-        "proposed_content",
-        "metadata_patch_json",
+        "domain",
+        "kind",
+        "subject_user_id",
+        "target_ref",
+        "payload_json",
         "risk",
         "reason",
-        "evidence_ids_json",
+        "evidence_json",
         "status",
+        "reviewer_user_id",
+        "reviewed_at",
+        "rejection_reason",
+        "actor_user_id",
+        "applied_at",
         "created_at",
         "updated_at",
         "expires_at",
     }
-    assert "idx_memory_maintenance_user_status" in indexes
 
 
 def test_create_proposal_defaults_to_pending_and_persists_json_fields(tmp_path, monkeypatch):

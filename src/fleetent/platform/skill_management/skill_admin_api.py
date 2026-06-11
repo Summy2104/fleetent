@@ -25,12 +25,9 @@ from typing import Any
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from fleetent import agent_store, auth, user_store
-from fleetent import audit_log
+from fleetent import agent_store, audit_log, auth, user_store
 from fleetent.platform.agent_lifecycle import materialize
 from fleetent.platform.reflection_management import (
-    reflection_apply_proposal,
-    reflection_close_proposal,
     reflection_list_proposals,
     reflection_proposal_diff,
 )
@@ -556,15 +553,19 @@ def approve_proposal(
     authorization: str | None = Header(None),
     x_confirm: str | None = Header(None),
 ) -> dict[str, Any]:
-    user = _require_admin(authorization)
+    _require_admin(authorization)
     _require_confirm(x_confirm)
-    reflection_apply_proposal(proposal_id, user.id)
-    audit_log.write_audit(user.id, "skill.proposal_approve", "skill_proposal", proposal_id)
-    return {"proposal_id": proposal_id, "status": "approved"}
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "Skill proposal approval is agent-owned and delivered via DM; "
+            "the platform console is read-only for reflection proposals."
+        ),
+    )
 
 
 class RejectBody(BaseModel):
-    reason: str = "rejected via admin console"
+    reason: str = "rejected via agent-owned reflection workflow"
 
 
 @router.post("/proposals/{proposal_id}/reject")
@@ -573,8 +574,12 @@ def reject_proposal(
     authorization: str | None = Header(None),
     body: RejectBody | None = None,
 ) -> dict[str, Any]:
-    user = _require_admin(authorization)
-    reason = body.reason if body else "rejected via admin console"
-    reflection_close_proposal(proposal_id, user.id, reason)
-    audit_log.write_audit(user.id, "skill.proposal_reject", "skill_proposal", proposal_id)
-    return {"proposal_id": proposal_id, "status": "rejected"}
+    _require_admin(authorization)
+    _ = body.reason if body else "rejected via agent-owned reflection workflow"
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "Skill proposal rejection is agent-owned and delivered via DM; "
+            "the platform console is read-only for reflection proposals."
+        ),
+    )

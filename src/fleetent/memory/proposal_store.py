@@ -56,21 +56,23 @@ def _parse_optional_datetime(value: object) -> datetime | None:
 
 
 def _to_dict(row: dict[str, Any]) -> MemoryMaintenanceProposal:
+    payload = json.loads(str(row["payload_json"]))
     return MemoryMaintenanceProposal(
         id=str(row["id"]),
-        user_id=str(row["user_id"]),
-        action=cast(MaintenanceAction, row["action"]),
-        target_memory_ids=[str(value) for value in json.loads(str(row["target_memory_ids_json"]))],
+        user_id=str(row["subject_user_id"]),
+        action=cast(MaintenanceAction, row["kind"]),
+        target_memory_ids=[str(value) for value in payload.get("target_memory_ids", [])],
         proposed_content=(
-            str(row["proposed_content"]) if row.get("proposed_content") is not None else None
+            str(payload["proposed_content"])
+            if payload.get("proposed_content") is not None
+            else None
         ),
         metadata_patch={
-            str(key): str(value)
-            for key, value in json.loads(str(row["metadata_patch_json"])).items()
+            str(key): str(value) for key, value in dict(payload.get("metadata_patch", {})).items()
         },
         risk=cast(MaintenanceRisk, row["risk"]),
         reason=str(row["reason"]),
-        evidence_ids=[str(value) for value in json.loads(str(row["evidence_ids_json"]))],
+        evidence_ids=[str(value) for value in json.loads(str(row["evidence_json"]))],
         status=cast(MaintenanceStatus, row["status"]),
         created_at=_parse_datetime(row["created_at"]),
         updated_at=_parse_datetime(row["updated_at"]),
@@ -85,8 +87,8 @@ def get_memory_maintenance_proposal(proposal_id: str) -> MemoryMaintenancePropos
         .execute(
             """
             SELECT *
-            FROM memory_maintenance_proposals
-            WHERE id = :id
+            FROM reflection_proposals
+            WHERE id = :id AND domain = 'memory'
             """,
             {"id": proposal_id},
         )
@@ -104,7 +106,7 @@ def list_memory_maintenance_proposals(
     status: MaintenanceStatus | None = None,
 ) -> list[MemoryMaintenanceProposal]:
     """List User Memory maintenance proposals for one owner."""
-    clauses = ["user_id = :user_id"]
+    clauses = ["domain = 'memory'", "subject_user_id = :user_id"]
     params: dict[str, object] = {"user_id": user_id}
     if start_ts is not None:
         clauses.append("updated_at >= :start_ts")
@@ -115,7 +117,7 @@ def list_memory_maintenance_proposals(
 
     query = f"""
             SELECT *
-            FROM memory_maintenance_proposals
+            FROM reflection_proposals
             WHERE {" AND ".join(clauses)}
             ORDER BY updated_at DESC, id ASC
             """
@@ -162,13 +164,11 @@ def mark_shared_memory_proposal_applied(proposal_id: str) -> MemoryMaintenancePr
     )
     store.database().execute(
         """
-        UPDATE memory_maintenance_proposals
+        UPDATE reflection_proposals
         SET status = :status,
             updated_at = :updated_at,
-            target_memory_ids_json = :target_memory_ids_json,
-            proposed_content = :proposed_content,
-            metadata_patch_json = :metadata_patch_json,
-            evidence_ids_json = :evidence_ids_json,
+            payload_json = :payload_json,
+            evidence_json = :evidence_json,
             risk = :risk,
             reason = :reason
         WHERE id = :id
@@ -177,10 +177,15 @@ def mark_shared_memory_proposal_applied(proposal_id: str) -> MemoryMaintenancePr
             "id": updated.id,
             "status": updated.status,
             "updated_at": store.format_datetime(updated.updated_at),
-            "target_memory_ids_json": json.dumps(updated.target_memory_ids, sort_keys=True),
-            "proposed_content": updated.proposed_content,
-            "metadata_patch_json": json.dumps(updated.metadata_patch, sort_keys=True),
-            "evidence_ids_json": json.dumps(updated.evidence_ids, sort_keys=True),
+            "payload_json": json.dumps(
+                {
+                    "target_memory_ids": updated.target_memory_ids,
+                    "proposed_content": updated.proposed_content,
+                    "metadata_patch": updated.metadata_patch,
+                },
+                sort_keys=True,
+            ),
+            "evidence_json": json.dumps(updated.evidence_ids, sort_keys=True),
             "risk": updated.risk,
             "reason": updated.reason,
         },

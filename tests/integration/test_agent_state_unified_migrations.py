@@ -132,9 +132,11 @@ def test_reflection_reports_columns_match_ensure_schema(tmp_path: Path) -> None:
     assert cols == {
         "id",
         "scope",
+        "domain",
         "time_window_start",
         "time_window_end",
         "findings_json",
+        "signal_summary_json",
         "created_at",
     }
 
@@ -223,10 +225,10 @@ def test_fully_migrated_db_raises_schema_too_new_if_given_stale_list(
     from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
 
     # Minimal 1-step list — simulates what session/migrations.py used to be.
-    _STALE_ONE_STEP: list[tuple[int, str]] = [(1, "SELECT 1")]
+    stale_one_step: list[tuple[int, str]] = [(1, "SELECT 1")]
 
     db = _open(tmp_path)
     migrate(db, AGENT_STATE_MIGRATIONS)  # DB now at current max
 
     with pytest.raises(SchemaTooNewError):
-        migrate(db, _STALE_ONE_STEP)  # only knows v1 — must refuse to open
+        migrate(db, stale_one_step)  # only knows v1 — must refuse to open

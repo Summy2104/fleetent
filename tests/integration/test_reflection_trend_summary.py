@@ -2,7 +2,7 @@ import json
 import sqlite3
 from datetime import UTC, datetime
 
-from fleetent.db import SQLiteDatabase, create_database
+from fleetent.db import SQLiteDatabase
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
 from fleetent.schema_migrations import migrate
 from tests.integration.test_migrations import apply_migrations
@@ -12,10 +12,10 @@ def _patch_reflection_db(monkeypatch, tmp_path):
     from fleetent import reflection
 
     db_path = tmp_path / "reflection-trends.db"
+    database = SQLiteDatabase(path=db_path)
     apply_migrations(db_path)
-    migrate(SQLiteDatabase(path=db_path), AGENT_STATE_MIGRATIONS)
-    database = create_database(f"sqlite:///{db_path}")
-    monkeypatch.setattr(reflection, "_database", lambda: database)
+    migrate(database, AGENT_STATE_MIGRATIONS)
+    monkeypatch.setattr(reflection, "_state_db", database)
     return db_path
 
 
@@ -31,12 +31,14 @@ def test_reflection_trend_summary_buckets_report_findings(monkeypatch, tmp_path)
         conn.execute(
             """
             INSERT INTO reflection_reports (
-                id, scope, time_window_start, time_window_end, findings_json, created_at
+                id, domain, scope, time_window_start, time_window_end, findings_json,
+                signal_summary_json, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "report-1",
+                "memory",
                 "owner-1",
                 "2026-01-01T00:00:00+00:00",
                 "2026-01-01T01:00:00+00:00",
@@ -56,19 +58,21 @@ def test_reflection_trend_summary_buckets_report_findings(monkeypatch, tmp_path)
                         },
                     ]
                 ),
+                None,
                 "2026-01-01T01:00:00+00:00",
             ),
         )
         conn.execute(
             """
-            INSERT INTO kb_reflection_reports (
-                id, scope, time_window_start, time_window_end, findings_json,
+            INSERT INTO reflection_reports (
+                id, domain, scope, time_window_start, time_window_end, findings_json,
                 signal_summary_json, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "kb-report-1",
+                "knowledge_base",
                 "owner-1",
                 "2026-01-02T00:00:00+00:00",
                 "2026-01-02T01:00:00+00:00",
@@ -121,73 +125,100 @@ def test_reflection_trend_summary_buckets_scoped_memory_proposal_lifecycle(monke
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             """
-            INSERT INTO memory_maintenance_proposals (
-                id, user_id, action, target_memory_ids_json, proposed_content,
-                metadata_patch_json, risk, reason, evidence_ids_json, status,
-                created_at, updated_at, expires_at
+            INSERT INTO reflection_proposals (
+                id, domain, kind, subject_user_id, target_ref, payload_json,
+                reason, evidence_json, risk, status, reviewer_user_id,
+                reviewed_at, rejection_reason, actor_user_id, applied_at,
+                expires_at, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "memory-proposal-1",
-                "owner-1",
+                "memory",
                 "rewrite",
-                json.dumps(["mem-1"]),
-                "redacted content",
-                json.dumps({}),
-                "medium",
+                "owner-1",
+                None,
+                json.dumps(
+                    {
+                        "target_memory_ids": ["mem-1"],
+                        "proposed_content": "redacted content",
+                        "metadata_patch": {},
+                    }
+                ),
                 "aggregate only",
                 json.dumps(["trace-1"]),
+                "medium",
                 "applied",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 "2026-01-01T02:00:00+00:00",
                 "2026-01-01T02:10:00+00:00",
-                None,
             ),
         )
         conn.execute(
             """
-            INSERT INTO memory_maintenance_proposals (
-                id, user_id, action, target_memory_ids_json, proposed_content,
-                metadata_patch_json, risk, reason, evidence_ids_json, status,
-                created_at, updated_at, expires_at
+            INSERT INTO reflection_proposals (
+                id, domain, kind, subject_user_id, target_ref, payload_json,
+                reason, evidence_json, risk, status, reviewer_user_id,
+                reviewed_at, rejection_reason, actor_user_id, applied_at,
+                expires_at, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "memory-proposal-2",
-                "owner-1",
+                "memory",
                 "delete",
-                json.dumps(["mem-2"]),
+                "owner-1",
                 None,
-                json.dumps({}),
-                "high",
+                json.dumps(
+                    {
+                        "target_memory_ids": ["mem-2"],
+                        "proposed_content": None,
+                        "metadata_patch": {},
+                    }
+                ),
                 "aggregate only",
                 json.dumps(["trace-2"]),
+                "high",
                 "rejected",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 "2026-01-01T03:00:00+00:00",
                 "2026-01-01T03:10:00+00:00",
-                None,
             ),
         )
         conn.execute(
             """
-            INSERT INTO skill_proposals (
-                id, type, target_skill, reason, evidence_refs_json, risk_level,
-                suggested_draft, suggested_diff, status, reviewer_user_id, reviewed_at,
-                rejection_reason, actor_user_id, applied_at, created_at, updated_at
+            INSERT INTO reflection_proposals (
+                id, domain, kind, subject_user_id, target_ref, payload_json,
+                reason, evidence_json, risk, status, reviewer_user_id,
+                reviewed_at, rejection_reason, actor_user_id, applied_at,
+                expires_at, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "skill-proposal-1",
+                "skill",
                 "update_skill",
+                None,
                 "incident-runbook",
+                json.dumps({"files": None, "suggested_draft": None, "suggested_diff": "--- diff"}),
                 "aggregate only",
                 json.dumps(["trace-3"]),
                 "low",
-                None,
-                "--- diff",
                 "pending",
+                None,
                 None,
                 None,
                 None,

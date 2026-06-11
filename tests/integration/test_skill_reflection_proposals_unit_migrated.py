@@ -1,16 +1,17 @@
 import pytest
 
-from fleetent.db import create_database
+from fleetent.db import SQLiteDatabase
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 
 
 def _patch_reflection_db(monkeypatch, tmp_path):
     from fleetent import reflection
-    from tests.integration.test_migrations import apply_migrations
 
     db_path = tmp_path / "skill-proposals.db"
-    apply_migrations(db_path)
-    database = create_database(f"sqlite:///{db_path}")
-    monkeypatch.setattr(reflection, "_database", lambda: database)
+    database = SQLiteDatabase(path=db_path)
+    migrate(database, AGENT_STATE_MIGRATIONS)
+    monkeypatch.setattr(reflection, "_state_db", database)
     return database
 
 
