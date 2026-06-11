@@ -16,7 +16,7 @@
 - **THEN** 一次查询返回跨三域的 pending 提案（按 `domain` 可筛），不需 union 多表
 
 ### Requirement: Knowledge-base 自进化提案
-KB reflection SHALL 可由 findings 生成 **KB mutation proposals**（`domain=knowledge_base`），经审批后 SHALL 通过 knowledge-base public API 执行;在审批前 SHALL NOT 自动修改 KB。v1 SHALL 支持动作 `archive_stale_doc` 与 `resync_connector`;其余动作（如 reingest / rerun_extraction / flag_gap）SHALL 可后续以新 `kind` + handler 扩展，不改表结构。审批渠道 SHALL 沿用 `self-evolution-split`:KB 提案经 platform console 由管理员审。
+KB reflection SHALL 可由 findings 生成 **KB mutation proposals**（`domain=knowledge_base`），经审批后 SHALL 通过 knowledge-base public API 执行;在审批前 SHALL NOT 自动修改 KB。v1 SHALL 支持动作 `archive_stale_doc` 与 `resync_connector`;其余动作（如 reingest / rerun_extraction / flag_gap）SHALL 可后续以新 `kind` + handler 扩展，不改表结构。
 
 #### Scenario: stale 文档生成可审批提案
 - **WHEN** KB reflection 产生 `stale_document` finding
@@ -29,6 +29,21 @@ KB reflection SHALL 可由 findings 生成 **KB mutation proposals**（`domain=k
 #### Scenario: 审批前不改 KB
 - **WHEN** KB 提案处于 pending / rejected
 - **THEN** 系统不创建、更新、删除、归档 KB document，也不触发 connector sync
+
+### Requirement: 自进化提案审批走 agent-owned 触达
+三域(memory/skill/kb)提案的审批触达 SHALL 复用 **agent-owned** 审批基础设施——经 `agent_config.resolve_approvers`(读 agent.yaml `ApprovalRouting`)解析**配置的审批人**(team/tenant 负责人)并经 im_gateway **外呼 DM**(沿用工具门的 `permission_gate._notify_approvers` 路径),审批人经 Slack 按钮 / 文本命令决定。审批人 SHALL **默认为非 requester 的真实负责人**(系统生成的提案无 requester);找不到审批人 SHALL **default-closed**(不自动 apply)。审批触达 MUST 全在 agent 侧,MUST NOT 依赖 platform console。提案审批是 **out-of-band**(无活跃 run),不复用工具门的 run suspend-resume;审批通过后由 apply(按 domain 分派)执行。
+
+#### Scenario: 提案外呼配置审批人、非当前人
+- **WHEN** 任一域提案进入 pending
+- **THEN** 系统经 `resolve_approvers` 解析 agent 配置的审批人(team/tenant 负责人)并经 im_gateway DM 之，不路由给该提案的发起者本人
+
+#### Scenario: 无审批人 default-closed
+- **WHEN** 配置中解析不到可达审批人
+- **THEN** 提案保持 pending、不被自动 apply（default-closed），不回退到 platform console
+
+#### Scenario: 全 agent 侧、不依赖 platform
+- **WHEN** standalone agent（无 platform）运行自进化审批
+- **THEN** 审批人解析与 DM 触达全在 agent 侧完成，不调用 platform console
 
 ## MODIFIED Requirements
 

@@ -47,6 +47,11 @@ report 终态只读、无状态机、无外引用 → 事件日志的标准建�
 ### D4：KB v1 动作 = archive_stale_doc + resync_connector
 选 KB 已有 public API、低风险、高价值的两个先打通"提案→审批→apply"闭环,证明三域对称跑得通;reingest/rerun_extraction/flag_gap 后续以新 kind+handler 增量加,不改表。
 
+### D6：审批走 agent-owned 触达(复用层次 A)
+三域提案审批**复用工具门那套** agent-owned 基础设施:`agent_config.resolve_approvers`(读 agent.yaml `ApprovalRouting`)解析**配置审批人(非 requester)** + `permission_gate._notify_approvers` 外呼 DM + Slack 按钮/文本决定,default-closed,全 agent 侧、**不走 platform console**。**为何不用 self-evolution-split 的 console 路由**:那是 2026-06-08 旧模型,已被 R1(`agent-owned-approval`)/`approval-suspend-resume`/`approval-requester-routing` supersede——审批早已统一为 agent 侧外呼,console 路由作废。
+**复用层次 = A**:`reflection_proposals` 保留自己的提案生命周期(draft/diff/applied/expires,工具门的 `approvals` 没有),仅**触达**复用 resolve+notify,不并入 `approvals` 表(两者生命周期不同:工具门 in-run suspend-resume vs 提案 out-of-band)。
+**out-of-band**:自进化提案系统生成、无活跃 run,故不复用 run suspend-resume;路径为 pending →（resolve+DM 审批人）→ approve/reject →（apply 按域分派)。
+
 ### D5：旧表退场、历史不迁移
 `memory_maintenance_proposals` / `skill_proposals`(agent_state Y)+ `kb_reflection_reports`(alembic 027)退场。pending 提案是瞬态待办,按「上线前不迁移数据」新表全新建;部署方如需保留在制提案,切换前先 resolve/清空。
 

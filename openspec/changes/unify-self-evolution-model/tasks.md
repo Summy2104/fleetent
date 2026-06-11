@@ -9,6 +9,7 @@
 - [ ] 2.1 写测试（integration）：统一 store 的 create/list/approve/reject 对三域行为一致；`list` 一次返回跨域 pending、可按 domain 筛 —— 见红
 - [ ] 2.2 实现统一 `reflection_proposals` store + 生命周期（status 转移 + reviewer/applied 审计），域特定载荷 `payload_json` 经 dataclass ser/de —— 见绿
 - [ ] 2.3 写测试 + 实现：apply 按 `domain` 分派 `_APPLY_HANDLERS`（memory→memory mutation API；skill→skill draft 边界），跨域隔离（一域 handler 不认他域 kind） —— 见红→见绿
+- [ ] 2.4 写测试 + 实现：提案进入 pending 时，经 **agent-owned** `agent_config.resolve_approvers` 解析配置审批人（**非 requester**）+ `permission_gate._notify_approvers` 外呼 DM；找不到审批人 → default-closed（保持 pending、不 auto-apply）；全 agent 侧、不调 platform console —— 见红→见绿
 
 ## 3. report 统一 + memory/skill 迁到统一表
 
@@ -21,7 +22,7 @@
 - [ ] 4.1 写测试（integration）：`stale_document` finding → 生成 `kind=archive_stale_doc` 的 pending 提案，不立即改 KB —— 见红
 - [ ] 4.2 实现 `generate_kb_proposals`(从 KB findings 生成 domain=kb 提案) —— 见绿
 - [ ] 4.3 写测试 + 实现 KB apply handler：approve+apply 经 knowledge-base public API 执行 `archive_stale_doc` / `resync_connector`；pending/rejected 不触动 KB —— 见红→见绿
-- [ ] 4.4 写测试：KB 提案审批路由经 platform console（沿用 self-evolution-split），不依赖 agent 自主 IM —— 见红→见绿
+- [ ] 4.4 写测试：KB 提案(domain=kb)审批同样走 §2.4 的 agent-owned 触达——经 resolve_approvers 解析配置审批人 + 外呼 DM，default-closed，不走 platform console —— 见红→见绿
 
 ## 5. 文档与收尾
 
