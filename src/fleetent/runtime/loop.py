@@ -58,6 +58,7 @@ from fleetent.runtime.termination import (
     resolve_limits,
 )
 from fleetent.runtime.tool_guardrails import GuardrailAction, evaluate_guardrail
+from fleetent.session import manager as session_mgr
 from fleetent.skills import available_skills_prompt, collect_disabled_trace
 from fleetent.skills import match as match_skill  # noqa: F401  # patch target + API parity
 from fleetent.skills import scan as scan_skills
@@ -780,7 +781,32 @@ async def _plan_run_slots(
                 medium_timeout=permission_gate_medium_timeout,
                 high_timeout=permission_gate_high_timeout,
             )
+            if decision == "pending":
+                # Suspend (approval-suspend-resume): write a protocol-valid placeholder
+                # result and record the pending mapping so the run can end with
+                # awaiting_approval and resume later when the human decides.
+                state.pending_approvals.append(
+                    {
+                        "approval_id": approval_id,
+                        "tool_call_id": tc.id,
+                        "tool_name": name,
+                        "tool_args": tool_args,
+                        "risk": risk,
+                        "approver_ids": sorted(_default_gate.authorized_actors(approval_id)),
+                    }
+                )
+                slots.append(
+                    _PlanSlot(
+                        tc_id=tc.id,
+                        name=name,
+                        tc_fp=tc_fp,
+                        placeholder=(f"awaiting_human_approval (id={approval_id})", False),
+                        counts_failure=False,
+                    )
+                )
+                continue
             if decision != "approved":
+                # Terminal rejection (no approver reachable / default-closed).
                 state.approval_rejected = True
                 slots.append(
                     _PlanSlot(
@@ -1608,6 +1634,23 @@ async def _run_inner(
         _record_injected_context(run_id, built_context.sources)
     except Exception as exc:  # noqa: BLE001 — long-term context is auxiliary
         _logger.debug("long_term_context_skipped", error=str(exc))
+    # approval-suspend-resume D6: make the model aware of any outstanding approval so
+    # it does not re-propose the same gated tool while one is pending in this session.
+    if session_id:
+        try:
+            _pending = await session_mgr.list_pending_approvals(session_id)
+            if _pending:
+                _names = ", ".join(
+                    sorted({str(e.get("tool_name", "?")) for e in _pending.values()})
+                )
+                _append_system_context(
+                    messages,
+                    system_prompt,
+                    f"当前有 {len(_pending)} 个工具调用正在等待人工审批（{_names}）。"
+                    "在用户批准前不要重复发起同一调用；其它请求可正常处理。",
+                )
+        except Exception as exc:  # noqa: BLE001 — awareness is auxiliary, never break the run
+            _logger.debug("pending_approval_note_skipped", error=str(exc))
     # MCP4: a strict-mode MCP server the agent is bound to is unavailable → stop up
     # front with a clear error (rather than run without its tools). Also logs
     # degrade/silent degradations for bound servers. No MCP servers → no-op.
@@ -1869,6 +1912,20 @@ async def _run_inner(
             agent_name=agent_name,
             user_id=user_id,
         )
+
+        # approval-suspend-resume: a gated tool call wrote an awaiting_human_approval
+        # placeholder this turn → suspend the run (non-terminal). The prompt was already
+        # sent by the gate; pending state is persisted below for resume.
+        if state.pending_approvals:
+            stop_reason = StopReason.awaiting_approval
+            break
+
+    # Persist pending approvals to the session so resolution can resume after this
+    # run returns (and across a process restart). The caller's session save preserves
+    # this meta (save(meta=None) merges existing meta).
+    if state.pending_approvals and session_id:
+        for entry in state.pending_approvals:
+            await session_mgr.add_pending_approval(session_id, str(entry["approval_id"]), entry)
 
     reply = (
         _msg_content

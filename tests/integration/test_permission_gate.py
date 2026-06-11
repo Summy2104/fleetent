@@ -1,4 +1,10 @@
-import asyncio
+"""Integration tests for the permission gate against a real approvals DB.
+
+Rewritten for approval-suspend-resume: request_approval registers + returns "pending"
+(non-blocking); resolve() finalizes the row. Blocking-timeout tests are gone — timeout
+is now handled by reconcile_expired_approvals (see test_permission_gate_restart.py).
+"""
+
 import sqlite3
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -45,23 +51,22 @@ def _mock_outbound(monkeypatch):
 
 @pytest.fixture
 def gate(db):
-    return PermissionGate(
-        medium_timeout=0.2,
-        high_timeout=0.2,
-    )
+    return PermissionGate()
 
 
-async def test_approved_path(gate, db, _mock_outbound):
+def _status(db_path, approval_id):
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT status, approver_actor FROM approvals WHERE id = ?", (approval_id,)
+    ).fetchone()
+    conn.close()
+    return row
+
+
+async def test_request_registers_pending_then_approve_finalizes(gate, db, _mock_outbound):
     reply_func = AsyncMock()
-    approval_id = "appr-1"
-
-    async def approve_after_delay():
-        await asyncio.sleep(0.05)
-        await gate.resolve(approval_id, "approved", approver_user_id="U_APPROVER")
-
-    asyncio.create_task(approve_after_delay())
     result = await gate.request_approval(
-        approval_id=approval_id,
+        approval_id="appr-1",
         risk_level="medium",
         tool_name="send_email",
         tool_args={"to": "test@example.com"},
@@ -71,161 +76,60 @@ async def test_approved_path(gate, db, _mock_outbound):
         approval_routing=_routing("medium"),
         outbound_connectors=_connectors(),
     )
-    assert result == "approved"
+    assert result == "pending"
+    assert _status(db, "appr-1")[0] == "pending"
     reply_func.assert_called()
 
+    ok = await gate.resolve("appr-1", "approved", approver_user_id="U_APPROVER")
+    assert ok is True
+    assert _status(db, "appr-1") == ("approved", "U_APPROVER")
 
-async def test_rejected_path(gate, db, _mock_outbound):
-    reply_func = AsyncMock()
-    approval_id = "appr-2"
 
-    async def reject_after_delay():
-        await asyncio.sleep(0.05)
-        await gate.resolve(approval_id, "rejected", approver_user_id="U_APPROVER")
-
-    asyncio.create_task(reject_after_delay())
+async def test_request_then_reject_finalizes(gate, db, _mock_outbound):
     result = await gate.request_approval(
-        approval_id=approval_id,
+        approval_id="appr-2",
         risk_level="medium",
         tool_name="send_email",
         tool_args={},
         requester_user_id="user-1",
-        reply_func=reply_func,
+        reply_func=AsyncMock(),
         session_id="test-session",
         approval_routing=_routing("medium"),
         outbound_connectors=_connectors(),
     )
-    assert result == "rejected"
+    assert result == "pending"
+    await gate.resolve("appr-2", "rejected", approver_user_id="U_APPROVER")
+    assert _status(db, "appr-2")[0] == "rejected"
 
 
-async def test_timeout_path(gate, db, _mock_outbound):
-    """No resolve before timeout → gate returns 'timeout'."""
-    reply_func = AsyncMock()
+async def test_high_risk_table_reflects_decision(gate, db, _mock_outbound):
+    await gate.request_approval(
+        approval_id="appr-4",
+        risk_level="high",
+        tool_name="delete_table",
+        tool_args={"name": "users"},
+        requester_user_id="user-1",
+        reply_func=AsyncMock(),
+        session_id="test-session",
+        approval_routing=_routing("high"),
+        outbound_connectors=_connectors(),
+    )
+    await gate.resolve("appr-4", "approved", approver_user_id="U_APPROVER")
+    assert _status(db, "appr-4") == ("approved", "U_APPROVER")
+
+
+async def test_unresolved_request_stays_pending(gate, db, _mock_outbound):
+    """Without a decision the approval stays pending (no blocking auto-timeout)."""
     result = await gate.request_approval(
         approval_id="appr-3",
         risk_level="medium",
         tool_name="send_email",
         tool_args={},
         requester_user_id="user-1",
-        reply_func=reply_func,
+        reply_func=AsyncMock(),
         session_id="test-session",
         approval_routing=_routing("medium"),
         outbound_connectors=_connectors(),
     )
-    assert result == "timeout"
-
-
-async def test_approvals_table_updated(gate, db, _mock_outbound):
-    reply_func = AsyncMock()
-    approval_id = "appr-4"
-
-    async def approve():
-        await asyncio.sleep(0.02)
-        await gate.resolve(approval_id, "approved", approver_user_id="U_APPROVER")
-
-    asyncio.create_task(approve())
-    await gate.request_approval(
-        approval_id=approval_id,
-        risk_level="high",
-        tool_name="delete_table",
-        tool_args={"name": "users"},
-        requester_user_id="user-1",
-        reply_func=reply_func,
-        session_id="test-session",
-        approval_routing=_routing("high"),
-        outbound_connectors=_connectors(),
-    )
-    conn = sqlite3.connect(db)
-    row = conn.execute(
-        "SELECT status, approver_actor FROM approvals WHERE id = ?", (approval_id,)
-    ).fetchone()
-    conn.close()
-    assert row[0] == "approved"
-    # approver_actor is set from gate.resolve(approver_user_id=...) call
-    assert row[1] == "U_APPROVER"
-
-
-async def test_timeout_sets_status_in_db(gate, db, _mock_outbound):
-    reply_func = AsyncMock()
-    approval_id = "appr-5"
-    await gate.request_approval(
-        approval_id=approval_id,
-        risk_level="medium",
-        tool_name="send_email",
-        tool_args={},
-        requester_user_id="user-1",
-        reply_func=reply_func,
-        session_id="test-session",
-        approval_routing=_routing("medium"),
-        outbound_connectors=_connectors(),
-    )
-    conn = sqlite3.connect(db)
-    row = conn.execute("SELECT status FROM approvals WHERE id = ?", (approval_id,)).fetchone()
-    conn.close()
-    assert row[0] == "timeout"
-
-
-# ── per-call timeout override tests ──────────────────────────────────────────
-
-
-async def test_medium_timeout_override_auto_rejects(db, _mock_outbound):
-    """medium_timeout kwarg overrides instance default; auto-rejects after override value."""
-    gate_long = PermissionGate(medium_timeout=300.0, high_timeout=3600.0)
-    reply_func = AsyncMock()
-
-    result = await gate_long.request_approval(
-        approval_id="override-01",
-        risk_level="medium",
-        tool_name="write_file",
-        tool_args={"path": "/tmp/x"},
-        requester_user_id="user1",
-        reply_func=reply_func,
-        session_id="test-session",
-        approval_routing=_routing("medium"),
-        outbound_connectors=_connectors(),
-        medium_timeout=0.05,
-    )
-
-    assert result == "timeout"
-    reply_func.assert_called()
-
-
-async def test_high_timeout_override_auto_rejects(db, _mock_outbound):
-    """high_timeout kwarg overrides instance default for high-risk tools."""
-    gate_long = PermissionGate(medium_timeout=300.0, high_timeout=3600.0)
-    reply_func = AsyncMock()
-
-    result = await gate_long.request_approval(
-        approval_id="override-02",
-        risk_level="high",
-        tool_name="bash_exec",
-        tool_args={"command": "ls"},
-        requester_user_id="user1",
-        reply_func=reply_func,
-        session_id="test-session",
-        approval_routing=_routing("high"),
-        outbound_connectors=_connectors(),
-        high_timeout=0.05,
-    )
-
-    assert result == "timeout"
-
-
-async def test_no_override_uses_instance_default(db, _mock_outbound):
-    """Without override kwargs, short instance default still applies (behaviour unchanged)."""
-    gate_short = PermissionGate(medium_timeout=0.05, high_timeout=3600.0)
-    reply_func = AsyncMock()
-
-    result = await gate_short.request_approval(
-        approval_id="override-03",
-        risk_level="medium",
-        tool_name="write_file",
-        tool_args={},
-        requester_user_id="user1",
-        reply_func=reply_func,
-        session_id="test-session",
-        approval_routing=_routing("medium"),
-        outbound_connectors=_connectors(),
-    )
-
-    assert result == "timeout"
+    assert result == "pending"
+    assert _status(db, "appr-3")[0] == "pending"

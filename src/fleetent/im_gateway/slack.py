@@ -156,16 +156,20 @@ async def _make_status_funcs(
     return reply_func, progress_func
 
 
-async def handle_approval_action(ack: Any, body: Any, client: Any) -> None:
+async def handle_approval_action(
+    ack: Any, body: Any, client: Any, agent_name: str | None = None
+) -> None:
     """Resolve a permission-gate approval from a Block Kit button click.
 
     The clicking user's Slack id (interaction payload) is the decision actor, so
     the gate's authorization check applies — a bystander's click is rejected with
     an ephemeral notice while the prompt keeps its buttons. On an accepted
     decision the prompt message is rewritten to a result state (buttons removed)
-    to prevent double-clicks.
+    to prevent double-clicks, then the suspended run is resumed (approval-suspend-resume).
     """
+    from fleetent.governance import approval_store
     from fleetent.governance.permission_gate import _default_gate
+    from fleetent.session import manager as session_mgr
 
     await ack()
     action = (body.get("actions") or [{}])[0]
@@ -178,11 +182,22 @@ async def handle_approval_action(ack: Any, body: Any, client: Any) -> None:
     decision = "rejected" if action_id == "approval_reject" else "approved"
     always = action_id == "approval_approve_always"
 
+    # The run persisted the approval's session id; recover authorized actors from that
+    # session's pending entry so authorization survives a restart.
+    row = approval_store.get_approval(approval_id)
+    session_id = str(row.get("session_id")) if row and row.get("session_id") else None
+    authorized: set[str] | None = None
+    if session_id:
+        pending = await session_mgr.get_pending_approval(session_id, approval_id)
+        if pending and pending.get("approver_ids"):
+            authorized = {str(a) for a in pending["approver_ids"]}
+
     found = await _default_gate.resolve(
         approval_id=approval_id,
         decision=decision,  # type: ignore[arg-type]
         approver_user_id=clicker,
         always=always,
+        authorized_actors=authorized,
     )
 
     if not found:
@@ -203,6 +218,38 @@ async def handle_approval_action(ack: Any, body: Any, client: Any) -> None:
             text=f"{verdict}{suffix} `{approval_id}` — by <@{clicker}>",
             blocks=[],
         )
+
+    # Resume the suspended run via the same path the text command uses. Best-effort:
+    # a resume failure must not undo the already-recorded decision.
+    if session_id and agent_name:
+        from fleetent.im_gateway import normalizer
+        from fleetent.im_gateway.normalizer import NormalizedMessage, SessionContext
+
+        async def _reply(text: str, blocks: list[dict[str, Any]] | None = None) -> None:
+            kwargs: dict[str, Any] = {"channel": channel, "text": text}
+            if blocks is not None:
+                kwargs["blocks"] = blocks
+            await client.chat_postMessage(**kwargs)
+
+        resume_msg = NormalizedMessage(
+            platform="slack",
+            session_id=session_id,
+            user_id=clicker,
+            text="",
+            attachments=[],
+            reply_func=_reply,
+            agent_name=agent_name,
+            session_context=SessionContext(platform="slack", sender_id=clicker),
+            outbound_connectors={"slack": client},
+        )
+        try:
+            reply = await normalizer._resume_pending_in_session(
+                resume_msg, session_id, approval_id, decision
+            )
+            if reply:
+                await _reply(reply)
+        except Exception as exc:  # noqa: BLE001 — decision stands; resume is best-effort
+            logger.warning("approval_button_resume_failed", approval_id=approval_id, error=str(exc))
 
 
 def _make_upload_func(
@@ -417,8 +464,12 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
     app = AsyncApp(token=bot_token)
 
     # Approval button clicks (requires Interactivity enabled on the Slack App;
-    # Socket Mode delivers block_actions over the existing connection).
-    app.action(re.compile(r"^approval_"))(handle_approval_action)
+    # Socket Mode delivers block_actions over the existing connection). The agent name
+    # is threaded so the handler can resume the suspended run on this connector's agent.
+    async def _on_approval_action(ack: Any, body: Any, client: Any) -> None:
+        await handle_approval_action(ack, body, client, agent_name=agent_name)
+
+    app.action(re.compile(r"^approval_"))(_on_approval_action)
 
     assistant = AsyncAssistant()
 

@@ -114,10 +114,12 @@ async def test_full_slack_message_pipeline(isolated_db, monkeypatch):
     assert saved[-1]["content"] == "Hello from agent"
 
 
-async def test_permission_gate_approved_tool_executes(isolated_db, monkeypatch):
-    """Tool with medium risk + approval routing → executes successfully."""
-    import asyncio
+async def test_permission_gate_pending_then_resolve_finalizes(isolated_db, monkeypatch):
+    """Medium risk + routing → request registers pending; resolve finalizes the row.
 
+    Suspend model (approval-suspend-resume): request_approval no longer blocks; it
+    returns "pending" and the row reads pending until an out-of-band resolve.
+    """
     from fleetent.agent_config import ApprovalRouting
     from fleetent.governance.permission_gate import PermissionGate
 
@@ -125,17 +127,10 @@ async def test_permission_gate_approved_tool_executes(isolated_db, monkeypatch):
     monkeypatch.setattr(outbound_mod, "send_to", AsyncMock(return_value=True))
     monkeypatch.setattr(outbound_mod, "is_reachable", AsyncMock(return_value=True))
 
-    gate = PermissionGate(medium_timeout=1.0, high_timeout=1.0)
-    reply_func = AsyncMock()
+    gate = PermissionGate()
     routing = ApprovalRouting(
         by_risk={"medium": {"approvers": ["slack:U_APPROVER"], "policy": "any"}}
     )
-
-    async def approve_it():
-        await asyncio.sleep(0.05)
-        await gate.resolve("test-appr-1", "approved", approver_user_id="U_APPROVER")
-
-    asyncio.create_task(approve_it())
 
     result = await gate.request_approval(
         approval_id="test-appr-1",
@@ -143,19 +138,22 @@ async def test_permission_gate_approved_tool_executes(isolated_db, monkeypatch):
         tool_name="send_email",
         tool_args={"to": "test@example.com"},
         requester_user_id="user-1",
-        reply_func=reply_func,
+        reply_func=AsyncMock(),
         session_id="test-session",
         approval_routing=routing,
         outbound_connectors={"slack": AsyncMock()},
     )
+    assert result == "pending"
 
-    assert result == "approved"
+    def _status() -> str:
+        conn = sqlite3.connect(isolated_db / "agent.db")
+        row = conn.execute("SELECT status FROM approvals WHERE id = ?", ("test-appr-1",)).fetchone()
+        conn.close()
+        return row[0]
 
-    # Verify approvals table has approved row in agent-side store.
-    conn = sqlite3.connect(isolated_db / "agent.db")
-    row = conn.execute("SELECT status FROM approvals WHERE id = ?", ("test-appr-1",)).fetchone()
-    conn.close()
-    assert row[0] == "approved"
+    assert _status() == "pending"
+    assert await gate.resolve("test-appr-1", "approved", approver_user_id="U_APPROVER") is True
+    assert _status() == "approved"
 
 
 async def test_tool_not_in_allowed_tools_raises_before_approval(isolated_db):

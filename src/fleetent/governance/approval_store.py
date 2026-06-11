@@ -8,14 +8,14 @@ Uses named parameters throughout.  No platform imports.
 from __future__ import annotations
 
 import datetime
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any
 
 from fleetent.db import ReadOnlySQLiteDatabase, SQLiteDatabase
 
 if TYPE_CHECKING:
     pass
 
-_AnyDatabase = Union[SQLiteDatabase, ReadOnlySQLiteDatabase]
+_AnyDatabase = SQLiteDatabase | ReadOnlySQLiteDatabase
 
 _state_db: SQLiteDatabase | None = None
 
@@ -47,9 +47,11 @@ def insert_approval(
     database().execute(
         """
         INSERT INTO approvals
-            (id, session_id, requester_user_id, risk_level, tool_name, tool_args, status, created_at)
+            (id, session_id, requester_user_id, risk_level, tool_name, tool_args,
+             status, created_at)
         VALUES
-            (:id, :session_id, :requester_user_id, :risk_level, :tool_name, :tool_args, 'pending', :created_at)
+            (:id, :session_id, :requester_user_id, :risk_level, :tool_name, :tool_args,
+             'pending', :created_at)
         """,
         {
             "id": id,
@@ -88,6 +90,23 @@ _SELECT = (
 )
 
 
+def get_approval(approval_id: str) -> dict[str, Any] | None:
+    """Return one approval row by id, or None if absent.
+
+    Used by the gate to verify an approval is genuinely pending when resolving
+    after a process restart (no in-memory registry to consult).
+    """
+    row = (
+        database()
+        .execute(
+            f"{_SELECT} WHERE id = :id",
+            {"id": approval_id},
+        )
+        .fetchone()
+    )
+    return dict(row) if row is not None else None
+
+
 def list_approvals(
     status: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -105,7 +124,7 @@ def list_approvals(
 
 
 def list_approvals_with_db(
-    db: "_AnyDatabase",
+    db: _AnyDatabase,
     status: str | None = None,
 ) -> list[dict[str, Any]]:
     """Read-only variant of list_approvals that accepts an explicit DB handle.
