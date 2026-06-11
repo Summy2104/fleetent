@@ -55,7 +55,7 @@ fleetent 平台全局术语定义。所有模块文档应以本表为准，避�
 
 | 术语 | 定义 | 禁止混用 |
 |------|------|---------|
-| **语义记忆** | 跨 session 的用户事实，按 `identity`/`preferences`/`context` 三类结构化存储于 `memory_items` 表，由 `fleetent.intelligence.memory` 负责 | 不用 "semantic memory"（英文只在代码注释中使用）|
+| **语义记忆** | 跨 session 的用户事实，按 `identity`/`preferences`/`context` 三类结构化存储于 `memory_items` 表，由 `fleetent.memory` 负责 | 不用 "semantic memory"（英文只在代码注释中使用）|
 | **情节记忆** | 对话与工具执行的完整历史轨迹，写入 `traces` 表，由 `observability` 负责 | 不用 "episodic memory"、"execution log"（traces 是正式名词）|
 | **程序记忆** | agent 完成特定任务的技能与方法，存储为 `skills/` 目录，由 `skill_registry` 负责 | 不用 "procedural memory"、"knowledge"（knowledge 指企业文档知识库）|
 | **工作记忆** | 当前 session 的对话上下文，存储在内存中，session 结束即释放，由 `context_mgr` 负责 | 不用 "working memory"、"context window"（context window 是 LLM 的技术概念）|
