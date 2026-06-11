@@ -13,11 +13,11 @@
 
 ## 3. 备份/恢复覆盖全部物理库 + WAL checkpoint
 
-- [ ] 3.1 写测试（integration）：构造含 `<tenant>/kb.db`、`<tenant>/shared_memory.db`、`<tenant>/<agent_id>/agent_state.db` + 各 `*_vectors.db` 的数据目录，默认 upgrade 后 `data/backups/TS/` 镜像结构备份**每一个**库 —— 见红
-- [ ] 3.2 写测试（integration）：某库有未 checkpoint 的 WAL 写 → 备份前 `wal_checkpoint(TRUNCATE)`，备份副本含该写（不丢） —— 见红
-- [ ] 3.3 写测试（integration）：停机 agent 的 `agent_state.db` 仍被递归发现并备份；registry 登记但目录缺失 → 告警不静默；`--backup-only` 同样覆盖全部库 —— 见红
-- [ ] 3.4 重写 `scripts/upgrade.py` 的 `backup_database`：递归 `rglob("*.db")` 枚举 + 每库经 `db.py` 入口 `wal_checkpoint(TRUNCATE)` 后复制 + 镜像目录结构；读 management.db registry 交叉核对兜底告警 —— 见绿
-- [ ] 3.5 写测试（integration）+ 实现：恢复对称（用备份批次整体替换数据目录全部库，含子目录） —— 见红→见绿
+- [x] 3.1 写测试（integration）：构造含 `<tenant>/kb.db`、`<tenant>/shared_memory.db`、`<tenant>/<agent_id>/agent_state.db` + 各 `*_vectors.db` 的数据目录，默认 upgrade 后 `data/backups/TS/` 镜像结构备份**每一个**库 —— 见红
+- [x] 3.2 写测试（integration）：某库有未 checkpoint 的 WAL 写 → 备份前 `wal_checkpoint(TRUNCATE)`，备份副本含该写（不丢） —— 见红
+- [x] 3.3 写测试（integration）：停机 agent 的 `agent_state.db` 仍被递归发现并备份；registry 登记但目录缺失 → 告警不静默；`--backup-only` 同样覆盖全部库 —— 见红
+- [x] 3.4 重写 `scripts/upgrade.py` 的 `backup_database`：递归 `rglob("*.db")` 枚举 + 每库经 `db.py` 入口 `wal_checkpoint(TRUNCATE)` 后复制 + 镜像目录结构；读 management.db registry 交叉核对兜底告警 —— 见绿
+- [x] 3.5 写测试（integration）+ 实现：恢复对称（用备份批次整体替换数据目录全部库，含子目录） —— 见红→见绿
 
 ## 4. 诊断 forbidden-skip 递归全树
 

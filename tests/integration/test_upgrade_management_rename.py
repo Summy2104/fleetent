@@ -13,6 +13,7 @@ from subprocess import CompletedProcess
 
 import pytest
 
+from fleetent.db import ReadOnlySQLiteDatabase, SQLiteDatabase
 from scripts import upgrade
 
 
@@ -35,9 +36,10 @@ def test_legacy_fleetent_db_renamed_to_management_db_after_backup_before_migrate
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     legacy = data_dir / "fleetent.db"
-    legacy.write_bytes(b"legacy management db")
-    (data_dir / "fleetent.db-wal").write_bytes(b"wal pages")
-    (data_dir / "fleetent.db-shm").write_bytes(b"shm")
+    # A real SQLite management library predating the rename.
+    legacy_db = SQLiteDatabase(path=legacy)
+    legacy_db.execute("CREATE TABLE marker (v TEXT)")
+    legacy_db.execute("INSERT INTO marker (v) VALUES ('legacy-row')")
     backup_root = tmp_path / "backups"
 
     state: dict[str, object] = {}
@@ -55,10 +57,11 @@ def test_legacy_fleetent_db_renamed_to_management_db_after_backup_before_migrate
     )
 
     assert exit_code == 0
-    # Main file + both sidecars renamed, contents preserved.
-    assert (data_dir / "management.db").read_bytes() == b"legacy management db"
-    assert (data_dir / "management.db-wal").read_bytes() == b"wal pages"
-    assert (data_dir / "management.db-shm").read_bytes() == b"shm"
+    # The renamed management.db is a valid SQLite library carrying the original data.
+    management = data_dir / "management.db"
+    assert management.exists()
+    rows = ReadOnlySQLiteDatabase(path=management).execute("SELECT v FROM marker").fetchall()
+    assert [r["v"] for r in rows] == ["legacy-row"]
     assert not legacy.exists()
     assert not (data_dir / "fleetent.db-wal").exists()
     assert not (data_dir / "fleetent.db-shm").exists()

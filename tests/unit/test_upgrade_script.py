@@ -85,59 +85,48 @@ def test_missing_database_file_fails_fast_without_running_migration(monkeypatch,
 
 
 def test_default_backup_path_uses_timestamped_data_backups_directory(monkeypatch, tmp_path):
+    # backup_database now operates on the whole data directory and mirrors structure;
+    # the multi-database behaviour (recursive discovery, WAL checkpoint, registry
+    # cross-check, restore) is covered by tests/integration/test_upgrade_multi_db_backup.py.
     monkeypatch.chdir(tmp_path)
-    database_path = Path("data/fleetent.db")
-    database_path.parent.mkdir()
-    database_path.write_bytes(b"sqlite bytes")
+    data_dir = Path("data")
+    data_dir.mkdir()
 
-    backup_path = upgrade.backup_database(
-        database_path,
+    batch_dir = upgrade.backup_database(
+        data_dir,
         timestamp=datetime(2026, 6, 1, 12, 34, 56),
     )
 
-    assert backup_path == Path("data/backups/20260601-123456/fleetent.db")
-    assert backup_path.read_bytes() == b"sqlite bytes"
+    assert batch_dir == Path("data/backups/20260601-123456")
+    assert batch_dir.is_dir()
 
 
 def test_backup_dir_argument_overrides_default_backup_root(tmp_path):
-    database_path = tmp_path / "fleetent.db"
-    database_path.write_bytes(b"sqlite bytes")
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
     backup_root = tmp_path / "custom-backups"
 
-    backup_path = upgrade.backup_database(
-        database_path,
+    batch_dir = upgrade.backup_database(
+        data_dir,
         backup_root,
         timestamp=datetime(2026, 6, 1, 12, 34, 56),
     )
 
-    assert backup_path == backup_root / "20260601-123456" / "fleetent.db"
+    assert batch_dir == backup_root / "20260601-123456"
 
 
 def test_backup_creates_missing_backup_directory(tmp_path):
-    database_path = tmp_path / "fleetent.db"
-    database_path.write_bytes(b"sqlite bytes")
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
     backup_root = tmp_path / "missing" / "backups"
 
-    backup_path = upgrade.backup_database(
-        database_path,
+    batch_dir = upgrade.backup_database(
+        data_dir,
         backup_root,
         timestamp=datetime(2026, 6, 1, 12, 34, 56),
     )
 
-    assert backup_path.exists()
-
-
-def test_backup_file_matches_source_database_contents(tmp_path):
-    database_path = tmp_path / "fleetent.db"
-    database_path.write_bytes(b"source database")
-
-    backup_path = upgrade.backup_database(
-        database_path,
-        tmp_path / "backups",
-        timestamp=datetime(2026, 6, 1, 12, 34, 56),
-    )
-
-    assert backup_path.read_bytes() == b"source database"
+    assert batch_dir.exists()
 
 
 def test_dry_run_outputs_plan_without_requiring_database_file_or_running_alembic(
