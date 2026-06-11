@@ -26,8 +26,8 @@
 | # | change | 实现 | 门禁 | archive | 状态 |
 |---|--------|------|------|---------|------|
 | 1 | sandbox-isolation-foundation | ✅ | ✅ | ✅ | **完成** |
-| 2 | sandbox-execution-world | ⏳ | - | - | 进行中 |
-| 3 | sandbox-file-egress | - | - | - | 待 |
+| 2 | sandbox-execution-world | ✅ | ✅ | ✅ | **完成** |
+| 3 | sandbox-file-egress | ⏳ | - | - | 进行中 |
 | 4 | sandbox-workspace-scope-split | - | - | - | 待 |
 | 5 | sandbox-approval-relaxation | - | - | - | 待 |
 | 6 | skill-frontmatter-agentskills-compliance | - | - | - | 待 |
@@ -43,5 +43,16 @@
 - **决策 D2**:manager↔workspace_gc 循环导入 → manager 内懒导入 workspace_gc。
 - 验证:模块边界 EXIT 0;新改 54 unit + 79 integration 全绿;`make test-pr` 2767 passed,唯一失败 `test_intelligence_directory_shim_removed` 与本 change 无关(diff 不碰 intelligence/,预先存在);mypy 90→87 无新增。
 - 已 archive,specs 同步(新 cap sandbox-containment-gating/sandbox-workspace-gc;改 sandbox-lifecycle/sandbox-workspace-mount)。
+
+### #2 sandbox-execution-world — 完成 2026-06-11
+- 实现:backend.SkillMount + create_workspace 加可选 skill_mount;docker `_skill_mount_flags`(-v src:/workspace/skills[:ro])+ SKILLS_DIR 注入(平台优先);hardening.config_hash 纳入 skill_mount(None 时字节兼容旧容器);manager._resolve_skill_mount(有效根→物化 builtin→is_blocked_mount→SkillMount);skills/registry effective_skill_root + materialize_builtin_skills(幂等不覆盖)+ location 渲染改 $SKILLS_DIR + run_code/路径指引;builtin_tools generate_image 落 /workspace/generated 返相对引用、_save/_read_upload 改 workspace 解析(历史绝对兜底)、read_skill 拼指引;shell_tool bash_exec docstring 首行改宿主世界观;normalizer 入站图片 per-session workspace。
+- **决策 D3**:执行面收敛锁定——run_code 唯一执行面,**不新增 sandbox_exec**(用户拍板)。
+- **决策 D4(迁移)**:analyze_image 选择迁入 /workspace/uploads,回读经 workspace 解析 + 历史绝对引用兜底,契约不破。
+- **AAA-8053 根因验证**:实测 skill 脚本经 $SKILLS_DIR 在容器内运行成功(exit 0)。
+- 验证:模块边界/测试层 OK;make test-pr 2812 passed(唯一失败 intelligence shim,预存无关);本 change 10 integration 全绿;mypy 改动文件零 error。
+- archive,specs 同步(新 cap sandbox-workspace-root/sandbox-skill-mount/sandbox-exec-face;改 image-generation-tool/vision-as-tool/builtin-shell-tool/skill-read-on-demand)。
+
+### ⚠️ 全局 gotcha(影响所有 change 的验证)
+实现 agent 易跑 `ruff format src tests`(格式化**全树**),误改大量无关文件的存量风格漂移(#2 时误改 22 个,含 platform/ 文件,可能与在途 schema-residue-cleanup 冲突)。**我在每个 change 提交前核查 diff、回退所有范围外纯格式化改动**,只保留本 change 真正触碰的文件。#3+ 的 agent 指令已加「只格式化自己改的文件」。
 
 <!-- 后续每个 change 的决策、遇到的问题、解决方式追加于此 -->
