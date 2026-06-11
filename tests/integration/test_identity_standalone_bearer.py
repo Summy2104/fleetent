@@ -28,9 +28,7 @@ def test_standalone_bearer_resolves_without_platform_tables(tmp_path, monkeypatc
     conn.commit()
     conn.close()
 
-    import fleetent.user_store as us
-
-    monkeypatch.setattr(us, "DB_PATH", db)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
 
     from fleetent.identity import LocalBearerAdapter, Principal
 
@@ -57,9 +55,7 @@ def test_standalone_bearer_blocked_user_rejected(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
 
-    import fleetent.user_store as us
-
-    monkeypatch.setattr(us, "DB_PATH", db)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
 
     from fleetent.identity import LocalBearerAdapter
 

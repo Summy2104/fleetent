@@ -5,16 +5,14 @@ from fastapi.testclient import TestClient
 import fleetent.runtime.loop as loop
 from fleetent import agent_config
 from fleetent import server as srv
-from fleetent import user_store as us
 from fleetent.integrations.sandbox import enablement as sandbox_enablement
 from fleetent.integrations.sandbox.enablement import Mode
 from tests.integration._migration_template import apply_migrations
 
 
 def test_lifespan_scans_agents_once(tmp_path, monkeypatch):
-    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
-    apply_migrations(tmp_path / "users.db")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
+    apply_migrations(tmp_path / "users.db")
     monkeypatch.chdir(tmp_path)  # no .env / config here
     calls: list[int] = []
     monkeypatch.setattr(agent_config, "scan", lambda *a, **k: calls.append(1))

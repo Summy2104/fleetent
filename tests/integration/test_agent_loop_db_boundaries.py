@@ -132,7 +132,7 @@ async def test_run_layered_budget_trips_and_logs_scope(mock_client, monkeypatch,
     import fleetent.runtime.layered_budget as lbud
     from fleetent.runtime.termination import StopReason
 
-    monkeypatch.setattr(lbud, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
     # Tiny user-token cap -> second checkpoint trips via the layered checker.
     capped = lbud.LayeredBudgetConfig({lbud.BudgetScope.user: lbud.ScopeBudget(max_tokens=1)})
     monkeypatch.setattr(

@@ -24,9 +24,6 @@ def client(tmp_path, monkeypatch):
     apply_migrations(db_path)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-    for mod in (user_store, audit):
-        monkeypatch.setattr(mod, "DB_PATH", db_path)
-    user_store._init_db()
     monkeypatch.setattr(api, "kb_engine_list", lambda tenant_id: [])
     monkeypatch.setattr(api, "kb_engine_create", lambda t, k, d: None)
     monkeypatch.setattr(api, "kb_engine_archive", lambda t, k: None)
@@ -44,8 +41,6 @@ def host_wired_client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.setenv("KNOWLEDGE_BASE__CHUNK_SIZE", "200")
     monkeypatch.setenv("KNOWLEDGE_BASE__CHUNK_OVERLAP", "0")
-    for mod in (user_store, audit):
-        monkeypatch.setattr(mod, "DB_PATH", db_path)
 
     indexed_chunks: dict[str, dict[str, str]] = {}
 
@@ -66,7 +61,6 @@ def host_wired_client(tmp_path, monkeypatch):
     monkeypatch.setattr(vector_store, "upsert", upsert)
     monkeypatch.setattr(vector_store, "search", search)
     monkeypatch.setattr(vector_store, "delete", delete)
-    user_store._init_db()
     app = FastAPI()
     app.include_router(api.router)
     return TestClient(app, raise_server_exceptions=True)

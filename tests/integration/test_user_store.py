@@ -21,8 +21,9 @@ DEFAULT_LEGACY_RE_EXPORT_DB_PATHS = {
 
 @pytest.fixture(autouse=True)
 def tmp_db(tmp_path, monkeypatch):
-    monkeypatch.setattr(user_store, "DB_PATH", tmp_path / "users.db")
-    apply_migrations(tmp_path / "users.db")
+    db = tmp_path / "users.db"
+    apply_migrations(db)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
 
 
 def test_create_user_returns_user():

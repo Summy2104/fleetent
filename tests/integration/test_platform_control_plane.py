@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi.testclient import TestClient
 
-import fleetent.user_store as us
 from tests.integration._migration_template import apply_migrations
 
 
@@ -17,7 +16,7 @@ def _cwd(tmp_path, monkeypatch):
 
 
 def _server(tmp_path, monkeypatch):
-    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
     apply_migrations(tmp_path / "users.db")
     monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
     monkeypatch.delenv("SLACK_APP_TOKEN", raising=False)

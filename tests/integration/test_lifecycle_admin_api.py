@@ -31,7 +31,6 @@ def _migrate(db_path):
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
     db_path = tmp_path / "users.db"
-    monkeypatch.setattr(us, "DB_PATH", db_path)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     _migrate(db_path)
     admin = us.create_user("Admin")

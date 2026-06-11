@@ -3,7 +3,6 @@ from fastapi.testclient import TestClient
 
 import fleetent.agent_store as agent_store
 import fleetent.auth as auth
-import fleetent.governance.audit_log as audit
 import fleetent.user_store as us
 from fleetent.server import app
 from tests.integration.test_migrations import apply_migrations
@@ -11,7 +10,8 @@ from tests.integration.test_migrations import apply_migrations
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
-    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
+    apply_migrations(tmp_path / "users.db")
     return TestClient(app)
 
 
@@ -41,7 +41,6 @@ def test_lifespan_loads_plugins(tmp_path, monkeypatch):
 
     db = tmp_path / "users.db"
     apply_migrations(db)
-    monkeypatch.setattr(us, "DB_PATH", db)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
 
     with patch("fleetent.server.load_plugins") as mock_load, TestClient(srv.app):
@@ -60,7 +59,6 @@ def test_lifespan_starts_platform_maintenance_scheduler(tmp_path, monkeypatch):
 
     db = tmp_path / "users.db"
     apply_migrations(db)
-    monkeypatch.setattr(us, "DB_PATH", db)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
 
     instance = MagicMock()
@@ -89,7 +87,6 @@ def test_lifespan_does_not_load_scheduled_tasks(tmp_path, monkeypatch):
 
     db = tmp_path / "users.db"
     apply_migrations(db)
-    monkeypatch.setattr(us, "DB_PATH", db)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
 
     with patch.object(schedule_store, "list_tasks") as list_mock, TestClient(srv.app):
@@ -109,8 +106,6 @@ def _agent_admin_env(tmp_path, monkeypatch):
     # platform-agent-lifecycle: create/update now materializes the agent home; isolate
     # FLEETENT_HOME to tmp so the seam never writes to the real data dir.
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
-    monkeypatch.setattr(us, "DB_PATH", db_path)
-    monkeypatch.setattr(audit, "DB_PATH", db_path)
     return db_path
 
 
