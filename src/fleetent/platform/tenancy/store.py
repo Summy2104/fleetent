@@ -1,19 +1,24 @@
 """SQLite-backed store for tenants and teams.
 
 All writes go through named parameters; schema is owned by Alembic (migrations 067-069).
+Connections go through db.py boundary (WAL + busy_timeout) via Settings().database_url.
 """
 
 from __future__ import annotations
 
 import datetime
-import sqlite3
 import uuid
 from typing import Any
 
-from fleetent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export for test monkeypatching
-
 _TENANT_COLS = "id, name, status, created_at, approver_user_id"
 _TEAM_COLS = "id, tenant_id, name, approver_user_id, created_at"
+
+
+def _db():
+    from fleetent.config import Settings
+    from fleetent.db import create_database
+
+    return create_database(Settings().database_url)
 
 
 # ── tenants ───────────────────────────────────────────────────────────────────
@@ -27,7 +32,7 @@ def create_tenant(
     """Create a new tenant.  ``id`` defaults to a new uuid if not supplied."""
     tenant_id = id if id is not None else str(uuid.uuid4())
     now = datetime.datetime.now(datetime.UTC).isoformat()
-    with _conn() as conn:
+    with _db().transaction() as conn:
         conn.execute(
             f"INSERT INTO tenants ({_TENANT_COLS}) VALUES"
             " (:id, :name, :status, :created_at, :approver_user_id)",
@@ -45,21 +50,21 @@ def create_tenant(
 
 
 def get_tenant(tenant_id: str) -> dict[str, Any] | None:
-    with _conn() as conn:
-        row = conn.execute(
-            f"SELECT {_TENANT_COLS} FROM tenants WHERE id = :id", {"id": tenant_id}
-        ).fetchone()
+    row = (
+        _db()
+        .execute(f"SELECT {_TENANT_COLS} FROM tenants WHERE id = :id", {"id": tenant_id})
+        .fetchone()
+    )
     return dict(row) if row else None
 
 
 def list_tenants() -> list[dict[str, Any]]:
-    with _conn() as conn:
-        rows = conn.execute(f"SELECT {_TENANT_COLS} FROM tenants ORDER BY created_at").fetchall()
+    rows = _db().execute(f"SELECT {_TENANT_COLS} FROM tenants ORDER BY created_at").fetchall()
     return [dict(r) for r in rows]
 
 
 def set_tenant_approver(tenant_id: str, approver_user_id: str | None) -> None:
-    with _conn() as conn:
+    with _db().transaction() as conn:
         conn.execute(
             "UPDATE tenants SET approver_user_id = :approver WHERE id = :id",
             {"approver": approver_user_id, "id": tenant_id},
@@ -77,7 +82,7 @@ def create_team(
     """Create a new team under ``tenant_id``.  ``id`` defaults to a new uuid."""
     team_id = id if id is not None else str(uuid.uuid4())
     now = datetime.datetime.now(datetime.UTC).isoformat()
-    with _conn() as conn:
+    with _db().transaction() as conn:
         conn.execute(
             f"INSERT INTO teams ({_TEAM_COLS}) VALUES"
             " (:id, :tenant_id, :name, :approver_user_id, :created_at)",
@@ -95,27 +100,29 @@ def create_team(
 
 
 def get_team(team_id: str) -> dict[str, Any] | None:
-    with _conn() as conn:
-        row = conn.execute(
-            f"SELECT {_TEAM_COLS} FROM teams WHERE id = :id", {"id": team_id}
-        ).fetchone()
+    row = (
+        _db().execute(f"SELECT {_TEAM_COLS} FROM teams WHERE id = :id", {"id": team_id}).fetchone()
+    )
     return dict(row) if row else None
 
 
 def list_teams(tenant_id: str | None = None) -> list[dict[str, Any]]:
-    with _conn() as conn:
-        if tenant_id is not None:
-            rows = conn.execute(
+    if tenant_id is not None:
+        rows = (
+            _db()
+            .execute(
                 f"SELECT {_TEAM_COLS} FROM teams WHERE tenant_id = :tid ORDER BY created_at",
                 {"tid": tenant_id},
-            ).fetchall()
-        else:
-            rows = conn.execute(f"SELECT {_TEAM_COLS} FROM teams ORDER BY created_at").fetchall()
+            )
+            .fetchall()
+        )
+    else:
+        rows = _db().execute(f"SELECT {_TEAM_COLS} FROM teams ORDER BY created_at").fetchall()
     return [dict(r) for r in rows]
 
 
 def set_team_approver(team_id: str, approver_user_id: str | None) -> None:
-    with _conn() as conn:
+    with _db().transaction() as conn:
         conn.execute(
             "UPDATE teams SET approver_user_id = :approver WHERE id = :id",
             {"approver": approver_user_id, "id": team_id},
@@ -129,20 +136,13 @@ def set_user_tenant(user_id: str, tenant_id: str) -> None:
     """Assign a user to a tenant.  Raises KeyError if either does not exist."""
     if get_tenant(tenant_id) is None:
         raise KeyError(f"Tenant not found: {tenant_id!r}")
-    with _conn() as conn:
-        result = conn.execute(
+    row = (
+        _db()
+        .execute(
             "UPDATE users SET tenant_id = :tenant_id WHERE id = :user_id RETURNING id",
             {"tenant_id": tenant_id, "user_id": user_id},
-        ).fetchone()
-    if result is None:
+        )
+        .fetchone()
+    )
+    if row is None:
         raise KeyError(f"User not found: {user_id!r}")
-
-
-# ── helpers ───────────────────────────────────────────────────────────────────
-
-
-def _conn() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn

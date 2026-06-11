@@ -72,6 +72,7 @@ graph TD
     memory_items
     approvals
     reflection_reports
+    budget_usage
   end
   subgraph KB["KB 关系库 kb.db ｜ agent 侧 · per-tenant"]
     knowledge_bases
@@ -131,7 +132,7 @@ erDiagram
 ```
 
 ### 3.3 per-agent 运行库（嵌入式 Y · `agent_state.db` · agent 侧）
-统一 MIGRATIONS（`runtime/agent_state_migrations.py`，单文件单 `user_version`）建 **10 张表**：`sessions`(会话元数据索引) · `traces`(append-only 运行轨迹) · `reflection_reports`(反思报告) · `memory_items`(per-user 语义记忆，**无 namespace 列**，agent 隔离靠物理库) · `approvals`/`approval_allowlist`(审批请求+门状态，**agent 全权真相源**，actor 为不透明标签) · `session_anti_flap`(压缩防抖，per session) · `sub_agent_runs`(子 agent 生命周期) · `memory_maintenance_proposals`(User Memory 维护建议) · `skill_proposals`(Skill 反思建议)。后四张由 `agent-runtime-db-routing-cleanup` 收编：`session_anti_flap`/`sub_agent_runs` 改经 `agent_scope` + `db.py`（去 `user_store.DB_PATH` + 裸 `sqlite3.connect`），`memory_maintenance_proposals`/`skill_proposals` 折进统一 `MIGRATIONS`（不再依赖 legacy `ensure_schema`）。
+统一 MIGRATIONS（`runtime/agent_state_migrations.py`，单文件单 `user_version`）建 **11 张表**：`sessions`(会话元数据索引) · `traces`(append-only 运行轨迹) · `reflection_reports`(反思报告) · `memory_items`(per-user 语义记忆，**无 namespace 列**，agent 隔离靠物理库) · `approvals`/`approval_allowlist`(审批请求+门状态，**agent 全权真相源**，actor 为不透明标签) · `session_anti_flap`(压缩防抖，per session) · `sub_agent_runs`(子 agent 生命周期) · `memory_maintenance_proposals`(User Memory 维护建议) · `skill_proposals`(Skill 反思建议) · `budget_usage`(预算滑窗累计，PK `(scope,key,period)`，**per-agent 物理隔离**，不落管理库)。后五张归属本 change 及前序 change：`session_anti_flap`/`sub_agent_runs` 改经 `agent_scope` + `db.py`（去 `user_store.DB_PATH` + 裸 `sqlite3.connect`），`memory_maintenance_proposals`/`skill_proposals` 折进统一 `MIGRATIONS`（不再依赖 legacy `ensure_schema`），`budget_usage` 由 `retire-raw-sqlite-connect` 从管理库迁入。
 
 ```mermaid
 erDiagram
@@ -161,6 +162,13 @@ erDiagram
   }
   skill_proposals {
     string status
+  }
+  budget_usage {
+    string scope
+    string key
+    string period
+    int turns
+    int tokens
   }
 ```
 

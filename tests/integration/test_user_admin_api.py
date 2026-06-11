@@ -3,8 +3,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import fleetent.auth as auth
-import fleetent.governance.audit_log as audit
-import fleetent.governance.blocklist as blocklist
 import fleetent.platform.user_management.api_key_store as aks
 import fleetent.platform.user_management.user_admin_api as api
 import fleetent.user_store as user_store
@@ -14,11 +12,8 @@ from tests.integration._migration_template import apply_migrations
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    for mod in (user_store, aks, audit, blocklist, im_user_store):
-        monkeypatch.setattr(mod, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
     apply_migrations(tmp_path / "users.db")
-    user_store._init_db()
-    im_user_store._init_db()
     app = FastAPI()
     app.include_router(api.router)
     return TestClient(app, raise_server_exceptions=True)

@@ -8,6 +8,7 @@ import fleetent.auth as auth
 import fleetent.governance.audit_log as audit
 import fleetent.platform.agent_statistics.stats_admin_api as api
 import fleetent.user_store as user_store
+from fleetent.db import create_database
 from tests.integration._migration_template import apply_migrations
 
 
@@ -15,17 +16,16 @@ from tests.integration._migration_template import apply_migrations
 def client(tmp_path_factory):
     mp = pytest.MonkeyPatch()
     tmp_path = tmp_path_factory.mktemp("db")
-    db_path = tmp_path / "users.db"
     managed_db = tmp_path / "managed.db"
     mp.setenv("ANTHROPIC_API_KEY", "test-key")
     # schedule_store (report scheduling) runs on the unified runtime; point it at a
     # migrated managed DB so scheduled_tasks exists.
     mp.setenv("DATABASE_URL", f"sqlite:///{managed_db}")
-    for mod in (user_store, audit):
-        mp.setattr(mod, "DB_PATH", db_path)
-    apply_migrations(db_path)
-    user_store._init_db()
     apply_migrations(managed_db)
+    # Patch user_store._db directly so _session_for() calls in test bodies work
+    # regardless of the autouse _isolate_database_url fixture deleting DATABASE_URL.
+    db_instance = create_database(f"sqlite:///{managed_db}")
+    mp.setattr(user_store, "_db", lambda: db_instance)
     mp.setattr(api, "fetch_traces", lambda **kw: [])
     mp.setattr(api, "fetch_approvals", lambda agent_id=None: [])
     mp.setattr(api, "agent_allowed_tools", lambda aid: [])

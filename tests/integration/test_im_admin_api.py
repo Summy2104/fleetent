@@ -22,10 +22,8 @@ from tests.integration._migration_template import apply_migrations
 def client(tmp_path, monkeypatch):
     db_path = tmp_path / "users.db"
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setattr(user_store, "DB_PATH", db_path)
-    monkeypatch.setattr(store, "DB_PATH", db_path)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     apply_migrations(db_path)
-    user_store._init_db()
     owner = user_store.admin_owner_id()
     store.upsert_connector(
         owner, "slack", config='{"bot_token": "xoxb-secret123", "app_token": "x"}'

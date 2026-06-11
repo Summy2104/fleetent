@@ -6,14 +6,12 @@ import pytest
 import fleetent.platform.im_gateway_management.connector_config as icc
 import fleetent.platform.im_gateway_management.connector_manager as mgr
 import fleetent.platform.im_gateway_management.connector_store as ics
-import fleetent.user_store as user_store
 from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture
 def db(tmp_path, monkeypatch):
-    monkeypatch.setattr(user_store, "DB_PATH", tmp_path / "users.db")
-    monkeypatch.setattr(ics, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
     monkeypatch.setattr(
         icc,
         "get_settings",

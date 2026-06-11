@@ -15,8 +15,6 @@ def tmp_db(tmp_path, monkeypatch):
     db = tmp_path / "users.db"
     apply_migrations(db)  # agent_store reads DATABASE_URL via the db boundary
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
-    monkeypatch.setattr(user_store, "DB_PATH", db)
-    monkeypatch.setattr(im_user_store, "DB_PATH", db)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
 

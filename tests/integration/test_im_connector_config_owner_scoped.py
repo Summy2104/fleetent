@@ -6,7 +6,6 @@ import types
 
 import pytest
 
-from fleetent import user_store
 from fleetent.platform.im_gateway_management import connector_config as cfg
 from fleetent.platform.im_gateway_management import connector_store as store
 from tests.integration._migration_template import apply_migrations
@@ -15,11 +14,9 @@ from tests.integration._migration_template import apply_migrations
 @pytest.fixture
 def db(tmp_path, monkeypatch):
     p = tmp_path / "users.db"
-    monkeypatch.setattr(user_store, "DB_PATH", p)
-    monkeypatch.setattr(store, "DB_PATH", p)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{p}")
     apply_migrations(p)
     now = datetime.datetime.now(datetime.UTC).isoformat()
-    user_store._init_db()
     with sqlite3.connect(str(p)) as c:
         c.execute(
             "INSERT INTO users (id, name, api_key, created_at, role)"

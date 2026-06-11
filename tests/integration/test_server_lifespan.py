@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-import fleetent.user_store as us
 from tests.integration._migration_template import apply_migrations
 
 
@@ -18,7 +17,7 @@ def isolate_runtime_config_files(tmp_path, monkeypatch):
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch, isolated_schedule_db):
-    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
     apply_migrations(tmp_path / "users.db")
     return TestClient(app_module().app)
 
@@ -31,7 +30,7 @@ def app_module():
 
 def test_health_includes_adapter_status(tmp_path, monkeypatch, isolated_schedule_db):
     """Health endpoint returns adapter presence flags; both False when no tokens."""
-    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
     apply_migrations(tmp_path / "users.db")
     monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
@@ -53,7 +52,7 @@ def test_health_adapter_flags_true_when_connectors_present(
     tmp_path, monkeypatch, isolated_schedule_db
 ):
     """Health reflects per-agent Slack + owner Telegram connector presence."""
-    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
     apply_migrations(tmp_path / "users.db")
 
     import fleetent.server as srv
@@ -78,7 +77,7 @@ def test_health_adapter_flags_true_when_connectors_present(
 
 def test_admin_im_router_mounted(tmp_path, monkeypatch, isolated_schedule_db):
     """`/admin/im/connectors` is mounted: unauthenticated request gets 401, not 404."""
-    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
     apply_migrations(tmp_path / "users.db")
     monkeypatch.chdir(tmp_path)
 

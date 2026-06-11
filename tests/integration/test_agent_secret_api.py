@@ -8,7 +8,6 @@ from fastapi.testclient import TestClient
 
 import fleetent.agent_store as agent_store
 import fleetent.auth as auth
-import fleetent.governance.audit_log as audit
 import fleetent.platform.agent_management_console.agent_admin_api as api
 import fleetent.user_store as user_store
 from fleetent.platform.connector_management import agent_mcp_server_store
@@ -25,9 +24,6 @@ def client(tmp_path, monkeypatch):
         "FLEETENT_SECRET_KEY",
         base64.urlsafe_b64encode(b"1" * 32).decode("ascii"),
     )
-    for mod in (user_store, audit):
-        monkeypatch.setattr(mod, "DB_PATH", db_path)
-    user_store._init_db()
     app = FastAPI()
     app.include_router(api.router)
     return TestClient(app, raise_server_exceptions=True)
