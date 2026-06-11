@@ -16,7 +16,7 @@ def _boom(*args, **kwargs):
     raise AssertionError("platform user_store must not be read on the runtime path")
 
 
-def _build_slack_handler(monkeypatch, agent_name, owner_id, config):
+def _build_slack_handler(monkeypatch, agent_name, config):
     routed = {}
 
     async def fake_route(msg):
@@ -38,7 +38,7 @@ def _build_slack_handler(monkeypatch, agent_name, owner_id, config):
 
     app.event = event_deco
     with patch("slack_bolt.async_app.AsyncApp", return_value=app):
-        slack.create_app(agent_name, owner_id, config)
+        slack.create_app(agent_name, config)
     return holder["app_mention"], routed
 
 
@@ -48,7 +48,7 @@ async def _say(text, thread_ts=None):
 
 async def test_slack_handler_resolves_identity_without_platform_db(monkeypatch):
     fn, routed = _build_slack_handler(
-        monkeypatch, "support", "ownerA", {"bot_token": "b", "app_token": "a"}
+        monkeypatch, "support", {"bot_token": "b", "app_token": "a"}
     )
     # Must not raise (no platform user_store read) and must use the native slack id.
     await fn({"user": "U_native", "text": "hi", "ts": "1", "channel": "C1"}, _say)
@@ -84,7 +84,7 @@ async def test_telegram_handler_resolves_identity_without_platform_db(monkeypatc
 
     with patch("telegram.ext.Application") as app_cls:
         app_cls.builder.return_value = FakeBuilder()
-        telegram.create_app("support", "ownerA", {"bot_token": "b"})
+        telegram.create_app("support", {"bot_token": "b"})
 
     handler = captured["handler"]
     fn = handler.callback

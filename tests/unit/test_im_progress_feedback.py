@@ -301,7 +301,6 @@ async def test_normalizer_passes_progress_func_to_run(monkeypatch):
 
     msg = normalizer.NormalizedMessage(
         platform="slack",
-        owner_id="",
         session_id="s1",
         user_id="u1",
         text="hi",
@@ -369,7 +368,6 @@ async def test_normalizer_without_progress_func_run_gets_none(monkeypatch):
 
     msg = normalizer.NormalizedMessage(
         platform="slack",
-        owner_id="",
         session_id="s1",
         user_id="u1",
         text="hi",
@@ -407,7 +405,7 @@ def _telegram_handler(monkeypatch, config=None):
 
     with patch("telegram.ext.Application") as mock_cls:
         mock_cls.builder.return_value = mock_builder
-        telegram.create_app("agent1", "ownerA", config)
+        telegram.create_app("agent1", config)
 
     handler = mock_app.add_handler.call_args[0][0]
     return handler, routed

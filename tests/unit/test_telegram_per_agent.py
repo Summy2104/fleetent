@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import fleetent.im_gateway.telegram as telegram
 
 
-def _capture_handler(monkeypatch, agent_name, owner_id, config):
+def _capture_handler(monkeypatch, agent_name, config):
     """Build the telegram app with a mocked Application builder; capture the handler."""
     mock_app = MagicMock()
     mock_builder = MagicMock()
@@ -16,7 +16,7 @@ def _capture_handler(monkeypatch, agent_name, owner_id, config):
 
     with patch("telegram.ext.Application") as mock_cls:
         mock_cls.builder.return_value = mock_builder
-        telegram.create_app(agent_name, owner_id, config)
+        telegram.create_app(agent_name, config)
 
     return mock_app.add_handler.call_args[0][0]
 
@@ -52,19 +52,18 @@ async def _run(handler_obj, update, monkeypatch):
 
 
 async def test_create_app_stamps_agent_and_owner(monkeypatch):
-    handler = _capture_handler(monkeypatch, "sales", "ownerA", {"bot_token": "b"})
+    handler = _capture_handler(monkeypatch, "sales", {"bot_token": "b"})
     captured = await _run(handler, _private_update("-100123"), monkeypatch)
     captured.assert_called_once()
     msg = captured.call_args[0][0]
     assert msg.agent_name == "sales"
-    assert msg.owner_id == "ownerA"
     assert msg.platform == "telegram"
 
 
 async def test_channel_filter_all_chats_forwarded(monkeypatch):
     # Channel filtering now handled by the normalizer via ConnectorAccess.allow_channels;
     # the Telegram handler forwards all messages regardless of channel.
-    handler = _capture_handler(monkeypatch, "sales", "ownerA", {"bot_token": "b"})
+    handler = _capture_handler(monkeypatch, "sales", {"bot_token": "b"})
     captured = await _run(handler, _private_update("-100999"), monkeypatch)
     captured.assert_called_once()  # forwarded to normalizer; access gate decides
 

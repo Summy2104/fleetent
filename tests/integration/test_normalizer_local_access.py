@@ -76,7 +76,6 @@ def _msg(replies, *, user_id="u1", channel_id="C1"):
 
     return normalizer.NormalizedMessage(
         platform="slack",
-        owner_id="",
         session_id="s1",
         user_id=user_id,
         text="hi",

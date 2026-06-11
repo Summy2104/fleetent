@@ -226,7 +226,7 @@ async def test_slack_create_app_returns_app_object(monkeypatch):
         import fleetent.im_gateway.slack as slack_mod
 
         result = slack_mod.create_app(
-            "support", "owner1", {"bot_token": "xoxb-fake", "app_token": "xapp-fake"}
+            "support", {"bot_token": "xoxb-fake", "app_token": "xapp-fake"}
         )
 
     assert result is mock_app_instance
@@ -253,7 +253,7 @@ async def test_telegram_create_app_returns_application_object(monkeypatch):
         mock_cls.builder.return_value = mock_builder
         import fleetent.im_gateway.telegram as tg_mod
 
-        result = tg_mod.create_app("support", "owner1", {"bot_token": "tg-fake-token"})
+        result = tg_mod.create_app("support", {"bot_token": "tg-fake-token"})
 
     assert result is mock_app
     mock_app.add_handler.assert_called_once()

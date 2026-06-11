@@ -74,7 +74,6 @@ async def _route_and_capture(monkeypatch, session_context):
 
     msg = normalizer.NormalizedMessage(
         platform="slack",
-        owner_id="",
         session_id="slack:thread:C9:300.3",
         user_id="U123",
         text="原始问题",
