@@ -14,6 +14,7 @@ dependency image then destroyed by `sweep_idle` once idle past `idle_hours`.
 
 from __future__ import annotations
 
+import hashlib
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -55,17 +56,52 @@ class _Entry:
     last_used: float
 
 
+# Total budget for the name-key segment that follows `sandbox-{scope}-`. The longest
+# scope prefix is `sandbox-session-` (16 chars); a 47-char budget keeps the full
+# container name within Docker's 63-char limit. Workspace subdir names (filesystem
+# limit 255) reuse the same budget so container and workspace derivation stay identical.
+_NAME_KEY_BUDGET = 47
+# Length of the collision-resisting hash suffix appended when truncation is required.
+# Derived from the full (untruncated) key so two keys sharing a >budget prefix but
+# differing in the truncated tail still map to distinct names.
+_HASH_SUFFIX_LEN = 12
+
+
 def _sanitise(raw: str) -> str:
-    """Reuse the client's safe-name policy + 48-char cap for the name key."""
-    return _SAFE_NAME.sub("-", raw)[:48]
+    """Apply the shared safe-name policy (no length cap)."""
+    return _SAFE_NAME.sub("-", raw)
+
+
+def _name_key(raw: str) -> str:
+    """Derive a collision-free, length-bounded name key from a full ownership key.
+
+    Short keys pass through the sanitiser verbatim (human-readable container /
+    workspace names for the common case). Once the sanitised key exceeds the
+    name-key budget, a `sha256` suffix computed over the **full untruncated** key is
+    appended to a truncated readable prefix, so two keys sharing a prefix longer than
+    the budget but differing only in the truncated tail still derive to distinct
+    names. The suffix is lowercase hex, keeping the result Docker-name-legal.
+
+    Args:
+        raw: The full, untruncated ownership key (session id or agent name).
+
+    Returns:
+        A sanitised name key no longer than ``_NAME_KEY_BUDGET`` chars.
+    """
+    sanitised = _sanitise(raw)
+    if len(sanitised) <= _NAME_KEY_BUDGET:
+        return sanitised
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:_HASH_SUFFIX_LEN]
+    prefix_budget = _NAME_KEY_BUDGET - _HASH_SUFFIX_LEN - 1  # 1 for the joining dash
+    return f"{sanitised[:prefix_budget]}-{digest}"
 
 
 def _container_name(scope: Scope, key: str) -> str:
-    return f"{SANDBOX_NAME_PREFIX}{scope.value}-{_sanitise(key)}"
+    return f"{SANDBOX_NAME_PREFIX}{scope.value}-{_name_key(key)}"
 
 
 def _agent_image_tag(key: str) -> str:
-    return _AGENT_IMAGE_TPL.format(key=_sanitise(key))
+    return _AGENT_IMAGE_TPL.format(key=_name_key(key))
 
 
 @dataclass
@@ -226,7 +262,7 @@ class SandboxManager:
         scope key. Idempotent: creates the dir tree if missing.
         """
         key = session_id if scope is Scope.SESSION else agent_name
-        ws_path = paths.workspaces_dir() / _sanitise(key)
+        ws_path = paths.workspaces_dir() / _name_key(key)
         # sandbox-hardening: never bind-mount a host dir under a sensitive root (a
         # misconfigured FLEETENT_HOME could otherwise expose ~/.ssh, /etc, etc.).
         # Checked before mkdir so a blocked path leaves no directory behind.
@@ -257,6 +293,10 @@ class SandboxManager:
         the commit is skipped (a warning is logged) and the container is destroyed
         directly — the next acquire reinstalls deps. Session scope never participates.
         """
+        # Imported lazily: workspace_gc imports _name_key from this module, so a
+        # top-level import here would close an import cycle.
+        from fleetent.integrations.sandbox import workspace_gc
+
         now = self.clock()
         cutoff = self.idle_hours * 3600
         stale = [
@@ -276,3 +316,15 @@ class SandboxManager:
                 )
             await self.backend.destroy_workspace(entry.workspace_id)
             self._registry.pop(_container_name(entry.scope, entry.key), None)
+
+        # sandbox-workspace-gc: prune stale entries inside every known agent-scope
+        # workspace dir by mtime (the dir is cross-session shared, so it is never
+        # deleted wholesale, unlike session scope). Run after reclaim so a just-swept
+        # agent's dir is included. Best-effort — a prune failure must not abort sweep.
+        agent_keys = {e.key for e in self._registry.values() if e.scope is Scope.AGENT}
+        agent_keys.update(e.key for e in stale)
+        for key in agent_keys:
+            try:
+                workspace_gc.gc_agent_workspace(key)
+            except OSError as exc:
+                _logger.warn("sandbox_agent_workspace_gc_failed", key=key, error=str(exc))

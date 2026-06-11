@@ -723,6 +723,27 @@ async def test_save_releases_sandboxes_for_removed_sessions(sessions_dir, monkey
     assert spy.released == ["a", "b"]
 
 
+async def test_release_reclaims_session_workspace_dir(sessions_dir, monkeypatch, tmp_path):
+    """A maintenance-removed session's workspace host dir is GC'd wholesale alongside
+    its container release (sandbox-workspace-gc, reached via the sandbox public API)."""
+    from fleetent import paths
+    from fleetent.integrations.sandbox.manager import _name_key
+
+    ws_root = tmp_path / "workspaces"
+    ws_root.mkdir()
+    monkeypatch.setattr(paths, "workspaces_dir", lambda: ws_root)
+    session_id = "user:U1/chan#a"
+    sess_ws = ws_root / _name_key(session_id)
+    (sess_ws / "uploads").mkdir(parents=True)
+    (sess_ws / "uploads" / "salary.xlsx").write_text("secret")
+
+    monkeypatch.setattr(session_mgr, "maybe_run_maintenance", lambda **kw: [session_id])
+    _install_spy_manager(monkeypatch, _SpyManager())
+    await session_mgr.save("s", [{"role": "user", "content": "x"}])
+
+    assert not sess_ws.exists()
+
+
 async def test_save_no_removed_sessions_does_not_release(sessions_dir, monkeypatch):
     monkeypatch.setattr(session_mgr, "maybe_run_maintenance", lambda **kw: [])
     spy = _install_spy_manager(monkeypatch, _SpyManager())

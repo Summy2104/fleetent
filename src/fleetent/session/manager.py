@@ -715,12 +715,18 @@ async def _release_sandboxes(session_ids: list[str]) -> None:
     """
     if not session_ids:
         return
+    from fleetent.integrations.sandbox import gc_session_workspace
     from fleetent.tools.builtin_tools import _get_manager
 
     manager = _get_manager()
     # Per-id isolation: one stuck container must not block reclaiming the others.
     for session_id in session_ids:
         try:
+            # Release the container first, then reclaim the host workspace dir
+            # (sandbox-workspace-gc): a session is terminal at TTL expiry, so its
+            # whole workspace dir — uploads + artefacts — is removed. Reached via the
+            # sandbox public API, not the manager internals.
             await manager.release_session(session_id)
+            gc_session_workspace(session_id)
         except Exception as exc:  # noqa: BLE001 — sandbox reclaim must not break persistence
             _logger.warn("sandbox_release_failed", session_id=session_id, error=str(exc))

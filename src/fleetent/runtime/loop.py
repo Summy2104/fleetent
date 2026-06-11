@@ -89,6 +89,46 @@ ProgressFunc = Callable[[dict[str, Any]], Awaitable[None]]
 _RUN_CODE_TOOL = "run_code"
 
 
+def runtime_sandbox_capable(
+    tool_name: str,
+    effective_mode: Mode | None,
+    *,
+    workspace_mount: bool,
+) -> bool:
+    """Whether a tool call is *actually* contained in the sandbox this run.
+
+    Feeds the action gate's ``sandbox_capable`` input from runtime containment rather
+    than a static tool-name lookup (sandbox-containment-gating). A tool is capable
+    only when:
+
+    - it is sandbox-backed (``is_sandbox_backed``), AND
+    - the effective sandbox mode is not OFF (``None`` is treated as OFF — fail
+      closed), AND
+    - it really executes inside the container this call. ``run_code`` execs in the
+      container whenever the mode is on. The file tools (``read_file`` etc.) instead
+      degrade to the host fence when the backend cannot bind-mount the workspace
+      (``workspace_mount=False``) — matching ``file_tools._select_backend`` — so they
+      are only contained when ``workspace_mount`` is available.
+
+    Args:
+        tool_name: The tool call's name (from the server-side registry, not LLM args).
+        effective_mode: The run's resolved sandbox mode, or None when unresolved.
+        workspace_mount: Whether the active backend bind-mounts the host workspace.
+
+    Returns:
+        True iff the tool is structurally isolated in the container for this call.
+    """
+    if not is_sandbox_backed(tool_name):
+        return False
+    if effective_mode is None or effective_mode is Mode.OFF:
+        return False
+    if tool_name == _RUN_CODE_TOOL:
+        return True
+    # File tools share the host workspace fence (no namespace) when the backend
+    # cannot bind-mount, so they are not contained then.
+    return workspace_mount
+
+
 def _filter_code_execution(
     schemas: list[Any],
     sandbox_mode: Mode | None,
@@ -628,6 +668,8 @@ async def _plan_run_slots(
     permission_gate_high_timeout: int | None = None,
     approval_routing: Any | None = None,
     outbound_connectors: dict[str, Any] | None = None,
+    sandbox_effective_mode: Mode | None = None,
+    sandbox_workspace_mount: bool = False,
 ) -> list[_PlanSlot]:
     """Phase one for run() (D2/D3/D6): serial, original order — produce one slot
     per tool_call. Guardrail, pre_tool_use hook, and (medium/high) approval are decided
@@ -745,7 +787,11 @@ async def _plan_run_slots(
                 governance.action_gate_medium_mode if governance is not None else "approval"
             ),
             high_mode=(governance.action_gate_high_mode if governance is not None else "approval"),
-            sandbox_capable=is_sandbox_backed(name),
+            sandbox_capable=runtime_sandbox_capable(
+                name,
+                sandbox_effective_mode,
+                workspace_mount=sandbox_workspace_mount,
+            ),
             force_ask=force_ask,
         )
         if gate_mode is ActionMode.REJECT:
@@ -1609,6 +1655,18 @@ async def _run_inner(
     # allowed_tools filter above).
     schemas = _filter_code_execution(schemas, sandbox_mode, agent_features)
 
+    # sandbox-containment-gating: read the active backend's bind-mount capability once
+    # per run (not per gate decision) so the action gate's sandbox_capable reflects
+    # whether file tools truly run in-container this run. Best-effort: a manager build
+    # failure must not break the run — degrade to "not mounted" (fail closed to gate).
+    try:
+        from fleetent.tools.builtin_tools import _get_manager
+
+        sandbox_workspace_mount = _get_manager().backend.capabilities.workspace_mount
+    except Exception as exc:  # noqa: BLE001 — capability probe is auxiliary, fail closed
+        _logger.debug("sandbox_capability_probe_failed", error=str(exc))
+        sandbox_workspace_mount = False
+
     # SB3 D5: execution-time context channel for run_code (session/agent/features),
     # injected out-of-band only into tools that opt in; harmless for the rest.
     tool_context = ToolContext(
@@ -1881,6 +1939,8 @@ async def _run_inner(
             permission_gate_high_timeout=permission_gate_high_timeout,
             approval_routing=approval_routing,
             outbound_connectors=outbound_connectors,
+            sandbox_effective_mode=sandbox_mode,
+            sandbox_workspace_mount=sandbox_workspace_mount,
         )
         pending = [s for s in slots if s.placeholder is None]
         # Progress is emitted once per execution batch (not per tool during planning):

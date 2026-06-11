@@ -6,7 +6,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 from fleetent.integrations.sandbox.backend import BackendCapabilities
 from fleetent.integrations.sandbox.config import NetworkPolicy, SandboxResources
-from fleetent.integrations.sandbox.manager import SandboxManager, Scope
+from fleetent.integrations.sandbox.manager import (
+    SandboxManager,
+    Scope,
+    _container_name,
+    _name_key,
+)
 
 
 def _mock_client(
@@ -60,6 +65,55 @@ def test_manager_construction_injectable():
     assert mgr.scope is Scope.AGENT
     assert mgr.idle_hours == 5.0
     assert mgr.resources_for(Scope.AGENT).read_only is False
+
+
+# --- collision-free key derivation (sandbox-lifecycle / workspace-mount) ----
+
+
+def test_name_key_short_key_is_readable_unhashed():
+    """A short key passes through the sanitiser verbatim (no hash suffix), keeping
+    container/workspace names human-readable for the common case."""
+    assert _name_key("user-U1-chan-a") == "user-U1-chan-a"
+    assert _name_key("bot") == "bot"
+
+
+def test_name_key_long_same_prefix_keys_do_not_collide():
+    """Two keys that share a prefix longer than the truncation budget but differ
+    only in the tail MUST derive to distinct name keys (no collision)."""
+    prefix = "a" * 60  # well past the 48-char legacy cap
+    key_a = prefix + "-session-AAAA"
+    key_b = prefix + "-session-BBBB"
+    derived_a = _name_key(key_a)
+    derived_b = _name_key(key_b)
+    assert derived_a != derived_b
+
+
+def test_name_key_long_key_within_docker_limit():
+    """A long key's derived name key stays within the budget so the full container
+    name (`sandbox-session-<key>`) fits Docker's 63-char limit."""
+    long_key = "x" * 200
+    derived = _name_key(long_key)
+    # `sandbox-session-` is the longest scope prefix (16 chars).
+    assert len(f"sandbox-session-{derived}") <= 63
+
+
+def test_name_key_hash_suffix_is_docker_legal():
+    """The hash suffix must be lowercase hex so the container name stays Docker-legal."""
+    derived = _name_key("y" * 200)
+    # Derived names only use [a-z0-9._-]; verify the hashed suffix has no illegal chars.
+    import re as _re
+
+    assert _re.fullmatch(r"[a-zA-Z0-9_.-]+", derived) is not None
+
+
+def test_container_name_long_same_prefix_keys_distinct():
+    """Container names for two long same-prefix keys differ end-to-end."""
+    prefix = "z" * 60
+    name_a = _container_name(Scope.SESSION, prefix + "-A")
+    name_b = _container_name(Scope.SESSION, prefix + "-B")
+    assert name_a != name_b
+    assert name_a.startswith("sandbox-session-")
+    assert len(name_a) <= 63
 
 
 # --- Section 4: acquire (naming / create / reuse) --------------------------
@@ -169,6 +223,24 @@ async def test_sweep_idle_commits_then_destroys_idle_agent():
     client.destroy_workspace.assert_awaited_once_with("cid-new")
     # commit before destroy
     assert client.commit_workspace.await_args.args[0] == "cid-new"
+
+
+async def test_sweep_idle_prunes_agent_workspaces(monkeypatch):
+    """sweep_idle prunes every known agent-scope workspace dir by mtime (workspace-gc),
+    keyed on the agent name — even for agents not yet idle-reclaimed."""
+    from fleetent.integrations.sandbox import workspace_gc
+
+    pruned: list[str] = []
+    monkeypatch.setattr(
+        workspace_gc, "gc_agent_workspace", lambda key, **kw: pruned.append(key) or 0
+    )
+    client = _mock_client()
+    now = [1000.0]
+    mgr = _manager(client, scope=Scope.AGENT, idle_hours=10.0, clock=lambda: now[0])
+    await mgr.acquire(Scope.AGENT, session_id="s1", agent_name="bot")
+    now[0] = 1000.0 + 100  # still recent, not reclaimed
+    await mgr.sweep_idle()
+    assert "bot" in pruned
 
 
 async def test_sweep_idle_skips_recent_agent():

@@ -100,6 +100,39 @@ async def test_host_path_outside_workspace_not_reachable(
         await _cleanup(mgr, Scope.SESSION, "itest-sec", "bot")
 
 
+async def test_same_prefix_long_keys_isolated_containers_and_workspaces(
+    workspace_root: Path,
+) -> None:
+    """Two session keys sharing a >budget prefix but differing only in the truncated
+    tail acquire distinct containers and distinct host workspaces — one's write to
+    /workspace is invisible to the other's container (no collision)."""
+    prefix = "u" * 60  # past the 47-char name-key budget
+    key_a = prefix + "-AAAA"
+    key_b = prefix + "-BBBB"
+    mgr = SandboxManager(backend=SandboxClient(), scope=Scope.SESSION)
+    try:
+        name_a = mgr.container_name(Scope.SESSION, key_a, "bot")
+        name_b = mgr.container_name(Scope.SESSION, key_b, "bot")
+        assert name_a != name_b
+
+        ws_a = await mgr.acquire(Scope.SESSION, session_id=key_a, agent_name="bot")
+        ws_b = await mgr.acquire(Scope.SESSION, session_id=key_b, agent_name="bot")
+        assert ws_a != ws_b
+
+        await mgr.backend.exec(ws_a, "echo from-A > /workspace/owner.txt")
+        # B's container must not see A's file (distinct host workspace dir mounted).
+        result = await mgr.backend.exec(ws_b, "cat /workspace/owner.txt")
+        assert "from-A" not in result.stdout
+        assert result.exit_code != 0
+
+        host_a = workspace_root / mgr.workspace_host_path(Scope.SESSION, key_a, "bot").name
+        host_b = workspace_root / mgr.workspace_host_path(Scope.SESSION, key_b, "bot").name
+        assert host_a != host_b
+    finally:
+        await _cleanup(mgr, Scope.SESSION, key_a, "bot")
+        await _cleanup(mgr, Scope.SESSION, key_b, "bot")
+
+
 async def test_session_snapshot_env_continuity(workspace_root: Path) -> None:
     """An exported var set in one session exec is visible in the next (snapshot)."""
     mgr = SandboxManager(backend=SandboxClient(), scope=Scope.SESSION)

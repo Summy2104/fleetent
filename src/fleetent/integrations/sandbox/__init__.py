@@ -36,6 +36,10 @@ from fleetent.integrations.sandbox.output_spill import cap_or_spill
 from fleetent.integrations.sandbox.output_truncation import truncate_stream
 from fleetent.integrations.sandbox.redaction import redact_secrets
 from fleetent.integrations.sandbox.secrets import build_sandbox_env, is_sensitive_name
+from fleetent.integrations.sandbox.workspace_gc import (
+    gc_agent_workspace,
+    gc_session_workspace,
+)
 
 __all__ = [
     "BackendCapabilities",
@@ -54,6 +58,8 @@ __all__ = [
     "build_sandbox_env",
     "cap_or_spill",
     "cleanup_orphans",
+    "gc_agent_workspace",
+    "gc_session_workspace",
     "get_effective_mode",
     "is_code_execution_enabled",
     "is_sensitive_name",
