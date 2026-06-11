@@ -1,5 +1,6 @@
 import pytest
 
+import fleetent.platform.user_management as user_management
 import fleetent.platform.user_management.api_key_store as aks
 import fleetent.user_store as user_store
 from tests.integration._migration_template import apply_migrations
@@ -51,13 +52,13 @@ def test_authenticate_legacy_single_column_key(db):
 
 def test_migrate_api_keys_moves_legacy(db):
     u = user_store.create_user("Eve")
-    moved = user_store.migrate_api_keys()
+    moved = user_management.migrate_api_keys()
     assert u.id in moved
     keys = aks.list_keys(u.id)
     assert len(keys) == 1
     assert keys[0]["scope"] == ["*"]
     # migration is idempotent
-    assert user_store.migrate_api_keys() == []
+    assert user_management.migrate_api_keys() == []
 
 
 def test_get_by_api_key_still_works(db):

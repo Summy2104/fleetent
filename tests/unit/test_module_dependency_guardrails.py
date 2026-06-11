@@ -32,17 +32,11 @@ _ALLOWED_VECTOR_STORE_EXTERNAL_IMPORTS = {
 
 # Top-level shared modules (e.g. ``fleetent.user_store``) sit outside the component
 # allowlist the direct-edge guard checks, so an agent runtime module that imports one
-# of them — which in turn imports ``fleetent.platform`` — leaks the platform dependency
-# transitively without tripping the direct check. This set pins the *currently known*
-# leaks so any NEW transitive leak fails the build; the ratchet test also fails if a
-# pinned module stops leaking, forcing this set to shrink as the leaks get fixed.
-_KNOWN_TRANSITIVE_PLATFORM_LEAKS: set[str] = {
-    # user_store.authenticate()/get_or_create_im_user() hard-import
-    # fleetent.platform.user_management / im_gateway_management unconditionally, so the
-    # standalone `fleetent agent run` Bearer-auth path (agent_app:_authenticate) reaches
-    # platform. Remove once those imports degrade gracefully when platform is absent.
-    "fleetent.user_store",
-}
+# of them could leak a ``fleetent.platform`` dependency transitively without tripping
+# the direct check. This set pins any *currently known* leaks so NEW transitive leaks
+# fail the build immediately; the ratchet test also fails if a pinned module stops
+# leaking, forcing this set to shrink as the leaks get fixed.
+_KNOWN_TRANSITIVE_PLATFORM_LEAKS: set[str] = set()
 
 
 def _iter_imported_modules(node: ast.AST) -> list[str]:
@@ -111,8 +105,7 @@ def test_audit_log_toplevel_infra_boundary() -> None:
     assert module.__file__ is not None
     located = Path(module.__file__)
     assert located.name == "audit_log.py", (
-        f"fleetent.audit_log must be at the top-level src/fleetent/audit_log.py, "
-        f"got {located}"
+        f"fleetent.audit_log must be at the top-level src/fleetent/audit_log.py, got {located}"
     )
     assert located.parent.name == "fleetent", (
         f"fleetent.audit_log must be a top-level infrastructure module, "
@@ -127,8 +120,7 @@ def test_audit_log_toplevel_infra_boundary() -> None:
         "violating its infrastructure-only boundary"
     )
     assert not _is_imported_from(["fleetent.platform"], imported_modules), (
-        "fleetent.audit_log imports fleetent.platform, "
-        "violating its infrastructure-only boundary"
+        "fleetent.audit_log imports fleetent.platform, violating its infrastructure-only boundary"
     )
 
 
@@ -349,19 +341,13 @@ _CONTROL_FACE_PREFIXES = (
 )
 
 # ③编排 face sub-packages (must not import ②控制 subpackages)
-_ORCHESTRATION_FACE_PREFIXES = (
-    "fleetent.platform.agent_lifecycle",
-)
+_ORCHESTRATION_FACE_PREFIXES = ("fleetent.platform.agent_lifecycle",)
 
 # ④摄取 face sub-packages
-_INGEST_FACE_PREFIXES = (
-    "fleetent.knowledge_base.ingest",
-)
+_INGEST_FACE_PREFIXES = ("fleetent.knowledge_base.ingest",)
 
 # ①边缘 face sub-packages
-_EDGE_FACE_PREFIXES = (
-    "fleetent.im_gateway",
-)
+_EDGE_FACE_PREFIXES = ("fleetent.im_gateway",)
 
 # Pairs (source_prefix, forbidden_target_prefix) — cross-face violations that have not
 # yet been fixed; each entry represents an architectural debt to eliminate.
@@ -370,13 +356,25 @@ _KNOWN_PLANE_BOUNDARY_VIOLATIONS: set[tuple[str, str]] = {
     # ③编排.materialize aggregates from all ②控制 stores to build agent.yaml
     # Fix: move materialize/secret_store/credential_slots to platform/ shared level
     ("fleetent.platform.agent_lifecycle.materialize", "fleetent.platform.connector_management"),
-    ("fleetent.platform.agent_lifecycle.materialize", "fleetent.platform.knowledge_base_management"),
-    ("fleetent.platform.agent_lifecycle.materialize", "fleetent.platform.model_provider_management"),
+    (
+        "fleetent.platform.agent_lifecycle.materialize",
+        "fleetent.platform.knowledge_base_management",
+    ),
+    (
+        "fleetent.platform.agent_lifecycle.materialize",
+        "fleetent.platform.model_provider_management",
+    ),
     ("fleetent.platform.agent_lifecycle.materialize", "fleetent.platform.skill_management"),
     # ②控制 modules call ③编排 to trigger re-materialization after store changes
     ("fleetent.platform.skill_management.skill_admin_api", "fleetent.platform.agent_lifecycle"),
-    ("fleetent.platform.knowledge_base_management.kb_admin_api", "fleetent.platform.agent_lifecycle"),
-    ("fleetent.platform.agent_management_console.agent_admin_api", "fleetent.platform.agent_lifecycle"),
+    (
+        "fleetent.platform.knowledge_base_management.kb_admin_api",
+        "fleetent.platform.agent_lifecycle",
+    ),
+    (
+        "fleetent.platform.agent_management_console.agent_admin_api",
+        "fleetent.platform.agent_lifecycle",
+    ),
 }
 
 
@@ -458,10 +456,7 @@ def test_no_new_plane_boundary_violations() -> None:
     stale = {
         (known_src, known_tgt)
         for known_src, known_tgt in _KNOWN_PLANE_BOUNDARY_VIOLATIONS
-        if not any(
-            src.startswith(known_src) and tgt.startswith(known_tgt)
-            for src, tgt in found
-        )
+        if not any(src.startswith(known_src) and tgt.startswith(known_tgt) for src, tgt in found)
     }
     assert not stale, (
         f"These plane boundary violations no longer exist; remove them from the allowlist: {stale}"
@@ -471,6 +466,7 @@ def test_no_new_plane_boundary_violations() -> None:
 # ---------------------------------------------------------------------------
 # Reflection two-way guardrail
 # ---------------------------------------------------------------------------
+
 
 def test_reflection_engine_does_not_import_reflection_management() -> None:
     """reflection/ engine MUST NOT import platform.reflection_management (management API)."""

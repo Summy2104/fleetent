@@ -31,6 +31,23 @@
 - **THEN** 若其中出现对业务能力模块或 `fleetent.platform.*` 的 import，测试 SHALL 失败
 - **AND** `structured_logging` SHALL 可经顶层路径 `fleetent.structured_logging` 导入
 
+### Requirement: 顶层共享模块无 platform 传递泄漏
+
+顶层共享模块（如 `fleetent.user_store`）若被 agent 运行时模块 import，且其自身再 import `fleetent.platform.*`，则构成 agent → shared module → platform 的传递泄漏。护栏 SHALL 检测这类泄漏。已知泄漏集合（`_KNOWN_TRANSITIVE_PLATFORM_LEAKS`）SHALL 默认为空；任何新泄漏都必须直接失败，而任何已 pin 泄漏一旦消失，也必须强制把 allowlist 收缩。
+
+#### Scenario: user_store no longer pinned
+- **WHEN** 运行传递 platform 泄漏护栏
+- **THEN** `_KNOWN_TRANSITIVE_PLATFORM_LEAKS` 不包含 `fleetent.user_store`
+- **AND** 当前 allowlist 为空
+
+#### Scenario: New transitive leak is rejected
+- **WHEN** 某顶层共享模块新增 `fleetent.platform.*` import 且被 agent 运行时模块可达
+- **THEN** 护栏测试失败并指出泄漏链路
+
+#### Scenario: Ratchet only shrinks
+- **WHEN** 某已 pin 的泄漏模块不再 import platform
+- **THEN** 护栏测试失败并要求把它移出 allowlist
+
 ### Requirement: intelligence 聚合层移除
 
 重构收口后，`src/fleetent/intelligence/` 目录及其 re-export shim SHALL 被删除；原 intelligence 内容 SHALL 以顶层组件形式存在。CLAUDE.md 架构契约 SHALL 与之一致（移除 intelligence 节点、平铺组件、记录依赖规则与三条判据）。
@@ -43,4 +60,3 @@
 #### Scenario: 无残留旧路径 import
 - **WHEN** 全仓检查 import
 - **THEN** SHALL NOT 存在对 `fleetent.intelligence.*` 的 import（shim 已删）
-

@@ -138,37 +138,10 @@ def _get_by_legacy_key(api_key: str) -> User | None:
     return _row_to_user(row) if row else None
 
 
-def migrate_api_keys() -> list[str]:
-    """Move legacy users.api_key values into the api_keys table. Idempotent.
-
-    Returns the list of user ids whose keys were migrated this run.
-    """
-    from fleetent.platform.user_management import api_key_store
-
-    db = _db()
-    moved: list[str] = []
-    users = db.execute("SELECT id, api_key FROM users WHERE api_key IS NOT NULL").fetchall()
-    existing = {r["key_hash"] for r in db.execute("SELECT key_hash FROM api_keys").fetchall()}
-    for row in users:
-        user_id, api_key = row["id"], row["api_key"]
-        if api_key_store._hash(api_key) in existing:
-            continue
-        import datetime as _dt
-
-        with db.transaction() as conn:
-            conn.execute(
-                """INSERT OR IGNORE INTO api_keys
-                       (user_id, key_hash, prefix, scope, note, created_at, call_count)
-                   VALUES (:user_id, :key_hash, :prefix, '["*"]', 'migrated', :created_at, 0)""",
-                {
-                    "user_id": user_id,
-                    "key_hash": api_key_store._hash(api_key),
-                    "prefix": api_key[:11],
-                    "created_at": _dt.datetime.now(_dt.UTC).isoformat(),
-                },
-            )
-        moved.append(user_id)
-    return moved
+def list_legacy_api_keys() -> list[tuple[str, str]]:
+    """Return legacy ``users.api_key`` values as ``(user_id, plaintext_key)`` pairs."""
+    rows = _db().execute("SELECT id, api_key FROM users WHERE api_key IS NOT NULL").fetchall()
+    return [(row["id"], row["api_key"]) for row in rows]
 
 
 def get_by_id(user_id: str) -> User | None:
@@ -339,12 +312,6 @@ def _update_field(user_id: str, column: str, value: object) -> None:
         conn.execute(
             f"UPDATE users SET {column} = :val WHERE id = :id", {"val": value, "id": user_id}
         )
-
-
-def get_or_create_im_user(owner_id: str, platform: str, platform_user_id: str) -> "User":
-    from fleetent.platform import im_gateway_management as im
-
-    return im.get_or_create(owner_id, platform, platform_user_id)
 
 
 def _row_to_user(row: dict) -> User:
