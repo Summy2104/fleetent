@@ -1,15 +1,28 @@
 """Sandbox container lifecycle management (SB2).
 
-Owns the "scope→tier" mapping and the container lifecycle atop SB3's context
-channel and SB4's `SandboxResources`. A `SandboxManager` instance holds its own
-in-memory registry (no module-global mutable state, per CLAUDE.md): tests build
-isolated instances and inject a mocked `SandboxClient` and clock.
+Owns the container lifecycle atop SB3's context channel and SB4's
+`SandboxResources`. A `SandboxManager` instance holds its own in-memory registry
+(no module-global mutable state, per CLAUDE.md): tests build isolated instances and
+inject a mocked `SandboxClient` and clock.
 
-Container naming encodes ownership as `sandbox-{scope}-{sanitised key}` (the
-`sandbox-` prefix constant lives in `sandbox_client.py`, the lowest layer, shared
-with SB8's orphan enumeration). `session` scope keeps the hardened tier and is
-reclaimed on `release_session`; `agent` scope runs writable, is committed to a
-dependency image then destroyed by `sweep_idle` once idle past `idle_hours`.
+Two orthogonal dimensions (sandbox-workspace-scope-split):
+
+- **`workspace_scope`** (`WorkspaceScope`, `session` default | `agent`) controls only
+  *data isolation* granularity: the container name key, the workspace host dir key,
+  and the container's liveness ownership (process-isolation boundary). Container
+  naming encodes it as `sandbox-{workspace_scope}-{sanitised key}` (the `sandbox-`
+  prefix constant lives in `backend.py`, the lowest layer, shared with SB8's orphan
+  enumeration). Multi-user deployments MUST run `session` (a configured `agent` is
+  corrected to `session` with a warning, since `agent` data isolation would share one
+  workspace dir/container across all users — cross-user leakage).
+- **per-agent dependency image persistence** is an *independent* switch. When enabled
+  on a `persist_workspace` backend, dependencies are baked offline into an immutable
+  deps image (declarative `setup_command`); runtime containers boot read-only from it.
+  Image selection is decoupled from `workspace_scope` and never derives from it.
+
+`docker commit`-from-running-container is **retired** from the lifecycle hot path:
+`sweep_idle` only reclaims idle containers (no commit), and `_image_for` queries the
+declaratively built immutable deps image, never a from-running commit product.
 """
 
 from __future__ import annotations
@@ -41,20 +54,35 @@ from fleetent.structured_logging import get_logger
 
 _logger = get_logger("sandbox.manager")
 
-# Image tag committed for an agent-scope container's dependencies; the next
-# acquire boots from it when present, else falls back to the client default.
-_AGENT_IMAGE_TPL = "fleetent-sandbox-agent-{key}:latest"
+# Image tag for an agent's declaratively built immutable dependency image. Distinct
+# from the retired commit-from-running tag (`fleetent-sandbox-agent-*`): this one is
+# produced by an offline build of `setup_command` (sandbox-image-persistence), never
+# by committing a container that ran end-user code. The next acquire boots read-only
+# from it when present, else falls back to the backend default base image.
+_DEPS_IMAGE_TPL = "fleetent-sandbox-deps-{key}:latest"
 
 
-class Scope(StrEnum):
+class WorkspaceScope(StrEnum):
+    """Data-isolation granularity (sandbox-workspace-scope).
+
+    Controls only the container name key, workspace host dir key, and container
+    liveness ownership — NOT dependency image persistence (that is an independent
+    per-agent switch, see `sandbox-image-persistence`).
+    """
+
     SESSION = "session"
     AGENT = "agent"
+
+
+# Re-export alias: keeps existing `Scope` / `Scope.SESSION` / `Scope.AGENT` imports
+# working after the rename (the shim carries no logic, per CLAUDE.md).
+Scope = WorkspaceScope
 
 
 @dataclass
 class _Entry:
     workspace_id: str
-    scope: Scope
+    scope: WorkspaceScope
     key: str
     last_used: float
 
@@ -99,28 +127,57 @@ def _name_key(raw: str) -> str:
     return f"{sanitised[:prefix_budget]}-{digest}"
 
 
-def _container_name(scope: Scope, key: str) -> str:
+def _container_name(scope: WorkspaceScope, key: str) -> str:
     return f"{SANDBOX_NAME_PREFIX}{scope.value}-{_name_key(key)}"
 
 
-def _agent_image_tag(key: str) -> str:
-    return _AGENT_IMAGE_TPL.format(key=_name_key(key))
+def _deps_image_tag(key: str) -> str:
+    """Tag of the declaratively built immutable deps image for an agent key."""
+    return _DEPS_IMAGE_TPL.format(key=_name_key(key))
+
+
+def resolve_workspace_scope(configured: WorkspaceScope, *, multi_user: bool) -> WorkspaceScope:
+    """Return the effective workspace_scope, enforcing the multi-user guard.
+
+    Multi-user deployments MUST run `session` data isolation: a configured `agent`
+    scope would share one workspace dir/container across all users (cross-user
+    leakage). When `multi_user` is True a configured `agent` is corrected to `session`
+    and a warning is logged — never silently accepted. Single-user (standalone) runs
+    keep the configured scope (an `agent` scope there has no cross-user surface and
+    enables cross-session dependency reuse).
+    """
+    if multi_user and configured is WorkspaceScope.AGENT:
+        _logger.warn("sandbox_workspace_scope_agent_corrected_multi_user", forced="session")
+        return WorkspaceScope.SESSION
+    return configured
 
 
 @dataclass
 class SandboxManager:
     """Per-process sandbox lifecycle owner; registry is instance state.
 
-    `scope` / `idle_hours` / `resources_by_scope` default from config but are
+    Two orthogonal dimensions (sandbox-workspace-scope-split):
+
+    - `scope` (the `workspace_scope`) sets data-isolation granularity only.
+    - `image_persistence` (+ `setup_command`) is the independent per-agent
+      dependency-image switch; image selection never derives from `scope`.
+
+    `multi_user` reflects the run shape: platform-hosted shared IM ingress sets it
+    True, standalone single-user `fleetent agent run` leaves it False. When True a
+    configured `agent` workspace_scope is corrected to `session` (cross-user leakage
+    guard). `scope` / `idle_hours` / `resources_by_scope` default from config but are
     fully injectable for isolated tests; `clock` is injectable so idle sweeps are
     deterministic without real time.
     """
 
     backend: BaseSandboxBackend = field(default_factory=DockerBackend)
-    scope: Scope = field(default=Scope.SESSION)
+    scope: WorkspaceScope = field(default=WorkspaceScope.SESSION)
     idle_hours: float = 2.0
-    resources_by_scope: dict[Scope, SandboxResources] | None = None
+    resources_by_scope: dict[WorkspaceScope, SandboxResources] | None = None
     skill_mount: SkillMountConfig | None = None
+    multi_user: bool = False
+    image_persistence: bool = False
+    setup_command: str | None = None
     clock: Callable[[], float] = time.monotonic
     _registry: dict[str, _Entry] = field(default_factory=dict, init=False)
 
@@ -131,17 +188,23 @@ class SandboxManager:
             lifecycle = load_sandbox_lifecycle()
             by_scope = build_resources_by_scope()
             self.resources_by_scope = {
-                Scope.SESSION: by_scope[Scope.SESSION.value],
-                Scope.AGENT: by_scope[Scope.AGENT.value],
+                WorkspaceScope.SESSION: by_scope[WorkspaceScope.SESSION.value],
+                WorkspaceScope.AGENT: by_scope[WorkspaceScope.AGENT.value],
             }
             # Honour config defaults only when the caller left them unset.
-            if self.scope == Scope.SESSION and self.idle_hours == 2.0:
-                self.scope = Scope(lifecycle.scope)
+            if self.scope == WorkspaceScope.SESSION and self.idle_hours == 2.0:
+                self.scope = WorkspaceScope(lifecycle.workspace_scope)
                 self.idle_hours = lifecycle.idle_hours
         else:
-            self.resources_by_scope = {Scope(k): v for k, v in self.resources_by_scope.items()}
+            self.resources_by_scope = {
+                WorkspaceScope(k): v for k, v in self.resources_by_scope.items()
+            }
+        # Multi-user guard (sandbox-workspace-scope): `agent` data isolation shares one
+        # workspace dir/container across all users — a cross-user leakage foot-gun. In a
+        # multi-user run shape, force `session` and warn rather than silently accept it.
+        self.scope = resolve_workspace_scope(self.scope, multi_user=self.multi_user)
 
-    def resources_for(self, scope: Scope) -> SandboxResources:
+    def resources_for(self, scope: WorkspaceScope) -> SandboxResources:
         assert self.resources_by_scope is not None
         return self.resources_by_scope[scope]
 
@@ -173,23 +236,29 @@ class SandboxManager:
 
     async def acquire(
         self,
-        scope: Scope,
+        scope: WorkspaceScope,
         session_id: str,
         agent_name: str,
         env: dict[str, str] | None = None,
     ) -> str:
-        """Return a workspace id for (scope, key), reusing or creating as needed.
+        """Return a workspace id for (workspace_scope, key), reusing or creating.
 
-        The key is the session id for `session` scope, the agent name for `agent`
-        scope. A registry hit refreshes last_used; a live container found by name
-        is re-adopted; otherwise a new container is created with the scope's tier
-        (and, for agent scope, a committed dependency image when one exists).
+        Two independent dimensions (sandbox-workspace-scope-split):
+
+        - **Container name / workspace path** derive from `workspace_scope`: the key is
+          the session id for `session` scope, the agent name for `agent` scope. A
+          registry hit refreshes last_used; a live container found by name is
+          re-adopted; otherwise a new container is created with the scope's tier.
+        - **Image selection** is a *separate* branch (`_image_for`) driven only by the
+          per-agent image-persistence switch + backend capability — never by
+          `workspace_scope`. It is always keyed on the agent name (the deps image is
+          per-agent), so the same image choice results under either workspace_scope.
 
         `env` (SB5) is the already-filtered injection mapping threaded to
         create_workspace on a fresh create; reused/re-adopted containers keep the
         env they were created with. None preserves SB2's clean-environment default.
         """
-        key = session_id if scope is Scope.SESSION else agent_name
+        key = session_id if scope is WorkspaceScope.SESSION else agent_name
         name = _container_name(scope, key)
         now = self.clock()
 
@@ -208,7 +277,9 @@ class SandboxManager:
             _logger.warn("sandbox_registry_stale_container", name=name)
             self._registry.pop(name, None)
 
-        image = await self._image_for(scope, key)
+        # Image selection走独立分支:只看 per-agent 持久化开关 + 后端能力,与 workspace_scope
+        # 解耦,且始终以 agent_name 为键(deps 镜像是 per-agent 的)。
+        image = await self._image_for(agent_name)
         # workspace_mount capability: only backends that bind-mount a host dir get a
         # host path; others run with an instance-local /workspace (degraded, logged).
         if self.backend.capabilities.workspace_mount:
@@ -256,17 +327,33 @@ class SandboxManager:
         self._registry[name] = _Entry(workspace_id, scope, key, now)
         return workspace_id
 
-    async def _image_for(self, scope: Scope, key: str) -> str | None:
-        """Agent scope boots from its committed image when present, else default.
+    async def _image_for(self, agent_name: str) -> str | None:
+        """Select the boot image, decoupled from `workspace_scope`.
 
-        Only meaningful on backends that can persist deps into an image; backends
-        without `persist_workspace` always boot from the base image (None).
+        Image selection is driven only by the per-agent image-persistence switch and
+        the backend's `persist_workspace` capability (sandbox-image-persistence), never
+        by `workspace_scope`:
+
+        - persistence off, or backend cannot persist → base image (None).
+        - persistence on + `persist_workspace` backend → the declaratively built
+          *immutable* deps image when it exists (`fleetent-sandbox-deps-<key>`), else
+          base image. Never queries a from-running `docker commit` product.
+
+        For a `persist_workspace=False` backend (e.g. microsandbox, no image-commit
+        primitive) hot-start is not achievable: it always returns None and logs that
+        the dependency runtime is re-readied from the base image, so callers never
+        mistake it for a persisted hot-start image.
         """
-        if scope is not Scope.AGENT:
+        if not self.image_persistence:
             return None
         if not self.backend.capabilities.persist_workspace:
+            _logger.info(
+                "sandbox_image_persistence_unavailable_no_hot_start",
+                backend=self.backend.name,
+                note="dependency runtime re-readied from base image each acquire",
+            )
             return None
-        tag = _agent_image_tag(key)
+        tag = _deps_image_tag(agent_name)
         if await self.backend.image_exists(tag):
             return tag
         return None
@@ -279,28 +366,28 @@ class SandboxManager:
         """
         self._registry.pop(name, None)
 
-    def container_name(self, scope: Scope, session_id: str, agent_name: str) -> str:
+    def container_name(self, scope: WorkspaceScope, session_id: str, agent_name: str) -> str:
         """Public name resolver so callers (run_code) can forget by name on abort."""
-        key = session_id if scope is Scope.SESSION else agent_name
+        key = session_id if scope is WorkspaceScope.SESSION else agent_name
         return _container_name(scope, key)
 
-    def invalidate(self, scope: Scope, session_id: str, agent_name: str) -> None:
+    def invalidate(self, scope: WorkspaceScope, session_id: str, agent_name: str) -> None:
         """Drop the (scope, key) registration so the next acquire rebuilds.
 
         Called by exec-layer self-healing when a command hits a missing-container
         error after acquire (the verify-then-die race window).
         """
-        key = session_id if scope is Scope.SESSION else agent_name
+        key = session_id if scope is WorkspaceScope.SESSION else agent_name
         self._registry.pop(_container_name(scope, key), None)
 
-    def workspace_host_path(self, scope: Scope, session_id: str, agent_name: str) -> Path:
+    def workspace_host_path(self, scope: WorkspaceScope, session_id: str, agent_name: str) -> Path:
         """Return (creating) the host dir mounted at ``/workspace`` for (scope, key).
 
         Shared by `acquire` (the bind-mount source) and the file tools' host-degrade
         backend (the path fence root), so both agree on exactly one directory per
         scope key. Idempotent: creates the dir tree if missing.
         """
-        key = session_id if scope is Scope.SESSION else agent_name
+        key = session_id if scope is WorkspaceScope.SESSION else agent_name
         ws_path = paths.workspaces_dir() / _name_key(key)
         # sandbox-hardening: never bind-mount a host dir under a sensitive root (a
         # misconfigured FLEETENT_HOME could otherwise expose ~/.ssh, /etc, etc.).
@@ -316,21 +403,24 @@ class SandboxManager:
         No-op for sessions with no session-scope container (e.g. agent scope);
         other sessions' containers are untouched.
         """
-        name = _container_name(Scope.SESSION, session_id)
+        name = _container_name(WorkspaceScope.SESSION, session_id)
         entry = self._registry.get(name)
-        if entry is None or entry.scope is not Scope.SESSION:
+        if entry is None or entry.scope is not WorkspaceScope.SESSION:
             return
         await self.backend.destroy_workspace(entry.workspace_id)
         self._registry.pop(name, None)
 
     async def sweep_idle(self) -> None:
-        """Reclaim agent-scope containers idle past `idle_hours`.
+        """Reclaim `agent`-scope containers idle past `idle_hours` (pure destroy).
 
-        On a backend that supports `persist_workspace`, each reclaimed container is
-        committed to its dependency image first, then destroyed (commit-then-destroy)
-        so the next acquire can boot from it. On a backend without that capability,
-        the commit is skipped (a warning is logged) and the container is destroyed
-        directly — the next acquire reinstalls deps. Session scope never participates.
+        Container liveness is the only thing reclaimed here: a stale container is
+        destroyed directly. `docker commit`-from-running-container is retired from the
+        lifecycle hot path (sandbox-image-persistence) — committing a container that
+        ran end-user code would bake that user's rootfs/site-packages into the next
+        boot image, and runtime `--read-only` / `--network none` are powerless over
+        already-baked layers. Dependency persistence is now an independent offline
+        declarative build (see `_image_for`), fully decoupled from container liveness.
+        `session` scope never participates in idle reclaim.
         """
         # Imported lazily: workspace_gc imports _name_key from this module, so a
         # top-level import here would close an import cycle.
@@ -341,18 +431,9 @@ class SandboxManager:
         stale = [
             entry
             for entry in self._registry.values()
-            if entry.scope is Scope.AGENT and (now - entry.last_used) > cutoff
+            if entry.scope is WorkspaceScope.AGENT and (now - entry.last_used) > cutoff
         ]
-        persist = self.backend.capabilities.persist_workspace
         for entry in stale:
-            if persist:
-                await self.backend.commit_workspace(entry.workspace_id, _agent_image_tag(entry.key))
-            else:
-                _logger.warn(
-                    "sandbox_idle_reclaim_no_persist",
-                    backend=self.backend.name,
-                    key=entry.key,
-                )
             await self.backend.destroy_workspace(entry.workspace_id)
             self._registry.pop(_container_name(entry.scope, entry.key), None)
 
@@ -360,7 +441,7 @@ class SandboxManager:
         # workspace dir by mtime (the dir is cross-session shared, so it is never
         # deleted wholesale, unlike session scope). Run after reclaim so a just-swept
         # agent's dir is included. Best-effort — a prune failure must not abort sweep.
-        agent_keys = {e.key for e in self._registry.values() if e.scope is Scope.AGENT}
+        agent_keys = {e.key for e in self._registry.values() if e.scope is WorkspaceScope.AGENT}
         agent_keys.update(e.key for e in stale)
         for key in agent_keys:
             try:

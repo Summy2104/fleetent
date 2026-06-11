@@ -31,8 +31,10 @@ SETTINGS_PATH: Path = paths.platform_yaml_path()
 _EXEC_TIMEOUT_MIN = 1
 _EXEC_TIMEOUT_MAX = 600
 
-# SB2 lifecycle defaults. `scope` selects container granularity (session-local vs
-# per-agent), `idle_hours` is the agent-scope idle TTL before sweep_idle reclaims.
+# SB2 lifecycle defaults. `workspace_scope` selects data-isolation granularity
+# (session-local vs per-agent); `idle_hours` is the agent-scope idle TTL before
+# sweep_idle reclaims. (sandbox-workspace-scope-split: `scope` renamed to
+# `workspace_scope`; the legacy `scope` key is still read for back-compat.)
 _DEFAULT_SCOPE = "session"
 _VALID_SCOPES = ("session", "agent")
 _DEFAULT_IDLE_HOURS = 2.0
@@ -59,11 +61,13 @@ class NetworkPolicy(StrEnum):
 class SandboxLifecycle:
     """SB2 container-lifecycle policy from the `sandbox:` section.
 
-    `scope` ("session" | "agent") sets container granularity; `idle_hours` is the
-    agent-scope idle TTL. SB4 owns resource fields; these two are SB2's additions.
+    `workspace_scope` ("session" | "agent") sets *data-isolation* granularity only
+    (sandbox-workspace-scope-split); `idle_hours` is the agent-scope idle TTL. SB4
+    owns resource fields; these two are SB2's additions. Dependency image persistence
+    is an independent per-agent switch (see `sandbox-image-persistence`), not here.
     """
 
-    scope: str = _DEFAULT_SCOPE
+    workspace_scope: str = _DEFAULT_SCOPE
     idle_hours: float = _DEFAULT_IDLE_HOURS
 
 
@@ -189,16 +193,19 @@ def load_sandbox_resources(path: Path | None = None) -> SandboxResources:
 
 
 def load_sandbox_lifecycle(path: Path | None = None) -> SandboxLifecycle:
-    """Load SB2's `sandbox.scope` / `sandbox.idle_hours`, falling back per field.
+    """Load SB2's `sandbox.workspace_scope` / `sandbox.idle_hours`, falling back per field.
 
-    An unrecognised scope or a non-positive idle_hours logs a warning and falls
-    back to its default rather than being silently accepted.
+    An unrecognised workspace_scope or a non-positive idle_hours logs a warning and
+    falls back to its default rather than being silently accepted. The legacy
+    `sandbox.scope` key (sandbox-workspace-scope-split predecessor) is read and mapped
+    to `workspace_scope` with a one-time warning so existing deployments keep working;
+    an explicit `workspace_scope` wins over the legacy key when both are present.
     """
     sandbox = _read_sandbox_section(path or SETTINGS_PATH)
     if sandbox is None:
         return SandboxLifecycle()
     return SandboxLifecycle(
-        scope=_load_scope(sandbox, _DEFAULT_SCOPE),
+        workspace_scope=_load_workspace_scope(sandbox, _DEFAULT_SCOPE),
         idle_hours=_load_positive_float(sandbox, "idle_hours", _DEFAULT_IDLE_HOURS),
     )
 
@@ -236,13 +243,23 @@ def build_resources_by_scope(path: Path | None = None) -> dict[str, SandboxResou
     return {_DEFAULT_SCOPE: base, "agent": agent}
 
 
-def _load_scope(section: dict[str, object], default: str) -> str:
-    if "scope" not in section:
+def _load_workspace_scope(section: dict[str, object], default: str) -> str:
+    """Resolve `workspace_scope`, reading the legacy `scope` key for back-compat.
+
+    Precedence: explicit `workspace_scope` > legacy `scope` (warned once) > default.
+    An unrecognised value on either key falls back to the default rather than being
+    silently accepted.
+    """
+    key = "workspace_scope"
+    if "workspace_scope" not in section and "scope" in section:
+        _logger.warn("sandbox_scope_key_deprecated", use="workspace_scope")
+        key = "scope"
+    if key not in section:
         return default
-    value = section["scope"]
+    value = section[key]
     if isinstance(value, str) and value in _VALID_SCOPES:
         return value
-    _logger.warn("sandbox_scope_invalid", value=repr(value), falling_back=default)
+    _logger.warn("sandbox_workspace_scope_invalid", value=repr(value), falling_back=default)
     return default
 
 

@@ -9,6 +9,7 @@ from fleetent.integrations.sandbox.config import NetworkPolicy, SandboxResources
 from fleetent.integrations.sandbox.manager import (
     SandboxManager,
     Scope,
+    WorkspaceScope,
     _container_name,
     _name_key,
 )
@@ -212,17 +213,17 @@ async def test_release_session_ignores_agent_scope():
     client.destroy_workspace.assert_not_awaited()
 
 
-async def test_sweep_idle_commits_then_destroys_idle_agent():
+async def test_sweep_idle_destroys_idle_agent_without_commit():
+    """sweep_idle reclaims an idle agent container by pure destroy — no
+    commit-from-running (sandbox-image-persistence retires that hot path)."""
     client = _mock_client()
     now = [1000.0]
     mgr = _manager(client, idle_hours=1.0, clock=lambda: now[0])
     await mgr.acquire(Scope.AGENT, session_id="s1", agent_name="bot")
     now[0] = 1000.0 + 2 * 3600  # 2h later, > idle_hours
     await mgr.sweep_idle()
-    client.commit_workspace.assert_awaited_once()
+    client.commit_workspace.assert_not_awaited()
     client.destroy_workspace.assert_awaited_once_with("cid-new")
-    # commit before destroy
-    assert client.commit_workspace.await_args.args[0] == "cid-new"
 
 
 async def test_sweep_idle_prunes_agent_workspaces(monkeypatch):
@@ -264,37 +265,40 @@ async def test_sweep_idle_ignores_session_scope():
     client.destroy_workspace.assert_not_awaited()
 
 
-# --- Section 6: agent dependency固化 + image reuse -------------------------
+# --- Section 6: declarative deps image selection (image persistence) -------
 
 
-async def test_sweep_idle_commits_agent_image_tag():
-    client = _mock_client()
-    now = [0.0]
-    mgr = _manager(client, idle_hours=1.0, clock=lambda: now[0])
-    await mgr.acquire(Scope.AGENT, session_id="s1", agent_name="bot")
-    now[0] = 10 * 3600
-    await mgr.sweep_idle()
-    tag = client.commit_workspace.await_args.args[1]
-    assert tag == "fleetent-sandbox-agent-bot:latest"
-
-
-async def test_acquire_agent_uses_committed_image_when_present():
-    """If the committed image exists, the next acquire boots from it."""
+async def test_acquire_uses_declarative_deps_image_when_present():
+    """With per-agent image persistence on, acquire boots from the declaratively built
+    immutable deps image when it exists — keyed on the agent name, not a commit tag."""
     client = _mock_client()
     client.image_exists = AsyncMock(return_value=True)
-    mgr = _manager(client)
+    mgr = _manager(client, image_persistence=True)
     await mgr.acquire(Scope.AGENT, session_id="s1", agent_name="bot")
     _, kwargs = client.create_workspace.call_args
-    assert kwargs["image"] == "fleetent-sandbox-agent-bot:latest"
+    assert kwargs["image"] == "fleetent-sandbox-deps-bot:latest"
+    # queried the declarative deps tag, never a from-running commit tag
+    assert client.image_exists.await_args.args[0] == "fleetent-sandbox-deps-bot:latest"
 
 
-async def test_acquire_agent_falls_back_to_default_image_when_absent():
+async def test_acquire_falls_back_to_base_image_when_no_deps_image():
     client = _mock_client()
     client.image_exists = AsyncMock(return_value=False)
-    mgr = _manager(client)
+    mgr = _manager(client, image_persistence=True)
     await mgr.acquire(Scope.AGENT, session_id="s1", agent_name="bot")
     _, kwargs = client.create_workspace.call_args
     assert kwargs["image"] is None
+
+
+async def test_acquire_session_scope_also_uses_deps_image_when_enabled():
+    """Image selection is decoupled from workspace_scope: even a `session`-scope
+    acquire boots from the per-agent deps image when persistence is on."""
+    client = _mock_client()
+    client.image_exists = AsyncMock(return_value=True)
+    mgr = _manager(client, image_persistence=True)
+    await mgr.acquire(Scope.SESSION, session_id="s1", agent_name="bot")
+    _, kwargs = client.create_workspace.call_args
+    assert kwargs["image"] == "fleetent-sandbox-deps-bot:latest"
 
 
 # --- SB5: env passthrough ---------------------------------------------------
@@ -365,8 +369,8 @@ async def test_acquire_workspace_subdir_is_sanitised(monkeypatch, tmp_path):
 # --- capability degradation (sandbox-backend-abstraction) ------------------
 
 
-async def test_sweep_idle_skips_commit_when_persist_unsupported():
-    """persist_workspace=False: idle reclaim destroys without committing, and warns."""
+async def test_sweep_idle_never_commits_even_on_persist_backend():
+    """commit-from-running is fully retired: idle reclaim never commits on any backend."""
     client = _mock_client(persist_workspace=False)
     now = [1000.0]
     mgr = _manager(client, idle_hours=1.0, clock=lambda: now[0])
@@ -377,10 +381,11 @@ async def test_sweep_idle_skips_commit_when_persist_unsupported():
     client.destroy_workspace.assert_awaited_once_with("cid-new")
 
 
-async def test_acquire_agent_skips_image_lookup_when_persist_unsupported():
-    """persist_workspace=False: agent scope never looks up a committed image."""
+async def test_acquire_skips_image_lookup_when_persist_unsupported():
+    """persist_workspace=False (e.g. microsandbox): even with image persistence on, no
+    deps image is looked up — hot-start is not achievable, boot from base image."""
     client = _mock_client(persist_workspace=False)
-    mgr = _manager(client, scope=Scope.AGENT)
+    mgr = _manager(client, scope=Scope.AGENT, image_persistence=True)
     await mgr.acquire(Scope.AGENT, session_id="s1", agent_name="bot")
     client.image_exists.assert_not_awaited()
     _, kwargs = client.create_workspace.call_args
@@ -440,3 +445,100 @@ async def test_manager_invalidate_removes_registry_entry():
     client.create_workspace = AsyncMock(return_value="cid-after-invalidate")
     ws2 = await mgr.acquire(Scope.SESSION, "s1", "agent-a")
     assert ws2 == "cid-after-invalidate"
+
+
+# --- sandbox-workspace-scope-split: WorkspaceScope naming + decoupling ------
+
+
+def test_scope_is_workspace_scope_alias():
+    """`Scope` is preserved as a re-export alias of `WorkspaceScope` (#3 compat)."""
+    assert Scope is WorkspaceScope
+    assert WorkspaceScope.SESSION == "session"
+    assert WorkspaceScope.AGENT == "agent"
+
+
+async def test_image_selection_independent_of_workspace_scope():
+    """Container name/path key derives from workspace_scope, but image selection does
+    NOT: under the same image-persistence toggle + backend capability, `session` and
+    `agent` workspace_scope resolve to the same image choice."""
+    client_session = _mock_client()
+    client_session.image_exists = AsyncMock(return_value=False)
+    mgr_session = _manager(client_session, image_persistence=True)
+    await mgr_session.acquire(WorkspaceScope.SESSION, session_id="s1", agent_name="bot")
+    _, kw_session = client_session.create_workspace.call_args
+
+    client_agent = _mock_client()
+    client_agent.image_exists = AsyncMock(return_value=False)
+    mgr_agent = _manager(client_agent, image_persistence=True)
+    await mgr_agent.acquire(WorkspaceScope.AGENT, session_id="s1", agent_name="bot")
+    _, kw_agent = client_agent.create_workspace.call_args
+
+    # No declarative image present → both fall back to the base image regardless of scope.
+    assert kw_session["image"] == kw_agent["image"]
+    assert kw_session["image"] is None
+
+
+async def test_image_selection_off_when_persistence_disabled():
+    """With per-agent image persistence off, no declarative image is even looked up,
+    independent of workspace_scope."""
+    client = _mock_client()
+    client.image_exists = AsyncMock(return_value=True)
+    mgr = _manager(client, image_persistence=False)
+    await mgr.acquire(WorkspaceScope.AGENT, session_id="s1", agent_name="bot")
+    client.image_exists.assert_not_awaited()
+    _, kwargs = client.create_workspace.call_args
+    assert kwargs["image"] is None
+
+
+# --- sandbox-workspace-scope-split: multi-user forces session ---------------
+
+
+def test_resolve_workspace_scope_multi_user_corrects_agent():
+    """resolve_workspace_scope forces `session` and warns when multi_user + agent."""
+    from unittest.mock import patch
+
+    from fleetent.integrations.sandbox import manager as manager_mod
+    from fleetent.integrations.sandbox.manager import resolve_workspace_scope
+
+    with patch.object(manager_mod, "_logger") as mock_log:
+        eff = resolve_workspace_scope(WorkspaceScope.AGENT, multi_user=True)
+    assert eff is WorkspaceScope.SESSION
+    mock_log.warn.assert_called_once()
+    assert mock_log.warn.call_args.args[0] == "sandbox_workspace_scope_agent_corrected_multi_user"
+
+
+def test_resolve_workspace_scope_single_user_keeps_agent():
+    from fleetent.integrations.sandbox.manager import resolve_workspace_scope
+
+    assert resolve_workspace_scope(WorkspaceScope.AGENT, multi_user=False) is WorkspaceScope.AGENT
+
+
+def test_resolve_workspace_scope_session_unchanged():
+    from fleetent.integrations.sandbox.manager import resolve_workspace_scope
+
+    assert (
+        resolve_workspace_scope(WorkspaceScope.SESSION, multi_user=True) is WorkspaceScope.SESSION
+    )
+
+
+def test_manager_multi_user_forces_session_scope():
+    """A manager built multi_user with a configured `agent` scope ends up `session`."""
+    client = _mock_client()
+    mgr = _manager(client, scope=WorkspaceScope.AGENT, multi_user=True)
+    assert mgr.scope is WorkspaceScope.SESSION
+
+
+def test_manager_single_user_keeps_agent_scope():
+    client = _mock_client()
+    mgr = _manager(client, scope=WorkspaceScope.AGENT, multi_user=False)
+    assert mgr.scope is WorkspaceScope.AGENT
+
+
+async def test_container_name_key_from_workspace_scope():
+    """The container name key still derives from workspace_scope (session→session_id,
+    agent→agent_name), unchanged by the image dimension."""
+    client = _mock_client()
+    mgr = _manager(client, image_persistence=True)
+    await mgr.acquire(WorkspaceScope.SESSION, session_id="sess-A", agent_name="bot")
+    _, kwargs = client.create_workspace.call_args
+    assert kwargs["name"] == "sandbox-session-sess-A"

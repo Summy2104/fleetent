@@ -145,8 +145,29 @@ class BaseSandboxBackend(ABC):
     # ── capability-gated surface (safe defaults for backends without it) ──────
 
     async def commit_workspace(self, workspace_id: str, image_tag: str) -> None:
-        """Persist a workspace's deps into an image (persist_workspace backends)."""
+        """Persist a workspace's deps into an image (persist_workspace backends).
+
+        Retired from the lifecycle hot path (sandbox-image-persistence): committing a
+        running container that executed end-user code bakes that user's rootfs into the
+        next boot image, and runtime hardening cannot reach already-baked layers.
+        Dependency persistence is now `build_deps_image` (declarative offline build).
+        Kept only for backward-compatible callers; the manager no longer calls it.
+        """
         raise NotImplementedError(f"{self.name} backend does not support commit_workspace")
+
+    async def build_deps_image(
+        self, image_tag: str, setup_command: str, base_image: str | None = None
+    ) -> None:
+        """Declaratively build an *immutable* dependency image (persist_workspace only).
+
+        Runs `setup_command` in a closed offline build (no end-user session data) on top
+        of `base_image`, producing an immutable image tagged `image_tag` that runtime
+        containers boot read-only from (sandbox-image-persistence). This is the only
+        sanctioned dependency-persistence primitive: it never commits a running
+        container. Backends without `persist_workspace` do not implement it (the default
+        raises so a miswired caller fails loudly rather than silently no-op).
+        """
+        raise NotImplementedError(f"{self.name} backend does not support build_deps_image")
 
     async def image_exists(self, image_tag: str) -> bool:
         """Whether a committed dependency image exists (persist_workspace backends)."""

@@ -78,12 +78,26 @@ def init_sandbox_manager(agent: object | None = None) -> SandboxManager:
 
     resolved = agent if isinstance(agent, AgentFile) else None
     skill_mount = None
+    image_persistence = False
+    setup_command: str | None = None
     if resolved is not None:
         # Per-agent override of the skills bind-mount (sandbox-skill-mount); None lets
         # the manager fall back to the platform `sandbox.skill_mount` defaults.
         sm = resolved.sandbox.skill_mount
         skill_mount = SkillMountConfig(enabled=sm.enabled, read_only=sm.read_only, source=sm.source)
-    _MANAGER = SandboxManager(backend=create_backend(resolved), skill_mount=skill_mount)
+        # Per-agent dependency-image persistence (sandbox-image-persistence): an
+        # independent switch from workspace_scope. Default off keeps prior behaviour.
+        image_persistence = resolved.sandbox.image_persistence
+        setup_command = resolved.sandbox.setup_command
+    # `fleetent agent run` is a single-user standalone process, so multi_user stays
+    # False here (the platform-hosted shared-IM construction site owns the multi-user
+    # signal); workspace_scope therefore honours config without correction.
+    _MANAGER = SandboxManager(
+        backend=create_backend(resolved),
+        skill_mount=skill_mount,
+        image_persistence=image_persistence,
+        setup_command=setup_command,
+    )
     return _MANAGER
 
 

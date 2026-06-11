@@ -34,7 +34,7 @@ from fleetent.integrations.sandbox.enablement import (
     resolve_effective_mode,
 )
 from fleetent.integrations.sandbox.maintenance import start_idle_sweep, stop_idle_sweep
-from fleetent.integrations.sandbox.manager import SandboxManager, Scope
+from fleetent.integrations.sandbox.manager import SandboxManager, Scope, WorkspaceScope
 from fleetent.integrations.sandbox.output_spill import cap_or_spill
 from fleetent.integrations.sandbox.output_truncation import truncate_stream
 from fleetent.integrations.sandbox.redaction import redact_secrets
@@ -57,6 +57,7 @@ __all__ = [
     "SandboxManager",
     "SandboxResources",
     "Scope",
+    "WorkspaceScope",
     "SkillMount",
     "SkillMountConfig",
     "load_skill_mount_config",

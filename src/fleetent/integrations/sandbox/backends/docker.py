@@ -363,6 +363,35 @@ class DockerBackend(BaseSandboxBackend):
             raise RuntimeError(f"docker commit failed: {stderr.decode().strip()}")
         _logger.info("sandbox_committed", container_id=workspace_id[:12], tag=image_tag)
 
+    async def build_deps_image(
+        self, image_tag: str, setup_command: str, base_image: str | None = None
+    ) -> None:
+        """Build an immutable deps image offline from `setup_command` (no commit).
+
+        Pipes a minimal Dockerfile (`FROM <base>` + `RUN <setup_command>`) to
+        `docker build -t <image_tag> -` (sandbox-image-persistence). The build runs in
+        a closed environment with no end-user session data, so the resulting image
+        contains only the declared dependencies — it is immutable and never carries a
+        prior session's writes (unlike the retired `docker commit`-from-running path).
+        Raises on a non-zero build so the caller does not believe deps were baked.
+        """
+        base = base_image or self._image
+        dockerfile = f"FROM {base}\nRUN {setup_command}\n"
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            "build",
+            "-t",
+            image_tag,
+            "-",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate(input=dockerfile.encode())
+        if proc.returncode != 0:
+            raise RuntimeError(f"docker build (deps image) failed: {stderr.decode().strip()}")
+        _logger.info("sandbox_deps_image_built", tag=image_tag, base=base)
+
     async def image_exists(self, image_tag: str) -> bool:
         """Return whether a local image with `image_tag` exists (never raising).
 

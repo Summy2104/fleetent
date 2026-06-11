@@ -7,9 +7,13 @@ is **lazy-imported** inside each method so a deployment that selects the Docker
 backend never loads it (and a missing package degrades `available()` to False rather
 than crashing import).
 
-Capability stance: `persist_workspace=False` (no image-commit primitive — `Snapshot`
-has different semantics, deferred), `workspace_mount=True` (`Volume.bind`),
-`orphan_cleanup=True` (`Sandbox.list`).
+Capability stance: `persist_workspace=False` — no image-build/commit primitive, so
+declarative dependency-image hot-start (sandbox-image-persistence) is **not achievable**
+on this backend. Dependencies are re-readied at runtime from the base image each
+acquire; `build_deps_image` is intentionally not implemented (the base default raises)
+and the manager never queries a deps image for this backend (it logs that hot-start is
+not available). `workspace_mount=True` (`Volume.bind`), `orphan_cleanup=True`
+(`Sandbox.list`).
 
 Resource mapping: generic fields (memory/cpus/network/read_only) map to SDK kwargs;
 Docker-only hardening fields (pids_limit/cap_*/tmpfs/etc.) are ignored — the microVM

@@ -344,7 +344,7 @@ def test_load_lifecycle_defaults_when_absent(
 
     monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", tmp_path / "absent.yaml")
     lc = load_sandbox_lifecycle()
-    assert lc.scope == "session"
+    assert lc.workspace_scope == "session"
     assert lc.idle_hours == 2.0
 
 
@@ -355,13 +355,13 @@ def test_load_lifecycle_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         tmp_path,
         """
         sandbox:
-          scope: agent
+          workspace_scope: agent
           idle_hours: 6
         """,
     )
     monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", path)
     lc = load_sandbox_lifecycle()
-    assert lc.scope == "agent"
+    assert lc.workspace_scope == "agent"
     assert lc.idle_hours == 6.0
 
 
@@ -374,14 +374,54 @@ def test_load_lifecycle_invalid_scope_falls_back(
         tmp_path,
         """
         sandbox:
-          scope: bogus
+          workspace_scope: bogus
           idle_hours: -1
         """,
     )
     monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", path)
     lc = load_sandbox_lifecycle()
-    assert lc.scope == "session"
+    assert lc.workspace_scope == "session"
     assert lc.idle_hours == 2.0
+
+
+def test_load_lifecycle_legacy_scope_key_mapped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The legacy `sandbox.scope` key is read and mapped to `workspace_scope` (with a
+    one-time warning) so existing platform.yaml deployments keep working."""
+    from fleetent.integrations.sandbox.config import load_sandbox_lifecycle
+
+    path = _write_settings(
+        tmp_path,
+        """
+        sandbox:
+          scope: agent
+          idle_hours: 4
+        """,
+    )
+    monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", path)
+    lc = load_sandbox_lifecycle()
+    assert lc.workspace_scope == "agent"
+    assert lc.idle_hours == 4.0
+
+
+def test_load_lifecycle_new_key_wins_over_legacy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When both keys are present the new `workspace_scope` wins over legacy `scope`."""
+    from fleetent.integrations.sandbox.config import load_sandbox_lifecycle
+
+    path = _write_settings(
+        tmp_path,
+        """
+        sandbox:
+          scope: agent
+          workspace_scope: session
+        """,
+    )
+    monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", path)
+    lc = load_sandbox_lifecycle()
+    assert lc.workspace_scope == "session"
 
 
 # --- SB2 scope→tier mapping (consumes SB4 resources + agent_scope override) -

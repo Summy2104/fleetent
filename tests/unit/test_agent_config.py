@@ -99,6 +99,44 @@ def test_agent_file_requires_models() -> None:
         agent_config.AgentFile.model_validate({"name": "bare", "version": 1})
 
 
+# --- sandbox-workspace-scope-split: per-agent image persistence schema ------
+
+
+def test_sandbox_settings_image_persistence_defaults_off() -> None:
+    """Defaults keep prior behaviour: image persistence off, no setup_command."""
+    af = agent_config.AgentFile.model_validate(
+        {"name": "bare", "version": 1, "models": _valid_models_doc()}
+    )
+    assert af.sandbox.image_persistence is False
+    assert af.sandbox.setup_command is None
+
+
+def test_sandbox_settings_image_persistence_parsed() -> None:
+    doc = _valid_doc()
+    doc["sandbox"] = {
+        "image_persistence": True,
+        "setup_command": "pip install requests pandas",
+    }
+    af = agent_config.AgentFile.model_validate(doc)
+    assert af.sandbox.image_persistence is True
+    assert af.sandbox.setup_command == "pip install requests pandas"
+
+
+def test_sandbox_settings_rejects_unknown_key() -> None:
+    """extra='forbid': an unknown sandbox subkey is rejected (typo never silent)."""
+    doc = _valid_doc()
+    doc["sandbox"] = {"image_persistance": True}  # typo
+    with pytest.raises(ValidationError):
+        agent_config.AgentFile.model_validate(doc)
+
+
+def test_sandbox_settings_rejects_non_bool_image_persistence() -> None:
+    doc = _valid_doc()
+    doc["sandbox"] = {"image_persistence": ["not", "a", "bool"]}
+    with pytest.raises(ValidationError):
+        agent_config.AgentFile.model_validate(doc)
+
+
 @pytest.mark.parametrize("field", ["provider", "protocol"])
 def test_model_target_requires_provider_and_protocol(field: str) -> None:
     doc = _valid_doc()
