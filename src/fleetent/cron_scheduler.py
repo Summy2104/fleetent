@@ -131,9 +131,7 @@ async def _fire(task: dict[str, Any], connectors: dict[str, Any] | None = None) 
 
     # agent_loop.run mutates `messages` in place into the full conversation; persist it
     # so a fixed-session task continues from here next fire.
-    await session_mgr.save(
-        sid, messages, user_id=principal.user_id, agent_name=task.get("agent_name")
-    )
+    await session_mgr.save(sid, messages, user_id=principal.user_id)
 
     delivery_error = await _deliver(task, reply, connectors or {})
     _record_run(task, now, "error" if delivery_error else "ok", delivery_error)

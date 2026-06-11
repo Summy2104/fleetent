@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
-from fleetent.memory import proposal_store, store
+from fleetent.memory import proposal_store, shared, store
 
 
 def _list_memory_maintenance_proposals(user_id: str) -> list[Any]:
@@ -190,7 +190,7 @@ def _shared_memory_rows(query: MemoryQualityTrendQuery) -> list[dict[str, Any]]:
         params["scope_id"] = query.scope_id
 
     return (
-        store.database()
+        shared._shared_memory_database()
         .execute(
             f"""
             SELECT id, scope_type, scope_id, type, status, updated_at

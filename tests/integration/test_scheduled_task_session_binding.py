@@ -108,8 +108,8 @@ async def test_fire_saves_with_user_and_agent(tmp_path, monkeypatch):
         messages.append({"role": "assistant", "content": "ok"})  # run mutates in place
         return "ok"
 
-    async def spy_save(sid, messages, user_id=None, agent_name=None):
-        captured.update(sid=sid, user_id=user_id, agent_name=agent_name, n=len(messages))
+    async def spy_save(sid, messages, user_id=None):
+        captured.update(sid=sid, user_id=user_id, n=len(messages))
 
     monkeypatch.setattr(cron, "_agent_run", fake_run)
     monkeypatch.setattr(sm, "save", spy_save)
@@ -122,5 +122,5 @@ async def test_fire_saves_with_user_and_agent(tmp_path, monkeypatch):
     }
     await cron._fire(task)
     assert captured["sid"] == "cron/s3"
-    assert captured["user_id"] == "u9" and captured["agent_name"] == "a9"
+    assert captured["user_id"] == "u9"
     assert captured["n"] == 2  # full conversation persisted (user + assistant)

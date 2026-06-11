@@ -635,11 +635,10 @@ async def save(
     messages: list[dict[str, object]],
     meta: dict[str, object] | None = None,
     user_id: str | None = None,
-    agent_name: str | None = None,
 ) -> None:
     # main's meta envelope + zhangyang's session_index update, merged: omitting
     # meta preserves any meta already persisted (e.g. a pinned agent version)
-    # while user_id/agent_name still feed the activity index below.
+    # while user_id still feeds the activity index below.
     if meta is None:
         _, meta = _read(session_id)
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
@@ -664,7 +663,6 @@ async def save(
             session_id,
             user_id=user_id,
             message_count=len(messages),
-            agent_name=agent_name,
         )
     except Exception as exc:  # noqa: BLE001 — auxiliary index must not break persistence
         _logger.warn("session_index_update_failed", session_id=session_id, error=str(exc))

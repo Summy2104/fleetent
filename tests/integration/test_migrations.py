@@ -26,6 +26,12 @@ _REMOVED_KB_TABLES = {
     "kb_entity_mentions",
     "kb_relations",
 }
+_RESIDUAL_MANAGEMENT_TABLES = {
+    "shared_memory_items",
+    "memory_maintenance_proposals",
+    "skill_proposals",
+    "skill_hits",
+}
 
 
 def downgrade_migrations(db_path: Path) -> None:
@@ -44,7 +50,7 @@ def _migration_config(db_path: Path) -> Config:
 
 def test_upgrade_creates_tables(tmp_path):
     db = tmp_path / "test.db"
-    apply_migrations(db)
+    _upgrade_to(db, "head")
     conn = sqlite3.connect(db)
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     conn.close()
@@ -57,17 +63,15 @@ def test_upgrade_creates_tables(tmp_path):
     # scheduled_tasks dropped from the management DB (agent-owned-scheduled-tasks):
     # it is now a pure agent-side table created only by schedule_store.ensure_schema.
     assert "scheduled_tasks" not in tables
-    assert "memory_maintenance_proposals" in tables
+    assert _RESIDUAL_MANAGEMENT_TABLES.isdisjoint(tables)
     assert _REMOVED_AGENT_KB_TABLE not in tables
-    assert "skill_proposals" in tables
-    assert "shared_memory_items" in tables
     assert _REMOVED_KB_TABLES.isdisjoint(tables)
     assert {"traces", "memory_items", "reflection_reports"}.isdisjoint(tables)
 
 
 def test_head_drops_kb_reflection_reports_and_downgrade_restores_it(tmp_path):
     db = tmp_path / "test.db"
-    apply_migrations(db)
+    _upgrade_to(db, "head")
 
     conn = sqlite3.connect(db)
     try:
@@ -92,7 +96,7 @@ def test_head_drops_kb_reflection_reports_and_downgrade_restores_it(tmp_path):
 
 def test_upgrade_does_not_create_trace_indexes_in_management_db(tmp_path):
     db = tmp_path / "test.db"
-    apply_migrations(db)
+    _upgrade_to(db, "head")
     conn = sqlite3.connect(db)
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     conn.close()
@@ -115,6 +119,67 @@ def test_upgrade_does_not_create_kb_tables_in_management_db(tmp_path):
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     conn.close()
     assert _REMOVED_KB_TABLES.isdisjoint(tables)
+
+
+def test_head_schema_does_not_contain_residual_management_tables(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    conn.close()
+    assert _RESIDUAL_MANAGEMENT_TABLES.isdisjoint(tables)
+
+
+def test_head_schema_contains_blocked_registrations_with_expected_columns(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(blocked_registrations)")}
+    conn.close()
+
+    assert "blocked_registrations" in tables
+    assert cols >= {"email", "reason", "batch_id", "created_at"}
+
+
+def test_head_onboards_existing_blocked_registrations_table_without_data_loss(tmp_path):
+    db = tmp_path / "test.db"
+    _upgrade_to(db, "077")
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """
+        CREATE TABLE blocked_registrations (
+            email      TEXT PRIMARY KEY,
+            reason     TEXT,
+            batch_id   TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO blocked_registrations (email, reason, batch_id, created_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        ("blocked@example.com", "seeded", "batch-1", "2026-06-11T00:00:00+00:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    _upgrade_to(db, "head")
+
+    conn = sqlite3.connect(db)
+    row = conn.execute(
+        """
+        SELECT email, reason, batch_id, created_at
+        FROM blocked_registrations
+        WHERE email = ?
+        """,
+        ("blocked@example.com",),
+    ).fetchone()
+    conn.close()
+
+    assert row == ("blocked@example.com", "seeded", "batch-1", "2026-06-11T00:00:00+00:00")
 
 
 def test_upgrade_does_not_create_knowledge_base_fts_index(tmp_path):
@@ -173,59 +238,9 @@ def test_column_structure(tmp_path):
     agent_cols = {row[1] for row in conn.execute("PRAGMA table_info(agents)")}
     assert agent_cols >= {"id", "name", "system_prompt", "allowed_tools", "created_at"}
 
-    maintenance_cols = {
-        row[1] for row in conn.execute("PRAGMA table_info(memory_maintenance_proposals)")
-    }
-    assert maintenance_cols >= {
-        "id",
-        "user_id",
-        "action",
-        "target_memory_ids_json",
-        "proposed_content",
-        "metadata_patch_json",
-        "risk",
-        "reason",
-        "evidence_ids_json",
-        "status",
-        "created_at",
-        "updated_at",
-        "expires_at",
-    }
-    shared_memory_cols = {row[1] for row in conn.execute("PRAGMA table_info(shared_memory_items)")}
-    assert shared_memory_cols >= {
-        "id",
-        "scope_type",
-        "scope_id",
-        "type",
-        "content",
-        "status",
-        "source",
-        "source_ref",
-        "created_by",
-        "created_at",
-        "updated_at",
-    }
-    skill_proposal_cols = {row[1] for row in conn.execute("PRAGMA table_info(skill_proposals)")}
-    assert skill_proposal_cols >= {
-        "id",
-        "type",
-        "target_skill",
-        "reason",
-        "evidence_refs_json",
-        "risk_level",
-        "suggested_draft",
-        "suggested_diff",
-        "status",
-        "reviewer_user_id",
-        "reviewed_at",
-        "rejection_reason",
-        "actor_user_id",
-        "applied_at",
-        "created_at",
-        "updated_at",
-    }
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     conn.close()
+    assert _RESIDUAL_MANAGEMENT_TABLES.isdisjoint(tables)
     assert _REMOVED_KB_TABLES.isdisjoint(tables)
     assert {"traces", "memory_items", "reflection_reports"}.isdisjoint(tables)
 

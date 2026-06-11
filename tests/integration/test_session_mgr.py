@@ -50,12 +50,12 @@ def _set_mtime(path, mtime: float) -> None:
 
 async def test_save_records_metadata(sessions_dir, index_db):
     messages = [{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"}]
-    await session_mgr.save("sess-1", messages, user_id="u1", agent_name="bot")
+    await session_mgr.save("sess-1", messages, user_id="u1")
     meta = session_index.get("sess-1")
     assert meta is not None
     assert meta["message_count"] == 2
     assert meta["user_id"] == "u1"
-    assert meta["agent_name"] == "bot"
+    assert "agent_name" not in meta
 
 
 async def test_save_backward_compatible_two_args(sessions_dir, index_db):
@@ -66,7 +66,24 @@ async def test_save_backward_compatible_two_args(sessions_dir, index_db):
     assert meta is not None
     assert meta["message_count"] == 1
     assert meta["user_id"] is None
-    assert meta["agent_name"] is None
+    assert "agent_name" not in meta
+
+
+async def test_save_calls_session_index_without_agent_name_kwarg(sessions_dir, monkeypatch):
+    captured = {}
+
+    def fake_record_activity(session_id: str, user_id: str | None, message_count: int) -> None:
+        captured.update(
+            session_id=session_id,
+            user_id=user_id,
+            message_count=message_count,
+        )
+
+    monkeypatch.setattr(session_index, "record_activity", fake_record_activity)
+
+    await session_mgr.save("sess-1", [{"role": "user", "content": "x"}], user_id="u1")
+
+    assert captured == {"session_id": "sess-1", "user_id": "u1", "message_count": 1}
 
 
 # --- 8. index failure must not break message persistence ---

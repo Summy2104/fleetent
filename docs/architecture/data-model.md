@@ -74,6 +74,7 @@ graph TD
     reflection_reports
     reflection_proposals
     budget_usage
+    scheduled_tasks
   end
   subgraph KB["KB 关系库 kb.db ｜ agent 侧 · per-tenant"]
     knowledge_bases
@@ -90,19 +91,23 @@ graph TD
   memory_items -. user_id .-> users
   traces -. agent_id .-> agents
   approvals -. requester_user_id .-> users
-  shared_memory_items -. tenant_id .-> tenants
+  scheduled_tasks -. session_id .-> sessions
+  scheduled_tasks -. user_id .-> users
   agent_kbs -. kb_id .-> knowledge_bases
-  vector_items -. "mem:/shared:/kb: 家族" .-> memory_items
+  vector_items -. "mem:" .-> memory_items
+  vector_items -. "shared:" .-> shared_memory_items
+  vector_items -. "kb:" .-> knowledge_chunks
 ```
 
 > 宏观图只列各库主干实体；完整清单与库内关系见下方各库明细（§3.2–§3.6）。
 
 ### 3.2 管理库（Alembic · platform 侧）
-- **身份/租户**：`users`(根主体，含 `tenant_id`) · `api_keys`(→users) · `tenants`(主体，含 `approver_user_id`) · `teams`(→tenants，含 `approver_user_id`) · `blocked_registrations`(注册封禁名单，control-plane only，agent 运行时不 import)
+- **身份/租户**：`users`(根主体，含 `tenant_id`) · `api_keys`(→users) · `tenants`(主体，含 `approver_user_id`) · `teams`(→tenants，含 `approver_user_id`) · `blocked_registrations`(注册封禁名单，Alembic 078 收编，control-plane only，agent 运行时不 import)
 - **IM**：`im_users`((platform,platform_user_id)→内部 user) · `im_connectors` · `im_channel_allowlist`
-- **Agent 定义/绑定**：`agents`(定义，含 `tenant_id`/`team_id`/`active_version_id`) · `agent_versions`(不可变快照) · `agent_admin_state`(版本/部署态) · `user_agents`(用户↔agent) · `channel_agents`(渠道↔agent) · `agent_kbs`(**agent↔KB 绑定唯一真相源**，带 `created_by` 审计) · `agent_mcp_servers` · `agent_mcp_server_bindings` · `agent_oauth_bindings` · `connectors`(工具 OAuth) · `agent_skills` · `long_term_context_policies`
+- **Agent 定义/绑定**：`agents`(定义，含 `tenant_id`/`team_id`/`active_version_id`) · `agent_versions`(不可变快照) · `agent_admin_state`(版本/部署态) · `user_agents`(用户↔agent) · `channel_agents`(渠道↔agent) · `agent_kbs`(**agent↔KB 绑定唯一真相源**，带 `created_by` 审计) · `agent_mcp_servers` · `agent_mcp_server_bindings` · `agent_oauth_bindings` · `agent_secrets`(agent / shared scope 密文 secret) · `connectors`(工具 OAuth) · `agent_skills` · `long_term_context_policies`
+- **KB 管理**：`kb_connectors`(connector 配置与自定义元数据；实际 KB 内容仍在 per-tenant `kb.db`)
 - **模型**：`model_providers` · `model_routes`(task_type→provider)
-- **治理/编排**：`audit_log`(平台管理操作审计)
+- **治理/编排**：`audit_log`(平台管理操作审计) · `session_meta`(platform chat 管理元数据，如 origin / pinned / admin takeover；与 agent 侧 `sessions` 索引分责，`session_id` 仅作跨库逻辑引用)
 - **Skill 治理**：`skill_provenance` · `skill_admin_state`（全局 skill 态）
 
 ```mermaid
@@ -132,7 +137,7 @@ erDiagram
 ```
 
 ### 3.3 per-agent 运行库（嵌入式 Y · `agent_state.db` · agent 侧）
-统一 MIGRATIONS（`runtime/agent_state_migrations.py`，单文件单 `user_version`）建 **11 张表**：`sessions`(会话元数据索引) · `traces`(append-only 运行轨迹) · `reflection_reports`(统一反思观察日志，domain=`memory|skill|knowledge_base|legacy`) · `reflection_proposals`(统一 memory/skill 提案与审批生命周期，domain=`memory|skill`) · `memory_items`(per-user 语义记忆，**无 namespace 列**，agent 隔离靠物理库) · `approvals`/`approval_allowlist`(审批请求+门状态，**agent 全权真相源**，actor 为不透明标签) · `session_anti_flap`(压缩防抖，per session) · `sub_agent_runs`(子 agent 生命周期) · `budget_usage`(预算滑窗累计，PK `(scope,key,period)`，**per-agent 物理隔离**，不落管理库) · `scheduled_tasks`(agent 侧 cron/once/interval 定时任务，由 `retire-standalone-fleetent-db` 从遗留 `fleetent.db` 迁入)。后五张归属本 change 及前序 change：`session_anti_flap`/`sub_agent_runs` 改经 `agent_scope` + `db.py`（去 `user_store.DB_PATH` + 裸 `sqlite3.connect`），reflection 域收口到 `reflection_reports` + `reflection_proposals` 两表，`budget_usage` 由 `retire-raw-sqlite-connect` 从管理库迁入，`scheduled_tasks` 由 `retire-standalone-fleetent-db` 从遗留 `fleetent.db` 迁入。
+统一 MIGRATIONS（`runtime/agent_state_migrations.py`，单文件单 `user_version`）建 **11 张表**：`sessions`(会话元数据索引，仅 `session_id` / `user_id` / timestamps / `message_count`，**无 `agent_name` 列**，归属由 per-agent 物理库圈定) · `traces`(append-only 运行轨迹) · `reflection_reports`(统一反思观察日志，domain=`memory|skill|knowledge_base|legacy`) · `reflection_proposals`(统一 memory/skill 提案与审批生命周期，domain=`memory|skill`) · `memory_items`(per-user 语义记忆，**无 namespace 列**，agent 隔离靠物理库) · `approvals`/`approval_allowlist`(审批请求+门状态，**agent 全权真相源**，actor 为不透明标签) · `session_anti_flap`(压缩防抖，per session) · `sub_agent_runs`(子 agent 生命周期) · `budget_usage`(预算滑窗累计，PK `(scope,key,period)`，**per-agent 物理隔离**，不落管理库) · `scheduled_tasks`(agent 侧 cron/once/interval 定时任务，由 `retire-standalone-fleetent-db` 从遗留 `fleetent.db` 迁入)。后五张归属本 change 及前序 change：`session_anti_flap`/`sub_agent_runs` 改经 `agent_scope` + `db.py`（去 `user_store.DB_PATH` + 裸 `sqlite3.connect`），reflection 域收口到 `reflection_reports` + `reflection_proposals` 两表，`budget_usage` 由 `retire-raw-sqlite-connect` 从管理库迁入，`scheduled_tasks` 由 `retire-standalone-fleetent-db` 从遗留 `fleetent.db` 迁入。
 
 ```mermaid
 erDiagram
