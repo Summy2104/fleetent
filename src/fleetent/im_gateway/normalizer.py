@@ -12,6 +12,7 @@ from fleetent import agent_config
 from fleetent.agent_config import AgentFile, ConnectorAccess
 from fleetent.identity import Principal
 from fleetent.im_gateway import access
+from fleetent.runtime.approval_resume import resume_pending_approval
 
 logger = structlog.get_logger(__name__)
 
@@ -281,11 +282,85 @@ async def _build_user_content(msg: NormalizedMessage, session_id: str) -> str:
     return "\n\n".join(sections)
 
 
+async def _resume_pending_in_session(
+    msg: NormalizedMessage, session_id: str, approval_id: str, decision: str
+) -> str | None:
+    """Execute-or-decline a resolved gated tool and continue the suspended run.
+
+    Builds the tool context + continuation from the message's agent config (mirroring
+    the normal turn's run kwargs), then delegates to resume_pending_approval under the
+    session lock so the resumed run is serialized against new same-session turns.
+    """
+    from fleetent.integrations.sandbox import enablement as sandbox_enablement
+    from fleetent.model import ModelPolicySnapshot
+    from fleetent.runtime import loop as agent_loop
+    from fleetent.runtime.snapshot import _governance_from_file
+    from fleetent.session import manager as session_mgr
+    from fleetent.tools.registry import ToolContext
+
+    if msg.agent_name:
+        agent = agent_config.current().get(msg.agent_name)
+    else:
+        agent = get_agent_for_context(msg.platform, msg.channel_id, msg.user_id)
+
+    governance = _governance_from_file(agent) if agent else None
+    allowed_tools = agent.allowed_tools if agent is not None and agent.allowed_tools else None
+    agent_features = agent.features if agent else None
+    model_policy = ModelPolicySnapshot.from_agent(agent) if agent else None
+    sandbox_mode = await sandbox_enablement.get_effective_mode()
+
+    tool_context = ToolContext(
+        agent_name=agent.name if agent else None,
+        features=agent_features or {},
+        session_id=session_id,
+        session_context=msg.session_context,
+        outbound_connectors=msg.outbound_connectors,
+    )
+
+    async def continue_run(history: list[dict[str, object]]) -> str:
+        return await agent_loop.run(
+            messages=history,
+            principal=Principal(user_id=msg.user_id, tenant_id="default"),
+            reply_func=msg.reply_func,
+            allowed_tools=allowed_tools,
+            sandbox_mode=sandbox_mode,
+            agent_features=agent_features,
+            session_id=session_id,
+            governance=governance,
+            model_policy=model_policy,
+            permission_gate_enabled=agent.permission_gate_enabled if agent else True,
+            permission_gate_medium_timeout=(
+                agent.permission_gate_medium_timeout_seconds if agent else None
+            ),
+            permission_gate_high_timeout=(
+                agent.permission_gate_high_timeout_seconds if agent else None
+            ),
+            approval_routing=agent.approval if agent else None,
+            outbound_connectors=msg.outbound_connectors,
+            progress_func=msg.progress_func,
+            session_context=msg.session_context,
+        )
+
+    async with session_mgr.session_lock(session_id):
+        history = await session_mgr.load(session_id)
+        reply = await resume_pending_approval(
+            session_id=session_id,
+            approval_id=approval_id,
+            decision=decision,  # type: ignore[arg-type]
+            messages=history,
+            tool_context=tool_context,
+            continue_run=continue_run,
+        )
+        await session_mgr.save(session_id, history)
+    return reply
+
+
 async def route(msg: NormalizedMessage) -> None:
     # Approval commands bypass the agent loop entirely
     m = _APPROVAL_RE.match(msg.text.strip())
     if m:
         from fleetent.governance.permission_gate import _default_gate
+        from fleetent.session import manager as session_mgr
 
         action = m.group(1).lower()
         decision = "approved" if action == "approve" else "rejected"
@@ -293,18 +368,38 @@ async def route(msg: NormalizedMessage) -> None:
         # fingerprint (approval-minimization); only meaningful on approve.
         always = m.group(2) is not None and action == "approve"
         approval_id = m.group(3)
+        # Owner-namespaced session id (matches how the run persisted the pending entry).
+        session_id = f"{msg.owner_id}:{msg.session_id}" if msg.owner_id else msg.session_id
+
+        # Recover authorized decision actors from the persisted pending entry so the
+        # gate's authorization check survives a process restart (approval-suspend-resume).
+        pending = await session_mgr.get_pending_approval(session_id, approval_id)
+        authorized = (
+            {str(a) for a in pending["approver_ids"]}
+            if pending and pending.get("approver_ids")
+            else None
+        )
         found = await _default_gate.resolve(
             approval_id=approval_id,
             decision=decision,  # type: ignore[arg-type]
             approver_user_id=msg.user_id,
             always=always,
+            authorized_actors=authorized,
         )
-        if found:
+        if not found:
+            await msg.reply_func(
+                f"⚠️ approval {approval_id} not found, unauthorized, or already resolved"
+            )
+            return
+        if pending is None:
+            # Resolved, but no suspended run in this session to resume.
             await msg.reply_func(
                 f"{'✅' if decision == 'approved' else '❌'} {approval_id} {decision}"
             )
-        else:
-            await msg.reply_func(f"⚠️ approval {approval_id} not found or already expired")
+            return
+        reply = await _resume_pending_in_session(msg, session_id, approval_id, decision)
+        if reply:
+            await msg.reply_func(reply)
         return
 
     # Resolve agent config first — the access gate is per-platform-connector. When the

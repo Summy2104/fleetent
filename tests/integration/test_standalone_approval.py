@@ -131,31 +131,16 @@ async def test_standalone_approval_no_platform(
 
     routing = ApprovalRouting(by_risk={"high": {"approvers": ["slack:U_LEAD"], "policy": "any"}})
     connector = AsyncMock()
-    # Simulated approver resolves after outbound DM is sent.
-    captured_id: list[str] = []
-
-    async def _intercept_send(platform, connector_obj, target, text, **kwargs):
-        import re
-
-        m = re.search(r"`([a-f0-9-]{6,36})`", text)
-        if m:
-            captured_id.append(m.group(1))
-            asyncio.get_event_loop().call_later(
-                0.05,
-                lambda: asyncio.ensure_future(
-                    gate.resolve(captured_id[0], "approved", "slack:U_LEAD")
-                ),
-            )
-        return True
-
-    monkeypatch.setattr(outbound_mod, "send_to", _intercept_send)
+    monkeypatch.setattr(outbound_mod, "send_to", AsyncMock(return_value=True))
 
     reply_calls: list[str] = []
 
     async def reply(text: str) -> None:
         reply_calls.append(text)
 
-    await loop_mod.run(
+    # Suspend model: run() registers the approval and returns (no blocking wait); the
+    # tool is NOT dispatched yet — it stays a placeholder until the decision resumes it.
+    result = await loop_mod.run(
         messages=[{"role": "user", "content": "delete the db"}],
         reply_func=reply,
         permission_gate_enabled=True,
@@ -164,20 +149,25 @@ async def test_standalone_approval_no_platform(
         outbound_connectors={"slack": connector},
         permission_gate_high_timeout=1.0,
     )
+    assert result == ""  # suspended; the prompt was already sent by the gate
 
-    # Verify real approval_store was written — no platform DB needed.
+    # Real agent-side approval_store written, no platform DB — row is pending.
     approvals = approval_store_mod.list_approvals()
     assert len(approvals) == 1
     rec = approvals[0]
-    assert rec["status"] == "approved"
+    assert rec["status"] == "pending"
     assert rec["session_id"] == "session:alice"
-    assert rec["approver_actor"] == "slack:U_LEAD"
     assert rec["tool_name"] == "delete_db"
-    assert rec["resolved_at"] is not None
+    loop_mod.dispatch.assert_not_called()  # not executed until resumed
 
-    # Requester got waiting notice (not an immediate rejection).
+    # Requester got a waiting notice (not an immediate rejection).
     assert any("⏳" in r for r in reply_calls)
     assert not any("❌" in r for r in reply_calls)
 
-    # Tool was dispatched after approval.
-    loop_mod.dispatch.assert_called_once()
+    # The approver resolves out-of-band → the store row is finalized to approved.
+    ok = await gate.resolve(rec["id"], "approved", "slack:U_LEAD")
+    assert ok is True
+    finalized = approval_store_mod.list_approvals()[0]
+    assert finalized["status"] == "approved"
+    assert finalized["approver_actor"] == "slack:U_LEAD"
+    assert finalized["resolved_at"] is not None

@@ -32,29 +32,45 @@ Tools SHALL declare their risk level at registration time via `@tool(risk_level=
 - **THEN** an approval request is sent to the pre-configured approver, and the requester is notified "waiting for admin approval"
 
 ### Requirement: Async approval wait
-The system SHALL block agent execution using `asyncio.Event` while waiting for approval.
+The system SHALL NOT block agent execution while waiting for approval. Instead the gate
+SHALL register the approval, send the prompt (interactive where supported), and return a
+`pending` result immediately; the loop then suspends the run (see the
+`approval-suspend-resume` capability) rather than awaiting an `asyncio.Event`. Resolution
+arrives out-of-band (Slack button or `approve`/`reject <id>` text command) and drives
+resume, not a coroutine wake-up.
 
 #### Scenario: Approved
-- **WHEN** user clicks "Allow" in the IM approval message
-- **THEN** the IM callback resolves the approval (`status=approved`), calls `event.set()`, and agent execution continues
+- **WHEN** user clicks "Allow" (or sends `approve <id>`) for a pending approval
+- **THEN** the approval is resolved `approved` and the suspended run is resumed (the
+  pending tool executes and the run continues), without relying on an in-process waiter
 
 #### Scenario: Rejected
-- **WHEN** user clicks "Deny" in the IM approval message
-- **THEN** the callback resolves (`status=rejected`), calls `event.set()`, and agent notifies the user "operation cancelled"
+- **WHEN** user clicks "Deny" (or sends `reject <id>`) for a pending approval
+- **THEN** the approval is resolved `rejected` and the suspended run resumes with a
+  user-declined result, notifying the user the operation was cancelled
+
+#### Scenario: request_approval does not block
+- **WHEN** the gate's `request_approval` is invoked for a gated tool call
+- **THEN** it registers the approval and returns `pending` without awaiting a decision
+
 
 ### Requirement: Approval timeout
-The system SHALL auto-reject approvals that exceed the configured timeout. Timeout values
-SHALL be read from the agent's `permission_gate_medium_timeout_seconds` and
-`permission_gate_high_timeout_seconds` fields when available, falling back to module defaults
-(300s medium, 3600s high) when called outside an agent context.
+The system SHALL reconcile approvals that exceed the configured timeout via the cleanup
+routine rather than by waking a blocked coroutine. Because no coroutine is suspended on
+the decision, timeout values MAY be configured generously; the defaults remain the
+agent's `permission_gate_medium_timeout_seconds` / `permission_gate_high_timeout_seconds`
+(300s / 3600s) where set.
 
-#### Scenario: Medium risk timeout
-- **WHEN** no response is received within the agent's configured `permission_gate_medium_timeout_seconds` (default 300)
-- **THEN** approval is auto-rejected, `approvals` table updated to `status=timeout`, user notified
+#### Scenario: Expired approval reconciled by cleanup
+- **WHEN** a pending approval exceeds its timeout
+- **THEN** the cleanup routine marks the `approvals` row `timeout` and clears the
+  session's `meta.pending_approvals` entry, leaving the session consistent
 
-#### Scenario: High risk timeout
-- **WHEN** no response is received within the agent's configured `permission_gate_high_timeout_seconds` (default 3600)
-- **THEN** same auto-reject behavior
+#### Scenario: Timeout values still configurable per agent
+- **WHEN** an agent sets `permission_gate_medium_timeout_seconds` /
+  `permission_gate_high_timeout_seconds`
+- **THEN** those values bound the pending window used by the cleanup reconciliation
+
 
 ### Requirement: Approval persistence
 All approval requests and outcomes SHALL be recorded in the `approvals` table.

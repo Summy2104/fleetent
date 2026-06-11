@@ -11,7 +11,6 @@ No platform imports.
 
 from __future__ import annotations
 
-import asyncio
 import datetime
 import json
 import logging
@@ -23,7 +22,7 @@ from fleetent.governance import approval_store
 
 logger = logging.getLogger(__name__)
 
-ApprovalResult = Literal["approved", "rejected", "timeout"]
+ApprovalResult = Literal["approved", "rejected", "timeout", "pending"]
 
 
 def _resolves_to_requester(approval_routing: Any | None, risk_level: str, tool_name: str) -> bool:
@@ -40,8 +39,10 @@ class PermissionGate:
     def __init__(self, medium_timeout: float = 300.0, high_timeout: float = 3600.0) -> None:
         self._medium_timeout = medium_timeout
         self._high_timeout = high_timeout
-        self._events: dict[str, asyncio.Event] = {}
-        self._decisions: dict[str, str] = {}
+        # Registry of approval_ids that are registered + awaiting a decision. No
+        # asyncio.Event: the run is suspended (not blocked), so nothing waits in-process
+        # (approval-suspend-resume). Resolution finalizes against this set.
+        self._pending: set[str] = set()
         # Per-pending-approval fingerprint context (approval-minimization) so resolve()
         # can persist an allow-always grant for the right (scope, tool) on "approve always".
         self._pending_fp: dict[str, tuple[str, str, str]] = {}
@@ -90,14 +91,6 @@ class PermissionGate:
             return "approved"
         self._pending_fp[approval_id] = (fp, scope_key, tool_name)
 
-        event = asyncio.Event()
-        self._events[approval_id] = event
-
-        if risk_level == "medium":
-            timeout = medium_timeout if medium_timeout is not None else self._medium_timeout
-        else:
-            timeout = high_timeout if high_timeout is not None else self._high_timeout
-
         # The requester sentinel routes the prompt back to the conversation; it is
         # always reachable here because the gate only runs with a live reply_func
         # (the loop guards on it).
@@ -124,7 +117,7 @@ class PermissionGate:
                 status="rejected",
                 resolved_at=resolved_at,
             )
-            self._events.pop(approval_id, None)
+            self._pending_fp.pop(approval_id, None)
             logger.info(
                 "approval_rejected_no_approver id=%s tool=%s risk=%s",
                 approval_id,
@@ -169,33 +162,21 @@ class PermissionGate:
                 f"Approval ID: `{approval_id}` — waiting for approver."
             )
 
-        try:
-            await asyncio.wait_for(event.wait(), timeout=timeout)
-            decision = self._decisions.get(approval_id, "rejected")
-        except TimeoutError:
-            decision = "timeout"
-
-        resolved_at = datetime.datetime.now(datetime.UTC).isoformat()
-        approval_store.update_approval(
-            id=approval_id,
-            status=decision,
-            resolved_at=resolved_at,
-            approver_actor=self._decisions.get(approval_id + ":actor"),
-        )
-
-        self._events.pop(approval_id, None)
-        self._decisions.pop(approval_id, None)
-        self._decisions.pop(approval_id + ":actor", None)
-        self._pending_fp.pop(approval_id, None)
-        self._authorized.pop(approval_id, None)
+        # Non-blocking: the run suspends instead of awaiting a decision here. The
+        # approval stays registered until resolve() finalizes it (which may be after
+        # a restart). approvals row remains status=pending.
+        self._pending.add(approval_id)
         logger.info(
-            "approval_resolved id=%s tool=%s risk=%s decision=%s",
+            "approval_registered_pending id=%s tool=%s risk=%s",
             approval_id,
             tool_name,
             risk_level,
-            decision,
         )
-        return decision  # type: ignore[return-value]
+        return "pending"
+
+    def authorized_actors(self, approval_id: str) -> set[str]:
+        """Identities allowed to decide a pending approval (for the loop to persist)."""
+        return set(self._authorized.get(approval_id, set()))
 
     async def _notify_approvers(
         self,
@@ -263,19 +244,36 @@ class PermissionGate:
         decision: Literal["approved", "rejected"],
         approver_user_id: str,
         always: bool = False,
+        authorized_actors: set[str] | None = None,
     ) -> bool:
-        """Resolve an approval request.
+        """Resolve a pending approval and finalize its record.
 
-        Returns True if the request was found, False if expired, unknown, or the
-        actor is not authorized to decide it. The approver_user_id is stored as
-        an opaque actor string (D4). When ``always`` is set and the decision is
-        "approved", the pending request's fingerprint is persisted to the
-        allow-list so future identical calls auto-approve (approval-minimization).
+        Returns True if the request was pending and the actor is authorized; False if
+        unknown/already-resolved or the actor is not authorized. The approver_user_id is
+        stored as an opaque actor string (D4). When ``always`` is set and the decision is
+        "approved", the pending request's fingerprint is persisted to the allow-list so
+        future identical calls auto-approve (approval-minimization).
+
+        Event-free (approval-suspend-resume): no in-process waiter is woken; the caller
+        triggers run resumption after a True result. The approvals row is updated to the
+        decision here (request_approval no longer finalizes it).
+
+        Restart survival: when the in-memory registry is empty (post-restart), the caller
+        supplies ``authorized_actors`` (recovered from the persisted session entry) and
+        the pending check falls back to the approvals row status. ``always`` grants are
+        skipped after a restart since the fingerprint context is in-memory only.
         """
-        event = self._events.get(approval_id)
-        if event is None:
-            return False
-        authorized = self._authorized.get(approval_id)
+        in_memory = approval_id in self._pending
+        if not in_memory:
+            # Post-restart path: trust the persisted approvals row for pending status.
+            row = approval_store.get_approval(approval_id)
+            if row is None or row.get("status") != "pending":
+                return False
+        authorized = (
+            authorized_actors
+            if authorized_actors is not None
+            else self._authorized.get(approval_id)
+        )
         if authorized is not None and approver_user_id not in authorized:
             logger.warning(
                 "approval_unauthorized_actor id=%s actor=%s", approval_id, approver_user_id
@@ -292,9 +290,16 @@ class PermissionGate:
                     created_at=datetime.datetime.now(datetime.UTC).isoformat(),
                     created_by=approver_user_id,
                 )
-        self._decisions[approval_id] = decision
-        self._decisions[approval_id + ":actor"] = approver_user_id
-        event.set()
+        approval_store.update_approval(
+            id=approval_id,
+            status=decision,
+            resolved_at=datetime.datetime.now(datetime.UTC).isoformat(),
+            approver_actor=approver_user_id,
+        )
+        self._pending.discard(approval_id)
+        self._pending_fp.pop(approval_id, None)
+        self._authorized.pop(approval_id, None)
+        logger.info("approval_resolved id=%s decision=%s", approval_id, decision)
         return True
 
 
