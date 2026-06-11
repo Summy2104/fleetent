@@ -18,6 +18,8 @@
 - KB 接线 + 图谱 lift(独立 change `wire-kb-tenant-routing`,动 kb.db)。
 - 搬迁历史 pending 提案(瞬态,新表全新建)。
 - KB v1 之外的提案动作(后续加 kind+handler,不改表)。
+- **Step 2 平台侧 skill 收集策展**(平台只读投影发现 agent-local 自进化 skill + 管理员收录提升 + 平台侧收录标记)——单独 platform change;本 change 只做 agent 侧自写自用。
+- skill bundle 的二进制资源(v1 限文本文件)。
 
 ## Decisions
 
@@ -39,7 +41,13 @@ reflection_proposals
 - `payload_json`:域特定载荷(memory: target_memory_ids+proposed_content+metadata_patch;skill: suggested_draft+suggested_diff;kb: 动作参数)。dataclass 层(`MemoryProposal`/`SkillProposal`/`KbProposal`)做类型化 ser/de。
 
 ### D2：apply 按 domain 分派,不复制状态机
-统一 store 管 create/list/approve/reject + 通用状态转移;apply 调 `_APPLY_HANDLERS[domain](proposal)`:memory→memory public mutation API;skill→写 skill draft 边界;kb→knowledge-base public API(archive/resync)。**为何**:生命周期是共享行为(合表的根据),apply 是域特定代码(分派,不抄表)。
+统一 store 管 create/list/approve/reject + 通用状态转移;apply 调 `_APPLY_HANDLERS[domain](proposal)`:memory→memory public mutation API(已实现);skill→agent-local skills 目录写整个 bundle(见 D7,本 change 把历史 stub 接成真实现);kb→knowledge-base public API(archive/resync,见 D4)。**为何**:生命周期是共享行为(合表的根据),apply 是域特定代码(分派,不抄表)。
+
+### D7：Skill apply = 写 agent-local 的整个 skill bundle(接通历史 stub)
+skill 是**目录 bundle**(`<name>/SKILL.md` + 可带脚本/子目录,Agent Skill 标准协议),不是单文件。skill apply SHALL 经 agent 侧 `skills.write_skill(name, files, provenance)` 公共边界把**整棵文件树**写进 **agent-local** skills 目录(`<agent home>/skills/<name>/`),**原子写**(先写临时目录 + SKILL.md 注入扫描 → rename 整目录换入,避免 registry 扫到半成品),SKILL.md 注入 frontmatter(`source: reflection` / `proposal_id` / `applied_at`),再 `registry.reload()` 热更新。**为何支持全 bundle 而非仅 SKILL.md**:只收录单文件没意义;安全靠三层——审批人 apply 前 review 整个 bundle(含脚本)+ SKILL.md 注入扫描 + skill 脚本执行时走 sandbox。**为何 agent-local**:各 agent 进化各自的、互不污染;跨 agent 共享靠 Step 2 平台只读策展收录(独立 change)。
+- payload:`{ skill_name, kind, files: { relpath: content } }`(v1 限文本文件);**update = 全树覆盖**(proposal 携完整目标态,简单可靠;文件级 diff 是后续优化)。
+- **deprecate = `enabled: false`**(frontmatter):从 catalog 排除→模型发现不到、不会自动误用;文件保留可追溯、可恢复(不物理删)。
+- 审批触达 SHALL 让审批人能 review 整个 bundle(尤其脚本)再批。
 
 ### D3：reports 1 张,理由是"日志无共享行为"
 report 终态只读、无状态机、无外引用 → 事件日志的标准建模是 1 表 + type/domain 列。3 张只省信封、无行为收益,且 append-only 日志将来要拆极便宜。故 1 张。

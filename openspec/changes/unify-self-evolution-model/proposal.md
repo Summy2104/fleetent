@@ -15,6 +15,7 @@
 - **统一行动层 `reflection_proposals`**(1 张):合并 `memory_maintenance_proposals` + `skill_proposals`,共享生命周期骨架(status/review/apply 审计)+ `domain` 区分 + 域特定载荷入 `payload_json`;apply 按 `domain` 分派 handler。统一审批"收件箱"。
 - **补 KB 自进化**(`domain=kb`):KB findings 生成 KB mutation proposals(v1 动作:`archive_stale_doc`、`resync_connector`),审批后经 knowledge-base public API 执行。
 - **审批走 agent-owned 触达**:三域提案的审批一律**复用** agent-owned 审批人解析 + 外呼 DM(`agent_config.resolve_approvers` + `permission_gate._notify_approvers` / im_gateway),找**配置的审批人(team/tenant 负责人,非 requester)**,default-closed;**不走 platform console**。自进化提案是系统生成、无活跃 run,故为 out-of-band(审批人按钮/文本决定 → 触发 apply),不复用工具门的 run suspend-resume。
+- **接通 skill apply**(历史 stub):approved 的 skill 提案 apply 经 agent 侧 `skills.write_skill` 把**整个 skill bundle**(`SKILL.md` + 脚本/子目录,Agent Skill 标准协议)原子写进**该 agent 自己的** skills 目录 + 热更新;`update`=全树覆盖,`deprecate`=frontmatter `enabled:false` 软禁用;安全三层(审批 review bundle / SKILL.md 注入扫描 / 脚本经 sandbox)。取代原 `raise not configured` stub。
 - **命名/骨架对齐**:`risk`、`evidence_json`、`kind` 统一;三域生命周期一致。
 - **退场**:`kb_reflection_reports`(alembic 027)、`memory_maintenance_proposals` / `skill_proposals`(agent_state Y)被统一两表替代。
 
@@ -35,4 +36,4 @@
 - **审批路由(修正)**:三域统一走 **agent-owned** —— `resolve_approvers`(读 agent.yaml `ApprovalRouting`)解析配置审批人(非 requester)+ im_gateway 外呼 DM + Slack 按钮/文本决定,default-closed,**全 agent 侧、不依赖 platform console**(取代 `self-evolution-split` 旧的"console"路由,该 spec 已被 R1/approval-suspend-resume supersede)。**复用层次 = A**:`reflection_proposals` 保留自己的提案生命周期(draft/diff/applied),仅**触达**复用工具门那套基础设施,不并入 `approvals` 表。
 - **数据**:pending 提案是瞬态待办——按「上线前不迁移数据」**新表全新建、旧表退场**(不搬历史 pending);如需保留在制提案,部署方在切换前先清空。
 - **migration/shim**:agent_state Y append 统一两表 + drop 两张旧表(`CREATE TABLE IF NOT EXISTS` 幂等);alembic forward-drop `kb_reflection_reports`。
-- **不在本切片**:KB 接线 + 图谱 lift(独立 change `wire-kb-tenant-routing`,动 kb.db);KB v1 之外的提案动作(reingest/rerun_extraction/flag_gap 后续加 handler 即可,不改表)。
+- **不在本切片**:KB 接线 + 图谱 lift(独立 change `wire-kb-tenant-routing`,动 kb.db);KB v1 之外的提案动作(reingest/rerun_extraction/flag_gap 后续加 handler 即可,不改表);**Step 2 平台侧 skill 收集策展**(平台只读投影发现 agent-local 自进化 skill + 管理员收录提升 + 平台侧收录标记——单独 platform change,本 change 只做 agent 自写自用);skill bundle 二进制资源(v1 限文本)。

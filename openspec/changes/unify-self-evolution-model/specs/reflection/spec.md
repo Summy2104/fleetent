@@ -30,6 +30,21 @@ KB reflection SHALL 可由 findings 生成 **KB mutation proposals**（`domain=k
 - **WHEN** KB 提案处于 pending / rejected
 - **THEN** 系统不创建、更新、删除、归档 KB document，也不触发 connector sync
 
+### Requirement: Skill 自进化 apply 写 agent-local bundle
+approved 的 skill 提案 apply SHALL 经 agent 侧 `skills` 公共边界把**整个 skill bundle**（`<name>/SKILL.md` + 可带脚本/子目录/文本资源，Agent Skill 标准协议）写进**该 agent 自己的** skills 目录（`<agent home>/skills/<name>/`），并热更新（`registry.reload()`）。写入 SHALL **原子**（先写临时目录 + SKILL.md 注入扫描通过 → 整目录 rename 换入，registry MUST NOT 扫到半成品）。SKILL.md SHALL 带 provenance frontmatter(`source: reflection` / `proposal_id` / `applied_at`)。apply MUST NOT 写其它 agent 的目录、MUST NOT 经 platform（agent-local、自洽）。`update_skill` SHALL 以**全树覆盖**目标 skill;`deprecate_skill` SHALL 以 frontmatter `enabled: false` 软禁用（从 catalog 排除、模型不再发现/自动调用，文件保留可追溯），不物理删。安全由三层保证:审批人 apply 前 review 整个 bundle + SKILL.md 注入扫描 + 脚本执行经 sandbox。
+
+#### Scenario: apply 写整个 bundle 到 agent 自己的 skills 目录
+- **WHEN** 一个 approved 的 `create_skill` 提案 apply
+- **THEN** 系统把 payload 的整棵文件树（SKILL.md + 脚本等）原子写入 `<agent home>/skills/<name>/` 并 `registry.reload()`，该 skill 立即可用，且不触及其它 agent 的目录
+
+#### Scenario: SKILL.md 注入扫描守门
+- **WHEN** 提案的 SKILL.md 命中 severe 注入模式
+- **THEN** apply 拒绝写入，提案不进入 applied
+
+#### Scenario: deprecate 软禁用、模型不误用
+- **WHEN** 一个 `deprecate_skill` 提案 apply
+- **THEN** 该 skill 的 SKILL.md frontmatter 置 `enabled: false`，从 catalog 排除，模型不再发现/自动调用;文件保留
+
 ### Requirement: 自进化提案审批走 agent-owned 触达
 三域(memory/skill/kb)提案的审批触达 SHALL 复用 **agent-owned** 审批基础设施——经 `agent_config.resolve_approvers`(读 agent.yaml `ApprovalRouting`)解析**配置的审批人**(team/tenant 负责人)并经 im_gateway **外呼 DM**(沿用工具门的 `permission_gate._notify_approvers` 路径),审批人经 Slack 按钮 / 文本命令决定。审批人 SHALL **默认为非 requester 的真实负责人**(系统生成的提案无 requester);找不到审批人 SHALL **default-closed**(不自动 apply)。审批触达 MUST 全在 agent 侧,MUST NOT 依赖 platform console。提案审批是 **out-of-band**(无活跃 run),不复用工具门的 run suspend-resume;审批通过后由 apply(按 domain 分派)执行。
 
