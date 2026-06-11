@@ -104,7 +104,7 @@ async def test_get_effective_mode_caches_docker_probe(tmp_path, monkeypatch):
     monkeypatch.setattr(se, "_effective_mode_cache", None)
     monkeypatch.setattr(se, "SETTINGS_PATH", tmp_path / "missing.yaml")  # default all
     probe = AsyncMock(return_value=True)
-    monkeypatch.setattr(sc.SandboxClient, "docker_available", probe)
+    monkeypatch.setattr(sc.SandboxClient, "available", probe)
 
     first = await se.get_effective_mode()
     second = await se.get_effective_mode()
@@ -121,6 +121,6 @@ async def test_get_effective_mode_degrades_when_docker_unavailable(tmp_path, mon
 
     monkeypatch.setattr(se, "_effective_mode_cache", None)
     monkeypatch.setattr(se, "SETTINGS_PATH", tmp_path / "missing.yaml")
-    monkeypatch.setattr(sc.SandboxClient, "docker_available", AsyncMock(return_value=False))
+    monkeypatch.setattr(sc.SandboxClient, "available", AsyncMock(return_value=False))
 
     assert await se.get_effective_mode() is Mode.OFF

@@ -64,20 +64,24 @@ def load_sandbox_mode() -> Mode:
 _effective_mode_cache: Mode | None = None
 
 
-async def get_effective_mode() -> Mode:
+async def get_effective_mode(backend: object | None = None) -> Mode:
     """Return the effective sandbox mode for non-server callers, caching the probe.
 
-    Resolves `load_sandbox_mode()` against a one-time Docker availability probe and
-    memoises the result for the process. The server path does not use this (it
-    resolves into app.state at startup); this serves IM gateway / CLI callers.
+    Resolves `load_sandbox_mode()` against a one-time backend availability probe and
+    memoises the result for the process. `backend` is the configured backend to probe
+    (a `BaseSandboxBackend`); when omitted the configured backend is resolved via the
+    factory (platform default). The first call seeds the cache, so the agent runtime
+    passing its agent-selected backend first makes later loop/IM calls reuse it.
     """
     global _effective_mode_cache
     if _effective_mode_cache is not None:
         return _effective_mode_cache
-    from fleetent.integrations.sandbox.client import SandboxClient
+    if backend is None:
+        from fleetent.integrations.sandbox.factory import create_backend
 
-    docker_available = await SandboxClient().docker_available()
-    _effective_mode_cache = resolve_effective_mode(load_sandbox_mode(), docker_available)
+        backend = create_backend()
+    available = await backend.available()  # type: ignore[attr-defined]
+    _effective_mode_cache = resolve_effective_mode(load_sandbox_mode(), available)
     return _effective_mode_cache
 
 

@@ -21,13 +21,21 @@ from enum import StrEnum
 from pathlib import Path
 
 from fleetent import paths
-from fleetent.integrations.sandbox.client import _SAFE_NAME, SANDBOX_NAME_PREFIX, SandboxClient
+from fleetent.integrations.sandbox.backend import (
+    _SAFE_NAME,
+    SANDBOX_NAME_PREFIX,
+    BaseSandboxBackend,
+)
+from fleetent.integrations.sandbox.backends.docker import DockerBackend
 from fleetent.integrations.sandbox.config import (
     SandboxResources,
     build_resources_by_scope,
     load_sandbox_lifecycle,
 )
 from fleetent.integrations.sandbox.hardening import config_hash, is_blocked_mount
+from fleetent.structured_logging import get_logger
+
+_logger = get_logger("sandbox.manager")
 
 # Image tag committed for an agent-scope container's dependencies; the next
 # acquire boots from it when present, else falls back to the client default.
@@ -69,7 +77,7 @@ class SandboxManager:
     deterministic without real time.
     """
 
-    client: SandboxClient = field(default_factory=SandboxClient)
+    backend: BaseSandboxBackend = field(default_factory=DockerBackend)
     scope: Scope = field(default=Scope.SESSION)
     idle_hours: float = 2.0
     resources_by_scope: dict[Scope, SandboxResources] | None = None
@@ -124,42 +132,58 @@ class SandboxManager:
             return entry.workspace_id
 
         image = await self._image_for(scope, key)
-        ws_path = self.workspace_host_path(scope, session_id, agent_name)
-        desired_hash = config_hash(image, self.resources_for(scope), env, str(ws_path))
+        # workspace_mount capability: only backends that bind-mount a host dir get a
+        # host path; others run with an instance-local /workspace (degraded, logged).
+        if self.backend.capabilities.workspace_mount:
+            ws_path: Path | None = self.workspace_host_path(scope, session_id, agent_name)
+        else:
+            ws_path = None
+            _logger.debug(
+                "sandbox_workspace_mount_unsupported", backend=self.backend.name, name=name
+            )
+        host_path = str(ws_path) if ws_path is not None else None
+        desired_hash = config_hash(image, self.resources_for(scope), env, host_path)
 
-        existing = await self.client.find_workspace(name)
+        existing = await self.backend.find_workspace(name)
         if existing is not None:
             # sandbox-hardening: re-adopt a surviving container only if its config-hash
             # still matches (or is absent on a pre-label container, reused conservatively);
             # a mismatch means the config changed since it was built, so rebuild.
-            actual_hash = await self.client.inspect_config_hash(name)
+            actual_hash = await self.backend.inspect_config_hash(name)
             if actual_hash is None or actual_hash == desired_hash:
                 self._registry[name] = _Entry(existing, scope, key, now)
                 return existing
-            await self.client.destroy_workspace(name)
+            await self.backend.destroy_workspace(name)
             self._registry.pop(name, None)
 
         # Session tier runs as `nobody`; make the host workspace dir writable by the
         # container's run uid. Single-tenant on-prem: workspace holds only the agent's
         # own working data (see design risk: mount-point uid write permission).
-        ws_path.chmod(0o777)
-        workspace_id = await self.client.create_workspace(
+        if ws_path is not None:
+            ws_path.chmod(0o777)
+        workspace_id = await self.backend.create_workspace(
             name=name,
             resources=self.resources_for(scope),
             image=image,
             env=env,
-            workspace_host_path=str(ws_path),
+            workspace_host_path=host_path,
             config_hash=desired_hash,
         )
         self._registry[name] = _Entry(workspace_id, scope, key, now)
         return workspace_id
 
     async def _image_for(self, scope: Scope, key: str) -> str | None:
-        """Agent scope boots from its committed image when present, else default."""
+        """Agent scope boots from its committed image when present, else default.
+
+        Only meaningful on backends that can persist deps into an image; backends
+        without `persist_workspace` always boot from the base image (None).
+        """
         if scope is not Scope.AGENT:
             return None
+        if not self.backend.capabilities.persist_workspace:
+            return None
         tag = _agent_image_tag(key)
-        if await self.client.image_exists(tag):
+        if await self.backend.image_exists(tag):
             return tag
         return None
 
@@ -203,15 +227,17 @@ class SandboxManager:
         entry = self._registry.get(name)
         if entry is None or entry.scope is not Scope.SESSION:
             return
-        await self.client.destroy_workspace(entry.workspace_id)
+        await self.backend.destroy_workspace(entry.workspace_id)
         self._registry.pop(name, None)
 
     async def sweep_idle(self) -> None:
         """Reclaim agent-scope containers idle past `idle_hours`.
 
-        Each reclaimed container is committed to its dependency image first, then
-        destroyed (commit-then-destroy) so the next acquire can boot from it.
-        Session scope never participates in idle reclamation.
+        On a backend that supports `persist_workspace`, each reclaimed container is
+        committed to its dependency image first, then destroyed (commit-then-destroy)
+        so the next acquire can boot from it. On a backend without that capability,
+        the commit is skipped (a warning is logged) and the container is destroyed
+        directly — the next acquire reinstalls deps. Session scope never participates.
         """
         now = self.clock()
         cutoff = self.idle_hours * 3600
@@ -220,7 +246,15 @@ class SandboxManager:
             for entry in self._registry.values()
             if entry.scope is Scope.AGENT and (now - entry.last_used) > cutoff
         ]
+        persist = self.backend.capabilities.persist_workspace
         for entry in stale:
-            await self.client.commit_workspace(entry.workspace_id, _agent_image_tag(entry.key))
-            await self.client.destroy_workspace(entry.workspace_id)
+            if persist:
+                await self.backend.commit_workspace(entry.workspace_id, _agent_image_tag(entry.key))
+            else:
+                _logger.warn(
+                    "sandbox_idle_reclaim_no_persist",
+                    backend=self.backend.name,
+                    key=entry.key,
+                )
+            await self.backend.destroy_workspace(entry.workspace_id)
             self._registry.pop(_container_name(entry.scope, entry.key), None)

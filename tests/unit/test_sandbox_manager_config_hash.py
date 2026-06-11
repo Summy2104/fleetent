@@ -20,7 +20,7 @@ def workspaces(monkeypatch, tmp_path):
 
 def _mgr(client) -> SandboxManager:
     return SandboxManager(
-        client=client,
+        backend=client,
         scope=Scope.SESSION,
         resources_by_scope={"session": SandboxResources(), "agent": SandboxResources()},
     )

@@ -83,7 +83,7 @@ def _make_manager(mock_client, scope=None):
     from fleetent.integrations.sandbox.manager import SandboxManager, Scope
 
     return SandboxManager(
-        client=mock_client,
+        backend=mock_client,
         scope=scope or Scope.SESSION,
         idle_hours=2.0,
         resources_by_scope={
@@ -653,7 +653,7 @@ def _timeout_manager(client, exec_timeout):
     from fleetent.integrations.sandbox.manager import SandboxManager, Scope
 
     return SandboxManager(
-        client=client,
+        backend=client,
         scope=Scope.SESSION,
         idle_hours=2.0,
         resources_by_scope={
@@ -675,7 +675,7 @@ async def test_run_code_sandbox_timeout_kills_and_classifies(monkeypatch):
     client = _mock_lifecycle_client("cid-timeout")
     client.exec = never_returns
     monkeypatch.setattr(tl, "_MANAGER", _timeout_manager(client, exec_timeout=0))
-    monkeypatch.setattr("fleetent.integrations.sandbox.client._KILL_GRACE_SECONDS", 0.001)
+    monkeypatch.setattr("fleetent.integrations.sandbox.backends.docker._KILL_GRACE_SECONDS", 0.001)
 
     result = await asyncio.wait_for(tl.run_code(code="while True: pass"), timeout=2.0)
     assert "超时" in result  # sandbox-timeout text, not the generic cancel text
@@ -695,7 +695,7 @@ async def test_run_code_external_cancel_kills_but_not_timeout(monkeypatch):
     client = _mock_lifecycle_client("cid-cancel2")
     client.exec = never_returns
     monkeypatch.setattr(tl, "_MANAGER", _timeout_manager(client, exec_timeout=30))
-    monkeypatch.setattr("fleetent.integrations.sandbox.client._KILL_GRACE_SECONDS", 0.001)
+    monkeypatch.setattr("fleetent.integrations.sandbox.backends.docker._KILL_GRACE_SECONDS", 0.001)
 
     token = CancelToken()
     token.cancel()  # external cancel before the (30s) sandbox deadline

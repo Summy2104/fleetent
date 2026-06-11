@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 
 def test_sandbox_client_logger_is_custom() -> None:
-    import fleetent.integrations.sandbox.client as mod
+    import fleetent.integrations.sandbox.backends.docker as mod
     from fleetent.structured_logging import Logger
 
     assert isinstance(mod._logger, Logger)
@@ -23,7 +23,7 @@ async def test_sandbox_client_logs_info_on_create() -> None:
 
     with (
         patch("asyncio.create_subprocess_exec", AsyncMock(return_value=_mock_proc(stdout=fake_id))),
-        patch("fleetent.integrations.sandbox.client._logger") as mock_log,
+        patch("fleetent.integrations.sandbox.backends.docker._logger") as mock_log,
     ):
         await client.create_workspace("session-1", resources=SandboxResources())
 
@@ -42,9 +42,9 @@ async def test_sandbox_client_logs_warn_on_docker_probe_fail() -> None:
             "asyncio.create_subprocess_exec",
             AsyncMock(return_value=_mock_proc(stderr="not found", returncode=1)),
         ),
-        patch("fleetent.integrations.sandbox.client._logger") as mock_log,
+        patch("fleetent.integrations.sandbox.backends.docker._logger") as mock_log,
     ):
-        await client.docker_available()
+        await client.available()
 
     mock_log.warn.assert_called()
 

@@ -80,7 +80,7 @@ src/fleetent/
   knowledge_base/    # KB 检索/向量化/持久化
   vector_store/      # 向量嵌入和重排
   governance/        # 审批门 / 权限 / 审计
-  integrations/      # MCP client / 沙箱
+  integrations/      # MCP client / 沙箱（sandbox/ 可插拔后端：backends/docker.py + backends/microsandbox.py）
   model/             # 模型路由和提供商健康
   observability/     # trace / usage / diagnostics
   session/           # 会话持久化
@@ -220,3 +220,4 @@ FLEETENT_TOKEN         # Bearer token（--token 参数优先）
 - **Bearer token 格式**：`Authorization: Bearer ma-<64hex>`（`ma-` 前缀区分服务 key 与模型 API key）
 - **MCP 工具名**：`{server_id}__{tool_name}`（双下划线）
 - **model/resolver.py**：每次调用新建 client——故意的，client 无状态且廉价
+- **Sandbox 可插拔后端**：`integrations/sandbox` 抽象为 `BaseSandboxBackend`（`backend.py`）+ `backends/docker.py`（默认）+ `backends/microsandbox.py`（本地 microVM，Apache-2.0，需宿主 KVM/HVF + 预装 runtime，否则 `is_installed()` 探测失败 → mode 降级 OFF）。后端经 `factory.create_backend` 按 `sandbox.backend`（agent.yaml > platform.yaml > 默认 docker）选型。能力差异经 `BackendCapabilities`（`persist_workspace`/`workspace_mount`/`orphan_cleanup`）门控，manager/cleanup 按能力降级、不用 isinstance。`client.py` 是 `SandboxClient = DockerBackend` 的 re-export shim——`monkeypatch`/`patch` Docker 内部（如 `_KILL_GRACE_SECONDS`、`_logger`）须打在 `backends.docker`，打 shim 不生效

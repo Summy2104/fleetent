@@ -51,6 +51,24 @@ async def test_start_infra_skips_sandbox_lifecycle_when_docker_unavailable() -> 
     sweep.assert_not_called()
 
 
+async def test_start_infra_inits_sandbox_manager_with_agent() -> None:
+    """The process sandbox manager is (re)built with the agent-selected backend."""
+    with (
+        patch(
+            "fleetent.integrations.sandbox.enablement.get_effective_mode",
+            AsyncMock(return_value=Mode.ALL),
+        ),
+        patch("fleetent.integrations.sandbox.cleanup_orphans", AsyncMock()),
+        patch("fleetent.integrations.sandbox.start_idle_sweep"),
+        patch("fleetent.tools.builtin_tools.init_sandbox_manager") as init_mgr,
+        patch("fleetent.session.manager.start_session_maintenance"),
+    ):
+        agent = _agent_without_mcp()
+        await agent_app._start_infra(agent)
+
+    init_mgr.assert_called_once_with(agent)
+
+
 async def test_start_infra_cleanup_failure_does_not_block_startup() -> None:
     """An orphan-cleanup error is logged; boot still proceeds to session maintenance."""
     with (

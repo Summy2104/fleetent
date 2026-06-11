@@ -9,8 +9,8 @@ from pathlib import Path
 
 from fleetent import eval_logger, paths
 from fleetent.integrations.sandbox import (
+    BaseSandboxBackend,
     ExecResult,
-    SandboxClient,
     SandboxManager,
     build_sandbox_env,
     cap_or_spill,
@@ -57,7 +57,25 @@ _MANAGER: SandboxManager | None = None
 def _get_manager() -> SandboxManager:
     global _MANAGER
     if _MANAGER is None:
-        _MANAGER = SandboxManager()
+        from fleetent.integrations.sandbox.factory import create_backend
+
+        _MANAGER = SandboxManager(backend=create_backend())
+    return _MANAGER
+
+
+def init_sandbox_manager(agent: object | None = None) -> SandboxManager:
+    """(Re)build the process sandbox manager with the agent-selected backend.
+
+    Called by the agent runtime at startup so a standalone agent's `agent.yaml`
+    `sandbox.backend` override takes effect (factory precedence: agent > platform >
+    docker). `agent` is an `AgentFile`; typed loosely to avoid a runtime import cycle.
+    """
+    global _MANAGER
+    from fleetent.agent_config import AgentFile
+    from fleetent.integrations.sandbox.factory import create_backend
+
+    resolved = agent if isinstance(agent, AgentFile) else None
+    _MANAGER = SandboxManager(backend=create_backend(resolved))
     return _MANAGER
 
 
@@ -233,7 +251,7 @@ from fleetent.tools.file_tools import write_file as write_file  # noqa: F401,E40
 
 
 async def _exec_or_cancel(
-    client: SandboxClient,
+    client: BaseSandboxBackend,
     ws_id: str,
     command: str,
     cancel_token: CancelToken,
@@ -309,7 +327,7 @@ async def run_code(
     exec_timeout = manager.resources_for(scope).exec_timeout
     start = time.monotonic()
     child = CancelToken(deadline=start + exec_timeout, parent=token)
-    result = await _exec_or_cancel(manager.client, ws_id, command, child, session_id=session_id)
+    result = await _exec_or_cancel(manager.backend, ws_id, command, child, session_id=session_id)
     elapsed = time.monotonic() - start
     if result is None:
         manager.forget(manager.container_name(scope, session_id, agent_name or "default"))

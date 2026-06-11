@@ -17,7 +17,7 @@ from fleetent.tools import file_sandbox_io as fsio
 from fleetent.tools.registry import ToolContext, tool
 
 if TYPE_CHECKING:
-    from fleetent.integrations.sandbox.client import ExecResult, SandboxClient
+    from fleetent.integrations.sandbox.backend import BaseSandboxBackend, ExecResult
     from fleetent.integrations.sandbox.manager import SandboxManager
 
 logger = logging.getLogger(__name__)
@@ -204,7 +204,7 @@ def _get_sandbox_manager() -> SandboxManager:
 class _ContainerBackend:
     """File IO executed inside the sandbox container, locked to ``/workspace``."""
 
-    client: SandboxClient
+    client: BaseSandboxBackend
     ws_id: str
     session_id: str
 
@@ -327,7 +327,10 @@ async def _select_backend(tool_context: ToolContext | None) -> _ContainerBackend
     agent_name = (tool_context.agent_name if tool_context else None) or "default"
     manager = _get_sandbox_manager()
     mode = await get_effective_mode()
-    if mode is Mode.OFF:
+    # Host fence when the sandbox is off OR the backend cannot bind-mount the host
+    # workspace (workspace_mount=False): file tools then share the host workspace dir
+    # with IM attachment staging (design D3), behind a normpath path fence.
+    if mode is Mode.OFF or not manager.backend.capabilities.workspace_mount:
         root = manager.workspace_host_path(manager.scope, session_id, agent_name)
         return _HostBackend(root=root)
     from fleetent.integrations.sandbox import build_sandbox_env
@@ -335,7 +338,7 @@ async def _select_backend(tool_context: ToolContext | None) -> _ContainerBackend
     features = tool_context.features if tool_context else {}
     env = build_sandbox_env(agent_env=features.get("sandbox_env"))
     ws_id = await manager.acquire(manager.scope, session_id, agent_name, env=env)
-    return _ContainerBackend(client=manager.client, ws_id=ws_id, session_id=session_id)
+    return _ContainerBackend(client=manager.backend, ws_id=ws_id, session_id=session_id)
 
 
 # ── tools ─────────────────────────────────────────────────────────────────────

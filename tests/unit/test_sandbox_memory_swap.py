@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-import fleetent.integrations.sandbox.client as client_mod
+import fleetent.integrations.sandbox.backends.docker as client_mod
 from fleetent.integrations.sandbox.client import SandboxClient
 from fleetent.integrations.sandbox.config import (
     SandboxResources,

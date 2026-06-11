@@ -4,12 +4,19 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+from fleetent.integrations.sandbox.backend import BackendCapabilities
 from fleetent.integrations.sandbox.config import NetworkPolicy, SandboxResources
 from fleetent.integrations.sandbox.manager import SandboxManager, Scope
 
 
-def _mock_client() -> MagicMock:
-    """A SandboxClient stub whose async methods are individually configurable."""
+def _mock_client(
+    *, persist_workspace: bool = True, workspace_mount: bool = True, orphan_cleanup: bool = True
+) -> MagicMock:
+    """A backend stub whose async methods + capabilities are individually configurable.
+
+    Defaults mirror the Docker backend (all capabilities true) so existing
+    behaviour assertions are unchanged; degradation tests flip a flag.
+    """
     client = MagicMock()
     client.find_workspace = AsyncMock(return_value=None)
     client.create_workspace = AsyncMock(return_value="cid-new")
@@ -19,11 +26,17 @@ def _mock_client() -> MagicMock:
     # sandbox-hardening: re-adopt path inspects the config-hash label; None = pre-label
     # container, conservatively reused (no rebuild), preserving prior reuse behavior.
     client.inspect_config_hash = AsyncMock(return_value=None)
+    # Real (not MagicMock) capabilities so the manager's gating reads concrete bools.
+    client.capabilities = BackendCapabilities(
+        persist_workspace=persist_workspace,
+        workspace_mount=workspace_mount,
+        orphan_cleanup=orphan_cleanup,
+    )
     return client
 
 
 def _manager(client: MagicMock | None = None, **kwargs) -> SandboxManager:
-    return SandboxManager(client=client or _mock_client(), **kwargs)
+    return SandboxManager(backend=client or _mock_client(), **kwargs)
 
 
 # --- Section 3: Scope + construction ---------------------------------------
@@ -272,3 +285,40 @@ async def test_acquire_workspace_subdir_is_sanitised(monkeypatch, tmp_path):
     _, kwargs = client.create_workspace.call_args
     assert kwargs["workspace_host_path"] == str(tmp_path / "user-U1-chan-a")
     assert (tmp_path / "user-U1-chan-a").is_dir()
+
+
+# --- capability degradation (sandbox-backend-abstraction) ------------------
+
+
+async def test_sweep_idle_skips_commit_when_persist_unsupported():
+    """persist_workspace=False: idle reclaim destroys without committing, and warns."""
+    client = _mock_client(persist_workspace=False)
+    now = [1000.0]
+    mgr = _manager(client, idle_hours=1.0, clock=lambda: now[0])
+    await mgr.acquire(Scope.AGENT, session_id="s1", agent_name="bot")
+    now[0] = 1000.0 + 2 * 3600
+    await mgr.sweep_idle()
+    client.commit_workspace.assert_not_awaited()
+    client.destroy_workspace.assert_awaited_once_with("cid-new")
+
+
+async def test_acquire_agent_skips_image_lookup_when_persist_unsupported():
+    """persist_workspace=False: agent scope never looks up a committed image."""
+    client = _mock_client(persist_workspace=False)
+    mgr = _manager(client, scope=Scope.AGENT)
+    await mgr.acquire(Scope.AGENT, session_id="s1", agent_name="bot")
+    client.image_exists.assert_not_awaited()
+    _, kwargs = client.create_workspace.call_args
+    assert kwargs["image"] is None
+
+
+async def test_acquire_omits_host_path_when_mount_unsupported(monkeypatch, tmp_path):
+    """workspace_mount=False: no host path is threaded to create_workspace."""
+    from fleetent import paths
+
+    monkeypatch.setattr(paths, "workspaces_dir", lambda: tmp_path)
+    client = _mock_client(workspace_mount=False)
+    mgr = _manager(client)
+    await mgr.acquire(Scope.SESSION, session_id="s1", agent_name="bot")
+    _, kwargs = client.create_workspace.call_args
+    assert kwargs["workspace_host_path"] is None

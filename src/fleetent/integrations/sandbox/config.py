@@ -37,6 +37,11 @@ _DEFAULT_SCOPE = "session"
 _VALID_SCOPES = ("session", "agent")
 _DEFAULT_IDLE_HOURS = 2.0
 
+# Backend selection (sandbox-backend-abstraction). `docker` is the default so existing
+# deployments are unchanged; `microsandbox` selects the local-microVM backend.
+_DEFAULT_BACKEND = "docker"
+_VALID_BACKENDS = ("docker", "microsandbox")
+
 # Minimal Linux capabilities the agent tier re-adds after `--cap-drop ALL` so an
 # in-container `pip install` can chown/chmod/own files and briefly drop privilege.
 # session tier adds none (it only runs code, never installs). Mirrors the hermes
@@ -60,6 +65,48 @@ class SandboxLifecycle:
 
     scope: str = _DEFAULT_SCOPE
     idle_hours: float = _DEFAULT_IDLE_HOURS
+
+
+@dataclass
+class SandboxBackendConfig:
+    """Backend selection from the `sandbox:` section (sandbox-backend-abstraction).
+
+    `backend` is the platform-level default backend name; `microsandbox_image` is the
+    optional base image for the microsandbox backend. The factory resolves the final
+    backend by overlaying any per-agent `agent.yaml` override on top of this.
+    """
+
+    backend: str = _DEFAULT_BACKEND
+    microsandbox_image: str | None = None
+
+
+def load_sandbox_backend_config(path: Path | None = None) -> SandboxBackendConfig:
+    """Load `sandbox.backend` / `sandbox.microsandbox.image`, falling back to docker.
+
+    An unrecognised backend logs a warning and falls back to `docker` rather than
+    being silently accepted (mirrors the resource-config "never silently accept"
+    rule). A missing file / section yields all defaults.
+    """
+    sandbox = _read_sandbox_section(path or SETTINGS_PATH)
+    if sandbox is None:
+        return SandboxBackendConfig()
+    backend = _load_backend(sandbox, _DEFAULT_BACKEND)
+    micro = sandbox.get("microsandbox")
+    image = micro.get("image") if isinstance(micro, dict) else None
+    return SandboxBackendConfig(
+        backend=backend,
+        microsandbox_image=image if isinstance(image, str) and image.strip() else None,
+    )
+
+
+def _load_backend(section: dict[str, object], default: str) -> str:
+    if "backend" not in section:
+        return default
+    value = section["backend"]
+    if isinstance(value, str) and value in _VALID_BACKENDS:
+        return value
+    _logger.warn("sandbox_backend_invalid", value=repr(value), falling_back=default)
+    return default
 
 
 @dataclass

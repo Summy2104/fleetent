@@ -3,6 +3,7 @@
 ## Purpose
 TBD - created by archiving change runtime-read-agent-config. Update Purpose after archive.
 ## Requirements
+
 ### Requirement: Per-run governance resolved from the active agent snapshot
 
 The system SHALL resolve per-run governance configuration (context compression, layered
@@ -32,11 +33,11 @@ parameter > agent configuration > field default.
 ### Requirement: Process-level deployment knobs resolved at agent startup
 
 The system SHALL resolve process-level deployment knobs (session disk cleanup interval,
-`disabled_skills`, logging/observability, `microsandbox_url`, image/vision endpoints,
-diagnostics) for a standalone agent process from the current (single) active agent's
-configuration at process startup, rather than from the global `Settings`. In the
-multi-agent dev/platform mode where no single agent owns the process, these knobs SHALL
-fall back to their defaults.
+`disabled_skills`, logging/observability, the `sandbox` section (backend selection),
+image/vision endpoints, diagnostics) for a standalone agent process from the current
+(single) active agent's configuration at process startup, rather than from the global
+`Settings`. In the multi-agent dev/platform mode where no single agent owns the process,
+these knobs SHALL fall back to their defaults.
 
 #### Scenario: standalone agent applies its own session cleanup interval
 
@@ -48,6 +49,13 @@ fall back to their defaults.
 
 - **WHEN** a standalone agent process starts for an agent declaring `disabled_skills: ["x"]`
 - **THEN** skill `x` is excluded from that process's skill registry
+
+#### Scenario: standalone agent resolves its sandbox backend from agent.yaml
+
+- **WHEN** a standalone agent process starts for an agent whose `agent.yaml` declares
+  `sandbox.backend: microsandbox`
+- **THEN** the process selects the microsandbox backend from that agent-level configuration,
+  without reading any platform-level settings file
 
 ### Requirement: Global budget dimension is not read at runtime
 
@@ -73,4 +81,3 @@ eliminates the previously parsed-but-unused agent-file intelligence fields.
 - **WHEN** an agent's `agent.yaml` declares an `embedding` block and the agent runs
 - **THEN** the embedding backend is constructed from that agent-config block, not from the
   global `Settings.embedding`
-

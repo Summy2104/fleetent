@@ -305,6 +305,15 @@ webhooks:
   enabled: true                   # set false to reject all inbound webhook calls
   max_body_bytes: 1048576         # max webhook request body size (bytes); default 1 MiB
 
+# ── sandbox backend (code execution) ──
+sandbox:
+  backend: null                   # null = inherit platform.yaml sandbox.backend (default docker);
+                                  # "docker" or "microsandbox" to pin this agent's backend
+  microsandbox:
+    image: null                   # null = backend default base image; e.g. "python:3.12" for microsandbox
+                                  # microsandbox needs host virtualization (KVM/HVF) + preinstalled runtime;
+                                  # if unavailable the sandbox degrades to OFF (no code execution)
+
 # ── observability ──
 observability:
   logging:

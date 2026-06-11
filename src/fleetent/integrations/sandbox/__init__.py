@@ -1,12 +1,20 @@
 """Sandbox integration public API.
 
-The Docker-backed code-execution sandbox: a pluggable external execution backend
-behind the ``run_code`` tool (sibling to ``integrations/mcp/``). Cross-package
-callers import from here, not from the internal modules.
+The code-execution sandbox: a pluggable external execution backend behind the
+``run_code`` tool (sibling to ``integrations/mcp/``), with Docker and microsandbox
+backends selected by configuration. Cross-package callers import from here, not
+from the internal modules.
 """
 
+from fleetent.integrations.sandbox.backend import (
+    BackendCapabilities,
+    BaseSandboxBackend,
+    ExecResult,
+)
+from fleetent.integrations.sandbox.backends.docker import DockerBackend
+from fleetent.integrations.sandbox.backends.microsandbox import MicrosandboxBackend
 from fleetent.integrations.sandbox.cleanup import cleanup_orphans
-from fleetent.integrations.sandbox.client import ExecResult, SandboxClient
+from fleetent.integrations.sandbox.client import SandboxClient
 from fleetent.integrations.sandbox.config import (
     NetworkPolicy,
     SandboxLifecycle,
@@ -30,6 +38,10 @@ from fleetent.integrations.sandbox.redaction import redact_secrets
 from fleetent.integrations.sandbox.secrets import build_sandbox_env, is_sensitive_name
 
 __all__ = [
+    "BackendCapabilities",
+    "BaseSandboxBackend",
+    "DockerBackend",
+    "MicrosandboxBackend",
     "Mode",
     "NetworkPolicy",
     "SandboxClient",

@@ -1017,7 +1017,9 @@ async def test_server_auth_health_and_approval(
     monkeypatch.setattr(
         server,
         "_platform_bearer",
-        lambda api_key: Principal(user_id="u1", tenant_id="default") if api_key == "ma-valid" else None,
+        lambda api_key: (
+            Principal(user_id="u1", tenant_id="default") if api_key == "ma-valid" else None
+        ),
     )
     resolved = await server._authenticate("Bearer ma-valid")
     assert resolved.user_id == "u1"
@@ -1033,12 +1035,15 @@ async def test_server_auth_health_and_approval(
             app=SimpleNamespace(
                 state=SimpleNamespace(
                     sandbox_mode=server.Mode.OFF,
-                    sandbox_docker_available=False,
+                    sandbox_backend="docker",
+                    sandbox_backend_available=False,
                 )
             )
         )
     )
     assert health["adapters"]["slack"] is True
+    assert health["sandbox"]["backend"] == "docker"
+    assert health["sandbox"]["backend_available"] is False
     assert health["sandbox"]["note"] == "off (docker unavailable)"
 
     async def resolve(**kwargs: Any) -> bool:

@@ -41,10 +41,10 @@ def workspace_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 async def container(
     workspace_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> AsyncIterator[tuple[SandboxManager, str]]:
-    mgr = SandboxManager(client=SandboxClient(), scope=Scope.SESSION)
+    mgr = SandboxManager(backend=SandboxClient(), scope=Scope.SESSION)
     sess = "itest-files"
     ws_id = await mgr.acquire(Scope.SESSION, sess, "bot")
-    backend = file_tools._ContainerBackend(client=mgr.client, ws_id=ws_id, session_id=sess)
+    backend = file_tools._ContainerBackend(client=mgr.backend, ws_id=ws_id, session_id=sess)
 
     async def _select(tool_context):
         return backend
@@ -53,7 +53,7 @@ async def container(
     try:
         yield mgr, sess
     finally:
-        await mgr.client.destroy_workspace(mgr.container_name(Scope.SESSION, sess, "bot"))
+        await mgr.backend.destroy_workspace(mgr.container_name(Scope.SESSION, sess, "bot"))
 
 
 async def test_write_then_read_roundtrip(container, workspace_root: Path) -> None:

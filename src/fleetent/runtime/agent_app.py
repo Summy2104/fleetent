@@ -227,22 +227,27 @@ async def _start_infra(agent: AgentFile) -> None:
     if _db_url:
         _init_agent_db_schema(_db_url, agent_id=agent.name, tenant_id=agent.tenant_id)
     from fleetent.integrations.sandbox import enablement as sandbox_enablement
-    from fleetent.session import manager as session_mgr
 
-    mode = await sandbox_enablement.get_effective_mode()  # one-time Docker probe, cached
-    # sandbox-runtime-lifecycle-wiring: only when Docker is usable (effective mode != off)
-    # do we reap last-run orphan containers and schedule agent-scope idle reclamation.
-    # Orphan cleanup is best-effort (a failure is logged, never aborts boot); the idle
-    # sweep is a bare-asyncio loop mirroring session maintenance.
+    # Select the configured sandbox backend (agent.yaml > platform.yaml > docker) and
+    # build the process sandbox manager around it so run_code uses the right backend.
+    from fleetent.integrations.sandbox.factory import create_backend
+    from fleetent.session import manager as session_mgr
+    from fleetent.tools.builtin_tools import init_sandbox_manager
+
+    backend = create_backend(agent)
+    init_sandbox_manager(agent)
+
+    mode = await sandbox_enablement.get_effective_mode(backend)  # one-time probe, cached
+    # sandbox-runtime-lifecycle-wiring: only when the backend is usable (effective mode
+    # != off) do we reap last-run orphan workspaces and schedule agent-scope idle
+    # reclamation. Orphan cleanup is best-effort (a failure is logged, never aborts
+    # boot) and capability-gated; the idle sweep is a bare-asyncio loop mirroring
+    # session maintenance.
     if mode is not sandbox_enablement.Mode.OFF:
-        from fleetent.integrations.sandbox import (
-            SandboxClient,
-            cleanup_orphans,
-            start_idle_sweep,
-        )
+        from fleetent.integrations.sandbox import cleanup_orphans, start_idle_sweep
 
         try:
-            await cleanup_orphans(SandboxClient())
+            await cleanup_orphans(backend)
         except Exception as exc:  # noqa: BLE001 — orphan cleanup must not abort boot
             _logger.warn("agent_runtime_sandbox_cleanup_failed", error=str(exc))
         start_idle_sweep()

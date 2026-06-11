@@ -35,16 +35,16 @@ def workspace_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 
 
 async def _cleanup(mgr: SandboxManager, scope: Scope, session_id: str, agent_name: str) -> None:
-    await mgr.client.destroy_workspace(mgr.container_name(scope, session_id, agent_name))
+    await mgr.backend.destroy_workspace(mgr.container_name(scope, session_id, agent_name))
 
 
 async def test_session_tier_writes_to_host_workspace(workspace_root: Path) -> None:
     """A session-tier (nobody, read-only rootfs) container can write /workspace, and
     the write is visible on the host workspace dir (mount + uid write perm work)."""
-    mgr = SandboxManager(client=SandboxClient(), scope=Scope.SESSION)
+    mgr = SandboxManager(backend=SandboxClient(), scope=Scope.SESSION)
     try:
         ws_id = await mgr.acquire(Scope.SESSION, session_id="itest-sess", agent_name="bot")
-        await mgr.client.exec(ws_id, "echo hello > /workspace/out.txt")
+        await mgr.backend.exec(ws_id, "echo hello > /workspace/out.txt")
         host_file = workspace_root / "itest-sess" / "out.txt"
         assert host_file.exists()
         assert host_file.read_text().strip() == "hello"
@@ -54,10 +54,10 @@ async def test_session_tier_writes_to_host_workspace(workspace_root: Path) -> No
 
 async def test_agent_tier_writes_to_host_workspace(workspace_root: Path) -> None:
     """An agent-tier (root, writable) container can also write /workspace to host."""
-    mgr = SandboxManager(client=SandboxClient(), scope=Scope.AGENT)
+    mgr = SandboxManager(backend=SandboxClient(), scope=Scope.AGENT)
     try:
         ws_id = await mgr.acquire(Scope.AGENT, session_id="s1", agent_name="itest-agent")
-        await mgr.client.exec(ws_id, "echo world > /workspace/out.txt")
+        await mgr.backend.exec(ws_id, "echo world > /workspace/out.txt")
         host_file = workspace_root / "itest-agent" / "out.txt"
         assert host_file.exists()
         assert host_file.read_text().strip() == "world"
@@ -68,16 +68,16 @@ async def test_agent_tier_writes_to_host_workspace(workspace_root: Path) -> None
 async def test_workspace_persists_across_container_destroy(workspace_root: Path) -> None:
     """Destroying the container does not delete the host workspace; a re-acquired
     container sees the prior content."""
-    mgr = SandboxManager(client=SandboxClient(), scope=Scope.SESSION)
+    mgr = SandboxManager(backend=SandboxClient(), scope=Scope.SESSION)
     try:
         ws_id = await mgr.acquire(Scope.SESSION, session_id="itest-persist", agent_name="bot")
-        await mgr.client.exec(ws_id, "echo keep > /workspace/state.txt")
-        await mgr.client.destroy_workspace(
+        await mgr.backend.exec(ws_id, "echo keep > /workspace/state.txt")
+        await mgr.backend.destroy_workspace(
             mgr.container_name(Scope.SESSION, "itest-persist", "bot")
         )
         mgr.forget(mgr.container_name(Scope.SESSION, "itest-persist", "bot"))
         ws_id2 = await mgr.acquire(Scope.SESSION, session_id="itest-persist", agent_name="bot")
-        result = await mgr.client.exec(ws_id2, "cat /workspace/state.txt")
+        result = await mgr.backend.exec(ws_id2, "cat /workspace/state.txt")
         assert result.stdout.strip() == "keep"
     finally:
         await _cleanup(mgr, Scope.SESSION, "itest-persist", "bot")
@@ -90,10 +90,10 @@ async def test_host_path_outside_workspace_not_reachable(
     (mount namespace boundary)."""
     secret = tmp_path / "secret.txt"
     secret.write_text("TOP-SECRET")
-    mgr = SandboxManager(client=SandboxClient(), scope=Scope.SESSION)
+    mgr = SandboxManager(backend=SandboxClient(), scope=Scope.SESSION)
     try:
         ws_id = await mgr.acquire(Scope.SESSION, session_id="itest-sec", agent_name="bot")
-        result = await mgr.client.exec(ws_id, f"cat {secret}")
+        result = await mgr.backend.exec(ws_id, f"cat {secret}")
         assert "TOP-SECRET" not in result.stdout
         assert result.exit_code != 0
     finally:
@@ -102,12 +102,12 @@ async def test_host_path_outside_workspace_not_reachable(
 
 async def test_session_snapshot_env_continuity(workspace_root: Path) -> None:
     """An exported var set in one session exec is visible in the next (snapshot)."""
-    mgr = SandboxManager(client=SandboxClient(), scope=Scope.SESSION)
+    mgr = SandboxManager(backend=SandboxClient(), scope=Scope.SESSION)
     sess = "itest-snap-env"
     try:
         ws_id = await mgr.acquire(Scope.SESSION, session_id=sess, agent_name="bot")
-        await mgr.client.exec(ws_id, "export FOO=bar", session_id=sess)
-        result = await mgr.client.exec(ws_id, "echo $FOO", session_id=sess)
+        await mgr.backend.exec(ws_id, "export FOO=bar", session_id=sess)
+        result = await mgr.backend.exec(ws_id, "echo $FOO", session_id=sess)
         assert result.stdout.strip() == "bar"
     finally:
         await _cleanup(mgr, Scope.SESSION, sess, "bot")
@@ -115,13 +115,13 @@ async def test_session_snapshot_env_continuity(workspace_root: Path) -> None:
 
 async def test_session_snapshot_cwd_continuity(workspace_root: Path) -> None:
     """A cd in one session exec persists to the next (cwd marker)."""
-    mgr = SandboxManager(client=SandboxClient(), scope=Scope.SESSION)
+    mgr = SandboxManager(backend=SandboxClient(), scope=Scope.SESSION)
     sess = "itest-snap-cwd"
     try:
         ws_id = await mgr.acquire(Scope.SESSION, session_id=sess, agent_name="bot")
-        await mgr.client.exec(ws_id, "mkdir -p /workspace/sub", session_id=sess)
-        await mgr.client.exec(ws_id, "cd /workspace/sub", session_id=sess)
-        result = await mgr.client.exec(ws_id, "pwd", session_id=sess)
+        await mgr.backend.exec(ws_id, "mkdir -p /workspace/sub", session_id=sess)
+        await mgr.backend.exec(ws_id, "cd /workspace/sub", session_id=sess)
+        result = await mgr.backend.exec(ws_id, "pwd", session_id=sess)
         assert result.stdout.strip() == "/workspace/sub"
     finally:
         await _cleanup(mgr, Scope.SESSION, sess, "bot")

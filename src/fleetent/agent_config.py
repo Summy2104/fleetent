@@ -236,6 +236,29 @@ class AgentKnowledge(BaseModel):
         return self
 
 
+class SandboxMicrosandboxSettings(BaseModel):
+    """Per-agent microsandbox backend options (sandbox-backend-abstraction)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    image: str | None = None
+
+
+class SandboxSettings(BaseModel):
+    """Per-agent sandbox backend selection (sandbox-backend-abstraction).
+
+    `backend` (``docker`` | ``microsandbox``) overrides the platform default for this
+    agent; ``None`` inherits the platform-level `sandbox.backend`. An invalid value is
+    not rejected here — the factory warns and falls back to docker — so a typo never
+    blocks the agent from loading.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    backend: str | None = None
+    microsandbox: SandboxMicrosandboxSettings = Field(default_factory=SandboxMicrosandboxSettings)
+
+
 class AgentFile(BaseModel):
     """Schema for a self-contained ``agent.yaml``."""
 
@@ -259,6 +282,7 @@ class AgentFile(BaseModel):
     rerank: RerankSettings = Field(default_factory=RerankSettings)
     knowledge: AgentKnowledge = Field(default_factory=AgentKnowledge)
     long_term_ctx: LongTermContextSettings = Field(default_factory=LongTermContextSettings)
+    sandbox: SandboxSettings = Field(default_factory=SandboxSettings)
     # ── per-agent runtime governance (defaults mirror Settings; schema-only this phase,
     #    runtime wiring lands in runtime-read-agent-config) ──
     # context compression

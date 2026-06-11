@@ -4,14 +4,32 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
+from fleetent.integrations.sandbox.backend import BackendCapabilities
 from fleetent.integrations.sandbox.cleanup import cleanup_orphans
 
 
-def _client(names: list[str]) -> AsyncMock:
+def _client(names: list[str], *, orphan_cleanup: bool = True) -> AsyncMock:
     client = AsyncMock()
-    client.list_containers = AsyncMock(return_value=names)
+    client.name = "fake"
+    client.list_workspaces = AsyncMock(return_value=names)
     client.destroy_workspace = AsyncMock()
+    client.capabilities = BackendCapabilities(
+        persist_workspace=True, workspace_mount=True, orphan_cleanup=orphan_cleanup
+    )
     return client
+
+
+async def test_cleanup_orphans_skips_when_capability_absent():
+    """orphan_cleanup=False: cleanup is a no-op (returns 0), never enumerates, logs."""
+    from unittest.mock import patch
+
+    client = _client(["sandbox-session-1"], orphan_cleanup=False)
+    with patch("fleetent.integrations.sandbox.cleanup._logger") as mock_log:
+        count = await cleanup_orphans(client)
+    assert count == 0
+    client.list_workspaces.assert_not_awaited()
+    client.destroy_workspace.assert_not_awaited()
+    mock_log.info.assert_called_once()
 
 
 async def test_cleanup_orphans_destroys_each_listed_container():
@@ -25,7 +43,7 @@ async def test_cleanup_orphans_destroys_each_listed_container():
 async def test_cleanup_orphans_queries_with_sandbox_prefix():
     client = _client([])
     await cleanup_orphans(client)
-    assert client.list_containers.await_args.args[0] == "sandbox-"
+    assert client.list_workspaces.await_args.args[0] == "sandbox-"
 
 
 async def test_cleanup_orphans_empty_list_returns_zero():
@@ -36,7 +54,7 @@ async def test_cleanup_orphans_empty_list_returns_zero():
 
 
 async def test_cleanup_orphans_docker_unavailable_returns_zero():
-    """Docker unavailable surfaces as an empty list from list_containers -> 0."""
+    """Docker unavailable surfaces as an empty list from list_workspaces -> 0."""
     client = _client([])
     count = await cleanup_orphans(client)
     assert count == 0

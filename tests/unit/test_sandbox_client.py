@@ -160,19 +160,19 @@ async def test_destroy_workspace_is_idempotent_when_container_absent(client):
 
 async def test_docker_available_true_on_zero_returncode(client):
     with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=_mock_proc(returncode=0))):
-        assert await client.docker_available() is True
+        assert await client.available() is True
 
 
 async def test_docker_available_false_on_nonzero_returncode(client):
     with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=_mock_proc(returncode=1))):
-        assert await client.docker_available() is False
+        assert await client.available() is False
 
 
 async def test_docker_available_false_when_cli_missing(client):
     with patch(
         "asyncio.create_subprocess_exec", AsyncMock(side_effect=FileNotFoundError("docker"))
     ):
-        assert await client.docker_available() is False
+        assert await client.available() is False
 
 
 async def _capture_create_workspace(
@@ -408,10 +408,10 @@ async def test_create_workspace_no_mount_when_path_none(client):
     assert "-v" not in argv
 
 
-# ── list_containers (SB8 orphan enumeration) ──────────────────────────────────
+# ── list_workspaces (SB8 orphan enumeration) ──────────────────────────────────
 
 
-async def test_list_containers_parses_names(client):
+async def test_list_workspaces_parses_names(client):
     """docker ps -a --filter name=<prefix> --format {{.Names}} -> name list."""
     captured: list[list[str]] = []
 
@@ -420,7 +420,7 @@ async def test_list_containers_parses_names(client):
         return _mock_proc(stdout="sandbox-session-1\nsandbox-agent-bot\n")
 
     with patch("asyncio.create_subprocess_exec", fake_exec):
-        names = await client.list_containers("sandbox-")
+        names = await client.list_workspaces("sandbox-")
 
     assert names == ["sandbox-session-1", "sandbox-agent-bot"]
     assert captured[0][:3] == ["docker", "ps", "-a"]
@@ -428,27 +428,27 @@ async def test_list_containers_parses_names(client):
     assert "{{.Names}}" in captured[0]
 
 
-async def test_list_containers_empty_output_returns_empty_list(client):
+async def test_list_workspaces_empty_output_returns_empty_list(client):
     """No matching containers -> empty list (blank stdout)."""
     with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=_mock_proc(stdout="\n"))):
-        names = await client.list_containers("sandbox-")
+        names = await client.list_workspaces("sandbox-")
     assert names == []
 
 
-async def test_list_containers_nonzero_returns_empty_list(client):
+async def test_list_workspaces_nonzero_returns_empty_list(client):
     """A non-zero docker exit degrades to an empty list without raising."""
     mock_proc = _mock_proc(stderr="cannot connect to docker daemon", returncode=1)
     with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_proc)):
-        names = await client.list_containers("sandbox-")
+        names = await client.list_workspaces("sandbox-")
     assert names == []
 
 
-async def test_list_containers_returns_empty_when_cli_missing(client):
+async def test_list_workspaces_returns_empty_when_cli_missing(client):
     """A missing docker CLI degrades to an empty list, never raising."""
     with patch(
         "asyncio.create_subprocess_exec", AsyncMock(side_effect=FileNotFoundError("docker"))
     ):
-        names = await client.list_containers("sandbox-")
+        names = await client.list_workspaces("sandbox-")
     assert names == []
 
 
@@ -456,7 +456,7 @@ async def test_list_containers_returns_empty_when_cli_missing(client):
 
 
 async def test_kill_workspace_sigterm_then_sigkill(client, monkeypatch):
-    import fleetent.integrations.sandbox.client as sc
+    import fleetent.integrations.sandbox.backends.docker as sc
 
     monkeypatch.setattr(sc, "_KILL_GRACE_SECONDS", 0.001)
     calls: list[tuple] = []
@@ -477,7 +477,7 @@ async def test_kill_workspace_sigterm_then_sigkill(client, monkeypatch):
 
 
 async def test_kill_workspace_nonzero_does_not_raise(client, monkeypatch):
-    import fleetent.integrations.sandbox.client as sc
+    import fleetent.integrations.sandbox.backends.docker as sc
 
     monkeypatch.setattr(sc, "_KILL_GRACE_SECONDS", 0.001)
     # SIGKILL on an already-stopped container returns nonzero — must not raise.

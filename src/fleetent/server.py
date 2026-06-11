@@ -25,6 +25,7 @@ from fleetent.governance.permission_gate import (
     cleanup_stale_approvals,
     list_approvals,
 )
+from fleetent.identity import Principal
 from fleetent.im_gateway.slack_supervisor import SlackSupervisor
 from fleetent.integrations.sandbox import (
     Mode,
@@ -48,7 +49,6 @@ from fleetent.platform.im_gateway_management import admin_api, connector_manager
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import provider_admin_api
 from fleetent.platform.skill_management import skill_admin_api
-from fleetent.identity import Principal
 from fleetent.platform.user_management import user_admin_api
 from fleetent.platform.user_management.api_key_store import resolve as _resolve_api_key
 from fleetent.platform.user_management.platform_bearer_adapter import PlatformBearerAdapter
@@ -443,13 +443,20 @@ def _telegram_adapter_configured() -> bool:
 
 @app.get("/health")
 async def health(request: Request) -> dict:  # type: ignore[type-arg]
-    # SB3: surface the effective sandbox mode resolved at startup; default to off
-    # when the state is somehow unset (e.g. lifespan not run) so we never crash.
+    # SB3: surface the effective sandbox mode + selected backend resolved at startup;
+    # default to off/docker/unavailable when state is unset (e.g. lifespan not run) so
+    # we never crash. `backend`/`backend_available` are backend-neutral (Docker or
+    # microsandbox); the legacy `docker_available` field is replaced.
     mode: Mode = getattr(request.app.state, "sandbox_mode", Mode.OFF)
-    docker_available: bool = getattr(request.app.state, "sandbox_docker_available", False)
-    sandbox: dict[str, Any] = {"mode": mode.value, "docker_available": docker_available}
-    if not docker_available:
-        sandbox["note"] = "off (docker unavailable)"
+    backend: str = getattr(request.app.state, "sandbox_backend", "docker")
+    backend_available: bool = getattr(request.app.state, "sandbox_backend_available", False)
+    sandbox: dict[str, Any] = {
+        "mode": mode.value,
+        "backend": backend,
+        "backend_available": backend_available,
+    }
+    if not backend_available:
+        sandbox["note"] = f"off ({backend} unavailable)"
     return {
         "status": "ok",
         "adapters": {

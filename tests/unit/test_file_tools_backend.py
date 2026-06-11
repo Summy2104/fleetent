@@ -7,8 +7,11 @@ host dir. LLM/docker are mocked; no real container is started here.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
+from fleetent.integrations.sandbox.backend import BackendCapabilities
 from fleetent.integrations.sandbox.enablement import Mode
 from fleetent.integrations.sandbox.manager import Scope
 from fleetent.tools import file_tools
@@ -17,8 +20,12 @@ from fleetent.tools import file_tools
 class _FakeManager:
     scope = Scope.SESSION
 
-    def __init__(self, root) -> None:
-        self.client = object()
+    def __init__(self, root, *, workspace_mount: bool = True) -> None:
+        self.backend = SimpleNamespace(
+            capabilities=BackendCapabilities(
+                persist_workspace=True, workspace_mount=workspace_mount, orphan_cleanup=True
+            )
+        )
         self._root = root
         self.acquired: tuple | None = None
 
@@ -35,6 +42,21 @@ def fake_manager(tmp_path, monkeypatch):
     mgr = _FakeManager(tmp_path / "workspace")
     monkeypatch.setattr(file_tools, "_get_sandbox_manager", lambda: mgr)
     return mgr
+
+
+async def test_select_host_backend_when_mount_unsupported(tmp_path, monkeypatch) -> None:
+    """mode != OFF but backend lacks workspace_mount -> host fence (design D3)."""
+    mgr = _FakeManager(tmp_path / "workspace", workspace_mount=False)
+    monkeypatch.setattr(file_tools, "_get_sandbox_manager", lambda: mgr)
+
+    async def _mode() -> Mode:
+        return Mode.ALL
+
+    monkeypatch.setattr(file_tools, "get_effective_mode", _mode)
+    backend = await file_tools._select_backend(None)
+    assert isinstance(backend, file_tools._HostBackend)
+    assert backend.root == mgr._root
+    assert mgr.acquired is None  # never acquired a container workspace
 
 
 async def _set_mode(monkeypatch, mode: Mode) -> None:
