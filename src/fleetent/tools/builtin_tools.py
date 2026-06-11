@@ -122,6 +122,24 @@ def _workspace_root_for(tool_context: ToolContext | None) -> Path:
     return manager.workspace_host_path(manager.scope, session_id, agent_name or "default")
 
 
+def _workspace_scope_and_root(tool_context: ToolContext | None) -> tuple[object, Path]:
+    """Return ``(manager.scope, host workspace dir)`` for the current tool context.
+
+    Used by send_file to gate on workspace scope while reusing the same single
+    `workspace_host_path` resolution point (so the resolved dir is exactly the one
+    run_code / file tools are fenced to). Kept out of the tool body so the
+    sole-sandbox-consumer guard (run_code only) is not tripped by send_file.
+    """
+    manager = _get_manager()
+    session_id = (
+        tool_context.session_id
+        if tool_context is not None and tool_context.session_id
+        else "run-code"
+    )
+    agent_name = (tool_context.agent_name if tool_context is not None else None) or "default"
+    return manager.scope, manager.workspace_host_path(manager.scope, session_id, agent_name)
+
+
 def _save_image(data: bytes, tool_context: ToolContext | None = None) -> str:
     """Write image bytes to the per-scope workspace `generated/` and return a relative ref.
 
@@ -668,3 +686,74 @@ async def send_im_message(
         return f"发送失败：{resolved_platform} 投递 {target} 时出错，请稍后重试。"
     kind = "私信" if target_type == "user" else "频道消息"
     return f"已发送{kind}到 {resolved_platform}:{target}。"
+
+
+@tool
+async def send_file(path: str, tool_context: ToolContext | None = None) -> str:
+    """Send a workspace product file back to the current conversation's sender.
+
+    Use this to deliver a file you created in the workspace (a report, chart,
+    converted document) to the person you are talking with. `path` is a
+    **workspace-relative** path (the single `/workspace` root); it is resolved to
+    the real host file and sent as an attachment. The recipient is fixed to the
+    current sender — you cannot specify a recipient. Auto-sends only inside a
+    private (DM) conversation with a session-scoped workspace; otherwise it
+    declines and asks you to use `send_im_message` (which goes through approval).
+    """
+    # Recipient is harness-fixed from session_context; the model cannot supply it.
+    sc = getattr(tool_context, "session_context", None) if tool_context else None
+    if sc is None:
+        return (
+            "无法发送：当前运行路径无会话发起人，无法自动外发文件"
+            "（如 scheduled task / sub_agent）。"
+        )
+
+    # No-approval iff: session-scoped workspace AND a DM conversation. Both gate the
+    # fact that the recipient is constrained and the workspace is session-private;
+    # otherwise fail-closed back to the medium-gated send_im_message path.
+    from fleetent.integrations.sandbox import Scope
+
+    scope, root = _workspace_scope_and_root(tool_context)
+    if scope is not Scope.SESSION:
+        return (
+            "无法自动外发：当前工作区为 agent 级（跨会话复用），不满足免审批前提。"
+            "请改用 send_im_message（经审批）发送。"
+        )
+    if str(getattr(sc, "chat_type", "") or "") != "dm":
+        return (
+            "无法自动外发：当前为频道会话，仅私信会话可自动外发文件。"
+            "请改用 send_im_message（经审批）发送。"
+        )
+
+    # Translate the workspace-relative path to a real host file, rejecting `..` escapes
+    # via the same fence the file tools use.
+    from fleetent.tools.file_sandbox_io import resolve_host_path
+
+    try:
+        host_path = resolve_host_path(root, path)
+    except ValueError:
+        return f"无法发送：路径 {path!r} 越出 workspace 范围，已拒绝。"
+    if not host_path.is_file():
+        return f"无法发送：workspace 内不存在文件 {path!r}（请确认已写入）。"
+
+    platform = str(getattr(sc, "platform", "") or "")
+    recipient = str(getattr(sc, "sender_id", "") or "")
+    connectors = tool_context.outbound_connectors if tool_context else {}
+    connector = connectors.get(platform)
+    if connector is None:
+        return (
+            f"当前通道不支持主动外发文件（无可用 {platform or '?'} 连接器）。"
+            "该功能仅在 IM 网关运行时可用。"
+        )
+
+    # Lazy import: keeps module load light and avoids cycles (builtin convention).
+    from fleetent import outbound
+
+    try:
+        sent = await outbound.send_file_to(platform, connector, recipient, str(host_path))
+    except Exception as exc:  # noqa: BLE001 — outbound must never abort the agent run
+        logger.warning("send_file delivery error on %s: %s", platform, exc)
+        return f"外发失败：{platform} 投递文件时出错，请稍后重试。"
+    if not sent:
+        return f"外发失败：{platform} 投递文件给 {recipient} 时出错，请稍后重试。"
+    return f"已把文件发送给 {platform}:{recipient}。"

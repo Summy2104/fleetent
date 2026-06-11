@@ -147,22 +147,22 @@ _IMAGE_GENERATED_RE = re.compile(r"image generated: (.+)")
 _FILE_WRITTEN_RE = re.compile(r"written \d+ bytes to (.+)")
 
 
-def _extract_generated_image_paths(
-    messages: list[dict[str, Any]], workspace_root: Path | None = None
-) -> list[str]:
-    """Extract local file paths from tool results that wrote or generated files.
+_EGRESS_NOTICE = (
+    "（提示：本轮在 workspace 内生成了产物，但无法自动外发。"
+    "若需把产物发回，请用 send_file 工具发送。）"
+)
 
-    Matches two formats produced by built-in tools:
-    - ``generate_image``: ``"image generated: <ref>"``
-    - ``write_file``:     ``"written N bytes to <ref>"``
 
-    `generate_image` now returns a workspace-relative ref (`generated/<name>.png`,
-    sandbox-workspace-root); a relative ref is resolved under ``workspace_root`` (the
-    per-session host workspace dir = container `/workspace`) to a real host path for
-    upload. A legacy host-absolute ref is used as-is. Only scans role == "tool";
-    refs that no longer exist on disk are silently skipped.
+def _turn_has_generated_product(messages: list[dict[str, Any]]) -> bool:
+    """Whether this turn's tool results signal a generated/written workspace product.
+
+    sandbox-file-egress: the old host ``Path.is_file()`` auto-reflow is structurally
+    broken under container execution (``run_code`` / ``write_file`` write inside the
+    container; tool results carry container-side paths the host can never locate). We
+    no longer infer a host path or auto-upload; we only detect "a product was produced
+    this turn" so ``route()`` can emit an explicit egress notice instead of silently
+    dropping it. The real delivery path is the agent calling ``send_file``.
     """
-    paths: list[str] = []
     for msg in messages:
         if msg.get("role") != "tool":
             continue
@@ -171,17 +171,9 @@ def _extract_generated_image_paths(
             continue
         for pattern in (_IMAGE_GENERATED_RE, _FILE_WRITTEN_RE):
             m = pattern.search(content)
-            if m:
-                ref = m.group(1).strip()
-                if not ref:
-                    break
-                candidate = Path(ref)
-                if not candidate.is_absolute() and workspace_root is not None:
-                    candidate = workspace_root / ref
-                if candidate.is_file():
-                    paths.append(str(candidate))
-                break
-    return paths
+            if m and m.group(1).strip():
+                return True
+    return False
 
 
 def _image_attachments(attachments: list[Any]) -> list[tuple[bytes, str]]:
@@ -620,15 +612,10 @@ async def route(msg: NormalizedMessage) -> None:
 
     await msg.reply_func(response)
 
-    # Upload any images generated during this turn. Only scan new messages added by the
-    # loop (history[history_len_before:]) so historical tool results are never re-sent.
-    if msg.upload_func is not None:
-        # Resolve workspace-relative refs (generate_image now returns generated/<name>)
-        # against the per-session workspace dir so the upload sees a real host path.
-        from fleetent.tools.builtin_tools import _get_manager
-
-        manager = _get_manager()
-        workspace_root = manager.workspace_host_path(manager.scope, session_id, "default")
-        file_paths = _extract_generated_image_paths(history[history_len_before:], workspace_root)
-        if file_paths:
-            await msg.upload_func(file_paths)
+    # sandbox-file-egress: the regex-sniff host auto-upload is retired (it is
+    # structurally broken for container-written products — host Path.is_file() can
+    # never match a container-side path). To avoid silently dropping a product, when
+    # this turn produced one we surface an explicit notice steering to send_file
+    # rather than inferring a host path. Only scan the messages this turn added.
+    if _turn_has_generated_product(history[history_len_before:]):
+        await msg.reply_func(_EGRESS_NOTICE)

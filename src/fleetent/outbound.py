@@ -44,6 +44,31 @@ async def send_to(
     return False
 
 
+async def send_file_to(
+    platform: str,
+    connector: Any,
+    target: str,
+    path: str,
+    *,
+    target_type: str = "user",
+    thread: Any = None,
+) -> bool:
+    """Send a local file as an attachment to target on platform.
+
+    Returns True on success, False on any failure (mirrors ``send_to`` semantics —
+    delivery failure is logged and swallowed, never raised). ``target_type`` selects
+    DM (``user``) vs a channel post (``channel``); ``thread`` optionally threads the
+    delivery (Slack ``thread_ts``). This is the single outbound file delivery point
+    shared by the ``send_file`` tool and the IM adapters' upload path.
+    """
+    if platform == "slack":
+        return await _slack_send_file(connector, target, path, target_type, thread)
+    if platform == "telegram":
+        return await _telegram_send_file(connector, target, path)
+    logger.warning("outbound_file_unsupported_platform", platform=platform)
+    return False
+
+
 def approval_prompt_blocks(
     approval_id: str, tool_name: str, risk_level: str
 ) -> list[dict[str, Any]]:
@@ -151,6 +176,39 @@ async def _telegram_send(bot: Any, chat_id: str, text: str, thread: Any = None) 
         return True
     except Exception as exc:  # noqa: BLE001 — outbound failure must not abort the gate
         logger.warning("telegram_send_message_failed", chat_id=chat_id, error=str(exc))
+        return False
+
+
+async def _slack_send_file(
+    client: Any, target: str, path: str, target_type: str, thread: Any
+) -> bool:
+    """Upload a local file to Slack via ``files_upload_v2``.
+
+    For a channel post the ``target`` is the channel id used directly; for a DM the
+    ``target`` is a user id, resolved to its DM channel via ``conversations_open``
+    (same range as ``_slack_send_dm``). A single delivery failure is logged and
+    swallowed so the caller's run continues.
+    """
+    try:
+        if target_type == "channel":
+            channel = target
+        else:
+            result = await client.conversations_open(users=[target])
+            channel = result["channel"]["id"]
+        await client.files_upload_v2(channel=channel, thread_ts=thread, file=path)
+        return True
+    except Exception as exc:  # noqa: BLE001 — outbound file failure must not abort the caller
+        logger.warning("slack_send_file_failed", target=target, path=path, error=str(exc))
+        return False
+
+
+async def _telegram_send_file(bot: Any, chat_id: str, path: str) -> bool:
+    """Send a local file to a Telegram chat via ``bot.send_document``."""
+    try:
+        await bot.send_document(chat_id=chat_id, document=path)
+        return True
+    except Exception as exc:  # noqa: BLE001 — outbound file failure must not abort the caller
+        logger.warning("telegram_send_file_failed", chat_id=chat_id, path=path, error=str(exc))
         return False
 
 
