@@ -24,7 +24,8 @@
 <!-- 无新增 capability;扩展既有 reflection -->
 
 ### Modified Capabilities
-- `reflection`: 统一自进化数据模型(1 `reflection_reports` + 1 `reflection_proposals`,三域 memory/skill/kb);KB reflection 由"只读"改为"可生成 KB mutation proposal(审批后经 public API 执行,仍不自动改 KB)";report/proposal 持久化改为统一两表(替代 `kb_reflection_reports` / `memory_maintenance_proposals` / `skill_proposals`)。
+- `reflection`: 统一自进化数据模型(1 `reflection_reports` + 1 `reflection_proposals`,三域 memory/skill/kb);KB reflection 由"只读"改为"可生成 KB mutation proposal(审批后经 public API 执行,仍不自动改 KB)";report/proposal 持久化改为统一两表(替代 `kb_reflection_reports` / `memory_maintenance_proposals` / `skill_proposals`);三域审批触达统一复用 agent-owned `resolve_approvers` + 外呼 DM(非 requester、default-closed、不依赖 platform console)。
+- `self-evolution-split`: 对齐审批路由——按影响范围解析审批人(memory→owner;shared/skill/KB→team/tenant 负责人),但触达渠道统一为 **agent-owned 外呼 DM**,取代原"skill/KB → platform console"旧路由(已被 R1 / approval-suspend-resume supersede);platform console 降为只读投影。
 
 ## Impact
 

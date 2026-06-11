@@ -27,6 +27,7 @@
 ## 5. 文档与收尾
 
 - [ ] 5.1 同步 `docs/architecture/data-model.md` §3.3：reflection 域由 4 表收口为 `reflection_reports` + `reflection_proposals`（更新表数与明细图）；移除 §3.5 中 `kb_reflection_reports` 的相关注记
-- [ ] 5.2 同步 `docs/capabilities/reflection.md`：2 表内核、三域对称、KB 自进化（archive_stale_doc/resync_connector）、KB 不再"只读"
-- [ ] 5.3 验证基线：无 platform、管理库表不存在下 `fleetent agent run` 正常；自进化三域 report/proposal 落 agent 自己的 `agent_state.db`
-- [ ] 5.4 change 收尾：`make test-pr` 全绿 + `uv run pytest tests/integration -q`（对照 main 基线，无新增失败）
+- [ ] 5.2 同步 `docs/capabilities/reflection.md`：2 表内核、三域对称、KB 自进化（archive_stale_doc/resync_connector）、KB 不再"只读"、审批走 agent-owned 外呼（非 console）
+- [ ] 5.3 grep 自查：仓内无残留"skill/KB → platform console 审批"描述（已由 self-evolution-split delta 对齐）；platform console 仅作只读投影
+- [ ] 5.4 验证基线：无 platform、管理库表不存在下 `fleetent agent run` 正常；自进化三域 report/proposal 落 agent 自己的 `agent_state.db`
+- [ ] 5.5 change 收尾：`make test-pr` 全绿 + `uv run pytest tests/integration -q`（对照 main 基线，无新增失败）
