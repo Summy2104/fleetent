@@ -102,7 +102,10 @@ async def reconcile_expired_approvals(*, expiry_seconds: int = _DEFAULT_EXPIRY_S
         )
         session_id = row.get("session_id")
         if session_id:
-            await session_mgr.remove_pending_approval(str(session_id), approval_id)
+            # remove_pending_approval is non-locking (callers hold the session lock);
+            # reconcile runs outside any run, so acquire the lock here.
+            async with session_mgr.session_lock(str(session_id)):
+                await session_mgr.remove_pending_approval(str(session_id), approval_id)
         count += 1
     if count:
         logger.info("approvals_reconciled_expired count=%d", count)

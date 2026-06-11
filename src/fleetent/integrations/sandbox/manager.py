@@ -127,9 +127,18 @@ class SandboxManager:
 
         entry = self._registry.get(name)
         if entry is not None:
-            # Created this process under the current config — trust it (no inspect).
-            entry.last_used = now
-            return entry.workspace_id
+            # Verify-on-reuse: a container can die outside our control (OOM kill,
+            # manual rm, daemon restart). Handing a dead id to the exec layer would
+            # break every sandbox-backed tool for the rest of the session, so a
+            # registry hit must be confirmed live; a dead entry falls through to
+            # the adopt-or-create path (the host-mounted workspace survives, so a
+            # rebuilt container sees the same files).
+            live = await self.backend.find_workspace(name)
+            if live is not None:
+                entry.last_used = now
+                return entry.workspace_id
+            _logger.warn("sandbox_registry_stale_container", name=name)
+            self._registry.pop(name, None)
 
         image = await self._image_for(scope, key)
         # workspace_mount capability: only backends that bind-mount a host dir get a
@@ -199,6 +208,15 @@ class SandboxManager:
         """Public name resolver so callers (run_code) can forget by name on abort."""
         key = session_id if scope is Scope.SESSION else agent_name
         return _container_name(scope, key)
+
+    def invalidate(self, scope: Scope, session_id: str, agent_name: str) -> None:
+        """Drop the (scope, key) registration so the next acquire rebuilds.
+
+        Called by exec-layer self-healing when a command hits a missing-container
+        error after acquire (the verify-then-die race window).
+        """
+        key = session_id if scope is Scope.SESSION else agent_name
+        self._registry.pop(_container_name(scope, key), None)
 
     def workspace_host_path(self, scope: Scope, session_id: str, agent_name: str) -> Path:
         """Return (creating) the host dir mounted at ``/workspace`` for (scope, key).

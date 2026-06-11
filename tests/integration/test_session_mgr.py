@@ -891,3 +891,24 @@ async def test_pending_approval_get_missing_returns_none(sessions_dir):
     await session_mgr.save(sid, [{"role": "user", "content": "x"}])
     assert await session_mgr.get_pending_approval(sid, "nope") is None
     assert await session_mgr.list_pending_approvals(sid) == {}
+
+
+async def test_pending_helpers_safe_under_held_session_lock(sessions_dir):
+    """add/remove_pending_approval run INSIDE the run's session lock (normalizer wraps
+    loop.run in session_lock; the loop persists pending from there). They must not
+    re-acquire the non-reentrant session lock — doing so deadlocks the run forever,
+    which kept is_running True and made steering swallow every later message."""
+    import asyncio
+
+    sid = "slack:dm:U1:1.1"
+    await session_mgr.save(sid, [{"role": "user", "content": "hi"}])
+
+    async with session_mgr.session_lock(sid):
+        await asyncio.wait_for(
+            session_mgr.add_pending_approval(sid, "a1", {"tool_name": "send_im_message"}),
+            timeout=2.0,
+        )
+        assert "a1" in await session_mgr.list_pending_approvals(sid)
+        await asyncio.wait_for(session_mgr.remove_pending_approval(sid, "a1"), timeout=2.0)
+
+    assert await session_mgr.list_pending_approvals(sid) == {}
