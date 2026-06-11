@@ -182,7 +182,7 @@ erDiagram
 ### 3.5 KB 关系库（嵌入式 Y · `kb.db` · agent / ingest 侧 · per-tenant）
 **已在本库（`knowledge_base/core/migrations.py` 的 Y）**：`knowledge_bases`(PK `(tenant_id,kb_id)`) · `knowledge_documents` · `knowledge_chunks`(+`chunks_fts`) · `knowledge_source_states` · `kb_entities` · `kb_entity_mentions` · `kb_relations` · `knowledge_connector_status`。
 
-> `kb_extraction_runs` 已移除：entity extraction 的 run 摘要只同步返回给调用方，若要审计走 observability trace event，不再持久化 KB 业务表。`kb_reflection_reports` 落点待确认（alembic 027 add 后又 drop）。
+> `kb_extraction_runs` 已移除：entity extraction 的 run 摘要只同步返回给调用方，若要审计走 observability trace event，不再持久化 KB 业务表。KB 反思**观察**统一落 agent 自己的 `agent_state.db.reflection_reports(domain=knowledge_base)`（Y）；旧管理库 `kb_reflection_reports` 已由 alembic 075 drop。KB **remediation**（写回/sync）仍在 platform / ingest 面，后续独立 change 处理，不在 agent 侧 apply。
 
 ```mermaid
 erDiagram
