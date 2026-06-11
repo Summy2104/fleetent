@@ -8,6 +8,7 @@ from fleetent import vector_store
 from fleetent.config import Settings
 from fleetent.db import Row, SQLiteDatabase, create_database
 from fleetent.knowledge_base.core import KnowledgeChunk, KnowledgeStore
+from fleetent.vector_store.backend import VectorBackend
 
 
 def create_knowledge_base(
@@ -56,9 +57,9 @@ async def archive_knowledge_base(
     if not archived:
         return False
     for chunk in chunks:
-        await vector_store.delete(
-            chunk.id,
+        await _delete_chunk(
             vector_store.knowledge_namespace(chunk.tenant_id, chunk.kb_id),
+            chunk.id,
         )
     return True
 
@@ -108,3 +109,20 @@ def _settings() -> Settings:
 
 def _database_or_default(database: SQLiteDatabase | None) -> SQLiteDatabase:
     return database if database is not None else _database()
+
+
+async def _delete_chunk(namespace: str, chunk_id: str) -> None:
+    backend = _injected_vector_backend()
+    if backend is None:
+        await vector_store.delete(chunk_id, namespace)
+        return
+    await backend.delete(chunk_id, namespace)
+
+
+def _injected_vector_backend() -> VectorBackend | None:
+    from fleetent.knowledge_base import runtime
+
+    try:
+        return runtime._vector_backend()
+    except RuntimeError:
+        return None

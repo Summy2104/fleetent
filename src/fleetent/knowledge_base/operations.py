@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from fleetent.db import SQLiteDatabase, default_database
+from fleetent.db import SQLiteDatabase
 from fleetent.knowledge_base.config import (
     KnowledgeConfigSnapshot,
     KnowledgeSourceConfig,
@@ -214,7 +214,7 @@ def get_connector_status(
 ) -> ConnectorStatus:
     """Read the latest known connector operation status."""
     definition = _get_connector_definition(connector_id, settings)
-    db = database or default_database()
+    db = _database(database)
     row = db.execute(
         """
         SELECT
@@ -256,7 +256,7 @@ def record_connector_status(
     """Persist the latest connector status summary."""
     started = started_at or _now()
     finished = finished_at or _now()
-    (database or default_database()).execute(
+    _database(database).execute(
         """
         INSERT INTO knowledge_connector_status (
             connector_id, connector_type, tenant_id, kb_id, last_status,
@@ -681,6 +681,14 @@ async def _no_sleep(seconds: float) -> None:
 
 def _now() -> datetime:
     return datetime.now(UTC).replace(microsecond=0)
+
+
+def _database(database: SQLiteDatabase | None = None) -> SQLiteDatabase:
+    if database is not None:
+        return database
+    from fleetent.knowledge_base import runtime
+
+    return runtime._database()
 
 
 def _kb_config(settings: KnowledgeConfigSnapshot | None = None) -> KnowledgeConfigSnapshot:

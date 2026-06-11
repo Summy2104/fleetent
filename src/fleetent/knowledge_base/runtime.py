@@ -7,7 +7,7 @@ from typing import Any
 
 from fleetent import vector_store
 from fleetent.config import KnowledgeBaseSettings, Settings
-from fleetent.db import SQLiteDatabase, create_database
+from fleetent.db import SQLiteDatabase
 from fleetent.knowledge_base.core import KnowledgeChunk, KnowledgeDocument, KnowledgeStore
 from fleetent.knowledge_base.ingest.runtime import (
     archive as _archive_document,
@@ -68,8 +68,25 @@ from fleetent.knowledge_base.retrieval.search import (
 )
 from fleetent.structured_logging import get_logger
 from fleetent.vector_store import rerank as rerank_runtime
+from fleetent.vector_store.backend import VectorBackend
 
 _logger = get_logger("knowledge_base")
+_kb_db: SQLiteDatabase | None = None
+_kb_vector_backend: VectorBackend | None = None
+
+
+def set_database(db: SQLiteDatabase | None) -> None:
+    """Inject the tenant-scoped KB relation database for this process."""
+
+    global _kb_db
+    _kb_db = db
+
+
+def set_vector_backend(vector_backend: VectorBackend | None) -> None:
+    """Inject the tenant-scoped KB vector backend for this process."""
+
+    global _kb_vector_backend
+    _kb_vector_backend = vector_backend
 
 
 async def ingest_text(
@@ -123,6 +140,13 @@ async def search(
     rerank: bool = False,
 ) -> list[KnowledgeChunk]:
     """Search KB chunks using default store and default KB config."""
+
+    if mode not in {"vector", "keyword", "hybrid"}:
+        raise ValueError(f"unsupported knowledge search mode: {mode}")
+    if rerank and mode != "hybrid":
+        raise ValueError("rerank only supports hybrid knowledge search mode")
+    if limit <= 0:
+        return []
 
     return await _search_chunks(
         query,
@@ -345,7 +369,20 @@ def _settings() -> Settings:
 
 
 def _database() -> SQLiteDatabase:
-    return create_database(_settings().database_url)
+    if _kb_db is None:
+        raise RuntimeError(
+            "knowledge_base.runtime: kb_db not initialized — call set_database(db) before use"
+        )
+    return _kb_db
+
+
+def _vector_backend() -> VectorBackend:
+    if _kb_vector_backend is None:
+        raise RuntimeError(
+            "knowledge_base.runtime: kb_vector_backend not initialized"
+            " — call set_vector_backend(backend) before use"
+        )
+    return _kb_vector_backend
 
 
 __all__ = [
@@ -364,6 +401,8 @@ __all__ = [
     "list_knowledge_bases",
     "preview_document_chunks",
     "search",
+    "set_database",
+    "set_vector_backend",
     "_search_hybrid",
     "_search_vector",
     "_rerank_candidate_limit",

@@ -68,10 +68,12 @@ async def _search_vector(
     limit: int,
     store: KnowledgeReadable,
 ) -> list[KnowledgeChunk]:
+    query_vector = await vector_store.embed_text(query)
+    backend = _vector_backend()
     score_by_id: dict[str, float] = {}
     for kb_id in kb_ids:
         namespace = vector_store.knowledge_namespace(tenant_id, kb_id)
-        vector_results = await vector_store.search(query, namespace, limit)
+        vector_results = await backend.search(query_vector, namespace, limit)
         for result in vector_results:
             score_by_id[result.id] = max(score_by_id.get(result.id, result.score), result.score)
 
@@ -199,6 +201,12 @@ def _rerank_config() -> RerankSettings:
     from fleetent import agent_config
 
     return agent_config.active_agent_or_default().rerank
+
+
+def _vector_backend():
+    from fleetent.knowledge_base import runtime
+
+    return runtime._vector_backend()
 
 
 def _rrf_score(rank: int, k: int = 60) -> float:

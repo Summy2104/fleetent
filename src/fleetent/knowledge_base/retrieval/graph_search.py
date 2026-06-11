@@ -3,8 +3,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Literal
 
-from fleetent.config import Settings
-from fleetent.db import SQLiteDatabase, create_database
+from fleetent.db import SQLiteDatabase
 from fleetent.knowledge_base.core import KnowledgeChunk, KnowledgeReadable
 from fleetent.knowledge_base.core.store import KnowledgeStore
 
@@ -193,12 +192,9 @@ async def graph_search(
 
 
 def _database() -> SQLiteDatabase:
-    try:
-        from fleetent.knowledge_base import runtime
+    from fleetent.knowledge_base import runtime
 
-        return runtime._database()
-    except Exception:
-        return create_database(Settings().database_url)
+    return runtime._database()
 
 
 def match_entities(

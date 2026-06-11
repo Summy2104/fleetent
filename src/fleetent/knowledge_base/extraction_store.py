@@ -22,7 +22,7 @@ class KnowledgeEntity:
 
 @dataclass(frozen=True)
 class KnowledgeExtractionRun:
-    """Persisted entity extraction run summary."""
+    """Entity extraction run summary returned to callers."""
 
     id: str
     tenant_id: str
@@ -117,34 +117,9 @@ class KnowledgeEntityStore:
         document_id: str | None,
         extractor: str,
     ) -> KnowledgeExtractionRun:
-        """Create a running extraction run summary."""
+        """Create an in-memory running extraction run summary."""
 
         run_id = str(uuid.uuid4())
-        started_at = _format_datetime(_now())
-        self._database.execute(
-            """
-            INSERT INTO kb_extraction_runs (
-                id, tenant_id, kb_id, document_id, extractor, status, started_at,
-                finished_at, documents_scanned, chunks_scanned, entities_upserted,
-                mentions_written, relations_written, failed_count, error_summary,
-                metadata_json
-            )
-            VALUES (
-                :id, :tenant_id, :kb_id, :document_id, :extractor, :status, :started_at,
-                NULL, 0, 0, 0, 0, 0, 0, NULL, :metadata_json
-            )
-            """,
-            {
-                "id": run_id,
-                "tenant_id": tenant_id,
-                "kb_id": kb_id,
-                "document_id": document_id,
-                "extractor": extractor,
-                "status": "running",
-                "started_at": started_at,
-                "metadata_json": "{}",
-            },
-        )
         return KnowledgeExtractionRun(
             id=run_id,
             tenant_id=tenant_id,
@@ -162,7 +137,7 @@ class KnowledgeEntityStore:
 
     def finish_run(
         self,
-        run_id: str,
+        run: KnowledgeExtractionRun,
         *,
         status: str,
         documents_scanned: int,
@@ -173,48 +148,23 @@ class KnowledgeEntityStore:
         failed_count: int,
         error_summary: str | None = None,
     ) -> KnowledgeExtractionRun:
-        """Finalize an extraction run and return the persisted summary."""
+        """Finalize an in-memory extraction run summary."""
 
-        self._database.execute(
-            """
-            UPDATE kb_extraction_runs
-            SET status = :status,
-                finished_at = :finished_at,
-                documents_scanned = :documents_scanned,
-                chunks_scanned = :chunks_scanned,
-                entities_upserted = :entities_upserted,
-                mentions_written = :mentions_written,
-                relations_written = :relations_written,
-                failed_count = :failed_count,
-                error_summary = :error_summary
-            WHERE id = :run_id
-            """,
-            {
-                "status": status,
-                "finished_at": _format_datetime(_now()),
-                "documents_scanned": documents_scanned,
-                "chunks_scanned": chunks_scanned,
-                "entities_upserted": entities_upserted,
-                "mentions_written": mentions_written,
-                "relations_written": relations_written,
-                "failed_count": failed_count,
-                "error_summary": error_summary,
-                "run_id": run_id,
-            },
+        return KnowledgeExtractionRun(
+            id=run.id,
+            tenant_id=run.tenant_id,
+            kb_id=run.kb_id,
+            document_id=run.document_id,
+            extractor=run.extractor,
+            status=status,
+            documents_scanned=documents_scanned,
+            chunks_scanned=chunks_scanned,
+            entities_upserted=entities_upserted,
+            mentions_written=mentions_written,
+            relations_written=relations_written,
+            failed_count=failed_count,
+            error_summary=error_summary,
         )
-        row = self._database.execute(
-            """
-            SELECT id, tenant_id, kb_id, document_id, extractor, status,
-                   documents_scanned, chunks_scanned, entities_upserted,
-                   mentions_written, relations_written, failed_count, error_summary
-            FROM kb_extraction_runs
-            WHERE id = :run_id
-            """,
-            {"run_id": run_id},
-        ).fetchone()
-        if row is None:
-            raise RuntimeError("finished extraction run was not found")
-        return _row_to_run(row)
 
     def replace_document_evidence(
         self,
@@ -222,7 +172,6 @@ class KnowledgeEntityStore:
         tenant_id: str,
         kb_id: str,
         document_id: str,
-        run_id: str,
         entities: list[ExtractedEntity],
         relations: list[ExtractedRelation],
     ) -> tuple[int, int, int]:
@@ -259,11 +208,11 @@ class KnowledgeEntityStore:
                     """
                     INSERT INTO kb_entity_mentions (
                         id, entity_id, tenant_id, kb_id, document_id, chunk_id, text,
-                        confidence, extraction_run_id, created_at
+                        confidence, created_at
                     )
                     VALUES (
                         :id, :entity_id, :tenant_id, :kb_id, :document_id, :chunk_id, :text,
-                        :confidence, :extraction_run_id, :created_at
+                        :confidence, :created_at
                     )
                     """,
                     {
@@ -275,7 +224,6 @@ class KnowledgeEntityStore:
                         "chunk_id": str(entity.metadata.get("chunk_id", "")),
                         "text": entity.name.strip(),
                         "confidence": entity.confidence,
-                        "extraction_run_id": run_id,
                         "created_at": _format_datetime(_now()),
                     },
                 )
@@ -294,12 +242,12 @@ class KnowledgeEntityStore:
                     INSERT INTO kb_relations (
                         id, tenant_id, kb_id, relation_type, source_entity_id,
                         target_entity_id, evidence_document_id, evidence_chunk_id,
-                        evidence_text, confidence, extraction_run_id, created_at
+                        evidence_text, confidence, created_at
                     )
                     VALUES (
                         :id, :tenant_id, :kb_id, :relation_type, :source_entity_id,
                         :target_entity_id, :evidence_document_id, :evidence_chunk_id,
-                        :evidence_text, :confidence, :extraction_run_id, :created_at
+                        :evidence_text, :confidence, :created_at
                     )
                     """,
                     {
@@ -313,7 +261,6 @@ class KnowledgeEntityStore:
                         "evidence_chunk_id": relation.chunk_id,
                         "evidence_text": _summarize_evidence(relation.evidence_text),
                         "confidence": relation.confidence,
-                        "extraction_run_id": run_id,
                         "created_at": _format_datetime(_now()),
                     },
                 )
@@ -390,24 +337,6 @@ def _row_to_entity(row: Row) -> KnowledgeEntity:
         name=str(row["name"]),
         normalized_name=str(row["normalized_name"]),
         metadata=json.loads(str(row["metadata_json"])),
-    )
-
-
-def _row_to_run(row: Row) -> KnowledgeExtractionRun:
-    return KnowledgeExtractionRun(
-        id=str(row["id"]),
-        tenant_id=str(row["tenant_id"]),
-        kb_id=str(row["kb_id"]),
-        document_id=str(row["document_id"]) if row["document_id"] is not None else None,
-        extractor=str(row["extractor"]),
-        status=str(row["status"]),
-        documents_scanned=int(row["documents_scanned"]),
-        chunks_scanned=int(row["chunks_scanned"]),
-        entities_upserted=int(row["entities_upserted"]),
-        mentions_written=int(row["mentions_written"]),
-        relations_written=int(row["relations_written"]),
-        failed_count=int(row["failed_count"]),
-        error_summary=(str(row["error_summary"]) if row["error_summary"] is not None else None),
     )
 
 

@@ -109,4 +109,82 @@ MIGRATIONS: list[tuple[int, str]] = [
         )
         """,
     ),
+    (
+        11,
+        """
+        CREATE TABLE IF NOT EXISTS knowledge_connector_status (
+            connector_id        TEXT PRIMARY KEY,
+            connector_type      TEXT NOT NULL,
+            tenant_id           TEXT NOT NULL,
+            kb_id               TEXT NOT NULL,
+            last_status         TEXT NOT NULL,
+            last_started_at     DATETIME,
+            last_finished_at    DATETIME,
+            last_summary_json   TEXT NOT NULL,
+            last_error          TEXT,
+            updated_at          DATETIME NOT NULL
+        )
+        """,
+    ),
+    (
+        12,
+        """
+        CREATE TABLE IF NOT EXISTS kb_entities (
+            id                  TEXT PRIMARY KEY,
+            tenant_id           TEXT NOT NULL,
+            kb_id               TEXT NOT NULL,
+            entity_type         TEXT NOT NULL,
+            name                TEXT NOT NULL,
+            normalized_name     TEXT NOT NULL,
+            metadata_json       TEXT NOT NULL DEFAULT '{}',
+            created_at          DATETIME NOT NULL,
+            updated_at          DATETIME NOT NULL,
+            UNIQUE (tenant_id, kb_id, entity_type, normalized_name)
+        )
+        """,
+    ),
+    (
+        13,
+        """
+        CREATE TABLE IF NOT EXISTS kb_entity_mentions (
+            id                  TEXT PRIMARY KEY,
+            entity_id           TEXT NOT NULL,
+            tenant_id           TEXT NOT NULL,
+            kb_id               TEXT NOT NULL,
+            document_id         TEXT NOT NULL,
+            chunk_id            TEXT NOT NULL,
+            text                TEXT NOT NULL,
+            confidence          REAL NOT NULL,
+            created_at          DATETIME NOT NULL
+        )
+        """,
+    ),
+    (
+        14,
+        """
+        CREATE TABLE IF NOT EXISTS kb_relations (
+            id                  TEXT PRIMARY KEY,
+            tenant_id           TEXT NOT NULL,
+            kb_id               TEXT NOT NULL,
+            relation_type       TEXT NOT NULL,
+            source_entity_id    TEXT NOT NULL,
+            target_entity_id    TEXT NOT NULL,
+            evidence_document_id TEXT NOT NULL,
+            evidence_chunk_id   TEXT NOT NULL,
+            evidence_text       TEXT NOT NULL,
+            confidence          REAL NOT NULL,
+            created_at          DATETIME NOT NULL
+        )
+        """,
+    ),
+    (
+        15,
+        "CREATE INDEX IF NOT EXISTS idx_kb_entity_mentions_document"
+        " ON kb_entity_mentions (tenant_id, kb_id, document_id)",
+    ),
+    (
+        16,
+        "CREATE INDEX IF NOT EXISTS idx_kb_relations_document"
+        " ON kb_relations (tenant_id, kb_id, evidence_document_id)",
+    ),
 ]

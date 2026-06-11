@@ -14,6 +14,18 @@ _MIGRATIONS_DIR = str(Path(__file__).resolve().parents[2] / "migrations")
 __all__ = ["apply_migrations", "downgrade_migrations"]
 
 _REMOVED_AGENT_KB_TABLE = "knowledge_base_agent_bindings"
+_REMOVED_KB_TABLES = {
+    "knowledge_bases",
+    "knowledge_documents",
+    "knowledge_chunks",
+    "knowledge_chunks_fts",
+    "knowledge_source_states",
+    "knowledge_connector_status",
+    "kb_extraction_runs",
+    "kb_entities",
+    "kb_entity_mentions",
+    "kb_relations",
+}
 
 
 def downgrade_migrations(db_path: Path) -> None:
@@ -39,19 +51,11 @@ def test_upgrade_creates_tables(tmp_path):
     # it is now a pure agent-side table created only by schedule_store.ensure_schema.
     assert "scheduled_tasks" not in tables
     assert "memory_maintenance_proposals" in tables
-    assert "knowledge_bases" in tables
-    assert "knowledge_documents" in tables
-    assert "knowledge_chunks" in tables
-    assert "knowledge_chunks_fts" in tables
     assert _REMOVED_AGENT_KB_TABLE not in tables
-    assert "knowledge_connector_status" in tables
-    assert "kb_extraction_runs" in tables
-    assert "kb_entities" in tables
-    assert "kb_entity_mentions" in tables
-    assert "kb_relations" in tables
     assert "kb_reflection_reports" in tables
     assert "skill_proposals" in tables
     assert "shared_memory_items" in tables
+    assert _REMOVED_KB_TABLES.isdisjoint(tables)
     assert {"traces", "memory_items", "reflection_reports"}.isdisjoint(tables)
 
 
@@ -73,22 +77,25 @@ def test_upgrade_does_not_create_memory_item_indexes_in_management_db(tmp_path):
     assert "memory_items" not in tables
 
 
-def test_upgrade_creates_knowledge_base_fts_index(tmp_path):
+def test_upgrade_does_not_create_kb_tables_in_management_db(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    conn.close()
+    assert _REMOVED_KB_TABLES.isdisjoint(tables)
+
+
+def test_upgrade_does_not_create_knowledge_base_fts_index(tmp_path):
     db = tmp_path / "test.db"
     apply_migrations(db)
     conn = sqlite3.connect(db)
     fts_sql = conn.execute(
-        """
-        SELECT sql
-        FROM sqlite_master
-        WHERE name = 'knowledge_chunks_fts'
-        """,
-    ).fetchone()[0]
+        "SELECT sql FROM sqlite_master WHERE name = 'knowledge_chunks_fts'"
+    ).fetchone()
     conn.close()
 
-    assert "CREATE VIRTUAL TABLE" in fts_sql
-    assert "fts5" in fts_sql.lower()
-    assert "chunk_id UNINDEXED" in fts_sql
+    assert fts_sql is None
 
 
 def test_downgrade_removes_tables(tmp_path):
@@ -168,48 +175,6 @@ def test_column_structure(tmp_path):
         "updated_at",
     }
 
-    kb_cols = {row[1] for row in conn.execute("PRAGMA table_info(knowledge_bases)")}
-    assert kb_cols >= {"tenant_id", "kb_id", "created_at"}
-    document_cols = {row[1] for row in conn.execute("PRAGMA table_info(knowledge_documents)")}
-    assert document_cols >= {
-        "id",
-        "tenant_id",
-        "kb_id",
-        "filename",
-        "source",
-        "source_url",
-        "archived_at",
-        "created_at",
-    }
-    chunk_cols = {row[1] for row in conn.execute("PRAGMA table_info(knowledge_chunks)")}
-    assert chunk_cols >= {
-        "id",
-        "document_id",
-        "tenant_id",
-        "kb_id",
-        "position",
-        "content",
-        "created_at",
-    }
-    extraction_run_cols = {row[1] for row in conn.execute("PRAGMA table_info(kb_extraction_runs)")}
-    assert extraction_run_cols >= {
-        "id",
-        "tenant_id",
-        "kb_id",
-        "document_id",
-        "extractor",
-        "status",
-        "started_at",
-        "finished_at",
-        "documents_scanned",
-        "chunks_scanned",
-        "entities_upserted",
-        "mentions_written",
-        "relations_written",
-        "failed_count",
-        "error_summary",
-        "metadata_json",
-    }
     kb_reflection_cols = {
         row[1] for row in conn.execute("PRAGMA table_info(kb_reflection_reports)")
     }
@@ -241,48 +206,9 @@ def test_column_structure(tmp_path):
         "created_at",
         "updated_at",
     }
-    entity_cols = {row[1] for row in conn.execute("PRAGMA table_info(kb_entities)")}
-    assert entity_cols >= {
-        "id",
-        "tenant_id",
-        "kb_id",
-        "entity_type",
-        "name",
-        "normalized_name",
-        "metadata_json",
-        "created_at",
-        "updated_at",
-    }
-    mention_cols = {row[1] for row in conn.execute("PRAGMA table_info(kb_entity_mentions)")}
-    assert mention_cols >= {
-        "id",
-        "entity_id",
-        "tenant_id",
-        "kb_id",
-        "document_id",
-        "chunk_id",
-        "text",
-        "confidence",
-        "extraction_run_id",
-        "created_at",
-    }
-    relation_cols = {row[1] for row in conn.execute("PRAGMA table_info(kb_relations)")}
-    assert relation_cols >= {
-        "id",
-        "tenant_id",
-        "kb_id",
-        "relation_type",
-        "source_entity_id",
-        "target_entity_id",
-        "evidence_document_id",
-        "evidence_chunk_id",
-        "evidence_text",
-        "confidence",
-        "extraction_run_id",
-        "created_at",
-    }
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     conn.close()
+    assert _REMOVED_KB_TABLES.isdisjoint(tables)
     assert {"traces", "memory_items", "reflection_reports"}.isdisjoint(tables)
 
 
@@ -536,9 +462,10 @@ def test_downgrade_removes_agent_versions(tmp_path):
     assert "agents" not in tables
 
 
-def test_knowledge_entity_unique_key_is_scoped(tmp_path):
+def test_downgrade_recreates_kb_entity_unique_key(tmp_path):
     db = tmp_path / "test.db"
     apply_migrations(db)
+    _downgrade_to(db, "074")
     conn = sqlite3.connect(db)
     indexes = conn.execute("PRAGMA index_list(kb_entities)").fetchall()
     unique_indexes = [row[1] for row in indexes if row[2]]

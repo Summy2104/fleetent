@@ -1,7 +1,8 @@
 from fleetent.config import KnowledgeBaseSettings, Settings
 from fleetent.db import create_database
+from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
 from fleetent.knowledge_base.parsers import ParsedDocument, ParsedSection
-from tests.integration.test_migrations import apply_migrations
+from fleetent.schema_migrations import migrate
 
 
 async def test_run_entity_extraction_document_scope_writes_summary_entities_and_evidence(
@@ -23,9 +24,6 @@ async def test_run_entity_extraction_document_scope_writes_summary_entities_and_
 
     summary = await run_entity_extraction("default", "global", document_id=document.id)
 
-    runs = database.execute(
-        "SELECT status, documents_scanned, chunks_scanned FROM kb_extraction_runs"
-    )
     entities = database.execute("SELECT entity_type, name FROM kb_entities ORDER BY name")
     mentions = database.execute("SELECT document_id, chunk_id, text FROM kb_entity_mentions")
     relations = database.execute(
@@ -34,9 +32,18 @@ async def test_run_entity_extraction_document_scope_writes_summary_entities_and_
         FROM kb_relations
         """
     )
+    tables = _table_names(database)
+    mention_columns = _column_names(database, "kb_entity_mentions")
+    relation_columns = _column_names(database, "kb_relations")
     assert summary.status == "succeeded"
     assert summary.documents_scanned == 1
-    assert runs.fetchall() == [{"status": "succeeded", "documents_scanned": 1, "chunks_scanned": 1}]
+    assert summary.chunks_scanned == 1
+    assert summary.entities_upserted >= 4
+    assert summary.mentions_written >= 3
+    assert summary.relations_written == 1
+    assert "kb_extraction_runs" not in tables
+    assert "extraction_run_id" not in mention_columns
+    assert "extraction_run_id" not in relation_columns
     assert {(row["entity_type"], row["name"]) for row in entities.fetchall()} >= {
         ("customer", "Acme"),
         ("project", "Atlas"),
@@ -69,15 +76,10 @@ async def test_run_entity_extraction_kb_scope_isolates_document_failures(monkeyp
 
     summary = await run_entity_extraction("default", "global")
 
-    run = database.execute("SELECT status, documents_scanned, failed_count FROM kb_extraction_runs")
     mentions = database.execute("SELECT DISTINCT document_id FROM kb_entity_mentions")
     assert summary.status == "partial_failed"
+    assert summary.documents_scanned == 2
     assert summary.failed_count == 1
-    assert run.fetchone() == {
-        "status": "partial_failed",
-        "documents_scanned": 2,
-        "failed_count": 1,
-    }
     assert [row["document_id"] for row in mentions.fetchall()] == [good.id]
 
 
@@ -93,12 +95,11 @@ async def test_successful_document_rerun_replaces_old_evidence(monkeypatch, tmp_
 
     entity_names = database.execute("SELECT name FROM kb_entities ORDER BY name").fetchall()
     mentions = database.execute("SELECT text FROM kb_entity_mentions ORDER BY text").fetchall()
-    runs = database.execute("SELECT id FROM kb_extraction_runs").fetchall()
     assert first.status == "succeeded"
     assert second.status == "succeeded"
     assert [row["name"] for row in entity_names] == ["Acme", "Beta"]
     assert [row["text"] for row in mentions] == ["Beta"]
-    assert len(runs) == 2
+    assert first.id != second.id
 
 
 async def test_failed_document_rerun_keeps_previous_evidence(monkeypatch, tmp_path):
@@ -117,13 +118,9 @@ async def test_failed_document_rerun_keeps_previous_evidence(monkeypatch, tmp_pa
     summary = await run_entity_extraction("default", "global", document_id=document.id)
 
     mentions = database.execute("SELECT text FROM kb_entity_mentions").fetchall()
-    failed_run = database.execute(
-        "SELECT status, error_summary FROM kb_extraction_runs ORDER BY started_at DESC LIMIT 1"
-    ).fetchone()
     assert summary.status == "failed"
     assert [row["text"] for row in mentions] == ["Acme"]
-    assert failed_run["status"] == "failed"
-    assert "secret content" not in failed_run["error_summary"]
+    assert summary.error_summary == "ValueError"
 
 
 async def _ingest_fixture_document(filename: str, content: str):
@@ -163,10 +160,11 @@ async def _replace_document_chunk(database, document_id: str, content: str) -> N
 
 
 def _patch_knowledge_runtime(monkeypatch, tmp_path):
+    from fleetent.db import SQLiteDatabase
     from fleetent.knowledge_base import runtime
 
     db_path = tmp_path / "knowledge.db"
-    apply_migrations(db_path)
+    migrate(SQLiteDatabase(path=db_path), KB_MIGRATIONS)
     database = create_database(f"sqlite:///{db_path}")
     settings = Settings(
         anthropic_api_key="test-key",
@@ -185,3 +183,14 @@ async def _noop_upsert(chunk_id: str, content: str, namespace: str) -> None:
 
 async def _noop_delete(chunk_id: str, namespace: str) -> None:
     return None
+
+
+def _table_names(database) -> set[str]:
+    return {
+        str(row["name"])
+        for row in database.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+
+
+def _column_names(database, table: str) -> set[str]:
+    return {str(row["name"]) for row in database.execute(f"PRAGMA table_info({table})").fetchall()}

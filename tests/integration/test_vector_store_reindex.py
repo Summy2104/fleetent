@@ -3,10 +3,10 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 
 from fleetent.db import SQLiteDatabase, create_database
+from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
 from fleetent.memory import store as memory_store
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
 from fleetent.schema_migrations import migrate
-from tests.integration.test_migrations import apply_migrations
 
 
 def _patch_memory_database(tmp_path, monkeypatch):
@@ -94,9 +94,10 @@ def _patch_knowledge_runtime(monkeypatch, tmp_path):
     from fleetent.knowledge_base import runtime as knowledge_runtime
 
     db_path = tmp_path / "knowledge.db"
-    apply_migrations(db_path)
+    migrate(SQLiteDatabase(path=db_path), KB_MIGRATIONS)
     database = create_database(f"sqlite:///{db_path}")
     monkeypatch.setattr(knowledge_runtime, "_database", lambda: database)
+    monkeypatch.setattr(knowledge_runtime, "_kb_vector_backend", None)
     monkeypatch.setattr(
         knowledge_runtime,
         "_kb_config",

@@ -3,8 +3,9 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 from fleetent.config import KnowledgeBaseSettings, Settings
-from fleetent.db import create_database
-from tests.integration.test_migrations import apply_migrations
+from fleetent.db import SQLiteDatabase, create_database
+from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
+from fleetent.schema_migrations import migrate
 
 
 async def test_confluence_sync_ingests_pages_into_tenant_kb(monkeypatch, tmp_path):
@@ -189,13 +190,14 @@ def _patch_knowledge_runtime(monkeypatch, tmp_path):
     from fleetent.knowledge_base import runtime
 
     db_path = tmp_path / "knowledge.db"
-    apply_migrations(db_path)
+    migrate(SQLiteDatabase(path=db_path), KB_MIGRATIONS)
     database = create_database(f"sqlite:///{db_path}")
     settings = Settings(
         anthropic_api_key="test-key",
         knowledge_base=KnowledgeBaseSettings(chunk_size=100, chunk_overlap=0),
     )
     monkeypatch.setattr(runtime, "_database", lambda: database)
+    monkeypatch.setattr(runtime, "_kb_vector_backend", None)
     monkeypatch.setattr(runtime, "_settings", lambda: settings)
     monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
     monkeypatch.setattr(runtime.vector_store, "delete", _noop_delete)

@@ -6,13 +6,18 @@ import argparse
 import asyncio
 import os
 import sys
+from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
+from fleetent.config import Settings
+from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
 from fleetent.knowledge_base.extraction import (
     run_entity_extraction as _run_entity_extraction,
 )
 from fleetent.knowledge_base.extraction_store import KnowledgeExtractionRun
 from fleetent.platform.admin_cli.common import sanitize_cli_value, summary_line
+from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
 
 
 def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -75,14 +80,16 @@ def _handle_connectors(args: argparse.Namespace) -> None:
         return
 
     if args.connector_cmd == "check":
-        check_result = asyncio.run(operations.check_connector(args.connector_id))
+        with _use_connector_runtime(operations, args.connector_id):
+            check_result = asyncio.run(operations.check_connector(args.connector_id))
         print(f"connector_id={check_result.connector_id}")
         print(f"status={check_result.status}")
         print(f"message={sanitize_cli_value(check_result.message)}")
         return
 
     if args.connector_cmd == "status":
-        status = operations.get_connector_status(args.connector_id)
+        with _use_connector_runtime(operations, args.connector_id):
+            status = operations.get_connector_status(args.connector_id)
         print(f"connector_id={status.connector_id}")
         print(f"status={status.last_status}")
         if status.last_summary:
@@ -94,9 +101,10 @@ def _handle_connectors(args: argparse.Namespace) -> None:
     if args.connector_cmd == "sync":
         if not args.dry_run and not _execute_sync_allowed(operations, args):
             sys.exit(1)
-        sync_result = asyncio.run(
-            operations.run_connector_sync(args.connector_id, dry_run=args.dry_run)
-        )
+        with _use_connector_runtime(operations, args.connector_id):
+            sync_result = asyncio.run(
+                operations.run_connector_sync(args.connector_id, dry_run=args.dry_run)
+            )
         print(f"connector_id={sync_result.connector_id}")
         print(f"status={sync_result.status}")
         if sync_result.summary:
@@ -131,13 +139,14 @@ def _execute_sync_env_flag(connector_type: str) -> str:
 
 
 def _handle_extract_entities(args: argparse.Namespace) -> None:
-    summary = asyncio.run(
-        run_entity_extraction(
-            args.tenant_id,
-            args.kb_id,
-            document_id=args.document_id,
+    with _use_kb_runtime(args.tenant_id):
+        summary = asyncio.run(
+            run_entity_extraction(
+                args.tenant_id,
+                args.kb_id,
+                document_id=args.document_id,
+            )
         )
-    )
     print(f"status={sanitize_cli_value(summary.status)}")
     print(f"tenant_id={sanitize_cli_value(summary.tenant_id)}")
     print(f"kb_id={sanitize_cli_value(summary.kb_id)}")
@@ -151,3 +160,39 @@ def _handle_extract_entities(args: argparse.Namespace) -> None:
     print(f"failed_count={summary.failed_count}")
     if summary.error_summary:
         print(f"error={sanitize_cli_value(summary.error_summary)}")
+
+
+def _tenant_router() -> TenantRouter:
+    data_dir = Path(Settings().database_url.removeprefix("sqlite:///")).parent
+    return TenantRouter(SQLiteTenantBackend(data_dir=data_dir))
+
+
+@contextmanager
+def _use_kb_runtime(tenant_id: str):
+    from fleetent.knowledge_base import runtime
+
+    scope = _tenant_router().tenant_scope(tenant_id)
+    previous_db = runtime._kb_db
+    previous_backend = runtime._kb_vector_backend
+    runtime.set_database(scope.open_kb_db(KB_MIGRATIONS))
+    runtime.set_vector_backend(scope.kb_vector_backend)
+    try:
+        yield
+    finally:
+        runtime.set_database(previous_db)
+        runtime.set_vector_backend(previous_backend)
+
+
+@contextmanager
+def _use_connector_runtime(operations: Any, connector_id: str):
+    try:
+        definition = operations.get_connector_config(connector_id)
+    except ValueError:
+        yield
+        return
+    tenant_id = getattr(getattr(definition, "config", None), "tenant_id", None)
+    if tenant_id is None:
+        yield
+        return
+    with _use_kb_runtime(tenant_id):
+        yield

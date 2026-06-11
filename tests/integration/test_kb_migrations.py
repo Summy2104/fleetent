@@ -52,7 +52,12 @@ def test_kb_migrations_create_expected_tables(tmp_path: Path) -> None:
         "knowledge_documents",
         "knowledge_chunks",
         "knowledge_source_states",
+        "knowledge_connector_status",
+        "kb_entities",
+        "kb_entity_mentions",
+        "kb_relations",
     }
+    assert "kb_extraction_runs" not in real_tables
 
 
 def test_kb_migrations_preserve_tenant_id_and_kb_id_columns(tmp_path: Path) -> None:
@@ -102,6 +107,53 @@ def test_kb_migrations_create_expected_columns(tmp_path: Path) -> None:
         "content_hash",
         "mtime_ns",
         "updated_at",
+    }
+    assert _col_names(migrated_db, "knowledge_connector_status") == {
+        "connector_id",
+        "connector_type",
+        "tenant_id",
+        "kb_id",
+        "last_status",
+        "last_started_at",
+        "last_finished_at",
+        "last_summary_json",
+        "last_error",
+        "updated_at",
+    }
+    assert _col_names(migrated_db, "kb_entities") == {
+        "id",
+        "tenant_id",
+        "kb_id",
+        "entity_type",
+        "name",
+        "normalized_name",
+        "metadata_json",
+        "created_at",
+        "updated_at",
+    }
+    assert _col_names(migrated_db, "kb_entity_mentions") == {
+        "id",
+        "entity_id",
+        "tenant_id",
+        "kb_id",
+        "document_id",
+        "chunk_id",
+        "text",
+        "confidence",
+        "created_at",
+    }
+    assert _col_names(migrated_db, "kb_relations") == {
+        "id",
+        "tenant_id",
+        "kb_id",
+        "relation_type",
+        "source_entity_id",
+        "target_entity_id",
+        "evidence_document_id",
+        "evidence_chunk_id",
+        "evidence_text",
+        "confidence",
+        "created_at",
     }
 
 

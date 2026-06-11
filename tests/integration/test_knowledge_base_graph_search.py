@@ -1,7 +1,8 @@
 from fleetent.config import KnowledgeBaseSettings
-from fleetent.db import create_database
+from fleetent.db import SQLiteDatabase, create_database
+from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
 from fleetent.knowledge_base.parsers import ParsedDocument, ParsedSection
-from tests.integration.test_migrations import apply_migrations
+from fleetent.schema_migrations import migrate
 
 
 async def test_graph_search_depth_zero_returns_direct_entity_mentions(monkeypatch, tmp_path):
@@ -81,7 +82,7 @@ def _patch_knowledge_runtime(monkeypatch, tmp_path):
     from fleetent.knowledge_base import runtime
 
     db_path = tmp_path / "knowledge.db"
-    apply_migrations(db_path)
+    migrate(SQLiteDatabase(path=db_path), KB_MIGRATIONS)
     database = create_database(f"sqlite:///{db_path}")
     config = KnowledgeBaseSettings(chunk_size=500, chunk_overlap=0)
     monkeypatch.setattr(runtime, "_database", lambda: database)
