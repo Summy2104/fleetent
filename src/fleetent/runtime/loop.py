@@ -18,7 +18,7 @@ import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
 from fleetent import agent_config
 from fleetent.eval_logger import log_run
 from fleetent.governance.action_gate import ActionMode, is_sandbox_backed, resolve_action_mode
-from fleetent.governance.agent_policy import check_tool_access
+from fleetent.governance.agent_policy import check_tool_access, is_tool_visible
 from fleetent.governance.permission_gate import _default_gate
 from fleetent.identity import Principal
 from fleetent.integrations.sandbox import Mode, is_code_execution_enabled, redact_secrets
@@ -287,9 +287,7 @@ def _visible_tool_names(allowed_tools: list[str] | None) -> set[str]:
     `requires_tools` is checked against exactly what the agent can call.
     """
     names = {s["function"]["name"] for s in get_schemas()}
-    if allowed_tools is not None:
-        names = {n for n in names if check_tool_access(n, allowed_tools)}
-    return names
+    return {n for n in names if is_tool_visible(n, allowed_tools)}
 
 
 def _strict_unavailable_reply(blocked: list[str]) -> str:
@@ -1646,9 +1644,9 @@ async def _run_inner(
         else get_schemas()
     )
 
-    # Filter by agent-level allowed_tools if specified
-    if allowed_tools is not None:
-        schemas = [s for s in schemas if check_tool_access(s["function"]["name"], allowed_tools)]
+    # Filter by agent-level allowed_tools (is_tool_visible also drops opt-in tools
+    # like bash_exec under allow-all / bare `*`).
+    schemas = [s for s in schemas if is_tool_visible(s["function"]["name"], allowed_tools)]
 
     # SB3 D1: the single code-execution enablement point — drop run_code from this
     # agent's schema when the (mode, features) pair disables it (alongside the
@@ -2420,10 +2418,9 @@ async def run_stream(
         finish_reason = "stop"
 
         stream_schemas = get_schemas()
-        if allowed_tools is not None:
-            stream_schemas = [
-                s for s in stream_schemas if check_tool_access(s["function"]["name"], allowed_tools)
-            ]
+        stream_schemas = [
+            s for s in stream_schemas if is_tool_visible(s["function"]["name"], allowed_tools)
+        ]
         # SB3 D1: code-execution enablement point, mirroring run().
         stream_schemas = _filter_code_execution(stream_schemas, sandbox_mode, agent_features)
 

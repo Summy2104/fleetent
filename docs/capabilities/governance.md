@@ -48,6 +48,45 @@ agent 工具执行前的治理层：在 agent 即将调用某个工具的那一�
 - ❌ **双人审批（dual-control）/ 跨会话挂起-恢复**：需要任务注册中心，太重；仅组织级影响 / 强合规场景才需要
 - ❌ **跨节点审批信令**：单机内 `asyncio.Event` 唤醒已够；多机部署需 Redis pub/sub 或 owning-node 路由（见 platform 多机集群 open question）
 
+## Action Gate：风险 → 处置 mode
+
+工具调用前，action gate 按工具的**服务端风险等级**（来自 registry，绝不取 LLM 传入的参数）映射到一个处置 mode：
+
+| 配置 | 含义 |
+|---|---|
+| `direct` | 不打扰审批人直接执行 |
+| `sandbox` | 在沙箱容器内直跑、不打扰审批人；**仅在运行时封闭成立时生效**，否则 fail-closed 自动升 `approval` |
+| `approval` | 外呼审批人确认（默认） |
+
+按风险等级：`none`/`low` → 直跑；`medium` → 取 `action_gate_medium_mode`；`high` → 取 `action_gate_high_mode`；`critical` → 永远 reject（任何配置、任何 LLM 参数都改不了）。无法证明安全的一律 fail-closed 升 `approval`（未知风险串、对非沙箱工具配 `sandbox`）。
+
+### 封闭即免审批（medium → sandbox）
+
+部署可把某 agent 的 `action_gate_medium_mode` 配为 `sandbox`，对**运行时封闭**的 medium 风险操作免审批——容器在 namespace 内封闭执行（`sandbox_capable` 为真）时，medium 操作经 action gate 解析为 `SANDBOX` 在容器内直跑，不逐次打扰审批人。
+
+- **正当性绑定运行时封闭性，而非工具的静态分类**：免审批只在封闭成立时生效。封闭不成立时——无 docker / 全局 sandbox mode 降级为 `off`（`effective_mode == OFF`）/ 操作并非容器内执行——同一 medium 操作复用既有 **fail-closed** 行为升级为 `approval` 走审批，绝不以 sandbox 名义静默直跑。
+- **高危不随 medium 放松**：兑现 medium 免审批（`medium_mode: sandbox`）不波及 high 面。`action_gate_high_mode` 推荐默认保持 `approval`。
+- **机制零改动**：免审批完全复用既有 `resolve_action_mode` 契约 + 地基 `sandbox-containment-gating` 提供的 `sandbox_capable`；`is_sandbox_backed` / `SANDBOX_BACKED_TOOLS` / registry risk 常量均不变。代码默认仍是 `action_gate_medium_mode: approval`——免审批是部署的**显式选择**，存量配置行为不变。
+
+### sandbox mode 选型指引
+
+全局沙箱三态 `mode`（`platform.yaml` 的 `sandbox.mode`，详见 sandbox-enablement-control）按部署形态推荐选型，与免审批配套。该指引为**选型建议**，不改变三态语义、默认值（`all`）与后端不可用时降级为 `off` 的行为：
+
+| 部署形态 | 推荐 mode | 配套 |
+|---|---|---|
+| 封闭可信内网，希望容器内 medium 操作免审批自动化 | `all` | agent 配 `action_gate_medium_mode: sandbox`；免审批仅在 `sandbox_capable` 为真时生效 |
+| 最小暴露代码执行面，仅特定授权 agent 可用 `run_code` | `selective` | 仅 `features.code_execution: true` 的 agent 暴露 `run_code` |
+| 完全禁用代码执行 | `off` | 不存在容器封闭，medium 操作不会因 `sandbox` 配置免审批，仍走审批 |
+
+### bash_exec 默认 opt-in（宿主直跑高危工具）
+
+`bash_exec` 在宿主机直跑任意 Shell（risk=high，非沙箱），是运维专属高危能力。它被划为 **opt-in 工具**：
+
+- **默认不暴露**：`allowed_tools` 为空（allow-all，运行时归一为 `None`）或仅含裸 `*` 通配的普通 agent **看不到也调用不了** `bash_exec`。空 allow-all 对其余非 opt-in 工具的语义不变。
+- **运维 agent 显式获得**：只有在 `allowed_tools` 中**显式具名命中**（字面 `bash_exec`，或能覆盖它的显式非裸 `*` 模式，如 `bash_*`）的 agent 才暴露 `bash_exec`。
+- **存量迁移**：原先依赖空 allow-all 隐式获得 `bash_exec` 的 agent，需在其 `allowed_tools` 显式补 `bash_exec`——属一次性配置动作。显式列出者不受影响。
+- `bash_exec` 自身的执行 / 审批 / 超时 / 工作目录契约不变（owned by builtin-shell-tool）；本能力只改它**是否默认出现在普通 agent 的工具面**。
+
 ## 模块图
 
 ```mermaid

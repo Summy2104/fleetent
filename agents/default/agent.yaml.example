@@ -265,8 +265,20 @@ permission_gate_medium_timeout_seconds: 300
 permission_gate_high_timeout_seconds: 3600
 
 # action gate — per-risk handling mode for gated tool calls (action-gate)
-#   approval = page a human approver (default) | auto = execute without paging | deny = always block
+#   direct   = execute without paging
+#   sandbox  = run inside the sandbox container without paging; the action gate
+#              fail-closes to approval automatically when the runtime is NOT closed
+#              (no docker / sandbox mode degraded to off / not executing in-container)
+#   approval = page a human approver (default)
+#
+# Recommended for closed, trusted deployments (e.g. sandbox mode=all on a trusted
+# intranet): set action_gate_medium_mode to `sandbox` to cash in免审批 — medium-risk
+# operations run inside the closed container without paging an approver, while staying
+# fail-closed (auto-upgraded to approval) whenever containment is not actually in effect.
+# See docs/capabilities/governance.md → "封闭即免审批" and the sandbox mode选型指引.
 action_gate_medium_mode: approval
+# High-risk operations stay on `approval` by default and are NOT relaxed alongside
+# medium: cashing in medium免审批 (medium_mode=sandbox) does not touch the high面.
 action_gate_high_mode: approval
 
 # approval routing — who gets paged when the gate fires (agent-owned-approval)
