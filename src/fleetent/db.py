@@ -133,18 +133,6 @@ def create_database(database_url: str) -> SQLiteDatabase:
     return SQLiteDatabase(path=path)
 
 
-def default_database() -> SQLiteDatabase:
-    """Return the configured default SQLiteDatabase.
-
-    Backward-compat fallback for call sites that have not yet migrated to
-    explicit TenantRouter injection.  Will be removed once all sites pass
-    a database explicitly (tracked under roadmap #3b).
-    """
-    from fleetent.config import Settings  # local import avoids circular at module level
-
-    return create_database(Settings().database_url)
-
-
 def _rows_from_cursor(cursor: sqlite3.Cursor) -> list[Row]:
     if cursor.description is None:
         return []

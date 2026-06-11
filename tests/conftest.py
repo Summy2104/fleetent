@@ -134,10 +134,14 @@ def _reset_traces_reflection_state_db():  # type: ignore[no-untyped-def]
 
 
 @pytest.fixture
-def isolated_schedule_db(tmp_path, monkeypatch):  # type: ignore[no-untyped-def]
-    db_path = tmp_path / "sched.db"
-    database_url = f"sqlite:///{db_path}"
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setenv("DATABASE_URL", database_url)
-    _apply_migrations(db_path)
-    return db.create_database(database_url)
+def isolated_schedule_db(tmp_path):  # type: ignore[no-untyped-def]
+    import fleetent.schedule_store as ss
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+    from fleetent.schema_migrations import migrate
+
+    state_db = db.SQLiteDatabase(path=tmp_path / "agent_state.db")
+    migrate(state_db, AGENT_STATE_MIGRATIONS)
+    original = ss._state_db
+    ss.set_state_db(state_db)
+    yield state_db
+    ss._state_db = original

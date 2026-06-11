@@ -115,8 +115,6 @@ def _redirect_agent_data_paths(home_dir: Path) -> None:
     # Replace the _default_data_dir callable so diagnostics export/retention
     # resolve to this agent's data dir, not the global FLEETENT_HOME/data/.
     diagnostics._default_data_dir = lambda: data_dir  # type: ignore[assignment]
-    # Only set DATABASE_URL if not already configured (explicit .env or system env wins).
-    os.environ.setdefault("DATABASE_URL", f"sqlite:///{data_dir / 'fleetent.db'}")
 
 
 def _configure_logging_from_agent(agent: AgentFile, home_dir: Path) -> None:
@@ -169,18 +167,14 @@ def _configure_logging_from_agent(agent: AgentFile, home_dir: Path) -> None:
     )
 
 
-def _init_agent_db_schema(database_url: str, *, agent_id: str, tenant_id: str = "default") -> None:
-    """Create all agent-side DB tables in database_url if they do not exist.
+def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "default") -> None:
+    """Bootstrap all agent-side DB tables anchored on data_dir.
 
-    Called once at boot after DATABASE_URL is redirected to the per-agent path.
-
-    KB schema is bootstrapped via TenantRouter + migrate-on-open so that KB tables
-    land in the tenant-scoped directory (data/<tenant_id>/kb.db), not the main db.
-    sessions/traces/reflection_reports/memory_items/approvals are bootstrapped via a
-    single unified AGENT_STATE_MIGRATIONS run-on-open against agent_state.db (3b-2/3/4).
+    All per-agent tables land in agent_state.db via the unified AGENT_STATE_MIGRATIONS;
+    KB and shared-memory tables land in tenant-scoped files via TenantRouter.
+    Does not create fleetent.db; does not read DATABASE_URL.
     """
     from fleetent import reflection, schedule_store
-    from fleetent.db import create_database
     from fleetent.governance import approval_allowlist_store as allowlist_store
     from fleetent.governance import approval_store
     from fleetent.knowledge_base import runtime as kb_runtime
@@ -195,10 +189,6 @@ def _init_agent_db_schema(database_url: str, *, agent_id: str, tenant_id: str = 
     from fleetent.session import index as session_index
     from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
 
-    db = create_database(database_url)
-    schedule_store.ensure_schema(db)
-
-    data_dir = db.path.parent
     router = TenantRouter(SQLiteTenantBackend(data_dir=data_dir))
     tenant_scope = router.tenant_scope(tenant_id)
     kb_db = tenant_scope.open_kb_db(KB_MIGRATIONS)
@@ -221,17 +211,16 @@ def _init_agent_db_schema(database_url: str, *, agent_id: str, tenant_id: str = 
     runtime_context.set_state_db(agent_state_db)
     sub_agent_lifecycle.set_state_db(agent_state_db)
     layered_budget.set_state_db(agent_state_db)
+    schedule_store.set_state_db(agent_state_db)
 
 
-async def _start_infra(agent: AgentFile) -> None:
+async def _start_infra(agent: AgentFile, data_dir: Path) -> None:
     """Best-effort process infrastructure: sandbox probe, per-agent MCP, session upkeep.
 
     Each step mirrors the platform lifespan but scoped to this one agent; a failure is
     logged and never aborts boot (same best-effort posture as the platform).
     """
-    _db_url = os.environ.get("DATABASE_URL", "")
-    if _db_url:
-        _init_agent_db_schema(_db_url, agent_id=agent.name, tenant_id=agent.tenant_id)
+    _init_agent_db_schema(data_dir, agent_id=agent.name, tenant_id=agent.tenant_id)
     from fleetent.integrations.sandbox import enablement as sandbox_enablement
 
     # Select the configured sandbox backend (agent.yaml > platform.yaml > docker) and
@@ -354,7 +343,7 @@ async def boot(
     load_plugins()
 
     if with_infra:
-        await _start_infra(agent)
+        await _start_infra(agent, home_dir / "data")
 
     if supervisor is None:
         from fleetent.im_gateway.slack_supervisor import SlackSupervisor

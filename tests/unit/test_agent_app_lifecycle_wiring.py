@@ -6,6 +6,7 @@ single-module behavioural test at unit level.
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fleetent.integrations.sandbox import Mode
@@ -18,8 +19,17 @@ def _agent_without_mcp() -> MagicMock:
     return agent
 
 
-async def test_start_infra_cleans_orphans_and_starts_sweep_when_docker_available() -> None:
+_NOOP_INIT_SCHEMA = patch(
+    "fleetent.runtime.agent_app._init_agent_db_schema",
+    MagicMock(),
+)
+
+
+async def test_start_infra_cleans_orphans_and_starts_sweep_when_docker_available(
+    tmp_path: Path,
+) -> None:
     with (
+        _NOOP_INIT_SCHEMA,
         patch(
             "fleetent.integrations.sandbox.enablement.get_effective_mode",
             AsyncMock(return_value=Mode.ALL),
@@ -29,14 +39,17 @@ async def test_start_infra_cleans_orphans_and_starts_sweep_when_docker_available
         patch("fleetent.integrations.sandbox.SandboxClient"),
         patch("fleetent.session.manager.start_session_maintenance"),
     ):
-        await agent_app._start_infra(_agent_without_mcp())
+        await agent_app._start_infra(_agent_without_mcp(), tmp_path / "data")
 
     cleanup.assert_awaited_once()
     sweep.assert_called_once()
 
 
-async def test_start_infra_skips_sandbox_lifecycle_when_docker_unavailable() -> None:
+async def test_start_infra_skips_sandbox_lifecycle_when_docker_unavailable(
+    tmp_path: Path,
+) -> None:
     with (
+        _NOOP_INIT_SCHEMA,
         patch(
             "fleetent.integrations.sandbox.enablement.get_effective_mode",
             AsyncMock(return_value=Mode.OFF),
@@ -45,15 +58,16 @@ async def test_start_infra_skips_sandbox_lifecycle_when_docker_unavailable() -> 
         patch("fleetent.integrations.sandbox.start_idle_sweep") as sweep,
         patch("fleetent.session.manager.start_session_maintenance"),
     ):
-        await agent_app._start_infra(_agent_without_mcp())
+        await agent_app._start_infra(_agent_without_mcp(), tmp_path / "data")
 
     cleanup.assert_not_awaited()
     sweep.assert_not_called()
 
 
-async def test_start_infra_inits_sandbox_manager_with_agent() -> None:
+async def test_start_infra_inits_sandbox_manager_with_agent(tmp_path: Path) -> None:
     """The process sandbox manager is (re)built with the agent-selected backend."""
     with (
+        _NOOP_INIT_SCHEMA,
         patch(
             "fleetent.integrations.sandbox.enablement.get_effective_mode",
             AsyncMock(return_value=Mode.ALL),
@@ -64,14 +78,15 @@ async def test_start_infra_inits_sandbox_manager_with_agent() -> None:
         patch("fleetent.session.manager.start_session_maintenance"),
     ):
         agent = _agent_without_mcp()
-        await agent_app._start_infra(agent)
+        await agent_app._start_infra(agent, tmp_path / "data")
 
     init_mgr.assert_called_once_with(agent)
 
 
-async def test_start_infra_cleanup_failure_does_not_block_startup() -> None:
+async def test_start_infra_cleanup_failure_does_not_block_startup(tmp_path: Path) -> None:
     """An orphan-cleanup error is logged; boot still proceeds to session maintenance."""
     with (
+        _NOOP_INIT_SCHEMA,
         patch(
             "fleetent.integrations.sandbox.enablement.get_effective_mode",
             AsyncMock(return_value=Mode.ALL),
@@ -84,6 +99,6 @@ async def test_start_infra_cleanup_failure_does_not_block_startup() -> None:
         patch("fleetent.integrations.sandbox.SandboxClient"),
         patch("fleetent.session.manager.start_session_maintenance") as session_maint,
     ):
-        await agent_app._start_infra(_agent_without_mcp())  # must not raise
+        await agent_app._start_infra(_agent_without_mcp(), tmp_path / "data")  # must not raise
 
     session_maint.assert_called_once()

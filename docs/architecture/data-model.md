@@ -102,7 +102,7 @@ graph TD
 - **IM**：`im_users`((platform,platform_user_id)→内部 user) · `im_connectors` · `im_channel_allowlist`
 - **Agent 定义/绑定**：`agents`(定义，含 `tenant_id`/`team_id`/`active_version_id`) · `agent_versions`(不可变快照) · `agent_admin_state`(版本/部署态) · `user_agents`(用户↔agent) · `channel_agents`(渠道↔agent) · `agent_kbs`(**agent↔KB 绑定唯一真相源**，带 `created_by` 审计) · `agent_mcp_servers` · `agent_mcp_server_bindings` · `agent_oauth_bindings` · `connectors`(工具 OAuth) · `agent_skills` · `long_term_context_policies`
 - **模型**：`model_providers` · `model_routes`(task_type→provider)
-- **治理/编排**：`audit_log`(平台管理操作审计) · `scheduled_tasks`(cron)
+- **治理/编排**：`audit_log`(平台管理操作审计)
 - **Skill 治理**：`skill_provenance` · `skill_admin_state`（全局 skill 态）
 
 ```mermaid
@@ -127,13 +127,12 @@ erDiagram
   agents ||--o{ agent_skills : "skill 绑定"
   agents ||--o{ long_term_context_policies : "tenant 默认+agent 覆盖"
   model_providers ||--o{ model_routes : "task_type→provider"
-  users ||--o{ scheduled_tasks : "owner"
   users ||--o{ audit_log : "管理操作审计"
   skill_provenance ||--|| skill_admin_state : "全局 skill 态"
 ```
 
 ### 3.3 per-agent 运行库（嵌入式 Y · `agent_state.db` · agent 侧）
-统一 MIGRATIONS（`runtime/agent_state_migrations.py`，单文件单 `user_version`）建 **10 张表**：`sessions`(会话元数据索引) · `traces`(append-only 运行轨迹) · `reflection_reports`(统一反思观察日志，domain=`memory|skill|knowledge_base|legacy`) · `reflection_proposals`(统一 memory/skill 提案与审批生命周期，domain=`memory|skill`) · `memory_items`(per-user 语义记忆，**无 namespace 列**，agent 隔离靠物理库) · `approvals`/`approval_allowlist`(审批请求+门状态，**agent 全权真相源**，actor 为不透明标签) · `session_anti_flap`(压缩防抖，per session) · `sub_agent_runs`(子 agent 生命周期) · `budget_usage`(预算滑窗累计，PK `(scope,key,period)`，**per-agent 物理隔离**，不落管理库)。后四张归属本 change 及前序 change：`session_anti_flap`/`sub_agent_runs` 改经 `agent_scope` + `db.py`（去 `user_store.DB_PATH` + 裸 `sqlite3.connect`），reflection 域收口到 `reflection_reports` + `reflection_proposals` 两表，`budget_usage` 由 `retire-raw-sqlite-connect` 从管理库迁入。
+统一 MIGRATIONS（`runtime/agent_state_migrations.py`，单文件单 `user_version`）建 **11 张表**：`sessions`(会话元数据索引) · `traces`(append-only 运行轨迹) · `reflection_reports`(统一反思观察日志，domain=`memory|skill|knowledge_base|legacy`) · `reflection_proposals`(统一 memory/skill 提案与审批生命周期，domain=`memory|skill`) · `memory_items`(per-user 语义记忆，**无 namespace 列**，agent 隔离靠物理库) · `approvals`/`approval_allowlist`(审批请求+门状态，**agent 全权真相源**，actor 为不透明标签) · `session_anti_flap`(压缩防抖，per session) · `sub_agent_runs`(子 agent 生命周期) · `budget_usage`(预算滑窗累计，PK `(scope,key,period)`，**per-agent 物理隔离**，不落管理库) · `scheduled_tasks`(agent 侧 cron/once/interval 定时任务，由 `retire-standalone-fleetent-db` 从遗留 `fleetent.db` 迁入)。后五张归属本 change 及前序 change：`session_anti_flap`/`sub_agent_runs` 改经 `agent_scope` + `db.py`（去 `user_store.DB_PATH` + 裸 `sqlite3.connect`），reflection 域收口到 `reflection_reports` + `reflection_proposals` 两表，`budget_usage` 由 `retire-raw-sqlite-connect` 从管理库迁入，`scheduled_tasks` 由 `retire-standalone-fleetent-db` 从遗留 `fleetent.db` 迁入。
 
 ```mermaid
 erDiagram

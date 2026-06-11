@@ -3,24 +3,17 @@
 import fleetent.cron_scheduler as cron
 import fleetent.schedule_store as ss
 from fleetent.identity import Principal
-from tests.integration.test_migrations import apply_migrations
 
 # ── schedule_store session_id column (S3, re-grafted onto main's db.py regime) ──
 
 
-def test_create_persists_session_id(tmp_path, monkeypatch):
-    db = tmp_path / "sched.db"
-    apply_migrations(db)
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
+def test_create_persists_session_id(isolated_schedule_db):
     ss.create("daily", "0 9 * * *", "UTC", "u1", "report", session_id="cron/daily")
     tasks = ss.list_tasks()
     assert tasks[0]["session_id"] == "cron/daily"
 
 
-def test_create_session_id_defaults_none(tmp_path, monkeypatch):
-    db = tmp_path / "sched.db"
-    apply_migrations(db)
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
+def test_create_session_id_defaults_none(isolated_schedule_db):
     ss.create("oneoff", "0 9 * * *", "UTC", "u1", "do it")
     assert ss.list_tasks()[0]["session_id"] is None
 

@@ -172,8 +172,7 @@ def _seed_agent_db(data_dir: Path, tenant_id: str, agent_id: str) -> None:
     from fleetent.runtime.agent_app import _init_agent_db_schema
     from fleetent.session import index as session_index
 
-    db_url = f"sqlite:///{data_dir / f'fleet_{tenant_id}_{agent_id}.db'}"
-    _init_agent_db_schema(db_url, agent_id=agent_id, tenant_id=tenant_id)
+    _init_agent_db_schema(data_dir, agent_id=agent_id, tenant_id=tenant_id)
 
     # Insert a session row directly (session_index was set by _init_agent_db_schema)
     session_index.record_activity(

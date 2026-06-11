@@ -35,9 +35,8 @@ def test_init_agent_db_schema_routes_by_tenant_id(tmp_path: Path) -> None:
 
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    db_url = f"sqlite:///{data_dir / 'fleetent.db'}"
 
-    _init_agent_db_schema(db_url, agent_id="bot", tenant_id="acme")
+    _init_agent_db_schema(data_dir, agent_id="bot", tenant_id="acme")
 
     # KB must be under <tenant>/
     kb_path = data_dir / "acme" / "kb.db"
@@ -59,10 +58,9 @@ def test_init_agent_db_schema_default_tenant_still_works(tmp_path: Path) -> None
 
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    db_url = f"sqlite:///{data_dir / 'fleetent.db'}"
 
     # default tenant — no tenant_id arg (backward compat)
-    _init_agent_db_schema(db_url, agent_id="bot")
+    _init_agent_db_schema(data_dir, agent_id="bot")
 
     kb_path = data_dir / "default" / "kb.db"
     assert kb_path.exists(), "Default tenant KB must be at data/default/kb.db"
@@ -79,9 +77,8 @@ def test_kb_tables_land_in_tenant_scoped_db(tmp_path: Path) -> None:
 
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    db_url = f"sqlite:///{data_dir / 'fleetent.db'}"
 
-    _init_agent_db_schema(db_url, agent_id="bot", tenant_id="acme")
+    _init_agent_db_schema(data_dir, agent_id="bot", tenant_id="acme")
 
     kb_path = data_dir / "acme" / "kb.db"
     tables = _tables_in(kb_path)
@@ -137,12 +134,10 @@ def test_two_agent_boots_different_tenants_no_cross_contamination(tmp_path: Path
     data_dir.mkdir()
 
     # Boot T1/bot
-    db_url_t1 = f"sqlite:///{data_dir / 'fleetent_t1.db'}"
-    _init_agent_db_schema(db_url_t1, agent_id="bot", tenant_id="tenant-1")
+    _init_agent_db_schema(data_dir, agent_id="bot", tenant_id="tenant-1")
 
     # Boot T2/bot (same agent name, different tenant)
-    db_url_t2 = f"sqlite:///{data_dir / 'fleetent_t2.db'}"
-    _init_agent_db_schema(db_url_t2, agent_id="bot", tenant_id="tenant-2")
+    _init_agent_db_schema(data_dir, agent_id="bot", tenant_id="tenant-2")
 
     t1_state = data_dir / "tenant-1" / "bot" / "agent_state.db"
     t2_state = data_dir / "tenant-2" / "bot" / "agent_state.db"

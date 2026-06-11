@@ -31,6 +31,7 @@ Version history:
   v24  reflection_proposals (unified memory/skill lifecycle)
   v25  drop memory_maintenance_proposals
   v26  drop skill_proposals
+  v27  scheduled_tasks    (retire-standalone-fleetent-db)
 """
 
 from __future__ import annotations
@@ -299,4 +300,32 @@ MIGRATIONS: list[tuple[int, str]] = [
     ),
     (25, "DROP TABLE IF EXISTS memory_maintenance_proposals"),
     (26, "DROP TABLE IF EXISTS skill_proposals"),
+    # ── v27: scheduled tasks (retire-standalone-fleetent-db) ─────────────────
+    # Lifted verbatim from schedule_store._TABLE_DDL; one agent per process so
+    # there is no agent_name column — routing is implicit to the process's agent.
+    (
+        27,
+        "CREATE TABLE IF NOT EXISTS scheduled_tasks ("
+        "id TEXT PRIMARY KEY, "
+        "name TEXT, "
+        "schedule_kind TEXT NOT NULL DEFAULT 'cron', "
+        "cron_expr TEXT, "
+        "run_at TEXT, "
+        "interval_seconds INTEGER, "
+        "anchor TEXT, "
+        "timezone TEXT, "
+        "user_id TEXT, "
+        "message TEXT, "
+        "session_id TEXT, "
+        "origin TEXT, "
+        "deliver TEXT, "
+        "enabled INTEGER NOT NULL DEFAULT 1, "
+        "source TEXT, "
+        "created_at TEXT, "
+        "last_run_at TEXT, "
+        "last_status TEXT, "
+        "last_error TEXT, "
+        "next_run_at TEXT"
+        ")",
+    ),
 ]

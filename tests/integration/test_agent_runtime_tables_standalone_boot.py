@@ -10,14 +10,20 @@ import pytest
 @pytest.fixture
 def _restore_runtime_state_dbs():
     """Restore the process-global state-db handles boot() mutates (context / sub_agent /
-    memory_store); the conftest only resets traces + reflection."""
+    memory_store / schedule_store); the conftest only resets traces + reflection."""
+    import fleetent.schedule_store as ss
     from fleetent.memory import store as memory_store
     from fleetent.runtime import context as runtime_context
     from fleetent.runtime import sub_agent_lifecycle
 
-    saved = (runtime_context._state_db, sub_agent_lifecycle._state_db, memory_store._state_db)
+    saved = (
+        runtime_context._state_db,
+        sub_agent_lifecycle._state_db,
+        memory_store._state_db,
+        ss._state_db,
+    )
     yield
-    runtime_context._state_db, sub_agent_lifecycle._state_db, memory_store._state_db = saved
+    runtime_context._state_db, sub_agent_lifecycle._state_db, memory_store._state_db, ss._state_db = saved  # noqa: E501
 
 
 _RUNTIME_TABLES = (
@@ -25,6 +31,7 @@ _RUNTIME_TABLES = (
     "sub_agent_runs",
     "reflection_reports",
     "reflection_proposals",
+    "scheduled_tasks",
 )
 
 
@@ -47,12 +54,9 @@ def test_standalone_boot_lands_runtime_tables_in_agent_state_db(
 
     data_dir = tmp_path / "data"
     data_dir.mkdir(parents=True)
-    mgmt_db = data_dir / "management.db"  # deliberately never migrated: no platform, no tables
-    db_url = f"sqlite:///{mgmt_db}"
-    monkeypatch.setenv("DATABASE_URL", db_url)
 
     # Boot the agent's DB schema exactly as `fleetent agent run` does, without any platform.
-    agent_app._init_agent_db_schema(db_url, agent_id="solo-bot", tenant_id="default")
+    agent_app._init_agent_db_schema(data_dir, agent_id="solo-bot", tenant_id="default")
 
     agent_state_db = data_dir / "default" / "solo-bot" / "agent_state.db"
     assert agent_state_db.exists()
@@ -98,6 +102,5 @@ def test_standalone_boot_lands_runtime_tables_in_agent_state_db(
     assert memory_store.database().path == agent_state_db
     assert proposal_store.get_memory_maintenance_proposal(proposal.id).id == proposal.id
 
-    # The management DB was never created with these agent tables (no platform involved).
-    if mgmt_db.exists():
-        assert _tables(mgmt_db).isdisjoint(set(_RUNTIME_TABLES))
+    # No fleetent.db must be created — standalone no longer anchors to DATABASE_URL.
+    assert not (data_dir / "fleetent.db").exists()

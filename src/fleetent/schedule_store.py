@@ -1,15 +1,9 @@
 """SQLite persistence for scheduled tasks.
 
-Agent-owned store (agent-owned-scheduled-tasks): the schema is created on demand
-via ``ensure_schema`` (idempotent ``CREATE TABLE`` ... ``IF NOT EXISTS``) so a
-standalone ``fleetent agent run`` works without platform migrations — joining the
-agent-side dual-authority tables (traces, memory_items). The platform DB keeps the
-same table via Alembic; the DDL here MUST match the Alembic head (drift guard). No
-platform imports.
-
-The database is resolved from ``DATABASE_URL`` (``Settings``), which ``agent_app``
-redirects to the per-agent ``data/`` dir on standalone boot — so the same code
-targets the agent DB in an agent process and the platform DB in the platform process.
+Agent-owned store: schema is created by the unified agent_state.db embedded
+migrations (AGENT_STATE_MIGRATIONS v27). Access the table through the database
+injected via ``set_state_db(db)`` — the same agent_state.db handle used by
+traces, reflection, memory, and approvals. No platform imports.
 """
 
 import json
@@ -17,42 +11,23 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from fleetent.config import Settings
-from fleetent.db import SQLiteDatabase, create_database
+from fleetent.db import SQLiteDatabase
 
-# Single source for the table DDL. scheduled_tasks is a pure agent-side table (no
-# Alembic counterpart after the platform table was dropped): one agent per process, so
-# there is no agent_name column — routing is implicit to the process's single agent.
-_TABLE_DDL = (
-    "CREATE TABLE IF NOT EXISTS scheduled_tasks ("
-    "id TEXT PRIMARY KEY, "
-    "name TEXT, "
-    "schedule_kind TEXT NOT NULL DEFAULT 'cron', "
-    "cron_expr TEXT, "
-    "run_at TEXT, "
-    "interval_seconds INTEGER, "
-    "anchor TEXT, "
-    "timezone TEXT, "
-    "user_id TEXT, "
-    "message TEXT, "
-    "session_id TEXT, "
-    "origin TEXT, "
-    "deliver TEXT, "
-    "enabled INTEGER NOT NULL DEFAULT 1, "
-    "source TEXT, "
-    "created_at TEXT, "
-    "last_run_at TEXT, "
-    "last_status TEXT, "
-    "last_error TEXT, "
-    "next_run_at TEXT"
-    ")"
-)
+_state_db: SQLiteDatabase | None = None
 
 
-def ensure_schema(db: SQLiteDatabase) -> None:
-    """Create the scheduled_tasks table if absent. Idempotent (agent-side schema owner)."""
-    with db.transaction() as conn:
-        conn.execute(_TABLE_DDL)
+def set_state_db(db: SQLiteDatabase) -> None:
+    """Inject the per-agent state DB. Called once at agent boot via agent_app."""
+    global _state_db
+    _state_db = db
+
+
+def _database() -> SQLiteDatabase:
+    if _state_db is None:
+        raise RuntimeError(
+            "schedule_store: state_db not initialized — call set_state_db(db) at boot"
+        )
+    return _state_db
 
 
 def create(
@@ -100,9 +75,7 @@ def create(
         "last_error": None,
         "next_run_at": None,
     }
-    db = _database()
-    ensure_schema(db)
-    with db.transaction() as conn:
+    with _database().transaction() as conn:
         conn.execute(
             "INSERT INTO scheduled_tasks ("
             "id, name, schedule_kind, cron_expr, run_at, interval_seconds, anchor, "
@@ -120,28 +93,24 @@ def create(
 
 def list_tasks(include_disabled: bool = False) -> list[dict[str, Any]]:
     """Return tasks as dicts. By default only enabled tasks (the scheduler load set)."""
-    db = _database()
-    ensure_schema(db)
     sql = "SELECT * FROM scheduled_tasks"
     if not include_disabled:
         sql += " WHERE enabled = 1"
-    rows = db.execute(sql).fetchall()
+    rows = _database().execute(sql).fetchall()
     return [_decode(dict(row)) for row in rows]
 
 
 def get(task_id: str) -> dict[str, Any] | None:
     """Return a single task by id, or None."""
-    db = _database()
-    ensure_schema(db)
-    row = db.execute("SELECT * FROM scheduled_tasks WHERE id = :id", {"id": task_id}).fetchone()
+    row = _database().execute(
+        "SELECT * FROM scheduled_tasks WHERE id = :id", {"id": task_id}
+    ).fetchone()
     return _decode(dict(row)) if row is not None else None
 
 
 def set_enabled(task_id: str, enabled: bool) -> bool:
     """Toggle a task's enabled flag (pause/resume). Returns True if a row matched."""
-    db = _database()
-    ensure_schema(db)
-    result = db.execute(
+    result = _database().execute(
         "UPDATE scheduled_tasks SET enabled = :enabled WHERE id = :id",
         {"enabled": 1 if enabled else 0, "id": task_id},
     )
@@ -157,9 +126,7 @@ def update_run_state(
     next_run_at: str | None = None,
 ) -> None:
     """Write back observability/runtime-state columns after a fire."""
-    db = _database()
-    ensure_schema(db)
-    db.execute(
+    _database().execute(
         "UPDATE scheduled_tasks SET last_run_at = :last_run_at, last_status = :last_status, "
         "last_error = :last_error, next_run_at = :next_run_at WHERE id = :id",
         {
@@ -173,9 +140,9 @@ def update_run_state(
 
 
 def delete(task_id: str) -> bool:
-    db = _database()
-    ensure_schema(db)
-    result = db.execute("DELETE FROM scheduled_tasks WHERE id = :task_id", {"task_id": task_id})
+    result = _database().execute(
+        "DELETE FROM scheduled_tasks WHERE id = :task_id", {"task_id": task_id}
+    )
     return result.rowcount > 0
 
 
@@ -187,7 +154,3 @@ def _decode(row: dict[str, Any]) -> dict[str, Any]:
         if isinstance(val, str):
             out[key] = json.loads(val)
     return out
-
-
-def _database() -> SQLiteDatabase:
-    return create_database(Settings().database_url)

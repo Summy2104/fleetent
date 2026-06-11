@@ -662,7 +662,7 @@ class AntiFlapState:
     since the last auto compression, and whether auto compression is circuit-broken.
 
     Updated functionally (dataclasses.replace, never in place) so callers thread it
-    explicitly; persisted per session_id in the per-agent fleetent.db, not in the message array.
+    explicitly; persisted per session_id in the per-agent agent_state.db, not in the message array.
     """
 
     recent_savings: tuple[float, ...] = ()

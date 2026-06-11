@@ -24,9 +24,8 @@ def test_kb_schema_established_in_tenant_scoped_db(tmp_path) -> None:
 
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    db_url = f"sqlite:///{data_dir / 'fleetent.db'}"
 
-    _init_agent_db_schema(db_url, agent_id="test-agent")
+    _init_agent_db_schema(data_dir, agent_id="test-agent")
 
     kb_db_path = data_dir / "default" / "kb.db"
     assert kb_db_path.exists(), "router must create data/default/kb.db"
@@ -39,40 +38,40 @@ def test_kb_schema_established_in_tenant_scoped_db(tmp_path) -> None:
 
 
 def test_kb_tables_absent_from_main_agent_db(tmp_path) -> None:
-    """KB tables must NOT be in the main fleetent.db after boot."""
+    """KB tables must NOT be in agent_state.db; they land in the tenant kb.db."""
     from fleetent.runtime.agent_app import _init_agent_db_schema
 
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    db_url = f"sqlite:///{data_dir / 'fleetent.db'}"
 
-    _init_agent_db_schema(db_url, agent_id="test-agent")
+    _init_agent_db_schema(data_dir, agent_id="test-agent")
 
-    main_db_path = data_dir / "fleetent.db"
-    if main_db_path.exists():
-        tables = _tables_in(main_db_path)
-        assert "knowledge_bases" not in tables, "KB tables must not pollute the main agent db"
-        assert "knowledge_documents" not in tables
-        assert "knowledge_chunks" not in tables
+    agent_state_path = data_dir / "default" / "test-agent" / "agent_state.db"
+    assert agent_state_path.exists()
+    tables = _tables_in(agent_state_path)
+    assert "knowledge_bases" not in tables, "KB tables must not pollute agent_state.db"
+    assert "knowledge_documents" not in tables
+    assert "knowledge_chunks" not in tables
+    assert not (data_dir / "fleetent.db").exists(), "fleetent.db must not be created"
 
 
 def test_memory_items_is_y_managed_in_agent_state_db(tmp_path) -> None:
-    """memory_items is now Y-managed in agent_state.db (3b-3); NOT in the main db."""
+    """memory_items is Y-managed in agent_state.db (3b-3); no standalone fleetent.db."""
     from fleetent.runtime.agent_app import _init_agent_db_schema
 
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    db_url = f"sqlite:///{data_dir / 'fleetent.db'}"
 
-    _init_agent_db_schema(db_url, agent_id="test-agent")
+    _init_agent_db_schema(data_dir, agent_id="test-agent")
 
-    main_db_path = data_dir / "fleetent.db"
-    assert main_db_path.exists()
-    tables = _tables_in(main_db_path)
+    agent_state_path = data_dir / "default" / "test-agent" / "agent_state.db"
+    assert agent_state_path.exists()
+    tables = _tables_in(agent_state_path)
     # memory_items, traces, and reflection_reports are all Y-managed in agent_state.db.
-    assert "memory_items" not in tables
-    assert "traces" not in tables
-    assert "reflection_reports" not in tables
+    assert "memory_items" in tables
+    assert "traces" in tables
+    assert "reflection_reports" in tables
+    assert not (data_dir / "fleetent.db").exists(), "fleetent.db must not be created"
 
 
 def test_traces_and_reflection_land_in_agent_state_db(tmp_path) -> None:
@@ -81,9 +80,8 @@ def test_traces_and_reflection_land_in_agent_state_db(tmp_path) -> None:
 
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    db_url = f"sqlite:///{data_dir / 'fleetent.db'}"
 
-    _init_agent_db_schema(db_url, agent_id="test-agent")
+    _init_agent_db_schema(data_dir, agent_id="test-agent")
 
     agent_state_path = data_dir / "default" / "test-agent" / "agent_state.db"
     assert agent_state_path.exists()
@@ -101,14 +99,13 @@ async def test_agent_boot_search_reads_only_boot_tenant_kb(tmp_path, monkeypatch
 
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    db_url = f"sqlite:///{data_dir / 'fleetent.db'}"
 
     async def embed_text(text: str) -> list[float]:
         return [1.0, 0.0]
 
     monkeypatch.setattr(runtime.vector_store, "embed_text", embed_text)
 
-    _init_agent_db_schema(db_url, agent_id="test-agent", tenant_id="tenant-a")
+    _init_agent_db_schema(data_dir, agent_id="test-agent", tenant_id="tenant-a")
 
     await runtime.ingest_text(
         filename="guide.txt",

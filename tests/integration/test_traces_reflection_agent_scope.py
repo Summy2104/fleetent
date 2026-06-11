@@ -59,15 +59,13 @@ def test_agent_app_routes_traces_and_reflection_tables_to_agent_state_db(tmp_pat
 
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    mgmt_db_path = data_dir / "management.db"
 
-    _init_agent_db_schema(f"sqlite:///{mgmt_db_path}", agent_id="agent-1", tenant_id="default")
+    _init_agent_db_schema(data_dir, agent_id="agent-1", tenant_id="default")
 
     agent_state_db_path = data_dir / "default" / "agent-1" / "agent_state.db"
     assert agent_state_db_path.exists()
     assert {"traces", "reflection_reports", "memory_items"} <= _tables(agent_state_db_path)
-    if mgmt_db_path.exists():
-        assert {"traces", "reflection_reports", "memory_items"}.isdisjoint(_tables(mgmt_db_path))
+    assert not (data_dir / "fleetent.db").exists(), "no standalone fleetent.db should be created"
 
 
 def test_agent_app_calls_traces_set_state_db() -> None:

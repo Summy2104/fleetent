@@ -8,7 +8,7 @@ the configuration is wired end-to-end.
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
@@ -48,12 +48,13 @@ async def test_agent_permission_gate_enabled_readable_at_boot(
 
     loaded_agent = None
 
-    async def capture_infra(agent):
+    async def capture_infra(agent, data_dir):
         nonlocal loaded_agent
         loaded_agent = agent
 
     with (
         patch("fleetent.runtime.agent_app._start_infra", capture_infra),
+        patch("fleetent.runtime.agent_app._start_scheduler", AsyncMock(return_value=None)),
         patch("fleetent.skills.scan"),
         patch("fleetent.tools.plugin_loader.load_plugins"),
         patch("fleetent.vector_store.configure_from_active_agent"),

@@ -74,7 +74,6 @@ async def test_agent_boot_routes_memory_vectors_to_agent_scoped_backend(
 ) -> None:
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    management_db_path = data_dir / "management.db"
     embed_text = AsyncMock(
         side_effect=lambda text: [1.0, 0.0] if text == "Agent A updated" else [0.0, 1.0]
     )
@@ -83,7 +82,7 @@ async def test_agent_boot_routes_memory_vectors_to_agent_scoped_backend(
     monkeypatch.setattr(vector_store, "delete", AsyncMock())
 
     _init_agent_db_schema(
-        f"sqlite:///{management_db_path}",
+        data_dir,
         agent_id="agent-a",
         tenant_id="default",
     )
@@ -92,7 +91,7 @@ async def test_agent_boot_routes_memory_vectors_to_agent_scoped_backend(
     await memory_layer.update_user_memory_content("alice", "mem-a", "Agent A updated")
 
     _init_agent_db_schema(
-        f"sqlite:///{management_db_path}",
+        data_dir,
         agent_id="agent-b",
         tenant_id="default",
     )

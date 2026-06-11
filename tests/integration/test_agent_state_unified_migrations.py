@@ -217,6 +217,48 @@ def test_memory_items_indexes_created(tmp_path: Path) -> None:
     assert "idx_memory_items_user_expires" in indexes
 
 
+# ── 7: scheduled_tasks created (retire-standalone-fleetent-db) ───────────────
+
+
+def test_unified_migrations_creates_scheduled_tasks_table(tmp_path: Path) -> None:
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+
+    db = _open(tmp_path)
+    migrate(db, AGENT_STATE_MIGRATIONS)
+    assert "scheduled_tasks" in _tables(db.path)
+
+
+def test_scheduled_tasks_columns_complete(tmp_path: Path) -> None:
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+
+    db = _open(tmp_path)
+    migrate(db, AGENT_STATE_MIGRATIONS)
+    cols = _columns(db.path, "scheduled_tasks")
+    assert cols == {
+        "id",
+        "name",
+        "schedule_kind",
+        "cron_expr",
+        "run_at",
+        "interval_seconds",
+        "anchor",
+        "timezone",
+        "user_id",
+        "message",
+        "session_id",
+        "origin",
+        "deliver",
+        "enabled",
+        "source",
+        "created_at",
+        "last_run_at",
+        "last_status",
+        "last_error",
+        "next_run_at",
+    }
+    assert "agent_name" not in cols
+
+
 def test_fully_migrated_db_raises_schema_too_new_if_given_stale_list(
     tmp_path: Path,
 ) -> None:
