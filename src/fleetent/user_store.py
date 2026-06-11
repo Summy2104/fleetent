@@ -2,7 +2,6 @@
 
 import datetime
 import secrets
-import sqlite3
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -10,6 +9,8 @@ from typing import Any
 
 from fleetent import paths
 
+# Kept for test legacy-shim and module-boundary detection; not used as a DB entry point
+# after retire-raw-sqlite-connect (all connections go through db.py boundary).
 DB_PATH = paths.data_dir() / "management.db"
 
 # Injectable hook for resolving api_keys table entries.
@@ -46,9 +47,36 @@ _FULL_COLS = (
 )
 
 
+def _db():
+    from fleetent.config import Settings
+    from fleetent.db import create_database
+
+    return create_database(Settings().database_url)
+
+
+def _conn():
+    """Compatibility shim for platform stores that import _conn from user_store.
+
+    Returns a sqlite3.Connection that (a) reads DATABASE_URL from Settings (same source
+    as _db()) and (b) sets WAL+busy_timeout via db.py._connect, so callers get the
+    same durability guarantees without needing to migrate to SQLiteDatabase yet.
+    Callers use `with _conn() as conn: conn.execute(...)` — sqlite3.Connection is a
+    context manager that auto-commits / rolls back.
+    """
+    import sqlite3  # noqa: PLC0415 — kept local, this is a shim on the removal path
+
+    from fleetent.config import Settings
+    from fleetent.db import _connect
+
+    db = _db()  # resolves Settings().database_url to a Path
+    db.path.parent.mkdir(parents=True, exist_ok=True)
+    conn = _connect(db.path)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 def create_user(name: str, email: str | None = None, tenant_id: str = "default") -> User:
     """Create a new user with a generated uuid and API key."""
-    _init_db()
     user = User(
         id=str(uuid.uuid4()),
         name=name,
@@ -57,11 +85,18 @@ def create_user(name: str, email: str | None = None, tenant_id: str = "default")
         email=email,
         tenant_id=tenant_id,
     )
-    with _conn() as conn:
+    with _db().transaction() as conn:
         conn.execute(
             "INSERT INTO users (id, name, api_key, created_at, email, tenant_id)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
-            (user.id, user.name, user.api_key, user.created_at, user.email, user.tenant_id),
+            " VALUES (:id, :name, :api_key, :created_at, :email, :tenant_id)",
+            {
+                "id": user.id,
+                "name": user.name,
+                "api_key": user.api_key,
+                "created_at": user.created_at,
+                "email": user.email,
+                "tenant_id": user.tenant_id,
+            },
         )
     return user
 
@@ -74,7 +109,6 @@ def authenticate(plaintext: str) -> tuple[User, dict[str, Any]] | None:
     column for standalone agents or unmigrated keys. Returns None if the key is
     invalid/revoked/expired or the owning user is blocked.
     """
-    _init_db()
     if _api_key_resolver is not None:
         meta = _api_key_resolver(plaintext)
         if meta is not None:
@@ -97,12 +131,10 @@ def get_by_api_key(api_key: str) -> User | None:
 
 
 def _get_by_legacy_key(api_key: str) -> User | None:
-    _init_db()
-    with _conn() as conn:
-        row = conn.execute(
-            f"SELECT {_FULL_COLS} FROM users WHERE api_key = ?", (api_key,)
-        ).fetchone()
-    return User(*row) if row else None
+    row = _db().execute(
+        f"SELECT {_FULL_COLS} FROM users WHERE api_key = :api_key", {"api_key": api_key}
+    ).fetchone()
+    return _row_to_user(row) if row else None
 
 
 def migrate_api_keys() -> list[str]:
@@ -112,27 +144,27 @@ def migrate_api_keys() -> list[str]:
     """
     from fleetent.platform.user_management import api_key_store
 
-    _init_db()
+    db = _db()
     moved: list[str] = []
-    with _conn() as conn:
-        users = conn.execute("SELECT id, api_key FROM users WHERE api_key IS NOT NULL").fetchall()
-        existing = {r[0] for r in conn.execute("SELECT key_hash FROM api_keys").fetchall()}
-    for user_id, api_key in users:
+    users = db.execute("SELECT id, api_key FROM users WHERE api_key IS NOT NULL").fetchall()
+    existing = {r["key_hash"] for r in db.execute("SELECT key_hash FROM api_keys").fetchall()}
+    for row in users:
+        user_id, api_key = row["id"], row["api_key"]
         if api_key_store._hash(api_key) in existing:
             continue
         import datetime as _dt
 
-        with _conn() as conn:
+        with db.transaction() as conn:
             conn.execute(
                 """INSERT OR IGNORE INTO api_keys
                        (user_id, key_hash, prefix, scope, note, created_at, call_count)
-                   VALUES (?, ?, ?, '["*"]', 'migrated', ?, 0)""",
-                (
-                    user_id,
-                    api_key_store._hash(api_key),
-                    api_key[:11],
-                    _dt.datetime.now(_dt.UTC).isoformat(),
-                ),
+                   VALUES (:user_id, :key_hash, :prefix, '["*"]', 'migrated', :created_at, 0)""",
+                {
+                    "user_id": user_id,
+                    "key_hash": api_key_store._hash(api_key),
+                    "prefix": api_key[:11],
+                    "created_at": _dt.datetime.now(_dt.UTC).isoformat(),
+                },
             )
         moved.append(user_id)
     return moved
@@ -140,50 +172,44 @@ def migrate_api_keys() -> list[str]:
 
 def get_by_id(user_id: str) -> User | None:
     """Look up a user by id. Returns None if not found."""
-    _init_db()
-    with _conn() as conn:
-        row = conn.execute(f"SELECT {_FULL_COLS} FROM users WHERE id = ?", (user_id,)).fetchone()
-    return User(*row) if row else None
+    row = _db().execute(
+        f"SELECT {_FULL_COLS} FROM users WHERE id = :id", {"id": user_id}
+    ).fetchone()
+    return _row_to_user(row) if row else None
 
 
 def get_by_email(email: str) -> User | None:
     """Look up a user by email. Returns None if not found."""
-    _init_db()
-    with _conn() as conn:
-        row = conn.execute(f"SELECT {_FULL_COLS} FROM users WHERE email = ?", (email,)).fetchone()
-    return User(*row) if row else None
+    row = _db().execute(
+        f"SELECT {_FULL_COLS} FROM users WHERE email = :email", {"email": email}
+    ).fetchone()
+    return _row_to_user(row) if row else None
 
 
 def list_users() -> list[User]:
     """Return all users ordered by created_at."""
-    _init_db()
-    with _conn() as conn:
-        rows = conn.execute(f"SELECT {_FULL_COLS} FROM users ORDER BY created_at").fetchall()
-    return [User(*row) for row in rows]
+    rows = _db().execute(f"SELECT {_FULL_COLS} FROM users ORDER BY created_at").fetchall()
+    return [_row_to_user(r) for r in rows]
 
 
 def rotate_key(user_id: str) -> User:
     """Generate a new API key for user_id. Raises KeyError if user not found."""
-    _init_db()
     new_key = f"ma-{secrets.token_hex(32)}"
-    with _conn() as conn:
-        updated = conn.execute(
-            f"UPDATE users SET api_key = ? WHERE id = ? RETURNING {_FULL_COLS}",
-            (new_key, user_id),
-        ).fetchone()
-    if updated is None:
+    row = _db().execute(
+        f"UPDATE users SET api_key = :key WHERE id = :id RETURNING {_FULL_COLS}",
+        {"key": new_key, "id": user_id},
+    ).fetchone()
+    if row is None:
         raise KeyError(f"User not found: {user_id}")
-    return User(*updated)
+    return _row_to_user(row)
 
 
 def get_builtin_admin() -> User | None:
     """Return the built-in admin user, if seeded."""
-    _init_db()
-    with _conn() as conn:
-        row = conn.execute(
-            f"SELECT {_FULL_COLS} FROM users WHERE role = 'built_in_admin' LIMIT 1"
-        ).fetchone()
-    return User(*row) if row else None
+    row = _db().execute(
+        f"SELECT {_FULL_COLS} FROM users WHERE role = 'built_in_admin' LIMIT 1"
+    ).fetchone()
+    return _row_to_user(row) if row else None
 
 
 # Sentinel owner for rows backfilled before a built-in admin exists; reassigned to the
@@ -225,11 +251,10 @@ def set_status(user_id: str, status: str) -> None:
 
 
 def set_password(user_id: str, password_hash: str, must_reset: bool = False) -> None:
-    _init_db()
-    with _conn() as conn:
+    with _db().transaction() as conn:
         conn.execute(
-            "UPDATE users SET password_hash = ?, must_reset = ? WHERE id = ?",
-            (password_hash, int(must_reset), user_id),
+            "UPDATE users SET password_hash = :ph, must_reset = :mr WHERE id = :id",
+            {"ph": password_hash, "mr": int(must_reset), "id": user_id},
         )
 
 
@@ -249,7 +274,6 @@ def create_web_user(
     An empty/whitespace email is treated as "no email" (stored as NULL) and is exempt from the
     duplicate check, so several email-less users (e.g. IM-only) can coexist.
     """
-    _init_db()
     from fleetent.governance import blocklist
 
     normalized = email.strip() or None
@@ -291,9 +315,8 @@ def disable_user(user_id: str) -> None:
 
 def delete_user(user_id: str) -> None:
     _guard_not_builtin_admin(user_id, "delete")
-    _init_db()
-    with _conn() as conn:
-        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    with _db().transaction() as conn:
+        conn.execute("DELETE FROM users WHERE id = :id", {"id": user_id})
 
 
 def _guard_not_builtin_admin(user_id: str, op: str) -> None:
@@ -303,9 +326,8 @@ def _guard_not_builtin_admin(user_id: str, op: str) -> None:
 
 
 def _update_field(user_id: str, column: str, value: object) -> None:
-    _init_db()
-    with _conn() as conn:
-        conn.execute(f"UPDATE users SET {column} = ? WHERE id = ?", (value, user_id))
+    with _db().transaction() as conn:
+        conn.execute(f"UPDATE users SET {column} = :val WHERE id = :id", {"val": value, "id": user_id})
 
 
 def get_or_create_im_user(owner_id: str, platform: str, platform_user_id: str) -> "User":
@@ -314,9 +336,19 @@ def get_or_create_im_user(owner_id: str, platform: str, platform_user_id: str) -
     return im.get_or_create(owner_id, platform, platform_user_id)
 
 
-def _conn() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    return sqlite3.connect(DB_PATH)
+def _row_to_user(row: dict) -> User:
+    return User(
+        id=row["id"],
+        name=row["name"],
+        api_key=row["api_key"],
+        created_at=row["created_at"],
+        email=row["email"],
+        role=row["role"],
+        status=row["status"],
+        must_reset=row["must_reset"],
+        password_hash=row["password_hash"],
+        tenant_id=row["tenant_id"],
+    )
 
 
 def _init_db() -> None:
