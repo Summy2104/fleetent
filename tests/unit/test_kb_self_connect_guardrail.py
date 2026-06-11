@@ -1,13 +1,7 @@
-"""Guardrail: identified KB self-connect bypasses must be removed.
+"""Guardrails for KB routing injection.
 
-operations.py had an identified _database() function that called
-create_database(_settings().database_url) without any injection point.
-This bypass is removed in task 4.2 so that KB DB access is
-routed via TenantRouter rather than reaching the global library.
-
-Other KB files (ingest/runtime.py, management/runtime.py, etc.) have
-optional-database fallbacks that are pre-existing technical debt and
-tracked separately; they are NOT in scope for this change.
+The KB read/write path for this change must not self-connect to the global
+management DB or bypass the injected per-tenant vector backend.
 """
 
 from __future__ import annotations
@@ -16,27 +10,28 @@ from pathlib import Path
 
 _KB_ROOT = Path("src/fleetent/knowledge_base")
 
-# Files that must no longer have a create_database(_settings()) call.
-_CLEANED_FILES = [
-    _KB_ROOT / "operations.py",
-]
 
-_SELF_CONNECT_PATTERNS = (
-    "create_database(_settings()",
-    "create_database(Settings()",
-)
+def _source(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
 
 
-def _has_self_connect_pattern(path: Path) -> list[str]:
-    source = path.read_text(encoding="utf-8")
-    return [p for p in _SELF_CONNECT_PATTERNS if p in source]
+def test_runtime_has_no_settings_database_fallback() -> None:
+    source = _source(_KB_ROOT / "runtime.py")
+    assert "create_database(" not in source
+    assert "Settings().database_url" not in source
 
 
-def test_operations_has_no_self_connect_bypass() -> None:
-    """operations.py must not call create_database with a settings URL."""
-    path = _KB_ROOT / "operations.py"
-    hits = _has_self_connect_pattern(path)
-    assert not hits, (
-        f"operations.py still has self-connect bypass: {hits}\n"
-        "Remove _database() and route via TenantRouter."
-    )
+def test_operations_has_no_default_database_bypass() -> None:
+    source = _source(_KB_ROOT / "operations.py")
+    assert "default_database(" not in source
+
+
+def test_graph_search_has_no_settings_database_fallback() -> None:
+    source = _source(_KB_ROOT / "retrieval" / "graph_search.py")
+    assert "create_database(" not in source
+    assert "Settings().database_url" not in source
+
+
+def test_search_has_no_global_vector_search_bypass() -> None:
+    source = _source(_KB_ROOT / "retrieval" / "search.py")
+    assert "vector_store.search(" not in source

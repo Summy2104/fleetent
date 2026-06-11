@@ -1,17 +1,20 @@
 import pytest
 
 from fleetent.config import KnowledgeBaseSettings
-from fleetent.db import create_database
-from tests.integration.test_migrations import apply_migrations
+from fleetent.db import SQLiteDatabase, create_database
+from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
+from fleetent.schema_migrations import migrate
+from fleetent.vector_store import SearchResult
 
 
 def _patch_runtime_database(monkeypatch, tmp_path):
     from fleetent.knowledge_base import runtime
 
     db_path = tmp_path / "knowledge.db"
-    apply_migrations(db_path)
+    migrate(SQLiteDatabase(path=db_path), KB_MIGRATIONS)
     database = create_database(f"sqlite:///{db_path}")
     monkeypatch.setattr(runtime, "_database", lambda: database)
+    monkeypatch.setattr(runtime, "_kb_vector_backend", None)
     return database
 
 
@@ -21,6 +24,32 @@ def _patch_runtime_settings(monkeypatch, **knowledge_base):
     config = KnowledgeBaseSettings(**knowledge_base)
     monkeypatch.setattr(runtime, "_kb_config", lambda: config)
     return config
+
+
+def _patch_runtime_vector_backend(monkeypatch, search_impl):
+    from fleetent.knowledge_base import runtime
+
+    class FakeVectorBackend:
+        async def upsert(self, id: str, vector: list[float], namespace: str) -> None:
+            return None
+
+        async def search(
+            self, vector: list[float], namespace: str, limit: int = 10
+        ) -> list[SearchResult]:
+            return await search_impl(vector, namespace, limit)
+
+        async def delete(self, id: str, namespace: str) -> None:
+            return None
+
+        async def clear_namespace(self, namespace: str) -> None:
+            return None
+
+    monkeypatch.setattr(runtime, "_kb_vector_backend", FakeVectorBackend())
+    monkeypatch.setattr(runtime.vector_store, "embed_text", _embed_text)
+
+
+async def _embed_text(text: str) -> list[float]:
+    return [1.0, 0.0]
 
 
 async def test_ingest_text_creates_document_and_deterministic_chunks(monkeypatch, tmp_path):
@@ -187,10 +216,10 @@ async def test_ingest_parsed_preserves_section_metadata_on_chunks(monkeypatch, t
     )
     document = await runtime.ingest_parsed(parsed, tenant_id="tenant-a", kb_id="global")
 
-    async def vector_search(query: str, namespace: str, limit: int):
+    async def vector_search(vector: list[float], namespace: str, limit: int):
         return [SearchResult(id=f"{document.id}:chunk:0", score=0.9)]
 
-    monkeypatch.setattr(runtime.vector_store, "search", vector_search)
+    _patch_runtime_vector_backend(monkeypatch, vector_search)
 
     results = await runtime.search("setup", tenant_id="tenant-a", kb_ids=["global"])
 
@@ -250,17 +279,17 @@ async def test_search_queries_vector_store_by_knowledge_namespace(monkeypatch, t
         tenant_id="tenant-a",
         kb_id="global",
     )
-    calls: list[tuple[str, str, int]] = []
+    calls: list[tuple[list[float], str, int]] = []
 
-    async def vector_search(query: str, namespace: str, limit: int):
-        calls.append((query, namespace, limit))
+    async def vector_search(vector: list[float], namespace: str, limit: int):
+        calls.append((vector, namespace, limit))
         return [SearchResult(id=f"{document.id}:chunk:0", score=0.75)]
 
-    monkeypatch.setattr(runtime.vector_store, "search", vector_search)
+    _patch_runtime_vector_backend(monkeypatch, vector_search)
 
     results = await runtime.search("handbook", tenant_id="tenant-a", kb_ids=["global"], limit=3)
 
-    assert calls == [("handbook", "kb:tenant-a:global", 3)]
+    assert calls == [([1.0, 0.0], "kb:tenant-a:global", 3)]
     assert [(chunk.id, chunk.filename, chunk.content, chunk.score) for chunk in results] == [
         (f"{document.id}:chunk:0", "guide.txt", "tenant handbook", 0.75)
     ]
@@ -287,7 +316,7 @@ async def test_search_merges_multiple_kbs_with_stable_ordering(monkeypatch, tmp_
         kb_id="team",
     )
 
-    async def vector_search(query: str, namespace: str, limit: int):
+    async def vector_search(vector: list[float], namespace: str, limit: int):
         if namespace == "kb:tenant-a:global":
             return [
                 SearchResult(id=f"{global_doc.id}:chunk:1", score=0.9),
@@ -297,7 +326,7 @@ async def test_search_merges_multiple_kbs_with_stable_ordering(monkeypatch, tmp_
             return [SearchResult(id=f"{team_doc.id}:chunk:0", score=0.95)]
         return []
 
-    monkeypatch.setattr(runtime.vector_store, "search", vector_search)
+    _patch_runtime_vector_backend(monkeypatch, vector_search)
 
     results = await runtime.search(
         "query", tenant_id="tenant-a", kb_ids=["global", "team"], limit=3
@@ -331,14 +360,14 @@ async def test_search_is_tenant_isolated(monkeypatch, tmp_path):
         kb_id="global",
     )
 
-    async def vector_search(query: str, namespace: str, limit: int):
+    async def vector_search(vector: list[float], namespace: str, limit: int):
         assert namespace == "kb:tenant-a:global"
         return [
             SearchResult(id=f"{tenant_a_doc.id}:chunk:0", score=0.8),
             SearchResult(id=f"{tenant_b_doc.id}:chunk:0", score=0.99),
         ]
 
-    monkeypatch.setattr(runtime.vector_store, "search", vector_search)
+    _patch_runtime_vector_backend(monkeypatch, vector_search)
 
     results = await runtime.search("shared", tenant_id="tenant-a", kb_ids=["global"], limit=10)
 
@@ -464,10 +493,10 @@ async def test_hybrid_search_merges_vector_and_keyword_candidates(monkeypatch, t
         kb_id="global",
     )
 
-    async def vector_search(query: str, namespace: str, limit: int):
+    async def vector_search(vector: list[float], namespace: str, limit: int):
         return [SearchResult(id=f"{vector_doc.id}:chunk:0", score=0.7)]
 
-    monkeypatch.setattr(runtime.vector_store, "search", vector_search)
+    _patch_runtime_vector_backend(monkeypatch, vector_search)
 
     results = await runtime.search(
         "ZX-404",
@@ -504,13 +533,13 @@ async def test_hybrid_search_deduplicates_and_boosts_dual_matches(monkeypatch, t
         kb_id="global",
     )
 
-    async def vector_search(query: str, namespace: str, limit: int):
+    async def vector_search(vector: list[float], namespace: str, limit: int):
         return [
             SearchResult(id=f"{vector_only_doc.id}:chunk:0", score=0.99),
             SearchResult(id=f"{dual_doc.id}:chunk:0", score=0.2),
         ]
 
-    monkeypatch.setattr(runtime.vector_store, "search", vector_search)
+    _patch_runtime_vector_backend(monkeypatch, vector_search)
 
     results = await runtime.search(
         "ERROR500",
@@ -547,10 +576,10 @@ async def test_hybrid_search_degrades_when_one_side_is_empty(monkeypatch, tmp_pa
         kb_id="global",
     )
 
-    async def vector_empty(query: str, namespace: str, limit: int):
+    async def vector_empty(vector: list[float], namespace: str, limit: int):
         return []
 
-    monkeypatch.setattr(runtime.vector_store, "search", vector_empty)
+    _patch_runtime_vector_backend(monkeypatch, vector_empty)
     keyword_results = await runtime.search(
         "KWD123",
         tenant_id="tenant-a",
@@ -559,10 +588,10 @@ async def test_hybrid_search_degrades_when_one_side_is_empty(monkeypatch, tmp_pa
         mode="hybrid",
     )
 
-    async def vector_only(query: str, namespace: str, limit: int):
+    async def vector_only(vector: list[float], namespace: str, limit: int):
         return [SearchResult(id=f"{vector_doc.id}:chunk:0", score=0.8)]
 
-    monkeypatch.setattr(runtime.vector_store, "search", vector_only)
+    _patch_runtime_vector_backend(monkeypatch, vector_only)
     vector_results = await runtime.search(
         "no-keyword-hit",
         tenant_id="tenant-a",
@@ -605,7 +634,7 @@ async def test_hybrid_rerank_uses_public_provider_results_to_reorder(monkeypatch
             calls.append((documents, top_n))
             return [RerankResult(index=1, score=0.98), RerankResult(index=0, score=0.10)]
 
-    async def vector_search(query: str, namespace: str, limit: int):
+    async def vector_search(vector: list[float], namespace: str, limit: int):
         assert limit == runtime._rerank_candidate_limit(2)
         return [
             SearchResult(id=f"{distractor_doc.id}:chunk:0", score=0.95),
@@ -614,7 +643,7 @@ async def test_hybrid_rerank_uses_public_provider_results_to_reorder(monkeypatch
 
     settings = Settings(rerank=RerankSettings(backend="disabled"))
     monkeypatch.setattr(runtime, "_settings", lambda: settings)
-    monkeypatch.setattr(runtime.vector_store, "search", vector_search)
+    _patch_runtime_vector_backend(monkeypatch, vector_search)
     monkeypatch.setattr(
         runtime.rerank_runtime,
         "create_rerank_provider",
@@ -678,14 +707,14 @@ async def test_hybrid_rerank_provider_failure_returns_original_hybrid_order(
         ) -> list[object]:
             raise RerankProviderError("provider unavailable")
 
-    async def vector_search(query: str, namespace: str, limit: int):
+    async def vector_search(vector: list[float], namespace: str, limit: int):
         return [
             SearchResult(id=f"{first_doc.id}:chunk:0", score=0.95),
             SearchResult(id=f"{second_doc.id}:chunk:0", score=0.70),
         ]
 
     monkeypatch.setattr(runtime, "_settings", lambda: Settings())
-    monkeypatch.setattr(runtime.vector_store, "search", vector_search)
+    _patch_runtime_vector_backend(monkeypatch, vector_search)
     baseline = await runtime.search(
         "ZX-888",
         tenant_id="tenant-a",

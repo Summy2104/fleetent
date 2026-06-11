@@ -92,3 +92,49 @@ def test_traces_and_reflection_land_in_agent_state_db(tmp_path) -> None:
     assert "reflection_reports" in agent_tables
     assert "sessions" in agent_tables
     assert "memory_items" in agent_tables
+
+
+async def test_agent_boot_search_reads_only_boot_tenant_kb(tmp_path, monkeypatch) -> None:
+    from fleetent.knowledge_base import runtime
+    from fleetent.runtime.agent_app import _init_agent_db_schema
+    from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    db_url = f"sqlite:///{data_dir / 'fleetent.db'}"
+
+    async def embed_text(text: str) -> list[float]:
+        return [1.0, 0.0]
+
+    monkeypatch.setattr(runtime.vector_store, "embed_text", embed_text)
+
+    _init_agent_db_schema(db_url, agent_id="test-agent", tenant_id="tenant-a")
+
+    await runtime.ingest_text(
+        filename="guide.txt",
+        content="tenant scoped handbook",
+        tenant_id="tenant-a",
+        kb_id="global",
+    )
+
+    tenant_a_results = await runtime.search(
+        "handbook",
+        tenant_id="tenant-a",
+        kb_ids=["global"],
+        limit=5,
+    )
+    assert [chunk.tenant_id for chunk in tenant_a_results] == ["tenant-a"]
+    assert (data_dir / "tenant-a" / "kb_vectors.db").exists()
+
+    router = TenantRouter(SQLiteTenantBackend(data_dir=data_dir))
+    tenant_b_scope = router.tenant_scope("tenant-b")
+    runtime.set_database(tenant_b_scope.open_kb_db([]))
+    runtime.set_vector_backend(tenant_b_scope.kb_vector_backend)
+
+    tenant_b_results = await runtime.search(
+        "handbook",
+        tenant_id="tenant-b",
+        kb_ids=["global"],
+        limit=5,
+    )
+    assert tenant_b_results == []

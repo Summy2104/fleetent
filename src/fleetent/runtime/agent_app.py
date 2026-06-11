@@ -183,6 +183,7 @@ def _init_agent_db_schema(database_url: str, *, agent_id: str, tenant_id: str = 
     from fleetent.db import create_database
     from fleetent.governance import approval_allowlist_store as allowlist_store
     from fleetent.governance import approval_store
+    from fleetent.knowledge_base import runtime as kb_runtime
     from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
     from fleetent.memory import shared as shared_memory
     from fleetent.memory import store as memory_store
@@ -200,7 +201,9 @@ def _init_agent_db_schema(database_url: str, *, agent_id: str, tenant_id: str = 
     data_dir = db.path.parent
     router = TenantRouter(SQLiteTenantBackend(data_dir=data_dir))
     tenant_scope = router.tenant_scope(tenant_id)
-    tenant_scope.open_kb_db(KB_MIGRATIONS)
+    kb_db = tenant_scope.open_kb_db(KB_MIGRATIONS)
+    kb_runtime.set_database(kb_db)
+    kb_runtime.set_vector_backend(tenant_scope.kb_vector_backend)
     sm_db = tenant_scope.open_shared_memory_db(SHARED_MEMORY_MIGRATIONS)
     shared_memory.set_shared_memory_db(
         sm_db,

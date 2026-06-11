@@ -57,13 +57,14 @@ def test_entity_name_normalization_trims_casefolds_and_collapses_whitespace():
 
 
 def test_entity_store_upsert_merges_within_kb_and_keeps_kbs_separate(tmp_path):
-    from fleetent.db import create_database
+    from fleetent.db import SQLiteDatabase, create_database
+    from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
     from fleetent.knowledge_base.extraction import ExtractedEntity
     from fleetent.knowledge_base.extraction_store import KnowledgeEntityStore
-    from tests.integration.test_migrations import apply_migrations
+    from fleetent.schema_migrations import migrate
 
     db_path = tmp_path / "knowledge.db"
-    apply_migrations(db_path)
+    migrate(SQLiteDatabase(path=db_path), KB_MIGRATIONS)
     store = KnowledgeEntityStore(create_database(f"sqlite:///{db_path}"))
 
     first = store.upsert_entity("tenant-a", "support", ExtractedEntity("customer", "Customer A"))

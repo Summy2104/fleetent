@@ -244,7 +244,6 @@ async def run_entity_extraction(
                 tenant_id=tenant_id,
                 kb_id=kb_id,
                 document_id=current_document_id,
-                run_id=run.id,
                 entities=document_entities,
                 relations=document_relations,
             )
@@ -262,7 +261,7 @@ async def run_entity_extraction(
     else:
         status = "succeeded"
     return store.finish_run(
-        run.id,
+        run,
         status=status,
         documents_scanned=documents_scanned,
         chunks_scanned=chunks_scanned,

@@ -2,18 +2,20 @@ from __future__ import annotations
 
 import json
 
-from fleetent.db import create_database
+from fleetent.db import SQLiteDatabase, create_database
 from fleetent.knowledge_base.config import KnowledgeConfigSnapshot
-from tests.integration.test_migrations import apply_migrations
+from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
+from fleetent.schema_migrations import migrate
 
 
 def _patch_operations_database(monkeypatch, tmp_path):
-    from fleetent.knowledge_base import operations
+    from fleetent.knowledge_base import runtime
 
     db_path = tmp_path / "connectors.db"
-    apply_migrations(db_path)
+    migrate(SQLiteDatabase(path=db_path), KB_MIGRATIONS)
     database = create_database(f"sqlite:///{db_path}")
-    monkeypatch.setattr(operations, "default_database", lambda: database)
+    monkeypatch.setattr(runtime, "_kb_db", database)
+    monkeypatch.setattr(runtime, "_kb_vector_backend", None)
     return database
 
 
@@ -63,7 +65,7 @@ def test_never_run_connector_status_is_stable(monkeypatch, tmp_path):
 
 
 def test_connector_status_overwrites_previous_status(monkeypatch, tmp_path):
-    _patch_operations_database(monkeypatch, tmp_path)
+    database = _patch_operations_database(monkeypatch, tmp_path)
     from fleetent.knowledge_base import operations
 
     operations.record_connector_status(
@@ -85,11 +87,9 @@ def test_connector_status_overwrites_previous_status(monkeypatch, tmp_path):
         error=None,
     )
 
-    row = (
-        operations.default_database()
-        .execute("SELECT last_status, last_summary_json FROM knowledge_connector_status")
-        .fetchone()
-    )
+    row = database.execute(
+        "SELECT last_status, last_summary_json FROM knowledge_connector_status"
+    ).fetchone()
 
     assert row is not None
     assert row["last_status"] == "sync_succeeded"
@@ -97,7 +97,7 @@ def test_connector_status_overwrites_previous_status(monkeypatch, tmp_path):
 
 
 def test_connector_status_redacts_summary_and_error(monkeypatch, tmp_path):
-    _patch_operations_database(monkeypatch, tmp_path)
+    database = _patch_operations_database(monkeypatch, tmp_path)
     from fleetent.knowledge_base import operations
 
     operations.record_connector_status(
@@ -110,11 +110,9 @@ def test_connector_status_redacts_summary_and_error(monkeypatch, tmp_path):
         error="credential secret-token failed",
     )
 
-    row = (
-        operations.default_database()
-        .execute("SELECT last_summary_json, last_error FROM knowledge_connector_status")
-        .fetchone()
-    )
+    row = database.execute(
+        "SELECT last_summary_json, last_error FROM knowledge_connector_status"
+    ).fetchone()
 
     assert row is not None
     assert "secret-token" not in row["last_summary_json"]

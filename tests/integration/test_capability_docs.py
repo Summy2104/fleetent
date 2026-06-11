@@ -52,9 +52,8 @@ def test_capability_docs_describe_entity_extraction():
 
     for content in [kb_doc, roadmap]:
         assert "entity extraction" in content
-        assert "kb_extraction_runs" in content
         assert "kb_entities" in content
-        assert "explicit run" in content
+        assert "graph evidence" in content
 
 
 def test_capability_docs_describe_graph_search_scope():

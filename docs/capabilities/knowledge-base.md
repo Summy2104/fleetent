@@ -6,7 +6,7 @@
 
 企业文档知识的导入、索引与检索，让 agent 能够基于企业内部文档回答问题。
 
-**当前负责**：手动 text / markdown 内容导入，plain text / Markdown / lightweight HTML / PDF / DOCX / PPTX / XLSX 解析，local directory、Google Drive folder 与 Confluence Cloud 手动同步、Google Sheets / Google Slides export 后接入 parser registry、connector list/check/status/sync 操作入口、sync planner、deterministic chunking、向量索引构建、SQLite FTS5/BM25 关键词索引、vector / keyword / hybrid 检索模式、entity extraction schema + explicit run、独立于 search 的 `graph_search` depth 0/1 graph evidence 检索、规则型 `plan_knowledge_search` / `execute_knowledge_search_plan` 检索策略 API、供 reflection 生成 `run_kb_reflection_report` 只读报告的 public signals、按 tenant + knowledge base 隔离召回相关文档片段，向 vector_store reindex 暴露当前可索引 chunks，以及手动运行的 deterministic retrieval evaluation / combined memory+KB embedding evaluation。
+**当前负责**：手动 text / markdown 内容导入，plain text / Markdown / lightweight HTML / PDF / DOCX / PPTX / XLSX 解析，local directory、Google Drive folder 与 Confluence Cloud 手动同步、Google Sheets / Google Slides export 后接入 parser registry、connector list/check/status/sync 操作入口、sync planner、deterministic chunking、向量索引构建、SQLite FTS5/BM25 关键词索引、vector / keyword / hybrid 检索模式、entity extraction schema + graph evidence、独立于 search 的 `graph_search` depth 0/1 graph evidence 检索、规则型 `plan_knowledge_search` / `execute_knowledge_search_plan` 检索策略 API、供 reflection 生成 `run_kb_reflection_report` 只读报告的 public signals、按 tenant + knowledge base 隔离召回相关文档片段，向 vector_store reindex 暴露当前可索引 chunks，以及手动运行的 deterministic retrieval evaluation / combined memory+KB embedding evaluation。
 
 **后续负责**：第三方数据源接入与文档获取、更丰富的文档解析、实体与关系提取、图谱存储。
 
@@ -19,7 +19,7 @@
 **模块归属**：
 - owning package：`fleetent.knowledge_base`
 - public API：`parse_text(filename, content)`、`parse_markdown(filename, content)`、`parse_html(filename, content)`、`parse_pdf(filename, content)`、`parse_docx(filename, content)`、`parse_pptx(filename, content)`、`parse_xlsx(filename, content)`、`parse_document(filename, content, mime_type)`、`ingest_text(filename, content, tenant_id, kb_id, source, source_url)`、`ingest_parsed(parsed, tenant_id, kb_id, source, source_url)`、`search(query, tenant_id, kb_ids, limit, mode)`、`KnowledgeSearchOptions`、`KnowledgeSearchPlan`、`KnowledgeSearchStep`、`plan_knowledge_search(query, options)`、`execute_knowledge_search_plan(plan)`、`delete(document_id)`、`archive(document_id)`、`iter_indexable_knowledge_chunks(tenant_id, kb_id)`、`ConnectorSummary`、`ConnectorCheckResult`、`ConnectorSyncResult`、`ConnectorStatus`、`list_configured_connectors()`、`check_connector(connector_id)`、`run_connector_sync(connector_id, dry_run)`、`get_connector_status(connector_id)`、`DocumentRef`、`DataSource`、`LocalDirectoryDataSource`、`LocalDirectorySourceConfig`、`GoogleDriveConnectorConfig`、`ConfluenceConnectorConfig`、`SyncAction`、`SyncPlan`、`SyncPlanItem`、`SyncPlanSummary`、`SyncExecutionSummary`、`plan_local_directory_sync(config, tenant_id, kb_id)`、`execute_sync_plan(plan)`、`sync_local_directory(config, tenant_id, kb_id)`、`plan_google_drive_sync(config, client)`、`sync_google_drive(config, client)`、`plan_confluence_sync(config, client)`、`sync_confluence(config, client)`
-- owned tables（per-tenant KB 关系库，嵌入式 Y 迁移）：`knowledge_bases`、`knowledge_documents`、`knowledge_chunks`、`knowledge_chunks_fts`、`knowledge_source_states`、`knowledge_connector_status`（agent↔KB 绑定不在此——唯一真相源是管理库的 `agent_kbs`，Alembic）
+- owned tables（per-tenant KB 关系库，嵌入式 Y 迁移）：`knowledge_bases`、`knowledge_documents`、`knowledge_chunks`、`knowledge_chunks_fts`、`knowledge_source_states`、`knowledge_connector_status`、`kb_entities`、`kb_entity_mentions`、`kb_relations`（agent↔KB 绑定不在此——唯一真相源是管理库的 `agent_kbs`，Alembic）
 - config namespace：Platform `knowledge.*` / Agent `knowledge_base.*` binding and retrieval policy
 
 ## 关键流程
@@ -130,19 +130,6 @@ knowledge_connector_status (
   updated_at         DATETIME NOT NULL
 )
 
--- entity extraction 显式运行摘要；不由 ingest / sync 自动触发
-kb_extraction_runs (
-  id TEXT PRIMARY KEY,
-  tenant_id TEXT,
-  kb_id TEXT,
-  document_id TEXT,
-  extractor TEXT,
-  status TEXT,
-  documents_scanned INTEGER,
-  chunks_scanned INTEGER,
-  failed_count INTEGER
-)
-
 -- tenant + KB scoped canonical entities
 kb_entities (
   id TEXT PRIMARY KEY,
@@ -155,12 +142,14 @@ kb_entities (
 )
 
 kb_entity_mentions / kb_relations 保存 mention 与 relation 的 chunk evidence。
+
+entity extraction 的 run 摘要不再持久化到 KB 表；调用方同步拿到 summary，如需审计走 observability trace event。
 ```
 
-向量 embedding 存储在 vector_store，namespace 格式为 `kb:{tenant_id}:{kb_id}`：
+向量 embedding 存储在 per-tenant `kb_vectors.db`，namespace 格式为 `kb:{tenant_id}:{kb_id}`：
 - chunk 向量：以 `chunk.id` 为 key
 
-知识库身份由 `tenant_id + kb_id` 共同决定。当前默认 `tenant_id="default"`、`kb_id="global"`；检索时在指定 namespace 内分别查询后合并排序。
+知识库身份由 `tenant_id + kb_id` 共同决定。当前默认 `tenant_id="default"`、`kb_id="global"`；platform ingest/sync 写入本 tenant 的 `kb.db` / `kb_vectors.db`，agent retrieval / `graph_search` 只读本 tenant 的同名文件。
 
 ## 接口定义
 

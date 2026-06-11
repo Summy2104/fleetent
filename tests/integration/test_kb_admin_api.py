@@ -4,6 +4,8 @@ Engine seams are monkeypatched so the tests exercise the management behaviour
 (uniqueness, binding protection, role guards, audit, seam pass-through).
 """
 
+import sqlite3
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -44,6 +46,9 @@ def host_wired_client(tmp_path, monkeypatch):
 
     indexed_chunks: dict[str, dict[str, str]] = {}
 
+    async def embed_text(text: str) -> list[float]:
+        return [1.0, 0.0]
+
     async def upsert(chunk_id: str, content: str, namespace: str) -> None:
         indexed_chunks[chunk_id] = {"content": content, "namespace": namespace}
 
@@ -58,6 +63,7 @@ def host_wired_client(tmp_path, monkeypatch):
         if indexed_chunks.get(chunk_id, {}).get("namespace") == namespace:
             indexed_chunks.pop(chunk_id, None)
 
+    monkeypatch.setattr(vector_store, "embed_text", embed_text)
     monkeypatch.setattr(vector_store, "upsert", upsert)
     monkeypatch.setattr(vector_store, "search", search)
     monkeypatch.setattr(vector_store, "delete", delete)
@@ -233,6 +239,58 @@ def test_host_wired_import_rejects_missing_kb(host_wired_client):
     listed = host_wired_client.get("/admin/kb", headers=_hdr(token))
     assert listed.status_code == 200
     assert listed.json() == []
+
+
+def test_host_wired_import_writes_tenant_scoped_kb_files(tmp_path, monkeypatch):
+    db_path = tmp_path / "management.db"
+    apply_migrations(db_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("KNOWLEDGE_BASE__CHUNK_SIZE", "200")
+    monkeypatch.setenv("KNOWLEDGE_BASE__CHUNK_OVERLAP", "0")
+
+    async def embed_text(text: str) -> list[float]:
+        return [1.0, 0.0]
+
+    monkeypatch.setattr(vector_store, "embed_text", embed_text)
+    app = FastAPI()
+    app.include_router(api.router)
+    client = TestClient(app, raise_server_exceptions=True)
+    token, _ = _session_for("admin")
+
+    created = client.post(
+        "/admin/kb",
+        headers=_hdr(token),
+        json={"kb_id": "support", "description": "Support handbook", "tenant_id": "tenant-a"},
+    )
+    assert created.status_code == 200
+
+    imported = client.post(
+        "/admin/kb/support/documents",
+        headers=_hdr(token),
+        json={
+            "source": "support-guide.md",
+            "document_format": "markdown",
+            "content": "# Reset Guide\n\nRestart the billing service when ERR42 appears.",
+            "tenant_id": "tenant-a",
+        },
+    )
+    assert imported.status_code == 200
+
+    tenant_kb_db = tmp_path / "tenant-a" / "kb.db"
+    tenant_kb_vectors = tmp_path / "tenant-a" / "kb_vectors.db"
+    assert tenant_kb_db.exists()
+    assert tenant_kb_vectors.exists()
+
+    with sqlite3.connect(db_path) as conn:
+        management_tables = {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        assert "knowledge_documents" not in management_tables
+    with sqlite3.connect(tenant_kb_db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM knowledge_documents").fetchone()[0] == 1
+    with sqlite3.connect(tenant_kb_vectors) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM vector_items").fetchone()[0] > 0
 
 
 def test_import_document_passes_through(client, monkeypatch):  # 场景 103

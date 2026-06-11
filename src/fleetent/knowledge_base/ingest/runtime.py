@@ -8,6 +8,7 @@ from fleetent import vector_store
 from fleetent.config import KnowledgeBaseSettings, Settings
 from fleetent.db import SQLiteDatabase, create_database
 from fleetent.knowledge_base.core import KnowledgeChunk, KnowledgeDocument, KnowledgeStore
+from fleetent.vector_store.backend import VectorBackend
 
 
 class _ParsedSectionLike(Protocol):
@@ -180,7 +181,7 @@ async def _ingest_chunks(
     store.insert_chunks(resolved_chunks)
     namespace = vector_store.knowledge_namespace(document.tenant_id, document.kb_id)
     for chunk in resolved_chunks:
-        await vector_store.upsert(chunk.id, chunk.content, namespace)
+        await _upsert_chunk(namespace, chunk)
     return document
 
 
@@ -190,9 +191,9 @@ async def delete(document_id: str, database: SQLiteDatabase | None = None) -> No
     store = KnowledgeStore(_database_or_default(database))
     chunks = store.get_document_chunks(document_id)
     for chunk in chunks:
-        await vector_store.delete(
-            chunk.id,
+        await _delete_chunk(
             vector_store.knowledge_namespace(chunk.tenant_id, chunk.kb_id),
+            chunk.id,
         )
     store.delete_document(document_id)
 
@@ -210,9 +211,9 @@ async def delete_document(
         return False
     chunks = store.get_scoped_document_chunks(tenant_id, kb_id, document_id)
     for chunk in chunks:
-        await vector_store.delete(
-            chunk.id,
+        await _delete_chunk(
             vector_store.knowledge_namespace(chunk.tenant_id, chunk.kb_id),
+            chunk.id,
         )
     return store.delete_scoped_document(tenant_id, kb_id, document_id)
 
@@ -223,9 +224,9 @@ async def archive(document_id: str, database: SQLiteDatabase | None = None) -> N
     store = KnowledgeStore(_database_or_default(database))
     chunks = store.get_document_chunks(document_id)
     for chunk in chunks:
-        await vector_store.delete(
-            chunk.id,
+        await _delete_chunk(
             vector_store.knowledge_namespace(chunk.tenant_id, chunk.kb_id),
+            chunk.id,
         )
     store.archive_document(document_id)
 
@@ -277,3 +278,28 @@ def _database() -> SQLiteDatabase:
 
 def _database_or_default(database: SQLiteDatabase | None) -> SQLiteDatabase:
     return database if database is not None else _database()
+
+
+async def _upsert_chunk(namespace: str, chunk: KnowledgeChunk) -> None:
+    backend = _injected_vector_backend()
+    if backend is None:
+        await vector_store.upsert(chunk.id, chunk.content, namespace)
+        return
+    await backend.upsert(chunk.id, await vector_store.embed_text(chunk.content), namespace)
+
+
+async def _delete_chunk(namespace: str, chunk_id: str) -> None:
+    backend = _injected_vector_backend()
+    if backend is None:
+        await vector_store.delete(chunk_id, namespace)
+        return
+    await backend.delete(chunk_id, namespace)
+
+
+def _injected_vector_backend() -> VectorBackend | None:
+    from fleetent.knowledge_base import runtime
+
+    try:
+        return runtime._vector_backend()
+    except RuntimeError:
+        return None

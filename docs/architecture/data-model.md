@@ -179,10 +179,10 @@ erDiagram
 ### 3.4 共享记忆库（嵌入式 Y · `shared_memory.db` · agent 侧 · per-tenant）
 `shared_memory_items`(team/tenant scope 共享记忆，多 agent 写的真相源)
 
-### 3.5 KB 关系库（嵌入式 Y · `kb.db` · agent 侧 · per-tenant）
-**已在本库（`core/migrations.py` 的 Y，核心 5 表）**：`knowledge_bases`(PK `(tenant_id,kb_id)`) · `knowledge_documents` · `knowledge_chunks`(+`chunks_fts`) · `knowledge_source_states`。
+### 3.5 KB 关系库（嵌入式 Y · `kb.db` · agent / ingest 侧 · per-tenant）
+**已在本库（`knowledge_base/core/migrations.py` 的 Y）**：`knowledge_bases`(PK `(tenant_id,kb_id)`) · `knowledge_documents` · `knowledge_chunks`(+`chunks_fts`) · `knowledge_source_states` · `kb_entities` · `kb_entity_mentions` · `kb_relations` · `knowledge_connector_status`。
 
-> ⚠️ **仍在管理库（alembic）、尚未 lift 进本 per-tenant 库**：知识图谱 `kb_entities` / `kb_entity_mentions` / `kb_relations`、抽取 `kb_extraction_runs`、`knowledge_connector_status`（建于 alembic 013/026，未被 drop）。当年 KB lift 只覆盖核心 5 表，这几张留在管理库（跨主体，与 per-tenant 隔离不符）——**第二处 #3 未切干净**，与 `budget_usage` 同类，待后续 change 归位。KB reflection report 现已统一落 agent 自己的 `agent_state.db.reflection_reports(domain=knowledge_base)`；KB remediation 仍在平台 / 摄取面后续 change 处理。下方 ER 为 **KB 概念模型/目标归属**，物理现状以本注为准。
+> `kb_extraction_runs` 已移除：entity extraction 的 run 摘要只同步返回给调用方，若要审计走 observability trace event，不再持久化 KB 业务表。`kb_reflection_reports` 落点待确认（alembic 027 add 后又 drop）。
 
 ```mermaid
 erDiagram
@@ -193,17 +193,14 @@ erDiagram
   kb_entities ||--o{ kb_entity_mentions : "mention"
   knowledge_chunks ||--o{ kb_entity_mentions : "出处"
   kb_entities ||--o{ kb_relations : "source/target"
-  knowledge_bases ||--o{ kb_extraction_runs : "explicit run"
   knowledge_bases ||--o{ knowledge_source_states : "同步态"
   knowledge_bases ||--o{ knowledge_connector_status : "connector 态"
 ```
 
-> ingest 单写、agent/retrieval 只读；agent 可用的 KB 由 `agent_kbs`（管理库，绑定真相源，经 `kb_id` 跨库引用本库）materialize 进 `agent.yaml`，运行时读配置不查表。
+> KB 是 tenant 共享资源：platform ingest/sync 写本 tenant 的 `kb.db` / `kb_vectors.db`，agent retrieval/graph_search 只读本 tenant 的同名文件。agent 可用的 KB 由 `agent_kbs`（管理库，绑定真相源，经 `kb_id` 跨库引用本库）materialize 进 `agent.yaml`，运行时读配置不查表。
 
 ### 3.6 向量底座（独立 substrate · 按家族路由）
 `vector_items`（每个 scope 一个向量库文件：`mem:`→当前 agent 的 `agent_vectors.db`，同库内再按 `mem:{user_id}` 分区；`shared:`→共享记忆 `shared_memory_vectors.db`；`kb:`→KB `kb_vectors.db`）
-
-> ⚠️ **接线现状(as-built)**: `mem:` 与 `shared:` 已接到各自 scope 的注入向量后端；**`kb:` 仍走全局 `vector_store` + namespace**（`KbScope.kb_vector_backend` 已提供但未注入），待 `wire-kb-tenant-routing` 落地后此注记移除。
 
 ## 4. 多租户与隔离
 

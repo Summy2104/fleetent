@@ -16,6 +16,7 @@ Auth mirrors user_admin_api: reads allow viewer+admin, writes require admin.
 
 import asyncio
 import re
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
 
@@ -23,13 +24,14 @@ import yaml
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
-from fleetent import auth, user_store
+from fleetent import audit_log, auth, user_store
+from fleetent import knowledge_base as kb_runtime
 from fleetent.config import KnowledgeBaseSettings, Settings
 from fleetent.db import SQLiteDatabase, create_database
-from fleetent import audit_log
 from fleetent.knowledge_base import operations as knowledge_base
 from fleetent.knowledge_base import parsers as legacy_parsers
 from fleetent.knowledge_base.core import KnowledgeChunk, KnowledgeStore
+from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
 from fleetent.knowledge_base.ingest.config import as_knowledge_base_settings
 from fleetent.knowledge_base.ingest.connectors.sync import (
     LocalDirectorySourceConfig,
@@ -62,6 +64,7 @@ from fleetent.knowledge_base.retrieval.search import SearchMode
 from fleetent.knowledge_base.retrieval.search import search as search_kb
 from fleetent.platform.agent_lifecycle import secret_store
 from fleetent.platform.knowledge_base_management import agent_kbs_store, kb_connector_store
+from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
 
 router = APIRouter(prefix="/admin/kb")
 
@@ -79,7 +82,7 @@ _VALID_MODES = {"vector", "keyword", "hybrid"}
 def kb_engine_list(tenant_id: str) -> list[dict[str, Any]]:
     """List KBs (kb_id/description/doc_count/chunk_count/last_import/archived)."""
     rows: list[dict[str, Any]] = []
-    for row in _kb_list_knowledge_bases(tenant_id):
+    for row in _kb_list_knowledge_bases(tenant_id, database=_knowledge_database(tenant_id)):
         data = dict(row)
         archived = (
             data.get("archived") if "archived" in data else data.get("archived_at") is not None
@@ -99,16 +102,27 @@ def kb_engine_list(tenant_id: str) -> list[dict[str, Any]]:
 
 
 def kb_engine_create(tenant_id: str, kb_id: str, description: str) -> None:
-    _kb_create_knowledge_base(tenant_id, kb_id, description)
+    _kb_create_knowledge_base(
+        tenant_id, kb_id, description, database=_knowledge_database(tenant_id)
+    )
 
 
 def kb_engine_edit(tenant_id: str, kb_id: str, description: str) -> None:
-    if not _kb_update_knowledge_base_description(tenant_id, kb_id, description):
+    if not _kb_update_knowledge_base_description(
+        tenant_id, kb_id, description, database=_knowledge_database(tenant_id)
+    ):
         raise HTTPException(status_code=404, detail="kb not found")
 
 
 def kb_engine_archive(tenant_id: str, kb_id: str) -> None:
-    archived = asyncio.run(_kb_archive_knowledge_base(tenant_id, kb_id))
+    with _use_kb_runtime(tenant_id):
+        archived = asyncio.run(
+            _kb_archive_knowledge_base(
+                tenant_id,
+                kb_id,
+                database=_knowledge_database(tenant_id),
+            )
+        )
     if not archived:
         raise HTTPException(status_code=404, detail="kb not found or already archived")
 
@@ -119,17 +133,24 @@ def kb_ingest_text(
     """Ingest pasted/uploaded content. Bridges knowledge_base.ingest_text on host."""
     _require_active_kb(tenant_id, kb_id)
     parsed = _parse_import_document(source, content, document_format)
-    document = asyncio.run(
-        kb_ingest_parsed(
-            parsed,
-            tenant_id=tenant_id,
-            kb_id=kb_id,
-            source=source,
-            source_url=None,
-            settings=_ingest_settings(),
+    with _use_kb_runtime(tenant_id):
+        document = asyncio.run(
+            kb_ingest_parsed(
+                parsed,
+                tenant_id=tenant_id,
+                kb_id=kb_id,
+                source=source,
+                source_url=None,
+                settings=_ingest_settings(),
+                database=_knowledge_database(tenant_id),
+            )
         )
+    chunks = _kb_preview_document_chunks(
+        tenant_id,
+        kb_id,
+        document.id,
+        database=_knowledge_database(tenant_id),
     )
-    chunks = _kb_preview_document_chunks(tenant_id, kb_id, document.id)
     return {
         "document_id": document.id,
         "chunks": len(chunks),
@@ -149,7 +170,8 @@ def kb_sync_directory(tenant_id: str, kb_id: str, path: str) -> dict[str, Any]:
             root_path=path,
             allowed_roots=[path],
         )
-        summary = asyncio.run(sync_local_directory(config, tenant_id=tenant_id, kb_id=kb_id))
+        with _use_kb_runtime(tenant_id):
+            summary = asyncio.run(sync_local_directory(config, tenant_id=tenant_id, kb_id=kb_id))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {
@@ -168,19 +190,35 @@ def kb_sync_directory(tenant_id: str, kb_id: str, path: str) -> dict[str, Any]:
 
 
 def kb_list_documents(tenant_id: str, kb_id: str) -> list[dict[str, Any]]:
-    return [dict(row) for row in _kb_list_documents(tenant_id, kb_id)]
+    return [
+        dict(row)
+        for row in _kb_list_documents(tenant_id, kb_id, database=_knowledge_database(tenant_id))
+    ]
 
 
 def kb_chunk_preview(tenant_id: str, kb_id: str, document_id: str) -> list[dict[str, Any]]:
     return [
         _chunk_to_search_result(chunk)
-        for chunk in _kb_preview_document_chunks(tenant_id, kb_id, document_id)
+        for chunk in _kb_preview_document_chunks(
+            tenant_id,
+            kb_id,
+            document_id,
+            database=_knowledge_database(tenant_id),
+        )
     ]
 
 
 def kb_delete_document(tenant_id: str, kb_id: str, document_id: str) -> None:
     """Delete a document + cascade its chunks/vectors. Bridges knowledge_base.delete."""
-    deleted = asyncio.run(_kb_delete_document(tenant_id, kb_id, document_id))
+    with _use_kb_runtime(tenant_id):
+        deleted = asyncio.run(
+            _kb_delete_document(
+                tenant_id,
+                kb_id,
+                document_id,
+                database=_knowledge_database(tenant_id),
+            )
+        )
     if not deleted:
         raise HTTPException(status_code=404, detail="document not found in kb")
 
@@ -190,16 +228,17 @@ def kb_search(
 ) -> list[dict[str, Any]]:
     """Retrieval test. Bridges knowledge_base.search (vector/keyword/hybrid) on host."""
     search_mode = cast(SearchMode, mode)
-    chunks = asyncio.run(
-        search_kb(
-            query,
-            store=KnowledgeStore(_knowledge_database()),
-            tenant_id=tenant_id,
-            kb_ids=kb_ids,
-            mode=search_mode,
-            limit=limit,
+    with _use_kb_runtime(tenant_id):
+        chunks = asyncio.run(
+            search_kb(
+                query,
+                store=KnowledgeStore(_knowledge_database(tenant_id)),
+                tenant_id=tenant_id,
+                kb_ids=kb_ids,
+                mode=search_mode,
+                limit=limit,
+            )
         )
-    )
     return [_chunk_to_search_result(chunk) for chunk in chunks]
 
 
@@ -228,8 +267,28 @@ def _session_user(authorization: str | None) -> user_store.User:
     return user
 
 
-def _knowledge_database() -> SQLiteDatabase:
-    return create_database(Settings().database_url)
+def _tenant_router() -> TenantRouter:
+    data_dir = create_database(Settings().database_url).path.parent
+    return TenantRouter(SQLiteTenantBackend(data_dir=data_dir))
+
+
+def _knowledge_database(tenant_id: str) -> SQLiteDatabase:
+    return _tenant_router().tenant_scope(tenant_id).open_kb_db(KB_MIGRATIONS)
+
+
+@contextmanager
+def _use_kb_runtime(tenant_id: str):
+    scope = _tenant_router().tenant_scope(tenant_id)
+    previous_db = kb_runtime.runtime._kb_db
+    previous_backend = kb_runtime.runtime._kb_vector_backend
+    kb_db = scope.open_kb_db(KB_MIGRATIONS)
+    kb_runtime.runtime.set_database(kb_db)
+    kb_runtime.runtime.set_vector_backend(scope.kb_vector_backend)
+    try:
+        yield scope
+    finally:
+        kb_runtime.runtime.set_database(previous_db)
+        kb_runtime.runtime.set_vector_backend(previous_backend)
 
 
 def _current_user(authorization: str | None) -> user_store.User:
@@ -314,7 +373,7 @@ def _ingest_settings() -> KnowledgeBaseSettings:
 
 
 def _require_active_kb(tenant_id: str, kb_id: str) -> None:
-    if not _kb_is_active_knowledge_base(tenant_id, kb_id):
+    if not _kb_is_active_knowledge_base(tenant_id, kb_id, database=_knowledge_database(tenant_id)):
         raise HTTPException(status_code=404, detail="kb not found or archived")
 
 
@@ -619,8 +678,9 @@ def _kb_description(tenant_id: str, kb_id: str) -> str:
 
 def _apply_kb_description(tenant_id: str, kb_id: str, description: str) -> None:
     """A connector IS a KB: ensure the KB row exists and set its description."""
-    _kb_create_knowledge_base(tenant_id, kb_id, description)
-    _kb_update_knowledge_base_description(tenant_id, kb_id, description)
+    database = _knowledge_database(tenant_id)
+    _kb_create_knowledge_base(tenant_id, kb_id, description, database=database)
+    _kb_update_knowledge_base_description(tenant_id, kb_id, description, database=database)
 
 
 def _connector_out(row: dict[str, Any]) -> dict[str, Any]:

@@ -1,4 +1,5 @@
-from fleetent.db import create_database
+from fleetent.db import SQLiteDatabase, create_database
+from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
 from fleetent.knowledge_base.extraction import (
     ExtractedEntity,
     ExtractedRelation,
@@ -6,7 +7,7 @@ from fleetent.knowledge_base.extraction import (
 from fleetent.knowledge_base.extraction_store import KnowledgeEntityStore
 from fleetent.knowledge_base.models import KnowledgeChunk, KnowledgeDocument
 from fleetent.knowledge_base.store import KnowledgeStore
-from tests.integration.test_migrations import apply_migrations
+from fleetent.schema_migrations import migrate
 
 
 def test_match_entities_by_normalized_query_with_tenant_kb_scope(tmp_path):
@@ -27,7 +28,7 @@ def test_match_entities_uses_metadata_aliases(tmp_path):
     from fleetent.knowledge_base.retrieval.graph_search import match_entities
 
     db_path = tmp_path / "knowledge.db"
-    apply_migrations(db_path)
+    migrate(SQLiteDatabase(path=db_path), KB_MIGRATIONS)
     database = create_database(f"sqlite:///{db_path}")
     store = KnowledgeEntityStore(database)
     store.upsert_entity(
@@ -82,7 +83,7 @@ def test_match_entities_handles_list_aliases_and_bad_metadata(tmp_path):
     from fleetent.knowledge_base.retrieval.graph_search import match_entities
 
     db_path = tmp_path / "aliases.db"
-    apply_migrations(db_path)
+    migrate(SQLiteDatabase(path=db_path), KB_MIGRATIONS)
     database = create_database(f"sqlite:///{db_path}")
     database.execute(
         """
@@ -121,16 +122,12 @@ async def test_graph_search_merges_scores_for_shared_chunk(monkeypatch, tmp_path
     # A relation whose evidence chunk is the directly-matched Acme chunk forces
     # _add_candidate to merge a lower relation score into the higher direct score.
     entity_store = KnowledgeEntityStore(database)
-    run = entity_store.insert_run(
-        tenant_id="tenant-a", kb_id="support", document_id=None, extractor="merge"
-    )
     acme = ExtractedEntity("customer", "Acme", metadata={"chunk_id": "doc-acme:chunk:0"})
     billing = ExtractedEntity("system", "Billing API", metadata={"chunk_id": "doc-billing:chunk:0"})
     entity_store.replace_document_evidence(
         tenant_id="tenant-a",
         kb_id="support",
         document_id="doc-acme",
-        run_id=run.id,
         entities=[acme, billing],
         relations=[
             ExtractedRelation(
@@ -225,7 +222,7 @@ async def test_graph_search_orders_by_score_then_position_and_respects_limit(mon
 
 def _seed_graph(tmp_path):
     db_path = tmp_path / "graph.db"
-    apply_migrations(db_path)
+    migrate(SQLiteDatabase(path=db_path), KB_MIGRATIONS)
     database = create_database(f"sqlite:///{db_path}")
 
     store = KnowledgeStore(database)
@@ -263,16 +260,12 @@ def _seed_graph(tmp_path):
         )
 
     entity_store = KnowledgeEntityStore(database)
-    run = entity_store.insert_run(
-        tenant_id="tenant-a", kb_id="support", document_id=None, extractor="test"
-    )
     acme = ExtractedEntity("customer", "Acme", metadata={"chunk_id": "doc-acme:chunk:0"})
     billing = ExtractedEntity("system", "Billing API", metadata={"chunk_id": "doc-billing:chunk:0"})
     entity_store.replace_document_evidence(
         tenant_id="tenant-a",
         kb_id="support",
         document_id="doc-acme",
-        run_id=run.id,
         entities=[acme],
         relations=[],
     )
@@ -280,7 +273,6 @@ def _seed_graph(tmp_path):
         tenant_id="tenant-a",
         kb_id="support",
         document_id="doc-billing",
-        run_id=run.id,
         entities=[billing],
         relations=[],
     )
@@ -288,7 +280,6 @@ def _seed_graph(tmp_path):
         tenant_id="tenant-a",
         kb_id="support",
         document_id="doc-rel",
-        run_id=run.id,
         entities=[acme, billing],
         relations=[
             ExtractedRelation(
@@ -306,7 +297,7 @@ def _seed_graph(tmp_path):
 
 def _seed_entities(tmp_path):
     db_path = tmp_path / "knowledge.db"
-    apply_migrations(db_path)
+    migrate(SQLiteDatabase(path=db_path), KB_MIGRATIONS)
     database = create_database(f"sqlite:///{db_path}")
     store = KnowledgeEntityStore(database)
     store.upsert_entity("tenant-a", "support", ExtractedEntity("customer", "Acme"))

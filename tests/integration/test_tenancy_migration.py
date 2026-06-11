@@ -224,13 +224,10 @@ def test_traces_table_is_absent_from_management_db(tmp_path: Path) -> None:
     assert "traces" not in _tables(db)
 
 
-def test_knowledge_bases_tenant_id_fk_to_tenants(tmp_path: Path) -> None:
+def test_knowledge_bases_table_is_absent_from_management_db_head(tmp_path: Path) -> None:
     db = tmp_path / "test.db"
     _upgrade(db)
-    fks = _fk_list(db, "knowledge_bases")
-    tenant_fk = next((f for f in fks if f["from"] == "tenant_id"), None)
-    assert tenant_fk is not None, "knowledge_bases.tenant_id should have FK→tenants"
-    assert tenant_fk["table"] == "tenants"
+    assert "knowledge_bases" not in _tables(db)
 
 
 def test_policies_tenant_id_fk_to_tenants(tmp_path: Path) -> None:
