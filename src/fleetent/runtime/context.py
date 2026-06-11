@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import sqlite3
 import time
 from dataclasses import dataclass, replace
 from typing import Any, cast
@@ -10,9 +9,9 @@ from typing import Any, cast
 from openai import OpenAI
 
 from fleetent import eval_logger
+from fleetent.db import SQLiteDatabase
 from fleetent.model import ModelConfigError, ModelPolicySnapshot, ResolvedModelConfig
 from fleetent.structured_logging import get_logger
-from fleetent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export for monkeypatch
 
 _DEFAULT_FLAP_WINDOW = 3
 _DEFAULT_MIN_SAVINGS_RATIO = 0.10
@@ -729,65 +728,62 @@ def apply_anti_flap(
     )
 
 
-def _anti_flap_conn() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    return sqlite3.connect(DB_PATH)
+# Per-agent state DB, injected once at boot via agent_app._init_agent_db_schema.
+# The session_anti_flap table is created by the unified AGENT_STATE_MIGRATIONS so this
+# module never owns DDL or a raw connection — keeping anti-flap state physically scoped
+# to the running agent's agent_state.db rather than a shared management DB.
+_state_db: SQLiteDatabase | None = None
 
 
-def init_anti_flap_db() -> None:
-    """Create the per-session anti-flap sister table, idempotently.
+def set_state_db(db: SQLiteDatabase) -> None:
+    """Inject the per-agent state DB.  Called once at agent boot."""
+    global _state_db
+    _state_db = db
 
-    A sister table keyed by session_id (not new columns on session-metadata-index's
-    `sessions` table) keeps that change's schema/semantics untouched.
-    """
-    with _anti_flap_conn() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS session_anti_flap (
-              session_id        TEXT PRIMARY KEY,
-              recent_savings    TEXT NOT NULL,
-              turns_since       INTEGER NOT NULL,
-              auto_disabled     INTEGER NOT NULL
-            )
-            """
+
+def _anti_flap_db() -> SQLiteDatabase:
+    if _state_db is None:
+        raise RuntimeError(
+            "runtime/context: state_db not initialized — call set_state_db(db) at boot"
         )
+    return _state_db
 
 
 def load_anti_flap_state(session_id: str) -> AntiFlapState:
-    """Load a session's AntiFlapState from fleetent.db, or a fresh default if absent."""
-    init_anti_flap_db()
-    with _anti_flap_conn() as conn:
-        row = conn.execute(
+    """Load a session's AntiFlapState from agent_state.db, or a fresh default if absent."""
+    row = (
+        _anti_flap_db()
+        .execute(
             "SELECT recent_savings, turns_since, auto_disabled "
-            "FROM session_anti_flap WHERE session_id = ?",
-            (session_id,),
-        ).fetchone()
+            "FROM session_anti_flap WHERE session_id = :session_id",
+            {"session_id": session_id},
+        )
+        .fetchone()
+    )
     if row is None:
         return AntiFlapState()
     return AntiFlapState(
-        recent_savings=tuple(json.loads(row[0])),
-        turns_since_last_compress=row[1],
-        auto_disabled=bool(row[2]),
+        recent_savings=tuple(json.loads(row["recent_savings"])),
+        turns_since_last_compress=row["turns_since"],
+        auto_disabled=bool(row["auto_disabled"]),
     )
 
 
 def save_anti_flap_state(session_id: str, state: AntiFlapState) -> None:
-    """Persist a session's AntiFlapState to fleetent.db (insert or replace)."""
-    init_anti_flap_db()
-    with _anti_flap_conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO session_anti_flap (session_id, recent_savings, turns_since, auto_disabled)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(session_id) DO UPDATE SET
-              recent_savings=excluded.recent_savings,
-              turns_since=excluded.turns_since,
-              auto_disabled=excluded.auto_disabled
-            """,
-            (
-                session_id,
-                json.dumps(list(state.recent_savings)),
-                state.turns_since_last_compress,
-                int(state.auto_disabled),
-            ),
-        )
+    """Persist a session's AntiFlapState to agent_state.db (insert or replace)."""
+    _anti_flap_db().execute(
+        """
+        INSERT INTO session_anti_flap (session_id, recent_savings, turns_since, auto_disabled)
+        VALUES (:session_id, :recent_savings, :turns_since, :auto_disabled)
+        ON CONFLICT(session_id) DO UPDATE SET
+          recent_savings=excluded.recent_savings,
+          turns_since=excluded.turns_since,
+          auto_disabled=excluded.auto_disabled
+        """,
+        {
+            "session_id": session_id,
+            "recent_savings": json.dumps(list(state.recent_savings)),
+            "turns_since": state.turns_since_last_compress,
+            "auto_disabled": int(state.auto_disabled),
+        },
+    )

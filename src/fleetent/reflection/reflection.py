@@ -9,8 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, cast
 
 from fleetent import memory, observability
-from fleetent.config import Settings
-from fleetent.db import SQLiteDatabase, create_database
+from fleetent.db import SQLiteDatabase
 
 FindingType = Literal["memory_candidate", "memory_conflict", "skill_opportunity"]
 KnowledgeBaseFindingType = Literal[
@@ -972,10 +971,16 @@ def set_state_db(db: SQLiteDatabase) -> None:
 
 
 def _database() -> SQLiteDatabase:
-    """Return the per-agent state DB if injected, else fall back to Settings().database_url."""
-    if _state_db is not None:
-        return _state_db
-    return create_database(Settings().database_url)
+    """Return the per-agent state DB injected at boot.
+
+    No management-DB fallback: without a per-agent ``_state_db`` injection, reflection
+    refuses rather than reading/writing agent-side tables (skill_proposals,
+    memory_maintenance_proposals) in the shared management library — that would violate
+    the agent/platform data-isolation contract.
+    """
+    if _state_db is None:
+        raise RuntimeError("reflection: state_db not initialized — call set_state_db(db) at boot")
+    return _state_db
 
 
 def _has_reflection_reports_table(database: SQLiteDatabase) -> bool:

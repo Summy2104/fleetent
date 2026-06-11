@@ -13,7 +13,9 @@ diagnostics、IM approvals）写入该 agent 专属的 `agents/<id>/data/` 目�
 immediately after `home_dir` is resolved and before any infrastructure initialisation.
 The redirection SHALL cover sessions, database, IM approvals, diagnostics, and log directory.
 After redirection, `_start_infra()` SHALL initialize the agent DB schema so that all
-agent-side tables exist before any store operation.
+agent-side tables exist before any store operation. Agent runtime tables MUST be reached via
+the per-agent state DB (`agent_scope` → `agent_state.db`) through the unified `db.py` boundary;
+no agent runtime table may be written through a global `DB_PATH` + raw `sqlite3.connect`.
 
 #### Scenario: Sessions land in agent home
 
@@ -30,7 +32,8 @@ agent-side tables exist before any store operation.
 
 - **WHEN** `fleetent agent run my-bot` completes `_start_infra()`
 - **THEN** `agents/my-bot/data/fleetent.db` SHALL contain all agent-side tables
-  (`traces`, `memory_items`, `reflection_reports`, knowledge base tables)
+  (`traces`, `memory_items`, `reflection_reports`, `session_anti_flap`, `sub_agent_runs`,
+  `memory_maintenance_proposals`, `skill_proposals`, knowledge base tables)
 
 #### Scenario: IM approvals land in agent home
 

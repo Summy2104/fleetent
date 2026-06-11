@@ -40,7 +40,8 @@ class SubAgentExecutor:
         timeout_seconds: int | None = None,
         cancel_token: CancelToken | None = None,
     ) -> list[SubAgentResult]:
-        sub_agent_lifecycle.init_db()
+        # sub_agent_runs schema is created by the unified AGENT_STATE_MIGRATIONS at boot;
+        # no per-call table init (the table lives in the per-agent agent_state.db).
         effective_timeout = sub_agent_lifecycle.resolve_timeout(timeout_seconds)
         batch_token = cancel_token if cancel_token is not None else CancelToken()
         coros = [

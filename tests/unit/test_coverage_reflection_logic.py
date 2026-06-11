@@ -171,9 +171,10 @@ def test_reflection_finding_generation_and_text_extraction():
 def test_reflection_generates_memory_and_skill_proposals(monkeypatch):
     memory_proposals: list[reflection.MemoryMaintenanceProposal] = []
     skill_proposals: list[reflection.SkillProposal] = []
-    monkeypatch.setattr(reflection, "_insert_maintenance_proposal", lambda proposal: None)
-    monkeypatch.setattr(reflection, "_record_maintenance_event", lambda _event, proposal: None)
-    monkeypatch.setattr(reflection, "_insert_skill_proposal", lambda proposal: None)
+    # Neutralize persistence so this unit test exercises only generation logic; the
+    # _persist_* wrappers are the ones that reach _database() (no _state_db injected here).
+    monkeypatch.setattr(reflection, "_persist_memory_maintenance_proposal", lambda proposal: None)
+    monkeypatch.setattr(reflection, "_persist_skill_proposal", lambda proposal: None)
 
     findings = [
         reflection.ReflectionFinding(

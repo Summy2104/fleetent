@@ -5,6 +5,18 @@ import pytest
 from fleetent.runtime.sub_agent import SubAgentExecutor
 
 
+@pytest.fixture(autouse=True)
+def _no_db_persistence(monkeypatch):
+    """Neutralize sub_agent_runs persistence: these are pure orchestration unit tests.
+
+    The per-agent state DB is injected only at agent boot; the DB-backed lifecycle
+    round-trip is covered in tests/integration/test_sub_agent_lifecycle_executor.py.
+    """
+    import fleetent.runtime.sub_agent_lifecycle as sal
+
+    monkeypatch.setattr(sal, "upsert", lambda lc: None)
+
+
 async def test_two_tasks_run_and_return_results():
     executor = SubAgentExecutor()
 

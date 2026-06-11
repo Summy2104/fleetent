@@ -26,6 +26,12 @@ def client(tmp_path, monkeypatch):
     for mod in (user_store, audit):
         monkeypatch.setattr(mod, "DB_PATH", db_path)
     user_store._init_db()
+    # reflection no longer falls back to DATABASE_URL (agent-runtime-db-routing-cleanup):
+    # inject the proposals DB the real-reflection tests write to via _insert_proposal.
+    from fleetent import reflection
+    from fleetent.db import SQLiteDatabase
+
+    monkeypatch.setattr(reflection, "_state_db", SQLiteDatabase(path=db_path))
     # neutral engine seams by default; individual tests override.
     monkeypatch.setattr(api, "engine_list_skills", lambda: [])
     monkeypatch.setattr(api, "engine_audit", lambda content: {"verdict": "pass", "rules": []})

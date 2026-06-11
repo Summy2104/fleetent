@@ -158,12 +158,17 @@ def test_memory_quality_trend_includes_maintenance_proposal_counts(tmp_path, mon
 
 
 def _patch_database(tmp_path, monkeypatch) -> SQLiteDatabase:
+    from fleetent import reflection
+
     db_path = tmp_path / "memory-quality-trends.db"
     apply_migrations(db_path)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     db = create_database(f"sqlite:///{db_path}")
     monkeypatch.setattr(memory_store, "_state_db", db)
+    # reflection no longer falls back to DATABASE_URL (agent-runtime-db-routing-cleanup):
+    # inject its per-agent state DB explicitly.
+    monkeypatch.setattr(reflection, "_state_db", db)
     return db
 
 

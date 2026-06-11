@@ -1,21 +1,21 @@
-"""Sub-agent lifecycle: state machine + sqlite3 persistence + timeout (AR20).
+"""Sub-agent lifecycle: state machine + persistence + timeout (AR20).
 
 A sub-agent task moves through a single-direction state machine
 (`pending → running → {succeeded,failed,timed_out,cancelled}`, plus
 `pending → cancelled`) and is recorded in the `sub_agent_runs` table of the
-per-agent `fleetent.db`, queryable by `parent_session_id` for observability. This
-module owns the lifecycle record and persistence; `sub_agent.py` keeps the
-parallel orchestration. Standard-library `sqlite3` only (no ORM).
+per-agent `agent_state.db`, queryable by `parent_session_id` for observability.
+This module owns the lifecycle record and persistence; `sub_agent.py` keeps the
+parallel orchestration. Reads/writes go through the unified `db.py` boundary on
+the per-agent state DB injected at boot (no raw connection, no ORM).
 """
 
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from fleetent.db import SQLiteDatabase
 from fleetent.structured_logging import get_logger
-from fleetent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export for monkeypatch
 
 _logger = get_logger("runtime.sub_agent")
 
@@ -77,85 +77,80 @@ def resolve_timeout(timeout_seconds: int | None = None, config: int | None = Non
     return SUB_AGENT_TIMEOUT_SECONDS
 
 
-def _conn() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    return sqlite3.connect(DB_PATH)
+# Per-agent state DB, injected once at boot via agent_app._init_agent_db_schema.
+# The sub_agent_runs table + index are created by the unified AGENT_STATE_MIGRATIONS,
+# so this module never owns DDL or a raw connection — keeping sub-agent run records
+# physically scoped to the running agent's agent_state.db, not a shared management DB.
+_state_db: SQLiteDatabase | None = None
 
 
-def init_db() -> None:
-    """Create the `sub_agent_runs` table and parent index, idempotently."""
-    with _conn() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS sub_agent_runs (
-              run_id            TEXT PRIMARY KEY,
-              parent_session_id TEXT NOT NULL,
-              name              TEXT NOT NULL,
-              state             TEXT NOT NULL,
-              timeout_seconds   INTEGER NOT NULL,
-              created_at        TEXT NOT NULL,
-              started_at        TEXT,
-              ended_at          TEXT,
-              error             TEXT
-            )
-            """
+def set_state_db(db: SQLiteDatabase) -> None:
+    """Inject the per-agent state DB.  Called once at agent boot."""
+    global _state_db
+    _state_db = db
+
+
+def _db() -> SQLiteDatabase:
+    if _state_db is None:
+        raise RuntimeError(
+            "runtime/sub_agent_lifecycle: state_db not initialized — call set_state_db(db) at boot"
         )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_sub_agent_runs_parent "
-            "ON sub_agent_runs(parent_session_id)"
-        )
+    return _state_db
 
 
 def upsert(lc: SubAgentLifecycle) -> None:
     """Insert or replace the lifecycle row keyed by run_id."""
-    with _conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO sub_agent_runs
-              (run_id, parent_session_id, name, state, timeout_seconds,
-               created_at, started_at, ended_at, error)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(run_id) DO UPDATE SET
-              state=excluded.state, started_at=excluded.started_at,
-              ended_at=excluded.ended_at, error=excluded.error
-            """,
-            (
-                lc.run_id,
-                lc.parent_session_id,
-                lc.name,
-                lc.state.value,
-                lc.timeout_seconds,
-                lc.created_at,
-                lc.started_at,
-                lc.ended_at,
-                lc.error,
-            ),
-        )
+    _db().execute(
+        """
+        INSERT INTO sub_agent_runs
+          (run_id, parent_session_id, name, state, timeout_seconds,
+           created_at, started_at, ended_at, error)
+        VALUES (:run_id, :parent_session_id, :name, :state, :timeout_seconds,
+                :created_at, :started_at, :ended_at, :error)
+        ON CONFLICT(run_id) DO UPDATE SET
+          state=excluded.state, started_at=excluded.started_at,
+          ended_at=excluded.ended_at, error=excluded.error
+        """,
+        {
+            "run_id": lc.run_id,
+            "parent_session_id": lc.parent_session_id,
+            "name": lc.name,
+            "state": lc.state.value,
+            "timeout_seconds": lc.timeout_seconds,
+            "created_at": lc.created_at,
+            "started_at": lc.started_at,
+            "ended_at": lc.ended_at,
+            "error": lc.error,
+        },
+    )
 
 
 def query_by_parent(parent_session_id: str) -> list[SubAgentLifecycle]:
     """Return all sub-agent runs for a parent session with their latest state."""
-    with _conn() as conn:
-        rows = conn.execute(
+    rows = (
+        _db()
+        .execute(
             """
             SELECT run_id, parent_session_id, name, state, timeout_seconds,
                    created_at, started_at, ended_at, error
-            FROM sub_agent_runs WHERE parent_session_id = ?
+            FROM sub_agent_runs WHERE parent_session_id = :parent_session_id
             ORDER BY created_at, run_id
             """,
-            (parent_session_id,),
-        ).fetchall()
+            {"parent_session_id": parent_session_id},
+        )
+        .fetchall()
+    )
     return [
         SubAgentLifecycle(
-            run_id=r[0],
-            parent_session_id=r[1],
-            name=r[2],
-            state=SubAgentState(r[3]),
-            timeout_seconds=r[4],
-            created_at=r[5],
-            started_at=r[6],
-            ended_at=r[7],
-            error=r[8],
+            run_id=r["run_id"],
+            parent_session_id=r["parent_session_id"],
+            name=r["name"],
+            state=SubAgentState(r["state"]),
+            timeout_seconds=r["timeout_seconds"],
+            created_at=r["created_at"],
+            started_at=r["started_at"],
+            ended_at=r["ended_at"],
+            error=r["error"],
         )
         for r in rows
     ]

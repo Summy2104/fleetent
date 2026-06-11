@@ -130,14 +130,14 @@ erDiagram
   skill_provenance ||--|| skill_admin_state : "全局 skill 态"
 ```
 
-> ⚠️ **当前错位（待 `agent-runtime-db-routing-cleanup` 迁移）**：`session_anti_flap`（压缩防抖）、`sub_agent_runs`（子 agent 生命周期）属 **agent 运行时数据**，但现经 `user_store.DB_PATH` + 裸 `sqlite3.connect` 物理落在**管理库**——违反「agent 数据只落 agent 侧」与统一 `db.py` 边界，应迁入 per-agent `agent_state.db`。
-
 ### 3.3 per-agent 运行库（嵌入式 Y · `agent_state.db` · agent 侧）
-统一 MIGRATIONS（`runtime/agent_state_migrations.py`）当前建 **6 张表**：`sessions`(会话元数据索引) · `traces`(append-only 运行轨迹) · `reflection_reports`(反思报告) · `memory_items`(per-user 语义记忆，**无 namespace 列**，agent 隔离靠物理库) · `approvals`/`approval_allowlist`(审批请求+门状态，**agent 全权真相源**，actor 为不透明标签)。
+统一 MIGRATIONS（`runtime/agent_state_migrations.py`，单文件单 `user_version`）建 **10 张表**：`sessions`(会话元数据索引) · `traces`(append-only 运行轨迹) · `reflection_reports`(反思报告) · `memory_items`(per-user 语义记忆，**无 namespace 列**，agent 隔离靠物理库) · `approvals`/`approval_allowlist`(审批请求+门状态，**agent 全权真相源**，actor 为不透明标签) · `session_anti_flap`(压缩防抖，per session) · `sub_agent_runs`(子 agent 生命周期) · `memory_maintenance_proposals`(User Memory 维护建议) · `skill_proposals`(Skill 反思建议)。后四张由 `agent-runtime-db-routing-cleanup` 收编：`session_anti_flap`/`sub_agent_runs` 改经 `agent_scope` + `db.py`（去 `user_store.DB_PATH` + 裸 `sqlite3.connect`），`memory_maintenance_proposals`/`skill_proposals` 折进统一 `MIGRATIONS`（不再依赖 legacy `ensure_schema`）。
 
 ```mermaid
 erDiagram
   sessions ||--o{ approvals : "session_id"
+  sessions ||--o{ session_anti_flap : "session_id"
+  sessions ||--o{ sub_agent_runs : "parent_session_id"
   memory_items ||--o{ memory_maintenance_proposals : "维护建议"
   traces {
     string run_id
@@ -148,12 +148,23 @@ erDiagram
   approval_allowlist {
     string fingerprint
   }
+  session_anti_flap {
+    string session_id
+    int auto_disabled
+  }
+  sub_agent_runs {
+    string run_id
+    string state
+  }
+  memory_maintenance_proposals {
+    string status
+  }
   skill_proposals {
     string status
   }
 ```
 
-> ⚠️ **未进统一 MIGRATIONS（待 cleanup 收编）**：`memory_maintenance_proposals`、`skill_proposals` 经 store 注入路由到 `agent_state.db`（库对），但由 legacy `ensure_schema` 建表、不在统一 `MIGRATIONS`——应折进统一列表（单文件单 `user_version`）。
+> 历史行不迁移：旧管理库中既有的 `session_anti_flap` / `sub_agent_runs` 行属 ephemeral 运行时数据，按「上线前不迁移数据」新建即可，旧行作孤儿由部署方按需清理。
 > 跨库（见 §3.1）：`memory_items.user_id` ⇢ 管理库 `users`；`approvals.requester_user_id` ⇢ 管理库 `users`、`approvals.session_id` → 本库 `sessions`。会话**内容**仍是 JSON 文件（`SESSIONS_DIR`，与元数据 DB 表物理分离）。
 
 ### 3.4 共享记忆库（嵌入式 Y · `shared_memory.db` · agent 侧 · per-tenant）
