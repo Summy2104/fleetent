@@ -72,6 +72,7 @@ graph TD
     memory_items
     approvals
     reflection_reports
+    reflection_proposals
     budget_usage
   end
   subgraph KB["KB 关系库 kb.db ｜ agent 侧 · per-tenant"]
