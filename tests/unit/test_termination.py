@@ -222,3 +222,15 @@ def test_approval_rejected_checker_stops_when_flagged() -> None:
 def test_approval_rejected_checker_passes_when_not_flagged() -> None:
     checker = ApprovalRejectedChecker()
     assert checker.check(LoopState(approval_rejected=False)) is None
+
+
+# ── approval-suspend-resume: awaiting_approval stop reason ─────────────────────
+
+
+def test_awaiting_approval_stop_reason_exists() -> None:
+    """A suspended-on-approval run ends with a distinct, non-terminal stop reason."""
+    from fleetent.runtime.termination import StopReason
+
+    assert StopReason.awaiting_approval == "awaiting_approval"
+    # Distinct from the terminal rejection reason (different semantics: mid-state).
+    assert StopReason.awaiting_approval != StopReason.approval_rejected

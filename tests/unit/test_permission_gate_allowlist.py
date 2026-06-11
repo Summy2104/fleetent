@@ -82,10 +82,9 @@ async def test_non_allowlisted_goes_through_notify(monkeypatch):
 
 
 async def _gate_with_pending(monkeypatch, fp: str):
-    import asyncio
-
     gate = PermissionGate(medium_timeout=0.1, high_timeout=0.1)
-    gate._events["a1"] = asyncio.Event()
+    # Suspend model: a pending approval is tracked in the _pending registry (no Event).
+    gate._pending.add("a1")
     gate._pending_fp["a1"] = (fp, "user:alice", "run_code")
     return gate
 

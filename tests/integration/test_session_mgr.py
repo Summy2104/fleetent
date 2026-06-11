@@ -9,8 +9,8 @@ import fleetent.session.manager as session_mgr
 from fleetent import agent_config
 from fleetent.agent_config import AgentFile
 from fleetent.db import SQLiteDatabase
-from fleetent.schema_migrations import migrate
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as SESSION_MIGRATIONS
+from fleetent.schema_migrations import migrate
 
 
 @pytest.fixture
@@ -854,3 +854,40 @@ def test_cli_run_sync_does_not_start_maintenance_task(monkeypatch):
     assert session_mgr._maintenance_task is None
     al.run_sync("hi")
     assert session_mgr._maintenance_task is None
+
+
+# ── approval-suspend-resume: pending_approvals meta helpers ───────────────────
+
+
+async def test_pending_approval_add_get_list_remove(sessions_dir):
+    sid = "slack:dm:U1:111.222"
+    # Seed a real session with messages + meta so we exercise the envelope path.
+    await session_mgr.save(sid, [{"role": "user", "content": "hi"}], meta={"k": "v"})
+
+    entry = {
+        "tool_call_id": "tc_1",
+        "tool_name": "send_im_message",
+        "tool_args": {"target": "U2", "text": "hi"},
+        "risk": "medium",
+        "approver_ids": ["U1"],
+    }
+    await session_mgr.add_pending_approval(sid, "appr-1", entry)
+
+    got = await session_mgr.get_pending_approval(sid, "appr-1")
+    assert got == entry
+    assert await session_mgr.list_pending_approvals(sid) == {"appr-1": entry}
+
+    # Messages and unrelated meta keys are preserved across the meta mutation.
+    assert await session_mgr.load(sid) == [{"role": "user", "content": "hi"}]
+    assert (await session_mgr.load_meta(sid))["k"] == "v"
+
+    await session_mgr.remove_pending_approval(sid, "appr-1")
+    assert await session_mgr.get_pending_approval(sid, "appr-1") is None
+    assert await session_mgr.list_pending_approvals(sid) == {}
+
+
+async def test_pending_approval_get_missing_returns_none(sessions_dir):
+    sid = "slack:dm:U9:000.000"
+    await session_mgr.save(sid, [{"role": "user", "content": "x"}])
+    assert await session_mgr.get_pending_approval(sid, "nope") is None
+    assert await session_mgr.list_pending_approvals(sid) == {}

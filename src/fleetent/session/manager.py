@@ -566,6 +566,61 @@ async def load_meta(session_id: str) -> dict[str, object]:
     return meta
 
 
+_PENDING_APPROVALS_KEY = "pending_approvals"
+
+
+def _write_envelope(
+    session_id: str, messages: list[dict[str, object]], meta: dict[str, object]
+) -> None:
+    """Atomically persist a {meta, messages} envelope as-is (no re-externalization).
+
+    For meta-only mutations the stored message list is written back verbatim so the
+    bookkeeping never round-trips messages through rehydrate/externalize.
+    """
+    SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+    path = SESSIONS_DIR / f"{session_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps({"meta": meta, "messages": messages}, ensure_ascii=False))
+    tmp.replace(path)
+
+
+async def add_pending_approval(session_id: str, approval_id: str, entry: dict[str, object]) -> None:
+    """Record a suspended tool call awaiting approval under ``meta.pending_approvals``."""
+    async with session_lock(session_id):
+        messages, meta = _read(session_id)
+        pending = dict(meta.get(_PENDING_APPROVALS_KEY) or {})
+        pending[approval_id] = entry
+        meta[_PENDING_APPROVALS_KEY] = pending
+        _write_envelope(session_id, messages, meta)
+
+
+async def get_pending_approval(session_id: str, approval_id: str) -> dict[str, object] | None:
+    """Return one pending-approval entry, or None if absent."""
+    _, meta = _read(session_id)
+    pending = meta.get(_PENDING_APPROVALS_KEY) or {}
+    entry = pending.get(approval_id)
+    return dict(entry) if isinstance(entry, dict) else None
+
+
+async def list_pending_approvals(session_id: str) -> dict[str, dict[str, object]]:
+    """Return all pending-approval entries keyed by approval_id (empty when none)."""
+    _, meta = _read(session_id)
+    pending = meta.get(_PENDING_APPROVALS_KEY) or {}
+    return {k: dict(v) for k, v in pending.items() if isinstance(v, dict)}
+
+
+async def remove_pending_approval(session_id: str, approval_id: str) -> None:
+    """Drop a resolved/expired pending-approval entry (no-op if absent)."""
+    async with session_lock(session_id):
+        messages, meta = _read(session_id)
+        pending = dict(meta.get(_PENDING_APPROVALS_KEY) or {})
+        if approval_id in pending:
+            del pending[approval_id]
+            meta[_PENDING_APPROVALS_KEY] = pending
+            _write_envelope(session_id, messages, meta)
+
+
 async def save(
     session_id: str,
     messages: list[dict[str, object]],
