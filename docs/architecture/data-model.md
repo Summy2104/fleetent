@@ -96,7 +96,7 @@ graph TD
 > 宏观图只列各库主干实体；完整清单与库内关系见下方各库明细（§3.2–§3.6）。
 
 ### 3.2 管理库（Alembic · platform 侧）
-- **身份/租户**：`users`(根主体，含 `tenant_id`) · `api_keys`(→users) · `tenants`(主体，含 `approver_user_id`) · `teams`(→tenants，含 `approver_user_id`)
+- **身份/租户**：`users`(根主体，含 `tenant_id`) · `api_keys`(→users) · `tenants`(主体，含 `approver_user_id`) · `teams`(→tenants，含 `approver_user_id`) · `blocked_registrations`(注册封禁名单，control-plane only，agent 运行时不 import)
 - **IM**：`im_users`((platform,platform_user_id)→内部 user) · `im_connectors` · `im_channel_allowlist`
 - **Agent 定义/绑定**：`agents`(定义，含 `tenant_id`/`team_id`/`active_version_id`) · `agent_versions`(不可变快照) · `agent_admin_state`(版本/部署态) · `user_agents`(用户↔agent) · `channel_agents`(渠道↔agent) · `agent_kbs`(**agent↔KB 绑定唯一真相源**，带 `created_by` 审计) · `agent_mcp_servers` · `agent_mcp_server_bindings` · `agent_oauth_bindings` · `connectors`(工具 OAuth) · `agent_skills` · `long_term_context_policies`
 - **模型**：`model_providers` · `model_routes`(task_type→provider)
@@ -171,7 +171,9 @@ erDiagram
 `shared_memory_items`(team/tenant scope 共享记忆，多 agent 写的真相源)
 
 ### 3.5 KB 关系库（嵌入式 Y · `kb.db` · agent 侧 · per-tenant）
-`knowledge_bases`(PK `(tenant_id,kb_id)`) · `knowledge_documents` · `knowledge_chunks`(+`chunks_fts`) · 知识图谱(`kb_entities` · `kb_entity_mentions` · `kb_relations`) · `kb_extraction_runs` · 同步态(`knowledge_source_states` · `knowledge_connector_status`) · KB 自进化(`kb_reflection_reports`)
+**已在本库（`core/migrations.py` 的 Y，核心 5 表）**：`knowledge_bases`(PK `(tenant_id,kb_id)`) · `knowledge_documents` · `knowledge_chunks`(+`chunks_fts`) · `knowledge_source_states`。
+
+> ⚠️ **仍在管理库（alembic）、尚未 lift 进本 per-tenant 库**：知识图谱 `kb_entities` / `kb_entity_mentions` / `kb_relations`、抽取 `kb_extraction_runs`、`knowledge_connector_status`（建于 alembic 013/026，未被 drop）。当年 KB lift 只覆盖核心 5 表，这几张留在管理库（跨主体，与 per-tenant 隔离不符）——**第二处 #3 未切干净**，与 `budget_usage` 同类，待后续 change 归位。`kb_reflection_reports` 落点待确认（alembic 027 add 后又 drop）。下方 ER 为 **KB 概念模型/目标归属**，物理现状以本注为准。
 
 ```mermaid
 erDiagram
