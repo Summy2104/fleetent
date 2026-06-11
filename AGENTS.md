@@ -35,8 +35,8 @@ Hard Gate 管「必须见红 → 见绿」纪律，**不规定范围**；task / 
 1. **opsx:propose** — 写 proposal.md、specs/、design.md（可选）、tasks.md；tasks.md 中**测试任务必须在对应实现任务之前**
 2. **建 worktree + 功能分支** — `git worktree add .worktrees/<change-name> -b feat/<change-name>`
 3. **opsx:apply** — 按 task 执行，每个 task 强制 TDD；完成后标记 `[x]`
-4. **opsx:archive** — 所有 checkbox 为 `[x]` 后，在**功能分支**归档并同步 specs（archive 表示"实现完成"，不代表已上线到 main）
-5. **推送 + 清理 worktree** — 清理前提：分支已推送到 remote、worktree 干净、无未提交改动
+4. **opsx:archive** — 所有 checkbox 为 `[x]` 后，在**功能分支**归档并同步 specs（archive 表示"实现完成"，不代表已上线到 main）。若 specs 已先经 **opsx:sync** 单独同步（实现先进 main、或并行切片的后续 propose 需要最新 specs 时），archive 仅做归档移动
+5. **推送 + 清理 worktree** — 清理前提：分支已推送到 remote、worktree 干净、无未提交改动；之后再决定 merge / PR
 
 **proposal / design 进入 implementation 前必须声明模块边界影响**：
 - owning package（如 `runtime` / `platform` / `governance` / ...）
@@ -62,7 +62,7 @@ agent runtime ──✗──→ platform        # 严格禁止反向依赖
 - platform 需要 agent 数据时读 agent 侧产物，而非要求 agent 反向写入 platform 表
 - **验证基线**：任何改动后，agent 必须能在「无 platform、platform 的 DB 表不存在」环境下完成 `fleetent agent run` 对话
 
-> 2026-06-11 审计：agent 运行时 + 独立组件对 platform 的反向 import **已彻底归零**。`im_gateway/telegram`、`tools/builtin_tools` 已清理；`user_store.authenticate` 根因由 **#4 Identity 端口** 根除（改用注入的 `_api_key_resolver`，platform 启动时 `set_api_key_resolver` 注入，standalone agent 留 None）；最后两处残留由 `finish-user-store-platform-decoupling` 收口——死 wrapper `get_or_create_im_user` 删除、一次性工具 `migrate_api_keys()` 迁至 `platform.user_management`，`user_store` 现零 platform import。护栏 `tests/unit/test_module_dependency_guardrails.py` 的 `_KNOWN_TRANSITIVE_PLATFORM_LEAKS` 已清空（`= set()`）：任何新增的 agent→platform 传递泄漏都会 fail。不得新增同类反向依赖。
+> 现状（2026-06-11 审计后）：agent 运行时 + 独立组件对 platform 的反向 import **已彻底归零**。`user_store.authenticate` 经注入的 `_api_key_resolver` 解耦（platform 启动时 `set_api_key_resolver` 注入，standalone agent 留 None）。护栏 `tests/unit/test_module_dependency_guardrails.py` 的 `_KNOWN_TRANSITIVE_PLATFORM_LEAKS` 已清空（`= set()`）：任何新增的 agent→platform 传递泄漏都会 fail。不得新增同类反向依赖。
 
 ---
 
@@ -101,7 +101,7 @@ src/fleetent/
 
 ## 数据与 Schema 生命周期
 
-**5 物理库 + 按主体物理分区已落地**（持久层 #3，详见 `docs/architecture/data-model.md`）：管理库（单库、跨主体）+ per-agent 运行库 + per-tenant 共享记忆库 / KB 关系库 + 向量底座，多主体时按 `<tenant>/<agent_id>/` 目录物理隔离。管理库真实文件为 `data/management.db`（旧 `fleetent.db` 已改名落地；存量部署经 `scripts/upgrade.py` 的 upgrade-time 重命名平滑迁移）。
+**5 物理库 + 按主体物理分区已落地**（持久层 #3，详见 `docs/architecture/data-model.md`）：管理库（单库、跨主体）+ per-agent 运行库 + per-tenant 共享记忆库 / KB 关系库 + 向量底座，多主体时按 `<tenant>/<agent_id>/` 目录物理隔离。管理库真实文件为 `data/management.db`（存量部署的旧 `fleetent.db` 由 `scripts/upgrade.py` 在升级时重命名）。
 
 **双权威**：
 - **管理表**（users/api_keys/tenants/teams/scheduled_tasks 等，管理库）→ 仅由 **Alembic** 维护，不在 store 中 `_init_db()` 建表
@@ -195,7 +195,7 @@ unit 不得涉及真实 DB file、schema、CRUD 或 store/runtime 协作：禁�
 ## 环境变量
 
 ```
-DATABASE_URL           # 可选，默认 sqlite:///<data_dir>/fleetent.db
+DATABASE_URL           # 可选，默认 sqlite:///<data_dir>/management.db
 LOG_FORMAT             # console | json，默认 console
 FLEETENT_HOME          # 覆盖 config/data 家目录（未设时：仓库内→./；仓库外→~/.fleetent）
 FLEETENT_AGENTS_DIR    # 覆盖 agents 目录（默认 <config_dir>/agents）
