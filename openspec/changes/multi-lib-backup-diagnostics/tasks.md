@@ -21,8 +21,8 @@
 
 ## 4. 诊断 forbidden-skip 递归全树
 
-- [ ] 4.1 写测试（integration）：数据目录子目录下的 `agent_state.db` / `kb.db`（+WAL）在 diagnostics export 中被排除，manifest 逐一记录每个被跳过的库（含子目录路径） —— 见红
-- [ ] 4.2 把 `observability/diagnostics.py` 的 `_forbidden_skips` 由 `data_dir.iterdir()` 改为递归 `rglob("*.db")`（含 `-wal`/`-shm`），既有 forbidden 判定与 manifest 逻辑不变 —— 见绿
+- [x] 4.1 写测试（integration）：数据目录子目录下的 `agent_state.db` / `kb.db`（+WAL）在 diagnostics export 中被排除，manifest 逐一记录每个被跳过的库（含子目录路径） —— 见红
+- [x] 4.2 把 `observability/diagnostics.py` 的 `_forbidden_skips` 由 `data_dir.iterdir()` 改为递归 `rglob("*.db")`（含 `-wal`/`-shm`），既有 forbidden 判定与 manifest 逻辑不变 —— 见绿
 
 ## 5. 文档同步与收尾
 
