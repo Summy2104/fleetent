@@ -197,7 +197,7 @@ docker compose run --rm fleetent uv run python scripts/upgrade.py
 
 - dry-run 输出 database URL、backup 路径和 migration 计划。
 - dry-run 不创建 backup，也不运行 Alembic。
-- backup-only 创建 `data/backups/YYYYMMDD-HHMMSS/fleetent.db`，不运行 migration。
+- backup-only 在 `data/backups/YYYYMMDD-HHMMSS/` 下按镜像结构创建全部物理库（management.db + 各子目录库）的备份，不运行 migration。
 - upgrade 在 backup 成功后运行 `alembic upgrade head`。
 - 验收记录写入 backup 路径和 migration 结果。
 

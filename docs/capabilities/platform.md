@@ -1372,7 +1372,7 @@ flowchart LR
 
 > 以下为后台管理多机器实例集群时的待决问题。当前实现有多处单机假设，集群化的地基（状态外置）属 session / scheduling / deployment 域，platform 侧只承担"把整个 fleet 当一个逻辑系统来管"的控制面与节点维度。本组在 v1.0 范围未定，按需评估或延期。
 
-- [ ] **集群状态外置（前置地基）**：SQLite（fleetent.db）、JSON sessions + per-session `asyncio.Lock`、governance.permission_gate 的 `asyncio.Event`、APScheduler 进程内调度、observability traces 均为单机部署假设。多机共享同一份事实需迁到自托管基础设施：fleetent.db → PostgreSQL；sessions → PostgreSQL / Redis；per-session 锁 → 分布式锁（Redis / PG advisory lock）；traces → 集中表或共享数据库后端。无此步则多机只是各跑各的。（负责人：待认领）
+- [ ] **集群状态外置（前置地基）**：SQLite（管理库 `management.db` + agent 侧各物理库）、JSON sessions + per-session `asyncio.Lock`、governance.permission_gate 的 `asyncio.Event`、APScheduler 进程内调度、observability traces 均为单机部署假设。多机共享同一份事实需迁到自托管基础设施：管理库 → PostgreSQL；sessions → PostgreSQL / Redis；per-session 锁 → 分布式锁（Redis / PG advisory lock）；traces → 集中表或共享数据库后端。无此步则多机只是各跑各的。（负责人：待认领）
 - [ ] **跨节点审批信令**：一个在途请求只活在某一台节点，但审批动作可能落在另一台后台。governance.permission_gate 的 `asyncio.Event` 需改为跨节点唤醒（Redis pub/sub 或 PG LISTEN/NOTIFY），或把 approval / cancel 路由到持有该请求的 owning node（配合 request_id）。（负责人：待认领）
 - [ ] **单例协调任务的 leader 选举**：cron_scheduler 与 reflection 定期任务必须全集群只跑一次，否则每台节点重复触发同一任务。需 leader 选举或共享 jobstore + 互斥锁。（负责人：待认领）
 - [ ] **节点注册表与控制面**：后台是否演进为无状态控制面（任一节点提供同一 Admin UI，读写共享状态，管整个 fleet）？是否新增「节点 / 实例管理」面——实例注册（node_id / host / 版本 / 心跳 / 状态）、集群拓扑、drain / 滚动重启、版本偏移告警？（负责人：待认领）

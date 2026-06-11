@@ -66,7 +66,7 @@ docker compose run --rm fleetent uv run python scripts/upgrade.py --backup-only
 验收点：
 
 - dry-run 输出 database URL、backup 路径和 migration 计划。
-- 非 dry-run 模式下，SQLite backup 写入 `data/backups/YYYYMMDD-HHMMSS/fleetent.db`。
+- 非 dry-run 模式下，SQLite backup 写入 `data/backups/YYYYMMDD-HHMMSS/`，按数据目录结构**镜像全部物理库**（管理库 `management.db` + per-tenant 的 KB / 共享记忆库 + per-agent `agent_state.db` + 各向量库，含 `-wal`/`-shm`）。
 - 只有 backup 成功后才运行 `alembic upgrade head`。
 - migration 失败时保留 backup，不自动 rollback。
 
@@ -205,8 +205,8 @@ uv run fleetent-admin diagnostics retention apply
 如果 migration、启动或 Pilot smoke 失败：
 
 1. 停止 fleetent 服务。
-2. 确认最近一次 SQLite backup 路径，例如 `data/backups/YYYYMMDD-HHMMSS/fleetent.db`。
-3. 替换当前 DB 文件，例如把 backup DB 复制回 `data/fleetent.db`。
+2. 确认最近一次备份批次目录，例如 `data/backups/YYYYMMDD-HHMMSS/`。
+3. 用**同一备份批次**按镜像结构把全部库复制回 `data/` 对应位置（如 `…/management.db` → `data/management.db`，及 `<tenant>/`、`<tenant>/<agent_id>/` 子目录下各库），保证多库一致、不混用不同时间点的备份。
 4. 重启 fleetent 服务。
 5. 再次运行 `GET /health`。
 6. 运行 `uv run fleetent-admin observability traces --event-type agent_run_failed --limit 20` 查看回滚后是否仍有失败事件。

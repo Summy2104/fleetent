@@ -148,7 +148,7 @@ def extract_message(template: str | None, payload: Any) -> str:
   - `fleetent-admin add-schedule --cron <expr> ...`：CLI 创建任务
   - `fleetent-admin remove-schedule --id <task_id>`：CLI 删除任务
 
-- ✅ **任务持久化**：任务定义存 SQLite（`data/fleetent.db`），server 重启后自动恢复调度
+- ✅ **任务持久化**：`scheduled_tasks` 属管理表，存 SQLite 管理库（`data/management.db`），server 重启后自动恢复调度
 
 - ✅ **全局调度配置**：`platform.yaml` 中只保存 `scheduling.enabled` 和 `scheduling.default_timezone`
   - 旧 `config/cron.yaml` 不再读取；文件存在时启动失败并提示通过 SQLite-backed runtime management 创建任务

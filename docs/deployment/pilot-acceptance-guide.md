@@ -72,7 +72,7 @@ environment:
   `FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN`、`FLEETENT_CONFLUENCE_TOKEN`。
 - MCP server credential 只包含 `api_key_env` 等非敏感引用。
 - `.env`、系统环境变量或受控 secret 文件只留在测试环境本机，不进入 git、trace、日志、diagnostics package 或 issue。
-- `database_url` 指向测试环境 SQLite 文件，例如 `sqlite:///data/fleetent.db`。
+- `database_url` 指向测试环境管理库 SQLite 文件，例如 `sqlite:///data/management.db`。
 
 建议检查：
 
@@ -109,7 +109,7 @@ uv run python scripts/upgrade.py
 
 通过标准：
 
-- SQLite backup 写入 `data/backups/YYYYMMDD-HHMMSS/fleetent.db`。
+- SQLite backup 写入 `data/backups/YYYYMMDD-HHMMSS/`，按数据目录结构镜像全部物理库（管理库 `management.db` + per-tenant / per-agent 子目录下各库，含 WAL sidecar）。
 - backup 成功后才运行 `alembic upgrade head`。
 - migration 成功后服务仍能启动；migration 失败时保留 backup 且脚本返回非 0。
 
@@ -127,8 +127,8 @@ uv run python scripts/upgrade.py --backup-only
 执行 restore drill：
 
 1. 停止 fleetent 服务。
-2. 记录当前 DB 文件路径和 restore 来源 backup。
-3. 将 backup DB 文件替换当前 `data/fleetent.db`。
+2. 记录当前数据目录和 restore 来源备份批次目录。
+3. 用同一备份批次按镜像结构把全部库复制回 `data/` 对应位置（如 `…/management.db` → `data/management.db`，及各 `<tenant>/<agent_id>/` 子目录库），不混用不同时间点的备份。
 4. 重启 fleetent 服务。
 5. 再次执行 `GET /health`。
 6. 运行 observability 查询确认恢复后可查询事件。

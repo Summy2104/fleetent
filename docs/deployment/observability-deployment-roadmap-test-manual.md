@@ -210,24 +210,26 @@ uv run python scripts/upgrade.py
 
 ```bash
 ls -lt data/backups
-test -f data/backups/<timestamp>/fleetent.db
+# 备份批次目录内镜像了全部物理库（management.db + <tenant>/<agent_id>/ 各库）
+ls -R data/backups/<timestamp>/
 ```
 
-如需在测试环境恢复，先停止服务，再由 operator 将 backup 复制回测试 DB 路径，并记录操作：
+如需在测试环境恢复，先停止服务，再由 operator 将该**备份批次按镜像结构整体**复制回数据目录，并记录操作：
 
 ```bash
 stamp=$(date +%Y%m%d-%H%M%S)
-mkdir -p "data/backups/manual-before-restore-${stamp}"
-cp data/fleetent.db "data/backups/manual-before-restore-${stamp}/fleetent.db"
 docker compose down
-cp data/backups/<timestamp>/fleetent.db data/fleetent.db
+# 回滚保险：另存当前数据目录一份
+cp -a data "data-before-restore-${stamp}"
+# 用同一备份批次按镜像结构整体恢复回 data/（含 management.db 与各子目录库）
+cp -a data/backups/<timestamp>/. data/
 docker compose up -d
 ```
 
 通过标准：
 
 - dry-run 输出 database URL、backup 路径和 migration 计划，不创建 backup，不运行 Alembic。
-- backup-only 创建 `data/backups/<timestamp>/fleetent.db`，不运行 migration。
+- backup-only 在 `data/backups/<timestamp>/` 下按镜像结构创建全部物理库（management.db + 各子目录库）的备份，不运行 migration。
 - upgrade 在 backup 成功后运行 migration。
 - restore 覆盖当前 DB 前，先额外保存一份当前 DB 的 manual backup。
 - restore drill 后服务可再次启动。
@@ -286,7 +288,7 @@ uv run fleetent-admin diagnostics retention dry-run
 人工复核：
 
 - package 包含 manifest、logs summary、trace / usage / performance summary、connector status、environment 和 config summary。
-- package 不包含 `data/fleetent.db`、`data/backups/`、credential 文件、secret 文件、完整 prompt / reply、KB chunks。
+- package 不包含 SQLite 主库（`data/management.db` 及 agent 侧各库）、`data/backups/`、credential 文件、secret 文件、完整 prompt / reply、KB chunks。
 - redaction 后仍能定位错误类型、run id、connector id 和 skip reason。
 
 建议检查：
