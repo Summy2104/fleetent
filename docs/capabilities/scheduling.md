@@ -94,36 +94,43 @@ flowchart TD
 
 ## 数据模型
 
-```sql
-scheduled_tasks (
-  id          TEXT PRIMARY KEY,  -- UUID，服务端生成
-  name        TEXT NOT NULL,
-  cron_expr   TEXT NOT NULL,     -- 标准五字段 cron 表达式
-  timezone    TEXT NOT NULL,     -- IANA 时区，默认 UTC
-  user_id     TEXT NOT NULL,     -- 归属用户
-  agent_name  TEXT,              -- 指定执行 agent，NULL 时用默认 agent
-  message     TEXT NOT NULL,     -- 触发时注入的消息内容
-  enabled     INTEGER NOT NULL,  -- 1=启用，0=禁用（规划中暂停功能使用）
-  source      TEXT NOT NULL,     -- "dynamic" | "tool"
-  created_at  TEXT NOT NULL
-)
-```
+`scheduled_tasks` 是 **agent 侧 per-agent 表**，住在该 agent 的 `agent_state.db`，**列级真相源 = `runtime/agent_state_migrations.py`（v27，嵌入式 Y）**，此处不复制完整 DDL（避免与迁移漂移）。任务形态字段：
+
+- **标识/归属**：`id`(UUID) · `name` · `user_id` · `source`(`static`/`dynamic`/`tool`) · `enabled` · `created_at`
+- **触发**：`schedule_kind`(`cron`/`once`/`interval`) + 对应字段 `cron_expr`(cron) / `run_at`(once) / `interval_seconds`+`anchor`(interval) · `timezone`
+- **执行**：`message`(触发注入的 prompt) · 可选 `session_id` · `origin`(创建上下文 JSON) · 可选 `deliver`(投递目标 JSON)
+- **运行态**：`last_run_at` · `last_status` · `last_error` · `next_run_at`
+- ⚠️ **无 `agent_name` 列**（one agent per process，归属由物理库圈定）
 
 Cron jobs 和 webhook sources 不写入平台配置文件。Cron jobs 通过 SQLite-backed runtime management 创建和恢复；webhook source management 将由后续独立 change 接入 runtime API / store。`platform.yaml` 只保存 `scheduling.enabled`、`scheduling.default_timezone`、`webhooks.enabled`、`webhooks.max_body_bytes` 等全局策略。
 
 ## 接口定义
 
 ```python
-# schedule_store
-def create(
-    name: str, cron_expr: str, timezone: str,
-    user_id: str, agent_name: str | None, message: str,
-    source: str = "dynamic",
-) -> dict[str, Any]:
-    """创建定时任务并写入 SQLite，返回完整任务字典。"""
+# schedule_store（注入式：boot 时经 set_state_db(agent_state_db) 注入，无 ensure_schema）
+def set_state_db(db: SQLiteDatabase) -> None:
+    """注入该 agent 的 agent_state.db 句柄；CRUD 经此句柄执行（未注入则抛错）。"""
 
-def list_tasks() -> list[dict[str, Any]]:
-    """返回所有 enabled=1 的任务，agent 进程 boot 时用于恢复调度。"""
+def create(
+    name: str,
+    cron_expr: str | None = None,
+    timezone: str = "UTC",
+    user_id: str = "default",
+    message: str = "",
+    source: str = "dynamic",
+    session_id: str | None = None,
+    *,
+    schedule_kind: str = "cron",       # "cron" | "once" | "interval"
+    run_at: str | None = None,         # once：ISO-8601 或相对 "+30m"
+    interval_seconds: int | None = None,
+    anchor: str | None = None,         # interval 锚点
+    origin: dict[str, Any] | None = None,
+    deliver: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """创建定时任务并写入 agent_state.db，返回完整任务字典。"""
+
+def list_tasks(include_disabled: bool = False) -> list[dict[str, Any]]:
+    """返回任务（默认仅 enabled），agent 进程 boot 时用于恢复调度。"""
 
 def delete(task_id: str) -> bool:
     """删除指定任务，返回是否成功找到并删除。"""
