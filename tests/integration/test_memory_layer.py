@@ -10,10 +10,10 @@ from fleetent import vector_store
 from fleetent.agent_config import AgentFile, default_models
 from fleetent.db import SQLiteDatabase
 from fleetent.memory import extraction, store
-from fleetent.memory.models import MemoryItem
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
 from fleetent.schema_migrations import migrate
 from fleetent.vector_store import runtime as vector_runtime
+from fleetent.vector_store.backend import SearchResult
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +37,32 @@ def _patch_database(tmp_path, monkeypatch):
     migrate(db, AGENT_STATE_MIGRATIONS)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setattr(store, "_state_db", db)
+    monkeypatch.setattr(store, "_vector_backend", _TrackingBackend(), raising=False)
+    monkeypatch.setattr(vector_store, "embed_text", AsyncMock(return_value=[0.1, 0.2, 0.3]))
     return db_path
+
+
+class _TrackingBackend:
+    def __init__(self, *, results: list[SearchResult] | None = None) -> None:
+        self.results = results or []
+        self.upserts: list[tuple[str, list[float], str]] = []
+        self.deletes: list[tuple[str, str]] = []
+        self.searches: list[tuple[list[float], str, int]] = []
+
+    async def upsert(self, id: str, vector: list[float], namespace: str) -> None:
+        self.upserts.append((id, vector, namespace))
+
+    async def search(
+        self, vector: list[float], namespace: str, limit: int = 10
+    ) -> list[SearchResult]:
+        self.searches.append((vector, namespace, limit))
+        return list(self.results)
+
+    async def delete(self, id: str, namespace: str) -> None:
+        self.deletes.append((id, namespace))
+
+    async def clear_namespace(self, namespace: str) -> None:
+        return None
 
 
 def _patch_extraction(monkeypatch, content: str) -> AsyncMock:
@@ -184,8 +209,12 @@ async def test_extract_and_update_ignores_invalid_memory_type(tmp_path, monkeypa
 
 async def test_extract_and_update_upserts_created_memory_to_vector_store(tmp_path, monkeypatch):
     db_path = _patch_database(tmp_path, monkeypatch)
-    upsert = AsyncMock()
-    monkeypatch.setattr(vector_store, "upsert", upsert)
+    backend = _TrackingBackend()
+    embed_text = AsyncMock(return_value=[0.4, 0.5, 0.6])
+    vector_upsert = AsyncMock()
+    monkeypatch.setattr(store, "_vector_backend", backend, raising=False)
+    monkeypatch.setattr(vector_store, "embed_text", embed_text)
+    monkeypatch.setattr(vector_store, "upsert", vector_upsert)
     _patch_extraction(
         monkeypatch,
         """[{"action": "create", "type": "identity", "content": "User is a backend engineer"}]""",
@@ -196,9 +225,9 @@ async def test_extract_and_update_upserts_created_memory_to_vector_store(tmp_pat
     )
 
     [row] = _memory_rows(db_path)
-    upsert.assert_awaited_once_with(
-        row["id"], "User is a backend engineer", vector_store.memory_namespace("alice")
-    )
+    embed_text.assert_awaited_once_with("User is a backend engineer")
+    assert backend.upserts == [(row["id"], [0.4, 0.5, 0.6], vector_store.memory_namespace("alice"))]
+    vector_upsert.assert_not_awaited()
 
 
 async def test_extract_and_update_includes_current_user_memory_snapshot(tmp_path, monkeypatch):
@@ -393,8 +422,12 @@ async def test_extract_and_update_applies_update_ttl_rules(tmp_path, monkeypatch
 
 async def test_extract_and_update_upserts_updated_memory_to_vector_store(tmp_path, monkeypatch):
     db_path = _patch_database(tmp_path, monkeypatch)
-    upsert = AsyncMock()
-    monkeypatch.setattr(vector_store, "upsert", upsert)
+    backend = _TrackingBackend()
+    embed_text = AsyncMock(return_value=[0.7, 0.8, 0.9])
+    vector_upsert = AsyncMock()
+    monkeypatch.setattr(store, "_vector_backend", backend, raising=False)
+    monkeypatch.setattr(vector_store, "embed_text", embed_text)
+    monkeypatch.setattr(vector_store, "upsert", vector_upsert)
     _insert_memory_row(
         db_path,
         id="mem-identity",
@@ -418,9 +451,11 @@ async def test_extract_and_update_upserts_updated_memory_to_vector_store(tmp_pat
         "alice", [{"role": "user", "content": "I am a platform engineer now"}]
     )
 
-    upsert.assert_awaited_once_with(
-        "mem-identity", "User is a platform engineer", vector_store.memory_namespace("alice")
-    )
+    embed_text.assert_awaited_once_with("User is a platform engineer")
+    assert backend.upserts == [
+        ("mem-identity", [0.7, 0.8, 0.9], vector_store.memory_namespace("alice"))
+    ]
+    vector_upsert.assert_not_awaited()
 
 
 async def test_extract_and_update_deletes_existing_memory(tmp_path, monkeypatch):
@@ -446,8 +481,10 @@ async def test_extract_and_update_deletes_existing_memory(tmp_path, monkeypatch)
 
 async def test_extract_and_update_deletes_memory_from_vector_store(tmp_path, monkeypatch):
     db_path = _patch_database(tmp_path, monkeypatch)
-    delete = AsyncMock()
-    monkeypatch.setattr(vector_store, "delete", delete)
+    backend = _TrackingBackend()
+    vector_delete = AsyncMock()
+    monkeypatch.setattr(store, "_vector_backend", backend, raising=False)
+    monkeypatch.setattr(vector_store, "delete", vector_delete)
     _insert_memory_row(
         db_path,
         id="mem-context",
@@ -464,15 +501,18 @@ async def test_extract_and_update_deletes_memory_from_vector_store(tmp_path, mon
         "alice", [{"role": "user", "content": "Forget that billing context"}]
     )
 
-    delete.assert_awaited_once_with("mem-context", vector_store.memory_namespace("alice"))
+    assert backend.deletes == [("mem-context", vector_store.memory_namespace("alice"))]
+    vector_delete.assert_not_awaited()
 
 
 async def test_extract_and_update_ignores_delete_target_outside_current_snapshot(
     tmp_path, monkeypatch
 ):
     db_path = _patch_database(tmp_path, monkeypatch)
-    delete = AsyncMock()
-    monkeypatch.setattr(vector_store, "delete", delete)
+    backend = _TrackingBackend()
+    vector_delete = AsyncMock()
+    monkeypatch.setattr(store, "_vector_backend", backend, raising=False)
+    monkeypatch.setattr(vector_store, "delete", vector_delete)
     expired = (datetime.now(UTC).replace(microsecond=0) - timedelta(days=1)).isoformat()
     _insert_memory_row(
         db_path,
@@ -500,7 +540,8 @@ async def test_extract_and_update_ignores_delete_target_outside_current_snapshot
     await memory_layer.extract_and_update("alice", [{"role": "user", "content": "forget"}])
 
     assert {row["id"] for row in _memory_rows(db_path)} == {"bob-memory", "expired-context"}
-    delete.assert_not_awaited()
+    assert backend.deletes == []
+    vector_delete.assert_not_awaited()
 
 
 async def test_extract_and_update_prompt_describes_action_contract(tmp_path, monkeypatch):
@@ -521,10 +562,12 @@ async def test_extract_and_update_prompt_describes_action_contract(tmp_path, mon
 
 async def test_extract_and_update_ignores_invalid_mutation_outputs(tmp_path, monkeypatch):
     db_path = _patch_database(tmp_path, monkeypatch)
-    upsert = AsyncMock()
-    delete = AsyncMock()
-    monkeypatch.setattr(vector_store, "upsert", upsert)
-    monkeypatch.setattr(vector_store, "delete", delete)
+    backend = _TrackingBackend()
+    vector_upsert = AsyncMock()
+    vector_delete = AsyncMock()
+    monkeypatch.setattr(store, "_vector_backend", backend, raising=False)
+    monkeypatch.setattr(vector_store, "upsert", vector_upsert)
+    monkeypatch.setattr(vector_store, "delete", vector_delete)
     _insert_memory_row(
         db_path,
         id="mem-identity",
@@ -558,8 +601,10 @@ async def test_extract_and_update_ignores_invalid_mutation_outputs(tmp_path, mon
     [row] = _memory_rows(db_path)
     assert row["id"] == "mem-identity"
     assert row["content"] == "User is a backend engineer"
-    upsert.assert_not_awaited()
-    delete.assert_not_awaited()
+    assert backend.upserts == []
+    assert backend.deletes == []
+    vector_upsert.assert_not_awaited()
+    vector_delete.assert_not_awaited()
 
 
 async def test_extract_and_update_ignores_invalid_json_without_mutation(tmp_path, monkeypatch):
@@ -633,19 +678,25 @@ async def test_search_uses_vector_ids_and_filters_expired_memory(tmp_path, monke
         content="User is working on an old project",
         expires_at=expired,
     )
-    vector_search = AsyncMock(
-        return_value=[
-            vector_store.SearchResult(id="mem-2", score=0.9),
-            vector_store.SearchResult(id="missing", score=0.8),
-            vector_store.SearchResult(id="mem-expired", score=0.7),
-            vector_store.SearchResult(id="mem-1", score=0.6),
+    backend = _TrackingBackend(
+        results=[
+            SearchResult(id="mem-2", score=0.9),
+            SearchResult(id="missing", score=0.8),
+            SearchResult(id="mem-expired", score=0.7),
+            SearchResult(id="mem-1", score=0.6),
         ]
     )
+    embed_text = AsyncMock(return_value=[0.2, 0.4, 0.6])
+    vector_search = AsyncMock()
+    monkeypatch.setattr(store, "_vector_backend", backend, raising=False)
+    monkeypatch.setattr(vector_store, "embed_text", embed_text)
     monkeypatch.setattr(vector_store, "search", vector_search)
 
     results = await memory_layer.search("alice", "python debugging", limit=4)
 
-    vector_search.assert_awaited_once_with("python debugging", "mem:alice", 4)
+    embed_text.assert_awaited_once_with("python debugging")
+    assert backend.searches == [([0.2, 0.4, 0.6], "mem:alice", 4)]
+    vector_search.assert_not_awaited()
     assert [item.id for item in results] == ["mem-2", "mem-1"]
     assert [item.content for item in results] == ["User debugs FastAPI", "User likes Python"]
 
@@ -667,6 +718,8 @@ async def test_extract_and_update_user_scoping_isolates_snapshot(tmp_path, monke
 async def test_extract_and_update_does_not_write_legacy_jsonl(tmp_path, monkeypatch):
     _patch_database(tmp_path, monkeypatch)
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(store, "_vector_backend", _TrackingBackend(), raising=False)
+    monkeypatch.setattr(vector_store, "embed_text", AsyncMock(return_value=[0.1, 0.2, 0.3]))
     monkeypatch.setattr(vector_store, "upsert", AsyncMock())
     _patch_extraction(
         monkeypatch,
@@ -678,3 +731,32 @@ async def test_extract_and_update_does_not_write_legacy_jsonl(tmp_path, monkeypa
     )
 
     assert not (tmp_path / "data" / "users" / "alice" / "memories.jsonl").exists()
+
+
+async def test_public_memory_mutations_use_injected_vector_backend(tmp_path, monkeypatch):
+    db_path = _patch_database(tmp_path, monkeypatch)
+    backend = _TrackingBackend()
+    embed_text = AsyncMock(return_value=[0.9, 0.1, 0.3])
+    vector_upsert = AsyncMock()
+    vector_delete = AsyncMock()
+    monkeypatch.setattr(store, "_vector_backend", backend, raising=False)
+    monkeypatch.setattr(vector_store, "embed_text", embed_text)
+    monkeypatch.setattr(vector_store, "upsert", vector_upsert)
+    monkeypatch.setattr(vector_store, "delete", vector_delete)
+    _insert_memory_row(
+        db_path,
+        id="mem-1",
+        type="context",
+        content="User is working on billing",
+        expires_at=(datetime.now(UTC).replace(microsecond=0) + timedelta(days=1)).isoformat(),
+    )
+
+    await memory_layer.update_user_memory_content("alice", "mem-1", "User is working on payments")
+    await memory_layer.mark_user_memory_stale("alice", "mem-1")
+    await memory_layer.delete_user_memory("alice", "mem-1")
+
+    embed_text.assert_awaited_once_with("User is working on payments")
+    assert backend.upserts == [("mem-1", [0.9, 0.1, 0.3], "mem:alice")]
+    assert backend.deletes == [("mem-1", "mem:alice"), ("mem-1", "mem:alice")]
+    vector_upsert.assert_not_awaited()
+    vector_delete.assert_not_awaited()

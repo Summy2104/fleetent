@@ -193,14 +193,24 @@ async def test_extract_and_update_applies_valid_actions_and_skips_invalid_target
         extraction.vector_store, "memory_namespace", lambda user_id: f"mem:{user_id}"
     )
 
-    async def fake_upsert(id: str, content: str, namespace: str) -> None:
-        vector_upserts.append((id, content, namespace))
+    async def fake_embed_text(content: str) -> list[float]:
+        return [float(len(content)), 1.0]
 
-    async def fake_delete(id: str, namespace: str) -> None:
-        vector_deletes.append((id, namespace))
+    class _TrackingBackend:
+        async def upsert(self, id: str, vector: list[float], namespace: str) -> None:
+            vector_upserts.append((id, vector, namespace))
 
-    monkeypatch.setattr(extraction.vector_store, "upsert", fake_upsert)
-    monkeypatch.setattr(extraction.vector_store, "delete", fake_delete)
+        async def search(self, vector: list[float], namespace: str, limit: int = 10) -> list[Any]:
+            return []
+
+        async def delete(self, id: str, namespace: str) -> None:
+            vector_deletes.append((id, namespace))
+
+        async def clear_namespace(self, namespace: str) -> None:
+            return None
+
+    monkeypatch.setattr(extraction.vector_store, "embed_text", fake_embed_text)
+    monkeypatch.setattr(extraction.store, "vector_backend", lambda: _TrackingBackend())
 
     await extraction.extract_and_update(
         "u1", [{"role": "user", "content": "facts"}], model_policy=policy
@@ -211,9 +221,9 @@ async def test_extract_and_update_applies_valid_actions_and_skips_invalid_target
         ("existing", "User prefers terse summaries", None)
     ]
     assert deleted_ids == ["deleted"]
-    assert [(content, namespace) for _id, content, namespace in vector_upserts] == [
-        ("User is an operator", "mem:u1"),
-        ("User prefers terse summaries", "mem:u1"),
+    assert [(namespace, vector) for _id, vector, namespace in vector_upserts] == [
+        ("mem:u1", [19.0, 1.0]),
+        ("mem:u1", [28.0, 1.0]),
     ]
     assert vector_deletes == [("deleted", "mem:u1")]
 
@@ -358,10 +368,20 @@ async def test_memory_maintenance_dry_run_and_delete_paths(monkeypatch):
         maintenance.vector_store, "memory_namespace", lambda user_id: f"memory:{user_id}"
     )
 
-    async def fake_vector_delete(id: str, namespace: str) -> None:
-        vector_deleted.append((id, namespace))
+    class _TrackingBackend:
+        async def upsert(self, id: str, vector: list[float], namespace: str) -> None:
+            return None
 
-    monkeypatch.setattr(maintenance.vector_store, "delete", fake_vector_delete)
+        async def search(self, vector: list[float], namespace: str, limit: int = 10) -> list[Any]:
+            return []
+
+        async def delete(self, id: str, namespace: str) -> None:
+            vector_deleted.append((id, namespace))
+
+        async def clear_namespace(self, namespace: str) -> None:
+            return None
+
+    monkeypatch.setattr(maintenance.store, "vector_backend", lambda: _TrackingBackend())
 
     dry = await maintenance.run_memory_maintenance("u1", dry_run=True)
     assert dry.deleted_ids == ["expired", "over", "dup"]

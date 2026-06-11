@@ -80,7 +80,7 @@ async def extract_and_update(
             if target is None:
                 continue
             store.delete_memory(user_id, target.id)
-            await vector_store.delete(target.id, vector_ns)
+            await store.vector_backend().delete(target.id, vector_ns)
             continue
         content = action.get("content")
         raw_type = action.get("type")
@@ -103,7 +103,8 @@ async def extract_and_update(
                 expires_at=expires_at(memory_type, now),
             )
             store.update_memory(updated)
-            await vector_store.upsert(updated.id, updated.content, vector_ns)
+            vector = await vector_store.embed_text(updated.content)
+            await store.vector_backend().upsert(updated.id, vector, vector_ns)
             continue
         if action_name != "create":
             continue
@@ -117,7 +118,8 @@ async def extract_and_update(
             expires_at=expires_at(memory_type, now),
         )
         store.insert_memory(item)
-        await vector_store.upsert(item.id, item.content, vector_ns)
+        vector = await vector_store.embed_text(item.content)
+        await store.vector_backend().upsert(item.id, vector, vector_ns)
 
 
 def strip_markdown_fence(text: str) -> str:

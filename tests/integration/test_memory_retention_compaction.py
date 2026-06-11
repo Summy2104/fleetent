@@ -14,6 +14,23 @@ def _patch_database(tmp_path, monkeypatch):
     return db_path
 
 
+class _TrackingBackend:
+    def __init__(self) -> None:
+        self.deletes: list[tuple[str, str]] = []
+
+    async def upsert(self, id: str, vector: list[float], namespace: str) -> None:
+        return None
+
+    async def search(self, vector: list[float], namespace: str, limit: int = 10) -> list[object]:
+        return []
+
+    async def delete(self, id: str, namespace: str) -> None:
+        self.deletes.append((id, namespace))
+
+    async def clear_namespace(self, namespace: str) -> None:
+        return None
+
+
 def _insert_memory(
     db_path,
     *,
@@ -58,11 +75,13 @@ async def test_apply_deletes_expired_context_rows_and_vectors(tmp_path, monkeypa
         type="identity",
         content="User is a platform engineer",
     )
-    vector_deletes = []
+    backend = _TrackingBackend()
+    vector_delete = []
 
     async def delete_vector(id: str, namespace: str) -> None:
-        vector_deletes.append((id, namespace))
+        vector_delete.append((id, namespace))
 
+    monkeypatch.setattr(store, "_vector_backend", backend, raising=False)
     monkeypatch.setattr(maintenance.vector_store, "delete", delete_vector)
 
     summary = await memory_layer.run_memory_maintenance(
@@ -74,7 +93,8 @@ async def test_apply_deletes_expired_context_rows_and_vectors(tmp_path, monkeypa
     assert summary.expired_count == 1
     assert summary.deleted_ids == ["ctx-expired"]
     assert _memory_ids(db_path) == ["identity-current"]
-    assert vector_deletes == [("ctx-expired", "mem:user-1")]
+    assert backend.deletes == [("ctx-expired", "mem:user-1")]
+    assert vector_delete == []
 
 
 async def test_apply_deletes_older_over_limit_rows_and_vectors(tmp_path, monkeypatch):
@@ -95,11 +115,13 @@ async def test_apply_deletes_older_over_limit_rows_and_vectors(tmp_path, monkeyp
         content="User prefers verbose answers",
         updated_at="2026-01-01T00:00:00+00:00",
     )
-    vector_deletes = []
+    backend = _TrackingBackend()
+    vector_delete = []
 
     async def delete_vector(id: str, namespace: str) -> None:
-        vector_deletes.append((id, namespace))
+        vector_delete.append((id, namespace))
 
+    monkeypatch.setattr(store, "_vector_backend", backend, raising=False)
     monkeypatch.setattr(maintenance.vector_store, "delete", delete_vector)
 
     summary = await memory_layer.run_memory_maintenance(
@@ -111,7 +133,8 @@ async def test_apply_deletes_older_over_limit_rows_and_vectors(tmp_path, monkeyp
     assert summary.over_limit_count == 1
     assert summary.deleted_ids == ["pref-old"]
     assert _memory_ids(db_path) == ["pref-new"]
-    assert vector_deletes == [("pref-old", "mem:user-1")]
+    assert backend.deletes == [("pref-old", "mem:user-1")]
+    assert vector_delete == []
 
 
 async def test_apply_duplicate_compaction_removes_duplicates_but_keeps_canonical(
@@ -134,11 +157,13 @@ async def test_apply_duplicate_compaction_removes_duplicates_but_keeps_canonical
         content="user prefers concise answers",
         updated_at="2026-01-01T00:00:00+00:00",
     )
-    vector_deletes = []
+    backend = _TrackingBackend()
+    vector_delete = []
 
     async def delete_vector(id: str, namespace: str) -> None:
-        vector_deletes.append((id, namespace))
+        vector_delete.append((id, namespace))
 
+    monkeypatch.setattr(store, "_vector_backend", backend, raising=False)
     monkeypatch.setattr(maintenance.vector_store, "delete", delete_vector)
 
     summary = await memory_layer.run_memory_maintenance(
@@ -150,7 +175,8 @@ async def test_apply_duplicate_compaction_removes_duplicates_but_keeps_canonical
     assert summary.compacted_count == 1
     assert summary.deleted_ids == ["pref-duplicate"]
     assert _memory_ids(db_path) == ["pref-canonical"]
-    assert vector_deletes == [("pref-duplicate", "mem:user-1")]
+    assert backend.deletes == [("pref-duplicate", "mem:user-1")]
+    assert vector_delete == []
 
 
 async def test_apply_is_scoped_to_requested_user_and_vector_namespace(tmp_path, monkeypatch):
@@ -173,11 +199,13 @@ async def test_apply_is_scoped_to_requested_user_and_vector_namespace(tmp_path, 
         content="User B old project",
         expires_at="2026-01-01T00:00:00+00:00",
     )
-    vector_deletes = []
+    backend = _TrackingBackend()
+    vector_delete = []
 
     async def delete_vector(id: str, namespace: str) -> None:
-        vector_deletes.append((id, namespace))
+        vector_delete.append((id, namespace))
 
+    monkeypatch.setattr(store, "_vector_backend", backend, raising=False)
     monkeypatch.setattr(maintenance.vector_store, "delete", delete_vector)
 
     summary = await memory_layer.run_memory_maintenance(
@@ -188,4 +216,5 @@ async def test_apply_is_scoped_to_requested_user_and_vector_namespace(tmp_path, 
 
     assert summary.deleted_ids == ["user-a-expired"]
     assert _memory_ids(db_path) == ["user-b-expired"]
-    assert vector_deletes == [("user-a-expired", "mem:user-a")]
+    assert backend.deletes == [("user-a-expired", "mem:user-a")]
+    assert vector_delete == []

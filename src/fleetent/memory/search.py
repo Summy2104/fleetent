@@ -12,7 +12,8 @@ from fleetent.memory.models import MemoryItem
 async def search(user_id: str, query: str, limit: int = 10) -> list[MemoryItem]:
     """Return semantically relevant, non-expired memory items."""
     vector_ns = vector_store.memory_namespace(user_id)
-    vector_results = await vector_store.search(query, vector_ns, limit)
+    query_vector = await vector_store.embed_text(query)
+    vector_results = await store.vector_backend().search(query_vector, vector_ns, limit)
     ids = [result.id for result in vector_results]
     if not ids:
         return []

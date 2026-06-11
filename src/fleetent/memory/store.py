@@ -18,6 +18,7 @@ from fleetent.memory.models import (
     MemoryMaintenancePolicy,
     MemoryType,
 )
+from fleetent.vector_store.backend import VectorBackend
 
 SNAPSHOT_LIMITS: dict[MemoryType, int] = {
     "identity": 20,
@@ -26,6 +27,7 @@ SNAPSHOT_LIMITS: dict[MemoryType, int] = {
 }
 
 _state_db: SQLiteDatabase | None = None
+_vector_backend: VectorBackend | None = None
 
 
 def set_state_db(db: SQLiteDatabase) -> None:
@@ -34,10 +36,25 @@ def set_state_db(db: SQLiteDatabase) -> None:
     _state_db = db
 
 
+def set_vector_backend(backend: VectorBackend) -> None:
+    """Inject the per-agent vector backend. Called once at agent boot."""
+    global _vector_backend
+    _vector_backend = backend
+
+
 def database() -> SQLiteDatabase:
     if _state_db is None:
         raise RuntimeError("memory/store: state_db not initialized — call set_state_db(db) at boot")
     return _state_db
+
+
+def vector_backend() -> VectorBackend:
+    if _vector_backend is None:
+        raise RuntimeError(
+            "memory/store: vector_backend not initialized"
+            " — call set_vector_backend(backend) at boot"
+        )
+    return _vector_backend
 
 
 def get_user_memory(user_id: str, memory_id: str) -> MemoryItem | None:

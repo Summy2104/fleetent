@@ -201,7 +201,7 @@ erDiagram
 > ingest 单写、agent/retrieval 只读；agent 可用的 KB 由 `agent_kbs`（管理库，绑定真相源，经 `kb_id` 跨库引用本库）materialize 进 `agent.yaml`，运行时读配置不查表。
 
 ### 3.6 向量底座（独立 substrate · 按家族路由）
-`vector_items`（每个 scope 一个向量库文件：`mem:`→per-agent 向量库、`shared:`→共享记忆向量库、`kb:`→KB 向量库）
+`vector_items`（每个 scope 一个向量库文件：`mem:`→当前 agent 的 `agent_vectors.db`，同库内再按 `mem:{user_id}` 分区；`shared:`→共享记忆向量库；`kb:`→KB 向量库）
 
 ## 4. 多租户与隔离
 

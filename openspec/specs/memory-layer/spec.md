@@ -41,12 +41,13 @@ Define structured per-user semantic memory storage, extraction, vector indexing,
 #### Scenario: Create action writes memory
 - **WHEN** LLM 返回 action=`create`、合法 type 和非空 content
 - **THEN** 系统写入一条 memory item
-- **AND** 调用 `vector_store.upsert()` 同步索引
+- **AND** 调用注入的 per-agent 向量后端同步索引
 
 #### Scenario: Update action changes existing memory
 - **WHEN** LLM 返回 action=`update`、合法 `target_id`、合法 type 和非空 content
 - **THEN** 系统更新该 memory item 的 content 和 updated_at
-- **AND** 调用 `vector_store.upsert(target_id, content, memory_namespace(user_id))`
+- **AND** 先调用 `vector_store.embed_text(content)` 生成向量
+- **AND** 调用注入的 per-agent 向量后端 upsert 到 `mem:{user_id}`
 
 #### Scenario: Context update refreshes TTL
 - **WHEN** context memory 被 update
@@ -59,7 +60,7 @@ Define structured per-user semantic memory storage, extraction, vector indexing,
 #### Scenario: Delete action removes existing memory
 - **WHEN** LLM 返回 action=`delete` 和合法 `target_id`
 - **THEN** 系统删除该 memory item
-- **AND** 调用 `vector_store.delete(target_id, memory_namespace(user_id))`
+- **AND** 调用注入的 per-agent 向量后端 delete `mem:{user_id}` 中的该 id
 
 #### Scenario: Ignore action does not mutate memory
 - **WHEN** LLM 返回 action=`ignore`
@@ -90,18 +91,32 @@ Define structured per-user semantic memory storage, extraction, vector indexing,
 - **THEN** expires_at 为 NULL
 
 ### Requirement: Vector index synchronization
-系统 SHALL 在创建 memory item 后同步写入 vector_store。
+系统 SHALL 在创建 / 更新 / 删除 memory item 后，经注入的 per-agent 向量后端（`agent_vectors.db`，来自 `agent_scope(tenant, agent_id).vector_backend`）同步向量索引，MUST NOT 使用全局 `vector_store` backend 自连。`mem:{user_id}` namespace 保留为该 per-agent 向量库内的按用户分区；embedding 仍走全局 provider（`vector_store.embed_text`）。
 
-#### Scenario: Memory create upserts vector
+#### Scenario: Memory create upserts vector into injected backend
 - **WHEN** memory item 被写入 SQLite
-- **THEN** 系统调用 `vector_store.upsert(memory_id, content, memory_namespace(user_id))`
+- **THEN** 系统先调用 `vector_store.embed_text(content)` 生成向量
+- **AND** 调用注入的 per-agent 向量后端 upsert 到 `mem:{user_id}`
+- **AND** 不调用全局 `vector_store` backend 的 upsert
+
+#### Scenario: Memory delete removes vector from injected backend
+- **WHEN** memory item 被删除或标记 stale
+- **THEN** 系统调用注入的 per-agent 向量后端 delete `mem:{user_id}` 中的该 id
+- **AND** 不调用全局 `vector_store` backend 的 delete
+
+#### Scenario: Memory vectors land in the current agent vector store
+- **WHEN** agent A 与 agent B 各自写入同一用户 namespace 的记忆
+- **THEN** A 的向量落 A 的 `agent_vectors.db`、B 落 B 的
+- **AND** 两个 agent 不共享一个全局向量库
 
 ### Requirement: Semantic memory search
-`search()` SHALL 通过 vector_store 检索 memory ids，回查 SQLite，并返回未过期 MemoryItem。
+`search()` SHALL 先用 `vector_store.embed_text(query)` 生成 query vector，再经注入的 per-agent 向量后端按 `mem:{user_id}` 检索 memory ids，回查 SQLite，并返回未过期 MemoryItem。MUST NOT 使用全局 `vector_store` backend 检索。
 
-#### Scenario: Search uses vector namespace
+#### Scenario: Search uses injected per-agent backend
 - **WHEN** 调用 `search("user-1", "python debugging")`
-- **THEN** 系统查询 vector_store namespace `mem:user-1`
+- **THEN** 系统调用 `vector_store.embed_text("python debugging")`
+- **AND** 使用注入的 per-agent 向量后端检索 namespace `mem:user-1`
+- **AND** 不调用全局 `vector_store` backend 的 search
 
 #### Scenario: Search returns memory items in vector order
 - **WHEN** vector_store 返回 memory ids `[id-2, id-1]`

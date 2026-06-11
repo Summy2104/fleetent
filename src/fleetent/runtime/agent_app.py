@@ -206,11 +206,13 @@ def _init_agent_db_schema(database_url: str, *, agent_id: str, tenant_id: str = 
         sm_db,
         tenant_scope.shared_memory_vector_backend,  # type: ignore[arg-type]
     )
-    agent_state_db = router.agent_scope(tenant_id, agent_id).open_state_db(AGENT_STATE_MIGRATIONS)
+    agent_scope = router.agent_scope(tenant_id, agent_id)
+    agent_state_db = agent_scope.open_state_db(AGENT_STATE_MIGRATIONS)
     session_index.set_state_db(agent_state_db)
     traces.set_state_db(agent_state_db)
     reflection.set_state_db(agent_state_db)
     memory_store.set_state_db(agent_state_db)
+    memory_store.set_vector_backend(agent_scope.vector_backend)
     approval_store.set_state_db(agent_state_db)
     allowlist_store.set_state_db(agent_state_db)
     runtime_context.set_state_db(agent_state_db)

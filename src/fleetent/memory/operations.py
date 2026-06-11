@@ -27,7 +27,8 @@ async def update_user_memory_content(user_id: str, memory_id: str, content: str)
         expires_at=expires_at(item.type, now),
     )
     store.update_memory(updated)
-    await vector_store.upsert(updated.id, updated.content, vector_store.memory_namespace(user_id))
+    vector = await vector_store.embed_text(updated.content)
+    await store.vector_backend().upsert(updated.id, vector, vector_store.memory_namespace(user_id))
 
 
 async def mark_user_memory_stale(user_id: str, memory_id: str) -> None:
@@ -46,13 +47,13 @@ async def mark_user_memory_stale(user_id: str, memory_id: str) -> None:
         expires_at=now,
     )
     store.update_memory(updated)
-    await vector_store.delete(updated.id, vector_store.memory_namespace(user_id))
+    await store.vector_backend().delete(updated.id, vector_store.memory_namespace(user_id))
 
 
 async def delete_user_memory(user_id: str, memory_id: str) -> None:
     """Delete one User Memory item through the public memory-layer boundary."""
     store.delete_memory(user_id, memory_id)
-    await vector_store.delete(memory_id, vector_store.memory_namespace(user_id))
+    await store.vector_backend().delete(memory_id, vector_store.memory_namespace(user_id))
 
 
 async def merge_user_memories(
