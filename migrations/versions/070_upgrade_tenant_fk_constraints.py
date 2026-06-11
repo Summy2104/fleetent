@@ -30,6 +30,18 @@ branch_labels = None
 depends_on = None
 
 
+def _has_table(name: str) -> bool:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    return inspector.has_table(name)
+
+
+def _has_foreign_key(table_name: str, fk_name: str) -> bool:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    return any(fk.get("name") == fk_name for fk in inspector.get_foreign_keys(table_name))
+
+
 def upgrade() -> None:
     # agents: tenant_id FK→tenants, team_id FK→teams
     with op.batch_alter_table("agents", recreate="always") as batch:
@@ -44,15 +56,11 @@ def upgrade() -> None:
     # knowledge_bases has a composite PK (tenant_id, kb_id) and child tables reference it;
     # batch mode handles this correctly on SQLite.
     with op.batch_alter_table("knowledge_bases", recreate="always") as batch:
-        batch.create_foreign_key(
-            "fk_knowledge_bases_tenant_id", "tenants", ["tenant_id"], ["id"]
-        )
+        batch.create_foreign_key("fk_knowledge_bases_tenant_id", "tenants", ["tenant_id"], ["id"])
 
     # long_term_context_policies: tenant_id FK→tenants
     with op.batch_alter_table("long_term_context_policies", recreate="always") as batch:
-        batch.create_foreign_key(
-            "fk_ltc_policies_tenant_id", "tenants", ["tenant_id"], ["id"]
-        )
+        batch.create_foreign_key("fk_ltc_policies_tenant_id", "tenants", ["tenant_id"], ["id"])
 
     # tenants.approver_user_id FK→users (now that users is in Alembic)
     with op.batch_alter_table("tenants", recreate="always") as batch:
@@ -62,9 +70,7 @@ def upgrade() -> None:
 
     # teams.approver_user_id FK→users
     with op.batch_alter_table("teams", recreate="always") as batch:
-        batch.create_foreign_key(
-            "fk_teams_approver_user_id", "users", ["approver_user_id"], ["id"]
-        )
+        batch.create_foreign_key("fk_teams_approver_user_id", "users", ["approver_user_id"], ["id"])
 
 
 def downgrade() -> None:
@@ -80,8 +86,9 @@ def downgrade() -> None:
     with op.batch_alter_table("knowledge_bases", recreate="always") as batch:
         batch.drop_constraint("fk_knowledge_bases_tenant_id", type_="foreignkey")
 
-    with op.batch_alter_table("traces", recreate="always") as batch:
-        batch.drop_constraint("fk_traces_tenant_id", type_="foreignkey")
+    if _has_table("traces") and _has_foreign_key("traces", "fk_traces_tenant_id"):
+        with op.batch_alter_table("traces", recreate="always") as batch:
+            batch.drop_constraint("fk_traces_tenant_id", type_="foreignkey")
 
     with op.batch_alter_table("agents", recreate="always") as batch:
         batch.drop_constraint("fk_agents_team_id", type_="foreignkey")

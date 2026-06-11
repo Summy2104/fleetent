@@ -46,10 +46,14 @@ def test_database_url_env_redirects_migration_target(
 
     # DATABASE_URL should have been used → target_db has tables
     assert target_db.exists(), "target_db should have been created via DATABASE_URL"
-    assert "traces" in _table_names(target_db)
+    tables = _table_names(target_db)
+    assert "users" in tables
+    assert {"traces", "memory_items", "reflection_reports"}.isdisjoint(tables)
 
     # ini fallback should NOT have been touched
-    assert not ini_fallback_db.exists(), "ini fallback db should be untouched when DATABASE_URL is set"
+    assert not ini_fallback_db.exists(), (
+        "ini fallback db should be untouched when DATABASE_URL is set"
+    )
 
 
 def test_migration_uses_ini_default_when_database_url_unset(
@@ -64,4 +68,6 @@ def test_migration_uses_ini_default_when_database_url_unset(
     command.upgrade(cfg, "head")
 
     assert ini_db.exists()
-    assert "traces" in _table_names(ini_db)
+    tables = _table_names(ini_db)
+    assert "users" in tables
+    assert {"traces", "memory_items", "reflection_reports"}.isdisjoint(tables)

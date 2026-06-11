@@ -9,6 +9,19 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_persisted_approval(monkeypatch):
+    """Default: no persisted approval row / pending entry, so the handler skips the
+    restart-authz recovery + resume path. Resume tests override these."""
+    from fleetent.governance import approval_store
+    from fleetent.session import manager as session_mgr
+
+    monkeypatch.setattr(approval_store, "get_approval", lambda aid: None)
+    monkeypatch.setattr(session_mgr, "get_pending_approval", AsyncMock(return_value=None))
+
 
 def _body(action_id: str, approval_id: str = "appr-1", user: str = "U_CLICKER") -> dict:
     return {
@@ -106,3 +119,44 @@ async def test_reply_func_forwards_blocks_to_say() -> None:
     kwargs = say.call_args.kwargs
     assert kwargs["text"] == "prompt text"
     assert kwargs["blocks"] == blocks
+
+
+# ── button resolution resumes the suspended run (approval-suspend-resume Task 7) ──
+
+
+async def test_approve_button_triggers_resume(monkeypatch):
+    from fleetent.governance import approval_store
+    from fleetent.im_gateway import normalizer, slack
+    from fleetent.session import manager as session_mgr
+
+    client = AsyncMock()
+    monkeypatch.setattr(
+        "fleetent.governance.permission_gate._default_gate.resolve",
+        AsyncMock(return_value=True),
+    )
+    # Approval row carries the run's (namespaced) session id; pending entry has approvers.
+    monkeypatch.setattr(
+        approval_store,
+        "get_approval",
+        lambda aid: {"session_id": "slack:dm:U_REQ:1.1", "status": "pending"},
+    )
+    monkeypatch.setattr(
+        session_mgr,
+        "get_pending_approval",
+        AsyncMock(return_value={"approver_ids": ["U_CLICKER"], "tool_name": "send_im_message"}),
+    )
+    resume = AsyncMock(return_value="已完成。")
+    monkeypatch.setattr(normalizer, "_resume_pending_in_session", resume)
+
+    await slack.handle_approval_action(
+        ack=AsyncMock(),
+        body=_body("approval_approve"),
+        client=client,
+        agent_name="my-bot",
+    )
+
+    # Resume invoked for the approval's session + the button's decision.
+    assert resume.await_args is not None
+    assert resume.await_args.args[1] == "slack:dm:U_REQ:1.1"  # session_id
+    assert resume.await_args.args[2] == "appr-1"  # approval_id
+    assert resume.await_args.args[3] == "approved"  # decision

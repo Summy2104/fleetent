@@ -206,7 +206,7 @@ uv run fleetent-admin diagnostics retention apply
 
 1. 停止 fleetent 服务。
 2. 确认最近一次备份批次目录，例如 `data/backups/YYYYMMDD-HHMMSS/`。
-3. 用**同一备份批次**按镜像结构把全部库复制回 `data/` 对应位置（如 `…/management.db` → `data/management.db`，及 `<tenant>/`、`<tenant>/<agent_id>/` 子目录下各库），保证多库一致、不混用不同时间点的备份。
+3. 用**同一备份批次**按镜像结构把全部库复制回 `data/` 对应位置（如 `…/management.db` → `data/management.db`，及 `<tenant>/`、`<tenant>/<agent_id>/` 子目录下各库），替换当前 DB 文件，保证多库一致、不混用不同时间点的备份。
 4. 重启 fleetent 服务。
 5. 再次运行 `GET /health`。
 6. 运行 `uv run fleetent-admin observability traces --event-type agent_run_failed --limit 20` 查看回滚后是否仍有失败事件。

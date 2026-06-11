@@ -16,6 +16,20 @@ branch_labels = None
 depends_on = None
 
 
+def _has_memory_items_table() -> bool:
+    return sa.inspect(op.get_bind()).has_table("memory_items")
+
+
+def _has_memory_items_index(name: str) -> bool:
+    inspector = sa.inspect(op.get_bind())
+    return any(index["name"] == name for index in inspector.get_indexes("memory_items"))
+
+
+def _has_memory_items_column(name: str) -> bool:
+    inspector = sa.inspect(op.get_bind())
+    return any(column["name"] == name for column in inspector.get_columns("memory_items"))
+
+
 def upgrade() -> None:
     op.add_column(
         "memory_items",
@@ -29,6 +43,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("idx_memory_items_user_namespace_type", table_name="memory_items")
-    with op.batch_alter_table("memory_items") as batch_op:
-        batch_op.drop_column("namespace")
+    if not _has_memory_items_table():
+        return
+    if _has_memory_items_index("idx_memory_items_user_namespace_type"):
+        op.drop_index("idx_memory_items_user_namespace_type", table_name="memory_items")
+    if _has_memory_items_column("namespace"):
+        with op.batch_alter_table("memory_items") as batch_op:
+            batch_op.drop_column("namespace")

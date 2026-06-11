@@ -941,26 +941,6 @@ def _as_utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
-def ensure_schema(db: SQLiteDatabase) -> None:
-    """Create reflection_reports table and index if they do not exist. Idempotent."""
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS reflection_reports (
-            id                  TEXT PRIMARY KEY,
-            scope               TEXT NOT NULL,
-            time_window_start   TEXT NOT NULL,
-            time_window_end     TEXT NOT NULL,
-            findings_json       TEXT NOT NULL,
-            created_at          TEXT NOT NULL
-        )
-        """
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_reflection_reports_scope_created"
-        " ON reflection_reports (scope, created_at)"
-    )
-
-
 _state_db: SQLiteDatabase | None = None
 
 

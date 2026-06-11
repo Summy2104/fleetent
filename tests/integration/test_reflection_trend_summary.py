@@ -2,7 +2,9 @@ import json
 import sqlite3
 from datetime import UTC, datetime
 
-from fleetent.db import create_database
+from fleetent.db import SQLiteDatabase, create_database
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 from tests.integration.test_migrations import apply_migrations
 
 
@@ -11,6 +13,7 @@ def _patch_reflection_db(monkeypatch, tmp_path):
 
     db_path = tmp_path / "reflection-trends.db"
     apply_migrations(db_path)
+    migrate(SQLiteDatabase(path=db_path), AGENT_STATE_MIGRATIONS)
     database = create_database(f"sqlite:///{db_path}")
     monkeypatch.setattr(reflection, "_database", lambda: database)
     return db_path

@@ -1,9 +1,9 @@
 # agent-db-schema-self-init Specification
 
 ## Purpose
-standalone agent 进程（`fleetent agent run <id>`）启动时自动建立 agent DB（`agents/<id>/data/fleetent.db`）
-所需的全部表结构，无需外部 alembic 步骤。每个 agent-side store 暴露幂等的 `ensure_schema()`
-函数，由 `agent_app._start_infra()` 统一调用。
+standalone agent 进程（`fleetent agent run <id>`）启动时自动建立 agent-side DB schema，
+无需外部 alembic 步骤。agent 运行时表由 per-agent / per-tenant 物理库上的统一嵌入式
+`MIGRATIONS` 建立；管理库 schema 仅由 alembic 维护。
 
 ## Requirements
 
@@ -25,27 +25,22 @@ SHALL create all agent-side tables in the DB pointed to by `DATABASE_URL`.
 - **WHEN** `_init_agent_db_schema()` is called on a DB that already has all tables
 - **THEN** no error is raised and no data is modified
 
-### Requirement: ensure_schema 与 alembic 保持一致（漂移护栏）
+### Requirement: 管理库不再定义 traces / memory_items / reflection_reports
 
-每个**仍以 `ensure_schema()` 自建**的 agent-side store（traces/memory/reflection），其所建表的列定义 SHALL
-与 `alembic upgrade head` 产出的同名表一致。系统 SHALL 提供一个自动护栏测试持续校验这一致性，使两套 schema
-权威（alembic 升级路径 / agent 自建路径）不会悄悄分叉。本护栏为**过渡件**（data-model §5.2）：仅在 agent 表
-仍混于 `fleetent.db`、与 alembic 双定义期间生效；已迁入 Y 的库（如 KB 关系库）不在其校验范围。
+管理库 alembic SHALL NOT 再定义 `traces` / `memory_items` / `reflection_reports` 表。
+它们是 agent 侧运行时表，唯一真相源为 per-agent `agent_state.db` 的统一 `MIGRATIONS`
+（Y）。这三张表在 alembic 中的历史定义 SHALL 经 forward-drop 迁移移除，使管理库
+不再建出永不被写的孤儿 agent 表。
 
-#### Scenario: 双路建表列一致
+#### Scenario: 管理库 alembic head 不含这三表
 
-- **WHEN** 空库 A 执行 `alembic upgrade head`，空库 B 执行全部仍存的 `ensure_schema()`
-- **THEN** 对 B 中每张表，其列集合等于 A 中同名表的列集合
+- **WHEN** 全新管理库执行 `alembic upgrade head`
+- **THEN** 库中不含 `traces` / `memory_items` / `reflection_reports` 表
 
-#### Scenario: 漂移被护栏捕获
+#### Scenario: agent 侧仍由 Y 建这三表
 
-- **WHEN** 某 `ensure_schema()` 的列定义与对应 alembic 迁移不一致
-- **THEN** 护栏测试失败，并指出分叉的表与列
-
-#### Scenario: Y 管理的库不在漂移校验内
-
-- **WHEN** KB 关系库已由嵌入式迁移（Y）管理
-- **THEN** 漂移护栏不把 KB 表纳入 ensure_schema↔alembic 一致性校验
+- **WHEN** 某 agent 的 `agent_state.db` 以统一 `MIGRATIONS` 打开
+- **THEN** `traces` / `memory_items` / `reflection_reports` 由 Y 建立，读写经 `agent_scope` 落该 agent 的库，与管理库无关
 
 ### Requirement: session 元数据纳入 agent DB 自建
 

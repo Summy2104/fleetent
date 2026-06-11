@@ -59,6 +59,11 @@ class StopReason(StrEnum):
     max_turns = "max_turns"
     consecutive_failures = "consecutive_failures"
     approval_rejected = "approval_rejected"
+    # Non-terminal: the run paused because a gated tool call is awaiting human
+    # approval. Pending state is persisted to the session; resolution resumes the
+    # run (approval-suspend-resume). Unlike approval_rejected (terminal), this is a
+    # mid-state the run returns to later.
+    awaiting_approval = "awaiting_approval"
     # Reserved: defined here so trace consumers know the full vocabulary, but no
     # checker is registered for these in this change (see proposal/design).
     loop_detected = "loop_detected"
@@ -76,6 +81,10 @@ class LoopState:
     turn: int = 0
     consecutive_failures: int = 0
     approval_rejected: bool = False
+    # Gated tool calls suspended this run awaiting human approval (approval-suspend-resume).
+    # Each entry: {approval_id, tool_call_id, tool_name, tool_args, risk, approver_ids}.
+    # Non-empty at turn end → run ends with StopReason.awaiting_approval and persists these.
+    pending_approvals: list[dict[str, object]] = field(default_factory=list)
     # Loop-detection state (AR4). Defaults keep this backward-compatible: an
     # empty history and unset flags leave every existing checker unaffected.
     tool_history: list[ToolCallRecord] = field(default_factory=list)

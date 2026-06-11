@@ -3,6 +3,8 @@ from datetime import UTC, datetime, timedelta
 from fleetent import memory
 from fleetent.db import SQLiteDatabase, create_database
 from fleetent.memory import store as memory_store
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 from tests.integration.test_migrations import apply_migrations
 
 
@@ -159,16 +161,19 @@ def test_memory_quality_trend_includes_maintenance_proposal_counts(tmp_path, mon
 
 def _patch_database(tmp_path, monkeypatch) -> SQLiteDatabase:
     from fleetent import reflection
+    from fleetent.observability import traces
 
     db_path = tmp_path / "memory-quality-trends.db"
     apply_migrations(db_path)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     db = create_database(f"sqlite:///{db_path}")
+    migrate(db, AGENT_STATE_MIGRATIONS)
     monkeypatch.setattr(memory_store, "_state_db", db)
     # reflection no longer falls back to DATABASE_URL (agent-runtime-db-routing-cleanup):
     # inject its per-agent state DB explicitly.
     monkeypatch.setattr(reflection, "_state_db", db)
+    monkeypatch.setattr(traces, "_state_db", db)
     return db
 
 

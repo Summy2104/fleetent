@@ -1,6 +1,6 @@
 """Integration tests for agent DB schema self-initialization.
 
-Tests that ensure_schema() functions create the correct tables and indices,
+Tests that the embedded migration lists create the correct tables and indices,
 and that _init_agent_db_schema() wires them all together correctly.
 These tests use real SQLiteDatabase files and verify actual schema state.
 """
@@ -28,22 +28,24 @@ def _index_names(db: SQLiteDatabase) -> set[str]:
     return {r["name"] for r in rows}
 
 
-# ── traces ────────────────────────────────────────────────────────────────────
+# ── traces via AGENT_STATE_MIGRATIONS ─────────────────────────────────────────
 
 
-def test_traces_ensure_schema_creates_table(tmp_path: Path) -> None:
-    from fleetent.observability.traces import ensure_schema
+def test_traces_y_migrations_create_table(tmp_path: Path) -> None:
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+    from fleetent.schema_migrations import migrate
 
     db = _db(tmp_path)
-    ensure_schema(db)
+    migrate(db, AGENT_STATE_MIGRATIONS)
     assert "traces" in _table_names(db)
 
 
-def test_traces_ensure_schema_creates_indices(tmp_path: Path) -> None:
-    from fleetent.observability.traces import ensure_schema
+def test_traces_y_migrations_create_indices(tmp_path: Path) -> None:
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+    from fleetent.schema_migrations import migrate
 
     db = _db(tmp_path)
-    ensure_schema(db)
+    migrate(db, AGENT_STATE_MIGRATIONS)
     indices = _index_names(db)
     assert "idx_traces_run_id" in indices
     assert "idx_traces_user_ts" in indices
@@ -51,12 +53,13 @@ def test_traces_ensure_schema_creates_indices(tmp_path: Path) -> None:
     assert "idx_traces_tenant_event_ts" in indices
 
 
-def test_traces_ensure_schema_idempotent(tmp_path: Path) -> None:
-    from fleetent.observability.traces import ensure_schema
+def test_traces_y_migrations_idempotent(tmp_path: Path) -> None:
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+    from fleetent.schema_migrations import migrate
 
     db = _db(tmp_path)
-    ensure_schema(db)
-    ensure_schema(db)
+    migrate(db, AGENT_STATE_MIGRATIONS)
+    migrate(db, AGENT_STATE_MIGRATIONS)
     assert "traces" in _table_names(db)
 
 
@@ -93,42 +96,46 @@ def test_memory_y_migrations_idempotent(tmp_path: Path) -> None:
     assert "memory_items" in _table_names(db)
 
 
-# ── reflection ─────────────────────────────────────────────────────────────────
+# ── reflection via AGENT_STATE_MIGRATIONS ─────────────────────────────────────
 
 
-def test_reflection_ensure_schema_creates_table(tmp_path: Path) -> None:
-    from fleetent.reflection import ensure_schema
+def test_reflection_y_migrations_create_table(tmp_path: Path) -> None:
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+    from fleetent.schema_migrations import migrate
 
     db = _db(tmp_path)
-    ensure_schema(db)
+    migrate(db, AGENT_STATE_MIGRATIONS)
     assert "reflection_reports" in _table_names(db)
 
 
-def test_reflection_ensure_schema_creates_index(tmp_path: Path) -> None:
-    from fleetent.reflection import ensure_schema
+def test_reflection_y_migrations_create_index(tmp_path: Path) -> None:
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+    from fleetent.schema_migrations import migrate
 
     db = _db(tmp_path)
-    ensure_schema(db)
+    migrate(db, AGENT_STATE_MIGRATIONS)
     assert "idx_reflection_reports_scope_created" in _index_names(db)
 
 
-def test_reflection_ensure_schema_idempotent(tmp_path: Path) -> None:
-    from fleetent.reflection import ensure_schema
+def test_reflection_y_migrations_idempotent(tmp_path: Path) -> None:
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+    from fleetent.schema_migrations import migrate
 
     db = _db(tmp_path)
-    ensure_schema(db)
-    ensure_schema(db)
+    migrate(db, AGENT_STATE_MIGRATIONS)
+    migrate(db, AGENT_STATE_MIGRATIONS)
     assert "reflection_reports" in _table_names(db)
 
 
-# ── knowledge base ─────────────────────────────────────────────────────────────
+# ── knowledge base via KB_MIGRATIONS ──────────────────────────────────────────
 
 
-def test_kb_ensure_schema_creates_all_tables(tmp_path: Path) -> None:
-    from fleetent.knowledge_base.operations import ensure_schema
+def test_kb_y_migrations_create_all_tables(tmp_path: Path) -> None:
+    from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
+    from fleetent.schema_migrations import migrate
 
     db = _db(tmp_path)
-    ensure_schema(db)
+    migrate(db, KB_MIGRATIONS)
     tables = _table_names(db)
     assert "knowledge_bases" in tables
     assert "knowledge_documents" in tables
@@ -136,21 +143,23 @@ def test_kb_ensure_schema_creates_all_tables(tmp_path: Path) -> None:
     assert "knowledge_source_states" in tables
 
 
-def test_kb_ensure_schema_creates_fts_table(tmp_path: Path) -> None:
-    from fleetent.knowledge_base.operations import ensure_schema
+def test_kb_y_migrations_create_fts_table(tmp_path: Path) -> None:
+    from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
+    from fleetent.schema_migrations import migrate
 
     db = _db(tmp_path)
-    ensure_schema(db)
+    migrate(db, KB_MIGRATIONS)
     # FTS5 virtual table name matches migration 008
     assert "knowledge_chunks_fts" in _table_names(db)
 
 
-def test_kb_ensure_schema_idempotent(tmp_path: Path) -> None:
-    from fleetent.knowledge_base.operations import ensure_schema
+def test_kb_y_migrations_idempotent(tmp_path: Path) -> None:
+    from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
+    from fleetent.schema_migrations import migrate
 
     db = _db(tmp_path)
-    ensure_schema(db)
-    ensure_schema(db)
+    migrate(db, KB_MIGRATIONS)
+    migrate(db, KB_MIGRATIONS)
     assert "knowledge_chunks" in _table_names(db)
 
 

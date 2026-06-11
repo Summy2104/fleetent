@@ -82,12 +82,15 @@ def test_retention_apply_disabled_fails_fast(tmp_path):
 def _patch_traces_db(monkeypatch, tmp_path, rows):
     from pathlib import Path
 
-    from fleetent.db import create_database
+    from fleetent.db import SQLiteDatabase, create_database
     from fleetent.observability import diagnostics
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+    from fleetent.schema_migrations import migrate
     from tests.integration.test_migrations import apply_migrations
 
     db_path = Path(tmp_path) / "traces.db"
     apply_migrations(db_path)
+    migrate(SQLiteDatabase(path=db_path), AGENT_STATE_MIGRATIONS)
     database = create_database(f"sqlite:///{db_path}")
     for ts, run_id in rows:
         database.execute(

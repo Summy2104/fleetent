@@ -6,7 +6,14 @@ from unittest.mock import AsyncMock
 import pytest
 
 from fleetent.db import SQLiteDatabase
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 from tests.integration.test_migrations import apply_migrations
+
+
+def _prepare_db(db_path) -> None:
+    apply_migrations(db_path)
+    migrate(SQLiteDatabase(path=db_path), AGENT_STATE_MIGRATIONS)
 
 
 @pytest.fixture(autouse=True)
@@ -21,7 +28,7 @@ def _reflection_state_db(tmp_path, monkeypatch):
     from fleetent.observability import traces
 
     db_path = tmp_path / "_reflection_autostate.db"
-    apply_migrations(db_path)
+    _prepare_db(db_path)
     db = SQLiteDatabase(path=db_path)
     monkeypatch.setattr(reflection, "_state_db", db)
     monkeypatch.setattr(traces, "_state_db", db)
@@ -35,9 +42,15 @@ def _use_db(monkeypatch, db_path) -> None:
     its per-agent state DB is injected explicitly; DATABASE_URL stays set for traces/memory.
     """
     from fleetent import reflection
+    from fleetent.memory import store as memory_store
+    from fleetent.observability import traces
 
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-    monkeypatch.setattr(reflection, "_state_db", SQLiteDatabase(path=db_path))
+    db = SQLiteDatabase(path=db_path)
+    migrate(db, AGENT_STATE_MIGRATIONS)
+    monkeypatch.setattr(reflection, "_state_db", db)
+    monkeypatch.setattr(traces, "_state_db", db)
+    monkeypatch.setattr(memory_store, "_state_db", db)
 
 
 async def test_reflection_public_api_is_importable():
@@ -253,7 +266,7 @@ async def test_run_reflection_persists_report_without_raw_transcript(tmp_path, m
     from fleetent import observability, reflection
 
     db_path = tmp_path / "reflection.db"
-    apply_migrations(db_path)
+    _prepare_db(db_path)
     raw_user_input = "My private transcript says I prefer Python"
     raw_agent_reply = "Agent reply should not be stored verbatim"
     events = [
@@ -320,7 +333,7 @@ async def test_memory_findings_do_not_modify_memory_items_table(tmp_path, monkey
     from fleetent import observability, reflection
 
     db_path = tmp_path / "reflection.db"
-    apply_migrations(db_path)
+    _prepare_db(db_path)
     now = datetime.now(UTC).isoformat()
     with sqlite3.connect(db_path) as conn:
         conn.execute(

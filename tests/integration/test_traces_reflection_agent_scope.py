@@ -1,15 +1,15 @@
-"""Integration tests: traces and reflection connections come from agent_scope (3b-2).
+"""Integration tests: traces and reflection are routed through agent_scope.
 
 Verifies:
+- agent_app boots agent_state.db via unified AGENT_STATE_MIGRATIONS
 - traces.py exposes set_state_db() and uses the injected db for record/query
 - reflection.py exposes set_state_db() and uses the injected db for operations
-- Guard: agent_app._init_agent_db_schema source no longer calls traces.ensure_schema
-  or reflection.ensure_schema (schema now handled by unified AGENT_STATE_MIGRATIONS)
 """
 
 from __future__ import annotations
 
 import inspect
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -30,29 +30,43 @@ def _migrated_db(tmp_path: Path) -> SQLiteDatabase:
     return db
 
 
-# ── Guard: agent_app no longer calls ensure_schema into global db ──────────────
+def _tables(db_path: Path) -> set[str]:
+    conn = sqlite3.connect(db_path)
+    try:
+        return {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    finally:
+        conn.close()
 
 
-def test_agent_app_does_not_call_traces_ensure_schema() -> None:
-    """_init_agent_db_schema must not call traces.ensure_schema (schema via Y now)."""
+# ── Positive invariants: agent_app uses unified migrations + agent_scope ──────
+
+
+def test_agent_app_opens_agent_state_db_with_unified_migrations() -> None:
+    """_init_agent_db_schema must open agent_state.db via agent_scope + AGENT_STATE_MIGRATIONS."""
     import fleetent.runtime.agent_app as agent_app_module
 
     src = inspect.getsource(agent_app_module._init_agent_db_schema)
-    assert "traces.ensure_schema" not in src, (
-        "_init_agent_db_schema must not call traces.ensure_schema; "
-        "traces schema is now bootstrapped via AGENT_STATE_MIGRATIONS"
+    assert "router.agent_scope(tenant_id, agent_id).open_state_db(AGENT_STATE_MIGRATIONS)" in src, (
+        "_init_agent_db_schema must bootstrap agent_state.db via "
+        "router.agent_scope(...).open_state_db(AGENT_STATE_MIGRATIONS)"
     )
 
 
-def test_agent_app_does_not_call_reflection_ensure_schema() -> None:
-    """_init_agent_db_schema must not call reflection.ensure_schema (schema via Y now)."""
-    import fleetent.runtime.agent_app as agent_app_module
+def test_agent_app_routes_traces_and_reflection_tables_to_agent_state_db(tmp_path: Path) -> None:
+    """Boot on an empty management DB still creates runtime tables only in agent_state.db."""
+    from fleetent.runtime.agent_app import _init_agent_db_schema
 
-    src = inspect.getsource(agent_app_module._init_agent_db_schema)
-    assert "reflection.ensure_schema" not in src, (
-        "_init_agent_db_schema must not call reflection.ensure_schema; "
-        "reflection schema is now bootstrapped via AGENT_STATE_MIGRATIONS"
-    )
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    mgmt_db_path = data_dir / "management.db"
+
+    _init_agent_db_schema(f"sqlite:///{mgmt_db_path}", agent_id="agent-1", tenant_id="default")
+
+    agent_state_db_path = data_dir / "default" / "agent-1" / "agent_state.db"
+    assert agent_state_db_path.exists()
+    assert {"traces", "reflection_reports", "memory_items"} <= _tables(agent_state_db_path)
+    if mgmt_db_path.exists():
+        assert {"traces", "reflection_reports", "memory_items"}.isdisjoint(_tables(mgmt_db_path))
 
 
 def test_agent_app_calls_traces_set_state_db() -> None:
@@ -85,9 +99,7 @@ def test_traces_exposes_set_state_db() -> None:
     assert callable(traces.set_state_db)
 
 
-def test_traces_record_uses_injected_db(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_traces_record_uses_injected_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """After set_state_db, record_trace_event writes to the injected per-agent DB."""
     from fleetent.observability import traces
     from fleetent.observability.traces import TraceEvent
@@ -106,9 +118,7 @@ def test_traces_record_uses_injected_db(
     assert row["run_id"] == "run-inject"
 
 
-def test_traces_query_uses_injected_db(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_traces_query_uses_injected_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """query_trace_events reads from the injected per-agent DB."""
     from fleetent.observability import traces
     from fleetent.observability.traces import TraceEvent, TraceQuery

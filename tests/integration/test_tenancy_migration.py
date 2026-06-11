@@ -11,7 +11,6 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-import pytest
 from alembic import command
 from alembic.config import Config
 
@@ -219,13 +218,10 @@ def test_agents_team_id_fk_to_teams(tmp_path: Path) -> None:
     assert team_fk["table"] == "teams"
 
 
-def test_traces_tenant_id_fk_to_tenants(tmp_path: Path) -> None:
+def test_traces_table_is_absent_from_management_db(tmp_path: Path) -> None:
     db = tmp_path / "test.db"
     _upgrade(db)
-    fks = _fk_list(db, "traces")
-    tenant_fk = next((f for f in fks if f["from"] == "tenant_id"), None)
-    assert tenant_fk is not None, "traces.tenant_id should have FK→tenants"
-    assert tenant_fk["table"] == "tenants"
+    assert "traces" not in _tables(db)
 
 
 def test_knowledge_bases_tenant_id_fk_to_tenants(tmp_path: Path) -> None:

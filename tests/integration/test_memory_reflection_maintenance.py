@@ -7,7 +7,14 @@ from unittest.mock import AsyncMock
 import pytest
 
 from fleetent.db import SQLiteDatabase
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 from tests.integration.test_migrations import apply_migrations
+
+
+def _prepare_db(db_path) -> None:
+    apply_migrations(db_path)
+    migrate(SQLiteDatabase(path=db_path), AGENT_STATE_MIGRATIONS)
 
 
 def _use_db(monkeypatch, db_path) -> None:
@@ -18,11 +25,14 @@ def _use_db(monkeypatch, db_path) -> None:
     """
     from fleetent import reflection
     from fleetent.memory import store as memory_store
+    from fleetent.observability import traces
 
     db_handle = SQLiteDatabase(path=db_path)
+    migrate(db_handle, AGENT_STATE_MIGRATIONS)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setattr(reflection, "_state_db", db_handle)
     monkeypatch.setattr(memory_store, "_state_db", db_handle)
+    monkeypatch.setattr(traces, "_state_db", db_handle)
 
 
 async def test_memory_candidate_generates_pending_proposal_without_modifying_memory(
@@ -32,7 +42,7 @@ async def test_memory_candidate_generates_pending_proposal_without_modifying_mem
     from fleetent import observability, reflection
 
     db_path = tmp_path / "reflection_maintenance.db"
-    apply_migrations(db_path)
+    _prepare_db(db_path)
     _use_db(monkeypatch, db_path)
     before = _memory_rows(db_path)
     events = [
@@ -75,7 +85,7 @@ async def test_memory_conflict_generates_owner_review_proposal_without_memory_wr
     from fleetent import observability, reflection
 
     db_path = tmp_path / "reflection_maintenance.db"
-    apply_migrations(db_path)
+    _prepare_db(db_path)
     now = datetime.now(UTC)
     with sqlite3.connect(db_path) as conn:
         for memory_id, content in [
@@ -152,7 +162,7 @@ async def test_team_or_project_fact_suggests_shared_memory_or_kb(tmp_path, monke
     from fleetent import observability, reflection
 
     db_path = tmp_path / "reflection_maintenance.db"
-    apply_migrations(db_path)
+    _prepare_db(db_path)
     _use_db(monkeypatch, db_path)
     events = [
         observability.TraceEvent(
@@ -188,7 +198,7 @@ async def test_memory_layer_public_mutation_rejects_cross_user_target(tmp_path, 
     from fleetent import memory as memory_layer
 
     db_path = tmp_path / "reflection_maintenance.db"
-    apply_migrations(db_path)
+    _prepare_db(db_path)
     now = datetime.now(UTC)
     with sqlite3.connect(db_path) as conn:
         conn.execute(

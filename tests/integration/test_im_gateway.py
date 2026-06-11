@@ -122,6 +122,7 @@ async def test_approve_command_resolves_gate_and_does_not_call_agent(
         decision="approved",
         approver_user_id="approver-1",
         always=False,
+        authorized_actors=None,
     )
     mock_agent_loop.run.assert_not_called()
     assert "abc12345" in reply_calls[0]
@@ -157,6 +158,7 @@ async def test_reject_command_resolves_gate(mock_session_mgr, mock_agent_loop, m
         decision="rejected",
         approver_user_id="approver-2",
         always=False,
+        authorized_actors=None,
     )
     mock_agent_loop.run.assert_not_called()
     assert "rejected" in reply_calls[0]
