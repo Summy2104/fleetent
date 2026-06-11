@@ -29,7 +29,7 @@ async def run_memory_maintenance(
     if not dry_run:
         for id in deleted_ids:
             store.delete_memory(user_id, id)
-            await vector_store.delete(id, vector_store.memory_namespace(user_id))
+            await store.vector_backend().delete(id, vector_store.memory_namespace(user_id))
     return MemoryMaintenanceSummary(
         user_id=user_id,
         dry_run=dry_run,

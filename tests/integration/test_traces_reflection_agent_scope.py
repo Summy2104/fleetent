@@ -46,7 +46,8 @@ def test_agent_app_opens_agent_state_db_with_unified_migrations() -> None:
     import fleetent.runtime.agent_app as agent_app_module
 
     src = inspect.getsource(agent_app_module._init_agent_db_schema)
-    assert "router.agent_scope(tenant_id, agent_id).open_state_db(AGENT_STATE_MIGRATIONS)" in src, (
+    assert "agent_scope = router.agent_scope(tenant_id, agent_id)" in src
+    assert "agent_scope.open_state_db(AGENT_STATE_MIGRATIONS)" in src, (
         "_init_agent_db_schema must bootstrap agent_state.db via "
         "router.agent_scope(...).open_state_db(AGENT_STATE_MIGRATIONS)"
     )

@@ -56,6 +56,8 @@ def _patch_database(tmp_path, monkeypatch):
     db = SQLiteDatabase(path=db_path)
     migrate(db, AGENT_STATE_MIGRATIONS)
     monkeypatch.setattr(store, "_state_db", db)
+    monkeypatch.setattr(store, "_vector_backend", _TrackingBackend(), raising=False)
+    monkeypatch.setattr(vector_store, "embed_text", AsyncMock(return_value=[0.1, 0.2, 0.3]))
     return db_path
 
 
@@ -80,12 +82,27 @@ def _memory_rows(db_path):
         ]
 
 
+class _TrackingBackend:
+    def __init__(self) -> None:
+        self.upserts: list[tuple[str, list[float], str]] = []
+
+    async def upsert(self, id: str, vector: list[float], namespace: str) -> None:
+        self.upserts.append((id, vector, namespace))
+
+    async def search(self, vector: list[float], namespace: str, limit: int = 10) -> list[object]:
+        return []
+
+    async def delete(self, id: str, namespace: str) -> None:
+        return None
+
+    async def clear_namespace(self, namespace: str) -> None:
+        return None
+
+
 async def test_extract_and_update_reads_first_valid_json_array_from_real_provider_output(
     tmp_path, monkeypatch
 ) -> None:
     db_path = _patch_database(tmp_path, monkeypatch)
-    upsert = AsyncMock()
-    monkeypatch.setattr(vector_store, "upsert", upsert)
     _patch_extraction(
         monkeypatch,
         """
@@ -113,8 +130,6 @@ async def test_extract_and_update_reads_first_valid_json_array_from_real_provide
 
 async def test_extract_and_update_reads_json_array_from_inline_prose(tmp_path, monkeypatch) -> None:
     db_path = _patch_database(tmp_path, monkeypatch)
-    upsert = AsyncMock()
-    monkeypatch.setattr(vector_store, "upsert", upsert)
     _patch_extraction(
         monkeypatch,
         'Memory actions: [{"action": "create", "type": "preferences", '
@@ -150,8 +165,6 @@ async def test_extract_and_update_normalizes_type_aware_real_provider_content(
     tmp_path, monkeypatch
 ) -> None:
     db_path = _patch_database(tmp_path, monkeypatch)
-    upsert = AsyncMock()
-    monkeypatch.setattr(vector_store, "upsert", upsert)
     _patch_extraction(
         monkeypatch,
         """

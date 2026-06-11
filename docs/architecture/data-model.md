@@ -200,9 +200,9 @@ erDiagram
 > ingest 单写、agent/retrieval 只读；agent 可用的 KB 由 `agent_kbs`（管理库，绑定真相源，经 `kb_id` 跨库引用本库）materialize 进 `agent.yaml`，运行时读配置不查表。
 
 ### 3.6 向量底座（独立 substrate · 按家族路由）
-`vector_items`（每个 scope 一个向量库文件：`mem:`→per-agent `agent_vectors.db`、`shared:`→共享记忆 `shared_memory_vectors.db`、`kb:`→KB `kb_vectors.db`）
+`vector_items`（每个 scope 一个向量库文件：`mem:`→当前 agent 的 `agent_vectors.db`，同库内再按 `mem:{user_id}` 分区；`shared:`→共享记忆 `shared_memory_vectors.db`；`kb:`→KB `kb_vectors.db`）
 
-> ⚠️ **接线现状(as-built)**:目前只有 **`shared:` 已接** per-tenant 向量后端(`shared_memory_vector_backend` 注入)。**`mem:` 与 `kb:` 仍走全局 `vector_store` + namespace**(`AgentScope.vector_backend` / `KbScope.kb_vector_backend` 提供了但没注入),无物理隔离——上方"每 scope 一文件"是目标态。待 `wire-memory-vector-routing`(mem:)与 `wire-kb-tenant-routing`(kb:)落地后此注记移除。
+> ⚠️ **接线现状(as-built)**: `mem:` 与 `shared:` 已接到各自 scope 的注入向量后端；**`kb:` 仍走全局 `vector_store` + namespace**（`KbScope.kb_vector_backend` 已提供但未注入），待 `wire-kb-tenant-routing` 落地后此注记移除。
 
 ## 4. 多租户与隔离
 
