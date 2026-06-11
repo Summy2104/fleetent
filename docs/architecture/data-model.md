@@ -48,54 +48,138 @@ data/
 
 > 实体名 + 一句话职责；列级以迁移为准（见文首）。关系多为 `*_id` 约定引用（非 DB 外键）。
 
-**关系骨架（ER）** —— 实线为同库关系，跨物理库引用为 `*_id` 逻辑约定（agent 侧库物理分离、无跨文件外键）：
+本节分**宏观**（§3.1 物理库全景 + 跨库引用）与**按库明细**（§3.2–§3.6，每库完整实体 + 库内关系）。所有关系均为 `*_id` 逻辑约定，**物理库间无 DB 外键**。
+
+### 3.1 物理库全景（宏观）
+
+5 物理库 + 库间**跨库逻辑引用**（虚线 = `*_id` 约定，非 DB 外键；agent 侧库物理分离、无跨文件外键）：
+
+```mermaid
+graph TD
+  subgraph MGMT["管理库 management.db ｜ platform 侧 · 单库跨主体 · Alembic"]
+    users
+    tenants
+    teams
+    agents
+    api_keys
+    agent_kbs
+    channel_agents
+    model_providers
+  end
+  subgraph AGENT["per-agent agent_state.db ｜ agent 侧 · 每 agent 一文件 · 嵌入式 Y"]
+    sessions
+    traces
+    memory_items
+    approvals
+    reflection_reports
+  end
+  subgraph KB["KB 关系库 kb.db ｜ agent 侧 · per-tenant"]
+    knowledge_bases
+    knowledge_documents
+    knowledge_chunks
+    kb_entities
+  end
+  subgraph SHARED["共享记忆 shared_memory.db ｜ agent 侧 · per-tenant"]
+    shared_memory_items
+  end
+  subgraph VEC["向量底座 ｜ agent 侧 · 按家族路由"]
+    vector_items
+  end
+  memory_items -. user_id .-> users
+  traces -. agent_id .-> agents
+  approvals -. agent_id .-> agents
+  shared_memory_items -. tenant_id .-> tenants
+  agent_kbs -. kb_id .-> knowledge_bases
+  vector_items -. "mem:/shared:/kb: 家族" .-> memory_items
+```
+
+> 宏观图只列各库主干实体；完整清单与库内关系见下方各库明细（§3.2–§3.6）。
+
+### 3.2 管理库（Alembic · platform 侧）
+- **身份/租户**：`users`(根主体，含 `tenant_id`) · `api_keys`(→users) · `tenants`(主体，含 `approver_user_id`) · `teams`(→tenants，含 `approver_user_id`)
+- **IM**：`im_users`((platform,platform_user_id)→内部 user) · `im_connectors` · `im_channel_allowlist`
+- **Agent 定义/绑定**：`agents`(定义，含 `tenant_id`/`team_id`/`active_version_id`) · `agent_versions`(不可变快照) · `agent_admin_state`(版本/部署态) · `user_agents`(用户↔agent) · `channel_agents`(渠道↔agent) · `agent_kbs`(**agent↔KB 绑定唯一真相源**，带 `created_by` 审计) · `agent_mcp_servers` · `agent_mcp_server_bindings` · `agent_oauth_bindings` · `connectors`(工具 OAuth) · `agent_skills` · `long_term_context_policies`
+- **模型**：`model_providers` · `model_routes`(task_type→provider)
+- **治理/编排**：`audit_log`(平台管理操作审计) · `scheduled_tasks`(cron)
+- **Skill 治理**：`skill_provenance` · `skill_admin_state`（全局 skill 态）
 
 ```mermaid
 erDiagram
   tenants ||--o{ teams : "下设"
   tenants ||--o{ users : "tenant_id"
   tenants ||--o{ agents : "tenant_id"
-  teams ||--o{ agents : "team_id(归属)"
+  teams ||--o{ agents : "team_id 归属"
   users ||--o{ api_keys : "has"
   users ||--o{ user_agents : ""
-  agents ||--o{ user_agents : ""
-  agents ||--o{ agent_versions : "versions"
+  agents ||--o{ user_agents : "用户↔agent"
+  users ||--o{ im_users : "平台用户→内部 user"
+  im_connectors ||--o{ im_channel_allowlist : "渠道准入"
+  agents ||--o{ agent_versions : "不可变快照"
+  agents ||--|| agent_admin_state : "版本/部署态"
   agents ||--o{ channel_agents : "渠道绑定"
-  agents ||--o{ agent_kbs : "KB 绑定(真相源)"
-  knowledge_bases ||--o{ agent_kbs : ""
-  model_providers ||--o{ model_routes : "routes"
-  knowledge_bases ||--o{ knowledge_documents : "contains"
-  knowledge_documents ||--o{ knowledge_chunks : "split"
-  knowledge_bases ||--o{ kb_entities : "extracts"
-  kb_entities ||--o{ kb_relations : "source/target"
-  users ||..o{ memory_items : "owns · per-agent库"
-  agents ||..o{ traces : "agent_id · per-agent库"
-  agents ||..o{ approvals : "审批 · per-agent库"
-  tenants ||..o{ shared_memory_items : "scope · 共享库"
+  agents ||--o{ agent_kbs : "KB 绑定真相源"
+  agents ||--o{ agent_mcp_server_bindings : ""
+  agent_mcp_servers ||--o{ agent_mcp_server_bindings : "MCP 绑定"
+  connectors ||--o{ agent_oauth_bindings : "工具 OAuth"
+  agents ||--o{ agent_oauth_bindings : ""
+  agents ||--o{ agent_skills : "skill 绑定"
+  agents ||--o{ long_term_context_policies : "tenant 默认+agent 覆盖"
+  model_providers ||--o{ model_routes : "task_type→provider"
+  users ||--o{ scheduled_tasks : "owner"
+  users ||--o{ audit_log : "管理操作审计"
+  skill_provenance ||--|| skill_admin_state : "全局 skill 态"
 ```
 
-> 虚线/跨库：`memory_items`/`approvals`/`traces` 等在 **per-agent 库**（按 `user_id`/`agent_id` 逻辑关联管理库的 users/agents）；`shared_memory_items` 在 **per-tenant 共享库**；KB 各表在 **per-tenant KB 库**。物理库间无 DB 外键，仅 id 约定。
+> ⚠️ **当前错位（待 `agent-runtime-db-routing-cleanup` 迁移）**：`session_anti_flap`（压缩防抖）、`sub_agent_runs`（子 agent 生命周期）属 **agent 运行时数据**，但现经 `user_store.DB_PATH` + 裸 `sqlite3.connect` 物理落在**管理库**——违反「agent 数据只落 agent 侧」与统一 `db.py` 边界，应迁入 per-agent `agent_state.db`。
 
-### 管理库（Alembic）
-- **身份/租户**：`users`(根主体，含 `tenant_id`) · `api_keys`(→users) · `tenants`(主体，含 `approver_user_id`) · `teams`(→tenants，含 `approver_user_id`)
-- **IM**：`im_users`((platform,platform_user_id)→内部 user) · `im_connectors` · `im_channel_allowlist`
-- **Agent 定义/绑定**：`agents`(定义，含 `tenant_id`/`team_id`/`active_version_id`) · `agent_versions`(不可变快照) · `agent_admin_state`(版本/部署态) · `user_agents`(用户↔agent) · `channel_agents`(渠道↔agent) · `agent_kbs`(**agent↔KB 绑定唯一真相源**，带 `created_by` 审计) · `agent_mcp_servers` · `agent_mcp_server_bindings` · `agent_oauth_bindings` · `connectors`(工具 OAuth) · `agent_skills` · `long_term_context_policies`
-- **模型**：`model_providers` · `model_routes`(task_type→provider)
-- **治理/编排**：`audit_log`(平台管理操作审计) · `scheduled_tasks`(cron)
-- **Skill 治理**：`skill_provenance` · `skill_admin_state`（全局 skill 态；提案草稿见 per-agent）
+### 3.3 per-agent 运行库（嵌入式 Y · `agent_state.db` · agent 侧）
+统一 MIGRATIONS（`runtime/agent_state_migrations.py`）当前建 **6 张表**：`sessions`(会话元数据索引) · `traces`(append-only 运行轨迹) · `reflection_reports`(反思报告) · `memory_items`(per-user 语义记忆，**无 namespace 列**，agent 隔离靠物理库) · `approvals`/`approval_allowlist`(审批请求+门状态，**agent 全权真相源**，actor 为不透明标签)。
 
-### per-agent 运行库（嵌入式 Y，`agent_state.db`）
-`sessions`/`session_meta`(会话元数据) · `session_anti_flap`(压缩防抖) · `sub_agent_runs`(子 agent 生命周期) · `traces`(append-only 轨迹) · `memory_items`(per-user 语义记忆，**无 namespace 列**，agent 隔离靠物理库) · `memory_maintenance_proposals` · 自进化(`reflection_reports` · skill 提案草稿) · `approvals`/`approval_allowlist`(审批请求+门状态，**agent 全权真相源**，actor 为不透明标签)
-> 会话**内容**仍是 JSON 文件（`SESSIONS_DIR`，与元数据 DB 表物理分离）。
+```mermaid
+erDiagram
+  sessions ||--o{ approvals : "session_id"
+  memory_items ||--o{ memory_maintenance_proposals : "维护建议"
+  traces {
+    string run_id
+  }
+  reflection_reports {
+    string scope
+  }
+  approval_allowlist {
+    string fingerprint
+  }
+  skill_proposals {
+    string status
+  }
+```
 
-### 共享记忆库（嵌入式 Y，`shared_memory.db`，per-tenant）
+> ⚠️ **未进统一 MIGRATIONS（待 cleanup 收编）**：`memory_maintenance_proposals`、`skill_proposals` 经 store 注入路由到 `agent_state.db`（库对），但由 legacy `ensure_schema` 建表、不在统一 `MIGRATIONS`——应折进统一列表（单文件单 `user_version`）。
+> 跨库（见 §3.1）：`memory_items.user_id` ⇢ 管理库 `users`；`approvals.requester_user_id` ⇢ 管理库 `users`、`approvals.session_id` → 本库 `sessions`。会话**内容**仍是 JSON 文件（`SESSIONS_DIR`，与元数据 DB 表物理分离）。
+
+### 3.4 共享记忆库（嵌入式 Y · `shared_memory.db` · agent 侧 · per-tenant）
 `shared_memory_items`(team/tenant scope 共享记忆，多 agent 写的真相源)
 
-### KB 关系库（嵌入式 Y，`kb.db`，per-tenant）
+### 3.5 KB 关系库（嵌入式 Y · `kb.db` · agent 侧 · per-tenant）
 `knowledge_bases`(PK `(tenant_id,kb_id)`) · `knowledge_documents` · `knowledge_chunks`(+`chunks_fts`) · 知识图谱(`kb_entities` · `kb_entity_mentions` · `kb_relations`) · `kb_extraction_runs` · 同步态(`knowledge_source_states` · `knowledge_connector_status`) · KB 自进化(`kb_reflection_reports`)
-> ingest 单写、agent/retrieval 只读；agent 可用的 KB 由 `agent_kbs` materialize 进 `agent.yaml`，运行时读配置不查表。
 
-### 向量底座（独立 substrate，按家族路由）
+```mermaid
+erDiagram
+  knowledge_bases ||--o{ knowledge_documents : "contains"
+  knowledge_documents ||--o{ knowledge_chunks : "split"
+  knowledge_chunks ||--|| knowledge_chunks_fts : "FTS 索引"
+  knowledge_bases ||--o{ kb_entities : "extract"
+  kb_entities ||--o{ kb_entity_mentions : "mention"
+  knowledge_chunks ||--o{ kb_entity_mentions : "出处"
+  kb_entities ||--o{ kb_relations : "source/target"
+  knowledge_bases ||--o{ kb_extraction_runs : "explicit run"
+  knowledge_bases ||--o{ knowledge_source_states : "同步态"
+  knowledge_bases ||--o{ knowledge_connector_status : "connector 态"
+  knowledge_bases ||--o{ kb_reflection_reports : "KB 自进化"
+```
+
+> ingest 单写、agent/retrieval 只读；agent 可用的 KB 由 `agent_kbs`（管理库，绑定真相源，经 `kb_id` 跨库引用本库）materialize 进 `agent.yaml`，运行时读配置不查表。
+
+### 3.6 向量底座（独立 substrate · 按家族路由）
 `vector_items`（每个 scope 一个向量库文件：`mem:`→per-agent 向量库、`shared:`→共享记忆向量库、`kb:`→KB 向量库）
 
 ## 4. 多租户与隔离
