@@ -62,7 +62,7 @@ agent runtime ──✗──→ platform        # 严格禁止反向依赖
 - platform 需要 agent 数据时读 agent 侧产物，而非要求 agent 反向写入 platform 表
 - **验证基线**：任何改动后，agent 必须能在「无 platform、platform 的 DB 表不存在」环境下完成 `fleetent agent run` 对话
 
-> 2026-06-11 审计：`im_gateway/telegram`、`tools/builtin_tools` 的反向 import 已清理。`user_store.authenticate` 的根因已由 **#4 Identity 端口落地根除**——`authenticate` 改用注入的 `_api_key_resolver`（platform 启动时 `set_api_key_resolver` 注入，standalone agent 留 None），不再 import platform。残留仅 `migrate_api_keys()`（一次性 key 迁移工具）内有懒加载 platform import，非 agent 运行时热路径。不得新增同类反向依赖。
+> 2026-06-11 审计：agent 运行时 + 独立组件对 platform 的反向 import **已彻底归零**。`im_gateway/telegram`、`tools/builtin_tools` 已清理；`user_store.authenticate` 根因由 **#4 Identity 端口** 根除（改用注入的 `_api_key_resolver`，platform 启动时 `set_api_key_resolver` 注入，standalone agent 留 None）；最后两处残留由 `finish-user-store-platform-decoupling` 收口——死 wrapper `get_or_create_im_user` 删除、一次性工具 `migrate_api_keys()` 迁至 `platform.user_management`，`user_store` 现零 platform import。护栏 `tests/unit/test_module_dependency_guardrails.py` 的 `_KNOWN_TRANSITIVE_PLATFORM_LEAKS` 已清空（`= set()`）：任何新增的 agent→platform 传递泄漏都会 fail。不得新增同类反向依赖。
 
 ---
 
