@@ -103,6 +103,9 @@ def _mock_lifecycle_client(create_id="cid-1"):
     client.destroy_workspace = AsyncMock()
     client.commit_workspace = AsyncMock()
     client.image_exists = AsyncMock(return_value=False)
+    # Real bool (not a truthy MagicMock) so run_code's self-heal branch stays off
+    # unless a test opts in (sandbox-liveness-reacquire).
+    client.is_workspace_missing = lambda res: False
     return client
 
 

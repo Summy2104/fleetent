@@ -111,7 +111,9 @@ async def test_acquire_second_call_same_key_reuses_registry():
     client = _mock_client()
     mgr = _manager(client)
     await mgr.acquire(Scope.SESSION, session_id="s1", agent_name="bot")
-    # registry now holds the container; a second acquire must not re-create.
+    # registry now holds the container; with the liveness probe seeing it alive,
+    # a second acquire must not re-create.
+    client.find_workspace = AsyncMock(return_value="cid-new")
     await mgr.acquire(Scope.SESSION, session_id="s1", agent_name="bot")
     assert client.create_workspace.await_count == 1
 
@@ -141,7 +143,8 @@ async def test_release_session_destroys_only_that_session():
     await mgr.acquire(Scope.SESSION, session_id="s2", agent_name="bot")
     await mgr.release_session("s1")
     client.destroy_workspace.assert_awaited_once_with("cid-new")
-    # s2 still registered (not destroyed): a re-acquire reuses the registry entry.
+    # s2 still registered (not destroyed): a live re-acquire reuses the registry entry.
+    client.find_workspace = AsyncMock(return_value="cid-new")
     client.create_workspace.reset_mock()
     await mgr.acquire(Scope.SESSION, session_id="s2", agent_name="bot")
     client.create_workspace.assert_not_awaited()
@@ -322,3 +325,46 @@ async def test_acquire_omits_host_path_when_mount_unsupported(monkeypatch, tmp_p
     await mgr.acquire(Scope.SESSION, session_id="s1", agent_name="bot")
     _, kwargs = client.create_workspace.call_args
     assert kwargs["workspace_host_path"] is None
+
+
+# --- Dead-container self-healing (sandbox-liveness-reacquire) ---------------
+
+
+async def test_acquire_reuse_recreates_when_container_dead():
+    """A registry hit whose container died externally must drop the entry and create."""
+    client = _mock_client()
+    mgr = _manager(client)
+    ws1 = await mgr.acquire(Scope.SESSION, "s1", "agent-a")
+    assert ws1 == "cid-new"
+
+    # Container killed externally (OOM / docker rm): liveness probe finds nothing.
+    client.find_workspace = AsyncMock(return_value=None)
+    client.create_workspace = AsyncMock(return_value="cid-new2")
+
+    ws2 = await mgr.acquire(Scope.SESSION, "s1", "agent-a")
+    assert ws2 == "cid-new2"
+
+
+async def test_acquire_reuse_keeps_live_container():
+    """A registry hit whose container is alive keeps being reused, no create."""
+    client = _mock_client()
+    mgr = _manager(client)
+    ws1 = await mgr.acquire(Scope.SESSION, "s1", "agent-a")
+
+    client.find_workspace = AsyncMock(return_value=ws1)
+    client.create_workspace = AsyncMock(side_effect=AssertionError("must not create"))
+
+    ws2 = await mgr.acquire(Scope.SESSION, "s1", "agent-a")
+    assert ws2 == ws1
+
+
+async def test_manager_invalidate_removes_registry_entry():
+    """invalidate() drops the (scope, key) registration so next acquire recreates."""
+    client = _mock_client()
+    mgr = _manager(client)
+    ws1 = await mgr.acquire(Scope.SESSION, "s1", "agent-a")
+    assert ws1 == "cid-new"
+    mgr.invalidate(Scope.SESSION, "s1", "agent-a")
+    client.create_workspace = AsyncMock(return_value="cid-after-invalidate")
+    ws2 = await mgr.acquire(Scope.SESSION, "s1", "agent-a")
+    assert ws2 == "cid-after-invalidate"
