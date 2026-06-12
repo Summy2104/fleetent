@@ -3,6 +3,7 @@
 > **现状权威参考**。持久层重设计（#1–#4）已全部落地——五物理库、按主体物理隔离、嵌入式迁移（Y）、Identity 端口、platform 只读投影均已实现。
 > **本文只描述"现状是什么"**；"为什么这样设计"（R1/R2/B2、物理 vs 逻辑、向量模型 A、实体减法等 rationale）见 [`records/decision-logs/persistence-redesign-decisions.md`](../records/decision-logs/persistence-redesign-decisions.md)。
 > **列级 schema 的真相源是迁移**：管理库 = `migrations/`（Alembic）；agent 侧库 = `runtime/agent_state_migrations.py`、`knowledge_base/core/migrations.py`、`memory/shared_memory_migrations.py`（嵌入式 Y）。本文实体清单为导航，不逐列复制。
+> **维护规则**：任何 change 增删表、改列或改关系时，MUST 同步本文对应的实体清单**与 erDiagram**（图文同改）——历次审计发现的漂移几乎全是"改了文本忘了图"。
 > 配套：[`target-architecture.md`](./target-architecture.md)（核+4面+基座 · Identity §6 · platform 只读投影 §7）。
 
 ## 1. 物理拓扑（5 库类型 · 按主体物理分区）
@@ -67,6 +68,7 @@ graph TD
     agents
     api_keys
     agent_kbs
+    kb_connectors
     channel_agents
     model_providers
   end
@@ -98,6 +100,7 @@ graph TD
   scheduled_tasks -. session_id .-> sessions
   scheduled_tasks -. user_id .-> users
   agent_kbs -. kb_id .-> knowledge_bases
+  kb_connectors -. "tenant_id,kb_id" .-> knowledge_bases
   vector_items -. "mem:" .-> memory_items
   vector_items -. "shared:" .-> shared_memory_items
   vector_items -. "kb:" .-> knowledge_chunks
@@ -106,9 +109,9 @@ graph TD
 > 宏观图只列各库主干实体；完整清单与库内关系见下方各库明细（§3.2–§3.6）。
 
 ### 3.2 管理库（Alembic · platform 侧）
-- **身份/租户**：`users`(根主体，含 `tenant_id`) · `api_keys`(→users) · `tenants`(主体，含 `approver_user_id`) · `teams`(→tenants，含 `approver_user_id`) · `blocked_registrations`(注册封禁名单，Alembic 078 收编，control-plane only，agent 运行时不 import)
-- **IM**：`im_users`(渠道身份归并真相源；managed 运行时由注入 resolver 消费，standalone 不消费) · `im_connectors` · `im_channel_allowlist`
-- **Agent 定义/绑定**：`agents`(定义，含 `tenant_id`/`team_id`/`active_version_id`) · `agent_versions`(不可变快照) · `agent_admin_state`(版本/部署态) · `user_agents`(用户↔agent) · `channel_agents`(渠道↔agent) · `agent_kbs`(**agent↔KB 绑定唯一真相源**，带 `created_by` 审计) · `agent_mcp_servers` · `agent_mcp_server_bindings` · `agent_oauth_bindings` · `agent_secrets`(agent / shared scope 密文 secret) · `connectors`(工具 OAuth) · `agent_skills` · `long_term_context_policies`
+- **身份/租户**：`users`(根主体，含 `tenant_id`；另含 **legacy 单 key 列 `api_key`**——仅作认证 fallback，多 key 真相源在 `api_keys` 表，`migrate_api_keys()` 迁移工具已备、清理待排) · `api_keys`(→users) · `tenants`(主体，含 `approver_user_id`→users) · `teams`(→tenants，含 `approver_user_id`→users) · `blocked_registrations`(注册封禁名单，Alembic 078 收编，control-plane only，agent 运行时不 import)
+- **IM**：`im_users`(渠道身份归并真相源；managed 运行时由注入 resolver 消费，standalone 不消费) · `im_connectors` · `im_channel_allowlist`——三表均带 **`owner_id` → users**（connector 注册归属的平台用户，默认 built-in admin，为将来 per-owner 接入预留）；`im_channel_allowlist` 与 `im_connectors` 经 `(owner_id, platform)` 复合约定关联（allowlist 无 connector id 列）
+- **Agent 定义/绑定**：`agents`(定义，含 `tenant_id`/`team_id`/`active_version_id`) · `agent_versions`(不可变快照) · `agent_admin_state`(版本/部署态) · `user_agents`(用户↔agent) · `channel_agents`(渠道↔agent) · `agent_kbs`(**agent↔KB 绑定唯一真相源**，带 `created_by` 审计) · `agent_mcp_servers` · `agent_mcp_server_bindings` · `agent_oauth_bindings` · `agent_secrets`(agent / shared scope 密文 secret) · `connectors`(工具 OAuth；含**休眠列 `agent_id`**——v1 减法裁决 defer，运行路径未消费) · `agent_skills` · `long_term_context_policies`(双轴：`tenant_id` 默认轴有 FK + `agent_id` 覆盖轴可空)
 - **KB 管理**：`kb_connectors`(connector 配置与自定义元数据；实际 KB 内容仍在 per-tenant `kb.db`)
 - **模型**：`model_providers` · `model_routes`(task_type→provider)
 - **治理/编排**：`audit_log`(平台管理操作审计) · `session_meta`(仅 playground / chat admin 创建路径会写入的 platform chat 管理元数据，如 origin / pinned / admin takeover；与 agent 侧 `sessions` 索引分责，`session_id` 仅作跨库逻辑引用)
@@ -126,8 +129,13 @@ erDiagram
   users ||--o{ user_agents : ""
   agents ||--o{ user_agents : "用户↔agent"
   users ||--o{ im_users : "平台用户→内部 user"
-  im_connectors ||--o{ im_channel_allowlist : "渠道准入"
+  users ||--o{ im_connectors : "owner_id 归属"
+  users ||--o{ tenants : "approver_user_id 审批人"
+  users ||--o{ teams : "approver_user_id 审批人"
+  im_connectors ||--o{ im_channel_allowlist : "(owner_id,platform) 约定关联"
   agents ||--o{ agent_versions : "不可变快照"
+  users ||--o{ agent_versions : "created_by_user_id"
+  agent_versions ||--o{ channel_agents : "bound_version_id 钉版本"
   agents ||--|| agent_admin_state : "版本/部署态"
   agents ||--o{ channel_agents : "渠道绑定"
   agents ||--o{ agent_kbs : "KB 绑定真相源"
@@ -136,7 +144,8 @@ erDiagram
   connectors ||--o{ agent_oauth_bindings : "工具 OAuth"
   agents ||--o{ agent_oauth_bindings : ""
   agents ||--o{ agent_skills : "skill 绑定"
-  agents ||--o{ long_term_context_policies : "tenant 默认+agent 覆盖"
+  tenants ||--o{ long_term_context_policies : "tenant_id 默认轴(FK)"
+  agents ||--o{ long_term_context_policies : "agent_id 覆盖轴(可空)"
   model_providers ||--o{ model_routes : "task_type→provider"
   users ||--o{ audit_log : "管理操作审计"
   skill_provenance ||--|| skill_admin_state : "全局 skill 态"
@@ -209,7 +218,9 @@ erDiagram
   kb_entities ||--o{ kb_entity_mentions : "mention"
   knowledge_chunks ||--o{ kb_entity_mentions : "出处"
   kb_entities ||--o{ kb_relations : "source/target"
+  knowledge_chunks ||--o{ kb_relations : "evidence_chunk_id 证据出处"
   knowledge_bases ||--o{ knowledge_source_states : "同步态"
+  knowledge_documents ||--o{ knowledge_source_states : "document_id 产出物"
   knowledge_bases ||--o{ knowledge_connector_status : "connector 态"
 ```
 
