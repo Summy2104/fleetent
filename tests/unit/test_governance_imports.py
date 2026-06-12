@@ -57,3 +57,14 @@ def test_permission_gate_does_not_import_user_store() -> None:
     source = inspect.getsource(module)
     assert "fleetent.user_store" not in source
     assert "user_store" not in source
+
+
+@pytest.mark.parametrize("module_name", ["approval_store", "permission_gate"])
+def test_governance_approval_modules_have_no_approver_actor_literal(module_name: str) -> None:
+    """approval_store and permission_gate must use approver_user_id, not approver_actor."""
+    module = importlib.import_module(f"fleetent.governance.{module_name}")
+    source = inspect.getsource(module)
+    assert "approver_actor" not in source, (
+        f"fleetent/governance/{module_name}.py still contains 'approver_actor' — "
+        "rename to approver_user_id"
+    )

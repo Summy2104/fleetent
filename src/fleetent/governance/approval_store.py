@@ -70,23 +70,23 @@ def update_approval(
     id: str,
     status: str,
     resolved_at: str,
-    approver_actor: str | None = None,
+    approver_user_id: str | None = None,
 ) -> None:
     database().execute(
         "UPDATE approvals SET status = :status, resolved_at = :resolved_at, "
-        "approver_actor = :approver_actor WHERE id = :id",
+        "approver_user_id = :approver_user_id WHERE id = :id",
         {
             "id": id,
             "status": status,
             "resolved_at": resolved_at,
-            "approver_actor": approver_actor,
+            "approver_user_id": approver_user_id,
         },
     )
 
 
 _SELECT = (
     "SELECT id, session_id, tool_name, risk_level, tool_args, status, "
-    "requester_user_id, approver_actor, created_at, resolved_at FROM approvals"
+    "requester_user_id, approver_user_id, created_at, resolved_at FROM approvals"
 )
 
 

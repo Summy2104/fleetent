@@ -57,7 +57,7 @@ def gate(db):
 def _status(db_path, approval_id):
     conn = sqlite3.connect(db_path)
     row = conn.execute(
-        "SELECT status, approver_actor FROM approvals WHERE id = ?", (approval_id,)
+        "SELECT status, approver_user_id FROM approvals WHERE id = ?", (approval_id,)
     ).fetchone()
     conn.close()
     return row
