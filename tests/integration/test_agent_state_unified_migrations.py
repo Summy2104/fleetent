@@ -127,6 +127,11 @@ def test_migrate_drops_agent_name_from_legacy_sessions_table(tmp_path: Path) -> 
         """,
         ("sess-1", "u1", 1.0, 2.0, 3, "bot"),
     )
+    # A faithful post-v27 DB also has scheduled_tasks (created at v27); later ALTERs
+    # (v29/v30 add task_type/notify_text) require it to exist.
+    conn.execute(
+        "CREATE TABLE scheduled_tasks (id TEXT PRIMARY KEY, schedule_kind TEXT, enabled INTEGER)"
+    )
     conn.execute("PRAGMA user_version = 27")
     conn.commit()
     conn.close()
@@ -277,6 +282,8 @@ def test_scheduled_tasks_columns_complete(tmp_path: Path) -> None:
     assert cols == {
         "id",
         "name",
+        "task_type",
+        "notify_text",
         "schedule_kind",
         "cron_expr",
         "run_at",
