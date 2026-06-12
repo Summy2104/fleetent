@@ -33,10 +33,13 @@ flowchart TD
     DB -->|"agent boot 时恢复"| AP
     AP -->|"到点触发"| FIRE
     FIRE -->|"行已删/禁用 → 跳过"| SKIP["跳过并注销 job"]
-    FIRE --> NM --> AL --> REPLY
-    REPLY -->|"deliver=explicit"| CH["投递到指定 platform/target<br/>(user DM 或 channel)"]
-    REPLY -->|"未指定"| ORIG["回落创建时的会话上下文 origin"]
+    FIRE -->|"task_type=notify"| DIRECT["调度器直发 notify_text<br/>（不跑 agent）"]
+    FIRE -->|"generate / action"| NM
+    NM --> AL --> REPLY
+    REPLY -->|"generate · deliver=explicit"| CH["投递到指定 platform/target<br/>(user DM 或 channel)"]
+    REPLY -->|"generate · 未指定"| ORIG["回落创建时的会话上下文 origin"]
     REPLY -->|"deliver.mode=none 或 [SILENT]"| NONE["静默：不投递"]
+    REPLY -->|"action"| ACT["agent 经自己的工具自发完成动作<br/>调度器不广播回复"]
 ```
 
 定时任务失败处理（重试 / 兜底为规划项，当前只记录 `last_status` / `last_error`）：
@@ -52,11 +55,12 @@ flowchart TD
 
 ## 数据模型
 
-`scheduled_tasks` 是 **agent 侧 per-agent 表**，住在该 agent 的 `agent_state.db`，**列级真相源 = `runtime/agent_state_migrations.py`（v27，嵌入式 Y）**，此处不复制完整 DDL（避免与迁移漂移）。任务形态字段：
+`scheduled_tasks` 是 **agent 侧 per-agent 表**，住在该 agent 的 `agent_state.db`，**列级真相源 = `runtime/agent_state_migrations.py`（嵌入式 Y）**，此处不复制完整 DDL（避免与迁移漂移）。任务形态字段：
 
 - **标识/归属**：`id`(UUID，服务端生成) · `name` · `user_id`(owner，取 resolved principal) · `source`(`static`/`dynamic`/`tool`) · `enabled` · `created_at`
 - **触发**：`schedule_kind`(`cron`/`once`/`interval`) + 对应字段 `cron_expr`(cron) / `run_at`(once：ISO-8601 或相对 `+30m`) / `interval_seconds`+`anchor`(interval) · `timezone`
-- **执行**：`message`(触发注入的 prompt) · 可选 `session_id` · `origin`(创建上下文 JSON，投递回落目标) · 可选 `deliver`(显式投递目标 JSON)
+- **分型**：`task_type`(`notify`/`generate`/`action`，默认 `generate`) · `notify_text`(notify 型的冻结定稿正文，触发时原样直发)
+- **执行**：`message`(generate/action 型触发注入的 prompt) · 可选 `session_id` · `origin`(创建上下文 JSON，投递回落目标) · 可选 `deliver`(显式投递目标 JSON)
 - **运行态**：`last_run_at` · `last_status` · `last_error` · `next_run_at`
 - **无 `agent_name` 列**：one agent per process，任务归属由物理库圈定。跨 agent 编排不在本能力域规划内（若将来需要，属 platform 侧编排，另立 change）
 
@@ -111,6 +115,8 @@ async def schedule(
     notify_platform: str = "",
     notify_target: str = "",
     notify_target_type: str = "user",   # user | channel
+    task_type: str = "generate",        # notify | generate | action
+    notify_text: str = "",              # notify 型的定稿正文（创建时优化确认后冻结）
     tool_context: ToolContext | None = None,
 ) -> str: ...
 
@@ -129,11 +135,18 @@ def extract_message(template: str | None, payload: Any) -> str:
 
 - ✅ **三种触发模式**：`cron`（标准五字段表达式 + IANA 时区，默认 UTC）、`once`（ISO-8601 绝对时间或 `+30m` 相对时间；成功执行后标记 `completed` 不再触发）、`interval`（固定间隔秒数）
 
+- ✅ **任务分型 + 投递契约**（typed-scheduled-task-delivery）：按「正文内容是否需要触发时刻才知道的信息」分三型
+  - `notify`：内容固定的纯通知——创建对话中 agent 把用户糙文案**优化定稿、确认后冻结**进 `notify_text`；触发时调度器**原样直发，不跑 agent**（无 LLM 成本/延迟/改写风险）
+  - `generate`（默认）：内容触发时生成（摘要、实时数据）——跑 agent，最终回复按投递契约发出
+  - `action`：任务本体是动作（发 DM/文件、条件分发）——跑 agent，由 agent 经自己的工具自发完成，调度器**不广播回复**
+  - 分型原则：**智能工作做在创建时（有对话者、有纠错回路），触发时只执行确定性动作**
+
 - ✅ **统一 `schedule` 对话工具**：create / list / remove / run_now / pause / resume 全部经一个工具完成
   - owner 一律取 resolved principal 的 `user_id`（模型传入的 `user_id` 参数仅在无 principal 的运行中作为 fallback），防模型伪造归属
   - 本进程没有运行中的调度器时（如纯 CLI 一次性运行），create 仍落库并如实告知「待 agent 服务运行后生效」
+  - 按型校验：如 `notify` 缺 `notify_text`/目标时创建被拒并给出可改正的提示
 
-- ✅ **主动投递**：触发后的回复经 `outbound` 主动投递
+- ✅ **主动投递**（generate 型）：触发后的回复经 `outbound` 主动投递
   - 显式目标：创建时给 `notify_platform` + `notify_target`（`target_type` user=DM / channel=频道）
   - 未指定：回落创建任务时的会话上下文（`origin`，含原平台/频道/线程）
   - 静默模式：`deliver.mode=none` 或回复恰为 `[SILENT]` 哨兵时成功但不投递（适合「只在有变化时报警」的巡检任务）
