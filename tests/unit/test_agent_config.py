@@ -140,11 +140,20 @@ def test_sandbox_settings_rejects_non_bool_image_persistence() -> None:
 # --- sandbox-scope-split-followups: explicit multi_user signal --------------
 
 
-def test_sandbox_settings_multi_user_defaults_off() -> None:
-    """Defaults keep prior single-user behaviour: multi_user is False."""
+def test_sandbox_settings_multi_user_defaults_on() -> None:
+    """Fail-safe default: multi_user is True (every agent treated as multi-user;
+    single-user agent-scope data reuse requires explicit opt-out)."""
     af = agent_config.AgentFile.model_validate(
         {"name": "bare", "version": 1, "models": _valid_models_doc()}
     )
+    assert af.sandbox.multi_user is True
+
+
+def test_sandbox_settings_multi_user_explicit_opt_out() -> None:
+    """Explicit `multi_user: false` opts a single-user deployment back out."""
+    doc = {"name": "bare", "version": 1, "models": _valid_models_doc()}
+    doc["sandbox"] = {"multi_user": False}
+    af = agent_config.AgentFile.model_validate(doc)
     assert af.sandbox.multi_user is False
 
 

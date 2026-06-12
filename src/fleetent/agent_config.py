@@ -276,8 +276,10 @@ class SandboxSettings(BaseModel):
     from. Both default off/empty so unspecified agents behave exactly as before; this
     is schema-only validation (the manager/backend act on it).
 
-    `multi_user` (sandbox-scope-split-followups) is the explicit run-shape signal that
-    drives the workspace-scope guard; default False keeps standalone agents single-user.
+    `multi_user` (sandbox-multi-user-default) is the run-shape signal driving the
+    workspace-scope guard; **default True (fail-safe)** — every agent is treated as
+    multi-user (per-user session isolation enforced), and a single-user deployment that
+    wants agent-scope cross-session data reuse must opt out with `multi_user: false`.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -287,12 +289,12 @@ class SandboxSettings(BaseModel):
     skill_mount: SandboxSkillMountSettings = Field(default_factory=SandboxSkillMountSettings)
     image_persistence: bool = False
     setup_command: str | None = None
-    # Explicit multi-user run-shape signal (sandbox-scope-split-followups). Standalone
-    # `fleetent agent run` is single-user (False); platform-hosted shared-IM agents set
-    # True so the manager's guard corrects a configured `agent` workspace_scope to
-    # `session`. Carried via config (not runtime inference) to keep the agent runtime
-    # free of platform-topology knowledge / reverse dependencies.
-    multi_user: bool = False
+    # Multi-user run-shape signal (sandbox-multi-user-default). Fail-safe default True:
+    # every agent is treated as multi-user, so the manager's guard corrects a configured
+    # `agent` workspace_scope to `session` (per-user isolation) unless a single-user
+    # deployment explicitly opts out with `multi_user: false`. Carried via config (not
+    # runtime inference) to keep the agent runtime free of platform-topology knowledge.
+    multi_user: bool = True
 
 
 class AgentFile(BaseModel):
