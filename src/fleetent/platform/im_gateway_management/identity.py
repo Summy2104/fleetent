@@ -71,7 +71,21 @@ def get_or_create(owner_id: str, platform: str, platform_user_id: str) -> User:
         user = get_by_id(row[0])
         assert user is not None
         return user
-    user = create_user(name=f"{platform}:{platform_user_id}")
+
+    with _conn() as conn:
+        shared = conn.execute(
+            """SELECT user_id FROM im_users
+               WHERE platform = :platform AND platform_user_id = :puid
+               ORDER BY id LIMIT 1""",
+            {"platform": platform, "puid": platform_user_id},
+        ).fetchone()
+
+    if shared:
+        user = get_by_id(shared[0])
+        assert user is not None
+    else:
+        user = create_user(name=f"{platform}:{platform_user_id}")
+
     now = datetime.datetime.now(datetime.UTC).isoformat()
     with _conn() as conn:
         # v1.0: new IM users are allowed by default; channel admission is handled by the

@@ -115,6 +115,15 @@ def _isolate_agent_data_redirects(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _reset_im_identity_resolver() -> None:
+    from fleetent.im_gateway import access
+
+    access.set_im_identity_resolver(None)
+    yield
+    access.set_im_identity_resolver(None)
+
+
+@pytest.fixture(autouse=True)
 def _reset_traces_reflection_state_db():  # type: ignore[no-untyped-def]
     """Reset traces._state_db and reflection._state_db between tests.
 

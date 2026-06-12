@@ -26,12 +26,13 @@
 - ✅ **Telegram polling 适配器**：python-telegram-bot 接入
   - `session_id` 推导：私聊 → `"user:{telegram_user_id}"`；群组 reply chain → `"thread:{message_id}"`
 
-- ✅ **IM 用户身份映射**：(platform, platform_user_id) → 内部 User
-  - 新用户自动创建，默认 allowed=0（待审批）
-  - get_or_create() 幂等，不重复创建
+- ✅ **IM 用户身份映射**：
+  - managed 模式：platform 在 startup 注入 resolver，把 `(platform, platform_user_id)` 归并到内部 `users.id`；首次见到自动创建 `users` + `im_users` 绑定，同一 `(platform, platform_user_id)` 跨 connector 复用同一 internal user
+  - standalone 模式：不注入 resolver，恒等透传渠道原生 id；行为与受管模式显式区分
 
-- ✅ **Allowlist 检查**：收到消息时校验用户是否已审批
-  - 未审批用户收到提示消息，请求不进入 agent_loop
+- ✅ **Allowlist 检查**：收到消息时校验用户是否已允许
+  - IM 身份默认 `allowed=1`；准入主要由 channel allowlist 控制
+  - 被 block 的 IM 身份请求不进入 agent_loop
   - HTTP API 用户（无 im_users 记录）默认放行
 
 - ✅ **Agent 解析优先级**：channel → user → default → 裸跑
@@ -48,11 +49,13 @@
 ```sql
 im_users (
   id               INTEGER PRIMARY KEY,
+  owner_id         TEXT,              -- connector identity（当前为 agent_name）
   platform         TEXT,              -- "slack" | "telegram"
   platform_user_id TEXT,
   user_id          TEXT,              -- → users.id
+  allowed          BOOLEAN,
   created_at       DATETIME,
-  UNIQUE(platform, platform_user_id)
+  UNIQUE(owner_id, platform, platform_user_id)
 )
 ```
 
@@ -143,10 +146,15 @@ im_users (
 
 ## 验收标准
 
-**场景 1：新用户首次发消息**
+**场景 1：新用户首次发消息（managed）**
 - Given：一个从未发过消息的 Slack 用户
 - When：用户发送任意消息
-- Then：im_user_store 自动创建记录（allowed=0），用户收到"请联系管理员审批"提示
+- Then：gateway 解析到内部 `users.id`，自动创建 `im_users` 绑定，消息继续按 channel allowlist 规则处理
+
+**场景 1b：新用户首次发消息（standalone）**
+- Given：一个 standalone agent 上从未发过消息的 Telegram 用户
+- When：用户发送任意消息
+- Then：`user_id` 直接等于渠道原生 id，不读取 platform 身份表
 
 **场景 2：已审批用户正常对话**
 - Given：allowed=1 的 Slack 用户

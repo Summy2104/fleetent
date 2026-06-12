@@ -38,7 +38,9 @@ def _build_handlers(monkeypatch):
 
     monkeypatch.setattr("fleetent.im_gateway.normalizer.route", fake_route)
     monkeypatch.setattr(
-        "fleetent.im_gateway.access.resolve_identity", lambda p, uid: uid, raising=False
+        "fleetent.im_gateway.access.resolve_identity",
+        lambda p, uid, owner_id="default": uid,
+        raising=False,
     )
     handlers: dict = {}
     app = MagicMock()
@@ -107,7 +109,9 @@ async def test_assistant_routes_file_attachment(monkeypatch):
 
     monkeypatch.setattr("fleetent.im_gateway.normalizer.route", fake_route)
     monkeypatch.setattr(
-        "fleetent.im_gateway.access.resolve_identity", lambda p, uid: uid, raising=False
+        "fleetent.im_gateway.access.resolve_identity",
+        lambda p, uid, owner_id="default": uid,
+        raising=False,
     )
     ctx = MagicMock()
     ctx.channel_id = "D1"

@@ -25,6 +25,7 @@ from fleetent.governance.permission_gate import (
     list_approvals,
 )
 from fleetent.identity import Principal
+from fleetent.im_gateway.access import IMIdentityResolutionError, set_im_identity_resolver
 from fleetent.im_gateway.slack_supervisor import SlackSupervisor
 from fleetent.integrations.sandbox import (
     Mode,
@@ -91,11 +92,39 @@ _connector_manager = connector_manager.ConnectorManager(factories={})
 _slack_supervisor = SlackSupervisor()
 
 
+def _connector_edge_tenant(owner_id: str) -> str:
+    agent = agent_config.current().get(owner_id)
+    if agent is None:
+        return "default"
+    return agent.tenant_id
+
+
+def _resolve_im_identity(owner_id: str, platform: str, platform_user_id: str) -> str:
+    from fleetent.platform.im_gateway_management import identity as im_identity
+
+    user = im_identity.get_or_create(owner_id, platform, platform_user_id)
+    edge_tenant = _connector_edge_tenant(owner_id)
+    if user.tenant_id != edge_tenant:
+        logger.warning(
+            "im_identity_tenant_mismatch owner_id=%s platform=%s platform_user_id=%s "
+            "mapped_user_id=%s mapped_tenant=%s edge_tenant=%s",
+            owner_id,
+            platform,
+            platform_user_id,
+            user.id,
+            user.tenant_id,
+            edge_tenant,
+        )
+        raise IMIdentityResolutionError("IM identity tenant mismatch")
+    return user.id
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Wire platform api_keys resolver so user_store.authenticate queries the api_keys
     # table (+ legacy fallback) without the module-level platform import removed by #4.
     user_store.set_api_key_resolver(_resolve_api_key)
+    set_im_identity_resolver(_resolve_im_identity)
 
     scan_skills()
     # file-driven-agent-config: scan agent.yaml files once at startup (same lifecycle
@@ -220,6 +249,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             maint.shutdown(wait=False)
     except Exception as exc:
         logger.warning("platform_maintenance_scheduler_shutdown_failed error=%s", exc)
+    finally:
+        set_im_identity_resolver(None)
 
 
 app = FastAPI(title="fleetent", lifespan=lifespan)

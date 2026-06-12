@@ -103,7 +103,7 @@ graph TD
 
 ### 3.2 管理库（Alembic · platform 侧）
 - **身份/租户**：`users`(根主体，含 `tenant_id`) · `api_keys`(→users) · `tenants`(主体，含 `approver_user_id`) · `teams`(→tenants，含 `approver_user_id`) · `blocked_registrations`(注册封禁名单，Alembic 078 收编，control-plane only，agent 运行时不 import)
-- **IM**：`im_users`((platform,platform_user_id)→内部 user) · `im_connectors` · `im_channel_allowlist`
+- **IM**：`im_users`(渠道身份归并真相源；managed 运行时由注入 resolver 消费，standalone 不消费) · `im_connectors` · `im_channel_allowlist`
 - **Agent 定义/绑定**：`agents`(定义，含 `tenant_id`/`team_id`/`active_version_id`) · `agent_versions`(不可变快照) · `agent_admin_state`(版本/部署态) · `user_agents`(用户↔agent) · `channel_agents`(渠道↔agent) · `agent_kbs`(**agent↔KB 绑定唯一真相源**，带 `created_by` 审计) · `agent_mcp_servers` · `agent_mcp_server_bindings` · `agent_oauth_bindings` · `agent_secrets`(agent / shared scope 密文 secret) · `connectors`(工具 OAuth) · `agent_skills` · `long_term_context_policies`
 - **KB 管理**：`kb_connectors`(connector 配置与自定义元数据；实际 KB 内容仍在 per-tenant `kb.db`)
 - **模型**：`model_providers` · `model_routes`(task_type→provider)
@@ -178,7 +178,7 @@ erDiagram
 ```
 
 > 历史行不迁移：旧管理库中既有的 `session_anti_flap` / `sub_agent_runs` 行属 ephemeral 运行时数据，按「上线前不迁移数据」新建即可，旧行作孤儿由部署方按需清理。
-> 跨库（见 §3.1）：`memory_items.user_id` ⇢ 管理库 `users`；`approvals.requester_user_id` ⇢ 管理库 `users`、`approvals.session_id` → 本库 `sessions`。会话**内容**仍是 JSON 文件（`SESSIONS_DIR`，与元数据 DB 表物理分离）。
+> 跨库（见 §3.1）：`memory_items.user_id` ⇢ 管理库 `users`（managed 模式成立；standalone 中该字段可为不透明渠道原生 id）；`approvals.requester_user_id` ⇢ 管理库 `users`（managed 成立；standalone 同样允许 opaque id）；`approvals.session_id` → 本库 `sessions`。会话**内容**仍是 JSON 文件（`SESSIONS_DIR`，与元数据 DB 表物理分离）。
 
 ### 3.4 共享记忆库（嵌入式 Y · `shared_memory.db` · agent 侧 · per-tenant）
 `shared_memory_items`(team/tenant scope 共享记忆，多 agent 写的真相源)

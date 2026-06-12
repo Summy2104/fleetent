@@ -14,10 +14,12 @@ def db(tmp_path, monkeypatch):
     return p
 
 
-def test_same_platform_user_distinct_per_owner(db):
+def test_same_platform_user_reuses_internal_user_across_owners(db):
     a = im_user_store.get_or_create("ownerA", "slack", "U1")
     b = im_user_store.get_or_create("ownerB", "slack", "U1")
-    assert a.id != b.id
+    assert a.id == b.id
+    owners = {(row["owner_id"], row["user_id"]) for row in im_user_store.list_all()}
+    assert owners == {("ownerA", a.id), ("ownerB", a.id)}
 
 
 def test_get_or_create_idempotent_per_owner(db):
