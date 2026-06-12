@@ -49,7 +49,7 @@ async def test_resolve_after_restart_finalizes_pending(db):
     assert ok is True
     row = approval_store.get_approval("a1")
     assert row["status"] == "approved"
-    assert row["approver_actor"] == "U_REQ"
+    assert row["approver_user_id"] == "U_REQ"
 
 
 async def test_resolve_after_restart_rejects_unauthorized_actor(db):

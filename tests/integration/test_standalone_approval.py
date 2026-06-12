@@ -168,5 +168,5 @@ async def test_standalone_approval_no_platform(
     assert ok is True
     finalized = approval_store_mod.list_approvals()[0]
     assert finalized["status"] == "approved"
-    assert finalized["approver_actor"] == "slack:U_LEAD"
+    assert finalized["approver_user_id"] == "slack:U_LEAD"
     assert finalized["resolved_at"] is not None

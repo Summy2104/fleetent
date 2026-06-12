@@ -132,6 +132,14 @@ def test_migrate_drops_agent_name_from_legacy_sessions_table(tmp_path: Path) -> 
     conn.execute(
         "CREATE TABLE scheduled_tasks (id TEXT PRIMARY KEY, schedule_kind TEXT, enabled INTEGER)"
     )
+    # approvals was created at v12; v31 renames approver_actor → approver_user_id so it
+    # must be present in any faithful post-v12 legacy DB.
+    conn.execute(
+        "CREATE TABLE approvals ("
+        "id TEXT PRIMARY KEY, session_id TEXT NOT NULL, requester_user_id TEXT NOT NULL, "
+        "risk_level TEXT NOT NULL, tool_name TEXT NOT NULL, tool_args TEXT NOT NULL, "
+        "status TEXT NOT NULL, approver_actor TEXT, created_at TEXT NOT NULL, resolved_at TEXT)"
+    )
     conn.execute("PRAGMA user_version = 27")
     conn.commit()
     conn.close()

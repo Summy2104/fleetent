@@ -337,4 +337,6 @@ MIGRATIONS: list[tuple[int, str]] = [
         "ALTER TABLE scheduled_tasks ADD COLUMN task_type TEXT NOT NULL DEFAULT 'generate'",
     ),
     (30, "ALTER TABLE scheduled_tasks ADD COLUMN notify_text TEXT"),
+    # ── v31: unify-identity-column-naming ────────────────────────────────────
+    (31, "ALTER TABLE approvals RENAME COLUMN approver_actor TO approver_user_id"),
 ]
