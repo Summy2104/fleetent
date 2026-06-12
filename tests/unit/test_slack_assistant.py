@@ -68,7 +68,9 @@ def _capture_routed(monkeypatch):
 
     monkeypatch.setattr("fleetent.im_gateway.normalizer.route", fake_route)
     monkeypatch.setattr(
-        "fleetent.im_gateway.access.resolve_identity", lambda p, uid: uid, raising=False
+        "fleetent.im_gateway.access.resolve_identity",
+        lambda p, uid, owner_id="default": uid,
+        raising=False,
     )
     monkeypatch.setattr(
         "fleetent.im_gateway.slack._download_attachments",

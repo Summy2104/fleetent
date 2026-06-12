@@ -216,6 +216,9 @@ Principal { user_id, tenant_id }
 5. 核运行       principal.user_id → scope 记忆/会话;tenant_id → 路由库;agent 配置的归属 team → 共享记忆桶
 ```
 
+- **managed 模式**：IM edge 在进入核前，经 platform 在 `server.py` lifespan 注入的 resolver，把 `(platform, platform_user_id)` 归并成内部 `users.id`；首次见到自动建 `users` + `im_users` 绑定，tenant 不匹配直接拒绝并记诊断日志。该写入动作属于 platform-owned resolver，不构成 agent→platform 反向依赖。
+- **standalone 模式**：不注入 resolver，`im_gateway.access.resolve_identity()` 恒等透传渠道原生 id；agent 继续完全脱离 platform 运行。
+
 ### 6.5 审批人解析(归属 team/主体,materialize 进配置)
 
 agent 可被**多个 team 的人使用**,但对它的**共享记忆/KB/高危工具审批**,归 **agent 归属 team 的审批人**(非请求者的 team)。解析链:

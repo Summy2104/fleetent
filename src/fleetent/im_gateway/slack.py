@@ -377,13 +377,22 @@ async def _route_assistant_message(
     ``progress_func`` close over them; ``progress_func`` aggregates the whole tool
     batch so multi-tool turns show every in-flight tool, not only the last.
     """
-    from fleetent.im_gateway.access import resolve_identity
+    from fleetent.im_gateway.access import IMIdentityResolutionError, resolve_identity
     from fleetent.im_gateway.normalizer import NormalizedMessage, SessionContext, route
 
     channel = getattr(context, "channel_id", None) or payload.get("channel") or ""
     thread_ts = getattr(context, "thread_ts", None)
     slack_user_id = payload.get("user") or getattr(context, "user_id", None) or "unknown"
-    identity = resolve_identity("slack", slack_user_id)
+    try:
+        identity = resolve_identity("slack", slack_user_id, agent_name)
+    except IMIdentityResolutionError as exc:
+        logger.warning(
+            "slack_identity_resolution_rejected",
+            agent=agent_name,
+            platform_user_id=slack_user_id,
+            error=str(exc),
+        )
+        return
 
     with contextlib.suppress(Exception):
         await set_status(_THINKING_STATUS, loading_messages=[_THINKING_STATUS])
@@ -443,8 +452,8 @@ def create_app(agent_name: str, config: dict[str, Any]) -> object:
 
     The receiving connection identifies the agent (per-agent-slack-connector): the
     handler stamps ``agent_name`` so routing skips channel→agent lookup. Channel access
-    is enforced by the normalizer access gate, not this handler. The connector carries
-    no owner_id and reads no platform table.
+    is enforced by the normalizer access gate, not this handler. The connector identity
+    is the owning agent name, passed through to the injected IM identity resolver.
 
     DM / assistant-pane conversations are handled by the Assistant container so the
     native status indicator binds to the real assistant thread; ``app_mention`` keeps
@@ -496,13 +505,22 @@ def create_app(agent_name: str, config: dict[str, Any]) -> object:
     app.assistant(assistant)
 
     async def _handle(event: dict[str, Any], client: Any, say: Any = None) -> None:
-        from fleetent.im_gateway.access import resolve_identity
+        from fleetent.im_gateway.access import IMIdentityResolutionError, resolve_identity
         from fleetent.im_gateway.normalizer import NormalizedMessage, SessionContext, route
 
         channel = event.get("channel") or ""
         slack_user_id = event.get("user") or "unknown"
         # Identity is the platform-native id, resolved locally — no platform user_store.
-        identity = resolve_identity("slack", slack_user_id)
+        try:
+            identity = resolve_identity("slack", slack_user_id, agent_name)
+        except IMIdentityResolutionError as exc:
+            logger.warning(
+                "slack_identity_resolution_rejected",
+                agent=agent_name,
+                platform_user_id=slack_user_id,
+                error=str(exc),
+            )
+            return
         thread_ts = event.get("thread_ts")
         channel_type = event.get("channel_type") or "channel"
 

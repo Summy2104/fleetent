@@ -44,8 +44,8 @@ def create_app(agent_name: str, config: dict[str, Any]) -> object:
 
     The receiving connection identifies the agent (per-agent-telegram-connector): the
     handler stamps ``agent_name`` so routing skips channel→agent lookup. The connector
-    carries no owner_id and reads no platform table; chat access is enforced by the
-    access gate.
+    identity is the owning agent name, passed through to the injected IM identity
+    resolver; chat access is enforced by the access gate.
     """
     try:
         from telegram.ext import Application
@@ -59,7 +59,10 @@ def create_app(agent_name: str, config: dict[str, Any]) -> object:
     async def handle_message(update: object, context: object) -> None:
         from telegram import Update
 
-        from fleetent.im_gateway.access import resolve_identity  # noqa: PLC0415
+        from fleetent.im_gateway.access import (  # noqa: PLC0415
+            IMIdentityResolutionError,
+            resolve_identity,
+        )
         from fleetent.im_gateway.normalizer import (  # noqa: PLC0415
             NormalizedMessage,
             SessionContext,
@@ -74,7 +77,16 @@ def create_app(agent_name: str, config: dict[str, Any]) -> object:
 
         tg_user_id = update.effective_user.id
         # Identity is the platform-native id, resolved locally — no platform user_store.
-        identity = resolve_identity("telegram", str(tg_user_id))
+        try:
+            identity = resolve_identity("telegram", str(tg_user_id), agent_name)
+        except IMIdentityResolutionError as exc:
+            logger.warning(
+                "telegram_identity_resolution_rejected",
+                agent=agent_name,
+                platform_user_id=str(tg_user_id),
+                error=str(exc),
+            )
+            return
 
         reply_to = update.message.reply_to_message
         chat_type = update.message.chat.type
