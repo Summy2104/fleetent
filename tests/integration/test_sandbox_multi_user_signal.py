@@ -42,6 +42,11 @@ def _agent(*, multi_user: bool) -> AgentFile:
     )
 
 
+def _agent_default() -> AgentFile:
+    """Agent with no explicit multi_user (exercises the fail-safe default)."""
+    return AgentFile(name="support", version=1, models=default_models())
+
+
 @pytest.fixture(autouse=True)
 def _agent_scope_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", _write_agent_scope_settings(tmp_path))
@@ -64,3 +69,11 @@ def test_single_user_agent_scope_preserved() -> None:
     mgr = builtin_tools.init_sandbox_manager(_agent(multi_user=False))
     assert mgr.multi_user is False
     assert mgr.scope is WorkspaceScope.AGENT
+
+
+def test_default_unset_multi_user_corrects_agent_scope_to_session() -> None:
+    """Fail-safe default: an agent that does not declare multi_user is treated as
+    multi-user, so a configured `workspace_scope: agent` is corrected to session."""
+    mgr = builtin_tools.init_sandbox_manager(_agent_default())
+    assert mgr.multi_user is True
+    assert mgr.scope is WorkspaceScope.SESSION

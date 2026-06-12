@@ -321,6 +321,10 @@ webhooks:
 sandbox:
   backend: null                   # null = inherit platform.yaml sandbox.backend (default docker);
                                   # "docker" or "microsandbox" to pin this agent's backend
+  multi_user: true                # fail-safe default: every agent treated as multi-user, so a
+                                  # configured workspace_scope=agent is forced to per-user `session`
+                                  # isolation (prevents cross-user data leakage). Set false ONLY for a
+                                  # genuine single-user deployment that wants agent-scope data reuse.
   microsandbox:
     image: null                   # null = backend default base image; e.g. "python:3.12" for microsandbox
                                   # microsandbox needs host virtualization (KVM/HVF) + preinstalled runtime;
