@@ -31,7 +31,6 @@ def _user(
     return user_store.User(
         id=user_id,
         name="Admin",
-        api_key="ma-test",
         created_at="2026-06-03T00:00:00+00:00",
         email="admin@example.com",
         role=role,

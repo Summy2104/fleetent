@@ -20,7 +20,7 @@ def client(tmp_path, monkeypatch):
 
 
 def _session_for(role: str) -> str:
-    u = user_store.create_user(f"{role}-user")
+    u, _ = user_store.create_user(f"{role}-user")
     user_store.set_role(u.id, role)
     return auth.create_session(u.id), u.id
 
@@ -388,7 +388,7 @@ def test_im_user_block_restore(client):
 
 def test_update_user_edits_name_and_email(client):
     token, _ = _session_for("admin")
-    target = user_store.create_user("old-name", email="old@x.io")
+    target, _ = user_store.create_user("old-name", email="old@x.io")
     r = client.patch(
         f"/admin/users/{target.id}",
         json={"name": "new-name", "email": "new@x.io"},
@@ -404,7 +404,7 @@ def test_update_user_edits_name_and_email(client):
 
 def test_update_user_partial_name_only(client):
     token, _ = _session_for("admin")
-    target = user_store.create_user("keep-mail", email="keep@x.io")
+    target, _ = user_store.create_user("keep-mail", email="keep@x.io")
     r = client.patch(f"/admin/users/{target.id}", json={"name": "renamed"}, headers=_hdr(token))
     assert r.status_code == 200
     refreshed = user_store.get_by_id(target.id)
@@ -419,7 +419,7 @@ def test_update_user_unknown_404(client):
 
 def test_update_user_viewer_forbidden(client):
     token, _ = _session_for("viewer")
-    target = user_store.create_user("victim")
+    target, _ = user_store.create_user("victim")
     r = client.patch(f"/admin/users/{target.id}", json={"name": "x"}, headers=_hdr(token))
     assert r.status_code == 403
 
@@ -427,6 +427,6 @@ def test_update_user_viewer_forbidden(client):
 def test_update_user_email_conflict_409(client):
     token, _ = _session_for("admin")
     user_store.create_user("a", email="taken@x.io")
-    target = user_store.create_user("b", email="b@x.io")
+    target, _ = user_store.create_user("b", email="b@x.io")
     r = client.patch(f"/admin/users/{target.id}", json={"email": "taken@x.io"}, headers=_hdr(token))
     assert r.status_code == 409

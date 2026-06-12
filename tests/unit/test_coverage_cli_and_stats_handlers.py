@@ -18,7 +18,6 @@ from fleetent.platform.agent_statistics import stats_admin_api
 class _CliUser:
     id: str = "u1"
     name: str = "Alice Long Display Name"
-    api_key: str = "ma-secret"
     created_at: str = "2026-01-01T00:00:00Z"
 
 
@@ -113,9 +112,9 @@ def test_agent_cli_handles_channel_version_user_and_default_flows(monkeypatch, t
 
 def test_user_cli_handles_create_list_rotate_and_builtin_admin(monkeypatch, capsys):
     user = _CliUser()
-    monkeypatch.setattr(users, "create_user", lambda name: _CliUser(name=name))
+    monkeypatch.setattr(users, "create_user", lambda name: (_CliUser(name=name), "ma-newkey"))
     monkeypatch.setattr(users, "list_users", lambda: [user, _CliUser(id="u2", name="B" * 25)])
-    monkeypatch.setattr(users, "rotate_key", lambda user_id: user)
+    monkeypatch.setattr(users, "rotate_key", lambda user_id: (user, "ma-rotated"))
     monkeypatch.setitem(
         sys.modules,
         "fleetent.auth",

@@ -63,33 +63,9 @@ def upgrade() -> None:
             },
         )
 
-    # Step 2: drop users.api_key via rename+recreate (SQLite-safe).
-    op.execute("ALTER TABLE users RENAME TO users_legacy_080")
-    op.execute(
-        """
-        CREATE TABLE users (
-            id           TEXT PRIMARY KEY,
-            name         TEXT NOT NULL,
-            created_at   TEXT NOT NULL,
-            email        TEXT UNIQUE,
-            password_hash TEXT,
-            role         TEXT NOT NULL DEFAULT 'viewer',
-            status       TEXT NOT NULL DEFAULT 'active',
-            must_reset   INTEGER NOT NULL DEFAULT 0,
-            tenant_id    TEXT NOT NULL DEFAULT 'default'
-                         REFERENCES tenants(id) ON DELETE RESTRICT
-        )
-        """
-    )
-    op.execute(
-        """
-        INSERT INTO users
-            (id, name, created_at, email, password_hash, role, status, must_reset, tenant_id)
-        SELECT id, name, created_at, email, password_hash, role, status, must_reset, tenant_id
-        FROM users_legacy_080
-        """
-    )
-    op.execute("DROP TABLE users_legacy_080")
+    # Step 2: drop users.api_key via Alembic batch_alter_table (handles SQLite FK refs).
+    with op.batch_alter_table("users") as batch_op:
+        batch_op.drop_column("api_key")
 
 
 def downgrade() -> None:

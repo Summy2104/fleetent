@@ -79,11 +79,13 @@ def _conn():
     return conn
 
 
-def create_user(name: str, email: str | None = None, tenant_id: str = "default") -> User:
-    """Create a new user.  API key is issued in api_keys (hashed); plaintext not persisted.
+def create_user(
+    name: str, email: str | None = None, tenant_id: str = "default"
+) -> tuple["User", str]:
+    """Create a new user and issue an API key.
 
-    Returns the User row.  The plaintext key is NOT included — see return-type change in
-    task 2.4 (retire-legacy-api-key-and-agent-rename) which will switch to (User, str).
+    Returns (User, plaintext_key).  The plaintext is shown once and never persisted;
+    the api_keys table stores only the SHA-256 hash.
     """
     plaintext = f"ma-{secrets.token_hex(32)}"
     now = datetime.datetime.now(datetime.UTC).isoformat()
@@ -108,7 +110,7 @@ def create_user(name: str, email: str | None = None, tenant_id: str = "default")
         )
     result = get_by_id(user_id)
     assert result is not None
-    return result
+    return result, plaintext
 
 
 def authenticate(plaintext: str) -> tuple[User, dict[str, Any]] | None:
@@ -153,20 +155,6 @@ def get_by_api_key(api_key: str) -> User | None:
     return result[0] if result else None
 
 
-def _get_by_legacy_key(api_key: str) -> User | None:
-    row = (
-        _db()
-        .execute(f"SELECT {_FULL_COLS} FROM users WHERE api_key = :api_key", {"api_key": api_key})
-        .fetchone()
-    )
-    return _row_to_user(row) if row else None
-
-
-def list_legacy_api_keys() -> list[tuple[str, str]]:
-    """Return legacy ``users.api_key`` values as ``(user_id, plaintext_key)`` pairs."""
-    rows = _db().execute("SELECT id, api_key FROM users WHERE api_key IS NOT NULL").fetchall()
-    return [(row["id"], row["api_key"]) for row in rows]
-
 
 def get_by_id(user_id: str) -> User | None:
     """Look up a user by id. Returns None if not found."""
@@ -192,11 +180,10 @@ def list_users() -> list[User]:
     return [_row_to_user(r) for r in rows]
 
 
-def rotate_key(user_id: str) -> User:
+def rotate_key(user_id: str) -> tuple["User", str]:
     """Revoke all active api_keys for user_id and issue a new one.  Raises KeyError if not found.
 
-    Returns the User row.  The new plaintext key is NOT included — callers that need it should
-    use api_key_store.issue_key directly, or wait for the (User, str) return-type change in 2.4.
+    Returns (User, plaintext_key).  The plaintext is shown once and never persisted.
     """
     user = get_by_id(user_id)
     if user is None:
@@ -219,7 +206,7 @@ def rotate_key(user_id: str) -> User:
                 "created_at": now,
             },
         )
-    return user
+    return user, plaintext
 
 
 def get_builtin_admin() -> User | None:
@@ -302,7 +289,7 @@ def create_web_user(
             raise PermissionError(f"email blocked from registration: {normalized}")
         if get_by_email(normalized) is not None:
             raise ValueError(f"email already exists: {normalized}")
-    user = create_user(name=name, email=normalized)
+    user, _ = create_user(name=name, email=normalized)
     if role != "viewer":
         set_role(user.id, role)
     if password_hash is not None:

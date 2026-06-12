@@ -66,14 +66,12 @@ def test_list_users_shows_created_users():
 
 
 def test_rotate_key_updates_key():
-    user = user_store.create_user("Eve")
-    old_key = user.api_key
+    user, old_key = user_store.create_user("Eve")
     out, _, code = run_admin("rotate-key", "--user-id", user.id)
     assert code == 0
     assert "ma-" in out
-    refreshed = user_store.get_by_id(user.id)
-    assert refreshed is not None
-    assert refreshed.api_key != old_key
+    # old key is revoked after rotation
+    assert user_store.get_by_api_key(old_key) is None
 
 
 def test_rotate_key_not_found_exits_nonzero():
