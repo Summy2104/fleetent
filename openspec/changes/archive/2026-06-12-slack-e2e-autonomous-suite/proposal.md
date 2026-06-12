@@ -30,14 +30,14 @@
 
 ### Removed Capabilities
 
-- `slack-e2e-test-suite`: 旧 Slack e2e 套件（MCP 通道 + 写死 yaml catalog + LLM 裁判 + catalog validator）整体废弃；其全部 requirement 由本 change 的 REMOVED delta 移除，能力由 `slack-e2e-api-helper` + `slack-e2e-autonomous-driver` 取代。
+- `slack-e2e-test-suite`: 旧 Slack e2e 套件（MCP 通道 + 写死 yaml catalog + LLM 裁判 + catalog validator）整体废弃，能力由 `slack-e2e-api-helper` + `slack-e2e-autonomous-driver` 取代。因 OpenSpec delta 不支持移除整个 capability（REMOVED 全部 requirement 会留空 spec），其 spec 目录随本 change 直接 `git rm` 删除。
 
 ## Impact
 
 - **新增产物（均非生产代码）**：
   - `tests/e2e/slack_autonomous/`：helper CLI（Python + Slack Web API 客户端）+ 覆盖清单/rubric 数据 + helper 纯函数单测
   - `.claude/skills/slack-e2e-autonomous/`：自主驱动方法论 skill
-- **删除产物（旧套件）**：`.claude/skills/slack-agent-e2e/`、`tests/e2e/slack_scenarios/`（17 yaml + README + sample `agent.yaml.example`）、`tests/integration/test_slack_scenarios_catalog.py`；旧 spec `slack-e2e-test-suite` 经 REMOVED delta 于 archive 时移除。无活跃外部引用（仅 `docs/archive/jira-backfill-plan.md` 历史文档提及，保留原貌）。
+- **删除产物（旧套件）**：`.claude/skills/slack-agent-e2e/`、`tests/e2e/slack_scenarios/`（17 yaml + README + sample `agent.yaml.example`）、`tests/integration/test_slack_scenarios_catalog.py`、旧 spec `openspec/specs/slack-e2e-test-suite/`（直接 `git rm`，因 OpenSpec delta 不支持删整个 capability）。无活跃外部引用（仅 `docs/archive/jira-backfill-plan.md` 历史文档提及，保留原貌）。
 - **依赖**：新增 dev 依赖 `slack_sdk`（self-hostable 纯 HTTP 客户端，符合数据主权原则）；若复用现有 `httpx` 则零新增，留待 design 定。
 - **模块边界**：owning = `tests/e2e` + `.claude/skills`；public API surface = 无（纯测试工具，不被任何生产模块 import）；owned tables = 无；config namespace = 无（helper 用 `SLACK_E2E_*` 环境变量）；cross-module deps = 无生产依赖，**不触碰 agent/platform 解耦契约**；migration/shim = 无。
 - **零影响**：`src/fleetent` 生产代码不改；无新增/修改持久化表。
