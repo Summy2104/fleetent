@@ -17,12 +17,14 @@ from __future__ import annotations
 import datetime
 import inspect
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
 from fleetent.governance import approval_store
+from fleetent.observability import build_tool_args_summary, record_tool_call
 from fleetent.session import manager as session_mgr
-from fleetent.tools.registry import ToolContext, dispatch
+from fleetent.tools.registry import ToolContext, dispatch, get_risk_level
 
 logger = logging.getLogger(__name__)
 
@@ -31,12 +33,50 @@ logger = logging.getLogger(__name__)
 _DEFAULT_EXPIRY_SECONDS = 24 * 3600
 
 
-async def _execute_tool(tool_name: str, tool_args: Any, tool_context: ToolContext) -> str:
-    """Run an approved tool through dispatch (authorization already passed at approval)."""
-    result = dispatch(tool_name, tool_args, tool_context=tool_context)
-    if inspect.iscoroutine(result):
-        result = await result
-    return str(result)
+async def _execute_tool(
+    tool_name: str, tool_args: Any, tool_context: ToolContext, tool_call_id: str = ""
+) -> str:
+    """Run an approved tool through dispatch (authorization already passed at approval).
+
+    Emits a `tool_call` trace span for the resumed execution (trace-tool-spans: the
+    suspended tool runs here, outside the loop's backfill, so its span is recorded
+    here to keep "every real execution is traced — including resume" true).
+    """
+    start = time.monotonic()
+    failed = False
+    try:
+        result = dispatch(tool_name, tool_args, tool_context=tool_context)
+        if inspect.iscoroutine(result):
+            result = await result
+        return str(result)
+    except BaseException:
+        failed = True
+        raise
+    finally:
+        _record_resumed_tool_call(tool_name, tool_args, tool_context, tool_call_id, failed, start)
+
+
+def _record_resumed_tool_call(
+    tool_name: str,
+    tool_args: Any,
+    tool_context: ToolContext,
+    tool_call_id: str,
+    failed: bool,
+    start: float,
+) -> None:
+    session_id = tool_context.session_id
+    record_tool_call(
+        session_id or "",
+        session_id,
+        {
+            "tool_name": tool_name,
+            "tool_call_id": tool_call_id,
+            "args_summary": build_tool_args_summary(tool_args),
+            "failed": failed,
+            "duration_ms": round((time.monotonic() - start) * 1000, 3),
+            "risk": get_risk_level(tool_name),
+        },
+    )
 
 
 async def resume_pending_approval(
@@ -59,7 +99,12 @@ async def resume_pending_approval(
 
     tool_name = str(entry.get("tool_name", ""))
     if decision == "approved":
-        result = await _execute_tool(tool_name, entry.get("tool_args"), tool_context)
+        result = await _execute_tool(
+            tool_name,
+            entry.get("tool_args"),
+            tool_context,
+            str(entry.get("tool_call_id", "")),
+        )
         note = f"[审批 {approval_id} 已批准，{tool_name} 执行结果：{result}]"
     else:
         note = f"[审批 {approval_id} 已被用户拒绝，{tool_name} 未执行]"
