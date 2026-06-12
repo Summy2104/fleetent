@@ -64,6 +64,12 @@ agent runtime ──✗──→ platform        # 严格禁止反向依赖
 
 > 现状（2026-06-11 审计后）：agent 运行时 + 独立组件对 platform 的反向 import **已彻底归零**。`user_store.authenticate` 经注入的 `_api_key_resolver` 解耦（platform 启动时 `set_api_key_resolver` 注入，standalone agent 留 None）。护栏 `tests/unit/test_module_dependency_guardrails.py` 的 `_KNOWN_TRANSITIVE_PLATFORM_LEAKS` 已清空（`= set()`）：任何新增的 agent→platform 传递泄漏都会 fail。不得新增同类反向依赖。
 
+### 异步资源生命周期（owner-task 契约）
+
+长生命周期异步资源（网络连接、SDK 会话、子进程流）**必须有唯一 owner task**：**谁打开谁关闭**——enter 和 exit 发生在同一个 task 内（anyio cancel scope / task group 的硬性要求）。跨 task 只传**句柄**（供消费），不传生命周期操作；**禁止用模块级全局单例持有活资源**（如模块级 `AsyncExitStack` 装连接）——它由"谁先用谁的 task"enter、却在关停时被另一个 task 解栈，必然违反 task 亲和性并在 teardown 时崩溃整个进程（2026-06-11 事故）。关停链上每一步必须**舱壁化**（独立 try/except + 超时），单组件收尾失败只记日志、不改变进程退出码、不波及其它组件；优雅排水路径必须 exit 0。
+
+> 范式实现：IM 连接 supervisor（每连接一个 owner task，`stop()` 定向取消）、MCP 会话宿主（`integrations/mcp/client.py` 的 `_SessionHost` + `aclose_all()`）。护栏 `test_module_dependency_guardrails.py::test_no_module_level_asyncexitstack_singleton` 强制「src 内零模块级 AsyncExitStack 单例」。函数内局部 `AsyncExitStack`（同 task、作用域内）不受限。
+
 ---
 
 ## 项目结构
@@ -219,5 +225,6 @@ FLEETENT_TOKEN         # Bearer token（--token 参数优先）
 - **路径常量**：`DB_PATH`/`SESSIONS_DIR` 等在 import 时从 `paths.py` 求值一次；测试整体重定向用 `monkeypatch.setenv("FLEETENT_HOME", tmp_path)` + `importlib.reload()`，或 `monkeypatch.setattr(module, "<CONST>", ...)`
 - **Bearer token 格式**：`Authorization: Bearer ma-<64hex>`（`ma-` 前缀区分服务 key 与模型 API key）
 - **MCP 工具名**：`{server_id}__{tool_name}`（双下划线）
+- **MCP 会话宿主**：每个 MCP 会话由 `_SessionHost`（`integrations/mcp/client.py`）的专属 task 持有，transport/ClientSession 的 enter/exit 同 task；`_active_sessions[(scope,id)]` 仍存 live `ClientSession` 供消费，`_session_hosts` 存宿主管生命周期。关停经 `aclose_all()`（接入 `agent_app._drain_and_close` 排干之后、`server.py` lifespan shutdown）。测试用 stub `_transport_cm` + `ClientSession`；**anyio 硬约束：cancel scope 必须同 task enter/exit**，不得用模块级 `AsyncExitStack` 持有连接（护栏强制）
 - **model/resolver.py**：每次调用新建 client——故意的，client 无状态且廉价
 - **Sandbox 可插拔后端**：`integrations/sandbox` 抽象为 `BaseSandboxBackend`（`backend.py`）+ `backends/docker.py`（默认）+ `backends/microsandbox.py`（本地 microVM，Apache-2.0，需宿主 KVM/HVF + 预装 runtime，否则 `is_installed()` 探测失败 → mode 降级 OFF）。后端经 `factory.create_backend` 按 `sandbox.backend`（agent.yaml > platform.yaml > 默认 docker）选型。能力差异经 `BackendCapabilities`（`persist_workspace`/`workspace_mount`/`orphan_cleanup`）门控，manager/cleanup 按能力降级、不用 isinstance。`client.py` 是 `SandboxClient = DockerBackend` 的 re-export shim——`monkeypatch`/`patch` Docker 内部（如 `_KILL_GRACE_SECONDS`、`_logger`）须打在 `backends.docker`，打 shim 不生效

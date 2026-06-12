@@ -501,3 +501,52 @@ def test_reflection_management_does_not_import_reflection_engine() -> None:
         "platform.reflection_management imports fleetent.reflection.reflection (engine private), "
         "violating management→engine boundary: " + ", ".join(violations)
     )
+
+
+# ---------------------------------------------------------------------------
+# Long-lived async resource owner-task guardrail
+# ---------------------------------------------------------------------------
+# A long-lived async resource (connection / SDK session / subprocess stream) must be
+# owned by a single task: opened and closed on the same task. A module-level
+# AsyncExitStack singleton holding such resources is entered by whichever task first uses
+# it and unwound by another at shutdown — violating anyio cancel-scope task affinity and
+# crashing the process on teardown (2026-06-11). Function-local AsyncExitStack (same-task,
+# scoped) is fine; only module-scope holders are flagged.
+
+
+def _module_level_asyncexitstack_holders(tree: ast.Module) -> list[str]:
+    names: list[str] = []
+    for node in tree.body:  # module scope only — not inside any function/class
+        if isinstance(node, ast.AnnAssign) and "AsyncExitStack" in ast.dump(node.annotation):
+            if isinstance(node.target, ast.Name):
+                names.append(node.target.id)
+        elif isinstance(node, ast.Assign) and "AsyncExitStack" in ast.dump(node.value):
+            names.extend(t.id for t in node.targets if isinstance(t, ast.Name))
+    return names
+
+
+def test_no_module_level_asyncexitstack_singleton() -> None:
+    """No src module may hold a module-level AsyncExitStack singleton (owner-task rule)."""
+    offenders: dict[str, list[str]] = {}
+    for path in _src_python_paths():
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        names = _module_level_asyncexitstack_holders(tree)
+        if names:
+            offenders[_module_name(path)] = names
+    assert not offenders, (
+        "module-level AsyncExitStack singleton(s) holding long-lived async resources — give "
+        "each resource a per-session owner task (谁打开谁关闭): " + repr(offenders)
+    )
+
+
+def test_asyncexitstack_guardrail_is_not_vacuous() -> None:
+    """Detector catches a planted module-level holder, ignores a function-local one."""
+    planted = ast.parse(
+        "from contextlib import AsyncExitStack\n_leak: AsyncExitStack | None = None\n"
+    )
+    assert _module_level_asyncexitstack_holders(planted) == ["_leak"]
+    local = ast.parse(
+        "from contextlib import AsyncExitStack\n"
+        "async def f():\n    async with AsyncExitStack() as s:\n        return s\n"
+    )
+    assert _module_level_asyncexitstack_holders(local) == []

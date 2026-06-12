@@ -16,6 +16,7 @@ scope isolation, and lazy reconnect on a dropped session.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import json
 import logging
@@ -44,8 +45,13 @@ _server_registry: dict[tuple[int | None, str], McpServerConfig] = {}
 # Ids of strict-mode servers that failed to register at startup (MCP4 D5): not in
 # _server_registry (never registered) yet still strict-unavailable for the query.
 _failed_strict_servers: set[str] = set()
-_active_sessions: dict[tuple[int | None, str], Any] = {}  # (scope, server_id) -> stdio session
-_exit_stack: AsyncExitStack | None = None
+_active_sessions: dict[tuple[int | None, str], Any] = {}  # (scope, server_id) -> ClientSession
+# (scope, server_id) -> session host. Each MCP session is owned by a dedicated task
+# (_SessionHost.task) so the SDK transport's anyio cancel scope is entered AND exited in
+# the same task — a shared module-level AsyncExitStack unwound from another task crashes
+# the process on teardown (2026-06-11 graceful-shutdown crash).
+_session_hosts: dict[tuple[int | None, str], _SessionHost] = {}
+_HOST_CLOSE_TIMEOUT = 5.0  # seconds to await a host's graceful teardown before cancelling
 
 _MAX_TOOL_PAGES = 100  # tools/list pagination safety cap: stop following nextCursor past this
 
@@ -277,27 +283,38 @@ def _oauth_degraded_result(server: McpServerConfig, exc: BaseException) -> str |
     return None
 
 
-async def get_exit_stack() -> AsyncExitStack:
-    global _exit_stack
-    if _exit_stack is None:
-        _exit_stack = AsyncExitStack()
-        await _exit_stack.__aenter__()
-    return _exit_stack
+async def _close_host(host: _SessionHost) -> None:
+    """Signal a session host to close and await its teardown (best-effort, bounded).
 
-
-async def close() -> None:
-    """Close all connections on shutdown.
-
-    The SDK owns every transport's wire (stdio subprocess / Streamable HTTP / SSE) and
-    holds each session in the shared AsyncExitStack — unwinding the stack runs each
-    transport's own teardown (HTTP DELETE handshake included), so there is nothing to
-    close by hand here.
+    The host owns the transport's anyio cancel scope, so it must run its own teardown;
+    we only wake it and wait. A teardown that hangs past the timeout is cancelled so
+    shutdown stays bounded; any teardown error is the host's own (logged there) — this
+    never raises.
     """
-    global _exit_stack
-    if _exit_stack is not None:
-        await _exit_stack.__aexit__(None, None, None)
-        _exit_stack = None
+    host.close_event.set()
+    try:
+        await asyncio.wait_for(asyncio.shield(host.task), _HOST_CLOSE_TIMEOUT)
+    except TimeoutError:
+        host.task.cancel()
+        with contextlib.suppress(BaseException):
+            await asyncio.gather(host.task, return_exceptions=True)
+    except Exception as exc:  # noqa: BLE001 — containment: a close failure never propagates
+        logger.warning("mcp_host_close_failed error=%s", exc)
+
+
+async def aclose_all() -> None:
+    """Release every MCP session host on shutdown (best-effort, contained).
+
+    Each host tears down its own transport (stdio subprocess / Streamable HTTP / SSE,
+    incl. the HTTP DELETE handshake) inside its own task, so enter/exit stay on the same
+    task. A single host failing or hanging MUST NOT block the others or change the
+    process exit code.
+    """
+    hosts = list(_session_hosts.values())
+    _session_hosts.clear()
     _active_sessions.clear()
+    if hosts:
+        await asyncio.gather(*(_close_host(h) for h in hosts), return_exceptions=True)
 
 
 async def register_all(servers: list[McpServerConfig], scope: int | None = None) -> None:
@@ -506,21 +523,77 @@ def _transport_cm(server: McpServerConfig, headers: dict[str, str]) -> Any:
     )
 
 
-async def _open_session_for(server: McpServerConfig, scope: int | None) -> Any:
-    """Open a transport-specific ClientSession, hold it in the exit stack, initialize it.
+@dataclass
+class _SessionHost:
+    """Owns one MCP ClientSession's lifecycle in a dedicated task.
 
-    Unified across stdio / http / sse: the SDK owns the wire; we hold the resulting
-    ClientSession in _active_sessions[(scope, id)] for reuse and lazy reconnect.
+    The transport + ClientSession context managers are entered and exited inside
+    ``task`` only; other tasks interact through ``session`` (consume) and ``close_event``
+    (request teardown), never by entering/exiting the contexts themselves.
+    """
+
+    task: asyncio.Task[None]
+    close_event: asyncio.Event
+    session: Any = None
+
+
+async def _host_session(
+    server: McpServerConfig,
+    scope: int | None,
+    headers: dict[str, str],
+    ready: asyncio.Future,
+    close_event: asyncio.Event,
+) -> None:
+    """Session owner coroutine: enter transport + ClientSession, init, park, exit — same task.
+
+    On a successful open it resolves ``ready`` with the live session and parks on
+    ``close_event``; on an open failure it propagates the error through ``ready``. A
+    teardown error (exit phase) is the host's own and is logged, never propagated — the
+    process must not die because one connector failed to close (2026-06-11).
+    """
+    try:
+        async with _transport_cm(server, headers) as streams:
+            read, write = streams[0], streams[1]
+            async with ClientSession(
+                read, write, message_handler=_make_message_handler(server, scope)
+            ) as session:
+                init_result = await session.initialize()
+                _capture_init_result(server, _init_result_to_dict(init_result))
+                if not ready.done():
+                    ready.set_result(session)
+                await close_event.wait()
+    except Exception as exc:  # noqa: BLE001 — open failure → caller; teardown failure → log
+        if not ready.done():
+            ready.set_exception(exc)
+        else:
+            logger.warning("mcp_session_teardown_failed server_id=%s error=%s", server.id, exc)
+
+
+async def _open_session_for(server: McpServerConfig, scope: int | None) -> Any:
+    """Open a transport-specific ClientSession owned by a dedicated host task, initialized.
+
+    Unified across stdio / http / sse: the SDK owns the wire; the host task holds the
+    transport + ClientSession contexts (entered/exited in that one task). The live
+    ClientSession is stored in _active_sessions[(scope, id)] for reuse and lazy reconnect;
+    its host in _session_hosts[(scope, id)] for lifecycle.
     """
     headers = {} if server.transport == "stdio" else await _http_headers(server)
-    stack = await get_exit_stack()
-    streams = await stack.enter_async_context(_transport_cm(server, headers))
-    read, write = streams[0], streams[1]
-    session: Any = await stack.enter_async_context(
-        ClientSession(read, write, message_handler=_make_message_handler(server, scope))
+    loop = asyncio.get_event_loop()
+    ready: asyncio.Future = loop.create_future()
+    close_event = asyncio.Event()
+    task = asyncio.ensure_future(_host_session(server, scope, headers, ready, close_event))
+    try:
+        session = await asyncio.wait_for(ready, server.connect_timeout)
+    except (Exception, asyncio.CancelledError):
+        # Open failed/timed out: tear the host down so no orphan task/connection leaks.
+        close_event.set()
+        task.cancel()
+        with contextlib.suppress(BaseException):
+            await asyncio.gather(task, return_exceptions=True)
+        raise
+    _session_hosts[(scope, server.id)] = _SessionHost(
+        task=task, close_event=close_event, session=session
     )
-    init_result = await session.initialize()
-    _capture_init_result(server, _init_result_to_dict(init_result))
     _active_sessions[(scope, server.id)] = session
     return session
 
@@ -740,6 +813,11 @@ def unregister_server(server_id: str, scope: int | None = None) -> None:
             del tr._registry[name]
     _server_registry.pop((scope, server_id), None)
     _active_sessions.pop((scope, server_id), None)
+    # Sync context: wake the host so it tears itself down on its own task (no await here);
+    # the host self-removes nothing else, so drop our handle too.
+    host = _session_hosts.pop((scope, server_id), None)
+    if host is not None:
+        host.close_event.set()
 
 
 def _rewrite_refs(node: Any) -> Any:
@@ -890,7 +968,12 @@ def _normalize_tool_result(content_blocks: Any, *, structured_content: Any, is_e
 
 async def _reopen_session(server: McpServerConfig, scope: int | None) -> Any | None:
     """Lazily re-open a dropped ClientSession (any transport) once. Returns the new
-    session, or None if reopen failed. Replaces the prior server's _active_sessions entry."""
+    session, or None if reopen failed. Closes the prior host first (no leak), then
+    replaces the server's _active_sessions / _session_hosts entry."""
+    old = _session_hosts.pop((scope, server.id), None)
+    _active_sessions.pop((scope, server.id), None)
+    if old is not None:
+        await _close_host(old)  # best-effort; a stuck/erroring old host never blocks reopen
     try:
         return await _open_session_for(server, scope)
     except Exception as exc:  # noqa: BLE001 — reopen failure → caller marks unavailable
