@@ -68,6 +68,7 @@ def create_app(agent_name: str, config: dict[str, Any]) -> object:
             SessionContext,
             route,
         )
+        from fleetent.outbound import ConversationAddress  # noqa: PLC0415
 
         assert isinstance(update, Update)
         if not update.message or not update.effective_user:
@@ -132,6 +133,15 @@ def create_app(agent_name: str, config: dict[str, Any]) -> object:
             progress_func=progress_func,
             channel_id=channel_id,
             outbound_connectors={"telegram": context.bot},
+            conversation_address=ConversationAddress(
+                platform="telegram",
+                chat_id=channel_id,
+                target_type="user",
+                thread_id=None,
+                user_id=str(tg_user_id),
+                chat_type="dm" if chat_type == "private" else "channel",
+                thread_root=str(reply_to.message_id) if reply_to else "",
+            ),
         )
         await route(msg)
 

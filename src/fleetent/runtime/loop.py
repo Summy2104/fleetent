@@ -34,6 +34,7 @@ from fleetent.observability import (
     record_tool_call,
     record_trace_event,
 )
+from fleetent.outbound import ConversationAddress
 from fleetent.runtime.budget import BudgetChecker, BudgetConfig, BudgetUsage, grace_max_tokens
 from fleetent.runtime.cancellation import CancellationChecker, CancelToken
 from fleetent.runtime.context import (
@@ -676,6 +677,7 @@ async def _plan_run_slots(
     outbound_connectors: dict[str, Any] | None = None,
     sandbox_effective_mode: Mode | None = None,
     sandbox_workspace_mount: bool = False,
+    conversation_address: ConversationAddress | None = None,
 ) -> list[_PlanSlot]:
     """Phase one for run() (D2/D3/D6): serial, original order — produce one slot
     per tool_call. Guardrail, pre_tool_use hook, and (medium/high) approval are decided
@@ -845,6 +847,13 @@ async def _plan_run_slots(
                         "tool_args": tool_args,
                         "risk": risk,
                         "approver_ids": sorted(_default_gate.authorized_actors(approval_id)),
+                        # conversation-address: persist the run's delivery target so any
+                        # resume entry rebuilds an equivalent context (None for non-IM runs).
+                        **(
+                            {"address": conversation_address.to_dict()}
+                            if conversation_address is not None
+                            else {}
+                        ),
                     }
                 )
                 slots.append(
@@ -1582,6 +1591,7 @@ async def run(
     outbound_connectors: dict[str, Any] | None = None,
     progress_func: ProgressFunc | None = None,
     session_context: Any = None,
+    conversation_address: ConversationAddress | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
@@ -1638,6 +1648,7 @@ async def run(
             outbound_connectors=outbound_connectors,
             progress_func=progress_func,
             session_context=session_context,
+            conversation_address=conversation_address,
         )
     finally:
         _active_runs -= 1
@@ -1674,6 +1685,7 @@ async def _run_inner(
     outbound_connectors: dict[str, Any] | None = None,
     progress_func: ProgressFunc | None = None,
     session_context: Any = None,
+    conversation_address: ConversationAddress | None = None,
 ) -> str:
     # Image-bearing messages route to the vision model (D6); raises here if
     # images are present but no vision route is configured, before any LLM call.
@@ -1988,6 +2000,7 @@ async def _run_inner(
             outbound_connectors=outbound_connectors,
             sandbox_effective_mode=sandbox_mode,
             sandbox_workspace_mount=sandbox_workspace_mount,
+            conversation_address=conversation_address,
         )
         pending = [s for s in slots if s.placeholder is None]
         # Progress is emitted once per execution batch (not per tool during planning):

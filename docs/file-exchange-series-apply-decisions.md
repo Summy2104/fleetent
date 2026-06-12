@@ -42,7 +42,27 @@
 
 ## ② conversation-address-unification
 
-待执行。
+**现状勘查结论**（实现前，经 Explore 代理确认）：
+- `outbound.py` 已有 `send_to(... target_type, thread, blocks)` / `send_file_to(... target_type, thread)`，平台分派齐全，**无 origin dict 解析**。
+- cron 的 origin 解析在 `cron_scheduler.py::_resolve_delivery`（line 217-235），把 `{platform, chat_id, target_type, thread_id}` 解析为 `(platform, target, target_type, thread)` tuple——top-level 模块，可 import outbound，无 platform 边界问题。
+- `NormalizedMessage`/`SessionContext` 在 `im_gateway/normalizer.py`（SessionContext 字段：platform, sender_id, sender_name, chat_type, channel_name, was_mentioned, thread_root）。
+- 挂起条目在 `loop.py` ~840-848：`{approval_id, tool_call_id, tool_name, tool_args, risk, approver_ids}`——**无 address**。run() 作用域有 session_id、user_id；但 NormalizedMessage/SessionContext **不在 loop 作用域**（loop 只收 session_id/principal/reply_func）。
+- 恢复三入口：`normalizer.route()` 文本 approve（line 361-416）→ `_resume_pending_in_session`（line 288，`continue_run` **不传 upload_func**）；`slack.handle_approval_action`（line 159，重建 `_reply` 无 thread、`resume_msg` 无 upload_func、SessionContext 仅 2 字段）。
+- session 持久化：`session/manager.py` `add/get/remove_pending_approval`，entry 是 JSON dict 存 `meta.pending_approvals[approval_id]`。
+
+**关键决策：**
+- **D②-1 address 来源**：loop 作用域无 NormalizedMessage。故 `ConversationAddress` 由**入站 adapter 构造**并经 `session_context`/新增管道带到 loop 挂起点。最小改动方案：把 address 作为 `session_context` 的衍生（SessionContext 已含 platform/thread_root 等），在挂起时由 loop 从传入的 `session_context` + session_id 构造 address dict 存入 pending 条目。→ 需给 `run()` 暴露 address 或从 session_context 提取。**采用**：`ConversationAddress` 提供 `from_session_context(session_context, channel_id, user_id)` 工厂；loop 挂起点已有 session_context 访问（经 ToolContext/参数）——确认 loop 是否有 session_context 形参，无则新增可选参数。
+- **D②-2 ConversationAddress 落 outbound.py**（顶层基础设施，im_gateway 与 runtime 都已依赖，零新方向；放 normalizer 会致 runtime→im_gateway 反向 import）。frozen dataclass `{platform, chat_id, target_type, thread_id, user_id}` + `chat_type`/`thread_root`（恢复 SessionContext 用）。
+- **D②-3 cron origin 收敛**：`ConversationAddress.from_cron_origin(dict)`，`_resolve_delivery` origin 分支经它构造再取投递 tuple，行为不变。
+- **D②-4 工厂**：`make_replier(connectors, address)→reply_func(text, blocks=None)`、`make_uploader(connectors, address)→upload_func(paths)`，内部走 send_to/send_file_to，零平台分支。
+- **D②-5 降级**：旧 pending 无 address → 恢复回退触发消息上下文 + warning，不阻塞。
+
+**实现要点与决策（apply 阶段）：**
+- **D②-6 单收敛点修复三入口**：按钮/文本/重启三个恢复入口**全部经 `_resume_pending_in_session`**。故只在该函数内从持久化 address 重建 reply_func（`make_replier`）/upload_func（`make_uploader`）/SessionContext/conversation_address，三入口一并修复——**无需改 `slack.handle_approval_action` 与文本 approve 路径本身**（它们构造的"触发消息上下文"被 resume 函数忽略，仅作为 outbound_connectors/user_id/agent_name 的载体；缺 address 时才回退到它）。故 tasks 3.5-3.8 由这一个收敛点满足；契约测试 `test_resume_address_contract.py` 用「故意错误的触发上下文（顶层 DM 无 thread）+ 持久化 thread 地址」证明三入口等价。
+- **D②-7 upload 在 resume 的实际通道**：`upload_func`（NormalizedMessage 字段）实际**无人消费**——真正的文件外发是 `send_file` 工具读 `tool_context.session_context`（platform/sender_id/chat_type）+ `outbound_connectors`。故 resume 的关键是重建 `session_context`（已做），`make_uploader` 仍构造以证明能力已接线（绑定但 send_file 才是投递路径）。
+- **D②-8 progress 保证**：resume 时 `progress_func = msg.progress_func or _noop_progress`，保证"progress 可用"契约即便触发入口未带 progress。
+- **D②-9 telegram**：无 Slack 式 thread（reply_to 是回复链非论坛 topic），故 telegram address `thread_id=None`；telegram 当前未接审批按钮入口，仅入站构造 address 以保持结构一致。
+- **5.2 真机验证**：同 ①，无 live IM/model 环境，自动化契约测试（错误触发上下文→回原 thread）等价覆盖；live my-bot 事故场景重放待用户环境。
 
 ---
 

@@ -10,11 +10,67 @@ IM edge face without creating a core→face dependency.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 import structlog
 
 logger = structlog.get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class ConversationAddress:
+    """Where a conversation lives — the persistable delivery target of a run.
+
+    A first-class, serializable address `{platform, chat_id, target_type, thread_id,
+    user_id}` plus the SessionContext routing fields (`chat_type`, `thread_root`)
+    needed to rebuild an equivalent delivery context after an approval suspend/resume.
+    Constructed once by an inbound adapter, persisted inside the pending-approval
+    entry, and converged with the cron `origin` descriptor so one type drives all
+    outbound delivery. Consumed by the `make_replier` / `make_uploader` factories.
+    """
+
+    platform: str
+    chat_id: str
+    target_type: str = "user"
+    thread_id: str | None = None
+    user_id: str = ""
+    chat_type: str = "dm"
+    thread_root: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "platform": self.platform,
+            "chat_id": self.chat_id,
+            "target_type": self.target_type,
+            "thread_id": self.thread_id,
+            "user_id": self.user_id,
+            "chat_type": self.chat_type,
+            "thread_root": self.thread_root,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ConversationAddress:
+        return cls(
+            platform=str(data.get("platform", "")),
+            chat_id=str(data.get("chat_id", "")),
+            target_type=str(data.get("target_type", "user")),
+            thread_id=data.get("thread_id"),
+            user_id=str(data.get("user_id", "")),
+            chat_type=str(data.get("chat_type", "dm")),
+            thread_root=str(data.get("thread_root", "")),
+        )
+
+    @classmethod
+    def from_cron_origin(cls, origin: dict[str, Any]) -> ConversationAddress:
+        """Build from a cron `scheduled_tasks.origin` descriptor (same type, one parser)."""
+        return cls(
+            platform=str(origin.get("platform", "")),
+            chat_id=str(origin.get("chat_id", "")),
+            target_type=str(origin.get("target_type", "user")),
+            thread_id=origin.get("thread_id"),
+            user_id=str(origin.get("user_id", "")),
+        )
 
 
 async def send_to(
@@ -67,6 +123,58 @@ async def send_file_to(
         return await _telegram_send_file(connector, target, path)
     logger.warning("outbound_file_unsupported_platform", platform=platform)
     return False
+
+
+def make_replier(connectors: dict[str, Any], address: ConversationAddress) -> Any:
+    """Build a thread-aware text reply closure for an address (no platform branch here).
+
+    The returned ``reply_func(text, blocks=None)`` dispatches through ``send_to`` with the
+    address's target/target_type/thread, so every inbound and resume entry constructs its
+    reply closure the same way — structurally impossible to drop the thread. A missing
+    connector for the address platform is a logged no-op (delivery is best-effort).
+    """
+    connector = connectors.get(address.platform)
+
+    async def reply_func(text: str, blocks: list[dict[str, Any]] | None = None) -> None:
+        if connector is None:
+            logger.warning("replier_no_connector", platform=address.platform)
+            return
+        await send_to(
+            address.platform,
+            connector,
+            address.chat_id,
+            text,
+            target_type=address.target_type,
+            thread=address.thread_id,
+            blocks=blocks,
+        )
+
+    return reply_func
+
+
+def make_uploader(connectors: dict[str, Any], address: ConversationAddress) -> Any:
+    """Build a thread-aware file upload closure for an address (mirrors ``make_replier``).
+
+    The returned ``upload_func(paths)`` delivers each path through ``send_file_to`` to the
+    address's chat/thread. A missing connector is a logged no-op.
+    """
+    connector = connectors.get(address.platform)
+
+    async def upload_func(paths: list[str]) -> None:
+        if connector is None:
+            logger.warning("uploader_no_connector", platform=address.platform)
+            return
+        for path in paths:
+            await send_file_to(
+                address.platform,
+                connector,
+                address.chat_id,
+                path,
+                target_type=address.target_type,
+                thread=address.thread_id,
+            )
+
+    return upload_func
 
 
 def approval_prompt_blocks(
