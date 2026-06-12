@@ -26,27 +26,18 @@ The `approvals` table `id` column SHALL store TEXT values to match the UUID stri
 - **WHEN** the runtime creates an approval with `id = str(uuid.uuid4())[:8]`
 - **THEN** the INSERT succeeds without datatype mismatch error
 
-### Requirement: 存量 approvals 表缺 approver_actor 列时 ensure_schema 自愈
+### Requirement: approvals 审批人列统一命名与语义
+`approvals` 表的审批人列 SHALL 命名为 `approver_user_id`，与 agent 侧其余身份列（`requester_user_id`、`sessions.user_id`、`memory_items.user_id` 等）共用统一语义：存 **Principal.user_id 字符串**——managed 部署为内部 `users.id`、standalone 部署为渠道原生 id、基础设施动作为 `system` 哨兵；无 DB 外键、跨库 opaque。旧列名 `approver_actor` SHALL 经嵌入式 Y 迁移（`RENAME COLUMN`）改名，代码与测试 MUST NOT 再引用旧列名。
 
-`governance/approval_store.py` 的 `ensure_schema()` SHALL 在建表语句之后探测 `approvals` 表的 `approver_actor` 列；列缺失时 SHALL 执行 `ALTER TABLE approvals ADD COLUMN approver_actor TEXT` 补列，并且仅在本次实际补列的分支内 SHALL 从旧列回填：`UPDATE approvals SET approver_actor = approver_user_id WHERE approver_actor IS NULL`。该自愈 MUST 幂等（重复调用不报错、不重复改动），且 MUST NOT 引入 `PRAGMA user_version` 戳或新的迁移列表。并发补列触发的 `duplicate column` 错误 SHALL 被识别为已自愈并忽略；其它异常 MUST NOT 被吞没。
+#### Scenario: 列名为 approver_user_id
+- **WHEN** `agent_state.db` 的嵌入式迁移运行到最新版本
+- **THEN** `approvals` 表含 `approver_user_id` 列且不含 `approver_actor` 列
 
-#### Scenario: 旧形态存量库自愈并回填
+#### Scenario: 旧版本库升级保留数据
+- **WHEN** 一个 `approvals.approver_actor` 已填值的旧版本库被 migrate-on-open 升级到最新版本
+- **THEN** 该列改名为 `approver_user_id`，历史行的值原样保留
 
-- **WHEN** `ensure_schema()` 作用于旧形态库（`approvals` 含 `approver_user_id`、无 `approver_actor`，且存在 `approver_user_id` 已填值的历史行）
-- **THEN** `approver_actor` 列被补上，历史行的 `approver_actor` 取 `approver_user_id` 的值，随后 `update_approval(..., approver_actor=...)` 成功执行
-
-#### Scenario: 新形态库 no-op
-
-- **WHEN** `ensure_schema()` 作用于当前 DDL 新建的库（已有 `approver_actor`、无 `approver_user_id`）
-- **THEN** 不执行 ALTER 也不执行回填，表结构与数据不变
-
-#### Scenario: 重复调用幂等
-
-- **WHEN** `ensure_schema()` 在同一库上连续调用两次
-- **THEN** 第二次调用不报错，表结构与数据与第一次调用后一致
-
-#### Scenario: 双列形态（手动止血过）不回填
-
-- **WHEN** `ensure_schema()` 作用于已同时含 `approver_user_id` 与 `approver_actor` 两列的库
-- **THEN** 不执行 ALTER 也不执行回填（`approver_actor` 为 NULL 的历史行保持 NULL）
+#### Scenario: 代码不再引用旧列名
+- **WHEN** 检查 `governance/approval_store.py` 与 `governance/permission_gate.py` 源码
+- **THEN** 不存在字符串 `approver_actor`
 
