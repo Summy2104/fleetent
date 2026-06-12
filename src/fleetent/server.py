@@ -392,10 +392,6 @@ def wire_agent_store_seams() -> None:
     def _console_delete(name: str) -> bool:
         return agent_store.delete_agent(name)
 
-    def _console_rename(old_name: str, new_name: str) -> None:
-        agent_store.rename_agent(old_name, new_name)
-        agent_admin_store.rename(old_name, new_name)
-
     def _apply_create(name: str, system_prompt: str, allowed_tools: list[str]) -> int:
         agent_id = agent_store.create_agent(name, system_prompt, allowed_tools).id
         materialize.materialize_from_store(name)
@@ -409,7 +405,6 @@ def wire_agent_store_seams() -> None:
     agent_console_api.create_agent_def = _console_create
     agent_console_api.update_agent_def = _console_update
     agent_console_api.delete_agent_def = _console_delete
-    agent_console_api.rename_agent_def = _console_rename
     agent_console_api.set_agent_icon = agent_store.set_icon
     agent_console_api.agent_icons = agent_store.icons_by_name
 

@@ -128,16 +128,6 @@ def delete_state(agent_name: str) -> None:
         conn.execute("DELETE FROM agent_admin_state WHERE agent_name = :name", {"name": agent_name})
 
 
-def rename(old_name: str, new_name: str) -> None:
-    """Re-key the side-table row when an agent is renamed; missing is a no-op."""
-    with _database().transaction() as conn:
-        conn.execute(
-            "UPDATE agent_admin_state SET agent_name = :new, updated_at = :now"
-            " WHERE agent_name = :old",
-            {"new": new_name, "old": old_name, "now": _now()},
-        )
-
-
 _FIELDS = {"status", "provenance", "drift", "archived_at"}
 _DEFAULTS = {"status": "enabled", "provenance": "adhoc", "drift": 0, "archived_at": None}
 
