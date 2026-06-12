@@ -57,11 +57,26 @@ async def test_session_tier_writes_to_host_workspace(workspace_root: Path) -> No
         await _cleanup(mgr, Scope.SESSION, "itest-sess", "bot")
 
 
-async def test_agent_tier_writes_to_host_workspace(workspace_root: Path) -> None:
-    """An agent-tier (root, writable) container can also write /workspace to host."""
+async def test_agent_tier_non_root_readonly_rootfs_still_writes_workspace(
+    workspace_root: Path,
+) -> None:
+    """agent tier is now hardened like session (sandbox-scope-split-followups): the
+    container runs non-root with a read-only rootfs, yet can still write the writable
+    `/workspace` bind mount (read-only rootfs only blocks the container system dirs).
+    """
     mgr = SandboxManager(backend=SandboxClient(), scope=Scope.AGENT)
     try:
         ws_id = await mgr.acquire(Scope.AGENT, session_id="s1", agent_name="itest-agent")
+
+        # Non-root: id -u is the nobody uid (65534), not 0.
+        whoami = await mgr.backend.exec(ws_id, "id -u")
+        assert whoami.stdout.strip() == "65534"
+
+        # Read-only rootfs: a write to a container system dir is rejected.
+        sys_write = await mgr.backend.exec(ws_id, "echo x > /opt/should-fail")
+        assert sys_write.exit_code != 0
+
+        # Writable /workspace bind mount: the agent's working write still succeeds.
         await mgr.backend.exec(ws_id, "echo world > /workspace/out.txt")
         host_file = workspace_root / "itest-agent" / "out.txt"
         assert host_file.exists()
@@ -193,8 +208,10 @@ async def test_declarative_deps_image_immutable_and_reused(workspace_root: Path)
         )
         r1 = await mgr.backend.exec(ws1, "test -f /opt/declared-dep && echo yes")
         assert r1.stdout.strip() == "yes"
-        # Write into the container rootfs (NOT into the immutable image).
-        await mgr.backend.exec(ws1, "touch /opt/session-scribble")
+        # Ephemeral container-local write into the writable /tmp tmpfs (the agent tier's
+        # rootfs is now read-only, so this is the only container-local writable spot
+        # outside the bind mount); it must NOT leak into the immutable image.
+        await mgr.backend.exec(ws1, "touch /tmp/session-scribble")
 
         # Destroy + re-acquire from the same immutable image: the prior write is gone,
         # the declared dep remains (image immutability — no commit-from-running leak).
@@ -207,7 +224,7 @@ async def test_declarative_deps_image_immutable_and_reused(workspace_root: Path)
         r_dep = await mgr.backend.exec(ws2, "test -f /opt/declared-dep && echo yes")
         assert r_dep.stdout.strip() == "yes"
         r_scribble = await mgr.backend.exec(
-            ws2, "test -f /opt/session-scribble && echo leaked || echo clean"
+            ws2, "test -f /tmp/session-scribble && echo leaked || echo clean"
         )
         assert r_scribble.stdout.strip() == "clean"
     finally:

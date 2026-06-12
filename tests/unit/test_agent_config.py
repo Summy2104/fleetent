@@ -137,6 +137,39 @@ def test_sandbox_settings_rejects_non_bool_image_persistence() -> None:
         agent_config.AgentFile.model_validate(doc)
 
 
+# --- sandbox-scope-split-followups: explicit multi_user signal --------------
+
+
+def test_sandbox_settings_multi_user_defaults_off() -> None:
+    """Defaults keep prior single-user behaviour: multi_user is False."""
+    af = agent_config.AgentFile.model_validate(
+        {"name": "bare", "version": 1, "models": _valid_models_doc()}
+    )
+    assert af.sandbox.multi_user is False
+
+
+def test_sandbox_settings_multi_user_parsed() -> None:
+    doc = _valid_doc()
+    doc["sandbox"] = {"multi_user": True}
+    af = agent_config.AgentFile.model_validate(doc)
+    assert af.sandbox.multi_user is True
+
+
+def test_sandbox_settings_rejects_non_bool_multi_user() -> None:
+    doc = _valid_doc()
+    doc["sandbox"] = {"multi_user": "yes-please"}
+    with pytest.raises(ValidationError):
+        agent_config.AgentFile.model_validate(doc)
+
+
+def test_sandbox_settings_unknown_key_still_rejected_with_multi_user() -> None:
+    """extra='forbid' keeps rejecting unknown keys after multi_user is added."""
+    doc = _valid_doc()
+    doc["sandbox"] = {"multi_user": True, "multi_users": True}  # typo
+    with pytest.raises(ValidationError):
+        agent_config.AgentFile.model_validate(doc)
+
+
 @pytest.mark.parametrize("field", ["provider", "protocol"])
 def test_model_target_requires_provider_and_protocol(field: str) -> None:
     doc = _valid_doc()

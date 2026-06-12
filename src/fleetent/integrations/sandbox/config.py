@@ -44,12 +44,6 @@ _DEFAULT_IDLE_HOURS = 2.0
 _DEFAULT_BACKEND = "docker"
 _VALID_BACKENDS = ("docker", "microsandbox")
 
-# Minimal Linux capabilities the agent tier re-adds after `--cap-drop ALL` so an
-# in-container `pip install` can chown/chmod/own files and briefly drop privilege.
-# session tier adds none (it only runs code, never installs). Mirrors the hermes
-# Docker backend's "started as root" allow-set.
-_AGENT_CAP_ADD: tuple[str, ...] = ("CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID")
-
 
 class NetworkPolicy(StrEnum):
     NONE = "none"
@@ -154,13 +148,14 @@ def _load_backend(section: dict[str, object], default: str) -> str:
 class SandboxResources:
     """Per-container resource limits; dataclass defaults are the safe defaults.
 
-    `read_only` belongs to the resource tier (default True keeps session
-    containers read-only); SB2 passes False for writable agent containers.
+    `read_only` belongs to the resource tier (default True keeps containers
+    read-only); both the session and agent tiers run read-only now that deps are
+    baked into a build-time immutable image rather than installed at runtime.
 
     The hardening fields below default to the strictest (session) tier — a bare
     `SandboxResources()` is the single source of truth for that tier. The agent
-    tier relaxes only `cap_add` (minimal install caps) and `run_as_user` (root)
-    via `build_resources_by_scope`, because installing deps needs them.
+    tier inherits these hardening defaults unchanged (sandbox-scope-split-followups);
+    `build_resources_by_scope` only overrides the non-hardening fields it exposes.
     """
 
     memory: int = 256
@@ -213,13 +208,15 @@ def load_sandbox_lifecycle(path: Path | None = None) -> SandboxLifecycle:
 def build_resources_by_scope(path: Path | None = None) -> dict[str, SandboxResources]:
     """Map each scope to its resource tier (SB2's scope→tier strategy).
 
-    `session` uses the hardened `sandbox.resources` tier as-is (read_only stays
-    True, network none, strictest hardening: no extra caps, non-root). `agent`
-    inherits that base, applies the optional `sandbox.agent_scope` override, then
-    forces the agent-tier relaxations needed to install deps: `read_only=False`
-    (writable rootfs for `docker commit` to capture, D3), `cap_add` = minimal
-    install caps, and `run_as_user=None` (root). The non-policy hardening fields
-    (pids_limit / tmpfs_size_mb / no_new_privileges / init) inherit from base.
+    `session` uses the hardened `sandbox.resources` tier as-is (read_only True,
+    network none, strictest hardening: no extra caps, non-root). `agent` inherits
+    that same hardened base and applies only the optional `sandbox.agent_scope`
+    override of the *non-hardening* fields (memory / cpus / network / memory_swap_mb).
+    It no longer relaxes read_only / cap_add / run_as_user: deps are baked into a
+    build-time immutable image (see `sandbox-image-persistence`), so the runtime
+    container never installs anything and needs no writable rootfs / install caps /
+    root (sandbox-scope-split-followups). The agent's work data is written to the
+    writable `/workspace` bind mount, which is unaffected by the read-only rootfs.
     """
     resolved = path or SETTINGS_PATH
     sandbox = _read_sandbox_section(resolved)
@@ -236,9 +233,6 @@ def build_resources_by_scope(path: Path | None = None) -> dict[str, SandboxResou
         cpus=_load_positive_float(override, "cpus", base.cpus),
         network=_load_network(override, base.network),
         memory_swap_mb=_load_optional_positive_int(override, "memory_swap_mb", base.memory_swap_mb),
-        read_only=False,
-        cap_add=_AGENT_CAP_ADD,
-        run_as_user=None,
     )
     return {_DEFAULT_SCOPE: base, "agent": agent}
 

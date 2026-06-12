@@ -314,13 +314,13 @@ async def test_create_workspace_session_runs_as_nobody(client):
 
 
 async def test_create_workspace_run_as_user_none_omits_user_flag(client):
-    """run_as_user=None (agent tier) omits --user so the container runs as root."""
+    """run_as_user=None omits --user so the container runs as the image default (root)."""
     argv = await _capture_create_workspace(client, resources=SandboxResources(run_as_user=None))
     assert "--user" not in argv
 
 
 async def test_create_workspace_cap_add_maps_each_capability(client):
-    """Each cap_add entry becomes its own --cap-add flag (agent install caps)."""
+    """Each cap_add entry becomes its own --cap-add flag (flag-mapping mechanism)."""
     res = SandboxResources(cap_add=("CHOWN", "SETUID"))
     argv = await _capture_create_workspace(client, resources=res)
     assert _cap_add_values(argv) == ["CHOWN", "SETUID"]

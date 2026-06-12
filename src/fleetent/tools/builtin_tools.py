@@ -80,6 +80,12 @@ def init_sandbox_manager(agent: object | None = None) -> SandboxManager:
     skill_mount = None
     image_persistence = False
     setup_command: str | None = None
+    # The multi-user run-shape signal is carried by config (sandbox-scope-split-followups):
+    # standalone `fleetent agent run` defaults False; a platform-hosted shared-IM agent
+    # writes `sandbox.multi_user: true` in its agent.yaml. Forwarding it here is what makes
+    # the manager's guard correct a configured `agent` workspace_scope to `session` — left
+    # unforwarded the guard would be dead (always False).
+    multi_user = False
     if resolved is not None:
         # Per-agent override of the skills bind-mount (sandbox-skill-mount); None lets
         # the manager fall back to the platform `sandbox.skill_mount` defaults.
@@ -89,14 +95,13 @@ def init_sandbox_manager(agent: object | None = None) -> SandboxManager:
         # independent switch from workspace_scope. Default off keeps prior behaviour.
         image_persistence = resolved.sandbox.image_persistence
         setup_command = resolved.sandbox.setup_command
-    # `fleetent agent run` is a single-user standalone process, so multi_user stays
-    # False here (the platform-hosted shared-IM construction site owns the multi-user
-    # signal); workspace_scope therefore honours config without correction.
+        multi_user = resolved.sandbox.multi_user
     _MANAGER = SandboxManager(
         backend=create_backend(resolved),
         skill_mount=skill_mount,
         image_persistence=image_persistence,
         setup_command=setup_command,
+        multi_user=multi_user,
     )
     return _MANAGER
 

@@ -438,15 +438,19 @@ def test_build_resources_by_scope_session_hardened(
     assert by_scope["session"].network is NetworkPolicy.NONE
 
 
-def test_build_resources_by_scope_agent_downgraded_by_default(
+def test_build_resources_by_scope_agent_read_only_like_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """With no agent_scope override, agent tier still drops read_only to writable."""
+    """agent tier inherits the read-only rootfs (sandbox-scope-split-followups).
+
+    Deps now come from the build-time immutable image, not a runtime install, so the
+    agent tier no longer relaxes read_only — it matches the session tier.
+    """
     from fleetent.integrations.sandbox.config import build_resources_by_scope
 
     monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", tmp_path / "absent.yaml")
     by_scope = build_resources_by_scope()
-    assert by_scope["agent"].read_only is False
+    assert by_scope["agent"].read_only is True
 
 
 def test_build_resources_by_scope_agent_scope_override(
@@ -470,10 +474,10 @@ def test_build_resources_by_scope_agent_scope_override(
     # session keeps base resources hardened
     assert by_scope["session"].memory == 512
     assert by_scope["session"].read_only is True
-    # agent inherits base then applies override + forced writable rootfs
+    # agent inherits base then applies the non-hardening override; rootfs stays read-only
     assert by_scope["agent"].memory == 2048
     assert by_scope["agent"].network is NetworkPolicy.ALLOW_ALL
-    assert by_scope["agent"].read_only is False
+    assert by_scope["agent"].read_only is True
 
 
 def test_build_resources_by_scope_session_strictest_hardening(
@@ -489,17 +493,22 @@ def test_build_resources_by_scope_session_strictest_hardening(
     assert session.run_as_user == "65534:65534"
 
 
-def test_build_resources_by_scope_agent_caps_and_root(
+def test_build_resources_by_scope_agent_same_hardening_as_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """agent tier re-adds the minimal install caps and runs as root (no --user)."""
+    """agent tier matches the strictest session hardening (sandbox-scope-split-followups).
+
+    Runtime no longer installs deps (baked into the build-time image), so the agent tier
+    drops no caps fewer than session, stays non-root, and keeps the read-only rootfs.
+    """
     from fleetent.integrations.sandbox.config import build_resources_by_scope
 
     monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", tmp_path / "absent.yaml")
     agent = build_resources_by_scope()["agent"]
     assert agent.cap_drop_all is True
-    assert agent.cap_add == ("CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID")
-    assert agent.run_as_user is None
+    assert agent.cap_add == ()
+    assert agent.run_as_user == "65534:65534"
+    assert agent.read_only is True
 
 
 def test_build_resources_by_scope_agent_inherits_base_hardening(

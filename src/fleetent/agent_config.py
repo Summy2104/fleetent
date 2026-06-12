@@ -275,6 +275,9 @@ class SandboxSettings(BaseModel):
     baked offline into an immutable deps image that runtime containers boot read-only
     from. Both default off/empty so unspecified agents behave exactly as before; this
     is schema-only validation (the manager/backend act on it).
+
+    `multi_user` (sandbox-scope-split-followups) is the explicit run-shape signal that
+    drives the workspace-scope guard; default False keeps standalone agents single-user.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -284,6 +287,12 @@ class SandboxSettings(BaseModel):
     skill_mount: SandboxSkillMountSettings = Field(default_factory=SandboxSkillMountSettings)
     image_persistence: bool = False
     setup_command: str | None = None
+    # Explicit multi-user run-shape signal (sandbox-scope-split-followups). Standalone
+    # `fleetent agent run` is single-user (False); platform-hosted shared-IM agents set
+    # True so the manager's guard corrects a configured `agent` workspace_scope to
+    # `session`. Carried via config (not runtime inference) to keep the agent runtime
+    # free of platform-topology knowledge / reverse dependencies.
+    multi_user: bool = False
 
 
 class AgentFile(BaseModel):
