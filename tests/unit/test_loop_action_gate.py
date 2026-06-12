@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import fleetent.runtime.loop as loop_mod
+from fleetent.integrations.sandbox import Mode
 from fleetent.runtime.snapshot import GovernanceConfig
 
 
@@ -147,6 +148,9 @@ async def test_medium_default_routes_to_approval(mock_loop_env, monkeypatch) -> 
 
 
 async def test_sandbox_mode_backed_tool_skips_approval(mock_loop_env, monkeypatch) -> None:
+    """sandbox-containment-gating: a sandbox-backed tool skips approval only when the
+    run is actually contained (effective mode != OFF). run_code execs in-container
+    whenever the mode is on, regardless of host bind-mount."""
     mock_dispatch = AsyncMock(return_value="result")
     monkeypatch.setattr(loop_mod, "get_risk_level", lambda name: "medium")
     monkeypatch.setattr(loop_mod, "dispatch", mock_dispatch)
@@ -158,10 +162,33 @@ async def test_sandbox_mode_backed_tool_skips_approval(mock_loop_env, monkeypatc
         reply_func=AsyncMock(),
         permission_gate_enabled=True,
         governance=GovernanceConfig(action_gate_medium_mode="sandbox"),
+        sandbox_mode=Mode.ALL,
     )
 
     assert gate["called"] is False
     mock_dispatch.assert_called_once()
+
+
+async def test_sandbox_mode_backed_tool_fails_closed_when_mode_off(
+    mock_loop_env, monkeypatch
+) -> None:
+    """When the box is not closed (effective mode OFF), even a sandbox-backed tool
+    configured as `sandbox` mode escalates to approval — no silent host-side run."""
+    mock_dispatch = AsyncMock(return_value="result")
+    monkeypatch.setattr(loop_mod, "get_risk_level", lambda name: "medium")
+    monkeypatch.setattr(loop_mod, "dispatch", mock_dispatch)
+    gate = _spy_gate(monkeypatch, result="approved")
+    mock_loop_env.chat.completions.create = _tool_response("run_code")
+
+    await loop_mod.run(
+        messages=[{"role": "user", "content": "run"}],
+        reply_func=AsyncMock(),
+        permission_gate_enabled=True,
+        governance=GovernanceConfig(action_gate_medium_mode="sandbox"),
+        sandbox_mode=Mode.OFF,
+    )
+
+    assert gate["called"] is True
 
 
 async def test_sandbox_mode_non_backed_tool_fails_closed_to_approval(

@@ -16,7 +16,7 @@ from typing import Any
 from fleetent import agent_config, agent_store
 from fleetent.agent_config import AgentFile, default_models
 from fleetent.agent_store import AgentVersion
-from fleetent.governance.agent_policy import check_tool_access
+from fleetent.governance.agent_policy import is_tool_visible
 from fleetent.model import ModelPolicySnapshot
 from fleetent.structured_logging import get_logger
 
@@ -230,8 +230,10 @@ def filter_tool_schemas(
 
     Two passes, both must pass for a tool to survive:
 
-    1. ``allowed_tools``: when not ``None``, only tools matching one of the
-       glob patterns (via ``check_tool_access``) are kept. ``None`` skips this pass.
+    1. ``allowed_tools`` (via ``is_tool_visible``): for ``None`` (allow-all) every
+       non-opt-in tool is kept; for an explicit list only fnmatch-matching tools
+       are kept. Opt-in tools (e.g. ``bash_exec``) require an explicit, non-bare-``*``
+       pattern and are dropped under allow-all / bare ``*``.
     2. ``mcp_server_ids``: ``None`` skips this pass (no MCP restriction). An empty
        list drops every MCP tool (any name containing ``__``). A non-empty list
        keeps only MCP tools whose ``{server_id}__`` prefix is listed; non-MCP
@@ -240,7 +242,7 @@ def filter_tool_schemas(
     result: list[ToolSchema] = []
     for schema in schemas:
         name = schema["function"]["name"]
-        if allowed_tools is not None and not check_tool_access(name, allowed_tools):
+        if not is_tool_visible(name, allowed_tools):
             continue
         if mcp_server_ids is not None and _is_mcp_tool(name):
             server_id = name.split(_MCP_SEP, 1)[0]

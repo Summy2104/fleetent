@@ -56,10 +56,10 @@ async def test_image_and_file_each_own_channel(monkeypatch, tmp_path):
     monkeypatch.setattr(paths, "workspaces_dir", lambda: tmp_path)
     analyze = AsyncMock(return_value="图片分析")
     monkeypatch.setattr(vc, "analyze", analyze)
-    monkeypatch.setattr(bt, "_save_upload", lambda data, mime: "/uploads/img.png")
+    monkeypatch.setattr(bt, "_save_upload", lambda data, mime, ctx=None: "uploads/img.png")
     fa = FileAttachment(data=b"csv", mime="text/csv", filename="d.csv")
     content = await normalizer._build_user_content(_msg("处理", [(b"png", "image/png"), fa]), "s")
-    assert "[图片 /uploads/img.png]" in content
+    assert "[图片 uploads/img.png]" in content
     assert "图片分析" in content
     assert "d.csv" in content
     assert "uploads/d.csv" in content

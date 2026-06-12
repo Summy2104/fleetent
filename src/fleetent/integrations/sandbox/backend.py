@@ -48,6 +48,22 @@ class ExecResult:
 
 
 @dataclass(frozen=True)
+class SkillMount:
+    """A host skills directory to bind-mount into the container at /workspace/skills.
+
+    `host_src` is the already-resolved host skills root (the manager validates it
+    against `is_blocked_mount` before constructing this). `read_only` defaults to
+    True: skill assets are author/operator-maintained and the agent runtime should
+    not rewrite them; an operator can flip it to allow in-container writes. Frozen so
+    a mount spec threaded through acquire→create_workspace is an immutable contract
+    and can contribute stably to `config_hash`.
+    """
+
+    host_src: str
+    read_only: bool = True
+
+
+@dataclass(frozen=True)
 class BackendCapabilities:
     """What a backend can do beyond the mandatory core surface.
 
@@ -94,8 +110,14 @@ class BaseSandboxBackend(ABC):
         env: dict[str, str] | None = None,
         workspace_host_path: str | None = None,
         config_hash: str | None = None,
+        skill_mount: SkillMount | None = None,
     ) -> str:
-        """Start an isolated workspace under `name`, returning its workspace id."""
+        """Start an isolated workspace under `name`, returning its workspace id.
+
+        `skill_mount` (sandbox-skill-mount) optionally bind-mounts a host skills root
+        at /workspace/skills and injects `SKILLS_DIR`; None keeps the prior behaviour
+        (backward compatible) and is ignored by backends without `workspace_mount`.
+        """
 
     @abstractmethod
     async def find_workspace(self, name: str) -> str | None:
@@ -123,8 +145,29 @@ class BaseSandboxBackend(ABC):
     # ── capability-gated surface (safe defaults for backends without it) ──────
 
     async def commit_workspace(self, workspace_id: str, image_tag: str) -> None:
-        """Persist a workspace's deps into an image (persist_workspace backends)."""
+        """Persist a workspace's deps into an image (persist_workspace backends).
+
+        Retired from the lifecycle hot path (sandbox-image-persistence): committing a
+        running container that executed end-user code bakes that user's rootfs into the
+        next boot image, and runtime hardening cannot reach already-baked layers.
+        Dependency persistence is now `build_deps_image` (declarative offline build).
+        Kept only for backward-compatible callers; the manager no longer calls it.
+        """
         raise NotImplementedError(f"{self.name} backend does not support commit_workspace")
+
+    async def build_deps_image(
+        self, image_tag: str, setup_command: str, base_image: str | None = None
+    ) -> None:
+        """Declaratively build an *immutable* dependency image (persist_workspace only).
+
+        Runs `setup_command` in a closed offline build (no end-user session data) on top
+        of `base_image`, producing an immutable image tagged `image_tag` that runtime
+        containers boot read-only from (sandbox-image-persistence). This is the only
+        sanctioned dependency-persistence primitive: it never commits a running
+        container. Backends without `persist_workspace` do not implement it (the default
+        raises so a miswired caller fails loudly rather than silently no-op).
+        """
+        raise NotImplementedError(f"{self.name} backend does not support build_deps_image")
 
     async def image_exists(self, image_tag: str) -> bool:
         """Whether a committed dependency image exists (persist_workspace backends)."""

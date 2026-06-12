@@ -26,13 +26,13 @@ def _assert_derivation_in_clean_env(code: str) -> None:
 
 
 def test_constants_derive_from_paths() -> None:
+    # GENERATED_DIR / UPLOADS_DIR are retired (sandbox-execution-world): image products
+    # now resolve to the per-scope workspace, not a fixed data/ subdir, so they no longer
+    # exist as module path constants.
     _assert_derivation_in_clean_env(
         "from fleetent import eval_logger, paths; "
         "from fleetent.integrations.sandbox import config as sc, enablement as se; "
-        "from fleetent.tools import builtin_tools as bt; "
         "assert eval_logger.TRACE_PATH == paths.data_dir() / 'traces.jsonl'; "
-        "assert bt.GENERATED_DIR == paths.data_dir() / 'generated'; "
-        "assert bt.UPLOADS_DIR == paths.data_dir() / 'uploads'; "
         "assert sc.SETTINGS_PATH == paths.platform_yaml_path(); "
         "assert se.SETTINGS_PATH == paths.platform_yaml_path()"
     )

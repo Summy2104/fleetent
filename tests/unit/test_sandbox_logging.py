@@ -60,10 +60,10 @@ def test_sandbox_config_logger_is_custom() -> None:
 
 
 def test_sandbox_config_warns_on_invalid_scope() -> None:
-    from fleetent.integrations.sandbox.config import _load_scope
+    from fleetent.integrations.sandbox.config import _load_workspace_scope
 
     with patch("fleetent.integrations.sandbox.config._logger") as mock_log:
-        _load_scope({"scope": "invalid_scope_xyz"}, "session")
+        _load_workspace_scope({"workspace_scope": "invalid_scope_xyz"}, "session")
 
     mock_log.warn.assert_called_once()
 

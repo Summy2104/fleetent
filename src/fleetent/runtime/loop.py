@@ -18,7 +18,7 @@ import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
 from fleetent import agent_config
 from fleetent.eval_logger import log_run
 from fleetent.governance.action_gate import ActionMode, is_sandbox_backed, resolve_action_mode
-from fleetent.governance.agent_policy import check_tool_access
+from fleetent.governance.agent_policy import check_tool_access, is_tool_visible
 from fleetent.governance.permission_gate import _default_gate
 from fleetent.identity import Principal
 from fleetent.integrations.sandbox import Mode, is_code_execution_enabled, redact_secrets
@@ -87,6 +87,46 @@ ProgressFunc = Callable[[dict[str, Any]], Awaitable[None]]
 # of an agent's schema (the one enablement point, D1) when code execution is not
 # enabled for that (mode, features) pair.
 _RUN_CODE_TOOL = "run_code"
+
+
+def runtime_sandbox_capable(
+    tool_name: str,
+    effective_mode: Mode | None,
+    *,
+    workspace_mount: bool,
+) -> bool:
+    """Whether a tool call is *actually* contained in the sandbox this run.
+
+    Feeds the action gate's ``sandbox_capable`` input from runtime containment rather
+    than a static tool-name lookup (sandbox-containment-gating). A tool is capable
+    only when:
+
+    - it is sandbox-backed (``is_sandbox_backed``), AND
+    - the effective sandbox mode is not OFF (``None`` is treated as OFF — fail
+      closed), AND
+    - it really executes inside the container this call. ``run_code`` execs in the
+      container whenever the mode is on. The file tools (``read_file`` etc.) instead
+      degrade to the host fence when the backend cannot bind-mount the workspace
+      (``workspace_mount=False``) — matching ``file_tools._select_backend`` — so they
+      are only contained when ``workspace_mount`` is available.
+
+    Args:
+        tool_name: The tool call's name (from the server-side registry, not LLM args).
+        effective_mode: The run's resolved sandbox mode, or None when unresolved.
+        workspace_mount: Whether the active backend bind-mounts the host workspace.
+
+    Returns:
+        True iff the tool is structurally isolated in the container for this call.
+    """
+    if not is_sandbox_backed(tool_name):
+        return False
+    if effective_mode is None or effective_mode is Mode.OFF:
+        return False
+    if tool_name == _RUN_CODE_TOOL:
+        return True
+    # File tools share the host workspace fence (no namespace) when the backend
+    # cannot bind-mount, so they are not contained then.
+    return workspace_mount
 
 
 def _filter_code_execution(
@@ -247,9 +287,7 @@ def _visible_tool_names(allowed_tools: list[str] | None) -> set[str]:
     `requires_tools` is checked against exactly what the agent can call.
     """
     names = {s["function"]["name"] for s in get_schemas()}
-    if allowed_tools is not None:
-        names = {n for n in names if check_tool_access(n, allowed_tools)}
-    return names
+    return {n for n in names if is_tool_visible(n, allowed_tools)}
 
 
 def _strict_unavailable_reply(blocked: list[str]) -> str:
@@ -628,6 +666,8 @@ async def _plan_run_slots(
     permission_gate_high_timeout: int | None = None,
     approval_routing: Any | None = None,
     outbound_connectors: dict[str, Any] | None = None,
+    sandbox_effective_mode: Mode | None = None,
+    sandbox_workspace_mount: bool = False,
 ) -> list[_PlanSlot]:
     """Phase one for run() (D2/D3/D6): serial, original order — produce one slot
     per tool_call. Guardrail, pre_tool_use hook, and (medium/high) approval are decided
@@ -745,7 +785,11 @@ async def _plan_run_slots(
                 governance.action_gate_medium_mode if governance is not None else "approval"
             ),
             high_mode=(governance.action_gate_high_mode if governance is not None else "approval"),
-            sandbox_capable=is_sandbox_backed(name),
+            sandbox_capable=runtime_sandbox_capable(
+                name,
+                sandbox_effective_mode,
+                workspace_mount=sandbox_workspace_mount,
+            ),
             force_ask=force_ask,
         )
         if gate_mode is ActionMode.REJECT:
@@ -1600,14 +1644,26 @@ async def _run_inner(
         else get_schemas()
     )
 
-    # Filter by agent-level allowed_tools if specified
-    if allowed_tools is not None:
-        schemas = [s for s in schemas if check_tool_access(s["function"]["name"], allowed_tools)]
+    # Filter by agent-level allowed_tools (is_tool_visible also drops opt-in tools
+    # like bash_exec under allow-all / bare `*`).
+    schemas = [s for s in schemas if is_tool_visible(s["function"]["name"], allowed_tools)]
 
     # SB3 D1: the single code-execution enablement point — drop run_code from this
     # agent's schema when the (mode, features) pair disables it (alongside the
     # allowed_tools filter above).
     schemas = _filter_code_execution(schemas, sandbox_mode, agent_features)
+
+    # sandbox-containment-gating: read the active backend's bind-mount capability once
+    # per run (not per gate decision) so the action gate's sandbox_capable reflects
+    # whether file tools truly run in-container this run. Best-effort: a manager build
+    # failure must not break the run — degrade to "not mounted" (fail closed to gate).
+    try:
+        from fleetent.tools.builtin_tools import _get_manager
+
+        sandbox_workspace_mount = _get_manager().backend.capabilities.workspace_mount
+    except Exception as exc:  # noqa: BLE001 — capability probe is auxiliary, fail closed
+        _logger.debug("sandbox_capability_probe_failed", error=str(exc))
+        sandbox_workspace_mount = False
 
     # SB3 D5: execution-time context channel for run_code (session/agent/features),
     # injected out-of-band only into tools that opt in; harmless for the rest.
@@ -1881,6 +1937,8 @@ async def _run_inner(
             permission_gate_high_timeout=permission_gate_high_timeout,
             approval_routing=approval_routing,
             outbound_connectors=outbound_connectors,
+            sandbox_effective_mode=sandbox_mode,
+            sandbox_workspace_mount=sandbox_workspace_mount,
         )
         pending = [s for s in slots if s.placeholder is None]
         # Progress is emitted once per execution batch (not per tool during planning):
@@ -2360,10 +2418,9 @@ async def run_stream(
         finish_reason = "stop"
 
         stream_schemas = get_schemas()
-        if allowed_tools is not None:
-            stream_schemas = [
-                s for s in stream_schemas if check_tool_access(s["function"]["name"], allowed_tools)
-            ]
+        stream_schemas = [
+            s for s in stream_schemas if is_tool_visible(s["function"]["name"], allowed_tools)
+        ]
         # SB3 D1: code-execution enablement point, mirroring run().
         stream_schemas = _filter_code_execution(stream_schemas, sandbox_mode, agent_features)
 

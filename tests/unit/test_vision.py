@@ -2,7 +2,6 @@
 
 import asyncio
 import base64
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -137,42 +136,48 @@ def test_analyze_empty_choices_raises(monkeypatch):
 # ── uploads storage helper ──────────────────────────────────────────────────
 
 
-def test_uploads_dir_constant_exists():
-    import fleetent.tools.builtin_tools as tl
+def _ws_ctx(monkeypatch, tmp_path):
+    """Isolate the per-scope workspace to tmp and return (ctx, uploads_dir).
 
-    assert isinstance(tl.UPLOADS_DIR, Path)
+    Uploads now land in the per-scope workspace `uploads/` (sandbox-workspace-root);
+    tests redirect `workspaces_dir` rather than the retired `UPLOADS_DIR` constant.
+    """
+    from fleetent import paths
+    from fleetent.tools.builtin_tools import _get_manager
+    from fleetent.tools.registry import ToolContext
 
-
-def test_uploads_dir_monkeypatchable(monkeypatch, tmp_path):
-    import fleetent.tools.builtin_tools as tl
-
-    monkeypatch.setattr(tl, "UPLOADS_DIR", tmp_path / "up")
-    assert tmp_path / "up" == tl.UPLOADS_DIR
+    monkeypatch.setattr(paths, "workspaces_dir", lambda: tmp_path / "ws")
+    ctx = ToolContext(session_id="vis-sess", agent_name="bot")
+    mgr = _get_manager()
+    uploads = mgr.workspace_host_path(mgr.scope, "vis-sess", "bot") / "uploads"
+    return ctx, uploads
 
 
 def test_save_upload_writes_and_reads_back(monkeypatch, tmp_path):
     import fleetent.tools.builtin_tools as tl
 
-    monkeypatch.setattr(tl, "UPLOADS_DIR", tmp_path / "up")
-    ref = tl._save_upload(PNG_BYTES, "image/png")
+    ctx, uploads = _ws_ctx(monkeypatch, tmp_path)
+    ref = tl._save_upload(PNG_BYTES, "image/png", ctx)
 
-    written = list((tmp_path / "up").glob("*"))
+    written = list(uploads.glob("*"))
     assert len(written) == 1
     assert written[0].read_bytes() == PNG_BYTES
-    # reference is a path string, no base64
+    # reference is a workspace-relative path string, no base64
     b64 = base64.b64encode(PNG_BYTES).decode("ascii")
     assert b64 not in ref
+    assert ref.startswith("uploads/")
     # the reference reads back to the original bytes
-    assert tl._read_upload(ref) == PNG_BYTES
+    assert tl._read_upload(ref, ctx) == PNG_BYTES
 
 
-def test_save_upload_reference_is_path(monkeypatch, tmp_path):
+def test_save_upload_reference_is_relative_path(monkeypatch, tmp_path):
     import fleetent.tools.builtin_tools as tl
 
-    monkeypatch.setattr(tl, "UPLOADS_DIR", tmp_path / "up")
-    ref = tl._save_upload(PNG_BYTES, "image/jpeg")
-    assert ref.endswith(".jpeg") or ref.endswith(".jpg") or Path(ref).suffix
-    assert str(tmp_path / "up") in ref
+    ctx, _uploads = _ws_ctx(monkeypatch, tmp_path)
+    ref = tl._save_upload(PNG_BYTES, "image/jpeg", ctx)
+    assert ref.startswith("uploads/")
+    assert ref.endswith(".jpg")
+    assert not ref.startswith("/")
 
 
 # ── analyze_image tool ──────────────────────────────────────────────────────
@@ -190,8 +195,8 @@ def test_analyze_image_registered():
 def test_analyze_image_valid_ref_returns_text(monkeypatch, tmp_path):
     import fleetent.tools.builtin_tools as tl
 
-    monkeypatch.setattr(tl, "UPLOADS_DIR", tmp_path / "up")
-    ref = tl._save_upload(PNG_BYTES, "image/png")
+    ctx, _uploads = _ws_ctx(monkeypatch, tmp_path)
+    ref = tl._save_upload(PNG_BYTES, "image/png", ctx)
 
     async def fake_analyze(image_bytes, instruction, *, config=None):
         assert image_bytes == PNG_BYTES
@@ -200,22 +205,22 @@ def test_analyze_image_valid_ref_returns_text(monkeypatch, tmp_path):
 
     monkeypatch.setattr(tl.vision_client, "analyze", fake_analyze)
 
-    result = asyncio_run(tl.analyze_image(ref=ref, instruction="read the total"))
+    result = asyncio_run(tl.analyze_image(ref=ref, instruction="read the total", tool_context=ctx))
     assert "total is $42" in result
 
 
 def test_analyze_image_result_has_no_base64(monkeypatch, tmp_path):
     import fleetent.tools.builtin_tools as tl
 
-    monkeypatch.setattr(tl, "UPLOADS_DIR", tmp_path / "up")
-    ref = tl._save_upload(PNG_BYTES, "image/png")
+    ctx, _uploads = _ws_ctx(monkeypatch, tmp_path)
+    ref = tl._save_upload(PNG_BYTES, "image/png", ctx)
 
     async def fake_analyze(image_bytes, instruction, *, config=None):
         return "described"
 
     monkeypatch.setattr(tl.vision_client, "analyze", fake_analyze)
 
-    result = asyncio_run(tl.analyze_image(ref=ref, instruction="x"))
+    result = asyncio_run(tl.analyze_image(ref=ref, instruction="x", tool_context=ctx))
     b64 = base64.b64encode(PNG_BYTES).decode("ascii")
     assert b64 not in result
 
@@ -223,9 +228,9 @@ def test_analyze_image_result_has_no_base64(monkeypatch, tmp_path):
 def test_analyze_image_invalid_ref_returns_error_not_raised(monkeypatch, tmp_path):
     import fleetent.tools.builtin_tools as tl
 
-    monkeypatch.setattr(tl, "UPLOADS_DIR", tmp_path / "up")
+    ctx, _uploads = _ws_ctx(monkeypatch, tmp_path)
     result = asyncio_run(
-        tl.analyze_image(ref=str(tmp_path / "up" / "missing.png"), instruction="x")
+        tl.analyze_image(ref="uploads/missing.png", instruction="x", tool_context=ctx)
     )
     assert result.startswith("error:")
 
@@ -234,15 +239,15 @@ def test_analyze_image_unconfigured_endpoint_returns_error(monkeypatch, tmp_path
     import fleetent.tools.builtin_tools as tl
     from fleetent.tools.vision_client import VisionError
 
-    monkeypatch.setattr(tl, "UPLOADS_DIR", tmp_path / "up")
-    ref = tl._save_upload(PNG_BYTES, "image/png")
+    ctx, _uploads = _ws_ctx(monkeypatch, tmp_path)
+    ref = tl._save_upload(PNG_BYTES, "image/png", ctx)
 
     async def fake_analyze(image_bytes, instruction, *, config=None):
         raise VisionError("vision endpoint not configured (vision_url is empty)")
 
     monkeypatch.setattr(tl.vision_client, "analyze", fake_analyze)
 
-    result = asyncio_run(tl.analyze_image(ref=ref, instruction="x"))
+    result = asyncio_run(tl.analyze_image(ref=ref, instruction="x", tool_context=ctx))
     assert result.startswith("error:")
     assert "not configured" in result
 
@@ -256,14 +261,14 @@ def test_analyze_image_result_in_trace_has_no_base64(monkeypatch, tmp_path):
     import fleetent.tools.builtin_tools as tl
     from fleetent import eval_logger
 
-    monkeypatch.setattr(tl, "UPLOADS_DIR", tmp_path / "up")
-    ref = tl._save_upload(PNG_BYTES, "image/png")
+    ctx, _uploads = _ws_ctx(monkeypatch, tmp_path)
+    ref = tl._save_upload(PNG_BYTES, "image/png", ctx)
 
     async def fake_analyze(image_bytes, instruction, *, config=None):
         return "structured description"
 
     monkeypatch.setattr(tl.vision_client, "analyze", fake_analyze)
-    result = asyncio_run(tl.analyze_image(ref=ref, instruction="x"))
+    result = asyncio_run(tl.analyze_image(ref=ref, instruction="x", tool_context=ctx))
 
     tool_msg = {"role": "tool", "tool_call_id": "call_1", "content": result}
     serialized = eval_logger._serialize(tool_msg)

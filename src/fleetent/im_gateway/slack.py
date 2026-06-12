@@ -259,20 +259,18 @@ def _make_upload_func(
 ) -> Any:
     """Return an async callable that uploads a list of local image paths to Slack.
 
-    Wraps ``files_upload_v2``; single-file failures are logged and skipped so
-    that one bad upload never prevents the rest from going through.
+    Converges onto the unified ``outbound.send_file_to`` primitive (single delivery
+    implementation shared with the ``send_file`` tool); the inbound ``channel`` is the
+    delivery target, so the channel (not user-DM) path is used directly. Single-file
+    failures are swallowed by the primitive so one bad upload never blocks the rest.
     """
+    from fleetent import outbound
 
     async def upload_func(paths: list[str]) -> None:
         for path in paths:
-            try:
-                await client.files_upload_v2(
-                    channel=channel,
-                    thread_ts=reply_thread,
-                    file=path,
-                )
-            except Exception as exc:  # noqa: BLE001 — upload failure must not break the response
-                logger.warning("slack_image_upload_failed", path=path, error=str(exc))
+            await outbound.send_file_to(
+                "slack", client, channel, path, target_type="channel", thread=reply_thread
+            )
 
     return upload_func
 

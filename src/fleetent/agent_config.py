@@ -244,19 +244,55 @@ class SandboxMicrosandboxSettings(BaseModel):
     image: str | None = None
 
 
+class SandboxSkillMountSettings(BaseModel):
+    """Per-agent skills-mount options (sandbox-skill-mount).
+
+    `enabled` toggles bind-mounting the host skills root into `/workspace/skills`;
+    `read_only` mounts it ro (default) so the agent cannot rewrite skill assets;
+    `source` optionally overrides the resolved effective skills root (``None`` →
+    the registry's resolved user root).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    read_only: bool = True
+    source: str | None = None
+
+
 class SandboxSettings(BaseModel):
     """Per-agent sandbox backend selection (sandbox-backend-abstraction).
 
     `backend` (``docker`` | ``microsandbox``) overrides the platform default for this
     agent; ``None`` inherits the platform-level `sandbox.backend`. An invalid value is
     not rejected here — the factory warns and falls back to docker — so a typo never
-    blocks the agent from loading.
+    blocks the agent from loading. `skill_mount` (sandbox-skill-mount) configures the
+    host skills bind-mount into `/workspace/skills`.
+
+    `image_persistence` + `setup_command` (sandbox-image-persistence) are the
+    *independent* per-agent dependency-image switch, orthogonal to `workspace_scope`
+    (data isolation). When enabled on a `persist_workspace` backend, `setup_command` is
+    baked offline into an immutable deps image that runtime containers boot read-only
+    from. Both default off/empty so unspecified agents behave exactly as before; this
+    is schema-only validation (the manager/backend act on it).
+
+    `multi_user` (sandbox-scope-split-followups) is the explicit run-shape signal that
+    drives the workspace-scope guard; default False keeps standalone agents single-user.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     backend: str | None = None
     microsandbox: SandboxMicrosandboxSettings = Field(default_factory=SandboxMicrosandboxSettings)
+    skill_mount: SandboxSkillMountSettings = Field(default_factory=SandboxSkillMountSettings)
+    image_persistence: bool = False
+    setup_command: str | None = None
+    # Explicit multi-user run-shape signal (sandbox-scope-split-followups). Standalone
+    # `fleetent agent run` is single-user (False); platform-hosted shared-IM agents set
+    # True so the manager's guard corrects a configured `agent` workspace_scope to
+    # `session`. Carried via config (not runtime inference) to keep the agent runtime
+    # free of platform-topology knowledge / reverse dependencies.
+    multi_user: bool = False
 
 
 class AgentFile(BaseModel):

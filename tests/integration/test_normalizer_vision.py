@@ -68,10 +68,24 @@ def _msg(replies, attachments):
     )
 
 
+def _redirect_workspaces(tmp_path, monkeypatch):
+    """Point the per-scope workspace root at tmp (uploads now land there, not UPLOADS_DIR)."""
+    from fleetent import paths
+
+    ws = tmp_path / "workspaces"
+    monkeypatch.setattr(paths, "workspaces_dir", lambda: ws)
+    return ws
+
+
+def _uploaded_files(ws_root):
+    """All files written under any per-scope workspace `uploads/` subdir."""
+    return [p for p in ws_root.rglob("uploads/*") if p.is_file()]
+
+
 async def test_image_message_extracted_and_stripped(tmp_path, monkeypatch):
     _setup_db(tmp_path, monkeypatch)
     _bind_default_agent(tmp_path, monkeypatch)
-    monkeypatch.setattr(tl, "UPLOADS_DIR", tmp_path / "up")
+    ws = _redirect_workspaces(tmp_path, monkeypatch)
 
     captured = {}
 
@@ -95,26 +109,26 @@ async def test_image_message_extracted_and_stripped(tmp_path, monkeypatch):
     replies = []
     await normalizer.route(_msg(replies, attachments=[(PNG_BYTES, "image/png")]))
 
-    # (a) image written to uploads
-    written = list((tmp_path / "up").glob("*"))
+    # (a) image written to the per-scope workspace uploads/
+    written = _uploaded_files(ws)
     assert len(written) == 1
     assert written[0].read_bytes() == PNG_BYTES
     # (b) analyze called once with the image and the user text as instruction
     assert captured["bytes"] == PNG_BYTES
     assert "invoice" in captured["instruction"]
-    # (c)+(d) the message handed to run carries the extracted text and a ref,
-    # and (e) no image_url block remains → routes default.
+    # (c)+(d) the message handed to run carries the extracted text and a workspace-relative
+    # ref, and (e) no image_url block remains → routes default.
     msgs = captured_messages["messages"]
     assert not has_image_block(msgs)
     blob = repr(msgs)
     assert "Total: $42.00" in blob
-    assert str(written[0]) in blob
+    assert f"uploads/{written[0].name}" in blob
 
 
 async def test_no_image_message_unchanged(tmp_path, monkeypatch):
     _setup_db(tmp_path, monkeypatch)
     _bind_default_agent(tmp_path, monkeypatch)
-    monkeypatch.setattr(tl, "UPLOADS_DIR", tmp_path / "up")
+    ws = _redirect_workspaces(tmp_path, monkeypatch)
 
     analyze = AsyncMock()
     monkeypatch.setattr(tl.vision_client, "analyze", analyze)
@@ -134,7 +148,7 @@ async def test_no_image_message_unchanged(tmp_path, monkeypatch):
 
     # plain text path: no vision call, no uploads, last message is the user text
     analyze.assert_not_awaited()
-    assert not (tmp_path / "up").exists() or not list((tmp_path / "up").glob("*"))
+    assert not _uploaded_files(ws)
     assert captured_messages["messages"][-1]["content"] == "what is the total on this invoice?"
 
 
@@ -143,7 +157,7 @@ async def test_reference_still_readable_for_followup_analyze(tmp_path, monkeypat
     analyze_image again (read-on-demand look-back)."""
     _setup_db(tmp_path, monkeypatch)
     _bind_default_agent(tmp_path, monkeypatch)
-    monkeypatch.setattr(tl, "UPLOADS_DIR", tmp_path / "up")
+    ws = _redirect_workspaces(tmp_path, monkeypatch)
 
     async def fake_analyze(image_bytes, instruction, *, settings=None):
         return "first look"
@@ -163,7 +177,10 @@ async def test_reference_still_readable_for_followup_analyze(tmp_path, monkeypat
     replies = []
     await normalizer.route(_msg(replies, attachments=[(PNG_BYTES, "image/png")]))
 
-    written = list((tmp_path / "up").glob("*"))
-    ref = str(written[0])
-    # the model can re-read the same reference later
-    assert tl._read_upload(ref) == PNG_BYTES
+    written = _uploaded_files(ws)
+    # the model can re-read the same reference later via its workspace-relative ref +
+    # the originating session's tool context.
+    from fleetent.tools.registry import ToolContext
+
+    ctx = ToolContext(session_id="thread:vision", agent_name=None)
+    assert tl._read_upload(f"uploads/{written[0].name}", ctx) == PNG_BYTES
