@@ -22,8 +22,8 @@
 
 ## 4. 文档
 
-- [ ] 4.1 `docs/architecture/data-model.md` §3.2：`users` 描述去 legacy `api_key` 注记、改为"key 唯一真相源在 `api_keys`（哈希，明文不落库）"；`agents` 描述加 **name 为不可变标识**（admin_state / session_meta / 物理目录以其为键）
-- [ ] 4.2 复核 `docs/capabilities/platform.md` / `user-center` 相关描述与 `docs/deployment/`（install/pilot 手册中 create-user 流程输出）无旧轨表述，有则同步
+- [x] 4.1 `docs/architecture/data-model.md` §3.2：`users` 描述去 legacy `api_key` 注记、改为"key 唯一真相源在 `api_keys`（哈希，明文不落库）"；`agents` 描述加 **name 为不可变标识**（admin_state / session_meta / 物理目录以其为键）
+- [x] 4.2 复核 `docs/capabilities/platform.md` / `user-center` 相关描述与 `docs/deployment/`（install/pilot 手册中 create-user 流程输出）无旧轨表述，有则同步
 
 ## 5. 收尾
 
