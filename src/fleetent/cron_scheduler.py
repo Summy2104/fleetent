@@ -94,6 +94,22 @@ async def _agent_run(
     )
 
 
+def _generate_delivery_statement(task: dict[str, Any]) -> str:
+    """The fired-run delivery contract for a ``generate`` task (no interlocutor at fire time).
+
+    Names the delivery target, restricts the reply to the notification body, documents the
+    ``[SILENT]`` skip sentinel, and forbids questions/operator-facing commentary — so the
+    agent's final reply is a clean notification that the scheduler broadcasts verbatim.
+    """
+    target = _resolve_delivery(task)
+    where = f"{target[0]}:{target[1]}" if target else "the task's configured target"
+    return (
+        f"[定时任务] 这是一个到点自动触发的任务，你没有对话对象，不要提问、不要输出面向操作者的"
+        f"说明。你这条回复的最终内容将被原样发布到 {where}。回复中只应包含要发布的通知正文本身；"
+        f"若本次无需发布任何内容，只回复 {_SILENT_SENTINEL}。"
+    )
+
+
 async def _fire(task: dict[str, Any], connectors: dict[str, Any] | None = None) -> None:
     """Construct messages, run the agent, and proactively deliver the reply (S3 + delivery).
 
@@ -121,16 +137,28 @@ async def _fire(task: dict[str, Any], connectors: dict[str, Any] | None = None) 
         )
         return
 
-    sid_spec = task.get("session_id")
-    if sid_spec is None:
-        sid = f"cron/{task['id']}/{uuid.uuid4().hex}"
-        messages: list[dict[str, Any]] = [{"role": "user", "content": task["message"]}]
-    else:
-        sid = sid_spec
-        messages = list(await session_mgr.load(sid))
-        messages.append({"role": "user", "content": task["message"]})
-
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    task_type = task.get("task_type") or "generate"
+
+    # notify: deterministic — the scheduler sends the frozen copy verbatim, no agent run.
+    # Status reflects the delivery outcome (the task intent).
+    if task_type == "notify":
+        delivery_error = await _deliver(task, task.get("notify_text"), connectors or {})
+        _record_run(task, now, "error" if delivery_error else "ok", delivery_error)
+        return
+
+    sid_spec = task.get("session_id")
+    sid = f"cron/{task['id']}/{uuid.uuid4().hex}" if sid_spec is None else sid_spec
+    messages: list[dict[str, Any]] = [] if sid_spec is None else list(await session_mgr.load(sid))
+    # generate: the run's final reply IS the broadcast — fold the delivery contract into the
+    # turn's instruction so the agent emits only the notification body (no questions;
+    # [SILENT] to send nothing). One user message (no separate turn) keeps fixed-session
+    # history clean.
+    content = task["message"]
+    if task_type == "generate":
+        content = f"{_generate_delivery_statement(task)}\n\n{content}"
+    messages.append({"role": "user", "content": content})
+
     try:
         reply = await _agent_run(
             messages,
@@ -146,6 +174,12 @@ async def _fire(task: dict[str, Any], connectors: dict[str, Any] | None = None) 
     # agent_loop.run mutates `messages` in place into the full conversation; persist it
     # so a fixed-session task continues from here next fire.
     await session_mgr.save(sid, messages, user_id=principal.user_id)
+
+    # action: the agent delivers via its own tools during the run — the scheduler MUST NOT
+    # broadcast its final reply (it is an operator-facing run report). Status = run outcome.
+    if task_type == "action":
+        _record_run(task, now, "ok", None)
+        return
 
     delivery_error = await _deliver(task, reply, connectors or {})
     _record_run(task, now, "error" if delivery_error else "ok", delivery_error)
@@ -311,6 +345,8 @@ class CronScheduler:
         session_id: str | None = None,
         origin: dict[str, Any] | None = None,
         deliver: dict[str, Any] | None = None,
+        task_type: str = "generate",
+        notify_text: str | None = None,
     ) -> dict[str, Any]:
         """Persist a new task and register its live job in one step."""
         task = _store.create(
@@ -326,6 +362,8 @@ class CronScheduler:
             interval_seconds=interval_seconds,
             origin=origin,
             deliver=deliver,
+            task_type=task_type,
+            notify_text=notify_text,
         )
         self._register(task)
         return task
@@ -436,6 +474,8 @@ def create_task(
     session_id: str | None = None,
     origin: dict[str, Any] | None = None,
     deliver: dict[str, Any] | None = None,
+    task_type: str = "generate",
+    notify_text: str | None = None,
 ) -> dict[str, Any]:
     """Create a task; registers the live job when a scheduler is running."""
     kwargs: dict[str, Any] = {
@@ -451,6 +491,8 @@ def create_task(
         "session_id": session_id,
         "origin": origin,
         "deliver": deliver,
+        "task_type": task_type,
+        "notify_text": notify_text,
     }
     sched = current()
     if sched is not None:
