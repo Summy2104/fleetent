@@ -1,8 +1,0 @@
-id: moh-hu-qing-qiu-zhu-dong-cheng-qing
-coverage:
-- clarify
-persona: 给出模糊、信息不全请求的用户。
-goal: 发一句信息明显不足、无法直接执行的请求(如「帮我处理一下那个文件」),不补充上下文,看 agent 如何应对。
-success_criteria: agent 不臆测乱答,而是主动提出有针对性的澄清问题来补全缺失信息。
-max_turns: 4
-channel: REPLACE_WITH_TEST_CHANNEL

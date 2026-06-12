@@ -1,9 +1,0 @@
-id: skill-an-xu-jia-zai
-coverage:
-- skills
-persona: 请求恰好命中 agent 某个技能的用户。
-goal: 提一个应触发 agent 加载某具体 skill 的请求(如对 summarize-doc:粘贴几段文字,要求按该 skill 的结构化风格做摘要),选一个泛泛回答会做得差、用 skill 才做得好的请求。
-success_criteria: 回复体现了该 skill 的特定指导/格式(而非通用回答),说明它按需加载并遵循了 skill。
-max_turns: 4
-channel: REPLACE_WITH_TEST_CHANNEL
-setup_hint: 目标 skill 需已安装且对测试 agent 可见(allowed_skills)。
