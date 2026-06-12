@@ -249,6 +249,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             maint.shutdown(wait=False)
     except Exception as exc:
         logger.warning("platform_maintenance_scheduler_shutdown_failed error=%s", exc)
+    # Release MCP session hosts (platform registers global servers via register_all). Each
+    # host tears down on its own task; failures are contained inside aclose_all().
+    try:
+        from fleetent.integrations import mcp
+
+        await mcp.aclose_all()
+    except Exception as exc:  # noqa: BLE001 — containment: shutdown must not raise
+        logger.warning("mcp_aclose_all_failed error=%s", exc)
     finally:
         set_im_identity_resolver(None)
 

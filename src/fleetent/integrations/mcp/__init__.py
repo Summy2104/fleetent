@@ -2,8 +2,8 @@
 
 from fleetent.integrations.mcp.client import (
     McpServerConfig,
+    aclose_all,
     call_tool,
-    close,
     probe_server,
     register_all,
     unregister_server,
@@ -11,8 +11,8 @@ from fleetent.integrations.mcp.client import (
 
 __all__ = [
     "McpServerConfig",
+    "aclose_all",
     "call_tool",
-    "close",
     "probe_server",
     "register_all",
     "unregister_server",

@@ -16,6 +16,7 @@ import json
 import os
 import signal
 import time
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -57,11 +58,48 @@ class AgentRuntime:
     scheduler: Any = None
 
     async def stop(self) -> None:
-        await self.supervisor.stop_all()
+        # Input shutdown only (stop accepting new work). MCP sessions are released later,
+        # after in-flight runs drain (see _drain_and_close) — runs may still use MCP tools.
+        # Each step is contained so one failing component never blocks the others.
+        await _stop_step("slack_supervisor", self.supervisor.stop_all())
         if self.telegram_supervisor is not None:
-            await self.telegram_supervisor.stop_all()
+            await _stop_step("telegram_supervisor", self.telegram_supervisor.stop_all())
         if self.scheduler is not None:
-            await self.scheduler.shutdown()
+            await _stop_step("scheduler", self.scheduler.shutdown())
+
+
+async def _stop_step(name: str, coro: Awaitable[None], timeout: float = 10.0) -> None:
+    """Run one shutdown step under containment: bounded by ``timeout`` and isolated.
+
+    A failing or hanging component is logged and skipped so the remaining steps still run
+    and the process exit code is unaffected — graceful shutdown must exit 0 even when a
+    component's teardown errors (2026-06-11 MCP teardown crash).
+    """
+    try:
+        await asyncio.wait_for(coro, timeout)
+    except Exception as exc:  # noqa: BLE001 — containment: a teardown error never propagates
+        _logger.warn("shutdown_step_failed", step=name, error=str(exc))
+
+
+async def _drain_and_close(rt: AgentRuntime, drain_timeout: float) -> None:
+    """Graceful drain chain: stop input → wait for in-flight runs → release MCP sessions.
+
+    MCP sessions close only after the drain so in-flight runs can still use MCP tools;
+    the release is contained so a stuck/erroring connector cannot change the exit path.
+    """
+    from fleetent.integrations import mcp
+    from fleetent.runtime import loop as _loop
+
+    _logger.info("agent_drain_started", active_runs=_loop._active_runs, drain_timeout=drain_timeout)
+    await rt.stop()
+    deadline = asyncio.get_event_loop().time() + drain_timeout
+    while _loop._active_runs > 0 and asyncio.get_event_loop().time() < deadline:
+        await asyncio.sleep(0.1)
+    if _loop._active_runs > 0:
+        _logger.warn("agent_drain_timed_out", active_runs_remaining=_loop._active_runs)
+    else:
+        _logger.info("agent_drain_completed")
+    await _stop_step("mcp_sessions", mcp.aclose_all())
 
 
 def resolve_home(agent_id: str, home: str | Path | None = None) -> Path:
@@ -452,8 +490,6 @@ async def serve(
     process runs IM-only with no HTTP listener. On SIGUSR1 the process drains in-flight
     requests (up to drain_timeout) then exits.
     """
-    from fleetent.runtime import loop as _loop
-
     home_dir = resolve_home(agent_id, home)
     home_dir.mkdir(parents=True, exist_ok=True)
     pid_file = home_dir / ".fleetent.pid"
@@ -462,19 +498,6 @@ async def serve(
     drain_event = asyncio.Event()
     loop = asyncio.get_event_loop()
     loop.add_signal_handler(signal.SIGUSR1, drain_event.set)
-
-    async def _drain_and_exit(rt: AgentRuntime) -> None:
-        _logger.info(
-            "agent_drain_started", active_runs=_loop._active_runs, drain_timeout=drain_timeout
-        )  # noqa: E501
-        await rt.stop()
-        deadline = asyncio.get_event_loop().time() + drain_timeout
-        while _loop._active_runs > 0 and asyncio.get_event_loop().time() < deadline:
-            await asyncio.sleep(0.1)
-        if _loop._active_runs > 0:
-            _logger.warn("agent_drain_timed_out", active_runs_remaining=_loop._active_runs)
-        else:
-            _logger.info("agent_drain_completed")
 
     try:
         rt = await boot(agent_id, home=home, port=port)
@@ -503,7 +526,7 @@ async def serve(
                 wait_task.cancel()
                 drain_task.cancel()
         finally:
-            await _drain_and_exit(rt)
+            await _drain_and_close(rt, drain_timeout)
     finally:
         loop.remove_signal_handler(signal.SIGUSR1)
         pid_file.unlink(missing_ok=True)
