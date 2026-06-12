@@ -56,7 +56,8 @@ def test_init_forwards_multi_user_false() -> None:
     assert kwargs["multi_user"] is False
 
 
-def test_init_without_agent_defaults_single_user() -> None:
-    """A standalone run with no AgentFile constructs a single-user manager."""
+def test_init_without_agent_defaults_fail_safe() -> None:
+    """Fail-safe: a run with no AgentFile constructs a multi-user manager
+    (forces per-user session isolation; harmless for a single-process one-shot)."""
     kwargs = _construct(None)
-    assert kwargs["multi_user"] is False
+    assert kwargs["multi_user"] is True
