@@ -244,11 +244,10 @@ def dispatch(
     """
     if is_sub_agent and name == _SUB_AGENT_TOOL:
         raise PermissionError("sub_agent tool is not available inside a sub-agent")
-    if allowed_tools is not None:
-        from fleetent.governance.agent_policy import check_tool_access
+    from fleetent.governance.agent_policy import is_tool_visible
 
-        if not check_tool_access(name, allowed_tools):
-            raise PermissionError(f"Tool '{name}' not permitted by agent policy")
+    if not is_tool_visible(name, allowed_tools):
+        raise PermissionError(f"Tool '{name}' not permitted by agent policy")
 
     is_mcp = _MCP_SEP in name
     if is_mcp and mcp_server_ids is not None:

@@ -28,11 +28,13 @@ async def bash_exec(
     cancel_token: CancelToken | None = None,
     tool_context: ToolContext | None = None,
 ) -> str:
-    """Execute a shell command on the host. Requires approval (risk=high).
+    """在宿主机执行 Shell；看不到 /workspace 与会话文件，处理会话文件请用容器内工具 run_code。
 
     Returns combined stdout + stderr output. Non-zero exit codes are appended
     as [exit N]. Large output uses the spillover strategy. Supports cancellation
-    via CancelToken and configurable timeout.
+    via CancelToken and configurable timeout. Requires approval (risk=high). Use this
+    for host/DevOps operations only; uploads, generated images and skill resources live
+    under /workspace and are reachable from run_code, not from bash_exec.
     """
     cwd = workdir if workdir else None
     token = cancel_token if cancel_token is not None else CancelToken()

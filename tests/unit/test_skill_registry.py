@@ -1208,3 +1208,186 @@ def test_scan_follows_symlinked_skill_directory(tmp_path):
         "Skill inside a symlinked directory was not discovered by scan(); "
         "rglob() must use follow_symlinks=True"
     )
+
+
+# --- Agent Skills standard metadata.fleetent-* compliance ---
+
+
+def test_as_bool_meta():
+    assert sr._as_bool_meta("true") is True
+    assert sr._as_bool_meta("True") is True
+    assert sr._as_bool_meta("false") is False
+    assert sr._as_bool_meta("FALSE") is False
+    assert sr._as_bool_meta("x") is None
+    assert sr._as_bool_meta("") is None
+    assert sr._as_bool_meta(None) is None
+
+
+def test_split_ws():
+    assert sr._split_ws("a b  c") == ["a", "b", "c"]
+    assert sr._split_ws("") == []
+    assert sr._split_ws("   ") == []
+    assert sr._split_ws("solo") == ["solo"]
+    assert sr._split_ws(None) == []
+
+
+def test_env_var_list_from_meta():
+    out = sr._as_env_var_list_from_meta("API_KEY OPT?")
+    assert out == [
+        {"name": "API_KEY", "optional": False},
+        {"name": "OPT", "optional": True},
+    ]
+    assert sr._as_env_var_list_from_meta("") == []
+    assert sr._as_env_var_list_from_meta(None) == []
+
+
+def test_scan_metadata_fleetent_authoritative(tmp_path):
+    _write_skill(
+        tmp_path,
+        "meta-only",
+        """\
+            ---
+            name: meta-only
+            description: meta skill.
+            metadata:
+              fleetent-requires-tools: "run_code search_docs"
+              fleetent-disable-model-invocation: "true"
+              fleetent-required-env: "API_KEY OPT?"
+            ---
+            body
+        """,
+    )
+    sr.scan(str(tmp_path / "skills"))
+    e = sr._index["meta-only"]
+    assert e.requires_tools == ["run_code", "search_docs"]
+    assert e.disable_model_invocation is True
+    assert e.required_env_vars == [
+        {"name": "API_KEY", "optional": False},
+        {"name": "OPT", "optional": True},
+    ]
+
+
+def test_scan_metadata_overrides_legacy_top_level(tmp_path):
+    _write_skill(
+        tmp_path,
+        "dual",
+        """\
+            ---
+            name: dual
+            description: dual skill.
+            enabled_by_default: true
+            metadata:
+              fleetent-enabled-by-default: "false"
+            ---
+            body
+        """,
+    )
+    sr.scan(str(tmp_path / "skills"))
+    assert sr._index["dual"].enabled_by_default is False
+
+
+def test_scan_legacy_top_level_still_works_without_metadata(tmp_path):
+    _write_skill(
+        tmp_path,
+        "legacy",
+        """\
+            ---
+            name: legacy
+            description: legacy skill.
+            requires_tools: [run_code, search_docs]
+            enabled_by_default: false
+            disable_model_invocation: true
+            ---
+            body
+        """,
+    )
+    sr.scan(str(tmp_path / "skills"))
+    e = sr._index["legacy"]
+    assert e.requires_tools == ["run_code", "search_docs"]
+    assert e.enabled_by_default is False
+    assert e.disable_model_invocation is True
+
+
+def test_scan_compatibility_carried_and_unknown_metadata_ignored(tmp_path):
+    _write_skill(
+        tmp_path,
+        "standard",
+        """\
+            ---
+            name: standard
+            description: standard skill.
+            compatibility: "linux x86_64 python>=3.11"
+            metadata:
+              openclaw-foo: "bar"
+              fleetent-unknown: "x"
+            ---
+            body
+        """,
+    )
+    with structlog.testing.capture_logs() as logs:
+        sr.scan(str(tmp_path / "skills"))
+    assert "standard" in sr._index
+    assert sr._index["standard"].compatibility == "linux x86_64 python>=3.11"
+    # No parse-failure warning for unknown / non-fleetent metadata keys.
+    assert not [e for e in logs if e.get("event") == "skill_frontmatter_parse_failed"]
+
+
+def test_scan_compatibility_default_none(tmp_path):
+    _write_skill(tmp_path, "nocompat", "---\nname: nocompat\ndescription: d.\n---\nbody")
+    sr.scan(str(tmp_path / "skills"))
+    assert sr._index["nocompat"].compatibility is None
+
+
+def test_scan_minimal_standard_frontmatter_defaults(tmp_path):
+    _write_skill(
+        tmp_path,
+        "bare",
+        "---\nname: bare\ndescription: deploy code skill.\n---\nbody",
+    )
+    sr.scan(str(tmp_path / "skills"))
+    e = sr._index["bare"]
+    assert e.requires_tools == []
+    assert e.required_env_vars == []
+    assert e.disable_model_invocation is False
+    assert e.enabled_by_default is True
+    assert e.tags == []
+    assert e.platforms == []
+    assert e.version is None
+    assert e.compatibility is None
+    assert sr.match("please deploy code now") == "bare"
+    assert sr.load("bare").startswith("---")
+
+
+def test_scan_metadata_tags_version_enabled(tmp_path):
+    _write_skill(
+        tmp_path,
+        "metatags",
+        """\
+            ---
+            name: metatags
+            description: tag skill.
+            metadata:
+              fleetent-tags: "intro onboarding help"
+              fleetent-platforms: "slack telegram"
+              fleetent-version: "1.0"
+              fleetent-enabled: "false"
+            ---
+            body
+        """,
+    )
+    sr.scan(str(tmp_path / "skills"))
+    e = sr._index["metatags"]
+    assert e.tags == ["intro", "onboarding", "help"]
+    assert e.platforms == ["slack", "telegram"]
+    assert e.version == "1.0"
+    assert e.enabled is False
+
+
+def test_builtin_getting_started_migrated_equivalence(tmp_path, monkeypatch):
+    builtin_root = Path(sr.__file__).parent.parent / "builtin_skills"
+    monkeypatch.setattr(sr, "BUILTIN_SKILLS_DIR", builtin_root)
+    sr.scan(str(tmp_path / "skills"))
+    e = sr._index["getting-started"]
+    assert e.tags == ["intro", "onboarding", "help"]
+    assert e.version == "1.0"
+    assert e.enabled_by_default is True

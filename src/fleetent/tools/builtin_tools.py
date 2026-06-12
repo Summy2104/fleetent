@@ -3,11 +3,12 @@
 import asyncio
 import datetime
 import logging
+import os
 import time
 import uuid
 from pathlib import Path
 
-from fleetent import eval_logger, paths
+from fleetent import eval_logger
 from fleetent.integrations.sandbox import (
     BaseSandboxBackend,
     ExecResult,
@@ -72,22 +73,45 @@ def init_sandbox_manager(agent: object | None = None) -> SandboxManager:
     """
     global _MANAGER
     from fleetent.agent_config import AgentFile
+    from fleetent.integrations.sandbox import SkillMountConfig
     from fleetent.integrations.sandbox.factory import create_backend
 
     resolved = agent if isinstance(agent, AgentFile) else None
-    _MANAGER = SandboxManager(backend=create_backend(resolved))
+    skill_mount = None
+    image_persistence = False
+    setup_command: str | None = None
+    # The multi-user run-shape signal is carried by config (sandbox-scope-split-followups):
+    # standalone `fleetent agent run` defaults False; a platform-hosted shared-IM agent
+    # writes `sandbox.multi_user: true` in its agent.yaml. Forwarding it here is what makes
+    # the manager's guard correct a configured `agent` workspace_scope to `session` — left
+    # unforwarded the guard would be dead (always False).
+    multi_user = False
+    if resolved is not None:
+        # Per-agent override of the skills bind-mount (sandbox-skill-mount); None lets
+        # the manager fall back to the platform `sandbox.skill_mount` defaults.
+        sm = resolved.sandbox.skill_mount
+        skill_mount = SkillMountConfig(enabled=sm.enabled, read_only=sm.read_only, source=sm.source)
+        # Per-agent dependency-image persistence (sandbox-image-persistence): an
+        # independent switch from workspace_scope. Default off keeps prior behaviour.
+        image_persistence = resolved.sandbox.image_persistence
+        setup_command = resolved.sandbox.setup_command
+        multi_user = resolved.sandbox.multi_user
+    _MANAGER = SandboxManager(
+        backend=create_backend(resolved),
+        skill_mount=skill_mount,
+        image_persistence=image_persistence,
+        setup_command=setup_command,
+        multi_user=multi_user,
+    )
     return _MANAGER
 
 
-# Generated images are written here, then a short reference is returned to the
-# loop (never inline base64). Injectable module-level constant (no global mutable
-# state): tests monkeypatch this to an isolated tmp path.
-GENERATED_DIR: Path = paths.data_dir() / "generated"
-
-# Inbound images are written here, then a short reference (path) travels in the
-# main context; analyze_image reads bytes back by reference. Injectable like
-# GENERATED_DIR (no global mutable state) so tests isolate it to a tmp path.
-UPLOADS_DIR: Path = paths.data_dir() / "uploads"
+# Workspace-relative subdirectories for image products (sandbox-workspace-root).
+# Both live under the per-scope `/workspace` (= host workspace dir), so the model
+# sees a single root and references flow as workspace-relative paths that resolve to
+# the same physical file in container and host-degrade modes.
+_GENERATED_SUBDIR = "generated"
+_UPLOADS_SUBDIR = "uploads"
 
 # Map common image mimes to file extensions for stored uploads.
 _MIME_EXT = {
@@ -98,35 +122,86 @@ _MIME_EXT = {
 }
 
 
-def _save_image(data: bytes) -> str:
-    """Write image bytes to GENERATED_DIR/{uuid4}.png and return a short reference.
+def _workspace_root_for(tool_context: ToolContext | None) -> Path:
+    """Resolve the per-scope host workspace dir for the current tool context (D6).
 
-    The reference is a path string (never base64), keeping the tool result and
-    trace free of image payloads.
+    Reuses the manager's single `workspace_host_path` resolution point so generated/
+    uploaded products land in the very directory `run_code` / file tools are fenced
+    to (container `/workspace` = this host dir). Degrades to the run_code default key
+    when called without a context, mirroring run_code's own fallback so the workspace
+    key matches.
     """
-    GENERATED_DIR.mkdir(parents=True, exist_ok=True)
-    path = GENERATED_DIR / f"{uuid.uuid4().hex}.png"
-    path.write_bytes(data)
-    return str(path)
+    manager = _get_manager()
+    session_id = (
+        tool_context.session_id
+        if tool_context is not None and tool_context.session_id
+        else "run-code"
+    )
+    agent_name = tool_context.agent_name if tool_context is not None else None
+    return manager.workspace_host_path(manager.scope, session_id, agent_name or "default")
 
 
-def _save_upload(data: bytes, mime: str) -> str:
-    """Write inbound image bytes to UPLOADS_DIR/{uuid4}.{ext} and return a ref.
+def _workspace_scope_and_root(tool_context: ToolContext | None) -> tuple[object, Path]:
+    """Return ``(manager.scope, host workspace dir)`` for the current tool context.
 
-    The reference is a path string (never base64), keeping the main context and
-    trace free of image payloads; analyze_image reads the bytes back via this
-    same reference.
+    Used by send_file to gate on workspace scope while reusing the same single
+    `workspace_host_path` resolution point (so the resolved dir is exactly the one
+    run_code / file tools are fenced to). Kept out of the tool body so the
+    sole-sandbox-consumer guard (run_code only) is not tripped by send_file.
     """
-    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    manager = _get_manager()
+    session_id = (
+        tool_context.session_id
+        if tool_context is not None and tool_context.session_id
+        else "run-code"
+    )
+    agent_name = (tool_context.agent_name if tool_context is not None else None) or "default"
+    return manager.scope, manager.workspace_host_path(manager.scope, session_id, agent_name)
+
+
+def _save_image(data: bytes, tool_context: ToolContext | None = None) -> str:
+    """Write image bytes to the per-scope workspace `generated/` and return a relative ref.
+
+    The reference is the workspace-relative `generated/<uuid>.png` (never base64, never
+    a host-absolute path), so the model stays in the single `/workspace` world and the
+    file is readable via file tools / run_code by the same relative path.
+    """
+    root = _workspace_root_for(tool_context)
+    generated = root / _GENERATED_SUBDIR
+    generated.mkdir(parents=True, exist_ok=True)
+    name = f"{uuid.uuid4().hex}.png"
+    (generated / name).write_bytes(data)
+    return f"{_GENERATED_SUBDIR}/{name}"
+
+
+def _save_upload(data: bytes, mime: str, tool_context: ToolContext | None = None) -> str:
+    """Write inbound image bytes to the per-scope workspace `uploads/`, return a relative ref.
+
+    Aligns with `normalizer._save_file_to_workspace`: the reference is the
+    workspace-relative `uploads/<uuid>.<ext>` (never base64, never host-absolute), and
+    analyze_image reads the bytes back via this same relative reference.
+    """
+    root = _workspace_root_for(tool_context)
+    uploads = root / _UPLOADS_SUBDIR
+    uploads.mkdir(parents=True, exist_ok=True)
     ext = _MIME_EXT.get(mime, ".bin")
-    path = UPLOADS_DIR / f"{uuid.uuid4().hex}{ext}"
-    path.write_bytes(data)
-    return str(path)
+    name = f"{uuid.uuid4().hex}{ext}"
+    (uploads / name).write_bytes(data)
+    return f"{_UPLOADS_SUBDIR}/{name}"
 
 
-def _read_upload(ref: str) -> bytes:
-    """Read image bytes back from an uploads reference (path)."""
-    return Path(ref).read_bytes()
+def _read_upload(ref: str, tool_context: ToolContext | None = None) -> bytes:
+    """Read image bytes from an uploads reference, via workspace resolution (D6).
+
+    A workspace-relative ref (`uploads/<name>.png`) resolves under the per-scope host
+    workspace dir (= container `/workspace`, same physical file in both modes). A
+    legacy host-absolute ref (from a pre-migration session) is read directly as a
+    backward-compatibility fallback so historical references keep working.
+    """
+    if os.path.isabs(ref):
+        return Path(ref).read_bytes()
+    root = _workspace_root_for(tool_context)
+    return (root / ref).read_bytes()
 
 
 @tool
@@ -196,7 +271,9 @@ def read_skill(name: str, tool_context: ToolContext | None = None) -> str:
         return f"error: skill {name!r} was blocked by the static injection audit"
     body = skill_registry.load(name)
     _record_skill_hit(name, tool_context)
-    return body
+    # Append the fixed exec-face / $SKILLS_DIR guidance so the model runs the skill's
+    # scripts via run_code under the single /workspace world (skill-read-on-demand).
+    return body + skill_registry._READ_SKILL_GUIDANCE
 
 
 def _record_skill_hit(name: str, tool_context: ToolContext | None) -> None:
@@ -506,34 +583,38 @@ async def schedule(
 
 
 @tool(risk_level="low")
-async def generate_image(prompt: str, size: str = "") -> str:
+async def generate_image(
+    prompt: str, size: str = "", tool_context: ToolContext | None = None
+) -> str:
     """Generate an image from a text prompt via the self-hosted images endpoint.
 
-    Returns a short reference (file path) to the saved image, never inline base64.
-    On endpoint failure/timeout, returns an explicit error result for the AI to
-    handle rather than raising and breaking the loop.
+    Returns a workspace-relative reference (`generated/<name>.png`) to the saved
+    image, never inline base64 or a host-absolute path. On endpoint failure/timeout,
+    returns an explicit error result for the AI to handle rather than raising and
+    breaking the loop.
     """
     try:
         data = await image_gen_client.generate(prompt, size=size or None)
     except image_gen_client.ImageGenError as exc:
         return f"error: image generation failed: {exc}"
-    ref = _save_image(data)
+    ref = _save_image(data, tool_context)
     return f"image generated: {ref}"
 
 
 @tool(risk_level="low")
-async def analyze_image(ref: str, instruction: str) -> str:
+async def analyze_image(ref: str, instruction: str, tool_context: ToolContext | None = None) -> str:
     """Understand an image on demand via the self-hosted vision endpoint.
 
-    `ref` is a stored-image reference (a path produced when an inbound image was
-    saved); `instruction` is what to look for (e.g. "read the invoice total").
-    Returns a structured text description, never inline base64. Use this to
-    re-examine or compare images already in the conversation. On invalid ref,
-    unconfigured endpoint, or endpoint failure, returns an explicit error result
-    for the AI to handle rather than raising and breaking the loop.
+    `ref` is a stored-image reference (a workspace-relative `uploads/<name>` produced
+    when an inbound image was saved; legacy host-absolute refs still resolve);
+    `instruction` is what to look for (e.g. "read the invoice total"). Returns a
+    structured text description, never inline base64. Use this to re-examine or
+    compare images already in the conversation. On invalid ref, unconfigured
+    endpoint, or endpoint failure, returns an explicit error result for the AI to
+    handle rather than raising and breaking the loop.
     """
     try:
-        data = _read_upload(ref)
+        data = _read_upload(ref, tool_context)
     except OSError as exc:
         return f"error: cannot read image reference {ref!r}: {exc}"
     try:
@@ -624,3 +705,74 @@ async def send_im_message(
         return f"发送失败：{resolved_platform} 投递 {target} 时出错，请稍后重试。"
     kind = "私信" if target_type == "user" else "频道消息"
     return f"已发送{kind}到 {resolved_platform}:{target}。"
+
+
+@tool
+async def send_file(path: str, tool_context: ToolContext | None = None) -> str:
+    """Send a workspace product file back to the current conversation's sender.
+
+    Use this to deliver a file you created in the workspace (a report, chart,
+    converted document) to the person you are talking with. `path` is a
+    **workspace-relative** path (the single `/workspace` root); it is resolved to
+    the real host file and sent as an attachment. The recipient is fixed to the
+    current sender — you cannot specify a recipient. Auto-sends only inside a
+    private (DM) conversation with a session-scoped workspace; otherwise it
+    declines and asks you to use `send_im_message` (which goes through approval).
+    """
+    # Recipient is harness-fixed from session_context; the model cannot supply it.
+    sc = getattr(tool_context, "session_context", None) if tool_context else None
+    if sc is None:
+        return (
+            "无法发送：当前运行路径无会话发起人，无法自动外发文件"
+            "（如 scheduled task / sub_agent）。"
+        )
+
+    # No-approval iff: session-scoped workspace AND a DM conversation. Both gate the
+    # fact that the recipient is constrained and the workspace is session-private;
+    # otherwise fail-closed back to the medium-gated send_im_message path.
+    from fleetent.integrations.sandbox import Scope
+
+    scope, root = _workspace_scope_and_root(tool_context)
+    if scope is not Scope.SESSION:
+        return (
+            "无法自动外发：当前工作区为 agent 级（跨会话复用），不满足免审批前提。"
+            "请改用 send_im_message（经审批）发送。"
+        )
+    if str(getattr(sc, "chat_type", "") or "") != "dm":
+        return (
+            "无法自动外发：当前为频道会话，仅私信会话可自动外发文件。"
+            "请改用 send_im_message（经审批）发送。"
+        )
+
+    # Translate the workspace-relative path to a real host file, rejecting `..` escapes
+    # via the same fence the file tools use.
+    from fleetent.tools.file_sandbox_io import resolve_host_path
+
+    try:
+        host_path = resolve_host_path(root, path)
+    except ValueError:
+        return f"无法发送：路径 {path!r} 越出 workspace 范围，已拒绝。"
+    if not host_path.is_file():
+        return f"无法发送：workspace 内不存在文件 {path!r}（请确认已写入）。"
+
+    platform = str(getattr(sc, "platform", "") or "")
+    recipient = str(getattr(sc, "sender_id", "") or "")
+    connectors = tool_context.outbound_connectors if tool_context else {}
+    connector = connectors.get(platform)
+    if connector is None:
+        return (
+            f"当前通道不支持主动外发文件（无可用 {platform or '?'} 连接器）。"
+            "该功能仅在 IM 网关运行时可用。"
+        )
+
+    # Lazy import: keeps module load light and avoids cycles (builtin convention).
+    from fleetent import outbound
+
+    try:
+        sent = await outbound.send_file_to(platform, connector, recipient, str(host_path))
+    except Exception as exc:  # noqa: BLE001 — outbound must never abort the agent run
+        logger.warning("send_file delivery error on %s: %s", platform, exc)
+        return f"外发失败：{platform} 投递文件时出错，请稍后重试。"
+    if not sent:
+        return f"外发失败：{platform} 投递文件给 {recipient} 时出错，请稍后重试。"
+    return f"已把文件发送给 {platform}:{recipient}。"

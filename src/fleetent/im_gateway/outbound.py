@@ -2,7 +2,8 @@
 
 from fleetent.outbound import (  # noqa: F401
     is_reachable,
+    send_file_to,
     send_to,
 )
 
-__all__ = ["is_reachable", "send_to"]
+__all__ = ["is_reachable", "send_file_to", "send_to"]

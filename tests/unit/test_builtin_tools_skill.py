@@ -55,7 +55,7 @@ def test_read_skill_clean_does_not_write_refusal_audit() -> None:
     ):
         out = builtin_tools.read_skill("ok")
 
-    assert out == "full body"
+    assert out.startswith("full body")  # guidance appended (skill-read-on-demand)
     mock_audit.assert_not_called()
 
 
@@ -82,7 +82,7 @@ def test_read_skill_success_records_hit_with_context() -> None:
     ):
         out = builtin_tools.read_skill("ok", tool_context=ctx)
 
-    assert out == "full body"
+    assert out.startswith("full body")  # guidance appended (skill-read-on-demand)
     mock_rec.assert_called_once()
     event = mock_rec.call_args.args[0]
     assert event.event_type == "skill_hit"
@@ -103,7 +103,7 @@ def test_read_skill_hit_recording_failure_does_not_block() -> None:
         out = builtin_tools.read_skill("ok")
 
     # Body still returned despite hit-recording failure.
-    assert out == "full body"
+    assert out.startswith("full body")  # guidance appended (skill-read-on-demand)
 
 
 def test_read_skill_blocked_does_not_record_hit() -> None:

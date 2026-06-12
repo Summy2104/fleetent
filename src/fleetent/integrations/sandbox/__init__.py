@@ -10,6 +10,7 @@ from fleetent.integrations.sandbox.backend import (
     BackendCapabilities,
     BaseSandboxBackend,
     ExecResult,
+    SkillMount,
 )
 from fleetent.integrations.sandbox.backends.docker import DockerBackend
 from fleetent.integrations.sandbox.backends.microsandbox import MicrosandboxBackend
@@ -19,9 +20,11 @@ from fleetent.integrations.sandbox.config import (
     NetworkPolicy,
     SandboxLifecycle,
     SandboxResources,
+    SkillMountConfig,
     build_resources_by_scope,
     load_sandbox_lifecycle,
     load_sandbox_resources,
+    load_skill_mount_config,
 )
 from fleetent.integrations.sandbox.enablement import (
     Mode,
@@ -31,11 +34,15 @@ from fleetent.integrations.sandbox.enablement import (
     resolve_effective_mode,
 )
 from fleetent.integrations.sandbox.maintenance import start_idle_sweep, stop_idle_sweep
-from fleetent.integrations.sandbox.manager import SandboxManager, Scope
+from fleetent.integrations.sandbox.manager import SandboxManager, Scope, WorkspaceScope
 from fleetent.integrations.sandbox.output_spill import cap_or_spill
 from fleetent.integrations.sandbox.output_truncation import truncate_stream
 from fleetent.integrations.sandbox.redaction import redact_secrets
 from fleetent.integrations.sandbox.secrets import build_sandbox_env, is_sensitive_name
+from fleetent.integrations.sandbox.workspace_gc import (
+    gc_agent_workspace,
+    gc_session_workspace,
+)
 
 __all__ = [
     "BackendCapabilities",
@@ -50,10 +57,16 @@ __all__ = [
     "SandboxManager",
     "SandboxResources",
     "Scope",
+    "WorkspaceScope",
+    "SkillMount",
+    "SkillMountConfig",
+    "load_skill_mount_config",
     "build_resources_by_scope",
     "build_sandbox_env",
     "cap_or_spill",
     "cleanup_orphans",
+    "gc_agent_workspace",
+    "gc_session_workspace",
     "get_effective_mode",
     "is_code_execution_enabled",
     "is_sensitive_name",

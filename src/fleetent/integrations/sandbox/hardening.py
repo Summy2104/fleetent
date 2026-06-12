@@ -36,9 +36,7 @@ def is_blocked_mount(path: str | Path) -> bool:
     sneak a blocked target past the prefix check.
     """
     resolved = os.path.realpath(str(path))
-    return any(
-        resolved == root or resolved.startswith(root + os.sep) for root in _blocked_roots()
-    )
+    return any(resolved == root or resolved.startswith(root + os.sep) for root in _blocked_roots())
 
 
 def config_hash(
@@ -46,21 +44,29 @@ def config_hash(
     resources: Any,
     env: dict[str, str] | None,
     workspace_host_path: str | None,
+    skill_mount: Any = None,
 ) -> str:
     """Stable short digest of the container's effective configuration.
 
     Used to invalidate a reused container when its config changed. Env contributes
     only its *key set* (sorted), not values — rotating a value should not force a
-    rebuild, only changing which variables are injected.
+    rebuild, only changing which variables are injected. ``skill_mount``
+    (sandbox-skill-mount) contributes its host source + ro/rw mode so changing the
+    mounted skills root (or its writability) rebuilds a reused container; ``None``
+    leaves the payload byte-identical to the pre-skill-mount signature so existing
+    containers are not invalidated by the new parameter alone.
     """
     resource_fields = sorted(vars(resources).items()) if resources is not None else []
+    payload_dict: dict[str, Any] = {
+        "image": image or "",
+        "resources": resource_fields,
+        "env_keys": sorted((env or {}).keys()),
+        "workspace": workspace_host_path or "",
+    }
+    if skill_mount is not None:
+        payload_dict["skill_mount"] = [skill_mount.host_src, skill_mount.read_only]
     payload = json.dumps(
-        {
-            "image": image or "",
-            "resources": resource_fields,
-            "env_keys": sorted((env or {}).keys()),
-            "workspace": workspace_host_path or "",
-        },
+        payload_dict,
         sort_keys=True,
         separators=(",", ":"),
         default=str,

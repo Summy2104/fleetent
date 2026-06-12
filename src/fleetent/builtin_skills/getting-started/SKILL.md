@@ -1,9 +1,10 @@
 ---
 name: getting-started
 description: Use when the user asks how to get started, what this assistant can do, or wants an introduction to available capabilities.
-tags: [intro, onboarding, help]
-version: 1.0
-enabled_by_default: true
+metadata:
+  fleetent-tags: "intro onboarding help"
+  fleetent-version: "1.0"
+  fleetent-enabled-by-default: "true"
 ---
 
 ## Getting Started
