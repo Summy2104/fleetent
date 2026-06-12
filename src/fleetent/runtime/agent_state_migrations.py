@@ -330,4 +330,11 @@ MIGRATIONS: list[tuple[int, str]] = [
         ")",
     ),
     (28, "ALTER TABLE sessions DROP COLUMN agent_name"),
+    # typed-scheduled-task-delivery: notify/generate/action typing + frozen notify copy.
+    # Existing rows default to 'generate' (closest to the prior run-and-deliver behavior).
+    (
+        29,
+        "ALTER TABLE scheduled_tasks ADD COLUMN task_type TEXT NOT NULL DEFAULT 'generate'",
+    ),
+    (30, "ALTER TABLE scheduled_tasks ADD COLUMN notify_text TEXT"),
 ]
