@@ -2,6 +2,7 @@
 
 import pytest
 
+import fleetent.agent_store as agent_store
 from fleetent.platform.connector_management import agent_oauth_binding_store as store
 from tests.integration._migration_template import apply_migrations
 
@@ -16,20 +17,24 @@ def store_db(tmp_path, monkeypatch):
 
 
 def test_bind_is_idempotent(store_db):
-    store.bind(5, "github")
-    store.bind(5, "github")
-    assert store.list_connectors_for_agent(5) == ["github"]
+    agent = agent_store.create_agent("agent-5", "p", [])
+    store.bind(agent.id, "github")
+    store.bind(agent.id, "github")
+    assert store.list_connectors_for_agent(agent.id) == ["github"]
 
 
 def test_unbind_removes(store_db):
-    store.bind(5, "github")
-    store.unbind(5, "github")
-    assert store.list_connectors_for_agent(5) == []
+    agent = agent_store.create_agent("agent-5", "p", [])
+    store.bind(agent.id, "github")
+    store.unbind(agent.id, "github")
+    assert store.list_connectors_for_agent(agent.id) == []
 
 
 def test_scoped_per_agent(store_db):
-    store.bind(5, "github")
-    store.bind(7, "github")
-    store.bind(5, "jira")
-    assert store.list_connectors_for_agent(5) == ["github", "jira"]
-    assert sorted(store.list_agents_for_connector("github")) == [5, 7]
+    agent_a = agent_store.create_agent("agent-5", "p", [])
+    agent_b = agent_store.create_agent("agent-7", "p", [])
+    store.bind(agent_a.id, "github")
+    store.bind(agent_b.id, "github")
+    store.bind(agent_a.id, "jira")
+    assert store.list_connectors_for_agent(agent_a.id) == ["github", "jira"]
+    assert sorted(store.list_agents_for_connector("github")) == [agent_a.id, agent_b.id]

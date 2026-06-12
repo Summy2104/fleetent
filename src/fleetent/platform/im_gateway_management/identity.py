@@ -4,13 +4,9 @@ Part of the unified IM module. Maps (owner_id, platform, platform_user_id) to an
 internal User and owns the approve/block/rebind admin workbench.
 """
 
-import contextlib
 import datetime
 from typing import Any
 
-from fleetent.user_store import (
-    DB_PATH as DB_PATH,  # noqa: F401 — re-export for test monkeypatching
-)
 from fleetent.user_store import (
     User,
     _conn,
@@ -59,7 +55,6 @@ def _parse_meta(raw: Any) -> dict[str, Any]:
 
 
 def get_or_create(owner_id: str, platform: str, platform_user_id: str) -> User:
-    _init_db()
     with _conn() as conn:
         row = conn.execute(
             """SELECT user_id FROM im_users
@@ -107,54 +102,54 @@ def get_or_create(owner_id: str, platform: str, platform_user_id: str) -> User:
 
 def check_allowed_by_user_id(user_id: str) -> bool:
     """Return True if user is not in im_users (HTTP API user) or is explicitly allowed."""
-    _init_db()
     with _conn() as conn:
-        row = conn.execute("SELECT allowed FROM im_users WHERE user_id = ?", (user_id,)).fetchone()
+        row = conn.execute(
+            "SELECT allowed FROM im_users WHERE user_id = :user_id",
+            {"user_id": user_id},
+        ).fetchone()
     if row is None:
         return True
-    return bool(row[0])
+    return bool(row["allowed"])
 
 
 def approve_user(im_user_id: int) -> None:
-    _init_db()
     with _conn() as conn:
-        conn.execute("UPDATE im_users SET allowed = 1 WHERE id = ?", (im_user_id,))
+        conn.execute("UPDATE im_users SET allowed = 1 WHERE id = :id", {"id": im_user_id})
 
 
 def block_user(im_user_id: int) -> None:
-    _init_db()
     with _conn() as conn:
-        conn.execute("UPDATE im_users SET allowed = 0 WHERE id = ?", (im_user_id,))
+        conn.execute("UPDATE im_users SET allowed = 0 WHERE id = :id", {"id": im_user_id})
 
 
 def get_im_user(im_user_id: int) -> dict[str, Any] | None:
     """Fetch one IM identity by its im_users.id, or None if it does not exist."""
-    _init_db()
     with _conn() as conn:
         row = conn.execute(
             "SELECT id, owner_id, platform, platform_user_id, user_id, allowed, created_at,"
-            " meta_json FROM im_users WHERE id = ?",
-            (im_user_id,),
+            " meta_json FROM im_users WHERE id = :id",
+            {"id": im_user_id},
         ).fetchone()
     if row is None:
         return None
     return {
-        "id": row[0],
-        "owner_id": row[1],
-        "platform": row[2],
-        "platform_user_id": row[3],
-        "user_id": row[4],
-        "allowed": bool(row[5]),
-        "created_at": row[6],
-        "metadata": _parse_meta(row[7]),
+        "id": row["id"],
+        "owner_id": row["owner_id"],
+        "platform": row["platform"],
+        "platform_user_id": row["platform_user_id"],
+        "user_id": row["user_id"],
+        "allowed": bool(row["allowed"]),
+        "created_at": row["created_at"],
+        "metadata": _parse_meta(row["meta_json"]),
     }
 
 
 def disable_im_accounts(user_id: str) -> None:
     """Disallow every IM identity bound to an internal user (used by governance block)."""
-    _init_db()
     with _conn() as conn:
-        conn.execute("UPDATE im_users SET allowed = 0 WHERE user_id = ?", (user_id,))
+        conn.execute(
+            "UPDATE im_users SET allowed = 0 WHERE user_id = :user_id", {"user_id": user_id}
+        )
 
 
 def block_im_user(
@@ -166,9 +161,8 @@ def block_im_user(
     """Block a single IM identity (admin workbench). Audited."""
     from fleetent import audit_log
 
-    _init_db()
     with _conn() as conn:
-        conn.execute("UPDATE im_users SET allowed = 0 WHERE id = ?", (im_user_id,))
+        conn.execute("UPDATE im_users SET allowed = 0 WHERE id = :id", {"id": im_user_id})
     audit_log.write_audit(
         actor,
         "block_im_user",
@@ -188,9 +182,8 @@ def restore_im_user(
     """Restore a single IM identity (admin workbench). Audited."""
     from fleetent import audit_log
 
-    _init_db()
     with _conn() as conn:
-        conn.execute("UPDATE im_users SET allowed = 1 WHERE id = ?", (im_user_id,))
+        conn.execute("UPDATE im_users SET allowed = 1 WHERE id = :id", {"id": im_user_id})
     audit_log.write_audit(
         actor,
         "restore_im_user",
@@ -217,7 +210,6 @@ def rebind_im_identity(im_user_id: int, target_user_id: str, actor: str | None =
     """
     from fleetent import audit_log
 
-    _init_db()
     if get_by_id(target_user_id) is None:
         raise ValueError(f"target user not found: {target_user_id}")
     with _conn() as conn:
@@ -264,7 +256,6 @@ def update_im_identity(
 
     from fleetent import audit_log
 
-    _init_db()
     detail: dict[str, Any] = {}
     with _conn() as conn:
         row = conn.execute(
@@ -305,7 +296,6 @@ def delete_im_identity(im_user_id: int, actor: str | None = None) -> None:
     """
     from fleetent import audit_log
 
-    _init_db()
     with _conn() as conn:
         cur = conn.execute("DELETE FROM im_users WHERE id = :id", {"id": im_user_id})
         if cur.rowcount == 0:
@@ -320,20 +310,19 @@ def delete_im_identity(im_user_id: int, actor: str | None = None) -> None:
 
 def list_im_identities(user_id: str) -> list[dict[str, Any]]:
     """All IM identities (across platforms) belonging to one internal User."""
-    _init_db()
     with _conn() as conn:
         rows = conn.execute(
             "SELECT id, platform, platform_user_id, allowed, meta_json FROM im_users"
-            " WHERE user_id = ? ORDER BY platform",
-            (user_id,),
+            " WHERE user_id = :user_id ORDER BY platform",
+            {"user_id": user_id},
         ).fetchall()
     return [
         {
-            "id": r[0],
-            "platform": r[1],
-            "platform_user_id": r[2],
-            "allowed": bool(r[3]),
-            "metadata": _parse_meta(r[4]),
+            "id": r["id"],
+            "platform": r["platform"],
+            "platform_user_id": r["platform_user_id"],
+            "allowed": bool(r["allowed"]),
+            "metadata": _parse_meta(r["meta_json"]),
         }
         for r in rows
     ]
@@ -341,7 +330,6 @@ def list_im_identities(user_id: str) -> list[dict[str, Any]]:
 
 def list_all() -> list[dict[str, Any]]:
     """All IM identities across all users (for the admin workbench)."""
-    _init_db()
     with _conn() as conn:
         rows = conn.execute(
             "SELECT id, owner_id, platform, platform_user_id, user_id, allowed, created_at,"
@@ -349,95 +337,31 @@ def list_all() -> list[dict[str, Any]]:
         ).fetchall()
     return [
         {
-            "id": r[0],
-            "owner_id": r[1],
-            "platform": r[2],
-            "platform_user_id": r[3],
-            "user_id": r[4],
-            "allowed": bool(r[5]),
-            "created_at": r[6],
-            "metadata": _parse_meta(r[7]),
+            "id": r["id"],
+            "owner_id": r["owner_id"],
+            "platform": r["platform"],
+            "platform_user_id": r["platform_user_id"],
+            "user_id": r["user_id"],
+            "allowed": bool(r["allowed"]),
+            "created_at": r["created_at"],
+            "metadata": _parse_meta(r["meta_json"]),
         }
         for r in rows
     ]
 
 
 def list_pending() -> list[dict[str, Any]]:
-    _init_db()
     with _conn() as conn:
         rows = conn.execute(
             "SELECT id, platform, platform_user_id, created_at"
             " FROM im_users WHERE allowed = 0 ORDER BY created_at"
         ).fetchall()
     return [
-        {"id": r[0], "platform": r[1], "platform_user_id": r[2], "created_at": r[3]} for r in rows
+        {
+            "id": r["id"],
+            "platform": r["platform"],
+            "platform_user_id": r["platform_user_id"],
+            "created_at": r["created_at"],
+        }
+        for r in rows
     ]
-
-
-def _init_db() -> None:
-    from fleetent import user_store
-
-    # Resolve the backfill owner before opening our own connection: admin_owner_id()
-    # opens a separate connection on the same SQLite file, which would deadlock if a
-    # write transaction were already held here.
-    admin_owner = user_store.admin_owner_id()
-    with _conn() as conn:
-        # Migrate: add allowed column to pre-allowlist tables before any owner rebuild.
-        try:
-            conn.execute("ALTER TABLE im_users ADD COLUMN allowed BOOLEAN NOT NULL DEFAULT 0")
-            # Existing users were already active before allowlist — grant access
-            conn.execute("UPDATE im_users SET allowed = 1 WHERE allowed = 0")
-        except Exception:
-            pass  # Column already exists or table absent
-        _rebuild_legacy_if_needed(conn, admin_owner)
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS im_users (
-                id               INTEGER PRIMARY KEY,
-                owner_id         TEXT NOT NULL,
-                platform         TEXT NOT NULL,
-                platform_user_id TEXT NOT NULL,
-                user_id          TEXT NOT NULL,
-                allowed          BOOLEAN NOT NULL DEFAULT 0,
-                created_at       TEXT NOT NULL,
-                meta_json        TEXT,
-                UNIQUE(owner_id, platform, platform_user_id)
-            )"""
-        )
-        # Migrate: add the per-platform metadata blob to pre-048 tables (see migration 048).
-        # Column may already exist (or table be absent) — both are fine.
-        with contextlib.suppress(Exception):
-            conn.execute("ALTER TABLE im_users ADD COLUMN meta_json TEXT")
-
-
-def _rebuild_legacy_if_needed(conn: Any, owner: str) -> None:
-    """Rebuild a pre-multi-tenant `im_users` (no owner_id) in place, backfilling owner_id
-    with the built-in admin owner. Idempotent."""
-    exists = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='im_users'"
-    ).fetchone()
-    if not exists:
-        return
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(im_users)")}
-    if "owner_id" in cols:
-        return
-    conn.execute("ALTER TABLE im_users RENAME TO im_users_legacy")
-    conn.execute(
-        """CREATE TABLE im_users (
-            id               INTEGER PRIMARY KEY,
-            owner_id         TEXT NOT NULL,
-            platform         TEXT NOT NULL,
-            platform_user_id TEXT NOT NULL,
-            user_id          TEXT NOT NULL,
-            allowed          BOOLEAN NOT NULL DEFAULT 0,
-            created_at       TEXT NOT NULL,
-            UNIQUE(owner_id, platform, platform_user_id)
-        )"""
-    )
-    conn.execute(
-        """INSERT INTO im_users
-               (id, owner_id, platform, platform_user_id, user_id, allowed, created_at)
-           SELECT id, :owner, platform, platform_user_id, user_id, allowed, created_at
-           FROM im_users_legacy""",
-        {"owner": owner},
-    )
-    conn.execute("DROP TABLE im_users_legacy")

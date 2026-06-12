@@ -2,6 +2,7 @@ import pytest
 
 import fleetent.auth as auth
 import fleetent.user_store as user_store
+from fleetent.platform.tenancy import store as tenancy_store
 from tests.integration._migration_template import apply_migrations
 
 
@@ -38,6 +39,23 @@ def test_builtin_admin_protected_from_disable_delete(db):
         user_store.disable_user(admin.id)
     with pytest.raises(PermissionError):
         user_store.delete_user(admin.id)
+
+
+def test_delete_user_rejects_tenant_or_team_approver(db):
+    tenant_approver = user_store.create_user("Tenant Approver")
+    team_approver = user_store.create_user("Team Approver")
+    safe_user = user_store.create_user("Safe Delete")
+    tenancy_store.create_team(id="support", tenant_id="default", name="Support")
+    tenancy_store.set_tenant_approver("default", tenant_approver.id)
+    tenancy_store.set_team_approver("support", team_approver.id)
+
+    with pytest.raises(PermissionError, match="tenant approver for tenant 'default'"):
+        user_store.delete_user(tenant_approver.id)
+    with pytest.raises(PermissionError, match="team approver for team 'support'"):
+        user_store.delete_user(team_approver.id)
+
+    user_store.delete_user(safe_user.id)
+    assert user_store.get_by_id(safe_user.id) is None
 
 
 def test_bulk_import(db):

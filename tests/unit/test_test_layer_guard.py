@@ -119,14 +119,13 @@ def test_guard_allows_read_only_db_symbol_compatibility_assertions(tmp_path):
         unit_root / "test_compat.py",
         "\n".join(
             [
-                "def test_db_path_constant_is_reexported():",
+                "def test_im_module_does_not_reexport_identity_db_path():",
                 "    from fleetent.platform import im_gateway_management as im",
-                "    assert hasattr(im, 'DB_PATH')",
+                "    assert not hasattr(im, 'DB_PATH')",
                 "",
-                "def test_db_path_monkeypatchability_is_compat_only(tmp_path, monkeypatch):",
+                "def test_identity_submodule_drops_db_path_reexport():",
                 "    from fleetent.platform.im_gateway_management import identity",
-                "    monkeypatch.setattr(identity, 'DB_PATH', tmp_path / 'users.db')",
-                "    assert identity.DB_PATH == tmp_path / 'users.db'",
+                "    assert not hasattr(identity, 'DB_PATH')",
                 "",
                 "def test_legacy_shim_reexports_same_object():",
                 "    from fleetent.platform.im_gateway_management import connector_store",

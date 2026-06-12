@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 
 import fleetent.agent_store as agent_store
+from fleetent.platform.connector_management import agent_oauth_binding_store
+from fleetent.platform.tenancy import store as tenancy_store
 from tests.integration._migration_template import apply_migrations
 
 
@@ -175,6 +177,8 @@ def test_create_agent_defaults_tenant_and_team(db):
 
 
 def test_create_agent_with_explicit_ownership(db):
+    tenancy_store.create_tenant(id="acme", name="Acme")
+    tenancy_store.create_team(id="support", tenant_id="acme", name="Support")
     agent = agent_store.create_agent(
         "acme-support", "prompt", [], tenant_id="acme", team_id="support"
     )
@@ -223,6 +227,8 @@ def test_existing_agent_backfills_default_tenant(db):
 
 
 def test_ownership_survives_user_and_channel_lookup(db):
+    tenancy_store.create_tenant(id="acme", name="Acme")
+    tenancy_store.create_team(id="support", tenant_id="acme", name="Support")
     agent = agent_store.create_agent("routed", "prompt", [], tenant_id="acme", team_id="support")
     agent_store.assign_user("user-1", agent.id)
     agent_store.assign_channel("slack", "C123", agent.id)
@@ -230,6 +236,76 @@ def test_ownership_survives_user_and_channel_lookup(db):
     by_channel = agent_store.get_agent_for_channel("slack", "C123")
     assert by_user is not None and by_user.tenant_id == "acme" and by_user.team_id == "support"
     assert by_channel is not None and by_channel.tenant_id == "acme"
+
+
+def test_create_agent_rejects_cross_tenant_team(db):
+    tenancy_store.create_tenant(id="tenant-a", name="Tenant A")
+    tenancy_store.create_tenant(id="tenant-b", name="Tenant B")
+    tenancy_store.create_team(id="team-b", tenant_id="tenant-b", name="Team B")
+
+    with pytest.raises(ValueError, match="tenant-a"):
+        agent_store.create_agent("crossed", "prompt", [], tenant_id="tenant-a", team_id="team-b")
+
+    from fleetent.config import Settings
+    from fleetent.db import create_database
+
+    database = create_database(Settings().database_url)
+    row = database.execute(
+        "SELECT COUNT(*) AS c FROM agents WHERE name = :name",
+        {"name": "crossed"},
+    ).fetchone()
+    assert row is not None and int(row["c"]) == 0
+
+
+def test_update_agent_tenancy_rejects_cross_tenant_team_without_mutation(db):
+    tenancy_store.create_tenant(id="tenant-a", name="Tenant A")
+    tenancy_store.create_tenant(id="tenant-b", name="Tenant B")
+    tenancy_store.create_team(id="team-a", tenant_id="tenant-a", name="Team A")
+    tenancy_store.create_team(id="team-b", tenant_id="tenant-b", name="Team B")
+    agent_store.create_agent("owned", "prompt", [], tenant_id="tenant-a", team_id="team-a")
+
+    with pytest.raises(ValueError, match="team-b"):
+        agent_store.update_agent_tenancy("owned", tenant_id="tenant-a", team_id="team-b")
+
+    found = agent_store.get_by_name("owned")
+    assert found is not None
+    assert found.tenant_id == "tenant-a"
+    assert found.team_id == "team-a"
+
+
+def test_create_agent_and_update_agent_tenancy_allow_null_team(db):
+    tenancy_store.create_tenant(id="tenant-a", name="Tenant A")
+    tenancy_store.create_tenant(id="tenant-b", name="Tenant B")
+    created = agent_store.create_agent("solo", "prompt", [], tenant_id="tenant-a", team_id=None)
+    assert created.team_id is None
+
+    agent_store.update_agent_tenancy("solo", tenant_id="tenant-b", team_id=None)
+
+    found = agent_store.get_by_name("solo")
+    assert found is not None
+    assert found.tenant_id == "tenant-b"
+    assert found.team_id is None
+
+
+def test_existing_agents_with_team_have_matching_tenant(db):
+    tenancy_store.create_tenant(id="tenant-a", name="Tenant A")
+    tenancy_store.create_tenant(id="tenant-b", name="Tenant B")
+    tenancy_store.create_team(id="team-a", tenant_id="tenant-a", name="Team A")
+    tenancy_store.create_team(id="team-b", tenant_id="tenant-b", name="Team B")
+    agent_store.create_agent("agent-a", "prompt", [], tenant_id="tenant-a", team_id="team-a")
+    agent_store.create_agent("agent-b", "prompt", [], tenant_id="tenant-b", team_id="team-b")
+
+    from fleetent.config import Settings
+    from fleetent.db import create_database
+
+    database = create_database(Settings().database_url)
+    mismatches = database.execute(
+        "SELECT a.name "
+        "FROM agents a "
+        "JOIN teams t ON t.id = a.team_id "
+        "WHERE a.team_id IS NOT NULL AND a.tenant_id != t.tenant_id"
+    ).fetchall()
+    assert mismatches == []
 
 
 # --- channel_agents tests ---
@@ -296,6 +372,30 @@ def test_delete_agent_removes_agent_and_versions(db):
         "SELECT COUNT(*) AS c FROM agent_versions WHERE agent_id = :aid", {"aid": agent.id}
     ).fetchone()
     assert rows is not None and int(rows["c"]) == 0
+
+
+def test_delete_agent_removes_binding_children_in_same_transaction(db):
+    from fleetent.config import Settings
+    from fleetent.db import create_database
+
+    tenancy_store.create_tenant(id="tenant-a", name="Tenant A")
+    agent = agent_store.create_agent("bound", "v1", ["shell"], tenant_id="tenant-a")
+    agent_store.bind_mcp_server(agent.id, "github")
+    agent_oauth_binding_store.bind(agent.id, "google-oauth")
+
+    assert agent_store.delete_agent("bound") is True
+
+    database = create_database(Settings().database_url)
+    mcp_rows = database.execute(
+        "SELECT COUNT(*) AS c FROM agent_mcp_server_bindings WHERE agent_id = :aid",
+        {"aid": agent.id},
+    ).fetchone()
+    oauth_rows = database.execute(
+        "SELECT COUNT(*) AS c FROM agent_oauth_bindings WHERE agent_id = :aid",
+        {"aid": agent.id},
+    ).fetchone()
+    assert mcp_rows is not None and int(mcp_rows["c"]) == 0
+    assert oauth_rows is not None and int(oauth_rows["c"]) == 0
 
 
 def test_delete_agent_unknown_returns_false(db):

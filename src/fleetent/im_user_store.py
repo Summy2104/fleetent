@@ -5,10 +5,6 @@ path (see change merge-im-connectors-into-im-users, cleanup follow-up).
 """
 
 from fleetent.platform.im_gateway_management.identity import (  # noqa: F401
-    DB_PATH as DB_PATH,
-)
-from fleetent.platform.im_gateway_management.identity import (  # noqa: F401
-    _init_db,
     approve_user,
     batch_block_im,
     block_im_user,

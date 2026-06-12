@@ -9,6 +9,7 @@ Uses DATABASE_URL monkeypatch (not DB_PATH) as the isolation mechanism.
 from __future__ import annotations
 
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -40,6 +41,45 @@ def test_tenancy_store_connection_uses_wal(db_path: Path) -> None:
     mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
     conn.close()
     assert mode == "wal", f"Expected WAL, got {mode!r}"
+
+
+def test_db_runtime_enables_foreign_keys_and_rejects_orphan_agent(db_path: Path) -> None:
+    from fleetent.config import Settings
+    from fleetent.db import create_database
+
+    database = create_database(Settings().database_url)
+    pragma = database.execute("PRAGMA foreign_keys").fetchone()
+    assert pragma is not None
+    assert int(pragma["foreign_keys"]) == 1
+
+    with pytest.raises(sqlite3.IntegrityError), database.transaction() as conn:
+        conn.execute(
+            "INSERT INTO agents "
+            "(name, system_prompt, allowed_tools, features, plugins, allowed_skills, "
+            "created_at, tenant_id, team_id, icon, config_overrides) "
+            "VALUES "
+            "(:name, :system_prompt, :allowed_tools, :features, :plugins, :allowed_skills, "
+            ":created_at, :tenant_id, :team_id, :icon, :config_overrides)",
+            {
+                "name": "orphan-agent",
+                "system_prompt": "prompt",
+                "allowed_tools": "[]",
+                "features": "{}",
+                "plugins": "[]",
+                "allowed_skills": "[]",
+                "created_at": datetime.now(UTC).isoformat(),
+                "tenant_id": "missing-tenant",
+                "team_id": None,
+                "icon": None,
+                "config_overrides": "{}",
+            },
+        )
+
+    row = database.execute(
+        "SELECT COUNT(*) AS c FROM agents WHERE name = :name",
+        {"name": "orphan-agent"},
+    ).fetchone()
+    assert row is not None and int(row["c"]) == 0
 
 
 # ── CRUD behaviour ────────────────────────────────────────────────────────────

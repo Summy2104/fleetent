@@ -5,7 +5,6 @@ import fleetent.platform.im_gateway_management.connector_store as im_connector_s
 import fleetent.platform.user_management.api_key_store as api_key_store
 from fleetent import user_store
 from fleetent.governance import audit_log
-from fleetent.platform.im_gateway_management import identity as im_user_store
 from tests.integration._migration_template import apply_migrations
 
 DEFAULT_USER_STORE_DB_PATH = user_store.DB_PATH
@@ -14,7 +13,6 @@ DEFAULT_LEGACY_RE_EXPORT_DB_PATHS = {
     "audit_log": audit_log.DB_PATH,
     "im_channel_allowlist": im_channel_allowlist.DB_PATH,
     "im_connector_store": im_connector_store.DB_PATH,
-    "im_user_store": im_user_store.DB_PATH,
 }
 
 
@@ -63,9 +61,8 @@ def test_legacy_re_exports_inherit_default_db_path():
         "import fleetent.platform.im_gateway_management.connector_store as c; "
         "import fleetent.platform.user_management.api_key_store as k; "
         "from fleetent.governance import audit_log; "
-        "from fleetent.platform.im_gateway_management import identity as iu; "
         "expected = paths.data_dir() / 'management.db'; "
-        "mods = [a, c, k, audit_log, iu]; "
+        "mods = [a, c, k, audit_log]; "
         "bad = [m.__name__ for m in mods if m.DB_PATH != expected]; "
         "assert not bad, bad"
     )

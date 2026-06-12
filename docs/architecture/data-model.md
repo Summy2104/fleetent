@@ -39,6 +39,8 @@ data/
 ## 2. schema 权威、路由与并发
 
 - **双权威（按库分）**：管理库 **Alembic-only**；per-agent / 共享记忆 / KB 关系库走**嵌入式 forward-only 迁移（Y）**——schema 以代码中有序 `MIGRATIONS=[(ver,sql)]` 定义、DB 只存 `PRAGMA user_version`、**migrate-on-open**、每文件自迁、库版本 > 代码已知版本则拒启动（`SchemaTooNewError`）。空库与旧库同一代码路径。
+- **关系完整性双层语义**：管理库经 `db.py` 打开的连接统一启用 `PRAGMA foreign_keys=ON`，声明了 FK 的管理表约束会真实生效；store 写入校验继续承接 FK 难以表达的语义级约束（例如 `agents.team_id` 与 `agents.tenant_id` 的复合一致性）。agent 侧库仍以约定引用为主；其中 KB 关系库的 `knowledge_documents → knowledge_chunks` 级联删除已随 FK 开启真实生效。
+- **FK 启用不回扫存量行**：SQLite 只约束启用后的新连接写入/删除，不会自动修复历史违规行；旧违规引用若后续被触碰，会在那次写路径上迟发失败。
 - **一文件一份统一 MIGRATIONS**：`agent_state.db` 由 `runtime/agent_state_migrations.py` 一份单调版本列表管（sessions/traces/reflection/memory/approvals 各占若干 v）——单文件单 `user_version`，不可每 store 各跑一份。
 - **路由（租户作用域 + 可换后端）**：`tenant_router` 暴露两个平级解析器——`tenant_scope(tenant)`（KB + 共享记忆句柄）、`agent_scope(tenant, agent_id)`（per-agent 句柄）。SQLite 后端映射到上述目录文件；后端可换（将来 PG per-tenant DB / RLS，调用点不变）。物理路由的主体取自 **agent 的归属主体**（`agents.team_id`/`tenant_id`，配置）；请求者 `Principal.tenant_id` 仅用于 edge 跨主体校验（`agent_app._check_tenant`）。
 - **并发**：所有 SQLite 连接启用 **WAL + busy_timeout**（关系库经 `db.py`、向量库经 `vector_store/backend.py`，同值）——支撑 platform 只读投影读 + agent 写并发、共享记忆多 agent 写。
@@ -49,6 +51,8 @@ data/
 > 实体名 + 一句话职责；列级以迁移为准（见文首）。关系多为 `*_id` 约定引用（非 DB 外键）。
 
 本节分**宏观**（§3.1 物理库全景 + 跨库引用）与**按库明细**（§3.2–§3.6，每库完整实体 + 库内关系）。所有关系均为 `*_id` 逻辑约定，**物理库间无 DB 外键**。
+
+**跨库引用孤儿契约**：物理库之间没有 DB 级 FK，消费方 **MUST** 容忍 `*_id` 指向已删或已 archive 的外库实体，并按域语义处理为拒绝或降级，而不是假设引用恒真。Identity / cron 复检类路径应继续采用分域重查，不共享隐式一致性。
 
 ### 3.1 物理库全景（宏观）
 
@@ -107,7 +111,7 @@ graph TD
 - **Agent 定义/绑定**：`agents`(定义，含 `tenant_id`/`team_id`/`active_version_id`) · `agent_versions`(不可变快照) · `agent_admin_state`(版本/部署态) · `user_agents`(用户↔agent) · `channel_agents`(渠道↔agent) · `agent_kbs`(**agent↔KB 绑定唯一真相源**，带 `created_by` 审计) · `agent_mcp_servers` · `agent_mcp_server_bindings` · `agent_oauth_bindings` · `agent_secrets`(agent / shared scope 密文 secret) · `connectors`(工具 OAuth) · `agent_skills` · `long_term_context_policies`
 - **KB 管理**：`kb_connectors`(connector 配置与自定义元数据；实际 KB 内容仍在 per-tenant `kb.db`)
 - **模型**：`model_providers` · `model_routes`(task_type→provider)
-- **治理/编排**：`audit_log`(平台管理操作审计) · `session_meta`(platform chat 管理元数据，如 origin / pinned / admin takeover；与 agent 侧 `sessions` 索引分责，`session_id` 仅作跨库逻辑引用)
+- **治理/编排**：`audit_log`(平台管理操作审计) · `session_meta`(仅 playground / chat admin 创建路径会写入的 platform chat 管理元数据，如 origin / pinned / admin takeover；与 agent 侧 `sessions` 索引分责，`session_id` 仅作跨库逻辑引用)
 - **Skill 治理**：`skill_provenance` · `skill_admin_state`（全局 skill 态）
 
 ```mermaid

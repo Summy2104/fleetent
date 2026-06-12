@@ -810,6 +810,36 @@ async def test_delete_removes_keyword_index_entries(monkeypatch, tmp_path):
     assert rows == []
 
 
+async def test_deleting_document_row_cascades_chunks_with_fk_enabled(monkeypatch, tmp_path):
+    database = _patch_runtime_database(monkeypatch, tmp_path)
+    _patch_runtime_settings(monkeypatch, chunk_size=5, chunk_overlap=0)
+
+    from fleetent.knowledge_base import runtime
+
+    monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
+    document = await runtime.ingest_text(
+        filename="cascade.md",
+        content="abcdefghij",
+        tenant_id="tenant-a",
+        kb_id="global",
+    )
+
+    before = database.execute(
+        "SELECT COUNT(*) AS c FROM knowledge_chunks WHERE document_id = :document_id",
+        {"document_id": document.id},
+    ).fetchone()
+    assert before is not None and int(before["c"]) > 0
+
+    with database.transaction() as conn:
+        conn.execute("DELETE FROM knowledge_documents WHERE id = :id", {"id": document.id})
+
+    after = database.execute(
+        "SELECT COUNT(*) AS c FROM knowledge_chunks WHERE document_id = :document_id",
+        {"document_id": document.id},
+    ).fetchone()
+    assert after is not None and int(after["c"]) == 0
+
+
 async def _noop_upsert(chunk_id: str, content: str, namespace: str) -> None:
     return None
 

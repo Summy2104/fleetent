@@ -36,7 +36,6 @@ from fleetent.platform.im_gateway_management.connector_store import (
     upsert_connector,
 )
 from fleetent.platform.im_gateway_management.identity import (
-    DB_PATH,
     PLATFORM_IDENTITY_FIELDS,
     approve_user,
     block_im_user,
@@ -55,7 +54,6 @@ from fleetent.platform.im_gateway_management.identity import (
 )
 
 __all__ = [
-    "DB_PATH",
     "PLATFORM_IDENTITY_FIELDS",
     "ConnectorManager",
     "add_entry",

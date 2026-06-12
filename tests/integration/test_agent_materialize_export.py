@@ -8,6 +8,7 @@ from fleetent.platform.agent_lifecycle import materialize
 from fleetent.platform.connector_management import agent_mcp_server_store
 from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.model_provider_management import provider_admin_store
+from fleetent.platform.tenancy import store as tenancy_store
 from tests.integration._migration_template import apply_migrations
 
 
@@ -21,6 +22,8 @@ def db(tmp_path, monkeypatch):
 
 
 def test_agent_file_from_store_exports_authored_runtime_config(db):
+    tenancy_store.create_tenant(id="acme", name="Acme")
+    tenancy_store.create_team(id="support", tenant_id="acme", name="Support")
     provider_admin_store.add_provider(
         "claude-fast",
         "https://api.anthropic.com/v1/",

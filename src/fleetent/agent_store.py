@@ -116,6 +116,28 @@ def _parse_caps(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _validate_team_tenant(
+    conn: SQLiteConnection,
+    *,
+    agent_name: str,
+    tenant_id: str,
+    team_id: str | None,
+) -> None:
+    if team_id is None:
+        return
+    row = conn.execute(
+        "SELECT tenant_id FROM teams WHERE id = :team_id", {"team_id": team_id}
+    ).fetchone()
+    if row is None:
+        return
+    team_tenant_id = str(row["tenant_id"])
+    if team_tenant_id != tenant_id:
+        raise ValueError(
+            f"agent {agent_name!r} team {team_id!r} belongs to tenant {team_tenant_id!r}, "
+            f"not agent tenant {tenant_id!r}"
+        )
+
+
 def create_agent(
     name: str,
     system_prompt: str,
@@ -147,6 +169,7 @@ def create_agent(
     with db.transaction() as conn:
         if conn.execute("SELECT 1 FROM agents WHERE name = :name", {"name": name}).fetchone():
             raise ValueError(f"agent {name!r} already exists")
+        _validate_team_tenant(conn, agent_name=name, tenant_id=tenant_id, team_id=team_id)
         agent_id = conn.execute(
             "INSERT INTO agents "
             "(name, system_prompt, allowed_tools, features, plugins, allowed_skills, "
@@ -210,10 +233,18 @@ def set_icon(name: str, icon: str | None) -> None:
 
 def set_identity(name: str, tenant_id: str, team_id: str | None) -> None:
     """Update an agent's tenant/team (agent-level identity, not a versioned change)."""
-    _db().execute(
-        "UPDATE agents SET tenant_id = :tenant_id, team_id = :team_id WHERE name = :name",
-        {"tenant_id": tenant_id, "team_id": team_id, "name": name},
-    )
+    update_agent_tenancy(name, tenant_id=tenant_id, team_id=team_id)
+
+
+def update_agent_tenancy(name: str, tenant_id: str, team_id: str | None) -> None:
+    """Update an agent's tenant/team after validating team ownership consistency."""
+    db = _db()
+    with db.transaction() as conn:
+        _validate_team_tenant(conn, agent_name=name, tenant_id=tenant_id, team_id=team_id)
+        conn.execute(
+            "UPDATE agents SET tenant_id = :tenant_id, team_id = :team_id WHERE name = :name",
+            {"tenant_id": tenant_id, "team_id": team_id, "name": name},
+        )
 
 
 def set_config_overrides(name: str, config_overrides: dict[str, Any]) -> None:
@@ -449,6 +480,14 @@ def delete_agent(name: str) -> bool:
         if agent is None:
             return False
         agent_id = int(agent["id"])
+        conn.execute(
+            "DELETE FROM agent_mcp_server_bindings WHERE agent_id = :aid",
+            {"aid": agent_id},
+        )
+        conn.execute(
+            "DELETE FROM agent_oauth_bindings WHERE agent_id = :aid",
+            {"aid": agent_id},
+        )
         # Detach the active-version FK before removing version rows.
         conn.execute(
             "UPDATE agents SET active_version_id = NULL WHERE id = :aid", {"aid": agent_id}

@@ -31,6 +31,7 @@
 - **per-agent / 共享记忆 / KB 关系库走嵌入式 forward-only 迁移（Y）**：schema 定义在代码（有序 `MIGRATIONS=[(ver,sql)]`）、DB 只存 `PRAGMA user_version`、migrate-on-open、每文件自迁、版本>代码则拒启动。原因：单机 agent 须脱离 alembic 启动；N 个动态建的 per-tenant 文件不能跑中央 alembic。
 - 关键工程约束：**一个物理文件一个 `user_version` → 由一份统一 MIGRATIONS 列表管**（`agent_state.db` 的 sessions/traces/reflection/memory/approvals 全在 `runtime/agent_state_migrations.py` 一份列表，单调版本；不能每 store 各一份跑同文件，否则撞戳/`SchemaTooNewError`）。
 - 过渡件：#1 立的"ensure_schema↔alembic 漂移护栏"在 agent 表脱离 `fleetent.db` 后退役。
+- **补充（乙1/乙2）**：管理库关系完整性定格为“FK 强制 + store 语义校验”双层模型：FK 负责真实约束/级联，store 负责跨列复合语义（如 team↔tenant 一致性）。
 
 ### D4 向量 = 独立 substrate（模型 A），17 库计数
 - 向量经 `vector_store`（横切 infra，非 KB 子件）的**独立后端/文件**，**不寄居关系库**——否则无法单独把向量层换 Qdrant（破坏可换后端）。

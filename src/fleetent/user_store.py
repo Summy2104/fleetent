@@ -297,6 +297,7 @@ def disable_user(user_id: str) -> None:
 
 def delete_user(user_id: str) -> None:
     _guard_not_builtin_admin(user_id, "delete")
+    _guard_not_tenancy_approver(user_id)
     with _db().transaction() as conn:
         conn.execute("DELETE FROM users WHERE id = :id", {"id": user_id})
 
@@ -305,6 +306,30 @@ def _guard_not_builtin_admin(user_id: str, op: str) -> None:
     current = get_by_id(user_id)
     if current is not None and current.role == "built_in_admin":
         raise PermissionError(f"built-in admin cannot be {op}d")
+
+
+def _guard_not_tenancy_approver(user_id: str) -> None:
+    tenant_row = (
+        _db()
+        .execute(
+            "SELECT id FROM tenants WHERE approver_user_id = :user_id ORDER BY id LIMIT 1",
+            {"user_id": user_id},
+        )
+        .fetchone()
+    )
+    if tenant_row is not None:
+        raise PermissionError(f"user is tenant approver for tenant {tenant_row['id']!r}")
+
+    team_row = (
+        _db()
+        .execute(
+            "SELECT id FROM teams WHERE approver_user_id = :user_id ORDER BY id LIMIT 1",
+            {"user_id": user_id},
+        )
+        .fetchone()
+    )
+    if team_row is not None:
+        raise PermissionError(f"user is team approver for team {team_row['id']!r}")
 
 
 def _update_field(user_id: str, column: str, value: object) -> None:

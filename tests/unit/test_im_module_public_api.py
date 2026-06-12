@@ -32,7 +32,7 @@ def test_im_module_exposes_unified_public_api():
     assert im.router.prefix == "/admin/im"
 
 
-def test_im_module_single_db_path():
+def test_im_module_does_not_reexport_identity_db_path():
     from fleetent.platform import im_gateway_management as im
 
-    assert hasattr(im, "DB_PATH")
+    assert not hasattr(im, "DB_PATH")

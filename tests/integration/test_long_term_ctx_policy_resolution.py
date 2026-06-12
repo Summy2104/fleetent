@@ -1,6 +1,8 @@
 """Resolution of tenant-default / agent-override context policies."""
 
+import fleetent.agent_store as agent_store
 from fleetent.long_term_ctx import _policy as policy
+from fleetent.platform.tenancy import store as tenancy_store
 
 
 def _record(
@@ -113,11 +115,19 @@ def _patch_policy_db(monkeypatch, tmp_path):
     db_path = Path(tmp_path) / "policy.db"
     apply_migrations(db_path)
     database = create_database(f"sqlite:///{db_path}")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setattr(policy, "_database", lambda: database)
+
+
+def _seed_policy_scope(tenant_id: str, agent_id: str | None = None) -> None:
+    tenancy_store.create_tenant(id=tenant_id, name=tenant_id.title())
+    if agent_id is not None:
+        agent_store.create_agent(agent_id, "prompt", [], tenant_id=tenant_id)
 
 
 def test_upsert_then_get_round_trips_tenant_default(monkeypatch, tmp_path):
     _patch_policy_db(monkeypatch, tmp_path)
+    _seed_policy_scope("acme")
 
     policy.upsert_policy(_record("acme", None, tenant_shared_memory_enabled=True))
 
@@ -131,6 +141,7 @@ def test_upsert_then_get_round_trips_tenant_default(monkeypatch, tmp_path):
 
 def test_upsert_replaces_existing_scope_on_conflict(monkeypatch, tmp_path):
     _patch_policy_db(monkeypatch, tmp_path)
+    _seed_policy_scope("acme", "a1")
 
     policy.upsert_policy(_record("acme", "a1", knowledge_base_max_tokens=100))
     policy.upsert_policy(_record("acme", "a1", knowledge_base_max_tokens=999))

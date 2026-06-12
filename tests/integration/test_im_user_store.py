@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import contextmanager
 
 import pytest
 
@@ -106,3 +107,43 @@ def test_legacy_block_user_revokes_access(db):
 
 def test_list_pending_empty(db):
     assert im_user_store.list_pending() == []
+
+
+def test_identity_crud_works_on_alembic_schema_without_runtime_schema_checks(db, monkeypatch):
+    executed_sql: list[str] = []
+
+    @contextmanager
+    def traced_conn():
+        conn = sqlite3.connect(db)
+        conn.row_factory = sqlite3.Row
+        conn.set_trace_callback(executed_sql.append)
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    monkeypatch.setattr(im_user_store, "_conn", traced_conn)
+
+    user = im_user_store.get_or_create(_OWNER, "slack", "U777")
+    im_id = im_user_store.list_im_identities(user.id)[0]["id"]
+    im_user_store.block_user(im_id)
+    assert im_user_store.check_allowed_by_user_id(user.id) is False
+    assert len(im_user_store.list_all()) == 1
+    assert len(im_user_store.list_pending()) == 1
+    im_user_store.approve_user(im_id)
+    assert im_user_store.check_allowed_by_user_id(user.id) is True
+    assert im_user_store.list_pending() == []
+
+    schema_sql = [
+        statement
+        for statement in executed_sql
+        if "CREATE TABLE" in statement
+        or "ALTER TABLE" in statement
+        or "sqlite_master" in statement
+        or "PRAGMA table_info" in statement
+    ]
+    assert schema_sql == []

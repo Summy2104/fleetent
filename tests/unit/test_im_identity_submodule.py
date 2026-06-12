@@ -20,8 +20,7 @@ def test_identity_submodule_exposes_public_fns():
         assert callable(getattr(identity, name)), name
 
 
-def test_identity_db_path_monkeypatchable(tmp_path, monkeypatch):
+def test_identity_submodule_does_not_reexport_db_path():
     from fleetent.platform.im_gateway_management import identity
 
-    monkeypatch.setattr(identity, "DB_PATH", tmp_path / "users.db")
-    assert tmp_path / "users.db" == identity.DB_PATH
+    assert not hasattr(identity, "DB_PATH")

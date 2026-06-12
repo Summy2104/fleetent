@@ -4,13 +4,15 @@ import importlib
 from pathlib import Path
 from unittest.mock import AsyncMock
 
-import fleetent.agent_store as agent_store
 import pytest
+
+import fleetent.agent_store as agent_store
 from fleetent import agent_config, long_term_ctx
 from fleetent.agent_config import AgentConfigIndex
 from fleetent.knowledge_base import KnowledgeChunk
 from fleetent.platform.agent_lifecycle import materialize
 from fleetent.platform.knowledge_base_management import agent_kbs_store
+from fleetent.platform.tenancy import store as tenancy_store
 from tests.integration._migration_template import apply_migrations
 
 _REMOVED_BINDINGS_MODULE = "fleetent.knowledge_base.bindings"
@@ -27,6 +29,7 @@ def test_live_agent_kb_path_materializes_agent_knowledge_and_long_term_ctx_uses_
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
+    tenancy_store.create_tenant(id="acme", name="Acme")
     agent = agent_store.create_agent("support", "You are support.", [], tenant_id="acme")
     agent_kbs_store.bind("acme", "support-kb", str(agent.id), created_by="admin")
     exported = materialize.agent_file_from_store(agent_store.get_by_name("support"))

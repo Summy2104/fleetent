@@ -8,7 +8,9 @@ import sqlite3
 
 import pytest
 
+import fleetent.agent_store as agent_store
 from fleetent.long_term_ctx import _policy as policy
+from fleetent.platform.tenancy import store as tenancy_store
 from tests.integration._migration_template import apply_migrations
 
 
@@ -45,6 +47,12 @@ def _record(
     return policy.ContextPolicyRecord(**fields)  # type: ignore[arg-type]
 
 
+def _seed_policy_scope(tenant_id: str, agent_id: str | None = None) -> None:
+    tenancy_store.create_tenant(id=tenant_id, name=tenant_id.title())
+    if agent_id is not None:
+        agent_store.create_agent(agent_id, "prompt", [], tenant_id=tenant_id)
+
+
 def test_migration_creates_policy_table(store_db):
     conn = sqlite3.connect(store_db)
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -74,6 +82,7 @@ def test_migration_creates_policy_table(store_db):
 
 
 def test_upsert_and_get_tenant_default_row(store_db):
+    _seed_policy_scope("acme")
     policy.upsert_policy(_record("acme", None, tenant_shared_memory_enabled=True))
     loaded = policy.get_policy("acme", None)
     assert loaded is not None
@@ -84,6 +93,7 @@ def test_upsert_and_get_tenant_default_row(store_db):
 
 
 def test_upsert_and_get_agent_override_row(store_db):
+    _seed_policy_scope("acme", "agent-1")
     policy.upsert_policy(_record("acme", None))
     policy.upsert_policy(_record("acme", "agent-1", team_shared_memory_enabled=True))
     tenant_row = policy.get_policy("acme", None)
@@ -94,6 +104,7 @@ def test_upsert_and_get_agent_override_row(store_db):
 
 
 def test_upsert_is_idempotent_per_scope(store_db):
+    _seed_policy_scope("acme")
     policy.upsert_policy(_record("acme", None, user_memory_max_tokens=1024))
     policy.upsert_policy(_record("acme", None, user_memory_max_tokens=2048))
     loaded = policy.get_policy("acme", None)
