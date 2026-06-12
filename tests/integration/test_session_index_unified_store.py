@@ -16,8 +16,8 @@ from pathlib import Path
 import pytest
 
 from fleetent.db import SQLiteDatabase
-from fleetent.schema_migrations import migrate
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as SESSION_MIGRATIONS
+from fleetent.schema_migrations import migrate
 
 
 def _setup_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SQLiteDatabase:
@@ -79,7 +79,7 @@ def test_record_activity_writes_to_injected_db(
 
     from fleetent.session.index import record_activity
 
-    record_activity("s1", "u1", 3, "my-agent")
+    record_activity("s1", "u1", 3)
 
     row = db.execute(
         "SELECT session_id FROM sessions WHERE session_id = :sid", {"sid": "s1"}
@@ -93,13 +93,12 @@ def test_get_returns_correct_metadata(tmp_path: Path, monkeypatch: pytest.Monkey
     _setup_db(tmp_path, monkeypatch)
     from fleetent.session.index import get, record_activity
 
-    record_activity("s2", "user-x", 5, "bot")
+    record_activity("s2", "user-x", 5)
     meta = get("s2")
     assert meta is not None
     assert meta["session_id"] == "s2"
     assert meta["user_id"] == "user-x"
     assert meta["message_count"] == 5
-    assert meta["agent_name"] == "bot"
 
 
 def test_get_returns_none_for_unknown_session(
@@ -117,9 +116,9 @@ def test_list_by_user_returns_sessions_newest_first(
     _setup_db(tmp_path, monkeypatch)
     from fleetent.session.index import list_by_user, record_activity
 
-    record_activity("old", "u1", 1, "a")
+    record_activity("old", "u1", 1)
     time.sleep(0.01)
-    record_activity("new", "u1", 2, "a")
+    record_activity("new", "u1", 2)
 
     results = list_by_user("u1")
     assert len(results) == 2
@@ -132,7 +131,7 @@ def test_count_reflects_recorded_sessions(tmp_path: Path, monkeypatch: pytest.Mo
     from fleetent.session.index import count, record_activity
 
     assert count() == 0
-    record_activity("sx", "u1", 1, "a")
+    record_activity("sx", "u1", 1)
     assert count() == 1
 
 
@@ -140,6 +139,6 @@ def test_delete_removes_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     _setup_db(tmp_path, monkeypatch)
     from fleetent.session.index import delete, get, record_activity
 
-    record_activity("sd", "u1", 1, "a")
+    record_activity("sd", "u1", 1)
     delete("sd")
     assert get("sd") is None

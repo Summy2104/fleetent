@@ -362,6 +362,7 @@ async def route(msg: NormalizedMessage) -> None:
     # Approval commands bypass the agent loop entirely
     m = _APPROVAL_RE.match(msg.text.strip())
     if m:
+        from fleetent.governance import approval_store
         from fleetent.governance.permission_gate import _default_gate
         from fleetent.session import manager as session_mgr
 
@@ -371,7 +372,17 @@ async def route(msg: NormalizedMessage) -> None:
         # fingerprint (approval-minimization); only meaningful on approve.
         always = m.group(2) is not None and action == "approve"
         approval_id = m.group(3)
-        session_id = msg.session_id
+        # The suspended run persisted its pending entry under ITS OWN session. In a
+        # plain DM each message is its own session, so the approve command's session
+        # differs from the run's — resolve the run's session from the approval row
+        # (same as the Slack button path), never assume it equals this message's.
+        # Defensive: a store hiccup must not crash the approve command (fall back).
+        row = None
+        try:
+            row = approval_store.get_approval(approval_id)
+        except Exception as exc:  # noqa: BLE001 — fall back to this message's session
+            logger.warning("approval_row_lookup_failed", approval_id=approval_id, error=str(exc))
+        session_id = str(row["session_id"]) if row and row.get("session_id") else msg.session_id
 
         # Recover authorized decision actors from the persisted pending entry so the
         # gate's authorization check survives a process restart (approval-suspend-resume).

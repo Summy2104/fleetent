@@ -5,6 +5,8 @@ import pytest
 
 from fleetent import memory
 from fleetent.db import SQLiteDatabase, create_database
+from fleetent.memory import shared as shared_memory_store
+from fleetent.memory.shared_memory_migrations import MIGRATIONS as SHARED_MEMORY_MIGRATIONS
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
 from fleetent.schema_migrations import migrate
 
@@ -14,12 +16,16 @@ def _patch_trend_db(monkeypatch, tmp_path):
     from tests.integration.test_migrations import apply_migrations
 
     db_path = tmp_path / "trends.db"
+    shared_db_path = tmp_path / "shared.db"
     apply_migrations(db_path)
     migrate(SQLiteDatabase(path=db_path), AGENT_STATE_MIGRATIONS)
+    shared_db = SQLiteDatabase(path=shared_db_path)
+    migrate(shared_db, SHARED_MEMORY_MIGRATIONS)
     database = create_database(f"sqlite:///{db_path}")
     monkeypatch.setattr(store, "database", lambda: database)
     monkeypatch.setattr(store, "_state_db", database)
-    return database
+    monkeypatch.setattr(shared_memory_store, "_shared_memory_db", shared_db)
+    return database, shared_db
 
 
 def _ts(day: int) -> datetime:
@@ -156,11 +162,11 @@ def test_duplicate_candidate_counts(monkeypatch, tmp_path) -> None:
 
 
 def test_shared_memory_and_weekly_bucketing(monkeypatch, tmp_path) -> None:
-    database = _patch_trend_db(monkeypatch, tmp_path)
-    _insert_shared(database, "s1", "context", _ts(1))
-    _insert_shared(database, "s2", "procedure", _ts(2))
+    _, shared_database = _patch_trend_db(monkeypatch, tmp_path)
+    _insert_shared(shared_database, "s1", "context", _ts(1))
+    _insert_shared(shared_database, "s2", "procedure", _ts(2))
     # scope filter must exclude this one
-    _insert_shared(database, "s3", "context", _ts(2), scope_id="other")
+    _insert_shared(shared_database, "s3", "context", _ts(2), scope_id="other")
 
     query = memory.MemoryQualityTrendQuery(
         user_id=None,

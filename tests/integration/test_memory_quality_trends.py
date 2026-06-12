@@ -2,7 +2,9 @@ from datetime import UTC, datetime, timedelta
 
 from fleetent import memory
 from fleetent.db import SQLiteDatabase, create_database
+from fleetent.memory import shared as shared_memory_store
 from fleetent.memory import store as memory_store
+from fleetent.memory.shared_memory_migrations import MIGRATIONS as SHARED_MEMORY_MIGRATIONS
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
 from fleetent.schema_migrations import migrate
 from tests.integration.test_migrations import apply_migrations
@@ -11,7 +13,7 @@ from tests.integration.test_migrations import apply_migrations
 def test_memory_quality_trend_buckets_user_memory_counts_and_expired_context(
     tmp_path, monkeypatch
 ) -> None:
-    database = _patch_database(tmp_path, monkeypatch)
+    database, _ = _patch_database(tmp_path, monkeypatch)
     start = datetime(2026, 6, 1, tzinfo=UTC)
     _insert_memory(
         database,
@@ -66,7 +68,7 @@ def test_memory_quality_trend_buckets_user_memory_counts_and_expired_context(
 
 
 def test_memory_quality_trend_keeps_shared_memory_counts_separate(tmp_path, monkeypatch) -> None:
-    database = _patch_database(tmp_path, monkeypatch)
+    database, shared_database = _patch_database(tmp_path, monkeypatch)
     start = datetime(2026, 6, 1, tzinfo=UTC)
     _insert_memory(
         database,
@@ -77,7 +79,7 @@ def test_memory_quality_trend_keeps_shared_memory_counts_separate(tmp_path, monk
         updated_at=start + timedelta(hours=1),
     )
     _insert_shared_memory(
-        database,
+        shared_database,
         id="team-procedure",
         scope_type="team",
         scope_id="eng",
@@ -159,22 +161,26 @@ def test_memory_quality_trend_includes_maintenance_proposal_counts(tmp_path, mon
     assert bucket.proposal_risk_counts == {"high": 1, "low": 1, "medium": 1}
 
 
-def _patch_database(tmp_path, monkeypatch) -> SQLiteDatabase:
+def _patch_database(tmp_path, monkeypatch) -> tuple[SQLiteDatabase, SQLiteDatabase]:
     from fleetent import reflection
     from fleetent.observability import traces
 
     db_path = tmp_path / "memory-quality-trends.db"
+    shared_db_path = tmp_path / "shared-memory.db"
     apply_migrations(db_path)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     db = create_database(f"sqlite:///{db_path}")
+    shared_db = SQLiteDatabase(path=shared_db_path)
     migrate(db, AGENT_STATE_MIGRATIONS)
+    migrate(shared_db, SHARED_MEMORY_MIGRATIONS)
     monkeypatch.setattr(memory_store, "_state_db", db)
+    monkeypatch.setattr(shared_memory_store, "_shared_memory_db", shared_db)
     # reflection no longer falls back to DATABASE_URL (agent-runtime-db-routing-cleanup):
     # inject its per-agent state DB explicitly.
     monkeypatch.setattr(reflection, "_state_db", db)
     monkeypatch.setattr(traces, "_state_db", db)
-    return db
+    return db, shared_db
 
 
 def _insert_memory(

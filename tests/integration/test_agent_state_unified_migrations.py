@@ -98,8 +98,48 @@ def test_sessions_columns_match_ensure_schema(tmp_path: Path) -> None:
         "created_at",
         "updated_at",
         "message_count",
-        "agent_name",
     }
+
+
+def test_migrate_drops_agent_name_from_legacy_sessions_table(tmp_path: Path) -> None:
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+
+    db = _open(tmp_path)
+    conn = sqlite3.connect(db.path)
+    conn.execute(
+        """
+        CREATE TABLE sessions (
+            session_id    TEXT PRIMARY KEY,
+            user_id       TEXT,
+            created_at    REAL,
+            updated_at    REAL,
+            message_count INTEGER,
+            agent_name    TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO sessions (
+            session_id, user_id, created_at, updated_at, message_count, agent_name
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        ("sess-1", "u1", 1.0, 2.0, 3, "bot"),
+    )
+    conn.execute("PRAGMA user_version = 27")
+    conn.commit()
+    conn.close()
+
+    migrate(db, AGENT_STATE_MIGRATIONS)
+
+    assert "agent_name" not in _columns(db.path, "sessions")
+    conn = sqlite3.connect(db.path)
+    row = conn.execute(
+        "SELECT session_id, user_id, created_at, updated_at, message_count FROM sessions"
+    ).fetchone()
+    conn.close()
+    assert row == ("sess-1", "u1", 1.0, 2.0, 3)
 
 
 def test_traces_columns_match_ensure_schema(tmp_path: Path) -> None:

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 import fleetent.auth as auth
@@ -77,3 +79,20 @@ def test_builtin_admin_cannot_be_blocked(db):
     admin, _ = auth.seed_builtin_admin()
     with pytest.raises(PermissionError):
         block_service.block_user(admin.id, reason="x")
+
+
+def test_ban_registration_marks_email_blocked(db):
+    assert blocklist.is_registration_blocked("z@x.com") is False
+
+    blocklist.ban_registration("z@x.com", reason="ops", batch_id="batch-z")
+
+    assert blocklist.is_registration_blocked("z@x.com") is True
+
+
+def test_blocklist_store_is_crud_only_and_uses_db_boundary():
+    source = Path("src/fleetent/governance/blocklist.py").read_text()
+
+    assert "CREATE TABLE" not in source
+    assert "DB_PATH as DB_PATH" not in source
+    assert "?" not in source
+    assert ":email" in source

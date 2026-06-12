@@ -32,6 +32,7 @@ Version history:
   v25  drop memory_maintenance_proposals
   v26  drop skill_proposals
   v27  scheduled_tasks    (retire-standalone-fleetent-db)
+  v28  drop sessions.agent_name
 """
 
 from __future__ import annotations
@@ -328,4 +329,5 @@ MIGRATIONS: list[tuple[int, str]] = [
         "next_run_at TEXT"
         ")",
     ),
+    (28, "ALTER TABLE sessions DROP COLUMN agent_name"),
 ]
