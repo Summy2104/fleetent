@@ -92,8 +92,17 @@
 - 我对每个 agent 产出独立核验(自跑门禁 + 审 diff),并**回退了 #2 时 `ruff format src tests` 误改的 22 个无关文件**;#3-#6 agent 已遵守「只格式化自己文件」。
 - 安全核心达成:碰撞修复(默认部署 P0 跨用户泄露根除)、无 docker=不免审批(fail-closed)、单根 /workspace + 路径对应(AAA-8053 实测根除)、send_file 收件人 harness 固定、run_code 唯一执行面(无审批后门)、docker-commit 投毒泄露根除(声明式不可变镜像)、免审批为显式部署选择(默认仍 approval)。
 
-**待你审批 / 后续项**:
-1. **PR `feat/sandbox-first-execution → main` 已建、未合并**,留你审核(CI 非阻塞轮询)。
-2. **#4 multi_user 平台接线**:护栏已落地,platform 共享 IM 入口传 multi_user=True 的接线待 platform 侧补(详见 #4 条目)。
-3. **#4 agent-tier 运行期 read_only rootfs**:defense-in-depth,留后续 hardening(核心隔离已由声明式不可变镜像满足)。
-4. microsandbox 声明式 build 端到端未真跑(环境未装 runtime),契约由 unit 覆盖。
+### #7 sandbox-scope-split-followups — 完成 2026-06-12(#4 两个后续项收尾)
+应张洋要求补齐 #4 留的两个后续项:
+- **A multi_user 信号接线(原后续项 1)已解决**:agent.yaml 新增 `sandbox.multi_user`(bool 默认 false),init_sandbox_manager 读它传入 SandboxManager,既有护栏由此真正生效(多用户配 agent→纠正 session+告警)。纯配置,无反向依赖;platform 生成多用户共享 agent 配置时写 true 即可。
+- **B agent-tier read_only 收紧(原后续项 2)已解决**:#4 移除 docker-commit 后 agent 档"装依赖"理由失效,build_resources_by_scope agent 档收紧为与 session 同档(read_only=True/非 root 65534/cap_add 空),删 `_AGENT_CAP_ADD`、清陈旧注释;依赖来自 build 期不可变镜像,/workspace 仍可写。
+- 实现 agent 抓到并修了一处测试污染(新测试 patch `_MANAGER` 全局泄漏,加 autouse fixture 恢复)。
+- 验证:边界/层 OK;make test-pr 2874 passed(仅预存失败,无污染残留);sandbox integration 111 passed 无回归(#1-#5 不破);未全树污染。
+- archive,specs 同步(改 sandbox-workspace-scope/sandbox-container-hardening)。
+
+## 合并到 main(2026-06-12,张洋授权)
+全部 7 个 change(6 批次 + 收尾)验证通过,张洋审完两个后续项后授权**整分支合并 main**。经 PR #235 合并(yang.zhang PR + admin 合并 + CI 轮询)。
+
+**剩余后续项(非阻断)**:
+- microsandbox 声明式 build 端到端未真跑(环境未装 runtime),契约由 unit 覆盖。
+- platform 侧:生成多用户共享 agent 的 agent.yaml 时记得写 `sandbox.multi_user: true`(agent-runtime 已就绪,接收即生效)。
