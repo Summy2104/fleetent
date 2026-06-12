@@ -21,7 +21,7 @@
 **D1：统一方向 = `approver_actor → approver_user_id`（回退 R1 命名，理由链入档）**
 R1 当时改名 "actor" 的动机是"Identity 端口落地前，agent 不依赖 platform 身份概念"——用词回避 user 是边界防御。该动机已被两件事取代：#4 identity-port 确立 `Principal{user_id, tenant_id}` 为核与 edge 的唯一身份通货；unify-im-identity-mapping 统一了 user_id 命名空间（managed 内部 id / standalone 渠道原生 id 透传）。如今 "user_id 后缀 = Principal.user_id 字符串" 是全库事实约定（10+ 列），"actor" 反成理解负担。**若将来再有人提议改回 "actor"，须先推翻本段理由链**：即论证 Principal.user_id 不再是统一身份通货。
 
-**D2：Y v29 用原生 `RENAME COLUMN`，不做表重建**
+**D2：Y 新版本用原生 `RENAME COLUMN`，不做表重建（append 在当前最大版本之后，勿硬编码——v29/v30 已被 typed-scheduled-task-delivery 占用，当前应为 v31，以 apply 时实际最大版本为准）**
 SQLite ≥3.25 支持（项目基线 Python 3.12 内置 ≥3.45）；该列无索引、无约束、无触发器依赖，RENAME 安全且保数据。统一 Y 谱系下 approvals 由 v12 建表 + 060 修 id 类型……单形态推进，迁移内无需探测分支。
 
 **D3：spec 的家 = standalone-agent-approval**
@@ -38,7 +38,7 @@ SQLite ≥3.25 支持（项目基线 Python 3.12 内置 ≥3.45）；该列无�
 
 ## Migration Plan
 
-Y v29 随 migrate-on-open 自动执行；forward-only 无回滚（内测窗口可重置）。代码与迁移同 commit 原子落地。
+Y 新版本随 migrate-on-open 自动执行；forward-only 无回滚（内测窗口可重置）。代码与迁移同 commit 原子落地。
 
 ## Open Questions
 

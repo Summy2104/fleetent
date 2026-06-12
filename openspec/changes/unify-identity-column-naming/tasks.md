@@ -2,10 +2,10 @@
 
 > 每个实现 task 严格 TDD：先写测试见红，再实现见绿。测试任务在对应实现任务之前。
 
-## 1. 列改名（Y v29）
+## 1. 列改名（嵌入式 Y 新版本）
 
-- [ ] 1.1 [测试] integration：最新 Y 版本下 `approvals` 表含 `approver_user_id` 列、不含 `approver_actor` 列；升级路径——以 v28 库（`approver_actor` 已填值的行）migrate-on-open 后列改名、历史值原样保留（先红：当前列名为 approver_actor）
-- [ ] 1.2 [实现] `runtime/agent_state_migrations.py` 追加 v29：`ALTER TABLE approvals RENAME COLUMN approver_actor TO approver_user_id` → 1.1 转绿
+- [ ] 1.1 [测试] integration：最新 Y 版本下 `approvals` 表含 `approver_user_id` 列、不含 `approver_actor` 列；升级路径——以改名前最大版本的库（`approver_actor` 已填值的行）migrate-on-open 后列改名、历史值原样保留（先红：当前列名为 approver_actor）
+- [ ] 1.2 [实现] `runtime/agent_state_migrations.py` 在当前最大版本之后追加新版本（勿硬编码——v29/v30 已被 typed-scheduled-task-delivery 占用）：`ALTER TABLE approvals RENAME COLUMN approver_actor TO approver_user_id` → 1.1 转绿
 
 ## 2. 代码与测试同步
 

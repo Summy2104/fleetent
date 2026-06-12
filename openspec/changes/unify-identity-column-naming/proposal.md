@@ -6,7 +6,7 @@ agent_state.db 全库 10+ 个身份列统一用 `*_user_id` 后缀且语义一�
 
 ## What Changes
 
-- **列改名**：`runtime/agent_state_migrations.py` 追加 v29 `ALTER TABLE approvals RENAME COLUMN approver_actor TO approver_user_id`（SQLite ≥3.25 原生支持；统一 Y 谱系下表形态单一，改名干净；Y 版本闸之外的遗留双列形态库不在处理范围）
+- **列改名**：`runtime/agent_state_migrations.py` 在当前最大版本之后追加新版本 `ALTER TABLE approvals RENAME COLUMN approver_actor TO approver_user_id`（SQLite ≥3.25 原生支持；统一 Y 谱系下表形态单一，改名干净；Y 版本闸之外的遗留双列形态库不在处理范围）
 - **代码同步**：`governance/approval_store.py`（SELECT 列、named params、dataclass/字典键）与 `governance/permission_gate.py`（写入参数）改用 `approver_user_id`；5 个测试文件同步（`test_approval_store` / `test_permission_gate` / `test_permission_gate_restart` / `test_standalone_approval` / `test_per_agent_approvals_schema`）
 - **spec 清理**：`standalone-agent-approval` REMOVED「存量 approvals 表缺 approver_actor 列时 ensure_schema 自愈」（代码已不存在，schema 权威=统一 Y + 版本闸）；ADDED「身份列统一命名与语义」（approvals 审批人列名 `approver_user_id`，语义=Principal.user_id 字符串）
 - **文档**（`docs/architecture/data-model.md` §3.3）：
@@ -26,10 +26,10 @@ agent_state.db 全库 10+ 个身份列统一用 `*_user_id` 后缀且语义一�
 
 ## Impact
 
-- **owning package**：`runtime`（agent_state_migrations v29）、`governance`（approval_store / permission_gate）
+- **owning package**：`runtime`（agent_state_migrations 新版本）、`governance`（approval_store / permission_gate）
 - **public API surface**：`approval_store` 返回字典/参数键 `approver_actor` → `approver_user_id`（内部协作面；standalone `/approvals` 端点响应字段若含该键需同步并在测试覆盖）
-- **owned tables**：`agent_state.db.approvals` 列改名（Y v29，forward-only）
+- **owned tables**：`agent_state.db.approvals` 列改名（嵌入式 Y 新版本，forward-only）
 - **config namespace**：无
 - **cross-module dependencies**：无新增；不触碰 agent/platform 边界
-- **migration / shim plan**：Y v29 RENAME COLUMN；不留旧列名兼容（上线前窗口，消费方全在本仓一次改净）
+- **migration / shim plan**：Y 新版本 RENAME COLUMN（append 在当前最大版本之后，勿硬编码版本号——v29/v30 已被 typed-scheduled-task-delivery 占用）；不留旧列名兼容（上线前窗口，消费方全在本仓一次改净）
 - **相邻切片**：无在跑 change 触碰 governance / agent_state_migrations（knowledge-base-standalone-service 不相干）
