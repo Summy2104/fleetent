@@ -71,6 +71,7 @@ graph TD
     kb_connectors
     channel_agents
     model_providers
+    session_meta
   end
   subgraph AGENT["per-agent agent_state.db ｜ agent 侧 · 每 agent 一文件 · 嵌入式 Y"]
     sessions
@@ -95,10 +96,14 @@ graph TD
     vector_items
   end
   memory_items -. user_id .-> users
+  sessions -. user_id .-> users
+  traces -. user_id .-> users
   traces -. agent_id .-> agents
   approvals -. requester_user_id .-> users
   scheduled_tasks -. session_id .-> sessions
   scheduled_tasks -. user_id .-> users
+  shared_memory_items -. "scope_id(team|tenant)" .-> teams
+  session_meta -. session_id .-> sessions
   agent_kbs -. kb_id .-> knowledge_bases
   kb_connectors -. "tenant_id,kb_id" .-> knowledge_bases
   vector_items -. "mem:" .-> memory_items
@@ -107,6 +112,7 @@ graph TD
 ```
 
 > 宏观图只列各库主干实体；完整清单与库内关系见下方各库明细（§3.2–§3.6）。
+> 跨库边的省略约定：① `reflection_proposals` 的 `subject/reviewer/actor_user_id` 与 approvals 的审批人列同样 ⇢ `users`，从略；② agent 侧各表的 `tenant_id` 接缝列（§2"可换后端"）⇢ `tenants`，全部从略；③ `shared_memory_items.scope_id` 在 `scope_type=tenant` 时指向 `tenants`（图仅画 teams 一条代表边）。`session_meta → sessions` 是全库唯一一条 mgmt→agent 方向的跨库引用（platform 自有元数据挂 agent 侧会话，非 agent 反向写）。
 
 ### 3.2 管理库（Alembic · platform 侧）
 - **身份/租户**：`users`(根主体，含 `tenant_id`；另含 **legacy 单 key 列 `api_key`**——仅作认证 fallback，多 key 真相源在 `api_keys` 表，`migrate_api_keys()` 迁移工具已备、清理待排) · `api_keys`(→users) · `tenants`(主体，含 `approver_user_id`→users) · `teams`(→tenants，含 `approver_user_id`→users) · `blocked_registrations`(注册封禁名单，Alembic 078 收编，control-plane only，agent 运行时不 import)
