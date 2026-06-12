@@ -79,10 +79,19 @@ async def _agent_run(
     user_id: str = "default",
     agent_name: str | None = None,
     principal: Principal | None = None,
+    connectors: dict[str, Any] | None = None,
 ) -> str:
     from fleetent.runtime import loop as agent_loop
 
-    return await agent_loop.run(messages, agent_name=agent_name, principal=principal)
+    # Thread the fire-time connector snapshot so outbound IM tools invoked inside the
+    # fired run (send_im_message, ...) reach the live connector — a cron fire has no
+    # inbound-message context to carry them otherwise (AAA-8039).
+    return await agent_loop.run(
+        messages,
+        agent_name=agent_name,
+        principal=principal,
+        outbound_connectors=connectors or {},
+    )
 
 
 async def _fire(task: dict[str, Any], connectors: dict[str, Any] | None = None) -> None:
@@ -123,7 +132,12 @@ async def _fire(task: dict[str, Any], connectors: dict[str, Any] | None = None) 
 
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
-        reply = await _agent_run(messages, agent_name=task.get("agent_name"), principal=principal)
+        reply = await _agent_run(
+            messages,
+            agent_name=task.get("agent_name"),
+            principal=principal,
+            connectors=connectors,
+        )
     except Exception as exc:  # noqa: BLE001 — record the failure, never crash the scheduler
         logger.warning("cron_fire_run_failed task=%s error=%s", task.get("id"), exc)
         _record_run(task, now, "error", str(exc))
