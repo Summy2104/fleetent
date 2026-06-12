@@ -364,7 +364,6 @@ def test_patch_creates_new_active_version(client, monkeypatch):
     assert len(agent_store.list_versions("ops")) == 2
 
 
-
 def test_patch_capabilities_yaml_updates_tools(client, monkeypatch):
     _wire_real_store(monkeypatch)
     agent_store.create_agent("ops", "v1", ["shell"])

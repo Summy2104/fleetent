@@ -19,8 +19,7 @@ import yaml
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
-from fleetent import auth, user_store
-from fleetent import audit_log
+from fleetent import audit_log, auth, user_store
 from fleetent.platform.agent_management_console import (
     agent_admin_store,
     agent_observability,
@@ -98,6 +97,7 @@ def delete_agent_def(name: str) -> bool:
 
 
 rename_agent_def: None = None  # removed — agent name is immutable after creation
+
 
 def references_for(agent_name: str) -> dict[str, Any]:
     """Who references an agent (users/channels) — drives archive protection."""

@@ -10,7 +10,12 @@ from tests.integration._migration_template import apply_migrations
 
 def _publish_agent(monkeypatch, *, name: str = "support", tenant_id: str = "default") -> None:
     from fleetent import agent_config
-    from fleetent.agent_config import AgentConfigIndex, AgentConnectors, AgentFile, TelegramConnector
+    from fleetent.agent_config import (
+        AgentConfigIndex,
+        AgentConnectors,
+        AgentFile,
+        TelegramConnector,
+    )
 
     agent = AgentFile(
         name=name,

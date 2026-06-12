@@ -27,5 +27,5 @@
 
 ## 5. 收尾
 
-- [ ] 5.1 `make test-pr` 全绿；`uv run pytest tests/integration -q`（不带 `-x`）对照 main 基线无新增失败
-- [ ] 5.2 `openspec validate retire-legacy-api-key-and-agent-rename` 通过；所有 checkbox 标记 `[x]`
+- [x] 5.1 `make test-pr` 全绿；`uv run pytest tests/integration -q`（不带 `-x`）对照 main 基线无新增失败
+- [x] 5.2 `openspec validate retire-legacy-api-key-and-agent-rename` 通过；所有 checkbox 标记 `[x]`

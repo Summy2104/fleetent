@@ -42,7 +42,6 @@ def test_new_slot_defaults_operator_and_derives_env_name(db):
     }
 
 
-
 def test_duplicate_env_name_is_rejected(db):
     agent = agent_store.create_agent("support-bot", "p", [])
     credential_slots.ensure_slot(agent, "slack_bot", env_name="FLEETENT_AGENT_SUPPORT_SHARED")

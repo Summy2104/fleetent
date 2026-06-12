@@ -38,7 +38,6 @@ from fleetent.observability.startup_diagnostics import (
 from fleetent.platform.agent_lifecycle import lifecycle_admin_api, materialize
 from fleetent.platform.agent_management_console import (
     agent_admin_api,
-    agent_admin_store,
     agent_console_api,
 )
 from fleetent.platform.agent_statistics import stats_admin_api

@@ -12,13 +12,10 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-import shutil
 
 import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
-
-from fleetent import user_store
 
 
 def _hash(plaintext: str) -> str:
@@ -37,7 +34,10 @@ def _make_pre_080_db(db_path) -> None:
     conn = sqlite3.connect(str(db_path))
     conn.executescript(
         """
-        CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL, CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num));
+        CREATE TABLE alembic_version (
+            version_num VARCHAR(32) NOT NULL,
+            CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
+        );
         INSERT INTO alembic_version VALUES ('079');
 
         CREATE TABLE tenants (
@@ -139,7 +139,9 @@ def test_upgrade_backfills_hashes_and_drops_api_key_column(tmp_path, monkeypatch
 
     # Assert: original key still authenticates via user_store.authenticate
     import importlib
+
     import fleetent.user_store as us_mod
+
     importlib.reload(us_mod)
 
     result = us_mod.authenticate("ma-" + "a" * 64)

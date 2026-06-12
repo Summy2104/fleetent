@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from fleetent.user_store import User
+    pass
 
 
 @dataclass(frozen=True)

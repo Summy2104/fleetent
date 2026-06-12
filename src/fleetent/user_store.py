@@ -17,7 +17,7 @@ DB_PATH = paths.data_dir() / "management.db"
 
 
 def _hash_key(plaintext: str) -> str:
-    """SHA-256 hash of a plaintext API key — single canonical implementation shared with api_key_store."""
+    """SHA-256 hash of a plaintext API key — single canonical source shared with api_key_store."""
     return hashlib.sha256(plaintext.encode()).hexdigest()
 
 
@@ -95,7 +95,13 @@ def create_user(
         conn.execute(
             "INSERT INTO users (id, name, created_at, email, tenant_id)"
             " VALUES (:id, :name, :created_at, :email, :tenant_id)",
-            {"id": user_id, "name": name, "created_at": now, "email": email, "tenant_id": tenant_id},
+            {
+                "id": user_id,
+                "name": name,
+                "created_at": now,
+                "email": email,
+                "tenant_id": tenant_id,
+            },
         )
         conn.execute(
             "INSERT INTO api_keys (user_id, key_hash, prefix, scope, created_at, call_count)"
@@ -132,28 +138,39 @@ def authenticate(plaintext: str) -> tuple[User, dict[str, Any]] | None:
 
     # Standalone: query api_keys by hash (same table, no platform import needed).
     key_hash = _hash_key(plaintext)
-    row = _db().execute(
-        "SELECT id, user_id, scope, revoked_at, expires_at FROM api_keys WHERE key_hash = :kh",
-        {"kh": key_hash},
-    ).fetchone()
+    row = (
+        _db()
+        .execute(
+            "SELECT id, user_id, scope, revoked_at, expires_at FROM api_keys WHERE key_hash = :kh",
+            {"kh": key_hash},
+        )
+        .fetchone()
+    )
     if row is None:
         return None
     if row["revoked_at"] is not None:
         return None
-    if row["expires_at"] is not None and row["expires_at"] <= datetime.datetime.now(datetime.UTC).isoformat():
+    if (
+        row["expires_at"] is not None
+        and row["expires_at"] <= datetime.datetime.now(datetime.UTC).isoformat()
+    ):
         return None
     user = get_by_id(row["user_id"])
     if user is None or user.status == "blocked":
         return None
     scope = json.loads(row["scope"]) if row["scope"] else ["*"]
-    return user, {"id": row["id"], "user_id": row["user_id"], "scope": scope, "prefix": plaintext[:11]}
+    return user, {
+        "id": row["id"],
+        "user_id": row["user_id"],
+        "scope": scope,
+        "prefix": plaintext[:11],
+    }
 
 
 def get_by_api_key(api_key: str) -> User | None:
     """Look up a user by API key (delegates to authenticate). Returns None if invalid."""
     result = authenticate(api_key)
     return result[0] if result else None
-
 
 
 def get_by_id(user_id: str) -> User | None:

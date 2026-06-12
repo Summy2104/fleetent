@@ -10,9 +10,6 @@ Asserts that after retire-legacy-api-key-and-agent-rename:
 from __future__ import annotations
 
 import ast
-import importlib
-import inspect
-import sys
 from pathlib import Path
 
 _SRC = Path(__file__).resolve().parents[2] / "src" / "fleetent"
@@ -48,14 +45,14 @@ def test_user_store_has_no_platform_import():
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                assert not alias.name.startswith(
-                    "fleetent.platform"
-                ), f"user_store imports platform: {alias.name}"
+                assert not alias.name.startswith("fleetent.platform"), (
+                    f"user_store imports platform: {alias.name}"
+                )
         if isinstance(node, ast.ImportFrom):
             module = node.module or ""
-            assert not module.startswith(
-                "fleetent.platform"
-            ), f"user_store imports from platform: {module}"
+            assert not module.startswith("fleetent.platform"), (
+                f"user_store imports from platform: {module}"
+            )
 
 
 def test_identity_has_no_platform_import():
@@ -65,11 +62,11 @@ def test_identity_has_no_platform_import():
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                assert not alias.name.startswith(
-                    "fleetent.platform"
-                ), f"identity imports platform: {alias.name}"
+                assert not alias.name.startswith("fleetent.platform"), (
+                    f"identity imports platform: {alias.name}"
+                )
         if isinstance(node, ast.ImportFrom):
             module = node.module or ""
-            assert not module.startswith(
-                "fleetent.platform"
-            ), f"identity imports from platform: {module}"
+            assert not module.startswith("fleetent.platform"), (
+                f"identity imports from platform: {module}"
+            )

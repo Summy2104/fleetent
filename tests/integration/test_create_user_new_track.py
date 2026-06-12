@@ -9,6 +9,7 @@ After retire-legacy-api-key-and-agent-rename:
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 from io import StringIO
 from unittest.mock import patch
@@ -44,8 +45,6 @@ def test_create_user_api_keys_has_hashed_row():
     expected_hash = hashlib.sha256(plaintext.encode()).hexdigest()
 
     import sqlalchemy as sa
-
-    from tests.integration._migration_template import _template_db
 
     db_url = f"sqlite:///{__import__('os').environ['DATABASE_URL'].replace('sqlite:///', '')}"
     engine = sa.create_engine(db_url)
@@ -88,11 +87,9 @@ def test_admin_cli_create_user_prints_key():
     with (
         patch("sys.argv", ["fleetent-admin", "create-user", "--name", "Dave"]),
         patch("sys.stdout", stdout),
+        contextlib.suppress(SystemExit),
     ):
-        try:
-            admin_cli_main()
-        except SystemExit:
-            pass
+        admin_cli_main()
 
     out = stdout.getvalue()
     assert "ma-" in out, f"plaintext key not in output: {out!r}"
