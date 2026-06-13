@@ -44,12 +44,13 @@ def cmd_send(args: argparse.Namespace) -> dict[str, Any]:
         return _pure.error_result("missing token (SLACK_E2E_TOKEN)")
     if not channel:
         return _pure.error_result("missing channel (SLACK_E2E_CHANNEL)")
+    text = args.text
+    if args.mention:
+        text = _pure.prepend_mention(text, _opt(args.bot_user_id, ENV_BOT))
     from slack_sdk.errors import SlackApiError
 
     try:
-        resp = _client(token).chat_postMessage(
-            channel=channel, text=args.text, thread_ts=args.thread_ts
-        )
+        resp = _client(token).chat_postMessage(channel=channel, text=text, thread_ts=args.thread_ts)
     except SlackApiError as exc:
         return _pure.error_result(f"chat_postMessage failed: {exc}")
     return _pure.ok_result(ts=resp["ts"], channel=resp["channel"])
@@ -88,12 +89,19 @@ def cmd_upload(args: argparse.Namespace) -> dict[str, Any]:
     channel = _opt(args.channel, ENV_CHANNEL)
     if not (token and channel):
         return _pure.error_result("missing token/channel")
+    comment = args.comment or ""
+    if args.mention:
+        comment = _pure.prepend_mention(comment, _opt(args.bot_user_id, ENV_BOT))
     from slack_sdk.errors import SlackApiError
 
     try:
         # files_upload_v2 wraps getUploadURLExternal → PUT → completeUploadExternal.
         resp = _client(token).files_upload_v2(
-            channel=channel, file=args.file, title=args.title, thread_ts=args.thread_ts
+            channel=channel,
+            file=args.file,
+            title=args.title,
+            thread_ts=args.thread_ts,
+            initial_comment=comment or None,
         )
     except SlackApiError as exc:
         return _pure.error_result(f"upload failed: {exc}")
@@ -180,6 +188,8 @@ def _build_parser() -> argparse.ArgumentParser:
     common(p_send)
     p_send.add_argument("--text", required=True)
     p_send.add_argument("--thread-ts")
+    p_send.add_argument("--bot-user-id")
+    p_send.add_argument("--mention", action="store_true", help="prefix <@bot> (channels need it)")
     p_send.set_defaults(func=cmd_send)
 
     p_read = sub.add_parser("read", help="poll for new bot messages in a thread/channel")
@@ -196,6 +206,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_up.add_argument("--file", required=True)
     p_up.add_argument("--title")
     p_up.add_argument("--thread-ts")
+    p_up.add_argument("--comment", help="initial_comment so image+text arrive as one message")
+    p_up.add_argument("--bot-user-id")
+    p_up.add_argument("--mention", action="store_true")
     p_up.set_defaults(func=cmd_upload)
 
     p_dl = sub.add_parser("download", help="download a file the agent posted, for verification")

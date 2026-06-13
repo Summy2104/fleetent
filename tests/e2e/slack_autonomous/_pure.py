@@ -89,3 +89,10 @@ def safe_local_filename(name: str) -> str:
     base = name.replace("\\", "/").split("/")[-1]
     base = re.sub(r"[\x00-\x1f]", "", base).strip().lstrip(".")
     return base or "download"
+
+
+def prepend_mention(text: str, bot_user_id: str | None) -> str:
+    """Prefix text with a Slack mention of the bot — channel messages require @mention."""
+    if not bot_user_id:
+        return text
+    return f"<@{bot_user_id}> {text}"

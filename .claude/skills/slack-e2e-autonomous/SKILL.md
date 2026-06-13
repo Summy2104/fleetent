@@ -29,6 +29,19 @@ description: >-
 
 任一前置不满足：**明确报告缺什么并停止**——不得伪造结果。
 
+## 场景与读取要点（真实验证得出，务必遵守）
+
+- **bot 回复在 thread 里**：agent 走 Slack Assistant API，回复落在以你消息 `ts` 为根的 thread。
+  **每次 `read` 都要带 `--thread-ts`（用 `send` 返回的 ts）**；读频道/DM 主流会漏掉回复、误判「无响应」。
+- **DM 是全能力主测场景**：DM 里**不需要 @mention**，审批可走文本、文件可上传——对话/记忆/工具/sandbox/
+  审批/文件入站出站/视觉都可测。用 `conversations.open` 拿 DM channel，再 `send --channel <DM>`。
+- **频道场景**：每条消息（含追问）**必须 @bot**（`send --mention` / `upload --mention`），否则 agent 收不到。
+  但**审批类不要在频道测**——审批指令正则 `^approve <id>$` 会被 `<@bot>` 前缀破坏；审批类一律走 DM。
+- **审批门（DM）**：触发后 agent 发 `Approval ID: <id>`；在**同 thread** `send --channel <DM> --text "approve <id>"`
+  （纯文本、不带 @），再 `read --thread-ts` 确认 agent 续行并返回工具结果。
+- **图文同消息**：测图片/文件分析时用 `upload --comment "问题"`（DM）或 `upload --mention --comment "问题"`
+  （频道），让图和提问在**同一条消息**；分两条发会让 agent「看不到图」。
+
 ## helper 用法（JSON in/out）
 
 ```bash
