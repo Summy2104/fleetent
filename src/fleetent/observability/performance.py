@@ -22,7 +22,7 @@ class PerformanceQuery:
     """Performance summary query filters."""
 
     user_id: str | None = None
-    agent_id: str | None = None
+    agent_name: str | None = None
     tenant_id: str | None = None
     session_id: str | None = None
     start_ts: datetime | None = None
@@ -97,7 +97,7 @@ def get_performance_summary(query: PerformanceQuery) -> PerformanceSummary:
     events = query_trace_events(
         TraceQuery(
             user_id=query.user_id,
-            agent_id=query.agent_id,
+            agent_name=query.agent_name,
             session_id=query.session_id,
             tenant_id=query.tenant_id,
             start_ts=query.start_ts,

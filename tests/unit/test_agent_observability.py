@@ -14,7 +14,7 @@ def _ev(event_type, payload, run_id="r1", ts="2026-06-02T00:00:00+00:00"):
         run_id=run_id,
         event_type=event_type,
         payload=payload,
-        agent_id="ops-bot",
+        agent_name="ops-bot",
         session_id=run_id,
         ts=datetime.fromisoformat(ts),
     )

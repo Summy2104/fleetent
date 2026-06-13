@@ -236,7 +236,7 @@ async def test_repeated_task_pattern_generates_skill_opportunity(monkeypatch):
             run_id="run-1",
             event_type="agent_run_completed",
             payload={"task_pattern": "summarize weekly Jira progress"},
-            agent_id="agent-1",
+            agent_name="agent-1",
             user_id="user-1",
         ),
         observability.TraceEvent(
@@ -244,7 +244,7 @@ async def test_repeated_task_pattern_generates_skill_opportunity(monkeypatch):
             run_id="run-2",
             event_type="agent_run_completed",
             payload={"task_pattern": "summarize weekly Jira progress"},
-            agent_id="agent-1",
+            agent_name="agent-1",
             user_id="user-1",
         ),
     ]
@@ -344,7 +344,7 @@ async def test_run_reflection_persists_generated_proposals_with_report_id(tmp_pa
                 "task_pattern": "summarize weekly Jira progress",
             },
             user_id="user-1",
-            agent_id="agent-1",
+            agent_name="agent-1",
         ),
         observability.TraceEvent(
             id="trace-2",
@@ -355,7 +355,7 @@ async def test_run_reflection_persists_generated_proposals_with_report_id(tmp_pa
                 "task_pattern": "summarize weekly Jira progress",
             },
             user_id="user-1",
-            agent_id="agent-1",
+            agent_name="agent-1",
         ),
     ]
     _use_db(monkeypatch, db_path)
@@ -391,7 +391,7 @@ async def test_run_reflection_persists_report_proposal_provenance_links(tmp_path
                 "task_pattern": "prepare release notes",
             },
             user_id="user-1",
-            agent_id="agent-1",
+            agent_name="agent-1",
         ),
         observability.TraceEvent(
             id="trace-2",
@@ -402,7 +402,7 @@ async def test_run_reflection_persists_report_proposal_provenance_links(tmp_path
                 "task_pattern": "prepare release notes",
             },
             user_id="user-1",
-            agent_id="agent-1",
+            agent_name="agent-1",
         ),
     ]
     _use_db(monkeypatch, db_path)

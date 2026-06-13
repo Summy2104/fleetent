@@ -1537,7 +1537,7 @@ def _record_agent_run_completed(
             event_type="agent_run_completed",
             payload=payload,
             user_id=user_id,
-            agent_id=agent_name,
+            agent_name=agent_name,
             session_id=session_id,
         )
     )

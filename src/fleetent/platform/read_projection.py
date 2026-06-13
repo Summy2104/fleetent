@@ -92,6 +92,59 @@ def aggregate_approvals_across_agents(
     return results
 
 
+def aggregate_trace_events_across_agents(
+    router: TenantRouter,
+    agents: list[tuple[str, int]],
+    *,
+    event_type: str | None = None,
+    limit: int = 1000,
+) -> list[dict[str, Any]]:
+    """Return trace events across platform agents using the read translation boundary.
+
+    Each input pair is a platform-side ``(tenant_id, agent_id)``. The function resolves
+    the readable agent name from the management registry, opens that agent's state DB
+    read-only, reads its name-keyed traces, and enriches each event with the platform
+    ``agent_id`` so callers stay on the management identity model.
+    """
+    import sqlite3
+
+    from fleetent import agent_store
+
+    results: list[dict[str, Any]] = []
+    params: dict[str, object] = {"limit": limit}
+    where = ""
+    if event_type is not None:
+        where = "WHERE event_type = :event_type"
+        params["event_type"] = event_type
+
+    for tenant_id, agent_id in agents:
+        agent_name = agent_store.get_agent_name_by_id(agent_id)
+        if agent_name is None:
+            continue
+        scope = router.agent_scope(tenant_id, agent_name)
+        try:
+            ro_db = scope.open_state_db_ro()
+            rows = ro_db.execute(
+                f"""
+                SELECT
+                    id, run_id, span_id, parent_span_id, session_id, user_id, agent_name,
+                    tenant_id, event_type, ts, payload_json
+                FROM traces
+                {where}
+                ORDER BY ts ASC
+                LIMIT :limit
+                """,
+                params,
+            ).fetchall()
+            for row in rows:
+                enriched = dict(row)
+                enriched["agent_id"] = agent_id
+                results.append(enriched)
+        except sqlite3.OperationalError:
+            pass
+    return results
+
+
 def read_shared_memory_for_tenant(
     router: TenantRouter,
     tenant_id: str,
@@ -113,7 +166,9 @@ def read_shared_memory_for_tenant(
     scope = router.tenant_scope(tenant_id)
     try:
         ro_db = scope.open_shared_memory_db_ro()
-        result = ro_db.execute("SELECT * FROM shared_memory_items ORDER BY created_at DESC LIMIT 100")
+        result = ro_db.execute(
+            "SELECT * FROM shared_memory_items ORDER BY created_at DESC LIMIT 100"
+        )
         return result.fetchall()
     except sqlite3.OperationalError:
         # DB doesn't exist or table not yet created — return empty

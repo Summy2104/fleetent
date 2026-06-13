@@ -87,7 +87,7 @@ def test_read_skill_success_records_hit_with_context() -> None:
     event = mock_rec.call_args.args[0]
     assert event.event_type == "skill_hit"
     assert event.payload["skill_name"] == "ok"
-    assert event.agent_id == "support"
+    assert event.agent_name == "support"
     assert event.session_id == "sess-9"
 
 

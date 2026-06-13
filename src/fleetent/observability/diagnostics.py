@@ -287,7 +287,7 @@ def _event_json(event: TraceEvent) -> str:
                 "event_type": event.event_type,
                 "ts": event.ts.isoformat() if event.ts else None,
                 "tenant_id": event.tenant_id,
-                "agent_id": event.agent_id,
+                "agent_name": event.agent_name,
                 "user_id": event.user_id,
                 "payload": payload,
             },

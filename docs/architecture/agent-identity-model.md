@@ -1,13 +1,13 @@
 # Agent 身份模型与迁移设计
 
-> **状态：阶段 2 已落地，阶段 3–5 待落地**。本文锁定 agent 标识在平台侧 / agent 侧的统一模型，并给出完整迁移详设。阶段 2（`unify-agent-binding-id`）已于 2026-06-13 落地 `agent_kbs` / `agent_skills` 的 INTEGER+FK 规整与 `agent_skills` 控制台绑定 bug 修复；其余阶段继续按 OpenSpec change 分批执行。`data-model.md` 已回填阶段 2 的 as-built 状态。
+> **状态：阶段 2–5 已全部落地**。本文锁定 agent 标识在平台侧 / agent 侧的统一模型，并给出完整迁移详设。阶段 2（`unify-agent-binding-id`）已于 2026-06-13 落地 `agent_kbs` / `agent_skills` 的 INTEGER+FK 规整与 `agent_skills` 控制台绑定 bug 修复；阶段 3–5 随后完成平台关系表归一、FK 完整性、`traces.agent_name` 正名、读写翻译边界收口与守护测试。`data-model.md` 已回填最终 as-built 状态。
 > 背景与往返论证（为何不是 slug-everywhere、为何不用 UUID、rename 安全性）见本文 §1 + `records/decision-logs/`。
 
 ## 1. 问题与目标
 
 ### 1.1 现状的乱（实测）
 agent 在系统里没有统一标识符，跨表、跨平面各行其是：
-- `agents.id` 是 **INTEGER 自增主键**；但 `agents.name` 是 **UNIQUE** 的人类可读标识，且是物理目录 `agents/<name>/`、`agent_admin_state` 主键、`session_meta.agent_name`、`traces.agent_id`、agent.yaml `name`、channel 路由 的实际键。
+- `agents.id` 是 **INTEGER 自增主键**；但 `agents.name` 是 **UNIQUE** 的人类可读标识，且曾同时被拿来当物理目录 `agents/<name>/`、`agent_admin_state` 主键、`session_meta.agent_name`、`traces.agent_id`、agent.yaml `name`、channel 路由 的实际键。
 - 平台关系表引用 agent 时**三种写法混用**：多数存 INTEGER `id`；`agent_kbs`/`agent_skills` 曾存**字符串化的 agent id**（TEXT）；`agent_admin_state`/`session_meta` 存 `name`。
 - 后果：① 跨表 JOIN 要 CAST（TEXT vs INTEGER）；② `agent_skills` 出现**真 bug**——控制台按 name 写、materialize 按字符串 id 读，控制台设的 skill 绑定运行时静默失效；③ 多数绑定表无 FK、agent 删除留孤儿。
 
@@ -92,7 +92,7 @@ kb.db / shared_memory.db 无 agent 标识列，不涉及。
 1. **阶段 2 — agent_kbs / agent_skills 归一 + 修 bug**（已完成，2026-06-13）：TEXT→INTEGER + FK；修控制台 name-写。落地 change：`unify-agent-binding-id`。
 2. **阶段 3 — agent_admin_state / session_meta 归 id**：键/列 name→id + FK + 调用方改造。
 3. **阶段 4 — 补齐绑定表 FK + MCP 表正名**：user_agents / channel_agents / agent_versions / agent_secrets 及 MCP 注册表补 FK→agents.id ON DELETE CASCADE；并一并执行 MCP 两表方案 A 改名（`agent_mcp_servers`→`mcp_servers` 注册表、`agent_mcp_server_bindings`→`agent_mcp_servers` 绑定，见 §3「MCP 表改名」）。
-4. **阶段 5 — 翻译边界固化 + 守护（含 agent 侧列正名）**：materialize 写边界 / read-projection 读边界的 name↔id 收口；**`traces.agent_id` → `agent_name` 列正名**（纯美容 R2 合规，并入此阶段而非单列——见下）；守护测试断言"平台关系表无 name 列（除 agents）、agent 侧无 agent id 列/标识"。
+4. **阶段 5 — 翻译边界固化 + 守护（含 agent 侧列正名）**：materialize 写边界 / read-projection 读边界的 name↔id 收口；**`traces.agent_id` → `agent_name` 列正名**（纯美容 R2 合规，并入此阶段而非单列——见下）；守护测试断言"平台关系表无 name 列（除 agents）、agent 侧无 agent id 列/标识"。已完成。
 
 > **决策（2026-06-13）**：原"阶段 1 = traces 列正名先做"已撤销。该改名纯属 R2 美容合规（列本已存 slug、零行为/完整性收益），却牵动 observability/agent-observability-view 两个 spec 的 5 条 requirement + 与彼时在跑的 trace-tool-spans 撞同一文件——性价比与时机均差。故并入阶段 5 的守护/清理一并做。Alembic 单链使阶段 2/3/4 本就串行；逐个 just-ahead propose（最多领先 applied frontier 一片）。
 

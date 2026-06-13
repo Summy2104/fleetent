@@ -29,14 +29,14 @@ def _window_delta(window: str) -> datetime.timedelta:
 
 
 def aggregate(
-    agent_id: str, window: str = "24h", now: datetime.datetime | None = None
+    agent_name: str, window: str = "24h", now: datetime.datetime | None = None
 ) -> dict[str, Any]:
     """Roll up trace events for one agent over a time window."""
     moment = now or datetime.datetime.now(datetime.UTC)
     start = moment - _window_delta(window)
     events = list(
         query_trace_events(
-            TraceQuery(agent_id=agent_id, start_ts=start, end_ts=moment, limit=DEFAULT_LIMIT)
+            TraceQuery(agent_name=agent_name, start_ts=start, end_ts=moment, limit=DEFAULT_LIMIT)
         )
     )
 
@@ -52,7 +52,7 @@ def aggregate(
     requested = [e for e in events if e.event_type == "permission_requested"]
 
     return {
-        "agent_name": agent_id,
+        "agent_name": agent_name,
         "window": window,
         "calls": runs,
         "tokens": tokens,

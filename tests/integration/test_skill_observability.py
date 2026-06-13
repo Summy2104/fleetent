@@ -29,7 +29,7 @@ def _emit_hit(skill: str, session: str | None, agent: str = "agent-a") -> None:
             event_type="skill_hit",
             payload={"skill_name": skill},
             session_id=session,
-            agent_id=agent,
+            agent_name=agent,
         )
     )
 

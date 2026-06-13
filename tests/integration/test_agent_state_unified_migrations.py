@@ -135,6 +135,27 @@ def test_migrate_drops_agent_name_from_legacy_sessions_table(tmp_path: Path) -> 
         """,
         ("sess-1", "u1", 1.0, 2.0, 3, "bot"),
     )
+    conn.execute(
+        """
+        CREATE TABLE traces (
+            id              TEXT PRIMARY KEY,
+            run_id          TEXT NOT NULL,
+            span_id         TEXT,
+            parent_span_id  TEXT,
+            session_id      TEXT,
+            user_id         TEXT,
+            agent_id        TEXT,
+            tenant_id       TEXT NOT NULL DEFAULT 'default',
+            event_type      TEXT NOT NULL,
+            ts              TEXT NOT NULL,
+            payload_json    TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("CREATE INDEX idx_traces_run_id ON traces (run_id)")
+    conn.execute("CREATE INDEX idx_traces_user_ts ON traces (user_id, ts)")
+    conn.execute("CREATE INDEX idx_traces_agent_ts ON traces (agent_id, ts)")
+    conn.execute("CREATE INDEX idx_traces_tenant_event_ts ON traces (tenant_id, event_type, ts)")
     # A faithful post-v27 DB also has scheduled_tasks (created at v27); later ALTERs
     # (v29/v30 add task_type/notify_text) require it to exist.
     conn.execute(
@@ -202,12 +223,74 @@ def test_traces_columns_match_ensure_schema(tmp_path: Path) -> None:
         "parent_span_id",
         "session_id",
         "user_id",
-        "agent_id",
+        "agent_name",
         "tenant_id",
         "event_type",
         "ts",
         "payload_json",
     }
+
+
+def test_migrate_v36_renames_traces_agent_id_to_agent_name(tmp_path: Path) -> None:
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+
+    db = _open(tmp_path)
+    conn = sqlite3.connect(db.path)
+    conn.execute(
+        """
+        CREATE TABLE traces (
+            id              TEXT PRIMARY KEY,
+            run_id          TEXT NOT NULL,
+            span_id         TEXT,
+            parent_span_id  TEXT,
+            session_id      TEXT,
+            user_id         TEXT,
+            agent_id        TEXT,
+            tenant_id       TEXT NOT NULL DEFAULT 'default',
+            event_type      TEXT NOT NULL,
+            ts              TEXT NOT NULL,
+            payload_json    TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("CREATE INDEX idx_traces_run_id ON traces (run_id)")
+    conn.execute("CREATE INDEX idx_traces_user_ts ON traces (user_id, ts)")
+    conn.execute("CREATE INDEX idx_traces_agent_ts ON traces (agent_id, ts)")
+    conn.execute("CREATE INDEX idx_traces_tenant_event_ts ON traces (tenant_id, event_type, ts)")
+    conn.execute(
+        """
+        INSERT INTO traces (
+            id, run_id, span_id, parent_span_id, session_id, user_id, agent_id,
+            tenant_id, event_type, ts, payload_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "trace-1",
+            "run-1",
+            None,
+            None,
+            "session-1",
+            "user-1",
+            "support",
+            "default",
+            "agent_run_completed",
+            "2026-06-14T00:00:00+00:00",
+            "{}",
+        ),
+    )
+    conn.execute("PRAGMA user_version = 36")
+    conn.commit()
+    conn.close()
+
+    migrate(db, AGENT_STATE_MIGRATIONS)
+
+    assert "agent_id" not in _columns(db.path, "traces")
+    assert "agent_name" in _columns(db.path, "traces")
+    rows = _fetch_all(
+        db.path,
+        "SELECT id, run_id, user_id, agent_name FROM traces ORDER BY id",
+    )
+    assert [tuple(row) for row in rows] == [("trace-1", "run-1", "user-1", "support")]
 
 
 def test_reflection_reports_columns_match_ensure_schema(tmp_path: Path) -> None:
