@@ -144,14 +144,14 @@
 - **THEN** payload 被序列化到 `payload_json`
 
 ### Requirement: Query trace events
-`query_trace_events()` SHALL 支持按 run、user、agent、tenant、event_type、时间范围和 limit 查询 trace events。
+`query_trace_events()` SHALL 支持按 run、user、agent、tenant、event_type、时间范围和 limit 查询 trace events。其中 agent 维度字段为 `agent_name`（agent 侧 trace 以 agent slug/name 记，列名为 `agent_name`，不再叫 `agent_id`——身份模型 R2：agent 侧不出现 agent id）。
 
 #### Scenario: Query by run id
 - **WHEN** 调用 `query_trace_events(TraceQuery(run_id="run-1"))`
 - **THEN** 只返回 `run_id` 为 `run-1` 的事件
 
 #### Scenario: Query by agent and time range
-- **WHEN** 调用 `query_trace_events()` 并传入 agent_id、start_ts 和 end_ts
+- **WHEN** 调用 `query_trace_events()` 并传入 `agent_name`、start_ts 和 end_ts
 - **THEN** 只返回该 agent 在时间范围内的事件
 
 #### Scenario: Query limit
@@ -231,7 +231,7 @@ usage summary SHALL 只统计 `agent_run_completed` trace events。
 - **THEN** summary 只包含 user-1 的 completed runs
 
 #### Scenario: Filter by agent and time range
-- **WHEN** 查询包含 agent_id、start_ts 和 end_ts
+- **WHEN** 查询包含 agent_name、start_ts 和 end_ts
 - **THEN** summary 只包含该 agent 在时间范围内的 completed runs
 
 #### Scenario: Filter by session
@@ -547,7 +547,7 @@ performance summary SHALL 通过 `query_trace_events()` 读取 traces，而不�
 - **AND** summary 只统计该 session 的 trace events
 
 #### Scenario: Filter by agent and time range
-- **WHEN** 查询包含 agent_id、start_ts 和 end_ts
+- **WHEN** 查询包含 agent_name、start_ts 和 end_ts
 - **THEN** summary 只统计该 agent 在时间范围内的 trace events
 
 ### Requirement: Run-level performance metrics
@@ -626,7 +626,7 @@ performance summary SHALL 通过 `query_trace_events()` 读取 traces，而不�
 - **WHEN** agent 没有显式 KB 绑定
 - **AND** 默认 KB 未配置、为空或不可用
 - **THEN** 系统记录一条知识库范围诊断事件
-- **AND** 事件包含 `tenant_id`、`agent_id` 和原因
+- **AND** 事件包含 `tenant_id`、`agent_name` 和原因
 
 #### Scenario: Scope diagnostics avoid sensitive content
 - **WHEN** 系统记录知识库范围诊断事件

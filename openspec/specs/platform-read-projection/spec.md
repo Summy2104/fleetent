@@ -3,9 +3,7 @@
 ## Purpose
 
 控制面（platform）对 agent 侧物理库的统一只读投影机制：只读 router 句柄（不迁移）+ 共享 store 读函数 + management.db registry 发现/遍历聚合。禁物化副本、禁 agent 反向写（target-architecture.md §7 落地）。
-
 ## Requirements
-
 ### Requirement: platform 只读 agent 侧库
 
 platform 控制面 SHALL 经**只读连接**读 agent 侧物理库（per-agent / KB / 共享记忆），MUST NOT 写它们、MUST NOT 要求 agent 把数据反向推送/写入 platform 库（禁物化副本）。router SHALL 提供**只读模式句柄（mode=ro）**供 platform 使用。该只读 open **MUST NOT 触发 migrate**——现有 `open_kb_db` / `open_state_db` / `open_shared_memory_db` 是 migrate-on-open（会写 `user_version`），platform 投影 **MUST NOT 复用它们**，须走单独的不迁移只读 open（迁移只属 agent 写侧 / 部署侧）。
@@ -52,3 +50,15 @@ approvals 投影 SHALL join 身份（agent 侧不透明 actor → 真实身份�
 
 - **WHEN** platform 投影某主体共享记忆
 - **THEN** 只读该主体 `shared_memory.db`，不遍历 agent
+
+### Requirement: agent 侧数据读投影经 name→id 解析（读翻译边界）
+agent 侧物理产物（traces、sessions 等）以 agent **name** 标 agent（身份模型 R2）；平台关系层以 `agents.id` 为身份（R1）。故 platform 读 agent 侧 name-keyed 数据并关联回平台 agent 时，SHALL 经 `agents` 表做 **name→id 解析**，且该翻译 SHALL 收口在读投影 / observability 读路径一处，不散落到其它代码。
+
+#### Scenario: 按平台 agent_id 投影其 agent 侧 trace
+- **WHEN** platform 投影某 agent（持 `agents.id`）的 trace
+- **THEN** 经 `agents` 解析出该 agent 的 name，再按 name 读 agent 侧 traces；结果关联回该 `agents.id`
+
+#### Scenario: 翻译收口
+- **WHEN** 审视平台读 agent 侧数据的代码路径
+- **THEN** name↔id 翻译只出现在读投影 / observability 读边界（与 materialize 写边界并列的唯二翻译点），不在其它模块重复
+
