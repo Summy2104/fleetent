@@ -14,7 +14,7 @@ def _make_user(user_id: str, tenant_id: str = "default"):
     from fleetent import user_store
 
     return user_store.User(
-        id=user_id, name="T", api_key="k", created_at="2024-01-01",
+        id=user_id, name="T", created_at="2024-01-01",
         status="active", tenant_id=tenant_id,
     )
 

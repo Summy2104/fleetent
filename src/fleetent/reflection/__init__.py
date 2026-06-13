@@ -19,6 +19,10 @@ class _ReflectionPackage(ModuleType):
         if hasattr(_reflection, name):
             super().__setattr__(name, value)
             setattr(_reflection, name, cast(Any, value))
+            if name == "_state_db" and value is not None:
+                from fleetent.governance import approval_request_store
+
+                approval_request_store.set_state_db(cast(Any, value))
             return
         super().__setattr__(name, value)
 

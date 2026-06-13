@@ -9,7 +9,7 @@ def _user(uid, tenant="default"):
     from fleetent import user_store
 
     return user_store.User(
-        id=uid, name="T", api_key="k", created_at="2024-01-01", status="active", tenant_id=tenant
+        id=uid, name="T", created_at="2024-01-01", status="active", tenant_id=tenant
     )
 
 

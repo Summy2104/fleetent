@@ -72,6 +72,7 @@ def test_migration_creates_unified_reflection_proposals_table(tmp_path):
 
     with sqlite3.connect(db_path) as conn:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(reflection_proposals)")}
+        approval_columns = {row[1] for row in conn.execute("PRAGMA table_info(approval_requests)")}
 
     assert columns >= {
         "id",
@@ -83,14 +84,24 @@ def test_migration_creates_unified_reflection_proposals_table(tmp_path):
         "risk",
         "reason",
         "evidence_json",
-        "status",
-        "reviewer_user_id",
-        "reviewed_at",
-        "rejection_reason",
         "actor_user_id",
         "applied_at",
         "created_at",
         "updated_at",
+    }
+    assert "status" not in columns
+    assert "reviewer_user_id" not in columns
+    assert "reviewed_at" not in columns
+    assert "rejection_reason" not in columns
+    assert "expires_at" not in columns
+    assert approval_columns >= {
+        "id",
+        "subject_type",
+        "subject_id",
+        "status",
+        "approver_user_id",
+        "decided_at",
+        "reason",
         "expires_at",
     }
 

@@ -24,7 +24,7 @@ def test_users_table_has_new_columns(db):
 
 
 def test_defaults_role_viewer_status_active(db):
-    u = user_store.create_user("Alice")
+    u, _ = user_store.create_user("Alice")
     fetched = user_store.get_by_id(u.id)
     assert fetched.role == "viewer"
     assert fetched.status == "active"
@@ -32,7 +32,7 @@ def test_defaults_role_viewer_status_active(db):
 
 
 def test_set_role_and_status(db):
-    u = user_store.create_user("Bob")
+    u, _ = user_store.create_user("Bob")
     user_store.set_role(u.id, "admin")
     user_store.set_status(u.id, "disabled")
     fetched = user_store.get_by_id(u.id)
@@ -41,7 +41,7 @@ def test_set_role_and_status(db):
 
 
 def test_set_password_and_must_reset(db):
-    u = user_store.create_user("Cara")
+    u, _ = user_store.create_user("Cara")
     user_store.set_password(u.id, "hash:abc", must_reset=True)
     fetched = user_store.get_by_id(u.id)
     assert fetched.password_hash == "hash:abc"
@@ -51,13 +51,13 @@ def test_set_password_and_must_reset(db):
 
 
 def test_get_by_email(db):
-    u = user_store.create_user("Dan", email="dan@example.com")
+    u, _ = user_store.create_user("Dan", email="dan@example.com")
     found = user_store.get_by_email("dan@example.com")
     assert found is not None and found.id == u.id
     assert user_store.get_by_email("nobody@example.com") is None
 
 
 def test_idempotent_init_preserves_rows(db):
-    u = user_store.create_user("Eve")
+    u, _ = user_store.create_user("Eve")
     user_store._init_db()  # run again — should not drop or error
     assert user_store.get_by_id(u.id) is not None

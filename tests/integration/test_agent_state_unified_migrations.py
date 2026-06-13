@@ -43,6 +43,14 @@ def _tables(db_path: Path) -> set[str]:
     return names
 
 
+def _fetch_all(db_path: Path, sql: str) -> list[sqlite3.Row]:
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(sql).fetchall()
+    conn.close()
+    return rows
+
+
 # ── 1: AGENT_STATE_MIGRATIONS exists and is correctly ordered ─────────────────
 
 
@@ -140,6 +148,32 @@ def test_migrate_drops_agent_name_from_legacy_sessions_table(tmp_path: Path) -> 
         "risk_level TEXT NOT NULL, tool_name TEXT NOT NULL, tool_args TEXT NOT NULL, "
         "status TEXT NOT NULL, approver_actor TEXT, created_at TEXT NOT NULL, resolved_at TEXT)"
     )
+    # reflection_proposals was created at v24, so any faithful post-v27 DB must carry the
+    # pre-report_id schema before v32 appends the nullable provenance column.
+    conn.execute(
+        """
+        CREATE TABLE reflection_proposals (
+          id                TEXT PRIMARY KEY,
+          domain            TEXT NOT NULL,
+          kind              TEXT NOT NULL,
+          subject_user_id   TEXT,
+          target_ref        TEXT,
+          payload_json      TEXT NOT NULL,
+          reason            TEXT NOT NULL,
+          evidence_json     TEXT NOT NULL,
+          risk              TEXT NOT NULL,
+          status            TEXT NOT NULL,
+          reviewer_user_id  TEXT,
+          reviewed_at       TEXT,
+          rejection_reason  TEXT,
+          actor_user_id     TEXT,
+          applied_at        TEXT,
+          expires_at        TEXT,
+          created_at        TEXT NOT NULL,
+          updated_at        TEXT NOT NULL
+        )
+        """
+    )
     conn.execute("PRAGMA user_version = 27")
     conn.commit()
     conn.close()
@@ -192,6 +226,236 @@ def test_reflection_reports_columns_match_ensure_schema(tmp_path: Path) -> None:
         "signal_summary_json",
         "created_at",
     }
+
+
+def test_migrate_v33_approval_data_into_unified_approval_requests(tmp_path: Path) -> None:
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+
+    db = _open(tmp_path)
+    conn = sqlite3.connect(db.path)
+    conn.execute(
+        """
+        CREATE TABLE approvals (
+            id                TEXT PRIMARY KEY,
+            session_id        TEXT NOT NULL,
+            requester_user_id TEXT NOT NULL,
+            risk_level        TEXT NOT NULL,
+            tool_name         TEXT NOT NULL,
+            tool_args         TEXT NOT NULL,
+            status            TEXT NOT NULL,
+            approver_user_id  TEXT,
+            created_at        TEXT NOT NULL,
+            resolved_at       TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO approvals (
+            id, session_id, requester_user_id, risk_level, tool_name, tool_args,
+            status, approver_user_id, created_at, resolved_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "apr_tool",
+            "sess-1",
+            "alice",
+            "high",
+            "delete_db",
+            '{"table":"users"}',
+            "approved",
+            "manager-1",
+            "2026-06-10T10:00:00+00:00",
+            "2026-06-10T10:05:00+00:00",
+        ),
+    )
+    conn.execute(
+        """
+        CREATE TABLE approval_allowlist (
+            fingerprint TEXT PRIMARY KEY,
+            scope_key   TEXT NOT NULL,
+            tool_name   TEXT NOT NULL,
+            created_at  TEXT NOT NULL,
+            created_by  TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO approval_allowlist (fingerprint, scope_key, tool_name, created_at, created_by)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        ("fp-1", "default", "delete_db", "2026-06-10T10:00:00+00:00", "manager-1"),
+    )
+    conn.execute(
+        """
+        CREATE TABLE reflection_proposals (
+          id                TEXT PRIMARY KEY,
+          domain            TEXT NOT NULL,
+          kind              TEXT NOT NULL,
+          subject_user_id   TEXT,
+          target_ref        TEXT,
+          payload_json      TEXT NOT NULL,
+          reason            TEXT NOT NULL,
+          evidence_json     TEXT NOT NULL,
+          risk              TEXT NOT NULL,
+          status            TEXT NOT NULL,
+          reviewer_user_id  TEXT,
+          reviewed_at       TEXT,
+          rejection_reason  TEXT,
+          actor_user_id     TEXT,
+          applied_at        TEXT,
+          expires_at        TEXT,
+          created_at        TEXT NOT NULL,
+          updated_at        TEXT NOT NULL,
+          report_id         TEXT
+        )
+        """
+    )
+    conn.executemany(
+        """
+        INSERT INTO reflection_proposals (
+          id, domain, kind, subject_user_id, target_ref, payload_json, reason,
+          evidence_json, risk, status, reviewer_user_id, reviewed_at, rejection_reason,
+          actor_user_id, applied_at, expires_at, created_at, updated_at, report_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                "mem-1",
+                "memory",
+                "promote_fact",
+                "alice",
+                "memory:1",
+                '{"memory":"x"}',
+                "keep it",
+                "[]",
+                "medium",
+                "pending",
+                None,
+                None,
+                None,
+                None,
+                None,
+                "2026-06-11T00:00:00+00:00",
+                "2026-06-10T09:00:00+00:00",
+                "2026-06-10T09:00:00+00:00",
+                "report-1",
+            ),
+            (
+                "skill-1",
+                "skill",
+                "update_skill",
+                "alice",
+                "skill:1",
+                '{"skill":"y"}',
+                "improve it",
+                "[]",
+                "high",
+                "rejected",
+                "manager-2",
+                "2026-06-11T01:00:00+00:00",
+                "unsafe",
+                None,
+                None,
+                "2026-06-12T00:00:00+00:00",
+                "2026-06-10T09:30:00+00:00",
+                "2026-06-10T09:30:00+00:00",
+                "report-2",
+            ),
+        ],
+    )
+    conn.execute("PRAGMA user_version = 33")
+    conn.commit()
+    conn.close()
+
+    migrate(db, AGENT_STATE_MIGRATIONS)
+
+    tables = _tables(db.path)
+    assert "approval_requests" in tables
+    assert "approvals" not in tables
+    assert "tool_auto_approvals" in tables
+    assert "approval_allowlist" not in tables
+
+    approval_rows = _fetch_all(
+        db.path,
+        """
+        SELECT id, subject_type, subject_id, requester_user_id, risk, status,
+               approver_user_id, decided_at, reason, routing_key, created_at, expires_at
+        FROM approval_requests
+        ORDER BY id
+        """,
+    )
+    assert [dict(row) for row in approval_rows] == [
+        {
+            "id": "apr_tool",
+            "subject_type": "tool_call",
+            "subject_id": "sess-1",
+            "requester_user_id": "alice",
+            "risk": "high",
+            "status": "approved",
+            "approver_user_id": "manager-1",
+            "decided_at": "2026-06-10T10:05:00+00:00",
+            "reason": None,
+            "routing_key": "delete_db",
+            "created_at": "2026-06-10T10:00:00+00:00",
+            "expires_at": None,
+        },
+        {
+            "id": "mem-1",
+            "subject_type": "memory_proposal",
+            "subject_id": "mem-1",
+            "requester_user_id": None,
+            "risk": "medium",
+            "status": "pending",
+            "approver_user_id": None,
+            "decided_at": None,
+            "reason": None,
+            "routing_key": "reflection_memory_proposal",
+            "created_at": "2026-06-10T09:00:00+00:00",
+            "expires_at": "2026-06-11T00:00:00+00:00",
+        },
+        {
+            "id": "skill-1",
+            "subject_type": "skill_proposal",
+            "subject_id": "skill-1",
+            "requester_user_id": None,
+            "risk": "high",
+            "status": "rejected",
+            "approver_user_id": "manager-2",
+            "decided_at": "2026-06-11T01:00:00+00:00",
+            "reason": "unsafe",
+            "routing_key": "reflection_skill_proposal",
+            "created_at": "2026-06-10T09:30:00+00:00",
+            "expires_at": "2026-06-12T00:00:00+00:00",
+        },
+    ]
+
+    proposal_columns = _columns(db.path, "reflection_proposals")
+    assert "status" not in proposal_columns
+    assert "reviewer_user_id" not in proposal_columns
+    assert "reviewed_at" not in proposal_columns
+    assert "rejection_reason" not in proposal_columns
+    assert "expires_at" not in proposal_columns
+
+    renamed_rows = _fetch_all(
+        db.path,
+        """
+        SELECT fingerprint, scope_key, tool_name, created_at, created_by
+        FROM tool_auto_approvals
+        """,
+    )
+    assert [dict(row) for row in renamed_rows] == [
+        {
+            "fingerprint": "fp-1",
+            "scope_key": "default",
+            "tool_name": "delete_db",
+            "created_at": "2026-06-10T10:00:00+00:00",
+            "created_by": "manager-1",
+        }
+    ]
 
 
 # ── 4: user_version stamped at the highest step ───────────────────────────────

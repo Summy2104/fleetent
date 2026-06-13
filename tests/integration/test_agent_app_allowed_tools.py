@@ -6,14 +6,12 @@ so the tool filter is skipped and all tools remain accessible.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import yaml
 from fastapi.testclient import TestClient
 
-import fleetent.identity as identity_mod
 import fleetent.runtime.loop as loop_mod
-from fleetent import agent_config, user_store
+from fleetent import agent_config
+from fleetent.identity import Principal
 from fleetent.runtime import agent_app
 
 
@@ -35,12 +33,11 @@ def _make_client(monkeypatch, agent_name, captured):
         yield '{"type":"text","content":"ok"}'
 
     monkeypatch.setattr(loop_mod, "run_stream", fake_run_stream)
-
-    fake_user = MagicMock(spec=user_store.User)
-    fake_user.id = "U1"
-    fake_user.status = "active"
-    fake_user.tenant_id = "default"
-    monkeypatch.setattr(identity_mod, "_legacy_key_lookup", lambda _token: fake_user)
+    monkeypatch.setattr(
+        agent_app.LocalBearerAdapter,
+        "__call__",
+        lambda self, _token: Principal(user_id="U1", tenant_id="default"),
+    )
 
     app = agent_app.build_app(agent_name)
     return TestClient(app, raise_server_exceptions=True)

@@ -273,7 +273,7 @@ flat→package 迁移收尾后，系统 SHALL expose runtime、model、tools、s
 - **THEN** 导入成功
 
 #### Scenario: Legacy runtime imports are removed
-- **WHEN** 调用方导入 `fleetent.agent_loop`、`fleetent.context_mgr`、`fleetent.agent_runtime`、`fleetent.sub_agent`、`fleetent.sub_agent_lifecycle`、`fleetent.termination`、`fleetent.loop_detector`、`fleetent.budget`、`fleetent.layered_budget`、`fleetent.cancellation`、`fleetent.message_hygiene`、`fleetent.error_classifier` 或 `fleetent.tool_guardrails`
+- **WHEN** 调用方导入 `fleetent.agent_loop`、`fleetent.context_mgr`、`fleetent.agent_runtime`、`fleetent.sub_agent`、`fleetent.sub_agent_lifecycle`、`fleetent.termination`、`fleetent.loop_detector`、`fleetent.budget`、`fleetent.cancellation`、`fleetent.message_hygiene`、`fleetent.error_classifier` 或 `fleetent.tool_guardrails`
 - **THEN** 导入失败并显示该 legacy module 不再存在
 
 #### Scenario: Legacy model imports are removed

@@ -33,6 +33,14 @@ Version history:
   v26  drop skill_proposals
   v27  scheduled_tasks    (retire-standalone-fleetent-db)
   v28  drop sessions.agent_name
+  v29  scheduled_tasks.task_type
+  v30  scheduled_tasks.notify_text
+  v31  approvals.approver_user_id
+  v32  reflection_proposals.report_id
+  v33  drop budget_usage
+  v34  unify approval requests
+  v35  artifacts          (unified-file-exchange) MCP artifact ledger
+  v36  artifacts.scope_key (unified-file-exchange D0) attribution = workspace scope key
 """
 
 from __future__ import annotations
@@ -339,12 +347,114 @@ MIGRATIONS: list[tuple[int, str]] = [
     (30, "ALTER TABLE scheduled_tasks ADD COLUMN notify_text TEXT"),
     # ── v31: unify-identity-column-naming ────────────────────────────────────
     (31, "ALTER TABLE approvals RENAME COLUMN approver_actor TO approver_user_id"),
-    # ── v32: unified-file-exchange — MCP artifact ledger (governance metadata,
-    # not a model interface). Records provenance + ownership for files produced by
-    # MCP servers under the /exchange namespace; drives attribution access control,
-    # the per-session attribution view, and audit.
+    # ── v32: reflection proposal provenance ──────────────────────────────────
+    (32, "ALTER TABLE reflection_proposals ADD COLUMN report_id TEXT"),
+    (33, "DROP TABLE IF EXISTS budget_usage"),
+]
+
+MIGRATIONS.append(
     (
-        32,
+        MIGRATIONS[-1][0] + 1,
+        """
+        CREATE TABLE approval_requests (
+            id                TEXT PRIMARY KEY,
+            subject_type      TEXT NOT NULL,
+            subject_id        TEXT NOT NULL,
+            requester_user_id TEXT,
+            risk              TEXT NOT NULL,
+            status            TEXT NOT NULL,
+            approver_user_id  TEXT,
+            decided_at        TEXT,
+            reason            TEXT,
+            routing_key       TEXT NOT NULL,
+            created_at        TEXT NOT NULL,
+            expires_at        TEXT
+        );
+        CREATE TABLE IF NOT EXISTS approvals (
+            id                TEXT PRIMARY KEY,
+            session_id        TEXT NOT NULL,
+            requester_user_id TEXT NOT NULL,
+            risk_level        TEXT NOT NULL,
+            tool_name         TEXT NOT NULL,
+            tool_args         TEXT NOT NULL,
+            status            TEXT NOT NULL,
+            approver_user_id  TEXT,
+            created_at        TEXT NOT NULL,
+            resolved_at       TEXT
+        );
+        CREATE TABLE IF NOT EXISTS approval_allowlist (
+            fingerprint TEXT PRIMARY KEY,
+            scope_key   TEXT NOT NULL,
+            tool_name   TEXT NOT NULL,
+            created_at  TEXT NOT NULL,
+            created_by  TEXT
+        );
+        INSERT INTO approval_requests (
+            id, subject_type, subject_id, requester_user_id, risk, status,
+            approver_user_id, decided_at, reason, routing_key, created_at, expires_at
+        )
+        SELECT
+            id,
+            'tool_call',
+            session_id,
+            requester_user_id,
+            risk_level,
+            CASE status WHEN 'timeout' THEN 'expired' ELSE status END,
+            approver_user_id,
+            resolved_at,
+            NULL,
+            tool_name,
+            created_at,
+            NULL
+        FROM approvals;
+        INSERT INTO approval_requests (
+            id, subject_type, subject_id, requester_user_id, risk, status,
+            approver_user_id, decided_at, reason, routing_key, created_at, expires_at
+        )
+        SELECT
+            id,
+            CASE domain
+                WHEN 'memory' THEN 'memory_proposal'
+                WHEN 'skill' THEN 'skill_proposal'
+                ELSE 'skill_proposal'
+            END,
+            id,
+            NULL,
+            risk,
+            CASE status WHEN 'timeout' THEN 'expired' ELSE status END,
+            reviewer_user_id,
+            reviewed_at,
+            rejection_reason,
+            CASE domain
+                WHEN 'memory' THEN 'reflection_memory_proposal'
+                WHEN 'skill' THEN 'reflection_skill_proposal'
+                ELSE 'reflection_' || domain || '_proposal'
+            END,
+            created_at,
+            expires_at
+        FROM reflection_proposals;
+        ALTER TABLE reflection_proposals DROP COLUMN status;
+        ALTER TABLE reflection_proposals DROP COLUMN reviewer_user_id;
+        ALTER TABLE reflection_proposals DROP COLUMN reviewed_at;
+        ALTER TABLE reflection_proposals DROP COLUMN rejection_reason;
+        ALTER TABLE reflection_proposals DROP COLUMN expires_at;
+        ALTER TABLE approval_allowlist RENAME TO tool_auto_approvals;
+        DROP TABLE approvals;
+        """,
+    )
+)
+
+# ── v35-v36: unified-file-exchange — MCP artifact ledger (reconcile: renumbered
+# after Bitbucket's v32-v34 since both mains independently used v32/v33). The ledger
+# is governance metadata, never a model interface: it records provenance + ownership
+# for files produced by MCP servers under the /exchange namespace and drives
+# attribution access control, the per-scope view, and audit. v36 adds `scope_key`
+# (D0): the visibility/ownership key (session_id when workspace_scope is `session`,
+# agent_name when `agent`; same source as the /workspace mount). session_id/user_id
+# become audit-only columns.
+MIGRATIONS.append(
+    (
+        MIGRATIONS[-1][0] + 1,
         "CREATE TABLE IF NOT EXISTS artifacts ("
         "artifact_id TEXT PRIMARY KEY, "
         "server_id TEXT NOT NULL, "
@@ -356,12 +466,6 @@ MIGRATIONS: list[tuple[int, str]] = [
         "size INTEGER, "
         "created_at TEXT"
         ")",
-    ),
-    # ── v33: unified-file-exchange D0 — attribution axis = workspace scope key.
-    # `scope_key` is the visibility/ownership key (session_id when workspace_scope is
-    # `session`, agent_name when `agent`; same source as the /workspace mount). The
-    # pre-existing session_id/user_id columns become audit-only (the concrete producing
-    # call). Legacy v32 rows get NULL scope_key until re-registered (table is dormant
-    # in production — no live rows to backfill).
-    (33, "ALTER TABLE artifacts ADD COLUMN scope_key TEXT"),
-]
+    )
+)
+MIGRATIONS.append((MIGRATIONS[-1][0] + 1, "ALTER TABLE artifacts ADD COLUMN scope_key TEXT"))

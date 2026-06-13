@@ -17,8 +17,8 @@ from fleetent.governance.permission_gate import PermissionGate
 
 @pytest.fixture(autouse=True)
 def _mock_store(monkeypatch):
-    from fleetent.governance import approval_allowlist_store as allowlist
     from fleetent.governance import approval_store
+    from fleetent.governance import tool_auto_approvals_store as allowlist
 
     monkeypatch.setattr(approval_store, "insert_approval", MagicMock())
     monkeypatch.setattr(approval_store, "update_approval", MagicMock())
@@ -105,7 +105,7 @@ async def test_pending_records_outbound_approver_as_authorized() -> None:
 
 
 async def test_allowlisted_still_auto_approves_immediately(monkeypatch) -> None:
-    from fleetent.governance import approval_allowlist_store as allowlist
+    from fleetent.governance import tool_auto_approvals_store as allowlist
 
     monkeypatch.setattr(allowlist, "is_allowed", lambda fp, **kw: True)
     gate = PermissionGate()

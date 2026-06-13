@@ -42,18 +42,6 @@ def test_new_slot_defaults_operator_and_derives_env_name(db):
     }
 
 
-def test_slot_env_name_does_not_drift_on_agent_rename(db):
-    agent = agent_store.create_agent("support-bot", "p", [])
-    original = credential_slots.ensure_slot(agent, "slack_bot")
-
-    agent_store.rename_agent("support-bot", "renamed-bot")
-    renamed = agent_store.get_by_name("renamed-bot")
-    assert renamed is not None
-    after_rename = credential_slots.ensure_slot(renamed, "slack_bot")
-
-    assert after_rename.env_name == original.env_name
-
-
 def test_duplicate_env_name_is_rejected(db):
     agent = agent_store.create_agent("support-bot", "p", [])
     credential_slots.ensure_slot(agent, "slack_bot", env_name="FLEETENT_AGENT_SUPPORT_SHARED")

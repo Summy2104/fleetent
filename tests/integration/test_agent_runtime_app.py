@@ -111,7 +111,7 @@ def test_chat_streams_and_applies_agent(tmp_path, monkeypatch):
     # made the routes build but fail at request time.)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
     apply_migrations(tmp_path / "users.db")
-    user = us.create_user("ChatUser")
+    user, api_key = us.create_user("ChatUser")
     home = _write_home(tmp_path, allowed_tools=["shell"], allowed_skills=["weather"])
     agent_config.scan_home(home)
 
@@ -129,7 +129,7 @@ def test_chat_streams_and_applies_agent(tmp_path, monkeypatch):
         resp = client.post(
             "/chat",
             json={"message": "hi"},
-            headers={"Authorization": f"Bearer {user.api_key}"},
+            headers={"Authorization": f"Bearer {api_key}"},
         )
 
     assert resp.status_code == 200

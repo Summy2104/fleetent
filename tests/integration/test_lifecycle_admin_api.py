@@ -33,7 +33,7 @@ def client(tmp_path, monkeypatch):
     db_path = tmp_path / "users.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     _migrate(db_path)
-    admin = us.create_user("Admin")
+    admin, _ = us.create_user("Admin")
 
     # authenticate the Session token to our admin user
     monkeypatch.setattr(auth, "validate_session", lambda token, idle: admin.id)

@@ -49,7 +49,7 @@ def test_artifacts_table_created_with_expected_columns(tmp_path):
         "size",
         "created_at",
     }
-    assert _user_version(db_path) >= 33
+    assert _user_version(db_path) >= 36
 
 
 def test_migration_idempotent_and_preserves_prior_tables(tmp_path):
@@ -66,13 +66,17 @@ def test_migration_idempotent_and_preserves_prior_tables(tmp_path):
     assert "traces" in tables
 
 
-def test_v33_adds_scope_key_column_preserving_v32_rows(tmp_path):
-    """A v32 artifacts row survives the v33 scope_key column add (migrate-on-open)."""
+def test_scope_key_column_add_preserves_prior_artifact_rows(tmp_path):
+    """An artifacts row created before scope_key (v35) survives the v36 column add.
+
+    Reconcile note: artifacts is v35 and scope_key is v36 (renumbered after Bitbucket's
+    v32-v34); the pre-scope_key slice is therefore `<= 35`, not `<= 32`.
+    """
     db_path = tmp_path / "agent_state.db"
-    # Migrate only up to v32, then insert a pre-v33 row (no scope_key column yet).
-    v32 = [m for m in MIGRATIONS if m[0] <= 32]
+    # Migrate only up to v35 (artifacts created, no scope_key yet), insert a legacy row.
+    pre_scope = [m for m in MIGRATIONS if m[0] <= 35]
     db = SQLiteDatabase(path=db_path)
-    migrate(db, v32)
+    migrate(db, pre_scope)
     assert "scope_key" not in _columns(db_path, "artifacts")
     conn = sqlite3.connect(db_path)
     conn.execute(
@@ -91,4 +95,4 @@ def test_v33_adds_scope_key_column_preserving_v32_rows(tmp_path):
     ).fetchone()
     conn.close()
     assert row == ("a1", "s1", None)  # legacy row preserved; scope_key NULL until re-registered
-    assert _user_version(db_path) >= 33
+    assert _user_version(db_path) >= 36

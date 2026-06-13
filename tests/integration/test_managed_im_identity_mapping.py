@@ -10,7 +10,12 @@ from tests.integration._migration_template import apply_migrations
 
 def _publish_agent(monkeypatch, *, name: str = "support", tenant_id: str = "default") -> None:
     from fleetent import agent_config
-    from fleetent.agent_config import AgentConfigIndex, AgentConnectors, AgentFile, TelegramConnector
+    from fleetent.agent_config import (
+        AgentConfigIndex,
+        AgentConnectors,
+        AgentFile,
+        TelegramConnector,
+    )
 
     agent = AgentFile(
         name=name,
@@ -122,6 +127,8 @@ async def test_im_first_then_bearer_resolves_same_user_id(tmp_path, monkeypatch)
         AsyncMock(),
     )
 
+    import fleetent.platform.user_management.api_key_store as aks
+
     with TestClient(srv.app):
         handler = _capture_telegram_handler("support")
         with patch("telegram.Update", MagicMock):
@@ -129,7 +136,8 @@ async def test_im_first_then_bearer_resolves_same_user_id(tmp_path, monkeypatch)
 
         user = user_store.get_by_id(routed[0].user_id)
         assert user is not None
-        authenticated = user_store.authenticate(user.api_key)
+        plaintext, _ = aks.issue_key(user.id)
+        authenticated = user_store.authenticate(plaintext)
 
     assert authenticated is not None
     assert authenticated[0].id == routed[0].user_id

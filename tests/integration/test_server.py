@@ -110,7 +110,7 @@ def _agent_admin_env(tmp_path, monkeypatch):
 
 
 def _admin_session() -> str:
-    u = us.create_user("admin-user")
+    u, _ = us.create_user("admin-user")
     us.set_role(u.id, "admin")
     return auth.create_session(u.id)
 

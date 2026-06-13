@@ -112,9 +112,8 @@ async def test_approve_command_resolves_gate_and_does_not_call_agent(
         reply_func=fake_reply,
     )
 
-    mock_resolve = AsyncMock()
-    with patch("fleetent.governance.permission_gate._default_gate") as mock_gate:
-        mock_gate.resolve = mock_resolve
+    mock_resolve = AsyncMock(return_value=True)
+    with patch("fleetent.governance.approval_router.resolve_approval_request", mock_resolve):
         await route(msg)
 
     mock_resolve.assert_called_once_with(
@@ -148,9 +147,8 @@ async def test_reject_command_resolves_gate(mock_session_mgr, mock_agent_loop, m
         reply_func=fake_reply,
     )
 
-    mock_resolve = AsyncMock()
-    with patch("fleetent.governance.permission_gate._default_gate") as mock_gate:
-        mock_gate.resolve = mock_resolve
+    mock_resolve = AsyncMock(return_value=True)
+    with patch("fleetent.governance.approval_router.resolve_approval_request", mock_resolve):
         await route(msg)
 
     mock_resolve.assert_called_once_with(

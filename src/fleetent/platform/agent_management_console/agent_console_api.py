@@ -19,8 +19,7 @@ import yaml
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
-from fleetent import auth, user_store
-from fleetent import audit_log
+from fleetent import audit_log, auth, user_store
 from fleetent.platform.agent_management_console import (
     agent_admin_store,
     agent_observability,
@@ -97,9 +96,7 @@ def delete_agent_def(name: str) -> bool:
     return False
 
 
-def rename_agent_def(old_name: str, new_name: str) -> None:
-    """Rename an agent + re-key its admin-state row. Bridges agent_store.rename_agent."""
-    return None
+rename_agent_def: None = None  # removed — agent name is immutable after creation
 
 
 def references_for(agent_name: str) -> dict[str, Any]:
@@ -181,7 +178,6 @@ class CreateBody(BaseModel):
 
 
 class UpdateBody(BaseModel):
-    name: str | None = None  # rename the agent (optional)
     tenant_id: str | None = None
     team_id: str | None = None
     system_prompt: str | None = None
@@ -357,16 +353,7 @@ def update_agent(
     user = _require_admin(authorization)
     if get_agent_def(name) is None:
         raise HTTPException(status_code=404, detail="agent not found")
-    # Optional rename: the agent name is editable; bindings key on agent_id so only
-    # the name + admin-state row move. Apply it first, then edit under the new name.
     target = name
-    if body.name is not None and body.name.strip() and body.name.strip() != name:
-        try:
-            rename_agent_def(name, body.name.strip())
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        target = body.name.strip()
-        audit_log.write_audit(user.id, "agent.rename", "agent", target, detail={"from": name})
     allowed_tools = body.allowed_tools
     if body.capabilities_yaml is not None:
         # Capabilities YAML drives allowed_tools; plugins/features are inherited unchanged.

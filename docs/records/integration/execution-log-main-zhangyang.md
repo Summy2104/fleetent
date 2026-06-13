@@ -42,7 +42,7 @@
 ### D1 — 扁平模块的去留边界（降低 churn 的关键决策）
 观察：main 自己也把 `agent_loop.py` / `tool_registry.py` / `model_router.py` / `session_mgr.py` / `config.py` / `user_store.py` 等**保留为顶层扁平模块**，只对 5 个领域分包（`governance/` `integrations/` `intelligence/` `observability/` `platform/`）。
 决策："采用 main 规范"≠"所有文件进包"。因此：
-- 张洋的净新增运行时模块（termination / budget / layered_budget / loop_detector / cancellation / error_classifier / message_hygiene / sub_agent_lifecycle / provider_health / tool_guardrails / tool_result_truncation / connectors / plugin_loader / skill_audit / multimodal / vision_client / image_gen_client / session_index）**保持顶层扁平**，与 main 留 agent_loop 扁平一致。
+- 张洋的净新增运行时模块（termination / budget / layered budget / loop_detector / cancellation / error_classifier / message_hygiene / sub_agent_lifecycle / provider_health / tool_guardrails / tool_result_truncation / connectors / plugin_loader / skill_audit / multimodal / vision_client / image_gen_client / session_index）**保持顶层扁平**，与 main 留 agent_loop 扁平一致。
 - 仅 main 已分包领域中重叠的 mcp / sandbox，把张洋的超集实现**放进 `integrations/mcp/`、`integrations/sandbox/`**。
 - governance：git 改名检测已自动删除扁平版、保留 `governance/` 包（行为等价，零风险）。
 
@@ -131,7 +131,7 @@ git 把 main 对 `mcp_client.py→integrations/mcp/client.py`、`sandbox_client.
 
 1. **[高·已立项] C2 trace 统一**：弃用 `eval_logger.py` 改用 `observability/traces`（含为 compression/sandbox 新增事件类型）。天级重构，~100+ 测试触点（test_eval_logger 42 测 + agent_loop 55 处 log_run 断言 + context_mgr 8 + tools 13）。**唯一剩余失败测试**等它落地。
 2. **[中] 记忆提取的触发**：C1 把 inline 提取改为 `intelligence.memory.extract_and_update`（每次 run 后 best-effort 调用，对齐原 inline 行为）。若想完全对齐 main（提取移出热路径、交反思层），再调整。
-3. **[中] DB schema 收编**：张洋裸 `CREATE TABLE`（budget_usage/sub_agent_runs/session_anti_flap 等）纳入 alembic 声明。
+3. **[中] DB schema 收编**：张洋裸 `CREATE TABLE`（budget usage/sub_agent_runs/session_anti_flap 等）纳入 alembic 声明。
 4. **[低] mcp/sandbox 是否归 `integrations/` 包**：当前扁平（D4）。若要严格 main 规范，机械迁移 + 改 import。
 5. **[低] 测试精确归类**：迁入 `tests/unit/` 的 34 个文件按 unit/integration 精确归位。
 6. **[低] `reload-skills` CLI 子命令**：main admin_cli 未含，`skill_registry.reload()` 仍在。

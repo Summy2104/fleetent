@@ -2,9 +2,7 @@
 
 ## Purpose
 审批挂起-恢复：gated 工具调用不阻塞 run，而是写 placeholder 占位结果挂起、以 awaiting_approval 结束并持久化 pending；人工决定（按钮/文本命令，含重启后）触发恢复——执行/拒绝该工具并续跑到最终回复。
-
 ## Requirements
-
 ### Requirement: Run suspends on a pending approval instead of blocking
 
 When a tool call requires approval, the run SHALL NOT block waiting for the human
@@ -84,21 +82,14 @@ MUST be removed from `meta.pending_approvals`.
 ### Requirement: Pending approvals survive a process restart
 
 Resolution SHALL NOT depend on an in-memory `asyncio.Event`. With the pending mapping in
-the session file and the approval row in the `approvals` table, a decision made after a
-process restart SHALL still resume the run. The authorized decision actors SHALL be
-recoverable after restart (persisted alongside the pending entry).
+the session file and the approval row in the `approval_requests` table (subject_type=`tool_call`),
+a decision made after a process restart SHALL still resume the run. The authorized decision
+actors SHALL be recoverable after restart (persisted alongside the pending entry).
 
 #### Scenario: approve after restart still resumes
 
-- **WHEN** the agent process restarts while an approval is pending, and an authorized
-  actor then approves it
-- **THEN** the run resumes (tool executes, run continues) using the persisted pending
-  mapping — no reliance on pre-restart in-memory state
-
-#### Scenario: authorization still enforced after restart
-
-- **WHEN** a non-authorized actor attempts to resolve a pending approval after restart
-- **THEN** the resolution is rejected (authorization recovered from the persisted entry)
+- **WHEN** a process restart occurs while an approval is pending, then an authorized actor approves
+- **THEN** the run resumes from the persisted `approval_requests` row + session `meta.pending_approvals`, without relying on any in-memory event
 
 ### Requirement: Same-session messages during a pending approval are processed
 
@@ -122,12 +113,12 @@ it does not silently re-propose the same gated call.
 ### Requirement: Expired approvals are reconciled
 
 A pending approval that exceeds its timeout SHALL be reconciled by the cleanup routine:
-the `approvals` row marked `timeout` and the `meta.pending_approvals` entry removed, so
+the `approval_requests` row marked `expired` and the `meta.pending_approvals` entry removed, so
 the session is left consistent. Because no coroutine is suspended, the approval window
 MAY be configured generously.
 
 #### Scenario: cleanup reconciles an expired pending approval
 
 - **WHEN** the cleanup routine runs and finds a pending approval past its timeout
-- **THEN** the approval is marked `timeout` and its `meta.pending_approvals` entry is
-  removed, leaving a consistent session history
+- **THEN** the `approval_requests` row is marked `expired` and the matching `meta.pending_approvals` entry is removed
+

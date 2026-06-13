@@ -1,19 +1,15 @@
-from fleetent.db import create_database
+from fleetent.db import SQLiteDatabase
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 
 
 def _patch_reflection_db(monkeypatch, tmp_path):
-    import sqlite3
-
     from fleetent import reflection
 
     db_path = tmp_path / "reflection-mgmt.db"
-    with sqlite3.connect(db_path) as conn:
-        for version, sql in AGENT_STATE_MIGRATIONS:
-            conn.execute(sql)
-            conn.execute(f"PRAGMA user_version = {version}")
-    database = create_database(f"sqlite:///{db_path}")
-    monkeypatch.setattr(reflection, "_database", lambda: database)
+    database = SQLiteDatabase(path=db_path)
+    migrate(database, AGENT_STATE_MIGRATIONS)
+    monkeypatch.setattr(reflection, "_state_db", database)
     return database
 
 
@@ -39,6 +35,35 @@ def test_reflection_management_lists_skill_proposals_from_agent_store(monkeypatc
 
     diff = reflection_management.reflection_proposal_diff(proposal.id)
     assert diff["proposal_id"] == proposal.id
+
+
+def test_reflection_management_serializes_report_id(monkeypatch, tmp_path):
+    from fleetent import reflection
+    from fleetent.platform import reflection_management
+    from fleetent.reflection import ReflectionFinding
+
+    _patch_reflection_db(monkeypatch, tmp_path)
+    [proposal] = reflection.generate_skill_proposals(
+        findings=[
+            ReflectionFinding(
+                type="skill_opportunity",
+                summary="Repeated task pattern may become a skill: draft launch update",
+                evidence_ids=["trace-a", "trace-b"],
+                metadata={"pattern": "draft launch update"},
+            )
+        ],
+        report_id="report-1",
+    )
+
+    [row] = [
+        item
+        for item in reflection_management.reflection_list_proposals()
+        if item["id"] == proposal.id
+    ]
+    diff = reflection_management.reflection_proposal_diff(proposal.id)
+
+    assert row["report_id"] == "report-1"
+    assert diff["report_id"] == "report-1"
 
 
 def test_skill_admin_api_consumes_reflection_management():

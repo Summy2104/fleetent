@@ -18,7 +18,6 @@ def _user(**overrides: Any) -> user_store.User:
     base: dict[str, Any] = {
         "id": "u1",
         "name": "alice",
-        "api_key": "ma-x",
         "created_at": "2026-01-01T00:00:00",
     }
     base.update(overrides)
@@ -131,7 +130,7 @@ def test_seed_builtin_admin_creates_when_absent(monkeypatch: Any) -> None:
     created = _user(id="admin-id", name=auth.BUILTIN_ADMIN_NAME)
 
     monkeypatch.setattr(user_store, "get_builtin_admin", lambda: None)
-    monkeypatch.setattr(user_store, "create_user", lambda name, email: created)
+    monkeypatch.setattr(user_store, "create_user", lambda name, email: (created, "bootstrap-pass"))
     monkeypatch.setattr(
         user_store, "set_role", lambda uid, role: calls.update({"role": (uid, role)})
     )

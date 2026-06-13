@@ -38,7 +38,7 @@ agent 工具执行前的治理层：在 agent 即将调用某个工具的那一�
 | **性质** | 不可逆操作的自我意图确认（防注入，非授权） |
 | **范围** | 极小：删除 / 外发邮件消息 / 转账 / 对外发布等不可逆高影响动作。读操作、可逆操作**一律不审批** |
 | **确认人** | 由 agent 的 `ApprovalRouting` 决定（R1）：可路由给**发起人本人**（`REQUESTER_SENTINEL`）或**指定审批人**（team/tenant approver）。审批人经 `im_gateway` **外呼 DM** 触达；无可达审批人 → default-closed 立即 reject |
-| **归属** | **agent 全权**：审批请求与门状态的唯一真相源是 agent 侧 `approval_store`（`approvals`/`approval_allowlist`），actor 存不透明标签；platform 只读下游投影（R1）|
+| **归属** | **agent 全权**：审批生命周期的唯一真相源是 agent 侧 `approval_requests`；工具调用 auto-approve 指纹存 `tool_auto_approvals`，actor 存不透明标签；platform 只读下游投影（R1）|
 | **时序** | 请求阻塞到 resolve 或超时；审批人经 DM 异步触达，进程内用 `asyncio.Event` 唤醒（跨节点唤醒属多机部署 open question）|
 | **作用域** | 当前限定在 owning node 的进程内门控；状态已落 `approval_store` 可被 platform 只读投影 |
 | **超时** | fail-closed：超时未确认按"未批准"处理，中止该工具 |
@@ -139,44 +139,31 @@ graph LR
 ## 数据模型
 
 ```sql
--- Agent 定义
-agents (
-  id            INTEGER PRIMARY KEY,
-  name          TEXT UNIQUE,
-  system_prompt TEXT,
-  allowed_tools TEXT,    -- JSON 数组,fnmatch 通配符,如 ["read_*", "github__*"]
-  created_at    DATETIME
-)
-
--- 用户 → Agent 分配
-user_agents (
-  user_id   TEXT,        -- → users.id
-  agent_id  INTEGER,     -- → agents.id
-  PRIMARY KEY (user_id, agent_id)
-)
-
--- Channel → Agent 绑定
-channel_agents (
-  platform    TEXT,      -- "slack" | "telegram" | ...
-  channel_id  TEXT,
-  agent_id    INTEGER,   -- → agents.id
-  PRIMARY KEY (platform, channel_id)
-)
-
--- 不可逆操作审批记录（会话内自我确认 + audit event 留痕）
-approvals (
+approval_requests (
   id                TEXT PRIMARY KEY,
-  session_id        TEXT,       -- 审批限定在此 session 内
-  requester_user_id TEXT,       -- → users.id；自我确认时确认人 = 发起人
-  tool_name         TEXT,
-  tool_args         TEXT,       -- JSON,确认时以可读意图呈现给用户
-  status            TEXT,       -- "pending" | "approved" | "rejected" | "timeout"
+  subject_type      TEXT,       -- tool_call | memory_proposal | skill_proposal
+  subject_id        TEXT,       -- tool_call=session_id；proposal=reflection_proposals.id
+  requester_user_id TEXT,
+  risk              TEXT,
+  status            TEXT,       -- pending | approved | rejected | expired | auto_approved
+  approver_user_id  TEXT,
+  decided_at        DATETIME,
+  reason            TEXT,
+  routing_key       TEXT,
   created_at        DATETIME,
-  resolved_at       DATETIME
+  expires_at        DATETIME
+)
+
+tool_auto_approvals (
+  fingerprint  TEXT PRIMARY KEY,
+  scope_key    TEXT,
+  tool_name    TEXT,
+  created_at   DATETIME,
+  created_by   TEXT
 )
 ```
 
-> 说明：`approvals` 记录用于审计追溯；状态机限定在单 session 生命周期内。原 `risk_level` / `approver_user_id` 字段在"会话内自我确认"模型下退化（确认人恒为发起人、范围恒为不可逆操作），如何精简到实现时定。
+> 说明：`approval_requests` 统一承载工具门与 reflection proposal 的审批生命周期；工具调用的 `tool_args` / `approver_ids` / 恢复上下文仍留在 session 文件 `meta.pending_approvals`。统一 resolve router 按 `subject_type` 分派到工具恢复或 proposal apply。`tool_auto_approvals` 仅是原 allowlist 的正名，fingerprint 机制与行为不变。
 
 ## 验收标准（E2E test case）
 
@@ -252,6 +239,6 @@ graph LR
 
 - [ ] "不可逆操作"的判定方式：工具上静态标注 `irreversible` vs 一份动作清单（删除/外发/转账/发布）（负责人：待认领）
 - [ ] 会话内确认的并发实现：暂停的 agent_loop 如何收到同会话的确认消息（与 session 锁的关系）（负责人：待认领）
-- [ ] `approvals` 表在自我确认模型下的字段精简（去掉 risk_level / approver_user_id?）（负责人：待认领）
+- [ ] 多机部署下 `approval_requests` 的跨节点唤醒 / owning-node 路由（负责人：待认领）
 - [ ] dual-control（组织级影响 / 合规双人复核）的触发条件与实现时机 —— 留口，v1 不做（负责人：待认领）
 - [ ] 工具访问控制从 fnmatch 升级到 Cerbos 的阈值（规则复杂度 / 参数级 ABAC 需求出现时）（负责人：待认领）

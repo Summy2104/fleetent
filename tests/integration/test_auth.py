@@ -62,7 +62,7 @@ def test_builtin_admin_cannot_be_demoted(db):
 
 
 def test_login_session_create_and_validate(db):
-    u = user_store.create_user("Alice")
+    u, _ = user_store.create_user("Alice")
     token = auth.create_session(u.id)
     assert auth.validate_session(token, idle_timeout=300) == u.id
     auth.logout(token)
@@ -72,14 +72,14 @@ def test_login_session_create_and_validate(db):
 def test_session_idle_timeout(db, monkeypatch):
     clock = {"t": 1000.0}
     monkeypatch.setattr(auth, "_clock", lambda: clock["t"])
-    u = user_store.create_user("Bob")
+    u, _ = user_store.create_user("Bob")
     token = auth.create_session(u.id)
     clock["t"] = 1000.0 + 301  # exceed idle timeout
     assert auth.validate_session(token, idle_timeout=300) is None
 
 
 def test_has_role_and_require_role(db):
-    u = user_store.create_user("Cara")
+    u, _ = user_store.create_user("Cara")
     user_store.set_role(u.id, "viewer")
     viewer = user_store.get_by_id(u.id)
     assert auth.has_role(viewer, {"admin", "built_in_admin"}) is False

@@ -19,13 +19,13 @@ import fleetent.runtime.loop as loop_mod
 @pytest.fixture(autouse=True)
 def _mock_store(monkeypatch):
     """Patch approval_store + allowlist_store so unit tests never touch real SQLite."""
-    from fleetent.governance import approval_allowlist_store, approval_store
+    from fleetent.governance import approval_store, tool_auto_approvals_store
 
     monkeypatch.setattr(approval_store, "insert_approval", MagicMock())
     monkeypatch.setattr(approval_store, "update_approval", MagicMock())
     monkeypatch.setattr(approval_store, "list_approvals", MagicMock(return_value=[]))
     monkeypatch.setattr(approval_store, "cleanup_stale", MagicMock(return_value=0))
-    monkeypatch.setattr(approval_allowlist_store, "is_allowed", MagicMock(return_value=False))
+    monkeypatch.setattr(tool_auto_approvals_store, "is_allowed", MagicMock(return_value=False))
 
 
 @pytest.fixture()
@@ -145,9 +145,7 @@ async def test_approval_routing_forwarded_to_gate(
     monkeypatch.setattr(gate, "request_approval", fake_request_approval)
     monkeypatch.setattr(loop_mod, "_default_gate", gate)
 
-    routing = ApprovalRouting(
-        by_risk={"high": {"approvers": ["slack:U_LEAD"], "policy": "any"}}
-    )
+    routing = ApprovalRouting(by_risk={"high": {"approvers": ["slack:U_LEAD"], "policy": "any"}})
     connectors = {"slack": AsyncMock()}
 
     await loop_mod.run(
@@ -180,9 +178,7 @@ async def test_medium_no_approver_is_rejected_not_self_confirmed(
     mock_loop_env.chat.completions.create = _tool_response("run_code")
 
     # Routing with no medium entry → no approver → default-closed reject
-    routing = ApprovalRouting(
-        by_risk={"high": {"approvers": ["slack:U_LEAD"], "policy": "any"}}
-    )
+    routing = ApprovalRouting(by_risk={"high": {"approvers": ["slack:U_LEAD"], "policy": "any"}})
 
     await loop_mod.run(
         messages=[{"role": "user", "content": "run some code"}],

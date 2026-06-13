@@ -3,7 +3,9 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from fleetent.db import create_database
+from fleetent.db import SQLiteDatabase
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 from tests.integration.test_migrations import apply_migrations
 
 FIXTURE = Path("tests/evaluation/fixtures/reflection_trend_summary/basic.json")
@@ -15,17 +17,19 @@ def test_reflection_trend_summary_fixture_covers_direction_and_redaction(monkeyp
     payload = json.loads(FIXTURE.read_text())
     db_path = tmp_path / "reflection-trend-eval.db"
     apply_migrations(db_path)
-    database = create_database(f"sqlite:///{db_path}")
-    monkeypatch.setattr(reflection, "_database", lambda: database)
+    database = SQLiteDatabase(path=db_path)
+    migrate(database, AGENT_STATE_MIGRATIONS)
+    monkeypatch.setattr(reflection, "_state_db", database)
 
     with sqlite3.connect(db_path) as conn:
         for report in payload["reflection_reports"]:
             conn.execute(
                 """
                 INSERT INTO reflection_reports (
-                    id, scope, time_window_start, time_window_end, findings_json, created_at
+                    id, domain, scope, time_window_start, time_window_end, findings_json,
+                    signal_summary_json, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, 'memory', ?, ?, ?, ?, NULL, ?)
                 """,
                 (
                     report["id"],
@@ -39,11 +43,11 @@ def test_reflection_trend_summary_fixture_covers_direction_and_redaction(monkeyp
         for report in payload["kb_reflection_reports"]:
             conn.execute(
                 """
-                INSERT INTO kb_reflection_reports (
-                    id, scope, time_window_start, time_window_end, findings_json,
+                INSERT INTO reflection_reports (
+                    id, domain, scope, time_window_start, time_window_end, findings_json,
                     signal_summary_json, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, 'knowledge_base', ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     report["id"],
@@ -58,54 +62,54 @@ def test_reflection_trend_summary_fixture_covers_direction_and_redaction(monkeyp
         for proposal in payload["memory_maintenance_proposals"]:
             conn.execute(
                 """
-                INSERT INTO memory_maintenance_proposals (
-                    id, user_id, action, target_memory_ids_json, proposed_content,
-                    metadata_patch_json, risk, reason, evidence_ids_json, status,
-                    created_at, updated_at, expires_at
+                INSERT INTO reflection_proposals (
+                    id, domain, kind, subject_user_id, target_ref, payload_json,
+                    reason, evidence_json, risk, actor_user_id, applied_at, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, 'memory', ?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?, ?)
                 """,
                 (
                     proposal["id"],
-                    payload["scope"],
                     proposal["action"],
-                    json.dumps(proposal["target_memory_ids"]),
-                    proposal["proposed_content"],
-                    json.dumps(proposal["metadata_patch"]),
-                    proposal["risk"],
+                    payload["scope"],
+                    json.dumps(
+                        {
+                            "target_memory_ids": proposal["target_memory_ids"],
+                            "proposed_content": proposal["proposed_content"],
+                            "metadata_patch": proposal["metadata_patch"],
+                        }
+                    ),
                     proposal["reason"],
                     json.dumps(proposal["evidence_ids"]),
-                    proposal["status"],
+                    proposal["risk"],
+                    proposal.get("applied_at") or proposal["updated_at"],
                     proposal["created_at"],
                     proposal["updated_at"],
-                    proposal.get("expires_at"),
                 ),
             )
         for proposal in payload["skill_proposals"]:
             conn.execute(
                 """
-                INSERT INTO skill_proposals (
-                    id, type, target_skill, reason, evidence_refs_json, risk_level,
-                    suggested_draft, suggested_diff, status, reviewer_user_id, reviewed_at,
-                    rejection_reason, actor_user_id, applied_at, created_at, updated_at
+                INSERT INTO reflection_proposals (
+                    id, domain, kind, subject_user_id, target_ref, payload_json,
+                    reason, evidence_json, risk, actor_user_id, applied_at, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, 'skill', ?, NULL, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
                 """,
                 (
                     proposal["id"],
                     proposal["type"],
                     proposal["target_skill"],
+                    json.dumps(
+                        {
+                            "files": None,
+                            "suggested_draft": proposal.get("suggested_draft"),
+                            "suggested_diff": proposal.get("suggested_diff"),
+                        }
+                    ),
                     proposal["reason"],
                     json.dumps(proposal["evidence_refs"]),
                     proposal["risk_level"],
-                    proposal.get("suggested_draft"),
-                    proposal.get("suggested_diff"),
-                    proposal["status"],
-                    proposal.get("reviewer_user_id"),
-                    proposal.get("reviewed_at"),
-                    proposal.get("rejection_reason"),
-                    proposal.get("actor_user_id"),
-                    proposal.get("applied_at"),
                     proposal["created_at"],
                     proposal["updated_at"],
                 ),

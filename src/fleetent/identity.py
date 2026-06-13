@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from fleetent.user_store import User
+    pass
 
 
 @dataclass(frozen=True)
@@ -37,22 +37,18 @@ class IdentityPort(Protocol):
 SYSTEM_PRINCIPAL = Principal(user_id="system", tenant_id="system")
 
 
-def _legacy_key_lookup(plaintext: str) -> "User | None":
-    """Look up a user by legacy users.api_key column — no platform import."""
-    from fleetent.user_store import _get_by_legacy_key  # noqa: PLC0415
-
-    return _get_by_legacy_key(plaintext)
-
-
 class LocalBearerAdapter:
-    """Resolve a bearer token using only the local users.api_key column.
+    """Resolve a bearer token via the local api_keys table (SHA-256 hash comparison).
 
-    Suitable for standalone agents that have no access to platform tables.
-    Never imports fleetent.platform.*.
+    Suitable for standalone agents; delegates to user_store.authenticate which queries
+    api_keys directly without importing fleetent.platform.*.
     """
 
     def __call__(self, credentials: str) -> Principal | None:
-        user = _legacy_key_lookup(credentials)
-        if user is None or user.status == "blocked":
+        from fleetent.user_store import authenticate  # noqa: PLC0415
+
+        result = authenticate(credentials)
+        if result is None:
             return None
+        user, _ = result
         return Principal(user_id=user.id, tenant_id=user.tenant_id)

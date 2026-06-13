@@ -42,9 +42,9 @@ def test_builtin_admin_protected_from_disable_delete(db):
 
 
 def test_delete_user_rejects_tenant_or_team_approver(db):
-    tenant_approver = user_store.create_user("Tenant Approver")
-    team_approver = user_store.create_user("Team Approver")
-    safe_user = user_store.create_user("Safe Delete")
+    tenant_approver, _ = user_store.create_user("Tenant Approver")
+    team_approver, _ = user_store.create_user("Team Approver")
+    safe_user, _ = user_store.create_user("Safe Delete")
     tenancy_store.create_team(id="support", tenant_id="default", name="Support")
     tenancy_store.set_tenant_approver("default", tenant_approver.id)
     tenancy_store.set_team_approver("support", team_approver.id)

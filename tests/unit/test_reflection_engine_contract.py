@@ -65,12 +65,12 @@ async def test_run_reflection_generates_pending_proposals_without_auto_apply(
     monkeypatch.setattr(
         reflection_impl,
         "generate_memory_maintenance_proposals",
-        lambda _user, _findings: memory_proposals,
+        lambda _user, _findings, report_id=None: memory_proposals,
     )
     monkeypatch.setattr(
         reflection_impl,
         "generate_skill_proposals",
-        lambda *, findings=None, skill_signals=None: skill_proposals,
+        lambda *, findings=None, skill_signals=None, report_id=None: skill_proposals,
     )
     persist_memory = []
     persist_skill = []

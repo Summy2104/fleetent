@@ -44,7 +44,6 @@ def test_memory_and_long_term_ctx_do_not_import_platform_modules() -> None:
     for package_name in (
         "fleetent.memory",
         "fleetent.long_term_ctx",
-        "fleetent.long_term_ctx._policy",
     ):
         package = importlib.import_module(package_name)
         if package.__file__ is None:
@@ -87,9 +86,12 @@ def test_long_term_ctx_memory_shim_remains_compatible() -> None:
     pass
 
 
-def test_long_term_ctx_top_level_package_contains_policy() -> None:
-    policy = importlib.import_module("fleetent.long_term_ctx._policy")
-    assert policy.__name__ == "fleetent.long_term_ctx._policy"
+def test_long_term_ctx_removed_policy_module_is_not_importable() -> None:
+    module_name = ".".join(("fleetent", "long_term_ctx", "_policy"))
+    sys.modules.pop(module_name, None)
+
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module(module_name)
 
 
 def test_runtime_loop_imports_long_term_ctx_from_top_level() -> None:

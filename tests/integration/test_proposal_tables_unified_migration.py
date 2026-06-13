@@ -7,12 +7,14 @@ from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
 def _boot_agent_state(tmp_path, agent_id="agent"):
     """Open a migrated per-agent agent_state.db and inject it into the agent-side stores."""
     from fleetent import reflection
+    from fleetent.governance import approval_request_store
     from fleetent.memory import store as memory_store
     from fleetent.observability import traces
 
     router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path / "data"))
     db = router.agent_scope("default", agent_id).open_state_db(MIGRATIONS)
     reflection.set_state_db(db)
+    approval_request_store.set_state_db(db)
     memory_store.set_state_db(db)
     traces.set_state_db(db)
     return db
@@ -273,3 +275,79 @@ async def test_pending_skill_proposal_without_approver_stays_pending_and_sends_n
 
     assert reflection.get_skill_proposal(proposal.id).status == "pending"
     assert notified == []
+
+
+async def test_reflection_proposal_creates_unified_approval_request_and_router_applies(
+    tmp_path, monkeypatch
+):
+    import asyncio
+    from types import SimpleNamespace
+
+    from fleetent import agent_config, reflection
+    from fleetent.governance import approval_request_store, approval_router
+    from fleetent.governance.permission_gate import PermissionGate
+    from fleetent.memory import shared as shared_memory
+
+    _boot_agent_state(tmp_path)
+
+    notified: list[str] = []
+    applied: list[str] = []
+
+    async def notify(
+        self, *, approval_id, tool_name, risk_level, approval_routing, outbound_connectors
+    ):
+        notified.append(approval_id)
+        return ["slack:u1"]
+
+    async def apply_shared_memory_proposal(proposal_id: str, actor_id: str) -> None:
+        applied.append(f"{proposal_id}:{actor_id}")
+
+    monkeypatch.setattr(
+        agent_config,
+        "active_agent",
+        lambda: SimpleNamespace(
+            approval=agent_config.ApprovalRouting(
+                by_tool={
+                    "reflection_memory_proposal": agent_config.ApprovalEntry(
+                        approvers=["slack:u1"],
+                        policy="any",
+                    )
+                }
+            )
+        ),
+    )
+    monkeypatch.setattr(PermissionGate, "_notify_approvers", notify)
+    monkeypatch.setattr(shared_memory, "apply_shared_memory_proposal", apply_shared_memory_proposal)
+
+    proposal = reflection.create_memory_maintenance_proposal(
+        user_id="u1",
+        action="suggest_shared_memory_or_kb",
+        target_memory_ids=[],
+        proposed_content="A stable org fact",
+        risk="low",
+        reason="shared fact",
+        evidence_ids=["trace-a"],
+        metadata_patch={"target": "shared_memory"},
+    )
+
+    await asyncio.sleep(0)
+
+    request = approval_request_store.get_request(proposal.id)
+    assert request is not None
+    assert request["subject_type"] == "memory_proposal"
+    assert request["status"] == "pending"
+    assert request["routing_key"] == "reflection_memory_proposal"
+    assert notified == [proposal.id]
+
+    ok = await approval_router.resolve_approval_request(
+        approval_id=proposal.id,
+        decision="approved",
+        approver_user_id="u1",
+    )
+
+    assert ok is True
+    updated = approval_request_store.get_request(proposal.id)
+    assert updated is not None
+    assert updated["status"] == "approved"
+    assert updated["approver_user_id"] == "u1"
+    assert applied == [f"{proposal.id}:u1"]

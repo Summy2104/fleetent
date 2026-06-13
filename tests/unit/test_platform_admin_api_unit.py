@@ -31,7 +31,6 @@ def _user(
     return user_store.User(
         id=user_id,
         name="Admin",
-        api_key="ma-test",
         created_at="2026-06-03T00:00:00+00:00",
         email="admin@example.com",
         role=role,
@@ -1041,7 +1040,7 @@ async def test_server_auth_health_and_approval(
     async def resolve(**kwargs: Any) -> bool:
         return kwargs["approval_id"] == "a1"
 
-    monkeypatch.setattr(server._default_gate, "resolve", resolve)
+    monkeypatch.setattr(server, "resolve_approval_request", resolve)
     assert (
         await server.resolve_approval(
             "a1", server.ApprovalRequest(decision="approved", approver_user_id="ops")

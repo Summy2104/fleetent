@@ -213,8 +213,8 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     Does not create fleetent.db; does not read DATABASE_URL.
     """
     from fleetent import reflection, schedule_store
-    from fleetent.governance import approval_allowlist_store as allowlist_store
-    from fleetent.governance import approval_store
+    from fleetent.governance import approval_request_store, approval_store
+    from fleetent.governance import tool_auto_approvals_store as allowlist_store
     from fleetent.knowledge_base import runtime as kb_runtime
     from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
     from fleetent.memory import shared as shared_memory
@@ -222,7 +222,7 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     from fleetent.memory.shared_memory_migrations import MIGRATIONS as SHARED_MEMORY_MIGRATIONS
     from fleetent.observability import traces
     from fleetent.runtime import context as runtime_context
-    from fleetent.runtime import layered_budget, sub_agent_lifecycle
+    from fleetent.runtime import sub_agent_lifecycle
     from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
     from fleetent.session import index as session_index
     from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
@@ -244,11 +244,11 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     reflection.set_state_db(agent_state_db)
     memory_store.set_state_db(agent_state_db)
     memory_store.set_vector_backend(agent_scope.vector_backend)
+    approval_request_store.set_state_db(agent_state_db)
     approval_store.set_state_db(agent_state_db)
     allowlist_store.set_state_db(agent_state_db)
     runtime_context.set_state_db(agent_state_db)
     sub_agent_lifecycle.set_state_db(agent_state_db)
-    layered_budget.set_state_db(agent_state_db)
     schedule_store.set_state_db(agent_state_db)
 
 
@@ -571,11 +571,11 @@ def build_app(agent_name: str) -> FastAPI:
 
     @app.post("/approvals/{approval_id}/resolve")
     async def resolve_approval(approval_id: str, req: ApprovalRequest) -> dict:  # type: ignore[type-arg]
-        from fleetent.governance.permission_gate import _default_gate
+        from fleetent.governance.approval_router import resolve_approval_request
 
         if req.decision not in ("approved", "rejected"):
             raise HTTPException(status_code=400, detail="decision must be 'approved' or 'rejected'")
-        found = await _default_gate.resolve(
+        found = await resolve_approval_request(
             approval_id=approval_id,
             decision=req.decision,  # type: ignore[arg-type]
             approver_user_id=req.approver_user_id,

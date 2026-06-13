@@ -100,9 +100,9 @@ def _default_capability_evidence() -> list[CapabilityEvidence]:
             "uv run pytest tests/integration/test_long_term_context_runtime.py -q",
             [
                 Path("tests/integration/test_long_term_context_runtime.py"),
-                Path("tests/integration/test_long_term_ctx_policy_store.py"),
+                Path("tests/integration/test_long_term_ctx.py"),
             ],
-            ["source attribution, deterministic budget decisions and ownership policy"],
+            ["source attribution, deterministic budget decisions and memory + knowledge"],
         ),
         CapabilityEvidence(
             "Reflection",

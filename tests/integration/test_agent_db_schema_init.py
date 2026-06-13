@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from fleetent.db import SQLiteDatabase
 
 
@@ -25,6 +23,11 @@ def _table_names(db: SQLiteDatabase) -> set[str]:
 
 def _index_names(db: SQLiteDatabase) -> set[str]:
     rows = db.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
+    return {r["name"] for r in rows}
+
+
+def _column_names(db: SQLiteDatabase, table: str) -> set[str]:
+    rows = db.execute(f"PRAGMA table_info({table})").fetchall()
     return {r["name"] for r in rows}
 
 
@@ -94,6 +97,44 @@ def test_memory_y_migrations_idempotent(tmp_path: Path) -> None:
     migrate(db, AGENT_STATE_MIGRATIONS)
     migrate(db, AGENT_STATE_MIGRATIONS)
     assert "memory_items" in _table_names(db)
+
+
+def test_agent_state_schema_uses_unified_approval_requests(tmp_path: Path) -> None:
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+    from fleetent.schema_migrations import migrate
+
+    db = _db(tmp_path)
+    migrate(db, AGENT_STATE_MIGRATIONS)
+
+    tables = _table_names(db)
+    legacy_tool_auto_table = "approval_" + "allowlist"
+    assert "approval_requests" in tables
+    assert "approvals" not in tables
+    assert "tool_auto_approvals" in tables
+    assert legacy_tool_auto_table not in tables
+
+    approval_request_columns = _column_names(db, "approval_requests")
+    assert approval_request_columns == {
+        "id",
+        "subject_type",
+        "subject_id",
+        "requester_user_id",
+        "risk",
+        "status",
+        "approver_user_id",
+        "decided_at",
+        "reason",
+        "routing_key",
+        "created_at",
+        "expires_at",
+    }
+
+    reflection_columns = _column_names(db, "reflection_proposals")
+    assert "status" not in reflection_columns
+    assert "reviewer_user_id" not in reflection_columns
+    assert "reviewed_at" not in reflection_columns
+    assert "rejection_reason" not in reflection_columns
+    assert "expires_at" not in reflection_columns
 
 
 # ── reflection via AGENT_STATE_MIGRATIONS ─────────────────────────────────────

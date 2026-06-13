@@ -24,9 +24,9 @@ def tmp_db(tmp_path, monkeypatch):
 
 
 def test_create_user_returns_user():
-    user = user_store.create_user("Alice")
+    user, api_key = user_store.create_user("Alice")
     assert user.name == "Alice"
-    assert user.api_key.startswith("ma-")
+    assert api_key.startswith("ma-")
     assert len(user.id) == 36  # uuid4
 
 
@@ -69,8 +69,8 @@ def test_legacy_re_exports_inherit_default_db_path():
 
 
 def test_get_by_api_key_found():
-    user = user_store.create_user("Bob")
-    found = user_store.get_by_api_key(user.api_key)
+    user, api_key = user_store.create_user("Bob")
+    found = user_store.get_by_api_key(api_key)
     assert found is not None
     assert found.id == user.id
 
@@ -80,7 +80,7 @@ def test_get_by_api_key_not_found():
 
 
 def test_get_by_id_found():
-    user = user_store.create_user("Carol")
+    user, _ = user_store.create_user("Carol")
     found = user_store.get_by_id(user.id)
     assert found is not None
     assert found.name == "Carol"
@@ -99,10 +99,9 @@ def test_list_users_returns_all():
 
 
 def test_rotate_key_changes_api_key():
-    user = user_store.create_user("Frank")
-    old_key = user.api_key
-    updated = user_store.rotate_key(user.id)
-    assert updated.api_key != old_key
-    assert updated.api_key.startswith("ma-")
+    user, old_key = user_store.create_user("Frank")
+    updated, new_key = user_store.rotate_key(user.id)
+    assert new_key != old_key
+    assert new_key.startswith("ma-")
     assert user_store.get_by_api_key(old_key) is None
-    assert user_store.get_by_api_key(updated.api_key) is not None
+    assert user_store.get_by_api_key(new_key) is not None

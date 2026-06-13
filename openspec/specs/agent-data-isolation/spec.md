@@ -36,7 +36,7 @@ Boot SHALL NOT create `fleetent.db` and SHALL NOT read or set `DATABASE_URL`.
 - **THEN** the per-agent `agent_state.db` SHALL contain all agent-side tables
   (`sessions`, `traces`, `memory_items`, `approvals`, `approval_allowlist`,
   `reflection_reports`, `reflection_proposals`, `session_anti_flap`, `sub_agent_runs`,
-  `budget_usage`, `scheduled_tasks`)
+  `scheduled_tasks`)
 - **AND** knowledge base tables live in the per-tenant `kb.db` (embedded migrations), not in
   `agent_state.db`
 

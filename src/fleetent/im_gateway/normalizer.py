@@ -406,7 +406,7 @@ async def route(msg: NormalizedMessage) -> None:
     m = _APPROVAL_RE.match(msg.text.strip())
     if m:
         from fleetent.governance import approval_store
-        from fleetent.governance.permission_gate import _default_gate
+        from fleetent.governance.approval_router import resolve_approval_request
         from fleetent.session import manager as session_mgr
 
         action = m.group(1).lower()
@@ -435,7 +435,7 @@ async def route(msg: NormalizedMessage) -> None:
             if pending and pending.get("approver_ids")
             else None
         )
-        found = await _default_gate.resolve(
+        found = await resolve_approval_request(
             approval_id=approval_id,
             decision=decision,  # type: ignore[arg-type]
             approver_user_id=msg.user_id,

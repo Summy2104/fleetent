@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 from fleetent import user_store
 from fleetent.db import SQLiteDatabase
-from fleetent.governance import approval_allowlist_store, approval_store
+from fleetent.governance import approval_request_store, approval_store, tool_auto_approvals_store
 from fleetent.governance.permission_gate import PermissionGate
 from fleetent.runtime import agent_app
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
@@ -35,8 +35,9 @@ def _make_client(monkeypatch, tmp_path):
     monkeypatch.setattr(user_store, "authenticate", lambda _token: (fake_user, {}))
     # Inject a fresh per-agent state DB so endpoints never touch a real home DB.
     state_db = _make_state_db(tmp_path)
+    monkeypatch.setattr(approval_request_store, "_state_db", state_db)
     monkeypatch.setattr(approval_store, "_state_db", state_db)
-    monkeypatch.setattr(approval_allowlist_store, "_state_db", state_db)
+    monkeypatch.setattr(tool_auto_approvals_store, "_state_db", state_db)
     app = agent_app.build_app("test-agent")
     return TestClient(app, raise_server_exceptions=True)
 
@@ -61,6 +62,35 @@ def test_resolve_approval_unknown_id_returns_404(monkeypatch, tmp_path):
     assert resp.status_code == 404, f"Expected 404 for unknown approval, got {resp.status_code}"
 
 
+def test_get_approvals_endpoint_lists_tool_calls_only(monkeypatch, tmp_path):
+    client = _make_client(monkeypatch, tmp_path)
+    approval_store.insert_approval(
+        id="tool-1",
+        session_id="session:1",
+        requester_user_id="U1",
+        risk_level="medium",
+        tool_name="run_code",
+        tool_args="{}",
+        created_at="2026-01-01T00:00:00+00:00",
+    )
+    approval_request_store.create_request(
+        id="proposal-1",
+        subject_type="memory_proposal",
+        subject_id="proposal-1",
+        requester_user_id="U1",
+        risk="medium",
+        routing_key="memory",
+        created_at="2026-01-01T00:00:01+00:00",
+    )
+
+    resp = client.get("/approvals")
+
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert [row["id"] for row in rows] == ["tool-1"]
+    assert rows[0]["tool_name"] == "run_code"
+
+
 async def test_resolve_approval_happy_path(monkeypatch, tmp_path):
     """POST /approvals/{id}/resolve with known pending id resolves it."""
     import asyncio
@@ -69,8 +99,9 @@ async def test_resolve_approval_happy_path(monkeypatch, tmp_path):
 
     # Inject a fresh per-agent state DB BEFORE the background request_approval writes.
     state_db = _make_state_db(tmp_path)
+    monkeypatch.setattr(approval_request_store, "_state_db", state_db)
     monkeypatch.setattr(approval_store, "_state_db", state_db)
-    monkeypatch.setattr(approval_allowlist_store, "_state_db", state_db)
+    monkeypatch.setattr(tool_auto_approvals_store, "_state_db", state_db)
     # Install a fresh gate with short timeouts so the test doesn't hang
     gate = PermissionGate(medium_timeout=5.0, high_timeout=5.0)
     monkeypatch.setattr(pg, "_default_gate", gate)

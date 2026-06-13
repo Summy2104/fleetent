@@ -6,7 +6,6 @@ for the shared memory DB; reflection proposals now live in agent_state.db.
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -95,13 +94,8 @@ async def test_approved_shared_memory_proposal_apply_creates_item(
     assert item.source_ref == proposal.id
     # vector backend received upsert with correct namespace
     assert any(id_ == item.id and ns == "shared:team:eng" for id_, _, ns in upsert_calls)
-    # proposal marked applied in agent_state.db
-    with sqlite3.connect(db_path) as conn:
-        row = conn.execute(
-            "SELECT status FROM reflection_proposals WHERE id = ?",
-            (proposal.id,),
-        ).fetchone()
-    assert row == ("applied",)
+    # proposal projection now derives lifecycle from approval_requests + applied_at
+    assert reflection.get_memory_maintenance_proposal(proposal.id).status == "applied"
 
 
 async def test_shared_memory_proposal_apply_allows_non_owner_admin_actor(
@@ -131,13 +125,7 @@ async def test_shared_memory_proposal_apply_allows_non_owner_admin_actor(
 
     assert item.created_by == "tenant-admin"
     assert any(id_ == item.id and ns == "shared:tenant:acme" for id_, _, ns in upsert_calls)
-    with sqlite3.connect(db_path) as conn:
-        proposal_row = conn.execute(
-            "SELECT status FROM reflection_proposals WHERE id = ?",
-            (proposal.id,),
-        ).fetchone()
-        # shared item lives in shared_memory.db (per-tenant), not the alembic DB
-    assert proposal_row == ("applied",)
+    assert reflection.get_memory_maintenance_proposal(proposal.id).status == "applied"
 
 
 @pytest.mark.parametrize(

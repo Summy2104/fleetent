@@ -48,16 +48,16 @@ def test_user_store_connection_uses_wal(db_path: Path) -> None:
 def test_create_user_returns_user() -> None:
     from fleetent import user_store
 
-    user = user_store.create_user("Alice")
+    user, api_key = user_store.create_user("Alice")
     assert user.name == "Alice"
-    assert user.api_key.startswith("ma-")
+    assert api_key.startswith("ma-")
     assert len(user.id) == 36
 
 
 def test_get_by_id_found() -> None:
     from fleetent import user_store
 
-    user = user_store.create_user("Bob")
+    user, _ = user_store.create_user("Bob")
     found = user_store.get_by_id(user.id)
     assert found is not None
     assert found.name == "Bob"
@@ -72,7 +72,7 @@ def test_get_by_id_not_found() -> None:
 def test_get_by_email_found() -> None:
     from fleetent import user_store
 
-    user = user_store.create_user("Carol", email="carol@example.com")
+    user, _ = user_store.create_user("Carol", email="carol@example.com")
     found = user_store.get_by_email("carol@example.com")
     assert found is not None
     assert found.id == user.id
@@ -97,20 +97,19 @@ def test_list_users_returns_all() -> None:
 def test_rotate_key_changes_api_key() -> None:
     from fleetent import user_store
 
-    user = user_store.create_user("Frank")
-    old_key = user.api_key
-    updated = user_store.rotate_key(user.id)
-    assert updated.api_key != old_key
-    assert updated.api_key.startswith("ma-")
+    user, old_key = user_store.create_user("Frank")
+    updated, new_key = user_store.rotate_key(user.id)
+    assert new_key != old_key
+    assert new_key.startswith("ma-")
     assert user_store.get_by_api_key(old_key) is None
-    assert user_store.get_by_api_key(updated.api_key) is not None
+    assert user_store.get_by_api_key(new_key) is not None
 
 
 def test_authenticate_legacy_key() -> None:
     from fleetent import user_store
 
-    user = user_store.create_user("Grace")
-    result = user_store.authenticate(user.api_key)
+    user, api_key = user_store.create_user("Grace")
+    result = user_store.authenticate(api_key)
     assert result is not None
     found_user, meta = result
     assert found_user.id == user.id
@@ -125,7 +124,7 @@ def test_authenticate_invalid_key_returns_none() -> None:
 def test_update_via_set_role() -> None:
     from fleetent import user_store
 
-    user = user_store.create_user("Harry")
+    user, _ = user_store.create_user("Harry")
     user_store.set_role(user.id, "admin")
     updated = user_store.get_by_id(user.id)
     assert updated is not None

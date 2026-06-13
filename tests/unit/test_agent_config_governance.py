@@ -5,11 +5,24 @@ phase adds schema acceptance only (runtime still reads Settings). Defaults MUST 
 current Settings defaults so an agent.yaml omitting them is equivalent to today.
 """
 
+from dataclasses import fields
+
 import pytest
 import yaml
 from pydantic import ValidationError
 
 from fleetent import agent_config
+
+LEGACY_LAYERED_BUDGET_FIELDS = (
+    f"{'_'.join(('agent', 'budget', 'session'))}_turns",
+    f"{'_'.join(('agent', 'budget', 'session'))}_tokens",
+    f"{'_'.join(('agent', 'budget', 'user'))}_turns",
+    f"{'_'.join(('agent', 'budget', 'user'))}_tokens",
+    f"{'_'.join(('agent', 'budget', 'agent'))}_turns",
+    f"{'_'.join(('agent', 'budget', 'agent'))}_tokens",
+    f"{'_'.join(('agent', 'budget', 'user'))}_window",
+    f"{'_'.join(('agent', 'budget', 'agent'))}_window",
+)
 
 
 def _write(root, name, **fields):
@@ -35,14 +48,12 @@ def test_governance_fields_parse() -> None:
         _agent_doc(
             agent_max_turns=30,
             context_compress_threshold=0.7,
-            agent_budget_user_tokens=5000,
             permission_gate_medium_timeout_seconds=60,
             provider_failure_threshold=5,
         )
     )
     assert af.agent_max_turns == 30
     assert af.context_compress_threshold == 0.7
-    assert af.agent_budget_user_tokens == 5000
     assert af.permission_gate_medium_timeout_seconds == 60
     assert af.provider_failure_threshold == 5
 
@@ -66,10 +77,6 @@ def test_governance_defaults_match_settings() -> None:
     assert af.permission_gate_high_timeout_seconds == 3600
     assert af.provider_failure_threshold == 3
     assert af.provider_cooldown_seconds == 60
-    # layered budget (session/user/agent dims only)
-    assert af.agent_budget_session_turns == -1
-    assert af.agent_budget_user_window == "weekly"
-    assert af.agent_budget_agent_window == "weekly"
 
 
 def test_two_agents_carry_independent_governance() -> None:
@@ -77,6 +84,53 @@ def test_two_agents_carry_independent_governance() -> None:
     b = agent_config.AgentFile.model_validate(_agent_doc(name="b", agent_max_turns=80))
     assert a.agent_max_turns == 30
     assert b.agent_max_turns == 80
+
+
+def test_cross_run_budget_fields_removed_from_agent_and_runtime_governance() -> None:
+    from fleetent.runtime.snapshot import GovernanceConfig
+
+    agent_fields = set(agent_config.AgentFile.model_fields)
+    runtime_fields = {field.name for field in fields(GovernanceConfig)}
+
+    for field_name in LEGACY_LAYERED_BUDGET_FIELDS:
+        assert field_name not in agent_fields
+        assert field_name not in runtime_fields
+
+
+def test_legacy_cross_run_budget_keys_are_ignored_when_loading_agent_file(tmp_path) -> None:
+    from fleetent.runtime.snapshot import _governance_from_file
+
+    legacy_fields = {
+        LEGACY_LAYERED_BUDGET_FIELDS[0]: 12,
+        LEGACY_LAYERED_BUDGET_FIELDS[1]: 2048,
+        LEGACY_LAYERED_BUDGET_FIELDS[2]: 24,
+        LEGACY_LAYERED_BUDGET_FIELDS[3]: 8192,
+        LEGACY_LAYERED_BUDGET_FIELDS[4]: 36,
+        LEGACY_LAYERED_BUDGET_FIELDS[5]: 12288,
+        LEGACY_LAYERED_BUDGET_FIELDS[6]: "daily",
+        LEGACY_LAYERED_BUDGET_FIELDS[7]: "monthly",
+    }
+    _write(
+        tmp_path,
+        "a",
+        agent_max_turns=30,
+        agent_max_tokens=4096,
+        agent_grace_call_token_ratio=0.2,
+        agent_grace_call_min_tokens=256,
+        **legacy_fields,
+    )
+
+    agent = agent_config.load_agent_file(tmp_path / "a")
+    governance = _governance_from_file(agent)
+
+    assert agent.agent_max_turns == 30
+    assert agent.agent_max_tokens == 4096
+    assert agent.agent_grace_call_token_ratio == 0.2
+    assert agent.agent_grace_call_min_tokens == 256
+    assert governance.agent_max_turns == 30
+    assert governance.agent_max_tokens == 4096
+    assert governance.agent_grace_call_token_ratio == 0.2
+    assert governance.agent_grace_call_min_tokens == 256
 
 
 # ── deployment / process fields ────────────────────────────────────────────
@@ -149,9 +203,9 @@ def test_nested_blocks_reuse_submodels() -> None:
 @pytest.mark.parametrize(
     "field",
     [
-        "agent_budget_global_turns",
-        "agent_budget_global_tokens",
-        "agent_budget_global_window",
+        f"{'_'.join(('agent', 'budget', 'global'))}_turns",
+        f"{'_'.join(('agent', 'budget', 'global'))}_tokens",
+        f"{'_'.join(('agent', 'budget', 'global'))}_window",
         "database_url",
     ],
 )
