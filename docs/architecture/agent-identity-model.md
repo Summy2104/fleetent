@@ -56,9 +56,16 @@ rename = 改 `agents.name` 一行（全系统唯一存 name 处）→ 平台 FK 
 | `agent_skills.agent_id` | TEXT 存 `str(id)` **或 name（bug）** | INTEGER + FK→agents.id ON DELETE CASCADE | 数字串→`CAST`；**name 串→经 agents 解析 name→id，解析不到则丢（本就静默失效行）** |
 | `agent_admin_state` | 主键 = `agent_name` | 主键/键 → `agent_id` + FK | 经 agents 解析 name→id 重建 |
 | `session_meta` | `agent_name` 列 | `agent_id` 列 + FK | 经 agents 解析 name→id；`user_id` 列不动（用户身份，不在本范围） |
-| `user_agents` / `channel_agents` / `agent_versions` / `agent_mcp_servers` / `agent_secrets` | 已 INTEGER id、**无 FK** | 补 FK→agents.id ON DELETE CASCADE | 无值变更，仅加约束（FK 已全局启用，见 data-model §2） |
-| `agent_mcp_server_bindings` / `agent_oauth_bindings` | 已 INTEGER + 已有 FK | 不变 | — |
+| `user_agents` / `channel_agents` / `agent_versions` / `mcp_servers`（原 `agent_mcp_servers`，见下「MCP 表改名」） / `agent_secrets` | 已 INTEGER id、**无 FK** | 补 FK→agents.id ON DELETE CASCADE | 无值变更，仅加约束（FK 已全局启用，见 data-model §2） |
+| `agent_mcp_servers`（原 `agent_mcp_server_bindings`，见下「MCP 表改名」） / `agent_oauth_bindings` | 已 INTEGER + 已有 FK | 改名（FK 不变） | — |
 | `connectors.agent_id` | INTEGER、休眠列（never written） | 维持现状（休眠），**不强加 FK**；文档注明 | — |
+
+> **MCP 表改名（阶段 4 并入，方案 A）**：当前两张 MCP 表命名与 skills/kbs 不一致、且角色反着——`agent_mcp_servers` 其实是**定义/注册表**（存 transport/url/auth，含全局 `agent_id=NULL` 行），却长得像绑定表；真正的绑定是 `agent_mcp_server_bindings`。阶段 4 一并正名，对齐 `agent_skills`/`agent_kbs`（绑定 = `agent_<物>`）与 `connectors`（注册表无 `agent_` 前缀）两条既有惯例：
+> - `agent_mcp_servers`（定义/注册表）→ **`mcp_servers`**（注册表去 `agent_` 前缀；同批补 FK）
+> - `agent_mcp_server_bindings`（绑定）→ **`agent_mcp_servers`**（沿用既有 FK）
+> - 终态：`mcp_servers`（注册）+ `agent_mcp_servers`（绑定），与 skills/kbs 完全并行。
+> - **换名顺序避碰**：先 `agent_mcp_servers`→`mcp_servers` 腾名，再 `agent_mcp_server_bindings`→`agent_mcp_servers`，两步顺序换、**无需临时名**。
+> - 代码面：`agent_mcp_server_store.py`（注册表 SQL→`mcp_servers`）、`agent_store.py` 的 bind/unbind/list（绑定 SQL→`agent_mcp_servers`）、索引 `idx_agent_mcp_servers_agent`→`idx_mcp_servers_agent`；store 文件/函数名建议随动以免「表名已正、代码名仍反」。
 
 ### 3.2 agent 侧（agent_state.db · 嵌入式 Y）→ 全部 name、列名也不出现 id
 
@@ -84,7 +91,7 @@ kb.db / shared_memory.db 无 agent 标识列，不涉及。
 
 1. **阶段 2 — agent_kbs / agent_skills 归一 + 修 bug**（已完成，2026-06-13）：TEXT→INTEGER + FK；修控制台 name-写。落地 change：`unify-agent-binding-id`。
 2. **阶段 3 — agent_admin_state / session_meta 归 id**：键/列 name→id + FK + 调用方改造。
-3. **阶段 4 — 补齐绑定表 FK**：user_agents / channel_agents / agent_versions / agent_mcp_servers / agent_secrets 补 FK→agents.id ON DELETE CASCADE。
+3. **阶段 4 — 补齐绑定表 FK + MCP 表正名**：user_agents / channel_agents / agent_versions / agent_secrets 及 MCP 注册表补 FK→agents.id ON DELETE CASCADE；并一并执行 MCP 两表方案 A 改名（`agent_mcp_servers`→`mcp_servers` 注册表、`agent_mcp_server_bindings`→`agent_mcp_servers` 绑定，见 §3「MCP 表改名」）。
 4. **阶段 5 — 翻译边界固化 + 守护（含 agent 侧列正名）**：materialize 写边界 / read-projection 读边界的 name↔id 收口；**`traces.agent_id` → `agent_name` 列正名**（纯美容 R2 合规，并入此阶段而非单列——见下）；守护测试断言"平台关系表无 name 列（除 agents）、agent 侧无 agent id 列/标识"。
 
 > **决策（2026-06-13）**：原"阶段 1 = traces 列正名先做"已撤销。该改名纯属 R2 美容合规（列本已存 slug、零行为/完整性收益），却牵动 observability/agent-observability-view 两个 spec 的 5 条 requirement + 与彼时在跑的 trace-tool-spans 撞同一文件——性价比与时机均差。故并入阶段 5 的守护/清理一并做。Alembic 单链使阶段 2/3/4 本就串行；逐个 just-ahead propose（最多领先 applied frontier 一片）。
