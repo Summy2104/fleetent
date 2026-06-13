@@ -166,15 +166,11 @@ erDiagram
   sessions ||--o{ session_anti_flap : "session_id"
   sessions ||--o{ sub_agent_runs : "parent_session_id"
   sessions ||--o{ scheduled_tasks : "session_id（可选复用会话）"
-<<<<<<< HEAD
   sessions ||--o{ traces : "session_id"
   sub_agent_runs ||--o{ traces : "run_id 同命名空间"
+  reflection_reports ||--o{ reflection_proposals : "report_id 源报告"
   memory_items ||--o{ reflection_proposals : "target_ref（仅 domain=memory · 多态）"
   approvals ||--o{ approval_allowlist : "fingerprint(scope_key+tool+args)"
-=======
-  reflection_reports ||--o{ reflection_proposals : "report_id 源报告"
-  memory_items ||--o{ reflection_proposals : "memory 维护建议"
->>>>>>> feat/link-proposal-to-report
   scheduled_tasks {
     string schedule_kind
     string user_id
