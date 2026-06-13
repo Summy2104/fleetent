@@ -9,6 +9,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import fleetent.agent_store as agent_store
 import fleetent.auth as auth
 import fleetent.governance.audit_log as audit
 import fleetent.platform.skill_management.skill_admin_api as api
@@ -188,11 +189,12 @@ def test_reload_failure_keeps_old_and_warns(client, monkeypatch):
 
 
 def test_archive_blocked_when_enabled_by_agent(client):
-    store.set_binding("agent-x", "s", enabled=True, updated_by="admin")
+    agent = agent_store.create_agent("agent-x", "Prompt.", ["shell"])
+    store.set_binding(agent.id, "s", enabled=True, updated_by="admin")
     token, _ = _session_for("admin")
     r = client.delete("/admin/skills/s", headers=_hdr(token, confirm=True))
     assert r.status_code == 409
-    assert "agent-x" in r.json()["detail"]["agents"]
+    assert agent.id in r.json()["detail"]["agents"]
     assert store.get_state("s")["status"] == "active"  # not archived
 
 
@@ -214,11 +216,13 @@ def test_archive_then_restore(client):
 
 
 def test_per_agent_disable_only_that_agent(client):
+    agent_a = agent_store.create_agent("agent-a", "Prompt.", ["shell"])
+    agent_b = agent_store.create_agent("agent-b", "Prompt.", ["shell"])
     token, _ = _session_for("admin")
-    client.put("/admin/skills/s/agents/agent-a", headers=_hdr(token), json={"enabled": True})
-    client.put("/admin/skills/s/agents/agent-b", headers=_hdr(token), json={"enabled": False})
+    client.put(f"/admin/skills/s/agents/{agent_a.id}", headers=_hdr(token), json={"enabled": True})
+    client.put(f"/admin/skills/s/agents/{agent_b.id}", headers=_hdr(token), json={"enabled": False})
     enabling = store.agents_enabling("s")
-    assert enabling == ["agent-a"]  # b disabled, a still enabled
+    assert enabling == [agent_a.id]  # b disabled, a still enabled
 
 
 # --- force publish ------------------------------------------------------------

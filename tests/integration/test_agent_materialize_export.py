@@ -68,7 +68,7 @@ def test_agent_file_from_store_exports_authored_runtime_config(db):
     agent_store.bind_mcp_server(agent.id, "docs")
     agent_store.assign_user("u_alice", agent.id)
     agent_store.assign_channel("slack", "C0123", agent.id)
-    agent_kbs_store.bind("acme", "support-kb", str(agent.id), created_by="admin")
+    agent_kbs_store.bind("acme", "support-kb", agent.id, created_by="admin")
 
     exported = materialize.agent_file_from_store(agent_store.get_by_name("support"))
 
@@ -255,8 +255,8 @@ def test_materialize_allowed_skills_from_binding(db):
     from fleetent.platform.skill_management import skill_admin_store
 
     agent = agent_store.create_agent("support", "p", [], allowed_skills=["authored"])
-    skill_admin_store.set_binding(str(agent.id), "crm-ops", True, updated_by=None)
-    skill_admin_store.set_binding(str(agent.id), "billing", False, updated_by=None)
+    skill_admin_store.set_binding(agent.id, "crm-ops", True, updated_by=None)
+    skill_admin_store.set_binding(agent.id, "billing", False, updated_by=None)
 
     exported = materialize.agent_file_from_store(agent)
 
@@ -268,7 +268,7 @@ def test_materialize_allowed_skills_empty_when_all_bindings_disabled(db):
     from fleetent.platform.skill_management import skill_admin_store
 
     agent = agent_store.create_agent("support", "p", [], allowed_skills=["authored"])
-    skill_admin_store.set_binding(str(agent.id), "crm-ops", False, updated_by=None)
+    skill_admin_store.set_binding(agent.id, "crm-ops", False, updated_by=None)
 
     exported = materialize.agent_file_from_store(agent)
 

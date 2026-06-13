@@ -117,7 +117,7 @@ def test_set_binding_rematerializes_only_that_agent() -> None:
         patch.object(skill_admin_api.agent_store, "get_agent_name_by_id", return_value="support"),
         patch.object(skill_admin_api, "_rematerialize_agent") as mock_remat_one,
     ):
-        skill_admin_api.set_skill_agent_binding("crm-ops", "7", body, authorization="Session t")
+        skill_admin_api.set_skill_agent_binding("crm-ops", 7, body, authorization="Session t")
         mock_remat_one.assert_called_once_with("support")
 
 
@@ -131,7 +131,7 @@ def test_set_binding_skips_rematerialize_when_agent_unknown() -> None:
         patch.object(skill_admin_api.agent_store, "get_agent_name_by_id", return_value=None),
         patch.object(skill_admin_api, "_rematerialize_agent") as mock_remat_one,
     ):
-        skill_admin_api.set_skill_agent_binding("crm-ops", "999", body, authorization="Session t")
+        skill_admin_api.set_skill_agent_binding("crm-ops", 999, body, authorization="Session t")
         mock_remat_one.assert_not_called()
 
 
