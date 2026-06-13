@@ -52,8 +52,8 @@ def _tool_call_response(name: str, args: str = "{}"):
 
 @pytest.fixture
 def _suspend_env(monkeypatch, tmp_path):
-    from fleetent.governance import approval_allowlist_store as allowlist
     from fleetent.governance import approval_store
+    from fleetent.governance import tool_auto_approvals_store as allowlist
 
     async def fake_create(**kwargs):
         return _tool_call_response("send_im_message", '{"target": "U2", "text": "hi"}')

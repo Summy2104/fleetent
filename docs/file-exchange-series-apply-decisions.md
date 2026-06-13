@@ -108,6 +108,38 @@ ground truth：勘查后确认 **MCP 调用咽喉 `_call_via_session(server_id, 
 
 ---
 
+## ③ 续做执行记录（2026-06-13，D0 重构后自动执行）
+
+**Phase 0（§0 归属轴重构）已完成**，TDD 红→绿，提交在 `feat/unified-file-exchange`（commit `5c9aa94b`，未推 remote）：
+- `workspace_scope_key(scope, session_id, agent_name)` 单一 key 派生权威（manager.py），替换 4 处内联派生。
+- 迁移 v33：`artifacts` 加 `scope_key` 列。
+- `artifact_exchange` 重做到 scope_key 轴（register/list_by_scope/resolve 改收 scope_key，`_find_by_path` 按 scope_key 过滤 + `_find_any_by_path` 仅 approved 跨 scope，修「按路径取最新→误判越权」缺陷）。
+- 门禁：tests/unit 2941 passed（清掉本地 `src/fleetent/intelligence` 过期 `__pycache__` 残留后）；artifact/migration integration 绿；mypy 改动文件零错误；ruff 净。
+
+### ⛔ 阻塞：bb-pr 目标 main 的双 remote 分叉（需 owner 拍板）
+
+Phase 0 完成后准备 bb-pr 合 main 时发现 **Bitbucket origin/main 与 GitHub github/main 已显著分叉**：
+- `origin/main`(Bitbucket, truth) = `cd523aca` "descope dormant context policy"，且有 ≥10 个 GitHub 上没有的近期 commit（`unify approval request lifecycle`、`remove layered budget`、`descope-context-policy` 等）。
+- ①②③(#14/#15/#16) **从未落 Bitbucket main**（`artifact_exchange.py` 在 origin/main 不存在）——只经 GitHub PR 进 github/main。
+- 本分支基于 **github/main**（含①②③）。merge-base(origin/main, HEAD)=`76c6e444`(PR #241)。
+
+后果：`bb-pr` 到 Bitbucket main 的 diff = **52 文件 / +2884 行**（揉进整个①②③ + P0 + docs），且 Step 2 合 origin/main 极可能与 Bitbucket 的 approval/context/budget 改动冲突，再由 admin 自动合入 truth main——高风险难回滚。「逐 Phase 小 diff bb-pr」的前提（分支基于 Bitbucket main）不成立。
+
+**owner 决策（2026-06-13）**：合入 **Bitbucket main，先 reconcile**。
+
+### reconcile 执行记录（本地 merge origin/main，commit `825eae2f`）
+
+合并 origin/main 进 feat 分支，冲突面比预期小——**仅 1 个文件硬冲突**，其余（loop/normalizer/slack/cron_scheduler + Bitbucket 的 governance 重构代码）自动合并无文本冲突。
+
+**冲突 1：迁移版本撞号**（`agent_state_migrations.py`）。两条 main 各自用了 v32/v33：Bitbucket = v32 `reflection_proposals.report_id` / v33 `drop budget_usage` / v34 `unify approval requests`（append）；我方 ③+P0 = v32 `artifacts` 表 / v33 `artifacts.scope_key`。
+- **解决**：Bitbucket 的 v32–v34 不可变（已在 truth main），我方两个迁移**重排到末尾**——artifacts→**v35**、scope_key→**v36**（经 `MIGRATIONS.append`，确保在 v34 之后）。docstring 版本史 + 迁移测试（`<=35` 切片、`>=36` 断言）同步更新。版本号验证单调唯一（…32,33,34,35,36）。
+
+**语义重叠：Bitbucket `unify approval requests`（v34）重构了审批模型**（建 `approval_requests`、drop `approvals`、rename `approval_allowlist`→`tool_auto_approvals`，新增 `approval_request_store`/`tool_auto_approvals_store`/`approval_store` facade）。
+- ③ 的 callable-risk（`registry.RiskFn`/`evaluate_risk_level`/`is_dynamic_risk`）合并后**存活**，与新审批模型不冲突（全 unit 绿）。
+- ②（#15）的 `test_conversation_address_suspend.py` 还 `import approval_allowlist_store as allowlist`（旧名，模块已删），触发 Bitbucket 新增的护栏 `test_tool_auto_approvals_guard`。**解决**：改为 `import tool_auto_approvals_store as allowlist`（permission_gate 同款别名），`is_allowed` 签名兼容。
+
+**待续**：全量 integration 对照「合并后基线」无新增失败后，bb-pr 合 Bitbucket main（首个 PR 较大，含①②③+reconcile+P0；CI 门控兜底）。
+
 ## ④ delivery-receipts-postcondition
 
 待执行。
