@@ -170,6 +170,7 @@ erDiagram
   sub_agent_runs ||--o{ traces : "run_id 同命名空间"
   reflection_reports ||--o{ reflection_proposals : "report_id 源报告"
   memory_items ||--o{ reflection_proposals : "target_ref（仅 domain=memory · 多态）"
+  reflection_proposals ||--o| approval_requests : "subject_id（memory/skill 审批生命周期）"
   scheduled_tasks {
     string schedule_kind
     string user_id
