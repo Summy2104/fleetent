@@ -171,6 +171,7 @@ erDiagram
   reflection_reports ||--o{ reflection_proposals : "report_id 源报告"
   memory_items ||--o{ reflection_proposals : "target_ref（仅 domain=memory · 多态）"
   reflection_proposals ||--o| approval_requests : "subject_id（memory/skill 审批生命周期）"
+  approval_requests ||--o{ tool_auto_approvals : "fingerprint 短路（仅 tool_call · 计算键）"
   scheduled_tasks {
     string schedule_kind
     string user_id
