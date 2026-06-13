@@ -132,6 +132,11 @@ class McpServerConfig:
     _list_refresh_lock: asyncio.Lock = field(
         default_factory=asyncio.Lock, repr=False, compare=False
     )
+    # unified-file-exchange: serializes the "call + product-dir diff" window per server so
+    # concurrent calls cannot mis-attribute each other's newly-written files (D2 diff layer).
+    _call_window_lock: asyncio.Lock = field(
+        default_factory=asyncio.Lock, repr=False, compare=False
+    )
     # Agent-scope key dimension (next<-main integration): registries/sessions are keyed
     # by (agent_scope, id) so the same server id can carry distinct credentials/sessions
     # per agent. None = the global (startup) scope. Distinct from the oauth `scope` str.
@@ -1118,6 +1123,51 @@ def _rewrite_result_paths(
 
 
 async def _call_via_session(
+    server_id: str,
+    tool_name: str,
+    args: dict[str, Any],
+    scope: int | None = None,
+    *,
+    scope_key: str | None = None,
+    session_id: str | None = None,
+    user_id: str | None = None,
+) -> str:
+    """Invoke a tool, then apply the call-window diff fallback when attributing (D2).
+
+    Thin wrapper over `_call_via_session_inner` (which owns the SDK call + lazy-reconnect
+    retry + the deterministic result rewrite). When a `scope_key` is threaded and the
+    server has a registered product root, snapshot it before the call and diff-register
+    any new files the rewrite missed — all under the server's per-call window lock so
+    concurrent calls don't mis-attribute. The diff is best-effort and never affects the
+    returned result; without attribution this is a byte-identical pass-through.
+    """
+    from fleetent import artifact_exchange
+
+    server = _server_registry.get((scope, server_id))
+    root = artifact_exchange.server_root(server_id) if (server is not None and scope_key) else None
+    if root is None:
+        return await _call_via_session_inner(
+            server_id, tool_name, args, scope,
+            scope_key=scope_key, session_id=session_id, user_id=user_id,
+        )
+    assert server is not None
+
+    async with server._call_window_lock:
+        before = artifact_exchange.snapshot_products(root)
+        text = await _call_via_session_inner(
+            server_id, tool_name, args, scope,
+            scope_key=scope_key, session_id=session_id, user_id=user_id,
+        )
+        try:
+            artifact_exchange.diff_register(
+                server_id, root, before, scope_key, session_id=session_id, user_id=user_id
+            )
+        except Exception as exc:  # noqa: BLE001 — diff is auxiliary, never affect the result
+            logger.warning("mcp_diff_register_failed server_id=%s error=%s", server_id, exc)
+        return text
+
+
+async def _call_via_session_inner(
     server_id: str,
     tool_name: str,
     args: dict[str, Any],
