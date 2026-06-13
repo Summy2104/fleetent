@@ -18,7 +18,24 @@ logger = structlog.get_logger(__name__)
 
 _SYSTEM = "You are a helpful assistant with access to tools. Use them when needed."
 _APPROVAL_RE = re.compile(r"^(approve|reject)(\s+always)?\s+([a-f0-9-]{6,36})\s*$", re.IGNORECASE)
+# Channels require @-mentioning the bot, so inbound text carries a leading `<@id>`.
+_LEADING_MENTION_RE = re.compile(r"^\s*<@[^>]+>\s*")
 _REJECTION_MSG = "你还没有权限使用此 bot，请联系管理员审批。"
+
+
+def _strip_leading_mention(text: str) -> str:
+    """Remove a single leading Slack bot mention (`<@id>` / `<@id|label>`) from text."""
+    return _LEADING_MENTION_RE.sub("", text, count=1)
+
+
+def _match_approval_command(text: str) -> re.Match[str] | None:
+    """Match an approve/reject command, tolerating a leading bot mention (channel case).
+
+    Channel messages must @-mention the bot, so the command arrives as `<@id> approve <x>`;
+    stripping the leading mention lets the same ``_APPROVAL_RE`` match channel and DM alike.
+    The id-format check is unchanged, so prose like ``<@bot> approve the plan`` stays unmatched.
+    """
+    return _APPROVAL_RE.match(_strip_leading_mention(text).strip())
 
 
 def _current_date_tz() -> tuple[str, str]:
@@ -359,8 +376,9 @@ async def _resume_pending_in_session(
 
 
 async def route(msg: NormalizedMessage) -> None:
-    # Approval commands bypass the agent loop entirely
-    m = _APPROVAL_RE.match(msg.text.strip())
+    # Approval commands bypass the agent loop entirely (tolerate a leading @mention, so
+    # channel approvals — where the bot must be @-mentioned — are recognized too).
+    m = _match_approval_command(msg.text)
     if m:
         from fleetent.governance import approval_store
         from fleetent.governance.approval_router import resolve_approval_request
