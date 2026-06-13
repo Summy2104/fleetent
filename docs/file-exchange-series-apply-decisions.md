@@ -68,7 +68,43 @@
 
 ## ③ unified-file-exchange
 
-待执行。
+**最大的 change（8 section / 30 task）**。新增 `artifact_exchange.py`（台账+命名空间解析+归属校验+视图）；MCP 约定注入/咽喉改写/diff 登记；fence 双根；沙箱归属视图 ro 挂载；callable risk；send_file 升级审批 + send_im_message files。
+
+**现状勘查结论**（经 Explore）：迁移当前最高版本 **31**（append v32 artifacts）；store 仿 `schedule_store.py`；MCP `_subprocess_env`/`_call_via_session`/`McpServerConfig`（client.py）；fence `resolve_host_path`（file_sandbox_io ~123）；`BackendCapabilities`（backend.py ~66）+ Docker `_workspace_flags`；`registry._risk_levels`/`get_risk_level`；send_im_message（builtin ~687 medium）/send_file（~733 fail-closed）；exchange 基目录 `paths.agent_home_dir`。
+
+**决策（随实现补充）：**
+- **D③-1 artifacts 表 schema**：`{artifact_id PK, server_id, rel_path, session_id, user_id, filename, mime, size, created_at}`，migration v32。
+- **D③-范围说明**：容器内 `/exchange` ro 挂载的真机断言（4.5）与 my-bot 真机重放（8.4）需 Docker/live MCP，本环境无法跑，以单测/集成（mock docker run 命令组装）等价覆盖挂载选项装配，真机待用户环境。
+
+### ⚠️ ③ 范围与进度声明（自动执行中途，供审核重点关注）
+
+ground truth：勘查后确认 **MCP 调用咽喉 `_call_via_session(server_id, tool, args, scope)` 只有 agent 级 `scope`，不带 IM `session_id`**——正是 design 反复强调的「server agent 级长驻 vs workspace per-session」生命周期错配。归属登记（把工件归到发起 session）要求把 `session_id` 从工具 dispatch（tool_context 有 session_id）一路穿到咽喉与登记点，触及 MCP dispatch wrapper + 咽喉 + 登记，改面大、对核心 MCP/沙箱子系统有真实回归风险。
+
+考虑到这是**无人值守的夜间自动跑**，破坏 MCP/沙箱核心的代价高，我对 ③ 采取「先做扎实、自洽、低风险、高价值的部分，深集成部分留给有人值守时续」的策略，并如实记录：
+
+**已完成（TDD 绿、已提交本分支）：**
+- ✅ Section 1：artifacts 台账（migration v32）+ `/exchange` 命名空间解析 + 归属访问控制 + effective_root（11 测试绿）。
+
+**本次继续做的自洽部分：**
+- Section 2.1/2.2：MCP 约定注入（XDG 三件套 + cwd 指向 `<agent_home>/exchange/<id>` 分区树，合并序 白名单<约定<显式 env，`file_isolation: off` 跳过）——这是「让 MCP server 产物落进可寻址分区树」的**根因 enabler**，自洽可单测。
+- Section 5：`@tool(risk_level=callable)` 调用期求值（通用机制，自洽可单测）。
+- Section 6（部分）：send_file callable risk 真值表 + 升级审批语义（自洽单测）。
+
+**留给有人值守续做（已在 tasks.md 保留未勾选，附原因）：**
+- 2.3-2.6（咽喉结果路径改写 + diff 兜底登记）：需把 session_id 穿过 MCP dispatch→咽喉，改面大、回归风险高。
+- Section 3（fence 双根接 resolve）：依赖 session_id 流贯通。
+- Section 4（沙箱 `/exchange` ro 挂载 + staging 降级）：需 Docker，本环境无法验证容器挂载。
+- 6.3/6.4、7（send 工具端到端 + send_im_message files）：依赖 exchange resolve 在工具层接线 + 沙箱视图。
+
+**结论**：③ **未达到可 archive（全勾选）状态**，故本分支以「foundation + 注入 + callable risk」的部分实现推送并开 PR（标记 WIP / 待续）；④ 硬依赖 ③ 的共享投递内核，**本次不启动**。
+
+**更新（2026-06-13，用户明确指示）**：用户授权把「目前完成的部分」合入 main。判断为**安全**——合入的代码全是惰性/附加脚手架，不改现网行为：
+- `artifact_exchange.py` 新模块尚未被任何生产路径 import（休眠基础设施）；
+- 迁移 v32 仅新增 `artifacts` 表（forward-only，幂等，已测）；
+- `McpServerConfig.file_root/file_isolation` 为可选字段，默认不改行为；约定注入 `_subprocess_env(server, agent_home=None)` 默认 None 走旧路径，且**尚未接到 stdio 启动**，生产行为字节不变；
+- callable risk 机制已加，但**无任何工具使用 callable risk**，loop gate 仅对 dynamic-risk 工具走动态求值 → 所有现有工具行为字节不变。
+
+合入方式：**不 archive**（实现未完成，archive=完成，会失真）、**不 sync specs**（实现只部分满足 spec，同步会让 main specs 宣称未建能力）——只合**代码 + 仍处 active 的 change 目录（带 WIP banner）**，change 留在 `openspec/changes/` 待续。这是对标准「先 archive 再合」流程的**有意、如实偏离**，因用户明确要求合并在手的部分。合并前已跑 `make test-pr` 全绿 + 完整 integration 对照 main 无新增失败。
 
 ---
 

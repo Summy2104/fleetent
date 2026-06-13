@@ -70,9 +70,11 @@ from fleetent.tools.multimodal import build_message_with_images, has_image_block
 from fleetent.tools.registry import (
     ToolContext,
     dispatch,
+    evaluate_risk_level,
     get_effective_timeout,
     get_risk_level,
     get_schemas,
+    is_dynamic_risk,
     is_self_truncating,
 )
 from fleetent.tools.result_truncation import truncate_tool_result
@@ -678,6 +680,7 @@ async def _plan_run_slots(
     sandbox_effective_mode: Mode | None = None,
     sandbox_workspace_mount: bool = False,
     conversation_address: ConversationAddress | None = None,
+    tool_context: ToolContext | None = None,
 ) -> list[_PlanSlot]:
     """Phase one for run() (D2/D3/D6): serial, original order — produce one slot
     per tool_call. Guardrail, pre_tool_use hook, and (medium/high) approval are decided
@@ -785,10 +788,21 @@ async def _plan_run_slots(
             if hres.modified_args is not None:
                 slot_args = hres.modified_args
             force_ask = hres.decision == "ask"
-        # Action Gate (C2): the tool's registry risk (never LLM args — anti-escape) maps
-        # to a disposition. CRITICAL is hardcoded REJECT; medium/high follow the agent's
-        # configured mode (default approval); unknown/uncontainable fail closed upward.
+        # Action Gate (C2): the tool's registry risk maps to a disposition. CRITICAL is
+        # hardcoded REJECT; medium/high follow the agent's configured mode (default
+        # approval); unknown/uncontainable fail closed upward. A callable risk
+        # (permission-gate D7) is evaluated here with the parsed args + tool_context — the
+        # risk fn may only RAISE risk on system facts (e.g. send_file's chat scope), never
+        # let LLM args lower it below the gate; a broken fn fails closed to medium.
         risk = get_risk_level(name)
+        if is_dynamic_risk(name):
+            try:
+                _risk_args = json.loads(slot_args) if isinstance(slot_args, str) else slot_args
+            except Exception:  # noqa: BLE001 — unparseable args: evaluate with empty mapping
+                _risk_args = {}
+            risk = evaluate_risk_level(
+                name, _risk_args if isinstance(_risk_args, dict) else {}, tool_context
+            )
         gate_mode = resolve_action_mode(
             risk,
             medium_mode=(
@@ -2001,6 +2015,7 @@ async def _run_inner(
             sandbox_effective_mode=sandbox_mode,
             sandbox_workspace_mount=sandbox_workspace_mount,
             conversation_address=conversation_address,
+            tool_context=tool_context,
         )
         pending = [s for s in slots if s.placeholder is None]
         # Progress is emitted once per execution batch (not per tool during planning):

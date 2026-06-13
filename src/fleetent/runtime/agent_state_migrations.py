@@ -339,4 +339,22 @@ MIGRATIONS: list[tuple[int, str]] = [
     (30, "ALTER TABLE scheduled_tasks ADD COLUMN notify_text TEXT"),
     # ── v31: unify-identity-column-naming ────────────────────────────────────
     (31, "ALTER TABLE approvals RENAME COLUMN approver_actor TO approver_user_id"),
+    # ── v32: unified-file-exchange — MCP artifact ledger (governance metadata,
+    # not a model interface). Records provenance + ownership for files produced by
+    # MCP servers under the /exchange namespace; drives attribution access control,
+    # the per-session attribution view, and audit.
+    (
+        32,
+        "CREATE TABLE IF NOT EXISTS artifacts ("
+        "artifact_id TEXT PRIMARY KEY, "
+        "server_id TEXT NOT NULL, "
+        "rel_path TEXT NOT NULL, "
+        "session_id TEXT, "
+        "user_id TEXT, "
+        "filename TEXT, "
+        "mime TEXT, "
+        "size INTEGER, "
+        "created_at TEXT"
+        ")",
+    ),
 ]
