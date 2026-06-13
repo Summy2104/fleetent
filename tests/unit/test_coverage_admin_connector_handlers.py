@@ -144,12 +144,12 @@ def test_agent_admin_binding_skill_kb_oauth_and_mcp_handlers(monkeypatch):
     monkeypatch.setattr(
         agent_admin_api.skill_admin_store,
         "enabled_skill_names",
-        lambda name: {"skill-a"},
+        lambda agent_id: {"skill-a"},
     )
     monkeypatch.setattr(
         agent_admin_api.skill_admin_store,
         "list_skills_for_agent",
-        lambda name: [{"skill_name": "skill-b", "enabled": False}],
+        lambda agent_id: [{"skill_name": "skill-b", "enabled": False}],
     )
     monkeypatch.setattr(
         agent_admin_api.skill_admin_store,

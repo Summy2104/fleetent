@@ -91,6 +91,7 @@ def test_skill_admin_route_handlers_cover_lifecycle(monkeypatch: pytest.MonkeyPa
     # never touches a real DB / filesystem.
     monkeypatch.setattr(skill_admin_api, "_rematerialize_all", lambda: [])
     monkeypatch.setattr(skill_admin_api, "_rematerialize_agent", lambda name: None)
+    monkeypatch.setattr(skill_admin_api.agent_store, "get_agent_name_by_id", lambda agent_id: "ops")
     monkeypatch.setattr(
         skill_admin_api, "engine_observability", lambda name: {"skill_name": name, "hits": 3}
     )
@@ -202,15 +203,15 @@ def test_skill_admin_route_handlers_cover_lifecycle(monkeypatch: pytest.MonkeyPa
     assert skill_admin_api.reload_skills(auth_header)["ok"] is True
     assert (
         skill_admin_api.set_skill_agent_binding(
-            "s", "agent-a", skill_admin_api.BindingBody(enabled=True), auth_header
+            "s", 7, skill_admin_api.BindingBody(enabled=True), auth_header
         )["enabled"]
         is True
     )
-    assert skill_admin_api.list_skill_agents("s", auth_header)[0]["agent_id"] == "agent-a"
+    assert skill_admin_api.list_skill_agents("s", auth_header)[0]["agent_id"] == 7
     with pytest.raises(HTTPException) as blocked:
         skill_admin_api.archive_skill("s", auth_header, "true")
     assert blocked.value.status_code == 409
-    bindings[("agent-a", "s")] = False
+    bindings[(7, "s")] = False
     assert skill_admin_api.archive_skill("s", auth_header, "true")["status"] == "archived"
     assert skill_admin_api.restore_skill("s", auth_header)["status"] == "active"
     assert skill_admin_api.force_publish("s", auth_header, "true")["forced"] == 1
@@ -788,7 +789,7 @@ def test_kb_admin_route_handlers_cover_management_and_documents(
     kbs: dict[str, dict[str, Any]] = {
         "kb1": {"kb_id": "kb1", "description": "Operations", "archived": False}
     }
-    bindings: dict[tuple[str, str], set[str]] = {("default", "kb1"): {"agent-a"}}
+    bindings: dict[tuple[str, str], set[int]] = {("default", "kb1"): {7}}
     audits: list[tuple[Any, ...]] = []
     deleted_docs: list[str] = []
 
@@ -885,7 +886,7 @@ def test_kb_admin_route_handlers_cover_management_and_documents(
     )
 
     auth_header = "Session token"
-    assert kb_admin_api.list_kbs(authorization=auth_header)[0]["bound_agents"] == ["agent-a"]
+    assert kb_admin_api.list_kbs(authorization=auth_header)[0]["bound_agents"] == [7]
     assert (
         kb_admin_api.create_kb(
             kb_admin_api.KbBody(kb_id="kb2", description="Policies"), auth_header
@@ -937,14 +938,12 @@ def test_kb_admin_route_handlers_cover_management_and_documents(
         == 1.0
     )
     assert (
-        kb_admin_api.bind_agent("kb2", kb_admin_api.BindBody(agent_id="agent-b"), auth_header)[
-            "bound"
-        ]
+        kb_admin_api.bind_agent("kb2", kb_admin_api.BindBody(agent_id=8), auth_header)["bound"]
         is True
     )
-    assert kb_admin_api.agents_for_kb("kb2", authorization=auth_header)["agents"] == ["agent-b"]
-    assert kb_admin_api.kbs_for_agent("agent-b", authorization=auth_header)["kb_ids"] == ["kb2"]
-    assert kb_admin_api.unbind_agent("kb2", "agent-b", authorization=auth_header)["bound"] is False
+    assert kb_admin_api.agents_for_kb("kb2", authorization=auth_header)["agents"] == [8]
+    assert kb_admin_api.kbs_for_agent(8, authorization=auth_header)["kb_ids"] == ["kb2"]
+    assert kb_admin_api.unbind_agent("kb2", 8, authorization=auth_header)["bound"] is False
     assert kb_admin_api.observation("kb2", authorization=auth_header)["recall_hits"] == 7
     with pytest.raises(HTTPException) as still_bound:
         kb_admin_api.archive_kb("kb1", authorization=auth_header, x_confirm="true")

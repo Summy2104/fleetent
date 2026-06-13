@@ -30,7 +30,7 @@ def _now() -> str:
 # --- Skill ↔ Agent binding matrix ---------------------------------------------
 
 
-def set_binding(agent_id: str, skill_name: str, enabled: bool, updated_by: str | None) -> None:
+def set_binding(agent_id: int, skill_name: str, enabled: bool, updated_by: str | None) -> None:
     """Upsert the enablement of ``skill_name`` for ``agent_id`` (idempotent)."""
     with _database().transaction() as conn:
         conn.execute(
@@ -65,7 +65,7 @@ def list_agents_for_skill(skill_name: str) -> list[dict[str, Any]]:
     )
 
 
-def list_skills_for_agent(agent_id: str) -> list[dict[str, Any]]:
+def list_skills_for_agent(agent_id: int) -> list[dict[str, Any]]:
     """Return every skill binding for an agent, enabled or not."""
     return (
         _database()
@@ -78,7 +78,7 @@ def list_skills_for_agent(agent_id: str) -> list[dict[str, Any]]:
     )
 
 
-def has_any_binding(agent_id: str) -> bool:
+def has_any_binding(agent_id: int) -> bool:
     """Whether the agent has at least one agent_skills row (enabled or not)."""
     row = (
         _database()
@@ -91,7 +91,7 @@ def has_any_binding(agent_id: str) -> bool:
     return row is not None
 
 
-def enabled_skill_names(agent_id: str) -> set[str]:
+def enabled_skill_names(agent_id: int) -> set[str]:
     """Skill names explicitly enabled (enabled=1) for the agent."""
     rows = (
         _database()
@@ -104,7 +104,7 @@ def enabled_skill_names(agent_id: str) -> set[str]:
     return {str(r["skill_name"]) for r in rows}
 
 
-def agents_enabling(skill_name: str) -> list[str]:
+def agents_enabling(skill_name: str) -> list[int]:
     """Return agent ids that explicitly enable the skill — drives delete protection."""
     rows = (
         _database()

@@ -1,6 +1,6 @@
 # Agent 身份模型与迁移设计
 
-> **状态：设计（未落地）**。本文锁定 agent 标识在平台侧 / agent 侧的统一模型，并给出完整迁移详设。落地经分阶段 OpenSpec change 执行；落地后本文转为 as-built 参考，`data-model.md` 交叉引用。
+> **状态：阶段 2 已落地，阶段 3–5 待落地**。本文锁定 agent 标识在平台侧 / agent 侧的统一模型，并给出完整迁移详设。阶段 2（`unify-agent-binding-id`）已于 2026-06-13 落地 `agent_kbs` / `agent_skills` 的 INTEGER+FK 规整与 `agent_skills` 控制台绑定 bug 修复；其余阶段继续按 OpenSpec change 分批执行。`data-model.md` 已回填阶段 2 的 as-built 状态。
 > 背景与往返论证（为何不是 slug-everywhere、为何不用 UUID、rename 安全性）见本文 §1 + `records/decision-logs/`。
 
 ## 1. 问题与目标
@@ -8,14 +8,14 @@
 ### 1.1 现状的乱（实测）
 agent 在系统里没有统一标识符，跨表、跨平面各行其是：
 - `agents.id` 是 **INTEGER 自增主键**；但 `agents.name` 是 **UNIQUE** 的人类可读标识，且是物理目录 `agents/<name>/`、`agent_admin_state` 主键、`session_meta.agent_name`、`traces.agent_id`、agent.yaml `name`、channel 路由 的实际键。
-- 平台关系表引用 agent 时**三种写法混用**：多数存 INTEGER `id`；`agent_kbs`/`agent_skills` 存 `str(agent.id)`（TEXT）；`agent_admin_state`/`session_meta` 存 `name`。
-- 后果：① 跨表 JOIN 要 CAST（TEXT vs INTEGER）；② `agent_skills` 出现**真 bug**——控制台按 name 写、materialize 按 `str(id)` 读，控制台设的 skill 绑定运行时静默失效；③ 多数绑定表无 FK、agent 删除留孤儿。
+- 平台关系表引用 agent 时**三种写法混用**：多数存 INTEGER `id`；`agent_kbs`/`agent_skills` 曾存**字符串化的 agent id**（TEXT）；`agent_admin_state`/`session_meta` 存 `name`。
+- 后果：① 跨表 JOIN 要 CAST（TEXT vs INTEGER）；② `agent_skills` 出现**真 bug**——控制台按 name 写、materialize 按字符串 id 读，控制台设的 skill 绑定运行时静默失效；③ 多数绑定表无 FK、agent 删除留孤儿。
 
 ### 1.2 rename 的脆性（设计动机）
 "`agents.name` 不可变"目前只靠"删了 rename 代码 + 守护测试 + spec 一行"撑着——是**政策不是不变量**。产品迟早要 rename（打错字/改品牌/重组）。若 name 是全系统 FK 键 + 物理目录名，rename 回来就是灾难级级联（重写所有绑定表键 + 搬物理目录）。
 
 ### 1.3 目标
-- agent 标识在两个平面各自**内部一致**，翻译收口到少数边界点（不再满地 `str(agent.id)`）。
+- agent 标识在两个平面各自**内部一致**，翻译收口到少数边界点（不再满地字符串化 id 包装）。
 - 关系完整性**不依赖任何可变标识**——rename 廉价、零关系级联。
 - 物理目录保持**可读**，不引入 UUID。
 - 修掉 `agent_skills` 的 name/id 混写 bug；补齐绑定表 FK。
@@ -76,13 +76,13 @@ kb.db / shared_memory.db 无 agent 标识列，不涉及。
 - **read-projection / observability**（读边界）：读 agent 侧 traces/sessions 后，按需 `agents` 表 name→id 解析关联平台 agent。
 - **`agent_skills` bug 修复**：`agent_management_console.set_agent_skill` 当前传 `name` 给 `set_binding`——改为先解析 name→id 再写（与 materialize 的 id-keyed 读对齐）；`skill_admin_api` 已传 id（去 `str()` 包装，传 int）。
 - **`agent_admin_store` / `session_admin_store`**：键/列从 name 改 id；调用方（server.py status 查询、console、chat admin、askit apply）改为传/解析 id。
-- 全仓清理 `str(agent.id)` 包装与按 name 查平台绑定表的残留。
+- 全仓清理字符串化 id 包装与按 name 查平台绑定表的残留。
 
 ## 4. 分阶段落地（每阶段一个 OpenSpec change）
 
 > 安全相关（agent 解析、删除级联），分阶段降风险；每阶段对照 main 基线零回归。
 
-1. **阶段 2 — agent_kbs / agent_skills 归一 + 修 bug**（真类型债 + 真 bug，**首做**）：TEXT→INTEGER + FK；修控制台 name-写。这是原 option-1 的正确版本。已 propose 为 `unify-agent-binding-id`。
+1. **阶段 2 — agent_kbs / agent_skills 归一 + 修 bug**（已完成，2026-06-13）：TEXT→INTEGER + FK；修控制台 name-写。落地 change：`unify-agent-binding-id`。
 2. **阶段 3 — agent_admin_state / session_meta 归 id**：键/列 name→id + FK + 调用方改造。
 3. **阶段 4 — 补齐绑定表 FK**：user_agents / channel_agents / agent_versions / agent_mcp_servers / agent_secrets 补 FK→agents.id ON DELETE CASCADE。
 4. **阶段 5 — 翻译边界固化 + 守护（含 agent 侧列正名）**：materialize 写边界 / read-projection 读边界的 name↔id 收口；**`traces.agent_id` → `agent_name` 列正名**（纯美容 R2 合规，并入此阶段而非单列——见下）；守护测试断言"平台关系表无 name 列（除 agents）、agent 侧无 agent id 列/标识"。
