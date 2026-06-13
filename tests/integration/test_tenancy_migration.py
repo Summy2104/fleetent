@@ -188,8 +188,8 @@ def test_new_users_get_default_tenant_id(tmp_path: Path) -> None:
     _upgrade(db)
     conn = sqlite3.connect(db)
     conn.execute(
-        "INSERT INTO users (id, name, api_key, created_at, tenant_id) VALUES "
-        "('u3', 'Carol', 'ma-ccc', '2026-01-03T00:00:00', 'default')"
+        "INSERT INTO users (id, name, created_at, tenant_id) VALUES "
+        "('u3', 'Carol', '2026-01-03T00:00:00', 'default')"
     )
     conn.commit()
     row = conn.execute("SELECT tenant_id FROM users WHERE id = 'u3'").fetchone()

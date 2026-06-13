@@ -19,8 +19,8 @@ def db(tmp_path, monkeypatch):
     now = datetime.datetime.now(datetime.UTC).isoformat()
     with sqlite3.connect(str(p)) as c:
         c.execute(
-            "INSERT INTO users (id, name, api_key, created_at, role)"
-            " VALUES ('admin1', 'admin', 'ma-x', ?, 'built_in_admin')",
+            "INSERT INTO users (id, name, created_at, role)"
+            " VALUES ('admin1', 'admin', ?, 'built_in_admin')",
             (now,),
         )
     # Slack and Telegram are per-agent now; WhatsApp is the owner-level platform.

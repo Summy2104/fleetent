@@ -38,7 +38,10 @@ def _make_minimal_db(path, user_id: str, name: str, api_key: str, status: str = 
             revoked_at TEXT,
             expires_at TEXT,
             created_at TEXT NOT NULL,
-            call_count INTEGER NOT NULL DEFAULT 0
+            call_count INTEGER NOT NULL DEFAULT 0,
+            last_used_at TEXT,
+            last_ip TEXT,
+            last_ua TEXT
         )"""
     )
     conn.execute(
