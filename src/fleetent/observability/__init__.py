@@ -37,8 +37,10 @@ from fleetent.observability.traces import (
     InjectedContextTrace,
     TraceEvent,
     TraceQuery,
+    build_tool_args_summary,
     query_trace_events,
     record_injected_context,
+    record_tool_call,
     record_trace_event,
 )
 from fleetent.observability.usage import ModelUsage, UsageQuery, UsageSummary, get_usage_summary
@@ -69,6 +71,7 @@ __all__ = [
     "UsageSummary",
     "VerificationIssue",
     "apply_diagnostics_retention",
+    "build_tool_args_summary",
     "classify_issue",
     "export_diagnostics",
     "get_performance_summary",
@@ -80,6 +83,7 @@ __all__ = [
     "real_smoke_gate",
     "recommend",
     "record_injected_context",
+    "record_tool_call",
     "record_trace_event",
     "render_json_report",
     "render_markdown_report",

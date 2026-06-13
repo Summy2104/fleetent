@@ -29,9 +29,12 @@ from fleetent.model.provider_health import ProviderHealthCache, get_health_cache
 from fleetent.observability import (
     InjectedContextTrace,
     TraceEvent,
+    build_tool_args_summary,
     record_injected_context,
+    record_tool_call,
     record_trace_event,
 )
+from fleetent.outbound import ConversationAddress
 from fleetent.runtime.budget import BudgetChecker, BudgetConfig, BudgetUsage, grace_max_tokens
 from fleetent.runtime.cancellation import CancellationChecker, CancelToken
 from fleetent.runtime.context import (
@@ -67,9 +70,11 @@ from fleetent.tools.multimodal import build_message_with_images, has_image_block
 from fleetent.tools.registry import (
     ToolContext,
     dispatch,
+    evaluate_risk_level,
     get_effective_timeout,
     get_risk_level,
     get_schemas,
+    is_dynamic_risk,
     is_self_truncating,
 )
 from fleetent.tools.result_truncation import truncate_tool_result
@@ -516,30 +521,32 @@ async def _run_serial_group(
     tool_context: ToolContext,
     user_id: str,
     default_tool_timeout: float | None = None,
-) -> list[tuple[str, bool]]:
+) -> list[tuple[str, bool, float]]:
     """Dispatch a same-resource-key group strictly in order (D5).
 
     Same-container stateful tools collapse into one sequential coroutine so the
     batch's gather still sees a single awaitable per group; results stay aligned
     to the group's slot order. T2's configurable default timeout flows to each
-    `_safe_dispatch`.
+    `_safe_dispatch`. Each entry carries the measured dispatch duration in
+    milliseconds (trace-tool-spans D1) so backfill can record a tool_call span.
     """
-    out: list[tuple[str, bool]] = []
+    out: list[tuple[str, bool, float]] = []
     for slot in slots:
+        start = time.monotonic()
         if slot.runner is not None:
-            out.append(await slot.runner())
+            content, failed = await slot.runner()
         else:
-            out.append(
-                await _safe_dispatch(
-                    slot.name,
-                    slot.args,
-                    is_sub_agent,
-                    token,
-                    tool_context,
-                    user_id=user_id,
-                    default_timeout=default_tool_timeout,
-                )
+            content, failed = await _safe_dispatch(
+                slot.name,
+                slot.args,
+                is_sub_agent,
+                token,
+                tool_context,
+                user_id=user_id,
+                default_timeout=default_tool_timeout,
             )
+        duration_ms = (time.monotonic() - start) * 1000
+        out.append((content, failed, duration_ms))
     return out
 
 
@@ -552,8 +559,9 @@ async def _execute_pending(
     user_id: str,
     parallel_max: int,
     default_tool_timeout: float | None = None,
-) -> dict[str, tuple[str, bool]]:
-    """Phase two (D1/D5/D7): run pending slots concurrently, return id→(text,failed).
+) -> tuple[dict[str, tuple[str, bool]], dict[str, float]]:
+    """Phase two (D1/D5/D7): run pending slots concurrently, return id→(text,failed)
+    plus id→duration_ms (trace-tool-spans D1, for the backfill tool_call span).
 
     Slots sharing a D5 resource key are collapsed into one serial coroutine (group),
     so a group occupies a single gather slot; free slots each occupy their own.
@@ -579,6 +587,7 @@ async def _execute_pending(
         group.append(slot)
 
     results: dict[str, tuple[str, bool]] = {}
+    durations: dict[str, float] = {}
     batch_size = parallel_max if parallel_max > 1 else 1
     for start in range(0, len(groups), batch_size):
         batch = groups[start : start + batch_size]
@@ -597,8 +606,10 @@ async def _execute_pending(
         )
         for group, group_results in zip(batch, gathered, strict=True):
             for slot, res in zip(group, group_results, strict=True):
-                results[slot.tc_id] = res
-    return results
+                content, failed, duration_ms = res
+                results[slot.tc_id] = (content, failed)
+                durations[slot.tc_id] = duration_ms
+    return results, durations
 
 
 async def _plan_run_slots(
@@ -621,6 +632,8 @@ async def _plan_run_slots(
     outbound_connectors: dict[str, Any] | None = None,
     sandbox_effective_mode: Mode | None = None,
     sandbox_workspace_mount: bool = False,
+    conversation_address: ConversationAddress | None = None,
+    tool_context: ToolContext | None = None,
 ) -> list[_PlanSlot]:
     """Phase one for run() (D2/D3/D6): serial, original order — produce one slot
     per tool_call. Guardrail, pre_tool_use hook, and (medium/high) approval are decided
@@ -728,10 +741,21 @@ async def _plan_run_slots(
             if hres.modified_args is not None:
                 slot_args = hres.modified_args
             force_ask = hres.decision == "ask"
-        # Action Gate (C2): the tool's registry risk (never LLM args — anti-escape) maps
-        # to a disposition. CRITICAL is hardcoded REJECT; medium/high follow the agent's
-        # configured mode (default approval); unknown/uncontainable fail closed upward.
+        # Action Gate (C2): the tool's registry risk maps to a disposition. CRITICAL is
+        # hardcoded REJECT; medium/high follow the agent's configured mode (default
+        # approval); unknown/uncontainable fail closed upward. A callable risk
+        # (permission-gate D7) is evaluated here with the parsed args + tool_context — the
+        # risk fn may only RAISE risk on system facts (e.g. send_file's chat scope), never
+        # let LLM args lower it below the gate; a broken fn fails closed to medium.
         risk = get_risk_level(name)
+        if is_dynamic_risk(name):
+            try:
+                _risk_args = json.loads(slot_args) if isinstance(slot_args, str) else slot_args
+            except Exception:  # noqa: BLE001 — unparseable args: evaluate with empty mapping
+                _risk_args = {}
+            risk = evaluate_risk_level(
+                name, _risk_args if isinstance(_risk_args, dict) else {}, tool_context
+            )
         gate_mode = resolve_action_mode(
             risk,
             medium_mode=(
@@ -790,6 +814,13 @@ async def _plan_run_slots(
                         "tool_args": tool_args,
                         "risk": risk,
                         "approver_ids": sorted(_default_gate.authorized_actors(approval_id)),
+                        # conversation-address: persist the run's delivery target so any
+                        # resume entry rebuilds an equivalent context (None for non-IM runs).
+                        **(
+                            {"address": conversation_address.to_dict()}
+                            if conversation_address is not None
+                            else {}
+                        ),
                     }
                 )
                 slots.append(
@@ -841,10 +872,13 @@ async def _backfill_slots(
     session_id: str | None = None,
     agent_name: str | None = None,
     user_id: str = "default",
+    run_id: str | None = None,
+    durations: dict[str, float] | None = None,
 ) -> None:
     """Phase three (D1/D4): serial, original `tool_calls` order. Append each tool
-    message, record the call into the loop-detection window, and fold
-    `consecutive_failures` per-result — identical to sequential per-tool updates.
+    message, record the call into the loop-detection window, fold
+    `consecutive_failures` per-result — identical to sequential per-tool updates —
+    and emit a `tool_call` trace span for each real execution (trace-tool-spans).
     """
     from fleetent.runtime import hooks
     from fleetent.runtime.hooks import HookContext
@@ -903,6 +937,39 @@ async def _backfill_slots(
             not failed,
             window=loop_checker.window,
         )
+        # trace-tool-spans: emit a tool_call span only for real executions — placeholders
+        # (guardrail/approval/deny) never reach here as executed work.
+        if not is_placeholder:
+            _record_tool_call_span(
+                run_id=run_id,
+                session_id=session_id,
+                slot=slot,
+                failed=failed,
+                duration_ms=(durations or {}).get(slot.tc_id, 0.0),
+            )
+
+
+def _record_tool_call_span(
+    *,
+    run_id: str | None,
+    session_id: str | None,
+    slot: _PlanSlot,
+    failed: bool,
+    duration_ms: float,
+) -> None:
+    """Record one executed tool call as a tool_call trace span (best-effort)."""
+    record_tool_call(
+        run_id or "",
+        session_id,
+        {
+            "tool_name": slot.name,
+            "tool_call_id": slot.tc_id,
+            "args_summary": build_tool_args_summary(slot.args),
+            "failed": failed,
+            "duration_ms": round(duration_ms, 3),
+            "risk": get_risk_level(slot.name),
+        },
+    )
 
 
 async def _apply_output_transform(
@@ -1395,7 +1462,9 @@ def _append_system_context(messages: list[Any], system_prompt: str, context_text
     messages.insert(0, {"role": "system", "content": f"{system_prompt}\n\n{addition}"})
 
 
-def _record_injected_context(run_id: str, sources: list[ContextSource]) -> None:
+def _record_injected_context(
+    run_id: str, sources: list[ContextSource], session_id: str | None = None
+) -> None:
     if not sources:
         return
     record_injected_context(
@@ -1410,6 +1479,7 @@ def _record_injected_context(run_id: str, sources: list[ContextSource]) -> None:
             )
             for source in sources
         ],
+        session_id=session_id,
     )
 
 
@@ -1424,6 +1494,7 @@ def _record_agent_run_completed(
     model_used: str,
     user_id: str,
     agent_name: str | None,
+    session_id: str | None = None,
 ) -> None:
     payload: dict[str, Any] = {
         "input": user_input,
@@ -1449,6 +1520,7 @@ def _record_agent_run_completed(
             payload=payload,
             user_id=user_id,
             agent_id=agent_name,
+            session_id=session_id,
         )
     )
 
@@ -1486,6 +1558,7 @@ async def run(
     outbound_connectors: dict[str, Any] | None = None,
     progress_func: ProgressFunc | None = None,
     session_context: Any = None,
+    conversation_address: ConversationAddress | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
@@ -1542,6 +1615,7 @@ async def run(
             outbound_connectors=outbound_connectors,
             progress_func=progress_func,
             session_context=session_context,
+            conversation_address=conversation_address,
         )
     finally:
         _active_runs -= 1
@@ -1578,6 +1652,7 @@ async def _run_inner(
     outbound_connectors: dict[str, Any] | None = None,
     progress_func: ProgressFunc | None = None,
     session_context: Any = None,
+    conversation_address: ConversationAddress | None = None,
 ) -> str:
     # Image-bearing messages route to the vision model (D6); raises here if
     # images are present but no vision route is configured, before any LLM call.
@@ -1640,7 +1715,7 @@ async def _run_inner(
             user_id, user_input, agent_name or "", active_cfg.max_tokens or 4096
         )
         _append_system_context(messages, system_prompt, built_context.text)
-        _record_injected_context(run_id, built_context.sources)
+        _record_injected_context(run_id, built_context.sources, session_id=session_id)
     except Exception as exc:  # noqa: BLE001 — long-term context is auxiliary
         _logger.debug("long_term_context_skipped", error=str(exc))
     # approval-suspend-resume D6: make the model aware of any outstanding approval so
@@ -1880,6 +1955,8 @@ async def _run_inner(
             outbound_connectors=outbound_connectors,
             sandbox_effective_mode=sandbox_mode,
             sandbox_workspace_mount=sandbox_workspace_mount,
+            conversation_address=conversation_address,
+            tool_context=tool_context,
         )
         pending = [s for s in slots if s.placeholder is None]
         # Progress is emitted once per execution batch (not per tool during planning):
@@ -1891,7 +1968,7 @@ async def _run_inner(
                 await progress_func({"type": "tool_call", "names": _names, "name": _names[0]})
             except Exception:  # noqa: BLE001 — progress feedback must not break the run
                 pass
-        results = await _execute_pending(
+        results, durations = await _execute_pending(
             pending,
             is_sub_agent=is_sub_agent,
             token=token,
@@ -1910,6 +1987,8 @@ async def _run_inner(
             session_id=session_id,
             agent_name=agent_name,
             user_id=user_id,
+            run_id=run_id,
+            durations=durations,
         )
 
         # approval-suspend-resume: a gated tool call wrote an awaiting_human_approval
@@ -1978,6 +2057,7 @@ async def _run_inner(
             model_used=model_used,
             user_id=user_id,
             agent_name=agent_name,
+            session_id=session_id,
         )
     except Exception as exc:  # noqa: BLE001 — completion trace is auxiliary
         _logger.debug("agent_run_completed_trace_skipped", error=str(exc))
@@ -2202,7 +2282,7 @@ async def run_stream(
             user_id, user_input, agent_name or "", active_cfg.max_tokens or 4096
         )
         _append_system_context(messages, system_prompt, built_context.text)
-        _record_injected_context(run_id, built_context.sources)
+        _record_injected_context(run_id, built_context.sources, session_id=session_id)
     except Exception as exc:  # noqa: BLE001 — long-term context is auxiliary
         _logger.debug("long_term_context_skipped", error=str(exc))
     reply = ""
@@ -2543,7 +2623,7 @@ async def run_stream(
                 )
             )
         pending = [s for s in slots if s.placeholder is None]
-        results = await _execute_pending(
+        results, durations = await _execute_pending(
             pending,
             is_sub_agent=False,
             token=token,
@@ -2611,6 +2691,15 @@ async def run_stream(
                 not failed,
                 window=loop_checker.window,
             )
+            # trace-tool-spans: span only for real executions (run_stream parity with run).
+            if not is_placeholder:
+                _record_tool_call_span(
+                    run_id=run_id,
+                    session_id=session_id,
+                    slot=slot,
+                    failed=failed,
+                    duration_ms=durations.get(slot.tc_id, 0.0),
+                )
 
     budget_dimension: str | None = None
     budget_scope: str | None = None
@@ -2701,6 +2790,7 @@ async def run_stream(
             model_used=model_used,
             user_id=user_id,
             agent_name=agent_name,
+            session_id=session_id,
         )
     except Exception as exc:  # noqa: BLE001 — completion trace is auxiliary
         _logger.debug("agent_run_completed_trace_skipped", error=str(exc))

@@ -10,11 +10,20 @@ from typing import Any, Literal
 
 from fleetent import paths
 from fleetent.db import SQLiteDatabase, create_database
-from fleetent.structured_logging import _redact_value
+from fleetent.integrations.sandbox import is_sensitive_name
+from fleetent.structured_logging import _redact_value, get_logger
 
 _MAX_STRING_LENGTH = 2048
 _MAX_SEQUENCE_LENGTH = 50
 _RAW_CONTENT_KEYS = frozenset({"content", "text", "transcript"})
+
+# args_summary upper bound (D2): serialized tool args are truncated to this many
+# characters (marker included) so a tool_call event can never bloat the trace.
+_ARGS_SUMMARY_MAX_LENGTH = 2048
+_ARGS_SUMMARY_TRUNCATION_MARKER = "...[truncated]"
+_REDACTED_ARG_PLACEHOLDER = "[REDACTED]"
+
+_logger = get_logger("observability.traces")
 
 _state_db: SQLiteDatabase | None = None
 
@@ -75,7 +84,9 @@ class InjectedContextTrace:
     metadata: dict[str, str]
 
 
-def record_injected_context(run_id: str, sources: list[InjectedContextTrace]) -> None:
+def record_injected_context(
+    run_id: str, sources: list[InjectedContextTrace], session_id: str | None = None
+) -> None:
     """Record source summaries for long-term context injected into a prompt."""
     if not sources:
         return
@@ -84,6 +95,7 @@ def record_injected_context(run_id: str, sources: list[InjectedContextTrace]) ->
             run_id=run_id,
             event_type="injected_context",
             payload={"sources": [_source_summary(source) for source in sources]},
+            session_id=session_id,
         )
     )
 
@@ -100,6 +112,60 @@ def _source_summary(source: InjectedContextTrace) -> dict[str, Any]:
             if key.lower() not in _RAW_CONTENT_KEYS
         },
     }
+
+
+def record_tool_call(run_id: str, session_id: str | None, payload: dict[str, Any]) -> None:
+    """Record one ``tool_call`` trace event for a tool that really executed.
+
+    Best-effort by contract: a write failure (DB unavailable, etc.) is logged at
+    warning and swallowed — observability is a side channel and MUST NOT affect the
+    tool result or the run. The caller builds ``payload`` (tool_name, tool_call_id,
+    args_summary, failed, duration_ms, risk); ``session_id`` binds the event to its
+    conversation when available.
+    """
+    try:
+        record_trace_event(
+            TraceEvent(
+                run_id=run_id,
+                event_type="tool_call",
+                payload=payload,
+                session_id=session_id,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 — side channel; never break the run
+        _logger.warn("tool_call_trace_record_failed", run_id=run_id, error=str(exc))
+
+
+def build_tool_args_summary(tool_args: dict[str, Any] | str) -> str:
+    """Redact and bound a tool's arguments into a trace-safe summary string.
+
+    Top-level argument names matching the sensitive-name baseline (SB5
+    ``is_sensitive_name``) have their values replaced before serialization, then the
+    JSON is truncated to a fixed cap with a marker (D2). Value-level redaction of
+    secrets embedded in benign-named fields is layered on by ``record_trace_event``.
+    """
+    parsed: Any
+    if isinstance(tool_args, str):
+        try:
+            parsed = json.loads(tool_args)
+        except (json.JSONDecodeError, ValueError):
+            parsed = None
+    else:
+        parsed = tool_args
+    if isinstance(parsed, dict):
+        redacted = {
+            str(key): (_REDACTED_ARG_PLACEHOLDER if is_sensitive_name(str(key)) else value)
+            for key, value in parsed.items()
+        }
+        text = json.dumps(redacted, ensure_ascii=False, sort_keys=True)
+    elif isinstance(tool_args, str):
+        text = tool_args
+    else:
+        text = json.dumps(tool_args, ensure_ascii=False, sort_keys=True)
+    if len(text) > _ARGS_SUMMARY_MAX_LENGTH:
+        keep = _ARGS_SUMMARY_MAX_LENGTH - len(_ARGS_SUMMARY_TRUNCATION_MARKER)
+        text = text[:keep] + _ARGS_SUMMARY_TRUNCATION_MARKER
+    return text
 
 
 def record_trace_event(event: TraceEvent) -> None:

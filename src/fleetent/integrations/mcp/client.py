@@ -24,6 +24,7 @@ import os
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
@@ -108,6 +109,12 @@ class McpServerConfig:
         default_factory=list
     )  # e.g. ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
     env: dict[str, str] = field(default_factory=dict)  # extra env vars for the subprocess
+    # unified-file-exchange: optional escape hatches for the /exchange namespace.
+    # `file_root` declares this server's effective file root explicitly (overrides the
+    # convention + any XDG_DATA_HOME); `file_isolation: "off"` opts the server out of the
+    # convention env injection entirely (reads the host's real ~/.config etc.).
+    file_root: str = ""
+    file_isolation: str = "on"  # "on" | "off"
     # Per-server HTTP timeouts in seconds: connect/discovery/probe/token vs tool call.
     connect_timeout: float = 10.0
     call_timeout: float = 30.0
@@ -396,15 +403,44 @@ def _resolve_env_ref(value: str) -> str:
     return value
 
 
-def _subprocess_env(server: McpServerConfig) -> dict[str, str]:
-    """Environment for a stdio MCP subprocess: the safe host whitelist plus the server's
-    explicitly declared env (which overrides the whitelist for same-named keys). The full
-    platform environment is never inherited (mcp-stdio-isolation).
+def _convention_cwd(server: McpServerConfig, agent_home: Path) -> Path:
+    """The partition-tree root a stdio MCP server runs in (unified-file-exchange)."""
+    return agent_home / "exchange" / server.id
 
-    ``env:VAR_NAME`` values are resolved from the parent process environment.
+
+def _convention_env(server: McpServerConfig, agent_home: Path) -> dict[str, str]:
+    """The convention-injected XDG triple pointing at the server's partition tree.
+
+    ``data/`` is the artifact root that maps to ``/exchange/<server_id>`` (enters the
+    namespace); ``config/`` and ``cache/`` are isolated outside it (silences ledger
+    noise from a server's settings/cache writes).
+    """
+    base = _convention_cwd(server, agent_home)
+    return {
+        "XDG_DATA_HOME": str(base / "data"),
+        "XDG_CONFIG_HOME": str(base / "config"),
+        "XDG_CACHE_HOME": str(base / "cache"),
+    }
+
+
+def _subprocess_env(server: McpServerConfig, agent_home: Path | None = None) -> dict[str, str]:
+    """Environment for a stdio MCP subprocess (mcp-stdio-isolation).
+
+    Merge order is safe host whitelist < convention injection < explicitly declared env.
+    The convention layer (unified-file-exchange) points the server's XDG dirs at its
+    ``<agent_home>/exchange/<id>`` partition tree so its products land in the addressable
+    ``/exchange`` namespace; an explicitly configured XDG is adopted in place (it wins).
+    ``file_isolation: "off"`` or a missing ``agent_home`` skips the convention (the latter
+    keeps legacy call sites byte-identical). The full platform environment is never
+    inherited; ``env:VAR_NAME`` values resolve from the parent process environment.
     """
     resolved = {k: _resolve_env_ref(v) for k, v in server.env.items()}
-    return {**_safe_base_env(), **resolved}
+    convention = (
+        _convention_env(server, agent_home)
+        if agent_home is not None and server.file_isolation != "off"
+        else {}
+    )
+    return {**_safe_base_env(), **convention, **resolved}
 
 
 def _is_tools_list_changed(message: Any) -> bool:

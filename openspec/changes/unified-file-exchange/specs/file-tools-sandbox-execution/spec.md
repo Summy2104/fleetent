@@ -16,12 +16,12 @@
 - **WHEN** read_file 收到 `/etc/passwd` 或 `../../etc/passwd`
 - **THEN** 返回越界错误，不读取该文件
 
-#### Scenario: 本会话 /exchange 路径放行
+#### Scenario: 本 scope /exchange 路径放行
 
-- **WHEN** read_file 收到 `/exchange/srv/a.xlsx` 且该工件台账归属当前会话
+- **WHEN** read_file 收到 `/exchange/srv/a.xlsx` 且该工件台账 `scope_key` == 当前 run scope_key
 - **THEN** 解析到有效文件根下真实文件并正常读取
 
-#### Scenario: 跨会话 /exchange 路径被拒
+#### Scenario: 跨 scope /exchange 路径被拒
 
-- **WHEN** read_file 收到归属其他会话的 `/exchange` 路径
+- **WHEN** read_file 收到 `scope_key` 不等于当前 run 的 `/exchange` 路径
 - **THEN** 返回归属校验失败的明确错误，不读取该文件

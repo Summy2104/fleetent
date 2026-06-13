@@ -248,10 +248,9 @@ def _resolve_delivery(task: dict[str, Any]) -> tuple[str, str, str, Any] | None:
                 return (platform, to, deliver.get("target_type", "user"), deliver.get("thread"))
     origin = task.get("origin")
     if isinstance(origin, dict):
-        platform = origin.get("platform")
-        to = origin.get("chat_id")
-        if platform and to:
-            return (platform, to, origin.get("target_type", "user"), origin.get("thread_id"))
+        addr = outbound.ConversationAddress.from_cron_origin(origin)
+        if addr.platform and addr.chat_id:
+            return (addr.platform, addr.chat_id, addr.target_type, addr.thread_id)
     return None
 
 

@@ -3,8 +3,8 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import fleetent.runtime.loop as agent_loop
-from fleetent.identity import Principal
 from fleetent.agent_config import AgentModels, ModelRouteEntry, ModelTarget
+from fleetent.identity import Principal
 from fleetent.long_term_ctx import BuiltContext, ContextSource
 from fleetent.model import ModelPolicySnapshot
 
@@ -79,7 +79,7 @@ def test_injected_context_trace_receives_budget_token_estimates(monkeypatch):
     monkeypatch.setattr(
         agent_loop,
         "record_injected_context",
-        lambda run_id, sources: captured.append((run_id, sources)),
+        lambda run_id, sources, session_id=None: captured.append((run_id, sources, session_id)),
     )
     source = ContextSource(
         source_type="memory",
@@ -89,7 +89,8 @@ def test_injected_context_trace_receives_budget_token_estimates(monkeypatch):
         token_estimate=17,
     )
 
-    agent_loop._record_injected_context("run-1", [source])
+    agent_loop._record_injected_context("run-1", [source], session_id="sess-1")
 
     assert captured[0][0] == "run-1"
     assert captured[0][1][0].token_estimate == 17
+    assert captured[0][2] == "sess-1"

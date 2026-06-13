@@ -39,6 +39,8 @@ Version history:
   v32  reflection_proposals.report_id
   v33  drop budget_usage
   v34  unify approval requests
+  v35  artifacts          (unified-file-exchange) MCP artifact ledger
+  v36  artifacts.scope_key (unified-file-exchange D0) attribution = workspace scope key
 """
 
 from __future__ import annotations
@@ -441,3 +443,29 @@ MIGRATIONS.append(
         """,
     )
 )
+
+# ── v35-v36: unified-file-exchange — MCP artifact ledger (reconcile: renumbered
+# after Bitbucket's v32-v34 since both mains independently used v32/v33). The ledger
+# is governance metadata, never a model interface: it records provenance + ownership
+# for files produced by MCP servers under the /exchange namespace and drives
+# attribution access control, the per-scope view, and audit. v36 adds `scope_key`
+# (D0): the visibility/ownership key (session_id when workspace_scope is `session`,
+# agent_name when `agent`; same source as the /workspace mount). session_id/user_id
+# become audit-only columns.
+MIGRATIONS.append(
+    (
+        MIGRATIONS[-1][0] + 1,
+        "CREATE TABLE IF NOT EXISTS artifacts ("
+        "artifact_id TEXT PRIMARY KEY, "
+        "server_id TEXT NOT NULL, "
+        "rel_path TEXT NOT NULL, "
+        "session_id TEXT, "
+        "user_id TEXT, "
+        "filename TEXT, "
+        "mime TEXT, "
+        "size INTEGER, "
+        "created_at TEXT"
+        ")",
+    )
+)
+MIGRATIONS.append((MIGRATIONS[-1][0] + 1, "ALTER TABLE artifacts ADD COLUMN scope_key TEXT"))

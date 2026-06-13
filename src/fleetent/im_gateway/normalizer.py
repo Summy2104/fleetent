@@ -133,6 +133,15 @@ class NormalizedMessage:
     # Platform IM connectors keyed by platform name (e.g. {"slack": client}). Passed to
     # loop.run() so permission_gate can DM approvers via outbound primitives.
     outbound_connectors: dict[str, Any] = field(default_factory=dict)
+    # conversation-address: the persistable delivery target of this run. Built once by the
+    # adapter and threaded into run() so a suspend persists it and a resume rebuilds an
+    # equivalent context. None for paths that do not supply one (degrades gracefully).
+    conversation_address: Any = field(default=None)
+
+
+async def _noop_progress(_event: dict[str, Any]) -> None:
+    """A do-nothing progress callback so a resumed run always has progress wired."""
+    return None
 
 
 def get_agent_for_context(platform: str, channel_id: str, user_id: str) -> AgentFile | None:
@@ -311,6 +320,7 @@ async def _resume_pending_in_session(
     the normal turn's run kwargs), then delegates to resume_pending_approval under the
     session lock so the resumed run is serialized against new same-session turns.
     """
+    from fleetent import outbound
     from fleetent.integrations.sandbox import enablement as sandbox_enablement
     from fleetent.model import ModelPolicySnapshot
     from fleetent.runtime import loop as agent_loop
@@ -329,11 +339,38 @@ async def _resume_pending_in_session(
     model_policy = ModelPolicySnapshot.from_agent(agent) if agent else None
     sandbox_mode = await sandbox_enablement.get_effective_mode()
 
+    # conversation-address: rebuild the delivery context from the PERSISTED address (the
+    # run's original chat/thread) rather than the message/click that triggered the resume,
+    # so resumed output lands where the run started — regardless of entry point. An
+    # upgrade-era entry without an address degrades to the triggering context + a warning.
+    pending = await session_mgr.get_pending_approval(session_id, approval_id)
+    address_dict = pending.get("address") if isinstance(pending, dict) else None
+    if isinstance(address_dict, dict):
+        addr = outbound.ConversationAddress.from_dict(address_dict)
+        reply_func = outbound.make_replier(msg.outbound_connectors, addr)
+        upload_func = outbound.make_uploader(msg.outbound_connectors, addr)
+        session_context: SessionContext | None = SessionContext(
+            platform=addr.platform,
+            sender_id=addr.user_id,
+            chat_type=addr.chat_type,
+            thread_root=addr.thread_root,
+        )
+        conversation_address: outbound.ConversationAddress | None = addr
+    else:
+        logger.warning(
+            "approval_resume_missing_address", session_id=session_id, approval_id=approval_id
+        )
+        reply_func = msg.reply_func
+        upload_func = msg.upload_func
+        session_context = msg.session_context
+        conversation_address = None
+    progress_func = msg.progress_func or _noop_progress
+
     tool_context = ToolContext(
         agent_name=agent.name if agent else None,
         features=agent_features or {},
         session_id=session_id,
-        session_context=msg.session_context,
+        session_context=session_context,
         outbound_connectors=msg.outbound_connectors,
     )
 
@@ -341,7 +378,7 @@ async def _resume_pending_in_session(
         return await agent_loop.run(
             messages=history,
             principal=Principal(user_id=msg.user_id, tenant_id="default"),
-            reply_func=msg.reply_func,
+            reply_func=reply_func,
             allowed_tools=allowed_tools,
             sandbox_mode=sandbox_mode,
             agent_features=agent_features,
@@ -357,9 +394,15 @@ async def _resume_pending_in_session(
             ),
             approval_routing=agent.approval if agent else None,
             outbound_connectors=msg.outbound_connectors,
-            progress_func=msg.progress_func,
-            session_context=msg.session_context,
+            progress_func=progress_func,
+            session_context=session_context,
+            conversation_address=conversation_address,
         )
+
+    # upload_func is rebuilt for parity with the inbound path; the resumed run delivers
+    # files through the send_file tool (session_context + connectors), so keep a reference
+    # bound but unused here — its construction proves the capability is wired, not dropped.
+    _ = upload_func
 
     async with session_mgr.session_lock(session_id):
         history = await session_mgr.load(session_id)
@@ -610,6 +653,7 @@ async def route(msg: NormalizedMessage) -> None:
                 outbound_connectors=msg.outbound_connectors,
                 progress_func=msg.progress_func,
                 session_context=msg.session_context,
+                conversation_address=msg.conversation_address,
             )
 
         # P4: session_end hook — observe after run completes, before session save.

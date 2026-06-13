@@ -13,9 +13,9 @@
 - **WHEN** agent 在 DM 会话调用 `send_file(path="report.pdf")`，且 workspace 内存在该文件
 - **THEN** 工具按 `session_context` 的 `platform`/`sender_id` 解析宿主真实文件并作为附件发回该发起人，结果文本回显**实际收件人**（`platform:sender_id`）
 
-#### Scenario: 本会话 /exchange 工件直发
+#### Scenario: 本 scope /exchange 工件直发
 
-- **WHEN** agent 在 DM 会话调用 `send_file(path="/exchange/google-drive/report.xlsx")`，该工件台账归属当前会话
+- **WHEN** agent 在 DM 会话调用 `send_file(path="/exchange/google-drive/report.xlsx")`，该工件台账 `scope_key` == 当前 run scope_key
 - **THEN** 工具解析有效文件根内真实文件并发回当前发起人
 
 #### Scenario: 路径逃出命名空间被拒
@@ -30,15 +30,15 @@
 
 ### Requirement: send_file 免审批当且仅当盒子封闭且收件人受约束
 
-`send_file` 免审批（不经 permission gate 直跑发送）MUST 当且仅当四条同时成立：回当前会话（收件人由 harness 固定）∧ 当前会话为 `dm`（`session_context.chat_type == "dm"`）∧ 文件全为本会话归属（workspace 相对路径且 `workspace_scope == session`，或 `/exchange` 工件台账归属当前会话）∧ `session_context` 非空（交互上下文）。
+`send_file` 免审批（不经 permission gate 直跑发送）MUST 当且仅当四条同时成立：回当前会话（收件人由 harness 固定）∧ 当前会话为 `dm`（`session_context.chat_type == "dm"`）∧ 文件全为本 run scope 归属（workspace 相对路径**恒为本 scope 私有**——它就是按当前 run 的 scope_key 键控的；或 `/exchange` 工件台账 `scope_key` == 当前 run scope_key）∧ `session_context` 非空（交互上下文）。
 
 任一条件不成立且 `session_context` 非空时，工具 MUST **升级为 medium 审批**而非拒绝：经 permission gate 走与 `send_im_message` 同级的审批流程，批准后发送、拒绝后不发送——既有"fail-closed 拒绝并指引换工具"的行为由"同一调用自动升级审批"取代。免审批/升级的判定 SHALL 经注册表的参数化风险（callable `risk_level`，见 permission-gate delta）在调用期求值；`sandbox-file-send` 原"MUST NOT 新增 action gate 动态 risk 缝"约束由本变更取代。
 
-免审批正当性仍绑定"收件人受约束 + 会话级封闭"：收件人由 harness 固定（无模型可控的不可信目标）、文件为本会话私有产物、且在私信场景。`session_context` 为 `None` 的路径不在本要求范围（按既有"无会话上下文的运行路径一律 fail-closed"要求处理，不升级审批——该路径无收件人可言且无审批回路）。
+免审批正当性绑定"收件人受约束 + scope 级封闭"：收件人由 harness 固定（无模型可控的不可信目标）、文件为本 run scope 私有产物、且在私信场景。多人部署 `workspace_scope` 被强制为 session，故"本 scope 归属"即"本会话归属"，不放大可发面；单人 `workspace_scope: agent` 下唯一发起人即文件所有者，agent 级私有文件直发亦不泄漏。`session_context` 为 `None` 的路径不在本要求范围（按既有"无会话上下文的运行路径一律 fail-closed"要求处理，不升级审批——该路径无收件人可言且无审批回路）。
 
 #### Scenario: 会话私信封闭时免审批直发
 
-- **WHEN** 四条件全部成立（DM、session workspace、本会话文件、交互上下文），agent 调用 `send_file(path="out.csv")`
+- **WHEN** 四条件全部成立（DM、本 scope 文件、交互上下文、回当前会话），agent 调用 `send_file(path="out.csv")`
 - **THEN** 工具不经审批直接发送，结果回显实际收件人
 
 #### Scenario: 频道会话升级审批
@@ -46,12 +46,12 @@
 - **WHEN** 当前会话为频道（`chat_type == "channel"`），agent 调用 `send_file`
 - **THEN** 该调用经 permission gate 弹出 medium 审批；批准后文件发出，拒绝后不发送
 
-#### Scenario: agent scope 工作区升级审批
+#### Scenario: agent scope 本 scope 文件免审批直发
 
-- **WHEN** `workspace_scope == agent`（跨会话复用工作区），agent 调用 `send_file`
-- **THEN** 该调用升级 medium 审批而非被拒绝
+- **WHEN** 单人部署 `workspace_scope == agent`，DM 会话中 agent 调用 `send_file` 发送本 scope 私有产物（workspace 相对路径或本 scope `/exchange` 工件）
+- **THEN** 工具不经审批直接发送（与 `/workspace` 一致：唯一发起人即所有者，不因 scope 为 agent 而被一刀升级或拒绝）
 
-#### Scenario: 跨会话 /exchange 工件升级审批
+#### Scenario: 跨 scope /exchange 工件升级审批
 
-- **WHEN** agent 调用 `send_file` 引用台账归属其他会话的 `/exchange` 工件
-- **THEN** 该调用升级 medium 审批；批准即跨会话授权，文件发回当前发起人
+- **WHEN** agent 调用 `send_file` 引用台账 `scope_key` 不等于当前 run 的 `/exchange` 工件
+- **THEN** 该调用升级 medium 审批；批准即跨 scope 授权，文件发回当前发起人
