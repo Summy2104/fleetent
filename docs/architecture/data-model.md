@@ -22,7 +22,7 @@
 
 ```
 data/
-  management.db                                   # 管理库（单库·跨主体·Alembic）—— 真实文件名（旧 fleetent.db 已改名落地；存量部署经 upgrade-time 重命名平滑迁移）
+  management.db                                   # 管理库（单库·跨主体·Alembic）
   <tenant>/
     kb.db / kb_vectors.db                         # KB 关系 / 向量（per-tenant）
     shared_memory.db / shared_memory_vectors.db   # 共享记忆 关系 / 向量（per-tenant）
@@ -115,9 +115,9 @@ graph TD
 > 跨库边的省略约定：① `reflection_proposals` 的 `subject/actor_user_id` 与 `approval_requests.approver_user_id` 同样 ⇢ `users`，从略；② agent 侧各表的 `tenant_id` 接缝列（§2"可换后端"）⇢ `tenants`，全部从略；③ `shared_memory_items.scope_id` 在 `scope_type=tenant` 时指向 `tenants`（图仅画 teams 一条代表边）。`session_meta → sessions` 是全库唯一一条 mgmt→agent 方向的跨库引用（platform 自有元数据挂 agent 侧会话，非 agent 反向写）。
 
 ### 3.2 管理库（Alembic · platform 侧）
-- **身份/租户**：`users`(根主体，含 `tenant_id`；**key 唯一真相源在 `api_keys`**——SHA-256 哈希，明文不落库，migration 080 已删 legacy `api_key` 列) · `api_keys`(→users) · `tenants`(主体，含 `approver_user_id`→users) · `teams`(→tenants，含 `approver_user_id`→users) · `blocked_registrations`(注册封禁名单，Alembic 078 收编，control-plane only，agent 运行时不 import)
+- **身份/租户**：`users`(根主体，含 `tenant_id`；**无 key 列**——key 唯一真相源在 `api_keys`，SHA-256 哈希、明文不落库) · `api_keys`(→users) · `tenants`(主体，含 `approver_user_id`→users) · `teams`(→tenants，含 `approver_user_id`→users) · `blocked_registrations`(注册封禁名单，control-plane only，agent 运行时不 import)
 - **IM**：`im_users`(渠道身份归并真相源；managed 运行时由注入 resolver 消费，standalone 不消费) · `im_connectors` · `im_channel_allowlist`——三表均带 **`owner_id` → users**（connector 注册归属的平台用户，默认 built-in admin，为将来 per-owner 接入预留）；`im_channel_allowlist` 与 `im_connectors` 经 `(owner_id, platform)` 复合约定关联（allowlist 无 connector id 列）
-- **Agent 定义/绑定**：`agents`(定义，含 `tenant_id`/`team_id`/`active_version_id`；**`name` 为不可变标识**——admin_state/session_meta/物理目录均以其为键，创建后不可改) · `agent_versions`(不可变快照) · `agent_admin_state`(版本/部署态) · `user_agents`(用户↔agent) · `channel_agents`(渠道↔agent) · `agent_kbs`(**agent↔KB 绑定唯一真相源**，带 `created_by` 审计) · `agent_mcp_servers` · `agent_mcp_server_bindings` · `agent_oauth_bindings` · `agent_secrets`(agent / shared scope 密文 secret) · `connectors`(工具 OAuth；含**休眠列 `agent_id`**——v1 减法裁决 defer，运行路径未消费) · `agent_skills` · `long_term_context_policies`(双轴：`tenant_id` 默认轴有 FK + `agent_id` 覆盖轴可空)
+- **Agent 定义/绑定**：`agents`(定义，含 `tenant_id`/`team_id`/`active_version_id`；**`name` 为不可变标识**——admin_state/session_meta/物理目录均以其为键，创建后不可改) · `agent_versions`(不可变快照) · `agent_admin_state`(版本/部署态) · `user_agents`(用户↔agent) · `channel_agents`(渠道↔agent) · `agent_kbs`(**agent↔KB 绑定唯一真相源**，带 `created_by` 审计) · `agent_mcp_servers` · `agent_mcp_server_bindings` · `agent_oauth_bindings` · `agent_secrets`(agent / shared scope 密文 secret) · `connectors`(工具 OAuth；含**休眠列 `agent_id`**——运行路径未消费) · `agent_skills` · `long_term_context_policies`(双轴：`tenant_id` 默认轴有 FK + `agent_id` 覆盖轴可空)
 - **KB 管理**：`kb_connectors`(connector 配置与自定义元数据；实际 KB 内容仍在 per-tenant `kb.db`)
 - **模型**：`model_providers` · `model_routes`(task_type→provider)
 - **治理/编排**：`audit_log`(平台管理操作审计) · `session_meta`(仅 playground / chat admin 创建路径会写入的 platform chat 管理元数据，如 origin / pinned / admin takeover；与 agent 侧 `sessions` 索引分责，`session_id` 仅作跨库逻辑引用)
@@ -158,7 +158,13 @@ erDiagram
 ```
 
 ### 3.3 per-agent 运行库（嵌入式 Y · `agent_state.db` · agent 侧）
-统一 MIGRATIONS（`runtime/agent_state_migrations.py`，单文件单 `user_version`）建 **10 张表**：`sessions`(会话元数据索引，仅 `session_id` / `user_id` / timestamps / `message_count`，**无 `agent_name` 列**，归属由 per-agent 物理库圈定) · `traces`(append-only 运行轨迹，挂 `session_id`/`run_id` 关联本库 `sessions`/`sub_agent_runs`) · `reflection_reports`(统一反思观察日志，domain=`memory|skill|knowledge_base|legacy`) · `reflection_proposals`(统一 memory/skill 提案实体，domain=`memory|skill`，仅保留提案内容与 apply provenance，不再存审批生命周期列) · `memory_items`(per-user 语义记忆，**无 namespace 列**，agent 隔离靠物理库) · `approval_requests`/`tool_auto_approvals`(审批生命周期单一真相源 + 工具调用 auto-approve 指纹表；`approval_requests.subject_type=tool_call|memory_proposal|skill_proposal`，tool-call 的上下文仍留在 session meta `pending_approvals`) · `session_anti_flap`(压缩防抖，per session) · `sub_agent_runs`(子 agent 生命周期) · `scheduled_tasks`(agent 侧 cron/once/interval 定时任务；`typed-scheduled-task-delivery` 增 `task_type`=`notify`/`generate`/`action` + `notify_text` 定稿正文——notify 由调度器直发不跑 agent，generate 跑 agent 按投递契约发回复，action 由 agent 自发、调度器不广播)。来历注记：`session_anti_flap`/`sub_agent_runs` 经 `agent_scope` + `db.py`（已去 `user_store.DB_PATH` 与裸 `sqlite3.connect`），reflection 域收口为 `reflection_reports` + `reflection_proposals` 两表（unify-self-evolution-model），`scheduled_tasks` 由 retire-standalone-fleetent-db 从遗留 `fleetent.db` 迁入；跨 run 分层预算已退役，对应历史表由新版本嵌入式迁移在 head 上 drop。
+统一 MIGRATIONS（`runtime/agent_state_migrations.py`，单文件单 `user_version`）建 **10 张表**：
+
+- **会话/运行**：`sessions`(会话元数据索引，仅 `session_id` / `user_id` / timestamps / `message_count`，**无 `agent_name` 列**——归属由 per-agent 物理库圈定) · `traces`(append-only 运行轨迹，挂 `session_id` / `run_id`) · `session_anti_flap`(压缩防抖，per session) · `sub_agent_runs`(子 agent 生命周期)
+- **记忆**：`memory_items`(per-user 语义记忆，**无 namespace 列**，agent 隔离靠物理库)
+- **审批**：`approval_requests`(审批生命周期**单一真相源**，`subject_type=tool_call|memory_proposal|skill_proposal`；tool-call 的挂起上下文留在 session meta `pending_approvals`) · `tool_auto_approvals`(工具调用 auto-approve 指纹表，仅 tool_call)
+- **反思**：`reflection_reports`(观察日志，domain=`memory|skill|knowledge_base|legacy`) · `reflection_proposals`(memory/skill 提案实体，domain=`memory|skill`；仅存提案内容 + apply 产出，审批生命周期在 `approval_requests`)
+- **调度**：`scheduled_tasks`(cron/once/interval 定时任务；`task_type`=`notify`/`generate`/`action` + `notify_text`——notify 调度器直发不跑 agent、generate 跑 agent 按投递契约发回复、action 由 agent 自发不广播)
 
 ```mermaid
 erDiagram
@@ -218,7 +224,7 @@ erDiagram
 ### 3.5 KB 关系库（嵌入式 Y · `kb.db` · agent / ingest 侧 · per-tenant）
 **已在本库（`knowledge_base/core/migrations.py` 的 Y）**：`knowledge_bases`(PK `(tenant_id,kb_id)`) · `knowledge_documents` · `knowledge_chunks`(+`chunks_fts`) · `knowledge_source_states` · `kb_entities` · `kb_entity_mentions` · `kb_relations` · `knowledge_connector_status`。
 
-> `kb_extraction_runs` 已移除：entity extraction 的 run 摘要只同步返回给调用方，若要审计走 observability trace event，不再持久化 KB 业务表。KB 反思**观察**统一落 agent 自己的 `agent_state.db.reflection_reports(domain=knowledge_base)`（Y）；旧管理库 `kb_reflection_reports` 已由 alembic 075 drop。KB **remediation**（写回/sync）仍在 platform / ingest 面，后续独立 change 处理，不在 agent 侧 apply。
+> 无 `kb_extraction_runs`：entity extraction 的 run 摘要只同步返回调用方、要审计走 observability trace，不持久化。KB 反思**观察**落 agent 的 `agent_state.db.reflection_reports(domain=knowledge_base)`。KB **remediation**（写回/sync）在 platform / ingest 面，不在 agent 侧 apply。
 
 ```mermaid
 erDiagram
@@ -254,8 +260,3 @@ erDiagram
 ## 6. platform 读侧投影
 
 platform 控制面经**只读连接**（不迁移、`mode=ro`）+ 共享 store 读函数 + management.db registry 读 agent 侧库；不物化副本、不要求 agent 反向写。详见 [`target-architecture.md` §7](./target-architecture.md)。
-
-## 命名对齐（已落地）
-
-- **管理库文件改名 `fleetent.db → management.db`**：已落地。`database_url` 默认、`alembic.ini`、`scripts/install*.sh`、`scripts/upgrade.py` 与 `read_projection.py` 注释均指真实文件 `management.db`；存量部署经 `scripts/upgrade.py` 的 upgrade-time 重命名（backup 后、migrate 前、幂等、含 `-wal`/`-shm` sidecar）平滑迁移。
-- **standalone agent `fleetent.db` 已退役**（`retire-standalone-fleetent-db`）：standalone agent 不再创建 `fleetent.db`，原唯一住客 `scheduled_tasks` 已迁入 per-agent `agent_state.db`（嵌入式 Y v27），boot 改以 `data_dir` 锚点路由、不再设 `DATABASE_URL`；`db.default_database()` 兜底入口一并移除。上方"管理库 `fleetent.db→management.db`"指的是受管模式管理库的历史改名，与已退役的 standalone agent DB 无关。
