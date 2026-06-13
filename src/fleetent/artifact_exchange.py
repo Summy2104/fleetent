@@ -14,6 +14,7 @@ parameters through the unified DB boundary. No `fleetent.platform.*` import.
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -245,6 +246,61 @@ def effective_root(server: McpServerConfig, agent_home: Path) -> Path:
 def register_server_root(server_id: str, root: Path) -> None:
     """Bind a server's effective file root so `/exchange/<server_id>` can resolve."""
     _server_roots[server_id] = root
+
+
+# Path tail after the effective root: stop at whitespace and common JSON/text delimiters
+# so a host path embedded in result text (`"localPath": "<root>/a/b.xlsx"`) is captured
+# without swallowing the trailing quote/comma.
+_PATH_TAIL = r'(/[^\s"\'<>),;]+)'
+
+
+def _safe_size(path: str) -> int | None:
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return None
+
+
+def rewrite_and_register(
+    server_id: str,
+    text: str,
+    scope_key: str | None,
+    *,
+    session_id: str | None = None,
+    user_id: str | None = None,
+) -> str:
+    """Rewrite in-root host paths in a tool result to `/exchange/<server_id>/<rel>` + register.
+
+    The deterministic discovery layer (D2): a host absolute path inside the server's
+    registered effective root is prefix-replaced with its `/exchange` canonical form and
+    the file registered in the ledger, attributed to the current run's ``scope_key``
+    (``session_id``/``user_id`` recorded for audit only). A no-op when the server has no
+    registered root or no ``scope_key`` is available (cannot attribute) — text byte-identical.
+    Paths outside the root are never touched.
+    """
+    root = _server_roots.get(server_id)
+    if root is None or not scope_key:
+        return text
+    base = os.path.normpath(str(root))
+    pattern = re.compile(re.escape(base) + _PATH_TAIL)
+    rewritten: dict[str, str] = {}
+
+    def _sub(match: re.Match[str]) -> str:
+        rel = match.group(1).lstrip("/")
+        if rel not in rewritten:
+            register(
+                server_id=server_id,
+                rel_path=rel,
+                scope_key=scope_key,
+                session_id=session_id,
+                user_id=user_id,
+                filename=os.path.basename(rel),
+                size=_safe_size(os.path.join(base, rel)),
+            )
+            rewritten[rel] = f"{EXCHANGE_ROOT}/{server_id}/{rel}"
+        return rewritten[rel]
+
+    return pattern.sub(_sub, text)
 
 
 def resolve(path: str, scope_key: str | None, *, approved: bool = False) -> Path:

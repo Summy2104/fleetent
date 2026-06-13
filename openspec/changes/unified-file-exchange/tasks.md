@@ -29,8 +29,8 @@
 
 - [x] 2.1 测试：`_subprocess_env` 合并序 白名单<约定注入<显式 env；约定注入 XDG 三件套+cwd 指向分区树；`file_isolation: off` 跳过注入——unit，先红
 - [x] 2.2 实现：约定注入层 + `McpServerConfig` 新增 `file_root`/`file_isolation` 字段 + stdio 启动 cwd 设置——绿
-- [ ] 2.3 测试：结果路径确定性改写（有效根内 host 绝对路径→`/exchange` 规范路径并登记，归因到当前 run 的 scope_key；根外路径不动）——unit，先红
-- [ ] 2.4 实现：咽喉层结果改写 + 登记挂接（scope_key 经 dispatch→咽喉穿线，审计列记 session_id/user_id）——绿
+- [x] 2.3 测试：结果路径确定性改写（有效根内 host 绝对路径→`/exchange` 规范路径并登记，归因到当前 run 的 scope_key；根外路径不动）——unit，先红
+- [x] 2.4 实现：咽喉层结果改写 + 登记挂接（scope_key 经 dispatch→咽喉穿线，审计列记 session_id/user_id）——绿
 - [ ] 2.5 测试：调用窗口 diff 兜底登记（新文件登记归因到当前 run scope_key、点文件/`*.tmp` 跳过、per-server 锁下并发归因不错乱、diff 异常不影响结果）——integration，先红
 - [ ] 2.6 实现：快照 diff + per-server `asyncio.Lock` 包裹调用窗口——绿
 

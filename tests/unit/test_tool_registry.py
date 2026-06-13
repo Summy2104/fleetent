@@ -99,11 +99,12 @@ async def test_dispatch_routes_in_scope_mcp_tool_with_agent_scope(monkeypatch):
 
     captured: dict[str, object] = {}
 
-    async def fake_call_tool(server_id, tool_name, args, scope=None):  # type: ignore[no-untyped-def]
+    async def fake_call_tool(server_id, tool_name, args, scope=None, **kw):  # type: ignore[no-untyped-def]
         captured["server_id"] = server_id
         captured["tool_name"] = tool_name
         captured["args"] = args
         captured["scope"] = scope
+        captured["scope_key"] = kw.get("scope_key")
         return "ok"
 
     monkeypatch.setattr(mcp_client, "call_tool", fake_call_tool)

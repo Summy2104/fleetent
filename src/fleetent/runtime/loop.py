@@ -266,6 +266,24 @@ def _agent_bound_to_server(server_id: str, allowed_tools: list[str] | None) -> b
     )
 
 
+def _resolve_scope_key(session_id: str | None, agent_name: str | None) -> str | None:
+    """The workspace scope key for /exchange attribution (D0), mirroring /workspace.
+
+    Reads the process sandbox manager's resolved scope so MCP-produced artifacts are
+    keyed exactly like the `/workspace` mount (session_id under `session`, agent_name
+    under `agent`). Best-effort: if the manager isn't available (sandbox off / not yet
+    built), fall back to session_id so the common (session-scoped) case still attributes.
+    """
+    try:
+        from fleetent.integrations.sandbox.manager import workspace_scope_key
+        from fleetent.tools.builtin_tools import _get_manager
+
+        return workspace_scope_key(_get_manager().scope, session_id or "", agent_name or "default")
+    except Exception as exc:  # noqa: BLE001 — attribution key is auxiliary, never break the run
+        _logger.debug("scope_key_resolve_fell_back_to_session", error=str(exc))
+        return session_id
+
+
 def _strict_blocked_servers(allowed_tools: list[str] | None) -> list[str]:
     """Handle MCP degradation for this agent (MCP4): return strict-mode unavailable
     servers the agent is bound to (→ stop); log degrade(warning)/silent(debug) for
@@ -1699,6 +1717,7 @@ async def _run_inner(
         agent_name=agent_name,
         features=agent_features or {},
         session_id=session_id,
+        scope_key=_resolve_scope_key(session_id, agent_name),
         session_context=session_context,
         principal=principal,
         outbound_connectors=outbound_connectors or {},
@@ -2228,6 +2247,7 @@ async def run_stream(
         agent_name=agent_name,
         features=agent_features or {},
         session_id=session_id,
+        scope_key=_resolve_scope_key(session_id, agent_name),
         session_context=session_context,
         principal=principal,
     )
