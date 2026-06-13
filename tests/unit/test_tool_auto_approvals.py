@@ -1,8 +1,8 @@
-"""Unit tests for the allow-always fingerprint (approval-minimization)."""
+"""Unit tests for the tool auto-approval fingerprint (approval-minimization)."""
 
 from __future__ import annotations
 
-from fleetent.governance.approval_allowlist_store import fingerprint
+from fleetent.governance.tool_auto_approvals_store import fingerprint
 
 
 def test_fingerprint_stable() -> None:

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
+from fleetent.governance import approval_request_store
 from fleetent.memory import store
 
 MaintenanceAction = Literal[
@@ -74,10 +75,10 @@ def _to_dict(row: dict[str, Any]) -> MemoryMaintenanceProposal:
         risk=cast(MaintenanceRisk, row["risk"]),
         reason=str(row["reason"]),
         evidence_ids=[str(value) for value in json.loads(str(row["evidence_json"]))],
-        status=cast(MaintenanceStatus, row["status"]),
+        status=cast(MaintenanceStatus, _proposal_status_for_row(row)),
         created_at=_parse_datetime(row["created_at"]),
         updated_at=_parse_datetime(row["updated_at"]),
-        expires_at=_parse_optional_datetime(row.get("expires_at")),
+        expires_at=_approval_request_datetime(row["id"], "expires_at"),
         report_id=cast(str | None, row["report_id"]),
     )
 
@@ -113,10 +114,6 @@ def list_memory_maintenance_proposals(
     if start_ts is not None:
         clauses.append("updated_at >= :start_ts")
         params["start_ts"] = store.format_datetime(start_ts)
-    if status is not None:
-        clauses.append("status = :status")
-        params["status"] = status
-
     query = f"""
             SELECT *
             FROM reflection_proposals
@@ -136,7 +133,10 @@ def list_memory_maintenance_proposals(
         if "no such table" in str(exc).lower():
             return []
         raise
-    return [_to_dict(row) for row in rows]
+    proposals = [_to_dict(row) for row in rows]
+    if status is None:
+        return proposals
+    return [proposal for proposal in proposals if proposal.status == status]
 
 
 def mark_shared_memory_proposal_applied(proposal_id: str) -> MemoryMaintenanceProposal:
@@ -168,17 +168,17 @@ def mark_shared_memory_proposal_applied(proposal_id: str) -> MemoryMaintenancePr
     store.database().execute(
         """
         UPDATE reflection_proposals
-        SET status = :status,
-            updated_at = :updated_at,
+        SET updated_at = :updated_at,
             payload_json = :payload_json,
             evidence_json = :evidence_json,
             risk = :risk,
-            reason = :reason
+            reason = :reason,
+            actor_user_id = :actor_user_id,
+            applied_at = :applied_at
         WHERE id = :id
         """,
         {
             "id": updated.id,
-            "status": updated.status,
             "updated_at": store.format_datetime(updated.updated_at),
             "payload_json": json.dumps(
                 {
@@ -191,6 +191,37 @@ def mark_shared_memory_proposal_applied(proposal_id: str) -> MemoryMaintenancePr
             "evidence_json": json.dumps(updated.evidence_ids, sort_keys=True),
             "risk": updated.risk,
             "reason": updated.reason,
+            "actor_user_id": None,
+            "applied_at": store.format_datetime(updated.updated_at),
         },
     )
     return updated
+
+
+def _approval_request_row(proposal_id: object) -> dict[str, Any] | None:
+    try:
+        approval_request_store.set_state_db(store.database())
+        return approval_request_store.get_request(str(proposal_id))
+    except RuntimeError:
+        return None
+
+
+def _approval_request_value(proposal_id: object, key: str) -> str | None:
+    row = _approval_request_row(proposal_id)
+    if row is None:
+        return None
+    value = row.get(key)
+    return str(value) if value is not None else None
+
+
+def _approval_request_datetime(proposal_id: object, key: str) -> datetime | None:
+    return _parse_optional_datetime(_approval_request_value(proposal_id, key))
+
+
+def _proposal_status_for_row(row: dict[str, Any]) -> str:
+    if row.get("applied_at") is not None:
+        return "applied"
+    request = _approval_request_row(row["id"])
+    if request is None:
+        return "pending"
+    return str(request["status"])

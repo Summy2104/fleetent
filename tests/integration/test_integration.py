@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-import fleetent.governance.approval_allowlist_store as approval_allowlist_store
 import fleetent.governance.approval_store as approval_store
+import fleetent.governance.tool_auto_approvals_store as tool_auto_approvals_store
 import fleetent.im_gateway.outbound as outbound_mod
 import fleetent.session.manager as session_mgr
 from fleetent.db import SQLiteDatabase
@@ -58,7 +57,7 @@ def isolated_db(tmp_path, monkeypatch):
     state_db = SQLiteDatabase(path=approval_db)
     migrate(state_db, AGENT_STATE_MIGRATIONS)
     monkeypatch.setattr(approval_store, "_state_db", state_db)
-    monkeypatch.setattr(approval_allowlist_store, "_state_db", state_db)
+    monkeypatch.setattr(tool_auto_approvals_store, "_state_db", state_db)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{managed_db}")
     _apply_migrations(managed_db)
@@ -146,10 +145,9 @@ async def test_permission_gate_pending_then_resolve_finalizes(isolated_db, monke
     assert result == "pending"
 
     def _status() -> str:
-        conn = sqlite3.connect(isolated_db / "agent.db")
-        row = conn.execute("SELECT status FROM approvals WHERE id = ?", ("test-appr-1",)).fetchone()
-        conn.close()
-        return row[0]
+        row = approval_store.get_approval("test-appr-1")
+        assert row is not None
+        return str(row["status"])
 
     assert _status() == "pending"
     assert await gate.resolve("test-appr-1", "approved", approver_user_id="U_APPROVER") is True
@@ -163,15 +161,7 @@ async def test_tool_not_in_allowed_tools_raises_before_approval(isolated_db):
     with pytest.raises(PermissionError, match="not permitted"):
         tr.dispatch("shell", {}, allowed_tools=["github__*"])
 
-    # Verify no approval row was created (table may not exist — that's fine too)
-    try:
-        conn = sqlite3.connect(isolated_db / "users.db")
-        count = conn.execute("SELECT COUNT(*) FROM approvals").fetchone()[0]
-        conn.close()
-        assert count == 0
-    except sqlite3.OperationalError:
-        # approvals table not created — PermissionError fired before any DB access, which is correct
-        pass
+    assert approval_store.list_approvals() == []
 
 
 async def test_session_history_accumulates_across_messages(isolated_db, monkeypatch):

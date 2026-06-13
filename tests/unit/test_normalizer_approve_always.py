@@ -26,10 +26,12 @@ def _msg(text: str) -> NormalizedMessage:
 
 @pytest.fixture
 def spy_resolve(monkeypatch):
-    from fleetent.governance.permission_gate import _default_gate
+    import fleetent.governance.approval_router as approval_router
+    import fleetent.session.manager as session_mgr
 
     resolve = AsyncMock(return_value=True)
-    monkeypatch.setattr(_default_gate, "resolve", resolve)
+    monkeypatch.setattr(approval_router, "resolve_approval_request", resolve)
+    monkeypatch.setattr(session_mgr, "get_pending_approval", AsyncMock(return_value=None))
     return resolve
 
 

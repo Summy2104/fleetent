@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Literal, cast
 
 from fleetent import observability
+from fleetent.reflection import reflection as reflection_api
 from fleetent.reflection import store
 from fleetent.reflection.reflection import (
     AutoMaintenancePolicy,
@@ -106,7 +107,7 @@ def _load_proposal_type(
     raise ValueError(f"proposal {proposal_id} does not exist")
 
 
-async def resolve(
+async def resolve_reflection_proposal_action(
     proposal_id: str,
     *,
     decision: DecisionInput,
@@ -115,6 +116,7 @@ async def resolve(
     auto_policy: AutoMaintenancePolicy | None = None,
 ) -> MemoryMaintenanceProposal | SkillProposal:
     """Resolve one reflection proposal through governance gate handlers."""
+    use_public_reflection_api = getattr(reflection_api, "_state_db", None) is not None
     kind, proposal = _load_proposal_type(proposal_id)
     normalized = _decision(decision)
 
@@ -123,6 +125,16 @@ async def resolve(
         actor = actor_user_id if actor_user_id is not None else memory_proposal.user_id
 
         if normalized == "approve":
+            if use_public_reflection_api:
+                approved_memory = reflection_api.approve_memory_maintenance_proposal(
+                    memory_proposal.id,
+                    actor_user_id=actor,
+                )
+                return await reflection_api.apply_memory_maintenance_proposal(
+                    approved_memory.id,
+                    actor_user_id=actor,
+                    auto_policy=auto_policy,
+                )
             approved_memory = approve_memory_maintenance_proposal(
                 memory_proposal.id,
                 actor_user_id=actor,
@@ -136,6 +148,11 @@ async def resolve(
 
         if normalized == "reject":
             reason = f"proposal {proposal_id} rejected via reflection gate"
+            if use_public_reflection_api:
+                return reflection_api.reject_memory_maintenance_proposal(
+                    memory_proposal.id,
+                    actor_user_id=actor,
+                )
             return reject_memory_maintenance_proposal(
                 memory_proposal.id,
                 actor_user_id=actor,
@@ -143,9 +160,17 @@ async def resolve(
             )
 
         if normalized == "expire":
+            if use_public_reflection_api:
+                return reflection_api.expire_memory_maintenance_proposal(memory_proposal.id)
             return expire_memory_maintenance_proposal(memory_proposal.id)
 
         if normalized == "apply":
+            if use_public_reflection_api:
+                return await reflection_api.apply_memory_maintenance_proposal(
+                    memory_proposal.id,
+                    actor_user_id=actor,
+                    auto_policy=auto_policy,
+                )
             return await apply_memory_maintenance_proposal(
                 memory_proposal.id,
                 actor_user_id=actor,
@@ -160,6 +185,15 @@ async def resolve(
     if normalized == "approve":
         if reviewer is None:
             raise ValueError("reviewer_user_id is required")
+        if use_public_reflection_api:
+            approved_skill = reflection_api.approve_skill_proposal(
+                skill_proposal.id,
+                reviewer_user_id=reviewer,
+            )
+            return await reflection_api.apply_skill_proposal(
+                approved_skill.id,
+                actor_user_id=reviewer,
+            )
         approved_skill = approve_skill_proposal(
             skill_proposal.id,
             reviewer_user_id=reviewer,
@@ -173,6 +207,12 @@ async def resolve(
     if normalized == "reject":
         if reviewer is None:
             raise ValueError("reviewer_user_id is required")
+        if use_public_reflection_api:
+            return reflection_api.reject_skill_proposal(
+                skill_proposal.id,
+                reviewer_user_id=reviewer,
+                reason=f"proposal {proposal_id} rejected via reflection gate",
+            )
         return reject_skill_proposal(
             skill_proposal.id,
             reviewer_user_id=reviewer,
@@ -182,6 +222,11 @@ async def resolve(
     if normalized == "expire":
         if reviewer is None:
             raise ValueError("reviewer_user_id is required")
+        if use_public_reflection_api:
+            return expire_skill_proposal(
+                skill_proposal.id,
+                reviewer_user_id=reviewer,
+            )
         return expire_skill_proposal(
             skill_proposal.id,
             reviewer_user_id=reviewer,
@@ -194,12 +239,34 @@ async def resolve(
             actor = reviewer_user_id
         else:
             raise ValueError("actor_user_id is required")
+        if use_public_reflection_api:
+            return await reflection_api.apply_skill_proposal(
+                skill_proposal.id,
+                actor_user_id=actor,
+            )
         return await apply_skill_proposal(
             skill_proposal.id,
             actor_user_id=actor,
         )
 
     raise ValueError(f"unsupported decision: {decision}")
+
+
+async def resolve(
+    proposal_id: str,
+    *,
+    decision: DecisionInput,
+    actor_user_id: str | None = None,
+    reviewer_user_id: str | None = None,
+    auto_policy: AutoMaintenancePolicy | None = None,
+) -> MemoryMaintenanceProposal | SkillProposal:
+    return await resolve_reflection_proposal_action(
+        proposal_id,
+        decision=decision,
+        actor_user_id=actor_user_id,
+        reviewer_user_id=reviewer_user_id,
+        auto_policy=auto_policy,
+    )
 
 
 def approve_skill_proposal(

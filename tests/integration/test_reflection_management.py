@@ -1,19 +1,15 @@
-from fleetent.db import create_database
+from fleetent.db import SQLiteDatabase
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 
 
 def _patch_reflection_db(monkeypatch, tmp_path):
-    import sqlite3
-
     from fleetent import reflection
 
     db_path = tmp_path / "reflection-mgmt.db"
-    with sqlite3.connect(db_path) as conn:
-        for version, sql in AGENT_STATE_MIGRATIONS:
-            conn.execute(sql)
-            conn.execute(f"PRAGMA user_version = {version}")
-    database = create_database(f"sqlite:///{db_path}")
-    monkeypatch.setattr(reflection, "_database", lambda: database)
+    database = SQLiteDatabase(path=db_path)
+    migrate(database, AGENT_STATE_MIGRATIONS)
+    monkeypatch.setattr(reflection, "_state_db", database)
     return database
 
 

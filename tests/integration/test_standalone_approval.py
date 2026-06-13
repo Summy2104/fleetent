@@ -16,8 +16,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-import fleetent.governance.approval_allowlist_store as allowlist_store_mod
 import fleetent.governance.approval_store as approval_store_mod
+import fleetent.governance.tool_auto_approvals_store as allowlist_store_mod
 
 # Patch the real module: permission_gate imports from fleetent.outbound; patching
 # the fleetent.im_gateway.outbound re-export shim would not take effect.

@@ -39,10 +39,24 @@ def test_retired_budget_table_dropped_when_legacy_db_migrates_to_head(tmp_path: 
     from fleetent.runtime.agent_state_migrations import MIGRATIONS
 
     db_path = tmp_path / "agent_state.db"
-    pre_drop = [migration for migration in MIGRATIONS if migration[0] < MIGRATIONS[-1][0]]
+    drop_version = next(version for version, sql in MIGRATIONS if _RETIRED_TABLE in sql)
+    pre_drop = [migration for migration in MIGRATIONS if migration[0] < drop_version]
+    post_drop = [migration for migration in MIGRATIONS if migration[0] >= drop_version]
     migrate(SQLiteDatabase(path=db_path), pre_drop)
 
     conn = sqlite3.connect(db_path)
+    conn.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {_RETIRED_TABLE} (
+            scope   TEXT NOT NULL,
+            key     TEXT NOT NULL,
+            period  TEXT NOT NULL,
+            turns   INTEGER NOT NULL,
+            tokens  INTEGER NOT NULL,
+            PRIMARY KEY (scope, key, period)
+        )
+        """
+    )
     conn.execute(
         f"INSERT INTO {_RETIRED_TABLE} (scope, key, period, turns, tokens) VALUES (?, ?, ?, ?, ?)",
         ("user", "u1", "2026-06", 3, 120),
@@ -50,7 +64,7 @@ def test_retired_budget_table_dropped_when_legacy_db_migrates_to_head(tmp_path: 
     conn.commit()
     conn.close()
 
-    migrate(SQLiteDatabase(path=db_path), MIGRATIONS)
+    migrate(SQLiteDatabase(path=db_path), post_drop)
 
     assert _RETIRED_TABLE not in _tables(db_path), (
         "legacy rows for the retired cross-run budget table must be dropped at head"

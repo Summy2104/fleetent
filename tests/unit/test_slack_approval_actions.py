@@ -38,7 +38,7 @@ async def test_approve_click_resolves_with_clicker_id_and_updates_message() -> N
     ack = AsyncMock()
     client = AsyncMock()
     with patch(
-        "fleetent.governance.permission_gate._default_gate.resolve",
+        "fleetent.governance.approval_router.resolve_approval_request",
         AsyncMock(return_value=True),
     ) as resolve:
         await slack.handle_approval_action(ack, _body("approval_approve"), client)
@@ -60,7 +60,7 @@ async def test_reject_click_resolves_rejected() -> None:
 
     client = AsyncMock()
     with patch(
-        "fleetent.governance.permission_gate._default_gate.resolve",
+        "fleetent.governance.approval_router.resolve_approval_request",
         AsyncMock(return_value=True),
     ) as resolve:
         await slack.handle_approval_action(
@@ -75,7 +75,7 @@ async def test_approve_always_click_sets_always_flag() -> None:
 
     client = AsyncMock()
     with patch(
-        "fleetent.governance.permission_gate._default_gate.resolve",
+        "fleetent.governance.approval_router.resolve_approval_request",
         AsyncMock(return_value=True),
     ) as resolve:
         await slack.handle_approval_action(
@@ -92,7 +92,7 @@ async def test_unauthorized_click_shows_ephemeral_and_keeps_prompt() -> None:
 
     client = AsyncMock()
     with patch(
-        "fleetent.governance.permission_gate._default_gate.resolve",
+        "fleetent.governance.approval_router.resolve_approval_request",
         AsyncMock(return_value=False),
     ):
         await slack.handle_approval_action(
@@ -131,7 +131,7 @@ async def test_approve_button_triggers_resume(monkeypatch):
 
     client = AsyncMock()
     monkeypatch.setattr(
-        "fleetent.governance.permission_gate._default_gate.resolve",
+        "fleetent.governance.approval_router.resolve_approval_request",
         AsyncMock(return_value=True),
     )
     # Approval row carries the run's (namespaced) session id; pending entry has approvers.

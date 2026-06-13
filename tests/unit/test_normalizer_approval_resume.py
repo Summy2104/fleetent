@@ -31,7 +31,7 @@ def _msg(text: str) -> NormalizedMessage:
 
 @pytest.fixture
 def _resume_env(monkeypatch):
-    from fleetent.governance.permission_gate import _default_gate
+    from fleetent.governance import approval_router
     from fleetent.session import manager as session_mgr
 
     entry = {
@@ -54,7 +54,7 @@ def _resume_env(monkeypatch):
 
     monkeypatch.setattr(session_mgr, "session_lock", _noop_lock)
     resolve = AsyncMock(return_value=True)
-    monkeypatch.setattr(_default_gate, "resolve", resolve)
+    monkeypatch.setattr(approval_router, "resolve_approval_request", resolve)
 
     resume = AsyncMock(return_value="已帮你把消息发出去了。")
     monkeypatch.setattr(normalizer, "resume_pending_approval", resume, raising=False)
@@ -113,8 +113,7 @@ async def test_text_approve_uses_run_session_not_message_session(monkeypatch):
     row (like the button path), not from the approve message's session."""
     import contextlib
 
-    from fleetent.governance import approval_store
-    from fleetent.governance.permission_gate import _default_gate
+    from fleetent.governance import approval_router, approval_store
     from fleetent.session import manager as session_mgr
 
     run_session = "slack:dm:U_REQ:1111.0001"  # where the run suspended + stored pending
@@ -145,7 +144,7 @@ async def test_text_approve_uses_run_session_not_message_session(monkeypatch):
         yield
 
     monkeypatch.setattr(session_mgr, "session_lock", _noop_lock)
-    monkeypatch.setattr(_default_gate, "resolve", AsyncMock(return_value=True))
+    monkeypatch.setattr(approval_router, "resolve_approval_request", AsyncMock(return_value=True))
 
     resume = AsyncMock(return_value="完成")
     monkeypatch.setattr(normalizer, "resume_pending_approval", resume, raising=False)

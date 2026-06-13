@@ -2,9 +2,7 @@
 
 ## Purpose
 人在回路（human-in-the-loop）的工具审批门。被标注 `risk_level` 的工具在执行前暂停，先经访问控制（`allowed_tools` 白名单）校验，再按风险等级触发审批：medium 向请求者本人发确认、high 向预配置审批人发审批。审批通过 `asyncio.Event` 阻塞 agent 执行，等待 IM 回调放行/拒绝或超时自动拒绝；全过程的请求与结果落 `approvals` 表，留可审计的轨迹并跨重启存活。
-
 ## Requirements
-
 ### Requirement: Access control at dispatch
 The system SHALL check `agent.allowed_tools` before executing any tool, as the first gate in `tool_registry.dispatch()`.
 
@@ -53,7 +51,6 @@ resume, not a coroutine wake-up.
 - **WHEN** the gate's `request_approval` is invoked for a gated tool call
 - **THEN** it registers the approval and returns `pending` without awaiting a decision
 
-
 ### Requirement: Approval timeout
 The system SHALL reconcile approvals that exceed the configured timeout via the cleanup
 routine rather than by waking a blocked coroutine. Because no coroutine is suspended on
@@ -71,13 +68,12 @@ agent's `permission_gate_medium_timeout_seconds` / `permission_gate_high_timeout
   `permission_gate_high_timeout_seconds`
 - **THEN** those values bound the pending window used by the cleanup reconciliation
 
-
 ### Requirement: Approval persistence
-All approval requests and outcomes SHALL be recorded in the `approvals` table.
+All approval requests and outcomes SHALL be recorded in the `approval_requests` table (subject_type=`tool_call`), the unified approval-lifecycle source of truth — no longer in a separate `approvals` table. The tool-call resume context (the suspended call) remains in the session's `meta.pending_approvals`.
 
 #### Scenario: Approval record lifecycle
 - **WHEN** a permission gate triggers
-- **THEN** a row is inserted with `status=pending`, and updated to `approved`/`rejected`/`timeout` when resolved
+- **THEN** an `approval_requests` row is inserted with `subject_type=tool_call` and `status=pending`, and updated to `approved`/`rejected`/`expired` when resolved
 
 ### Requirement: permission gate SHALL be skippable per agent
 The loop's `_plan_run_slots` function SHALL accept a `permission_gate_enabled` flag. When `False`,
@@ -172,3 +168,4 @@ plain-text prompt when the delivery channel rejects the payload.
   argument)
 - **THEN** the gate re-sends the plain-text prompt and the approval flow continues
   unaffected
+

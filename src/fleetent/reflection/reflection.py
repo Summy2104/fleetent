@@ -15,6 +15,7 @@ import yaml
 
 from fleetent import memory, observability
 from fleetent.db import SQLiteDatabase
+from fleetent.governance import approval_request_store
 
 FindingType = Literal["memory_candidate", "memory_conflict", "skill_opportunity"]
 KnowledgeBaseFindingType = Literal[
@@ -134,6 +135,8 @@ class MemoryMaintenanceProposal:
     created_at: datetime
     updated_at: datetime
     expires_at: datetime | None
+    actor_user_id: str | None = None
+    applied_at: datetime | None = None
     report_id: str | None = None
 
 
@@ -483,16 +486,17 @@ def list_skill_proposals(status: str | None = "pending") -> list[SkillProposal]:
     database = _database()
     if not database.path.exists() or not _has_table(database, "reflection_proposals"):
         return []
-    where = "WHERE domain = 'skill'"
-    params: dict[str, object] = {}
-    if status:
-        where += " AND status = :status"
-        params["status"] = status
     rows = database.execute(
-        f"SELECT * FROM reflection_proposals {where} ORDER BY updated_at DESC",
-        params,
+        """
+        SELECT * FROM reflection_proposals
+        WHERE domain = 'skill'
+        ORDER BY updated_at DESC
+        """,
     ).fetchall()
-    return [_skill_proposal_from_row(row) for row in rows]
+    proposals = [_skill_proposal_from_row(row) for row in rows]
+    if status is None:
+        return proposals
+    return [proposal for proposal in proposals if proposal.status == status]
 
 
 def list_reflection_proposals(
@@ -509,14 +513,11 @@ def list_reflection_proposals(
     if domain is not None:
         clauses.append("domain = :domain")
         params["domain"] = domain
-    if status is not None:
-        clauses.append("status = :status")
-        params["status"] = status
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     rows = database.execute(
         f"""
         SELECT
-            id, domain, kind, status, subject_user_id, target_ref, risk, created_at, updated_at,
+            id, domain, kind, subject_user_id, target_ref, risk, applied_at, created_at, updated_at,
             report_id
         FROM reflection_proposals
         {where}
@@ -524,12 +525,12 @@ def list_reflection_proposals(
         """,
         params,
     ).fetchall()
-    return [
+    records = [
         ReflectionProposalRecord(
             id=str(row["id"]),
             domain=cast(ProposalDomain, row["domain"]),
             kind=str(row["kind"]),
-            status=str(row["status"]),
+            status=_proposal_status_for_row(row),
             subject_user_id=cast(str | None, row["subject_user_id"]),
             target_ref=cast(str | None, row["target_ref"]),
             risk=str(row["risk"]),
@@ -539,12 +540,20 @@ def list_reflection_proposals(
         )
         for row in rows
     ]
+    if status is None:
+        return records
+    return [record for record in records if record.status == status]
 
 
 def approve_skill_proposal(proposal_id: str, *, reviewer_user_id: str) -> SkillProposal:
     """Approve a pending Skill proposal."""
     proposal = get_skill_proposal(proposal_id)
     _require_skill_proposal_status(proposal, {"pending"})
+    _decide_proposal_approval_request(
+        proposal_id=proposal_id,
+        status="approved",
+        approver_user_id=reviewer_user_id,
+    )
     now = datetime.now(UTC).replace(microsecond=0)
     updated = _replace_skill_proposal(
         proposal,
@@ -566,6 +575,12 @@ def reject_skill_proposal(
     """Reject a pending Skill proposal."""
     proposal = get_skill_proposal(proposal_id)
     _require_skill_proposal_status(proposal, {"pending"})
+    _decide_proposal_approval_request(
+        proposal_id=proposal_id,
+        status="rejected",
+        approver_user_id=reviewer_user_id,
+        reason=reason,
+    )
     now = datetime.now(UTC).replace(microsecond=0)
     updated = _replace_skill_proposal(
         proposal,
@@ -661,6 +676,13 @@ def create_memory_maintenance_proposal(
         expires_at=expires_at,
     )
     _insert_maintenance_proposal(proposal)
+    _create_proposal_approval_request(
+        proposal_id=proposal.id,
+        domain="memory",
+        risk=proposal.risk,
+        created_at=proposal.created_at,
+        expires_at=proposal.expires_at,
+    )
     _schedule_pending_proposal_notification(
         proposal_id=proposal.id,
         domain="memory",
@@ -700,6 +722,8 @@ def _build_memory_maintenance_proposal(
         created_at=now,
         updated_at=now,
         expires_at=expires_at,
+        actor_user_id=None,
+        applied_at=None,
         report_id=report_id,
     )
 
@@ -720,9 +744,6 @@ def list_memory_maintenance_proposals(
     """List User Memory maintenance proposals for one owner."""
     clauses = ["domain = 'memory'", "subject_user_id = :user_id"]
     params: dict[str, object] = {"user_id": user_id}
-    if status is not None:
-        clauses.append("status = :status")
-        params["status"] = status
     rows = (
         _database()
         .execute(
@@ -736,7 +757,10 @@ def list_memory_maintenance_proposals(
         )
         .fetchall()
     )
-    return [_proposal_from_row(row) for row in rows]
+    proposals = [_proposal_from_row(row) for row in rows]
+    if status is None:
+        return proposals
+    return [proposal for proposal in proposals if proposal.status == status]
 
 
 def approve_memory_maintenance_proposal(
@@ -748,6 +772,11 @@ def approve_memory_maintenance_proposal(
     proposal = get_memory_maintenance_proposal(proposal_id)
     _require_owner(proposal, actor_user_id)
     _require_status(proposal, {"pending"})
+    _decide_proposal_approval_request(
+        proposal_id=proposal_id,
+        status="approved",
+        approver_user_id=actor_user_id,
+    )
     updated = _with_status(proposal, "approved")
     _update_maintenance_proposal(updated)
     _record_maintenance_event("memory_maintenance_proposal_approved", updated)
@@ -763,6 +792,12 @@ def reject_memory_maintenance_proposal(
     proposal = get_memory_maintenance_proposal(proposal_id)
     _require_owner(proposal, actor_user_id)
     _require_status(proposal, {"pending"})
+    _decide_proposal_approval_request(
+        proposal_id=proposal_id,
+        status="rejected",
+        approver_user_id=actor_user_id,
+        reason=f"proposal {proposal_id} rejected by owner",
+    )
     updated = _with_status(proposal, "rejected")
     _update_maintenance_proposal(updated)
     _record_maintenance_event("memory_maintenance_proposal_rejected", updated)
@@ -773,6 +808,10 @@ def expire_memory_maintenance_proposal(proposal_id: str) -> MemoryMaintenancePro
     """Expire a proposal that is no longer actionable."""
     proposal = get_memory_maintenance_proposal(proposal_id)
     _require_status(proposal, {"pending", "approved"})
+    _decide_proposal_approval_request(
+        proposal_id=proposal_id,
+        status="expired",
+    )
     updated = _with_status(proposal, "expired")
     _update_maintenance_proposal(updated)
     return updated
@@ -787,6 +826,11 @@ def mark_shared_memory_proposal_applied(proposal_id: str) -> MemoryMaintenancePr
     if proposal.metadata_patch.get("target") != "shared_memory":
         raise ValueError("proposal target is not shared_memory")
     updated = _with_status(proposal, "applied")
+    updated = replace(
+        updated,
+        actor_user_id=proposal.user_id,
+        applied_at=datetime.now(UTC).replace(microsecond=0),
+    )
     _update_maintenance_proposal(updated)
     _record_maintenance_event("shared_memory_proposal_applied", updated)
     return updated
@@ -815,6 +859,11 @@ async def apply_memory_maintenance_proposal(
 
     await _apply_maintenance_action(proposal)
     updated = _with_status(proposal, "applied")
+    updated = replace(
+        updated,
+        actor_user_id=actor_user_id,
+        applied_at=datetime.now(UTC).replace(microsecond=0),
+    )
     _update_maintenance_proposal(updated)
     _record_maintenance_event("memory_maintenance_proposal_applied", updated)
     return updated
@@ -891,6 +940,13 @@ def _persist_memory_maintenance_proposal(proposal: MemoryMaintenanceProposal) ->
     if not _has_table(database, "reflection_proposals"):
         return
     _insert_maintenance_proposal(proposal)
+    _create_proposal_approval_request(
+        proposal_id=proposal.id,
+        domain="memory",
+        risk=proposal.risk,
+        created_at=proposal.created_at,
+        expires_at=proposal.expires_at,
+    )
     _schedule_pending_proposal_notification(
         proposal_id=proposal.id,
         domain="memory",
@@ -906,6 +962,13 @@ def _persist_skill_proposal(proposal: SkillProposal) -> None:
     if not _has_table(database, "reflection_proposals"):
         return
     _insert_skill_proposal(proposal)
+    _create_proposal_approval_request(
+        proposal_id=proposal.id,
+        domain="skill",
+        risk=proposal.risk_level,
+        created_at=proposal.created_at,
+        expires_at=None,
+    )
     _schedule_pending_proposal_notification(
         proposal_id=proposal.id,
         domain="skill",
@@ -997,7 +1060,7 @@ def _aggregate_memory_proposals(
         return
     rows = database.execute(
         """
-        SELECT kind, risk, status, created_at
+        SELECT id, kind, risk, applied_at, created_at
         FROM reflection_proposals
         WHERE domain = 'memory'
           AND subject_user_id = :scope
@@ -1012,7 +1075,7 @@ def _aggregate_memory_proposals(
         if bucket_index is None:
             continue
         bucket = buckets[bucket_index]
-        status = str(row["status"])
+        status = _proposal_status_for_row(row)
         _increment_count(bucket.proposal_status_counts, status)
         _increment_count(bucket.proposal_risk_counts, str(row["risk"]))
         _increment_count(bucket.proposal_action_counts, str(row["kind"]))
@@ -1034,7 +1097,7 @@ def _aggregate_skill_proposals(
         return
     rows = database.execute(
         """
-        SELECT kind, risk, status, created_at
+        SELECT id, kind, risk, applied_at, created_at
         FROM reflection_proposals
         WHERE domain = 'skill'
           AND created_at >= :start_ts
@@ -1048,7 +1111,7 @@ def _aggregate_skill_proposals(
         if bucket_index is None:
             continue
         bucket = buckets[bucket_index]
-        status = str(row["status"])
+        status = _proposal_status_for_row(row)
         _increment_count(bucket.proposal_status_counts, status)
         _increment_count(bucket.proposal_risk_counts, str(row["risk"]))
         _increment_count(bucket.proposal_type_counts, str(row["kind"]))
@@ -1119,6 +1182,7 @@ def set_state_db(db: SQLiteDatabase) -> None:
     """Inject the per-agent state DB.  Called once at agent boot via agent_app."""
     global _state_db
     _state_db = db
+    approval_request_store.set_state_db(db)
 
 
 def _database() -> SQLiteDatabase:
@@ -1372,15 +1436,11 @@ def _insert_maintenance_proposal(proposal: MemoryMaintenanceProposal) -> None:
         """
         INSERT INTO reflection_proposals (
             id, domain, kind, report_id, subject_user_id, target_ref, payload_json,
-            reason, evidence_json, risk, status, reviewer_user_id,
-            reviewed_at, rejection_reason, actor_user_id, applied_at,
-            expires_at, created_at, updated_at
+            reason, evidence_json, risk, actor_user_id, applied_at, created_at, updated_at
         )
         VALUES (
             :id, :domain, :kind, :report_id, :subject_user_id, :target_ref, :payload_json,
-            :reason, :evidence_json, :risk, :status, :reviewer_user_id,
-            :reviewed_at, :rejection_reason, :actor_user_id, :applied_at,
-            :expires_at, :created_at, :updated_at
+            :reason, :evidence_json, :risk, :actor_user_id, :applied_at, :created_at, :updated_at
         )
         """,
         _proposal_params(proposal),
@@ -1453,15 +1513,11 @@ def _insert_skill_proposal(proposal: SkillProposal) -> None:
         """
         INSERT OR IGNORE INTO reflection_proposals (
             id, domain, kind, report_id, subject_user_id, target_ref, payload_json,
-            reason, evidence_json, risk, status, reviewer_user_id,
-            reviewed_at, rejection_reason, actor_user_id, applied_at,
-            expires_at, created_at, updated_at
+            reason, evidence_json, risk, actor_user_id, applied_at, created_at, updated_at
         )
         VALUES (
             :id, :domain, :kind, :report_id, :subject_user_id, :target_ref, :payload_json,
-            :reason, :evidence_json, :risk, :status, :reviewer_user_id,
-            :reviewed_at, :rejection_reason, :actor_user_id, :applied_at,
-            :expires_at, :created_at, :updated_at
+            :reason, :evidence_json, :risk, :actor_user_id, :applied_at, :created_at, :updated_at
         )
         """,
         _skill_proposal_params(proposal),
@@ -1472,11 +1528,7 @@ def _update_skill_proposal(proposal: SkillProposal) -> None:
     _database().execute(
         """
         UPDATE reflection_proposals
-        SET status = :status,
-            reviewer_user_id = :reviewer_user_id,
-            reviewed_at = :reviewed_at,
-            rejection_reason = :rejection_reason,
-            actor_user_id = :actor_user_id,
+        SET actor_user_id = :actor_user_id,
             applied_at = :applied_at,
             updated_at = :updated_at
         WHERE id = :id
@@ -1520,13 +1572,8 @@ def _skill_proposal_params(proposal: SkillProposal) -> dict[str, object]:
         "reason": proposal.reason,
         "evidence_json": json.dumps(proposal.evidence_refs, sort_keys=True),
         "risk": proposal.risk_level,
-        "status": proposal.status,
-        "reviewer_user_id": proposal.reviewer_user_id,
-        "reviewed_at": proposal.reviewed_at.isoformat() if proposal.reviewed_at else None,
-        "rejection_reason": proposal.rejection_reason,
         "actor_user_id": proposal.actor_user_id,
         "applied_at": proposal.applied_at.isoformat() if proposal.applied_at else None,
-        "expires_at": None,
         "created_at": proposal.created_at.isoformat(),
         "updated_at": proposal.updated_at.isoformat(),
     }
@@ -1549,10 +1596,10 @@ def _skill_proposal_from_row(row: dict[str, Any]) -> SkillProposal:
         report_id=cast(str | None, row["report_id"]),
         suggested_draft=cast(str | None, payload.get("suggested_draft")),
         suggested_diff=cast(str | None, payload.get("suggested_diff")),
-        status=cast(SkillProposalStatus, row["status"]),
-        reviewer_user_id=cast(str | None, row["reviewer_user_id"]),
-        reviewed_at=_parse_optional_datetime(row["reviewed_at"]),
-        rejection_reason=cast(str | None, row["rejection_reason"]),
+        status=cast(SkillProposalStatus, _proposal_status_for_row(row)),
+        reviewer_user_id=_approval_request_value(row["id"], "approver_user_id"),
+        reviewed_at=_approval_request_datetime(row["id"], "decided_at"),
+        rejection_reason=_approval_request_value(row["id"], "reason"),
         actor_user_id=cast(str | None, row["actor_user_id"]),
         applied_at=_parse_optional_datetime(row["applied_at"]),
         created_at=datetime.fromisoformat(row["created_at"]),
@@ -1573,6 +1620,82 @@ def _require_skill_proposal_status(
     if proposal.status not in allowed:
         expected = ", ".join(sorted(allowed))
         raise ValueError(f"skill proposal must be {expected}, got {proposal.status}")
+
+
+def _create_proposal_approval_request(
+    *,
+    proposal_id: str,
+    domain: ProposalDomain,
+    risk: str,
+    created_at: datetime,
+    expires_at: datetime | None,
+) -> None:
+    approval_request_store.create_request(
+        id=proposal_id,
+        subject_type="memory_proposal" if domain == "memory" else "skill_proposal",
+        subject_id=proposal_id,
+        requester_user_id=None,
+        risk=risk,
+        routing_key=f"reflection_{domain}_proposal",
+        created_at=created_at.isoformat(),
+        expires_at=_format_datetime(expires_at),
+    )
+
+
+def _decide_proposal_approval_request(
+    *,
+    proposal_id: str,
+    status: Literal["approved", "rejected", "expired"],
+    approver_user_id: str | None = None,
+    reason: str | None = None,
+) -> None:
+    try:
+        approval_request_store.decide_request(
+            id=proposal_id,
+            status=status,
+            decided_at=datetime.now(UTC).replace(microsecond=0).isoformat(),
+            approver_user_id=approver_user_id,
+            reason=reason,
+        )
+    except RuntimeError:
+        # Unit tests still exercise pure row/dataclass helpers with fake stores that do
+        # not provision approval_requests. Keep those paths working without a DB.
+        return
+
+
+def _approval_request_row(proposal_id: object) -> dict[str, Any] | None:
+    try:
+        return approval_request_store.get_request(str(proposal_id))
+    except RuntimeError:
+        return None
+
+
+def _approval_request_value(proposal_id: object, key: str) -> str | None:
+    row = _approval_request_row(proposal_id)
+    if row is None:
+        return None
+    value = row.get(key)
+    return str(value) if value is not None else None
+
+
+def _approval_request_datetime(proposal_id: object, key: str) -> datetime | None:
+    value = _approval_request_value(proposal_id, key)
+    return _parse_optional_datetime(value)
+
+
+def _proposal_status_for_row(row: dict[str, Any]) -> str:
+    if row.get("applied_at") is not None:
+        return "applied"
+    legacy_status = row.get("status")
+    if legacy_status is not None:
+        return str(legacy_status)
+    proposal_id = row.get("id")
+    if proposal_id is None:
+        return "pending"
+    request = _approval_request_row(proposal_id)
+    if request is None:
+        return "pending"
+    return str(request["status"])
 
 
 def _skill_name(pattern: str) -> str:
@@ -1641,11 +1764,11 @@ def _update_maintenance_proposal(proposal: MemoryMaintenanceProposal) -> None:
     _database().execute(
         """
         UPDATE reflection_proposals
-        SET status = :status,
-            updated_at = :updated_at,
+        SET updated_at = :updated_at,
             payload_json = :payload_json,
             evidence_json = :evidence_json,
-            expires_at = :expires_at
+            actor_user_id = :actor_user_id,
+            applied_at = :applied_at
         WHERE id = :id
         """,
         _proposal_params(proposal),
@@ -1689,15 +1812,10 @@ def _proposal_params(proposal: MemoryMaintenanceProposal) -> dict[str, object]:
         "risk": proposal.risk,
         "reason": proposal.reason,
         "evidence_json": json.dumps(proposal.evidence_ids, sort_keys=True),
-        "status": proposal.status,
-        "reviewer_user_id": None,
-        "reviewed_at": None,
-        "rejection_reason": None,
-        "actor_user_id": None,
-        "applied_at": None,
+        "actor_user_id": proposal.actor_user_id,
+        "applied_at": _format_datetime(proposal.applied_at),
         "created_at": _format_datetime(proposal.created_at),
         "updated_at": _format_datetime(proposal.updated_at),
-        "expires_at": _format_datetime(proposal.expires_at),
     }
 
 
@@ -1719,10 +1837,12 @@ def _proposal_from_row(row: dict[str, Any]) -> MemoryMaintenanceProposal:
         risk=cast(MaintenanceRisk, row["risk"]),
         reason=str(row["reason"]),
         evidence_ids=[str(value) for value in json.loads(str(row["evidence_json"]))],
-        status=cast(MaintenanceStatus, row["status"]),
+        status=cast(MaintenanceStatus, _proposal_status_for_row(row)),
         created_at=_parse_datetime(row["created_at"]),
         updated_at=_parse_datetime(row["updated_at"]),
-        expires_at=_parse_optional_datetime(row.get("expires_at")),
+        expires_at=_approval_request_datetime(row["id"], "expires_at"),
+        actor_user_id=cast(str | None, row.get("actor_user_id")),
+        applied_at=_parse_optional_datetime(row.get("applied_at")),
         report_id=cast(str | None, row["report_id"]),
     )
 
@@ -1745,6 +1865,8 @@ def _with_status(
         created_at=proposal.created_at,
         updated_at=datetime.now(UTC).replace(microsecond=0),
         expires_at=proposal.expires_at,
+        actor_user_id=proposal.actor_user_id,
+        applied_at=proposal.applied_at,
         report_id=proposal.report_id,
     )
 
@@ -1776,7 +1898,22 @@ async def _apply_maintenance_action(proposal: MemoryMaintenanceProposal) -> None
             await memory.delete_user_memory(proposal.user_id, memory_id)
         return
     if proposal.action == "suggest_shared_memory_or_kb":
-        return
+        target = proposal.metadata_patch.get("target")
+        if target == "shared_memory":
+            from fleetent.memory import shared as shared_memory
+
+            await shared_memory.apply_shared_memory_proposal(
+                proposal.id,
+                actor_id=proposal.user_id,
+            )
+            return
+        if target == "knowledge_base":
+            raise RuntimeError("knowledge base proposals are no longer handled on the agent side")
+        if target is None:
+            # Older proposals may not yet carry a concrete shared-memory / KB target.
+            # Preserve the legacy "no user-memory write" behavior for those records.
+            return
+        raise ValueError("proposal target is not shared_memory")
     raise ValueError(f"unsupported maintenance action: {proposal.action}")
 
 

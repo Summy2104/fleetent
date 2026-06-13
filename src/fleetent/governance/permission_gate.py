@@ -17,8 +17,8 @@ import logging
 from collections.abc import Callable, Coroutine
 from typing import Any, Literal
 
-from fleetent.governance import approval_allowlist_store as allowlist
 from fleetent.governance import approval_store
+from fleetent.governance import tool_auto_approvals_store as allowlist
 
 logger = logging.getLogger(__name__)
 
@@ -238,7 +238,7 @@ class PermissionGate:
 
         return reached
 
-    async def resolve(
+    async def resolve_tool_call_approval(
         self,
         approval_id: str,
         decision: Literal["approved", "rejected"],
@@ -301,6 +301,22 @@ class PermissionGate:
         self._authorized.pop(approval_id, None)
         logger.info("approval_resolved id=%s decision=%s", approval_id, decision)
         return True
+
+    async def resolve(
+        self,
+        approval_id: str,
+        decision: Literal["approved", "rejected"],
+        approver_user_id: str,
+        always: bool = False,
+        authorized_actors: set[str] | None = None,
+    ) -> bool:
+        return await self.resolve_tool_call_approval(
+            approval_id=approval_id,
+            decision=decision,
+            approver_user_id=approver_user_id,
+            always=always,
+            authorized_actors=authorized_actors,
+        )
 
 
 _default_gate: PermissionGate = PermissionGate()

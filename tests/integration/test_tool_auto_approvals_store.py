@@ -1,4 +1,4 @@
-"""Integration tests for the allow-always store (approval-minimization).
+"""Integration tests for the tool auto-approval store (approval-minimization).
 
 Connection is injected via monkeypatch on _state_db (3b-4 set_state_db pattern).
 Verifies grant/lookup/list and idempotent re-grant.
@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from fleetent.db import SQLiteDatabase
-from fleetent.governance import approval_allowlist_store as store
+from fleetent.governance import tool_auto_approvals_store as store
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
 from fleetent.schema_migrations import migrate
 

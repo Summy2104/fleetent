@@ -1,19 +1,14 @@
-"""Agent-side approval store: persists tool approval requests and outcomes.
-
-Schema owner: agent_state.db via per-agent MIGRATIONS (v12).  Connection is
-injected via set_state_db() at agent boot — no ensure_schema, no DB_PATH.
-Uses named parameters throughout.  No platform imports.
-"""
+"""Compatibility facade for tool-call approvals backed by approval_requests."""
 
 from __future__ import annotations
 
 import datetime
-from typing import TYPE_CHECKING, Any
+import json
+from typing import Any
 
 from fleetent.db import ReadOnlySQLiteDatabase, SQLiteDatabase
-
-if TYPE_CHECKING:
-    pass
+from fleetent.governance import approval_request_store
+from fleetent.session import manager as session_mgr
 
 _AnyDatabase = SQLiteDatabase | ReadOnlySQLiteDatabase
 
@@ -21,9 +16,10 @@ _state_db: SQLiteDatabase | None = None
 
 
 def set_state_db(db: SQLiteDatabase) -> None:
-    """Inject the per-agent state DB.  Called once at agent boot."""
+    """Inject the per-agent state DB. Called once at agent boot."""
     global _state_db
     _state_db = db
+    approval_request_store.set_state_db(db)
 
 
 def database() -> SQLiteDatabase:
@@ -31,6 +27,7 @@ def database() -> SQLiteDatabase:
         raise RuntimeError(
             "approval_store: state_db not initialized — call set_state_db(db) at boot"
         )
+    approval_request_store.set_state_db(_state_db)
     return _state_db
 
 
@@ -44,24 +41,15 @@ def insert_approval(
     tool_args: str,
     created_at: str,
 ) -> None:
-    database().execute(
-        """
-        INSERT INTO approvals
-            (id, session_id, requester_user_id, risk_level, tool_name, tool_args,
-             status, created_at)
-        VALUES
-            (:id, :session_id, :requester_user_id, :risk_level, :tool_name, :tool_args,
-             'pending', :created_at)
-        """,
-        {
-            "id": id,
-            "session_id": session_id,
-            "requester_user_id": requester_user_id,
-            "risk_level": risk_level,
-            "tool_name": tool_name,
-            "tool_args": tool_args,
-            "created_at": created_at,
-        },
+    approval_request_store.set_state_db(database())
+    approval_request_store.create_request(
+        id=id,
+        subject_type="tool_call",
+        subject_id=session_id or id,
+        requester_user_id=requester_user_id,
+        risk=risk_level,
+        routing_key=tool_name,
+        created_at=created_at,
     )
 
 
@@ -72,83 +60,74 @@ def update_approval(
     resolved_at: str,
     approver_user_id: str | None = None,
 ) -> None:
-    database().execute(
-        "UPDATE approvals SET status = :status, resolved_at = :resolved_at, "
-        "approver_user_id = :approver_user_id WHERE id = :id",
-        {
-            "id": id,
-            "status": status,
-            "resolved_at": resolved_at,
-            "approver_user_id": approver_user_id,
-        },
+    approval_request_store.set_state_db(database())
+    approval_request_store.decide_request(
+        id=id,
+        status="expired" if status == "timeout" else status,
+        decided_at=resolved_at,
+        approver_user_id=approver_user_id,
     )
 
 
-_SELECT = (
-    "SELECT id, session_id, tool_name, risk_level, tool_args, status, "
-    "requester_user_id, approver_user_id, created_at, resolved_at FROM approvals"
-)
+def _pending_entry(session_id: str, approval_id: str) -> dict[str, object] | None:
+    if not session_id:
+        return None
+    path = session_mgr.SESSIONS_DIR / f"{session_id}.json"
+    if not path.exists():
+        return None
+    payload = json.loads(path.read_text())
+    meta = payload.get("meta") or {}
+    pending = meta.get("pending_approvals") or {}
+    entry = pending.get(approval_id)
+    return dict(entry) if isinstance(entry, dict) else None
+
+
+def _row_to_legacy(row: dict[str, Any]) -> dict[str, Any]:
+    session_id = str(row["subject_id"] or "")
+    pending = _pending_entry(session_id, str(row["id"]))
+    return {
+        "id": row["id"],
+        "session_id": session_id,
+        "tool_name": row["routing_key"],
+        "risk_level": row["risk"],
+        "tool_args": json.dumps(pending.get("tool_args", {})) if pending is not None else "{}",
+        "status": "timeout" if row["status"] == "expired" else row["status"],
+        "requester_user_id": row["requester_user_id"],
+        "approver_user_id": row["approver_user_id"],
+        "created_at": row["created_at"],
+        "resolved_at": row["decided_at"],
+    }
 
 
 def get_approval(approval_id: str) -> dict[str, Any] | None:
-    """Return one approval row by id, or None if absent.
+    approval_request_store.set_state_db(database())
+    row = approval_request_store.get_request(approval_id)
+    if row is None or row.get("subject_type") != "tool_call":
+        return None
+    return _row_to_legacy(row)
 
-    Used by the gate to verify an approval is genuinely pending when resolving
-    after a process restart (no in-memory registry to consult).
-    """
-    row = (
-        database()
-        .execute(
-            f"{_SELECT} WHERE id = :id",
-            {"id": approval_id},
-        )
-        .fetchone()
+
+def list_approvals(status: str | None = None) -> list[dict[str, Any]]:
+    approval_request_store.set_state_db(database())
+    rows = approval_request_store.list_requests(
+        status="expired" if status == "timeout" else status,
+        subject_type="tool_call",
     )
-    return dict(row) if row is not None else None
-
-
-def list_approvals(
-    status: str | None = None,
-) -> list[dict[str, Any]]:
-    db = database()
-    if status is not None:
-        rows = db.execute(
-            f"{_SELECT} WHERE status = :status ORDER BY created_at DESC",
-            {"status": status},
-        ).fetchall()
-    else:
-        rows = db.execute(
-            f"{_SELECT} ORDER BY created_at DESC LIMIT 50",
-        ).fetchall()
-    return list(rows)
+    return [_row_to_legacy(row) for row in rows]
 
 
 def list_approvals_with_db(
     db: _AnyDatabase,
     status: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Read-only variant of list_approvals that accepts an explicit DB handle.
-
-    Used by platform read projection to read from agent DBs via read-only connections
-    without touching the module-level _state_db.
-    """
-    if status is not None:
-        rows = db.execute(
-            f"{_SELECT} WHERE status = :status ORDER BY created_at DESC",
-            {"status": status},
-        ).fetchall()
-    else:
-        rows = db.execute(
-            f"{_SELECT} ORDER BY created_at DESC LIMIT 50",
-        ).fetchall()
-    return list(rows)
+    rows = approval_request_store.list_requests_with_db(
+        db,
+        status="expired" if status == "timeout" else status,
+        subject_type="tool_call",
+    )
+    return [_row_to_legacy(row) for row in rows]
 
 
 def cleanup_stale() -> int:
-    """Mark all pending approvals as timeout. Returns number of rows updated."""
     now = datetime.datetime.now(datetime.UTC).isoformat()
-    result = database().execute(
-        "UPDATE approvals SET status = 'timeout', resolved_at = :now WHERE status = 'pending'",
-        {"now": now},
-    )
-    return result.rowcount
+    return approval_request_store.expire_pending_requests(now=now)

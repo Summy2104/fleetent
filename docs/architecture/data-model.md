@@ -77,9 +77,10 @@ graph TD
     sessions
     traces
     memory_items
-    approvals
+    approval_requests
     reflection_reports
     reflection_proposals
+    tool_auto_approvals
     scheduled_tasks
   end
   subgraph KB["KB 关系库 kb.db ｜ agent 侧 · per-tenant"]
@@ -98,7 +99,7 @@ graph TD
   sessions -. user_id .-> users
   traces -. user_id .-> users
   traces -. agent_id .-> agents
-  approvals -. requester_user_id .-> users
+  approval_requests -. requester_user_id .-> users
   scheduled_tasks -. session_id .-> sessions
   scheduled_tasks -. user_id .-> users
   shared_memory_items -. "scope_id(team|tenant)" .-> teams
@@ -111,7 +112,7 @@ graph TD
 ```
 
 > 宏观图只列各库主干实体；完整清单与库内关系见下方各库明细（§3.2–§3.6）。
-> 跨库边的省略约定：① `reflection_proposals` 的 `subject/reviewer/actor_user_id` 与 approvals 的审批人列同样 ⇢ `users`，从略；② agent 侧各表的 `tenant_id` 接缝列（§2"可换后端"）⇢ `tenants`，全部从略；③ `shared_memory_items.scope_id` 在 `scope_type=tenant` 时指向 `tenants`（图仅画 teams 一条代表边）。`session_meta → sessions` 是全库唯一一条 mgmt→agent 方向的跨库引用（platform 自有元数据挂 agent 侧会话，非 agent 反向写）。
+> 跨库边的省略约定：① `reflection_proposals` 的 `subject/actor_user_id` 与 `approval_requests.approver_user_id` 同样 ⇢ `users`，从略；② agent 侧各表的 `tenant_id` 接缝列（§2"可换后端"）⇢ `tenants`，全部从略；③ `shared_memory_items.scope_id` 在 `scope_type=tenant` 时指向 `tenants`（图仅画 teams 一条代表边）。`session_meta → sessions` 是全库唯一一条 mgmt→agent 方向的跨库引用（platform 自有元数据挂 agent 侧会话，非 agent 反向写）。
 
 ### 3.2 管理库（Alembic · platform 侧）
 - **身份/租户**：`users`(根主体，含 `tenant_id`；**key 唯一真相源在 `api_keys`**——SHA-256 哈希，明文不落库，migration 080 已删 legacy `api_key` 列) · `api_keys`(→users) · `tenants`(主体，含 `approver_user_id`→users) · `teams`(→tenants，含 `approver_user_id`→users) · `blocked_registrations`(注册封禁名单，Alembic 078 收编，control-plane only，agent 运行时不 import)
@@ -157,11 +158,11 @@ erDiagram
 ```
 
 ### 3.3 per-agent 运行库（嵌入式 Y · `agent_state.db` · agent 侧）
-统一 MIGRATIONS（`runtime/agent_state_migrations.py`，单文件单 `user_version`）建 **10 张表**：`sessions`(会话元数据索引，仅 `session_id` / `user_id` / timestamps / `message_count`，**无 `agent_name` 列**，归属由 per-agent 物理库圈定) · `traces`(append-only 运行轨迹，挂 `session_id`/`run_id` 关联本库 `sessions`/`sub_agent_runs`) · `reflection_reports`(统一反思观察日志，domain=`memory|skill|knowledge_base|legacy`) · `reflection_proposals`(统一 memory/skill 提案与审批生命周期，domain=`memory|skill`) · `memory_items`(per-user 语义记忆，**无 namespace 列**，agent 隔离靠物理库) · `approvals`/`approval_allowlist`(审批请求+门状态，**agent 全权真相源**；所有 `*_user_id` 列 = `Principal.user_id` 字符串：managed=内部 `users.id`、standalone=渠道原生 id、基础设施=`system`，无 FK、跨库 opaque) · `session_anti_flap`(压缩防抖，per session) · `sub_agent_runs`(子 agent 生命周期) · `scheduled_tasks`(agent 侧 cron/once/interval 定时任务；`typed-scheduled-task-delivery` 增 `task_type`=`notify`/`generate`/`action` + `notify_text` 定稿正文——notify 由调度器直发不跑 agent，generate 跑 agent 按投递契约发回复，action 由 agent 自发、调度器不广播)。来历注记：`session_anti_flap`/`sub_agent_runs` 经 `agent_scope` + `db.py`（已去 `user_store.DB_PATH` 与裸 `sqlite3.connect`），reflection 域收口为 `reflection_reports` + `reflection_proposals` 两表（unify-self-evolution-model），`scheduled_tasks` 由 retire-standalone-fleetent-db 从遗留 `fleetent.db` 迁入；跨 run 分层预算已退役，对应历史表由新版本嵌入式迁移在 head 上 drop。
+统一 MIGRATIONS（`runtime/agent_state_migrations.py`，单文件单 `user_version`）建 **10 张表**：`sessions`(会话元数据索引，仅 `session_id` / `user_id` / timestamps / `message_count`，**无 `agent_name` 列**，归属由 per-agent 物理库圈定) · `traces`(append-only 运行轨迹，挂 `session_id`/`run_id` 关联本库 `sessions`/`sub_agent_runs`) · `reflection_reports`(统一反思观察日志，domain=`memory|skill|knowledge_base|legacy`) · `reflection_proposals`(统一 memory/skill 提案实体，domain=`memory|skill`，仅保留提案内容与 apply provenance，不再存审批生命周期列) · `memory_items`(per-user 语义记忆，**无 namespace 列**，agent 隔离靠物理库) · `approval_requests`/`tool_auto_approvals`(审批生命周期单一真相源 + 工具调用 auto-approve 指纹表；`approval_requests.subject_type=tool_call|memory_proposal|skill_proposal`，tool-call 的上下文仍留在 session meta `pending_approvals`) · `session_anti_flap`(压缩防抖，per session) · `sub_agent_runs`(子 agent 生命周期) · `scheduled_tasks`(agent 侧 cron/once/interval 定时任务；`typed-scheduled-task-delivery` 增 `task_type`=`notify`/`generate`/`action` + `notify_text` 定稿正文——notify 由调度器直发不跑 agent，generate 跑 agent 按投递契约发回复，action 由 agent 自发、调度器不广播)。来历注记：`session_anti_flap`/`sub_agent_runs` 经 `agent_scope` + `db.py`（已去 `user_store.DB_PATH` 与裸 `sqlite3.connect`），reflection 域收口为 `reflection_reports` + `reflection_proposals` 两表（unify-self-evolution-model），`scheduled_tasks` 由 retire-standalone-fleetent-db 从遗留 `fleetent.db` 迁入；跨 run 分层预算已退役，对应历史表由新版本嵌入式迁移在 head 上 drop。
 
 ```mermaid
 erDiagram
-  sessions ||--o{ approvals : "session_id"
+  sessions ||--o{ approval_requests : "tool_call.subject_id=session_id"
   sessions ||--o{ session_anti_flap : "session_id"
   sessions ||--o{ sub_agent_runs : "parent_session_id"
   sessions ||--o{ scheduled_tasks : "session_id（可选复用会话）"
@@ -169,7 +170,6 @@ erDiagram
   sub_agent_runs ||--o{ traces : "run_id 同命名空间"
   reflection_reports ||--o{ reflection_proposals : "report_id 源报告"
   memory_items ||--o{ reflection_proposals : "target_ref（仅 domain=memory · 多态）"
-  approvals ||--o{ approval_allowlist : "fingerprint(scope_key+tool+args)"
   scheduled_tasks {
     string schedule_kind
     string user_id
@@ -186,9 +186,13 @@ erDiagram
     string domain
     string kind
     string report_id
-    string status
   }
-  approval_allowlist {
+  approval_requests {
+    string subject_type
+    string status
+    string routing_key
+  }
+  tool_auto_approvals {
     string fingerprint
   }
   session_anti_flap {
@@ -202,9 +206,9 @@ erDiagram
 ```
 
 > 历史行不迁移：旧管理库中既有的 `session_anti_flap` / `sub_agent_runs` 行属 ephemeral 运行时数据，按「上线前不迁移数据」新建即可，旧行作孤儿由部署方按需清理。
-> 跨库（见 §3.1）：`memory_items.user_id` ⇢ 管理库 `users`（managed 模式成立；standalone 中该字段可为不透明渠道原生 id）；`approvals.requester_user_id` ⇢ 管理库 `users`（managed 成立；standalone 同样允许 opaque id）；`approvals.session_id` → 本库 `sessions`。会话**内容**仍是 JSON 文件（`SESSIONS_DIR`，与元数据 DB 表物理分离）。
+> 跨库（见 §3.1）：`memory_items.user_id` ⇢ 管理库 `users`（managed 模式成立；standalone 中该字段可为不透明渠道原生 id）；`approval_requests.requester_user_id` ⇢ 管理库 `users`（managed 成立；standalone 同样允许 opaque id）；tool-call 审批的 `approval_requests.subject_id` 约定为本库 `sessions.session_id`。会话**内容**仍是 JSON 文件（`SESSIONS_DIR`，与元数据 DB 表物理分离）。
 >
-> 语义注记：① `reflection_proposals.target_ref` 为多态引用——memory 类提案指向 `memory_items.id`，skill 类提案指向文件系统 skill 名（字符串路径），完整性由 apply 路径兜底，无 FK 约束（图中 `memory_items → reflection_proposals` 边即此引用，仅 `domain=memory` 成立）。② `traces` 同时挂 `session_id`（→`sessions`，`query_trace_events` 按它过滤）与 `run_id`（与 `sub_agent_runs.run_id` 同命名空间，均 UUIDv4，可按 `run_id` 关联出子 agent 的完整 trace 树）。③ 库内 `session_id` / `run_id` / `report_id` 都是约定引用，**无时序保证、无外键**：`approvals`/`traces` 行可先于 `sessions` 索引行写入（工具门控、首事件在会话首圈即触发），`reflection_proposals.report_id` 可回指生成它的 `reflection_reports.id`，但历史行或非反思来源行允许为 `NULL`。④ `approval_allowlist` 与 `approvals` 经**计算键**关联（非存储 FK）：`fingerprint = hash(scope_key, tool_name, tool_args)`，其中 `scope_key = requester_user_id`；审批前算 fingerprint 查 allowlist，命中即 auto-approve（approval-minimization 的"记住此类放行"机制）。`created_by` 为授予放行的审批人（`*_user_id` 同语义，⇢ 管理库 `users`，可空 opaque）。
+> 语义注记：① `reflection_proposals.target_ref` 为多态引用——memory 类提案指向 `memory_items.id`，skill 类提案指向文件系统 skill 名（字符串路径），完整性由 apply 路径兜底，无 FK 约束（图中 `memory_items → reflection_proposals` 边即此引用，仅 `domain=memory` 成立）。② `traces` 同时挂 `session_id`（→`sessions`，`query_trace_events` 按它过滤）与 `run_id`（与 `sub_agent_runs.run_id` 同命名空间，均 UUIDv4，可按 `run_id` 关联出子 agent 的完整 trace 树）。③ 库内 `session_id` / `run_id` / `report_id` 都是约定引用，**无时序保证、无外键**：`approval_requests`/`traces` 行可先于 `sessions` 索引行写入（工具门控、首事件在会话首圈即触发），`reflection_proposals.report_id` 可回指生成它的 `reflection_reports.id`，但历史行或非反思来源行允许为 `NULL`。④ `approval_requests` 是审批生命周期单一真相源：tool-call 审批的 subject 是 session meta `pending_approvals` 里的挂起上下文；memory/skill 审批的 subject 是同 id 的 `reflection_proposals` 行；统一 resolve router 按 `subject_type` 分派到工具恢复或提案 apply。⑤ `tool_auto_approvals` 与 tool-call `approval_requests` 经**计算键**关联（非存储 FK）：`fingerprint = hash(scope_key, tool_name, tool_args)`，其中 `scope_key = requester_user_id`；审批前算 fingerprint 查表，命中即 auto-approve。`created_by` 为授予放行的审批人（`*_user_id` 同语义，⇢ 管理库 `users`，可空 opaque）。
 
 ### 3.4 共享记忆库（嵌入式 Y · `shared_memory.db` · agent 侧 · per-tenant）
 `shared_memory_items`(team/tenant scope 共享记忆，多 agent 写的真相源)

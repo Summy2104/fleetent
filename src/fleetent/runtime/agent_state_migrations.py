@@ -38,6 +38,7 @@ Version history:
   v31  approvals.approver_user_id
   v32  reflection_proposals.report_id
   v33  drop budget_usage
+  v34  unify approval requests
 """
 
 from __future__ import annotations
@@ -348,3 +349,95 @@ MIGRATIONS: list[tuple[int, str]] = [
     (32, "ALTER TABLE reflection_proposals ADD COLUMN report_id TEXT"),
     (33, "DROP TABLE IF EXISTS budget_usage"),
 ]
+
+MIGRATIONS.append(
+    (
+        MIGRATIONS[-1][0] + 1,
+        """
+        CREATE TABLE approval_requests (
+            id                TEXT PRIMARY KEY,
+            subject_type      TEXT NOT NULL,
+            subject_id        TEXT NOT NULL,
+            requester_user_id TEXT,
+            risk              TEXT NOT NULL,
+            status            TEXT NOT NULL,
+            approver_user_id  TEXT,
+            decided_at        TEXT,
+            reason            TEXT,
+            routing_key       TEXT NOT NULL,
+            created_at        TEXT NOT NULL,
+            expires_at        TEXT
+        );
+        CREATE TABLE IF NOT EXISTS approvals (
+            id                TEXT PRIMARY KEY,
+            session_id        TEXT NOT NULL,
+            requester_user_id TEXT NOT NULL,
+            risk_level        TEXT NOT NULL,
+            tool_name         TEXT NOT NULL,
+            tool_args         TEXT NOT NULL,
+            status            TEXT NOT NULL,
+            approver_user_id  TEXT,
+            created_at        TEXT NOT NULL,
+            resolved_at       TEXT
+        );
+        CREATE TABLE IF NOT EXISTS approval_allowlist (
+            fingerprint TEXT PRIMARY KEY,
+            scope_key   TEXT NOT NULL,
+            tool_name   TEXT NOT NULL,
+            created_at  TEXT NOT NULL,
+            created_by  TEXT
+        );
+        INSERT INTO approval_requests (
+            id, subject_type, subject_id, requester_user_id, risk, status,
+            approver_user_id, decided_at, reason, routing_key, created_at, expires_at
+        )
+        SELECT
+            id,
+            'tool_call',
+            session_id,
+            requester_user_id,
+            risk_level,
+            CASE status WHEN 'timeout' THEN 'expired' ELSE status END,
+            approver_user_id,
+            resolved_at,
+            NULL,
+            tool_name,
+            created_at,
+            NULL
+        FROM approvals;
+        INSERT INTO approval_requests (
+            id, subject_type, subject_id, requester_user_id, risk, status,
+            approver_user_id, decided_at, reason, routing_key, created_at, expires_at
+        )
+        SELECT
+            id,
+            CASE domain
+                WHEN 'memory' THEN 'memory_proposal'
+                WHEN 'skill' THEN 'skill_proposal'
+                ELSE 'skill_proposal'
+            END,
+            id,
+            NULL,
+            risk,
+            CASE status WHEN 'timeout' THEN 'expired' ELSE status END,
+            reviewer_user_id,
+            reviewed_at,
+            rejection_reason,
+            CASE domain
+                WHEN 'memory' THEN 'reflection_memory_proposal'
+                WHEN 'skill' THEN 'reflection_skill_proposal'
+                ELSE 'reflection_' || domain || '_proposal'
+            END,
+            created_at,
+            expires_at
+        FROM reflection_proposals;
+        ALTER TABLE reflection_proposals DROP COLUMN status;
+        ALTER TABLE reflection_proposals DROP COLUMN reviewer_user_id;
+        ALTER TABLE reflection_proposals DROP COLUMN reviewed_at;
+        ALTER TABLE reflection_proposals DROP COLUMN rejection_reason;
+        ALTER TABLE reflection_proposals DROP COLUMN expires_at;
+        ALTER TABLE approval_allowlist RENAME TO tool_auto_approvals;
+        DROP TABLE approvals;
+        """,
+    )
+)

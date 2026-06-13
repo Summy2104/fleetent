@@ -127,11 +127,10 @@ def test_reflection_trend_summary_buckets_scoped_memory_proposal_lifecycle(monke
             """
             INSERT INTO reflection_proposals (
                 id, domain, kind, subject_user_id, target_ref, payload_json,
-                reason, evidence_json, risk, status, reviewer_user_id,
-                reviewed_at, rejection_reason, actor_user_id, applied_at,
-                expires_at, created_at, updated_at
+                reason, evidence_json, risk, actor_user_id, applied_at,
+                created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "memory-proposal-1",
@@ -149,13 +148,8 @@ def test_reflection_trend_summary_buckets_scoped_memory_proposal_lifecycle(monke
                 "aggregate only",
                 json.dumps(["trace-1"]),
                 "medium",
-                "applied",
                 None,
-                None,
-                None,
-                None,
-                None,
-                None,
+                "2026-01-01T02:05:00+00:00",
                 "2026-01-01T02:00:00+00:00",
                 "2026-01-01T02:10:00+00:00",
             ),
@@ -164,11 +158,10 @@ def test_reflection_trend_summary_buckets_scoped_memory_proposal_lifecycle(monke
             """
             INSERT INTO reflection_proposals (
                 id, domain, kind, subject_user_id, target_ref, payload_json,
-                reason, evidence_json, risk, status, reviewer_user_id,
-                reviewed_at, rejection_reason, actor_user_id, applied_at,
-                expires_at, created_at, updated_at
+                reason, evidence_json, risk, actor_user_id, applied_at,
+                created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "memory-proposal-2",
@@ -186,11 +179,6 @@ def test_reflection_trend_summary_buckets_scoped_memory_proposal_lifecycle(monke
                 "aggregate only",
                 json.dumps(["trace-2"]),
                 "high",
-                "rejected",
-                None,
-                None,
-                None,
-                None,
                 None,
                 None,
                 "2026-01-01T03:00:00+00:00",
@@ -199,13 +187,35 @@ def test_reflection_trend_summary_buckets_scoped_memory_proposal_lifecycle(monke
         )
         conn.execute(
             """
+            INSERT INTO approval_requests (
+                id, subject_type, subject_id, requester_user_id, risk, status,
+                approver_user_id, decided_at, reason, routing_key, created_at, expires_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "memory-proposal-2",
+                "memory_proposal",
+                "memory-proposal-2",
+                None,
+                "high",
+                "rejected",
+                "reviewer-1",
+                "2026-01-01T03:05:00+00:00",
+                "aggregate only",
+                "reflection_memory_proposal",
+                "2026-01-01T03:00:00+00:00",
+                None,
+            ),
+        )
+        conn.execute(
+            """
             INSERT INTO reflection_proposals (
                 id, domain, kind, subject_user_id, target_ref, payload_json,
-                reason, evidence_json, risk, status, reviewer_user_id,
-                reviewed_at, rejection_reason, actor_user_id, applied_at,
-                expires_at, created_at, updated_at
+                reason, evidence_json, risk, actor_user_id, applied_at,
+                created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "skill-proposal-1",
@@ -217,11 +227,6 @@ def test_reflection_trend_summary_buckets_scoped_memory_proposal_lifecycle(monke
                 "aggregate only",
                 json.dumps(["trace-3"]),
                 "low",
-                "pending",
-                None,
-                None,
-                None,
-                None,
                 None,
                 None,
                 "2026-01-01T04:00:00+00:00",

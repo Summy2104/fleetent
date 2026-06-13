@@ -1,4 +1,4 @@
-"""Unit tests: permission gate auto-approve on allow-always hit (approval-minimization)."""
+"""Unit tests: permission gate auto-approve on tool auto-approval hit."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from fleetent.governance import approval_allowlist_store as allowlist
+from fleetent.governance import tool_auto_approvals_store as allowlist
 from fleetent.governance import approval_store
 from fleetent.governance.permission_gate import PermissionGate
 

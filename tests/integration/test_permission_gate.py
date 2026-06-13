@@ -1,18 +1,17 @@
-"""Integration tests for the permission gate against a real approvals DB.
+"""Integration tests for the permission gate against unified approval storage.
 
 Rewritten for approval-suspend-resume: request_approval registers + returns "pending"
 (non-blocking); resolve() finalizes the row. Blocking-timeout tests are gone — timeout
 is now handled by reconcile_expired_approvals (see test_permission_gate_restart.py).
 """
 
-import sqlite3
 from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
 
-import fleetent.governance.approval_allowlist_store as approval_allowlist_store
 import fleetent.governance.approval_store as approval_store
+import fleetent.governance.tool_auto_approvals_store as tool_auto_approvals_store
 import fleetent.im_gateway.outbound as outbound_mod
 from fleetent.agent_config import ApprovalRouting
 from fleetent.db import SQLiteDatabase
@@ -38,7 +37,7 @@ def db(tmp_path: Path, monkeypatch):
     state_db = SQLiteDatabase(path=db_path)
     migrate(state_db, AGENT_STATE_MIGRATIONS)
     monkeypatch.setattr(approval_store, "_state_db", state_db)
-    monkeypatch.setattr(approval_allowlist_store, "_state_db", state_db)
+    monkeypatch.setattr(tool_auto_approvals_store, "_state_db", state_db)
     return db_path
 
 
@@ -54,13 +53,10 @@ def gate(db):
     return PermissionGate()
 
 
-def _status(db_path, approval_id):
-    conn = sqlite3.connect(db_path)
-    row = conn.execute(
-        "SELECT status, approver_user_id FROM approvals WHERE id = ?", (approval_id,)
-    ).fetchone()
-    conn.close()
-    return row
+def _status(approval_id):
+    row = approval_store.get_approval(approval_id)
+    assert row is not None
+    return row["status"], row["approver_user_id"]
 
 
 async def test_request_registers_pending_then_approve_finalizes(gate, db, _mock_outbound):
@@ -77,12 +73,12 @@ async def test_request_registers_pending_then_approve_finalizes(gate, db, _mock_
         outbound_connectors=_connectors(),
     )
     assert result == "pending"
-    assert _status(db, "appr-1")[0] == "pending"
+    assert _status("appr-1")[0] == "pending"
     reply_func.assert_called()
 
     ok = await gate.resolve("appr-1", "approved", approver_user_id="U_APPROVER")
     assert ok is True
-    assert _status(db, "appr-1") == ("approved", "U_APPROVER")
+    assert _status("appr-1") == ("approved", "U_APPROVER")
 
 
 async def test_request_then_reject_finalizes(gate, db, _mock_outbound):
@@ -99,7 +95,7 @@ async def test_request_then_reject_finalizes(gate, db, _mock_outbound):
     )
     assert result == "pending"
     await gate.resolve("appr-2", "rejected", approver_user_id="U_APPROVER")
-    assert _status(db, "appr-2")[0] == "rejected"
+    assert _status("appr-2")[0] == "rejected"
 
 
 async def test_high_risk_table_reflects_decision(gate, db, _mock_outbound):
@@ -115,7 +111,7 @@ async def test_high_risk_table_reflects_decision(gate, db, _mock_outbound):
         outbound_connectors=_connectors(),
     )
     await gate.resolve("appr-4", "approved", approver_user_id="U_APPROVER")
-    assert _status(db, "appr-4") == ("approved", "U_APPROVER")
+    assert _status("appr-4") == ("approved", "U_APPROVER")
 
 
 async def test_unresolved_request_stays_pending(gate, db, _mock_outbound):
@@ -132,4 +128,4 @@ async def test_unresolved_request_stays_pending(gate, db, _mock_outbound):
         outbound_connectors=_connectors(),
     )
     assert result == "pending"
-    assert _status(db, "appr-3")[0] == "pending"
+    assert _status("appr-3")[0] == "pending"

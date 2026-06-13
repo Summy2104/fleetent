@@ -54,8 +54,8 @@ def _tool_call_response(name: str, args: str = "{}"):
 def _loop_env(monkeypatch):
     """Mock the LLM client + side-effect stores so run() is deterministic and offline."""
     import fleetent.runtime.loop as al
-    from fleetent.governance import approval_allowlist_store as allowlist
     from fleetent.governance import approval_store
+    from fleetent.governance import tool_auto_approvals_store as allowlist
 
     captured: dict = {}
 

@@ -20,10 +20,8 @@ from pydantic import BaseModel
 from fleetent import agent_config, agent_store, user_store
 from fleetent.auth import seed_builtin_admin
 from fleetent.config import Settings, configure_logging
-from fleetent.governance.permission_gate import (
-    _default_gate,
-    list_approvals,
-)
+from fleetent.governance.approval_router import resolve_approval_request
+from fleetent.governance.permission_gate import list_approvals
 from fleetent.identity import Principal
 from fleetent.im_gateway.access import IMIdentityResolutionError, set_im_identity_resolver
 from fleetent.im_gateway.slack_supervisor import SlackSupervisor
@@ -517,7 +515,7 @@ class ApprovalRequest(BaseModel):
 async def resolve_approval(approval_id: str, req: ApprovalRequest) -> dict:  # type: ignore[type-arg]
     if req.decision not in ("approved", "rejected"):
         raise HTTPException(status_code=400, detail="decision must be 'approved' or 'rejected'")
-    found = await _default_gate.resolve(
+    found = await resolve_approval_request(
         approval_id=approval_id,
         decision=req.decision,  # type: ignore[arg-type]
         approver_user_id=req.approver_user_id,

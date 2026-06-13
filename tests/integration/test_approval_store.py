@@ -29,30 +29,31 @@ def _inject_db(state_db: SQLiteDatabase, monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(approval_store, "_state_db", state_db)
 
 
-# ── schema ────────────────────────────────────────────────────────────────────
+# ── schema / compatibility ────────────────────────────────────────────────────
 
 
-def test_approvals_table_exists(state_db: SQLiteDatabase) -> None:
+def test_compatibility_store_uses_approval_requests_table(state_db: SQLiteDatabase) -> None:
     tables = {
         r["name"]
         for r in state_db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
     }
-    assert "approvals" in tables
+    assert "approval_requests" in tables
+    assert "approvals" not in tables
 
 
-def test_approvals_required_columns(state_db: SQLiteDatabase) -> None:
-    cols = {r["name"] for r in state_db.execute("PRAGMA table_info(approvals)").fetchall()}
+def test_approval_requests_required_columns(state_db: SQLiteDatabase) -> None:
+    cols = {r["name"] for r in state_db.execute("PRAGMA table_info(approval_requests)").fetchall()}
     required = {
         "id",
-        "session_id",
+        "subject_type",
+        "subject_id",
         "requester_user_id",
-        "risk_level",
-        "tool_name",
-        "tool_args",
+        "risk",
+        "routing_key",
         "status",
         "approver_user_id",
         "created_at",
-        "resolved_at",
+        "decided_at",
     }
     assert required.issubset(cols)
 

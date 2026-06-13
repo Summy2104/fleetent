@@ -7,7 +7,7 @@
 系统自我改进机制，定期分析 agent 执行历史，先生成结构化观察报告，再通过受控 proposal lifecycle 推进 memory / skill 的维护。
 reflection 默认不直接修改 User Memory、skills 或 knowledge base。
 
-**负责**：通过 observability trace API 读取 agent 执行历史，生成统一 `reflection_reports`；为 User Memory 与 skills 生成统一 `reflection_proposals(domain=memory|skill)`；对 pending proposal 走 agent-owned 审批外呼；在 approved 后按 domain 调用对应 public boundary apply。
+**负责**：通过 observability trace API 读取 agent 执行历史，生成统一 `reflection_reports`；为 User Memory 与 skills 生成统一 `reflection_proposals(domain=memory|skill)`；为提案创建 `approval_requests(subject_type=memory_proposal|skill_proposal)`；对 pending proposal 走 agent-owned 审批外呼；在 approved 后按 domain 调用对应 public boundary apply。
 
 **不负责**：实时处理（异步定期触发，不在请求链路上）、platform console 审批、知识库文档内容修改（KB 只产 report，不写回）、Shared Memory 实现、管理员替用户确认 User Memory 修改。
 
@@ -42,8 +42,9 @@ flowchart TD
     F -->|memory| G[生成 reflection_proposals]
     F -->|skill| G
     F -->|knowledge_base| H[结束 仅保留 report]
-    G --> I[agent_config.resolve_approvers 解析审批人]
-    I --> J[permission_gate._notify_approvers 外呼 DM]
+    G --> H2[创建 approval_requests]
+    H2 --> I[agent_config.resolve_approvers 解析审批人]
+    I --> J[统一 approval router 外呼/接收 IM 决策]
     J --> K{审批结果}
     K -->|approved| L[按 domain 分派 apply handler]
     K -->|rejected / expired| M[结束]
@@ -76,15 +77,25 @@ reflection_proposals (
   reason            TEXT,
   evidence_json     TEXT,
   risk              TEXT,         -- low | medium | high
-  status            TEXT,         -- pending | approved | rejected | applied | expired
-  reviewer_user_id  TEXT,
-  reviewed_at       DATETIME,
-  rejection_reason  TEXT,
   actor_user_id     TEXT,
   applied_at        DATETIME,
-  expires_at        DATETIME,
   created_at        DATETIME,
   updated_at        DATETIME
+)
+
+approval_requests (
+  id                TEXT PRIMARY KEY, -- 对 proposal 族与 reflection_proposals.id 对齐
+  subject_type      TEXT,             -- memory_proposal | skill_proposal
+  subject_id        TEXT,             -- reflection_proposals.id
+  requester_user_id TEXT,
+  risk              TEXT,
+  status            TEXT,             -- pending | approved | rejected | expired
+  approver_user_id  TEXT,
+  decided_at        DATETIME,
+  reason            TEXT,
+  routing_key       TEXT,
+  created_at        DATETIME,
+  expires_at        DATETIME
 )
 ```
 
@@ -95,9 +106,11 @@ reflection_proposals (
   - `domain=memory`
   - `domain=skill`
   - `domain=knowledge_base`
-- `reflection_proposals(domain=skill)` 与 `reflection_proposals(domain=memory)` 统一承载两域行动：
+- `reflection_proposals(domain=skill)` 与 `reflection_proposals(domain=memory)` 统一承载两域行动实体：
   - `domain=memory`
   - `domain=skill`
+- approval lifecycle 不再存在 `reflection_proposals` 自身列里，统一落到 `approval_requests`
+- IM 回复 → approve/reject → apply 的闭环已接通，入口统一走 approval router
 - memory / skill proposal 在由 `run_reflection` 生成时通过可空 `report_id` 回链到源 `reflection_reports.id`
   - 历史行和非反思来源 proposal 允许 `report_id = NULL`
 - memory / skill proposal lifecycle 共享同一套 create / list / approve / reject / apply 审计字段

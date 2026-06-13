@@ -42,7 +42,7 @@ def _requester_routing():
 @pytest.fixture(autouse=True)
 def _mock_store(monkeypatch):
     """Patch approval_store + allowlist_store so unit tests never touch real SQLite."""
-    from fleetent.governance import approval_allowlist_store, approval_store
+    from fleetent.governance import approval_store, tool_auto_approvals_store
 
     store_calls: dict = {}
 
@@ -53,7 +53,7 @@ def _mock_store(monkeypatch):
     monkeypatch.setattr(approval_store, "update_approval", MagicMock())
     monkeypatch.setattr(approval_store, "get_approval", MagicMock(return_value=None))
     monkeypatch.setattr(approval_store, "list_approvals", MagicMock(return_value=[]))
-    monkeypatch.setattr(approval_allowlist_store, "is_allowed", MagicMock(return_value=False))
+    monkeypatch.setattr(tool_auto_approvals_store, "is_allowed", MagicMock(return_value=False))
     return store_calls
 
 

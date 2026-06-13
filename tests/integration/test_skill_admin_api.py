@@ -14,26 +14,22 @@ import fleetent.governance.audit_log as audit
 import fleetent.platform.skill_management.skill_admin_api as api
 import fleetent.platform.skill_management.skill_admin_store as store
 import fleetent.user_store as user_store
+from fleetent.db import SQLiteDatabase
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    import sqlite3
-
     db_path = tmp_path / "users.db"
     apply_migrations(db_path)
-    with sqlite3.connect(db_path) as conn:
-        for version, sql in AGENT_STATE_MIGRATIONS:
-            conn.execute(sql)
-            conn.execute(f"PRAGMA user_version = {version}")
+    migrate(SQLiteDatabase(path=db_path), AGENT_STATE_MIGRATIONS)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     # reflection no longer falls back to DATABASE_URL (agent-runtime-db-routing-cleanup):
     # inject the proposals DB the real-reflection tests write to via _insert_proposal.
     from fleetent import reflection
-    from fleetent.db import SQLiteDatabase
 
     monkeypatch.setattr(reflection, "_state_db", SQLiteDatabase(path=db_path))
     # neutral engine seams by default; individual tests override.
@@ -280,13 +276,21 @@ def _insert_proposal(db_path, pid="pr1", status="pending"):
     conn.execute(
         """INSERT INTO reflection_proposals
            (id, domain, kind, subject_user_id, target_ref, payload_json, reason,
-            evidence_json, risk, status, reviewer_user_id, reviewed_at,
-            rejection_reason, actor_user_id, applied_at, expires_at, created_at, updated_at)
+            evidence_json, risk, actor_user_id, applied_at, created_at, updated_at)
            VALUES (?, 'skill', 'create_skill', NULL, 'demo',
                    ?,
-                   'because logs', '["t1"]', 'low', ?, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)""",
-        (pid, payload_json, status, now, now),
+                   'because logs', '["t1"]', 'low', NULL, NULL, ?, ?)""",
+        (pid, payload_json, now, now),
     )
+    if status != "pending":
+        conn.execute(
+            """INSERT INTO approval_requests
+               (id, subject_type, subject_id, requester_user_id, risk, status,
+                approver_user_id, decided_at, reason, routing_key, created_at, expires_at)
+               VALUES (?, 'skill_proposal', ?, NULL, 'low', ?, 'reviewer', ?, NULL,
+                       'reflection_skill_proposal', ?, NULL)""",
+            (pid, pid, status, now, now),
+        )
     conn.commit()
     conn.close()
 
