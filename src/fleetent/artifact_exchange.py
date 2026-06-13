@@ -248,6 +248,11 @@ def register_server_root(server_id: str, root: Path) -> None:
     _server_roots[server_id] = root
 
 
+def server_root(server_id: str) -> Path | None:
+    """The registered effective file root for a server, or None if unbound."""
+    return _server_roots.get(server_id)
+
+
 # Path tail after the effective root: stop at whitespace and common JSON/text delimiters
 # so a host path embedded in result text (`"localPath": "<root>/a/b.xlsx"`) is captured
 # without swallowing the trailing quote/comma.
@@ -259,6 +264,63 @@ def _safe_size(path: str) -> int | None:
         return os.path.getsize(path)
     except OSError:
         return None
+
+
+def snapshot_products(root: Path | str) -> dict[str, tuple[float, int]]:
+    """Map ``rel_path -> (mtime, size)`` for files under ``root`` (call-window diff input).
+
+    Skips dotfiles (any dot-prefixed path segment) and ``*.tmp`` so a server's settings/
+    cache/scratch writes never enter the ledger. Returns ``{}`` for a missing root.
+    """
+    base = Path(root)
+    snap: dict[str, tuple[float, int]] = {}
+    if not base.is_dir():
+        return snap
+    for p in base.rglob("*"):
+        if not p.is_file():
+            continue
+        rel = p.relative_to(base)
+        if any(part.startswith(".") for part in rel.parts) or p.suffix == ".tmp":
+            continue
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        snap[str(rel)] = (st.st_mtime, st.st_size)
+    return snap
+
+
+def diff_register(
+    server_id: str,
+    root: Path | str,
+    before: dict[str, tuple[float, int]],
+    scope_key: str | None,
+    *,
+    session_id: str | None = None,
+    user_id: str | None = None,
+) -> list[str]:
+    """Register product-dir files new/changed since ``before`` — the call-window diff (D2).
+
+    The fallback for products the deterministic rewrite missed (result text never named
+    the path). A no-op without a ``scope_key`` (cannot attribute). Returns the rel_paths
+    registered. ``register`` is idempotent on ``(server, rel, scope_key)`` so files the
+    rewrite already registered are harmlessly refreshed, not duplicated.
+    """
+    if not scope_key:
+        return []
+    after = snapshot_products(root)
+    newly = [rel for rel, meta in after.items() if before.get(rel) != meta]
+    for rel in newly:
+        register(
+            server_id=server_id,
+            rel_path=rel,
+            scope_key=scope_key,
+            session_id=session_id,
+            user_id=user_id,
+            filename=os.path.basename(rel),
+            size=after[rel][1],
+        )
+    return newly
 
 
 def rewrite_and_register(
