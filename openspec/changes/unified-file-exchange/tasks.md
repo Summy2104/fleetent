@@ -9,12 +9,12 @@
 
 ## 0. 归属轴重构（D0，续做前置，必须先做）
 
-- [ ] 0.1 测试：单一 key 派生权威 `workspace_scope_key(scope, session_id, agent_name)`（SESSION→session_id / AGENT→agent_name），且与 `SandboxManager.workspace_host_path` 同源（同输入同 key）——unit，先红
-- [ ] 0.2 实现：抽 `workspace_scope_key`（sandbox 与 exchange 共用，杜绝两处各自推导 scope）——绿
-- [ ] 0.3 测试：迁移 v33 给 `artifacts` 追加 `scope_key` 列（migrate-on-open、user_version 递增、既有数据无损）——integration，先红
-- [ ] 0.4 实现：`agent_state_migrations.py` append v33——绿
-- [ ] 0.5 测试：`artifact_exchange` 改为 scope_key 轴（`register(...scope_key, session_id, user_id)` 记审计列；`resolve(path, scope_key, *, approved)` 按 `(server_id, rel_path, scope_key)` 命中；同 `(server_id, rel_path)` 跨 scope 各自命中不串味、不误拒；`list_by_scope`；`approved=True` 跨 scope 豁免并记审计）——unit/integration，先红
-- [ ] 0.6 实现：重做 `artifact_exchange` 签名与查找（`_find_by_path`→按 scope_key 过滤；`resolve`/`register`/`list_*` 改 scope_key 轴）——绿
+- [x] 0.1 测试：单一 key 派生权威 `workspace_scope_key(scope, session_id, agent_name)`（SESSION→session_id / AGENT→agent_name），且与 `SandboxManager.workspace_host_path` 同源（同输入同 key）——unit，先红
+- [x] 0.2 实现：抽 `workspace_scope_key`（sandbox 与 exchange 共用，杜绝两处各自推导 scope）——绿
+- [x] 0.3 测试：迁移 v33 给 `artifacts` 追加 `scope_key` 列（migrate-on-open、user_version 递增、既有数据无损）——integration，先红
+- [x] 0.4 实现：`agent_state_migrations.py` append v33——绿
+- [x] 0.5 测试：`artifact_exchange` 改为 scope_key 轴（`register(...scope_key, session_id, user_id)` 记审计列；`resolve(path, scope_key, *, approved)` 按 `(server_id, rel_path, scope_key)` 命中；同 `(server_id, rel_path)` 跨 scope 各自命中不串味、不误拒；`list_by_scope`；`approved=True` 跨 scope 豁免并记审计）——unit/integration，先红
+- [x] 0.6 实现：重做 `artifact_exchange` 签名与查找（`_find_by_path`→按 scope_key 过滤；`resolve`/`register`/`list_*` 改 scope_key 轴）——绿
 
 ## 1. 台账与命名空间核心（artifact_exchange.py）
 

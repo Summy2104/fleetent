@@ -55,63 +55,79 @@ def _exchange(tmp_path, monkeypatch):
         {"gd": root},
     )
 
+    # Ledger keyed by (server_id, rel_path) → one artifact carrying its scope_key.
     ledger: dict[tuple[str, str], Artifact] = {}
 
-    def fake_find(server_id, rel_path):
+    def fake_find_by_path(server_id, rel_path, scope_key):
+        art = ledger.get((server_id, rel_path))
+        return art if art is not None and art.scope_key == scope_key else None
+
+    def fake_find_any(server_id, rel_path):
         return ledger.get((server_id, rel_path))
 
-    monkeypatch.setattr(artifact_exchange, "_find_by_path", fake_find)
+    monkeypatch.setattr(artifact_exchange, "_find_by_path", fake_find_by_path)
+    monkeypatch.setattr(artifact_exchange, "_find_any_by_path", fake_find_any)
     return root, ledger
 
 
-def _art(session_id: str, rel: str = "a.txt") -> Artifact:
-    return Artifact("id1", "gd", rel, session_id, "U", rel, None, None, None)
+def _art(scope_key: str, rel: str = "a.txt") -> Artifact:
+    # fields: id, server, rel, scope_key, session_id, user_id, filename, mime, size, created_at
+    return Artifact("id1", "gd", rel, scope_key, "sess", "U", rel, None, None, None)
 
 
-def test_resolve_legal_same_session(_exchange):
+def test_resolve_legal_same_scope(_exchange):
     root, ledger = _exchange
-    ledger[("gd", "a.txt")] = _art("S1")
-    assert artifact_exchange.resolve("/exchange/gd/a.txt", "S1") == root / "a.txt"
+    ledger[("gd", "a.txt")] = _art("K1")
+    assert artifact_exchange.resolve("/exchange/gd/a.txt", "K1") == root / "a.txt"
 
 
 def test_resolve_rejects_non_exchange_path(_exchange):
     with pytest.raises(ExchangeResolutionError):
-        artifact_exchange.resolve("/somewhere/else", "S1")
+        artifact_exchange.resolve("/somewhere/else", "K1")
 
 
 def test_resolve_rejects_dotdot_escape(_exchange):
     _, ledger = _exchange
-    ledger[("gd", "../secret")] = _art("S1", "../secret")
+    ledger[("gd", "../secret")] = _art("K1", "../secret")
     with pytest.raises(ExchangeResolutionError):
-        artifact_exchange.resolve("/exchange/gd/../secret", "S1")
+        artifact_exchange.resolve("/exchange/gd/../secret", "K1")
 
 
 def test_resolve_rejects_unregistered_server(_exchange):
     with pytest.raises(ExchangeResolutionError):
-        artifact_exchange.resolve("/exchange/unknown/a.txt", "S1")
+        artifact_exchange.resolve("/exchange/unknown/a.txt", "K1")
 
 
 def test_resolve_rejects_unregistered_artifact(_exchange):
     # File exists on disk but no ledger entry → no attribution → reject.
     with pytest.raises(ExchangeResolutionError):
-        artifact_exchange.resolve("/exchange/gd/a.txt", "S1")
+        artifact_exchange.resolve("/exchange/gd/a.txt", "K1")
 
 
-def test_resolve_rejects_cross_session(_exchange):
+def test_resolve_rejects_cross_scope(_exchange):
     _, ledger = _exchange
-    ledger[("gd", "a.txt")] = _art("S2")  # owned by another session
-    with pytest.raises(ExchangeResolutionError):
-        artifact_exchange.resolve("/exchange/gd/a.txt", "S1")
+    ledger[("gd", "a.txt")] = _art("K2")  # owned by another scope
+    with pytest.raises(ExchangeResolutionError, match="另一|another|审批|approval"):
+        artifact_exchange.resolve("/exchange/gd/a.txt", "K1")
+
+
+def test_resolve_same_path_other_scope_does_not_mask_own(_exchange):
+    """D4: a same-path artifact owned by another scope MUST NOT mask my own row;
+    scope-filtered lookup returns mine, not 'newest at path'."""
+    root, ledger = _exchange
+    # Only my own row is present at this path under my scope.
+    ledger[("gd", "a.txt")] = _art("K1")
+    assert artifact_exchange.resolve("/exchange/gd/a.txt", "K1") == root / "a.txt"
 
 
 def test_resolve_approved_bypasses_attribution(_exchange):
     root, ledger = _exchange
-    ledger[("gd", "a.txt")] = _art("S2")
-    assert artifact_exchange.resolve("/exchange/gd/a.txt", "S1", approved=True) == root / "a.txt"
+    ledger[("gd", "a.txt")] = _art("K2")
+    assert artifact_exchange.resolve("/exchange/gd/a.txt", "K1", approved=True) == root / "a.txt"
 
 
 def test_resolve_missing_file_reports_gone(_exchange):
     root, ledger = _exchange
-    ledger[("gd", "deleted.txt")] = _art("S1", "deleted.txt")
+    ledger[("gd", "deleted.txt")] = _art("K1", "deleted.txt")
     with pytest.raises(ExchangeResolutionError, match="不存在|gone|exist"):
-        artifact_exchange.resolve("/exchange/gd/deleted.txt", "S1")
+        artifact_exchange.resolve("/exchange/gd/deleted.txt", "K1")

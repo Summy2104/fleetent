@@ -357,4 +357,11 @@ MIGRATIONS: list[tuple[int, str]] = [
         "created_at TEXT"
         ")",
     ),
+    # ── v33: unified-file-exchange D0 — attribution axis = workspace scope key.
+    # `scope_key` is the visibility/ownership key (session_id when workspace_scope is
+    # `session`, agent_name when `agent`; same source as the /workspace mount). The
+    # pre-existing session_id/user_id columns become audit-only (the concrete producing
+    # call). Legacy v32 rows get NULL scope_key until re-registered (table is dormant
+    # in production — no live rows to backfill).
+    (33, "ALTER TABLE artifacts ADD COLUMN scope_key TEXT"),
 ]

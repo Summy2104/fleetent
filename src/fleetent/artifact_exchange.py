@@ -4,8 +4,8 @@ The `/exchange/<server_id>/<rel>` namespace is the second logical root (besides
 `/workspace`) the file fence understands. This module is the agent-side governance
 core behind it: an `artifacts` ledger (provenance + ownership metadata — never a
 model interface), effective-root resolution for MCP servers, attribution access
-control (a session may only reach its own artifacts), and the per-session hard-link
-view that is read-only mounted into the sandbox as `/exchange`.
+control (a run may only reach artifacts owned by its workspace scope, D0), and the
+per-scope hard-link view that is read-only mounted into the sandbox as `/exchange`.
 
 Injection mirrors `schedule_store` (`set_state_db` at agent boot); SQL uses named
 parameters through the unified DB boundary. No `fleetent.platform.*` import.
@@ -55,11 +55,18 @@ def _database() -> SQLiteDatabase:
 
 @dataclass(frozen=True)
 class Artifact:
-    """One ledger row: a file produced by an MCP server under /exchange."""
+    """One ledger row: a file produced by an MCP server under /exchange.
+
+    `scope_key` is the visibility/ownership key (D0): the run's workspace scope key
+    (session_id when workspace_scope is `session`, agent_name when `agent`; same
+    source as the /workspace mount). `session_id`/`user_id` record the concrete
+    producing call for AUDIT only — they do not drive access control.
+    """
 
     artifact_id: str
     server_id: str
     rel_path: str
+    scope_key: str | None
     session_id: str | None
     user_id: str | None
     filename: str | None
@@ -72,7 +79,8 @@ def register(
     *,
     server_id: str,
     rel_path: str,
-    session_id: str | None,
+    scope_key: str | None,
+    session_id: str | None = None,
     user_id: str | None = None,
     filename: str | None = None,
     mime: str | None = None,
@@ -80,27 +88,29 @@ def register(
 ) -> str:
     """Record (or refresh) an artifact and return its id.
 
-    Idempotent on ``(server_id, rel_path, session_id)``: re-registering the same file
-    (the chokepoint rewrite and the diff fallback may both see it) refreshes mutable
-    metadata and returns the existing id rather than inserting a duplicate.
+    Idempotent on ``(server_id, rel_path, scope_key)`` (D0): re-registering the same
+    file under the same scope (the chokepoint rewrite and the diff fallback may both
+    see it) refreshes mutable + audit metadata and returns the existing id rather than
+    inserting a duplicate. The same path under a *different* scope is a distinct row.
     """
     existing = (
         _database()
         .execute(
             "SELECT artifact_id FROM artifacts "
             "WHERE server_id = :server_id AND rel_path = :rel_path "
-            "AND session_id IS :session_id",
-            {"server_id": server_id, "rel_path": rel_path, "session_id": session_id},
+            "AND scope_key IS :scope_key",
+            {"server_id": server_id, "rel_path": rel_path, "scope_key": scope_key},
         )
         .fetchone()
     )
     if existing is not None:
         artifact_id = existing["artifact_id"]
         _database().execute(
-            "UPDATE artifacts SET user_id = :user_id, filename = :filename, "
-            "mime = :mime, size = :size WHERE artifact_id = :artifact_id",
+            "UPDATE artifacts SET session_id = :session_id, user_id = :user_id, "
+            "filename = :filename, mime = :mime, size = :size WHERE artifact_id = :artifact_id",
             {
                 "artifact_id": artifact_id,
+                "session_id": session_id,
                 "user_id": user_id,
                 "filename": filename,
                 "mime": mime,
@@ -112,14 +122,16 @@ def register(
     artifact_id = str(uuid.uuid4())
     _database().execute(
         "INSERT INTO artifacts ("
-        "artifact_id, server_id, rel_path, session_id, user_id, filename, mime, size, created_at"
+        "artifact_id, server_id, rel_path, scope_key, session_id, user_id, filename, mime, size,"
+        " created_at"
         ") VALUES ("
-        ":artifact_id, :server_id, :rel_path, :session_id, :user_id, :filename, :mime, :size,"
-        " :created_at)",
+        ":artifact_id, :server_id, :rel_path, :scope_key, :session_id, :user_id, :filename, :mime,"
+        " :size, :created_at)",
         {
             "artifact_id": artifact_id,
             "server_id": server_id,
             "rel_path": rel_path,
+            "scope_key": scope_key,
             "session_id": session_id,
             "user_id": user_id,
             "filename": filename,
@@ -144,21 +156,47 @@ def get(artifact_id: str) -> Artifact | None:
     return _row_to_artifact(row) if row is not None else None
 
 
-def list_by_session(session_id: str) -> list[Artifact]:
-    """Return all artifacts owned by a session, newest first."""
+def list_by_scope(scope_key: str) -> list[Artifact]:
+    """Return all artifacts owned by a workspace scope (D0), newest first.
+
+    Drives the per-scope hard-link view (`.views/<scope_key>/`) and scope-level audit.
+    """
     rows = (
         _database()
         .execute(
-            "SELECT * FROM artifacts WHERE session_id = :session_id ORDER BY created_at DESC",
-            {"session_id": session_id},
+            "SELECT * FROM artifacts WHERE scope_key = :scope_key ORDER BY created_at DESC",
+            {"scope_key": scope_key},
         )
         .fetchall()
     )
     return [_row_to_artifact(row) for row in rows]
 
 
-def _find_by_path(server_id: str, rel_path: str) -> Artifact | None:
-    """Return the artifact registered at (server_id, rel_path), or None."""
+def _find_by_path(server_id: str, rel_path: str, scope_key: str | None) -> Artifact | None:
+    """Return the artifact registered at (server_id, rel_path) for THIS scope, or None.
+
+    Scope-filtered (D4): never 'newest at path across scopes' — a same-path artifact
+    owned by another scope must not be returned here (it would either leak or, after the
+    ownership check, falsely deny the requester's own file).
+    """
+    row = (
+        _database()
+        .execute(
+            "SELECT * FROM artifacts WHERE server_id = :server_id AND rel_path = :rel_path "
+            "AND scope_key IS :scope_key ORDER BY created_at DESC LIMIT 1",
+            {"server_id": server_id, "rel_path": rel_path, "scope_key": scope_key},
+        )
+        .fetchone()
+    )
+    return _row_to_artifact(row) if row is not None else None
+
+
+def _find_any_by_path(server_id: str, rel_path: str) -> Artifact | None:
+    """Return the newest artifact at (server_id, rel_path) regardless of scope.
+
+    Used only on the approved (post-permission-gate) cross-scope path and to
+    distinguish 'cross-scope, needs approval' from 'never registered' in `resolve`.
+    """
     row = (
         _database()
         .execute(
@@ -176,6 +214,7 @@ def _row_to_artifact(row: dict[str, Any]) -> Artifact:
         artifact_id=row["artifact_id"],
         server_id=row["server_id"],
         rel_path=row["rel_path"],
+        scope_key=row["scope_key"],
         session_id=row["session_id"],
         user_id=row["user_id"],
         filename=row["filename"],
@@ -208,13 +247,14 @@ def register_server_root(server_id: str, root: Path) -> None:
     _server_roots[server_id] = root
 
 
-def resolve(path: str, session_id: str | None, *, approved: bool = False) -> Path:
+def resolve(path: str, scope_key: str | None, *, approved: bool = False) -> Path:
     """Resolve a ``/exchange/<server_id>/<rel>`` path to a host file with attribution.
 
     Enforces (D4): the path is well-formed and inside the server's registered root (no
-    ``..`` escape), the artifact is in the ledger, and — unless ``approved`` — it is
-    owned by ``session_id``. Raises `ExchangeResolutionError` for any violation, or when
-    the underlying file no longer exists.
+    ``..`` escape), and the artifact is owned by THIS workspace scope (`scope_key`).
+    The only cross-scope exemption is ``approved`` (the call already passed the
+    permission gate — send_file upgrade / send_im_message files). Raises
+    `ExchangeResolutionError` for any violation, or when the underlying file is gone.
     """
     server_id, rel = _split_exchange_path(path)
     root = _server_roots.get(server_id)
@@ -226,13 +266,21 @@ def resolve(path: str, session_id: str | None, *, approved: bool = False) -> Pat
     if candidate != base and not candidate.startswith(base + os.sep):
         raise ExchangeResolutionError(f"path escapes exchange root: {path!r}")
 
-    artifact = _find_by_path(server_id, rel)
+    # Scope-filtered lookup first: my own row wins over any same-path other-scope row.
+    artifact = _find_by_path(server_id, rel, scope_key)
     if artifact is None:
-        raise ExchangeResolutionError(f"no registered artifact for {path!r}")
-    if not approved and artifact.session_id != session_id:
-        raise ExchangeResolutionError(
-            f"artifact {path!r} belongs to another session; use send_im_message (approval)"
-        )
+        # Not mine. Either it belongs to another scope (cross-scope) or was never
+        # registered — distinguished by a scope-agnostic lookup. Cross-scope is only
+        # reachable when the call already passed the permission gate (`approved`).
+        other = _find_any_by_path(server_id, rel)
+        if other is None:
+            raise ExchangeResolutionError(f"no registered artifact for {path!r}")
+        if not approved:
+            raise ExchangeResolutionError(
+                f"artifact {path!r} 属于另一 scope（belongs to another scope）；"
+                "use send_im_message (approval)"
+            )
+
     if not Path(candidate).is_file():
         raise ExchangeResolutionError(f"工件已不存在（file gone）: {path!r}")
     return Path(candidate)
