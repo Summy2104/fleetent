@@ -344,7 +344,7 @@ class SearchBody(BaseModel):
 
 
 class BindBody(BaseModel):
-    agent_id: str
+    agent_id: int
     tenant_id: str = _DEFAULT_TENANT
 
 
@@ -419,7 +419,7 @@ def run_evaluation(body: EvalBody, authorization: str | None = Header(None)) -> 
 
 @router.get("/by-agent/{agent_id}")
 def kbs_for_agent(
-    agent_id: str, tenant_id: str = _DEFAULT_TENANT, authorization: str | None = Header(None)
+    agent_id: int, tenant_id: str = _DEFAULT_TENANT, authorization: str | None = Header(None)
 ) -> dict[str, Any]:
     _current_user(authorization)
     # Archive state lives in the KB engine, not the binding store: drop bindings
@@ -598,7 +598,7 @@ def bind_agent(
 @router.delete("/{kb_id}/agents/{agent_id}")
 def unbind_agent(
     kb_id: str,
-    agent_id: str,
+    agent_id: int,
     tenant_id: str = _DEFAULT_TENANT,
     authorization: str | None = Header(None),
 ) -> dict[str, Any]:
