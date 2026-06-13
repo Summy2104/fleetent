@@ -104,6 +104,65 @@ async def test_call_tool_applies_chokepoint_rewrite(_exchange, monkeypatch):
     assert len(arts) == 1 and arts[0].rel_path == "out/report.xlsx"
 
 
+def test_diff_register_picks_up_unmentioned_new_file(_exchange):
+    root = _exchange
+    before = artifact_exchange.snapshot_products(root)
+    (root / "out" / "extra.csv").write_text("data")  # server wrote it; result never names it
+    newly = artifact_exchange.diff_register("gd", root, before, "K1", session_id="S1")
+    assert "out/extra.csv" in newly
+    assert "out/extra.csv" in {a.rel_path for a in artifact_exchange.list_by_scope("K1")}
+
+
+def test_diff_register_skips_dotfiles_and_tmp(_exchange):
+    root = _exchange
+    before = artifact_exchange.snapshot_products(root)
+    (root / ".hidden").write_text("x")
+    (root / "scratch.tmp").write_text("x")
+    assert artifact_exchange.diff_register("gd", root, before, "K1") == []
+
+
+def test_diff_register_ignores_preexisting_unchanged(_exchange):
+    root = _exchange  # already has out/report.xlsx
+    before = artifact_exchange.snapshot_products(root)
+    assert artifact_exchange.diff_register("gd", root, before, "K1") == []
+
+
+def test_diff_register_noop_without_scope_key(_exchange):
+    root = _exchange
+    before = artifact_exchange.snapshot_products(root)
+    (root / "out" / "extra.csv").write_text("data")
+    assert artifact_exchange.diff_register("gd", root, before, None) == []
+    assert artifact_exchange.list_by_scope("K1") == []
+
+
+async def test_call_tool_diff_registers_unmentioned_product(_exchange, monkeypatch):
+    """The call-window diff (§2.5) registers a product the result text never names."""
+    import types
+
+    import fleetent.integrations.mcp.client as mc
+    from fleetent.integrations.mcp.client import HealthState, McpServerConfig
+
+    root = _exchange
+    server = McpServerConfig(id="gd", transport="stdio", command="x")
+    server._health = HealthState.healthy
+    monkeypatch.setattr(mc, "_server_registry", {(None, "gd"): server})
+
+    class _Sess:
+        async def call_tool(self, name, args):
+            # The tool writes a file but its result text does NOT mention the path.
+            (root / "out" / "silent.bin").write_bytes(b"x")
+            return types.SimpleNamespace(
+                content=[types.SimpleNamespace(type="text", text="done")],
+                structuredContent=None,
+                isError=False,
+            )
+
+    monkeypatch.setattr(mc, "_active_sessions", {(None, "gd"): _Sess()})
+    out = await mc.call_tool("gd", "gen", {}, scope=None, scope_key="K1", session_id="S1")
+    assert out == "done"  # result text unchanged (no path to rewrite)
+    assert "out/silent.bin" in {a.rel_path for a in artifact_exchange.list_by_scope("K1")}
+
+
 async def test_call_tool_no_scope_key_is_byte_identical(_exchange, monkeypatch):
     """No scope_key (e.g. no run context) → legacy behavior: raw result, no registration."""
     import types
