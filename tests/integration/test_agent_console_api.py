@@ -59,12 +59,16 @@ def test_viewer_can_read_not_write(client):
 # --- enable/disable (场景 39) -------------------------------------------------
 
 
-def test_disable_then_enable(client):
+def test_disable_then_enable(client, monkeypatch):
+    agent_store.create_agent("ops", "Ops.", ["shell"])
+    _wire_real_store(monkeypatch)
     token, _ = _session_for("admin")
     client.post("/admin/agents/ops/disable", headers=_hdr(token))
-    assert store.get_state("ops")["status"] == "disabled"
+    ops = agent_store.get_by_name("ops")
+    assert ops is not None
+    assert store.get_state(ops.id)["status"] == "disabled"
     client.post("/admin/agents/ops/enable", headers=_hdr(token))
-    assert store.get_state("ops")["status"] == "enabled"
+    assert store.get_state(ops.id)["status"] == "enabled"
     assert any(a["action"] == "agent.disable" for a in audit.search_audit())
 
 
@@ -72,6 +76,8 @@ def test_disable_then_enable(client):
 
 
 def test_archive_blocked_when_bound(client, monkeypatch):
+    agent_store.create_agent("ops", "Ops.", ["shell"])
+    _wire_real_store(monkeypatch)
     monkeypatch.setattr(
         api, "references_for", lambda name: {"users": ["u1"], "channels": ["slack:C1"]}
     )
@@ -79,41 +85,39 @@ def test_archive_blocked_when_bound(client, monkeypatch):
     r = client.post("/admin/agents/ops/archive", headers=_hdr(token, confirm=True))
     assert r.status_code == 409
     assert "u1" in r.json()["detail"]["users"]
-    assert store.get_state("ops")["status"] != "archived"
+    ops = agent_store.get_by_name("ops")
+    assert ops is not None
+    assert store.get_state(ops.id)["status"] != "archived"
 
 
-def test_archive_requires_confirm_then_restore(client):
+def test_archive_requires_confirm_then_restore(client, monkeypatch):
+    agent_store.create_agent("ops", "Ops.", ["shell"])
+    _wire_real_store(monkeypatch)
     token, _ = _session_for("admin")
     assert client.post("/admin/agents/ops/archive", headers=_hdr(token)).status_code == 428
     r = client.post("/admin/agents/ops/archive", headers=_hdr(token, confirm=True))
     assert r.status_code == 200
-    assert store.get_state("ops")["status"] == "archived"
+    ops = agent_store.get_by_name("ops")
+    assert ops is not None
+    assert store.get_state(ops.id)["status"] == "archived"
     client.post("/admin/agents/ops/restore", headers=_hdr(token))
-    assert store.get_state("ops")["status"] == "enabled"
+    assert store.get_state(ops.id)["status"] == "enabled"
 
 
 # --- clone (场景 42) ----------------------------------------------------------
 
 
 def test_clone_copies_def_no_bindings(client, monkeypatch):
-    created = {}
-    monkeypatch.setattr(
-        api,
-        "get_agent_def",
-        lambda name: (
-            {"id": 1, "system_prompt": "p", "allowed_tools": ["read_*"]} if name == "ops" else None
-        ),
-    )
-    monkeypatch.setattr(
-        api,
-        "create_agent_def",
-        lambda n, sp, at, *a, **k: created.update(name=n, sp=sp, at=at),
-    )
+    _wire_real_store(monkeypatch)
+    agent_store.create_agent("ops", "p", ["read_*"])
     token, _ = _session_for("admin")
     r = client.post("/admin/agents/ops/clone", headers=_hdr(token), json={"new_name": "ops2"})
     assert r.status_code == 200
-    assert created == {"name": "ops2", "sp": "p", "at": ["read_*"]}
-    assert store.get_state("ops2")["provenance"] == "adhoc"
+    clone = agent_store.get_by_name("ops2")
+    assert clone is not None
+    assert clone.system_prompt == "p"
+    assert clone.allowed_tools == ["read_*"]
+    assert store.get_state(clone.id)["provenance"] == "adhoc"
 
 
 def test_clone_duplicate_name_rejected(client, monkeypatch):
@@ -258,7 +262,7 @@ def test_create_agent_persists_and_lists(client, monkeypatch):
     assert r.status_code == 201
     found = agent_store.get_by_name("newbot")
     assert found is not None and found.system_prompt == "hi"
-    st = store.get_state("newbot")
+    st = store.get_state(found.id)
     assert st["provenance"] == "adhoc" and st["status"] == "enabled"
     assert "newbot" in {a["agent_name"] for a in store.list_states()}
 
@@ -387,10 +391,12 @@ def test_patch_missing_404(client, monkeypatch):
 def test_patch_managed_marks_drift(client, monkeypatch):
     _wire_real_store(monkeypatch)
     agent_store.create_agent("ops", "v1", ["shell"])
-    store.set_provenance("ops", "managed")
+    ops = agent_store.get_by_name("ops")
+    assert ops is not None
+    store.set_provenance(ops.id, "managed")
     token, _ = _session_for("admin")
     client.patch("/admin/agents/ops", headers=_hdr(token), json={"system_prompt": "v2"})
-    assert store.get_state("ops")["drift"] == 1
+    assert store.get_state(ops.id)["drift"] == 1
 
 
 def test_delete_requires_confirm(client, monkeypatch):
@@ -415,7 +421,9 @@ def test_delete_blocked_when_bound(client, monkeypatch):
 def test_delete_removes_def_and_state(client, monkeypatch):
     _wire_real_store(monkeypatch)
     agent_store.create_agent("ops", "p", [])
-    store.enable("ops")
+    ops = agent_store.get_by_name("ops")
+    assert ops is not None
+    store.enable(ops.id)
     token, _ = _session_for("admin")
     r = client.delete("/admin/agents/ops", headers=_hdr(token, confirm=True))
     assert r.status_code == 200

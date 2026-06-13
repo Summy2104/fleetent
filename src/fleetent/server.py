@@ -439,9 +439,12 @@ def agent_routing_status(agent_name: str) -> str:
     if not os.environ.get("DATABASE_URL"):
         return "enabled"
     try:
+        agent = agent_store.get_by_name(agent_name)
+        if agent is None:
+            return "enabled"
         from fleetent.platform.agent_management_console import agent_admin_store
 
-        return str(agent_admin_store.get_state(agent_name)["status"])
+        return str(agent_admin_store.get_state(agent.id)["status"])
     except Exception:  # noqa: BLE001 — advisory check, never block chat on failure
         logger.exception("agent_status_lookup_failed agent=%s", agent_name)
         return "enabled"
