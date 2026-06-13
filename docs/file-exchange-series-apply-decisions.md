@@ -138,7 +138,13 @@ Phase 0 完成后准备 bb-pr 合 main 时发现 **Bitbucket origin/main 与 Git
 - ③ 的 callable-risk（`registry.RiskFn`/`evaluate_risk_level`/`is_dynamic_risk`）合并后**存活**，与新审批模型不冲突（全 unit 绿）。
 - ②（#15）的 `test_conversation_address_suspend.py` 还 `import approval_allowlist_store as allowlist`（旧名，模块已删），触发 Bitbucket 新增的护栏 `test_tool_auto_approvals_guard`。**解决**：改为 `import tool_auto_approvals_store as allowlist`（permission_gate 同款别名），`is_allowed` 签名兼容。
 
-**待续**：全量 integration 对照「合并后基线」无新增失败后，bb-pr 合 Bitbucket main（首个 PR 较大，含①②③+reconcile+P0；CI 门控兜底）。
+**reconcile 验证**：合并后全量 unit 2943 passed、integration 1962 passed / 0 failed。
+
+### ✅ PR #243 已合入 Bitbucket main（2026-06-13）
+
+`feat(file-exchange): D0 归属轴重构地基 (§0) + reconcile ①②③ 落 Bitbucket main`。CI（Pipeline pullrequests）SUCCESSFUL 后 admin approve + merge_commit 合入。**①②③(#14/#15/#16) 首次落 Bitbucket truth main**，D0 归属轴重构 + P0 一并合入。origin/main 顶端 = `6486fe78`。`close_source_branch=false`（分支留作后续 Phase 续做）。
+
+**后续 Phase（P1–P6）**：分支基线现已与 Bitbucket main 对齐，逐 Phase diff 干净，每 Phase 绿后 bb-pr 增量合入。
 
 ## ④ delivery-receipts-postcondition
 
