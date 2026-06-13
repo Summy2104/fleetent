@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 from fleetent import agent_config
 from fleetent.agent_config import AgentConfigIndex, AgentFile, default_models
+from fleetent.config import LongTermContextSettings
 from fleetent.knowledge_base import KnowledgeChunk
 from fleetent.memory import MemoryItem
 
@@ -69,9 +70,7 @@ async def test_build_context_calls_memory_search_with_user_query_and_limit(monke
         available_tokens=200,
     )
 
-    memory_search.assert_awaited_once_with(
-        "user-1", "python debugging", limit=10
-    )
+    memory_search.assert_awaited_once_with("user-1", "python debugging", limit=10)
 
 
 async def test_memory_results_are_formatted_with_memory_source_summary(monkeypatch):
@@ -217,6 +216,82 @@ async def test_builtin_knowledge_provider_disabled_does_not_call_knowledge_base(
     knowledge_search.assert_not_awaited()
     assert result.text == ""
     assert result.sources == []
+
+
+async def test_build_context_keeps_budget_policy_path_for_memory_and_knowledge(monkeypatch):
+    from fleetent import long_term_ctx
+
+    _publish_agent(
+        monkeypatch,
+        AgentFile(
+            name="agent-1",
+            version=1,
+            models=default_models(),
+            knowledge={
+                "enabled": True,
+                "bindings": [{"tenant_id": "tenant-a", "kb_id": "global"}],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        long_term_ctx,
+        "_ltc_config",
+        lambda: LongTermContextSettings(
+            max_tokens=200,
+            memory_max_tokens=200,
+            knowledge_max_tokens=200,
+            memory_top_k=5,
+            knowledge_top_k=5,
+            conflict_preference="memory",
+        ),
+    )
+    now = datetime(2026, 5, 31, tzinfo=UTC)
+    memory_item = MemoryItem(
+        id="mem-1",
+        user_id="user-1",
+        type="preference",
+        content="User prefers on-prem deployment guidance.",
+        created_at=now,
+        updated_at=now,
+        expires_at=None,
+    )
+    knowledge_chunk = KnowledgeChunk(
+        id="chunk-1",
+        document_id="doc-1",
+        tenant_id="tenant-a",
+        kb_id="global",
+        filename="guide.md",
+        content="Fleetent supports self-hosted deployment.",
+        position=0,
+        score=0.82,
+        source="manual",
+        source_url=None,
+    )
+    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[memory_item]))
+    monkeypatch.setattr(
+        long_term_ctx.knowledge_base, "search", AsyncMock(return_value=[knowledge_chunk])
+    )
+    long_term_ctx.set_knowledge_provider(None)
+
+    result = await long_term_ctx.build_context(
+        user_id="user-1",
+        query="deployment guide",
+        agent_id="agent-1",
+        available_tokens=200,
+    )
+
+    assert [source.source_type for source in result.sources] == ["memory", "knowledge"]
+    assert result.budget_metadata.effective_budget == 200
+    assert result.budget_metadata.memory_used_tokens > 0
+    assert result.budget_metadata.knowledge_used_tokens > 0
+    assert any(
+        decision.source_type == "memory" and decision.included
+        for decision in result.budget_metadata.decisions
+    )
+    assert any(
+        decision.source_type == "knowledge" and decision.included
+        for decision in result.budget_metadata.decisions
+    )
 
 
 async def test_empty_knowledge_results_are_omitted(monkeypatch):

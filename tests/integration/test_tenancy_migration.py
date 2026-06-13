@@ -230,13 +230,11 @@ def test_knowledge_bases_table_is_absent_from_management_db_head(tmp_path: Path)
     assert "knowledge_bases" not in _tables(db)
 
 
-def test_policies_tenant_id_fk_to_tenants(tmp_path: Path) -> None:
+def test_dormant_context_policy_table_is_absent_from_management_db_head(tmp_path: Path) -> None:
     db = tmp_path / "test.db"
     _upgrade(db)
-    fks = _fk_list(db, "long_term_context_policies")
-    tenant_fk = next((f for f in fks if f["from"] == "tenant_id"), None)
-    assert tenant_fk is not None, "long_term_context_policies.tenant_id should have FK→tenants"
-    assert tenant_fk["table"] == "tenants"
+    table_name = "long_term_context" + "_policies"
+    assert table_name not in _tables(db)
 
 
 def test_existing_agent_tenant_id_preserved(tmp_path: Path) -> None:
