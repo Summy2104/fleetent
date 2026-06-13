@@ -957,8 +957,23 @@ def _register_tool(
 
     input_schema = _sanitize_input_schema(getattr(tool_def, "inputSchema", None))
 
-    async def call(**kwargs: object) -> str:
-        return await _call_via_session(server.id, tool_def.name, dict(kwargs), server._agent_scope)
+    async def call(tool_context: Any = None, **kwargs: object) -> str:
+        # tool_context binds to this param (never into kwargs → never leaks to MCP args).
+        # It carries the run's scope_key for /exchange attribution (global-scope path; the
+        # agent-scoped path threads the same via dispatch → call_tool).
+        scope_key = getattr(tool_context, "scope_key", None)
+        session_id = getattr(tool_context, "session_id", None)
+        principal = getattr(tool_context, "principal", None)
+        user_id = getattr(principal, "user_id", None)
+        return await _call_via_session(
+            server.id,
+            tool_def.name,
+            dict(kwargs),
+            server._agent_scope,
+            scope_key=scope_key,
+            session_id=session_id,
+            user_id=user_id,
+        )
 
     schema: tr.ToolSchema = {
         "type": "function",
@@ -1079,8 +1094,38 @@ def _result_to_text(result: Any) -> str:
     )
 
 
+def _rewrite_result_paths(
+    server_id: str,
+    text: str,
+    scope_key: str | None,
+    session_id: str | None,
+    user_id: str | None,
+) -> str:
+    """Apply the deterministic /exchange chokepoint rewrite to a tool result (best-effort).
+
+    Delegates to artifact_exchange; a failure must never break the tool call (the agent
+    still gets the raw result). No-op when no scope_key/root (byte-identical legacy).
+    """
+    try:
+        from fleetent import artifact_exchange
+
+        return artifact_exchange.rewrite_and_register(
+            server_id, text, scope_key, session_id=session_id, user_id=user_id
+        )
+    except Exception as exc:  # noqa: BLE001 — attribution is auxiliary, never crash the call
+        logger.warning("mcp_result_rewrite_failed server_id=%s error=%s", server_id, exc)
+        return text
+
+
 async def _call_via_session(
-    server_id: str, tool_name: str, args: dict[str, Any], scope: int | None = None
+    server_id: str,
+    tool_name: str,
+    args: dict[str, Any],
+    scope: int | None = None,
+    *,
+    scope_key: str | None = None,
+    session_id: str | None = None,
+    user_id: str | None = None,
 ) -> str:
     """Invoke a tool through the held SDK ClientSession (any transport).
 
@@ -1134,19 +1179,35 @@ async def _call_via_session(
             set_health(server, HealthState.unavailable)
             return _unavailable_result(server_id)
         reset_health(server)  # retry succeeded → server is healthy again
-    return _result_to_text(result)
+    text = _result_to_text(result)
+    return _rewrite_result_paths(server_id, text, scope_key, session_id, user_id)
 
 
 # Public API. `scope` keys the (scope, server_id) registry: None = global (startup)
 # servers; an int = an agent-scoped registration. A scope with no matching server_id
 # raises rather than silently falling back to the global server (agent isolation).
 async def call_tool(
-    server_id: str, tool_name: str, args: dict[str, Any], scope: int | None = None
+    server_id: str,
+    tool_name: str,
+    args: dict[str, Any],
+    scope: int | None = None,
+    *,
+    scope_key: str | None = None,
+    session_id: str | None = None,
+    user_id: str | None = None,
 ) -> str:
     server = _server_registry.get((scope, server_id))
     if server is None:
         raise KeyError(f"Unknown MCP server: {server_id}")
-    return await _call_via_session(server_id, tool_name, args, scope)
+    return await _call_via_session(
+        server_id,
+        tool_name,
+        args,
+        scope,
+        scope_key=scope_key,
+        session_id=session_id,
+        user_id=user_id,
+    )
 
 
 # === MCP resources / prompts as capability-gated synthetic tools ============

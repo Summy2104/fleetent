@@ -35,6 +35,10 @@ class ToolContext:
     agent_name: str | None = None
     features: dict[str, Any] = field(default_factory=dict)
     session_id: str | None = None
+    # Resolved workspace scope key (D0): the /exchange attribution key, mirroring the
+    # /workspace mount (session_id under `session` scope, agent_name under `agent`). Set
+    # by the loop from the sandbox manager's resolved scope; None = no attribution.
+    scope_key: str | None = None
     # Inbound sender/channel metadata (im_gateway.SessionContext) for whoami-style
     # tools; typed Any to avoid an im_gateway import cycle. None = unavailable.
     session_context: Any = None
@@ -296,7 +300,18 @@ def dispatch(
         from fleetent.integrations.mcp import client as mcp_client
 
         server_id, tool_name = name.split(_MCP_SEP, 1)
-        return mcp_client.call_tool(server_id, tool_name, kwargs, scope=mcp_scope)
+        # Thread /exchange attribution (D0): same scope_key the global path carries via
+        # the wrapper's tool_context, plus session_id/user_id for the ledger audit columns.
+        principal = getattr(tool_context, "principal", None)
+        return mcp_client.call_tool(
+            server_id,
+            tool_name,
+            kwargs,
+            scope=mcp_scope,
+            scope_key=getattr(tool_context, "scope_key", None),
+            session_id=getattr(tool_context, "session_id", None),
+            user_id=getattr(principal, "user_id", None),
+        )
 
     if name not in _registry:
         return f"unknown tool: {name}"
