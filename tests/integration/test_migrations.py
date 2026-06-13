@@ -459,15 +459,14 @@ def test_downgrade_recreates_agent_runtime_tables_in_management_db(tmp_path):
 
 
 def test_agent_mcp_server_bindings_table_created(tmp_path):
-    # The binding table (agent->global server join) is distinct from the
-    # full-definition agent_mcp_servers table; both must exist at head.
+    # The binding table is now agent_mcp_servers; the renamed registry table is mcp_servers.
     db = tmp_path / "test.db"
     apply_migrations(db)
     conn = sqlite3.connect(db)
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_mcp_server_bindings)")}
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_mcp_servers)")}
     conn.close()
-    assert "agent_mcp_server_bindings" in tables
+    assert "agent_mcp_servers" in tables
     assert cols >= {"agent_id", "server_id", "created_at", "created_by"}
 
 
@@ -481,7 +480,8 @@ def test_downgrade_removes_agent_mcp_server_bindings_table(tmp_path):
     conn = sqlite3.connect(db)
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     conn.close()
-    assert "agent_mcp_server_bindings" not in tables
+    assert "mcp_servers" not in tables
+    assert "agent_mcp_servers" in tables
 
 
 def test_downgrade_removes_agent_versions(tmp_path):
@@ -532,9 +532,9 @@ def test_agent_mcp_servers_table_and_columns(tmp_path):
     apply_migrations(db)
     conn = sqlite3.connect(db)
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_mcp_servers)")}
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(mcp_servers)")}
     conn.close()
-    assert "agent_mcp_servers" in tables
+    assert "mcp_servers" in tables
     assert cols >= {
         "id",
         "agent_id",
@@ -581,7 +581,7 @@ def test_downgrade_removes_agent_scoped_connector_schema(tmp_path):
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     connector_cols = {row[1] for row in conn.execute("PRAGMA table_info(connectors)")}
     conn.close()
-    assert "agent_mcp_servers" not in tables
+    assert "mcp_servers" not in tables
     assert "agent_id" not in connector_cols
 
 

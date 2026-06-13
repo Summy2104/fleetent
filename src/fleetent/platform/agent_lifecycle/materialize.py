@@ -28,7 +28,7 @@ from fleetent.agent_config import (
 )
 from fleetent.config import McpServerSettings
 from fleetent.platform.agent_lifecycle import credential_slots, secret_store
-from fleetent.platform.connector_management import agent_mcp_server_store
+from fleetent.platform.connector_management import mcp_server_store
 from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.model_provider_management import provider_admin_store
 from fleetent.platform.skill_management import skill_admin_store
@@ -231,9 +231,9 @@ def _mcp_servers_for_agent(agent: agent_store.Agent) -> list[McpServerSettings]:
     )
     servers: list[McpServerSettings] = []
     for server_id in ids:
-        row = agent_mcp_server_store.get_mcp_server(
+        row = mcp_server_store.get_mcp_server(
             agent.id, server_id
-        ) or agent_mcp_server_store.get_mcp_server(None, server_id)
+        ) or mcp_server_store.get_mcp_server(None, server_id)
         if row is None:
             continue
         servers.append(

@@ -387,7 +387,7 @@ def test_delete_agent_removes_binding_children_in_same_transaction(db):
 
     database = create_database(Settings().database_url)
     mcp_rows = database.execute(
-        "SELECT COUNT(*) AS c FROM agent_mcp_server_bindings WHERE agent_id = :aid",
+        "SELECT COUNT(*) AS c FROM agent_mcp_servers WHERE agent_id = :aid",
         {"aid": agent.id},
     ).fetchone()
     oauth_rows = database.execute(

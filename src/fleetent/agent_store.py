@@ -461,7 +461,7 @@ def delete_agent(name: str) -> bool:
             return False
         agent_id = int(agent["id"])
         conn.execute(
-            "DELETE FROM agent_mcp_server_bindings WHERE agent_id = :aid",
+            "DELETE FROM agent_mcp_servers WHERE agent_id = :aid",
             {"aid": agent_id},
         )
         conn.execute(
@@ -641,7 +641,7 @@ def list_channels_for_agent(agent_id: int) -> list[dict[str, Any]]:
 
 def bind_mcp_server(agent_id: int, server_id: str, created_by: str | None = None) -> None:
     _db().execute(
-        "INSERT OR IGNORE INTO agent_mcp_server_bindings "
+        "INSERT OR IGNORE INTO agent_mcp_servers "
         "(agent_id, server_id, created_at, created_by) "
         "VALUES (:agent_id, :server_id, :created_at, :created_by)",
         {
@@ -655,8 +655,7 @@ def bind_mcp_server(agent_id: int, server_id: str, created_by: str | None = None
 
 def unbind_mcp_server(agent_id: int, server_id: str) -> None:
     _db().execute(
-        "DELETE FROM agent_mcp_server_bindings "
-        "WHERE agent_id = :agent_id AND server_id = :server_id",
+        "DELETE FROM agent_mcp_servers WHERE agent_id = :agent_id AND server_id = :server_id",
         {"agent_id": agent_id, "server_id": server_id},
     )
 
@@ -665,8 +664,7 @@ def list_mcp_servers_for_agent(agent_id: int) -> list[str]:
     rows = (
         _db()
         .execute(
-            "SELECT server_id FROM agent_mcp_server_bindings "
-            "WHERE agent_id = :agent_id ORDER BY server_id",
+            "SELECT server_id FROM agent_mcp_servers WHERE agent_id = :agent_id ORDER BY server_id",
             {"agent_id": agent_id},
         )
         .fetchall()

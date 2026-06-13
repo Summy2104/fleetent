@@ -16,9 +16,9 @@ from fleetent import agent_store, audit_log, auth, paths, user_store
 from fleetent.platform.agent_lifecycle import credential_slots, secret_store
 from fleetent.platform.agent_lifecycle.materialize import agent_file_from_store
 from fleetent.platform.connector_management import (
-    agent_mcp_server_store,
     agent_oauth_binding_store,
     connector_config_store,
+    mcp_server_store,
 )
 from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.skill_management import skill_admin_store
@@ -91,7 +91,7 @@ def _known_mcp_server_ids() -> set[str]:
     Uses DB-registered global servers (admin console), matching what
     ``GET /admin/mcp/servers`` lists.
     """
-    return {str(r["server_id"]) for r in agent_mcp_server_store.list_mcp_servers(None)}
+    return {str(r["server_id"]) for r in mcp_server_store.list_mcp_servers(None)}
 
 
 def _build_agent_yaml(agent: agent_store.Agent) -> str:
@@ -106,9 +106,9 @@ def _build_agent_yaml(agent: agent_store.Agent) -> str:
 
     servers: list[dict[str, Any]] = []
     for sid in agent_store.list_mcp_servers_for_agent(agent.id):
-        row = agent_mcp_server_store.get_mcp_server(
-            agent.id, sid
-        ) or agent_mcp_server_store.get_mcp_server(None, sid)
+        row = mcp_server_store.get_mcp_server(agent.id, sid) or mcp_server_store.get_mcp_server(
+            None, sid
+        )
         if row is None:
             continue
         entry: dict[str, Any] = {"id": sid, "transport": row["transport"]}
