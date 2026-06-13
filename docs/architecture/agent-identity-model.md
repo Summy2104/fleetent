@@ -82,13 +82,12 @@ kb.db / shared_memory.db 无 agent 标识列，不涉及。
 
 > 安全相关（agent 解析、删除级联），分阶段降风险；每阶段对照 main 基线零回归。
 
-1. **阶段 1 — agent 侧列正名**（最小、零平台影响）：`traces.agent_id` → `agent_name`（嵌入式 Y）+ 写读点改名。隔离、低风险，先做。
-2. **阶段 2 — agent_kbs / agent_skills 归一 + 修 bug**（真类型债 + 真 bug）：TEXT→INTEGER + FK；修控制台 name-写。这是原 option-1 的正确版本。
-3. **阶段 3 — agent_admin_state / session_meta 归 id**：键/列 name→id + FK + 调用方改造。
-4. **阶段 4 — 补齐绑定表 FK**：user_agents / channel_agents / agent_versions / agent_mcp_servers / agent_secrets 补 FK→agents.id ON DELETE CASCADE。
-5. **阶段 5 — 翻译边界固化 + 守护**：materialize 写边界 / read-projection 读边界的 name↔id 收口；守护测试断言"平台关系表无 name 列（除 agents）、agent 侧无 agent id 列/标识"。
+1. **阶段 2 — agent_kbs / agent_skills 归一 + 修 bug**（真类型债 + 真 bug，**首做**）：TEXT→INTEGER + FK；修控制台 name-写。这是原 option-1 的正确版本。已 propose 为 `unify-agent-binding-id`。
+2. **阶段 3 — agent_admin_state / session_meta 归 id**：键/列 name→id + FK + 调用方改造。
+3. **阶段 4 — 补齐绑定表 FK**：user_agents / channel_agents / agent_versions / agent_mcp_servers / agent_secrets 补 FK→agents.id ON DELETE CASCADE。
+4. **阶段 5 — 翻译边界固化 + 守护（含 agent 侧列正名）**：materialize 写边界 / read-projection 读边界的 name↔id 收口；**`traces.agent_id` → `agent_name` 列正名**（纯美容 R2 合规，并入此阶段而非单列——见下）；守护测试断言"平台关系表无 name 列（除 agents）、agent 侧无 agent id 列/标识"。
 
-阶段 1、2 可立即做（隔离、收益明确）；3–5 依赖面更广，逐个 propose。
+> **决策（2026-06-13）**：原"阶段 1 = traces 列正名先做"已撤销。该改名纯属 R2 美容合规（列本已存 slug、零行为/完整性收益），却牵动 observability/agent-observability-view 两个 spec 的 5 条 requirement + 与彼时在跑的 trace-tool-spans 撞同一文件——性价比与时机均差。故并入阶段 5 的守护/清理一并做。Alembic 单链使阶段 2/3/4 本就串行；逐个 just-ahead propose（最多领先 applied frontier 一片）。
 
 ## 5. 风险与权衡
 
