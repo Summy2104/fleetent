@@ -13,23 +13,20 @@ long-term-ctx 仍可基于 memory 正常工作。
 
 **不负责**：存储任何数据、记忆提取（→ memory）、文档索引（→ knowledge_base）、in-session 上下文压缩（→ context_mgr）、trace 持久化（→ observability）。
 
-Shared Memory 通过 `build_context_with_policy` 按 agent 归属（tenant / team）接入 prompt 注入：
-每个 agent 解析出一份 context policy（tenant 默认 + agent 覆盖），policy 控制 User Memory、Shared Memory
-（tenant / team）、Knowledge Base 四类来源的启用、per-source budget 和 top-k。Shared Memory 的 scope 不由
-policy 任意指定，而是固定从 agent 自身的 `tenant_id` / `team_id` 解析，不支持跨 tenant 或跨 team 访问。
-无 policy row 时保持当前行为：User Memory + Knowledge Base 启用，Shared Memory 默认关闭。
+**Shared Memory 说明**：Shared Memory 仍是 memory 能力的一部分，scope 仍按 agent 归属的
+`tenant` / `team` 划分；但把 Shared Memory 通过 long-term-ctx 的 `context policy` 注入 prompt
+的那条设计已在当前版本 descope，现行 live path 只组装 User Memory + Knowledge Base。
 
 **调用关系**：
-- 依赖：`fleetent.memory`（search）、knowledge_base optional provider（search，KB 范围取自 agent.yaml 的 `knowledge_base_ids`，由管理库 `agent_kbs` materialize）、agent / tenant context policy（token 预算上限和来源分配策略）
+- 依赖：`fleetent.memory`（search）、knowledge_base optional provider（search，KB 范围取自 agent.yaml 的 `knowledge_base_ids`，由管理库 `agent_kbs` materialize）、agent `long_term_ctx.*` 配置（token 预算上限和来源分配策略）
 - 被依赖：agent_loop（每次对话开始前调用）
 
 **模块归属**：
 - owning package：`fleetent.long_term_ctx`
 - public API：`build_context(user_id, query, agent_id, available_tokens)`、
-  `build_context_with_policy(identity, user_id, query, available_tokens)`、
-  `resolve_context_policy(identity)`、`AgentContextIdentity` / `ContextPolicy`
-- owned tables：`long_term_context_policies`（tenant 默认 + agent 覆盖，wide row）
-- config namespace：Agent `long_term_ctx.*` / tenant policy（无 policy row 时的默认 budget 来源）
+  `BuiltContext`、`ContextSource`、`BudgetPolicy`、`BudgetMetadata`、`BudgetDecision`
+- owned tables：无
+- config namespace：Agent `long_term_ctx.*`
 
 agent 归属字段 `tenant_id`（NOT NULL，默认 `default`）/ `team_id`（可空）由 agents 表拥有。
 
@@ -123,7 +120,7 @@ async def build_context(
 - deterministic evaluation fixture / runner 覆盖 memory-only、KB-only、mixed injection 和低预算 omission
 - real-provider smoke 仅在 `FLEETENT_EVAL_REAL_LONG_TERM_CONTEXT=1` 且凭据完整时手动运行；默认 skip
 
-当前定位：已恢复长期上下文注入链路，并有基础 evaluation 回归；budget policy 已具备 deterministic contract，后续重点是 agent / tenant 级策略和真实 token estimator。
+当前定位：已恢复长期上下文注入链路，并有基础 evaluation 回归；budget policy 已具备 deterministic contract，后续重点是真实 token estimator 和格式模板。
 
 ## 规划中（v1.0）
 
@@ -151,12 +148,8 @@ async def build_context(
 
 ## 当前缺口
 
-- KB provider 已接入 agent 到多个 KB 的绑定策略；agent / tenant context policy 已支持 tenant 默认 +
-  agent 覆盖、User Memory / Shared Memory / Knowledge Base 开关与预算。
-- Shared Memory 已作为第三类 provider 接入 `build_context_with_policy()`；scope 只从 agent 归属
-  `tenant_id` / `team_id` 派生，默认关闭，不支持 policy 任意指定跨 tenant / team scope。
+- KB provider 已接入 agent 到多个 KB 的绑定策略；长期上下文预算目前只覆盖 User Memory + Knowledge Base。
 - token 估算仍使用 deterministic 近似值，尚未接入真实 tokenizer。
-- policy 编辑入口仍是代码 / store 层能力，尚未提供 admin API、UI 或热更新。
 - 格式模板未产品化，缺少按 agent / tenant 配置的 prompt 模板。
 - graph_search 不直接接入 `build_context()`；需要调用方通过 knowledge-base planner / search 先形成 KB
   候选后再进入长期上下文。
@@ -164,7 +157,6 @@ async def build_context(
 ## 下一批候选 specs
 
 - `long-term-context-template-config`
-- `long-term-context-policy-admin-api`
 - `knowledge-provider-contract`
 - `long-term-context-real-tokenizer`
 
@@ -207,26 +199,6 @@ memory / knowledge / observability 的接口，未来可以独立成 package，�
 - When：build_context 调用
 - Then：不发起任何检索，直接返回空 text 和空 sources，并记录 `zero_available_tokens`；agent_loop 正常继续，不因注入失败报错
 
-## Agent / tenant context policy
-
-`build_context_with_policy(identity, ...)` 在 `build_context` 的 memory + KB 基础上增加 Shared Memory，
-按 agent 归属解析的 policy 决定来源启用与预算。
-
-**解析规则**：
-- agent 覆盖行（`tenant_id` + `agent_id`）优先于 tenant 默认行（`tenant_id` + `agent_id` 为空）。
-- 无任何 policy row：User Memory + Knowledge Base 启用，Shared Memory 关闭，预算取 `long_term_ctx.*` 默认值。
-
-**Shared Memory scope**：
-- tenant Shared Memory 固定查询 `("tenant", agent.tenant_id)`；team Shared Memory 固定查询 `("team", agent.team_id)`。
-- agent 无 `team_id` 时 team Shared Memory 跳过，并记录 `team_id_missing` budget decision。
-- policy 不能指定任意 scope，因此 agent 永远无法读取其它 tenant 或其它 team 的 Shared Memory。
-
-**验收场景**：
-- Given agent 无 policy：Then 不查询 Shared Memory，decisions 记录 `disabled_by_policy`。
-- Given agent 覆盖启用 tenant + team Shared Memory：Then 注入本 tenant / 本 team 的 Shared Memory，且不含其它 tenant / team 的内容。
-- Given 某来源被 policy 关闭：Then 该来源不被查询，decisions 解释排除原因。
-- Given per-source budget 不足：Then 超出的条目以 `source_budget_exceeded` 排除。
-
 ## 测试边界
 
 **需要单元测试的行为**：
@@ -246,7 +218,7 @@ memory / knowledge / observability 的接口，未来可以独立成 package，�
 **需要 mock 的依赖**：
 - `fleetent.memory.search`：隔离 memory 模块，控制返回内容和数量
 - `knowledge_base.search` 或 null provider：隔离 knowledge_base 模块（KB 范围由 agent.yaml 配置注入）
-- context policy / Agent config：注入测试用 token 预算上限
+- Agent config：注入测试用 token 预算上限
 
 ## 待决问题
 

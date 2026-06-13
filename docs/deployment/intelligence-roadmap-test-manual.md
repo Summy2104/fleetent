@@ -156,15 +156,15 @@ uv run pytest tests/integration/test_shared_memory.py tests/integration/test_mem
 
 目标：
 
-- Long-term Context 能同时使用 User Memory、Shared Memory 和 KB。
+- Long-term Context 能同时使用 User Memory 和 KB。
 - context source attribution 可查询。
-- Shared Memory scope 只能由 agent tenant / team ownership 派生。
+- budget decision 元数据可查询。
 
 建议操作：
 
 ```bash
 uv run pytest tests/integration/test_long_term_context_runtime.py \
-  tests/integration/test_long_term_ctx_policy_store.py \
+  tests/integration/test_long_term_ctx.py \
   tests/evaluation/test_long_term_context_eval.py \
   -q
 ```
@@ -173,7 +173,6 @@ uv run pytest tests/integration/test_long_term_context_runtime.py \
 
 - 选择一次测试 run，记录 run id。
 - 查询 trace，确认有 memory source、knowledge source 或 context budget decision。
-- 确认没有任意跨 tenant / team scope 注入。
 
 失败分类：
 

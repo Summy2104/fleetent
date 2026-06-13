@@ -31,8 +31,8 @@ def test_owner_capability_contract_evidence_covers_all_pilot_domains(tmp_path):
             capability="Long-term Context",
             status="passed",
             command="uv run pytest tests/integration/test_long_term_context_runtime.py -q",
-            artifacts=[Path("tests/integration/test_long_term_ctx_policy_store.py")],
-            notes=["source attribution, budget decisions, ownership policy"],
+            artifacts=[Path("tests/integration/test_long_term_ctx.py")],
+            notes=["source attribution, budget decisions, memory + knowledge assembly"],
         ),
         CapabilityEvidence(
             capability="Reflection",
