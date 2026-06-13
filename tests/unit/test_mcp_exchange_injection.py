@@ -46,3 +46,61 @@ def test_no_agent_home_preserves_legacy_behavior():
     env = mcp_client._subprocess_env(server, agent_home=None)
     assert "XDG_DATA_HOME" not in env
     assert env["FOO"] == "bar"
+
+
+# ── P1: stdio params cwd + server-root binding (wiring the dormant injection) ──
+
+
+def test_stdio_params_sets_cwd_and_convention_env_when_agent_home_bound(tmp_path):
+    server = McpServerConfig(id="gd", transport="stdio", command="x")
+    server._agent_home = tmp_path
+    params = mcp_client._stdio_params(server)
+    assert params.cwd == str(tmp_path / "exchange" / "gd")
+    assert params.env["XDG_DATA_HOME"] == str(tmp_path / "exchange" / "gd" / "data")
+    assert (tmp_path / "exchange" / "gd").is_dir()  # cwd ensured to exist before spawn
+
+
+def test_stdio_params_no_agent_home_legacy():
+    server = McpServerConfig(id="gd", transport="stdio", command="x")
+    params = mcp_client._stdio_params(server)
+    assert params.cwd is None
+    assert "XDG_DATA_HOME" not in params.env
+
+
+def test_stdio_params_file_isolation_off_no_cwd(tmp_path):
+    server = McpServerConfig(id="gd", transport="stdio", command="x", file_isolation="off")
+    server._agent_home = tmp_path
+    params = mcp_client._stdio_params(server)
+    assert params.cwd is None
+    assert "XDG_DATA_HOME" not in params.env
+
+
+def test_bind_exchange_root_registers_convention_root(tmp_path, monkeypatch):
+    from fleetent import artifact_exchange
+
+    monkeypatch.setattr(artifact_exchange, "_server_roots", {})
+    server = McpServerConfig(id="gd", transport="stdio", command="x")
+    mcp_client._bind_exchange_root(server, tmp_path)
+    assert artifact_exchange._server_roots["gd"] == tmp_path / "exchange" / "gd" / "data"
+
+
+def test_bind_exchange_root_adopts_explicit_xdg(tmp_path, monkeypatch):
+    from fleetent import artifact_exchange
+
+    monkeypatch.setattr(artifact_exchange, "_server_roots", {})
+    server = McpServerConfig(
+        id="gw", transport="stdio", command="x", env={"XDG_DATA_HOME": str(tmp_path / "xdg")}
+    )
+    mcp_client._bind_exchange_root(server, tmp_path)
+    assert artifact_exchange._server_roots["gw"] == tmp_path / "xdg"
+
+
+def test_bind_exchange_root_skips_without_agent_home_or_isolation_off(monkeypatch):
+    from fleetent import artifact_exchange
+
+    monkeypatch.setattr(artifact_exchange, "_server_roots", {})
+    s1 = McpServerConfig(id="gd", transport="stdio", command="x")
+    mcp_client._bind_exchange_root(s1, None)
+    s2 = McpServerConfig(id="gw", transport="stdio", command="x", file_isolation="off")
+    mcp_client._bind_exchange_root(s2, "/home")
+    assert artifact_exchange._server_roots == {}

@@ -145,7 +145,7 @@ async def test_register_all_strict_startup_failure_tracked(monkeypatch):
     monkeypatch.setattr(mc, "_server_registry", {})
     monkeypatch.setattr(mc, "_failed_strict_servers", set())
 
-    async def fake_register(server, scope=None):
+    async def fake_register(server, scope=None, agent_home=None):
         if server.id == "failstrict":
             raise RuntimeError("connect failed")
         mc._server_registry[(scope, server.id)] = server

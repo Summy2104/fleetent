@@ -60,8 +60,9 @@ def _capture_stdio_params_env(monkeypatch) -> dict:
     """Patch StdioServerParameters to record env then short-circuit before spawning."""
     captured: dict = {}
 
-    def fake_params(command=None, args=None, env=None):
+    def fake_params(command=None, args=None, env=None, cwd=None):
         captured["env"] = env
+        captured["cwd"] = cwd
         raise _BoomError()
 
     monkeypatch.setattr(mc, "StdioServerParameters", fake_params)

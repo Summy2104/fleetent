@@ -136,6 +136,10 @@ class McpServerConfig:
     # by (agent_scope, id) so the same server id can carry distinct credentials/sessions
     # per agent. None = the global (startup) scope. Distinct from the oauth `scope` str.
     _agent_scope: int | None = field(default=None, repr=False, compare=False)
+    # unified-file-exchange: the agent home this server is registered under, supplied by
+    # the agent-side caller (register_all). Drives the stdio cwd + convention env and the
+    # /exchange effective-root binding. None = legacy (no convention; byte-identical).
+    _agent_home: Path | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         _validate_degrade_mode(self)
@@ -324,11 +328,13 @@ async def aclose_all() -> None:
         await asyncio.gather(*(_close_host(h) for h in hosts), return_exceptions=True)
 
 
-async def register_all(servers: list[McpServerConfig], scope: int | None = None) -> None:
+async def register_all(
+    servers: list[McpServerConfig], scope: int | None = None, agent_home: Path | None = None
+) -> None:
     _failed_strict_servers.clear()  # recompute startup-failed strict set each registration
     for server in servers:
         try:
-            await _register_server(server, scope)
+            await _register_server(server, scope, agent_home)
         except Exception as exc:
             # Startup failure = unregistered = tools never visible (MCP4 D5); platform
             # start is NOT blocked. A strict server's failure is tracked so bound
@@ -341,8 +347,14 @@ async def register_all(servers: list[McpServerConfig], scope: int | None = None)
     install_schema_filter()
 
 
-async def _register_server(server: McpServerConfig, scope: int | None = None) -> None:
+async def _register_server(
+    server: McpServerConfig, scope: int | None = None, agent_home: Path | None = None
+) -> None:
     server._agent_scope = scope
+    server._agent_home = agent_home
+    # unified-file-exchange: bind the /exchange effective root so the fence + result
+    # rewrite can resolve this server's products (no-op for non-stdio / no agent_home).
+    _bind_exchange_root(server, agent_home)
     if server.auth_type == "oauth2":
         _clear_oauth_auth_state(server)  # (re-)registration clears sticky auth state (D5)
     # All transports go through one SDK-ClientSession path (stdio / http / sse).
@@ -443,6 +455,50 @@ def _subprocess_env(server: McpServerConfig, agent_home: Path | None = None) -> 
     return {**_safe_base_env(), **convention, **resolved}
 
 
+def _convention_applies(server: McpServerConfig, agent_home: Path | None) -> bool:
+    """Whether the /exchange convention (cwd + XDG injection + root binding) applies."""
+    return agent_home is not None and server.file_isolation != "off"
+
+
+def _stdio_params(server: McpServerConfig) -> StdioServerParameters:
+    """Build the stdio subprocess parameters, applying the /exchange convention.
+
+    When the server carries an `_agent_home` (set at registration) and isolation is on,
+    the subprocess runs in its partition root `<agent_home>/exchange/<id>` (created here
+    so the spawn never fails on a missing cwd) with the convention XDG triple injected.
+    Otherwise the legacy params (no cwd, no convention) are produced byte-identically.
+    """
+    agent_home = server._agent_home
+    cwd: str | None = None
+    if _convention_applies(server, agent_home):
+        assert agent_home is not None
+        cwd_path = _convention_cwd(server, agent_home)
+        cwd_path.mkdir(parents=True, exist_ok=True)
+        cwd = str(cwd_path)
+    return StdioServerParameters(
+        command=server.command,
+        args=server.args,
+        env=_subprocess_env(server, agent_home),
+        cwd=cwd,
+    )
+
+
+def _bind_exchange_root(server: McpServerConfig, agent_home: Path | None) -> None:
+    """Bind this stdio server's effective file root so `/exchange/<id>` resolves.
+
+    No-op for non-stdio servers, when no agent_home is supplied, or when the server opts
+    out (`file_isolation: off`). Idempotent — re-registration rebinds the same root.
+    """
+    if server.transport != "stdio" or not _convention_applies(server, agent_home):
+        return
+    assert agent_home is not None
+    from fleetent import artifact_exchange
+
+    artifact_exchange.register_server_root(
+        server.id, artifact_exchange.effective_root(server, agent_home)
+    )
+
+
 def _is_tools_list_changed(message: Any) -> bool:
     """Whether an incoming MCP server message is a tools/list_changed notification."""
     root = getattr(message, "root", None)
@@ -534,10 +590,7 @@ def _transport_cm(server: McpServerConfig, headers: dict[str, str]) -> Any:
     (read, write) streams fed to a ClientSession.
     """
     if server.transport == "stdio":
-        params = StdioServerParameters(
-            command=server.command, args=server.args, env=_subprocess_env(server)
-        )
-        return stdio_client(params)
+        return stdio_client(_stdio_params(server))
     # Per-server timeouts map onto the SDK transport: connect_timeout governs the
     # connection / request POST (`timeout`), call_timeout the streamed tool-result read
     # (`sse_read_timeout`) — the long-lived session means both are set once, at open.
