@@ -305,7 +305,9 @@ async def _start_infra(agent: AgentFile, data_dir: Path) -> None:
             for s in agent.mcp_servers
         ]
         try:
-            await mcp_client.register_all(configs)
+            # unified-file-exchange: the agent home (data_dir's parent) anchors each
+            # stdio server's /exchange partition tree (cwd + XDG injection + root binding).
+            await mcp_client.register_all(configs, agent_home=data_dir.parent)
         except Exception as exc:  # noqa: BLE001 — MCP unavailable must not abort boot
             _logger.warn("agent_runtime_mcp_register_failed", error=str(exc))
     session_mgr.start_session_maintenance()
