@@ -39,6 +39,7 @@ class MemoryMaintenanceProposal:
     created_at: datetime
     updated_at: datetime
     expires_at: datetime | None = None
+    report_id: str | None = None
 
 
 def _parse_datetime(value: object) -> datetime:
@@ -77,6 +78,7 @@ def _to_dict(row: dict[str, Any]) -> MemoryMaintenanceProposal:
         created_at=_parse_datetime(row["created_at"]),
         updated_at=_parse_datetime(row["updated_at"]),
         expires_at=_parse_optional_datetime(row.get("expires_at")),
+        report_id=cast(str | None, row["report_id"]),
     )
 
 
@@ -161,6 +163,7 @@ def mark_shared_memory_proposal_applied(proposal_id: str) -> MemoryMaintenancePr
         created_at=proposal.created_at,
         updated_at=now,
         expires_at=proposal.expires_at,
+        report_id=proposal.report_id,
     )
     store.database().execute(
         """

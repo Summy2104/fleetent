@@ -69,6 +69,7 @@ reflection_proposals (
   id                TEXT PRIMARY KEY,
   domain            TEXT,         -- memory | skill
   kind              TEXT,
+  report_id         TEXT,         -- nullable provenance link to reflection_reports.id
   subject_user_id   TEXT,
   target_ref        TEXT,
   payload_json      TEXT,
@@ -97,6 +98,8 @@ reflection_proposals (
 - `reflection_proposals(domain=skill)` 与 `reflection_proposals(domain=memory)` 统一承载两域行动：
   - `domain=memory`
   - `domain=skill`
+- memory / skill proposal 在由 `run_reflection` 生成时通过可空 `report_id` 回链到源 `reflection_reports.id`
+  - 历史行和非反思来源 proposal 允许 `report_id = NULL`
 - memory / skill proposal lifecycle 共享同一套 create / list / approve / reject / apply 审计字段
 - report 持久化不保存完整 transcript；KB report 也不保存完整 document body
 - KB reflection 只生成 report，不创建 proposal，不在 agent 侧 apply；remediation 留给平台 / ingest 面后续独立 change
@@ -122,7 +125,7 @@ reflection_proposals (
 **场景 1：memory report + proposal**
 - Given：用户对话中重复出现可沉淀事实，且已有 memory signal
 - When：`run_reflection(scope)` 触发
-- Then：写入 `reflection_reports(domain=memory)`，并生成 `reflection_proposals(domain=memory)`；User Memory 本身不会在未批准前被修改
+- Then：写入 `reflection_reports(domain=memory)`，并生成 `reflection_proposals(domain=memory)`；生成的 proposal 通过 `report_id` 回指本次 report；User Memory 本身不会在未批准前被修改
 
 **场景 2：skill bundle apply**
 - Given：某 agent 的 traces 中反复出现同类任务模式，skill proposal 已批准

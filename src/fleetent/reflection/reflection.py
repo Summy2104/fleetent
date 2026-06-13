@@ -134,6 +134,7 @@ class MemoryMaintenanceProposal:
     created_at: datetime
     updated_at: datetime
     expires_at: datetime | None
+    report_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -157,6 +158,7 @@ class SkillProposal:
     actor_user_id: str | None = None
     applied_at: datetime | None = None
     files: dict[str, str] | None = None
+    report_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -209,6 +211,7 @@ class ReflectionProposalRecord:
     risk: str
     created_at: datetime
     updated_at: datetime
+    report_id: str | None = None
 
 
 def get_reflection_trend_summary(query: ReflectionTrendQuery) -> ReflectionTrendSummary:
@@ -280,11 +283,15 @@ async def run_reflection(scope: str) -> ReflectionReport:
         findings=findings,
         created_at=now,
     )
-    for memory_proposal in generate_memory_maintenance_proposals(scope, findings):
-        _persist_memory_maintenance_proposal(memory_proposal)
-    for skill_proposal in generate_skill_proposals(findings=findings):
-        _persist_skill_proposal(skill_proposal)
     _save_report(report)
+    for memory_proposal in generate_memory_maintenance_proposals(
+        scope,
+        findings,
+        report_id=report.id,
+    ):
+        _persist_memory_maintenance_proposal(memory_proposal)
+    for skill_proposal in generate_skill_proposals(findings=findings, report_id=report.id):
+        _persist_skill_proposal(skill_proposal)
     return report
 
 
@@ -330,6 +337,8 @@ async def run_kb_reflection_report(scope: str) -> KnowledgeBaseReflectionReport:
 def generate_memory_maintenance_proposals(
     user_id: str,
     findings: list[ReflectionFinding],
+    *,
+    report_id: str | None = None,
 ) -> list[MemoryMaintenanceProposal]:
     """Generate User Memory maintenance proposals from reflection findings."""
     proposals: list[MemoryMaintenanceProposal] = []
@@ -352,6 +361,7 @@ def generate_memory_maintenance_proposals(
                             "boundary": "not_user_memory:suggest_shared_memory_or_kb",
                             "source_finding": finding.type,
                         },
+                        report_id=report_id,
                     )
                 )
                 continue
@@ -368,6 +378,7 @@ def generate_memory_maintenance_proposals(
                         "confirmation": "inline",
                         "source_finding": finding.type,
                     },
+                    report_id=report_id,
                 )
             )
             continue
@@ -385,6 +396,7 @@ def generate_memory_maintenance_proposals(
                         "confirmation": "review",
                         "source_finding": finding.type,
                     },
+                    report_id=report_id,
                 )
             )
     return proposals
@@ -394,6 +406,7 @@ def generate_skill_proposals(
     *,
     findings: list[ReflectionFinding] | None = None,
     skill_signals: list[dict[str, object]] | None = None,
+    report_id: str | None = None,
 ) -> list[SkillProposal]:
     """Generate pending Skill proposals without applying them."""
     proposals: list[SkillProposal] = []
@@ -412,6 +425,7 @@ def generate_skill_proposals(
                 files={"SKILL.md": _skill_draft(target_skill, pattern, finding.summary)},
                 suggested_draft=_skill_draft(target_skill, pattern, finding.summary),
                 suggested_diff=None,
+                report_id=report_id,
             )
         )
 
@@ -434,6 +448,7 @@ def generate_skill_proposals(
                     files=None,
                     suggested_draft=None,
                     suggested_diff=_skill_diff(skill_name, reason),
+                    report_id=report_id,
                 )
             )
         elif trigger_count == 0 and days_unused >= 90:
@@ -449,6 +464,7 @@ def generate_skill_proposals(
                     suggested_diff=(
                         f"Mark skill {skill_name!r} deprecated after {days_unused} unused days."
                     ),
+                    report_id=report_id,
                 )
             )
     return proposals
@@ -499,7 +515,9 @@ def list_reflection_proposals(
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     rows = database.execute(
         f"""
-        SELECT id, domain, kind, status, subject_user_id, target_ref, risk, created_at, updated_at
+        SELECT
+            id, domain, kind, status, subject_user_id, target_ref, risk, created_at, updated_at,
+            report_id
         FROM reflection_proposals
         {where}
         ORDER BY updated_at DESC, id ASC
@@ -517,6 +535,7 @@ def list_reflection_proposals(
             risk=str(row["risk"]),
             created_at=_parse_datetime(row["created_at"]),
             updated_at=_parse_datetime(row["updated_at"]),
+            report_id=cast(str | None, row["report_id"]),
         )
         for row in rows
     ]
@@ -662,6 +681,7 @@ def _build_memory_maintenance_proposal(
     evidence_ids: list[str],
     metadata_patch: dict[str, str] | None = None,
     expires_at: datetime | None = None,
+    report_id: str | None = None,
 ) -> MemoryMaintenanceProposal:
     """Build a pending User Memory maintenance proposal without side effects."""
     _validate_proposal_input(user_id, action, risk, target_memory_ids)
@@ -680,6 +700,7 @@ def _build_memory_maintenance_proposal(
         created_at=now,
         updated_at=now,
         expires_at=expires_at,
+        report_id=report_id,
     )
 
 
@@ -1350,13 +1371,13 @@ def _insert_maintenance_proposal(proposal: MemoryMaintenanceProposal) -> None:
     _database().execute(
         """
         INSERT INTO reflection_proposals (
-            id, domain, kind, subject_user_id, target_ref, payload_json,
+            id, domain, kind, report_id, subject_user_id, target_ref, payload_json,
             reason, evidence_json, risk, status, reviewer_user_id,
             reviewed_at, rejection_reason, actor_user_id, applied_at,
             expires_at, created_at, updated_at
         )
         VALUES (
-            :id, :domain, :kind, :subject_user_id, :target_ref, :payload_json,
+            :id, :domain, :kind, :report_id, :subject_user_id, :target_ref, :payload_json,
             :reason, :evidence_json, :risk, :status, :reviewer_user_id,
             :reviewed_at, :rejection_reason, :actor_user_id, :applied_at,
             :expires_at, :created_at, :updated_at
@@ -1376,6 +1397,7 @@ def _create_skill_proposal(
     files: dict[str, str] | None,
     suggested_draft: str | None,
     suggested_diff: str | None,
+    report_id: str | None = None,
 ) -> SkillProposal:
     proposal = _build_skill_proposal(
         proposal_type=proposal_type,
@@ -1386,6 +1408,7 @@ def _create_skill_proposal(
         files=files,
         suggested_draft=suggested_draft,
         suggested_diff=suggested_diff,
+        report_id=report_id,
     )
     _persist_skill_proposal(proposal)
     return proposal
@@ -1401,6 +1424,7 @@ def _build_skill_proposal(
     files: dict[str, str] | None,
     suggested_draft: str | None,
     suggested_diff: str | None,
+    report_id: str | None = None,
 ) -> SkillProposal:
     """Build a pending Skill proposal without persistence side effects."""
     now = datetime.now(UTC).replace(microsecond=0)
@@ -1417,6 +1441,7 @@ def _build_skill_proposal(
         status="pending",
         created_at=now,
         updated_at=now,
+        report_id=report_id,
     )
 
 
@@ -1427,13 +1452,13 @@ def _insert_skill_proposal(proposal: SkillProposal) -> None:
     database.execute(
         """
         INSERT OR IGNORE INTO reflection_proposals (
-            id, domain, kind, subject_user_id, target_ref, payload_json,
+            id, domain, kind, report_id, subject_user_id, target_ref, payload_json,
             reason, evidence_json, risk, status, reviewer_user_id,
             reviewed_at, rejection_reason, actor_user_id, applied_at,
             expires_at, created_at, updated_at
         )
         VALUES (
-            :id, :domain, :kind, :subject_user_id, :target_ref, :payload_json,
+            :id, :domain, :kind, :report_id, :subject_user_id, :target_ref, :payload_json,
             :reason, :evidence_json, :risk, :status, :reviewer_user_id,
             :reviewed_at, :rejection_reason, :actor_user_id, :applied_at,
             :expires_at, :created_at, :updated_at
@@ -1481,6 +1506,7 @@ def _skill_proposal_params(proposal: SkillProposal) -> dict[str, object]:
         "id": proposal.id,
         "domain": "skill",
         "kind": proposal.type,
+        "report_id": proposal.report_id,
         "subject_user_id": None,
         "target_ref": proposal.target_skill,
         "payload_json": json.dumps(
@@ -1520,6 +1546,7 @@ def _skill_proposal_from_row(row: dict[str, Any]) -> SkillProposal:
             if payload.get("files") is not None
             else None
         ),
+        report_id=cast(str | None, row["report_id"]),
         suggested_draft=cast(str | None, payload.get("suggested_draft")),
         suggested_diff=cast(str | None, payload.get("suggested_diff")),
         status=cast(SkillProposalStatus, row["status"]),
@@ -1648,6 +1675,7 @@ def _proposal_params(proposal: MemoryMaintenanceProposal) -> dict[str, object]:
         "id": proposal.id,
         "domain": "memory",
         "kind": proposal.action,
+        "report_id": proposal.report_id,
         "subject_user_id": proposal.user_id,
         "target_ref": None,
         "payload_json": json.dumps(
@@ -1695,6 +1723,7 @@ def _proposal_from_row(row: dict[str, Any]) -> MemoryMaintenanceProposal:
         created_at=_parse_datetime(row["created_at"]),
         updated_at=_parse_datetime(row["updated_at"]),
         expires_at=_parse_optional_datetime(row.get("expires_at")),
+        report_id=cast(str | None, row["report_id"]),
     )
 
 
@@ -1716,6 +1745,7 @@ def _with_status(
         created_at=proposal.created_at,
         updated_at=datetime.now(UTC).replace(microsecond=0),
         expires_at=proposal.expires_at,
+        report_id=proposal.report_id,
     )
 
 

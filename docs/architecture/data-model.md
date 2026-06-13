@@ -166,10 +166,15 @@ erDiagram
   sessions ||--o{ session_anti_flap : "session_id"
   sessions ||--o{ sub_agent_runs : "parent_session_id"
   sessions ||--o{ scheduled_tasks : "session_id（可选复用会话）"
+<<<<<<< HEAD
   sessions ||--o{ traces : "session_id"
   sub_agent_runs ||--o{ traces : "run_id 同命名空间"
   memory_items ||--o{ reflection_proposals : "target_ref（仅 domain=memory · 多态）"
   approvals ||--o{ approval_allowlist : "fingerprint(scope_key+tool+args)"
+=======
+  reflection_reports ||--o{ reflection_proposals : "report_id 源报告"
+  memory_items ||--o{ reflection_proposals : "memory 维护建议"
+>>>>>>> feat/link-proposal-to-report
   scheduled_tasks {
     string schedule_kind
     string user_id
@@ -185,6 +190,7 @@ erDiagram
   reflection_proposals {
     string domain
     string kind
+    string report_id
     string status
   }
   approval_allowlist {
@@ -210,7 +216,7 @@ erDiagram
 > 历史行不迁移：旧管理库中既有的 `session_anti_flap` / `sub_agent_runs` 行属 ephemeral 运行时数据，按「上线前不迁移数据」新建即可，旧行作孤儿由部署方按需清理。
 > 跨库（见 §3.1）：`memory_items.user_id` ⇢ 管理库 `users`（managed 模式成立；standalone 中该字段可为不透明渠道原生 id）；`approvals.requester_user_id` ⇢ 管理库 `users`（managed 成立；standalone 同样允许 opaque id）；`approvals.session_id` → 本库 `sessions`。会话**内容**仍是 JSON 文件（`SESSIONS_DIR`，与元数据 DB 表物理分离）。
 >
-> 语义注记：① `reflection_proposals.target_ref` 为多态引用——memory 类提案指向 `memory_items.id`，skill 类提案指向文件系统 skill 名（字符串路径），完整性由 apply 路径兜底，无 FK 约束（图中 `memory_items → reflection_proposals` 边即此引用，仅 `domain=memory` 成立）。② `traces` 同时挂 `session_id`（→`sessions`，`query_trace_events` 按它过滤）与 `run_id`（与 `sub_agent_runs.run_id` 同命名空间，均 UUIDv4，可按 `run_id` 关联出子 agent 的完整 trace 树）。③ 库内 `session_id` / `run_id` 等均为约定引用，**无时序保证、无外键**：`approvals`/`traces` 行可先于 `sessions` 索引行写入（工具门控、首事件在会话首圈即触发），外键约束故意缺省。④ `budget_usage` 的 `scope` 枚举为 `task|session|user|agent`，`key` 语义随 scope 变化（`task`→`run_id`、`session`→`session_id`、`user`→`user_id`、`agent`→字面量 `default`）。⑤ `approval_allowlist` 与 `approvals` 经**计算键**关联（非存储 FK）：`fingerprint = hash(scope_key, tool_name, tool_args)`，其中 `scope_key = requester_user_id`；审批前算 fingerprint 查 allowlist，命中即 auto-approve（approval-minimization 的"记住此类放行"机制）。`created_by` 为授予放行的审批人（`*_user_id` 同语义，⇢ 管理库 `users`，可空 opaque）。
+> 语义注记：① `reflection_proposals.target_ref` 为多态引用——memory 类提案指向 `memory_items.id`，skill 类提案指向文件系统 skill 名（字符串路径），完整性由 apply 路径兜底，无 FK 约束（图中 `memory_items → reflection_proposals` 边即此引用，仅 `domain=memory` 成立）。② `traces` 同时挂 `session_id`（→`sessions`，`query_trace_events` 按它过滤）与 `run_id`（与 `sub_agent_runs.run_id` 同命名空间，均 UUIDv4，可按 `run_id` 关联出子 agent 的完整 trace 树）。③ 库内 `session_id` / `run_id` / `report_id` 都是约定引用，**无时序保证、无外键**：`approvals`/`traces` 行可先于 `sessions` 索引行写入（工具门控、首事件在会话首圈即触发），`reflection_proposals.report_id` 可回指生成它的 `reflection_reports.id`，但历史行或非反思来源行允许为 `NULL`。④ `budget_usage` 的 `scope` 枚举为 `task|session|user|agent`，`key` 语义随 scope 变化（`task`→`run_id`、`session`→`session_id`、`user`→`user_id`、`agent`→字面量 `default`）。⑤ `approval_allowlist` 与 `approvals` 经**计算键**关联（非存储 FK）：`fingerprint = hash(scope_key, tool_name, tool_args)`，其中 `scope_key = requester_user_id`；审批前算 fingerprint 查 allowlist，命中即 auto-approve（approval-minimization 的"记住此类放行"机制）。`created_by` 为授予放行的审批人（`*_user_id` 同语义，⇢ 管理库 `users`，可空 opaque）。
 
 ### 3.4 共享记忆库（嵌入式 Y · `shared_memory.db` · agent 侧 · per-tenant）
 `shared_memory_items`(team/tenant scope 共享记忆，多 agent 写的真相源)

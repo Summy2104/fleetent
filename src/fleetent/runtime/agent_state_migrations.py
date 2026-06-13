@@ -33,6 +33,10 @@ Version history:
   v26  drop skill_proposals
   v27  scheduled_tasks    (retire-standalone-fleetent-db)
   v28  drop sessions.agent_name
+  v29  scheduled_tasks.task_type
+  v30  scheduled_tasks.notify_text
+  v31  approvals.approver_user_id
+  v32  reflection_proposals.report_id
 """
 
 from __future__ import annotations
@@ -339,4 +343,6 @@ MIGRATIONS: list[tuple[int, str]] = [
     (30, "ALTER TABLE scheduled_tasks ADD COLUMN notify_text TEXT"),
     # ── v31: unify-identity-column-naming ────────────────────────────────────
     (31, "ALTER TABLE approvals RENAME COLUMN approver_actor TO approver_user_id"),
+    # ── v32: reflection proposal provenance ──────────────────────────────────
+    (32, "ALTER TABLE reflection_proposals ADD COLUMN report_id TEXT"),
 ]
