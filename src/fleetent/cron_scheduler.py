@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import sqlite3
 from collections.abc import Callable
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
@@ -61,8 +62,27 @@ def _resolve_cron_principal(task: dict[str, Any]) -> Principal | None:
         return Principal(user_id="default", tenant_id="default")
     try:
         u = user_store.get_by_id(user_id)
-    except Exception:  # noqa: BLE001 — users table absent: no platform domain to consult
-        return Principal(user_id=user_id, tenant_id="default")
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc):
+            # No user-management schema (standalone agent): trust the archived identity.
+            return Principal(user_id=user_id, tenant_id="default")
+        # Platform domain exists but the lookup failed (locked DB, I/O error, ...).
+        # Fail closed — never fire a task whose identity we cannot reverify.
+        logger.warning(
+            "cron_principal_recheck_failed task=%s user_id=%s err=%s",
+            task.get("id"),
+            user_id,
+            exc,
+        )
+        return None
+    except Exception as exc:  # noqa: BLE001 — unknown failure: fail closed, never fire unverified
+        logger.warning(
+            "cron_principal_recheck_failed task=%s user_id=%s err=%s",
+            task.get("id"),
+            user_id,
+            exc,
+        )
+        return None
     if u is not None:
         if u.status == "blocked":
             return None

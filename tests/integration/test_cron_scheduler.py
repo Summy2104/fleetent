@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from unittest.mock import AsyncMock
 
 from fleetent.identity import Principal
@@ -602,7 +603,6 @@ def _platform_user(user_id, status="active", tenant_id="default"):
     return user_store.User(
         id=user_id,
         name="Test",
-        api_key="k",
         created_at="2024-01-01",
         status=status,
         tenant_id=tenant_id,
@@ -682,7 +682,7 @@ async def test_fire_allows_when_user_management_absent(tmp_path, monkeypatch):
     import fleetent.user_store as user_store
 
     def _no_table(uid):
-        raise RuntimeError("no such table: users")
+        raise sqlite3.OperationalError("no such table: users")
 
     monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
     monkeypatch.setattr(user_store, "get_by_id", _no_table)
@@ -702,6 +702,37 @@ async def test_fire_allows_when_user_management_absent(tmp_path, monkeypatch):
 
     run_mock.assert_called_once()
     assert run_mock.call_args[1]["principal"].user_id == "anyone"
+
+
+async def test_fire_skips_when_principal_lookup_errors(tmp_path, monkeypatch):
+    """A lookup failure other than 'no such table' (locked DB, I/O error) fails closed.
+
+    The platform domain exists but cannot be consulted; firing with the archived
+    identity would let a possibly-blocked user's task run unverified, so skip.
+    """
+    import fleetent.cron_scheduler as cs
+    import fleetent.session.manager as session_mgr
+    import fleetent.user_store as user_store
+
+    def _locked(uid):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(user_store, "get_by_id", _locked)
+    run_mock = AsyncMock(return_value="r")
+    monkeypatch.setattr(cs, "_agent_run", run_mock)
+
+    task = {
+        "id": "p6",
+        "user_id": "someone",
+        "message": "x",
+        "session_id": None,
+        "agent_name": None,
+        "deliver": None,
+        "origin": None,
+    }
+    await cs._fire(task)
+    run_mock.assert_not_called()
 
 
 async def test_fire_allows_default_placeholder_identity(tmp_path, monkeypatch):
