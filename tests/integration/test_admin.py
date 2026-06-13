@@ -573,7 +573,7 @@ def test_observability_traces_cli_queries_public_api_and_hides_payload_values(mo
                     run_id="run-1",
                     event_type="agent_run_completed",
                     user_id="user-1",
-                    agent_id="agent-1",
+                    agent_name="agent-1",
                     session_id="session-1",
                     payload={
                         "model_used": "claude",
@@ -614,7 +614,7 @@ def test_observability_traces_cli_queries_public_api_and_hides_payload_values(mo
     assert query.run_id == "run-1"
     assert query.event_type == "agent_run_completed"
     assert query.user_id == "user-1"
-    assert query.agent_id == "agent-1"
+    assert query.agent_name == "agent-1"
     assert query.session_id == "session-1"
     assert query.tenant_id == "default"
     assert query.start_ts == datetime.fromisoformat("2026-06-02T00:00:00+00:00")
@@ -679,7 +679,7 @@ def test_observability_usage_cli_queries_public_api_and_outputs_summary(monkeypa
     query = captured["query"]
     assert code == 0
     assert query.user_id == "user-1"
-    assert query.agent_id == "agent-1"
+    assert query.agent_name == "agent-1"
     assert query.session_id == "session-1"
     assert query.tenant_id == "default"
     assert query.start_ts == datetime.fromisoformat("2026-06-02T00:00:00+00:00")
@@ -758,7 +758,7 @@ def test_observability_performance_cli_queries_public_api_and_outputs_summary(mo
 
     query = captured["query"]
     assert code == 0
-    assert query.agent_id == "agent-1"
+    assert query.agent_name == "agent-1"
     assert query.limit == 100
     assert "run_count=4" in out
     assert "failure_rate=0.250" in out

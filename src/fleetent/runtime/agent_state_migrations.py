@@ -41,6 +41,7 @@ Version history:
   v34  unify approval requests
   v35  artifacts          (unified-file-exchange) MCP artifact ledger
   v36  artifacts.scope_key (unified-file-exchange D0) attribution = workspace scope key
+  v37  traces.agent_name  (finalize-agent-identity) rename traces.agent_id column
 """
 
 from __future__ import annotations
@@ -469,3 +470,28 @@ MIGRATIONS.append(
     )
 )
 MIGRATIONS.append((MIGRATIONS[-1][0] + 1, "ALTER TABLE artifacts ADD COLUMN scope_key TEXT"))
+MIGRATIONS.append(
+    (
+        MIGRATIONS[-1][0] + 1,
+        """
+        CREATE TABLE IF NOT EXISTS traces (
+            id              TEXT PRIMARY KEY,
+            run_id          TEXT NOT NULL,
+            span_id         TEXT,
+            parent_span_id  TEXT,
+            session_id      TEXT,
+            user_id         TEXT,
+            agent_id        TEXT,
+            tenant_id       TEXT NOT NULL DEFAULT 'default',
+            event_type      TEXT NOT NULL,
+            ts              TEXT NOT NULL,
+            payload_json    TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_traces_run_id ON traces (run_id);
+        CREATE INDEX IF NOT EXISTS idx_traces_user_ts ON traces (user_id, ts);
+        CREATE INDEX IF NOT EXISTS idx_traces_agent_ts ON traces (agent_id, ts);
+        CREATE INDEX IF NOT EXISTS idx_traces_tenant_event_ts ON traces (tenant_id, event_type, ts);
+        ALTER TABLE traces RENAME COLUMN agent_id TO agent_name;
+        """,
+    )
+)
