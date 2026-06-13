@@ -31,6 +31,23 @@ fleetent 的文件平面当前分裂为两个互不可见的世界：
 
 ## Decisions
 
+### D0 归属轴 = workspace scope key（继承 `/workspace`，agent 内不另起隔离轴）
+
+> 本决策为后续所有归属/校验/视图条款的根。2026-06-13 架构审计修正：原设计（旧 D3/D4/D5）以裸 `session_id` 作独立归属轴，与 agent 内既有的**唯一文件隔离轴**矛盾，是"别扭"的根因。
+
+agent 运行时内，对**文件 / sandbox / exchange**只有一条隔离轴：**workspace scope**。其 key 由 `SandboxManager` 解析一次：
+
+- `workspace_scope == SESSION` → key = `session_id`
+- `workspace_scope == AGENT` → key = `agent_name`
+
+`/exchange` 工件的归属、访问校验、视图分组**复用同一 scope key**，与 `/workspace` 挂载**同源同 key**——两个挂载一套规则。`resolve_workspace_scope` 已强制「multi_user 时 AGENT→SESSION」（`manager.py`），exchange 复用即白捡多人隔离护栏，无需另写一套。
+
+- **边界澄清（platform ⊥ agent）**：`tenant_id` 是 platform 概念，agent 运行时**不建模、不依赖**（AGENTS.md 单向解耦契约）。`user_id` 在 agent 内只服务 memory 分区与审批路由，**不是文件隔离 key**——多人 agent 下「按用户隔离文件」由 session 隔离自动达成（DM 的 `session_id` 内已含 user）。故归属轴**只有 workspace scope key 一条**。
+- **单一 key 派生权威**：抽 `workspace_scope_key(scope, session_id, agent_name)`（或经 `SandboxManager` 暴露），`/workspace` 挂载与 `/exchange` 归属**必须调同一个**，杜绝两处各自推导 scope 导致 split-brain（workspace 按 agent、exchange 按 session）。
+- **审计 ≠ 访问**：台账行**仍记录产生该调用的具体 `session_id` + `user_id`**（审计真相），但**可见性/访问分组用 `scope_key`**。两者是不同列、不同用途，旧 D4「归属==当前 session」把二者混为一谈才是冲突源。
+
+- *备选：exchange 维持独立 session 轴（旧设计）*——后果：单人 `workspace_scope: agent` 部署下 `/workspace` 跨 session 可见但 `/exchange` 不可见，两挂载两规则，违背"一棵树"北极星；且与 fence/file tools/sandbox/send_file 既有的 scope-key 归属不一致。否决。
+
 ### D1 逻辑命名空间 `/exchange/<server_id>`，映射"有效文件根"——而非物理统一目录
 
 `/exchange/<server_id>` 是 fence 认识的第二个逻辑根，启动 server 时绑定到该 server 的**有效文件根**：未显式配置 → 约定注入的 `<agent_home>/exchange/<server_id>/data`；已显式配置（如 my-bot 的 google-workspace xdg 树）→ 显式值原地收编。
@@ -49,17 +66,21 @@ fleetent 的文件平面当前分裂为两个互不可见的世界：
 
 ### D3 台账（artifacts 表）是治理元数据，不是模型接口
 
-`agent_state.db` 嵌入式迁移新增 `artifacts`：`{artifact_id, server_id, rel_path, session_id, user_id, filename, mime, size, created_at}`。新平铺模块 `artifact_exchange.py` 仿 `schedule_store.py`（`set_state_db` 注入、named parameters）。台账唯一职责：归属校验、视图构建、审计。模型永远不见 artifact_id。
+`agent_state.db` 嵌入式迁移：v32 建 `artifacts`（已合入 main）`{artifact_id, server_id, rel_path, session_id, user_id, filename, mime, size, created_at}`；**v33 追加 `scope_key` 列**（登记时解析的归属/可见性 key，见 D0）。新平铺模块 `artifact_exchange.py` 仿 `schedule_store.py`（`set_state_db` 注入、named parameters）。台账职责：归属校验、视图构建、审计。模型永远不见 artifact_id。
 
+- **列语义二分**：`scope_key` = 访问/可见性 key（按 D0 解析，SESSION→session_id / AGENT→agent_name）；`session_id` + `user_id` = 产生该工件的具体调用，仅作审计真相，**不参与访问判定**。
 - *备选：`artifact:<id>` 作为工具引用语义*——模型需要在路径/id 两套语义间切换，是前两代方案被否的核心原因。
 
 ### D4 归属即访问控制，统一在 fence 一处实现
 
-fence 解析 `/exchange` 路径时校验"台账归属 == 当前 session"，对**所有** host 侧 file 工具一致生效（不只 send_file）。跨 session → 拒绝并提示走 `send_im_message`（审批）。多人部署隔离不因 exchange 是 agent 级物理目录而倒退。
+fence 解析 `/exchange` 路径时校验"台账 `scope_key` == 当前 run 的 scope_key"（D0），对**所有** host 侧 file 工具一致生效（不只 send_file）。跨 scope → 拒绝并提示走 `send_im_message`（审批）。多人部署 scope 被强制为 session，隔离不因 exchange 是 agent 级物理目录而倒退。
+
+- **查找按 scope_key 过滤，非按路径取最新**：`resolve` 必须查 `(server_id, rel_path, scope_key)` 命中当前 run 归属的行，而非「按路径取最新行再校验」——后者在两 run 同 rel_path 时会取到他人最新行、误判越权（已合入 v32 休眠代码的 `_find_by_path` 缺陷，本期修正）。
+- **唯一跨 scope 豁免 = 已过审批**：`resolve(path, scope_key, *, approved=False)`，`approved=True`（send_file 升级审批 / send_im_message files，人批即授权）才跳过 scope 校验。审批旁路应记审计（谁、批了哪个工件）。
 
 ### D5 沙箱消费用"归属视图 + ro 挂载"，不是 staging 复制
 
-工件登记时向归属 session 的视图目录 `<agent_home>/exchange/.views/<session_key>/<server_id>/…` 补硬链接；容器创建时第二卷 `视图目录 → /exchange:ro`。
+工件登记时向归属 scope 的视图目录 `<agent_home>/exchange/.views/<scope_key>/<server_id>/…` 补硬链接（`scope_key` 按 D0，SESSION→session_id / AGENT→agent_name）；容器创建时第二卷 `视图目录 → /exchange:ro`。容器消费侧用 `scope_key` 取视图目录，与 `/workspace` 同 key——同一 run 的两个挂载视图一致。
 
 - bind mount 挂目录 ⇒ 挂载后新增硬链接容器内实时可见（容器先建、文件后到成立）；
 - 容器内外 `/exchange/...` 路径一字不差，动态拼路径的代码天然工作（任何"预扫描代码提取路径再复制"的方案做不到）;
@@ -74,7 +95,7 @@ fence 解析 `/exchange` 路径时校验"台账归属 == 当前 session"，对**
 
 `send_file`（无收件人参数 ⇒ 结构上不可能发错人 ⇒ 免审批快速通道）与 `send_im_message`（收件人模型填 ⇒ 恒 medium 审批）保留各自意图表面，底层共享同一执行内核（归属校验 + outbound 原语）。
 
-- `send_file` 风险参数化：免审批四条件（回当前会话 / DM / 文件全为本会话归属 / 交互上下文）全满足 → 直发；任一不满足 → **升级 medium 审批**取代现行"拒绝"——所有死路变成"最坏多点一次同意"。
+- `send_file` 风险参数化：免审批四条件（回当前会话 / DM / 文件全为本 run scope 归属（其 `scope_key` == 当前 run scope_key，含 workspace 相对路径与 `/exchange` 工件）/ 交互上下文）全满足 → 直发；任一不满足 → **升级 medium 审批**取代现行"拒绝"——所有死路变成"最坏多点一次同意"。归属以 scope_key 表达后，单人 `workspace_scope: agent` 部署下 agent 级工件对该 run 即"本 scope 归属"，不再因 `scope != session` 被一刀拒绝（与 `/workspace` 一致）。
 - `send_im_message` 新增可选 `files` 参数（跨会话工件、显式目标的文件投递经此，人批即跨会话授权）。
 - *备选：合并为单一 `send_message(to=?)`*——评估否决：收件人变可选参数后安全从"结构保证"降为"分类器保证"（单点 bug = 静默免审批）；实证显示模型爱填可选参数（事故中主动填 target=发起人），会把免审批流误升级；"send_im_message 必审批"审计不变量被稀释；allow-always 指纹/skill/prompt 迁移面大。合并声称的好处（共享内核、升级式降级、附件能力）全部不依赖合并。
 
@@ -94,11 +115,12 @@ fence 解析 `/exchange` 路径时校验"台账归属 == 当前 session"，对**
 
 ## Migration Plan
 
-1. 嵌入式迁移加 `artifacts` 表（forward-only，migrate-on-open，旧库自动升级）。
+1. 嵌入式迁移：v32 加 `artifacts` 表（已合入）；v33 追加 `scope_key` 列（forward-only，migrate-on-open，旧库自动升级；空表无回填问题）。
 2. 部署后新启动的 MCP server 应用约定注入；显式 env 的 server 行为不变（原地收编）。
 3. 新建容器带 `/exchange` 挂载；存量容器随 session 轮换自然获得。
 4. 回滚：去掉注入与挂载即回到现状；`artifacts` 表残留无害（无人读）。
 
 ## Open Questions
 
-- 无（设计决策已与 owner 逐项确认：双向范围、按 session 归属免审批、不合并工具、视图挂载方案）。
+- 无。设计决策已与 owner 逐项确认：双向范围、不合并工具、视图挂载方案。
+- **2026-06-13 架构审计修正**：归属轴由「裸 session_id 独立轴」改为「继承 workspace scope key」（D0），已与 owner 确认（含单人 `workspace_scope: agent` 下 exchange 跟随 `/workspace` 按 agent 共享）。已合入 main 的 v32 休眠代码（`resolve`/`list_by_session`/`_find_by_path` 以 session_id 为轴、按路径取最新）按 D0/D4 重做：v33 加 `scope_key` 列、签名改收 scope_key、查找按 scope_key 过滤。因属休眠脚手架（无生产 import），改动零现网风险。

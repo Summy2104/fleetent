@@ -64,7 +64,7 @@
 2. **两个待确认**：
    - 产文件的是不是 **stdio 本地 `google-workspace-mcp`**？（若是云端 HTTP，本套「本地文件交换区」机制完全不适用——文件不在本地，需走 future 的「远端字节拉回」另一条路）
    - **discovery 两层**（确定性咽喉改写为主 + 调用窗口 diff 兜底）定不定？建议：为正确性 diff 应做（结构成独立可测层），返不返路径只决定 diff 是主力还是安全网。
-3. ⚠️ **`openspec/changes/unified-file-exchange/design.md` 还是旧方案**（独立 session_id 台账归属），与上面「继承 workspace scope」**不一致**。**续做前先更新 design.md/specs 到新架构**，否则照旧设计实现会返工。
+3. ✅ **已解决（2026-06-13）**：架构审计确认 agent 内文件/sandbox/exchange 只有一条隔离轴 = workspace scope key（platform 的 tenant_id 不入 agent；user_id 仅服务 memory/审批，非文件 key）。design.md/specs/tasks 已全量更新到「继承 workspace scope」：新增 **D0**（归属轴=scope_key、单一 key 派生权威、审计≠访问）；D3/D4/D5/D6 + 6 个 spec + tasks 同步；新增 **§0 归属轴重构任务**（`workspace_scope_key` 权威、迁移 v33 加 `scope_key` 列、重做已合入休眠代码的 `resolve`/`list_by_session`/`_find_by_path` 至 scope_key 轴并修「按路径取最新→误拒」缺陷）。`openspec validate --strict` 通过。**续做第一步 = §0**（§1.5/1.6 休眠产物被 §0 取代）。
 
 ---
 
@@ -82,9 +82,10 @@
 ## 7. 建议续做顺序
 
 1. 拍板 §5 的两个确认（stdio? discovery?）。
-2. 更新 ③ `design.md`/specs 到「继承 workspace scope」根架构。
-3. 摸 agent_home 在 MCP 注册层的解析（解锁 2.2/2.3/3）。
-4. 按依赖序实现：§2.2残留 → §2.3/2.4 →（§2.5/2.6 视决策）→ §3 → §4（§4.5/4.8 待 Docker）→ §6 → §7 → §8。
+2. ✅ 已完成：design.md/specs/tasks 更新到「继承 workspace scope」根架构（见 §5.3）。
+3. **先做 tasks §0**（归属轴重构：`workspace_scope_key` 权威 + 迁移 v33 + 重做休眠 `artifact_exchange`）——这是后续一切的地基。
+4. 摸 agent_home 在 MCP 注册层的解析（解锁 2.2/2.3/3）。
+5. 按依赖序实现：§0 → §2.2残留 → §2.3/2.4 →（§2.5/2.6 视决策）→ §3 → §4（§4.5/4.8 待 Docker）→ §6 → §7 → §8。
 5. ③ 全勾后 `opsx:archive` + `opsx:sync` + PR 合并；再起 ④。
 
 ## 8. 流程/门禁速记（AGENTS.md）
