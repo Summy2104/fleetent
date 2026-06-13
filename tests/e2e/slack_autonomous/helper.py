@@ -107,7 +107,19 @@ def cmd_upload(args: argparse.Namespace) -> dict[str, Any]:
         return _pure.error_result(f"upload failed: {exc}")
     files = resp.get("files") or ([resp["file"]] if resp.get("file") else [])
     file_id = files[0]["id"] if files else None
-    return _pure.ok_result(file_id=file_id)
+    # Locate the message the upload created so the driver can read ITS thread for the
+    # agent reply. Channel shares omit a ts, so find the message by file id in history.
+    message_ts = None
+    if file_id:
+        try:
+            hist = _client(token).conversations_history(channel=channel, limit=10)
+            for m in hist.get("messages", []):
+                if any(f.get("id") == file_id for f in m.get("files", [])):
+                    message_ts = m["ts"]
+                    break
+        except SlackApiError:
+            message_ts = None
+    return _pure.ok_result(file_id=file_id, message_ts=message_ts)
 
 
 def cmd_download(args: argparse.Namespace) -> dict[str, Any]:

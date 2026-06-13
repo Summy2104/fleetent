@@ -31,16 +31,18 @@ description: >-
 
 ## 场景与读取要点（真实验证得出，务必遵守）
 
-- **bot 回复在 thread 里**：agent 走 Slack Assistant API，回复落在以你消息 `ts` 为根的 thread。
-  **每次 `read` 都要带 `--thread-ts`（用 `send` 返回的 ts）**；读频道/DM 主流会漏掉回复、误判「无响应」。
-- **DM 是全能力主测场景**：DM 里**不需要 @mention**，审批可走文本、文件可上传——对话/记忆/工具/sandbox/
-  审批/文件入站出站/视觉都可测。用 `conversations.open` 拿 DM channel，再 `send --channel <DM>`。
-- **频道场景**：每条消息（含追问）**必须 @bot**（`send --mention` / `upload --mention`），否则 agent 收不到。
-  但**审批类不要在频道测**——审批指令正则 `^approve <id>$` 会被 `<@bot>` 前缀破坏；审批类一律走 DM。
-- **审批门（DM）**：触发后 agent 发 `Approval ID: <id>`；在**同 thread** `send --channel <DM> --text "approve <id>"`
-  （纯文本、不带 @），再 `read --thread-ts` 确认 agent 续行并返回工具结果。
-- **图文同消息**：测图片/文件分析时用 `upload --comment "问题"`（DM）或 `upload --mention --comment "问题"`
-  （频道），让图和提问在**同一条消息**；分两条发会让 agent「看不到图」。
+- **以频道为主测**（agent 真实服务场景）：频道里**每条消息都必须 @bot**（`send --mention` /
+  `upload --mention`），否则 agent 收不到（频道靠 app_mention 触发）。
+- **bot 回复在 thread 里**：agent 走 Slack Assistant API，回复落在以你消息为根的 thread。
+  **每次 `read` 都必须带 `--thread-ts`**，读主流会漏掉回复、误判「无响应」（这是最容易踩的坑）：
+  - 纯文本：用 `send` 返回的 `ts` 作 `--thread-ts`；
+  - 文件：用 `upload` 返回的 `message_ts` 作 `--thread-ts`。
+- **文件入站/视觉（频道可测）**：`upload --file <图> --mention --comment "问题"`——让图、@bot、问题在
+  **同一条消息**，再 `read --thread-ts <message_ts>` 读 agent 分析；分两条发会让 agent「看不到图」。
+- **审批门（频道纯 API 受限）**：审批指令 `approve <id>` 必须 @bot 才被收到，但 `<@bot>` 前缀会破坏
+  审批正则 `^approve <id>$`（agent 当成新任务）→ 频道纯 API 测不了审批；需**真人点审批按钮**，或在
+  agent 侧让审批正则容忍 @ 前缀（另行改进）。触发审批的能力（`run_code`/`send_file` 等）据此标注受限。
+  （注：DM 里纯文本 `approve <id>` 可正常审批，但本套件按约定走频道。）
 
 ## helper 用法（JSON in/out）
 
