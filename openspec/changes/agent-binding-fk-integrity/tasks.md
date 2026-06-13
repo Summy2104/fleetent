@@ -1,6 +1,6 @@
 # agent-binding-fk-integrity Tasks
 
-> Provisional（阶段 4，排在阶段 2/3 后）。TDD：先测试见红、再实现见绿。
+> 阶段 4（阶段 2/3 已落地；当前 Alembic head=`083`）。TDD：先测试见红、再实现见绿。
 
 ## 1. MCP 两表正名（方案 A，Alembic）
 
