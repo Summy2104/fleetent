@@ -146,6 +146,33 @@ Phase 0 完成后准备 bb-pr 合 main 时发现 **Bitbucket origin/main 与 Git
 
 **后续 Phase（P1–P6）**：分支基线现已与 Bitbucket main 对齐，逐 Phase diff 干净，每 Phase 绿后 bb-pr 增量合入。
 
+### ✅ 夜间自动执行进度（2026-06-14 凌晨）
+
+逐 Phase bb-pr 合入 Bitbucket truth main，每个 PR 经 CI（Pipeline pullrequests）SUCCESSFUL 后 admin approve + merge_commit：
+
+| PR | 内容 | 状态 |
+|---|---|---|
+| #243 | reconcile ①②③ 落 Bitbucket + §0 归属轴重构（workspace_scope_key / v33→v36 scope_key 列 / artifact_exchange 重做） | ✅ MERGED |
+| #244 | §2.2 接通 MCP stdio 约定 cwd + /exchange 根绑定 | ✅ MERGED |
+| #245 | §2.3/2.4 确定性咽喉结果改写 + scope_key 归因穿线 | ✅ MERGED |
+| #246 | §2.5/2.6 调用窗口 diff 兜底 + per-server 锁 | ✅ MERGED |
+
+**§0 + §2 全部完成**（生产/发现/归因半边）：MCP server 产物现已 ① 落可寻址分区树（cwd+XDG 注入）、② 经确定性改写+diff 兜底被发现、③ 按统一 workspace scope key 归因、④ artifacts 台账(v35/v36)+命名空间+迁移齐备。全程每 PR unit 2949 + integration 1962→1973 全绿、mypy/ruff 净。
+
+每次 sync 期间 Bitbucket main 持续前进（descope-context-policy / unify-approval-requests / approve-mention-tolerance / unify-agent-binding-id 等他人 PR），均干净合并，无新增失败。
+
+### ⏸️ Checkpoint（§3 之前，待晨审决定是否续做）
+
+**主动停在消费侧之前**。理由：§3（fence 双根）触碰 read/write/edit/search 这条**所有 agent 共用的 file-tools 核心路径**，且与 §4（容器 ro 挂载，需 Docker/mock）、§5（send 工具复用 fence 解析）**紧密交织**——三者解析同一批 `/exchange` 路径，backend/容器/挂载的交互微妙。凌晨在核心文件路径仓促改动风险收益比不划算；而 §0+§2 已是自洽完整的交付。续做建议有人值守或清醒时段。
+
+**已勘明的续做设计（加速晨后继续）：**
+- **§3 fence 双根**：file_tools 的 `_HostBackend`/`_ContainerBackend` 经各自 `_resolve`/`resolve_ws_path` 钉单根。`/exchange/<id>/...` 路径应在 file 工具入口（read/write/edit/search_content/search_files，均在 `_select_backend` 前后）拦截，经 `artifact_exchange.resolve(path, tool_context.scope_key, approved=False)` 解析到 host 文件（归属校验：本 scope 放行 / 跨 scope 拒绝 / 未登记拒绝）。/exchange 工件是 host 文件，读/搜直接落 host，与 workspace backend 无关。建议抽一个共享解析助手 `(kind, target)`，避免 5 个工具重复。LOW 工具（read/search）无审批回路 → 跨 scope 恒拒。
+- **§4 沙箱视图+挂载**：`artifact_exchange` 补视图管理（`.views/<scope_key>/<server_id>/<rel>` 硬链接，登记时增补/刷新，依赖 §0 的 scope_key 已就位）；`BackendCapabilities` 加 `exchange_mount`（Docker=true）；`backends/docker.py::_workspace_flags` 仿 workspace 卷加第二卷 `视图 → /exchange:ro`；`manager.acquire` 接线按 scope_key 取视图目录。§4.5/4.6/§8.4 真机断言 mock 化（断言 docker run 选项装配 + skipif）。
+- **§5 send 工具**：`send_file` 接 `/exchange` 路径（经 §3 的 resolve）+ callable risk 真值表（D6/D7，callable risk 机制 §5 已在）+ 升级审批路径（批准后 `approved=True` 解析发送）；`send_im_message` 加 `files` 参数 + 与 send_file 共享投递内核。
+- **§8 收尾**：全量门禁 + 文档（AGENTS.md Gotchas / agent.yaml.example）+ §8.5 archive+sync（全 checkbox 勾选后）。
+
+tasks.md 已勾选至 §2 全部（§0/§2.1-2.6）；§3 起未勾。
+
 ## ④ delivery-receipts-postcondition
 
 待执行。
