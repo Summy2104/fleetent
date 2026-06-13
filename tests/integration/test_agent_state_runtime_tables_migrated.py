@@ -112,11 +112,10 @@ def test_unified_migrations_are_contiguous_and_idempotent(tmp_path):
 
 def test_reflection_proposals_report_id_migrates_existing_rows_to_null(tmp_path):
     db = SQLiteDatabase(path=tmp_path / "agent_state.db")
-    legacy_version = max(
-        version
-        for version, sql in MIGRATIONS
-        if "ADD COLUMN report_id TEXT" not in sql and "report_id" not in sql
+    report_id_version = next(
+        version for version, sql in MIGRATIONS if "ADD COLUMN report_id TEXT" in sql
     )
+    legacy_version = report_id_version - 1
     conn = sqlite3.connect(db.path)
     try:
         conn.execute(

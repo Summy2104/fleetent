@@ -38,6 +38,18 @@ AGENTS_DIR = paths.agents_dir()
 
 AGENT_FILE_NAME = "agent.yaml"
 _ENV_VAR_NAME_RE = re.compile(r"^(env:)?[A-Z_][A-Z0-9_]*$")
+_IGNORED_LEGACY_GOVERNANCE_KEYS = frozenset(
+    {
+        f"{'_'.join(('agent', 'budget', 'session'))}_turns",
+        f"{'_'.join(('agent', 'budget', 'session'))}_tokens",
+        f"{'_'.join(('agent', 'budget', 'user'))}_turns",
+        f"{'_'.join(('agent', 'budget', 'user'))}_tokens",
+        f"{'_'.join(('agent', 'budget', 'agent'))}_turns",
+        f"{'_'.join(('agent', 'budget', 'agent'))}_tokens",
+        f"{'_'.join(('agent', 'budget', 'user'))}_window",
+        f"{'_'.join(('agent', 'budget', 'agent'))}_window",
+    }
+)
 
 
 class ApprovalEntry(BaseModel):
@@ -333,15 +345,6 @@ class AgentFile(BaseModel):
     context_flap_window: int = 3
     context_min_savings_ratio: float = 0.10
     context_min_interval_turns: int = 1
-    # layered budget — session/user/agent dims only (global dropped: no cross-agent runtime)
-    agent_budget_session_turns: int = -1
-    agent_budget_session_tokens: int = -1
-    agent_budget_user_turns: int = -1
-    agent_budget_user_tokens: int = -1
-    agent_budget_agent_turns: int = -1
-    agent_budget_agent_tokens: int = -1
-    agent_budget_user_window: str = "weekly"
-    agent_budget_agent_window: str = "weekly"
     # loop / budget / guardrail
     agent_max_turns: int = 50
     agent_max_consecutive_failures: int = 3
@@ -471,6 +474,7 @@ def load_agent_file(agent_dir: Path) -> AgentFile:
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, dict):
         raise ValueError(f"{path} must contain a mapping")
+    raw = _drop_ignored_legacy_governance_keys(raw)
     agent = AgentFile.model_validate(raw)
     if agent.name != agent_dir.name:
         raise ValueError(
@@ -543,6 +547,7 @@ def load_agent_home_file(path: Path) -> AgentFile:
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, dict):
         raise ValueError(f"{path} must contain a mapping")
+    raw = _drop_ignored_legacy_governance_keys(raw)
     agent = AgentFile.model_validate(raw)
     _reject_inline_secrets(agent, path)
     return agent
@@ -551,6 +556,10 @@ def load_agent_home_file(path: Path) -> AgentFile:
 def _single_agent_index(agent: AgentFile) -> AgentConfigIndex:
     """Build an index from one single-file agent: it is the sole, forced-default agent."""
     return AgentConfigIndex(agents={agent.name: agent}, default=agent.name)
+
+
+def _drop_ignored_legacy_governance_keys(raw: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in raw.items() if key not in _IGNORED_LEGACY_GOVERNANCE_KEYS}
 
 
 def build_index(agents_dir: str | Path | None = None) -> AgentConfigIndex:

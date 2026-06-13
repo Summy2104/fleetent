@@ -80,7 +80,6 @@ graph TD
     approvals
     reflection_reports
     reflection_proposals
-    budget_usage
     scheduled_tasks
   end
   subgraph KB["KB 关系库 kb.db ｜ agent 侧 · per-tenant"]
@@ -158,7 +157,7 @@ erDiagram
 ```
 
 ### 3.3 per-agent 运行库（嵌入式 Y · `agent_state.db` · agent 侧）
-统一 MIGRATIONS（`runtime/agent_state_migrations.py`，单文件单 `user_version`）建 **11 张表**：`sessions`(会话元数据索引，仅 `session_id` / `user_id` / timestamps / `message_count`，**无 `agent_name` 列**，归属由 per-agent 物理库圈定) · `traces`(append-only 运行轨迹，挂 `session_id`/`run_id` 关联本库 `sessions`/`sub_agent_runs`) · `reflection_reports`(统一反思观察日志，domain=`memory|skill|knowledge_base|legacy`) · `reflection_proposals`(统一 memory/skill 提案与审批生命周期，domain=`memory|skill`) · `memory_items`(per-user 语义记忆，**无 namespace 列**，agent 隔离靠物理库) · `approvals`/`approval_allowlist`(审批请求+门状态，**agent 全权真相源**；所有 `*_user_id` 列 = `Principal.user_id` 字符串：managed=内部 `users.id`、standalone=渠道原生 id、基础设施=`system`，无 FK、跨库 opaque) · `session_anti_flap`(压缩防抖，per session) · `sub_agent_runs`(子 agent 生命周期) · `budget_usage`(预算滑窗累计，PK `(scope,key,period)`，**per-agent 物理隔离**，不落管理库) · `scheduled_tasks`(agent 侧 cron/once/interval 定时任务；`typed-scheduled-task-delivery` 增 `task_type`=`notify`/`generate`/`action` + `notify_text` 定稿正文——notify 由调度器直发不跑 agent，generate 跑 agent 按投递契约发回复，action 由 agent 自发、调度器不广播)。来历注记：`session_anti_flap`/`sub_agent_runs` 经 `agent_scope` + `db.py`（已去 `user_store.DB_PATH` 与裸 `sqlite3.connect`），reflection 域收口为 `reflection_reports` + `reflection_proposals` 两表（unify-self-evolution-model），`budget_usage` 由 retire-raw-sqlite-connect 从管理库迁入，`scheduled_tasks` 由 retire-standalone-fleetent-db 从遗留 `fleetent.db` 迁入。
+统一 MIGRATIONS（`runtime/agent_state_migrations.py`，单文件单 `user_version`）建 **10 张表**：`sessions`(会话元数据索引，仅 `session_id` / `user_id` / timestamps / `message_count`，**无 `agent_name` 列**，归属由 per-agent 物理库圈定) · `traces`(append-only 运行轨迹，挂 `session_id`/`run_id` 关联本库 `sessions`/`sub_agent_runs`) · `reflection_reports`(统一反思观察日志，domain=`memory|skill|knowledge_base|legacy`) · `reflection_proposals`(统一 memory/skill 提案与审批生命周期，domain=`memory|skill`) · `memory_items`(per-user 语义记忆，**无 namespace 列**，agent 隔离靠物理库) · `approvals`/`approval_allowlist`(审批请求+门状态，**agent 全权真相源**；所有 `*_user_id` 列 = `Principal.user_id` 字符串：managed=内部 `users.id`、standalone=渠道原生 id、基础设施=`system`，无 FK、跨库 opaque) · `session_anti_flap`(压缩防抖，per session) · `sub_agent_runs`(子 agent 生命周期) · `scheduled_tasks`(agent 侧 cron/once/interval 定时任务；`typed-scheduled-task-delivery` 增 `task_type`=`notify`/`generate`/`action` + `notify_text` 定稿正文——notify 由调度器直发不跑 agent，generate 跑 agent 按投递契约发回复，action 由 agent 自发、调度器不广播)。来历注记：`session_anti_flap`/`sub_agent_runs` 经 `agent_scope` + `db.py`（已去 `user_store.DB_PATH` 与裸 `sqlite3.connect`），reflection 域收口为 `reflection_reports` + `reflection_proposals` 两表（unify-self-evolution-model），`scheduled_tasks` 由 retire-standalone-fleetent-db 从遗留 `fleetent.db` 迁入；跨 run 分层预算已退役，对应历史表由新版本嵌入式迁移在 head 上 drop。
 
 ```mermaid
 erDiagram
@@ -200,19 +199,12 @@ erDiagram
     string run_id
     string state
   }
-  budget_usage {
-    string scope
-    string key
-    string period
-    int turns
-    int tokens
-  }
 ```
 
 > 历史行不迁移：旧管理库中既有的 `session_anti_flap` / `sub_agent_runs` 行属 ephemeral 运行时数据，按「上线前不迁移数据」新建即可，旧行作孤儿由部署方按需清理。
 > 跨库（见 §3.1）：`memory_items.user_id` ⇢ 管理库 `users`（managed 模式成立；standalone 中该字段可为不透明渠道原生 id）；`approvals.requester_user_id` ⇢ 管理库 `users`（managed 成立；standalone 同样允许 opaque id）；`approvals.session_id` → 本库 `sessions`。会话**内容**仍是 JSON 文件（`SESSIONS_DIR`，与元数据 DB 表物理分离）。
 >
-> 语义注记：① `reflection_proposals.target_ref` 为多态引用——memory 类提案指向 `memory_items.id`，skill 类提案指向文件系统 skill 名（字符串路径），完整性由 apply 路径兜底，无 FK 约束（图中 `memory_items → reflection_proposals` 边即此引用，仅 `domain=memory` 成立）。② `traces` 同时挂 `session_id`（→`sessions`，`query_trace_events` 按它过滤）与 `run_id`（与 `sub_agent_runs.run_id` 同命名空间，均 UUIDv4，可按 `run_id` 关联出子 agent 的完整 trace 树）。③ 库内 `session_id` / `run_id` / `report_id` 都是约定引用，**无时序保证、无外键**：`approvals`/`traces` 行可先于 `sessions` 索引行写入（工具门控、首事件在会话首圈即触发），`reflection_proposals.report_id` 可回指生成它的 `reflection_reports.id`，但历史行或非反思来源行允许为 `NULL`。④ `budget_usage` 的 `scope` 枚举为 `task|session|user|agent`，`key` 语义随 scope 变化（`task`→`run_id`、`session`→`session_id`、`user`→`user_id`、`agent`→字面量 `default`）。⑤ `approval_allowlist` 与 `approvals` 经**计算键**关联（非存储 FK）：`fingerprint = hash(scope_key, tool_name, tool_args)`，其中 `scope_key = requester_user_id`；审批前算 fingerprint 查 allowlist，命中即 auto-approve（approval-minimization 的"记住此类放行"机制）。`created_by` 为授予放行的审批人（`*_user_id` 同语义，⇢ 管理库 `users`，可空 opaque）。
+> 语义注记：① `reflection_proposals.target_ref` 为多态引用——memory 类提案指向 `memory_items.id`，skill 类提案指向文件系统 skill 名（字符串路径），完整性由 apply 路径兜底，无 FK 约束（图中 `memory_items → reflection_proposals` 边即此引用，仅 `domain=memory` 成立）。② `traces` 同时挂 `session_id`（→`sessions`，`query_trace_events` 按它过滤）与 `run_id`（与 `sub_agent_runs.run_id` 同命名空间，均 UUIDv4，可按 `run_id` 关联出子 agent 的完整 trace 树）。③ 库内 `session_id` / `run_id` / `report_id` 都是约定引用，**无时序保证、无外键**：`approvals`/`traces` 行可先于 `sessions` 索引行写入（工具门控、首事件在会话首圈即触发），`reflection_proposals.report_id` 可回指生成它的 `reflection_reports.id`，但历史行或非反思来源行允许为 `NULL`。④ `approval_allowlist` 与 `approvals` 经**计算键**关联（非存储 FK）：`fingerprint = hash(scope_key, tool_name, tool_args)`，其中 `scope_key = requester_user_id`；审批前算 fingerprint 查 allowlist，命中即 auto-approve（approval-minimization 的"记住此类放行"机制）。`created_by` 为授予放行的审批人（`*_user_id` 同语义，⇢ 管理库 `users`，可空 opaque）。
 
 ### 3.4 共享记忆库（嵌入式 Y · `shared_memory.db` · agent 侧 · per-tenant）
 `shared_memory_items`(team/tenant scope 共享记忆，多 agent 写的真相源)

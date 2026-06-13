@@ -37,6 +37,7 @@ Version history:
   v30  scheduled_tasks.notify_text
   v31  approvals.approver_user_id
   v32  reflection_proposals.report_id
+  v33  drop budget_usage
 """
 
 from __future__ import annotations
@@ -345,4 +346,5 @@ MIGRATIONS: list[tuple[int, str]] = [
     (31, "ALTER TABLE approvals RENAME COLUMN approver_actor TO approver_user_id"),
     # ── v32: reflection proposal provenance ──────────────────────────────────
     (32, "ALTER TABLE reflection_proposals ADD COLUMN report_id TEXT"),
+    (33, "DROP TABLE IF EXISTS budget_usage"),
 ]

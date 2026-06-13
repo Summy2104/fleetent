@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import fleetent.runtime.loop as al
-from fleetent.identity import Principal
 
 
 def _text_resp(text: str | None = "reply") -> MagicMock:
@@ -126,37 +125,3 @@ async def test_run_without_session_id_does_not_touch_flap_db(mock_client, monkey
     assert called["apply"] == 0  # ungated AR12 path; anti-flap not engaged
     rows = db.execute("SELECT COUNT(*) AS n FROM session_anti_flap").fetchone()
     assert rows["n"] == 0  # no anti-flap state persisted
-
-
-async def test_run_layered_budget_trips_and_logs_scope(mock_client, monkeypatch, tmp_path):
-    import fleetent.runtime.layered_budget as lbud
-    from fleetent.runtime.termination import StopReason
-
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
-    # Tiny user-token cap -> second checkpoint trips via the layered checker.
-    capped = lbud.LayeredBudgetConfig({lbud.BudgetScope.user: lbud.ScopeBudget(max_tokens=1)})
-    monkeypatch.setattr(
-        lbud.LayeredBudgetConfig, "from_governance", classmethod(lambda cls, g: capped)
-    )
-    captured: dict = {}
-    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
-
-    def _resp(*a, **k):
-        r = _tool_resp("get_time")
-        r.usage = MagicMock(prompt_tokens=10, completion_tokens=5)
-        return r
-
-    mock_client.chat.completions.create = AsyncMock(side_effect=_resp)
-
-    await al.run(
-        [{"role": "user", "content": "x"}],
-        principal=Principal(user_id="u1", tenant_id="default"),
-        session_id="s1",
-        max_turns=50,
-    )
-    assert captured.get("stop_reason") == StopReason.budget_exceeded
-    assert captured.get("budget_scope") == "user"  # layered user scope reported
-    from datetime import UTC, datetime
-
-    used = lbud.BudgetStore().get(lbud.BudgetScope.user, "u1", now=datetime.now(UTC))
-    assert used.tokens >= 15  # store accumulated across the turn(s)

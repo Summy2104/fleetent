@@ -203,11 +203,7 @@ The self-contained `agent.yaml` SHALL additionally accept a per-agent runtime
 governance configuration covering: context compression (`context_max_tokens`,
 `context_compress_threshold`, `context_keep_recent`, `context_tmax_ratio`,
 `context_tretained_ratio`, `compression_initial_intent_max`, `context_flap_window`,
-`context_min_savings_ratio`, `context_min_interval_turns`); layered budget on the
-`session_*` / `user_*` / `agent_*` dimensions (`agent_budget_session_turns`,
-`agent_budget_session_tokens`, `agent_budget_user_turns`, `agent_budget_user_tokens`,
-`agent_budget_agent_turns`, `agent_budget_agent_tokens`, `agent_budget_user_window`,
-`agent_budget_agent_window`); loop/budget/guardrail controls (`agent_max_turns`,
+`context_min_savings_ratio`, `context_min_interval_turns`); loop/budget/guardrail controls (`agent_max_turns`,
 `agent_max_consecutive_failures`, `agent_max_tokens`, `agent_grace_call_token_ratio`,
 `agent_grace_call_min_tokens`, `agent_loop_repeat_threshold`, `guardrail_repeat_threshold`,
 `agent_tool_parallel_max`, `loop_detect_ignore_arg_keys`, `sub_agent_timeout_seconds`,
@@ -265,20 +261,17 @@ of scope for this change.
 - **THEN** the parsed agent's observability block is an `ObservabilitySettings` with
   `logging.console_level == "debug"`
 
-### Requirement: Global budget and database_url excluded from agent.yaml
+### Requirement: Retired cross-run budget keys and database_url excluded from agent.yaml
 
-The self-contained `agent.yaml` SHALL NOT accept the global (cross-agent) budget
-dimension `agent_budget_global_turns`, `agent_budget_global_tokens`, or
-`agent_budget_global_window`: in the distributed per-agent-process model there is no
-runtime that aggregates a cross-agent total, so this dimension is dropped from the
-consolidated config. The `agent.yaml` SHALL also NOT accept `database_url`; the database
-location is derived from the agent home (`<home>/data/fleetent.db`) and never written as
-an absolute path in the file.
+The self-contained `agent.yaml` SHALL NOT require or expose the retired cross-run budget
+keys. The `agent.yaml` SHALL also NOT accept `database_url`; the database location is
+derived from the agent home (`<home>/data/fleetent.db`) and never written as an
+absolute path in the file.
 
-#### Scenario: global budget field is rejected
+#### Scenario: retired cross-run budget key is not part of the schema
 
-- **WHEN** an `agent.yaml` declares `agent_budget_global_tokens: 1000`
-- **THEN** loading fails fast with a schema error naming the unknown field
+- **WHEN** an `agent.yaml` declares a retired cross-run budget key
+- **THEN** that key is not part of the active schema and the runtime does not rely on it
 
 #### Scenario: database_url field is rejected
 

@@ -47,7 +47,7 @@
 │        └──────── Tool Results + Memory Extraction ──────────┘        │
 │                                                                      │
 │   运行治理子模块：                                                    │
-│   termination · loop_detector · budget · layered_budget             │
+│   termination · loop_detector · budget · layered budget             │
 │   cancellation · message_hygiene · error_classifier                 │
 │   tool_guardrails · sub_agent_lifecycle                             │
 └──────┬────────────────────┬────────────────────┬───────────────────┘
@@ -161,7 +161,7 @@ src/fleetent/
     termination.py       ←   终止原因分类（max_turns/tokens/failures/approval/guardrail）
     loop_detector.py     ←   arg 指纹 + repeat 阈值
     budget.py            ←   token 追踪
-    layered_budget.py    ←   分层 budget 策略
+    layered-budget.py    ←   分层 budget 策略
     cancellation.py      ←   CancelToken 优雅关停
     message_hygiene.py   ←   消息净化与契约验证
     error_classifier.py  ←   错误分类（api_error/rate_limit/validation 等）

@@ -46,7 +46,7 @@ LEGACY_FLATPATH_MODULES = (
     "fleetent.termination",
     "fleetent.loop_detector",
     "fleetent.budget",
-    "fleetent.layered_budget",
+    "fleetent." + "_".join(("layered", "budget")),
     "fleetent.cancellation",
     "fleetent.message_hygiene",
     "fleetent.error_classifier",

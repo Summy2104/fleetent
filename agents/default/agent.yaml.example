@@ -21,7 +21,7 @@
 # Migrating from an older global config (config consolidation): every agent-runtime
 # knob that used to live in `config/settings.yaml` now lives HERE in agent.yaml —
 #   • intelligence: vector_store / embedding / rerank / knowledge / long_term_ctx / mcp
-#   • governance:   context_* / agent_budget_* / agent_max_* / permission_gate_* /
+#   • governance:   context_* / agent_max_* / permission_gate_* /
 #                   tool_default_timeout_seconds / provider_* (see "runtime governance" below)
 #   • deployment:   log_format / session_* / disabled_skills /
 #                   observability / diagnostics / scheduling / webhooks
@@ -245,16 +245,6 @@ hooks_enabled: false              # master switch; off = no dispatch, no behavio
 hooks_decision_failure: open      # decision-hook failure: open(fail-open+audit) | strict(fail-closed)
 hooks_timeout_seconds: 5.0        # per-hook timeout (seconds)
 
-# layered budget — session / user / agent dims (-1 = unlimited)
-agent_budget_session_turns: -1
-agent_budget_session_tokens: -1
-agent_budget_user_turns: -1
-agent_budget_user_tokens: -1
-agent_budget_user_window: weekly   # rolling window: daily | weekly | monthly
-agent_budget_agent_turns: -1
-agent_budget_agent_tokens: -1
-agent_budget_agent_window: weekly
-
 # grace-call budget (reserved for the final summary call after budget is nearly exhausted)
 agent_grace_call_token_ratio: 0.05  # fraction of session budget reserved for grace call
 agent_grace_call_min_tokens: 512    # minimum tokens guaranteed for grace call regardless of ratio
@@ -346,5 +336,5 @@ diagnostics:
     traces_days: null             # days to retain agent run traces
     diagnostic_exports_days: null # days to retain diagnostic export bundles
 
-# NOTE: agent_budget_global_* and database_url are intentionally NOT accepted here.
+# NOTE: database_url is intentionally NOT accepted here.
 # The database location is derived from the agent home (<home>/data/fleetent.db).

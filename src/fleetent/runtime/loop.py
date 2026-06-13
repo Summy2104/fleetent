@@ -341,60 +341,13 @@ def _gated_compress(
     )
 
 
-def _setup_layered_budget(
-    session_id: str | None,
-    user_id: str | None,
-    agent_name: str | None,
-    governance: GovernanceConfig | None = None,
-) -> tuple[Any, Any, dict[Any, str | None]]:
-    """Build the AR18 layered-budget checker/store, or (None, None, {}) when no cap
-    is configured (dormant by default → zero behaviour/DB change for plain runs).
-
-    Caps + windows come from the per-agent governance (a default GovernanceConfig
-    when absent → all dims uncapped). The global (cross-agent) scope was dropped."""
-    from fleetent.runtime import layered_budget as lbud
-
-    gov = governance if governance is not None else GovernanceConfig()
-    config = lbud.LayeredBudgetConfig.from_governance(gov)
-    windows = {
-        lbud.BudgetScope.user: lbud.BudgetWindow(gov.agent_budget_user_window),
-        lbud.BudgetScope.agent: lbud.BudgetWindow(gov.agent_budget_agent_window),
-    }
-    if not config.has_any_cap():
-        return None, None, {}
-    store = lbud.BudgetStore(windows=windows)
-    keys: dict[Any, str | None] = {
-        lbud.BudgetScope.session: session_id,
-        lbud.BudgetScope.user: user_id,
-        lbud.BudgetScope.agent: agent_name,
-    }
-    checker = lbud.LayeredBudgetChecker(config, store, keys, clock=lbud.utc_now)
-    return checker, store, keys
-
-
-def _layered_budget_add(
-    store: Any, keys: dict[Any, str | None], prompt: int, completion: int
-) -> None:
-    """Fold one main-loop turn into each cross-run scope with a present key (AR18)."""
-    if store is None:
-        return
-    from fleetent.runtime import layered_budget as lbud
-
-    now = lbud.utc_now()
-    for scope in lbud.CROSS_RUN_SCOPES:
-        key = keys.get(scope)
-        if key is None:
-            continue
-        store.add(scope, key, prompt or 0, completion or 0, now=now)
-
-
 def _build_controller(
     max_turns: int | None,
     max_consecutive_failures: int | None,
     *,
     include_approval: bool,
     budget_config: BudgetConfig,
-    budget_usage: BudgetUsage,
+    run_usage: BudgetUsage,
     loop_repeat_threshold: int | None = None,
     loop_ignore_arg_keys: list[str] | None = None,
     cancel_token: CancelToken | None = None,
@@ -406,7 +359,7 @@ def _build_controller(
     dimension is now one of two budget dimensions (turns / tokens), and
     any exhausted dimension produces `budget_exceeded` (not `max_turns`). The
     `StopReason.max_turns` enum member is retained but the loop no longer produces
-    it (design D2). The budget checker reads the same per-run `budget_usage` the
+    it (design D2). The budget checker reads the same per-run usage tracker the
     loop accumulates into each turn, and is returned so the loop can read the
     triggering dimension for the trace.
 
@@ -427,7 +380,7 @@ def _build_controller(
     controller = TerminationController()
     if cancel_token is not None:
         controller.register(CancellationChecker(cancel_token))
-    budget_checker = BudgetChecker(budget_config, budget_usage)
+    budget_checker = BudgetChecker(budget_config, run_usage)
     controller.register(budget_checker)
     controller.register(ConsecutiveFailuresChecker(mcf))
     if include_approval:
@@ -1733,13 +1686,13 @@ async def _run_inner(
     # None → a never-cancelling default token, keeping the no-token path identical.
     token = cancel_token if cancel_token is not None else CancelToken()
     budget_config = _resolve_budget_config(max_turns, max_tokens, governance)
-    budget_usage = BudgetUsage()
+    run_usage = BudgetUsage()
     controller, loop_checker, budget_checker = _build_controller(
         max_turns,
         max_consecutive_failures,
         include_approval=True,
         budget_config=budget_config,
-        budget_usage=budget_usage,
+        run_usage=run_usage,
         loop_repeat_threshold=loop_repeat_threshold,
         loop_ignore_arg_keys=loop_ignore_arg_keys,
         cancel_token=token,
@@ -1752,12 +1705,6 @@ async def _run_inner(
     parallel_max = _resolve_parallel_max(governance)
     default_tool_timeout = _resolve_default_tool_timeout(governance)
     flap_state = _load_flap_state(session_id)
-    layered_checker, layered_store, layered_keys = _setup_layered_budget(
-        session_id, user_id, agent_name, governance
-    )
-    if layered_checker is not None:
-        controller.register(layered_checker)
-
     empty_reply_retries = 0  # T2-2: bounded self-correction for blank final replies
     while True:
         forced = controller.should_stop(state)
@@ -1863,13 +1810,7 @@ async def _run_inner(
         # BudgetChecker judges on up-to-date usage at the next checkpoint — not on a
         # single end-of-loop response.usage. Compression's internal LLM never reaches
         # here, so it is exempt by construction (D4).
-        _budget_add(budget_usage, response.usage)
-        _layered_budget_add(
-            layered_store,
-            layered_keys,
-            getattr(response.usage, "prompt_tokens", 0),
-            getattr(response.usage, "completion_tokens", 0),
-        )
+        _budget_add(run_usage, response.usage)
         route_chain = (active_cfg,)  # stick with the winning target for subsequent turns
         choice = response.choices[0]
         msg = choice.message
@@ -1994,14 +1935,9 @@ async def _run_inner(
     budget_scope: str | None = None
     if stop_reason == StopReason.budget_exceeded:
         # Grace Call (D3): a final summarizing call instead of a hard cut. Its own
-        # usage is NOT folded into budget_usage (D4/D6: it spends the reserved
+        # usage is NOT folded into the per-run usage tracker (D4/D6: it spends the reserved
         # dimension). Failure degrades to the partial reply already accumulated.
         budget_dimension = budget_checker.triggered_dimension
-        # AR18: a layered (cross-run) scope may be the trigger instead of the
-        # per-run AR2 budget; record the scope and its dimension for the trace.
-        if layered_checker is not None and layered_checker.triggered_scope is not None:
-            budget_scope = layered_checker.triggered_scope
-            budget_dimension = budget_dimension or layered_checker.triggered_dimension
         reply = await _grace_call(
             _build_async_client(active_cfg, policy.require_api_key(active_cfg)),
             active_cfg,
@@ -2295,13 +2231,13 @@ async def run_stream(
 
     token = cancel_token if cancel_token is not None else CancelToken()
     budget_config = _resolve_budget_config(max_turns, max_tokens, governance)
-    budget_usage = BudgetUsage()
+    run_usage = BudgetUsage()
     controller, loop_checker, budget_checker = _build_controller(
         max_turns,
         max_consecutive_failures,
         include_approval=False,
         budget_config=budget_config,
-        budget_usage=budget_usage,
+        run_usage=run_usage,
         loop_repeat_threshold=loop_repeat_threshold,
         loop_ignore_arg_keys=loop_ignore_arg_keys,
         cancel_token=token,
@@ -2314,12 +2250,6 @@ async def run_stream(
     parallel_max = _resolve_parallel_max(governance)
     default_tool_timeout = _resolve_default_tool_timeout(governance)
     flap_state = _load_flap_state(session_id)
-    layered_checker, layered_store, layered_keys = _setup_layered_budget(
-        session_id, user_id, agent_name, governance
-    )
-    if layered_checker is not None:
-        controller.register(layered_checker)
-
     empty_reply_retries = 0  # T2-2: bounded self-correction for blank final replies
     while True:
         forced = controller.should_stop(state)
@@ -2487,8 +2417,7 @@ async def run_stream(
         # D1: settle this turn's usage into the per-run accumulator now (step +
         # tokens), so the BudgetChecker judges between turns rather than only
         # at the end of the whole run. Compression's LLM never reaches here (D4).
-        budget_usage.add(turn_prompt_tokens, turn_completion_tokens)
-        _layered_budget_add(layered_store, layered_keys, turn_prompt_tokens, turn_completion_tokens)
+        run_usage.add(turn_prompt_tokens, turn_completion_tokens)
 
         if finish_reason != "tool_calls":
             reply = "".join(reply_parts)
@@ -2692,9 +2621,6 @@ async def run_stream(
         # then done; (b) failure after partial deltas → keep what streamed (cannot
         # be unsent), record degradation, then done. Both always reach `done`.
         budget_dimension = budget_checker.triggered_dimension
-        if layered_checker is not None and layered_checker.triggered_scope is not None:
-            budget_scope = layered_checker.triggered_scope
-            budget_dimension = budget_dimension or layered_checker.triggered_dimension
         partial_reply = reply
         grace_messages = [*messages, {"role": "user", "content": _GRACE_CALL_TEXT}]
         reserved = grace_max_tokens(budget_config.max_tokens)
