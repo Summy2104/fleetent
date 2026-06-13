@@ -25,7 +25,7 @@
 
 ## 5. 文档
 
-- [ ] 5.1 `docs/architecture/data-model.md`：§3.3 traces 列名 `agent_id`→`agent_name`；§2/§6 补"两翻译边界 + 身份键守护"
+- [ ] 5.1 `docs/architecture/data-model.md`：§3.3 traces 列名 `agent_id`→`agent_name`；§2/§6 补"两翻译边界 + 身份键守护"；**§3.2 退役 `agents` 条目的"`name` 为不可变标识…创建后不可改"框架**——改为 hybrid 表述（`agents.id` = 不可变身份/关系键、`agents.name` = 可变可读标签，rename 仅改 agents 一行 + re-materialize 重刷产物，零关系级联，见 identity-model §1.2/§2.3），并更新 key-list（admin_state/session_meta 已于阶段 3 改 agent_id 键，name 仅余物理目录/agent.yaml/traces 等 agent 侧产物）
 - [ ] 5.2 `docs/architecture/agent-identity-model.md`：标阶段 5 收尾完成，全模型落地
 
 ## 6. 收尾
