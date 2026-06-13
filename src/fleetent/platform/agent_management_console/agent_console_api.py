@@ -107,6 +107,13 @@ def references_for(agent_name: str) -> dict[str, Any]:
     return agent_admin_store.references(int(agent["id"]))
 
 
+def _require_agent_id(name: str) -> int:
+    agent = get_agent_def(name)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="agent not found")
+    return int(agent["id"])
+
+
 def agent_observability_agg(agent_name: str, window: str) -> dict[str, Any]:
     """Per-agent aggregation (calls/tokens/cost/error-rate/latency/approvals).
 
@@ -226,7 +233,17 @@ def observability(
 
 def _def_response(name: str) -> dict[str, Any]:
     agent = get_agent_def(name)
-    state = agent_admin_store.get_state(name)
+    agent_id = None if agent is None else int(agent["id"])
+    state = (
+        {
+            "agent_id": None,
+            "agent_name": name,
+            "status": "enabled",
+            "provenance": "adhoc",
+        }
+        if agent_id is None
+        else agent_admin_store.get_state(agent_id)
+    )
     out: dict[str, Any] = {
         "agent": name,
         "provenance": state["provenance"],
@@ -331,8 +348,9 @@ def create_agent(body: CreateBody, authorization: str | None = Header(None)) -> 
         team_id=body.team_id,
         config_overrides=_merge_overrides(body.config_overrides_yaml, body.config_overrides_fields),
     )
-    agent_admin_store.set_provenance(body.name, "adhoc")
-    agent_admin_store.enable(body.name)
+    agent_id = _require_agent_id(body.name)
+    agent_admin_store.set_provenance(agent_id, "adhoc")
+    agent_admin_store.enable(agent_id)
     audit_log.write_audit(user.id, "agent.create", "agent", body.name)
     return _def_response(body.name)
 
@@ -351,8 +369,7 @@ def update_agent(
     name: str, body: UpdateBody, authorization: str | None = Header(None)
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
-    if get_agent_def(name) is None:
-        raise HTTPException(status_code=404, detail="agent not found")
+    target_id = _require_agent_id(name)
     target = name
     allowed_tools = body.allowed_tools
     if body.capabilities_yaml is not None:
@@ -384,7 +401,7 @@ def update_agent(
     )
     if body.icon is not None:
         set_agent_icon(target, body.icon)
-    agent_admin_store.mark_drift(target)  # no-op unless provenance is managed
+    agent_admin_store.mark_drift(target_id)  # no-op unless provenance is managed
     audit_log.write_audit(user.id, "agent.update", "agent", target)
     return _def_response(target)
 
@@ -396,14 +413,13 @@ def delete_agent(
     x_confirm: str | None = Header(None),
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
-    if get_agent_def(name) is None:
-        raise HTTPException(status_code=404, detail="agent not found")
+    agent_id = _require_agent_id(name)
     refs = references_for(name)
     if refs["users"] or refs["channels"]:
         raise HTTPException(status_code=409, detail={"error": "agent still bound", **refs})
     _require_confirm(x_confirm)
     delete_agent_def(name)
-    agent_admin_store.delete_state(name)
+    agent_admin_store.delete_state(agent_id)
     audit_log.write_audit(user.id, "agent.delete", "agent", name)
     return {"agent": name, "deleted": True}
 
@@ -414,7 +430,7 @@ def delete_agent(
 @router.post("/agents/{name}/enable")
 def enable_agent(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
     user = _require_admin(authorization)
-    agent_admin_store.enable(name)
+    agent_admin_store.enable(_require_agent_id(name))
     audit_log.write_audit(user.id, "agent.enable", "agent", name)
     return {"agent": name, "status": "enabled"}
 
@@ -422,7 +438,7 @@ def enable_agent(name: str, authorization: str | None = Header(None)) -> dict[st
 @router.post("/agents/{name}/disable")
 def disable_agent(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
     user = _require_admin(authorization)
-    agent_admin_store.disable(name)
+    agent_admin_store.disable(_require_agent_id(name))
     audit_log.write_audit(user.id, "agent.disable", "agent", name)
     return {"agent": name, "status": "disabled"}
 
@@ -438,7 +454,7 @@ def archive_agent(
     if refs["users"] or refs["channels"]:
         raise HTTPException(status_code=409, detail={"error": "agent still bound", **refs})
     _require_confirm(x_confirm)
-    agent_admin_store.archive(name)
+    agent_admin_store.archive(_require_agent_id(name))
     audit_log.write_audit(user.id, "agent.archive", "agent", name)
     return {"agent": name, "status": "archived"}
 
@@ -446,7 +462,7 @@ def archive_agent(
 @router.post("/agents/{name}/restore")
 def restore_agent(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
     user = _require_admin(authorization)
-    agent_admin_store.restore(name)
+    agent_admin_store.restore(_require_agent_id(name))
     audit_log.write_audit(user.id, "agent.restore", "agent", name)
     return {"agent": name, "status": "enabled"}
 
@@ -474,7 +490,8 @@ def clone_agent(
         src.get("memory_namespace", "default"),
     )
     # clone is a fresh adhoc agent with no bindings and default enabled status
-    agent_admin_store.set_provenance(body.new_name, "adhoc")
-    agent_admin_store.enable(body.new_name)
+    agent_id = _require_agent_id(body.new_name)
+    agent_admin_store.set_provenance(agent_id, "adhoc")
+    agent_admin_store.enable(agent_id)
     audit_log.write_audit(user.id, "agent.clone", "agent", body.new_name, detail={"source": name})
     return {"agent": body.new_name, "cloned_from": name, "provenance": "adhoc"}

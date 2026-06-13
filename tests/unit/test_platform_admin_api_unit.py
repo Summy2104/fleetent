@@ -464,9 +464,14 @@ def test_chat_admin_route_handlers_cover_playground_and_governance(
             {"session_id": session_id, "origin": kwargs.get("origin", "web"), "status": "active"},
         )
         metas[session_id].update(kwargs)
+        if "agent_id" in kwargs and "agent_name" not in metas[session_id]:
+            metas[session_id]["agent_name"] = "ops"
 
     monkeypatch.setattr(
         chat_admin_api.audit_log, "write_audit", lambda *args, **kwargs: audits.append(args)
+    )
+    monkeypatch.setattr(
+        chat_admin_api, "get_agent_by_name", lambda name: SimpleNamespace(id=7, name=name)
     )
     monkeypatch.setattr(chat_admin_api.session_admin_store, "upsert_meta", upsert_meta)
     monkeypatch.setattr(
@@ -993,9 +998,10 @@ def test_server_helpers_cover_admin_url_jobs_and_auth(
     monkeypatch.delenv("DATABASE_URL", raising=False)
     assert server.agent_routing_status("ops") == "enabled"
     monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/fleetent")
+    monkeypatch.setattr(server.agent_store, "get_by_name", lambda name: SimpleNamespace(id=7))
     from fleetent.platform.agent_management_console import agent_admin_store
 
-    monkeypatch.setattr(agent_admin_store, "get_state", lambda agent_name: {"status": "disabled"})
+    monkeypatch.setattr(agent_admin_store, "get_state", lambda agent_id: {"status": "disabled"})
     assert server.agent_routing_status("ops") == "disabled"
 
 
