@@ -279,10 +279,10 @@ def test_bind_known_mcp_server(fresh_client, monkeypatch):
 def test_known_mcp_ids_include_store_registered(monkeypatch):
     # _known_mcp_server_ids uses DB-registered global servers, so a store-only
     # server is bindable.
-    from fleetent.platform.connector_management import agent_mcp_server_store
+    from fleetent.platform.connector_management import mcp_server_store
 
     monkeypatch.setattr(
-        agent_mcp_server_store,
+        mcp_server_store,
         "list_mcp_servers",
         lambda agent_id: [{"server_id": "middle"}] if agent_id is None else [],
     )
@@ -290,11 +290,11 @@ def test_known_mcp_ids_include_store_registered(monkeypatch):
 
 
 def test_bind_store_registered_mcp_server(fresh_client, monkeypatch):
-    from fleetent.platform.connector_management import agent_mcp_server_store
+    from fleetent.platform.connector_management import mcp_server_store
 
     agent = agent_store.create_agent("ops", "Ops v1.", ["shell"])
     monkeypatch.setattr(
-        agent_mcp_server_store,
+        mcp_server_store,
         "list_mcp_servers",
         lambda agent_id: [{"server_id": "middle"}] if agent_id is None else [],
     )
