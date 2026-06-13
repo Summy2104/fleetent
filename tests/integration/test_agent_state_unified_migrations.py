@@ -140,6 +140,32 @@ def test_migrate_drops_agent_name_from_legacy_sessions_table(tmp_path: Path) -> 
         "risk_level TEXT NOT NULL, tool_name TEXT NOT NULL, tool_args TEXT NOT NULL, "
         "status TEXT NOT NULL, approver_actor TEXT, created_at TEXT NOT NULL, resolved_at TEXT)"
     )
+    # reflection_proposals was created at v24, so any faithful post-v27 DB must carry the
+    # pre-report_id schema before v32 appends the nullable provenance column.
+    conn.execute(
+        """
+        CREATE TABLE reflection_proposals (
+          id                TEXT PRIMARY KEY,
+          domain            TEXT NOT NULL,
+          kind              TEXT NOT NULL,
+          subject_user_id   TEXT,
+          target_ref        TEXT,
+          payload_json      TEXT NOT NULL,
+          reason            TEXT NOT NULL,
+          evidence_json     TEXT NOT NULL,
+          risk              TEXT NOT NULL,
+          status            TEXT NOT NULL,
+          reviewer_user_id  TEXT,
+          reviewed_at       TEXT,
+          rejection_reason  TEXT,
+          actor_user_id     TEXT,
+          applied_at        TEXT,
+          expires_at        TEXT,
+          created_at        TEXT NOT NULL,
+          updated_at        TEXT NOT NULL
+        )
+        """
+    )
     conn.execute("PRAGMA user_version = 27")
     conn.commit()
     conn.close()

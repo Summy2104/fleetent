@@ -41,6 +41,35 @@ def test_reflection_management_lists_skill_proposals_from_agent_store(monkeypatc
     assert diff["proposal_id"] == proposal.id
 
 
+def test_reflection_management_serializes_report_id(monkeypatch, tmp_path):
+    from fleetent import reflection
+    from fleetent.platform import reflection_management
+    from fleetent.reflection import ReflectionFinding
+
+    _patch_reflection_db(monkeypatch, tmp_path)
+    [proposal] = reflection.generate_skill_proposals(
+        findings=[
+            ReflectionFinding(
+                type="skill_opportunity",
+                summary="Repeated task pattern may become a skill: draft launch update",
+                evidence_ids=["trace-a", "trace-b"],
+                metadata={"pattern": "draft launch update"},
+            )
+        ],
+        report_id="report-1",
+    )
+
+    [row] = [
+        item
+        for item in reflection_management.reflection_list_proposals()
+        if item["id"] == proposal.id
+    ]
+    diff = reflection_management.reflection_proposal_diff(proposal.id)
+
+    assert row["report_id"] == "report-1"
+    assert diff["report_id"] == "report-1"
+
+
 def test_skill_admin_api_consumes_reflection_management():
     from fleetent.platform import reflection_management
     from fleetent.platform.skill_management import skill_admin_api

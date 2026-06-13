@@ -33,6 +33,7 @@ def _proposal_dict(p: Any) -> dict[str, Any]:
     """Serialize a reflection SkillProposal to a JSON-able review-inbox row."""
     return {
         "id": p.id,
+        "report_id": p.report_id,
         "type": p.type,
         "target_skill": p.target_skill,
         "reason": p.reason,
