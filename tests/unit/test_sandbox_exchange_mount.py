@@ -34,7 +34,20 @@ def test_capabilities_exchange_mount_defaults_false():
 
 def test_exchange_flags_assembles_ro_mount():
     flags = DockerBackend()._exchange_flags("/home/agent/exchange/.views/K1")
-    assert flags == ["-v", "/home/agent/exchange/.views/K1:/exchange:ro"]
+    assert flags == [
+        "--mount",
+        "type=bind,source=/home/agent/exchange/.views/K1,target=/exchange,readonly",
+    ]
+
+
+def test_exchange_flags_colon_in_scope_key_path_is_safe():
+    # scope_key == session_id "slack:dm:U1:1781..." → view path contains colons. The old
+    # `-v src:dst:ro` form produced "too many colons" and broke `docker run`. The --mount
+    # form keeps the full source path intact and emits no bare `-v <colon-path>`.
+    view = "/home/agent/exchange/.views/slack:dm:U1:1781443457.4"
+    flags = DockerBackend()._exchange_flags(view)
+    assert flags == ["--mount", f"type=bind,source={view},target=/exchange,readonly"]
+    assert "-v" not in flags  # never the colon-splitting positional form
 
 
 def test_exchange_flags_empty_when_no_view():
@@ -56,8 +69,8 @@ async def test_create_workspace_includes_exchange_ro_mount():
             exchange_view_path="/home/agent/exchange/.views/s1",
         )
     args = list(captured["args"])
-    assert "-v" in args
-    assert "/home/agent/exchange/.views/s1:/exchange:ro" in args
+    assert "--mount" in args
+    assert "type=bind,source=/home/agent/exchange/.views/s1,target=/exchange,readonly" in args
 
 
 async def test_create_workspace_omits_exchange_mount_when_absent():
@@ -70,7 +83,7 @@ async def test_create_workspace_omits_exchange_mount_when_absent():
 
     with patch("asyncio.create_subprocess_exec", AsyncMock(side_effect=fake_exec)):
         await backend.create_workspace(name="sandbox-session-s1")
-    assert not any(":/exchange:ro" in str(a) for a in captured["args"])
+    assert not any("target=/exchange" in str(a) for a in captured["args"])
 
 
 async def test_manager_acquire_passes_exchange_view_when_capable(monkeypatch, tmp_path):

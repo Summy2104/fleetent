@@ -152,10 +152,12 @@ class DockerBackend(BaseSandboxBackend):
     def _workspace_flags(workspace_host_path: str | None) -> list[str]:
         """Bind-mount the host workspace dir into the container at /workspace.
 
-        None keeps the current no-mount behaviour (sandbox-workspace-mount)."""
+        Uses `--mount type=bind` (not `-v src:dst`) so a source path containing `:` —
+        e.g. a scope_key/session_id like `slack:dm:U1:<ts>` — cannot break the mount spec
+        (sandbox-mount-colon-safe). None keeps the current no-mount behaviour."""
         if not workspace_host_path:
             return []
-        return ["-v", f"{workspace_host_path}:{_WORKSPACE_MOUNT}"]
+        return ["--mount", f"type=bind,source={workspace_host_path},target={_WORKSPACE_MOUNT}"]
 
     @staticmethod
     def _exchange_flags(exchange_view_path: str | None) -> list[str]:
@@ -163,24 +165,31 @@ class DockerBackend(BaseSandboxBackend):
 
         Read-only so products only ever land in /workspace (output contract); the view is
         filtered to the current scope on the host, so cross-scope artifacts are physically
-        absent in-container. None keeps the container without an /exchange mount."""
+        absent in-container. Uses `--mount type=bind,...,readonly` (not `-v src:dst:ro`) so
+        the view path — named by the raw `scope_key`, which under session scope is a
+        session_id containing colons — does not produce `docker: too many colons`
+        (sandbox-mount-colon-safe). None keeps the container without an /exchange mount."""
         if not exchange_view_path:
             return []
-        return ["-v", f"{exchange_view_path}:{_EXCHANGE_MOUNT}:ro"]
+        return [
+            "--mount",
+            f"type=bind,source={exchange_view_path},target={_EXCHANGE_MOUNT},readonly",
+        ]
 
     @staticmethod
     def _skill_mount_flags(skill_mount: SkillMount | None) -> list[str]:
         """Bind-mount the host skills root into the container at /workspace/skills.
 
-        Default read_only adds the `:ro` suffix so the agent runtime cannot rewrite
-        author/operator-maintained skill assets; read_only=False drops it. None keeps
-        the no-mount behaviour (backward compatible / unsupported backend)."""
+        Default read_only adds `readonly` so the agent runtime cannot rewrite
+        author/operator-maintained skill assets; read_only=False drops it. Uses
+        `--mount type=bind` for colon-safe source paths (sandbox-mount-colon-safe). None
+        keeps the no-mount behaviour (backward compatible / unsupported backend)."""
         if skill_mount is None:
             return []
-        spec = f"{skill_mount.host_src}:{_SKILLS_MOUNT}"
+        spec = f"type=bind,source={skill_mount.host_src},target={_SKILLS_MOUNT}"
         if skill_mount.read_only:
-            spec += ":ro"
-        return ["-v", spec]
+            spec += ",readonly"
+        return ["--mount", spec]
 
     @staticmethod
     def _skills_env(skill_mount: SkillMount | None) -> dict[str, str]:
