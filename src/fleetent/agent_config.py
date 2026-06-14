@@ -130,6 +130,8 @@ class TelegramConnector(BaseModel):
 class AgentConnectors(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    supports_dm: bool = False
+    supports_groups: bool = False
     slack: SlackConnector | None = None
     telegram: TelegramConnector | None = None
 

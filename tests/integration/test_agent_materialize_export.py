@@ -5,6 +5,7 @@ import pytest
 import fleetent.agent_store as agent_store
 from fleetent.agent_config import default_models
 from fleetent.platform.agent_lifecycle import materialize
+from fleetent.platform.agent_management_console import agent_im_group_store
 from fleetent.platform.connector_management import agent_mcp_server_store
 from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.model_provider_management import provider_admin_store
@@ -132,6 +133,38 @@ def test_agent_file_from_store_applies_config_overrides(db):
     assert af.knowledge.retrieval_policy.top_k == 7
     assert af.knowledge.retrieval_policy.mode == "hybrid"  # untouched nested default
     assert af.knowledge.enabled is False  # untouched sibling default preserved
+
+
+def test_agent_file_from_store_materializes_im_access_without_clobbering_credentials(db):
+    agent = agent_store.create_agent(
+        "support",
+        "p",
+        [],
+        config_overrides={
+            "connectors": {
+                "slack": {
+                    "bot_token_env": "SUPPORT_SLACK_BOT",
+                    "app_token_env": "SUPPORT_SLACK_APP",
+                }
+            }
+        },
+    )
+    agent_store.assign_user("u_alice", agent.id)
+    agent_store.assign_user("u_bob", agent.id)
+    agent_store.set_im_capabilities("support", supports_dm=True, supports_groups=True)
+    agent_im_group_store.bind(agent.id, "slack", "C_ops", created_by="admin")
+    agent_im_group_store.bind(agent.id, "slack", "C_eng", created_by="admin")
+
+    exported = materialize.agent_file_from_store(agent_store.get_by_name("support"))
+
+    assert exported.connectors.supports_dm is True
+    assert exported.connectors.supports_groups is True
+    assert exported.connectors.slack is not None
+    assert exported.connectors.slack.bot_token_env == "SUPPORT_SLACK_BOT"
+    assert exported.connectors.slack.app_token_env == "SUPPORT_SLACK_APP"
+    assert exported.connectors.slack.access.allow_users == ["u_alice", "u_bob"]
+    assert exported.connectors.slack.access.allow_channels == ["C_eng", "C_ops"]
+    assert exported.connectors.slack.access.require_approval is True
 
 
 def test_agent_file_from_store_ignores_invalid_config_override(db):

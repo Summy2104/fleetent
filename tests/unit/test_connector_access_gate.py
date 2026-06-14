@@ -1,17 +1,14 @@
 """Tests for channel_allowed/user_allowed accepting ConnectorAccess (restructure-agent-access)."""
 
-import pytest
-
 from fleetent.agent_config import ConnectorAccess
 from fleetent.im_gateway.access import LocalApprovalStore, channel_allowed, user_allowed
-
 
 # ── Task 2.1: channel_allowed(ConnectorAccess, channel_id) ──────────────────
 
 
-def test_channel_allowed_empty_allows_all():
+def test_channel_allowed_empty_rejects_all_groups():
     access = ConnectorAccess()
-    assert channel_allowed(access, "C_any") is True
+    assert channel_allowed(access, "C_any") is False
 
 
 def test_channel_allowed_listed_channel():

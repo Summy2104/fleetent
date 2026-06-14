@@ -144,7 +144,7 @@ async def _noop_progress(_event: dict[str, Any]) -> None:
     return None
 
 
-def get_agent_for_context(platform: str, channel_id: str, user_id: str) -> AgentFile | None:
+def get_agent_for_context() -> AgentFile | None:
     """Resolve agent from the file index: default → None (bare run).
 
     Bindings-based routing (channel/user) has been removed; the agent is identified by
@@ -165,6 +165,22 @@ def _get_connector_access(agent: AgentFile | None, platform: str) -> ConnectorAc
     if platform == "telegram" and agent.connectors.telegram is not None:
         return agent.connectors.telegram.access
     return ConnectorAccess()
+
+
+def _has_platform_connector(agent: AgentFile | None, platform: str) -> bool:
+    if agent is None:
+        return False
+    if platform == "slack":
+        return agent.connectors.slack is not None
+    if platform == "telegram":
+        return agent.connectors.telegram is not None
+    return False
+
+
+def _chat_type(msg: NormalizedMessage) -> str:
+    if msg.session_context is not None:
+        return msg.session_context.chat_type
+    return "dm"
 
 
 _IMAGE_MIME_PREFIX = "image/"
@@ -331,7 +347,7 @@ async def _resume_pending_in_session(
     if msg.agent_name:
         agent = agent_config.current().get(msg.agent_name)
     else:
-        agent = get_agent_for_context(msg.platform, msg.channel_id, msg.user_id)
+        agent = get_agent_for_context()
 
     governance = _governance_from_file(agent) if agent else None
     allowed_tools = agent.allowed_tools if agent is not None and agent.allowed_tools else None
@@ -482,29 +498,34 @@ async def route(msg: NormalizedMessage) -> None:
     if msg.agent_name:
         agent = agent_config.current().get(msg.agent_name)
     else:
-        agent = get_agent_for_context(msg.platform, msg.channel_id, msg.user_id)
+        agent = get_agent_for_context()
 
     # Local, zero-platform-DB access gate against the connector's access config + an
     # agent-local approval store. No agent resolved (bare run) → default-closed.
     access_cfg = _get_connector_access(agent, msg.platform)
     store = access.LocalApprovalStore(access.APPROVALS_PATH)
-    if not access.channel_allowed(access_cfg, msg.channel_id):
-        await msg.reply_func(_REJECTION_MSG)
-        return
-    # Skip user gate when allow_all_users is set OR when the channel is explicitly listed
-    # in allow_channels (channel membership implies authorization). Empty allow_channels
-    # means "allow all channels" but does NOT grant implicit user access.
-    channel_explicitly_allowed = (
-        bool(access_cfg.allow_channels) and msg.channel_id in access_cfg.allow_channels
-    )
-    skip_user_gate = access_cfg.allow_all_users or channel_explicitly_allowed
-    if not skip_user_gate and not access.user_allowed(access_cfg, store, msg.user_id):
-        # Record the pending user so the platform/admin can approve them later; either
-        # way the message never reaches the loop, decided entirely from local state.
-        if access_cfg.require_approval:
-            store.add_pending(msg.user_id)
-        await msg.reply_func(_REJECTION_MSG)
-        return
+    chat_type = _chat_type(msg)
+    if chat_type == "channel":
+        if (
+            not _has_platform_connector(agent, msg.platform)
+            or not agent.connectors.supports_groups
+            or not access.channel_allowed(access_cfg, msg.channel_id)
+        ):
+            await msg.reply_func(_REJECTION_MSG)
+            return
+    else:
+        if not _has_platform_connector(agent, msg.platform) or not agent.connectors.supports_dm:
+            await msg.reply_func(_REJECTION_MSG)
+            return
+        if not access_cfg.allow_all_users and not access.user_allowed(
+            access_cfg, store, msg.user_id
+        ):
+            # Record the pending user so the platform/admin can approve them later; either
+            # way the message never reaches the loop, decided entirely from local state.
+            if access_cfg.require_approval:
+                store.add_pending(msg.user_id)
+            await msg.reply_func(_REJECTION_MSG)
+            return
 
     from fleetent.integrations.sandbox import enablement as sandbox_enablement
     from fleetent.model import ModelPolicySnapshot

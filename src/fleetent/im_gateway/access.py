@@ -126,9 +126,9 @@ def resolve_principal(
 
 
 def channel_allowed(access: ConnectorAccess, channel_id: str) -> bool:
-    """Channel gate: empty ``allow_channels`` allows all channels the connector receives."""
+    """Group gate: only explicitly allowlisted groups are admitted."""
     if not access.allow_channels:
-        return True
+        return False
     return channel_id in access.allow_channels
 
 

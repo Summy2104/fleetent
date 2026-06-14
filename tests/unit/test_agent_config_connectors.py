@@ -39,6 +39,37 @@ def test_connectors_optional(tmp_path):
     assert af.connectors.slack is None
 
 
+def test_connector_support_flags_parse_and_default_false(tmp_path):
+    _write(
+        tmp_path,
+        "support",
+        connectors={
+            "supports_dm": True,
+            "slack": {
+                "bot_token_env": "SUPPORT_SLACK_BOT",
+                "app_token_env": "SUPPORT_SLACK_APP",
+            },
+        },
+    )
+    parsed = agent_config.load_agent_file(tmp_path / "support")
+    assert parsed.connectors.supports_dm is True
+    assert parsed.connectors.supports_groups is False
+
+    _write(
+        tmp_path,
+        "support-defaults",
+        connectors={
+            "slack": {
+                "bot_token_env": "SUPPORT_SLACK_BOT",
+                "app_token_env": "SUPPORT_SLACK_APP",
+            }
+        },
+    )
+    defaults = agent_config.load_agent_file(tmp_path / "support-defaults")
+    assert defaults.connectors.supports_dm is False
+    assert defaults.connectors.supports_groups is False
+
+
 def test_channels_default_empty(tmp_path):
     _write(
         tmp_path,

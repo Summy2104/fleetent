@@ -15,6 +15,7 @@ import fleetent.platform.agent_lifecycle.credential_slots as credential_slots
 import fleetent.platform.agent_lifecycle.materialize as materialize
 import fleetent.platform.agent_lifecycle.secret_store as secret_store
 import fleetent.platform.agent_management_console.agent_admin_api as api
+import fleetent.platform.agent_management_console.agent_im_group_store as agent_im_group_store
 import fleetent.platform.connector_management.agent_mcp_server_store as agent_mcp_server_store
 import fleetent.platform.connector_management.agent_oauth_binding_store as agent_oauth_binding_store
 import fleetent.platform.connector_management.connector_config_store as connector_config_store
@@ -38,6 +39,7 @@ def _patch_all_stores(mp_or_monkeypatch, db_path: object) -> None:
     mp_or_monkeypatch.setattr(agent_store, "_db", lambda: db_instance)
     mp_or_monkeypatch.setattr(skill_admin_store, "_database", lambda: db_instance)
     mp_or_monkeypatch.setattr(agent_kbs_store, "_database", lambda: db_instance)
+    mp_or_monkeypatch.setattr(agent_im_group_store, "_database", lambda: db_instance)
     mp_or_monkeypatch.setattr(agent_mcp_server_store, "_database", lambda: db_instance)
     mp_or_monkeypatch.setattr(agent_oauth_binding_store, "_database", lambda: db_instance)
     mp_or_monkeypatch.setattr(connector_config_store, "_database", lambda: db_instance)
@@ -178,6 +180,82 @@ def test_bind_unknown_agent_404(client):
     token, _ = _session_for("admin")
     resp = client.post("/admin/agents/ghost/bindings/users/u-1", headers=_hdr(token))
     assert resp.status_code == 404
+
+
+def test_bind_and_unbind_im_group(fresh_client):
+    agent = agent_store.create_agent("ops", "Ops v1.", ["shell"])
+    token, _ = _session_for("admin")
+
+    resp = fresh_client.post(
+        "/admin/agents/ops/bindings/groups",
+        headers=_hdr(token),
+        json={"platform": "slack", "group_id": "C0123"},
+    )
+    assert resp.status_code == 201
+    assert agent_im_group_store.list_groups_for_agent(agent.id) == [
+        {"platform": "slack", "group_id": "C0123"}
+    ]
+
+    resp = fresh_client.delete(
+        "/admin/agents/ops/bindings/groups/slack/C0123",
+        headers=_hdr(token),
+    )
+    assert resp.status_code == 204
+    assert agent_im_group_store.list_groups_for_agent(agent.id) == []
+
+
+def test_set_im_capabilities(fresh_client):
+    agent_store.create_agent("ops", "Ops v1.", ["shell"])
+    token, _ = _session_for("admin")
+
+    resp = fresh_client.put(
+        "/admin/agents/ops/im-capabilities",
+        headers=_hdr(token),
+        json={"supports_dm": True, "supports_groups": True},
+    )
+    assert resp.status_code == 200
+
+    agent = agent_store.get_by_name("ops")
+    assert agent is not None
+    assert agent.supports_dm is True
+    assert agent.supports_groups is True
+
+
+def test_im_group_and_capability_viewer_forbidden(fresh_client):
+    agent_store.create_agent("ops", "Ops v1.", ["shell"])
+    token, _ = _session_for("viewer")
+
+    group_resp = fresh_client.post(
+        "/admin/agents/ops/bindings/groups",
+        headers=_hdr(token),
+        json={"platform": "slack", "group_id": "C0123"},
+    )
+    assert group_resp.status_code == 403
+
+    capability_resp = fresh_client.put(
+        "/admin/agents/ops/im-capabilities",
+        headers=_hdr(token),
+        json={"supports_dm": True, "supports_groups": False},
+    )
+    assert capability_resp.status_code == 403
+
+
+def test_im_group_and_capability_unknown_agent_404(client):
+    token, _ = _session_for("admin")
+
+    group_resp = client.post(
+        "/admin/agents/ghost/bindings/groups",
+        headers=_hdr(token),
+        json={"platform": "slack", "group_id": "C0123"},
+    )
+    assert group_resp.status_code == 404
+
+    capability_resp = client.put(
+        "/admin/agents/ghost/im-capabilities",
+        headers=_hdr(token),
+        json={"supports_dm": True, "supports_groups": False},
+    )
+    assert capability_resp.status_code == 404
 
 
 # --- bindings read ------------------------------------------------------------

@@ -4,50 +4,30 @@
 TBD - created by archiving change im-user-access-control. Update Purpose after archive.
 ## Requirements
 ### Requirement: Global default agent configuration
+The system SHALL determine the default agent from the file-based agent index: the single agent whose file sets `bindings.default: true`. When an incoming message is not already attributed to a specific agent by its connector connection, that default agent (if present) is used. Resolving the default SHALL NOT read the database. （旧的"无 channel/user 绑定时用 default"措辞已退役——channel/user 文件绑定路由已随 IM 访问模型移除；agent 由连接器连接识别，default 是兜底。）
 
-The system SHALL determine the default agent from the file-based agent index: the
-single agent whose file sets `bindings.default: true`. When a message has no channel or
-user binding, that default agent (if present) is used. Resolving the default SHALL NOT
-read the database.
-
-#### Scenario: Default agent declared in a file, no channel or user binding
-
-- **WHEN** exactly one agent file sets `bindings.default: true` and neither the channel
-  nor the user has a binding
+#### Scenario: Default agent declared in a file
+- **WHEN** exactly one agent file sets `bindings.default: true` and the incoming message's connector does not identify a specific agent
 - **THEN** that agent is applied to the request, resolved from its file with no DB read
 
 #### Scenario: No default agent declared
-
 - **WHEN** no agent file sets `bindings.default: true`
-- **THEN** default resolution returns nothing and the request proceeds with no agent
-  (bare run)
+- **THEN** default resolution returns nothing and the request proceeds with no agent (bare run)
 
 ### Requirement: Agent lookup priority order
+The system SHALL resolve the agent for each incoming message in the following priority order, served entirely from the file-based agent index: **connector-identified agent > default agent > bare run**. The connector connection that received the message identifies the agent (one-agent-one-bot); the prior channel-binding and user-binding lookup layers are removed (that file-bindings routing model has been retired with the IM access model).
 
-The system SHALL resolve the agent for each incoming message in the following priority
-order, served entirely from the file-based agent index: channel binding > user binding
-> default agent > bare run.
+#### Scenario: Connector identifies the agent
+- **WHEN** a message arrives on a connector connection bound to agent X
+- **THEN** agent X is used (no channel/user binding lookup occurs)
 
-#### Scenario: All levels present — channel wins
+#### Scenario: Connector does not identify an agent — default wins
+- **WHEN** the incoming message is not attributed to a specific agent and a default agent file exists
+- **THEN** the default agent is used
 
-- **WHEN** the channel is bound by an agent file, the user is bound by an agent file,
-  and a default agent file exists
-- **THEN** the channel's agent is used
-
-#### Scenario: No channel binding — user wins
-
-- **WHEN** no agent file binds the channel but an agent file binds the user
-- **THEN** the user's agent is used
-
-#### Scenario: No channel or user binding — default wins
-
-- **WHEN** neither the channel nor the user is bound by any agent file
-- **THEN** the default agent (if declared) is used
-
-#### Scenario: No bindings and no default — bare run
-
-- **WHEN** no agent file binds the channel or user and none declares a default
-- **THEN** the request runs without a custom system_prompt or allowed_tools
+#### Scenario: No identified agent and no default — bare run
+- **WHEN** no agent is identified by the connector and none declares a default
+- **THEN** the request proceeds with no agent (bare run)
 
 ### Requirement: Admin can set default agent via CLI
 The admin CLI SHALL provide a `set-default-agent` command that operates on the file-based
@@ -64,3 +44,4 @@ Platform settings file — that field is removed from `Settings`.
 #### Scenario: Clear default agent
 - **WHEN** admin runs `fleetent-admin set-default-agent --clear`
 - **THEN** the `bindings.default` flag is removed from the previously-default agent's `agent.yaml`
+

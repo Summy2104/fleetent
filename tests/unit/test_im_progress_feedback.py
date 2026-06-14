@@ -260,11 +260,12 @@ async def test_normalizer_passes_progress_func_to_run(monkeypatch):
         version=1,
         models=default_models(),
         connectors=AgentConnectors(
+            supports_dm=True,
             slack=SlackConnector(
                 bot_token_env="BOT",
                 app_token_env="APP",
                 access=ConnectorAccess(allow_users=["u1"]),
-            )
+            ),
         ),
     )
     monkeypatch.setattr(normalizer, "get_agent_for_context", lambda *a, **k: agent)
@@ -334,11 +335,12 @@ async def test_normalizer_without_progress_func_run_gets_none(monkeypatch):
         version=1,
         models=default_models(),
         connectors=AgentConnectors(
+            supports_dm=True,
             slack=SlackConnector(
                 bot_token_env="BOT",
                 app_token_env="APP",
                 access=ConnectorAccess(allow_users=["u1"]),
-            )
+            ),
         ),
     )
     monkeypatch.setattr(normalizer, "get_agent_for_context", lambda *a, **k: agent)

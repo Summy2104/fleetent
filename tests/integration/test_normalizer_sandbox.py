@@ -43,11 +43,12 @@ def _write_default_agent(home, monkeypatch, **fields):
         "version": 1,
         "models": agent_config.default_models().model_dump(mode="json"),
         "connectors": {
+            "supports_dm": True,
             "slack": {
                 "bot_token_env": "TEST_BOT_TOKEN",
                 "app_token_env": "TEST_APP_TOKEN",
                 "access": {"allow_users": ["u1"]},
-            }
+            },
         },
     }
     doc.update(fields)

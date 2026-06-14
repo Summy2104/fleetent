@@ -44,11 +44,12 @@ def _wire_common(monkeypatch, tmp_path):
         version=1,
         models=default_models(),
         connectors=AgentConnectors(
+            supports_dm=True,
             slack=SlackConnector(
                 bot_token_env="BOT",
                 app_token_env="APP",
                 access=ConnectorAccess(allow_users=["u1"]),
-            )
+            ),
         ),
     )
     monkeypatch.setattr(normalizer, "get_agent_for_context", lambda *a, **k: agent)

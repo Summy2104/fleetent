@@ -9,12 +9,13 @@ lifecycle is owned by Alembic. This module never imports the agent loop.
 from typing import Any
 
 import yaml
-from fastapi import APIRouter, Body, Header, HTTPException
+from fastapi import APIRouter, Body, Header, HTTPException, Response, status
 from pydantic import BaseModel
 
 from fleetent import agent_store, audit_log, auth, paths, user_store
 from fleetent.platform.agent_lifecycle import credential_slots, secret_store
 from fleetent.platform.agent_lifecycle.materialize import agent_file_from_store
+from fleetent.platform.agent_management_console import agent_im_group_store
 from fleetent.platform.connector_management import (
     agent_oauth_binding_store,
     connector_config_store,
@@ -50,6 +51,16 @@ _ADMIN_ROLES = {"admin", "built_in_admin"}
 
 class SecretWriteBody(BaseModel):
     value: str
+
+
+class AgentImGroupBindingBody(BaseModel):
+    platform: str
+    group_id: str
+
+
+class AgentImCapabilitiesBody(BaseModel):
+    supports_dm: bool
+    supports_groups: bool
 
 
 def _session_user(authorization: str | None) -> user_store.User:
@@ -207,6 +218,77 @@ def unbind_user(
     agent = _require_agent(name)
     agent_store.unassign_user(user_id, agent.id)
     return {"agent": name, "user_id": user_id, "bound": False}
+
+
+@router.post("/agents/{name}/bindings/groups", status_code=status.HTTP_201_CREATED)
+def bind_im_group(
+    name: str,
+    body: AgentImGroupBindingBody,
+    authorization: str | None = Header(None),
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    agent = _require_agent(name)
+    agent_im_group_store.bind(agent.id, body.platform, body.group_id, created_by=user.id)
+    audit_log.write_audit(
+        user.id,
+        "agent.im_group.bind",
+        target_type="agent",
+        target_id=name,
+        detail={"platform": body.platform, "group_id": body.group_id},
+    )
+    return {"agent": name, "platform": body.platform, "group_id": body.group_id, "bound": True}
+
+
+@router.delete(
+    "/agents/{name}/bindings/groups/{platform}/{group_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+def unbind_im_group(
+    name: str,
+    platform: str,
+    group_id: str,
+    authorization: str | None = Header(None),
+) -> Response:
+    user = _require_admin(authorization)
+    agent = _require_agent(name)
+    agent_im_group_store.unbind(agent.id, platform, group_id)
+    audit_log.write_audit(
+        user.id,
+        "agent.im_group.unbind",
+        target_type="agent",
+        target_id=name,
+        detail={"platform": platform, "group_id": group_id},
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.put("/agents/{name}/im-capabilities")
+def set_im_capabilities(
+    name: str,
+    body: AgentImCapabilitiesBody,
+    authorization: str | None = Header(None),
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    _require_agent(name)
+    agent_store.set_im_capabilities(
+        name,
+        supports_dm=body.supports_dm,
+        supports_groups=body.supports_groups,
+    )
+    audit_log.write_audit(
+        user.id,
+        "agent.im_capabilities.set",
+        target_type="agent",
+        target_id=name,
+        detail={
+            "supports_dm": body.supports_dm,
+            "supports_groups": body.supports_groups,
+        },
+    )
+    return {
+        "agent": name,
+        "supports_dm": body.supports_dm,
+        "supports_groups": body.supports_groups,
+    }
 
 
 # --- aggregate bindings read --------------------------------------------------

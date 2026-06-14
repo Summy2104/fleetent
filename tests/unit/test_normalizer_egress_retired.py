@@ -32,11 +32,12 @@ def _make_agent_file(name: str = "test-agent"):
                 "routes": {"default": [{"target": "primary"}]},
             },
             "connectors": {
+                "supports_dm": True,
                 "slack": {
                     "bot_token_env": "SLACK_BOT_TOKEN",
                     "app_token_env": "SLACK_APP_TOKEN",
                     "access": {"allow_all_users": True, "require_approval": False},
-                }
+                },
             },
         }
     )

@@ -34,7 +34,7 @@ _UNSET: Any = object()
 # versioned, so they are read straight off the agents row.
 _AGENT_ROW_COLUMNS = (
     "id, name, active_version_id, features, plugins, allowed_skills, tenant_id, team_id, "
-    "icon, config_overrides"
+    "icon, config_overrides, supports_dm, supports_groups"
 )
 
 
@@ -71,6 +71,9 @@ class Agent:
     # Per-agent agent.yaml field overrides (governance/deployment/intelligence/access…),
     # deep-merged onto the materialized defaults. Agent-level, not versioned.
     config_overrides: dict[str, Any] = field(default_factory=dict)
+    # Agent IM access capability switches are authored on the management-plane agent row.
+    supports_dm: bool = False
+    supports_groups: bool = False
 
 
 @dataclass
@@ -113,6 +116,8 @@ def _parse_caps(row: dict[str, Any]) -> dict[str, Any]:
         "config_overrides": (
             json.loads(row["config_overrides"] or "{}") if "config_overrides" in row else {}
         ),
+        "supports_dm": bool(row["supports_dm"]) if "supports_dm" in row else False,
+        "supports_groups": bool(row["supports_groups"]) if "supports_groups" in row else False,
     }
 
 
@@ -223,6 +228,8 @@ def create_agent(
         memory_namespace=memory_namespace,
         icon=icon,
         config_overrides=config_overrides,
+        supports_dm=False,
+        supports_groups=False,
     )
 
 
@@ -252,6 +259,19 @@ def set_config_overrides(name: str, config_overrides: dict[str, Any]) -> None:
     _db().execute(
         "UPDATE agents SET config_overrides = :co WHERE name = :name",
         {"co": json.dumps(config_overrides or {}), "name": name},
+    )
+
+
+def set_im_capabilities(name: str, *, supports_dm: bool, supports_groups: bool) -> None:
+    """Replace an agent's IM chat-type capability switches."""
+    _db().execute(
+        "UPDATE agents SET supports_dm = :supports_dm, supports_groups = :supports_groups "
+        "WHERE name = :name",
+        {
+            "supports_dm": int(supports_dm),
+            "supports_groups": int(supports_groups),
+            "name": name,
+        },
     )
 
 
@@ -568,6 +588,23 @@ def list_users_for_agent(agent_id: int) -> list[str]:
         .fetchall()
     )
     return [str(row["user_id"]) for row in rows]
+
+
+def list_im_groups_for_agent(agent_id: int) -> list[dict[str, str]]:
+    rows = (
+        _db()
+        .execute(
+            """
+            SELECT platform, group_id
+            FROM agent_im_groups
+            WHERE agent_id = :agent_id
+            ORDER BY platform, group_id
+            """,
+            {"agent_id": agent_id},
+        )
+        .fetchall()
+    )
+    return [{"platform": str(row["platform"]), "group_id": str(row["group_id"])} for row in rows]
 
 
 def bind_mcp_server(agent_id: int, server_id: str, created_by: str | None = None) -> None:

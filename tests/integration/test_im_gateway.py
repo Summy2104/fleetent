@@ -33,7 +33,7 @@ def mock_memory_skill(monkeypatch):
     monkeypatch.setattr(ius, "check_allowed_by_user_id", lambda user_id: True)
     # -next route resolves the bound agent via get_agent_for_context (flat Agent),
     # not the snapshot resolver; no bound agent → bare run with the default system.
-    monkeypatch.setattr(norm, "get_agent_for_context", lambda platform, channel_id, user_id: None)
+    monkeypatch.setattr(norm, "get_agent_for_context", lambda *a, **k: None)
 
 
 async def test_route_loads_history_calls_agent_saves_replies(
@@ -55,11 +55,12 @@ async def test_route_loads_history_calls_agent_saves_replies(
         version=1,
         models=default_models(),
         connectors=AgentConnectors(
+            supports_dm=True,
             slack=SlackConnector(
                 bot_token_env="BOT",
                 app_token_env="APP",
                 access=ConnectorAccess(allow_users=["internal-user-1"]),
-            )
+            ),
         ),
     )
     monkeypatch.setattr(norm, "get_agent_for_context", lambda *a, **k: agent)
@@ -307,16 +308,15 @@ async def test_route_channel_agent_takes_priority(
         system_prompt="Channel sys.",
         allowed_tools=["shell"],
         connectors=AgentConnectors(
+            supports_dm=True,
             slack=SlackConnector(
                 bot_token_env="BOT",
                 app_token_env="APP",
                 access=ConnectorAccess(allow_users=["some-user"]),
-            )
+            ),
         ),
     )
-    monkeypatch.setattr(
-        norm, "get_agent_for_context", lambda platform, channel_id, user_id: channel_agent
-    )
+    monkeypatch.setattr(norm, "get_agent_for_context", lambda *a, **k: channel_agent)
 
     reply_calls: list[str] = []
 
