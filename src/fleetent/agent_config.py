@@ -90,50 +90,50 @@ class ApprovalRouting(BaseModel):
     by_tool: dict[str, ApprovalEntry] = Field(default_factory=dict)
 
 
-class ConnectorAccess(BaseModel):
-    """Per-platform IM access rules, embedded in each connector declaration.
+class ImAccess(BaseModel):
+    """Per-platform IM access rules, embedded in each IM binding declaration.
 
     The default is closed: with no rules the agent grants no implicit access and
-    requires approval. Empty allow_channels = allow all channels the connector receives
+    requires approval. Empty allow_groups = allow all groups the binding receives
     events from.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    allow_channels: list[str] = Field(default_factory=list)
+    allow_groups: list[str] = Field(default_factory=list)
     allow_users: list[str] = Field(default_factory=list)
-    # When true, skip the user gate entirely — all users are allowed on this connector.
-    # Intended for open internal bots; does not affect channel gate.
+    # When true, skip the user gate entirely — all users are allowed on this binding.
+    # Intended for open internal bots; does not affect group gate.
     allow_all_users: bool = False
     require_approval: bool = True
 
 
-class SlackConnector(BaseModel):
+class SlackBinding(BaseModel):
     """Per-agent Slack connection. Tokens are env-var names, never inline secrets."""
 
     model_config = ConfigDict(extra="forbid")
 
     bot_token_env: str
     app_token_env: str
-    access: ConnectorAccess = Field(default_factory=ConnectorAccess)
+    access: ImAccess = Field(default_factory=ImAccess)
 
 
-class TelegramConnector(BaseModel):
+class TelegramBinding(BaseModel):
     """Per-agent Telegram connection. The token is an env-var name, never an inline secret."""
 
     model_config = ConfigDict(extra="forbid")
 
     bot_token_env: str
-    access: ConnectorAccess = Field(default_factory=ConnectorAccess)
+    access: ImAccess = Field(default_factory=ImAccess)
 
 
-class AgentConnectors(BaseModel):
+class ImBinding(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     supports_dm: bool = False
     supports_groups: bool = False
-    slack: SlackConnector | None = None
-    telegram: TelegramConnector | None = None
+    slack: SlackBinding | None = None
+    telegram: TelegramBinding | None = None
 
 
 class ModelTarget(BaseModel):
@@ -389,7 +389,7 @@ class AgentFile(BaseModel):
     mcp: McpSettings = Field(default_factory=McpSettings)
     scheduling: SchedulingSettings = Field(default_factory=SchedulingSettings)
     webhooks: WebhooksSettings = Field(default_factory=WebhooksSettings)
-    connectors: AgentConnectors = Field(default_factory=AgentConnectors)
+    im: ImBinding = Field(default_factory=ImBinding)
     approval: ApprovalRouting | None = None
 
 
@@ -449,12 +449,12 @@ class AgentConfigIndex:
         return self.default
 
     def slack_agents(self) -> list[str]:
-        """Names of agents that declare a Slack connector."""
-        return [name for name, a in self.agents.items() if a.connectors.slack is not None]
+        """Names of agents that declare a Slack IM binding."""
+        return [name for name, a in self.agents.items() if a.im.slack is not None]
 
     def telegram_agents(self) -> list[str]:
-        """Names of agents that declare a Telegram connector."""
-        return [name for name, a in self.agents.items() if a.connectors.telegram is not None]
+        """Names of agents that declare a Telegram IM binding."""
+        return [name for name, a in self.agents.items() if a.im.telegram is not None]
 
 
 # Current published index. Empty until scan() runs (mirrors skill_registry._index).
@@ -488,10 +488,10 @@ def load_agent_file(agent_dir: Path) -> AgentFile:
 
 
 def _reject_inline_secrets(agent: AgentFile, path: Path) -> None:
-    """Reject inline plaintext secrets in MCP/connector defs; secrets go via env refs."""
+    """Reject inline plaintext secrets in MCP/IM binding defs; secrets go via env refs."""
     payload = {
         "mcp_servers": [server.model_dump() for server in agent.mcp_servers],
-        "connectors": agent.connectors.model_dump(),
+        "im": agent.im.model_dump(),
     }
     intelligence_payload = {
         "models": agent.models.model_dump(),

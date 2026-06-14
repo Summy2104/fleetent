@@ -57,7 +57,7 @@ def test_health_adapter_flags_true_when_connectors_present(
 
     import fleetent.server as srv
 
-    # Slack is per-agent (agent.yaml connectors.slack); Telegram is owner-level.
+    # Slack is per-agent (agent.yaml im.slack); Telegram is owner-level.
     monkeypatch.setattr(srv, "_slack_adapter_configured", lambda: True)
     monkeypatch.setattr(srv, "_telegram_adapter_configured", lambda: True)
 

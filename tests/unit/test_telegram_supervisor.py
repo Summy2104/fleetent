@@ -8,15 +8,15 @@ from fleetent import agent_config
 from fleetent.im_gateway import telegram_supervisor
 
 
-def _write(root, name, bot_env, allow_channels=None):
+def _write(root, name, bot_env, allow_groups=None):
     doc = {
         "name": name,
         "version": 1,
         "models": agent_config.default_models().model_dump(),
-        "connectors": {
+        "im": {
             "telegram": {
                 "bot_token_env": bot_env,
-                "access": {"allow_channels": allow_channels or []},
+                "access": {"allow_groups": allow_groups or []},
             }
         },
     }
@@ -36,7 +36,7 @@ def _supervisor(started):
 async def test_starts_one_connection_per_telegram_agent(tmp_path, monkeypatch):
     monkeypatch.setenv("SUP_BOT", "111:AAA")
     monkeypatch.setenv("SAL_BOT", "222:BBB")
-    _write(tmp_path, "support", "SUP_BOT", allow_channels=["-100"])
+    _write(tmp_path, "support", "SUP_BOT", allow_groups=["-100"])
     _write(tmp_path, "sales", "SAL_BOT")
     agent_config.scan(tmp_path)
 

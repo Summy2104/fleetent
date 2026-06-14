@@ -141,7 +141,7 @@ def test_agent_file_from_store_materializes_im_access_without_clobbering_credent
         "p",
         [],
         config_overrides={
-            "connectors": {
+            "im": {
                 "slack": {
                     "bot_token_env": "SUPPORT_SLACK_BOT",
                     "app_token_env": "SUPPORT_SLACK_APP",
@@ -157,14 +157,14 @@ def test_agent_file_from_store_materializes_im_access_without_clobbering_credent
 
     exported = materialize.agent_file_from_store(agent_store.get_by_name("support"))
 
-    assert exported.connectors.supports_dm is True
-    assert exported.connectors.supports_groups is True
-    assert exported.connectors.slack is not None
-    assert exported.connectors.slack.bot_token_env == "SUPPORT_SLACK_BOT"
-    assert exported.connectors.slack.app_token_env == "SUPPORT_SLACK_APP"
-    assert exported.connectors.slack.access.allow_users == ["u_alice", "u_bob"]
-    assert exported.connectors.slack.access.allow_channels == ["C_eng", "C_ops"]
-    assert exported.connectors.slack.access.require_approval is True
+    assert exported.im.supports_dm is True
+    assert exported.im.supports_groups is True
+    assert exported.im.slack is not None
+    assert exported.im.slack.bot_token_env == "SUPPORT_SLACK_BOT"
+    assert exported.im.slack.app_token_env == "SUPPORT_SLACK_APP"
+    assert exported.im.slack.access.allow_users == ["u_alice", "u_bob"]
+    assert exported.im.slack.access.allow_groups == ["C_eng", "C_ops"]
+    assert exported.im.slack.access.require_approval is True
 
 
 def test_agent_file_from_store_ignores_invalid_config_override(db):

@@ -1,7 +1,7 @@
-"""Per-agent Slack connector supervisor (per-agent-slack-connector).
+"""Per-agent Slack IM binding supervisor (per-agent-slack-connector).
 
 Sources the agent index (`agent_config`) and runs one Slack Socket Mode connection per
-agent that declares `connectors.slack` with resolvable env tokens. Keyed by agent name;
+agent that declares `im.slack` with resolvable env tokens. Keyed by agent name;
 owns per-agent connection status. Replaces the owner-level connector manager for Slack.
 """
 
@@ -13,7 +13,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fleetent import agent_config
-from fleetent.agent_config import SlackConnector
+from fleetent.agent_config import SlackBinding
 from fleetent.im_gateway import slack
 from fleetent.structured_logging import get_logger
 
@@ -35,18 +35,18 @@ class SlackSupervisor:
         self._status: dict[str, str] = {}
         self._configs: dict[str, dict[str, Any]] = {}
 
-    def _resolve_config(self, connector: SlackConnector) -> dict[str, Any] | None:
-        bot = os.environ.get(connector.bot_token_env)
-        app = os.environ.get(connector.app_token_env)
+    def _resolve_config(self, binding: SlackBinding) -> dict[str, Any] | None:
+        bot = os.environ.get(binding.bot_token_env)
+        app = os.environ.get(binding.app_token_env)
         if not bot or not app:
             return None
         return {"bot_token": bot, "app_token": app}
 
     async def start(self, agent_name: str) -> None:
         agent = agent_config.current().get(agent_name)
-        if agent is None or agent.connectors.slack is None:
+        if agent is None or agent.im.slack is None:
             return
-        config = self._resolve_config(agent.connectors.slack)
+        config = self._resolve_config(agent.im.slack)
         if config is None:
             self._status[agent_name] = "unconfigured"
             _logger.warn("slack_connector_unconfigured", agent=agent_name)
@@ -89,8 +89,8 @@ class SlackSupervisor:
             await self.stop(name)
         for name in declared:
             agent = agent_config.current().get(name)
-            assert agent is not None and agent.connectors.slack is not None
-            new_config = self._resolve_config(agent.connectors.slack)
+            assert agent is not None and agent.im.slack is not None
+            new_config = self._resolve_config(agent.im.slack)
             running = name in self._tasks and not self._tasks[name].done()
             if running and new_config != self._configs.get(name):
                 await self.stop(name)  # config changed → restart

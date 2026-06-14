@@ -1,4 +1,4 @@
-"""agent.yaml connectors.slack schema + secret scan + index query (per-agent-slack-connector)."""
+"""agent.yaml im.slack schema + secret scan + index query (per-agent-slack-connector)."""
 
 import pytest
 import yaml
@@ -14,37 +14,38 @@ def _write(root, name, **fields):
     (d / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
 
 
-def test_slack_connector_parsed(tmp_path):
+def test_im_binding_parsed(tmp_path):
     _write(
         tmp_path,
         "support",
-        connectors={
+        im={
             "slack": {
                 "bot_token_env": "SUPPORT_SLACK_BOT",
                 "app_token_env": "SUPPORT_SLACK_APP",
-                "access": {"allow_channels": ["C1"]},
+                "access": {"allow_groups": ["C1"]},
             }
         },
     )
     af = agent_config.load_agent_file(tmp_path / "support")
-    assert af.connectors.slack is not None
-    assert af.connectors.slack.bot_token_env == "SUPPORT_SLACK_BOT"
-    assert af.connectors.slack.app_token_env == "SUPPORT_SLACK_APP"
-    assert af.connectors.slack.access.allow_channels == ["C1"]
+    assert af.im.slack is not None
+    assert af.im.slack.bot_token_env == "SUPPORT_SLACK_BOT"
+    assert af.im.slack.app_token_env == "SUPPORT_SLACK_APP"
+    assert af.im.slack.access.allow_groups == ["C1"]
 
 
-def test_connectors_optional(tmp_path):
+def test_im_optional(tmp_path):
     _write(tmp_path, "bare")
     af = agent_config.load_agent_file(tmp_path / "bare")
-    assert af.connectors.slack is None
+    assert af.im.slack is None
 
 
-def test_connector_support_flags_parse_and_default_false(tmp_path):
+def test_im_support_flags_parse_and_default_false(tmp_path):
     _write(
         tmp_path,
         "support",
-        connectors={
+        im={
             "supports_dm": True,
+            "supports_groups": True,
             "slack": {
                 "bot_token_env": "SUPPORT_SLACK_BOT",
                 "app_token_env": "SUPPORT_SLACK_APP",
@@ -52,13 +53,13 @@ def test_connector_support_flags_parse_and_default_false(tmp_path):
         },
     )
     parsed = agent_config.load_agent_file(tmp_path / "support")
-    assert parsed.connectors.supports_dm is True
-    assert parsed.connectors.supports_groups is False
+    assert parsed.im.supports_dm is True
+    assert parsed.im.supports_groups is True
 
     _write(
         tmp_path,
         "support-defaults",
-        connectors={
+        im={
             "slack": {
                 "bot_token_env": "SUPPORT_SLACK_BOT",
                 "app_token_env": "SUPPORT_SLACK_APP",
@@ -66,26 +67,26 @@ def test_connector_support_flags_parse_and_default_false(tmp_path):
         },
     )
     defaults = agent_config.load_agent_file(tmp_path / "support-defaults")
-    assert defaults.connectors.supports_dm is False
-    assert defaults.connectors.supports_groups is False
+    assert defaults.im.supports_dm is False
+    assert defaults.im.supports_groups is False
 
 
-def test_channels_default_empty(tmp_path):
+def test_allow_groups_default_empty(tmp_path):
     _write(
         tmp_path,
         "support",
-        connectors={"slack": {"bot_token_env": "B", "app_token_env": "A"}},
+        im={"slack": {"bot_token_env": "B", "app_token_env": "A"}},
     )
     af = agent_config.load_agent_file(tmp_path / "support")
-    # No access block → allow_channels defaults to empty (open to all channels).
-    assert af.connectors.slack.access.allow_channels == []
+    # No access block → allow_groups defaults to empty (open to all groups).
+    assert af.im.slack.access.allow_groups == []
 
 
-def test_inline_token_under_connectors_rejected(tmp_path):
+def test_inline_token_under_im_rejected(tmp_path):
     _write(
         tmp_path,
         "support",
-        connectors={
+        im={
             "slack": {
                 "bot_token_env": "xoxb-0123456789-abcdefABCDEF0123456789",
                 "app_token_env": "SUPPORT_SLACK_APP",
@@ -101,12 +102,12 @@ def test_index_slack_agents(tmp_path):
     _write(
         tmp_path,
         "support",
-        connectors={"slack": {"bot_token_env": "B1", "app_token_env": "A1"}},
+        im={"slack": {"bot_token_env": "B1", "app_token_env": "A1"}},
     )
     _write(
         tmp_path,
         "sales",
-        connectors={"slack": {"bot_token_env": "B2", "app_token_env": "A2"}},
+        im={"slack": {"bot_token_env": "B2", "app_token_env": "A2"}},
     )
     _write(tmp_path, "no-slack")
     index = agent_config.build_index(tmp_path)

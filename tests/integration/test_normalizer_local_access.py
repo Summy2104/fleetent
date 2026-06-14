@@ -6,10 +6,10 @@ import pytest
 
 import fleetent.im_gateway.access as access
 from fleetent.agent_config import (
-    AgentConnectors,
     AgentFile,
-    ConnectorAccess,
-    SlackConnector,
+    ImAccess,
+    ImBinding,
+    SlackBinding,
     default_models,
 )
 from fleetent.im_gateway import normalizer
@@ -52,7 +52,7 @@ def approvals(tmp_path, monkeypatch):
 
 
 def _agent(
-    access_cfg: ConnectorAccess,
+    access_cfg: ImAccess,
     *,
     supports_dm: bool = False,
     supports_groups: bool = False,
@@ -61,10 +61,10 @@ def _agent(
         name="a",
         version=1,
         models=default_models(),
-        connectors=AgentConnectors(
+        im=ImBinding(
             supports_dm=supports_dm,
             supports_groups=supports_groups,
-            slack=SlackConnector(
+            slack=SlackBinding(
                 bot_token_env="BOT",
                 app_token_env="APP",
                 access=access_cfg,
@@ -99,14 +99,14 @@ def _msg(replies, *, user_id="u1", channel_id="C1", chat_type="dm"):
 
 
 async def test_allowed_user_proceeds(monkeypatch, stub_loop, approvals):
-    _set_agent(monkeypatch, _agent(ConnectorAccess(allow_users=["u1"]), supports_dm=True))
+    _set_agent(monkeypatch, _agent(ImAccess(allow_users=["u1"]), supports_dm=True))
     await normalizer.route(_msg([]))
     assert stub_loop["loop"] is True
 
 
 async def test_locally_approved_user_proceeds(monkeypatch, stub_loop, approvals):
     approvals.approve("u1")
-    _set_agent(monkeypatch, _agent(ConnectorAccess(require_approval=True), supports_dm=True))
+    _set_agent(monkeypatch, _agent(ImAccess(require_approval=True), supports_dm=True))
     await normalizer.route(_msg([]))
     assert stub_loop["loop"] is True
 
@@ -114,7 +114,7 @@ async def test_locally_approved_user_proceeds(monkeypatch, stub_loop, approvals)
 async def test_disallowed_user_with_require_approval_blocked_and_pending(
     monkeypatch, stub_loop, approvals
 ):
-    _set_agent(monkeypatch, _agent(ConnectorAccess(require_approval=True), supports_dm=True))
+    _set_agent(monkeypatch, _agent(ImAccess(require_approval=True), supports_dm=True))
     replies = []
     await normalizer.route(_msg(replies))
     assert stub_loop["loop"] is False  # never reached the loop
@@ -144,7 +144,7 @@ async def test_dm_gate_branches_on_capability_and_user_access(
     _set_agent(
         monkeypatch,
         _agent(
-            ConnectorAccess(allow_users=allow_users, allow_all_users=allow_all_users),
+            ImAccess(allow_users=allow_users, allow_all_users=allow_all_users),
             supports_dm=supports_dm,
         ),
     )
@@ -160,7 +160,7 @@ async def test_dm_gate_branches_on_capability_and_user_access(
 
 
 @pytest.mark.parametrize(
-    ("supports_groups", "allow_channels", "user_id", "channel_id", "should_run"),
+    ("supports_groups", "allow_groups", "user_id", "channel_id", "should_run"),
     [
         (True, ["C1"], "u-stranger", "C1", True),
         (False, ["C1"], "u-stranger", "C1", False),
@@ -172,7 +172,7 @@ async def test_group_gate_branches_on_capability_and_group_allowlist(
     stub_loop,
     approvals,
     supports_groups,
-    allow_channels,
+    allow_groups,
     user_id,
     channel_id,
     should_run,
@@ -180,7 +180,7 @@ async def test_group_gate_branches_on_capability_and_group_allowlist(
     _set_agent(
         monkeypatch,
         _agent(
-            ConnectorAccess(allow_channels=allow_channels, allow_users=[]),
+            ImAccess(allow_groups=allow_groups, allow_users=[]),
             supports_groups=supports_groups,
         ),
     )
@@ -200,7 +200,7 @@ async def test_group_gate_branches_on_capability_and_group_allowlist(
 async def test_default_closed_blocks_dm_and_empty_group_allowlist(
     monkeypatch, stub_loop, approvals
 ):
-    _set_agent(monkeypatch, _agent(ConnectorAccess()))
+    _set_agent(monkeypatch, _agent(ImAccess()))
 
     dm_replies = []
     await normalizer.route(_msg(dm_replies, chat_type="dm"))
@@ -210,7 +210,7 @@ async def test_default_closed_blocks_dm_and_empty_group_allowlist(
     _set_agent(
         monkeypatch,
         _agent(
-            ConnectorAccess(allow_all_users=True),
+            ImAccess(allow_all_users=True),
             supports_groups=True,
         ),
     )
@@ -233,6 +233,6 @@ async def test_zero_db_proof_routing_decides_locally(monkeypatch, stub_loop, app
     monkeypatch.setattr(platform_im, "check_allowed_by_user_id", boom)
     monkeypatch.setattr(user_store, "_conn", boom)
 
-    _set_agent(monkeypatch, _agent(ConnectorAccess(allow_users=["u1"]), supports_dm=True))
+    _set_agent(monkeypatch, _agent(ImAccess(allow_users=["u1"]), supports_dm=True))
     await normalizer.route(_msg([]))
     assert stub_loop["loop"] is True

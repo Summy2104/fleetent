@@ -1,17 +1,17 @@
 # Agent IM 接入与访问控制模型（设计）
 
-> **状态：设计（未实现）**。锁定 agent 在 IM 平台的 bot 接入身份，与三层访问控制（用户准入 / 私群能力 / 群白名单），及"平台配置 → 部署 materialize → agent 侧零-platform-DB 强制"的同步契约。命名采用 **S2（`im` 命名空间）**。与 [agent-identity-model](agent-identity-model.md)、[data-model](data-model.md) 配套。
+> **状态：已实现（阶段 1–4 完成，2026-06-14）**。锁定 agent 在 IM 平台的 bot 接入身份，与三层访问控制（用户准入 / 私群能力 / 群白名单），及"平台配置 → 部署 materialize → agent 侧零-platform-DB 强制"的同步契约。命名采用 **S2（`im` 命名空间）**。与 [agent-identity-model](agent-identity-model.md)、[data-model](data-model.md) 配套。
 
 ## 1. 问题与现状（2026-06-14 审计）
 
 **runtime 模型**：**一个 Agent 一个 bot**——agent 在 agent.yaml 声明自己的 bot 凭据，连接器连接**即** agent 身份；消息发给哪个 bot 就是哪个 agent。旧的按频道路由表是"共享 bot 按频道路由"设计的遗骸，runtime 早已不读、已死。
 
-**访问控制现状**：agent.yaml `ConnectorAccess`（`allow_channels` / `allow_users` / `allow_all_users` / `require_approval`），platform materialize 同步、agent 侧本地强制（零 platform DB）。这套"平台配置→部署同步→agent 侧执行"骨架是对的。
+**访问控制现状**：agent.yaml `ImAccess`（`allow_groups` / `allow_users` / `allow_all_users` / `require_approval`），platform materialize 同步、agent 侧本地强制（零 platform DB）。这套"平台配置→部署同步→agent 侧执行"骨架是对的。
 
 **三个缺陷**：
 1. **平台配置断线**：平台侧关系表 `user_agents`（用户↔agent）不接 materialize、是死表；agent.yaml 的 `allow_users` 没有平台侧关系源喂它。admin 在平台配的"谁能用这个 agent"传不到 agent 侧。
 2. **无私/群能力声明**：闸不看 `chat_type`，agent 无法声明"只支持私聊"或"只支持群"。
-3. **群安全默认相反**：空 `allow_channels` = 放行所有频道（**默认开**），agent 可被拉进任意群交互——安全风险。
+3. **群安全默认曾相反**：旧模型里空 `allow_channels` = 放行所有频道（默认开）；阶段 3/4 已翻转为 `allow_groups` 默认空 = 不进任何群。
 
 **命名重载**：「connector」同时指 IM bot 连接 / 工具 OAuth（`connectors` 表）/ KB 数据源（`kb_connectors`）/ owner 级 IM 配置（`im_connectors`），读代码须脑内消歧。
 
@@ -85,14 +85,17 @@ FK 遵循 identity-model：agent 引用 = `agent_id` INTEGER FK→agents.id ON D
 im:
   supports_dm: true
   supports_groups: true
-  allow_users: [alice, bob]          # agent 级（内部 User）
   slack:
     bot_token_env: SLACK_BOT_TOKEN
     app_token_env: SLACK_APP_TOKEN
-    allow_groups: [C0123]            # 平台级群白名单
+    access:
+      allow_users: [alice, bob]      # agent 级（内部 User），按平台 binding materialize
+      allow_groups: [C0123]          # 平台级群白名单
   telegram:
     bot_token_env: TG_BOT_TOKEN
-    allow_groups: ["-100456"]
+    access:
+      allow_users: [alice, bob]
+      allow_groups: ["-100456"]
 ```
 
 Python 模型：`ImBinding`（顶层）+ per-platform `SlackBinding`/`TelegramBinding` + `ImAccess`（演进自 `ConnectorAccess`）。
@@ -120,9 +123,9 @@ Python 模型：`ImBinding`（顶层）+ per-platform `SlackBinding`/`TelegramBi
 
 1. **阶段 1 — descope dead channel-route table** ✅ 已落地：删表 + `bound_version_id` 死列 + store/端点；ER 图/§3.2 同步。
 2. **阶段 2 — 立群白名单表 + 能力列** ✅ 已落地：建 `agent_im_groups`，加 `agents.supports_dm`/`supports_groups`；admin 配置入口。**`user_agents` 保留**（用户准入源，不改名）。
-3. **阶段 3 — materialize 接线 + 闸按 chat_type 分流（功能，零改名）** ⏳ 已 propose：平台表 materialize 进 agent.yaml access 块、准入闸 DM/群 双路 + **群默认关翻转**；退役旧文件绑定路由（C）。**保留所有名字**（`connectors`/`ConnectorAccess`/`allow_channels`）。
-4. **阶段 3b — im_users 瘦身为纯身份映射**（见 §11）：删 `owner_id` + `allowed`，补 FK `user_id`→users，provisioning 落 `edge_tenant`，封禁迁 `users.status`。**独立于闸**（碰 im_users/identity.py/server.py resolver/users，跟阶段 3 不同文件），可在阶段 3 后单独 propose。
-5. **阶段 4 — "connector"(IM 义) 全量正名 `im`**：`connectors`→`im` block、`ConnectorAccess`→`ImAccess`、`SlackConnector`→`SlackBinding`、`allow_channels`→`allow_groups`；Python 类/agent.yaml 块名/测试随动。纯改名、零行为。**外科手术式**——只动 IM-gateway 那几处，勿碰 tool/KB 的 `connectors`/`kb_connectors`。
+3. **阶段 3 — materialize 接线 + 闸按 chat_type 分流（功能，零改名）** ✅ 已落地：平台表 materialize 进 agent.yaml access 块、准入闸 DM/群 双路 + **群默认关翻转**；退役旧文件绑定路由（C）。实现时仍保留旧名字（`connectors`/`ConnectorAccess`/`allow_channels`）。
+4. **阶段 3b — im_users 瘦身为纯身份映射** ✅ 已落地（见 §11）：删 `owner_id` + `allowed`，补 FK `user_id`→users，provisioning 落 `edge_tenant`，封禁迁 `users.status`。与闸逻辑解耦，独立推进。
+5. **阶段 4 — "connector"(IM 义) 全量正名 `im`** ✅ 已落地（2026-06-14）：`connectors`→`im` block、`ConnectorAccess`→`ImAccess`、`SlackConnector`→`SlackBinding`、`allow_channels`→`allow_groups`；Python 类/agent.yaml 块名/测试随动。纯改名、零行为。**外科手术式**——只动 IM 义，未碰 tool/KB 的 `connectors`/`kb_connectors`。
 
 > 阶段顺序与 identity-model 同理：串行（Alembic 单链 + 都改 data-model/materialize）；逐个 just-ahead propose。3b 文件面与阶段 3 不同，但仍建议排在阶段 3 后（避免 data-model/identity 文档并发编辑）。
 

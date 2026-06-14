@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fleetent import paths
-from fleetent.agent_config import ConnectorAccess
+from fleetent.agent_config import ImAccess
 
 if TYPE_CHECKING:
     from fleetent.identity import Principal
@@ -99,7 +99,7 @@ def resolve_identity(platform: str, platform_user_id: str, owner_id: str = "defa
 
     The agent runtime uses the platform-native IM user id directly as the identity, so
     it never reads the platform ``user_store``. Author-facing ``allow_users`` entries in
-    the connector's access block are matched against this same native id.
+    the binding's access block are matched against this same native id.
     """
     if _im_identity_resolver is not None:
         return _im_identity_resolver(owner_id, platform, platform_user_id)
@@ -125,13 +125,13 @@ def resolve_principal(
     )
 
 
-def channel_allowed(access: ConnectorAccess, channel_id: str) -> bool:
+def channel_allowed(access: ImAccess, channel_id: str) -> bool:
     """Group gate: only explicitly allowlisted groups are admitted."""
-    if not access.allow_channels:
+    if not access.allow_groups:
         return False
-    return channel_id in access.allow_channels
+    return channel_id in access.allow_groups
 
 
-def user_allowed(access: ConnectorAccess, store: LocalApprovalStore, identity: str) -> bool:
+def user_allowed(access: ImAccess, store: LocalApprovalStore, identity: str) -> bool:
     """User gate: allowed if statically listed or locally approved."""
     return identity in access.allow_users or store.is_approved(identity)

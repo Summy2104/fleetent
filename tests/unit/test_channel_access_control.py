@@ -6,40 +6,40 @@ from unittest.mock import AsyncMock
 import pytest
 
 from fleetent.agent_config import (
-    AgentConnectors,
     AgentFile,
-    ConnectorAccess,
-    SlackConnector,
-    TelegramConnector,
+    ImAccess,
+    ImBinding,
+    SlackBinding,
+    TelegramBinding,
     default_models,
 )
 
-# ── Task 1.1: ConnectorAccess.allow_all_users 字段默认 false ─────────────────
+# ── Task 1.1: ImAccess.allow_all_users 字段默认 false ─────────────────
 
 
 def test_connector_access_allow_all_users_default_false():
-    access = ConnectorAccess()
+    access = ImAccess()
     assert access.allow_all_users is False
 
 
 def test_connector_access_allow_all_users_can_be_true():
-    access = ConnectorAccess(allow_all_users=True)
+    access = ImAccess(allow_all_users=True)
     assert access.allow_all_users is True
 
 
 def test_connector_access_allow_all_users_in_slack_connector():
-    conn = SlackConnector(
+    conn = SlackBinding(
         bot_token_env="BOT",
         app_token_env="APP",
-        access=ConnectorAccess(allow_all_users=True),
+        access=ImAccess(allow_all_users=True),
     )
     assert conn.access.allow_all_users is True
 
 
 def test_connector_access_allow_all_users_in_telegram_connector():
-    conn = TelegramConnector(
+    conn = TelegramBinding(
         bot_token_env="BOT",
-        access=ConnectorAccess(allow_all_users=True),
+        access=ImAccess(allow_all_users=True),
     )
     assert conn.access.allow_all_users is True
 
@@ -50,15 +50,15 @@ _MODELS = default_models()
 
 
 def _agent_with_slack_access(
-    allow_channels: list[str] | None = None,
+    allow_groups: list[str] | None = None,
     allow_users: list[str] | None = None,
     allow_all_users: bool = False,
     require_approval: bool = True,
     supports_dm: bool = False,
     supports_groups: bool = False,
 ) -> AgentFile:
-    access = ConnectorAccess(
-        allow_channels=allow_channels or [],
+    access = ImAccess(
+        allow_groups=allow_groups or [],
         allow_users=allow_users or [],
         allow_all_users=allow_all_users,
         require_approval=require_approval,
@@ -67,10 +67,10 @@ def _agent_with_slack_access(
         name="test",
         version=1,
         models=_MODELS,
-        connectors=AgentConnectors(
+        im=ImBinding(
             supports_dm=supports_dm,
             supports_groups=supports_groups,
-            slack=SlackConnector(bot_token_env="BOT", app_token_env="APP", access=access),
+            slack=SlackBinding(bot_token_env="BOT", app_token_env="APP", access=access),
         ),
     )
 
@@ -142,19 +142,19 @@ async def _route_with_agent(
     return replies
 
 
-# Task 2.1: 频道在 allow_channels 中 → 跳过用户门控
+# Task 2.1: 频道在 allow_groups 中 → 跳过用户门控
 @pytest.mark.asyncio
 async def test_user_in_listed_channel_bypasses_user_gate(tmp_path):
-    agent = _agent_with_slack_access(allow_channels=["C1"], allow_users=[], supports_groups=True)
+    agent = _agent_with_slack_access(allow_groups=["C1"], allow_users=[], supports_groups=True)
     replies = await _route_with_agent(agent, channel_id="C1", user_id="U_unknown")
     # Should NOT get rejection message — message proceeds to loop
     assert not any("权限" in r or "审批" in r for r in replies)
 
 
-# Task 2.2: allow_channels 为空 → 用户门控不跳过
+# Task 2.2: allow_groups 为空 → 用户门控不跳过
 @pytest.mark.asyncio
-async def test_empty_allow_channels_does_not_skip_user_gate(tmp_path):
-    agent = _agent_with_slack_access(allow_channels=[], allow_users=[], supports_groups=True)
+async def test_empty_allow_groups_does_not_skip_user_gate(tmp_path):
+    agent = _agent_with_slack_access(allow_groups=[], allow_users=[], supports_groups=True)
     replies = await _route_with_agent(agent, channel_id="C1", user_id="U_unknown")
     # Should get rejection message — user gate active
     assert any("权限" in r or "审批" in r for r in replies)

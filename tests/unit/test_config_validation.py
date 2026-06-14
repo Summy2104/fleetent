@@ -12,7 +12,7 @@ def test_env_provided_secret_values_are_not_inline_config_errors(monkeypatch):
         name="a",
         version=1,
         models=default_models(),
-        connectors={"slack": {"bot_token_env": "SLACK_BOT_TOKEN", "app_token_env": "SLACK_APP"}},
+        im={"slack": {"bot_token_env": "SLACK_BOT_TOKEN", "app_token_env": "SLACK_APP"}},
     )
 
     report = validate_config(

@@ -4,11 +4,10 @@ import pytest
 from pydantic import ValidationError
 
 from fleetent.agent_config import (
-    AgentConnectors,
     AgentFile,
-    ConnectorAccess,
-    SlackConnector,
-    TelegramConnector,
+    ImAccess,
+    ImBinding,
+    SlackBinding,
     default_models,
     load_agent_home_file,
 )
@@ -41,21 +40,21 @@ version: 1
 """
         + _MODELS
         + """
-connectors:
+im:
   slack:
     bot_token_env: BOT_TOKEN
     app_token_env: APP_TOKEN
     access:
-      allow_channels: ["C_ops", "C_eng"]
+      allow_groups: ["C_ops", "C_eng"]
       allow_users: ["U_alice", "U_bob"]
       require_approval: false
 """,
     )
     agent = load_agent_home_file(home)
-    assert agent.connectors.slack is not None
-    assert agent.connectors.slack.access.allow_channels == ["C_ops", "C_eng"]
-    assert agent.connectors.slack.access.allow_users == ["U_alice", "U_bob"]
-    assert agent.connectors.slack.access.require_approval is False
+    assert agent.im.slack is not None
+    assert agent.im.slack.access.allow_groups == ["C_ops", "C_eng"]
+    assert agent.im.slack.access.allow_users == ["U_alice", "U_bob"]
+    assert agent.im.slack.access.require_approval is False
 
 
 def test_absent_access_block_defaults_closed(tmp_path):
@@ -67,23 +66,23 @@ version: 1
 """
         + _MODELS
         + """
-connectors:
+im:
   slack:
     bot_token_env: BOT_TOKEN
     app_token_env: APP_TOKEN
 """,
     )
     agent = load_agent_home_file(home)
-    assert agent.connectors.slack is not None
+    assert agent.im.slack is not None
     # Safe default: no implicit allow, approval required.
-    assert agent.connectors.slack.access.allow_channels == []
-    assert agent.connectors.slack.access.allow_users == []
-    assert agent.connectors.slack.access.require_approval is True
+    assert agent.im.slack.access.allow_groups == []
+    assert agent.im.slack.access.allow_users == []
+    assert agent.im.slack.access.require_approval is True
 
 
 def test_connector_access_model_default_is_closed():
-    access = ConnectorAccess()
-    assert access.allow_channels == []
+    access = ImAccess()
+    assert access.allow_groups == []
     assert access.allow_users == []
     assert access.require_approval is True
 
@@ -97,7 +96,7 @@ version: 1
 """
         + _MODELS
         + """
-connectors:
+im:
   slack:
     bot_token_env: BOT_TOKEN
     app_token_env: APP_TOKEN
@@ -119,7 +118,7 @@ version: 1
 """
         + _MODELS
         + """
-connectors:
+im:
   slack:
     bot_token_env: "xoxb-1234567890-abcdefghijklmnop"
     app_token_env: APP_TOKEN
@@ -136,11 +135,11 @@ def test_agentfile_default_connector_access_closed():
         name="alice",
         version=1,
         models=default_models(),
-        connectors=AgentConnectors(slack=SlackConnector(bot_token_env="BOT", app_token_env="APP")),
+        im=ImBinding(slack=SlackBinding(bot_token_env="BOT", app_token_env="APP")),
     )
-    assert agent.connectors.slack is not None
-    assert agent.connectors.slack.access.require_approval is True
-    assert agent.connectors.slack.access.allow_users == []
+    assert agent.im.slack is not None
+    assert agent.im.slack.access.require_approval is True
+    assert agent.im.slack.access.allow_users == []
 
 
 def test_telegram_access_block_parses(tmp_path):
@@ -152,7 +151,7 @@ version: 1
 """
         + _MODELS
         + """
-connectors:
+im:
   telegram:
     bot_token_env: TG_BOT_TOKEN
     access:
@@ -161,9 +160,9 @@ connectors:
 """,
     )
     agent = load_agent_home_file(home)
-    assert agent.connectors.telegram is not None
-    assert agent.connectors.telegram.access.allow_users == ["12345"]
-    assert agent.connectors.telegram.access.require_approval is False
+    assert agent.im.telegram is not None
+    assert agent.im.telegram.access.allow_users == ["12345"]
+    assert agent.im.telegram.access.require_approval is False
 
 
 def test_agentfile_with_connector_access_via_constructor():
@@ -171,14 +170,14 @@ def test_agentfile_with_connector_access_via_constructor():
         name="alice",
         version=1,
         models=default_models(),
-        connectors=AgentConnectors(
-            slack=SlackConnector(
+        im=ImBinding(
+            slack=SlackBinding(
                 bot_token_env="BOT",
                 app_token_env="APP",
-                access=ConnectorAccess(allow_users=["U_alice"], require_approval=False),
+                access=ImAccess(allow_users=["U_alice"], require_approval=False),
             )
         ),
     )
-    assert agent.connectors.slack is not None
-    assert agent.connectors.slack.access.allow_users == ["U_alice"]
-    assert agent.connectors.slack.access.require_approval is False
+    assert agent.im.slack is not None
+    assert agent.im.slack.access.allow_users == ["U_alice"]
+    assert agent.im.slack.access.require_approval is False

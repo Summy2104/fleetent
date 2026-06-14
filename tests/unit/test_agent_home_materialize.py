@@ -3,13 +3,13 @@
 import yaml
 
 from fleetent.agent_config import (
-    AgentConnectors,
     AgentFile,
     AgentKnowledge,
     AgentKnowledgeBinding,
     AgentRetrievalPolicy,
-    ConnectorAccess,
-    SlackConnector,
+    ImAccess,
+    ImBinding,
+    SlackBinding,
     default_models,
     load_agent_file,
 )
@@ -25,11 +25,11 @@ def _agent(name="support", **fields):
         allowed_tools=["shell"],
         allowed_skills=["weather"],
         models=default_models(),
-        connectors=AgentConnectors(
-            slack=SlackConnector(
+        im=ImBinding(
+            slack=SlackBinding(
                 bot_token_env="SUP_BOT",
                 app_token_env="SUP_APP",
-                access=ConnectorAccess(allow_users=["u_alice"]),
+                access=ImAccess(allow_users=["u_alice"]),
             )
         ),
     )
@@ -45,9 +45,9 @@ def test_create_writes_runnable_home(tmp_path, monkeypatch):
     af = load_agent_file(home)  # round-trips through the home schema (dir name == name)
     assert af.system_prompt == "Help the user."
     assert af.allowed_tools == ["shell"]
-    assert af.connectors.slack is not None
-    assert af.connectors.slack.access.allow_users == ["u_alice"]
-    assert af.connectors.slack.bot_token_env == "SUP_BOT"
+    assert af.im.slack is not None
+    assert af.im.slack.access.allow_users == ["u_alice"]
+    assert af.im.slack.bot_token_env == "SUP_BOT"
 
 
 def test_env_scaffold_has_names_only_no_plaintext(tmp_path, monkeypatch):
@@ -113,8 +113,8 @@ def test_default_closed_access_when_not_authored(tmp_path, monkeypatch):
     home = materialize.write_home(agent)
     af = load_agent_file(home)
     # No connectors means no access config; default-closed policy is per-connector.
-    assert af.connectors.slack is None
-    assert af.connectors.telegram is None
+    assert af.im.slack is None
+    assert af.im.telegram is None
 
 
 def test_materialize_splits_agent_knowledge_and_kb_service_config(tmp_path, monkeypatch):

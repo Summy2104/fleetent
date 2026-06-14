@@ -491,15 +491,15 @@ def test_agent_file_parses_telegram_connector() -> None:
             "name": "sales",
             "version": 1,
             "models": _valid_models_doc(),
-            "connectors": {"telegram": {"bot_token_env": "SALES_TG_BOT"}},
+            "im": {"telegram": {"bot_token_env": "SALES_TG_BOT"}},
         }
     )
-    assert af.connectors.telegram is not None
-    assert af.connectors.telegram.bot_token_env == "SALES_TG_BOT"
+    assert af.im.telegram is not None
+    assert af.im.telegram.bot_token_env == "SALES_TG_BOT"
 
 
 def test_telegram_agents_lists_declaring_agents(tmp_path) -> None:
-    _write_agent(tmp_path, "sales", connectors={"telegram": {"bot_token_env": "SALES_TG_BOT"}})
+    _write_agent(tmp_path, "sales", im={"telegram": {"bot_token_env": "SALES_TG_BOT"}})
     _write_agent(tmp_path, "plain")  # no telegram connector
     index = agent_config.build_index(tmp_path)
     assert index.telegram_agents() == ["sales"]
@@ -509,7 +509,7 @@ def test_inline_secret_in_telegram_rejected(tmp_path) -> None:
     _write_agent(
         tmp_path,
         "sales",
-        connectors={"telegram": {"bot_token_env": "123456789:AAHinlineLiveBotTokenXXXXXXXX"}},
+        im={"telegram": {"bot_token_env": "123456789:AAHinlineLiveBotTokenXXXXXXXX"}},
     )
     with pytest.raises(ValueError) as exc:
         agent_config.build_index(tmp_path)

@@ -88,7 +88,7 @@ manager (not hardcoded in server lifespan) and SHALL obtain credentials via
 `im_connector_config.resolve(platform)` (DB-first, `.env` fallback). Slack SHALL NOT be
 started this way: each agent's Slack connection is started per-agent from the agent
 index (see `per-agent-slack-connector`), with credentials from that agent's
-`connectors.slack` environment references.
+`im.slack` environment references.
 
 #### Scenario: Manager starts enabled owner-level adapters on boot
 - **WHEN** the server starts and the `telegram` connector is `enabled=1` with valid credentials

@@ -1,32 +1,32 @@
-"""Tests for channel_allowed/user_allowed accepting ConnectorAccess (restructure-agent-access)."""
+"""Tests for channel_allowed/user_allowed accepting ImAccess (restructure-agent-access)."""
 
-from fleetent.agent_config import ConnectorAccess
+from fleetent.agent_config import ImAccess
 from fleetent.im_gateway.access import LocalApprovalStore, channel_allowed, user_allowed
 
-# ── Task 2.1: channel_allowed(ConnectorAccess, channel_id) ──────────────────
+# ── Task 2.1: channel_allowed(ImAccess, channel_id) ──────────────────
 
 
 def test_channel_allowed_empty_rejects_all_groups():
-    access = ConnectorAccess()
+    access = ImAccess()
     assert channel_allowed(access, "C_any") is False
 
 
 def test_channel_allowed_listed_channel():
-    access = ConnectorAccess(allow_channels=["C1", "C2"])
+    access = ImAccess(allow_groups=["C1", "C2"])
     assert channel_allowed(access, "C1") is True
 
 
 def test_channel_allowed_unlisted_channel_rejected():
-    access = ConnectorAccess(allow_channels=["C1"])
+    access = ImAccess(allow_groups=["C1"])
     assert channel_allowed(access, "C2") is False
 
 
-# ── Task 2.2: user_allowed(ConnectorAccess, store, identity) ─────────────────
+# ── Task 2.2: user_allowed(ImAccess, store, identity) ─────────────────
 
 
 def test_user_allowed_static_list(tmp_path):
     store = LocalApprovalStore(tmp_path / "approvals.json")
-    access = ConnectorAccess(allow_users=["U_alice"])
+    access = ImAccess(allow_users=["U_alice"])
     assert user_allowed(access, store, "U_alice") is True
     assert user_allowed(access, store, "U_bob") is False
 
@@ -34,11 +34,11 @@ def test_user_allowed_static_list(tmp_path):
 def test_user_allowed_dynamic_approval(tmp_path):
     store = LocalApprovalStore(tmp_path / "approvals.json")
     store.approve("U_dynamic")
-    access = ConnectorAccess()
+    access = ImAccess()
     assert user_allowed(access, store, "U_dynamic") is True
 
 
 def test_user_not_allowed_when_empty_and_not_approved(tmp_path):
     store = LocalApprovalStore(tmp_path / "approvals.json")
-    access = ConnectorAccess()
+    access = ImAccess()
     assert user_allowed(access, store, "U_unknown") is False

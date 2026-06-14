@@ -61,7 +61,7 @@ async def test_create_app_stamps_agent_and_owner(monkeypatch):
 
 
 async def test_channel_filter_all_chats_forwarded(monkeypatch):
-    # Channel filtering now handled by the normalizer via ConnectorAccess.allow_channels;
+    # Channel filtering now handled by the normalizer via ImAccess.allow_groups;
     # the Telegram handler forwards all messages regardless of channel.
     handler = _capture_handler(monkeypatch, "sales", {"bot_token": "b"})
     captured = await _run(handler, _private_update("-100999"), monkeypatch)

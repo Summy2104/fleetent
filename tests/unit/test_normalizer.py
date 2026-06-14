@@ -23,10 +23,10 @@ async def test_session_id_not_owner_prefixed(monkeypatch, tmp_path):
     from dataclasses import fields
 
     from fleetent.agent_config import (
-        AgentConnectors,
         AgentFile,
-        ConnectorAccess,
-        SlackConnector,
+        ImAccess,
+        ImBinding,
+        SlackBinding,
         default_models,
     )
     from fleetent.im_gateway import access
@@ -38,12 +38,12 @@ async def test_session_id_not_owner_prefixed(monkeypatch, tmp_path):
         name="a",
         version=1,
         models=default_models(),
-        connectors=AgentConnectors(
+        im=ImBinding(
             supports_dm=True,
-            slack=SlackConnector(
+            slack=SlackBinding(
                 bot_token_env="BOT",
                 app_token_env="APP",
-                access=ConnectorAccess(allow_users=["u1"]),
+                access=ImAccess(allow_users=["u1"]),
             ),
         ),
     )
@@ -83,10 +83,10 @@ async def test_normalizer_propagates_permission_gate_config(monkeypatch, tmp_pat
     import contextlib
 
     from fleetent.agent_config import (
-        AgentConnectors,
         AgentFile,
-        ConnectorAccess,
-        SlackConnector,
+        ImAccess,
+        ImBinding,
+        SlackBinding,
         default_models,
     )
     from fleetent.im_gateway import access
@@ -97,12 +97,12 @@ async def test_normalizer_propagates_permission_gate_config(monkeypatch, tmp_pat
         name="b",
         version=1,
         models=default_models(),
-        connectors=AgentConnectors(
+        im=ImBinding(
             supports_dm=True,
-            slack=SlackConnector(
+            slack=SlackBinding(
                 bot_token_env="SLACK_BOT",
                 app_token_env="SLACK_APP",
-                access=ConnectorAccess(allow_users=["u1"]),
+                access=ImAccess(allow_users=["u1"]),
             ),
         ),
         permission_gate_enabled=False,

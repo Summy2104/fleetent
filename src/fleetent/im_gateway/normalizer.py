@@ -9,7 +9,7 @@ from typing import Any
 import structlog
 
 from fleetent import agent_config
-from fleetent.agent_config import AgentFile, ConnectorAccess
+from fleetent.agent_config import AgentFile, ImAccess
 from fleetent.identity import Principal
 from fleetent.im_gateway import access
 from fleetent.runtime.approval_resume import resume_pending_approval
@@ -156,24 +156,24 @@ def get_agent_for_context() -> AgentFile | None:
     return None if name is None else index.get(name)
 
 
-def _get_connector_access(agent: AgentFile | None, platform: str) -> ConnectorAccess:
-    """Return the ConnectorAccess for the given platform, or a default-closed policy."""
+def _get_connector_access(agent: AgentFile | None, platform: str) -> ImAccess:
+    """Return the ImAccess for the given platform, or a default-closed policy."""
     if agent is None:
-        return ConnectorAccess()
-    if platform == "slack" and agent.connectors.slack is not None:
-        return agent.connectors.slack.access
-    if platform == "telegram" and agent.connectors.telegram is not None:
-        return agent.connectors.telegram.access
-    return ConnectorAccess()
+        return ImAccess()
+    if platform == "slack" and agent.im.slack is not None:
+        return agent.im.slack.access
+    if platform == "telegram" and agent.im.telegram is not None:
+        return agent.im.telegram.access
+    return ImAccess()
 
 
 def _has_platform_connector(agent: AgentFile | None, platform: str) -> bool:
     if agent is None:
         return False
     if platform == "slack":
-        return agent.connectors.slack is not None
+        return agent.im.slack is not None
     if platform == "telegram":
-        return agent.connectors.telegram is not None
+        return agent.im.telegram is not None
     return False
 
 
@@ -508,13 +508,13 @@ async def route(msg: NormalizedMessage) -> None:
     if chat_type == "channel":
         if (
             not _has_platform_connector(agent, msg.platform)
-            or not agent.connectors.supports_groups
+            or not agent.im.supports_groups
             or not access.channel_allowed(access_cfg, msg.channel_id)
         ):
             await msg.reply_func(_REJECTION_MSG)
             return
     else:
-        if not _has_platform_connector(agent, msg.platform) or not agent.connectors.supports_dm:
+        if not _has_platform_connector(agent, msg.platform) or not agent.im.supports_dm:
             await msg.reply_func(_REJECTION_MSG)
             return
         if not access_cfg.allow_all_users and not access.user_allowed(

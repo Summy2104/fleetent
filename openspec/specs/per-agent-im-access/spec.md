@@ -6,28 +6,23 @@ rules and dynamic approvals in its home, so the agent runtime enforces access lo
 with zero platform-database access. Created by archiving change per-agent-im-access.
 ## Requirements
 ### Requirement: Per-agent IM access config in the agent home
+An agent SHALL carry its IM access rules inside its **`im`** binding declarations, not in a top-level `access` block. Each binding (**`im.slack`**, **`im.telegram`**) SHALL embed an **`access: ImAccess`** object with **`allow_groups`** (list), `allow_users` (list), and `require_approval` (bool); IM 能力 `supports_dm`/`supports_groups` 在顶层 `im` 上。The runtime SHALL resolve access policy by reading the binding that matches `msg.platform`, with zero platform-DB access. The top-level `AgentFile.access` field and `AgentAccess` class remain removed. （纯改名：`connectors`→`im`、`ConnectorAccess`→`ImAccess`、`allow_channels`→`allow_groups`；行为与阶段 3 完全一致。）
 
-An agent SHALL carry its IM access rules inside its connector declarations, not in a
-top-level `access` block. Each connector (`connectors.slack`, `connectors.telegram`)
-SHALL embed an `access: ConnectorAccess` object with `allow_channels` (list),
-`allow_users` (list), and `require_approval` (bool). The runtime SHALL resolve access
-policy by reading the connector that matches `msg.platform`, with zero platform-DB access.
-The top-level `AgentFile.access` field and `AgentAccess` class are removed.
-
-#### Scenario: Access rules loaded from the connector's access block
-
-- **WHEN** an agent home declares `connectors.slack.access.allow_users: ["u_alice"]` and the agent loads
-- **THEN** the resolved agent exposes that allow rule under `connectors.slack.access` for runtime evaluation, with no platform-DB read
+#### Scenario: Access rules loaded from the binding's access block
+- **WHEN** an agent home declares `im.slack.access.allow_users: ["u_alice"]` and the agent loads
+- **THEN** the resolved agent exposes that allow rule under `im.slack.access` for runtime evaluation, with no platform-DB read
 
 #### Scenario: Absent access block defaults to closed-with-approval
-
-- **WHEN** an agent home declares `connectors.slack` with no `access` sub-block
-- **THEN** the agent applies a safe default (`ConnectorAccess()`: no implicit allow, approval required) for Slack messages
+- **WHEN** an agent home declares `im.slack` with no `access` sub-block
+- **THEN** the agent applies a safe default (`ImAccess()`: no implicit allow, approval required) for Slack messages
 
 #### Scenario: Slack and Telegram can have independent access policies
-
-- **WHEN** an agent declares `connectors.slack.access.allow_all_users: false` and `connectors.telegram.access.require_approval: false`
+- **WHEN** an agent declares `im.slack.access.allow_all_users: false` and `im.telegram.access.require_approval: false`
 - **THEN** the runtime enforces the Slack policy for Slack messages and the Telegram policy for Telegram messages independently
+
+#### Scenario: 群白名单字段为 allow_groups
+- **WHEN** an agent declares `im.slack.access.allow_groups: ["C1"]`
+- **THEN** 群准入按该 `allow_groups` 列表判定（语义同阶段 3 的群白名单，仅字段名由 `allow_channels` 改为 `allow_groups`）
 
 ### Requirement: Agent-local approval store
 
@@ -56,9 +51,9 @@ platform-DB `get_or_create`/user lookup occurs on the runtime path.
   proceeds, proving identity resolution is local
 
 ### Requirement: Runtime access gate reads per-connector access config
-The agent runtime SHALL resolve the `ConnectorAccess` for an incoming message by matching `msg.platform` to the corresponding connector's `access` field; when no matching connector is found, a default-closed `ConnectorAccess()` SHALL apply. The gate SHALL branch by **conversation type** (`chat_type`):
+The agent runtime SHALL resolve the `ImAccess` for an incoming message by matching `msg.platform` to the corresponding connector's `access` field; when no matching connector is found, a default-closed `ImAccess()` SHALL apply. The gate SHALL branch by **conversation type** (`chat_type`):
 - **DM**: admission requires `supports_dm` to be true AND the user gate to pass (user ∈ `allow_users`, or locally approved, or `allow_all_users`); otherwise the message is rejected.
-- **Group/channel**: admission requires `supports_groups` to be true AND the group to be in the access group allowlist (the `allow_channels` field); a listed group grants implicit access to its members (group single-gate, user gate skipped).
+- **Group/channel**: admission requires `supports_groups` to be true AND the group to be in the access group allowlist (the `allow_groups` field); a listed group grants implicit access to its members (group single-gate, user gate skipped).
 
 `supports_dm` / `supports_groups` are agent-level capability flags (default `false`), materialized from `agents.supports_*`. With both defaulting false and no allowlists, a new agent admits nothing (default-closed).
 
@@ -80,10 +75,10 @@ The agent runtime SHALL resolve the `ConnectorAccess` for an incoming message by
 
 #### Scenario: Unknown platform falls back to default-closed
 - **WHEN** a message arrives on a platform with no matching connector declaration
-- **THEN** default-closed `ConnectorAccess()` applies and the message is rejected
+- **THEN** default-closed `ImAccess()` applies and the message is rejected
 
 ### Requirement: Channel listing grants implicit user access
-The access group allowlist (the `allow_channels` field — renamed to `allow_groups` in a later phase) SHALL gate **group** messages only (DMs are not gated by it). When a group is explicitly listed, the agent SHALL admit its members without requiring them in `allow_users` (group single-gate). When the group allowlist is **empty**, the agent SHALL admit **no** group messages (default-closed). This reverses the prior "empty = allow all channels" behavior — an agent can no longer be pulled into arbitrary groups.
+The access group allowlist (the `allow_groups` field) SHALL gate **group** messages only (DMs are not gated by it). When a group is explicitly listed, the agent SHALL admit its members without requiring them in `allow_users` (group single-gate). When the group allowlist is **empty**, the agent SHALL admit **no** group messages (default-closed). This reverses the prior "empty = allow all channels" behavior — an agent can no longer be pulled into arbitrary groups.
 
 #### Scenario: User in listed group bypasses user gate
 - **WHEN** the group allowlist contains group `C1` and a message arrives from `C1` from a user not in `allow_users`
@@ -99,7 +94,7 @@ The access group allowlist (the `allow_channels` field — renamed to `allow_gro
 
 ### Requirement: allow_all_users flag opens access to all users
 
-`ConnectorAccess` SHALL support an `allow_all_users: bool` field (default `false`). When
+`ImAccess` SHALL support an `allow_all_users: bool` field (default `false`). When
 `true`, the user gate SHALL be skipped for all messages on this connector, including DMs.
 `allow_users` entries and the local approval store are still valid but not consulted when
 `allow_all_users` is set.

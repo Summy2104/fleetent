@@ -52,7 +52,7 @@ required to connect to that platform. The schema SHALL be:
 - `whatsapp`: `phone_number_id`, `access_token`, `verify_token`, `business_account_id`
 
 Slack and Telegram are no longer owner-level connectors: their credentials are declared per
-agent via `connectors.slack` / `connectors.telegram` environment references (see
+agent via `im.slack` / `im.telegram` environment references (see
 `per-agent-slack-connector` and `per-agent-telegram-connector`) and SHALL NOT appear in this
 owner-level schema. These keys drive `.env` fallback resolution and the admin UI's dynamic
 credential form for the owner-level platforms only.
@@ -71,4 +71,3 @@ The masked read SHALL mask every value present in a platform's stored config, re
 #### Scenario: WhatsApp access token masked
 - **WHEN** an admin reads the `whatsapp` connector config and `access_token` is `EAAG1234567890wxyz`
 - **THEN** the returned `access_token` is masked exposing only `wxyz` (e.g. `****wxyz`)
-

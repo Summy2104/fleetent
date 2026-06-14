@@ -29,10 +29,10 @@ def _async(value):
 
 def _wire_common(monkeypatch, tmp_path):
     from fleetent.agent_config import (
-        AgentConnectors,
         AgentFile,
-        ConnectorAccess,
-        SlackConnector,
+        ImAccess,
+        ImBinding,
+        SlackBinding,
         default_models,
     )
     from fleetent.im_gateway import access
@@ -43,12 +43,12 @@ def _wire_common(monkeypatch, tmp_path):
         name="a",
         version=1,
         models=default_models(),
-        connectors=AgentConnectors(
+        im=ImBinding(
             supports_dm=True,
-            slack=SlackConnector(
+            slack=SlackBinding(
                 bot_token_env="BOT",
                 app_token_env="APP",
-                access=ConnectorAccess(allow_users=["u1"]),
+                access=ImAccess(allow_users=["u1"]),
             ),
         ),
     )
