@@ -71,10 +71,10 @@ def test_skills_actions_wired_to_endpoints():
         "/agents/",
         "/force-publish",
         "/observability",
-        "/provenance/promote",
-        "/provenance/discard",
     ):
         assert frag in html, frag
+    assert "/provenance/promote" not in html
+    assert "/provenance/discard" not in html
 
 
 def test_skills_action_functions_present():
@@ -88,12 +88,12 @@ def test_skills_action_functions_present():
         "function skDelete",
         "function skRestore",
         "function skForcePublish",
-        "function skPromote",
-        "function skDiscard",
         "function skDrawer",
         "function skDoUpload",
     ):
         assert fn in html, fn
+    assert "function skPromote" not in html
+    assert "function skDiscard" not in html
 
 
 def test_skill_import_folder_or_zip_dropzone():
@@ -1569,7 +1569,6 @@ _MODULE_BUTTONS = {
         "skDoUpload",
         "skApprove",
         "skReject",
-        "skPromote",
     ],
     "sessions": [
         "sessTakeover",

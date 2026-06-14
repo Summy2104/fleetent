@@ -102,11 +102,6 @@ def test_skill_admin_route_handlers_cover_lifecycle(monkeypatch: pytest.MonkeyPa
         lambda proposal_id: {"proposal_id": proposal_id, "diff": "+body"},
     )
     monkeypatch.setattr(
-        skill_admin_api,
-        "askit_override",
-        lambda name, action: {"skill_name": name, "action": action, "ok": True},
-    )
-    monkeypatch.setattr(
         skill_admin_api.audit_log, "write_audit", lambda *args, **kwargs: audits.append(args)
     )
     monkeypatch.setattr(
@@ -117,13 +112,34 @@ def test_skill_admin_route_handlers_cover_lifecycle(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(skill_admin_api.skill_admin_store, "get_state", state)
     monkeypatch.setattr(
         skill_admin_api.skill_admin_store,
-        "get_provenance",
-        lambda name: provenance.setdefault(name, {"source": "adhoc", "drift": 0}),
+        "get_source",
+        lambda name: provenance.setdefault(
+            name,
+            {
+                "skill_name": name,
+                "source": "adhoc",
+                "immutable_fields": None,
+                "current_version": None,
+            },
+        ),
     )
     monkeypatch.setattr(
         skill_admin_api.skill_admin_store,
-        "set_provenance",
-        lambda name, source: provenance.__setitem__(name, {"source": source, "drift": 0}),
+        "set_source",
+        lambda name, source, immutable_fields=None: provenance.__setitem__(
+            name,
+            {
+                "skill_name": name,
+                "source": source,
+                "immutable_fields": immutable_fields,
+                "current_version": None,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        skill_admin_api.skill_admin_store,
+        "ensure_catalog_entries",
+        lambda names: None,
     )
     monkeypatch.setattr(
         skill_admin_api.skill_admin_store,
@@ -137,16 +153,6 @@ def test_skill_admin_route_handlers_cover_lifecycle(monkeypatch: pytest.MonkeyPa
     )
     monkeypatch.setattr(
         skill_admin_api.skill_admin_store,
-        "mark_drift",
-        lambda name: provenance.setdefault(name, {"source": "managed", "drift": 0}).__setitem__(
-            "drift", 1
-        ),
-    )
-    monkeypatch.setattr(
-        skill_admin_api.skill_admin_store, "is_immutable_change", lambda name, fields: True
-    )
-    monkeypatch.setattr(
-        skill_admin_api.skill_admin_store,
         "set_global_enabled",
         lambda name, enabled: state(name).__setitem__("global_enabled", int(enabled)),
     )
@@ -156,6 +162,15 @@ def test_skill_admin_route_handlers_cover_lifecycle(monkeypatch: pytest.MonkeyPa
         lambda name: sorted(
             agent for (agent, skill), enabled in bindings.items() if skill == name and enabled
         ),
+    )
+    monkeypatch.setattr(
+        skill_admin_api.skill_admin_store,
+        "drifted_agents",
+        lambda name: [
+            agent
+            for (agent, skill), enabled in bindings.items()
+            if skill == name and enabled and provenance.get(name, {}).get("source") == "managed"
+        ],
     )
     monkeypatch.setattr(
         skill_admin_api.skill_admin_store,
@@ -176,13 +191,6 @@ def test_skill_admin_route_handlers_cover_lifecycle(monkeypatch: pytest.MonkeyPa
         "set_forced",
         lambda name, forced: state(name).__setitem__("forced", int(forced)),
     )
-    monkeypatch.setattr(
-        skill_admin_api.skill_admin_store,
-        "clear_drift",
-        lambda name: provenance.setdefault(name, {"source": "adhoc", "drift": 0}).__setitem__(
-            "drift", 0
-        ),
-    )
 
     auth_header = "Session token"
     valid = "---\nname: s\ndescription: desc\n---\nbody"
@@ -193,10 +201,16 @@ def test_skill_admin_route_handlers_cover_lifecycle(monkeypatch: pytest.MonkeyPa
         is True
     )
     assert skill_admin_api.list_skills(auth_header)[0]["name"] == "s"
-    provenance["s"] = {"source": "managed", "drift": 0}
+    provenance["s"] = {
+        "skill_name": "s",
+        "source": "managed",
+        "immutable_fields": ["name"],
+        "current_version": None,
+    }
     edited = skill_admin_api.edit_skill("s", skill_admin_api.EditBody(content=valid), auth_header)
-    assert edited["immutable_warning"] is True
-    assert edited["drift"] is True
+    assert edited["source"] == "managed"
+    assert "immutable_warning" not in edited
+    assert "drift" not in edited
     assert skill_admin_api.disable_skill("s", auth_header)["global_enabled"] == 0
     assert skill_admin_api.enable_skill("s", auth_header)["global_enabled"] == 1
     assert disabled == [("s", True), ("s", False)]
@@ -216,8 +230,6 @@ def test_skill_admin_route_handlers_cover_lifecycle(monkeypatch: pytest.MonkeyPa
     assert skill_admin_api.restore_skill("s", auth_header)["status"] == "active"
     assert skill_admin_api.force_publish("s", auth_header, "true")["forced"] == 1
     assert skill_admin_api.skill_observability("s", auth_header)["hits"] == 3
-    assert skill_admin_api.promote_skill("s", auth_header, "true")["action"] == "promote"
-    assert skill_admin_api.discard_skill("s", auth_header)["action"] == "discard"
     assert skill_admin_api.list_proposals(auth_header) == [{"id": "p1"}]
     assert skill_admin_api.proposal_diff("p1", auth_header)["diff"] == "+body"
     with pytest.raises(HTTPException) as approve_blocked:

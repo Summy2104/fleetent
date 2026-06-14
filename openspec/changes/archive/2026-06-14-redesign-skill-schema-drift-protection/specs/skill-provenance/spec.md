@@ -11,7 +11,7 @@ Each skill SHALL carry a provenance source in the `skills` master table (`source
 - **WHEN** the provenance source for a skill is read
 - **THEN** it is returned from the `skills` master row, and no `skill_provenance` table is consulted
 
-### Requirement: Drift marking is per-agent
+### Requirement: Drift marking on managed skills
 Drift SHALL be tracked **per (agent, skill)** on `agent_skills.drift`, not per-skill. A runtime modification to an agent's own skill copy (via reflection or operator edit in that agent's home) SHALL be reflected as `drift=1` on that agent's binding row, set by the platform observing the agent home (never written by the agent runtime). Editing the pool's authoritative copy via the admin API SHALL NOT set per-agent drift.
 
 #### Scenario: Runtime modification marks per-agent drift
@@ -22,7 +22,7 @@ Drift SHALL be tracked **per (agent, skill)** on `agent_skills.drift`, not per-s
 - **WHEN** an admin edits the pool's authoritative "crm-ops" via the admin API
 - **THEN** no `agent_skills.drift` flag is set by that edit
 
-### Requirement: Immutable fields stored on the catalog
+### Requirement: Immutable fields restored by spec
 Fields marked immutable on a skill SHALL be recorded in `skills.immutable_fields` (JSON). The admin edit path MAY surface a notice when an immutable field is changed. The actual restore-on-deploy enforcement is deferred to the future pool-versioning / backflow change.
 
 #### Scenario: Immutable fields read from catalog

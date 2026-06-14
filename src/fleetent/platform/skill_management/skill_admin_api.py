@@ -5,7 +5,7 @@ pipeline, global + per-agent enablement, archive with reference protection, the
 provenance/drift badge, the reflection proposal inbox, and per-skill observation.
 
 The *engine* semantics (matching, injection, security-audit verdicts, hot reload),
-the reflection *application* of proposals, and the askit override flow live in their
+and the reflection *application* of proposals live in their
 own domains. They are reached here through small injectable seams (module-level
 callables) so this router stays testable in isolation and never imports the agent
 loop. Seams whose owning domain is not yet implemented default to documented
@@ -109,11 +109,6 @@ def _rematerialize_agent(name: str) -> None:
     materialize.materialize_from_store(name)
 
 
-def askit_override(skill_name: str, action: str) -> dict[str, Any]:
-    """Promote/discard a drifted managed skill via askit. Placeholder (askit follow-up)."""
-    return {"skill_name": skill_name, "action": action, "ok": True}
-
-
 # --- auth helpers -------------------------------------------------------------
 
 
@@ -173,7 +168,7 @@ def _validate_frontmatter(content: str) -> bool:
     return bool(fm.get("name")) and bool(fm.get("description"))
 
 
-def _publish(name: str, content: str, source: str, verdict: dict[str, Any]) -> dict[str, Any]:
+def _publish(name: str, content: str, verdict: dict[str, Any]) -> dict[str, Any]:
     """Apply an audit verdict: quarantine on reject, mark+publish on suspicious, publish on pass."""
     skill_admin_store.set_audit_result(name, verdict["verdict"], verdict.get("rules"))
     if verdict["verdict"] == "rejected":
@@ -207,21 +202,22 @@ def list_skills(
 ) -> list[dict[str, Any]]:
     _current_user(authorization)
     engine = {s["name"]: s for s in engine_list_skills()}
+    skill_admin_store.ensure_catalog_entries(sorted(engine))
     rows: list[dict[str, Any]] = []
     names = set(engine) | {s["skill_name"] for s in skill_admin_store.list_states(include_archived)}
     for name in sorted(names):
         state = skill_admin_store.get_state(name)
         if not include_archived and state["status"] == "archived":
             continue
-        prov = skill_admin_store.get_provenance(name)
+        source = skill_admin_store.get_source(name)
         row = {
             "name": name,
             "description": engine.get(name, {}).get("description", ""),
             "status": state["status"],
             "global_enabled": state["global_enabled"],
             "audit_verdict": state["audit_verdict"],
-            "source": prov["source"],
-            "drift": prov["drift"],
+            "source": source["source"],
+            "drifted_agents": skill_admin_store.drifted_agents(name),
             "enabling_agents": skill_admin_store.agents_enabling(name),
         }
         if q and q.lower() not in name.lower() and q.lower() not in row["description"].lower():
@@ -252,9 +248,9 @@ def create_skill(body: SkillBody, authorization: str | None = Header(None)) -> d
         raise HTTPException(
             status_code=422, detail="invalid frontmatter (name/description required)"
         )
-    skill_admin_store.set_provenance(body.name, body.source)
+    skill_admin_store.set_source(body.name, body.source)
     verdict = engine_audit(body.content)
-    result = _publish(body.name, body.content, body.source, verdict)
+    result = _publish(body.name, body.content, verdict)
     audit_log.write_audit(user.id, "skill.create", "skill", body.name, detail=result)
     return result
 
@@ -280,9 +276,9 @@ def _import_skill_dir(src_dir: Path, source: str) -> dict[str, Any]:
         raise ValueError(f"unsafe skill name: {name!r}")
     dest = Path(engine_skills_dir()) / name
     shutil.copytree(src_dir, dest, dirs_exist_ok=True)
-    skill_admin_store.set_provenance(name, source)
+    skill_admin_store.set_source(name, source)
     verdict = engine_audit(content)
-    return _publish(name, content, source, verdict)
+    return _publish(name, content, verdict)
 
 
 def _run_import(root: Path, recursive: bool, source: str) -> dict[str, Any]:
@@ -375,17 +371,10 @@ def edit_skill(
         raise HTTPException(
             status_code=422, detail="invalid frontmatter (name/description required)"
         )
-    prov = skill_admin_store.get_provenance(name)
-    immutable_warning = False
-    if prov["source"] == "managed":
-        skill_admin_store.mark_drift(name)
-        # a heuristic: editing always touches the body; flag if the skill declares
-        # any immutable fields so the UI can warn the change will be reverted.
-        immutable_warning = skill_admin_store.is_immutable_change(name, {"name", "content"})
+    source = skill_admin_store.get_source(name)
     verdict = engine_audit(body.content)
-    result = _publish(name, body.content, prov["source"], verdict)
-    result["immutable_warning"] = immutable_warning
-    result["drift"] = prov["source"] == "managed"
+    result = _publish(name, body.content, verdict)
+    result["source"] = source["source"]
     audit_log.write_audit(user.id, "skill.edit", "skill", name, detail=result)
     return result
 
@@ -501,32 +490,6 @@ def force_publish(
 def skill_observability(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
     _current_user(authorization)
     return engine_observability(name)
-
-
-# --- provenance promote / discard --------------------------------------------
-
-
-@router.post("/{name}/provenance/promote")
-def promote_skill(
-    name: str,
-    authorization: str | None = Header(None),
-    x_confirm: str | None = Header(None),
-) -> dict[str, Any]:
-    user = _require_admin(authorization)
-    _require_confirm(x_confirm)
-    result = askit_override(name, "promote")
-    skill_admin_store.clear_drift(name)
-    audit_log.write_audit(user.id, "skill.promote", "skill", name, detail=result)
-    return result
-
-
-@router.post("/{name}/provenance/discard")
-def discard_skill(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
-    user = _require_admin(authorization)
-    result = askit_override(name, "discard")
-    skill_admin_store.clear_drift(name)
-    audit_log.write_audit(user.id, "skill.discard", "skill", name, detail=result)
-    return result
 
 
 # --- reflection proposal inbox ------------------------------------------------

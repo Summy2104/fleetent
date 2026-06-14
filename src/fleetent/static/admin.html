@@ -1965,7 +1965,7 @@ const SK_TABS = [
   { key: 'active',      label: 'Active',      test: r => r.status === 'active' && r.global_enabled },
   { key: 'disabled',    label: 'Disabled',    test: r => r.status === 'active' && !r.global_enabled },
   { key: 'quarantined', label: 'Quarantined', test: r => r.status === 'quarantined' },
-  { key: 'drifted',     label: 'Drifted',     test: r => !!r.drift },
+  { key: 'drifted',     label: 'Drifted',     test: r => (r.drifted_agents || []).length > 0 },
   { key: 'archived',    label: 'Archived',    test: r => r.status === 'archived' },
 ];
 
@@ -2001,7 +2001,7 @@ function skPills(r) {
   const st = r.status === 'active' ? (r.global_enabled ? 'active' : 'blocked') : 'blocked';
   out.push(`<span class="pill ${st}">${esc(r.status === 'active' && !r.global_enabled ? 'disabled' : r.status)}</span>`);
   if (r.audit_verdict && r.audit_verdict !== 'pass') out.push(`<span class="pill blocked">audit: ${esc(r.audit_verdict)}</span>`);
-  if (r.drift) out.push(`<span class="pill blocked">drift</span>`);
+  if ((r.drifted_agents || []).length) out.push(`<span class="pill blocked">drifted: ${r.drifted_agents.length}</span>`);
   out.push(`<span class="pill">${esc(r.source || 'adhoc')}</span>`);
   return out.join(" ");
 }
@@ -2061,8 +2061,6 @@ async function skDrawer(name) {
         : `<button class="small ghost" onclick="skEnable('${esc(name)}')">Enable</button>`}
       ${(r.audit_verdict === 'rejected' || r.status === 'quarantined')
         ? `<button class="small danger" onclick="skForcePublish('${esc(name)}')">Force publish</button>` : ''}
-      ${r.drift ? `<button class="small ghost" onclick="skPromote('${esc(name)}')">Promote</button>
-                   <button class="small ghost" onclick="skDiscard('${esc(name)}')">Discard</button>` : ''}
       ${r.status === 'archived'
         ? `<button class="small ghost" onclick="skRestore('${esc(name)}')">Restore</button>`
         : `<button class="small danger" onclick="skDelete('${esc(name)}')">Delete</button>`}
@@ -2074,6 +2072,7 @@ async function skDrawer(name) {
     ${meta('Source', esc(r.source || 'adhoc'))}
     ${meta('Audit', esc(r.audit_verdict || '—'))}
     ${meta('Global', r.global_enabled ? 'enabled' : 'disabled')}
+    ${meta('Drifted agents', (r.drifted_agents || []).length ? esc((r.drifted_agents || []).join(', ')) : '—')}
     ${acts}
     <h4 style="margin:16px 0 6px;">Agent bindings</h4>
     <div style="display:flex; flex-direction:column; gap:6px;">${agentRows}</div>
@@ -2160,14 +2159,6 @@ async function skRestore(name) { try { await api("POST", `/skills/${encodeURICom
 async function skForcePublish(name) {
   if (!await confirmDialog(`Force-publish "${name}" despite audit verdict?`)) return;
   try { await api("POST", `/skills/${encodeURIComponent(name)}/force-publish`, null, { "X-Confirm": "true" }); skAfterMutate(); } catch (e) { toast(e.message, "error"); }
-}
-async function skPromote(name) {
-  if (!await confirmDialog(`Promote managed skill "${name}" (keep local drift)?`)) return;
-  try { await api("POST", `/skills/${encodeURIComponent(name)}/provenance/promote`, null, { "X-Confirm": "true" }); skAfterMutate(); } catch (e) { toast(e.message, "error"); }
-}
-async function skDiscard(name) {
-  if (!await confirmDialog(`Discard local drift of "${name}" (revert to managed)?`)) return;
-  try { await api("POST", `/skills/${encodeURIComponent(name)}/provenance/discard`); skAfterMutate(); } catch (e) { toast(e.message, "error"); }
 }
 async function skSetAgent(name, agentId, enabled) {
   try { await api("PUT", `/skills/${encodeURIComponent(name)}/agents/${encodeURIComponent(agentId)}`, { enabled }); }
