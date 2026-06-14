@@ -60,6 +60,8 @@ def create(
     A ``notify`` task requires ``notify_text`` and a resolvable delivery target; ``generate``
     / ``action`` require ``message``.
     """
+    if schedule_kind not in ("cron", "once", "interval"):
+        raise ValueError(f"invalid schedule_kind: {schedule_kind!r} (cron/once/interval)")
     if task_type not in ("notify", "generate", "action"):
         raise ValueError(f"invalid task_type: {task_type!r} (notify/generate/action)")
     if task_type == "notify":

@@ -820,3 +820,28 @@ async def test_create_once_rejects_unparseable_run_at(isolated_schedule_db):
 
     with pytest.raises(ValueError):
         cs.create_task(name="t", schedule_kind="once", run_at="garbage-not-a-date", message="x")
+
+
+# ── schedule_kind validation + run_at→once alias (schedule-kind-validation) ──
+
+
+def test_create_task_rejects_invalid_schedule_kind(isolated_schedule_db):
+    import pytest
+
+    import fleetent.cron_scheduler as cs
+
+    with pytest.raises(ValueError, match="schedule_kind"):
+        cs.create_task(name="t", schedule_kind="weekly", run_at="2026-06-14T08:00:00Z", message="x")
+
+
+def test_create_task_aliases_run_at_kind_to_once(isolated_schedule_db):
+    import fleetent.cron_scheduler as cs
+    import fleetent.schedule_store as ss
+
+    # Model confusion: schedule_kind set to the param name "run_at" instead of "once".
+    task = cs.create_task(
+        name="t", schedule_kind="run_at", run_at="2026-06-14 08:07:19 UTC", message="x"
+    )
+    row = ss.get(task["id"])
+    assert row["schedule_kind"] == "once"  # aliased
+    assert "UTC" not in row["run_at"]  # and the run_at got ISO-normalized (alias → once path)

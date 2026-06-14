@@ -557,10 +557,14 @@ async def schedule(
 ) -> str:
     """Manage scheduled tasks. ``action`` is one of create/list/remove/run_now/pause/resume.
 
-    create: schedule_kind=cron (cron_expr like '0 9 * * 1-5'), once (run_at: ISO time or
-    a relative duration like '+30m'), or interval (interval_seconds). Deliver target:
-    notify_platform/notify_target (target_type user|channel); else defaults to the chat the
-    task was created in.
+    create: `schedule_kind` MUST be exactly one of `cron` / `once` / `interval` —
+    - `cron`: recurring, set `cron_expr` (e.g. '0 9 * * 1-5');
+    - `once`: one-time, set `schedule_kind="once"` and put the time in `run_at` (ISO time
+      or a relative duration like '+30m'). Do NOT set `schedule_kind` to "run_at" — that is
+      the parameter name, not a kind;
+    - `interval`: every N seconds, set `interval_seconds`.
+    Deliver target: notify_platform/notify_target (target_type user|channel); else defaults
+    to the chat the task was created in.
 
     Pick task_type by asking: **does the message content need information only known at send
     time?**
