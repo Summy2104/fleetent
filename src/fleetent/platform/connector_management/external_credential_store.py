@@ -63,6 +63,28 @@ def put_oauth_credential(
         )
 
 
+def put_apikey_credential(
+    user_id: str,
+    service_id: str,
+    api_key: str,
+    *,
+    updated_by: str | None = None,
+) -> None:
+    """Store a user-submitted API key as an authorized credential.
+
+    The payload form is ``{"api_key": <value>}``; the value is encrypted at rest by
+    the shared crypto helper. API keys have no refresh concept, so the status is
+    always ``authorized`` until the user re-submits or it is revoked.
+    """
+    put_oauth_credential(
+        user_id,
+        service_id,
+        {"api_key": api_key},
+        updated_by=updated_by,
+        status="authorized",
+    )
+
+
 def delete_credential(user_id: str, service_id: str) -> None:
     with _database().transaction() as conn:
         conn.execute(

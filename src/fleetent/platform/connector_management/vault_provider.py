@@ -17,6 +17,29 @@ def _consent_url(user_id: str, service_id: str) -> str:
     return f"/admin/connectors/authorize/{service_id}?user_id={user_id}"
 
 
+def _submit_url(service_id: str) -> str:
+    """Where a user submits their own API key (no OAuth jump for apikey services)."""
+    return f"/admin/connectors/{service_id}/credentials"
+
+
+def _get_apikey_credential(
+    user_id: str, service_id: str
+) -> connectors.Credential | connectors.NeedsConsent:
+    """Resolve an ``apikey``-protocol credential.
+
+    API keys carry no refresh concept, so this path never touches the OAuth refresh
+    logic or the token expiry check: a stored authorized key resolves to a
+    ``Credential``; anything else asks the user to submit their key.
+    """
+    credential = external_credential_store.get_credential(user_id, service_id)
+    if credential is None or credential["status"] != "authorized":
+        return connectors.NeedsConsent(
+            connector=service_id,
+            consent_url=_submit_url(service_id),
+        )
+    return connectors.Credential(connector=service_id, client=dict(credential["payload"]))
+
+
 def _expires_at(payload: dict[str, object]) -> datetime | None:
     raw = payload.get("expires_at")
     if not isinstance(raw, str) or not raw:
@@ -180,6 +203,10 @@ def revoke_credential(user_id: str, service_id: str) -> dict[str, bool]:
 def get_credential(
     user_id: str, service_id: str, scopes: list[str]
 ) -> connectors.Credential | connectors.NeedsConsent | connectors.CredentialError:
+    service = external_service_store.get_service(service_id)
+    if service is not None and service.get("protocol") == "apikey":
+        return _get_apikey_credential(user_id, service_id)
+
     credential = external_credential_store.get_credential(user_id, service_id)
     if credential is None:
         return connectors.NeedsConsent(
