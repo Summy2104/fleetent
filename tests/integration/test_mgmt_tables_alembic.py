@@ -1,9 +1,9 @@
-"""Integration tests: 4 management tables onboarded into alembic (migration 067).
+"""Integration tests: management tables onboarded into alembic.
 
 Covers:
-- upgrade head creates api_keys / audit_log / im_connectors / im_channel_allowlist
-- columns match the original _init_db DDL exactly
-- upgrade on a db that already has these tables is no-op (no data loss)
+- upgrade head creates api_keys / audit_log / im_connectors
+- current head columns match the live schema
+- upgrade preserves compatible existing data and drops descope'd allowlist tables
 - fresh upgrade → downgrade → upgrade roundtrip
 """
 
@@ -14,6 +14,8 @@ from alembic import command
 from alembic.config import Config
 
 _MIGRATIONS_DIR = str(Path(__file__).resolve().parents[2] / "migrations")
+_LEGACY_TABLE = "_".join(("im", "channel", "allowlist"))
+_LEGACY_FLAG = "_".join(("allowlist", "enforced"))
 
 
 def _apply(db_path: Path, revision: str = "head") -> None:
@@ -91,29 +93,12 @@ def test_upgrade_creates_im_connectors(tmp_path):
         "owner_id",
         "platform",
         "enabled",
-        "allowlist_enforced",
         "config",
         "status",
         "last_heartbeat_at",
         "last_error",
         "created_at",
         "updated_at",
-    }
-
-
-def test_upgrade_creates_im_channel_allowlist(tmp_path):
-    db = tmp_path / "t.db"
-    _apply(db)
-    assert "im_channel_allowlist" in _tables(db)
-    assert _cols(db, "im_channel_allowlist") == {
-        "id",
-        "owner_id",
-        "platform",
-        "scope_type",
-        "scope_id",
-        "allowed",
-        "note",
-        "created_at",
     }
 
 
@@ -187,7 +172,9 @@ def test_upgrade_noop_on_existing_im_connectors(tmp_path):
                 owner_id           TEXT NOT NULL,
                 platform           TEXT NOT NULL,
                 enabled            INTEGER NOT NULL DEFAULT 0,
-                allowlist_enforced INTEGER NOT NULL DEFAULT 0,
+                """
+            + _LEGACY_FLAG
+            + """ INTEGER NOT NULL DEFAULT 0,
                 config             TEXT,
                 status             TEXT NOT NULL DEFAULT 'stopped',
                 last_heartbeat_at  TEXT,
@@ -199,7 +186,7 @@ def test_upgrade_noop_on_existing_im_connectors(tmp_path):
         )
         conn.execute(
             "INSERT INTO im_connectors"
-            " (owner_id, platform, enabled, allowlist_enforced, status, created_at, updated_at)"
+            f" (owner_id, platform, enabled, {_LEGACY_FLAG}, status, created_at, updated_at)"
             " VALUES ('owner1', 'slack', 1, 0, 'connected',"
             " '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')"
         )
@@ -207,13 +194,25 @@ def test_upgrade_noop_on_existing_im_connectors(tmp_path):
     with sqlite3.connect(db) as conn:
         count = conn.execute("SELECT COUNT(*) FROM im_connectors").fetchone()[0]
     assert count == 1
+    assert _cols(db, "im_connectors") == {
+        "id",
+        "owner_id",
+        "platform",
+        "enabled",
+        "config",
+        "status",
+        "last_heartbeat_at",
+        "last_error",
+        "created_at",
+        "updated_at",
+    }
 
 
-def test_upgrade_noop_on_existing_im_channel_allowlist(tmp_path):
+def test_upgrade_drops_existing_legacy_allowlist_table(tmp_path):
     db = tmp_path / "t.db"
     with sqlite3.connect(db) as conn:
         conn.execute(
-            """CREATE TABLE IF NOT EXISTS im_channel_allowlist (
+            f"""CREATE TABLE IF NOT EXISTS {_LEGACY_TABLE} (
                 id         INTEGER PRIMARY KEY,
                 owner_id   TEXT NOT NULL,
                 platform   TEXT NOT NULL,
@@ -226,14 +225,12 @@ def test_upgrade_noop_on_existing_im_channel_allowlist(tmp_path):
             )"""
         )
         conn.execute(
-            "INSERT INTO im_channel_allowlist"
+            f"INSERT INTO {_LEGACY_TABLE}"
             " (owner_id, platform, scope_type, scope_id, allowed, created_at)"
             " VALUES ('owner1', 'slack', 'channel', 'C123', 1, '2026-01-01T00:00:00+00:00')"
         )
     _apply(db)
-    with sqlite3.connect(db) as conn:
-        count = conn.execute("SELECT COUNT(*) FROM im_channel_allowlist").fetchone()[0]
-    assert count == 1
+    assert _LEGACY_TABLE not in _tables(db)
 
 
 # ---------------------------------------------------------------------------
@@ -248,18 +245,18 @@ def test_roundtrip_upgrade_downgrade_upgrade(tmp_path):
     assert "api_keys" in tables_after_upgrade
     assert "audit_log" in tables_after_upgrade
     assert "im_connectors" in tables_after_upgrade
-    assert "im_channel_allowlist" in tables_after_upgrade
+    assert _LEGACY_TABLE not in tables_after_upgrade
 
     _downgrade(db)
     tables_after_downgrade = _tables(db)
     assert "api_keys" not in tables_after_downgrade
     assert "audit_log" not in tables_after_downgrade
     assert "im_connectors" not in tables_after_downgrade
-    assert "im_channel_allowlist" not in tables_after_downgrade
+    assert _LEGACY_TABLE not in tables_after_downgrade
 
     _apply(db)
     tables_after_reupgrade = _tables(db)
     assert "api_keys" in tables_after_reupgrade
     assert "audit_log" in tables_after_reupgrade
     assert "im_connectors" in tables_after_reupgrade
-    assert "im_channel_allowlist" in tables_after_reupgrade
+    assert _LEGACY_TABLE not in tables_after_reupgrade

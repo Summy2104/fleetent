@@ -18,7 +18,6 @@ _LEGACY_SHIMS = {
     "fleetent.platform.im_gateway_management.im_connector_store",
     "fleetent.platform.im_gateway_management.im_connector_config",
     "fleetent.platform.im_gateway_management.im_connector_manager",
-    "fleetent.platform.im_gateway_management.im_channel_allowlist",
     "fleetent.platform.im_gateway_management.im_admin_api",
 }
 
@@ -30,7 +29,6 @@ _CANONICAL_SUBMODULES = {
     f"{_PKG}.connector_store",
     f"{_PKG}.connector_config",
     f"{_PKG}.connector_manager",
-    f"{_PKG}.channel_allowlist",
     f"{_PKG}.admin_api",
 }
 

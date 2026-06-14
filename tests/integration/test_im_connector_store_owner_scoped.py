@@ -52,12 +52,10 @@ def test_status_heartbeat_flags_owner_scoped(db):
     store.upsert_connector("ownerA", "slack")
     store.report_status("ownerA", "slack", "connected")
     store.set_enabled("ownerA", "slack", True)
-    store.set_allowlist_enforced("ownerA", "slack", True)
     store.heartbeat("ownerA", "slack")
     row = store.get_connector("ownerA", "slack")
     assert row["status"] == "connected"
     assert row["enabled"] == 1
-    assert row["allowlist_enforced"] == 1
     assert row["last_heartbeat_at"] is not None
 
 

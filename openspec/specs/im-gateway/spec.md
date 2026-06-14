@@ -102,15 +102,15 @@ index (see `per-agent-slack-connector`), with credentials from that agent's
 - **WHEN** the `telegram` connector is `enabled=0` at boot
 - **THEN** the Telegram adapter is not launched
 
-### Requirement: Routing enforces the channel allowlist
-Before normalizing into the agent pipeline, `normalizer.route` SHALL consult `im_channel_allowlist.is_allowed(platform, channel_id, workspace_id)` and SHALL drop disallowed messages before user-level checks.
+### Requirement: Routing enforces agent IM access policy
+Before normalizing into the agent pipeline, `normalizer.route` SHALL enforce the materialized agent IM access policy (`allow_groups`, `allow_users`, `allow_all_users`, and DM/group capability gates) locally and SHALL drop disallowed messages before user-level checks.
 
 #### Scenario: Allowed channel routes normally
-- **WHEN** a message arrives in a channel allowed by the platform's enforcement policy
+- **WHEN** a message arrives in a channel allowed by the agent's IM access policy
 - **THEN** routing proceeds to the IM user allowlist check and agent resolution as before
 
 #### Scenario: Disallowed channel dropped pre-pipeline
-- **WHEN** the platform has `allowlist_enforced=1` and the message's channel/workspace is not listed
+- **WHEN** the agent does not allow the message's channel/workspace or chat type
 - **THEN** the adapter replies with a rejection and the message never reaches the agent loop
 
 #### Scenario: Existing NormalizedMessage contract preserved
@@ -182,4 +182,3 @@ unchanged, so ordinary prose that merely @-mentions the bot is not misread as ap
 - **WHEN** a user sends `<@bot> approve the plan` (no valid approval id)
 - **THEN** the leading mention is stripped but the id-format check fails, so the message
   is handled as a normal agent turn, not an approval decision
-

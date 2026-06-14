@@ -24,7 +24,6 @@ def upsert_connector(
     platform: str,
     *,
     enabled: bool | None = None,
-    allowlist_enforced: bool | None = None,
     config: str | None = None,
     status: str | None = None,
 ) -> None:
@@ -33,15 +32,11 @@ def upsert_connector(
     with _conn() as conn:
         conn.execute(
             """INSERT INTO im_connectors
-                   (owner_id, platform, enabled, allowlist_enforced, config, status,
-                    created_at, updated_at)
-               VALUES (:owner_id, :platform, COALESCE(:enabled, 0),
-                       COALESCE(:allowlist_enforced, 0), :config,
+                   (owner_id, platform, enabled, config, status, created_at, updated_at)
+               VALUES (:owner_id, :platform, COALESCE(:enabled, 0), :config,
                        COALESCE(:status, 'stopped'), :now, :now)
                ON CONFLICT(owner_id, platform) DO UPDATE SET
                    enabled = COALESCE(excluded.enabled, im_connectors.enabled),
-                   allowlist_enforced =
-                       COALESCE(excluded.allowlist_enforced, im_connectors.allowlist_enforced),
                    config = COALESCE(excluded.config, im_connectors.config),
                    status = COALESCE(excluded.status, im_connectors.status),
                    updated_at = excluded.updated_at""",
@@ -49,7 +44,6 @@ def upsert_connector(
                 "owner_id": owner_id,
                 "platform": platform,
                 "enabled": _bool(enabled),
-                "allowlist_enforced": _bool(allowlist_enforced),
                 "config": config,
                 "status": status,
                 "now": now,
@@ -96,10 +90,6 @@ def set_enabled(owner_id: str, platform: str, enabled: bool) -> None:
     _set_flag(owner_id, platform, "enabled", enabled)
 
 
-def set_allowlist_enforced(owner_id: str, platform: str, enforced: bool) -> None:
-    _set_flag(owner_id, platform, "allowlist_enforced", enforced)
-
-
 def get_connector(owner_id: str, platform: str) -> dict[str, Any] | None:
     with _conn() as conn:
         row = conn.execute(
@@ -126,8 +116,8 @@ def list_connectors(owner_id: str | None = None) -> list[dict[str, Any]]:
 
 
 _COLS = (
-    "id, owner_id, platform, enabled, allowlist_enforced, config, status, "
-    "last_heartbeat_at, last_error, created_at, updated_at"
+    "id, owner_id, platform, enabled, config, status, last_heartbeat_at, "
+    "last_error, created_at, updated_at"
 )
 _FIELDS = [c.strip() for c in _COLS.split(",")]
 

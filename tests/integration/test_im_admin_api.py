@@ -17,6 +17,9 @@ import fleetent.platform.im_gateway_management.connector_store as store
 import fleetent.user_store as user_store
 from tests.integration._migration_template import apply_migrations
 
+_LEGACY_FLAG = "_".join(("allowlist", "enforced"))
+_LEGACY_ALLOWLIST_PATH = "/admin/im/" + "_".join(("allow", "list"))
+
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
@@ -69,6 +72,7 @@ def test_list_connectors_masked(client):
     assert "xoxb-secret" not in slack["config"]["bot_token"]
     # each row carries its owner_id
     assert slack["owner_id"] == api._owner  # type: ignore[attr-defined]
+    assert _LEGACY_FLAG not in slack
 
 
 def test_list_connectors_admin_sees_all_owners(client):
@@ -87,16 +91,26 @@ def test_get_connector_detail(client):
     assert r.json()["platform"] == "slack"
 
 
-def test_patch_connector_config_and_enforce(client):
+def test_patch_connector_config_rejects_legacy_flag(client):
     token = _session_for("admin")
     r = client.patch(
         "/admin/im/connectors/slack",
         headers=_hdr(token),
-        json={"config": {"bot_token": "new-tok"}, "allowlist_enforced": True},
+        json={"config": {"bot_token": "new-tok"}, _LEGACY_FLAG: True},
+    )
+    assert r.status_code == 422
+
+
+def test_patch_connector_config_updates_without_legacy_flag(client):
+    token = _session_for("admin")
+    r = client.patch(
+        "/admin/im/connectors/slack",
+        headers=_hdr(token),
+        json={"config": {"bot_token": "new-tok"}},
     )
     assert r.status_code == 200
     assert cfg.resolve(api._owner, "slack")["bot_token"] == "new-tok"  # type: ignore[attr-defined]
-    assert store.get_connector(api._owner, "slack")["allowlist_enforced"] == 1  # type: ignore[attr-defined]
+    assert _LEGACY_FLAG not in r.json()
 
 
 def test_enable_disable_drive_manager(client):
@@ -204,16 +218,18 @@ def test_ui_has_enable_disable_and_admin_gate():
     assert "openConnModal('" in body
 
 
-def test_allowlist_crud(client):
+def test_allowlist_endpoints_removed(client):
     token = _session_for("admin")
-    r = client.post(
-        "/admin/im/allowlist",
-        headers=_hdr(token),
-        json={"platform": "slack", "scope_type": "channel", "scope_id": "C1"},
+    assert (
+        client.get(f"{_LEGACY_ALLOWLIST_PATH}?platform=slack", headers=_hdr(token)).status_code
+        == 404
     )
-    assert r.status_code == 201
-    entries = client.get("/admin/im/allowlist?platform=slack", headers=_hdr(token)).json()
-    assert len(entries) == 1
-    entry_id = entries[0]["id"]
-    assert client.delete(f"/admin/im/allowlist/{entry_id}", headers=_hdr(token)).status_code == 200
-    assert client.get("/admin/im/allowlist?platform=slack", headers=_hdr(token)).json() == []
+    assert (
+        client.post(
+            _LEGACY_ALLOWLIST_PATH,
+            headers=_hdr(token),
+            json={"platform": "slack", "scope_type": "channel", "scope_id": "C1"},
+        ).status_code
+        == 404
+    )
+    assert client.delete(f"{_LEGACY_ALLOWLIST_PATH}/1", headers=_hdr(token)).status_code == 404

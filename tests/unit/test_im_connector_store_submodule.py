@@ -9,7 +9,6 @@ def test_connector_store_submodule_exposes_public_fns():
         "report_status",
         "heartbeat",
         "set_enabled",
-        "set_allowlist_enforced",
         "get_connector",
         "list_connectors",
         "STATUSES",

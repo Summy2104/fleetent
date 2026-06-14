@@ -1,4 +1,4 @@
-"""FastAPI router for /admin/im — IM connector registry + channel allowlist.
+"""FastAPI router for /admin/im — IM connector registry.
 
 Read endpoints return masked credentials. enable/disable drive the connector manager
 through injectable start/stop seams (the manager is async + lives in the app lifespan,
@@ -9,14 +9,10 @@ loop. Auth: admin-only (connector config carries credentials).
 from typing import Any, Literal
 
 from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from fleetent import auth, user_store
-from fleetent.platform.im_gateway_management import (
-    channel_allowlist,
-    connector_config,
-    connector_store,
-)
+from fleetent.platform.im_gateway_management import connector_config, connector_store
 
 router = APIRouter(prefix="/admin/im")
 
@@ -68,21 +64,16 @@ def _require_admin(authorization: str | None) -> user_store.User:
 
 
 class ConnectorPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     config: dict[str, str] | None = None
-    allowlist_enforced: bool | None = None
 
 
 class CreateConnectorBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     platform: Literal["telegram", "slack", "whatsapp"]
     config: dict[str, str]
-    owner_id: str | None = None
-
-
-class AllowlistBody(BaseModel):
-    platform: str
-    scope_type: str  # "channel" | "workspace"
-    scope_id: str
-    note: str | None = None
     owner_id: str | None = None
 
 
@@ -142,8 +133,6 @@ def patch_connector(
         raise HTTPException(status_code=404, detail="connector not found")
     if body.config is not None:
         connector_config.set_config(owner, platform, body.config)
-    if body.allowlist_enforced is not None:
-        connector_store.set_allowlist_enforced(owner, platform, body.allowlist_enforced)
     return _masked_view(connector_store.get_connector(owner, platform))  # type: ignore[arg-type]
 
 
@@ -167,35 +156,3 @@ def disable_connector(
     connector_store.set_enabled(owner, platform, False)
     stop_connector(owner, platform)
     return {"owner_id": owner, "platform": platform, "enabled": False}
-
-
-# --- channel allowlist --------------------------------------------------------
-
-
-@router.get("/allowlist")
-def list_allowlist(
-    platform: str | None = None,
-    owner_id: str | None = None,
-    authorization: str | None = Header(None),
-) -> list[dict[str, Any]]:
-    """Admin scope: owner_id omitted lists across all owners; platform optionally filters."""
-    _require_admin(authorization)
-    return channel_allowlist.list_entries(owner_id, platform)
-
-
-@router.post("/allowlist", status_code=201)
-def add_allowlist(body: AllowlistBody, authorization: str | None = Header(None)) -> dict[str, Any]:
-    _require_admin(authorization)
-    owner = body.owner_id or _default_owner()
-    try:
-        channel_allowlist.add_entry(owner, body.platform, body.scope_type, body.scope_id, body.note)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"owner_id": owner, "platform": body.platform, "scope_id": body.scope_id, "added": True}
-
-
-@router.delete("/allowlist/{entry_id}")
-def delete_allowlist(entry_id: int, authorization: str | None = Header(None)) -> dict[str, Any]:
-    _require_admin(authorization)
-    channel_allowlist.remove_entry(entry_id)
-    return {"id": entry_id, "removed": True}

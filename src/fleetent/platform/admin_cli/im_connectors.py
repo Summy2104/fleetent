@@ -1,8 +1,4 @@
-"""IM connector registry + channel allowlist admin CLI commands.
-
-Distinct from `im.py` (IM *user* approval). These manage the connector registry
-(credentials, enable/disable) and the per-platform channel allowlist.
-"""
+"""IM connector registry admin CLI commands."""
 
 from __future__ import annotations
 
@@ -11,7 +7,7 @@ import sys
 
 
 def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    """Register IM connector + channel allowlist commands."""
+    """Register IM connector commands."""
     p_conn = subparsers.add_parser("im-connector", help="IM connector registry administration")
     conn_sub = p_conn.add_subparsers(dest="im_connector_cmd", required=True)
     conn_sub.add_parser("list", help="List connectors with masked config")
@@ -26,21 +22,9 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
 
     subparsers.add_parser("seed-connectors", help="Seed connector configs from .env")
 
-    p_chan = subparsers.add_parser("im-channel", help="IM channel allowlist administration")
-    chan_sub = p_chan.add_subparsers(dest="im_channel_cmd", required=True)
-    p_allow = chan_sub.add_parser("allow", help="Add a channel/workspace allowlist entry")
-    p_allow.add_argument("--platform", required=True)
-    p_allow.add_argument("--scope-type", required=True, choices=["channel", "workspace"])
-    p_allow.add_argument("--scope-id", required=True)
-    p_allow.add_argument("--note")
-    p_dis = chan_sub.add_parser("disallow", help="Remove an allowlist entry by id")
-    p_dis.add_argument("--id", required=True, type=int)
-    p_list = chan_sub.add_parser("list", help="List allowlist entries")
-    p_list.add_argument("--platform")
-
 
 def handle(args: argparse.Namespace) -> bool:
-    """Handle IM connector + channel allowlist commands."""
+    """Handle IM connector commands."""
     if args.cmd == "im-connector":
         _handle_connector(args)
         return True
@@ -49,9 +33,6 @@ def handle(args: argparse.Namespace) -> bool:
 
         seeded = im.seed_from_env()
         print("Seeded: " + (", ".join(seeded) if seeded else "(none)"))
-        return True
-    if args.cmd == "im-channel":
-        _handle_channel(args)
         return True
     return False
 
@@ -92,38 +73,4 @@ def _handle_connector(args: argparse.Namespace) -> None:
             config[key] = value
         im.set_config(owner, args.platform, config)
         print(f"{args.platform} config updated ({len(config)} key(s))")
-        return
-
-
-def _handle_channel(args: argparse.Namespace) -> None:
-    from fleetent import user_store
-    from fleetent.platform import im_gateway_management as im
-
-    owner = user_store.admin_owner_id()
-
-    if args.im_channel_cmd == "allow":
-        try:
-            im.add_entry(owner, args.platform, args.scope_type, args.scope_id, args.note)
-        except ValueError as exc:
-            print(str(exc), file=sys.stderr)
-            raise SystemExit(2) from exc
-        print(f"allowed {args.platform} {args.scope_type}:{args.scope_id}")
-        return
-
-    if args.im_channel_cmd == "disallow":
-        im.remove_entry(args.id)
-        print(f"removed allowlist entry {args.id}")
-        return
-
-    if args.im_channel_cmd == "list":
-        entries = im.list_entries(None, args.platform)
-        if not entries:
-            print("No allowlist entries.")
-            return
-        print(f"{'ID':<6}  {'PLATFORM':<12}  {'SCOPE_TYPE':<10}  {'SCOPE_ID':<24}  NOTE")
-        for row in entries:
-            print(
-                f"{row['id']:<6}  {row['platform']:<12}  {row['scope_type']:<10}  "
-                f"{row['scope_id']:<24}  {row.get('note') or ''}"
-            )
         return

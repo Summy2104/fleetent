@@ -163,6 +163,6 @@ Python 模型：`ImBinding`（顶层）+ per-platform `SlackBinding`/`TelegramBi
 - **不做**：跨租户同一人=两 User 的 per-tenant 身份重键（v1 一个人属一个 org，over-engineering）。
 
 ### 其余身份域 FK 缺口（一并或随后）
-`im_users.user_id`→users、`api_keys.user_id`→users、`im_connectors`/`im_channel_allowlist`.`owner_id`→users（后两者另见 §9 whatsapp / B-descope）——补 FK 按上轮 tenancy 的"父删 RESTRICT / 引用 SET NULL"风格定 ondelete。
+`im_users.user_id`→users、`api_keys.user_id`→users、`im_connectors.owner_id`→users（另见 §9 whatsapp）——补 FK 按上轮 tenancy 的"父删 RESTRICT / 引用 SET NULL"风格定 ondelete。
 
-> 关联 [[identity-auth-model]]（#4 Identity 端口）。owner 塌缩进 tenant 的终态见上次讨论：im_users(本节)+ im_channel_allowlist(descope)+ im_connectors(待 §9) 三处 owner_id 全退役后，模型只剩 tenant 一个作用域轴。
+> 关联 [[identity-auth-model]]（#4 Identity 端口）。当前 IM 域只剩 `im_connectors.owner_id` 这一处 owner 作用域残留（待 §9 whatsapp 收口）；`im_users` 已去 owner_id，旧的渠道白名单表也已整体 descope。

@@ -24,7 +24,6 @@ def test_table_has_expected_columns(db):
         "id",
         "platform",
         "enabled",
-        "allowlist_enforced",
         "config",
         "status",
         "last_heartbeat_at",
@@ -65,13 +64,11 @@ def test_heartbeat_sets_timestamp_without_changing_status(db):
     assert row["status"] == "connected"
 
 
-def test_set_enabled_and_allowlist_enforced(db):
+def test_set_enabled(db):
     ics.upsert_connector(_OWNER, "slack")
     ics.set_enabled(_OWNER, "slack", True)
-    ics.set_allowlist_enforced(_OWNER, "slack", True)
     row = ics.get_connector(_OWNER, "slack")
     assert row["enabled"] == 1
-    assert row["allowlist_enforced"] == 1
     ics.set_enabled(_OWNER, "slack", False)
     assert ics.get_connector(_OWNER, "slack")["enabled"] == 0
 
