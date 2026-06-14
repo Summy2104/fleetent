@@ -26,7 +26,7 @@
 #   • deployment:   log_format / session_* / disabled_skills /
 #                   observability / diagnostics / scheduling / webhooks
 #   • default agent: the old `default_agent_name` is now `bindings.default: true`
-#   • IM tokens:     the old slack_/telegram_ tokens are now `connectors.*` `*_env` refs (Slack)
+#   • IM tokens:     the old slack_/telegram_ tokens are now `im.*` `*_env` refs (Slack)
 #                    or owner-level env vars (Telegram); never inline
 # The platform `config/settings.yaml` keeps only `database_url` / `log_format` / `observability`.
 name: support-bot                  # required; the agent's name (any value in single-agent mode)
@@ -196,13 +196,15 @@ mcp_servers:
     # file_isolation: "off"             # opt OUT entirely — server reads the host's real
                                          # ~/.config etc., products are NOT addressable
 
-# ── connectors (per-agent IM ingress; tokens via env reference only) ──
-connectors:
+# ── im (per-agent IM ingress; tokens via env reference only) ──
+im:
+  supports_dm: true
+  supports_groups: true
   slack:
     bot_token_env: SUPPORT_SLACK_BOT   # env-var NAME (xoxb- token lives in .env)
     app_token_env: SUPPORT_SLACK_APP   # env-var NAME (xapp- Socket Mode token)
-    access:                            # per-connector access rules (default-closed)
-      allow_channels:
+    access:                            # per-binding access rules (default-closed)
+      allow_groups:
         - C0123ABCD
         - C0456EFGH
       allow_users:
@@ -210,8 +212,8 @@ connectors:
       require_approval: true
   telegram:
     bot_token_env: SUPPORT_TG_BOT      # env-var NAME (bot token lives in .env)
-    access:                            # per-connector access rules (default-closed)
-      allow_channels:
+    access:                            # per-binding access rules (default-closed)
+      allow_groups:
         - "-1001234567890"
       allow_users:
         - "u_alice"

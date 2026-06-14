@@ -1002,7 +1002,7 @@ async def test_server_auth_health_and_approval(
         await server._authenticate("Basic nope")
     assert invalid_auth.value.status_code == 401
 
-    # Slack is per-agent (agent.yaml connectors.slack); Telegram is owner-level.
+    # Slack is per-agent (agent.yaml im.slack); Telegram is owner-level.
     monkeypatch.setattr(server, "_slack_adapter_configured", lambda: True)
     monkeypatch.setattr(server, "_telegram_adapter_configured", lambda: False)
     health = await server.health(

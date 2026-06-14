@@ -5,7 +5,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Per-agent IM access config in the agent home
-An agent SHALL carry its IM access rules inside its **`im`** connector declarations, not in a top-level `access` block. Each binding (**`im.slack`**, **`im.telegram`**) SHALL embed an **`access: ImAccess`** object with **`allow_groups`** (list), `allow_users` (list), and `require_approval` (bool); IM 能力 `supports_dm`/`supports_groups` 在顶层 `im` 上。The runtime SHALL resolve access policy by reading the binding that matches `msg.platform`, with zero platform-DB access. The top-level `AgentFile.access` field and `AgentAccess` class remain removed. （纯改名：`connectors`→`im`、`ConnectorAccess`→`ImAccess`、`allow_channels`→`allow_groups`；行为与阶段 3 完全一致。）
+An agent SHALL carry its IM access rules inside its **`im`** binding declarations, not in a top-level `access` block. Each binding (**`im.slack`**, **`im.telegram`**) SHALL embed an **`access: ImAccess`** object with **`allow_groups`** (list), `allow_users` (list), and `require_approval` (bool); IM 能力 `supports_dm`/`supports_groups` 在顶层 `im` 上。The runtime SHALL resolve access policy by reading the binding that matches `msg.platform`, with zero platform-DB access. The top-level `AgentFile.access` field and `AgentAccess` class remain removed. （纯改名：`connectors`→`im`、`ConnectorAccess`→`ImAccess`、`allow_channels`→`allow_groups`；行为与阶段 3 完全一致。）
 
 #### Scenario: Access rules loaded from the binding's access block
 - **WHEN** an agent home declares `im.slack.access.allow_users: ["u_alice"]` and the agent loads

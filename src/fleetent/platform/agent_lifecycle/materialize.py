@@ -88,9 +88,9 @@ def _apply_overrides(base: AgentFile, overrides: dict[str, Any]) -> AgentFile:
 def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
     """Build the home schema from the authored core definition.
 
-    Connector credentials still come from authored ``config_overrides``. Platform-authored
+    IM binding credentials still come from authored ``config_overrides``. Platform-authored
     IM access state (capability flags, allowed users, per-platform group allowlists) is
-    then materialized onto the resulting connector config without clobbering those creds.
+    then materialized onto the resulting IM binding config without clobbering those creds.
     """
     base = AgentFile(
         name=agent.name,
@@ -116,9 +116,9 @@ def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
 def _materialize_im_access(base: AgentFile, agent: agent_store.Agent) -> AgentFile:
     """Project platform-authored IM access state into the agent home config."""
     raw = base.model_dump(mode="json", exclude_defaults=False)
-    connectors = raw.setdefault("connectors", {})
-    connectors["supports_dm"] = agent.supports_dm
-    connectors["supports_groups"] = agent.supports_groups
+    im = raw.setdefault("im", {})
+    im["supports_dm"] = agent.supports_dm
+    im["supports_groups"] = agent.supports_groups
 
     allow_users = agent_store.list_users_for_agent(agent.id)
     groups_by_platform: dict[str, list[str]] = {}
@@ -132,20 +132,20 @@ def _materialize_im_access(base: AgentFile, agent: agent_store.Agent) -> AgentFi
         groups_by_platform.setdefault(row["platform"], []).append(row["group_id"])
 
     for platform, groups in groups_by_platform.items():
-        connector = connectors.get(platform)
-        if not isinstance(connector, dict):
+        binding = im.get(platform)
+        if not isinstance(binding, dict):
             continue
-        access = connector.setdefault("access", {})
+        access = binding.setdefault("access", {})
         access["allow_users"] = allow_users
-        access["allow_channels"] = groups
+        access["allow_groups"] = groups
 
     for platform in ("slack", "telegram"):
-        connector = connectors.get(platform)
-        if not isinstance(connector, dict):
+        binding = im.get(platform)
+        if not isinstance(binding, dict):
             continue
-        access = connector.setdefault("access", {})
+        access = binding.setdefault("access", {})
         access["allow_users"] = allow_users
-        access.setdefault("allow_channels", [])
+        access.setdefault("allow_groups", [])
 
     return AgentFile.model_validate(raw)
 

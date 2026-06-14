@@ -41,10 +41,10 @@ async def test_route_loads_history_calls_agent_saves_replies(
 ):
     import fleetent.im_gateway.normalizer as norm
     from fleetent.agent_config import (
-        AgentConnectors,
         AgentFile,
-        ConnectorAccess,
-        SlackConnector,
+        ImAccess,
+        ImBinding,
+        SlackBinding,
         default_models,
     )
 
@@ -54,12 +54,12 @@ async def test_route_loads_history_calls_agent_saves_replies(
         name="a",
         version=1,
         models=default_models(),
-        connectors=AgentConnectors(
+        im=ImBinding(
             supports_dm=True,
-            slack=SlackConnector(
+            slack=SlackBinding(
                 bot_token_env="BOT",
                 app_token_env="APP",
-                access=ConnectorAccess(allow_users=["internal-user-1"]),
+                access=ImAccess(allow_users=["internal-user-1"]),
             ),
         ),
     )
@@ -294,10 +294,10 @@ async def test_route_channel_agent_takes_priority(
     """Channel-bound agent's system prompt is used for the run (file-driven AgentFile)."""
     import fleetent.im_gateway.normalizer as norm
     from fleetent.agent_config import (
-        AgentConnectors,
         AgentFile,
-        ConnectorAccess,
-        SlackConnector,
+        ImAccess,
+        ImBinding,
+        SlackBinding,
         default_models,
     )
 
@@ -307,12 +307,12 @@ async def test_route_channel_agent_takes_priority(
         models=default_models(),
         system_prompt="Channel sys.",
         allowed_tools=["shell"],
-        connectors=AgentConnectors(
+        im=ImBinding(
             supports_dm=True,
-            slack=SlackConnector(
+            slack=SlackBinding(
                 bot_token_env="BOT",
                 app_token_env="APP",
-                access=ConnectorAccess(allow_users=["some-user"]),
+                access=ImAccess(allow_users=["some-user"]),
             ),
         ),
     )

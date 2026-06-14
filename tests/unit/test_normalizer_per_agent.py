@@ -18,7 +18,7 @@ def _write(root, name, **fields):
         "name": name,
         "version": 1,
         "models": agent_config.default_models().model_dump(),
-        "connectors": {
+        "im": {
             "supports_dm": True,
             "slack": {
                 "bot_token_env": "BOT",

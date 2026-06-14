@@ -1,7 +1,7 @@
-"""Per-agent Telegram connector supervisor (per-agent-telegram-connector).
+"""Per-agent Telegram IM binding supervisor (per-agent-telegram-connector).
 
 Sources the agent index (`agent_config`) and runs one Telegram polling connection per
-agent that declares `connectors.telegram` with a resolvable env token. Keyed by agent name;
+agent that declares `im.telegram` with a resolvable env token. Keyed by agent name;
 owns per-agent connection status in memory. Mirrors `SlackSupervisor`; no platform import.
 """
 
@@ -13,7 +13,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fleetent import agent_config
-from fleetent.agent_config import TelegramConnector
+from fleetent.agent_config import TelegramBinding
 from fleetent.im_gateway import telegram
 from fleetent.structured_logging import get_logger
 
@@ -35,17 +35,17 @@ class TelegramSupervisor:
         self._status: dict[str, str] = {}
         self._configs: dict[str, dict[str, Any]] = {}
 
-    def _resolve_config(self, connector: TelegramConnector) -> dict[str, Any] | None:
-        bot = os.environ.get(connector.bot_token_env)
+    def _resolve_config(self, binding: TelegramBinding) -> dict[str, Any] | None:
+        bot = os.environ.get(binding.bot_token_env)
         if not bot:
             return None
         return {"bot_token": bot}
 
     async def start(self, agent_name: str) -> None:
         agent = agent_config.current().get(agent_name)
-        if agent is None or agent.connectors.telegram is None:
+        if agent is None or agent.im.telegram is None:
             return
-        config = self._resolve_config(agent.connectors.telegram)
+        config = self._resolve_config(agent.im.telegram)
         if config is None:
             self._status[agent_name] = "unconfigured"
             _logger.warn("telegram_connector_unconfigured", agent=agent_name)
@@ -88,8 +88,8 @@ class TelegramSupervisor:
             await self.stop(name)
         for name in declared:
             agent = agent_config.current().get(name)
-            assert agent is not None and agent.connectors.telegram is not None
-            new_config = self._resolve_config(agent.connectors.telegram)
+            assert agent is not None and agent.im.telegram is not None
+            new_config = self._resolve_config(agent.im.telegram)
             running = name in self._tasks and not self._tasks[name].done()
             if running and new_config != self._configs.get(name):
                 await self.stop(name)  # config changed → restart

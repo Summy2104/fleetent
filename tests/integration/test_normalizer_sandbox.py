@@ -42,7 +42,7 @@ def _write_default_agent(home, monkeypatch, **fields):
         "name": "default",
         "version": 1,
         "models": agent_config.default_models().model_dump(mode="json"),
-        "connectors": {
+        "im": {
             "supports_dm": True,
             "slack": {
                 "bot_token_env": "TEST_BOT_TOKEN",

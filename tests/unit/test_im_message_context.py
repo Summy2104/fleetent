@@ -15,10 +15,10 @@ def _async(value):
 
 def _agent():
     from fleetent.agent_config import (
-        AgentConnectors,
         AgentFile,
-        ConnectorAccess,
-        SlackConnector,
+        ImAccess,
+        ImBinding,
+        SlackBinding,
         default_models,
     )
 
@@ -26,13 +26,13 @@ def _agent():
         name="a",
         version=1,
         models=default_models(),
-        connectors=AgentConnectors(
+        im=ImBinding(
             supports_dm=True,
             supports_groups=True,
-            slack=SlackConnector(
+            slack=SlackBinding(
                 bot_token_env="BOT",
                 app_token_env="APP",
-                access=ConnectorAccess(allow_all_users=True, allow_channels=["C9"]),
+                access=ImAccess(allow_all_users=True, allow_groups=["C9"]),
             ),
         ),
     )

@@ -85,7 +85,7 @@ def _admin_login_url(router_prefix: str) -> str:
 _connector_manager = connector_manager.ConnectorManager(factories={})
 
 # Per-agent Slack supervisor: one Socket Mode connection per agent declaring
-# `connectors.slack`, sourced from the agent index.
+# `im.slack`, sourced from the agent index.
 _slack_supervisor = SlackSupervisor()
 
 
@@ -467,17 +467,13 @@ async def _authenticate(authorization: str = Header()) -> Principal:
 
 
 def _slack_adapter_configured() -> bool:
-    """Whether any indexed agent declares a per-agent Slack connector."""
-    return any(
-        agent.connectors.slack is not None for agent in agent_config.current().agents.values()
-    )
+    """Whether any indexed agent declares a per-agent Slack IM binding."""
+    return any(agent.im.slack is not None for agent in agent_config.current().agents.values())
 
 
 def _telegram_adapter_configured() -> bool:
-    """Whether any indexed agent declares a per-agent Telegram connector."""
-    return any(
-        agent.connectors.telegram is not None for agent in agent_config.current().agents.values()
-    )
+    """Whether any indexed agent declares a per-agent Telegram IM binding."""
+    return any(agent.im.telegram is not None for agent in agent_config.current().agents.values())
 
 
 @app.get("/health")

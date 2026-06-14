@@ -245,10 +245,10 @@ async def test_normalizer_passes_progress_func_to_run(monkeypatch):
     import contextlib
 
     from fleetent.agent_config import (
-        AgentConnectors,
         AgentFile,
-        ConnectorAccess,
-        SlackConnector,
+        ImAccess,
+        ImBinding,
+        SlackBinding,
         default_models,
     )
     from fleetent.im_gateway import access, normalizer
@@ -259,12 +259,12 @@ async def test_normalizer_passes_progress_func_to_run(monkeypatch):
         name="a",
         version=1,
         models=default_models(),
-        connectors=AgentConnectors(
+        im=ImBinding(
             supports_dm=True,
-            slack=SlackConnector(
+            slack=SlackBinding(
                 bot_token_env="BOT",
                 app_token_env="APP",
-                access=ConnectorAccess(allow_users=["u1"]),
+                access=ImAccess(allow_users=["u1"]),
             ),
         ),
     )
@@ -320,10 +320,10 @@ async def test_normalizer_without_progress_func_run_gets_none(monkeypatch):
     import contextlib
 
     from fleetent.agent_config import (
-        AgentConnectors,
         AgentFile,
-        ConnectorAccess,
-        SlackConnector,
+        ImAccess,
+        ImBinding,
+        SlackBinding,
         default_models,
     )
     from fleetent.im_gateway import access, normalizer
@@ -334,12 +334,12 @@ async def test_normalizer_without_progress_func_run_gets_none(monkeypatch):
         name="a",
         version=1,
         models=default_models(),
-        connectors=AgentConnectors(
+        im=ImBinding(
             supports_dm=True,
-            slack=SlackConnector(
+            slack=SlackBinding(
                 bot_token_env="BOT",
                 app_token_env="APP",
-                access=ConnectorAccess(allow_users=["u1"]),
+                access=ImAccess(allow_users=["u1"]),
             ),
         ),
     )

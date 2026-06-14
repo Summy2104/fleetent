@@ -8,16 +8,16 @@ from fleetent import agent_config
 from fleetent.im_gateway import slack_supervisor
 
 
-def _write(root, name, bot_env, app_env, allow_channels=None):
+def _write(root, name, bot_env, app_env, allow_groups=None):
     doc = {
         "name": name,
         "version": 1,
         "models": agent_config.default_models().model_dump(),
-        "connectors": {
+        "im": {
             "slack": {
                 "bot_token_env": bot_env,
                 "app_token_env": app_env,
-                "access": {"allow_channels": allow_channels or []},
+                "access": {"allow_groups": allow_groups or []},
             }
         },
     }
@@ -39,7 +39,7 @@ async def test_starts_one_connection_per_slack_agent(tmp_path, monkeypatch):
     monkeypatch.setenv("SUP_APP", "xapp-1")
     monkeypatch.setenv("SAL_BOT", "xoxb-2")
     monkeypatch.setenv("SAL_APP", "xapp-2")
-    _write(tmp_path, "support", "SUP_BOT", "SUP_APP", allow_channels=["C1"])
+    _write(tmp_path, "support", "SUP_BOT", "SUP_APP", allow_groups=["C1"])
     _write(tmp_path, "sales", "SAL_BOT", "SAL_APP")
     agent_config.scan(tmp_path)
 

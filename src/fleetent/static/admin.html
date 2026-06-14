@@ -1296,7 +1296,7 @@
           <label class="row" style="gap:6px; font-size:12px;"><input type="checkbox" id="ag-access-approval" checked> require_approval</label>
           <div class="muted" style="font-size:12px; margin-top:6px;">allow_users</div>
           <div id="ag-access-users"></div>
-          <div class="muted" style="font-size:12px; margin-top:6px;">allow_channels</div>
+          <div class="muted" style="font-size:12px; margin-top:6px;">allow_groups</div>
           <div id="ag-access-channels"></div>
           <h4 style="margin:14px 0 4px;">Advanced settings</h4>
           <div class="muted" style="font-size:12px;">Common agent.yaml knobs — defaults shown; only changed values are saved.</div>
@@ -2793,9 +2793,9 @@ function agStripAdvKeys(co) {
   return clone;
 }
 
-// --- Access: require_approval + allow_users/allow_channels chosen FROM the bindings -------
+// --- Access: require_approval + allow_users/allow_groups chosen FROM the bindings -------
 let AG_IM_USERS = [];           // [{user_id, platform, platform_user_id}] loaded with the modal
-let AG_ACCESS = { require_approval: true, allow_users: [], allow_channels: [] };
+let AG_ACCESS = { require_approval: true, allow_users: [], allow_groups: [] };
 // The user ids / channels currently bound in the modal — the only things access can allow.
 function agBoundUserIds() {
   const set = new Set();
@@ -2825,18 +2825,18 @@ function agRenderAccess() {
     "Allow specific channels… (empty = all bound)");
   const want = new Set(AG_ACCESS.allow_users);
   for (const cb of document.querySelectorAll("#ag-access-users .aac-user input")) if (want.has(cb.value)) cb.checked = true;
-  const wantc = new Set(AG_ACCESS.allow_channels);
+  const wantc = new Set(AG_ACCESS.allow_groups);
   for (const cb of document.querySelectorAll("#ag-access-channels .aac-ch input")) if (wantc.has(cb.value)) cb.checked = true;
   agMsSync("ag-access-users"); agMsSync("ag-access-channels");
   $("ag-access-approval").checked = AG_ACCESS.require_approval !== false;
 }
 function agCollectAccess() {
   const allow_users = [...document.querySelectorAll("#ag-access-users .aac-user input:checked")].map(i => i.value);
-  const allow_channels = [...document.querySelectorAll("#ag-access-channels .aac-ch input:checked")].map(i => i.value);
+  const allow_groups = [...document.querySelectorAll("#ag-access-channels .aac-ch input:checked")].map(i => i.value);
   const require_approval = $("ag-access-approval").checked;
   const access = {};
   if (allow_users.length) access.allow_users = allow_users;
-  if (allow_channels.length) access.allow_channels = allow_channels;
+  if (allow_groups.length) access.allow_groups = allow_groups;
   if (require_approval !== true) access.require_approval = require_approval;  // true is the default
   return access;  // {} when all default
 }
@@ -2845,7 +2845,7 @@ function agCollectAccess() {
 function agAccessSyncFromBindings() {
   if (document.querySelector("#ag-access-users .ms")) {
     AG_ACCESS.allow_users = [...document.querySelectorAll("#ag-access-users .aac-user input:checked")].map(i => i.value);
-    AG_ACCESS.allow_channels = [...document.querySelectorAll("#ag-access-channels .aac-ch input:checked")].map(i => i.value);
+    AG_ACCESS.allow_groups = [...document.querySelectorAll("#ag-access-channels .aac-ch input:checked")].map(i => i.value);
     AG_ACCESS.require_approval = $("ag-access-approval").checked;
   }
   agRenderAccess();
@@ -2863,7 +2863,7 @@ async function agCreate() {
   $("ag-memns").value = ""; delete $("ag-memns").dataset.auto;
   $("ag-skillsdir").value = "";
   agRenderAdvFields({});  // advanced knobs at their defaults
-  AG_ACCESS = { require_approval: true, allow_users: [], allow_channels: [] };
+  AG_ACCESS = { require_approval: true, allow_users: [], allow_groups: [] };
   $("ag-system-prompt").value = "";
   $("ag-allowed-tools").value = "";
   $("ag-bind-config").style.display = "";
@@ -3174,7 +3174,7 @@ async function agEdit(name) {
     AG_ACCESS = {
       require_approval: acc.require_approval !== false,
       allow_users: acc.allow_users || [],
-      allow_channels: acc.allow_channels || [],
+      allow_groups: acc.allow_groups || [],
     };
     const rest = agStripAdvKeys(co);
     $("ag-capabilities").value = Object.keys(rest).length

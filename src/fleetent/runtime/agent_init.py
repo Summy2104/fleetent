@@ -43,7 +43,7 @@ def _template_agent(agent_id: str) -> AgentFile:
 
 
 def _referenced_env_names(agent: AgentFile) -> list[str]:
-    """Collect env-var names the agent references (always + MCP/connector ``*_env``)."""
+    """Collect env-var names the agent references (always + MCP/IM binding ``*_env``)."""
     names: set[str] = set()
     for target in agent.models.targets:
         if target.api_key_env:
@@ -53,7 +53,7 @@ def _referenced_env_names(agent: AgentFile) -> list[str]:
             value = getattr(server, attr, "")
             if value:
                 names.add(value)
-    slack = agent.connectors.slack
+    slack = agent.im.slack
     if slack is not None:
         names.update(n for n in (slack.bot_token_env, slack.app_token_env) if n)
     return sorted(names)

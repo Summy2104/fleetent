@@ -31,7 +31,7 @@ def _make_agent_file(name: str = "test-agent"):
                 ],
                 "routes": {"default": [{"target": "primary"}]},
             },
-            "connectors": {
+            "im": {
                 "supports_dm": True,
                 "slack": {
                     "bot_token_env": "SLACK_BOT_TOKEN",

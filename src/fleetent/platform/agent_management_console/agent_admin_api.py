@@ -108,8 +108,8 @@ def _known_mcp_server_ids() -> set[str]:
 def _build_agent_yaml(agent: agent_store.Agent) -> str:
     """Assemble the runtime agent.yaml from the DB-authored config + bindings.
 
-    Covers every field the admin console authors. connectors.slack is intentionally
-    omitted: per-agent Slack connectors are not authored in the DB.
+    Covers every field the admin console authors. im.slack is intentionally
+    omitted: per-agent Slack IM bindings are not authored in the DB.
     """
     data: dict[str, Any] = agent_file_from_store(agent).model_dump(
         mode="json", exclude_defaults=False
@@ -505,9 +505,9 @@ def _required_env_items(agent: agent_store.Agent) -> list[dict[str, Any]]:
     for server in agent_file.mcp_servers:
         if server.api_key_env:
             sources.setdefault(server.api_key_env, "MCP")
-    if agent_file.connectors.slack is not None:
-        sources.setdefault(agent_file.connectors.slack.bot_token_env, "Connectors")
-        sources.setdefault(agent_file.connectors.slack.app_token_env, "Connectors")
+    if agent_file.im.slack is not None:
+        sources.setdefault(agent_file.im.slack.bot_token_env, "IM")
+        sources.setdefault(agent_file.im.slack.app_token_env, "IM")
 
     items: list[dict[str, Any]] = []
     for env_name, source in sorted(sources.items()):

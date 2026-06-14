@@ -13,9 +13,9 @@ def _publish_agent(monkeypatch, *, name: str = "support", tenant_id: str = "defa
     from fleetent import agent_config
     from fleetent.agent_config import (
         AgentConfigIndex,
-        AgentConnectors,
         AgentFile,
-        TelegramConnector,
+        ImBinding,
+        TelegramBinding,
     )
 
     agent = AgentFile(
@@ -23,7 +23,7 @@ def _publish_agent(monkeypatch, *, name: str = "support", tenant_id: str = "defa
         version=1,
         tenant_id=tenant_id,
         models=agent_config.default_models(),
-        connectors=AgentConnectors(telegram=TelegramConnector(bot_token_env="BOT")),
+        im=ImBinding(telegram=TelegramBinding(bot_token_env="BOT")),
     )
     monkeypatch.setattr(
         agent_config,

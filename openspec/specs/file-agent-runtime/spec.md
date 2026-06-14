@@ -82,7 +82,7 @@ onto the global defaults with no database lookup.
 ### Requirement: Secrets rejected in agent files
 
 The scan SHALL reject any agent file containing an inline plaintext secret in
-secret-bearing fields, including the `mcp_servers` and `connectors` subtrees. Secret
+secret-bearing fields, including the `mcp_servers` and `im` subtrees. Secret
 material SHALL be referenced only by environment-variable name (e.g. `api_key_env`,
 `bot_token_env`, `app_token_env`, `credential_ref`) or by an `env:VAR_NAME` reference in
 free-form value maps such as `mcp_servers[*].env` and `mcp_servers[*].headers`.
@@ -137,21 +137,21 @@ user, or where more than one agent declares itself the default.
 - **WHEN** two agent files both set `bindings.default: true`
 - **THEN** the scan fails fast with an error naming the conflicting agents
 
-### Requirement: Agent file may declare platform connectors
+### Requirement: Agent file may declare platform im
 
-The agent file model SHALL accept an optional `connectors` block declaring per-agent
+The agent file model SHALL accept an optional `im` block declaring per-agent
 platform connections, and SHALL validate it. Per-platform connector semantics are
 defined by the relevant connector capability (e.g. `per-agent-slack-connector`). Secret
-material under `connectors` MUST be referenced by environment-variable name only.
+material under `im` MUST be referenced by environment-variable name only.
 
-#### Scenario: connectors block accepted
+#### Scenario: im block accepted
 
-- **WHEN** an `agent.yaml` includes a `connectors.slack` block with env-reference token names
+- **WHEN** an `agent.yaml` includes a `im.slack` block with env-reference token names
 - **THEN** the agent loads with that connector declaration available to the connector layer
 
-#### Scenario: connectors block optional
+#### Scenario: im block optional
 
-- **WHEN** an `agent.yaml` omits `connectors`
+- **WHEN** an `agent.yaml` omits `im`
 - **THEN** the agent loads normally
 
 ### Requirement: Single-file agent home loading
@@ -283,7 +283,7 @@ absolute path in the file.
 The system SHALL extend inline-secret rejection to cover every secret-bearing field
 introduced by the governance and deployment groups. Such credential values MUST be
 provided as `*_env` environment-variable references and MUST NOT appear as inline
-plaintext secrets, consistent with the existing guard over `mcp_servers`, `connectors`,
+plaintext secrets, consistent with the existing guard over `mcp_servers`, `im`,
 and the intelligence layer.
 
 #### Scenario: Inline secret in a deployment field is rejected
