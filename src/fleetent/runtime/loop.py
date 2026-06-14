@@ -266,6 +266,24 @@ def _agent_bound_to_server(server_id: str, allowed_tools: list[str] | None) -> b
     )
 
 
+def _append_delivery_trailer(reply: str, tool_context: Any) -> str:
+    """Append the run's delivery fact trailer to the final reply, if any (§3, D4).
+
+    The trailer is system-generated from the run's delivery ledger and concatenated AFTER
+    the model's text, so the model cannot omit or rewrite it. Empty ledger → reply unchanged
+    (zero noise). Best-effort: a render failure never alters the reply."""
+    try:
+        from fleetent.observability.traces import render_delivery_trailer
+
+        ledger = getattr(tool_context, "delivery_ledger", None)
+        trailer = render_delivery_trailer(ledger)
+        if trailer:
+            return f"{reply}\n\n{trailer}" if reply else trailer
+    except Exception as exc:  # noqa: BLE001 — trailer is auxiliary, never break the reply
+        _logger.warn("delivery_trailer_failed", error=str(exc))
+    return reply
+
+
 def _resolve_scope_key(session_id: str | None, agent_name: str | None) -> str | None:
     """The workspace scope key for /exchange attribution (D0), mirroring /workspace.
 
@@ -1711,6 +1729,11 @@ async def _run_inner(
         _logger.debug("sandbox_capability_probe_failed", error=str(exc))
         sandbox_workspace_mount = False
 
+    start = time.monotonic()
+    run_id = str(uuid.uuid4())
+    # delivery-receipts (§2): run-level ledger collecting every outbound receipt this run,
+    # read at finalize to render the fact trailer (§3).
+    delivery_ledger: list[Any] = []
     # SB3 D5: execution-time context channel for run_code (session/agent/features),
     # injected out-of-band only into tools that opt in; harmless for the rest.
     tool_context = ToolContext(
@@ -1718,13 +1741,12 @@ async def _run_inner(
         features=agent_features or {},
         session_id=session_id,
         scope_key=_resolve_scope_key(session_id, agent_name),
+        run_id=run_id,
+        delivery_ledger=delivery_ledger,
         session_context=session_context,
         principal=principal,
         outbound_connectors=outbound_connectors or {},
     )
-
-    start = time.monotonic()
-    run_id = str(uuid.uuid4())
     user_input = _first_user_content(messages)
     # Class-A wiring: inject long-term context (KB + memory) and record the
     # injected-context trace. Best-effort — a missing DB / disabled KB must not
@@ -2112,7 +2134,9 @@ async def _run_inner(
             timeout=governance.hooks_timeout_seconds,
             strict=False,
         )
-    return reply
+    # delivery-receipts (§3): the fact trailer is appended LAST — after on_response hooks —
+    # so neither the model nor a hook can omit or rewrite it.
+    return _append_delivery_trailer(reply, tool_context)
 
 
 def run_sync(
@@ -2243,11 +2267,14 @@ async def run_stream(
     disabled_trace = collect_disabled_trace() or None
 
     # SB3 D5: execution-time context channel (session/agent/features) for opt-in tools.
+    # delivery-receipts (§2): streaming path's run-level ledger; run_id set just below.
+    _stream_delivery_ledger: list[Any] = []
     tool_context = ToolContext(
         agent_name=agent_name,
         features=agent_features or {},
         session_id=session_id,
         scope_key=_resolve_scope_key(session_id, agent_name),
+        delivery_ledger=_stream_delivery_ledger,
         session_context=session_context,
         principal=principal,
     )
@@ -2295,6 +2322,7 @@ async def run_stream(
 
     start = time.monotonic()
     run_id = str(uuid.uuid4())
+    tool_context.run_id = run_id  # delivery-receipts (§2): bind ledger receipts' trace to this run
     # Class-A wiring (streaming): inject long-term context + record injected-context
     # trace. Best-effort — missing DB / disabled KB must not break the stream.
     try:
@@ -2768,6 +2796,12 @@ async def run_stream(
                     yield {"type": "text_delta", "content": partial_reply}
 
     reply = await _apply_output_transform(reply, governance, session_id, agent_name, user_id)
+    # delivery-receipts (§3): after the stream, append the fact trailer as a final delta
+    # (separate from the model's text, so it cannot be omitted) and fold it into `done`.
+    _with_trailer = _append_delivery_trailer(reply, tool_context)
+    if _with_trailer != reply:
+        yield {"type": "text_delta", "content": _with_trailer[len(reply) :]}
+        reply = _with_trailer
     yield {"type": "done", "content": reply}
 
     from openai.types import CompletionUsage as _CU  # noqa: N814 — terse local alias

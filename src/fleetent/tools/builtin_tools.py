@@ -779,6 +779,7 @@ async def send_im_message(
     sent = await outbound.send_to(
         resolved_platform, connector, target, text, target_type=target_type
     )
+    _record_delivery(tool_context, sent)
     if not sent.ok:
         return f"发送失败：{resolved_platform} 投递 {target} 时出错，请稍后重试。"
     kind = "私信" if target_type == "user" else "频道消息"
@@ -794,6 +795,7 @@ async def send_im_message(
         except Exception as exc:  # noqa: BLE001 — per-file degrade, never abort the batch
             skipped.append(f"{raw}（{exc}）")
             continue
+        _record_delivery(tool_context, rcpt)
         if rcpt.ok:
             delivered += 1
         else:
@@ -805,6 +807,33 @@ async def send_im_message(
         if skipped:
             result += " 跳过：" + "；".join(skipped)
     return result
+
+
+def _record_delivery(tool_context: Any, receipt: Any) -> None:
+    """Append a delivery receipt to the run ledger + record its delivery trace (§2).
+
+    Best-effort and side-channel: feeds the fact trailer (run ledger) and audit (trace).
+    A None ledger (direct/non-loop call) just skips collection; tracing needs a run_id."""
+    ledger = getattr(tool_context, "delivery_ledger", None)
+    if ledger is not None:
+        ledger.append(receipt)
+    run_id = getattr(tool_context, "run_id", None)
+    if run_id:
+        from fleetent.observability import traces
+
+        traces.record_delivery(
+            run_id,
+            getattr(tool_context, "session_id", None),
+            {
+                "ok": receipt.ok,
+                "platform": receipt.platform,
+                "target": receipt.target,
+                "target_type": receipt.target_type,
+                "kind": receipt.kind,
+                "provider_ref": receipt.provider_ref,
+                "error": receipt.error,
+            },
+        )
 
 
 def _resolve_outbound_path(path: str, tool_context: Any, *, approved: bool) -> Path:
@@ -907,6 +936,7 @@ async def send_file(path: str, tool_context: ToolContext | None = None) -> str:
     except Exception as exc:  # noqa: BLE001 — outbound must never abort the agent run
         logger.warning("send_file delivery error on %s: %s", platform, exc)
         return f"外发失败：{platform} 投递文件时出错，请稍后重试。"
+    _record_delivery(tool_context, sent)
     if not sent.ok:
         return f"外发失败：{platform} 投递文件给 {recipient} 时出错，请稍后重试。"
     return f"已把文件发送给 {platform}:{recipient}。"

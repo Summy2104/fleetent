@@ -39,6 +39,11 @@ class ToolContext:
     # /workspace mount (session_id under `session` scope, agent_name under `agent`). Set
     # by the loop from the sandbox manager's resolved scope; None = no attribution.
     scope_key: str | None = None
+    # delivery-receipts (D2): the run id (for the delivery trace) and the run-level
+    # delivery ledger — outbound tools append their DeliveryReceipt so the run can render
+    # the fact trailer + audit. None ledger = no collection (e.g. non-loop direct calls).
+    run_id: str | None = None
+    delivery_ledger: list[Any] | None = None
     # Inbound sender/channel metadata (im_gateway.SessionContext) for whoami-style
     # tools; typed Any to avoid an im_gateway import cycle. None = unavailable.
     session_context: Any = None

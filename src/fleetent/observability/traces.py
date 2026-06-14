@@ -136,6 +136,68 @@ def record_tool_call(run_id: str, session_id: str | None, payload: dict[str, Any
         _logger.warn("tool_call_trace_record_failed", run_id=run_id, error=str(exc))
 
 
+def mask_target(target: str | None) -> str:
+    """Mask a delivery target id for trace/trailer display (delivery-receipts, D3).
+
+    Keeps a short head+tail so a human can sanity-check the recipient without exposing the
+    full platform id: ``U0123456789`` → ``U01…789``. Short ids pass through unchanged.
+    """
+    t = str(target or "")
+    if len(t) <= 6:
+        return t
+    return f"{t[:3]}…{t[-3:]}"
+
+
+def render_delivery_trailer(ledger: list[Any] | None) -> str | None:
+    """Render the run's delivery ledger into a one-line fact trailer, or None if empty (§3, D4).
+
+    Deterministic system output appended after the model's final reply so the ground truth
+    of what was delivered sits beside the model's claim. Compact: success file/message
+    counts with masked target summaries + a failure list. Duck-typed over DeliveryReceipt
+    (.ok/.kind/.target/.error) to avoid an outbound import. None ledger / no attempts → None.
+    """
+    if not ledger:
+        return None
+    files_ok = [r for r in ledger if r.kind == "file" and r.ok]
+    msgs_ok = [r for r in ledger if r.kind == "text" and r.ok]
+    failed = [r for r in ledger if not r.ok]
+    parts: list[str] = []
+    if files_ok:
+        tgts = ", ".join(mask_target(r.target) for r in files_ok)
+        parts.append(f"文件 {len(files_ok)}（{tgts}）")
+    if msgs_ok:
+        tgts = ", ".join(mask_target(r.target) for r in msgs_ok)
+        parts.append(f"消息 {len(msgs_ok)}（{tgts}）")
+    if failed:
+        reasons = ", ".join(str(r.error or "?") for r in failed)
+        parts.append(f"失败 {len(failed)}（{reasons}）")
+    return "📬 实际投递：" + "；".join(parts)
+
+
+def record_delivery(run_id: str, session_id: str | None, payload: dict[str, Any]) -> None:
+    """Record one ``delivery`` trace event for an outbound delivery attempt (best-effort).
+
+    Mirrors ``record_tool_call``: a write failure is logged at warning and swallowed
+    (side channel, never affects the run). The caller builds ``payload`` from a
+    DeliveryReceipt (ok, platform, target, target_type, kind, provider_ref, error); the
+    ``target`` is masked here so the audit trail never carries the full recipient id.
+    """
+    try:
+        masked = dict(payload)
+        if "target" in masked:
+            masked["target"] = mask_target(masked.get("target"))
+        record_trace_event(
+            TraceEvent(
+                run_id=run_id,
+                event_type="delivery",
+                payload=masked,
+                session_id=session_id,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 — side channel; never break the run
+        _logger.warn("delivery_trace_record_failed", run_id=run_id, error=str(exc))
+
+
 def build_tool_args_summary(tool_args: dict[str, Any] | str) -> str:
     """Redact and bound a tool's arguments into a trace-safe summary string.
 
