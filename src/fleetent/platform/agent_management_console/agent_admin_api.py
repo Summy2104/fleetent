@@ -17,8 +17,8 @@ from fleetent.platform.agent_lifecycle import credential_slots, secret_store
 from fleetent.platform.agent_lifecycle.materialize import agent_file_from_store
 from fleetent.platform.agent_management_console import agent_im_group_store
 from fleetent.platform.connector_management import (
-    agent_oauth_binding_store,
-    connector_config_store,
+    agent_service_grant_store,
+    external_service_store,
     mcp_server_store,
 )
 from fleetent.platform.knowledge_base_management import agent_kbs_store
@@ -61,6 +61,10 @@ class AgentImGroupBindingBody(BaseModel):
 class AgentImCapabilitiesBody(BaseModel):
     supports_dm: bool
     supports_groups: bool
+
+
+class AgentOAuthBindingBody(BaseModel):
+    run_as: str = "user"
 
 
 def _session_user(authorization: str | None) -> user_store.User:
@@ -530,27 +534,37 @@ def _required_env_items(agent: agent_store.Agent) -> list[dict[str, Any]]:
 def list_agent_oauth(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
     _current_user(authorization)
     agent = _require_agent(name)
-    connector_ids = agent_oauth_binding_store.list_connectors_for_agent(agent.id)
-    return {"agent": name, "connector_ids": connector_ids}
+    service_grants = agent_service_grant_store.list_services_for_agent(agent.id)
+    return {
+        "agent": name,
+        "service_grants": service_grants,
+        "connector_ids": [grant["service_id"] for grant in service_grants],
+    }
 
 
 @router.post("/agents/{name}/bindings/oauth/{connector_id}")
 def bind_oauth(
-    name: str, connector_id: str, authorization: str | None = Header(None)
+    name: str,
+    connector_id: str,
+    body: AgentOAuthBindingBody | None = None,
+    authorization: str | None = Header(None),
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
     agent = _require_agent(name)
-    if connector_config_store.get_connector(connector_id) is None:
+    run_as = body.run_as if body is not None else "user"
+    if run_as not in {"user", "agent"}:
+        raise HTTPException(status_code=422, detail="invalid run_as")
+    if external_service_store.get_service(connector_id) is None:
         raise HTTPException(status_code=404, detail=f"connector {connector_id!r} not found")
-    agent_oauth_binding_store.bind(agent.id, connector_id, created_by=user.id)
+    agent_service_grant_store.bind(agent.id, connector_id, run_as=run_as, created_by=user.id)
     audit_log.write_audit(
         user.id,
         "agent.oauth.bind",
         target_type="agent",
         target_id=name,
-        detail={"connector_id": connector_id},
+        detail={"connector_id": connector_id, "run_as": run_as},
     )
-    return {"agent": name, "connector_id": connector_id, "bound": True}
+    return {"agent": name, "connector_id": connector_id, "run_as": run_as, "bound": True}
 
 
 @router.delete("/agents/{name}/bindings/oauth/{connector_id}")
@@ -559,7 +573,7 @@ def unbind_oauth(
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
     agent = _require_agent(name)
-    agent_oauth_binding_store.unbind(agent.id, connector_id)
+    agent_service_grant_store.unbind(agent.id, connector_id)
     audit_log.write_audit(
         user.id,
         "agent.oauth.unbind",

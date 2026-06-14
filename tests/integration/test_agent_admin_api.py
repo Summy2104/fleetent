@@ -430,37 +430,49 @@ def test_kb_bind_unknown_agent_404(client):
 # --- agent OAuth connector bindings ------------------------------------------
 
 
-def _oauth_ids(client, token):
+def _oauth_grants(client, token):
     r = client.get("/admin/agents/ops/bindings/oauth", headers=_hdr(token))
-    return r.json()["connector_ids"]
+    return r.json()["service_grants"]
 
 
 def test_oauth_bind_list_unbind(fresh_client):
-    from fleetent.platform.connector_management import connector_config_store
+    from fleetent.platform.connector_management import external_service_store
 
     agent_store.create_agent("ops", "Ops.", ["shell"])
-    connector_config_store.add_connector("github", "GitHub")
+    external_service_store.add_service("github", "GitHub")
     token, _ = _session_for("admin")
-    assert _oauth_ids(fresh_client, token) == []
-    r = fresh_client.post("/admin/agents/ops/bindings/oauth/github", headers=_hdr(token))
+    assert _oauth_grants(fresh_client, token) == []
+    r = fresh_client.post(
+        "/admin/agents/ops/bindings/oauth/github",
+        headers=_hdr(token),
+        json={"run_as": "agent"},
+    )
     assert r.status_code == 200
-    assert _oauth_ids(fresh_client, token) == ["github"]
+    assert _oauth_grants(fresh_client, token) == [{"service_id": "github", "run_as": "agent"}]
     d = fresh_client.delete("/admin/agents/ops/bindings/oauth/github", headers=_hdr(token))
     assert d.status_code == 200
-    assert _oauth_ids(fresh_client, token) == []
+    assert _oauth_grants(fresh_client, token) == []
 
 
 def test_oauth_bind_unknown_connector_404(fresh_client):
     agent_store.create_agent("ops", "Ops.", ["shell"])
     token, _ = _session_for("admin")
-    r = fresh_client.post("/admin/agents/ops/bindings/oauth/nope", headers=_hdr(token))
+    r = fresh_client.post(
+        "/admin/agents/ops/bindings/oauth/nope",
+        headers=_hdr(token),
+        json={"run_as": "user"},
+    )
     assert r.status_code == 404
 
 
 def test_oauth_bind_viewer_forbidden(fresh_client):
     agent_store.create_agent("ops", "Ops.", ["shell"])
     token, _ = _session_for("viewer")
-    r = fresh_client.post("/admin/agents/ops/bindings/oauth/github", headers=_hdr(token))
+    r = fresh_client.post(
+        "/admin/agents/ops/bindings/oauth/github",
+        headers=_hdr(token),
+        json={"run_as": "user"},
+    )
     assert r.status_code == 403
 
 

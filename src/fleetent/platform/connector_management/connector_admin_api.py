@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from fleetent import audit_log, auth, user_store
 from fleetent.platform.connector_management import (
-    connector_config_store,
+    agent_service_grant_store,
     external_credential_store,
     external_service_store,
     mcp_server_store,
@@ -180,8 +180,15 @@ class ConnectorBody(BaseModel):
 
 class ConnectorEditBody(BaseModel):
     display_name: str | None = None
+    protocol: str | None = None
     oauth_config: dict[str, Any] | None = None
     enabled: bool | None = None
+
+
+def _service_to_connector_payload(service: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(service)
+    payload["id"] = payload["service_id"]
+    return payload
 
 
 def _service_oauth_config(service_id: str) -> dict[str, Any]:
@@ -219,7 +226,11 @@ def list_connectors(
     authorization: str | None = Header(None), agent_id: int | None = None
 ) -> list[dict[str, Any]]:
     _current_user(authorization)
-    return [_mask(c) for c in connector_config_store.list_connectors(agent_id)]
+    del agent_id
+    return [
+        _mask(_service_to_connector_payload(service))
+        for service in external_service_store.list_services()
+    ]
 
 
 @router.get("/connectors/authorize/{service_id}")
@@ -288,11 +299,11 @@ def oauth_callback(
 @router.post("/connectors")
 def add_connector(body: ConnectorBody, authorization: str | None = Header(None)) -> dict[str, Any]:
     user = _require_admin(authorization)
-    if body.protocol != "oauth2":
-        raise HTTPException(status_code=422, detail="only OAuth 2.x connectors are supported")
-    if connector_config_store.get_connector(body.id) is not None:
+    if body.protocol not in {"oauth2", "apikey"}:
+        raise HTTPException(status_code=422, detail="unsupported connector protocol")
+    if external_service_store.get_service(body.id) is not None:
         raise HTTPException(status_code=409, detail="connector id already exists")
-    connector_config_store.add_connector(
+    external_service_store.add_service(
         body.id,
         body.display_name,
         oauth_config=body.oauth_config,
@@ -300,7 +311,9 @@ def add_connector(body: ConnectorBody, authorization: str | None = Header(None))
         enabled=body.enabled,
     )
     audit_log.write_audit(user.id, "connector.add", "connector", body.id)
-    return _mask_dict(connector_config_store.get_connector(body.id))
+    created = external_service_store.get_service(body.id)
+    assert created is not None
+    return _mask_dict(_service_to_connector_payload(created))
 
 
 @router.put("/connectors/{connector_id}")
@@ -308,21 +321,38 @@ def edit_connector(
     connector_id: str, body: ConnectorEditBody, authorization: str | None = Header(None)
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
-    if connector_config_store.get_connector(connector_id) is None:
+    if body.protocol is not None and body.protocol not in {"oauth2", "apikey"}:
+        raise HTTPException(status_code=422, detail="unsupported connector protocol")
+    if external_service_store.get_service(connector_id) is None:
         raise HTTPException(status_code=404, detail="connector not found")
-    connector_config_store.edit_connector(connector_id, **body.model_dump(exclude_unset=True))
+    external_service_store.edit_service(connector_id, **body.model_dump(exclude_unset=True))
     audit_log.write_audit(user.id, "connector.edit", "connector", connector_id)
-    return _mask_dict(connector_config_store.get_connector(connector_id))
+    updated = external_service_store.get_service(connector_id)
+    assert updated is not None
+    return _mask_dict(_service_to_connector_payload(updated))
 
 
 @router.delete("/connectors/{connector_id}")
 def delete_connector(connector_id: str, authorization: str | None = Header(None)) -> dict[str, Any]:
     user = _require_admin(authorization)
-    if connector_config_store.get_connector(connector_id) is None:
+    if external_service_store.get_service(connector_id) is None:
         raise HTTPException(status_code=404, detail="connector not found")
-    connector_config_store.delete_connector(connector_id)
+    external_service_store.delete_service(connector_id)
     audit_log.write_audit(user.id, "connector.delete", "connector", connector_id)
     return {"success": True, "connector_id": connector_id}
+
+
+@router.get("/connectors/{connector_id}/bindings/agents")
+def list_connector_binding_agents(
+    connector_id: str, authorization: str | None = Header(None)
+) -> dict[str, Any]:
+    _current_user(authorization)
+    if external_service_store.get_service(connector_id) is None:
+        raise HTTPException(status_code=404, detail="connector not found")
+    return {
+        "service_id": connector_id,
+        "agent_ids": agent_service_grant_store.list_agents_for_service(connector_id),
+    }
 
 
 @router.get("/connectors/{connector_id}/lifecycle")
@@ -339,7 +369,7 @@ def test_oauth_connector(
     _current_user(authorization)
     try:
         # Get connector config to check if it exists
-        connector = connector_config_store.get_connector(connector_id)
+        connector = external_service_store.get_service(connector_id)
         if not connector:
             return {"success": False, "connector_id": connector_id, "error": "Connector not found"}
 
