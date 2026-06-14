@@ -118,12 +118,13 @@ Python 模型：`ImBinding`（顶层）+ per-platform `SlackBinding`/`TelegramBi
 
 ## 8. 分阶段落地（每阶段一个 OpenSpec change，串行——都碰 data-model + materialize）
 
-1. **阶段 1 — descope dead channel-route table**：删表 + `bound_version_id` 死列 + 相关 store/端点；ER 图/§3.2 同步。（最干净、无依赖）
-2. **阶段 2 — 立访问关系表 + 能力列**：建 `agent_im_users` / `agent_im_groups`，加 `supports_dm`/`supports_groups`；admin API 配置入口。（暂不接 materialize）
-3. **阶段 3 — materialize 接线 + agent.yaml `im` 块演进 + 闸按 chat_type 分流**：`ConnectorAccess`→`ImAccess`、`allow_channels`→`allow_groups`、平台表 materialize 进 `im` 块、准入闸实现 DM/群 双路 + 默认关。（核心，依赖 1/2）
-4. **阶段 4（可选）— "connector"(IM 义) 全量正名 `im`**：Python 类/agent.yaml 块名/测试随动。（纯整洁，可并入阶段 3 或单列）
+1. **阶段 1 — descope dead channel-route table** ✅ 已落地：删表 + `bound_version_id` 死列 + store/端点；ER 图/§3.2 同步。
+2. **阶段 2 — 立群白名单表 + 能力列** ✅ 已落地：建 `agent_im_groups`，加 `agents.supports_dm`/`supports_groups`；admin 配置入口。**`user_agents` 保留**（用户准入源，不改名）。
+3. **阶段 3 — materialize 接线 + 闸按 chat_type 分流（功能，零改名）** ⏳ 已 propose：平台表 materialize 进 agent.yaml access 块、准入闸 DM/群 双路 + **群默认关翻转**；退役旧文件绑定路由（C）。**保留所有名字**（`connectors`/`ConnectorAccess`/`allow_channels`）。
+4. **阶段 3b — im_users 瘦身为纯身份映射**（见 §11）：删 `owner_id` + `allowed`，补 FK `user_id`→users，provisioning 落 `edge_tenant`，封禁迁 `users.status`。**独立于闸**（碰 im_users/identity.py/server.py resolver/users，跟阶段 3 不同文件），可在阶段 3 后单独 propose。
+5. **阶段 4 — "connector"(IM 义) 全量正名 `im`**：`connectors`→`im` block、`ConnectorAccess`→`ImAccess`、`SlackConnector`→`SlackBinding`、`allow_channels`→`allow_groups`；Python 类/agent.yaml 块名/测试随动。纯改名、零行为。**外科手术式**——只动 IM-gateway 那几处，勿碰 tool/KB 的 `connectors`/`kb_connectors`。
 
-> 阶段顺序与 identity-model 同理：串行（Alembic 单链 + 都改 data-model/materialize）；逐个 just-ahead propose。
+> 阶段顺序与 identity-model 同理：串行（Alembic 单链 + 都改 data-model/materialize）；逐个 just-ahead propose。3b 文件面与阶段 3 不同，但仍建议排在阶段 3 后（避免 data-model/identity 文档并发编辑）。
 
 ## 9. 范围与取舍
 
@@ -136,4 +137,24 @@ Python 模型：`ImBinding`（顶层）+ per-platform `SlackBinding`/`TelegramBi
 - ~~能力 `supports_*` 落 `agents` 还是 `agent_versions`~~ **已定（2026-06-14）：落 `agents`**——能力是 agent 级策略立场、非版本化推理配置，并入 allowed_skills/features 族，避免版本回滚耦合。
 - ~~用户准入表命名~~ **已定：保留 `user_agents`**（跨平台、非 IM 专属，不加 im 前缀）；仅群白名单 `agent_im_groups` 带 im（平台特定）。
 - whatsapp owner-level 与本模型的统一（§9）——独立议题。
-- **身份/租户**（随本线一起做，见 [[identity-auth-model]]）：`owner_id` 误名（im_users.owner_id 实为 agent 名）、多租户 IM 身份守卫半成品（provisioning 落 default 而非 edge_tenant）、身份域 FK 缺口——phase 3 materialize/gate 落地时一并拉直。
+- ~~身份/租户（owner_id 误名、守卫半成品、FK 缺口）~~ **已定（2026-06-14）→ 见 §11（阶段 3b）**：im_users 瘦身为纯身份映射，owner_id/allowed 删除而非重键。
+
+## 11. 阶段 3b — im_users 瘦身为纯身份映射（已定 2026-06-14）
+
+**结论（修正早前的"owner_id→tenant_id 重键"过度设计）**：`im_users` 的唯一职责是 **`platform_user_id` ⇄ `user_id` 的双向身份查找**（入站：渠道身份→内部 User；出站：User→平台地址，给审批人发 DM 等）。`owner_id` 与 `allowed` **都删除**，不替换。
+
+### 为什么两列都不需要
+- **`owner_id`**（实为 agent 名，误名）：纯身份映射不需要作用域列——租户在 **User 身上**（`users.tenant_id`），不在 im_users 上。一个 `(platform, platform_user_id)` 全局唯一对应一个内部 User（**全局身份**模型：一个 IM 人 = 一个 User，属某租户）。
+- **`allowed`**（per-IM-身份准入标志）：与新访问模型重复——**访问** = `user_agents`/`allow_users`（闸，§4）；**封禁** = `users.status == "blocked"`（user_store 认证时已检查）。三层塌成两层，`allowed` 冗余。
+
+### 目标 schema / 行为
+- `im_users` 列：保留 `id` / `platform` / `platform_user_id` / `user_id` / `created_at` / `meta_json`；**删 `owner_id` + `allowed`**；UNIQUE 改 `(platform, platform_user_id)`；补 **FK `user_id`→users**。
+- **provisioning**：`get_or_create(platform, platform_user_id)` 首见时 `create_user(tenant_id=edge_tenant)`（edge_tenant = 收消息 bot 的 `agent.tenant_id`）——修掉"新用户落 default、非 default 租户 agent 被守卫拒"的 bug。
+- **封禁迁移**：im-user-allowlist 的 approve/block 流改用 `users.status`（封整个 User，而非 per-IM-身份 `allowed`）。
+- **守卫保留**：`user.tenant_id == edge_tenant`（强制"只能跟本租户 bot 说话"）。全局身份 + create-in-edge-tenant 下，人属首个 onboard 他的租户。
+- **不做**：跨租户同一人=两 User 的 per-tenant 身份重键（v1 一个人属一个 org，over-engineering）。
+
+### 其余身份域 FK 缺口（一并或随后）
+`im_users.user_id`→users、`api_keys.user_id`→users、`im_connectors`/`im_channel_allowlist`.`owner_id`→users（后两者另见 §9 whatsapp / B-descope）——补 FK 按上轮 tenancy 的"父删 RESTRICT / 引用 SET NULL"风格定 ondelete。
+
+> 关联 [[identity-auth-model]]（#4 Identity 端口）。owner 塌缩进 tenant 的终态见上次讨论：im_users(本节)+ im_channel_allowlist(descope)+ im_connectors(待 §9) 三处 owner_id 全退役后，模型只剩 tenant 一个作用域轴。
