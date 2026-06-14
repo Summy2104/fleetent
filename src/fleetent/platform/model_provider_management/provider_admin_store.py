@@ -1,8 +1,8 @@
-"""Management-source persistence for model providers and task_type routing.
+"""Management-source persistence for model providers.
 
 This is the single source the admin console writes to (db runtime, named params,
-no ORM). model-router runtime consuming these tables instead of its in-code ROUTES
-is a model-router-domain follow-up; this module owns only the management writes.
+no ORM). Runtime route selection lives elsewhere; this module owns only provider
+management writes.
 
 api_key is stored as given (it must be usable for connectivity tests) but is never
 returned to clients in plaintext — masking is applied in the API serialization layer.
@@ -130,10 +130,9 @@ def set_pricing(provider_id: str, input_price: float | None, output_price: float
 
 
 def delete_provider(provider_id: str) -> None:
-    """Delete a provider and remove it from every task_type route."""
+    """Delete a provider."""
     with _database().transaction() as conn:
         conn.execute("DELETE FROM model_providers WHERE id = :id", {"id": provider_id})
-        conn.execute("DELETE FROM model_routes WHERE provider_id = :id", {"id": provider_id})
 
 
 def get_provider(provider_id: str) -> dict[str, Any] | None:
@@ -161,44 +160,3 @@ def _decode(row: dict[str, Any]) -> dict[str, Any]:
         if out.get(jf):
             out[jf] = json.loads(out[jf])
     return out
-
-
-# --- task_type → provider routing (order = fallback priority) -----------------
-
-
-def set_route_order(task_type: str, provider_ids: list[str]) -> None:
-    """Replace the provider list for a task_type; list order is fallback priority."""
-    with _database().transaction() as conn:
-        conn.execute(
-            "DELETE FROM model_routes WHERE task_type = :task_type",
-            {"task_type": task_type},
-        )
-        for priority, provider_id in enumerate(provider_ids):
-            conn.execute(
-                """
-                INSERT INTO model_routes (task_type, provider_id, priority)
-                VALUES (:task_type, :provider_id, :priority)
-                """,
-                {"task_type": task_type, "provider_id": provider_id, "priority": priority},
-            )
-
-
-def get_route_providers(task_type: str) -> list[str]:
-    rows = (
-        _database()
-        .execute(
-            "SELECT provider_id FROM model_routes WHERE task_type = :task_type ORDER BY priority",
-            {"task_type": task_type},
-        )
-        .fetchall()
-    )
-    return [r["provider_id"] for r in rows]
-
-
-def list_route_task_types() -> list[str]:
-    rows = (
-        _database()
-        .execute("SELECT DISTINCT task_type FROM model_routes ORDER BY task_type")
-        .fetchall()
-    )
-    return [r["task_type"] for r in rows]

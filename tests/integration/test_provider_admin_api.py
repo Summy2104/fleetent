@@ -65,6 +65,9 @@ def _hdr(token: str) -> dict:
     return {"Authorization": f"Session {token}"}
 
 
+_LEGACY_ROUTES_PATH = "/admin/providers" + "/routes"
+
+
 def _add(client, token, pid="p", **kw):
     body = {
         "id": pid,
@@ -187,114 +190,30 @@ def test_connectivity_test_viewer_forbidden(fresh_client):
     )
 
 
-# --- route orchestration + fallback order (场景 116) -------------------------
+# --- route endpoints removed, health view retained ---------------------------
 
 
-def test_route_order_set_and_reorder(fresh_client):
+def test_routes_endpoints_removed_but_health_remains(fresh_client):
     token, _ = _session_for("admin")
     _add(fresh_client, token, pid="a")
-    _add(fresh_client, token, pid="b")
-    fresh_client.put(
-        "/admin/providers/routes/code", headers=_hdr(token), json={"provider_ids": ["a", "b"]}
+
+    assert fresh_client.get(_LEGACY_ROUTES_PATH, headers=_hdr(token)).status_code == 404
+    assert (
+        fresh_client.put(
+            f"{_LEGACY_ROUTES_PATH}/code",
+            headers=_hdr(token),
+            json={"provider_ids": ["a"]},
+        ).status_code
+        == 404
     )
-    assert store.get_route_providers("code") == ["a", "b"]
-    fresh_client.put(
-        "/admin/providers/routes/code", headers=_hdr(token), json={"provider_ids": ["b", "a"]}
+    assert (
+        fresh_client.get(f"{_LEGACY_ROUTES_PATH}/code/preview", headers=_hdr(token)).status_code
+        == 404
     )
-    assert store.get_route_providers("code") == ["b", "a"]
-    assert any(a["action"] == "provider.route_set" for a in audit.search_audit())
 
-
-def test_route_viewer_cannot_reorder(client):
-    token, _ = _session_for("viewer")
-    r = client.put(
-        "/admin/providers/routes/code", headers=_hdr(token), json={"provider_ids": ["a"]}
-    )
-    assert r.status_code == 403
-
-
-# --- unknown task_type falls back to default (场景 117) ----------------------
-
-
-def test_unconfigured_task_type_preview_falls_back(client):
-    token, _ = _session_for("admin")
-    r = client.get("/admin/providers/routes/never/preview", headers=_hdr(token))
-    assert r.json()["chain"] == []
-    assert r.json()["falls_back_to"] == "default"
-
-
-def test_configured_task_type_preview_chain(fresh_client):
-    token, _ = _session_for("admin")
-    _add(fresh_client, token, pid="a")
-    _add(fresh_client, token, pid="b")
-    fresh_client.put(
-        "/admin/providers/routes/code", headers=_hdr(token), json={"provider_ids": ["a", "b"]}
-    )
-    r = fresh_client.get("/admin/providers/routes/code/preview", headers=_hdr(token))
-    assert r.json()["chain"] == ["a", "b"]
-    assert r.json()["falls_back_to"] is None
-
-
-# --- fallback chain progressive simulation (4.5/4.6) -------------------------
-
-
-def test_preview_simulation_skips_down_provider(fresh_client, monkeypatch):
-    monkeypatch.setattr(
-        api,
-        "router_health_probe",
-        lambda: {"a": {"available": False, "recovers_at": "2026-06-02T10:00:00Z"}},
-    )
-    token, _ = _session_for("admin")
-    _add(fresh_client, token, pid="a")
-    _add(fresh_client, token, pid="b")
-    fresh_client.put(
-        "/admin/providers/routes/code", headers=_hdr(token), json={"provider_ids": ["a", "b"]}
-    )
-    r = fresh_client.get("/admin/providers/routes/code/preview", headers=_hdr(token))
-    body = r.json()
-    assert body["chain"] == ["a", "b"]
-    sim = body["simulation"]
-    assert [s["provider"] for s in sim] == ["a", "b"]
-    assert sim[0]["status"] == "down"
-    assert sim[0]["action"] == "skip"
-    assert sim[0]["recovers_at"] == "2026-06-02T10:00:00Z"
-    assert sim[1]["status"] == "up"
-    assert sim[1]["action"] == "selected"
-    assert body["selected"] == "b"
-
-
-def test_preview_simulation_all_down_selects_none(fresh_client, monkeypatch):
-    monkeypatch.setattr(
-        api,
-        "router_health_probe",
-        lambda: {
-            "a": {"available": False, "recovers_at": None},
-            "b": {"available": False, "recovers_at": None},
-        },
-    )
-    token, _ = _session_for("admin")
-    _add(fresh_client, token, pid="a")
-    _add(fresh_client, token, pid="b")
-    fresh_client.put(
-        "/admin/providers/routes/code", headers=_hdr(token), json={"provider_ids": ["a", "b"]}
-    )
-    r = fresh_client.get("/admin/providers/routes/code/preview", headers=_hdr(token))
-    body = r.json()
-    assert body["selected"] is None
-    assert all(s["action"] == "skip" for s in body["simulation"])
-
-
-def test_preview_simulation_empty_cache_selects_primary(fresh_client):
-    token, _ = _session_for("admin")
-    _add(fresh_client, token, pid="a")
-    _add(fresh_client, token, pid="b")
-    fresh_client.put(
-        "/admin/providers/routes/code", headers=_hdr(token), json={"provider_ids": ["a", "b"]}
-    )
-    r = fresh_client.get("/admin/providers/routes/code/preview", headers=_hdr(token))
-    body = r.json()
-    assert body["selected"] == "a"
-    assert body["simulation"][0]["action"] == "selected"
+    health = fresh_client.get("/admin/providers/health", headers=_hdr(token))
+    assert health.status_code == 200
+    assert health.json()["providers"] == [{"id": "a", "available": True, "recovers_at": None}]
 
 
 # --- health probe state view (4.7/4.8) --------------------------------------
@@ -361,19 +280,15 @@ def test_set_pricing_then_observability_uses_it(fresh_client, monkeypatch):
     assert r.json()["input_price_per_1k"] == 1.5
 
 
-# --- delete removes from routes + audit (场景 119) ---------------------------
+# --- delete audits without legacy route-table cleanup (场景 119) -------------
 
 
-def test_delete_provider_removes_from_routes_and_audits(fresh_client):
+def test_delete_provider_without_routes_cleanup_and_audits(fresh_client):
     token, _ = _session_for("admin")
     _add(fresh_client, token, pid="a")
-    _add(fresh_client, token, pid="b")
-    fresh_client.put(
-        "/admin/providers/routes/default", headers=_hdr(token), json={"provider_ids": ["a", "b"]}
-    )
     r = fresh_client.delete("/admin/providers/a", headers=_hdr(token))
     assert r.status_code == 200
-    assert store.get_route_providers("default") == ["b"]
+    assert store.get_provider("a") is None
     assert any(a["action"] == "provider.delete" for a in audit.search_audit())
 
 

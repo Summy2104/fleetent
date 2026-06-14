@@ -21,9 +21,3 @@ The console SHALL let an admin create, edit, delete a provider, run a connectivi
 - **WHEN** an admin runs a connectivity test on a provider
 - **THEN** the console calls `POST /admin/providers/{id}/connectivity-test` and shows the result
 
-### Requirement: Task-type routing
-The console SHALL show the task_type → provider route table and let an admin update a route (with preview).
-
-#### Scenario: Update a route
-- **WHEN** an admin sets a new provider for a task_type
-- **THEN** the console calls `PUT /admin/providers/routes/{task_type}` and the table reflects it

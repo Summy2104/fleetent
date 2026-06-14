@@ -1,5 +1,8 @@
+from pathlib import Path
+
 import pytest
 
+import fleetent.audit_log as top_level_audit
 import fleetent.governance.audit_log as audit
 from tests.integration._migration_template import apply_migrations
 
@@ -55,3 +58,11 @@ def test_batch_id_shared(db):
     audit.write_audit("admin1", "block_user", target_id="u2", batch_id="b-1")
     rows = [r for r in audit.search_audit(action="block_user") if r["batch_id"] == "b-1"]
     assert len(rows) == 2
+
+
+def test_audit_log_uses_named_sql_params():
+    source = Path(top_level_audit.__file__).read_text()
+    assert "VALUES (?, ?, ?, ?, ?, ?, ?)" not in source
+    assert " = ?" not in source
+    assert ":actor_user_id" in source
+    assert ":action" in source

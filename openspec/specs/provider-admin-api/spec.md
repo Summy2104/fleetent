@@ -4,18 +4,18 @@
 TBD - created by archiving change 2026-06-02-model-provider-management. Update Purpose after archive.
 ## Requirements
 ### Requirement: Provider listing with routing context
-The admin console SHALL list every configured provider showing its name, `base_url`, `model`, owning task_type(s), its priority position within each task_type fallback chain, and last connectivity status. The `api_key` SHALL never appear in plaintext.
+The admin console SHALL list every configured provider showing its name, `base_url`, `model`, and last connectivity status. The `api_key` SHALL never appear in plaintext. Listing no longer exposes owning task_type / fallback priority position; runtime routing truth lives in `ROUTES_PATH` YAML and agent-level `model_overrides`, not in a management DB table.
 
-#### Scenario: List shows masked key and routing position
+#### Scenario: List shows masked key
 - **WHEN** an admin opens the provider list
-- **THEN** each provider shows name, base_url, model, owning task_type(s), fallback priority position, and last connectivity status, with the `api_key` masked (prefix + `***` or full `***`) — never plaintext
+- **THEN** each provider shows name, base_url, model, and last connectivity status, with the `api_key` masked (prefix + `***` or full `***`) — never plaintext
 
 ### Requirement: Create, edit, and delete a provider
-An admin SHALL be able to add, edit, and delete a provider by supplying `base_url`, `model`, `api_key` (masked storage and display), `max_tokens`, `temperature`, and `extra_params` (provider-specific passthrough). Saving SHALL take effect without restarting the service, via the fleetent config write boundary. Deleting SHALL remove the provider from configuration and from all task_type routes.
+An admin SHALL be able to add, edit, and delete a provider by supplying `base_url`, `model`, `api_key` (masked storage and display), `max_tokens`, `temperature`, and `extra_params` (provider-specific passthrough). Saving SHALL take effect without restarting the service, via the fleetent config write boundary. Deleting SHALL remove the provider from configuration without any extra management-table route cleanup.
 
 #### Scenario: Add provider takes effect without restart
 - **WHEN** an admin adds a provider with base_url / model / api_key / max_tokens / temperature / extra_params
-- **THEN** the provider is persisted via the config write boundary and the next routing resolution reflects it without a service restart, and the stored `api_key` is masked in every view
+- **THEN** the provider is persisted via the config write boundary and is available to model resolution without a service restart, and the stored `api_key` is masked in every view
 
 #### Scenario: Edit leaves key unchanged when blank
 - **WHEN** an admin edits a provider and leaves the api_key field blank
@@ -23,7 +23,7 @@ An admin SHALL be able to add, edit, and delete a provider by supplying `base_ur
 
 #### Scenario: Delete provider writes audit
 - **WHEN** an admin deletes a provider and confirms
-- **THEN** the provider is removed from configuration and from all task_type routes, and the delete action is written to the audit log
+- **THEN** the provider is removed from configuration and the delete action is written to the audit log
 
 ### Requirement: Per-provider and per-model observability view
 The console SHALL show, per provider / model, call count, token usage, cost (only when a price is configured), error rate, average latency, and which task_types / Agents use it. The data source is the observability domain; this surface only aggregates by provider·model.
@@ -43,10 +43,9 @@ Across every view, response body, audit `detail`, and log line, the provider `ap
 Provider create / edit / delete SHALL be restricted to `admin` / `built_in_admin`. A `viewer` SHALL only browse provider configuration (key masked) and observability. Requests without a valid login session SHALL be rejected with 401.
 
 #### Scenario: Viewer cannot modify provider configuration
-- **WHEN** a viewer opens the model_provider management page and attempts to add / edit / delete a provider or change routing order
-- **THEN** the relevant controls are hidden or the request returns 403; the viewer may only browse configuration (key masked), routing order, and observability
+- **WHEN** a viewer opens the model_provider management page and attempts to add / edit / delete a provider
+- **THEN** the relevant controls are hidden or the request returns 403; the viewer may only browse configuration (key masked) and observability
 
 #### Scenario: Unauthenticated request rejected
 - **WHEN** a request to any `/admin/providers/*` endpoint carries no valid login session
 - **THEN** the response is 401
-
