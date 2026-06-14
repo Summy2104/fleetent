@@ -30,11 +30,11 @@ Skill 生命周期到目前为止是**单向**的：池 → 部署 → agent 运
 - **owning package**: `platform`（`skill_management` 回流流程 + 复用第 2 期池 git 提交/版本 + `agent_lifecycle/materialize` 重新物化）。
 - **public API surface**:
   - 新增回流端点：提名 / 列出回流候选、获取回流 diff（相对 base 与 head）、`accept`/`reject`/`fork` 决策端点（admin 治理鉴权）。
-  - 调用第 2 期池 git 写：accept→`commit_pool(...)`；diff←`pool_diff`/`pool_content_at`。
+  - 调用第 2 期池 git 写：accept→`commit_pool(...)`；diff←`pool_diff_for_commit`/`pool_content_at`。
   - `materialize`：accept/reject 后清 drift + 重新物化受影响 agent。
-- **owned tables**: 回流提案的持久化——优先复用 / 扩展 reflection 域的 `skill_proposals`（加一个 `backflow` kind + 来源 agent / base_version 字段），避免新建并行表；若结构不契合再评估新表（迁移号 apply 时定、不写死）。
+- **owned tables**: `backflow_proposals`（管理库，Alembic 迁移，号 apply 时定）。agent-side `skill_proposals` 已在 v26 DROP，不可复用；直接建管理侧独立表，无回退路径。
 - **config namespace**: 无新增。
-- **cross-module dependencies**: 依赖第 2 期 `skill-pool-versioning`（git 提交 / diff / 版本）；读 agent home 进化副本内容（platform→agent 单向读）；复用 reflection `skill_proposals` 存储。agent→platform 零反写不变。
-- **migration/shim plan**: 若复用 `skill_proposals` 加 kind/字段 → 轻量 Alembic 迁移（号 apply 时定）；无表删除。
+- **cross-module dependencies**: 依赖第 2 期 `skill-pool-versioning`（git 提交 / diff / 版本，函数：`commit_pool` / `pool_diff_for_commit` / `pool_content_at` / `pool_version_for_skill`）；读 agent home 进化副本内容（platform→agent 单向读）。agent→platform 零反写不变。
+- **migration/shim plan**: 新建管理库 `backflow_proposals` 表（Alembic 迁移，号 apply 时现取）；无表删除。
 - **依赖顺序**: 本 change 依赖第 2 期（`skill-pool-git-versioning`）已落地并 sync；**apply 前需在第 2 期 specs 同步后 `opsx:validate` 复核本 change 的 prose 引用与 base 是否一致**。
 - **out of scope**: 自动 merge（明确否决，只人工裁决冲突）；多租户池回流（远期）；`docs/architecture/data-model.md` 与主 specs 不在本 change 改（集成车道统一刷）。

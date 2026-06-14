@@ -67,12 +67,12 @@ review 时 SHALL 展示：agent 进化副本（home/skills/X 内容）相对 **`
 - **[accept 覆盖他人改动]** 冲突态 accept 覆盖 head → D4 强制显式确认 + 记录被覆盖的 head 版本，可经 git 历史回溯。
 - **[fork 致池膨胀]** fork 逐例由人选、非默认；若 fork 泛滥说明该 skill 本应是 agent 特化——运营可见、可治理（归档无用 fork）。
 - **[跨 change prose 漂移]** 本 change prose 引用第 2 期 git 能力；若第 2 期 apply 时接口/语义微调 → 本 change apply 前 `opsx:validate` + 人工复核引用，必要时小改 artifacts（注意：第 2 期 apply 开跑后别在 main 改第 2 期同名 artifacts）。
-- **[skill_proposals 复用不契合]** 若 backflow 字段与既有 schema 冲突 → 退化为独立表，迁移号 apply 时定、不写死。
+- **[skill_proposals 不可复用 — 已确认]** `skill_proposals` 在 agent_state_migrations v26 中已 DROP（agent-side 表已去除）；backflow 提案改用独立 Alembic 管理表 `backflow_proposals`，无需 fallback 判断。
 
 ## Migration Plan
 
 1. （若复用 `skill_proposals`）轻量 Alembic 迁移加 `backflow` kind + 来源 agent / `base_version` 字段（号 apply 时定）。
-2. 实现回流流程：提名 → diff（调第 2 期 `pool_diff`/`pool_content_at`）→ 治理审批 accept/reject/fork → accept 调 `commit_pool` + 清 drift + 重新物化。
+2. 实现回流流程：提名 → diff（调第 2 期 `pool_diff_for_commit`/`pool_content_at`）→ 治理审批 accept/reject/fork → accept 调 `commit_pool` + 清 drift + 重新物化。
 3. 命名正名审计：grep 残留 askit 品牌；仅正名「机制被误挂」者，保留合法 askit-facing（`askit_console` agent apply）。
 
 **Rollback**：回滚代码 + 反向迁移（摘除 `skill_proposals` 新增字段/kind）。已落池的回流 commit 保留在 git 历史（无害，回滚不擦池历史）。
