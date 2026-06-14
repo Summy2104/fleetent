@@ -1,4 +1,4 @@
-"""Owner-keyed IM identity mapping."""
+"""Global IM identity mapping no longer scopes rows by owner."""
 
 import pytest
 
@@ -14,32 +14,29 @@ def db(tmp_path, monkeypatch):
     return p
 
 
-def test_same_platform_user_reuses_internal_user_across_owners(db):
-    a = im_user_store.get_or_create("ownerA", "slack", "U1")
-    b = im_user_store.get_or_create("ownerB", "slack", "U1")
+def test_same_platform_user_has_single_global_mapping(db):
+    a = im_user_store.get_or_create("slack", "U1", "default")
+    b = im_user_store.get_or_create("slack", "U1", "default")
     assert a.id == b.id
-    owners = {(row["owner_id"], row["user_id"]) for row in im_user_store.list_all()}
-    assert owners == {("ownerA", a.id), ("ownerB", a.id)}
 
-
-def test_get_or_create_idempotent_per_owner(db):
-    a1 = im_user_store.get_or_create("ownerA", "slack", "U1")
-    a2 = im_user_store.get_or_create("ownerA", "slack", "U1")
-    assert a1.id == a2.id
-
-
-def test_list_all_includes_owner(db):
-    im_user_store.get_or_create("ownerA", "slack", "U1")
     rows = im_user_store.list_all()
-    assert rows and rows[0]["owner_id"] == "ownerA"
+    assert len(rows) == 1
+    assert rows[0]["platform"] == "slack"
+    assert rows[0]["platform_user_id"] == "U1"
+    assert rows[0]["user_id"] == a.id
 
 
-def test_block_isolated_per_owner(db):
-    a = im_user_store.get_or_create("ownerA", "slack", "U1")
-    im_user_store.get_or_create("ownerB", "slack", "U1")
-    # block owner A's identity row
-    a_row = next(r for r in im_user_store.list_all() if r["owner_id"] == "ownerA")
-    im_user_store.block_user(a_row["id"])
-    assert im_user_store.check_allowed_by_user_id(a.id) is False
-    b_row = next(r for r in im_user_store.list_all() if r["owner_id"] == "ownerB")
-    assert b_row["allowed"] is True
+def test_list_all_exposes_user_status_not_owner(db):
+    user = im_user_store.get_or_create("slack", "U1", "default")
+    row = im_user_store.list_all()[0]
+    assert "owner_id" not in row
+    assert row["user_id"] == user.id
+    assert row["status"] == "active"
+
+
+def test_block_updates_shared_user_status(db):
+    user = im_user_store.get_or_create("slack", "U1", "default")
+    row = im_user_store.list_all()[0]
+    im_user_store.block_im_user(row["id"])
+    assert im_user_store.check_allowed_by_user_id(user.id) is False
+    assert im_user_store.list_all()[0]["status"] == "blocked"
