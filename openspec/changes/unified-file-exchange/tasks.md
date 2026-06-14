@@ -41,8 +41,8 @@
 
 ## 4. 沙箱归属视图
 
-- [ ] 4.1 测试：视图目录维护（`.views/<scope_key>/` 按 scope_key 分组；登记补硬链接保持 `<server_id>/<rel>` 结构、重登记刷新链接、容器创建前确保目录存在、跨文件系统降级标记+日志）——integration，先红
-- [ ] 4.2 实现：`artifact_exchange` 视图管理（view_dir/链接增补/刷新）——绿
+- [x] 4.1 测试：视图目录维护（`.views/<scope_key>/` 按 scope_key 分组；登记补硬链接保持 `<server_id>/<rel>` 结构、重登记刷新链接、容器创建前确保目录存在、跨文件系统降级标记+日志）——integration，先红
+- [x] 4.2 实现：`artifact_exchange` 视图管理（view_dir/链接增补/刷新）——绿
 - [ ] 4.3 测试：`BackendCapabilities` 新增 `exchange_mount`（Docker=true）；容器创建携带视图 ro 挂载到 `/exchange`；同 scope_key 复用同视图；无能力后端不传挂载+降级日志——integration，先红
 - [ ] 4.4 实现：capability 位 + Docker 后端第二卷 ro 挂载 + manager 接线——绿
 - [ ] 4.5 测试：容器内 `/exchange` 只读 + 挂载后新增链接即时可见——以 **mock docker run 命令组装等价覆盖**（断言 `-v 视图:/exchange:ro` 选项装配 + 复用同视图）；真机断言加 `@pytest.mark.skipif`（无 docker 跳过），先红
