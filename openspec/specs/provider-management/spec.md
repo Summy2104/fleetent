@@ -356,17 +356,6 @@ CREATE TABLE model_providers (
     updated_by TEXT
 );
 
--- Task type routing configuration
-CREATE TABLE model_routes (
-    task_type TEXT NOT NULL,
-    provider_id TEXT NOT NULL,
-    priority INTEGER NOT NULL, -- Lower number = higher priority
-    weight INTEGER DEFAULT 100, -- For weighted routing
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (task_type, provider_id),
-    FOREIGN KEY (provider_id) REFERENCES model_providers(id) ON DELETE CASCADE
-);
-
 -- Provider health history
 CREATE TABLE provider_health_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
