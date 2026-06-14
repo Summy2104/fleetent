@@ -1,10 +1,11 @@
 """Unit tests for the send_file builtin tool (sandbox-file-egress / sandbox-file-send).
 
 send_file sends a product back to the FIXED current sender (from session_context),
-never a model-supplied recipient. Under §6/D0 the no-approval/escalate decision is a
-CALLABLE risk (_send_file_risk): low iff DM ∧ files owned by this run's scope ∧
-session_context present; otherwise medium approval (no longer a body-level fail-closed
-decline). Manager and connectors are mocked; no real DB/FastAPI.
+never a model-supplied recipient. Under the recipient-identity axis
+(approval-boundary-redesign) send_file is always no-approval (it can only reply to the
+current conversation, DM or channel); cross-scope artifacts are hard-refused by the
+/exchange resolver (covered in the integration suite). Manager and connectors are mocked;
+no real DB/FastAPI.
 """
 
 from __future__ import annotations
@@ -45,13 +46,13 @@ def _patch_manager(tmp_path: Path, scope: Scope = Scope.SESSION):
     return patch("fleetent.tools.builtin_tools._get_manager", return_value=manager)
 
 
-def test_send_file_registered_as_callable_risk() -> None:
+def test_send_file_registered_as_no_approval() -> None:
     import fleetent.tools.builtin_tools  # noqa: F401 — registration side effect
 
-    # §6/D7: send_file now carries a call-time callable risk (low/medium decided per call),
-    # not a static level. get_risk_level reports the conservative static view ("medium").
-    assert is_dynamic_risk("send_file")
-    assert get_risk_level("send_file") == "medium"
+    # approval-boundary-redesign: send_file is always no-approval (static "none"), not a
+    # call-time callable — it can only reply to the current conversation.
+    assert not is_dynamic_risk("send_file")
+    assert get_risk_level("send_file") == "none"
 
 
 def test_send_file_schema_exposes_only_path() -> None:
@@ -138,16 +139,14 @@ async def test_send_file_missing_file_returns_text(tmp_path) -> None:
     assert "不存在" in result or "找不到" in result
 
 
-# ── 2.3 escalate-vs-direct matrix (§6/D0: risk-level decides, body no longer declines) ──
+# ── 2.3 no-approval direct send (approval-boundary-redesign: reply to current convo) ──
 
 
-async def test_send_file_channel_escalates_via_risk(tmp_path) -> None:
-    from fleetent.tools.builtin_tools import _send_file_risk, send_file
+async def test_send_file_channel_sends_no_approval(tmp_path) -> None:
+    from fleetent.tools.builtin_tools import send_file
 
-    # A channel conversation → callable risk escalates to medium approval (not body decline).
-    assert _send_file_risk({"path": "x.csv"}, _ctx(chat_type="channel")) == "medium"
-    # The body itself no longer self-declines (the gate enforces escalation); when invoked
-    # directly (gate already passed) it sends to the harness-fixed recipient.
+    # A channel conversation: send_file replies into the current channel → no approval,
+    # direct send to the harness-fixed recipient.
     (tmp_path / "x.csv").write_bytes(b"x")
     with (
         _patch_manager(tmp_path),
@@ -165,12 +164,10 @@ async def test_send_file_channel_escalates_via_risk(tmp_path) -> None:
     assert "已把文件发送" in result
 
 
-async def test_send_file_agent_scope_dm_is_low_and_sends(tmp_path) -> None:
-    # D0: a workspace-relative file is always this run's scope; in a DM (single-user
-    # agent-scope) it is own-scope → low → direct send, not a fail-closed decline.
-    from fleetent.tools.builtin_tools import _send_file_risk, send_file
+async def test_send_file_workspace_file_sends(tmp_path) -> None:
+    # A workspace-relative file is always this run's scope → direct send, no approval.
+    from fleetent.tools.builtin_tools import send_file
 
-    assert _send_file_risk({"path": "x.csv"}, _ctx()) == "low"
     (tmp_path / "x.csv").write_bytes(b"x")
     with (
         _patch_manager(tmp_path, scope=Scope.AGENT),

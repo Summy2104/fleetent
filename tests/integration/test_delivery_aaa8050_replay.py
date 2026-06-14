@@ -47,7 +47,7 @@ def mock_loop_env(monkeypatch):
     monkeypatch.setattr(loop_mod, "log_run", lambda *a, **kw: None)
     monkeypatch.setattr(loop_mod, "extract_and_update", AsyncMock())
     monkeypatch.setattr(loop_mod, "available_skills_prompt", lambda *a, **k: "")
-    monkeypatch.setattr(loop_mod, "get_risk_level", lambda name: "low")
+    monkeypatch.setattr(loop_mod, "evaluate_risk_level", lambda name, args, ctx: "low")
     monkeypatch.setattr(loop_mod, "is_dynamic_risk", lambda name: False, raising=False)
     monkeypatch.setattr(
         loop_mod,

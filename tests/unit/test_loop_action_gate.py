@@ -116,7 +116,7 @@ def _spy_gate(monkeypatch, result: str = "approved") -> dict:
 
 async def test_critical_tool_rejected_without_gate(mock_loop_env, monkeypatch) -> None:
     mock_dispatch = AsyncMock(return_value="result")
-    monkeypatch.setattr(loop_mod, "get_risk_level", lambda name: "critical")
+    monkeypatch.setattr(loop_mod, "evaluate_risk_level", lambda name, args, ctx: "critical")
     monkeypatch.setattr(loop_mod, "dispatch", mock_dispatch)
     gate = _spy_gate(monkeypatch)
     mock_loop_env.chat.completions.create = _tool_response("nuke_everything")
@@ -133,7 +133,7 @@ async def test_critical_tool_rejected_without_gate(mock_loop_env, monkeypatch) -
 
 async def test_medium_default_routes_to_approval(mock_loop_env, monkeypatch) -> None:
     mock_dispatch = AsyncMock(return_value="result")
-    monkeypatch.setattr(loop_mod, "get_risk_level", lambda name: "medium")
+    monkeypatch.setattr(loop_mod, "evaluate_risk_level", lambda name, args, ctx: "medium")
     monkeypatch.setattr(loop_mod, "dispatch", mock_dispatch)
     gate = _spy_gate(monkeypatch, result="approved")
     mock_loop_env.chat.completions.create = _tool_response("write_file")
@@ -152,7 +152,7 @@ async def test_sandbox_mode_backed_tool_skips_approval(mock_loop_env, monkeypatc
     run is actually contained (effective mode != OFF). run_code execs in-container
     whenever the mode is on, regardless of host bind-mount."""
     mock_dispatch = AsyncMock(return_value="result")
-    monkeypatch.setattr(loop_mod, "get_risk_level", lambda name: "medium")
+    monkeypatch.setattr(loop_mod, "evaluate_risk_level", lambda name, args, ctx: "medium")
     monkeypatch.setattr(loop_mod, "dispatch", mock_dispatch)
     gate = _spy_gate(monkeypatch)
     mock_loop_env.chat.completions.create = _tool_response("run_code")
@@ -175,7 +175,7 @@ async def test_sandbox_mode_backed_tool_fails_closed_when_mode_off(
     """When the box is not closed (effective mode OFF), even a sandbox-backed tool
     configured as `sandbox` mode escalates to approval — no silent host-side run."""
     mock_dispatch = AsyncMock(return_value="result")
-    monkeypatch.setattr(loop_mod, "get_risk_level", lambda name: "medium")
+    monkeypatch.setattr(loop_mod, "evaluate_risk_level", lambda name, args, ctx: "medium")
     monkeypatch.setattr(loop_mod, "dispatch", mock_dispatch)
     gate = _spy_gate(monkeypatch, result="approved")
     mock_loop_env.chat.completions.create = _tool_response("run_code")
@@ -195,7 +195,7 @@ async def test_sandbox_mode_non_backed_tool_fails_closed_to_approval(
     mock_loop_env, monkeypatch
 ) -> None:
     mock_dispatch = AsyncMock(return_value="result")
-    monkeypatch.setattr(loop_mod, "get_risk_level", lambda name: "medium")
+    monkeypatch.setattr(loop_mod, "evaluate_risk_level", lambda name, args, ctx: "medium")
     monkeypatch.setattr(loop_mod, "dispatch", mock_dispatch)
     gate = _spy_gate(monkeypatch, result="approved")
     mock_loop_env.chat.completions.create = _tool_response("send_message")
@@ -253,7 +253,7 @@ def _tool_response_with_args(tool_name: str, args: dict):
 async def test_tool_args_cannot_downgrade_critical(mock_loop_env, monkeypatch) -> None:
     """LLM-supplied risk/risk_level in args must not relax a registry-critical tool."""
     mock_dispatch = AsyncMock(return_value="result")
-    monkeypatch.setattr(loop_mod, "get_risk_level", lambda name: "critical")
+    monkeypatch.setattr(loop_mod, "evaluate_risk_level", lambda name, args, ctx: "critical")
     monkeypatch.setattr(loop_mod, "dispatch", mock_dispatch)
     gate = _spy_gate(monkeypatch)
     mock_loop_env.chat.completions.create = _tool_response_with_args(
@@ -278,7 +278,7 @@ async def test_no_approver_reachable_rejects(mock_loop_env, monkeypatch) -> None
     from fleetent.governance.permission_gate import PermissionGate
 
     mock_dispatch = AsyncMock(return_value="result")
-    monkeypatch.setattr(loop_mod, "get_risk_level", lambda name: "high")
+    monkeypatch.setattr(loop_mod, "evaluate_risk_level", lambda name, args, ctx: "high")
     monkeypatch.setattr(loop_mod, "dispatch", mock_dispatch)
     gate = PermissionGate(medium_timeout=0.1, high_timeout=0.1)
     monkeypatch.setattr(loop_mod, "_default_gate", gate)

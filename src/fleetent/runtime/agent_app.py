@@ -307,6 +307,7 @@ async def _start_infra(agent: AgentFile, data_dir: Path) -> None:
                 headers=dict(s.headers),
                 connect_timeout=s.connect_timeout,
                 call_timeout=s.call_timeout,
+                approval_rules=list(s.approval_rules),
             )
             for s in agent.mcp_servers
         ]

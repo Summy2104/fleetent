@@ -51,7 +51,10 @@ def mock_loop_env(monkeypatch):
     monkeypatch.setattr(loop_mod, "log", lambda *a, **kw: None, raising=False)
     monkeypatch.setattr(loop_mod, "extract_and_update", AsyncMock())
     monkeypatch.setattr(loop_mod, "available_skills_prompt", lambda *a, **k: "")
+    # get_risk_level feeds the trace's static "risk" field; evaluate_risk_level feeds the
+    # gate decision (default low → ungated; reject-path tests override it below).
     monkeypatch.setattr(loop_mod, "get_risk_level", lambda name: "low")
+    monkeypatch.setattr(loop_mod, "evaluate_risk_level", lambda name, args, ctx: "low")
     monkeypatch.setattr(
         loop_mod,
         "resolve_limits",
@@ -312,7 +315,7 @@ async def test_resumed_approval_records_tool_call_for_session(trace_db, monkeypa
 async def test_rejected_placeholder_records_no_tool_call(trace_db, mock_loop_env, monkeypatch):
     # critical risk → Action Gate rejects, the slot becomes a placeholder, dispatch
     # never runs, and no tool_call event is recorded.
-    monkeypatch.setattr(loop_mod, "get_risk_level", lambda name: "critical")
+    monkeypatch.setattr(loop_mod, "evaluate_risk_level", lambda name, args, ctx: "critical")
     dispatch = AsyncMock(return_value="ok")
     monkeypatch.setattr(loop_mod, "dispatch", dispatch)
     mock_loop_env.chat.completions.create = _two_turn_tool_then_stop("nuke", {})

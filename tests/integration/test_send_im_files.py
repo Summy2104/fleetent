@@ -1,9 +1,11 @@
 """Integration: send_im_message `files` param + shared delivery kernel (§7).
 
-send_im_message stays recipient-explicit (always medium-gated), so a human approval here
-authorizes cross-scope artifact delivery: its `files` resolve through the same kernel as
-send_file but with approved=True. Invalid entries degrade per-file (skipped, not aborted);
-without `files` the behavior is unchanged.
+send_im_message is recipient-explicit. Under the recipient-identity axis
+(approval-boundary-redesign) a send to a third party is approval-gated, so a human approval
+authorizes cross-scope artifact delivery (its `files` resolve with approved=True); a reply to
+the current conversation is NOT gated, so cross-scope files are refused (approved=False).
+Invalid entries degrade per-file (skipped, not aborted); without `files` the behavior is
+unchanged.
 """
 
 from __future__ import annotations
@@ -106,6 +108,42 @@ async def test_send_im_message_delivers_cross_scope_artifact(_exchange):
         )
     send_file_to.assert_called_once()
     assert str(_exchange / "report.xlsx") == send_file_to.call_args.args[3]
+    assert "已发送" in result
+
+
+async def test_send_im_to_current_convo_refuses_cross_scope_file(_exchange):
+    from fleetent.tools.builtin_tools import send_im_message
+
+    # target == current sender (U1) → reply to the current conversation → NOT gated, so no
+    # human approval occurred → a cross-scope (K1) artifact while the run is K2 must be
+    # refused (skipped), never auto-authorized. The text still delivers.
+    artifact_exchange.register(server_id="gd", rel_path="report.xlsx", scope_key="K1")
+    with (
+        patch("fleetent.outbound.is_reachable", AsyncMock(return_value=True)),
+        patch(
+            "fleetent.outbound.send_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=True, platform="slack", target="x", target_type="user", kind="text"
+                )
+            ),
+        ),
+        patch(
+            "fleetent.outbound.send_file_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=True, platform="slack", target="x", target_type="user", kind="file"
+                )
+            ),
+        ) as send_file_to,
+    ):
+        result = await send_im_message(
+            target="U1",
+            text="here",
+            files=["/exchange/gd/report.xlsx"],
+            tool_context=_ctx("K2"),
+        )
+    send_file_to.assert_not_called()  # cross-scope file refused on the ungated reply path
     assert "已发送" in result
 
 

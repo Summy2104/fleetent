@@ -1,8 +1,9 @@
 """Integration: send_file delivers an /exchange artifact end-to-end (§6.3).
 
-A DM run sending an own-scope /exchange artifact resolves it through the ledger
-(approved=True — the gate already vetted attribution via the callable risk) and delivers
-the real host file to the harness-fixed recipient.
+A run sending an own-scope /exchange artifact resolves it through the ledger and delivers
+the real host file to the harness-fixed recipient. send_file is never approval-gated
+(approval-boundary-redesign) and therefore has no cross-scope escape: an artifact owned by
+another scope is hard-refused (resolve with approved=False), pointing to send_im_message.
 """
 
 from __future__ import annotations
@@ -67,6 +68,24 @@ async def test_send_file_delivers_own_scope_exchange_artifact(_exchange):
     # the resolved host file (under the server root) is what gets delivered
     assert str(_exchange / "report.xlsx") == send.call_args.args[3]
     assert "已把文件发送" in result
+
+
+async def test_send_file_cross_scope_artifact_hard_refused(_exchange):
+    from fleetent.tools.builtin_tools import send_file
+
+    # artifact owned by K1; the current run is K2 → cross-scope. send_file has no approval
+    # escape, so it must hard-refuse and point to send_im_message, never deliver.
+    artifact_exchange.register(server_id="gd", rel_path="report.xlsx", scope_key="K1")
+    mgr = MagicMock()
+    mgr.scope = Scope.SESSION
+    with (
+        patch("fleetent.tools.builtin_tools._get_manager", return_value=mgr),
+        patch("fleetent.outbound.send_file_to", AsyncMock()) as send,
+    ):
+        result = await send_file(path="/exchange/gd/report.xlsx", tool_context=_ctx("K2"))
+    send.assert_not_called()
+    assert "无法发送" in result
+    assert "send_im_message" in result
 
 
 async def test_send_file_exchange_gone_reports_error(_exchange):

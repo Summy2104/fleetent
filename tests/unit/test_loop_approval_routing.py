@@ -106,7 +106,7 @@ async def test_permission_gate_disabled_tool_dispatched(
 ) -> None:
     """permission_gate_enabled=False: medium-risk tool dispatched without approval."""
     mock_dispatch = AsyncMock(return_value="result")
-    monkeypatch.setattr(loop_mod, "get_risk_level", lambda name: "medium")
+    monkeypatch.setattr(loop_mod, "evaluate_risk_level", lambda name, args, ctx: "medium")
     monkeypatch.setattr(loop_mod, "dispatch", mock_dispatch)
 
     mock_loop_env.chat.completions.create = _tool_response("write_file")
@@ -131,7 +131,7 @@ async def test_approval_routing_forwarded_to_gate(
     from fleetent.governance.permission_gate import PermissionGate
 
     mock_dispatch = AsyncMock(return_value="result")
-    monkeypatch.setattr(loop_mod, "get_risk_level", lambda name: "high")
+    monkeypatch.setattr(loop_mod, "evaluate_risk_level", lambda name, args, ctx: "high")
     monkeypatch.setattr(loop_mod, "dispatch", mock_dispatch)
     mock_loop_env.chat.completions.create = _tool_response("delete_db")
 
@@ -173,7 +173,7 @@ async def test_medium_no_approver_is_rejected_not_self_confirmed(
     from fleetent.agent_config import ApprovalRouting
 
     mock_dispatch = AsyncMock(return_value="result")
-    monkeypatch.setattr(loop_mod, "get_risk_level", lambda name: "medium")
+    monkeypatch.setattr(loop_mod, "evaluate_risk_level", lambda name, args, ctx: "medium")
     monkeypatch.setattr(loop_mod, "dispatch", mock_dispatch)
     mock_loop_env.chat.completions.create = _tool_response("run_code")
 
