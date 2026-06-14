@@ -30,7 +30,7 @@ def test_migration_creates_tables(store_db):
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     conn.close()
     assert "agent_skills" in tables
-    assert "skill_provenance" in tables
+    assert "skills" in tables
 
 
 def test_agent_skills_columns(store_db):
@@ -40,16 +40,20 @@ def test_agent_skills_columns(store_db):
     assert cols >= {"agent_id", "skill_name", "enabled", "updated_at", "updated_by"}
 
 
-def test_skill_provenance_columns(store_db):
+def test_skills_master_columns(store_db):
     conn = sqlite3.connect(store_db)
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(skill_provenance)")}
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(skills)")}
     conn.close()
     assert cols >= {
-        "skill_name",
+        "name",
+        "status",
+        "global_enabled",
+        "audit_verdict",
+        "audit_rules",
+        "forced",
         "source",
-        "drift",
         "immutable_fields",
-        "last_deploy_at",
+        "current_version",
         "updated_at",
     }
 
@@ -123,40 +127,59 @@ def test_integer_agent_id_crud(store_db):
     assert skill_admin_store.enabled_skill_names(agent.id) == {"summarizer"}
 
 
-# --- 3. provenance + drift ---
+# --- 3. skills master table + per-agent drift ---
 
 
-def test_set_and_get_provenance(store_db):
-    skill_admin_store.set_provenance("summarizer", "adhoc")
-    assert skill_admin_store.get_provenance("summarizer")["source"] == "adhoc"
-    skill_admin_store.set_provenance("summarizer", "managed")
-    assert skill_admin_store.get_provenance("summarizer")["source"] == "managed"
+def test_state_reads_and_writes_skills_master_table(store_db):
+    state = skill_admin_store.get_state("never-set")
+    assert state["status"] == "active"
+    assert state["global_enabled"] == 1
+
+    skill_admin_store.set_global_enabled("summarizer", False)
+    skill_admin_store.set_status("summarizer", "quarantined")
+
+    conn = sqlite3.connect(store_db)
+    try:
+        row = conn.execute(
+            "SELECT name, status, global_enabled FROM skills WHERE name = ?",
+            ("summarizer",),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row == ("summarizer", "quarantined", 0)
 
 
-def test_unknown_provenance_defaults_to_adhoc(store_db):
-    # UI-created skills with no explicit provenance row are treated as adhoc.
-    assert skill_admin_store.get_provenance("never-set")["source"] == "adhoc"
-    assert skill_admin_store.get_provenance("never-set")["drift"] == 0
+def test_catalog_source_and_binding_upsert_missing_skill_rows(store_db):
+    agent = agent_store.create_agent("agent-a", "Prompt.", ["shell"])
+    skill_admin_store.set_source("summarizer", "managed", immutable_fields=["name"])
+    skill_admin_store.set_binding(agent.id, "translator", enabled=True, updated_by="admin")
+
+    assert skill_admin_store.get_source("summarizer") == {
+        "skill_name": "summarizer",
+        "source": "managed",
+        "immutable_fields": '["name"]',
+        "current_version": None,
+    }
+    assert skill_admin_store.get_source("translator") == {
+        "skill_name": "translator",
+        "source": "adhoc",
+        "immutable_fields": None,
+        "current_version": None,
+    }
 
 
-def test_mark_and_clear_drift(store_db):
-    skill_admin_store.set_provenance("summarizer", "managed")
-    skill_admin_store.mark_drift("summarizer")
-    assert skill_admin_store.get_provenance("summarizer")["drift"] == 1
-    skill_admin_store.clear_drift("summarizer")
-    assert skill_admin_store.get_provenance("summarizer")["drift"] == 0
+def test_per_agent_drift_isolated_by_agent_skill_row(store_db):
+    agent_a = agent_store.create_agent("agent-a", "Prompt.", ["shell"])
+    agent_b = agent_store.create_agent("agent-b", "Prompt.", ["shell"])
+    skill_admin_store.set_binding(agent_a.id, "summarizer", enabled=True, updated_by="admin")
+    skill_admin_store.set_binding(agent_b.id, "summarizer", enabled=True, updated_by="admin")
 
+    skill_admin_store.set_drift(agent_a.id, "summarizer", drifted=True)
 
-def test_immutable_field_change_flagged(store_db):
-    skill_admin_store.set_provenance("summarizer", "managed", immutable_fields=["name"])
-    # changing an immutable field on a managed skill returns a warning flag
-    assert skill_admin_store.is_immutable_change("summarizer", {"name"}) is True
-    assert skill_admin_store.is_immutable_change("summarizer", {"description"}) is False
-
-
-def test_adhoc_skill_has_no_immutable_constraint(store_db):
-    skill_admin_store.set_provenance("widget", "adhoc")
-    assert skill_admin_store.is_immutable_change("widget", {"name"}) is False
+    assert skill_admin_store.get_drift(agent_a.id, "summarizer")["drift"] == 1
+    assert skill_admin_store.get_drift(agent_b.id, "summarizer")["drift"] == 0
+    assert skill_admin_store.drifted_agents("summarizer") == [agent_a.id]
 
 
 # --- management state ---

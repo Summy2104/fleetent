@@ -362,6 +362,152 @@ def test_write_home_skill_copy_is_idempotent(db, tmp_path, monkeypatch):
     assert (home / "skills" / "crm-ops" / "SKILL.md").is_file()
 
 
+def test_write_home_preserves_drifted_skill_copy_and_logs_skip(db, tmp_path, monkeypatch):
+    from fleetent.platform.skill_management import skill_admin_store
+
+    class _Logger:
+        def __init__(self) -> None:
+            self.events: list[tuple[str, dict[str, object]]] = []
+
+        def debug(self, *_args, **_kwargs) -> None:
+            return None
+
+        def warn(self, name: str, **kwargs) -> None:
+            self.events.append((name, kwargs))
+
+        def info(self, name: str, **kwargs) -> None:
+            self.events.append((name, kwargs))
+
+    skills_src = tmp_path / "global_skills"
+    (skills_src / "crm-ops").mkdir(parents=True)
+    (skills_src / "crm-ops" / "SKILL.md").write_text(
+        "---\nname: crm-ops\ndescription: CRM ops\n---\npool-v1", encoding="utf-8"
+    )
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(skills_src))
+    logger = _Logger()
+    monkeypatch.setattr(materialize, "_logger", logger)
+
+    agent = agent_store.create_agent("support", "p", [])
+    skill_admin_store.set_binding(agent.id, "crm-ops", True, updated_by=None)
+
+    home = materialize.write_home(materialize.agent_file_from_store(agent), source_agent=agent)
+    evolved = home / "skills" / "crm-ops" / "SKILL.md"
+    evolved.write_text(
+        "---\n"
+        "name: crm-ops\n"
+        "description: CRM ops\n"
+        "proposal_id: pr-1\n"
+        "applied_at: 2026-06-14T00:00:00+00:00\n"
+        "---\n"
+        "evolved-copy",
+        encoding="utf-8",
+    )
+
+    materialize.write_home(materialize.agent_file_from_store(agent), source_agent=agent)
+
+    assert "evolved-copy" in evolved.read_text(encoding="utf-8")
+    assert skill_admin_store.get_drift(agent.id, "crm-ops")["drift"] == 1
+    assert any(event[0] == "agent_home_skill_copy_skipped_drift" for event in logger.events)
+
+
+def test_write_home_refreshes_non_drifted_skill_and_updates_base_version(db, tmp_path, monkeypatch):
+    from fleetent.platform.skill_management import skill_admin_store
+
+    skills_src = tmp_path / "global_skills"
+    (skills_src / "billing").mkdir(parents=True)
+    skill_file = skills_src / "billing" / "SKILL.md"
+    skill_file.write_text(
+        "---\nname: billing\ndescription: Billing ops\n---\npool-v1", encoding="utf-8"
+    )
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(skills_src))
+
+    agent = agent_store.create_agent("support", "p", [])
+    skill_admin_store.set_binding(agent.id, "billing", True, updated_by=None)
+
+    home = materialize.write_home(materialize.agent_file_from_store(agent), source_agent=agent)
+    skill_file.write_text(
+        "---\nname: billing\ndescription: Billing ops\n---\npool-v2", encoding="utf-8"
+    )
+
+    materialize.write_home(materialize.agent_file_from_store(agent), source_agent=agent)
+
+    copied = home / "skills" / "billing" / "SKILL.md"
+    drift = skill_admin_store.get_drift(agent.id, "billing")
+    assert "pool-v2" in copied.read_text(encoding="utf-8")
+    assert drift["drift"] == 0
+    assert drift["base_version"] == materialize._skill_dir_version(skills_src / "billing")
+
+
+def test_write_home_handles_drift_per_skill_subdirectory(db, tmp_path, monkeypatch):
+    from fleetent.platform.skill_management import skill_admin_store
+
+    skills_src = tmp_path / "global_skills"
+    for name, body in {"crm-ops": "pool-crm-v1", "billing": "pool-billing-v1"}.items():
+        (skills_src / name).mkdir(parents=True)
+        (skills_src / name / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: {name}\n---\n{body}",
+            encoding="utf-8",
+        )
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(skills_src))
+
+    agent = agent_store.create_agent("support", "p", [])
+    skill_admin_store.set_binding(agent.id, "crm-ops", True, updated_by=None)
+    skill_admin_store.set_binding(agent.id, "billing", True, updated_by=None)
+
+    home = materialize.write_home(materialize.agent_file_from_store(agent), source_agent=agent)
+    (home / "skills" / "crm-ops" / "SKILL.md").write_text(
+        "---\n"
+        "name: crm-ops\n"
+        "description: crm-ops\n"
+        "proposal_id: pr-1\n"
+        "applied_at: 2026-06-14T00:00:00+00:00\n"
+        "---\n"
+        "evolved-crm",
+        encoding="utf-8",
+    )
+    (skills_src / "billing" / "SKILL.md").write_text(
+        "---\nname: billing\ndescription: billing\n---\npool-billing-v2",
+        encoding="utf-8",
+    )
+
+    materialize.write_home(materialize.agent_file_from_store(agent), source_agent=agent)
+
+    assert "evolved-crm" in (home / "skills" / "crm-ops" / "SKILL.md").read_text(encoding="utf-8")
+    assert "pool-billing-v2" in (home / "skills" / "billing" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert skill_admin_store.get_drift(agent.id, "crm-ops")["drift"] == 1
+    assert skill_admin_store.get_drift(agent.id, "billing")["drift"] == 0
+
+
+def test_write_home_marks_drift_from_hash_mismatch_without_runtime_platform_write(
+    db, tmp_path, monkeypatch
+):
+    from fleetent.platform.skill_management import skill_admin_store
+
+    skills_src = tmp_path / "global_skills"
+    (skills_src / "search").mkdir(parents=True)
+    (skills_src / "search" / "SKILL.md").write_text(
+        "---\nname: search\ndescription: Search\n---\npool-v1", encoding="utf-8"
+    )
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(skills_src))
+
+    agent = agent_store.create_agent("support", "p", [])
+    skill_admin_store.set_binding(agent.id, "search", True, updated_by=None)
+
+    home = materialize.write_home(materialize.agent_file_from_store(agent), source_agent=agent)
+    local_copy = home / "skills" / "search" / "SKILL.md"
+    local_copy.write_text(
+        "---\nname: search\ndescription: Search\n---\noperator-edit",
+        encoding="utf-8",
+    )
+
+    materialize.write_home(materialize.agent_file_from_store(agent), source_agent=agent)
+
+    assert "operator-edit" in local_copy.read_text(encoding="utf-8")
+    assert skill_admin_store.get_drift(agent.id, "search")["drift"] == 1
+
+
 # ── list_all_names + rematerialize_all (skill-admin-trigger-rematerialize) ────
 
 
