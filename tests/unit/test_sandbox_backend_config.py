@@ -60,3 +60,42 @@ def test_agent_file_sandbox_section_parsed() -> None:
     )
     assert af.sandbox.backend == "microsandbox"
     assert af.sandbox.microsandbox.image == "alpine"
+
+
+# ── docker image config (sandbox-image-config) ──
+
+
+def test_docker_image_none_when_absent(tmp_path: Path) -> None:
+    cfg = load_sandbox_backend_config(tmp_path / "missing.yaml")
+    assert cfg.docker_image is None
+
+
+def test_backend_reads_docker_image(tmp_path: Path) -> None:
+    cfg = load_sandbox_backend_config(
+        _write(tmp_path, "sandbox:\n  docker:\n    image: fleetent-sandbox:0.1.0\n")
+    )
+    assert cfg.docker_image == "fleetent-sandbox:0.1.0"
+
+
+def test_docker_image_blank_is_none(tmp_path: Path) -> None:
+    cfg = load_sandbox_backend_config(_write(tmp_path, "sandbox:\n  docker:\n    image: '   '\n"))
+    assert cfg.docker_image is None
+
+
+def test_agent_file_sandbox_docker_image_default() -> None:
+    from fleetent.agent_config import AgentFile, default_models
+
+    af = AgentFile(name="a", version=1, models=default_models())
+    assert af.sandbox.docker.image is None
+
+
+def test_agent_file_sandbox_docker_image_parsed() -> None:
+    from fleetent.agent_config import AgentFile, default_models
+
+    af = AgentFile(
+        name="a",
+        version=1,
+        models=default_models(),
+        sandbox={"docker": {"image": "fleetent-sandbox:0.1.0"}},
+    )
+    assert af.sandbox.docker.image == "fleetent-sandbox:0.1.0"
