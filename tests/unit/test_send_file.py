@@ -1,9 +1,10 @@
 """Unit tests for the send_file builtin tool (sandbox-file-egress / sandbox-file-send).
 
-send_file sends a workspace product back to the FIXED current sender (from
-session_context), never a model-supplied recipient. No-approval iff
-workspace_scope==session AND chat_type==dm AND session_context present; otherwise
-fail-closed. Manager and connectors are mocked; no real DB/FastAPI.
+send_file sends a product back to the FIXED current sender (from session_context),
+never a model-supplied recipient. Under §6/D0 the no-approval/escalate decision is a
+CALLABLE risk (_send_file_risk): low iff DM ∧ files owned by this run's scope ∧
+session_context present; otherwise medium approval (no longer a body-level fail-closed
+decline). Manager and connectors are mocked; no real DB/FastAPI.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from fleetent.im_gateway.normalizer import SessionContext
 from fleetent.integrations.sandbox import Scope
-from fleetent.tools.registry import ToolContext, get_risk_level
+from fleetent.tools.registry import ToolContext, get_risk_level, is_dynamic_risk
 
 
 def _ctx(
@@ -43,10 +44,13 @@ def _patch_manager(tmp_path: Path, scope: Scope = Scope.SESSION):
     return patch("fleetent.tools.builtin_tools._get_manager", return_value=manager)
 
 
-def test_send_file_registered_as_none_risk() -> None:
+def test_send_file_registered_as_callable_risk() -> None:
     import fleetent.tools.builtin_tools  # noqa: F401 — registration side effect
 
-    assert get_risk_level("send_file") == "none"
+    # §6/D7: send_file now carries a call-time callable risk (low/medium decided per call),
+    # not a static level. get_risk_level reports the conservative static view ("medium").
+    assert is_dynamic_risk("send_file")
+    assert get_risk_level("send_file") == "medium"
 
 
 def test_send_file_schema_exposes_only_path() -> None:
@@ -112,35 +116,40 @@ async def test_send_file_missing_file_returns_text(tmp_path) -> None:
     assert "不存在" in result or "找不到" in result
 
 
-# ── 2.3 fail-closed matrix ───────────────────────────────────────────────────
+# ── 2.3 escalate-vs-direct matrix (§6/D0: risk-level decides, body no longer declines) ──
 
 
-async def test_send_file_channel_fail_closed(tmp_path) -> None:
-    from fleetent.tools.builtin_tools import send_file
+async def test_send_file_channel_escalates_via_risk(tmp_path) -> None:
+    from fleetent.tools.builtin_tools import _send_file_risk, send_file
 
+    # A channel conversation → callable risk escalates to medium approval (not body decline).
+    assert _send_file_risk({"path": "x.csv"}, _ctx(chat_type="channel")) == "medium"
+    # The body itself no longer self-declines (the gate enforces escalation); when invoked
+    # directly (gate already passed) it sends to the harness-fixed recipient.
     (tmp_path / "x.csv").write_bytes(b"x")
     with (
         _patch_manager(tmp_path),
         patch("fleetent.outbound.send_file_to", AsyncMock(return_value=True)) as send,
     ):
         result = await send_file(path="x.csv", tool_context=_ctx(chat_type="channel"))
+    send.assert_called_once()
+    assert "已把文件发送" in result
 
-    send.assert_not_called()
-    assert "send_im_message" in result
 
+async def test_send_file_agent_scope_dm_is_low_and_sends(tmp_path) -> None:
+    # D0: a workspace-relative file is always this run's scope; in a DM (single-user
+    # agent-scope) it is own-scope → low → direct send, not a fail-closed decline.
+    from fleetent.tools.builtin_tools import _send_file_risk, send_file
 
-async def test_send_file_agent_scope_fail_closed(tmp_path) -> None:
-    from fleetent.tools.builtin_tools import send_file
-
+    assert _send_file_risk({"path": "x.csv"}, _ctx()) == "low"
     (tmp_path / "x.csv").write_bytes(b"x")
     with (
         _patch_manager(tmp_path, scope=Scope.AGENT),
         patch("fleetent.outbound.send_file_to", AsyncMock(return_value=True)) as send,
     ):
         result = await send_file(path="x.csv", tool_context=_ctx())
-
-    send.assert_not_called()
-    assert "send_im_message" in result
+    send.assert_called_once()
+    assert "已把文件发送" in result
 
 
 async def test_send_file_no_session_context_fail_closed(tmp_path) -> None:

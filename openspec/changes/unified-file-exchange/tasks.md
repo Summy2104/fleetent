@@ -57,15 +57,15 @@
 
 ## 6. send_file 升级语义
 
-- [ ] 6.1 测试：send_file 风险函数真值表（四条件全满足→low，含单人 agent scope 本 scope 文件 DM 直发；频道/跨 scope 工件→medium；`session_context=None` 仍 fail-closed 不升级）——unit，先红
-- [ ] 6.2 实现：send_file 接 `/exchange` 路径 + callable risk + 升级审批路径（批准后 `approved=True` 解析发送），替换原 fail-closed 拒绝文案——绿
-- [ ] 6.3 测试：免审批直发与升级审批端到端（DM 本会话工件直发回显收件人；频道场景批准后发出、拒绝后不发）——integration，先红
-- [ ] 6.4 实现：修复联动（EGRESS 提示文案更新指向新语义）——绿
+- [x] 6.1 测试：send_file 风险函数真值表（四条件全满足→low，含单人 agent scope 本 scope 文件 DM 直发；频道/跨 scope 工件→medium；`session_context=None` 仍 fail-closed 不升级）——unit，先红
+- [x] 6.2 实现：send_file 接 `/exchange` 路径 + callable risk + 升级审批路径（批准后 `approved=True` 解析发送），替换原 fail-closed 拒绝文案——绿
+- [x] 6.3 测试：免审批直发与升级审批端到端（DM 本会话工件直发回显收件人；频道场景批准后发出、拒绝后不发）——integration，先红
+- [x] 6.4 实现：修复联动（EGRESS 提示文案更新指向新语义）——绿
 
 ## 7. send_im_message 附件能力
 
-- [ ] 7.1 测试：`files` 参数（批准后文本+附件投递；跨会话工件批准即授权；无效条目逐文件降级不中断；任意参数组合恒过 medium gate；不带 files 行为与现状一致）——integration，先红
-- [ ] 7.2 实现：`files` 参数 + 共享投递内核（与 send_file 同一解析/发送核）——绿
+- [x] 7.1 测试：`files` 参数（批准后文本+附件投递；跨会话工件批准即授权；无效条目逐文件降级不中断；任意参数组合恒过 medium gate；不带 files 行为与现状一致）——integration，先红
+- [x] 7.2 实现：`files` 参数 + 共享投递内核（与 send_file 同一解析/发送核）——绿
 
 ## 8. 收尾
 

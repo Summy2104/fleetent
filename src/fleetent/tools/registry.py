@@ -78,7 +78,7 @@ def tool[F: ToolFn](fn: F) -> F: ...
 @overload
 def tool(
     *,
-    risk_level: str = "none",
+    risk_level: "str | RiskFn" = "none",
     connector: str | None = None,
     scopes: list[str] | None = None,
     timeout: float | None = None,
