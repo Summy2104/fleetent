@@ -98,6 +98,7 @@ class MicrosandboxBackend(BaseSandboxBackend):
         workspace_host_path: str | None = None,
         config_hash: str | None = None,
         skill_mount: SkillMount | None = None,
+        exchange_view_path: str | None = None,  # ignored: no exchange_mount → staging degrade
     ) -> str:
         """Start a microVM named `name`, returning the name as the workspace id.
 

@@ -305,8 +305,22 @@ class SandboxManager:
         # contributes to config_hash — changing it rebuilds a reused container. A blocked
         # source raises here, before any create.
         skill_mount = self._resolve_skill_mount()
+        # unified-file-exchange: on a capable backend, ro-mount the run's scope view dir at
+        # /exchange (ensured to exist, possibly empty, before create). Keyed by the same
+        # scope_key as /workspace, so consumption and attribution agree.
+        exchange_view_path: str | None = None
+        if self.backend.capabilities.exchange_mount:
+            from fleetent import artifact_exchange
+
+            view = artifact_exchange.view_dir(workspace_scope_key(scope, session_id, agent_name))
+            exchange_view_path = str(view) if view is not None else None
         desired_hash = config_hash(
-            image, self.resources_for(scope), env, host_path, skill_mount=skill_mount
+            image,
+            self.resources_for(scope),
+            env,
+            host_path,
+            skill_mount=skill_mount,
+            exchange_view_path=exchange_view_path,
         )
 
         existing = await self.backend.find_workspace(name)
@@ -334,6 +348,7 @@ class SandboxManager:
             workspace_host_path=host_path,
             config_hash=desired_hash,
             skill_mount=skill_mount,
+            exchange_view_path=exchange_view_path,
         )
         self._registry[name] = _Entry(workspace_id, scope, key, now)
         return workspace_id

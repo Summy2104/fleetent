@@ -76,6 +76,9 @@ class BackendCapabilities:
     persist_workspace: bool
     workspace_mount: bool
     orphan_cleanup: bool
+    # unified-file-exchange: bind-mount the run's scope view dir read-only at /exchange.
+    # Defaults False so test stubs / backends that don't opt in degrade to staging copy.
+    exchange_mount: bool = False
 
 
 class BaseSandboxBackend(ABC):
@@ -111,8 +114,13 @@ class BaseSandboxBackend(ABC):
         workspace_host_path: str | None = None,
         config_hash: str | None = None,
         skill_mount: SkillMount | None = None,
+        exchange_view_path: str | None = None,
     ) -> str:
         """Start an isolated workspace under `name`, returning its workspace id.
+
+        `exchange_view_path` (unified-file-exchange) optionally ro-mounts the run's scope
+        view dir at /exchange on an `exchange_mount`-capable backend; None / incapable
+        backends ignore it (consumption degrades to staging copy).
 
         `skill_mount` (sandbox-skill-mount) optionally bind-mounts a host skills root
         at /workspace/skills and injects `SKILLS_DIR`; None keeps the prior behaviour
