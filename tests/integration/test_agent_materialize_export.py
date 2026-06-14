@@ -67,7 +67,6 @@ def test_agent_file_from_store_exports_authored_runtime_config(db):
     )
     agent_store.bind_mcp_server(agent.id, "docs")
     agent_store.assign_user("u_alice", agent.id)
-    agent_store.assign_channel("slack", "C0123", agent.id)
     agent_kbs_store.bind("acme", "support-kb", agent.id, created_by="admin")
 
     exported = materialize.agent_file_from_store(agent_store.get_by_name("support"))

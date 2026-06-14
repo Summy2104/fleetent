@@ -3,7 +3,7 @@
 askit's fleetent deployer does not write SQLite directly — it POSTs compiled agent
 definitions here and fleetent upserts them, so fleetent stays the sole writer of its
 own DB. Apply owns only the agent *definition* (name immutable; system_prompt /
-allowed_tools / model mutable). Bindings (user_agents / channel_agents) are runtime
+allowed_tools / model mutable). Bindings (user_agents) are runtime
 state and are never overwritten by apply.
 
 Provenance is tracked in agent_admin_store: applied agents become managed (spec_owned);

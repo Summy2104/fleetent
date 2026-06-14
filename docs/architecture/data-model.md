@@ -69,7 +69,6 @@ graph TD
     api_keys
     agent_kbs
     kb_connectors
-    channel_agents
     model_providers
     session_meta
   end
@@ -117,7 +116,7 @@ graph TD
 ### 3.2 管理库（Alembic · platform 侧）
 - **身份/租户**：`users`(根主体，含 `tenant_id`；**无 key 列**——key 唯一真相源在 `api_keys`，SHA-256 哈希、明文不落库) · `api_keys`(`user_id`→users，**软引用无 FK**) · `tenants`(主体，含 `approver_user_id`→users) · `teams`(→tenants，含 `approver_user_id`→users) · `blocked_registrations`(注册封禁名单，control-plane only，agent 运行时不 import)
 - **IM**：`im_users`(渠道身份归并真相源；managed 运行时由注入 resolver 消费，standalone 不消费) · `im_connectors` · `im_channel_allowlist`——三表均带 `owner_id`（**软引用 users、无 FK**；connector 注册归属的平台用户，默认 built-in admin，为将来 per-owner 接入预留）；`im_channel_allowlist` 与 `im_connectors` 经 `(owner_id, platform)` 复合约定关联（无 FK，allowlist 无 connector id 列）。**`im_channel_allowlist` 的准入强制当前未接线**——`is_allowed()` 无生产消费方，渠道准入实际走 agent.yaml `ConnectorAccess`
-- **Agent 定义/绑定**：`agents`(定义；`id` 是平台关系键与不可变身份，`name` 是可读 slug / 物理目录名 / materialize 到 agent 侧的标签；身份模型已让 name 结构上可安全 rename——关系键全挂 id、rename 仅需改本表一行 + 写边界重刷产物，**但当前未提供 rename 写路径、name 创建后不可变**；agent 状态在 `agent_admin_state`，agents 表无 status 列) · `agent_versions`(不可变快照；**`agent_id` INTEGER FK→agents.id ON DELETE CASCADE**，identity-model 阶段 4) · `agent_admin_state`(版本/部署态；**`agent_id` INTEGER 主键 + FK→agents.id ON DELETE CASCADE**，identity-model 阶段 3) · `user_agents`(用户↔agent；**`agent_id` INTEGER FK→agents.id ON DELETE CASCADE**，identity-model 阶段 4；**仅 admin 维护，鉴权/渠道路由未消费**) · `channel_agents`(渠道↔agent；**`agent_id` INTEGER FK→agents.id ON DELETE CASCADE**，identity-model 阶段 4；**渠道路由 runtime 已不读此表**——入站由连接器启动时静态绑定 agent，`bound_version_id` 为无 FK 的休眠列) · `agent_kbs`(**agent↔KB 绑定唯一真相源**；`agent_id` 已在 agent-identity-model 阶段 2 规整为 **INTEGER FK→agents.id ON DELETE CASCADE**，带 `created_by` 审计) · `mcp_servers`(MCP 注册表；`agent_id` 可空，agent-owned 行带 **FK→agents.id ON DELETE CASCADE**，identity-model 阶段 4) · `agent_mcp_servers`(agent↔MCP 绑定；**FK→agents.id ON DELETE CASCADE**，迁移 085 补齐) · `agent_oauth_bindings`(agent↔OAuth 绑定；**FK→agents.id ON DELETE CASCADE**，迁移 085 补齐；**runtime 未接线、仅 admin 维护**，`connector_id` 软引用 `connectors`、无 FK) · `agent_secrets`(agent / shared scope 密文 secret；可选 `agent_id` 带 **FK→agents.id ON DELETE CASCADE**，identity-model 阶段 4) · `connectors`(工具 OAuth 注册目录；**整表 runtime 未接线**——仅 admin CRUD，与 `agent_oauth_bindings` 构成未接线的注册+绑定对；含**休眠列 `agent_id`**——从未非-NULL 写入、刻意**不加 FK**) · `agent_skills`（`agent_id` 已在 agent-identity-model 阶段 2 规整为 **INTEGER FK→agents.id ON DELETE CASCADE**；控制台 name/id 混写导致的绑定静默失效 bug 已修复）
+- **Agent 定义/绑定**：`agents`(定义；`id` 是平台关系键与不可变身份，`name` 是可读 slug / 物理目录名 / materialize 到 agent 侧的标签；身份模型已让 name 结构上可安全 rename——关系键全挂 id、rename 仅需改本表一行 + 写边界重刷产物，**但当前未提供 rename 写路径、name 创建后不可变**；agent 状态在 `agent_admin_state`，agents 表无 status 列) · `agent_versions`(不可变快照；**`agent_id` INTEGER FK→agents.id ON DELETE CASCADE**，identity-model 阶段 4) · `agent_admin_state`(版本/部署态；**`agent_id` INTEGER 主键 + FK→agents.id ON DELETE CASCADE**，identity-model 阶段 3) · `user_agents`(用户↔agent；**`agent_id` INTEGER FK→agents.id ON DELETE CASCADE**，identity-model 阶段 4；**仅 admin 维护，鉴权/渠道路由未消费**) · `agent_kbs`(**agent↔KB 绑定唯一真相源**；`agent_id` 已在 agent-identity-model 阶段 2 规整为 **INTEGER FK→agents.id ON DELETE CASCADE**，带 `created_by` 审计) · `mcp_servers`(MCP 注册表；`agent_id` 可空，agent-owned 行带 **FK→agents.id ON DELETE CASCADE**，identity-model 阶段 4) · `agent_mcp_servers`(agent↔MCP 绑定；**FK→agents.id ON DELETE CASCADE**，迁移 085 补齐) · `agent_oauth_bindings`(agent↔OAuth 绑定；**FK→agents.id ON DELETE CASCADE**，迁移 085 补齐；**runtime 未接线、仅 admin 维护**，`connector_id` 软引用 `connectors`、无 FK) · `agent_secrets`(agent / shared scope 密文 secret；可选 `agent_id` 带 **FK→agents.id ON DELETE CASCADE**，identity-model 阶段 4) · `connectors`(工具 OAuth 注册目录；**整表 runtime 未接线**——仅 admin CRUD，与 `agent_oauth_bindings` 构成未接线的注册+绑定对；含**休眠列 `agent_id`**——从未非-NULL 写入、刻意**不加 FK**) · `agent_skills`（`agent_id` 已在 agent-identity-model 阶段 2 规整为 **INTEGER FK→agents.id ON DELETE CASCADE**；控制台 name/id 混写导致的绑定静默失效 bug 已修复）
 - **KB 管理**：`kb_connectors`(connector 配置与自定义元数据；实际 KB 内容仍在 per-tenant `kb.db`)
 - **模型**：`model_providers`（materialize 读：model_overrides→ModelTarget + api_key env）
 - **治理/编排**：`audit_log`(平台管理操作审计) · `session_meta`(仅 playground / chat admin 创建路径会写入的 platform chat 管理元数据，如 origin / pinned / admin takeover；`agent_id` 为可空 **INTEGER FK→agents.id ON DELETE CASCADE**，identity-model 阶段 3；与 agent 侧 `sessions` 索引分责，`session_id` 仅作跨库逻辑引用)
@@ -125,7 +124,7 @@ graph TD
 
 > 下图只画有库内关系的主干表；独立/弱关联表不入图：`blocked_registrations`（按 email 匹配，无 FK）、`agent_secrets`（→agents，密文配置）、`kb_connectors`（KB 数据源配置）、`session_meta`（`session_id` 仅跨库逻辑引用 agent 侧 `sessions`）。
 >
-> **图例**（2026-06-14 按代码实测校准，见决策日志）：**实线** = 有 FK 约束的硬关系；**虚线** = 软引用（按 id/name 约定、**无 FK 约束**）。边标记：**`·未接线`** = 关系/列存在但 runtime 不消费（功能未接线或已移除）；**`·admin`** = FK 真实但仅 admin/console 消费、非 agent runtime；**`·休眠列`** = 列从未被有效写入/读取。当前 26 条边中仅 8 条为「实线 + runtime 活跃消费」（agents↔agent_versions/agent_kbs/mcp_servers/agent_mcp_servers/agent_skills、tenants↔teams/users/agents）。
+> **图例**（2026-06-14 按代码实测校准，见决策日志）：**实线** = 有 FK 约束的硬关系；**虚线** = 软引用（按 id/name 约定、**无 FK 约束**）。边标记：**`·未接线`** = 关系/列存在但 runtime 不消费（功能未接线或已移除）；**`·admin`** = FK 真实但仅 admin/console 消费、非 agent runtime；**`·休眠列`** = 列从未被有效写入/读取。当前 24 条边中仅 8 条为「实线 + runtime 活跃消费」（agents↔agent_versions/agent_kbs/mcp_servers/agent_mcp_servers/agent_skills、tenants↔teams/users/agents）。
 
 ```mermaid
 erDiagram
@@ -143,9 +142,7 @@ erDiagram
   im_connectors ||..o{ im_channel_allowlist : "(owner,platform)约定·未接线"
   agents ||--o{ agent_versions : "不可变快照"
   users ||..o{ agent_versions : "created_by_user_id"
-  agent_versions ||..o{ channel_agents : "bound_version_id·休眠列"
   agents ||--|| agent_admin_state : "版本/部署态·admin"
-  agents ||--o{ channel_agents : "渠道绑定·admin(inbound不读)"
   agents ||--o{ agent_kbs : "KB 绑定真相源"
   agents ||--o{ mcp_servers : "agent-owned MCP 注册"
   agents ||--o{ agent_mcp_servers : "MCP 绑定(agent侧)"

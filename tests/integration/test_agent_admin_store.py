@@ -96,23 +96,13 @@ def test_list_excludes_archived(store_db):
 
 
 def test_references_and_protection(store_db):
-    # channel_agents is created by the agent_store legacy bootstrap (not by alembic);
-    # create it here so references() can query both binding tables, then insert bindings.
     conn = sqlite3.connect(store_db)
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS channel_agents "
-        "(platform TEXT, channel_id TEXT, agent_id INTEGER, created_at TEXT)"
-    )
     conn.execute("INSERT INTO user_agents (user_id, agent_id) VALUES ('u1', 7)")
-    conn.execute(
-        "INSERT INTO channel_agents (platform, channel_id, agent_id, created_at) "
-        "VALUES ('slack', 'C1', 7, '2026-01-01')"
-    )
     conn.commit()
     conn.close()
     refs = store.references(7)
     assert refs["users"] == ["u1"]
-    assert refs["channels"] == ["slack:C1"]
+    assert refs["channels"] == []
     assert store.is_referenced(7) is True
     assert store.is_referenced(999) is False
 

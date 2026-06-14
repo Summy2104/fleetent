@@ -4,12 +4,12 @@
 TBD - created by archiving change 2026-06-02-agent-management-console. Update Purpose after archive.
 ## Requirements
 ### Requirement: Clone an agent without bindings
-An admin SHALL be able to clone an existing agent under a new globally unique name. The clone SHALL copy the source agent's active version definition (system_prompt, allowed_tools, model_overrides, skills_dir, mcp_server_ids, memory_namespace) and SHALL NOT copy any user or channel bindings or the default flag. The clone SHALL start in `status=enabled` and `provenance=adhoc`.
+An admin SHALL be able to clone an existing agent under a new globally unique name. The clone SHALL copy the source agent's active version definition (system_prompt, allowed_tools, model_overrides, skills_dir, mcp_server_ids, memory_namespace) and SHALL NOT copy any user bindings or the default flag. The clone SHALL start in `status=enabled` and `provenance=adhoc`. （Channel 绑定不再存在——`channel_agents` 已 descope。）
 
 #### Scenario: Clone copies definition, not bindings
-- **WHEN** "ops-bot" is bound to several channels and an admin clones it as "ops-bot-staging"
+- **WHEN** an admin clones "ops-bot" as "ops-bot-staging"
 - **THEN** "ops-bot-staging" has the same system_prompt, allowed_tools, and model config as "ops-bot"'s active version
-- **AND** "ops-bot-staging" has no `user_agents` or `channel_agents` rows and is not the default agent
+- **AND** "ops-bot-staging" has no `user_agents` rows and is not the default agent
 - **AND** "ops-bot-staging" is `enabled`
 
 #### Scenario: Clone with duplicate name rejected

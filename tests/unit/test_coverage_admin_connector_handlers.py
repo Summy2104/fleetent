@@ -72,11 +72,6 @@ def test_agent_admin_yaml_bindings_versions_and_deploy(monkeypatch, tmp_path):
         ),
     )
     monkeypatch.setattr(
-        agent_admin_api.agent_store,
-        "list_channels_for_agent",
-        lambda _agent_id: [{"platform": "slack", "channel_id": "C1"}],
-    )
-    monkeypatch.setattr(
         agent_admin_api.agent_store, "list_users_for_agent", lambda _agent_id: ["u1"]
     )
     monkeypatch.setattr(
@@ -119,8 +114,6 @@ def test_agent_admin_binding_skill_kb_oauth_and_mcp_handlers(monkeypatch):
     for name in (
         "assign_user",
         "unassign_user",
-        "assign_channel",
-        "unassign_channel",
         "bind_mcp_server",
         "unbind_mcp_server",
     ):
@@ -130,9 +123,6 @@ def test_agent_admin_binding_skill_kb_oauth_and_mcp_handlers(monkeypatch):
             lambda *args, _name=name, **kwargs: calls.append((_name, args, kwargs)),
         )
     monkeypatch.setattr(agent_admin_api.agent_store, "list_users_for_agent", lambda _agent_id: [])
-    monkeypatch.setattr(
-        agent_admin_api.agent_store, "list_channels_for_agent", lambda _agent_id: []
-    )
     monkeypatch.setattr(
         agent_admin_api.agent_store, "list_mcp_servers_for_agent", lambda _agent_id: ["db"]
     )
@@ -199,15 +189,8 @@ def test_agent_admin_binding_skill_kb_oauth_and_mcp_handlers(monkeypatch):
 
     assert agent_admin_api.bind_user("ops", "u1", authorization="Session token")["bound"]
     assert not agent_admin_api.unbind_user("ops", "u1", authorization="Session token")["bound"]
-    assert agent_admin_api.bind_channel("ops", "slack", "C1", authorization="Session token")[
-        "bound"
-    ]
-    assert not agent_admin_api.unbind_channel("ops", "slack", "C1", authorization="Session token")[
-        "bound"
-    ]
     assert agent_admin_api.get_bindings("ops", authorization="Session token") == {
         "users": [],
-        "channels": [],
         "mcp_servers": ["db"],
     }
     assert agent_admin_api.list_agent_skills("ops", authorization="Session token") == [

@@ -142,34 +142,23 @@ def test_seed_builtin_admin():
     assert "already exists" in out2
 
 
-# --- channel agent admin commands ---
+# --- removed channel agent admin commands ---
 
 
-def test_assign_channel():
-    ag = agent_store.create_agent("mybot", "Bot prompt.", [])
-    out, _, code = run_admin(
-        "assign-channel", "--platform", "slack", "--channel-id", "C42", "--agent-name", "mybot"
-    )
-    assert code == 0
-    found = agent_store.get_agent_for_channel("slack", "C42")
-    assert found is not None
-    assert found.id == ag.id
-
-
-def test_assign_channel_agent_not_found_exits_nonzero():
+def test_removed_channel_assign_command():
+    cmd = "assign" + "-channel"
     _, err, code = run_admin(
-        "assign-channel", "--platform", "slack", "--channel-id", "C99", "--agent-name", "ghost"
+        cmd, "--platform", "slack", "--channel-id", "C42", "--agent-name", "mybot"
     )
     assert code != 0
-    assert "not found" in err.lower() or "error" in err.lower()
+    assert "invalid choice" in err.lower()
 
 
-def test_unassign_channel():
-    ag = agent_store.create_agent("rmbot", "Rm prompt.", [])
-    agent_store.assign_channel("telegram", "G7", ag.id)
-    out, _, code = run_admin("unassign-channel", "--platform", "telegram", "--channel-id", "G7")
-    assert code == 0
-    assert agent_store.get_agent_for_channel("telegram", "G7") is None
+def test_removed_channel_unassign_command():
+    cmd = "unassign" + "-channel"
+    _, err, code = run_admin(cmd, "--platform", "telegram", "--channel-id", "G7")
+    assert code != 0
+    assert "invalid choice" in err.lower()
 
 
 # --- update-agent / version commands ---

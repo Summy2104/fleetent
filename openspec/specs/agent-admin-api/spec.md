@@ -40,7 +40,7 @@ The system SHALL expose endpoints for listing and activating an agent's versions
 - **THEN** the response is 404 and `active_version_id` is unchanged
 
 ### Requirement: Binding endpoints
-The system SHALL expose endpoints to bind and unbind users and channels, requiring `admin`.
+The system SHALL expose endpoints to bind and unbind **users** to/from an agent, requiring `admin`. （Channel 绑定端点随 `channel_agents` descope 移除——一 agent 一 bot 模型下消息由连接器连接定 agent，无需按渠道绑定。）
 
 #### Scenario: Bind user
 - **WHEN** an admin sends `POST /admin/agents/{name}/bindings/users` with body `{"user_id":"u1"}`
@@ -50,17 +50,13 @@ The system SHALL expose endpoints to bind and unbind users and channels, requiri
 - **WHEN** an admin sends `DELETE /admin/agents/{name}/bindings/users/{user_id}`
 - **THEN** the matching `user_agents` row is removed and the response is 204
 
-#### Scenario: Bind channel records active version
-- **WHEN** an admin sends `POST /admin/agents/{name}/bindings/channels` with `{"platform":"slack","channel_id":"C1"}`
-- **THEN** a row is upserted into `channel_agents` with `bound_version_id` set to the agent's current active version, and the response is 201
-
-#### Scenario: Unbind channel
-- **WHEN** an admin sends `DELETE /admin/agents/{name}/bindings/channels/{platform}/{channel_id}`
-- **THEN** the row is removed and the response is 204
-
 #### Scenario: Bind to missing agent
 - **WHEN** a binding endpoint targets an agent name that does not exist
 - **THEN** the response is 404
+
+#### Scenario: Channel binding endpoints removed
+- **WHEN** a request hits `POST` or `DELETE /admin/agents/{name}/bindings/channels*`
+- **THEN** the route does not exist (404) — channel-to-agent binding has been descoped
 
 ### Requirement: Role-based guard for agent lifecycle and console writes
 
@@ -114,7 +110,6 @@ Every write SHALL emit an `audit_log` entry stamped with the acting user id.
 - **WHEN** an admin or viewer sends `GET /admin/agents/ops-bot/observability`
 - **THEN** the response contains the per-agent aggregated metrics and recent-session list
 
-
 ### Requirement: Agent create, read-full, update, and delete endpoints
 
 The system SHALL expose, under role-based Session auth (write requires `admin`/`built_in_admin`, read allows `viewer` and above):
@@ -122,7 +117,7 @@ The system SHALL expose, under role-based Session auth (write requires `admin`/`
 - `POST /admin/agents` with body `{name, system_prompt?, allowed_tools?, skills_dir?, mcp_server_ids?, model_overrides?, memory_namespace?}` to create a new agent definition. It SHALL persist the def via `agent_store.create_agent` (passing through the optional version-config fields when provided) AND create an `agent_admin_state` row with `provenance=adhoc`, `status=enabled` so the agent appears in `GET /admin/agents`. It SHALL return 201 with the new agent's definition, or 409 if the name already exists.
 - `GET /admin/agents/{name}` to return the full agent definition resolved from the active version, including `system_prompt`, `allowed_tools`, `skills_dir`, `mcp_server_ids`, `model_overrides`, and `memory_namespace`. It SHALL return 404 if the agent does not exist.
 - `PATCH /admin/agents/{name}` with a subset of editable fields (`system_prompt`, `allowed_tools`, `skills_dir`, `mcp_server_ids`, `model_overrides`, `memory_namespace`) to edit the agent by creating and activating a new immutable version via `agent_store.create_version` (only provided fields overridden; omitted fields inherit the prior active version). If the agent's provenance is `managed`, it SHALL mark drift. It SHALL return 200 with the updated definition, or 404 if the agent does not exist.
-- `DELETE /admin/agents/{name}` to hard-delete the agent. It SHALL require a confirmation header (`X-Confirm: true`) and SHALL be binding-protected: when the agent is referenced by user/channel bindings the response is 409 and nothing is deleted. Otherwise it SHALL call `agent_store.delete_agent` and remove the `agent_admin_state` row, returning 200.
+- `DELETE /admin/agents/{name}` to hard-delete the agent. It SHALL require a confirmation header (`X-Confirm: true`) and SHALL be binding-protected: when the agent is referenced by user bindings the response is 409 and nothing is deleted. Otherwise it SHALL call `agent_store.delete_agent` and remove the `agent_admin_state` row, returning 200.
 
 Every write SHALL emit an `audit_log` entry stamped with the acting user id.
 
@@ -200,7 +195,6 @@ The agent console and apply API seams (`get_agent_def`, `create_agent_def`, `upd
 - **WHEN** an admin sends `POST /admin/agents/apply` for a new spec
 - **THEN** the wired `create_agent_def` persists it and `agent_store.get_by_name(spec.name)` returns the def
 
-
 ### Requirement: Agent template management endpoints
 
 The system SHALL expose template CRUD endpoints under role-based Session auth (write requires `admin`/`built_in_admin`, read allows `viewer` and above), reading and writing through `agent_template_store`:
@@ -266,14 +260,13 @@ Every write SHALL emit an `audit_log` entry stamped with the acting user id.
 ### Requirement: Agent binding read endpoint
 
 The agent admin API SHALL expose `GET /admin/agents/{name}/bindings` returning the
-agent's current bindings: bound user ids, bound channels (each with `platform`,
-`channel_id`, and `bound_version_id`), and bound MCP `server_id`s. Reads SHALL be
+agent's current bindings: bound user ids and bound MCP `server_id`s. Reads SHALL be
 allowed for viewer and admin roles.
 
 #### Scenario: Read an agent's bindings
 
 - **WHEN** an admin or viewer sends `GET /admin/agents/{name}/bindings`
-- **THEN** the response contains `users`, `channels`, and `mcp_servers` for that agent
+- **THEN** the response contains `users` and `mcp_servers` for that agent
 
 #### Scenario: Unknown agent
 
@@ -343,3 +336,4 @@ The agent admin API SHALL expose agent-side endpoints to manage which OAuth conn
 #### Scenario: Viewer cannot mutate OAuth bindings
 - **WHEN** a viewer calls the bind or unbind endpoint
 - **THEN** the request is rejected with 403
+

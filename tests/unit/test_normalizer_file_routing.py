@@ -44,7 +44,6 @@ def test_get_agent_for_context_none_when_no_default(tmp_path, monkeypatch):
 def test_get_agent_for_context_does_not_touch_db(tmp_path, monkeypatch):
     _write(tmp_path, "solo", system_prompt="S")
     agent_config.scan(tmp_path)
-    monkeypatch.setattr(agent_store, "get_agent_for_channel", _explode)
     monkeypatch.setattr(agent_store, "get_agent_for_user", _explode)
     monkeypatch.setattr(agent_store, "get_default_agent", _explode)
     # Does not raise despite db being wired to explode

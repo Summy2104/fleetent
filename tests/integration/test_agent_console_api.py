@@ -78,9 +78,7 @@ def test_disable_then_enable(client, monkeypatch):
 def test_archive_blocked_when_bound(client, monkeypatch):
     agent_store.create_agent("ops", "Ops.", ["shell"])
     _wire_real_store(monkeypatch)
-    monkeypatch.setattr(
-        api, "references_for", lambda name: {"users": ["u1"], "channels": ["slack:C1"]}
-    )
+    monkeypatch.setattr(api, "references_for", lambda name: {"users": ["u1"], "channels": []})
     token, _ = _session_for("admin")
     r = client.post("/admin/agents/ops/archive", headers=_hdr(token, confirm=True))
     assert r.status_code == 409

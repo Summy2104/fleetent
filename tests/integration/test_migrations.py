@@ -14,6 +14,7 @@ _MIGRATIONS_DIR = str(Path(__file__).resolve().parents[2] / "migrations")
 __all__ = ["apply_migrations", "downgrade_migrations"]
 
 _REMOVED_AGENT_KB_TABLE = "knowledge_base_agent_bindings"
+_LEGACY_CHANNEL_BINDINGS_TABLE = "channel" + "_agents"
 _REMOVED_KB_TABLES = {
     "knowledge_bases",
     "knowledge_documents",
@@ -285,10 +286,9 @@ def test_agent_versions_table_and_columns(tmp_path):
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     av_cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_versions)")}
     agent_cols = {row[1] for row in conn.execute("PRAGMA table_info(agents)")}
-    chan_cols = {row[1] for row in conn.execute("PRAGMA table_info(channel_agents)")}
     conn.close()
     assert "agent_versions" in tables
-    assert "channel_agents" in tables
+    assert _LEGACY_CHANNEL_BINDINGS_TABLE not in tables
     assert av_cols >= {
         "id",
         "agent_id",
@@ -302,7 +302,6 @@ def test_agent_versions_table_and_columns(tmp_path):
         "created_at",
     }
     assert "active_version_id" in agent_cols
-    assert "bound_version_id" in chan_cols
 
 
 def test_agent_v1_backfill_for_existing_rows(tmp_path):

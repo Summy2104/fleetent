@@ -25,7 +25,7 @@ def _ns(**values: Any) -> argparse.Namespace:
     return argparse.Namespace(**values)
 
 
-def test_agent_cli_handles_channel_version_user_and_default_flows(monkeypatch, tmp_path, capsys):
+def test_agent_cli_handles_version_user_and_default_flows(monkeypatch, tmp_path, capsys):
     calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
     fake_agent = SimpleNamespace(id=9)
     fake_version = SimpleNamespace(id=3, version=2, is_active=True, created_at="now")
@@ -52,8 +52,6 @@ def test_agent_cli_handles_channel_version_user_and_default_flows(monkeypatch, t
         SimpleNamespace(
             _UNSET=object(),
             get_by_name=lambda name: fake_agent if name == "ops" else None,
-            assign_channel=lambda *args: calls.append(("assign_channel", args, {})),
-            unassign_channel=lambda *args: calls.append(("unassign_channel", args, {})),
             create_version=lambda *args, **kwargs: fake_version,
             list_versions=lambda name: [fake_version] if name == "ops" else [],
             activate_version=lambda *args: calls.append(("activate_version", args, {})),
@@ -67,10 +65,6 @@ def test_agent_cli_handles_channel_version_user_and_default_flows(monkeypatch, t
         SimpleNamespace(load_active_db=lambda name: fake_snapshot if name == "ops" else None),
     )
 
-    assert agents.handle(
-        _ns(cmd="assign-channel", platform="slack", channel_id="C1", agent_name="ops")
-    )
-    assert agents.handle(_ns(cmd="unassign-channel", platform="slack", channel_id="C1"))
     assert agents.handle(_ns(cmd="set-default-agent", clear=False, agent_name="ops"))
     ops_yaml = yaml.safe_load((agents_dir / "ops" / "agent.yaml").read_text())
     assert ops_yaml["bindings"]["default"] is True
@@ -95,13 +89,10 @@ def test_agent_cli_handles_channel_version_user_and_default_flows(monkeypatch, t
     assert not agents.handle(_ns(cmd="unknown"))
 
     output = capsys.readouterr().out
-    assert "Channel slack/C1" in output
     assert "version 2" in output
     assert "name: ops" in output
     assert ("assign_user", ("u1", 9), {}) in calls
 
-    with pytest.raises(SystemExit):
-        agents.handle(_ns(cmd="assign-channel", platform="slack", channel_id="C1", agent_name="x"))
     with pytest.raises(SystemExit):
         agents.handle(_ns(cmd="list-agent-versions", agent_name="x"))
     with pytest.raises(SystemExit):

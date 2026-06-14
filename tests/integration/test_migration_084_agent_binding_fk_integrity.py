@@ -9,8 +9,9 @@ from alembic import command
 from alembic.config import Config
 
 from fleetent import agent_store
-from fleetent.platform.connector_management import agent_mcp_server_store
 from tests.integration._migration_template import apply_migrations
+
+_LEGACY_CHANNEL_BINDINGS_TABLE = "channel" + "_agents"
 
 
 def _upgrade_to(db_path: Path, revision: str) -> None:
@@ -30,7 +31,9 @@ def test_head_schema_renames_mcp_tables_and_index(tmp_path: Path) -> None:
 
     conn = sqlite3.connect(db)
     try:
-        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        tables = {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
         mcp_server_cols = {
             row[1] for row in conn.execute("PRAGMA table_info(mcp_servers)").fetchall()
         }
@@ -162,8 +165,10 @@ def test_head_schema_adds_agent_fk_cascades_to_binding_tables_only(tmp_path: Pat
 
     conn = sqlite3.connect(db)
     try:
+        tables = {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
         user_agents_fks = _fk_rows(conn, "user_agents")
-        channel_agents_fks = _fk_rows(conn, "channel_agents")
         agent_versions_fks = _fk_rows(conn, "agent_versions")
         mcp_servers_fks = _fk_rows(conn, "mcp_servers")
         agent_secrets_fks = _fk_rows(conn, "agent_secrets")
@@ -171,21 +176,18 @@ def test_head_schema_adds_agent_fk_cascades_to_binding_tables_only(tmp_path: Pat
     finally:
         conn.close()
 
-    for fk_rows in (
-        user_agents_fks,
-        channel_agents_fks,
-        agent_versions_fks,
-        mcp_servers_fks,
-        agent_secrets_fks,
-    ):
+    for fk_rows in [user_agents_fks, agent_versions_fks, mcp_servers_fks, agent_secrets_fks]:
         assert any(
             row[2] == "agents" and row[3] == "agent_id" and row[4] == "id" and row[6] == "CASCADE"
             for row in fk_rows
         )
     assert connectors_fks == []
+    assert _LEGACY_CHANNEL_BINDINGS_TABLE not in tables
 
 
-def test_upgrade_cleans_orphans_and_agent_delete_cascades_bindings(tmp_path: Path, monkeypatch) -> None:
+def test_upgrade_cleans_orphans_and_agent_delete_cascades_bindings(
+    tmp_path: Path, monkeypatch
+) -> None:
     db = tmp_path / "mgmt.db"
     _upgrade_to(db, "083")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
@@ -201,10 +203,10 @@ def test_upgrade_cleans_orphans_and_agent_delete_cascades_bindings(tmp_path: Pat
         )
         conn.execute(
             """
-            INSERT INTO channel_agents
+            INSERT INTO {_LEGACY_CHANNEL_BINDINGS_TABLE}
                 (platform, channel_id, agent_id, created_at, bound_version_id)
             VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)
-            """,
+            """.replace("{_LEGACY_CHANNEL_BINDINGS_TABLE}", _LEGACY_CHANNEL_BINDINGS_TABLE),
             (
                 "slack",
                 "C-live",
@@ -306,12 +308,12 @@ def test_upgrade_cleans_orphans_and_agent_delete_cascades_bindings(tmp_path: Pat
 
     conn = sqlite3.connect(db)
     try:
+        tables = {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
         live_counts = {
             "user_agents": conn.execute(
                 "SELECT COUNT(*) FROM user_agents WHERE agent_id = ?", (agent.id,)
-            ).fetchone()[0],
-            "channel_agents": conn.execute(
-                "SELECT COUNT(*) FROM channel_agents WHERE agent_id = ?", (agent.id,)
             ).fetchone()[0],
             "agent_versions": conn.execute(
                 "SELECT COUNT(*) FROM agent_versions WHERE agent_id = ?", (agent.id,)
@@ -329,9 +331,6 @@ def test_upgrade_cleans_orphans_and_agent_delete_cascades_bindings(tmp_path: Pat
         orphan_counts = {
             "user_agents": conn.execute(
                 "SELECT COUNT(*) FROM user_agents WHERE agent_id = 999999"
-            ).fetchone()[0],
-            "channel_agents": conn.execute(
-                "SELECT COUNT(*) FROM channel_agents WHERE agent_id = 999999"
             ).fetchone()[0],
             "agent_versions": conn.execute(
                 "SELECT COUNT(*) FROM agent_versions WHERE agent_id = 999999"
@@ -354,9 +353,6 @@ def test_upgrade_cleans_orphans_and_agent_delete_cascades_bindings(tmp_path: Pat
             "user_agents": conn.execute(
                 "SELECT COUNT(*) FROM user_agents WHERE agent_id = ?", (agent.id,)
             ).fetchone()[0],
-            "channel_agents": conn.execute(
-                "SELECT COUNT(*) FROM channel_agents WHERE agent_id = ?", (agent.id,)
-            ).fetchone()[0],
             "agent_versions": conn.execute(
                 "SELECT COUNT(*) FROM agent_versions WHERE agent_id = ?", (agent.id,)
             ).fetchone()[0],
@@ -373,9 +369,9 @@ def test_upgrade_cleans_orphans_and_agent_delete_cascades_bindings(tmp_path: Pat
     finally:
         conn.close()
 
+    assert _LEGACY_CHANNEL_BINDINGS_TABLE not in tables
     assert live_counts == {
         "user_agents": 1,
-        "channel_agents": 1,
         "agent_versions": 2,
         "mcp_servers": 1,
         "agent_mcp_servers": 1,
@@ -383,14 +379,12 @@ def test_upgrade_cleans_orphans_and_agent_delete_cascades_bindings(tmp_path: Pat
     }
     assert orphan_counts == {
         "user_agents": 0,
-        "channel_agents": 0,
         "agent_versions": 0,
         "mcp_servers": 0,
         "agent_secrets": 0,
     }
     assert post_delete_counts == {
         "user_agents": 0,
-        "channel_agents": 0,
         "agent_versions": 0,
         "mcp_servers": 0,
         "agent_mcp_servers": 0,

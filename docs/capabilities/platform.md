@@ -1362,7 +1362,7 @@ flowchart LR
   - 跨域 follow-up：fleetent 侧需新增 agents 批量 apply API（server / admin）；ai-skills-toolkit 侧实现 fleetent renderer + deployer。
 - [x] **askit 调用形态（已定）**：控制台以**子进程调用 askit CLI + 镜像内固定 askit 版本**，不引库 API；编排外部平台直接子进程，fleetent 自管理的"落库"经上条 apply API 完成。
 - [x] **工作区与多环境（已定）**：控制台持 **git-backed 的 spec 工作副本、按环境分（dev/test/pre/prod）**，对齐 askit 分支 env 检测；`deploy` 指向**某环境的 fleetent endpoint**（可远程，不要求与 spec 仓库同机）；**跨环境 promote 需 admin + 2FA**（复用高危二次确认）。spec 仓库（SoT）与运行 DB 解耦、经 endpoint 连接。
-- [x] **来源切换的边界（已定）**：核心原则 **identity = 稳定的 agent_id，「受管/临管」只是同一行上的标志位，切换来源不重建对象**——decompile 转正 / adopt 后历史 trace（按 agent_id）与绑定（user_agents / channel_agents 外键引用 agent_id）天然续上；`deploy` 命中**同名临管 agent** 时走 "**adopt 收编**"（沿用同 agent_id、翻转为受管，UI 确认），不覆盖、不硬拒。
+- [x] **来源切换的边界（已定）**：核心原则 **identity = 稳定的 agent_id，「受管/临管」只是同一行上的标志位，切换来源不重建对象**——decompile 转正 / adopt 后历史 trace（按 agent_id）与绑定（如 `user_agents` 这类引用 `agent_id` 的关系）天然续上；`deploy` 命中**同名临管 agent** 时走 "**adopt 收编**"（沿用同 agent_id、翻转为受管，UI 确认），不覆盖、不硬拒。
 - [x] **请求级链路的关联 ID（已定）**：agent-runtime 在 `run() / run_stream() / run_sync()` **入口生成 ULID**（时间可排序），用 **contextvar** 贯穿主循环，所有子事件（工具 / 审批 / 路由 / memory / 压缩）携带；**sub_agent 继承父 request_id + 自带 span_id** 形成 trace 树（OTel-lite）；HTTP 路径补 session_id；**历史 trace 不回填**（退化见场景 85）。platform 仅按 request_id 渲染。
   - 跨域 follow-up：request_id / span 的生成与传播在 agent-runtime / observability 实现。
 - [x] **成本统计的模型单价表（已定）**：单价表放 **model_router 配置**（与 provider / model 声明同处，operator 维护），每模型记 input / output 每 1k token 单价；聚合时 `token × 单价`；**未配置单价的模型成本显示"未配置"而非 0**（自托管 / 自定义模型常无公开价）。

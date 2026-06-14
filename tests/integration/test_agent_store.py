@@ -226,16 +226,13 @@ def test_existing_agent_backfills_default_tenant(db):
     assert found.team_id is None
 
 
-def test_ownership_survives_user_and_channel_lookup(db):
+def test_ownership_survives_user_lookup(db):
     tenancy_store.create_tenant(id="acme", name="Acme")
     tenancy_store.create_team(id="support", tenant_id="acme", name="Support")
     agent = agent_store.create_agent("routed", "prompt", [], tenant_id="acme", team_id="support")
     agent_store.assign_user("user-1", agent.id)
-    agent_store.assign_channel("slack", "C123", agent.id)
     by_user = agent_store.get_agent_for_user("user-1")
-    by_channel = agent_store.get_agent_for_channel("slack", "C123")
     assert by_user is not None and by_user.tenant_id == "acme" and by_user.team_id == "support"
-    assert by_channel is not None and by_channel.tenant_id == "acme"
 
 
 def test_create_agent_rejects_cross_tenant_team(db):
@@ -308,49 +305,20 @@ def test_existing_agents_with_team_have_matching_tenant(db):
     assert mismatches == []
 
 
-# --- channel_agents tests ---
+# --- removed channel binding store API ---
 
 
-def test_assign_and_get_agent_for_channel(db):
-    agent = agent_store.create_agent("ch-agent", "Channel prompt.", [])
-    agent_store.assign_channel("slack", "C123", agent.id)
-    found = agent_store.get_agent_for_channel("slack", "C123")
-    assert found is not None
-    assert found.id == agent.id
+def test_channel_binding_store_functions_are_removed(db):
+    del db  # integration DB fixture keeps this test in the same layer as the removed API.
 
-
-def test_assign_channel_records_bound_version(db):
-    agent = agent_store.create_agent("ch-agent", "Channel prompt.", [])
-    agent_store.assign_channel("slack", "C123", agent.id)
-    bound = agent_store.get_channel_bound_version_id("slack", "C123")
-    assert bound == agent.active_version_id
-
-
-def test_get_agent_for_channel_unbound(db):
-    assert agent_store.get_agent_for_channel("slack", "C999") is None
-
-
-def test_assign_channel_upserts_on_duplicate(db):
-    a1 = agent_store.create_agent("agent-a", "A", [])
-    a2 = agent_store.create_agent("agent-b", "B", [])
-    agent_store.assign_channel("slack", "C1", a1.id)
-    agent_store.assign_channel("slack", "C1", a2.id)
-    found = agent_store.get_agent_for_channel("slack", "C1")
-    assert found is not None
-    assert found.id == a2.id
-
-
-def test_unassign_channel(db):
-    agent = agent_store.create_agent("rm-agent", "R", [])
-    agent_store.assign_channel("telegram", "G42", agent.id)
-    agent_store.unassign_channel("telegram", "G42")
-    assert agent_store.get_agent_for_channel("telegram", "G42") is None
-
-
-def test_platform_isolation(db):
-    agent = agent_store.create_agent("iso-agent", "I", [])
-    agent_store.assign_channel("slack", "C5", agent.id)
-    assert agent_store.get_agent_for_channel("telegram", "C5") is None
+    for name in (
+        "assign" + "_channel",
+        "unassign" + "_channel",
+        "get_agent_for_" + "channel",
+        "list_channels_for_" + "agent",
+        "get_channel_bound_" + "version_id",
+    ):
+        assert not hasattr(agent_store, name), name
 
 
 # --- hard delete ---

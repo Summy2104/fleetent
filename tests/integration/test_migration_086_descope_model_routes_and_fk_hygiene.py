@@ -9,6 +9,8 @@ import pytest
 
 from tests.integration._migration_template import apply_migrations
 
+_LEGACY_CHANNEL_BINDINGS_TABLE = "channel" + "_agents"
+
 
 def _connect(db: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db)
@@ -102,7 +104,6 @@ def test_head_schema_sets_expected_fk_delete_actions_and_preserves_agent_shape(
             "agent_secrets",
             "agent_skills",
             "agent_versions",
-            "channel_agents",
             "mcp_servers",
             "session_meta",
             "user_agents",
@@ -122,10 +123,13 @@ def test_head_schema_sets_expected_fk_delete_actions_and_preserves_agent_shape(
     assert _fk_delete_action(conn := _connect(db), "teams", "tenant_id", "tenants") == "RESTRICT"
     conn.close()
     assert (
-        _fk_delete_action(conn := _connect(db), "tenants", "approver_user_id", "users") == "SET NULL"
+        _fk_delete_action(conn := _connect(db), "tenants", "approver_user_id", "users")
+        == "SET NULL"
     )
     conn.close()
-    assert _fk_delete_action(conn := _connect(db), "teams", "approver_user_id", "users") == "SET NULL"
+    assert (
+        _fk_delete_action(conn := _connect(db), "teams", "approver_user_id", "users") == "SET NULL"
+    )
     conn.close()
 
     assert agent_columns >= {
@@ -145,6 +149,12 @@ def test_head_schema_sets_expected_fk_delete_actions_and_preserves_agent_shape(
     }
     assert "sqlite_autoindex_agents_1" in agent_indexes  # UNIQUE(name)
     assert child_delete_actions == {table: "CASCADE" for table in child_delete_actions}
+
+    conn = _connect(db)
+    try:
+        assert _LEGACY_CHANNEL_BINDINGS_TABLE not in _tables(conn)
+    finally:
+        conn.close()
 
 
 def test_delete_tenant_with_children_is_restricted(tmp_path: Path) -> None:

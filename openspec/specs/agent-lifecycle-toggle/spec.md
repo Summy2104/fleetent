@@ -4,7 +4,7 @@
 TBD - created by archiving change 2026-06-02-agent-management-console. Update Purpose after archive.
 ## Requirements
 ### Requirement: Enable / disable toggle preserves definition and bindings
-An admin SHALL be able to disable an enabled agent and re-enable a disabled agent. Disabling SHALL keep the agent's definition, all versions, and all user/channel bindings intact, but SHALL stop the agent from accepting new sessions. Re-enabling SHALL immediately restore routing. Both actions SHALL be audited.
+An admin SHALL be able to disable an enabled agent and re-enable a disabled agent. Disabling SHALL keep the agent's definition, all versions, and all user bindings intact, but SHALL stop the agent from accepting new sessions. Re-enabling SHALL immediately restore service. Both actions SHALL be audited. （Channel 绑定不再存在——`channel_agents` 已 descope。）
 
 #### Scenario: Disabled agent rejects a new session
 - **WHEN** agent "ops-bot" has been disabled by an admin and a message routes to "ops-bot"
@@ -17,19 +17,19 @@ An admin SHALL be able to disable an enabled agent and re-enable a disabled agen
 - **AND** an `agent.enable` audit entry exists
 
 #### Scenario: Disable keeps bindings
-- **WHEN** "ops-bot" is bound to channel C1 and is then disabled
-- **THEN** the `channel_agents` and `user_agents` rows for "ops-bot" are unchanged and the agent definition/versions are preserved
+- **WHEN** "ops-bot" has user bindings and is then disabled
+- **THEN** the `user_agents` rows for "ops-bot" are unchanged and the agent definition/versions are preserved
 
 ### Requirement: Binding protection before archive
-Archiving (soft delete) an agent SHALL be blocked while it is still bound to any user or channel, or set as the default agent. The block response SHALL list the occupying users, channels, and whether it is the default. Archive SHALL only proceed when no references remain.
+Archiving (soft delete) an agent SHALL be blocked while it is still bound to any user, or set as the default agent. The block response SHALL list the occupying users and whether it is the default. Archive SHALL only proceed when no references remain. （Channel 绑定已 descope，不再纳入阻挡判定。）
 
 #### Scenario: Archive blocked while bound
-- **WHEN** an admin requests archive of "ops-bot" which is still bound to a channel (or is the default agent)
-- **THEN** the request is rejected (409) and the response lists the occupying user ids, (platform, channel_id) pairs, and default flag
+- **WHEN** an admin requests archive of "ops-bot" which is still bound to a user (or is the default agent)
+- **THEN** the request is rejected (409) and the response lists the occupying user ids and default flag
 - **AND** the agent's `status` and `deleted_at` are unchanged
 
 #### Scenario: Archive proceeds after unbinding
-- **WHEN** "ops-bot" has no remaining user/channel bindings and is not default, and an admin confirms archive
+- **WHEN** "ops-bot" has no remaining user bindings and is not default, and an admin confirms archive
 - **THEN** the agent's `status` becomes `archived` and `deleted_at` is set in the same transaction
 - **AND** the agent is removed from the routable list and an `agent.archive` audit entry exists
 

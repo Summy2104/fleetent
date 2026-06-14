@@ -275,8 +275,6 @@ def test_agents_lifecycle_functions_present():
         "function agVersions",
         "function agActivateVersion",
         "function agToggleUser",
-        "function agBindChannel",
-        "function agUnbindChannel",
     ):
         assert fn in html, fn
 
@@ -294,7 +292,6 @@ def test_agents_endpoints_present():
         "/versions",
         "/activate",
         "/bindings/users/",
-        "/bindings/channels/",
     ):
         assert frag in html, frag
 
@@ -474,11 +471,11 @@ def test_overflow_menu_escapes_scroll_clipping():
 
 def test_agents_im_binding_in_drawer():
     html = ADMIN_HTML
-    # IM channel binding moved into the drawer (deploy modal removed)
+    # Only user allowlist binding remains in the drawer; channel binding is gone.
     assert 'id="ag-deploy-modal"' not in html
-    assert "function agBindChannel" in html
-    chfn = html.split("async function agBindChannel", 1)[1].split("async function", 1)[0]
-    assert "/bindings/channels/" in chfn
+    assert "function agToggleUser" in html
+    assert "function agBindChannel" not in html
+    assert "/bindings/" + "channels/" not in html
 
 
 def test_agent_export_yaml_wired():
@@ -1427,13 +1424,9 @@ _MODULE_INPUTS = {
         "ag-capabilities",
         "ag-kb-select",
         "ag-access-approval",
-        "ag-ch-platform",
-        "ag-ch-id",
         "ag-clone-name",
         "ag-filter",
         "ag-user-filter",
-        "agm-ch-platform",
-        "agm-ch-id",
     ],
     "chat": ["chat-agent", "chat-input"],
     "kb": ["kbc-id", "kbc-kind", "kbc-tenant", "kbc-kb", "kbc-desc", "kbc-enabled", "kbc-custom"],
@@ -1553,7 +1546,6 @@ _MODULE_BUTTONS = {
         "agToggleOauth",
         "agSetSkill",
         "agActivateVersion",
-        "agmAddChannel",
     ],
     "chat": ["chatNew", "chatSend", "chatOpen", "chatPin", "chatExport"],
     "kb": ["kbcOpenCreate", "kbcSave", "kbcOpenEdit", "kbcDelete", "kbcCheck", "kbcSync"],

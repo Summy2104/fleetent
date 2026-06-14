@@ -162,19 +162,16 @@ def test_bind_user_viewer_forbidden(fresh_client):
     assert resp.status_code == 403
 
 
-def test_bind_and_unbind_channel_records_version(fresh_client):
-    agent = agent_store.create_agent("ops", "Ops v1.", ["shell"])
+def test_channel_binding_routes_are_removed(fresh_client):
+    agent_store.create_agent("ops", "Ops v1.", ["shell"])
     token, _ = _session_for("admin")
+    route = "/admin/agents/ops/bindings/" + "channels/slack/C-1"
 
-    resp = fresh_client.post("/admin/agents/ops/bindings/channels/slack/C-1", headers=_hdr(token))
-    assert resp.status_code == 200
-    bound = agent_store.get_agent_for_channel("slack", "C-1")
-    assert bound is not None and bound.id == agent.id
-    assert agent_store.get_channel_bound_version_id("slack", "C-1") == agent.active_version_id
+    resp = fresh_client.post(route, headers=_hdr(token))
+    assert resp.status_code == 404
 
-    resp = fresh_client.delete("/admin/agents/ops/bindings/channels/slack/C-1", headers=_hdr(token))
-    assert resp.status_code == 200
-    assert agent_store.get_agent_for_channel("slack", "C-1") is None
+    resp = fresh_client.delete(route, headers=_hdr(token))
+    assert resp.status_code == 404
 
 
 def test_bind_unknown_agent_404(client):
@@ -189,7 +186,6 @@ def test_bind_unknown_agent_404(client):
 def test_get_bindings_shape(fresh_client):
     agent = agent_store.create_agent("ops", "Ops v1.", ["shell"])
     agent_store.assign_user("u-1", agent.id)
-    agent_store.assign_channel("slack", "C-1", agent.id)
     agent_store.bind_mcp_server(agent.id, "github")
     token, _ = _session_for("viewer")
 
@@ -198,9 +194,7 @@ def test_get_bindings_shape(fresh_client):
     body = resp.json()
     assert body["users"] == ["u-1"]
     assert body["mcp_servers"] == ["github"]
-    assert len(body["channels"]) == 1
-    chan = body["channels"][0]
-    assert chan["platform"] == "slack" and chan["channel_id"] == "C-1"
+    assert "channels" not in body
 
 
 def test_get_bindings_unknown_agent_404(client):
@@ -419,8 +413,6 @@ def test_export_agent_yaml(fresh_client):
     )
     agent_store.bind_mcp_server(agent.id, "docs")
     agent_store.assign_user("u_alice", agent.id)
-    agent_store.assign_channel("slack", "C0123ABCD", agent.id)
-
     token, _ = _session_for("admin")
     r = fresh_client.get("/admin/agents/support-bot/agent-yaml", headers=_hdr(token))
     assert r.status_code == 200, r.text
@@ -435,8 +427,8 @@ def test_export_agent_yaml(fresh_client):
     assert doc["allowed_skills"] == ["jira"]
     assert doc["memory_namespace"] == "support-bot"
     assert {s["id"]: s for s in doc["mcp_servers"]}["docs"]["api_key_env"] == "ACME_DOCS_MCP_TOKEN"
-    assert "slack:C0123ABCD" in doc["bindings"]["channels"]
     assert "u_alice" in doc["bindings"]["users"]
+    assert "channels" not in doc["bindings"]
 
 
 def test_export_agent_yaml_indentation(fresh_client):

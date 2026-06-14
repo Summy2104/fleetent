@@ -558,45 +558,6 @@ def get_agent_for_user(user_id: str) -> Agent | None:
     return get_by_name(str(row["name"]))
 
 
-def assign_channel(platform: str, channel_id: str, agent_id: int) -> None:
-    db = _db()
-    active = db.execute(
-        "SELECT active_version_id FROM agents WHERE id = :aid", {"aid": agent_id}
-    ).fetchone()
-    bound_version_id = active["active_version_id"] if active else None
-    db.execute(
-        "INSERT OR REPLACE INTO channel_agents "
-        "(platform, channel_id, agent_id, bound_version_id, created_at) "
-        "VALUES (:platform, :channel_id, :agent_id, :bound_version_id, :created_at)",
-        {
-            "platform": platform,
-            "channel_id": channel_id,
-            "agent_id": agent_id,
-            "bound_version_id": bound_version_id,
-            "created_at": _now(),
-        },
-    )
-
-
-def unassign_channel(platform: str, channel_id: str) -> None:
-    _db().execute(
-        "DELETE FROM channel_agents WHERE platform = :platform AND channel_id = :channel_id",
-        {"platform": platform, "channel_id": channel_id},
-    )
-
-
-def get_agent_for_channel(platform: str, channel_id: str) -> Agent | None:
-    db = _db()
-    row = db.execute(
-        "SELECT a.name FROM agents a JOIN channel_agents ca ON ca.agent_id = a.id "
-        "WHERE ca.platform = :platform AND ca.channel_id = :channel_id LIMIT 1",
-        {"platform": platform, "channel_id": channel_id},
-    ).fetchone()
-    if row is None:
-        return None
-    return get_by_name(str(row["name"]))
-
-
 def list_users_for_agent(agent_id: int) -> list[str]:
     rows = (
         _db()
@@ -607,26 +568,6 @@ def list_users_for_agent(agent_id: int) -> list[str]:
         .fetchall()
     )
     return [str(row["user_id"]) for row in rows]
-
-
-def list_channels_for_agent(agent_id: int) -> list[dict[str, Any]]:
-    rows = (
-        _db()
-        .execute(
-            "SELECT platform, channel_id, bound_version_id FROM channel_agents "
-            "WHERE agent_id = :agent_id ORDER BY platform, channel_id",
-            {"agent_id": agent_id},
-        )
-        .fetchall()
-    )
-    return [
-        {
-            "platform": str(row["platform"]),
-            "channel_id": str(row["channel_id"]),
-            "bound_version_id": row["bound_version_id"],
-        }
-        for row in rows
-    ]
 
 
 def bind_mcp_server(agent_id: int, server_id: str, created_by: str | None = None) -> None:
@@ -660,21 +601,6 @@ def list_mcp_servers_for_agent(agent_id: int) -> list[str]:
         .fetchall()
     )
     return [str(row["server_id"]) for row in rows]
-
-
-def get_channel_bound_version_id(platform: str, channel_id: str) -> int | None:
-    row = (
-        _db()
-        .execute(
-            "SELECT bound_version_id FROM channel_agents "
-            "WHERE platform = :platform AND channel_id = :channel_id",
-            {"platform": platform, "channel_id": channel_id},
-        )
-        .fetchone()
-    )
-    if row is None or row["bound_version_id"] is None:
-        return None
-    return int(row["bound_version_id"])
 
 
 def _get_default_agent_name() -> str | None:

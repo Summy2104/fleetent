@@ -1,6 +1,6 @@
 """FastAPI router for /admin/agents version + binding management.
 
-Adds the version-listing/activation and the four user/channel binding endpoints on
+Adds the version-listing/activation and the user binding endpoints on
 top of the agent management console, reusing the same Session auth + role guards
 (viewer reads, admin writes). Agent rows and bindings come from agent_store; schema
 lifecycle is owned by Alembic. This module never imports the agent loop.
@@ -120,12 +120,7 @@ def _build_agent_yaml(agent: agent_store.Agent) -> str:
         data["mcp_servers"] = servers
 
     bindings: dict[str, Any] = {}
-    channels = [
-        f"{c['platform']}:{c['channel_id']}" for c in agent_store.list_channels_for_agent(agent.id)
-    ]
     users = agent_store.list_users_for_agent(agent.id)
-    if channels:
-        bindings["channels"] = channels
     if users:
         bindings["users"] = users
     if bindings:
@@ -214,32 +209,6 @@ def unbind_user(
     return {"agent": name, "user_id": user_id, "bound": False}
 
 
-@router.post("/agents/{name}/bindings/channels/{platform}/{channel_id}")
-def bind_channel(
-    name: str,
-    platform: str,
-    channel_id: str,
-    authorization: str | None = Header(None),
-) -> dict[str, Any]:
-    _require_admin(authorization)
-    agent = _require_agent(name)
-    agent_store.assign_channel(platform, channel_id, agent.id)
-    return {"agent": name, "platform": platform, "channel_id": channel_id, "bound": True}
-
-
-@router.delete("/agents/{name}/bindings/channels/{platform}/{channel_id}")
-def unbind_channel(
-    name: str,
-    platform: str,
-    channel_id: str,
-    authorization: str | None = Header(None),
-) -> dict[str, Any]:
-    _require_admin(authorization)
-    _require_agent(name)
-    agent_store.unassign_channel(platform, channel_id)
-    return {"agent": name, "platform": platform, "channel_id": channel_id, "bound": False}
-
-
 # --- aggregate bindings read --------------------------------------------------
 
 
@@ -249,7 +218,6 @@ def get_bindings(name: str, authorization: str | None = Header(None)) -> dict[st
     agent = _require_agent(name)
     return {
         "users": agent_store.list_users_for_agent(agent.id),
-        "channels": agent_store.list_channels_for_agent(agent.id),
         "mcp_servers": agent_store.list_mcp_servers_for_agent(agent.id),
     }
 

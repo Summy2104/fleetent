@@ -4,7 +4,7 @@
 
 ## 1. 问题与现状（2026-06-14 审计）
 
-**runtime 模型**：**一个 Agent 一个 bot**——agent 在 agent.yaml 声明自己的 bot 凭据，连接器连接**即** agent 身份；消息发给哪个 bot 就是哪个 agent。`channel→agent` 路由（`channel_agents` 表）是旧"共享 bot 按频道路由"设计的遗骸，runtime 早已不读、已死。
+**runtime 模型**：**一个 Agent 一个 bot**——agent 在 agent.yaml 声明自己的 bot 凭据，连接器连接**即** agent 身份；消息发给哪个 bot 就是哪个 agent。旧的按频道路由表是"共享 bot 按频道路由"设计的遗骸，runtime 早已不读、已死。
 
 **访问控制现状**：agent.yaml `ConnectorAccess`（`allow_channels` / `allow_users` / `allow_all_users` / `require_approval`），platform materialize 同步、agent 侧本地强制（零 platform DB）。这套"平台配置→部署同步→agent 侧执行"骨架是对的。
 
@@ -75,7 +75,7 @@ agent runtime MUST NOT import platform（边界契约不变）；platform 单向
 | `agents`/`agent_versions`：`supports_dm` `supports_groups` | INTEGER(bool) | agent 能力，随版本化配置 materialize |
 | **`agent_im_users`** | `agent_id INTEGER FK→agents.id ON DELETE CASCADE`, `user_id TEXT`（内部 User），PK(agent_id,user_id) | 用户准入关系（取代死表 `user_agents`） |
 | **`agent_im_groups`** | `agent_id INTEGER FK→agents.id ON DELETE CASCADE`, `platform TEXT`, `group_id TEXT`，PK(agent_id,platform,group_id) | 群白名单（req3 载体），默认无行=不进任何群 |
-| ~~`channel_agents`~~ | **descope** | 旧路由表（含 `bound_version_id` 死列）；一 agent 一 bot 后路由不需要 |
+| ~~旧 channel 路由表~~ | **descope** | 旧路由表（含 `bound_version_id` 死列）；一 agent 一 bot 后路由不需要 |
 
 FK 遵循 identity-model：agent 引用 = `agent_id` INTEGER FK→agents.id ON DELETE CASCADE。
 
@@ -106,7 +106,7 @@ Python 模型：`ImBinding`（顶层）+ per-platform `SlackBinding`/`TelegramBi
 | `allow_channels` | `allow_groups`（仅群；DM 由 supports_dm + allow_users 管） |
 | `SlackConnector` / `TelegramConnector` | `SlackBinding` / `TelegramBinding` |
 | 死表 `user_agents` | `agent_im_users` |
-| 死表 `channel_agents` | descope（access 改用 `agent_im_groups`，语义不同——非路由） |
+| 已删除的 channel 路由表 | descope（access 改用 `agent_im_groups`，语义不同——非路由） |
 
 > "connector" 一词在 IM 语境退役；`connectors`（工具 OAuth）/`kb_connectors`/`im_connectors` 是另外的东西，不在本设计内。
 
@@ -118,7 +118,7 @@ Python 模型：`ImBinding`（顶层）+ per-platform `SlackBinding`/`TelegramBi
 
 ## 8. 分阶段落地（每阶段一个 OpenSpec change，串行——都碰 data-model + materialize）
 
-1. **阶段 1 — descope channel_agents**：删表 + `bound_version_id` 死列 + 相关 store/端点；ER 图/§3.2 同步。（最干净、无依赖）
+1. **阶段 1 — descope dead channel-route table**：删表 + `bound_version_id` 死列 + 相关 store/端点；ER 图/§3.2 同步。（最干净、无依赖）
 2. **阶段 2 — 立访问关系表 + 能力列**：建 `agent_im_users` / `agent_im_groups`，加 `supports_dm`/`supports_groups`；admin API 配置入口。（暂不接 materialize）
 3. **阶段 3 — materialize 接线 + agent.yaml `im` 块演进 + 闸按 chat_type 分流**：`ConnectorAccess`→`ImAccess`、`allow_channels`→`allow_groups`、平台表 materialize 进 `im` 块、准入闸实现 DM/群 双路 + 默认关。（核心，依赖 1/2）
 4. **阶段 4（可选）— "connector"(IM 义) 全量正名 `im`**：Python 类/agent.yaml 块名/测试随动。（纯整洁，可并入阶段 3 或单列）

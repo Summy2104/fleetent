@@ -118,15 +118,7 @@ def references(agent_id: int) -> dict[str, Any]:
             {"aid": agent_id},
         ).fetchall()
     ]
-    channels = [
-        f"{r['platform']}:{r['channel_id']}"
-        for r in db.execute(
-            "SELECT platform, channel_id FROM channel_agents WHERE agent_id = :aid "
-            "ORDER BY platform, channel_id",
-            {"aid": agent_id},
-        ).fetchall()
-    ]
-    return {"users": users, "channels": channels}
+    return {"users": users, "channels": []}
 
 
 def is_referenced(agent_id: int) -> bool:

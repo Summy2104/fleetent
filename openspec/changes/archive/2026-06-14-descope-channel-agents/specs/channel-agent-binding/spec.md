@@ -10,3 +10,14 @@
 
 ### Requirement: channel_agents carries bound_version_id audit column
 **Reason**: 随 `channel_agents` 表移除；`bound_version_id` 为无 FK 的休眠列、无生产消费。
+
+## ADDED Requirements
+
+### Requirement: Management DB excludes channel-agent binding capability
+The management database MUST NOT expose a `channel_agents` table or any direct channel-to-agent
+binding API surface.
+
+#### Scenario: Head schema and admin surface exclude channel bindings
+- **WHEN** management DB migrations are applied to head and the admin surface is exercised
+- **THEN** no `channel_agents` table exists
+- **AND** no channel binding CRUD endpoint or CLI command is available

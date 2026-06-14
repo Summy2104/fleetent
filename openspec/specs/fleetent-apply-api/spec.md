@@ -15,11 +15,11 @@ fleetent SHALL expose an idempotent apply API (`POST /admin/agents/apply`, batch
 - **THEN** the second apply yields the same agent state with no additional side effects beyond audit and version timestamps
 
 ### Requirement: Apply owns the agent definition only, never bindings
-The apply API SHALL only own the agent definition: `name` (immutable identity), `system_prompt` / `allowed_tools` / `model` (mutable). Bindings (`user_agents` / `channel_agents` and default bindings) are runtime state and SHALL NOT be overwritten or deleted by apply.
+The apply API SHALL only own the agent definition: `name` (immutable identity), `system_prompt` / `allowed_tools` / `model` (mutable). Bindings (`user_agents` and default bindings) are runtime state and SHALL NOT be overwritten or deleted by apply.
 
 #### Scenario: Apply does not touch bindings
-- **WHEN** an existing managed agent has user and channel bindings and a new apply updates its `system_prompt`
-- **THEN** the `system_prompt` is updated and all existing `user_agents` / `channel_agents` rows are preserved unchanged
+- **WHEN** an existing managed agent has user bindings and a new apply updates its `system_prompt`
+- **THEN** the `system_prompt` is updated and all existing `user_agents` rows are preserved unchanged
 
 #### Scenario: Immutable name is restored on apply
 - **WHEN** an existing managed agent's `name` was changed in the UI and an apply for that agent (matched by `agent_id`) carries the spec `name`
@@ -64,4 +64,3 @@ The apply API SHALL require admin authentication (the deployer uses a service ke
 #### Scenario: Apply stamps creator and audits
 - **WHEN** admin user `u-admin` initiates a deploy whose apply upserts agent "ops-bot"
 - **THEN** the resulting version row records `created_by_user_id = "u-admin"` and an audit entry is written for the apply
-

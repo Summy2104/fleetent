@@ -1292,9 +1292,6 @@
           <div id="agm-kb" style="display:flex; flex-direction:column; gap:4px;"></div>
           <h4 style="margin:14px 0 4px;">IM users (allowlist) <span class="muted" style="font-weight:normal; font-size:12px;">(by Slack / Telegram / WhatsApp id)</span></h4>
           <div id="agm-users"></div>
-          <h4 style="margin:14px 0 4px;">Channels</h4>
-          <div id="agm-channels"></div>
-          <div class="row" style="margin-top:6px;"><input id="agm-ch-platform" placeholder="platform" style="max-width:120px;"><input id="agm-ch-id" placeholder="channel_id"><button type="button" class="small" onclick="agmAddChannel()">Add channel</button></div>
           <h4 style="margin:14px 0 4px;">Access <span class="muted" style="font-weight:normal; font-size:12px;">(narrow to a subset of the bindings above)</span></h4>
           <label class="row" style="gap:6px; font-size:12px;"><input type="checkbox" id="ag-access-approval" checked> require_approval</label>
           <div class="muted" style="font-size:12px; margin-top:6px;">allow_users</div>
@@ -2670,14 +2667,11 @@ async function agArchive(name) {
     // and archive in one step instead of dead-ending on the error.
     const b = await api("GET", `/agents/${enc}/bindings`).catch(() => null);
     const users = (b && b.users) || [];
-    const channels = (b && b.channels) || [];
-    if (!users.length && !channels.length) { toast(e.message, "error"); return; }
+    if (!users.length) { toast(e.message, "error"); return; }
     const parts = [];
     if (users.length) parts.push(`${users.length} user(s)`);
-    if (channels.length) parts.push(`${channels.length} channel(s)`);
     if (!await confirmDialog(`${name} is bound to ${parts.join(" and ")}. Unbind all and archive?`)) return;
     for (const u of users) await api("DELETE", `/agents/${enc}/bindings/users/${encodeURIComponent(u)}`).catch(() => {});
-    for (const c of channels) await api("DELETE", `/agents/${enc}/bindings/channels/${encodeURIComponent(c.platform)}/${encodeURIComponent(c.channel_id)}`).catch(() => {});
     try { await api("POST", `/agents/${enc}/archive`, null, { "X-Confirm": "true" }); agAfterChange(name); }
     catch (e2) { toast(e2.message, "error"); }
   }
@@ -2819,7 +2813,7 @@ function agBoundUserIds() {
   return out;
 }
 function agBoundChannels() {
-  return (AGM_CHANNELS || []).map(c => `${c.platform}:${c.channel_id}`);
+  return [];
 }
 function agRenderAccess() {
   const users = agBoundUserIds();
@@ -2981,7 +2975,6 @@ function agCollectModelOverrides() {
   return { targets, routes };
 }
 
-let AGM_CHANNELS = [];
 // KB pickers source from connectors (a KB IS a connector). Dedupe by kb_id; keep the
 // first non-empty description so the picker label is meaningful.
 function kbOptionsFromConnectors(connectors) {
@@ -2993,10 +2986,8 @@ function kbOptionsFromConnectors(connectors) {
   }
   return [...byId].map(([kb_id, description]) => ({ kb_id, description }));
 }
-// `current` (edit mode) pre-checks existing bindings: {skills, mcp, oauth, kb, users, channels}.
+// `current` (edit mode) pre-checks existing bindings: {skills, mcp, oauth, kb, users}.
 async function agLoadCreateBindings(current = null) {
-  AGM_CHANNELS = [];
-  $("agm-channels").innerHTML = "";
   const [skills, mcp, connectors, kbConnectors, imUsers] = await Promise.all([
     api("GET", "/skills").catch(() => []),
     api("GET", "/mcp/servers").catch(() => []),
@@ -3041,8 +3032,6 @@ async function agLoadCreateBindings(current = null) {
     check("agm-kb-item", new Set(current.kb || []));
     check("agm-user-row", new Set(current.users || []));
     for (const id of ["agm-skills", "agm-mcp", "agm-oauth", "agm-users", "agm-kb"]) agMsSync(id);
-    AGM_CHANNELS = (current.channels || []).map(c => ({ platform: c.platform, channel_id: c.channel_id }));
-    agmRenderChannels();
   }
   // Access allow-lists derive from the bindings; re-derive when the user picks change.
   $("agm-users").addEventListener("change", agAccessSyncFromBindings);
@@ -3101,19 +3090,6 @@ function agMsUncheck(btn, e) {
   if (cb) cb.checked = false;
   agMsSync(id);
 }
-function agmRenderChannels() {
-  $("agm-channels").innerHTML = AGM_CHANNELS.map((c, i) =>
-    `<div class="row">${esc(c.platform)} / ${esc(c.channel_id)} <button type="button" class="small ghost danger" onclick="agmRemoveChannel(${i})">Remove</button></div>`).join("");
-  if ($("ag-access-channels")) agAccessSyncFromBindings();  // refresh access channel options
-}
-function agmAddChannel() {
-  const pf = $("agm-ch-platform").value.trim(), ch = $("agm-ch-id").value.trim();
-  if (!pf || !ch) { toast("Enter both platform and channel_id", "error"); return; }
-  if (!AGM_CHANNELS.some(c => c.platform === pf && c.channel_id === ch)) AGM_CHANNELS.push({ platform: pf, channel_id: ch });
-  $("agm-ch-platform").value = ""; $("agm-ch-id").value = "";
-  agmRenderChannels();
-}
-function agmRemoveChannel(i) { AGM_CHANNELS.splice(i, 1); agmRenderChannels(); }
 function agFillModelOverrides(mo) {
   mo = mo || {};
   let targets = [];
@@ -3154,7 +3130,7 @@ async function agEdit(name) {
   try {
     const [a, bindings, skills, kbs, oauth, providers] = await Promise.all([
       api("GET", `/agents/${enc}`),
-      api("GET", `/agents/${enc}/bindings`).catch(() => ({ users: [], channels: [], mcp_servers: [] })),
+      api("GET", `/agents/${enc}/bindings`).catch(() => ({ users: [], mcp_servers: [] })),
       api("GET", `/agents/${enc}/skills`).catch(() => []),
       api("GET", `/agents/${enc}/kbs`).catch(() => ({ kb_ids: [] })),
       api("GET", `/agents/${enc}/bindings/oauth`).catch(() => ({ connector_ids: [] })),
@@ -3167,11 +3143,10 @@ async function agEdit(name) {
       oauth: oauth.connector_ids || [],
       kb: kbs.kb_ids || [],
       users: bindings.users || [],
-      channels: bindings.channels || [],
     };
     AG_EDIT_ORIG = {
       skills: new Set(current.skills), mcp: new Set(current.mcp), oauth: new Set(current.oauth),
-      kb: new Set(current.kb), users: new Set(current.users), channels: current.channels,
+      kb: new Set(current.kb), users: new Set(current.users),
     };
     $("ag-modal-title").textContent = "Edit agent: " + name;
     $("ag-name").value = name;
@@ -3214,9 +3189,8 @@ async function agEdit(name) {
 
 async function agApplyEditBindings(name) {
   const enc = encodeURIComponent(name);
-  const o = AG_EDIT_ORIG || { skills: new Set(), mcp: new Set(), oauth: new Set(), kb: new Set(), users: new Set(), channels: [] };
+  const o = AG_EDIT_ORIG || { skills: new Set(), mcp: new Set(), oauth: new Set(), kb: new Set(), users: new Set() };
   const checked = cls => new Set([...document.querySelectorAll(`#ag-bind-config .${cls} input:checked`)].map(i => i.value));
-  const chKey = c => `${c.platform} ${c.channel_id}`;
   const calls = [];
   const sk = checked("agm-skill");
   for (const s of sk) if (!o.skills.has(s)) calls.push(api("PUT", `/agents/${enc}/skills/${encodeURIComponent(s)}`, { enabled: true }));
@@ -3233,10 +3207,6 @@ async function agApplyEditBindings(name) {
   const us = checked("agm-user-row");
   for (const id of us) if (!o.users.has(id)) calls.push(api("POST", `/agents/${enc}/bindings/users/${encodeURIComponent(id)}`));
   for (const id of o.users) if (!us.has(id)) calls.push(api("DELETE", `/agents/${enc}/bindings/users/${encodeURIComponent(id)}`));
-  const curCh = new Set(AGM_CHANNELS.map(chKey));
-  const origCh = new Set((o.channels || []).map(chKey));
-  for (const c of AGM_CHANNELS) if (!origCh.has(chKey(c))) calls.push(api("POST", `/agents/${enc}/bindings/channels/${encodeURIComponent(c.platform)}/${encodeURIComponent(c.channel_id)}`));
-  for (const c of (o.channels || [])) if (!curCh.has(chKey(c))) calls.push(api("DELETE", `/agents/${enc}/bindings/channels/${encodeURIComponent(c.platform)}/${encodeURIComponent(c.channel_id)}`));
   const failed = (await Promise.allSettled(calls)).filter(r => r.status === "rejected").length;
   if (failed) toast(`${failed} binding change(s) failed.`, "error");
 }
@@ -3255,8 +3225,6 @@ async function agApplyCreateBindings(name) {
     calls.push(api("POST", `/agents/${enc}/kbs`, { kb_id: id }));
   for (const id of checked("agm-user-row"))
     calls.push(api("POST", `/agents/${enc}/bindings/users/${encodeURIComponent(id)}`));
-  for (const c of AGM_CHANNELS)
-    calls.push(api("POST", `/agents/${enc}/bindings/channels/${encodeURIComponent(c.platform)}/${encodeURIComponent(c.channel_id)}`));
   const results = await Promise.allSettled(calls);
   const failed = results.filter(r => r.status === "rejected").length;
   if (failed) toast(`${failed} binding(s) failed; review them in the detail panel.`, "error");
@@ -3568,7 +3536,7 @@ async function agDrawerManage(name) {
     const [a, bindings, skills, kbs, oauth, mcpServers, connectors, allKbs, versions, allUsers] =
       await Promise.all([
         api("GET", `/agents/${enc}`),
-        api("GET", `/agents/${enc}/bindings`).catch(() => ({ users: [], channels: [], mcp_servers: [] })),
+        api("GET", `/agents/${enc}/bindings`).catch(() => ({ users: [], mcp_servers: [] })),
         api("GET", `/agents/${enc}/skills`).catch(() => []),
         api("GET", `/agents/${enc}/kbs`).catch(() => ({ kb_ids: [] })),
         api("GET", `/agents/${enc}/bindings/oauth`).catch(() => ({ connector_ids: [] })),
@@ -3651,7 +3619,7 @@ function agRenderDrawer(name, d) {
   const kbAdd = IS_VIEWER || !kbOpts ? "" :
     `<div class="row" style="margin-top:8px;"><select id="ag-kb-select"><option value="">— select a KB —</option>${kbOpts}</select><button class="small" onclick="agAddKb()">Bind</button></div>`;
 
-  // IM — users (filterable multi-select allowlist) + channels (bind many)
+  // IM — users (filterable multi-select allowlist)
   const boundUsers = new Set(d.bindings.users || []);
   const userLabel = (u) => esc(u.name || u.email || u.id) + (u.name || u.email ? ` <span class="muted">(${esc(u.id)})</span>` : "");
   const userRow = (id, q, checked, body) =>
@@ -3668,14 +3636,7 @@ function agRenderDrawer(name, d) {
     ? `<input id="ag-user-filter" class="sk-search" style="margin:4px 0 6px;" placeholder="🔍  Filter users by name, email or id" oninput="agFilterUsers()">`
     : "";
 
-  const chans = (d.bindings.channels || []);
-  const chList = chans.length
-    ? chans.map(c => `<div class="row">${esc(c.platform)} / ${esc(c.channel_id)}${IS_VIEWER ? "" : ` <button class="small ghost danger" onclick="agUnbindChannel('${esc(c.platform)}','${esc(c.channel_id)}')">Unbind</button>`}</div>`).join("")
-    : `<div class="muted">No channels bound.</div>`;
-  const chAdd = IS_VIEWER ? "" :
-    `<div class="row" style="margin-top:8px;"><input id="ag-ch-platform" placeholder="platform" style="max-width:120px;"><input id="ag-ch-id" placeholder="channel_id"><button class="small" onclick="agBindChannel()">Bind channel</button></div>`;
-  const im = `<div class="sk-meta-row"><span class="muted">Users (allowlist)</span></div>${userFilter}${userRows}${orphanRows}
-    <div class="sk-meta-row" style="margin-top:10px;"><span class="muted">Channels</span></div>${chList}${chAdd}`;
+  const im = `<div class="sk-meta-row"><span class="muted">Users (allowlist)</span></div>${userFilter}${userRows}${orphanRows}`;
 
   // Versions
   const versions = (d.versions || []).map(v =>
@@ -3758,15 +3719,6 @@ function agFilterUsers() {
   for (const row of document.querySelectorAll("#ag-drawer-body .ag-user-row")) {
     row.style.display = (!q || (row.dataset.q || "").includes(q)) ? "" : "none";
   }
-}
-async function agBindChannel() {
-  const pf = $("ag-ch-platform").value.trim(), ch = $("ag-ch-id").value.trim(); if (!pf || !ch) return;
-  try { await api("POST", `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/channels/${encodeURIComponent(pf)}/${encodeURIComponent(ch)}`); agDrawerManage(AG_DRAWER); }
-  catch (e) { toast(e.message, "error"); }
-}
-async function agUnbindChannel(pf, ch) {
-  try { await api("DELETE", `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/channels/${encodeURIComponent(pf)}/${encodeURIComponent(ch)}`); agDrawerManage(AG_DRAWER); }
-  catch (e) { toast(e.message, "error"); }
 }
 
 LOADERS.agents = () => loadAgents();

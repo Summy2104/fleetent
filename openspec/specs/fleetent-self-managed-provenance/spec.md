@@ -53,5 +53,4 @@ Switching provenance (decompile to managed, or adopt on same-name deploy) SHALL 
 #### Scenario: Adopt on same-name deploy reuses agent_id
 - **WHEN** `deploy --target fleetent` targets an agent whose name matches an existing ad-hoc agent
 - **THEN** the existing row is adopted: the same `agent_id` is reused and the row is flipped to `spec_owned` (with UI confirmation), not overwritten or rejected
-- **AND** historical traces (by `agent_id`) and bindings (`user_agents` / `channel_agents` referencing `agent_id`) continue without migration
-
+- **AND** historical traces (by `agent_id`) and bindings (`user_agents` referencing `agent_id`) continue without migration

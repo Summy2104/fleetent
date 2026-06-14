@@ -56,7 +56,7 @@ rename = 改 `agents.name` 一行（全系统唯一存 name 处）→ 平台 FK 
 | `agent_skills.agent_id` | TEXT 存 `str(id)` **或 name（bug）** | INTEGER + FK→agents.id ON DELETE CASCADE | 数字串→`CAST`；**name 串→经 agents 解析 name→id，解析不到则丢（本就静默失效行）** |
 | `agent_admin_state` | 主键 = `agent_name` | 主键/键 → `agent_id` + FK | 经 agents 解析 name→id 重建 |
 | `session_meta` | `agent_name` 列 | `agent_id` 列 + FK | 经 agents 解析 name→id；`user_id` 列不动（用户身份，不在本范围） |
-| `user_agents` / `channel_agents` / `agent_versions` / `mcp_servers`（原 `agent_mcp_servers`，见下「MCP 表改名」） / `agent_secrets` | 已 INTEGER id、**无 FK** | 补 FK→agents.id ON DELETE CASCADE | 无值变更，仅加约束（FK 已全局启用，见 data-model §2） |
+| `user_agents` / legacy channel-binding table / `agent_versions` / `mcp_servers`（原 `agent_mcp_servers`，见下「MCP 表改名」） / `agent_secrets` | 已 INTEGER id、**无 FK** | 补 FK→agents.id ON DELETE CASCADE | 无值变更，仅加约束（FK 已全局启用，见 data-model §2） |
 | `agent_mcp_servers`（原 `agent_mcp_server_bindings`，见下「MCP 表改名」） / `agent_oauth_bindings` | 已 INTEGER、FK 为裸 NO-ACTION（阶段 4 漏判"已有 FK"=够） | 阶段 4 后补迁移（085）把 FK 升级为 **ON DELETE CASCADE**——与其它绑定表一致、delete_agent 退化为单条 `DELETE FROM agents` | 无值变更，batch 重建加 cascade |
 | `connectors.agent_id` | INTEGER、休眠列（never written） | 维持现状（休眠），**不强加 FK**；文档注明 | — |
 
@@ -91,7 +91,7 @@ kb.db / shared_memory.db 无 agent 标识列，不涉及。
 
 1. **阶段 2 — agent_kbs / agent_skills 归一 + 修 bug**（已完成，2026-06-13）：TEXT→INTEGER + FK；修控制台 name-写。落地 change：`unify-agent-binding-id`。
 2. **阶段 3 — agent_admin_state / session_meta 归 id**：键/列 name→id + FK + 调用方改造。
-3. **阶段 4 — 补齐绑定表 FK + MCP 表正名**：user_agents / channel_agents / agent_versions / agent_secrets 及 MCP 注册表补 FK→agents.id ON DELETE CASCADE；并一并执行 MCP 两表方案 A 改名（`agent_mcp_servers`→`mcp_servers` 注册表、`agent_mcp_server_bindings`→`agent_mcp_servers` 绑定，见 §3「MCP 表改名」）。
+3. **阶段 4 — 补齐绑定表 FK + MCP 表正名**：user_agents / legacy channel-binding table / agent_versions / agent_secrets 及 MCP 注册表补 FK→agents.id ON DELETE CASCADE；并一并执行 MCP 两表方案 A 改名（`agent_mcp_servers`→`mcp_servers` 注册表、`agent_mcp_server_bindings`→`agent_mcp_servers` 绑定，见 §3「MCP 表改名」）。
 4. **阶段 5 — 翻译边界固化 + 守护（含 agent 侧列正名）**：materialize 写边界 / read-projection 读边界的 name↔id 收口；**`traces.agent_id` → `agent_name` 列正名**（纯美容 R2 合规，并入此阶段而非单列——见下）；守护测试断言"平台关系表无 name 列（除 agents）、agent 侧无 agent id 列/标识"。已完成。
 
 > **决策（2026-06-13）**：原"阶段 1 = traces 列正名先做"已撤销。该改名纯属 R2 美容合规（列本已存 slug、零行为/完整性收益），却牵动 observability/agent-observability-view 两个 spec 的 5 条 requirement + 与彼时在跑的 trace-tool-spans 撞同一文件——性价比与时机均差。故并入阶段 5 的守护/清理一并做。Alembic 单链使阶段 2/3/4 本就串行；逐个 just-ahead propose（最多领先 applied frontier 一片）。

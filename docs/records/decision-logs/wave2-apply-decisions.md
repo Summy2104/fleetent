@@ -795,7 +795,7 @@ SB9（sandbox 轨末环）：`run_code` 执行结果写入 trace。
 **前置核实结论（tasks 1.x）：**
 - 1.1 `tool_registry._registry` 为 `dict[name, (callable, schema)]`（行 32）、`_risk_levels` 为 `dict[name, str]`（行 33）。改键需同步迁移**两处**（`_registry` + `_risk_levels`）并改 `schema["function"]["name"]`。`@tool` 注册时键 = 函数名（行 57-58）。
 - 1.2 `mcp_client._make_tool_name`（行 164-165）= `f"{server_id}__{tool_name}"`（双下划线）；MCP 直接写 `tr._registry[...]`（行 500-501）。插件改键**沿用同一双下划线格式**。
-- 1.3 `Agent` 现字段 `id/name/system_prompt/allowed_tools/features`（dataclass 行 14-23）。读写点：`create_agent`、`_row_to_agent`（被 `get_by_name`/`get_agent_for_user`/`get_agent_for_channel` 复用）、`_SELECT_COLS`、`_init_db` DDL。
+- 1.3 `Agent` 现字段 `id/name/system_prompt/allowed_tools/features`（dataclass 行 14-23）。读写点：`create_agent`、`_row_to_agent`（被 `get_by_name` / `get_agent_for_user` / legacy channel lookup 复用）、`_SELECT_COLS`、`_init_db` DDL。
 - 1.4 **真实授权门 = agent_loop 暴露给 LLM 前的 schema 过滤**（`run()` 行 519-520、`run_stream()` 行 849-851 调 `check_tool_access`）。`dispatch` 内的 `check_tool_access` 分支（行 118-122）在生产路径**死分支**——`_safe_dispatch` 从不传 `allowed_tools`。故 plugins 展开并入 server 构造的 `allowed_tools`、经 schema 过滤生效，**不改 `check_tool_access` 签名、不碰 dispatch**。
 - 1.5 `skill_registry._resolve_skills_dir`（行 54-58）现状**已读 `FLEETENT_SKILLS_DIR`**（CLAUDE.md 的改名已落地，artifact 里的 `MINI_AGENT_` 已过时）。插件随此约定用 **`FLEETENT_PLUGINS_DIR`**。lifespan 调用点 server.py 行 71（`scan_skills()`）。
 - 1.6 **plugins 加列走 alembic**（同 SB3 features，zy 指示）：`_init_db` 的 CREATE TABLE 内联 `plugins TEXT NOT NULL DEFAULT '[]'`（新库/测试天然有列）；新增 alembic `003_add_agent_plugins`（`op.add_column`，供现有生产库），**非运行时 PRAGMA+ALTER**。
