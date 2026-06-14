@@ -779,7 +779,7 @@ async def send_im_message(
     sent = await outbound.send_to(
         resolved_platform, connector, target, text, target_type=target_type
     )
-    if not sent:
+    if not sent.ok:
         return f"发送失败：{resolved_platform} 投递 {target} 时出错，请稍后重试。"
     kind = "私信" if target_type == "user" else "频道消息"
 
@@ -790,14 +790,14 @@ async def send_im_message(
     for raw in files or []:
         try:
             host = _resolve_outbound_path(raw, tool_context, approved=True)
-            ok = await outbound.send_file_to(resolved_platform, connector, target, str(host))
+            rcpt = await outbound.send_file_to(resolved_platform, connector, target, str(host))
         except Exception as exc:  # noqa: BLE001 — per-file degrade, never abort the batch
             skipped.append(f"{raw}（{exc}）")
             continue
-        if ok:
+        if rcpt.ok:
             delivered += 1
         else:
-            skipped.append(f"{raw}（投递失败）")
+            skipped.append(f"{raw}（{rcpt.error or '投递失败'}）")
 
     result = f"已发送{kind}到 {resolved_platform}:{target}。"
     if files:
@@ -907,6 +907,6 @@ async def send_file(path: str, tool_context: ToolContext | None = None) -> str:
     except Exception as exc:  # noqa: BLE001 — outbound must never abort the agent run
         logger.warning("send_file delivery error on %s: %s", platform, exc)
         return f"外发失败：{platform} 投递文件时出错，请稍后重试。"
-    if not sent:
+    if not sent.ok:
         return f"外发失败：{platform} 投递文件给 {recipient} 时出错，请稍后重试。"
     return f"已把文件发送给 {platform}:{recipient}。"

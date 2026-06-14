@@ -225,13 +225,13 @@ async def _deliver(
         logger.warning("cron_deliver_no_connector task=%s platform=%s", task.get("id"), platform)
         return f"no connector for platform {platform}"
     try:
-        sent = await outbound.send_to(
+        receipt = await outbound.send_to(
             platform, connector, to, reply, target_type=target_type, thread=thread
         )
     except Exception as exc:  # noqa: BLE001 — best-effort delivery
         logger.warning("cron_deliver_failed task=%s error=%s", task.get("id"), exc)
         return str(exc)
-    return None if sent else "delivery returned false"
+    return None if receipt.ok else (receipt.error or "delivery returned false")
 
 
 def _resolve_delivery(task: dict[str, Any]) -> tuple[str, str, str, Any] | None:

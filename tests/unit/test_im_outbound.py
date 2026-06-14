@@ -21,7 +21,7 @@ async def test_send_to_slack_opens_dm_then_posts() -> None:
 
     result = await send_to("slack", client, "U_USER_456", "hello approver")
 
-    assert result is True
+    assert result.ok is True
     client.conversations_open.assert_called_once_with(users=["U_USER_456"])
     client.chat_postMessage.assert_called_once_with(channel="DM_CHANNEL_123", text="hello approver")
 
@@ -35,7 +35,7 @@ async def test_send_to_slack_returns_false_on_failure() -> None:
 
     result = await send_to("slack", client, "U_BAD", "text")
 
-    assert result is False
+    assert result.ok is False
 
 
 # ── send_to: Telegram ──────────────────────────────────────────────────────────
@@ -50,7 +50,7 @@ async def test_send_to_telegram_calls_send_message() -> None:
 
     result = await send_to("telegram", bot, "987654321", "you must approve this")
 
-    assert result is True
+    assert result.ok is True
     bot.send_message.assert_called_once_with(chat_id="987654321", text="you must approve this")
 
 
@@ -63,7 +63,7 @@ async def test_send_to_telegram_returns_false_on_failure() -> None:
 
     result = await send_to("telegram", bot, "UNKNOWN", "text")
 
-    assert result is False
+    assert result.ok is False
 
 
 async def test_send_to_unknown_platform_returns_false() -> None:
@@ -71,7 +71,7 @@ async def test_send_to_unknown_platform_returns_false() -> None:
     from fleetent.im_gateway.outbound import send_to
 
     result = await send_to("whatsapp", MagicMock(), "target", "text")
-    assert result is False
+    assert result.ok is False
 
 
 # ── send_to: independent of inbound context ──────────────────────────────────
@@ -139,7 +139,7 @@ async def test_send_to_slack_requires_no_inbound_event() -> None:
     # Called with just platform, connector, target, text — no thread context
     result = await send_to("slack", client, "U_FRESH", "standalone message")
 
-    assert result is True
+    assert result.ok is True
     # Must open a new DM, not reply into an existing thread
     client.conversations_open.assert_called_once()
 
@@ -195,7 +195,7 @@ async def test_send_to_slack_dm_forwards_blocks() -> None:
 
     result = await send_to("slack", client, "U_X", "fallback text", blocks=blocks)
 
-    assert result is True
+    assert result.ok is True
     kwargs = client.chat_postMessage.call_args.kwargs
     assert kwargs["blocks"] == blocks
     assert kwargs["text"] == "fallback text"
@@ -210,5 +210,5 @@ async def test_send_to_telegram_ignores_blocks() -> None:
 
     result = await send_to("telegram", bot, "12345", "hello", blocks=[{"type": "actions"}])
 
-    assert result is True
+    assert result.ok is True
     assert "blocks" not in (bot.send_message.call_args.kwargs or {})

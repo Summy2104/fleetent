@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from fleetent.governance.permission_gate import PermissionGate
+from fleetent.outbound import DeliveryReceipt
 
 
 def _make_routing(platform: str = "slack", target: str = "U_APPROVER", policy: str = "any"):
@@ -151,7 +152,20 @@ async def test_send_failure_triggers_default_closed(monkeypatch) -> None:
     import fleetent.outbound as outbound_mod
 
     monkeypatch.setattr(outbound_mod, "is_reachable", AsyncMock(return_value=True))
-    monkeypatch.setattr(outbound_mod, "send_to", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        outbound_mod,
+        "send_to",
+        AsyncMock(
+            return_value=DeliveryReceipt(
+                ok=False,
+                platform="slack",
+                target="x",
+                target_type="user",
+                kind="text",
+                error="boom",
+            )
+        ),
+    )
     gate = PermissionGate()
     result = await gate.request_approval(
         approval_id="send_fail",

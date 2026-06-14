@@ -18,6 +18,7 @@ from fleetent import user_store
 from fleetent.db import SQLiteDatabase
 from fleetent.governance import approval_request_store, approval_store, tool_auto_approvals_store
 from fleetent.governance.permission_gate import PermissionGate
+from fleetent.outbound import DeliveryReceipt
 from fleetent.runtime import agent_app
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
 from fleetent.schema_migrations import migrate
@@ -114,7 +115,15 @@ async def test_resolve_approval_happy_path(monkeypatch, tmp_path):
     import fleetent.outbound as outbound_mod
     from fleetent.agent_config import ApprovalRouting
 
-    monkeypatch.setattr(outbound_mod, "send_to", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        outbound_mod,
+        "send_to",
+        AsyncMock(
+            return_value=DeliveryReceipt(
+                ok=True, platform="slack", target="x", target_type="user", kind="text"
+            )
+        ),
+    )
     monkeypatch.setattr(outbound_mod, "is_reachable", AsyncMock(return_value=True))
     routing = ApprovalRouting(by_risk={"medium": {"approvers": ["slack:U_LEAD"], "policy": "any"}})
 
