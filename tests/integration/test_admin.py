@@ -83,53 +83,25 @@ def test_rotate_key_not_found_exits_nonzero():
 # --- allowlist admin commands ---
 
 
-def test_list_pending_no_users():
-    out, _, code = run_admin("list-pending")
-    assert code == 0
-    assert "No pending" in out
-
-
-def test_new_users_not_pending_by_default():
-    # v1.0 default-allow: newly created IM users are not pending.
-    im_user_store.get_or_create(user_store.admin_owner_id(), "slack", "U_PEND1")
-    im_user_store.get_or_create(user_store.admin_owner_id(), "telegram", "12345")
-    out, _, code = run_admin("list-pending")
-    assert code == 0
-    assert "No pending" in out
-
-
-def test_list_pending_shows_blocked_users():
-    u = im_user_store.get_or_create(user_store.admin_owner_id(), "slack", "U_BLK")
-    im_id = im_user_store.list_im_identities(u.id)[0]["id"]
-    im_user_store.block_user(im_id)  # allowed=0 -> appears in legacy pending list
-    out, _, code = run_admin("list-pending")
-    assert code == 0
-    assert "U_BLK" in out
-
-
-def test_approve_user():
-    u = im_user_store.get_or_create(user_store.admin_owner_id(), "slack", "U_APPROVE")
-    im_id = im_user_store.list_im_identities(u.id)[0]["id"]
-    im_user_store.block_user(im_id)
-    out, _, code = run_admin("approve-user", "--im-user-id", str(im_id))
-    assert code == 0
-    assert im_user_store.check_allowed_by_user_id(u.id) is True
-
-
-def test_approve_user_not_found_exits_nonzero():
-    _, err, code = run_admin("approve-user", "--im-user-id", "9999")
+def test_list_pending_command_removed():
+    _, err, code = run_admin("list-pending")
     assert code != 0
-    assert "not found" in err.lower() or "error" in err.lower()
+    assert "invalid choice" in err.lower()
+
+
+def test_approve_user_command_removed():
+    _, err, code = run_admin("approve-user", "--im-user-id", "1")
+    assert code != 0
+    assert "invalid choice" in err.lower()
 
 
 def test_block_user_is_deprecated_noop():
-    u = im_user_store.get_or_create(user_store.admin_owner_id(), "slack", "U_BLOCK")
+    u = im_user_store.get_or_create("slack", "U_BLOCK", "default")
     im_id = im_user_store.list_im_identities(u.id)[0]["id"]
     _, err, code = run_admin("block-user", "--im-user-id", str(im_id))
     assert code == 0
     assert "deprecated" in err.lower()
-    # state unchanged: still allowed
-    assert im_user_store.check_allowed_by_user_id(u.id) is True
+    assert user_store.get_by_id(u.id).status == "active"
 
 
 def test_seed_builtin_admin():

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from tests.integration._migration_template import apply_migrations
@@ -157,7 +158,7 @@ async def test_tenant_mismatch_rejects_im_message_with_diagnostic_log(
     tenancy_store.create_tenant(id="tenant-a", name="Tenant A")
     tenancy_store.create_tenant(id="tenant-b", name="Tenant B")
 
-    user = im_identity.get_or_create("support", "telegram", "424242")
+    user = im_identity.get_or_create("telegram", "424242", "default")
     tenancy_store.set_user_tenant(user.id, "tenant-b")
 
     routed = []
@@ -179,6 +180,53 @@ async def test_tenant_mismatch_rejects_im_message_with_diagnostic_log(
 
     assert routed == []
     assert "tenant" in caplog.text.lower()
+
+
+def test_resolver_rejects_blocked_managed_im_user(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
+    apply_migrations(tmp_path / "users.db")
+    _publish_agent(monkeypatch, tenant_id="default")
+
+    import fleetent.server as srv
+    import fleetent.user_store as user_store
+    from fleetent.im_gateway.access import IMIdentityResolutionError
+    from fleetent.platform.im_gateway_management import identity as im_identity
+
+    user = im_identity.get_or_create("telegram", "424242", "default")
+    user_store.set_status(user.id, "blocked")
+
+    with pytest.raises(IMIdentityResolutionError):
+        srv._resolve_im_identity("support", "telegram", "424242")
+
+
+async def test_non_default_tenant_new_im_user_routes_without_mismatch(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
+    apply_migrations(tmp_path / "users.db")
+    _publish_agent(monkeypatch, tenant_id="tenant-a")
+
+    import fleetent.server as srv
+    from fleetent.platform.tenancy import store as tenancy_store
+
+    tenancy_store.create_tenant(id="tenant-a", name="Tenant A")
+
+    routed = []
+
+    async def fake_route(msg):
+        routed.append(msg)
+
+    monkeypatch.setattr("fleetent.im_gateway.normalizer.route", fake_route)
+    monkeypatch.setattr(
+        "fleetent.runtime.approval_resume.reconcile_expired_approvals",
+        AsyncMock(),
+    )
+
+    with TestClient(srv.app):
+        handler = _capture_telegram_handler("support")
+        with patch("telegram.Update", MagicMock):
+            await handler(_make_update(424242), MagicMock())
+
+    assert len(routed) == 1
+    assert routed[0].user_id != "424242"
 
 
 async def test_blocked_managed_im_user_is_rechecked_and_skipped_by_cron(

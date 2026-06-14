@@ -99,8 +99,10 @@ def _connector_edge_tenant(owner_id: str) -> str:
 def _resolve_im_identity(owner_id: str, platform: str, platform_user_id: str) -> str:
     from fleetent.platform.im_gateway_management import identity as im_identity
 
-    user = im_identity.get_or_create(owner_id, platform, platform_user_id)
     edge_tenant = _connector_edge_tenant(owner_id)
+    user = im_identity.get_or_create(platform, platform_user_id, edge_tenant)
+    if user.status == "blocked":
+        raise IMIdentityResolutionError("IM identity blocked")
     if user.tenant_id != edge_tenant:
         logger.warning(
             "im_identity_tenant_mismatch owner_id=%s platform=%s platform_user_id=%s "

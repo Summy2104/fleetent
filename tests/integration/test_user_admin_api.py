@@ -181,7 +181,7 @@ def test_must_reset_gate_then_change_password(client):
 
 def test_im_users_list(client):
     token, _ = _session_for("admin")
-    im_user_store.get_or_create("owner1", "slack", "U_LIST")
+    im_user_store.get_or_create("slack", "U_LIST", "default")
     rows = client.get("/admin/im-users", headers=_hdr(token)).json()
     assert any(r["platform_user_id"] == "U_LIST" for r in rows)
 
@@ -199,7 +199,7 @@ def test_im_fields_endpoint_lists_per_platform(client):
 
 def test_im_identity_edit_metadata(client):
     token, _ = _session_for("admin")
-    user = im_user_store.get_or_create("owner1", "slack", "U_EDIT")
+    user = im_user_store.get_or_create("slack", "U_EDIT", "default")
     im_id = im_user_store.list_im_identities(user.id)[0]["id"]
     r = client.patch(
         f"/admin/im-users/{im_id}",
@@ -225,7 +225,7 @@ def test_im_identity_edit_missing_404(client):
 
 def test_im_identity_delete(client):
     token, _ = _session_for("admin")
-    user = im_user_store.get_or_create("owner1", "slack", "U_DEL")
+    user = im_user_store.get_or_create("slack", "U_DEL", "default")
     im_id = im_user_store.list_im_identities(user.id)[0]["id"]
     r = client.delete(f"/admin/im-users/{im_id}", headers=_hdr(token))
     assert r.status_code == 204
@@ -240,7 +240,7 @@ def test_im_identity_delete_missing_404(client):
 
 def test_im_identity_edit_and_delete_require_admin(client):
     token, _ = _session_for("viewer")
-    user = im_user_store.get_or_create("owner1", "slack", "U_VIEW")
+    user = im_user_store.get_or_create("slack", "U_VIEW", "default")
     im_id = im_user_store.list_im_identities(user.id)[0]["id"]
     assert (
         client.patch(
@@ -333,7 +333,7 @@ def test_admin_rebind_im_identity_to_user(client):
     target = client.post(
         "/admin/users", headers=_hdr(token), json={"email": "t@x.com", "name": "Target"}
     ).json()["id"]
-    u = im_user_store.get_or_create("owner1", "slack", "U_BIND")
+    u = im_user_store.get_or_create("slack", "U_BIND", "default")
     im_id = im_user_store.list_im_identities(u.id)[0]["id"]
 
     r = client.post(f"/admin/im-users/{im_id}/bind", headers=_hdr(token), json={"user_id": target})
@@ -345,7 +345,7 @@ def test_admin_rebind_im_identity_to_user(client):
 
 def test_rebind_unknown_user_404(client):
     token, _ = _session_for("admin")
-    u = im_user_store.get_or_create("owner1", "slack", "U_BIND2")
+    u = im_user_store.get_or_create("slack", "U_BIND2", "default")
     im_id = im_user_store.list_im_identities(u.id)[0]["id"]
     r = client.post(f"/admin/im-users/{im_id}/bind", headers=_hdr(token), json={"user_id": "ghost"})
     assert r.status_code == 404
@@ -365,7 +365,7 @@ def test_ui_im_users_has_bind_action(client):
 
 def test_im_user_block_restore(client):
     token, _ = _session_for("admin")
-    u = im_user_store.get_or_create("owner1", "slack", "U1")
+    u = im_user_store.get_or_create("slack", "U1", "default")
     im_id = im_user_store.list_im_identities(u.id)[0]["id"]
     assert (
         client.post(
@@ -373,14 +373,16 @@ def test_im_user_block_restore(client):
         ).status_code
         == 200
     )
-    assert im_user_store.check_allowed_by_user_id(u.id) is False
+    assert user_store.get_by_id(u.id).status == "blocked"
     assert (
         client.post(
             f"/admin/im-users/{im_id}/restore", headers=_hdr(token), json={"reason": "ok"}
         ).status_code
         == 200
     )
-    assert im_user_store.check_allowed_by_user_id(u.id) is True
+    assert user_store.get_by_id(u.id).status == "active"
+    assert client.post(f"/admin/im-users/{im_id}/approve", headers=_hdr(token)).status_code == 404
+    assert client.get("/admin/im-users/pending", headers=_hdr(token)).status_code in {404, 405}
 
 
 # --- edit user profile (name/email) -------------------------------------------

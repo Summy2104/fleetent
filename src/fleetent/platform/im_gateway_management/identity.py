@@ -1,7 +1,7 @@
-"""IM identity mapping + per-identity allowlist (im_users table).
+"""IM identity mapping + admin workbench over the im_users table.
 
-Part of the unified IM module. Maps (owner_id, platform, platform_user_id) to an
-internal User and owns the approve/block/rebind admin workbench.
+Part of the unified IM module. Maps (platform, platform_user_id) to an internal
+User and owns the admin workbench over that mapping.
 """
 
 import datetime
@@ -12,6 +12,7 @@ from fleetent.user_store import (
     _conn,
     create_user,
     get_by_id,
+    set_status,
 )
 
 # Admin-editable, platform-specific identity attributes. The platform handle
@@ -54,102 +55,88 @@ def _parse_meta(raw: Any) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def get_or_create(owner_id: str, platform: str, platform_user_id: str) -> User:
+def get_or_create(platform: str, platform_user_id: str, edge_tenant: str) -> User:
     with _conn() as conn:
         row = conn.execute(
             """SELECT user_id FROM im_users
-               WHERE owner_id = :owner_id AND platform = :platform
-                 AND platform_user_id = :puid""",
-            {"owner_id": owner_id, "platform": platform, "puid": platform_user_id},
+               WHERE platform = :platform AND platform_user_id = :puid""",
+            {"platform": platform, "puid": platform_user_id},
         ).fetchone()
     if row:
         user = get_by_id(row[0])
         assert user is not None
         return user
 
-    with _conn() as conn:
-        shared = conn.execute(
-            """SELECT user_id FROM im_users
-               WHERE platform = :platform AND platform_user_id = :puid
-               ORDER BY id LIMIT 1""",
-            {"platform": platform, "puid": platform_user_id},
-        ).fetchone()
-
-    if shared:
-        user = get_by_id(shared[0])
-        assert user is not None
-    else:
-        user, _ = create_user(name=f"{platform}:{platform_user_id}")
+    user, _ = create_user(name=f"{platform}:{platform_user_id}", tenant_id=edge_tenant)
 
     now = datetime.datetime.now(datetime.UTC).isoformat()
     with _conn() as conn:
-        # v1.0: new IM users are allowed by default; channel admission is handled by the
-        # channel allowlist (see im-channel-allowlist), not per-user approval.
-        conn.execute(
+        cursor = conn.execute(
             """INSERT OR IGNORE INTO im_users
-                   (owner_id, platform, platform_user_id, user_id, allowed, created_at)
-               VALUES (:owner_id, :platform, :puid, :uid, 1, :now)""",
+                   (platform, platform_user_id, user_id, created_at)
+               VALUES (:platform, :puid, :uid, :now)""",
             {
-                "owner_id": owner_id,
                 "platform": platform,
                 "puid": platform_user_id,
                 "uid": user.id,
                 "now": now,
             },
         )
-    return user
+        if cursor.rowcount:
+            return user
+        row = conn.execute(
+            """SELECT user_id FROM im_users
+               WHERE platform = :platform AND platform_user_id = :puid""",
+            {"platform": platform, "puid": platform_user_id},
+        ).fetchone()
+    assert row is not None
+    existing = get_by_id(row[0])
+    assert existing is not None
+    return existing
 
 
 def check_allowed_by_user_id(user_id: str) -> bool:
-    """Return True if user is not in im_users (HTTP API user) or is explicitly allowed."""
-    with _conn() as conn:
-        row = conn.execute(
-            "SELECT allowed FROM im_users WHERE user_id = :user_id",
-            {"user_id": user_id},
-        ).fetchone()
-    if row is None:
-        return True
-    return bool(row["allowed"])
+    """Compatibility shim over the canonical users.status block state."""
+    user = get_by_id(user_id)
+    return user is None or user.status != "blocked"
 
 
 def approve_user(im_user_id: int) -> None:
-    with _conn() as conn:
-        conn.execute("UPDATE im_users SET allowed = 1 WHERE id = :id", {"id": im_user_id})
+    restore_im_user(im_user_id)
 
 
 def block_user(im_user_id: int) -> None:
-    with _conn() as conn:
-        conn.execute("UPDATE im_users SET allowed = 0 WHERE id = :id", {"id": im_user_id})
+    block_im_user(im_user_id)
 
 
 def get_im_user(im_user_id: int) -> dict[str, Any] | None:
     """Fetch one IM identity by its im_users.id, or None if it does not exist."""
     with _conn() as conn:
         row = conn.execute(
-            "SELECT id, owner_id, platform, platform_user_id, user_id, allowed, created_at,"
-            " meta_json FROM im_users WHERE id = :id",
+            "SELECT im.id, im.platform, im.platform_user_id, im.user_id, im.created_at,"
+            " im.meta_json, users.status"
+            " FROM im_users AS im JOIN users ON users.id = im.user_id"
+            " WHERE im.id = :id",
             {"id": im_user_id},
         ).fetchone()
     if row is None:
         return None
+    allowed = row["status"] != "blocked"
     return {
         "id": row["id"],
-        "owner_id": row["owner_id"],
         "platform": row["platform"],
         "platform_user_id": row["platform_user_id"],
         "user_id": row["user_id"],
-        "allowed": bool(row["allowed"]),
+        "status": row["status"],
+        "allowed": allowed,
         "created_at": row["created_at"],
         "metadata": _parse_meta(row["meta_json"]),
     }
 
 
 def disable_im_accounts(user_id: str) -> None:
-    """Disallow every IM identity bound to an internal user (used by governance block)."""
-    with _conn() as conn:
-        conn.execute(
-            "UPDATE im_users SET allowed = 0 WHERE user_id = :user_id", {"user_id": user_id}
-        )
+    """No-op compatibility shim; IM blocking is enforced via users.status."""
+    return None
 
 
 def block_im_user(
@@ -161,8 +148,10 @@ def block_im_user(
     """Block a single IM identity (admin workbench). Audited."""
     from fleetent import audit_log
 
-    with _conn() as conn:
-        conn.execute("UPDATE im_users SET allowed = 0 WHERE id = :id", {"id": im_user_id})
+    row = get_im_user(im_user_id)
+    if row is None:
+        raise ValueError(f"im identity not found: {im_user_id}")
+    set_status(row["user_id"], "blocked")
     audit_log.write_audit(
         actor,
         "block_im_user",
@@ -182,8 +171,10 @@ def restore_im_user(
     """Restore a single IM identity (admin workbench). Audited."""
     from fleetent import audit_log
 
-    with _conn() as conn:
-        conn.execute("UPDATE im_users SET allowed = 1 WHERE id = :id", {"id": im_user_id})
+    row = get_im_user(im_user_id)
+    if row is None:
+        raise ValueError(f"im identity not found: {im_user_id}")
+    set_status(row["user_id"], "active")
     audit_log.write_audit(
         actor,
         "restore_im_user",
@@ -312,8 +303,9 @@ def list_im_identities(user_id: str) -> list[dict[str, Any]]:
     """All IM identities (across platforms) belonging to one internal User."""
     with _conn() as conn:
         rows = conn.execute(
-            "SELECT id, platform, platform_user_id, allowed, meta_json FROM im_users"
-            " WHERE user_id = :user_id ORDER BY platform",
+            "SELECT im.id, im.platform, im.platform_user_id, im.meta_json, users.status"
+            " FROM im_users AS im JOIN users ON users.id = im.user_id"
+            " WHERE im.user_id = :user_id ORDER BY im.platform",
             {"user_id": user_id},
         ).fetchall()
     return [
@@ -321,7 +313,8 @@ def list_im_identities(user_id: str) -> list[dict[str, Any]]:
             "id": r["id"],
             "platform": r["platform"],
             "platform_user_id": r["platform_user_id"],
-            "allowed": bool(r["allowed"]),
+            "status": r["status"],
+            "allowed": r["status"] != "blocked",
             "metadata": _parse_meta(r["meta_json"]),
         }
         for r in rows
@@ -332,17 +325,19 @@ def list_all() -> list[dict[str, Any]]:
     """All IM identities across all users (for the admin workbench)."""
     with _conn() as conn:
         rows = conn.execute(
-            "SELECT id, owner_id, platform, platform_user_id, user_id, allowed, created_at,"
-            " meta_json FROM im_users ORDER BY created_at"
+            "SELECT im.id, im.platform, im.platform_user_id, im.user_id, im.created_at,"
+            " im.meta_json, users.status"
+            " FROM im_users AS im JOIN users ON users.id = im.user_id"
+            " ORDER BY im.created_at"
         ).fetchall()
     return [
         {
             "id": r["id"],
-            "owner_id": r["owner_id"],
             "platform": r["platform"],
             "platform_user_id": r["platform_user_id"],
             "user_id": r["user_id"],
-            "allowed": bool(r["allowed"]),
+            "status": r["status"],
+            "allowed": r["status"] != "blocked",
             "created_at": r["created_at"],
             "metadata": _parse_meta(r["meta_json"]),
         }
@@ -351,17 +346,4 @@ def list_all() -> list[dict[str, Any]]:
 
 
 def list_pending() -> list[dict[str, Any]]:
-    with _conn() as conn:
-        rows = conn.execute(
-            "SELECT id, platform, platform_user_id, created_at"
-            " FROM im_users WHERE allowed = 0 ORDER BY created_at"
-        ).fetchall()
-    return [
-        {
-            "id": r["id"],
-            "platform": r["platform"],
-            "platform_user_id": r["platform_user_id"],
-            "created_at": r["created_at"],
-        }
-        for r in rows
-    ]
+    return []
