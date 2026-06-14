@@ -2,24 +2,209 @@
 
 from __future__ import annotations
 
+import logging
+from datetime import UTC, datetime
+
+import httpx
+
 from fleetent import connectors
-from fleetent.platform.connector_management import external_credential_store
+from fleetent.platform.connector_management import external_credential_store, external_service_store
+
+_logger = logging.getLogger(__name__)
 
 
 def _consent_url(user_id: str, service_id: str) -> str:
     return f"/admin/connectors/authorize/{service_id}?user_id={user_id}"
 
 
+def _expires_at(payload: dict[str, object]) -> datetime | None:
+    raw = payload.get("expires_at")
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def _is_expired(payload: dict[str, object]) -> bool:
+    expires_at = _expires_at(payload)
+    return expires_at is not None and expires_at <= datetime.now(UTC)
+
+
+def _refresh_tokens(
+    user_id: str, service_id: str, credential: dict[str, object], scopes: list[str]
+) -> connectors.Credential | connectors.NeedsConsent | connectors.CredentialError:
+    payload = dict(credential["payload"])
+    refresh_token = payload.get("refresh_token")
+    if not isinstance(refresh_token, str) or not refresh_token:
+        return connectors.NeedsConsent(
+            connector=service_id,
+            consent_url=_consent_url(user_id, service_id),
+        )
+
+    service = external_service_store.get_service(service_id)
+    oauth_config = service.get("oauth_config", {}) if service is not None else {}
+    token_url = oauth_config.get("token")
+    client_id = oauth_config.get("client_id")
+    if not isinstance(token_url, str) or not token_url:
+        return connectors.CredentialError(
+            connector=service_id,
+            message="missing token endpoint configuration",
+            retryable=False,
+        )
+
+    data = {"grant_type": "refresh_token", "refresh_token": refresh_token}
+    if isinstance(client_id, str) and client_id:
+        data["client_id"] = client_id
+    if scopes:
+        data["scope"] = " ".join(scopes)
+
+    try:
+        response = httpx.post(token_url, data=data, timeout=10.0)
+    except httpx.HTTPError as exc:
+        external_credential_store.put_oauth_credential(
+            user_id,
+            service_id,
+            payload,
+            updated_by=user_id,
+            status="error",
+        )
+        _logger.warning(
+            "connector refresh failed connector=%s user_id=%s error=%s",
+            service_id,
+            user_id,
+            exc.__class__.__name__,
+        )
+        return connectors.CredentialError(
+            connector=service_id,
+            message="credential refresh failed",
+            retryable=True,
+        )
+
+    if response.status_code == 400 and response.headers.get("content-type", "").startswith(
+        "application/json"
+    ):
+        error = response.json().get("error")
+        if error == "invalid_grant":
+            external_credential_store.put_oauth_credential(
+                user_id,
+                service_id,
+                payload,
+                updated_by=user_id,
+                status="needs_reauth",
+            )
+            return connectors.NeedsConsent(
+                connector=service_id,
+                consent_url=_consent_url(user_id, service_id),
+            )
+
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        external_credential_store.put_oauth_credential(
+            user_id,
+            service_id,
+            payload,
+            updated_by=user_id,
+            status="error",
+        )
+        _logger.warning(
+            "connector refresh http failure connector=%s user_id=%s status_code=%s error=%s",
+            service_id,
+            user_id,
+            response.status_code,
+            exc.__class__.__name__,
+        )
+        return connectors.CredentialError(
+            connector=service_id,
+            message="credential refresh failed",
+            retryable=True,
+        )
+
+    refreshed = response.json()
+    merged = dict(payload)
+    merged.update(refreshed)
+    if "refresh_token" not in refreshed:
+        merged["refresh_token"] = refresh_token
+    if scopes and "scopes" not in merged:
+        merged["scopes"] = scopes
+    external_credential_store.put_oauth_credential(
+        user_id,
+        service_id,
+        merged,
+        updated_by=user_id,
+        status="authorized",
+    )
+    stored = external_credential_store.get_credential(user_id, service_id)
+    assert stored is not None
+    client = dict(stored["payload"])
+    if scopes:
+        client.setdefault("scopes", scopes)
+    return connectors.Credential(connector=service_id, client=client)
+
+
+def revoke_credential(user_id: str, service_id: str) -> dict[str, bool]:
+    credential = external_credential_store.get_credential(user_id, service_id)
+    if credential is None:
+        return {"revoked": True}
+
+    payload = dict(credential["payload"])
+    external_credential_store.delete_credential(user_id, service_id)
+
+    service = external_service_store.get_service(service_id)
+    oauth_config = service.get("oauth_config", {}) if service is not None else {}
+    revoke_url = oauth_config.get("revoke")
+    token = payload.get("refresh_token") or payload.get("access_token")
+    if not isinstance(revoke_url, str) or not revoke_url or not isinstance(token, str) or not token:
+        return {"revoked": True}
+
+    data = {"token": token}
+    client_id = oauth_config.get("client_id")
+    if isinstance(client_id, str) and client_id:
+        data["client_id"] = client_id
+
+    try:
+        response = httpx.post(revoke_url, data=data, timeout=10.0)
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        _logger.warning(
+            "connector revoke failed connector=%s user_id=%s error=%s",
+            service_id,
+            user_id,
+            exc.__class__.__name__,
+        )
+    return {"revoked": True}
+
+
 def get_credential(
     user_id: str, service_id: str, scopes: list[str]
-) -> connectors.Credential | connectors.NeedsConsent:
+) -> connectors.Credential | connectors.NeedsConsent | connectors.CredentialError:
     credential = external_credential_store.get_credential(user_id, service_id)
-    if credential is None or credential["status"] != "authorized":
+    if credential is None:
+        return connectors.NeedsConsent(
+            connector=service_id,
+            consent_url=_consent_url(user_id, service_id),
+        )
+    if credential["status"] == "needs_reauth":
         return connectors.NeedsConsent(
             connector=service_id,
             consent_url=_consent_url(user_id, service_id),
         )
     payload = dict(credential["payload"])
+    if _is_expired(payload):
+        return _refresh_tokens(user_id, service_id, credential, scopes)
+    if credential["status"] == "error":
+        return connectors.CredentialError(
+            connector=service_id,
+            message="credential refresh failed",
+            retryable=True,
+        )
+    if credential["status"] != "authorized":
+        return connectors.NeedsConsent(
+            connector=service_id,
+            consent_url=_consent_url(user_id, service_id),
+        )
     if scopes:
         payload.setdefault("scopes", scopes)
     return connectors.Credential(connector=service_id, client=payload)

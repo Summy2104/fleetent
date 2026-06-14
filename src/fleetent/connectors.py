@@ -14,7 +14,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-CredentialProvider = Callable[[str, str, "list[str]"], "Credential | NeedsConsent"]
+CredentialProvider = Callable[
+    [str, str, "list[str]"], "Credential | NeedsConsent | CredentialError"
+]
 
 
 @dataclass
@@ -47,7 +49,28 @@ class NeedsConsent:
     consent_url: str
 
 
-def _default_provider(user_id: str, connector: str, scopes: list[str]) -> Credential | NeedsConsent:
+@dataclass
+class CredentialError:
+    """Signals credential resolution failed in a way that may be retried."""
+
+    connector: str
+    message: str
+    retryable: bool = True
+    detail: str | None = field(default=None, repr=False)
+
+    def __repr__(self) -> str:
+        return (
+            "CredentialError("
+            f"connector={self.connector!r}, message={self.message!r}, retryable={self.retryable!r}"
+            ")"
+        )
+
+    __str__ = __repr__
+
+
+def _default_provider(
+    user_id: str, connector: str, scopes: list[str]
+) -> Credential | NeedsConsent | CredentialError:
     """Default seam: no OAuth store yet, so always require consent."""
     return NeedsConsent(
         connector=connector,
@@ -66,7 +89,7 @@ def set_provider(provider: CredentialProvider) -> None:
 
 def get_credential(
     user_id: str | None, connector: str, scopes: list[str]
-) -> Credential | NeedsConsent:
+) -> Credential | NeedsConsent | CredentialError:
     """Resolve a connector credential for a user.
 
     Without a `user_id` credentials cannot be isolated per user, so we degrade

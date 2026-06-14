@@ -31,6 +31,18 @@ def test_needs_consent_holds_connector_and_url():
     assert nc.consent_url == "https://auth/x"
 
 
+def test_credential_error_repr_masks_details():
+    err = connectors.CredentialError(
+        connector="github",
+        message="refresh request failed",
+        retryable=True,
+        detail="refresh-u1 secret token",
+    )
+    assert "refresh-u1" not in repr(err)
+    assert "refresh-u1" not in str(err)
+    assert "refresh request failed" in repr(err)
+
+
 def test_default_provider_returns_needs_consent():
     result = connectors.get_credential("user-1", "google-drive", ["drive.readonly"])
     assert isinstance(result, connectors.NeedsConsent)

@@ -287,7 +287,8 @@ def dispatch(
     For a tool declaring a `connector` (D3), the per-user credential is resolved via
     `connectors.get_credential(user_id, connector, scopes)`: a `Credential` injects its
     `client` as a hidden keyword-only argument; a `NeedsConsent` short-circuits to a
-    consent prompt. The injected `client` never enters kwargs, the return, or a trace.
+    consent prompt; a `CredentialError` short-circuits to a retryable failure message.
+    The injected `client` never enters kwargs, the return, or a trace.
 
     For MCP tools (``server_id__tool``) ``mcp_server_ids`` is the agent's resolved server
     whitelist (out-of-scope ids rejected before any session is touched) and ``mcp_scope``
@@ -348,6 +349,10 @@ def dispatch(
         return (
             f"connector '{cred.connector}' requires authorization before this tool can run. "
             f"Ask the user to grant access here: {cred.consent_url}"
+        )
+    if isinstance(cred, connectors.CredentialError):
+        return (
+            f"connector '{cred.connector}' is temporarily unavailable: {cred.message}. Retry later."
         )
     # Inject the client out-of-band (keyword-only, excluded from the schema); it
     # is never written back into kwargs, so it cannot reach the return value or trace.

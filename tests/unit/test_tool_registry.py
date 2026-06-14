@@ -398,6 +398,32 @@ def test_dispatch_short_circuits_on_needs_consent(monkeypatch):
     assert "google-drive" in result
 
 
+def test_dispatch_short_circuits_on_credential_error(monkeypatch):
+    from fleetent import connectors
+
+    ran = {"v": False}
+
+    @tool_registry.tool(connector="google-drive", scopes=["drive"])
+    def gd_refresh(q: str, *, client) -> str:
+        """Search drive."""
+        ran["v"] = True
+        return "should not run"
+
+    def _provider(user_id, connector, scopes):
+        return connectors.CredentialError(
+            connector="google-drive",
+            message="credential refresh failed",
+            retryable=True,
+            detail="refresh-secret",
+        )
+
+    monkeypatch.setattr(connectors, "_provider", _provider)
+    result = tool_registry.dispatch("gd_refresh", '{"q": "x"}', user_id="u1")
+    assert ran["v"] is False
+    assert "temporarily unavailable" in result
+    assert "refresh-secret" not in result
+
+
 def test_dispatch_connector_tool_without_user_id_short_circuits(monkeypatch):
     ran = {"v": False}
 
