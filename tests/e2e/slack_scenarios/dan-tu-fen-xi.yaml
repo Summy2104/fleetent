@@ -1,9 +1,0 @@
-id: dan-tu-fen-xi
-coverage:
-- image
-persona: 发一张截图/照片并就图提问的用户。
-goal: 往频道发一张你已知内容的图片,请 agent 描述图中内容(或抽取其中的文字/数值)。
-success_criteria: 回复准确描述出该图的已知内容,说明附件被接收并分析,而非被忽略。
-max_turns: 3
-channel: REPLACE_WITH_TEST_CHANNEL
-setup_hint: 需能往 Slack 发图(确认 Slack MCP 是否支持发图,否则用 README 的回退);测试 agent 需开启视觉工具。

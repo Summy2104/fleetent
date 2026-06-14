@@ -1,8 +1,0 @@
-id: xian-cheng-lian-xu-zhui-wen
-coverage:
-- thread-continuity
-persona: 在同一个 Slack 线程里连续追问的用户。
-goal: 在同一线程内就同一主题连发 3 轮逐步深入的追问(每轮基于上一轮的回答继续),检验 agent 是否始终保持该线程的上下文。
-success_criteria: 每一轮回答都正确承接同线程的前文,上下文不丢失、不串话,逐步深入。
-max_turns: 5
-channel: REPLACE_WITH_TEST_CHANNEL

@@ -1,9 +1,0 @@
-id: tu-wen-hun-he
-coverage:
-- image-text
-persona: 同时给图和文字、要求结合两者作答的用户。
-goal: 发一张已知内容的图,并配一句文字提问,要求 agent 结合图与文字给出答案(如「这张报错截图是什么问题?给个修复建议」)。
-success_criteria: 回复同时利用了图像内容和文字诉求,给出针对该图的、结合上下文的具体回答。
-max_turns: 3
-channel: REPLACE_WITH_TEST_CHANNEL
-setup_hint: 需能发图 + 视觉工具开启。
