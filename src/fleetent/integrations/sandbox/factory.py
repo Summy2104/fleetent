@@ -37,6 +37,7 @@ def create_backend(
     platform_cfg = load_sandbox_backend_config(platform_path)
     name = platform_cfg.backend
     image = platform_cfg.microsandbox_image
+    docker_image = platform_cfg.docker_image
 
     if agent is not None:
         agent_sandbox = agent.sandbox
@@ -52,10 +53,12 @@ def create_backend(
                 name = _DEFAULT_BACKEND
         if agent_sandbox.microsandbox.image:
             image = agent_sandbox.microsandbox.image
+        if agent_sandbox.docker.image:
+            docker_image = agent_sandbox.docker.image
 
     if name == "microsandbox":
         # Lazy import: a docker-only deployment never loads the microsandbox backend.
         from fleetent.integrations.sandbox.backends.microsandbox import MicrosandboxBackend
 
         return MicrosandboxBackend(image=image) if image else MicrosandboxBackend()
-    return DockerBackend()
+    return DockerBackend(image=docker_image) if docker_image else DockerBackend()

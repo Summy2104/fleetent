@@ -88,3 +88,34 @@ def test_docker_selection_does_not_require_microsandbox(tmp_path: Path) -> None:
     with patch("builtins.__import__", side_effect=fake_import):
         backend = create_backend(platform_path=tmp_path / "missing.yaml")
     assert isinstance(backend, DockerBackend)
+
+
+# ── docker image resolution (sandbox-image-config) ──
+
+
+def _agent_docker_image(image: str) -> AgentFile:
+    return AgentFile(
+        name="a", version=1, models=default_models(), sandbox={"docker": {"image": image}}
+    )
+
+
+def test_docker_default_image_when_unset(tmp_path: Path) -> None:
+    backend = create_backend(platform_path=tmp_path / "missing.yaml")
+    assert isinstance(backend, DockerBackend)
+    assert backend._image == "python:3.12-slim"  # built-in default unchanged
+
+
+def test_platform_docker_image_applied(tmp_path: Path) -> None:
+    p = tmp_path / "platform.yaml"
+    p.write_text("sandbox:\n  docker:\n    image: fleetent-sandbox:0.1.0\n")
+    backend = create_backend(platform_path=p)
+    assert isinstance(backend, DockerBackend)
+    assert backend._image == "fleetent-sandbox:0.1.0"
+
+
+def test_agent_docker_image_overrides_platform(tmp_path: Path) -> None:
+    p = tmp_path / "platform.yaml"
+    p.write_text("sandbox:\n  docker:\n    image: fleetent-sandbox:plat\n")
+    backend = create_backend(_agent_docker_image("fleetent-sandbox:agent"), platform_path=p)
+    assert isinstance(backend, DockerBackend)
+    assert backend._image == "fleetent-sandbox:agent"

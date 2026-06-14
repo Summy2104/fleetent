@@ -113,10 +113,18 @@ class SandboxBackendConfig:
 
     backend: str = _DEFAULT_BACKEND
     microsandbox_image: str | None = None
+    docker_image: str | None = None
+
+
+def _image_from_subsection(sandbox: dict[str, object], key: str) -> str | None:
+    """Read `sandbox.<key>.image` as a non-blank string, else None."""
+    sub = sandbox.get(key)
+    image = sub.get("image") if isinstance(sub, dict) else None
+    return image if isinstance(image, str) and image.strip() else None
 
 
 def load_sandbox_backend_config(path: Path | None = None) -> SandboxBackendConfig:
-    """Load `sandbox.backend` / `sandbox.microsandbox.image`, falling back to docker.
+    """Load `sandbox.backend` / `sandbox.{microsandbox,docker}.image`, falling back to docker.
 
     An unrecognised backend logs a warning and falls back to `docker` rather than
     being silently accepted (mirrors the resource-config "never silently accept"
@@ -126,11 +134,10 @@ def load_sandbox_backend_config(path: Path | None = None) -> SandboxBackendConfi
     if sandbox is None:
         return SandboxBackendConfig()
     backend = _load_backend(sandbox, _DEFAULT_BACKEND)
-    micro = sandbox.get("microsandbox")
-    image = micro.get("image") if isinstance(micro, dict) else None
     return SandboxBackendConfig(
         backend=backend,
-        microsandbox_image=image if isinstance(image, str) and image.strip() else None,
+        microsandbox_image=_image_from_subsection(sandbox, "microsandbox"),
+        docker_image=_image_from_subsection(sandbox, "docker"),
     )
 
 

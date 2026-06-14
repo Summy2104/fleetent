@@ -258,6 +258,19 @@ class SandboxMicrosandboxSettings(BaseModel):
     image: str | None = None
 
 
+class SandboxDockerSettings(BaseModel):
+    """Per-agent Docker backend options (sandbox-image-config).
+
+    ``image`` overrides the Docker sandbox base image for this agent (e.g. a
+    ``fleetent-sandbox`` image with file-operation libs baked in so run_code can produce
+    xlsx/docx/pdf offline). ``None`` inherits the platform default / built-in
+    ``python:3.12-slim``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    image: str | None = None
+
+
 class SandboxSkillMountSettings(BaseModel):
     """Per-agent skills-mount options (sandbox-skill-mount).
 
@@ -300,6 +313,7 @@ class SandboxSettings(BaseModel):
 
     backend: str | None = None
     microsandbox: SandboxMicrosandboxSettings = Field(default_factory=SandboxMicrosandboxSettings)
+    docker: SandboxDockerSettings = Field(default_factory=SandboxDockerSettings)
     skill_mount: SandboxSkillMountSettings = Field(default_factory=SandboxSkillMountSettings)
     image_persistence: bool = False
     setup_command: str | None = None
