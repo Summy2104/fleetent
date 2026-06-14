@@ -16,8 +16,7 @@ from typing import Any
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
-from fleetent import auth, user_store
-from fleetent import audit_log
+from fleetent import audit_log, auth, user_store
 from fleetent.platform.agent_management_console import agent_admin_store
 
 router = APIRouter(prefix="/admin/agents")
@@ -77,9 +76,9 @@ def _apply_one(spec: AgentSpec, actor_id: str) -> dict[str, Any]:
         # name is immutable (it is the key); only mutable fields are updated. bindings untouched.
         update_agent_def(spec.name, spec.system_prompt, spec.allowed_tools)
         agent_id = int(existing["id"])
-        was_adhoc = agent_admin_store.get_state(spec.name)["provenance"] == "adhoc"
+        was_adhoc = agent_admin_store.get_state(agent_id)["provenance"] == "adhoc"
         action = "adopted" if was_adhoc else "updated"
-    agent_admin_store.set_provenance(spec.name, "managed")  # managed == spec_owned
+    agent_admin_store.set_provenance(agent_id, "managed")  # managed == spec_owned
     return {"name": spec.name, "agent_id": agent_id, "action": action, "provenance": "managed"}
 
 

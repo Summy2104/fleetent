@@ -4,7 +4,7 @@
 TBD - created by archiving change 2026-06-02-agent-management-console. Update Purpose after archive.
 ## Requirements
 ### Requirement: Per-agent aggregated observability view
-The system SHALL provide a per-agent observability view aggregated by `agent_id` from the observability traces. The view SHALL surface, for a given time window: call count, token/cost usage, error rate, average latency, permission_gate trigger count and approval rate, and a recent-session list. The view SHALL only aggregate existing observability data and SHALL NOT define new trace collection.
+The system SHALL provide a per-agent observability view aggregated by `agent_name` from the observability traces. The view SHALL surface, for a given time window: call count, token/cost usage, error rate, average latency, permission_gate trigger count and approval rate, and a recent-session list. The view SHALL only aggregate existing observability data and SHALL NOT define new trace collection.
 
 #### Scenario: View surfaces aggregated metrics
 - **WHEN** an admin opens the observability page of "ops-bot" which has had multiple calls in the last 24 hours
@@ -21,4 +21,3 @@ The system SHALL provide a per-agent observability view aggregated by `agent_id`
 #### Scenario: Viewer may read the observability view
 - **WHEN** a viewer opens an agent's observability page
 - **THEN** the aggregated metrics are returned (read access is allowed for viewer)
-

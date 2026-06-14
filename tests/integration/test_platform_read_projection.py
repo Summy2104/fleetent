@@ -239,6 +239,51 @@ def test_aggregate_approvals_across_agents_read_only(tmp_path: Path) -> None:
     assert "bot" in agent_names
 
 
+def test_aggregate_trace_events_across_agents_resolves_platform_id_via_agent_name(
+    tmp_path: Path,
+) -> None:
+    from fleetent import agent_store
+    from fleetent.observability.traces import TraceEvent, record_trace_event, set_state_db
+    from fleetent.platform import read_projection
+    from fleetent.platform.tenancy import store as tenancy_store
+    from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
+    from tests.integration.test_migrations import apply_migrations
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    management_db = tmp_path / "management.db"
+    apply_migrations(management_db)
+
+    import os
+
+    os.environ["DATABASE_URL"] = f"sqlite:///{management_db}"
+    tenancy_store.create_tenant(id="tenant-1", name="Tenant 1")
+    agent = agent_store.create_agent("support", "Support.", ["shell"], tenant_id="tenant-1")
+
+    _seed_agent_db(data_dir, "tenant-1", "support")
+    router = TenantRouter(SQLiteTenantBackend(data_dir=data_dir))
+    write_db = router.agent_scope("tenant-1", "support").open_state_db(
+        __import__("fleetent.runtime.agent_state_migrations", fromlist=["MIGRATIONS"]).MIGRATIONS
+    )
+    set_state_db(write_db)
+    record_trace_event(
+        TraceEvent(
+            id="trace-1",
+            run_id="run-1",
+            event_type="agent_run_completed",
+            payload={"reply": "done"},
+            user_id="user-1",
+            agent_name="support",
+        )
+    )
+
+    rows = read_projection.aggregate_trace_events_across_agents(router, [("tenant-1", agent.id)])
+
+    assert [(row["agent_id"], row["agent_name"], row["run_id"]) for row in rows] == [
+        (agent.id, "support", "run-1")
+    ]
+
+
 def test_read_shared_memory_for_tenant(tmp_path: Path) -> None:
     """Platform reads shared memory for a tenant directly (per-tenant, read-only)."""
     from fleetent.memory import shared as shared_memory

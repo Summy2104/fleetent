@@ -287,7 +287,7 @@ def _record_skill_hit(name: str, tool_context: ToolContext | None) -> None:
     """
     from fleetent.observability.traces import TraceEvent, record_trace_event
 
-    agent_id = tool_context.agent_name if tool_context else None
+    agent_name = tool_context.agent_name if tool_context else None
     session_id = tool_context.session_id if tool_context else None
     try:
         record_trace_event(
@@ -296,7 +296,7 @@ def _record_skill_hit(name: str, tool_context: ToolContext | None) -> None:
                 event_type="skill_hit",
                 payload={"skill_name": name},
                 session_id=session_id,
-                agent_id=agent_id,
+                agent_name=agent_name,
             )
         )
     except Exception as exc:  # noqa: BLE001 — observability is a side channel; never block

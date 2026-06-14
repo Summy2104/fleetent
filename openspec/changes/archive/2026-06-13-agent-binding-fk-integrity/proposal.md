@@ -1,6 +1,6 @@
 # agent-binding-fk-integrity
 
-> **Provisional**：agent 身份模型迁移**阶段 4**（依据 `docs/architecture/agent-identity-model.md`）。排在阶段 2/3 之后（同走 Alembic 单链，串行）；版本号不在此 pin。
+> agent 身份模型迁移**阶段 4**（依据 `docs/architecture/agent-identity-model.md`）。阶段 2（`unify-agent-binding-id`）与阶段 3（`unify-agent-state-id`）已落地；当前 Alembic head = `083`，本 change 继续 append-after-head 串行推进。
 
 ## Why
 
@@ -35,4 +35,4 @@
 - **config namespace**：无（YAML 侧 `mcp_servers[]` 配置键与 DB 表同名属巧合、不涉及）
 - **cross-module dependencies**：不碰 agent 零 platform import
 - **migration / shim plan**：Alembic batch 重建加 FK（保留主键/唯一约束/索引）；MCP 改名在同一迁移内**先 `agent_mcp_servers`→`mcp_servers` 腾名、再 `agent_mcp_server_bindings`→`agent_mcp_servers`**（顺序换、无需临时名）；forward-only、downgrade 反向；**FK 已全局启用**（见 data-model §2），补 FK 后即时生效；迁移前若存量有违规孤儿行，先清理或迁移内处理（pre-launch 窗口，多为空）
-- **相邻切片**：依赖阶段 2/3 先落地（Alembic 单链串行）；已核当前未归档 change 无一碰 MCP 表/store（`unified-file-exchange` 的 `mcp_servers[]` 是 YAML 配置键、非 DB 表）；apply 前 pull 确认 head 与无新增碰撞
+- **相邻切片**：阶段 2/3 已落地（Alembic 单链串行，当前 head=`083`）；已核当前未归档 change 无一碰 MCP 表/store（`unified-file-exchange` 的 `mcp_servers[]` 是 YAML 配置键、非 DB 表）；apply 前 pull 确认 head 与无新增碰撞

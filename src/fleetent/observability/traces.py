@@ -54,7 +54,7 @@ class TraceEvent:
     parent_span_id: str | None = None
     session_id: str | None = None
     user_id: str | None = None
-    agent_id: str | None = None
+    agent_name: str | None = None
     tenant_id: str = "default"
 
 
@@ -64,7 +64,7 @@ class TraceQuery:
 
     run_id: str | None = None
     user_id: str | None = None
-    agent_id: str | None = None
+    agent_name: str | None = None
     session_id: str | None = None
     tenant_id: str | None = None
     event_type: str | None = None
@@ -176,10 +176,10 @@ def record_trace_event(event: TraceEvent) -> None:
     _db().execute(
         """
         INSERT INTO traces (
-            id, run_id, span_id, parent_span_id, session_id, user_id, agent_id,
+            id, run_id, span_id, parent_span_id, session_id, user_id, agent_name,
             tenant_id, event_type, ts, payload_json
         ) VALUES (
-            :id, :run_id, :span_id, :parent_span_id, :session_id, :user_id, :agent_id,
+            :id, :run_id, :span_id, :parent_span_id, :session_id, :user_id, :agent_name,
             :tenant_id, :event_type, :ts, :payload_json
         )
         """,
@@ -190,7 +190,7 @@ def record_trace_event(event: TraceEvent) -> None:
             "parent_span_id": event.parent_span_id,
             "session_id": event.session_id,
             "user_id": event.user_id,
-            "agent_id": event.agent_id,
+            "agent_name": event.agent_name,
             "tenant_id": event.tenant_id,
             "event_type": event.event_type,
             "ts": ts.isoformat(),
@@ -203,7 +203,7 @@ def query_trace_events(query: TraceQuery) -> Iterator[TraceEvent]:
     """Query agent run trace events."""
     clauses: list[str] = []
     params: dict[str, object] = {"limit": query.limit}
-    for field in ("run_id", "user_id", "agent_id", "session_id", "tenant_id", "event_type"):
+    for field in ("run_id", "user_id", "agent_name", "session_id", "tenant_id", "event_type"):
         value = getattr(query, field)
         if value is not None:
             clauses.append(f"{field} = :{field}")
@@ -219,7 +219,7 @@ def query_trace_events(query: TraceQuery) -> Iterator[TraceEvent]:
     rows = _db().execute(
         f"""
         SELECT
-            id, run_id, span_id, parent_span_id, session_id, user_id, agent_id,
+            id, run_id, span_id, parent_span_id, session_id, user_id, agent_name,
             tenant_id, event_type, ts, payload_json
         FROM traces
         {where}
@@ -321,7 +321,7 @@ def _trace_event_from_row(row: dict[str, Any]) -> TraceEvent:
         parent_span_id=row["parent_span_id"],
         session_id=row["session_id"],
         user_id=row["user_id"],
-        agent_id=row["agent_id"],
+        agent_name=row["agent_name"],
         tenant_id=row["tenant_id"],
         event_type=row["event_type"],
         ts=datetime.fromisoformat(row["ts"]),

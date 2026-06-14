@@ -294,7 +294,7 @@ async def test_usage_summary_counts_only_completion_events_when_context_is_injec
     assert len(list(query_trace_events(TraceQuery(event_type="agent_run_completed")))) == 1
 
     summary = get_usage_summary(
-        UsageQuery(user_id="user-contract", agent_id="agent-contract", tenant_id="default")
+        UsageQuery(user_id="user-contract", agent_name="agent-contract", tenant_id="default")
     )
 
     assert summary.run_count == 1

@@ -449,31 +449,21 @@ def _merge_version_fields(
 
 
 def delete_agent(name: str) -> bool:
-    """Hard-delete an agent and all its versions in one transaction.
+    """Hard-delete an agent and all its dependent rows in one transaction.
 
     Returns True when an agent was removed, False when no such agent exists.
-    Deletes ``agent_versions`` before ``agents`` to respect the FK ordering.
+    Every agent-referencing table carries FK→agents.id ON DELETE CASCADE
+    (identity-model 阶段 2–4), so deleting the ``agents`` row cascades to
+    versions / bindings / satellites with no orphans — no manual child deletes
+    needed. ``agents.active_version_id`` is a plain column (no FK), so the
+    cascade is unaffected by it.
     """
     db = _db()
     with db.transaction() as conn:
         agent = conn.execute("SELECT id FROM agents WHERE name = :name", {"name": name}).fetchone()
         if agent is None:
             return False
-        agent_id = int(agent["id"])
-        conn.execute(
-            "DELETE FROM agent_mcp_server_bindings WHERE agent_id = :aid",
-            {"aid": agent_id},
-        )
-        conn.execute(
-            "DELETE FROM agent_oauth_bindings WHERE agent_id = :aid",
-            {"aid": agent_id},
-        )
-        # Detach the active-version FK before removing version rows.
-        conn.execute(
-            "UPDATE agents SET active_version_id = NULL WHERE id = :aid", {"aid": agent_id}
-        )
-        conn.execute("DELETE FROM agent_versions WHERE agent_id = :aid", {"aid": agent_id})
-        conn.execute("DELETE FROM agents WHERE id = :aid", {"aid": agent_id})
+        conn.execute("DELETE FROM agents WHERE id = :aid", {"aid": int(agent["id"])})
     return True
 
 
@@ -641,7 +631,7 @@ def list_channels_for_agent(agent_id: int) -> list[dict[str, Any]]:
 
 def bind_mcp_server(agent_id: int, server_id: str, created_by: str | None = None) -> None:
     _db().execute(
-        "INSERT OR IGNORE INTO agent_mcp_server_bindings "
+        "INSERT OR IGNORE INTO agent_mcp_servers "
         "(agent_id, server_id, created_at, created_by) "
         "VALUES (:agent_id, :server_id, :created_at, :created_by)",
         {
@@ -655,8 +645,7 @@ def bind_mcp_server(agent_id: int, server_id: str, created_by: str | None = None
 
 def unbind_mcp_server(agent_id: int, server_id: str) -> None:
     _db().execute(
-        "DELETE FROM agent_mcp_server_bindings "
-        "WHERE agent_id = :agent_id AND server_id = :server_id",
+        "DELETE FROM agent_mcp_servers WHERE agent_id = :agent_id AND server_id = :server_id",
         {"agent_id": agent_id, "server_id": server_id},
     )
 
@@ -665,8 +654,7 @@ def list_mcp_servers_for_agent(agent_id: int) -> list[str]:
     rows = (
         _db()
         .execute(
-            "SELECT server_id FROM agent_mcp_server_bindings "
-            "WHERE agent_id = :agent_id ORDER BY server_id",
+            "SELECT server_id FROM agent_mcp_servers WHERE agent_id = :agent_id ORDER BY server_id",
             {"agent_id": agent_id},
         )
         .fetchall()

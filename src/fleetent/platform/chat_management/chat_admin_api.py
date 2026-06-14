@@ -23,8 +23,7 @@ from fastapi import APIRouter, Header, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from fleetent import auth, user_store
-from fleetent import audit_log
+from fleetent import agent_store, audit_log, auth, user_store
 from fleetent.platform.chat_management import session_admin_store, transcript_export
 
 router = APIRouter(prefix="/admin")
@@ -73,6 +72,11 @@ def session_stats(session_id: str) -> dict[str, Any]:
     Bridges observability + permission_gate on host; placeholder returns zeros.
     """
     return {"total_tokens": 0, "rounds": 0, "pending_approvals": 0}
+
+
+def get_agent_by_name(name: str) -> agent_store.Agent | None:
+    """Resolve an agent definition by name. Kept as a seam for route tests."""
+    return agent_store.get_by_name(name)
 
 
 def load_transcript(session_id: str) -> list[dict[str, Any]]:
@@ -180,12 +184,20 @@ def _require_own_playground(session_id: str, user: user_store.User) -> dict[str,
     return meta
 
 
+def _require_agent(name: str) -> agent_store.Agent:
+    agent = get_agent_by_name(name)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="agent not found")
+    return agent
+
+
 @router.post("/chat/start")
 def playground_start(body: StartBody, authorization: str | None = Header(None)) -> dict[str, Any]:
     user = _require_admin(authorization)
+    agent = _require_agent(body.agent_name)
     session_id = f"pg-{uuid.uuid4().hex[:12]}"
     session_admin_store.upsert_meta(
-        session_id, origin="playground", agent_name=body.agent_name, user_id=user.id
+        session_id, origin="playground", agent_id=agent.id, user_id=user.id
     )
     return {"session_id": session_id, "origin": "playground", "agent_name": body.agent_name}
 
@@ -315,7 +327,8 @@ def list_sessions(
     authorization: str | None = Header(None),
 ) -> list[dict[str, Any]]:
     _current_user(authorization)
-    rows = session_admin_store.list_meta(status=status, user_id=user_id, agent_name=agent_name)
+    resolved_agent_id = None if agent_name is None else _require_agent(agent_name).id
+    rows = session_admin_store.list_meta(status=status, user_id=user_id, agent_id=resolved_agent_id)
     for row in rows:
         row.update(session_stats(row["session_id"]))
     return rows

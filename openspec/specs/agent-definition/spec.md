@@ -101,7 +101,7 @@ Routing resolution SHALL reject new sessions for agents whose `status` is `disab
 
 ### Requirement: Agent hard deletion
 
-The store SHALL expose `agent_store.delete_agent(name)` that removes the agent, all its versions, and its binding child rows in a single transaction (delete `agent_mcp_server_bindings` and `agent_oauth_bindings` rows, then `agent_versions` rows, then the `agents` row, in FK-safe order). It SHALL return a boolean: `True` when a row was deleted, `False` when no agent with that name exists. SQL SHALL use named parameters and go through the store boundary; no ORM.
+The store SHALL expose `agent_store.delete_agent(name)` that removes the agent and all its dependent rows in a single transaction. Every agent-referencing table carries FK→agents.id ON DELETE CASCADE (identity-model 阶段 2–4，含 binding 表 `agent_mcp_servers` / `agent_oauth_bindings`)，so the store resolves the agent id by name and issues a single `DELETE FROM agents`; the cascade removes all versions / bindings / satellites with no orphans and no manual child deletes. It SHALL return a boolean: `True` when a row was deleted, `False` when no agent with that name exists. SQL SHALL use named parameters and go through the store boundary; no ORM.
 
 #### Scenario: Delete removes agents and agent_versions rows
 
@@ -111,23 +111,25 @@ The store SHALL expose `agent_store.delete_agent(name)` that removes the agent, 
 #### Scenario: Delete cleans binding child rows
 
 - **WHEN** `agent_store.delete_agent("assistant")` is called for an agent holding MCP server bindings and OAuth bindings
-- **THEN** the `agent_mcp_server_bindings` and `agent_oauth_bindings` rows for that agent are removed in the same transaction（FK 强制下不报约束错误，且不留孤儿绑定行）
+- **THEN** the `agent_mcp_servers` and `agent_oauth_bindings` rows for that agent are removed in the same transaction（FK 强制下不报约束错误，且不留孤儿绑定行）
 
 #### Scenario: Delete of unknown agent returns False
 
 - **WHEN** `agent_store.delete_agent("nope")` is called and no such agent exists
 - **THEN** no rows are modified AND the call returns `False`
 
-### Requirement: Agent name 为不可变标识
-`agents.name` SHALL 是创建后不可变的标识符。系统 MUST NOT 提供改名能力（store / admin API / console 均无 rename 路径）——`agent_admin_state`（部署态键）、`session_meta.agent_name`（playground 归属）与 **per-agent 物理数据目录 `agents/<name>/data/`**（agent_state.db / 会话 / 向量的家）均以名字为键，改名会使部署态与历史会话失联、并令 agent 解析到空数据目录（全部运行数据被孤儿）。改名诉求 SHALL 以"创建新 agent + 按需显式迁移数据"满足。
+### Requirement: agents.id 是不可变身份、agents.name 是可变可读标签
+`agents.id`（INTEGER 代理键）SHALL 是 agent 的不可变身份与平台所有关系表的 FK 键，永不暴露给人 / 物理层；`agents.name`（slug）SHALL 是**可变**的人类可读标签，仅存于 `agents` 表一列 + agent 侧产物（物理目录 `agents/<name>/`、agent.yaml、`traces.agent_name`）+ 显示层。关系完整性只挂 `agents.id`，故 name 变更**零关系级联**（依据 `docs/architecture/agent-identity-model.md`）。
 
-#### Scenario: 无 rename 写路径
+当前系统**不提供改名 API**（store / admin / console 均无修改 `agents.name` 的写路径，YAGNI）。若未来加入，rename SHALL = 改 `agents.name` 一行 + 在写边界 re-materialize 重刷 agent 侧产物（物理目录搬迁 / agent.yaml 重写；`traces` 历史行保留旧 name），**不触碰任何平台关系键**。
+
+#### Scenario: 平台关系键挂 id 不挂 name
+- **WHEN** 审视平台侧引用 agent 的表（`agent_admin_state` / `session_meta` / 各绑定表等）
+- **THEN** agent 引用一律为 `agent_id` INTEGER FK→`agents.id`；除 `agents.name` 列本身外，不存在以 name 引用 agent 的列
+
+#### Scenario: 当前无 rename 写路径
 - **WHEN** 检查 `agent_store`、`agent_admin_store` 与 agent console API
-- **THEN** 不存在修改 `agents.name` 的函数或端点
-
-#### Scenario: 名字键 satellite 的一致性由不可变性保证
-- **WHEN** agent 创建后正常运行任意时长
-- **THEN** `agent_admin_state`、`session_meta` 与物理目录所用的名字键始终与 `agents.name` 一致（因其不可变）
+- **THEN** 不存在修改 `agents.name` 的函数或端点（rename 暂未提供；如启用，按上述写边界 re-materialize 语义实现）
 
 ### Requirement: Runtime agent resolution is file-sourced
 
@@ -150,4 +152,30 @@ and CLI) are unchanged; the file is the runtime artifact generated from them.
 
 - **WHEN** routing references agent name `ghost` but no `agents/ghost/agent.yaml` exists
 - **THEN** runtime resolution returns no snapshot and the request proceeds as a bare run
+
+### Requirement: Agent 绑定表声明 agents.id 外键与级联
+平台侧引用 agent 的从属/绑定表 SHALL 以 `agent_id`（INTEGER，= `agents.id`）声明 FK→`agents.id` ON DELETE CASCADE，使 agent 删除时其全部绑定/从属行由约束级联清理（不依赖应用层手工清理）。覆盖：`user_agents`、`channel_agents`、`agent_versions`、`mcp_servers`（正名后的 MCP 注册表）、`agent_secrets`、`agent_mcp_servers`（MCP 绑定表）、`agent_oauth_bindings`（OAuth 绑定表），以及阶段 2/3 已处理的 `agent_kbs`、`agent_skills`、`agent_admin_state`、`session_meta`——**全部 agent 引用表无一例外均 CASCADE**。例外：`connectors.agent_id` 为休眠列（运行路径未写入），不在本约束内，待真实接入再规整。
+
+#### Scenario: 五表均带 agents.id FK
+- **WHEN** 管理库迁移运行到最新版本
+- **THEN** `user_agents` / `channel_agents` / `agent_versions` / `mcp_servers` / `agent_secrets` 各声明 FK→`agents.id` ON DELETE CASCADE
+
+#### Scenario: 删除 agent 级联清理全部绑定
+- **WHEN** 一个持有用户分配 / 渠道绑定 / 版本 / MCP server 定义 / MCP 绑定 / secret 的 agent 被删除
+- **THEN** 这些表中该 agent 的行随 FK ON DELETE CASCADE 一并删除，不留孤儿
+
+#### Scenario: 休眠列不强加 FK
+- **WHEN** 审视 `connectors.agent_id`
+- **THEN** 它不声明 agents.id FK（休眠列、运行路径未消费），不在本约束范围
+
+### Requirement: MCP server 注册表与绑定表命名对齐既有惯例
+MCP 的两张管理表 SHALL 按"注册表 vs 绑定表"正名，与 skills/kbs 绑定家族及 `connectors` 注册表的既有命名惯例一致：MCP server 连接定义（含全局 `agent_id=NULL` 行）的注册表命名为 `mcp_servers`（无 `agent_` 前缀，对齐 `connectors`）；agent↔MCP server 的绑定表命名为 `agent_mcp_servers`（对齐 `agent_skills`/`agent_kbs`）。改名 SHALL 不改变运行时行为：materialize 的 MCP 解析（绑定取 id、注册表取定义）在新表名下结果不变。
+
+#### Scenario: 注册表与绑定表名各就各位
+- **WHEN** 管理库迁移运行到最新版本
+- **THEN** 存在 `mcp_servers`（MCP server 定义注册表，原 `agent_mcp_servers`）与 `agent_mcp_servers`（agent↔server 绑定表，原 `agent_mcp_server_bindings`）；旧名 `agent_mcp_server_bindings` 不再存在
+
+#### Scenario: 改名后 MCP 解析行为不变
+- **WHEN** materialize 为某 agent 解析 MCP servers
+- **THEN** 仍从绑定表（`agent_mcp_servers`）+ 版本快照 union 取 server_id，从注册表（`mcp_servers`）取定义（per-agent 行优先、全局 `agent_id=NULL` 行兜底），结果与改名前一致
 

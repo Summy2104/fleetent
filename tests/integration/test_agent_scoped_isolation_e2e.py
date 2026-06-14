@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 import fleetent.integrations.mcp.client as mcp_client
+from fleetent import agent_store
 from fleetent.integrations.mcp.client import McpServerConfig
 from fleetent.platform.connector_management import (
     agent_mcp_server_store,
@@ -31,6 +32,8 @@ def scoped_db(tmp_path, monkeypatch):
     _apply_migrations(db_path)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    assert agent_store.create_agent("agent-a", "A prompt", ["shell"]).id == AGENT_A
+    assert agent_store.create_agent("agent-b", "B prompt", ["shell"]).id == AGENT_B
     # isolate MCP client maps
     srv_before = dict(mcp_client._server_registry)
     sess_before = dict(mcp_client._active_sessions)
