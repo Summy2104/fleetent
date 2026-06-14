@@ -7,10 +7,10 @@
 
 ## 1. 回流提案存储（复用 reflection skill_proposals）
 
-- [ ] 1.1 写测试（integration）：管理库新增 `backflow_proposals` 表（Alembic 迁移，号 apply 时定）；提名漂移副本生成 backflow 提案、未漂移副本拒绝提名——先见红
+- [x] 1.1 写测试（integration）：管理库新增 `backflow_proposals` 表（Alembic 迁移，号 apply 时定）；提名漂移副本生成 backflow 提案、未漂移副本拒绝提名——先见红
   > **[已校准 2026-06-15]** `skill_proposals` agent-side 表已在 agent_state_migrations v26 DROP，不可复用；确认使用独立 Alembic 管理表 `backflow_proposals`（status/agent_id/skill_name/base_version/proposed_content/kind）。
-- [ ] 1.2 写轻量 Alembic 迁移（号 apply 时按当前 head 现取）建 `backflow_proposals` 表——跑 1.1 见绿
-- [ ] 1.3 跑 `PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py`：回流流程在 platform、agent→platform 反向依赖仍为零
+- [x] 1.2 写轻量 Alembic 迁移（号 apply 时按当前 head 现取）建 `backflow_proposals` 表——跑 1.1 见绿
+- [x] 1.3 跑 `PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py`：回流流程在 platform、agent→platform 反向依赖仍为零
 
 ## 2. 回流 diff（相对 base 与 head）
 
