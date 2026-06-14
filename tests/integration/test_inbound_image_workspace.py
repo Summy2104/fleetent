@@ -6,7 +6,6 @@ host-absolute path), and analyze_image reads the same file back via that ref. Vi
 endpoint + agent loop are mocked; tmp workspace + db. No docker.
 """
 
-
 import yaml
 
 import fleetent.agent_config as agent_config
@@ -27,11 +26,12 @@ def _bind_default_agent(tmp_path, monkeypatch):
         "version": 1,
         "models": agent_config.default_models().model_dump(mode="json"),
         "connectors": {
+            "supports_dm": True,
             "slack": {
                 "bot_token_env": "TEST_BOT_TOKEN",
                 "app_token_env": "TEST_APP_TOKEN",
                 "access": {"allow_users": ["u1"]},
-            }
+            },
         },
     }
     (d / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")

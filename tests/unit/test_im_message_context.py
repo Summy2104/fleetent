@@ -27,11 +27,13 @@ def _agent():
         version=1,
         models=default_models(),
         connectors=AgentConnectors(
+            supports_dm=True,
+            supports_groups=True,
             slack=SlackConnector(
                 bot_token_env="BOT",
                 app_token_env="APP",
-                access=ConnectorAccess(allow_all_users=True),
-            )
+                access=ConnectorAccess(allow_all_users=True, allow_channels=["C9"]),
+            ),
         ),
     )
 

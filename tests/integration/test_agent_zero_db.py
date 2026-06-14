@@ -56,6 +56,6 @@ def test_runtime_resolution_does_not_touch_db(tmp_path, monkeypatch):
     }
     assert resolved == {"acme", "default"}
 
-    agent = normalizer.get_agent_for_context("slack", "C1", "u1")
+    agent = normalizer.get_agent_for_context()
     assert agent is not None and agent.name == "default"
     assert agent.system_prompt == "S"

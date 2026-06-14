@@ -1,4 +1,4 @@
-"""Tests for _get_connector_access and simplified get_agent_for_context (restructure-agent-access)."""
+"""Tests for _get_connector_access and the simplified default-agent resolver."""
 
 from fleetent.agent_config import (
     AgentConnectors,
@@ -87,7 +87,7 @@ def test_get_agent_for_context_returns_default(monkeypatch):
     fake_index = AgentConfigIndex(agents={"default": default_agent}, default="default")
     monkeypatch.setattr(ac, "_index", fake_index)
 
-    result = get_agent_for_context("slack", "C_irrelevant", "U_irrelevant")
+    result = get_agent_for_context()
     assert result is not None
     assert result.name == "default"
 
@@ -106,7 +106,7 @@ def test_get_agent_for_context_no_channel_lookup(monkeypatch):
     )
     monkeypatch.setattr(ac, "_index", fake_index)
 
-    result = get_agent_for_context("slack", "C_other", "U_other")
+    result = get_agent_for_context()
     assert result is not None
     assert result.name == "default"
 
@@ -118,5 +118,5 @@ def test_get_agent_for_context_none_when_no_default(monkeypatch):
     fake_index = AgentConfigIndex(agents={}, default=None)
     monkeypatch.setattr(ac, "_index", fake_index)
 
-    result = get_agent_for_context("slack", "C1", "U1")
+    result = get_agent_for_context()
     assert result is None

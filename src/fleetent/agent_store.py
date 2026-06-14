@@ -590,6 +590,23 @@ def list_users_for_agent(agent_id: int) -> list[str]:
     return [str(row["user_id"]) for row in rows]
 
 
+def list_im_groups_for_agent(agent_id: int) -> list[dict[str, str]]:
+    rows = (
+        _db()
+        .execute(
+            """
+            SELECT platform, group_id
+            FROM agent_im_groups
+            WHERE agent_id = :agent_id
+            ORDER BY platform, group_id
+            """,
+            {"agent_id": agent_id},
+        )
+        .fetchall()
+    )
+    return [{"platform": str(row["platform"]), "group_id": str(row["group_id"])} for row in rows]
+
+
 def bind_mcp_server(agent_id: int, server_id: str, created_by: str | None = None) -> None:
     _db().execute(
         "INSERT OR IGNORE INTO agent_mcp_servers "

@@ -14,7 +14,6 @@ from fleetent.agent_config import (
     default_models,
 )
 
-
 # ── Task 1.1: ConnectorAccess.allow_all_users 字段默认 false ─────────────────
 
 
@@ -55,6 +54,8 @@ def _agent_with_slack_access(
     allow_users: list[str] | None = None,
     allow_all_users: bool = False,
     require_approval: bool = True,
+    supports_dm: bool = False,
+    supports_groups: bool = False,
 ) -> AgentFile:
     access = ConnectorAccess(
         allow_channels=allow_channels or [],
@@ -67,13 +68,15 @@ def _agent_with_slack_access(
         version=1,
         models=_MODELS,
         connectors=AgentConnectors(
-            slack=SlackConnector(bot_token_env="BOT", app_token_env="APP", access=access)
+            supports_dm=supports_dm,
+            supports_groups=supports_groups,
+            slack=SlackConnector(bot_token_env="BOT", app_token_env="APP", access=access),
         ),
     )
 
 
 def _msg(channel_id: str = "C1", user_id: str = "U_unknown", platform: str = "slack"):
-    from fleetent.im_gateway.normalizer import NormalizedMessage
+    from fleetent.im_gateway.normalizer import NormalizedMessage, SessionContext
 
     replies: list[str] = []
 
@@ -89,6 +92,12 @@ def _msg(channel_id: str = "C1", user_id: str = "U_unknown", platform: str = "sl
         reply_func=reply_func,
         channel_id=channel_id,
         agent_name="test",
+        session_context=SessionContext(
+            platform=platform,
+            sender_id=user_id,
+            chat_type="dm" if channel_id.startswith("D") else "channel",
+            channel_name=channel_id,
+        ),
     ), replies
 
 
@@ -99,7 +108,6 @@ async def _route_with_agent(
     from fleetent import agent_config
     from fleetent.agent_config import AgentConfigIndex
     from fleetent.im_gateway import access as access_mod
-    from fleetent.im_gateway import normalizer
 
     msg, replies = _msg(channel_id=channel_id, user_id=user_id, platform=platform)
 
@@ -110,16 +118,12 @@ async def _route_with_agent(
     from fleetent.runtime import loop as agent_loop
     from fleetent.session import manager as session_mgr
 
-    orig_current = agent_config.current
-
     async def fake_loop(**kwargs):
         return "ok"
 
     @contextlib.asynccontextmanager
     async def fake_lock(sid):
         yield
-
-    monkeypatches = []
 
     import unittest.mock as mock
 
@@ -141,7 +145,7 @@ async def _route_with_agent(
 # Task 2.1: 频道在 allow_channels 中 → 跳过用户门控
 @pytest.mark.asyncio
 async def test_user_in_listed_channel_bypasses_user_gate(tmp_path):
-    agent = _agent_with_slack_access(allow_channels=["C1"], allow_users=[])
+    agent = _agent_with_slack_access(allow_channels=["C1"], allow_users=[], supports_groups=True)
     replies = await _route_with_agent(agent, channel_id="C1", user_id="U_unknown")
     # Should NOT get rejection message — message proceeds to loop
     assert not any("权限" in r or "审批" in r for r in replies)
@@ -150,7 +154,7 @@ async def test_user_in_listed_channel_bypasses_user_gate(tmp_path):
 # Task 2.2: allow_channels 为空 → 用户门控不跳过
 @pytest.mark.asyncio
 async def test_empty_allow_channels_does_not_skip_user_gate(tmp_path):
-    agent = _agent_with_slack_access(allow_channels=[], allow_users=[])
+    agent = _agent_with_slack_access(allow_channels=[], allow_users=[], supports_groups=True)
     replies = await _route_with_agent(agent, channel_id="C1", user_id="U_unknown")
     # Should get rejection message — user gate active
     assert any("权限" in r or "审批" in r for r in replies)
@@ -159,7 +163,7 @@ async def test_empty_allow_channels_does_not_skip_user_gate(tmp_path):
 # Task 2.3: allow_all_users=True → 跳过用户门控
 @pytest.mark.asyncio
 async def test_allow_all_users_true_skips_user_gate(tmp_path):
-    agent = _agent_with_slack_access(allow_all_users=True)
+    agent = _agent_with_slack_access(allow_all_users=True, supports_dm=True)
     replies = await _route_with_agent(agent, channel_id="D_dm", user_id="U_unknown")
     # Should NOT get rejection
     assert not any("权限" in r or "审批" in r for r in replies)
@@ -168,6 +172,6 @@ async def test_allow_all_users_true_skips_user_gate(tmp_path):
 # Task 2.4: allow_all_users=False（默认）→ 用户门控保持
 @pytest.mark.asyncio
 async def test_allow_all_users_false_keeps_user_gate(tmp_path):
-    agent = _agent_with_slack_access(allow_all_users=False, allow_users=[])
+    agent = _agent_with_slack_access(allow_all_users=False, allow_users=[], supports_dm=True)
     replies = await _route_with_agent(agent, channel_id="C1", user_id="U_unknown")
     assert any("权限" in r or "审批" in r for r in replies)

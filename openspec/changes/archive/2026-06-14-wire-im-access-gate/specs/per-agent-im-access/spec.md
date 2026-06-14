@@ -29,7 +29,7 @@ The agent runtime SHALL resolve the `ConnectorAccess` for an incoming message by
 - **WHEN** a message arrives on a platform with no matching connector declaration
 - **THEN** default-closed `ConnectorAccess()` applies and the message is rejected
 
-### Requirement: Group allowlist gates group messages (default-closed)
+### Requirement: Channel listing grants implicit user access
 The access group allowlist (the `allow_channels` field — renamed to `allow_groups` in a later phase) SHALL gate **group** messages only (DMs are not gated by it). When a group is explicitly listed, the agent SHALL admit its members without requiring them in `allow_users` (group single-gate). When the group allowlist is **empty**, the agent SHALL admit **no** group messages (default-closed). This reverses the prior "empty = allow all channels" behavior — an agent can no longer be pulled into arbitrary groups.
 
 #### Scenario: User in listed group bypasses user gate

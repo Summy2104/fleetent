@@ -39,11 +39,12 @@ async def test_session_id_not_owner_prefixed(monkeypatch, tmp_path):
         version=1,
         models=default_models(),
         connectors=AgentConnectors(
+            supports_dm=True,
             slack=SlackConnector(
                 bot_token_env="BOT",
                 app_token_env="APP",
                 access=ConnectorAccess(allow_users=["u1"]),
-            )
+            ),
         ),
     )
     monkeypatch.setattr(normalizer, "get_agent_for_context", lambda *a, **k: agent)
@@ -97,11 +98,12 @@ async def test_normalizer_propagates_permission_gate_config(monkeypatch, tmp_pat
         version=1,
         models=default_models(),
         connectors=AgentConnectors(
+            supports_dm=True,
             slack=SlackConnector(
                 bot_token_env="SLACK_BOT",
                 app_token_env="SLACK_APP",
                 access=ConnectorAccess(allow_users=["u1"]),
-            )
+            ),
         ),
         permission_gate_enabled=False,
         permission_gate_medium_timeout_seconds=60,

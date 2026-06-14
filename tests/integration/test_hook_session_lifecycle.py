@@ -44,11 +44,12 @@ def _mock_env(monkeypatch):
         version=1,
         models=default_models(),
         connectors=AgentConnectors(
+            supports_dm=True,
             slack=SlackConnector(
                 bot_token_env="BOT",
                 app_token_env="APP",
                 access=ConnectorAccess(allow_users=["u1"]),
-            )
+            ),
         ),
         hooks_enabled=True,
     )
@@ -118,6 +119,14 @@ async def test_session_hooks_disabled_no_effect(_mock_env):
         name="test-agent",
         version=1,
         models=default_models(),
+        connectors=AgentConnectors(
+            supports_dm=True,
+            slack=SlackConnector(
+                bot_token_env="BOT",
+                app_token_env="APP",
+                access=ConnectorAccess(allow_users=["u1"]),
+            ),
+        ),
         hooks_enabled=False,
     )
     norm.get_agent_for_context = lambda *a, **k: agent_off
