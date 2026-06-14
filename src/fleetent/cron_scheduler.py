@@ -530,6 +530,12 @@ def create_task(
     notify_text: str | None = None,
 ) -> dict[str, Any]:
     """Create a task; registers the live job when a scheduler is running."""
+    # Forgive the common model confusion of passing the parameter name as the kind
+    # (schedule-kind-validation): `schedule_kind="run_at"` clearly means a one-shot, so
+    # normalize it to "once" before the run_at normalization below. Other invalid kinds are
+    # rejected by schedule_store.create.
+    if schedule_kind == "run_at":
+        schedule_kind = "once"
     # Normalize a one-shot run_at to canonical ISO at write time (cron-runat-hardening) so the
     # store never holds a form the parser later chokes on. Reuses the single parser; an
     # unparseable run_at raises ValueError here (the schedule tool surfaces it as clean text).
