@@ -152,6 +152,27 @@ class BaseSandboxBackend(ABC):
 
     # ── capability-gated surface (safe defaults for backends without it) ──────
 
+    async def stage_file(self, workspace_id: str, container_path: str, data: bytes) -> None:
+        """Copy a host file's bytes into the container at an absolute path (staging degrade).
+
+        Used by run_code's /exchange staging fallback on backends WITHOUT `exchange_mount`
+        (D5): when the scope view cannot be ro-mounted, attribution-checked artifacts are
+        copied in before exec. Default implementation writes via the `_run_exec` primitive
+        (base64 over stdin), so any backend with a working exec channel gets staging for
+        free; a backend may override with a native copy.
+        """
+        import base64
+        import os.path
+        import shlex
+
+        b64 = base64.b64encode(data).decode("ascii")
+        directory = os.path.dirname(container_path)
+        cmd = (
+            f"mkdir -p {shlex.quote(directory)} && "
+            f"base64 -d > {shlex.quote(container_path)}"
+        )
+        await self._run_exec(workspace_id, cmd, stdin=b64.encode("ascii"))
+
     async def commit_workspace(self, workspace_id: str, image_tag: str) -> None:
         """Persist a workspace's deps into an image (persist_workspace backends).
 

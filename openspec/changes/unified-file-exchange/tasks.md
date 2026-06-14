@@ -47,8 +47,8 @@
 - [x] 4.4 实现：capability 位 + Docker 后端第二卷 ro 挂载 + manager 接线——绿
 - [x] 4.5 测试：容器内 `/exchange` 只读 + 挂载后新增链接即时可见——以 **mock docker run 命令组装等价覆盖**（断言 `-v 视图:/exchange:ro` 选项装配 + 复用同视图）；真机断言加 `@pytest.mark.skipif`（无 docker 跳过），先红
 - [x] 4.6 实现：补齐挂载选项装配与文档注释（mock 覆盖通过）——绿
-- [ ] 4.7 测试：无 `exchange_mount` 后端的 staging 降级（exec 前扫描代码 `/exchange/…` 引用、归属校验通过者复制进容器、记录降级日志）——integration，先红
-- [ ] 4.8 实现：staging 降级路径——绿
+- [x] 4.7 测试：无 `exchange_mount` 后端的 staging 降级（exec 前扫描代码 `/exchange/…` 引用、归属校验通过者复制进容器、记录降级日志）——integration，先红
+- [x] 4.8 实现：staging 降级路径——绿
 
 ## 5. 权限门参数化风险
 

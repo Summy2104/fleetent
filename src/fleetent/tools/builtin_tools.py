@@ -4,6 +4,7 @@ import asyncio
 import datetime
 import logging
 import os
+import re
 import time
 import uuid
 from pathlib import Path
@@ -360,6 +361,48 @@ async def _exec_or_cancel(
             return exec_task.result()
 
 
+# /exchange/<server_id>/<rel> references embedded in run_code source (staging fallback).
+_EXCHANGE_REF_RE = re.compile(r"/exchange/[A-Za-z0-9_.-]+/[^\s\"'<>),;]+")
+
+
+async def _stage_exchange_refs(
+    code: str, scope_key: str | None, backend: BaseSandboxBackend, ws_id: str
+) -> int:
+    """Stage attribution-passing /exchange refs into the container (D5 degrade, §4.7/4.8).
+
+    No-op on `exchange_mount`-capable backends (the ro view mount handles it). Otherwise the
+    `/exchange/...` paths literally referenced in the code are resolved through
+    artifact_exchange (own-scope only; cross-scope / unregistered are silently skipped — not
+    staged) and copied into the container before exec. Returns the count staged; logs a
+    degrade line when refs were present. Best-effort: a copy failure is logged, never raised.
+    """
+    if getattr(backend.capabilities, "exchange_mount", False):
+        return 0
+    refs = sorted(set(_EXCHANGE_REF_RE.findall(code)))
+    if not refs:
+        return 0
+    from fleetent import artifact_exchange
+
+    staged = 0
+    for ref in refs:
+        try:
+            host = artifact_exchange.resolve(ref, scope_key, approved=False)
+        except Exception:  # noqa: BLE001 — cross-scope/unregistered/gone → not staged
+            continue
+        try:
+            await backend.stage_file(ws_id, ref, host.read_bytes())
+            staged += 1
+        except Exception as exc:  # noqa: BLE001 — staging is best-effort, never break exec
+            logger.warning("exchange_staging_copy_failed ref=%s error=%s", ref, exc)
+    logger.warning(
+        "exchange_staging_degrade backend=%s refs=%d staged=%d",
+        getattr(backend, "name", "?"),
+        len(refs),
+        staged,
+    )
+    return staged
+
+
 @tool(risk_level="medium", self_truncates=True)
 async def run_code(
     code: str,
@@ -390,6 +433,14 @@ async def run_code(
     agent_env = features.get("sandbox_env")
     env = build_sandbox_env(agent_env=agent_env)
     ws_id = await manager.acquire(scope, session_id, agent_name or "default", env=env)
+    # unified-file-exchange §4.7/4.8: on a backend without exchange_mount, stage the code's
+    # attribution-passing /exchange refs into the container before exec (no-op on capable
+    # backends, where the ro view mount already exposes them). Best-effort, never breaks run.
+    try:
+        scope_key = getattr(tool_context, "scope_key", None)
+        await _stage_exchange_refs(code, scope_key, manager.backend, ws_id)
+    except Exception as exc:  # noqa: BLE001 — staging is auxiliary, never break run_code
+        logger.warning("exchange_staging_failed error=%s", exc)
     command = f"python3 -c {__import__('shlex').quote(code)}"
     # SB2 D4: normal completion does NOT destroy — reuse is the point; destruction
     # is owned by release_session / sweep_idle. AR19's cancel path still hard-aborts
