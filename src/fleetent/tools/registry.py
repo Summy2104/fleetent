@@ -148,20 +148,29 @@ def is_dynamic_risk(name: str) -> bool:
 
 
 def evaluate_risk_level(name: str, args: dict[str, Any], tool_context: Any) -> str:
-    """Resolve a tool's risk at call time (permission-gate D7).
+    """Resolve a tool's risk at call time, delegating to the central approval policy.
 
-    A static string is returned as-is. A callable risk is evaluated with
-    ``(args, tool_context)``; any exception fails closed to 'medium' so a buggy risk
-    function can never silently downgrade a call below the approval threshold.
+    The tool's registered band (a static string, or a callable evaluated with
+    ``(args, tool_context)``) is computed first as the *fallback*, then handed to
+    `governance.approval_policy.risk_for`, which is the single authority on the
+    recipient-identity axis (approval-boundary-redesign). A broken callable fails closed to
+    'medium' before delegation, so it can never silently downgrade a call. The policy import
+    is lazy to keep the tools→governance edge out of module load (the reverse edge already
+    exists; importing at top would cycle).
     """
     value = _risk_levels.get(name, "none")
-    if not callable(value):
-        return value
-    try:
-        return value(args, tool_context)
-    except Exception:  # noqa: BLE001 — fail closed: a broken risk fn must not bypass the gate
-        logger.warning("risk_callable_failed name=%s", name)
-        return "medium"
+    if callable(value):
+        try:
+            fallback = value(args, tool_context)
+        except Exception:  # noqa: BLE001 — fail closed: a broken risk fn must not bypass the gate
+            logger.warning("risk_callable_failed name=%s", name)
+            fallback = "medium"
+    else:
+        fallback = value
+
+    from fleetent.governance.approval_policy import risk_for
+
+    return risk_for(name, args, tool_context, fallback=fallback)
 
 
 def get_connector(name: str) -> tuple[str, list[str]] | None:

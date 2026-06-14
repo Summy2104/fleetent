@@ -156,6 +156,20 @@ class ConfluenceConnectorsSettings(BaseModel):
     connectors: list[ConfluenceConnectorSettings] = Field(default_factory=list)
 
 
+class McpApprovalRule(BaseModel):
+    """One MCP approval rule (approval-boundary-redesign D4).
+
+    Matches calls to ``tool`` (the server-local tool name). ``when`` is an optional
+    arg-condition map (arg name → allowed values); a call matches when, for every listed
+    arg, the call's value is in the list (AND across args). ``when=None`` matches the whole
+    tool. A match raises the call to ``medium`` (approval); MCP calls otherwise default to
+    no-approval.
+    """
+
+    tool: str
+    when: dict[str, list[str]] | None = None
+
+
 class McpServerSettings(BaseModel):
     id: str
     transport: str = "http"
@@ -173,6 +187,9 @@ class McpServerSettings(BaseModel):
     # client's built-in connect/call defaults so omitting them changes nothing.
     connect_timeout: float = 10.0
     call_timeout: float = 30.0
+    # Per-server approval rules (approval-boundary-redesign D4): which operations on this MCP
+    # server require approval. Empty = all operations no-approval (the narrow-surface default).
+    approval_rules: list[McpApprovalRule] = Field(default_factory=list)
 
 
 class McpServersFile(BaseModel):

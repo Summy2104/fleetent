@@ -80,6 +80,26 @@ flowchart TD
 
 - ✅ **resources / prompts 合成工具**：对 advertised `resources`/`prompts` 的服务，注册 `{server}__list_resources`/`__read_resource`、`__list_prompts`/`__get_prompt` 合成工具（capability 门控），调用分派到对应 MCP 方法（http JSON-RPC / stdio SDK）、结果 JSON 文本化；走 `{server}__*` 命名空间故自动受降级隐藏、stdio 刷新后保留
 
+- ✅ **per-server 审批规则（approval_rules，approval-boundary-redesign）**：MCP 工具调用是否需要人工审批，由 agent.yaml `mcp_servers[].approval_rules` 声明。判定经中心策略 `governance/approval_policy.risk_for`（与内置工具同一裁决入口）。规则形如：
+
+    ```yaml
+    mcp_servers:
+      - id: google-workspace
+        # ...连接配置...
+        approval_rules:
+          - tool: manage_email                     # server 内本地工具名（运行时全名 google-workspace__manage_email）
+            when: { operation: [send, reply, replyAll, forward] }   # 按参数匹配：命中其一即匹配；多参数 = AND
+          - tool: manage_drive
+            when: { operation: [delete] }
+          - tool: some_dangerous_tool              # 省略 when = 整工具一律审批
+    ```
+
+    匹配 → `medium`（走审批门）；**未命中 / 该 server 未声明 `approval_rules` → 免审批直跑**。
+
+    > ⚠️ **安全取舍（窄审批面）**：默认姿态是「未声明即免审批」——审批面只覆盖「主动外发给当前对话以外的接收方」（私信/文件/邮件）。**新挂一个 MCP server 若不配 `approval_rules`，其危险操作（删文件、改数据等）默认免审批直跑**，安全责任在 agent owner 显式声明需审批的操作。
+    >
+    > **内置默认**：`google-workspace` 的 `manage_email`（`operation ∈ {send, reply, replyAll, forward}`）开箱即默认 `medium`（发邮件默认审批，关闭 MCP 零审批漏洞）；该默认可被 agent.yaml 对该 server 的显式 `approval_rules` 覆盖。
+
 ## 未来增强（本轮 6 变更程序已全部完成）
 
 > 依据见 `docs/records/mcp-enhancement-2026-06/`（四参考项目差距分析 + 决策记录）。本轮范围 B 的 6 个变更——工具结果处理、协议合规与发现完整性、stdio 子进程环境隔离、per-server 超时、动态工具刷新(stdio)、resources/prompts 合成工具——已全部落地。以下为延后 / 待评估项：

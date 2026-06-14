@@ -309,7 +309,7 @@ async def test_run_approval_rejected_terminates(mock_client, monkeypatch):
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update({"messages": a[2]}))
     msgs = [{"role": "user", "content": "go"}]
     with (
-        patch.object(al, "get_risk_level", lambda name: "high"),
+        patch.object(al, "evaluate_risk_level", lambda name, args, ctx: "high"),
         patch.object(al._default_gate, "request_approval", AsyncMock(return_value="rejected")),
     ):
         result = await al.run(msgs, reply_func=AsyncMock(), max_turns=50)
@@ -2924,7 +2924,7 @@ async def test_run_multi_high_risk_approved_serially_then_parallel(mock_client):
         return f"{name}_r"
 
     with (
-        patch.object(al, "get_risk_level", lambda name: "high"),
+        patch.object(al, "evaluate_risk_level", lambda name, args, ctx: "high"),
         patch.object(al._default_gate, "request_approval", fake_approval),
         patch.object(al, "dispatch", disp),
     ):
@@ -2950,7 +2950,7 @@ async def test_run_rejected_tool_excluded_from_batch_others_run(mock_client):
         return f"{name}_r"
 
     with (
-        patch.object(al, "get_risk_level", lambda name: "high"),
+        patch.object(al, "evaluate_risk_level", lambda name, args, ctx: "high"),
         patch.object(al._default_gate, "request_approval", fake_approval),
         patch.object(al, "dispatch", disp),
         patch.object(al, "log_run", lambda *a, **kw: captured.update({"messages": a[2], **kw})),

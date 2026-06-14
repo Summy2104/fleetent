@@ -705,7 +705,7 @@ def sub_agent(tasks: str) -> str:
     return "sub_agent must be called through the agent loop"
 
 
-@tool(risk_level="medium")
+@tool(risk_level="none")
 async def invoke_agent(
     agent_name: str, message: str, tool_context: ToolContext | None = None
 ) -> str:
@@ -784,13 +784,27 @@ async def send_im_message(
         return f"发送失败：{resolved_platform} 投递 {target} 时出错，请稍后重试。"
     kind = "私信" if target_type == "user" else "频道消息"
 
-    # Attachments (§7): resolve each through the shared kernel (approved=True — this tool is
-    # always medium-gated, so the approval authorizes cross-scope artifacts). Per-file
-    # degrade: a bad/cross-scope-gone entry is skipped with a note, never aborting the send.
+    # Attachments (§7): resolve each through the shared kernel. Cross-scope artifacts are
+    # authorized only when this call was approval-gated — under the recipient-identity axis
+    # (approval-boundary-redesign) a send to the current conversation is NOT gated, so it must
+    # not silently authorize another session's file. The call is gated iff the policy bands it
+    # medium (target ≠ current conversation). Per-file degrade: a bad/cross-scope/gone entry is
+    # skipped with a note, never aborting the send.
+    from fleetent.governance import approval_policy
+
+    _gated = (
+        approval_policy.risk_for(
+            "send_im_message",
+            {"target": target, "target_type": target_type},
+            tool_context,
+            fallback="medium",
+        )
+        == "medium"
+    )
     delivered, skipped = 0, []
     for raw in files or []:
         try:
-            host = _resolve_outbound_path(raw, tool_context, approved=True)
+            host = _resolve_outbound_path(raw, tool_context, approved=_gated)
             rcpt = await outbound.send_file_to(resolved_platform, connector, target, str(host))
         except Exception as exc:  # noqa: BLE001 — per-file degrade, never abort the batch
             skipped.append(f"{raw}（{exc}）")
@@ -840,10 +854,11 @@ def _resolve_outbound_path(path: str, tool_context: Any, *, approved: bool) -> P
     """Resolve a send path to a host file across both roots — the shared delivery kernel.
 
     Workspace-relative paths resolve via the same fence the file tools use; `/exchange`
-    paths resolve through the ledger with attribution (``approved`` bypasses the scope
-    check — send_file passes True because the gate already vetted it; send_im_message
-    passes True because it is always medium-gated, so a human approval authorizes the
-    cross-scope delivery). Raises ValueError / ExchangeResolutionError / FileNotFoundError.
+    paths resolve through the ledger with attribution. ``approved`` is the only cross-scope
+    exemption: send_file passes False (it is never gated, so cross-scope is hard-refused);
+    send_im_message passes True only when the call was approval-gated (recipient ≠ current
+    conversation), so a human approval authorizes the cross-scope delivery. Raises
+    ValueError / ExchangeResolutionError / FileNotFoundError.
     """
     from fleetent.tools.file_sandbox_io import resolve_host_path
     from fleetent.tools.file_tools import _is_exchange_path
@@ -860,37 +875,7 @@ def _resolve_outbound_path(path: str, tool_context: Any, *, approved: bool) -> P
     return host
 
 
-def _send_file_risk(args: dict[str, Any], tool_context: Any) -> str:
-    """Call-time risk for send_file (D6/D7): low iff the box is closed, else medium.
-
-    Low (no-approval) requires all of: an interactive `session_context` (recipient is
-    harness-fixed) ∧ a DM conversation ∧ the file owned by the current run's scope
-    (workspace-relative is always this run's scope; an `/exchange` artifact must resolve
-    under the run's scope_key). Any miss escalates to medium approval — replacing the old
-    fail-closed decline so every dead end becomes "at worst one approval click". A missing
-    session_context returns medium; the body still fail-closes (no recipient / approval loop).
-    """
-    sc = getattr(tool_context, "session_context", None) if tool_context else None
-    if sc is None:
-        return "medium"
-    if str(getattr(sc, "chat_type", "") or "") != "dm":
-        return "medium"
-    path = str(args.get("path", "") or "")
-    from fleetent.tools.file_tools import _is_exchange_path
-
-    if _is_exchange_path(path):
-        from fleetent import artifact_exchange
-
-        scope_key = getattr(tool_context, "scope_key", None)
-        try:
-            artifact_exchange.resolve(path, scope_key, approved=False)
-            return "low"  # own-scope artifact
-        except Exception:  # noqa: BLE001 — cross-scope / unregistered / gone → escalate
-            return "medium"
-    return "low"  # workspace-relative path is always the current run's scope
-
-
-@tool(risk_level=_send_file_risk)
+@tool(risk_level="none")
 async def send_file(path: str, tool_context: ToolContext | None = None) -> str:
     """Send a product file back to the current conversation's sender.
 
@@ -898,11 +883,12 @@ async def send_file(path: str, tool_context: ToolContext | None = None) -> str:
     **workspace-relative** path (the `/workspace` root) or an **`/exchange/<server_id>/...`**
     canonical path (a file an MCP tool produced). It is resolved to the real host file and
     sent as an attachment. The recipient is fixed to the current sender — you cannot specify
-    one. A DM with files owned by this run sends directly; anything else (a channel, a
-    cross-scope artifact) goes through a one-time approval rather than failing.
+    one. Files owned by this run send directly (DM or the current channel, no approval); a
+    cross-scope artifact (owned by another session) is refused — deliver it via
+    send_im_message (which is approval-gated) instead.
     """
     # Recipient is harness-fixed from session_context; the model cannot supply it. No
-    # session_context = no recipient / no approval loop (scheduled task / sub_agent) → decline.
+    # session_context = no recipient (scheduled task / sub_agent) → decline.
     sc = getattr(tool_context, "session_context", None) if tool_context else None
     if sc is None:
         return (
@@ -910,11 +896,12 @@ async def send_file(path: str, tool_context: ToolContext | None = None) -> str:
             "（如 scheduled task / sub_agent）。"
         )
 
-    # Escalation (channel / cross-scope) is enforced by the callable risk (_send_file_risk)
-    # + permission gate; by the time the body runs the call is either low or approved. The
-    # shared kernel resolves with approved=True (the gate already vetted attribution).
+    # send_file always replies to the current conversation, so it is never approval-gated
+    # (approval-boundary-redesign). It therefore has no approval escape for cross-scope
+    # artifacts: resolve with approved=False — a file owned by another scope is hard-refused
+    # (the resolver's message points to send_im_message).
     try:
-        host_path = _resolve_outbound_path(path, tool_context, approved=True)
+        host_path = _resolve_outbound_path(path, tool_context, approved=False)
     except (ValueError, FileNotFoundError) as exc:
         return f"无法发送：{exc}"
 

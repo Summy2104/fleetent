@@ -115,6 +115,9 @@ class McpServerConfig:
     # convention env injection entirely (reads the host's real ~/.config etc.).
     file_root: str = ""
     file_isolation: str = "on"  # "on" | "off"
+    # Approval rules (approval-boundary-redesign D4): which of this server's operations require
+    # approval. Installed into governance.approval_policy at registration. Empty = no-approval.
+    approval_rules: list[Any] = field(default_factory=list)
     # Per-server HTTP timeouts in seconds: connect/discovery/probe/token vs tool call.
     connect_timeout: float = 10.0
     call_timeout: float = 30.0
@@ -355,6 +358,11 @@ async def _register_server(
 ) -> None:
     server._agent_scope = scope
     server._agent_home = agent_home
+    # approval-boundary-redesign D4: install this server's approval rules into the central
+    # policy so MCP calls matching a rule are gated (default no-approval otherwise).
+    from fleetent.governance import approval_policy
+
+    approval_policy.set_server_mcp_rules(server.id, server.approval_rules)
     # unified-file-exchange: bind the /exchange effective root so the fence + result
     # rewrite can resolve this server's products (no-op for non-stdio / no agent_home).
     _bind_exchange_root(server, agent_home)
