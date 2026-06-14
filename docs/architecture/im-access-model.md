@@ -131,7 +131,12 @@ Python 模型：`ImBinding`（顶层）+ per-platform `SlackBinding`/`TelegramBi
 
 ## 9. 范围与取舍
 
-- **whatsapp owner-level 例外**：slack/telegram 是 per-agent bot（本设计对象）；whatsapp 走 owner 级 `im_connectors`（连接归属平台用户、非 per-agent）。本设计聚焦 per-agent-bot 平台；whatsapp 的 owner 模型如何并入本访问模型留作后续单独议题。
+- **whatsapp：v1 缓做，空 owner-level 脚手架 descope（已调研定调 2026-06-14）**。
+  - **现状**：`im_connectors` 表 + `connector_manager`（`server.py` 用 `factories={}` 实例化→永不启动任何连接器）+ `connector_config`（whatsapp 配置 schema）+ owner-level admin API/CLI = **整套未实现的死脚手架**（无 whatsapp 适配器、无 webhook 处理）。仅服务 whatsapp 一个平台，slack/telegram 走 per-agent 不碰它。
+  - **WhatsApp 与 slack/telegram 架构差异很大**（Cloud API，On-Prem 2025-10 已废）：① **webhook-push**（Meta POST 到公网 HTTPS 端点，不能轮询/socket）vs per-agent 持久连接；② 身份=**电话号**；③ **一个 Business 号/WABA**，per-agent 多号是重资产 → "连接=agent" 失效、**需路由**（号→哪个 agent）；④ **不支持群**（1:1 商户↔客户）→ 只 `supports_dm` 适用；⑤ 出站受 **24h 客服窗口 + 预审模板**约束。
+  - **扩展性结论**：共性扩展缝**已就位**——`NormalizedMessage`（平台无关）+ `im_users(platform, platform_user_id)`（电话号即 platform_user_id）+ 访问闸（supports_dm 适用）。whatsapp 的独有部分（webhook 入站、共享号路由、模板/24h 出站）形态差异大、**不预抽象**（空 `im_connectors` 脚手架就是错方向、留着≈零价值）。
+  - **决定**：descope 整套 owner-level connector 机制（`im_connectors` 表 + `connector_manager` + `connector_config` + owner-level admin API/CLI）——**完成 owner→tenant 塌缩第三刀**（owner_id 在 IM 域彻底退役）。该 descope 排在 `descope-im-channel-allowlist` 落地后（重叠 connector_store/admin_api/__init__，串行）。
+  - **未来 whatsapp = 增量**（非重构核心）：① 控制面 webhook 端点 ② whatsapp 适配器（电话→NormalizedMessage，chat_type=dm）③ 路由规则（共享号→agent：大概率"一号=一默认 agent"或菜单，**比旧 channel_agents 简单**）④ 模板/24h 出站。届时正经设计。
 - **群单门 vs 双门** → 单门（见 §4）。
 - **不做 bot 级能力开关** → agent 级（见 §3）。
 
