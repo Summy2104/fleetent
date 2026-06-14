@@ -42,7 +42,6 @@ from fleetent.platform.agent_statistics import stats_admin_api
 from fleetent.platform.askit_console import agent_apply_api
 from fleetent.platform.chat_management import chat_admin_api
 from fleetent.platform.connector_management import connector_admin_api
-from fleetent.platform.im_gateway_management import admin_api, connector_manager
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import provider_admin_api
 from fleetent.platform.skill_management import skill_admin_api
@@ -78,11 +77,6 @@ def _admin_login_url(router_prefix: str) -> str:
     display_host = "127.0.0.1" if host in ("0.0.0.0", "") else host
     return f"http://{display_host}:{port}{router_prefix}/ui"
 
-
-# Owner-level connector manager. Slack and Telegram are intentionally absent: both are
-# per-agent, supervised from the agent index (per-agent-slack-connector /
-# per-agent-telegram-connector). No owner-level adapter factories remain.
-_connector_manager = connector_manager.ConnectorManager(factories={})
 
 # Per-agent Slack supervisor: one Socket Mode connection per agent declaring
 # `im.slack`, sourced from the agent index.
@@ -266,7 +260,6 @@ app.include_router(skill_admin_api.router)
 app.include_router(provider_admin_api.router)
 app.include_router(kb_admin_api.router)
 app.include_router(connector_admin_api.router)
-app.include_router(admin_api.router)
 app.include_router(chat_admin_api.router)
 app.include_router(agent_console_api.router)
 app.include_router(agent_admin_api.router)

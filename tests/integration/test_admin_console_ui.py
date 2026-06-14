@@ -765,11 +765,10 @@ def test_sessions_write_controls_admin_gated():
 # --- 8. OAuth Connectors + MCP module -----------------------------------------
 
 
-def test_oauth_mcp_tab_distinct_from_im_connectors():
+def test_oauth_mcp_tab_present():
     html = ADMIN_HTML
     assert 'id="tab-oauth"' in html
     assert 'id="oauth-grid"' in html  # card grid (replaced oc-body table)
-    # distinct from IM connectors tab which uses /im/connectors
     assert 'data-tab="oauth"' in html
     assert "LOADERS.oauth" in html
 
@@ -970,7 +969,7 @@ def test_tables_wrapped_in_scroll_container():
     html = ADMIN_HTML
     # every data table lives inside a horizontal scroll container
     assert html.count('class="table-scroll"') >= html.count("<table>")
-    assert html.count("<table>") >= 8
+    assert html.count("<table>") >= 7
 
 
 def test_empty_and_loading_state_helpers_present():
@@ -1074,14 +1073,14 @@ def test_separate_connectors_tab_removed():
 # --- Task 2: foldable IM identities per User ----------------------------------
 
 
-def test_loaders_users_fetches_three_endpoints():
+def test_loaders_users_fetches_identity_endpoints():
     html = ADMIN_HTML
     loader = html.split("async function loadUsers()", 1)[1].split("function renderUsers", 1)[0]
     assert '"/users"' in loader
     assert '"/im-users"' in loader
-    assert '"/im/connectors"' in loader
+    assert '"/im/connectors"' not in loader
     assert "IM_BY_USER" in loader
-    assert "CONN_BY_OWNER" in loader
+    assert "CONN_BY_OWNER" not in loader
 
 
 def test_render_users_joins_im_identities_by_user():
@@ -1151,20 +1150,18 @@ def test_bind_modal_is_searchable_user_picker():
 # --- Task 3: connectors grouped under owning User -----------------------------
 
 
-def test_render_users_groups_connectors_by_owner():
+def test_render_users_groups_im_identities_only():
     body = _render_users_body(ADMIN_HTML)
-    assert "CONN_BY_OWNER[" in body
-    assert "connEnable(" in body
-    assert "connDisable(" in body
+    assert "IM_BY_USER[" in body
+    assert "CONN_BY_OWNER[" not in body
 
 
-def test_add_connection_per_user_row():
+def test_users_row_no_longer_offers_connection_management():
     html = ADMIN_HTML
-    # no top-level "Add connection" bar — the action lives on each User row
+    # owner-level IM connectors are removed from the users tab.
     assert "conn-create-bar" not in html
     body = _render_users_body(html)
-    # per-row add targets that User as the connector owner, admin-gated
-    assert "openConnModal('" in body
+    assert "openConnModal('" not in body
     assert "IS_VIEWER" in body
 
 
@@ -1183,23 +1180,16 @@ def test_edit_user_profile_modal_and_wiring():
     assert "openEditUser('" in body and "IS_VIEWER" in body
 
 
-def test_connector_modal_retained():
+def test_connector_modal_removed():
     html = ADMIN_HTML
-    assert 'id="conn-modal"' in html
-    assert "function openConnModal" in html
-    assert "function createConn" in html
-    assert "const CONN_FIELDS" in html
+    assert 'id="conn-modal"' not in html
+    assert "function openConnModal" not in html
+    assert "function createConn" not in html
+    assert "const CONN_FIELDS" not in html
 
 
-def test_im_connector_create_targets_selected_owner():
-    html = ADMIN_HTML
-    create = html.split("async function createConn()", 1)[1].split("async function connEnable", 1)[
-        0
-    ]
-    # owner flows from the per-row target (CONN_OWNER set by openConnModal), not a
-    # free-text form field; creation stays admin-gated server-side.
-    assert "owner_id" in create
-    assert "CONN_OWNER" in create
+def test_im_connector_create_removed():
+    assert "/im/connectors" not in ADMIN_HTML
 
 
 # --- Task 4: source filter + badge --------------------------------------------
@@ -1459,7 +1449,6 @@ _MODULE_INPUTS = {
         "mcp-headers",
         "mcp-subprotocols",
         "mcp-enabled",
-        "conn-platform",
         "oc-id",
         "oc-name",
         "oc-client-id",
@@ -1560,7 +1549,6 @@ _MODULE_BUTTONS = {
         "pvTogglePassword",
     ],
     "connectors": [
-        "openConnModal",
         "saveMcpConnector",
         "mcpOpenEdit",
         "mcpReconnect",
@@ -1569,8 +1557,6 @@ _MODULE_BUTTONS = {
         "ocSave",
         "ocOpenEdit",
         "ocRevoke",
-        "connEnable",
-        "connDisable",
     ],
     "skills": [
         "skOpenCreate",

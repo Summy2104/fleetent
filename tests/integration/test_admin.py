@@ -738,66 +738,23 @@ def test_observability_cli_invalid_time_exits_nonzero():
     assert "invalid timestamp" in err
 
 
-# --- im-connector CLI (IM gateway management) ---------------------------------
+# --- removed owner-level IM connector CLI ------------------------------------
 
 
-def _seed_slack_connector():
-    import fleetent.platform.im_gateway_management.connector_store as store
-    import fleetent.user_store as user_store
+@pytest.mark.parametrize(
+    ("args", "snippet"),
+    [
+        (("im-connector", "list"), "invalid choice"),
+        (("im-connector", "enable", "--platform", "slack"), "invalid choice"),
+        (
+            ("im-connector", "set-config", "--platform", "slack", "--set", "bot_token=new-tok"),
+            "invalid choice",
+        ),
+        (("seed-connectors",), "invalid choice"),
+    ],
+)
+def test_owner_level_im_connector_commands_removed(args: tuple[str, ...], snippet: str):
+    _, err, code = run_admin(*args)
 
-    store.upsert_connector(
-        user_store.admin_owner_id(), "slack", config='{"bot_token": "xoxb-secret123"}', enabled=True
-    )
-
-
-def test_im_connector_list_shows_masked_config():
-    _seed_slack_connector()
-
-    out, _, code = run_admin("im-connector", "list")
-
-    assert code == 0
-    assert "slack" in out
-    assert "t123" in out  # last 4 retained
-    assert "xoxb-secret" not in out  # raw token never printed
-
-
-def test_im_connector_enable_disable_toggles_flag():
-    import fleetent.platform.im_gateway_management.connector_store as store
-    import fleetent.user_store as user_store
-
-    owner = user_store.admin_owner_id()
-    _seed_slack_connector()
-
-    _, _, code = run_admin("im-connector", "disable", "--platform", "slack")
-    assert code == 0
-    assert store.get_connector(owner, "slack")["enabled"] == 0
-
-    _, _, code = run_admin("im-connector", "enable", "--platform", "slack")
-    assert code == 0
-    assert store.get_connector(owner, "slack")["enabled"] == 1
-
-
-def test_im_connector_set_config_writes_config():
-    import fleetent.platform.im_gateway_management.connector_config as cfg
-    import fleetent.user_store as user_store
-
-    out, _, code = run_admin(
-        "im-connector", "set-config", "--platform", "slack", "--set", "bot_token=new-tok"
-    )
-
-    assert code == 0
-    assert cfg.resolve(user_store.admin_owner_id(), "slack")["bot_token"] == "new-tok"
-
-
-def test_seed_connectors_imports_env_tokens(monkeypatch):
-    import fleetent.platform.im_gateway_management.connector_store as store
-    import fleetent.user_store as user_store
-
-    # Slack and Telegram are per-agent now; seed covers owner-level platforms (WhatsApp).
-    monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "wa-env")
-
-    out, _, code = run_admin("seed-connectors")
-
-    assert code == 0
-    assert "whatsapp" in out
-    assert store.get_connector(user_store.admin_owner_id(), "whatsapp")["enabled"] == 1
+    assert code != 0
+    assert snippet in err.lower()

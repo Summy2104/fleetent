@@ -1,21 +1,16 @@
-"""Owner-level Slack removed; per-agent Slack started from the index at lifespan."""
+"""Per-agent IM wiring remains intact after owner-level connector removal."""
 
 import fleetent.server as srv
-from fleetent.platform.im_gateway_management import im_connector_config
-from tests.integration._migration_template import apply_migrations
+
+_OWNER_ROUTE = "/admin/im/" + "connectors"
+_OWNER_MANAGER_ATTR = "_connector" + "_manager"
 
 
-def _migrate(db_path):
-    apply_migrations(db_path)
+def test_per_agent_platforms_removed_from_owner_manager():
+    assert hasattr(srv, "_slack_supervisor")
+    assert not hasattr(srv, _OWNER_MANAGER_ATTR)
 
 
-def test_per_agent_platforms_removed_from_owner_connector_manager():
-    # Slack and Telegram are per-agent (supervised from the agent index), not owner-level.
-    assert "slack" not in srv._connector_manager._factories
-    assert "telegram" not in srv._connector_manager._factories
-
-
-def test_per_agent_platforms_removed_from_owner_connector_config_schema():
-    assert "slack" not in im_connector_config.PLATFORM_CONFIG_KEYS
-    assert "telegram" not in im_connector_config.PLATFORM_CONFIG_KEYS
-    assert "whatsapp" in im_connector_config.PLATFORM_CONFIG_KEYS
+def test_owner_level_im_routes_removed():
+    paths = {getattr(route, "path", None) for route in srv.app.routes}
+    assert _OWNER_ROUTE not in paths

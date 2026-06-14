@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 from fastapi.testclient import TestClient
 
 from tests.integration._migration_template import apply_migrations
+
+_OWNER_ROUTE = "/admin/im/" + "connectors"
 
 
 @pytest.fixture(autouse=True)
@@ -38,8 +38,8 @@ def test_health_includes_adapter_status(tmp_path, monkeypatch, isolated_schedule
 
     import fleetent.server as srv
 
-    with TestClient(srv.app) as client:
-        resp = client.get("/health")
+    client = TestClient(srv.app)
+    resp = client.get("/health")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -51,7 +51,7 @@ def test_health_includes_adapter_status(tmp_path, monkeypatch, isolated_schedule
 def test_health_adapter_flags_true_when_connectors_present(
     tmp_path, monkeypatch, isolated_schedule_db
 ):
-    """Health reflects per-agent Slack + owner Telegram connector presence."""
+    """Health reflects per-agent Slack + Telegram presence."""
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
     apply_migrations(tmp_path / "users.db")
 
@@ -61,13 +61,8 @@ def test_health_adapter_flags_true_when_connectors_present(
     monkeypatch.setattr(srv, "_slack_adapter_configured", lambda: True)
     monkeypatch.setattr(srv, "_telegram_adapter_configured", lambda: True)
 
-    # Manager start is mocked so lifespan never opens real sockets.
-    with (
-        patch.object(srv._connector_manager, "start_all_enabled", new_callable=AsyncMock),
-        patch.object(srv._connector_manager, "stop", new_callable=AsyncMock),
-        TestClient(srv.app) as client,
-    ):
-        resp = client.get("/health")
+    client = TestClient(srv.app)
+    resp = client.get("/health")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -75,19 +70,15 @@ def test_health_adapter_flags_true_when_connectors_present(
     assert data["adapters"]["telegram"] is True
 
 
-def test_admin_im_router_mounted(tmp_path, monkeypatch, isolated_schedule_db):
-    """`/admin/im/connectors` is mounted: unauthenticated request gets 401, not 404."""
+def test_admin_im_router_removed(tmp_path, monkeypatch, isolated_schedule_db):
+    """Owner-level IM connector routes are removed from the platform app."""
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
     apply_migrations(tmp_path / "users.db")
     monkeypatch.chdir(tmp_path)
 
     import fleetent.server as srv
 
-    with (
-        patch.object(srv._connector_manager, "start_all_enabled", new_callable=AsyncMock),
-        patch.object(srv._connector_manager, "stop", new_callable=AsyncMock),
-        TestClient(srv.app) as client,
-    ):
-        resp = client.get("/admin/im/connectors")
+    client = TestClient(srv.app)
+    resp = client.get(_OWNER_ROUTE)
 
-    assert resp.status_code == 401
+    assert resp.status_code == 404

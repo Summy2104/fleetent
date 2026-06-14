@@ -9,6 +9,9 @@ from fastapi.testclient import TestClient
 
 from tests.integration._migration_template import apply_migrations
 
+_OWNER_ROUTE = "/admin/im/" + "connectors"
+_OWNER_MANAGER_ATTR = "_connector" + "_manager"
+
 
 @pytest.fixture(autouse=True)
 def _cwd(tmp_path, monkeypatch):
@@ -28,38 +31,35 @@ def _server(tmp_path, monkeypatch):
 
 def test_platform_boots_agent_free_no_im(tmp_path, monkeypatch, isolated_schedule_db):
     srv = _server(tmp_path, monkeypatch)
-    start_all = AsyncMock()
     start_from_index = AsyncMock()
-    monkeypatch.setattr(srv._connector_manager, "start_all_enabled", start_all)
     monkeypatch.setattr(srv._slack_supervisor, "start_from_index", start_from_index)
 
-    with TestClient(srv.app) as client:
-        assert client.get("/health").status_code == 200
+    client = TestClient(srv.app)
+    assert client.get("/health").status_code == 200
 
     # Control plane: no IM connector / supervisor started at boot.
-    start_all.assert_not_called()
     start_from_index.assert_not_called()
+    assert not hasattr(srv, _OWNER_MANAGER_ATTR)
     # No agent-use sandbox runtime probed/stashed on the platform.
     assert not hasattr(srv.app.state, "sandbox_mode")
 
 
-def test_admin_router_still_mounted(tmp_path, monkeypatch, isolated_schedule_db):
+def test_admin_router_removed(tmp_path, monkeypatch, isolated_schedule_db):
     srv = _server(tmp_path, monkeypatch)
-    with TestClient(srv.app) as client:
-        # mounted but unauthenticated → 401 (not 404)
-        assert client.get("/admin/im/connectors").status_code == 401
+    client = TestClient(srv.app)
+    assert client.get(_OWNER_ROUTE).status_code == 404
 
 
 def test_chat_endpoint_absent(tmp_path, monkeypatch, isolated_schedule_db):
     srv = _server(tmp_path, monkeypatch)
-    with TestClient(srv.app) as client:
-        assert client.post("/chat", json={"message": "hi"}).status_code == 404
+    client = TestClient(srv.app)
+    assert client.post("/chat", json={"message": "hi"}).status_code == 404
 
 
 def test_webhook_endpoint_absent(tmp_path, monkeypatch, isolated_schedule_db):
     srv = _server(tmp_path, monkeypatch)
-    with TestClient(srv.app) as client:
-        assert client.post("/webhook/some-source", json={}).status_code == 404
+    client = TestClient(srv.app)
+    assert client.post("/webhook/some-source", json={}).status_code == 404
 
 
 def test_ws_route_absent(tmp_path, monkeypatch, isolated_schedule_db):

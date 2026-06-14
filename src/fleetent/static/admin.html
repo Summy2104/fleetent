@@ -1010,26 +1010,6 @@
     </div>
   </div>
 
-  <div id="conn-modal" class="modal hidden">
-    <div class="modal-box" role="dialog" aria-modal="true">
-      <h3>Add connection</h3>
-      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="createConn(); return false;">
-        <label class="muted">Platform</label>
-        <select id="conn-platform" onchange="renderConnFields()">
-          <option value="telegram">telegram</option>
-          <option value="slack">slack</option>
-          <option value="whatsapp">whatsapp</option>
-        </select>
-        <div id="conn-fields" style="display:flex; flex-direction:column; gap:10px;"></div>
-        <div id="conn-err" class="err"></div>
-        <div class="row" style="justify-content:flex-end;">
-          <button type="button" class="ghost" onclick="closeConnModal()">Cancel</button>
-          <button type="submit">Save</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
   <div id="sk-modal" class="modal hidden">
     <div class="modal-box" role="dialog" aria-modal="true" style="width:920px; max-width:calc(100% - 32px);">
       <h3 id="sk-modal-title">Create skill</h3>
@@ -1621,10 +1601,9 @@ LOADERS.users = () => loadUsers();
 LOADERS.kb = () => loadKb();
 
 let ALL_USERS = [];
-// IM identities + connectors are folded under their owning User (presentation
-// re-axis off existing joins: im_users.user_id = user.id, connectors.owner_id = user.id).
+// IM identities are folded under their owning User (presentation re-axis off the
+// existing join im_users.user_id = user.id).
 let IM_BY_USER = {};
-let CONN_BY_OWNER = {};
 let IM_FIELDS = {};  // platform -> editable field definitions (from /im-users/fields)
 const USERS_PAGE_SIZE = 20;
 let USERS_PAGE = 1;
@@ -1632,18 +1611,15 @@ let USERS_PAGE = 1;
 async function loadUsers() {
   $("users-body").innerHTML = loadingRow(8);
   try {
-    const [users, imUsers, conns, fields] = await Promise.all([
+    const [users, imUsers, fields] = await Promise.all([
       api("GET", "/users"),
       api("GET", "/im-users"),
-      api("GET", "/im/connectors"),
       api("GET", "/im-users/fields").catch(() => ({})),
     ]);
     ALL_USERS = users;
     IM_FIELDS = fields || {};
     IM_BY_USER = {};
     for (const iu of imUsers) (IM_BY_USER[iu.user_id] ||= []).push(iu);
-    CONN_BY_OWNER = {};
-    for (const c of conns) (CONN_BY_OWNER[c.owner_id] ||= []).push(c);
     renderUsers();
   } catch (e) { $("users-body").innerHTML = emptyRow(8, e.message); }
 }
@@ -1674,11 +1650,8 @@ function renderUsers() {
   const pageUsers = users.slice(offset, offset + USERS_PAGE_SIZE);
   $("users-body").innerHTML = pageUsers.map((u, i) => {
     const ids = IM_BY_USER[u.id] || [];
-    const conns = CONN_BY_OWNER[u.id] || [];
     const imOrigin = isImOrigin(u);
-    const hasChild = ids.length > 0 || conns.length > 0;
-    // Expander gated on bound IM identities (per spec); owned connectors render in
-    // the same child region when present.
+    const hasChild = ids.length > 0;
     const expander = ids.length
       ? `<button class="small ghost" title="Show IM identities" onclick="toggleUserRow('${u.id}')">▸</button>`
       : "";
@@ -1709,32 +1682,8 @@ function renderUsers() {
           </table></div>
         </div>`
       : "";
-    const connRows = conns.map(c => {
-      const creds = Object.entries(c.config || {}).map(([k, v]) => `${esc(k)}=${esc(v)}`).join(", ");
-      return `
-      <tr>
-        <td style="text-transform:capitalize;">${esc(c.platform)}</td>
-        <td><span class="pill">${esc(c.status || "")}</span></td>
-        <td><span class="pill ${c.enabled ? "active" : "blocked"}">${c.enabled ? "on" : "off"}</span></td>
-        <td class="muted">${creds || "—"}</td>
-        <td class="actions">
-          ${c.enabled
-            ? `<button class="small danger" onclick="connDisable('${esc(c.platform)}')">Disable</button>`
-            : `<button class="small ghost" onclick="connEnable('${esc(c.platform)}')">Enable</button>`}
-        </td>
-      </tr>`;
-    }).join("");
-    const connBlock = conns.length
-      ? `<div class="card">
-          <h4 style="margin:0 0 8px;">Connectors owned</h4>
-          <div class="table-scroll"><table>
-            <thead><tr><th>Platform</th><th>Status</th><th>Enabled</th><th>Credentials</th><th>Actions</th></tr></thead>
-            <tbody>${connRows}</tbody>
-          </table></div>
-        </div>`
-      : "";
     const childRow = hasChild
-      ? `<tr id="child-${u.id}" class="hidden"><td></td><td colspan="7">${idBlock}${connBlock}</td></tr>`
+      ? `<tr id="child-${u.id}" class="hidden"><td></td><td colspan="7">${idBlock}</td></tr>`
       : "";
     return `
     <tr>
@@ -1755,7 +1704,6 @@ function renderUsers() {
               : `<button onclick="setRole('${u.id}','admin')">Make admin</button>`}
             <button onclick="resetPassword('${u.id}')">Reset password</button>
             <button onclick="viewKeys('${u.id}')">Keys</button>
-            ${IS_VIEWER ? "" : `<button onclick="openConnModal('${u.id}')">Add connection</button>`}
             ${u.status === "blocked"
               ? `<button onclick="unblock('${u.id}')">Enable user</button>`
               : `<button class="danger" onclick="block('${u.id}')">Disable user</button>`}
@@ -2005,53 +1953,6 @@ async function doBindIm(userId) {
     loadUsers();
   } catch (e) { $("bind-err").textContent = apiErrorMessage(e.message || e); }
 }
-
-// Per-platform credential fields — must match im_connector_config.PLATFORM_CONFIG_KEYS.
-const CONN_FIELDS = {
-  telegram: ["bot_token"],
-  slack: ["bot_token", "signing_secret", "app_token"],
-  whatsapp: ["phone_number_id", "access_token", "verify_token", "business_account_id"],
-};
-
-// Connector mutations refresh the unified User-centric view.
-async function loadConn() { return loadUsers(); }
-
-function renderConnFields() {
-  const platform = $("conn-platform").value;
-  $("conn-fields").innerHTML = (CONN_FIELDS[platform] || []).map(k =>
-    `<input data-key="${k}" placeholder="${k}" type="password" autocomplete="off">`).join("");
-}
-
-// Owner of the connector being created — set from the per-User-row action so the
-// new connector attaches to that User (admin-gated). Null falls back to the caller.
-let CONN_OWNER = null;
-function openConnModal(ownerId) {
-  CONN_OWNER = ownerId || null;
-  $("conn-err").textContent = "";
-  $("conn-platform").value = "telegram";
-  renderConnFields();
-  $("conn-modal").classList.remove("hidden");
-}
-function closeConnModal() { $("conn-modal").classList.add("hidden"); CONN_OWNER = null; }
-
-async function createConn() {
-  $("conn-err").textContent = "";
-  const platform = $("conn-platform").value;
-  const config = {};
-  for (const inp of $("conn-fields").querySelectorAll("input[data-key]")) {
-    if (inp.value) config[inp.dataset.key] = inp.value;
-  }
-  const body = { platform, config };
-  if (CONN_OWNER) body.owner_id = CONN_OWNER;
-  try {
-    await api("POST", "/im/connectors", body);
-    closeConnModal();
-    loadConn();
-  } catch (e) { $("conn-err").textContent = e.message; }
-}
-
-async function connEnable(platform) { try { await api("POST", `/im/connectors/${platform}/enable`); loadConn(); } catch (e) { toast(e.message, "error"); } }
-async function connDisable(platform) { try { await api("POST", `/im/connectors/${platform}/disable`); loadConn(); } catch (e) { toast(e.message, "error"); } }
 
 // --- Skills -----------------------------------------------------------------
 

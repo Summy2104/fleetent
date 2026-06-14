@@ -1,8 +1,8 @@
 """Tool OAuth credential contract and a swappable provider seam.
 
 This module is about *tool* connector credentials (e.g. google-drive, github):
-the OAuth client a tool needs at execution time. It is unrelated to the
-`im_connector_*` modules, which manage IM-platform connections (Slack/Telegram).
+the OAuth client a tool needs at execution time. It is unrelated to platform IM
+identity mapping and IM-user administration.
 
 `get_credential` delegates to a module-level, monkeypatch-able `_provider`. The
 default provider always returns `NeedsConsent` because real OAuth token storage

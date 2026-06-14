@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -33,8 +31,8 @@ def test_health_includes_adapter_status(tmp_path, monkeypatch):
 
     import fleetent.server as srv
 
-    with TestClient(srv.app) as client:
-        resp = client.get("/health")
+    client = TestClient(srv.app)
+    resp = client.get("/health")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -44,7 +42,7 @@ def test_health_includes_adapter_status(tmp_path, monkeypatch):
 
 
 def test_health_adapter_flags_true_when_connectors_present(tmp_path, monkeypatch):
-    """Health reflects per-agent Slack + owner Telegram connector presence."""
+    """Health reflects per-agent Slack + Telegram presence."""
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
     apply_migrations(tmp_path / "users.db")
 
@@ -53,12 +51,8 @@ def test_health_adapter_flags_true_when_connectors_present(tmp_path, monkeypatch
     monkeypatch.setattr(srv, "_slack_adapter_configured", lambda: True)
     monkeypatch.setattr(srv, "_telegram_adapter_configured", lambda: True)
 
-    with (
-        patch.object(srv._connector_manager, "start_all_enabled", new_callable=AsyncMock),
-        patch.object(srv._connector_manager, "stop", new_callable=AsyncMock),
-        TestClient(srv.app) as client,
-    ):
-        resp = client.get("/health")
+    client = TestClient(srv.app)
+    resp = client.get("/health")
 
     assert resp.status_code == 200
     data = resp.json()

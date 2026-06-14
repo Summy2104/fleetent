@@ -1,8 +1,8 @@
 """Guard: migrated management store modules must not self-build their tables.
 
-After onboarding api_keys / audit_log / im_connectors into alembic, their store
-modules must no longer contain CREATE TABLE statements for those tables. Schema
-is alembic's responsibility; stores are CRUD-only.
+After onboarding api_keys and audit_log into alembic, their store modules must no
+longer contain CREATE TABLE statements for those tables. Schema is alembic's
+responsibility; stores are CRUD-only.
 """
 
 from pathlib import Path
@@ -22,8 +22,3 @@ def test_api_key_store_no_create_table():
 def test_audit_log_no_create_table():
     src = _read("fleetent/audit_log.py")
     assert "CREATE TABLE" not in src, "audit_log must not contain CREATE TABLE"
-
-
-def test_connector_store_no_create_table():
-    src = _read("fleetent/platform/im_gateway_management/connector_store.py")
-    assert "CREATE TABLE" not in src, "connector_store must not contain CREATE TABLE"
