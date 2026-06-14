@@ -82,6 +82,7 @@ def nominate(
             },
         )
         row = conn.execute("SELECT last_insert_rowid() AS id").fetchone()
+    assert row is not None
     return int(row["id"])
 
 
@@ -95,9 +96,7 @@ def _detect_conflict(pool_dir: Path, skill_name: str, base_version: str | None) 
     from hashlib import sha256
 
     digest = sha256()
-    for path in sorted(
-        p for p in skill_dir.rglob("*") if p.is_file() and ".git" not in p.parts
-    ):
+    for path in sorted(p for p in skill_dir.rglob("*") if p.is_file() and ".git" not in p.parts):
         digest.update(path.relative_to(skill_dir).as_posix().encode("utf-8"))
         digest.update(b"\0")
         digest.update(path.read_bytes())
@@ -158,6 +157,56 @@ def list_proposals(
         .fetchall()
     )
     return [dict(r) for r in rows]
+
+
+def get_proposal_diff(proposal_id: int, *, pool_dir: Path) -> dict[str, Any]:
+    """Return unified diffs for a backflow proposal.
+
+    Returns a dict with:
+    - ``diff_vs_base``: evolved copy vs what was materialized (base_version content)
+    - ``diff_vs_head``: evolved copy vs current pool head content
+    - ``conflict``: True if pool has advanced past base_version
+    """
+    import difflib
+
+    row = get_proposal(proposal_id)
+    if row is None:
+        raise ValueError(f"proposal {proposal_id} not found")
+
+    proposed = row["proposed_content"]
+    skill_name = row["skill_name"]
+    base_version: str | None = row["base_version"]
+
+    # Current pool head content
+    pool_skill_dir = pool_dir / skill_name
+    head_content: str | None = None
+    if pool_skill_dir.exists():
+        skill_md = pool_skill_dir / "SKILL.md"
+        if skill_md.is_file():
+            head_content = skill_md.read_text(encoding="utf-8")
+
+    # base content: reconstruct from pool git at base_version commit
+    base_content: str | None = None
+    if base_version is not None:
+        from fleetent.platform.skill_management.pool_git import pool_content_at
+
+        base_content = pool_content_at(pool_dir, skill_name, base_version)
+
+    # Conflict: pool head differs from what was materialized
+    conflict = _detect_conflict(pool_dir, skill_name, base_version)
+
+    def _diff(a: str | None, b: str | None, fromfile: str, tofile: str) -> str:
+        if a is None and b is None:
+            return ""
+        lines_a = (a or "").splitlines(keepends=True)
+        lines_b = (b or "").splitlines(keepends=True)
+        return "".join(difflib.unified_diff(lines_a, lines_b, fromfile=fromfile, tofile=tofile))
+
+    return {
+        "diff_vs_base": _diff(base_content, proposed, "base", "evolved"),
+        "diff_vs_head": _diff(head_content, proposed, "head", "evolved"),
+        "conflict": conflict,
+    }
 
 
 def set_status(
