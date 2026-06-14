@@ -4,7 +4,7 @@
 
 ## 1. 用户提交 API key 流
 
-- [ ] 1.1 写测试（integration）：用户为 api_key 服务提交 key → 加密入 external_credentials（密文非明文）→ status=authorized；明文不回显；无「管理员代填」端点。
+- [ ] 1.1 写测试（integration）：用户为 apikey 服务提交 key → 加密入 external_credentials（密文非明文）→ status=authorized；明文不回显；无「管理员代填」端点。
 - [ ] 1.2 实现：用户自助提交端点（复用 session auth），加密复用 P0 crypto helper。运行 1.1 见绿。
 
 ## 2. API-key 凭证解析

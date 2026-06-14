@@ -1,13 +1,13 @@
 ## Why
 
-P0 只打通 OAuth2 授权码协议。但很多外部服务（含非 OAuth 的 MCP server）用 **API key** 鉴权——用户需要把自己的外部服务 API key 交给平台、平台加密代存，调用时按用户身份注入（Case 2b）。本变更补齐 `protocol=api_key` 的凭证路径：用户提交 key → 加密入 `external_credentials` → dispatch 时解析为 `Credential`。
+P0 只打通 OAuth2 授权码协议。但很多外部服务（含非 OAuth 的 MCP server）用 **API key** 鉴权——用户需要把自己的外部服务 API key 交给平台、平台加密代存，调用时按用户身份注入（Case 2b）。本变更补齐 `protocol=apikey` 的凭证路径：用户提交 key → 加密入 `external_credentials` → dispatch 时解析为 `Credential`。
 
 > Apply 顺序：依赖 `external-credential-vault`（P0）先 archive；与 P2（OAuth 生命周期）无耦合，可并行。
 
 ## What Changes
 
-- **用户提交 API key 流**：为 `protocol=api_key` 的服务提供「用户提交自己的 API key」入口（用户本人提交，admin 不能代填），key 经 Fernet 加密写入 `external_credentials`，`status=authorized`。
-- **API-key 凭证解析**：Vault provider 对 `protocol=api_key` 的服务解析出 `Credential`（client 携带该用户的 key）；无 key 时返回 `NeedsConsent`（提示用户去提交 key，而非 OAuth 跳转）。
+- **用户提交 API key 流**：为 `protocol=apikey` 的服务提供「用户提交自己的 API key」入口（用户本人提交，admin 不能代填），key 经 Fernet 加密写入 `external_credentials`，`status=authorized`。
+- **API-key 凭证解析**：Vault provider 对 `protocol=apikey` 的服务解析出 `Credential`（client 携带该用户的 key）；无 key 时返回 `NeedsConsent`（提示用户去提交 key，而非 OAuth 跳转）。
 - **API key 无 refresh 概念**：不参与 P2 的刷新流；失效时由用户重新提交。
 - key 明文 MUST NOT 进日志 / trace / 异常 / 返回值。
 
