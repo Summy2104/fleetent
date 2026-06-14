@@ -167,10 +167,7 @@ class BaseSandboxBackend(ABC):
 
         b64 = base64.b64encode(data).decode("ascii")
         directory = os.path.dirname(container_path)
-        cmd = (
-            f"mkdir -p {shlex.quote(directory)} && "
-            f"base64 -d > {shlex.quote(container_path)}"
-        )
+        cmd = f"mkdir -p {shlex.quote(directory)} && base64 -d > {shlex.quote(container_path)}"
         await self._run_exec(workspace_id, cmd, stdin=b64.encode("ascii"))
 
     async def commit_workspace(self, workspace_id: str, image_tag: str) -> None:

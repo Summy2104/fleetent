@@ -47,9 +47,7 @@ def test_rewrite_replaces_in_root_path_and_registers(_exchange):
 
 
 def test_rewrite_leaves_out_of_root_paths_untouched(_exchange):
-    out = artifact_exchange.rewrite_and_register(
-        "gd", '{"path": "/etc/passwd"}', scope_key="K1"
-    )
+    out = artifact_exchange.rewrite_and_register("gd", '{"path": "/etc/passwd"}', scope_key="K1")
     assert out == '{"path": "/etc/passwd"}'
     assert artifact_exchange.list_by_scope("K1") == []
 
