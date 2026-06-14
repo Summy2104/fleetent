@@ -34,7 +34,7 @@
 | 控制 | 粒度 | 为什么 | 载体 |
 |---|---|---|---|
 | **能力**：`supports_dm` / `supports_groups` | **Agent 级** | 能力是 agent 行为设计内禀、跨平台不变；bot 级=过度设计 | agent 版本化配置 → agent.yaml `im.*` |
-| **用户准入**：哪些 User 能用此 Agent | **Agent 级**（判**内部 User**） | 内部身份跨平台一致；平台身份映射归 `im_users` | 平台表 `agent_im_users` → `im.allow_users` |
+| **用户准入**：哪些 User 能用此 Agent | **Agent 级**（判**内部 User**） | 内部身份跨平台一致；平台身份映射归 `im_users` | 平台表 `user_agents`（**保留、不加 im 前缀**——用户准入跨平台、非 IM 专属）→ `im.allow_users` |
 | **群白名单**：此 bot 准在哪些群 | **Bot 级**（per 平台） | 群 id 平台特定、无跨平台抽象，被迫 | 平台表 `agent_im_groups` → `im.<platform>.allow_groups` |
 
 > 决策：**不做 bot 级能力开关**（同 agent 跨平台能力差异罕见，YAGNI；真需要时按平台 override 或拆 agent）。用户准入判**内部 User**（非平台原始身份）。
@@ -59,8 +59,8 @@ DM 是 1:1、对端就是该 user，故必须过用户门；群是多人、群�
 ```
 平台侧（管理库，admin 配）          materialize（平台侧）          agent 侧（runtime）
 ─────────────────────────          ──────────────────          ──────────────────
-agent 能力(supports_*)      ┐
-agent_im_users(用户准入)    ┼──→  写 agent.yaml `im` 块  ──→  本地读 agent.yaml 判闸
+agents.supports_*(能力)     ┐
+user_agents(用户准入,保留)  ┼──→  写 agent.yaml `im` 块  ──→  本地读 agent.yaml 判闸
 agent_im_groups(群白名单)   ┘                                  （不查 platform DB）
 ```
 
@@ -72,9 +72,9 @@ agent runtime MUST NOT import platform（边界契约不变）；platform 单向
 
 | 表/列 | 定义 | 说明 |
 |---|---|---|
-| `agents`/`agent_versions`：`supports_dm` `supports_groups` | INTEGER(bool) | agent 能力，随版本化配置 materialize |
-| **`agent_im_users`** | `agent_id INTEGER FK→agents.id ON DELETE CASCADE`, `user_id TEXT`（内部 User），PK(agent_id,user_id) | 用户准入关系（取代死表 `user_agents`） |
-| **`agent_im_groups`** | `agent_id INTEGER FK→agents.id ON DELETE CASCADE`, `platform TEXT`, `group_id TEXT`，PK(agent_id,platform,group_id) | 群白名单（req3 载体），默认无行=不进任何群 |
+| `agents`：`supports_dm` `supports_groups` | INTEGER(bool) | agent 能力——**agent 级非版本化配置**，并入 `agents` 的 allowed_skills/features/plugins 族（非 agent_versions，避免"回滚版本→IM 能力变"的耦合）；materialize 进 `im.*` |
+| `user_agents`（**保留、不改名**） | 现有 `(user_id TEXT, agent_id INTEGER FK→agents.id ON DELETE CASCADE)` | 用户准入源（跨平台、agent 级，**非 IM 专属故不加 im 前缀**）；phase 3 materialize 进 `allow_users` |
+| **`agent_im_groups`**（新建） | `agent_id INTEGER FK→agents.id ON DELETE CASCADE`, `platform TEXT`, `group_id TEXT`，PK(agent_id,platform,group_id) | 群白名单（req3 载体，IM 平台特定故带 im）；默认无行=不进任何群 |
 | ~~旧 channel 路由表~~ | **descope** | 旧路由表（含 `bound_version_id` 死列）；一 agent 一 bot 后路由不需要 |
 
 FK 遵循 identity-model：agent 引用 = `agent_id` INTEGER FK→agents.id ON DELETE CASCADE。
@@ -105,7 +105,7 @@ Python 模型：`ImBinding`（顶层）+ per-platform `SlackBinding`/`TelegramBi
 | `ConnectorAccess` | `ImAccess`（+ `ImBinding`） |
 | `allow_channels` | `allow_groups`（仅群；DM 由 supports_dm + allow_users 管） |
 | `SlackConnector` / `TelegramConnector` | `SlackBinding` / `TelegramBinding` |
-| 死表 `user_agents` | `agent_im_users` |
+| `user_agents` | **保留不改名**（用户准入跨平台、非 IM 专属，不加 im 前缀；phase 3 materialize 进 `allow_users`） |
 | 已删除的 channel 路由表 | descope（access 改用 `agent_im_groups`，语义不同——非路由） |
 
 > "connector" 一词在 IM 语境退役；`connectors`（工具 OAuth）/`kb_connectors`/`im_connectors` 是另外的东西，不在本设计内。
@@ -133,5 +133,7 @@ Python 模型：`ImBinding`（顶层）+ per-platform `SlackBinding`/`TelegramBi
 
 ## 10. Open Questions
 
-- 能力 `supports_*` 落 `agents`（稳定属性）还是 `agent_versions`（版本快照）？倾向版本快照（与 allowed_tools 等一致、随 materialize）——apply 时定。
+- ~~能力 `supports_*` 落 `agents` 还是 `agent_versions`~~ **已定（2026-06-14）：落 `agents`**——能力是 agent 级策略立场、非版本化推理配置，并入 allowed_skills/features 族，避免版本回滚耦合。
+- ~~用户准入表命名~~ **已定：保留 `user_agents`**（跨平台、非 IM 专属，不加 im 前缀）；仅群白名单 `agent_im_groups` 带 im（平台特定）。
 - whatsapp owner-level 与本模型的统一（§9）——独立议题。
+- **身份/租户**（随本线一起做，见 [[identity-auth-model]]）：`owner_id` 误名（im_users.owner_id 实为 agent 名）、多租户 IM 身份守卫半成品（provisioning 落 default 而非 edge_tenant）、身份域 FK 缺口——phase 3 materialize/gate 落地时一并拉直。
