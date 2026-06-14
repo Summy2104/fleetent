@@ -48,7 +48,7 @@ def _hdr(token: str, confirm: bool = False) -> dict:
     return h
 
 
-# --- catalog CRUD + OAuth 2.x only -------------------------------------------
+# --- catalog CRUD + external service protocols --------------------------------
 
 
 def test_no_auth_401(client):
@@ -78,14 +78,15 @@ def test_add_connector_oauth2(client):
     assert "client_secret" not in r.json()["oauth_config"]  # never stored/returned
 
 
-def test_non_oauth2_rejected(client):
+def test_add_connector_apikey(client):
     token, _ = _session_for("admin")
     r = client.post(
         "/admin/connectors",
         headers=_hdr(token),
         json={"id": "x", "display_name": "X", "protocol": "apikey"},
     )
-    assert r.status_code == 422
+    assert r.status_code == 200
+    assert r.json()["protocol"] == "apikey"
 
 
 def test_catalog_masks_secret(client, monkeypatch):  # 场景 114
@@ -246,10 +247,30 @@ def test_connector_list_is_global_only_even_when_agent_id_filter_is_passed(clien
     )
 
     r = client.get("/admin/connectors", headers=_hdr(token))
-    assert {(c["id"], c["agent_id"]) for c in r.json()} == {("gh", None)}
+    assert [c["id"] for c in r.json()] == ["gh"]
+    assert "agent_id" not in r.json()[0]
 
     r2 = client.get("/admin/connectors?agent_id=5", headers=_hdr(token))
-    assert {(c["id"], c["agent_id"]) for c in r2.json()} == {("gh", None)}
+    assert r2.json() == r.json()
+
+
+def test_connector_binding_reverse_lookup_lists_agent_ids(client):
+    from fleetent.platform.connector_management import (
+        agent_service_grant_store,
+        external_service_store,
+    )
+
+    sales = agent_store.create_agent("sales", "p", [])
+    ops = agent_store.create_agent("ops", "p", [])
+    external_service_store.add_service("github", "GitHub")
+    token, _ = _session_for("admin")
+    agent_service_grant_store.bind(sales.id, "github", run_as="user", created_by="admin")
+    agent_service_grant_store.bind(ops.id, "github", run_as="agent", created_by="admin")
+
+    r = client.get("/admin/connectors/github/bindings/agents", headers=_hdr(token))
+
+    assert r.status_code == 200
+    assert r.json() == {"service_id": "github", "agent_ids": [sales.id, ops.id]}
 
 
 def test_mcp_server_list_exposes_owner_and_agent_filter(client, monkeypatch):

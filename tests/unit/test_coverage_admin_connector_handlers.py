@@ -167,24 +167,24 @@ def test_agent_admin_binding_skill_kb_oauth_and_mcp_handlers(monkeypatch):
         lambda *args: calls.append(("kb_unbind", args, {})),
     )
     monkeypatch.setattr(
-        agent_admin_api.agent_oauth_binding_store,
-        "list_connectors_for_agent",
-        lambda agent_id: ["gdrive"],
+        agent_admin_api.agent_service_grant_store,
+        "list_services_for_agent",
+        lambda agent_id: [{"service_id": "gdrive", "run_as": "user"}],
     )
     monkeypatch.setattr(
-        agent_admin_api.agent_oauth_binding_store,
+        agent_admin_api.agent_service_grant_store,
         "bind",
         lambda *args, **kwargs: calls.append(("oauth_bind", args, kwargs)),
     )
     monkeypatch.setattr(
-        agent_admin_api.agent_oauth_binding_store,
+        agent_admin_api.agent_service_grant_store,
         "unbind",
         lambda *args: calls.append(("oauth_unbind", args, {})),
     )
     monkeypatch.setattr(
-        agent_admin_api.connector_config_store,
-        "get_connector",
-        lambda connector_id: {"id": connector_id} if connector_id == "gdrive" else None,
+        agent_admin_api.external_service_store,
+        "get_service",
+        lambda connector_id: {"service_id": connector_id} if connector_id == "gdrive" else None,
     )
 
     assert agent_admin_api.bind_user("ops", "u1", authorization="Session token")["bound"]
@@ -211,6 +211,7 @@ def test_agent_admin_binding_skill_kb_oauth_and_mcp_handlers(monkeypatch):
     assert not agent_admin_api.unbind_agent_kb("ops", "kb1", authorization="Session token")["bound"]
     assert agent_admin_api.list_agent_oauth("ops", authorization="Session token") == {
         "agent": "ops",
+        "service_grants": [{"service_id": "gdrive", "run_as": "user"}],
         "connector_ids": ["gdrive"],
     }
     assert agent_admin_api.bind_oauth("ops", "gdrive", authorization="Session token")["bound"]
@@ -386,30 +387,55 @@ async def test_connector_admin_catalog_mcp_and_grant_handlers(monkeypatch):
         },
     )
     monkeypatch.setattr(
-        connector_admin_api.connector_config_store,
-        "list_connectors",
-        lambda agent_id=None: list(connectors.values()),
+        connector_admin_api.external_service_store,
+        "list_services",
+        lambda: [
+            {
+                "service_id": "gdrive",
+                "display_name": "Drive",
+                "protocol": "oauth2",
+                "enabled": True,
+                "oauth_config": {"client_secret": "secret", "nested": [{"refresh_token": "tok"}]},
+            }
+        ],
     )
     monkeypatch.setattr(
-        connector_admin_api.connector_config_store,
-        "get_connector",
-        lambda connector_id: connectors.get(connector_id),
-    )
-    monkeypatch.setattr(
-        connector_admin_api.connector_config_store,
-        "add_connector",
-        lambda id, display_name, **kwargs: connectors.setdefault(
-            id, {"id": id, "display_name": display_name, **kwargs}
+        connector_admin_api.external_service_store,
+        "get_service",
+        lambda connector_id: (
+            {
+                "service_id": connector_id,
+                "display_name": connectors[connector_id]["display_name"],
+                "protocol": connectors[connector_id].get("protocol", "oauth2"),
+                "enabled": connectors[connector_id]["enabled"],
+                "oauth_config": connectors[connector_id]["oauth_config"],
+            }
+            if connector_id in connectors
+            else None
         ),
     )
     monkeypatch.setattr(
-        connector_admin_api.connector_config_store,
-        "edit_connector",
+        connector_admin_api.external_service_store,
+        "add_service",
+        lambda id, display_name, **kwargs: connectors.setdefault(
+            id,
+            {
+                "id": id,
+                "display_name": display_name,
+                "protocol": kwargs.get("protocol", "oauth2"),
+                "enabled": kwargs.get("enabled", True),
+                "oauth_config": kwargs.get("oauth_config") or {},
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        connector_admin_api.external_service_store,
+        "edit_service",
         lambda connector_id, **kwargs: connectors[connector_id].update(kwargs),
     )
     monkeypatch.setattr(
-        connector_admin_api.connector_config_store,
-        "delete_connector",
+        connector_admin_api.external_service_store,
+        "delete_service",
         lambda connector_id: connectors.pop(connector_id, None),
     )
     monkeypatch.setattr(

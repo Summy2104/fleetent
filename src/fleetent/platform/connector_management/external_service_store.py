@@ -34,7 +34,15 @@ def add_service(
             INSERT INTO external_services
                 (service_id, display_name, protocol, oauth_config, enabled, created_at, updated_at)
             VALUES
-                (:service_id, :display_name, :protocol, :oauth_config, :enabled, :created_at, :updated_at)
+                (
+                    :service_id,
+                    :display_name,
+                    :protocol,
+                    :oauth_config,
+                    :enabled,
+                    :created_at,
+                    :updated_at
+                )
             """,
             {
                 "service_id": service_id,
@@ -48,7 +56,7 @@ def add_service(
         )
 
 
-_EDITABLE = {"display_name", "oauth_config", "enabled"}
+_EDITABLE = {"display_name", "oauth_config", "protocol", "enabled"}
 _COLS = "service_id, display_name, protocol, oauth_config, enabled, created_at, updated_at"
 
 
@@ -92,7 +100,9 @@ def get_service(service_id: str) -> dict[str, Any] | None:
 
 
 def list_services() -> list[dict[str, Any]]:
-    rows = _database().execute(f"SELECT {_COLS} FROM external_services ORDER BY service_id").fetchall()
+    rows = (
+        _database().execute(f"SELECT {_COLS} FROM external_services ORDER BY service_id").fetchall()
+    )
     return [_decode(row) for row in rows]
 
 
