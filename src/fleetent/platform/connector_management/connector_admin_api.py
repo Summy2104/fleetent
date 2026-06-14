@@ -185,6 +185,10 @@ class ConnectorEditBody(BaseModel):
     enabled: bool | None = None
 
 
+class ApiKeyBody(BaseModel):
+    api_key: str
+
+
 def _service_to_connector_payload(service: dict[str, Any]) -> dict[str, Any]:
     payload = dict(service)
     payload["id"] = payload["service_id"]
@@ -294,6 +298,30 @@ def oauth_callback(
         status="authorized",
     )
     return {"authorized": True, "service_id": service_id}
+
+
+@router.post("/connectors/{service_id}/credentials")
+def submit_api_key(
+    service_id: str, body: ApiKeyBody, authorization: str | None = Header(None)
+) -> dict[str, Any]:
+    """User self-submits their own API key for an ``apikey``-protocol connector.
+
+    The key is bound to the authenticated session's own user — there is no target
+    ``user_id`` parameter, so an admin cannot fill a key on another user's behalf.
+    The plaintext key is encrypted at rest and never echoed back.
+    """
+    user = _session_user(authorization)
+    service = external_service_store.get_service(service_id)
+    if service is None:
+        raise HTTPException(status_code=404, detail="connector not found")
+    if service.get("protocol") != "apikey":
+        raise HTTPException(status_code=422, detail="connector does not use api-key auth")
+    if not body.api_key:
+        raise HTTPException(status_code=422, detail="api_key is required")
+    external_credential_store.put_apikey_credential(
+        user.id, service_id, body.api_key, updated_by=user.id
+    )
+    return {"submitted": True, "service_id": service_id}
 
 
 @router.post("/connectors")
