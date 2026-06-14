@@ -492,6 +492,55 @@ def skill_observability(name: str, authorization: str | None = Header(None)) -> 
     return engine_observability(name)
 
 
+# --- version history / diff (read-only) --------------------------------------
+
+
+def _pool_dir() -> "Path | None":
+    """Return the pool directory if it has a git repo, otherwise None."""
+    from pathlib import Path
+
+    from fleetent.platform.skill_management.pool_git import _is_git_repo
+
+    d = Path(engine_skills_dir())
+    return d if d.exists() and _is_git_repo(d) else None
+
+
+@router.get("/{name}/versions")
+def skill_versions(name: str, authorization: str | None = Header(None)) -> list[dict[str, Any]]:
+    """Return commit history for a skill (viewer+ access).
+
+    Entries are sorted newest-first, each containing sha, message, author, timestamp.
+    """
+    _current_user(authorization)
+    pool = _pool_dir()
+    if pool is None:
+        return []
+    from fleetent.platform.skill_management.pool_git import pool_skill_history
+
+    return pool_skill_history(pool, name)
+
+
+@router.get("/{name}/versions/{ref}/diff")
+def skill_version_diff(
+    name: str, ref: str, authorization: str | None = Header(None)
+) -> dict[str, Any]:
+    """Return the unified diff for a specific commit ref (viewer+ access).
+
+    Degrades to changed-file list with truncated=True if diff exceeds size limit.
+    Never silently truncates.
+    """
+    _current_user(authorization)
+    pool = _pool_dir()
+    if pool is None:
+        raise HTTPException(status_code=404, detail="pool has no version history")
+    from fleetent.platform.skill_management.pool_git import pool_diff_for_commit
+
+    result = pool_diff_for_commit(pool, name, ref)
+    if result.get("error"):
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
 # --- reflection proposal inbox ------------------------------------------------
 
 

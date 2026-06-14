@@ -478,9 +478,9 @@ def write_home(
 
 
 def _skill_dir_version(skill_dir: Path) -> str:
-    """Stable content hash for one skill directory."""
+    """Stable content hash for one skill directory (excludes .git)."""
     digest = sha256()
-    for path in sorted(p for p in skill_dir.rglob("*") if p.is_file()):
+    for path in sorted(p for p in skill_dir.rglob("*") if p.is_file() and ".git" not in p.parts):
         digest.update(path.relative_to(skill_dir).as_posix().encode("utf-8"))
         digest.update(b"\0")
         digest.update(path.read_bytes())
@@ -510,11 +510,16 @@ def _is_skill_drifted(
     if _skill_has_runtime_provenance(dest_skill_dir):
         return True
     state = skill_admin_store.get_drift(agent_id, skill_name)
-    current_version = _skill_dir_version(dest_skill_dir)
+    home_hash = _skill_dir_version(dest_skill_dir)
     base_version = state["base_version"]
+
     if isinstance(base_version, str) and base_version:
-        return current_version != base_version
-    return current_version != _skill_dir_version(src_skill_dir)
+        # base_version is always a content hash (sha256 of materialized skill dir).
+        # Drift = agent modified their home copy from what was last materialized.
+        return home_hash != base_version
+
+    # No base_version recorded — fall back to comparing home vs current pool.
+    return home_hash != _skill_dir_version(src_skill_dir)
 
 
 def _copy_skills(home: Path, *, source_agent: agent_store.Agent | None = None) -> None:
@@ -522,15 +527,17 @@ def _copy_skills(home: Path, *, source_agent: agent_store.Agent | None = None) -
 
     Makes the agent home self-contained (the agent process reads only its own home).
     Full copy: visibility is later narrowed at runtime by agent.yaml's allowed_skills /
-    disabled_skills. Best-effort: a missing source is skipped; a copy error is logged
-    but never aborts materialize (agent.yaml is already written).
+    disabled_skills. Excludes ``.git`` so it is never copied into an agent home.
+    Best-effort: a missing source is skipped; a copy error is logged but never aborts
+    materialize (agent.yaml is already written).
     """
     src = Path(skill_registry._resolve_skills_dir(None))
     if not src.exists():
         return
     dest_root = home / "skills"
     dest_root.mkdir(parents=True, exist_ok=True)
-    for skill_dir in sorted(p for p in src.iterdir() if p.is_dir()):
+    # Skip .git — it belongs to the pool repo, not to individual skill dirs
+    for skill_dir in sorted(p for p in src.iterdir() if p.is_dir() and p.name != ".git"):
         dest_skill_dir = dest_root / skill_dir.name
         try:
             if source_agent is not None:
@@ -555,9 +562,10 @@ def _copy_skills(home: Path, *, source_agent: agent_store.Agent | None = None) -
             shutil.copytree(skill_dir, dest_skill_dir)
 
             if source_agent is not None:
-                skill_admin_store.set_base_version(
-                    source_agent.id, skill_dir.name, _skill_dir_version(skill_dir)
-                )
+                # Always store content hash as base_version for drift detection.
+                # Pool git sha is tracked separately in current_version (catalog).
+                new_base = _skill_dir_version(skill_dir)
+                skill_admin_store.set_base_version(source_agent.id, skill_dir.name, new_base)
                 skill_admin_store.set_drift(source_agent.id, skill_dir.name, drifted=False)
         except OSError as exc:
             _logger.warn("agent_home_skill_copy_failed", path=str(skill_dir), error=str(exc))

@@ -178,6 +178,21 @@ def agents_enabling(skill_name: str) -> list[int]:
 # --- Catalog metadata ---------------------------------------------------------
 
 
+def set_current_version(skill_name: str, version: str | None) -> None:
+    """Update the pool git version pointer for a skill in the catalog."""
+    with _database().transaction() as conn:
+        _ensure_skill_row(conn, skill_name)
+        conn.execute(
+            """
+            UPDATE skills
+            SET current_version = :version,
+                updated_at = :updated_at
+            WHERE name = :skill_name
+            """,
+            {"skill_name": skill_name, "version": version, "updated_at": _now()},
+        )
+
+
 def set_source(skill_name: str, source: str, immutable_fields: list[str] | None = None) -> None:
     """Record the catalog source and immutable field set for a skill."""
     if source not in {"managed", "adhoc"}:

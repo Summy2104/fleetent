@@ -10,8 +10,8 @@ vault slice:
 SQLite cannot reshape these tables in place, so the migration follows the
 "create new table -> copy data -> drop old table" pattern used elsewhere.
 
-Revision ID: 092
-Revises: 091
+Revision ID: 093
+Revises: 092
 Create Date: 2026-06-14
 """
 
@@ -20,8 +20,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "092"
-down_revision = "091"
+revision = "093"
+down_revision = "092"
 branch_labels = None
 depends_on = None
 

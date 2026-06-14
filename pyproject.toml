@@ -29,6 +29,7 @@ dependencies = [
     "cryptography>=48.0.0",
     "html2text>=2024.2.26",
     "microsandbox>=0.5.6",
+    "dulwich>=1.2.6",
 ]
 
 [project.scripts]
