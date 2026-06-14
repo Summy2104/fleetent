@@ -13,7 +13,7 @@
 2. **无私/群能力声明**：闸不看 `chat_type`，agent 无法声明"只支持私聊"或"只支持群"。
 3. **群安全默认曾相反**：旧模型里空 `allow_channels` = 放行所有频道（默认开）；阶段 3/4 已翻转为 `allow_groups` 默认空 = 不进任何群。
 
-**命名重载**：「connector」同时指 IM bot 连接 / 工具 OAuth（`connectors` 表）/ KB 数据源（`kb_connectors`）/ owner 级 IM 配置（`im_connectors`），读代码须脑内消歧。
+**命名重载**：「connector」同时指 IM bot 连接 / 工具 OAuth（`connectors` 表）/ KB 数据源（`kb_connectors`）/ 已退役的 owner 级 IM 配置（历史 `im_connectors`），读代码须脑内消歧。
 
 ## 2. 实体模型
 
@@ -111,7 +111,7 @@ Python 模型：`ImBinding`（顶层）+ per-platform `SlackBinding`/`TelegramBi
 | `user_agents` | **保留不改名**（用户准入跨平台、非 IM 专属，不加 im 前缀；phase 3 materialize 进 `allow_users`） |
 | 已删除的 channel 路由表 | descope（access 改用 `agent_im_groups`，语义不同——非路由） |
 
-> "connector" 一词在 IM 语境退役；`connectors`（工具 OAuth）/`kb_connectors`/`im_connectors` 是另外的东西，不在本设计内。
+> "connector" 一词在 IM 语境退役；`connectors`（工具 OAuth）/`kb_connectors`/历史 `im_connectors` 是另外的东西，不在本设计内。
 
 ## 7. 默认与安全
 
@@ -163,6 +163,6 @@ Python 模型：`ImBinding`（顶层）+ per-platform `SlackBinding`/`TelegramBi
 - **不做**：跨租户同一人=两 User 的 per-tenant 身份重键（v1 一个人属一个 org，over-engineering）。
 
 ### 其余身份域 FK 缺口（一并或随后）
-`im_users.user_id`→users、`api_keys.user_id`→users、`im_connectors.owner_id`→users（另见 §9 whatsapp）——补 FK 按上轮 tenancy 的"父删 RESTRICT / 引用 SET NULL"风格定 ondelete。
+`im_users.user_id`→users、`api_keys.user_id`→users——补 FK 按上轮 tenancy 的"父删 RESTRICT / 引用 SET NULL"风格定 ondelete。
 
-> 关联 [[identity-auth-model]]（#4 Identity 端口）。当前 IM 域只剩 `im_connectors.owner_id` 这一处 owner 作用域残留（待 §9 whatsapp 收口）；`im_users` 已去 owner_id，旧的渠道白名单表也已整体 descope。
+> 关联 [[identity-auth-model]]（#4 Identity 端口）。当前 IM 域已无 owner 作用域残留；`im_users` 已去 owner_id，旧的渠道白名单表与 owner-level connector 机制也已整体 descope。

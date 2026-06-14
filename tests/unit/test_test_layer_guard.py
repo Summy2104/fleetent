@@ -128,9 +128,9 @@ def test_guard_allows_read_only_db_symbol_compatibility_assertions(tmp_path):
                 "    assert not hasattr(identity, 'DB_PATH')",
                 "",
                 "def test_legacy_shim_reexports_same_object():",
-                "    from fleetent.platform.im_gateway_management import connector_store",
-                "    from fleetent.platform.im_gateway_management import im_connector_store",
-                "    assert im_connector_store.get_connector is connector_store.get_connector",
+                "    from fleetent import im_user_store",
+                "    from fleetent.platform.im_gateway_management import identity",
+                "    assert im_user_store.get_or_create is identity.get_or_create",
             ]
         ),
     )

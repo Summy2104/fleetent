@@ -8,9 +8,8 @@ from typing import Any
 
 import pytest
 
-from fleetent import user_store
 from fleetent.knowledge_base import operations as kb_operations
-from fleetent.platform.admin_cli import agents, im_connectors, kb_connectors, users
+from fleetent.platform.admin_cli import agents, kb_connectors, users
 from fleetent.platform.agent_statistics import stats_admin_api
 
 
@@ -132,45 +131,6 @@ def test_user_cli_handles_create_list_rotate_and_builtin_admin(monkeypatch, caps
         sys.modules, "fleetent.auth", SimpleNamespace(seed_builtin_admin=lambda: None)
     )
     assert users.handle(_ns(cmd="seed-builtin-admin"))
-
-
-def test_im_connector_cli_uses_mocked_management_boundaries(monkeypatch, capsys):
-    calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
-    fake_im = SimpleNamespace(
-        seed_from_env=lambda: ["slack"],
-        list_connectors=lambda: [
-            {"owner_id": "admin", "platform": "slack", "enabled": 1, "status": "connected"}
-        ],
-        resolve_masked=lambda owner, platform: {"bot_token": "***"},
-        set_enabled=lambda *args: calls.append(("set_enabled", args, {})),
-        set_config=lambda *args: calls.append(("set_config", args, {})),
-    )
-    monkeypatch.setattr(user_store, "admin_owner_id", lambda: "admin")
-    monkeypatch.setattr(
-        "fleetent.platform.im_gateway_management",
-        fake_im,
-        raising=False,
-    )
-
-    assert im_connectors.handle(_ns(cmd="seed-connectors"))
-    assert im_connectors.handle(_ns(cmd="im-connector", im_connector_cmd="list"))
-    assert im_connectors.handle(
-        _ns(cmd="im-connector", im_connector_cmd="enable", platform="slack")
-    )
-    assert im_connectors.handle(
-        _ns(cmd="im-connector", im_connector_cmd="set-config", platform="slack", set=["a=b"])
-    )
-    assert not im_connectors.handle(_ns(cmd="unknown"))
-
-    output = capsys.readouterr().out
-    assert "Seeded: slack" in output
-    assert "bot_token=***" in output
-    assert ("set_config", ("admin", "slack", {"a": "b"}), {}) in calls
-
-    with pytest.raises(SystemExit):
-        im_connectors.handle(
-            _ns(cmd="im-connector", im_connector_cmd="set-config", platform="slack", set=["bad"])
-        )
 
 
 def test_kb_connector_cli_sync_guards_and_extract_summary(monkeypatch, capsys):
