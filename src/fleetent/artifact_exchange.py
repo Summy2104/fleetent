@@ -52,6 +52,18 @@ def set_views_root(path: Path) -> None:
     _views_root = path
 
 
+def view_dir(scope_key: str | None) -> Path | None:
+    """The (created) scope view directory to ro-mount at /exchange, or None if disabled.
+
+    Ensured to exist (possibly empty) before a container is created so the bind mount has
+    a source and later-linked artifacts appear live (D5: container first, files after)."""
+    if _views_root is None or not scope_key:
+        return None
+    d = _views_root / scope_key
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def _link_into_view(server_id: str, rel_path: str, scope_key: str | None) -> None:
     """Best-effort hard-link an artifact into its scope view (§4.1/4.2).
 
