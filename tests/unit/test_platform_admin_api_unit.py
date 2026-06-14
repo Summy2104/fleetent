@@ -650,12 +650,11 @@ def test_chat_admin_route_error_branches(monkeypatch: pytest.MonkeyPatch) -> Non
     assert invalid_bulk.value.status_code == 422
 
 
-def test_provider_admin_route_handlers_cover_crud_routing_and_observation(
+def test_provider_admin_handlers_cover_crud_health_and_observation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_auth(monkeypatch, provider_admin_api, _user())
     providers: dict[str, dict[str, Any]] = {}
-    routes: dict[str, list[str]] = {"default": []}
     audits: list[tuple[Any, ...]] = []
 
     def add_provider(provider_id: str, **kwargs: Any) -> None:
@@ -671,19 +670,6 @@ def test_provider_admin_route_handlers_cover_crud_routing_and_observation(
             "output_price_per_1k": None,
         }
 
-    monkeypatch.setattr(
-        provider_admin_api.provider_admin_store, "list_route_task_types", lambda: list(routes)
-    )
-    monkeypatch.setattr(
-        provider_admin_api.provider_admin_store,
-        "get_route_providers",
-        lambda task_type: routes.get(task_type, []),
-    )
-    monkeypatch.setattr(
-        provider_admin_api.provider_admin_store,
-        "set_route_order",
-        lambda task_type, provider_ids: routes.__setitem__(task_type, provider_ids),
-    )
     monkeypatch.setattr(
         provider_admin_api.provider_admin_store, "list_providers", lambda: list(providers.values())
     )
@@ -745,13 +731,6 @@ def test_provider_admin_route_handlers_cover_crud_routing_and_observation(
         )["model"]
         == "gpt-next"
     )
-    assert provider_admin_api.set_route(
-        "chat", provider_admin_api.RouteOrderBody(provider_ids=["p1", "p2"]), auth_header
-    )["providers"] == ["p1", "p2"]
-    assert provider_admin_api.list_routes(auth_header)["chat"] == ["p1", "p2"]
-    preview = provider_admin_api.preview_route("chat", auth_header)
-    assert preview["simulation"][0]["status"] == "down"
-    assert provider_admin_api.preview_route("embedding", auth_header)["falls_back_to"] == "default"
     assert provider_admin_api.health(auth_header)["providers"][0]["available"] is False
     assert provider_admin_api.connectivity_test("p1", auth_header)["reachable"] is True
     pricing = provider_admin_api.set_pricing(

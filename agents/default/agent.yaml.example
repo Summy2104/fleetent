@@ -187,6 +187,14 @@ mcp_servers:
       - "readonly"
     env:
       BILLING_DB_DSN_ENV: BILLING_DB_DSN
+    # ── unified file-exchange (stdio only) ──
+    # By default a stdio server's products land in its convention partition tree
+    # (<agent_home>/exchange/<id>/data) and become addressable to the model under the
+    # /exchange/<id>/ namespace (send_file delivers them, file tools read them). Override:
+    # file_root: /var/lib/billing/out   # declare the server's real product dir explicitly
+                                         # (overrides the convention + any XDG_DATA_HOME)
+    # file_isolation: "off"             # opt OUT entirely — server reads the host's real
+                                         # ~/.config etc., products are NOT addressable
 
 # ── connectors (per-agent IM ingress; tokens via env reference only) ──
 connectors:

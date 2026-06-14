@@ -1,12 +1,11 @@
 """FastAPI router for /admin/providers — the model_provider management face.
 
 Owns the management behaviour only: provider CRUD (api_key masked on output),
-task_type → provider route orchestration (list order = fallback priority),
-connectivity test, fallback-chain preview, health-probe view, pricing table, and
-per-provider observation. The runtime routing/fallback/client-instantiation and
-cost collection live in the model-router / observability domains and are reached
-through injectable seams (mockable in tests). This router never imports the agent
-loop, so it is testable in isolation.
+connectivity test, health-probe view, pricing table, and per-provider observation.
+The runtime routing/fallback/client-instantiation and cost collection live in the
+model-router / observability domains and are reached through injectable seams
+(mockable in tests). This router never imports the agent loop, so it is testable
+in isolation.
 
 Auth mirrors user_admin_api: reads allow viewer+admin, writes require admin.
 """
@@ -17,8 +16,7 @@ from typing import Any
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
-from fleetent import auth, user_store
-from fleetent import audit_log
+from fleetent import audit_log, auth, user_store
 from fleetent.platform.model_provider_management import provider_admin_store
 from fleetent.platform.model_provider_management.provider_connectivity import (
     test_provider_connectivity_sync,
@@ -28,9 +26,6 @@ router = APIRouter(prefix="/admin/providers")
 
 IDLE_TIMEOUT_SECONDS = 1800
 _ADMIN_ROLES = {"admin", "built_in_admin"}
-_DEFAULT_TASK_TYPE = "default"
-
-
 # --- injectable seams (model-router / observability follow-ups) ---------------
 
 
@@ -167,82 +162,30 @@ class ProviderEditBody(BaseModel):
     params: dict[str, Any] | None = None
 
 
-class RouteOrderBody(BaseModel):
-    provider_ids: list[str]
-
-
 class PricingBody(BaseModel):
     input_price_per_1k: float | None = None
     output_price_per_1k: float | None = None
 
 
-# --- routing views (declared before /{id} to avoid path capture) -------------
+def _routes_removed() -> None:
+    raise HTTPException(status_code=404, detail="provider routes endpoint removed")
 
 
 @router.get("/routes")
-def list_routes(authorization: str | None = Header(None)) -> dict[str, list[str]]:
-    _current_user(authorization)
-    return {
-        tt: provider_admin_store.get_route_providers(tt)
-        for tt in provider_admin_store.list_route_task_types()
-    }
+def removed_routes_list() -> None:
+    _routes_removed()
 
 
 @router.put("/routes/{task_type}")
-def set_route(
-    task_type: str, body: RouteOrderBody, authorization: str | None = Header(None)
-) -> dict[str, Any]:
-    user = _require_admin(authorization)
-    provider_admin_store.set_route_order(task_type, body.provider_ids)
-    audit_log.write_audit(
-        user.id,
-        "provider.route_set",
-        "task_type",
-        task_type,
-        detail={"order": body.provider_ids},
-    )
-    return {"task_type": task_type, "providers": body.provider_ids}
+def removed_routes_update(task_type: str) -> None:
+    del task_type
+    _routes_removed()
 
 
 @router.get("/routes/{task_type}/preview")
-def preview_route(task_type: str, authorization: str | None = Header(None)) -> dict[str, Any]:
-    _current_user(authorization)
-    chain = provider_admin_store.get_route_providers(task_type)
-    if not chain:
-        # model-router falls back to "default" at runtime when a task_type is unconfigured.
-        return {
-            "task_type": task_type,
-            "chain": [],
-            "falls_back_to": _DEFAULT_TASK_TYPE,
-            "simulation": [],
-            "selected": None,
-        }
-    # Walk the chain against the health cache (read-only): the first available
-    # provider is selected, earlier down providers are skipped. No real model call.
-    cache = router_health_probe()
-    simulation: list[dict[str, Any]] = []
-    selected: str | None = None
-    for provider_id in chain:
-        available, recovers_at = _health_of(cache, provider_id)
-        if available and selected is None:
-            action, selected = "selected", provider_id
-        else:
-            action = "skip"
-        simulation.append(
-            {
-                "provider": provider_id,
-                "status": "up" if available else "down",
-                "action": action,
-                "recovers_at": recovers_at,
-            }
-        )
-    return {
-        "task_type": task_type,
-        "chain": chain,
-        "falls_back_to": None,
-        "simulation": simulation,
-        "selected": selected,
-    }
+def removed_routes_preview(task_type: str) -> None:
+    del task_type
+    _routes_removed()
 
 
 @router.get("/health")

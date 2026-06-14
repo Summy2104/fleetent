@@ -4,9 +4,11 @@ import asyncio
 import datetime
 import logging
 import os
+import re
 import time
 import uuid
 from pathlib import Path
+from typing import Any
 
 from fleetent import eval_logger
 from fleetent.integrations.sandbox import (
@@ -360,6 +362,48 @@ async def _exec_or_cancel(
             return exec_task.result()
 
 
+# /exchange/<server_id>/<rel> references embedded in run_code source (staging fallback).
+_EXCHANGE_REF_RE = re.compile(r"/exchange/[A-Za-z0-9_.-]+/[^\s\"'<>),;]+")
+
+
+async def _stage_exchange_refs(
+    code: str, scope_key: str | None, backend: BaseSandboxBackend, ws_id: str
+) -> int:
+    """Stage attribution-passing /exchange refs into the container (D5 degrade, §4.7/4.8).
+
+    No-op on `exchange_mount`-capable backends (the ro view mount handles it). Otherwise the
+    `/exchange/...` paths literally referenced in the code are resolved through
+    artifact_exchange (own-scope only; cross-scope / unregistered are silently skipped — not
+    staged) and copied into the container before exec. Returns the count staged; logs a
+    degrade line when refs were present. Best-effort: a copy failure is logged, never raised.
+    """
+    if getattr(backend.capabilities, "exchange_mount", False):
+        return 0
+    refs = sorted(set(_EXCHANGE_REF_RE.findall(code)))
+    if not refs:
+        return 0
+    from fleetent import artifact_exchange
+
+    staged = 0
+    for ref in refs:
+        try:
+            host = artifact_exchange.resolve(ref, scope_key, approved=False)
+        except Exception:  # noqa: BLE001 — cross-scope/unregistered/gone → not staged
+            continue
+        try:
+            await backend.stage_file(ws_id, ref, host.read_bytes())
+            staged += 1
+        except Exception as exc:  # noqa: BLE001 — staging is best-effort, never break exec
+            logger.warning("exchange_staging_copy_failed ref=%s error=%s", ref, exc)
+    logger.warning(
+        "exchange_staging_degrade backend=%s refs=%d staged=%d",
+        getattr(backend, "name", "?"),
+        len(refs),
+        staged,
+    )
+    return staged
+
+
 @tool(risk_level="medium", self_truncates=True)
 async def run_code(
     code: str,
@@ -390,6 +434,14 @@ async def run_code(
     agent_env = features.get("sandbox_env")
     env = build_sandbox_env(agent_env=agent_env)
     ws_id = await manager.acquire(scope, session_id, agent_name or "default", env=env)
+    # unified-file-exchange §4.7/4.8: on a backend without exchange_mount, stage the code's
+    # attribution-passing /exchange refs into the container before exec (no-op on capable
+    # backends, where the ro view mount already exposes them). Best-effort, never breaks run.
+    try:
+        scope_key = getattr(tool_context, "scope_key", None)
+        await _stage_exchange_refs(code, scope_key, manager.backend, ws_id)
+    except Exception as exc:  # noqa: BLE001 — staging is auxiliary, never break run_code
+        logger.warning("exchange_staging_failed error=%s", exc)
     command = f"python3 -c {__import__('shlex').quote(code)}"
     # SB2 D4: normal completion does NOT destroy — reuse is the point; destruction
     # is owned by release_session / sweep_idle. AR19's cancel path still hard-aborts
@@ -690,15 +742,18 @@ async def send_im_message(
     text: str,
     target_type: str = "user",
     platform: str = "",
+    files: list[str] | None = None,
     tool_context: ToolContext | None = None,
 ) -> str:
-    """Proactively send an IM message to a user (DM) or a channel.
+    """Proactively send an IM message — optionally with file attachments — to a user/channel.
 
     Use when the user asks you to notify or message someone, or to post to a
     channel — beyond replying in the current conversation (replying needs no
     tool). `target` is the platform-native id (Slack `U…`/`C…`, Telegram chat
     id); `target_type` is "user" for a DM (default) or "channel" for a channel
-    post. `platform` defaults to the current conversation's platform.
+    post. `platform` defaults to the current conversation's platform. `files` is an
+    optional list of workspace-relative or `/exchange/<server_id>/...` paths to attach
+    (this tool is always approval-gated, so the approval authorizes cross-scope artifacts).
     """
     # Lazy import: keeps module load light and avoids cycles (builtin convention).
     from fleetent import outbound
@@ -727,22 +782,98 @@ async def send_im_message(
     if not sent:
         return f"发送失败：{resolved_platform} 投递 {target} 时出错，请稍后重试。"
     kind = "私信" if target_type == "user" else "频道消息"
-    return f"已发送{kind}到 {resolved_platform}:{target}。"
+
+    # Attachments (§7): resolve each through the shared kernel (approved=True — this tool is
+    # always medium-gated, so the approval authorizes cross-scope artifacts). Per-file
+    # degrade: a bad/cross-scope-gone entry is skipped with a note, never aborting the send.
+    delivered, skipped = 0, []
+    for raw in files or []:
+        try:
+            host = _resolve_outbound_path(raw, tool_context, approved=True)
+            ok = await outbound.send_file_to(resolved_platform, connector, target, str(host))
+        except Exception as exc:  # noqa: BLE001 — per-file degrade, never abort the batch
+            skipped.append(f"{raw}（{exc}）")
+            continue
+        if ok:
+            delivered += 1
+        else:
+            skipped.append(f"{raw}（投递失败）")
+
+    result = f"已发送{kind}到 {resolved_platform}:{target}。"
+    if files:
+        result += f" 附件 {delivered}/{len(files)} 已投递。"
+        if skipped:
+            result += " 跳过：" + "；".join(skipped)
+    return result
 
 
-@tool
-async def send_file(path: str, tool_context: ToolContext | None = None) -> str:
-    """Send a workspace product file back to the current conversation's sender.
+def _resolve_outbound_path(path: str, tool_context: Any, *, approved: bool) -> Path:
+    """Resolve a send path to a host file across both roots — the shared delivery kernel.
 
-    Use this to deliver a file you created in the workspace (a report, chart,
-    converted document) to the person you are talking with. `path` is a
-    **workspace-relative** path (the single `/workspace` root); it is resolved to
-    the real host file and sent as an attachment. The recipient is fixed to the
-    current sender — you cannot specify a recipient. Auto-sends only inside a
-    private (DM) conversation with a session-scoped workspace; otherwise it
-    declines and asks you to use `send_im_message` (which goes through approval).
+    Workspace-relative paths resolve via the same fence the file tools use; `/exchange`
+    paths resolve through the ledger with attribution (``approved`` bypasses the scope
+    check — send_file passes True because the gate already vetted it; send_im_message
+    passes True because it is always medium-gated, so a human approval authorizes the
+    cross-scope delivery). Raises ValueError / ExchangeResolutionError / FileNotFoundError.
     """
-    # Recipient is harness-fixed from session_context; the model cannot supply it.
+    from fleetent.tools.file_sandbox_io import resolve_host_path
+    from fleetent.tools.file_tools import _is_exchange_path
+
+    if _is_exchange_path(path):
+        from fleetent import artifact_exchange
+
+        scope_key = getattr(tool_context, "scope_key", None)
+        return artifact_exchange.resolve(path, scope_key, approved=approved)
+    _scope, root = _workspace_scope_and_root(tool_context)
+    host = resolve_host_path(root, path)
+    if not host.is_file():
+        raise FileNotFoundError(f"workspace 内不存在文件 {path!r}（请确认已写入）")
+    return host
+
+
+def _send_file_risk(args: dict[str, Any], tool_context: Any) -> str:
+    """Call-time risk for send_file (D6/D7): low iff the box is closed, else medium.
+
+    Low (no-approval) requires all of: an interactive `session_context` (recipient is
+    harness-fixed) ∧ a DM conversation ∧ the file owned by the current run's scope
+    (workspace-relative is always this run's scope; an `/exchange` artifact must resolve
+    under the run's scope_key). Any miss escalates to medium approval — replacing the old
+    fail-closed decline so every dead end becomes "at worst one approval click". A missing
+    session_context returns medium; the body still fail-closes (no recipient / approval loop).
+    """
+    sc = getattr(tool_context, "session_context", None) if tool_context else None
+    if sc is None:
+        return "medium"
+    if str(getattr(sc, "chat_type", "") or "") != "dm":
+        return "medium"
+    path = str(args.get("path", "") or "")
+    from fleetent.tools.file_tools import _is_exchange_path
+
+    if _is_exchange_path(path):
+        from fleetent import artifact_exchange
+
+        scope_key = getattr(tool_context, "scope_key", None)
+        try:
+            artifact_exchange.resolve(path, scope_key, approved=False)
+            return "low"  # own-scope artifact
+        except Exception:  # noqa: BLE001 — cross-scope / unregistered / gone → escalate
+            return "medium"
+    return "low"  # workspace-relative path is always the current run's scope
+
+
+@tool(risk_level=_send_file_risk)
+async def send_file(path: str, tool_context: ToolContext | None = None) -> str:
+    """Send a product file back to the current conversation's sender.
+
+    Use this to deliver a file to the person you are talking with. `path` is either a
+    **workspace-relative** path (the `/workspace` root) or an **`/exchange/<server_id>/...`**
+    canonical path (a file an MCP tool produced). It is resolved to the real host file and
+    sent as an attachment. The recipient is fixed to the current sender — you cannot specify
+    one. A DM with files owned by this run sends directly; anything else (a channel, a
+    cross-scope artifact) goes through a one-time approval rather than failing.
+    """
+    # Recipient is harness-fixed from session_context; the model cannot supply it. No
+    # session_context = no recipient / no approval loop (scheduled task / sub_agent) → decline.
     sc = getattr(tool_context, "session_context", None) if tool_context else None
     if sc is None:
         return (
@@ -750,33 +881,13 @@ async def send_file(path: str, tool_context: ToolContext | None = None) -> str:
             "（如 scheduled task / sub_agent）。"
         )
 
-    # No-approval iff: session-scoped workspace AND a DM conversation. Both gate the
-    # fact that the recipient is constrained and the workspace is session-private;
-    # otherwise fail-closed back to the medium-gated send_im_message path.
-    from fleetent.integrations.sandbox import Scope
-
-    scope, root = _workspace_scope_and_root(tool_context)
-    if scope is not Scope.SESSION:
-        return (
-            "无法自动外发：当前工作区为 agent 级（跨会话复用），不满足免审批前提。"
-            "请改用 send_im_message（经审批）发送。"
-        )
-    if str(getattr(sc, "chat_type", "") or "") != "dm":
-        return (
-            "无法自动外发：当前为频道会话，仅私信会话可自动外发文件。"
-            "请改用 send_im_message（经审批）发送。"
-        )
-
-    # Translate the workspace-relative path to a real host file, rejecting `..` escapes
-    # via the same fence the file tools use.
-    from fleetent.tools.file_sandbox_io import resolve_host_path
-
+    # Escalation (channel / cross-scope) is enforced by the callable risk (_send_file_risk)
+    # + permission gate; by the time the body runs the call is either low or approved. The
+    # shared kernel resolves with approved=True (the gate already vetted attribution).
     try:
-        host_path = resolve_host_path(root, path)
-    except ValueError:
-        return f"无法发送：路径 {path!r} 越出 workspace 范围，已拒绝。"
-    if not host_path.is_file():
-        return f"无法发送：workspace 内不存在文件 {path!r}（请确认已写入）。"
+        host_path = _resolve_outbound_path(path, tool_context, approved=True)
+    except (ValueError, FileNotFoundError) as exc:
+        return f"无法发送：{exc}"
 
     platform = str(getattr(sc, "platform", "") or "")
     recipient = str(getattr(sc, "sender_id", "") or "")

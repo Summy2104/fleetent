@@ -32,6 +32,7 @@ _KILL_GRACE_SECONDS = 5.0
 # Container-side mount point for the per-scope host workspace directory
 # (sandbox-workspace-mount). The host path is the caller/manager's responsibility.
 _WORKSPACE_MOUNT = "/workspace"
+_EXCHANGE_MOUNT = "/exchange"
 
 # Container-side mount point + env var for the host skills root (sandbox-skill-mount).
 # Fixed so skill scripts locate their resources via `$SKILLS_DIR` regardless of the
@@ -43,7 +44,7 @@ _SKILLS_DIR_ENV = "SKILLS_DIR"
 class DockerBackend(BaseSandboxBackend):
     name = "docker"
     capabilities = BackendCapabilities(
-        persist_workspace=True, workspace_mount=True, orphan_cleanup=True
+        persist_workspace=True, workspace_mount=True, orphan_cleanup=True, exchange_mount=True
     )
 
     def __init__(self, image: str = "python:3.12-slim") -> None:
@@ -157,6 +158,17 @@ class DockerBackend(BaseSandboxBackend):
         return ["-v", f"{workspace_host_path}:{_WORKSPACE_MOUNT}"]
 
     @staticmethod
+    def _exchange_flags(exchange_view_path: str | None) -> list[str]:
+        """Bind-mount the run's scope view dir read-only at /exchange (unified-file-exchange).
+
+        Read-only so products only ever land in /workspace (output contract); the view is
+        filtered to the current scope on the host, so cross-scope artifacts are physically
+        absent in-container. None keeps the container without an /exchange mount."""
+        if not exchange_view_path:
+            return []
+        return ["-v", f"{exchange_view_path}:{_EXCHANGE_MOUNT}:ro"]
+
+    @staticmethod
     def _skill_mount_flags(skill_mount: SkillMount | None) -> list[str]:
         """Bind-mount the host skills root into the container at /workspace/skills.
 
@@ -213,6 +225,7 @@ class DockerBackend(BaseSandboxBackend):
         workspace_host_path: str | None = None,
         config_hash: str | None = None,
         skill_mount: SkillMount | None = None,
+        exchange_view_path: str | None = None,
     ) -> str:
         """Start an isolated container, return container ID as workspace_id.
 
@@ -243,6 +256,7 @@ class DockerBackend(BaseSandboxBackend):
             *self._resource_flags(resources),
             *self._env_flags(effective_env),
             *self._workspace_flags(workspace_host_path),
+            *self._exchange_flags(exchange_view_path),
             *self._skill_mount_flags(skill_mount),
             *self._label_flags(config_hash),
             image or self._image,

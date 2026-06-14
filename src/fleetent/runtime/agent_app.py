@@ -250,6 +250,12 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     runtime_context.set_state_db(agent_state_db)
     sub_agent_lifecycle.set_state_db(agent_state_db)
     schedule_store.set_state_db(agent_state_db)
+    # unified-file-exchange: wire the artifact ledger + per-scope hard-link views root
+    # (data_dir is <agent_home>/data, so the exchange tree lives under data_dir.parent).
+    from fleetent import artifact_exchange
+
+    artifact_exchange.set_state_db(agent_state_db)
+    artifact_exchange.set_views_root(data_dir.parent / "exchange" / ".views")
 
 
 async def _start_infra(agent: AgentFile, data_dir: Path) -> None:

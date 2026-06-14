@@ -174,8 +174,8 @@ _FILE_WRITTEN_RE = re.compile(r"written \d+ bytes to (.+)")
 
 
 _EGRESS_NOTICE = (
-    "（提示：本轮在 workspace 内生成了产物，但无法自动外发。"
-    "若需把产物发回，请用 send_file 工具发送。）"
+    "（提示：本轮生成了产物（workspace 或 /exchange）。"
+    "若需发回，请用 send_file 工具——私信内本会话产物直发，其余情形会请求一次确认。）"
 )
 
 

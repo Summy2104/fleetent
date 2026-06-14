@@ -27,16 +27,17 @@ def write_audit(
         conn.execute(
             """INSERT INTO audit_log
                    (actor_user_id, action, target_type, target_id, detail, batch_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (
-                actor_user_id,
-                action,
-                target_type,
-                target_id,
-                json.dumps(detail) if detail is not None else None,
-                batch_id,
-                datetime.datetime.now(datetime.UTC).isoformat(),
-            ),
+               VALUES (:actor_user_id, :action, :target_type, :target_id, :detail, :batch_id,
+                       :created_at)""",
+            {
+                "actor_user_id": actor_user_id,
+                "action": action,
+                "target_type": target_type,
+                "target_id": target_id,
+                "detail": json.dumps(detail) if detail is not None else None,
+                "batch_id": batch_id,
+                "created_at": datetime.datetime.now(datetime.UTC).isoformat(),
+            },
         )
 
 
@@ -49,7 +50,7 @@ def search_audit(
     until: str | None = None,
 ) -> list[dict[str, Any]]:
     clauses: list[str] = []
-    params: list[str] = []
+    params: dict[str, str] = {}
     for column, value in (
         ("actor_user_id", actor),
         ("action", action),
@@ -57,14 +58,14 @@ def search_audit(
         ("target_id", target_id),
     ):
         if value is not None:
-            clauses.append(f"{column} = ?")
-            params.append(value)
+            clauses.append(f"{column} = :{column}")
+            params[column] = value
     if since is not None:
-        clauses.append("created_at >= ?")
-        params.append(since)
+        clauses.append("created_at >= :since")
+        params["since"] = since
     if until is not None:
-        clauses.append("created_at <= ?")
-        params.append(until)
+        clauses.append("created_at <= :until")
+        params["until"] = until
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     with _conn() as conn:
         rows = conn.execute(

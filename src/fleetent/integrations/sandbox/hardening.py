@@ -45,6 +45,7 @@ def config_hash(
     env: dict[str, str] | None,
     workspace_host_path: str | None,
     skill_mount: Any = None,
+    exchange_view_path: str | None = None,
 ) -> str:
     """Stable short digest of the container's effective configuration.
 
@@ -65,6 +66,8 @@ def config_hash(
     }
     if skill_mount is not None:
         payload_dict["skill_mount"] = [skill_mount.host_src, skill_mount.read_only]
+    if exchange_view_path:
+        payload_dict["exchange_view"] = exchange_view_path
     payload = json.dumps(
         payload_dict,
         sort_keys=True,

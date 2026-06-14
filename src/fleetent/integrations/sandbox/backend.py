@@ -76,6 +76,9 @@ class BackendCapabilities:
     persist_workspace: bool
     workspace_mount: bool
     orphan_cleanup: bool
+    # unified-file-exchange: bind-mount the run's scope view dir read-only at /exchange.
+    # Defaults False so test stubs / backends that don't opt in degrade to staging copy.
+    exchange_mount: bool = False
 
 
 class BaseSandboxBackend(ABC):
@@ -111,8 +114,13 @@ class BaseSandboxBackend(ABC):
         workspace_host_path: str | None = None,
         config_hash: str | None = None,
         skill_mount: SkillMount | None = None,
+        exchange_view_path: str | None = None,
     ) -> str:
         """Start an isolated workspace under `name`, returning its workspace id.
+
+        `exchange_view_path` (unified-file-exchange) optionally ro-mounts the run's scope
+        view dir at /exchange on an `exchange_mount`-capable backend; None / incapable
+        backends ignore it (consumption degrades to staging copy).
 
         `skill_mount` (sandbox-skill-mount) optionally bind-mounts a host skills root
         at /workspace/skills and injects `SKILLS_DIR`; None keeps the prior behaviour
@@ -143,6 +151,24 @@ class BaseSandboxBackend(ABC):
         """
 
     # ── capability-gated surface (safe defaults for backends without it) ──────
+
+    async def stage_file(self, workspace_id: str, container_path: str, data: bytes) -> None:
+        """Copy a host file's bytes into the container at an absolute path (staging degrade).
+
+        Used by run_code's /exchange staging fallback on backends WITHOUT `exchange_mount`
+        (D5): when the scope view cannot be ro-mounted, attribution-checked artifacts are
+        copied in before exec. Default implementation writes via the `_run_exec` primitive
+        (base64 over stdin), so any backend with a working exec channel gets staging for
+        free; a backend may override with a native copy.
+        """
+        import base64
+        import os.path
+        import shlex
+
+        b64 = base64.b64encode(data).decode("ascii")
+        directory = os.path.dirname(container_path)
+        cmd = f"mkdir -p {shlex.quote(directory)} && base64 -d > {shlex.quote(container_path)}"
+        await self._run_exec(workspace_id, cmd, stdin=b64.encode("ascii"))
 
     async def commit_workspace(self, workspace_id: str, image_tag: str) -> None:
         """Persist a workspace's deps into an image (persist_workspace backends).

@@ -22,9 +22,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fleetent.db import SQLiteDatabase
+from fleetent.structured_logging import get_logger
 
 if TYPE_CHECKING:
     from fleetent.integrations.mcp.client import McpServerConfig
+
+_logger = get_logger("artifact_exchange")
 
 # The logical second root the file fence understands (besides /workspace).
 EXCHANGE_ROOT = "/exchange"
@@ -33,6 +36,59 @@ EXCHANGE_ROOT = "/exchange"
 _server_roots: dict[str, Path] = {}
 
 _state_db: SQLiteDatabase | None = None
+
+# Root of the per-scope hard-link views (`<agent_home>/exchange/.views/`), set at boot.
+# Each artifact is linked to `<_views_root>/<scope_key>/<server_id>/<rel>` so the sandbox
+# can ro-mount exactly one scope's view. None = views disabled (no linking).
+_views_root: Path | None = None
+# Servers whose effective root is on a different filesystem than the views root, so a
+# hard link is impossible (EXDEV) — their consumption must fall back to staging copy (D5).
+_staging_degraded_servers: set[str] = set()
+
+
+def set_views_root(path: Path) -> None:
+    """Set the per-scope hard-link views root.  Called once at agent boot via agent_app."""
+    global _views_root
+    _views_root = path
+
+
+def view_dir(scope_key: str | None) -> Path | None:
+    """The (created) scope view directory to ro-mount at /exchange, or None if disabled.
+
+    Ensured to exist (possibly empty) before a container is created so the bind mount has
+    a source and later-linked artifacts appear live (D5: container first, files after)."""
+    if _views_root is None or not scope_key:
+        return None
+    d = _views_root / scope_key
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _link_into_view(server_id: str, rel_path: str, scope_key: str | None) -> None:
+    """Best-effort hard-link an artifact into its scope view (§4.1/4.2).
+
+    Links `<server_root>/<rel>` → `<_views_root>/<scope_key>/<server_id>/<rel>`. Refreshes
+    a stale link (source inode changed). A cross-filesystem failure (EXDEV) flags the
+    server for staging degrade (D5) and logs — never raises (registration must not fail).
+    """
+    if _views_root is None or not scope_key:
+        return
+    root = _server_roots.get(server_id)
+    if root is None:
+        return
+    src = Path(root) / rel_path
+    if not src.is_file():
+        return
+    link = _views_root / scope_key / server_id / rel_path
+    try:
+        link.parent.mkdir(parents=True, exist_ok=True)
+        if link.exists() and link.stat().st_ino != src.stat().st_ino:
+            link.unlink()  # stale link → source replaced (new inode); refresh
+        if not link.exists():
+            os.link(src, link)
+    except OSError as exc:
+        _staging_degraded_servers.add(server_id)
+        _logger.warn("artifact_view_link_failed", server_id=server_id, rel=rel_path, error=str(exc))
 
 
 class ExchangeResolutionError(ValueError):
@@ -118,6 +174,7 @@ def register(
                 "size": size,
             },
         )
+        _link_into_view(server_id, rel_path, scope_key)
         return str(artifact_id)
 
     artifact_id = str(uuid.uuid4())
@@ -141,6 +198,7 @@ def register(
             "created_at": datetime.now(UTC).isoformat(),
         },
     )
+    _link_into_view(server_id, rel_path, scope_key)
     return artifact_id
 
 

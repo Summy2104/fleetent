@@ -1,4 +1,4 @@
-"""Tests for provider_admin_store: provider CRUD, task_type route ordering, pricing.
+"""Tests for provider_admin_store: provider CRUD and pricing.
 
 New management-source tables created by Alembic migration 011, accessed via the
 unified db runtime (named params). api_key is stored but never returned plaintext.
@@ -22,11 +22,12 @@ def store_db(tmp_path, monkeypatch):
 def test_migration_creates_tables(store_db):
     import sqlite3
 
+    legacy_route_table = "model" + "_routes"
     conn = sqlite3.connect(store_db)
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     conn.close()
     assert "model_providers" in tables
-    assert "model_routes" in tables
+    assert legacy_route_table not in tables
 
 
 def test_add_and_get_provider(store_db):
@@ -69,13 +70,10 @@ def test_edit_provider_blank_key_keeps_existing(store_db):
     assert p["api_key"] == "orig-key"
 
 
-def test_delete_provider_removes_from_routes(store_db):
+def test_delete_provider_without_legacy_route_table(store_db):
     store.add_provider("a", base_url="u", model="m", api_key="k")
-    store.add_provider("b", base_url="u", model="m", api_key="k")
-    store.set_route_order("default", ["a", "b"])
     store.delete_provider("a")
     assert store.get_provider("a") is None
-    assert store.get_route_providers("default") == ["b"]
 
 
 def test_list_providers(store_db):
@@ -83,16 +81,3 @@ def test_list_providers(store_db):
     store.add_provider("b", base_url="u", model="m", api_key="k")
     names = {p["id"] for p in store.list_providers()}
     assert names == {"a", "b"}
-
-
-def test_route_order_is_fallback_priority(store_db):
-    store.add_provider("a", base_url="u", model="m", api_key="k")
-    store.add_provider("b", base_url="u", model="m", api_key="k")
-    store.set_route_order("code", ["a", "b"])
-    assert store.get_route_providers("code") == ["a", "b"]
-    store.set_route_order("code", ["b", "a"])  # reorder
-    assert store.get_route_providers("code") == ["b", "a"]
-
-
-def test_route_unconfigured_returns_empty(store_db):
-    assert store.get_route_providers("never") == []

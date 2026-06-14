@@ -2,9 +2,7 @@
 
 ## Purpose
 让 5 个文件工具（read_file/write_file/edit_file/search_content/search_files）经 sandbox 容器执行并锁定 workspace 边界：容器内 shell 命令执行、path 限制在 workspace 内、workspace 外宿主路径不可达、tool_context 定位 scope 容器、docker 不可用时降级宿主 + 路径围栏、read/search 保持安全 LOW，并保留既有功能行为。
-
 ## Requirements
-
 ### Requirement: 文件工具经容器执行操作 workspace
 
 当 sandbox 可用且选定后端声明 `workspace_mount` capability 时，5 个文件工具（read_file/write_file/edit_file/search_content/search_files）SHALL 经 `SandboxManager` 取得 scope 容器并通过后端 `exec` 在容器内执行 shell 命令操作 `/workspace`，而非在宿主进程直接读写。
@@ -19,15 +17,27 @@
 
 ### Requirement: path 锁定在 workspace 内
 
-文件工具的 path 参数 SHALL 解释为 workspace 内路径：相对路径相对 `/workspace`；绝对路径规范化后必须落在 `/workspace` 内。越界路径 MUST 被拒绝并返回明确错误，不执行任何读写。
+文件工具的 path 参数 SHALL 解释为双根命名空间内路径：相对路径相对 `/workspace`；绝对路径规范化后必须落在 `/workspace` 内，或落在 `/exchange/<server_id>/` 内（后者 MUST 经 file-exchange 的归属校验，归属不符或未登记即拒绝）。两根之外的路径 MUST 被拒绝并返回明确错误，不执行任何读写。
 
 #### Scenario: 相对路径落在 workspace
+
 - **WHEN** read_file 收到相对路径 `sub/a.txt`
 - **THEN** 实际操作 `/workspace/sub/a.txt`
 
 #### Scenario: 越界绝对路径被拒
+
 - **WHEN** read_file 收到 `/etc/passwd` 或 `../../etc/passwd`
 - **THEN** 返回越界错误，不读取该文件
+
+#### Scenario: 本 scope /exchange 路径放行
+
+- **WHEN** read_file 收到 `/exchange/srv/a.xlsx` 且该工件台账 `scope_key` == 当前 run scope_key
+- **THEN** 解析到有效文件根下真实文件并正常读取
+
+#### Scenario: 跨 scope /exchange 路径被拒
+
+- **WHEN** read_file 收到 `scope_key` 不等于当前 run 的 `/exchange` 路径
+- **THEN** 返回归属校验失败的明确错误，不读取该文件
 
 ### Requirement: workspace 外宿主路径在容器内不可达
 
@@ -92,3 +102,4 @@
 #### Scenario: 真实缺失路径仍如实报告
 - **WHEN** 容器存活，read_file 探测一个确实不存在的路径
 - **THEN** 工具返回「路径不存在」（既有语义不变）
+

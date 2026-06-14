@@ -36,19 +36,19 @@
 
 ## 3. fence 双根与 file 工具
 
-- [ ] 3.1 测试：file 工具 path 解析双根（相对→/workspace 不变；`/exchange` 本 scope 放行/跨 scope 拒绝/同路径跨 scope 不串味/未登记拒绝；其余越界拒绝语义不变）——integration，先红
-- [ ] 3.2 实现：`file_sandbox_io` 围栏扩双根，read/write/edit/search 接入 `artifact_exchange.resolve`——绿
+- [x] 3.1 测试：file 工具 path 解析双根（相对→/workspace 不变；`/exchange` 本 scope 放行/跨 scope 拒绝/同路径跨 scope 不串味/未登记拒绝；其余越界拒绝语义不变）——integration，先红
+- [x] 3.2 实现：`file_sandbox_io` 围栏扩双根，read/write/edit/search 接入 `artifact_exchange.resolve`——绿
 
 ## 4. 沙箱归属视图
 
-- [ ] 4.1 测试：视图目录维护（`.views/<scope_key>/` 按 scope_key 分组；登记补硬链接保持 `<server_id>/<rel>` 结构、重登记刷新链接、容器创建前确保目录存在、跨文件系统降级标记+日志）——integration，先红
-- [ ] 4.2 实现：`artifact_exchange` 视图管理（view_dir/链接增补/刷新）——绿
-- [ ] 4.3 测试：`BackendCapabilities` 新增 `exchange_mount`（Docker=true）；容器创建携带视图 ro 挂载到 `/exchange`；同 scope_key 复用同视图；无能力后端不传挂载+降级日志——integration，先红
-- [ ] 4.4 实现：capability 位 + Docker 后端第二卷 ro 挂载 + manager 接线——绿
-- [ ] 4.5 测试：容器内 `/exchange` 只读 + 挂载后新增链接即时可见——以 **mock docker run 命令组装等价覆盖**（断言 `-v 视图:/exchange:ro` 选项装配 + 复用同视图）；真机断言加 `@pytest.mark.skipif`（无 docker 跳过），先红
-- [ ] 4.6 实现：补齐挂载选项装配与文档注释（mock 覆盖通过）——绿
-- [ ] 4.7 测试：无 `exchange_mount` 后端的 staging 降级（exec 前扫描代码 `/exchange/…` 引用、归属校验通过者复制进容器、记录降级日志）——integration，先红
-- [ ] 4.8 实现：staging 降级路径——绿
+- [x] 4.1 测试：视图目录维护（`.views/<scope_key>/` 按 scope_key 分组；登记补硬链接保持 `<server_id>/<rel>` 结构、重登记刷新链接、容器创建前确保目录存在、跨文件系统降级标记+日志）——integration，先红
+- [x] 4.2 实现：`artifact_exchange` 视图管理（view_dir/链接增补/刷新）——绿
+- [x] 4.3 测试：`BackendCapabilities` 新增 `exchange_mount`（Docker=true）；容器创建携带视图 ro 挂载到 `/exchange`；同 scope_key 复用同视图；无能力后端不传挂载+降级日志——integration，先红
+- [x] 4.4 实现：capability 位 + Docker 后端第二卷 ro 挂载 + manager 接线——绿
+- [x] 4.5 测试：容器内 `/exchange` 只读 + 挂载后新增链接即时可见——以 **mock docker run 命令组装等价覆盖**（断言 `-v 视图:/exchange:ro` 选项装配 + 复用同视图）；真机断言加 `@pytest.mark.skipif`（无 docker 跳过），先红
+- [x] 4.6 实现：补齐挂载选项装配与文档注释（mock 覆盖通过）——绿
+- [x] 4.7 测试：无 `exchange_mount` 后端的 staging 降级（exec 前扫描代码 `/exchange/…` 引用、归属校验通过者复制进容器、记录降级日志）——integration，先红
+- [x] 4.8 实现：staging 降级路径——绿
 
 ## 5. 权限门参数化风险
 
@@ -57,20 +57,20 @@
 
 ## 6. send_file 升级语义
 
-- [ ] 6.1 测试：send_file 风险函数真值表（四条件全满足→low，含单人 agent scope 本 scope 文件 DM 直发；频道/跨 scope 工件→medium；`session_context=None` 仍 fail-closed 不升级）——unit，先红
-- [ ] 6.2 实现：send_file 接 `/exchange` 路径 + callable risk + 升级审批路径（批准后 `approved=True` 解析发送），替换原 fail-closed 拒绝文案——绿
-- [ ] 6.3 测试：免审批直发与升级审批端到端（DM 本会话工件直发回显收件人；频道场景批准后发出、拒绝后不发）——integration，先红
-- [ ] 6.4 实现：修复联动（EGRESS 提示文案更新指向新语义）——绿
+- [x] 6.1 测试：send_file 风险函数真值表（四条件全满足→low，含单人 agent scope 本 scope 文件 DM 直发；频道/跨 scope 工件→medium；`session_context=None` 仍 fail-closed 不升级）——unit，先红
+- [x] 6.2 实现：send_file 接 `/exchange` 路径 + callable risk + 升级审批路径（批准后 `approved=True` 解析发送），替换原 fail-closed 拒绝文案——绿
+- [x] 6.3 测试：免审批直发与升级审批端到端（DM 本会话工件直发回显收件人；频道场景批准后发出、拒绝后不发）——integration，先红
+- [x] 6.4 实现：修复联动（EGRESS 提示文案更新指向新语义）——绿
 
 ## 7. send_im_message 附件能力
 
-- [ ] 7.1 测试：`files` 参数（批准后文本+附件投递；跨会话工件批准即授权；无效条目逐文件降级不中断；任意参数组合恒过 medium gate；不带 files 行为与现状一致）——integration，先红
-- [ ] 7.2 实现：`files` 参数 + 共享投递内核（与 send_file 同一解析/发送核）——绿
+- [x] 7.1 测试：`files` 参数（批准后文本+附件投递；跨会话工件批准即授权；无效条目逐文件降级不中断；任意参数组合恒过 medium gate；不带 files 行为与现状一致）——integration，先红
+- [x] 7.2 实现：`files` 参数 + 共享投递内核（与 send_file 同一解析/发送核）——绿
 
 ## 8. 收尾
 
-- [ ] 8.1 `uv run pytest tests/unit -q` 与 `uv run pytest tests/integration -q`（不带 -x，对照 main 基线无新增失败）
-- [ ] 8.2 `make test-pr` 全绿；`uv run mypy src` 无新增错误
-- [ ] 8.3 文档：AGENTS.md Gotchas 补 exchange 条目（命名空间/归属/约定注入/逃生门）；agent.yaml.example 注释 `file_root`/`file_isolation`
-- [ ] 8.4 验证：my-bot 事故场景**等价持久层/装配验证**（真实 sqlite artifacts 登记→resolve→send_file 解析链路 + mock docker/MCP/LLM 重建；真机断言 `skipif` 跳过）；真机重放留用户环境补跑，决策文档记入「真机待补」
-- [ ] 8.5 收口：全部 checkbox `[x]` 后 `opsx:archive` + `opsx:sync`（功能分支归档+同步 specs），最终 bb-pr 合 main
+- [x] 8.1 `uv run pytest tests/unit -q` 与 `uv run pytest tests/integration -q`（不带 -x，对照 main 基线无新增失败）
+- [x] 8.2 `make test-pr` 全绿；`uv run mypy src` 无新增错误
+- [x] 8.3 文档：AGENTS.md Gotchas 补 exchange 条目（命名空间/归属/约定注入/逃生门）；agent.yaml.example 注释 `file_root`/`file_isolation`
+- [x] 8.4 验证：my-bot 事故场景**等价持久层/装配验证**（真实 sqlite artifacts 登记→resolve→send_file 解析链路 + mock docker/MCP/LLM 重建；真机断言 `skipif` 跳过）；真机重放留用户环境补跑，决策文档记入「真机待补」
+- [x] 8.5 收口：全部 checkbox `[x]` 后 `opsx:archive` + `opsx:sync`（功能分支归档+同步 specs），最终 bb-pr 合 main
