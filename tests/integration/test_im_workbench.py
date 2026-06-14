@@ -12,11 +12,8 @@ def db(tmp_path, monkeypatch):
     return tmp_path / "users.db"
 
 
-_OWNER = "owner1"
-
-
 def test_block_and_restore_audited(db):
-    user = im_user_store.get_or_create(_OWNER, "slack", "U1")
+    user = im_user_store.get_or_create("slack", "U1", "default")
     im_id = im_user_store.list_im_identities(user.id)[0]["id"]
     im_user_store.block_im_user(im_id, reason="spam", actor="admin1")
     assert im_user_store.check_allowed_by_user_id(user.id) is False
@@ -27,8 +24,8 @@ def test_block_and_restore_audited(db):
 
 
 def test_batch_block_shared_id(db):
-    u1 = im_user_store.get_or_create(_OWNER, "slack", "A1")
-    u2 = im_user_store.get_or_create(_OWNER, "telegram", "B1")
+    u1 = im_user_store.get_or_create("slack", "A1", "default")
+    u2 = im_user_store.get_or_create("telegram", "B1", "default")
     id1 = im_user_store.list_im_identities(u1.id)[0]["id"]
     id2 = im_user_store.list_im_identities(u2.id)[0]["id"]
     batch_id = im_user_store.batch_block_im([id1, id2], reason="raid", actor="admin1")
@@ -47,7 +44,7 @@ def test_identity_fields_differ_by_platform(db):
 
 
 def test_update_identity_metadata_audited(db):
-    user = im_user_store.get_or_create(_OWNER, "slack", "U1")
+    user = im_user_store.get_or_create("slack", "U1", "default")
     im_id = im_user_store.list_im_identities(user.id)[0]["id"]
     im_user_store.update_im_identity(
         im_id,
@@ -64,7 +61,7 @@ def test_update_identity_metadata_audited(db):
 
 
 def test_update_identity_can_override_user_id(db):
-    user = im_user_store.get_or_create(_OWNER, "slack", "U1")
+    user = im_user_store.get_or_create("slack", "U1", "default")
     im_id = im_user_store.list_im_identities(user.id)[0]["id"]
     # admin corrects the auto-captured Slack User ID
     im_user_store.update_im_identity(im_id, platform_user_id="U0555FN1REX", actor="admin1")
@@ -74,15 +71,15 @@ def test_update_identity_can_override_user_id(db):
 
 
 def test_update_identity_user_id_conflict_raises(db):
-    a = im_user_store.get_or_create(_OWNER, "slack", "A1")
-    im_user_store.get_or_create(_OWNER, "slack", "B1")
+    a = im_user_store.get_or_create("slack", "A1", "default")
+    im_user_store.get_or_create("slack", "B1", "default")
     a_id = im_user_store.list_im_identities(a.id)[0]["id"]
     with pytest.raises(ValueError):
         im_user_store.update_im_identity(a_id, platform_user_id="B1")
 
 
 def test_update_metadata_drops_keys_not_in_platform_schema(db):
-    user = im_user_store.get_or_create(_OWNER, "telegram", "T1")
+    user = im_user_store.get_or_create("telegram", "T1", "default")
     im_id = im_user_store.list_im_identities(user.id)[0]["id"]
     # email is a Slack field, not Telegram — it must be dropped.
     im_user_store.update_im_identity(im_id, metadata={"username": "@bob", "email": "x@x.com"})
@@ -95,7 +92,7 @@ def test_update_identity_missing_raises(db):
 
 
 def test_delete_im_identity_audited(db):
-    user = im_user_store.get_or_create(_OWNER, "slack", "U1")
+    user = im_user_store.get_or_create("slack", "U1", "default")
     im_id = im_user_store.list_im_identities(user.id)[0]["id"]
     im_user_store.delete_im_identity(im_id, actor="admin1")
     assert im_user_store.get_im_user(im_id) is None
@@ -110,15 +107,15 @@ def test_delete_im_identity_missing_raises(db):
 
 def test_list_identities_merges_platforms(db):
     # Same internal user bound to two platforms (simulate by reusing user_id).
-    u = im_user_store.get_or_create(_OWNER, "slack", "M1")
+    u = im_user_store.get_or_create("slack", "M1", "default")
     import sqlite3
 
     with sqlite3.connect(db) as conn:
         conn.execute(
             "INSERT INTO im_users"
-            " (owner_id, platform, platform_user_id, user_id, allowed, created_at)"
-            " VALUES (?, 'telegram','M2',?,1,'2026-01-01')",
-            (_OWNER, u.id),
+            " (platform, platform_user_id, user_id, created_at)"
+            " VALUES ('telegram','M2',?,'2026-01-01')",
+            (u.id,),
         )
     identities = im_user_store.list_im_identities(u.id)
     platforms = {i["platform"] for i in identities}

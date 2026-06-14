@@ -20,4 +20,4 @@ def test_identity_store_is_crud_only_and_shim_drops_schema_helpers():
     assert "def _init_db" not in source
     assert "DB_PATH as DB_PATH" not in source
     assert "?" not in source
-    assert ":owner_id" in source
+    assert ":puid" in source

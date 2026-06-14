@@ -22,9 +22,7 @@ def db(tmp_path, monkeypatch):
 def test_block_user_cascade(db):
     u = user_store.create_web_user("a@x.com", "Alice")
     plaintext, _ = aks.issue_key(u.id)
-    im_user_store.get_or_create(
-        user_store.admin_owner_id(), "slack", "U1"
-    )  # creates User; bind not needed
+    im_user_store.get_or_create("slack", "U1", "default")  # creates User; bind not needed
     # bind the IM identity to the blocked user for the cascade test
     import sqlite3
 
@@ -37,10 +35,10 @@ def test_block_user_cascade(db):
     assert aks.resolve(plaintext) is None  # key revoked
     assert blocklist.is_registration_blocked("a@x.com") is True
     with sqlite3.connect(db) as conn:
-        allowed = conn.execute(
-            "SELECT allowed FROM im_users WHERE user_id = ?", (u.id,)
+        mapped = conn.execute(
+            "SELECT COUNT(*) FROM im_users WHERE user_id = ?", (u.id,)
         ).fetchone()[0]
-    assert allowed == 0
+    assert mapped == 1
     assert len(audit.search_audit(action="block_user", target_id=u.id)) == 1
 
 
