@@ -1,9 +1,0 @@
-id: kua-session-jiyi
-coverage:
-- memory-cross-session
-persona: 跨多次会话使用同一 agent 的老用户。
-goal: 在当前线程告诉 agent 一个稳定偏好(如「以后回答都用要点列表」)。随后在一个全新线程里提一个普通问题,看它是否仍记得该偏好。
-success_criteria: 新线程的回答体现了此前设定的长期偏好,说明跨 session 记忆生效。
-max_turns: 6
-channel: REPLACE_WITH_TEST_CHANNEL
-setup_hint: 测试 agent 需开启跨 session 记忆(memory_layer/记忆命名空间)。

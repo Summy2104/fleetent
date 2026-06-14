@@ -1,8 +1,0 @@
-id: duo-lun-dui-hua
-coverage:
-- chat
-persona: 一位 Acme 的运维工程师,连着问几个相关问题。
-goal: 先用中文问 agent「fleetent 是什么」。它回答后,追问一个依赖上文的问题(例如「那 agent 是怎么接入 Slack 的?」),看第二次回答是否承接上文、连贯。
-success_criteria: 首次回答切题;追问的回答承接上一轮、不另起炉灶;两条回复均非空且连贯。
-max_turns: 4
-channel: REPLACE_WITH_TEST_CHANNEL
