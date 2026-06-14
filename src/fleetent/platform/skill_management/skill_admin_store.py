@@ -1,14 +1,11 @@
 """Management-face persistence for Skill administration.
 
-Two concerns live here, both backed by the unified db runtime (named params, no ORM):
+The platform skill admin surface owns two management tables after migration 092:
 
-- ``agent_skills``: the Skill↔Agent enablement matrix used by the admin console.
-  The engine (``skill`` domain) reads this as the per-agent desired-disabled state;
-  this module only owns the management-side writes and reference-protection queries.
-- ``skill_provenance``: the managed (spec-owned) / adhoc (DB-only) badge plus the
-  ``drift`` flag and immutable-field set, used to coordinate with askit override flow.
+- ``skills``: the catalog/master metadata row keyed by skill name.
+- ``agent_skills``: the Skill↔Agent binding matrix plus per-agent deployment state.
 
-Schema lifecycle is owned by Alembic (migration 010); this module never creates tables.
+Schema lifecycle is owned by Alembic; this module never creates tables.
 """
 
 import datetime
@@ -16,7 +13,7 @@ import json
 from typing import Any
 
 from fleetent.config import Settings
-from fleetent.db import SQLiteDatabase, create_database
+from fleetent.db import SQLiteConnection, SQLiteDatabase, create_database
 
 
 def _database() -> SQLiteDatabase:
@@ -27,16 +24,62 @@ def _now() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat()
 
 
+def _ensure_skill_row(conn: SQLiteConnection, skill_name: str) -> None:
+    now = _now()
+    conn.execute(
+        """
+        INSERT INTO skills (
+            name, status, global_enabled, audit_verdict, audit_rules, forced, source,
+            immutable_fields, current_version, archived_at, created_at, updated_at
+        )
+        VALUES (
+            :skill_name, 'active', 1, NULL, NULL, 0, 'adhoc',
+            NULL, NULL, NULL, :created_at, :updated_at
+        )
+        ON CONFLICT(name) DO NOTHING
+        """,
+        {"skill_name": skill_name, "created_at": now, "updated_at": now},
+    )
+
+
+_STATE_DEFAULTS = {
+    "status": "active",
+    "global_enabled": 1,
+    "audit_verdict": None,
+    "audit_rules": None,
+    "forced": 0,
+    "archived_at": None,
+}
+
+
+def _state_row_default(skill_name: str) -> dict[str, Any]:
+    return {
+        "skill_name": skill_name,
+        "status": "active",
+        "global_enabled": 1,
+        "audit_verdict": None,
+        "audit_rules": None,
+        "forced": 0,
+        "archived_at": None,
+        "updated_at": None,
+    }
+
+
 # --- Skill ↔ Agent binding matrix ---------------------------------------------
 
 
 def set_binding(agent_id: int, skill_name: str, enabled: bool, updated_by: str | None) -> None:
     """Upsert the enablement of ``skill_name`` for ``agent_id`` (idempotent)."""
     with _database().transaction() as conn:
+        _ensure_skill_row(conn, skill_name)
         conn.execute(
             """
-            INSERT INTO agent_skills (agent_id, skill_name, enabled, updated_at, updated_by)
-            VALUES (:agent_id, :skill_name, :enabled, :updated_at, :updated_by)
+            INSERT INTO agent_skills (
+                agent_id, skill_name, enabled, updated_at, updated_by, base_version, drift, drift_at
+            )
+            VALUES (
+                :agent_id, :skill_name, :enabled, :updated_at, :updated_by, NULL, 0, NULL
+            )
             ON CONFLICT(agent_id, skill_name) DO UPDATE SET
                 enabled = excluded.enabled,
                 updated_at = excluded.updated_at,
@@ -57,8 +100,13 @@ def list_agents_for_skill(skill_name: str) -> list[dict[str, Any]]:
     return (
         _database()
         .execute(
-            "SELECT agent_id, skill_name, enabled, updated_at, updated_by "
-            "FROM agent_skills WHERE skill_name = :skill_name ORDER BY agent_id",
+            """
+            SELECT
+                agent_id, skill_name, enabled, updated_at, updated_by, base_version, drift, drift_at
+            FROM agent_skills
+            WHERE skill_name = :skill_name
+            ORDER BY agent_id
+            """,
             {"skill_name": skill_name},
         )
         .fetchall()
@@ -70,8 +118,13 @@ def list_skills_for_agent(agent_id: int) -> list[dict[str, Any]]:
     return (
         _database()
         .execute(
-            "SELECT agent_id, skill_name, enabled, updated_at, updated_by "
-            "FROM agent_skills WHERE agent_id = :agent_id ORDER BY skill_name",
+            """
+            SELECT
+                agent_id, skill_name, enabled, updated_at, updated_by, base_version, drift, drift_at
+            FROM agent_skills
+            WHERE agent_id = :agent_id
+            ORDER BY skill_name
+            """,
             {"agent_id": agent_id},
         )
         .fetchall()
@@ -109,32 +162,35 @@ def agents_enabling(skill_name: str) -> list[int]:
     rows = (
         _database()
         .execute(
-            "SELECT agent_id FROM agent_skills "
-            "WHERE skill_name = :skill_name AND enabled = 1 ORDER BY agent_id",
+            """
+            SELECT agent_id
+            FROM agent_skills
+            WHERE skill_name = :skill_name AND enabled = 1
+            ORDER BY agent_id
+            """,
             {"skill_name": skill_name},
         )
         .fetchall()
     )
-    return [r["agent_id"] for r in rows]
+    return [int(r["agent_id"]) for r in rows]
 
 
-# --- Provenance (managed / adhoc) + drift -------------------------------------
+# --- Catalog metadata ---------------------------------------------------------
 
 
-def set_provenance(skill_name: str, source: str, immutable_fields: list[str] | None = None) -> None:
-    """Record the managed/adhoc source (and optional immutable field set) for a skill."""
+def set_source(skill_name: str, source: str, immutable_fields: list[str] | None = None) -> None:
+    """Record the catalog source and immutable field set for a skill."""
     if source not in {"managed", "adhoc"}:
-        raise ValueError(f"unknown provenance source: {source}")
+        raise ValueError(f"unknown source: {source}")
     with _database().transaction() as conn:
+        _ensure_skill_row(conn, skill_name)
         conn.execute(
             """
-            INSERT INTO skill_provenance
-                (skill_name, source, drift, immutable_fields, updated_at)
-            VALUES (:skill_name, :source, 0, :immutable_fields, :updated_at)
-            ON CONFLICT(skill_name) DO UPDATE SET
-                source = excluded.source,
-                immutable_fields = excluded.immutable_fields,
-                updated_at = excluded.updated_at
+            UPDATE skills
+            SET source = :source,
+                immutable_fields = :immutable_fields,
+                updated_at = :updated_at
+            WHERE name = :skill_name
             """,
             {
                 "skill_name": skill_name,
@@ -145,13 +201,16 @@ def set_provenance(skill_name: str, source: str, immutable_fields: list[str] | N
         )
 
 
-def get_provenance(skill_name: str) -> dict[str, Any]:
-    """Return provenance for a skill; skills with no row default to adhoc/no-drift."""
+def get_source(skill_name: str) -> dict[str, Any]:
+    """Return catalog source/current_version metadata for a skill."""
     row = (
         _database()
         .execute(
-            "SELECT skill_name, source, drift, immutable_fields, last_deploy_at, updated_at "
-            "FROM skill_provenance WHERE skill_name = :skill_name",
+            """
+            SELECT name AS skill_name, source, immutable_fields, current_version
+            FROM skills
+            WHERE name = :skill_name
+            """,
             {"skill_name": skill_name},
         )
         .fetchone()
@@ -160,45 +219,105 @@ def get_provenance(skill_name: str) -> dict[str, Any]:
         return {
             "skill_name": skill_name,
             "source": "adhoc",
-            "drift": 0,
             "immutable_fields": None,
-            "last_deploy_at": None,
-            "updated_at": None,
+            "current_version": None,
         }
     return row
 
 
-def mark_drift(skill_name: str) -> None:
-    """Flag a managed skill as drifted because the UI changed it out-of-band."""
-    _set_drift(skill_name, 1)
-
-
-def clear_drift(skill_name: str) -> None:
-    """Clear the drift flag (after promote/discard reconciles the skill)."""
-    _set_drift(skill_name, 0)
-
-
-def _set_drift(skill_name: str, value: int) -> None:
+def ensure_catalog_entries(skill_names: list[str]) -> None:
+    """Ensure the skills catalog has rows for every listed skill."""
     with _database().transaction() as conn:
+        for skill_name in skill_names:
+            _ensure_skill_row(conn, skill_name)
+
+
+# --- Per-agent deployment state ----------------------------------------------
+
+
+def set_drift(agent_id: int, skill_name: str, *, drifted: bool) -> None:
+    """Record whether an agent's deployed copy has drifted from the pool copy."""
+    with _database().transaction() as conn:
+        now = _now()
         conn.execute(
             """
-            INSERT INTO skill_provenance (skill_name, source, drift, updated_at)
-            VALUES (:skill_name, 'adhoc', :drift, :updated_at)
-            ON CONFLICT(skill_name) DO UPDATE SET
-                drift = :drift,
+            UPDATE agent_skills
+            SET drift = :drift,
+                drift_at = :drift_at,
                 updated_at = :updated_at
+            WHERE agent_id = :agent_id AND skill_name = :skill_name
             """,
-            {"skill_name": skill_name, "drift": value, "updated_at": _now()},
+            {
+                "agent_id": agent_id,
+                "skill_name": skill_name,
+                "drift": 1 if drifted else 0,
+                "drift_at": now if drifted else None,
+                "updated_at": now,
+            },
         )
 
 
-def is_immutable_change(skill_name: str, changed_fields: set[str]) -> bool:
-    """True when a managed skill's edit touches any field declared immutable."""
-    prov = get_provenance(skill_name)
-    if prov["source"] != "managed" or not prov["immutable_fields"]:
-        return False
-    immutable = set(json.loads(prov["immutable_fields"]))
-    return bool(immutable & changed_fields)
+def get_drift(agent_id: int, skill_name: str) -> dict[str, Any]:
+    """Return per-agent drift/base_version state for a bound skill."""
+    row = (
+        _database()
+        .execute(
+            """
+            SELECT agent_id, skill_name, base_version, drift, drift_at
+            FROM agent_skills
+            WHERE agent_id = :agent_id AND skill_name = :skill_name
+            """,
+            {"agent_id": agent_id, "skill_name": skill_name},
+        )
+        .fetchone()
+    )
+    if row is None:
+        return {
+            "agent_id": agent_id,
+            "skill_name": skill_name,
+            "base_version": None,
+            "drift": 0,
+            "drift_at": None,
+        }
+    return row
+
+
+def set_base_version(agent_id: int, skill_name: str, base_version: str | None) -> None:
+    """Persist the pool version an agent copy was last materialized from."""
+    with _database().transaction() as conn:
+        now = _now()
+        conn.execute(
+            """
+            UPDATE agent_skills
+            SET base_version = :base_version,
+                updated_at = :updated_at
+            WHERE agent_id = :agent_id AND skill_name = :skill_name
+            """,
+            {
+                "agent_id": agent_id,
+                "skill_name": skill_name,
+                "base_version": base_version,
+                "updated_at": now,
+            },
+        )
+
+
+def drifted_agents(skill_name: str) -> list[int]:
+    """Return agent ids whose deployed skill copy is marked drifted."""
+    rows = (
+        _database()
+        .execute(
+            """
+            SELECT agent_id
+            FROM agent_skills
+            WHERE skill_name = :skill_name AND drift = 1
+            ORDER BY agent_id
+            """,
+            {"skill_name": skill_name},
+        )
+        .fetchall()
+    )
+    return [int(row["agent_id"]) for row in rows]
 
 
 # --- Management state (status / global enablement / audit verdict / forced) ---
@@ -209,36 +328,35 @@ def get_state(skill_name: str) -> dict[str, Any]:
     row = (
         _database()
         .execute(
-            "SELECT skill_name, status, global_enabled, audit_verdict, audit_rules, "
-            "forced, archived_at, updated_at FROM skill_admin_state "
-            "WHERE skill_name = :skill_name",
+            """
+            SELECT
+                name AS skill_name,
+                status,
+                global_enabled,
+                audit_verdict,
+                audit_rules,
+                forced,
+                archived_at,
+                updated_at
+            FROM skills
+            WHERE name = :skill_name
+            """,
             {"skill_name": skill_name},
         )
         .fetchone()
     )
-    if row is None:
-        return {
-            "skill_name": skill_name,
-            "status": "active",
-            "global_enabled": 1,
-            "audit_verdict": None,
-            "audit_rules": None,
-            "forced": 0,
-            "archived_at": None,
-            "updated_at": None,
-        }
-    return row
+    return row if row is not None else _state_row_default(skill_name)
 
 
 def list_states(include_archived: bool = False) -> list[dict[str, Any]]:
-    """Return all management-state rows; archived excluded unless asked."""
+    """Return all catalog-state rows; archived excluded unless asked."""
     sql = (
-        "SELECT skill_name, status, global_enabled, audit_verdict, audit_rules, "
-        "forced, archived_at, updated_at FROM skill_admin_state"
+        "SELECT name AS skill_name, status, global_enabled, audit_verdict, audit_rules, "
+        "forced, archived_at, updated_at FROM skills"
     )
     if not include_archived:
         sql += " WHERE status != 'archived'"
-    return _database().execute(sql + " ORDER BY skill_name").fetchall()
+    return _database().execute(sql + " ORDER BY name").fetchall()
 
 
 def set_audit_result(skill_name: str, verdict: str, rules: list[str] | None = None) -> None:
@@ -268,28 +386,31 @@ def set_forced(skill_name: str, forced: bool) -> None:
     _upsert_state(skill_name, {"forced": 1 if forced else 0})
 
 
-_STATE_DEFAULTS = {
-    "status": "active",
-    "global_enabled": 1,
-    "audit_verdict": None,
-    "audit_rules": None,
-    "forced": 0,
-    "archived_at": None,
-}
-
-
 def _upsert_state(skill_name: str, fields: dict[str, Any]) -> None:
-    merged = {**_STATE_DEFAULTS, **fields, "skill_name": skill_name, "updated_at": _now()}
-    assignments = ", ".join(f"{k} = :{k}" for k in fields)
+    merged = {
+        **_STATE_DEFAULTS,
+        "source": "adhoc",
+        "immutable_fields": None,
+        "current_version": None,
+        "created_at": _now(),
+        **fields,
+        "skill_name": skill_name,
+        "updated_at": _now(),
+    }
+    assignments = ", ".join(f"{key} = :{key}" for key in fields)
     with _database().transaction() as conn:
         conn.execute(
             f"""
-            INSERT INTO skill_admin_state
-                (skill_name, status, global_enabled, audit_verdict, audit_rules,
-                 forced, archived_at, updated_at)
-            VALUES (:skill_name, :status, :global_enabled, :audit_verdict, :audit_rules,
-                    :forced, :archived_at, :updated_at)
-            ON CONFLICT(skill_name) DO UPDATE SET {assignments}, updated_at = :updated_at
+            INSERT INTO skills (
+                name, status, global_enabled, audit_verdict, audit_rules, forced, source,
+                immutable_fields, current_version, archived_at, created_at, updated_at
+            )
+            VALUES (
+                :skill_name, :status, :global_enabled, :audit_verdict, :audit_rules,
+                :forced, :source,
+                :immutable_fields, :current_version, :archived_at, :created_at, :updated_at
+            )
+            ON CONFLICT(name) DO UPDATE SET {assignments}, updated_at = :updated_at
             """,
             merged,
         )
@@ -299,13 +420,7 @@ def _upsert_state(skill_name: str, fields: dict[str, Any]) -> None:
 
 
 def observe(skill_name: str) -> dict[str, Any]:
-    """Per-skill observability from the agent-side trace: hit count + deduped sessions.
-
-    Reads ``skill_hit`` trace events written by the agent runtime to observability, rather
-    than a platform-owned table — honoring the agent->platform data-flow direction (the
-    platform reads agent products; the agent never writes platform tables). ``stale`` is
-    False because this is live data.
-    """
+    """Per-skill observability from the agent-side trace: hit count + deduped sessions."""
     from fleetent.observability.traces import TraceQuery, query_trace_events
 
     hits = 0

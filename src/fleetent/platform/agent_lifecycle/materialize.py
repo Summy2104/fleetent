@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import shutil
 import sqlite3
+from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -472,11 +473,51 @@ def write_home(
         source_agent=source_agent,
         exclude_existing=_knowledge_env_var_names(knowledge_config),
     )
-    _copy_skills(home)
+    _copy_skills(home, source_agent=source_agent)
     return home
 
 
-def _copy_skills(home: Path) -> None:
+def _skill_dir_version(skill_dir: Path) -> str:
+    """Stable content hash for one skill directory."""
+    digest = sha256()
+    for path in sorted(p for p in skill_dir.rglob("*") if p.is_file()):
+        digest.update(path.relative_to(skill_dir).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _skill_has_runtime_provenance(skill_dir: Path) -> bool:
+    skill_md = skill_dir / "SKILL.md"
+    if not skill_md.is_file():
+        return False
+    frontmatter: dict[str, Any] = (
+        skill_registry._parse_frontmatter(skill_md.read_text(encoding="utf-8")) or {}
+    )
+    return bool(frontmatter.get("proposal_id") or frontmatter.get("applied_at"))
+
+
+def _is_skill_drifted(
+    *,
+    agent_id: int,
+    skill_name: str,
+    src_skill_dir: Path,
+    dest_skill_dir: Path,
+) -> bool:
+    if not dest_skill_dir.exists():
+        return False
+    if _skill_has_runtime_provenance(dest_skill_dir):
+        return True
+    state = skill_admin_store.get_drift(agent_id, skill_name)
+    current_version = _skill_dir_version(dest_skill_dir)
+    base_version = state["base_version"]
+    if isinstance(base_version, str) and base_version:
+        return current_version != base_version
+    return current_version != _skill_dir_version(src_skill_dir)
+
+
+def _copy_skills(home: Path, *, source_agent: agent_store.Agent | None = None) -> None:
     """Mirror the platform's global skills dir into ``<home>/skills/``.
 
     Makes the agent home self-contained (the agent process reads only its own home).
@@ -487,7 +528,36 @@ def _copy_skills(home: Path) -> None:
     src = Path(skill_registry._resolve_skills_dir(None))
     if not src.exists():
         return
-    try:
-        shutil.copytree(src, home / "skills", dirs_exist_ok=True)
-    except OSError as exc:
-        _logger.warn("agent_home_skill_copy_failed", path=str(src), error=str(exc))
+    dest_root = home / "skills"
+    dest_root.mkdir(parents=True, exist_ok=True)
+    for skill_dir in sorted(p for p in src.iterdir() if p.is_dir()):
+        dest_skill_dir = dest_root / skill_dir.name
+        try:
+            if source_agent is not None:
+                drifted = _is_skill_drifted(
+                    agent_id=source_agent.id,
+                    skill_name=skill_dir.name,
+                    src_skill_dir=skill_dir,
+                    dest_skill_dir=dest_skill_dir,
+                )
+                skill_admin_store.set_drift(source_agent.id, skill_dir.name, drifted=drifted)
+                if drifted:
+                    _logger.info(
+                        "agent_home_skill_copy_skipped_drift",
+                        agent=source_agent.name,
+                        skill=skill_dir.name,
+                        path=str(dest_skill_dir),
+                    )
+                    continue
+
+            if dest_skill_dir.exists():
+                shutil.rmtree(dest_skill_dir)
+            shutil.copytree(skill_dir, dest_skill_dir)
+
+            if source_agent is not None:
+                skill_admin_store.set_base_version(
+                    source_agent.id, skill_dir.name, _skill_dir_version(skill_dir)
+                )
+                skill_admin_store.set_drift(source_agent.id, skill_dir.name, drifted=False)
+        except OSError as exc:
+            _logger.warn("agent_home_skill_copy_failed", path=str(skill_dir), error=str(exc))

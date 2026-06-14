@@ -4,16 +4,20 @@
 TBD - created by archiving change 2026-06-02-skill-management. Update Purpose after archive.
 ## Requirements
 ### Requirement: Skill list and search
-The system SHALL expose `GET /admin/skills` returning all skills with name, one-line description, tags/platforms, enablement state (globally enabled / globally disabled / archived), latest security-audit verdict (pass / suspicious / rejected), cumulative injection hits, last-triggered time, and which agents enable it. The list SHALL support search and sort by name, tag, state, and audit verdict.
+The system SHALL expose `GET /admin/skills` returning all skills with name, one-line description, tags/platforms, enablement state (globally enabled / globally disabled / archived), latest security-audit verdict (pass / suspicious / rejected), cumulative injection hits, last-triggered time, and which agents enable it. Each entry SHALL also include the provenance `source` (read from the `skills` master row) and a **per-agent drift summary** (e.g. the count or list of agents whose deployed copy has `drift=1`), replacing any per-skill drift flag. The list SHALL support search and sort by name, tag, state, and audit verdict.
 
 #### Scenario: List returns skill metadata
 - **WHEN** an admin or viewer sends `GET /admin/skills`
-- **THEN** the response is a JSON array where each entry contains name, description, tags, platforms, enablement state, audit verdict, injection hit count, last-triggered time, and enabling agents
+- **THEN** the response is a JSON array where each entry contains name, description, tags, platforms, enablement state, audit verdict, injection hit count, last-triggered time, enabling agents, provenance `source`, and a per-agent drift summary
 - **AND** archived skills are excluded by default
 
 #### Scenario: Search by audit verdict
 - **WHEN** `GET /admin/skills?audit=suspicious` is sent
 - **THEN** only skills whose latest audit verdict is `suspicious` are returned
+
+#### Scenario: Drift summary reflects per-agent state
+- **WHEN** skill "crm-ops" is drifted on agent "support-bot" but not on others, and `GET /admin/skills` is sent
+- **THEN** "crm-ops" entry's drift summary reports exactly the drifted agent(s), not a single per-skill flag
 
 ### Requirement: Upload or create with frontmatter validation and audit gating
 The system SHALL expose `POST /admin/skills` to upload a `SKILL.md` (or a directory package with scripts/templates) or create one inline. Before publishing, the system SHALL validate the YAML frontmatter and invoke the skill domain's security audit, then gate the outcome by verdict: a `rejected` verdict SHALL NOT publish and SHALL quarantine the skill; a `suspicious` verdict SHALL publish with a list mark; a `pass` verdict SHALL publish. Publishing SHALL trigger a hot reload.
@@ -120,7 +124,6 @@ Upload / edit / enable-disable / archive / per-agent assignment / proposal revie
 - **WHEN** 全量 re-materialize 过程中某个 agent 导出失败（如缺 provider 配置）
 - **THEN** 该失败被记录为结构化告警，接口仍返回成功，其余 agent 正常刷新
 
-
 ### Requirement: Skill 命中追踪提供真实 observability 数据
 
 每次 `read_skill` 成功加载一个 skill 的全文 MUST 记录一条命中（skill 名、可得的 agent / session、时间戳）到持久化存储。per-skill observability 查询 MUST 据此返回真实数据——命中计数与触发它的去重 session 列表，且 `stale` MUST 为假——而非固定的空占位符。
@@ -142,3 +145,4 @@ Upload / edit / enable-disable / archive / per-agent assignment / proposal revie
 #### Scenario: 拒绝与未知名不记命中
 - **WHEN** `read_skill` 因 audit_blocked 被拒，或因未知 skill 名返回错误
 - **THEN** 不记录命中
+

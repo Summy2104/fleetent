@@ -127,7 +127,33 @@ def test_upload_invalid_frontmatter_422(client):
     assert store.get_state("s")["audit_verdict"] is None  # not persisted
 
 
-# --- edit re-audit + reload + drift ------------------------------------------
+# --- list / edit / source pipeline -------------------------------------------
+
+
+def test_list_reports_source_and_per_agent_drift_summary(client, monkeypatch):
+    monkeypatch.setattr(
+        api,
+        "engine_list_skills",
+        lambda: [
+            {"name": "crm-ops", "description": "CRM ops"},
+            {"name": "billing", "description": "Billing"},
+        ],
+    )
+    agent = agent_store.create_agent("support", "Prompt.", ["shell"])
+    store.set_binding(agent.id, "crm-ops", enabled=True, updated_by="admin")
+    store.set_binding(agent.id, "billing", enabled=True, updated_by="admin")
+    store.set_source("crm-ops", "managed")
+    store.set_drift(agent.id, "crm-ops", drifted=True)
+    token, _ = _session_for("viewer")
+
+    rows = client.get("/admin/skills", headers=_hdr(token)).json()
+    crm = next(row for row in rows if row["name"] == "crm-ops")
+    billing = next(row for row in rows if row["name"] == "billing")
+
+    assert crm["source"] == "managed"
+    assert crm["drifted_agents"] == [agent.id]
+    assert "drift" not in crm
+    assert billing["drifted_agents"] == []
 
 
 def test_edit_reaudits_and_reloads(client, monkeypatch):
@@ -146,12 +172,48 @@ def test_edit_reaudits_and_reloads(client, monkeypatch):
     assert calls["audit"] == 1 and calls["reload"] == 1
 
 
-def test_edit_managed_marks_drift(client, monkeypatch):
-    store.set_provenance("s", "managed")
+def test_edit_does_not_return_immutable_warning_or_per_skill_drift(client, monkeypatch):
+    store.set_source("s", "managed", immutable_fields=["name"])
     token, _ = _session_for("admin")
     r = client.put("/admin/skills/s", headers=_hdr(token), json={"content": _VALID})
-    assert r.json()["drift"] is True
-    assert store.get_provenance("s")["drift"] == 1
+    assert "immutable_warning" not in r.json()
+    assert "drift" not in r.json()
+
+
+def test_create_and_import_write_source_to_skills_master(client, tmp_path, monkeypatch):
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    monkeypatch.setattr(api, "engine_skills_dir", lambda: str(skills_dir))
+    token, _ = _session_for("admin")
+
+    created = client.post(
+        "/admin/skills",
+        headers=_hdr(token),
+        json={
+            "name": "created",
+            "content": _VALID.replace("name: s", "name: created"),
+            "source": "managed",
+        },
+    )
+    assert created.status_code == 200
+    assert store.get_source("created")["source"] == "managed"
+
+    files = [("files", ("alpha/SKILL.md", b"---\nname: alpha\ndescription: d\n---\nbody"))]
+    imported = client.post(
+        "/admin/skills/import/upload",
+        headers=_hdr(token),
+        files=files,
+        data={"source": "managed"},
+    )
+    assert imported.status_code == 200
+    assert store.get_source("alpha")["source"] == "managed"
+
+
+def test_provenance_promote_discard_endpoints_removed(client):
+    token, _ = _session_for("admin")
+    promoted = client.post("/admin/skills/s/provenance/promote", headers=_hdr(token, confirm=True))
+    assert promoted.status_code == 404
+    assert client.post("/admin/skills/s/provenance/discard", headers=_hdr(token)).status_code == 404
 
 
 # --- global enable / disable (场景 50) ---------------------------------------
