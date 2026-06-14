@@ -101,7 +101,7 @@ Routing resolution SHALL reject new sessions for agents whose `status` is `disab
 
 ### Requirement: Agent hard deletion
 
-The store SHALL expose `agent_store.delete_agent(name)` that removes the agent and all its dependent rows in a single transaction. With FK ON DELETE CASCADE on every agent-referencing table (identity-model 阶段 4), deleting the `agents` row cascades to versions / bindings / satellites with no orphans; the store additionally clears `agent_mcp_servers` and `agent_oauth_bindings` rows and nulls `active_version_id` before deleting `agent_versions` rows and the `agents` row (FK-safe order). It SHALL return a boolean: `True` when a row was deleted, `False` when no agent with that name exists. SQL SHALL use named parameters and go through the store boundary; no ORM.
+The store SHALL expose `agent_store.delete_agent(name)` that removes the agent and all its dependent rows in a single transaction. Every agent-referencing table carries FK→agents.id ON DELETE CASCADE (identity-model 阶段 2–4，含 binding 表 `agent_mcp_servers` / `agent_oauth_bindings`)，so the store resolves the agent id by name and issues a single `DELETE FROM agents`; the cascade removes all versions / bindings / satellites with no orphans and no manual child deletes. It SHALL return a boolean: `True` when a row was deleted, `False` when no agent with that name exists. SQL SHALL use named parameters and go through the store boundary; no ORM.
 
 #### Scenario: Delete removes agents and agent_versions rows
 
@@ -154,7 +154,7 @@ and CLI) are unchanged; the file is the runtime artifact generated from them.
 - **THEN** runtime resolution returns no snapshot and the request proceeds as a bare run
 
 ### Requirement: Agent 绑定表声明 agents.id 外键与级联
-平台侧引用 agent 的从属/绑定表 SHALL 以 `agent_id`（INTEGER，= `agents.id`）声明 FK→`agents.id` ON DELETE CASCADE，使 agent 删除时其全部绑定/从属行由约束级联清理（不依赖应用层手工清理）。覆盖：`user_agents`、`channel_agents`、`agent_versions`、`mcp_servers`（正名后的 MCP 注册表）、`agent_secrets`（以及阶段 2/3 已处理的 `agent_kbs`、`agent_skills`、`agent_admin_state`、`session_meta`，与已带 FK 的 `agent_mcp_servers` 绑定表、`agent_oauth_bindings`）。例外：`connectors.agent_id` 为休眠列（运行路径未写入），不在本约束内，待真实接入再规整。
+平台侧引用 agent 的从属/绑定表 SHALL 以 `agent_id`（INTEGER，= `agents.id`）声明 FK→`agents.id` ON DELETE CASCADE，使 agent 删除时其全部绑定/从属行由约束级联清理（不依赖应用层手工清理）。覆盖：`user_agents`、`channel_agents`、`agent_versions`、`mcp_servers`（正名后的 MCP 注册表）、`agent_secrets`、`agent_mcp_servers`（MCP 绑定表）、`agent_oauth_bindings`（OAuth 绑定表），以及阶段 2/3 已处理的 `agent_kbs`、`agent_skills`、`agent_admin_state`、`session_meta`——**全部 agent 引用表无一例外均 CASCADE**。例外：`connectors.agent_id` 为休眠列（运行路径未写入），不在本约束内，待真实接入再规整。
 
 #### Scenario: 五表均带 agents.id FK
 - **WHEN** 管理库迁移运行到最新版本

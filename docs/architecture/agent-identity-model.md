@@ -57,7 +57,7 @@ rename = 改 `agents.name` 一行（全系统唯一存 name 处）→ 平台 FK 
 | `agent_admin_state` | 主键 = `agent_name` | 主键/键 → `agent_id` + FK | 经 agents 解析 name→id 重建 |
 | `session_meta` | `agent_name` 列 | `agent_id` 列 + FK | 经 agents 解析 name→id；`user_id` 列不动（用户身份，不在本范围） |
 | `user_agents` / `channel_agents` / `agent_versions` / `mcp_servers`（原 `agent_mcp_servers`，见下「MCP 表改名」） / `agent_secrets` | 已 INTEGER id、**无 FK** | 补 FK→agents.id ON DELETE CASCADE | 无值变更，仅加约束（FK 已全局启用，见 data-model §2） |
-| `agent_mcp_servers`（原 `agent_mcp_server_bindings`，见下「MCP 表改名」） / `agent_oauth_bindings` | 已 INTEGER + 已有 FK | 改名（FK 不变） | — |
+| `agent_mcp_servers`（原 `agent_mcp_server_bindings`，见下「MCP 表改名」） / `agent_oauth_bindings` | 已 INTEGER、FK 为裸 NO-ACTION（阶段 4 漏判"已有 FK"=够） | 阶段 4 后补迁移（085）把 FK 升级为 **ON DELETE CASCADE**——与其它绑定表一致、delete_agent 退化为单条 `DELETE FROM agents` | 无值变更，batch 重建加 cascade |
 | `connectors.agent_id` | INTEGER、休眠列（never written） | 维持现状（休眠），**不强加 FK**；文档注明 | — |
 
 > **MCP 表改名（阶段 4 并入，方案 A）**：当前两张 MCP 表命名与 skills/kbs 不一致、且角色反着——`agent_mcp_servers` 其实是**定义/注册表**（存 transport/url/auth，含全局 `agent_id=NULL` 行），却长得像绑定表；真正的绑定是 `agent_mcp_server_bindings`。阶段 4 一并正名，对齐 `agent_skills`/`agent_kbs`（绑定 = `agent_<物>`）与 `connectors`（注册表无 `agent_` 前缀）两条既有惯例：
