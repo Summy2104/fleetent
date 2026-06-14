@@ -36,8 +36,8 @@
 
 ## 3. fence 双根与 file 工具
 
-- [ ] 3.1 测试：file 工具 path 解析双根（相对→/workspace 不变；`/exchange` 本 scope 放行/跨 scope 拒绝/同路径跨 scope 不串味/未登记拒绝；其余越界拒绝语义不变）——integration，先红
-- [ ] 3.2 实现：`file_sandbox_io` 围栏扩双根，read/write/edit/search 接入 `artifact_exchange.resolve`——绿
+- [x] 3.1 测试：file 工具 path 解析双根（相对→/workspace 不变；`/exchange` 本 scope 放行/跨 scope 拒绝/同路径跨 scope 不串味/未登记拒绝；其余越界拒绝语义不变）——integration，先红
+- [x] 3.2 实现：`file_sandbox_io` 围栏扩双根，read/write/edit/search 接入 `artifact_exchange.resolve`——绿
 
 ## 4. 沙箱归属视图
 

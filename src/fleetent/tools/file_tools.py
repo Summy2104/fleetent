@@ -354,6 +354,83 @@ class _HostBackend:
         return _py_files(pattern, root, max_results)
 
 
+def _is_exchange_path(path: str) -> bool:
+    """Whether a tool path targets the /exchange second root (vs the /workspace root)."""
+    from fleetent.artifact_exchange import EXCHANGE_ROOT
+
+    norm = path if path.startswith("/") else "/" + path
+    return norm == EXCHANGE_ROOT or norm.startswith(EXCHANGE_ROOT + "/")
+
+
+@dataclass
+class _ExchangeHostBackend:
+    """File IO on a /exchange artifact, resolved + attribution-checked per path.
+
+    /exchange artifacts are host files (an MCP server's products); they are read host-side
+    regardless of the workspace backend. Each path resolves through
+    ``artifact_exchange.resolve`` which enforces D0 attribution (own scope_key only, unless
+    the call already passed the permission gate → ``approved``). A resolution failure raises
+    ``ExchangeResolutionError`` (a ``ValueError``) which the tools surface as an error.
+    """
+
+    scope_key: str | None
+    approved: bool = False
+
+    def _resolve(self, path: str) -> Path:
+        from fleetent import artifact_exchange
+
+        return artifact_exchange.resolve(path, self.scope_key, approved=self.approved)
+
+    async def probe(self, path: str) -> _Stat:
+        p = self._resolve(path)
+        if p.is_dir():
+            return _Stat("dir")
+        if p.is_file():
+            return _Stat("file", p.stat().st_size)
+        if p.exists():
+            return _Stat("other")
+        return _Stat("missing")
+
+    async def read_bytes(self, path: str) -> bytes:
+        try:
+            return self._resolve(path).read_bytes()
+        except OSError as exc:
+            raise _BackendError(str(exc)) from exc
+
+    async def list_dir(self, path: str) -> list[_DirEntry]:
+        # /exchange addresses individual registered artifacts, not browsable directories.
+        raise _BackendError("/exchange 路径指向具体工件，不支持目录列举")
+
+    async def write_bytes(self, path: str, data: bytes) -> None:
+        try:
+            self._resolve(path).write_bytes(data)
+        except OSError as exc:
+            raise _BackendError(str(exc)) from exc
+
+    async def search_content(self, pattern: str, path: str, include: str, max_results: int) -> str:
+        target = str(self._resolve(path))
+        if _RG_BIN:
+            return _rg_search(pattern, target, include, max_results)
+        return _py_search(pattern, target, include, max_results)
+
+    async def search_files(self, pattern: str, path: str, max_results: int) -> str:
+        target = str(self._resolve(path))
+        if _RG_BIN:
+            return _rg_files(pattern, target, max_results)
+        return _py_files(pattern, target, max_results)
+
+
+async def _resolve_backend(
+    path: str, tool_context: ToolContext | None, *, approved: bool = False
+) -> _ContainerBackend | _HostBackend | _ExchangeHostBackend:
+    """Pick the backend for a tool path: the /exchange host backend for the second root,
+    else the workspace backend (container, or host fence on docker-unavailable degrade)."""
+    if _is_exchange_path(path):
+        scope_key = tool_context.scope_key if tool_context else None
+        return _ExchangeHostBackend(scope_key=scope_key, approved=approved)
+    return await _select_backend(tool_context)
+
+
 async def _select_backend(tool_context: ToolContext | None) -> _ContainerBackend | _HostBackend:
     """Pick the container backend when the sandbox is usable, else the host fence.
 
@@ -406,7 +483,7 @@ async def read_file(
     offset+limit) with line-number prefixes. For directories: a listing sorted by
     mtime (newest first). Binary files are detected and rejected.
     """
-    backend = await _select_backend(tool_context)
+    backend = await _resolve_backend(path, tool_context)
     try:
         stat = await backend.probe(path)
     except ValueError as exc:  # path escapes the workspace
@@ -470,7 +547,7 @@ async def write_file(
     Runs inside the sandbox container (content streamed over stdin) or the host fence
     when docker is unavailable; the path is locked to the workspace.
     """
-    backend = await _select_backend(tool_context)
+    backend = await _resolve_backend(path, tool_context)
     data = content.encode("utf-8")
     try:
         await backend.write_bytes(path, data)
@@ -620,7 +697,7 @@ async def edit_file(
     (exact → line trim → whitespace → line-ending → indentation → context anchor), then
     writes the result back through the backend. Returns which layer matched.
     """
-    backend = await _select_backend(tool_context)
+    backend = await _resolve_backend(path, tool_context)
     try:
         stat = await backend.probe(path)
     except ValueError as exc:  # path escapes the workspace
@@ -700,7 +777,7 @@ async def search_content(
     (ripgrep/Python fallback) when docker is unavailable. The search root is locked to
     the workspace, so it can never scan host paths outside it.
     """
-    backend = await _select_backend(tool_context)
+    backend = await _resolve_backend(path, tool_context)
     try:
         return await backend.search_content(pattern, path, include, max_results)
     except ValueError as exc:  # path escapes the workspace
@@ -789,7 +866,7 @@ async def search_files(
     Runs inside the sandbox container (find) locked to the workspace, or the host fence
     (ripgrep/Python fallback) when docker is unavailable.
     """
-    backend = await _select_backend(tool_context)
+    backend = await _resolve_backend(path, tool_context)
     try:
         return await backend.search_files(pattern, path, max_results)
     except ValueError as exc:  # path escapes the workspace
