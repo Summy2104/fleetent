@@ -8,6 +8,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import fleetent.agent_store as agent_store
 import fleetent.auth as auth
 import fleetent.governance.audit_log as audit
 import fleetent.platform.chat_management.chat_admin_api as api
@@ -22,6 +23,8 @@ def client(tmp_path, monkeypatch):
     apply_migrations(db_path)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    agent_store.create_agent("ops", "Ops.", ["shell"])
+    agent_store.create_agent("qa", "QA.", ["shell"])
     monkeypatch.setattr(api, "load_transcript", lambda sid: [])
     monkeypatch.setattr(api, "clear_session", lambda sid: None)
     monkeypatch.setattr(api, "inject", lambda sid, role, content: None)
@@ -31,7 +34,7 @@ def client(tmp_path, monkeypatch):
 
 
 def _session_for(role: str) -> tuple[str, str]:
-    u = user_store.create_user(f"{role}-user")
+    u, _ = user_store.create_user(f"{role}-user")
     user_store.set_role(u.id, role)
     return auth.create_session(u.id), u.id
 
@@ -47,11 +50,14 @@ def _hdr(token: str, confirm: bool = False) -> dict:
 
 
 def test_playground_start_isolated(client):
+    ops = agent_store.get_by_name("ops")
+    assert ops is not None
     token, _ = _session_for("admin")
     r = client.post("/admin/chat/start", headers=_hdr(token), json={"agent_name": "ops"})
     assert r.status_code == 200
     sid = r.json()["session_id"]
     assert r.json()["origin"] == "playground"
+    assert store.get_meta(sid)["agent_id"] == ops.id
     # not listed among real sessions
     real = client.get("/admin/sessions", headers=_hdr(token)).json()
     assert sid not in {m["session_id"] for m in real}
@@ -90,6 +96,8 @@ def test_overrides_are_request_scoped(client, monkeypatch):  # 场景 98 (覆盖
             seen.append((sid, overrides)) or {"reply": "", "events": []}
         ),
     )
+    ops = agent_store.get_by_name("ops")
+    assert ops is not None
     token, _ = _session_for("admin")
     a = client.post("/admin/chat/start", headers=_hdr(token), json={"agent_name": "ops"}).json()[
         "session_id"
@@ -107,6 +115,7 @@ def test_overrides_are_request_scoped(client, monkeypatch):  # 场景 98 (覆盖
     assert by_sid[a] == {"model": "x"}
     assert by_sid[b] is None  # other session unaffected by A's override
     # agent definition metadata is untouched by request-level overrides
+    assert store.get_meta(a)["agent_id"] == ops.id
     assert store.get_meta(a)["agent_name"] == "ops"
 
 
@@ -191,7 +200,9 @@ def test_bulk_dispose(client):
 
 def test_session_detail_replays_meta_and_transcript(client, monkeypatch):  # 场景 100 (回放)
     monkeypatch.setattr(api, "load_transcript", lambda sid: [{"role": "user", "content": "q"}])
-    store.upsert_meta("web-9", origin="web", agent_name="ops")
+    ops = agent_store.get_by_name("ops")
+    assert ops is not None
+    store.upsert_meta("web-9", origin="web", agent_id=ops.id)
     token, _ = _session_for("admin")
     r = client.get("/admin/sessions/web-9", headers=_hdr(token))
     assert r.status_code == 200
@@ -269,7 +280,9 @@ def test_purge_expired_playground_removes_unpinned(client, monkeypatch):  # 场�
 
 
 def test_list_sessions_enriched_with_stats(client, monkeypatch):  # 场景 100 (列表富化)
-    store.upsert_meta("web-1", origin="web", agent_name="ops", user_id="u1")
+    ops = agent_store.get_by_name("ops")
+    assert ops is not None
+    store.upsert_meta("web-1", origin="web", agent_id=ops.id, user_id="u1")
     monkeypatch.setattr(
         api,
         "session_stats",

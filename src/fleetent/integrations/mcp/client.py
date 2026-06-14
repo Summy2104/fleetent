@@ -16,6 +16,7 @@ scope isolation, and lazy reconnect on a dropped session.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import json
 import logging
@@ -23,6 +24,7 @@ import os
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
@@ -44,8 +46,13 @@ _server_registry: dict[tuple[int | None, str], McpServerConfig] = {}
 # Ids of strict-mode servers that failed to register at startup (MCP4 D5): not in
 # _server_registry (never registered) yet still strict-unavailable for the query.
 _failed_strict_servers: set[str] = set()
-_active_sessions: dict[tuple[int | None, str], Any] = {}  # (scope, server_id) -> stdio session
-_exit_stack: AsyncExitStack | None = None
+_active_sessions: dict[tuple[int | None, str], Any] = {}  # (scope, server_id) -> ClientSession
+# (scope, server_id) -> session host. Each MCP session is owned by a dedicated task
+# (_SessionHost.task) so the SDK transport's anyio cancel scope is entered AND exited in
+# the same task — a shared module-level AsyncExitStack unwound from another task crashes
+# the process on teardown (2026-06-11 graceful-shutdown crash).
+_session_hosts: dict[tuple[int | None, str], _SessionHost] = {}
+_HOST_CLOSE_TIMEOUT = 5.0  # seconds to await a host's graceful teardown before cancelling
 
 _MAX_TOOL_PAGES = 100  # tools/list pagination safety cap: stop following nextCursor past this
 
@@ -102,6 +109,12 @@ class McpServerConfig:
         default_factory=list
     )  # e.g. ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
     env: dict[str, str] = field(default_factory=dict)  # extra env vars for the subprocess
+    # unified-file-exchange: optional escape hatches for the /exchange namespace.
+    # `file_root` declares this server's effective file root explicitly (overrides the
+    # convention + any XDG_DATA_HOME); `file_isolation: "off"` opts the server out of the
+    # convention env injection entirely (reads the host's real ~/.config etc.).
+    file_root: str = ""
+    file_isolation: str = "on"  # "on" | "off"
     # Per-server HTTP timeouts in seconds: connect/discovery/probe/token vs tool call.
     connect_timeout: float = 10.0
     call_timeout: float = 30.0
@@ -119,10 +132,19 @@ class McpServerConfig:
     _list_refresh_lock: asyncio.Lock = field(
         default_factory=asyncio.Lock, repr=False, compare=False
     )
+    # unified-file-exchange: serializes the "call + product-dir diff" window per server so
+    # concurrent calls cannot mis-attribute each other's newly-written files (D2 diff layer).
+    _call_window_lock: asyncio.Lock = field(
+        default_factory=asyncio.Lock, repr=False, compare=False
+    )
     # Agent-scope key dimension (next<-main integration): registries/sessions are keyed
     # by (agent_scope, id) so the same server id can carry distinct credentials/sessions
     # per agent. None = the global (startup) scope. Distinct from the oauth `scope` str.
     _agent_scope: int | None = field(default=None, repr=False, compare=False)
+    # unified-file-exchange: the agent home this server is registered under, supplied by
+    # the agent-side caller (register_all). Drives the stdio cwd + convention env and the
+    # /exchange effective-root binding. None = legacy (no convention; byte-identical).
+    _agent_home: Path | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         _validate_degrade_mode(self)
@@ -277,34 +299,47 @@ def _oauth_degraded_result(server: McpServerConfig, exc: BaseException) -> str |
     return None
 
 
-async def get_exit_stack() -> AsyncExitStack:
-    global _exit_stack
-    if _exit_stack is None:
-        _exit_stack = AsyncExitStack()
-        await _exit_stack.__aenter__()
-    return _exit_stack
+async def _close_host(host: _SessionHost) -> None:
+    """Signal a session host to close and await its teardown (best-effort, bounded).
 
-
-async def close() -> None:
-    """Close all connections on shutdown.
-
-    The SDK owns every transport's wire (stdio subprocess / Streamable HTTP / SSE) and
-    holds each session in the shared AsyncExitStack — unwinding the stack runs each
-    transport's own teardown (HTTP DELETE handshake included), so there is nothing to
-    close by hand here.
+    The host owns the transport's anyio cancel scope, so it must run its own teardown;
+    we only wake it and wait. A teardown that hangs past the timeout is cancelled so
+    shutdown stays bounded; any teardown error is the host's own (logged there) — this
+    never raises.
     """
-    global _exit_stack
-    if _exit_stack is not None:
-        await _exit_stack.__aexit__(None, None, None)
-        _exit_stack = None
+    host.close_event.set()
+    try:
+        await asyncio.wait_for(asyncio.shield(host.task), _HOST_CLOSE_TIMEOUT)
+    except TimeoutError:
+        host.task.cancel()
+        with contextlib.suppress(BaseException):
+            await asyncio.gather(host.task, return_exceptions=True)
+    except Exception as exc:  # noqa: BLE001 — containment: a close failure never propagates
+        logger.warning("mcp_host_close_failed error=%s", exc)
+
+
+async def aclose_all() -> None:
+    """Release every MCP session host on shutdown (best-effort, contained).
+
+    Each host tears down its own transport (stdio subprocess / Streamable HTTP / SSE,
+    incl. the HTTP DELETE handshake) inside its own task, so enter/exit stay on the same
+    task. A single host failing or hanging MUST NOT block the others or change the
+    process exit code.
+    """
+    hosts = list(_session_hosts.values())
+    _session_hosts.clear()
     _active_sessions.clear()
+    if hosts:
+        await asyncio.gather(*(_close_host(h) for h in hosts), return_exceptions=True)
 
 
-async def register_all(servers: list[McpServerConfig], scope: int | None = None) -> None:
+async def register_all(
+    servers: list[McpServerConfig], scope: int | None = None, agent_home: Path | None = None
+) -> None:
     _failed_strict_servers.clear()  # recompute startup-failed strict set each registration
     for server in servers:
         try:
-            await _register_server(server, scope)
+            await _register_server(server, scope, agent_home)
         except Exception as exc:
             # Startup failure = unregistered = tools never visible (MCP4 D5); platform
             # start is NOT blocked. A strict server's failure is tracked so bound
@@ -317,8 +352,14 @@ async def register_all(servers: list[McpServerConfig], scope: int | None = None)
     install_schema_filter()
 
 
-async def _register_server(server: McpServerConfig, scope: int | None = None) -> None:
+async def _register_server(
+    server: McpServerConfig, scope: int | None = None, agent_home: Path | None = None
+) -> None:
     server._agent_scope = scope
+    server._agent_home = agent_home
+    # unified-file-exchange: bind the /exchange effective root so the fence + result
+    # rewrite can resolve this server's products (no-op for non-stdio / no agent_home).
+    _bind_exchange_root(server, agent_home)
     if server.auth_type == "oauth2":
         _clear_oauth_auth_state(server)  # (re-)registration clears sticky auth state (D5)
     # All transports go through one SDK-ClientSession path (stdio / http / sse).
@@ -379,15 +420,88 @@ def _resolve_env_ref(value: str) -> str:
     return value
 
 
-def _subprocess_env(server: McpServerConfig) -> dict[str, str]:
-    """Environment for a stdio MCP subprocess: the safe host whitelist plus the server's
-    explicitly declared env (which overrides the whitelist for same-named keys). The full
-    platform environment is never inherited (mcp-stdio-isolation).
+def _convention_cwd(server: McpServerConfig, agent_home: Path) -> Path:
+    """The partition-tree root a stdio MCP server runs in (unified-file-exchange)."""
+    return agent_home / "exchange" / server.id
 
-    ``env:VAR_NAME`` values are resolved from the parent process environment.
+
+def _convention_env(server: McpServerConfig, agent_home: Path) -> dict[str, str]:
+    """The convention-injected XDG triple pointing at the server's partition tree.
+
+    ``data/`` is the artifact root that maps to ``/exchange/<server_id>`` (enters the
+    namespace); ``config/`` and ``cache/`` are isolated outside it (silences ledger
+    noise from a server's settings/cache writes).
+    """
+    base = _convention_cwd(server, agent_home)
+    return {
+        "XDG_DATA_HOME": str(base / "data"),
+        "XDG_CONFIG_HOME": str(base / "config"),
+        "XDG_CACHE_HOME": str(base / "cache"),
+    }
+
+
+def _subprocess_env(server: McpServerConfig, agent_home: Path | None = None) -> dict[str, str]:
+    """Environment for a stdio MCP subprocess (mcp-stdio-isolation).
+
+    Merge order is safe host whitelist < convention injection < explicitly declared env.
+    The convention layer (unified-file-exchange) points the server's XDG dirs at its
+    ``<agent_home>/exchange/<id>`` partition tree so its products land in the addressable
+    ``/exchange`` namespace; an explicitly configured XDG is adopted in place (it wins).
+    ``file_isolation: "off"`` or a missing ``agent_home`` skips the convention (the latter
+    keeps legacy call sites byte-identical). The full platform environment is never
+    inherited; ``env:VAR_NAME`` values resolve from the parent process environment.
     """
     resolved = {k: _resolve_env_ref(v) for k, v in server.env.items()}
-    return {**_safe_base_env(), **resolved}
+    convention = (
+        _convention_env(server, agent_home)
+        if agent_home is not None and server.file_isolation != "off"
+        else {}
+    )
+    return {**_safe_base_env(), **convention, **resolved}
+
+
+def _convention_applies(server: McpServerConfig, agent_home: Path | None) -> bool:
+    """Whether the /exchange convention (cwd + XDG injection + root binding) applies."""
+    return agent_home is not None and server.file_isolation != "off"
+
+
+def _stdio_params(server: McpServerConfig) -> StdioServerParameters:
+    """Build the stdio subprocess parameters, applying the /exchange convention.
+
+    When the server carries an `_agent_home` (set at registration) and isolation is on,
+    the subprocess runs in its partition root `<agent_home>/exchange/<id>` (created here
+    so the spawn never fails on a missing cwd) with the convention XDG triple injected.
+    Otherwise the legacy params (no cwd, no convention) are produced byte-identically.
+    """
+    agent_home = server._agent_home
+    cwd: str | None = None
+    if _convention_applies(server, agent_home):
+        assert agent_home is not None
+        cwd_path = _convention_cwd(server, agent_home)
+        cwd_path.mkdir(parents=True, exist_ok=True)
+        cwd = str(cwd_path)
+    return StdioServerParameters(
+        command=server.command,
+        args=server.args,
+        env=_subprocess_env(server, agent_home),
+        cwd=cwd,
+    )
+
+
+def _bind_exchange_root(server: McpServerConfig, agent_home: Path | None) -> None:
+    """Bind this stdio server's effective file root so `/exchange/<id>` resolves.
+
+    No-op for non-stdio servers, when no agent_home is supplied, or when the server opts
+    out (`file_isolation: off`). Idempotent — re-registration rebinds the same root.
+    """
+    if server.transport != "stdio" or not _convention_applies(server, agent_home):
+        return
+    assert agent_home is not None
+    from fleetent import artifact_exchange
+
+    artifact_exchange.register_server_root(
+        server.id, artifact_exchange.effective_root(server, agent_home)
+    )
 
 
 def _is_tools_list_changed(message: Any) -> bool:
@@ -481,10 +595,7 @@ def _transport_cm(server: McpServerConfig, headers: dict[str, str]) -> Any:
     (read, write) streams fed to a ClientSession.
     """
     if server.transport == "stdio":
-        params = StdioServerParameters(
-            command=server.command, args=server.args, env=_subprocess_env(server)
-        )
-        return stdio_client(params)
+        return stdio_client(_stdio_params(server))
     # Per-server timeouts map onto the SDK transport: connect_timeout governs the
     # connection / request POST (`timeout`), call_timeout the streamed tool-result read
     # (`sse_read_timeout`) — the long-lived session means both are set once, at open.
@@ -506,21 +617,77 @@ def _transport_cm(server: McpServerConfig, headers: dict[str, str]) -> Any:
     )
 
 
-async def _open_session_for(server: McpServerConfig, scope: int | None) -> Any:
-    """Open a transport-specific ClientSession, hold it in the exit stack, initialize it.
+@dataclass
+class _SessionHost:
+    """Owns one MCP ClientSession's lifecycle in a dedicated task.
 
-    Unified across stdio / http / sse: the SDK owns the wire; we hold the resulting
-    ClientSession in _active_sessions[(scope, id)] for reuse and lazy reconnect.
+    The transport + ClientSession context managers are entered and exited inside
+    ``task`` only; other tasks interact through ``session`` (consume) and ``close_event``
+    (request teardown), never by entering/exiting the contexts themselves.
+    """
+
+    task: asyncio.Task[None]
+    close_event: asyncio.Event
+    session: Any = None
+
+
+async def _host_session(
+    server: McpServerConfig,
+    scope: int | None,
+    headers: dict[str, str],
+    ready: asyncio.Future,
+    close_event: asyncio.Event,
+) -> None:
+    """Session owner coroutine: enter transport + ClientSession, init, park, exit — same task.
+
+    On a successful open it resolves ``ready`` with the live session and parks on
+    ``close_event``; on an open failure it propagates the error through ``ready``. A
+    teardown error (exit phase) is the host's own and is logged, never propagated — the
+    process must not die because one connector failed to close (2026-06-11).
+    """
+    try:
+        async with _transport_cm(server, headers) as streams:
+            read, write = streams[0], streams[1]
+            async with ClientSession(
+                read, write, message_handler=_make_message_handler(server, scope)
+            ) as session:
+                init_result = await session.initialize()
+                _capture_init_result(server, _init_result_to_dict(init_result))
+                if not ready.done():
+                    ready.set_result(session)
+                await close_event.wait()
+    except Exception as exc:  # noqa: BLE001 — open failure → caller; teardown failure → log
+        if not ready.done():
+            ready.set_exception(exc)
+        else:
+            logger.warning("mcp_session_teardown_failed server_id=%s error=%s", server.id, exc)
+
+
+async def _open_session_for(server: McpServerConfig, scope: int | None) -> Any:
+    """Open a transport-specific ClientSession owned by a dedicated host task, initialized.
+
+    Unified across stdio / http / sse: the SDK owns the wire; the host task holds the
+    transport + ClientSession contexts (entered/exited in that one task). The live
+    ClientSession is stored in _active_sessions[(scope, id)] for reuse and lazy reconnect;
+    its host in _session_hosts[(scope, id)] for lifecycle.
     """
     headers = {} if server.transport == "stdio" else await _http_headers(server)
-    stack = await get_exit_stack()
-    streams = await stack.enter_async_context(_transport_cm(server, headers))
-    read, write = streams[0], streams[1]
-    session: Any = await stack.enter_async_context(
-        ClientSession(read, write, message_handler=_make_message_handler(server, scope))
+    loop = asyncio.get_event_loop()
+    ready: asyncio.Future = loop.create_future()
+    close_event = asyncio.Event()
+    task = asyncio.ensure_future(_host_session(server, scope, headers, ready, close_event))
+    try:
+        session = await asyncio.wait_for(ready, server.connect_timeout)
+    except (Exception, asyncio.CancelledError):
+        # Open failed/timed out: tear the host down so no orphan task/connection leaks.
+        close_event.set()
+        task.cancel()
+        with contextlib.suppress(BaseException):
+            await asyncio.gather(task, return_exceptions=True)
+        raise
+    _session_hosts[(scope, server.id)] = _SessionHost(
+        task=task, close_event=close_event, session=session
     )
-    init_result = await session.initialize()
-    _capture_init_result(server, _init_result_to_dict(init_result))
     _active_sessions[(scope, server.id)] = session
     return session
 
@@ -740,6 +907,11 @@ def unregister_server(server_id: str, scope: int | None = None) -> None:
             del tr._registry[name]
     _server_registry.pop((scope, server_id), None)
     _active_sessions.pop((scope, server_id), None)
+    # Sync context: wake the host so it tears itself down on its own task (no await here);
+    # the host self-removes nothing else, so drop our handle too.
+    host = _session_hosts.pop((scope, server_id), None)
+    if host is not None:
+        host.close_event.set()
 
 
 def _rewrite_refs(node: Any) -> Any:
@@ -790,8 +962,23 @@ def _register_tool(
 
     input_schema = _sanitize_input_schema(getattr(tool_def, "inputSchema", None))
 
-    async def call(**kwargs: object) -> str:
-        return await _call_via_session(server.id, tool_def.name, dict(kwargs), server._agent_scope)
+    async def call(tool_context: Any = None, **kwargs: object) -> str:
+        # tool_context binds to this param (never into kwargs → never leaks to MCP args).
+        # It carries the run's scope_key for /exchange attribution (global-scope path; the
+        # agent-scoped path threads the same via dispatch → call_tool).
+        scope_key = getattr(tool_context, "scope_key", None)
+        session_id = getattr(tool_context, "session_id", None)
+        principal = getattr(tool_context, "principal", None)
+        user_id = getattr(principal, "user_id", None)
+        return await _call_via_session(
+            server.id,
+            tool_def.name,
+            dict(kwargs),
+            server._agent_scope,
+            scope_key=scope_key,
+            session_id=session_id,
+            user_id=user_id,
+        )
 
     schema: tr.ToolSchema = {
         "type": "function",
@@ -890,7 +1077,12 @@ def _normalize_tool_result(content_blocks: Any, *, structured_content: Any, is_e
 
 async def _reopen_session(server: McpServerConfig, scope: int | None) -> Any | None:
     """Lazily re-open a dropped ClientSession (any transport) once. Returns the new
-    session, or None if reopen failed. Replaces the prior server's _active_sessions entry."""
+    session, or None if reopen failed. Closes the prior host first (no leak), then
+    replaces the server's _active_sessions / _session_hosts entry."""
+    old = _session_hosts.pop((scope, server.id), None)
+    _active_sessions.pop((scope, server.id), None)
+    if old is not None:
+        await _close_host(old)  # best-effort; a stuck/erroring old host never blocks reopen
     try:
         return await _open_session_for(server, scope)
     except Exception as exc:  # noqa: BLE001 — reopen failure → caller marks unavailable
@@ -907,8 +1099,83 @@ def _result_to_text(result: Any) -> str:
     )
 
 
+def _rewrite_result_paths(
+    server_id: str,
+    text: str,
+    scope_key: str | None,
+    session_id: str | None,
+    user_id: str | None,
+) -> str:
+    """Apply the deterministic /exchange chokepoint rewrite to a tool result (best-effort).
+
+    Delegates to artifact_exchange; a failure must never break the tool call (the agent
+    still gets the raw result). No-op when no scope_key/root (byte-identical legacy).
+    """
+    try:
+        from fleetent import artifact_exchange
+
+        return artifact_exchange.rewrite_and_register(
+            server_id, text, scope_key, session_id=session_id, user_id=user_id
+        )
+    except Exception as exc:  # noqa: BLE001 — attribution is auxiliary, never crash the call
+        logger.warning("mcp_result_rewrite_failed server_id=%s error=%s", server_id, exc)
+        return text
+
+
 async def _call_via_session(
-    server_id: str, tool_name: str, args: dict[str, Any], scope: int | None = None
+    server_id: str,
+    tool_name: str,
+    args: dict[str, Any],
+    scope: int | None = None,
+    *,
+    scope_key: str | None = None,
+    session_id: str | None = None,
+    user_id: str | None = None,
+) -> str:
+    """Invoke a tool, then apply the call-window diff fallback when attributing (D2).
+
+    Thin wrapper over `_call_via_session_inner` (which owns the SDK call + lazy-reconnect
+    retry + the deterministic result rewrite). When a `scope_key` is threaded and the
+    server has a registered product root, snapshot it before the call and diff-register
+    any new files the rewrite missed — all under the server's per-call window lock so
+    concurrent calls don't mis-attribute. The diff is best-effort and never affects the
+    returned result; without attribution this is a byte-identical pass-through.
+    """
+    from fleetent import artifact_exchange
+
+    server = _server_registry.get((scope, server_id))
+    root = artifact_exchange.server_root(server_id) if (server is not None and scope_key) else None
+    if root is None:
+        return await _call_via_session_inner(
+            server_id, tool_name, args, scope,
+            scope_key=scope_key, session_id=session_id, user_id=user_id,
+        )
+    assert server is not None
+
+    async with server._call_window_lock:
+        before = artifact_exchange.snapshot_products(root)
+        text = await _call_via_session_inner(
+            server_id, tool_name, args, scope,
+            scope_key=scope_key, session_id=session_id, user_id=user_id,
+        )
+        try:
+            artifact_exchange.diff_register(
+                server_id, root, before, scope_key, session_id=session_id, user_id=user_id
+            )
+        except Exception as exc:  # noqa: BLE001 — diff is auxiliary, never affect the result
+            logger.warning("mcp_diff_register_failed server_id=%s error=%s", server_id, exc)
+        return text
+
+
+async def _call_via_session_inner(
+    server_id: str,
+    tool_name: str,
+    args: dict[str, Any],
+    scope: int | None = None,
+    *,
+    scope_key: str | None = None,
+    session_id: str | None = None,
+    user_id: str | None = None,
 ) -> str:
     """Invoke a tool through the held SDK ClientSession (any transport).
 
@@ -962,19 +1229,35 @@ async def _call_via_session(
             set_health(server, HealthState.unavailable)
             return _unavailable_result(server_id)
         reset_health(server)  # retry succeeded → server is healthy again
-    return _result_to_text(result)
+    text = _result_to_text(result)
+    return _rewrite_result_paths(server_id, text, scope_key, session_id, user_id)
 
 
 # Public API. `scope` keys the (scope, server_id) registry: None = global (startup)
 # servers; an int = an agent-scoped registration. A scope with no matching server_id
 # raises rather than silently falling back to the global server (agent isolation).
 async def call_tool(
-    server_id: str, tool_name: str, args: dict[str, Any], scope: int | None = None
+    server_id: str,
+    tool_name: str,
+    args: dict[str, Any],
+    scope: int | None = None,
+    *,
+    scope_key: str | None = None,
+    session_id: str | None = None,
+    user_id: str | None = None,
 ) -> str:
     server = _server_registry.get((scope, server_id))
     if server is None:
         raise KeyError(f"Unknown MCP server: {server_id}")
-    return await _call_via_session(server_id, tool_name, args, scope)
+    return await _call_via_session(
+        server_id,
+        tool_name,
+        args,
+        scope,
+        scope_key=scope_key,
+        session_id=session_id,
+        user_id=user_id,
+    )
 
 
 # === MCP resources / prompts as capability-gated synthetic tools ============

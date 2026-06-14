@@ -72,7 +72,7 @@ def test_list_tenants_cli(tmp_path: Path) -> None:
 
 
 def test_set_user_tenant_cli(tmp_path: Path) -> None:
-    user = user_store.create_user("Test User")
+    user, _ = user_store.create_user("Test User")
     run_admin("create-tenant", "--id", "corp2", "--name", "Corp Two")
     stdout, stderr, code = run_admin(
         "set-user-tenant", "--user-id", user.id, "--tenant-id", "corp2"
@@ -84,7 +84,7 @@ def test_set_user_tenant_cli(tmp_path: Path) -> None:
 
 
 def test_set_tenant_approver_cli(tmp_path: Path) -> None:
-    approver = user_store.create_user("Approver User")
+    approver, _ = user_store.create_user("Approver User")
     stdout, stderr, code = run_admin(
         "set-approver", "--type", "tenant", "--id", "default", "--user-id", approver.id
     )
@@ -99,7 +99,7 @@ def test_set_tenant_approver_cli(tmp_path: Path) -> None:
 def test_set_team_approver_cli(tmp_path: Path) -> None:
     run_admin("create-tenant", "--id", "t3", "--name", "T3")
     run_admin("create-team", "--id", "team3", "--tenant-id", "t3", "--name", "Team Three")
-    approver = user_store.create_user("Team Approver")
+    approver, _ = user_store.create_user("Team Approver")
     stdout, stderr, code = run_admin(
         "set-approver", "--type", "team", "--id", "team3", "--user-id", approver.id
     )
@@ -118,12 +118,12 @@ def _make_api(monkeypatch: pytest.MonkeyPatch, *, is_admin: bool = True):
     """Return the tenancy admin API module with auth and audit mocked."""
     from fleetent.platform.tenancy import admin_api
 
-    admin_user = user_store.create_user("Admin")
+    admin_user, _ = user_store.create_user("Admin")
     user_store.set_role(admin_user.id, "admin")
 
     monkeypatch.setattr(admin_api.auth, "validate_session", lambda token, idle: admin_user.id)
     if not is_admin:
-        viewer = user_store.create_user("Viewer")
+        viewer, _ = user_store.create_user("Viewer")
         monkeypatch.setattr(admin_api.auth, "validate_session", lambda token, idle: viewer.id)
 
     audits: list[tuple[object, ...]] = []
@@ -168,7 +168,7 @@ def test_api_create_team(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_api_set_user_tenant(monkeypatch: pytest.MonkeyPatch) -> None:
     admin_api, auth_header, audits = _make_api(monkeypatch)
-    user = user_store.create_user("TargetUser")
+    user, _ = user_store.create_user("TargetUser")
     result = admin_api.api_set_user_tenant(
         user.id,
         admin_api.SetUserTenantBody(tenant_id="default"),
@@ -181,7 +181,7 @@ def test_api_set_user_tenant(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_api_set_tenant_approver(monkeypatch: pytest.MonkeyPatch) -> None:
     admin_api, auth_header, audits = _make_api(monkeypatch)
-    approver = user_store.create_user("Approver")
+    approver, _ = user_store.create_user("Approver")
     result = admin_api.api_set_approver(
         "default",
         admin_api.SetApproverBody(approver_user_id=approver.id, entity_type="tenant"),
@@ -197,7 +197,7 @@ def test_api_set_team_approver(monkeypatch: pytest.MonkeyPatch) -> None:
 
     admin_api, auth_header, audits = _make_api(monkeypatch)
     create_team("team_x", "default", "Team X")
-    approver = user_store.create_user("Approver2")
+    approver, _ = user_store.create_user("Approver2")
     result = admin_api.api_set_approver(
         "team_x",
         admin_api.SetApproverBody(approver_user_id=approver.id, entity_type="team"),

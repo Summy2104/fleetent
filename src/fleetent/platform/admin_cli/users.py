@@ -24,11 +24,11 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
 def handle(args: argparse.Namespace) -> bool:
     """Handle user commands."""
     if args.cmd == "create-user":
-        user = create_user(args.name)
+        user, api_key = create_user(args.name)
         print("User created.")
         print(f"  id:      {user.id}")
         print(f"  name:    {user.name}")
-        print(f"  api_key: {user.api_key}  ← save this, shown once")
+        print(f"  api_key: {api_key}  ← save this, shown once")
         return True
 
     if args.cmd == "list-users":
@@ -44,12 +44,12 @@ def handle(args: argparse.Namespace) -> bool:
 
     if args.cmd == "rotate-key":
         try:
-            user = rotate_key(args.user_id)
+            user, api_key = rotate_key(args.user_id)
         except KeyError:
             print(f"Error: User {args.user_id!r} not found.", file=sys.stderr)
             sys.exit(1)
         print(f"Key rotated for {user.name}.")
-        print(f"  new api_key: {user.api_key}  ← save this, shown once")
+        print(f"  new api_key: {api_key}  ← save this, shown once")
         return True
 
     if args.cmd == "seed-builtin-admin":

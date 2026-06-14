@@ -1,4 +1,4 @@
-"""Integration tests: approval_store and allowlist_store connect via set_state_db (3b-4).
+"""Integration tests: approval stores connect via set_state_db (3b-4).
 
 Verifies:
 - Both stores expose set_state_db() (no ensure_schema-into-global residual)
@@ -44,19 +44,21 @@ def test_approval_store_has_no_ensure_schema() -> None:
     )
 
 
-def test_allowlist_store_has_no_db_path_global() -> None:
-    import fleetent.governance.approval_allowlist_store as module
+def test_tool_auto_approvals_store_has_no_db_path_global() -> None:
+    import fleetent.governance.tool_auto_approvals_store as module
 
     source = inspect.getsource(module)
-    assert "DB_PATH =" not in source, "approval_allowlist_store must not have a DB_PATH global assignment"
+    assert "DB_PATH =" not in source, (
+        "tool_auto_approvals_store must not have a DB_PATH global assignment"
+    )
 
 
-def test_allowlist_store_has_no_ensure_schema() -> None:
-    import fleetent.governance.approval_allowlist_store as module
+def test_tool_auto_approvals_store_has_no_ensure_schema() -> None:
+    import fleetent.governance.tool_auto_approvals_store as module
 
     source = inspect.getsource(module)
     assert "def ensure_schema" not in source, (
-        "approval_allowlist_store must not expose ensure_schema"
+        "tool_auto_approvals_store must not expose ensure_schema"
     )
 
 
@@ -70,10 +72,10 @@ def test_approval_store_exposes_set_state_db() -> None:
     assert callable(module.set_state_db)
 
 
-def test_allowlist_store_exposes_set_state_db() -> None:
-    import fleetent.governance.approval_allowlist_store as module
+def test_tool_auto_approvals_store_exposes_set_state_db() -> None:
+    import fleetent.governance.tool_auto_approvals_store as module
 
-    assert hasattr(module, "set_state_db"), "approval_allowlist_store must expose set_state_db()"
+    assert hasattr(module, "set_state_db"), "tool_auto_approvals_store must expose set_state_db()"
     assert callable(module.set_state_db)
 
 
@@ -88,8 +90,10 @@ def test_approval_store_raises_before_set_state_db(monkeypatch: pytest.MonkeyPat
         module.list_approvals()
 
 
-def test_allowlist_store_raises_before_set_state_db(monkeypatch: pytest.MonkeyPatch) -> None:
-    import fleetent.governance.approval_allowlist_store as module
+def test_tool_auto_approvals_store_raises_before_set_state_db(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fleetent.governance.tool_auto_approvals_store as module
 
     monkeypatch.setattr(module, "_state_db", None)
     with pytest.raises(RuntimeError, match="set_state_db"):
@@ -123,10 +127,10 @@ def test_approval_store_insert_uses_injected_db(
     assert rows[0]["session_id"] == "session:alice"
 
 
-def test_allowlist_store_add_grant_uses_injected_db(
+def test_tool_auto_approvals_store_add_grant_uses_injected_db(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import fleetent.governance.approval_allowlist_store as module
+    import fleetent.governance.tool_auto_approvals_store as module
 
     db = _open_state_db(tmp_path)
     monkeypatch.setattr(module, "_state_db", db)

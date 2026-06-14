@@ -152,6 +152,17 @@ def resolve_workspace_scope(configured: WorkspaceScope, *, multi_user: bool) -> 
     return configured
 
 
+def workspace_scope_key(scope: WorkspaceScope, session_id: str, agent_name: str) -> str:
+    """The single source of truth for a run's workspace scope key (D0).
+
+    `session` scope keys per session (`session_id`); `agent` scope keys per agent
+    (`agent_name`). This is the one key that both `/workspace` (sandbox mount) and
+    `/exchange` (file-exchange attribution/view) derive from — they MUST agree, so
+    every site computes it here rather than re-deriving inline.
+    """
+    return session_id if scope is WorkspaceScope.SESSION else agent_name
+
+
 @dataclass
 class SandboxManager:
     """Per-process sandbox lifecycle owner; registry is instance state.
@@ -258,7 +269,7 @@ class SandboxManager:
         create_workspace on a fresh create; reused/re-adopted containers keep the
         env they were created with. None preserves SB2's clean-environment default.
         """
-        key = session_id if scope is WorkspaceScope.SESSION else agent_name
+        key = workspace_scope_key(scope, session_id, agent_name)
         name = _container_name(scope, key)
         now = self.clock()
 
@@ -368,7 +379,7 @@ class SandboxManager:
 
     def container_name(self, scope: WorkspaceScope, session_id: str, agent_name: str) -> str:
         """Public name resolver so callers (run_code) can forget by name on abort."""
-        key = session_id if scope is WorkspaceScope.SESSION else agent_name
+        key = workspace_scope_key(scope, session_id, agent_name)
         return _container_name(scope, key)
 
     def invalidate(self, scope: WorkspaceScope, session_id: str, agent_name: str) -> None:
@@ -377,7 +388,7 @@ class SandboxManager:
         Called by exec-layer self-healing when a command hits a missing-container
         error after acquire (the verify-then-die race window).
         """
-        key = session_id if scope is WorkspaceScope.SESSION else agent_name
+        key = workspace_scope_key(scope, session_id, agent_name)
         self._registry.pop(_container_name(scope, key), None)
 
     def workspace_host_path(self, scope: WorkspaceScope, session_id: str, agent_name: str) -> Path:
@@ -387,7 +398,7 @@ class SandboxManager:
         backend (the path fence root), so both agree on exactly one directory per
         scope key. Idempotent: creates the dir tree if missing.
         """
-        key = session_id if scope is WorkspaceScope.SESSION else agent_name
+        key = workspace_scope_key(scope, session_id, agent_name)
         ws_path = paths.workspaces_dir() / _name_key(key)
         # sandbox-hardening: never bind-mount a host dir under a sensitive root (a
         # misconfigured FLEETENT_HOME could otherwise expose ~/.ssh, /etc, etc.).

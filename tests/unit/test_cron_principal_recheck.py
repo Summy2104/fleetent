@@ -16,7 +16,6 @@ def _make_user(user_id: str, status: str = "active", tenant_id: str = "default")
     return user_store.User(
         id=user_id,
         name="Test",
-        api_key="k",
         created_at="2024-01-01",
         status=status,
         tenant_id=tenant_id,

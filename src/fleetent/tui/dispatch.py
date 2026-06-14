@@ -11,7 +11,7 @@ import asyncio
 import uuid
 from typing import Any, Literal, cast
 
-from fleetent.governance import permission_gate
+from fleetent.governance import approval_router
 from fleetent.identity import Principal
 from fleetent.runtime import CancelToken, run_stream
 from fleetent.session import manager as session_mgr
@@ -125,7 +125,7 @@ async def dispatch(conn: Connection, request: dict[str, Any]) -> dict[str, Any] 
         decision = params.get("decision")
         if decision not in ("approved", "rejected"):
             return p.make_error(req_id, p.INVALID_PARAMS, "decision must be approved|rejected")
-        found = await permission_gate._default_gate.resolve(
+        found = await approval_router.resolve_approval_request(
             approval_id=str(params.get("approval_id", "")),
             decision=cast(Literal["approved", "rejected"], decision),
             approver_user_id=conn.user_id,

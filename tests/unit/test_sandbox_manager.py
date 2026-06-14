@@ -12,6 +12,7 @@ from fleetent.integrations.sandbox.manager import (
     WorkspaceScope,
     _container_name,
     _name_key,
+    workspace_scope_key,
 )
 
 
@@ -51,6 +52,29 @@ def _manager(client: MagicMock | None = None, **kwargs) -> SandboxManager:
 def test_scope_values():
     assert Scope.SESSION == "session"
     assert Scope.AGENT == "agent"
+
+
+# --- D0: single workspace-scope-key authority ------------------------------
+
+
+def test_workspace_scope_key_session_uses_session_id():
+    assert workspace_scope_key(WorkspaceScope.SESSION, "s1", "bot") == "s1"
+
+
+def test_workspace_scope_key_agent_uses_agent_name():
+    assert workspace_scope_key(WorkspaceScope.AGENT, "s1", "bot") == "bot"
+
+
+def test_workspace_scope_key_matches_workspace_host_path(monkeypatch, tmp_path):
+    """The single key authority MUST agree with workspace_host_path's dir keying:
+    /workspace and /exchange must derive the same scope_key from one source (D0)."""
+    from fleetent import paths
+
+    monkeypatch.setattr(paths, "workspaces_dir", lambda: tmp_path)
+    mgr = _manager()
+    for scope in (WorkspaceScope.SESSION, WorkspaceScope.AGENT):
+        key = workspace_scope_key(scope, "s1", "bot")
+        assert mgr.workspace_host_path(scope, "s1", "bot") == tmp_path / _name_key(key)
 
 
 def test_manager_construction_defaults():

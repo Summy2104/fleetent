@@ -236,7 +236,7 @@ async def test_repeated_task_pattern_generates_skill_opportunity(monkeypatch):
             run_id="run-1",
             event_type="agent_run_completed",
             payload={"task_pattern": "summarize weekly Jira progress"},
-            agent_id="agent-1",
+            agent_name="agent-1",
             user_id="user-1",
         ),
         observability.TraceEvent(
@@ -244,7 +244,7 @@ async def test_repeated_task_pattern_generates_skill_opportunity(monkeypatch):
             run_id="run-2",
             event_type="agent_run_completed",
             payload={"task_pattern": "summarize weekly Jira progress"},
-            agent_id="agent-1",
+            agent_name="agent-1",
             user_id="user-1",
         ),
     ]
@@ -327,6 +327,163 @@ async def test_run_reflection_persists_report_without_raw_transcript(tmp_path, m
     persisted = row[4]
     assert raw_user_input not in persisted
     assert raw_agent_reply not in persisted
+
+
+async def test_run_reflection_persists_generated_proposals_with_report_id(tmp_path, monkeypatch):
+    from fleetent import observability, reflection
+
+    db_path = tmp_path / "reflection.db"
+    _prepare_db(db_path)
+    events = [
+        observability.TraceEvent(
+            id="trace-1",
+            run_id="run-1",
+            event_type="agent_run_completed",
+            payload={
+                "memory_fact": "User prefers Python",
+                "task_pattern": "summarize weekly Jira progress",
+            },
+            user_id="user-1",
+            agent_name="agent-1",
+        ),
+        observability.TraceEvent(
+            id="trace-2",
+            run_id="run-2",
+            event_type="agent_run_completed",
+            payload={
+                "memory_fact": "User prefers Python",
+                "task_pattern": "summarize weekly Jira progress",
+            },
+            user_id="user-1",
+            agent_name="agent-1",
+        ),
+    ]
+    _use_db(monkeypatch, db_path)
+    monkeypatch.setattr(observability, "query_trace_events", lambda query: events)
+    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=[]))
+
+    report = await reflection.run_reflection("user-1")
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT domain, report_id
+            FROM reflection_proposals
+            ORDER BY domain ASC
+            """
+        ).fetchall()
+
+    assert rows == [("memory", report.id), ("skill", report.id)]
+
+
+async def test_run_reflection_persists_report_proposal_provenance_links(tmp_path, monkeypatch):
+    from fleetent import observability, reflection
+
+    db_path = tmp_path / "reflection.db"
+    _prepare_db(db_path)
+    events = [
+        observability.TraceEvent(
+            id="trace-1",
+            run_id="run-1",
+            event_type="agent_run_completed",
+            payload={
+                "memory_fact": "User prefers Python",
+                "task_pattern": "prepare release notes",
+            },
+            user_id="user-1",
+            agent_name="agent-1",
+        ),
+        observability.TraceEvent(
+            id="trace-2",
+            run_id="run-2",
+            event_type="agent_run_completed",
+            payload={
+                "memory_fact": "User prefers Python",
+                "task_pattern": "prepare release notes",
+            },
+            user_id="user-1",
+            agent_name="agent-1",
+        ),
+    ]
+    _use_db(monkeypatch, db_path)
+    monkeypatch.setattr(observability, "query_trace_events", lambda query: events)
+    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=[]))
+
+    report = await reflection.run_reflection("user-1")
+
+    with sqlite3.connect(db_path) as conn:
+        proposal_ids = [
+            row[0]
+            for row in conn.execute(
+                """
+                SELECT id
+                FROM reflection_proposals
+                WHERE report_id = ?
+                ORDER BY domain ASC, id ASC
+                """,
+                (report.id,),
+            ).fetchall()
+        ]
+        linked_report_ids = [
+            row[0]
+            for row in conn.execute(
+                """
+                SELECT reports.id
+                FROM reflection_reports AS reports
+                JOIN reflection_proposals AS proposals
+                  ON proposals.report_id = reports.id
+                WHERE proposals.id IN (
+                    SELECT id FROM reflection_proposals ORDER BY domain ASC, id ASC
+                )
+                ORDER BY proposals.domain ASC, proposals.id ASC
+                """
+            ).fetchall()
+        ]
+
+    assert len(proposal_ids) == 2
+    assert linked_report_ids == [report.id, report.id]
+
+
+async def test_reportless_proposal_persists_null_report_id_and_remains_usable(
+    tmp_path, monkeypatch
+):
+    from fleetent import reflection
+
+    db_path = tmp_path / "reflection.db"
+    _prepare_db(db_path)
+    _use_db(monkeypatch, db_path)
+    update_memory = AsyncMock()
+    monkeypatch.setattr(reflection.memory, "update_user_memory_content", update_memory)
+
+    proposal = reflection.create_memory_maintenance_proposal(
+        user_id="user-1",
+        action="rewrite",
+        target_memory_ids=["mem-1"],
+        proposed_content="User prefers Python.",
+        risk="medium",
+        reason="clarify wording",
+        evidence_ids=["trace-1"],
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        persisted = conn.execute(
+            "SELECT report_id FROM reflection_proposals WHERE id = ?",
+            (proposal.id,),
+        ).fetchone()
+
+    loaded = reflection.get_memory_maintenance_proposal(proposal.id)
+    listed = reflection.list_memory_maintenance_proposals("user-1")
+    reflection.approve_memory_maintenance_proposal(proposal.id, actor_user_id="user-1")
+    applied = await reflection.apply_memory_maintenance_proposal(
+        proposal.id,
+        actor_user_id="user-1",
+    )
+
+    assert persisted == (None,)
+    assert loaded.report_id is None
+    assert listed[0].report_id is None
+    assert applied.report_id is None
+    update_memory.assert_awaited_once_with("user-1", "mem-1", "User prefers Python.")
 
 
 async def test_memory_findings_do_not_modify_memory_items_table(tmp_path, monkeypatch):

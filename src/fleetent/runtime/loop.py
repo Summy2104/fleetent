@@ -29,9 +29,12 @@ from fleetent.model.provider_health import ProviderHealthCache, get_health_cache
 from fleetent.observability import (
     InjectedContextTrace,
     TraceEvent,
+    build_tool_args_summary,
     record_injected_context,
+    record_tool_call,
     record_trace_event,
 )
+from fleetent.outbound import ConversationAddress
 from fleetent.runtime.budget import BudgetChecker, BudgetConfig, BudgetUsage, grace_max_tokens
 from fleetent.runtime.cancellation import CancellationChecker, CancelToken
 from fleetent.runtime.context import (
@@ -67,9 +70,11 @@ from fleetent.tools.multimodal import build_message_with_images, has_image_block
 from fleetent.tools.registry import (
     ToolContext,
     dispatch,
+    evaluate_risk_level,
     get_effective_timeout,
     get_risk_level,
     get_schemas,
+    is_dynamic_risk,
     is_self_truncating,
 )
 from fleetent.tools.result_truncation import truncate_tool_result
@@ -261,6 +266,24 @@ def _agent_bound_to_server(server_id: str, allowed_tools: list[str] | None) -> b
     )
 
 
+def _resolve_scope_key(session_id: str | None, agent_name: str | None) -> str | None:
+    """The workspace scope key for /exchange attribution (D0), mirroring /workspace.
+
+    Reads the process sandbox manager's resolved scope so MCP-produced artifacts are
+    keyed exactly like the `/workspace` mount (session_id under `session`, agent_name
+    under `agent`). Best-effort: if the manager isn't available (sandbox off / not yet
+    built), fall back to session_id so the common (session-scoped) case still attributes.
+    """
+    try:
+        from fleetent.integrations.sandbox.manager import workspace_scope_key
+        from fleetent.tools.builtin_tools import _get_manager
+
+        return workspace_scope_key(_get_manager().scope, session_id or "", agent_name or "default")
+    except Exception as exc:  # noqa: BLE001 — attribution key is auxiliary, never break the run
+        _logger.debug("scope_key_resolve_fell_back_to_session", error=str(exc))
+        return session_id
+
+
 def _strict_blocked_servers(allowed_tools: list[str] | None) -> list[str]:
     """Handle MCP degradation for this agent (MCP4): return strict-mode unavailable
     servers the agent is bound to (→ stop); log degrade(warning)/silent(debug) for
@@ -341,60 +364,13 @@ def _gated_compress(
     )
 
 
-def _setup_layered_budget(
-    session_id: str | None,
-    user_id: str | None,
-    agent_name: str | None,
-    governance: GovernanceConfig | None = None,
-) -> tuple[Any, Any, dict[Any, str | None]]:
-    """Build the AR18 layered-budget checker/store, or (None, None, {}) when no cap
-    is configured (dormant by default → zero behaviour/DB change for plain runs).
-
-    Caps + windows come from the per-agent governance (a default GovernanceConfig
-    when absent → all dims uncapped). The global (cross-agent) scope was dropped."""
-    from fleetent.runtime import layered_budget as lbud
-
-    gov = governance if governance is not None else GovernanceConfig()
-    config = lbud.LayeredBudgetConfig.from_governance(gov)
-    windows = {
-        lbud.BudgetScope.user: lbud.BudgetWindow(gov.agent_budget_user_window),
-        lbud.BudgetScope.agent: lbud.BudgetWindow(gov.agent_budget_agent_window),
-    }
-    if not config.has_any_cap():
-        return None, None, {}
-    store = lbud.BudgetStore(windows=windows)
-    keys: dict[Any, str | None] = {
-        lbud.BudgetScope.session: session_id,
-        lbud.BudgetScope.user: user_id,
-        lbud.BudgetScope.agent: agent_name,
-    }
-    checker = lbud.LayeredBudgetChecker(config, store, keys, clock=lbud.utc_now)
-    return checker, store, keys
-
-
-def _layered_budget_add(
-    store: Any, keys: dict[Any, str | None], prompt: int, completion: int
-) -> None:
-    """Fold one main-loop turn into each cross-run scope with a present key (AR18)."""
-    if store is None:
-        return
-    from fleetent.runtime import layered_budget as lbud
-
-    now = lbud.utc_now()
-    for scope in lbud.CROSS_RUN_SCOPES:
-        key = keys.get(scope)
-        if key is None:
-            continue
-        store.add(scope, key, prompt or 0, completion or 0, now=now)
-
-
 def _build_controller(
     max_turns: int | None,
     max_consecutive_failures: int | None,
     *,
     include_approval: bool,
     budget_config: BudgetConfig,
-    budget_usage: BudgetUsage,
+    run_usage: BudgetUsage,
     loop_repeat_threshold: int | None = None,
     loop_ignore_arg_keys: list[str] | None = None,
     cancel_token: CancelToken | None = None,
@@ -406,7 +382,7 @@ def _build_controller(
     dimension is now one of two budget dimensions (turns / tokens), and
     any exhausted dimension produces `budget_exceeded` (not `max_turns`). The
     `StopReason.max_turns` enum member is retained but the loop no longer produces
-    it (design D2). The budget checker reads the same per-run `budget_usage` the
+    it (design D2). The budget checker reads the same per-run usage tracker the
     loop accumulates into each turn, and is returned so the loop can read the
     triggering dimension for the trace.
 
@@ -427,7 +403,7 @@ def _build_controller(
     controller = TerminationController()
     if cancel_token is not None:
         controller.register(CancellationChecker(cancel_token))
-    budget_checker = BudgetChecker(budget_config, budget_usage)
+    budget_checker = BudgetChecker(budget_config, run_usage)
     controller.register(budget_checker)
     controller.register(ConsecutiveFailuresChecker(mcf))
     if include_approval:
@@ -563,30 +539,32 @@ async def _run_serial_group(
     tool_context: ToolContext,
     user_id: str,
     default_tool_timeout: float | None = None,
-) -> list[tuple[str, bool]]:
+) -> list[tuple[str, bool, float]]:
     """Dispatch a same-resource-key group strictly in order (D5).
 
     Same-container stateful tools collapse into one sequential coroutine so the
     batch's gather still sees a single awaitable per group; results stay aligned
     to the group's slot order. T2's configurable default timeout flows to each
-    `_safe_dispatch`.
+    `_safe_dispatch`. Each entry carries the measured dispatch duration in
+    milliseconds (trace-tool-spans D1) so backfill can record a tool_call span.
     """
-    out: list[tuple[str, bool]] = []
+    out: list[tuple[str, bool, float]] = []
     for slot in slots:
+        start = time.monotonic()
         if slot.runner is not None:
-            out.append(await slot.runner())
+            content, failed = await slot.runner()
         else:
-            out.append(
-                await _safe_dispatch(
-                    slot.name,
-                    slot.args,
-                    is_sub_agent,
-                    token,
-                    tool_context,
-                    user_id=user_id,
-                    default_timeout=default_tool_timeout,
-                )
+            content, failed = await _safe_dispatch(
+                slot.name,
+                slot.args,
+                is_sub_agent,
+                token,
+                tool_context,
+                user_id=user_id,
+                default_timeout=default_tool_timeout,
             )
+        duration_ms = (time.monotonic() - start) * 1000
+        out.append((content, failed, duration_ms))
     return out
 
 
@@ -599,8 +577,9 @@ async def _execute_pending(
     user_id: str,
     parallel_max: int,
     default_tool_timeout: float | None = None,
-) -> dict[str, tuple[str, bool]]:
-    """Phase two (D1/D5/D7): run pending slots concurrently, return id→(text,failed).
+) -> tuple[dict[str, tuple[str, bool]], dict[str, float]]:
+    """Phase two (D1/D5/D7): run pending slots concurrently, return id→(text,failed)
+    plus id→duration_ms (trace-tool-spans D1, for the backfill tool_call span).
 
     Slots sharing a D5 resource key are collapsed into one serial coroutine (group),
     so a group occupies a single gather slot; free slots each occupy their own.
@@ -626,6 +605,7 @@ async def _execute_pending(
         group.append(slot)
 
     results: dict[str, tuple[str, bool]] = {}
+    durations: dict[str, float] = {}
     batch_size = parallel_max if parallel_max > 1 else 1
     for start in range(0, len(groups), batch_size):
         batch = groups[start : start + batch_size]
@@ -644,8 +624,10 @@ async def _execute_pending(
         )
         for group, group_results in zip(batch, gathered, strict=True):
             for slot, res in zip(group, group_results, strict=True):
-                results[slot.tc_id] = res
-    return results
+                content, failed, duration_ms = res
+                results[slot.tc_id] = (content, failed)
+                durations[slot.tc_id] = duration_ms
+    return results, durations
 
 
 async def _plan_run_slots(
@@ -668,6 +650,8 @@ async def _plan_run_slots(
     outbound_connectors: dict[str, Any] | None = None,
     sandbox_effective_mode: Mode | None = None,
     sandbox_workspace_mount: bool = False,
+    conversation_address: ConversationAddress | None = None,
+    tool_context: ToolContext | None = None,
 ) -> list[_PlanSlot]:
     """Phase one for run() (D2/D3/D6): serial, original order — produce one slot
     per tool_call. Guardrail, pre_tool_use hook, and (medium/high) approval are decided
@@ -775,10 +759,21 @@ async def _plan_run_slots(
             if hres.modified_args is not None:
                 slot_args = hres.modified_args
             force_ask = hres.decision == "ask"
-        # Action Gate (C2): the tool's registry risk (never LLM args — anti-escape) maps
-        # to a disposition. CRITICAL is hardcoded REJECT; medium/high follow the agent's
-        # configured mode (default approval); unknown/uncontainable fail closed upward.
+        # Action Gate (C2): the tool's registry risk maps to a disposition. CRITICAL is
+        # hardcoded REJECT; medium/high follow the agent's configured mode (default
+        # approval); unknown/uncontainable fail closed upward. A callable risk
+        # (permission-gate D7) is evaluated here with the parsed args + tool_context — the
+        # risk fn may only RAISE risk on system facts (e.g. send_file's chat scope), never
+        # let LLM args lower it below the gate; a broken fn fails closed to medium.
         risk = get_risk_level(name)
+        if is_dynamic_risk(name):
+            try:
+                _risk_args = json.loads(slot_args) if isinstance(slot_args, str) else slot_args
+            except Exception:  # noqa: BLE001 — unparseable args: evaluate with empty mapping
+                _risk_args = {}
+            risk = evaluate_risk_level(
+                name, _risk_args if isinstance(_risk_args, dict) else {}, tool_context
+            )
         gate_mode = resolve_action_mode(
             risk,
             medium_mode=(
@@ -837,6 +832,13 @@ async def _plan_run_slots(
                         "tool_args": tool_args,
                         "risk": risk,
                         "approver_ids": sorted(_default_gate.authorized_actors(approval_id)),
+                        # conversation-address: persist the run's delivery target so any
+                        # resume entry rebuilds an equivalent context (None for non-IM runs).
+                        **(
+                            {"address": conversation_address.to_dict()}
+                            if conversation_address is not None
+                            else {}
+                        ),
                     }
                 )
                 slots.append(
@@ -888,10 +890,13 @@ async def _backfill_slots(
     session_id: str | None = None,
     agent_name: str | None = None,
     user_id: str = "default",
+    run_id: str | None = None,
+    durations: dict[str, float] | None = None,
 ) -> None:
     """Phase three (D1/D4): serial, original `tool_calls` order. Append each tool
-    message, record the call into the loop-detection window, and fold
-    `consecutive_failures` per-result — identical to sequential per-tool updates.
+    message, record the call into the loop-detection window, fold
+    `consecutive_failures` per-result — identical to sequential per-tool updates —
+    and emit a `tool_call` trace span for each real execution (trace-tool-spans).
     """
     from fleetent.runtime import hooks
     from fleetent.runtime.hooks import HookContext
@@ -950,6 +955,39 @@ async def _backfill_slots(
             not failed,
             window=loop_checker.window,
         )
+        # trace-tool-spans: emit a tool_call span only for real executions — placeholders
+        # (guardrail/approval/deny) never reach here as executed work.
+        if not is_placeholder:
+            _record_tool_call_span(
+                run_id=run_id,
+                session_id=session_id,
+                slot=slot,
+                failed=failed,
+                duration_ms=(durations or {}).get(slot.tc_id, 0.0),
+            )
+
+
+def _record_tool_call_span(
+    *,
+    run_id: str | None,
+    session_id: str | None,
+    slot: _PlanSlot,
+    failed: bool,
+    duration_ms: float,
+) -> None:
+    """Record one executed tool call as a tool_call trace span (best-effort)."""
+    record_tool_call(
+        run_id or "",
+        session_id,
+        {
+            "tool_name": slot.name,
+            "tool_call_id": slot.tc_id,
+            "args_summary": build_tool_args_summary(slot.args),
+            "failed": failed,
+            "duration_ms": round(duration_ms, 3),
+            "risk": get_risk_level(slot.name),
+        },
+    )
 
 
 async def _apply_output_transform(
@@ -1442,7 +1480,9 @@ def _append_system_context(messages: list[Any], system_prompt: str, context_text
     messages.insert(0, {"role": "system", "content": f"{system_prompt}\n\n{addition}"})
 
 
-def _record_injected_context(run_id: str, sources: list[ContextSource]) -> None:
+def _record_injected_context(
+    run_id: str, sources: list[ContextSource], session_id: str | None = None
+) -> None:
     if not sources:
         return
     record_injected_context(
@@ -1457,6 +1497,7 @@ def _record_injected_context(run_id: str, sources: list[ContextSource]) -> None:
             )
             for source in sources
         ],
+        session_id=session_id,
     )
 
 
@@ -1471,6 +1512,7 @@ def _record_agent_run_completed(
     model_used: str,
     user_id: str,
     agent_name: str | None,
+    session_id: str | None = None,
 ) -> None:
     payload: dict[str, Any] = {
         "input": user_input,
@@ -1495,7 +1537,8 @@ def _record_agent_run_completed(
             event_type="agent_run_completed",
             payload=payload,
             user_id=user_id,
-            agent_id=agent_name,
+            agent_name=agent_name,
+            session_id=session_id,
         )
     )
 
@@ -1533,6 +1576,7 @@ async def run(
     outbound_connectors: dict[str, Any] | None = None,
     progress_func: ProgressFunc | None = None,
     session_context: Any = None,
+    conversation_address: ConversationAddress | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
@@ -1589,6 +1633,7 @@ async def run(
             outbound_connectors=outbound_connectors,
             progress_func=progress_func,
             session_context=session_context,
+            conversation_address=conversation_address,
         )
     finally:
         _active_runs -= 1
@@ -1625,6 +1670,7 @@ async def _run_inner(
     outbound_connectors: dict[str, Any] | None = None,
     progress_func: ProgressFunc | None = None,
     session_context: Any = None,
+    conversation_address: ConversationAddress | None = None,
 ) -> str:
     # Image-bearing messages route to the vision model (D6); raises here if
     # images are present but no vision route is configured, before any LLM call.
@@ -1671,6 +1717,7 @@ async def _run_inner(
         agent_name=agent_name,
         features=agent_features or {},
         session_id=session_id,
+        scope_key=_resolve_scope_key(session_id, agent_name),
         session_context=session_context,
         principal=principal,
         outbound_connectors=outbound_connectors or {},
@@ -1687,7 +1734,7 @@ async def _run_inner(
             user_id, user_input, agent_name or "", active_cfg.max_tokens or 4096
         )
         _append_system_context(messages, system_prompt, built_context.text)
-        _record_injected_context(run_id, built_context.sources)
+        _record_injected_context(run_id, built_context.sources, session_id=session_id)
     except Exception as exc:  # noqa: BLE001 — long-term context is auxiliary
         _logger.debug("long_term_context_skipped", error=str(exc))
     # approval-suspend-resume D6: make the model aware of any outstanding approval so
@@ -1733,13 +1780,13 @@ async def _run_inner(
     # None → a never-cancelling default token, keeping the no-token path identical.
     token = cancel_token if cancel_token is not None else CancelToken()
     budget_config = _resolve_budget_config(max_turns, max_tokens, governance)
-    budget_usage = BudgetUsage()
+    run_usage = BudgetUsage()
     controller, loop_checker, budget_checker = _build_controller(
         max_turns,
         max_consecutive_failures,
         include_approval=True,
         budget_config=budget_config,
-        budget_usage=budget_usage,
+        run_usage=run_usage,
         loop_repeat_threshold=loop_repeat_threshold,
         loop_ignore_arg_keys=loop_ignore_arg_keys,
         cancel_token=token,
@@ -1752,12 +1799,6 @@ async def _run_inner(
     parallel_max = _resolve_parallel_max(governance)
     default_tool_timeout = _resolve_default_tool_timeout(governance)
     flap_state = _load_flap_state(session_id)
-    layered_checker, layered_store, layered_keys = _setup_layered_budget(
-        session_id, user_id, agent_name, governance
-    )
-    if layered_checker is not None:
-        controller.register(layered_checker)
-
     empty_reply_retries = 0  # T2-2: bounded self-correction for blank final replies
     while True:
         forced = controller.should_stop(state)
@@ -1863,13 +1904,7 @@ async def _run_inner(
         # BudgetChecker judges on up-to-date usage at the next checkpoint — not on a
         # single end-of-loop response.usage. Compression's internal LLM never reaches
         # here, so it is exempt by construction (D4).
-        _budget_add(budget_usage, response.usage)
-        _layered_budget_add(
-            layered_store,
-            layered_keys,
-            getattr(response.usage, "prompt_tokens", 0),
-            getattr(response.usage, "completion_tokens", 0),
-        )
+        _budget_add(run_usage, response.usage)
         route_chain = (active_cfg,)  # stick with the winning target for subsequent turns
         choice = response.choices[0]
         msg = choice.message
@@ -1939,6 +1974,8 @@ async def _run_inner(
             outbound_connectors=outbound_connectors,
             sandbox_effective_mode=sandbox_mode,
             sandbox_workspace_mount=sandbox_workspace_mount,
+            conversation_address=conversation_address,
+            tool_context=tool_context,
         )
         pending = [s for s in slots if s.placeholder is None]
         # Progress is emitted once per execution batch (not per tool during planning):
@@ -1950,7 +1987,7 @@ async def _run_inner(
                 await progress_func({"type": "tool_call", "names": _names, "name": _names[0]})
             except Exception:  # noqa: BLE001 — progress feedback must not break the run
                 pass
-        results = await _execute_pending(
+        results, durations = await _execute_pending(
             pending,
             is_sub_agent=is_sub_agent,
             token=token,
@@ -1969,6 +2006,8 @@ async def _run_inner(
             session_id=session_id,
             agent_name=agent_name,
             user_id=user_id,
+            run_id=run_id,
+            durations=durations,
         )
 
         # approval-suspend-resume: a gated tool call wrote an awaiting_human_approval
@@ -1994,14 +2033,9 @@ async def _run_inner(
     budget_scope: str | None = None
     if stop_reason == StopReason.budget_exceeded:
         # Grace Call (D3): a final summarizing call instead of a hard cut. Its own
-        # usage is NOT folded into budget_usage (D4/D6: it spends the reserved
+        # usage is NOT folded into the per-run usage tracker (D4/D6: it spends the reserved
         # dimension). Failure degrades to the partial reply already accumulated.
         budget_dimension = budget_checker.triggered_dimension
-        # AR18: a layered (cross-run) scope may be the trigger instead of the
-        # per-run AR2 budget; record the scope and its dimension for the trace.
-        if layered_checker is not None and layered_checker.triggered_scope is not None:
-            budget_scope = layered_checker.triggered_scope
-            budget_dimension = budget_dimension or layered_checker.triggered_dimension
         reply = await _grace_call(
             _build_async_client(active_cfg, policy.require_api_key(active_cfg)),
             active_cfg,
@@ -2042,6 +2076,7 @@ async def _run_inner(
             model_used=model_used,
             user_id=user_id,
             agent_name=agent_name,
+            session_id=session_id,
         )
     except Exception as exc:  # noqa: BLE001 — completion trace is auxiliary
         _logger.debug("agent_run_completed_trace_skipped", error=str(exc))
@@ -2212,6 +2247,7 @@ async def run_stream(
         agent_name=agent_name,
         features=agent_features or {},
         session_id=session_id,
+        scope_key=_resolve_scope_key(session_id, agent_name),
         session_context=session_context,
         principal=principal,
     )
@@ -2266,7 +2302,7 @@ async def run_stream(
             user_id, user_input, agent_name or "", active_cfg.max_tokens or 4096
         )
         _append_system_context(messages, system_prompt, built_context.text)
-        _record_injected_context(run_id, built_context.sources)
+        _record_injected_context(run_id, built_context.sources, session_id=session_id)
     except Exception as exc:  # noqa: BLE001 — long-term context is auxiliary
         _logger.debug("long_term_context_skipped", error=str(exc))
     reply = ""
@@ -2295,13 +2331,13 @@ async def run_stream(
 
     token = cancel_token if cancel_token is not None else CancelToken()
     budget_config = _resolve_budget_config(max_turns, max_tokens, governance)
-    budget_usage = BudgetUsage()
+    run_usage = BudgetUsage()
     controller, loop_checker, budget_checker = _build_controller(
         max_turns,
         max_consecutive_failures,
         include_approval=False,
         budget_config=budget_config,
-        budget_usage=budget_usage,
+        run_usage=run_usage,
         loop_repeat_threshold=loop_repeat_threshold,
         loop_ignore_arg_keys=loop_ignore_arg_keys,
         cancel_token=token,
@@ -2314,12 +2350,6 @@ async def run_stream(
     parallel_max = _resolve_parallel_max(governance)
     default_tool_timeout = _resolve_default_tool_timeout(governance)
     flap_state = _load_flap_state(session_id)
-    layered_checker, layered_store, layered_keys = _setup_layered_budget(
-        session_id, user_id, agent_name, governance
-    )
-    if layered_checker is not None:
-        controller.register(layered_checker)
-
     empty_reply_retries = 0  # T2-2: bounded self-correction for blank final replies
     while True:
         forced = controller.should_stop(state)
@@ -2487,8 +2517,7 @@ async def run_stream(
         # D1: settle this turn's usage into the per-run accumulator now (step +
         # tokens), so the BudgetChecker judges between turns rather than only
         # at the end of the whole run. Compression's LLM never reaches here (D4).
-        budget_usage.add(turn_prompt_tokens, turn_completion_tokens)
-        _layered_budget_add(layered_store, layered_keys, turn_prompt_tokens, turn_completion_tokens)
+        run_usage.add(turn_prompt_tokens, turn_completion_tokens)
 
         if finish_reason != "tool_calls":
             reply = "".join(reply_parts)
@@ -2614,7 +2643,7 @@ async def run_stream(
                 )
             )
         pending = [s for s in slots if s.placeholder is None]
-        results = await _execute_pending(
+        results, durations = await _execute_pending(
             pending,
             is_sub_agent=False,
             token=token,
@@ -2682,6 +2711,15 @@ async def run_stream(
                 not failed,
                 window=loop_checker.window,
             )
+            # trace-tool-spans: span only for real executions (run_stream parity with run).
+            if not is_placeholder:
+                _record_tool_call_span(
+                    run_id=run_id,
+                    session_id=session_id,
+                    slot=slot,
+                    failed=failed,
+                    duration_ms=durations.get(slot.tc_id, 0.0),
+                )
 
     budget_dimension: str | None = None
     budget_scope: str | None = None
@@ -2692,9 +2730,6 @@ async def run_stream(
         # then done; (b) failure after partial deltas → keep what streamed (cannot
         # be unsent), record degradation, then done. Both always reach `done`.
         budget_dimension = budget_checker.triggered_dimension
-        if layered_checker is not None and layered_checker.triggered_scope is not None:
-            budget_scope = layered_checker.triggered_scope
-            budget_dimension = budget_dimension or layered_checker.triggered_dimension
         partial_reply = reply
         grace_messages = [*messages, {"role": "user", "content": _GRACE_CALL_TEXT}]
         reserved = grace_max_tokens(budget_config.max_tokens)
@@ -2775,6 +2810,7 @@ async def run_stream(
             model_used=model_used,
             user_id=user_id,
             agent_name=agent_name,
+            session_id=session_id,
         )
     except Exception as exc:  # noqa: BLE001 — completion trace is auxiliary
         _logger.debug("agent_run_completed_trace_skipped", error=str(exc))

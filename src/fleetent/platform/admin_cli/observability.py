@@ -40,7 +40,7 @@ def handle(args: argparse.Namespace) -> bool:
             observability.TraceQuery(
                 run_id=args.run_id,
                 user_id=args.user_id,
-                agent_id=args.agent_id,
+                agent_name=args.agent_id,
                 session_id=args.session_id,
                 tenant_id=args.tenant_id,
                 event_type=args.event_type,
@@ -51,13 +51,13 @@ def handle(args: argparse.Namespace) -> bool:
         )
         print(
             f"{'TS':<25}  {'RUN_ID':<18}  {'EVENT_TYPE':<28}  "
-            f"{'USER_ID':<16}  {'AGENT_ID':<16}  {'SESSION_ID':<16}  PAYLOAD_KEYS"
+            f"{'USER_ID':<16}  {'AGENT_NAME':<16}  {'SESSION_ID':<16}  PAYLOAD_KEYS"
         )
         for event in events:
             print(
                 f"{format_optional(event.ts.isoformat() if event.ts else None):<25}  "
                 f"{event.run_id:<18}  {event.event_type:<28}  "
-                f"{format_optional(event.user_id):<16}  {format_optional(event.agent_id):<16}  "
+                f"{format_optional(event.user_id):<16}  {format_optional(event.agent_name):<16}  "
                 f"{format_optional(event.session_id):<16}  {payload_keys(event.payload)}"
             )
         return True
@@ -66,7 +66,7 @@ def handle(args: argparse.Namespace) -> bool:
         usage_summary = observability.get_usage_summary(
             observability.UsageQuery(
                 user_id=args.user_id,
-                agent_id=args.agent_id,
+                agent_name=args.agent_id,
                 tenant_id=args.tenant_id,
                 session_id=args.session_id,
                 start_ts=parse_iso_time(args.from_ts, "--from"),
@@ -102,7 +102,7 @@ def handle(args: argparse.Namespace) -> bool:
         performance_summary = observability.get_performance_summary(
             observability.PerformanceQuery(
                 user_id=args.user_id,
-                agent_id=args.agent_id,
+                agent_name=args.agent_id,
                 tenant_id=args.tenant_id,
                 session_id=args.session_id,
                 start_ts=parse_iso_time(args.from_ts, "--from"),

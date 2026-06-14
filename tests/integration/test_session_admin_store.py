@@ -4,6 +4,7 @@ import sqlite3
 
 import pytest
 
+from fleetent import agent_store
 from fleetent.platform.chat_management import session_admin_store as store
 from fleetent.session import manager as session_mgr
 from tests.integration._migration_template import apply_migrations
@@ -31,11 +32,16 @@ def test_meta_defaults(store_db):
     assert m["status"] == "active"
     assert m["takeover_actor"] is None
     assert m["pinned"] == 0
+    assert m["agent_id"] is None
+    assert m["agent_name"] is None
 
 
 def test_upsert_playground_origin(store_db):
-    store.upsert_meta("s1", origin="playground", agent_name="ops")
+    agent_id = agent_store.create_agent("ops", "Ops.", ["shell"]).id
+    store.upsert_meta("s1", origin="playground", agent_id=agent_id)
     assert store.get_meta("s1")["origin"] == "playground"
+    assert store.get_meta("s1")["agent_id"] == agent_id
+    assert store.get_meta("s1")["agent_name"] == "ops"
 
 
 def test_status_transitions(store_db):
@@ -71,6 +77,14 @@ def test_list_filter_by_user(store_db):
     store.upsert_meta("a", origin="web", user_id="u1")
     store.upsert_meta("b", origin="web", user_id="u2")
     assert {m["session_id"] for m in store.list_meta(user_id="u1")} == {"a"}
+
+
+def test_list_filter_by_agent_id(store_db):
+    ops = agent_store.create_agent("ops", "Ops.", ["shell"]).id
+    support = agent_store.create_agent("support", "Support.", ["shell"]).id
+    store.upsert_meta("a", origin="web", user_id="u1", agent_id=ops)
+    store.upsert_meta("b", origin="web", user_id="u1", agent_id=support)
+    assert {m["session_id"] for m in store.list_meta(agent_id=ops)} == {"a"}
 
 
 # --- session_mgr hooks ---

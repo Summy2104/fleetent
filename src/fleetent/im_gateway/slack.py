@@ -168,7 +168,7 @@ async def handle_approval_action(
     to prevent double-clicks, then the suspended run is resumed (approval-suspend-resume).
     """
     from fleetent.governance import approval_store
-    from fleetent.governance.permission_gate import _default_gate
+    from fleetent.governance.approval_router import resolve_approval_request
     from fleetent.session import manager as session_mgr
 
     await ack()
@@ -192,7 +192,7 @@ async def handle_approval_action(
         if pending and pending.get("approver_ids"):
             authorized = {str(a) for a in pending["approver_ids"]}
 
-    found = await _default_gate.resolve(
+    found = await resolve_approval_request(
         approval_id=approval_id,
         decision=decision,  # type: ignore[arg-type]
         approver_user_id=clicker,
@@ -377,6 +377,7 @@ async def _route_assistant_message(
     """
     from fleetent.im_gateway.access import IMIdentityResolutionError, resolve_identity
     from fleetent.im_gateway.normalizer import NormalizedMessage, SessionContext, route
+    from fleetent.outbound import ConversationAddress
 
     channel = getattr(context, "channel_id", None) or payload.get("channel") or ""
     thread_ts = getattr(context, "thread_ts", None)
@@ -441,6 +442,15 @@ async def _route_assistant_message(
         channel_id=channel,
         upload_func=_make_upload_func(client, channel, thread_ts),
         outbound_connectors={"slack": client},
+        conversation_address=ConversationAddress(
+            platform="slack",
+            chat_id=channel,
+            target_type="channel",
+            thread_id=thread_ts or payload.get("ts"),
+            user_id=slack_user_id,
+            chat_type="dm",
+            thread_root=thread_ts or payload.get("ts") or "",
+        ),
     )
     await route(msg)
 
@@ -505,6 +515,7 @@ def create_app(agent_name: str, config: dict[str, Any]) -> object:
     async def _handle(event: dict[str, Any], client: Any, say: Any = None) -> None:
         from fleetent.im_gateway.access import IMIdentityResolutionError, resolve_identity
         from fleetent.im_gateway.normalizer import NormalizedMessage, SessionContext, route
+        from fleetent.outbound import ConversationAddress
 
         channel = event.get("channel") or ""
         slack_user_id = event.get("user") or "unknown"
@@ -558,6 +569,15 @@ def create_app(agent_name: str, config: dict[str, Any]) -> object:
             channel_id=channel,
             upload_func=_make_upload_func(client, channel, reply_thread),
             outbound_connectors={"slack": client},
+            conversation_address=ConversationAddress(
+                platform="slack",
+                chat_id=channel,
+                target_type="channel",
+                thread_id=reply_thread,
+                user_id=slack_user_id,
+                chat_type="dm" if channel_type == "im" else "channel",
+                thread_root=reply_thread or "",
+            ),
         )
         await route(msg)
 

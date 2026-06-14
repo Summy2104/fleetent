@@ -196,14 +196,14 @@ Principal { user_id, tenant_id }
 - **`tenant_id`**:主体;核用它路由到该主体的物理库(§5.7);单机 = `default`。
 - **刻意精瘦**:`role` / 密码 / `scopes` / `display_name` 挡在端口外(edge/governance/platform 的事);**不带 team**——共享记忆/KB/审批都走 **agent 的归属 team**(配置),不需要请求者的 team(见 §6.5)。字段名沿用全库惯例(`user_id`/`tenant_id`),不用裸 `id`。
 
-**`Principal`(请求者) ≠ `AgentContextIdentity`(运行的 agent)** —— 核运行时同时握两个身份对象,别混:
+**`Principal`(请求者) ≠ agent identity(运行的 agent)** —— 核运行时同时握两个身份对象,别混:
 
 | 对象 | 是谁 | 字段 | 来源 |
 |---|---|---|---|
 | `Principal` | 请求者(谁在问) | `{ user_id, tenant_id }` | edge 从凭证解析 |
-| `AgentContextIdentity` | 运行的 agent | `{ agent_id, tenant_id, team_id }` | agent 配置/定义 |
+| agent identity | 运行的 agent | `{ agent_id, tenant_id, team_id }` | agent 配置/定义 |
 
-- **`team_id` 只在 `AgentContextIdentity`**(= **agent 的归属 team**,驱动共享记忆 team-scope);**用户的 team 不带**——所以 "Principal 不带 team" 与 `long_term_ctx` 用 `AgentContextIdentity.team_id` **不冲突**(那是 agent 的 team)。
+- **`team_id` 只在 agent identity**(= **agent 的归属 team**,驱动共享记忆 team-scope);**用户的 team 不带**——所以 "Principal 不带 team" 与 long-term context / shared memory 读取 agent 的 `team_id` **不冲突**(那是 agent 的 team)。
 - **两个 `tenant_id`**:edge 校验 `Principal.tenant_id == agent 主体`(**跨主体不许访问**);核**物理路由按 agent 的主体**开库(经校验后二者相等)。Principal 留 `tenant_id` 供 edge 校验 + 审计 + 防御性核对。
 
 ### 6.4 一条流程(Slack 消息)

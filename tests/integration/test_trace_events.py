@@ -265,7 +265,7 @@ def test_query_trace_events_filters_by_run_user_agent_tenant_event_time_and_limi
             ts=base_ts,
             session_id="session-1",
             user_id="user-1",
-            agent_id="agent-1",
+            agent_name="agent-1",
             tenant_id="tenant-1",
         ),
         TraceEvent(
@@ -276,7 +276,7 @@ def test_query_trace_events_filters_by_run_user_agent_tenant_event_time_and_limi
             ts=base_ts + timedelta(minutes=1),
             session_id="session-2",
             user_id="user-1",
-            agent_id="agent-1",
+            agent_name="agent-1",
             tenant_id="tenant-1",
         ),
         TraceEvent(
@@ -287,7 +287,7 @@ def test_query_trace_events_filters_by_run_user_agent_tenant_event_time_and_limi
             ts=base_ts + timedelta(minutes=2),
             session_id="session-2",
             user_id="user-2",
-            agent_id="agent-2",
+            agent_name="agent-2",
             tenant_id="tenant-2",
         ),
     ]
@@ -307,7 +307,7 @@ def test_query_trace_events_filters_by_run_user_agent_tenant_event_time_and_limi
         event.id
         for event in query_trace_events(
             TraceQuery(
-                agent_id="agent-1",
+                agent_name="agent-1",
                 tenant_id="tenant-1",
                 event_type="agent_run_completed",
                 start_ts=base_ts + timedelta(seconds=30),

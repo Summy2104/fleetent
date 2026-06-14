@@ -8,6 +8,7 @@ import sqlite3
 
 import pytest
 
+from fleetent import agent_store
 from fleetent.platform.skill_management import skill_admin_store
 from tests.integration._migration_template import apply_migrations
 
@@ -54,17 +55,20 @@ def test_skill_provenance_columns(store_db):
 
 
 def test_set_binding_and_list(store_db):
-    skill_admin_store.set_binding("agent-a", "summarizer", enabled=True, updated_by="admin")
-    skill_admin_store.set_binding("agent-b", "summarizer", enabled=False, updated_by="admin")
+    agent_a = agent_store.create_agent("agent-a", "Prompt.", ["shell"])
+    agent_b = agent_store.create_agent("agent-b", "Prompt.", ["shell"])
+    skill_admin_store.set_binding(agent_a.id, "summarizer", enabled=True, updated_by="admin")
+    skill_admin_store.set_binding(agent_b.id, "summarizer", enabled=False, updated_by="admin")
     agents = skill_admin_store.list_agents_for_skill("summarizer")
     by_id = {a["agent_id"]: a for a in agents}
-    assert by_id["agent-a"]["enabled"] == 1
-    assert by_id["agent-b"]["enabled"] == 0
+    assert by_id[agent_a.id]["enabled"] == 1
+    assert by_id[agent_b.id]["enabled"] == 0
 
 
 def test_set_binding_is_idempotent(store_db):
-    skill_admin_store.set_binding("agent-a", "summarizer", enabled=True, updated_by="admin")
-    skill_admin_store.set_binding("agent-a", "summarizer", enabled=False, updated_by="admin2")
+    agent = agent_store.create_agent("agent-a", "Prompt.", ["shell"])
+    skill_admin_store.set_binding(agent.id, "summarizer", enabled=True, updated_by="admin")
+    skill_admin_store.set_binding(agent.id, "summarizer", enabled=False, updated_by="admin2")
     agents = skill_admin_store.list_agents_for_skill("summarizer")
     assert len(agents) == 1
     assert agents[0]["enabled"] == 0
@@ -72,29 +76,51 @@ def test_set_binding_is_idempotent(store_db):
 
 
 def test_list_skills_for_agent(store_db):
-    skill_admin_store.set_binding("agent-a", "summarizer", enabled=True, updated_by="admin")
-    skill_admin_store.set_binding("agent-a", "translator", enabled=True, updated_by="admin")
-    names = {s["skill_name"] for s in skill_admin_store.list_skills_for_agent("agent-a")}
+    agent = agent_store.create_agent("agent-a", "Prompt.", ["shell"])
+    skill_admin_store.set_binding(agent.id, "summarizer", enabled=True, updated_by="admin")
+    skill_admin_store.set_binding(agent.id, "translator", enabled=True, updated_by="admin")
+    names = {s["skill_name"] for s in skill_admin_store.list_skills_for_agent(agent.id)}
     assert names == {"summarizer", "translator"}
 
 
 def test_agents_enabling_returns_only_enabled(store_db):
-    skill_admin_store.set_binding("agent-a", "summarizer", enabled=True, updated_by="admin")
-    skill_admin_store.set_binding("agent-b", "summarizer", enabled=False, updated_by="admin")
+    agent_a = agent_store.create_agent("agent-a", "Prompt.", ["shell"])
+    agent_b = agent_store.create_agent("agent-b", "Prompt.", ["shell"])
+    skill_admin_store.set_binding(agent_a.id, "summarizer", enabled=True, updated_by="admin")
+    skill_admin_store.set_binding(agent_b.id, "summarizer", enabled=False, updated_by="admin")
     enabling = skill_admin_store.agents_enabling("summarizer")
-    assert enabling == ["agent-a"]
+    assert enabling == [agent_a.id]
 
 
 def test_has_any_binding(store_db):
-    assert skill_admin_store.has_any_binding("agent-a") is False
-    skill_admin_store.set_binding("agent-a", "summarizer", enabled=False, updated_by="admin")
-    assert skill_admin_store.has_any_binding("agent-a") is True
+    agent = agent_store.create_agent("agent-a", "Prompt.", ["shell"])
+    assert skill_admin_store.has_any_binding(agent.id) is False
+    skill_admin_store.set_binding(agent.id, "summarizer", enabled=False, updated_by="admin")
+    assert skill_admin_store.has_any_binding(agent.id) is True
 
 
 def test_enabled_skill_names(store_db):
-    skill_admin_store.set_binding("agent-a", "summarizer", enabled=True, updated_by="admin")
-    skill_admin_store.set_binding("agent-a", "translator", enabled=False, updated_by="admin")
-    assert skill_admin_store.enabled_skill_names("agent-a") == {"summarizer"}
+    agent = agent_store.create_agent("agent-a", "Prompt.", ["shell"])
+    skill_admin_store.set_binding(agent.id, "summarizer", enabled=True, updated_by="admin")
+    skill_admin_store.set_binding(agent.id, "translator", enabled=False, updated_by="admin")
+    assert skill_admin_store.enabled_skill_names(agent.id) == {"summarizer"}
+
+
+def test_integer_agent_id_crud(store_db):
+    agent = agent_store.create_agent("agent-seven", "Prompt.", ["shell"])
+    skill_admin_store.set_binding(agent.id, "summarizer", enabled=True, updated_by="admin")
+    skill_admin_store.set_binding(agent.id, "translator", enabled=False, updated_by="admin")
+
+    agents = skill_admin_store.list_agents_for_skill("summarizer")
+    by_id = {a["agent_id"]: a for a in agents}
+
+    assert by_id[agent.id]["enabled"] == 1
+    assert {s["skill_name"] for s in skill_admin_store.list_skills_for_agent(agent.id)} == {
+        "summarizer",
+        "translator",
+    }
+    assert skill_admin_store.has_any_binding(agent.id) is True
+    assert skill_admin_store.enabled_skill_names(agent.id) == {"summarizer"}
 
 
 # --- 3. provenance + drift ---

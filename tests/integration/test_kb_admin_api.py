@@ -10,6 +10,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import fleetent.agent_store as agent_store
 import fleetent.auth as auth
 import fleetent.governance.audit_log as audit
 import fleetent.platform.knowledge_base_management.agent_kbs_store as kbs_store
@@ -73,7 +74,7 @@ def host_wired_client(tmp_path, monkeypatch):
 
 
 def _session_for(role: str) -> tuple[str, str]:
-    u = user_store.create_user(f"{role}-user")
+    u, _ = user_store.create_user(f"{role}-user")
     user_store.set_role(u.id, role)
     return auth.create_session(u.id), u.id
 
@@ -371,11 +372,12 @@ def test_retrieval_empty_kb_ids_422(client, monkeypatch):
 
 
 def test_archive_blocked_when_bound(client):
-    kbs_store.bind("default", "sales", "agent-a")
+    agent = agent_store.create_agent("agent-a", "Prompt.", ["shell"])
+    kbs_store.bind("default", "sales", agent.id)
     token, _ = _session_for("admin")
     r = client.delete("/admin/kb/sales", headers=_hdr(token, confirm=True))
     assert r.status_code == 409
-    assert "agent-a" in r.json()["detail"]["agents"]
+    assert agent.id in r.json()["detail"]["agents"]
 
 
 def test_archive_requires_confirm_when_unbound(client):
@@ -387,9 +389,10 @@ def test_archive_requires_confirm_when_unbound(client):
 
 
 def test_unbind_then_archive_succeeds(client):
-    kbs_store.bind("default", "sales", "agent-a")
+    agent = agent_store.create_agent("agent-a", "Prompt.", ["shell"])
+    kbs_store.bind("default", "sales", agent.id)
     token, _ = _session_for("admin")
-    client.delete("/admin/kb/sales/agents/agent-a", headers=_hdr(token))
+    client.delete(f"/admin/kb/sales/agents/{agent.id}", headers=_hdr(token))
     r = client.delete("/admin/kb/sales", headers=_hdr(token, confirm=True))
     assert r.status_code == 200
 
@@ -446,12 +449,13 @@ def test_host_wired_archive_updates_visibility_search_and_binding(host_wired_cli
     bind = host_wired_client.post(
         "/admin/kb/support/agents",
         headers=_hdr(token),
-        json={"agent_id": "agent-a"},
+        json={"agent_id": 1},
     )
     assert bind.status_code == 409
 
-    kbs_store.bind("default", "support", "agent-stale")
-    reverse = host_wired_client.get("/admin/kb/by-agent/agent-stale", headers=_hdr(token))
+    stale_agent = agent_store.create_agent("agent-stale", "Prompt.", ["shell"])
+    kbs_store.bind("default", "support", stale_agent.id)
+    reverse = host_wired_client.get(f"/admin/kb/by-agent/{stale_agent.id}", headers=_hdr(token))
     assert reverse.status_code == 200
     assert reverse.json()["kb_ids"] == []
 
@@ -523,11 +527,12 @@ def test_delete_document_viewer_forbidden(client):
 
 
 def test_bind_and_reverse_lookup_consistent(client):
+    agent = agent_store.create_agent("agent-a", "Prompt.", ["shell"])
     token, _ = _session_for("admin")
-    client.post("/admin/kb/sales/agents", headers=_hdr(token), json={"agent_id": "agent-a"})
+    client.post("/admin/kb/sales/agents", headers=_hdr(token), json={"agent_id": agent.id})
     fwd = client.get("/admin/kb/sales/agents", headers=_hdr(token)).json()
-    rev = client.get("/admin/kb/by-agent/agent-a", headers=_hdr(token)).json()
-    assert fwd["agents"] == ["agent-a"]
+    rev = client.get(f"/admin/kb/by-agent/{agent.id}", headers=_hdr(token)).json()
+    assert fwd["agents"] == [agent.id]
     assert rev["kb_ids"] == ["sales"]
 
 
@@ -543,15 +548,16 @@ def test_eval_entry_read_only_for_viewer(client, monkeypatch):
 
 
 def test_kbs_for_agent_filters_archived(client, monkeypatch):
+    agent = agent_store.create_agent("agent-a", "Prompt.", ["shell"])
     monkeypatch.setattr(
         api,
         "kb_engine_list",
         lambda tenant_id: [{"kb_id": "live"}, {"kb_id": "old", "archived": True}],
     )
-    kbs_store.bind("default", "live", "agent-a")
-    kbs_store.bind("default", "old", "agent-a")
+    kbs_store.bind("default", "live", agent.id)
+    kbs_store.bind("default", "old", agent.id)
     token, _ = _session_for("admin")
-    rev = client.get("/admin/kb/by-agent/agent-a", headers=_hdr(token)).json()
+    rev = client.get(f"/admin/kb/by-agent/{agent.id}", headers=_hdr(token)).json()
     assert rev["kb_ids"] == ["live"]  # archived "old" filtered out
 
 

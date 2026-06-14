@@ -20,10 +20,8 @@ from pydantic import BaseModel
 from fleetent import agent_config, agent_store, user_store
 from fleetent.auth import seed_builtin_admin
 from fleetent.config import Settings, configure_logging
-from fleetent.governance.permission_gate import (
-    _default_gate,
-    list_approvals,
-)
+from fleetent.governance.approval_router import resolve_approval_request
+from fleetent.governance.permission_gate import list_approvals
 from fleetent.identity import Principal
 from fleetent.im_gateway.access import IMIdentityResolutionError, set_im_identity_resolver
 from fleetent.im_gateway.slack_supervisor import SlackSupervisor
@@ -38,7 +36,6 @@ from fleetent.observability.startup_diagnostics import (
 from fleetent.platform.agent_lifecycle import lifecycle_admin_api, materialize
 from fleetent.platform.agent_management_console import (
     agent_admin_api,
-    agent_admin_store,
     agent_console_api,
 )
 from fleetent.platform.agent_statistics import stats_admin_api
@@ -249,6 +246,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             maint.shutdown(wait=False)
     except Exception as exc:
         logger.warning("platform_maintenance_scheduler_shutdown_failed error=%s", exc)
+    # Release MCP session hosts (platform registers global servers via register_all). Each
+    # host tears down on its own task; failures are contained inside aclose_all().
+    try:
+        from fleetent.integrations import mcp
+
+        await mcp.aclose_all()
+    except Exception as exc:  # noqa: BLE001 — containment: shutdown must not raise
+        logger.warning("mcp_aclose_all_failed error=%s", exc)
     finally:
         set_im_identity_resolver(None)
 
@@ -384,10 +389,6 @@ def wire_agent_store_seams() -> None:
     def _console_delete(name: str) -> bool:
         return agent_store.delete_agent(name)
 
-    def _console_rename(old_name: str, new_name: str) -> None:
-        agent_store.rename_agent(old_name, new_name)
-        agent_admin_store.rename(old_name, new_name)
-
     def _apply_create(name: str, system_prompt: str, allowed_tools: list[str]) -> int:
         agent_id = agent_store.create_agent(name, system_prompt, allowed_tools).id
         materialize.materialize_from_store(name)
@@ -401,7 +402,6 @@ def wire_agent_store_seams() -> None:
     agent_console_api.create_agent_def = _console_create
     agent_console_api.update_agent_def = _console_update
     agent_console_api.delete_agent_def = _console_delete
-    agent_console_api.rename_agent_def = _console_rename
     agent_console_api.set_agent_icon = agent_store.set_icon
     agent_console_api.agent_icons = agent_store.icons_by_name
 
@@ -439,9 +439,12 @@ def agent_routing_status(agent_name: str) -> str:
     if not os.environ.get("DATABASE_URL"):
         return "enabled"
     try:
+        agent = agent_store.get_by_name(agent_name)
+        if agent is None:
+            return "enabled"
         from fleetent.platform.agent_management_console import agent_admin_store
 
-        return str(agent_admin_store.get_state(agent_name)["status"])
+        return str(agent_admin_store.get_state(agent.id)["status"])
     except Exception:  # noqa: BLE001 — advisory check, never block chat on failure
         logger.exception("agent_status_lookup_failed agent=%s", agent_name)
         return "enabled"
@@ -515,7 +518,7 @@ class ApprovalRequest(BaseModel):
 async def resolve_approval(approval_id: str, req: ApprovalRequest) -> dict:  # type: ignore[type-arg]
     if req.decision not in ("approved", "rejected"):
         raise HTTPException(status_code=400, detail="decision must be 'approved' or 'rejected'")
-    found = await _default_gate.resolve(
+    found = await resolve_approval_request(
         approval_id=approval_id,
         decision=req.decision,  # type: ignore[arg-type]
         approver_user_id=req.approver_user_id,

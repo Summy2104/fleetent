@@ -45,17 +45,37 @@ def create(
     anchor: str | None = None,
     origin: dict[str, Any] | None = None,
     deliver: dict[str, Any] | None = None,
+    task_type: str = "generate",
+    notify_text: str | None = None,
 ) -> dict[str, Any]:
     """Persist a scheduled task and return it as a dict.
 
     Positional params: name, cron_expr, timezone, user_id, message, source, session_id.
     The ``schedule_kind`` and one-shot/interval/delivery fields are keyword-only.
+
+    ``task_type`` (typed-scheduled-task-delivery) selects fire behavior:
+    - ``notify``   — scheduler sends the frozen ``notify_text`` verbatim, no agent run.
+    - ``generate`` — agent produces the notification body, scheduler delivers it (default).
+    - ``action``   — agent acts (sends via its own tools); the scheduler never broadcasts.
+    A ``notify`` task requires ``notify_text`` and a resolvable delivery target; ``generate``
+    / ``action`` require ``message``.
     """
+    if task_type not in ("notify", "generate", "action"):
+        raise ValueError(f"invalid task_type: {task_type!r} (notify/generate/action)")
+    if task_type == "notify":
+        if not notify_text:
+            raise ValueError("notify task requires notify_text (the frozen notification copy)")
+        if deliver is None and origin is None:
+            raise ValueError("notify task requires a delivery target (deliver or origin)")
+    elif not message:
+        raise ValueError(f"{task_type} task requires message (the agent prompt)")
     task_id = str(uuid.uuid4())
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     row = {
         "id": task_id,
         "name": name,
+        "task_type": task_type,
+        "notify_text": notify_text,
         "schedule_kind": schedule_kind,
         "cron_expr": cron_expr,
         "run_at": run_at,
@@ -78,11 +98,13 @@ def create(
     with _database().transaction() as conn:
         conn.execute(
             "INSERT INTO scheduled_tasks ("
-            "id, name, schedule_kind, cron_expr, run_at, interval_seconds, anchor, "
+            "id, name, task_type, notify_text, schedule_kind, cron_expr, run_at, "
+            "interval_seconds, anchor, "
             "timezone, user_id, message, session_id, origin, deliver, "
             "enabled, source, created_at, last_run_at, last_status, last_error, next_run_at"
             ") VALUES ("
-            ":id, :name, :schedule_kind, :cron_expr, :run_at, :interval_seconds, :anchor, "
+            ":id, :name, :task_type, :notify_text, :schedule_kind, :cron_expr, :run_at, "
+            ":interval_seconds, :anchor, "
             ":timezone, :user_id, :message, :session_id, :origin, :deliver, "
             ":enabled, :source, :created_at, :last_run_at, :last_status, :last_error, :next_run_at"
             ")",
@@ -102,9 +124,11 @@ def list_tasks(include_disabled: bool = False) -> list[dict[str, Any]]:
 
 def get(task_id: str) -> dict[str, Any] | None:
     """Return a single task by id, or None."""
-    row = _database().execute(
-        "SELECT * FROM scheduled_tasks WHERE id = :id", {"id": task_id}
-    ).fetchone()
+    row = (
+        _database()
+        .execute("SELECT * FROM scheduled_tasks WHERE id = :id", {"id": task_id})
+        .fetchone()
+    )
     return _decode(dict(row)) if row is not None else None
 
 

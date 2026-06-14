@@ -287,7 +287,7 @@ def _record_skill_hit(name: str, tool_context: ToolContext | None) -> None:
     """
     from fleetent.observability.traces import TraceEvent, record_trace_event
 
-    agent_id = tool_context.agent_name if tool_context else None
+    agent_name = tool_context.agent_name if tool_context else None
     session_id = tool_context.session_id if tool_context else None
     try:
         record_trace_event(
@@ -296,7 +296,7 @@ def _record_skill_hit(name: str, tool_context: ToolContext | None) -> None:
                 event_type="skill_hit",
                 payload={"skill_name": name},
                 session_id=session_id,
-                agent_id=agent_id,
+                agent_name=agent_name,
             )
         )
     except Exception as exc:  # noqa: BLE001 — observability is a side channel; never block
@@ -499,15 +499,30 @@ async def schedule(
     notify_platform: str = "",
     notify_target: str = "",
     notify_target_type: str = "user",
+    task_type: str = "generate",
+    notify_text: str = "",
     tool_context: ToolContext | None = None,
 ) -> str:
     """Manage scheduled tasks. ``action`` is one of create/list/remove/run_now/pause/resume.
 
     create: schedule_kind=cron (cron_expr like '0 9 * * 1-5'), once (run_at: ISO time or
-    a relative duration like '+30m'), or interval (interval_seconds). The fired reply is
-    delivered to notify_platform/notify_target (target_type user|channel) when given;
-    otherwise it defaults back to the chat/thread the task was created in. pause/resume
-    toggle a task; remove deletes it; run_now fires it immediately; list shows all tasks.
+    a relative duration like '+30m'), or interval (interval_seconds). Deliver target:
+    notify_platform/notify_target (target_type user|channel); else defaults to the chat the
+    task was created in.
+
+    Pick task_type by asking: **does the message content need information only known at send
+    time?**
+    - No, fixed wording → ``task_type="notify"``: provide the final polished copy in
+      ``notify_text`` (NOT message). At creation time, refine the user's rough wording into
+      the final copy, echo it back for confirmation, then create — at fire time the scheduler
+      sends ``notify_text`` verbatim, no model run.
+    - Yes, content made at fire time (summaries, fresh data) → ``task_type="generate"`` (default):
+      put the instruction in ``message``; your fired reply IS what gets posted.
+    - The task performs actions (send DMs/files, conditional/multi-target) → ``task_type="action"``:
+      put the instruction in ``message``; you act via your own tools and the scheduler does
+      NOT broadcast your reply.
+
+    pause/resume toggle a task; remove deletes it; run_now fires it immediately; list shows all.
     """
     from fleetent import cron_scheduler
 
@@ -525,19 +540,26 @@ async def schedule(
         # the user_id parameter is only a fallback for principal-less runs.
         ctx_principal = getattr(tool_context, "principal", None) if tool_context else None
         owner = ctx_principal.user_id if ctx_principal is not None else user_id
-        task = cron_scheduler.create_task(
-            name=name,
-            cron_expr=cron_expr or None,
-            timezone=timezone,
-            user_id=owner,
-            message=message,
-            source="tool",
-            schedule_kind=schedule_kind,
-            run_at=run_at or None,
-            interval_seconds=interval_seconds or None,
-            origin=origin,
-            deliver=deliver,
-        )
+        try:
+            task = cron_scheduler.create_task(
+                name=name,
+                cron_expr=cron_expr or None,
+                timezone=timezone,
+                user_id=owner,
+                message=message,
+                source="tool",
+                schedule_kind=schedule_kind,
+                run_at=run_at or None,
+                interval_seconds=interval_seconds or None,
+                origin=origin,
+                deliver=deliver,
+                task_type=task_type,
+                notify_text=notify_text or None,
+            )
+        except ValueError as exc:
+            # Per-type validation (e.g. notify without notify_text/target) → clean text,
+            # never a raised exception the agent loop would have to recover from.
+            return f"error: {exc}"
         if cron_scheduler.current() is None:
             # No live scheduler in this process — be truthful so the AI does not
             # promise the user a fire time that will never come.

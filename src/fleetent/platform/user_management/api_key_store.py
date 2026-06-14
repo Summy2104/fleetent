@@ -6,7 +6,6 @@ sufficient to avoid storing plaintext while keeping lookups fast.
 
 import datetime
 import fnmatch
-import hashlib
 import json
 import secrets
 from typing import Any, cast
@@ -14,9 +13,7 @@ from typing import Any, cast
 from fleetent.user_store import (
     DB_PATH as DB_PATH,  # noqa: F401 — re-export for test monkeypatching
 )
-from fleetent.user_store import (
-    _conn,
-)
+from fleetent.user_store import _conn, _hash_key
 
 _COLS = (
     "id, user_id, prefix, scope, note, expires_at, revoked_at, "
@@ -24,13 +21,12 @@ _COLS = (
 )
 _FIELDS = [c.strip() for c in _COLS.split(",")]
 
+# Canonical hash — single implementation shared with user_store._hash_key.
+_hash = _hash_key
+
 
 def _now() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat()
-
-
-def _hash(plaintext: str) -> str:
-    return hashlib.sha256(plaintext.encode()).hexdigest()
 
 
 def issue_key(

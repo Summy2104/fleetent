@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-import fleetent.governance.approval_allowlist_store as approval_allowlist_store
 import fleetent.governance.approval_store as approval_store
+import fleetent.governance.tool_auto_approvals_store as tool_auto_approvals_store
 from fleetent.db import SQLiteDatabase
 from fleetent.governance.permission_gate import PermissionGate
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
@@ -23,7 +23,7 @@ def db(tmp_path: Path, monkeypatch):
     state_db = SQLiteDatabase(path=tmp_path / "agent.db")
     migrate(state_db, AGENT_STATE_MIGRATIONS)
     monkeypatch.setattr(approval_store, "_state_db", state_db)
-    monkeypatch.setattr(approval_allowlist_store, "_state_db", state_db)
+    monkeypatch.setattr(tool_auto_approvals_store, "_state_db", state_db)
     return state_db
 
 
@@ -49,7 +49,7 @@ async def test_resolve_after_restart_finalizes_pending(db):
     assert ok is True
     row = approval_store.get_approval("a1")
     assert row["status"] == "approved"
-    assert row["approver_actor"] == "U_REQ"
+    assert row["approver_user_id"] == "U_REQ"
 
 
 async def test_resolve_after_restart_rejects_unauthorized_actor(db):

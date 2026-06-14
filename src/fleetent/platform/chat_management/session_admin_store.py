@@ -1,9 +1,4 @@
-"""Management metadata for chat sessions (origin / status / takeover / pinned).
-
-db runtime + named params, no ORM. Transcripts live in session_mgr JSON files; this
-store only holds the governance metadata the admin console needs to list, filter,
-take over, and isolate playground sessions. Schema is owned by migration 014.
-"""
+"""Management metadata for chat sessions (origin / status / takeover / pinned)."""
 
 import datetime
 from typing import Any
@@ -12,8 +7,10 @@ from fleetent.config import Settings
 from fleetent.db import SQLiteDatabase, create_database
 
 _COLS = (
-    "session_id, origin, status, takeover_actor, takeover_at, pinned, pin_note, "
-    "agent_name, user_id, channel, updated_at"
+    "session_meta.session_id, session_meta.origin, session_meta.status, "
+    "session_meta.takeover_actor, session_meta.takeover_at, session_meta.pinned, "
+    "session_meta.pin_note, session_meta.agent_id, agents.name AS agent_name, "
+    "session_meta.user_id, session_meta.channel, session_meta.updated_at"
 )
 
 
@@ -28,7 +25,7 @@ def _now() -> str:
 def upsert_meta(
     session_id: str,
     origin: str = "web",
-    agent_name: str | None = None,
+    agent_id: int | None = None,
     user_id: str | None = None,
     channel: str | None = None,
 ) -> None:
@@ -37,10 +34,10 @@ def upsert_meta(
         conn.execute(
             """
             INSERT INTO session_meta
-                (session_id, origin, status, pinned, agent_name, user_id, channel, updated_at)
-            VALUES (:session_id, :origin, 'active', 0, :agent_name, :user_id, :channel, :updated_at)
+                (session_id, origin, status, pinned, agent_id, user_id, channel, updated_at)
+            VALUES (:session_id, :origin, 'active', 0, :agent_id, :user_id, :channel, :updated_at)
             ON CONFLICT(session_id) DO UPDATE SET
-                agent_name = excluded.agent_name,
+                agent_id = excluded.agent_id,
                 user_id = excluded.user_id,
                 channel = excluded.channel,
                 updated_at = excluded.updated_at
@@ -48,7 +45,7 @@ def upsert_meta(
             {
                 "session_id": session_id,
                 "origin": origin,
-                "agent_name": agent_name,
+                "agent_id": agent_id,
                 "user_id": user_id,
                 "channel": channel,
                 "updated_at": _now(),
@@ -60,7 +57,9 @@ def get_meta(session_id: str) -> dict[str, Any]:
     row = (
         _database()
         .execute(
-            f"SELECT {_COLS} FROM session_meta WHERE session_id = :sid",
+            f"SELECT {_COLS} FROM session_meta "
+            "LEFT JOIN agents ON agents.id = session_meta.agent_id "
+            "WHERE session_meta.session_id = :sid",
             {"sid": session_id},
         )
         .fetchone()
@@ -74,6 +73,7 @@ def get_meta(session_id: str) -> dict[str, Any]:
             "takeover_at": None,
             "pinned": 0,
             "pin_note": None,
+            "agent_id": None,
             "agent_name": None,
             "user_id": None,
             "channel": None,
@@ -109,7 +109,7 @@ def list_meta(
     include_playground: bool = False,
     status: str | None = None,
     user_id: str | None = None,
-    agent_name: str | None = None,
+    agent_id: int | None = None,
 ) -> list[dict[str, Any]]:
     clauses = []
     params: dict[str, Any] = {}
@@ -121,13 +121,18 @@ def list_meta(
     if user_id:
         clauses.append("user_id = :user_id")
         params["user_id"] = user_id
-    if agent_name:
-        clauses.append("agent_name = :agent_name")
-        params["agent_name"] = agent_name
+    if agent_id is not None:
+        clauses.append("session_meta.agent_id = :agent_id")
+        params["agent_id"] = agent_id
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     return (
         _database()
-        .execute(f"SELECT {_COLS} FROM session_meta{where} ORDER BY updated_at DESC", params)
+        .execute(
+            f"SELECT {_COLS} FROM session_meta "
+            "LEFT JOIN agents ON agents.id = session_meta.agent_id"
+            f"{where} ORDER BY session_meta.updated_at DESC",
+            params,
+        )
         .fetchall()
     )
 

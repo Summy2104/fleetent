@@ -4,6 +4,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import fleetent.agent_store as agent_store
 import fleetent.auth as auth
 import fleetent.governance.audit_log as audit
 import fleetent.platform.connector_management.connector_admin_api as api
@@ -35,7 +36,7 @@ def client(tmp_path, monkeypatch):
 
 
 def _session_for(role: str) -> tuple[str, str]:
-    u = user_store.create_user(f"{role}-user")
+    u, _ = user_store.create_user(f"{role}-user")
     user_store.set_role(u.id, role)
     return auth.create_session(u.id), u.id
 
@@ -262,15 +263,16 @@ def test_mcp_server_list_exposes_owner_and_agent_filter(client, monkeypatch):
         "mcp_list_servers",
         lambda: [{"id": "fs", "transport": "stdio", "status": "connected", "tool_count": 1}],
     )
-    agent_mcp_server_store.add_mcp_server(5, "internal", transport="stdio", command="python")
+    agent_id = agent_store.create_agent("connector-mcp-owner", "p", ["shell"]).id
+    agent_mcp_server_store.add_mcp_server(agent_id, "internal", transport="stdio", command="python")
     token, _ = _session_for("admin")
 
     r = client.get("/admin/mcp/servers", headers=_hdr(token))
     assert ("fs", None) in {(s["id"], s["agent_id"]) for s in r.json()}
 
-    r2 = client.get("/admin/mcp/servers?agent_id=5", headers=_hdr(token))
+    r2 = client.get(f"/admin/mcp/servers?agent_id={agent_id}", headers=_hdr(token))
     internal = next(s for s in r2.json() if s["id"] == "internal")
-    assert internal["agent_id"] == 5
+    assert internal["agent_id"] == agent_id
 
 
 def test_global_mcp_server_added_via_api_is_listed(client):

@@ -334,7 +334,7 @@ def test_build_controller_empty_history_yields_only_active_reasons():
         1,
         include_approval=True,
         budget_config=config,
-        budget_usage=usage,
+        run_usage=usage,
         loop_repeat_threshold=3,
     )
     reason = controller.should_stop(
@@ -885,7 +885,10 @@ async def test_run_passes_user_id_to_log_run(mock_client, monkeypatch):
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
     captured: dict = {}
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
-    await al.run([{"role": "user", "content": "hi"}], principal=Principal(user_id="user-99", tenant_id="default"))
+    await al.run(
+        [{"role": "user", "content": "hi"}],
+        principal=Principal(user_id="user-99", tenant_id="default"),
+    )
     assert captured.get("user_id") == "user-99"
 
 
@@ -903,7 +906,12 @@ async def test_run_stream_passes_user_id_and_agent_name_to_log_run(mock_client, 
     )
     captured: dict = {}
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
-    [_ async for _ in al.run_stream("hi", principal=Principal(user_id="user-7", tenant_id="default"), agent_name="myagent")]
+    [
+        _
+        async for _ in al.run_stream(
+            "hi", principal=Principal(user_id="user-7", tenant_id="default"), agent_name="myagent"
+        )
+    ]
     assert captured.get("user_id") == "user-7"
     assert captured.get("agent_name") == "myagent"
 

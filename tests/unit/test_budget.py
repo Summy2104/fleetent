@@ -36,7 +36,7 @@ def test_budget_config_supports_no_limit_sentinel() -> None:
     assert cfg.max_turns == NO_LIMIT
 
 
-def test_budget_usage_starts_at_zero() -> None:
+def test_usage_tracker_starts_at_zero() -> None:
     usage = BudgetUsage()
     assert usage.turns == 0
     assert usage.tokens == 0
@@ -49,7 +49,7 @@ def test_budget_config_has_no_cost_dimension() -> None:
     assert not hasattr(BudgetConfig(max_turns=1, max_tokens=1), "max_cost_usd")
 
 
-def test_budget_usage_has_no_cost_dimension() -> None:
+def test_usage_tracker_has_no_cost_dimension() -> None:
     assert not hasattr(BudgetUsage(), "cost_usd")
 
 

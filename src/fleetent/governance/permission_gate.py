@@ -17,8 +17,8 @@ import logging
 from collections.abc import Callable, Coroutine
 from typing import Any, Literal
 
-from fleetent.governance import approval_allowlist_store as allowlist
 from fleetent.governance import approval_store
+from fleetent.governance import tool_auto_approvals_store as allowlist
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ class PermissionGate:
         requester_routed = _resolves_to_requester(approval_routing, risk_level, tool_name)
 
         # Resolve and contact approvers via outbound DM (D2, D3).
-        approver_actors = await self._notify_approvers(
+        approver_user_ids = await self._notify_approvers(
             approval_id=approval_id,
             tool_name=tool_name,
             risk_level=risk_level,
@@ -106,7 +106,7 @@ class PermissionGate:
         )
 
         # No approvers reachable → default-closed reject immediately (D5).
-        if not approver_actors and not requester_routed:
+        if not approver_user_ids and not requester_routed:
             await reply_func(
                 f"❌ Tool `{tool_name}` requires approval but no approver could be reached "
                 f"(risk: {risk_level}). Request rejected."
@@ -131,7 +131,7 @@ class PermissionGate:
         # "platform:target" tag and the bare target id so IM callers (bare
         # msg.user_id) and qualified actors both pass the resolve() check.
         authorized: set[str] = set()
-        for actor in approver_actors:
+        for actor in approver_user_ids:
             authorized.add(actor)
             authorized.add(actor.partition(":")[2])
         if requester_routed:
@@ -238,7 +238,7 @@ class PermissionGate:
 
         return reached
 
-    async def resolve(
+    async def resolve_tool_call_approval(
         self,
         approval_id: str,
         decision: Literal["approved", "rejected"],
@@ -294,13 +294,29 @@ class PermissionGate:
             id=approval_id,
             status=decision,
             resolved_at=datetime.datetime.now(datetime.UTC).isoformat(),
-            approver_actor=approver_user_id,
+            approver_user_id=approver_user_id,
         )
         self._pending.discard(approval_id)
         self._pending_fp.pop(approval_id, None)
         self._authorized.pop(approval_id, None)
         logger.info("approval_resolved id=%s decision=%s", approval_id, decision)
         return True
+
+    async def resolve(
+        self,
+        approval_id: str,
+        decision: Literal["approved", "rejected"],
+        approver_user_id: str,
+        always: bool = False,
+        authorized_actors: set[str] | None = None,
+    ) -> bool:
+        return await self.resolve_tool_call_approval(
+            approval_id=approval_id,
+            decision=decision,
+            approver_user_id=approver_user_id,
+            always=always,
+            authorized_actors=authorized_actors,
+        )
 
 
 _default_gate: PermissionGate = PermissionGate()

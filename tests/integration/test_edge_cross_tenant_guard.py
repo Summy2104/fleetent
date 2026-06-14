@@ -8,16 +8,15 @@ runs (HTTP 403 / WS close); same-tenant passes through unchanged (single-tenant 
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock
 
 import pytest
 import yaml
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-import fleetent.identity as identity_mod
 import fleetent.runtime.loop as loop_mod
-from fleetent import agent_config, user_store
+from fleetent import agent_config
+from fleetent.identity import Principal
 from fleetent.runtime import agent_app
 
 _TUI_TOKEN = "tui-test-token"
@@ -45,11 +44,11 @@ def _patch_run_stream(monkeypatch, captured):
 
 
 def _patch_requester_tenant(monkeypatch, tenant_id):
-    fake_user = MagicMock(spec=user_store.User)
-    fake_user.id = "U1"
-    fake_user.status = "active"
-    fake_user.tenant_id = tenant_id
-    monkeypatch.setattr(identity_mod, "_legacy_key_lookup", lambda _token: fake_user)
+    monkeypatch.setattr(
+        agent_app.LocalBearerAdapter,
+        "__call__",
+        lambda self, _token: Principal(user_id="U1", tenant_id=tenant_id),
+    )
 
 
 # --- /chat (task 1.1 / 1.2) ---------------------------------------------------

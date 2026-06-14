@@ -12,14 +12,13 @@ import yaml
 from fastapi import APIRouter, Body, Header, HTTPException
 from pydantic import BaseModel
 
-from fleetent import agent_store, auth, paths, user_store
-from fleetent import audit_log
+from fleetent import agent_store, audit_log, auth, paths, user_store
 from fleetent.platform.agent_lifecycle import credential_slots, secret_store
 from fleetent.platform.agent_lifecycle.materialize import agent_file_from_store
 from fleetent.platform.connector_management import (
-    agent_mcp_server_store,
     agent_oauth_binding_store,
     connector_config_store,
+    mcp_server_store,
 )
 from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.skill_management import skill_admin_store
@@ -92,7 +91,7 @@ def _known_mcp_server_ids() -> set[str]:
     Uses DB-registered global servers (admin console), matching what
     ``GET /admin/mcp/servers`` lists.
     """
-    return {str(r["server_id"]) for r in agent_mcp_server_store.list_mcp_servers(None)}
+    return {str(r["server_id"]) for r in mcp_server_store.list_mcp_servers(None)}
 
 
 def _build_agent_yaml(agent: agent_store.Agent) -> str:
@@ -107,9 +106,9 @@ def _build_agent_yaml(agent: agent_store.Agent) -> str:
 
     servers: list[dict[str, Any]] = []
     for sid in agent_store.list_mcp_servers_for_agent(agent.id):
-        row = agent_mcp_server_store.get_mcp_server(
-            agent.id, sid
-        ) or agent_mcp_server_store.get_mcp_server(None, sid)
+        row = mcp_server_store.get_mcp_server(agent.id, sid) or mcp_server_store.get_mcp_server(
+            None, sid
+        )
         if row is None:
             continue
         entry: dict[str, Any] = {"id": sid, "transport": row["transport"]}
@@ -261,11 +260,11 @@ def get_bindings(name: str, authorization: str | None = Header(None)) -> dict[st
 @router.get("/agents/{name}/skills")
 def list_agent_skills(name: str, authorization: str | None = Header(None)) -> list[dict[str, Any]]:
     _current_user(authorization)
-    _require_agent(name)
-    enabled = skill_admin_store.enabled_skill_names(name)
+    agent = _require_agent(name)
+    enabled = skill_admin_store.enabled_skill_names(agent.id)
     bound = {
         str(r["skill_name"]): bool(r["enabled"])
-        for r in skill_admin_store.list_skills_for_agent(name)
+        for r in skill_admin_store.list_skills_for_agent(agent.id)
     }
     names = {s["name"] for s in skill_registry.list_skills()} | set(bound)
     return [{"skill_name": n, "enabled": bound.get(n, n in enabled)} for n in sorted(names)]
@@ -279,8 +278,8 @@ def set_agent_skill(
     authorization: str | None = Header(None),
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
-    _require_agent(name)
-    skill_admin_store.set_binding(name, skill_name, enabled, updated_by=user.id)
+    agent = _require_agent(name)
+    skill_admin_store.set_binding(agent.id, skill_name, enabled, updated_by=user.id)
     audit_log.write_audit(
         user.id,
         "agent.skill.set",
@@ -335,7 +334,7 @@ def unbind_mcp(
 def list_agent_kbs(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
     _current_user(authorization)
     agent = _require_agent(name)
-    kb_ids = agent_kbs_store.list_kbs_for_agent(agent.tenant_id, str(agent.id))
+    kb_ids = agent_kbs_store.list_kbs_for_agent(agent.tenant_id, agent.id)
     return {"agent": name, "kb_ids": kb_ids}
 
 
@@ -347,7 +346,7 @@ def bind_agent_kb(
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
     agent = _require_agent(name)
-    agent_kbs_store.bind(agent.tenant_id, kb_id, str(agent.id), created_by=user.id)
+    agent_kbs_store.bind(agent.tenant_id, kb_id, agent.id, created_by=user.id)
     audit_log.write_audit(
         user.id, "agent.kb.bind", target_type="agent", target_id=name, detail={"kb_id": kb_id}
     )
@@ -360,7 +359,7 @@ def unbind_agent_kb(
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
     agent = _require_agent(name)
-    agent_kbs_store.unbind(agent.tenant_id, kb_id, str(agent.id))
+    agent_kbs_store.unbind(agent.tenant_id, kb_id, agent.id)
     audit_log.write_audit(
         user.id, "agent.kb.unbind", target_type="agent", target_id=name, detail={"kb_id": kb_id}
     )

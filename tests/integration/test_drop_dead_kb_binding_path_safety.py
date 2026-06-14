@@ -31,7 +31,7 @@ def test_live_agent_kb_path_materializes_agent_knowledge_and_long_term_ctx_uses_
 
     tenancy_store.create_tenant(id="acme", name="Acme")
     agent = agent_store.create_agent("support", "You are support.", [], tenant_id="acme")
-    agent_kbs_store.bind("acme", "support-kb", str(agent.id), created_by="admin")
+    agent_kbs_store.bind("acme", "support-kb", agent.id, created_by="admin")
     exported = materialize.agent_file_from_store(agent_store.get_by_name("support"))
     assert exported.knowledge.enabled is True
     assert [binding.kb_id for binding in exported.knowledge.bindings] == ["support-kb"]

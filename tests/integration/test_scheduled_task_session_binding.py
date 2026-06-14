@@ -75,12 +75,16 @@ async def test_fire_fixed_semantics_accumulates(tmp_path, monkeypatch):
         return f"reply-{n}"
 
     monkeypatch.setattr(cron, "_agent_run", fake_run)
+    # action type: runs the agent and accumulates the conversation, but injects no
+    # delivery statement (generate-only) — so the run sees the raw turn and fixed-session
+    # accumulation is asserted on the unmodified messages.
     task = {
         "id": "t2",
         "message": "tick",
         "user_id": "u1",
         "agent_name": "a1",
         "session_id": "cron/fixed",
+        "task_type": "action",
     }
     await cron._fire(task)
     await cron._fire(task)

@@ -16,6 +16,7 @@ import json
 import os
 import signal
 import time
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -57,11 +58,48 @@ class AgentRuntime:
     scheduler: Any = None
 
     async def stop(self) -> None:
-        await self.supervisor.stop_all()
+        # Input shutdown only (stop accepting new work). MCP sessions are released later,
+        # after in-flight runs drain (see _drain_and_close) — runs may still use MCP tools.
+        # Each step is contained so one failing component never blocks the others.
+        await _stop_step("slack_supervisor", self.supervisor.stop_all())
         if self.telegram_supervisor is not None:
-            await self.telegram_supervisor.stop_all()
+            await _stop_step("telegram_supervisor", self.telegram_supervisor.stop_all())
         if self.scheduler is not None:
-            await self.scheduler.shutdown()
+            await _stop_step("scheduler", self.scheduler.shutdown())
+
+
+async def _stop_step(name: str, coro: Awaitable[None], timeout: float = 10.0) -> None:
+    """Run one shutdown step under containment: bounded by ``timeout`` and isolated.
+
+    A failing or hanging component is logged and skipped so the remaining steps still run
+    and the process exit code is unaffected — graceful shutdown must exit 0 even when a
+    component's teardown errors (2026-06-11 MCP teardown crash).
+    """
+    try:
+        await asyncio.wait_for(coro, timeout)
+    except Exception as exc:  # noqa: BLE001 — containment: a teardown error never propagates
+        _logger.warn("shutdown_step_failed", step=name, error=str(exc))
+
+
+async def _drain_and_close(rt: AgentRuntime, drain_timeout: float) -> None:
+    """Graceful drain chain: stop input → wait for in-flight runs → release MCP sessions.
+
+    MCP sessions close only after the drain so in-flight runs can still use MCP tools;
+    the release is contained so a stuck/erroring connector cannot change the exit path.
+    """
+    from fleetent.integrations import mcp
+    from fleetent.runtime import loop as _loop
+
+    _logger.info("agent_drain_started", active_runs=_loop._active_runs, drain_timeout=drain_timeout)
+    await rt.stop()
+    deadline = asyncio.get_event_loop().time() + drain_timeout
+    while _loop._active_runs > 0 and asyncio.get_event_loop().time() < deadline:
+        await asyncio.sleep(0.1)
+    if _loop._active_runs > 0:
+        _logger.warn("agent_drain_timed_out", active_runs_remaining=_loop._active_runs)
+    else:
+        _logger.info("agent_drain_completed")
+    await _stop_step("mcp_sessions", mcp.aclose_all())
 
 
 def resolve_home(agent_id: str, home: str | Path | None = None) -> Path:
@@ -175,8 +213,8 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     Does not create fleetent.db; does not read DATABASE_URL.
     """
     from fleetent import reflection, schedule_store
-    from fleetent.governance import approval_allowlist_store as allowlist_store
-    from fleetent.governance import approval_store
+    from fleetent.governance import approval_request_store, approval_store
+    from fleetent.governance import tool_auto_approvals_store as allowlist_store
     from fleetent.knowledge_base import runtime as kb_runtime
     from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
     from fleetent.memory import shared as shared_memory
@@ -184,7 +222,7 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     from fleetent.memory.shared_memory_migrations import MIGRATIONS as SHARED_MEMORY_MIGRATIONS
     from fleetent.observability import traces
     from fleetent.runtime import context as runtime_context
-    from fleetent.runtime import layered_budget, sub_agent_lifecycle
+    from fleetent.runtime import sub_agent_lifecycle
     from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
     from fleetent.session import index as session_index
     from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
@@ -206,11 +244,11 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     reflection.set_state_db(agent_state_db)
     memory_store.set_state_db(agent_state_db)
     memory_store.set_vector_backend(agent_scope.vector_backend)
+    approval_request_store.set_state_db(agent_state_db)
     approval_store.set_state_db(agent_state_db)
     allowlist_store.set_state_db(agent_state_db)
     runtime_context.set_state_db(agent_state_db)
     sub_agent_lifecycle.set_state_db(agent_state_db)
-    layered_budget.set_state_db(agent_state_db)
     schedule_store.set_state_db(agent_state_db)
 
 
@@ -267,7 +305,9 @@ async def _start_infra(agent: AgentFile, data_dir: Path) -> None:
             for s in agent.mcp_servers
         ]
         try:
-            await mcp_client.register_all(configs)
+            # unified-file-exchange: the agent home (data_dir's parent) anchors each
+            # stdio server's /exchange partition tree (cwd + XDG injection + root binding).
+            await mcp_client.register_all(configs, agent_home=data_dir.parent)
         except Exception as exc:  # noqa: BLE001 — MCP unavailable must not abort boot
             _logger.warn("agent_runtime_mcp_register_failed", error=str(exc))
     session_mgr.start_session_maintenance()
@@ -452,8 +492,6 @@ async def serve(
     process runs IM-only with no HTTP listener. On SIGUSR1 the process drains in-flight
     requests (up to drain_timeout) then exits.
     """
-    from fleetent.runtime import loop as _loop
-
     home_dir = resolve_home(agent_id, home)
     home_dir.mkdir(parents=True, exist_ok=True)
     pid_file = home_dir / ".fleetent.pid"
@@ -462,19 +500,6 @@ async def serve(
     drain_event = asyncio.Event()
     loop = asyncio.get_event_loop()
     loop.add_signal_handler(signal.SIGUSR1, drain_event.set)
-
-    async def _drain_and_exit(rt: AgentRuntime) -> None:
-        _logger.info(
-            "agent_drain_started", active_runs=_loop._active_runs, drain_timeout=drain_timeout
-        )  # noqa: E501
-        await rt.stop()
-        deadline = asyncio.get_event_loop().time() + drain_timeout
-        while _loop._active_runs > 0 and asyncio.get_event_loop().time() < deadline:
-            await asyncio.sleep(0.1)
-        if _loop._active_runs > 0:
-            _logger.warn("agent_drain_timed_out", active_runs_remaining=_loop._active_runs)
-        else:
-            _logger.info("agent_drain_completed")
 
     try:
         rt = await boot(agent_id, home=home, port=port)
@@ -503,7 +528,7 @@ async def serve(
                 wait_task.cancel()
                 drain_task.cancel()
         finally:
-            await _drain_and_exit(rt)
+            await _drain_and_close(rt, drain_timeout)
     finally:
         loop.remove_signal_handler(signal.SIGUSR1)
         pid_file.unlink(missing_ok=True)
@@ -548,11 +573,11 @@ def build_app(agent_name: str) -> FastAPI:
 
     @app.post("/approvals/{approval_id}/resolve")
     async def resolve_approval(approval_id: str, req: ApprovalRequest) -> dict:  # type: ignore[type-arg]
-        from fleetent.governance.permission_gate import _default_gate
+        from fleetent.governance.approval_router import resolve_approval_request
 
         if req.decision not in ("approved", "rejected"):
             raise HTTPException(status_code=400, detail="decision must be 'approved' or 'rejected'")
-        found = await _default_gate.resolve(
+        found = await resolve_approval_request(
             approval_id=approval_id,
             decision=req.decision,  # type: ignore[arg-type]
             approver_user_id=req.approver_user_id,

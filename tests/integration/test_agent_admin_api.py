@@ -12,12 +12,14 @@ from fastapi.testclient import TestClient
 import fleetent.agent_store as agent_store
 import fleetent.auth as auth
 import fleetent.platform.agent_lifecycle.credential_slots as credential_slots
+import fleetent.platform.agent_lifecycle.materialize as materialize
 import fleetent.platform.agent_lifecycle.secret_store as secret_store
 import fleetent.platform.agent_management_console.agent_admin_api as api
 import fleetent.platform.connector_management.agent_mcp_server_store as agent_mcp_server_store
 import fleetent.platform.connector_management.agent_oauth_binding_store as agent_oauth_binding_store
 import fleetent.platform.connector_management.connector_config_store as connector_config_store
 import fleetent.platform.knowledge_base_management.agent_kbs_store as agent_kbs_store
+import fleetent.platform.skill_management.skill_admin_api as skill_api
 import fleetent.platform.skill_management.skill_admin_store as skill_admin_store
 import fleetent.user_store as user_store
 from fleetent.db import create_database
@@ -58,6 +60,7 @@ def client(tmp_path_factory):
     _patch_all_stores(mp, db_path)
     app = FastAPI()
     app.include_router(api.router)
+    app.include_router(skill_api.router)
     yield TestClient(app, raise_server_exceptions=True)
     mp.undo()
 
@@ -70,11 +73,12 @@ def fresh_client(tmp_path, monkeypatch):
     _patch_all_stores(monkeypatch, db_path)
     app = FastAPI()
     app.include_router(api.router)
+    app.include_router(skill_api.router)
     return TestClient(app, raise_server_exceptions=True)
 
 
 def _session_for(role: str) -> tuple[str, str]:
-    u = user_store.create_user(f"{role}-user")
+    u, _ = user_store.create_user(f"{role}-user")
     user_store.set_role(u.id, role)
     return auth.create_session(u.id), u.id
 
@@ -232,6 +236,29 @@ def test_put_agent_skill_viewer_forbidden(fresh_client):
     assert resp.status_code == 403
 
 
+def test_agent_and_skill_routes_share_same_integer_binding_key_and_materialize_it(fresh_client):
+    agent = agent_store.create_agent("support", "Support.", ["shell"], allowed_skills=["authored"])
+    token, _ = _session_for("admin")
+
+    agent_resp = fresh_client.put(
+        "/admin/agents/support/skills/crm-ops", headers=_hdr(token), json={"enabled": True}
+    )
+    assert agent_resp.status_code == 200
+
+    skill_resp = fresh_client.put(
+        f"/admin/skills/crm-ops/agents/{agent.id}", headers=_hdr(token), json={"enabled": True}
+    )
+    assert skill_resp.status_code == 200
+
+    rows = skill_admin_store.list_skills_for_agent(agent.id)
+    assert [(row["agent_id"], row["skill_name"], row["enabled"]) for row in rows] == [
+        (agent.id, "crm-ops", 1)
+    ]
+    assert materialize.agent_file_from_store(agent_store.get_by_name("support")).allowed_skills == [
+        "crm-ops"
+    ]
+
+
 # --- agent MCP bindings -------------------------------------------------------
 
 
@@ -252,10 +279,10 @@ def test_bind_known_mcp_server(fresh_client, monkeypatch):
 def test_known_mcp_ids_include_store_registered(monkeypatch):
     # _known_mcp_server_ids uses DB-registered global servers, so a store-only
     # server is bindable.
-    from fleetent.platform.connector_management import agent_mcp_server_store
+    from fleetent.platform.connector_management import mcp_server_store
 
     monkeypatch.setattr(
-        agent_mcp_server_store,
+        mcp_server_store,
         "list_mcp_servers",
         lambda agent_id: [{"server_id": "middle"}] if agent_id is None else [],
     )
@@ -263,11 +290,11 @@ def test_known_mcp_ids_include_store_registered(monkeypatch):
 
 
 def test_bind_store_registered_mcp_server(fresh_client, monkeypatch):
-    from fleetent.platform.connector_management import agent_mcp_server_store
+    from fleetent.platform.connector_management import mcp_server_store
 
     agent = agent_store.create_agent("ops", "Ops v1.", ["shell"])
     monkeypatch.setattr(
-        agent_mcp_server_store,
+        mcp_server_store,
         "list_mcp_servers",
         lambda agent_id: [{"server_id": "middle"}] if agent_id is None else [],
     )

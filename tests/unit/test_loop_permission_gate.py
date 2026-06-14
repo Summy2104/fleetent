@@ -16,7 +16,7 @@ import fleetent.runtime.loop as loop
 @pytest.fixture(autouse=True)
 def _mock_store(monkeypatch):
     """Patch approval_store and allowlist so unit tests never touch real SQLite."""
-    from fleetent.governance import approval_allowlist_store, approval_store
+    from fleetent.governance import approval_store, tool_auto_approvals_store
 
     monkeypatch.setattr(approval_store, "insert_approval", MagicMock())
     monkeypatch.setattr(approval_store, "update_approval", MagicMock())
@@ -24,7 +24,7 @@ def _mock_store(monkeypatch):
     monkeypatch.setattr(approval_store, "cleanup_stale", MagicMock(return_value=0))
     # allowlist.is_allowed requires an initialized state_db; return False so the
     # timeout/rejection path under test is actually exercised.
-    monkeypatch.setattr(approval_allowlist_store, "is_allowed", MagicMock(return_value=False))
+    monkeypatch.setattr(tool_auto_approvals_store, "is_allowed", MagicMock(return_value=False))
 
 
 @pytest.fixture

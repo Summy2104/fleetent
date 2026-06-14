@@ -29,23 +29,31 @@ def _inject_db(state_db: SQLiteDatabase, monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(approval_store, "_state_db", state_db)
 
 
-# ── schema ────────────────────────────────────────────────────────────────────
+# ── schema / compatibility ────────────────────────────────────────────────────
 
 
-def test_approvals_table_exists(state_db: SQLiteDatabase) -> None:
+def test_compatibility_store_uses_approval_requests_table(state_db: SQLiteDatabase) -> None:
     tables = {
         r["name"]
         for r in state_db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
     }
-    assert "approvals" in tables
+    assert "approval_requests" in tables
+    assert "approvals" not in tables
 
 
-def test_approvals_required_columns(state_db: SQLiteDatabase) -> None:
-    cols = {r["name"] for r in state_db.execute("PRAGMA table_info(approvals)").fetchall()}
+def test_approval_requests_required_columns(state_db: SQLiteDatabase) -> None:
+    cols = {r["name"] for r in state_db.execute("PRAGMA table_info(approval_requests)").fetchall()}
     required = {
-        "id", "session_id", "requester_user_id", "risk_level",
-        "tool_name", "tool_args", "status", "approver_actor",
-        "created_at", "resolved_at",
+        "id",
+        "subject_type",
+        "subject_id",
+        "requester_user_id",
+        "risk",
+        "routing_key",
+        "status",
+        "approver_user_id",
+        "created_at",
+        "decided_at",
     }
     assert required.issubset(cols)
 
@@ -89,7 +97,7 @@ def test_insert_approval_records_non_empty_session_id() -> None:
     assert rows[0]["session_id"] != ""
 
 
-def test_update_approval_sets_status_and_actor() -> None:
+def test_update_approval_sets_status_and_approver() -> None:
     approval_store.insert_approval(
         id="upd_test",
         session_id="s1",
@@ -103,12 +111,12 @@ def test_update_approval_sets_status_and_actor() -> None:
         id="upd_test",
         status="approved",
         resolved_at="2026-01-01T01:00:00+00:00",
-        approver_actor="slack:U_APPROVER",
+        approver_user_id="slack:U_APPROVER",
     )
 
     rows = approval_store.list_approvals()
     assert rows[0]["status"] == "approved"
-    assert rows[0]["approver_actor"] == "slack:U_APPROVER"
+    assert rows[0]["approver_user_id"] == "slack:U_APPROVER"
     assert rows[0]["resolved_at"] is not None
 
 

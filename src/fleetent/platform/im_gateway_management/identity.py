@@ -79,7 +79,7 @@ def get_or_create(owner_id: str, platform: str, platform_user_id: str) -> User:
         user = get_by_id(shared[0])
         assert user is not None
     else:
-        user = create_user(name=f"{platform}:{platform_user_id}")
+        user, _ = create_user(name=f"{platform}:{platform_user_id}")
 
     now = datetime.datetime.now(datetime.UTC).isoformat()
     with _conn() as conn:

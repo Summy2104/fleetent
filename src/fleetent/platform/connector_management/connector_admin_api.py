@@ -17,11 +17,10 @@ from typing import Any, cast
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
-from fleetent import auth, user_store
-from fleetent import audit_log
+from fleetent import audit_log, auth, user_store
 from fleetent.platform.connector_management import (
-    agent_mcp_server_store,
     connector_config_store,
+    mcp_server_store,
 )
 
 router = APIRouter(prefix="/admin")
@@ -336,12 +335,12 @@ def list_mcp_servers(
         }
 
     # Persisted definitions: global defaults always, plus the agent's own when scoped.
-    for row in agent_mcp_server_store.list_mcp_servers(None):
+    for row in mcp_server_store.list_mcp_servers(None):
         if row["server_id"] not in seen:
             servers.append(_from_row(row))
             seen.add(row["server_id"])
     if agent_id is not None:
-        for row in agent_mcp_server_store.list_mcp_servers(agent_id):
+        for row in mcp_server_store.list_mcp_servers(agent_id):
             servers.append(_from_row(row))
     return [_mask(s) for s in servers]
 
@@ -356,7 +355,7 @@ async def list_mcp_tools(
     can show what the server actually exposes, not a stored guess.
     """
     _current_user(authorization)
-    if agent_mcp_server_store.get_mcp_server(None, server_id) is None:
+    if mcp_server_store.get_mcp_server(None, server_id) is None:
         return {"connected": False, "error": "Server configuration not found", "tools": []}
     result = await mcp_probe(server_id)
     return {
@@ -383,9 +382,9 @@ async def edit_mcp_server(
 ) -> dict[str, Any]:
     """Edit a stored MCP server definition. `enabled: false` deactivates it."""
     user = _require_admin(authorization)
-    if agent_mcp_server_store.get_mcp_server(agent_id, server_id) is None:
+    if mcp_server_store.get_mcp_server(agent_id, server_id) is None:
         raise HTTPException(status_code=404, detail="mcp server not found")
-    agent_mcp_server_store.edit_mcp_server(agent_id, server_id, **body)
+    mcp_server_store.edit_mcp_server(agent_id, server_id, **body)
     audit_log.write_audit(user.id, "mcp.edit", "mcp_server", server_id)
     await mcp_sync_server(server_id, agent_id)
     return {"success": True, "server_id": server_id}
@@ -398,9 +397,9 @@ async def delete_mcp_server(
     agent_id: int | None = None,
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
-    if agent_mcp_server_store.get_mcp_server(agent_id, server_id) is None:
+    if mcp_server_store.get_mcp_server(agent_id, server_id) is None:
         raise HTTPException(status_code=404, detail="mcp server not found")
-    agent_mcp_server_store.delete_mcp_server(agent_id, server_id)
+    mcp_server_store.delete_mcp_server(agent_id, server_id)
     audit_log.write_audit(user.id, "mcp.delete", "mcp_server", server_id)
     await mcp_sync_server(server_id, agent_id)
     return {"success": True, "server_id": server_id}
@@ -417,11 +416,11 @@ async def create_mcp_server(
     if not isinstance(server_id, str) or not server_id:
         raise HTTPException(status_code=422, detail="server id is required")
     agent_id = server.get("agent_id")
-    if agent_mcp_server_store.get_mcp_server(agent_id, server_id) is not None:
+    if mcp_server_store.get_mcp_server(agent_id, server_id) is not None:
         raise HTTPException(status_code=409, detail="mcp server id already exists")
     transport = server.get("transport", "stdio")
 
-    agent_mcp_server_store.add_mcp_server(
+    mcp_server_store.add_mcp_server(
         agent_id=agent_id,
         server_id=server_id,
         transport=transport,
@@ -449,7 +448,7 @@ async def test_mcp_server(
     connected=False with the failure reason.
     """
     _current_user(authorization)
-    row = agent_mcp_server_store.get_mcp_server(None, server_id)
+    row = mcp_server_store.get_mcp_server(None, server_id)
     if row is None:
         return {
             "success": False,

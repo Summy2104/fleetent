@@ -41,21 +41,31 @@ _EXPECTED_COLUMNS = {
         "id",
         "domain",
         "kind",
+        "report_id",
         "subject_user_id",
         "target_ref",
         "payload_json",
         "reason",
         "evidence_json",
         "risk",
-        "status",
-        "reviewer_user_id",
-        "reviewed_at",
-        "rejection_reason",
         "actor_user_id",
         "applied_at",
-        "expires_at",
         "created_at",
         "updated_at",
+    },
+    "approval_requests": {
+        "id",
+        "subject_type",
+        "subject_id",
+        "requester_user_id",
+        "risk",
+        "status",
+        "approver_user_id",
+        "decided_at",
+        "reason",
+        "routing_key",
+        "created_at",
+        "expires_at",
     },
 }
 
@@ -107,3 +117,69 @@ def test_unified_migrations_are_contiguous_and_idempotent(tmp_path):
     finally:
         conn.close()
     assert user_version == MIGRATIONS[-1][0]
+
+
+def test_reflection_proposals_report_id_migrates_existing_rows_to_null(tmp_path):
+    db = SQLiteDatabase(path=tmp_path / "agent_state.db")
+    report_id_version = next(
+        version for version, sql in MIGRATIONS if "ADD COLUMN report_id TEXT" in sql
+    )
+    legacy_version = report_id_version - 1
+    conn = sqlite3.connect(db.path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE reflection_proposals (
+              id                TEXT PRIMARY KEY,
+              domain            TEXT NOT NULL,
+              kind              TEXT NOT NULL,
+              subject_user_id   TEXT,
+              target_ref        TEXT,
+              payload_json      TEXT NOT NULL,
+              reason            TEXT NOT NULL,
+              evidence_json     TEXT NOT NULL,
+              risk              TEXT NOT NULL,
+              status            TEXT NOT NULL,
+              reviewer_user_id  TEXT,
+              reviewed_at       TEXT,
+              rejection_reason  TEXT,
+              actor_user_id     TEXT,
+              applied_at        TEXT,
+              expires_at        TEXT,
+              created_at        TEXT NOT NULL,
+              updated_at        TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO reflection_proposals (
+                id, domain, kind, subject_user_id, target_ref, payload_json, reason,
+                evidence_json, risk, status, reviewer_user_id, reviewed_at,
+                rejection_reason, actor_user_id, applied_at, expires_at, created_at, updated_at
+            )
+            VALUES (
+                'proposal-1', 'memory', 'rewrite', 'user-1', NULL, '{}', 'because',
+                '[]', 'low', 'pending', NULL, NULL, NULL, NULL, NULL, NULL,
+                '2026-06-13T00:00:00+00:00', '2026-06-13T00:00:00+00:00'
+            )
+            """
+        )
+        conn.execute(f"PRAGMA user_version = {legacy_version}")
+        conn.commit()
+    finally:
+        conn.close()
+
+    migrate(db, MIGRATIONS)
+
+    conn = sqlite3.connect(db.path)
+    try:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(reflection_proposals)")}
+        report_id = conn.execute(
+            "SELECT report_id FROM reflection_proposals WHERE id = 'proposal-1'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert "report_id" in columns
+    assert report_id is None

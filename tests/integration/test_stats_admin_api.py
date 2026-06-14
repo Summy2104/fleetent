@@ -37,7 +37,7 @@ def client(tmp_path_factory):
 
 
 def _session_for(role: str) -> tuple[str, str]:
-    u = user_store.create_user(f"{role}-user")
+    u, _ = user_store.create_user(f"{role}-user")
     user_store.set_role(u.id, role)
     return auth.create_session(u.id), u.id
 

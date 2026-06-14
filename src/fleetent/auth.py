@@ -64,7 +64,7 @@ def seed_builtin_admin() -> tuple[user_store.User, str] | None:
             user_store.set_must_reset(existing.id, True)
         return None
     temp_password = BUILTIN_ADMIN_PASSWORD
-    user = user_store.create_user(name=BUILTIN_ADMIN_NAME, email=None)
+    user, _ = user_store.create_user(name=BUILTIN_ADMIN_NAME, email=None)
     user_store.set_role(user.id, "built_in_admin")
     # admin/admin is an insecure bootstrap credential: force a password change on first login.
     user_store.set_password(user.id, hash_password(temp_password), must_reset=True)

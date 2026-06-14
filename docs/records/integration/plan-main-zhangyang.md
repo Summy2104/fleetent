@@ -25,7 +25,7 @@
 | 子系统 | 更完整的一方 | 关系 | 集成动作 |
 |---|---|---|---|
 | 终止框架 `termination.py` | **张洋独有，main 空白** | 净增量 | 整体移入；循环检查点插入 |
-| 用量预算 `budget.py` + `layered_budget.py`（五层，cost 已砍） | **张洋独有，main 空白** | 净增量 | 移入；新表收编 Alembic |
+| 用量预算 `budget.py` + `layered-budget.py`（五层，cost 已砍） | **张洋独有，main 空白** | 净增量 | 移入；新表收编 Alembic |
 | 循环检测 `loop_detector.py` | **张洋独有，main 空白** | 净增量 | 移入（依赖 LoopState） |
 | 取消传播 `cancellation.py`（CancelToken + parent） | **张洋独有，main 空白** | 净增量 | 移入；牵动 dispatch 签名 |
 | 错误分类 `error_classifier.py` | **张洋更强**（main 仅硬编码 503 fallback） | main 弱内联 | 用张洋查表替换 main 硬编码 |
@@ -75,7 +75,7 @@
 
 ### 阶段 2 — 运行时模块迁入（中风险）
 张洋的独立模块作为新文件迁入，**统一适配 main 规范**：
-- 移入文件：`termination` / `budget` / `layered_budget` / `loop_detector` / `cancellation` / `error_classifier` / `message_hygiene` / `sub_agent_lifecycle` / `provider_health` / `tool_guardrails` / `tool_result_truncation` / `connectors` / `plugin_loader` / `skill_audit` / `multimodal` / `vision_client` / `image_gen_client` / `sandbox_*`（7 文件）/ `mcp_client` / `context_mgr`（替换 main 版）/ `skill_registry`（替换 main 版）。
+- 移入文件：`termination` / `budget` / `layered budget` / `loop_detector` / `cancellation` / `error_classifier` / `message_hygiene` / `sub_agent_lifecycle` / `provider_health` / `tool_guardrails` / `tool_result_truncation` / `connectors` / `plugin_loader` / `skill_audit` / `multimodal` / `vision_client` / `image_gen_client` / `sandbox_*`（7 文件）/ `mcp_client` / `context_mgr`（替换 main 版）/ `skill_registry`（替换 main 版）。
 - **import 路径全仓改写**（扁平 → 包路径）：
   | 概念 | 张洋（扁平） | main（包，集成目标） |
   |---|---|---|
@@ -98,7 +98,7 @@
 ### 阶段 4 — 数据库迁移链（硬门槛，不解决跑不起来）
 两边 `002~004` 用了**相同 revision id 但不同含义**（main `002_add_scheduled_tasks` vs 张洋 `002_add_agent_features`，都 `down_revision="001"`）。main 已到 `025`，张洋只到 `004`。Alembic 线性历史撞车。
 - 给张洋的迁移**重新分配 revision id**，接到 main `025` 之后（`026`/`027`/…），修正 `down_revision` 串成单链。
-- 张洋的新表（`budget_usage` / `sub_agent_runs` / `session_anti_flap` / 压缩相关 / `agent_skills` 等）从裸 `CREATE TABLE IF NOT EXISTS` **收编进 Alembic 声明**（符合 main 规范）。
+- 张洋的新表（`budget usage` / `sub_agent_runs` / `session_anti_flap` / 压缩相关 / `agent_skills` 等）从裸 `CREATE TABLE IF NOT EXISTS` **收编进 Alembic 声明**（符合 main 规范）。
 
 ### 阶段 5 — 测试归位（机械但量大）
 - 张洋的 ~80 个平铺 `tests/test_*.py` 归位到 main 的 `tests/{unit,integration,e2e,evaluation}/` 分层目录（main ~130+ 文件）。
@@ -122,7 +122,7 @@
 | 4 | `config.py` yaml-first ↔ 扁平字段不可行级 merge | 中高 | 张洋调参重建为嵌套 section |
 | 5 | `eval_logger` → `observability.traces` 全量改接线 + 签名核对 | 中 | 逐调用点改，签名不符补适配 |
 | 6 | import 路径全仓改写（扁平 → 包） | 中 | 全局 grep 替换，CI 兜底 |
-| 7 | 新表收编 Alembic（两套 schema 管理打架） | 中 | budget_usage/sub_agent_runs/session_anti_flap 等纳入迁移 |
+| 7 | 新表收编 Alembic（两套 schema 管理打架） | 中 | budget usage/sub_agent_runs/session_anti_flap 等纳入迁移 |
 | 8 | Grace Call 多发的 LLM 调用被 trace 误记为正常 turn | 低中 | 移植时标记区分 |
 | 9 | skill 引擎 ↔ 管理面接口契约不匹配 | 中 | 写适配层翻译 store 状态为引擎入参 |
 | 10 | 测试归位量大（~80 文件改路径） | 低（机械） | 批量移动 + 路径修正 |

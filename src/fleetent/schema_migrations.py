@@ -84,13 +84,37 @@ def _apply_step(db_path: Path, version: int, sql: str) -> None:
     try:
         conn.execute("BEGIN")
         try:
-            conn.execute(sql)
+            for statement in _split_sql_statements(sql):
+                conn.execute(statement)
             conn.execute(f"PRAGMA user_version = {version}")
             conn.execute("COMMIT")
         except Exception as exc:
             conn.execute("ROLLBACK")
-            raise MigrationError(
-                f"Migration step v{version} failed: {exc}"
-            ) from exc
+            raise MigrationError(f"Migration step v{version} failed: {exc}") from exc
     finally:
         conn.close()
+
+
+def _split_sql_statements(sql: str) -> list[str]:
+    """Split a migration script into executable SQLite statements.
+
+    Migration steps are usually one statement, but some forward-only schema
+    changes need a tightly ordered script while still sharing one version stamp.
+    """
+    statements: list[str] = []
+    buffer: list[str] = []
+    for line in sql.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        buffer.append(line)
+        candidate = "\n".join(buffer).strip()
+        if sqlite3.complete_statement(candidate):
+            finalized = candidate.rstrip(";").strip()
+            if finalized:
+                statements.append(finalized)
+            buffer.clear()
+    remainder = "\n".join(buffer).strip()
+    if remainder:
+        statements.append(remainder.rstrip(";").strip())
+    return statements

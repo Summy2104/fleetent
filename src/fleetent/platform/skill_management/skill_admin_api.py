@@ -464,16 +464,13 @@ def list_skill_agents(name: str, authorization: str | None = Header(None)) -> li
 
 @router.put("/{name}/agents/{agent_id}")
 def set_skill_agent_binding(
-    name: str, agent_id: str, body: BindingBody, authorization: str | None = Header(None)
+    name: str, agent_id: int, body: BindingBody, authorization: str | None = Header(None)
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
     skill_admin_store.set_binding(agent_id, name, body.enabled, updated_by=user.id)
     action = "skill.agent_enable" if body.enabled else "skill.agent_disable"
     audit_log.write_audit(user.id, action, "skill", name, detail={"agent_id": agent_id})
-    try:
-        agent_name = agent_store.get_agent_name_by_id(int(agent_id))
-    except ValueError:
-        agent_name = None  # non-numeric id → cannot resolve a name; binding still written
+    agent_name = agent_store.get_agent_name_by_id(agent_id)
     if agent_name is not None:
         _rematerialize_agent(agent_name)
     return {"name": name, "agent_id": agent_id, "enabled": body.enabled}

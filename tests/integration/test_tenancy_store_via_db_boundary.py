@@ -121,7 +121,7 @@ def test_set_tenant_approver() -> None:
     from fleetent import user_store
     from fleetent.platform.tenancy.store import get_tenant, set_tenant_approver
 
-    user = user_store.create_user("Approver")
+    user, _ = user_store.create_user("Approver")
     set_tenant_approver("default", user.id)
     t = get_tenant("default")
     assert t is not None
@@ -150,7 +150,7 @@ def test_set_team_approver() -> None:
     from fleetent.platform.tenancy.store import create_team, get_team, set_team_approver
 
     team = create_team(name="Legal")
-    user = user_store.create_user("Team Approver")
+    user, _ = user_store.create_user("Team Approver")
     set_team_approver(team["id"], user.id)
     found = get_team(team["id"])
     assert found is not None

@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 ToolSchema = dict[str, Any]
 ToolReturn = str | Coroutine[Any, Any, str]
 ToolFn = Callable[..., ToolReturn]
+# permission-gate D7: a risk level may be a callable evaluated at call time with
+# (tool_args, tool_context) → "low" | "medium" | "high".
+RiskFn = Callable[[dict[str, Any], Any], str]
 
 
 @dataclass
@@ -32,6 +35,10 @@ class ToolContext:
     agent_name: str | None = None
     features: dict[str, Any] = field(default_factory=dict)
     session_id: str | None = None
+    # Resolved workspace scope key (D0): the /exchange attribution key, mirroring the
+    # /workspace mount (session_id under `session` scope, agent_name under `agent`). Set
+    # by the loop from the sandbox manager's resolved scope; None = no attribution.
+    scope_key: str | None = None
     # Inbound sender/channel metadata (im_gateway.SessionContext) for whoami-style
     # tools; typed Any to avoid an im_gateway import cycle. None = unavailable.
     session_context: Any = None
@@ -46,7 +53,7 @@ class ToolContext:
 
 
 _registry: dict[str, tuple[Callable[..., Any], ToolSchema]] = {}
-_risk_levels: dict[str, str] = {}
+_risk_levels: dict[str, "str | RiskFn"] = {}
 # Per-tool timeout metadata parallel to _risk_levels (T2): name -> seconds. Absent
 # means "use the global default". Like risk_level it never enters the LLM schema.
 _timeouts: dict[str, float] = {}
@@ -83,7 +90,7 @@ def tool(
 def tool(
     fn: ToolFn | None = None,
     *,
-    risk_level: str = "none",
+    risk_level: "str | RiskFn" = "none",
     connector: str | None = None,
     scopes: list[str] | None = None,
     timeout: float | None = None,
@@ -118,8 +125,38 @@ def tool(
 
 
 def get_risk_level(name: str) -> str:
-    """Return the registered risk level for a tool, defaulting to 'none'."""
-    return _risk_levels.get(name, "none")
+    """Return a tool's static risk level, defaulting to 'none'.
+
+    For a tool whose risk is a callable (permission-gate D7), a conservative static
+    view ('medium') is returned for context-free callers (e.g. trace logging) that
+    cannot supply call args; the call-time disposition uses `evaluate_risk_level`.
+    """
+    value = _risk_levels.get(name, "none")
+    if callable(value):
+        return "medium"
+    return value
+
+
+def is_dynamic_risk(name: str) -> bool:
+    """Whether a tool's risk is a call-time callable (permission-gate D7)."""
+    return callable(_risk_levels.get(name))
+
+
+def evaluate_risk_level(name: str, args: dict[str, Any], tool_context: Any) -> str:
+    """Resolve a tool's risk at call time (permission-gate D7).
+
+    A static string is returned as-is. A callable risk is evaluated with
+    ``(args, tool_context)``; any exception fails closed to 'medium' so a buggy risk
+    function can never silently downgrade a call below the approval threshold.
+    """
+    value = _risk_levels.get(name, "none")
+    if not callable(value):
+        return value
+    try:
+        return value(args, tool_context)
+    except Exception:  # noqa: BLE001 — fail closed: a broken risk fn must not bypass the gate
+        logger.warning("risk_callable_failed name=%s", name)
+        return "medium"
 
 
 def get_connector(name: str) -> tuple[str, list[str]] | None:
@@ -263,7 +300,18 @@ def dispatch(
         from fleetent.integrations.mcp import client as mcp_client
 
         server_id, tool_name = name.split(_MCP_SEP, 1)
-        return mcp_client.call_tool(server_id, tool_name, kwargs, scope=mcp_scope)
+        # Thread /exchange attribution (D0): same scope_key the global path carries via
+        # the wrapper's tool_context, plus session_id/user_id for the ledger audit columns.
+        principal = getattr(tool_context, "principal", None)
+        return mcp_client.call_tool(
+            server_id,
+            tool_name,
+            kwargs,
+            scope=mcp_scope,
+            scope_key=getattr(tool_context, "scope_key", None),
+            session_id=getattr(tool_context, "session_id", None),
+            user_id=getattr(principal, "user_id", None),
+        )
 
     if name not in _registry:
         return f"unknown tool: {name}"

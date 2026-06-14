@@ -59,11 +59,10 @@ these knobs SHALL fall back to their defaults.
 
 ### Requirement: Global budget dimension is not read at runtime
 
-The system SHALL NOT read or enforce a global (cross-agent) budget dimension at runtime.
-The runtime layered-budget aggregation MUST operate only on the `session`, `user`, and
-`agent` dimensions. No runtime path SHALL consult `agent_budget_global_*`.
+The system SHALL NOT read or enforce any retired cross-run budget dimension at runtime.
+No runtime path SHALL consult legacy cross-run budget config fields.
 
-#### Scenario: layered aggregation skips the global dimension
+#### Scenario: runtime ignores retired cross-run budget dimensions
 
 - **WHEN** the cross-run layered budget aggregation runs
 - **THEN** it evaluates only the `session`, `user`, and `agent` scopes and never a `global`

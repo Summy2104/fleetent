@@ -1,6 +1,8 @@
-"""SQLite-backed user store. Each user has a uuid id and an API key."""
+"""SQLite-backed user store. Users authenticate via the api_keys table (hashed)."""
 
 import datetime
+import hashlib
+import json
 import secrets
 import uuid
 from collections.abc import Callable
@@ -13,9 +15,15 @@ from fleetent import paths
 # after retire-raw-sqlite-connect (all connections go through db.py boundary).
 DB_PATH = paths.data_dir() / "management.db"
 
+
+def _hash_key(plaintext: str) -> str:
+    """SHA-256 hash of a plaintext API key — single canonical source shared with api_key_store."""
+    return hashlib.sha256(plaintext.encode()).hexdigest()
+
+
 # Injectable hook for resolving api_keys table entries.
 # Platform startup wires this to api_key_store.resolve; standalone agents leave it None,
-# falling back to the legacy users.api_key column only (no platform import needed).
+# falling back to the local api_keys hash lookup (no platform import needed).
 _api_key_resolver: Callable[[str], dict[str, Any] | None] | None = None
 
 
@@ -32,7 +40,6 @@ def set_api_key_resolver(resolver: Callable[[str], dict[str, Any] | None]) -> No
 class User:
     id: str
     name: str
-    api_key: str
     created_at: str
     email: str | None = None
     role: str = "viewer"
@@ -42,9 +49,7 @@ class User:
     tenant_id: str = "default"
 
 
-_FULL_COLS = (
-    "id, name, api_key, created_at, email, role, status, must_reset, password_hash, tenant_id"
-)
+_FULL_COLS = "id, name, created_at, email, role, status, must_reset, password_hash, tenant_id"
 
 
 def _db():
@@ -74,74 +79,98 @@ def _conn():
     return conn
 
 
-def create_user(name: str, email: str | None = None, tenant_id: str = "default") -> User:
-    """Create a new user with a generated uuid and API key."""
-    user = User(
-        id=str(uuid.uuid4()),
-        name=name,
-        api_key=f"ma-{secrets.token_hex(32)}",
-        created_at=datetime.datetime.now(datetime.UTC).isoformat(),
-        email=email,
-        tenant_id=tenant_id,
-    )
-    with _db().transaction() as conn:
+def create_user(
+    name: str, email: str | None = None, tenant_id: str = "default"
+) -> tuple["User", str]:
+    """Create a new user and issue an API key.
+
+    Returns (User, plaintext_key).  The plaintext is shown once and never persisted;
+    the api_keys table stores only the SHA-256 hash.
+    """
+    plaintext = f"ma-{secrets.token_hex(32)}"
+    now = datetime.datetime.now(datetime.UTC).isoformat()
+    user_id = str(uuid.uuid4())
+    db = _db()
+    with db.transaction() as conn:
         conn.execute(
-            "INSERT INTO users (id, name, api_key, created_at, email, tenant_id)"
-            " VALUES (:id, :name, :api_key, :created_at, :email, :tenant_id)",
+            "INSERT INTO users (id, name, created_at, email, tenant_id)"
+            " VALUES (:id, :name, :created_at, :email, :tenant_id)",
             {
-                "id": user.id,
-                "name": user.name,
-                "api_key": user.api_key,
-                "created_at": user.created_at,
-                "email": user.email,
-                "tenant_id": user.tenant_id,
+                "id": user_id,
+                "name": name,
+                "created_at": now,
+                "email": email,
+                "tenant_id": tenant_id,
             },
         )
-    return user
+        conn.execute(
+            "INSERT INTO api_keys (user_id, key_hash, prefix, scope, created_at, call_count)"
+            " VALUES (:user_id, :key_hash, :prefix, :scope, :created_at, 0)",
+            {
+                "user_id": user_id,
+                "key_hash": _hash_key(plaintext),
+                "prefix": plaintext[:11],
+                "scope": json.dumps(["*"]),
+                "created_at": now,
+            },
+        )
+    result = get_by_id(user_id)
+    assert result is not None
+    return result, plaintext
 
 
 def authenticate(plaintext: str) -> tuple[User, dict[str, Any]] | None:
     """Resolve a plaintext API key to (User, key_metadata).
 
-    When the platform api_keys resolver is wired (set_api_key_resolver was called at
-    startup), checks the api_keys table first. Falls back to the legacy users.api_key
-    column for standalone agents or unmigrated keys. Returns None if the key is
-    invalid/revoked/expired or the owning user is blocked.
+    When the platform resolver is injected (set_api_key_resolver called at startup),
+    delegates to it. Otherwise queries api_keys by hash — the single canonical path
+    for standalone agents. Returns None when the key is invalid/revoked/expired or the
+    owning user is blocked.
     """
     if _api_key_resolver is not None:
         meta = _api_key_resolver(plaintext)
-        if meta is not None:
-            user = get_by_id(meta["user_id"])
-            if user is None or user.status == "blocked":
-                return None
-            return user, meta
+        if meta is None:
+            return None
+        user = get_by_id(meta["user_id"])
+        if user is None or user.status == "blocked":
+            return None
+        return user, meta
 
-    # Legacy fallback: key still lives only in the users.api_key column.
-    user = _get_by_legacy_key(plaintext)
+    # Standalone: query api_keys by hash (same table, no platform import needed).
+    key_hash = _hash_key(plaintext)
+    row = (
+        _db()
+        .execute(
+            "SELECT id, user_id, scope, revoked_at, expires_at FROM api_keys WHERE key_hash = :kh",
+            {"kh": key_hash},
+        )
+        .fetchone()
+    )
+    if row is None:
+        return None
+    if row["revoked_at"] is not None:
+        return None
+    if (
+        row["expires_at"] is not None
+        and row["expires_at"] <= datetime.datetime.now(datetime.UTC).isoformat()
+    ):
+        return None
+    user = get_by_id(row["user_id"])
     if user is None or user.status == "blocked":
         return None
-    return user, {"id": None, "user_id": user.id, "scope": ["*"], "prefix": plaintext[:11]}
+    scope = json.loads(row["scope"]) if row["scope"] else ["*"]
+    return user, {
+        "id": row["id"],
+        "user_id": row["user_id"],
+        "scope": scope,
+        "prefix": plaintext[:11],
+    }
 
 
 def get_by_api_key(api_key: str) -> User | None:
     """Look up a user by API key (delegates to authenticate). Returns None if invalid."""
     result = authenticate(api_key)
     return result[0] if result else None
-
-
-def _get_by_legacy_key(api_key: str) -> User | None:
-    row = (
-        _db()
-        .execute(f"SELECT {_FULL_COLS} FROM users WHERE api_key = :api_key", {"api_key": api_key})
-        .fetchone()
-    )
-    return _row_to_user(row) if row else None
-
-
-def list_legacy_api_keys() -> list[tuple[str, str]]:
-    """Return legacy ``users.api_key`` values as ``(user_id, plaintext_key)`` pairs."""
-    rows = _db().execute("SELECT id, api_key FROM users WHERE api_key IS NOT NULL").fetchall()
-    return [(row["id"], row["api_key"]) for row in rows]
 
 
 def get_by_id(user_id: str) -> User | None:
@@ -168,20 +197,33 @@ def list_users() -> list[User]:
     return [_row_to_user(r) for r in rows]
 
 
-def rotate_key(user_id: str) -> User:
-    """Generate a new API key for user_id. Raises KeyError if user not found."""
-    new_key = f"ma-{secrets.token_hex(32)}"
-    row = (
-        _db()
-        .execute(
-            f"UPDATE users SET api_key = :key WHERE id = :id RETURNING {_FULL_COLS}",
-            {"key": new_key, "id": user_id},
-        )
-        .fetchone()
-    )
-    if row is None:
+def rotate_key(user_id: str) -> tuple["User", str]:
+    """Revoke all active api_keys for user_id and issue a new one.  Raises KeyError if not found.
+
+    Returns (User, plaintext_key).  The plaintext is shown once and never persisted.
+    """
+    user = get_by_id(user_id)
+    if user is None:
         raise KeyError(f"User not found: {user_id}")
-    return _row_to_user(row)
+    now = datetime.datetime.now(datetime.UTC).isoformat()
+    plaintext = f"ma-{secrets.token_hex(32)}"
+    with _db().transaction() as conn:
+        conn.execute(
+            "UPDATE api_keys SET revoked_at = :now WHERE user_id = :uid AND revoked_at IS NULL",
+            {"now": now, "uid": user_id},
+        )
+        conn.execute(
+            "INSERT INTO api_keys (user_id, key_hash, prefix, scope, created_at, call_count)"
+            " VALUES (:user_id, :key_hash, :prefix, :scope, :created_at, 0)",
+            {
+                "user_id": user_id,
+                "key_hash": _hash_key(plaintext),
+                "prefix": plaintext[:11],
+                "scope": json.dumps(["*"]),
+                "created_at": now,
+            },
+        )
+    return user, plaintext
 
 
 def get_builtin_admin() -> User | None:
@@ -264,7 +306,7 @@ def create_web_user(
             raise PermissionError(f"email blocked from registration: {normalized}")
         if get_by_email(normalized) is not None:
             raise ValueError(f"email already exists: {normalized}")
-    user = create_user(name=name, email=normalized)
+    user, _ = create_user(name=name, email=normalized)
     if role != "viewer":
         set_role(user.id, role)
     if password_hash is not None:
@@ -343,7 +385,6 @@ def _row_to_user(row: dict) -> User:
     return User(
         id=row["id"],
         name=row["name"],
-        api_key=row["api_key"],
         created_at=row["created_at"],
         email=row["email"],
         role=row["role"],

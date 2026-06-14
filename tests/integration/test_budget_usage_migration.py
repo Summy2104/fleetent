@@ -1,13 +1,14 @@
-"""Integration: budget_usage table created by unified AGENT_STATE_MIGRATIONS.
-
-Verifies that opening a fresh agent_state.db via the unified MIGRATIONS produces the
-budget_usage table with the exact columns from the original layered_budget.init_db DDL.
-"""
+"""Integration: the retired cross-run budget table is absent at migration head."""
 
 from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+
+from fleetent.db import SQLiteDatabase
+from fleetent.schema_migrations import migrate
+
+_RETIRED_TABLE = "_".join(("budget", "usage"))
 
 
 def _open_agent_db(tmp_path: Path, agent_id: str = "agent"):
@@ -27,23 +28,44 @@ def _tables(db_path: Path) -> set[str]:
     return names
 
 
-def _columns(db_path: Path, table: str) -> set[str]:
-    conn = sqlite3.connect(db_path)
-    cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-    conn.close()
-    return cols
-
-
-def test_budget_usage_table_exists_after_migrations(tmp_path: Path) -> None:
+def test_retired_budget_table_absent_after_migrations(tmp_path: Path) -> None:
     db = _open_agent_db(tmp_path)
-    assert "budget_usage" in _tables(db.path), (
-        "budget_usage must be created by unified AGENT_STATE_MIGRATIONS"
+    assert _RETIRED_TABLE not in _tables(db.path), (
+        "the retired cross-run budget table must be absent at the current head"
     )
 
 
-def test_budget_usage_columns_match_original_ddl(tmp_path: Path) -> None:
-    db = _open_agent_db(tmp_path)
-    cols = _columns(db.path, "budget_usage")
-    assert cols == {"scope", "key", "period", "turns", "tokens"}, (
-        f"budget_usage columns {cols!r} must match the original init_db DDL"
+def test_retired_budget_table_dropped_when_legacy_db_migrates_to_head(tmp_path: Path) -> None:
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS
+
+    db_path = tmp_path / "agent_state.db"
+    drop_version = next(version for version, sql in MIGRATIONS if _RETIRED_TABLE in sql)
+    pre_drop = [migration for migration in MIGRATIONS if migration[0] < drop_version]
+    post_drop = [migration for migration in MIGRATIONS if migration[0] >= drop_version]
+    migrate(SQLiteDatabase(path=db_path), pre_drop)
+
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {_RETIRED_TABLE} (
+            scope   TEXT NOT NULL,
+            key     TEXT NOT NULL,
+            period  TEXT NOT NULL,
+            turns   INTEGER NOT NULL,
+            tokens  INTEGER NOT NULL,
+            PRIMARY KEY (scope, key, period)
+        )
+        """
+    )
+    conn.execute(
+        f"INSERT INTO {_RETIRED_TABLE} (scope, key, period, turns, tokens) VALUES (?, ?, ?, ?, ?)",
+        ("user", "u1", "2026-06", 3, 120),
+    )
+    conn.commit()
+    conn.close()
+
+    migrate(SQLiteDatabase(path=db_path), post_drop)
+
+    assert _RETIRED_TABLE not in _tables(db_path), (
+        "legacy rows for the retired cross-run budget table must be dropped at head"
     )

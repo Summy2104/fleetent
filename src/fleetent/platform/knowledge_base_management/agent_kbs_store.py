@@ -20,7 +20,7 @@ def _now() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat()
 
 
-def bind(tenant_id: str, kb_id: str, agent_id: str, created_by: str | None = None) -> None:
+def bind(tenant_id: str, kb_id: str, agent_id: int, created_by: str | None = None) -> None:
     """Bind a KB to an agent (idempotent on the composite key)."""
     with _database().transaction() as conn:
         conn.execute(
@@ -39,7 +39,7 @@ def bind(tenant_id: str, kb_id: str, agent_id: str, created_by: str | None = Non
         )
 
 
-def unbind(tenant_id: str, kb_id: str, agent_id: str) -> None:
+def unbind(tenant_id: str, kb_id: str, agent_id: int) -> None:
     with _database().transaction() as conn:
         conn.execute(
             "DELETE FROM agent_kbs WHERE tenant_id = :tenant_id AND kb_id = :kb_id "
@@ -48,7 +48,7 @@ def unbind(tenant_id: str, kb_id: str, agent_id: str) -> None:
         )
 
 
-def list_agents_for_kb(tenant_id: str, kb_id: str) -> list[str]:
+def list_agents_for_kb(tenant_id: str, kb_id: str) -> list[int]:
     rows = (
         _database()
         .execute(
@@ -61,7 +61,7 @@ def list_agents_for_kb(tenant_id: str, kb_id: str) -> list[str]:
     return [r["agent_id"] for r in rows]
 
 
-def list_kbs_for_agent(tenant_id: str, agent_id: str) -> list[str]:
+def list_kbs_for_agent(tenant_id: str, agent_id: int) -> list[str]:
     rows = (
         _database()
         .execute(

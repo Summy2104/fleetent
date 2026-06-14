@@ -84,7 +84,7 @@ def test_approver_is_null_by_default(tmp_path: Path) -> None:
 def test_set_tenant_approver(tmp_path: Path) -> None:
     from fleetent.platform.tenancy.store import get_tenant, set_tenant_approver
 
-    user = user_store.create_user("Approver A")
+    user, _ = user_store.create_user("Approver A")
     set_tenant_approver("default", user.id)
     tenant = get_tenant("default")
     assert tenant is not None
@@ -95,7 +95,7 @@ def test_set_team_approver(tmp_path: Path) -> None:
     from fleetent.platform.tenancy.store import create_team, get_team, set_team_approver
 
     create_team("team3", "default", "Legal")
-    user = user_store.create_user("Approver B")
+    user, _ = user_store.create_user("Approver B")
     set_team_approver("team3", user.id)
     team = get_team("team3")
     assert team is not None
@@ -105,7 +105,7 @@ def test_set_team_approver(tmp_path: Path) -> None:
 def test_set_tenant_approver_to_none_clears(tmp_path: Path) -> None:
     from fleetent.platform.tenancy.store import get_tenant, set_tenant_approver
 
-    user = user_store.create_user("Approver C")
+    user, _ = user_store.create_user("Approver C")
     set_tenant_approver("default", user.id)
     set_tenant_approver("default", None)
     tenant = get_tenant("default")
@@ -117,7 +117,7 @@ def test_set_user_tenant(tmp_path: Path) -> None:
     from fleetent.platform.tenancy.store import create_tenant, set_user_tenant
 
     create_tenant("corp", "Corp Inc")
-    user = user_store.create_user("Employee")
+    user, _ = user_store.create_user("Employee")
     set_user_tenant(user.id, "corp")
     refreshed = user_store.get_by_id(user.id)
     assert refreshed is not None
@@ -125,5 +125,5 @@ def test_set_user_tenant(tmp_path: Path) -> None:
 
 
 def test_new_user_has_default_tenant_id(tmp_path: Path) -> None:
-    user = user_store.create_user("NewUser")
+    user, _ = user_store.create_user("NewUser")
     assert user.tenant_id == "default"

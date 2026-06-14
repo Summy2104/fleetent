@@ -16,8 +16,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-import fleetent.governance.approval_allowlist_store as allowlist_store_mod
 import fleetent.governance.approval_store as approval_store_mod
+import fleetent.governance.tool_auto_approvals_store as allowlist_store_mod
 
 # Patch the real module: permission_gate imports from fleetent.outbound; patching
 # the fleetent.im_gateway.outbound re-export shim would not take effect.
@@ -168,5 +168,5 @@ async def test_standalone_approval_no_platform(
     assert ok is True
     finalized = approval_store_mod.list_approvals()[0]
     assert finalized["status"] == "approved"
-    assert finalized["approver_actor"] == "slack:U_LEAD"
+    assert finalized["approver_user_id"] == "slack:U_LEAD"
     assert finalized["resolved_at"] is not None

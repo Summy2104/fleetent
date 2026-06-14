@@ -28,7 +28,7 @@ from fleetent.agent_config import (
 )
 from fleetent.config import McpServerSettings
 from fleetent.platform.agent_lifecycle import credential_slots, secret_store
-from fleetent.platform.connector_management import agent_mcp_server_store
+from fleetent.platform.connector_management import mcp_server_store
 from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.model_provider_management import provider_admin_store
 from fleetent.platform.skill_management import skill_admin_store
@@ -137,8 +137,8 @@ def _allowed_skills_for(agent: agent_store.Agent) -> list[str]:
     back to authored too.
     """
     try:
-        if skill_admin_store.has_any_binding(str(agent.id)):
-            return sorted(skill_admin_store.enabled_skill_names(str(agent.id)))
+        if skill_admin_store.has_any_binding(agent.id):
+            return sorted(skill_admin_store.enabled_skill_names(agent.id))
     except sqlite3.OperationalError as exc:
         if "no such table" not in str(exc):
             raise
@@ -231,9 +231,9 @@ def _mcp_servers_for_agent(agent: agent_store.Agent) -> list[McpServerSettings]:
     )
     servers: list[McpServerSettings] = []
     for server_id in ids:
-        row = agent_mcp_server_store.get_mcp_server(
+        row = mcp_server_store.get_mcp_server(
             agent.id, server_id
-        ) or agent_mcp_server_store.get_mcp_server(None, server_id)
+        ) or mcp_server_store.get_mcp_server(None, server_id)
         if row is None:
             continue
         servers.append(
@@ -253,7 +253,7 @@ def _mcp_servers_for_agent(agent: agent_store.Agent) -> list[McpServerSettings]:
 
 def _knowledge_for_agent(agent: agent_store.Agent) -> AgentKnowledge:
     try:
-        kb_ids = agent_kbs_store.list_kbs_for_agent(agent.tenant_id, str(agent.id))
+        kb_ids = agent_kbs_store.list_kbs_for_agent(agent.tenant_id, agent.id)
     except sqlite3.OperationalError as exc:
         if "no such table: agent_kbs" not in str(exc):
             raise

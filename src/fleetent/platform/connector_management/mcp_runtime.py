@@ -1,6 +1,6 @@
 """Bridge persisted MCP server definitions into the live MCP client.
 
-Only global (``agent_id IS NULL``), enabled definitions from ``agent_mcp_server_store``
+Only global (``agent_id IS NULL``), enabled definitions from ``mcp_server_store``
 are registered into the runtime so their tools become visible to agents; disabled or
 deleted definitions are unregistered. Per-agent scoped registration is out of scope
 here — this is the DB-authored global layer.
@@ -14,7 +14,7 @@ from fleetent.integrations.mcp import (
     register_all,
     unregister_server,
 )
-from fleetent.platform.connector_management import agent_mcp_server_store
+from fleetent.platform.connector_management import mcp_server_store
 
 
 def _row_to_config(row: dict[str, Any]) -> McpServerConfig:
@@ -32,9 +32,7 @@ def _row_to_config(row: dict[str, Any]) -> McpServerConfig:
 
 
 def enabled_global_configs() -> list[McpServerConfig]:
-    return [
-        _row_to_config(r) for r in agent_mcp_server_store.list_mcp_servers(None) if r["enabled"]
-    ]
+    return [_row_to_config(r) for r in mcp_server_store.list_mcp_servers(None) if r["enabled"]]
 
 
 async def register_global_store_servers() -> None:
@@ -51,7 +49,7 @@ async def sync_server(server_id: str) -> None:
     exists and is enabled. Used after admin add/edit/delete/disable so the change takes
     effect without a restart. A connect failure is swallowed by ``register_all``.
     """
-    row = agent_mcp_server_store.get_mcp_server(None, server_id)
+    row = mcp_server_store.get_mcp_server(None, server_id)
     unregister_server(server_id)
     if row is not None and row["enabled"]:
         await register_all([_row_to_config(row)])
@@ -59,7 +57,7 @@ async def sync_server(server_id: str) -> None:
 
 async def probe_global_server(server_id: str) -> dict[str, Any]:
     """Real connectivity test for a stored global server (initialize + tools/list)."""
-    row = agent_mcp_server_store.get_mcp_server(None, server_id)
+    row = mcp_server_store.get_mcp_server(None, server_id)
     if row is None:
         return {"connected": False, "error": "server not found"}
     return await probe_server(_row_to_config(row))

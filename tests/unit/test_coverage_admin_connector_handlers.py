@@ -54,7 +54,7 @@ def test_agent_admin_yaml_bindings_versions_and_deploy(monkeypatch, tmp_path):
         lambda _agent_id: ["global", "missing"],
     )
     monkeypatch.setattr(
-        agent_admin_api.agent_mcp_server_store,
+        agent_admin_api.mcp_server_store,
         "get_mcp_server",
         lambda agent_id, sid: (
             {
@@ -137,19 +137,19 @@ def test_agent_admin_binding_skill_kb_oauth_and_mcp_handlers(monkeypatch):
         agent_admin_api.agent_store, "list_mcp_servers_for_agent", lambda _agent_id: ["db"]
     )
     monkeypatch.setattr(
-        agent_admin_api.agent_mcp_server_store,
+        agent_admin_api.mcp_server_store,
         "list_mcp_servers",
         lambda _agent_id: [{"server_id": "db"}],
     )
     monkeypatch.setattr(
         agent_admin_api.skill_admin_store,
         "enabled_skill_names",
-        lambda name: {"skill-a"},
+        lambda agent_id: {"skill-a"},
     )
     monkeypatch.setattr(
         agent_admin_api.skill_admin_store,
         "list_skills_for_agent",
-        lambda name: [{"skill_name": "skill-b", "enabled": False}],
+        lambda agent_id: [{"skill_name": "skill-b", "enabled": False}],
     )
     monkeypatch.setattr(
         agent_admin_api.skill_admin_store,
@@ -461,17 +461,17 @@ async def test_connector_admin_catalog_mcp_and_grant_handlers(monkeypatch):
         }
     }
     monkeypatch.setattr(
-        connector_admin_api.agent_mcp_server_store,
+        connector_admin_api.mcp_server_store,
         "list_mcp_servers",
         lambda agent_id: [row for (aid, _sid), row in mcp_rows.items() if aid == agent_id],
     )
     monkeypatch.setattr(
-        connector_admin_api.agent_mcp_server_store,
+        connector_admin_api.mcp_server_store,
         "get_mcp_server",
         lambda agent_id, server_id: mcp_rows.get((agent_id, server_id)),
     )
     monkeypatch.setattr(
-        connector_admin_api.agent_mcp_server_store,
+        connector_admin_api.mcp_server_store,
         "add_mcp_server",
         lambda **kwargs: mcp_rows.__setitem__(
             (kwargs.get("agent_id"), kwargs["server_id"]),
@@ -487,14 +487,14 @@ async def test_connector_admin_catalog_mcp_and_grant_handlers(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        connector_admin_api.agent_mcp_server_store,
+        connector_admin_api.mcp_server_store,
         "edit_mcp_server",
         lambda agent_id, server_id, **kwargs: calls.append(
             ("edit_mcp", (agent_id, server_id), kwargs)
         ),
     )
     monkeypatch.setattr(
-        connector_admin_api.agent_mcp_server_store,
+        connector_admin_api.mcp_server_store,
         "delete_mcp_server",
         lambda agent_id, server_id: calls.append(("delete_mcp", (agent_id, server_id), {})),
     )
