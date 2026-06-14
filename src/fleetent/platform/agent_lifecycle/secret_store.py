@@ -3,19 +3,21 @@
 from __future__ import annotations
 
 import datetime
-import os
 from typing import Literal
-
-from cryptography.fernet import Fernet, InvalidToken
 
 from fleetent.config import Settings
 from fleetent.db import SQLiteDatabase, create_database
+from fleetent.secret_crypto import (
+    SecretKeyError as _SecretKeyError,
+)
+from fleetent.secret_crypto import (
+    _fernet,
+    decrypt_text,
+    encrypt_text,
+)
 
 SecretStatus = Literal["set", "unset"]
-
-
-class SecretKeyError(RuntimeError):
-    """Raised when the platform secret-store master key is missing or invalid."""
+SecretKeyError = _SecretKeyError
 
 
 def _database() -> SQLiteDatabase:
@@ -26,16 +28,6 @@ def _now() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat()
 
 
-def _fernet() -> Fernet:
-    key = os.environ.get("FLEETENT_SECRET_KEY", "")
-    if not key:
-        raise SecretKeyError("FLEETENT_SECRET_KEY is required for inject secret operations")
-    try:
-        return Fernet(key.encode("ascii"))
-    except Exception as exc:
-        raise SecretKeyError("FLEETENT_SECRET_KEY must be a valid Fernet key") from exc
-
-
 def set(agent_id: int | None, env_name: str, plaintext: str, updated_by: str | None = None) -> None:
     """Encrypt and store a secret value for one slot.
 
@@ -43,7 +35,7 @@ def set(agent_id: int | None, env_name: str, plaintext: str, updated_by: str | N
     """
     if plaintext == "":
         raise ValueError("empty secret values are rejected; use delete to clear a value")
-    ciphertext = _fernet().encrypt(plaintext.encode("utf-8")).decode("ascii")
+    ciphertext = encrypt_text(plaintext)
     with _database().transaction() as conn:
         conn.execute(
             """
@@ -66,7 +58,7 @@ def set(agent_id: int | None, env_name: str, plaintext: str, updated_by: str | N
 
 def get_decrypted(agent_id: int | None, env_name: str) -> str | None:
     """Return the decrypted value for this exact scope, or None when the slot is unset."""
-    fernet = _fernet()
+    _fernet()
     row = (
         _database()
         .execute(
@@ -78,10 +70,7 @@ def get_decrypted(agent_id: int | None, env_name: str) -> str | None:
     )
     if row is None:
         return None
-    try:
-        return fernet.decrypt(str(row["ciphertext"]).encode("ascii")).decode("utf-8")
-    except InvalidToken as exc:
-        raise SecretKeyError("FLEETENT_SECRET_KEY cannot decrypt the stored secret") from exc
+    return decrypt_text(str(row["ciphertext"]))
 
 
 def get_resolved(agent_id: int, env_name: str) -> str | None:

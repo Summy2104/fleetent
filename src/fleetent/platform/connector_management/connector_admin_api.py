@@ -12,14 +12,19 @@ Only the connector config catalog is persisted here. Secrets/tokens are never re
 plaintext — masking is applied in the serialization layer. Never imports the agent loop.
 """
 
+import secrets
 from typing import Any, cast
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, Header, HTTPException
+import httpx
+from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from fleetent import audit_log, auth, user_store
 from fleetent.platform.connector_management import (
     connector_config_store,
+    external_credential_store,
+    external_service_store,
     mcp_server_store,
 )
 
@@ -28,6 +33,7 @@ router = APIRouter(prefix="/admin")
 IDLE_TIMEOUT_SECONDS = 1800
 _ADMIN_ROLES = {"admin", "built_in_admin"}
 _SENSITIVE = ("secret", "token", "refresh", "api_key", "password")
+_pending_consent_states: dict[str, tuple[str, str]] = {}
 
 
 # --- injectable seams (connectors / mcp follow-ups) ---------------------------
@@ -178,6 +184,13 @@ class ConnectorEditBody(BaseModel):
     enabled: bool | None = None
 
 
+def _service_oauth_config(service_id: str) -> dict[str, Any]:
+    service = external_service_store.get_service(service_id)
+    if service is None:
+        raise HTTPException(status_code=404, detail="connector not found")
+    return service.get("oauth_config", {})
+
+
 # --- OAuth connector catalog --------------------------------------------------
 
 
@@ -207,6 +220,69 @@ def list_connectors(
 ) -> list[dict[str, Any]]:
     _current_user(authorization)
     return [_mask(c) for c in connector_config_store.list_connectors(agent_id)]
+
+
+@router.get("/connectors/authorize/{service_id}")
+def authorize_connector(
+    service_id: str, request: Request, authorization: str | None = Header(None)
+) -> dict[str, Any]:
+    user = _current_user(authorization)
+    oauth_config = _service_oauth_config(service_id)
+    authorize_url = oauth_config.get("authorize")
+    client_id = oauth_config.get("client_id")
+    if not authorize_url or not client_id:
+        raise HTTPException(status_code=422, detail="connector authorize metadata missing")
+    state = secrets.token_urlsafe(24)
+    _pending_consent_states[state] = (user.id, service_id)
+    scopes = oauth_config.get("scopes", [])
+    query = {
+        "response_type": "code",
+        "client_id": client_id,
+        "redirect_uri": str(request.url_for("oauth_callback", service_id=service_id)),
+        "state": state,
+    }
+    if scopes:
+        query["scope"] = " ".join(scopes)
+    return {"authorize_url": f"{authorize_url}?{urlencode(query)}"}
+
+
+@router.get("/connectors/callback/{service_id}", name="oauth_callback")
+def oauth_callback(
+    service_id: str,
+    state: str,
+    code: str,
+    request: Request,
+    authorization: str | None = Header(None),
+) -> dict[str, Any]:
+    user = _current_user(authorization)
+    pending = _pending_consent_states.pop(state, None)
+    if pending != (user.id, service_id):
+        raise HTTPException(status_code=400, detail="invalid consent state")
+    oauth_config = _service_oauth_config(service_id)
+    token_url = oauth_config.get("token")
+    client_id = oauth_config.get("client_id")
+    if not token_url or not client_id:
+        raise HTTPException(status_code=422, detail="connector token metadata missing")
+    response = httpx.post(
+        token_url,
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "client_id": client_id,
+            "redirect_uri": str(request.url_for("oauth_callback", service_id=service_id)),
+        },
+        timeout=10.0,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    external_credential_store.put_oauth_credential(
+        user.id,
+        service_id,
+        payload,
+        updated_by=user.id,
+        status="authorized",
+    )
+    return {"authorized": True, "service_id": service_id}
 
 
 @router.post("/connectors")

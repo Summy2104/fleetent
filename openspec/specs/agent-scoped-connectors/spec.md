@@ -1,93 +1,30 @@
 # agent-scoped-connectors Specification
 
-## Purpose
-TBD - created by archiving change agent-scoped-oauth-mcp. Update Purpose after archive.
-## Requirements
+## REMOVED Requirements
+
 ### Requirement: Connector ownership by agent
-Each OAuth connector configuration SHALL carry an owning-agent dimension. A connector
-row SHALL store an `agent_id` that is either a specific agent or null. A null
-`agent_id` SHALL mean a global-default connector available to any agent that has no
-agent-specific entry for the same connector id. The same connector id MAY exist once
-per agent plus once as the global default.
 
-#### Scenario: Agent-specific connector overrides global default
-- **WHEN** a global-default `github` connector exists AND agent `billing` has its own
-  `github` connector configuration
-- **THEN** resolving the `github` connector for agent `billing` returns the
-  `billing`-owned configuration, not the global default
+**Reason**: 该 per-agent connector 覆盖层为 dormant 死代码——`connectors.agent_id` 列自迁移 040 起从未被写入非 NULL 值，所有 admin 写入路径恒为全局 scope，overlay 解析分支从未生效。随 `connectors`→`external_services` 重塑为**单层全局**服务注册表，该维度移除。
 
-#### Scenario: Falls back to global default
-- **WHEN** a global-default `github` connector exists AND agent `sales` has no
-  `github` connector of its own
-- **THEN** resolving the `github` connector for agent `sales` returns the global-default
-  configuration
-
-#### Scenario: Unique per scope
-- **WHEN** agent `billing` already owns a `github` connector
-- **AND** an attempt is made to add a second `github` connector owned by `billing`
-- **THEN** the store rejects the duplicate within that agent scope
+**Migration**: `connectors.agent_id` 列、`ux_connectors_agent_scope` / `ux_connectors_global_scope` partial 索引、store 的 overlay 解析分支一并删除；每个 `service_id` 在 `external_services` 中仅一条全局记录。per-principal 的差异化由 `external_credentials`（按 `(user_id, service_id)`）承载，不再由 per-agent connector 行承载。
 
 ### Requirement: Connector credential resolution is scoped by agent
-OAuth credential and token resolution for a tool call SHALL be performed within the
-owning-agent scope of the resolved connector. One agent's authorization SHALL NOT
-satisfy a tool call made under a different agent scope. `client_secret` SHALL never be
-persisted; per-agent secrets SHALL be referenced by per-scope environment variable
-names.
 
-#### Scenario: Authorization does not cross agents
-- **WHEN** agent `billing` is authorized for its `github` connector
-- **AND** agent `sales` has its own `github` connector that is not authorized
-- **THEN** a `github` tool call made under agent `sales` is treated as not-authorized
-  even though `billing` is authorized
+**Reason**: 凭证隔离轴从「per-agent connector scope」改为「per-principal（`external-credential-vault`）」。凭证按 `(user_id, service_id)` 隔离、由 `agent_service_grants.run_as` 决定取调用用户还是 agent principal 的凭证，per-agent connector 覆盖层不再是隔离机制。
 
-#### Scenario: Secret never persisted
-- **WHEN** a connector is created or edited with a `client_secret` field
-- **THEN** the stored row contains no `client_secret` value
+**Migration**: 凭证解析改由 Vault provider 经 `connectors.get_credential(user_id, service, scopes)` 按 principal 进行（见 `external-credential-vault`）；`client_secret` 仍永不入库（走 env / `agent_secrets`）。
 
-### Requirement: MCP server ownership by agent
-MCP server definitions SHALL be resolvable per agent. The same `server_id` MAY have a
-distinct definition (transport, endpoint/command, auth) per agent, plus an optional
-global-default definition authored in Platform DB. Agent-specific
-definitions SHALL override the global default for the same `server_id`.
-
-#### Scenario: Per-agent server definition wins
-- **WHEN** a global-default `github` MCP server is configured in Platform DB AND agent
-  `billing` defines its own `github` MCP server
-- **THEN** resolving MCP servers for agent `billing` uses the `billing`-owned `github`
-  definition
-
-#### Scenario: Global default used when agent has none
-- **WHEN** agent `sales` defines no MCP servers of its own
-- **THEN** resolving MCP servers for agent `sales` yields the global-default servers
-
-### Requirement: MCP sessions and credentials isolated per agent
-MCP tool dispatch SHALL key its connection/session by `(agent scope, server_id)` so two
-agents using the same `server_id` never share a session or credential. An agent SHALL
-only be able to dispatch MCP tools belonging to its own resolved servers.
-
-#### Scenario: Two agents same server id get separate sessions
-- **WHEN** agent `billing` and agent `sales` both resolve a `github` MCP server with
-  different credentials
-- **THEN** a tool dispatch under `billing` uses `billing`'s session/credential and a
-  dispatch under `sales` uses `sales`'s session/credential; neither reuses the other
-
-#### Scenario: Cross-agent MCP dispatch rejected
-- **WHEN** agent `sales` has no `github` MCP server in its resolved scope
-- **AND** a `github__create_issue` dispatch is attempted under agent `sales`
-- **THEN** the dispatch is rejected and no global `github` session is used
+## MODIFIED Requirements
 
 ### Requirement: Admin surfaces expose the owning agent
-The admin face SHALL display the owning agent for each entry across the connector
-directory, the per-user authorization matrix, and the MCP server list, and SHALL support
-filtering by agent. Global-default entries SHALL be shown distinctly from agent-owned
-entries.
 
-#### Scenario: Filter connectors by agent
-- **WHEN** an admin filters the connector directory by agent `billing`
-- **THEN** only `billing`-owned connectors and applicable global defaults are listed,
-  each labeled with its owning agent or "global default"
+The admin face SHALL display the owning agent for each entry in the MCP server list, and SHALL support filtering the MCP server list by agent. Global-default MCP server entries SHALL be shown distinctly from agent-owned entries. 外部服务注册表（`external_services`）为单层全局、无 owning-agent 维度，故其目录与 per-user 授权视图 SHALL NOT 再展示或按 owning agent 过滤。
 
 #### Scenario: MCP server list shows owner
 - **WHEN** an admin opens the MCP server list
 - **THEN** each server entry shows its owning agent, or "global default" for entries
   authored without an agent scope
+
+#### Scenario: 外部服务目录无 owning-agent 维度
+- **WHEN** an admin opens the external services directory
+- **THEN** entries are listed as a single global registry with no owning-agent column and no by-agent filter

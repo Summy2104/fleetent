@@ -359,7 +359,7 @@ def test_delete_agent_removes_binding_children_in_same_transaction(db):
         {"aid": agent.id},
     ).fetchone()
     oauth_rows = database.execute(
-        "SELECT COUNT(*) AS c FROM agent_oauth_bindings WHERE agent_id = :aid",
+        "SELECT COUNT(*) AS c FROM agent_service_grants WHERE agent_id = :aid",
         {"aid": agent.id},
     ).fetchone()
     assert mcp_rows is not None and int(mcp_rows["c"]) == 0

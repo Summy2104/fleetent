@@ -1,9 +1,6 @@
-"""Management-face persistence for the OAuth connector config catalog.
+"""Compatibility shim for the renamed external services registry store."""
 
-db runtime + named params, no ORM. Only the connector *configuration* (endpoints,
-scopes, client_id) lives here. Per-user credentials, consent, refresh, and revoke
-are owned by the connectors engine domain. ``client_secret`` is never stored here.
-"""
+from __future__ import annotations
 
 import datetime
 import json
@@ -29,21 +26,29 @@ def add_connector(
     enabled: bool = True,
     agent_id: int | None = None,
 ) -> None:
+    if agent_id is not None:
+        raise ValueError("agent-scoped connectors were removed; use global external services only")
     config = dict(oauth_config or {})
-    config.pop("client_secret", None)  # never persist the secret
+    config.pop("client_secret", None)
     now = _now()
     with _database().transaction() as conn:
         conn.execute(
             """
-            INSERT INTO connectors
-                (agent_id, id, display_name, protocol, oauth_config, enabled,
-                 created_at, updated_at)
-            VALUES (:agent_id, :id, :display_name, :protocol, :oauth_config, :enabled,
-                    :created_at, :updated_at)
+            INSERT INTO external_services
+                (service_id, display_name, protocol, oauth_config, enabled, created_at, updated_at)
+            VALUES
+                (
+                    :service_id,
+                    :display_name,
+                    :protocol,
+                    :oauth_config,
+                    :enabled,
+                    :created_at,
+                    :updated_at
+                )
             """,
             {
-                "agent_id": agent_id,
-                "id": connector_id,
+                "service_id": connector_id,
                 "display_name": display_name,
                 "protocol": protocol,
                 "oauth_config": json.dumps(config) if config else None,
@@ -55,58 +60,46 @@ def add_connector(
 
 
 _EDITABLE = {"display_name", "oauth_config", "enabled"}
-
-
-_COLS = "agent_id, id, display_name, protocol, oauth_config, enabled, created_at, updated_at"
+_COLS = "service_id, display_name, protocol, oauth_config, enabled, created_at, updated_at"
 
 
 def edit_connector(connector_id: str, agent_id: int | None = None, **fields: Any) -> None:
+    if agent_id is not None:
+        raise ValueError("agent-scoped connectors were removed; use global external services only")
     updates = {k: v for k, v in fields.items() if k in _EDITABLE and v is not None}
     if "oauth_config" in updates:
-        cfg = dict(updates["oauth_config"])
-        cfg.pop("client_secret", None)
-        updates["oauth_config"] = json.dumps(cfg)
+        config = dict(updates["oauth_config"])
+        config.pop("client_secret", None)
+        updates["oauth_config"] = json.dumps(config)
     if "enabled" in updates:
         updates["enabled"] = 1 if updates["enabled"] else 0
     if not updates:
         return
     updates["updated_at"] = _now()
-    assignments = ", ".join(f"{k} = :{k}" for k in updates)
-    scope = "agent_id = :agent_id" if agent_id is not None else "agent_id IS NULL"
+    assignments = ", ".join(f"{key} = :{key}" for key in updates)
     with _database().transaction() as conn:
         conn.execute(
-            f"UPDATE connectors SET {assignments} WHERE id = :id AND {scope}",
-            {**updates, "id": connector_id, "agent_id": agent_id},
+            f"UPDATE external_services SET {assignments} WHERE service_id = :service_id",
+            {**updates, "service_id": connector_id},
         )
 
 
 def delete_connector(connector_id: str, agent_id: int | None = None) -> None:
-    scope = "agent_id = :agent_id" if agent_id is not None else "agent_id IS NULL"
+    if agent_id is not None:
+        raise ValueError("agent-scoped connectors were removed; use global external services only")
     with _database().transaction() as conn:
         conn.execute(
-            f"DELETE FROM connectors WHERE id = :id AND {scope}",
-            {"id": connector_id, "agent_id": agent_id},
+            "DELETE FROM external_services WHERE service_id = :service_id",
+            {"service_id": connector_id},
         )
 
 
 def get_connector(connector_id: str, agent_id: int | None = None) -> dict[str, Any] | None:
-    # Resolution: an agent-owned row wins; otherwise fall back to the global default.
-    if agent_id is not None:
-        row = (
-            _database()
-            .execute(
-                f"SELECT {_COLS} FROM connectors WHERE id = :id AND agent_id = :agent_id",
-                {"id": connector_id, "agent_id": agent_id},
-            )
-            .fetchone()
-        )
-        if row:
-            return _decode(row)
     row = (
         _database()
         .execute(
-            f"SELECT {_COLS} FROM connectors WHERE id = :id AND agent_id IS NULL",
-            {"id": connector_id},
+            f"SELECT {_COLS} FROM external_services WHERE service_id = :service_id",
+            {"service_id": connector_id},
         )
         .fetchone()
     )
@@ -114,26 +107,15 @@ def get_connector(connector_id: str, agent_id: int | None = None) -> dict[str, A
 
 
 def list_connectors(agent_id: int | None = None) -> list[dict[str, Any]]:
-    db = _database()
-    globals_ = {
-        r["id"]: _decode(r)
-        for r in db.execute(
-            f"SELECT {_COLS} FROM connectors WHERE agent_id IS NULL ORDER BY id"
-        ).fetchall()
-    }
-    if agent_id is None:
-        return list(globals_.values())
-    # Overlay agent-owned rows on top of the global defaults.
-    for r in db.execute(
-        f"SELECT {_COLS} FROM connectors WHERE agent_id = :agent_id ORDER BY id",
-        {"agent_id": agent_id},
-    ).fetchall():
-        decoded = _decode(r)
-        globals_[decoded["id"]] = decoded
-    return sorted(globals_.values(), key=lambda c: c["id"])
+    rows = (
+        _database().execute(f"SELECT {_COLS} FROM external_services ORDER BY service_id").fetchall()
+    )
+    return [_decode(row) for row in rows]
 
 
 def _decode(row: dict[str, Any]) -> dict[str, Any]:
     out = dict(row)
     out["oauth_config"] = json.loads(out["oauth_config"]) if out.get("oauth_config") else {}
+    out["id"] = out.pop("service_id")
+    out["agent_id"] = None
     return out

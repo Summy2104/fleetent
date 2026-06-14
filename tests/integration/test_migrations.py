@@ -517,13 +517,14 @@ def test_downgrade_recreates_kb_entity_unique_key(tmp_path):
     ] in indexed_columns.values()
 
 
-def test_connectors_has_agent_id_column(tmp_path):
+def test_external_services_head_schema_is_global_only(tmp_path):
     db = tmp_path / "test.db"
     apply_migrations(db)
     conn = sqlite3.connect(db)
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(connectors)")}
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(external_services)")}
     conn.close()
-    assert "agent_id" in cols
+    assert "agent_id" not in cols
+    assert cols >= {"service_id", "display_name", "protocol", "oauth_config", "enabled"}
 
 
 def test_agent_mcp_servers_table_and_columns(tmp_path):
@@ -549,7 +550,7 @@ def test_agent_mcp_servers_table_and_columns(tmp_path):
     }
 
 
-def test_connectors_agent_id_nullable_for_existing_rows(tmp_path):
+def test_external_services_upgrade_preserves_existing_global_rows(tmp_path):
     db = tmp_path / "test.db"
     _upgrade_to(db, "033")
     conn = sqlite3.connect(db)
@@ -570,6 +571,14 @@ def test_connectors_agent_id_nullable_for_existing_rows(tmp_path):
     agent_id = conn.execute("SELECT agent_id FROM connectors WHERE id='github'").fetchone()[0]
     conn.close()
     assert agent_id is None
+
+    _upgrade_to(db, "head")
+    conn = sqlite3.connect(db)
+    row = conn.execute(
+        "SELECT service_id, display_name FROM external_services WHERE service_id='github'"
+    ).fetchone()
+    conn.close()
+    assert row == ("github", "GitHub")
 
 
 def test_downgrade_removes_agent_scoped_connector_schema(tmp_path):
@@ -614,12 +623,12 @@ def test_knowledge_base_store_uses_database_boundary_and_named_parameters():
     assert ":tenant_id" in store_source
 
 
-def test_agent_oauth_bindings_table_and_columns(tmp_path):
+def test_agent_service_grants_table_and_columns(tmp_path):
     db = tmp_path / "test.db"
     apply_migrations(db)
     conn = sqlite3.connect(db)
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_oauth_bindings)")}
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_service_grants)")}
     conn.close()
-    assert "agent_oauth_bindings" in tables
-    assert cols >= {"agent_id", "connector_id", "created_at", "created_by"}
+    assert "agent_service_grants" in tables
+    assert cols >= {"agent_id", "service_id", "run_as", "created_at", "created_by"}

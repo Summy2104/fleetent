@@ -172,7 +172,7 @@ def test_head_schema_adds_agent_fk_cascades_to_binding_tables_only(tmp_path: Pat
         agent_versions_fks = _fk_rows(conn, "agent_versions")
         mcp_servers_fks = _fk_rows(conn, "mcp_servers")
         agent_secrets_fks = _fk_rows(conn, "agent_secrets")
-        connectors_fks = _fk_rows(conn, "connectors")
+        external_services_fks = _fk_rows(conn, "external_services")
     finally:
         conn.close()
 
@@ -181,7 +181,7 @@ def test_head_schema_adds_agent_fk_cascades_to_binding_tables_only(tmp_path: Pat
             row[2] == "agents" and row[3] == "agent_id" and row[4] == "id" and row[6] == "CASCADE"
             for row in fk_rows
         )
-    assert connectors_fks == []
+    assert external_services_fks == []
     assert _LEGACY_CHANNEL_BINDINGS_TABLE not in tables
 
 

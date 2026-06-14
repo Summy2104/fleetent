@@ -100,7 +100,7 @@ def test_head_schema_sets_expected_fk_delete_actions_and_preserves_agent_shape(
             "agent_admin_state",
             "agent_kbs",
             "agent_mcp_servers",
-            "agent_oauth_bindings",
+            "agent_service_grants",
             "agent_secrets",
             "agent_skills",
             "agent_versions",

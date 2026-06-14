@@ -30,7 +30,7 @@ def test_head_schema_binding_tables_have_cascade_fk(tmp_path: Path) -> None:
     conn = sqlite3.connect(db)
     try:
         mcp_binding_fks = _fk_rows(conn, "agent_mcp_servers")
-        oauth_binding_fks = _fk_rows(conn, "agent_oauth_bindings")
+        oauth_binding_fks = _fk_rows(conn, "agent_service_grants")
     finally:
         conn.close()
 
@@ -97,10 +97,10 @@ def test_upgrade_cleans_binding_orphans_and_preserves_live(tmp_path: Path, monke
             "SELECT COUNT(*) FROM agent_mcp_servers WHERE agent_id = 999999"
         ).fetchone()[0]
         oauth_live = conn.execute(
-            "SELECT COUNT(*) FROM agent_oauth_bindings WHERE agent_id = ?", (agent.id,)
+            "SELECT COUNT(*) FROM agent_service_grants WHERE agent_id = ?", (agent.id,)
         ).fetchone()[0]
         oauth_orphan = conn.execute(
-            "SELECT COUNT(*) FROM agent_oauth_bindings WHERE agent_id = 999999"
+            "SELECT COUNT(*) FROM agent_service_grants WHERE agent_id = 999999"
         ).fetchone()[0]
     finally:
         conn.close()
@@ -129,7 +129,7 @@ def test_agent_delete_cascades_binding_rows_without_manual_clear(
             "SELECT COUNT(*) FROM agent_mcp_servers WHERE agent_id = ?", (agent.id,)
         ).fetchone()[0]
         oauth = conn.execute(
-            "SELECT COUNT(*) FROM agent_oauth_bindings WHERE agent_id = ?", (agent.id,)
+            "SELECT COUNT(*) FROM agent_service_grants WHERE agent_id = ?", (agent.id,)
         ).fetchone()[0]
     finally:
         conn.close()

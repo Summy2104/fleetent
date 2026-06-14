@@ -253,6 +253,17 @@ def whoami(tool_context: ToolContext | None = None) -> str:
     )
 
 
+@tool(connector="github", scopes=["repo"])
+def github_connection_status(*, client: dict[str, Any]) -> str:
+    """Return a safe summary proving the per-user GitHub credential is wired."""
+    scopes = client.get("scope") or client.get("scopes") or []
+    if isinstance(scopes, list):
+        scope_summary = ",".join(str(scope) for scope in scopes) if scopes else "none"
+    else:
+        scope_summary = str(scopes)
+    return f"github credential ready; scopes={scope_summary}"
+
+
 @tool
 def read_skill(name: str, tool_context: ToolContext | None = None) -> str:
     """Read a skill's full instructions by name (from the <available_skills> list).
