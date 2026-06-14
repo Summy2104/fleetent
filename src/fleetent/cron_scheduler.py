@@ -231,6 +231,23 @@ async def _deliver(
     except Exception as exc:  # noqa: BLE001 — best-effort delivery
         logger.warning("cron_deliver_failed task=%s error=%s", task.get("id"), exc)
         return str(exc)
+    # delivery-receipts (§2, D2): cron has no ToolContext, so it self-records the delivery
+    # trace here (run_id keyed by the task so a cron fire's delivery is auditable).
+    from fleetent.observability import traces
+
+    traces.record_delivery(
+        f"cron:{task.get('id')}",
+        None,
+        {
+            "ok": receipt.ok,
+            "platform": receipt.platform,
+            "target": receipt.target,
+            "target_type": receipt.target_type,
+            "kind": receipt.kind,
+            "provider_ref": receipt.provider_ref,
+            "error": receipt.error,
+        },
+    )
     return None if receipt.ok else (receipt.error or "delivery returned false")
 
 
