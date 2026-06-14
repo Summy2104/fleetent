@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from fleetent.im_gateway.normalizer import SessionContext
 from fleetent.integrations.sandbox import Scope
+from fleetent.outbound import DeliveryReceipt
 from fleetent.tools.registry import ToolContext, get_risk_level, is_dynamic_risk
 
 
@@ -73,7 +74,14 @@ async def test_send_file_dm_session_scope_sends_to_fixed_recipient(tmp_path) -> 
     connector = object()
     with (
         _patch_manager(tmp_path),
-        patch("fleetent.outbound.send_file_to", AsyncMock(return_value=True)) as send,
+        patch(
+            "fleetent.outbound.send_file_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=True, platform="slack", target="x", target_type="user", kind="file"
+                )
+            ),
+        ) as send,
     ):
         result = await send_file(path="report.pdf", tool_context=_ctx(connector=connector))
 
@@ -94,7 +102,14 @@ async def test_send_file_rejects_path_escape(tmp_path) -> None:
 
     with (
         _patch_manager(tmp_path),
-        patch("fleetent.outbound.send_file_to", AsyncMock(return_value=True)) as send,
+        patch(
+            "fleetent.outbound.send_file_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=True, platform="slack", target="x", target_type="user", kind="file"
+                )
+            ),
+        ) as send,
     ):
         result = await send_file(path="../../etc/passwd", tool_context=_ctx())
 
@@ -108,7 +123,14 @@ async def test_send_file_missing_file_returns_text(tmp_path) -> None:
 
     with (
         _patch_manager(tmp_path),
-        patch("fleetent.outbound.send_file_to", AsyncMock(return_value=True)) as send,
+        patch(
+            "fleetent.outbound.send_file_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=True, platform="slack", target="x", target_type="user", kind="file"
+                )
+            ),
+        ) as send,
     ):
         result = await send_file(path="nope.pdf", tool_context=_ctx())
 
@@ -129,7 +151,14 @@ async def test_send_file_channel_escalates_via_risk(tmp_path) -> None:
     (tmp_path / "x.csv").write_bytes(b"x")
     with (
         _patch_manager(tmp_path),
-        patch("fleetent.outbound.send_file_to", AsyncMock(return_value=True)) as send,
+        patch(
+            "fleetent.outbound.send_file_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=True, platform="slack", target="x", target_type="user", kind="file"
+                )
+            ),
+        ) as send,
     ):
         result = await send_file(path="x.csv", tool_context=_ctx(chat_type="channel"))
     send.assert_called_once()
@@ -145,7 +174,14 @@ async def test_send_file_agent_scope_dm_is_low_and_sends(tmp_path) -> None:
     (tmp_path / "x.csv").write_bytes(b"x")
     with (
         _patch_manager(tmp_path, scope=Scope.AGENT),
-        patch("fleetent.outbound.send_file_to", AsyncMock(return_value=True)) as send,
+        patch(
+            "fleetent.outbound.send_file_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=True, platform="slack", target="x", target_type="user", kind="file"
+                )
+            ),
+        ) as send,
     ):
         result = await send_file(path="x.csv", tool_context=_ctx())
     send.assert_called_once()
@@ -159,7 +195,14 @@ async def test_send_file_no_session_context_fail_closed(tmp_path) -> None:
     ctx = ToolContext(session_id="sess-1", session_context=None, outbound_connectors={})
     with (
         _patch_manager(tmp_path),
-        patch("fleetent.outbound.send_file_to", AsyncMock(return_value=True)) as send,
+        patch(
+            "fleetent.outbound.send_file_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=True, platform="slack", target="x", target_type="user", kind="file"
+                )
+            ),
+        ) as send,
     ):
         result = await send_file(path="x.csv", tool_context=ctx)
 
@@ -199,7 +242,19 @@ async def test_send_file_delivery_failure_returns_text(tmp_path) -> None:
     (tmp_path / "x.csv").write_bytes(b"x")
     with (
         _patch_manager(tmp_path),
-        patch("fleetent.outbound.send_file_to", AsyncMock(return_value=False)),
+        patch(
+            "fleetent.outbound.send_file_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=False,
+                    platform="slack",
+                    target="x",
+                    target_type="user",
+                    kind="text",
+                    error="boom",
+                )
+            ),
+        ),
     ):
         result = await send_file(path="x.csv", tool_context=_ctx())
 

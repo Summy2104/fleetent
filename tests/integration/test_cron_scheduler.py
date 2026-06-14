@@ -6,6 +6,7 @@ import sqlite3
 from unittest.mock import AsyncMock
 
 from fleetent.identity import Principal
+from fleetent.outbound import DeliveryReceipt
 
 _STUB_PRINCIPAL = Principal(user_id="u-1", tenant_id="default")
 
@@ -339,7 +340,11 @@ async def test_fire_delivers_reply_to_origin(tmp_path, monkeypatch):
     monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
     monkeypatch.setattr(cs, "_resolve_cron_principal", lambda uid: _STUB_PRINCIPAL)
     monkeypatch.setattr(cs, "_agent_run", AsyncMock(return_value="your standup is at 9"))
-    send = AsyncMock(return_value=True)
+    send = AsyncMock(
+        return_value=DeliveryReceipt(
+            ok=True, platform="slack", target="x", target_type="user", kind="text"
+        )
+    )
     monkeypatch.setattr(cs.outbound, "send_to", send)
     monkeypatch.setattr(cs._store, "update_run_state", lambda *a, **k: None)
 
@@ -368,7 +373,11 @@ async def test_fire_explicit_deliver_to_channel(tmp_path, monkeypatch):
     monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
     monkeypatch.setattr(cs, "_resolve_cron_principal", lambda uid: _STUB_PRINCIPAL)
     monkeypatch.setattr(cs, "_agent_run", AsyncMock(return_value="daily report"))
-    send = AsyncMock(return_value=True)
+    send = AsyncMock(
+        return_value=DeliveryReceipt(
+            ok=True, platform="slack", target="x", target_type="user", kind="text"
+        )
+    )
     monkeypatch.setattr(cs.outbound, "send_to", send)
     monkeypatch.setattr(cs._store, "update_run_state", lambda *a, **k: None)
 
@@ -399,7 +408,11 @@ async def test_fire_silent_reply_suppresses_delivery(tmp_path, monkeypatch):
     monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
     monkeypatch.setattr(cs, "_resolve_cron_principal", lambda uid: _STUB_PRINCIPAL)
     monkeypatch.setattr(cs, "_agent_run", AsyncMock(return_value="[SILENT]"))
-    send = AsyncMock(return_value=True)
+    send = AsyncMock(
+        return_value=DeliveryReceipt(
+            ok=True, platform="slack", target="x", target_type="user", kind="text"
+        )
+    )
     monkeypatch.setattr(cs.outbound, "send_to", send)
     statuses = []
     monkeypatch.setattr(

@@ -13,6 +13,7 @@ import fleetent.governance.tool_auto_approvals_store as tool_auto_approvals_stor
 import fleetent.im_gateway.outbound as outbound_mod
 import fleetent.session.manager as session_mgr
 from fleetent.db import SQLiteDatabase
+from fleetent.outbound import DeliveryReceipt
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
 from fleetent.schema_migrations import migrate
 from tests.integration._migration_template import apply_migrations as _apply_migrations
@@ -123,7 +124,15 @@ async def test_permission_gate_pending_then_resolve_finalizes(isolated_db, monke
     from fleetent.governance.permission_gate import PermissionGate
 
     # Mock outbound so DM send succeeds without real Slack.
-    monkeypatch.setattr(outbound_mod, "send_to", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        outbound_mod,
+        "send_to",
+        AsyncMock(
+            return_value=DeliveryReceipt(
+                ok=True, platform="slack", target="x", target_type="user", kind="text"
+            )
+        ),
+    )
     monkeypatch.setattr(outbound_mod, "is_reachable", AsyncMock(return_value=True))
 
     gate = PermissionGate()

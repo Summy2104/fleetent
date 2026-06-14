@@ -225,7 +225,7 @@ class PermissionGate:
                 )
                 continue
             sent = await send_to(platform, connector, target, msg, blocks=blocks)
-            if sent:
+            if sent.ok:
                 actor = f"{platform}:{target}"
                 reached.append(actor)
             else:

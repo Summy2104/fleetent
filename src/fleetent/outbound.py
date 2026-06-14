@@ -19,6 +19,26 @@ logger = structlog.get_logger(__name__)
 
 
 @dataclass(frozen=True)
+class DeliveryReceipt:
+    """Structured result of one outbound delivery attempt (delivery-receipts, D1).
+
+    Replaces the bare bool so a run can assemble a ground-truth delivery ledger and the
+    user-facing fact trailer: `ok` (delivered?), the `target`/`target_type`/`kind`
+    (text|file), the `thread`, the platform `provider_ref` (Slack ts / file_id) for audit,
+    and `error` on failure. `ok` is the bool replacement (`if receipt.ok:` at call sites).
+    """
+
+    ok: bool
+    platform: str
+    target: str
+    target_type: str
+    kind: str  # "text" | "file"
+    thread: Any = None
+    provider_ref: str | None = None
+    error: str | None = None
+
+
+@dataclass(frozen=True)
 class ConversationAddress:
     """Where a conversation lives — the persistable delivery target of a run.
 
@@ -82,22 +102,36 @@ async def send_to(
     target_type: str = "user",
     thread: Any = None,
     blocks: list[dict[str, Any]] | None = None,
-) -> bool:
-    """Send text to target on platform. Returns True on success, False on any failure.
+) -> DeliveryReceipt:
+    """Send text to target on platform, returning a DeliveryReceipt (never raises).
 
     ``target_type`` selects DM (``user``) vs a channel/group post (``channel``);
     ``thread`` optionally threads the message (Slack ``thread_ts`` / Telegram topic).
     ``blocks`` is an optional platform-specific rich payload (Slack Block Kit);
     platforms without rich rendering ignore it and send the text fallback.
     """
+    ref: str | None = None
+    err: str | None = None
     if platform == "slack":
         if target_type == "channel":
-            return await _slack_send_channel(connector, target, text, thread, blocks)
-        return await _slack_send_dm(connector, target, text, blocks)
-    if platform == "telegram":
-        return await _telegram_send(connector, target, text, thread)
-    logger.warning("outbound_unsupported_platform", platform=platform)
-    return False
+            ref, err = await _slack_send_channel(connector, target, text, thread, blocks)
+        else:
+            ref, err = await _slack_send_dm(connector, target, text, blocks)
+    elif platform == "telegram":
+        ref, err = await _telegram_send(connector, target, text, thread)
+    else:
+        err = f"unsupported platform: {platform}"
+        logger.warning("outbound_unsupported_platform", platform=platform)
+    return DeliveryReceipt(
+        ok=err is None,
+        platform=platform,
+        target=target,
+        target_type=target_type,
+        kind="text",
+        thread=thread,
+        provider_ref=ref,
+        error=err,
+    )
 
 
 async def send_file_to(
@@ -108,21 +142,32 @@ async def send_file_to(
     *,
     target_type: str = "user",
     thread: Any = None,
-) -> bool:
-    """Send a local file as an attachment to target on platform.
+) -> DeliveryReceipt:
+    """Send a local file as an attachment to target, returning a DeliveryReceipt (never raises).
 
-    Returns True on success, False on any failure (mirrors ``send_to`` semantics —
-    delivery failure is logged and swallowed, never raised). ``target_type`` selects
-    DM (``user``) vs a channel post (``channel``); ``thread`` optionally threads the
-    delivery (Slack ``thread_ts``). This is the single outbound file delivery point
-    shared by the ``send_file`` tool and the IM adapters' upload path.
+    ``target_type`` selects DM (``user``) vs a channel post (``channel``); ``thread``
+    optionally threads the delivery (Slack ``thread_ts``). This is the single outbound file
+    delivery point shared by the ``send_file`` tool and the IM adapters' upload path.
     """
+    ref: str | None = None
+    err: str | None = None
     if platform == "slack":
-        return await _slack_send_file(connector, target, path, target_type, thread)
-    if platform == "telegram":
-        return await _telegram_send_file(connector, target, path)
-    logger.warning("outbound_file_unsupported_platform", platform=platform)
-    return False
+        ref, err = await _slack_send_file(connector, target, path, target_type, thread)
+    elif platform == "telegram":
+        ref, err = await _telegram_send_file(connector, target, path)
+    else:
+        err = f"unsupported platform: {platform}"
+        logger.warning("outbound_file_unsupported_platform", platform=platform)
+    return DeliveryReceipt(
+        ok=err is None,
+        platform=platform,
+        target=target,
+        target_type=target_type,
+        kind="file",
+        thread=thread,
+        provider_ref=ref,
+        error=err,
+    )
 
 
 def make_replier(connectors: dict[str, Any], address: ConversationAddress) -> Any:
@@ -224,24 +269,51 @@ def approval_prompt_blocks(
     ]
 
 
+# Delivery-helper contract (delivery-receipts): return (provider_ref, error). Success →
+# (ts/file_id-or-"", None); failure → (None, reason). Never raises (outbound must not abort).
+_Result = tuple[str | None, str | None]
+
+
+def _slack_ref(resp: Any, key: str) -> str:
+    """Best-effort provider ref (ts/id) from a Slack response; "" when absent/odd-shaped."""
+    try:
+        v = resp.get(key) if hasattr(resp, "get") else None
+        return str(v) if v is not None else ""
+    except Exception:  # noqa: BLE001 — ref extraction must never fail a successful send
+        return ""
+
+
+def _slack_file_ref(resp: Any) -> str:
+    try:
+        files = resp.get("files") if hasattr(resp, "get") else None
+        if files:
+            return str(files[0].get("id") or "")
+        f = resp.get("file") if hasattr(resp, "get") else None
+        if f:
+            return str(f.get("id") or "")
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
 async def _slack_send_channel(
     client: Any,
     channel: str,
     text: str,
     thread: Any = None,
     blocks: list[dict[str, Any]] | None = None,
-) -> bool:
+) -> _Result:
     try:
         kwargs: dict[str, Any] = {"channel": channel, "text": text}
         if thread:
             kwargs["thread_ts"] = thread
         if blocks is not None:
             kwargs["blocks"] = blocks
-        await client.chat_postMessage(**kwargs)
-        return True
+        resp = await client.chat_postMessage(**kwargs)
+        return _slack_ref(resp, "ts"), None
     except Exception as exc:  # noqa: BLE001 — outbound failure must not abort the caller
         logger.warning("slack_send_channel_failed", channel=channel, error=str(exc))
-        return False
+        return None, str(exc)
 
 
 async def is_reachable(platform: str, connector: Any, target: str) -> bool:
@@ -261,35 +333,35 @@ async def is_reachable(platform: str, connector: Any, target: str) -> bool:
 
 async def _slack_send_dm(
     client: Any, user_id: str, text: str, blocks: list[dict[str, Any]] | None = None
-) -> bool:
+) -> _Result:
     try:
         result = await client.conversations_open(users=[user_id])
         channel = result["channel"]["id"]
         kwargs: dict[str, Any] = {"channel": channel, "text": text}
         if blocks is not None:
             kwargs["blocks"] = blocks
-        await client.chat_postMessage(**kwargs)
-        return True
+        resp = await client.chat_postMessage(**kwargs)
+        return _slack_ref(resp, "ts"), None
     except Exception as exc:  # noqa: BLE001 — outbound failure must not abort the gate
         logger.warning("slack_send_dm_failed", user_id=user_id, error=str(exc))
-        return False
+        return None, str(exc)
 
 
-async def _telegram_send(bot: Any, chat_id: str, text: str, thread: Any = None) -> bool:
+async def _telegram_send(bot: Any, chat_id: str, text: str, thread: Any = None) -> _Result:
     try:
         kwargs: dict[str, Any] = {"chat_id": chat_id, "text": text}
         if thread:
             kwargs["message_thread_id"] = thread
         await bot.send_message(**kwargs)
-        return True
+        return "", None  # telegram client returns no stable ref we record; "" = success-no-ref
     except Exception as exc:  # noqa: BLE001 — outbound failure must not abort the gate
         logger.warning("telegram_send_message_failed", chat_id=chat_id, error=str(exc))
-        return False
+        return None, str(exc)
 
 
 async def _slack_send_file(
     client: Any, target: str, path: str, target_type: str, thread: Any
-) -> bool:
+) -> _Result:
     """Upload a local file to Slack via ``files_upload_v2``.
 
     For a channel post the ``target`` is the channel id used directly; for a DM the
@@ -303,21 +375,21 @@ async def _slack_send_file(
         else:
             result = await client.conversations_open(users=[target])
             channel = result["channel"]["id"]
-        await client.files_upload_v2(channel=channel, thread_ts=thread, file=path)
-        return True
+        resp = await client.files_upload_v2(channel=channel, thread_ts=thread, file=path)
+        return _slack_file_ref(resp), None
     except Exception as exc:  # noqa: BLE001 — outbound file failure must not abort the caller
         logger.warning("slack_send_file_failed", target=target, path=path, error=str(exc))
-        return False
+        return None, str(exc)
 
 
-async def _telegram_send_file(bot: Any, chat_id: str, path: str) -> bool:
+async def _telegram_send_file(bot: Any, chat_id: str, path: str) -> _Result:
     """Send a local file to a Telegram chat via ``bot.send_document``."""
     try:
         await bot.send_document(chat_id=chat_id, document=path)
-        return True
+        return "", None
     except Exception as exc:  # noqa: BLE001 — outbound file failure must not abort the caller
         logger.warning("telegram_send_file_failed", chat_id=chat_id, path=path, error=str(exc))
-        return False
+        return None, str(exc)
 
 
 async def _telegram_is_reachable(bot: Any, chat_id: str) -> bool:

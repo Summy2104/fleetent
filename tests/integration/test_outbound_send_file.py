@@ -22,7 +22,7 @@ async def test_slack_dm_delivers_real_file(tmp_path) -> None:
 
     ok = await send_file_to("slack", client, "U_RECIP", str(f))
 
-    assert ok is True
+    assert ok.ok is True
     client.conversations_open.assert_called_once_with(users=["U_RECIP"])
     client.files_upload_v2.assert_called_once_with(channel="DM_42", thread_ts=None, file=str(f))
 
@@ -38,7 +38,7 @@ async def test_slack_channel_threaded_delivers_real_file(tmp_path) -> None:
         "slack", client, "C_OPS", str(f), target_type="channel", thread="111.222"
     )
 
-    assert ok is True
+    assert ok.ok is True
     client.conversations_open.assert_not_called()
     client.files_upload_v2.assert_called_once_with(
         channel="C_OPS", thread_ts="111.222", file=str(f)
@@ -54,5 +54,5 @@ async def test_telegram_delivers_real_file(tmp_path) -> None:
 
     ok = await send_file_to("telegram", bot, "555", str(f))
 
-    assert ok is True
+    assert ok.ok is True
     bot.send_document.assert_called_once_with(chat_id="555", document=str(f))

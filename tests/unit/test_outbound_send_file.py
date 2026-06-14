@@ -20,7 +20,7 @@ async def test_send_file_to_slack_channel_uploads_to_channel() -> None:
         "slack", client, "C_CHAN", "/tmp/report.pdf", target_type="channel", thread="1.2"
     )
 
-    assert result is True
+    assert result.ok is True
     client.files_upload_v2.assert_called_once_with(
         channel="C_CHAN", thread_ts="1.2", file="/tmp/report.pdf"
     )
@@ -35,7 +35,7 @@ async def test_send_file_to_slack_user_opens_dm_then_uploads() -> None:
 
     result = await send_file_to("slack", client, "U_USER", "/tmp/out.csv")
 
-    assert result is True
+    assert result.ok is True
     client.conversations_open.assert_called_once_with(users=["U_USER"])
     client.files_upload_v2.assert_called_once_with(
         channel="DM_X", thread_ts=None, file="/tmp/out.csv"
@@ -51,7 +51,7 @@ async def test_send_file_to_slack_returns_false_on_failure() -> None:
 
     result = await send_file_to("slack", client, "U_USER", "/tmp/out.csv")
 
-    assert result is False
+    assert result.ok is False
 
 
 async def test_send_file_to_telegram_calls_send_document() -> None:
@@ -62,7 +62,7 @@ async def test_send_file_to_telegram_calls_send_document() -> None:
 
     result = await send_file_to("telegram", bot, "987", "/tmp/out.csv")
 
-    assert result is True
+    assert result.ok is True
     bot.send_document.assert_called_once_with(chat_id="987", document="/tmp/out.csv")
 
 
@@ -74,14 +74,14 @@ async def test_send_file_to_telegram_returns_false_on_failure() -> None:
 
     result = await send_file_to("telegram", bot, "987", "/tmp/out.csv")
 
-    assert result is False
+    assert result.ok is False
 
 
 async def test_send_file_to_unknown_platform_returns_false() -> None:
     from fleetent.outbound import send_file_to
 
     result = await send_file_to("whatsapp", MagicMock(), "x", "/tmp/out.csv")
-    assert result is False
+    assert result.ok is False
 
 
 def test_send_file_to_reexported_by_im_gateway_shim() -> None:

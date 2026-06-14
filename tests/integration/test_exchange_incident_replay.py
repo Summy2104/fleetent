@@ -17,6 +17,7 @@ import pytest
 from fleetent import artifact_exchange
 from fleetent.db import SQLiteDatabase
 from fleetent.integrations.sandbox import Scope
+from fleetent.outbound import DeliveryReceipt
 from fleetent.runtime.agent_state_migrations import MIGRATIONS
 from fleetent.schema_migrations import migrate
 from fleetent.tools.registry import ToolContext
@@ -65,11 +66,16 @@ async def test_incident_export_then_send_file_one_step(_exchange):
     mgr.scope = Scope.SESSION
     with (
         patch("fleetent.tools.builtin_tools._get_manager", return_value=mgr),
-        patch("fleetent.outbound.send_file_to", AsyncMock(return_value=True)) as send,
+        patch(
+            "fleetent.outbound.send_file_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=True, platform="slack", target="x", target_type="user", kind="file"
+                )
+            ),
+        ) as send,
     ):
-        result = await send_file(
-            path="/exchange/google-drive/reports/q3.xlsx", tool_context=ctx
-        )
+        result = await send_file(path="/exchange/google-drive/reports/q3.xlsx", tool_context=ctx)
 
     # The real exported host file is delivered to the DM sender — no faked completion.
     send.assert_called_once()

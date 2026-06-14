@@ -15,6 +15,7 @@ import pytest
 
 from fleetent import artifact_exchange
 from fleetent.db import SQLiteDatabase
+from fleetent.outbound import DeliveryReceipt
 from fleetent.runtime.agent_state_migrations import MIGRATIONS
 from fleetent.schema_migrations import migrate
 from fleetent.tools.registry import ToolContext
@@ -49,8 +50,22 @@ async def test_send_im_message_no_files_unchanged(_exchange):
 
     with (
         patch("fleetent.outbound.is_reachable", AsyncMock(return_value=True)),
-        patch("fleetent.outbound.send_to", AsyncMock(return_value=True)) as send_to,
-        patch("fleetent.outbound.send_file_to", AsyncMock(return_value=True)) as send_file_to,
+        patch(
+            "fleetent.outbound.send_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=True, platform="slack", target="x", target_type="user", kind="text"
+                )
+            ),
+        ) as send_to,
+        patch(
+            "fleetent.outbound.send_file_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=True, platform="slack", target="x", target_type="user", kind="file"
+                )
+            ),
+        ) as send_file_to,
     ):
         result = await send_im_message(target="U2", text="hi", tool_context=_ctx())
     send_to.assert_called_once()
@@ -66,8 +81,22 @@ async def test_send_im_message_delivers_cross_scope_artifact(_exchange):
     artifact_exchange.register(server_id="gd", rel_path="report.xlsx", scope_key="K1")
     with (
         patch("fleetent.outbound.is_reachable", AsyncMock(return_value=True)),
-        patch("fleetent.outbound.send_to", AsyncMock(return_value=True)),
-        patch("fleetent.outbound.send_file_to", AsyncMock(return_value=True)) as send_file_to,
+        patch(
+            "fleetent.outbound.send_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=True, platform="slack", target="x", target_type="user", kind="text"
+                )
+            ),
+        ),
+        patch(
+            "fleetent.outbound.send_file_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=True, platform="slack", target="x", target_type="user", kind="file"
+                )
+            ),
+        ) as send_file_to,
     ):
         result = await send_im_message(
             target="U2",
@@ -86,8 +115,22 @@ async def test_send_im_message_skips_invalid_file_entry(_exchange):
     artifact_exchange.register(server_id="gd", rel_path="report.xlsx", scope_key="K1")
     with (
         patch("fleetent.outbound.is_reachable", AsyncMock(return_value=True)),
-        patch("fleetent.outbound.send_to", AsyncMock(return_value=True)),
-        patch("fleetent.outbound.send_file_to", AsyncMock(return_value=True)) as send_file_to,
+        patch(
+            "fleetent.outbound.send_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=True, platform="slack", target="x", target_type="user", kind="text"
+                )
+            ),
+        ),
+        patch(
+            "fleetent.outbound.send_file_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=True, platform="slack", target="x", target_type="user", kind="file"
+                )
+            ),
+        ) as send_file_to,
     ):
         result = await send_im_message(
             target="U2",

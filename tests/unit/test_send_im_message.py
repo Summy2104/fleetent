@@ -9,6 +9,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 from fleetent.im_gateway.normalizer import SessionContext
+from fleetent.outbound import DeliveryReceipt
 from fleetent.tools.registry import ToolContext, get_risk_level
 
 
@@ -31,7 +32,14 @@ async def test_dm_sent_via_session_platform_connector() -> None:
     connector = object()
     with (
         patch("fleetent.outbound.is_reachable", AsyncMock(return_value=True)),
-        patch("fleetent.outbound.send_to", AsyncMock(return_value=True)) as send_to,
+        patch(
+            "fleetent.outbound.send_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=True, platform="slack", target="x", target_type="user", kind="text"
+                )
+            ),
+        ) as send_to,
     ):
         result = await send_im_message(
             target="U_OTHER", text="hello", tool_context=_ctx(connector=connector)
@@ -51,7 +59,14 @@ async def test_channel_post_passes_target_type() -> None:
 
     with (
         patch("fleetent.outbound.is_reachable", AsyncMock(return_value=True)),
-        patch("fleetent.outbound.send_to", AsyncMock(return_value=True)) as send_to,
+        patch(
+            "fleetent.outbound.send_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=True, platform="slack", target="x", target_type="user", kind="text"
+                )
+            ),
+        ) as send_to,
     ):
         await send_im_message(
             target="C_NOTICE",
@@ -73,7 +88,14 @@ async def test_explicit_platform_overrides_session_platform() -> None:
     )
     with (
         patch("fleetent.outbound.is_reachable", AsyncMock(return_value=True)),
-        patch("fleetent.outbound.send_to", AsyncMock(return_value=True)) as send_to,
+        patch(
+            "fleetent.outbound.send_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=True, platform="slack", target="x", target_type="user", kind="text"
+                )
+            ),
+        ) as send_to,
     ):
         await send_im_message(target="12345", text="hi", platform="telegram", tool_context=ctx)
 
@@ -108,7 +130,14 @@ async def test_unreachable_target_returns_explanation_and_skips_send() -> None:
 
     with (
         patch("fleetent.outbound.is_reachable", AsyncMock(return_value=False)),
-        patch("fleetent.outbound.send_to", AsyncMock(return_value=True)) as send_to,
+        patch(
+            "fleetent.outbound.send_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=True, platform="slack", target="x", target_type="user", kind="text"
+                )
+            ),
+        ) as send_to,
     ):
         result = await send_im_message(target="U_GHOST", text="hi", tool_context=_ctx())
 
@@ -121,7 +150,19 @@ async def test_send_failure_returns_failure_text() -> None:
 
     with (
         patch("fleetent.outbound.is_reachable", AsyncMock(return_value=True)),
-        patch("fleetent.outbound.send_to", AsyncMock(return_value=False)),
+        patch(
+            "fleetent.outbound.send_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=False,
+                    platform="slack",
+                    target="x",
+                    target_type="user",
+                    kind="text",
+                    error="boom",
+                )
+            ),
+        ),
     ):
         result = await send_im_message(target="U_OTHER", text="hi", tool_context=_ctx())
 

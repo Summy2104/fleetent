@@ -4,8 +4,8 @@
 
 ## 1. 回执对象与原语改造
 
-- [ ] 1.1 测试：`DeliveryReceipt` 形状 + `send_to`/`send_file_to` 成功/失败回执（含 Slack ts/file_id 提取、永不抛语义保持）——unit（mock connector），先红
-- [ ] 1.2 实现：outbound 返回回执，仓内调用方（send_file/send_im_message/上传原语/cron/_notify_approvers）bool 语境收敛为 `receipt.ok`——绿
+- [x] 1.1 测试：`DeliveryReceipt` 形状 + `send_to`/`send_file_to` 成功/失败回执（含 Slack ts/file_id 提取、永不抛语义保持）——unit（mock connector），先红
+- [x] 1.2 实现：outbound 返回回执，仓内调用方（send_file/send_im_message/上传原语/cron/_notify_approvers）bool 语境收敛为 `receipt.ok`——绿
 
 ## 2. 台账与 trace
 

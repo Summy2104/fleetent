@@ -16,6 +16,7 @@ import fleetent.im_gateway.outbound as outbound_mod
 from fleetent.agent_config import ApprovalRouting
 from fleetent.db import SQLiteDatabase
 from fleetent.governance.permission_gate import PermissionGate
+from fleetent.outbound import DeliveryReceipt
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
 from fleetent.schema_migrations import migrate
 
@@ -44,7 +45,15 @@ def db(tmp_path: Path, monkeypatch):
 @pytest.fixture
 def _mock_outbound(monkeypatch):
     """Mock outbound so sends succeed and targets are reachable."""
-    monkeypatch.setattr(outbound_mod, "send_to", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        outbound_mod,
+        "send_to",
+        AsyncMock(
+            return_value=DeliveryReceipt(
+                ok=True, platform="slack", target="x", target_type="user", kind="text"
+            )
+        ),
+    )
     monkeypatch.setattr(outbound_mod, "is_reachable", AsyncMock(return_value=True))
 
 

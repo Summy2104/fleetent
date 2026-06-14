@@ -26,6 +26,7 @@ import fleetent.runtime.loop as loop_mod
 from fleetent.agent_config import ApprovalRouting
 from fleetent.db import SQLiteDatabase
 from fleetent.governance.permission_gate import PermissionGate
+from fleetent.outbound import DeliveryReceipt
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
 from fleetent.schema_migrations import migrate
 
@@ -116,7 +117,15 @@ async def test_standalone_approval_no_platform(
     monkeypatch.setattr(allowlist_store_mod, "_state_db", state_db)
 
     # Mock outbound: all sends succeed, all targets reachable.
-    monkeypatch.setattr(outbound_mod, "send_to", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        outbound_mod,
+        "send_to",
+        AsyncMock(
+            return_value=DeliveryReceipt(
+                ok=True, platform="slack", target="x", target_type="user", kind="text"
+            )
+        ),
+    )
     monkeypatch.setattr(outbound_mod, "is_reachable", AsyncMock(return_value=True))
 
     # Fresh gate so shared state from other tests doesn't leak.
@@ -130,7 +139,15 @@ async def test_standalone_approval_no_platform(
 
     routing = ApprovalRouting(by_risk={"high": {"approvers": ["slack:U_LEAD"], "policy": "any"}})
     connector = AsyncMock()
-    monkeypatch.setattr(outbound_mod, "send_to", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        outbound_mod,
+        "send_to",
+        AsyncMock(
+            return_value=DeliveryReceipt(
+                ok=True, platform="slack", target="x", target_type="user", kind="text"
+            )
+        ),
+    )
 
     reply_calls: list[str] = []
 
