@@ -239,20 +239,17 @@ def test_mcp_reconnect_admin_only(client, monkeypatch):
     assert client.post("/admin/mcp/servers/gh/reconnect", headers=_hdr(viewer)).status_code == 403
 
 
-def test_connector_list_exposes_owner_and_filters_by_agent(client):
-    from fleetent.platform.connector_management import connector_config_store as store
-
+def test_connector_list_is_global_only_even_when_agent_id_filter_is_passed(client):
     token, _ = _session_for("admin")
     client.post(
         "/admin/connectors", headers=_hdr(token), json={"id": "gh", "display_name": "GH global"}
     )
-    store.add_connector("gh", "GH agent 5", agent_id=5)
 
     r = client.get("/admin/connectors", headers=_hdr(token))
     assert {(c["id"], c["agent_id"]) for c in r.json()} == {("gh", None)}
 
     r2 = client.get("/admin/connectors?agent_id=5", headers=_hdr(token))
-    assert {c["display_name"] for c in r2.json()} == {"GH agent 5"}
+    assert {(c["id"], c["agent_id"]) for c in r2.json()} == {("gh", None)}
 
 
 def test_mcp_server_list_exposes_owner_and_agent_filter(client, monkeypatch):

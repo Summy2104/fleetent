@@ -1,9 +1,6 @@
-"""Per-agent OAuth connector bindings (migration 045, db runtime, named params, no ORM).
+"""Compatibility shim for the renamed agent service grant store."""
 
-Each row is a join: "agent X may use OAuth connector Y". Parallels the agent MCP
-server bindings; the connector catalog itself lives in connector_config_store. This is
-authoring metadata only — runtime consumption is a separate follow-up.
-"""
+from __future__ import annotations
 
 import datetime
 
@@ -22,12 +19,14 @@ def _now() -> str:
 def bind(agent_id: int, connector_id: str, created_by: str | None = None) -> None:
     with _database().transaction() as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO agent_oauth_bindings "
-            "(agent_id, connector_id, created_at, created_by) "
-            "VALUES (:agent_id, :connector_id, :created_at, :created_by)",
+            """
+            INSERT INTO agent_service_grants (agent_id, service_id, run_as, created_at, created_by)
+            VALUES (:agent_id, :service_id, 'user', :created_at, :created_by)
+            ON CONFLICT(agent_id, service_id) DO NOTHING
+            """,
             {
                 "agent_id": agent_id,
-                "connector_id": connector_id,
+                "service_id": connector_id,
                 "created_at": _now(),
                 "created_by": created_by,
             },
@@ -37,9 +36,11 @@ def bind(agent_id: int, connector_id: str, created_by: str | None = None) -> Non
 def unbind(agent_id: int, connector_id: str) -> None:
     with _database().transaction() as conn:
         conn.execute(
-            "DELETE FROM agent_oauth_bindings "
-            "WHERE agent_id = :agent_id AND connector_id = :connector_id",
-            {"agent_id": agent_id, "connector_id": connector_id},
+            """
+            DELETE FROM agent_service_grants
+            WHERE agent_id = :agent_id AND service_id = :service_id
+            """,
+            {"agent_id": agent_id, "service_id": connector_id},
         )
 
 
@@ -47,23 +48,31 @@ def list_connectors_for_agent(agent_id: int) -> list[str]:
     rows = (
         _database()
         .execute(
-            "SELECT connector_id FROM agent_oauth_bindings "
-            "WHERE agent_id = :agent_id ORDER BY connector_id",
+            """
+            SELECT service_id
+            FROM agent_service_grants
+            WHERE agent_id = :agent_id
+            ORDER BY service_id
+            """,
             {"agent_id": agent_id},
         )
         .fetchall()
     )
-    return [str(r["connector_id"]) for r in rows]
+    return [str(row["service_id"]) for row in rows]
 
 
 def list_agents_for_connector(connector_id: str) -> list[int]:
     rows = (
         _database()
         .execute(
-            "SELECT agent_id FROM agent_oauth_bindings "
-            "WHERE connector_id = :connector_id ORDER BY agent_id",
-            {"connector_id": connector_id},
+            """
+            SELECT agent_id
+            FROM agent_service_grants
+            WHERE service_id = :service_id
+            ORDER BY agent_id
+            """,
+            {"service_id": connector_id},
         )
         .fetchall()
     )
-    return [int(r["agent_id"]) for r in rows]
+    return [int(row["agent_id"]) for row in rows]

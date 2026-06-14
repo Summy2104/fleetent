@@ -1,10 +1,9 @@
-"""End-to-end agent-scoped isolation (Task 8.1).
+"""End-to-end agent-scoped MCP isolation.
 
-Two agents (A, B) share the same ``github`` connector id and the same ``github``
-MCP server id but carry distinct credentials. The full stack — Alembic schema,
-scoped connector store, scoped MCP server store, scope-keyed MCP client — must
-route each agent to its own session/credential. Crucially, agent B's call must
-never be satisfied by agent A's authorization.
+The external service registry is now global-only, so connector config no longer
+participates in per-agent isolation. The MCP server registry still does: two
+agents may declare the same ``github`` MCP server id with distinct credentials,
+and the scope-keyed MCP client must route each call to the matching session.
 """
 
 import contextlib
@@ -16,10 +15,7 @@ import pytest
 import fleetent.integrations.mcp.client as mcp_client
 from fleetent import agent_store
 from fleetent.integrations.mcp.client import McpServerConfig
-from fleetent.platform.connector_management import (
-    agent_mcp_server_store,
-    connector_config_store,
-)
+from fleetent.platform.connector_management import agent_mcp_server_store
 from tests.integration._migration_template import apply_migrations as _apply_migrations
 
 AGENT_A = 1
@@ -45,18 +41,6 @@ def scoped_db(tmp_path, monkeypatch):
 
 
 async def test_two_agents_same_github_route_to_separate_credentials(scoped_db, monkeypatch):
-    # Connector config catalog: same id, per-agent client_id, no shared row.
-    connector_config_store.add_connector(
-        "github", "GitHub (A)", oauth_config={"client_id": "cid-A"}, agent_id=AGENT_A
-    )
-    connector_config_store.add_connector(
-        "github", "GitHub (B)", oauth_config={"client_id": "cid-B"}, agent_id=AGENT_B
-    )
-    a_cfg = connector_config_store.get_connector("github", agent_id=AGENT_A)
-    b_cfg = connector_config_store.get_connector("github", agent_id=AGENT_B)
-    assert a_cfg["oauth_config"]["client_id"] == "cid-A"
-    assert b_cfg["oauth_config"]["client_id"] == "cid-B"
-
     # MCP server catalog: same server_id, per-agent endpoint + credential env var.
     agent_mcp_server_store.add_mcp_server(
         AGENT_A,

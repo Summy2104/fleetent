@@ -17,7 +17,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[impo
 from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel
 
-from fleetent import agent_config, agent_store, user_store
+from fleetent import agent_config, agent_store, connectors, user_store
 from fleetent.auth import seed_builtin_admin
 from fleetent.config import Settings, configure_logging
 from fleetent.governance.approval_router import resolve_approval_request
@@ -41,7 +41,7 @@ from fleetent.platform.agent_management_console import (
 from fleetent.platform.agent_statistics import stats_admin_api
 from fleetent.platform.askit_console import agent_apply_api
 from fleetent.platform.chat_management import chat_admin_api
-from fleetent.platform.connector_management import connector_admin_api
+from fleetent.platform.connector_management import connector_admin_api, vault_provider
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import provider_admin_api
 from fleetent.platform.skill_management import skill_admin_api
@@ -117,6 +117,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Wire platform api_keys resolver so user_store.authenticate queries the api_keys
     # table (+ legacy fallback) without the module-level platform import removed by #4.
     user_store.set_api_key_resolver(_resolve_api_key)
+    connectors.set_provider(vault_provider.get_credential)
     set_im_identity_resolver(_resolve_im_identity)
 
     scan_skills()
