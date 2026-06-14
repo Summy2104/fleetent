@@ -88,9 +88,7 @@ def _link_into_view(server_id: str, rel_path: str, scope_key: str | None) -> Non
             os.link(src, link)
     except OSError as exc:
         _staging_degraded_servers.add(server_id)
-        _logger.warn(
-            "artifact_view_link_failed", server_id=server_id, rel=rel_path, error=str(exc)
-        )
+        _logger.warn("artifact_view_link_failed", server_id=server_id, rel=rel_path, error=str(exc))
 
 
 class ExchangeResolutionError(ValueError):

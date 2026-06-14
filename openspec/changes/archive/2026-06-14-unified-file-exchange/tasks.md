@@ -69,8 +69,8 @@
 
 ## 8. 收尾
 
-- [ ] 8.1 `uv run pytest tests/unit -q` 与 `uv run pytest tests/integration -q`（不带 -x，对照 main 基线无新增失败）
-- [ ] 8.2 `make test-pr` 全绿；`uv run mypy src` 无新增错误
-- [ ] 8.3 文档：AGENTS.md Gotchas 补 exchange 条目（命名空间/归属/约定注入/逃生门）；agent.yaml.example 注释 `file_root`/`file_isolation`
-- [ ] 8.4 验证：my-bot 事故场景**等价持久层/装配验证**（真实 sqlite artifacts 登记→resolve→send_file 解析链路 + mock docker/MCP/LLM 重建；真机断言 `skipif` 跳过）；真机重放留用户环境补跑，决策文档记入「真机待补」
-- [ ] 8.5 收口：全部 checkbox `[x]` 后 `opsx:archive` + `opsx:sync`（功能分支归档+同步 specs），最终 bb-pr 合 main
+- [x] 8.1 `uv run pytest tests/unit -q` 与 `uv run pytest tests/integration -q`（不带 -x，对照 main 基线无新增失败）
+- [x] 8.2 `make test-pr` 全绿；`uv run mypy src` 无新增错误
+- [x] 8.3 文档：AGENTS.md Gotchas 补 exchange 条目（命名空间/归属/约定注入/逃生门）；agent.yaml.example 注释 `file_root`/`file_isolation`
+- [x] 8.4 验证：my-bot 事故场景**等价持久层/装配验证**（真实 sqlite artifacts 登记→resolve→send_file 解析链路 + mock docker/MCP/LLM 重建；真机断言 `skipif` 跳过）；真机重放留用户环境补跑，决策文档记入「真机待补」
+- [x] 8.5 收口：全部 checkbox `[x]` 后 `opsx:archive` + `opsx:sync`（功能分支归档+同步 specs），最终 bb-pr 合 main

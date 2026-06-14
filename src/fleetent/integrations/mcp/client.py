@@ -134,9 +134,7 @@ class McpServerConfig:
     )
     # unified-file-exchange: serializes the "call + product-dir diff" window per server so
     # concurrent calls cannot mis-attribute each other's newly-written files (D2 diff layer).
-    _call_window_lock: asyncio.Lock = field(
-        default_factory=asyncio.Lock, repr=False, compare=False
-    )
+    _call_window_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
     # Agent-scope key dimension (next<-main integration): registries/sessions are keyed
     # by (agent_scope, id) so the same server id can carry distinct credentials/sessions
     # per agent. None = the global (startup) scope. Distinct from the oauth `scope` str.
@@ -1147,16 +1145,26 @@ async def _call_via_session(
     root = artifact_exchange.server_root(server_id) if (server is not None and scope_key) else None
     if root is None:
         return await _call_via_session_inner(
-            server_id, tool_name, args, scope,
-            scope_key=scope_key, session_id=session_id, user_id=user_id,
+            server_id,
+            tool_name,
+            args,
+            scope,
+            scope_key=scope_key,
+            session_id=session_id,
+            user_id=user_id,
         )
     assert server is not None
 
     async with server._call_window_lock:
         before = artifact_exchange.snapshot_products(root)
         text = await _call_via_session_inner(
-            server_id, tool_name, args, scope,
-            scope_key=scope_key, session_id=session_id, user_id=user_id,
+            server_id,
+            tool_name,
+            args,
+            scope,
+            scope_key=scope_key,
+            session_id=session_id,
+            user_id=user_id,
         )
         try:
             artifact_exchange.diff_register(
