@@ -74,7 +74,6 @@ from fleetent.tools.registry import (
     get_effective_timeout,
     get_risk_level,
     get_schemas,
-    is_dynamic_risk,
     is_self_truncating,
 )
 from fleetent.tools.result_truncation import truncate_tool_result
@@ -777,21 +776,20 @@ async def _plan_run_slots(
             if hres.modified_args is not None:
                 slot_args = hres.modified_args
             force_ask = hres.decision == "ask"
-        # Action Gate (C2): the tool's registry risk maps to a disposition. CRITICAL is
-        # hardcoded REJECT; medium/high follow the agent's configured mode (default
-        # approval); unknown/uncontainable fail closed upward. A callable risk
-        # (permission-gate D7) is evaluated here with the parsed args + tool_context — the
-        # risk fn may only RAISE risk on system facts (e.g. send_file's chat scope), never
-        # let LLM args lower it below the gate; a broken fn fails closed to medium.
-        risk = get_risk_level(name)
-        if is_dynamic_risk(name):
-            try:
-                _risk_args = json.loads(slot_args) if isinstance(slot_args, str) else slot_args
-            except Exception:  # noqa: BLE001 — unparseable args: evaluate with empty mapping
-                _risk_args = {}
-            risk = evaluate_risk_level(
-                name, _risk_args if isinstance(_risk_args, dict) else {}, tool_context
-            )
+        # Action Gate (C2): the tool's risk maps to a disposition. CRITICAL is hardcoded
+        # REJECT; medium/high follow the agent's configured mode (default approval);
+        # unknown/uncontainable fail closed upward. Every call is routed through
+        # `evaluate_risk_level`, which delegates to `governance.approval_policy.risk_for` —
+        # the single authority on the recipient-identity axis. The policy may only RAISE risk
+        # on system facts (e.g. send_im_message's recipient ≠ current conversation), never let
+        # LLM args lower it below the gate; a broken policy fails closed to medium.
+        try:
+            _risk_args = json.loads(slot_args) if isinstance(slot_args, str) else slot_args
+        except Exception:  # noqa: BLE001 — unparseable args: evaluate with empty mapping
+            _risk_args = {}
+        risk = evaluate_risk_level(
+            name, _risk_args if isinstance(_risk_args, dict) else {}, tool_context
+        )
         gate_mode = resolve_action_mode(
             risk,
             medium_mode=(

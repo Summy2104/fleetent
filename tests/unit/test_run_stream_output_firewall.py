@@ -33,7 +33,7 @@ def mock_client(monkeypatch) -> AsyncMock:
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
     monkeypatch.setattr(al, "extract_and_update", AsyncMock())
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
-    monkeypatch.setattr(al, "get_risk_level", lambda name: "none")
+    monkeypatch.setattr(al, "evaluate_risk_level", lambda name, args, ctx: "none")
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"leaked {_SECRET} here")
     monkeypatch.setattr(
         al,

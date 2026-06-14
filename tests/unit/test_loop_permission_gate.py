@@ -105,7 +105,7 @@ async def test_permission_gate_disabled_tool_is_dispatched(
     """permission_gate_enabled=False: medium-risk tool is dispatched without approval wait."""
     mock_dispatch = AsyncMock(return_value="file written")
     monkeypatch.setattr(
-        loop, "get_risk_level", lambda name: "medium" if name == "write_file" else "low"
+        loop, "evaluate_risk_level", lambda name, args, ctx: "medium" if name == "write_file" else "low"
     )
     monkeypatch.setattr(loop, "dispatch", mock_dispatch)
 
@@ -126,7 +126,7 @@ async def test_permission_gate_enabled_tool_blocked_on_timeout(
     """permission_gate_enabled=True + short timeout: gate blocks tool (timeout→rejected)."""
     mock_dispatch = AsyncMock(return_value="file written")
     monkeypatch.setattr(
-        loop, "get_risk_level", lambda name: "medium" if name == "write_file" else "low"
+        loop, "evaluate_risk_level", lambda name, args, ctx: "medium" if name == "write_file" else "low"
     )
     monkeypatch.setattr(loop, "dispatch", mock_dispatch)
 
@@ -150,7 +150,7 @@ async def test_permission_gate_medium_timeout_forwarded(
     """permission_gate_medium_timeout is forwarded: shorter timeout causes quicker rejection."""
     mock_dispatch = AsyncMock(return_value="result")
     monkeypatch.setattr(
-        loop, "get_risk_level", lambda name: "medium" if name == "write_file" else "low"
+        loop, "evaluate_risk_level", lambda name, args, ctx: "medium" if name == "write_file" else "low"
     )
     monkeypatch.setattr(loop, "dispatch", mock_dispatch)
     mock_loop_env.chat.completions.create = _tool_response("write_file")

@@ -133,7 +133,7 @@ async def test_standalone_approval_no_platform(
     monkeypatch.setattr(loop_mod, "_default_gate", gate)
 
     # LLM: tool call → text stop.
-    monkeypatch.setattr(loop_mod, "get_risk_level", lambda name: "high")
+    monkeypatch.setattr(loop_mod, "evaluate_risk_level", lambda name, args, ctx: "high")
     monkeypatch.setattr(loop_mod, "dispatch", AsyncMock(return_value="dispatched"))
     _loop_env.chat.completions.create = _stub_tool_then_stop("delete_db")
 
