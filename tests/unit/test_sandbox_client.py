@@ -396,16 +396,16 @@ async def _capture_argv(client: SandboxClient, **kwargs) -> list[str]:
 
 
 async def test_create_workspace_mounts_workspace_when_path_given(client):
-    """A workspace_host_path adds `-v <host>:/workspace` to docker run."""
+    """A workspace_host_path adds `--mount type=bind,...,target=/workspace` to docker run."""
     argv = await _capture_argv(client, workspace_host_path="/host/ws/s1")
-    mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
-    assert "/host/ws/s1:/workspace" in mounts
+    mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "--mount"]
+    assert "type=bind,source=/host/ws/s1,target=/workspace" in mounts
 
 
 async def test_create_workspace_no_mount_when_path_none(client):
-    """No workspace_host_path keeps current behaviour: no -v flag."""
+    """No workspace_host_path keeps current behaviour: no workspace mount flag."""
     argv = await _capture_argv(client, workspace_host_path=None)
-    assert "-v" not in argv
+    assert not any("target=/workspace" in str(a) for a in argv)
 
 
 # ── list_workspaces (SB8 orphan enumeration) ──────────────────────────────────
