@@ -13,12 +13,12 @@ from fleetent.integrations.sandbox.backends.docker import DockerBackend
 
 def test_skill_mount_flags_read_only_default() -> None:
     flags = DockerBackend._skill_mount_flags(SkillMount(host_src="/srv/skills"))
-    assert flags == ["-v", "/srv/skills:/workspace/skills:ro"]
+    assert flags == ["--mount", "type=bind,source=/srv/skills,target=/workspace/skills,readonly"]
 
 
 def test_skill_mount_flags_writable() -> None:
     flags = DockerBackend._skill_mount_flags(SkillMount(host_src="/srv/skills", read_only=False))
-    assert flags == ["-v", "/srv/skills:/workspace/skills"]
+    assert flags == ["--mount", "type=bind,source=/srv/skills,target=/workspace/skills"]
 
 
 def test_skill_mount_flags_none_no_mount() -> None:
