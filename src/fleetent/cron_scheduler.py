@@ -42,6 +42,12 @@ def _parse_run_at(run_at: str) -> datetime:
     if match:
         seconds = int(match.group(1)) * _UNIT_SECONDS[match.group(2)]
         return datetime.now(UTC) + timedelta(seconds=seconds)
+    # Tolerate common non-strict ISO forms the model emits (cron-runat-hardening): a trailing
+    # ` UTC`/` GMT` name → numeric offset; a trailing `Z` → `+00:00` (defensive on older
+    # interpreters). fromisoformat already accepts the space-separated `YYYY-MM-DD HH:MM:SS`.
+    spec = re.sub(r"\s+(?:UTC|GMT)\s*$", "+00:00", spec, flags=re.IGNORECASE)
+    if spec.endswith(("Z", "z")):
+        spec = spec[:-1] + "+00:00"
     return datetime.fromisoformat(spec)
 
 
@@ -318,7 +324,17 @@ class CronScheduler:
         db_jobs = _store.list_tasks()
 
         for task in db_jobs:
-            self._register(task)
+            # Bulkhead (cron-runat-hardening): a single malformed task (e.g. an unparseable
+            # run_at) must never crash agent boot. Log it, disable it so it is not re-loaded
+            # next boot, and continue registering the rest.
+            try:
+                self._register(task)
+            except Exception as exc:  # noqa: BLE001 — one bad row is a data problem, not an outage
+                task_id = task.get("id")
+                logger.warning("cron_register_failed task=%s error=%s", task_id, exc)
+                if task_id:
+                    with suppress(Exception):
+                        _store.set_enabled(task_id, False)
 
         self._register_maintenance_jobs()
         self._scheduler.start()
@@ -514,6 +530,11 @@ def create_task(
     notify_text: str | None = None,
 ) -> dict[str, Any]:
     """Create a task; registers the live job when a scheduler is running."""
+    # Normalize a one-shot run_at to canonical ISO at write time (cron-runat-hardening) so the
+    # store never holds a form the parser later chokes on. Reuses the single parser; an
+    # unparseable run_at raises ValueError here (the schedule tool surfaces it as clean text).
+    if schedule_kind == "once" and run_at:
+        run_at = _parse_run_at(run_at).isoformat()
     kwargs: dict[str, Any] = {
         "name": name,
         "schedule_kind": schedule_kind,

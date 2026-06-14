@@ -769,3 +769,54 @@ async def test_fire_allows_default_placeholder_identity(tmp_path, monkeypatch):
     }
     await cs._fire(task)
     run_mock.assert_called_once()
+
+
+# ── boot resilience: one malformed task must not crash start() (cron-runat-hardening) ──
+
+
+async def test_start_bulkheads_malformed_task(isolated_schedule_db):
+    import fleetent.cron_scheduler as cs
+    import fleetent.schedule_store as ss
+
+    good = ss.create(name="good", cron_expr="0 9 * * *", message="hi")
+    bad = ss.create(name="bad", schedule_kind="once", run_at="2026-06-14T08:07:19Z", message="x")
+    # Poison the bad row's run_at to a value the parser cannot resolve (legacy bad data).
+    isolated_schedule_db.execute(
+        "UPDATE scheduled_tasks SET run_at = :r WHERE id = :i",
+        {"r": "garbage-not-a-date", "i": bad["id"]},
+    )
+
+    scheduler = cs.CronScheduler()
+    await scheduler.start()  # MUST NOT raise despite the malformed task
+    try:
+        assert scheduler.running
+        assert scheduler.get_job(good["id"]) is not None  # valid task registered
+        assert scheduler.get_job(bad["id"]) is None  # malformed task skipped
+        assert not ss.get(bad["id"])["enabled"]  # and auto-disabled
+    finally:
+        await scheduler.shutdown()
+
+
+# ── write-time run_at normalization (cron-runat-hardening) ──
+
+
+async def test_create_once_normalizes_run_at(isolated_schedule_db):
+    import fleetent.cron_scheduler as cs
+    import fleetent.schedule_store as ss
+    from fleetent.cron_scheduler import _parse_run_at
+
+    task = cs.create_task(
+        name="t", schedule_kind="once", run_at="2026-06-14 08:07:19 UTC", message="x"
+    )
+    stored = ss.get(task["id"])["run_at"]
+    assert "UTC" not in stored  # canonical ISO, no tz-name suffix
+    assert _parse_run_at(stored).hour == 8  # round-trips cleanly
+
+
+async def test_create_once_rejects_unparseable_run_at(isolated_schedule_db):
+    import pytest
+
+    import fleetent.cron_scheduler as cs
+
+    with pytest.raises(ValueError):
+        cs.create_task(name="t", schedule_kind="once", run_at="garbage-not-a-date", message="x")

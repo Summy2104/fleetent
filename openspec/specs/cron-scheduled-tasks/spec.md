@@ -2,9 +2,7 @@
 
 ## Purpose
 Agent-owned scheduled tasks (cron/once/interval) persisted in an agent-side SQLite table, fired asynchronously by the in-process scheduler, managed via the unified `schedule` tool, with no platform dependency.
-
 ## Requirements
-
 ### Requirement: Scheduled task definition and persistence
 The system SHALL store scheduled task definitions in an **agent-side** SQLite `scheduled_tasks` table whose schema is owned by the per-agent `agent_state.db` unified embedded forward-only migrations (`AGENT_STATE_MIGRATIONS`, with `PRAGMA user_version` + migrate-on-open), NOT by `schedule_store` self-init and NOT by Alembic and NOT in the platform database (the management-DB table is dropped; `scheduled_tasks` is a pure agent-side table living in the same `agent_state.db` as `traces`/`reflection_reports`/`memory_items`/`approvals`). `schedule_store` SHALL access the table through a database injected via `schedule_store.set_state_db(db)` (the same `agent_scope`-resolved `agent_state.db` handle injected into the other agent-side stores at boot); `schedule_store` SHALL NOT expose an `ensure_schema()` entry point and SHALL NOT resolve `DATABASE_URL` to self-connect. All SQL SHALL use named parameters. Each task SHALL have: `id` (UUID), `name`, `schedule_kind` (`cron`/`once`/`interval`), the kind's schedule fields (`cron_expr` for cron, `run_at` for once, `interval_seconds` + optional `anchor` for interval), `timezone`, `user_id`, `message` (prompt text), optional `session_id`, `origin` (creation-context JSON), optional `deliver` (delivery-target JSON), `enabled` flag, `source` (`static`/`dynamic`/`tool`), `created_at`, **`task_type` (`notify`/`generate`/`action`, default `generate`)**, **`notify_text` (frozen notification copy, required for `notify`)**, and runtime-state columns `last_run_at`, `last_status`, `last_error`, `next_run_at`. The `agent_name` column SHALL NOT exist (one agent per process). The store SHALL validate per type: `notify` requires `notify_text` and a resolvable delivery target; `generate`/`action` require `message`.
 
@@ -33,7 +31,7 @@ The system SHALL store scheduled task definitions in an **agent-side** SQLite `s
 - **THEN** the row is removed from `scheduled_tasks`
 
 ### Requirement: Dynamic tasks survive server restart
-Tasks created via the `schedule` tool SHALL be persisted to the agent-side SQLite store and re-registered with APScheduler on every **agent process boot** (`agent_app.boot`), with `next_run_at` recomputed from the current time. Cron jobs SHALL NOT be loaded from YAML files.
+Tasks created via the `schedule` tool SHALL be persisted to the agent-side SQLite store and re-registered with APScheduler on every **agent process boot** (`agent_app.boot`), with `next_run_at` recomputed from the current time. Cron jobs SHALL NOT be loaded from YAML files. Re-registration MUST be bulkheaded per task: if registering one task raises (e.g. a malformed `run_at`), the scheduler SHALL log a warning, disable that task (`enabled=0`, so it is not re-loaded on the next boot), and skip it — it MUST NOT abort boot or prevent the remaining tasks from registering. A single bad row is a data problem, never an availability problem.
 
 #### Scenario: Dynamic task re-registered after agent restart
 - **WHEN** a task is created via `schedule_store.create()` and the agent process is restarted
@@ -42,6 +40,10 @@ Tasks created via the `schedule` tool SHALL be persisted to the agent-side SQLit
 #### Scenario: Old cron YAML is not loaded
 - **WHEN** a legacy cron YAML file exists
 - **THEN** scheduler startup does not load static jobs from it
+
+#### Scenario: One malformed task does not crash boot
+- **WHEN** the store holds a `once` task whose `run_at` cannot be parsed (e.g. `'2026-06-14 08:07:19 UTC'` survived from an older writer) alongside valid tasks
+- **THEN** scheduler start logs a warning for that task, disables it (`enabled=0`), registers all the valid tasks, and the scheduler starts normally — boot completes
 
 ### Requirement: Cron trigger fires agent run asynchronously
 When a scheduled task's trigger (cron/once/interval) matches the current time, the scheduler SHALL fire **according to the task's `task_type`**: `notify` sends `notify_text` verbatim via the fire-time connector snapshot **without invoking `agent_loop.run`**; `generate` and `action` call `agent_loop.run()` with the task's `message`, `user_id`, resolved agent context, the fire-time `outbound_connectors` snapshot (so outbound tools like `send_im_message` reach the live IM connectors), and (for `generate`) the scheduled-run delivery statement. The trigger SHALL NOT block the scheduler event loop, and the run result SHALL be recorded in the observability trace. `last_status` SHALL reflect the **task intent** outcome per type — notify: delivery outcome; generate: run + delivery outcome; action: run outcome — never merely "the delivery API call succeeded".
@@ -76,6 +78,7 @@ The scheduler SHALL read its runtime settings from the **agent configuration** (
 #### Scenario: Default timezone is configured
 - **WHEN** a persisted task does not define timezone
 - **THEN** the scheduler uses `agent.scheduling.default_timezone`
+
 ### Requirement: Scheduled tasks are agent-owned with no platform dependency
 Scheduled-task persistence and scheduling SHALL be entirely agent-runtime concerns. `schedule_store` and `cron_scheduler` MUST NOT `import fleetent.platform.*` and MUST NOT write to any platform table. An agent SHALL be able to create and fire scheduled tasks in an environment where the platform service is absent and the platform database / `scheduled_tasks` table do not exist.
 
@@ -221,3 +224,23 @@ For `notify` tasks the notification copy SHALL be produced **once, at creation t
 #### Scenario: Fire-time-dependent content is steered away from notify
 - **WHEN** a user asks to schedule a reminder whose content includes "today's todo list"
 - **THEN** the task is created as `generate` (not `notify`), because the content needs send-time information
+
+### Requirement: Robust run_at parsing and write-time normalization
+The one-shot `run_at` parser SHALL tolerate common non-strict ISO forms in addition to strict ISO-8601 and relative durations (`+30m`/`2h`): a trailing timezone-name suffix (` UTC`/` GMT`) MUST be normalized to a numeric offset before parsing, and a trailing `Z` MUST be accepted. When a `once` task is created via the `schedule` tool, the system SHALL normalize `run_at` through that same parser and persist the canonical ISO form (with explicit offset); an unparseable `run_at` MUST be rejected at create time with an explanatory error and MUST NOT be stored.
+
+#### Scenario: run_at with UTC suffix parses
+- **WHEN** `_parse_run_at("2026-06-14 08:07:19 UTC")` is evaluated
+- **THEN** it resolves to the corresponding UTC datetime without raising
+
+#### Scenario: strict ISO and relative durations still work
+- **WHEN** `_parse_run_at("2026-06-14T08:07:19Z")` and `_parse_run_at("+30m")` are evaluated
+- **THEN** both resolve correctly (absolute UTC; now + 30 minutes)
+
+#### Scenario: create normalizes run_at to canonical ISO
+- **WHEN** a `once` task is created via the `schedule` tool with `run_at="2026-06-14 08:07:19 UTC"`
+- **THEN** the stored `run_at` is canonical ISO with an explicit offset (e.g. `2026-06-14T08:07:19+00:00`)
+
+#### Scenario: create rejects an unparseable run_at
+- **WHEN** a `once` task is created with a `run_at` the parser cannot resolve
+- **THEN** the tool returns an explanatory error and no row is persisted
+
