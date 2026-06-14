@@ -1,6 +1,6 @@
 # fleetent 数据模型与物理拓扑（as-built）
 
-> **现状权威参考**。持久层重设计（#1–#4）与 agent identity phase 2–5 已全部落地——五物理库、按主体物理隔离、嵌入式迁移（Y）、Identity 端口、platform 只读投影、name/id 双边界模型均已实现。
+> **现状权威参考**。持久层重设计（#1–#4）与 agent identity phase 2–5 已全部落地——五物理库、按主体物理隔离、嵌入式迁移（Y）、Identity 端口、platform 只读投影、name/id 双边界模型均已实现。**IM 访问模型（能力闸 supports_dm/supports_groups · 用户闸 user_agents · 群白名单 agent_im_groups + materialize）与 owner→tenant 作用域塌缩亦已落地**（详见 [`im-access-model.md`](./im-access-model.md)）。
 > **本文只描述"现状是什么"**；"为什么这样设计"（R1/R2/B2、物理 vs 逻辑、向量模型 A、实体减法等 rationale）见 [`records/decision-logs/persistence-redesign-decisions.md`](../records/decision-logs/persistence-redesign-decisions.md)。
 > **列级 schema 的真相源是迁移**：管理库 = `migrations/`（Alembic）；agent 侧库 = `runtime/agent_state_migrations.py`、`knowledge_base/core/migrations.py`、`memory/shared_memory_migrations.py`（嵌入式 Y）。本文实体清单为导航，不逐列复制。
 > **维护规则**：任何 change 增删表、改列或改关系时，MUST 同步本文对应的实体清单**与 erDiagram**（图文同改）——历次审计发现的漂移几乎全是"改了文本忘了图"。
