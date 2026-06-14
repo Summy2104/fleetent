@@ -12,7 +12,6 @@ from fleetent.platform.im_gateway_management.connector_store import (  # noqa: F
     heartbeat,
     list_connectors,
     report_status,
-    set_allowlist_enforced,
     set_enabled,
     upsert_connector,
 )

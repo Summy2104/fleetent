@@ -222,14 +222,13 @@ async def test_default_closed_blocks_dm_and_empty_group_allowlist(
 
 
 async def test_zero_db_proof_routing_decides_locally(monkeypatch, stub_loop, approvals):
-    # Rig the platform allowlist/user-store to raise; routing must still decide.
+    # Rig the platform/user-store to raise; routing must still decide locally.
     import fleetent.platform.im_gateway_management as platform_im
     import fleetent.user_store as user_store
 
     def boom(*a, **k):
         raise AssertionError("platform DB must not be read on the runtime path")
 
-    monkeypatch.setattr(platform_im, "is_allowed", boom)
     monkeypatch.setattr(platform_im, "check_allowed_by_user_id", boom)
     monkeypatch.setattr(user_store, "_conn", boom)
 

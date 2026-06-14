@@ -14,7 +14,7 @@
 ## 分类与决策
 
 ### C1 · 管理表入 Alembic，测试未跑迁移（~80 例）
-- **现象**：`sqlite3.OperationalError: no such table: users / im_connectors / api_keys / im_channel_allowlist`。
+- **现象**：`sqlite3.OperationalError: no such table: users / im_connectors / api_keys / legacy IM allowlist table`。
 - **根因**：mgmt-tables-into-alembic / tenancy（迁移 067–070）后 `user_store._init_db()` 等变为 `pass`，管理表 **仅由 Alembic 建**；约 19 个测试文件的 fixture 仍只 `monkeypatch DB_PATH`、不跑迁移。
 - **决策**：所有重定向 `DB_PATH` 的 fixture 在重定向后 `apply_migrations(db)`（必要处同步 `DATABASE_URL`）。
 

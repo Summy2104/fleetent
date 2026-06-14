@@ -738,7 +738,7 @@ def test_observability_cli_invalid_time_exits_nonzero():
     assert "invalid timestamp" in err
 
 
-# --- im-connector / im-channel CLI (IM gateway management) --------------------
+# --- im-connector CLI (IM gateway management) ---------------------------------
 
 
 def _seed_slack_connector():
@@ -801,28 +801,3 @@ def test_seed_connectors_imports_env_tokens(monkeypatch):
     assert code == 0
     assert "whatsapp" in out
     assert store.get_connector(user_store.admin_owner_id(), "whatsapp")["enabled"] == 1
-
-
-def test_im_channel_allow_list_disallow():
-    import fleetent.platform.im_gateway_management.connector_store as store
-    import fleetent.user_store as user_store
-
-    store.upsert_connector(
-        user_store.admin_owner_id(), "slack", config='{"bot_token": "x"}', enabled=True
-    )
-
-    _, _, code = run_admin(
-        "im-channel", "allow", "--platform", "slack", "--scope-type", "channel", "--scope-id", "C1"
-    )
-    assert code == 0
-
-    out, _, code = run_admin("im-channel", "list", "--platform", "slack")
-    assert code == 0
-    assert "C1" in out
-
-    import fleetent.platform.im_gateway_management.channel_allowlist as allowlist
-
-    entry_id = allowlist.list_entries(None, "slack")[0]["id"]
-    _, _, code = run_admin("im-channel", "disallow", "--id", str(entry_id))
-    assert code == 0
-    assert allowlist.list_entries(None, "slack") == []

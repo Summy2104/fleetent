@@ -51,7 +51,7 @@ docker compose run --rm fleetent uv run python scripts/upgrade.py --dry-run
 
 dry-run 通过后执行升级脚本。脚本会在 SQLite backup 成功后运行 `alembic upgrade head`：
 
-> **迁移要求（从 migration 067 起必须）**：`api_keys`、`audit_log`、`im_connectors`、`im_channel_allowlist` 已完全由 Alembic 管理，应用启动前须先完成 `alembic upgrade head`；否则这 4 张表不存在，API 将报 "no such table" 错误。
+> **迁移要求（当前 head）**：`api_keys`、`audit_log`、`im_connectors` 已完全由 Alembic 管理，应用启动前须先完成 `alembic upgrade head`；否则管理 API 会报 "no such table" 错误。
 
 ```bash
 docker compose run --rm fleetent uv run python scripts/upgrade.py

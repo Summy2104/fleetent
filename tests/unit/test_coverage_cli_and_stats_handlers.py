@@ -144,11 +144,6 @@ def test_im_connector_cli_uses_mocked_management_boundaries(monkeypatch, capsys)
         resolve_masked=lambda owner, platform: {"bot_token": "***"},
         set_enabled=lambda *args: calls.append(("set_enabled", args, {})),
         set_config=lambda *args: calls.append(("set_config", args, {})),
-        add_entry=lambda *args: calls.append(("add_entry", args, {})),
-        remove_entry=lambda *args: calls.append(("remove_entry", args, {})),
-        list_entries=lambda owner, platform: [
-            {"id": 1, "platform": "slack", "scope_type": "channel", "scope_id": "C1", "note": "ok"}
-        ],
     )
     monkeypatch.setattr(user_store, "admin_owner_id", lambda: "admin")
     monkeypatch.setattr(
@@ -165,24 +160,11 @@ def test_im_connector_cli_uses_mocked_management_boundaries(monkeypatch, capsys)
     assert im_connectors.handle(
         _ns(cmd="im-connector", im_connector_cmd="set-config", platform="slack", set=["a=b"])
     )
-    assert im_connectors.handle(
-        _ns(
-            cmd="im-channel",
-            im_channel_cmd="allow",
-            platform="slack",
-            scope_type="channel",
-            scope_id="C1",
-            note="ok",
-        )
-    )
-    assert im_connectors.handle(_ns(cmd="im-channel", im_channel_cmd="disallow", id=1))
-    assert im_connectors.handle(_ns(cmd="im-channel", im_channel_cmd="list", platform="slack"))
     assert not im_connectors.handle(_ns(cmd="unknown"))
 
     output = capsys.readouterr().out
     assert "Seeded: slack" in output
     assert "bot_token=***" in output
-    assert "allowed slack channel:C1" in output
     assert ("set_config", ("admin", "slack", {"a": "b"}), {}) in calls
 
     with pytest.raises(SystemExit):

@@ -27,7 +27,7 @@ router。跨模块调用方 MUST 通过该模块的 public API surface 调用，
 
 ### Requirement: IM module owns all IM tables
 
-统一 IM 模块 SHALL 是 `im_users`、`im_connectors`、`im_channel_allowlist` 三张表的唯一
+统一 IM 模块 SHALL 是 `im_users`、`im_connectors` 两张表的唯一
 owner module，负责其 store 访问与 public DTO。其他模块 MUST NOT 直接 query 或 mutate
 这些表。
 
@@ -41,7 +41,7 @@ owner module，负责其 store 访问与 public DTO。其他模块 MUST NOT 直�
 旧 IM import 路径 SHALL 保留为 compatibility shim，仅 re-export 统一 IM 模块的 public
 names，MUST NOT 包含业务逻辑。受影响路径为 `fleetent.im_user_store` 及
 `fleetent.platform.im_gateway_management` 下的 `im_connector_store`、
-`im_connector_config`、`im_connector_manager`、`im_channel_allowlist`、`im_admin_api`。
+`im_connector_config`、`im_connector_manager`、`im_admin_api`。
 
 #### Scenario: 旧路径 import 仍可用
 

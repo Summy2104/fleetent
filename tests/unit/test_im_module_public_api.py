@@ -1,4 +1,4 @@
-"""Unified IM module public API surface (identity, connector, config, manager, allowlist, admin)."""
+"""Unified IM module public API surface (identity, connector, config, manager, admin)."""
 
 
 def test_im_module_exposes_unified_public_api():
@@ -20,12 +20,10 @@ def test_im_module_exposes_unified_public_api():
         "list_connectors",
         "report_status",
         "set_enabled",
-        "set_allowlist_enforced",
     )
     config_fns = ("resolve", "resolve_masked", "set_config", "seed_from_env")
-    allowlist_fns = ("add_entry", "remove_entry", "list_entries", "is_allowed")
 
-    for name in identity_fns + connector_fns + config_fns + allowlist_fns:
+    for name in identity_fns + connector_fns + config_fns:
         assert hasattr(im, name), name
 
     assert hasattr(im, "ConnectorManager")

@@ -4,14 +4,14 @@
 TBD - created by archiving change 2026-05-30-im-gateway-management. Update Purpose after archive.
 ## Requirements
 ### Requirement: Connector registry storage
-The system SHALL store one row per IM platform connector in an `im_connectors` table with columns: `id`, `platform` (TEXT UNIQUE — e.g. `slack`/`telegram`/`whatsapp`), `enabled` (INTEGER default 0), `allowlist_enforced` (INTEGER default 0), `config` (TEXT JSON, nullable), `status` (TEXT default `stopped`), `last_heartbeat_at` (TEXT, nullable), `last_error` (TEXT, nullable), `created_at`, `updated_at`.
+The system SHALL store one row per IM platform connector in an `im_connectors` table with columns: `id`, `owner_id`, `platform` (TEXT — e.g. `slack`/`telegram`/`whatsapp`), `enabled` (INTEGER default 0), `config` (TEXT JSON, nullable), `status` (TEXT default `stopped`), `last_heartbeat_at` (TEXT, nullable), `last_error` (TEXT, nullable), `created_at`, `updated_at`, with a UNIQUE constraint on `(owner_id, platform)`.
 
 #### Scenario: Table initialized
 - **WHEN** `_init_db()` runs on a fresh database
 - **THEN** the `im_connectors` table exists with the columns above
 
-#### Scenario: Platform uniqueness
-- **WHEN** a second row with an existing `platform` is inserted
+#### Scenario: Platform uniqueness per owner
+- **WHEN** a second row with an existing `(owner_id, platform)` is inserted
 - **THEN** the insert is rejected by the UNIQUE constraint
 
 ### Requirement: Connector status reporting
@@ -52,14 +52,14 @@ A connector whose resolved config has no usable credentials SHALL be marked `unc
 - **THEN** its status is set to `unconfigured` and no task is started, without raising an error
 
 ### Requirement: Connector listing exposes status
-The system SHALL expose connector listing showing platform, enabled flag, status, last heartbeat, last error, and `allowlist_enforced`, with credential values masked.
+The system SHALL expose connector listing showing owner, platform, enabled flag, status, last heartbeat, and last error, with credential values masked.
 
 #### Scenario: List connectors
 - **WHEN** an admin requests the connector list
-- **THEN** each platform's `platform`, `enabled`, `status`, `last_heartbeat_at`, `last_error`, `allowlist_enforced` are returned and any credential fields are masked
+- **THEN** each row's `owner_id`, `platform`, `enabled`, `status`, `last_heartbeat_at`, and `last_error` are returned and any credential fields are masked
 
 ### Requirement: Create a connector for a not-yet-configured platform
-The system SHALL allow an admin to create (initialize) a connector row for a platform that has no existing row, supplying its credential config in the same call. Creation SHALL be idempotent: creating for an existing platform SHALL update that platform's config rather than insert a duplicate (the `platform` UNIQUE constraint is preserved). Creation SHALL be admin-only.
+The system SHALL allow an admin to create (initialize) a connector row for a platform that has no existing row, supplying its credential config in the same call. Creation SHALL be idempotent: creating for an existing `(owner_id, platform)` SHALL update that row's config rather than insert a duplicate (the `(owner_id, platform)` UNIQUE constraint is preserved). Creation SHALL be admin-only.
 
 #### Scenario: Create a brand-new platform connection
 - **WHEN** an admin POSTs a `whatsapp` connector with a credential config and no `whatsapp` row exists
@@ -67,7 +67,7 @@ The system SHALL allow an admin to create (initialize) a connector row for a pla
 
 #### Scenario: Create for an existing platform updates config
 - **WHEN** an admin POSTs a `slack` connector config while a `slack` row already exists
-- **THEN** the existing row's config is updated (no duplicate row) and the UNIQUE(platform) constraint is not violated
+- **THEN** the existing row's config is updated (no duplicate row) and the UNIQUE(owner_id, platform) constraint is not violated
 
 #### Scenario: Non-admin cannot create a connector
 - **WHEN** a viewer attempts to create a connector
@@ -89,4 +89,3 @@ Slack/Telegram rows MAY remain but SHALL be inert (never started by the owner-le
 
 - **WHEN** `start_all_enabled` runs and an `enabled=1` `telegram` row exists in `im_connectors`
 - **THEN** no Telegram adapter is started by the owner-level connector manager
-
