@@ -110,7 +110,14 @@ def test_head_schema_adds_external_credentials(tmp_path: Path) -> None:
         conn.close()
 
     assert "external_credentials" in tables
-    assert columns == ["user_id", "service_id", "payload_ciphertext", "status", "updated_at", "updated_by"]
+    assert columns == [
+        "user_id",
+        "service_id",
+        "payload_ciphertext",
+        "status",
+        "updated_at",
+        "updated_by",
+    ]
     assert pk_columns == ["user_id", "service_id"]
 
 
@@ -128,7 +135,8 @@ def test_upgrade_preserves_rows_and_delete_agent_cascades_service_grants(
         conn.execute(
             """
             INSERT INTO connectors
-                (agent_id, id, display_name, protocol, oauth_config, enabled, created_at, updated_at)
+                (agent_id, id, display_name, protocol, oauth_config, enabled,
+                 created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
