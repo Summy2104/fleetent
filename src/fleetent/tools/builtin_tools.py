@@ -572,7 +572,8 @@ async def schedule(
     name: Annotated[str, "任务名称（create 时建议提供，便于 list 辨识）"] = "",
     schedule_kind: Annotated[
         Literal["cron", "once", "interval"],
-        "调度类型：cron=周期（配 cron_expr）；once=一次性（配 run_at）；interval=每 N 秒（配 interval_seconds）",
+        "调度类型：cron=周期（配 cron_expr）；once=一次性（配 run_at）；"
+        "interval=每 N 秒（配 interval_seconds）",
     ] = "cron",
     cron_expr: Annotated[
         str,
@@ -590,7 +591,7 @@ async def schedule(
         "IANA 时区名，如 'Asia/Shanghai'。cron_expr/run_at 按此时区的本地时间解释——"
         "直接填当地钟面时间，不要预先换算成 UTC；留空则用部署默认时区，"
         "仅当用户明确点名其它时区时才填",
-    ] = "UTC",
+    ] = "",
     user_id: Annotated[str, "归属用户（一般留空，由调用者身份决定）"] = "default",
     task_id: Annotated[str, "remove/run_now/pause/resume 的目标任务 ID"] = "",
     notify_platform: Annotated[str, "投递平台如 'slack'（留空则用任务创建时所在会话）"] = "",
@@ -674,9 +675,10 @@ async def schedule(
                 f"kind={schedule_kind!r} — takes effect when the agent service is running "
                 "(no scheduler in this process)"
             )
+        hint = str(task.get("next_fire_hint") or "")
         return (
             f"Scheduled task created and registered: id={task['id']!r} "
-            f"name={name!r} kind={schedule_kind!r}"
+            f"name={name!r} kind={schedule_kind!r}.{hint}"
         )
 
     if action == "list":

@@ -418,7 +418,28 @@ class CronScheduler:
             notify_text=notify_text,
         )
         self._register(task)
+        self._backfill_next_run(task)
         return task
+
+    def _backfill_next_run(self, task: dict[str, Any]) -> None:
+        """Persist the registered job's next fire time to ``next_run_at`` and attach a
+        human-readable hint (task timezone + UTC) to ``task`` for the create result.
+
+        Best-effort: a failure here (no job yet, paused once-task, ...) never breaks create.
+        """
+        try:
+            job = self._scheduler.get_job(task["id"])
+            nrt = getattr(job, "next_run_time", None) if job is not None else None
+            if nrt is None:
+                return
+            resolved_tz = task.get("timezone") or self._settings.default_timezone
+            _store.update_run_state(task["id"], next_run_at=nrt.isoformat())
+            task["next_run_at"] = nrt.isoformat()
+            local = nrt.strftime("%Y-%m-%d %H:%M")
+            utc = nrt.astimezone(UTC).strftime("%Y-%m-%d %H:%M")
+            task["next_fire_hint"] = f" 下次触发 {local} ({resolved_tz}) / {utc} UTC"
+        except Exception as exc:  # noqa: BLE001 — echo is best-effort, never break create
+            logger.warning("cron_next_run_backfill_failed task=%s error=%s", task.get("id"), exc)
 
     def remove_task(self, task_id: str) -> bool:
         """Delete the task row and deregister its live job. Returns False if unknown."""
