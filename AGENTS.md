@@ -186,6 +186,8 @@ unit 不得涉及真实 DB file、schema、CRUD 或 store/runtime 协作：禁�
 | 单 task 收尾 | 受影响层（unit 或 integration） | 该层无新增失败 |
 | change / PR 收尾 | `make test-pr` + `uv run pytest tests/integration -q`（不带 `-x`，对照 main 基线） | test-pr 全绿；integration 无新增失败 |
 
+覆盖门禁口径：push 路径仅看 unit，`make test-unit-ci` 的 `coverage report --fail-under=76`；每日定时路径看合并覆盖，`make test-coverage-ci` 的 `coverage report --fail-under=88`。
+
 **门禁判据是「无新增失败」，不是零失败**：当前（2026-06）约有 2 unit + 19 integration 预先存在失败（`permission_gate` / agent-access 重构遗留，owner 非测试改动者）；其中 2 个 unit（`test_loop_permission_gate.py`，flaky）已在 `make test-pr` 用 `--deselect` quarantine。`make test-pr` 的 ruff 只扫本分支 changed-vs-main 的 `.py`——你只对自己改过的文件负责。
 
 ### Mock 策略
