@@ -54,6 +54,13 @@ context of the message or click that triggered the resolution — so resumed out
 in the original chat/thread with upload capability intact. The resolved pending entry
 MUST be removed from `meta.pending_approvals`.
 
+Delivery receipts produced while executing the approved tool SHALL be surfaced in the
+resumed run's final reply as the system-generated delivery fact trailer, so a successful
+proactive send is confirmed deterministically to the originating conversation rather than
+left to the model's discretion. The resume path SHALL share one delivery ledger between the
+tool-execution context and the continuation run so the trailer rendered at the
+continuation's finalize includes the receipts from the resumed tool execution.
+
 #### Scenario: approve executes the tool and continues
 
 - **WHEN** an authorized actor approves a pending approval
@@ -72,12 +79,11 @@ MUST be removed from `meta.pending_approvals`.
 - **THEN** the same resume path runs (execute-or-decline → inject → continue) and the
   resumed output lands at the same persisted address regardless of entry point
 
-#### Scenario: resumed output returns to the original thread
+#### Scenario: approved send is confirmed by a delivery trailer
 
-- **WHEN** a run suspended inside a Slack thread is resolved from anywhere (button click
-  or a top-level `approve <id>` message)
-- **THEN** the resumed run's replies and any subsequent approval prompts are posted into
-  the original thread recorded in the pending entry's address
+- **WHEN** an approved `send_im_message` executes during resume and the message is delivered
+- **THEN** the resumed run's final reply carries the system delivery fact trailer
+  (`📬 实际投递：消息 …`) reflecting that send, independent of what the model wrote
 
 ### Requirement: Pending approvals survive a process restart
 

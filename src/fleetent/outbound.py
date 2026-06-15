@@ -223,23 +223,23 @@ def make_uploader(connectors: dict[str, Any], address: ConversationAddress) -> A
 
 
 def approval_prompt_blocks(
-    approval_id: str, tool_name: str, risk_level: str
+    approval_id: str, tool_name: str, risk_level: str, summary: str = ""
 ) -> list[dict[str, Any]]:
     """Slack Block Kit payload for an approval prompt: summary + three decision buttons.
 
     The gate passes this payload opaquely; only Slack delivery paths render it.
     Button action_ids are the contract consumed by the Slack ``block_actions`` handler.
+    ``summary`` (when non-empty) is a human-readable description of WHAT is being approved
+    (e.g. the resolved recipient of a send) so the approver can verify before deciding.
     """
+    head = f"🔐 工具 `{tool_name}` 请求执行（风险等级: {risk_level}）"
+    if summary:
+        head += f"\n{summary}"
+    head += f"\nApproval ID: `{approval_id}`"
     return [
         {
             "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": (
-                    f"🔐 工具 `{tool_name}` 请求执行（风险等级: {risk_level}）\n"
-                    f"Approval ID: `{approval_id}`"
-                ),
-            },
+            "text": {"type": "mrkdwn", "text": head},
         },
         {
             "type": "actions",
@@ -267,6 +267,78 @@ def approval_prompt_blocks(
             ],
         },
     ]
+
+
+_LABEL_TIMEOUT_SECONDS = 3.0
+
+
+async def resolve_recipient_label(
+    platform: str, connector: Any, target: str, target_type: str
+) -> str:
+    """Best-effort human-readable label for a send target; raw id on any failure.
+
+    Slack: a user id → ``@<display_name>`` via ``users_info``; a channel id → ``#<name>``
+    via ``conversations_info``. Other platforms (or any error/timeout) fall back to the raw
+    ``target`` so an approval prompt is never blocked or delayed by name resolution. Never
+    raises. No platform-control-plane dependency — resolution goes only through the injected
+    IM connector.
+    """
+    if platform != "slack" or connector is None or not target:
+        return target
+    try:
+        import anyio
+
+        with anyio.fail_after(_LABEL_TIMEOUT_SECONDS):
+            if target_type == "channel":
+                resp = await connector.conversations_info(channel=target)
+                name = ((resp.get("channel") or {}) if hasattr(resp, "get") else {}).get("name")
+                return f"#{name}" if name else target
+            resp = await connector.users_info(user=target)
+            user = (resp.get("user") or {}) if hasattr(resp, "get") else {}
+            profile = user.get("profile") or {}
+            name = profile.get("display_name") or profile.get("real_name") or user.get("name")
+            return f"@{name}" if name else target
+    except Exception as exc:  # noqa: BLE001 — name resolution is best-effort, never blocks
+        logger.warning("recipient_label_resolve_failed", target=target, error=str(exc))
+        return target
+
+
+def _preview(text: str, limit: int = 60) -> str:
+    text = " ".join(str(text).split())
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+async def summarize_gated_call(
+    tool_name: str, tool_args: Any, platform: str, connector: Any
+) -> str:
+    """Human-readable one-liner of a gated call for the approval prompt (best-effort).
+
+    For ``send_im_message`` it names the resolved recipient (``@name``/``#channel``), the
+    target type (私信/频道), a short text preview, and the attachment count — so the approver
+    can verify the recipient before deciding. Other tools get a compact, length-capped
+    rendering of their args. Never raises.
+    """
+    args = tool_args if isinstance(tool_args, dict) else {}
+    try:
+        if tool_name == "send_im_message":
+            target = str(args.get("target", "") or "")
+            target_type = str(args.get("target_type", "user") or "user")
+            label = await resolve_recipient_label(platform, connector, target, target_type)
+            kind = "私信" if target_type == "user" else "频道"
+            parts = [f"发送对象：{label}（{kind}）"]
+            text = str(args.get("text", "") or "")
+            if text:
+                parts.append(f"预览：{_preview(text)}")
+            files = args.get("files") or []
+            if files:
+                parts.append(f"附件 {len(files)}")
+            return "｜".join(parts)
+        # Generic: compact, length-capped key=value rendering.
+        rendered = ", ".join(f"{k}={_preview(str(v), 40)}" for k, v in args.items())
+        return f"参数：{_preview(rendered, 200)}" if rendered else ""
+    except Exception as exc:  # noqa: BLE001 — summary is auxiliary, never blocks the prompt
+        logger.warning("gated_call_summary_failed", tool=tool_name, error=str(exc))
+        return ""
 
 
 # Delivery-helper contract (delivery-receipts): return (provider_ref, error). Success →

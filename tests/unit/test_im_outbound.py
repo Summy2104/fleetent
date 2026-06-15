@@ -184,6 +184,101 @@ def test_approval_prompt_blocks_include_text_section_with_tool() -> None:
     assert "appr-43" in joined
 
 
+def test_approval_prompt_blocks_render_summary() -> None:
+    """A non-empty summary appears in a section so the approver sees WHAT is approved."""
+    from fleetent.outbound import approval_prompt_blocks
+
+    blocks = approval_prompt_blocks(
+        "appr-9", "send_im_message", "medium", summary="发送对象：@张三（私信）"
+    )
+    sections = [b for b in blocks if b.get("type") == "section"]
+    joined = " ".join(str(s) for s in sections)
+    assert "@张三" in joined
+    assert "发送对象" in joined
+
+
+def test_approval_prompt_blocks_summary_default_backward_compatible() -> None:
+    """Omitting summary keeps the prior shape (no empty/extra summary noise)."""
+    from fleetent.outbound import approval_prompt_blocks
+
+    assert approval_prompt_blocks("a", "t", "medium") == approval_prompt_blocks(
+        "a", "t", "medium", summary=""
+    )
+
+
+async def test_resolve_recipient_label_slack_user() -> None:
+    """A Slack user id resolves to @display_name via users_info (best-effort)."""
+    from unittest.mock import AsyncMock
+
+    from fleetent.outbound import resolve_recipient_label
+
+    client = AsyncMock()
+    client.users_info = AsyncMock(
+        return_value={"user": {"profile": {"display_name": "张三", "real_name": "Zhang San"}}}
+    )
+    label = await resolve_recipient_label("slack", client, "U_OTHER", "user")
+    assert label == "@张三"
+
+
+async def test_resolve_recipient_label_slack_channel() -> None:
+    from unittest.mock import AsyncMock
+
+    from fleetent.outbound import resolve_recipient_label
+
+    client = AsyncMock()
+    client.conversations_info = AsyncMock(return_value={"channel": {"name": "general"}})
+    label = await resolve_recipient_label("slack", client, "C_X", "channel")
+    assert label == "#general"
+
+
+async def test_resolve_recipient_label_falls_back_to_raw_on_error() -> None:
+    """Any resolution failure (API error / non-Slack) degrades to the raw target id."""
+    from unittest.mock import AsyncMock
+
+    from fleetent.outbound import resolve_recipient_label
+
+    client = AsyncMock()
+    client.users_info = AsyncMock(side_effect=RuntimeError("boom"))
+    assert await resolve_recipient_label("slack", client, "U_OTHER", "user") == "U_OTHER"
+    # Non-Slack platform: raw id, no call needed.
+    assert await resolve_recipient_label("telegram", object(), "12345", "user") == "12345"
+
+
+async def test_summarize_gated_call_send_im_message() -> None:
+    """send_im_message summary names the resolved recipient, type, text preview, attachments."""
+    from unittest.mock import AsyncMock
+
+    from fleetent.outbound import summarize_gated_call
+
+    client = AsyncMock()
+    client.users_info = AsyncMock(return_value={"user": {"profile": {"display_name": "张三"}}})
+    summary = await summarize_gated_call(
+        "send_im_message",
+        {
+            "target": "U_OTHER",
+            "text": "季度报告已生成请查收",
+            "target_type": "user",
+            "files": ["a.xlsx"],
+        },
+        "slack",
+        client,
+    )
+    assert "@张三" in summary
+    assert "私信" in summary
+    assert "季度报告" in summary  # text preview present
+    assert "附件" in summary and "1" in summary
+
+
+async def test_summarize_gated_call_generic_tool() -> None:
+    """Non-send_im tools get a compact arg summary (no crash, no recipient framing)."""
+    from fleetent.outbound import summarize_gated_call
+
+    summary = await summarize_gated_call(
+        "manage_email", {"operation": "send", "to": "x@y.com"}, "slack", object()
+    )
+    assert isinstance(summary, str) and summary  # non-empty compact summary
+
+
 async def test_send_to_slack_dm_forwards_blocks() -> None:
     """send_to(..., blocks=...) passes blocks to chat_postMessage on the DM path."""
     from fleetent.im_gateway.outbound import send_to

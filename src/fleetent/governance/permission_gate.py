@@ -25,6 +25,27 @@ logger = logging.getLogger(__name__)
 ApprovalResult = Literal["approved", "rejected", "timeout", "pending"]
 
 
+async def _build_call_summary(
+    tool_name: str, tool_args: dict[str, Any], outbound_connectors: dict[str, Any]
+) -> str:
+    """Best-effort human-readable summary of a gated call for the approval prompt.
+
+    Picks the platform/connector (explicit ``platform`` arg → else the sole connector) and
+    delegates to ``outbound.summarize_gated_call`` (which resolves the recipient label and
+    never raises). Returns "" when no connector is available — the prompt then omits the
+    summary line rather than blocking. No dependency on the platform control plane.
+    """
+    platform = str((tool_args or {}).get("platform", "") or "")
+    if not platform and len(outbound_connectors) == 1:
+        platform = next(iter(outbound_connectors))
+    connector = outbound_connectors.get(platform) if platform else None
+    if connector is None:
+        return ""
+    from fleetent.outbound import summarize_gated_call
+
+    return await summarize_gated_call(tool_name, tool_args, platform, connector)
+
+
 def _resolves_to_requester(approval_routing: Any | None, risk_level: str, tool_name: str) -> bool:
     """True when the routing for this call includes the ``requester`` sentinel."""
     if approval_routing is None:
@@ -100,6 +121,7 @@ class PermissionGate:
         approver_user_ids = await self._notify_approvers(
             approval_id=approval_id,
             tool_name=tool_name,
+            tool_args=tool_args,
             risk_level=risk_level,
             approval_routing=approval_routing,
             outbound_connectors=outbound_connectors or {},
@@ -144,14 +166,21 @@ class PermissionGate:
             # (Slack); a TypeError from a text-only channel degrades to plain text.
             from fleetent.outbound import approval_prompt_blocks
 
+            # Human-readable summary so the approver can verify WHAT (esp. the recipient of a
+            # send) is being approved before deciding (best-effort; never blocks the prompt).
+            summary = await _build_call_summary(tool_name, tool_args, outbound_connectors or {})
             prompt = (
                 f"🔐 Tool `{tool_name}` requires your approval (risk: {risk_level}).\n"
-                f"Approval ID: `{approval_id}`\n"
+                + (f"{summary}\n" if summary else "")
+                + f"Approval ID: `{approval_id}`\n"
                 f"Reply with: `approve {approval_id}` or `reject {approval_id}`"
             )
             try:
                 await reply_func(
-                    prompt, blocks=approval_prompt_blocks(approval_id, tool_name, risk_level)
+                    prompt,
+                    blocks=approval_prompt_blocks(
+                        approval_id, tool_name, risk_level, summary=summary
+                    ),
                 )
             except TypeError:
                 await reply_func(prompt)
@@ -182,6 +211,7 @@ class PermissionGate:
         self,
         approval_id: str,
         tool_name: str,
+        tool_args: dict[str, Any],
         risk_level: str,
         approval_routing: Any | None,
         outbound_connectors: dict[str, Any],
@@ -200,12 +230,14 @@ class PermissionGate:
         if not addresses:
             return []
 
+        summary = await _build_call_summary(tool_name, tool_args, outbound_connectors)
         msg = (
             f"🔐 Approval required for tool `{tool_name}` (risk: {risk_level}).\n"
-            f"Approval ID: `{approval_id}`\n"
+            + (f"{summary}\n" if summary else "")
+            + f"Approval ID: `{approval_id}`\n"
             f"Reply with: `approve {approval_id}` or `reject {approval_id}`"
         )
-        blocks = approval_prompt_blocks(approval_id, tool_name, risk_level)
+        blocks = approval_prompt_blocks(approval_id, tool_name, risk_level, summary=summary)
 
         reached: list[str] = []
         for platform, target in addresses:
