@@ -219,11 +219,14 @@ def build_tool_args_summary(tool_args: dict[str, Any] | str) -> str:
             str(key): (_REDACTED_ARG_PLACEHOLDER if is_sensitive_name(str(key)) else value)
             for key, value in parsed.items()
         }
-        text = json.dumps(redacted, ensure_ascii=False, sort_keys=True)
+        # default=str: a non-serializable value (e.g. an out-of-band injected ToolContext)
+        # degrades to its string form rather than raising — a trace summary must never crash
+        # its caller (fix-approval-resume-serialization).
+        text = json.dumps(redacted, ensure_ascii=False, sort_keys=True, default=str)
     elif isinstance(tool_args, str):
         text = tool_args
     else:
-        text = json.dumps(tool_args, ensure_ascii=False, sort_keys=True)
+        text = json.dumps(tool_args, ensure_ascii=False, sort_keys=True, default=str)
     if len(text) > _ARGS_SUMMARY_MAX_LENGTH:
         keep = _ARGS_SUMMARY_MAX_LENGTH - len(_ARGS_SUMMARY_TRUNCATION_MARKER)
         text = text[:keep] + _ARGS_SUMMARY_TRUNCATION_MARKER
