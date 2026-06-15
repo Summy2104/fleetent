@@ -55,7 +55,9 @@ def test_record_run_swallow_store_write_failure(monkeypatch: pytest.MonkeyPatch)
 
 async def test_scheduler_start_skips_disabled_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     scheduler = cron_scheduler.CronScheduler(settings=SchedulingSettings(enabled=False))
-    monkeypatch.setattr(cron_scheduler._store, "list_tasks", lambda: (_ for _ in ()).throw(AssertionError))
+    monkeypatch.setattr(
+        cron_scheduler._store, "list_tasks", lambda: (_ for _ in ()).throw(AssertionError)
+    )
 
     await scheduler.start()
 
@@ -71,7 +73,11 @@ async def test_scheduler_start_bulkheads_bad_rows_and_sets_current(
     registered: list[str] = []
 
     monkeypatch.setattr(cron_scheduler._store, "list_tasks", lambda: tasks)
-    monkeypatch.setattr(cron_scheduler._store, "set_enabled", lambda task_id, enabled: disabled.append((task_id, enabled)))
+    monkeypatch.setattr(
+        cron_scheduler._store,
+        "set_enabled",
+        lambda task_id, enabled: disabled.append((task_id, enabled)),
+    )
     monkeypatch.setattr(
         cron_scheduler.CronScheduler,
         "_register_maintenance_jobs",
@@ -105,8 +111,16 @@ def test_register_maintenance_jobs_adds_cleanup_job(fake_scheduler: _FakeSchedul
 @pytest.mark.parametrize(
     ("task", "trigger", "extra_key"),
     [
-        ({"id": "once-1", "schedule_kind": "once", "run_at": "2026-06-15T08:00:00+00:00"}, "date", "run_date"),
-        ({"id": "int-1", "schedule_kind": "interval", "interval_seconds": 30}, "interval", "seconds"),
+        (
+            {"id": "once-1", "schedule_kind": "once", "run_at": "2026-06-15T08:00:00+00:00"},
+            "date",
+            "run_date",
+        ),
+        (
+            {"id": "int-1", "schedule_kind": "interval", "interval_seconds": 30},
+            "interval",
+            "seconds",
+        ),
         ({"id": "cron-1", "schedule_kind": "cron", "cron_expr": "0 9 * * *"}, "cron", "minute"),
     ],
 )
@@ -117,7 +131,9 @@ def test_register_adds_expected_trigger_jobs(
     trigger: str,
     extra_key: str,
 ) -> None:
-    monkeypatch.setattr(cron_scheduler, "_parse_run_at", lambda value: datetime(2026, 6, 15, tzinfo=UTC))
+    monkeypatch.setattr(
+        cron_scheduler, "_parse_run_at", lambda value: datetime(2026, 6, 15, tzinfo=UTC)
+    )
     monkeypatch.setattr(
         cron_scheduler,
         "_parse_cron",
@@ -140,9 +156,13 @@ def test_create_remove_and_toggle_task_delegate_to_store_and_scheduler(
     monkeypatch.setattr(cron_scheduler._store, "create", lambda **kwargs: task)
     monkeypatch.setattr(cron_scheduler._store, "delete", lambda task_id: task_id == "task-1")
     monkeypatch.setattr(cron_scheduler._store, "set_enabled", lambda task_id, enabled: True)
-    monkeypatch.setattr(cron_scheduler._store, "get", lambda task_id: task if task_id == "task-1" else None)
+    monkeypatch.setattr(
+        cron_scheduler._store, "get", lambda task_id: task if task_id == "task-1" else None
+    )
     registered: list[str] = []
-    monkeypatch.setattr(cron_scheduler.CronScheduler, "_register", lambda self, row: registered.append(row["id"]))
+    monkeypatch.setattr(
+        cron_scheduler.CronScheduler, "_register", lambda self, row: registered.append(row["id"])
+    )
 
     created = scheduler.create_task(name="n", cron_expr="0 9 * * *")
     removed = scheduler.remove_task("task-1")
@@ -165,7 +185,11 @@ def test_complete_once_only_marks_successful_tasks(monkeypatch: pytest.MonkeyPat
         "fail": {"id": "fail", "last_status": "error", "last_run_at": "now"},
     }
     monkeypatch.setattr(cron_scheduler._store, "get", lambda task_id: states.get(task_id))
-    monkeypatch.setattr(cron_scheduler._store, "set_enabled", lambda task_id, enabled: updates.append((task_id, {"enabled": enabled})))
+    monkeypatch.setattr(
+        cron_scheduler._store,
+        "set_enabled",
+        lambda task_id, enabled: updates.append((task_id, {"enabled": enabled})),
+    )
     monkeypatch.setattr(
         cron_scheduler._store,
         "update_run_state",
@@ -188,7 +212,11 @@ async def test_run_now_and_module_run_task_now_cover_scheduler_and_store_paths(
     scheduler = cron_scheduler.CronScheduler(connectors_resolver=lambda: {"slack": object()})
     fire = AsyncMock()
     monkeypatch.setattr(cron_scheduler, "_fire", fire)
-    monkeypatch.setattr(cron_scheduler._store, "get", lambda task_id: {"id": task_id} if task_id == "task-1" else None)
+    monkeypatch.setattr(
+        cron_scheduler._store,
+        "get",
+        lambda task_id: {"id": task_id} if task_id == "task-1" else None,
+    )
     monkeypatch.setattr(cron_scheduler, "_current", scheduler)
 
     assert await scheduler.run_now("missing") is False
@@ -202,31 +230,45 @@ async def test_run_now_and_module_run_task_now_cover_scheduler_and_store_paths(
     fire.assert_awaited_once_with({"id": "task-1"})
 
 
-def test_module_facade_functions_cover_scheduler_and_store_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_module_facade_functions_cover_scheduler_and_store_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     scheduler = SimpleNamespace(
         create_task=lambda **kwargs: {"via": "scheduler", **kwargs},
         remove_task=lambda task_id: task_id == "task-1",
         set_task_enabled=lambda task_id, enabled: enabled,
     )
     monkeypatch.setattr(cron_scheduler, "_current", scheduler)
-    monkeypatch.setattr(cron_scheduler, "_parse_run_at", lambda value: datetime(2026, 6, 15, tzinfo=UTC))
+    monkeypatch.setattr(
+        cron_scheduler, "_parse_run_at", lambda value: datetime(2026, 6, 15, tzinfo=UTC)
+    )
 
-    created = cron_scheduler.create_task(name="n", schedule_kind="run_at", run_at="2026-06-15 08:00:00 UTC")
+    created = cron_scheduler.create_task(
+        name="n", schedule_kind="run_at", run_at="2026-06-15 08:00:00 UTC"
+    )
     assert created["schedule_kind"] == "once"
     assert created["run_at"] == "2026-06-15T00:00:00+00:00" or created["run_at"].endswith("+00:00")
     assert cron_scheduler.remove_task("task-1") is True
     assert cron_scheduler.set_task_enabled("task-1", True) is True
 
     monkeypatch.setattr(cron_scheduler, "_current", None)
-    monkeypatch.setattr(cron_scheduler._store, "create", lambda **kwargs: {"via": "store", **kwargs})
+    monkeypatch.setattr(
+        cron_scheduler._store, "create", lambda **kwargs: {"via": "store", **kwargs}
+    )
     monkeypatch.setattr(cron_scheduler._store, "delete", lambda task_id: False)
     monkeypatch.setattr(cron_scheduler._store, "set_enabled", lambda task_id, enabled: False)
-    monkeypatch.setattr(cron_scheduler._store, "list_tasks", lambda include_disabled=False: [{"id": "x", "include_disabled": include_disabled}])
+    monkeypatch.setattr(
+        cron_scheduler._store,
+        "list_tasks",
+        lambda include_disabled=False: [{"id": "x", "include_disabled": include_disabled}],
+    )
 
     assert cron_scheduler.create_task(name="n")["via"] == "store"
     assert cron_scheduler.remove_task("missing") is False
     assert cron_scheduler.set_task_enabled("missing", False) is False
-    assert cron_scheduler.list_tasks(include_disabled=True) == [{"id": "x", "include_disabled": True}]
+    assert cron_scheduler.list_tasks(include_disabled=True) == [
+        {"id": "x", "include_disabled": True}
+    ]
 
 
 def test_parse_cron_splits_expression() -> None:

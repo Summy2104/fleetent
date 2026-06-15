@@ -169,7 +169,12 @@ async def test_apply_skill_proposal_to_boundary_handles_create_update_deprecate_
     with pytest.raises(ValueError, match="SKILL.md"):
         await reflection.apply_skill_proposal_to_boundary(
             reflection.SkillProposal(
-                **{**created.__dict__, "id": "sp-err", "suggested_draft": None, "files": {"notes.md": "n"}}
+                **{
+                    **created.__dict__,
+                    "id": "sp-err",
+                    "suggested_draft": None,
+                    "files": {"notes.md": "n"},
+                }
             )
         )
 
@@ -199,7 +204,9 @@ async def test_apply_skill_proposal_updates_actor_and_blocks_rejected(monkeypatc
     updates: list[reflection.SkillProposal] = []
     monkeypatch.setattr(reflection, "get_skill_proposal", lambda proposal_id: proposal)
     monkeypatch.setattr(reflection, "apply_skill_proposal_to_boundary", AsyncMock())
-    monkeypatch.setattr(reflection, "_update_skill_proposal", lambda updated: updates.append(updated))
+    monkeypatch.setattr(
+        reflection, "_update_skill_proposal", lambda updated: updates.append(updated)
+    )
 
     result = await reflection.apply_skill_proposal("sp-1", actor_user_id="admin-1")
     assert result.status == "applied"
@@ -218,10 +225,26 @@ async def test_apply_skill_proposal_updates_actor_and_blocks_rejected(monkeypatc
 def test_create_and_persist_memory_and_skill_proposals_fire_side_effects(monkeypatch) -> None:
     now = datetime(2026, 6, 15, tzinfo=UTC)
     created: list[tuple[str, str, str]] = []
-    monkeypatch.setattr(reflection, "_insert_maintenance_proposal", lambda proposal: created.append(("insert_memory", proposal.id, proposal.status)))
-    monkeypatch.setattr(reflection, "_create_proposal_approval_request", lambda **kwargs: created.append(("approval", kwargs["proposal_id"], kwargs["domain"])))
-    monkeypatch.setattr(reflection, "_schedule_pending_proposal_notification", lambda **kwargs: created.append(("notify", kwargs["proposal_id"], kwargs["domain"])))
-    monkeypatch.setattr(reflection, "_record_maintenance_event", lambda event_type, proposal: created.append((event_type, proposal.id, proposal.status)))
+    monkeypatch.setattr(
+        reflection,
+        "_insert_maintenance_proposal",
+        lambda proposal: created.append(("insert_memory", proposal.id, proposal.status)),
+    )
+    monkeypatch.setattr(
+        reflection,
+        "_create_proposal_approval_request",
+        lambda **kwargs: created.append(("approval", kwargs["proposal_id"], kwargs["domain"])),
+    )
+    monkeypatch.setattr(
+        reflection,
+        "_schedule_pending_proposal_notification",
+        lambda **kwargs: created.append(("notify", kwargs["proposal_id"], kwargs["domain"])),
+    )
+    monkeypatch.setattr(
+        reflection,
+        "_record_maintenance_event",
+        lambda event_type, proposal: created.append((event_type, proposal.id, proposal.status)),
+    )
     monkeypatch.setattr("uuid.uuid4", lambda: SimpleNamespace(__str__=lambda self: "uuid-1"))
     monkeypatch.setattr(reflection, "datetime", SimpleNamespace(now=lambda tz=None: now, UTC=UTC))
 
@@ -247,11 +270,31 @@ def test_create_and_persist_memory_and_skill_proposals_fire_side_effects(monkeyp
     monkeypatch.setattr(reflection, "_database", lambda: db)
     monkeypatch.setattr(reflection, "_has_table", lambda database, name: True)
     persisted: list[tuple[str, str]] = []
-    monkeypatch.setattr(reflection, "_insert_maintenance_proposal", lambda proposal: persisted.append(("memory", proposal.id)))
-    monkeypatch.setattr(reflection, "_insert_skill_proposal", lambda proposal: persisted.append(("skill", proposal.id)))
-    monkeypatch.setattr(reflection, "_create_proposal_approval_request", lambda **kwargs: persisted.append(("approval", kwargs["domain"])))
-    monkeypatch.setattr(reflection, "_schedule_pending_proposal_notification", lambda **kwargs: persisted.append(("notify", kwargs["domain"])))
-    monkeypatch.setattr(reflection, "_record_maintenance_event", lambda event_type, proposal: persisted.append(("event", proposal.id)))
+    monkeypatch.setattr(
+        reflection,
+        "_insert_maintenance_proposal",
+        lambda proposal: persisted.append(("memory", proposal.id)),
+    )
+    monkeypatch.setattr(
+        reflection,
+        "_insert_skill_proposal",
+        lambda proposal: persisted.append(("skill", proposal.id)),
+    )
+    monkeypatch.setattr(
+        reflection,
+        "_create_proposal_approval_request",
+        lambda **kwargs: persisted.append(("approval", kwargs["domain"])),
+    )
+    monkeypatch.setattr(
+        reflection,
+        "_schedule_pending_proposal_notification",
+        lambda **kwargs: persisted.append(("notify", kwargs["domain"])),
+    )
+    monkeypatch.setattr(
+        reflection,
+        "_record_maintenance_event",
+        lambda event_type, proposal: persisted.append(("event", proposal.id)),
+    )
 
     reflection._persist_memory_maintenance_proposal(proposal)  # noqa: SLF001
     reflection._persist_skill_proposal(  # noqa: SLF001
@@ -269,16 +312,29 @@ def test_create_and_persist_memory_and_skill_proposals_fire_side_effects(monkeyp
             updated_at=now,
         )
     )
-    assert persisted[:4] == [("memory", proposal.id), ("approval", "memory"), ("notify", "memory"), ("event", proposal.id)]
+    assert persisted[:4] == [
+        ("memory", proposal.id),
+        ("approval", "memory"),
+        ("notify", "memory"),
+        ("event", proposal.id),
+    ]
     assert persisted[-3:] == [("skill", "sp-1"), ("approval", "skill"), ("notify", "skill")]
 
 
 def test_memory_and_skill_row_helpers_round_trip_and_status_helpers(monkeypatch) -> None:
     approval_rows = {
-        "sp-1": {"status": "approved", "approver_user_id": "rev-1", "decided_at": "2026-06-15T01:00:00+00:00", "reason": "ok", "expires_at": "2026-06-16T00:00:00+00:00"},
+        "sp-1": {
+            "status": "approved",
+            "approver_user_id": "rev-1",
+            "decided_at": "2026-06-15T01:00:00+00:00",
+            "reason": "ok",
+            "expires_at": "2026-06-16T00:00:00+00:00",
+        },
         "mp-1": {"status": "expired", "expires_at": "2026-06-16T00:00:00+00:00"},
     }
-    monkeypatch.setattr(reflection, "_approval_request_row", lambda proposal_id: approval_rows.get(str(proposal_id)))
+    monkeypatch.setattr(
+        reflection, "_approval_request_row", lambda proposal_id: approval_rows.get(str(proposal_id))
+    )
 
     skill = reflection._skill_proposal_from_row(_skill_row())  # noqa: SLF001
     memory = reflection._proposal_from_row(_memory_row())  # noqa: SLF001
@@ -290,7 +346,9 @@ def test_memory_and_skill_row_helpers_round_trip_and_status_helpers(monkeypatch)
     assert reflection._proposal_status_for_row({"id": "mp-1", "applied_at": None}) == "expired"  # noqa: SLF001
 
 
-def test_misc_reflection_helpers_cover_status_validation_time_and_skill_bundle(monkeypatch, tmp_path: Path) -> None:
+def test_misc_reflection_helpers_cover_status_validation_time_and_skill_bundle(
+    monkeypatch, tmp_path: Path
+) -> None:
     now = datetime(2026, 6, 15, tzinfo=UTC)
     proposal = reflection.MemoryMaintenanceProposal(
         id="mp-1",
@@ -345,7 +403,9 @@ def test_misc_reflection_helpers_cover_status_validation_time_and_skill_bundle(m
     (skills_root / "SKILL.md").write_text("---\nname: triage\n---\nbody", encoding="utf-8")
     (skills_root / "notes.md").write_text("notes", encoding="utf-8")
     monkeypatch.setattr("fleetent.skills.registry._last_skills_dir", str(tmp_path / "skills"))
-    monkeypatch.setattr("fleetent.skills.registry._resolve_skills_dir", lambda _value: str(tmp_path / "skills"))
+    monkeypatch.setattr(
+        "fleetent.skills.registry._resolve_skills_dir", lambda _value: str(tmp_path / "skills")
+    )
 
     assert reflection._load_existing_skill_bundle("triage") == {  # noqa: SLF001
         "SKILL.md": "---\nname: triage\n---\nbody",

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from contextlib import contextmanager
 from typing import Any
 
 import pytest
 
 from fleetent.platform.im_gateway_management import identity
+
+_SQLITE_INTEGRITY_ERROR = __import__("sqlite3").IntegrityError
 
 
 class _Result:
@@ -49,7 +50,9 @@ def test_check_allowed_by_user_id_follows_blocked_status(monkeypatch) -> None:
     monkeypatch.setattr(identity, "get_by_id", lambda user_id: None)
     assert identity.check_allowed_by_user_id("u1") is True
 
-    monkeypatch.setattr(identity, "get_by_id", lambda user_id: type("U", (), {"status": "blocked"})())
+    monkeypatch.setattr(
+        identity, "get_by_id", lambda user_id: type("U", (), {"status": "blocked"})()
+    )
     assert identity.check_allowed_by_user_id("u1") is False
 
 
@@ -87,7 +90,11 @@ def test_get_or_create_creates_user_and_handles_insert_race(monkeypatch) -> None
 
     monkeypatch.setattr(identity, "_conn", fake_conn)
     monkeypatch.setattr(identity, "create_user", lambda **kwargs: (_Created(), "token"))
-    monkeypatch.setattr(identity, "get_by_id", lambda user_id: {"existing-user": "existing", "created-user": _Created()}[user_id])
+    monkeypatch.setattr(
+        identity,
+        "get_by_id",
+        lambda user_id: {"existing-user": "existing", "created-user": _Created()}[user_id],
+    )
 
     assert identity.get_or_create("slack", "U1", "tenant-1") == "existing"
 
@@ -163,8 +170,12 @@ def test_batch_block_im_builds_batch_id_and_calls_each_identity(monkeypatch) -> 
 
 def test_approve_and_block_user_delegate_to_specific_helpers(monkeypatch) -> None:
     calls: list[tuple[str, int]] = []
-    monkeypatch.setattr(identity, "restore_im_user", lambda im_user_id: calls.append(("restore", im_user_id)))
-    monkeypatch.setattr(identity, "block_im_user", lambda im_user_id: calls.append(("block", im_user_id)))
+    monkeypatch.setattr(
+        identity, "restore_im_user", lambda im_user_id: calls.append(("restore", im_user_id))
+    )
+    monkeypatch.setattr(
+        identity, "block_im_user", lambda im_user_id: calls.append(("block", im_user_id))
+    )
 
     identity.approve_user(7)
     identity.block_user(8)
@@ -235,7 +246,7 @@ def test_update_im_identity_surfaces_duplicate_platform_user_id(monkeypatch) -> 
         if sql.startswith("SELECT platform"):
             return _Result(row=("slack",))
         if sql.startswith("UPDATE im_users SET platform_user_id"):
-            raise sqlite3.IntegrityError("duplicate")
+            raise _SQLITE_INTEGRITY_ERROR("duplicate")
         return _Result()
 
     @contextmanager
@@ -265,9 +276,15 @@ def test_block_restore_and_rebind_im_identity_cover_success_and_errors(monkeypat
         "fleetent.audit_log.write_audit",
         lambda *args, **kwargs: audits.append((args, kwargs)),
     )
-    monkeypatch.setattr(identity, "get_im_user", lambda im_user_id: {"user_id": "user-1"} if im_user_id == 7 else None)
+    monkeypatch.setattr(
+        identity,
+        "get_im_user",
+        lambda im_user_id: {"user_id": "user-1"} if im_user_id == 7 else None,
+    )
     status_calls: list[tuple[str, str]] = []
-    monkeypatch.setattr(identity, "set_status", lambda user_id, status: status_calls.append((user_id, status)))
+    monkeypatch.setattr(
+        identity, "set_status", lambda user_id, status: status_calls.append((user_id, status))
+    )
 
     identity.block_im_user(7, reason="raid", actor="admin-1", batch_id="b1")
     identity.restore_im_user(7, reason="ok", actor="admin-1", batch_id="b2")
@@ -283,7 +300,9 @@ def test_block_restore_and_rebind_im_identity_cover_success_and_errors(monkeypat
         yield _Conn(lambda sql, params: _Result(rowcount=1))
 
     monkeypatch.setattr(identity, "_conn", fake_conn)
-    monkeypatch.setattr(identity, "get_by_id", lambda user_id: object() if user_id == "user-2" else None)
+    monkeypatch.setattr(
+        identity, "get_by_id", lambda user_id: object() if user_id == "user-2" else None
+    )
     identity.rebind_im_identity(7, "user-2", actor="admin-2")
 
     with pytest.raises(ValueError, match="target user not found"):

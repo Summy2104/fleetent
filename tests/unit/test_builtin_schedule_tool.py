@@ -84,22 +84,30 @@ async def test_schedule_list_remove_pause_resume_run_now_and_unknown(monkeypatch
     assert "t2 | weekly | once | paused" in listed
 
     monkeypatch.setattr("fleetent.cron_scheduler.remove_task", lambda task_id: task_id == "t1")
-    assert await builtin_tools.schedule(action="remove", task_id="t1") == "Scheduled task 't1' removed"
+    assert (
+        await builtin_tools.schedule(action="remove", task_id="t1") == "Scheduled task 't1' removed"
+    )
     assert "not found" in await builtin_tools.schedule(action="remove", task_id="missing")
 
     monkeypatch.setattr(
         "fleetent.cron_scheduler.set_task_enabled",
         lambda task_id, enabled: task_id == "t1",
     )
-    assert await builtin_tools.schedule(action="pause", task_id="t1") == "Scheduled task 't1' paused"
-    assert await builtin_tools.schedule(action="resume", task_id="t1") == "Scheduled task 't1' resumed"
+    assert (
+        await builtin_tools.schedule(action="pause", task_id="t1") == "Scheduled task 't1' paused"
+    )
+    assert (
+        await builtin_tools.schedule(action="resume", task_id="t1") == "Scheduled task 't1' resumed"
+    )
     assert "not found" in await builtin_tools.schedule(action="pause", task_id="missing")
 
     monkeypatch.setattr(
         "fleetent.cron_scheduler.run_task_now",
         AsyncMock(side_effect=lambda task_id: task_id == "t1"),
     )
-    assert await builtin_tools.schedule(action="run_now", task_id="t1") == "Scheduled task 't1' fired"
+    assert (
+        await builtin_tools.schedule(action="run_now", task_id="t1") == "Scheduled task 't1' fired"
+    )
     assert "not found" in await builtin_tools.schedule(action="run_now", task_id="missing")
 
     assert "unknown action" in await builtin_tools.schedule(action="bogus")

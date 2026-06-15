@@ -39,7 +39,12 @@ def _memory_proposal(
 
 @pytest.mark.parametrize(
     ("raw", "normalized"),
-    [(" approve ", "approve"), ("APPROVED", "approve"), ("rejected", "reject"), ("applied", "apply")],
+    [
+        (" approve ", "approve"),
+        ("APPROVED", "approve"),
+        ("rejected", "reject"),
+        ("applied", "apply"),
+    ],
 )
 def test_decision_normalizes_aliases(raw: str, normalized: str) -> None:
     assert reflection_gate._decision(raw) == normalized  # noqa: SLF001
@@ -53,7 +58,9 @@ def test_decision_rejects_unknown_value() -> None:
 async def test_resolve_reflection_proposal_action_uses_public_reflection_api(monkeypatch) -> None:
     proposal = _memory_proposal()
     approved = _memory_proposal(status="approved")
-    monkeypatch.setattr(reflection_gate, "_load_proposal_type", lambda proposal_id: ("memory", proposal))
+    monkeypatch.setattr(
+        reflection_gate, "_load_proposal_type", lambda proposal_id: ("memory", proposal)
+    )
     monkeypatch.setattr(reflection_gate.reflection_api, "_state_db", object())
     monkeypatch.setattr(
         reflection_gate.reflection_api,
@@ -93,7 +100,9 @@ async def test_resolve_reflection_proposal_action_covers_skill_public_api_and_ac
         created_at=datetime(2026, 6, 15, tzinfo=UTC),
         updated_at=datetime(2026, 6, 15, tzinfo=UTC),
     )
-    monkeypatch.setattr(reflection_gate, "_load_proposal_type", lambda proposal_id: ("skill", proposal))
+    monkeypatch.setattr(
+        reflection_gate, "_load_proposal_type", lambda proposal_id: ("skill", proposal)
+    )
     monkeypatch.setattr(reflection_gate.reflection_api, "_state_db", object())
     monkeypatch.setattr(
         reflection_gate.reflection_api,
@@ -126,7 +135,9 @@ async def test_apply_memory_maintenance_proposal_requires_owner_approval_without
         await reflection_gate.apply_memory_maintenance_proposal(proposal.id)
 
 
-async def test_apply_memory_maintenance_proposal_auto_applies_low_risk_mark_stale(monkeypatch) -> None:
+async def test_apply_memory_maintenance_proposal_auto_applies_low_risk_mark_stale(
+    monkeypatch,
+) -> None:
     proposal = _memory_proposal(action="mark_stale", risk="low")
     applied = AsyncMock()
     updates: list[MemoryMaintenanceProposal] = []
@@ -156,7 +167,9 @@ async def test_apply_memory_maintenance_proposal_auto_applies_low_risk_mark_stal
     assert events == [("memory_maintenance_proposal_applied", "applied")]
 
 
-async def test_apply_memory_maintenance_proposal_expires_and_refuses_expired_proposal(monkeypatch) -> None:
+async def test_apply_memory_maintenance_proposal_expires_and_refuses_expired_proposal(
+    monkeypatch,
+) -> None:
     proposal = _memory_proposal(expires_at=datetime.now(UTC) - timedelta(minutes=1))
     updates: list[MemoryMaintenanceProposal] = []
 
@@ -176,12 +189,24 @@ async def test_apply_memory_maintenance_proposal_expires_and_refuses_expired_pro
     assert updates[0].status == "expired"
 
 
-def test_memory_proposal_state_helpers_cover_reject_expire_and_shared_memory_applied(monkeypatch) -> None:
-    proposal = _memory_proposal(status="pending", action="suggest_shared_memory_or_kb", metadata_patch={"target": "shared_memory"})
+def test_memory_proposal_state_helpers_cover_reject_expire_and_shared_memory_applied(
+    monkeypatch,
+) -> None:
+    proposal = _memory_proposal(
+        status="pending",
+        action="suggest_shared_memory_or_kb",
+        metadata_patch={"target": "shared_memory"},
+    )
     updates: list[MemoryMaintenanceProposal] = []
     monkeypatch.setattr(reflection_gate, "_load_memory_proposal", lambda proposal_id: proposal)
-    monkeypatch.setattr(reflection_gate.store, "_update_maintenance_proposal", lambda updated: updates.append(updated))
-    monkeypatch.setattr(reflection_gate, "_record_maintenance_event", lambda event_type, updated: None)
+    monkeypatch.setattr(
+        reflection_gate.store,
+        "_update_maintenance_proposal",
+        lambda updated: updates.append(updated),
+    )
+    monkeypatch.setattr(
+        reflection_gate, "_record_maintenance_event", lambda event_type, updated: None
+    )
 
     with pytest.raises(TypeError, match="reviewed_at"):
         reflection_gate.reject_memory_maintenance_proposal(
@@ -190,7 +215,11 @@ def test_memory_proposal_state_helpers_cover_reject_expire_and_shared_memory_app
             reason="nope",
         )
 
-    monkeypatch.setattr(reflection_gate, "_load_memory_proposal", lambda proposal_id: _memory_proposal(status="approved"))
+    monkeypatch.setattr(
+        reflection_gate,
+        "_load_memory_proposal",
+        lambda proposal_id: _memory_proposal(status="approved"),
+    )
     expired = reflection_gate.expire_memory_maintenance_proposal("mp-1")
     assert expired.status == "expired"
 
@@ -224,11 +253,15 @@ def test_skill_proposal_state_helpers_cover_validation(monkeypatch) -> None:
     )
     updates: list[reflection_gate.SkillProposal] = []
     monkeypatch.setattr(reflection_gate, "_load_skill_proposal", lambda proposal_id: proposal)
-    monkeypatch.setattr(reflection_gate.store, "_update_skill_proposal", lambda updated: updates.append(updated))
+    monkeypatch.setattr(
+        reflection_gate.store, "_update_skill_proposal", lambda updated: updates.append(updated)
+    )
 
     approved = reflection_gate.approve_skill_proposal("sp-1", reviewer_user_id="reviewer-1")
     assert approved.status == "approved"
-    rejected = reflection_gate.reject_skill_proposal("sp-1", reviewer_user_id="reviewer-1", reason="nope")
+    rejected = reflection_gate.reject_skill_proposal(
+        "sp-1", reviewer_user_id="reviewer-1", reason="nope"
+    )
     assert rejected.rejection_reason == "nope"
     expired = reflection_gate.expire_skill_proposal("sp-1", reviewer_user_id="reviewer-1")
     assert expired.status == "expired"
