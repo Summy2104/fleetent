@@ -327,18 +327,18 @@ The agent admin API SHALL expose agent-side endpoints to manage an agent's knowl
 - **THEN** the request is rejected with 403
 
 ### Requirement: Agent OAuth connector binding endpoints
-The agent admin API SHALL expose agent-side endpoints to manage which OAuth connectors an agent may use, parallel to the MCP binding endpoints. Reads SHALL allow viewer or admin; writes SHALL require admin. Binding a connector that does not exist in the connector catalog SHALL be rejected.
+The agent admin API SHALL expose agent-side endpoints to manage which external services an agent may use, parallel to the MCP binding endpoints. Reads SHALL allow viewer or admin; writes SHALL require admin. Binding a service that does not exist in the external services registry SHALL be rejected. HTTP 端点路径与路径参数 token 保持不变（向后兼容）。
 
 #### Scenario: List an agent's OAuth connector bindings
 - **WHEN** a viewer or admin calls `GET /admin/agents/{name}/bindings/oauth`
-- **THEN** the response lists the connector_ids bound to that agent
+- **THEN** the response lists the service ids bound to that agent
 
 #### Scenario: Bind an OAuth connector to an agent
-- **WHEN** an admin calls `POST /admin/agents/{name}/bindings/oauth/{connector_id}` for an existing connector
-- **THEN** the binding is created (idempotently) and the connector_id appears in the agent's bound list
+- **WHEN** an admin calls `POST /admin/agents/{name}/bindings/oauth/{connector_id}` for an existing service
+- **THEN** the binding is created (idempotently) and the service id appears in the agent's bound list
 
 #### Scenario: Bind rejects unknown connector
-- **WHEN** an admin binds a connector_id that is not in the connector catalog
+- **WHEN** an admin binds a connector_id that is not in the external services registry
 - **THEN** the request is rejected with 404
 
 #### Scenario: Unbind an OAuth connector from an agent

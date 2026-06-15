@@ -101,7 +101,7 @@ Routing resolution SHALL reject new sessions for agents whose `status` is `disab
 
 ### Requirement: Agent hard deletion
 
-The store SHALL expose `agent_store.delete_agent(name)` that removes the agent and all its dependent rows in a single transaction. Every agent-referencing table carries FK→agents.id ON DELETE CASCADE (identity-model 阶段 2–4，含 binding 表 `agent_mcp_servers` / `agent_oauth_bindings`)，so the store resolves the agent id by name and issues a single `DELETE FROM agents`; the cascade removes all versions / bindings / satellites with no orphans and no manual child deletes. It SHALL return a boolean: `True` when a row was deleted, `False` when no agent with that name exists. SQL SHALL use named parameters and go through the store boundary; no ORM.
+The store SHALL expose `agent_store.delete_agent(name)` that removes the agent and all its dependent rows in a single transaction. Every agent-referencing table carries FK→agents.id ON DELETE CASCADE (identity-model 阶段 2–4，含 binding 表 `agent_mcp_servers` / `agent_service_grants`)，so the store resolves the agent id by name and issues a single `DELETE FROM agents`; the cascade removes all versions / bindings / satellites with no orphans and no manual child deletes. It SHALL return a boolean: `True` when a row was deleted, `False` when no agent with that name exists. SQL SHALL use named parameters and go through the store boundary; no ORM.
 
 #### Scenario: Delete removes agents and agent_versions rows
 
@@ -110,8 +110,8 @@ The store SHALL expose `agent_store.delete_agent(name)` that removes the agent a
 
 #### Scenario: Delete cleans binding child rows
 
-- **WHEN** `agent_store.delete_agent("assistant")` is called for an agent holding MCP server bindings and OAuth bindings
-- **THEN** the `agent_mcp_servers` and `agent_oauth_bindings` rows for that agent are removed in the same transaction（FK 强制下不报约束错误，且不留孤儿绑定行）
+- **WHEN** `agent_store.delete_agent("assistant")` is called for an agent holding MCP server bindings and external-service grants
+- **THEN** the `agent_mcp_servers` and `agent_service_grants` rows for that agent are removed in the same transaction（FK 强制下不报约束错误，且不留孤儿绑定行）
 
 #### Scenario: Delete of unknown agent returns False
 
@@ -154,22 +154,22 @@ and CLI) are unchanged; the file is the runtime artifact generated from them.
 - **THEN** runtime resolution returns no snapshot and the request proceeds as a bare run
 
 ### Requirement: Agent 绑定表声明 agents.id 外键与级联
-平台侧引用 agent 的从属/绑定表 SHALL 以 `agent_id`（INTEGER，= `agents.id`）声明 FK→`agents.id` ON DELETE CASCADE，使 agent 删除时其全部绑定/从属行由约束级联清理（不依赖应用层手工清理）。覆盖：`user_agents`、`agent_versions`、`mcp_servers`（正名后的 MCP 注册表）、`agent_secrets`、`agent_mcp_servers`（MCP 绑定表）、`agent_oauth_bindings`（OAuth 绑定表）、`agent_im_groups`（IM 群白名单，IM 访问模型阶段 2 新增），以及阶段 2/3 已处理的 `agent_kbs`、`agent_skills`、`agent_admin_state`、`session_meta`——**全部 agent 引用表无一例外均 CASCADE**。例外：`connectors.agent_id` 为休眠列（运行路径未写入），不在本约束内，待真实接入再规整。
+平台侧引用 agent 的从属/绑定表 SHALL 以 `agent_id`（INTEGER，= `agents.id`）声明 FK→`agents.id` ON DELETE CASCADE，使 agent 删除时其全部绑定/从属行由约束级联清理（不依赖应用层手工清理）。覆盖：`user_agents`、`agent_versions`、`mcp_servers`（正名后的 MCP 注册表）、`agent_secrets`、`agent_mcp_servers`（MCP 绑定表）、`agent_service_grants`（外部服务授权表，正名自 `agent_oauth_bindings`）、`agent_im_groups`（IM 群白名单，IM 访问模型阶段 2 新增），以及阶段 2/3 已处理的 `agent_kbs`、`agent_skills`、`agent_admin_state`、`session_meta`——**全部 agent 引用表无一例外均 CASCADE**。注：原 `connectors.agent_id` 休眠列已随 `connectors`→`external_services` 重塑移除（服务注册表为单层全局，无 owning-agent 维度），不再存在该例外。
 
 #### Scenario: 各 agent 绑定表均带 agents.id FK
 - **WHEN** 管理库迁移运行到最新版本
-- **THEN** `user_agents` / `agent_versions` / `mcp_servers` / `agent_secrets` / `agent_im_groups` 各声明 FK→`agents.id` ON DELETE CASCADE
+- **THEN** `user_agents` / `agent_versions` / `mcp_servers` / `agent_secrets` / `agent_mcp_servers` / `agent_service_grants` / `agent_im_groups` 各声明 FK→`agents.id` ON DELETE CASCADE
 
 #### Scenario: 删除 agent 级联清理全部绑定
-- **WHEN** 一个持有用户分配 / 版本 / MCP server 定义 / MCP 绑定 / secret / IM 群白名单的 agent 被删除
+- **WHEN** 一个持有用户分配 / 版本 / MCP 绑定 / 外部服务授权 / secret / IM 群白名单的 agent 被删除
 - **THEN** 这些表中该 agent 的行随 FK ON DELETE CASCADE 一并删除，不留孤儿
 
-#### Scenario: 休眠列不强加 FK
-- **WHEN** 审视 `connectors.agent_id`
-- **THEN** 它不声明 agents.id FK（休眠列、运行路径未消费），不在本约束范围
+#### Scenario: 服务注册表无 owning-agent 维度
+- **WHEN** 审视 `external_services`
+- **THEN** 它为单层全局注册表、无 `agent_id` 列、不参与 per-agent FK 约束（per-principal 差异由 `external_credentials` 承载）
 
 ### Requirement: MCP server 注册表与绑定表命名对齐既有惯例
-MCP 的两张管理表 SHALL 按"注册表 vs 绑定表"正名，与 skills/kbs 绑定家族及 `connectors` 注册表的既有命名惯例一致：MCP server 连接定义（含全局 `agent_id=NULL` 行）的注册表命名为 `mcp_servers`（无 `agent_` 前缀，对齐 `connectors`）；agent↔MCP server 的绑定表命名为 `agent_mcp_servers`（对齐 `agent_skills`/`agent_kbs`）。改名 SHALL 不改变运行时行为：materialize 的 MCP 解析（绑定取 id、注册表取定义）在新表名下结果不变。
+MCP 的两张管理表 SHALL 按"注册表 vs 绑定表"正名，与 skills/kbs 绑定家族及 `external_services` 注册表的既有命名惯例一致：MCP server 连接定义（含全局 `agent_id=NULL` 行）的注册表命名为 `mcp_servers`（无 `agent_` 前缀，对齐 `external_services`）；agent↔MCP server 的绑定表命名为 `agent_mcp_servers`（对齐 `agent_skills`/`agent_kbs`）。改名 SHALL 不改变运行时行为：materialize 的 MCP 解析（绑定取 id、注册表取定义）在新表名下结果不变。
 
 #### Scenario: 注册表与绑定表名各就各位
 - **WHEN** 管理库迁移运行到最新版本

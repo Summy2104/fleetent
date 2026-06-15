@@ -21,6 +21,8 @@ P0 把 `connectors`→`external_services`、`agent_oauth_bindings`→`agent_serv
 - `agent-definition`: 删除级联与 FK 覆盖清单中的 `agent_oauth_bindings` 改名、`connectors.agent_id` 休眠列需求更新。
 - `agent-admin-api`: OAuth 绑定端点实体术语对账（路径不变）。
 - `oauth-mcp-admin-ui`: OAuth Connectors tab 实体术语对账（路径不变）。
+- `external-credential-vault`: 修正 `protocol` 枚举值（`oauth2_authcode`/`api_key` → `oauth2`/`apikey`）；删除 `kind` 列引用（P6 re-baseline 确认该列不存在，工厂键改用 `service_id`）。
+- `connector-credential-injection`: 补 seam 第三态 `CredentialError`（P2 新增，代码先于 spec）；补 dispatch 对 `CredentialError` 的短路行为。
 
 ## Impact
 

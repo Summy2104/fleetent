@@ -19,7 +19,7 @@ The store SHALL expose `agent_store.delete_agent(name)` that removes the agent a
 #### Scenario: Delete of unknown agent returns False
 
 - **WHEN** `agent_store.delete_agent("nope")` is called and no such agent exists
-- **THEN** no rows are deleted and the call returns `False`
+- **THEN** no rows are modified AND the call returns `False`
 
 ### Requirement: Agent 绑定表声明 agents.id 外键与级联
 平台侧引用 agent 的从属/绑定表 SHALL 以 `agent_id`（INTEGER，= `agents.id`）声明 FK→`agents.id` ON DELETE CASCADE，使 agent 删除时其全部绑定/从属行由约束级联清理（不依赖应用层手工清理）。覆盖：`user_agents`、`agent_versions`、`mcp_servers`（正名后的 MCP 注册表）、`agent_secrets`、`agent_mcp_servers`（MCP 绑定表）、`agent_service_grants`（外部服务授权表，正名自 `agent_oauth_bindings`）、`agent_im_groups`（IM 群白名单，IM 访问模型阶段 2 新增），以及阶段 2/3 已处理的 `agent_kbs`、`agent_skills`、`agent_admin_state`、`session_meta`——**全部 agent 引用表无一例外均 CASCADE**。注：原 `connectors.agent_id` 休眠列已随 `connectors`→`external_services` 重塑移除（服务注册表为单层全局，无 owning-agent 维度），不再存在该例外。
