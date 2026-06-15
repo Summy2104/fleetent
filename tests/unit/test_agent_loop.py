@@ -210,6 +210,21 @@ async def test_run_returns_text_reply(mock_client):
     assert result == "hello"
 
 
+async def test_run_seeded_delivery_ledger_renders_in_trailer(mock_client):
+    """A caller-seeded delivery_ledger (approval resume) is rendered into the final trailer."""
+    from fleetent.outbound import DeliveryReceipt
+
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("好的"))
+    seed = [
+        DeliveryReceipt(
+            ok=True, platform="slack", target="U_OTHER", target_type="user", kind="text"
+        )
+    ]
+    result = await al.run([{"role": "user", "content": "hi"}], delivery_ledger=seed)
+    assert "📬 实际投递" in result
+    assert "消息" in result
+
+
 async def test_run_returns_empty_string_when_content_is_none(mock_client):
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp(None))
     result = await al.run([{"role": "user", "content": "hi"}])

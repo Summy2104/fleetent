@@ -382,17 +382,26 @@ async def _resume_pending_in_session(
         conversation_address = None
     progress_func = msg.progress_func or _noop_progress
 
+    # approval-suspend-resume + delivery-receipts: share ONE ledger between the resumed tool
+    # execution and the continuation run, so the approved send's receipt is rendered into the
+    # continuation's final reply as the deterministic "📬 实际投递" trailer (not left to the model).
+    import uuid
+
+    shared_ledger: list[object] = []
     tool_context = ToolContext(
         agent_name=agent.name if agent else None,
         features=agent_features or {},
         session_id=session_id,
         session_context=session_context,
         outbound_connectors=msg.outbound_connectors,
+        run_id=str(uuid.uuid4()),
+        delivery_ledger=shared_ledger,
     )
 
     async def continue_run(history: list[dict[str, object]]) -> str:
         return await agent_loop.run(
             messages=history,
+            delivery_ledger=shared_ledger,
             principal=Principal(user_id=msg.user_id, tenant_id="default"),
             reply_func=reply_func,
             allowed_tools=allowed_tools,
