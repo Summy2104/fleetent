@@ -105,6 +105,66 @@ def delete_all_credentials_for_user(user_id: str) -> None:
         )
 
 
+def list_all_credentials() -> list[dict[str, Any]]:
+    """Return all credentials metadata (no payload) for the admin authorization matrix."""
+    rows = (
+        _database()
+        .execute("SELECT user_id, service_id, status, updated_at FROM external_credentials")
+        .fetchall()
+    )
+    return [
+        {
+            "user_id": str(row["user_id"]),
+            "service_id": str(row["service_id"]),
+            "status": str(row["status"]),
+            "updated_at": str(row["updated_at"]),
+        }
+        for row in rows
+    ]
+
+
+def list_credentials_for_user(user_id: str) -> list[dict[str, Any]]:
+    """Return all credentials metadata for a user (no payload), used for offboarding."""
+    rows = (
+        _database()
+        .execute(
+            """
+            SELECT service_id, status, updated_at
+            FROM external_credentials
+            WHERE user_id = :user_id
+            """,
+            {"user_id": user_id},
+        )
+        .fetchall()
+    )
+    return [
+        {
+            "service_id": str(row["service_id"]),
+            "status": str(row["status"]),
+            "updated_at": str(row["updated_at"]),
+        }
+        for row in rows
+    ]
+
+
+def count_credentials_by_status(service_id: str) -> dict[str, int]:
+    """Return credential counts grouped by status for a service, used for lifecycle stats."""
+    rows = (
+        _database()
+        .execute(
+            """
+            SELECT status, COUNT(*) AS cnt
+            FROM external_credentials
+            WHERE service_id = :service_id
+            GROUP BY status
+            """,
+            {"service_id": service_id},
+        )
+        .fetchall()
+    )
+    return {str(row["status"]): int(row["cnt"]) for row in rows}
+
+
 def get_credential(user_id: str, service_id: str) -> dict[str, Any] | None:
     row = (
         _database()

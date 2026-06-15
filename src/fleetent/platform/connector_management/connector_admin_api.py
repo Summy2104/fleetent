@@ -26,6 +26,7 @@ from fleetent.platform.connector_management import (
     external_credential_store,
     external_service_store,
     mcp_server_store,
+    vault_provider,
 )
 
 router = APIRouter(prefix="/admin")
@@ -35,33 +36,79 @@ _ADMIN_ROLES = {"admin", "built_in_admin"}
 _SENSITIVE = ("secret", "token", "refresh", "api_key", "password")
 _pending_consent_states: dict[str, tuple[str, str]] = {}
 
+# Maps external_credentials.status → matrix status name visible to callers.
+# "error" → "credential_error" matches the four-state enum the matrix exposes.
+_STATUS_MAP: dict[str, str] = {
+    "authorized": "authorized",
+    "needs_reauth": "needs_reauth",
+    "error": "credential_error",
+}
 
-# --- injectable seams (connectors / mcp follow-ups) ---------------------------
+
+# --- connector admin seams (wired to Vault) -----------------------------------
 
 
 def connectors_list_grants(agent_id: int | None = None) -> list[dict[str, Any]]:
-    """(user, connector) authorization matrix. Owned by connectors (placeholder).
+    """(user, connector) authorization matrix derived from current Vault rows.
 
-    Each item: ``{user_id, connector_id, status, scopes}`` where status is one of
-    not_authorized / authorized / needs_reauth / credential_error. When ``agent_id``
-    is given the matrix is scoped to that owning agent's connectors.
+    Matrix is single-level global — the ``agent_id`` param is accepted for API
+    compatibility but ignored (spec: no owning-agent dimension). Status values:
+    authorized / needs_reauth / credential_error. Users with no row are absent
+    (the caller infers not_authorized from absence).
     """
-    return []
+    del agent_id  # global-only per spec; kept for endpoint compat
+    rows = external_credential_store.list_all_credentials()
+    return [
+        {
+            "user_id": row["user_id"],
+            "connector_id": row["service_id"],
+            "status": _STATUS_MAP.get(row["status"], row["status"]),
+            "updated_at": row["updated_at"],
+        }
+        for row in rows
+    ]
 
 
 def connectors_revoke(user_id: str, connector_id: str) -> dict[str, Any]:
-    """Revoke a user's connector credential. Owned by connectors (placeholder)."""
-    return {"user_id": user_id, "connector_id": connector_id, "revoked": False, "wired": False}
+    """Revoke a user's connector credential via the Vault (delete local + OAuth revoke)."""
+    result = vault_provider.revoke_credential(user_id, connector_id)
+    return {"user_id": user_id, "connector_id": connector_id, **result}
 
 
 def connectors_offboarding_result(user_id: str) -> dict[str, Any]:
-    """Result of connectors auto-revoking a disabled user's credentials. Placeholder."""
-    return {"user_id": user_id, "revoked": [], "failed": []}
+    """Revoke all connector credentials for a user and report per-service success/failure.
+
+    Idempotent: if credentials are already gone the service still appears in ``revoked``.
+    """
+    creds = external_credential_store.list_credentials_for_user(user_id)
+    revoked: list[str] = []
+    failed: list[str] = []
+    for cred in creds:
+        service_id = cred["service_id"]
+        try:
+            result = vault_provider.revoke_credential(user_id, service_id)
+            if result.get("revoked"):
+                revoked.append(service_id)
+            else:
+                failed.append(service_id)
+        except Exception:
+            failed.append(service_id)
+    return {"user_id": user_id, "revoked": revoked, "failed": failed}
 
 
 def connector_lifecycle_stats(connector_id: str) -> dict[str, Any]:
-    """Refresh success/failure + re-auth counts for a connector. Placeholder."""
-    return {"connector_id": connector_id, "refresh_ok": 0, "refresh_failed": 0, "reauths": 0}
+    """Refresh success/failure + re-auth counts derived from current credential statuses.
+
+    No history table exists; stats are inferred from the live status column:
+    authorized → refresh_ok, error → refresh_failed, needs_reauth → reauths.
+    """
+    counts = external_credential_store.count_credentials_by_status(connector_id)
+    return {
+        "connector_id": connector_id,
+        "refresh_ok": counts.get("authorized", 0),
+        "refresh_failed": counts.get("error", 0),
+        "reauths": counts.get("needs_reauth", 0),
+    }
 
 
 def mcp_list_servers() -> list[dict[str, Any]]:
