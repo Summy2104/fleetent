@@ -315,7 +315,7 @@ def dispatch(
             raise PermissionError(f"MCP server '{server_id}' not in agent scope")
 
     kwargs: dict[str, Any] = (
-        arguments_json if isinstance(arguments_json, dict) else json.loads(arguments_json)
+        dict(arguments_json) if isinstance(arguments_json, dict) else json.loads(arguments_json)
     )
     # Agent-scoped MCP: route through the scope-keyed session, not the global closure.
     if is_mcp and mcp_scope is not None:

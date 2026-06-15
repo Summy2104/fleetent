@@ -75,6 +75,32 @@ async def test_approve_executes_tool_injects_result_and_continues(_seeded, monke
     assert reply == "好的，已帮你发出。"
 
 
+async def test_execute_tool_dict_args_does_not_crash_on_summary():
+    """Regression (fix-approval-resume-serialization): resume executes a tool with a DICT
+    args entry; dispatch injects tool_context. The post-execution tool_call summary MUST NOT
+    crash on the injected ToolContext, and the args entry stays clean."""
+    import fleetent.runtime.approval_resume as ar
+    from fleetent.tools import registry as tool_registry
+    from fleetent.tools.registry import ToolContext
+
+    @tool_registry.tool
+    def resume_probe(target: str, tool_context=None) -> str:
+        """opt-in tool exercised on the resume path."""
+        return f"sent to {target}"
+
+    args = {"target": "U2"}
+    ctx = ToolContext(agent_name="a", session_id="s1")
+    # _execute_tool dispatches then records the tool_call (build_tool_args_summary in finally).
+    result = await ar._execute_tool("resume_probe", args, ctx, "tc1")
+
+    assert result == "sent to U2"
+    assert "tool_context" not in args  # caller's entry args not polluted
+    # And the args summary built over those args is ToolContext-free + serializable.
+    from fleetent.observability import build_tool_args_summary
+
+    assert "ToolContext" not in build_tool_args_summary(args)
+
+
 async def test_resumed_send_receipt_flows_to_continuation_trailer(_seeded, monkeypatch):
     """A shared delivery ledger lets the approved send's receipt reach the continuation's
     trailer — the deterministic '📬 实际投递' confirmation, not left to the model."""
