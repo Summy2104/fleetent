@@ -64,8 +64,13 @@ async def test_start_infra_skips_sandbox_lifecycle_when_docker_unavailable(
     sweep.assert_not_called()
 
 
-async def test_start_infra_inits_sandbox_manager_with_agent(tmp_path: Path) -> None:
-    """The process sandbox manager is (re)built with the agent-selected backend."""
+async def test_start_infra_inits_sandbox_manager_with_per_agent_skills_root(
+    tmp_path: Path,
+) -> None:
+    """The sandbox manager is (re)built with the agent-selected backend AND the
+    per-agent skills root (== the scan root) as the mount source default, so the
+    container's /workspace/skills matches what the skill index was scanned from
+    (sandbox-skill-mount-per-agent-root)."""
     with (
         _NOOP_INIT_SCHEMA,
         patch(
@@ -80,7 +85,7 @@ async def test_start_infra_inits_sandbox_manager_with_agent(tmp_path: Path) -> N
         agent = _agent_without_mcp()
         await agent_app._start_infra(agent, tmp_path / "data")
 
-    init_mgr.assert_called_once_with(agent)
+    init_mgr.assert_called_once_with(agent, agent_skills_root=tmp_path / "skills")
 
 
 async def test_start_infra_cleanup_failure_does_not_block_startup(tmp_path: Path) -> None:

@@ -66,12 +66,23 @@ def _get_manager() -> SandboxManager:
     return _MANAGER
 
 
-def init_sandbox_manager(agent: object | None = None) -> SandboxManager:
+def init_sandbox_manager(
+    agent: object | None = None,
+    *,
+    agent_skills_root: str | Path | None = None,
+) -> SandboxManager:
     """(Re)build the process sandbox manager with the agent-selected backend.
 
     Called by the agent runtime at startup so a standalone agent's `agent.yaml`
     `sandbox.backend` override takes effect (factory precedence: agent > platform >
     docker). `agent` is an `AgentFile`; typed loosely to avoid a runtime import cycle.
+
+    `agent_skills_root` (sandbox-skill-mount-per-agent-root) is the per-agent skills
+    root that boot also scans the skill index from (`home_dir/skills`). When the agent
+    leaves `sandbox.skill_mount.source` unset, this becomes the mount source default so
+    the container's `/workspace/skills` == the scan root, rather than the global
+    `<base>/skills` the manager would otherwise fall back to. An explicit
+    `skill_mount.source` still wins; None (no boot wiring) preserves the global fallback.
     """
     global _MANAGER
     from fleetent.agent_config import AgentFile
@@ -91,9 +102,14 @@ def init_sandbox_manager(agent: object | None = None) -> SandboxManager:
     multi_user = True
     if resolved is not None:
         # Per-agent override of the skills bind-mount (sandbox-skill-mount); None lets
-        # the manager fall back to the platform `sandbox.skill_mount` defaults.
+        # the manager fall back to the platform `sandbox.skill_mount` defaults — except
+        # boot supplies the per-agent skills root so an unset source defaults to the same
+        # root the skill index was scanned from (sandbox-skill-mount-per-agent-root).
         sm = resolved.sandbox.skill_mount
-        skill_mount = SkillMountConfig(enabled=sm.enabled, read_only=sm.read_only, source=sm.source)
+        source = sm.source
+        if source is None and agent_skills_root is not None:
+            source = str(agent_skills_root)
+        skill_mount = SkillMountConfig(enabled=sm.enabled, read_only=sm.read_only, source=source)
         # Per-agent dependency-image persistence (sandbox-image-persistence): an
         # independent switch from workspace_scope. Default off keeps prior behaviour.
         image_persistence = resolved.sandbox.image_persistence
