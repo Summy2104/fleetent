@@ -8,7 +8,7 @@ import re
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from fleetent import eval_logger
 from fleetent.integrations.sandbox import (
@@ -565,21 +565,45 @@ def _origin_from_context(tool_context: ToolContext | None) -> dict[str, str | No
 
 @tool(risk_level="low")
 async def schedule(
-    action: str,
-    name: str = "",
-    schedule_kind: str = "cron",
-    cron_expr: str = "",
-    run_at: str = "",
-    interval_seconds: int = 0,
-    message: str = "",
-    timezone: str = "UTC",
-    user_id: str = "default",
-    task_id: str = "",
-    notify_platform: str = "",
-    notify_target: str = "",
-    notify_target_type: str = "user",
-    task_type: str = "generate",
-    notify_text: str = "",
+    action: Annotated[
+        Literal["create", "list", "remove", "run_now", "pause", "resume"],
+        "要执行的操作",
+    ],
+    name: Annotated[str, "任务名称（create 时建议提供，便于 list 辨识）"] = "",
+    schedule_kind: Annotated[
+        Literal["cron", "once", "interval"],
+        "调度类型：cron=周期（配 cron_expr）；once=一次性（配 run_at）；"
+        "interval=每 N 秒（配 interval_seconds）",
+    ] = "cron",
+    cron_expr: Annotated[
+        str,
+        "5 段 cron『分 时 日 月 周』，各字段按 timezone 的本地钟面时间填写，"
+        "切勿换算成 UTC。例：每天本地 20:34 → '34 20 * * *'",
+    ] = "",
+    run_at: Annotated[
+        str,
+        "once 的触发时刻：ISO 时间或相对时长如 '+30m'，按 timezone 的本地时间解释",
+    ] = "",
+    interval_seconds: Annotated[int, "interval 的间隔秒数"] = 0,
+    message: Annotated[str, "generate/action 任务的指令（到点交给 agent 执行的 prompt）"] = "",
+    timezone: Annotated[
+        str,
+        "IANA 时区名，如 'Asia/Shanghai'。cron_expr/run_at 按此时区的本地时间解释——"
+        "直接填当地钟面时间，不要预先换算成 UTC；留空则用部署默认时区，"
+        "仅当用户明确点名其它时区时才填",
+    ] = "",
+    user_id: Annotated[str, "归属用户（一般留空，由调用者身份决定）"] = "default",
+    task_id: Annotated[str, "remove/run_now/pause/resume 的目标任务 ID"] = "",
+    notify_platform: Annotated[str, "投递平台如 'slack'（留空则用任务创建时所在会话）"] = "",
+    notify_target: Annotated[str, "投递目标 ID（频道或用户），配合 notify_platform"] = "",
+    notify_target_type: Annotated[Literal["user", "channel"], "投递目标类型"] = "user",
+    task_type: Annotated[
+        Literal["notify", "generate", "action"],
+        "notify=到点发固定文案（配 notify_text，不跑 agent）；"
+        "generate=到点跑 agent 生成内容并自动广播回复（默认，适合拉取/汇总/发送类）；"
+        "action=到点跑 agent 用自身工具行动，调度器不广播回复",
+    ] = "generate",
+    notify_text: Annotated[str, "notify 类型的固定文案（task_type=notify 时必填）"] = "",
     tool_context: ToolContext | None = None,
 ) -> str:
     """Manage scheduled tasks. ``action`` is one of create/list/remove/run_now/pause/resume.
@@ -651,9 +675,10 @@ async def schedule(
                 f"kind={schedule_kind!r} — takes effect when the agent service is running "
                 "(no scheduler in this process)"
             )
+        hint = str(task.get("next_fire_hint") or "")
         return (
             f"Scheduled task created and registered: id={task['id']!r} "
-            f"name={name!r} kind={schedule_kind!r}"
+            f"name={name!r} kind={schedule_kind!r}.{hint}"
         )
 
     if action == "list":
