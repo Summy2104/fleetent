@@ -26,6 +26,15 @@ def test_project_guidance_documents_test_layer_guard_and_unit_boundaries():
 
 def test_unit_ci_coverage_gate_keeps_required_scope_and_threshold():
     makefile = Path("Makefile").read_text(encoding="utf-8")
+    pipelines = Path("bitbucket-pipelines.yml").read_text(encoding="utf-8")
+    guidance = Path("AGENTS.md").read_text(encoding="utf-8")
 
     assert "uv run coverage run --source=src/fleetent -m pytest tests/unit" in makefile
-    assert "uv run coverage report --fail-under=75" in makefile
+    assert "uv run coverage report --fail-under=76" in makefile
+    assert "uv run coverage run --source=src/fleetent -m pytest tests/unit tests/integration" in (
+        makefile
+    )
+    assert "uv run coverage report --fail-under=88" in makefile
+    assert "make test-coverage-ci" in pipelines
+    assert "push 路径仅看 unit" in guidance
+    assert "每日定时路径看合并覆盖" in guidance
