@@ -26,7 +26,7 @@
 
 ## 6. 收尾验证
 
-- [ ] 6.1 跑受影响层：`uv run pytest tests/unit/test_builtin_tools_schedule_schema.py -q` 与 `uv run pytest tests/integration/test_cron_timezone_resolution.py tests/integration/test_schedule_tool_next_fire_echo.py -q`，并跑既有 schedule/cron 相关测试确认无回归。
-- [ ] 6.2 `uv run python scripts/check_test_layers.py` 确认新增 unit/integration 测试归位正确。
-- [ ] 6.3 改动文件 `uv run ruff format` + `uv run ruff check` + `uv run mypy src`（改动范围）通过。
-- [ ] 6.4 `make test-pr` 全绿；`uv run pytest tests/integration -q` 对照 main 基线确认无新增失败。
+- [x] 6.1 跑受影响层：新增 schema/timezone/echo 测试 + 既有 schedule/cron 测试共 100 个全绿，无回归。
+- [x] 6.2 `uv run python scripts/check_test_layers.py` 通过（含在 make test-pr）。
+- [x] 6.3 改动文件 ruff format（5 files unchanged）+ ruff check（All checks passed）+ mypy（2 source files, no issues）通过。
+- [x] 6.4 `make test-pr` 全绿（3169 passed）；`uv run pytest tests/integration -q` 2083 passed / 0 failed，对照 main 基线无新增失败。
