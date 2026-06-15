@@ -12,6 +12,7 @@ from fleetent.platform.connector_management import (
     agent_service_grant_store,
     external_credential_store,
     external_service_store,
+    service_providers,
 )
 
 _logger = logging.getLogger(__name__)
@@ -107,6 +108,9 @@ def _refresh_tokens(
         data["client_id"] = client_id
     if scopes:
         data["scope"] = " ".join(scopes)
+    client_secret = service_providers.client_secret_for(service_id)
+    if client_secret:
+        data["client_secret"] = client_secret
 
     try:
         response = httpx.post(token_url, data=data, timeout=10.0)
