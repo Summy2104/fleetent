@@ -32,65 +32,56 @@ An admin SHALL be able to list all declared external services and create / edit 
 - **THEN** 该服务从目录移除，操作落审计
 
 ### Requirement: Per-user authorization matrix
-The admin face SHALL present a `(user, connector)` authorization matrix whose per-cell
-state aligns with the `connectors` domain query result: not-authorized (`NeedsConsent`,
-never granted), authorized (valid credential, with granted scopes), needs-reauthorization
-(`NeedsConsent`, refresh token expired), and credential-error (`CredentialError`, refresh
-network failure, retryable). Matrix queries SHALL be scoped to the connector's owning
-agent so authorization for an agent-owned connector is never conflated with a global
-default or another agent's connector of the same id. The matrix SHALL be viewable by user
-or by connector. State determination is delegated to the `connectors` domain and SHALL
-NOT be recomputed here.
 
-#### Scenario: Mixed authorization states shown (场景 109)
+The admin face SHALL present a `(user, service)` authorization matrix whose per-cell state comes from `external_credentials.status`: not-authorized（无凭证）、authorized（有效凭证，含 granted scopes）、needs-reauthorization（`needs_reauth`，refresh 失效）、credential-error（`error`，可重试）。矩阵为**单层全局**，SHALL NOT 再按 owning-agent 范围划分（承接 P0 移除的覆盖层）。矩阵可按 user 或按 service 视角聚合。状态判定 SHALL 取自 Vault（`external_credentials`），SHALL NOT 在此重算。
+
+#### Scenario: Mixed authorization states shown
 - **WHEN** an admin filters the matrix to a user who has authorized `google-drive`, never authorized `github`, and whose `notion` refresh token has expired
 - **THEN** `google-drive` shows authorized with its scopes, `github` shows not-authorized, and `notion` shows "needs reauthorization"
 
 #### Scenario: Credential error distinguished from needs-consent
-- **WHEN** the `connectors` query returns `CredentialError` for a `(user, connector)` pair
-- **THEN** the cell shows "credential error (retryable)" distinctly from "not-authorized" and "needs reauthorization"
+- **WHEN** Vault 对某 `(user, service)` 返回 `status=error`
+- **THEN** 该格显示 "credential error (retryable)"，区别于 not-authorized 与 needs-reauthorization
 
 #### Scenario: Switch matrix viewpoint
-- **WHEN** an admin toggles between the by-user and by-connector views
+- **WHEN** an admin toggles between the by-user and by-service views
 - **THEN** the same authorization data is re-aggregated under the selected axis
 
-#### Scenario: Authorization scoped to owning agent
-- **WHEN** agent `billing` and agent `sales` each own a `github` connector and a user
-  has authorized only `billing`'s
-- **THEN** the matrix shows the user authorized for `billing`'s `github` and
-  not-authorized for `sales`'s `github`
-
 ### Requirement: Admin cannot complete first-time consent on behalf of a user
-The admin face SHALL NOT provide any path to complete a user's first-time OAuth consent. OAuth consent requires the user's own browser redirect. No delegate-consent endpoint SHALL exist.
 
-#### Scenario: No delegate-consent entry for unauthorized cell (场景 110)
-- **WHEN** an admin opens an unauthorized `(user, connector)` cell (e.g. Bob has never authorized `github`)
-- **THEN** the UI offers no "authorize on behalf of" action and clearly states that first-time consent must be completed by the user's own browser redirect; no delegate-consent endpoint accepts the request
+The admin face SHALL NOT provide any path to complete a user's first-time OAuth consent or to fill in a user's API key. 首次授权 SHALL 由用户本人完成（OAuth 浏览器跳转 / 用户自助提交 key）。No delegate-consent endpoint SHALL exist.
+
+#### Scenario: No delegate-consent entry for unauthorized cell
+- **WHEN** an admin opens an unauthorized `(user, service)` cell
+- **THEN** the UI offers no "authorize on behalf of" action and states that first-time authorization must be completed by the user; no delegate endpoint accepts the request
 
 ### Requirement: Admin revoke on behalf of a user
-An admin SHALL be able to revoke a `(user, connector)` grant. The revoke semantics (delete credential, call the external revoke endpoint) are delegated to the `connectors` domain; this face only triggers it, requires confirmation, and audits it. After revoke the user returns to `NeedsConsent` on next use of that tool.
 
-#### Scenario: Revoke with confirmation and audit (场景 111)
+An admin SHALL be able to revoke a `(user, service)` grant. The revoke semantics（删除本地凭证、尽力调用外部 revoke endpoint）are delegated to the Vault（见 `oauth-token-lifecycle`）。This face only triggers it, requires confirmation, and audits it. After revoke the user returns to `NeedsConsent` on next use.
+
+#### Scenario: Revoke with confirmation and audit
 - **WHEN** an admin revokes `(Alice, google-drive)` and confirms the high-risk action
-- **THEN** the `connectors` domain deletes the credential and calls the external revoke endpoint, Alice must re-authorize on next use, and the revoke is written to the audit log
+- **THEN** the Vault deletes the credential and calls the external revoke endpoint, Alice must re-authorize on next use, and the revoke is written to the audit log
 
 #### Scenario: Revoke requires admin
-- **WHEN** a viewer attempts to revoke a `(user, connector)` grant
+- **WHEN** a viewer attempts to revoke a `(user, service)` grant
 - **THEN** the request is rejected with 403
 
 ### Requirement: Offboarding linkage visibility
-The admin face SHALL display the result of the `connectors` domain auto-revoking all of a user's connector credentials when user-center disables that user, including which connectors were revoked and whether each succeeded, for offboarding audit.
+
+The admin face SHALL display the result of the Vault auto-revoking all of a user's external credentials when the user is disabled, including which services were revoked and whether each succeeded, for offboarding audit.
 
 #### Scenario: Show offboarding revoke result
-- **WHEN** a user has been disabled in user-center and the admin opens that user's connector view
-- **THEN** the face shows each connector whose credential was auto-revoked by the linkage and the success/failure of each external revoke
+- **WHEN** a user has been disabled and the admin opens that user's external-services view
+- **THEN** the face shows each service whose credential was auto-revoked by the linkage and the success/failure of each external revoke
 
 ### Requirement: Credential lifecycle observability
-The admin face SHALL show, per connector, access-token auto-refresh success/failure rate and the count of re-authorizations caused by refresh-token expiry, to diagnose why a connector repeatedly requires re-authorization.
 
-#### Scenario: Per-connector refresh metrics
-- **WHEN** an admin opens the lifecycle view for a connector
-- **THEN** it shows the auto-refresh success/failure rate and the re-authorization count for that connector
+The admin face SHALL show, per service, access-token auto-refresh success/failure rate and the count of re-authorizations caused by refresh-token expiry, sourced from Vault token-lifecycle data（见 `oauth-token-lifecycle`）。
+
+#### Scenario: Per-service refresh metrics
+- **WHEN** an admin opens the lifecycle view for a service
+- **THEN** it shows the auto-refresh success/failure rate and the re-authorization count for that service
 
 ### Requirement: Sensitive value masking across all views
 Every connector view and audit entry SHALL mask `client_secret`, access tokens, and refresh tokens; no view or log SHALL echo them in plaintext. Masking SHALL be applied in a single serialization layer.
