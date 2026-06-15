@@ -2,6 +2,12 @@
 
 > 纯文案/表名对账，无运行时行为变更。建议作为收口在 P0–P6 后 apply。无 TDD 红绿（无实现代码），以 spec 校验与文档一致性为准。
 
+## 0. 新增 drift 对账（P7 扩容项，A 阶段已完成）
+
+- [ ] 0.1 `external-credential-vault` delta：修正 `protocol` 枚举值（`oauth2`/`apikey`）；删掉 `kind` 列引用。
+- [ ] 0.2 `connector-credential-injection` delta：补 `CredentialError` 第三态与 dispatch 短路行为需求。
+- [ ] 0.3 确认全仓主 spec 不再含 `external_services.kind` 列描述（cross-check）。
+
 ## 1. 主 specs 对账
 
 - [ ] 1.1 `agent-definition`：`agent_oauth_bindings`→`agent_service_grants`（删除级联 + FK 覆盖清单 + 场景）；`connectors.agent_id` 休眠列需求/场景改为「随 connectors→external_services 移除」。
