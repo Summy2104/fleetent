@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install test t test-pr test-unit test-unit-ci test-integration test-e2e test-evaluation test-layers lint fmt check typecheck serve admin
+.PHONY: help install test t test-pr test-unit test-unit-ci test-coverage-ci test-integration test-e2e test-evaluation test-layers lint fmt check typecheck serve admin
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -37,9 +37,13 @@ test-pr: ## PR gate (must be green): unit (minus quarantine) + layer boundaries 
 test-unit: ## Run unit tests
 	uv run pytest tests/unit
 
-test-unit-ci: ## Run CI unit tests with 75% coverage gate
+test-unit-ci: ## Run CI unit tests with 76% coverage gate
 	uv run coverage run --source=src/fleetent -m pytest tests/unit
-	uv run coverage report --fail-under=75
+	uv run coverage report --fail-under=76
+
+test-coverage-ci: ## Run daily unit+integration tests with 88% combined coverage gate
+	uv run coverage run --source=src/fleetent -m pytest tests/unit tests/integration
+	uv run coverage report --fail-under=88
 
 test-integration: ## Run integration tests
 	uv run pytest tests/integration

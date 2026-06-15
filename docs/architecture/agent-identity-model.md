@@ -1,6 +1,7 @@
 # Agent 身份模型与迁移设计
 
-> **状态：阶段 2–5 已全部落地**。本文锁定 agent 标识在平台侧 / agent 侧的统一模型，并给出完整迁移详设。阶段 2（`unify-agent-binding-id`）已于 2026-06-13 落地 `agent_kbs` / `agent_skills` 的 INTEGER+FK 规整与 `agent_skills` 控制台绑定 bug 修复；阶段 3–5 随后完成平台关系表归一、FK 完整性、`traces.agent_name` 正名、读写翻译边界收口与守护测试。`data-model.md` 已回填最终 as-built 状态。
+> **🔒 决策记录（已冻结，阶段 2–5 全落地 2026-06-13/14）**。本文是一次性的**迁移设计 + 决策记录**，不再追代码维护。
+> **现状（as-built）真相在别处**：模型与 FK → [data-model](data-model.md)（agents/agent_versions/agent_admin_state 等 + erDiagram）；架构定位 → `target-architecture.md §6`（Identity 端口）；身份/认证模型 → memory `[[identity-auth-model]]`。下文记录的是"当时怎么决策、怎么迁的"，**id=不可变身份 / name=可读标签 + 两条翻译边界**这套模型的 rationale。
 > 背景与往返论证（为何不是 slug-everywhere、为何不用 UUID、rename 安全性）见本文 §1 + `records/decision-logs/`。
 
 ## 1. 问题与目标
