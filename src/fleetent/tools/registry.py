@@ -344,7 +344,8 @@ def dispatch(
     from fleetent import connectors
 
     connector, scopes = connector_meta
-    cred = connectors.get_credential(user_id, connector, scopes)
+    agent_name = tool_context.agent_name if tool_context is not None else None
+    cred = connectors.get_credential(user_id, connector, scopes, agent_name)
     if isinstance(cred, connectors.NeedsConsent):
         return (
             f"connector '{cred.connector}' requires authorization before this tool can run. "

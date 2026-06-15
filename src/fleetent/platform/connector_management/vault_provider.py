@@ -7,14 +7,39 @@ from datetime import UTC, datetime
 
 import httpx
 
-from fleetent import connectors
-from fleetent.platform.connector_management import external_credential_store, external_service_store
+from fleetent import agent_store, connectors, user_store
+from fleetent.platform.connector_management import (
+    agent_service_grant_store,
+    external_credential_store,
+    external_service_store,
+)
 
 _logger = logging.getLogger(__name__)
 
 
 def _consent_url(user_id: str, service_id: str) -> str:
     return f"/admin/connectors/authorize/{service_id}?user_id={user_id}"
+
+
+def _resolve_principal(user_id: str, service_id: str, agent_name: str | None) -> str:
+    """Return the effective user_id for credential lookup based on the agent's run_as grant.
+
+    When agent_name is provided, we check the agent's grant for this service:
+    - run_as=agent: use the agent's service-principal (``agent:<id>``).
+    - run_as=user or no grant: use the original caller's user_id.
+    Falls back silently to user_id if the agent name can't be resolved.
+    """
+    if agent_name is None:
+        return user_id
+    agent = agent_store.get_by_name(agent_name)
+    if agent is None:
+        return user_id
+    for grant in agent_service_grant_store.list_services_for_agent(agent.id):
+        if grant["service_id"] == service_id:
+            if grant.get("run_as") == "agent":
+                return user_store.get_or_create_service_principal(agent.id)
+            break
+    return user_id
 
 
 def _submit_url(service_id: str) -> str:
@@ -201,26 +226,30 @@ def revoke_credential(user_id: str, service_id: str) -> dict[str, bool]:
 
 
 def get_credential(
-    user_id: str, service_id: str, scopes: list[str]
+    user_id: str,
+    service_id: str,
+    scopes: list[str],
+    agent_name: str | None = None,
 ) -> connectors.Credential | connectors.NeedsConsent | connectors.CredentialError:
+    principal_user_id = _resolve_principal(user_id, service_id, agent_name)
     service = external_service_store.get_service(service_id)
     if service is not None and service.get("protocol") == "apikey":
-        return _get_apikey_credential(user_id, service_id)
+        return _get_apikey_credential(principal_user_id, service_id)
 
-    credential = external_credential_store.get_credential(user_id, service_id)
+    credential = external_credential_store.get_credential(principal_user_id, service_id)
     if credential is None:
         return connectors.NeedsConsent(
             connector=service_id,
-            consent_url=_consent_url(user_id, service_id),
+            consent_url=_consent_url(principal_user_id, service_id),
         )
     if credential["status"] == "needs_reauth":
         return connectors.NeedsConsent(
             connector=service_id,
-            consent_url=_consent_url(user_id, service_id),
+            consent_url=_consent_url(principal_user_id, service_id),
         )
     payload = dict(credential["payload"])
     if _is_expired(payload):
-        return _refresh_tokens(user_id, service_id, credential, scopes)
+        return _refresh_tokens(principal_user_id, service_id, credential, scopes)
     if credential["status"] == "error":
         return connectors.CredentialError(
             connector=service_id,
@@ -230,7 +259,7 @@ def get_credential(
     if credential["status"] != "authorized":
         return connectors.NeedsConsent(
             connector=service_id,
-            consent_url=_consent_url(user_id, service_id),
+            consent_url=_consent_url(principal_user_id, service_id),
         )
     if scopes:
         payload.setdefault("scopes", scopes)

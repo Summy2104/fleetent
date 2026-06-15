@@ -21,6 +21,8 @@ Two concerns live side by side, reconciled during the next<-main integration:
 """
 
 import json
+import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -28,7 +30,23 @@ from typing import Any
 from fleetent.config import Settings
 from fleetent.db import SQLiteConnection, SQLiteDatabase, create_database
 
+_logger = logging.getLogger(__name__)
 _UNSET: Any = object()
+
+# Optional hook called with the agent's integer id just before the agent row is
+# deleted. Platform registers this at startup to clean up service-principal
+# external_credentials; standalone agents leave it None. Best-effort: exceptions
+# are caught, logged, and suppressed so delete_agent always completes.
+_delete_agent_hook: Callable[[int], None] | None = None
+
+
+def set_delete_agent_hook(cb: Callable[[int], None]) -> None:
+    """Register a pre-delete cleanup callback (called with the agent's integer id).
+
+    Called once by the platform server lifespan. Must not be called by agent runtime code.
+    """
+    global _delete_agent_hook
+    _delete_agent_hook = cb
 
 # Agent-row columns beyond the version-derived runtime fields. Caps are not
 # versioned, so they are read straight off the agents row.
@@ -483,7 +501,13 @@ def delete_agent(name: str) -> bool:
         agent = conn.execute("SELECT id FROM agents WHERE name = :name", {"name": name}).fetchone()
         if agent is None:
             return False
-        conn.execute("DELETE FROM agents WHERE id = :aid", {"aid": int(agent["id"])})
+        agent_id = int(agent["id"])
+        if _delete_agent_hook is not None:
+            try:
+                _delete_agent_hook(agent_id)
+            except Exception:
+                _logger.warning("delete_agent cleanup hook failed for agent_id=%s", agent_id)
+        conn.execute("DELETE FROM agents WHERE id = :aid", {"aid": agent_id})
     return True
 
 

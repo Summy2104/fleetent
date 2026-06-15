@@ -52,7 +52,7 @@ def test_default_provider_returns_needs_consent():
 def test_provider_seam_passthrough(monkeypatch):
     fake = connectors.Credential(connector="github", client=object())
 
-    def _fake_provider(user_id, connector, scopes):
+    def _fake_provider(user_id, connector, scopes, agent_name=None):
         return fake
 
     monkeypatch.setattr(connectors, "_provider", _fake_provider)
@@ -61,7 +61,7 @@ def test_provider_seam_passthrough(monkeypatch):
 
 
 def test_missing_user_id_returns_needs_consent(monkeypatch):
-    def _fake_provider(user_id, connector, scopes):  # pragma: no cover - must not run
+    def _fake_provider(user_id, connector, scopes, agent_name=None):  # pragma: no cover
         raise AssertionError("provider should not be consulted without user_id")
 
     monkeypatch.setattr(connectors, "_provider", _fake_provider)
@@ -73,5 +73,5 @@ def test_missing_user_id_returns_needs_consent(monkeypatch):
 def test_set_provider_replaces_seam(monkeypatch):
     monkeypatch.setattr(connectors, "_provider", connectors._default_provider)
     fake = connectors.Credential(connector="slack", client=object())
-    connectors.set_provider(lambda user_id, connector, scopes: fake)
+    connectors.set_provider(lambda user_id, connector, scopes, agent_name=None: fake)
     assert connectors.get_credential("u", "slack", []) is fake
