@@ -28,8 +28,11 @@ def db(tmp_path, monkeypatch):
 
 @pytest.fixture
 def pool_dir(tmp_path):
+    from fleetent.platform.skill_management.pool_git import init_pool
+
     d = tmp_path / "pool"
     d.mkdir()
+    init_pool(d)
     return d
 
 
@@ -38,32 +41,44 @@ def _create_agent(name: str = "support") -> agent_store.Agent:
     return agent_store.create_agent(name, "You are support.", [], tenant_id="acme")
 
 
-def _setup_pool_skill(pool_dir: Path, name: str, content: str) -> None:
+def _setup_pool_skill(pool_dir: Path, name: str, content: str) -> str:
+    from fleetent.platform.skill_management.pool_git import commit_pool
+
     skill_dir = pool_dir / name
     skill_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "SKILL.md").write_text(
         f"---\nname: {name}\ndescription: test\n---\n{content}", encoding="utf-8"
     )
-
-
-_FAKE_BASE = "a" * 64  # 64-char content hash (sha256 format)
+    scripts_dir = skill_dir / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "sync.py").write_text("print('pool script')\n", encoding="utf-8")
+    sha = commit_pool(pool_dir, message=f"add {name}", author="admin <a@a>", skill_name=name)
+    assert sha is not None
+    return sha
 
 
 def test_nominate_drifted_skill_creates_pending_proposal(db, pool_dir, monkeypatch):
-    """Nominating a drifted agent skill creates a pending backflow_proposals row."""
+    """Nominating a drifted multi-file skill captures the full bundle and base_commit."""
+    from fleetent.platform.agent_lifecycle import materialize
+
     monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(pool_dir))
 
-    _setup_pool_skill(pool_dir, "crm-ops", "pool-v1")
+    base_commit = _setup_pool_skill(pool_dir, "crm-ops", "pool-v1")
     agent = _create_agent()
     skill_admin_store.set_binding(agent.id, "crm-ops", True, updated_by="admin")
-    skill_admin_store.set_base_version(agent.id, "crm-ops", _FAKE_BASE)
+    materialize.write_home(materialize.agent_file_from_store(agent), source_agent=agent)
+
+    home_skill = materialize.home_dir(agent.name) / "skills" / "crm-ops"
+    (home_skill / "SKILL.md").write_text(
+        "---\nname: crm-ops\ndescription: test\n---\nevolved by agent",
+        encoding="utf-8",
+    )
+    (home_skill / "scripts" / "sync.py").write_text("print('agent script')\n", encoding="utf-8")
     skill_admin_store.set_drift(agent.id, "crm-ops", drifted=True)
 
-    evolved = "---\nname: crm-ops\ndescription: test\n---\nevolved by agent"
     proposal_id = backflow_store.nominate(
         agent_id=agent.id,
         skill_name="crm-ops",
-        proposed_content=evolved,
         pool_dir=pool_dir,
     )
 
@@ -73,8 +88,12 @@ def test_nominate_drifted_skill_creates_pending_proposal(db, pool_dir, monkeypat
     assert row["status"] == "pending"
     assert row["agent_id"] == agent.id
     assert row["skill_name"] == "crm-ops"
-    assert row["proposed_content"] == evolved
-    assert row["base_version"] == _FAKE_BASE
+    assert row["proposed_bundle"] == {
+        "SKILL.md": "---\nname: crm-ops\ndescription: test\n---\nevolved by agent",
+        "scripts/sync.py": "print('agent script')\n",
+    }
+    assert row["base_version"] is not None
+    assert row["base_commit"] == base_commit
 
 
 def test_nominate_non_drifted_skill_raises(db, pool_dir, monkeypatch):
@@ -87,16 +106,13 @@ def test_nominate_non_drifted_skill_raises(db, pool_dir, monkeypatch):
     # drift stays 0 (default)
 
     with pytest.raises(ValueError, match="not drifted"):
-        backflow_store.nominate(
-            agent_id=agent.id,
-            skill_name="billing",
-            proposed_content="some evolved content",
-            pool_dir=pool_dir,
-        )
+        backflow_store.nominate(agent_id=agent.id, skill_name="billing", pool_dir=pool_dir)
 
 
 def test_list_pending_proposals(db, pool_dir, monkeypatch):
     """list_proposals returns only pending proposals for the given skill."""
+    from fleetent.platform.agent_lifecycle import materialize
+
     monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(pool_dir))
 
     _setup_pool_skill(pool_dir, "crm-ops", "pool-v1")
@@ -106,14 +122,14 @@ def test_list_pending_proposals(db, pool_dir, monkeypatch):
 
     for agent in (agent1, agent2):
         skill_admin_store.set_binding(agent.id, "crm-ops", True, updated_by="admin")
-        skill_admin_store.set_base_version(agent.id, "crm-ops", _FAKE_BASE)
+        materialize.write_home(materialize.agent_file_from_store(agent), source_agent=agent)
         skill_admin_store.set_drift(agent.id, "crm-ops", drifted=True)
-        backflow_store.nominate(
-            agent_id=agent.id,
-            skill_name="crm-ops",
-            proposed_content=f"evolved by {agent.name}",
-            pool_dir=pool_dir,
+        home_skill = materialize.home_dir(agent.name) / "skills" / "crm-ops" / "SKILL.md"
+        home_skill.write_text(
+            f"---\nname: crm-ops\ndescription: test\n---\nevolved by {agent.name}",
+            encoding="utf-8",
         )
+        backflow_store.nominate(agent_id=agent.id, skill_name="crm-ops", pool_dir=pool_dir)
 
     rows = backflow_store.list_proposals(skill_name="crm-ops", status="pending")
     assert len(rows) == 2

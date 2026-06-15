@@ -11,9 +11,11 @@ it is never touched by agent runtime modules.
 from __future__ import annotations
 
 import datetime
+import json
 from pathlib import Path
 from typing import Any
 
+from fleetent import agent_store, paths
 from fleetent.config import Settings
 from fleetent.db import SQLiteDatabase, create_database
 
@@ -30,7 +32,7 @@ def nominate(
     *,
     agent_id: int,
     skill_name: str,
-    proposed_content: str,
+    proposed_content: str | None = None,
     pool_dir: Path,
 ) -> int:
     """Create a pending backflow proposal for a drifted agent skill copy.
@@ -38,7 +40,7 @@ def nominate(
     Args:
         agent_id: The agent whose home copy is being nominated.
         skill_name: The skill to nominate for backflow.
-        proposed_content: The SKILL.md content of the evolved home copy.
+        proposed_content: Optional legacy fallback for SKILL.md-only nominations.
         pool_dir: The shared pool directory (used to detect conflict at nomination time).
 
     Returns:
@@ -56,6 +58,12 @@ def nominate(
         )
 
     base_version: str | None = drift_state.get("base_version")
+    base_commit: str | None = drift_state.get("base_commit")
+    proposed_bundle = _capture_proposed_bundle(
+        agent_id=agent_id,
+        skill_name=skill_name,
+        proposed_content=proposed_content,
+    )
 
     # Detect conflict: pool content has moved since the last materialization.
     conflict = _detect_conflict(pool_dir, skill_name, base_version)
@@ -65,17 +73,18 @@ def nominate(
         conn.execute(
             """
             INSERT INTO backflow_proposals
-                (status, agent_id, skill_name, base_version, proposed_content,
+                (status, agent_id, skill_name, base_version, base_commit, proposed_bundle,
                  conflict, overridden_head, forked_as, created_at, updated_at)
             VALUES
-                ('pending', :agent_id, :skill_name, :base_version, :proposed_content,
+                ('pending', :agent_id, :skill_name, :base_version, :base_commit, :proposed_bundle,
                  :conflict, NULL, NULL, :created_at, :updated_at)
             """,
             {
                 "agent_id": agent_id,
                 "skill_name": skill_name,
                 "base_version": base_version,
-                "proposed_content": proposed_content,
+                "base_commit": base_commit,
+                "proposed_bundle": json.dumps(proposed_bundle, sort_keys=True),
                 "conflict": 1 if conflict else 0,
                 "created_at": now,
                 "updated_at": now,
@@ -111,7 +120,7 @@ def get_proposal(proposal_id: int) -> dict[str, Any] | None:
         _database()
         .execute(
             """
-            SELECT id, status, agent_id, skill_name, base_version, proposed_content,
+            SELECT id, status, agent_id, skill_name, base_version, base_commit, proposed_bundle,
                    conflict, overridden_head, forked_as, created_at, updated_at
             FROM backflow_proposals
             WHERE id = :proposal_id
@@ -120,7 +129,7 @@ def get_proposal(proposal_id: int) -> dict[str, Any] | None:
         )
         .fetchone()
     )
-    return dict(row) if row is not None else None
+    return _row_to_proposal(row)
 
 
 def list_proposals(
@@ -146,7 +155,7 @@ def list_proposals(
         _database()
         .execute(
             f"""
-            SELECT id, status, agent_id, skill_name, base_version, proposed_content,
+            SELECT id, status, agent_id, skill_name, base_version, base_commit, proposed_bundle,
                    conflict, overridden_head, forked_as, created_at, updated_at
             FROM backflow_proposals
             {where}
@@ -156,7 +165,39 @@ def list_proposals(
         )
         .fetchall()
     )
-    return [dict(r) for r in rows]
+    proposals: list[dict[str, Any]] = []
+    for row in rows:
+        proposal = _row_to_proposal(row)
+        if proposal is not None:
+            proposals.append(proposal)
+    return proposals
+
+
+def _row_to_proposal(row: Any) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    proposal = dict(row)
+    proposal["proposed_bundle"] = json.loads(proposal["proposed_bundle"])
+    return proposal
+
+
+def _capture_proposed_bundle(
+    *, agent_id: int, skill_name: str, proposed_content: str | None
+) -> dict[str, str]:
+    agent_name = agent_store.get_agent_name_by_id(agent_id)
+    if agent_name is not None:
+        skill_dir = paths.agent_home_dir(agent_name) / "skills" / skill_name
+        if skill_dir.is_dir():
+            bundle: dict[str, str] = {}
+            for path in sorted(
+                p for p in skill_dir.rglob("*") if p.is_file() and ".git" not in p.parts
+            ):
+                bundle[path.relative_to(skill_dir).as_posix()] = path.read_text(encoding="utf-8")
+            if bundle:
+                return bundle
+    if proposed_content is None:
+        raise ValueError(f"skill {skill_name!r} has no materialized bundle to nominate")
+    return {"SKILL.md": proposed_content}
 
 
 def get_proposal_diff(proposal_id: int, *, pool_dir: Path) -> dict[str, Any]:
@@ -173,38 +214,79 @@ def get_proposal_diff(proposal_id: int, *, pool_dir: Path) -> dict[str, Any]:
     if row is None:
         raise ValueError(f"proposal {proposal_id} not found")
 
-    proposed = row["proposed_content"]
+    proposed_bundle: dict[str, str] = row["proposed_bundle"]
     skill_name = row["skill_name"]
     base_version: str | None = row["base_version"]
+    base_commit: str | None = row["base_commit"]
 
-    # Current pool head content
+    # Current pool head bundle
     pool_skill_dir = pool_dir / skill_name
-    head_content: str | None = None
+    head_bundle: dict[str, str] | None = None
     if pool_skill_dir.exists():
-        skill_md = pool_skill_dir / "SKILL.md"
-        if skill_md.is_file():
-            head_content = skill_md.read_text(encoding="utf-8")
+        head_bundle = {}
+        for path in sorted(
+            p for p in pool_skill_dir.rglob("*") if p.is_file() and ".git" not in p.parts
+        ):
+            relpath = path.relative_to(pool_skill_dir).as_posix()
+            head_bundle[relpath] = path.read_text(encoding="utf-8")
 
-    # base content: reconstruct from pool git at base_version commit
-    base_content: str | None = None
-    if base_version is not None:
-        from fleetent.platform.skill_management.pool_git import pool_content_at
+    # base bundle: reconstruct from pool git at base_commit
+    base_bundle: dict[str, str] | None = None
+    if base_commit is not None:
+        from fleetent.platform.skill_management.pool_git import pool_bundle_at
 
-        base_content = pool_content_at(pool_dir, skill_name, base_version)
+        base_bundle = pool_bundle_at(pool_dir, skill_name, base_commit)
 
     # Conflict: pool head differs from what was materialized
     conflict = _detect_conflict(pool_dir, skill_name, base_version)
 
-    def _diff(a: str | None, b: str | None, fromfile: str, tofile: str) -> str:
+    def _bundle_diff(
+        a: dict[str, str] | None, b: dict[str, str] | None, from_label: str, to_label: str
+    ) -> str:
         if a is None and b is None:
             return ""
-        lines_a = (a or "").splitlines(keepends=True)
-        lines_b = (b or "").splitlines(keepends=True)
-        return "".join(difflib.unified_diff(lines_a, lines_b, fromfile=fromfile, tofile=tofile))
+        left = a or {}
+        right = b or {}
+        parts: list[str] = []
+        skill_md_left = left.get("SKILL.md")
+        skill_md_right = right.get("SKILL.md")
+        if skill_md_left is not None or skill_md_right is not None:
+            parts.append(
+                "".join(
+                    difflib.unified_diff(
+                        (skill_md_left or "").splitlines(keepends=True),
+                        (skill_md_right or "").splitlines(keepends=True),
+                        fromfile=f"{from_label}/SKILL.md",
+                        tofile=f"{to_label}/SKILL.md",
+                    )
+                )
+            )
+        changed_paths: list[str] = []
+        for relpath in sorted(set(left) | set(right)):
+            if relpath == "SKILL.md":
+                continue
+            before = left.get(relpath)
+            after = right.get(relpath)
+            if before == after:
+                continue
+            if before is None:
+                changed_paths.append(f"A {relpath}")
+            elif after is None:
+                changed_paths.append(f"D {relpath}")
+            else:
+                changed_paths.append(f"M {relpath}")
+        if changed_paths:
+            parts.append("Changed files:\n" + "\n".join(changed_paths) + "\n")
+        return "".join(parts)
+
+    if base_commit is None:
+        diff_vs_base = "Base unknown; only diff_vs_head is available.\n"
+    else:
+        diff_vs_base = _bundle_diff(base_bundle, proposed_bundle, "base", "evolved")
 
     return {
-        "diff_vs_base": _diff(base_content, proposed, "base", "evolved"),
-        "diff_vs_head": _diff(head_content, proposed, "head", "evolved"),
+        "diff_vs_base": diff_vs_base,
+        "diff_vs_head": _bundle_diff(head_bundle, proposed_bundle, "head", "evolved"),
         "conflict": conflict,
     }
 
