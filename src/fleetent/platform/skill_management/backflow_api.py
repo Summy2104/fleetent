@@ -8,6 +8,8 @@ Auth mirrors skill_admin_api: ``Authorization: Session <token>``.
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -82,6 +84,31 @@ def _pool_dir() -> Path:
     return Path(engine_skills_dir())
 
 
+def _write_bundle_atomic(skill_dir: Path, bundle: dict[str, str]) -> None:
+    tmp_parent = skill_dir.parent / ".tmp"
+    tmp_parent.mkdir(parents=True, exist_ok=True)
+    tmp_dir = Path(tempfile.mkdtemp(prefix=f"{skill_dir.name}-", dir=tmp_parent))
+    backup_dir = skill_dir.with_name(f"{skill_dir.name}.bak")
+    try:
+        for relpath, content in bundle.items():
+            dest = tmp_dir / relpath
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(content, encoding="utf-8")
+        if backup_dir.exists():
+            shutil.rmtree(backup_dir)
+        if skill_dir.exists():
+            skill_dir.rename(backup_dir)
+        tmp_dir.rename(skill_dir)
+        if backup_dir.exists():
+            shutil.rmtree(backup_dir)
+    except Exception:
+        if tmp_dir.exists():
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        if backup_dir.exists() and not skill_dir.exists():
+            backup_dir.rename(skill_dir)
+        raise
+
+
 # --- endpoints ----------------------------------------------------------------
 
 
@@ -113,7 +140,7 @@ def accept_proposal(
 
     skill_name: str = row["skill_name"]
     agent_id: int = row["agent_id"]
-    proposed_content: str = row["proposed_content"]
+    proposed_bundle: dict[str, str] = row["proposed_bundle"]
     pool_dir = _pool_dir()
 
     # Record what we're overriding if this is a conflict accept
@@ -123,10 +150,9 @@ def accept_proposal(
 
         overridden_head = pool_version_for_skill(pool_dir, skill_name)
 
-    # Write evolved content to pool
+    # Write evolved bundle to pool
     skill_dir = pool_dir / skill_name
-    skill_dir.mkdir(parents=True, exist_ok=True)
-    (skill_dir / "SKILL.md").write_text(proposed_content, encoding="utf-8")
+    _write_bundle_atomic(skill_dir, proposed_bundle)
 
     # Commit to pool git
     new_sha = commit_pool(
@@ -188,7 +214,7 @@ def fork_proposal(
 
     skill_name: str = row["skill_name"]
     agent_id: int = row["agent_id"]
-    proposed_content: str = row["proposed_content"]
+    proposed_bundle: dict[str, str] = row["proposed_bundle"]
     pool_dir = _pool_dir()
 
     fork_name = body.fork_name
@@ -197,18 +223,21 @@ def fork_proposal(
 
     # Write fork to pool (original skill dir untouched)
     fork_dir = pool_dir / fork_name
-    fork_dir.mkdir(parents=True, exist_ok=True)
-    (fork_dir / "SKILL.md").write_text(proposed_content, encoding="utf-8")
+    _write_bundle_atomic(fork_dir, proposed_bundle)
 
     # Commit fork to pool git
-    commit_pool(
+    new_sha = commit_pool(
         pool_dir,
         message=f"backflow fork: {skill_name} → {fork_name}",
         author=body.author,
         skill_name=fork_name,
     )
+    if new_sha is not None:
+        skill_admin_store.set_current_version(fork_name, new_sha)
 
-    # Clear drift for the source agent
+    # Rebind the source agent to the fork and clear drift on the original binding.
+    skill_admin_store.set_binding(agent_id, skill_name, False, updated_by=user.name)
+    skill_admin_store.set_binding(agent_id, fork_name, True, updated_by=user.name)
     skill_admin_store.set_drift(agent_id, skill_name, drifted=False)
 
     # Close proposal

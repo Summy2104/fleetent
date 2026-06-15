@@ -75,10 +75,11 @@ def set_binding(agent_id: int, skill_name: str, enabled: bool, updated_by: str |
         conn.execute(
             """
             INSERT INTO agent_skills (
-                agent_id, skill_name, enabled, updated_at, updated_by, base_version, drift, drift_at
+                agent_id, skill_name, enabled, updated_at, updated_by,
+                base_version, base_commit, drift, drift_at
             )
             VALUES (
-                :agent_id, :skill_name, :enabled, :updated_at, :updated_by, NULL, 0, NULL
+                :agent_id, :skill_name, :enabled, :updated_at, :updated_by, NULL, NULL, 0, NULL
             )
             ON CONFLICT(agent_id, skill_name) DO UPDATE SET
                 enabled = excluded.enabled,
@@ -278,7 +279,7 @@ def get_drift(agent_id: int, skill_name: str) -> dict[str, Any]:
         _database()
         .execute(
             """
-            SELECT agent_id, skill_name, base_version, drift, drift_at
+            SELECT agent_id, skill_name, base_version, base_commit, drift, drift_at
             FROM agent_skills
             WHERE agent_id = :agent_id AND skill_name = :skill_name
             """,
@@ -291,6 +292,7 @@ def get_drift(agent_id: int, skill_name: str) -> dict[str, Any]:
             "agent_id": agent_id,
             "skill_name": skill_name,
             "base_version": None,
+            "base_commit": None,
             "drift": 0,
             "drift_at": None,
         }
@@ -312,6 +314,26 @@ def set_base_version(agent_id: int, skill_name: str, base_version: str | None) -
                 "agent_id": agent_id,
                 "skill_name": skill_name,
                 "base_version": base_version,
+                "updated_at": now,
+            },
+        )
+
+
+def set_base_commit(agent_id: int, skill_name: str, base_commit: str | None) -> None:
+    """Persist the pool git commit an agent copy was last materialized from."""
+    with _database().transaction() as conn:
+        now = _now()
+        conn.execute(
+            """
+            UPDATE agent_skills
+            SET base_commit = :base_commit,
+                updated_at = :updated_at
+            WHERE agent_id = :agent_id AND skill_name = :skill_name
+            """,
+            {
+                "agent_id": agent_id,
+                "skill_name": skill_name,
+                "base_commit": base_commit,
                 "updated_at": now,
             },
         )

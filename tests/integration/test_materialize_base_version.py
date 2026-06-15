@@ -19,7 +19,6 @@ from fleetent.platform.skill_management import skill_admin_store
 from fleetent.platform.tenancy import store as tenancy_store
 from tests.integration._migration_template import apply_migrations
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -36,8 +35,6 @@ def db(tmp_path, monkeypatch):
 
 @pytest.fixture
 def pool_dir(tmp_path):
-    from fleetent.platform.skill_management import pool_git
-
     d = tmp_path / "pool"
     d.mkdir()
     return d
@@ -93,6 +90,7 @@ def test_materialize_writes_content_hash_base_version(db, pool_dir, tmp_path, mo
 
     drift_row = skill_admin_store.get_drift(agent.id, "billing")
     base_version = drift_row["base_version"]
+    base_commit = drift_row["base_commit"]
 
     # must be a 64-char sha256 content hash (NOT the 40-char git sha)
     expected = materialize._skill_dir_version(pool_dir / "billing")
@@ -100,6 +98,7 @@ def test_materialize_writes_content_hash_base_version(db, pool_dir, tmp_path, mo
     assert len(base_version) == 64
     assert all(c in "0123456789abcdef" for c in base_version)
     assert base_version == expected
+    assert base_commit == sha
 
 
 # ---------------------------------------------------------------------------
@@ -111,8 +110,6 @@ def test_no_false_drift_on_content_hash_base_version_upgrade(db, pool_dir, tmp_p
     """Upgrade scenario: existing content-hash base_version does NOT trigger false drift
     when the agent home copy has not actually changed.
     """
-    from fleetent.platform.skill_management import pool_git
-
     monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(pool_dir))
 
     sha = _setup_pool_skill(pool_dir, "billing", "billing skill content")
@@ -147,8 +144,6 @@ def test_no_false_drift_on_content_hash_base_version_upgrade(db, pool_dir, tmp_p
 def test_drift_detected_after_rebaseline_when_home_modified(db, pool_dir, tmp_path, monkeypatch):
     """After re-baseline, a subsequent materialize detects real drift when the
     agent's home copy was modified."""
-    from fleetent.platform.skill_management import pool_git
-
     monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(pool_dir))
 
     sha = _setup_pool_skill(pool_dir, "crm-ops", "pool content")
@@ -181,6 +176,76 @@ def test_drift_detected_after_rebaseline_when_home_modified(db, pool_dir, tmp_pa
     assert drift_row["drift"] == 1, "modified home copy should be marked drifted"
     # Home file should still contain the modified content (not overwritten)
     assert "modified by agent" in modified_skill.read_text()
+
+
+def test_materialize_refreshes_base_commit_for_clean_home_and_preserves_it_on_drift(
+    db, pool_dir, tmp_path, monkeypatch
+):
+    """Clean homes refresh to the latest pool commit; drifted homes keep their prior base_commit."""
+    from fleetent.platform.skill_management import pool_git
+
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(pool_dir))
+
+    sha_v1 = _setup_pool_skill(pool_dir, "billing", "pool-v1")
+    skill_admin_store.set_current_version("billing", sha_v1)
+
+    agent = _create_agent(db)
+    skill_admin_store.set_binding(agent.id, "billing", True, updated_by="admin")
+
+    materialize.write_home(
+        materialize.agent_file_from_store(agent),
+        source_agent=agent,
+    )
+    row_v1 = skill_admin_store.get_drift(agent.id, "billing")
+    assert row_v1["drift"] == 0
+    assert row_v1["base_commit"] == sha_v1
+
+    (pool_dir / "billing" / "SKILL.md").write_text(
+        "---\nname: billing\ndescription: test\n---\npool-v2",
+        encoding="utf-8",
+    )
+    sha_v2 = pool_git.commit_pool(
+        pool_dir,
+        message="billing v2",
+        author="system <system@f>",
+        skill_name="billing",
+    )
+    assert sha_v2 is not None
+
+    materialize.write_home(
+        materialize.agent_file_from_store(agent),
+        source_agent=agent,
+    )
+    row_v2 = skill_admin_store.get_drift(agent.id, "billing")
+    assert row_v2["drift"] == 0
+    assert row_v2["base_commit"] == sha_v2
+
+    home_skill = materialize.home_dir(agent.name) / "skills" / "billing" / "SKILL.md"
+    home_skill.write_text(
+        "---\nname: billing\ndescription: test\n---\nagent-local-drift",
+        encoding="utf-8",
+    )
+
+    (pool_dir / "billing" / "SKILL.md").write_text(
+        "---\nname: billing\ndescription: test\n---\npool-v3",
+        encoding="utf-8",
+    )
+    sha_v3 = pool_git.commit_pool(
+        pool_dir,
+        message="billing v3",
+        author="system <system@f>",
+        skill_name="billing",
+    )
+    assert sha_v3 is not None
+
+    materialize.write_home(
+        materialize.agent_file_from_store(agent),
+        source_agent=agent,
+    )
+    row_v3 = skill_admin_store.get_drift(agent.id, "billing")
+    assert row_v3["drift"] == 1
+    assert row_v3["base_commit"] == sha_v2
+    assert "agent-local-drift" in home_skill.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

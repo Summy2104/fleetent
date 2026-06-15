@@ -293,8 +293,7 @@ def pool_diff_for_commit(pool_dir: Path, skill_name: str, ref: str) -> dict[str,
             "truncated": True,
             "changed_files": changed_files,
             "warning": (
-                f"diff exceeds {_DIFF_SIZE_LIMIT // 1024} KiB; "
-                "showing changed file names only"
+                f"diff exceeds {_DIFF_SIZE_LIMIT // 1024} KiB; showing changed file names only"
             ),
         }
 
@@ -323,6 +322,38 @@ def pool_content_at(pool_dir: Path, skill_name: str, ref: str) -> str | None:
                     if subitem.path.decode() == "SKILL.md":
                         blob: Any = r.object_store[subitem.sha]
                         return str(blob.data.decode(errors="replace"))
+    except Exception:
+        pass
+    return None
+
+
+def pool_bundle_at(pool_dir: Path, skill_name: str, ref: str) -> dict[str, str] | None:
+    """Return the full skill bundle for ``skill_name`` at git ref ``ref``."""
+    from dulwich.repo import Repo
+
+    try:
+        r = Repo(str(pool_dir))
+        commit: Any = r[ref.encode()]
+        tree: Any = r.object_store[commit.tree]
+        for item in tree.items():
+            if item.path.decode() != skill_name:
+                continue
+            subtree: Any = r.object_store[item.sha]
+            bundle: dict[str, str] = {}
+
+            def _walk(prefix: str, node: Any, out: dict[str, str]) -> None:
+                for subitem in node.items():
+                    name = subitem.path.decode()
+                    child = r.object_store[subitem.sha]
+                    relpath = f"{prefix}{name}"
+                    if hasattr(child, "items"):
+                        _walk(relpath + "/", child, out)
+                    else:
+                        blob_data = getattr(child, "data", b"")
+                        out[relpath] = str(blob_data.decode(errors="replace"))
+
+            _walk("", subtree, bundle)
+            return bundle
     except Exception:
         pass
     return None

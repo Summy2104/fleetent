@@ -565,7 +565,11 @@ def _copy_skills(home: Path, *, source_agent: agent_store.Agent | None = None) -
                 # Always store content hash as base_version for drift detection.
                 # Pool git sha is tracked separately in current_version (catalog).
                 new_base = _skill_dir_version(skill_dir)
+                from fleetent.platform.skill_management.pool_git import pool_version_for_skill
+
+                new_base_commit = pool_version_for_skill(src, skill_dir.name)
                 skill_admin_store.set_base_version(source_agent.id, skill_dir.name, new_base)
+                skill_admin_store.set_base_commit(source_agent.id, skill_dir.name, new_base_commit)
                 skill_admin_store.set_drift(source_agent.id, skill_dir.name, drifted=False)
         except OSError as exc:
             _logger.warn("agent_home_skill_copy_failed", path=str(skill_dir), error=str(exc))
