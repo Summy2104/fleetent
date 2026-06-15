@@ -247,10 +247,41 @@ def admin_owner_id() -> str:
     return admin.id if admin else SYSTEM_OWNER_ID
 
 
+def get_or_create_service_principal(agent_id: int) -> str:
+    """Return the service-principal user id for an agent, creating the row if absent.
+
+    Uses id=``agent:<agent_id>``, role=``service``. No api_key is issued — service
+    principals authenticate only via credential resolution, never via inbound ma- keys.
+    Idempotent: safe to call on every dispatch, not just on first bind.
+    """
+    principal_id = f"agent:{agent_id}"
+    now = datetime.datetime.now(datetime.UTC).isoformat()
+    db = _db()
+    with db.transaction() as conn:
+        existing = conn.execute(
+            "SELECT id FROM users WHERE id = :id", {"id": principal_id}
+        ).fetchone()
+        if existing is None:
+            conn.execute(
+                "INSERT INTO users (id, name, created_at, role, tenant_id)"
+                " VALUES (:id, :name, :created_at, :role, :tenant_id)",
+                {
+                    "id": principal_id,
+                    "name": principal_id,
+                    "created_at": now,
+                    "role": "service",
+                    "tenant_id": "default",
+                },
+            )
+    return principal_id
+
+
 def set_role(user_id: str, role: str) -> None:
     current = get_by_id(user_id)
     if current is not None and current.role == "built_in_admin" and role != "built_in_admin":
         raise PermissionError("built-in admin cannot be demoted")
+    if current is not None and current.role == "service":
+        raise PermissionError(f"service principal {user_id!r} cannot be assigned a human role")
     _update_field(user_id, "role", role)
 
 

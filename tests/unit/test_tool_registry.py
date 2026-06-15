@@ -345,7 +345,7 @@ def test_dispatch_injects_client_for_connector_tool(monkeypatch):
         received["q"] = q
         return "results"
 
-    def _provider(user_id, connector, scopes):
+    def _provider(user_id, connector, scopes, agent_name=None):
         assert (user_id, connector, scopes) == ("u1", "github", ["repo"])
         return connectors.Credential(connector="github", client=sentinel_client)
 
@@ -388,7 +388,7 @@ def test_dispatch_short_circuits_on_needs_consent(monkeypatch):
         ran["v"] = True
         return "should not run"
 
-    def _provider(user_id, connector, scopes):
+    def _provider(user_id, connector, scopes, agent_name=None):
         return connectors.NeedsConsent(connector="google-drive", consent_url="https://auth/gd")
 
     monkeypatch.setattr(connectors, "_provider", _provider)
@@ -409,7 +409,7 @@ def test_dispatch_short_circuits_on_credential_error(monkeypatch):
         ran["v"] = True
         return "should not run"
 
-    def _provider(user_id, connector, scopes):
+    def _provider(user_id, connector, scopes, agent_name=None):
         return connectors.CredentialError(
             connector="google-drive",
             message="credential refresh failed",
@@ -449,7 +449,7 @@ def test_dispatch_does_not_leak_secret_in_result(monkeypatch):
         """Echo."""
         return f"ran with q={q}"
 
-    def _provider(user_id, connector, scopes):
+    def _provider(user_id, connector, scopes, agent_name=None):
         return connectors.Credential(connector="github", client=object(), secret=secret)
 
     monkeypatch.setattr(connectors, "_provider", _provider)
@@ -468,7 +468,7 @@ def test_no_credential_in_trace(monkeypatch):
         """Echo for trace test."""
         return f"done: {q}"
 
-    def _provider(user_id, connector, scopes):
+    def _provider(user_id, connector, scopes, agent_name=None):
         return connectors.Credential(connector="github", client=object(), secret=secret)
 
     monkeypatch.setattr(connectors, "_provider", _provider)

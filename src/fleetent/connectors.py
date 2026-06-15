@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 CredentialProvider = Callable[
-    [str, str, "list[str]"], "Credential | NeedsConsent | CredentialError"
+    [str, str, "list[str]", "str | None"], "Credential | NeedsConsent | CredentialError"
 ]
 
 
@@ -69,7 +69,7 @@ class CredentialError:
 
 
 def _default_provider(
-    user_id: str, connector: str, scopes: list[str]
+    user_id: str, connector: str, scopes: list[str], agent_name: str | None = None
 ) -> Credential | NeedsConsent | CredentialError:
     """Default seam: no OAuth store yet, so always require consent."""
     return NeedsConsent(
@@ -88,16 +88,23 @@ def set_provider(provider: CredentialProvider) -> None:
 
 
 def get_credential(
-    user_id: str | None, connector: str, scopes: list[str]
+    user_id: str | None,
+    connector: str,
+    scopes: list[str],
+    agent_name: str | None = None,
 ) -> Credential | NeedsConsent | CredentialError:
     """Resolve a connector credential for a user.
 
     Without a `user_id` credentials cannot be isolated per user, so we degrade
     safely to `NeedsConsent` without consulting the provider.
+
+    `agent_name` is forwarded to the provider for ``run_as`` grant resolution:
+    when the agent has a grant with ``run_as=agent`` for this connector, the
+    provider uses the agent's service-principal instead of the caller's user_id.
     """
     if user_id is None:
         return NeedsConsent(
             connector=connector,
             consent_url=f"https://consent.invalid/{connector}",
         )
-    return _provider(user_id, connector, scopes)
+    return _provider(user_id, connector, scopes, agent_name)

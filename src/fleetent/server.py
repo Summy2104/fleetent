@@ -120,6 +120,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     connectors.set_provider(vault_provider.get_credential)
     set_im_identity_resolver(_resolve_im_identity)
 
+    from fleetent.platform.connector_management import external_credential_store
+
+    agent_store.set_delete_agent_hook(
+        lambda aid: external_credential_store.delete_all_credentials_for_user(f"agent:{aid}")
+    )
+
     scan_skills()
     # file-driven-agent-config: scan agent.yaml files once at startup (same lifecycle
     # as scan_skills); the in-memory index drives zero-DB runtime agent resolution.

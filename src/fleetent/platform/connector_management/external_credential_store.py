@@ -96,6 +96,15 @@ def delete_credential(user_id: str, service_id: str) -> None:
         )
 
 
+def delete_all_credentials_for_user(user_id: str) -> None:
+    """Delete all stored credentials for a user (e.g. service-principal cleanup on agent delete)."""
+    with _database().transaction() as conn:
+        conn.execute(
+            "DELETE FROM external_credentials WHERE user_id = :user_id",
+            {"user_id": user_id},
+        )
+
+
 def get_credential(user_id: str, service_id: str) -> dict[str, Any] | None:
     row = (
         _database()
