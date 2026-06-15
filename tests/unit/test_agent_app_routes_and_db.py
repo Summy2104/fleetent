@@ -141,7 +141,8 @@ async def test_start_infra_registers_mcp_and_resume_markers(
         lambda current_agent: "backend",
     )
     monkeypatch.setattr(
-        "fleetent.tools.builtin_tools.init_sandbox_manager", lambda current_agent: None
+        "fleetent.tools.builtin_tools.init_sandbox_manager",
+        lambda current_agent, **kwargs: None,
     )
     monkeypatch.setattr(
         "fleetent.integrations.sandbox.enablement.get_effective_mode",
