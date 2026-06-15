@@ -53,6 +53,45 @@ def test_check_allowed_by_user_id_follows_blocked_status(monkeypatch) -> None:
     assert identity.check_allowed_by_user_id("u1") is False
 
 
+def test_get_or_create_returns_existing_user_without_creating(monkeypatch) -> None:
+    @contextmanager
+    def fake_conn():
+        yield _Conn(lambda sql, params: _Result(row=("user-1",)))
+
+    existing = object()
+    monkeypatch.setattr(identity, "_conn", fake_conn)
+    monkeypatch.setattr(identity, "get_by_id", lambda user_id: existing)
+    monkeypatch.setattr(
+        identity,
+        "create_user",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("create_user must not run")),
+    )
+
+    assert identity.get_or_create("slack", "U1", "tenant-1") is existing
+
+
+def test_get_or_create_creates_user_and_handles_insert_race(monkeypatch) -> None:
+    class _Created:
+        id = "created-user"
+
+    rows = iter([None, ("existing-user",)])
+
+    def execute(sql: str, params: dict[str, Any]) -> _Result:
+        if sql.startswith("SELECT user_id FROM im_users"):
+            return _Result(row=next(rows))
+        return _Result(rowcount=0)
+
+    @contextmanager
+    def fake_conn():
+        yield _Conn(execute)
+
+    monkeypatch.setattr(identity, "_conn", fake_conn)
+    monkeypatch.setattr(identity, "create_user", lambda **kwargs: (_Created(), "token"))
+    monkeypatch.setattr(identity, "get_by_id", lambda user_id: {"existing-user": "existing", "created-user": _Created()}[user_id])
+
+    assert identity.get_or_create("slack", "U1", "tenant-1") == "existing"
+
+
 def test_identity_fields_returns_copy_not_backed_by_module_constant() -> None:
     fields = identity.identity_fields("slack")
     fields[0]["label"] = "changed"
@@ -120,6 +159,17 @@ def test_batch_block_im_builds_batch_id_and_calls_each_identity(monkeypatch) -> 
         (3, "raid", "admin-1", "batch-abc123"),
         (4, "raid", "admin-1", "batch-abc123"),
     ]
+
+
+def test_approve_and_block_user_delegate_to_specific_helpers(monkeypatch) -> None:
+    calls: list[tuple[str, int]] = []
+    monkeypatch.setattr(identity, "restore_im_user", lambda im_user_id: calls.append(("restore", im_user_id)))
+    monkeypatch.setattr(identity, "block_im_user", lambda im_user_id: calls.append(("block", im_user_id)))
+
+    identity.approve_user(7)
+    identity.block_user(8)
+
+    assert calls == [("restore", 7), ("block", 8)]
 
 
 def test_update_im_identity_filters_metadata_and_audits(monkeypatch) -> None:
@@ -207,6 +257,46 @@ def test_delete_im_identity_requires_existing_row(monkeypatch) -> None:
 
     with pytest.raises(ValueError, match="im identity not found"):
         identity.delete_im_identity(8)
+
+
+def test_block_restore_and_rebind_im_identity_cover_success_and_errors(monkeypatch) -> None:
+    audits: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+    monkeypatch.setattr(
+        "fleetent.audit_log.write_audit",
+        lambda *args, **kwargs: audits.append((args, kwargs)),
+    )
+    monkeypatch.setattr(identity, "get_im_user", lambda im_user_id: {"user_id": "user-1"} if im_user_id == 7 else None)
+    status_calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(identity, "set_status", lambda user_id, status: status_calls.append((user_id, status)))
+
+    identity.block_im_user(7, reason="raid", actor="admin-1", batch_id="b1")
+    identity.restore_im_user(7, reason="ok", actor="admin-1", batch_id="b2")
+    assert status_calls == [("user-1", "blocked"), ("user-1", "active")]
+
+    with pytest.raises(ValueError, match="im identity not found"):
+        identity.block_im_user(9)
+    with pytest.raises(ValueError, match="im identity not found"):
+        identity.restore_im_user(9)
+
+    @contextmanager
+    def fake_conn():
+        yield _Conn(lambda sql, params: _Result(rowcount=1))
+
+    monkeypatch.setattr(identity, "_conn", fake_conn)
+    monkeypatch.setattr(identity, "get_by_id", lambda user_id: object() if user_id == "user-2" else None)
+    identity.rebind_im_identity(7, "user-2", actor="admin-2")
+
+    with pytest.raises(ValueError, match="target user not found"):
+        identity.rebind_im_identity(7, "missing")
+
+    @contextmanager
+    def fake_missing_conn():
+        yield _Conn(lambda sql, params: _Result(rowcount=0))
+
+    monkeypatch.setattr(identity, "_conn", fake_missing_conn)
+    monkeypatch.setattr(identity, "get_by_id", lambda user_id: object())
+    with pytest.raises(ValueError, match="im identity not found"):
+        identity.rebind_im_identity(7, "user-2")
 
 
 def test_list_helpers_return_allowed_and_parsed_metadata(monkeypatch) -> None:
