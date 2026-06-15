@@ -440,6 +440,12 @@ async def _resume_pending_in_session(
             continue_run=continue_run,
         )
         await session_mgr.save(session_id, history)
+    # Deliver the continuation's final reply to the ORIGINAL conversation via the
+    # persisted-address replier — NOT the approve action's reply_func, which would land it
+    # at the channel top-level or a fresh DM (approval-suspend-resume: resumed output returns
+    # to the original chat/thread). The caller therefore must NOT re-post the return value.
+    if reply:
+        await reply_func(reply)
     return reply
 
 
@@ -496,9 +502,9 @@ async def route(msg: NormalizedMessage) -> None:
                 f"{'✅' if decision == 'approved' else '❌'} {approval_id} {decision}"
             )
             return
-        reply = await _resume_pending_in_session(msg, session_id, approval_id, decision)
-        if reply:
-            await msg.reply_func(reply)
+        # _resume_pending_in_session delivers the final reply to the persisted address itself;
+        # re-posting here via the approve message's reply_func would land it in the wrong place.
+        await _resume_pending_in_session(msg, session_id, approval_id, decision)
         return
 
     # Resolve agent config first — the access gate is per-platform-connector. When the

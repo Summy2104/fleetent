@@ -54,6 +54,13 @@ context of the message or click that triggered the resolution — so resumed out
 in the original chat/thread with upload capability intact. The resolved pending entry
 MUST be removed from `meta.pending_approvals`.
 
+The resumed run's **final reply** (including the delivery fact trailer) SHALL be delivered
+by the resume path itself via the persisted-address replier, so it returns to the original
+conversation (the same channel thread, or the same DM). The reply_func of the message or
+button click that triggered the resolution MUST NOT be used to post the resumed final
+reply — doing so would drop it at the channel top-level or in a fresh DM. When no persisted
+address exists (upgrade-era entry), delivery degrades to the triggering context.
+
 Delivery receipts produced while executing the approved tool SHALL be surfaced in the
 resumed run's final reply as the system-generated delivery fact trailer, so a successful
 proactive send is confirmed deterministically to the originating conversation rather than
@@ -84,6 +91,15 @@ continuation's finalize includes the receipts from the resumed tool execution.
 - **WHEN** an approved `send_im_message` executes during resume and the message is delivered
 - **THEN** the resumed run's final reply carries the system delivery fact trailer
   (`📬 实际投递：消息 …`) reflecting that send, independent of what the model wrote
+
+#### Scenario: final reply returns to the persisted conversation, not the trigger
+
+- **WHEN** an approval is resolved by a `approve <id>` text command (or button click) whose
+  own reply context differs from the run's persisted address (e.g. a channel run resolved
+  from the channel top-level, or a DM run)
+- **THEN** the resumed final reply (with the 📬 receipt) is delivered to the persisted
+  address (the original channel thread / original DM) via the persisted-address replier,
+  and the triggering message/click reply_func is NOT used to post it
 
 ### Requirement: Pending approvals survive a process restart
 
