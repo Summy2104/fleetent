@@ -110,6 +110,42 @@ async def test_resume_rebuilds_context_from_persisted_thread_address(
     assert sent[0]["thread"] == "170.5"
 
 
+async def test_resume_final_reply_posts_to_persisted_address_not_trigger(_resume_env, monkeypatch):
+    """The resume's final reply (incl. the 📬 receipt) MUST land in the original conversation
+    via the persisted-address replier — NOT via the approve action's reply_func (which would
+    drop it at the channel top-level / a fresh DM)."""
+    address = ConversationAddress(
+        platform="slack",
+        chat_id="C_THREAD",
+        target_type="channel",
+        thread_id="170.5",
+        user_id="U1",
+        chat_type="channel",
+        thread_root="170.5",
+    )
+    await _seed_pending("run-session", address)
+
+    posted: list[dict] = []
+
+    async def fake_send_to(platform, connector, target, text, **kw):
+        posted.append({"target": target, "text": text, **kw})
+        return True
+
+    monkeypatch.setattr(outbound, "send_to", fake_send_to)
+
+    msg = _wrong_context_msg()  # trigger is top-level DM with a DISTINCT reply_func
+    await normalizer._resume_pending_in_session(msg, "run-session", "a1", "approved")
+
+    # The continuation's final reply ("继续完成" from the mocked run) is delivered to the
+    # PERSISTED thread address, threaded — not the triggering approve context.
+    finals = [p for p in posted if p["text"] == "继续完成"]
+    assert finals, "resume final reply was not posted to the persisted address"
+    assert finals[0]["target"] == "C_THREAD"
+    assert finals[0]["thread"] == "170.5"
+    # The approve action's own reply_func MUST NOT be used for the resume reply.
+    msg.reply_func.assert_not_awaited()
+
+
 async def test_resume_missing_address_degrades_with_warning(_resume_env, monkeypatch, caplog):
     captured = _resume_env
     await _seed_pending("legacy-session", None)  # upgrade-era entry, no address
