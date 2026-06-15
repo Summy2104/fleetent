@@ -16,7 +16,6 @@ import secrets
 from typing import Any, cast
 from urllib.parse import urlencode
 
-import httpx
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 
@@ -26,6 +25,7 @@ from fleetent.platform.connector_management import (
     external_credential_store,
     external_service_store,
     mcp_server_store,
+    service_providers,
     vault_provider,
 )
 
@@ -297,14 +297,9 @@ def authorize_connector(
     state = secrets.token_urlsafe(24)
     _pending_consent_states[state] = (user.id, service_id)
     scopes = oauth_config.get("scopes", [])
-    query = {
-        "response_type": "code",
-        "client_id": client_id,
-        "redirect_uri": str(request.url_for("oauth_callback", service_id=service_id)),
-        "state": state,
-    }
-    if scopes:
-        query["scope"] = " ".join(scopes)
+    redirect_uri = str(request.url_for("oauth_callback", service_id=service_id))
+    provider = service_providers.get_provider(service_id)
+    query = provider.build_authorize_params(client_id, redirect_uri, state, scopes)
     return {"authorize_url": f"{authorize_url}?{urlencode(query)}"}
 
 
@@ -325,18 +320,15 @@ def oauth_callback(
     client_id = oauth_config.get("client_id")
     if not token_url or not client_id:
         raise HTTPException(status_code=422, detail="connector token metadata missing")
-    response = httpx.post(
+    provider = service_providers.get_provider(service_id)
+    redirect_uri = str(request.url_for("oauth_callback", service_id=service_id))
+    payload = provider.exchange_code(
+        code,
+        client_id,
+        service_providers.client_secret_for(service_id),
+        redirect_uri,
         token_url,
-        data={
-            "grant_type": "authorization_code",
-            "code": code,
-            "client_id": client_id,
-            "redirect_uri": str(request.url_for("oauth_callback", service_id=service_id)),
-        },
-        timeout=10.0,
     )
-    response.raise_for_status()
-    payload = response.json()
     external_credential_store.put_oauth_credential(
         user.id,
         service_id,
