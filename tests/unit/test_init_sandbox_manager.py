@@ -36,12 +36,21 @@ def _agent(*, multi_user: bool) -> AgentFile:
     )
 
 
-def _construct(agent: AgentFile | None) -> dict:
+def _agent_with_skill_source(source: str | None) -> AgentFile:
+    return AgentFile(
+        name="support",
+        version=1,
+        models=default_models(),
+        sandbox={"skill_mount": {"source": source}},
+    )
+
+
+def _construct(agent: AgentFile | None, **kwargs) -> dict:
     with (
         patch("fleetent.integrations.sandbox.factory.create_backend", MagicMock()),
         patch("fleetent.tools.builtin_tools.SandboxManager") as manager_cls,
     ):
-        builtin_tools.init_sandbox_manager(agent)
+        builtin_tools.init_sandbox_manager(agent, **kwargs)
     assert manager_cls.call_count == 1
     return manager_cls.call_args.kwargs
 
@@ -61,3 +70,29 @@ def test_init_without_agent_defaults_fail_safe() -> None:
     (forces per-user session isolation; harmless for a single-process one-shot)."""
     kwargs = _construct(None)
     assert kwargs["multi_user"] is True
+
+
+def test_per_agent_skills_root_is_default_source_when_unset() -> None:
+    """sandbox-skill-mount-per-agent-root: when the agent leaves skill_mount.source
+    unset, the per-agent skills root passed by boot becomes the mount source default
+    (so the mount root == the scan root), instead of the global <base>/skills."""
+    per_agent = "/home/.fleetent/agents/support/skills"
+    kwargs = _construct(_agent_with_skill_source(None), agent_skills_root=per_agent)
+    assert kwargs["skill_mount"].source == per_agent
+
+
+def test_explicit_skill_source_wins_over_per_agent_root() -> None:
+    """An explicitly configured skill_mount.source takes precedence over the
+    per-agent default."""
+    kwargs = _construct(
+        _agent_with_skill_source("/operator/custom/skills"),
+        agent_skills_root="/home/.fleetent/agents/support/skills",
+    )
+    assert kwargs["skill_mount"].source == "/operator/custom/skills"
+
+
+def test_no_skills_root_keeps_global_fallback() -> None:
+    """Backward compat: a call without agent_skills_root keeps source as the agent's
+    own value (None → manager falls back to the global effective root as before)."""
+    kwargs = _construct(_agent_with_skill_source(None))
+    assert kwargs["skill_mount"].source is None

@@ -48,7 +48,7 @@ async def test_agent_permission_gate_enabled_readable_at_boot(
 
     loaded_agent = None
 
-    async def capture_infra(agent, data_dir):
+    async def capture_infra(agent, data_dir, *, skills_root=None):
         nonlocal loaded_agent
         loaded_agent = agent
 

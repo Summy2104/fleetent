@@ -1593,6 +1593,7 @@ async def run(
     progress_func: ProgressFunc | None = None,
     session_context: Any = None,
     conversation_address: ConversationAddress | None = None,
+    delivery_ledger: list[Any] | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
@@ -1650,6 +1651,7 @@ async def run(
             progress_func=progress_func,
             session_context=session_context,
             conversation_address=conversation_address,
+            delivery_ledger=delivery_ledger,
         )
     finally:
         _active_runs -= 1
@@ -1687,6 +1689,7 @@ async def _run_inner(
     progress_func: ProgressFunc | None = None,
     session_context: Any = None,
     conversation_address: ConversationAddress | None = None,
+    delivery_ledger: list[Any] | None = None,
 ) -> str:
     # Image-bearing messages route to the vision model (D6); raises here if
     # images are present but no vision route is configured, before any LLM call.
@@ -1730,8 +1733,10 @@ async def _run_inner(
     start = time.monotonic()
     run_id = str(uuid.uuid4())
     # delivery-receipts (§2): run-level ledger collecting every outbound receipt this run,
-    # read at finalize to render the fact trailer (§3).
-    delivery_ledger: list[Any] = []
+    # read at finalize to render the fact trailer (§3). A caller may seed it (approval-suspend-
+    # resume shares one ledger between the resumed tool execution and this continuation so the
+    # trailer confirms the approved send); default None → a fresh ledger.
+    delivery_ledger = delivery_ledger if delivery_ledger is not None else []
     # SB3 D5: execution-time context channel for run_code (session/agent/features),
     # injected out-of-band only into tools that opt in; harmless for the rest.
     tool_context = ToolContext(
@@ -1744,6 +1749,10 @@ async def _run_inner(
         session_context=session_context,
         principal=principal,
         outbound_connectors=outbound_connectors or {},
+        # send-file-to-conversation: the authoritative delivery address (same one text
+        # replies use) so send_file lands the file in the current conversation — channel
+        # into that channel, DM into that DM — instead of always the requester's DM.
+        conversation_address=conversation_address,
     )
     user_input = _first_user_content(messages)
     # Class-A wiring: inject long-term context (KB + memory) and record the

@@ -243,11 +243,12 @@ async def handle_approval_action(
             outbound_connectors={"slack": client},
         )
         try:
-            reply = await normalizer._resume_pending_in_session(
+            # _resume_pending_in_session delivers the final reply to the persisted address
+            # itself; re-posting here (`_reply` targets the button's channel top-level) would
+            # land it in the wrong place.
+            await normalizer._resume_pending_in_session(
                 resume_msg, session_id, approval_id, decision
             )
-            if reply:
-                await _reply(reply)
         except Exception as exc:  # noqa: BLE001 — decision stands; resume is best-effort
             logger.warning("approval_button_resume_failed", approval_id=approval_id, error=str(exc))
 

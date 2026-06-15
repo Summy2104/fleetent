@@ -31,3 +31,17 @@ def test_string_args_passthrough_when_not_json_object():
     summary = build_tool_args_summary("plain string args")
 
     assert summary == "plain string args"
+
+
+def test_non_serializable_arg_value_does_not_raise():
+    """A non-JSON-serializable arg value (e.g. an injected ToolContext) degrades to a
+    string instead of raising — a trace summary must never crash its caller
+    (fix-approval-resume-serialization)."""
+
+    class _Weird:
+        def __repr__(self) -> str:
+            return "<weird>"
+
+    summary = build_tool_args_summary({"target": "U2", "ctx": _Weird()})
+    assert isinstance(summary, str)
+    assert "U2" in summary  # benign args still rendered

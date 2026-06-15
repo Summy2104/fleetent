@@ -258,11 +258,19 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     artifact_exchange.set_views_root(data_dir.parent / "exchange" / ".views")
 
 
-async def _start_infra(agent: AgentFile, data_dir: Path) -> None:
+async def _start_infra(
+    agent: AgentFile, data_dir: Path, *, skills_root: Path | None = None
+) -> None:
     """Best-effort process infrastructure: sandbox probe, per-agent MCP, session upkeep.
 
     Each step mirrors the platform lifespan but scoped to this one agent; a failure is
     logged and never aborts boot (same best-effort posture as the platform).
+
+    `skills_root` is this agent's per-agent skills root (the same `home_dir/skills`
+    boot scans the skill index from); it seeds the sandbox skill-mount source default so
+    the container's `/workspace/skills` matches the scan root
+    (sandbox-skill-mount-per-agent-root). None derives it from `data_dir.parent`
+    (== home_dir, mirroring the MCP `agent_home` derivation below).
     """
     _init_agent_db_schema(data_dir, agent_id=agent.name, tenant_id=agent.tenant_id)
     from fleetent.integrations.sandbox import enablement as sandbox_enablement
@@ -274,7 +282,7 @@ async def _start_infra(agent: AgentFile, data_dir: Path) -> None:
     from fleetent.tools.builtin_tools import init_sandbox_manager
 
     backend = create_backend(agent)
-    init_sandbox_manager(agent)
+    init_sandbox_manager(agent, agent_skills_root=skills_root or (data_dir.parent / "skills"))
 
     mode = await sandbox_enablement.get_effective_mode(backend)  # one-time probe, cached
     # sandbox-runtime-lifecycle-wiring: only when the backend is usable (effective mode
@@ -385,12 +393,15 @@ async def boot(
     vector_store.configure_from_active_agent()
     # Build this agent's skill index from its OWN home (self-contained: never the
     # process CWD or FLEETENT_SKILLS_DIR). materialize copies skill files to home/skills/;
-    # a missing dir scans to builtin-only (skill-nested-scan safe).
-    scan_skills(skills_dir=str(home_dir / "skills"))
+    # a missing dir scans to builtin-only (skill-nested-scan safe). The same per-agent
+    # root seeds the sandbox skill-mount default so the container's /workspace/skills ==
+    # this scan root (sandbox-skill-mount-per-agent-root).
+    skills_root = home_dir / "skills"
+    scan_skills(skills_dir=str(skills_root))
     load_plugins()
 
     if with_infra:
-        await _start_infra(agent, home_dir / "data")
+        await _start_infra(agent, home_dir / "data", skills_root=skills_root)
 
     if supervisor is None:
         from fleetent.im_gateway.slack_supervisor import SlackSupervisor

@@ -55,6 +55,13 @@ class ToolContext:
     # send proactively (send_im_message). Empty when the run path has no IM gateway
     # (TUI / HTTP) — such tools must degrade with an explanatory result.
     outbound_connectors: dict[str, Any] = field(default_factory=dict)
+    # Authoritative current-conversation delivery address (outbound.ConversationAddress:
+    # platform/chat_id/target_type/thread_id) — the same address text replies use, so
+    # send_file delivers a file back to the current conversation (channel -> channel,
+    # DM -> DM) rather than always the requester's DM. Typed Any to keep registry free of
+    # an outbound import. None = no gateway address (standalone CLI / streaming) → send_file
+    # falls back to session_context.sender_id (DM).
+    conversation_address: Any = None
 
 
 _registry: dict[str, tuple[Callable[..., Any], ToolSchema]] = {}
@@ -308,7 +315,7 @@ def dispatch(
             raise PermissionError(f"MCP server '{server_id}' not in agent scope")
 
     kwargs: dict[str, Any] = (
-        arguments_json if isinstance(arguments_json, dict) else json.loads(arguments_json)
+        dict(arguments_json) if isinstance(arguments_json, dict) else json.loads(arguments_json)
     )
     # Agent-scoped MCP: route through the scope-keyed session, not the global closure.
     if is_mcp and mcp_scope is not None:

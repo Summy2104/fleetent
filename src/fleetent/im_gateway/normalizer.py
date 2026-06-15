@@ -382,17 +382,26 @@ async def _resume_pending_in_session(
         conversation_address = None
     progress_func = msg.progress_func or _noop_progress
 
+    # approval-suspend-resume + delivery-receipts: share ONE ledger between the resumed tool
+    # execution and the continuation run, so the approved send's receipt is rendered into the
+    # continuation's final reply as the deterministic "📬 实际投递" trailer (not left to the model).
+    import uuid
+
+    shared_ledger: list[object] = []
     tool_context = ToolContext(
         agent_name=agent.name if agent else None,
         features=agent_features or {},
         session_id=session_id,
         session_context=session_context,
         outbound_connectors=msg.outbound_connectors,
+        run_id=str(uuid.uuid4()),
+        delivery_ledger=shared_ledger,
     )
 
     async def continue_run(history: list[dict[str, object]]) -> str:
         return await agent_loop.run(
             messages=history,
+            delivery_ledger=shared_ledger,
             principal=Principal(user_id=msg.user_id, tenant_id="default"),
             reply_func=reply_func,
             allowed_tools=allowed_tools,
@@ -431,6 +440,12 @@ async def _resume_pending_in_session(
             continue_run=continue_run,
         )
         await session_mgr.save(session_id, history)
+    # Deliver the continuation's final reply to the ORIGINAL conversation via the
+    # persisted-address replier — NOT the approve action's reply_func, which would land it
+    # at the channel top-level or a fresh DM (approval-suspend-resume: resumed output returns
+    # to the original chat/thread). The caller therefore must NOT re-post the return value.
+    if reply:
+        await reply_func(reply)
     return reply
 
 
@@ -487,9 +502,9 @@ async def route(msg: NormalizedMessage) -> None:
                 f"{'✅' if decision == 'approved' else '❌'} {approval_id} {decision}"
             )
             return
-        reply = await _resume_pending_in_session(msg, session_id, approval_id, decision)
-        if reply:
-            await msg.reply_func(reply)
+        # _resume_pending_in_session delivers the final reply to the persisted address itself;
+        # re-posting here via the approve message's reply_func would land it in the wrong place.
+        await _resume_pending_in_session(msg, session_id, approval_id, decision)
         return
 
     # Resolve agent config first — the access gate is per-platform-connector. When the

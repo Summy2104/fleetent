@@ -239,6 +239,62 @@ async def test_requester_prompt_degrades_when_reply_func_rejects_blocks() -> Non
     assert any("approve req2" in t for t in texts)
 
 
+async def test_requester_prompt_shows_resolved_recipient() -> None:
+    """send_im_message prompt names the resolved recipient + type + preview."""
+    gate = PermissionGate()
+    connector = AsyncMock()
+    connector.users_info = AsyncMock(return_value={"user": {"profile": {"display_name": "张三"}}})
+    captured: list[dict] = []
+
+    async def reply(text: str, blocks=None) -> None:
+        captured.append({"text": text, "blocks": blocks})
+
+    await gate.request_approval(
+        approval_id="reqr",
+        risk_level="medium",
+        tool_name="send_im_message",
+        tool_args={"target": "U_OTHER", "text": "季度报告请查收", "target_type": "user"},
+        requester_user_id="U_REQ",
+        reply_func=reply,
+        session_id="s1",
+        approval_routing=_requester_routing(),
+        outbound_connectors={"slack": connector},
+    )
+
+    prompt = next(c for c in captured if "approve reqr" in c["text"])
+    blob = prompt["text"] + " " + str(prompt["blocks"])
+    assert "@张三" in blob  # resolved recipient shown
+    assert "私信" in blob
+    assert "季度报告" in blob  # text preview
+
+
+async def test_requester_prompt_recipient_resolution_failure_degrades() -> None:
+    """If name resolution fails, the prompt still goes out with the raw id (not blocked)."""
+    gate = PermissionGate()
+    connector = AsyncMock()
+    connector.users_info = AsyncMock(side_effect=RuntimeError("api down"))
+    captured: list[dict] = []
+
+    async def reply(text: str, blocks=None) -> None:
+        captured.append({"text": text, "blocks": blocks})
+
+    result = await gate.request_approval(
+        approval_id="reqf",
+        risk_level="medium",
+        tool_name="send_im_message",
+        tool_args={"target": "U_OTHER", "text": "hi", "target_type": "user"},
+        requester_user_id="U_REQ",
+        reply_func=reply,
+        session_id="s1",
+        approval_routing=_requester_routing(),
+        outbound_connectors={"slack": connector},
+    )
+
+    assert result == "pending"
+    prompt = next(c for c in captured if "approve reqf" in c["text"])
+    assert "U_OTHER" in prompt["text"] + " " + str(prompt["blocks"])  # raw id fallback
+
+
 async def test_outbound_approver_dm_carries_blocks() -> None:
     gate = PermissionGate()
     connectors = _make_connectors()

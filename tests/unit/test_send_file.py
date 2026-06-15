@@ -95,6 +95,115 @@ async def test_send_file_dm_session_scope_sends_to_fixed_recipient(tmp_path) -> 
     assert "slack:U_SENDER" in result
 
 
+# ── send-file-to-conversation: recipient = current conversation address ───────
+
+
+def _ctx_with_address(
+    *, address: object, platform: str = "slack", connector: object | None = None
+) -> ToolContext:
+    """A ToolContext carrying an authoritative conversation_address (IM gateway path)."""
+    return ToolContext(
+        session_id="sess-1",
+        agent_name=None,
+        session_context=SessionContext(platform=platform, sender_id="U_SENDER", chat_type="dm"),
+        outbound_connectors={platform: connector if connector is not None else object()},
+        conversation_address=address,
+    )
+
+
+async def test_send_file_channel_address_posts_to_channel(tmp_path) -> None:
+    """A channel conversation_address delivers the file into that channel, with thread."""
+    from fleetent.outbound import ConversationAddress
+    from fleetent.tools.builtin_tools import send_file
+
+    (tmp_path / "report.xlsx").write_bytes(b"x")
+    addr = ConversationAddress(
+        platform="slack",
+        chat_id="C_CHANNEL",
+        target_type="channel",
+        thread_id="1781.0001",
+        chat_type="channel",
+    )
+    connector = object()
+    with (
+        _patch_manager(tmp_path),
+        patch(
+            "fleetent.outbound.send_file_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=True,
+                    platform="slack",
+                    target="C_CHANNEL",
+                    target_type="channel",
+                    kind="file",
+                )
+            ),
+        ) as send,
+    ):
+        result = await send_file(
+            path="report.xlsx", tool_context=_ctx_with_address(address=addr, connector=connector)
+        )
+
+    args = send.call_args
+    assert args.args[0] == "slack"
+    assert args.args[1] is connector
+    assert args.args[2] == "C_CHANNEL"  # target = channel id, not the sender's DM
+    assert args.args[3] == str(tmp_path / "report.xlsx")
+    assert args.kwargs.get("target_type") == "channel"
+    assert args.kwargs.get("thread") == "1781.0001"
+    assert "slack:C_CHANNEL" in result
+
+
+async def test_send_file_dm_address_sends_to_dm(tmp_path) -> None:
+    """A DM conversation_address delivers to that DM (target_type=user)."""
+    from fleetent.outbound import ConversationAddress
+    from fleetent.tools.builtin_tools import send_file
+
+    (tmp_path / "report.pdf").write_bytes(b"%PDF")
+    addr = ConversationAddress(platform="slack", chat_id="D_DM", target_type="user", chat_type="dm")
+    with (
+        _patch_manager(tmp_path),
+        patch(
+            "fleetent.outbound.send_file_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=True, platform="slack", target="D_DM", target_type="user", kind="file"
+                )
+            ),
+        ) as send,
+    ):
+        result = await send_file(path="report.pdf", tool_context=_ctx_with_address(address=addr))
+
+    args = send.call_args
+    assert args.args[2] == "D_DM"
+    assert args.kwargs.get("target_type") == "user"
+    assert "slack:D_DM" in result
+
+
+async def test_send_file_no_address_falls_back_to_sender_dm(tmp_path) -> None:
+    """Without a conversation_address, recipient falls back to session_context.sender_id DM."""
+    from fleetent.tools.builtin_tools import send_file
+
+    (tmp_path / "report.pdf").write_bytes(b"%PDF")
+    with (
+        _patch_manager(tmp_path),
+        patch(
+            "fleetent.outbound.send_file_to",
+            AsyncMock(
+                return_value=DeliveryReceipt(
+                    ok=True, platform="slack", target="U_SENDER", target_type="user", kind="file"
+                )
+            ),
+        ) as send,
+    ):
+        result = await send_file(path="report.pdf", tool_context=_ctx())
+
+    args = send.call_args
+    assert args.args[2] == "U_SENDER"  # legacy DM fallback
+    assert args.kwargs.get("target_type", "user") == "user"
+    assert "slack:U_SENDER" in result
+
+
 # ── 2.2 path translation / traversal ─────────────────────────────────────────
 
 

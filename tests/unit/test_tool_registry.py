@@ -237,6 +237,49 @@ def test_dispatch_injects_tool_context_into_opt_in_tool():
     assert received["ctx"] is ctx
 
 
+def test_dispatch_does_not_mutate_caller_dict_args():
+    """dispatch must not inject out-of-band context into the caller's args dict.
+
+    fix-approval-resume-serialization: the resume path passes entry["tool_args"] (a dict)
+    to dispatch then summarizes it; if dispatch injected tool_context/cancel_token in-place,
+    json.dumps of that summary would crash on the ToolContext. The tool still receives the
+    injected context (behavior unchanged); only the caller's dict stays clean.
+    """
+    from fleetent.tools.registry import ToolContext
+
+    received: dict[str, object] = {}
+
+    @tool_registry.tool
+    def ctx_probe(x: str, tool_context=None) -> str:
+        """opts into the execution context."""
+        received["ctx"] = tool_context
+        return x
+
+    args = {"x": "v"}
+    ctx = ToolContext(agent_name="a")
+    tool_registry.dispatch("ctx_probe", args, tool_context=ctx)
+
+    assert received["ctx"] is ctx  # tool still got the injected context
+    assert "tool_context" not in args  # caller's dict not polluted
+    assert "cancel_token" not in args
+    assert args == {"x": "v"}
+
+
+def test_tool_context_carries_conversation_address():
+    """ToolContext exposes the authoritative current-conversation delivery address.
+
+    send-file-to-conversation: send_file resolves its recipient from this address
+    (channel -> channel, DM -> DM), the same address text replies use. Defaults to
+    None so non-gateway run paths (standalone CLI / streaming) fall back gracefully.
+    """
+    from fleetent.tools.registry import ToolContext
+
+    assert ToolContext().conversation_address is None
+    addr = object()
+    ctx = ToolContext(conversation_address=addr)
+    assert ctx.conversation_address is addr
+
+
 def test_dispatch_does_not_inject_context_into_non_opt_in_tool():
     from fleetent.tools.registry import ToolContext
 

@@ -66,12 +66,23 @@ def _get_manager() -> SandboxManager:
     return _MANAGER
 
 
-def init_sandbox_manager(agent: object | None = None) -> SandboxManager:
+def init_sandbox_manager(
+    agent: object | None = None,
+    *,
+    agent_skills_root: str | Path | None = None,
+) -> SandboxManager:
     """(Re)build the process sandbox manager with the agent-selected backend.
 
     Called by the agent runtime at startup so a standalone agent's `agent.yaml`
     `sandbox.backend` override takes effect (factory precedence: agent > platform >
     docker). `agent` is an `AgentFile`; typed loosely to avoid a runtime import cycle.
+
+    `agent_skills_root` (sandbox-skill-mount-per-agent-root) is the per-agent skills
+    root that boot also scans the skill index from (`home_dir/skills`). When the agent
+    leaves `sandbox.skill_mount.source` unset, this becomes the mount source default so
+    the container's `/workspace/skills` == the scan root, rather than the global
+    `<base>/skills` the manager would otherwise fall back to. An explicit
+    `skill_mount.source` still wins; None (no boot wiring) preserves the global fallback.
     """
     global _MANAGER
     from fleetent.agent_config import AgentFile
@@ -91,9 +102,14 @@ def init_sandbox_manager(agent: object | None = None) -> SandboxManager:
     multi_user = True
     if resolved is not None:
         # Per-agent override of the skills bind-mount (sandbox-skill-mount); None lets
-        # the manager fall back to the platform `sandbox.skill_mount` defaults.
+        # the manager fall back to the platform `sandbox.skill_mount` defaults — except
+        # boot supplies the per-agent skills root so an unset source defaults to the same
+        # root the skill index was scanned from (sandbox-skill-mount-per-agent-root).
         sm = resolved.sandbox.skill_mount
-        skill_mount = SkillMountConfig(enabled=sm.enabled, read_only=sm.read_only, source=sm.source)
+        source = sm.source
+        if source is None and agent_skills_root is not None:
+            source = str(agent_skills_root)
+        skill_mount = SkillMountConfig(enabled=sm.enabled, read_only=sm.read_only, source=source)
         # Per-agent dependency-image persistence (sandbox-image-persistence): an
         # independent switch from workspace_scope. Default off keeps prior behaviour.
         image_persistence = resolved.sandbox.image_persistence
@@ -920,8 +936,21 @@ async def send_file(path: str, tool_context: ToolContext | None = None) -> str:
     except (ValueError, FileNotFoundError) as exc:
         return f"无法发送：{exc}"
 
-    platform = str(getattr(sc, "platform", "") or "")
-    recipient = str(getattr(sc, "sender_id", "") or "")
+    # Recipient = the current conversation address, the same one text replies use, so a file
+    # lands where the conversation lives: channel -> that channel (threaded), DM -> that DM
+    # (send-file-to-conversation). When no authoritative address is injected (standalone CLI /
+    # streaming / no gateway), fall back to the sender's DM (legacy behavior).
+    address = getattr(tool_context, "conversation_address", None) if tool_context else None
+    if address is not None:
+        platform = str(getattr(address, "platform", "") or getattr(sc, "platform", "") or "")
+        recipient = str(getattr(address, "chat_id", "") or "")
+        target_type = str(getattr(address, "target_type", "user") or "user")
+        thread = getattr(address, "thread_id", None)
+    else:
+        platform = str(getattr(sc, "platform", "") or "")
+        recipient = str(getattr(sc, "sender_id", "") or "")
+        target_type = "user"
+        thread = None
     connectors = tool_context.outbound_connectors if tool_context else {}
     connector = connectors.get(platform)
     if connector is None:
@@ -934,7 +963,9 @@ async def send_file(path: str, tool_context: ToolContext | None = None) -> str:
     from fleetent import outbound
 
     try:
-        sent = await outbound.send_file_to(platform, connector, recipient, str(host_path))
+        sent = await outbound.send_file_to(
+            platform, connector, recipient, str(host_path), target_type=target_type, thread=thread
+        )
     except Exception as exc:  # noqa: BLE001 — outbound must never abort the agent run
         logger.warning("send_file delivery error on %s: %s", platform, exc)
         return f"外发失败：{platform} 投递文件时出错，请稍后重试。"

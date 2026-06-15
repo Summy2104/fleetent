@@ -75,6 +75,72 @@ async def test_approve_executes_tool_injects_result_and_continues(_seeded, monke
     assert reply == "好的，已帮你发出。"
 
 
+async def test_execute_tool_dict_args_does_not_crash_on_summary():
+    """Regression (fix-approval-resume-serialization): resume executes a tool with a DICT
+    args entry; dispatch injects tool_context. The post-execution tool_call summary MUST NOT
+    crash on the injected ToolContext, and the args entry stays clean."""
+    import fleetent.runtime.approval_resume as ar
+    from fleetent.tools import registry as tool_registry
+    from fleetent.tools.registry import ToolContext
+
+    @tool_registry.tool
+    def resume_probe(target: str, tool_context=None) -> str:
+        """opt-in tool exercised on the resume path."""
+        return f"sent to {target}"
+
+    args = {"target": "U2"}
+    ctx = ToolContext(agent_name="a", session_id="s1")
+    # _execute_tool dispatches then records the tool_call (build_tool_args_summary in finally).
+    result = await ar._execute_tool("resume_probe", args, ctx, "tc1")
+
+    assert result == "sent to U2"
+    assert "tool_context" not in args  # caller's entry args not polluted
+    # And the args summary built over those args is ToolContext-free + serializable.
+    from fleetent.observability import build_tool_args_summary
+
+    assert "ToolContext" not in build_tool_args_summary(args)
+
+
+async def test_resumed_send_receipt_flows_to_continuation_trailer(_seeded, monkeypatch):
+    """A shared delivery ledger lets the approved send's receipt reach the continuation's
+    trailer — the deterministic '📬 实际投递' confirmation, not left to the model."""
+    from fleetent.observability.traces import render_delivery_trailer
+    from fleetent.outbound import DeliveryReceipt
+
+    ar, entry, removed = _seeded
+    shared_ledger: list[object] = []
+    ctx = ToolContext(outbound_connectors={"slack": object()}, delivery_ledger=shared_ledger)
+
+    def fake_dispatch(name, args, **kw):
+        # Mirror _record_delivery: the executed send appends its receipt to the ctx ledger.
+        kw["tool_context"].delivery_ledger.append(
+            DeliveryReceipt(ok=True, platform="slack", target="U2", target_type="user", kind="text")
+        )
+        return "已发送私信到 slack:U2"
+
+    monkeypatch.setattr(ar, "dispatch", fake_dispatch)
+
+    async def continue_run(msgs):
+        # Production continue_run is agent_loop.run sharing this SAME ledger; emulate the
+        # finalize trailer render over it.
+        base = "好的，已帮你发出。"
+        trailer = render_delivery_trailer(shared_ledger)
+        return f"{base}\n\n{trailer}" if trailer else base
+
+    reply = await resume_pending_approval(
+        session_id="slack:dm:U_REQ:1.1",
+        approval_id="a1",
+        decision="approved",
+        messages=[],
+        tool_context=ctx,
+        continue_run=continue_run,
+    )
+
+    assert len(shared_ledger) == 1  # the resumed send recorded into the shared ledger
+    assert "📬 实际投递" in reply
+    assert "消息" in reply
+
+
 async def test_reject_skips_execution_injects_decline_and_continues(_seeded, monkeypatch):
     ar, entry, removed = _seeded
 
