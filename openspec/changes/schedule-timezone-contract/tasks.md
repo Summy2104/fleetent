@@ -1,12 +1,12 @@
 ## 1. 工具契约可见性 — 枚举（Literal）
 
-- [ ] 1.1 写失败测试（unit, `tests/unit/test_builtin_tools_schedule_schema.py`）：从 `get_schemas()` 取 `schedule` schema，断言 `task_type` 暴露 enum `["notify","generate","action"]`、`schedule_kind` 暴露 enum `["cron","once","interval"]`、`action` 与 `notify_target_type` 暴露各自枚举。运行最窄命令见红。
-- [ ] 1.2 实现：把 `schedule` 签名的 `action`/`schedule_kind`/`task_type`/`notify_target_type` 改为 `Annotated[Literal[...], "desc"]`。运行同一命令见绿。
+- [x] 1.1 写失败测试（unit, `tests/unit/test_builtin_tools_schedule_schema.py`）：从 `get_schemas()` 取 `schedule` schema，断言 `task_type` 暴露 enum `["notify","generate","action"]`、`schedule_kind` 暴露 enum `["cron","once","interval"]`、`action` 与 `notify_target_type` 暴露各自枚举。运行最窄命令见红。
+- [x] 1.2 实现：把 `schedule` 签名的 `action`/`schedule_kind`/`task_type`/`notify_target_type` 改为 `Annotated[Literal[...], "desc"]`。运行同一命令见绿。
 
 ## 2. 工具契约可见性 — 参数描述（Annotated）
 
-- [ ] 2.1 写失败测试（unit, 同上文件）：断言 `timezone` 与 `cron_expr` 参数的 `description` 含"按时区本地钟面时间填、勿预转 UTC"语义，且 `timezone` 描述含"留空用部署默认"；`task_type` 描述含 notify/generate/action 选择判据。见红。
-- [ ] 2.2 实现：给 `timezone`/`cron_expr`/`run_at`/`interval_seconds`/`message`/`notify_text`/`notify_platform`/`notify_target`/`name`/`task_id` 补 `Annotated` 中文描述（`timezone` 写明 no-pre-convert + 留空用部署默认；`cron_expr` 给"每天本地 20:34 → '34 20 * * *'"范例；`task_type` 写明三类判据与默认 generate）。见绿。
+- [x] 2.1 写失败测试（unit, 同上文件）：断言 `timezone` 与 `cron_expr` 参数的 `description` 含"按时区本地钟面时间填、勿预转 UTC"语义，且 `timezone` 描述含"留空用部署默认"；`task_type` 描述含 notify/generate/action 选择判据。见红。
+- [x] 2.2 实现：给 `timezone`/`cron_expr`/`run_at`/`interval_seconds`/`message`/`notify_text`/`notify_platform`/`notify_target`/`name`/`task_id` 补 `Annotated` 中文描述（`timezone` 写明 no-pre-convert + 留空用部署默认；`cron_expr` 给"每天本地 20:34 → '34 20 * * *'"范例；`task_type` 写明三类判据与默认 generate）。见绿。
 
 ## 3. 时区解析链 — 去硬编码 UTC
 
