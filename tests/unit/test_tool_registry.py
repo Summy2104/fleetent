@@ -237,6 +237,21 @@ def test_dispatch_injects_tool_context_into_opt_in_tool():
     assert received["ctx"] is ctx
 
 
+def test_tool_context_carries_conversation_address():
+    """ToolContext exposes the authoritative current-conversation delivery address.
+
+    send-file-to-conversation: send_file resolves its recipient from this address
+    (channel -> channel, DM -> DM), the same address text replies use. Defaults to
+    None so non-gateway run paths (standalone CLI / streaming) fall back gracefully.
+    """
+    from fleetent.tools.registry import ToolContext
+
+    assert ToolContext().conversation_address is None
+    addr = object()
+    ctx = ToolContext(conversation_address=addr)
+    assert ctx.conversation_address is addr
+
+
 def test_dispatch_does_not_inject_context_into_non_opt_in_tool():
     from fleetent.tools.registry import ToolContext
 

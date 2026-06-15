@@ -1744,6 +1744,10 @@ async def _run_inner(
         session_context=session_context,
         principal=principal,
         outbound_connectors=outbound_connectors or {},
+        # send-file-to-conversation: the authoritative delivery address (same one text
+        # replies use) so send_file lands the file in the current conversation — channel
+        # into that channel, DM into that DM — instead of always the requester's DM.
+        conversation_address=conversation_address,
     )
     user_input = _first_user_content(messages)
     # Class-A wiring: inject long-term context (KB + memory) and record the

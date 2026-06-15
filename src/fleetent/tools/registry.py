@@ -55,6 +55,13 @@ class ToolContext:
     # send proactively (send_im_message). Empty when the run path has no IM gateway
     # (TUI / HTTP) — such tools must degrade with an explanatory result.
     outbound_connectors: dict[str, Any] = field(default_factory=dict)
+    # Authoritative current-conversation delivery address (outbound.ConversationAddress:
+    # platform/chat_id/target_type/thread_id) — the same address text replies use, so
+    # send_file delivers a file back to the current conversation (channel -> channel,
+    # DM -> DM) rather than always the requester's DM. Typed Any to keep registry free of
+    # an outbound import. None = no gateway address (standalone CLI / streaming) → send_file
+    # falls back to session_context.sender_id (DM).
+    conversation_address: Any = None
 
 
 _registry: dict[str, tuple[Callable[..., Any], ToolSchema]] = {}
