@@ -14,8 +14,8 @@ definitions:
           - uv sync --frozen --group dev
           - uv run alembic upgrade head
           - make test-unit-ci
-    - step: &integration-tests
-        name: integration tests
+    - step: &daily-integration-coverage
+        name: integration tests + combined coverage
         caches:
           - uv
         script:
@@ -23,7 +23,7 @@ definitions:
           - export ANTHROPIC_API_KEY=test-key
           - uv sync --frozen --group dev
           - uv run alembic upgrade head
-          - make test-integration
+          - make test-coverage-ci
 
 pipelines:
   pull-requests:
@@ -36,4 +36,4 @@ pipelines:
 
   custom:
     integration-tests:
-      - step: *integration-tests
+      - step: *daily-integration-coverage
