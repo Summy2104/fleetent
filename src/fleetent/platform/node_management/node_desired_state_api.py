@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from fleetent import agent_store
-from fleetent.platform.agent_lifecycle import materialize
+from fleetent.platform.agent_lifecycle import credential_slots, materialize, secret_store
 from fleetent.platform.agent_management_console import agent_admin_store
 from fleetent.platform.node_management import node_store, placement_store
 
@@ -67,6 +67,7 @@ def get_desired_state(
                 "config": materialize.desired_state_payload_from_agent_file(
                     materialize.agent_file_from_store(agent)
                 ),
+                "secrets": _agent_secrets(agent),
             }
         )
     return {"node_id": node_id, "agents": agents}
@@ -90,3 +91,16 @@ def post_node_status(
             detail=report.detail,
         )
     return {"node_id": node_id, "updated": len(body.agents)}
+
+
+def _agent_secrets(agent: agent_store.Agent) -> dict[str, str]:
+    secrets: dict[str, str] = {}
+    for slot in credential_slots.list_slots(agent):
+        if slot.mode != "inject":
+            continue
+        if secret_store.status(agent.id, slot.env_name) != "set":
+            continue
+        value = secret_store.get_decrypted(agent.id, slot.env_name)
+        if value is not None:
+            secrets[slot.env_name] = value
+    return secrets
