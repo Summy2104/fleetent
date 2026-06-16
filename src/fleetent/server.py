@@ -44,6 +44,7 @@ from fleetent.platform.chat_management import chat_admin_api
 from fleetent.platform.connector_management import connector_admin_api, vault_provider
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import provider_admin_api
+from fleetent.platform.node_management import node_desired_state_api
 from fleetent.platform.skill_management import skill_admin_api
 from fleetent.platform.user_management import user_admin_api
 from fleetent.platform.user_management.api_key_store import resolve as _resolve_api_key
@@ -273,6 +274,7 @@ app.include_router(agent_admin_api.router)
 app.include_router(stats_admin_api.router)
 app.include_router(agent_apply_api.router)
 app.include_router(lifecycle_admin_api.router)
+app.include_router(node_desired_state_api.router)
 
 
 _UNSET: Any = object()  # distinguishes "field omitted" from an explicit None (clear)

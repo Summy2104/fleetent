@@ -13,6 +13,7 @@ from fleetent.db import SQLiteDatabase, create_database
 from fleetent.user_store import _hash_key
 
 _COLS = "id, name, key_hash, labels, registered_at, last_seen_at, created_at, updated_at"
+_STATUS_COLS = "agent_id, node_id, phase, pid, health, detail, reported_at"
 
 
 def _database() -> SQLiteDatabase:
@@ -113,6 +114,80 @@ def deregister_node(node_id: str) -> None:
     if int(placement_count["count"]) > 0:
         raise ValueError(f"node {node_id!r} still has pinned agents")
     _database().execute("DELETE FROM nodes WHERE id = :id", {"id": node_id})
+
+
+def touch_last_seen(node_id: str) -> None:
+    now = _now()
+    _database().execute(
+        """
+        UPDATE nodes
+        SET last_seen_at = :last_seen_at, updated_at = :updated_at
+        WHERE id = :id
+        """,
+        {"id": node_id, "last_seen_at": now, "updated_at": now},
+    )
+
+
+def upsert_agent_status(
+    agent_id: int,
+    *,
+    node_id: str,
+    phase: str,
+    pid: int | None = None,
+    health: str | None = None,
+    detail: str | None = None,
+) -> dict[str, Any]:
+    reported_at = _now()
+    with _database().transaction() as conn:
+        conn.execute(
+            """
+            INSERT INTO node_agent_status (
+                agent_id, node_id, phase, pid, health, detail, reported_at
+            )
+            VALUES (:agent_id, :node_id, :phase, :pid, :health, :detail, :reported_at)
+            ON CONFLICT(agent_id) DO UPDATE SET
+                node_id = excluded.node_id,
+                phase = excluded.phase,
+                pid = excluded.pid,
+                health = excluded.health,
+                detail = excluded.detail,
+                reported_at = excluded.reported_at
+            """,
+            {
+                "agent_id": agent_id,
+                "node_id": node_id,
+                "phase": phase,
+                "pid": pid,
+                "health": health,
+                "detail": detail,
+                "reported_at": reported_at,
+            },
+        )
+    row = (
+        _database()
+        .execute(
+            f"SELECT {_STATUS_COLS} FROM node_agent_status WHERE agent_id = :agent_id",
+            {"agent_id": agent_id},
+        )
+        .fetchone()
+    )
+    assert row is not None
+    return dict(row)
+
+
+def list_agent_status_by_node(node_id: str) -> list[dict[str, Any]]:
+    rows = (
+        _database()
+        .execute(
+            (
+                f"SELECT {_STATUS_COLS} FROM node_agent_status "
+                "WHERE node_id = :node_id ORDER BY agent_id"
+            ),
+            {"node_id": node_id},
+        )
+        .fetchall()
+    )
+    return [dict(row) for row in rows]
 
 
 def _decode(row: dict[str, Any]) -> dict[str, Any]:

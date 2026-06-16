@@ -48,6 +48,7 @@ def set_delete_agent_hook(cb: Callable[[int], None]) -> None:
     global _delete_agent_hook
     _delete_agent_hook = cb
 
+
 # Agent-row columns beyond the version-derived runtime fields. Caps are not
 # versioned, so they are read straight off the agents row.
 _AGENT_ROW_COLUMNS = (
@@ -362,6 +363,41 @@ def get_by_name(name: str) -> Agent | None:
     """Return the agent: runtime fields from its active version, caps from the row."""
     db = _db()
     agent = _get_agent_row(db, name)
+    if agent is None:
+        return None
+    version = db.execute(
+        "SELECT * FROM agent_versions WHERE id = :vid",
+        {"vid": agent["active_version_id"]},
+    ).fetchone()
+    if version is None:
+        return None
+    return Agent(
+        id=int(agent["id"]),
+        name=str(agent["name"]),
+        system_prompt=str(version["system_prompt"]),
+        allowed_tools=json.loads(version["allowed_tools"]),
+        active_version_id=int(agent["active_version_id"]),
+        tenant_id=str(agent["tenant_id"]) if agent["tenant_id"] is not None else "default",
+        team_id=str(agent["team_id"]) if agent["team_id"] is not None else None,
+        skills_dir=version["skills_dir"],
+        mcp_server_ids=(
+            None if version["mcp_server_ids"] is None else json.loads(version["mcp_server_ids"])
+        ),
+        model_overrides=json.loads(version["model_overrides"])
+        if version["model_overrides"]
+        else {},
+        memory_namespace=str(version["memory_namespace"]),
+        **_parse_caps(agent),
+    )
+
+
+def get_by_id(agent_id: int) -> Agent | None:
+    """Return the agent by integer id: runtime fields from active version, caps from the row."""
+    db = _db()
+    agent = db.execute(
+        f"SELECT {_AGENT_ROW_COLUMNS} FROM agents WHERE id = :agent_id",
+        {"agent_id": agent_id},
+    ).fetchone()
     if agent is None:
         return None
     version = db.execute(
