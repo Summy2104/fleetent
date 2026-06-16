@@ -2211,7 +2211,7 @@ def run_sync(
         sandbox_mode = await sandbox_enablement.get_effective_mode()
         return await run(
             messages,
-            user_id=user_id,
+            principal=Principal(user_id=user_id, tenant_id="default"),
             system_prompt=system_prompt,
             allowed_tools=allowed_tools,
             agent_name=agent_name,
