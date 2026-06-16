@@ -5,6 +5,8 @@ from __future__ import annotations
 import sqlite3
 from unittest.mock import AsyncMock
 
+import pytest
+
 from fleetent.identity import Principal
 from fleetent.outbound import DeliveryReceipt
 
@@ -623,10 +625,13 @@ def _platform_user(user_id, status="active", tenant_id="default"):
 
 
 async def test_fire_skips_blocked_platform_user(tmp_path, monkeypatch):
+    # Platform mode: injected recheck returns None for a blocked creator → _fire skips.
     import fleetent.cron_scheduler as cs
     import fleetent.user_store as user_store
+    from fleetent.server import _cron_principal_recheck
 
     monkeypatch.setattr(user_store, "get_by_id", lambda uid: _platform_user(uid, "blocked"))
+    cs.set_principal_resolver(_cron_principal_recheck)
     run_mock = AsyncMock(return_value="r")
     monkeypatch.setattr(cs, "_agent_run", run_mock)
 
@@ -641,6 +646,21 @@ async def test_fire_skips_blocked_platform_user(tmp_path, monkeypatch):
     }
     await cs._fire(task)
     run_mock.assert_not_called()
+
+
+@pytest.fixture(autouse=True)
+def _reset_cron_principal_resolver():
+    """Fire-time principal resolver is module-global state (decouple-cron-principal-recheck).
+
+    Default to the standalone state (no resolver) and restore around every test so a
+    platform-mode test cannot leak its injected resolver into a standalone-mode test.
+    """
+    import fleetent.cron_scheduler as cs
+
+    saved = cs._principal_resolver
+    cs._principal_resolver = None
+    yield
+    cs._principal_resolver = saved
 
 
 async def test_fire_allows_im_channel_guaranteed_identity(tmp_path, monkeypatch):
@@ -669,10 +689,14 @@ async def test_fire_allows_im_channel_guaranteed_identity(tmp_path, monkeypatch)
 
 
 async def test_fire_skips_unknown_identity_without_im_origin(tmp_path, monkeypatch):
+    # Platform mode: the injected recheck rejects a vanished creator with no IM origin,
+    # and _fire must honor that None by not running.
     import fleetent.cron_scheduler as cs
     import fleetent.user_store as user_store
+    from fleetent.server import _cron_principal_recheck
 
     monkeypatch.setattr(user_store, "get_by_id", lambda uid: None)
+    cs.set_principal_resolver(_cron_principal_recheck)
     run_mock = AsyncMock(return_value="r")
     monkeypatch.setattr(cs, "_agent_run", run_mock)
 
@@ -718,20 +742,23 @@ async def test_fire_allows_when_user_management_absent(tmp_path, monkeypatch):
 
 
 async def test_fire_skips_when_principal_lookup_errors(tmp_path, monkeypatch):
-    """A lookup failure other than 'no such table' (locked DB, I/O error) fails closed.
+    """A platform lookup failure (locked DB, I/O error) fails closed.
 
-    The platform domain exists but cannot be consulted; firing with the archived
-    identity would let a possibly-blocked user's task run unverified, so skip.
+    In platform mode the injected recheck consults the users table; if that lookup
+    raises, firing with the archived identity would let a possibly-blocked user's task
+    run unverified, so _resolve_cron_principal swallows the error and skips.
     """
     import fleetent.cron_scheduler as cs
     import fleetent.session.manager as session_mgr
     import fleetent.user_store as user_store
+    from fleetent.server import _cron_principal_recheck
 
     def _locked(uid):
         raise sqlite3.OperationalError("database is locked")
 
     monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
     monkeypatch.setattr(user_store, "get_by_id", _locked)
+    cs.set_principal_resolver(_cron_principal_recheck)
     run_mock = AsyncMock(return_value="r")
     monkeypatch.setattr(cs, "_agent_run", run_mock)
 
