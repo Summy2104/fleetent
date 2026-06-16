@@ -17,12 +17,18 @@
 ## Capabilities
 
 ### New Capabilities
-- `node-desired-state-api`: 分区期望态拉取 + 实际态/心跳上报 + node 鉴权契约。
+- `node-desired-state-api`: node 鉴权 + 分区期望态拉取（按 placement 分区 + status 过滤 + 配置载荷）+ 实际态/心跳上报。
 
 ### Modified Capabilities
-<!-- apply 时核实确切的主 spec 名再写 delta： -->
-- `agent-lifecycle-toggle`: status（enabled/disabled/archived）由"仅账面态"变为**驱动期望态**的声明意图（被 desired-state API 消费）。
-- `platform-agent-lifecycle`: 生命周期语义从"platform 直接启停"转向"声明期望态 + node 调谐"（实际拆除在 C5）。
+<!-- 细化时（C1 已落地）的修订：status 的 enable/disable/archive 行为本身不变，只是
+     desired-state API 成为它的新消费者 → 按"新增行为不改既有"原则全部落在新 capability，
+     不 modify agent-lifecycle-toggle。platform-agent-lifecycle 的 start/stop 拆除属 C5，
+     C2 不碰。故本 change 无 Modified Capabilities。 -->
+<!-- 无 -->
+
+> 注：本 proposal 由 skeleton 细化（C1 `agent-node-registry` 已 apply 落地 main，迁移 096）。
+> 本 change 对着 C1 真实产物写：`placement_store.list_by_node` / `node_store.resolve_node_key` /
+> `nodes.last_seen_at` 列 / `materialize.agent_file_from_store`。
 
 ## Impact
 
