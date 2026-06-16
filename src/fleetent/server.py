@@ -17,7 +17,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[impo
 from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel
 
-from fleetent import agent_config, agent_store, connectors, user_store
+from fleetent import agent_config, agent_store, connectors, cron_scheduler, user_store
 from fleetent.auth import seed_builtin_admin
 from fleetent.config import Settings, configure_logging
 from fleetent.governance.approval_router import resolve_approval_request
@@ -112,6 +112,27 @@ def _resolve_im_identity(owner_id: str, platform: str, platform_user_id: str) ->
     return user.id
 
 
+def _cron_principal_recheck(task: dict[str, Any]) -> Principal | None:
+    """Platform fire-time creator recheck, injected into cron_scheduler at startup.
+
+    Re-verifies a fired task's creator against the `users` table: blocked → reject;
+    a creator that vanished (deleted) with no platform IM origin → reject; otherwise the
+    creator's current Principal. A vanished creator that still carries a platform IM
+    origin is trusted (channel-guaranteed identity, never resolved through the users
+    table). cron_scheduler short-circuits `system`/`default` before delegating here.
+    """
+    user_id = str(task.get("user_id") or "default")
+    u = user_store.get_by_id(user_id)
+    if u is not None:
+        if u.status == "blocked":
+            return None
+        return Principal(user_id=u.id, tenant_id=u.tenant_id)
+    origin = task.get("origin")
+    if isinstance(origin, dict) and origin.get("platform"):
+        return Principal(user_id=user_id, tenant_id="default")
+    return None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Wire platform api_keys resolver so user_store.authenticate queries the api_keys
@@ -119,6 +140,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     user_store.set_api_key_resolver(_resolve_api_key)
     connectors.set_provider(vault_provider.get_credential)
     set_im_identity_resolver(_resolve_im_identity)
+    # Platform fire-time creator recheck for cron tasks (decouple-cron-principal-recheck):
+    # standalone agents never run this lifespan, so they keep trusting the archived IM
+    # identity without opening the management DB.
+    cron_scheduler.set_principal_resolver(_cron_principal_recheck)
 
     from fleetent.platform.connector_management import external_credential_store
 
