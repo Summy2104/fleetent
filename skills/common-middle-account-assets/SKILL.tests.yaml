@@ -1,0 +1,94 @@
+trigger_tests:
+  - input: "查 new name 49 的子账户资产"
+    expected: direct
+  - input: "Alice 账户的可用数量是多少"
+    expected: direct
+  - input: "批量查 Alice、Bob、Carol 的资产"
+    expected: direct
+  - input: "account assets for Alice"
+    expected: direct
+  - input: "查 ZYJDW00203-B1 到 ZYJDW00203-B79 的资产"
+    expected: direct
+  - input: "ZYJDW00203-B1 一直到 B10 的子账户资产"
+    expected: direct
+  - input: "sub-account assets for Alice and Bob"
+    expected: direct
+
+non_trigger_tests:
+  - input: "把 Alice 账户的 USDT 提到外部地址"
+    expected: no_trigger
+    reason: "提币/打款不在本 skill 范围"
+  - input: "Alice 账户最近一周的充提流水"
+    expected: no_trigger
+    reason: "动账流水走 transaction_list_account_transactions"
+  - input: "Alice 账户的总估值折算成人民币"
+    expected: no_trigger
+    reason: "法币换算走 exchange_rate skill"
+  - input: "查一下 BTC 现在的价格"
+    expected: no_trigger
+    reason: "币价查询不属于账户资产域"
+
+dod_tests:
+  - id: dod-1-name-to-balance-single-call
+    description: "用名称直接查余额，一步完成，无需 account_id 解析"
+    scenario: "用户输入「查 Alice 的资产」"
+    expected:
+      - LLM 标准化为 --names '["Alice"]'
+      - 调用 fetch-assets.py --names '["Alice"]'
+      - 脚本内调用 balance_get_account_balance name=Alice
+      - 不调用 account_list_accounts 或 account_get_account
+
+  - id: dod-2-range-expansion-by-script
+    description: "范围由 Python 脚本确定性展开，LLM 只做语义解析"
+    scenario: "用户输入「查 ZYJDW00203-B1 到 ZYJDW00203-B5 的资产」"
+    expected:
+      - LLM 输出 --range '{"prefix":"ZYJDW00203-B","start":1,"end":5,"pad_width":0}'
+      - 脚本展开为 5 个名称
+      - fetch-assets.py 并行查询 5 个账户
+      - 生成单张合并 XLSX
+
+  - id: dod-3-over-100-confirm
+    description: "展开后 > 100 个账户，LLM 提示确认，不调用脚本"
+    scenario: "用户输入「查 B1 到 B200 的资产」"
+    expected:
+      - LLM 计算展开数量 = 200
+      - 回复「展开后共 200 个账户，请确认后再次发送」
+      - 不调用 fetch-assets.py
+
+  - id: dod-4-name-mismatch-validation
+    description: "响应 account_name 与请求 name 不匹配时，记为失败"
+    scenario: "balance_get_account_balance 返回 account_name != 请求 name"
+    expected:
+      - 脚本将该账户记为查询失败
+      - 错误信息含「名称不匹配」
+      - 其余账户正常继续
+
+  - id: dod-5-xlsx-always
+    description: "始终输出 XLSX，无 TSV 分支"
+    scenario: "查询 1 个账户"
+    expected:
+      - stdout 含「已生成 Excel 文件：」
+      - 文件扩展名为 .xlsx
+
+  - id: dod-6-partial-failure-continue
+    description: "批量中部分账户失败，其余正常出现在 XLSX，失败账户末尾单独列出"
+    scenario: "查询 Alice、BadName、Carol，BadName 返回错误"
+    expected:
+      - XLSX 只含 Alice 和 Carol 的行
+      - stdout 含「账户 BadName 查询失败：」
+      - 末尾「批量查询完成：2 成功 / 1 失败」
+
+  - id: dod-7-no-append-to-output
+    description: "agent 原样输出脚本 stdout，不追加内容"
+    scenario: "完整跑通一次查询"
+    expected:
+      - agent 不在脚本输出之外追加任何引导语或总结
+      - 不暴露内部文件路径
+
+  - id: dod-8-dedup-preserve-order
+    description: "展开后去重，保留首次出现顺序"
+    scenario: "用户输入「Alice, Bob, Alice, Carol」"
+    expected:
+      - 脚本接收 --names '["Alice","Bob","Alice","Carol"]'
+      - 展开并去重为 ["Alice","Bob","Carol"]
+      - 查询顺序为 Alice → Bob → Carol

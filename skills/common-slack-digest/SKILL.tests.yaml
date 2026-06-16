@@ -1,0 +1,140 @@
+skill: common-slack-digest
+triggers:
+  keywords:
+  - slack 总结
+  - slack digest
+  - 频道总结
+  - 消息总结
+  - 讨论总结
+  - 聊天记录
+  - slack 摘要
+  - 频道摘要
+trigger_tests:
+- input: '帮我做个 #dev-ai 的 slack 总结'
+  expect: match
+- input: '频道总结 #product'
+  expect: match
+- input: '#dev-ai 这周讨论总结'
+  expect: match
+- input: 看看 slack 摘要
+  expect: match
+- input: 帮我做个 slack digest
+  expect: match
+- input: 总结一下聊天记录
+  expect: match
+- input: 帮我写个 PRD
+  expect: no_match
+- input: 分析用户反馈
+  expect: no_match
+- input: 生成会议纪要
+  expect: no_match
+config:
+  timeout: 120s
+cases:
+- id: tc-001
+  name: 识别讨论总结模式
+  input: '总结 #dev-ai 今天的讨论
+
+    '
+  expect:
+    contains:
+    - - 讨论
+      - 总结
+    - - 频道
+      - '#dev-ai'
+      - dev-ai
+    min_length: 50
+  priority: benchmark
+  needs_external: true
+- id: tc-002
+  name: 识别活动摘要模式
+  input: '#product 这周发生了什么
+
+    '
+  expect:
+    contains:
+    - - 活动
+      - 摘要
+      - 发生
+    - - '#product'
+      - product
+    min_length: 50
+  priority: benchmark
+  needs_external: true
+- id: tc-003
+  name: 识别知识提取模式
+  input: '#dev-ai 有什么重要决策？
+
+    '
+  expect:
+    contains:
+    - - 决策
+      - 知识
+      - 结论
+    min_length: 50
+  priority: benchmark
+  needs_external: true
+- id: tc-004
+  name: 识别搜索总结模式
+  input: '搜索 #dev-ai 关于 OpenClaw 的讨论
+
+    '
+  expect:
+    contains:
+    - - 搜索
+      - OpenClaw
+    min_length: 50
+  priority: benchmark
+  needs_external: true
+- id: tc-005
+  name: gate-缺少频道信息时先澄清
+  input: '帮我做个 slack 总结
+
+    '
+  expect:
+    contains:
+    - - 频道
+      - channel
+      - '#'
+    - - 时间范围
+      - 最近
+      - 今天
+    min_length: 60
+    not_contains:
+    - - 已完成
+      - 处理完成
+      - 已同步完成
+  priority: gate
+  needs_external: false
+- id: tc-006
+  name: gate-讨论总结模式识别
+  input: '总结 #dev-ai 今天的讨论重点
+
+    '
+  expect:
+    contains:
+    - - 讨论总结
+      - 讨论
+      - 总结
+    - - '#dev-ai'
+      - dev-ai
+    min_length: 50
+  priority: gate
+  needs_external: false
+- id: tc-007
+  name: gate-搜索总结模式识别
+  input: '搜索 #dev-ai 关于发布回滚的讨论并总结
+
+    '
+  expect:
+    contains:
+    - - 搜索总结
+      - 搜索
+    - - 发布
+      - 回滚
+    - - '#dev-ai'
+      - dev-ai
+    min_length: 60
+  priority: gate
+  needs_external: false
+version: '3.0'

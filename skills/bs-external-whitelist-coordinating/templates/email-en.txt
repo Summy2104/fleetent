@@ -1,0 +1,27 @@
+To:
+- notification@nsdigital.io
+- compliance@nsdigital.io
+- {business_group_email}
+
+Subject:
+[Whitelist Address] Wallet Information_{client_company} ({application_date})
+
+---
+
+Company Name:
+
+Business Line Involved:
+
+Purpose of Payment:
+
+Country of Registration:
+
+Due to xxxxx, we are sending our receiving address:
+
+Address One:
+Currency:
+Network:
+
+Address Two:
+Currency:
+Network:

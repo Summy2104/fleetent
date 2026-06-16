@@ -1,0 +1,74 @@
+name: bs-flow-progressing
+version: 2.0.0
+tests:
+  - id: T01
+    name: 查询成功 - 有流程
+    input:
+      slack_user_id: "U0123456789"
+      slack_user_email: "zhang.san@company.com"
+      action: "query"
+    expected:
+      status: "success"
+      summary:
+        initiated_count: "> 0 OR pending_approval_count > 0"
+    description: 用户有进行中的流程时，应返回流程列表
+
+  - id: T02
+    name: 查询成功 - 无流程
+    input:
+      slack_user_id: "U9999999999"
+      slack_user_email: "new.user@company.com"
+      action: "query"
+    expected:
+      status: "no_flows"
+      summary:
+        initiated_count: 0
+        pending_approval_count: 0
+    description: 用户无进行中的流程时，应返回空列表
+
+  - id: T03
+    name: 用户未绑定
+    input:
+      slack_user_id: "UNOTEXIST"
+      slack_user_email: "notexist@external.com"
+      action: "query"
+    expected:
+      status: "user_not_found"
+    description: Slack 用户在 NS 系统中不存在时，应提示绑定
+
+  - id: T04
+    name: 交互式催办
+    input:
+      slack_user_id: "U0123456789"
+      slack_user_email: "zhang.san@company.com"
+      action: "remind"
+    expected:
+      status: "success"
+      message_contains: "请选择催办对象"
+    description: 用户说"催一下"时，应展示待审批人列表
+
+  - id: T05
+    name: 自然语言催办
+    input:
+      slack_user_id: "U0123456789"
+      slack_user_email: "zhang.san@company.com"
+      action: "remind"
+      target_approver: "王总"
+      process_no: "20260421015"
+    expected:
+      status: "success"
+      reminders_sent:
+        - target: "王总"
+          process_no: "20260421015"
+    description: 用户指定目标和流程号时，应直接发送催办
+
+  - id: T06
+    name: 批量催办超时
+    input:
+      slack_user_id: "U0123456789"
+      slack_user_email: "zhang.san@company.com"
+      action: "remind_all"
+    expected:
+      status: "success"
+      reminders_sent_count: ">= 1"
+    description: 用户说"催办超时"时，应催办所有超时审批人

@@ -1,0 +1,53 @@
+skill: common-ns-process
+description: >
+  Trigger + behavior tests for common-ns-process: workflow definitions, dashboards, process
+  instances, fund plans/paths/info, approval history.
+  Asserts wrapper usage and forbids bare mcpfast.
+test_cases:
+- name: 流程号触发资金计划链 1
+  category: trigger_positive
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查一下流程 20260410035 的资金计划
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_
+  - contains: /v2/bpmn/process_instance/number/
+  - contains: fund_plans
+- name: 查审批历史
+  category: trigger_positive
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查一下流程 20260410035 的审批历史
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_
+  - contains: /v2/bpmn/process_instance
+  - contains: /tasks
+- name: 按审批人姓名查流程 chain 4
+  category: trigger_positive
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查一下审批人 Alice Wang 处理过的流程
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_
+  - contains: /v1/management/approver/list
+  - contains: /v1/bpmn/dashboard/all
+- name: 查银行账户不应触发 process
+  category: trigger_negative
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查一下所有银行列表
+  expected_behavior:
+  - not_contains: mcpfast armada-v2-mcp.armada_
+  - not_contains: /v1/bpmn/
+  - not_contains: /v2/bpmn/
+  - not_contains: process_instance
+- name: Step 0 鉴权预检 - sender_id 缺失
+  category: auth
+  user_input: |
+    查一下流程 20260410035
+  expected_behavior:
+  - contains: 此查询仅限 Slack 渠道使用
+  - not_contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh

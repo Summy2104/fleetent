@@ -1,0 +1,30 @@
+To:
+- owen.zhang@nsdigital.io
+- mo@nsdigital.io
+
+CC:
+- {client_contact_email}
+- {business_group_email}
+- notification@nsdigital.io
+
+Subject:
+[Whitelist Address] Northstar Receiving Address - {client_company} - {business_line} - {application_date}
+
+---
+
+Hi Owen,
+
+Please review the following addresses (note: addresses become effective only after Owen replies to confirm the review).
+
+Purpose: for {business_line} business.
+
+Northstar Whitelist Receiving Addresses:
+
+Currency (Network)            Address
+{currency} ({chain_name})     {wallet_address}
+
+For the first transfer, please send a small test amount and reply-all to this whitelist email with:
+
+1. Test transfer currency and amount
+2. Test transfer TXID
+3. Our receiving address

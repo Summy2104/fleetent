@@ -1,0 +1,151 @@
+version: 1.0
+skill: bs-exchange-rate
+tests:
+  - name: default_query_no_filter
+    description: 用户未指定任何过滤条件时，按默认参数（page_num=1, page_size=50, ordering=-value）调用主接口，不追问
+    input:
+      user_message: "拉一下 CEX 账户费率列表"
+    expected:
+      mcp_call:
+        tool: "cex_list_exchange_rate_accounts"
+        args:
+          page_num: 1
+          page_size: 50
+          ordering: "-value"
+      asks_user: false
+
+  - name: market_name_to_id_hardcoded
+    description: 用户传市场名（Binance/OKX/...）时按硬编码表转 market_id，不再调用 list_market（中台已无此工具）；开户主体名直接透传到 account_owner
+    input:
+      user_message: "看下 alpha 名下在 Binance 的账户"
+    expected:
+      mcp_calls_in_order:
+        - tool: "cex_list_exchange_rate_accounts"
+          args:
+            market: "4"
+            account_owner: "alpha"
+            page_num: 1
+            page_size: 50
+            ordering: "-value"
+      market_list_market_called: false
+
+  - name: account_owner_multi_name_passthrough
+    description: 用户给多个开户主体名（逗号分隔）时直接透传到 account_owner
+    input:
+      user_message: "查 alpha,beta 名下的母账户列表"
+    expected:
+      mcp_call:
+        tool: "cex_list_exchange_rate_accounts"
+        args:
+          account_owner: "alpha,beta"
+          page_num: 1
+          page_size: 50
+          ordering: "-value"
+
+  - name: market_id_passthrough
+    description: 用户直接传 market_id（含逗号多值）时跳过名称解析
+    input:
+      user_message: "market=4,10 的母账户"
+    expected:
+      mcp_calls_in_order:
+        - tool: "cex_list_exchange_rate_accounts"
+          args:
+            market: "4,10"
+            page_num: 1
+            page_size: 50
+            ordering: "-value"
+
+  - name: unknown_market_name_degrade
+    description: 用户给的市场名不在硬编码表内时退化为全平台查询，并在输出尾部 ℹ️ 标注
+    input:
+      user_message: "查 Backpack 的账户费率"
+    expected:
+      mcp_call:
+        tool: "cex_list_exchange_rate_accounts"
+        args_not_contains: ["market"]
+      output_contains: "市场名 `Backpack` 未识别"
+
+  - name: response_pagination_fields
+    description: 解析返回固定结构 {count, total_pages, current_page, results[]}
+    input:
+      mocked_response: '{"count":128,"total_pages":3,"current_page":1,"results":[{"id":1204,"code":"Mss0009","value":"90123.4521","market":4}]}'
+    expected:
+      records_count: 1
+      total: 128
+      pages_total: 3
+      current_page: 1
+
+  - name: empty_result_friendly_message
+    description: results 为空时输出友好提示，不报错
+    input:
+      mocked_response: '{"count":0,"total_pages":0,"current_page":1,"results":[]}'
+      filters: { account_owner: "non_existing" }
+    expected:
+      output_contains: "未查到符合条件的 CEX 母账户"
+      status_error: false
+
+  - name: value_no_precision_loss
+    description: USD 估值字段 value 原字面输出，不做 round / float / 千分位
+    input:
+      mocked_response: '{"count":1,"results":[{"id":1,"code":"X","value":"123456.78901234567890"}]}'
+    expected:
+      output_contains: "123456.78901234567890"
+      output_not_contains: ["123456.79", "123,456.78"]
+
+  - name: market_id_to_name_lookup
+    description: 渲染时 market 数字 ID 反查显示名称（Binance=4, OKX=10, Bybit=19, Bitget=42, Gate=43, Deribit=44）
+    input:
+      mocked_response: '{"count":1,"results":[{"id":1,"code":"X","market":44,"value":"1"}]}'
+    expected:
+      output_contains: "Deribit"
+
+  - name: auth_error_surfaced
+    description: 401/403 时返回 missing_or_invalid_api_key
+    input:
+      stderr_contains: "401"
+    expected:
+      output:
+        status: "error"
+        reason: "missing_or_invalid_api_key"
+
+  - name: never_curls_directly
+    description: 严禁 agent 输出直接 curl 中台 HTTP 端点的指令；中台接入后必须经 middle__ MCP 工具调用（鉴权由 MCP server env 注入）
+    input:
+      user_message: "用 curl 查一下账户费率"
+    expected:
+      uses_curl: false
+      uses_middle_mcp_tool: true
+
+  - name: never_emits_api_key
+    description: 任何输出（含错误回执）都不得包含 Authorization / Bearer / X-API-Key 字面值
+    input:
+      simulate: "user pastes token-bearing curl into chat"
+    expected:
+      response_redacts_token: true
+
+trigger_tests:
+  - input: "拉一下 CEX 账户费率列表"
+    expected: direct
+  - input: "查 alpha 在 Binance 的母账户"
+    expected: direct
+  - input: "看下账户费率管理，按估值降序"
+    expected: direct
+  - input: "cex_list_exchange_rate_accounts 跑一下"
+    expected: direct
+
+non_trigger_tests:
+  - input: "USD 兑 CNY 现在多少"
+    expected: no_trigger
+    reason: "外汇牌价应走 exchange_rate_get_exchange_rate_report（法币汇率 spoke 待新建），不在本 skill 范围"
+  - input: "BTC 现在多少钱"
+    expected: no_trigger
+    reason: "实时币价应走 common-ns-monitor / 行情类 skill"
+  - input: "查 Binance 上 alpha 账户的交易费率明细"
+    expected: no_trigger
+    reason: "单账户交易费率明细应走 cex_get_account_trade_fee（待新建 spoke）"
+  - input: "查一下账户 49 下所有子账户的资产"
+    expected: no_trigger
+    reason: "账户资产查询由 common-middle-account-assets 处理"
+  - input: "Binance 资金费率"
+    expected: no_trigger
+    reason: "资金费率属于 common-ns-monitor 的监控子域，不在本 skill 范围"

@@ -1,0 +1,146 @@
+version: 1.0
+skill: common-middle-whitelist-internal
+tests:
+  - name: list_by_address_and_coin
+    description: "按地址 + 币种过滤"
+    input:
+      user_message: "查 USDT 内白名单，地址含 0x742"
+    expected:
+      mcp_call:
+        tool: "white_list_whitelist"
+        args:
+          address: "0x742"
+          coin: "USDT"
+          page: 1
+          page_size: 20
+
+  - name: list_by_subject
+    description: "按公司主体名过滤"
+    input:
+      user_message: "查公司主体 NS Trading 的内白名单"
+    expected:
+      mcp_call:
+        tool: "white_list_whitelist"
+        args:
+          subject: "NS Trading"
+          page: 1
+          page_size: 20
+
+  - name: list_by_audit_status_pending
+    description: "待审核的内白名单 audit_status=3"
+    input:
+      user_message: "查待审核的内白名单"
+    expected:
+      mcp_call:
+        tool: "white_list_whitelist"
+        args:
+          audit_status: 3
+          page: 1
+          page_size: 20
+
+  - name: list_archived
+    description: "已归档的内白名单 state=2"
+    input:
+      user_message: "查已归档的内白名单"
+    expected:
+      mcp_call:
+        tool: "white_list_whitelist"
+        args:
+          state: 2
+          page: 1
+          page_size: 20
+
+  - name: get_by_id
+    description: "按 ID 查详情"
+    input:
+      user_message: "查内白名单 ID 789 的详情"
+    expected:
+      mcp_call:
+        tool: "white_get_whitelist"
+        args: { whitelist_id: 789 }
+
+  - name: get_missing_id_asks_user
+    description: "get 缺 whitelist_id 时追问"
+    input:
+      user_message: "查内白名单详情"
+    expected:
+      asks_user: true
+      output_contains: "whitelist_id"
+
+  - name: empty_list_friendly_message
+    description: "列表为空时友好提示，不报错"
+    input:
+      mocked_response: '{"count":0,"results":[]}'
+    expected:
+      output_contains: "未查到符合条件的内白名单"
+      status_error: false
+
+  - name: address_no_truncation
+    description: "钱包地址原字面输出，不截断"
+    input:
+      mocked_response: '{"count":1,"results":[{"id":789,"address":"0x742d35Cc6634C0532925a3b844Bc454e4438f44e","coin":"USDT"}]}'
+    expected:
+      output_contains: "0x742d35Cc6634C0532925a3b844Bc454e4438f44e"
+
+  - name: enum_display_used
+    description: "枚举字段用 *_display 中文展示"
+    input:
+      mocked_response: '{"count":1,"results":[{"id":789,"address":"0x...","audit_status":6,"audit_status_display":"审核通过","state":1,"state_display":"正常"}]}'
+    expected:
+      output_contains: "审核通过"
+      output_contains: "正常"
+
+  - name: detail_extended_fields_rendered
+    description: "详情模式展示 +8 扩展字段段落"
+    input:
+      mocked_response: '{"id":789,"address":"0x...","remark":"test","address_tag":"hot wallet","uid":"acc-123"}'
+    expected:
+      output_contains: "扩展信息"
+      output_contains: "test"
+      output_contains: "hot wallet"
+
+  - name: must_use_hub_wrapper
+    description: "必须经 hub wrapper 调用"
+    input:
+      user_message: "查内白名单"
+    expected:
+      contains: "bash $SKILLS_DIR/common-middle-system-query/scripts/middle-call.sh"
+      not_contains: "mcpfast middle-mcp-server"
+
+  - name: never_emits_api_key
+    description: "输出不得含凭证片段"
+    input:
+      simulate: "user pastes token-bearing curl into chat"
+    expected:
+      response_redacts_token: true
+
+trigger_tests:
+  - input: "查内白名单"
+    expected: direct
+  - input: "USDT 公司内部地址白名单"
+    expected: direct
+  - input: "公司主体 NS Trading 的内白名单"
+    expected: direct
+  - input: "查内白名单 ID 789 详情"
+    expected: direct
+  - input: "Binance 上待审核的内白名单"
+    expected: direct
+  - input: "已归档的公司白名单"
+    expected: direct
+
+non_trigger_tests:
+  - input: "查客户 ABC Trading 的白名单地址"
+    expected: no_trigger
+    reason: "客户白名单应走 common-middle-whitelist-customer"
+  - input: "查外部对手方白名单"
+    expected: no_trigger
+    reason: "外部对手方 = 客户白名单，应走 common-middle-whitelist-customer"
+  - input: "起草一封内白名单邮件给业务部"
+    expected: no_trigger
+    reason: "起草邮件应走 bs-internal-whitelist-drafting（NS 侧）"
+  - input: "协调客户提交收款地址白名单"
+    expected: no_trigger
+    reason: "外部白名单协同应走 bs-external-whitelist-coordinating（NS 侧）"
+  - input: "这笔出款的收款地址是否安全"
+    expected: no_trigger
+    reason: "转账安全判定应走 safe-tx-hash + 风控 skill"

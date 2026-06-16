@@ -1,0 +1,70 @@
+skill: common-ns-flows
+description: >
+  Trigger + behavior tests for common-ns-flows: business transactions, logical/real
+  transactions, fund dashboards, reconciliation, FDL settlement.
+  Asserts wrapper usage and forbids bypassing it with a direct armada tool call.
+test_cases:
+- name: 查业务流水触发 chain 2
+  category: trigger_positive
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查一下 BP-Pay 的业务流水列表
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: armada__armada_
+  - contains: /v1/biz_transaction_headers/keyword
+  - contains: /v1/biz_transactions
+- name: 查 NS 对账流水
+  category: trigger_positive
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查一下 NS 对账流水
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: armada__armada_
+  - contains: /v1/reconciliation
+- name: 查资金端流动性看板
+  category: trigger_positive
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查一下资金端流动性看板
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: armada__armada_
+  - contains: /v1/fund_dashboard
+- name: 查 FDL 结算
+  category: trigger_positive
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查一下 FDL 结算单
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: armada__armada_
+  - contains: /v1/fdl-settlements
+- name: 查本金触发 fund-source-stat
+  category: trigger_positive
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查一下 x黄金002 项目的本金
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: armada__armada_
+  - contains: /v1/biz_transaction_headers/keyword
+  - contains: /v1/biz_transactions/stat
+  - contains: render_fund_source_stat.py
+- name: 查客户不应触发 flows
+  category: trigger_negative
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查一下客户 Alpha Fund
+  expected_behavior:
+  - not_contains: armada__armada_
+  - not_contains: /v1/biz_transactions
+  - not_contains: /v1/reconciliation
+- name: Step 0 鉴权预检 - sender_id 缺失
+  category: auth
+  user_input: |
+    查一下 NS 对账流水
+  expected_behavior:
+  - contains: 此查询仅限 Slack 渠道使用
+  - not_contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh

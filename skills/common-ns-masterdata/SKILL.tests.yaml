@@ -1,0 +1,58 @@
+skill: common-ns-masterdata
+description: >
+  Trigger + behavior tests for common-ns-masterdata: master data, business config, accounts.
+  Asserts wrapper usage and forbids bypassing it with a direct armada tool call.
+test_cases:
+- name: 查客户触发 masterdata
+  category: trigger_positive
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查一下客户 Alpha Fund
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: armada__armada_get
+  - not_contains: armada__armada_post
+  - contains: get "/v1/customers
+- name: 查银行账户触发 masterdata
+  category: trigger_positive
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查一下银行列表
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: armada__armada_get
+  - contains: get "/v1/accounts/bank"
+- name: 查数币账户按链筛选走 chain 5
+  category: trigger_positive
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查一下 TRC20 链上的 USDT 数币账户
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: armada__armada_
+  - contains: get "/v1/coins
+- name: 查币价不应触发 masterdata
+  category: trigger_negative
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查一下 BTC 币价
+  expected_behavior:
+  - not_contains: armada__armada_
+  - not_contains: /v1/customers
+  - not_contains: /v1/accounts/bank
+- name: 查流水不应触发 masterdata
+  category: trigger_negative
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查一下 NS 对账流水
+  expected_behavior:
+  - not_contains: armada__armada_
+  - not_contains: /v1/customers
+  - not_contains: /v1/accounts
+- name: Step 0 鉴权预检 - sender_id 缺失
+  category: auth
+  user_input: |
+    查一下客户 Alpha Fund
+  expected_behavior:
+  - contains: 此查询仅限 Slack 渠道使用
+  - not_contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh

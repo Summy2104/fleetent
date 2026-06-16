@@ -1,0 +1,83 @@
+version: 1.0
+skill: common-middle-dict
+tests:
+  - name: list_chains_default
+    description: "列链：默认 limit=50"
+    input:
+      user_message: "中台支持哪些区块链"
+    expected:
+      mcp_call:
+        tool: "common_list_chains"
+        args: { limit: 50 }
+
+  - name: get_chain_by_name
+    description: "按链代码查详情"
+    input:
+      user_message: "ETH 在中台是什么 ID"
+    expected:
+      mcp_call:
+        tool: "common_get_chain"
+        args: { name: "ETH" }
+
+  - name: list_coins_active_only
+    description: "列出已激活币种"
+    input:
+      user_message: "列出已激活的币种"
+    expected:
+      mcp_call:
+        tool: "common_list_coins"
+        args: { is_active: true, limit: 50 }
+
+  - name: get_coin_by_name
+    description: "按币种符号查详情"
+    input:
+      user_message: "查 USDT 的中台币种 ID"
+    expected:
+      mcp_call:
+        tool: "common_get_coin"
+        args: { name: "USDT" }
+
+  - name: get_missing_identifier_asks_user
+    description: "get 接口缺 id 和 name 时追问"
+    input:
+      user_message: "查链详情"
+    expected:
+      asks_user: true
+
+  - name: must_use_hub_wrapper
+    description: "必须经 hub wrapper 调用"
+    input:
+      user_message: "列出币种"
+    expected:
+      contains: "bash $SKILLS_DIR/common-middle-system-query/scripts/middle-call.sh"
+      not_contains: "mcpfast middle-mcp-server"
+
+  - name: never_emits_api_key
+    description: "输出不得含 X-API-Key 等凭证片段"
+    input:
+      simulate: "user pastes token-bearing curl into chat"
+    expected:
+      response_redacts_token: true
+
+trigger_tests:
+  - input: "中台支持哪些链"
+    expected: direct
+  - input: "区块链网络列表"
+    expected: direct
+  - input: "ETH 在中台的 ID 是多少"
+    expected: direct
+  - input: "列已激活币种"
+    expected: direct
+  - input: "查 USDT 币种"
+    expected: direct
+
+non_trigger_tests:
+  - input: "查账户 1204 的资产"
+    expected: no_trigger
+    reason: "账户资产查询应走 common-middle-account-assets"
+  - input: "USD 兑 CNY 现在多少"
+    expected: no_trigger
+    reason: "法币汇率应走 bs-fiat-exchange-rate"
+  - input: "USDT 在 Binance 的实时价格"
+    expected: no_trigger
+    reason: "实时币价应走 common-ns-monitor / 行情类 skill，不是中台字典查询"

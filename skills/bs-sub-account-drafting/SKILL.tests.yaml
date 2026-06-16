@@ -1,0 +1,180 @@
+trigger_tests:
+  - input: "@star Trading 在 Binance 要开个子账户，用途现货"
+    expected: direct
+  - input: "给 Trading 申请个子账户"
+    expected: direct
+  - input: "帮 Trading 在 OKX 开个 sub account，用途合约对冲"
+    expected: direct
+  - input: "Trading 要开个平台账户，关联客户 C-1042"
+    expected: direct
+
+non_trigger_tests:
+  - input: "子账户开通流程是什么？"
+    expected: no_trigger
+    reason: "这是流程问询，应由 bs-common-workflow 或 bs-workflow-routing 处理，不是子账户协调场景"
+  - input: "合同签好了没？"
+    expected: no_trigger
+    reason: "合同状态查询不属于子账户协调范围"
+  - input: "帮我查一下 Binance 子账户的 API key"
+    expected: no_trigger
+    reason: "Agent 不接触子账户凭据，凭据查询不在本 skill 职责内"
+  - input: "帮 Trading 绑定一下中台账户"
+    expected: no_trigger
+    reason: "中台绑定由 BS 人工执行，Agent 只生成指引，不代操作"
+
+dod_tests:
+  - name: happy_path_three_stages
+    description: "happy path：Leader 审批 → AM 开通 → BS 绑定 3 阶段均能顺序推进"
+    input:
+      business_line: "Trading"
+      platform: "Binance"
+      purpose: "现货交易"
+      customer_id: "C-1042"
+    expected:
+      status_sequence:
+        - "leader_approval_pending"
+        - "am_execution_pending"
+        - "binding_pending"
+        - "completed"
+      current_step_sequence:
+        - "Step 2"
+        - "Step 3"
+        - "Step 6"
+        - "Step 7"
+
+  - name: credentials_never_stored
+    description: "子账户凭据全程不进入 Agent 任何存储/日志；BS 从 AM 邮件直接复制到中台"
+    input:
+      business_line: "Trading"
+      platform: "Binance"
+      purpose: "现货交易"
+      am_reply_body: "API key: abc123xyz, account ID: SUB-9876"
+    expected:
+      credential_in_output: false
+      credential_in_storage: false
+      credential_in_log: false
+      zhongtai_binding_guide_contains_credentials: false
+      am_reply_email_thread_is_url_only: true
+
+  - name: timeout_escalation_leader
+    description: "Leader 审批超时（2 工作日 + 2 次超时）能正确移交 BS-C04"
+    input:
+      business_line: "Trading"
+      platform: "Binance"
+      purpose: "现货交易"
+      leader_timeout_count: 2
+    expected:
+      status: "escalated"
+      escalated_to: "BS-C04"
+
+  - name: timeout_escalation_am
+    description: "AM 回执超时（7 天 SLA）能正确移交 BS-C04"
+    input:
+      business_line: "Trading"
+      platform: "Binance"
+      purpose: "现货交易"
+      am_reply_timeout_days: 7
+    expected:
+      status: "escalated"
+      escalated_to: "BS-C04"
+
+  - name: rejection_escalation
+    description: "Leader 拒 / AM 拒 → 走 BS-C04"
+    input:
+      business_line: "Trading"
+      platform: "Binance"
+      purpose: "现货交易"
+      leader_decision: "reject"
+    expected:
+      status: "escalated"
+      escalated_to: "BS-C04"
+
+  - name: done_advances_to_next_node
+    description: "BS 回 'done' 能正确推进到 BS-06 内部白名单"
+    input:
+      current_step: "Step 7"
+      bs_reply: "done"
+    expected:
+      status: "completed"
+      next_skill: "BS-06"
+
+  - name: am_missing_escalation
+    description: "business_line_roster.AM 列为空 → 返回 am_missing 走 BS-C04"
+    input:
+      business_line: "Trading"
+      platform: "Binance"
+      purpose: "现货交易"
+      roster_am_empty: true
+    expected:
+      status: "am_missing"
+      escalated_to: "BS-C04"
+
+  - name: template_missing_escalation
+    description: "common-email-draft-gdrive 模板缺失 → 走 BS-C04"
+    input:
+      business_line: "Trading"
+      platform: "Binance"
+      purpose: "现货交易"
+      template_missing: true
+    expected:
+      status: "escalated"
+      escalated_to: "BS-C04"
+
+  - name: idempotent_dedup
+    description: "幂等性：{business_line, platform, purpose} 24h 内去重"
+    input:
+      business_line: "Trading"
+      platform: "Binance"
+      purpose: "现货交易"
+      duplicate_within_24h: true
+    expected:
+      dedup: true
+      new_draft_created: false
+
+# ─────────────────────────────────────────────────────────────
+# 防回潮断言（R03/R04 接入后的兜底护栏）
+# 触发场景：用户问业务线相关查询；agent 输出不应包含已废弃的旧调用方式
+# 字段名 `assertions` 与 `common-ns-system-query/SKILL.tests.yaml` 一致；
+# 若本仓库 schema 校验报错则改为 `expected: { contains: [...], not_contains: [...] }`
+# 形式（参考 `common-ns-system-query/SKILL.tests.yaml` 第 285-330 行）。
+# ─────────────────────────────────────────────────────────────
+regression_tests:
+  - name: no_legacy_mcpfast_armada_in_response
+    description: "agent 输出 NS 查询命令时不应再用裸 mcpfast armada-*，必须走 wrapper"
+    user_input: |
+      {"sender_id": "U05K7R8TBST"}
+      Trading 在 Binance 要开个子账户做现货
+    assertions:
+      - not_contains: mcpfast armada-
+      - not_contains: /tmp/.ns_slack_uid
+      - contains: ns-call.sh
+
+  - name: min_chars_blocks_short_input
+    description: "业务线输入 < 2 字符时不发 NS 查询"
+    user_input: |
+      {"sender_id": "U05K7R8TBST"}
+      给 D 申请个子账户
+    assertions:
+      - contains: 业务线名称至少需要 2 个字符
+      - not_contains: ns-call.sh
+
+  - name: single_candidate_does_not_auto_adopt
+    description: "业务线单候选时必须等待用户「1」/「y」确认，不直接生成草稿"
+    user_input: |
+      {"sender_id": "U05K7R8TBST"}
+      Trading 在 Binance 开子账户
+    assertions:
+      - contains: 找到 1 条业务线候选
+      - contains: 回复「1」或「y」
+      - not_contains: 邮件草稿生成完成
+
+  - name: confirm_gate_appears_before_draft
+    description: "Step 4 二次确认 gate 必须在草稿之前出现"
+    user_input: |
+      {"sender_id": "U05K7R8TBST"}
+      Trading 在 Binance 开子账户做现货，已选业务线 1
+    assertions:
+      - contains: 即将生成
+      - contains: 业务线 leader（business_leader）
+      - contains: 业务线邮件组（business_group_email）
+      - contains: 回复「确认」继续生成草稿

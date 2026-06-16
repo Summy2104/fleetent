@@ -1,0 +1,32 @@
+name: common-knowledge-search
+description: Verify slimmed skill triggers only on deep-search intents.
+tests:
+  - name: not_triggered_on_basic_QA
+    input: "项目立项要哪些字段？"
+    expect:
+      skill_loaded: false
+      reason: "auto-recall hook handles this; skill should not match"
+
+  - name: triggered_on_list_sources_request
+    input: "知识库里有什么文档？"
+    expect:
+      skill_loaded: true
+      reason: "matches '有什么文档/列目录' intent"
+
+  - name: triggered_on_specific_record_lookup
+    input: "在 KYC 跟踪表里找下 AAA-1234 这条记录"
+    expect:
+      skill_loaded: true
+      reason: "matches '找具体编号' intent for paginated lookup"
+
+  - name: triggered_on_full_document_read
+    input: "把 BS 项目立项流程 文档完整内容给我"
+    expect:
+      skill_loaded: true
+      reason: "matches '读完整文档原文' intent"
+
+  - name: not_triggered_on_chitchat
+    input: "今天天气怎么样"
+    expect:
+      skill_loaded: false
+      reason: "no KB-relevant intent"

@@ -1,0 +1,114 @@
+version: 1.0
+skill: bs-cex-account-details
+tests:
+  - name: trade_fee_by_account_id
+    description: "用户明确给 account_id 查交易费率"
+    input:
+      user_message: "查账户 1204 的交易费率"
+    expected:
+      mcp_call:
+        tool: "cex_get_account_trade_fee"
+        args: { account_id: 1204 }
+
+  - name: withdraw_limit_by_account_id
+    description: "查提币额度"
+    input:
+      user_message: "OKX 账户 1230 的 24h 可提多少 USDT"
+    expected:
+      mcp_call:
+        tool: "cex_get_account_withdraw_limit"
+        args: { account_id: 1230 }
+
+  - name: borrow_info_with_refresh
+    description: "查借贷信息且要求强制刷新"
+    input:
+      user_message: "强制刷新查账户 1240 的借贷信息"
+    expected:
+      mcp_call:
+        tool: "cex_get_account_borrow_info"
+        args: { account_id: 1240, refresh: true }
+
+  - name: missing_account_id_asks_user
+    description: "无 account_id 时追问，不能凭名字猜"
+    input:
+      user_message: "查账户的费率"
+    expected:
+      asks_user: true
+      output_contains: "account_id"
+
+  - name: resolve_account_id_from_code_first
+    description: "只给 code/name 时先调 bs-exchange-rate 解析 id 再查"
+    input:
+      user_message: "查 Mss0009 的交易费率"
+    expected:
+      mcp_calls_in_order:
+        - tool: "cex_list_exchange_rate_accounts"
+          args: { code: "Mss0009" }
+        - tool: "cex_get_account_trade_fee"
+
+  - name: pageview_columns_drive_rendering
+    description: "渲染必须按 table.columns 元数据，不硬编码字段名"
+    input:
+      mocked_response: '{"tables":[{"title":"VIP 现货费率","table":{"columns":[{"label":"VIP 等级","prop":"vip"},{"label":"现货 Maker","prop":"spot_maker"}],"data":[{"vip":7,"spot_maker":"0.001"}]}}]}'
+    expected:
+      output_contains: "VIP 等级"
+      output_contains: "现货 Maker"
+      output_contains: "0.001"
+
+  - name: empty_tables_friendly_message
+    description: "tables 为空时友好提示，不报错"
+    input:
+      mocked_response: '{"tables":[]}'
+      filters: { account_id: 1204 }
+    expected:
+      output_contains: "暂无"
+      status_error: false
+
+  - name: collecting_in_progress_warning
+    description: "title 含「采集中」时尾部 ℹ️ 标注"
+    input:
+      mocked_response: '{"tables":[{"title":"OKX 杠杆可借（采集中）","table":{"columns":[],"data":[]}}]}'
+    expected:
+      output_contains: "采集中"
+      output_contains: "ℹ️"
+
+  - name: must_use_hub_wrapper
+    description: "必须经 hub wrapper 调用"
+    input:
+      user_message: "查账户 1204 的费率"
+    expected:
+      contains: "bash $SKILLS_DIR/common-middle-system-query/scripts/middle-call.sh"
+      not_contains: "mcpfast middle-mcp-server"
+
+  - name: never_emits_api_key
+    description: "输出不得含凭证片段"
+    input:
+      simulate: "user pastes token-bearing curl into chat"
+    expected:
+      response_redacts_token: true
+
+trigger_tests:
+  - input: "查账户 1204 的交易费率"
+    expected: direct
+  - input: "Binance 账户 1204 现货手续费"
+    expected: direct
+  - input: "OKX 账户 1230 的提币额度"
+    expected: direct
+  - input: "查账户 1240 的借贷信息"
+    expected: direct
+  - input: "Bybit 账户 1250 的借币利率"
+    expected: direct
+
+non_trigger_tests:
+  - input: "拉一份 CEX 母账户列表"
+    expected: no_trigger
+    reason: "母账户列表应走 bs-exchange-rate（cex_list_exchange_rate_accounts），不是单账户详情"
+  - input: "查账户 1204 的资产"
+    expected: no_trigger
+    reason: "账户资产应走 common-middle-account-assets"
+  - input: "导出账户 1204 最近一周流水"
+    expected: no_trigger
+    reason: "动账流水应走 bs-transaction-history"
+  - input: "USD 兑 CNY 的法币汇率"
+    expected: no_trigger
+    reason: "法币汇率应走 bs-fiat-exchange-rate"
