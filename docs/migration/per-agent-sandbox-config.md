@@ -57,3 +57,24 @@ Notes:
   them has no effect (no deprecation warning is emitted).
 - A standalone agent with no `platform.yaml` now resolves its full sandbox resource
   profile from `agent.yaml` + code defaults.
+
+## Code-execution enablement (`sandbox.mode` removed)
+
+The global tri-state `sandbox.mode` (`off` / `selective` / `all`) is removed
+(`per-agent-sandbox-enablement`). Code-execution enablement is now decided per agent by
+`features.code_execution` (unset/`true` = on, `false` = off), gated by runtime backend
+availability (no Docker → off for everyone). Remove `sandbox.mode` from `platform.yaml`
+and translate it:
+
+| Old `platform.yaml` `sandbox.mode` | New per-agent `agent.yaml` |
+|---|---|
+| `all` (default) | leave `features.code_execution` unset (on) on agents that should run code |
+| `selective` | set `features.code_execution: true` only on authorized agents; others unset/`false` |
+| `off` (host kill-switch) | set `features.code_execution: false` on every agent that must not run code |
+
+Notes:
+
+- The "no Docker → off" runtime degrade is unchanged and still applies regardless of config.
+- The medium auto-approval coupling (`action_gate_medium_mode: sandbox`) now keys on the
+  runtime `sandbox_capable` signal (backend available **and** the agent has code execution
+  enabled); when not capable, those medium operations fail closed and page approval.

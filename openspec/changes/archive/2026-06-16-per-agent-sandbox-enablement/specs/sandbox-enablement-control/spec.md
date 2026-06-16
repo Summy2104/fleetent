@@ -26,15 +26,15 @@
 
 ### Requirement: 沙箱启用判定不读 platform.yaml
 
-沙箱启用判定 MUST NOT 读取 `platform.yaml`：`integrations/sandbox/enablement.py` 不再 `paths.platform_yaml_path()`，删除 `sandbox.mode` 的读取。叠加 `per-agent-sandbox-resources`（resources/lifecycle/skill_mount 已停读）后，`integrations/sandbox` 的**任何模块** MUST NOT 读取 `platform.yaml`。standalone agent（无 `platform.yaml`）SHALL 能正常判定代码执行启用并按需创建沙箱。
+沙箱启用判定 MUST NOT 读取 `platform.yaml`：`integrations/sandbox/enablement.py` 不再 `paths.platform_yaml_path()`，删除 `sandbox.mode` 的读取与 `SETTINGS_PATH`。叠加 `per-agent-sandbox-resources`（resources/lifecycle/skill_mount 已停读）后，`integrations/sandbox` 中除 **backend 选型**（`load_sandbox_backend_config` 的 `sandbox.backend` 可选默认——既有、agent.yaml 优先、无 platform.yaml 时回落 docker，不在本次范围）外，MUST NOT 为沙箱启用/资源/lifecycle/skill_mount 读取 `platform.yaml`。standalone agent（无 `platform.yaml`）SHALL 能正常判定代码执行启用并按需创建沙箱。
 
 #### Scenario: 启用判定零读 platform.yaml
 - **WHEN** 解析某 agent 的代码执行启用
 - **THEN** 判定路径不调用 `paths.platform_yaml_path()`、不读取 `platform.yaml` 的 `sandbox.mode`
 
-#### Scenario: integrations/sandbox 整体零读 platform.yaml
-- **WHEN** 检视 `integrations/sandbox` 各模块的源码导入与读取
-- **THEN** 没有任何模块读取 `platform.yaml`（不出现 `paths.platform_yaml_path()` 的沙箱配置读取）
+#### Scenario: enablement 模块不再绑定 platform.yaml
+- **WHEN** 检视 `integrations/sandbox/enablement.py` 源码
+- **THEN** 该模块不引用 `paths.platform_yaml_path()` / `SETTINGS_PATH`，无 `sandbox.mode` 读取与 tri-state mode 加载器
 
 ## MODIFIED Requirements
 

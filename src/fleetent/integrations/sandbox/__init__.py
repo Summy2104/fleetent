@@ -26,8 +26,6 @@ from fleetent.integrations.sandbox.enablement import (
     Mode,
     get_effective_mode,
     is_code_execution_enabled,
-    load_sandbox_mode,
-    resolve_effective_mode,
 )
 from fleetent.integrations.sandbox.maintenance import start_idle_sweep, stop_idle_sweep
 from fleetent.integrations.sandbox.manager import SandboxManager, Scope, WorkspaceScope
@@ -64,9 +62,7 @@ __all__ = [
     "get_effective_mode",
     "is_code_execution_enabled",
     "is_sensitive_name",
-    "load_sandbox_mode",
     "redact_secrets",
-    "resolve_effective_mode",
     "start_idle_sweep",
     "stop_idle_sweep",
     "truncate_stream",

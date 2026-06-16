@@ -29,9 +29,7 @@ def test_resources_from_agent_settings_does_not_read_platform_yaml(monkeypatch) 
     # Also neutralise the module-level SETTINGS_PATH so a stale binding can't be used.
     monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", Path("/nonexistent/poison.yaml"))
 
-    res = resources_from_agent_settings(
-        SandboxResourcesSettings(network="public_only", memory=512)
-    )
+    res = resources_from_agent_settings(SandboxResourcesSettings(network="public_only", memory=512))
     assert res.memory == 512
 
 
@@ -51,8 +49,6 @@ def test_config_module_resource_path_has_no_settings_path_reads_for_resources() 
     src = Path(sandbox_config.__file__).read_text(encoding="utf-8")
     tree = ast.parse(src)
     for fn in ("resources_from_agent_settings", "_resources_from_section"):
-        node = next(
-            n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == fn
-        )
+        node = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == fn)
         names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
         assert "SETTINGS_PATH" not in names, f"{fn} must not read SETTINGS_PATH"

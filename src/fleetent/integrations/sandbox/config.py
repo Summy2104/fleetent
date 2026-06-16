@@ -111,14 +111,14 @@ def _load_backend(section: dict[str, object], default: str) -> str:
 class SandboxResources:
     """Per-container resource limits; dataclass defaults are the safe defaults.
 
-    `read_only` belongs to the resource tier (default True keeps containers
-    read-only); both the session and agent tiers run read-only now that deps are
-    baked into a build-time immutable image rather than installed at runtime.
+    `read_only` belongs to the resource tier (default True keeps containers read-only);
+    containers run read-only now that deps are baked into a build-time immutable image
+    rather than installed at runtime.
 
-    The hardening fields below default to the strictest (session) tier — a bare
-    `SandboxResources()` is the single source of truth for that tier. The agent
-    tier inherits these hardening defaults unchanged (sandbox-scope-split-followups);
-    `build_resources_by_scope` only overrides the non-hardening fields it exposes.
+    The hardening fields default to the strictest tier — a bare `SandboxResources()` is
+    the single source of truth for that tier. Per-agent-sandbox-resources: each agent has
+    one resource profile built from `agent.yaml` `sandbox.resources` via
+    `resources_from_agent_settings` (session/agent workspace scopes share it).
     """
 
     memory: int = 256

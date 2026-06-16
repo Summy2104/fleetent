@@ -162,7 +162,7 @@ async def test_sandbox_mode_backed_tool_skips_approval(mock_loop_env, monkeypatc
         reply_func=AsyncMock(),
         permission_gate_enabled=True,
         governance=GovernanceConfig(action_gate_medium_mode="sandbox"),
-        sandbox_mode=Mode.ALL,
+        sandbox_mode=Mode.ON,
     )
 
     assert gate["called"] is False

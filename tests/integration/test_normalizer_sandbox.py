@@ -68,7 +68,7 @@ async def test_route_passes_sandbox_context_to_run(tmp_path, monkeypatch):
     import fleetent.integrations.sandbox.enablement as se
     import fleetent.runtime.loop as agent_loop
 
-    monkeypatch.setattr(se, "get_effective_mode", AsyncMock(return_value=se.Mode.SELECTIVE))
+    monkeypatch.setattr(se, "get_effective_mode", AsyncMock(return_value=se.Mode.ON))
 
     captured: dict = {}
 
@@ -81,7 +81,7 @@ async def test_route_passes_sandbox_context_to_run(tmp_path, monkeypatch):
     replies: list[str] = []
     await normalizer.route(_msg(replies))
 
-    assert captured.get("sandbox_mode") is se.Mode.SELECTIVE
+    assert captured.get("sandbox_mode") is se.Mode.ON
     assert captured.get("session_id") == "thread:sb3"
     # No bound agent here → features default to None/{} and run_code stays gated by mode.
     assert captured.get("agent_features") in (None, {})

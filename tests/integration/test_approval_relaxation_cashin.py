@@ -44,7 +44,7 @@ def _gate(af, *, mode):
 def test_config_sandbox_contained_runs_without_approval(tmp_path) -> None:
     af = _write_agent(tmp_path / "agents", "sandbox")
     assert af.action_gate_medium_mode == "sandbox"
-    assert _gate(af, mode=Mode.ALL) is ActionMode.SANDBOX
+    assert _gate(af, mode=Mode.ON) is ActionMode.SANDBOX
 
 
 def test_config_sandbox_uncontained_fails_closed_to_approval(tmp_path) -> None:
@@ -58,7 +58,7 @@ def test_high_stays_approval_when_medium_relaxed(tmp_path) -> None:
         "high",
         medium_mode=af.action_gate_medium_mode,
         high_mode=af.action_gate_high_mode,
-        sandbox_capable=runtime_sandbox_capable("run_code", Mode.ALL, workspace_mount=True),
+        sandbox_capable=runtime_sandbox_capable("run_code", Mode.ON, workspace_mount=True),
         force_ask=False,
     )
     assert high is ActionMode.APPROVAL

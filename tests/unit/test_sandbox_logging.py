@@ -89,19 +89,8 @@ def test_sandbox_enablement_logger_is_custom() -> None:
     assert isinstance(mod._logger, Logger)
 
 
-def test_sandbox_enablement_warns_on_invalid_mode() -> None:
-    from fleetent.integrations.sandbox.enablement import load_sandbox_mode
-
-    with (
-        patch("fleetent.integrations.sandbox.enablement._logger") as mock_log,
-        patch(
-            "fleetent.integrations.sandbox.enablement._read_raw_mode",
-            return_value="not_a_real_mode",
-        ),
-    ):
-        load_sandbox_mode()
-
-    mock_log.warn.assert_called_once()
+# (per-agent-sandbox-enablement removed the tri-state mode loader + its invalid-mode
+# warning; the enablement logger is still asserted custom above.)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
