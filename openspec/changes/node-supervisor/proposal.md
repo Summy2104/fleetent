@@ -18,14 +18,15 @@
 ## Capabilities
 
 ### New Capabilities
-- `node-supervisor`: `fleetent-node` 守护与生命周期。
-- `node-reconcile-loop`: 期望态↔实际态幂等调谐（PID 真相、re-adopt、崩溃重拉）。
-- `node-process-backend`: 可插拔进程后端 + local 实现（Popen/PID/信号）。
-- `node-config-provider`: 可插拔配置来源 + platform-api 实现 + 本地缓存 + config-hash 漂移重启。
+- `node-supervisor`: `fleetent-node` 守护——配置(node-id/token/platform-url)、拉取(platform-api provider + 本地缓存)、幂等 reconcile(期望↔实际、PID 真相、re-adopt、崩溃重拉、config-hash 漂移重启)、实际态上报。
+- `node-process-backend`: 可插拔进程后端接口 + local 实现（spawn `fleetent agent run`、stop via `fleetent agent stop`、liveness via PID 文件 + os.kill）。
 
 ### Modified Capabilities
-<!-- 可能微调 agent 侧暴露 config-hash 供漂移检测；apply 时核实是否需 delta： -->
-- `agent-runtime-cli`: 可能新增"暴露当前配置 hash"供 node 漂移判断（agent 进程本身仍 home-driven，不感知 node）。
+- `agent-runtime-cli`: **新增 `fleetent agent stop <agent-id>`**（薄包既有 `_stop_running` drain 协议 SIGUSR1→SIGTERM→SIGKILL），供 node 经 subprocess 优雅停 agent——drain 逻辑单一真相源留在 runtime，node 不重复实现、不 import runtime 内部。
+
+> 注：本 proposal 由 skeleton 细化（C2 `node-desired-state-api` 已 apply 落 main，迁移 097）。对着 C2 真实契约写：
+> GET `/nodes/{id}/desired-state` → `{node_id, agents:[{agent_id,name,config}]}`；
+> POST `/nodes/{id}/status` ← `{agents:[{agent_id,phase,pid?,health?,detail?}]}`；Bearer node-key + URL 自限。
 
 ## Impact
 
