@@ -43,4 +43,4 @@
 - [x] 7.2 `make test-unit-ci`（CI 覆盖率关 `--fail-under=76`）通过——新增 integration-only 代码勿拖垮 unit 覆盖
 - [x] 7.3 `uv run pytest tests/integration -q`（不带 `-x`，对照 main 基线，无新增失败）
 - [x] 7.4 `openspec validate node-desired-state-api` 通过
-- [ ] 7.5 merge 后 `uv run alembic -c alembic.ini heads` 确认**单一 head**（撞号则改号重链）
+- [x] 7.5 merge 后 `uv run alembic -c alembic.ini heads` 确认**单一 head**（撞号则改号重链）
