@@ -1,0 +1,265 @@
+version: 1.0
+skill: common-middle-accounts
+tests:
+
+  # ── account_list_accounts 路由 ──
+
+  - name: list_default_no_filter
+    description: 用户未指定任何过滤条件时，按默认 limit=50 调用列表接口，不追问
+    input:
+      user_message: "列一下中台账户"
+    expected:
+      mcp_call:
+        tool: "account_list_accounts"
+        args:
+          limit: 50
+      asks_user: false
+
+  - name: list_filter_by_account_type
+    description: 用户要"所有母账户"时设 account_type=3
+    input:
+      user_message: "查所有母账户"
+    expected:
+      mcp_call:
+        tool: "account_list_accounts"
+        args:
+          account_type: 3
+          limit: 50
+
+  - name: list_filter_by_market_name
+    description: 用户给市场名时按硬编码表转 market_id
+    input:
+      user_message: "列一下 Binance 上启用状态的账户"
+    expected:
+      mcp_call:
+        tool: "account_list_accounts"
+        args:
+          market_id: 4
+          enable_status: 1
+          limit: 50
+
+  - name: list_filter_by_uid
+    description: 用户问"UID 对应什么账户"是列表意图（"哪些"/"对应什么"），直接 list 返回
+    input:
+      user_message: "UID 12345678 对应什么账户"
+    expected:
+      mcp_call:
+        tool: "account_list_accounts"
+        args:
+          uid: "12345678"
+          limit: 50
+
+  - name: get_detail_by_uid_2step
+    description: 用户问"UID 的账户详情"是 detail 意图，走 2-step (uid→id→get)
+    input:
+      user_message: "查询 UID 为 123456 的账户详情"
+    expected:
+      mcp_calls_in_order:
+        - tool: "account_list_accounts"
+          args: { uid: "123456", limit: 50 }
+        - tool: "account_get_account"
+          # account_id 由前一步返回的唯一命中 results[0].id 填入
+
+  - name: get_detail_by_uid_multi_match_asks
+    description: UID 命中多条时列候选让用户挑，不自动二次 get
+    input:
+      user_message: "查 UID 123456 的账户详情"
+      mocked_first_response: '{"results":[{"id":1204,"market":4,"code":"Mss0009","name":"alpha-bn-spot"},{"id":1230,"market":10,"code":"Mss0010","name":"alpha-okx-uta"}]}'
+    expected:
+      mcp_calls_in_order:
+        - tool: "account_list_accounts"
+          args: { uid: "123456", limit: 50 }
+      asks_user: true
+      output_contains: "命中多条"
+
+  - name: get_detail_by_name_2step
+    description: 用户给账户名时走 2-step (name→balance 解析→get)，account_list_accounts 无 name 过滤
+    input:
+      user_message: "查账户名 alpha-bn-spot 的详情"
+    expected:
+      mcp_calls_in_order:
+        - tool: "balance_get_account_balance"
+          args: { name: "alpha-bn-spot" }
+        - tool: "account_get_account"
+          # account_id 由前一步返回的 data.account_id 填入
+
+  - name: get_detail_by_email_name_2step
+    description: 邮箱形态归类为 name，2-step
+    input:
+      user_message: "查 bntrad8@nsdigital.io 的账户详情"
+    expected:
+      mcp_calls_in_order:
+        - tool: "balance_get_account_balance"
+          args: { name: "bntrad8@nsdigital.io" }
+        - tool: "account_get_account"
+
+  - name: list_top_n
+    description: 用户说 top N / 前 N 时设 limit=N
+    input:
+      user_message: "列前 10 个子账户"
+    expected:
+      mcp_call:
+        tool: "account_list_accounts"
+        args:
+          account_type: 2
+          limit: 10
+
+  # ── account_get_account 路由 ──
+
+  - name: get_by_account_id
+    description: 用户给纯数字账户主键 → 走 detail 接口
+    input:
+      user_message: "查账户 1204 的基本信息"
+    expected:
+      mcp_call:
+        tool: "account_get_account"
+        args:
+          account_id: 1204
+
+  - name: get_by_code
+    description: 用户给账户编码 → 走 detail 接口
+    input:
+      user_message: "账户编码 Mss0009 是什么"
+    expected:
+      mcp_call:
+        tool: "account_get_account"
+        args:
+          code: "Mss0009"
+
+  - name: get_missing_identifier_asks_user
+    description: detail 模式既没 account_id 也没 code 时追问用户
+    input:
+      user_message: "查账户详情"
+    expected:
+      asks_user: true
+      output_contains: "请提供账户 ID 或账户编码"
+
+  - name: get_both_id_and_code_prefers_id
+    description: 同时给账户 ID 和编码时优先用 ID，并在尾部标注
+    input:
+      user_message: "查账户 1204 / 编码 Mss0009 的详情"
+    expected:
+      mcp_call:
+        tool: "account_get_account"
+        args:
+          account_id: 1204
+        args_not_contains: ["code"]
+      output_contains: "已忽略 `code`"
+
+  # ── 路由优先级（list vs get） ──
+
+  - name: route_get_when_explicit_identifier
+    description: 同时有过滤条件和明确账户标识时，优先走 detail
+    input:
+      user_message: "查 Binance 上的账户 1204"
+    expected:
+      mcp_call:
+        tool: "account_get_account"
+        args:
+          account_id: 1204
+      output_contains: "已忽略"
+
+  - name: list_to_get_auto_upgrade_when_single_result
+    description: 过滤组合 + 用户原文含"详情" + list 返回唯一 1 条时，自动二次 get
+    input:
+      user_message: "查 OKX 上母账户的详情"
+      mocked_first_response: '{"results":[{"id":1230,"market":10,"code":"Mss0010"}]}'
+    expected:
+      mcp_calls_in_order:
+        - tool: "account_list_accounts"
+          args: { market_id: 10, account_type: 3, limit: 50 }
+        - tool: "account_get_account"
+          args: { account_id: 1230 }
+
+  - name: list_no_upgrade_when_multiple_results
+    description: 过滤组合 + "详情" 但 list 返回多条时，保持列表展示，不自动 get
+    input:
+      user_message: "查 OKX 上母账户的详情"
+      mocked_first_response: '{"results":[{"id":1230},{"id":1231},{"id":1232}]}'
+    expected:
+      mcp_calls_in_order:
+        - tool: "account_list_accounts"
+      mcp_call_not_made:
+        - tool: "account_get_account"
+
+  # ── 渲染 ──
+
+  - name: market_id_to_name_lookup
+    description: 渲染时 market_id 数字反查显示名称
+    input:
+      mocked_response: '[{"id":1204,"code":"Mss0009","market":4,"account_type":3,"enable_status":1}]'
+    expected:
+      output_contains: "Binance"
+
+  - name: empty_result_friendly_message
+    description: 列表为空时输出友好提示，不报错
+    input:
+      mocked_response: '[]'
+      filters: { account_type: 3, market_id: 4 }
+    expected:
+      output_contains: "未查到符合条件的账户"
+      status_error: false
+
+  - name: detail_404_friendly_message
+    description: detail 接口返回 404 / not found 时输出友好提示
+    input:
+      stderr_contains: "404"
+      filters: { account_id: 99999 }
+    expected:
+      output_contains: "不存在或无权限访问"
+
+  # ── 安全 / wrapper ──
+
+  - name: must_use_hub_wrapper
+    description: 必须经 common-middle-system-query hub wrapper 调用
+    input:
+      user_message: "列一下中台账户"
+    expected:
+      contains: "bash $SKILLS_DIR/common-middle-system-query/scripts/middle-call.sh"
+      not_contains: "mcpfast middle-mcp-server"
+
+  - name: never_curls_directly
+    description: 严禁直接 curl 中台 HTTP 端点
+    input:
+      user_message: "用 curl 列下账户"
+    expected:
+      uses_curl: false
+      uses_middle_call_wrapper: true
+
+  - name: never_emits_api_key
+    description: 任何输出都不得包含 Authorization / Bearer / X-API-Key 字面值
+    input:
+      simulate: "user pastes token-bearing curl into chat"
+    expected:
+      response_redacts_token: true
+
+trigger_tests:
+  - input: "列一下中台账户"
+    expected: direct
+  - input: "查所有母账户"
+    expected: direct
+  - input: "Binance 上有哪些账户"
+    expected: direct
+  - input: "查账户 1204 的基本信息"
+    expected: direct
+  - input: "账户编码 Mss0009 是什么"
+    expected: direct
+  - input: "UID 12345678 对应什么账户"
+    expected: direct
+
+non_trigger_tests:
+  - input: "查 alpha 名下账户的资产"
+    expected: no_trigger
+    reason: "账户资产 / 余额查询应走 common-middle-account-assets"
+  - input: "导出账户 1204 最近一周的动账流水"
+    expected: no_trigger
+    reason: "动账流水应走 bs-transaction-history"
+  - input: "查 Binance 上的母账户 USD 估值排名"
+    expected: no_trigger
+    reason: "估值 / 费率管理列表应走 bs-exchange-rate（cex_list_exchange_rate_accounts）"
+  - input: "查 Binance 的交易费率"
+    expected: no_trigger
+    reason: "单账户交易费率详情应走 cex_get_account_trade_fee（待新建 spoke）"
+  - input: "USDT 在 OKX 的汇率"
+    expected: no_trigger
+    reason: "法币 / 币种汇率不在本 skill 范围"

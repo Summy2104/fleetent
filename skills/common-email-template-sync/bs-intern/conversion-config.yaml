@@ -1,0 +1,247 @@
+# BS Intern 邮件模版转换配置
+# 由 common-email-template-sync skill 在语义转换步骤中读取
+version: "2.0.0"
+agent_id: "bs-intern"
+
+# ═══════════════════════════════════════════
+# 固定角色清单
+# ═══════════════════════════════════════════
+# 转换时必须保留原始姓名和邮箱，不得转为占位符。
+# 包含三类：个人角色、业务线专属角色、群组邮箱。
+
+fixed_roles:
+  # ── 个人角色 ──
+  - name: "Mo NS"
+    email: "mo.ns@nsdigital.io"
+    role: "最终审批人（老板）"
+  - name: "Buyi Mo"
+    email: "mo@antalpha.com"
+    role: "高层审批（antalpha）"
+  - name: "mo"
+    email: "mo@nsdigital.io"
+    role: "高层审批"
+  - name: "Gene Jiang"
+    email: "gene@antalpha.com"
+    role: "高层审批"
+  - name: "Frank Z"
+    email: "frank.z@nsdigital.io"
+    role: "合规/风控审批"
+  - name: "Celine Wang"
+    email: "jinhua.wang@nsdigital.io"
+    role: "资金部 leader"
+  - name: "浩涛"
+    email: "tao.hao@nsdigital.io"
+    role: "财务部 leader"
+  - name: "李利贞"
+    email: "lilizhen@nsdigital.io"
+    role: "风控/RM"
+  - name: "张斌"
+    email: "owen.zhang@nsdigital.io"
+    role: "地址复核（Owen）"
+
+  # ── 业务线专属角色 ──
+  - name: "BigOrange NS"
+    email: "orange@nsdigital.io"
+    role: "量化业务 leader"
+  - name: "Tianshu Sun"
+    email: "tianshu.sun@nsdigital.io"
+    role: "量化财务审批"
+  - name: "Junjie Zhang"
+    email: "junjie.zhang@nsdigital.io"
+    role: "量化风控审批（张俊杰）"
+  - name: "Ying Wang"
+    email: "ying.wang@nsdigital.io"
+    role: "配资财务审批"
+  - name: "赵春华"
+    email: "zhaochunhua516@gmail.com"
+    role: "配资客户方联系人"
+  - name: "Sophia Wu"
+    email: "sophia.wu@armada-energy.com"
+    role: "Armada 一级审批"
+  - name: "Yichun Hua"
+    email: "max@armada-energy.com"
+    role: "Armada 最终确认"
+  - name: "KinYep Lee"
+    email: "bryan.lee@nsdigital.io"
+    role: "Armada 支付安排"
+  - name: "Luna Zhao"
+    email: "luna@nsdigital.io"
+    role: "Defi 分润相关"
+  - name: "Chris Z"
+    email: "chris@nsdigital.io"
+    role: "Defi 分润相关"
+
+  # ── 群组邮箱 ──
+  - name: "compliance"
+    email: "compliance@nsdigital.io"
+    role: "合规审批"
+  - name: "notification"
+    email: "notification@nsdigital.io"
+    role: "通知"
+  - name: "am"
+    email: "am@nsdigital.io"
+    role: "账户管理"
+  - name: "rm"
+    email: "rm@nsdigital.io"
+    role: "风控管理"
+  - name: "treasury"
+    email: "treasury@nsdigital.io"
+    role: "资金/财务"
+  - name: "bs"
+    email: "bs@nsdigital.io"
+    role: "业务支持"
+  - name: "onboarding"
+    email: "onboarding@nsdigital.io"
+    role: "入职/开户流程"
+  - name: "hr"
+    email: "hr@nsdigital.io"
+    role: "HR"
+  - name: "qi"
+    email: "qi@nsdigital.io"
+    role: "QI"
+  - name: "loan"
+    email: "loan@nsdigital.io"
+    role: "贷款/配资"
+  - name: "finance"
+    email: "finance@nsdigital.io"
+    role: "财务"
+  - name: "bi"
+    email: "bi@nsdigital.io"
+    role: "商业智能"
+  - name: "defi"
+    email: "defi@nsdigital.io"
+    role: "Defi 业务"
+  - name: "legal"
+    email: "legal@nsdigital.io"
+    role: "法务"
+  - name: "cr"
+    email: "cr@nsdigital.io"
+    role: "Core Review"
+  - name: "partnership"
+    email: "partnership@nsdigital.io"
+    role: "合作伙伴关系"
+
+# ═══════════════════════════════════════════
+# 占位符库
+# ═══════════════════════════════════════════
+# 命名规范：小写字母 + 下划线。转换时优先复用此库中的名称。
+
+placeholders:
+  # 通用
+  - name: "business_line"
+    description: "业务线名称"
+    examples: ["Defi", "Armada", "量化", "配资"]
+  - name: "project_id"
+    description: "项目号"
+    examples: ["Defi00329", "DPLH002", "AE00801"]
+  - name: "project_name"
+    description: "项目简称"
+  - name: "application_date"
+    description: "申请日期"
+    format: "YYYY-MM-DD"
+  - name: "account_entity"
+    description: "账户主体/公司名称"
+  - name: "platform_name"
+    description: "平台名称"
+    examples: ["Binance", "OKX", "Gate"]
+  - name: "currency"
+    description: "币种"
+    examples: ["BTC", "USDT", "ETH", "USD"]
+  - name: "amount"
+    description: "金额/数量"
+  - name: "chain_name"
+    description: "链名称/网络"
+    examples: ["Ethereum", "BSC", "Solana"]
+  # 人员/角色
+  - name: "business_leader"
+    description: "业务 leader（无固定邮箱时使用）"
+  - name: "business_group_email"
+    description: "业务群组邮箱（无固定邮箱时使用）"
+  - name: "client_company"
+    description: "客户/合作方公司名称"
+  - name: "client_contact_email"
+    description: "客户/合作方联系人邮箱"
+  - name: "applicant_name"
+    description: "申请人姓名"
+  - name: "applicant_email"
+    description: "申请人邮箱"
+  # 账户/地址
+  - name: "sub_account_name"
+    description: "子账户名称"
+  - name: "wallet_address"
+    description: "钱包/区块链地址"
+  - name: "ip_address"
+    description: "IP 地址"
+  - name: "urgency_level"
+    description: "紧急程度"
+    examples: ["优先处理", "常规"]
+
+# ═══════════════════════════════════════════
+# 邮件主题标签
+# ═══════════════════════════════════════════
+
+subject_labels:
+  - label: "【开户申请】"
+    use_case: "交易所开户"
+  - label: "【开户申请-银行】"
+    use_case: "银行开户"
+  - label: "【KYC特批申请】"
+    use_case: "KYC 特批"
+  - label: "【立项申请】"
+    use_case: "新项目立项"
+  - label: "【付款申请】"
+    use_case: "付款审批"
+  - label: "【子账户申请】"
+    use_case: "子账户创建"
+  - label: "【子账户清理】"
+    use_case: "子账户清理/删除"
+  - label: "【子账户换绑】"
+    use_case: "子账户换绑至其他项目"
+  - label: "【地址创建】"
+    use_case: "地址创建"
+  - label: "【钱包创建】"
+    use_case: "钱包创建"
+  - label: "【多签地址认证】"
+    use_case: "多签地址确认"
+  - label: "【Fordefi 地址审核/申请加白】"
+    use_case: "Fordefi 地址认证/加白"
+  - label: "【白名单地址】"
+    use_case: "内部/外部白名单地址"
+  - label: "【地址移除/白名单移除】"
+    use_case: "地址或白名单移除"
+  - label: "【公司注册申请】"
+    use_case: "新公司注册"
+  - label: "【增加IP】"
+    use_case: "子账户增加绑定 IP"
+  - label: "【更新IP】"
+    use_case: "子账户更新绑定 IP"
+  - label: "【关键信息确认】"
+    use_case: "配资业务还款/借款信息确认"
+  - label: "【项目入资】"
+    use_case: "项目入资"
+  - label: "【项目增资】"
+    use_case: "项目增资"
+  - label: "【项目减资】"
+    use_case: "项目减资"
+  - label: "【项目撤资】"
+    use_case: "项目撤资"
+  - label: "【分润规则确认】"
+    use_case: "Defi 分润/TB 规则确认"
+
+# ═══════════════════════════════════════════
+# 审批流程模式
+# ═══════════════════════════════════════════
+
+approval_patterns:
+  - level: 2
+    description: "二级审批：业务 leader + Mo NS"
+  - level: 3
+    description: "三级审批：业务 leader → 财务 leader → Mo NS"
+  - level: 4
+    description: "四级审批：业务 leader → Frank Z → compliance → Mo NS"
+
+# ═══════════════════════════════════════════
+# 用户自定义规则（用户反馈后追加）
+# ═══════════════════════════════════════════
+
+custom_rules: []

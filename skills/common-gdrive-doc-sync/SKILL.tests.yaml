@@ -1,0 +1,214 @@
+skill: common-gdrive-doc-sync
+version: '3.0'
+triggers:
+  keywords:
+  - gdrive同步
+  - Google Drive同步
+  - 同步到Google Drive共享目录
+  - 同步到GoogleDrive共享目录
+  - 上传到Google Drive
+  - 同步到Google Drive
+  - 同步到 gdrive
+  - 同步到共享目录
+  - 上传到共享盘
+trigger_tests:
+- input: 把这个文件上传到Google Drive
+  expect: match
+- input: 同步到Google Drive共享目录
+  expect: match
+- input: 用 folderId 上传这个文档
+  expect: match
+- input: 把这个文件同步到 gdrive
+  expect: match
+- input: 帮我写一个 PRD
+  expect: no_match
+- input: 今天天气怎么样
+  expect: no_match
+config:
+  timeout: 60s
+cases:
+- id: tc-001
+  name: 可协作编辑类型直传
+  suite: smoke
+  input: '假设 google-drive MCP server 可用，且源文件 /workspaces/outbound/周报.docx 可读。
+
+    把这个文件上传到 Google Drive，目录是 folderId=1AbCdEf123。
+
+    '
+  expect:
+    contains:
+    - - success
+      - 成功
+    - - direct_upload
+      - 直传
+    - - drive_file_id
+      - fileId
+    - - collaborative_editable
+      - 可协作编辑
+    - - google-drive__uploadFile
+  priority: gate
+  needs_external: false
+- id: tc-002
+  name: markdown 转 docx 后上传
+  input: '假设 google-drive MCP server 可用，源文件 /workspaces/outbound/meeting-notes.md
+    可读，pandoc 已安装。
+
+    把它同步到这个目录 https://drive.google.com/drive/folders/1AbCdEf12345
+
+    '
+  expect:
+    contains:
+    - - converted_upload
+      - 转换后上传
+    - - pandoc
+      - docx
+    - - success
+      - 成功
+    - - google-drive__uploadFile
+  priority: gate
+  needs_external: false
+- id: tc-003
+  name: 不支持类型失败且不上传
+  input: '假设 google-drive MCP server 可用。
+
+    把 /workspaces/outbound/demo.zip 上传到 Google Drive 目录 1AbCdEf123
+
+    '
+  expect:
+    contains:
+    - - failed
+      - 失败
+    - - UNSUPPORTED_FILE_TYPE
+      - 不支持
+    not_contains:
+    - - drive_file_id
+      - fileId
+      - 上传成功
+  priority: gate
+  needs_external: false
+- id: tc-004
+  name: 最近单文件产物自动识别
+  input: '把刚才生成的文件上传到 Google Drive，目录是 folderId=1AbCdEf123
+
+    '
+  expect:
+    contains:
+    - - 最近一次
+      - 单文件
+      - 自动识别
+  priority: benchmark
+  needs_external: true
+- id: tc-005
+  name: 最近多文件产物返回歧义错误
+  input: '当前会话最近一次产物包含 3 个文件：a.md、b.md、c.md。
+
+    我说“把刚才那些文件同步到 Google Drive”。
+
+    请按 V1 规则返回结果。
+
+    '
+  expect:
+    contains:
+    - - AMBIGUOUS_ARTIFACT_REFERENCE
+      - 歧义
+      - 请指定
+  priority: gate
+  needs_external: false
+- id: tc-006
+  name: 目录链接解析失败
+  input: '上传这个 markdown 到目录链接 https://drive.google.com/drive/folders/not-a-valid-id
+
+    '
+  expect:
+    contains:
+    - - TARGET_FOLDER_UNRESOLVABLE
+      - 目录解析失败
+      - failed
+  priority: gate
+  needs_external: false
+- id: tc-007
+  name: google-drive server 不可用必须失败
+  input: '假设 google-drive MCP server/tool 不可达。
+
+    把 /workspaces/outbound/demo.md 上传到 Google Drive，目录是 folderId=1AbCdEf123。
+
+    '
+  expect:
+    contains:
+    - - DRIVE_MCP_UNAVAILABLE
+      - failed
+      - error_code
+      - DRIVE_MCP_UNAVAILABLE
+  priority: gate
+  needs_external: false
+- id: tc-008
+  name: 禁止非 MCP 回退
+  input: '即使上传失败，也不要使用 rclone 或手动上传方案。
+
+    按 common-gdrive-doc-sync V1 规则返回执行结果。
+
+    '
+  expect:
+    contains:
+    - - NON_MCP_FALLBACK_FORBIDDEN
+      - failed
+    not_contains:
+    - - rclone copy
+      - 手动上传
+      - gdrive upload
+  priority: gate
+  needs_external: false
+- id: tc-009
+  name: txt 需转换后上传
+  input: '假设源文件和目录权限都满足，且 google-drive MCP server 可用。
+
+    把 /tmp/gdrive-sync-test/demo_01.txt 上传到 Google Drive，目录是 folderId=1AbCdEf123。
+
+    '
+  expect:
+    contains:
+    - - status
+      - success
+    - - mode
+      - converted_upload
+    - - drive_file_id
+      - collaborative_editable
+    not_contains:
+    - - direct_upload
+  priority: gate
+  needs_external: false
+- id: tc-010
+  name: pdf 直传但不可在线编辑
+  input: '假设 google-drive MCP server 可用，源文件 /workspaces/outbound/spec.pdf 可读。
+
+    把它上传到 Google Drive，目录是 folderId=1AbCdEf123。
+
+    '
+  expect:
+    contains:
+    - - status
+      - success
+    - - direct_upload
+      - 直传
+    - - collaborative_editable
+      - 'false'
+  priority: gate
+  needs_external: false
+- id: tc-011
+  name: odt ods odp 归类为可上传不可在线编辑
+  input: '假设 google-drive MCP server 可用，源文件 /workspaces/outbound/meeting.odt
+    可读。
+
+    把它上传到 Google Drive，目录是 folderId=1AbCdEf123。
+
+    '
+  expect:
+    contains:
+    - - status
+      - success
+    - - direct_upload
+      - 直传
+    - - collaborative_editable
+      - 'false'
+  priority: gate
+  needs_external: false

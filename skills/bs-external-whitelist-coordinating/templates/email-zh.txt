@@ -1,0 +1,27 @@
+收件人：
+- notification@nsdigital.io
+- compliance@nsdigital.io
+- {business_group_email}
+
+邮件主题：
+【白名单地址】Wallet Information_{client_company}（{application_date}）
+
+---
+
+公司法定名称：
+
+涉及业务线：
+
+付款目的：
+
+注册国家：
+
+因 xxxxx，新增我方收款地址：
+
+地址一：
+币种：
+网络：
+
+地址二：
+币种：
+网络：

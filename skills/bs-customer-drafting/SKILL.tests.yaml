@@ -1,0 +1,521 @@
+skill: bs-customer-drafting
+description: >
+  bs-customer-drafting 技能测试用例，覆盖触发词识别、prompt 片段文件内容、exec 加载行为、
+  信息追问、业务线 ID 映射（必须批量）、查重分级、预览确认（不得提 close/草稿置位细节）、
+  创建后自动 close、成功回显草稿+启用话术、修改端点与参数格式、枚举值合规（type 不传）、
+  错误处理、失败红线（禁止自改参数/自动重试）。
+test_cases:
+  # --- 触发词识别 ---
+  - name: 触发词识别-创建
+    category: triggers
+    user_input: 帮我创建一个客户
+    expected_behavior:
+      - one_of:
+          - contains: 客户名称
+          - contains: name
+          - contains: 请提供
+      - not_contains: armada_post
+  - name: 触发词识别-修改
+    category: triggers
+    user_input: 修改客户 示例科技 的 KYC 状态为已完成
+    expected_behavior:
+      - contains: /v1/customers/keyword
+      - one_of:
+          - contains: /v1/customers/{id}
+          - contains: "\"id\""
+  # --- SKILL.md 内联模板校验 ---
+  - name: SKILL.md 必须内联创建客户 prompt 模板
+    category: inline_prompt
+    static_file: SKILL.md
+    expected_behavior:
+      - contains: "★ 客户名称"
+      - contains: "`1`=未完成"
+      - contains: "`1`=未签署"
+      - contains: 示例科技
+      - contains: NS-量化
+      - not_contains: "ABC Trading Ltd"
+
+  - name: SKILL.md 必须内联修改客户 prompt 模板
+    category: inline_prompt
+    static_file: SKILL.md
+    expected_behavior:
+      - contains: 可改字段白名单
+      - contains: 不支持修改
+      - contains: "`source_*`"
+      - contains: "业务线加一个 NS-DeFi"
+
+  - name: references 下不得再有 prompt 片段文件
+    category: inline_prompt
+    static_file_must_not_exist:
+      - references/prompt-create-step1.md
+      - references/prompt-edit-step2.md
+
+  # --- 信息追问 ---
+  - name: 信息不全时追问必填字段
+    category: information_gathering
+    user_input: 我要新建一个客户叫做示例科技
+    expected_behavior:
+      - one_of:
+          - contains: 业务线
+          - contains: biz_lines
+      - not_contains: armada_post
+
+  # --- 业务线映射 ---
+  - name: 业务线名映射成 ID
+    category: biz_line_mapping
+    user_input: 新建客户 示例科技，业务线 NS-Trading
+    expected_behavior:
+      - contains: /v1/biz_lines/keyword
+      - one_of:
+          - contains: "\"name\": \"NS-Trading\""
+          - contains: "\"name\":\"NS-Trading\""
+
+  - name: 多业务线必须一次批量查
+    category: biz_line_mapping
+    user_input: 新建客户 示例科技，业务线 NS-量化，NS-Trading
+    expected_behavior:
+      - contains: /v1/biz_lines/keyword
+      - one_of:
+          - contains: "\"name\": [\"NS-量化\", \"NS-Trading\"]"
+          - contains: "\"name\":[\"NS-量化\",\"NS-Trading\"]"
+          - contains: "\"name\": [\"NS-量化\",\"NS-Trading\"]"
+
+  # --- 查重分级 ---
+  - name: 创建前查重
+    category: dedupe
+    user_input: 新建客户 示例科技有限公司，业务线 NS-Trading
+    expected_behavior:
+      - contains: /v1/customers
+      - one_of:
+          - contains: "\"name\": \"示例科技"
+          - contains: "\"name\":\"示例科技"
+
+  - name: 精确同名直接拦截
+    category: dedupe
+    user_input: 新建客户 示例科技，业务线 NS-Trading
+    context: 假设 /v1/customers 查询返回完全同名客户 ID=555
+    expected_behavior:
+      - one_of:
+          - contains: 已存在
+          - contains: duplicate
+          - contains: 同名
+      - not_contains: armada_post
+
+  # --- 预览确认闸门 ---
+  - name: 创建前必须预览
+    category: confirmation_gate
+    user_input: 创建客户 示例科技，业务线 NS-Trading，kyc 已完成，nda 已签署
+    expected_behavior:
+      - one_of:
+          - contains: 确认
+          - contains: 预览
+          - contains: 提交
+      - not_contains: armada_post
+
+  - name: 预览不得提及创建后 close 或草稿置位细节
+    category: confirmation_gate
+    user_input: 创建客户 示例科技，业务线 NS-Trading
+    expected_behavior:
+      - not_contains: /close
+      - not_contains: 草稿置位
+      - not_contains: 关户态
+
+  - name: 用户确认后才调用
+    category: confirmation_gate
+    user_input: |
+      创建客户 示例科技，业务线 NS-Trading id 12，kyc 已完成，nda 已签署
+      [预览已展示，用户回复：确认]
+    expected_behavior:
+      - contains: armada_post
+      - contains: path="/v1/customers"
+      - one_of:
+          - contains: "\"kyc\": 2"
+          - contains: "\"kyc\":2"
+
+  # --- 创建后 close（草稿实现）---
+  - name: 创建成功后必须自动调 close
+    category: auto_close
+    user_input: |
+      创建客户 示例科技，业务线 NS-Trading
+      [用户已确认，创建 API 返回 id=999]
+    expected_behavior:
+      - contains: "/v1/customers/{id}/close"
+      - contains: "\"id\": \"999\""
+
+  - name: close 失败时给出明确提示（用户侧称草稿置位）
+    category: auto_close
+    user_input: |
+      创建客户 示例科技，业务线 NS-Trading
+      [创建成功 id=999，但 close 调用返回 500]
+    expected_behavior:
+      - one_of:
+          - contains: 手动
+          - contains: 草稿置位
+          - contains: 未能完成草稿
+          - contains: 管理端
+      - contains: "999"
+
+  - name: close 成功后回显草稿并说明启用后可用
+    category: auto_close
+    user_input: |
+      创建客户 示例科技，业务线 NS-Trading
+      [用户已确认，创建成功 id=999，close 成功]
+    expected_behavior:
+      - one_of:
+          - contains: 草稿
+          - contains: 启用后即可
+          - contains: 正常使用
+          - contains: 立即启用
+          - contains: 是否启用
+          - contains: 启用吗
+          - contains: 需启用
+          - contains: 正式使用
+
+  # --- 修改端点 ---
+  - name: 修改端点使用 PUT
+    category: endpoints
+    user_input: |
+      修改客户 ID 123 的备注为 "2026-Q2 续签"
+      [用户已确认]
+    expected_behavior:
+      - contains: armada_put
+      - contains: path="/v1/customers/{id}"
+      - contains: "\"id\": \"123\""
+      - contains: "\"memo\""
+
+  - name: 修改不得尝试改 name
+    category: endpoints
+    user_input: 把客户 123 的 name 改成 "新名称"
+    expected_behavior:
+      - one_of:
+          - contains: 不支持
+          - contains: 不可修改
+          - contains: 白名单
+      - not_contains: armada_put
+
+  # --- 完整 PUT 模式（带历史值） ---
+  - name: 修改前必须拉详情做 baseline
+    category: full_put
+    user_input: |
+      修改客户 ID 1948693665486028800 的备注
+    expected_behavior:
+      - contains: armada_get
+      - contains: /v1/customers/{id}
+      - one_of:
+          - contains: "\"id\": \"1948693665486028800\""
+          - contains: "\"id\":\"1948693665486028800\""
+
+  - name: PUT body 必须带全部可改字段的最终值
+    category: full_put
+    user_input: |
+      修改客户 ID 123 的简称为 "AI 客户02"
+      [baseline: short_name="旧简称", customer_code="C1102", kyc=1, nda=1, memo="旧备注", email=["old@x.com"], register_address="上海", contacts=[{name:"张三"}]]
+      [用户已确认]
+    expected_behavior:
+      - contains: armada_put
+      - contains: "\"short_name\": \"AI 客户02\""
+      - contains: "\"customer_code\": \"C1102\""
+      - contains: "\"kyc\": 1"
+      - contains: "\"nda\": 1"
+      - contains: "\"memo\": \"旧备注\""
+      - contains: "\"email\": [\"old@x.com\"]"
+      - contains: "\"register_address\": \"上海\""
+      - contains: "contacts"
+
+  - name: 预览必须展示全部可改字段的旧值新值
+    category: full_put
+    user_input: |
+      修改客户 ID 123 的简称为 "AI 客户02"
+      [baseline 已拉取]
+    expected_behavior:
+      - contains: 旧值
+      - contains: 新值
+      - contains: 未改动
+      - contains: short_name
+      - contains: kyc
+      - contains: memo
+      - contains: register_address
+
+  - name: biz_lines 未返回时不得放进 PUT body
+    category: full_put
+    user_input: |
+      修改客户 ID 123 的备注为 "new"
+      [baseline: 详情接口未返回 biz_lines]
+      [用户未改 biz_lines，已确认]
+    expected_behavior:
+      - contains: armada_put
+      - contains: "\"memo\": \"new\""
+      - not_contains: "\"biz_lines\""
+
+  # --- 枚举合规 ---
+  - name: 枚举值用整数而非字符串
+    category: enum_compliance
+    user_input: |
+      创建客户 示例科技，业务线 NS-Trading，kyc 已完成，nda 已签署
+      [用户已确认]
+    expected_behavior:
+      - one_of:
+          - contains: "\"kyc\": 2"
+          - contains: "\"kyc\":2"
+      - not_contains: "\"kyc\": \"2\""
+
+  - name: biz_lines 元素必须是字符串雪花 ID
+    category: enum_compliance
+    user_input: |
+      创建客户 示例科技，业务线 NS-Trading
+      [业务线 keyword 返回 id=2046555212949643264，用户已确认]
+    expected_behavior:
+      - contains: armada_post
+      - one_of:
+          - contains: "\"biz_lines\": [\"2046555212949643264\"]"
+          - contains: "\"biz_lines\":[\"2046555212949643264\"]"
+      - not_contains: "\"biz_lines\": [2046555212949643264]"
+      - not_contains: "\"biz_lines\":[2046555212949643264]"
+
+  - name: customer id path_params 必须字符串
+    category: enum_compliance
+    user_input: |
+      修改客户 ID 2046555212949643264 的备注为"abc"
+      [用户已确认]
+    expected_behavior:
+      - contains: armada_put
+      - one_of:
+          - contains: "\"id\": \"2046555212949643264\""
+          - contains: "\"id\":\"2046555212949643264\""
+      - not_contains: "\"id\": 2046555212949643264"
+
+  - name: type 不出现在 body 中
+    category: enum_compliance
+    user_input: |
+      创建客户 示例科技，业务线 NS-Trading
+      [用户已确认]
+    expected_behavior:
+      - contains: armada_post
+      - not_contains: "\"type\""
+
+  - name: 预览表不展示 type 字段
+    category: enum_compliance
+    user_input: 创建客户 示例科技，业务线 NS-Trading
+    expected_behavior:
+      - not_contains: 客户类型
+      - not_contains: "员工客户"
+      - not_contains: "供应商客户"
+
+  - name: 用户指定 type 也不放进 body
+    category: enum_compliance
+    user_input: |
+      创建一个供应商客户 示例科技，业务线 NS-Trading
+      [用户已确认]
+    expected_behavior:
+      - contains: armada_post
+      - not_contains: "\"type\""
+
+  # --- 字段前置校验 ---
+  - name: 非法邮箱必须被拦截-创建
+    category: field_validation
+    user_input: |
+      创建客户 示例科技，业务线 NS-量化，邮箱 123233,邮箱邮箱
+    expected_behavior:
+      - one_of:
+          - contains: 不合法
+          - contains: 无效
+          - contains: 缺少
+          - contains: "@"
+      - contains: "123233"
+      - contains: 邮箱邮箱
+      - not_contains: armada_post
+      - not_contains: "字段 | 值 | 来源"
+
+  - name: 非法邮箱必须被拦截-修改
+    category: field_validation
+    user_input: |
+      修改客户 ID 123 的邮箱为 "badmail"
+    expected_behavior:
+      - one_of:
+          - contains: 不合法
+          - contains: 无效
+          - contains: 缺少
+      - not_contains: armada_put
+
+  - name: memo 超长必须被拦截
+    category: field_validation
+    user_input: |
+      创建客户 示例科技，业务线 NS-量化，备注是一段 800 字的文字
+    expected_behavior:
+      - one_of:
+          - contains: 500
+          - contains: 超过
+          - contains: 过长
+      - not_contains: armada_post
+
+  - name: 枚举非法必须被拦截
+    category: field_validation
+    user_input: |
+      创建客户 示例科技，业务线 NS-量化，kyc 状态 = "高级认证"
+    expected_behavior:
+      - one_of:
+          - contains: 未完成
+          - contains: 已完成
+          - contains: 已关户
+          - contains: 允许值
+          - contains: 不支持
+      - not_contains: armada_post
+
+  # --- 回复风格（静默执行） ---
+  - name: 不得出现开场白客套话
+    category: reply_style
+    user_input: |
+      创建客户 示例科技，业务线 NS-量化
+      [业务线命中、查重通过]
+    expected_behavior:
+      - not_contains: 好的，我来为
+      - not_contains: 收到！
+      - not_contains: 明白了
+      - not_contains: 让我帮您
+      - not_contains: 让我先
+
+  - name: 不得播报流水账
+    category: reply_style
+    user_input: |
+      创建客户 示例科技，业务线 NS-量化
+      [业务线命中、查重通过]
+    expected_behavior:
+      - not_contains: 首先我需要
+      - not_contains: 首先，我需要
+      - not_contains: 现在进行客户查重
+      - not_contains: 现在进行查重
+      - not_contains: 接下来我要
+      - not_contains: 让我先读取
+
+  - name: 不得播报工具切换细节
+    category: reply_style
+    user_input: |
+      创建客户 示例科技，业务线 NS-量化
+      [业务线命中、查重通过]
+    expected_behavior:
+      - not_contains: ns-mcp 当前不可用
+      - not_contains: 让我尝试通过
+      - not_contains: 让我改用
+      - not_contains: 正在调用
+
+  - name: 不得播报中间成功结果
+    category: reply_style
+    user_input: |
+      创建客户 示例科技，业务线 NS-量化
+      [业务线命中 ID=1813912038663606273、查重通过]
+    expected_behavior:
+      - not_contains: 已找到，ID 为
+      - not_contains: 查重通过
+      - not_contains: 无重名客户
+      - not_contains: 已查到客户详情
+      - one_of:
+          - contains: 以上信息确认无误
+          - contains: 字段 | 值 | 来源
+          - contains: "| 字段 | 值 | 来源 |"
+
+  # --- MCP 名称 ---
+  - name: 使用占位 mcp 名 ns-mcp
+    category: mcp_naming
+    user_input: |
+      创建客户 示例科技，业务线 NS-Trading
+      [用户已确认]
+    expected_behavior:
+      - contains: ns-call.sh "$UID"
+      - not_contains: mcpfast ns-mcp
+      - not_contains: mcpfast armada
+
+  # --- 错误处理 ---
+  - name: 后端错误原样透传
+    category: error_handling
+    user_input: |
+      创建客户 示例，业务线 NS-Trading
+      [用户确认后 API 返回 400 "name 重复"]
+    expected_behavior:
+      - one_of:
+          - contains: name 重复
+          - contains: 400
+          - contains: 已存在
+
+  # --- 失败红线（禁止自改参数/自动重试） ---
+  - name: 400 同名失败时禁止自动加后缀
+    category: failure_no_auto_retry
+    user_input: |
+      创建客户 示例科技，业务线 NS-Trading
+      [用户已确认，API 返回 400 "客户名已存在"]
+    expected_behavior:
+      - not_contains: 示例科技测试
+      - not_contains: 示例科技-2
+      - not_contains: 示例科技ABC
+      - one_of:
+          - contains: 已存在
+          - contains: 400
+          - contains: 改个名字
+
+  - name: 失败后不得自动重试
+    category: failure_no_auto_retry
+    user_input: |
+      创建客户 示例科技，业务线 NS-Trading
+      [用户已确认，API 返回 500]
+    expected_behavior:
+      - one_of:
+          - contains: 已终止
+          - contains: 不会自动重试
+          - contains: 需要你确认
+      - not_contains: 重新尝试
+
+  - name: 字段过长时不得自动截断
+    category: failure_no_auto_retry
+    user_input: |
+      创建客户 示例科技，业务线 NS-Trading，备注为一段 800 字的描述
+      [API 返回 400 "memo 超过 500 字"]
+    expected_behavior:
+      - one_of:
+          - contains: 超过
+          - contains: 500
+          - contains: memo
+      - not_contains: 已自动截断
+      - not_contains: 已截短
+
+  - name: 枚举非法时不得自动降级
+    category: failure_no_auto_retry
+    user_input: |
+      创建客户 示例科技，业务线 NS-Trading，kyc 已完成
+      [API 返回 400 "kyc=2 不支持"]
+    expected_behavior:
+      - one_of:
+          - contains: 已终止
+          - contains: 不支持
+      - not_contains: 已降级为 kyc=1
+      - not_contains: 改为默认值
+
+  - name: 重试必须走用户重新授权
+    category: failure_no_auto_retry
+    user_input: |
+      创建客户 示例科技，业务线 NS-Trading
+      [上一轮 400 失败，用户说"再试一次"]
+    expected_behavior:
+      - one_of:
+          - contains: 预览
+          - contains: 重新确认
+          - contains: 请再次确认
+      - not_contains: 已为你重新发起
+
+metadata:
+  total_test_cases: 39
+  coverage:
+    triggers: 2
+    inline_prompt: 3
+    information_gathering: 1
+    biz_line_mapping: 2
+    dedupe: 2
+    confirmation_gate: 3
+    auto_close: 3
+    endpoints: 2
+    full_put: 4
+    enum_compliance: 6
+    field_validation: 4
+    reply_style: 4
+    mcp_naming: 1
+    error_handling: 1
+    failure_no_auto_retry: 5
+version: "1.8"

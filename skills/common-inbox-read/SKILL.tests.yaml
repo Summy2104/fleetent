@@ -1,0 +1,70 @@
+skill: common-inbox-read
+version: '1.0'
+
+triggers:
+  keywords:
+    - 看邮件
+    - 查收件箱
+    - 看收件箱
+    - 最近收到的邮件
+    - 读邮件
+    - 有没有人回邮件
+    - 有没有回复
+    - 检查邮箱
+    - check inbox
+    - 搜邮件
+    - 下载附件
+
+trigger_tests:
+  - input: 看下最近收到的邮件
+    expect: match
+  - input: 帮我查下收件箱有没有人回复
+    expect: match
+  - input: 把那封邮件的附件下载下来
+    expect: match
+  - input: 帮我给候选人发面试邀请
+    expect: no_match
+  - input: 帮我写段代码
+    expect: no_match
+
+config:
+  timeout: 60s
+
+cases:
+  - id: tc-multi-account-asks
+    name: 多账号且用户未指定时，先问看哪个邮箱，不擅自选
+    priority: gate
+    needs_external: true
+    input: 看下最近收到的邮件
+    notes: |
+      该 agent 配了多个账号（如 talent-acquisition 5 个）。期望行为：
+      先列出可选邮箱并询问用户看哪个，而不是默认查某一个就直接返回结果。
+      用语义判断是否在"请用户选择账号"，不卡固定措辞。
+
+  - id: tc-named-account-direct
+    name: 用户点名公司时直接用对应账号，不再追问
+    priority: gate
+    needs_external: true
+    input: 看下 antalpha 邮箱最近的邮件
+    notes: |
+      用户已点名 antalpha。期望：直接对 account_name=antalpha 调
+      list_emails_metadata，不再追问看哪个账号。语义判断即可。
+
+  - id: tc-lists-metadata-not-claims-incapable
+    name: 列收件箱而非声称无能力
+    priority: gate
+    needs_external: true
+    input: 看下最近收到的 5 封邮件，列一下发件人和主题
+    notes: |
+      回归本 skill 要解决的核心 bug：agent 过去会回复"我没有邮箱读取能力"。
+      期望：实际调用 list_emails_metadata 并以发件人/主题/时间/email_id 形式列出，
+      或在多账号时先按 tc-multi-account-asks 询问账号——但不得声称自己没有读邮件的能力。
+
+  - id: tc-read-only-no-send-delete
+    name: 只读，不触发发送/删除
+    priority: gate
+    needs_external: true
+    input: 看下收件箱里那封面试相关的邮件写了啥
+    notes: |
+      期望：只用 list_emails_metadata / get_emails_content 读取，
+      绝不调用 send_email 或 delete_emails。语义判断输出是读取结果而非发信/删信动作。
