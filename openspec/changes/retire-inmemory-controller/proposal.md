@@ -19,8 +19,10 @@
 <!-- 无 -->
 
 ### Modified Capabilities
-- `platform-agent-lifecycle`: 移除"platform 直接 spawn/terminate 子进程 + 内存追踪"的 start/stop/runtime-status；生命周期收敛为"声明期望态（C2）+ node 调谐（C3）"。
-<!-- runtime-status 若有独立 capability，apply 时核实并标 REMOVED/MODIFIED。 -->
+- `platform-agent-lifecycle`: REMOVE 需求"Start and stop agent processes without monitoring"（start/stop/runtime-status + AgentController）；该能力其余（materialize 物化 home/.env/skills）保留。生命周期收敛为"声明期望态（C2）+ node 调谐（C3）"。
+- `agent-lifecycle-logging`: REMOVE 需求"agent_lifecycle.controller 记录进程启停事件" + "agent_lifecycle.api 记录管理 API 调用"（对应模块删除）；保留"materialize 记录物化操作结果"。
+
+> 注：`agent-lifecycle-toggle`（enable/disable/archive）**不动**——它是 desired-state 的输入（C2 已接线），保留。死函数 `agent_routing_status` 无 capability，删除属 impl+test 清理、无 spec delta。本 proposal 已对当前 main 核实删除目标与调用者（lifecycle_admin_api 仅含 start/stop/runtime-status；AgentController 调用者仅该 api + 2 测试；agent_routing_status 仍零生产调用）。
 
 ## Impact
 
