@@ -5,17 +5,19 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 import fleetent.integrations.sandbox.backends.docker as client_mod
+from fleetent.agent_config import SandboxResourcesSettings
 from fleetent.integrations.sandbox.client import SandboxClient
 from fleetent.integrations.sandbox.config import (
     SandboxResources,
-    build_resources_by_scope,
-    load_sandbox_resources,
+    resources_from_agent_settings,
 )
+
+
+def _build(**fields) -> SandboxResources:
+    return resources_from_agent_settings(SandboxResourcesSettings(**fields))
 
 
 def _swap_value(flags: list[str]) -> str:
@@ -75,60 +77,22 @@ def test_swap_equal_to_memory_no_warn(monkeypatch: pytest.MonkeyPatch) -> None:
     assert not fake.warnings
 
 
-# ── config 载入 ──────────────────────────────────────────────────────────────
+# ── 从 agent.yaml sandbox.resources 构建（per-agent-sandbox-resources）─────────
 
 
-def _write_yaml(path: Path, body: str) -> None:
-    path.write_text(body)
+def test_build_memory_swap_mb() -> None:
+    assert _build(memory=256, memory_swap_mb=1024).memory_swap_mb == 1024
 
 
-def test_load_memory_swap_mb(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    path = tmp_path / "platform.yaml"
-    _write_yaml(path, "sandbox:\n  resources:\n    memory: 256\n    memory_swap_mb: 1024\n")
-    res = load_sandbox_resources(path)
-    assert res.memory_swap_mb == 1024
+def test_build_memory_swap_default_none() -> None:
+    assert _build(memory=256).memory_swap_mb is None
 
 
-def test_load_memory_swap_default_none(tmp_path: Path) -> None:
-    path = tmp_path / "platform.yaml"
-    _write_yaml(path, "sandbox:\n  resources:\n    memory: 256\n")
-    res = load_sandbox_resources(path)
-    assert res.memory_swap_mb is None
+def test_invalid_memory_swap_falls_back_to_none() -> None:
+    assert _build(memory_swap_mb=0).memory_swap_mb is None
 
 
-def test_invalid_memory_swap_falls_back_to_none(tmp_path: Path) -> None:
-    path = tmp_path / "platform.yaml"
-    _write_yaml(path, "sandbox:\n  resources:\n    memory_swap_mb: 0\n")
-    assert load_sandbox_resources(path).memory_swap_mb is None
-    _write_yaml(path, "sandbox:\n  resources:\n    memory_swap_mb: notint\n")
-    assert load_sandbox_resources(path).memory_swap_mb is None
-
-
-# ── build_resources_by_scope：agent_scope override + None 跟随 ─────────────────
-
-
-def test_agent_scope_memory_swap_override(tmp_path: Path) -> None:
-    path = tmp_path / "platform.yaml"
-    _write_yaml(
-        path,
-        "sandbox:\n  resources:\n    memory: 256\n"
-        "  agent_scope:\n    memory: 512\n    memory_swap_mb: 1024\n",
-    )
-    by_scope = build_resources_by_scope(path)
-    agent = by_scope["agent"]
-    assert agent.memory == 512
-    assert agent.memory_swap_mb == 1024
-    assert _swap_value(SandboxClient._resource_flags(agent)) == "1024m"
-
-
-def test_agent_scope_memory_only_swap_follows(tmp_path: Path) -> None:
-    """agent_scope 仅提 memory、未配 swap：None 跟随语义 → swap == 提高后的 memory。"""
-    path = tmp_path / "platform.yaml"
-    _write_yaml(
-        path,
-        "sandbox:\n  resources:\n    memory: 256\n  agent_scope:\n    memory: 1024\n",
-    )
-    by_scope = build_resources_by_scope(path)
-    agent = by_scope["agent"]
-    assert agent.memory_swap_mb is None
-    assert _swap_value(SandboxClient._resource_flags(agent)) == "1024m"
+def test_per_agent_memory_swap_drives_flags() -> None:
+    """A per-agent resources profile with explicit memory_swap_mb drives --memory-swap."""
+    res = _build(memory=512, memory_swap_mb=1024)
+    assert _swap_value(SandboxClient._resource_flags(res)) == "1024m"

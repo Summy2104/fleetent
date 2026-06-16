@@ -8,7 +8,10 @@ import re
 import time
 import uuid
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
+
+if TYPE_CHECKING:
+    from fleetent.integrations.sandbox.manager import WorkspaceScope
 
 from fleetent import eval_logger
 from fleetent.integrations.sandbox import (
@@ -87,12 +90,23 @@ def init_sandbox_manager(
     global _MANAGER
     from fleetent.agent_config import AgentFile
     from fleetent.integrations.sandbox import SkillMountConfig
+    from fleetent.integrations.sandbox.config import (
+        SandboxResources,
+        resources_from_agent_settings,
+    )
     from fleetent.integrations.sandbox.factory import create_backend
+    from fleetent.integrations.sandbox.manager import WorkspaceScope
 
     resolved = agent if isinstance(agent, AgentFile) else None
     skill_mount = None
     image_persistence = False
     setup_command: str | None = None
+    # Per-agent sandbox resource/hardening profile + lifecycle (per-agent-sandbox-resources).
+    # Built from the agent's `sandbox.resources` over code defaults; no platform.yaml.
+    # `workspace_scope` collapses to one resource tier (SESSION == AGENT).
+    resources = SandboxResources()
+    scope = WorkspaceScope.SESSION
+    idle_hours = 2.0
     # Multi-user run-shape signal (sandbox-multi-user-default). Fail-safe: default True
     # even with no AgentFile, so the manager's guard correcting a configured `agent`
     # workspace_scope to `session` is always live (a single-process one-shot is session
@@ -115,14 +129,34 @@ def init_sandbox_manager(
         image_persistence = resolved.sandbox.image_persistence
         setup_command = resolved.sandbox.setup_command
         multi_user = resolved.sandbox.multi_user
+        resources = resources_from_agent_settings(resolved.sandbox.resources)
+        scope = _coerce_workspace_scope(resolved.sandbox.workspace_scope)
+        if resolved.sandbox.idle_hours is not None and resolved.sandbox.idle_hours > 0:
+            idle_hours = resolved.sandbox.idle_hours
     _MANAGER = SandboxManager(
         backend=create_backend(resolved),
         skill_mount=skill_mount,
+        # Collapsed single resource tier — one per-agent profile for both scopes.
+        resources_by_scope={WorkspaceScope.SESSION: resources, WorkspaceScope.AGENT: resources},
+        scope=scope,
+        idle_hours=idle_hours,
         image_persistence=image_persistence,
         setup_command=setup_command,
         multi_user=multi_user,
     )
     return _MANAGER
+
+
+def _coerce_workspace_scope(value: str | None) -> "WorkspaceScope":
+    """Map a per-agent `sandbox.workspace_scope` string to WorkspaceScope; invalid → SESSION."""
+    from fleetent.integrations.sandbox.manager import WorkspaceScope
+
+    if value is None:
+        return WorkspaceScope.SESSION
+    try:
+        return WorkspaceScope(value)
+    except ValueError:
+        return WorkspaceScope.SESSION
 
 
 # Workspace-relative subdirectories for image products (sandbox-workspace-root).

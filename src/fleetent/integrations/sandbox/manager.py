@@ -45,9 +45,6 @@ from fleetent.integrations.sandbox.backends.docker import DockerBackend
 from fleetent.integrations.sandbox.config import (
     SandboxResources,
     SkillMountConfig,
-    build_resources_by_scope,
-    load_sandbox_lifecycle,
-    load_skill_mount_config,
 )
 from fleetent.integrations.sandbox.hardening import config_hash, is_blocked_mount
 from fleetent.structured_logging import get_logger
@@ -193,19 +190,18 @@ class SandboxManager:
     _registry: dict[str, _Entry] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
+        # per-agent-sandbox-resources: resources/skill_mount/lifecycle are injected by the
+        # agent runtime (init_sandbox_manager builds them from agent.yaml `sandbox.resources`).
+        # When left unset (bare SandboxManager() in tests / one-shots) fall back to code-level
+        # safe defaults — NOT platform.yaml. The sandbox no longer reads platform.yaml here.
         if self.skill_mount is None:
-            self.skill_mount = load_skill_mount_config()
+            self.skill_mount = SkillMountConfig()
         if self.resources_by_scope is None:
-            lifecycle = load_sandbox_lifecycle()
-            by_scope = build_resources_by_scope()
+            default_resources = SandboxResources()
             self.resources_by_scope = {
-                WorkspaceScope.SESSION: by_scope[WorkspaceScope.SESSION.value],
-                WorkspaceScope.AGENT: by_scope[WorkspaceScope.AGENT.value],
+                WorkspaceScope.SESSION: default_resources,
+                WorkspaceScope.AGENT: default_resources,
             }
-            # Honour config defaults only when the caller left them unset.
-            if self.scope == WorkspaceScope.SESSION and self.idle_hours == 2.0:
-                self.scope = WorkspaceScope(lifecycle.workspace_scope)
-                self.idle_hours = lifecycle.idle_hours
         else:
             self.resources_by_scope = {
                 WorkspaceScope(k): v for k, v in self.resources_by_scope.items()

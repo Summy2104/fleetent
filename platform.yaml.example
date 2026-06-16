@@ -22,18 +22,11 @@ sandbox:
   #               approval even if an agent sets action_gate_medium_mode: sandbox
   # See docs/capabilities/governance.md → "sandbox mode选型指引" / "封闭即免审批".
   mode: all
-  scope: session
-  idle_hours: 2.0
-  resources:
-    memory: 256
-    cpus: 0.5
-    network: none
-    exec_timeout: 30
-    read_only: true
-  agent_scope:
-    memory: 512
-    cpus: 1.0
-    network: public_only
+  # Per-agent sandbox resources / hardening / lifecycle / skills-mount moved to each
+  # agent's agent.yaml `sandbox.resources` + `sandbox.workspace_scope` / `sandbox.idle_hours`
+  # / `sandbox.skill_mount` (per-agent-sandbox-resources): every agent owns its own profile;
+  # they are no longer read from this shared platform.yaml. See
+  # docs/migration/per-agent-sandbox-config.md.
 
 scheduling:
   enabled: true

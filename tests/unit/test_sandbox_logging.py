@@ -59,13 +59,14 @@ def test_sandbox_config_logger_is_custom() -> None:
     assert isinstance(mod._logger, Logger)
 
 
-def test_sandbox_config_warns_on_invalid_scope() -> None:
-    from fleetent.integrations.sandbox.config import _load_workspace_scope
+def test_sandbox_config_warns_on_invalid_resource_value() -> None:
+    from fleetent.agent_config import SandboxResourcesSettings
+    from fleetent.integrations.sandbox.config import resources_from_agent_settings
 
     with patch("fleetent.integrations.sandbox.config._logger") as mock_log:
-        _load_workspace_scope({"workspace_scope": "invalid_scope_xyz"}, "session")
+        resources_from_agent_settings(SandboxResourcesSettings(network="invalid_net_xyz"))
 
-    mock_log.warn.assert_called_once()
+    mock_log.warn.assert_called()
 
 
 # ── sandbox.cleanup ───────────────────────────────────────────────────────────
