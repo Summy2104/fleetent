@@ -196,12 +196,19 @@ bash_exec: bash $SKILLS_DIR/bs-internal-whitelist-drafting/scripts/query-ns-info
 ```
 knowledge-bridge__knowledge_search
   query="NS常规对外收款地址清单 {business_line} {currency} {chain_name}"
+  agent_id="bs-intern"
   top_k=20
 ```
 
 `{chain_name}` 为空时 query 省略该 token。多个 combo 可在同一轮内并行发起多个工具调用。完整 SOP 见 `skills/common-knowledge-search/SKILL.md`。
 
-**fail-fast**：接口报错 / 超时 / 非合法 JSON → 告诉用户「收款地址清单查询失败：{原因}」终止，**不重试**。
+> **`agent_id` 必填**：`knowledge_search` 必须带 `agent_id="bs-intern"`（本部署 KB 注册的消费者 id）。
+> **严禁**省略，也**严禁**改用 `my-bot`/`default`/Slack ID 等猜测值（会返回 `400 Unknown agent_id`）。
+
+**fail-fast（不重试、不空转换 agent_id）**：带 `agent_id="bs-intern"` 仍报错 / 超时 / 非 2xx（如 `500`）/ 非合法 JSON 时，
+**不重试**、**不换 agent_id**。按以下降级：将该 combo 的 `wallet_address` 置 `null`（渲染脚本兜底为占位符
+`<待业务/中台确认>`），**照常渲染出稿**，并在最终回复顶部以一行提示用户「⚠️ 收款地址清单查询暂不可用（{原因}），
+邮件中的钱包地址为占位符，请人工补全后再发送」。这样即使 KB 不可用，也能产出可人工补全的邮件草稿，而非整体失败。
 
 每条 chunk 的 `content` 字段是该 sheet 的一行（或邻近几行）拼接，覆盖列：`序号 / 平台 / 账户名称 / 账户编码 / 账户标签 / 币种网络 / 币种 / 场景 / 地址`。
 
