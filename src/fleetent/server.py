@@ -33,7 +33,7 @@ from fleetent.observability.startup_diagnostics import (
     log_config_failed,
     log_config_loaded,
 )
-from fleetent.platform.agent_lifecycle import lifecycle_admin_api, materialize
+from fleetent.platform.agent_lifecycle import materialize
 from fleetent.platform.agent_management_console import (
     agent_admin_api,
     agent_console_api,
@@ -298,7 +298,6 @@ app.include_router(agent_console_api.router)
 app.include_router(agent_admin_api.router)
 app.include_router(stats_admin_api.router)
 app.include_router(agent_apply_api.router)
-app.include_router(lifecycle_admin_api.router)
 app.include_router(node_desired_state_api.router)
 
 
@@ -455,28 +454,6 @@ def _run_playground_retention() -> None:
         chat_admin_api.purge_expired_playground()
     except Exception:  # noqa: BLE001 — keep the periodic job alive
         logger.exception("playground_retention_failed")
-
-
-def agent_routing_status(agent_name: str) -> str:
-    """Lifecycle status of a console-managed agent ('enabled'/'disabled'/'archived').
-
-    Advisory: if no managed DB is configured or the lookup fails, default to 'enabled'
-    so the hot path is never blocked by an observability concern.
-    """
-    import os
-
-    if not os.environ.get("DATABASE_URL"):
-        return "enabled"
-    try:
-        agent = agent_store.get_by_name(agent_name)
-        if agent is None:
-            return "enabled"
-        from fleetent.platform.agent_management_console import agent_admin_store
-
-        return str(agent_admin_store.get_state(agent.id)["status"])
-    except Exception:  # noqa: BLE001 — advisory check, never block chat on failure
-        logger.exception("agent_status_lookup_failed agent=%s", agent_name)
-        return "enabled"
 
 
 _platform_bearer = PlatformBearerAdapter()
