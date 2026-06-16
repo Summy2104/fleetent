@@ -32,7 +32,7 @@ async def test_start_infra_cleans_orphans_and_starts_sweep_when_docker_available
         _NOOP_INIT_SCHEMA,
         patch(
             "fleetent.integrations.sandbox.enablement.get_effective_mode",
-            AsyncMock(return_value=Mode.ALL),
+            AsyncMock(return_value=Mode.ON),
         ),
         patch("fleetent.integrations.sandbox.cleanup_orphans", AsyncMock()) as cleanup,
         patch("fleetent.integrations.sandbox.start_idle_sweep") as sweep,
@@ -75,7 +75,7 @@ async def test_start_infra_inits_sandbox_manager_with_per_agent_skills_root(
         _NOOP_INIT_SCHEMA,
         patch(
             "fleetent.integrations.sandbox.enablement.get_effective_mode",
-            AsyncMock(return_value=Mode.ALL),
+            AsyncMock(return_value=Mode.ON),
         ),
         patch("fleetent.integrations.sandbox.cleanup_orphans", AsyncMock()),
         patch("fleetent.integrations.sandbox.start_idle_sweep"),
@@ -94,7 +94,7 @@ async def test_start_infra_cleanup_failure_does_not_block_startup(tmp_path: Path
         _NOOP_INIT_SCHEMA,
         patch(
             "fleetent.integrations.sandbox.enablement.get_effective_mode",
-            AsyncMock(return_value=Mode.ALL),
+            AsyncMock(return_value=Mode.ON),
         ),
         patch(
             "fleetent.integrations.sandbox.cleanup_orphans",

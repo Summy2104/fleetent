@@ -29,12 +29,13 @@ def test_constants_derive_from_paths() -> None:
     # GENERATED_DIR / UPLOADS_DIR are retired (sandbox-execution-world): image products
     # now resolve to the per-scope workspace, not a fixed data/ subdir, so they no longer
     # exist as module path constants.
+    # enablement no longer binds SETTINGS_PATH (per-agent-sandbox-enablement); only the
+    # backend-config path in sandbox.config still derives the shared platform.yaml path.
     _assert_derivation_in_clean_env(
         "from fleetent import eval_logger, paths; "
-        "from fleetent.integrations.sandbox import config as sc, enablement as se; "
+        "from fleetent.integrations.sandbox import config as sc; "
         "assert eval_logger.TRACE_PATH == paths.data_dir() / 'traces.jsonl'; "
-        "assert sc.SETTINGS_PATH == paths.platform_yaml_path(); "
-        "assert se.SETTINGS_PATH == paths.platform_yaml_path()"
+        "assert sc.SETTINGS_PATH == paths.platform_yaml_path()"
     )
 
 

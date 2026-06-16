@@ -50,7 +50,7 @@ async def test_select_host_backend_when_mount_unsupported(tmp_path, monkeypatch)
     monkeypatch.setattr(file_tools, "_get_sandbox_manager", lambda: mgr)
 
     async def _mode() -> Mode:
-        return Mode.ALL
+        return Mode.ON
 
     monkeypatch.setattr(file_tools, "get_effective_mode", _mode)
     backend = await file_tools._select_backend(None)
@@ -67,7 +67,7 @@ async def _set_mode(monkeypatch, mode: Mode) -> None:
 
 
 async def test_select_container_backend_when_enabled(fake_manager, monkeypatch) -> None:
-    await _set_mode(monkeypatch, Mode.ALL)
+    await _set_mode(monkeypatch, Mode.ON)
     backend = await file_tools._select_backend(None)
     assert isinstance(backend, file_tools._ContainerBackend)
     assert backend.ws_id == "ws-abc123"
@@ -82,7 +82,7 @@ async def test_select_host_backend_when_off(fake_manager, monkeypatch) -> None:
 
 
 async def test_container_backend_keys_on_tool_context(fake_manager, monkeypatch) -> None:
-    await _set_mode(monkeypatch, Mode.ALL)
+    await _set_mode(monkeypatch, Mode.ON)
     ctx = file_tools_tool_context(session_id="sess-1", agent_name="bot")
     await file_tools._select_backend(ctx)
     scope, session_id, agent_name = fake_manager.acquired

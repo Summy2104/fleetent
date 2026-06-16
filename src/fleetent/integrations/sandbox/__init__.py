@@ -18,20 +18,14 @@ from fleetent.integrations.sandbox.cleanup import cleanup_orphans
 from fleetent.integrations.sandbox.client import SandboxClient
 from fleetent.integrations.sandbox.config import (
     NetworkPolicy,
-    SandboxLifecycle,
     SandboxResources,
     SkillMountConfig,
-    build_resources_by_scope,
-    load_sandbox_lifecycle,
-    load_sandbox_resources,
-    load_skill_mount_config,
+    resources_from_agent_settings,
 )
 from fleetent.integrations.sandbox.enablement import (
     Mode,
     get_effective_mode,
     is_code_execution_enabled,
-    load_sandbox_mode,
-    resolve_effective_mode,
 )
 from fleetent.integrations.sandbox.maintenance import start_idle_sweep, stop_idle_sweep
 from fleetent.integrations.sandbox.manager import SandboxManager, Scope, WorkspaceScope
@@ -53,15 +47,13 @@ __all__ = [
     "NetworkPolicy",
     "SandboxClient",
     "ExecResult",
-    "SandboxLifecycle",
     "SandboxManager",
     "SandboxResources",
     "Scope",
     "WorkspaceScope",
     "SkillMount",
     "SkillMountConfig",
-    "load_skill_mount_config",
-    "build_resources_by_scope",
+    "resources_from_agent_settings",
     "build_sandbox_env",
     "cap_or_spill",
     "cleanup_orphans",
@@ -70,11 +62,7 @@ __all__ = [
     "get_effective_mode",
     "is_code_execution_enabled",
     "is_sensitive_name",
-    "load_sandbox_lifecycle",
-    "load_sandbox_mode",
-    "load_sandbox_resources",
     "redact_secrets",
-    "resolve_effective_mode",
     "start_idle_sweep",
     "stop_idle_sweep",
     "truncate_stream",

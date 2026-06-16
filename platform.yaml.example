@@ -13,27 +13,16 @@ observability:
     directory: data/logs
     json_file: true
 
-sandbox:
-  # Global code-execution enablement (three-state). Backend unavailable degrades to off.
-  #   all       = expose run_code to every agent (recommended for closed, trusted intranets;
-  #               pair with agent.yaml action_gate_medium_mode: sandbox to cash in medium免审批)
-  #   selective = expose run_code only to agents with features.code_execution: true (minimal面)
-  #   off       = no code execution at all; no container closure → medium operations still page
-  #               approval even if an agent sets action_gate_medium_mode: sandbox
-  # See docs/capabilities/governance.md → "sandbox mode选型指引" / "封闭即免审批".
-  mode: all
-  scope: session
-  idle_hours: 2.0
-  resources:
-    memory: 256
-    cpus: 0.5
-    network: none
-    exec_timeout: 30
-    read_only: true
-  agent_scope:
-    memory: 512
-    cpus: 1.0
-    network: public_only
+# Sandbox config is per-agent now — not in this shared platform.yaml.
+#   - Code-execution enablement: each agent's agent.yaml `features.code_execution`
+#     (unset/true = on, false = off), gated by runtime backend availability (no Docker
+#     → off). There is no global tri-state `sandbox.mode` (per-agent-sandbox-enablement).
+#   - Resources / hardening / lifecycle / skills-mount: each agent's agent.yaml
+#     `sandbox.resources` / `sandbox.workspace_scope` / `sandbox.idle_hours` /
+#     `sandbox.skill_mount` (per-agent-sandbox-resources).
+# Only `sandbox.backend` (optional machine default for backend selection, agent.yaml
+# overrides; docker when absent) may still appear here. See
+# docs/migration/per-agent-sandbox-config.md.
 
 scheduling:
   enabled: true

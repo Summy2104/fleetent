@@ -32,15 +32,15 @@ def test_off_mode_escalates_sandbox_op_to_approval() -> None:
 
 def test_contained_run_runs_sandbox_directly() -> None:
     """Contained run (mode on + run_code in-container) → SANDBOX, no approval."""
-    assert _gate("run_code", Mode.ALL, workspace_mount=True) is ActionMode.SANDBOX
+    assert _gate("run_code", Mode.ON, workspace_mount=True) is ActionMode.SANDBOX
 
 
 def test_file_tool_no_mount_backend_escalates() -> None:
     """A mount-less backend (e.g. microsandbox) degrades file tools to the host
     fence — they are not contained, so a `sandbox` file op escalates to APPROVAL."""
-    assert _gate("write_file", Mode.ALL, workspace_mount=False) is ActionMode.APPROVAL
+    assert _gate("write_file", Mode.ON, workspace_mount=False) is ActionMode.APPROVAL
 
 
 def test_run_code_no_mount_backend_still_sandbox() -> None:
     """run_code execs in-container even on a mount-less backend → still SANDBOX."""
-    assert _gate("run_code", Mode.ALL, workspace_mount=False) is ActionMode.SANDBOX
+    assert _gate("run_code", Mode.ON, workspace_mount=False) is ActionMode.SANDBOX
