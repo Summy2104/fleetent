@@ -16,6 +16,7 @@ _COMPONENTS = {
     "knowledge_base",
     "long_term_ctx",
     "memory",
+    "node",
     "observability",
     "reflection",
     "runtime",
@@ -143,6 +144,31 @@ def test_structured_logging_infra_boundary() -> None:
     assert not _is_imported_from(["fleetent.platform"], imported_modules), (
         "fleetent.structured_logging imports fleetent.platform, "
         "violating its infrastructure-only boundary"
+    )
+
+
+def test_cron_scheduler_does_not_depend_on_user_store() -> None:
+    """Fire-time principal resolution is injection-decoupled (decouple-cron-principal-recheck).
+
+    cron_scheduler must not reach the platform management DB to resolve a fired task's
+    principal — it must not import fleetent.user_store. The blocked/deleted recheck is
+    supplied by the platform via set_principal_resolver; standalone trusts the IM identity.
+    """
+    import importlib
+
+    module = importlib.import_module("fleetent.cron_scheduler")
+    assert module.__file__ is not None
+    located = Path(module.__file__)
+    tree = ast.parse(located.read_text(encoding="utf-8"), filename=str(located))
+    imported_modules = set(_iter_imported_modules(tree))
+
+    assert not _is_imported_from(["fleetent.user_store"], imported_modules), (
+        "fleetent.cron_scheduler imports fleetent.user_store; fire-time principal "
+        "resolution must be injection-decoupled (set_principal_resolver), not a direct "
+        "management-DB lookup"
+    )
+    assert not _is_imported_from(["fleetent.platform"], imported_modules), (
+        "fleetent.cron_scheduler imports fleetent.platform, violating agent⊥platform"
     )
 
 
@@ -298,6 +324,7 @@ _CORE_MODULE_PREFIXES = (
     "fleetent.runtime",
     "fleetent.session",
     "fleetent.model",
+    "fleetent.node",
     "fleetent.tools",
     "fleetent.integrations",
     "fleetent.governance",
@@ -399,6 +426,22 @@ def test_core_modules_do_not_import_face_namespaces() -> None:
     assert not violations, (
         "核 modules import face namespaces, violating core→face boundary:\n"
         + "\n".join(f"  {v}" for v in violations)
+    )
+
+
+def test_node_supervisor_does_not_import_platform_or_runtime() -> None:
+    violations: list[str] = []
+    for path in _src_python_paths():
+        module_name = _module_name(path)
+        if not module_name.startswith("fleetent.node"):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        imported_modules = set(_iter_imported_modules(tree))
+        if _is_imported_from(["fleetent.platform", "fleetent.runtime"], imported_modules):
+            violations.append(module_name)
+    assert not violations, (
+        "fleetent.node must stay as HTTP client + subprocess orchestrator only; "
+        "forbidden imports found in: " + ", ".join(violations)
     )
 
 

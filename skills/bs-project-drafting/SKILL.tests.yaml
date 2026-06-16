@@ -1,0 +1,51 @@
+trigger_tests:
+  - input: "客户 C-1042 已创建完成，业务线 Trading，帮我生成 NS 项目草稿"
+    expected: direct
+  - input: "帮这个 Trading 客户立项，purpose 是现货交易对接"
+    expected: direct
+  - input: "按编码规则给 C-1042 生成 project_no 并拉起 NS 草稿"
+    expected: direct
+  - input: "客户已有 in-progress 项目，复用 project_no 继续主流程"
+    expected: direct
+  - input: "BS 已在 NS 点了生成，触发 BS-05 外部白名单"
+    expected: direct
+  - input: "帮我给客户「恒基科技」在配资业务线创建 NS 项目草稿"
+    expected: direct
+  - input: "NS 项目草稿，客户叫 NS Digital，业务线 Trading"
+    expected: direct
+  - input: "更新项目 ZCDTY00101 的备注为现货交易正式对接"
+    expected: direct
+  - input: "更新项目 2046523929246720000 的结束时间到 2027-12-31 16:00:00"
+    expected: direct
+  - input: "更新项目 Pay-OTC00101 状态为运行"
+    expected: direct
+  - input: "帮 C-1042 在配资业务线创建两个项目"
+    expected: direct
+  - input: "给 NS Digital Trading 客户建项目，项目号 ABCD00101 和 ABCD00201"
+    expected: direct
+  - input: "客户恒基科技，业务线 NS-借贷，指定项目号 HJT00101 创建草稿"
+    expected: direct
+  - input: "其他信息参照ZYJDW003196，业务线质押借贷外，备注bnloan11"
+    expected: direct
+  - input: "参考项目ZYJDW003196新建一个项目，项目号ZYJDW0031xx"
+    expected: direct
+
+non_trigger_tests:
+  - input: "量化业务开户流程是什么？"
+    expected: no_trigger
+    reason: "流程问询，不是项目草稿生成场景"
+  - input: "帮我提一个工单：借贷客户 LTV 调整"
+    expected: no_trigger
+    reason: "工单字段抽取由 bs-intake-field-extracting 处理"
+  - input: "NS 客户主数据怎么 active？"
+    expected: no_trigger
+    reason: "客户创建由 BS-03 customer-drafting 处理"
+  - input: "项目立项审批到哪一步了？"
+    expected: no_trigger
+    reason: "立项审批走 NS 原生审批流，不在本 skill 职责内"
+  - input: "这个项目的范围应该怎么定义？"
+    expected: no_trigger
+    reason: "项目内容/范围定义由业务方负责，不在本 skill 职责内"
+  - input: "帮我更新一下客户的 KYC 状态"
+    expected: no_trigger
+    reason: "更新客户字段不在本 skill 职责，客户实体由 bs-customer-drafting 管理"

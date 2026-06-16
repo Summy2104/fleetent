@@ -23,30 +23,6 @@ so the agent is runnable by `fleetent agent run`.
 - **THEN** `FLEETENT_HOME/agents/support/agent.yaml` is rewritten to match
 - **AND** operator-provided `.env` secret values are preserved
 
-### Requirement: Start and stop agent processes without monitoring
-
-The platform SHALL be able to start an agent by spawning `fleetent agent run <name>` as a
-subprocess and to stop it by terminating the tracked process. The platform SHALL track
-started PIDs to stop them, and SHALL NOT health-monitor, auto-restart, or supervise the
-agent processes.
-
-#### Scenario: Start spawns the agent runtime
-
-- **WHEN** `POST /admin/agents/support/start` is called
-- **THEN** the platform spawns `fleetent agent run support` (materializing the home first
-  if needed) and records the process
-
-#### Scenario: Stop terminates the tracked process
-
-- **WHEN** `POST /admin/agents/support/stop` is called for a started agent
-- **THEN** the platform terminates that tracked process
-
-#### Scenario: No supervision
-
-- **WHEN** a started agent process exits on its own
-- **THEN** the platform does not restart it and reports it as not-running; recovery
-  requires an explicit start
-
 ### Requirement: Agent materialization writes self-contained Agent homes
 
 平台 materialize SHALL 将每个 Agent 写成 self-contained Agent home under
@@ -164,3 +140,4 @@ agent 引用的密钥占位 SHALL NOT 出现在 Platform ENV 模板中——它�
 
 - **WHEN** 对同一 agent 连续两次 materialize
 - **THEN** 第二次覆盖 `<home>/skills/` 中的同名文件，不因目录已存在而报错
+

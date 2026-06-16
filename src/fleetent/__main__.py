@@ -32,6 +32,13 @@ def _parse_agent_restart(args: list[str]) -> argparse.Namespace:
     return parser.parse_args(args)
 
 
+def _parse_agent_stop(args: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="fleetent agent stop")
+    parser.add_argument("agent_id", help="agent id (home at FLEETENT_HOME/agents/<agent-id>/)")
+    parser.add_argument("--home", default=None, help="override the agent home directory")
+    return parser.parse_args(args)
+
+
 def _parse_agent_init(args: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="fleetent agent init")
     parser.add_argument("agent_id", help="agent id (home at FLEETENT_HOME/agents/<agent-id>/)")
@@ -66,6 +73,14 @@ def main() -> None:
         home_dir = agent_app.resolve_home(ns.agent_id, ns.home)
         agent_app._stop_running(home_dir)
         asyncio.run(agent_app.serve(ns.agent_id, port=ns.port, home=ns.home))
+        return
+
+    if argv[:2] == ["agent", "stop"]:
+        from fleetent.runtime import agent_app
+
+        ns = _parse_agent_stop(argv[2:])
+        home_dir = agent_app.resolve_home(ns.agent_id, ns.home)
+        agent_app._stop_running(home_dir)
         return
 
     user_input = " ".join(argv) if argv else sys.stdin.read().strip()

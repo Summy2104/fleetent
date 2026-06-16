@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import re
-import sqlite3
 from collections.abc import Callable
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
@@ -13,7 +12,6 @@ from typing import Any
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
 
 import fleetent.schedule_store as _store
-import fleetent.user_store as user_store
 from fleetent import outbound
 from fleetent.config import SchedulingSettings
 from fleetent.identity import SYSTEM_PRINCIPAL, Principal
@@ -51,53 +49,56 @@ def _parse_run_at(run_at: str) -> datetime:
     return datetime.fromisoformat(spec)
 
 
-def _resolve_cron_principal(task: dict[str, Any]) -> Principal | None:
-    """Recheck the archived identity in its own domain before firing.
+# Fire-time creator recheck, injection-decoupled from the platform management DB
+# (decouple-cron-principal-recheck). The platform installs a resolver at startup
+# (server.py lifespan, mirroring user_store.set_api_key_resolver); standalone never
+# installs one and trusts the task's archived IM identity. cron_scheduler therefore
+# never imports user_store or opens the management database on the fire path.
+_principal_resolver: Callable[[dict[str, Any]], Principal | None] | None = None
 
-    Platform users (present in the users table) keep platform semantics: blocked →
-    reject; a row that disappeared (deleted user) with no IM origin → reject.
-    Channel-guaranteed IM identities never live in the users table (the identity-port
-    spec forbids resolving them through user_store), so a task carrying an IM origin
-    fires with its archived identity. Deployments without user management (no users
-    table at all) trust the archived identity — the agent-independence baseline.
+
+def set_principal_resolver(resolver: Callable[[dict[str, Any]], Principal | None]) -> None:
+    """Install the platform fire-time creator recheck (blocked/deleted against `users`).
+
+    Called by the platform control plane at startup. The standalone agent never calls
+    this, so `_resolve_cron_principal` falls back to trusting the archived IM identity
+    without touching any management database.
+    """
+    global _principal_resolver
+    _principal_resolver = resolver
+
+
+def _resolve_cron_principal(task: dict[str, Any]) -> Principal | None:
+    """Resolve the principal a fired task runs as, decoupled from platform storage.
+
+    `system`/`default` short-circuit (no resolver, no DB). Otherwise: when a platform
+    resolver is installed it owns the recheck (blocked → reject; vanished without IM
+    origin → reject; else current Principal). When none is installed (standalone agent),
+    trust the task's archived IM identity — the edge authenticated the creator at
+    creation time — and fail closed only when there is no IM provenance to trust.
     """
     user_id = str(task.get("user_id") or "default")
     if user_id == "system":
         return SYSTEM_PRINCIPAL
     if user_id == "default":  # placeholder, no platform identity claimed
         return Principal(user_id="default", tenant_id="default")
-    try:
-        u = user_store.get_by_id(user_id)
-    except sqlite3.OperationalError as exc:
-        if "no such table" in str(exc):
-            # No user-management schema (standalone agent): trust the archived identity.
-            return Principal(user_id=user_id, tenant_id="default")
-        # Platform domain exists but the lookup failed (locked DB, I/O error, ...).
-        # Fail closed — never fire a task whose identity we cannot reverify.
-        logger.warning(
-            "cron_principal_recheck_failed task=%s user_id=%s err=%s",
-            task.get("id"),
-            user_id,
-            exc,
-        )
-        return None
-    except Exception as exc:  # noqa: BLE001 — unknown failure: fail closed, never fire unverified
-        logger.warning(
-            "cron_principal_recheck_failed task=%s user_id=%s err=%s",
-            task.get("id"),
-            user_id,
-            exc,
-        )
-        return None
-    if u is not None:
-        if u.status == "blocked":
+    if _principal_resolver is not None:
+        # Platform mode: delegate the users-table revocation recheck. A lookup failure
+        # (locked DB, I/O error) fails closed — never fire a task we cannot reverify.
+        try:
+            return _principal_resolver(task)
+        except Exception as exc:  # noqa: BLE001 — unverifiable identity: fail closed
+            logger.warning(
+                "cron_principal_recheck_failed task=%s user_id=%s err=%s",
+                task.get("id"),
+                user_id,
+                exc,
+            )
             return None
-        return Principal(user_id=u.id, tenant_id=u.tenant_id)
-    origin = task.get("origin")
-    if isinstance(origin, dict) and origin.get("platform"):
-        # Channel-guaranteed IM identity: the edge authenticated the creator.
-        return Principal(user_id=user_id, tenant_id="default")
-    return None
+    # Standalone: no user-management domain to reverify against. Trust the archived,
+    # edge-authenticated IM identity (the agent-independence baseline); never open the
+    # management database — so an empty/malformed DATABASE_URL cannot skip a fire.
+    return Principal(user_id=user_id, tenant_id="default")
 
 
 async def _agent_run(
@@ -418,7 +419,28 @@ class CronScheduler:
             notify_text=notify_text,
         )
         self._register(task)
+        self._backfill_next_run(task)
         return task
+
+    def _backfill_next_run(self, task: dict[str, Any]) -> None:
+        """Persist the registered job's next fire time to ``next_run_at`` and attach a
+        human-readable hint (task timezone + UTC) to ``task`` for the create result.
+
+        Best-effort: a failure here (no job yet, paused once-task, ...) never breaks create.
+        """
+        try:
+            job = self._scheduler.get_job(task["id"])
+            nrt = getattr(job, "next_run_time", None) if job is not None else None
+            if nrt is None:
+                return
+            resolved_tz = task.get("timezone") or self._settings.default_timezone
+            _store.update_run_state(task["id"], next_run_at=nrt.isoformat())
+            task["next_run_at"] = nrt.isoformat()
+            local = nrt.strftime("%Y-%m-%d %H:%M")
+            utc = nrt.astimezone(UTC).strftime("%Y-%m-%d %H:%M")
+            task["next_fire_hint"] = f" 下次触发 {local} ({resolved_tz}) / {utc} UTC"
+        except Exception as exc:  # noqa: BLE001 — echo is best-effort, never break create
+            logger.warning("cron_next_run_backfill_failed task=%s error=%s", task.get("id"), exc)
 
     def remove_task(self, task_id: str) -> bool:
         """Delete the task row and deregister its live job. Returns False if unknown."""

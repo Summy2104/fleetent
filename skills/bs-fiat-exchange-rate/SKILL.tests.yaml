@@ -1,0 +1,102 @@
+version: 1.0
+skill: bs-fiat-exchange-rate
+tests:
+  - name: standard_pair_with_range
+    description: "标准币种对 + 起止年月"
+    input:
+      user_message: "拉一份 SGD 兑 HKD 2025 年 1 到 3 月的汇率"
+    expected:
+      mcp_call:
+        tool: "exchange_rate_get_exchange_rate_report"
+        args:
+          base: "SGD"
+          quote: "HKD"
+          start_year: 2025
+          start_month: 1
+          end_year: 2025
+          end_month: 3
+
+  - name: full_year_defaults
+    description: "只给年份时默认 1-12 月"
+    input:
+      user_message: "USD/CNY 2025 年全年"
+    expected:
+      mcp_call:
+        tool: "exchange_rate_get_exchange_rate_report"
+        args:
+          base: "USD"
+          quote: "CNY"
+          start_year: 2025
+
+  - name: quarter_to_months
+    description: "Q1 转 start_month=1, end_month=3"
+    input:
+      user_message: "EUR/JPY 2025 Q1"
+    expected:
+      mcp_call:
+        tool: "exchange_rate_get_exchange_rate_report"
+        args:
+          base: "EUR"
+          quote: "JPY"
+          start_year: 2025
+          start_month: 1
+          end_month: 3
+
+  - name: missing_base_or_quote_asks
+    description: "base 或 quote 缺失时追问"
+    input:
+      user_message: "拉份历史汇率"
+    expected:
+      asks_user: true
+      output_contains: "ISO 4217"
+
+  - name: invalid_month_range_asks
+    description: "end 早于 start 时追问纠正"
+    input:
+      user_message: "USD/CNY 2025-06 到 2025-01"
+    expected:
+      asks_user: true
+
+  - name: file_delivered_via_send_file
+    description: "xlsx 必须通过内置 send_file 投递回当前对话，聊天不暴露内部路径"
+    input:
+      mocked_response: '{"file_url":"/tmp/fiat_SGD_HKD.xlsx"}'
+    expected:
+      uses_send_file: true
+      output_not_contains: "/tmp/"
+
+  - name: never_emits_api_key
+    description: "输出不得含 Authorization / Bearer / X-API-Key 字面值"
+    input:
+      simulate: "user pastes token-bearing curl into chat"
+    expected:
+      response_redacts_token: true
+
+  - name: middle_mcp_not_available_notice
+    description: "中台 middle-mcp 未接入 my-bot 时，告知用户不可执行，不臆造 curl/wrapper"
+    input:
+      user_message: "拉份 SGD/HKD 2025 年汇率"
+    expected:
+      uses_curl: false
+      output_contains: "middle-mcp"
+
+trigger_tests:
+  - input: "拉份 SGD 兑 HKD 2025 年汇率"
+    expected: direct
+  - input: "USD/CNY 2025 全年汇率报告"
+    expected: direct
+  - input: "EUR JPY 法币历史汇率"
+    expected: direct
+  - input: "看下 GBP/USD 最近一年的汇率"
+    expected: direct
+
+non_trigger_tests:
+  - input: "USDT 在 Binance 的汇率"
+    expected: no_trigger
+    reason: "数字货币 CEX 费率应走 bs-exchange-rate"
+  - input: "BTC 现在多少钱"
+    expected: no_trigger
+    reason: "实时币价应走 common-ns-monitor 或行情类 skill"
+  - input: "查 USD 在中台的币种 ID"
+    expected: no_trigger
+    reason: "币种字典应走 common-middle-dict"

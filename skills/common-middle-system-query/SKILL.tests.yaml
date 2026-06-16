@@ -1,0 +1,108 @@
+skill: common-middle-system-query
+description: |
+  Test cases for common-middle-system-query hub skill: trigger routing to
+  3 spoke skills (common-middle-account-assets / bs-exchange-rate /
+  bs-transaction-history) and wrapper invocation convention.
+
+test_cases:
+
+# ── Routing: 账户资产 → common-middle-account-assets ──
+
+- name: 路由_单账户资产查询
+  category: routing
+  user_input: |
+    查 alpha 名下的账户资产
+  expected_behavior:
+  - contains: common-middle-account-assets
+  - not_contains: bs-transaction-history
+  - not_contains: bs-exchange-rate
+
+- name: 路由_批量账户持仓
+  category: routing
+  user_input: |
+    拉取 ZYJDW00203-B1 到 ZYJDW00203-B10 这批账户的持仓
+  expected_behavior:
+  - contains: common-middle-account-assets
+  - not_contains: bs-transaction-history
+
+- name: 路由_可用冻结余额
+  category: routing
+  user_input: |
+    bntrad8@nsdigital.io 现在可用余额和冻结余额各是多少
+  expected_behavior:
+  - contains: common-middle-account-assets
+
+# ── Routing: 动账流水 → bs-transaction-history ──
+
+- name: 路由_动账流水带时间范围
+  category: routing
+  user_input: |
+    导出 bntrad8@nsdigital.io 最近 7 天的动账流水
+  expected_behavior:
+  - contains: bs-transaction-history
+  - not_contains: common-middle-account-assets
+
+- name: 路由_xlsx流水导出
+  category: routing
+  user_input: |
+    把账户 1204 在 2026-04-29 到 2026-05-19 的进出账明细导成 xlsx
+  expected_behavior:
+  - contains: bs-transaction-history
+
+# ── Routing: 汇率 → bs-exchange-rate ──
+
+- name: 路由_账户汇率查询
+  category: routing
+  user_input: |
+    查 USDT 在 Binance 上的账户汇率
+  expected_behavior:
+  - contains: bs-exchange-rate
+  - not_contains: common-middle-account-assets
+  - not_contains: bs-transaction-history
+
+- name: 路由_估值汇率
+  category: routing
+  user_input: |
+    看下 alpha 名下所有账户的估值汇率
+  expected_behavior:
+  - contains: bs-exchange-rate
+
+# ── Wrapper 调用约定 ──
+
+- name: 调用_必须走wrapper
+  category: wrapper
+  user_input: |
+    查 account_id=1204 的余额
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-middle-system-query/scripts/middle-call.sh
+  - not_contains: mcpfast middle-mcp-server
+  - not_contains: mcpfast middle-
+
+- name: 调用_不允许直curl中台
+  category: wrapper
+  user_input: |
+    拉一份账户汇率快照
+  expected_behavior:
+  - not_contains: curl
+  - not_contains: middle.antalpha-mo.com/api
+  - not_contains: Authorization
+  - not_contains: Bearer
+
+# ── Non-trigger（避免误触发） ──
+
+- name: 非触发_NS业务流水
+  category: non_trigger
+  user_input: |
+    查 TR03642 项目的业务流水
+  expected_behavior:
+  - not_contains: bs-transaction-history
+  - not_contains: middle-call.sh
+  - contains: common-ns-flows
+
+- name: 非触发_KYC详情
+  category: non_trigger
+  user_input: |
+    查客户 ABC Trading 的 KYC 详情
+  expected_behavior:
+  - not_contains: common-middle-account-assets
+  - not_contains: middle-call.sh

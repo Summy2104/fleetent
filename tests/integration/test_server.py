@@ -30,6 +30,14 @@ def test_kb_router_mounted():
     assert "/admin/kb" in paths  # knowledge-base management router is mounted
 
 
+def test_node_router_mounted():
+    from fleetent.server import app
+
+    paths = {getattr(r, "path", None) for r in app.routes}
+    assert "/nodes/{node_id}/desired-state" in paths
+    assert "/nodes/{node_id}/status" in paths
+
+
 # ── cron scheduler lifespan ───────────────────────────────────────────────────
 
 

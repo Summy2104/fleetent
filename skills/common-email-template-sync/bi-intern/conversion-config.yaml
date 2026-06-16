@@ -1,0 +1,45 @@
+# BI Intern 邮件模版转换配置
+# 由 common-email-template-sync skill 在语义转换步骤中读取
+# ⚠️ 首次使用前请补充 fixed_roles 和 subject_labels
+version: "1.0.0"
+agent_id: "bi-intern"
+
+# A. 固定角色清单（有具体邮箱地址的角色，转换时不得改为占位符）
+#    待补充：请根据 bi-intern 实际邮件模版中出现的固定人员填写
+fixed_roles: []
+  # 示例格式：
+  # - name: "姓名"
+  #   email: "email@nsdigital.io"
+  #   role: "角色说明"
+
+# B. 常用占位符库（命名规范参考，优先复用）
+common_placeholders:
+  - name: "business_line"
+    description: "业务线名称"
+    examples: ["Defi", "Armada"]
+  - name: "application_date"
+    description: "申请日期（YYYY-MM-DD）"
+  - name: "business_group_email"
+    description: "业务群组邮箱（无具体邮箱的群组角色）"
+  - name: "business_leader"
+    description: "业务 leader 邮箱或姓名"
+  - name: "account_entity"
+    description: "账户主体/公司名称"
+  - name: "platform_name"
+    description: "平台名称"
+    examples: ["Binance", "OKX"]
+
+# C. 邮件主题标签清单
+#    待补充：请根据 bi-intern 实际使用的邮件类型填写
+subject_labels: []
+  # 示例格式：
+  # - label: "【申请类型】"
+  #   use_case: "使用场景说明"
+
+# D. 审批流程模式（用于识别正文中的审批结构）
+approval_patterns:
+  - level: 2
+    description: "二级审批：业务 leader + 最终审批人"
+
+# F. 用户自定义规则（用户反馈后追加在此）
+custom_rules: []

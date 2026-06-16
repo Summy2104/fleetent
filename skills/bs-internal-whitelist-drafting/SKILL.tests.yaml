@@ -1,0 +1,115 @@
+trigger_tests:
+  - input: "@star 出一份内部白名单邮件，量化业务，Grand Digital Holding Limited 客户，要 USDT erc20、USDT trc20、BTC，中文版"
+    expected: direct
+  - input: "中文， Grand Digital Holding Limited，量化， USDT erc20， USDT trc20， BTC"
+    expected: direct
+  - input: "BS 内部白名单：英文版，ABC LLC，Defi，USDT TRC20"
+    expected: direct
+  - input: "@star 出一份内部白名单邮件，Trading 业务要收 ETH ERC20"
+    expected: direct
+  - input: "业务要收款，准备内部白名单"
+    expected: direct
+
+non_trigger_tests:
+  - input: "帮我把这个 USDT 地址加到客户外部白名单"
+    expected: no_trigger
+    reason: "外部白名单（客户地址）不在本 skill 范围"
+  - input: "在中台把 USDT/TRC20 的内部地址改一下"
+    expected: no_trigger
+    reason: "本 skill 不做中台地址创建/更新，BS 应在中台 UI 操作"
+  - input: "帮我把这封 Risk 审批邮件发出去"
+    expected: no_trigger
+    reason: "本 skill 不做邮件发送"
+  - input: "USDT 能跑在哪些链上？"
+    expected: no_trigger
+    reason: "币种链合法性判断不在本 skill 范围"
+  - input: "工单状态查一下"
+    expected: no_trigger
+    reason: "工单状态查询由 bs-intake-status-notifying 处理"
+
+dod_tests:
+  - name: happy_path_zero_followups
+    description: "用户初始消息一次给完 4 字段，且所有查询单命中 → 0 轮追问出稿"
+    input:
+      message: "中文， Grand Digital Holding Limited，量化， USDT erc20， USDT trc20， BTC"
+      biz_lines_response_count: 1
+      biz_lines_email_group_size: 2
+      kb_match_per_combo: 1
+    expected:
+      followup_rounds: 0
+      email_draft_present: true
+      address_lines_count: 3
+      cc_email_count: 2
+
+  - name: gap_address_not_found
+    description: "某 (币种,网络) 在 KB 0 命中 → 第 2 轮一次性追问；用户跳过 → 占位符出稿"
+    input:
+      kb_match_per_combo: [1, 0, 1]
+      user_skip_in_followup: true
+    expected:
+      followup_rounds: 1
+      email_draft_present: true
+      placeholder_in_address_line_2: "<待业务/中台确认>"
+
+  - name: gap_biz_line_multi_candidates
+    description: "/v1/biz_lines 多业务线候选 → 进 gaps 一次性追问"
+    input:
+      biz_lines_response_count: 3
+    expected:
+      followup_rounds: 1
+      gap_question_includes_biz_line_candidates: true
+
+  - name: fail_fast_kb_search_error
+    description: "knowledge_search 接口报错 → 直接终止不重试"
+    input:
+      kb_search_error: "timeout"
+    expected:
+      terminated: true
+      retry_count: 0
+      message_contains: "收款地址清单查询失败"
+
+  - name: fail_fast_biz_lines_error
+    description: "/v1/biz_lines 接口报错 → 直接终止不重试"
+    input:
+      biz_lines_error: "timeout"
+    expected:
+      terminated: true
+      retry_count: 0
+      message_contains: "业务线查询失败"
+
+  - name: network_omitted
+    description: "BTC 未给网络 → 仅按业务线+币种匹配 KB"
+    input:
+      message: "中文， Grand Digital Holding Limited，量化， BTC"
+    expected:
+      kb_match_filter_uses_network: false
+      kb_match_filter_uses_currency_and_business_line: true
+
+  - name: address_masking_in_gaps
+    description: "gaps 候选展示地址必须 mask（前 6 后 4，中间 ***）"
+    input:
+      kb_match_per_combo: 3
+    expected:
+      mask_pattern: "^.{6}\\*\\*\\*.{4}$"
+
+  - name: parse_failure_first_round_batched_ask
+    description: "用户消息缺多个字段 → 第 1 轮一次性把缺失字段全部列出（不拆多条）"
+    input:
+      message: "出一份内部白名单邮件"
+    expected:
+      followup_rounds: 1
+      first_followup_lists_all_missing_fields: true
+
+  - name: address_masking_full_in_email_body
+    description: "邮件正文里地址必须完整（不 mask）"
+    expected:
+      email_body_address_full: true
+      slack_address_masked: true
+
+  - name: subagent_sender_id_passthrough
+    description: "父 agent 通过 sub_agent 透传 sender_id 通过 Step 0；未透传则失败"
+    input:
+      parent_passes_sender_id: false
+    expected:
+      step0_failed: true
+      no_ns_calls_made: true

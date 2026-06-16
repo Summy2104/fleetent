@@ -80,7 +80,7 @@ The scheduler SHALL read its runtime settings from the **agent configuration** (
 - **THEN** the scheduler uses `agent.scheduling.default_timezone`
 
 ### Requirement: Scheduled tasks are agent-owned with no platform dependency
-Scheduled-task persistence and scheduling SHALL be entirely agent-runtime concerns. `schedule_store` and `cron_scheduler` MUST NOT `import fleetent.platform.*` and MUST NOT write to any platform table. An agent SHALL be able to create and fire scheduled tasks in an environment where the platform service is absent and the platform database / `scheduled_tasks` table do not exist.
+Scheduled-task persistence and scheduling SHALL be entirely agent-runtime concerns. `schedule_store` and `cron_scheduler` MUST NOT `import fleetent.platform.*` and MUST NOT write to any platform table. The fire-time path SHALL NOT read platform-owned tables either: `cron_scheduler` MUST NOT open or query the platform management database (the `users` table) to resolve a fired task's principal — in particular it MUST NOT call `user_store.get_by_id` directly, and MUST NOT import `user_store` for that purpose. An agent SHALL be able to create **and fire** scheduled tasks in an environment where the platform service is absent and the platform database / `scheduled_tasks` table do not exist, **regardless of how `DATABASE_URL` is configured** (unset, empty, or pointing at a non-existent file) — a malformed or empty `DATABASE_URL` SHALL NOT cause fired tasks to be skipped.
 
 #### Scenario: Create and fire without platform
 - **WHEN** `fleetent agent run` is executed with no platform service and no platform database present
@@ -88,7 +88,30 @@ Scheduled-task persistence and scheduling SHALL be entirely agent-runtime concer
 
 #### Scenario: No reverse dependency on platform
 - **WHEN** the agent-runtime scheduling modules are imported
-- **THEN** they do not import `fleetent.platform.*` and do not access platform-owned tables
+- **THEN** they do not import `fleetent.platform.*`, do not import `user_store`, and do not access platform-owned tables
+
+#### Scenario: Empty or malformed DATABASE_URL does not break firing
+- **WHEN** a standalone agent fires a task created by a real IM user while `DATABASE_URL` is set to an empty string (or any value that would fail to open the management database)
+- **THEN** the task still fires and delivers — the principal is resolved from the task's archived IM identity without touching the management database
+
+### Requirement: Fire-time principal resolution is injection-decoupled from platform
+The scheduler's fire-time principal resolution SHALL use an injection seam, mirroring the existing platform-resolver pattern (`user_store.set_api_key_resolver`, `connectors.set_provider`, `set_im_identity_resolver`). `cron_scheduler` SHALL expose a module-level `set_principal_resolver(resolver)` whose installed callable maps a fired task to a `Principal | None`. When **no** resolver is installed (the standalone agent — the platform `server.py` lifespan that injects it never runs), the scheduler SHALL trust the task's archived identity unconditionally — `Principal(user_id, tenant_id="default")` for any non-`system`/non-`default` user_id — without opening or querying any database (the agent-independence baseline). When a resolver **is** installed (platform mode), the scheduler SHALL delegate principal resolution to it; the resolver SHALL perform the creator revocation recheck against the `users` table — returning `None` for a blocked creator (skip), `Principal(user_id, "default")` for a vanished creator that still carries a platform IM `origin`, the creator's current `Principal(user_id, tenant_id)` for an active creator, and `None` for a vanished creator with no IM origin. A raised exception from the installed resolver (e.g. a locked or unreachable management DB) SHALL be caught and treated as fail-closed (`None`, skip) — never fire a task whose identity cannot be reverified. The `system` and `default` user_id short-circuits SHALL remain unchanged and SHALL NOT consult the resolver or any database.
+
+#### Scenario: Standalone trusts archived identity without a database
+- **WHEN** no principal resolver is installed and a fired task carries a non-`system`/non-`default` user_id (with or without an IM `origin`)
+- **THEN** `_resolve_cron_principal` returns `Principal(user_id, "default")` without calling `user_store` or opening any database
+
+#### Scenario: Platform-injected resolver enforces revocation
+- **WHEN** the platform lifespan has called `set_principal_resolver` and a fired task's creator is now `blocked` in the `users` table
+- **THEN** the injected resolver returns `None` and the fire is skipped; an unblocked creator resolves to their current `Principal(user_id, tenant_id)`
+
+#### Scenario: Platform resolver lookup error fails closed
+- **WHEN** a principal resolver is installed and it raises while consulting the `users` table (locked DB, I/O error)
+- **THEN** `_resolve_cron_principal` catches the error, logs `cron_principal_recheck_failed`, and returns `None` so the task does not fire unverified
+
+#### Scenario: system and default short-circuit unchanged
+- **WHEN** a fired task has user_id `system` or `default`
+- **THEN** the principal resolves to `SYSTEM_PRINCIPAL` / `Principal("default", "default")` respectively without consulting the resolver or any database
 
 ### Requirement: Schedule kinds cron, one-shot, and interval
 The system SHALL support three schedule kinds mapped to APScheduler triggers: `cron` (5-field expression via `CronTrigger.from_crontab`), `once` (absolute timestamp or relative duration via `DateTrigger`), and `interval` (fixed period anchored from creation via `IntervalTrigger`). `schedule_kind` MUST be validated at task creation: a value outside `{cron, once, interval}` MUST be rejected with a clear `ValueError` (e.g. `invalid schedule_kind: 'run_at' (cron/once/interval)`) and MUST NOT be persisted — so an invalid kind can never reach registration (where a non-matching kind would fall through to the cron branch and crash on a missing cron expression). As a forgiving normalization for the common model confusion of passing the parameter name as the kind, `schedule_kind="run_at"` MUST be treated as `"once"` at creation (then the one-shot `run_at` normalization applies).
@@ -127,6 +150,10 @@ The scheduler SHALL avoid burst-firing missed runs after the agent process was d
 ### Requirement: schedule tool for managing scheduled tasks
 A single `schedule` built-in tool SHALL let an agent manage scheduled tasks via an `action` parameter (`create`, `list`, `remove`, `run_now`, `pause`, `resume`). It SHALL have `risk_level="low"` and SHALL NOT require human approval. The tool SHALL perform all mutations through the running `CronScheduler` instance obtained via `cron_scheduler.current()` — never by writing `schedule_store` directly. `create` SHALL accept `task_type` (default `generate`) and `notify_text`, enforcing the per-type validation (notify requires `notify_text` + delivery target; generate/action require `message`) and returning a clean error string rather than raising on a validation failure; its tool description SHALL carry the type-deciding question ("does the message content need information only known at send time?") plus the creation-time finalize-and-confirm flow for notify copy. `create` SHALL stamp the task's owner from the execution principal (`tool_context.principal.user_id`) when available, falling back to the `user_id` parameter only when no principal is present — the model-supplied parameter MUST NOT override an available principal. `create` SHALL return the new task's id; `pause`/`resume` SHALL toggle the task's `enabled` flag and deregister/register the APScheduler job accordingly; `run_now` SHALL fire the task immediately via a public scheduler method. When no scheduler is running (one-shot CLI run, or `scheduling.enabled=false`), mutations SHALL still persist to the store and the tool result SHALL state truthfully that the task takes effect when the agent service is running — the tool MUST NOT report the task as active.
 
+The `schedule` tool's parameter contract SHALL be carried in the **tool schema delivered to the model** (the model receives the schema, not the Python function's docstring body): `action`, `schedule_kind`, `task_type`, and `notify_target_type` SHALL be declared as enumerated parameters (via `Literal`) so the model receives their allowed values, and every parameter SHALL carry a description (via `Annotated`) so per-parameter guidance reaches the model. Because `schedule_kind` is enumerated, the model cannot emit a non-member value such as `run_at` (the forgiving normalization underneath remains for non-model callers). The `task_type` parameter description SHALL convey the notify/generate/action selection rule and the default `generate`.
+
+The `timezone` parameter SHALL default to unspecified (empty), NOT to a hardcoded `"UTC"`; when the model does not supply a timezone, `create` SHALL pass it through as absent (`None`) so the deployment-default resolution applies (see "Timezone resolution is local-clock and DST-safe"). The `timezone` and `cron_expr` parameter descriptions SHALL state that cron fields are the **local wall-clock time of the task timezone** and MUST NOT be pre-converted to UTC, and that an unspecified timezone uses the deployment default while an explicit timezone is set only when the user names one. On a successful `create`, the tool result SHALL state the task's next fire time in **both the task timezone and UTC**.
+
 #### Scenario: Agent creates a notify task with frozen copy
 - **WHEN** an agent calls `schedule(action="create", task_type="notify", notify_text="📅 晨会提醒：9:00 准时开始", schedule_kind="cron", cron_expr="0 9 * * 1-5")`
 - **THEN** the task is created with `task_type="notify"`, fires agent-free, and its id is returned
@@ -162,6 +189,22 @@ A single `schedule` built-in tool SHALL let an agent manage scheduled tasks via 
 #### Scenario: Task owner comes from the execution principal
 - **WHEN** an agent calls `schedule(action="create", user_id="whatever-the-model-typed")` with a `tool_context` carrying a resolved principal
 - **THEN** the created task's `user_id` is the principal's `user_id`, not the model-supplied parameter
+
+#### Scenario: Model receives task_type and schedule_kind enums in the schema
+- **WHEN** the `schedule` tool schema is built by the schema builder and delivered to the model
+- **THEN** the `task_type` parameter exposes the enum `["notify", "generate", "action"]` with a description conveying the selection rule, and the `schedule_kind` parameter exposes the enum `["cron", "once", "interval"]`
+
+#### Scenario: timezone parameter carries the no-pre-convert contract
+- **WHEN** the `schedule` tool schema is built
+- **THEN** the `timezone` (and `cron_expr`) parameter descriptions state that cron fields are the task timezone's local wall-clock time and MUST NOT be pre-converted to UTC, and that an unspecified timezone uses the deployment default
+
+#### Scenario: Unspecified timezone is passed through, not forced to UTC
+- **WHEN** an agent calls `schedule(action="create", schedule_kind="cron", cron_expr="0 18 * * *", message=...)` with no `timezone`
+- **THEN** the persisted task does not carry a hardcoded `"UTC"` that defeats the fallback, and the scheduler resolves the effective timezone from `agent.scheduling.default_timezone`
+
+#### Scenario: Create result states the next fire time in task timezone and UTC
+- **WHEN** an agent creates a cron task on a running scheduler
+- **THEN** the tool result states the next fire time in both the task timezone and UTC, and the task's `next_run_at` is populated
 
 ### Requirement: Live mutation through a single owner
 All scheduled-task mutations (create / remove / enable-disable / run-now) SHALL go through public `CronScheduler` methods (`create_task`, `remove_task`, `set_task_enabled`, `run_now`) that atomically perform the store write and the corresponding APScheduler job registration/deregistration in one place. `schedule_store` SHALL be the scheduler's private persistence layer: the tool layer MUST NOT import `schedule_store` directly (enforced by a dependency guardrail test). The module SHALL expose `cron_scheduler.current()` returning the running scheduler instance, registered at `start()` and cleared at `shutdown()`.
@@ -251,4 +294,23 @@ The one-shot `run_at` parser SHALL tolerate common non-strict ISO forms in addit
 #### Scenario: create rejects an unparseable run_at
 - **WHEN** a `once` task is created with a `run_at` the parser cannot resolve
 - **THEN** the tool returns an explanatory error and no row is persisted
+
+### Requirement: Timezone resolution is local-clock and DST-safe
+The system SHALL resolve a scheduled task's effective timezone with the precedence **explicit per-task `timezone` > `agent.scheduling.default_timezone` > `UTC`**. Cron fields SHALL be interpreted in the resolved timezone (APScheduler `CronTrigger` timezone) as **local wall-clock time**. The system SHALL persist the cron expression and the timezone **as given** and SHALL NOT normalize a recurring schedule to a fixed UTC offset at creation time, so a recurring task fires at the same local wall-clock time across daylight-saving transitions. Neither the model nor the tool layer SHALL perform timezone arithmetic when constructing a task — the model supplies the user's stated wall-clock time plus (optionally) a timezone name, and conversion is the scheduler's concern at fire time.
+
+#### Scenario: Cron is interpreted in the task timezone
+- **WHEN** a task is registered with `cron_expr="0 18 * * *"` and `timezone="Asia/Shanghai"`
+- **THEN** it fires at 18:00 Asia/Shanghai — not 18:00 UTC, and not 10:00 Asia/Shanghai
+
+#### Scenario: Empty timezone resolves to the deployment default
+- **WHEN** a task is created with no timezone while `agent.scheduling.default_timezone="Asia/Shanghai"`
+- **THEN** it is registered against `Asia/Shanghai` and fires at the intended local wall-clock time
+
+#### Scenario: No double conversion of the wall-clock time
+- **WHEN** a user asks for 20:34 in a named timezone and the task is created
+- **THEN** the stored cron fields equal the stated wall-clock (`34 20`) and the timezone equals the named zone — the wall-clock is never pre-shifted to UTC
+
+#### Scenario: Recurring schedule follows daylight-saving
+- **WHEN** a daily task is stored as a local cron expression plus an IANA timezone that observes DST
+- **THEN** it fires at the same local wall-clock time before and after a daylight-saving transition (no fixed-UTC-offset drift), because the schedule was not normalized to UTC at creation
 

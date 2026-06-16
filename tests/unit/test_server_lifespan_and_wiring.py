@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock
 import pytest
 
 from fleetent import agent_store, server
-from fleetent.identity import Principal
 from fleetent.platform.agent_management_console import agent_console_api
 from fleetent.platform.askit_console import agent_apply_api
 
@@ -247,7 +246,6 @@ async def test_server_helper_branches(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(server, "list_approvals", lambda status=None: [{"status": status}])
     assert await server.get_approvals("pending") == [{"status": "pending"}]
 
-    monkeypatch.setattr(server, "agent_routing_status", lambda name: "enabled")
     monkeypatch.setattr(
         server.agent_config,
         "current",

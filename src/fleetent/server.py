@@ -17,7 +17,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[impo
 from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel
 
-from fleetent import agent_config, agent_store, connectors, user_store
+from fleetent import agent_config, agent_store, connectors, cron_scheduler, user_store
 from fleetent.auth import seed_builtin_admin
 from fleetent.config import Settings, configure_logging
 from fleetent.governance.approval_router import resolve_approval_request
@@ -33,7 +33,7 @@ from fleetent.observability.startup_diagnostics import (
     log_config_failed,
     log_config_loaded,
 )
-from fleetent.platform.agent_lifecycle import lifecycle_admin_api, materialize
+from fleetent.platform.agent_lifecycle import materialize
 from fleetent.platform.agent_management_console import (
     agent_admin_api,
     agent_console_api,
@@ -44,6 +44,7 @@ from fleetent.platform.chat_management import chat_admin_api
 from fleetent.platform.connector_management import connector_admin_api, vault_provider
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import provider_admin_api
+from fleetent.platform.node_management import node_desired_state_api
 from fleetent.platform.skill_management import skill_admin_api
 from fleetent.platform.user_management import user_admin_api
 from fleetent.platform.user_management.api_key_store import resolve as _resolve_api_key
@@ -112,6 +113,27 @@ def _resolve_im_identity(owner_id: str, platform: str, platform_user_id: str) ->
     return user.id
 
 
+def _cron_principal_recheck(task: dict[str, Any]) -> Principal | None:
+    """Platform fire-time creator recheck, injected into cron_scheduler at startup.
+
+    Re-verifies a fired task's creator against the `users` table: blocked → reject;
+    a creator that vanished (deleted) with no platform IM origin → reject; otherwise the
+    creator's current Principal. A vanished creator that still carries a platform IM
+    origin is trusted (channel-guaranteed identity, never resolved through the users
+    table). cron_scheduler short-circuits `system`/`default` before delegating here.
+    """
+    user_id = str(task.get("user_id") or "default")
+    u = user_store.get_by_id(user_id)
+    if u is not None:
+        if u.status == "blocked":
+            return None
+        return Principal(user_id=u.id, tenant_id=u.tenant_id)
+    origin = task.get("origin")
+    if isinstance(origin, dict) and origin.get("platform"):
+        return Principal(user_id=user_id, tenant_id="default")
+    return None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Wire platform api_keys resolver so user_store.authenticate queries the api_keys
@@ -119,6 +141,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     user_store.set_api_key_resolver(_resolve_api_key)
     connectors.set_provider(vault_provider.get_credential)
     set_im_identity_resolver(_resolve_im_identity)
+    # Platform fire-time creator recheck for cron tasks (decouple-cron-principal-recheck):
+    # standalone agents never run this lifespan, so they keep trusting the archived IM
+    # identity without opening the management DB.
+    cron_scheduler.set_principal_resolver(_cron_principal_recheck)
 
     from fleetent.platform.connector_management import external_credential_store
 
@@ -272,7 +298,7 @@ app.include_router(agent_console_api.router)
 app.include_router(agent_admin_api.router)
 app.include_router(stats_admin_api.router)
 app.include_router(agent_apply_api.router)
-app.include_router(lifecycle_admin_api.router)
+app.include_router(node_desired_state_api.router)
 
 
 _UNSET: Any = object()  # distinguishes "field omitted" from an explicit None (clear)
@@ -428,28 +454,6 @@ def _run_playground_retention() -> None:
         chat_admin_api.purge_expired_playground()
     except Exception:  # noqa: BLE001 — keep the periodic job alive
         logger.exception("playground_retention_failed")
-
-
-def agent_routing_status(agent_name: str) -> str:
-    """Lifecycle status of a console-managed agent ('enabled'/'disabled'/'archived').
-
-    Advisory: if no managed DB is configured or the lookup fails, default to 'enabled'
-    so the hot path is never blocked by an observability concern.
-    """
-    import os
-
-    if not os.environ.get("DATABASE_URL"):
-        return "enabled"
-    try:
-        agent = agent_store.get_by_name(agent_name)
-        if agent is None:
-            return "enabled"
-        from fleetent.platform.agent_management_console import agent_admin_store
-
-        return str(agent_admin_store.get_state(agent.id)["status"])
-    except Exception:  # noqa: BLE001 — advisory check, never block chat on failure
-        logger.exception("agent_status_lookup_failed agent=%s", agent_name)
-        return "enabled"
 
 
 _platform_bearer = PlatformBearerAdapter()

@@ -1,0 +1,4 @@
+{
+  "_comment": "静态 market_id -> 名称 兜底映射。主路径走 NS MCP armada_get /v1/accounts/digital_coin/category 实时拉取；NS 失败时回落到这张表；都没命中显示 'market#<id>'。要扩展直接编辑本文件，不用动代码。注：以下划线开头的 key 是注释，不会被识别为 id。",
+  "4": "Binance"
+}

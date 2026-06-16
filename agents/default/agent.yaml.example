@@ -311,6 +311,9 @@ mcp:
 
 scheduling:
   enabled: true                   # set false to disable APScheduler cron tasks for this agent
+  # Fallback timezone for tasks created without an explicit one. cron_expr fields are read
+  # as local wall-clock in this zone (e.g. set "Asia/Shanghai" so "0 18 * * *" means 18:00
+  # Beijing). A task that names its own timezone overrides this.
   default_timezone: "UTC"
 
 webhooks:

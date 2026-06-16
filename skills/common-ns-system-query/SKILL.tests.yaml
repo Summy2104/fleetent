@@ -1,0 +1,341 @@
+skill: common-ns-system-query
+description: 'Test cases for common-ns-system-query skill covering 8 functional domains,
+
+  various parameter patterns, and error scenarios.
+
+  '
+test_cases:
+- name: 查询银行列表
+  category: accounts
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询所有银行
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v1/accounts/bank"
+  - not_contains: ProcessInstance
+- name: 查询指定银行详情
+  category: accounts
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询银行 ID 为 123 的详情
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v1/accounts/bank/{id}"
+  - contains: path_params
+  - contains: '"id": "123"'
+- name: 查询公司法币账户
+  category: accounts
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询主体 456 的公司法币账户
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v1/accounts/fiat/company/account/list"
+  - contains: query_params
+  - contains: '"entity_id"'
+- name: 查询客户列表（带过滤）
+  category: master_data
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询状态为可用的客户，每页 20 条
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v1/customers"
+  - contains: query_params
+  - one_of:
+    - contains: '"status": 3'
+    - contains: '"status":3'
+  - contains: '"page_size": 20'
+- name: 查询项目列表
+  category: master_data
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询所有投资项目
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v1/projects"
+  - contains: '"biz_line"'
+- name: 查询用户列表
+  category: master_data
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询所有激活的用户
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v1/users"
+  - one_of:
+    - contains: '"status": 1'
+    - contains: '"status":1'
+- name: 查询部门列表
+  category: master_data
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询技术部门
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v1/department/list"
+  - contains: '"name"'
+- name: 查询业务线列表
+  category: business_config
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询所有业务线
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v1/biz_lines"
+- name: 查询行为详情
+  category: business_config
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询行为 ID 789 的详情
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v1/activity/{id}"
+  - contains: path_params
+  - contains: '"id": "789"'
+- name: 查询流程定义列表
+  category: process
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查找名称包含付款的流程定义
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v1/bpmn/process_definition/list"
+  - contains: '"process_name"'
+  - contains: 付款
+- name: 获取流程图 XML
+  category: process
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    获取流程定义 proc-123 的流程图
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v1/bpmn/process_definition/{id}/xml"
+  - contains: path_params
+- name: 查询资金差价表格（整数枚举参数）
+  category: monitor
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询 Binance 借出方向的借贷利率差价
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v1/monitor/fund_price_diff/data"
+  - one_of:
+    - contains: '"biz_type": 1'
+    - contains: '"biz_type":1'
+- name: 查询资金费率
+  category: monitor
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询币安和 OKX 的资金费率
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v1/monitor/bi_report/fund_rate"
+- name: 查询逻辑交易流水
+  category: transactions
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询已完成的逻辑交易流水
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v1/v_transactions"
+  - contains: '"process_status"'
+- name: 查询实际交易流水
+  category: transactions
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询项目 PRJ-001 的实际交易流水
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v1/r_transactions"
+  - contains: '"project_no"'
+- name: 查询 NS 动账流水
+  category: reconciliation
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询未对账的 NS 动账流水
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v1/reconciliation/adjustment/real_transactions/r_flows"
+  - contains: '"match_status"'
+- name: 查询 FDL 结算单列表
+  category: fdl_settlements
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询 FDL 固定利率结算单
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v1/fdl-settlements"
+- name: 查询资金计划
+  category: fund
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询流程 inst-abc123 的资金计划
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v2/bpmn/process_instance/{instance_id}/fund_plans"
+  - contains: path_params
+  - contains: '"instance_id": "inst-abc123"'
+- name: 查询资金路径
+  category: fund
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询流程 inst-abc123 的资金路径
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v2/bpmn/process_instance/{instance_id}/fund_path/list"
+  - contains: '"instance_id": "inst-abc123"'
+- name: 查询资金信息
+  category: fund
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询流程 inst-abc123 的资金信息
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v2/bpmn/process_instance/{instance_id}/fund_infos"
+  - contains: '"instance_id": "inst-abc123"'
+- name: 查询审批组列表
+  category: approval
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询所有审批组
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v1/management/approver/group/list"
+- name: 查询审批人列表
+  category: approval
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询审批组 group-123 的审批人
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v1/management/approver/list"
+  - contains: '"approver_group_id"'
+- name: 复杂查询（路径参数 + 查询参数）
+  category: parameter_patterns
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询公司账户 456 下的 USD 账号，每页 10 条
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v1/accounts/fiat/company/account/{id}/account_numbers"
+  - contains: path_params
+  - contains: query_params
+  - contains: '"currency": "USD"'
+  - contains: '"page_size": 10'
+- name: 数组参数测试
+  category: parameter_patterns
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询业务线 1、2、3 的客户
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: get "/v1/customers"
+  - contains: '"biz_line_ids"'
+  - contains: '[1, 2, 3]'
+- name: 缺少必填参数提示
+  category: error_handling
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询资金计划
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - one_of:
+    - contains: instance_id
+    - contains: 流程实例 ID
+    - contains: 请提供
+- name: 无效 ID 错误处理
+  category: error_handling
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询银行 ID xxx 的详情
+  context: 假设 API 返回 404
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+  - contains: 不存在
+- name: 鉴权-正路径（Slack 合法 sender_id）
+  category: auth
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    查询所有银行
+  expected_behavior:
+  - not_contains: 'echo "U05K7R8TBST" >'
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh "U05K7R8TBST"
+  - not_contains: mcpfast armada-v2-mcp.armada_get
+- name: 鉴权-非 Slack 渠道（无首行 JSON）
+  category: auth
+  user_input: 查询所有银行
+  expected_behavior:
+  - contains: 此查询仅限 Slack 渠道使用
+  - contains: 已阻止 NS 系统查询
+  - not_contains: mcpfast armada-v2-mcp
+  - not_contains: ns-call.sh
+- name: 鉴权-sender_id 格式非法
+  category: auth
+  user_input: |
+    {"sender_id": "INVALID123"}
+    查询所有银行
+  expected_behavior:
+  - contains: 此查询仅限 Slack 渠道使用
+  - not_contains: ns-call.sh
+- name: 鉴权-subagent 透传场景
+  category: auth
+  user_input: |
+    {"sender_id": "U05K7R8TBST"}
+    父 agent 委派：请查询银行 ID 123 的详情
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh "U05K7R8TBST"
+  - contains: get "/v1/accounts/bank/{id}"
+- name: 鉴权-uid 来自本轮 incoming，不使用任何持久化介质
+  category: auth
+  user_input: |
+    {"sender_id": "U09DIFFUSER1"}
+    查询银行列表
+  expected_behavior:
+  - contains: bash $SKILLS_DIR/common-ns-system-query/scripts/ns-call.sh "U09DIFFUSER1"
+  - not_contains: U05K7R8TBST
+  - not_contains: 'echo "U09DIFFUSER1" >'
+metadata:
+  total_test_cases: 31
+  coverage:
+  - accounts: 3
+  - master_data: 4
+  - business_config: 2
+  - process: 2
+  - monitor: 2
+  - transactions: 2
+  - reconciliation: 1
+  - fdl_settlements: 1
+  - fund: 3
+  - approval: 2
+  - parameter_patterns: 2
+  - error_handling: 2
+  - auth: 5
+version: '3.0'

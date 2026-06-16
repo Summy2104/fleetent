@@ -1,0 +1,87 @@
+global_assertions:
+  not_contains:
+    - "mcpfast"     # fleetent 无 mcpfast；NS 请求必须经 ns-call.sh wrapper 出 ARMADA_CALL 后再发起 armada__armada_get
+    - "cat ${SKILLS_DIR}/bs-external-whitelist-coordinating/templates"  # 防回退到 AI 手撸渲染,Step 4 必须走 render-email.py
+
+trigger_tests:
+  - input: "@star 这个 TRC20 地址 Alpha Fund 给的，帮我走外部白名单"
+    expected: direct
+  - input: "客户发了收币地址邮件，开始外部白名单流程"
+    expected: direct
+  - input: "Alpha Fund 提交了新的 ERC20 收币地址，需要客户地址录入"
+    expected: direct
+
+non_trigger_tests:
+  - input: "外部白名单流程是什么？"
+    expected: no_trigger
+    reason: "流程问询，不是实际协调场景"
+  - input: "帮我核对一笔 AE 新能源付款 Invoice"
+    expected: no_trigger
+    reason: "AE 付款由 bs-ae-small-flow 处理，与外部白名单无关"
+  - input: "借贷业务新客户要提交开户申请"
+    expected: no_trigger
+    reason: "非 Trading 业务线且非收币地址场景，应走 bs-intake-classifying"
+  - input: "白名单比对一下这批客户地址"
+    expected: no_trigger
+    reason: "白名单比对由 nsfin-whitelist-comparing 处理，与外部白名单协调场景不同"
+
+dod_tests:
+  - name: auth_precheck_fails_without_sender_id
+    description: "Step 0 鉴权预检失败时返回固定话术，不调用 wrapper"
+    input: "incoming JSON 中无 sender_id 字段"
+    expected_outcome: "回复 '❌ 此查询仅限 Slack 渠道使用。当前上下文无法识别 Slack 用户身份,已阻止 NS 系统查询。' 并终止；不执行任何 ns-call.sh 调用"
+
+  - name: field_cap_strict_3_only
+    description: "字段封顶纪律：只问 client_company / business_line / language 三个，不追问其他"
+    input: "用户仅给出 client_company + business_line，其余字段（付款目的 / 注册国家 / 收币地址）一概不应被问"
+    expected_outcome: "skill 不向用户询问 client_company / business_line / language 之外的任何字段；模板内空白字段保持空白由发件人手填"
+
+  - name: language_default_zh
+    description: "language 字段未命中关键词时默认 zh，不视为缺失"
+    input: "用户消息中无 中文/英文/双语 等语言关键词"
+    expected_outcome: "language=zh，不进入缺字段追问；输出中文版邮件草稿"
+
+  - name: zero_match_silent_fallback
+    description: "biz_lines 查询 0 候选时不追问用户，直接进入渲染，BG 邮箱保留占位符"
+    input: '{business_line: "未存在的业务线"} 且 NS 返回 total=0'
+    expected_outcome: "不向用户回复 '没找到 / 请重输' 等追问话术；直接生成草稿，To 列表中 {business_group_email} 保持原样占位符"
+
+  - name: single_business_line_auto_pick_email
+    description: "biz_lines 单条命中：业务线无歧义，自动取该业务线的 email_group[0]，不出表格"
+    input: '{business_line: "Trading"} 且 NS 返回 1 条匹配且 email_group 非空'
+    expected_outcome: "直接采用唯一候选的 email_group[0] 作为 business_group_email；不展示候选表格、不要求用户选序号；进入 Step 4 渲染"
+
+  - name: multi_business_line_must_user_select
+    description: "≥ 2 条命中必须出表格让用户选业务线，严禁自动取首条 / 启发式跳表"
+    input: '{business_line: "量化"} 且 NS 返回 5 条匹配（如 NS-量化 / TEST-量化 / NN-量化 / NS-量化（子）/ NS-NS-量化）'
+    expected_outcome: "展示 markdown 表格，列为 # / 业务线 / email_group；提示回复序号 1-N；未收到序号前不进入 Step 4；用户回复序号后才取该候选的 email_group[0]"
+
+  - name: multi_match_table_two_columns_only
+    description: "多候选表格仅展示「业务线」+「email_group」两列，无 缩写 / 状态 / id"
+    input: "ns 返回多条 biz_lines"
+    expected_outcome: "表头为 # / 业务线 / email_group；不出现 abbreviation / status / id 等列"
+
+  - name: empty_email_group_keeps_placeholder
+    description: "选定候选 email_group 为空时，BG 邮箱在草稿中保留占位符"
+    input: "用户从多候选中选定的业务线，其 email_group 为空"
+    expected_outcome: "草稿 To 列表中 {business_group_email} 保持原样；不向用户追问替代邮箱"
+
+  - name: wrapper_failure_silent_fallback
+    description: "ns-call.sh exit ≠ 0 时按 0 候选路径处理，不阻塞流程"
+    input: "wrapper 因鉴权失败 / 网络异常返回非零退出码"
+    expected_outcome: "不回复 'NS 鉴权或调用异常,请联系管理员' 终止；按 0 候选路径直接渲染草稿，{business_group_email} 保留占位符"
+
+  - name: render_must_use_script_no_manual_string_ops
+    description: "Step 4 渲染必须走 scripts/render-email.py，禁止 AI 自己 cat 模板 + 字符串替换"
+    input: "language=zh 完整流程"
+    expected_outcome: "bash_exec 调用为 python3 ${SKILLS_DIR}/bs-external-whitelist-coordinating/scripts/render-email.py --lang zh --json '...'；不出现 cat templates/* 也不出现 google-drive__downloadFile / pandoc"
+
+  - name: bilingual_concatenates_zh_then_en
+    description: "language=both 时输出中文+英文双版本，中文在前"
+    input: '{language: "双语"}'
+    expected_outcome: "草稿先输出中文版（读 email-zh.txt），后输出英文版（读 email-en.txt），两段间空行+分隔线"
+
+  - name: placeholder_passthrough_for_unknown
+    description: "模板出现 3 字段管理之外的占位符时保持原样不报错"
+    input: "templates/email-*.txt 中假设新增了 {unknown_field} 占位符"
+    expected_outcome: "草稿中 {unknown_field} 保持原样，skill 不抛错也不向用户追问"
