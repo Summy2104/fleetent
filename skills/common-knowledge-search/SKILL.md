@@ -20,7 +20,15 @@ metadata:
 | `knowledge-bridge__knowledge_list_sources` | 列出数据源类型 |
 | `knowledge-bridge__knowledge_list_documents` | 列出文档目录，可选 source / container_id |
 | `knowledge-bridge__knowledge_get_document` | doc_id，可选 chunk_limit / cursor（长文档分页读取） |
-| `knowledge-bridge__knowledge_search` | query, top_k=20（仅在 hook 召回弱命中、需要更多结果时使用） |
+| `knowledge-bridge__knowledge_search` | query, **agent_id（必填）**, top_k=20（仅在 hook 召回弱命中、需要更多结果时使用） |
+
+> **`agent_id`（fleetent 部署约定 · 必读）**：`knowledge_search` 的 `agent_id` 是**必填**参数，
+> 用于在 KB 服务端做 consumer 鉴权与召回作用域。**本部署的 agent_id = `bs-intern`**（KB token 注册的
+> 消费者 id）。**禁止猜测/遍历** `my-bot`、`default`、`fleetent`、用户 Slack ID 等——非注册值一律返回
+> `400 Unknown or disabled agent_id`。`list_sources` / `list_documents` 不需要 agent_id（故能正常列目录）。
+> **失败即停，不得循环重试**：若带正确 `agent_id=bs-intern` 仍返回非 2xx（如 `500 Internal Server Error`），
+> 视为 **KB 检索服务端暂不可用**，**最多重试 1 次**后按「异常处理」如实告知用户「知识库检索服务暂时不可用」，
+> 改用 `list_documents` / `get_document` 直读，或建议稍后再试——**严禁**反复换 agent_id 空转。
 
 ## Search 结果字段
 

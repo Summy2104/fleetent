@@ -64,24 +64,42 @@ google-drive__getGoogleSheetContent
   range: A1:K500
 ```
 
-**1b. `NS 币贷/NET客户`（xlsx）下载到 workspace 后解析**：
+> **权限回退（fleetent 部署）**：`google-drive` MCP（piotr-agier）与 `google-workspace` MCP 用的是**不同的
+> Google 身份**。若 `google-drive__getGoogleSheetContent` 返回 `The caller does not have permission`，
+> 改用 `google-workspace` MCP（以宿主用户身份）读取同一张表：
+> `google-workspace__manage_sheets`（operation=read, spreadsheetId 同上, range=A1:K500）。
+> 两条路径均无权访问时，如实告知用户「当前账号无该 KYC 表访问权限，请联系表 owner 共享给 bot 的 Google 账号」，不要编造数据。
 
-路径遵循 `common-file-output` 规范：落在 workspace 的 `outbound/kyc/{YYYY-MM}/ns-bidai-net.xlsx`。
+**1b. `NS 币贷/NET客户`（xlsx）下载后解析**：
 
-1) agent loop 发起 `google-drive__downloadFile` 工具调用下载文件到 workspace：
+1) **先建目录**（`google-drive__downloadFile` 的 `localPath` 必须是**绝对路径**，且父目录须已存在，否则报
+   `localPath must be an absolute path` / `Parent directory does not exist`）。用内置 `run_code`（python）先创建：
+
+```python
+import os
+from datetime import datetime
+out_dir = f"/workspace/outbound/kyc/{datetime.now():%Y-%m}"
+os.makedirs(out_dir, exist_ok=True)
+print(out_dir)
+```
+
+2) agent loop 发起 `google-drive__downloadFile`，`localPath` 用上一步的**绝对路径**：
 
 ```
 google-drive__downloadFile
   fileId: 1uGnrDTzVyUv_CndMHtdg-s7K0NKjfN4-
-  localPath: outbound/kyc/{YYYY-MM}/ns-bidai-net.xlsx
+  localPath: /workspace/outbound/kyc/{YYYY-MM}/ns-bidai-net.xlsx
 ```
 
-2) 用内置 `run_code`（python，预装 `openpyxl`）解析（YYYY-MM 用当前年月）：
+> 若 `google-drive` 身份无权下载，回退用 `google-workspace__manage_drive`（operation=download / export，
+> fileId 同上）取回 xlsx 到同一绝对路径。
+
+3) 用内置 `run_code`（python，预装 `openpyxl`）解析（路径与下载的**绝对路径一致**）：
 
 ```python
 from openpyxl import load_workbook
 from datetime import datetime
-path = f"outbound/kyc/{datetime.now():%Y-%m}/ns-bidai-net.xlsx"
+path = f"/workspace/outbound/kyc/{datetime.now():%Y-%m}/ns-bidai-net.xlsx"
 ws = load_workbook(path, read_only=True, data_only=True).active
 for idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
     if idx == 1:
