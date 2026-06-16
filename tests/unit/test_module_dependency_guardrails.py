@@ -16,6 +16,7 @@ _COMPONENTS = {
     "knowledge_base",
     "long_term_ctx",
     "memory",
+    "node",
     "observability",
     "reflection",
     "runtime",
@@ -323,6 +324,7 @@ _CORE_MODULE_PREFIXES = (
     "fleetent.runtime",
     "fleetent.session",
     "fleetent.model",
+    "fleetent.node",
     "fleetent.tools",
     "fleetent.integrations",
     "fleetent.governance",
@@ -424,6 +426,22 @@ def test_core_modules_do_not_import_face_namespaces() -> None:
     assert not violations, (
         "核 modules import face namespaces, violating core→face boundary:\n"
         + "\n".join(f"  {v}" for v in violations)
+    )
+
+
+def test_node_supervisor_does_not_import_platform_or_runtime() -> None:
+    violations: list[str] = []
+    for path in _src_python_paths():
+        module_name = _module_name(path)
+        if not module_name.startswith("fleetent.node"):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        imported_modules = set(_iter_imported_modules(tree))
+        if _is_imported_from(["fleetent.platform", "fleetent.runtime"], imported_modules):
+            violations.append(module_name)
+    assert not violations, (
+        "fleetent.node must stay as HTTP client + subprocess orchestrator only; "
+        "forbidden imports found in: " + ", ".join(violations)
     )
 
 

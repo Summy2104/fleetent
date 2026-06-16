@@ -244,6 +244,40 @@ def test_parse_agent_restart_with_port_and_home(tmp_path) -> None:
     assert ns.home == str(tmp_path)
 
 
+def test_parse_agent_stop_defaults() -> None:
+    ns = cli._parse_agent_stop(["my-bot"])
+    assert ns.agent_id == "my-bot"
+    assert ns.home is None
+
+
+def test_parse_agent_stop_with_home(tmp_path) -> None:
+    ns = cli._parse_agent_stop(["my-bot", "--home", str(tmp_path)])
+    assert ns.home == str(tmp_path)
+
+
+def test_main_dispatches_agent_stop(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+
+    resolved_home = tmp_path / "agents" / "my-bot"
+    resolve_calls: list[tuple[str, str | None]] = []
+    stop_calls: list[object] = []
+
+    monkeypatch.setattr(
+        agent_app,
+        "resolve_home",
+        lambda agent_id, home=None: resolve_calls.append((agent_id, home)) or resolved_home,
+    )
+    monkeypatch.setattr(
+        agent_app, "_stop_running", lambda home_dir, **kw: stop_calls.append(home_dir)
+    )
+
+    monkeypatch.setattr("sys.argv", ["fleetent", "agent", "stop", "my-bot"])
+    cli.main()
+
+    assert resolve_calls == [("my-bot", None)]
+    assert stop_calls == [resolved_home]
+
+
 def test_main_dispatches_agent_restart(tmp_path, monkeypatch) -> None:
     """fleetent agent restart calls _stop_running then asyncio.run(serve(...))."""
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
