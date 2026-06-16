@@ -19,23 +19,34 @@ def _config(tmp_path) -> NodeConfig:
 def test_local_backend_spawn_uses_agent_run(monkeypatch, tmp_path) -> None:
     from fleetent.node.backend import LocalProcessBackend
 
-    calls: list[tuple[tuple[str, ...], str | None]] = []
+    calls: list[tuple[tuple[str, ...], str | None, dict[str, str] | None]] = []
 
     def fake_popen(cmd: list[str], **kwargs):
-        calls.append((tuple(cmd), kwargs.get("cwd")))
+        calls.append((tuple(cmd), kwargs.get("cwd"), kwargs.get("env")))
         return object()
 
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    monkeypatch.setenv("PATH", os.environ["PATH"])
+    monkeypatch.setenv("BASE_ENV", "base-value")
 
     backend = LocalProcessBackend(_config(tmp_path))
-    backend.spawn("support")
+    backend.spawn("support", env={"ANTHROPIC_API_KEY": "sk-live-secret"})
 
-    assert calls == [
-        (
-            ("fleetent", "agent", "run", "support", "--home", str(tmp_path / "agents" / "support")),
-            str(tmp_path),
-        )
-    ]
+    assert len(calls) == 1
+    cmd, cwd, env = calls[0]
+    assert cmd == (
+        "fleetent",
+        "agent",
+        "run",
+        "support",
+        "--home",
+        str(tmp_path / "agents" / "support"),
+    )
+    assert cwd == str(tmp_path)
+    assert env is not None
+    assert env["BASE_ENV"] == "base-value"
+    assert env["ANTHROPIC_API_KEY"] == "sk-live-secret"
+    assert not (tmp_path / "agents" / "support" / ".env").exists()
 
 
 def test_local_backend_stop_uses_agent_stop(monkeypatch, tmp_path) -> None:

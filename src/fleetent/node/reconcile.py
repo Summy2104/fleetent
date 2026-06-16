@@ -11,6 +11,9 @@ import yaml
 from fleetent.node.backend import BaseProcessBackend
 from fleetent.node.config import NodeConfig
 from fleetent.node.provider import DesiredState
+from fleetent.structured_logging import get_logger
+
+_logger = get_logger("node.reconcile")
 
 
 class NodeReconciler:
@@ -33,9 +36,25 @@ class NodeReconciler:
                 continue
 
             desired_hash = _config_hash(desired.config)
+            if desired_state.source == "cache" and not desired.secrets:
+                if pid is None:
+                    _logger.warn(
+                        "node_secret_start_deferred",
+                        agent_name=name,
+                        secret_env_names=[],
+                        secret_count=0,
+                    )
+                    continue
+                continue
             if pid is None:
                 self._write_home(name, desired.config)
-                self._backend.spawn(name)
+                _logger.info(
+                    "node_agent_spawn",
+                    agent_name=name,
+                    secret_env_names=sorted(desired.secrets),
+                    secret_count=len(desired.secrets),
+                )
+                self._backend.spawn(name, env=desired.secrets)
                 hashes[name] = desired_hash
                 continue
 
@@ -43,7 +62,13 @@ class NodeReconciler:
             if current_hash != desired_hash:
                 self._backend.stop(name)
                 self._write_home(name, desired.config)
-                self._backend.spawn(name)
+                _logger.info(
+                    "node_agent_spawn",
+                    agent_name=name,
+                    secret_env_names=sorted(desired.secrets),
+                    secret_count=len(desired.secrets),
+                )
+                self._backend.spawn(name, env=desired.secrets)
                 hashes[name] = desired_hash
 
         self._write_hashes(hashes)

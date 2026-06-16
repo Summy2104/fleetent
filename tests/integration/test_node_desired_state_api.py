@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -131,6 +133,88 @@ def test_get_desired_state_returns_empty_agent_set_when_node_has_no_enabled_plac
 
     assert response.status_code == 200
     assert response.json() == {"node_id": "node-a", "agents": []}
+
+
+def test_get_desired_state_includes_only_set_secrets_for_enabled_agents_on_target_node(
+    node_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent import agent_store
+    from fleetent.platform.agent_lifecycle import credential_slots, secret_store
+    from fleetent.platform.agent_management_console import agent_admin_store
+    from fleetent.platform.node_management import node_store, placement_store
+
+    monkeypatch.setenv(
+        "FLEETENT_SECRET_KEY",
+        base64.urlsafe_b64encode(b"4" * 32).decode("ascii"),
+    )
+    node_key, _ = node_store.register_node("node-a")
+    node_store.register_node("node-b")
+    enabled = agent_store.create_agent(
+        "enabled",
+        "Help users",
+        ["shell"],
+        config_overrides={
+            "im": {
+                "slack": {
+                    "bot_token_env": "ENABLED_SLACK_BOT",
+                    "app_token_env": "ENABLED_SLACK_APP",
+                }
+            }
+        },
+    )
+    other_node = agent_store.create_agent("other-node", "Other node", ["shell"])
+    disabled = agent_store.create_agent("disabled", "Disabled agent", ["shell"])
+
+    placement_store.pin_agent(enabled.id, "node-a")
+    placement_store.pin_agent(other_node.id, "node-b")
+    placement_store.pin_agent(disabled.id, "node-a")
+    agent_admin_store.disable(disabled.id)
+
+    credential_slots.ensure_slot(
+        enabled,
+        "env:ENABLED_SLACK_BOT",
+        mode="inject",
+        env_name="ENABLED_SLACK_BOT",
+    )
+    credential_slots.ensure_slot(
+        enabled,
+        "env:ENABLED_SLACK_APP",
+        mode="inject",
+        env_name="ENABLED_SLACK_APP",
+    )
+    credential_slots.ensure_slot(
+        other_node,
+        "env:OTHER_NODE_SECRET",
+        mode="inject",
+        env_name="OTHER_NODE_SECRET",
+    )
+    credential_slots.ensure_slot(
+        disabled,
+        "env:DISABLED_SECRET",
+        mode="inject",
+        env_name="DISABLED_SECRET",
+    )
+    secret_store.set(enabled.id, "ENABLED_SLACK_BOT", "xoxb-live-secret", "admin")
+    secret_store.set(other_node.id, "OTHER_NODE_SECRET", "other-node-secret", "admin")
+    secret_store.set(disabled.id, "DISABLED_SECRET", "disabled-secret", "admin")
+
+    response = node_client.get(
+        "/nodes/node-a/desired-state",
+        headers={"Authorization": f"Bearer {node_key}"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["node_id"] == "node-a"
+    assert [agent["name"] for agent in payload["agents"]] == ["enabled"]
+    delivered = payload["agents"][0]
+    assert delivered["secrets"] == {"ENABLED_SLACK_BOT": "xoxb-live-secret"}
+    assert delivered["config"]["im"]["slack"]["access"]["require_approval"] is True
+    assert "bot_token_env" not in delivered["config"]["im"]["slack"]
+    assert "app_token_env" not in delivered["config"]["im"]["slack"]
+    assert "ENABLED_SLACK_APP" not in delivered["secrets"]
+    assert "other-node-secret" not in str(payload)
+    assert "disabled-secret" not in str(payload)
 
 
 def test_post_status_updates_last_seen_and_agent_projection(node_client: TestClient) -> None:
