@@ -146,6 +146,31 @@ def test_structured_logging_infra_boundary() -> None:
     )
 
 
+def test_cron_scheduler_does_not_depend_on_user_store() -> None:
+    """Fire-time principal resolution is injection-decoupled (decouple-cron-principal-recheck).
+
+    cron_scheduler must not reach the platform management DB to resolve a fired task's
+    principal — it must not import fleetent.user_store. The blocked/deleted recheck is
+    supplied by the platform via set_principal_resolver; standalone trusts the IM identity.
+    """
+    import importlib
+
+    module = importlib.import_module("fleetent.cron_scheduler")
+    assert module.__file__ is not None
+    located = Path(module.__file__)
+    tree = ast.parse(located.read_text(encoding="utf-8"), filename=str(located))
+    imported_modules = set(_iter_imported_modules(tree))
+
+    assert not _is_imported_from(["fleetent.user_store"], imported_modules), (
+        "fleetent.cron_scheduler imports fleetent.user_store; fire-time principal "
+        "resolution must be injection-decoupled (set_principal_resolver), not a direct "
+        "management-DB lookup"
+    )
+    assert not _is_imported_from(["fleetent.platform"], imported_modules), (
+        "fleetent.cron_scheduler imports fleetent.platform, violating agent⊥platform"
+    )
+
+
 def test_forbidden_edges_for_dissolution() -> None:
     for path in _src_python_paths():
         module_name = _module_name(path)
