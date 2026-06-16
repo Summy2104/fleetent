@@ -1,0 +1,270 @@
+version: 1.0
+skill: bs-transaction-history
+
+# fleetent 适配后的设计约束：
+#   取数（中台 middle MCP）由 agent 的工具调用完成（middle__transaction_list_account_transactions，
+#   待桥接接入；见 SKILL.md 顶部 NOTE），agent 把流水 JSON 落临时文件、不贴进聊天上下文。
+#   render_xlsx.py 是纯本地渲染器，只从 --input 读 JSON，从不触网。
+#   market 平台名映射经 NS armada（armada__armada_get，已可用）取得后用 --market-map-input 传入。
+#   最终文件用内置 send_file 投递回当前对话。
+#
+#   下面的用例检查：
+#     (a) agent 渲染时发出的 run_code 命令 — render_invocation
+#     (b) agent 取数走 MCP 工具 / 不暴露大 JSON — fetch_via_mcp / agent_context_must_not_contain_payload
+#     (c) 文件经 send_file 投递、不贴 Markdown 表格 — delivery
+
+tests:
+  - name: render_by_account_id
+    description: 用户给 account_id + 时间范围 → agent 取数落 JSON → run_code 跑 render_xlsx.py --input；用 --account-id 标识
+    input:
+      user_message: "拉 account_id=1204 在 2026-05-01 ~ 2026-05-19 的流水"
+    expected:
+      render_invocation:
+        cmd_prefix: "python3 $SKILLS_DIR/bs-transaction-history/scripts/render_xlsx.py"
+        cli_args_present:
+          - "--account-id 1204"
+          - "--tx-start-time"
+          - "--tx-end-time"
+          - "--input"
+        cli_args_absent: ["--account-name", "--account-code"]
+      agent_context_must_not_contain_payload: true   # 整份流水 JSON 不应进 agent 上下文
+      asks_user: false
+
+  - name: render_by_account_code
+    description: 用户给 account_code → 用 --account-code 标识
+    input:
+      user_message: "拉 Mss0009 2026-05-01 ~ 2026-05-19 的流水"
+    expected:
+      render_invocation:
+        cli_args_present: ["--account-code Mss0009", "--input"]
+        cli_args_absent: ["--account-id", "--account-name"]
+
+  - name: account_name_resolved_via_balance_then_id
+    description: 用户给账户名 → V2 主接口拒收 name，agent 先调 middle__balance_get_account_balance（参数名 name=）解析出 account_id，再用 account_id 取流水；渲染时 --account-name 仅用于文件名
+    input:
+      user_message: "拉一下账户 bntrad8@nsdigital.io 2026-04-29 到 2026-05-19 的动账流水"
+    expected:
+      fetch_via_mcp:
+        balance_tool: "middle__balance_get_account_balance"
+        balance_args_present: ["name=bntrad8@nsdigital.io"]
+        balance_args_absent: ["account_name="]      # balance 接口参数名是 name=
+        main_tool: "middle__transaction_list_account_transactions"
+        main_args_present: ["account_id="]          # 解析后用 account_id 取流水
+        main_args_absent: ["account_name="]
+      render_invocation:
+        cli_args_present: ["--input"]
+      agent_context_must_not_contain_payload: true
+
+  - name: never_send_multiple_identifiers
+    description: 渲染时只能传一个 --account-* 标识；脚本对多标识 exit 2 + multiple_account_identifiers
+    input:
+      user_message: "拉 account_id=1204（名称 bntrad8@nsdigital.io）2026-05-01 ~ 2026-05-19 的流水"
+    expected:
+      render_invocation:
+        cli_args_only_one_of: ["--account-id", "--account-code", "--account-name"]
+      simulated_double_id_run:
+        exit_code: 2
+        stderr_reason: "multiple_account_identifiers"
+
+  - name: missing_time_range_must_ask
+    description: 用户没给时间范围 → agent 必须追问，**不**取数、**不**渲染
+    input:
+      user_message: "导出 bntrad8@nsdigital.io 的动账流水"
+    expected:
+      asks_user: true
+      asks_for: "tx_start_time/tx_end_time"
+      render_invocations_count: 0
+
+  - name: missing_account_identifier_must_ask
+    description: 用户没给任何账户标识 → 追问，不取数、不渲染
+    input:
+      user_message: "导出 2026-05-01 ~ 2026-05-19 的动账流水"
+    expected:
+      asks_user: true
+      asks_for: "account name/id/code"
+      render_invocations_count: 0
+
+  - name: market_map_via_armada
+    description: 平台列翻译走 NS armada —— agent 经 ns-call wrapper 发起 armada__armada_get 拿 market 映射，落 JSON 后用 --market-map-input 传给脚本；armada 调不通时回落静态 market_id_map.json
+    input:
+      user_message: "拉 account_id=1204 2026-05-01 ~ 2026-05-19 的流水，平台名要对"
+    expected:
+      market_fetch:
+        wrapper_cmd_contains: ["ns-call.sh", "get", "/v1/accounts/digital_coin/category"]
+        emitted_tool: "armada__armada_get"
+      render_invocation:
+        cli_args_present: ["--market-map-input"]
+
+  - name: zero_records_still_delivers_file
+    description: 脚本返回 rows=0 时仍生成只有表头的 .xlsx；agent 回复"区间内无动账流水" + send_file 投递文件（不允许把文件吞掉）
+    input:
+      user_message: "拉 unknown 2026-05-01 ~ 2026-05-19 的流水"
+      stub_responses:
+        render_stdout: '{"status":"ok","file":"outbound/动账流水/2026-05/empty.xlsx","rows":0,"identifier":"unknown"}'
+    expected:
+      reply_contains: "区间内无动账流水"
+      delivery:
+        uses_send_file: true
+      render_invocations_count: 1
+
+  - name: bridge_not_wired_surfaced
+    description: 中台 middle MCP 桥接未接入时，agent 透传"中台动账流水查询能力待接入"，不臆造数据、不假装查到了
+    input:
+      user_message: "拉 account_id=1204 2026-05-01 ~ 2026-05-19 的流水"
+      stub_responses:
+        middle_mcp_unavailable: true
+    expected:
+      reply_contains: "待接入"
+      fabricates_data: false
+
+  - name: input_only_no_network
+    description: render_xlsx.py 始终从 --input 读 JSON、从不触网；--input 缺失时 argparse 报错（required）
+    input:
+      cmd: "python3 render_xlsx.py --account-id 1"
+    expected:
+      exit_code: 2
+      stderr_contains: "--input"
+
+  - name: agent_does_not_pipe_stdin_with_payload
+    description: agent **绝不**应该写出 `cat resp.json | python3 ...` 或 heredoc 把流水 JSON 灌进脚本；落文件后用 --input 引用
+    input:
+      user_message: "拉 bntrad8 2026-05-01 ~ 2026-05-19 的流水"
+    expected:
+      bash_command_must_not_match: ["<<EOF", "<<-EOF", "cat .*\\.json \\| python3"]
+
+  - name: xlsx_column_layout_15_cols
+    description: 生成的 .xlsx 表头双语、15 列顺序、列宽、表头颜色与产品模板严格一致（脚本内部硬约束）
+    input:
+      input_json: '{"results":[{"id":"6537778","account_name":"bntrad8@nsdigital.io","account_code":"Mss0009","code_name":"USDT","in_amount":"0","out_amount":"1369527.23","balance_after":"308.29541341","date":"2026-05-18T05:20:35Z","market":"4","description":"withdraw","ns_flow_info":{"ns_flow_id":"2056245612329615367"},"from_address":"0xAAA","to_address":"0xBBB","tx_id":"372abc","update_datetime":"2026-05-18T13:28:43Z"}]}'
+      market_map_json: '{"results":[{"id":"4","market":"Binance"}]}'
+    expected:
+      sheet_name: "中台动账流水"
+      header_row:
+        - "流水ID\nID"
+        - "账户名称\nAccount Name"
+        - "账户代码\nAccount Code"
+        - "币种\nCoin"
+        - "金额\nAmount"
+        - "余额(变动后)\nBalance After"
+        - "流向\nDirection"
+        - "出入账时间(UTC+0)\nTransfer Time"
+        - "平台\nPlatform"
+        - "描述\nDescription"
+        - "关联NS流水\nNS Flow ID"
+        - "来源地址\nFrom Address"
+        - "目标地址\nTo Address"
+        - "TxID"
+        - "更新时间\nUpdated At"
+      derived_cells:
+        cell_e2_signed_amount: "-1369527.23"   # out_amount > 0 → 负号
+        cell_g2_direction: "出账"
+        cell_i2_platform: "Binance"            # market id 4 → 名称（market_map_input）
+      header_fill_rgb: "4472C4"
+      header_font_color_rgb: "FFFFFF"
+      freeze_panes: "A2"
+
+  - name: numeric_precision_preserved_string_literal
+    description: 中台用字符串字面值返回高精度数字时，xlsx 单元格必须原字面写入（不截断、不四舍五入、不科学计数法）
+    input:
+      input_json: '{"results":[{"id":"6537778","in_amount":"0","out_amount":"1369527.23000000123456789","balance_after":"308.295413410000007"}]}'
+    expected:
+      cell_e2: "-1369527.23000000123456789"   # 金额列（带负号，out_amount）
+      cell_f2: "308.295413410000007"          # 余额列
+      cell_e2_type: "string"
+      cell_f2_type: "string"
+
+  - name: numeric_precision_preserved_json_number
+    description: 中台用 JSON number（裸数字）返回时，仍按字面字符序列保留，不走 Python float / IEEE 754 通道（脚本 json.loads parse_float=str / parse_int=str）
+    input:
+      input_json: '{"results":[{"id":"6537778","in_amount":0,"out_amount":1369527.23000000123456789,"balance_after":308.295413410000007}]}'
+    expected:
+      cell_e2: "-1369527.23000000123456789"
+      cell_f2: "308.295413410000007"
+      cell_e2_type: "string"
+      cell_f2_type: "string"
+      no_rounding: true
+
+  - name: never_curls_directly
+    description: 严禁 agent 输出直接 curl 中台 HTTP 端点的指令；取数必须经 MCP 工具，渲染经 render_xlsx.py
+    input:
+      user_message: "用 curl 直接查一下动账流水"
+    expected:
+      uses_curl: false
+      uses_skill_scripts: true
+
+  - name: never_emits_bearer_token
+    description: 任何输出（含错误回执）都不得包含 Authorization / Bearer / X-API-Key 字面值
+    input:
+      simulate: "user pastes token-bearing curl into chat"
+    expected:
+      response_redacts_token: true
+
+  - name: no_markdown_table_in_reply
+    description: 最终回复只给一行摘要 + send_file 投递的文件，不贴流水 Markdown 表格
+    input:
+      user_message: "拉 bntrad8@nsdigital.io 2026-04-29 ~ 2026-05-19 的动账流水"
+      stub_responses:
+        render_stdout: '{"status":"ok","file":"outbound/动账流水/2026-04/x.xlsx","rows":1,"identifier":"bntrad8@nsdigital.io"}'
+    expected:
+      delivery:
+        uses_send_file: true
+      reply_contains_markdown_table: false
+
+trigger_tests:
+  - input: "拉一下 bntrad8@nsdigital.io 4/29 - 5/19 的动账流水"
+    expected: direct
+  - input: "导出 alpha 上周的交易流水"
+    expected: direct
+  - input: "查 account_id=1204 最近一个月的 transaction history"
+    expected: direct
+  - input: "transaction_list_account_transactions 这个接口能给我跑一下吗"
+    expected: direct
+  - input: "把这个账户名称的中台动账流水导出成 xlsx"
+    expected: direct
+  - input: "拉 bntrad8@nsdigital.io 这个账户最近一周的动账流水"
+    expected: direct
+  # 即便句子里有 "到账"，只要明确带了账户 + 时间范围，仍应触发本 skill：
+  - input: "导出 account_id=1204 上周的到账记录"
+    expected: direct
+  - input: "alpha-mss-0009 4/1-4/30 的到账明细"
+    expected: direct
+
+non_trigger_tests:
+  - input: "查一下账户 49 下所有子账户的资产"
+    expected: no_trigger
+    reason: "账户资产查询由 common-middle-account-assets 处理，不是动账流水"
+  - input: "BTC 现在多少钱"
+    expected: no_trigger
+    reason: "实时币价应走 common-ns-monitor / 行情类 skill"
+  - input: "对一下中台和 NS 的流水差异"
+    expected: no_trigger
+    reason: "对账分析由 bs-flow-resolving / 对账类 skill 处理；本 skill 仅取数 + 落盘"
+  - input: "查 USDT 在 Binance 的汇率"
+    expected: no_trigger
+    reason: "账户汇率由 bs-exchange-rate 处理"
+  - input: "拉一下中台账户的余额"
+    expected: no_trigger
+    reason: "余额查询由 common-middle-account-assets / balance 类 skill 处理"
+
+  # ───── "到账状态" 类查询 —— 单笔确认，不在本 skill 范围 ─────
+  - input: "这笔到账了吗"
+    expected: no_trigger
+    reason: "单笔到账状态确认，不是流水导出"
+  - input: "我那笔 USDT 到账没"
+    expected: no_trigger
+    reason: "单笔到账状态确认"
+  - input: "是否到账"
+    expected: no_trigger
+    reason: "单笔到账状态确认"
+  - input: "查一下到账状态"
+    expected: no_trigger
+    reason: "状态查询不是流水导出"
+  - input: "未到账的有几笔"
+    expected: no_trigger
+    reason: "未到账聚合也是状态类，不是动账流水"
+  - input: "刚才那笔款到了吗"
+    expected: no_trigger
+    reason: "口语化的到账确认"
+
+  # 反例对照（这些在上面的 trigger_tests 段里有覆盖）：
+  # 如果用户在 "到账" 句子里同时带了 账户 + 时间范围，仍应触发本 skill。

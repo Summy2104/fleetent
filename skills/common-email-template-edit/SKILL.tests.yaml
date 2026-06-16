@@ -1,0 +1,210 @@
+skill: common-email-template-edit
+version: '3.0'
+triggers:
+  keywords:
+  - 修改邮件模版
+  - 编辑邮件模版
+  - edit email template
+  - 更新邮件模版
+trigger_tests:
+- input: 修改邮件模版 开户申请 把收件人改成 test@nsdigital.io
+  expect: match
+- input: 编辑邮件模版 地址创建申请 模版 新增抄送 legal@nsdigital.io
+  expect: match
+- input: edit email template 子账户申请 change approver
+  expect: match
+- input: 更新邮件模版 KYC特批 把审批流程从三级改为四级
+  expect: match
+- input: 起草邮件 开户申请
+  expect: no_match
+- input: 同步邮件模版 地址创建申请
+  expect: no_match
+- input: 扫描邮件模版
+  expect: no_match
+- input: 帮我写一个 PRD
+  expect: no_match
+config:
+  timeout: 60s
+cases:
+- id: tc-001
+  name: 未指定模版名应报错并提示
+  suite: smoke
+  input: '修改邮件模版'
+  expect:
+    contains:
+    - - 请指定模版名称
+      - 请指定
+    - - 扫描邮件模版
+      - common-email-template-scan
+    not_contains:
+    - - readGoogleDoc
+      - mcpfast
+      - "exec:"
+  priority: gate
+  needs_external: false
+- id: tc-002
+  name: 修改意图不明确应追问
+  suite: smoke
+  input: '修改邮件模版 【通用】地址创建申请 模版'
+  expect:
+    contains:
+    - - 具体
+      - 什么
+      - 哪里
+      - 怎么改
+    not_contains:
+    - - readGoogleDoc
+      - mcpfast
+      - "exec:"
+  priority: gate
+  needs_external: false
+- id: tc-003
+  name: 环境变量未配置应报错
+  suite: smoke
+  input: '假设 GDRIVE_EMAIL_TEMPLATE_FOLDER 环境变量为空。
+
+    修改邮件模版 【通用】地址创建申请 模版 把收件人改成 test@nsdigital.io
+
+    '
+  expect:
+    contains:
+    - - GDRIVE_EMAIL_TEMPLATE_FOLDER
+      - 未配置
+      - 环境变量
+    not_contains:
+    - - readGoogleDoc
+      - listFolder
+  priority: gate
+  needs_external: false
+- id: tc-004
+  name: 替换文本 - findAndReplaceInDoc
+  suite: smoke
+  input: '假设 mcpfast 与 google-drive server 可用，GDRIVE_EMAIL_TEMPLATE_FOLDER 已配置，
+    template-index.json 包含「【通用】地址创建申请 模版」的 doc_file_id。
+
+    修改邮件模版 【通用】地址创建申请 模版 把收件人 old@nsdigital.io 改成 new@nsdigital.io
+
+    '
+  expect:
+    contains:
+    - - readGoogleDoc
+      - 读取
+    - - findAndReplaceInDoc
+      - 替换
+    - - 模版已修改
+      - 修改完成
+      - 已修改
+    - - docs.google.com
+      - 查看文档
+    not_contains:
+    - - Step 1
+      - Step 2
+      - 正在执行
+      - 开始编辑
+  priority: gate
+  needs_external: true
+- id: tc-005
+  name: 插入新内容 - insertText
+  suite: smoke
+  input: '假设 mcpfast 与 google-drive server 可用，GDRIVE_EMAIL_TEMPLATE_FOLDER 已配置，
+    template-index.json 包含「【通用】子账户申请模版」的 doc_file_id。
+
+    修改邮件模版 【通用】子账户申请模版 在抄送里加上 legal@nsdigital.io
+
+    '
+  expect:
+    contains:
+    - - readGoogleDoc
+      - 读取
+    - - insertText
+      - getGoogleDocContent
+    - - 模版已修改
+      - 修改完成
+      - 已修改
+    - - docs.google.com
+      - 查看文档
+    not_contains:
+    - - Step 1
+      - Step 2
+      - 正在执行
+      - 开始编辑
+  priority: gate
+  needs_external: true
+- id: tc-006
+  name: 模版未找到应提示先同步
+  suite: smoke
+  input: '假设 mcpfast 与 google-drive server 可用，GDRIVE_EMAIL_TEMPLATE_FOLDER 已配置，
+    但 template-index.json 中不包含「不存在的模版」，listFolder 也未找到匹配的 -AI 文件。
+
+    修改邮件模版 不存在的模版 把收件人改成 test@nsdigital.io
+
+    '
+  expect:
+    contains:
+    - - 未找到
+      - 不存在
+    - - 同步邮件模版
+      - common-email-template-sync
+    not_contains:
+    - - readGoogleDoc
+      - findAndReplaceInDoc
+  priority: gate
+  needs_external: true
+- id: tc-007
+  name: 禁止修改 docx 原始模版
+  suite: smoke
+  input: '假设 mcpfast 与 google-drive server 可用，GDRIVE_EMAIL_TEMPLATE_FOLDER 已配置。
+
+    用户要求：修改邮件模版 【通用】地址创建申请 模版.docx 把收件人改成 test@nsdigital.io
+
+    注意用户指定了 .docx 文件。根据 skill 约束，只允许编辑 -AI Google Doc，不得修改 .docx 原始模版。
+
+    '
+  expect:
+    contains:
+    - - '-AI'
+      - Google Doc
+      - 原始模版
+      - .docx
+    not_contains:
+    - - uploadFile
+      - 上传
+  priority: gate
+  needs_external: true
+- id: tc-008
+  name: 输出必须包含文档链接
+  suite: smoke
+  input: '假设 mcpfast 与 google-drive server 可用，GDRIVE_EMAIL_TEMPLATE_FOLDER 已配置，
+    template-index.json 包含「【通用】开户申请-银行」的 doc_file_id 为 abc123。
+
+    修改邮件模版 【通用】开户申请-银行 把主题标签改成【银行开户】
+
+    '
+  expect:
+    contains:
+    - - docs.google.com/document/d/
+      - 查看文档
+    - - 模版已修改
+      - 已修改
+  priority: gate
+  needs_external: true
+- id: tc-009
+  name: 静默执行 - 不暴露中间过程
+  suite: smoke
+  input: '假设 mcpfast 与 google-drive server 可用，GDRIVE_EMAIL_TEMPLATE_FOLDER 已配置。
+
+    修改邮件模版 【通用】地址创建申请 模版 把审批流程从二级改为三级
+
+    '
+  expect:
+    not_contains:
+    - - Step 1
+      - Step 2
+      - Step 3
+    - - 正在执行
+      - 开始编辑
+      - 正在读取
+    - - "exec:"
+      - mcpfast google-drive
+  priority: benchmark
+  needs_external: true

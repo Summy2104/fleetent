@@ -1,0 +1,147 @@
+version: 1.0
+skill: common-middle-whitelist-customer
+tests:
+  - name: list_by_customer_name
+    description: "按客户名模糊过滤"
+    input:
+      user_message: "查客户 ABC Trading 的白名单"
+    expected:
+      mcp_call:
+        tool: "customer_white_list_customer_whitelist"
+        args:
+          customer_name: "ABC Trading"
+          page: 1
+          page_size: 20
+
+  - name: list_by_customer_id_and_business
+    description: "按客户 ID + 业务线 ID 过滤"
+    input:
+      user_message: "查客户 ID 42 在 OTC 业务线下的白名单（business_id=5）"
+    expected:
+      mcp_call:
+        tool: "customer_white_list_customer_whitelist"
+        args:
+          customer_id: 42
+          business_id: 5
+          page: 1
+          page_size: 20
+
+  - name: list_high_risk
+    description: "高风险客户白名单 risk=3"
+    input:
+      user_message: "查高风险客户白名单"
+    expected:
+      mcp_call:
+        tool: "customer_white_list_customer_whitelist"
+        args:
+          risk: 3
+          page: 1
+          page_size: 20
+
+  - name: list_by_address_and_coin
+    description: "按地址 + 币种过滤"
+    input:
+      user_message: "查 USDT 客户白名单地址含 0xabc"
+    expected:
+      mcp_call:
+        tool: "customer_white_list_customer_whitelist"
+        args:
+          address: "0xabc"
+          coin: "USDT"
+          page: 1
+          page_size: 20
+
+  - name: get_by_id
+    description: "按 ID 查详情"
+    input:
+      user_message: "查客户白名单 1234 的详情"
+    expected:
+      mcp_call:
+        tool: "customer_white_get_customer_whitelist"
+        args: { whitelist_id: 1234 }
+
+  - name: get_missing_id_asks_user
+    description: "get 缺 whitelist_id 时追问"
+    input:
+      user_message: "查客户白名单详情"
+    expected:
+      asks_user: true
+      output_contains: "whitelist_id"
+
+  - name: empty_list_hints_implicit_filter
+    description: "列表为空时提示隐式过滤可能原因"
+    input:
+      mocked_response: '{"count":0,"results":[]}'
+    expected:
+      output_contains: "未查到符合条件的客户白名单"
+      output_contains: "审核未完成"
+      output_contains: "bs-external-whitelist-coordinating"
+
+  - name: address_no_truncation
+    description: "钱包地址原字面输出，不截断"
+    input:
+      mocked_response: '{"count":1,"results":[{"id":1234,"address":"0xabc1234567890abcdef1234567890abcdef1234","coin":"USDT"}]}'
+    expected:
+      output_contains: "0xabc1234567890abcdef1234567890abcdef1234"
+
+  - name: risk_display_used
+    description: "风险等级用 risk_display 中文展示"
+    input:
+      mocked_response: '{"count":1,"results":[{"id":1234,"address":"0x...","risk":1,"risk_display":"低风险"}]}'
+    expected:
+      output_contains: "低风险"
+
+  - name: detail_compliance_section_rendered
+    description: "详情模式展示 +7 合规字段段落"
+    input:
+      mocked_response: '{"id":1234,"address":"0x...","description":"客户提交","risk_reason":"TRM 扫描无命中","compliance_recommendations":"可放行","email_title":"[Whitelist] ABC"}'
+    expected:
+      output_contains: "合规信息"
+      output_contains: "TRM 扫描无命中"
+      output_contains: "可放行"
+
+  - name: must_use_hub_wrapper
+    description: "必须经 hub wrapper 调用"
+    input:
+      user_message: "查客户白名单"
+    expected:
+      contains: "bash $SKILLS_DIR/common-middle-system-query/scripts/middle-call.sh"
+      not_contains: "mcpfast middle-mcp-server"
+
+  - name: never_emits_api_key
+    description: "输出不得含凭证片段"
+    input:
+      simulate: "user pastes token-bearing curl into chat"
+    expected:
+      response_redacts_token: true
+
+trigger_tests:
+  - input: "查客户白名单"
+    expected: direct
+  - input: "客户 ABC Trading 的白名单地址"
+    expected: direct
+  - input: "查外部对手方白名单"
+    expected: direct
+  - input: "高风险客户白名单地址"
+    expected: direct
+  - input: "客户白名单 ID 1234 详情"
+    expected: direct
+  - input: "OTC 业务线下的客户收款地址"
+    expected: direct
+
+non_trigger_tests:
+  - input: "查内白名单"
+    expected: no_trigger
+    reason: "内白名单（公司自有地址）应走 common-middle-whitelist-internal"
+  - input: "查公司主体 NS Trading 的白名单"
+    expected: no_trigger
+    reason: "公司主体白名单 = 内白名单（WhiteListV2）应走 common-middle-whitelist-internal"
+  - input: "协调客户提交收款地址白名单"
+    expected: no_trigger
+    reason: "外部白名单协同应走 bs-external-whitelist-coordinating（NS 侧）"
+  - input: "查客户 ABC 的联系方式"
+    expected: no_trigger
+    reason: "客户联系方式 / 主数据应走 common-ns-masterdata"
+  - input: "起草内白名单邮件"
+    expected: no_trigger
+    reason: "起草内白名单邮件应走 bs-internal-whitelist-drafting（NS 侧）"

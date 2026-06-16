@@ -1,0 +1,234 @@
+skill: product-meeting-notes-gen
+version: '3.0'
+triggers:
+  keywords:
+  - 会议纪要
+  - 会议记录
+  - meeting notes
+  - 会议总结
+  patterns:
+  - 整理.*会议
+  - 生成.*纪要
+trigger_tests:
+- input: 帮我整理会议纪要
+  expect: match
+- input: 生成会议记录
+  expect: match
+- input: 写 PRD
+  expect: no_match
+config:
+  timeout: 30s
+  model: sonnet
+cases:
+- id: tc-001
+  name: 完整会议记录整理
+  input: "整理以下会议记录：\n\n会议：产品周会\n时间：2026-02-10 14:00\n参会：张三、李四、王五\n\n讨论内容：\n1. 用户积分系统上线情况\n\
+    \   - 张三：已完成灰度，数据符合预期\n   - 决定全量发布\n\n2. 会员体系方案\n   - 李四介绍了三个方案\n   - 讨论后选择方案二\n\
+    \   - 需要王五本周完成技术评估\n\n3. 下周计划\n   - 张三继续跟进积分运营\n   - 李四开始会员积分兑换设计\n"
+  expect:
+    contains:
+    - - 会议纪要
+      - 产品周会
+    - - 张三
+      - 李四
+      - 王五
+    - - 要点
+      - 📌
+    - - Action Items
+      - ✅
+    - - 技术评估
+      - 本周
+    - - 决议
+      - 通过
+      - 方案二
+    has_sections:
+    - 会议要点
+    - Action Items
+    min_length: 250
+  priority: benchmark
+  needs_external: false
+- id: tc-002
+  name: 提取 Action Items
+  input: '从以下讨论中提取 Action Items：
+
+
+    会议讨论：
+
+    - 张三需要在周三前完成 PRD 初稿
+
+    - 李四负责本周内完成技术方案
+
+    - 王五下周一前提供成本估算
+
+    - 赵六跟进第三方接口对接，没有明确时间
+
+    '
+  expect:
+    contains:
+    - - Action
+      - Items
+      - 任务
+    - - 张三
+      - PRD
+      - 周三
+    - - 李四
+      - 技术方案
+      - 本周
+    - - 王五
+      - 成本
+      - 周一
+    - - 负责人
+      - 截止
+    min_length: 150
+  priority: benchmark
+  needs_external: false
+- id: tc-003
+  name: 需求评审会议
+  input: "整理需求评审会议记录：\n\n会议：用户等级需求评审\n参会：产品、研发、测试\n\n评审内容：\n1. 等级计算规则\n   - 研发：方案可行，建议加缓存\n\
+    \   - 测试：需要补充边界场景\n\n2. 等级展示样式\n   - 设计确认\n   - 需要UI提供图标\n\n问题：\n- 等级权益还未确定，待运营确认\n"
+  expect:
+    contains:
+    - - 需求评审
+      - 用户等级
+    - - 研发
+      - 测试
+    - - 可行
+      - 建议
+    - - 遗留
+      - 问题
+      - 待确认
+  priority: benchmark
+  needs_external: false
+- id: tc-004
+  name: 技术方案评审
+  input: "整理技术评审记录：\n\n会议：支付模块技术方案评审\n\n讨论：\n1. 整体方案可行\n2. 关于并发处理：\n   - 张三建议用分布式锁\n\
+    \   - 李四认为队列更好\n   - 最终决定用队列方案\n\n结论：方案通过，按队列方式实现\n下一步：张三本周完成详细设计\n"
+  expect:
+    contains:
+    - - 技术
+      - 评审
+      - 支付
+    - - 通过
+      - 决定
+      - 结论
+    - - 队列
+      - 方案
+    - - 详细设计
+  priority: benchmark
+  needs_external: false
+- id: tc-005
+  name: 音频转写整理
+  input: '整理以下音频转写内容（口语化）：
+
+
+    张三：那个，今天主要是聊一下积分的事情
+
+    李四：嗯，积分系统上线后数据怎么样
+
+    张三：还不错，日活用户的积分获取率有15%
+
+    李四：那挺好的，下一步就是积分商城了吧
+
+    张三：对对对，商城的话我想下周出方案
+
+    李四：好，那你下周三前给我看一版
+
+    张三：没问题
+
+    '
+  expect:
+    contains:
+    - - 积分
+      - 系统
+    - - 15%
+      - 数据
+    - - 积分商城
+      - 下一步
+    - - 下周三
+      - 方案
+    - - 张三
+  priority: benchmark
+  needs_external: false
+- id: tc-006
+  name: 识别遗留问题
+  input: "整理会议记录，标记遗留问题：\n\n讨论：\n1. 用户等级权益\n   - 未确定，需要运营决定\n\n2. 积分有效期\n   - 没有结论，下次再讨论\n\
+    \n3. 技术方案\n   - 已确认，按方案A执行\n"
+  expect:
+    contains:
+    - - 遗留
+      - 问题
+      - ❓
+    - - 等级权益
+      - 未确定
+    - - 积分有效期
+      - 没有结论
+    min_length: 100
+  priority: benchmark
+  needs_external: false
+- id: tc-007
+  name: 无会议内容
+  input: '生成会议纪要
+
+    '
+  expect:
+    contains:
+    - - 会议
+      - 记录
+      - 内容
+      - 提供
+      - 请
+    max_length: 300
+  priority: benchmark
+  needs_external: false
+- id: tc-008
+  name: gate-输入不足时提示补充会议信息
+  input: '生成会议纪要
+
+    '
+  expect:
+    contains:
+    - - 会议
+      - 时间
+      - 议题
+      - 记录
+      - 补充
+    max_length: 500
+    not_contains:
+    - - 已完成
+      - 处理完成
+      - 已同步完成
+  priority: gate
+  needs_external: false
+- name: gate-信息充分时首轮直接输出纪要
+  input: 请根据以下记录输出会议纪要和行动项：今天决定下周灰度上线，负责人Alice，风险是回滚预案不足。
+  expect:
+    contains:
+    - - 会议纪要
+      - 总结
+      - 会议要点
+      - 灰度上线
+    - - 行动项
+      - Action
+      - Action Items
+    - - 负责人
+      - Alice
+    min_length: 80
+  id: tc-009
+  priority: gate
+  needs_external: false
+suites:
+  smoke:
+  - tc-001
+  - tc-002
+  - tc-008
+  - tc-009
+  full:
+  - tc-001
+  - tc-002
+  - tc-003
+  - tc-004
+  - tc-005
+  - tc-006
+  - tc-007
+  - tc-008
+  - tc-009

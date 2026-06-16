@@ -1,3 +1,7 @@
+> ⏸ **DEFERRED / PARKED（2026-06-16，勿 apply）**
+> 多渠道 reframe（IM 只是入站之一，未来要支持 WebUI/CLI/App）后，对"TUI 客户端已死"不再有把握：保留的 `dispatch/protocol/transport` 是 Channel 缝的核心，而被删的 TUI 客户端（尤其 `backend.py`）是**唯一一个真实客户端端到端跑通这条缝**的活证，也可能是未来 CLI 渠道（若走远程 WS 形态）要复用的种子。减法纪律＝只删有把握已死的，故按下不执行。
+> **待 CLI/Web 渠道形态定了再决定**：把 TUI 演化成第一个非 IM 渠道适配器（远程 WS）vs 确认形态不对（进程内 stdio）删掉重建。在此之前本 change 仅作记录，不进入 apply。
+
 ## Why
 
 第一方终端 TUI（`fleetent-tui`）是一个纯 WebSocket 瘦客户端，挂到 agent daemon 的 `/ws` 上做多轮对话。它有三处冗余/尴尬：

@@ -1,0 +1,28 @@
+收件人：
+- owen.zhang@nsdigital.io
+- mo@nsdigital.io
+
+抄送：
+- {client_contact_email}
+- {business_group_email}
+- notification@nsdigital.io
+
+邮件主题：
+【白名单地址】Northstar收币地址-{client_company}-{business_line}-{application_date}
+
+---
+
+请 Owen 复核以下地址（注：待 Owen 回复邮件复核后才生效）
+
+用于 {business_line} 业务
+
+Northstar 收币白名单地址：
+
+币种（网络）                  地址
+{currency}（{chain_name}）    {wallet_address}
+
+首次打款请先进行小额测试，并回复白名单邮件（reply to all），回复内容如下：
+
+1. 测试打款币种、金额
+2. 测试打款 TXID
+3. 我方的收币地址

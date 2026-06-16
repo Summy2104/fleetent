@@ -1,0 +1,78 @@
+version: 1.0
+skill: bs-kyc-status-querying
+tests:
+  - name: kyc_status_four_states_detection
+    description: passed / pending / expired / not_found 4 种状态均可正确识别并返回
+    input:
+      cases:
+        - customer_name: "Alpha Fund"
+          business_line: "Trading"
+          sheet_row: { status: "passed", kyc_type: "ns", expiry_date: "2026-12-31" }
+          expected_status: "passed"
+        - customer_name: "Beta Capital"
+          business_line: "Trading"
+          sheet_row: { status: "pending" }
+          expected_status: "pending"
+        - customer_name: "Gamma LLC"
+          business_line: "Trading"
+          sheet_row: { status: "expired", expiry_date: "2025-09-30" }
+          expected_status: "expired"
+        - customer_name: "Unknown Co"
+          business_line: "Trading"
+          sheet_row: null
+          expected_status: "not_found"
+    expected:
+      all_statuses_match: true
+
+  - name: output_schema_consistency
+    description: 输出 JSON 结构与输出结构表完全一致，含 source_row 便于人工回溯
+    input:
+      customer_name: "Alpha Fund"
+      business_line: "Trading"
+    expected:
+      output:
+        status: "passed"
+        kyc_type: "ns"
+        expiry_date: "2026-12-31"
+        source_row: "kyc_tracker!A42"
+      required_fields: [status, kyc_type, expiry_date, source_row]
+
+  - name: gsheets_unavailable_error_handling
+    description: GSheets 不可用时返回 error + reason，上游可据此移交
+    input:
+      customer_name: "Alpha Fund"
+      business_line: "Trading"
+      simulate: gsheets_timeout_after_retry
+    expected:
+      output:
+        status: "error"
+        reason: "gsheets_unavailable"
+
+  - name: non_trading_business_line_support
+    description: 非 Trading 业务线输入也能正常查询（为 v2 横向扩展预留）
+    input:
+      customer_name: "Delta Partners"
+      business_line: "Lending"
+    expected:
+      no_schema_error: true
+      status_returned: true
+      reason: "Skill 不应因 business_line != Trading 而报错，应走正常查询路径"
+
+trigger_tests:
+  - input: "查一下 Alpha Fund 的 KYC 过了吗"
+    expected: direct
+  - input: "Trading 新客户 XX，先查 KYC"
+    expected: direct
+  - input: "帮我看看这个客户 KYC 状态"
+    expected: direct
+
+non_trigger_tests:
+  - input: "帮我做 KYC 审核"
+    expected: no_trigger
+    reason: "KYC 审核/签发是 Onboarding Team 人工职责，不在本 skill 范围"
+  - input: "给客户发一封 onboarding 邮件"
+    expected: no_trigger
+    reason: "对外客户沟通由 v2 的 BS-02 customer-onboarding-relaying 处理"
+  - input: "查一下 NS 里这个客户的 KYC"
+    expected: no_trigger
+    reason: "MVP 单源仅查 GSheets，不查 NS；NS KYC 查询留待 v2 多源支持"
