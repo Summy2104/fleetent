@@ -120,6 +120,7 @@ graph TD
 - **KB 管理**：`kb_connectors`(connector 配置与自定义元数据；实际 KB 内容仍在 per-tenant `kb.db`)
 - **模型**：`model_providers`（materialize 读：model_overrides→ModelTarget + api_key env）
 - **治理/编排**：`audit_log`(平台管理操作审计) · `session_meta`(仅 playground / chat admin 创建路径会写入的 platform chat 管理元数据，如 origin / pinned / admin takeover；`agent_id` 为可空 **INTEGER FK→agents.id ON DELETE CASCADE**，identity-model 阶段 3；与 agent 侧 `sessions` 索引分责，`session_id` 仅作跨库逻辑引用)
+- **节点编排（分布式 node 模型，迁移 096/097）**：`nodes`(节点注册表＝跑 agent 的 worker 进程；`id` TEXT PK、`key_hash` 唯一＝节点 bearer 鉴权、`labels` JSON、`last_seen_at` 心跳) · `agent_placements`(**期望态**——pin agent→node；`agent_id` 主键 + **FK→agents.id ON DELETE CASCADE**、`node_id` **FK→nodes.id ON DELETE RESTRICT**（有 agent pin 着不能删 node）、`pinned_by`) · `node_agent_status`(**上报态投影**——node 回报 agent 实际运行态；`agent_id` 主键 + **FK→agents.id ON DELETE CASCADE**、`node_id` **FK→nodes.id ON DELETE CASCADE**、`phase`/`pid`/`health`/`detail`/`reported_at`)。desired(`agent_placements`) vs reported(`node_agent_status`) 的 reconcile 模型见 [`target-architecture.md`](./target-architecture.md) orchestration plane；进程内 in-memory controller 已退休。**与 `agent_admin_state.status`（admin enable/disable/archive 意图）正交**——这里是"在哪个 node 跑 + 实际跑成啥样"。
 - **Skill 治理**：`skills`（skill 主表，PK=`name`；迁移 092 把旧 `skill_admin_state` 治理列 + `skill_provenance` 溯源列**合并为单表**：`status`/`global_enabled`/`audit_verdict`/`audit_rules`/`forced`/`source`/`immutable_fields`/`current_version`/`archived_at`——旧两表已 drop） · `backflow_proposals`（agent 运行时改动 skill 的**回流提案**；`id` PK，`agent_id`/`skill_name` 软引用无 FK，`base_version`/`base_commit` 锚定 skill-pool git 版本，`proposed_bundle` 为多文件 JSON 包，`status`/`conflict`/`overridden_head`/`forked_as` 驱动调和）
 
 > 下图只画有库内关系的主干表；独立/弱关联表不入图：`blocked_registrations`（按 email 匹配，无 FK）、`agent_secrets`（→agents，密文配置）、`kb_connectors`（KB 数据源配置）、`session_meta`（`session_id` 仅跨库逻辑引用 agent 侧 `sessions`）。
@@ -141,7 +142,7 @@ erDiagram
   users ||--o{ teams : "approver_user_id·SET NULL"
   agents ||--o{ agent_versions : "不可变快照"
   users ||..o{ agent_versions : "created_by_user_id"
-  agents ||--|| agent_admin_state : "版本/部署态·admin"
+  agents ||--|| agent_admin_state : "生命周期/provenance/drift·admin"
   agents ||--o{ agent_kbs : "KB 绑定真相源"
   agents ||--o{ mcp_servers : "agent-owned MCP 注册"
   agents ||--o{ agent_mcp_servers : "MCP 绑定(agent侧)"
@@ -155,6 +156,10 @@ erDiagram
   agents ||..o{ backflow_proposals : "skill 回流提案(agent_id 软引用)"
   skills ||..o{ backflow_proposals : "skill_name 软引用"
   users ||..o{ audit_log : "管理操作审计"
+  agents ||--o| agent_placements : "期望放置 pin·CASCADE"
+  nodes ||--o{ agent_placements : "node 承载·RESTRICT"
+  agents ||--o| node_agent_status : "上报态·CASCADE"
+  nodes ||--o{ node_agent_status : "node 回报·CASCADE"
   agents {
     int supports_dm "default 0"
     int supports_groups "default 0"
