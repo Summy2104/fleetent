@@ -273,6 +273,15 @@ async def _start_infra(
     (== home_dir, mirroring the MCP `agent_home` derivation below).
     """
     _init_agent_db_schema(data_dir, agent_id=agent.name, tenant_id=agent.tenant_id)
+
+    # approval-suspend-resume (#8): reconcile THIS agent's expired pending approvals now
+    # that _init_agent_db_schema has wired approval_store's per-agent state_db. This used
+    # to run in the platform lifespan, where no agent state_db is wired (crashed boot);
+    # it belongs here so each agent reconciles its own approvals against its own DB.
+    from fleetent.runtime.approval_resume import reconcile_expired_approvals
+
+    await reconcile_expired_approvals()
+
     from fleetent.integrations.sandbox import enablement as sandbox_enablement
 
     # Select the configured sandbox backend (agent.yaml > platform.yaml > docker) and

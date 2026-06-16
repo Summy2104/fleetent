@@ -24,12 +24,21 @@ _NOOP_INIT_SCHEMA = patch(
     MagicMock(),
 )
 
+# _start_infra now reconciles this agent's expired approvals (#8) right after
+# _init_agent_db_schema wires approval_store's state_db. These tests NOOP that wiring,
+# so they must stub reconcile too — it would otherwise find no state_db and raise.
+_NOOP_RECONCILE = patch(
+    "fleetent.runtime.approval_resume.reconcile_expired_approvals",
+    AsyncMock(),
+)
+
 
 async def test_start_infra_cleans_orphans_and_starts_sweep_when_docker_available(
     tmp_path: Path,
 ) -> None:
     with (
         _NOOP_INIT_SCHEMA,
+        _NOOP_RECONCILE,
         patch(
             "fleetent.integrations.sandbox.enablement.get_effective_mode",
             AsyncMock(return_value=Mode.ALL),
@@ -50,6 +59,7 @@ async def test_start_infra_skips_sandbox_lifecycle_when_docker_unavailable(
 ) -> None:
     with (
         _NOOP_INIT_SCHEMA,
+        _NOOP_RECONCILE,
         patch(
             "fleetent.integrations.sandbox.enablement.get_effective_mode",
             AsyncMock(return_value=Mode.OFF),
@@ -73,6 +83,7 @@ async def test_start_infra_inits_sandbox_manager_with_per_agent_skills_root(
     (sandbox-skill-mount-per-agent-root)."""
     with (
         _NOOP_INIT_SCHEMA,
+        _NOOP_RECONCILE,
         patch(
             "fleetent.integrations.sandbox.enablement.get_effective_mode",
             AsyncMock(return_value=Mode.ALL),
@@ -92,6 +103,7 @@ async def test_start_infra_cleanup_failure_does_not_block_startup(tmp_path: Path
     """An orphan-cleanup error is logged; boot still proceeds to session maintenance."""
     with (
         _NOOP_INIT_SCHEMA,
+        _NOOP_RECONCILE,
         patch(
             "fleetent.integrations.sandbox.enablement.get_effective_mode",
             AsyncMock(return_value=Mode.ALL),

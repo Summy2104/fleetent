@@ -133,11 +133,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # AR7: load enabled plugins once at startup (same lifecycle as scan_skills /
     # mcp register_all). A missing plugins/ dir or a bad plugin never aborts boot.
     load_plugins()
-    # approval-suspend-resume: reconcile only EXPIRED pending approvals; non-expired
-    # ones survive the restart and stay resolvable (no blanket timeout anymore).
-    from fleetent.runtime.approval_resume import reconcile_expired_approvals
-
-    await reconcile_expired_approvals()
+    # approval-suspend-resume (#8): expired-approval reconcile is agent-owned and runs in
+    # each agent's boot (agent_app._start_infra), where approval_store's per-agent state_db
+    # is wired. The platform process wires no agent state_db, so it MUST NOT reconcile here
+    # — doing so crashed boot with "approval_store: state_db not initialized".
     try:
         settings = Settings()
     except Exception as exc:
