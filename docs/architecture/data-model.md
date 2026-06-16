@@ -1,10 +1,9 @@
 # fleetent 数据模型与物理拓扑（as-built）
 
-> **现状权威参考**。持久层重设计（#1–#4）与 agent identity phase 2–5 已全部落地——五物理库、按主体物理隔离、嵌入式迁移（Y）、Identity 端口、platform 只读投影、name/id 双边界模型均已实现。**IM 访问模型（能力闸 supports_dm/supports_groups · 用户闸 user_agents · 群白名单 agent_im_groups + materialize）与 owner→tenant 作用域塌缩亦已落地**（详见 [`im-access-model.md`](./im-access-model.md)）。**分布式 node 编排模型已落地**（节点注册表 `nodes` + 期望态 `agent_placements` + 上报态投影 `node_agent_status` 的 desired/reported reconcile，退休进程内 controller；orchestration plane 详见 [`target-architecture.md`](./target-architecture.md)）。
-> **本文只描述"现状是什么"**；"为什么这样设计"（R1/R2/B2、物理 vs 逻辑、向量模型 A、实体减法等 rationale）见 [`records/decision-logs/persistence-redesign-decisions.md`](../records/decision-logs/persistence-redesign-decisions.md)。
-> **列级 schema 的真相源是迁移**：管理库 = `migrations/`（Alembic）；agent 侧库 = `runtime/agent_state_migrations.py`、`knowledge_base/core/migrations.py`、`memory/shared_memory_migrations.py`（嵌入式 Y）。本文实体清单为导航，不逐列复制。
-> **维护规则**：任何 change 增删表、改列或改关系时，MUST 同步本文对应的实体清单**与 erDiagram**（图文同改）——历次审计发现的漂移几乎全是"改了文本忘了图"。
-> 配套：[`target-architecture.md`](./target-architecture.md)（核+4面+基座 · Identity §6 · platform 只读投影 §7）· [`agent-management.md`](./agent-management.md)（agent 管理子系统：生命周期/自管/绑定/materialize/node 编排的连接逻辑）。
+> **现状权威参考**——只描述"当前 schema 是什么"。变更史（哪个迁移、哪一期落地）见 git 与 [`records/decision-logs/`](../records/decision-logs/)；设计 rationale（R1/R2/B2、物理 vs 逻辑、向量模型 A、实体减法等）见 [`persistence-redesign-decisions.md`](../records/decision-logs/persistence-redesign-decisions.md)。
+> **列级 schema 真相源是迁移**：管理库 `migrations/`（Alembic）；agent 侧库 `runtime/agent_state_migrations.py` / `knowledge_base/core/migrations.py` / `memory/shared_memory_migrations.py`（嵌入式 Y）。本文实体清单为导航，不逐列复制。
+> **维护规则**：任何 change 增删表 / 改列 / 改关系，MUST 同步对应实体清单**与 erDiagram**（图文同改）。
+> **配套**：[`target-architecture.md`](./target-architecture.md)（核+4面+基座 · Identity §6 · 只读投影 §7）· [`agent-management.md`](./agent-management.md)（agent 生命周期/自管/绑定/编排）· [`skill-system.md`](./skill-system.md) · [`im-access-model.md`](./im-access-model.md)。
 
 ## 1. 物理拓扑（5 库类型 · 按主体物理分区）
 
@@ -33,27 +32,24 @@ data/
 
 命名规则：per-tenant 层 `X`=资源名（`kb`/`shared_memory`，一资源一文件）；per-agent 层 `X`=归属（`agent_state`，一 agent 一文件、不按内容）。目录 `<tenant>/<agent_name>/` 用 agent 的可读 slug 圈定主体内的物理归属。
 
-**物理库计数**：2 主体 × 各 2 agent = **17 库**（管理 1 + 每主体〔2 agent×(关系+向量)=4 + 共享 2 + KB 2〕×2）。"5"是**类型数**，非部署文件数。
+**物理库计数**：2 主体 × 各 2 agent = **17 库**（管理 1 + 每主体〔2 agent×(关系+向量)=4 + 共享 2 + KB 2〕×2）。"5" 是**类型数**，非部署文件数。
 
 **跨主体隔离**：agent 进程经 `agent.yaml` 只开本主体目录下的文件，物理上够不到别主体的库——合规"主体间互不可见"由文件边界结构性保证，非纪律级 `WHERE tenant_id`。
 
 ## 2. schema 权威、路由与并发
 
 - **双权威（按库分）**：管理库 **Alembic-only**；per-agent / 共享记忆 / KB 关系库走**嵌入式 forward-only 迁移（Y）**——schema 以代码中有序 `MIGRATIONS=[(ver,sql)]` 定义、DB 只存 `PRAGMA user_version`、**migrate-on-open**、每文件自迁、库版本 > 代码已知版本则拒启动（`SchemaTooNewError`）。空库与旧库同一代码路径。
-- **关系完整性双层语义**：管理库经 `db.py` 打开的连接统一启用 `PRAGMA foreign_keys=ON`，声明了 FK 的管理表约束会真实生效；store 写入校验继续承接 FK 难以表达的语义级约束（例如 `agents.team_id` 与 `agents.tenant_id` 的复合一致性）。agent 侧库仍以约定引用为主；其中 KB 关系库的 `knowledge_documents → knowledge_chunks` 级联删除已随 FK 开启真实生效。
-- **FK 启用不回扫存量行**：SQLite 只约束启用后的新连接写入/删除，不会自动修复历史违规行；旧违规引用若后续被触碰，会在那次写路径上迟发失败。
-- **一文件一份统一 MIGRATIONS**：`agent_state.db` 由 `runtime/agent_state_migrations.py` 一份单调版本列表管（sessions/traces/reflection/memory/approvals 各占若干 v）——单文件单 `user_version`，不可每 store 各跑一份。
-- **路由（租户作用域 + 可换后端）**：`tenant_router` 暴露两个平级解析器——`tenant_scope(tenant)`（KB + 共享记忆句柄）、`agent_scope(tenant, agent_name)`（per-agent 句柄）。SQLite 后端映射到上述目录文件；后端可换（将来 PG per-tenant DB / RLS，调用点不变）。物理路由的主体取自 **agent 的归属主体**（`agents.team_id`/`tenant_id`，配置）；请求者 `Principal.tenant_id` 仅用于 edge 跨主体校验（`agent_app._check_tenant`）。
-- **并发**：所有 SQLite 连接启用 **WAL + busy_timeout**（关系库经 `db.py`、向量库经 `vector_store/backend.py`，同值）——支撑 platform 只读投影读 + agent 写并发、共享记忆多 agent 写。
-- **agent 侧表保留 `tenant_id` 列**：文件路由忽略它，作"可换后端"接缝（将来 RLS 后端按它行级强制）。
+- **关系完整性双层**：管理库经 `db.py` 的连接统一 `PRAGMA foreign_keys=ON`，声明了 FK 的管理表约束真实生效；store 写入校验承接 FK 难表达的语义约束（如 `agents.team_id` 与 `tenant_id` 的复合一致性）。agent 侧库以约定引用为主，其中 KB 关系库 `knowledge_documents → knowledge_chunks` 级联删除随 FK 真实生效。
+- **FK 不回扫存量**：SQLite 只约束启用后的新写入/删除，不修复历史违规行；旧违规引用被触碰时在该次写路径迟发失败。
+- **一文件一份 MIGRATIONS**：`agent_state.db` 由 `runtime/agent_state_migrations.py` 一份单调版本列表管——单文件单 `user_version`，不可每 store 各跑一份。
+- **路由（租户作用域 + 可换后端）**：`tenant_router` 暴露 `tenant_scope(tenant)`（KB + 共享记忆句柄）与 `agent_scope(tenant, agent_name)`（per-agent 句柄）。SQLite 后端映射到上述目录文件，后端可换（将来 PG per-tenant DB / RLS，调用点不变）。物理路由主体取自 **agent 的归属主体**（`agents.team_id`/`tenant_id`）；请求者 `Principal.tenant_id` 仅用于 edge 跨主体校验（`agent_app._check_tenant`）。
+- **并发**：所有 SQLite 连接启用 **WAL + busy_timeout**（关系库经 `db.py`、向量库经 `vector_store/backend.py`）——支撑只读投影读 + agent 写并发、共享记忆多 agent 写。
+- **agent 侧表保留 `tenant_id` 列**：文件路由忽略它，作"可换后端"接缝（将来 RLS 按它行级强制）。
 
 ## 3. 实体模型（按库归类）
 
-> 实体名 + 一句话职责；列级以迁移为准（见文首）。关系多为 `*_id` 约定引用（非 DB 外键）。
-
-本节分**宏观**（§3.1 物理库全景 + 跨库引用）与**按库明细**（§3.2–§3.6，每库完整实体 + 库内关系）。所有关系均为 `*_id` 逻辑约定，**物理库间无 DB 外键**。
-
-**跨库引用孤儿契约**：物理库之间没有 DB 级 FK，消费方 **MUST** 容忍 `*_id` 指向已删或已 archive 的外库实体，并按域语义处理为拒绝或降级，而不是假设引用恒真。Identity / cron 复检类路径应继续采用分域重查，不共享隐式一致性。
+> 关系多为 `*_id` 约定引用；**物理库间无 DB 外键**。库内（同一物理库）声明的 FK 见各表"FK"列。
+> **跨库引用孤儿契约**：消费方 **MUST** 容忍 `*_id` 指向已删/已 archive 的外库实体，按域语义拒绝或降级，不假设引用恒真；Identity / cron 复检类路径分域重查，不共享隐式一致性。
 
 ### 3.1 物理库全景（宏观）
 
@@ -110,22 +106,67 @@ graph TD
   vector_items -. "kb:" .-> knowledge_chunks
 ```
 
-> 宏观图只列各库主干实体；完整清单与库内关系见下方各库明细（§3.2–§3.6）。
-> 跨库边的省略约定：① `reflection_proposals` 的 `subject/actor_user_id` 与 `approval_requests.approver_user_id` 同样 ⇢ `users`，从略；② agent 侧各表的 `tenant_id` 接缝列（§2"可换后端"）⇢ `tenants`，全部从略；③ `shared_memory_items.scope_id` 在 `scope_type=tenant` 时指向 `tenants`（图仅画 teams 一条代表边）。`session_meta → sessions` 是全库唯一一条 mgmt→agent 方向的跨库引用（platform 自有元数据挂 agent 侧会话，非 agent 反向写）。
+> 宏观图只列各库主干实体；完整清单与库内关系见 §3.2–§3.6。`session_meta → sessions` 是全库唯一一条 mgmt→agent 方向跨库引用（platform 自有元数据挂 agent 会话，非 agent 反向写）。省略的跨库边：`reflection_proposals.*_user_id` / `approval_requests.approver_user_id` ⇢ `users`；agent 侧各表 `tenant_id` 接缝列 ⇢ `tenants`；`shared_memory_items.scope_id` 在 `scope_type=tenant` 时 ⇢ `tenants`。
 
 ### 3.2 管理库（Alembic · platform 侧）
-- **身份/租户**：`users`(根主体，含 `tenant_id`；**无 key 列**——key 唯一真相源在 `api_keys`，SHA-256 哈希、明文不落库) · `api_keys`(`user_id`→users，**软引用无 FK**) · `tenants`(主体，含 `approver_user_id`→users) · `teams`(→tenants，含 `approver_user_id`→users) · `blocked_registrations`(注册封禁名单，control-plane only，agent 运行时不 import)
-- **IM**：`im_users`(渠道身份归并真相源；**纯 `(platform, platform_user_id) ⇄ user_id` 双向映射**，managed 运行时由注入 resolver 消费，standalone 不消费；列仅 `id/platform/platform_user_id/user_id/created_at/meta_json`，**UNIQUE(platform, platform_user_id)**，`user_id` 带 **FK→users.id ON DELETE CASCADE**；**无 `owner_id` / `allowed`**，IM 封禁改由 `users.status=="blocked"` 在平台 resolver 强制)。渠道准入已统一走 agent.yaml `ImAccess` / `agent_im_groups` 的群白名单与 chat_type 闸
-- **Agent 定义/绑定**：`agents`(定义；`id` 是平台关系键与不可变身份，`name` 是可读 slug / 物理目录名 / materialize 到 agent 侧的标签；身份模型已让 name 结构上可安全 rename——关系键全挂 id、rename 仅需改本表一行 + 写边界重刷产物，**但当前未提供 rename 写路径、name 创建后不可变**；agent 状态在 `agent_admin_state`，agents 表无 status 列；IM 访问模型阶段 2 新增 `supports_dm` / `supports_groups` 两个 agent 级能力列，默认 `0`，阶段 4 materialize 到 agent.yaml `im.supports_dm` / `im.supports_groups`；`active_version_id` **刻意保持裸 INTEGER 无 FK**——逻辑指向 `agent_versions.id`，但不设约束以避免 agents↔agent_versions 循环 FK 与建档 insert 顺序鸡生蛋，指针由应用维护) · `agent_versions`(不可变快照；**`agent_id` INTEGER FK→agents.id ON DELETE CASCADE**，identity-model 阶段 4) · `agent_admin_state`(agent **生命周期状态 + 自管 provenance + drift** 侧表，**非版本指针**——`status`∈`enabled`/`disabled`/`archived`、`provenance`∈`managed`/`adhoc`（apply API 写 `managed`、控制台写 `adhoc`）、`drift`（managed 被带外编辑置位）；**`agent_id` INTEGER 主键 + FK→agents.id ON DELETE CASCADE**，identity-model 阶段 3；管理逻辑/命名消歧见 [`agent-management.md`](./agent-management.md) §2) · `user_agents`(用户↔agent；**`agent_id` INTEGER FK→agents.id ON DELETE CASCADE**，identity-model 阶段 4；**仅 admin 维护**，阶段 4 materialize 为 agent.yaml `im.<platform>.access.allow_users`) · `agent_im_groups`(agent↔IM 群白名单；**`agent_id` INTEGER FK→agents.id ON DELETE CASCADE**；键 `(agent_id, platform, group_id)`，默认无行；阶段 4 materialize 为 agent.yaml `im.<platform>.access.allow_groups`) · `agent_kbs`(**agent↔KB 绑定唯一真相源**；`agent_id` 已在 agent-identity-model 阶段 2 规整为 **INTEGER FK→agents.id ON DELETE CASCADE**，带 `created_by` 审计) · `mcp_servers`(MCP 注册表；`agent_id` 可空，agent-owned 行带 **FK→agents.id ON DELETE CASCADE**，identity-model 阶段 4) · `agent_mcp_servers`(agent↔MCP 绑定；**FK→agents.id ON DELETE CASCADE**，迁移 085 补齐) · `agent_service_grants`(agent↔外部服务授权；**FK→agents.id ON DELETE CASCADE**；`service_id` 软引用 `external_services`、无 FK；含 `run_as` 列（`user`/`agent`）控制凭证主体) · `agent_secrets`(agent / shared scope 密文 secret；可选 `agent_id` 带 **FK→agents.id ON DELETE CASCADE**，identity-model 阶段 4) · `external_services`(工具 OAuth 服务注册表；**单层全局无 `agent_id`**；`protocol`=`oauth2`/`apikey`；`client_secret` 不落库走 env；已接线 P0–P6) · `external_credentials`(per-principal Fernet 加密凭证；主键 `(user_id, service_id)`；`status`：`authorized`/`needs_reauth`/`error`；明文不出库；已接线 vault provider) · `agent_skills`（`agent_id` 已在 agent-identity-model 阶段 2 规整为 **INTEGER FK→agents.id ON DELETE CASCADE**；控制台 name/id 混写导致的绑定静默失效 bug 已修复；迁移 092 重建后增 **FK→skills(name)** 与 drift 列 `base_version`/`base_commit`/`drift`/`drift_at`）
-- **KB 管理**：`kb_connectors`(connector 配置与自定义元数据；实际 KB 内容仍在 per-tenant `kb.db`)
-- **模型**：`model_providers`（materialize 读：model_overrides→ModelTarget + api_key env）
-- **治理/编排**：`audit_log`(平台管理操作审计) · `session_meta`(仅 playground / chat admin 创建路径会写入的 platform chat 管理元数据，如 origin / pinned / admin takeover；`agent_id` 为可空 **INTEGER FK→agents.id ON DELETE CASCADE**，identity-model 阶段 3；与 agent 侧 `sessions` 索引分责，`session_id` 仅作跨库逻辑引用)
-- **节点编排（分布式 node 模型，迁移 096/097）**：`nodes`(节点注册表＝跑 agent 的 worker 进程；`id` TEXT PK、`key_hash` 唯一＝节点 bearer 鉴权、`labels` JSON、`last_seen_at` 心跳) · `agent_placements`(**期望态**——pin agent→node；`agent_id` 主键 + **FK→agents.id ON DELETE CASCADE**、`node_id` **FK→nodes.id ON DELETE RESTRICT**（有 agent pin 着不能删 node）、`pinned_by`) · `node_agent_status`(**上报态投影**——node 回报 agent 实际运行态；`agent_id` 主键 + **FK→agents.id ON DELETE CASCADE**、`node_id` **FK→nodes.id ON DELETE CASCADE**、`phase`/`pid`/`health`/`detail`/`reported_at`)。desired(`agent_placements`) vs reported(`node_agent_status`) 的 reconcile 行为、下发闸（`status==enabled` 才下发）、node 自治循环见 [`agent-management.md`](./agent-management.md) §6（高层平面见 [`target-architecture.md`](./target-architecture.md)）；进程内 in-memory controller 已退休。**与 `agent_admin_state.status`（admin enable/disable/archive 意图）正交**——这里是"在哪个 node 跑 + 实际跑成啥样"。
-- **Skill 治理**：`skills`（skill 主表，PK=`name`；迁移 092 把旧 `skill_admin_state` 治理列 + `skill_provenance` 溯源列**合并为单表**：`status`/`global_enabled`/`audit_verdict`/`audit_rules`/`forced`/`source`/`immutable_fields`/`current_version`/`archived_at`——旧两表已 drop） · `backflow_proposals`（agent 运行时改动 skill 的**回流提案**；`id` PK，`agent_id`/`skill_name` 软引用无 FK，`base_version`/`base_commit` 锚定 skill-pool git 版本，`proposed_bundle` 为多文件 JSON 包，`status`/`conflict`/`overridden_head`/`forked_as` 驱动调和）
 
-> 下图只画有库内关系的主干表；独立/弱关联表不入图：`blocked_registrations`（按 email 匹配，无 FK）、`agent_secrets`（→agents，密文配置）、`kb_connectors`（KB 数据源配置）、`session_meta`（`session_id` 仅跨库逻辑引用 agent 侧 `sessions`）。
->
-> **图例**（2026-06-15 按代码实测校准，见决策日志）：**实线** = 有 FK 约束的硬关系；**虚线** = 软引用（按 id/name 约定、**无 FK 约束**）。边标记：**`·admin`** = FK 真实但仅 admin/console 消费、非 agent runtime；**`·vault`** = 已接线 per-principal vault provider。
+> FK 列省略时表示无库内 FK（软引用）。`→X (CASCADE/RESTRICT)` 为库内 FK 及其 ondelete。
+
+**身份 / 租户**
+
+| 表 | 键 / 关键列 | FK | 用途 |
+|---|---|---|---|
+| `users` | 根主体；`tenant_id`；**无 key 列** | — | 唯一身份；key 真相源在 `api_keys`（SHA-256，明文不落库）|
+| `api_keys` | `user_id` | — (软引用 users) | bearer key 哈希 |
+| `tenants` | `approver_user_id` | — (软引用 users) | 主体（法人/商户）|
+| `teams` | `tenant_id` · `approver_user_id` | → tenants | 主体下设团队 |
+| `blocked_registrations` | 按 email 匹配 | — | 注册封禁名单（control-plane only）|
+| `im_users` | `id` · UNIQUE`(platform, platform_user_id)` · `user_id` · `meta_json` | `user_id` → users (CASCADE) | 渠道身份 ⇄ 内部 user **纯双向映射**（无 owner_id/allowed；封禁走 `users.status`）|
+
+**Agent 定义 / 绑定**（绑定族 `agent_id` 一律 → agents CASCADE）
+
+| 表 | 键 / 关键列 | FK | 用途 |
+|---|---|---|---|
+| `agents` | `id`=不可变身份 · `name`=可读标签 · `active_version_id`(裸 INTEGER 无 FK) · `supports_dm`/`supports_groups`；无 status 列 | — | agent 定义；管理逻辑 → [agent-management](agent-management.md) |
+| `agent_versions` | `agent_id` | → agents (CASCADE) | 不可变版本快照 |
+| `agent_admin_state` | PK `agent_id`；`status`/`provenance`/`drift`/`archived_at` | → agents (CASCADE) | 管理态（生命周期+自管+drift）→ [agent-management §2](agent-management.md) |
+| `user_agents` | `(user_id, agent_id)` | → agents (CASCADE) | 用户↔agent 准入；materialize → `im.allow_users`（admin 维护）|
+| `agent_im_groups` | `(agent_id, platform, group_id)` | → agents (CASCADE) | IM 群白名单；materialize → `im.<platform>.allow_groups` |
+| `agent_kbs` | `agent_id` · `created_by` | → agents (CASCADE) | agent↔KB 绑定真相源；`kb_id` 软引用本 tenant `kb.db` |
+| `mcp_servers` | `agent_id` 可空 | → agents (CASCADE，agent-owned 行) | MCP 注册表（定义：transport/url/auth；含全局 `agent_id=NULL` 行）|
+| `agent_mcp_servers` | `(agent_id, server_id)` | → agents (CASCADE) | agent↔MCP 挂载（绑定）；`server_id` 软引用 `mcp_servers` |
+| `agent_service_grants` | `agent_id` · `run_as`(user/agent) | → agents (CASCADE) | agent↔外部服务授权；`service_id` 软引用 `external_services` |
+| `agent_secrets` | `agent_id` 可空（agent/shared scope）| → agents (CASCADE) | 密文 secret（node 下发时注入）|
+| `agent_skills` | `(agent_id, skill_name)`；drift 列 `base_version`/`base_commit`/`drift`/`drift_at` | → agents (CASCADE) · → skills(name) | skill 启用 + 部署副本 drift；→ [skill-system](skill-system.md) |
+| `external_services` | 单层全局**无 `agent_id`**；`protocol`=oauth2/apikey | — | 工具 OAuth 服务注册表（`client_secret` 走 env 不落库）|
+| `external_credentials` | PK `(user_id, service_id)`；`status`=authorized/needs_reauth/error | — (软引用 users/external_services) | per-principal Fernet 加密凭证（明文不出库）|
+
+**节点编排**（→ [agent-management §6](agent-management.md)；desired/reported reconcile）
+
+| 表 | 键 / 关键列 | FK | 用途 |
+|---|---|---|---|
+| `nodes` | `id` TEXT PK · `key_hash` 唯一 · `labels` JSON · `last_seen_at` | — | 节点注册表（worker；key_hash=bearer 鉴权、心跳）|
+| `agent_placements` | PK `agent_id` · `node_id` · `pinned_by` | → agents (CASCADE) · → nodes (RESTRICT) | **期望态**：pin agent→node（node 有 pin 不可删）|
+| `node_agent_status` | PK `agent_id` · `node_id` · `phase`/`pid`/`health`/`detail` | → agents (CASCADE) · → nodes (CASCADE) | **上报态投影**：node 回报实际运行态 |
+
+**Skill 治理**（→ [skill-system](skill-system.md)）
+
+| 表 | 键 / 关键列 | FK | 用途 |
+|---|---|---|---|
+| `skills` | PK `name`；`status`/`global_enabled`/`audit_verdict`/`audit_rules`/`forced`/`source`/`immutable_fields`/`current_version` | — | skill 主表（治理 + 溯源合一）|
+| `backflow_proposals` | `id`；`base_version`/`base_commit`；`proposed_bundle`(多文件 JSON)；`status`/`conflict`/`overridden_head`/`forked_as` | — (软引用 agents/skills) | agent 运行时改 skill 的回流提案 |
+
+**KB 管理 / 模型 / 治理**
+
+| 表 | 键 / 关键列 | FK | 用途 |
+|---|---|---|---|
+| `kb_connectors` | connector 配置 + 自定义元数据 | — | KB 数据源配置（实际内容在 per-tenant `kb.db`）|
+| `model_providers` | provider + api_key env | — | materialize 读：model_overrides → ModelTarget |
+| `audit_log` | 管理操作审计 | — (软引用 users) | 平台管理操作审计 |
+| `session_meta` | `session_id` · `agent_id` 可空 · origin/pinned/takeover | → agents (CASCADE) | platform chat 管理元数据（`session_id` 跨库逻辑引用 agent `sessions`）|
+
+> 下图只画有库内关系的主干表；独立/弱关联表不入图：`blocked_registrations`、`agent_secrets`、`kb_connectors`、`session_meta`。
+> **图例**：**实线** = 有 FK 约束的硬关系；**虚线** = 软引用（按 id/name 约定、无 FK）。边标记：`·admin` = FK 真实但仅 admin/console 消费、非 agent runtime；`·vault` = per-principal vault provider。
 
 ```mermaid
 erDiagram
@@ -172,13 +213,21 @@ erDiagram
 ```
 
 ### 3.3 per-agent 运行库（嵌入式 Y · `agent_state.db` · agent 侧）
+
 统一 MIGRATIONS（`runtime/agent_state_migrations.py`，单文件单 `user_version`）建 **10 张表**：
 
-- **会话/运行**：`sessions`(会话元数据索引，仅 `session_id` / `user_id` / timestamps / `message_count`，**无 `agent_name` 列**——归属由 per-agent 物理库圈定) · `traces`(append-only 运行轨迹，挂 `session_id` / `run_id`；agent 维度列为 `agent_name`) · `session_anti_flap`(压缩防抖，per session) · `sub_agent_runs`(子 agent 生命周期)
-- **记忆**：`memory_items`(per-user 语义记忆，**无 namespace 列**，agent 隔离靠物理库)
-- **审批**：`approval_requests`(审批生命周期**单一真相源**，`subject_type=tool_call|memory_proposal|skill_proposal`；tool-call 的挂起上下文留在 session meta `pending_approvals`) · `tool_auto_approvals`(工具调用 auto-approve 指纹表，仅 tool_call)
-- **反思**：`reflection_reports`(观察日志，domain=`memory|skill|knowledge_base|legacy`) · `reflection_proposals`(memory/skill 提案实体，domain=`memory|skill`；仅存提案内容 + apply 产出，审批生命周期在 `approval_requests`)
-- **调度**：`scheduled_tasks`(cron/once/interval 定时任务；`task_type`=`notify`/`generate`/`action` + `notify_text`——notify 调度器直发不跑 agent、generate 跑 agent 按投递契约发回复、action 由 agent 自发不广播)
+| 类 | 表 | 关键列 / 说明 |
+|---|---|---|
+| 会话/运行 | `sessions` | 会话元数据索引（`session_id`/`user_id`/timestamps/`message_count`，**无 `agent_name` 列**——归属由物理库圈定）|
+| | `traces` | append-only 运行轨迹，挂 `session_id`/`run_id`；agent 维度列 `agent_name` |
+| | `session_anti_flap` | 压缩防抖，per session |
+| | `sub_agent_runs` | 子 agent 生命周期，`run_id` 与 traces 同命名空间 |
+| 记忆 | `memory_items` | per-user 语义记忆（**无 namespace 列**，agent 隔离靠物理库）|
+| 审批 | `approval_requests` | 审批生命周期**单一真相源**，`subject_type`=tool_call/memory_proposal/skill_proposal |
+| | `tool_auto_approvals` | 工具 auto-approve 指纹表（仅 tool_call）|
+| 反思 | `reflection_reports` | 观察日志，`domain`=memory/skill/knowledge_base/legacy |
+| | `reflection_proposals` | memory/skill 提案实体；审批生命周期在 `approval_requests` |
+| 调度 | `scheduled_tasks` | cron/once/interval；`task_type`=notify(直发)/generate(跑 agent 发回复)/action(自发不广播)|
 
 ```mermaid
 erDiagram
@@ -227,18 +276,18 @@ erDiagram
   }
 ```
 
-> 历史行不迁移：旧管理库中既有的 `session_anti_flap` / `sub_agent_runs` 行属 ephemeral 运行时数据，按「上线前不迁移数据」新建即可，旧行作孤儿由部署方按需清理。
-> 跨库（见 §3.1）：`memory_items.user_id` ⇢ 管理库 `users`（managed 模式成立；standalone 中该字段可为不透明渠道原生 id）；`approval_requests.requester_user_id` ⇢ 管理库 `users`（managed 成立；standalone 同样允许 opaque id）；tool-call 审批的 `approval_requests.subject_id` 约定为本库 `sessions.session_id`。会话**内容**仍是 JSON 文件（`SESSIONS_DIR`，与元数据 DB 表物理分离）。
->
-> 语义注记：① `reflection_proposals.target_ref` 为多态引用——memory 类提案指向 `memory_items.id`，skill 类提案指向文件系统 skill 名（字符串路径），完整性由 apply 路径兜底，无 FK 约束（图中 `memory_items → reflection_proposals` 边即此引用，仅 `domain=memory` 成立）。② `traces` 同时挂 `session_id`（→`sessions`，`query_trace_events` 按它过滤）与 `run_id`（与 `sub_agent_runs.run_id` 同命名空间，均 UUIDv4，可按 `run_id` 关联出子 agent 的完整 trace 树）。③ 库内 `session_id` / `run_id` / `report_id` 都是约定引用，**无时序保证、无外键**：`approval_requests`/`traces` 行可先于 `sessions` 索引行写入（工具门控、首事件在会话首圈即触发），`reflection_proposals.report_id` 可回指生成它的 `reflection_reports.id`，但历史行或非反思来源行允许为 `NULL`。④ `approval_requests` 是审批生命周期单一真相源：tool-call 审批的 subject 是 session meta `pending_approvals` 里的挂起上下文；memory/skill 审批的 subject 是同 id 的 `reflection_proposals` 行；统一 resolve router 按 `subject_type` 分派到工具恢复或提案 apply。⑤ `tool_auto_approvals` 与 tool-call `approval_requests` 经**计算键**关联（非存储 FK）：`fingerprint = hash(scope_key, tool_name, tool_args)`，其中 `scope_key = requester_user_id`；审批前算 fingerprint 查表，命中即 auto-approve。`created_by` 为授予放行的审批人（`*_user_id` 同语义，⇢ 管理库 `users`，可空 opaque）。
+> **库内不变量**：① `reflection_proposals.target_ref` 多态——memory 类指 `memory_items.id`、skill 类指文件系统 skill 名，完整性由 apply 路径兜底（无 FK；图中 `memory_items → reflection_proposals` 边仅 `domain=memory` 成立）。② `traces` 挂 `session_id`（查询过滤）+ `run_id`（与 `sub_agent_runs` 同命名空间，关联子 agent trace 树）。③ `session_id`/`run_id`/`report_id` 均约定引用、**无时序保证无外键**：`approval_requests`/`traces` 可先于 `sessions` 索引行写入，`report_id` 可空。④ `approval_requests` 是审批单一真相源：tool-call subject 在 session meta `pending_approvals`、memory/skill subject 是同 id `reflection_proposals`，统一 resolve router 按 `subject_type` 分派。⑤ `tool_auto_approvals` 经**计算键** `fingerprint=hash(scope_key, tool_name, tool_args)`（`scope_key=requester_user_id`）关联，非存储 FK。
+> **跨库**：`memory_items.user_id` / `approval_requests.requester_user_id` ⇢ 管理库 `users`（managed 成立；standalone 可为不透明渠道 id）；tool-call `approval_requests.subject_id` ⇢ 本库 `sessions.session_id`。会话**内容**是 JSON 文件（`SESSIONS_DIR`，与元数据表物理分离）。
 
 ### 3.4 共享记忆库（嵌入式 Y · `shared_memory.db` · agent 侧 · per-tenant）
-`shared_memory_items`(team/tenant scope 共享记忆，多 agent 写的真相源)
+
+`shared_memory_items`：team/tenant scope 共享记忆，同主体多 agent 写的真相源。
 
 ### 3.5 KB 关系库（嵌入式 Y · `kb.db` · agent / ingest 侧 · per-tenant）
-**已在本库（`knowledge_base/core/migrations.py` 的 Y）**：`knowledge_bases`(PK `(tenant_id,kb_id)`) · `knowledge_documents` · `knowledge_chunks`(+`chunks_fts`) · `knowledge_source_states` · `kb_entities` · `kb_entity_mentions` · `kb_relations` · `knowledge_connector_status`。
 
-> 无 `kb_extraction_runs`：entity extraction 的 run 摘要只同步返回调用方、要审计走 observability trace，不持久化。KB 反思**观察**落 agent 的 `agent_state.db.reflection_reports(domain=knowledge_base)`。KB **remediation**（写回/sync）在 platform / ingest 面，不在 agent 侧 apply。
+`knowledge_bases`(PK `(tenant_id, kb_id)`) · `knowledge_documents` · `knowledge_chunks`(+`chunks_fts`) · `knowledge_source_states` · `kb_entities` · `kb_entity_mentions` · `kb_relations` · `knowledge_connector_status`。
+
+> 无 `kb_extraction_runs`：extraction run 摘要只同步返回 / 走 observability trace，不持久化。KB 反思**观察**落 agent `agent_state.db.reflection_reports(domain=knowledge_base)`；**remediation**（写回/sync）在 platform / ingest 面，不在 agent apply。
 
 ```mermaid
 erDiagram
@@ -255,15 +304,16 @@ erDiagram
   knowledge_bases ||--o{ knowledge_connector_status : "connector 态"
 ```
 
-> KB 是 tenant 共享资源：platform ingest/sync 写本 tenant 的 `kb.db` / `kb_vectors.db`，agent retrieval/graph_search 只读本 tenant 的同名文件。agent 可用的 KB 由 `agent_kbs`（管理库，绑定真相源，经 `kb_id` 跨库引用本库）materialize 进 `agent.yaml`，运行时读配置不查表。
+> KB 是 tenant 共享资源：platform ingest/sync 写本 tenant `kb.db`/`kb_vectors.db`，agent retrieval/graph_search 只读同名文件。可用 KB 由 `agent_kbs`（管理库绑定真相源，`kb_id` 跨库引用）materialize 进 `agent.yaml`，运行时读配置不查表。
 
 ### 3.6 向量底座（独立 substrate · 按家族路由）
-`vector_items`（每个 scope 一个向量库文件：`mem:`→当前 agent 的 `agent_vectors.db`，同库内再按 `mem:{user_id}` 分区；`shared:`→共享记忆 `shared_memory_vectors.db`；`kb:`→KB `kb_vectors.db`）
+
+`vector_items`：每 scope 一个向量库文件——`mem:`→当前 agent `agent_vectors.db`（库内再按 `mem:{user_id}` 分区）；`shared:`→`shared_memory_vectors.db`；`kb:`→`kb_vectors.db`。
 
 ## 4. 多租户与隔离
 
-- **tenant = 主体（法人实体/商户）**，`teams` 在其下；`users.tenant_id` 给出组织归属。v1 **不建 `team_members`**——共享记忆/KB/审批都走 **agent 归属 team**（`agents.team_id`），不需请求者的 team。
-- **隔离 = 物理 per-tenant**：合规"主体间互不可见"（财务等）由目录/文件边界保证。`管理库` 单库跨主体（注册中心，不存业务对话/KB）；业务数据（per-agent / 共享记忆 / KB / 向量）按主体分目录。
+- **tenant = 主体（法人/商户）**，`teams` 在其下；`users.tenant_id` 给组织归属。v1 **不建 `team_members`**——共享记忆/KB/审批走 **agent 归属 team**（`agents.team_id`），不需请求者 team。
+- **隔离 = 物理 per-tenant**：合规"主体间互不可见"由目录/文件边界保证。管理库单库跨主体（注册中心，不存业务对话/KB）；业务数据按主体分目录。
 - **可换后端**：SQLite 文件路由是当下后端；保留 `tenant_id` 列以接住将来 PG（per-tenant DB 或 RLS）。
 - **审批人**：`teams.approver_user_id` / `tenants.approver_user_id`，解析链 `agent.team_id 审批人 → tenant 审批人 → reject`（default-closed），部署时 materialize 进 `agent.yaml`。
 
@@ -273,4 +323,4 @@ erDiagram
 
 ## 6. platform 读侧投影
 
-platform 控制面经**只读连接**（不迁移、`mode=ro`）+ 共享 store 读函数 + management.db registry 读 agent 侧库；不物化副本、不要求 agent 反向写。身份翻译只收口在两处：materialize/boot 写边界用 `agents.id → agents.name` 覆盖 agent 产物，read-projection / observability 读边界用 `agents.name → agents.id` 关联回平台实体；除此之外不散落 name/id 翻译。详见 [`target-architecture.md` §7](./target-architecture.md)。
+platform 控制面经**只读连接**（`mode=ro`、不迁移）+ 共享 store 读函数 + management.db registry 读 agent 侧库；不物化副本、不要求 agent 反向写。身份翻译只收口两处：materialize/boot 写边界 `agents.id → name` 覆盖 agent 产物、read-projection/observability 读边界 `agents.name → id` 关联回平台实体。详见 [`target-architecture.md` §7](./target-architecture.md)。
