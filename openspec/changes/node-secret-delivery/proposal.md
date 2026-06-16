@@ -16,12 +16,19 @@ agent 要连 Slack/Telegram/模型/MCP，必须拿到 secret（IM token、模型
 ## Capabilities
 
 ### New Capabilities
-- `node-secret-injection`: secret 经授权分区下发 + node 子进程 env 注入（内存不落盘）+ 安全基线。
+- `node-secret-injection`: platform 经 desired-state 分区下发 per-agent secret（源自 `credential_slots`+`secret_store`，与非密 config 分离）+ node 注入子进程 env（内存不落盘、缓存只存 config 剥 secret）+ platform-down 降级 + 安全基线（TLS/分区授权）。
 
 ### Modified Capabilities
-- `node-desired-state-api`: 分区响应扩展携带 secret 值（在 C2 契约上加密分发字段）。
-<!-- 可能触碰凭证库读取相关 capability；apply 时核实： -->
-- `agent-credential-authoring` / vault 相关: 凭证读取多一个"经 node 分区下发"的消费路径（值不变，新增出口）。
+<!-- 细化（C2/C3 已落地）：secret 全部落新 capability node-secret-injection，
+     含"扩展 desired-state 响应携带 secrets"作为 ADDED 要求——不 modify node-desired-state-api/
+     node-supervisor/node-process-backend（同 C2 处理原则：新增行为不改既有）。
+     凭证读取复用既有 secret_store.get_decrypted（读路径不变），不 modify 凭证 capability。 -->
+<!-- 无 -->
+
+> 注：本 proposal 由 skeleton 细化（C3 已 apply 落 main）。对着真实代码写：platform 侧复用
+> `credential_slots.list_slots` + `secret_store.get_decrypted`（materialize 写 .env 同源）；
+> config 已由 `materialize._strip_secret_plumbing` 确保非密；node 侧注入点 `node/backend.py spawn`
+> + `node/reconcile.py`，⚠️ `node/provider.py` 的磁盘缓存必须剥 secret。
 
 ## Impact
 
