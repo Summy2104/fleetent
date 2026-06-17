@@ -826,6 +826,46 @@ async def invoke_agent(
     )
 
 
+def _resolve_self_dm_redirect(
+    target: str, target_type: str, address: Any, sender_id: str
+) -> dict[str, Any] | None:
+    """Pin a channel self-DM back to the current conversation (channel thread).
+
+    Closes the channel→DM drift (fix-send-im-channel-self-dm-routing): when the agent
+    targets the current-conversation sender as a `user` DM but the conversation lives in a
+    **channel**, the delivery should land in that channel thread (the same surface `send_file`
+    uses), not the sender's private DM. The approval level is unchanged — this is still the
+    current conversation.
+
+    Channel is detected via ``address.chat_type == "channel"`` (the reliable field), not
+    ``address.target_type`` (latently hardcoded by the Slack adapter).
+
+    Args:
+        target: The model-supplied recipient id.
+        target_type: The model-supplied target kind (`user` / `channel`).
+        address: The current conversation address (duck-typed: ``chat_type``/``chat_id``/
+            ``thread_id``), or None when no authoritative address is injected.
+        sender_id: The current conversation's sender id.
+
+    Returns:
+        A delivery override ``{"recipient", "target_type", "thread"}`` pinning the send to the
+        channel thread, or None when the rewrite does not apply (third party, channel post,
+        DM conversation, missing address, or empty ids).
+    """
+    if address is None or target_type != "user":
+        return None
+    if getattr(address, "chat_type", "") != "channel":
+        return None
+    t, s = str(target or "").strip(), str(sender_id or "").strip()
+    if not t or not s or t != s:
+        return None
+    return {
+        "recipient": str(getattr(address, "chat_id", "") or ""),
+        "target_type": "channel",
+        "thread": getattr(address, "thread_id", None),
+    }
+
+
 @tool(risk_level="medium")
 async def send_im_message(
     target: str,
@@ -835,15 +875,18 @@ async def send_im_message(
     files: list[str] | None = None,
     tool_context: ToolContext | None = None,
 ) -> str:
-    """Proactively send an IM message — optionally with file attachments — to a user/channel.
+    """Proactively send an IM message — optionally with file attachments — to ANOTHER user/channel.
 
-    Use when the user asks you to notify or message someone, or to post to a
-    channel — beyond replying in the current conversation (replying needs no
-    tool). `target` is the platform-native id (Slack `U…`/`C…`, Telegram chat
-    id); `target_type` is "user" for a DM (default) or "channel" for a channel
-    post. `platform` defaults to the current conversation's platform. `files` is an
-    optional list of workspace-relative or `/exchange/<server_id>/...` paths to attach
-    (this tool is always approval-gated, so the approval authorizes cross-scope artifacts).
+    Use this for proactive outreach **beyond the current conversation**: notifying or messaging
+    a different user, or posting to a different channel. To reply to the person you are talking
+    with, do NOT use this tool — reply with plain text, or use `send_file` for a file (both land
+    in the current conversation automatically). `target` is the platform-native id (Slack
+    `U…`/`C…`, Telegram chat id); `target_type` is "user" for a DM (default) or "channel" for a
+    channel post. `platform` defaults to the current conversation's platform. `files` is an
+    optional list of workspace-relative or `/exchange/<server_id>/...` paths to attach.
+    Outreach to a third party is approval-gated, and the approval authorizes cross-scope
+    artifacts; a send to the current conversation sender from within a channel is delivered to
+    that channel thread (not a private DM).
     """
     # Lazy import: keeps module load light and avoids cycles (builtin convention).
     from fleetent import outbound
@@ -859,20 +902,34 @@ async def send_im_message(
             f"发送失败：当前通道不支持主动外发（无可用 {resolved_platform} 连接器）。"
             "该功能仅在 IM 网关运行时可用。"
         )
-    if target_type == "user":
-        reachable = await outbound.is_reachable(resolved_platform, connector, target)
+    # Conversation-pinning (fix-send-im-channel-self-dm-routing): a self-DM
+    # (target == sender, target_type == "user") issued from within a CHANNEL must land in that
+    # channel thread — the same surface send_file uses — not the sender's private DM. The
+    # approval level is unchanged (still the current conversation; _gated below keeps using the
+    # original target/target_type). Non-self / channel-post / DM-conversation sends are untouched.
+    _addr = getattr(tool_context, "conversation_address", None) if tool_context else None
+    _redirect = _resolve_self_dm_redirect(
+        target, target_type, _addr, str(getattr(sc, "sender_id", "") or "")
+    )
+    eff_target = _redirect["recipient"] if _redirect else target
+    eff_target_type = _redirect["target_type"] if _redirect else target_type
+    eff_thread = _redirect["thread"] if _redirect else None
+
+    if eff_target_type == "user":
+        reachable = await outbound.is_reachable(resolved_platform, connector, eff_target)
         if not reachable:
             return (
-                f"发送失败：目标 {target} 在 {resolved_platform} 上不可达/无法触达"
+                f"发送失败：目标 {eff_target} 在 {resolved_platform} 上不可达/无法触达"
                 "（Telegram 用户需先与 bot 对话过）。"
             )
     sent = await outbound.send_to(
-        resolved_platform, connector, target, text, target_type=target_type
+        resolved_platform, connector, eff_target, text, target_type=eff_target_type,
+        thread=eff_thread,
     )
     _record_delivery(tool_context, sent)
     if not sent.ok:
-        return f"发送失败：{resolved_platform} 投递 {target} 时出错，请稍后重试。"
-    kind = "私信" if target_type == "user" else "频道消息"
+        return f"发送失败：{resolved_platform} 投递 {eff_target} 时出错，请稍后重试。"
+    kind = "私信" if eff_target_type == "user" else "频道消息"
 
     # Attachments (§7): resolve each through the shared kernel. Cross-scope artifacts are
     # authorized only when this call was approval-gated — under the recipient-identity axis
@@ -895,7 +952,10 @@ async def send_im_message(
     for raw in files or []:
         try:
             host = _resolve_outbound_path(raw, tool_context, approved=_gated)
-            rcpt = await outbound.send_file_to(resolved_platform, connector, target, str(host))
+            rcpt = await outbound.send_file_to(
+                resolved_platform, connector, eff_target, str(host),
+                target_type=eff_target_type, thread=eff_thread,
+            )
         except Exception as exc:  # noqa: BLE001 — per-file degrade, never abort the batch
             skipped.append(f"{raw}（{exc}）")
             continue
@@ -905,7 +965,7 @@ async def send_im_message(
         else:
             skipped.append(f"{raw}（{rcpt.error or '投递失败'}）")
 
-    result = f"已发送{kind}到 {resolved_platform}:{target}。"
+    result = f"已发送{kind}到 {resolved_platform}:{eff_target}。"
     if files:
         result += f" 附件 {delivered}/{len(files)} 已投递。"
         if skipped:
