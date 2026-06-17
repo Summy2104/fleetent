@@ -12,6 +12,9 @@ fleetent 平台全局术语定义。所有模块文档应以本表为准，避�
 | **agent** | 由 system_prompt、allowed_tools 和 skill 组成的 LLM 实例配置，代表一个业务角色（如 HR 助手、代码审查机器人） | 不用 "bot"（bot 特指 IM 平台上的账号）|
 | **agent_loop** | agent 的核心执行引擎：接收输入 → LLM 调用 → 工具执行 → 迭代，直到终止条件 | 不用 "run loop"、"execution cycle" |
 | **scope** | 数据隔离的粒度标识，可以是 `tenant_id` 或 `agent_id`，用于区分不同租户或不同 agent 的数据 | 不用 "namespace"（namespace 专指 vector_store 内部的分区）|
+| **principal** | 认证完成后贯穿 agent 运行时的身份抽象，携带 `user_id`、`tenant_id`、`agent_name` 等字段。由认证边界（bearer token 解析 / IM 渠道担保）构造，核心模块只消费 Principal，不直接处理认证逻辑 | 不用 "user"（user 是存储层实体，principal 是运行时身份令牌）|
+| **node** | `fleetent-node` 进程，负责在某台宿主机上运行和管理一批 agent。轮询平台 `GET /nodes/{id}/desired-state` 获取期望列表，通过 spawn/stop 启停 `fleetent agent run` 子进程，并经 `POST /nodes/{id}/status` 上报实际运行态；注册信息存 `nodes` 表，以 `ma-<hex>` service key 鉴权 | 不用 "worker"、"host" |
+| **materialize** | 平台将管理库中的 agent 定义、绑定和配置**单向刷写**为 agent 侧 `agent.yaml` 文件的操作，触发于 create / update / apply / clone 等变更后。agent 运行时只读自己的 `agent.yaml`，不查 platform DB（零 platform 依赖契约的执行点） | 不用 "sync"（暗示双向）、"deploy"（指发布上线，materialize 是配置刷写）|
 
 ---
 
@@ -31,9 +34,9 @@ fleetent 平台全局术语定义。所有模块文档应以本表为准，避�
 
 | 术语 | 定义 | 禁止混用 |
 |------|------|---------|
-| **skill** | 注入 agent system_prompt 的行为模式描述，存储为 `skills/` 目录下的文件（单文件或多级目录）。skill 告诉 agent"怎么做某类任务" | 不用 "prompt template"、"behavior"（过于宽泛）|
+| **skill** | 可复用的行为模式描述，存储为 `skills/` 目录下的包（含 `SKILL.md` + 可选脚本/资源）。平时以 **catalog**（名称 + 描述）形式出现在 system prompt，agent 按需调 `read_skill(name)` 加载全文；告诉 agent"怎么做某类任务" | 不用 "prompt template"、"behavior"（过于宽泛）|
 | **skill_path** | skill 在 `skills/` 目录下的相对路径，如 `summarizer` 或 `tools/code_runner`，用于物理定位（文件系统相对路径），不是唯一标识符。skill 的唯一标识是 `name`（`skills` 表的 PK）。 | 不用 "skill_path 作为唯一标识符"（`name` 才是 PK）|
-| **skill 注入** | 根据用户输入关键词匹配 skill，将匹配到的 skill 内容追加到 system_prompt 的过程 | 不用 "skill 加载"、"skill 激活" |
+| **skill 注入（read-on-demand）** | 模型按需加载 skill 全文的机制：启动时 system prompt 只含 **catalog**（每个合格 skill 的 `name/description/location`）；模型决定使用某 skill 时调用 `read_skill(name)` 工具，运行时即时注入全文。旧的关键词自动匹配路径（`match()`）是 legacy，不再使用。 | 不用 "skill 激活"；"skill 加载"仅限描述 `read_skill` 工具调用本身 |
 | **snapshot** | skill 变更提案中对整个 skill 目录的完整文件快照，格式为 `{"files": {"rel_path": "content", ...}}`。delete 提案的 snapshot 为 null | 不用 "diff"（snapshot 是全量，不是增量）|
 
 ---
