@@ -74,7 +74,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["APScheduler trigger"] --> B["schedule_store\n读取任务定义 + user 状态复检"]
+    A["cron trigger（APScheduler-backed）"] --> B["schedule_store\n读取任务定义 + user 状态复检"]
     B --> C["runtime.loop.run"]
     C --> D["reply_func\n回写 IM 或记录日志"]
 ```
@@ -93,7 +93,7 @@ flowchart TD
 | Session 存储 | JSON 文件 + asyncio.Lock；元数据入 per-agent 库 | 可调试；原子写（.tmp → rename）防损坏 |
 | 工具审批 | **agent 全权能力**：阻塞等审批人决定，platform 只读投影（R1） | 请求者≠审批人；agent 主动私信审批人；approvals 落 agent 侧 `approval_store`；agent 须脱离 platform 跑 |
 | 认证 | 认证属 edge、核只消费 `Principal`；authn 经基座 Identity 端口 | agent 侧不 import platform，结构性根除反向依赖泄漏 |
-| 代码执行隔离 | Docker CLI（当前）→ microsandbox microVM（v1.0 目标） | 每个沙箱独立 Linux 内核，无逃逸风险；< 100ms 启动；无需 dockerd |
+| 代码执行隔离 | 可插拔后端：Docker（默认）/ microsandbox microVM（本地 microVM，需 KVM/HVF，is_installed() 探测，详见 sandbox.md） | 每个沙箱独立 Linux 内核，无逃逸风险；< 100ms 启动；无需 dockerd |
 | MCP 工具命名 | `{server}__{tool}` 双下划线 | 避免与内置工具名冲突，来源可追溯 |
 | 记忆提取 | 轻量模型异步提取，不阻塞响应 | 结构化语义记忆写入 per-agent 库 `memory_items`，vector_store 建索引；long_term_ctx 统一协调检索与注入 |
 
@@ -117,7 +117,7 @@ flowchart TD
 | [platform.md](capabilities/platform.md) | 用户管理、API 认证、admin CLI | P1 | - | 张亮 | 部分完成 |
 | [governance.md](capabilities/governance.md) | 权限审批、工具白名单、agent 定义与分配 | P0 | session | 张亮 | 部分完成 |
 | [scheduling.md](capabilities/scheduling.md) | Cron 定时任务、Webhook 事件触发 | P1 | agent-runtime · session · im-gateway | 张亮 | 部分完成 |
-| [connectors.md](capabilities/connectors.md) | 用户级外部工具授权连接器；区别于 knowledge-base 数据源 connector | P2 | platform（用户身份） | 张亮 | 未开始 |
+| [connectors.md](capabilities/connectors.md) | 外部服务 Vault（external_services / external_credentials / agent_service_grants，支持 oauth2/apikey） | P2 | platform（用户身份） | 张亮 | 基础完成 |
 | [memory.md](capabilities/memory.md) | User Memory、Shared Memory、维护 proposal、质量趋势 | P1 | model-router · vector-store · observability · reflection | 常乐 | 基础完成 |
 | [long-term-ctx.md](capabilities/long-term-ctx.md) | 长期上下文调度与注入，memory / knowledge-base / Shared Memory provider 和 context policy | P1 | memory · knowledge-base | 常乐 | 基础完成 |
 | [knowledge-base.md](capabilities/knowledge-base.md) | 企业文档知识库、local / Google Drive / Confluence 同步、hybrid / graph / rerank / planner | P1 | vector-store | 常乐 | 基础完成 |

@@ -67,6 +67,9 @@ graph TD
     kb_connectors
     model_providers
     session_meta
+    nodes["nodes（节点注册）"]
+    agent_placements["agent_placements（agent↔node 分配）"]
+    node_agent_status["node_agent_status（心跳/运行状态）"]
   end
   subgraph AGENT["per-agent agent_state.db ｜ agent 侧 · 每 agent 一文件 · 嵌入式 Y"]
     sessions
@@ -104,7 +107,10 @@ graph TD
   vector_items -. "mem:" .-> memory_items
   vector_items -. "shared:" .-> shared_memory_items
   vector_items -. "kb:" .-> knowledge_chunks
+  nodes --> agent_placements
 ```
+
+> 注：external_services / external_credentials / agent_service_grants（工具 OAuth Vault）已落管理库，详见 §3.2。
 
 > 宏观图只列各库主干实体；完整清单与库内关系见 §3.2–§3.6。`session_meta → sessions` 是全库唯一一条 mgmt→agent 方向跨库引用（platform 自有元数据挂 agent 会话，非 agent 反向写）。省略的跨库边：`reflection_proposals.*_user_id` / `approval_requests.approver_user_id` ⇢ `users`；agent 侧各表 `tenant_id` 接缝列 ⇢ `tenants`；`shared_memory_items.scope_id` 在 `scope_type=tenant` 时 ⇢ `tenants`。
 

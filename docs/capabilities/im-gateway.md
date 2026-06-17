@@ -31,8 +31,7 @@
   - standalone 模式：不注入 resolver，恒等透传渠道原生 id；行为与受管模式显式区分
 
 - ✅ **Allowlist 检查**：收到消息时校验用户是否已允许
-  - IM 身份默认 `allowed=1`；准入主要由 channel allowlist 控制
-  - 被 block 的 IM 身份请求不进入 agent_loop
+  - 封禁通过 `users.status == "blocked"` 强制（`allowed` 字段已移除）；访问准入通过 `user_agents` 绑定关系控制
   - HTTP API 用户（无 im_users 记录）默认放行
 
 - ✅ **Agent 解析优先级**：channel → user → default → 裸跑
@@ -49,13 +48,11 @@
 ```sql
 im_users (
   id               INTEGER PRIMARY KEY,
-  owner_id         TEXT,              -- connector identity（当前为 agent_name）
   platform         TEXT,              -- "slack" | "telegram"
   platform_user_id TEXT,
-  user_id          TEXT,              -- → users.id
-  allowed          BOOLEAN,
+  user_id          INTEGER REFERENCES users(id),
   created_at       DATETIME,
-  UNIQUE(owner_id, platform, platform_user_id)
+  UNIQUE(platform, platform_user_id)
 )
 ```
 
@@ -157,7 +154,7 @@ im_users (
 - Then：`user_id` 直接等于渠道原生 id，不读取 platform 身份表
 
 **场景 2：已审批用户正常对话**
-- Given：allowed=1 的 Slack 用户
+- Given：未被封禁（`users.status != "blocked"`）的 Slack 用户
 - When：用户发送消息
 - Then：消息进入 agent_loop，回复正常返回给用户
 

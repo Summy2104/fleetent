@@ -234,7 +234,8 @@ def get_logger(component: str) -> Logger:
   - 支持按 run / user / agent / session / tenant / event_type / time range 查询
   - `log` 命名只留给 structured logging，不再用于 agent trace
 
-- [ ] **轻量 span 关联**：记录 `run_id`、`span_id`、`parent_span_id`
+- [~] **轻量 span 关联**（部分实现）：记录 `run_id`、`span_id`、`parent_span_id`
+  - `span_id`/`parent_span_id` 字段已加到 traces 表，span 树完整语义待补（见当前缺口）
   - 不引入 OpenTelemetry SDK
   - sub_agent 继承父 `run_id` 并生成子 span
 
@@ -355,7 +356,7 @@ observability 当前应继续作为进程内基础设施模块。未来如果 tr
 
 ## 待决问题
 
-- [ ] `run_id` 使用 UUID 还是 ULID？platform.md 已倾向 ULID，需要在 agent-runtime change 中最终确认。（负责人：待认领）
+- [x] `run_id` 使用 UUID 还是 ULID？已决定：ULID，在 agent-runtime 的 `run()/run_stream()/run_sync()` 入口生成。
 - [ ] trace payload 的大字段截断阈值是多少？是否按 event_type 配置？（负责人：待认领）
 - [ ] audit event 是独立 `audit_events` 表，还是 trace event 的一个 event_type？当前倾向独立表，避免污染 reflection 数据源。（负责人：待认领）
 - [ ] logs 文件保留策略：按天数、大小，还是交给部署方 logrotate？（负责人：待认领）

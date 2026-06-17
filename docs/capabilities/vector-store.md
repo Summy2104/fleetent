@@ -13,7 +13,7 @@
 
 **调用关系**：
 - 依赖：embedding 模型（默认 deterministic，可由 active Agent `models.routes.embedding` 指向 HTTP provider）、向量后端（memory 或普通 SQLite persistent backend；sqlite-vec / Qdrant 后置）、Agent / Platform config
-- 被依赖：`fleetent.memory`（记忆条目的写入与检索）、knowledge_base（文档 chunk 的写入与检索）
+- 被依赖：`fleetent.memory` 和 `fleetent.knowledge_base` 使用 `embed_text()` 生成向量，向量读写经注入的 per-agent/per-tenant `SQLiteVectorBackend` 实例，不经过全局 `vector_store` 的 upsert/search
 
 **模块归属**：
 - owning package：`fleetent.vector_store`
@@ -114,6 +114,13 @@ def reindex(request: ReindexRequest) -> ReindexSummary:
 - `vector_store.database_url` 可选配置；未配置时 SQLite backend 复用全局 `Settings.database_url`
 - 同步 reindex 边界支持 memory / knowledge-base 的 dry-run 和 rebuild；`rebuild` 先清空目标 namespace，再逐条 upsert 当前 source records，单条失败计入 failed 并继续后续 item
 - combined memory+KB embedding evaluation 使用 deterministic embedding 默认验证 memory 和 KB 都能通过 reindex 后检索；真实 HTTP embedding smoke 显式 opt-in
+
+**物理分库路由（per-agent / per-tenant）**
+- Agent 工作记忆向量 → 各 agent 专属 `agent_vectors.db`（per-agent 物理隔离，路径：`<tenant_id>/<agent_id>/agent_vectors.db`）
+- KB 向量 → 各 tenant 专属 `kb_vectors.db`（per-tenant 物理隔离，路径：`<tenant_id>/kb_vectors.db`）
+- 共享记忆向量 → 各 tenant 专属 `shared_memory_vectors.db`（路径：`<tenant_id>/shared_memory_vectors.db`）
+- 具体路径由 `tenant_router.py` 管理，通过注入的 `SQLiteVectorBackend` 实例访问
+- 全局 `vector_store` runtime 提供 `embed_text()` 和后端配置入口，不作为 memory/KB 的直接读写路径
 
 当前定位：可支持 `fleetent.memory`、long-term-ctx 和测试场景；SQLite backend 解决重启后索引丢失问题，但不是大规模 ANN 检索后端。
 rerank provider 已接入 knowledge-base hybrid search 的显式 rerank 路径；默认仍为 disabled，不会静默调用真实外部服务。

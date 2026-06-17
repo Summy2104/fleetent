@@ -153,6 +153,11 @@ def extract_message(template: str | None, payload: Any) -> str:
 
 - ✅ **触发期校验**：到点时从 store 重读任务行——已删除或已禁用的行绝不执行（绕过 facade 的写入者也拦得住）；owner 被拉黑或不存在时跳过执行
 
+- ✅ **Principal recheck 解耦（standalone 安全）**：cron 任务触发前会 recheck scheduled_task 的 principal（api_key 是否仍有效、未禁用）
+  - recheck 逻辑通过注入的 resolver 解耦：platform 启动时调用 `cron_scheduler.set_principal_resolver(_cron_principal_recheck)` 注入平台侧检查；standalone 模式下不注入（resolver=None），直接放行
+  - fail-closed 语义：recheck 异常时拒绝执行，而非忽略异常继续运行
+  - cron 触发路径因此不 import `user_store`，也不打开 management 库（`decouple-cron-principal-recheck`，2026-06-16 归档）
+
 - ✅ **宕机错过处理**：停机期间错过的触发在 3600s 宽限窗口内合并补发一次（coalesce）；过期更久的一次性任务跳过不补发；`max_instances=1` 防止慢执行与下次触发重叠
 
 - ✅ **任务持久化与恢复**：`scheduled_tasks` 存该 agent 的 `agent_state.db`（嵌入式 Y 维护，非 Alembic、不在管理库），由 **agent 进程**的 `CronScheduler` 在 boot 时恢复调度（平台 managed 侧不触发用户定时任务，只跑自身维护）

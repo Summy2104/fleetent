@@ -213,6 +213,24 @@ uv run fleetent-admin diagnostics retention apply
 
 回滚不自动删除 diagnostics package 和 logs；保留它们用于问题上报。
 
+## 分布式部署（可选：platform 与 agent node 分机）
+
+单机部署（默认）下，platform 进程内置 agent controller，无需额外配置。
+若需 platform 与 agent host 分机运行，执行以下额外步骤：
+
+**在 agent host 上**
+1. 将代码仓库 clone 到 agent host
+2. 运行 `bash scripts/install-agent.sh <agent-id>` 安装 agent node 依赖并初始化 agent home
+3. 在 platform 侧注册该 node：`uv run fleetent-admin node register --host <agent-host> --port <port>`
+
+**验证**
+- `uv run fleetent-admin node list` — 应显示已注册的 node 及其心跳状态
+- `uv run fleetent-admin node deregister <node-id>` — 如需下线
+
+**当前限制**
+- node 与 platform 须能互相访问（HTTP）
+- agent 运行数据仍落各自 agent host 的本地 SQLite
+
 ## Pilot 验收清单
 
 - [ ] Docker Compose 镜像构建完成，`fleetent-admin init-config` 成功。
