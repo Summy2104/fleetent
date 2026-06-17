@@ -2153,7 +2153,7 @@ async function skDisable(name) { try { await api("POST", `/skills/${encodeURICom
 async function skReload() { try { await api("POST", "/skills/reload"); loadSkills(); toast("Skill index reloaded", "success"); } catch (e) { toast(e.message, "error"); } }
 async function skDelete(name) {
   if (!await confirmDialog(`Archive (soft-delete) skill "${name}"?`)) return;
-  try { await api("DELETE", `/skills/${encodeURIComponent(name)}`); skCloseDrawer(); loadSkills(); } catch (e) { toast(e.message, "error"); }
+  try { await api("DELETE", `/skills/${encodeURIComponent(name)}`, null, { "X-Confirm": "true" }); skCloseDrawer(); loadSkills(); } catch (e) { toast(e.message, "error"); }
 }
 async function skRestore(name) { try { await api("POST", `/skills/${encodeURIComponent(name)}/restore`); skAfterMutate(); } catch (e) { toast(e.message, "error"); } }
 async function skForcePublish(name) {
