@@ -32,7 +32,7 @@
 
 ### Deploy Anywhere（部署主权）
 
-跑在客户自己的服务器上，数据不出内网。支持 Slack / Telegram / WhatsApp，不绑定特定 IM 平台。单容器部署，零外部依赖，5 分钟内可用。
+跑在客户自己的服务器上，数据不出内网。支持 Slack / Telegram（WhatsApp 扩展缝已预留，v1 暂缓），不绑定特定 IM 平台。单容器部署，零外部依赖，5 分钟内可用。
 
 ### Govern Everything（可治理）
 

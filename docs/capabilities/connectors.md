@@ -4,7 +4,7 @@
 
 ## 概述
 
-工具调用时的 **per-user 外部系统授权与凭证层**。当某个工具需要访问外部系统（Google Drive、GitHub、Notion 等）时，由本模块负责：用户**独立授权**该外部系统（OAuth consent）、安全保管这个用户的凭证、并在工具调用时把凭证注入到对外请求。
+工具调用时的 **per-user 外部系统授权与凭证层**。当某个工具需要访问外部系统（Google Drive、GitHub、Notion 等）时，由本模块负责：用户**独立授权**该外部系统、安全保管这个用户的凭证、并在工具调用时把凭证注入到对外请求。
 
 "独立"指：这是**每个用户、每个外部系统各自一次**的授权 —— Alice 授权她自己的 Drive，与 agent 配置、与别的用户都无关。governance 决定"能不能调这个工具"，connectors 决定"调用时拿谁的凭证、用户授权了没"。
 
@@ -14,52 +14,65 @@
 - 不执行工具逻辑 → **agent-runtime**
 - 不判断"外部资源行级该不该看"→ **外部系统自身权限**（如 Drive ACL）
 
-**接入硬约束**：外部系统接入**只接受 OAuth 2.x**。不支持 OAuth 的系统（长期 API key / Basic Auth / 私有协议）不在接入范围 —— 业务对话简化为"它支持 OAuth 吗?支持→接;不支持→等它支持"。
+**协议支持**：`external_services.protocol` 字段区分两种协议：
+- `oauth2`：用于用户授权场景（authorization_code / client_credentials flow），适合 SaaS 系统（Drive、GitHub 等）
+- `apikey`：用于机器对机器场景，用户直接提交密钥，密钥加密后存入 `external_credentials`
 
 **调用关系**：
-- 依赖：user-center（user_id）、加密凭证存储、email/web（consent 承载）
+- 依赖：user-center（user_id）、加密凭证存储（`external_credentials`）、email/web（OAuth consent 承载）
 - 被依赖：agent-runtime（工具调用时取凭证）、governance（查授权状态以决定是否提示 consent）
 - 对外：各外部系统的 OAuth Authorization Server + Resource API
 
-## 现状
+## 现状 ✅
 
-骨架已就位、核心流程未实现：
-- `connectors` 表已存在（管理库，迁移 040 重建为 agent-scoped：nullable `agent_id`，NULL = 全局默认），`agent_oauth_bindings` 表见迁移 045
-- `src/fleetent/connectors.py` 已定义 `Credential` / `NeedsConsent` / `CredentialProvider` 契约；默认 provider 恒返回 `NeedsConsent`（注入 seam，待真实 OAuth store 实现）
-- OAuth consent 流程、token 加密存储与 refresh、调用时凭证注入、`connector_grants` 持久化均**未实现**（仍为下方规划）
+以下能力均已落地（`platform/connector_management/`）：
 
-## 规划中（v1.0）
+- **External Credential Vault**：`external_credentials` 表已就位（管理库，per-user per-service，加密存储），`vault_provider.py` 实现真实的凭证读写、OAuth token refresh、revoke；platform 启动时调用 `set_provider(vault_provider.get_credential)` 注入，standalone agent 保持默认 NeedsConsent stub
+- **双协议支持**：`external_services.protocol` 支持 `oauth2`（OAuth consent + token refresh）和 `apikey`（用户提交密钥，无 refresh 概念）
+- **Admin CRUD 端点**：`connector_admin_api.py` 已提供 external_services 的 list / create / update / delete 端点
+- **Credential revoke**：`vault_provider.revoke_credential()` 删除凭证记录并调用外部 revoke endpoint（OAuth 服务）
+- **Agent service grant**：`agent_service_grants` 表记录哪些 agent 有权使用哪个 external_service，以及 `run_as` 模式（`user` / `agent`）
+- **Service principal（run_as=agent）**：当 grant `run_as=agent` 时，凭证以 agent 的 service-principal 身份（`agent:<id>`）查找，而非调用用户身份
+- **`src/fleetent/connectors.py`**：定义 `Credential` / `NeedsConsent` / `CredentialError` / `CredentialProvider` 契约；`set_provider` seam 供 platform 注入；`get_credential` 统一入口（无 `user_id` 时安全降级为 NeedsConsent）
 
-- [ ] **Connector 抽象**：每个外部系统一个 connector，声明它的 OAuth 配置（authorize/token endpoint、scopes、client_id）。加新外部系统 = 加一个 connector 配置，不改核心代码
-- [ ] **per-user OAuth 授权（consent）**：用户首次需要某外部系统时，引导走 OAuth consent（浏览器跳转），授权后保存该用户对该 connector 的 refresh token
-- [ ] **凭证生命周期**：加密存储 refresh token（不存明文）；access token 过期前自动 refresh；用户可主动解绑（revoke）
-- [ ] **凭证注入**：工具调用外部系统时，按 (user_id, connector) 取出有效 access token，注入到对外请求
-- [ ] **授权状态查询**：回答"用户 X 授权过 connector Y 吗、scope 够不够"，供 agent / governance 在调用前决定是否先引导 consent
-- [ ] **离职 / 禁用联动**：user-center 禁用某用户时，撤销其全部 connector 凭证并调用各外部系统的 revoke endpoint
+## 规划中
+
+- [ ] **完整 OAuth consent 流**：用户浏览器跳转至外部 OAuth consent 页、授权后回调换 token（`/admin/connectors/authorize/<service_id>` 端点框架已有，oauth dance 实现待完成）
+- [ ] **per-user SSE 连接池**：SSE transport 的 MCP server 需要 per-user 连接，建连时注入 token，空闲淘汰（`integrations.mcp` 侧）
+- [ ] **Connector marketplace / 注册管理界面**：通过 UI 管理 external_services，目前只有 admin API
+- [ ] **Per-user 凭证审计日志**：记录每次凭证读写和 revoke 操作
 
 ## 授权与凭证流程
 
 ```
-[首次授权 consent]
+[首次授权 consent — oauth2 协议]
 用户让 agent 用某外部系统(如查 Drive)
   → connectors 查 (user_id, "google-drive") 授权状态:未授权
   → 返回 NeedsConsent + consent URL,agent 提示用户点击
   → 用户浏览器打开 → 外部系统 OAuth consent 页 → 同意
   → 回调到 connectors 的 callback 端点 → 用 auth code 换 refresh token
-  → 加密存入 connector_grants(user_id, connector_id, refresh_token, scopes)
+  → 加密存入 external_credentials(user_id, service_id, payload_ciphertext, status="authorized")
+
+[首次授权 — apikey 协议]
+用户让 agent 用某外部系统(如第三方 API)
+  → connectors 查 (user_id, service_id) 授权状态:未授权
+  → 返回 NeedsConsent + 密钥提交 URL
+  → 用户通过 /admin/connectors/<service_id>/credentials 提交 API key
+  → 加密存入 external_credentials(status="authorized")
 
 [后续调用注入]
 工具要访问外部系统
-  → connectors 取该 user 对该 connector 的凭证
-  → access token 过期(<60s) → 用 refresh token 换新的
-    → refresh token 本身过期 → 返回 NeedsConsent（需重新授权，不可自动恢复）
-    → refresh 请求网络失败 → 返回 CredentialError（区别于未授权，可重试）
-  → 注入到工具的对外请求(Authorization: Bearer <access token>)
-  → 外部系统按"该用户本人"权限返回数据(行级权限由外部系统保证)
+  → connectors 取该 user 对该 service 的凭证
+  → oauth2: access token 过期 → 用 refresh token 换新的
+    → refresh token 本身过期 → 返回 NeedsConsent（需重新授权）
+    → refresh 请求网络失败 → 返回 CredentialError（可重试）
+  → apikey: 无 refresh 概念,直接取存储密钥
+  → 注入到工具的对外请求
+  → 外部系统按"该用户本人"权限返回数据
 
 [撤销]
 用户主动解绑 / 离职被禁用
-  → 删 connector_grants 记录 + 调外部系统 revoke endpoint
+  → 删 external_credentials 记录 + 调外部系统 revoke endpoint（oauth2 协议）
 ```
 
 ## 凭证如何注入工具（声明 + dispatch 单点注入）
@@ -159,6 +172,12 @@ MCP server 是**独立运行的东西**(远程服务 / 本地子进程),不是 i
 - SSE transport：连接池属 `fleetent.integrations.mcp`（agent-runtime），**connectors 只负责提供 per-user token**，建连/重连时由 `fleetent.integrations.mcp` 取用
 - 不论 transport,**token 的 consent / 存储 / refresh / revoke 始终在 connectors**,MCP server 不替平台管(厂商 server 只是"拿 token 去取数")
 
+### Vault provider 注入（platform vs standalone）
+
+- **Standalone agent**（`fleetent agent run`，无 platform）：`connectors.py` 的默认 provider 恒返回 NeedsConsent，不依赖任何 platform 代码
+- **Platform 部署**：platform 启动时（`server.py` lifespan）调用 `connectors.set_provider(vault_provider.get_credential)` 注入真实 Vault provider
+- 调用方（dispatch / agent-runtime）无感知，统一通过 `connectors.get_credential(user_id, service_id, scopes)` 获取
+
 ## 模块图
 
 ```mermaid
@@ -166,25 +185,26 @@ graph TD
     AR["agent-runtime<br/>(工具调用时)"]
     GOV["governance<br/>(查授权状态)"]
 
-    subgraph CONN["connectors"]
-        REG["connector_registry<br/>外部系统 OAuth 配置"]
-        CONSENT["consent_service<br/>发起 OAuth + 回调换 token"]
-        STORE["credential_store<br/>加密存 refresh token"]
-        REFRESH["token_service<br/>refresh / 注入 / revoke"]
+    subgraph CONN["connectors (platform/connector_management)"]
+        SVCSTOR["external_service_store<br/>外部系统定义 + 协议"]
+        VAULTPROV["vault_provider<br/>OAuth refresh / apikey 取凭证 / revoke"]
+        CREDSTOR["external_credential_store<br/>加密存 per-user 凭证"]
+        GRANTSTOR["agent_service_grant_store<br/>agent 授权表 + run_as"]
     end
+
+    SEAM["connectors.py<br/>get_credential seam<br/>(set_provider 注入点)"]
 
     UC["user-center<br/>(user_id)"]
     EXT["外部系统 OAuth + API<br/>Google / GitHub / ..."]
 
-    AR -->|取凭证注入| REFRESH
-    GOV -.->|授权状态查询| REFRESH
-    CONSENT --> REG
-    CONSENT --> STORE
-    REFRESH --> STORE
-    REFRESH --> REG
-    CONSENT -. 绑定到 user_id .-> UC
-    CONSENT <-->|OAuth dance| EXT
-    REFRESH <-->|refresh / revoke| EXT
+    AR -->|取凭证注入| SEAM
+    GOV -.->|授权状态查询| SEAM
+    SEAM -->|platform 注入后委托| VAULTPROV
+    VAULTPROV --> SVCSTOR
+    VAULTPROV --> CREDSTOR
+    VAULTPROV --> GRANTSTOR
+    VAULTPROV -. 绑定到 user_id .-> UC
+    VAULTPROV <-->|OAuth refresh / revoke| EXT
 ```
 
 ## 对外系统交互图
@@ -218,40 +238,48 @@ graph LR
 ## 数据模型
 
 ```sql
--- connector 定义（每个外部系统一个）
-connectors (
-  id            TEXT PRIMARY KEY,   -- "google-drive" | "github" | ...
-  display_name  TEXT,
-  oauth_config  TEXT,               -- JSON: authorize_url / token_url / scopes / client_id
-  enabled       BOOLEAN,
-  created_at    DATETIME
-)
--- 注:client_secret 不入此表,走 env / 密钥注入(参考 deployment 的密钥不落 DB 原则)
-
--- per-user 授权与凭证
-connector_grants (
-  id              INTEGER PRIMARY KEY,
-  user_id         TEXT,             -- → users.id (user-center)
-  connector_id    TEXT,             -- → connectors.id
-  refresh_token   BLOB,             -- 加密存储,不存明文
-  scopes          TEXT,             -- 已授权 scope
-  granted_at      DATETIME,
-  revoked_at      DATETIME,         -- 软删除,保留历史用于审计
-  UNIQUE(user_id, connector_id) WHERE revoked_at IS NULL
+-- 外部服务定义（每个外部系统一条，全局，无 agent_id）
+-- 管理库（management.db），由 Alembic 维护
+external_services (
+  service_id    TEXT PRIMARY KEY,    -- "google-drive" | "github" | ...
+  display_name  TEXT NOT NULL,
+  protocol      TEXT NOT NULL,       -- "oauth2" | "apikey"
+  oauth_config  TEXT,                -- JSON: authorize / token / revoke endpoint、scopes、client_id
+                                     -- client_secret 不入此表，走 service_providers 注入
+  enabled       INTEGER NOT NULL,    -- 1 = 启用
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
 )
 
--- OAuth consent 进行中的一次性 state（防 CSRF,回调校验后即弃）
-connector_oauth_states (
-  state        TEXT PRIMARY KEY,    -- 随机,绑定本次 consent
-  user_id      TEXT,
-  connector_id TEXT,
-  expires_at   DATETIME             -- 短时效
+-- per-user 加密凭证（每 user 每 service 一行）
+-- 管理库，PK: (user_id, service_id)
+external_credentials (
+  user_id             TEXT NOT NULL,
+  service_id          TEXT NOT NULL,
+  payload_ciphertext  TEXT NOT NULL,  -- 加密后的 JSON payload
+                                      -- oauth2: {access_token, refresh_token, expires_at, ...}
+                                      -- apikey: {api_key: <value>}
+  status              TEXT NOT NULL,  -- "authorized" | "needs_reauth" | "error"
+  updated_at          TEXT NOT NULL,
+  updated_by          TEXT,           -- 操作人 user_id，用于审计
+  PRIMARY KEY (user_id, service_id)
+)
+
+-- per-agent 服务授权（哪些 agent 可以使用哪个 external_service）
+-- 管理库，PK: (agent_id, service_id)
+agent_service_grants (
+  agent_id    INTEGER NOT NULL,   -- → agents.id
+  service_id  TEXT NOT NULL,      -- → external_services.service_id
+  run_as      TEXT NOT NULL,      -- "user"（用调用方凭证）| "agent"（用 agent service-principal）
+  created_at  TEXT NOT NULL,
+  created_by  TEXT,               -- 授权操作人
+  PRIMARY KEY (agent_id, service_id)
 )
 ```
 
 ## 验收标准（E2E test case）
 
-**场景 1：未授权触发 consent 引导**
+**场景 1：未授权触发 consent 引导（oauth2）**
 - Given：用户从未授权过 Google Drive，agent 的工具含 drive.search
 - When：用户让 agent 查 Drive
 - Then：connectors 返回 NeedsConsent + consent URL，agent 提示用户去授权；工具不执行
@@ -259,9 +287,9 @@ connector_oauth_states (
 **场景 2：授权后凭证保存**
 - Given：用户点击 consent URL 并在 Google 同意
 - When：OAuth 回调到 connectors（state 校验通过）
-- Then：connector_grants 写入该 (user_id, google-drive) 的加密 refresh token + scopes，状态变为已授权
+- Then：`external_credentials` 写入该 (user_id, google-drive) 的加密 payload，status="authorized"
 
-**场景 3：调用时注入与自动刷新**
+**场景 3：调用时注入与自动刷新（oauth2）**
 - Given：用户已授权 Drive，access token 已过期
 - When：agent 再次查 Drive
 - Then：connectors 用 refresh token 换新 access token 并注入请求；Drive 按 Alice 本人权限返回她能看到的文件
@@ -269,7 +297,7 @@ connector_oauth_states (
 **场景 3b：refresh token 过期需重新授权**
 - Given：用户已授权 Drive，但 refresh token 已过期（如长期未使用被外部系统吊销）
 - When：agent 调用 Drive 相关工具，connectors 尝试用 refresh token 换新 access token
-- Then：外部 OAuth server 返回 token 无效；connectors 将该 grant 标记为已失效；返回 NeedsConsent + consent URL；工具不执行；agent 提示用户重新授权
+- Then：外部 OAuth server 返回 `invalid_grant`；connectors 将该凭证 status 标记为 `needs_reauth`；返回 NeedsConsent + consent URL；工具不执行；agent 提示用户重新授权
 
 **场景 4：per-user 隔离**
 - Given：Alice 和 Bob 都授权了 Drive
@@ -277,19 +305,19 @@ connector_oauth_states (
 - Then：connectors 注入的是 Bob 自己的 token，Drive 按 Bob 权限返回为空 —— 跨用户拿不到对方数据
 
 **场景 5：主动解绑撤销**
-- Given：用户已授权某 connector
-- When：用户解绑
-- Then：connector_grants 标记 revoked，并调用外部系统 revoke endpoint；后续调用回到 NeedsConsent
+- Given：用户已授权某 service
+- When：用户解绑（调用 revoke）
+- Then：`external_credentials` 记录被删除，并调用外部系统 revoke endpoint（oauth2 协议）；后续调用回到 NeedsConsent
 
 **场景 6：离职禁用联动**
-- Given：用户授权了多个 connector，被 user-center 禁用
+- Given：用户授权了多个 service，被 user-center 禁用
 - When：禁用生效
-- Then：该用户全部 connector_grants 被撤销 + 调用各外部 revoke endpoint
+- Then：该用户全部 `external_credentials` 被删除 + 调用各外部 revoke endpoint
 
-**场景 7：非 OAuth 系统拒绝接入**
-- Given：某外部系统只支持长期 API key、不支持 OAuth
-- When：尝试为它注册 connector
-- Then：注册被拒绝（connector 必须基于 OAuth 2.x）
+**场景 7：API-key 协议接入**
+- Given：某外部系统使用 API key 而非 OAuth
+- When：管理员注册 external_service（protocol="apikey"），用户通过管理界面提交 API key
+- Then：密钥加密存入 `external_credentials`；后续工具调用直接取用密钥，无 refresh 流程
 
 **场景 8：dispatch 单点注入（工具零凭证代码）**
 - Given：工具 `drive_search` 仅声明 `connector="google-drive"`，函数体不含任何 token / OAuth 代码，用户已授权
@@ -301,6 +329,11 @@ connector_oauth_states (
 - When：agent 调用该工具
 - Then：dispatch 在执行前短路，返回 NeedsConsent + consent URL，工具体一行都不执行，agent 提示用户授权
 
+**场景 10：run_as=agent（service principal）**
+- Given：agent grant 配置了 `run_as=agent`，agent 有 service-principal 凭证
+- When：任意用户让该 agent 调用该 service
+- Then：connectors 以 agent 的 service-principal 身份取凭证，而非调用用户的凭证；用户本人无需授权该 service
+
 ## Smoke Test 用例图
 
 ```mermaid
@@ -308,10 +341,10 @@ graph LR
     USER(("用户"))
     ADMIN(("管理员"))
 
-    UC1(["首次授权<br/>OAuth consent"])
+    UC1(["首次授权<br/>OAuth consent / apikey 提交"])
     UC2(["调用时<br/>取凭证 + 注入"])
     UC3(["主动解绑<br/>撤销凭证"])
-    UC4(["注册 connector<br/>(OAuth 配置)"])
+    UC4(["注册 external_service<br/>(协议 + 配置)"])
 
     USER --> UC1
     USER --> UC2
@@ -319,29 +352,28 @@ graph LR
     ADMIN --> UC4
 ```
 
-冒烟测试覆盖这 4 条主路径即可判断 connectors 基本可用：OAuth 授权、凭证注入、解绑撤销、connector 注册。
+冒烟测试覆盖这 4 条主路径即可判断 connectors 基本可用：授权（OAuth 或 apikey）、凭证注入、解绑撤销、服务注册。
 
 ## 测试边界
 
 **需要单元测试的行为**：
 - `get_credential` 基础路径：已授权用户返回 Credential，未授权返回 NeedsConsent + consent URL
-- access token 自动刷新：剩余时效 < 60s 时调用 refresh，返回新 Credential
-- refresh token 过期：OAuth server 返回 token 无效时，grant 标记失效并返回 NeedsConsent
-- refresh 网络失败：返回 CredentialError（区别于 NeedsConsent，可重试）
-- OAuth callback：state 校验通过后写入 connector_grants；state 不匹配则拒绝（CSRF 防护）
-- per-user 隔离：dispatch 取 acting_user 自己的凭证，不读取其他用户的 grant
-- revoke：标记 `connector_grants.revoked_at` + 调用外部 revoke endpoint；后续 `get_credential` 返回 NeedsConsent
+- oauth2: access token 自动刷新：`expires_at` 已过时调用 refresh，返回新 Credential
+- oauth2: refresh token 过期（`invalid_grant`）：凭证 status 标记为 `needs_reauth`，返回 NeedsConsent
+- oauth2: refresh 网络失败：返回 CredentialError（retryable=True）
+- apikey: 有效凭证直接返回 Credential；无凭证返回 NeedsConsent + 密钥提交 URL
+- per-user 隔离：dispatch 取 acting_user 自己的凭证，不读取其他用户的 credential
+- revoke：删除 `external_credentials` 记录 + 调用外部 revoke endpoint；后续 `get_credential` 返回 NeedsConsent
+- `run_as=agent`：agent grant 存在时以 service-principal 身份取凭证；无 grant 时回退到 user_id
 
 **需要 mock 的依赖**：
 - 外部 OAuth server（token endpoint / revoke endpoint）：用 `respx` mock HTTP 调用
-- 时间（`datetime.utcnow`）：控制 token 过期时间和 OAuth state TTL
-- SQLite DB 路径：`monkeypatch` 到 `tmp_path`
+- 时间（`datetime.now`）：控制 token 过期时间
+- SQLite DB 路径：`monkeypatch` 到 `tmp_path`（integration 层）
 
 ## 待决问题
 
-- [ ] 加密凭证存储后端：自维护加密 SQLite（Lean，零额外依赖）vs Vault / OpenBao（重但成熟）（负责人：待认领）
-- [ ] OAuth consent 的 callback 端点承载：复用 server.py 还是独立 web 入口（on-prem 公网可达性）（负责人：待认领）
-- [ ] 各厂商 MCP 的 transport 核实:接入前确认它是 Streamable HTTP(每请求注入,简单)还是老 SSE(要连接池)。Google Drive=HTTP;Atlassian=`/v1/sse`,需查它有无 streamable-http 端点（负责人：待认领）
-- [ ] SSE 类 MCP 的 per-user 连接池:何时实现、连接数上限 / 空闲淘汰策略（负责人：待认领）
+- [ ] OAuth consent 的完整 callback 端点：复用 server.py 还是独立 web 入口（on-prem 公网可达性）（负责人：待认领）
+- [ ] 各厂商 MCP 的 transport 核实：接入前确认它是 Streamable HTTP（每请求注入，简单）还是老 SSE（要连接池）。Google Drive=HTTP；Atlassian=`/v1/sse`，需查它有无 streamable-http 端点（负责人：待认领）
+- [ ] SSE 类 MCP 的 per-user 连接池：何时实现、连接数上限 / 空闲淘汰策略（负责人：待认领）
 - [ ] incremental scope：按工具按需追加 scope（如先 drive.readonly，后续加 calendar）vs 首次一次性申请全量（负责人：待认领）
-- [ ] connector 注册形态：配置文件 vs admin CLI vs DB（负责人：待认领）
