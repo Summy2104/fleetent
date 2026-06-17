@@ -1,6 +1,6 @@
 # Intelligence Roadmap 人工测试手册
 
-本手册用于把 [intelligence-roadmap.md](../capabilities/roadmaps/intelligence-roadmap.md)
+本手册用于把 [intelligence-roadmap.md](intelligence-roadmap.md)
 从“本地自动化已通过”推进到 Pilot `Go` 所需的人工证据。它只覆盖 Memory、Long-term Context、
 Reflection、Vector Store 和 Knowledge Base；部署、诊断包和配置检查见
 [observability-deployment-roadmap-test-manual.md](observability-deployment-roadmap-test-manual.md)。

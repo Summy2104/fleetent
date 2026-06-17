@@ -16,8 +16,8 @@ docs/
   capabilities/
     _template.md              # 能力域文档模板
     *.md                      # 能力定义、状态和验收标准；子系统深度行为模型（agent-management / im-access-model / skill-system）也在此
-    roadmaps/                 # 能力簇 roadmap、Pilot readiness 总览和人工测试手册
-  deployment/
+  roadmaps/                   # 能力簇 roadmap、Pilot readiness 总览和人工测试手册
+  operations/
     pilot-runbook.md           # Pilot 部署与人工验收流程
     pilot-install-checklist.md # 安装、升级、备份、健康检查和问题上报清单
     pilot-acceptance-guide.md  # Go / Conditional Go / No-Go 判定和报告模板
@@ -37,8 +37,8 @@ docs/
 | --- | --- | --- |
 | 架构文档 | `docs/architecture.md`, `docs/architecture/` | `architecture.md` 是架构总览和当前权威入口；`architecture/` 放架构演进路线图和专题文档。 |
 | 能力文档 | `docs/capabilities/` | 做什么、当前状态、规划项、验收标准和模块归属。 |
-| 能力 roadmap | `docs/capabilities/roadmaps/` | 多个相关 capability 的完成度、缺口、优先级和 Pilot 风险。 |
-| 部署文档 | `docs/deployment/` | 安装、升级、备份、运行、验收、secret 处理和迁移指南。 |
+| 能力 roadmap | `docs/roadmaps/` | 多个相关 capability 的完成度、缺口、优先级和 Pilot 风险。 |
+| 运维文档 | `docs/operations/` | 安装、升级、备份、运行、验收、secret 处理和迁移指南。 |
 | 项目记录 | `docs/records/` | 集成方案、执行日志、review/apply 决策记录。 |
 | 归档资料 | `docs/archive/` | 不再作为当前事实来源的旧设计、历史调研和 deep dive。 |
 
@@ -46,20 +46,20 @@ docs/
 
 | Roadmap | 用途 |
 | --- | --- |
-| `docs/capabilities/roadmaps/pilot-readiness-roadmap.md` | 全项目 Pilot readiness 总览、验收入口和 Go / Conditional Go / No-Go 风险。 |
-| `docs/capabilities/roadmaps/runtime-tooling-roadmap.md` | Agent Runtime、Model Router、Tools、MCP、Sandbox、Skill、Session 能力簇。 |
-| `docs/capabilities/roadmaps/intelligence-roadmap.md` | Memory、Long-term Context、Reflection、Vector Store、Knowledge Base 能力簇。 |
-| `docs/capabilities/roadmaps/observability-deployment-roadmap.md` | Observability、Diagnostics、Deployment / Config 能力簇。 |
-| `docs/capabilities/roadmaps/platform-channel-roadmap.md` | Platform、Governance、User Center、Connectors、IM Gateway、Scheduling / Webhook 能力簇。 |
+| `docs/roadmaps/pilot-readiness-roadmap.md` | 全项目 Pilot readiness 总览、验收入口和 Go / Conditional Go / No-Go 风险。 |
+| `docs/roadmaps/runtime-tooling-roadmap.md` | Agent Runtime、Model Router、Tools、MCP、Sandbox、Skill、Session 能力簇。 |
+| `docs/roadmaps/intelligence-roadmap.md` | Memory、Long-term Context、Reflection、Vector Store、Knowledge Base 能力簇。 |
+| `docs/roadmaps/observability-deployment-roadmap.md` | Observability、Diagnostics、Deployment / Config 能力簇。 |
+| `docs/roadmaps/platform-channel-roadmap.md` | Platform、Governance、User Center、Connectors、IM Gateway、Scheduling / Webhook 能力簇。 |
 | `docs/records/roadmaps/v1.0-roadmap.md` | 历史 v1.0 执行引擎开发排期记录。 |
 
 ## 能力域索引
 
 | 文档 | 覆盖范围 | 优先级 | 依赖的模块 | 负责人 | 状态 |
 |------|---------|:------:|-----------|--------|------|
-| [roadmaps/pilot-readiness-roadmap.md](capabilities/roadmaps/pilot-readiness-roadmap.md) | Pilot readiness 横向总览、Go / Conditional Go / No-Go 风险和验收入口 | P0 | 全项目 capability | - | 基础完成 |
-| [roadmaps/intelligence-roadmap.md](capabilities/roadmaps/intelligence-roadmap.md) | Memory / Long-term Context / Reflection / Vector Store / Knowledge Base 能力簇 roadmap | P0 | memory · long-term-ctx · reflection · vector-store · knowledge-base | - | 基础完成 |
-| [roadmaps/observability-deployment-roadmap.md](capabilities/roadmaps/observability-deployment-roadmap.md) | Observability / Diagnostics / Deployment / Config 能力簇 roadmap | P0 | observability · config-management | - | 基础完成 |
+| [roadmaps/pilot-readiness-roadmap.md](roadmaps/pilot-readiness-roadmap.md) | Pilot readiness 横向总览、Go / Conditional Go / No-Go 风险和验收入口 | P0 | 全项目 capability | - | 基础完成 |
+| [roadmaps/intelligence-roadmap.md](roadmaps/intelligence-roadmap.md) | Memory / Long-term Context / Reflection / Vector Store / Knowledge Base 能力簇 roadmap | P0 | memory · long-term-ctx · reflection · vector-store · knowledge-base | - | 基础完成 |
+| [roadmaps/observability-deployment-roadmap.md](roadmaps/observability-deployment-roadmap.md) | Observability / Diagnostics / Deployment / Config 能力簇 roadmap | P0 | observability · config-management | - | 基础完成 |
 | [agent-runtime.md](capabilities/agent-runtime.md) | 核心循环、工具调度、上下文压缩、运行治理 | P0 | model-router · tools · session · skill · governance · observability | 张洋 | 部分完成 |
 | [model-router.md](capabilities/model-router.md) | task_type 路由、provider 配置、fallback 链 | P0 | config-management | 张洋 | 部分完成 |
 | [tools.md](capabilities/tools.md) | @tool 装饰器、schema 构建、dispatch、内置工具集 | P0 | governance · connectors | 张洋 | 部分完成 |
