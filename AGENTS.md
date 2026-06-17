@@ -34,6 +34,10 @@ type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`
 
 Hard Gate 管「必须见红 → 见绿」纪律，**不规定范围**；task / PR 收尾跑什么范围见「测试规范 · 何时跑什么」。跳过任何一步 = 违反流程。
 
+### 非代码产物提交
+
+TDD Hard Gate 只管代码实现；文档、proposal.md、design.md、tasks.md 等非代码产物由 agent 起草后，须**人工确认内容正确**再 commit，不得由 agent 直接提交。
+
 ### OpenSpec 工作流
 
 > **前置条件**：所有工作流从 main 最新代码出发，开始前执行 `git pull origin main`。
