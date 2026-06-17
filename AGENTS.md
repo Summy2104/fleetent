@@ -10,6 +10,12 @@
 
 AI 和所有团队成员必须遵守。违反任何一条 = 违反流程，需要回退重来。
 
+### 语言
+
+- 默认使用中文和用户交流。
+- OpenSpec 产物（proposal.md、design.md、tasks.md、spec 文件）用中文写。
+- 代码、commit message、API 字段、错误码使用英文。
+
 ### Commit 规范
 
 格式：`type(scope): 简短描述`（英文，动词开头，scope 可选）
