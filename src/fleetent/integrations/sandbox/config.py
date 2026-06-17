@@ -13,7 +13,7 @@ this change clamps it to [1, 600] but does not act on it in `docker run`.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 
@@ -31,14 +31,6 @@ SETTINGS_PATH: Path = paths.platform_yaml_path()
 _EXEC_TIMEOUT_MIN = 1
 _EXEC_TIMEOUT_MAX = 600
 
-# SB2 lifecycle defaults. `workspace_scope` selects data-isolation granularity
-# (session-local vs per-agent); `idle_hours` is the agent-scope idle TTL before
-# sweep_idle reclaims. (sandbox-workspace-scope-split: `scope` renamed to
-# `workspace_scope`; the legacy `scope` key is still read for back-compat.)
-_DEFAULT_SCOPE = "session"
-_VALID_SCOPES = ("session", "agent")
-_DEFAULT_IDLE_HOURS = 2.0
-
 # Backend selection (sandbox-backend-abstraction). `docker` is the default so existing
 # deployments are unchanged; `microsandbox` selects the local-microVM backend.
 _DEFAULT_BACKEND = "docker"
@@ -49,20 +41,6 @@ class NetworkPolicy(StrEnum):
     NONE = "none"
     PUBLIC_ONLY = "public_only"
     ALLOW_ALL = "allow_all"
-
-
-@dataclass
-class SandboxLifecycle:
-    """SB2 container-lifecycle policy from the `sandbox:` section.
-
-    `workspace_scope` ("session" | "agent") sets *data-isolation* granularity only
-    (sandbox-workspace-scope-split); `idle_hours` is the agent-scope idle TTL. SB4
-    owns resource fields; these two are SB2's additions. Dependency image persistence
-    is an independent per-agent switch (see `sandbox-image-persistence`), not here.
-    """
-
-    workspace_scope: str = _DEFAULT_SCOPE
-    idle_hours: float = _DEFAULT_IDLE_HOURS
 
 
 @dataclass
@@ -78,28 +56,6 @@ class SkillMountConfig:
     enabled: bool = True
     read_only: bool = True
     source: str | None = None
-
-
-def load_skill_mount_config(path: Path | None = None) -> SkillMountConfig:
-    """Load `sandbox.skill_mount.{enabled,read_only,source}`, falling back per field.
-
-    A missing file / `sandbox:` section / `skill_mount:` subsection yields all
-    defaults (mount the user root read-only). Present-but-invalid bool fields fall
-    back with a warning rather than being silently accepted.
-    """
-    sandbox = _read_sandbox_section(path or SETTINGS_PATH)
-    if sandbox is None:
-        return SkillMountConfig()
-    section = sandbox.get("skill_mount")
-    if not isinstance(section, dict):
-        return SkillMountConfig()
-    defaults = SkillMountConfig()
-    source = section.get("source")
-    return SkillMountConfig(
-        enabled=_load_bool(section, "enabled", defaults.enabled),
-        read_only=_load_bool(section, "read_only", defaults.read_only),
-        source=source if isinstance(source, str) and source.strip() else None,
-    )
 
 
 @dataclass
@@ -155,14 +111,14 @@ def _load_backend(section: dict[str, object], default: str) -> str:
 class SandboxResources:
     """Per-container resource limits; dataclass defaults are the safe defaults.
 
-    `read_only` belongs to the resource tier (default True keeps containers
-    read-only); both the session and agent tiers run read-only now that deps are
-    baked into a build-time immutable image rather than installed at runtime.
+    `read_only` belongs to the resource tier (default True keeps containers read-only);
+    containers run read-only now that deps are baked into a build-time immutable image
+    rather than installed at runtime.
 
-    The hardening fields below default to the strictest (session) tier — a bare
-    `SandboxResources()` is the single source of truth for that tier. The agent
-    tier inherits these hardening defaults unchanged (sandbox-scope-split-followups);
-    `build_resources_by_scope` only overrides the non-hardening fields it exposes.
+    The hardening fields default to the strictest tier — a bare `SandboxResources()` is
+    the single source of truth for that tier. Per-agent-sandbox-resources: each agent has
+    one resource profile built from `agent.yaml` `sandbox.resources` via
+    `resources_from_agent_settings` (session/agent workspace scopes share it).
     """
 
     memory: int = 256
@@ -181,87 +137,6 @@ class SandboxResources:
     no_new_privileges: bool = True
     init: bool = True
     run_as_user: str | None = "65534:65534"
-
-
-def load_sandbox_resources(path: Path | None = None) -> SandboxResources:
-    """Load `sandbox.resources` from settings.yaml, falling back per field.
-
-    Returns all defaults when the file, the `sandbox:` section, or the
-    `resources:` subsection is absent. Present-but-invalid individual fields log
-    a warning and fall back to that field's default (never silently accepted).
-    A corrupt YAML file logs and yields all defaults rather than failing startup.
-    """
-    return _resources_from_section(_read_resources_section(path or SETTINGS_PATH))
-
-
-def load_sandbox_lifecycle(path: Path | None = None) -> SandboxLifecycle:
-    """Load SB2's `sandbox.workspace_scope` / `sandbox.idle_hours`, falling back per field.
-
-    An unrecognised workspace_scope or a non-positive idle_hours logs a warning and
-    falls back to its default rather than being silently accepted. The legacy
-    `sandbox.scope` key (sandbox-workspace-scope-split predecessor) is read and mapped
-    to `workspace_scope` with a one-time warning so existing deployments keep working;
-    an explicit `workspace_scope` wins over the legacy key when both are present.
-    """
-    sandbox = _read_sandbox_section(path or SETTINGS_PATH)
-    if sandbox is None:
-        return SandboxLifecycle()
-    return SandboxLifecycle(
-        workspace_scope=_load_workspace_scope(sandbox, _DEFAULT_SCOPE),
-        idle_hours=_load_positive_float(sandbox, "idle_hours", _DEFAULT_IDLE_HOURS),
-    )
-
-
-def build_resources_by_scope(path: Path | None = None) -> dict[str, SandboxResources]:
-    """Map each scope to its resource tier (SB2's scope→tier strategy).
-
-    `session` uses the hardened `sandbox.resources` tier as-is (read_only True,
-    network none, strictest hardening: no extra caps, non-root). `agent` inherits
-    that same hardened base and applies only the optional `sandbox.agent_scope`
-    override of the *non-hardening* fields (memory / cpus / network / memory_swap_mb).
-    It no longer relaxes read_only / cap_add / run_as_user: deps are baked into a
-    build-time immutable image (see `sandbox-image-persistence`), so the runtime
-    container never installs anything and needs no writable rootfs / install caps /
-    root (sandbox-scope-split-followups). The agent's work data is written to the
-    writable `/workspace` bind mount, which is unaffected by the read-only rootfs.
-    """
-    resolved = path or SETTINGS_PATH
-    sandbox = _read_sandbox_section(resolved)
-    base = _resources_from_section(_read_resources_section(resolved))
-
-    override = sandbox.get("agent_scope") if isinstance(sandbox, dict) else None
-    if not isinstance(override, dict):
-        override = {}
-    from dataclasses import replace
-
-    agent = replace(
-        base,
-        memory=_load_positive_int(override, "memory", base.memory),
-        cpus=_load_positive_float(override, "cpus", base.cpus),
-        network=_load_network(override, base.network),
-        memory_swap_mb=_load_optional_positive_int(override, "memory_swap_mb", base.memory_swap_mb),
-    )
-    return {_DEFAULT_SCOPE: base, "agent": agent}
-
-
-def _load_workspace_scope(section: dict[str, object], default: str) -> str:
-    """Resolve `workspace_scope`, reading the legacy `scope` key for back-compat.
-
-    Precedence: explicit `workspace_scope` > legacy `scope` (warned once) > default.
-    An unrecognised value on either key falls back to the default rather than being
-    silently accepted.
-    """
-    key = "workspace_scope"
-    if "workspace_scope" not in section and "scope" in section:
-        _logger.warn("sandbox_scope_key_deprecated", use="workspace_scope")
-        key = "scope"
-    if key not in section:
-        return default
-    value = section[key]
-    if isinstance(value, str) and value in _VALID_SCOPES:
-        return value
-    _logger.warn("sandbox_workspace_scope_invalid", value=repr(value), falling_back=default)
-    return default
 
 
 def _read_sandbox_section(path: Path) -> dict[str, object] | None:
@@ -285,17 +160,6 @@ def _read_sandbox_section(path: Path) -> dict[str, object] | None:
     return sandbox
 
 
-def _read_resources_section(path: Path) -> dict[str, object] | None:
-    """Pull `sandbox.resources` out of the settings file, or None when absent."""
-    sandbox = _read_sandbox_section(path)
-    if sandbox is None:
-        return None
-    resources = sandbox.get("resources")
-    if not isinstance(resources, dict):
-        return None
-    return resources
-
-
 def _resources_from_section(section: dict[str, object] | None) -> SandboxResources:
     """Build SandboxResources from a `resources`-shaped mapping (per-field validated)."""
     if section is None:
@@ -317,6 +181,39 @@ def _resources_from_section(section: dict[str, object] | None) -> SandboxResourc
         init=_load_bool(section, "init", defaults.init),
         run_as_user=_load_run_as_user(section, defaults.run_as_user),
     )
+
+
+def resources_from_agent_settings(resources: object) -> SandboxResources:
+    """Build `SandboxResources` from a per-agent `SandboxResourcesSettings`.
+
+    Per-agent-sandbox-resources: each agent owns one resource/hardening profile in its
+    `agent.yaml` `sandbox.resources`; this replaces the machine-shared `platform.yaml`
+    `sandbox.resources` (+ `agent_scope`) path. `None` fields inherit the code-level safe
+    default; declared fields reuse the exact same value-level validation/clamp/enum-fallback
+    as `_resources_from_section` (invalid values fall back with a warning, never rejected).
+    """
+    if resources is None:
+        return SandboxResources()
+    declared = {k: v for k, v in resources.model_dump().items() if v is not None}  # type: ignore[attr-defined]
+    base = _resources_from_section(declared)
+    # cap_add is not covered by _resources_from_section (it has no platform.yaml precedent
+    # in that builder); apply it explicitly from the agent profile.
+    cap_add = declared.get("cap_add")
+    if cap_add is not None:
+        base = replace(base, cap_add=_coerce_cap_add(cap_add, base.cap_add))
+    return base
+
+
+def _coerce_cap_add(value: object, default: tuple[str, ...]) -> tuple[str, ...]:
+    """Coerce `cap_add` to a tuple of non-empty capability strings; invalid → default."""
+    if not isinstance(value, (list, tuple)) or not all(
+        isinstance(c, str) and c.strip() for c in value
+    ):
+        _logger.warn(
+            "sandbox_resource_invalid", field="cap_add", value=repr(value), falling_back=default
+        )
+        return default
+    return tuple(value)
 
 
 def _load_positive_int(section: dict[str, object], key: str, default: int) -> int:

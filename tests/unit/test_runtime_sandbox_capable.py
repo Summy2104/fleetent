@@ -14,7 +14,7 @@ from fleetent.runtime.loop import runtime_sandbox_capable
 
 
 def test_non_sandbox_backed_tool_never_capable():
-    assert runtime_sandbox_capable("send_email", Mode.ALL, workspace_mount=True) is False
+    assert runtime_sandbox_capable("send_email", Mode.ON, workspace_mount=True) is False
 
 
 def test_mode_off_makes_capable_false():
@@ -30,16 +30,16 @@ def test_none_mode_makes_capable_false():
 
 def test_file_tool_requires_workspace_mount():
     """File tools degrade to the host fence without workspace_mount → not capable."""
-    assert runtime_sandbox_capable("write_file", Mode.ALL, workspace_mount=False) is False
-    assert runtime_sandbox_capable("read_file", Mode.ALL, workspace_mount=False) is False
+    assert runtime_sandbox_capable("write_file", Mode.ON, workspace_mount=False) is False
+    assert runtime_sandbox_capable("read_file", Mode.ON, workspace_mount=False) is False
 
 
 def test_file_tool_capable_when_contained():
-    assert runtime_sandbox_capable("write_file", Mode.ALL, workspace_mount=True) is True
-    assert runtime_sandbox_capable("edit_file", Mode.SELECTIVE, workspace_mount=True) is True
+    assert runtime_sandbox_capable("write_file", Mode.ON, workspace_mount=True) is True
+    assert runtime_sandbox_capable("edit_file", Mode.ON, workspace_mount=True) is True
 
 
 def test_run_code_capable_without_mount_when_mode_on():
     """run_code execs inside the container regardless of host bind-mount, so a
     mount-less backend (e.g. microsandbox) still contains it when mode != OFF."""
-    assert runtime_sandbox_capable("run_code", Mode.ALL, workspace_mount=False) is True
+    assert runtime_sandbox_capable("run_code", Mode.ON, workspace_mount=False) is True

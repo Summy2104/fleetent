@@ -54,3 +54,6 @@ agents/*/skills/
 # Claude Code runtime locks
 .claude/*.lock
 docs/local/
+
+# Generated architecture diagrams
+docs/architecture/*.html

@@ -114,6 +114,24 @@ def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
     return _materialize_im_access(with_overrides, agent)
 
 
+def desired_state_payload_from_agent_file(agent_file: AgentFile) -> dict[str, Any]:
+    """Serialize the non-secret subset of an AgentFile for node desired-state delivery."""
+    return _strip_secret_plumbing(agent_file.model_dump(mode="json", exclude_defaults=False))
+
+
+def _strip_secret_plumbing(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_strip_secret_plumbing(item) for item in value]
+    if isinstance(value, dict):
+        sanitized: dict[str, Any] = {}
+        for key, item in value.items():
+            if key == "env" or key.endswith("_env") or key.endswith("credential_ref"):
+                continue
+            sanitized[key] = _strip_secret_plumbing(item)
+        return sanitized
+    return value
+
+
 def _materialize_im_access(base: AgentFile, agent: agent_store.Agent) -> AgentFile:
     """Project platform-authored IM access state into the agent home config."""
     raw = base.model_dump(mode="json", exclude_defaults=False)

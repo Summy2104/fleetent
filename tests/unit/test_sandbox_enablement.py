@@ -1,126 +1,73 @@
-"""Tests for the three-state code-execution enablement decision (SB3)."""
+"""Code-execution enablement decision (per-agent-sandbox-enablement).
+
+Mode collapses to {OFF, ON}: ON means the backend is available (runtime sandbox
+capability), OFF means it is not. There is no global tri-state read from platform.yaml
+anymore — per-agent `features.code_execution` is the sole policy input, gated by the
+runtime capability. `get_effective_mode` derives ON/OFF purely from the backend probe.
+"""
 
 from __future__ import annotations
 
 import pytest
 
-from fleetent.integrations.sandbox.enablement import (
-    Mode,
-    is_code_execution_enabled,
-    resolve_effective_mode,
-)
+import fleetent.integrations.sandbox.enablement as se
+from fleetent.integrations.sandbox.enablement import Mode, is_code_execution_enabled
 
 
-def test_mode_members_and_default():
+def test_mode_members_are_off_on_only():
     assert Mode.OFF == "off"
-    assert Mode.SELECTIVE == "selective"
-    assert Mode.ALL == "all"
+    assert Mode.ON == "on"
+    assert not hasattr(Mode, "SELECTIVE")
+    assert not hasattr(Mode, "ALL")
 
 
-@pytest.mark.parametrize("code_execution", [True, False, None])
+@pytest.mark.parametrize("code_execution", [None, True, False])
 def test_off_always_disabled(code_execution):
     assert is_code_execution_enabled(Mode.OFF, code_execution) is False
 
 
-def test_selective_only_explicit_true_enabled():
-    assert is_code_execution_enabled(Mode.SELECTIVE, True) is True
-    assert is_code_execution_enabled(Mode.SELECTIVE, False) is False
-    assert is_code_execution_enabled(Mode.SELECTIVE, None) is False
+def test_on_enabled_unless_explicit_false():
+    # Preserves the old `all` semantics: unset/true on, explicit false off.
+    assert is_code_execution_enabled(Mode.ON, None) is True
+    assert is_code_execution_enabled(Mode.ON, True) is True
+    assert is_code_execution_enabled(Mode.ON, False) is False
 
 
-def test_all_enabled_unless_explicit_false():
-    assert is_code_execution_enabled(Mode.ALL, None) is True
-    assert is_code_execution_enabled(Mode.ALL, True) is True
-    assert is_code_execution_enabled(Mode.ALL, False) is False
+class _Backend:
+    def __init__(self, available: bool) -> None:
+        self._available = available
+
+    async def available(self) -> bool:
+        return self._available
 
 
-def test_resolve_effective_mode_docker_unavailable_forces_off():
-    assert resolve_effective_mode(Mode.ALL, docker_available=False) is Mode.OFF
-    assert resolve_effective_mode(Mode.SELECTIVE, docker_available=False) is Mode.OFF
-    assert resolve_effective_mode(Mode.OFF, docker_available=False) is Mode.OFF
-
-
-def test_resolve_effective_mode_docker_available_passthrough():
-    assert resolve_effective_mode(Mode.ALL, docker_available=True) is Mode.ALL
-    assert resolve_effective_mode(Mode.SELECTIVE, docker_available=True) is Mode.SELECTIVE
-    assert resolve_effective_mode(Mode.OFF, docker_available=True) is Mode.OFF
-
-
-# ── sandbox: platform.yaml section ───────────────────────────────────────────
-
-
-def test_load_sandbox_mode_defaults_to_all_when_file_absent(tmp_path, monkeypatch):
-    import fleetent.integrations.sandbox.enablement as se
-
-    monkeypatch.setattr(se, "SETTINGS_PATH", tmp_path / "missing.yaml")
-    assert se.load_sandbox_mode() is Mode.ALL
-
-
-def test_load_sandbox_mode_defaults_to_all_when_section_absent(tmp_path, monkeypatch):
-    import fleetent.integrations.sandbox.enablement as se
-
-    p = tmp_path / "settings.yaml"
-    p.write_text("log_format: json\n")
-    monkeypatch.setattr(se, "SETTINGS_PATH", p)
-    assert se.load_sandbox_mode() is Mode.ALL
-
-
-def test_load_sandbox_mode_reads_configured_value(tmp_path, monkeypatch):
-    import fleetent.integrations.sandbox.enablement as se
-
-    p = tmp_path / "settings.yaml"
-    p.write_text("sandbox:\n  mode: selective\n")
-    monkeypatch.setattr(se, "SETTINGS_PATH", p)
-    assert se.load_sandbox_mode() is Mode.SELECTIVE
-
-
-def test_load_sandbox_mode_off(tmp_path, monkeypatch):
-    import fleetent.integrations.sandbox.enablement as se
-
-    p = tmp_path / "settings.yaml"
-    p.write_text("sandbox:\n  mode: off\n")
-    monkeypatch.setattr(se, "SETTINGS_PATH", p)
-    assert se.load_sandbox_mode() is Mode.OFF
-
-
-def test_load_sandbox_mode_invalid_falls_back_to_all(tmp_path, monkeypatch):
-    import fleetent.integrations.sandbox.enablement as se
-
-    p = tmp_path / "settings.yaml"
-    p.write_text("sandbox:\n  mode: bogus\n")
-    monkeypatch.setattr(se, "SETTINGS_PATH", p)
-    assert se.load_sandbox_mode() is Mode.ALL
-
-
-# ── cached effective-mode resolver (non-server callers: IM gateway / CLI) ────
-
-
-async def test_get_effective_mode_caches_docker_probe(tmp_path, monkeypatch):
-    from unittest.mock import AsyncMock
-
-    import fleetent.integrations.sandbox.client as sc
-    import fleetent.integrations.sandbox.enablement as se
-
+async def test_get_effective_mode_on_when_backend_available(monkeypatch):
     monkeypatch.setattr(se, "_effective_mode_cache", None)
-    monkeypatch.setattr(se, "SETTINGS_PATH", tmp_path / "missing.yaml")  # default all
-    probe = AsyncMock(return_value=True)
-    monkeypatch.setattr(sc.SandboxClient, "available", probe)
-
-    first = await se.get_effective_mode()
-    second = await se.get_effective_mode()
-    assert first is Mode.ALL
-    assert second is Mode.ALL
-    probe.assert_called_once()  # probe is run once and cached
+    assert await se.get_effective_mode(_Backend(True)) is Mode.ON
 
 
-async def test_get_effective_mode_degrades_when_docker_unavailable(tmp_path, monkeypatch):
-    from unittest.mock import AsyncMock
-
-    import fleetent.integrations.sandbox.client as sc
-    import fleetent.integrations.sandbox.enablement as se
-
+async def test_get_effective_mode_off_when_backend_unavailable(monkeypatch):
     monkeypatch.setattr(se, "_effective_mode_cache", None)
-    monkeypatch.setattr(se, "SETTINGS_PATH", tmp_path / "missing.yaml")
-    monkeypatch.setattr(sc.SandboxClient, "available", AsyncMock(return_value=False))
+    assert await se.get_effective_mode(_Backend(False)) is Mode.OFF
 
-    assert await se.get_effective_mode() is Mode.OFF
+
+async def test_get_effective_mode_caches_probe(monkeypatch):
+    monkeypatch.setattr(se, "_effective_mode_cache", None)
+    calls = {"n": 0}
+
+    class _Counting:
+        async def available(self) -> bool:
+            calls["n"] += 1
+            return True
+
+    b = _Counting()
+    first = await se.get_effective_mode(b)
+    second = await se.get_effective_mode(b)
+    assert first is Mode.ON and second is Mode.ON
+    assert calls["n"] == 1  # probed once, then cached
+
+
+def test_no_platform_yaml_mode_loader():
+    # The tri-state mode loader + its platform.yaml read are removed.
+    assert not hasattr(se, "load_sandbox_mode")
+    assert not hasattr(se, "SETTINGS_PATH")

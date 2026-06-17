@@ -2472,47 +2472,37 @@ async def test_run_off_mode_excludes_run_code(mock_client, monkeypatch):
     assert _tool_names_sent(mock_client) == {"calculate"}
 
 
-async def test_run_selective_excludes_run_code_when_not_opted_in(mock_client, monkeypatch):
-    from fleetent.integrations.sandbox.enablement import Mode
-
-    monkeypatch.setattr(al, "get_schemas", lambda: [_schema("run_code"), _schema("calculate")])
-    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
-    await al.run(
-        [{"role": "user", "content": "hi"}], sandbox_mode=Mode.SELECTIVE, agent_features={}
-    )
-    assert _tool_names_sent(mock_client) == {"calculate"}
-
-
-async def test_run_selective_includes_run_code_when_opted_in(mock_client, monkeypatch):
+async def test_run_on_includes_run_code_when_opted_in(mock_client, monkeypatch):
     from fleetent.integrations.sandbox.enablement import Mode
 
     monkeypatch.setattr(al, "get_schemas", lambda: [_schema("run_code"), _schema("calculate")])
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
     await al.run(
         [{"role": "user", "content": "hi"}],
-        sandbox_mode=Mode.SELECTIVE,
+        sandbox_mode=Mode.ON,
         agent_features={"code_execution": True},
     )
     assert _tool_names_sent(mock_client) == {"run_code", "calculate"}
 
 
-async def test_run_all_includes_run_code_when_unset(mock_client, monkeypatch):
+async def test_run_on_includes_run_code_when_unset(mock_client, monkeypatch):
+    # per-agent-sandbox-enablement: ON + unset → included (legacy `all` default).
     from fleetent.integrations.sandbox.enablement import Mode
 
     monkeypatch.setattr(al, "get_schemas", lambda: [_schema("run_code"), _schema("calculate")])
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
-    await al.run([{"role": "user", "content": "hi"}], sandbox_mode=Mode.ALL, agent_features={})
+    await al.run([{"role": "user", "content": "hi"}], sandbox_mode=Mode.ON, agent_features={})
     assert _tool_names_sent(mock_client) == {"run_code", "calculate"}
 
 
-async def test_run_all_excludes_run_code_when_explicit_false(mock_client, monkeypatch):
+async def test_run_on_excludes_run_code_when_explicit_false(mock_client, monkeypatch):
     from fleetent.integrations.sandbox.enablement import Mode
 
     monkeypatch.setattr(al, "get_schemas", lambda: [_schema("run_code"), _schema("calculate")])
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
     await al.run(
         [{"role": "user", "content": "hi"}],
-        sandbox_mode=Mode.ALL,
+        sandbox_mode=Mode.ON,
         agent_features={"code_execution": False},
     )
     assert _tool_names_sent(mock_client) == {"calculate"}
@@ -2541,7 +2531,7 @@ async def test_run_stream_all_includes_run_code(mock_client, monkeypatch):
 
     monkeypatch.setattr(al, "get_schemas", lambda: [_schema("run_code"), _schema("calculate")])
     mock_client.chat.completions.create = AsyncMock(return_value=_stream_chunks("done"))
-    async for _ in al.run_stream("hi", sandbox_mode=Mode.ALL, agent_features={}):
+    async for _ in al.run_stream("hi", sandbox_mode=Mode.ON, agent_features={}):
         pass
     assert _tool_names_sent(mock_client) == {"run_code", "calculate"}
 

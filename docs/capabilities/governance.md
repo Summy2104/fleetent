@@ -68,15 +68,17 @@ agent 工具执行前的治理层：在 agent 即将调用某个工具的那一�
 - **高危不随 medium 放松**：兑现 medium 免审批（`medium_mode: sandbox`）不波及 high 面。`action_gate_high_mode` 推荐默认保持 `approval`。
 - **机制零改动**：免审批完全复用既有 `resolve_action_mode` 契约 + 地基 `sandbox-containment-gating` 提供的 `sandbox_capable`；`is_sandbox_backed` / `SANDBOX_BACKED_TOOLS` / registry risk 常量均不变。代码默认仍是 `action_gate_medium_mode: approval`——免审批是部署的**显式选择**，存量配置行为不变。
 
-### sandbox mode 选型指引
+### 代码执行启用选型指引（per-agent）
 
-全局沙箱三态 `mode`（`platform.yaml` 的 `sandbox.mode`，详见 sandbox-enablement-control）按部署形态推荐选型，与免审批配套。该指引为**选型建议**，不改变三态语义、默认值（`all`）与后端不可用时降级为 `off` 的行为：
+代码执行启用由 **per-agent `features.code_execution`**（未声明/`true`=开、`false`=关）+ **运行时后端可用性**（无 Docker → 一律禁用）决定，**无全局三态 `sandbox.mode`**（详见 sandbox-enablement-control / per-agent-sandbox-enablement）。按部署形态配置各 agent，与免审批配套：
 
-| 部署形态 | 推荐 mode | 配套 |
+| 部署形态 | 配置（per-agent） | 配套 |
 |---|---|---|
-| 封闭可信内网，希望容器内 medium 操作免审批自动化 | `all` | agent 配 `action_gate_medium_mode: sandbox`；免审批仅在 `sandbox_capable` 为真时生效 |
-| 最小暴露代码执行面，仅特定授权 agent 可用 `run_code` | `selective` | 仅 `features.code_execution: true` 的 agent 暴露 `run_code` |
-| 完全禁用代码执行 | `off` | 不存在容器封闭，medium 操作不会因 `sandbox` 配置免审批，仍走审批 |
+| 封闭可信内网，希望容器内 medium 操作免审批自动化 | 相关 agent `features.code_execution: true`（或不声明） | agent 配 `action_gate_medium_mode: sandbox`；免审批仅在 `sandbox_capable` 为真（后端可用且该 agent 启用代码执行）时生效 |
+| 最小暴露代码执行面，仅特定授权 agent 可用 `run_code` | 仅授权 agent `features.code_execution: true`，其余 `false` | 仅授权 agent 暴露 `run_code` |
+| 完全禁用某 agent 代码执行 | 该 agent `features.code_execution: false` | 该 agent 不存在容器封闭，medium 操作不会因 `sandbox` 配置免审批，仍走审批 |
+
+> 运行时无 Docker / 后端不可用时一律降级禁用（fail-closed），此时 `sandbox_capable` 为假，medium 操作升审批。
 
 ### bash_exec 默认 opt-in（宿主直跑高危工具）
 

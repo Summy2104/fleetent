@@ -287,6 +287,35 @@ class SandboxSkillMountSettings(BaseModel):
     source: str | None = None
 
 
+class SandboxResourcesSettings(BaseModel):
+    """Per-agent sandbox container resource + hardening profile (per-agent-sandbox-resources).
+
+    Mirrors `integrations.sandbox.config.SandboxResources`; every field is optional and
+    `None` means "inherit the code-level safe default" — the manager builds a concrete
+    `SandboxResources` by laying declared fields over `SandboxResources()` (with the same
+    value-level validation/clamp/enum-fallback as before). Replaces the machine-shared
+    `platform.yaml` `sandbox.resources` + `sandbox.agent_scope` (collapsed to one tier).
+    Value-level invalid inputs (e.g. `memory=0`, unknown `network`) are not rejected here;
+    they fall back to the field default with a warning at build time.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    memory: int | None = None
+    cpus: float | None = None
+    network: str | None = None
+    exec_timeout: int | None = None
+    read_only: bool | None = None
+    memory_swap_mb: int | None = None
+    pids_limit: int | None = None
+    tmpfs_size_mb: int | None = None
+    cap_drop_all: bool | None = None
+    cap_add: list[str] | None = None
+    no_new_privileges: bool | None = None
+    init: bool | None = None
+    run_as_user: str | None = None
+
+
 class SandboxSettings(BaseModel):
     """Per-agent sandbox backend selection (sandbox-backend-abstraction).
 
@@ -317,6 +346,13 @@ class SandboxSettings(BaseModel):
     skill_mount: SandboxSkillMountSettings = Field(default_factory=SandboxSkillMountSettings)
     image_persistence: bool = False
     setup_command: str | None = None
+    # Per-agent sandbox resource/hardening profile + lifecycle (per-agent-sandbox-resources).
+    # `resources` replaces the machine-shared platform.yaml `sandbox.resources`/`agent_scope`;
+    # `workspace_scope` ("session"|"agent", None → code default "session") and `idle_hours`
+    # (None → code default) move off platform.yaml's lifecycle section onto each agent.
+    resources: SandboxResourcesSettings = Field(default_factory=SandboxResourcesSettings)
+    workspace_scope: str | None = None
+    idle_hours: float | None = None
     # Multi-user run-shape signal (sandbox-multi-user-default). Fail-safe default True:
     # every agent is treated as multi-user, so the manager's guard corrects a configured
     # `agent` workspace_scope to `session` (per-user isolation) unless a single-user

@@ -22,6 +22,7 @@ docs/
     pilot-install-checklist.md # 安装、升级、备份、健康检查和问题上报清单
     pilot-acceptance-guide.md  # Go / Conditional Go / No-Go 判定和报告模板
     secrets.md                 # Secret 和凭据处理指南
+    per-agent-sandbox-config.md # 迁移指南：沙箱配置从 platform.yaml 移至 agent.yaml
   records/
     integration/               # 一次性集成方案与执行日志
     decision-logs/             # apply/review 过程中的决策记录
@@ -36,7 +37,7 @@ docs/
 | 架构文档 | `docs/architecture.md`, `docs/architecture/` | `architecture.md` 是架构总览和当前权威入口；`architecture/` 放架构演进路线图和专题文档。 |
 | 能力文档 | `docs/capabilities/` | 做什么、当前状态、规划项、验收标准和模块归属。 |
 | 能力 roadmap | `docs/capabilities/roadmaps/` | 多个相关 capability 的完成度、缺口、优先级和 Pilot 风险。 |
-| 部署文档 | `docs/deployment/` | 安装、升级、备份、运行、验收和 secret 处理。 |
+| 部署文档 | `docs/deployment/` | 安装、升级、备份、运行、验收、secret 处理和迁移指南。 |
 | 项目记录 | `docs/records/` | 集成方案、执行日志、review/apply 决策记录。 |
 | 归档资料 | `docs/archive/` | 不再作为当前事实来源的旧设计、历史调研和 deep dive。 |
 

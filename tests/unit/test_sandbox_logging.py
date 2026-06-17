@@ -59,13 +59,14 @@ def test_sandbox_config_logger_is_custom() -> None:
     assert isinstance(mod._logger, Logger)
 
 
-def test_sandbox_config_warns_on_invalid_scope() -> None:
-    from fleetent.integrations.sandbox.config import _load_workspace_scope
+def test_sandbox_config_warns_on_invalid_resource_value() -> None:
+    from fleetent.agent_config import SandboxResourcesSettings
+    from fleetent.integrations.sandbox.config import resources_from_agent_settings
 
     with patch("fleetent.integrations.sandbox.config._logger") as mock_log:
-        _load_workspace_scope({"workspace_scope": "invalid_scope_xyz"}, "session")
+        resources_from_agent_settings(SandboxResourcesSettings(network="invalid_net_xyz"))
 
-    mock_log.warn.assert_called_once()
+    mock_log.warn.assert_called()
 
 
 # ── sandbox.cleanup ───────────────────────────────────────────────────────────
@@ -88,19 +89,8 @@ def test_sandbox_enablement_logger_is_custom() -> None:
     assert isinstance(mod._logger, Logger)
 
 
-def test_sandbox_enablement_warns_on_invalid_mode() -> None:
-    from fleetent.integrations.sandbox.enablement import load_sandbox_mode
-
-    with (
-        patch("fleetent.integrations.sandbox.enablement._logger") as mock_log,
-        patch(
-            "fleetent.integrations.sandbox.enablement._read_raw_mode",
-            return_value="not_a_real_mode",
-        ),
-    ):
-        load_sandbox_mode()
-
-    mock_log.warn.assert_called_once()
+# (per-agent-sandbox-enablement removed the tri-state mode loader + its invalid-mode
+# warning; the enablement logger is still asserted custom above.)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
