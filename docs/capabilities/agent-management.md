@@ -1,7 +1,7 @@
 # Agent 管理子系统（as-built 行为模型）
 
-> **状态：as-built 行为参考（2026-06-16）**。把"管理一个 agent"的完整故事串起来——身份/版本 → 管理态 → 自管溯源 → 绑定 → materialize → node 编排。**只讲行为/关系/数据流，不复述列级 schema**（表/列/FK 真相源是 [data-model](data-model.md) §3.2 + erDiagram）。设计 rationale 见 [`records/decision-logs/`](../records/decision-logs/)。
-> **枢纽文档**：身份 id/name 模型见 [agent-identity-model](../records/decision-logs/agent-identity-model.md)（已冻结）；编排高层平面见 [`target-architecture.md`](./target-architecture.md)；绑定细节见 [skill-system](skill-system.md) / [im-access-model](im-access-model.md)；认证见 [[identity-auth-model]]。
+> **状态：as-built 行为参考（2026-06-16）**。把"管理一个 agent"的完整故事串起来——身份/版本 → 管理态 → 自管溯源 → 绑定 → materialize → node 编排。**只讲行为/关系/数据流，不复述列级 schema**（表/列/FK 真相源是 [data-model](../architecture/data-model.md) §3.2 + erDiagram）。设计 rationale 见 [`records/decision-logs/`](../records/decision-logs/)。
+> **枢纽文档**：身份 id/name 模型见 [agent-identity-model](../records/decision-logs/agent-identity-model.md)（已冻结）；编排高层平面见 [`target-architecture.md`](../architecture/target-architecture.md)；绑定细节见 [skill-system](skill-system.md) / [im-access-model](im-access-model.md)；认证见 [[identity-auth-model]]。
 
 ## 0. 一句话
 

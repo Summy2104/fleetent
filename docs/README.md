@@ -13,12 +13,9 @@ docs/
   architecture/
     target-architecture.md    # 详细架构模型：核+4面+基座、模块边界、Identity、只读投影、模块归属速查
     data-model.md             # 数据模型与物理拓扑（as-built）
-    agent-management.md       # Agent 管理子系统行为模型
-    im-access-model.md        # IM 接入与访问控制模型
-    skill-system.md           # Skill 子系统行为模型
   capabilities/
     _template.md              # 能力域文档模板
-    *.md                      # 能力定义、状态和验收标准
+    *.md                      # 能力定义、状态和验收标准；子系统深度行为模型（agent-management / im-access-model / skill-system）也在此
     roadmaps/                 # 能力簇 roadmap、Pilot readiness 总览和人工测试手册
   deployment/
     pilot-runbook.md           # Pilot 部署与人工验收流程
@@ -55,6 +52,36 @@ docs/
 | `docs/capabilities/roadmaps/observability-deployment-roadmap.md` | Observability、Diagnostics、Deployment / Config 能力簇。 |
 | `docs/capabilities/roadmaps/platform-channel-roadmap.md` | Platform、Governance、User Center、Connectors、IM Gateway、Scheduling / Webhook 能力簇。 |
 | `docs/records/roadmaps/v1.0-roadmap.md` | 历史 v1.0 执行引擎开发排期记录。 |
+
+## 能力域索引
+
+| 文档 | 覆盖范围 | 优先级 | 依赖的模块 | 负责人 | 状态 |
+|------|---------|:------:|-----------|--------|------|
+| [roadmaps/pilot-readiness-roadmap.md](capabilities/roadmaps/pilot-readiness-roadmap.md) | Pilot readiness 横向总览、Go / Conditional Go / No-Go 风险和验收入口 | P0 | 全项目 capability | - | 基础完成 |
+| [roadmaps/intelligence-roadmap.md](capabilities/roadmaps/intelligence-roadmap.md) | Memory / Long-term Context / Reflection / Vector Store / Knowledge Base 能力簇 roadmap | P0 | memory · long-term-ctx · reflection · vector-store · knowledge-base | - | 基础完成 |
+| [roadmaps/observability-deployment-roadmap.md](capabilities/roadmaps/observability-deployment-roadmap.md) | Observability / Diagnostics / Deployment / Config 能力簇 roadmap | P0 | observability · config-management | - | 基础完成 |
+| [agent-runtime.md](capabilities/agent-runtime.md) | 核心循环、工具调度、上下文压缩、运行治理 | P0 | model-router · tools · session · skill · governance · observability | 张洋 | 部分完成 |
+| [model-router.md](capabilities/model-router.md) | task_type 路由、provider 配置、fallback 链 | P0 | config-management | 张洋 | 部分完成 |
+| [tools.md](capabilities/tools.md) | @tool 装饰器、schema 构建、dispatch、内置工具集 | P0 | governance · connectors | 张洋 | 部分完成 |
+| [session.md](capabilities/session.md) | session 持久化、并发保护、生命周期管理 | P0 | - | 张洋 | 已实现 |
+| [im-gateway.md](capabilities/im-gateway.md) | Slack / Telegram 接入、用户映射 | P0 | session · governance · platform | 张亮 | 部分完成 |
+| [governance.md](capabilities/governance.md) | 权限审批、工具白名单、agent 定义与分配 | P0 | session | 张亮 | 部分完成 |
+| [observability.md](capabilities/observability.md) | 评估日志、数据统计、链路追踪 | P0 | - | 常乐 | 基础完成 |
+| [mcp.md](capabilities/mcp.md) | MCP 外部工具集成（stdio / HTTP） | P1 | connectors | 张洋 | 部分完成 |
+| [sandbox.md](capabilities/sandbox.md) | 安全代码执行（Docker / microsandbox 可插拔后端） | P1 | - | 张洋 | 部分完成 |
+| [skill.md](capabilities/skill.md) | Skill 发现、read-on-demand 注入、catalog | P1 | - | 张洋 | 部分完成 |
+| [platform.md](capabilities/platform.md) | 用户管理、API 认证、admin CLI、node 编排 | P1 | - | 张亮 | 部分完成 |
+| [scheduling.md](capabilities/scheduling.md) | Cron 定时任务、Webhook 事件触发 | P1 | agent-runtime · session · im-gateway | 张亮 | 部分完成 |
+| [memory.md](capabilities/memory.md) | User Memory、Shared Memory、维护 proposal、质量趋势 | P1 | model-router · vector-store · observability · reflection | 常乐 | 基础完成 |
+| [long-term-ctx.md](capabilities/long-term-ctx.md) | 长期上下文调度与注入，memory / knowledge-base / Shared Memory provider 和 context policy | P1 | memory · knowledge-base | 常乐 | 基础完成 |
+| [knowledge-base.md](capabilities/knowledge-base.md) | 企业文档知识库、local / Google Drive / Confluence 同步、hybrid / graph / rerank / planner | P1 | vector-store | 常乐 | 基础完成 |
+| [vector-store.md](capabilities/vector-store.md) | 向量索引、SQLite backend、embedding / rerank provider、同步 reindex | P1 | config-management | 常乐 | 基础完成 |
+| [config-management.md](capabilities/config-management.md) | on-premises 打包、配置管理、SQLite upgrade / backup | P1 | - | 常乐 | 基础完成 |
+| [connectors.md](capabilities/connectors.md) | 外部服务 Vault（external_services / external_credentials / agent_service_grants） | P2 | platform | 张亮 | 基础完成 |
+| [reflection.md](capabilities/reflection.md) | User Memory / Skill / 知识库反思、proposal lifecycle、趋势聚合 | P2 | memory · skill · knowledge-base · observability | 常乐 | 基础完成 |
+| [agent-management.md](capabilities/agent-management.md) | Agent 生命周期、版本、管理态、materialize、node 编排（as-built 行为模型） | — | — | — | as-built |
+| [im-access-model.md](capabilities/im-access-model.md) | IM bot 接入身份、三层访问控制、配置同步契约（as-built 行为模型） | — | — | — | as-built |
+| [skill-system.md](capabilities/skill-system.md) | Skill 子系统完整行为：read-on-demand、平台治理、drift 检测、backflow 回流（as-built 行为模型） | — | — | — | as-built |
 
 ## 写作规范
 
