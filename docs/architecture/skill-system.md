@@ -1,6 +1,6 @@
 # Skill 子系统（as-built 行为模型）
 
-> **状态：as-built 行为参考（2026-06-15 schema 重设计后重写）**。本文只讲**逻辑怎么运转**（谁调谁、数据流、决策点、约束），**不复述列级 schema**——表/列/FK 的真相源是 [data-model](data-model.md)（Skill 段 + erDiagram）与迁移 092/094/095。设计 rationale 见 [`records/decision-logs/`](../records/decision-logs/)（`skill-system-enhancements-decisions.md`、`wave2-apply-decisions.md`）。配套 [agent-identity-model](agent-identity-model.md)。
+> **状态：as-built 行为参考（2026-06-15 schema 重设计后重写）**。本文只讲**逻辑怎么运转**（谁调谁、数据流、决策点、约束），**不复述列级 schema**——表/列/FK 的真相源是 [data-model](data-model.md)（Skill 段 + erDiagram）与迁移 092/094/095。设计 rationale 见 [`records/decision-logs/`](../records/decision-logs/)（`skill-system-enhancements-decisions.md`、`wave2-apply-decisions.md`）。配套 [agent-identity-model](../records/decision-logs/agent-identity-model.md)。
 
 ## 0. 一句话
 

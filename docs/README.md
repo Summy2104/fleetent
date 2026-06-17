@@ -11,21 +11,25 @@ docs/
   architecture.md              # 架构总览，当前权威入口：模块关系、数据流、关键决策
   glossary.md                  # 术语表
   architecture/
-    target-architecture.md # 详细架构模型：核+4面+基座、模块边界、Identity、只读投影、模块归属速查
-    data-model.md                # 数据模型与物理拓扑（as-built）
+    target-architecture.md    # 详细架构模型：核+4面+基座、模块边界、Identity、只读投影、模块归属速查
+    data-model.md             # 数据模型与物理拓扑（as-built）
+    agent-management.md       # Agent 管理子系统行为模型
+    im-access-model.md        # IM 接入与访问控制模型
+    skill-system.md           # Skill 子系统行为模型
   capabilities/
-    _template.md               # 能力域文档模板
-    *.md                       # 能力定义、状态和验收标准
-    roadmaps/                  # 能力簇 roadmap 和 Pilot readiness 总览
+    _template.md              # 能力域文档模板
+    *.md                      # 能力定义、状态和验收标准
+    roadmaps/                 # 能力簇 roadmap、Pilot readiness 总览和人工测试手册
   deployment/
     pilot-runbook.md           # Pilot 部署与人工验收流程
     pilot-install-checklist.md # 安装、升级、备份、健康检查和问题上报清单
     pilot-acceptance-guide.md  # Go / Conditional Go / No-Go 判定和报告模板
     secrets.md                 # Secret 和凭据处理指南
+    monitoring.md              # 监控与告警配置指南
     per-agent-sandbox-config.md # 迁移指南：沙箱配置从 platform.yaml 移至 agent.yaml
   records/
     integration/               # 一次性集成方案与执行日志
-    decision-logs/             # apply/review 过程中的决策记录
+    decision-logs/             # apply/review 过程中的决策记录（含已冻结的 agent-identity-model）
     roadmaps/                  # 历史开发排期和执行计划记录
   archive/                     # 过期设计、旧 internals deep dive、历史调研
 ```

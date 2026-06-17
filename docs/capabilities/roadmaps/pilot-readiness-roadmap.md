@@ -30,8 +30,8 @@ uv run python scripts/generate_pilot_verification_report.py
 
 专项人工验收手册：
 
-- [Intelligence Roadmap 人工测试手册](../../deployment/intelligence-roadmap-test-manual.md)
-- [Observability and Deployment Roadmap 人工测试手册](../../deployment/observability-deployment-roadmap-test-manual.md)
+- [Intelligence Roadmap 人工测试手册](intelligence-roadmap-test-manual.md)
+- [Observability and Deployment Roadmap 人工测试手册](observability-deployment-roadmap-test-manual.md)
 
 ## 全项目 readiness 看板
 

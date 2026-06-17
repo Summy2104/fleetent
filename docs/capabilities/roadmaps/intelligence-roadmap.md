@@ -10,7 +10,7 @@
 
 **Go。** Google Drive / Confluence 已完成真实 API check、sync 和本地 KB 入库验证；Jina embedding / rerank provider 已完成真实 smoke、evaluation 和 228 chunk 全量 reindex 验证；Memory extraction、Long-term Context 和 Reflection 的真实 LLM / provider smoke 已通过。生产化入口缺口已接受为 post-Go non-blocking backlog，不阻塞当前 Intelligence Go 判定。
 
-人工验收入口：[Intelligence Roadmap 人工测试手册](../../deployment/intelligence-roadmap-test-manual.md)。
+人工验收入口：[Intelligence Roadmap 人工测试手册](intelligence-roadmap-test-manual.md)。
 
 ## Go 验证状态
 
