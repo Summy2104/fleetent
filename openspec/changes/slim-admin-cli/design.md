@@ -1,85 +1,81 @@
 ## Context
 
-现有三个独立 binary 入口：
-- `fleetent`（`src/fleetent/__main__.py`）：已有 `agent init/run/restart/stop` 子命令 + 一次性 fallback
-- `fleetent-admin`（`src/fleetent/platform/admin_cli/main.py`）：12 个 CLI 模块，`register/handle` 模式
-- `fleetent-node`（`src/fleetent/node/app.py`）：node supervisor 入口
+三个独立 binary 入口：
+- `fleetent`（`src/fleetent/__main__.py`）：手写 argv 匹配（`if argv[:2] == ["agent","run"]`），已有 `agent init/run/restart/stop` + 一次性 fallback。`main()` 签名 `def main() -> None`，内部读 `sys.argv[1:]`。
+- `fleetent-admin`（`platform/admin_cli/main.py`）：`main() -> None`，内部 `parser.parse_args()`（读 sys.argv），`prog="fleetent-admin"`；12 个 CLI 模块走 `register/handle` 模式。
+- `fleetent-node`（`node/app.py`）：`main() -> None`，**无 argparse、无命令行参数**，全部配置经环境变量（`FLEETENT_NODE_*`）。
 
-`__main__.py` 的调度逻辑是手写 `argv` 匹配，没有 argparse 框架（`if argv[:2] == ["agent", "run"]:`），现有 `agent` 子命令组就是这种模式。
+前置 change `complete-admin-api-coverage` 落地后，18 条命令全部有 HTTP 等价路径。
 
-`fleetent-admin` 的 CLI 模块架构清晰（每个 `register(subparsers)` + `handle(args)` 函数），可以整体移植进新的子命令组而不需要修改各模块内部实现。
-
-`add-platform-admin-apis` 落地后，18 条 B 类命令有 HTTP API 等价路径，可以从 CLI 删除。
+审查（2026-06-18）发现的下游引用与陷阱已并入 tasks，本节只记关键技术决策。
 
 ## Goals / Non-Goals
 
 **Goals:**
-- `fleetent admin <cmd>` 成为 `fleetent-admin <cmd>` 的替代入口，行为等价
-- `fleetent node start` 成为 `fleetent-node` 的替代入口
-- 删除 18 条 B 类冗余 CLI 命令（HTTP API 已覆盖）
-- `fleetent-admin`/`fleetent-node` 降级为 deprecation shim，打印迁移提示后转发
+- `fleetent admin <cmd>` / `fleetent node start` 成为统一入口，行为等价旧 binary。
+- 删 18 条冗余命令，同步全仓下游引用（测试/specs/docs/脚本）使门禁与 `opsx:verify` 全绿。
+- 旧入口 shim 化，迁移提示对用户可见。
 
 **Non-Goals:**
-- 修改任何 CLI 命令的内部实现逻辑（只改命名空间和入口）
-- 将 admin CLI 迁移到 argparse 以外的框架
-- 修改 HTTP API（由 `add-platform-admin-apis` 处理）
-- 删除 `fleetent-tui`（已是独立 PARKED 决策）
+- 改任何保留命令的内部逻辑。
+- 删 `fleetent-tui`（独立 PARKED 决策）。
+- 删仍 CLI-only 保留的管理/维护命令（tenants/node/memory-shared/kb-extract/diagnostics/maintenance）。
 
 ## Decisions
 
-### D1：`fleetent admin` 作为整体转发，不逐命令重新注册
+### D1：`fleetent admin` 整体转发 + admin main 参数化
 
-`__main__.py` 中检测到 `argv[0] == "admin"` 时，懒加载 `platform.admin_cli.main` 并将 `argv[1:]` 转发给其 `main()` 函数（修改 `sys.argv` 后调用，或直接传参）。**不**把 12 个 CLI 模块逐一在 `__main__.py` 里重新注册——复用整个 admin CLI 的 argparse 树，避免双重维护。
+`__main__.py` 检测 `argv[0] == "admin"` 时懒加载 `platform.admin_cli.main`，调用 `admin_main.main(argv[1:])`。`admin_cli/main.py` 的 `main()` 改签名 `def main(argv: list[str] | None = None)`，`None` 时 fallback `sys.argv[1:]`，并把 `argv` 传给 `parser.parse_args(argv)`。复用整棵 admin argparse 树，不在 `__main__.py` 重新注册 12 个模块。
 
-这要求 admin CLI main 支持被调用时接受外部 argv，而不只读 `sys.argv`。改造 `platform/admin_cli/main.py` 的 `main()` 接受可选 `argv: list[str] | None = None` 参数。
+**prog 名修正**：`admin_cli/main.py` 的 `ArgumentParser(prog=...)` 改为可参数化（`main(argv=None, prog="fleetent admin")`）。否则 `fleetent admin --help` 的 usage 行会显示 `fleetent-admin`，与新命名空间自相矛盾。shim 调用时传 `prog="fleetent-admin"` 保持旧提示。
 
-### D2：懒加载隔离，避免污染 agent runtime 启动路径
+### D2：懒加载隔离 agent runtime 启动路径
 
-`__main__.py` 顶部只有 `from fleetent.runtime import run_sync`（一次性 fallback 用）。admin 和 node 子命令的 import 全部延迟到进入对应分支时执行（`if argv[0] == "admin": from fleetent.platform.admin_cli import main as admin_main`）。确保 `fleetent agent run` 不触发 platform 代码加载。
+admin / node 子命令的 import 全部延迟到进入对应分支（`if argv[0]=="admin": from fleetent.platform.admin_cli import main as admin_main`）。`fleetent agent run` 不得触发 platform import。
 
-### D3：deprecation shim 在 `pyproject.toml` 中保留脚本条目，函数体打印警告后转发
+**测试写法（明确指定，避免 flaky）**：`test_agent_run_does_not_import_platform` 用**同进程**：测试内先 `sys.modules.pop("fleetent.platform.admin_cli", None)`，`monkeypatch` 掉 `agent_app.serve`（避免真启动），调度到 `agent run` 分支后断言 `"fleetent.platform.admin_cli" not in sys.modules`。不要用子进程（属 integration 且慢），也不要裸断言（其他测试可能已污染 sys.modules）。与既有护栏 `test_module_dependency_guardrails.py` 互补（后者管 import 静态依赖，本测试管运行时懒加载时机）。
+
+### D3：deprecation shim 用 stderr print，不用 warnings.warn
 
 ```python
 # src/fleetent/_shims.py
+import sys
+
 def fleetent_admin_shim() -> None:
-    import sys, warnings
-    warnings.warn(
-        "fleetent-admin is deprecated; use: fleetent admin <cmd>",
-        DeprecationWarning, stacklevel=1,
-    )
-    sys.argv = ["fleetent", "admin"] + sys.argv[1:]
+    print("Deprecated: 'fleetent-admin' → use 'fleetent admin'.", file=sys.stderr)
+    sys.argv = ["fleetent", "admin", *sys.argv[1:]]
+    from fleetent.__main__ import main
+    main()
+
+def fleetent_node_shim() -> None:
+    print("Deprecated: 'fleetent-node' → use 'fleetent node start'.", file=sys.stderr)
+    sys.argv = ["fleetent", "node", "start", *sys.argv[1:]]
     from fleetent.__main__ import main
     main()
 ```
 
-`pyproject.toml` 中 `fleetent-admin` 指向 `fleetent._shims:fleetent_admin_shim`。`fleetent-node` 同理转发到 `fleetent node start`。
+**关键**：Python 默认过滤 `DeprecationWarning`（除非 `-W` 或在 `__main__`），`warnings.warn(...)` **不保证打到 stderr**。spec 验收要求"stderr 打印提示"，故用 `print(file=sys.stderr)`。`pyproject.toml` 的 `fleetent-admin`/`fleetent-node` 指向这两个 shim。
 
-### D4：B 类命令删除方式——只从 `register()` 中移除，不删模块文件
+### D4：删 B 类命令——只动 register/handle，保留模块文件
 
-18 条 B 类命令分散在各 CLI 模块（`agents.py`、`users.py`、`nodes.py`、`kb_connectors.py`、`observability.py`、`im.py`）。只在各模块的 `register()` 函数中删掉对应的 `add_parser` 调用和 `handle()` 中对应的分支。模块文件本身保留（其他命令还在）。
+18 条命令分散在 `users.py`/`agents.py`/`kb_connectors.py`/`observability.py`。只删各模块 `register()` 的 `add_parser` 和 `handle()` 对应分支。`observability.py` 全部命令是 B 类 → 从 `_COMMAND_MODULES` 移除该模块（文件保留）。`kb_connectors.py` 保留 `extract-entities`，只删 `connectors` 子命令。
 
-例外：`observability.py` 的所有命令均为 B 类，整个模块从 `_COMMAND_MODULES` 列表移除（但文件留着，作为历史参考，不做 shim）。
+### D5：`fleetent node start` 直调 node.app.main()
 
-### D5：`fleetent node` 子命令组，`start` 是主命令
-
-```
-fleetent node start      # 启动 node supervisor（等价 fleetent-node）
-fleetent node status     # （未来扩展槽位，本 change 暂不实现）
-```
-
-本 change 只实现 `fleetent node start`，调用 `node.app.main()`。
+`node/app.py` 无命令行参数（全环境变量），`fleetent node start` 直接 `node_app.main()` 即可。`fleetent node` 不带 `start` 或带多余参数时报用法错误。**不**预留 `node status` 槽位（node app 无此能力，避免臆想接口）。
 
 ## Risks / Trade-offs
 
-- **`fleetent-admin` shim 的 `sys.argv` 替换**：shim 通过修改 `sys.argv` 转发命令，部分极端情况（argparse 读 `sys.argv[0]` 做 prog 名称）可能显示 `fleetent admin` 而非 `fleetent-admin`，属预期行为（就是要引导迁移）。→ 无实质功能影响。
-- **B 类删除的时机**：本 change 和 `add-platform-admin-apis` 同步推进，apply 时必须确认前者已落地。tasks.md 中显式标注前置条件。→ apply 提示词里注明。
-- **`observability.py` 模块整体移除**：该模块的所有命令均被 HTTP API 覆盖，直接从 `_COMMAND_MODULES` 移除。如果日后新增 observability CLI 操作，需重新加回。→ 文件保留、只移出注册，重新加回成本低。
+- **[下游 242 处引用]** 本 change 真正的重头是同步测试/specs/docs/脚本，而非入口改造。tasks 已逐类列出；漏改任一类会导致 `make test-pr`（unit 硬断言）、`opsx:verify`（specs 不符）或文档测试红。→ tasks 分组覆盖，收尾跑 integration 对照基线。
+- **[AGENTS.md 并发编辑]** `AGENTS.md` 是项目指令文件，apply 在 worktree 改它时主会话不得同时改，否则 merge 冲突。→ apply 提示词里点明该文件只由执行会话改。
+- **[shim sys.argv 替换]** shim 改 `sys.argv` 后 argparse 的 prog 可能显示 `fleetent`——可接受（就是引导迁移）。
+- **[entry-point 改动需 uv sync]** `pyproject.toml` 改 scripts 后需 `uv sync` 才让 shell 命令生效；shim 函数本身可单测，端到端命令需手动验证（tasks 标注）。
 
 ## Migration Plan
 
-1. 先改 `admin_cli/main.py` 支持外部 argv
-2. 再改 `__main__.py` 接入 `admin` / `node` 子命令
-3. 再删 B 类命令（各模块 `register`/`handle` 中移除）
-4. 再写 shim 函数 + 改 `pyproject.toml`
-5. 每步均有对应测试（见 tasks.md）
-6. 最终收尾：`make test-pr` + integration 套件无新增失败
+1. 确认前置 `complete-admin-api-coverage` 已在 main
+2. admin main 参数化 + prog 修正 → `__main__.py` 接 admin/node 子命令
+3. 删 18 条命令 → 同步 specs delta
+4. shim（stderr）+ pyproject + uv sync
+5. 同步下游：entry-point 测试、integration 测试、文档测试、文档、Makefile、install 脚本
+6. 收尾：`make test-pr` + `make test-unit-ci` + integration 对照基线 + `opsx:verify`
