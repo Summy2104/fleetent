@@ -28,14 +28,13 @@ flowchart TD
         PARSE --> IDX["L1 索引\n全量 name + 摘要"]
     end
 
-    subgraph match["请求时匹配"]
-        INPUT[用户输入] --> KW{"关键词匹配\n当前实现"}
-        KW -->|命中| L2[加载 L2 全文]
-        KW -->|未命中| LLMR["aux LLM 路由\n读取 L1 摘要\n规划中"]
-        LLMR -->|有匹配| L2
-        LLMR -->|无匹配| NONE[不注入 Skill]
-        L2 --> REF{"L3 引用文件\n按需加载（规划中）"}
-        REF --> SYS[注入 system prompt]
+    subgraph match["请求时：read-on-demand catalog"]
+        INPUT[用户输入] --> CAT["available_skills_prompt()\n生成所有 enabled skill\n名称 + 描述 catalog"]
+        CAT --> CTX[注入上下文]
+        CTX --> MODEL["模型根据 catalog\n调用 read_skill 工具"]
+        MODEL -->|需要某 Skill| RS["read_skill(name)\n按需加载全文"]
+        MODEL -->|无需 Skill| NONE[不加载任何 Skill]
+        RS --> SYS[全文注入 system prompt]
     end
 
     subgraph conflict["多 Skill 命中（规划中）"]
@@ -47,53 +46,37 @@ flowchart TD
 
 ## 现状
 
-- ⚡ **Skill 扫描**：扫描 `skills/` 目录下一级子目录中的 `SKILL.md` 文件，建立索引
-  - 仅扫描一级目录，不支持深层嵌套
-  - 同名 Skill 冲突时静默覆盖，无警告
+- ✅ **Skill 扫描**：递归扫描 `skills/` 下任意层级的 `SKILL.md` 文件（`os.walk` 全递归），建立索引
+  - 同名 Skill 冲突时输出 warning 日志，按 tier/path-sort 确定性选择（user tier 覆盖 builtin），不再静默覆盖
   - 支持通过 `FLEETENT_SKILLS_DIR` 覆盖默认 skills 目录；旧 `MINI_AGENT_SKILLS_DIR` 不再生效
 
-- ⚡ **元数据解析**：从 `SKILL.md` 文件头部解析 `name` 和 `description`
-  - 使用简单行扫描，而非完整 YAML 解析器，遇到复杂格式会出错
-  - 解析失败时静默跳过，无报警
+- ✅ **元数据解析**：从 `SKILL.md` 文件头部使用标准 YAML 解析器（`yaml.safe_load`）完整解析 frontmatter
+  - 支持 `name`、`description`、`tags`、`enabled`、`enabled_by_default`、`disable_model_invocation` 等扩展字段
+  - 解析失败时明确报警，不静默跳过
 
-- ✅ **关键词匹配与注入**：用户输入命中 description 关键词时，将该 Skill 的完整内容注入 system prompt
-  - 当前为首次命中即停止，多 Skill 场景只注入第一个匹配
+- ✅ **Read-on-demand catalog 架构**：运行时由 `available_skills_prompt()` 生成所有 enabled skill 的 catalog（名称 + 描述），注入上下文；模型根据 catalog 调用 `read_skill` 工具按需加载 skill 全文，不预先注入完整内容
+
+- ✅ **热加载**：通过 admin CLI 或管理 API 触发 `reload()` 重新扫描，无需重启服务
+  - 重扫描期间继续使用旧索引，完成后原子交换
+  - 扫描失败时保留旧索引并告警，不影响服务
+
+- ✅ **安全审计（注入防护）**：`_audit_skill()` 加载时扫描 Skill 内容，识别已知的 prompt 注入模式
+  - severe / suspicious 两级分级：命中 suspicious 写入审计日志 + 启动时控制台警告；命中 severe 拒绝加载，设 `audit_blocked` 字段
+  - 被 `audit_blocked` 的 Skill 不进入 catalog，也不可被 `load()` 加载
+
+- ✅ **禁用机制**：某 Skill「是否进入 `available_skills_prompt` 清单」由单一资格谓词（`_disabled_reason`）裁决，覆盖四类来源 + 安全审计，任一命中即排除（不向模型展示）；`load()` 按名显式加载不受任何禁用约束（人工排查的安全出口，`audit_blocked` 除外）
+  - **`enabled`（作者级，frontmatter `enabled: false`）**：Skill 作者主动硬关停自身。**优先于 `enabled_by_default`**——即便 `enabled_by_default: true`，只要 `enabled: false` 仍被禁用。缺省 `true`
+  - **`disabled_skills`（运维级，部署配置 `Settings.disabled_skills`）**：运维按名强制关停，对所有 agent 生效
+  - **`enabled_by_default`（默认态，frontmatter）**：作者声明该 Skill 默认不自动进清单（缺省 `true`）。优先级最低
+  - **`audit_blocked`（安全审计）**：命中 severe 注入模式，优先级最高；`load()` 也被阻止
+  - **`model_invocation_disabled`（可见性级，frontmatter `disable_model_invocation: true`）**：仅从 catalog 隐藏，不出现在 `available_skills_prompt`，但不阻止手动 `load()`（供人工场景使用）
+  - **来源优先级（裁决顺序，也是 trace 记录的来源标识）**：`audit_blocked` > `model_invocation_disabled` > `frontmatter_disabled`（`enabled:false`）> `config_disabled`（`disabled_skills`）> `default_disabled`（`enabled_by_default:false`）。任一命中即排除，trace 记首个（最高优先）命中来源
+  - **可观测**：某 Skill 被排除出清单时，其 name 与来源标识写入该次运行日志的 `disabled_skills_trace` 字段（仅非空才写、向后兼容），便于排查「为什么这个 Skill 没生效/不在清单」；无禁用的运行不写该字段
 
 ## 规划中（v1.0）
 
-- [ ] **渐进式加载（L1 / L2 / L3）**：按需加载，减少无关 Skill 对 context 的占用
-  - **L1（始终加载）**：所有 Skill 的名称和一句话描述列表，让 AI 知道「有哪些 Skill 可用」
-  - **L2（按需加载）**：命中时加载该 Skill 的完整 `SKILL.md` 内容
-  - **L3（延迟加载）**：`SKILL.md` 中引用的附属文件，由 AI 通过文件读取工具按需获取
-
-- [ ] **完整 YAML frontmatter 解析**：使用标准 YAML 解析器，支持 `tags`、`platforms`、`version`、`enabled_by_default` 等扩展字段；解析失败时明确报警，不静默跳过
-
-- [ ] **多 Skill 共存**：同一请求命中多个 Skill 时的完整处理策略
-  - 所有命中 Skill 的 L1 摘要共存于 system prompt
-  - L2 全文保持首次命中原则（避免注入内容过多）
+- [ ] **多 Skill 共存**：同一请求多个 Skill 均相关时的冲突处理策略
   - `exclusive: true` 的 Skill 命中后向用户询问选择
-
-- [ ] **热加载**：通过 admin CLI 或管理 API 触发重新扫描，无需重启服务
-  - 重扫描期间继续使用旧索引，完成后原子切换
-  - 扫描失败时保留旧索引并告警，不影响服务
-  - 正在执行中的任务继续使用旧版 Skill，不受影响
-
-- [ ] **安全审计（注入防护）**：加载时扫描 Skill 内容，识别已知的 prompt 注入模式
-  - 16 类检测规则，包括：「忽略之前的指令」、伪装 system 指令、shell 注入命令等
-  - 命中可疑模式：写入审计日志 + 启动时控制台警告
-  - 命中严重模式：拒绝加载该 Skill
-
-- ✅ **禁用机制**：某 Skill「是否进入 `available_skills_prompt` 清单」由单一资格谓词（`_disabled_reason`）裁决，覆盖三类来源 + 安全审计，任一命中即排除（不向模型展示）；`load()` 按名显式加载不受任何禁用约束（人工排查的安全出口）
-  - **`enabled`（作者级，frontmatter `enabled: false`）**：Skill 作者主动硬关停自身。优先级最高（仅次于安全审计），**优先于 `enabled_by_default`**——即便 `enabled_by_default: true`，只要 `enabled: false` 仍被禁用。缺省 `true`
-  - **`disabled_skills`（运维级，部署配置 `Settings.disabled_skills`）**：运维按名强制关停，对所有 agent 生效
-  - **`enabled_by_default`（默认态，frontmatter）**：作者声明该 Skill 默认不自动进清单（缺省 `true`）。优先级最低
-  - **`audit_blocked`（安全审计，SK5）**：命中 severe 注入模式，优先级最高
-  - **来源优先级（裁决顺序，也是 trace 记录的来源标识）**：`audit_blocked` > `frontmatter_disabled`（`enabled:false`）> `config_disabled`（`disabled_skills`）> `default_disabled`（`enabled_by_default:false`）。任一命中即排除，trace 记首个（最高优先）命中来源
-  - **可观测**：某 Skill 被排除出清单时，其 name 与来源标识写入该次运行日志的 `disabled_skills_trace` 字段（仅非空才写、向后兼容），便于排查「为什么这个 Skill 没生效/不在清单」；无禁用的运行不写该字段
-
-- [ ] **深层嵌套目录支持**：递归扫描 `skills/` 下任意层级的 `SKILL.md` 文件
-
-- [ ] **同名冲突警告**：扫描时发现同名 Skill，明确报警并选定一个，不静默覆盖
 
 ## 验收标准
 
@@ -123,14 +106,13 @@ flowchart TD
 - 扫描：`SKILL.md` 存在时正确解析 `name` / `description`；文件缺失时跳过，不抛异常
 - 关键词匹配：description 包含关键词时命中；不包含时返回空
 - 注入内容：命中时 system_prompt 包含该 Skill 的完整内容；未命中时 system_prompt 不变
-- 同名 Skill：扫描时产生警告日志（v1.0）
+- 同名 Skill：扫描时产生警告日志，tier/path-sort 确定性选择
 - 环境变量：`FLEETENT_SKILLS_DIR` 设置时使用该路径；未设置时使用默认 `./skills`
 
 **需要 mock 的依赖**：
 - `skills/` 目录路径：`monkeypatch` 到 `tmp_path` 下的临时目录
-- 热加载的文件系统变更事件（v1.0）：mock 触发信号，不依赖真实文件变更
+- 热加载触发信号：mock `reload()` 调用，不依赖真实文件变更事件
 
 ## 待决问题
 
-- [ ] L1 索引注入方式：作为 system_prompt 固定前缀，还是每次请求动态拼接？对 token 消耗的影响需评估。（负责人：待认领）
-- [ ] 安全审计的 16 类规则由谁维护？是否纳入版本控制，如何更新？（负责人：待认领）
+- [ ] 安全审计规则由谁维护？是否纳入版本控制，如何更新？（负责人：待认领）

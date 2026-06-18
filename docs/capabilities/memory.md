@@ -8,7 +8,7 @@ User Memory 的提取、存储与检索，让 agent 在多次对话中积累单�
 
 **负责**：从对话中提取用户相关事实，按类型结构化存储，支持向量相似度检索，并向 vector_store reindex 暴露当前可索引记忆。当前 `fleetent.memory` 已实现 User Memory，并提供 Shared Memory 数据层；Shared Memory 保存已确认的团队 / 租户级上下文、偏好和流程。User Memory 的向量写入与检索经 agent boot 注入的 per-agent backend（`agent_vectors.db`），embedding 仍走全局 `vector_store` provider。
 
-**不负责**：企业文档知识（→ knowledge_base）、注入 system prompt 的协调与 token 预算（→ long_term_ctx）、未经 owner 确认的 reflection 写回。Shared Memory 的 prompt 注入由 long_term_ctx 按 agent 归属（tenant / team）的 context policy 协调，memory 只提供 `search_shared_memory` 检索 API。
+**不负责**：企业文档知识（→ knowledge_base）、注入 system prompt 的协调与 token 预算（→ long_term_ctx）、未经 owner 确认的 reflection 写回。Shared Memory 的 prompt 注入由 long_term_ctx 按 agent 归属（tenant / team）的 context policy 协调，memory 只提供 `search_shared_memory` 检索 API。注：Shared Memory 经 long_term_ctx 的注入路径当前 descope，`build_context()` 尚未调用 `search_shared_memory()`；此功能待 Pilot 后评估启用。
 
 ### 记忆系统全局架构
 
@@ -298,4 +298,5 @@ User Memory 应继续作为模块化单体内的 `fleetent.memory` 边界。未�
 
 - [ ] 冲突判断粒度：同 type 下全量比较，还是只对语义相似度超过阈值的条目做冲突检测？（负责人：待认领）
 - [ ] context TTL 起算点：首次提及时间，还是最后一次提及时间？（负责人：待认领）
-- [ ] 记忆条数上限：v1.0 先设软监控阈值（超出记告警日志），还是直接按 type 设硬上限？如设硬上限，identity / preferences 各多少合适？超出时由 reflection 批量合并，还是 memory 模块内联驱逐？（负责人：待认领）
+- [x] 记忆条数上限：v1.0 先设软监控阈值（超出记告警日志），还是直接按 type 设硬上限？如设硬上限，identity / preferences 各多少合适？超出时由 reflection 批量合并，还是 memory 模块内联驱逐？（负责人：待认领）
+  - 已实现：每类设软上限（identity/context=20，preferences=30），通过显式 retention API 处理 over-limit rows（`maybe_run_maintenance()`），不自动驱逐；重复合并通过 exact duplicate compaction 处理。

@@ -3,7 +3,7 @@
 > **现状权威参考**——只描述"当前 schema 是什么"。变更史（哪个迁移、哪一期落地）见 git 与 [`records/decision-logs/`](../records/decision-logs/)；设计 rationale（R1/R2/B2、物理 vs 逻辑、向量模型 A、实体减法等）见 [`persistence-redesign-decisions.md`](../records/decision-logs/persistence-redesign-decisions.md)。
 > **列级 schema 真相源是迁移**：管理库 `migrations/`（Alembic）；agent 侧库 `runtime/agent_state_migrations.py` / `knowledge_base/core/migrations.py` / `memory/shared_memory_migrations.py`（嵌入式 Y）。本文实体清单为导航，不逐列复制。
 > **维护规则**：任何 change 增删表 / 改列 / 改关系，MUST 同步对应实体清单**与 erDiagram**（图文同改）。
-> **配套**：[`target-architecture.md`](./target-architecture.md)（核+4面+基座 · Identity §6 · 只读投影 §7）· [`agent-management.md`](./agent-management.md)（agent 生命周期/自管/绑定/编排）· [`skill-system.md`](./skill-system.md) · [`im-access-model.md`](./im-access-model.md)。
+> **配套**：[`target-architecture.md`](./target-architecture.md)（核+4面+基座 · Identity §6 · 只读投影 §7）· [`agent-management.md`](../capabilities/agent-management.md)（agent 生命周期/自管/绑定/编排）· [`skill-system.md`](../capabilities/skill-system.md) · [`im-access-model.md`](../capabilities/im-access-model.md)。
 
 ## 1. 物理拓扑（5 库类型 · 按主体物理分区）
 
@@ -67,6 +67,9 @@ graph TD
     kb_connectors
     model_providers
     session_meta
+    nodes["nodes（节点注册）"]
+    agent_placements["agent_placements（agent↔node 分配）"]
+    node_agent_status["node_agent_status（心跳/运行状态）"]
   end
   subgraph AGENT["per-agent agent_state.db ｜ agent 侧 · 每 agent 一文件 · 嵌入式 Y"]
     sessions
@@ -104,7 +107,10 @@ graph TD
   vector_items -. "mem:" .-> memory_items
   vector_items -. "shared:" .-> shared_memory_items
   vector_items -. "kb:" .-> knowledge_chunks
+  nodes --> agent_placements
 ```
+
+> 注：external_services / external_credentials / agent_service_grants（工具 OAuth Vault）已落管理库，详见 §3.2。
 
 > 宏观图只列各库主干实体；完整清单与库内关系见 §3.2–§3.6。`session_meta → sessions` 是全库唯一一条 mgmt→agent 方向跨库引用（platform 自有元数据挂 agent 会话，非 agent 反向写）。省略的跨库边：`reflection_proposals.*_user_id` / `approval_requests.approver_user_id` ⇢ `users`；agent 侧各表 `tenant_id` 接缝列 ⇢ `tenants`；`shared_memory_items.scope_id` 在 `scope_type=tenant` 时 ⇢ `tenants`。
 
@@ -127,9 +133,9 @@ graph TD
 
 | 表 | 键 / 关键列 | FK | 用途 |
 |---|---|---|---|
-| `agents` | `id`=不可变身份 · `name`=可读标签 · `active_version_id`(裸 INTEGER 无 FK) · `supports_dm`/`supports_groups`；无 status 列 | — | agent 定义；管理逻辑 → [agent-management](agent-management.md) |
+| `agents` | `id`=不可变身份 · `name`=可读标签 · `active_version_id`(裸 INTEGER 无 FK) · `supports_dm`/`supports_groups`；无 status 列 | — | agent 定义；管理逻辑 → [agent-management](../capabilities/agent-management.md) |
 | `agent_versions` | `agent_id` | → agents (CASCADE) | 不可变版本快照 |
-| `agent_admin_state` | PK `agent_id`；`status`/`provenance`/`drift`/`archived_at` | → agents (CASCADE) | 管理态（生命周期+自管+drift）→ [agent-management §2](agent-management.md) |
+| `agent_admin_state` | PK `agent_id`；`status`/`provenance`/`drift`/`archived_at` | → agents (CASCADE) | 管理态（生命周期+自管+drift）→ [agent-management §2](../capabilities/agent-management.md) |
 | `user_agents` | `(user_id, agent_id)` | → agents (CASCADE) | 用户↔agent 准入；materialize → `im.allow_users`（admin 维护）|
 | `agent_im_groups` | `(agent_id, platform, group_id)` | → agents (CASCADE) | IM 群白名单；materialize → `im.<platform>.allow_groups` |
 | `agent_kbs` | `agent_id` · `created_by` | → agents (CASCADE) | agent↔KB 绑定真相源；`kb_id` 软引用本 tenant `kb.db` |
@@ -137,11 +143,11 @@ graph TD
 | `agent_mcp_servers` | `(agent_id, server_id)` | → agents (CASCADE) | agent↔MCP 挂载（绑定）；`server_id` 软引用 `mcp_servers` |
 | `agent_service_grants` | `agent_id` · `run_as`(user/agent) | → agents (CASCADE) | agent↔外部服务授权；`service_id` 软引用 `external_services` |
 | `agent_secrets` | `agent_id` 可空（agent/shared scope）| → agents (CASCADE) | 密文 secret（node 下发时注入）|
-| `agent_skills` | `(agent_id, skill_name)`；drift 列 `base_version`/`base_commit`/`drift`/`drift_at` | → agents (CASCADE) · → skills(name) | skill 启用 + 部署副本 drift；→ [skill-system](skill-system.md) |
+| `agent_skills` | `(agent_id, skill_name)`；drift 列 `base_version`/`base_commit`/`drift`/`drift_at` | → agents (CASCADE) · → skills(name) | skill 启用 + 部署副本 drift；→ [skill-system](../capabilities/skill-system.md) |
 | `external_services` | 单层全局**无 `agent_id`**；`protocol`=oauth2/apikey | — | 工具 OAuth 服务注册表（`client_secret` 走 env 不落库）|
 | `external_credentials` | PK `(user_id, service_id)`；`status`=authorized/needs_reauth/error | — (软引用 users/external_services) | per-principal Fernet 加密凭证（明文不出库）|
 
-**节点编排**（→ [agent-management §6](agent-management.md)；desired/reported reconcile）
+**节点编排**（→ [agent-management §6](../capabilities/agent-management.md)；desired/reported reconcile）
 
 | 表 | 键 / 关键列 | FK | 用途 |
 |---|---|---|---|
@@ -149,7 +155,7 @@ graph TD
 | `agent_placements` | PK `agent_id` · `node_id` · `pinned_by` | → agents (CASCADE) · → nodes (RESTRICT) | **期望态**：pin agent→node（node 有 pin 不可删）|
 | `node_agent_status` | PK `agent_id` · `node_id` · `phase`/`pid`/`health`/`detail` | → agents (CASCADE) · → nodes (CASCADE) | **上报态投影**：node 回报实际运行态 |
 
-**Skill 治理**（→ [skill-system](skill-system.md)）
+**Skill 治理**（→ [skill-system](../capabilities/skill-system.md)）
 
 | 表 | 键 / 关键列 | FK | 用途 |
 |---|---|---|---|

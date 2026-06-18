@@ -225,5 +225,7 @@ memory / knowledge / observability 的接口，未来可以独立成 package，�
 - [ ] token 预算默认值：Agent config / policy 中配置的 token 上限设多少？与 `available_tokens` 取 min 时，两者的典型比例是多少？（负责人：待认领）
 - [ ] memory 与 knowledge 的 token 分配：各自固定比例，还是完全按相关度动态分配？（负责人：待认领）
 - [ ] 格式化模板：memory 和 knowledge 区段的具体格式由谁定义，是否需要可配置？（负责人：待认领）
-- [ ] knowledge provider 注入方式：通过 config 开关、依赖注入参数，还是模块级 provider registry？（负责人：待认领）
-- [ ] graph_search 触发决策：等 knowledge-base graph search 进入实现前再定；本阶段不接入 graph_search。（负责人：待认领）
+- [x] knowledge provider 注入方式：通过 config 开关、依赖注入参数，还是模块级 provider registry？（负责人：待认领）
+  - 已实现：优先使用 `set_knowledge_provider()` 注入（测试/override 场景）；生产路径通过 `agent.yaml` 的 `knowledge.enabled + knowledge.bindings` 配置驱动（`_search_knowledge()` 中按优先级分支）。
+- [x] graph_search 触发决策：等 knowledge-base graph search 进入实现前再定；本阶段不接入 graph_search。（负责人：待认领）
+  - graph_search 技术实现已完成（knowledge-base-graph-search 已归档，depth 0/1 可用）；是否接入 `build_context()` 默认路径待 Pilot 反馈后决定（当前通过 `plan_knowledge_search()` 显式调用）。

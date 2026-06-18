@@ -9,7 +9,7 @@
 多用户管理、API 认证和管理员操作，并向上扩展为统一的 Admin Web 后台——涵盖用户 / IM、Agent、Skill、聊天（试运行 + 会话管理）、知识库、connector、model_provider 管理，askit 编排与 fleetent 自管理，跨 agent 统计与单请求全链路追踪，以及资源监控与告警。是 fleetent 作为多租户平台的基础层与运维控制面。
 
 **调用关系**：
-- 依赖：user-center（用户创建、禁用、拉黑等写操作均通过 user-center 接口，不直接写 users 表）、user_store / im_user_store（只读，供 Bearer token 认证查询）、agent_store（Agent 定义与绑定的读写，供 Admin UI 的 Agent 管理页）、skill_registry（Skill 索引读取与热加载触发，供 Admin UI 的 Skill 管理页）、reflection（只读 `reflection_proposals(domain=skill)` 与 trend summary，供 Skill 提案 inbox / 投影展示；审批写路径仍归 agent-owned reflection / governance）、session_mgr（只读 / 接管，供 Admin UI 的聊天会话管理页）、agent_loop（admin 试运行聊天经统一 run 入口发起）、knowledge_base（知识库的导入 / 检索 / 删除，供 Admin UI 的知识库管理页）、connectors（per-user OAuth 授权状态与凭证生命周期，供 Admin UI 的 connector 管理页）、mcp（MCP server 连接状态与工具注册，供 connector 管理页的 MCP 子视图）、model_router（provider / 模型路由配置与单价表的读写，供 Admin UI 的 model_provider 管理页）、askit（外部 spec 编译 / 部署工具链，供 Admin UI 的 askit 编排控制台调用，详见「askit 编排控制台」）
+- 依赖：user_store（users 表读写经由 platform user_store）、im_user_store（只读，供 Bearer token 认证查询）、agent_store（Agent 定义与绑定的读写，供 Admin UI 的 Agent 管理页）、skill_registry（Skill 索引读取与热加载触发，供 Admin UI 的 Skill 管理页）、reflection（只读 `reflection_proposals(domain=skill)` 与 trend summary，供 Skill 提案 inbox / 投影展示；审批写路径仍归 agent-owned reflection / governance）、session_mgr（只读 / 接管，供 Admin UI 的聊天会话管理页）、agent_loop（admin 试运行聊天经统一 run 入口发起）、knowledge_base（知识库的导入 / 检索 / 删除，供 Admin UI 的知识库管理页）、connectors（per-user OAuth 授权状态与凭证生命周期，供 Admin UI 的 connector 管理页）、mcp（MCP server 连接状态与工具注册，供 connector 管理页的 MCP 子视图）、model_router（provider / 模型路由配置与单价表的读写，供 Admin UI 的 model_provider 管理页）、askit（外部 spec 编译 / 部署工具链，供 Admin UI 的 askit 编排控制台调用，详见「askit 编排控制台」）
 - 被依赖：server.py（认证）、normalizer（用户查找）、admin CLI
 - **职责边界**：platform 只提供 Agent / Skill / 聊天 / 知识库 / connector / model_provider / askit 操作的**管理面**（Admin UI 上的增删改查、启停、绑定 / 分配、按系列触发与观测）；它们的**运行语义**——Agent 的 allowed_tools 校验、审批、路由解析归 [governance](./governance.md) / [agent-runtime](./agent-runtime.md)；Skill 的扫描 / 匹配 / 注入 / 禁用 / 安全审计归 [skill](./skill.md)，AI 自动生成的 Skill 提案与审批流归 [reflection](./reflection.md)；聊天会话的并发锁 / 原子持久化 / 上下文压缩归 [session](./session.md) / agent-runtime；知识库的解析 / 分块 / 索引 / 检索归 [knowledge-base](./knowledge-base.md)；connector 的 OAuth consent / 凭证刷新 / 注入归 [connectors](./connectors.md)，MCP 服务连接 / 工具注册 / 降级归 [mcp](./mcp.md)；model_provider 的 Agent-scoped targets / routes、fallback 和 client 实例化归 [model-router](./model-router.md)；askit 的 spec 编译 / 校验 / 部署 / 覆盖回流等语义归 **ai-skills-toolkit 外部工具域**。本模块只交叉引用、不重复定义这些语义
 - **不涉及**：config（属 deployment 域）
@@ -100,6 +100,12 @@ flowchart TD
 - ✅ **用户管理 CLI**：create-user、list-users、rotate-key
 
 - ✅ **IM 用户管理 CLI**：approve-user、block-user、list-pending（v1.0 起 IM 用户首次会话**默认放行**，`approve-user` / `list-pending` 仅作历史兼容；`block-user` 收回到 UI 由 admin 操作）
+
+- ✅ **节点注册表（node registry）**：多机部署所需的 node 身份管理已落地
+  - `nodes` 表（node_id / host / port / version / last_seen_at / status）已落 Alembic
+  - `agent_placements` 表（agent↔node placement 关系）已落
+  - node desired-state API：`POST /admin/nodes/{node_id}/desired-state` 已就位
+  - CLI：`uv run fleetent-admin node register|list|deregister` 可用
 
 ## 规划中（v1.0）
 
@@ -1375,6 +1381,6 @@ flowchart LR
 - [ ] **集群状态外置（前置地基）**：SQLite（管理库 `management.db` + agent 侧各物理库）、JSON sessions + per-session `asyncio.Lock`、governance.permission_gate 的 `asyncio.Event`、APScheduler 进程内调度、observability traces 均为单机部署假设。多机共享同一份事实需迁到自托管基础设施：管理库 → PostgreSQL；sessions → PostgreSQL / Redis；per-session 锁 → 分布式锁（Redis / PG advisory lock）；traces → 集中表或共享数据库后端。无此步则多机只是各跑各的。（负责人：待认领）
 - [ ] **跨节点审批信令**：一个在途请求只活在某一台节点，但审批动作可能落在另一台后台。governance.permission_gate 的 `asyncio.Event` 需改为跨节点唤醒（Redis pub/sub 或 PG LISTEN/NOTIFY），或把 approval / cancel 路由到持有该请求的 owning node（配合 request_id）。（负责人：待认领）
 - [ ] **单例协调任务的 leader 选举**：cron_scheduler 与 reflection 定期任务必须全集群只跑一次，否则每台节点重复触发同一任务。需 leader 选举或共享 jobstore + 互斥锁。（负责人：待认领）
-- [ ] **节点注册表与控制面**：后台是否演进为无状态控制面（任一节点提供同一 Admin UI，读写共享状态，管整个 fleet）？是否新增「节点 / 实例管理」面——实例注册（node_id / host / 版本 / 心跳 / 状态）、集群拓扑、drain / 滚动重启、版本偏移告警？（负责人：待认领）
+- [ ] **节点控制面（Admin UI）**：后台是否演进为无状态控制面（任一节点提供同一 Admin UI，读写共享状态，管整个 fleet）？集群拓扑可视化、drain / 滚动重启、版本偏移告警等 UI 层能力待评估。节点注册表（nodes / agent_placements 表与 CLI）已落地，见「现状」。（负责人：待认领）
 - [ ] **监控告警的节点维度**：「资源监控与告警」需从单机扩为按节点上报 + 集群汇总；告警规则作用域扩到 单节点 / 节点组 / 集群聚合，区分"单节点挂"与"集群整体降级"；抑制规则上提到节点层级（节点宕机抑制其上容器 / 进程的次生告警）。（负责人：待认领）
 - [ ] **配置一致性与 skill 分发**：`deploy --target fleetent` 写共享 store 后全节点自动收敛，但 skill 文件的跨节点分发载体（共享卷 / 对象存储 / deploy 时同步）与 per-node 配置 drift / 版本展示待定。（负责人：待认领）

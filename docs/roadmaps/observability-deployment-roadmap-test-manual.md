@@ -1,7 +1,7 @@
 # Observability and Deployment Roadmap 人工测试手册
 
 本手册用于把
-[observability-deployment-roadmap.md](../capabilities/roadmaps/observability-deployment-roadmap.md)
+[observability-deployment-roadmap.md](observability-deployment-roadmap.md)
 从“本地自动化已通过”推进到 Pilot `Go` 所需的人工证据。它覆盖 Observability、Diagnostics、
 Deployment / Config 和 Pilot verification；Memory / KB / Reflection 的业务验收见
 [intelligence-roadmap-test-manual.md](intelligence-roadmap-test-manual.md)。

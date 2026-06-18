@@ -6,7 +6,7 @@
 
 session 持久化层，管理对话上下文的读写、并发保护和生命周期。session 是跨请求维护对话连续性的核心基础设施。
 
-**负责**：session 消息历史的读写、并发锁、原子持久化、TTL 过期与清理（规划中）。
+**负责**：session 消息历史的读写、并发锁、原子持久化、TTL 过期与清理、session 元数据索引、磁盘空间管理。
 
 **不负责**：session 内消息的压缩（→ context_mgr）、执行记录写入（→ observability）、IM 平台 thread/channel 与 session 的映射（→ im-gateway）、定时任务触发逻辑（→ cron_scheduler）。
 
@@ -32,8 +32,8 @@ flowchart TD
         RENAME --> UNLOCK["释放 Lock"]
     end
 
-    subgraph cleanup["清理（规划中）"]
-        CRON["定期任务"] --> SCAN["扫描 sessions/ 目录"]
+    subgraph cleanup["清理（后台任务）"]
+        CRON["server lifespan 启动\nstart_session_maintenance()"] --> SCAN["扫描 sessions/ 目录"]
         SCAN --> TTL{"最后活跃\n超过 TTL?"}
         TTL -->|是| DEL["删除 session 文件"]
         TTL -->|否| KEEP["保留"]
@@ -64,19 +64,19 @@ session_id 是 session 的唯一标识，格式因来源而异：
 
 - ✅ **原子写入**：先写 `.json.tmp`，完成后 `rename` 替换，防止写入中断损坏文件
 
-- ❌ **TTL / 过期**：无自动清理，session 文件永久积累，磁盘持续增长
+- ✅ **TTL / 过期与自动清理**：session_mgr 内部 asyncio 后台任务，server lifespan 启动时触发（`start_session_maintenance()`），支持 TTL + 容量上限清理；TTL 以最后活跃时间计算
 
-- ❌ **session 元数据**：无创建时间、最后活跃时间等索引，无法按时间排序或统计
+- ✅ **session 元数据索引**：per-agent state DB 的 `sessions` 表，含 `created_at` / `updated_at` / `message_count` / `user_id`（嵌入式 Y 迁移）
 
-- ❌ **大小保护**：单个 session 文件可无限增长（context_mgr 压缩缓解 token 问题，但不限制文件大小）
+- ✅ **磁盘空间管理**：容量上限清理，超限时按最后活跃时间 LRU 清理最旧的 session
 
 ## 规划中（v1.0）
 
-- [ ] **TTL 过期与自动清理**：防止磁盘无限增长
-  - 配置 `session_ttl_days`（默认 30 天），定期后台任务扫描并删除超期 session
+- [x] **TTL 过期与自动清理**：防止磁盘无限增长
+  - 配置 `session_ttl_days`（默认 30 天），`start_session_maintenance()` 在 server lifespan 启动时触发内部 asyncio 后台任务，定期扫描并删除超期 session
   - TTL 以最后活跃时间计算，而非创建时间
 
-- [ ] **session 轻量元数据索引**：存储每个 session 的基本信息，支持管理和统计
+- [x] **session 轻量元数据索引**：存储每个 session 的基本信息，支持管理和统计
   - 记录：创建时间、最后活跃时间、消息数；agent 归属由 per-agent 物理库圈定，不在 `sessions` 表重复存 `agent_name`
   - 存于 per-agent 运行库 `agent_state.db` 的 `sessions` 表（嵌入式 Y 迁移），不增加 session 文件本身体积；platform 管理侧另有管理库 `session_meta` 表保存 origin / pinned / takeover 等控制面元数据，会话**内容**仍是 `SESSIONS_DIR` 下的 JSON 文件
 
@@ -85,7 +85,7 @@ session_id 是 session 的唯一标识，格式因来源而异：
   - `session_id` 未指定时：每次新建独立 session，上下文不跨次保留（适合无状态定时操作）
   - 两种语义在 cron 任务配置中显式声明，不做隐式推断
 
-- [ ] **磁盘空间管理**：总 session 文件大小上限或最大保留数量，超限时按 LRU 清理最旧的 session
+- [x] **磁盘空间管理**：总 session 文件大小上限或最大保留数量，超限时按 LRU 清理最旧的 session
 
 ## 验收标准
 
@@ -132,5 +132,5 @@ session_id 是 session 的唯一标识，格式因来源而异：
 
 ## 待决问题
 
-- [ ] TTL 清理任务由谁触发？复用 cron_scheduler 的基础设施，还是 session_mgr 内部维护独立的后台任务？（负责人：待认领）
+- [x] TTL 清理任务由谁触发？复用 cron_scheduler 的基础设施，还是 session_mgr 内部维护独立的后台任务？→ **已决**：session_mgr 内部 asyncio 任务，server lifespan 启动时调用 `start_session_maintenance()`，不依赖 cron_scheduler。
 - [ ] 服务重启后内存中的 `_locks` dict 被清空，正在写入中的请求（极少概率）会不会留下 `.json.tmp` 孤儿文件？是否需要启动时扫描清理？（负责人：待认领）

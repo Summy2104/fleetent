@@ -37,7 +37,7 @@ flowchart TD
         G --> B
     end
 
-    subgraph stop["强制终止（规划中）"]
+    subgraph stop["强制终止"]
         S1[步数超限]
         S2["预算耗尽 → Grace Call"]
         S3[外部取消信号]
@@ -60,7 +60,7 @@ flowchart TD
   - `RouteConfig` 支持 `fallbacks: list[str]`
   - 重试耗尽后抛出异常，trace 中记录实际使用的模型
 
-- ✅ **内置工具**：`time`、`calculate`、`read_file`、`write_file`、`run_code`、`sub_agent`
+- ✅ **内置工具**：内置工具详见 tools.md，当前包含文件、Web、Shell、图像生成、交互等多个类别
   - `@tool` / `@tool(risk_level="medium/high")` 装饰器注册
   - import `tools.py` 即触发注册（副作用）
 
@@ -79,23 +79,27 @@ flowchart TD
   - 每个子 agent 使用全新上下文
   - child trace 记录 `parent_session_id`，可通过 traces 追踪完整调用链
 
+- ✅ **终止框架**：`runtime/termination.py`（TerminationController、ConsecutiveFailuresChecker、GuardrailChecker）接入主循环，每种终止原因对应不同收尾行为；终止原因码写入 observability trace event
+
+- ✅ **循环检测**：`runtime/loop_detector.py` 识别 AI 陷入无意义重复操作；检测到循环注入警告提示，持续重复则强制停止
+
+- ✅ **取消传播**：`runtime/cancellation.py` 实现 cancel token 单向流贯穿主循环和工具调用；外部取消时正在执行的工具真正中止并释放资源
+
+- ✅ **迭代预算与 Grace Call**：`runtime/budget.py`（BudgetConfig max_turns/max_tokens、BudgetChecker）；预算将耗尽时触发 Grace Call，给 AI 最后一次机会生成当前进展总结
+
+- ✅ **消息卫生（Message Hygiene）**：`runtime/message_hygiene.py`（sanitize()、HygieneReport）自动修复连续同角色消息、孤立工具结果、缺失工具结果等违规；修复动作写入 trace event
+
+- ✅ **工具超时保护**：`tools/registry.py` 的 `get_effective_timeout` 接线；超时取消调用并向 AI 返回超时错误结果，不中断主循环
+
+- ✅ **多模态输入支持**：`tools/multimodal.py` + `loop.py` 中 `build_message_with_images` 接线；支持 base64 编码图片作为消息内容
+
+- ✅ **工具调用守卫（Guardrails）**：`runtime/tool_guardrails.py`（GuardrailAction、evaluate_guardrail）检测相同工具相同参数连续重复、连续失败等异常调用模式
+
+- ✅ **插件工具机制**：`tools/plugin_loader.py`（PluginMeta、expand_plugin_patterns）；`plugins/{插件名}/` 目录下放 `plugin.yaml` + `@tool` 函数，启动时自动扫描加载，工具自动加命名空间前缀
+
 ## 规划中（v1.0）
 
 ### 核心循环增强
-
-- [ ] **终止条件管理**：强制终止条件接入主循环，每种原因对应不同的收尾行为
-  - `max_turns`：执行步数超限
-  - `budget_exceeded`：token 用量或成本超限 → 触发 Grace Call
-  - `cancelled`：收到外部取消信号 → 直接停止
-  - `approval_rejected`：高风险操作被人工拒绝 → 停止当次任务
-  - `loop_detected`：检测到无意义重复操作
-  - `consecutive_failures`：连续多次工具调用或 AI 请求失败
-  - 终止原因码写入 observability trace event，用于统计「任务为何失败」和生成面向用户的提示
-
-- [ ] **迭代预算与 Grace Call**：任意预算维度耗尽时优雅停止
-  - 三维预算：执行步数上限 / token 用量上限 / 美元成本上限
-  - 预算将耗尽时不直接切断，而是给 AI 最后一次机会生成「当前进展总结」（Grace Call）
-  - Grace Call 有独立的 token 预算；失败则返回已有的部分结果
 
 - [ ] **工具并行调度**：AI 单轮可能同时请求多个工具，按依赖关系决定是否并行
   - **完全可并行**：工具之间无依赖、无共享资源（如同时查询多个独立数据源）→ 并行执行
@@ -103,10 +107,6 @@ flowchart TD
   - **必须串行**：有副作用、依赖前步结果、或需人工审批的工具 → 始终串行
   - 并行结果必须按 AI 原始请求的顺序回填，顺序错乱会导致 AI 上下文混乱
   - 当前状态：所有工具均串行执行，并行调度未实现
-
-- [ ] **循环检测**：识别 AI 陷入「反复调用同一工具却毫无进展」的状态
-  - 主循环层做粗粒度检测，细粒度检测见工具调用守卫
-  - 检测到循环 → 注入警告提示；AI 忽略仍重复 → 强制停止
 
 - [ ] **错误分类与重试策略**：运行时错误归一化为固定分类，每类关联恢复策略
 
@@ -124,31 +124,11 @@ flowchart TD
 
   主循环只读取错误类型上挂载的标志位（是否重试 / 是否压缩 / 是否切换模型），不重复解析错误内容。
 
-- [ ] **消息卫生与契约修复**：发给 LLM 的消息序列必须满足严格格式要求，自动修复违规
-  - 连续两条同一角色消息 → 合并或插入占位消息
-  - 有工具调用但缺少对应结果 → 补充「工具执行失败」占位结果
-  - 有工具结果但找不到对应调用 → 移除孤立结果
-  - 修复动作必须写入 observability trace event；修复失败尽早报错，不传不合法消息给 LLM
-
 ### 工具层增强
-
-- [ ] **插件工具机制**：企业团队无需修改平台代码即可扩展工具
-  - 在 `plugins/{插件名}/` 目录下放 `plugin.yaml` + `__init__.py`（含 `@tool` 函数）
-  - 平台启动时自动扫描加载 `enabled: true` 的插件，工具自动加命名空间前缀 `{插件名}__{工具名}`
-  - agent 定义中须列出 `plugins: [crm_tools]`，否则该插件工具对该 agent 不可见
-  - `plugin.yaml` 格式错误 → 跳过该插件并警告，不阻断启动
-
-- [ ] **工具超时保护**：每次工具调用有超时上限（内置 30s / MCP 60s / 插件 30s，可配置）
-  - 超时 → 取消调用，向 AI 返回超时错误结果（不抛异常中断循环）
-  - 取消必须真正释放资源（沙箱容器、MCP 连接）
 
 - [ ] **工具结果写入时压缩**：工具结果写入 context 时立即做大小控制，context 从一开始就保持紧凑
   - 第一层（当轮）：结果超 4000 tokens 时截断，保留开头 + 结尾 + 关键标识符（文件路径、ID、哈希值）
   - 第二层（跨轮）：进入下一轮时，尾部之外的旧 `tool_result` 自动降级为面包屑格式
-
-- [ ] **工具调用守卫（Guardrails）**：检测异常调用模式，防止 AI 反复调用同一工具毫无进展
-  - 相同工具 + 相同参数连续重复 N 次 → 注入警告提示；AI 忽略仍重复 → 停止调用
-  - 同一工具连续失败 M 次 → 同等处理
 
 - [ ] **参数消毒与 Secret 过滤**：工具调用参数在执行前做格式修复；沙箱环境严格过滤敏感变量（见 sandbox.md 环境变量过滤）
   - 参数 JSON 格式损坏 → 尝试自动修复；修复失败则向 AI 报错
@@ -178,22 +158,11 @@ flowchart TD
 
 ### 运行治理
 
-- [ ] **成本预算管控（五层）**：单次任务 / 单 session / 单用户 / 单 agent / 全局，各自可配置上限
-  - 三个计量维度：执行步数 / token 用量 / 美元成本
-  - 系统内部操作（如压缩调用）可豁免计入预算
-  - 到达上限触发 Grace Call，不硬切断
-
-- [ ] **取消与超时传播**：cancel token 单向流贯穿主循环和所有工具调用
-  - 外部取消到达时，正在进行的工具执行（沙箱容器、MCP 连接）真正中止并释放资源
-  - 含 cooperative（协作停止）+ 硬 deadline 两层保护
+- ~~**成本预算管控（五层）**~~：**[已 descope]** per-run 两维度预算（max_turns / max_tokens）已落地，见 `runtime/budget.py`；跨 run 分层预算（单次任务 / session / 用户 / agent / 全局五层）已 descope（2026-06-13）。
 
 - [ ] **sub_agent 生命周期管理**：当前为 fire-and-forget，无法感知子任务阻塞或失败
   - 加 SQLite 状态表：`pending → in_progress → done/failed`
   - 支持超时检测与失败重试
-
-- [ ] **多模态输入支持**：接收图片等非文本内容并透传给 LLM
-  - 支持 base64 编码图片作为消息内容
-  - 边界：音频/视频暂不支持
 
 ## 验收标准
 

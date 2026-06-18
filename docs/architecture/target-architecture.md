@@ -318,13 +318,15 @@ platform 经"共享 store 读函数"读 = 依赖 agent 侧库的**读 schema**�
         governance(执行: agent_policy · permission_gate机制 · blocklist检查)
         agent_config         〔依赖 Identity 端口，不依赖其实现〕
 ①边缘 : im_gateway · webhook_router · im_user_store · server(/chat /ws)
+        · tui/(交互式终端 TUI) · outbound(IM 出站投递)
 ②控制 : platform/{askit_console, agent_management_console, connector_management,
         knowledge_base_management, model_provider_management, skill_management,
         user_management, chat_management, reflection_management}
         · governance 管理 API(审批解析/封禁) · agent_store · user_store(CRUD)
         · connectors · admin_cli · server(管理端点)
 ③编排 : platform/agent_lifecycle(materialize/secret) · platform/node_management(注册表/placement/desired-state API)
-        · node/(fleetent-node supervisor，跨机 HTTP client) · cron_scheduler · schedule_store
+        · node/(fleetent-node supervisor，跨机 HTTP client；当前物理上与平台同包，但内部不 import platform 实现，部署时可抽出为独立二进制)
+        · cron_scheduler · schedule_store
 ④摄取 : knowledge_base.ingest · connector sync
 基座  : db · config · paths · structured_logging · secret_scan · eval_logger
         · vector_store · observability(trace;fleet 监控已外置)
