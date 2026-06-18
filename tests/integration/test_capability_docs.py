@@ -19,17 +19,17 @@ def test_knowledge_base_capability_docs_describe_advanced_file_parsers():
 
 
 def test_owner_roadmap_marks_advanced_file_parsers_complete():
-    content = Path("docs/capabilities/roadmaps/intelligence-roadmap.md").read_text(encoding="utf-8")
+    content = Path("docs/roadmaps/intelligence-roadmap.md").read_text(encoding="utf-8")
 
     assert "`knowledge-base-file-parsers-advanced`：已完成" in content
 
 
 def test_pilot_capability_verification_report_is_documented():
-    roadmap = Path("docs/capabilities/roadmaps/pilot-readiness-roadmap.md").read_text(
+    roadmap = Path("docs/roadmaps/pilot-readiness-roadmap.md").read_text(
         encoding="utf-8"
     )
-    acceptance = Path("docs/deployment/pilot-acceptance-guide.md").read_text(encoding="utf-8")
-    runbook = Path("docs/deployment/pilot-runbook.md").read_text(encoding="utf-8")
+    acceptance = Path("docs/operations/pilot-acceptance-guide.md").read_text(encoding="utf-8")
+    runbook = Path("docs/operations/pilot-runbook.md").read_text(encoding="utf-8")
 
     required = [
         "uv run python scripts/generate_pilot_verification_report.py",
@@ -48,7 +48,7 @@ def test_pilot_capability_verification_report_is_documented():
 
 def test_capability_docs_describe_entity_extraction():
     kb_doc = Path("docs/capabilities/knowledge-base.md").read_text(encoding="utf-8")
-    roadmap = Path("docs/capabilities/roadmaps/intelligence-roadmap.md").read_text(encoding="utf-8")
+    roadmap = Path("docs/roadmaps/intelligence-roadmap.md").read_text(encoding="utf-8")
 
     for content in [kb_doc, roadmap]:
         assert "entity extraction" in content
@@ -58,7 +58,7 @@ def test_capability_docs_describe_entity_extraction():
 
 def test_capability_docs_describe_graph_search_scope():
     kb_doc = Path("docs/capabilities/knowledge-base.md").read_text(encoding="utf-8")
-    roadmap = Path("docs/capabilities/roadmaps/intelligence-roadmap.md").read_text(encoding="utf-8")
+    roadmap = Path("docs/roadmaps/intelligence-roadmap.md").read_text(encoding="utf-8")
 
     for content in [kb_doc, roadmap]:
         assert "graph_search" in content
@@ -70,7 +70,7 @@ def test_capability_docs_describe_graph_search_scope():
 
 def test_capability_docs_describe_query_planner_scope():
     kb_doc = Path("docs/capabilities/knowledge-base.md").read_text(encoding="utf-8")
-    roadmap = Path("docs/capabilities/roadmaps/intelligence-roadmap.md").read_text(encoding="utf-8")
+    roadmap = Path("docs/roadmaps/intelligence-roadmap.md").read_text(encoding="utf-8")
 
     for content in [kb_doc, roadmap]:
         assert "plan_knowledge_search" in content
@@ -83,7 +83,7 @@ def test_capability_docs_describe_query_planner_scope():
 def test_capability_docs_describe_kb_reflection_reports_scope():
     reflection_doc = Path("docs/capabilities/reflection.md").read_text(encoding="utf-8")
     kb_doc = Path("docs/capabilities/knowledge-base.md").read_text(encoding="utf-8")
-    roadmap = Path("docs/capabilities/roadmaps/intelligence-roadmap.md").read_text(encoding="utf-8")
+    roadmap = Path("docs/roadmaps/intelligence-roadmap.md").read_text(encoding="utf-8")
 
     for content in [reflection_doc, kb_doc, roadmap]:
         assert "run_kb_reflection_report" in content
@@ -98,7 +98,7 @@ def test_capability_docs_describe_kb_reflection_reports_scope():
 def test_capability_docs_describe_skill_reflection_proposals_scope():
     reflection_doc = Path("docs/capabilities/reflection.md").read_text(encoding="utf-8")
     skill_doc = Path("docs/capabilities/skill.md").read_text(encoding="utf-8")
-    roadmap = Path("docs/capabilities/roadmaps/intelligence-roadmap.md").read_text(encoding="utf-8")
+    roadmap = Path("docs/roadmaps/intelligence-roadmap.md").read_text(encoding="utf-8")
 
     for content in [reflection_doc, skill_doc, roadmap]:
         assert "SkillProposal" in content
@@ -113,7 +113,7 @@ def test_capability_docs_describe_skill_reflection_proposals_scope():
 def test_capability_docs_describe_shared_memory_scope():
     memory_doc = Path("docs/capabilities/memory.md").read_text(encoding="utf-8")
     long_term_doc = Path("docs/capabilities/long-term-ctx.md").read_text(encoding="utf-8")
-    roadmap = Path("docs/capabilities/roadmaps/intelligence-roadmap.md").read_text(encoding="utf-8")
+    roadmap = Path("docs/roadmaps/intelligence-roadmap.md").read_text(encoding="utf-8")
 
     for content in [memory_doc, long_term_doc, roadmap]:
         assert "Shared Memory" in content
