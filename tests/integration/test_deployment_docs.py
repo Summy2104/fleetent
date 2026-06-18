@@ -66,7 +66,7 @@ def test_env_example_is_safe_and_local_env_and_secrets_are_ignored():
 
 
 def test_secrets_documentation_describes_flat_untracked_directory():
-    content = Path("docs/deployment/secrets.md").read_text(encoding="utf-8")
+    content = Path("docs/operations/secrets.md").read_text(encoding="utf-8")
 
     required_phrases = [
         "secrets/",
@@ -124,7 +124,7 @@ def test_active_docs_and_source_do_not_reintroduce_legacy_config_paths():
         "agent.configure.yaml.example",
         "agent.defaults.yaml.example",
     ]
-    roots = [Path("README.md"), Path("docs/capabilities"), Path("docs/deployment"), Path("src")]
+    roots = [Path("README.md"), Path("docs/capabilities"), Path("docs/operations"), Path("src")]
     offenders: list[str] = []
     for root in roots:
         paths = [root] if root.is_file() else sorted(root.rglob("*"))
@@ -197,7 +197,7 @@ def test_docker_compose_uses_local_env_mounts_and_port():
 def test_legacy_mcp_yaml_is_not_tracked_or_required_by_deployment_docs():
     tracked_files = set(Path(".").glob("config/mcp.yaml"))
     deployment_docs = "\n".join(
-        path.read_text(encoding="utf-8") for path in Path("docs/deployment").glob("*.md")
+        path.read_text(encoding="utf-8") for path in Path("docs/operations").glob("*.md")
     )
 
     assert not tracked_files
@@ -205,7 +205,7 @@ def test_legacy_mcp_yaml_is_not_tracked_or_required_by_deployment_docs():
 
 
 def test_pilot_install_checklist_exists_and_covers_required_sections():
-    checklist = Path("docs/deployment/pilot-install-checklist.md")
+    checklist = Path("docs/operations/pilot-install-checklist.md")
 
     assert checklist.exists()
     content = checklist.read_text(encoding="utf-8")
@@ -228,7 +228,7 @@ def test_pilot_install_checklist_exists_and_covers_required_sections():
 
 
 def test_pilot_install_checklist_contains_required_commands():
-    content = Path("docs/deployment/pilot-install-checklist.md").read_text(encoding="utf-8")
+    content = Path("docs/operations/pilot-install-checklist.md").read_text(encoding="utf-8")
 
     required_commands = [
         "docker compose run --rm fleetent uv run fleetent-admin init-config",
@@ -251,7 +251,7 @@ def test_pilot_install_checklist_contains_required_commands():
 
 
 def test_pilot_install_checklist_documents_secret_and_reporting_boundaries():
-    content = Path("docs/deployment/pilot-install-checklist.md").read_text(encoding="utf-8")
+    content = Path("docs/operations/pilot-install-checklist.md").read_text(encoding="utf-8")
 
     required_phrases = [
         "不要把真实 secret、token、credential payload 写入 agent config、日志、trace",
@@ -269,7 +269,7 @@ def test_pilot_install_checklist_documents_secret_and_reporting_boundaries():
 
 
 def test_pilot_runbook_exists_and_covers_step_by_step_flow():
-    runbook = Path("docs/deployment/pilot-runbook.md")
+    runbook = Path("docs/operations/pilot-runbook.md")
 
     assert runbook.exists()
     content = runbook.read_text(encoding="utf-8")
@@ -296,7 +296,7 @@ def test_pilot_runbook_exists_and_covers_step_by_step_flow():
 
 
 def test_pilot_runbook_contains_required_commands_and_failure_handling():
-    content = Path("docs/deployment/pilot-runbook.md").read_text(encoding="utf-8")
+    content = Path("docs/operations/pilot-runbook.md").read_text(encoding="utf-8")
 
     required_phrases = [
         "自动化测试只能作为辅助证据",
@@ -327,7 +327,7 @@ def test_pilot_runbook_contains_required_commands_and_failure_handling():
 
 
 def test_intelligence_roadmap_manual_uses_current_shared_memory_cli():
-    content = Path("docs/deployment/intelligence-roadmap-test-manual.md").read_text(
+    content = Path("docs/roadmaps/intelligence-roadmap-test-manual.md").read_text(
         encoding="utf-8"
     )
 
@@ -336,7 +336,7 @@ def test_intelligence_roadmap_manual_uses_current_shared_memory_cli():
 
 
 def test_intelligence_roadmap_manual_documents_real_llm_credentials_safely():
-    content = Path("docs/deployment/intelligence-roadmap-test-manual.md").read_text(
+    content = Path("docs/roadmaps/intelligence-roadmap-test-manual.md").read_text(
         encoding="utf-8"
     )
 
@@ -359,10 +359,9 @@ def test_deployment_docs_are_docker_compose_first_and_use_port_8765():
     docs = {
         path: path.read_text(encoding="utf-8")
         for path in [
-            Path("docs/deployment/pilot-install-checklist.md"),
-            Path("docs/deployment/pilot-acceptance-guide.md"),
-            Path("docs/deployment/pilot-runbook.md"),
-            Path("docs/capabilities/deployment.md"),
+            Path("docs/operations/pilot-install-checklist.md"),
+            Path("docs/operations/pilot-acceptance-guide.md"),
+            Path("docs/operations/pilot-runbook.md"),
         ]
     }
 
@@ -410,10 +409,9 @@ def test_deployment_docs_do_not_use_old_agent_config_paths_as_primary():
         path: path.read_text(encoding="utf-8")
         for path in [
             Path("README.md"),
-            Path("docs/deployment/pilot-install-checklist.md"),
-            Path("docs/deployment/pilot-acceptance-guide.md"),
-            Path("docs/deployment/pilot-runbook.md"),
-            Path("docs/capabilities/deployment.md"),
+            Path("docs/operations/pilot-install-checklist.md"),
+            Path("docs/operations/pilot-acceptance-guide.md"),
+            Path("docs/operations/pilot-runbook.md"),
         ]
     }
 

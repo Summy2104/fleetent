@@ -1,15 +1,17 @@
 #!/bin/bash
 # ============================================================================
-# fleetent standalone agent installer
+# fleetent standalone agent runtime installer
 # ============================================================================
-# Installs the fleetent binary and scaffolds a runnable agent home.
-# Does NOT require alembic, fleetent-admin, or a running platform.
+# Installs the fleetent binary and sets FLEETENT_HOME, then prints a tutorial
+# guiding you to create an agent yourself. It does NOT create an agent home and
+# does NOT require alembic, fleetent-admin, or a running platform.
 #
 # Usage:
-#   scripts/install-agent.sh <agent-id> [--dir PATH] [--help]
+#   scripts/install-agent.sh [--dir PATH] [--help]
 #
-# The agent home is created at $FLEETENT_HOME/agents/<agent-id>/.
-# After running, edit agent.yaml and .env, then:
+# After running, create and run an agent:
+#   fleetent agent init <agent-id>
+#   # edit $FLEETENT_HOME/agents/<agent-id>/agent.yaml + .env
 #   fleetent agent run <agent-id> [--port N]
 # ============================================================================
 
@@ -33,28 +35,27 @@ log_error()   { printf "${RED}✗${NC} %s\n" "$1" >&2; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 FLEETENT_HOME_DIR="${FLEETENT_HOME:-$HOME/.fleetent}"
-AGENT_ID=""
 
 usage() {
     cat <<'EOF'
-fleetent agent installer — deploy a standalone agent (no platform required).
+fleetent agent runtime installer — install the runtime + set FLEETENT_HOME
+(no platform required). Create agents yourself afterwards with `fleetent agent init`.
 
 Usage:
-  scripts/install-agent.sh <agent-id> [options]
-
-Arguments:
-  agent-id    Required. The agent identifier (e.g. my-bot, support-bot).
-              Creates $FLEETENT_HOME/agents/<agent-id>/ with agent.yaml + .env.
+  scripts/install-agent.sh [options]
 
 Options:
   --dir PATH  Override FLEETENT_HOME (default ~/.fleetent)
   --help      Show this help and exit
 
-After installation:
-  1. Edit $FLEETENT_HOME/agents/<agent-id>/agent.yaml (model, system_prompt, connectors)
-  2. Fill secrets in $FLEETENT_HOME/agents/<agent-id>/.env
-  3. Run: fleetent agent run <agent-id> [--port N]
-  4. Connect TUI: fleetent-tui --url ws://localhost:<N>/ws --token <FLEETENT_TUI_TOKEN>
+After installation, create and run an agent:
+  1. fleetent agent init <agent-id>
+  2. Edit $FLEETENT_HOME/agents/<agent-id>/agent.yaml + .env  (chmod 600 .env)
+  3. fleetent agent run <agent-id> [--port N]
+  4. fleetent-tui --url ws://localhost:<N>/ws --token <FLEETENT_TUI_TOKEN>
+
+Note: the <agent-id> positional argument was removed — agent creation is now a
+separate step (`fleetent agent init`), decoupled from runtime installation.
 EOF
 }
 
@@ -70,19 +71,10 @@ parse_args() {
             -*)
                 log_error "Unknown option: $1"; usage >&2; exit 2 ;;
             *)
-                if [ -z "$AGENT_ID" ]; then
-                    AGENT_ID="$1"; shift
-                else
-                    log_error "Unexpected argument: $1"; usage >&2; exit 2
-                fi ;;
+                log_error "The agent-id argument was removed. Create the agent with: fleetent agent init $1"
+                usage >&2; exit 2 ;;
         esac
     done
-
-    if [ -z "$AGENT_ID" ]; then
-        log_error "agent-id is required."
-        usage >&2
-        exit 2
-    fi
 }
 
 ensure_uv() {
@@ -130,30 +122,21 @@ setup_home_env() {
     fi
 }
 
-init_agent() {
-    log_info "Initialising agent home for '$AGENT_ID'..."
-    if fleetent agent init "$AGENT_ID"; then
-        log_success "Agent home created: $FLEETENT_HOME/agents/$AGENT_ID/"
-    else
-        log_error "fleetent agent init failed."
-        exit 1
-    fi
-}
-
 precheck_docker() {
     if command -v docker >/dev/null 2>&1; then return 0; fi
     log_warn "Docker not found — the sandbox (run_code) tool will be unavailable."
 }
 
-print_success() {
-    log_success "Agent '$AGENT_ID' installed."
+print_tutorial() {
+    log_success "fleetent runtime installed.  FLEETENT_HOME = $FLEETENT_HOME"
     echo
-    echo "Next steps:"
-    echo "  1. Edit agent config:  $FLEETENT_HOME/agents/$AGENT_ID/agent.yaml"
-    echo "  2. Fill secrets:       $FLEETENT_HOME/agents/$AGENT_ID/.env"
-    echo "     (chmod 600 $FLEETENT_HOME/agents/$AGENT_ID/.env)"
-    echo "  3. Start agent:        fleetent agent run $AGENT_ID [--port 8766]"
-    echo "  4. TUI token in:       $FLEETENT_HOME/agents/$AGENT_ID/.env  (FLEETENT_TUI_TOKEN)"
+    echo "Next — create and run an agent:"
+    echo "  1. fleetent agent init <agent-id>"
+    echo "  2. Edit $FLEETENT_HOME/agents/<agent-id>/agent.yaml + .env   (chmod 600 .env)"
+    echo "  3. fleetent agent run <agent-id> [--port 8766]"
+    echo "  4. fleetent-tui --url ws://localhost:<port>/ws --token <FLEETENT_TUI_TOKEN>"
+    echo
+    echo "(FLEETENT_TUI_TOKEN is generated into the agent's .env by 'fleetent agent init'.)"
 }
 
 main() {
@@ -162,9 +145,8 @@ main() {
     check_python
     install_tool
     setup_home_env
-    init_agent
     precheck_docker
-    print_success
+    print_tutorial
 }
 
 main "$@"

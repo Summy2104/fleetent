@@ -220,7 +220,7 @@ uv run fleetent-admin diagnostics retention apply
 
 **在 agent host 上**
 1. 将代码仓库 clone 到 agent host
-2. 运行 `bash scripts/install-agent.sh <agent-id>` 安装 agent node 依赖并初始化 agent home
+2. 运行 `bash scripts/install-agent.sh` 安装 agent 运行时（不再带 agent-id），再 `fleetent agent init <agent-id>` 创建 agent home
 3. 在 platform 侧注册该 node：`uv run fleetent-admin node register --host <agent-host> --port <port>`
 
 **验证**
