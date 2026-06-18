@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install test t test-pr test-unit test-unit-ci test-coverage-ci test-integration test-e2e test-evaluation test-layers lint fmt check typecheck serve admin
+.PHONY: help install test t test-pr test-unit test-unit-ci test-coverage-ci test-integration test-e2e test-evaluation test-layers lint fmt check typecheck serve platform admin
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -69,6 +69,9 @@ typecheck: ## Type-check with mypy
 check: lint typecheck ## Run lint + typecheck
 
 serve: ## Start HTTP server with auto-reload (port 8765)
+	uv run uvicorn fleetent.server:app --reload --port 8765
+
+platform: ## Start platform control-plane (alias for serve)
 	uv run uvicorn fleetent.server:app --reload --port 8765
 
 admin: ## Show admin CLI help
