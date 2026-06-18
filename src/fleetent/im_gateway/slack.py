@@ -282,6 +282,17 @@ def _make_upload_func(
 _MAX_FILE_BYTES = 20 * 1024 * 1024
 
 
+def _is_html_response(resp: Any) -> bool:
+    """True when a download response is an HTML page rather than file bytes.
+
+    Slack serves a sign-in / error HTML page (not the file) when the bot token lacks the
+    required scope or has no access to the file; treating that HTML as file bytes would
+    poison downstream tools, so callers degrade instead.
+    """
+    ctype = resp.headers.get("content-type", "") if hasattr(resp, "headers") else ""
+    return ctype.split(";")[0].strip().lower() == "text/html"
+
+
 async def _download_attachments(files: list[dict[str, Any]], bot_token: str) -> list[Any]:
     """Download inbound Slack files for the agent (im-file-attachment).
 
@@ -298,7 +309,12 @@ async def _download_attachments(files: list[dict[str, Any]], bot_token: str) -> 
     headers = {"Authorization": f"Bearer {bot_token}"}
     cap_mb = _MAX_FILE_BYTES // (1024 * 1024)
     over_cap_note = f"超过大小上限（{cap_mb} MB）"
-    async with httpx.AsyncClient() as client:
+    # follow_redirects: Slack serves some file types (e.g. PDF) via a 302 from
+    # files.slack.com to the slack-files.com sandbox domain; the policy is undocumented
+    # and may apply to any type, so we follow unconditionally rather than special-casing.
+    # The redirect target is cross-origin, so httpx strips the Authorization header — safe,
+    # since that URL carries its own signed token.
+    async with httpx.AsyncClient(follow_redirects=True) as client:
         for f in files:
             mime = f.get("mimetype") or ""
             url = f.get("url_private")
@@ -310,6 +326,13 @@ async def _download_attachments(files: list[dict[str, Any]], bot_token: str) -> 
                     resp.raise_for_status()
                 except httpx.HTTPError as exc:
                     logger.warning("slack_image_download_failed", url=url, error=str(exc))
+                    continue
+                if _is_html_response(resp):
+                    logger.warning(
+                        "slack_image_download_failed",
+                        url=url,
+                        error="content-type=text/html (check bot token scopes / file access)",
+                    )
                     continue
                 out.append((resp.content, mime))
                 continue
@@ -327,6 +350,17 @@ async def _download_attachments(files: list[dict[str, Any]], bot_token: str) -> 
             except httpx.HTTPError as exc:
                 logger.warning(
                     "slack_file_download_failed", url=url, filename=filename, error=str(exc)
+                )
+                out.append(
+                    FileAttachment(data=None, mime=mime, filename=filename, note="文件下载失败")
+                )
+                continue
+            if _is_html_response(resp):
+                logger.warning(
+                    "slack_file_download_failed",
+                    url=url,
+                    filename=filename,
+                    error="content-type=text/html (check bot token scopes / file access)",
                 )
                 out.append(
                     FileAttachment(data=None, mime=mime, filename=filename, note="文件下载失败")

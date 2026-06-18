@@ -12,8 +12,9 @@ _SHEET_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
 
 
 class _Resp:
-    def __init__(self, content: bytes):
+    def __init__(self, content: bytes, content_type: str = "application/octet-stream"):
         self.content = content
+        self.headers = {"content-type": content_type}
 
     def raise_for_status(self) -> None:
         pass
@@ -126,3 +127,62 @@ async def test_image_and_file_mixed():
     assert out[0] == (b"png", "image/png")
     assert isinstance(out[1], FileAttachment)
     assert out[1].data == b"csv"
+
+
+async def test_client_follows_redirects():
+    """Download client MUST follow redirects: Slack 302s PDF-type files from
+    files.slack.com to the slack-files.com sandbox domain; not following the redirect
+    fails those downloads. The redirect policy is Slack-internal and undocumented, so we
+    follow unconditionally rather than special-casing by file type."""
+    captured: dict = {}
+    client = _FakeClient(lambda url: _Resp(b"pdf-bytes"))
+
+    def _capture(*args, **kwargs):
+        captured.update(kwargs)
+        return client
+
+    files = [
+        {
+            "name": "report.pdf",
+            "mimetype": "application/pdf",
+            "url_private": "https://files.slack.com/report.pdf",
+            "size": 100,
+        }
+    ]
+    with patch("httpx.AsyncClient", side_effect=_capture):
+        out = await slack._download_attachments(files, "xoxb-tok")
+    assert captured.get("follow_redirects") is True
+    assert out[0].data == b"pdf-bytes"
+
+
+async def test_html_response_file_degrades_to_placeholder():
+    """Slack returns an HTML sign-in/error page (not file bytes) when the token lacks
+    scope or the file is inaccessible. The HTML MUST NOT be cached as file bytes."""
+    html = b"<!DOCTYPE html><html><body>Sign in to Slack</body></html>"
+    files = [
+        {
+            "name": "report.pdf",
+            "mimetype": "application/pdf",
+            "url_private": "https://files.slack.com/report.pdf",
+            "size": 100,
+        }
+    ]
+    client = _FakeClient(lambda url: _Resp(html, content_type="text/html; charset=utf-8"))
+    with _patch_client(client):
+        out = await slack._download_attachments(files, "xoxb-tok")
+    assert len(out) == 1
+    assert out[0].data is None
+    assert out[0].filename == "report.pdf"
+    assert out[0].note != ""
+
+
+async def test_html_response_image_skipped():
+    """An image url returning HTML is skipped, not appended as image bytes."""
+    html = b"<html>nope</html>"
+    files = [
+        {"mimetype": "image/png", "url_private": "https://files.slack.com/a.png"},
+    ]
+    client = _FakeClient(lambda url: _Resp(html, content_type="text/html"))
+    with _patch_client(client):
+        out = await slack._download_attachments(files, "xoxb-tok")
+    assert out == []
