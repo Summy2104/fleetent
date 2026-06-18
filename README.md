@@ -18,22 +18,19 @@ fleetent 是一个面向企业内网部署的轻量 Agent 平台。项目基于 
 
 Linux / macOS / WSL2：脚本会 bootstrap uv + Python 3.12，用 `uv tool install` 把
 `fleetent`/`fleetent-admin`/`fleetent-tui` 装成全局命令，并在 `FLEETENT_HOME`
-（默认 `~/.fleetent`，与工作目录解耦）下铺设 Platform env 和默认 Agent home：
-`agents/default/{agent.yaml,.env,data/}`。部署的 agent 只读自己 home 内的 `agent.yaml` + `.env`。
+（默认 `~/.fleetent`，与工作目录解耦）下铺设 Platform env + 初始化数据库。
+**安装脚本不再 seed 默认 Agent**——agent 由你用 `fleetent agent init` 按需创建（见下一节）。
 
 ```bash
 git clone <repo-url> && cd fleetent
-scripts/install.sh                 # 或 --dir PATH / --skip-db / --skip-config
-# 编辑 agent 配置与密钥：
-$EDITOR ~/.fleetent/agents/default/agent.yaml ~/.fleetent/agents/default/.env
-# 新开 shell 后（确保 ~/.local/bin 在 PATH）：
-fleetent "hello"
+scripts/install.sh                 # 或 --agent-only / --platform-only / --dir PATH
+# 然后按下一节用 `fleetent agent init <agent-id>` 创建并运行 agent
 ```
 
 > 仓库示例模板贴近运行位置：Platform 使用根目录 `.env.example` 和
-> `platform.yaml.example`；默认 Agent 使用 `agents/default/agent.yaml.example` 和
-> `agents/default/.env.example`。平台部署 Agent 时会 materialize 到
-> `agents/<agent-id>/agent.yaml` 和 `agents/<agent-id>/.env`。
+> `platform.yaml.example`；Agent 模板为 `agents/default/agent.yaml.example` 和
+> `agents/default/.env.example`，`fleetent agent init <id>` 据此 scaffold 到
+> `agents/<id>/agent.yaml` + `.env`。
 
 > 这是面向开发者 / 单机快速体验的路径。**on-prem 生产部署请用 Docker**
 > （`Dockerfile` + `docker-compose.yml`），环境可复现、数据不出内网。
