@@ -13,13 +13,14 @@ def test_project_guidance_documents_test_layer_guard_and_unit_boundaries():
     assert "Alembic migration" in guidance
     assert "`tests.integration.*`" in guidance
     assert "`tmp_path`" in guidance
-    for text in (guidance, claude_guidance):
-        assert "`sqlite3`" in text
-        assert "`DB_PATH`" in text
-        assert "`_init_db()`" in text
-        assert "`DATABASE_URL=sqlite:///...`" in text
-        assert "真实 DB file、schema、CRUD 或 store/runtime 协作" in text
-        assert "只读 legacy shim / public API / path constant" in text
+    # CLAUDE.md is an @AGENTS.md include pointer; guidance content lives in AGENTS.md.
+    assert "@AGENTS.md" in claude_guidance
+    assert "`sqlite3`" in guidance
+    assert "`DB_PATH`" in guidance
+    assert "`_init_db()`" in guidance
+    assert "`DATABASE_URL=sqlite:///...`" in guidance
+    assert "真实 DB file、schema、CRUD 或 store/runtime 协作" in guidance
+    assert "只读 legacy shim / public API / path constant" in guidance
     assert "scripts/check_test_layers.py" in makefile
     assert "DB-backed unit tests" in makefile
 
