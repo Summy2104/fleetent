@@ -104,3 +104,18 @@ KB / document creation, import, deletion, archive, and agent binding SHALL be ad
 - **WHEN** an admin performs any KB or document write operation
 - **THEN** an audit entry recording actor / action / target / detail is written
 
+### Requirement: Manual KB entity extraction trigger
+
+The system SHALL expose `POST /admin/kb/{kb_id}/extract-entities` on the existing KB admin router so an admin can manually trigger entity extraction for one KB, equivalent to `fleetent-admin kb extract-entities`. The endpoint SHALL run through the existing KB runtime wiring and return `202 Accepted`.
+
+#### Scenario: Trigger entity extraction for a KB
+- **WHEN** an admin calls `POST /admin/kb/{kb_id}/extract-entities`
+- **THEN** the system starts entity extraction for that KB and returns 202 Accepted
+
+#### Scenario: Missing KB is rejected
+- **WHEN** an admin calls the extract endpoint for a KB that does not exist or is archived
+- **THEN** the system returns 404 and does not start extraction
+
+#### Scenario: Viewer cannot trigger entity extraction
+- **WHEN** a viewer calls `POST /admin/kb/{kb_id}/extract-entities`
+- **THEN** the system returns 403

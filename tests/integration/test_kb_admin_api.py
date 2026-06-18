@@ -17,6 +17,7 @@ import fleetent.platform.knowledge_base_management.agent_kbs_store as kbs_store
 import fleetent.platform.knowledge_base_management.kb_admin_api as api
 import fleetent.user_store as user_store
 from fleetent import vector_store
+from fleetent.knowledge_base.extraction_store import KnowledgeExtractionRun
 from fleetent.vector_store import SearchResult
 from tests.integration._migration_template import apply_migrations
 
@@ -669,3 +670,99 @@ def test_observation_read_only_aggregation(client, monkeypatch):
     assert body["recall_hits"] == 42
     assert body["zero_recall_docs"] == ["d9"]
     assert body["sessions"] == ["s1", "s2"]
+
+
+def test_extract_entities_endpoint_exists(client, monkeypatch):
+    monkeypatch.setattr(api, "_require_active_kb", lambda tenant_id, kb_id: None)
+    monkeypatch.setattr(
+        api,
+        "kb_extract_entities",
+        lambda tenant_id, kb_id, document_id=None: {
+            "id": "run-1",
+            "tenant_id": tenant_id,
+            "kb_id": kb_id,
+            "document_id": document_id,
+            "extractor": "deterministic",
+            "status": "completed",
+            "documents_scanned": 1,
+            "chunks_scanned": 1,
+            "entities_upserted": 1,
+            "mentions_written": 1,
+            "relations_written": 0,
+            "failed_count": 0,
+            "error_summary": None,
+        },
+    )
+    token, _ = _session_for("admin")
+    response = client.post(
+        "/admin/kb/test-kb/extract-entities",
+        headers=_hdr(token),
+        json={},
+    )
+    assert response.status_code == 202
+
+
+def test_extract_entities_triggers_task(client, monkeypatch):
+    monkeypatch.setattr(api, "_require_active_kb", lambda tenant_id, kb_id: None)
+    called: list[tuple[str, str, str | None]] = []
+
+    def _extract(tenant_id: str, kb_id: str, document_id: str | None = None) -> dict[str, object]:
+        called.append((tenant_id, kb_id, document_id))
+        run = KnowledgeExtractionRun(
+            id="run-1",
+            tenant_id=tenant_id,
+            kb_id=kb_id,
+            document_id=document_id,
+            extractor="deterministic",
+            status="completed",
+            documents_scanned=2,
+            chunks_scanned=5,
+            entities_upserted=3,
+            mentions_written=4,
+            relations_written=1,
+            failed_count=0,
+        )
+        return run.__dict__
+
+    monkeypatch.setattr(api, "kb_extract_entities", _extract)
+    token, _ = _session_for("admin")
+
+    response = client.post(
+        "/admin/kb/support/extract-entities",
+        headers=_hdr(token),
+        json={"document_id": "doc-1"},
+    )
+
+    assert response.status_code == 202
+    assert called == [("default", "support", "doc-1")]
+    assert response.json()["run"]["kb_id"] == "support"
+
+
+def test_extract_entities_unknown_kb_returns_404(client):
+    token, _ = _session_for("admin")
+
+    response = client.post(
+        "/admin/kb/missing/extract-entities",
+        headers=_hdr(token),
+        json={},
+    )
+
+    assert response.status_code == 404
+
+
+def test_extract_entities_non_admin_returns_403(client, monkeypatch):
+    monkeypatch.setattr(api, "_require_active_kb", lambda tenant_id, kb_id: None)
+    monkeypatch.setattr(
+        api,
+        "kb_extract_entities",
+        lambda tenant_id, kb_id, document_id=None: {"kb_id": kb_id, "tenant_id": tenant_id},
+    )
+    token, _ = _session_for("viewer")
+
+    response = client.post(
+        "/admin/kb/support/extract-entities",
+        headers=_hdr(token),
+        json={},
+    )
+
+    assert response.status_code == 403

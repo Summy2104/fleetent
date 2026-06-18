@@ -32,6 +32,7 @@ from fleetent.knowledge_base import operations as knowledge_base
 from fleetent.knowledge_base import parsers as legacy_parsers
 from fleetent.knowledge_base.core import KnowledgeChunk, KnowledgeStore
 from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
+from fleetent.knowledge_base.extraction import run_entity_extraction as _kb_run_entity_extraction
 from fleetent.knowledge_base.ingest.config import as_knowledge_base_settings
 from fleetent.knowledge_base.ingest.connectors.sync import (
     LocalDirectorySourceConfig,
@@ -252,6 +253,32 @@ def kb_observation(tenant_id: str, kb_id: str) -> dict[str, Any]:
     return {"kb_id": kb_id, "recall_hits": 0, "zero_recall_docs": [], "sessions": []}
 
 
+def kb_extract_entities(
+    tenant_id: str,
+    kb_id: str,
+    document_id: str | None = None,
+) -> dict[str, Any]:
+    """Run explicit KB entity extraction through the knowledge-base public API."""
+    _require_active_kb(tenant_id, kb_id)
+    with _use_kb_runtime(tenant_id):
+        summary = asyncio.run(_kb_run_entity_extraction(tenant_id, kb_id, document_id=document_id))
+    return {
+        "id": summary.id,
+        "tenant_id": summary.tenant_id,
+        "kb_id": summary.kb_id,
+        "document_id": summary.document_id,
+        "extractor": summary.extractor,
+        "status": summary.status,
+        "documents_scanned": summary.documents_scanned,
+        "chunks_scanned": summary.chunks_scanned,
+        "entities_upserted": summary.entities_upserted,
+        "mentions_written": summary.mentions_written,
+        "relations_written": summary.relations_written,
+        "failed_count": summary.failed_count,
+        "error_summary": summary.error_summary,
+    }
+
+
 # --- auth helpers -------------------------------------------------------------
 
 
@@ -351,6 +378,11 @@ class BindBody(BaseModel):
 class EvalBody(BaseModel):
     kb_id: str
     tenant_id: str = _DEFAULT_TENANT
+
+
+class ExtractEntitiesBody(BaseModel):
+    tenant_id: str = _DEFAULT_TENANT
+    document_id: str | None = None
 
 
 def _parse_import_document(
@@ -857,3 +889,20 @@ async def sync_kb_connector(
         "summary": result.summary,
         "error": result.error,
     }
+
+
+@router.post("/{kb_id}/extract-entities", status_code=202)
+def extract_entities(
+    kb_id: str,
+    body: ExtractEntitiesBody,
+    authorization: str | None = Header(None),
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    try:
+        run = kb_extract_entities(body.tenant_id, kb_id, document_id=body.document_id)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    audit_log.write_audit(user.id, "kb_extract_entities", "kb", kb_id)
+    return {"status": "accepted", "run": run}
