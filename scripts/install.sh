@@ -35,26 +35,27 @@ log_error()   { printf "${RED}✗${NC} %s\n" "$1" >&2; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 FLEETENT_HOME_DIR="${FLEETENT_HOME:-$HOME/.fleetent}"
-AGENT_ID="default"
 INSTALL_AGENT=true
 INSTALL_PLATFORM=true
 
 usage() {
     cat <<'EOF'
-fleetent developer installer — install both agent and platform in editable mode.
+fleetent developer installer — install both agent runtime and platform in editable mode.
 
 Usage:
   scripts/install.sh [options]
 
 Options:
-  --agent-only        Install only the standalone agent component
+  --agent-only        Install only the standalone agent runtime
   --platform-only     Install only the platform control plane
-  --agent-id ID       Agent id to initialise (default: "default")
   --dir PATH          Override FLEETENT_HOME (default ~/.fleetent)
   --help              Show this help and exit
 
+Agent creation is a separate step (no default agent is seeded):
+  fleetent agent init <agent-id>
+
 For production deployment use role-specific scripts:
-  scripts/install-agent.sh <agent-id>
+  scripts/install-agent.sh
   scripts/install-platform.sh
 EOF
 }
@@ -65,11 +66,6 @@ parse_args() {
             --help|-h) usage; exit 0 ;;
             --agent-only)   INSTALL_PLATFORM=false; shift ;;
             --platform-only) INSTALL_AGENT=false; shift ;;
-            --agent-id)
-                if [ -z "${2:-}" ]; then
-                    log_error "--agent-id requires an ID"; exit 2
-                fi
-                AGENT_ID="$2"; shift 2 ;;
             --dir)
                 if [ -z "${2:-}" ]; then
                     log_error "--dir requires a PATH"; exit 2
@@ -128,9 +124,16 @@ main() {
     fi
 
     if [ "$INSTALL_AGENT" = true ]; then
-        log_info "Setting up agent '$AGENT_ID'..."
-        bash "$SCRIPT_DIR/install-agent.sh" "$AGENT_ID" \
-            --dir "$FLEETENT_HOME_DIR" || true
+        # install-defer-agent-init: the runtime is already installed (editable, above);
+        # no default agent is seeded — print the create-agent tutorial instead.
+        log_info "Agent runtime ready (no default agent seeded)."
+        echo
+        echo "Create and run an agent:"
+        echo "  1. fleetent agent init <agent-id>"
+        echo "  2. Edit $FLEETENT_HOME/agents/<agent-id>/agent.yaml + .env   (chmod 600 .env)"
+        echo "  3. fleetent agent run <agent-id> [--port 8766]"
+        echo "  4. fleetent-tui --url ws://localhost:<port>/ws --token <FLEETENT_TUI_TOKEN>"
+        echo
     fi
 
     log_success "Developer install complete."
