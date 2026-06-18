@@ -11,7 +11,6 @@ from typing import Any
 
 import pytest
 from fastapi import HTTPException
-from fastapi.responses import Response, StreamingResponse
 
 from fleetent import server, user_store
 from fleetent.platform.chat_management import chat_admin_api
@@ -458,7 +457,7 @@ def test_user_admin_route_error_branches(monkeypatch: pytest.MonkeyPatch) -> Non
     assert missing.value.status_code == 404
 
 
-def test_chat_admin_route_handlers_cover_playground_and_governance(
+def test_chat_admin_route_handlers_cover_governance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     actor = _user()
@@ -496,16 +495,6 @@ def test_chat_admin_route_handlers_cover_playground_and_governance(
     )
     monkeypatch.setattr(
         chat_admin_api.session_admin_store,
-        "set_pinned",
-        lambda session_id, pinned, note=None: metas.setdefault(
-            session_id, {"session_id": session_id}
-        ).update({"pinned": pinned, "note": note}),
-    )
-    monkeypatch.setattr(
-        chat_admin_api.session_admin_store, "list_unpinned_playground", lambda cutoff: ["old-pg"]
-    )
-    monkeypatch.setattr(
-        chat_admin_api.session_admin_store,
         "delete_meta",
         lambda session_id: metas.pop(session_id, None),
     )
@@ -535,21 +524,6 @@ def test_chat_admin_route_handlers_cover_playground_and_governance(
     )
     monkeypatch.setattr(
         chat_admin_api,
-        "run_playground",
-        lambda agent, sid, msg, overrides, bypass: {
-            "reply": msg,
-            "events": [],
-            "bypass": bypass,
-            "overrides": overrides,
-        },
-    )
-    monkeypatch.setattr(
-        chat_admin_api,
-        "run_playground_stream",
-        lambda agent, sid, msg, overrides, bypass: iter([{"event": "delta", "text": msg}]),
-    )
-    monkeypatch.setattr(
-        chat_admin_api,
         "session_stats",
         lambda session_id: {"total_tokens": 10, "rounds": 2, "pending_approvals": 0},
     )
@@ -576,39 +550,17 @@ def test_chat_admin_route_handlers_cover_playground_and_governance(
     )
 
     auth_header = "Session token"
-    started = chat_admin_api.playground_start(
-        chat_admin_api.StartBody(agent_name="ops"), auth_header
-    )
-    sid = started["session_id"]
-    assert metas[sid]["origin"] == "playground"
-    message = chat_admin_api.playground_message(
-        sid,
-        chat_admin_api.MessageBody(
-            message="hello", overrides={"model": "test"}, auto_approve_medium=True
-        ),
-        auth_header,
-    )
-    assert message["reply"] == "hello"
-    stream = chat_admin_api.playground_stream(
-        sid, chat_admin_api.MessageBody(message="stream"), auth_header
-    )
-    assert isinstance(stream, StreamingResponse)
+    metas["im-1"] = {
+        "session_id": "im-1",
+        "origin": "im",
+        "status": "active",
+        "agent_id": 7,
+        "agent_name": "ops",
+    }
     assert (
-        chat_admin_api.playground_pin(sid, chat_admin_api.PinBody(note="keep"), auth_header)[
-            "pinned"
-        ]
-        is True
+        chat_admin_api.list_sessions(agent_name="ops", authorization=auth_header)[0]["total_tokens"]
+        == 10
     )
-    exported = chat_admin_api.playground_export(sid, "json", auth_header)
-    assert exported["transcript"][0]["content"] == "hi"
-    markdown = chat_admin_api.playground_export(sid, "markdown", auth_header)
-    assert isinstance(markdown, Response)
-    metas["old-pg"] = {"session_id": "old-pg", "origin": "playground"}
-    assert chat_admin_api.purge_expired_playground()["purged"] == ["old-pg"]
-    assert "old-pg" not in metas
-
-    metas["im-1"] = {"session_id": "im-1", "origin": "im", "status": "active"}
-    assert chat_admin_api.list_sessions(authorization=auth_header)[0]["total_tokens"] == 10
     assert chat_admin_api.session_detail("im-1", auth_header)["transcript"][0]["role"] == "user"
     assert chat_admin_api.takeover("im-1", auth_header)["taken_over"] is True
     assert (
@@ -633,7 +585,7 @@ def test_chat_admin_route_handlers_cover_playground_and_governance(
         ]
         == 1
     )
-    assert cleared == ["old-pg", "im-1"]
+    assert cleared == ["im-1"]
     assert injected == [("im-1", "human_agent", "human")]
     assert resets == [("im-1", 1)]
     assert audits
@@ -641,17 +593,10 @@ def test_chat_admin_route_handlers_cover_playground_and_governance(
 
 def test_chat_admin_route_error_branches(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_auth(monkeypatch, chat_admin_api, _user())
-    monkeypatch.setattr(
-        chat_admin_api.session_admin_store,
-        "get_meta",
-        lambda session_id: {"session_id": session_id, "origin": "web", "agent_name": "ops"},
-    )
-    with pytest.raises(HTTPException) as not_playground:
-        chat_admin_api.playground_message(
-            "web-1", chat_admin_api.MessageBody(message="hi"), "Session token"
-        )
-    # per-user isolation: a non-playground (or non-owned) session is not found, not 409
-    assert not_playground.value.status_code == 404
+    monkeypatch.setattr(chat_admin_api, "get_agent_by_name", lambda name: None)
+    with pytest.raises(HTTPException) as missing_agent:
+        chat_admin_api.list_sessions(agent_name="missing", authorization="Session token")
+    assert missing_agent.value.status_code == 404
     with pytest.raises(HTTPException) as missing_confirm:
         chat_admin_api.force_end("web-1", "Session token")
     assert missing_confirm.value.status_code == 428
@@ -975,16 +920,7 @@ def test_server_helpers_cover_admin_url_jobs_and_auth(
 ) -> None:
     monkeypatch.setattr(server.sys, "argv", ["uvicorn", "--host=0.0.0.0", "--port", "9000"])
     assert server._admin_login_url("/admin") == "http://127.0.0.1:9000/admin/ui"
-
-    purged: list[str] = []
-    monkeypatch.delenv("DATABASE_URL", raising=False)
-    server._run_playground_retention()
-    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/fleetent")
-    monkeypatch.setattr(
-        server.chat_admin_api, "purge_expired_playground", lambda: purged.append("purge")
-    )
-    server._run_playground_retention()
-    assert purged == ["purge"]
+    assert not hasattr(server, "_run_playground_retention")
 
 
 async def test_server_auth_health_and_approval(

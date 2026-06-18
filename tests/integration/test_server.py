@@ -56,10 +56,10 @@ def test_lifespan_loads_plugins(tmp_path, monkeypatch):
     mock_load.assert_called_once()
 
 
-def test_lifespan_starts_platform_maintenance_scheduler(tmp_path, monkeypatch):
-    """agent-owned-scheduled-tasks: platform lifespan runs a bare maintenance scheduler
-    (playground retention only) — it no longer loads/fires user scheduled tasks."""
-    from unittest.mock import MagicMock, patch
+def test_lifespan_has_no_platform_maintenance_scheduler(tmp_path, monkeypatch):
+    """drop-platform-playground: platform lifespan no longer starts a maintenance scheduler."""
+
+    from unittest.mock import AsyncMock
 
     from starlette.testclient import TestClient
 
@@ -68,20 +68,14 @@ def test_lifespan_starts_platform_maintenance_scheduler(tmp_path, monkeypatch):
     db = tmp_path / "users.db"
     apply_migrations(db)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
+    monkeypatch.setattr(
+        "fleetent.runtime.approval_resume.reconcile_expired_approvals",
+        AsyncMock(),
+    )
 
-    instance = MagicMock()
-    instance.running = True
-    with (
-        patch("fleetent.server.AsyncIOScheduler", return_value=instance) as mock_cls,
-        TestClient(srv.app),
-    ):
+    assert not hasattr(srv, "AsyncIOScheduler")
+    with TestClient(srv.app):
         pass  # lifespan runs on enter/exit
-
-    mock_cls.assert_called_once()
-    instance.start.assert_called_once()
-    instance.shutdown.assert_called_once()
-    job_ids = {c.kwargs.get("id") for c in instance.add_job.call_args_list}
-    assert "playground_retention" in job_ids
 
 
 def test_lifespan_does_not_load_scheduled_tasks(tmp_path, monkeypatch):

@@ -1,69 +1,32 @@
-"""FastAPI router for /admin/chat (playground) and /admin/sessions (governance).
+"""FastAPI router for /admin/sessions session governance.
 
-Owns the management behaviour only: the admin try-run playground (isolated
-origin=playground sessions, request-level overrides, playground-only approval bypass,
-pin/export) and the real-session governance face (list/replay, takeover + human
-inject, force-end / clear / reset, bulk disposition, export).
+Owns the management behaviour only: the real-session governance face (list/replay,
+takeover + human inject, force-end / clear / reset, bulk disposition).
 
 The while-tool-use loop / model routing / approval live in agent-runtime + governance;
 transcript persistence + locks live in session; IM delivery lives in im-gateway. Those
 are reached through injectable seams (mockable in tests). Session governance metadata
-is persisted via session_admin_store. Never imports the agent loop directly.
+is persisted via session_admin_store.
 
 Auth: reads allow viewer+admin, writes require admin; high-risk writes need X-Confirm.
 """
 
-import datetime
-import json
 import uuid
-from collections.abc import Iterator
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, Response
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from fleetent import agent_store, audit_log, auth, user_store
-from fleetent.platform.chat_management import session_admin_store, transcript_export
+from fleetent.platform.chat_management import session_admin_store
 
 router = APIRouter(prefix="/admin")
 
 IDLE_TIMEOUT_SECONDS = 1800
 _ADMIN_ROLES = {"admin", "built_in_admin"}
-PLAYGROUND_RETENTION_DAYS = 7
 
 
 # --- injectable seams (agent-runtime / session / im-gateway follow-ups) -------
-
-
-def run_playground(
-    agent_name: str,
-    session_id: str,
-    message: str,
-    overrides: dict[str, Any] | None,
-    bypass_medium: bool,
-) -> dict[str, Any]:
-    """Run one playground turn. Bridges agent_loop.run_stream on host (collected).
-
-    Returns ``{reply, events}`` where events carry the per-turn observability
-    (skill/kb hits, tool i/o, approval decisions, model routing). origin=playground
-    so the run is not counted toward the agent's outward usage.
-    """
-    return {"reply": "", "events": [], "wired": False}
-
-
-def run_playground_stream(
-    agent_name: str,
-    session_id: str,
-    message: str,
-    overrides: dict[str, Any] | None,
-    bypass_medium: bool,
-) -> Iterator[dict[str, Any]]:
-    """Stream playground turn events (bridges agent_loop.run_stream on host).
-
-    Yields per-turn observability event dicts; the route serializes them as SSE.
-    """
-    return iter(())
 
 
 def session_stats(session_id: str) -> dict[str, Any]:
@@ -141,20 +104,6 @@ def _require_confirm(x_confirm: str | None) -> None:
 # --- request bodies -----------------------------------------------------------
 
 
-class StartBody(BaseModel):
-    agent_name: str
-
-
-class MessageBody(BaseModel):
-    message: str
-    overrides: dict[str, Any] | None = None
-    auto_approve_medium: bool = False
-
-
-class PinBody(BaseModel):
-    note: str | None = None
-
-
 class InjectBody(BaseModel):
     content: str
     role: str = "human_agent"
@@ -167,133 +116,6 @@ class ResetBody(BaseModel):
 class BulkBody(BaseModel):
     session_ids: list[str]
     action: str  # "end" | "clear"
-
-
-# --- playground ---------------------------------------------------------------
-
-
-def _require_own_playground(session_id: str, user: user_store.User) -> dict[str, Any]:
-    """Resolve a playground session that belongs to this operator, else 404.
-
-    Playground chat history is per-operator: only the user who started a session
-    may message/export/delete it.
-    """
-    meta = session_admin_store.get_meta(session_id)
-    if meta.get("origin") != "playground" or meta.get("user_id") != user.id:
-        raise HTTPException(status_code=404, detail="playground session not found")
-    return meta
-
-
-def _require_agent(name: str) -> agent_store.Agent:
-    agent = get_agent_by_name(name)
-    if agent is None:
-        raise HTTPException(status_code=404, detail="agent not found")
-    return agent
-
-
-@router.post("/chat/start")
-def playground_start(body: StartBody, authorization: str | None = Header(None)) -> dict[str, Any]:
-    user = _require_admin(authorization)
-    agent = _require_agent(body.agent_name)
-    session_id = f"pg-{uuid.uuid4().hex[:12]}"
-    session_admin_store.upsert_meta(
-        session_id, origin="playground", agent_id=agent.id, user_id=user.id
-    )
-    return {"session_id": session_id, "origin": "playground", "agent_name": body.agent_name}
-
-
-@router.get("/chat/sessions")
-def list_playground_sessions(authorization: str | None = Header(None)) -> list[dict[str, Any]]:
-    """The current operator's playground sessions (most recent first), isolated per user."""
-    user = _require_admin(authorization)
-    rows = session_admin_store.list_meta(user_id=user.id, include_playground=True)
-    return [r for r in rows if r.get("origin") == "playground"]
-
-
-@router.delete("/chat/{session_id}", status_code=204)
-def delete_playground_session(session_id: str, authorization: str | None = Header(None)) -> None:
-    user = _require_admin(authorization)
-    _require_own_playground(session_id, user)
-    clear_session(session_id)
-    session_admin_store.delete_meta(session_id)
-    audit_log.write_audit(user.id, "playground_delete", "session", session_id)
-
-
-@router.post("/chat/{session_id}/message")
-def playground_message(
-    session_id: str, body: MessageBody, authorization: str | None = Header(None)
-) -> dict[str, Any]:
-    user = _require_admin(authorization)
-    meta = _require_own_playground(session_id, user)
-    bypass = body.auto_approve_medium  # only honored for playground sessions
-    if bypass:
-        audit_log.write_audit(user.id, "playground_bypass_medium", "session", session_id)
-    result = run_playground(meta["agent_name"], session_id, body.message, body.overrides, bypass)
-    return result
-
-
-@router.post("/chat/{session_id}/stream")
-def playground_stream(
-    session_id: str, body: MessageBody, authorization: str | None = Header(None)
-) -> StreamingResponse:
-    user = _require_admin(authorization)
-    meta = _require_own_playground(session_id, user)
-    bypass = body.auto_approve_medium
-    if bypass:
-        audit_log.write_audit(user.id, "playground_bypass_medium", "session", session_id)
-
-    def _sse() -> Iterator[str]:
-        for event in run_playground_stream(
-            meta["agent_name"], session_id, body.message, body.overrides, bypass
-        ):
-            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-
-    return StreamingResponse(_sse(), media_type="text/event-stream")
-
-
-@router.post("/chat/{session_id}/pin")
-def playground_pin(
-    session_id: str, body: PinBody, authorization: str | None = Header(None)
-) -> dict[str, Any]:
-    user = _require_admin(authorization)
-    _require_own_playground(session_id, user)
-    session_admin_store.set_pinned(session_id, True, note=body.note)
-    audit_log.write_audit(user.id, "playground_pin", "session", session_id)
-    return {"session_id": session_id, "pinned": True}
-
-
-@router.get("/chat/{session_id}/export")
-def playground_export(
-    session_id: str, fmt: str = "json", authorization: str | None = Header(None)
-) -> Any:
-    user = _require_admin(authorization)
-    _require_own_playground(session_id, user)
-    transcript = load_transcript(session_id)
-    audit_log.write_audit(user.id, "session_export", "session", session_id, detail={"fmt": fmt})
-    if fmt == "markdown":
-        return Response(
-            content=transcript_export.render_markdown(session_id, transcript),
-            media_type="text/markdown",
-            headers={"Content-Disposition": f'attachment; filename="{session_id}.md"'},
-        )
-    return {"session_id": session_id, "transcript": transcript}
-
-
-def purge_expired_playground(
-    now: datetime.datetime | None = None, retention_days: int = PLAYGROUND_RETENTION_DAYS
-) -> dict[str, list[str]]:
-    """Delete unpinned playground sessions past the retention window (scheduling job).
-
-    Transcript is emptied through the session seam; governance metadata is dropped.
-    """
-    moment = now or datetime.datetime.now(datetime.UTC)
-    cutoff = (moment - datetime.timedelta(days=retention_days)).isoformat()
-    purged = []
-    for sid in session_admin_store.list_unpinned_playground(cutoff):
-        clear_session(sid)
-        session_admin_store.delete_meta(sid)
-        purged.append(sid)
-    return {"purged": purged}
 
 
 # --- session governance -------------------------------------------------------
@@ -327,7 +149,12 @@ def list_sessions(
     authorization: str | None = Header(None),
 ) -> list[dict[str, Any]]:
     _current_user(authorization)
-    resolved_agent_id = None if agent_name is None else _require_agent(agent_name).id
+    resolved_agent_id = None
+    if agent_name is not None:
+        agent = get_agent_by_name(agent_name)
+        if agent is None:
+            raise HTTPException(status_code=404, detail="agent not found")
+        resolved_agent_id = agent.id
     rows = session_admin_store.list_meta(status=status, user_id=user_id, agent_id=resolved_agent_id)
     for row in rows:
         row.update(session_stats(row["session_id"]))

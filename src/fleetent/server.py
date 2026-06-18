@@ -13,7 +13,6 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
 from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel
 
@@ -49,10 +48,9 @@ from fleetent.platform.skill_management import skill_admin_api
 from fleetent.platform.user_management import user_admin_api
 from fleetent.platform.user_management.api_key_store import resolve as _resolve_api_key
 from fleetent.platform.user_management.platform_bearer_adapter import PlatformBearerAdapter
-from fleetent.runtime import run_stream
 from fleetent.session import manager as session_mgr
 from fleetent.skills import scan as scan_skills
-from fleetent.tools.plugin_loader import expand_plugin_patterns, load_plugins
+from fleetent.tools.plugin_loader import load_plugins
 
 logger = logging.getLogger(__name__)
 
@@ -189,57 +187,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     logger.info("admin_login_url url=%s", _admin_login_url(user_admin_api.router.prefix))
 
-    # The running event loop, used by the admin "Chat" playground seams below to drive
-    # on-demand turns from sync admin handlers.
+    # The running event loop backs the session governance seams injected below.
     loop = asyncio.get_running_loop()
-
-    # Wire the admin "Chat" playground to the real agent loop (mirrors /chat): the
-    # selected agent is resolved by name from its file-driven config, and the turn
-    # runs through run_stream against the playground session. Without this the
-    # playground seams are inert placeholders.
-    def _pg_run(
-        agent_name: str,
-        session_id: str,
-        message: str,
-        overrides: dict[str, Any] | None,
-        bypass_medium: bool,
-    ) -> dict[str, Any]:
-        from fleetent.runtime.snapshot import _governance_from_file
-
-        af = agent_config.current().get(agent_name) if agent_name else None
-        kwargs: dict[str, Any] = {
-            "principal": Principal(user_id="playground", tenant_id="default"),
-            "session_id": session_id,
-        }
-        if af is not None:
-            kwargs["system_prompt"] = af.system_prompt
-            kwargs["allowed_tools"] = af.allowed_tools + expand_plugin_patterns(af.plugins)
-            kwargs["agent_name"] = af.name
-            kwargs["agent_features"] = af.features
-            kwargs["allowed_skills"] = af.allowed_skills
-            kwargs["governance"] = _governance_from_file(af)
-        events: list[dict[str, Any]] = []
-
-        async def _collect() -> str:
-            reply = ""
-            try:
-                async for ev in run_stream(message, **kwargs):
-                    etype = ev.get("type")
-                    if etype == "done":
-                        reply = ev.get("content", "")
-                    elif etype in ("tool_call", "tool_result", "error"):
-                        events.append(ev)
-            except Exception as exc:  # noqa: BLE001 — surface as a turn error, never a 500
-                events.append({"type": "error", "content": str(exc)})
-            return reply
-
-        reply = asyncio.run_coroutine_threadsafe(_collect(), loop).result()
-        return {"reply": reply, "events": events}
 
     def _pg_transcript(session_id: str) -> list[dict[str, Any]]:
         return asyncio.run_coroutine_threadsafe(session_mgr.load(session_id), loop).result()
 
-    chat_admin_api.run_playground = _pg_run
     chat_admin_api.load_transcript = _pg_transcript
     chat_admin_api.clear_session = lambda session_id: asyncio.run_coroutine_threadsafe(
         session_mgr.clear(session_id), loop
@@ -251,30 +204,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         session_mgr.reset(session_id, keep_turns), loop
     ).result()
 
-    # Platform-maintenance scheduler only (agent-owned-scheduled-tasks): user scheduled
-    # tasks are agent-runtime-owned and fired by each agent process, NOT the platform
-    # server. The platform keeps a bare scheduler purely for its own housekeeping
-    # (expired-playground purge); best-effort so a failure never blocks serving.
-    maint = AsyncIOScheduler()
-    try:
-        maint.add_job(
-            _run_playground_retention,
-            trigger="interval",
-            seconds=_PLAYGROUND_RETENTION_INTERVAL_SECONDS,
-            id="playground_retention",
-            replace_existing=True,
-        )
-        maint.start()
-    except Exception as exc:
-        logger.warning("platform_maintenance_scheduler_start_failed error=%s", exc)
-
     yield
-
-    try:
-        if maint.running:
-            maint.shutdown(wait=False)
-    except Exception as exc:
-        logger.warning("platform_maintenance_scheduler_shutdown_failed error=%s", exc)
     # Release MCP session hosts (platform registers global servers via register_all). Each
     # host tears down on its own task; failures are contained inside aclose_all().
     try:
@@ -439,21 +369,6 @@ def wire_agent_store_seams() -> None:
 
 
 wire_agent_store_seams()
-
-
-_PLAYGROUND_RETENTION_INTERVAL_SECONDS = 24 * 3600
-
-
-def _run_playground_retention() -> None:
-    """Daily sweep: drop unpinned, expired playground sessions. Failures are isolated."""
-    import os
-
-    if not os.environ.get("DATABASE_URL"):
-        return
-    try:
-        chat_admin_api.purge_expired_playground()
-    except Exception:  # noqa: BLE001 — keep the periodic job alive
-        logger.exception("playground_retention_failed")
 
 
 _platform_bearer = PlatformBearerAdapter()

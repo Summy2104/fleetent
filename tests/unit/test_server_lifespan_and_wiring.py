@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -155,28 +155,62 @@ def test_agent_def_dict_and_wire_agent_store_seams(monkeypatch: pytest.MonkeyPat
     )
 
 
-@dataclass
-class _FakeScheduler:
-    running: bool = True
-    started: bool = False
-    jobs: list[tuple[tuple[Any, ...], dict[str, Any]]] | None = None
-    shutdown_calls: list[bool] | None = None
+def test_server_does_not_import_run_stream() -> None:
+    source = Path(server.__file__).read_text(encoding="utf-8")
+    assert "from fleetent.runtime import run_stream" not in source
 
-    def __post_init__(self) -> None:
-        self.jobs = []
-        self.shutdown_calls = []
 
-    def add_job(self, *args: Any, **kwargs: Any) -> None:
-        assert self.jobs is not None
-        self.jobs.append((args, kwargs))
+async def test_no_playground_scheduler(monkeypatch: pytest.MonkeyPatch) -> None:
+    resolver_calls: list[tuple[str, Any]] = []
+    assert not hasattr(server.chat_admin_api, "run_playground")
+    monkeypatch.setattr(
+        server.user_store, "set_api_key_resolver", lambda fn: resolver_calls.append(("api", fn))
+    )
+    monkeypatch.setattr(
+        server.connectors, "set_provider", lambda fn: resolver_calls.append(("provider", fn))
+    )
+    monkeypatch.setattr(
+        server, "set_im_identity_resolver", lambda fn: resolver_calls.append(("im", fn))
+    )
+    monkeypatch.setattr(
+        server.agent_store, "set_delete_agent_hook", lambda fn: resolver_calls.append(("hook", fn))
+    )
+    monkeypatch.setattr(server, "scan_skills", lambda: resolver_calls.append(("skills", None)))
+    monkeypatch.setattr(
+        server.agent_config, "scan", lambda: resolver_calls.append(("agents", None))
+    )
+    monkeypatch.setattr(server, "load_plugins", lambda: resolver_calls.append(("plugins", None)))
+    monkeypatch.setattr(
+        "fleetent.runtime.approval_resume.reconcile_expired_approvals",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        server, "Settings", lambda: SimpleNamespace(database_url="sqlite:///tmp.db")
+    )
+    monkeypatch.setattr(
+        server, "configure_logging", lambda settings: resolver_calls.append(("logging", settings))
+    )
+    monkeypatch.setattr(
+        server, "log_config_loaded", lambda: resolver_calls.append(("loaded", None))
+    )
+    monkeypatch.setattr(
+        server, "diagnose_database_writable", lambda url: resolver_calls.append(("db", url))
+    )
+    monkeypatch.setattr(
+        server,
+        "seed_builtin_admin",
+        lambda: (SimpleNamespace(name="admin"), "temp-pass"),
+    )
+    monkeypatch.setattr("fleetent.integrations.mcp.aclose_all", AsyncMock())
 
-    def start(self) -> None:
-        self.started = True
-
-    def shutdown(self, wait: bool = False) -> None:
-        assert self.shutdown_calls is not None
-        self.shutdown_calls.append(wait)
-        self.running = False
+    async with server.lifespan(SimpleNamespace()):
+        assert ("skills", None) in resolver_calls
+        assert ("plugins", None) in resolver_calls
+        assert not hasattr(server.chat_admin_api, "run_playground")
+        assert callable(server.chat_admin_api.load_transcript)
+        assert callable(server.chat_admin_api.clear_session)
+        assert callable(server.chat_admin_api.inject)
+        assert callable(server.chat_admin_api.reset_session)
 
 
 async def test_lifespan_wires_startup_and_shutdown(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -219,22 +253,16 @@ async def test_lifespan_wires_startup_and_shutdown(monkeypatch: pytest.MonkeyPat
         "seed_builtin_admin",
         lambda: (SimpleNamespace(name="admin"), "temp-pass"),
     )
-    scheduler = _FakeScheduler()
-    monkeypatch.setattr(server, "AsyncIOScheduler", lambda: scheduler)
     monkeypatch.setattr("fleetent.integrations.mcp.aclose_all", AsyncMock())
 
     async with server.lifespan(SimpleNamespace()):
-        assert scheduler.started is True
-        assert scheduler.jobs and scheduler.jobs[0][1]["id"] == "playground_retention"
         assert ("skills", None) in resolver_calls
         assert ("plugins", None) in resolver_calls
-        assert callable(server.chat_admin_api.run_playground)
         assert callable(server.chat_admin_api.load_transcript)
         assert callable(server.chat_admin_api.clear_session)
         assert callable(server.chat_admin_api.inject)
         assert callable(server.chat_admin_api.reset_session)
 
-    assert scheduler.shutdown_calls == [False]
     assert resolver_calls[-1] == ("im", None)
 
 
