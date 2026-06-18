@@ -1,6 +1,6 @@
 ## MODIFIED Requirements
 
-### Requirement: Admin can set default agent via control plane
+### Requirement: Admin can set default agent via CLI
 
 The platform SHALL expose `PUT /admin/agents/{name}/default` (set the named agent as default) and `DELETE /admin/agents/default` (clear the current default). The default SHALL be a control-plane attribute persisted in the management DB (a single default agent per tenant), NOT edited directly on node-side `agent.yaml` files. Setting a new default SHALL clear any previously-default agent in the same tenant. The materialize path SHALL emit `bindings.default: true` into the agent.yaml content for the agent marked default, so node-side scan continues to resolve the default from `bindings.default` unchanged. Both endpoints MUST require admin role and write an audit entry.
 

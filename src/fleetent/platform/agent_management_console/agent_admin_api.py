@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from fleetent import agent_store, audit_log, auth, paths, user_store
 from fleetent.platform.agent_lifecycle import credential_slots, secret_store
 from fleetent.platform.agent_lifecycle.materialize import agent_file_from_store
-from fleetent.platform.agent_management_console import agent_im_group_store
+from fleetent.platform.agent_management_console import agent_admin_store, agent_im_group_store
 from fleetent.platform.connector_management import (
     agent_service_grant_store,
     external_service_store,
@@ -134,7 +134,7 @@ def _build_agent_yaml(agent: agent_store.Agent) -> str:
     if servers:
         data["mcp_servers"] = servers
 
-    bindings: dict[str, Any] = {}
+    bindings: dict[str, Any] = dict(data.get("bindings") or {})
     users = agent_store.list_users_for_agent(agent.id)
     if users:
         bindings["users"] = users
@@ -204,6 +204,23 @@ def activate_version(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"name": name, "active_version": version}
+
+
+@router.put("/agents/{name}/default")
+def set_default_agent(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    agent = _require_agent(name)
+    agent_admin_store.set_default(agent.id)
+    audit_log.write_audit(user.id, "agent.default.set", target_type="agent", target_id=name)
+    return {"agent": name, "is_default": True}
+
+
+@router.delete("/agents/default")
+def clear_default_agent(authorization: str | None = Header(None)) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    agent_admin_store.clear_default()
+    audit_log.write_audit(user.id, "agent.default.clear", target_type="agent", target_id="*")
+    return {"cleared": True}
 
 
 @router.post("/agents/{name}/bindings/users/{user_id}")
