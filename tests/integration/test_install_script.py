@@ -15,7 +15,7 @@ import subprocess
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "install.sh"
-SUPPORTED_FLAGS = ("--agent-only", "--platform-only", "--agent-id", "--dir", "--help")
+SUPPORTED_FLAGS = ("--agent-only", "--platform-only", "--dir", "--help")
 
 
 def _run(args: list[str], home: Path) -> subprocess.CompletedProcess[str]:
@@ -175,7 +175,9 @@ def test_full_run_delegates_to_both_role_scripts(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     out = result.stdout + result.stderr
     assert "Setting up platform" in out
-    assert "Setting up agent 'default'" in out
+    # install-defer-agent-init: no default agent is seeded; a create-agent tutorial is printed.
+    assert "fleetent agent init" in out
+    assert not (home / ".fleetent" / "agents" / "default").exists()
     assert "Developer install complete" in out
 
 
@@ -220,9 +222,11 @@ def test_agent_only_skips_platform_and_db(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stdout + result.stderr
     out = result.stdout + result.stderr
-    assert "Setting up agent 'default'" in out
+    # Agent component now only installs the runtime + prints the create-agent tutorial.
+    assert "fleetent agent init" in out
     assert "Setting up platform" not in out
     assert "upgrade head" not in uv_log.read_text()
+    assert not (home / ".fleetent" / "agents" / "default").exists()
 
 
 def test_platform_only_skips_agent(tmp_path: Path) -> None:
@@ -235,18 +239,8 @@ def test_platform_only_skips_agent(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     out = result.stdout + result.stderr
     assert "Setting up platform" in out
-    assert "Setting up agent '" not in out
-
-
-def test_agent_id_flag_targets_named_agent(tmp_path: Path) -> None:
-    home = tmp_path / "home"
-    home.mkdir()
-    env = _fake_uv_env(home, tmp_path / "bin", tmp_path / "uv.log")
-
-    result = _run_env(["--agent-only", "--agent-id", "support"], env, home)
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "Setting up agent 'support'" in result.stdout + result.stderr
+    # platform-only skips the agent component entirely → no create-agent tutorial.
+    assert "fleetent agent init" not in out
 
 
 def test_rerun_is_idempotent(tmp_path: Path) -> None:
