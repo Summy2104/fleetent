@@ -10,6 +10,12 @@
 
 AI 和所有团队成员必须遵守。违反任何一条 = 违反流程，需要回退重来。
 
+### 语言
+
+- 默认使用中文和用户交流。
+- OpenSpec 产物（proposal.md、design.md、tasks.md、spec 文件）用中文写。
+- 代码、commit message、API 字段、错误码使用英文。
+
 ### Commit 规范
 
 格式：`type(scope): 简短描述`（英文，动词开头，scope 可选）
@@ -27,6 +33,10 @@ type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`
 3. 可选 refactor → 确保仍然绿
 
 Hard Gate 管「必须见红 → 见绿」纪律，**不规定范围**；task / PR 收尾跑什么范围见「测试规范 · 何时跑什么」。跳过任何一步 = 违反流程。
+
+### 非代码产物提交
+
+TDD Hard Gate 只管代码实现；文档、proposal.md、design.md、tasks.md 等非代码产物由 agent 起草后，须**人工确认内容正确**再 commit，不得由 agent 直接提交。
 
 ### OpenSpec 工作流
 

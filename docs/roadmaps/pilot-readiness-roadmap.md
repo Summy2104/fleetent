@@ -7,7 +7,7 @@
 **Pilot MVP 工程前置已基础完成。** 当前已有 admin query CLI、agent KB binding、connector operations、diagnostics / retention、Docker Compose Pilot 入口、Pilot install checklist、Pilot acceptance guide 和自动化验证报告入口。
 
 **当前还不能仅凭本文件直接宣称全项目 Pilot Go。** Intelligence 和 Observability / Deployment
-专项 roadmap 已达到 Go；全项目 Pilot Go 仍需按 [Pilot acceptance guide](../../deployment/pilot-acceptance-guide.md)
+专项 roadmap 已达到 Go；全项目 Pilot Go 仍需按 [Pilot acceptance guide](../operations/pilot-acceptance-guide.md)
 汇总 Runtime / Tooling、Platform / Governance / Channels 的剩余接入风险后输出最终 Go / Conditional Go / No-Go 判定。
 
 Pilot 验收前先生成自动化证据包：
@@ -30,8 +30,8 @@ uv run python scripts/generate_pilot_verification_report.py
 
 专项人工验收手册：
 
-- [Intelligence Roadmap 人工测试手册](../../deployment/intelligence-roadmap-test-manual.md)
-- [Observability and Deployment Roadmap 人工测试手册](../../deployment/observability-deployment-roadmap-test-manual.md)
+- [Intelligence Roadmap 人工测试手册](intelligence-roadmap-test-manual.md)
+- [Observability and Deployment Roadmap 人工测试手册](observability-deployment-roadmap-test-manual.md)
 
 ## 全项目 readiness 看板
 
@@ -72,8 +72,8 @@ uv run python scripts/generate_pilot_verification_report.py
   [observability-deployment-roadmap.md](observability-deployment-roadmap.md)。
 - 复核 Runtime / Tooling 的执行链路、工具、MCP、sandbox 降级和端到端稳定性风险。
 - 复核 Platform / Governance / Channels 的 Slack / Telegram / Webhook / scheduler / connector 可用性和权限边界。
-- 按 [pilot-install-checklist.md](../../deployment/pilot-install-checklist.md) 完成一次准生产安装、升级、备份、恢复和诊断包导出演练。
-- 按 [pilot-acceptance-guide.md](../../deployment/pilot-acceptance-guide.md) 完成 Go / Conditional Go / No-Go 判定。
+- 按 [pilot-install-checklist.md](../operations/pilot-install-checklist.md) 完成一次准生产安装、升级、备份、恢复和诊断包导出演练。
+- 按 [pilot-acceptance-guide.md](../operations/pilot-acceptance-guide.md) 完成 Go / Conditional Go / No-Go 判定。
 
 ## 合理内测平衡点
 

@@ -29,6 +29,22 @@ conversation address cannot be resolved, the call MUST fail closed to `medium`. 
 SHALL never raise — unreachable targets, missing connectors, per-file resolution failures, and
 send failures each return an explanatory text result.
 
+The tool's documented purpose SHALL describe it as **proactive outreach to other users or
+other channels** — replying to the current conversation is done with `send_file` (for files)
+or a plain text reply — so the model is not steered to route "send it to me" through this tool.
+
+**Delivery-surface pinning (channel self-DM):** when an authoritative current-conversation
+address is present AND that conversation is a **channel** (`chat_type == "channel"`), AND the
+requested `(target, target_type)` is a **user DM to the current-conversation sender**
+(`target_type == "user"` and `target` equals the inbound sender id), the delivery SHALL be
+pinned to the current conversation address — delivered to that **channel (threaded)**, the same
+surface `send_file` uses — rather than to the sender's private DM. Both the text and any file
+attachments SHALL be delivered to that pinned address (the effective `target_type` and thread
+id flow through to both `outbound.send_to` and `outbound.send_file_to`). The approval level is
+unaffected (this is still the current conversation → `none`). This pinning SHALL NOT apply when
+the target is a third party, when `target_type == "channel"`, or when the inbound conversation
+is itself a DM (`chat_type != "channel"`).
+
 #### Scenario: DM to a third-party user is gated
 
 - **WHEN** the agent calls `send_im_message(target="U_OTHER", text="hi")` in a Slack
@@ -48,6 +64,30 @@ send failures each return an explanatory text result.
 - **WHEN** the agent calls `send_im_message(target="C_NOTICE", text="...", target_type="channel")`
   where `C_NOTICE` is not the current channel, and the call is approved
 - **THEN** the message is posted to the channel via `outbound.send_to`
+
+#### Scenario: self-DM from a channel is pinned to the channel thread
+
+- **WHEN** the inbound conversation is a Slack **channel** (`chat_type == "channel"`) whose
+  sender is `U_SELF`, and the agent calls
+  `send_im_message(target="U_SELF", text="here", target_type="user", files=["report.png"])`
+- **THEN** the text and the file are delivered to the **current channel (threaded)** — the same
+  surface `send_file` uses — and NOT to `U_SELF`'s private DM
+- **AND** the call requires no approval (it is still the current conversation)
+- **AND** the delivery receipts (and the `📬 实际投递` trailer) name the channel as the target
+
+#### Scenario: self-DM from a DM conversation is unchanged
+
+- **WHEN** the inbound conversation is itself a DM with `U_SELF` (`chat_type != "channel"`) and
+  the agent calls `send_im_message(target="U_SELF", text="here", target_type="user")`
+- **THEN** the message is delivered to that DM as before (no pinning rewrite applies)
+
+#### Scenario: third-party DM from a channel is not pinned
+
+- **WHEN** the inbound conversation is a channel and the agent calls
+  `send_im_message(target="U_OTHER", text="hi", target_type="user")` where `U_OTHER` is not
+  the sender
+- **THEN** no pinning applies, the call is `medium` (gated), and after approval the message is
+  delivered to `U_OTHER`'s DM
 
 #### Scenario: assistant-pane DM path injects connectors
 
@@ -86,4 +126,3 @@ send failures each return an explanatory text result.
   resolved from the session context
 - **THEN** `approval_policy.risk_for` returns `medium` and the call passes the permission gate
   before any delivery
-

@@ -12,6 +12,9 @@ fleetent 平台全局术语定义。所有模块文档应以本表为准，避�
 | **agent** | 由 system_prompt、allowed_tools 和 skill 组成的 LLM 实例配置，代表一个业务角色（如 HR 助手、代码审查机器人） | 不用 "bot"（bot 特指 IM 平台上的账号）|
 | **agent_loop** | agent 的核心执行引擎：接收输入 → LLM 调用 → 工具执行 → 迭代，直到终止条件 | 不用 "run loop"、"execution cycle" |
 | **scope** | 数据隔离的粒度标识，可以是 `tenant_id` 或 `agent_id`，用于区分不同租户或不同 agent 的数据 | 不用 "namespace"（namespace 专指 vector_store 内部的分区）|
+| **principal** | 认证完成后贯穿 agent 运行时的身份抽象，携带 `user_id`、`tenant_id`、`agent_name` 等字段。由认证边界（bearer token 解析 / IM 渠道担保）构造，核心模块只消费 Principal，不直接处理认证逻辑 | 不用 "user"（user 是存储层实体，principal 是运行时身份令牌）|
+| **node** | `fleetent-node` 进程，负责在某台宿主机上运行和管理一批 agent。轮询平台 `GET /nodes/{id}/desired-state` 获取期望列表，通过 spawn/stop 启停 `fleetent agent run` 子进程，并经 `POST /nodes/{id}/status` 上报实际运行态；注册信息存 `nodes` 表，以 `ma-<hex>` service key 鉴权 | 不用 "worker"、"host" |
+| **materialize** | 平台将管理库中的 agent 定义、绑定和配置**单向刷写**为 agent 侧 `agent.yaml` 文件的操作，触发于 create / update / apply / clone 等变更后。agent 运行时只读自己的 `agent.yaml`，不查 platform DB（零 platform 依赖契约的执行点） | 不用 "sync"（暗示双向）、"deploy"（指发布上线，materialize 是配置刷写）|
 
 ---
 
@@ -22,7 +25,7 @@ fleetent 平台全局术语定义。所有模块文档应以本表为准，避�
 | **session** | 一次完整的对话上下文，包含完整的消息历史，持久化为 `sessions/{session_id}.json`。session 是逻辑概念，跨越多条消息 | 不用 "conversation"（过于宽泛）|
 | **thread** | IM 平台（如 Slack）的原生消息线程，是 session 的物理载体之一。一个 thread 对应一个 session | 不用 "channel thread"，容易与 channel 混淆 |
 | **channel** | IM 平台上的频道或聊天窗口（Slack channel、Telegram chat），是消息的发送场所，一个 channel 可以有多个 thread | 保持原词 |
-| **session_id** | session 的唯一标识，格式为 `{user_id}/{thread_id}` 或 `{user_id}/{channel_id}`，保证同一对话上下文的连续性 | 不用 "conversation_id"、"chat_id" |
+| **session_id** | session 的唯一标识，带平台前缀，由各 IM 适配器的 `_derive_session_id()` 构造。例如：`slack:dm:{user_id}:{thread_root}`（私信）、`slack:thread:{channel_id}:{thread_root}`（频道线程）；CLI 会话使用简单 UUID。 | 不用 "conversation_id"、"chat_id" |
 | **platform** | 接入层的 IM 平台，如 `slack`、`telegram`、`whatsapp`。与 `fleetent 平台`（指本产品）区分，后者用 "系统" 或全称 | 消息上下文中保持原词 |
 
 ---
@@ -31,9 +34,9 @@ fleetent 平台全局术语定义。所有模块文档应以本表为准，避�
 
 | 术语 | 定义 | 禁止混用 |
 |------|------|---------|
-| **skill** | 注入 agent system_prompt 的行为模式描述，存储为 `skills/` 目录下的文件（单文件或多级目录）。skill 告诉 agent"怎么做某类任务" | 不用 "prompt template"、"behavior"（过于宽泛）|
-| **skill_path** | skill 在 `skills/` 目录下的相对路径，如 `summarizer` 或 `tools/code_runner`，用于唯一标识一个 skill | 不用 "skill_name"（名称可重复，路径唯一）|
-| **skill 注入** | 根据用户输入关键词匹配 skill，将匹配到的 skill 内容追加到 system_prompt 的过程 | 不用 "skill 加载"、"skill 激活" |
+| **skill** | 可复用的行为模式描述，存储为 `skills/` 目录下的包（含 `SKILL.md` + 可选脚本/资源）。平时以 **catalog**（名称 + 描述）形式出现在 system prompt，agent 按需调 `read_skill(name)` 加载全文；告诉 agent"怎么做某类任务" | 不用 "prompt template"、"behavior"（过于宽泛）|
+| **skill_path** | skill 在 `skills/` 目录下的相对路径，如 `summarizer` 或 `tools/code_runner`，用于物理定位（文件系统相对路径），不是唯一标识符。skill 的唯一标识是 `name`（`skills` 表的 PK）。 | 不用 "skill_path 作为唯一标识符"（`name` 才是 PK）|
+| **skill 注入（read-on-demand）** | 模型按需加载 skill 全文的机制：启动时 system prompt 只含 **catalog**（每个合格 skill 的 `name/description/location`）；模型决定使用某 skill 时调用 `read_skill(name)` 工具，运行时即时注入全文。旧的关键词自动匹配路径（`match()`）是 legacy，不再使用。 | 不用 "skill 激活"；"skill 加载"仅限描述 `read_skill` 工具调用本身 |
 | **snapshot** | skill 变更提案中对整个 skill 目录的完整文件快照，格式为 `{"files": {"rel_path": "content", ...}}`。delete 提案的 snapshot 为 null | 不用 "diff"（snapshot 是全量，不是增量）|
 
 ---
@@ -58,7 +61,7 @@ fleetent 平台全局术语定义。所有模块文档应以本表为准，避�
 | **语义记忆** | 跨 session 的用户事实，按 `identity`/`preferences`/`context` 三类结构化存储于 `memory_items` 表，由 `fleetent.memory` 负责 | 不用 "semantic memory"（英文只在代码注释中使用）|
 | **情节记忆** | 对话与工具执行的完整历史轨迹，写入 `traces` 表，由 `observability` 负责 | 不用 "episodic memory"、"execution log"（traces 是正式名词）|
 | **程序记忆** | agent 完成特定任务的技能与方法，存储为 `skills/` 目录，由 `skill_registry` 负责 | 不用 "procedural memory"、"knowledge"（knowledge 指企业文档知识库）|
-| **工作记忆** | 当前 session 的对话上下文，存储在内存中，session 结束即释放，由 `context_mgr` 负责 | 不用 "working memory"、"context window"（context window 是 LLM 的技术概念）|
+| **工作记忆** | 当前 session 的对话上下文，存储在内存中，session 结束即释放，由 `runtime.context` 负责（`context_mgr` 是遗留 re-export shim，`monkeypatch` 等须指真实模块 `fleetent.runtime.context`）| 不用 "working memory"、"context window"（context window 是 LLM 的技术概念）|
 | **identity** | 语义记忆子类型：用户的身份事实（姓名、职位、技能），永久有效，新值覆盖旧值 | 保持英文，与代码 type 字段对齐 |
 | **preferences** | 语义记忆子类型：用户的工作偏好（风格、输出格式），长期有效；需区分明确陈述（更新记忆）和一次性请求（不更新）| 保持英文，与代码 type 字段对齐 |
 | **context** | 语义记忆子类型：用户的临时状态（当前项目、进行中任务），TTL 30 天，过期自动失效 | 保持英文，与代码 type 字段对齐。注意与"上下文（context window）"区分 |
@@ -74,7 +77,9 @@ fleetent 平台全局术语定义。所有模块文档应以本表为准，避�
 | **chunk** | 文档分块后的最小检索单元，保留来源文档信息（filename、position）| 保持英文，与代码字段对齐 |
 | **entity** | 从文档中 LLM 提取的命名实体（人名、组织、概念、产品等），用于图增强检索 | 保持英文 |
 | **relation** | 两个 entity 之间的关系描述，从文档中 LLM 提取，存储为有向边 | 保持英文 |
-| **connector** | 数据源连接器，实现 `DataSource` 接口，负责从外部系统（Confluence、Google Drive、本地目录等）拉取文档 | 不用 "adapter"、"integration" |
+| **connector（KB 数据源）** | KB 数据源连接器，实现 `DataSource` 接口，负责从外部系统（Confluence、Google Drive、本地目录等）拉取文档并写入知识库。当前仍使用 connector 命名（`knowledge_base/connectors/`）。 | 不用 "adapter"、"integration" |
+| **external service / external_services** | 工具级外部服务授权体系（OAuth2 / API-key），由 `platform/connector_management/` 管理。凭证存储在 `external_credentials`，授权关系存储在 `agent_service_grants`。旧称"工具 OAuth connector"，已重设计为 Vault 体系，不再使用 connector 一词。 | 不用 "connector"（工具 OAuth 语境下已废弃）|
+| **[废弃] IM connector** | IM 渠道接入的旧称，v1 阶段 4 正式废弃，改称 im（ImAccess / ImBinding）。 | 不用 "connector"（IM 语境下已废弃）|
 | **ingest** | 将文档导入知识库的过程：解析 → 分块 → embedding / 索引写入；图提取属于后续 graph search 阶段 | 不用 "import"、"upload"（upload 特指文件直传这一种 ingest 方式）|
 
 ---

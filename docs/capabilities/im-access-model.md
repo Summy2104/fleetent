@@ -1,7 +1,7 @@
 # Agent IM 接入与访问控制模型（as-built 行为）
 
 > **状态：as-built 行为参考（阶段 1–4 + 3b 全落地，2026-06-14）**。讲 agent 在 IM 平台的 bot 接入身份 + 三层访问控制 + "平台配置→部署 materialize→agent 侧零-platform-DB 强制"的同步契约。命名采用 **S2（`im` 命名空间）**。
-> **schema 真相源是 [data-model](data-model.md)**（`im_users`/`user_agents`/`agent_im_groups`/`agents.supports_*` + erDiagram），本文不复述列。**分阶段落地过程、已 resolved 的设计取舍**见 [`records/decision-logs/`](../records/decision-logs/) 与本文 git 历史。配套 [agent-identity-model](agent-identity-model.md)、[[identity-auth-model]]。
+> **schema 真相源是 [data-model](../architecture/data-model.md)**（`im_users`/`user_agents`/`agent_im_groups`/`agents.supports_*` + erDiagram），本文不复述列。**分阶段落地过程、已 resolved 的设计取舍**见 [`records/decision-logs/`](../records/decision-logs/) 与本文 git 历史。配套 [agent-identity-model](../records/decision-logs/agent-identity-model.md)、[[identity-auth-model]]。
 
 ## 1. runtime 模型：一个 Agent 一个 bot
 
