@@ -102,7 +102,7 @@ def test_create_shared_memory(tmp_path, monkeypatch) -> None:
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     assert response.json()["status"] == "active"
     assert response.json()["type"] == "procedure"
 

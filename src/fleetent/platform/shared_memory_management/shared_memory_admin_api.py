@@ -104,7 +104,7 @@ def list_shared_memory(
     return [_item_dict(item) for item in items]
 
 
-@router.post("")
+@router.post("", status_code=201)
 async def create_shared_memory_item(
     body: CreateSharedMemoryBody,
     authorization: str | None = Header(None),

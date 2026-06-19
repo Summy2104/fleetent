@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from fleetent import audit_log, auth, user_store
@@ -71,15 +72,22 @@ def list_nodes(authorization: str | None = Header(None)) -> list[dict[str, Any]]
     return [_serialize_node(node) for node in node_store.list_nodes()]
 
 
-@router.delete("/{node_id}")
-def deregister_node(node_id: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+@router.delete("/{node_id}", status_code=204)
+def deregister_node(node_id: str, authorization: str | None = Header(None)) -> Response:
     user = _require_admin(authorization)
     try:
         node_store.deregister_node(node_id)
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        placements = placement_store.list_by_node(node_id)
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": str(exc),
+                "pinned_agents": [placement["agent_id"] for placement in placements],
+            },
+        )
     audit_log.write_audit(user.id, "node.deregister", target_type="node", target_id=node_id)
-    return {"node_id": node_id, "deregistered": True}
+    return Response(status_code=204)
 
 
 @router.post("/{node_id}/pin")
@@ -105,12 +113,12 @@ def pin_node(
     return placement
 
 
-@router.delete("/{node_id}/pin")
+@router.delete("/{node_id}/pin", status_code=204)
 def unpin_node(
     node_id: str,
     agent_id: int,
     authorization: str | None = Header(None),
-) -> dict[str, Any]:
+) -> Response:
     user = _require_admin(authorization)
     placement_store.unpin_agent(agent_id)
     audit_log.write_audit(
@@ -120,4 +128,4 @@ def unpin_node(
         target_id=node_id,
         detail={"agent_id": agent_id},
     )
-    return {"node_id": node_id, "agent_id": agent_id, "pinned": False}
+    return Response(status_code=204)

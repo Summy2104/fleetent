@@ -5,8 +5,8 @@ from fastapi.testclient import TestClient
 import fleetent.agent_store as agent_store
 import fleetent.auth as auth
 import fleetent.user_store as user_store
-from fleetent.server import app
 from fleetent.platform.node_management import node_store, placement_store
+from fleetent.server import app
 from tests.integration._migration_template import apply_migrations
 
 
@@ -79,7 +79,7 @@ def test_deregister_node_success(tmp_path, monkeypatch) -> None:
 
     response = client.delete("/admin/nodes/node-a", headers=_session_header("admin"))
 
-    assert response.status_code == 200
+    assert response.status_code == 204
     assert node_store.get_node("node-a") is None
 
 
@@ -92,6 +92,7 @@ def test_deregister_pinned_node_returns_409(tmp_path, monkeypatch) -> None:
     response = client.delete("/admin/nodes/node-a", headers=_session_header("admin"))
 
     assert response.status_code == 409
+    assert response.json()["pinned_agents"] == [agent.id]
 
 
 def test_pin_and_unpin_agent(tmp_path, monkeypatch) -> None:
@@ -113,7 +114,7 @@ def test_pin_and_unpin_agent(tmp_path, monkeypatch) -> None:
         headers=_session_header("admin"),
     )
 
-    assert unpin_response.status_code == 200
+    assert unpin_response.status_code == 204
     assert placement_store.get_for_agent(agent.id) is None
 
 
