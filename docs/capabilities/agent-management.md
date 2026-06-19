@@ -44,9 +44,9 @@ agent 的"定义谁拥有"治理——**这条是活的**（区别于 skill 自�
 ## 4. 版本生命周期（`agent_versions`）
 
 - **创建 agent** → 自动建 version 1 并设 active。
-- **编辑（console PATCH / CLI `update-agent`）** → `create_version(activate=True)`：建新版本快照并把 `active_version_id` 指过去。版本快照 system_prompt/allowed_tools/skills_dir/mcp_server_ids/model_overrides 等。
+- **编辑（console PATCH / HTTP `PATCH /admin/agents/{name}`）** → `create_version(activate=True)`：建新版本快照并把 `active_version_id` 指过去。版本快照 system_prompt/allowed_tools/skills_dir/mcp_server_ids/model_overrides 等。
 - **apply（managed）本身不建版本**——只创建/更新定义 + 置 provenance=managed；后续若 console 编辑 managed agent 仍走 create_version（**版本与 provenance 正交**）。
-- **显式激活**：`POST /admin/agents/{name}/versions/{v}/activate`（或 CLI）只改 `active_version_id`、不建新版本。**无自动回滚路径**——切版本是人工触发的唯一手段。
+- **显式激活**：`POST /admin/agents/{name}/versions/{v}/activate` 只改 `active_version_id`、不建新版本。**无自动回滚路径**——切版本是人工触发的唯一手段。
 - **agent 级能力**（features/plugins/allowed_skills/config_overrides/supports_dm/groups）**不版本化**，存 `agents` 表——避免"回滚版本→能力/IM 闸跟着变"的耦合。
 
 ## 5. materialize：平台 → agent.yaml（单向桥）
@@ -74,7 +74,7 @@ flowchart LR
     ST["POST /status"]
     NAS[node_agent_status<br/>上报态]
   end
-  subgraph N[node（fleetent-node 进程）]
+  subgraph N[node（fleetent node start 进程）]
     POLL[provider.fetch<br/>轮询~10s]
     REC[reconcile<br/>diff desired vs 本地]
     BK[spawn/stop<br/>fleetent agent run]
@@ -99,14 +99,14 @@ flowchart LR
 | 操作 | 入口 | 改表 | 触发 |
 |---|---|---|---|
 | create | `POST /admin/agents` | agents(v1)+versions+admin_state | materialize |
-| update | `PATCH /admin/agents/{name}` / CLI `update-agent` | versions(vN)+admin_state(drift) | materialize |
+| update | `PATCH /admin/agents/{name}` / HTTP `PATCH /admin/agents/{name}` | versions(vN)+admin_state(drift) | materialize |
 | clone | `POST /admin/agents/{name}/clone` | agents(v1)+versions+admin_state(adhoc) | materialize |
 | delete | `DELETE /admin/agents/{name}` | agents(CASCADE 清所有绑定) | 需 references 校验(user_agents)+X-Confirm；`_delete_agent_hook` 清外部凭证 |
 | enable/disable/archive/restore | `POST /admin/agents/{name}/{op}` | admin_state(status) | —（下次 desired-state 生效）|
 | apply / apply:batch | `POST /admin/agents/apply` | agents/versions + admin_state(provenance=managed) | materialize |
 | list/activate version | `GET\|POST /admin/agents/{name}/versions[/{v}/activate]` | agents(active_version_id) | 无自动 materialize |
 | pin / unpin | **仅 CLI** `node pin\|unpin` | agent_placements | 下次 desired-state 生效 |
-| assign/unassign user | CLI `assign-user` | user_agents | materialize(IM allow_users) |
+| assign/unassign user | `POST` / `DELETE /admin/agents/{name}/bindings/users/{user_id}` | user_agents | materialize(IM allow_users) |
 
 ## 8. live / dead 速查
 

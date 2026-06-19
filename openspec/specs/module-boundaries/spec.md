@@ -110,7 +110,10 @@ tables、config namespace 变化和 cross-module dependencies。
 
 ### Requirement: Admin CLI package split
 系统 SHALL expose the admin CLI through `platform.admin_cli` canonical package paths only; the legacy
-`fleetent.admin` shim SHALL NOT remain importable.
+`fleetent.admin` shim SHALL NOT remain importable. The `fleetent-admin` console script SHALL point to the
+deprecation shim `fleetent._shims:fleetent_admin_shim` (which forwards to `fleetent admin`), not directly to
+`fleetent.platform.admin_cli.main:main`. `platform.admin_cli.main.main` SHALL remain importable as the
+canonical implementation that both `fleetent admin` and the shim delegate to.
 
 #### Scenario: New admin CLI package entrypoint exists
 - **WHEN** 调用方导入 `fleetent.platform.admin_cli.main.main`
@@ -120,9 +123,9 @@ tables、config namespace 变化和 cross-module dependencies。
 - **WHEN** 调用方导入 `fleetent.admin`
 - **THEN** 导入失败并显示该 legacy module 不再存在
 
-#### Scenario: Console script points to canonical entrypoint
+#### Scenario: Console script points to deprecation shim
 - **WHEN** 查看 `pyproject.toml`
-- **THEN** `fleetent-admin` 指向 `fleetent.platform.admin_cli.main:main`
+- **THEN** `fleetent-admin` 指向 `fleetent._shims:fleetent_admin_shim`
 
 ### Requirement: Admin CLI command domains
 admin CLI SHALL 按命令域拆分实现文件，降低单文件冲突。
@@ -339,3 +342,4 @@ agent-runtime 模块（`runtime`、`session`、`im_gateway`、`intelligence`、`
 #### Scenario: 级联编排归 platform
 - **WHEN** 封禁用户需要吊销其 API 密钥并禁用其 IM 账号（均为 platform-owned 数据）
 - **THEN** 该级联编排由 platform 层模块执行，而不是由 governance 模块 import platform store 来执行
+

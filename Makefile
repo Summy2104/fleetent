@@ -75,4 +75,4 @@ platform: ## Start platform control-plane (alias for serve)
 	uv run uvicorn fleetent.server:app --reload --port 8765
 
 admin: ## Show admin CLI help
-	uv run fleetent-admin --help
+	uv run fleetent admin --help

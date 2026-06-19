@@ -96,7 +96,7 @@ install_editable() {
     log_info "Installing fleetent in editable mode (developer)..."
     # --editable: source tree stays the live import path.
     uv tool install --force --editable "$REPO_ROOT"
-    log_success "Installed (editable): fleetent fleetent-admin fleetent-tui"
+    log_success "Installed (editable): fleetent fleetent-tui"
 }
 
 main() {

@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 class ConfigError(ValueError):
-    """Raised when fleetent-node configuration is missing or invalid."""
+    """Raised when fleetent node start configuration is missing or invalid."""
 
 
 @dataclass(frozen=True)
@@ -19,7 +19,7 @@ class NodeConfig:
 
 
 def load_config() -> NodeConfig:
-    """Load fleetent-node config from environment variables."""
+    """Load fleetent node start config from environment variables."""
     platform_url = _require_env("FLEETENT_NODE_PLATFORM_URL")
     node_id = _require_env("FLEETENT_NODE_ID")
     service_key = _require_env("FLEETENT_NODE_SERVICE_KEY")
@@ -39,4 +39,3 @@ def _require_env(name: str) -> str:
     if not value:
         raise ConfigError(f"missing required environment variable: {name}")
     return value
-

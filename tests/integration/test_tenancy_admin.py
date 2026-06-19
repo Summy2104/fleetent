@@ -30,7 +30,7 @@ def run_admin(*args: str) -> tuple[str, str, int]:
     stdout, stderr = StringIO(), StringIO()
     exit_code = 0
     with (
-        patch("sys.argv", ["fleetent-admin", *args]),
+        patch("sys.argv", ["fleetent", *args]),
         patch("sys.stdout", stdout),
         patch("sys.stderr", stderr),
     ):

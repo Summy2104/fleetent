@@ -3,7 +3,7 @@
 三个独立 binary 入口：
 - `fleetent`（`src/fleetent/__main__.py`）：手写 argv 匹配（`if argv[:2] == ["agent","run"]`），已有 `agent init/run/restart/stop` + 一次性 fallback。`main()` 签名 `def main() -> None`，内部读 `sys.argv[1:]`。
 - `fleetent-admin`（`platform/admin_cli/main.py`）：`main() -> None`，内部 `parser.parse_args()`（读 sys.argv），`prog="fleetent-admin"`；12 个 CLI 模块走 `register/handle` 模式。
-- `fleetent-node`（`node/app.py`）：`main() -> None`，**无 argparse、无命令行参数**，全部配置经环境变量（`FLEETENT_NODE_*`）。
+- `fleetent node start`（`node/app.py`）：`main() -> None`，**无 argparse、无命令行参数**，全部配置经环境变量（`FLEETENT_NODE_*`）。
 
 前置 change `complete-admin-api-coverage` 落地后，18 条命令全部有 HTTP 等价路径。
 
@@ -48,13 +48,13 @@ def fleetent_admin_shim() -> None:
     main()
 
 def fleetent_node_shim() -> None:
-    print("Deprecated: 'fleetent-node' → use 'fleetent node start'.", file=sys.stderr)
+    print("Deprecated: 'fleetent node start' → use 'fleetent node start'.", file=sys.stderr)
     sys.argv = ["fleetent", "node", "start", *sys.argv[1:]]
     from fleetent.__main__ import main
     main()
 ```
 
-**关键**：Python 默认过滤 `DeprecationWarning`（除非 `-W` 或在 `__main__`），`warnings.warn(...)` **不保证打到 stderr**。spec 验收要求"stderr 打印提示"，故用 `print(file=sys.stderr)`。`pyproject.toml` 的 `fleetent-admin`/`fleetent-node` 指向这两个 shim。
+**关键**：Python 默认过滤 `DeprecationWarning`（除非 `-W` 或在 `__main__`），`warnings.warn(...)` **不保证打到 stderr**。spec 验收要求"stderr 打印提示"，故用 `print(file=sys.stderr)`。`pyproject.toml` 的 `fleetent-admin`/`fleetent node start` 指向这两个 shim。
 
 ### D4：删 B 类命令——只动 register/handle，保留模块文件
 

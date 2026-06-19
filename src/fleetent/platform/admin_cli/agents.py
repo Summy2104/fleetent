@@ -14,73 +14,11 @@ if TYPE_CHECKING:
 
 def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register agent commands."""
-    p_default = subparsers.add_parser("set-default-agent", help="Set or clear the default agent")
-    p_default_group = p_default.add_mutually_exclusive_group(required=True)
-    p_default_group.add_argument("--agent-name", help="Agent name to set as default")
-    p_default_group.add_argument("--clear", action="store_true", help="Clear default agent")
-
-    p_update = subparsers.add_parser("update-agent", help="Create a new agent version")
-    p_update.add_argument("--agent-name", required=True)
-    p_update.add_argument("--system-prompt")
-    p_update.add_argument("--allowed-tools", help="Comma-separated tool patterns")
-    p_update.add_argument("--skills-dir")
-    p_update.add_argument("--mcp-server-ids", help="Comma-separated MCP server ids")
-    p_update.add_argument("--memory-namespace")
-    p_update.add_argument(
-        "--no-activate", action="store_true", help="Create the version without activating it"
-    )
-
-    p_list_v = subparsers.add_parser("list-agent-versions", help="List an agent's versions")
-    p_list_v.add_argument("--agent-name", required=True)
-
-    p_activate_v = subparsers.add_parser(
-        "activate-agent-version", help="Activate a specific agent version"
-    )
-    p_activate_v.add_argument("--agent-name", required=True)
-    p_activate_v.add_argument("--version", type=int, required=True)
-
-    p_show = subparsers.add_parser("show-agent", help="Show an agent's active version")
-    p_show.add_argument("--agent-name", required=True)
-
-    p_assign_u = subparsers.add_parser("assign-user", help="Bind an agent to a user")
-    p_assign_u.add_argument("--user-id", required=True)
-    p_assign_u.add_argument("--agent-name", required=True)
-
-    p_unassign_u = subparsers.add_parser("unassign-user", help="Remove a user-agent binding")
-    p_unassign_u.add_argument("--user-id", required=True)
-    p_unassign_u.add_argument("--agent-name", required=True)
+    return None
 
 
 def handle(args: argparse.Namespace) -> bool:
     """Handle agent commands."""
-    if args.cmd == "set-default-agent":
-        _set_default_agent(args)
-        return True
-
-    if args.cmd == "update-agent":
-        _update_agent(args)
-        return True
-
-    if args.cmd == "list-agent-versions":
-        _list_agent_versions(args)
-        return True
-
-    if args.cmd == "activate-agent-version":
-        _activate_agent_version(args)
-        return True
-
-    if args.cmd == "show-agent":
-        _show_agent(args)
-        return True
-
-    if args.cmd == "assign-user":
-        _assign_user(args)
-        return True
-
-    if args.cmd == "unassign-user":
-        _unassign_user(args)
-        return True
-
     return False
 
 

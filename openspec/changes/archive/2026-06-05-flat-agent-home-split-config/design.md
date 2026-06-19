@@ -19,7 +19,7 @@
 
 **D4 install.sh 扁平 seed。** seed `$FLEETENT_HOME/agent.yaml`（从 `config/agent/agent.yaml.example`）+ `$FLEETENT_HOME/.env`（从 `config/agent/.env.example`）；移除 `mkdir config` 与 config/ 拷贝。部署 home：`agent.yaml`+`.env`+`data/`。
 
-**D5 init_config 用 platform 模板。** `fleetent-admin init-config`（平台脚手架）的 `.env` 源 = `config/platform/.env.example`。
+**D5 init_config 用 platform 模板。** `fleetent admin init-config`（平台脚手架）的 `.env` 源 = `config/platform/.env.example`。
 
 **D6 .gitignore 修正。** 忽略 `config/agent/agent.yaml`、`config/**/.env`、`config/platform/*.yaml`（如有）；committed 仅 `*.example`。
 

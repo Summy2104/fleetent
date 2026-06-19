@@ -27,8 +27,8 @@ roadmaps and identifies Pilot validation entrypoints.
 
 #### Scenario: Intelligence validation manual uses current CLI entrypoints
 - **WHEN** a maintainer opens `docs/deployment/intelligence-roadmap-test-manual.md`
-- **THEN** shared memory validation commands use the current `fleetent-admin memory shared ...` command tree
-- **AND** the manual does not instruct operators to run removed `fleetent-admin shared-memory ...` commands
+- **THEN** shared memory validation commands use the current `fleetent admin memory shared ...` command tree
+- **AND** the manual does not instruct operators to run removed `fleetent admin shared-memory ...` commands
 
 #### Scenario: Intelligence validation manual describes real provider opt-in
 - **WHEN** a maintainer opens `docs/deployment/intelligence-roadmap-test-manual.md`

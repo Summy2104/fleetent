@@ -84,11 +84,11 @@
 系统 SHALL 在 `fleetent-admin` 中提供 diagnostics export 和 retention 手动操作命令。
 
 #### Scenario: Export from CLI
-- **WHEN** operator 运行 `fleetent-admin diagnostics export`
+- **WHEN** operator 运行 `fleetent admin diagnostics export`
 - **THEN** CLI 调用 diagnostics export 并输出诊断包路径
 
 #### Scenario: Retention dry-run from CLI
-- **WHEN** operator 运行 `fleetent-admin diagnostics retention dry-run`
+- **WHEN** operator 运行 `fleetent admin diagnostics retention dry-run`
 - **THEN** CLI 输出将删除的诊断数据候选摘要
 - **AND** 不删除任何数据
 

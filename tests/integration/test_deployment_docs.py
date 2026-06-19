@@ -231,20 +231,18 @@ def test_pilot_install_checklist_contains_required_commands():
     content = Path("docs/operations/pilot-install-checklist.md").read_text(encoding="utf-8")
 
     required_commands = [
-        "docker compose run --rm fleetent uv run fleetent-admin init-config",
+        "docker compose run --rm fleetent uv run fleetent admin init-config",
         "docker compose run --rm fleetent uv run python scripts/upgrade.py --dry-run",
         "docker compose run --rm fleetent uv run python scripts/upgrade.py",
         "docker compose up -d",
         "curl -fsS http://127.0.0.1:8765/health",
-        "uv run fleetent-admin kb connectors list",
-        "uv run fleetent-admin kb connectors check",
-        "uv run fleetent-admin kb connectors sync",
-        "uv run fleetent-admin kb connectors status",
-        "uv run fleetent-admin observability traces",
-        "uv run fleetent-admin observability usage",
-        "uv run fleetent-admin observability performance",
-        "uv run fleetent-admin diagnostics export",
-        "uv run fleetent-admin diagnostics retention dry-run",
+        "GET /admin/kb/connectors",
+        "POST /admin/kb/connectors",
+        "GET /admin/observability/traces",
+        "GET /admin/observability/usage",
+        "GET /admin/observability/performance",
+        "uv run fleetent admin diagnostics export",
+        "uv run fleetent admin diagnostics retention dry-run",
     ]
     for command in required_commands:
         assert command in content
@@ -306,19 +304,19 @@ def test_pilot_runbook_contains_required_commands_and_failure_handling():
         "应该看到什么",
         "通过标准",
         "失败判断",
-        "docker compose run --rm fleetent uv run fleetent-admin init-config",
+        "docker compose run --rm fleetent uv run fleetent admin init-config",
         "docker compose run --rm fleetent uv run python scripts/upgrade.py --dry-run",
         "docker compose run --rm fleetent uv run python scripts/upgrade.py --backup-only",
         "docker compose run --rm fleetent uv run python scripts/upgrade.py",
         "docker compose up -d",
         "curl -fsS http://127.0.0.1:8765/health",
-        "uv run fleetent-admin observability traces",
-        "uv run fleetent-admin diagnostics export",
+        "GET /admin/observability/traces",
+        "uv run fleetent admin diagnostics export",
         "uv run pytest tests/evaluation/test_memory_extraction_eval.py -q",
         "uv run pytest tests/evaluation/test_long_term_context_eval.py -q",
         "uv run pytest tests/evaluation/test_reflection_report_eval.py -q",
-        "uv run fleetent-admin kb connectors check <google_drive_connector_id>",
-        "uv run fleetent-admin kb connectors check <confluence_connector_id>",
+        "POST /admin/kb/connectors/<google_drive_connector_id>/check",
+        "POST /admin/kb/connectors/<confluence_connector_id>/check",
         "FLEETENT_EVAL_REAL_EMBEDDING=1",
         "skipped: credentials not configured",
     ]
@@ -327,18 +325,14 @@ def test_pilot_runbook_contains_required_commands_and_failure_handling():
 
 
 def test_intelligence_roadmap_manual_uses_current_shared_memory_cli():
-    content = Path("docs/roadmaps/intelligence-roadmap-test-manual.md").read_text(
-        encoding="utf-8"
-    )
+    content = Path("docs/roadmaps/intelligence-roadmap-test-manual.md").read_text(encoding="utf-8")
 
     assert "fleetent-admin shared-memory" not in content
-    assert "fleetent-admin memory shared" in content
+    assert "fleetent admin memory shared" in content
 
 
 def test_intelligence_roadmap_manual_documents_real_llm_credentials_safely():
-    content = Path("docs/roadmaps/intelligence-roadmap-test-manual.md").read_text(
-        encoding="utf-8"
-    )
+    content = Path("docs/roadmaps/intelligence-roadmap-test-manual.md").read_text(encoding="utf-8")
 
     required_phrases = [
         "FLEETENT_EVAL_REAL_LLM",

@@ -2,7 +2,7 @@
 
 ### Requirement: 节点管理 admin HTTP API
 
-系统 SHALL 在 `/admin/nodes` 下暴露节点注册/注销/pin 的 HTTP API，供管理员操作，所有端点 MUST 要求 admin 角色（`Authorization: Session <token>`，区别于 node 自身的 Bearer service key 鉴权）。底层调用 `node_store` 和 `placement_store`，与 `fleetent-admin node` CLI 命令等价。
+系统 SHALL 在 `/admin/nodes` 下暴露节点注册/注销/pin 的 HTTP API，供管理员操作，所有端点 MUST 要求 admin 角色（`Authorization: Session <token>`，区别于 node 自身的 Bearer service key 鉴权）。底层调用 `node_store` 和 `placement_store`，与 `fleetent admin node` CLI 命令等价。
 
 #### Scenario: 注册节点并获得一次性 service key
 

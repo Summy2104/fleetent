@@ -103,7 +103,7 @@ content remains ignored rather than guessed.
 ### D6 - Docs are verified like entrypoints
 
 Update `docs/deployment/intelligence-roadmap-test-manual.md` to use
-`fleetent-admin memory shared ...` and to describe the real LLM validation env behavior. Extend the
+`fleetent admin memory shared ...` and to describe the real LLM validation env behavior. Extend the
 existing deployment docs test so stale CLI names fail fast.
 
 ## Risks / Trade-offs

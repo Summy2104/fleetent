@@ -967,33 +967,6 @@ Confluence connector tests SHALL use fake clients by default and SHALL NOT conne
 - **WHEN** status 包含 summary 或 error
 - **THEN** 持久化内容不包含 token、secret、credential payload 或完整文档正文
 
-### Requirement: Admin CLI connector operations
-系统 SHALL 在 `fleetent-admin` 中提供 knowledge-base connector operations 命令。
-
-#### Scenario: List connectors from CLI
-- **WHEN** operator 运行 `fleetent-admin kb connectors list`
-- **THEN** CLI 输出配置的 connector 摘要
-
-#### Scenario: Check connector from CLI
-- **WHEN** operator 运行 `fleetent-admin kb connectors check <connector_id>`
-- **THEN** CLI 输出该 connector 的检查状态
-
-#### Scenario: Show connector status from CLI
-- **WHEN** operator 运行 `fleetent-admin kb connectors status <connector_id>`
-- **THEN** CLI 输出该 connector 最近一次状态或 `never_run`
-
-#### Scenario: Dry-run sync from CLI
-- **WHEN** operator 运行 `fleetent-admin kb connectors sync <connector_id> --dry-run`
-- **THEN** CLI 执行 dry-run 并输出 plan summary
-
-#### Scenario: Run sync from CLI
-- **WHEN** operator 运行 `fleetent-admin kb connectors sync <connector_id>`
-- **THEN** CLI 执行真实 sync 并输出 sync summary
-
-#### Scenario: CLI output is sanitized
-- **WHEN** CLI 输出 connector check、sync 或 status 结果
-- **THEN** 输出不包含 token、secret、credential payload 或完整文档正文
-
 ### Requirement: Advanced parser public API
 knowledge-base SHALL provide local parsers for text-based PDF, DOCX, PPTX and XLSX documents without using AI frameworks or external parsing services.
 
@@ -1254,12 +1227,12 @@ knowledge-base SHALL expose explicit entity extraction through public API and ad
 - **THEN** 导入成功
 
 #### Scenario: Admin CLI triggers extraction
-- **WHEN** operator 运行 `fleetent-admin kb extract-entities --kb-id <kb_id>`
+- **WHEN** operator 运行 `fleetent admin kb extract-entities --kb-id <kb_id>`
 - **THEN** CLI 调用 KB-level explicit extraction run
 - **AND** 输出脱敏 run summary
 
 #### Scenario: Admin CLI supports document scope
-- **WHEN** operator 运行 `fleetent-admin kb extract-entities --kb-id <kb_id> --document-id <document_id>`
+- **WHEN** operator 运行 `fleetent admin kb extract-entities --kb-id <kb_id> --document-id <document_id>`
 - **THEN** CLI 调用 document-level explicit extraction run
 - **AND** 输出脱敏 run summary
 

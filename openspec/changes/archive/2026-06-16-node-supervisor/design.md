@@ -5,12 +5,12 @@ C1（nodes/placement，迁移 096）、C2（desired-state API + node_agent_statu
 - `POST /nodes/{id}/status` ← `{agents:[{agent_id, phase, pid?, health?, detail?}]}`。
 - 鉴权：`Authorization: Bearer <node service key>` + URL `{id}` 自限。
 
-C3 建消费端：每个 agent host 一个 `fleetent-node` 守护，把期望态调谐成本地 per-agent 进程。这是序列里最大、最特别的一块（新顶层包 + 新二进制）。
+C3 建消费端：每个 agent host 一个 `fleetent node start` 守护，把期望态调谐成本地 per-agent 进程。这是序列里最大、最特别的一块（新顶层包 + 新二进制）。
 
 ## Goals / Non-Goals
 
 **Goals:**
-- 新部署件 `fleetent-node`：配置 → 拉期望态(platform-api provider + 本地缓存) → 幂等 reconcile(PID 真相/re-adopt/崩溃重拉/config-hash 漂移重启) → 上报实际态。
+- 新部署件 `fleetent node start`：配置 → 拉期望态(platform-api provider + 本地缓存) → 幂等 reconcile(PID 真相/re-adopt/崩溃重拉/config-hash 漂移重启) → 上报实际态。
 - 可插拔进程后端 + `local` 实现（spawn `fleetent agent run`、stop `fleetent agent stop`、liveness PID+os.kill）。
 - runtime CLI 加 `fleetent agent stop <id>`（drain 单一真相源）。
 
@@ -24,7 +24,7 @@ C3 建消费端：每个 agent host 一个 `fleetent-node` 守护，把期望态
 
 1. **边界（核心）**：`node/` 是新顶层包，**MUST NOT `import fleetent.platform.*`**（经 HTTP 消费 C2），**MUST NOT import agent runtime 内部**（经 subprocess 调 `fleetent agent run|stop`）。故 node 是纯"HTTP client + 子进程编排"，不违反 agent↔platform 解耦。护栏：boundary 检查需覆盖新包。
 
-2. **实际态真相 = 本地 PID 文件 + `os.kill` 探活**，不用守护内存的 Popen 句柄做权威——这样 `fleetent-node` 重启可 re-adopt 仍在跑的 agent（不重复拉起/不误杀）。崩溃 → 下轮 PID 探活为死 → 重拉。
+2. **实际态真相 = 本地 PID 文件 + `os.kill` 探活**，不用守护内存的 Popen 句柄做权威——这样 `fleetent node start` 重启可 re-adopt 仍在跑的 agent（不重复拉起/不误杀）。崩溃 → 下轮 PID 探活为死 → 重拉。
 
 3. **优雅停经 `fleetent agent stop`，不在 node 侧重写信号**：drain 协议（SIGUSR1→TERM→KILL）单一真相源留 runtime（薄包既有 `_stop_running`）。node 仅 subprocess 调它。代价：runtime CLI 加一个 stop 子命令（ADDED 到 agent-runtime-cli）。备选（node 直接 os.kill 信号序列）不取，理由：避免 drain 逻辑双份漂移。
 
@@ -42,4 +42,4 @@ C3 建消费端：每个 agent host 一个 `fleetent-node` 守护，把期望态
 - **无 secret 的链路验证有限**：C3 跑通的 agent 只能是无需外部凭证的（或本地已有 env 的）；真正连 IM/模型要等 C4。验证时用不需 secret 的最小 agent。
 - **reconcile 与上报时序**：先 reconcile 再上报，上报反映本轮结束态；短暂不一致（收敛中）是预期。
 - **测试分层**：node 逻辑（拉取解析/reconcile 决策/backend）用 mock HTTP(respx)+mock subprocess 可 unit；真实"node↔platform↔spawn"端到端属 integration/e2e。
-- **新二进制打包**：`fleetent-node` entry point 入 pyproject；install 脚本（install-agent 类）后续接入，本 change 至少让二进制可跑。
+- **新二进制打包**：`fleetent node start` entry point 入 pyproject；install 脚本（install-agent 类）后续接入，本 change 至少让二进制可跑。

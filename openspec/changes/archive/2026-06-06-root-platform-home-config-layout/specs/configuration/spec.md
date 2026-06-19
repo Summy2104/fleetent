@@ -67,10 +67,10 @@ secret、Agent-local runtime secret 等 Agent runtime variables SHALL belong to
 
 ### Requirement: Local configuration initialization
 
-系统 SHALL 提供 `fleetent-admin init-config` 作为 Platform home 配置初始化入口。
+系统 SHALL 提供 `fleetent admin init-config` 作为 Platform home 配置初始化入口。
 
 #### Scenario: Init config creates local Platform files
-- **WHEN** operator 运行 `fleetent-admin init-config`
+- **WHEN** operator 运行 `fleetent admin init-config`
 - **THEN** 系统从 `.env.example` 创建 `.env`
 - **AND** 从 `platform.yaml.example` 创建 `platform.yaml`
 - **AND** 创建 `data/`、`data/logs/`、`data/diagnostics/` 和 `secrets/`

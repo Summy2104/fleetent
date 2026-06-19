@@ -1,6 +1,7 @@
 """Admin CLI entrypoint."""
 
 import argparse
+import sys
 
 from fleetent.platform.admin_cli import (
     agents,
@@ -11,7 +12,6 @@ from fleetent.platform.admin_cli import (
     kb_connectors,
     maintenance,
     nodes,
-    observability,
     shared_memory,
     tenancy,
     users,
@@ -27,21 +27,23 @@ _COMMAND_MODULES = (
     init_config,
     config_validation,
     diagnostics,
-    observability,
     shared_memory,
     maintenance,
 )
 
 
-def main() -> None:
+def main(argv: list[str] | None = None, prog: str = "fleetent admin") -> None:
     """Run the fleetent admin CLI."""
-    parser = argparse.ArgumentParser(prog="fleetent-admin", description="User management CLI")
+    parser = argparse.ArgumentParser(prog=prog, description="User management CLI")
     subparsers = parser.add_subparsers(dest="cmd", required=True)
 
     for module in _COMMAND_MODULES:
         module.register(subparsers)
 
-    args = parser.parse_args()
+    if argv is None:
+        argv = sys.argv[1:]
+
+    args = parser.parse_args(argv)
 
     for module in _COMMAND_MODULES:
         if module.handle(args):

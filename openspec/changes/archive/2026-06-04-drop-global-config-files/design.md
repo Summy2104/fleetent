@@ -21,7 +21,7 @@
 `COPY config/*.yaml.example` 在删除 3 个全局后仅剩 `agent.yaml.example` 命中，依赖 glob 偶然性脆弱。改 `COPY config/agent.yaml.example ./config/`，语义明确、构建稳定。
 
 **D3：init_config 保留 `.env` seed，去掉两个全局文件。**
-`fleetent-admin init-config` 仍是 .env + 数据目录脚手架；去掉 settings.yaml/mcp.servers.yaml 两项与对应提示。不在此 seed agent.yaml（install.sh 负责部署 agent；init-config 是平台侧最小脚手架）。
+`fleetent admin init-config` 仍是 .env + 数据目录脚手架；去掉 settings.yaml/mcp.servers.yaml 两项与对应提示。不在此 seed agent.yaml（install.sh 负责部署 agent；init-config 是平台侧最小脚手架）。
 
 ## Risks / Trade-offs
 

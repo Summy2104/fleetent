@@ -74,7 +74,7 @@ def test_unknown_flag_fails_fast(tmp_path: Path) -> None:
 # ── fake-uv harness ─────────────────────────────────────────────────────────
 # A stub `uv` on PATH lets us exercise ensure_uv/check_python/install_editable
 # and the delegated role scripts without touching the network. It logs every
-# invocation and, on `tool install`, creates the three entrypoints so the role
+# invocation and, on `tool install`, creates the required entrypoints so the role
 # scripts' `command -v fleetent` checks pass.
 
 _FAKE_UV = """#!/bin/bash
@@ -92,7 +92,7 @@ case "$1" in
     ;;
   tool)
     if [ "$2" = "install" ]; then
-      for c in fleetent fleetent-admin fleetent-tui; do
+      for c in fleetent fleetent-tui; do
         printf '#!/bin/bash\\n:' > "$FAKE_BIN/$c"; chmod +x "$FAKE_BIN/$c"
       done
     fi

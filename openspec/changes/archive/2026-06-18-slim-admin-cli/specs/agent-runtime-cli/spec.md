@@ -16,12 +16,12 @@
 
 ### Requirement: `fleetent node start` 子命令
 
-`fleetent` 命令 SHALL 支持 `node start`，启动 node supervisor，等价于原 `fleetent-node`（配置经 `FLEETENT_NODE_*` 环境变量，无命令行参数）。
+`fleetent` 命令 SHALL 支持 `node start`，启动 node supervisor，等价于原 `fleetent node start`（配置经 `FLEETENT_NODE_*` 环境变量，无命令行参数）。
 
 #### Scenario: node start 启动 supervisor
 
 - **WHEN** 用户运行 `fleetent node start`
-- **THEN** node supervisor 启动，行为与原 `fleetent-node` 相同
+- **THEN** node supervisor 启动，行为与原 `fleetent node start` 相同
 
 #### Scenario: node 子命令缺 start 报用法错误
 
@@ -30,7 +30,7 @@
 
 ### Requirement: 旧入口 deprecation shim
 
-`fleetent-admin` 与 `fleetent-node` 脚本 SHALL 保留（`pyproject.toml` 入口指向 shim），调用时 SHALL 向 **stderr** 打印迁移提示后转发到对应新命令，不改变执行结果。
+`fleetent-admin` 与 `fleetent node start` 脚本 SHALL 保留（`pyproject.toml` 入口指向 shim），调用时 SHALL 向 **stderr** 打印迁移提示后转发到对应新命令，不改变执行结果。
 
 #### Scenario: fleetent-admin 转发并提示
 
@@ -38,9 +38,9 @@
 - **THEN** stderr 打印 `Deprecated: 'fleetent-admin' → use 'fleetent admin'.`
 - **AND** 命令正常执行
 
-#### Scenario: fleetent-node 转发并提示
+#### Scenario: fleetent node start 转发并提示
 
-- **WHEN** 用户运行 `fleetent-node`
+- **WHEN** 用户运行 `fleetent node start`
 - **THEN** stderr 打印迁移提示，node supervisor 正常启动
 
 ### Requirement: agent runtime 启动路径不加载 admin 代码
@@ -52,9 +52,11 @@
 - **WHEN** 调度到 `fleetent agent run` 分支（serve 被 mock，sys.modules 先清除 platform.admin_cli）
 - **THEN** `fleetent.platform.admin_cli` 不在 `sys.modules`
 
-## REMOVED Requirements
+## ADDED Requirements
 
-### Requirement: B 类冗余 CLI 命令
+### Requirement: B 类冗余 CLI 命令已移除
+
+B 类冗余 CLI 命令 SHALL NOT 再通过 `fleetent admin` 暴露；运维与控制面 SHALL 改走对应 HTTP API。
 
 **Reason**: 以下命令均已有等价 HTTP API——其中 6 条的 API 由前置 change `complete-admin-api-coverage` 补齐——CLI 入口冗余。
 

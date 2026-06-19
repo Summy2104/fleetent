@@ -10,11 +10,11 @@ from pathlib import Path
 import pytest
 
 
-def test_fleetent_admin_console_script_points_to_platform_entrypoint() -> None:
+def test_fleetent_admin_console_script_points_to_shim() -> None:
     pyproject = tomllib.loads(Path("pyproject.toml").read_text())
 
     assert (
-        pyproject["project"]["scripts"]["fleetent-admin"] == "fleetent.platform.admin_cli.main:main"
+        pyproject["project"]["scripts"]["fleetent-admin"] == "fleetent._shims:fleetent_admin_shim"
     )
 
 

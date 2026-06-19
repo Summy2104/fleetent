@@ -1,6 +1,6 @@
 ## Why
 
-`single-agent-config-file` + `installer-seed-agent-yaml`（均已合并 main）确立了部署 agent 自包含、扁平 home（`agent.yaml` + `.env` + `data/`，无 `config/`）。全局配置文件 `config/settings.yaml` / `mcp.yaml` / `mcp.servers.yaml` 不再被 install 部署，且各加载器**已容忍其缺失→回退默认值**。但仓库仍保留这三个 `.example` 模板，且 `fleetent-admin init-config` 仍 seed `settings.yaml`/`mcp.servers.yaml`——与新模型不一致、易误导 operator。本 change 清理这些孤立的全局配置模板与 seed 路径。
+`single-agent-config-file` + `installer-seed-agent-yaml`（均已合并 main）确立了部署 agent 自包含、扁平 home（`agent.yaml` + `.env` + `data/`，无 `config/`）。全局配置文件 `config/settings.yaml` / `mcp.yaml` / `mcp.servers.yaml` 不再被 install 部署，且各加载器**已容忍其缺失→回退默认值**。但仓库仍保留这三个 `.example` 模板，且 `fleetent admin init-config` 仍 seed `settings.yaml`/`mcp.servers.yaml`——与新模型不一致、易误导 operator。本 change 清理这些孤立的全局配置模板与 seed 路径。
 
 ## What Changes
 

@@ -24,18 +24,6 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     """Register knowledge-base connector commands."""
     p_kb = subparsers.add_parser("kb", help="Knowledge-base administration")
     kb_sub = p_kb.add_subparsers(dest="kb_cmd", required=True)
-    p_kb_connectors = kb_sub.add_parser("connectors", help="Knowledge-base connectors")
-    kb_connectors_sub = p_kb_connectors.add_subparsers(dest="connector_cmd", required=True)
-    kb_connectors_sub.add_parser("list", help="List configured connectors")
-    p_connector_check = kb_connectors_sub.add_parser("check", help="Check connector health")
-    p_connector_check.add_argument("connector_id")
-    p_connector_status = kb_connectors_sub.add_parser("status", help="Show connector status")
-    p_connector_status.add_argument("connector_id")
-    p_connector_sync = kb_connectors_sub.add_parser("sync", help="Run connector sync")
-    p_connector_sync.add_argument("connector_id")
-    p_connector_sync.add_argument("--dry-run", action="store_true")
-    p_connector_sync.add_argument("--yes", action="store_true")
-    p_connector_sync.add_argument("--pilot-fixture", action="store_true")
     p_extract = kb_sub.add_parser("extract-entities", help="Run explicit KB entity extraction")
     p_extract.add_argument("--tenant-id", default="default")
     p_extract.add_argument("--kb-id", required=True)
@@ -46,12 +34,10 @@ def handle(args: argparse.Namespace) -> bool:
     """Handle knowledge-base connector commands."""
     if args.cmd != "kb":
         return False
-    if args.kb_cmd == "connectors":
-        _handle_connectors(args)
-        return True
     if args.kb_cmd == "extract-entities":
         _handle_extract_entities(args)
-    return True
+        return True
+    return False
 
 
 async def run_entity_extraction(
@@ -117,7 +103,7 @@ def _execute_sync_allowed(operations: Any, args: argparse.Namespace) -> bool:
     if not args.yes:
         print(
             "connector execute sync requires --yes; run dry-run first: "
-            f"fleetent-admin kb connectors sync {args.connector_id} --dry-run",
+            f"fleetent admin kb connectors sync {args.connector_id} --dry-run",
             file=sys.stderr,
         )
         return False

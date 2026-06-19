@@ -25,7 +25,7 @@ Go / `Conditional Go` / No-Go 建议。真实 smoke 必须显式设置 opt-in fl
 验收目标：
 
 - 验证测试环境能完成配置加载、SQLite 升级、备份、恢复演练、服务启动和基础 health check。
-- 验证 operator 能通过 `fleetent-admin` 查询 observability、导出 diagnostics，并定位一次测试 run。
+- 验证 operator 能通过 `fleetent admin` 查询 observability、导出 diagnostics，并定位一次测试 run。
 - 验证 memory、long-term context、reflection、knowledge base、vector store 的 Pilot MVP 基础链路可用。
 - 验证真实外部依赖的状态被明确记录为 `passed`、`failed` 或 `skipped`。
 - 输出一份可追踪的验收报告，明确 Pilot blocker、docs gap、enhancement 和 out-of-scope。
@@ -45,7 +45,7 @@ Go / Conditional Go / No-Go 标准：
 - 已按 [pilot-install-checklist.md](pilot-install-checklist.md) 完成安装、依赖同步和基础配置。
 - 当前分支、commit SHA、部署包版本和目标环境名称已记录。
 - operator 有测试环境 shell 权限、服务启停权限、`data/` 和 `config/` 读写权限。
-- Docker Compose 可用，且 `docker compose run --rm fleetent uv run fleetent-admin --help` 能输出帮助。
+- Docker Compose 可用，且 `docker compose run --rm fleetent uv run fleetent admin --help` 能输出帮助。
 - 服务端口未被占用，测试环境允许访问企业批准的 LLM / embedding endpoint。
 - 测试数据不包含真实敏感客户数据；如必须使用真实企业数据，先确认数据 owner 和脱敏策略。
 
@@ -79,13 +79,13 @@ environment:
 ```bash
 git status --short
 test -f agents/<agent-id>/agent.yaml
-uv run fleetent-admin kb connectors list
+GET /admin/kb/connectors
 ```
 
 通过标准：
 
 - `git status --short` 不显示误提交的 secret、`.env`、credential 文件或 data 文件。
-- `fleetent-admin kb connectors list` 输出的 connector 摘要不包含 token、credential payload 或文档正文。
+- `GET /admin/kb/connectors` 返回的 connector 摘要不包含 token、credential payload 或文档正文。
 - `credential_ref` 指向的文件权限和环境变量注入方式已由 operator 单独记录。
 
 ## 4. SQLite Backup / Upgrade / Restore Drill
@@ -136,7 +136,7 @@ uv run python scripts/upgrade.py --backup-only
 恢复后命令：
 
 ```bash
-uv run fleetent-admin observability traces --event-type agent_run_failed --limit 20
+GET /admin/observability/traces?event_type=agent_run_failed&limit=20
 ```
 
 通过标准：
@@ -161,9 +161,9 @@ curl -fsS http://127.0.0.1:8765/health
 检查 CLI：
 
 ```bash
-docker compose run --rm fleetent uv run fleetent-admin init-config --dry-run
-uv run fleetent-admin --help
-uv run fleetent-admin observability traces --limit 5
+docker compose run --rm fleetent uv run fleetent admin init-config --dry-run
+uv run fleetent admin --help
+GET /admin/observability/traces?limit=5
 uv run fleetent "hello"
 ```
 
@@ -173,7 +173,7 @@ uv run fleetent "hello"
 
 - 服务启动无配置错误、DB migration 错误或 secret 打印。
 - `/health` 返回 200。
-- `fleetent-admin` 子命令可执行。
+- `fleetent admin` 子命令可执行。
 - CLI agent 可完成一次最小 run；如果真实 LLM 未配置，应记录为 `skipped: real LLM route not configured`
   或 `failed`，并说明是否影响 Go 判定。
 
@@ -182,27 +182,27 @@ uv run fleetent "hello"
 查询 traces：
 
 ```bash
-uv run fleetent-admin observability traces --limit 20
-uv run fleetent-admin observability traces --event-type agent_run_failed --limit 50
+GET /admin/observability/traces?limit=20
+GET /admin/observability/traces?event_type=agent_run_failed&limit=50
 ```
 
 查询 usage：
 
 ```bash
-uv run fleetent-admin observability usage --limit 100
+GET /admin/observability/usage?limit=100
 ```
 
 查询 performance：
 
 ```bash
-uv run fleetent-admin observability performance --limit 100
+GET /admin/observability/performance?limit=100
 ```
 
 导出 diagnostics：
 
 ```bash
-uv run fleetent-admin diagnostics export
-uv run fleetent-admin diagnostics retention dry-run
+uv run fleetent admin diagnostics export
+uv run fleetent admin diagnostics retention dry-run
 ```
 
 通过标准：
@@ -332,17 +332,17 @@ uv run pytest tests/evaluation -x -q
 检查配置：
 
 ```bash
-uv run fleetent-admin kb connectors list
-uv run fleetent-admin kb connectors check <google_drive_connector_id>
-uv run fleetent-admin kb connectors sync <google_drive_connector_id> --dry-run
-uv run fleetent-admin kb connectors status <google_drive_connector_id>
+GET /admin/kb/connectors
+POST /admin/kb/connectors/<google_drive_connector_id>/check
+POST /admin/kb/connectors/<google_drive_connector_id>/sync  # body: {"dry_run": true}
+GET /admin/kb/connectors/<google_drive_connector_id>/status
 ```
 
 真实 sync smoke：
 
 ```bash
 FLEETENT_GOOGLE_DRIVE_EXECUTE_SYNC=1 \
-  uv run fleetent-admin kb connectors sync <google_drive_connector_id> --yes --pilot-fixture
+  POST /admin/kb/connectors/<google_drive_connector_id>/sync  # body: {"dry_run": false}
 ```
 
 执行规则：
@@ -358,17 +358,17 @@ FLEETENT_GOOGLE_DRIVE_EXECUTE_SYNC=1 \
 检查配置：
 
 ```bash
-uv run fleetent-admin kb connectors list
-uv run fleetent-admin kb connectors check <confluence_connector_id>
-uv run fleetent-admin kb connectors sync <confluence_connector_id> --dry-run
-uv run fleetent-admin kb connectors status <confluence_connector_id>
+GET /admin/kb/connectors
+POST /admin/kb/connectors/<confluence_connector_id>/check
+POST /admin/kb/connectors/<confluence_connector_id>/sync  # body: {"dry_run": true}
+GET /admin/kb/connectors/<confluence_connector_id>/status
 ```
 
 真实 sync smoke：
 
 ```bash
 FLEETENT_CONFLUENCE_EXECUTE_SYNC=1 \
-  uv run fleetent-admin kb connectors sync <confluence_connector_id> --yes --pilot-fixture
+  POST /admin/kb/connectors/<confluence_connector_id>/sync  # body: {"dry_run": false}
 ```
 
 执行规则：

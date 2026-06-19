@@ -106,7 +106,7 @@ KB / document creation, import, deletion, archive, and agent binding SHALL be ad
 
 ### Requirement: Manual KB entity extraction trigger
 
-The system SHALL expose `POST /admin/kb/{kb_id}/extract-entities` on the existing KB admin router so an admin can manually trigger entity extraction for one KB, equivalent to `fleetent-admin kb extract-entities`. The endpoint SHALL run through the existing KB runtime wiring and return `202 Accepted`.
+The system SHALL expose `POST /admin/kb/{kb_id}/extract-entities` on the existing KB admin router so an admin can manually trigger entity extraction for one KB, equivalent to `fleetent admin kb extract-entities`. The endpoint SHALL run through the existing KB runtime wiring and return `202 Accepted`.
 
 #### Scenario: Trigger entity extraction for a KB
 - **WHEN** an admin calls `POST /admin/kb/{kb_id}/extract-entities`

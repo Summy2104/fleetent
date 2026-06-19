@@ -47,8 +47,9 @@ def _parse_agent_init(args: list[str]) -> argparse.Namespace:
     return parser.parse_args(args)
 
 
-def main() -> None:
-    argv = sys.argv[1:]
+def main(argv: list[str] | None = None) -> None:
+    if argv is None:
+        argv = sys.argv[1:]
     if argv[:2] == ["agent", "init"]:
         from fleetent.runtime import agent_init
 
@@ -81,6 +82,22 @@ def main() -> None:
         ns = _parse_agent_stop(argv[2:])
         home_dir = agent_app.resolve_home(ns.agent_id, ns.home)
         agent_app._stop_running(home_dir)
+        return
+
+    if argv and argv[0] == "admin":
+        from fleetent.platform.admin_cli.main import main as admin_main
+
+        admin_main(argv[1:], prog="fleetent admin")
+        return
+
+    if argv and argv[0] == "node":
+        if argv[1:] != ["start"]:
+            print("Usage: fleetent node start", file=sys.stderr)
+            sys.exit(1)
+
+        from fleetent.node import app as node_app
+
+        node_app.main()
         return
 
     user_input = " ".join(argv) if argv else sys.stdin.read().strip()

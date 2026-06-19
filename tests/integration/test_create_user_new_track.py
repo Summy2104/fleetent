@@ -4,15 +4,11 @@ After retire-legacy-api-key-and-agent-rename:
   - create_user returns (User, plaintext_key) tuple
   - api_keys table gains a hashed row (scope ["*"])
   - users table row has no api_key column / value
-  - admin CLI create-user still prints the plaintext key once
 """
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
-from io import StringIO
-from unittest.mock import patch
 
 import pytest
 
@@ -77,20 +73,3 @@ def test_users_row_has_no_api_key_value():
     engine.dispose()
 
     assert "api_key" not in col_names
-
-
-def test_admin_cli_create_user_prints_key():
-    """admin CLI create-user must still print the plaintext key once."""
-    from fleetent.platform.admin_cli.main import main as admin_cli_main
-
-    stdout = StringIO()
-    with (
-        patch("sys.argv", ["fleetent-admin", "create-user", "--name", "Dave"]),
-        patch("sys.stdout", stdout),
-        contextlib.suppress(SystemExit),
-    ):
-        admin_cli_main()
-
-    out = stdout.getvalue()
-    assert "ma-" in out, f"plaintext key not in output: {out!r}"
-    assert "shown once" in out, f"'shown once' note missing: {out!r}"

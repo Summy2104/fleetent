@@ -6,7 +6,7 @@
 
 - Docker image 没有复制 `scripts/`，容器内无法稳定执行 upgrade / 初始化类脚本。
 - Compose 依赖 `.env.production`，但项目决策是只提交 `.env.example`，初始化后生成本地 `.env`。
-- 没有 `fleetent-admin init-config`，operator 需要手动复制 `config/*.example`。
+- 没有 `fleetent admin init-config`，operator 需要手动复制 `config/*.example`。
 - migration 和服务启动的推荐顺序没有通过 compose 流程表达。
 - 文档端口、部署入口和旧配置文件边界不一致。
 - `secrets/` 目录和 `credential_ref` 文件路径没有简单、统一、可解释的约定。
@@ -17,7 +17,7 @@
 
 - 将 Docker Compose 定义为 Pilot 默认部署入口；`uv run uvicorn` 保留为开发模式。
 - 补齐 Dockerfile / compose，使容器内可执行 `fleetent`、`fleetent-admin` 和 `scripts/upgrade.py`。
-- 新增 `fleetent-admin init-config`，用于生成本地 `.env`、`config/settings.yaml`、`config/mcp.servers.yaml`，并创建 `data/`、`data/logs/`、`data/diagnostics/` 和平铺 `secrets/` 目录。
+- 新增 `fleetent admin init-config`，用于生成本地 `.env`、`config/settings.yaml`、`config/mcp.servers.yaml`，并创建 `data/`、`data/logs/`、`data/diagnostics/` 和平铺 `secrets/` 目录。
 - 只提交 `.env.example`；本地 `.env` 不进 git。
 - `secrets/` 不进 git，目录平铺，只保存不分 scope 的部署级 secret 文件，例如 `google-drive-token.json`、`confluence-api-token`。
 - Compose 挂载 `./data:/app/data`、`./config:/app/config`、`./secrets:/app/secrets:ro`，端口统一 `8765`。

@@ -4,7 +4,7 @@
 # ============================================================================
 # Installs the fleetent binary and sets FLEETENT_HOME, then prints a tutorial
 # guiding you to create an agent yourself. It does NOT create an agent home and
-# does NOT require alembic, fleetent-admin, or a running platform.
+# does NOT require alembic, fleetent admin, or a running platform.
 #
 # Usage:
 #   scripts/install-agent.sh [--dir PATH] [--help]

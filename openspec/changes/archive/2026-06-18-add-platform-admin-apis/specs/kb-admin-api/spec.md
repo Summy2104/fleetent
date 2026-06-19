@@ -2,7 +2,7 @@
 
 ### Requirement: KB 实体提取触发端点
 
-系统 SHALL 在现有 `kb_admin_api` router 中新增 `POST /admin/kb/{kb_id}/extract-entities` 端点，供管理员手动触发指定 KB 的实体提取任务。功能等价于 `fleetent-admin kb extract-entities` CLI 命令。
+系统 SHALL 在现有 `kb_admin_api` router 中新增 `POST /admin/kb/{kb_id}/extract-entities` 端点，供管理员手动触发指定 KB 的实体提取任务。功能等价于 `fleetent admin kb extract-entities` CLI 命令。
 
 #### Scenario: 触发实体提取
 

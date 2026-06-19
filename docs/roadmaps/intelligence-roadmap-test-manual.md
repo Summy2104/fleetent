@@ -135,8 +135,8 @@ uv run pytest tests/integration/test_shared_memory.py \
 建议操作：
 
 ```bash
-uv run fleetent-admin memory shared list --scope-type tenant --scope-id pilot-tenant
-uv run fleetent-admin memory shared list --scope-type team --scope-id pilot-team
+uv run fleetent admin memory shared list --scope-type tenant --scope-id pilot-tenant
+uv run fleetent admin memory shared list --scope-type team --scope-id pilot-team
 uv run pytest tests/integration/test_shared_memory.py tests/integration/test_memory_retention_compaction.py -q
 ```
 
@@ -251,17 +251,17 @@ uv run pytest tests/integration/test_knowledge_base.py \
 建议操作：
 
 ```bash
-uv run fleetent-admin kb connectors list
-uv run fleetent-admin kb connectors check <google_drive_connector_id>
-uv run fleetent-admin kb connectors sync <google_drive_connector_id> --dry-run
-uv run fleetent-admin kb connectors status <google_drive_connector_id>
+GET /admin/kb/connectors
+POST /admin/kb/connectors/<google_drive_connector_id>/check
+POST /admin/kb/connectors/<google_drive_connector_id>/sync  # body: {"dry_run": true}
+GET /admin/kb/connectors/<google_drive_connector_id>/status
 ```
 
 真实 execute sync：
 
 ```bash
 FLEETENT_GOOGLE_DRIVE_EXECUTE_SYNC=1 \
-  uv run fleetent-admin kb connectors sync <google_drive_connector_id> --yes --pilot-fixture
+  POST /admin/kb/connectors/<google_drive_connector_id>/sync  # body: {"dry_run": false}
 ```
 
 通过标准：
@@ -284,17 +284,17 @@ FLEETENT_GOOGLE_DRIVE_EXECUTE_SYNC=1 \
 建议操作：
 
 ```bash
-uv run fleetent-admin kb connectors list
-uv run fleetent-admin kb connectors check <confluence_connector_id>
-uv run fleetent-admin kb connectors sync <confluence_connector_id> --dry-run
-uv run fleetent-admin kb connectors status <confluence_connector_id>
+GET /admin/kb/connectors
+POST /admin/kb/connectors/<confluence_connector_id>/check
+POST /admin/kb/connectors/<confluence_connector_id>/sync  # body: {"dry_run": true}
+GET /admin/kb/connectors/<confluence_connector_id>/status
 ```
 
 真实 execute sync：
 
 ```bash
 FLEETENT_CONFLUENCE_EXECUTE_SYNC=1 \
-  uv run fleetent-admin kb connectors sync <confluence_connector_id> --yes --pilot-fixture
+  POST /admin/kb/connectors/<confluence_connector_id>/sync  # body: {"dry_run": false}
 ```
 
 通过标准：

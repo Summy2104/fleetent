@@ -23,7 +23,7 @@ case "$1" in
   python) [ "${FAKE_PYTHON_OK:-1}" = "1" ] && exit 0 || exit 1 ;;
   tool)
     if [ "$2" = "install" ]; then
-      for c in fleetent fleetent-admin fleetent-tui; do
+      for c in fleetent fleetent-tui; do
         printf '#!/bin/bash\\n:' > "$FAKE_BIN/$c"; chmod +x "$FAKE_BIN/$c"
       done
     fi

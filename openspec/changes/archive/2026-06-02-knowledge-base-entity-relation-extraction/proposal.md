@@ -47,7 +47,7 @@ search ranking。目标是为后续 graph search 提供可回归、可替换、�
 - public API surface：
   - entity / relation dataclasses。
   - extraction run service，例如 `run_entity_extraction(tenant_id, kb_id, document_id=None, extractor=\"deterministic\")`。
-  - admin CLI，例如 `fleetent-admin kb extract-entities --kb-id ... [--document-id ...]`。
+  - admin CLI，例如 `fleetent admin kb extract-entities --kb-id ... [--document-id ...]`。
 - owned tables：新增 knowledge-base-owned `kb_extraction_runs`、`kb_entities`、`kb_entity_mentions`、`kb_relations`。
 - config namespace：无新增默认 runtime config；真实 LLM smoke 使用显式环境变量 opt-in。
 - cross-module dependencies：

@@ -227,3 +227,26 @@ generated with `secrets.token_hex(32)`.
 - **WHEN** `fleetent agent stop support` 但无 pid 文件或进程已退出
 - **THEN** 命令静默成功，不报错
 
+### Requirement: B 类冗余 CLI 命令已移除
+
+B 类冗余 CLI 命令 SHALL NOT 再通过 `fleetent admin` 暴露；运维与控制面 SHALL 改走对应 HTTP API。
+
+**Reason**: 以下命令均已有等价 HTTP API——其中 6 条的 API 由前置 change `complete-admin-api-coverage` 补齐——CLI 入口冗余。
+
+**Migration**:
+- `create-user` → `POST /admin/service-principals`（建服务账号即发 key）
+- `rotate-key` → `POST /admin/users/{user_id}/rotate-key`
+- `set-default-agent` → `PUT /admin/agents/{name}/default` / `DELETE /admin/agents/default`
+- `observability traces/usage/performance` → `GET /admin/observability/{traces,usage,performance}`
+- `list-users` → `GET /admin/users`；`block-user`（已是 no-op stub）→ `POST /admin/im-users/{id}/block`
+- `update-agent`/`list-agent-versions`/`activate-agent-version`/`show-agent` → `/admin/agents/{name}/*`
+- `assign-user`/`unassign-user` → `POST|DELETE /admin/agents/{name}/bindings/users/{user_id}`
+- `kb connectors list/check/status/sync` → `/admin/kb/connectors/*`
+
+已移除（共 18 条）：`create-user`、`list-users`、`rotate-key`、`block-user`、`update-agent`、`list-agent-versions`、`activate-agent-version`、`show-agent`、`assign-user`、`unassign-user`、`set-default-agent`、`kb connectors list`、`kb connectors check`、`kb connectors status`、`kb connectors sync`、`observability traces`、`observability usage`、`observability performance`。
+
+#### Scenario: 已移除命令不再可用
+
+- **WHEN** 用户运行 `fleetent admin create-user`（或其他已移除命令）
+- **THEN** argparse 报 `invalid choice` 错误（命令不存在）
+

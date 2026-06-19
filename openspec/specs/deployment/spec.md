@@ -116,7 +116,7 @@ API, scheduler, or worker behavior.
 
 #### Scenario: Connector CLI commands are documented
 - **WHEN** operator 阅读部署或运维文档
-- **THEN** 文档列出 `fleetent-admin kb connectors list/check/status/sync` 的用途
+- **THEN** 文档列出 `/admin/kb/connectors/*` 与 `fleetent admin kb extract-entities` 的用途
 
 #### Scenario: Credential boundary is documented
 - **WHEN** operator 阅读部署或运维文档
@@ -132,7 +132,7 @@ API, scheduler, or worker behavior.
 
 #### Scenario: Diagnostics export is documented
 - **WHEN** operator 阅读 deployment 文档
-- **THEN** 文档说明如何运行 `fleetent-admin diagnostics export`
+- **THEN** 文档说明如何运行 `fleetent admin diagnostics export`
 - **AND** 文档说明诊断包包含和不包含的内容
 
 #### Scenario: Retention default is documented
@@ -142,7 +142,7 @@ API, scheduler, or worker behavior.
 
 #### Scenario: Manual retention is documented
 - **WHEN** operator 阅读 deployment 文档
-- **THEN** 文档说明如何运行 `fleetent-admin diagnostics retention dry-run`
+- **THEN** 文档说明如何运行 `fleetent admin diagnostics retention dry-run`
 - **AND** 文档说明只有显式开启 `diagnostics.retention.enabled=true` 后 apply 才会删除诊断数据
 
 #### Scenario: Backup deletion is out of scope
@@ -175,10 +175,10 @@ API, scheduler, or worker behavior.
 - **THEN** checklist 明确禁止把真实 secret、token、credential payload 写入 settings、日志、trace、diagnostics package、issue 或测试 fixture
 
 ### Requirement: Fleetent admin command compatibility
-部署 SHALL 继续提供 `fleetent-admin` 作为管理员和 operator 的本机 CLI 入口。
+部署 SHALL 继续提供 `fleetent admin` 作为管理员和 operator 的本机 CLI 入口。
 
 #### Scenario: Fleetent admin command remains available
-- **WHEN** operator 按部署文档运行 `uv run fleetent-admin`
+- **WHEN** operator 按部署文档运行 `uv run fleetent admin`
 - **THEN** CLI 使用新的 `platform.admin_cli` 实现
 - **AND** 对 operator 暴露的命令名、参数和输出保持兼容
 
@@ -246,7 +246,7 @@ Docker image SHALL include enough project files to run the service, admin CLI an
 #### Scenario: Container can run operator commands
 - **WHEN** operator enters the fleetent container or uses `docker compose run --rm fleetent`
 - **THEN** `uv run fleetent --help` works
-- **AND** `uv run fleetent-admin --help` works
+- **AND** `uv run fleetent admin --help` works
 - **AND** `uv run python scripts/upgrade.py --dry-run` works
 
 ### Requirement: Explicit migration is recommended for Pilot
@@ -271,7 +271,7 @@ Deployment docs SHALL explain the Docker Compose first Pilot flow, local env fil
 
 #### Scenario: Init flow is documented
 - **WHEN** operator reads deployment docs
-- **THEN** docs instruct operator to run `fleetent-admin init-config`
+- **THEN** docs instruct operator to run `fleetent admin init-config`
 - **AND** docs explain which files and directories are created
 
 #### Scenario: Flat secrets directory is documented

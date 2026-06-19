@@ -13,7 +13,7 @@ fleetent 平台全局术语定义。所有模块文档应以本表为准，避�
 | **agent_loop** | agent 的核心执行引擎：接收输入 → LLM 调用 → 工具执行 → 迭代，直到终止条件 | 不用 "run loop"、"execution cycle" |
 | **scope** | 数据隔离的粒度标识，可以是 `tenant_id` 或 `agent_id`，用于区分不同租户或不同 agent 的数据 | 不用 "namespace"（namespace 专指 vector_store 内部的分区）|
 | **principal** | 认证完成后贯穿 agent 运行时的身份抽象，携带 `user_id`、`tenant_id`、`agent_name` 等字段。由认证边界（bearer token 解析 / IM 渠道担保）构造，核心模块只消费 Principal，不直接处理认证逻辑 | 不用 "user"（user 是存储层实体，principal 是运行时身份令牌）|
-| **node** | `fleetent-node` 进程，负责在某台宿主机上运行和管理一批 agent。轮询平台 `GET /nodes/{id}/desired-state` 获取期望列表，通过 spawn/stop 启停 `fleetent agent run` 子进程，并经 `POST /nodes/{id}/status` 上报实际运行态；注册信息存 `nodes` 表，以 `ma-<hex>` service key 鉴权 | 不用 "worker"、"host" |
+| **node** | `fleetent node start` 进程，负责在某台宿主机上运行和管理一批 agent。轮询平台 `GET /nodes/{id}/desired-state` 获取期望列表，通过 spawn/stop 启停 `fleetent agent run` 子进程，并经 `POST /nodes/{id}/status` 上报实际运行态；注册信息存 `nodes` 表，以 `ma-<hex>` service key 鉴权 | 不用 "worker"、"host" |
 | **materialize** | 平台将管理库中的 agent 定义、绑定和配置**单向刷写**为 agent 侧 `agent.yaml` 文件的操作，触发于 create / update / apply / clone 等变更后。agent 运行时只读自己的 `agent.yaml`，不查 platform DB（零 platform 依赖契约的执行点） | 不用 "sync"（暗示双向）、"deploy"（指发布上线，materialize 是配置刷写）|
 
 ---

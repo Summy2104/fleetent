@@ -7,7 +7,7 @@
 
 ## What Changes
 
-- **新部署件 `fleetent-node`**（新 console-script + 顶层 `node/` 包）：长驻守护，每个 agent host 一个。
+- **新部署件 `fleetent node start`**（新 console-script + 顶层 `node/` 包）：长驻守护，每个 agent host 一个。
 - **reconcile 循环**：拉 C2 的分区期望态 → 与**本地实际态**（`<home>/.fleetent.pid` + `os.kill` 探活）比对 → `enabled∧死`→`fleetent agent run` 拉起；`disabled/archived∧活`→优雅停（复用 agent 既有 SIGUSR1→SIGTERM→SIGKILL）。幂等。
 - **进程后端可插拔（仿 sandbox backend）**：v1 落 **local**（`subprocess.Popen` + PID 文件 + 信号）；systemd 后端列 roadmap。
 - **配置/secret 来源 provider 可插拔**：v1 **platform-api provider**；node **本地缓存**最后一次期望态/配置（兜 platform 短暂下线仍能跑/重启 agent，**补掉 platform 单点**）。
@@ -18,7 +18,7 @@
 ## Capabilities
 
 ### New Capabilities
-- `node-supervisor`: `fleetent-node` 守护——配置(node-id/token/platform-url)、拉取(platform-api provider + 本地缓存)、幂等 reconcile(期望↔实际、PID 真相、re-adopt、崩溃重拉、config-hash 漂移重启)、实际态上报。
+- `node-supervisor`: `fleetent node start` 守护——配置(node-id/token/platform-url)、拉取(platform-api provider + 本地缓存)、幂等 reconcile(期望↔实际、PID 真相、re-adopt、崩溃重拉、config-hash 漂移重启)、实际态上报。
 - `node-process-backend`: 可插拔进程后端接口 + local 实现（spawn `fleetent agent run`、stop via `fleetent agent stop`、liveness via PID 文件 + os.kill）。
 
 ### Modified Capabilities
@@ -30,15 +30,15 @@
 
 ## Impact
 
-**owning package**：**新顶层 `node/` 包** + 打包（新 `fleetent-node` 入口）。
+**owning package**：**新顶层 `node/` 包** + 打包（新 `fleetent node start` 入口）。
 
 **边界（关键）**：`node/` **作为 platform 的 HTTP client** 消费 C2 API，**MUST NOT `import fleetent.platform.*`**；拉起 agent 走 **subprocess（`fleetent agent run`）**，**不 import agent runtime 内部**。故 `node/` 既不依赖 platform 也不依赖 runtime 内部实现——纯"HTTP 客户端 + 子进程编排"，边界极干净，不违反 agent↔platform 解耦铁律。
 
-**public API surface（新增）**：`fleetent-node` CLI；`node/` 的 reconcile / backend / provider 接口（供后续 systemd/Vault 等后端实现）。
+**public API surface（新增）**：`fleetent node start` CLI；`node/` 的 reconcile / backend / provider 接口（供后续 systemd/Vault 等后端实现）。
 
 **owned tables**：无（node 不写管理库；本地缓存为 node 本地文件/内存，非管理表）。
 
-**config namespace**：`fleetent-node` 运行配置（platform URL、node-id、service-key、轮询/缓存参数、`FLEETENT_HOME`）。
+**config namespace**：`fleetent node start` 运行配置（platform URL、node-id、service-key、轮询/缓存参数、`FLEETENT_HOME`）。
 
 **cross-module dependencies**：HTTP→platform C2 API；subprocess→`fleetent agent run`；读本地 PID 文件。无 Python import 跨边界。
 

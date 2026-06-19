@@ -35,7 +35,7 @@ diagnostics:
 
 ## Diagnostics Export
 
-`fleetent-admin diagnostics export` 生成本地压缩包。建议结构：
+`fleetent admin diagnostics export` 生成本地压缩包。建议结构：
 
 ```text
 diagnostics-YYYYMMDD-HHMMSS.zip
@@ -105,7 +105,7 @@ retention 分 dry-run 和 apply。
 
 ### Dry-run
 
-`fleetent-admin diagnostics retention dry-run` 输出将删除的候选：
+`fleetent admin diagnostics retention dry-run` 输出将删除的候选：
 
 - logs 文件数量和路径摘要。
 - traces 记录数量。
@@ -140,8 +140,8 @@ apply 输出删除摘要；单个文件删除失败应记录失败并继续处�
 建议命令：
 
 ```bash
-fleetent-admin diagnostics export --from 2026-06-02T00:00:00 --to 2026-06-02T23:59:59
-fleetent-admin diagnostics retention dry-run
+fleetent admin diagnostics export --from 2026-06-02T00:00:00 --to 2026-06-02T23:59:59
+fleetent admin diagnostics retention dry-run
 fleetent-admin diagnostics retention apply
 ```
 
