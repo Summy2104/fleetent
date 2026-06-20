@@ -15,6 +15,7 @@ import subprocess
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "install-agent.sh"
+_RETIRED_TUI_CMD = "fleetent" + "-tui"
 
 _FAKE_UV = """#!/bin/bash
 echo "uv $*" >> "$UV_LOG"
@@ -23,9 +24,7 @@ case "$1" in
   python) [ "${FAKE_PYTHON_OK:-1}" = "1" ] && exit 0 || exit 1 ;;
   tool)
     if [ "$2" = "install" ]; then
-      for c in fleetent fleetent-tui; do
-        printf '#!/bin/bash\\n:' > "$FAKE_BIN/$c"; chmod +x "$FAKE_BIN/$c"
-      done
+      printf '#!/bin/bash\\n:' > "$FAKE_BIN/fleetent"; chmod +x "$FAKE_BIN/fleetent"
     fi
     ;;
 esac
@@ -76,6 +75,8 @@ def test_install_without_agent_id_installs_runtime_and_prints_tutorial(tmp_path:
     # Tutorial guides the operator to create an agent themselves.
     assert "fleetent agent init" in out
     assert "fleetent agent run" in out
+    assert "fleetent tui --url ws://localhost:<port>/ws --token <FLEETENT_TUI_TOKEN>" in out
+    assert _RETIRED_TUI_CMD not in out
     # No agent home produced by the script.
     assert not (home / ".fleetent" / "agents").exists()
 

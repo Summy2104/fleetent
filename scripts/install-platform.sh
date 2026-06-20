@@ -93,7 +93,7 @@ install_tool() {
         log_info "Run: uv tool update-shell"
         exit 1
     fi
-    log_success "Installed: fleetent fleetent-tui"
+    log_success "Installed: fleetent"
 }
 
 setup_home_env() {

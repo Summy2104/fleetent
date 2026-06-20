@@ -21,4 +21,5 @@
 
 #### Scenario: Tutorial names the agent-creation steps
 - **WHEN** the install completes
-- **THEN** the printed tutorial SHALL name, in order, `fleetent agent init <agent-id>`, editing `agent.yaml`/`.env`, `fleetent agent run <agent-id> [--port N]`, and connecting via `fleetent-tui`
+- **THEN** the printed tutorial SHALL name, in order, `fleetent agent init <agent-id>`, editing `agent.yaml`/`.env`, `fleetent agent run <agent-id> [--port N]`, and connecting via `fleetent tui`
+

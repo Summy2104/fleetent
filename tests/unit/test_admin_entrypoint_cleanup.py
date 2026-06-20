@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+_RETIRED_TUI_CMD = "fleetent" + "-tui"
+
 
 def test_legacy_console_scripts_removed_from_pyproject() -> None:
     pyproject = tomllib.loads(Path("pyproject.toml").read_text())
@@ -16,6 +18,7 @@ def test_legacy_console_scripts_removed_from_pyproject() -> None:
 
     assert "fleetent-admin" not in scripts
     assert "fleetent-node" not in scripts
+    assert _RETIRED_TUI_CMD not in scripts
 
 
 def test_legacy_admin_module_is_not_importable() -> None:

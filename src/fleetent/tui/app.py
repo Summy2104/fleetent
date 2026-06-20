@@ -1,4 +1,4 @@
-"""TUI main loop entry point (fleetent-tui).
+"""TUI main loop entry point (fleetent tui).
 
 ``AppController`` holds the testable interaction logic — a submitted line becomes a
 backend action (chat → ``send``; slash command → abort/approve/session/quit/help),
@@ -144,11 +144,11 @@ async def _run(url: str, token: str) -> None:
         await backend.close()
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(prog="fleetent-tui", description="fleetent terminal TUI")
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(prog="fleetent tui", description="fleetent terminal TUI")
     parser.add_argument("--url", default=os.environ.get("FLEETENT_TUI_URL", DEFAULT_URL))
     parser.add_argument("--token", default=os.environ.get("FLEETENT_TOKEN", ""))
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if not args.token:
         parser.error("a Bearer ma- key is required via --token or FLEETENT_TOKEN")
     asyncio.run(_run(args.url, args.token))

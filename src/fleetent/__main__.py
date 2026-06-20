@@ -100,6 +100,12 @@ def main(argv: list[str] | None = None) -> None:
         node_app.main()
         return
 
+    if argv and argv[0] == "tui":
+        from fleetent.tui import app as tui_app
+
+        tui_app.main(argv[1:])
+        return
+
     user_input = " ".join(argv) if argv else sys.stdin.read().strip()
     if not user_input:
         print(

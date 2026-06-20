@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import sys
+
+import pytest
 
 admin_main = importlib.import_module("fleetent.platform.admin_cli.main")
 
@@ -44,6 +47,15 @@ def test_command_modules_has_no_empty_module() -> None:
 
     assert "im" not in module_names
     assert "agents" not in module_names
+
+
+def test_observability_module_removed() -> None:
+    module_names = {module.__name__.rsplit(".", 1)[-1] for module in admin_main._COMMAND_MODULES}
+    sys.modules.pop("fleetent.platform.admin_cli.observability", None)
+
+    assert "observability" not in module_names
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("fleetent.platform.admin_cli.observability")
 
 
 def test_memory_shared_cli_removed() -> None:

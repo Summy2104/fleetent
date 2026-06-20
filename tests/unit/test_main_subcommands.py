@@ -49,6 +49,21 @@ def test_node_without_start_errors(monkeypatch: pytest.MonkeyPatch, capsys) -> N
     assert "Usage: fleetent node start" in capsys.readouterr().err
 
 
+def test_tui_subcommand_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
+    tui_app_module = importlib.import_module("fleetent.tui.app")
+
+    def fake_main(argv: list[str] | None = None) -> None:
+        calls.append(argv or [])
+
+    monkeypatch.setattr(tui_app_module, "main", fake_main)
+    monkeypatch.setattr("sys.argv", ["fleetent", "tui", "--help"])
+
+    cli.main()
+
+    assert calls == [["--help"]]
+
+
 def test_agent_run_does_not_import_platform(monkeypatch: pytest.MonkeyPatch) -> None:
     sys.modules.pop("fleetent.platform.admin_cli", None)
 
@@ -66,3 +81,22 @@ def test_agent_run_does_not_import_platform(monkeypatch: pytest.MonkeyPatch) -> 
     cli.main()
 
     assert "fleetent.platform.admin_cli" not in sys.modules
+
+
+def test_tui_does_not_load_on_agent_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    sys.modules.pop("fleetent.tui.app", None)
+
+    async def fake_serve(
+        agent_id: str,
+        *,
+        port: int | None = None,
+        home: str | None = None,
+    ) -> None:
+        return None
+
+    monkeypatch.setattr(agent_app, "serve", fake_serve)
+    monkeypatch.setattr("sys.argv", ["fleetent", "agent", "run", "support"])
+
+    cli.main()
+
+    assert "fleetent.tui.app" not in sys.modules
