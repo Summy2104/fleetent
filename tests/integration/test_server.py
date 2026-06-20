@@ -38,6 +38,15 @@ def test_node_router_mounted():
     assert "/nodes/{node_id}/status" in paths
 
 
+def test_no_shared_memory_admin_router(client) -> None:
+    import fleetent.server as srv
+
+    paths = {getattr(r, "path", None) for r in srv.app.routes}
+    assert "/admin/memory/shared" not in paths
+    assert not hasattr(srv, "shared_memory_admin_api")
+    assert client.get("/admin/memory/shared?scope_type=team&scope_id=eng").status_code == 404
+
+
 # ── cron scheduler lifespan ───────────────────────────────────────────────────
 
 

@@ -324,13 +324,15 @@ def test_pilot_runbook_contains_required_commands_and_failure_handling():
         assert phrase in content
 
 
-def test_intelligence_roadmap_manual_uses_current_shared_memory_cli():
+def test_intelligence_roadmap_manual_references_shared_memory_governance_flow():
     content = Path("docs/roadmaps/intelligence-roadmap-test-manual.md").read_text(encoding="utf-8")
 
     assert "fleetent-admin shared-memory" not in content
     assert "fleetent-admin" not in content
     assert "fleetent-node" not in content
-    assert "fleetent admin memory shared" in content
+    assert "fleetent admin memory shared" not in content
+    assert "Shared Memory apply / reject" in content
+    assert "tests/integration/test_shared_memory.py" in content
 
 
 def test_intelligence_roadmap_manual_documents_real_llm_credentials_safely():

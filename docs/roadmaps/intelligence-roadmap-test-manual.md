@@ -135,21 +135,19 @@ uv run pytest tests/integration/test_shared_memory.py \
 建议操作：
 
 ```bash
-uv run fleetent admin memory shared list --scope-type tenant --scope-id pilot-tenant
-uv run fleetent admin memory shared list --scope-type team --scope-id pilot-team
 uv run pytest tests/integration/test_shared_memory.py tests/integration/test_memory_retention_compaction.py -q
 ```
 
 人工复核：
 
-- 查询结果只显示目标 tenant / team 的 Shared Memory。
+- 结合 `tests/integration/test_shared_memory.py` 的用例记录，确认 Shared Memory 只落在目标 tenant / team scope。
 - 验收记录中保存 memory item id、scope、status，不保存完整用户对话。
-- maintenance proposal 初始为 pending；apply / reject 必须有 owner 操作记录。
+- reflection maintenance proposal 初始为 pending；Shared Memory apply / reject 必须有 owner 审批或 apply 记录。
 
 失败分类：
 
 - 跨用户、跨 tenant 或跨 team 泄漏：`Pilot blocker`。
-- CLI 输出缺少足够定位信息但功能可用：Docs gap。
+- 人工验收证据缺少 scope / status 关键信息但功能可用：Docs gap。
 - 缺 review UI：Enhancement。
 
 ## 5. Long-term Context 验收
