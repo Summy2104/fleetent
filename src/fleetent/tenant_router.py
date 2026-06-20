@@ -25,9 +25,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
-from fleetent.db import ReadOnlySQLiteDatabase, SQLiteDatabase
+from fleetent.db import ReadOnlySQLiteDatabase, SQLiteDatabase, create_substrate
 from fleetent.vector_store.backend import SQLiteVectorBackend, VectorBackend
 
 
@@ -58,9 +58,10 @@ class KbScope:
 
         Idempotent: if the DB is already at current version nothing changes.
         """
-        from fleetent.schema_migrations import migrate
+        if self.kb_db.capabilities.embedded_migrations:
+            from fleetent.schema_migrations import migrate
 
-        migrate(self.kb_db, migrations)
+            migrate(self.kb_db, migrations)
         return self.kb_db
 
     def open_shared_memory_db(self, migrations: list[tuple[int, str]]) -> SQLiteDatabase:
@@ -74,9 +75,10 @@ class KbScope:
                 "shared_memory_db not provisioned in this KbScope — "
                 "use SQLiteTenantBackend or supply shared_memory_db explicitly"
             )
-        from fleetent.schema_migrations import migrate
+        if self.shared_memory_db.capabilities.embedded_migrations:
+            from fleetent.schema_migrations import migrate
 
-        migrate(self.shared_memory_db, migrations)
+            migrate(self.shared_memory_db, migrations)
         return self.shared_memory_db
 
     def open_kb_db_ro(self) -> ReadOnlySQLiteDatabase:
@@ -111,9 +113,10 @@ class AgentScope:
 
         Idempotent: if the DB is already at current version nothing changes.
         """
-        from fleetent.schema_migrations import migrate
+        if self.state_db.capabilities.embedded_migrations:
+            from fleetent.schema_migrations import migrate
 
-        migrate(self.state_db, migrations)
+            migrate(self.state_db, migrations)
         return self.state_db
 
     def open_state_db_ro(self) -> ReadOnlySQLiteDatabase:
@@ -141,11 +144,14 @@ class SQLiteTenantBackend:
     def resolve(self, tenant_id: str) -> KbScope:
         tenant_dir = self.data_dir / tenant_id
         tenant_dir.mkdir(parents=True, exist_ok=True)
-        kb_db = SQLiteDatabase(path=tenant_dir / "kb.db")
+        kb_db = cast(SQLiteDatabase, create_substrate(f"sqlite:///{tenant_dir / 'kb.db'}"))
         kb_vector_backend = SQLiteVectorBackend(
             database_url=f"sqlite:///{tenant_dir / 'kb_vectors.db'}"
         )
-        shared_memory_db = SQLiteDatabase(path=tenant_dir / "shared_memory.db")
+        shared_memory_db = cast(
+            SQLiteDatabase,
+            create_substrate(f"sqlite:///{tenant_dir / 'shared_memory.db'}"),
+        )
         shared_memory_vector_backend = SQLiteVectorBackend(
             database_url=f"sqlite:///{tenant_dir / 'shared_memory_vectors.db'}"
         )
@@ -160,7 +166,10 @@ class SQLiteTenantBackend:
     def resolve_agent(self, tenant_id: str, agent_id: str) -> AgentScope:
         agent_dir = self.data_dir / tenant_id / agent_id
         agent_dir.mkdir(parents=True, exist_ok=True)
-        state_db = SQLiteDatabase(path=agent_dir / "agent_state.db")
+        state_db = cast(
+            SQLiteDatabase,
+            create_substrate(f"sqlite:///{agent_dir / 'agent_state.db'}"),
+        )
         vector_backend = SQLiteVectorBackend(
             database_url=f"sqlite:///{agent_dir / 'agent_vectors.db'}"
         )
