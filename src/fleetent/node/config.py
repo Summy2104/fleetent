@@ -20,10 +20,16 @@ class NodeConfig:
 
 def load_config() -> NodeConfig:
     """Load fleetent node start config from environment variables."""
+    home_dir = Path(os.environ.get("FLEETENT_HOME") or Path.home() / ".fleetent").expanduser()
+    env_path = home_dir / "node" / ".env"
+    if env_path.exists():
+        from dotenv import load_dotenv
+
+        load_dotenv(env_path, override=False)
+
     platform_url = _require_env("FLEETENT_NODE_PLATFORM_URL")
     node_id = _require_env("FLEETENT_NODE_ID")
     service_key = _require_env("FLEETENT_NODE_SERVICE_KEY")
-    home_dir = Path(os.environ.get("FLEETENT_HOME") or Path.home() / ".fleetent").expanduser()
     interval_seconds = int(os.environ.get("FLEETENT_NODE_INTERVAL_SECONDS", "10"))
     return NodeConfig(
         platform_url=platform_url.rstrip("/"),
