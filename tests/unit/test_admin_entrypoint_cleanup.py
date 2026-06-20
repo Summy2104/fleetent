@@ -10,12 +10,12 @@ from pathlib import Path
 import pytest
 
 
-def test_fleetent_admin_console_script_points_to_shim() -> None:
+def test_legacy_console_scripts_removed_from_pyproject() -> None:
     pyproject = tomllib.loads(Path("pyproject.toml").read_text())
+    scripts = pyproject["project"]["scripts"]
 
-    assert (
-        pyproject["project"]["scripts"]["fleetent-admin"] == "fleetent._shims:fleetent_admin_shim"
-    )
+    assert "fleetent-admin" not in scripts
+    assert "fleetent-node" not in scripts
 
 
 def test_legacy_admin_module_is_not_importable() -> None:

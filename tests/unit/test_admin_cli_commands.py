@@ -37,3 +37,10 @@ def test_removed_commands_absent() -> None:
     kb_choices = top_level["kb"]._subparsers._group_actions[0].choices
     assert "connectors" not in kb_choices
     assert "extract-entities" in kb_choices
+
+
+def test_command_modules_has_no_empty_module() -> None:
+    module_names = {module.__name__.rsplit(".", 1)[-1] for module in admin_main._COMMAND_MODULES}
+
+    assert "im" not in module_names
+    assert "agents" not in module_names

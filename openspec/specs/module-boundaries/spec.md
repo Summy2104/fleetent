@@ -110,10 +110,10 @@ tables、config namespace 变化和 cross-module dependencies。
 
 ### Requirement: Admin CLI package split
 系统 SHALL expose the admin CLI through `platform.admin_cli` canonical package paths only; the legacy
-`fleetent.admin` shim SHALL NOT remain importable. The `fleetent-admin` console script SHALL point to the
-deprecation shim `fleetent._shims:fleetent_admin_shim` (which forwards to `fleetent admin`), not directly to
-`fleetent.platform.admin_cli.main:main`. `platform.admin_cli.main.main` SHALL remain importable as the
-canonical implementation that both `fleetent admin` and the shim delegate to.
+`fleetent.admin` shim SHALL NOT remain importable. The admin CLI SHALL be invoked exclusively via the
+`fleetent admin` subcommand of the single `fleetent` entrypoint; the standalone `fleetent-admin` console
+script SHALL NOT exist in `pyproject.toml` (its deprecation shim is removed). `platform.admin_cli.main.main`
+SHALL remain importable as the canonical implementation that `fleetent admin` delegates to.
 
 #### Scenario: New admin CLI package entrypoint exists
 - **WHEN** 调用方导入 `fleetent.platform.admin_cli.main.main`
@@ -123,9 +123,9 @@ canonical implementation that both `fleetent admin` and the shim delegate to.
 - **WHEN** 调用方导入 `fleetent.admin`
 - **THEN** 导入失败并显示该 legacy module 不再存在
 
-#### Scenario: Console script points to deprecation shim
-- **WHEN** 查看 `pyproject.toml`
-- **THEN** `fleetent-admin` 指向 `fleetent._shims:fleetent_admin_shim`
+#### Scenario: No standalone admin console script
+- **WHEN** 查看 `pyproject.toml` 的 `[project.scripts]`
+- **THEN** 不含 `fleetent-admin` 入口；admin CLI 仅经 `fleetent admin` 子命令暴露
 
 ### Requirement: Admin CLI command domains
 admin CLI SHALL 按命令域拆分实现文件，降低单文件冲突。
@@ -320,8 +320,8 @@ flat→package 迁移收尾后，系统 SHALL expose runtime、model、tools、s
 
 #### Scenario: Current docs reference canonical admin CLI entrypoint
 - **WHEN** 读者查看当前 platform 或 architecture docs
-- **THEN** 文档使用 `fleetent.platform.admin_cli` 或 `fleetent-admin` console script 表示 admin CLI 入口
-- **AND** 不把 `fleetent.admin` 描述为当前实现入口
+- **THEN** 文档使用 `fleetent.platform.admin_cli` 或 `fleetent admin` 子命令表示 admin CLI 入口
+- **AND** 不把 `fleetent.admin` 或已移除的 `fleetent-admin` console script 描述为当前实现入口
 
 #### Scenario: Deleted legacy paths are not described as current APIs
 - **WHEN** 当前 docs 描述 memory、governance、integrations 或 admin CLI

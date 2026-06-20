@@ -35,9 +35,7 @@ dependencies = [
 
 [project.scripts]
 fleetent = "fleetent.__main__:main"
-fleetent-admin = "fleetent._shims:fleetent_admin_shim"
 fleetent-tui = "fleetent.tui.app:main"
-fleetent-node = "fleetent._shims:fleetent_node_shim"
 
 [build-system]
 requires = ["hatchling"]

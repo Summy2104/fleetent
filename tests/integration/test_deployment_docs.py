@@ -328,6 +328,8 @@ def test_intelligence_roadmap_manual_uses_current_shared_memory_cli():
     content = Path("docs/roadmaps/intelligence-roadmap-test-manual.md").read_text(encoding="utf-8")
 
     assert "fleetent-admin shared-memory" not in content
+    assert "fleetent-admin" not in content
+    assert "fleetent-node" not in content
     assert "fleetent admin memory shared" in content
 
 

@@ -4,10 +4,8 @@ import argparse
 import sys
 
 from fleetent.platform.admin_cli import (
-    agents,
     config_validation,
     diagnostics,
-    im,
     init_config,
     kb_connectors,
     maintenance,
@@ -20,8 +18,6 @@ from fleetent.platform.admin_cli import (
 _COMMAND_MODULES = (
     users,
     tenancy,
-    im,
-    agents,
     nodes,
     kb_connectors,
     init_config,

@@ -5,18 +5,12 @@ import sys
 from types import SimpleNamespace
 from typing import Any
 
-from fleetent.platform.admin_cli import agents, kb_connectors, users
+from fleetent.platform.admin_cli import kb_connectors, users
 from fleetent.platform.agent_statistics import stats_admin_api
 
 
 def _ns(**values: Any) -> argparse.Namespace:
     return argparse.Namespace(**values)
-
-
-def test_agent_cli_removed_handlers_return_false() -> None:
-    assert not agents.handle(_ns(cmd="update-agent"))
-    assert not agents.handle(_ns(cmd="assign-user"))
-    assert not agents.handle(_ns(cmd="unknown"))
 
 
 def test_user_cli_only_keeps_seed_builtin_admin(monkeypatch, capsys) -> None:
