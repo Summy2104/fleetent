@@ -38,6 +38,8 @@
 agent 的"定义谁拥有"治理——**这条是活的**（区别于 skill 自管的 inert，见 [skill-system](skill-system.md) §6.3）：
 
 - **apply API**（`askit_console/agent_apply_api.py`，`POST /admin/agents/apply`）写 `provenance=managed`（"spec-owned"）。已存在的 adhoc agent 被 apply = **adopt**（adhoc→managed）。这是外部编排器（askit）把 agent 纳管的入口。
+- apply 的定义面现在包含 `model_overrides`：payload 形状为 `{routes: {<route_key>: [{provider, model, base_url, api_key_env, protocol?, max_tokens?, params?}]}}`，镜像 materialize 后 `agent.yaml` 的 `models` 段。该字段进入 `agent_versions.model_overrides` 版本快照；省略或传 `null` 时沿用既有 `_UNSET` 语义，不主动改写当前模型策略。
+- `model_overrides` 只携带 `api_key_env`（环境变量名），**不携带密钥值**。真实 key 仍经 `PUT /admin/agents/{name}/secrets/{env_name}` 写入 `agent_secrets`，node 在下发 desired-state/拉起 agent 时把对应 secret 注入运行环境。
 - **drift 置位**：控制台 UI 编辑一个 managed agent → `mark_drift()`（adhoc 时 no-op），标记"人工改动与外部源不一致"。
 - **⚠️ 调和半闭环（已知缺口）**：`clear_drift()` 当前**零调用**，apply 重新断言 spec 也不清 drift，无 promote/discard 路径 → **drift 标得上、清不掉**。功能缺口，非冗余（列有读有写）。归 backlog。
 

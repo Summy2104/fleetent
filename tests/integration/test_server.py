@@ -1,9 +1,13 @@
+import base64
+
 import pytest
 from fastapi.testclient import TestClient
 
 import fleetent.agent_store as agent_store
 import fleetent.auth as auth
 import fleetent.user_store as us
+from fleetent.agent_config import default_models
+from fleetent.platform.agent_lifecycle import materialize
 from fleetent.server import app
 from tests.integration.test_migrations import apply_migrations
 
@@ -126,6 +130,24 @@ def _admin_session() -> str:
     return auth.create_session(u.id)
 
 
+def _model_overrides_payload() -> dict[str, object]:
+    return {
+        "routes": {
+            "default": [
+                {
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5-20251001",
+                    "base_url": "https://api.anthropic.com/v1/",
+                    "api_key_env": "FLEETENT_MODEL_PRIMARY_API_KEY",
+                    "protocol": "openai_chat",
+                    "max_tokens": 1024,
+                    "params": {"temperature": 0.1},
+                }
+            ]
+        }
+    }
+
+
 def test_clone_persists_via_wired_seam(tmp_path, monkeypatch, isolated_schedule_db):
     _agent_admin_env(tmp_path, monkeypatch)
     agent_store.create_agent("ops", "Ops prompt", ["read_*"])
@@ -153,6 +175,191 @@ def test_apply_persists_via_wired_seam(tmp_path, monkeypatch, isolated_schedule_
     assert r.status_code == 200
     found = agent_store.get_by_name("fresh")
     assert found is not None and found.system_prompt == "Fresh."
+
+
+def test_apply_persists_model_overrides_via_wired_seam(tmp_path, monkeypatch, isolated_schedule_db):
+    _agent_admin_env(tmp_path, monkeypatch)
+    token = _admin_session()
+    client = TestClient(app)
+    model_overrides = _model_overrides_payload()
+
+    r = client.post(
+        "/admin/agents/apply",
+        headers={"Authorization": f"Session {token}"},
+        json={
+            "name": "fresh-model",
+            "system_prompt": "Fresh.",
+            "allowed_tools": ["shell"],
+            "model_overrides": model_overrides,
+        },
+    )
+
+    assert r.status_code == 200
+    found = agent_store.get_by_name("fresh-model")
+    assert found is not None
+    assert found.model_overrides == model_overrides
+
+
+def test_apply_without_model_overrides_preserves_existing_policy_and_fresh_default(
+    tmp_path, monkeypatch, isolated_schedule_db
+):
+    _agent_admin_env(tmp_path, monkeypatch)
+    seed_overrides = _model_overrides_payload()
+    agent_store.create_agent("existing-model", "Before.", ["shell"], model_overrides=seed_overrides)
+    token = _admin_session()
+    client = TestClient(app)
+
+    update = client.post(
+        "/admin/agents/apply",
+        headers={"Authorization": f"Session {token}"},
+        json={
+            "name": "existing-model",
+            "system_prompt": "After.",
+            "allowed_tools": ["shell", "read_file"],
+        },
+    )
+
+    assert update.status_code == 200
+    updated = agent_store.get_by_name("existing-model")
+    assert updated is not None
+    assert updated.system_prompt == "After."
+    assert updated.allowed_tools == ["shell", "read_file"]
+    assert updated.model_overrides == seed_overrides
+
+    fresh = client.post(
+        "/admin/agents/apply",
+        headers={"Authorization": f"Session {token}"},
+        json={
+            "name": "fresh-null-model",
+            "system_prompt": "Fresh.",
+            "allowed_tools": ["shell"],
+            "model_overrides": None,
+        },
+    )
+
+    assert fresh.status_code == 200
+    created = agent_store.get_by_name("fresh-null-model")
+    assert created is not None
+    assert created.model_overrides == {}
+    assert materialize.agent_file_from_store(created).models == default_models()
+
+
+def test_apply_materializes_configured_model_overrides_via_wired_seam(
+    tmp_path, monkeypatch, isolated_schedule_db
+):
+    _agent_admin_env(tmp_path, monkeypatch)
+    token = _admin_session()
+    client = TestClient(app)
+
+    response = client.post(
+        "/admin/agents/apply",
+        headers={"Authorization": f"Session {token}"},
+        json={
+            "name": "materialized-model",
+            "system_prompt": "Fresh.",
+            "allowed_tools": ["shell"],
+            "model_overrides": _model_overrides_payload(),
+        },
+    )
+
+    assert response.status_code == 200
+    exported = materialize.agent_file_from_store(agent_store.get_by_name("materialized-model"))
+    assert exported.models != default_models()
+    assert exported.models.routes["default"][0].target == "default-0"
+    target = {item.id: item for item in exported.models.targets}["default-0"]
+    assert target.provider == "anthropic"
+    assert target.model == "claude-haiku-4-5-20251001"
+    assert target.base_url == "https://api.anthropic.com/v1/"
+    assert target.api_key_env == "FLEETENT_MODEL_PRIMARY_API_KEY"
+
+
+def test_apply_is_idempotent_for_model_overrides_and_preserves_bindings(
+    tmp_path, monkeypatch, isolated_schedule_db
+):
+    _agent_admin_env(tmp_path, monkeypatch)
+    seed_overrides = _model_overrides_payload()
+    agent = agent_store.create_agent(
+        "stable-model", "Before.", ["shell"], model_overrides=seed_overrides
+    )
+    agent_store.assign_user("user-1", agent.id)
+    token = _admin_session()
+    client = TestClient(app)
+    payload = {
+        "name": "stable-model",
+        "system_prompt": "After.",
+        "allowed_tools": ["shell", "read_file"],
+        "model_overrides": seed_overrides,
+    }
+
+    first = client.post(
+        "/admin/agents/apply",
+        headers={"Authorization": f"Session {token}"},
+        json=payload,
+    )
+    second = client.post(
+        "/admin/agents/apply",
+        headers={"Authorization": f"Session {token}"},
+        json=payload,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    found = agent_store.get_by_name("stable-model")
+    assert found is not None
+    assert found.system_prompt == "After."
+    assert found.allowed_tools == ["shell", "read_file"]
+    assert found.model_overrides == seed_overrides
+    assert agent_store.list_users_for_agent(found.id) == ["user-1"]
+    versions = agent_store.list_versions("stable-model")
+    assert len(versions) == 3
+    assert versions[0].model_overrides == seed_overrides
+    assert versions[1].model_overrides == seed_overrides
+    assert versions[0].system_prompt == versions[1].system_prompt == "After."
+    assert versions[0].allowed_tools == versions[1].allowed_tools == ["shell", "read_file"]
+
+
+def test_apply_model_overrides_keep_api_key_env_name_without_secret_value(
+    tmp_path, monkeypatch, isolated_schedule_db
+):
+    _agent_admin_env(tmp_path, monkeypatch)
+    monkeypatch.setenv(
+        "FLEETENT_SECRET_KEY",
+        base64.urlsafe_b64encode(b"1" * 32).decode("ascii"),
+    )
+    token = _admin_session()
+    client = TestClient(app)
+    model_overrides = _model_overrides_payload()
+
+    applied = client.post(
+        "/admin/agents/apply",
+        headers={"Authorization": f"Session {token}"},
+        json={
+            "name": "secret-safe-model",
+            "system_prompt": "Fresh.",
+            "allowed_tools": ["shell"],
+            "model_overrides": model_overrides,
+        },
+    )
+    secret = client.put(
+        "/admin/agents/secret-safe-model/secrets/FLEETENT_MODEL_PRIMARY_API_KEY",
+        headers={"Authorization": f"Session {token}"},
+        json={"value": "sk-live-secret"},
+    )
+
+    assert applied.status_code == 200
+    assert secret.status_code == 200
+    found = agent_store.get_by_name("secret-safe-model")
+    assert found is not None
+    assert found.model_overrides["routes"] == model_overrides["routes"]
+    assert (
+        found.model_overrides["routes"]["default"][0]["api_key_env"]
+        == "FLEETENT_MODEL_PRIMARY_API_KEY"
+    )
+    assert "sk-live-secret" not in str(found.model_overrides)
+    versions = agent_store.list_versions("secret-safe-model")
+    assert len(versions) == 1
+    assert versions[0].model_overrides["routes"] == model_overrides["routes"]
+    assert "sk-live-secret" not in str(versions[0].model_overrides)
 
 
 def test_create_persists_version_config_via_wired_seam(tmp_path, monkeypatch, isolated_schedule_db):

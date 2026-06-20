@@ -347,13 +347,34 @@ def wire_agent_store_seams() -> None:
     def _console_delete(name: str) -> bool:
         return agent_store.delete_agent(name)
 
-    def _apply_create(name: str, system_prompt: str, allowed_tools: list[str]) -> int:
-        agent_id = agent_store.create_agent(name, system_prompt, allowed_tools).id
+    def _apply_create(
+        name: str,
+        system_prompt: str,
+        allowed_tools: list[str],
+        model_overrides: dict[str, Any] | None = None,
+    ) -> int:
+        agent_id = agent_store.create_agent(
+            name,
+            system_prompt,
+            allowed_tools,
+            model_overrides=model_overrides,
+        ).id
         materialize.materialize_from_store(name)
         return agent_id
 
-    def _apply_update(name: str, system_prompt: str, allowed_tools: list[str]) -> None:
-        agent_store.create_version(name, system_prompt=system_prompt, allowed_tools=allowed_tools)
+    def _apply_update(
+        name: str,
+        system_prompt: str,
+        allowed_tools: list[str],
+        model_overrides: dict[str, Any] | None = None,
+    ) -> None:
+        kwargs: dict[str, Any] = {
+            "system_prompt": system_prompt,
+            "allowed_tools": allowed_tools,
+        }
+        if model_overrides is not None:
+            kwargs["model_overrides"] = model_overrides
+        agent_store.create_version(name, **kwargs)
         materialize.materialize_from_store(name)
 
     agent_console_api.get_agent_def = _get_def
