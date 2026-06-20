@@ -15,8 +15,8 @@ Auth mirrors user_admin_api: reads allow viewer+admin, writes require admin.
 """
 
 import asyncio
-import json
 import re
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
@@ -74,6 +74,8 @@ IDLE_TIMEOUT_SECONDS = 1800
 _ADMIN_ROLES = {"admin", "built_in_admin"}
 _DEFAULT_TENANT = "default"
 _VALID_MODES = {"vector", "keyword", "hybrid"}
+_KB_INGEST_POLL_INTERVAL_SECONDS = 0.05
+_KB_INGEST_WAIT_TIMEOUT_SECONDS = 30.0
 
 
 # --- injectable engine seams (knowledge-base / observability follow-ups) -------
@@ -439,64 +441,21 @@ def _enqueue_connector_sync_job(connector_id: str) -> dict[str, Any]:
     return kb_ingest_jobs.enqueue_connector_job(connector)
 
 
-def _run_kb_ingest_job(job: dict[str, Any]) -> dict[str, Any]:
-    payload = json.loads(str(job["connector_ref"]))
-    job_type = str(job["job_type"])
-    if job_type == "import_document":
-        return kb_ingest_text(
-            str(job["tenant_id"]),
-            str(job["kb_id"]),
-            str(payload["source"]),
-            str(payload["content"]),
-            str(payload["document_format"]),
-        )
-    if job_type == "sync_directory":
-        return kb_sync_directory(
-            str(job["tenant_id"]),
-            str(job["kb_id"]),
-            str(payload["path"]),
-        )
-    if job_type == "connector_sync":
-        connector_id = str(payload["connector_id"])
-        result = asyncio.run(
-            knowledge_base.run_connector_sync(
-                connector_id,
-                settings=_connector_settings(),
-                dry_run=False,
-            )
-        )
-        return {
-            "connector_id": result.connector_id,
-            "status": result.status,
-            "summary": result.summary,
-            "error": result.error,
-        }
-    raise HTTPException(status_code=422, detail=f"unknown kb ingest job type: {job_type}")
-
-
-def _drain_kb_ingest_job(job_id: str) -> dict[str, Any]:
-    # Transitional path for kb-worker rollout: execute the enqueued job inline for now.
+def _wait_for_kb_ingest_job(job_id: str) -> dict[str, Any]:
+    deadline = time.monotonic() + _KB_INGEST_WAIT_TIMEOUT_SECONDS
     while True:
-        claimed = kb_ingest_jobs.claim_job(job_id)
-        if claimed is None:
-            existing = kb_ingest_jobs.get_job(job_id)
-            if existing is None:
-                raise HTTPException(status_code=404, detail="kb ingest job not found")
-            raise HTTPException(status_code=409, detail=f"kb ingest job is {existing['status']}")
-        try:
-            result = _run_kb_ingest_job(claimed)
-        except HTTPException as exc:
-            failed = kb_ingest_jobs.mark_failed(job_id, str(exc.detail))
-            if failed is not None and failed["status"] == "pending":
-                continue
-            raise
-        except Exception as exc:
-            failed = kb_ingest_jobs.mark_failed(job_id, str(exc))
-            if failed is not None and failed["status"] == "pending":
-                continue
-            raise HTTPException(status_code=500, detail="kb ingest job failed") from exc
-        kb_ingest_jobs.mark_done(job_id)
-        return {"job_id": job_id, **result}
+        job = kb_ingest_jobs.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="kb ingest job not found")
+        status = str(job["status"])
+        if status == "done":
+            result = kb_ingest_jobs.get_job_result(job) or {}
+            return {"job_id": job_id, "status": status, **result}
+        if status == "failed":
+            return {"job_id": job_id, "status": status, "error": str(job.get("last_error") or "")}
+        if time.monotonic() >= deadline:
+            return {"job_id": job_id, "status": status}
+        time.sleep(_KB_INGEST_POLL_INTERVAL_SECONDS)
 
 
 def _chunk_to_search_result(chunk: KnowledgeChunk) -> dict[str, Any]:
@@ -635,8 +594,9 @@ def import_document(
     kb_id: str, body: ImportBody, authorization: str | None = Header(None)
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
+    _require_active_kb(body.tenant_id, kb_id)
     job = _enqueue_import_job(kb_id, body)
-    result = _drain_kb_ingest_job(str(job["id"]))
+    result = _wait_for_kb_ingest_job(str(job["id"]))
     audit_log.write_audit(
         user.id,
         "doc_import",
@@ -656,8 +616,9 @@ def sync_directory(
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
     _require_confirm(x_confirm)  # full resync is high-risk
+    _require_active_kb(body.tenant_id, kb_id)
     job = _enqueue_sync_directory_job(kb_id, body)
-    result = _drain_kb_ingest_job(str(job["id"]))
+    result = _wait_for_kb_ingest_job(str(job["id"]))
     audit_log.write_audit(user.id, "doc_sync", "kb", kb_id, detail={"path": body.path})
     return result
 
@@ -977,7 +938,7 @@ async def sync_kb_connector(
         }
     else:
         job = _enqueue_connector_sync_job(connector_id)
-        response = _drain_kb_ingest_job(str(job["id"]))
+        response = _wait_for_kb_ingest_job(str(job["id"]))
     audit_log.write_audit(
         user.id,
         "kb_connector.sync",

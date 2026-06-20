@@ -106,6 +106,12 @@ def main(argv: list[str] | None = None) -> None:
         tui_app.main(argv[1:])
         return
 
+    if argv and argv[0] == "kb-worker":
+        from fleetent.knowledge_base import worker as kb_worker
+
+        kb_worker.main(argv[1:])
+        return
+
     user_input = " ".join(argv) if argv else sys.stdin.read().strip()
     if not user_input:
         print(

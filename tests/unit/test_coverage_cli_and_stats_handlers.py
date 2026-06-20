@@ -54,7 +54,8 @@ def test_kb_connector_cli_only_keeps_extract_entities(monkeypatch, capsys) -> No
 
     output = capsys.readouterr().out
     assert "entities_upserted=3" in output
-    assert kb_connectors._execute_sync_env_flag("confluence") == "FLEETENT_CONFLUENCE_EXECUTE_SYNC"
+    assert not hasattr(kb_connectors, "_handle_connectors")
+    assert not hasattr(kb_connectors, "_execute_sync_env_flag")
 
 
 def test_stats_admin_api_handlers_with_mocked_auth_and_data(monkeypatch):

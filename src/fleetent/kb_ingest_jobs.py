@@ -10,6 +10,9 @@ from typing import Any
 from fleetent.config import Settings
 from fleetent.db import SQLiteDatabase, create_database
 
+_RESULT_KEY = "__result__"
+_REQUEST_KEY = "__request__"
+
 
 def _database() -> SQLiteDatabase:
     return create_database(Settings().database_url)
@@ -38,6 +41,21 @@ def get_job(job_id: str) -> dict[str, Any] | None:
         .fetchone()
     )
     return _decode(row)
+
+
+def get_job_payload(job: dict[str, Any]) -> dict[str, Any]:
+    payload = json.loads(str(job["connector_ref"]))
+    if _REQUEST_KEY in payload and isinstance(payload[_REQUEST_KEY], dict):
+        return dict(payload[_REQUEST_KEY])
+    return payload
+
+
+def get_job_result(job: dict[str, Any]) -> dict[str, Any] | None:
+    payload = json.loads(str(job["connector_ref"]))
+    result = payload.get(_RESULT_KEY)
+    if isinstance(result, dict):
+        return dict(result)
+    return None
 
 
 def enqueue_job(
@@ -146,17 +164,34 @@ def claim_next_job() -> dict[str, Any] | None:
     return _decode(row)
 
 
-def mark_done(job_id: str) -> dict[str, Any] | None:
+def mark_done(job_id: str, *, result: dict[str, Any] | None = None) -> dict[str, Any] | None:
     now = _now()
     with _database().transaction() as conn:
+        current = conn.execute(
+            "SELECT connector_ref FROM kb_ingest_jobs WHERE id = :id",
+            {"id": job_id},
+        ).fetchone()
+        if current is None:
+            return None
+        connector_ref = str(current["connector_ref"])
+        if result is not None:
+            connector_ref = json.dumps(
+                {
+                    _REQUEST_KEY: json.loads(connector_ref),
+                    _RESULT_KEY: result,
+                }
+            )
         row = conn.execute(
             """
             UPDATE kb_ingest_jobs
-            SET status = 'done', updated_at = :now, finished_at = :now
+            SET status = 'done',
+                connector_ref = :connector_ref,
+                updated_at = :now,
+                finished_at = :now
             WHERE id = :id
             RETURNING *
             """,
-            {"id": job_id, "now": now},
+            {"id": job_id, "connector_ref": connector_ref, "now": now},
         ).fetchone()
     return _decode(row)
 

@@ -205,7 +205,7 @@ def test_execute_sync_enqueues_job_and_dry_run_stays_inline(client, monkeypatch)
     )
     monkeypatch.setattr(
         api,
-        "_drain_kb_ingest_job",
+        "_wait_for_kb_ingest_job",
         lambda job_id: (
             calls.__setitem__("drain", calls["drain"] + 1)
             or {

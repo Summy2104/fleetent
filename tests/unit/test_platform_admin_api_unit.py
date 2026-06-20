@@ -752,6 +752,7 @@ def test_kb_admin_route_handlers_cover_management_and_documents(
         "kb_engine_archive",
         lambda tenant_id, kb_id: kbs[kb_id].__setitem__("archived", True),
     )
+    monkeypatch.setattr(kb_admin_api, "_require_active_kb", lambda tenant_id, kb_id: None)
     monkeypatch.setattr(
         kb_admin_api,
         "kb_ingest_text",
@@ -777,7 +778,7 @@ def test_kb_admin_route_handlers_cover_management_and_documents(
     )
     monkeypatch.setattr(
         kb_admin_api,
-        "_drain_kb_ingest_job",
+        "_wait_for_kb_ingest_job",
         lambda job_id: (
             {"job_id": job_id, "document_id": "doc-1", "chunks": 2}
             if job_id == "job-import-1"
