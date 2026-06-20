@@ -17,21 +17,21 @@
 - KB 四分(core/retrieval/ingest/management)+ 读写边界护栏
 - 审批门统一(`approval_requests` 单一真相源 + `approval_router` 按 subject_type 分派;reflection 复用 permission_gate 外呼)
 - node 注册表 / desired-state API / supervisor / secret 注入
-- `node-config-file`(node 从 `$FLEETENT_HOME/node/.env` 加载)— 本轮在途
+- `node-config-file`(node 从 `$FLEETENT_HOME/node/.env` 加载)— ✅ 已落地
 
 ## 变更序列
 
-### Phase A — Ingest 队列 + worker(已 propose,可串行 apply)
+### Phase A — Ingest 队列 + worker(✅ 全部落地 2026-06-20)
 
-到单机目标态的核心。三个 change 一条链:
+到单机目标态的核心。三个 change 一条链,**已全部 apply 落地 main**:
 
 | change | 状态 | 内容 | 前置 |
 | --- | --- | --- | --- |
-| `kb-ingest-queue` | proposed | DB 背 `kb_ingest_jobs`(管理库 Alembic)+ 入队 + 原子 claim/done/retry;触发器停止控制面内联跑 ingest;worker 落地前留过渡 drain | — |
-| `kb-worker` | proposed | `fleetent kb-worker` 唯一消费者/单一写入方;移除过渡 drain;admin sync = 入队+轮询 | kb-ingest-queue |
-| `kb-worker-config-file` | proposed | `$FLEETENT_HOME/kb-worker/.env`(队列/底座/embedder/Vault 接入),平行 node-config-file;connector 配置不进 worker | kb-worker |
+| `kb-ingest-queue` | ✅ landed (`e1997237`) | DB 背 `kb_ingest_jobs`(管理库 Alembic,迁移 099)+ 入队 + 原子 claim/done/retry;触发器停止控制面内联跑 ingest;worker 落地前留过渡 drain | — |
+| `kb-worker` | ✅ landed (`f24ae882`) | `fleetent kb-worker` 唯一消费者/单一写入方;移除过渡 drain;admin sync = 入队+轮询(`_wait_for_kb_ingest_job`) | kb-ingest-queue |
+| `kb-worker-config-file` | ✅ landed (`b8db5197`) | `$FLEETENT_HOME/kb-worker/.env`(队列/底座/embedder/Vault 接入),平行 node-config-file;connector 配置不进 worker | kb-worker |
 
-要点:队列经 `db.py` 边界、worker 不 import platform;明文凭据不入队(只写 `cred_ref`);迁移版本号 apply 时取 head 续号。
+落地形态:多触发器 → DB 队列 → 唯一 kb-worker → ingest 核;队列经 `db.py` 边界、worker 不 import platform;明文凭据不入队(只写 `cred_ref`,运行时按 ref 解析留 Phase B)。**单机 ingest worker 链已齐**(target-architecture §12 的单机形态)。
 
 ### Phase B — 可插拔数据底座(blocked 占位,分布式才展开)
 
