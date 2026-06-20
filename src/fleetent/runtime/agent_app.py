@@ -274,6 +274,9 @@ async def _start_infra(
     (== home_dir, mirroring the MCP `agent_home` derivation below).
     """
     _init_agent_db_schema(data_dir, agent_id=agent.name, tenant_id=agent.tenant_id)
+    from fleetent.runtime.approval_resume import reconcile_expired_approvals
+
+    await reconcile_expired_approvals()
     from fleetent.integrations.sandbox import enablement as sandbox_enablement
 
     # Select the configured sandbox backend (agent.yaml > platform.yaml > docker) and
