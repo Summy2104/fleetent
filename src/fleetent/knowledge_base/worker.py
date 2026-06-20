@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from fleetent import kb_ingest_jobs
 from fleetent import knowledge_base as kb_runtime
@@ -27,6 +30,41 @@ from fleetent.knowledge_base.management.runtime import (
     is_active_knowledge_base as _kb_is_active_knowledge_base,
 )
 from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
+
+
+@dataclass(frozen=True)
+class KBWorkerConfig:
+    queue_database_url: str = ""
+    substrate_database_url: str = ""
+    embedding_backend: str = ""
+    embedding_endpoint: str = ""
+    embedding_model: str = ""
+    vault_addr: str = ""
+    vault_token: str = ""
+    home_dir: Path = Path()
+
+
+def load_config() -> KBWorkerConfig:
+    """Load kb-worker config from process env plus ``$FLEETENT_HOME/kb-worker/.env``."""
+    home_dir = Path(os.environ.get("FLEETENT_HOME") or Path.home() / ".fleetent").expanduser()
+    env_path = home_dir / "kb-worker" / ".env"
+    if env_path.exists():
+        from dotenv import load_dotenv
+
+        load_dotenv(env_path, override=False)
+    return KBWorkerConfig(
+        queue_database_url=os.environ.get("FLEETENT_KB_WORKER_QUEUE_DATABASE_URL", "").strip(),
+        substrate_database_url=os.environ.get(
+            "FLEETENT_KB_WORKER_SUBSTRATE_DATABASE_URL", ""
+        ).strip(),
+        embedding_backend=os.environ.get("FLEETENT_KB_WORKER_EMBEDDING_BACKEND", "").strip(),
+        embedding_endpoint=os.environ.get("FLEETENT_KB_WORKER_EMBEDDING_ENDPOINT", "").strip(),
+        embedding_model=os.environ.get("FLEETENT_KB_WORKER_EMBEDDING_MODEL", "").strip(),
+        vault_addr=os.environ.get("FLEETENT_KB_WORKER_VAULT_ADDR", "").strip(),
+        vault_token=os.environ.get("FLEETENT_KB_WORKER_VAULT_TOKEN", "").strip(),
+        home_dir=home_dir,
+    )
+
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="fleetent kb-worker")
@@ -211,5 +249,6 @@ def run(*, poll_interval: float) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
+    load_config()
     ns = _parse_args(argv or [])
     run(poll_interval=ns.poll_interval)
