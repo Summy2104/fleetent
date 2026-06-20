@@ -111,6 +111,8 @@ def reindex(request: ReindexRequest) -> ReindexSummary:
 - in-memory vector backend，支持 namespace 隔离、upsert 覆盖、delete、score 排序
 - 普通 SQLite persistent backend，使用 `vector_items` 表持久化 namespace-scoped vectors，检索时在 Python 内做 cosine similarity
 - Agent model policy 可为 embedding / rerank 指定 HTTP provider；`vector_store.*` 保留向量后端配置
+- 命名 Agent 若未配置 `models.routes.embedding`，boot 时回落 deterministic embedding 并记录 WARN；
+  chat-only agent 因此不会因缺 embedding route 而起不来，但 KB / 向量检索质量会退化，生产应显式配置
 - `vector_store.database_url` 可选配置；未配置时 SQLite backend 复用全局 `Settings.database_url`
 - 同步 reindex 边界支持 memory / knowledge-base 的 dry-run 和 rebuild；`rebuild` 先清空目标 namespace，再逐条 upsert 当前 source records，单条失败计入 failed 并继续后续 item
 - combined memory+KB embedding evaluation 使用 deterministic embedding 默认验证 memory 和 KB 都能通过 reindex 后检索；真实 HTTP embedding smoke 显式 opt-in
@@ -151,6 +153,8 @@ rerank provider 已接入 knowledge-base hybrid search 的显式 rerank 路径�
 - sqlite-vec / Qdrant 未实现：当前持久化后端是普通 SQLite + Python cosine，不提供 ANN 性能。
 - 真实 embedding 可通过 Agent `models.routes.embedding` 的 HTTP provider 接入，但当前默认仍是 deterministic，需部署自托管
   embedding endpoint 后显式配置。
+- 命名 Agent 缺 `embedding` route 时只做 deterministic 回落，不会校验或自动修复已声明 route 的误配；
+  route 存在但协议错误或缺 endpoint 仍会在 boot 时明确报配置错误。
 - rerank 已接入 knowledge-base hybrid search 的显式路径，并有 deterministic evaluation；真实 rerank
   provider 仍需显式 opt-in smoke 和效果评估。
 - reindex 当前是同步 public API，尚未提供后台 job runtime、操作历史或管理界面。
