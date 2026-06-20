@@ -11,13 +11,11 @@ from fleetent.platform.admin_cli import (
     maintenance,
     nodes,
     shared_memory,
-    tenancy,
     users,
 )
 
 _COMMAND_MODULES = (
     users,
-    tenancy,
     nodes,
     kb_connectors,
     init_config,
