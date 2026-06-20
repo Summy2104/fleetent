@@ -29,7 +29,6 @@ DecisionInput = Literal[
 
 
 DecisionState = Literal["approve", "reject", "expire", "apply"]
-ReviewRoute = Literal["im"]
 
 
 def _default_shared_memory_reviewer(
@@ -50,16 +49,6 @@ def set_shared_memory_reviewer(
     """Inject a resolver for shared-memory reviewer identity."""
     global _shared_memory_reviewer
     _shared_memory_reviewer = reviewer
-
-
-def resolve_review_channel(
-    proposal_id: str,
-    *,
-    actor_user_id: str | None = None,
-) -> ReviewRoute:
-    """Return the review channel for one proposal id."""
-    _kind, _proposal = _load_proposal_type(proposal_id)
-    return "im"
 
 
 def _decision(decision: DecisionInput) -> DecisionState:
