@@ -42,14 +42,12 @@
 > 取代了旧的 `knowledge-base-standalone-service` 占位:本轮把"KB 升格独立服务"重构成"可插拔底座 + kb-worker"(retrieval 留 agent、management 留 platform、store 进可插拔底座),不再需要 bespoke KB 服务。旧占位已移除。
 > 最重、纯重构;展开时可能按数据族(KB/memory/sessions/向量)细分多个 change。向量底座已部分可换 Qdrant,减一点量。
 
-### Phase C — 部署拓扑收敛(接近时再写)
+### Phase C — 部署拓扑收敛(✅ 已落地 2026-06-20)
 
 | change | 状态 | 内容 |
 | --- | --- | --- |
-| `node-launches-agent-single-host` | 未写 | 单机也经 node 拉起 agent(统一);production 不再直起。`fleetent agent run` 保留为 node 用的原语(也可 dev 直跑) |
-| `remove-standalone-deployment` | 未写 | 砍 standalone 部署、platform 始终在场;**改 AGENTS.md「agent 必须能在无 platform 环境运行」那条不可逾越规则措辞**(解耦契约部分不变);更新 install/docs |
-
-> ⚠️ AGENTS.md 那条不可逾越规则的措辞**等 `remove-standalone-deployment` 真落地时才改**——规则随代码改,不提前(现在代码仍强制 standalone 可运行)。
+| `node-launches-agent-single-host` | ✅ landed | 单机也经 node 拉起 agent(统一);production 不再直起。`fleetent agent run` 保留为 node 用的原语(也可 dev 直跑) |
+| `remove-standalone-deployment` | ✅ landed | 砍 standalone 部署、platform 始终在场;已改 AGENTS.md「agent 必须能在无 platform 环境运行」那条措辞(解耦契约部分不变);install/docs 已同步 |
 
 ## 两条路径
 

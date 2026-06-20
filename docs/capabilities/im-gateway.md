@@ -28,7 +28,7 @@
 
 - ✅ **IM 用户身份映射**：
   - managed 模式：platform 在 startup 注入 resolver，把 `(platform, platform_user_id)` 归并到内部 `users.id`；首次见到自动创建 `users` + `im_users` 绑定，同一 `(platform, platform_user_id)` 跨 connector 复用同一 internal user
-  - standalone 模式：不注入 resolver，恒等透传渠道原生 id；行为与受管模式显式区分
+  - 直接 `fleetent agent run` 进程：不注入 resolver，恒等透传渠道原生 id；保留该运行时解耦事实，但它不再构成受支持的 standalone 部署模式
 
 - ✅ **Allowlist 检查**：收到消息时校验用户是否已允许
   - 封禁通过 `users.status == "blocked"` 强制（`allowed` 字段已移除）；访问准入通过 `user_agents` 绑定关系控制
@@ -148,8 +148,8 @@ im_users (
 - When：用户发送任意消息
 - Then：gateway 解析到内部 `users.id`，自动创建 `im_users` 绑定，消息继续按 channel allowlist 规则处理
 
-**场景 1b：新用户首次发消息（standalone）**
-- Given：一个 standalone agent 上从未发过消息的 Telegram 用户
+**场景 1b：新用户首次发消息（直接 agent run）**
+- Given：一个直接 `fleetent agent run` 进程上从未发过消息的 Telegram 用户
 - When：用户发送任意消息
 - Then：`user_id` 直接等于渠道原生 id，不读取 platform 身份表
 

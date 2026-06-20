@@ -1,9 +1,10 @@
 """CLI entry point.
 
 - ``fleetent agent init <agent-id> [--home PATH] [--force]``: scaffold a runnable agent
-  home (``agent.yaml`` + ``.env``) from a built-in template; no platform/DB.
+  home (``agent.yaml`` + ``.env``) from a built-in template for node-launched agents
+  and local dev/test; no platform/DB.
 - ``fleetent agent run <agent-id> [--port N] [--home PATH]``: run one agent as a
-  self-contained foreground process (loop + bound IM, optional HTTP/ws).
+  foreground process (loop + bound IM, optional HTTP/ws) used by node and local dev/test.
 - ``fleetent agent restart <agent-id> [--port N] [--home PATH]``: gracefully stop the
   running agent (SIGUSR1 drain → SIGTERM → SIGKILL) then boot a fresh one.
 - ``fleetent "<prompt>"`` (or piped stdin): one-shot run as the deployed home agent.

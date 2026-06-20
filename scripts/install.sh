@@ -2,12 +2,12 @@
 # ============================================================================
 # fleetent one-click installer (developers / single machine)
 # ============================================================================
-# Installs BOTH the platform control plane and a default standalone agent in
+# Installs BOTH the platform control plane and agent runtime tooling in
 # editable mode — suitable for local development where the source tree must
 # stay as the live import path.
 #
 # For production deployment use the role-specific scripts instead:
-#   scripts/install-agent.sh <agent-id>   — standalone agent only
+#   scripts/install-agent.sh              — managed agent host (runtime + node)
 #   scripts/install-platform.sh           — platform control plane only
 #
 # Usage:
@@ -46,7 +46,7 @@ Usage:
   scripts/install.sh [options]
 
 Options:
-  --agent-only        Install only the standalone agent runtime
+  --agent-only        Install only the agent runtime tooling
   --platform-only     Install only the platform control plane
   --dir PATH          Override FLEETENT_HOME (default ~/.fleetent)
   --help              Show this help and exit
