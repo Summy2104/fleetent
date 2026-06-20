@@ -62,6 +62,10 @@ agent 的"定义谁拥有"治理——**这条是活的**（区别于 skill 自�
 
 ## 6. node 编排（分布式，retire-inmemory-controller 之后）
 
+单机部署与分布式部署在编排机制上完全一致：都由 node 轮询 desired-state 并拉起
+`fleetent agent run`。差别只在于单机把 platform、node、agent 放在同一台机器上，
+此时 node 通过 localhost 与 platform 通信。
+
 kubelet 式 **desired / reported** 模型，平台无状态、node 自治：
 
 ```mermaid

@@ -221,7 +221,7 @@ Principal { user_id, tenant_id }
 ```
 
 - **managed 模式**：IM edge 在进入核前，经 platform 在 `server.py` lifespan 注入的 resolver，把 `(platform, platform_user_id)` 归并成内部 `users.id`；首次见到自动建 `users` + `im_users` 绑定，tenant 不匹配直接拒绝并记诊断日志。该写入动作属于 platform-owned resolver，不构成 agent→platform 反向依赖。
-- **standalone 模式**：不注入 resolver，`im_gateway.access.resolve_identity()` 恒等透传渠道原生 id；agent 继续完全脱离 platform 运行。
+- **direct-run 模式**：不注入 resolver，`im_gateway.access.resolve_identity()` 恒等透传渠道原生 id；这保留了运行时解耦事实，但它是 dev/test 或最小运行路径，不再是受支持的 standalone 部署模式。
 
 ### 6.5 审批人解析(归属 team/主体,materialize 进配置)
 
@@ -235,7 +235,7 @@ agent.team_id 的审批人  ──无──►  tenant(主体) 的审批人  ─
 
 ### 6.6 端口与适配器(实现按部署"插")
 
-- **单机 agent**:最小本地实现(env / static token,如现 `_validate_tui_token`)——无 platform。
+- **直接 `fleetent agent run` 进程**：最小本地实现(env / static token,如现 `_validate_tui_token`)；保留给 node 原语与 dev/test，不构成受支持部署拓扑。
 - **platform**:完整实现(api_keys 表、角色、吊销)。
 - **企业/外部登录**:**OIDC 适配器,首发 Google**;同一适配器覆盖 Okta / Azure AD / Keycloak;严格内网客户改挂内网 IdP(Keycloak / 客户 AD),**端口不变**。
 
@@ -245,7 +245,7 @@ agent.team_id 的审批人  ──无──►  tenant(主体) 的审批人  ─
 | 渠道担保(IM 平台用户 id) | IM 终端用户 | im_users 映射 → user |
 | OIDC `id_token`(将来) | 人(企业登录) | OIDC 适配器验签 →(发 session) |
 
-**修掉 #1**:核只依赖 `Principal` 类型 + 基座 `Identity` 端口,**永不** import platform 的 user 管理——standalone agent 鉴权不再够进 platform,泄漏从根消失(不是打补丁)。
+**修掉 #1**:核只依赖 `Principal` 类型 + 基座 `Identity` 端口,**永不** import platform 的 user 管理——direct-run 进程的鉴权不再够进 platform,泄漏从根消失(不是打补丁)。
 
 > 主权注记:Google OIDC 登录流需联通 `accounts.google.com`、身份/邮箱经过 Google。当前 pilot 客户**接受外部登录**,故首发 Google;气隙 / 严格内网客户改挂内网 IdP。
 
@@ -349,14 +349,13 @@ platform 经"共享 store 读函数"读 = 依赖 agent 侧库的**读 schema**�
 
 ---
 
-## 12. 目标方向：KB / memory / 部署拓扑（2026-06-20 讨论定案，**未实现**）
+## 12. 目标方向：KB / memory / 部署拓扑（2026-06-20 定案）
 
 > 仅方向，尚未落地；实现需后续 OpenSpec change（建议顺序：kb-worker 配置文件化 → ingest 队列+worker → 底座可插拔后端）。
 
 **核心不变量**：每个组件单机/分布式**只差物理摆放,不差架构**——agent 永远由 node 拉起、ingest 永远是 worker、数据永远走 substrate；单机/分布式只差 **co-location + 后端选择**（队列后端 DB↔broker、底座后端 本地文件↔网络 DB，均可插拔，同一套接口）。
 
-**部署只两种,砍 standalone**：单机 / 分布式，**platform 始终在场**。standalone（无 platform）**部署模式**退役（消冗余/一致性）；但 **agent→platform 解耦契约保留**（agent MUST NOT import platform，护栏强制）。`fleetent agent run` 保留为 **node 拉起 agent 的原语**（也可 dev 直接跑，非部署模式）。
-> ⚠️ 「不可逾越的规则」里"agent 必须能在无 platform 环境独立运行"那条的**措辞改动,等 standalone-removal change 真落地时同步改**（规则随代码改，不提前）；解耦契约部分不变。
+**部署只两种,砍 standalone**：单机 / 分布式，**platform 始终在场**。单机 = platform + node + agent 同机，node 经 localhost 拉起 agent；分布式 = platform 与 agent host 分离，node 经网络拉起本机 agent。standalone（无 platform）**部署模式**已退役（消冗余/一致性）；但 **agent→platform 解耦契约保留**（agent MUST NOT import platform，护栏强制）。`fleetent agent run` 保留为 **node 拉起 agent 的原语**（也可 dev 直接跑，非部署模式）。
 
 **统一可插拔数据底座**：memory / KB / sessions / 向量 都是 agent 侧 per-tenant 数据，共用一个底座；单机=本地文件，分布式=网络托管 DB（Postgres/Qdrant，self-hostable）。**memory 与 KB 不各做独立服务**——是同一个"底座后端可插拔"的决定。唯一不对称：KB 多一个 **ingest 计算管道**（重 embedding），分布式可拆独立 worker；memory 的写轻、内联。
 
