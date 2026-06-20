@@ -346,3 +346,26 @@ platform 经"共享 store 读函数"读 = 依赖 agent 侧库的**读 schema**�
 
 **open questions**：
 - 模块迁移顺序：先拆巨型文件（正交、低风险）还是先立面边界（结构优先）？（DB 层执行顺序已随持久层 #3 完成，与此正交。）
+
+---
+
+## 12. 目标方向：KB / memory / 部署拓扑（2026-06-20 讨论定案，**未实现**）
+
+> 仅方向，尚未落地；实现需后续 OpenSpec change（建议顺序：kb-worker 配置文件化 → ingest 队列+worker → 底座可插拔后端）。
+
+**核心不变量**：每个组件单机/分布式**只差物理摆放,不差架构**——agent 永远由 node 拉起、ingest 永远是 worker、数据永远走 substrate；单机/分布式只差 **co-location + 后端选择**（队列后端 DB↔broker、底座后端 本地文件↔网络 DB，均可插拔，同一套接口）。
+
+**部署只两种,砍 standalone**：单机 / 分布式，**platform 始终在场**。standalone（无 platform）**部署模式**退役（消冗余/一致性）；但 **agent→platform 解耦契约保留**（agent MUST NOT import platform，护栏强制）。`fleetent agent run` 保留为 **node 拉起 agent 的原语**（也可 dev 直接跑，非部署模式）。
+> ⚠️ 「不可逾越的规则」里"agent 必须能在无 platform 环境独立运行"那条的**措辞改动,等 standalone-removal change 真落地时同步改**（规则随代码改，不提前）；解耦契约部分不变。
+
+**统一可插拔数据底座**：memory / KB / sessions / 向量 都是 agent 侧 per-tenant 数据，共用一个底座；单机=本地文件，分布式=网络托管 DB（Postgres/Qdrant，self-hostable）。**memory 与 KB 不各做独立服务**——是同一个"底座后端可插拔"的决定。唯一不对称：KB 多一个 **ingest 计算管道**（重 embedding），分布式可拆独立 worker；memory 的写轻、内联。
+
+**KB = 派生视图（非真相源）**：没人直接写 KB 内容。人改**数据源**、AI 只读 KB + 产 reflection report，问题靠"改源→重摄"修；KB 是数据源经 ingest 的纯派生、可重摄。对比 memory=真相源（agent 经审批门直写）。KB **不走 agent 审批门**（共享派生资源，remediation 归平台/人）。
+
+**Ingest = 一个核 + 多触发器 + DB 队列 + 唯一 worker**：核 `knowledge_base.ingest` 一份；触发器（上传/webhook/cron/admin sync）**全只入队**；`fleetent kb-worker` 是**唯一消费者/唯一写入方**（KB 单一写入方，保串行/重试/隔离）；admin sync = 入队+等完成；直接调核仅测试。**单机也拆 worker**（为消模式/隔离，非扩容），前提 DB 背队列（零 broker）+ 同 binary。
+
+**connector 配置归属（三层，job 是唯一桥）**：
+- **kb-worker 自身配置**（队列/底座/embedder/Vault 接入）= 部署级静态，放专属配置文件（平行 node-config-file）。
+- **connector 注册表**（源地址/参数/凭据**引用**）= Platform 管理库，单一真相源；**connector 配置不进 worker 配置**。
+- **connector 凭据** = Vault。platform 入队时把"非密 connector 配置 + 凭据 ref"塞进 job；worker 用自身 Vault 接入**运行时按 ref 解析**真凭据（secret 不在队列 at-rest，worker 不 import platform）。
+- 与 node 差异：node 由 platform 注入解析好的密钥（agent 无 Vault 权）；kb-worker 自持 Vault 接入按 ref 取。
