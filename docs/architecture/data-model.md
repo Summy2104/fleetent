@@ -135,7 +135,7 @@ graph TD
 |---|---|---|---|
 | `agents` | `id`=不可变身份 · `name`=可读标签 · `active_version_id`(裸 INTEGER 无 FK) · `supports_dm`/`supports_groups`；无 status 列 | — | agent 定义；管理逻辑 → [agent-management](../capabilities/agent-management.md) |
 | `agent_versions` | `agent_id` | → agents (CASCADE) | 不可变版本快照 |
-| `agent_admin_state` | PK `agent_id`；`status`/`provenance`/`drift`/`archived_at` | → agents (CASCADE) | 管理态（生命周期+自管+drift）→ [agent-management §2](../capabilities/agent-management.md) |
+| `agent_admin_state` | PK `agent_id`；`status`/`provenance`/`drift`/`archived_at`/`is_default`（默认 agent 标记，迁移 098；materialize→`bindings.default`，每 tenant 至多一个） | → agents (CASCADE) | 管理态（生命周期+自管+drift+默认）→ [agent-management §2](../capabilities/agent-management.md) |
 | `user_agents` | `(user_id, agent_id)` | → agents (CASCADE) | 用户↔agent 准入；materialize → `im.allow_users`（admin 维护）|
 | `agent_im_groups` | `(agent_id, platform, group_id)` | → agents (CASCADE) | IM 群白名单；materialize → `im.<platform>.allow_groups` |
 | `agent_kbs` | `agent_id` · `created_by` | → agents (CASCADE) | agent↔KB 绑定真相源；`kb_id` 软引用本 tenant `kb.db` |
