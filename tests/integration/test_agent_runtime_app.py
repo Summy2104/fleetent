@@ -1,11 +1,15 @@
 """Standalone agent runtime: boot one agent home, bind IM, optional HTTP — no platform."""
 
+import datetime
+from unittest.mock import AsyncMock
+
 import yaml
 from fastapi.testclient import TestClient
 
 import fleetent.runtime.loop as loop
 import fleetent.user_store as us
 from fleetent import agent_config
+from fleetent.governance import approval_store
 from fleetent.runtime import agent_app
 from tests.integration._migration_template import apply_migrations
 
@@ -188,3 +192,32 @@ async def test_boot_safe_when_home_has_no_skills_dir(tmp_path, monkeypatch):
     await agent_app.boot("support", home=home, supervisor=sup, with_infra=False)
 
     assert "crm-ops" not in skill_registry._index
+
+
+async def test_boot_reconciles_expired_approvals_in_agent_state(tmp_path, monkeypatch):
+    from fleetent.integrations.sandbox import enablement as sandbox_enablement
+    from fleetent.session import manager as session_mgr
+
+    home = _write_home(tmp_path)
+    agent_app._redirect_agent_data_paths(home)
+    agent_app._init_agent_db_schema(home / "data", agent_id="support", tenant_id="default")
+    approval_store.insert_approval(
+        id="expired",
+        session_id="slack:dm:U_REQ:1.1",
+        requester_user_id="U_REQ",
+        risk_level="medium",
+        tool_name="send_im_message",
+        tool_args="{}",
+        created_at=(datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=48)).isoformat(),
+    )
+    monkeypatch.setattr(
+        sandbox_enablement,
+        "get_effective_mode",
+        AsyncMock(return_value=sandbox_enablement.Mode.OFF),
+    )
+    monkeypatch.setattr(session_mgr, "start_session_maintenance", lambda: None)
+
+    sup = _FakeSupervisor()
+    await agent_app.boot("support", home=home, supervisor=sup, with_infra=True, start_im=False)
+
+    assert approval_store.get_approval("expired")["status"] == "timeout"

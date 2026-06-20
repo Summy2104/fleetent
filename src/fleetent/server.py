@@ -159,11 +159,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # AR7: load enabled plugins once at startup (same lifecycle as scan_skills /
     # mcp register_all). A missing plugins/ dir or a bad plugin never aborts boot.
     load_plugins()
-    # approval-suspend-resume: reconcile only EXPIRED pending approvals; non-expired
-    # ones survive the restart and stay resolvable (no blanket timeout anymore).
-    from fleetent.runtime.approval_resume import reconcile_expired_approvals
-
-    await reconcile_expired_approvals()
     try:
         settings = Settings()
     except Exception as exc:
