@@ -766,6 +766,25 @@ def test_kb_admin_route_handlers_cover_management_and_documents(
         lambda tenant_id, kb_id, path: {"scanned": 3, "ingested": 2, "skipped": 1, "failed": 0},
     )
     monkeypatch.setattr(
+        kb_admin_api,
+        "_enqueue_import_job",
+        lambda kb_id, body: {"id": "job-import-1", "kb_id": kb_id, "tenant_id": body.tenant_id},
+    )
+    monkeypatch.setattr(
+        kb_admin_api,
+        "_enqueue_sync_directory_job",
+        lambda kb_id, body: {"id": "job-sync-1", "kb_id": kb_id, "tenant_id": body.tenant_id},
+    )
+    monkeypatch.setattr(
+        kb_admin_api,
+        "_drain_kb_ingest_job",
+        lambda job_id: (
+            {"job_id": job_id, "document_id": "doc-1", "chunks": 2}
+            if job_id == "job-import-1"
+            else {"job_id": job_id, "scanned": 3, "ingested": 2, "skipped": 1, "failed": 0}
+        ),
+    )
+    monkeypatch.setattr(
         kb_admin_api, "kb_list_documents", lambda tenant_id, kb_id: [{"document_id": "doc-1"}]
     )
     monkeypatch.setattr(

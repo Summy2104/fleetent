@@ -143,6 +143,30 @@ def test_head_schema_contains_blocked_registrations_with_expected_columns(tmp_pa
     assert cols >= {"email", "reason", "batch_id", "created_at"}
 
 
+def test_head_schema_contains_kb_ingest_jobs_table(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(kb_ingest_jobs)")}
+    conn.close()
+
+    assert "kb_ingest_jobs" in tables
+    assert cols >= {
+        "id",
+        "tenant_id",
+        "kb_id",
+        "connector_ref",
+        "cred_ref",
+        "status",
+        "attempts",
+        "created_at",
+        "updated_at",
+        "claimed_at",
+        "finished_at",
+    }
+
+
 def test_head_onboards_existing_blocked_registrations_table_without_data_loss(tmp_path):
     db = tmp_path / "test.db"
     _upgrade_to(db, "077")

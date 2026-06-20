@@ -8,7 +8,7 @@ KB ingest 当前在 platform 进程内**同步内联**跑(`kb_admin_api` 里 `as
 
 - **新增 `kb_ingest_jobs` 队列表**(管理库,Alembic;与 `scheduled_tasks` 同属编排状态):字段含 `id`、`tenant_id`、`kb_id`、`connector_ref`(非密)、`cred_ref`(Vault 引用,非明文)、`status`(pending/claimed/done/failed)、`attempts`、时间戳。
 - **入队 API**:platform 侧提供 enqueue 接口;入队时读 connector 注册表,把**非密 connector 配置 + 凭据 ref**写入 job(不写明文凭据)。
-- **触发器改造**:`kb_admin_api` 的 sync/导入端点由"同步 `asyncio.run` 跑 ingest"改为"入队并返回 job id";cron / webhook 触发同样改为入队。
+- **触发器改造**:`kb_admin_api` 的 sync/导入端点由"同步 `asyncio.run` 跑 ingest"改为"先入队再消费"；当前代码树中**没有现成的 KB cron / webhook 执行入口**，后续新增这类触发器时复用同一 enqueue seam。
 - **claim/done/retry 语义**:队列提供原子 claim(单消费者取一条置 claimed)、done、failed+retry(attempts 上限),保证串行/可重试。
 - **过渡消费**:在 `kb-worker` 落地前,提供一个最小的同进程 drain(或保留同步路径作 admin sync 的"入队+等完成"),确保功能不回退。
 

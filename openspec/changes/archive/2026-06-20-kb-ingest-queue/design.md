@@ -25,7 +25,7 @@ claim = 单条 `UPDATE ... SET status='claimed', claimed_at=... WHERE id=(SELECT
 
 ### D4:过渡消费(worker 落地前不回退功能)
 
-`kb-worker` 未落地前,提供最小过渡:admin sync 端点入队后**同进程内联 drain 这一条 job 并等完成**(保持"入队+等完成"语义,功能不回退);cron/webhook 入队后由同一过渡 drain 处理。worker change 落地后,过渡 drain 移除、改由 worker 统一消费。
+`kb-worker` 未落地前,提供最小过渡:admin sync / 文档导入 / connector execute sync 入队后**同进程内联 drain 这一条 job 并等完成**(保持功能不回退)。当前代码树中没有现成的 KB cron/webhook 执行入口；后续若新增,复用同一 drain seam,待 `kb-worker` 落地后统一移除过渡 drain。
 
 ## Risks / Trade-offs
 

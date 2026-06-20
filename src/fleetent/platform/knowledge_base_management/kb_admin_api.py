@@ -15,6 +15,7 @@ Auth mirrors user_admin_api: reads allow viewer+admin, writes require admin.
 """
 
 import asyncio
+import json
 import re
 from contextlib import contextmanager
 from pathlib import Path
@@ -24,7 +25,7 @@ import yaml
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
-from fleetent import audit_log, auth, user_store
+from fleetent import audit_log, auth, kb_ingest_jobs, user_store
 from fleetent import knowledge_base as kb_runtime
 from fleetent.config import KnowledgeBaseSettings, Settings
 from fleetent.db import SQLiteDatabase, create_database
@@ -409,6 +410,95 @@ def _require_active_kb(tenant_id: str, kb_id: str) -> None:
         raise HTTPException(status_code=404, detail="kb not found or archived")
 
 
+def _enqueue_import_job(kb_id: str, body: ImportBody) -> dict[str, Any]:
+    return kb_ingest_jobs.enqueue_job(
+        job_type="import_document",
+        tenant_id=body.tenant_id,
+        kb_id=kb_id,
+        connector_ref={
+            "source": body.source,
+            "content": body.content,
+            "document_format": body.document_format,
+        },
+    )
+
+
+def _enqueue_sync_directory_job(kb_id: str, body: SyncBody) -> dict[str, Any]:
+    return kb_ingest_jobs.enqueue_job(
+        job_type="sync_directory",
+        tenant_id=body.tenant_id,
+        kb_id=kb_id,
+        connector_ref={"path": body.path},
+    )
+
+
+def _enqueue_connector_sync_job(connector_id: str) -> dict[str, Any]:
+    connector = kb_connector_store.get_connector(connector_id)
+    if connector is None:
+        raise HTTPException(status_code=404, detail="connector not found")
+    return kb_ingest_jobs.enqueue_connector_job(connector)
+
+
+def _run_kb_ingest_job(job: dict[str, Any]) -> dict[str, Any]:
+    payload = json.loads(str(job["connector_ref"]))
+    job_type = str(job["job_type"])
+    if job_type == "import_document":
+        return kb_ingest_text(
+            str(job["tenant_id"]),
+            str(job["kb_id"]),
+            str(payload["source"]),
+            str(payload["content"]),
+            str(payload["document_format"]),
+        )
+    if job_type == "sync_directory":
+        return kb_sync_directory(
+            str(job["tenant_id"]),
+            str(job["kb_id"]),
+            str(payload["path"]),
+        )
+    if job_type == "connector_sync":
+        connector_id = str(payload["connector_id"])
+        result = asyncio.run(
+            knowledge_base.run_connector_sync(
+                connector_id,
+                settings=_connector_settings(),
+                dry_run=False,
+            )
+        )
+        return {
+            "connector_id": result.connector_id,
+            "status": result.status,
+            "summary": result.summary,
+            "error": result.error,
+        }
+    raise HTTPException(status_code=422, detail=f"unknown kb ingest job type: {job_type}")
+
+
+def _drain_kb_ingest_job(job_id: str) -> dict[str, Any]:
+    # Transitional path for kb-worker rollout: execute the enqueued job inline for now.
+    while True:
+        claimed = kb_ingest_jobs.claim_job(job_id)
+        if claimed is None:
+            existing = kb_ingest_jobs.get_job(job_id)
+            if existing is None:
+                raise HTTPException(status_code=404, detail="kb ingest job not found")
+            raise HTTPException(status_code=409, detail=f"kb ingest job is {existing['status']}")
+        try:
+            result = _run_kb_ingest_job(claimed)
+        except HTTPException as exc:
+            failed = kb_ingest_jobs.mark_failed(job_id, str(exc.detail))
+            if failed is not None and failed["status"] == "pending":
+                continue
+            raise
+        except Exception as exc:
+            failed = kb_ingest_jobs.mark_failed(job_id, str(exc))
+            if failed is not None and failed["status"] == "pending":
+                continue
+            raise HTTPException(status_code=500, detail="kb ingest job failed") from exc
+        kb_ingest_jobs.mark_done(job_id)
+        return {"job_id": job_id, **result}
+
+
 def _chunk_to_search_result(chunk: KnowledgeChunk) -> dict[str, Any]:
     return {
         "chunk_id": chunk.id,
@@ -545,7 +635,8 @@ def import_document(
     kb_id: str, body: ImportBody, authorization: str | None = Header(None)
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
-    result = kb_ingest_text(body.tenant_id, kb_id, body.source, body.content, body.document_format)
+    job = _enqueue_import_job(kb_id, body)
+    result = _drain_kb_ingest_job(str(job["id"]))
     audit_log.write_audit(
         user.id,
         "doc_import",
@@ -565,7 +656,8 @@ def sync_directory(
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
     _require_confirm(x_confirm)  # full resync is high-risk
-    result = kb_sync_directory(body.tenant_id, kb_id, body.path)
+    job = _enqueue_sync_directory_job(kb_id, body)
+    result = _drain_kb_ingest_job(str(job["id"]))
     audit_log.write_audit(user.id, "doc_sync", "kb", kb_id, detail={"path": body.path})
     return result
 
@@ -873,22 +965,29 @@ async def sync_kb_connector(
         raise HTTPException(status_code=404, detail="connector not found")
     if not body.dry_run:
         _require_confirm(x_confirm)  # real ingestion is high-risk
-    result = await knowledge_base.run_connector_sync(
-        connector_id, settings=_connector_settings(), dry_run=body.dry_run
-    )
+    if body.dry_run:
+        result = await knowledge_base.run_connector_sync(
+            connector_id, settings=_connector_settings(), dry_run=True
+        )
+        response = {
+            "connector_id": result.connector_id,
+            "status": result.status,
+            "summary": result.summary,
+            "error": result.error,
+        }
+    else:
+        job = _enqueue_connector_sync_job(connector_id)
+        response = _drain_kb_ingest_job(str(job["id"]))
     audit_log.write_audit(
         user.id,
         "kb_connector.sync",
         "kb_connector",
         connector_id,
-        detail={"dry_run": body.dry_run, "status": result.status},
+        detail={"dry_run": body.dry_run, "status": response["status"]},
     )
-    return {
-        "connector_id": result.connector_id,
-        "status": result.status,
-        "summary": result.summary,
-        "error": result.error,
-    }
+    if body.dry_run:
+        return response
+    return {"connector_id": connector_id, **response}
 
 
 @router.post("/{kb_id}/extract-entities", status_code=202)

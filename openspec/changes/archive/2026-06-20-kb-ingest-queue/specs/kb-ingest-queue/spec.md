@@ -6,7 +6,7 @@
 
 #### Scenario: 入队产生 pending job
 
-- **WHEN** 一个 ingest 触发(上传/sync/cron/webhook)发生
+- **WHEN** 一个 ingest 触发(上传/sync/connector execute sync)发生
 - **THEN** 系统插入一条 `status=pending` 的 `kb_ingest_jobs` 记录,携带 `connector_ref` 与 `cred_ref`
 
 #### Scenario: 明文凭据不入队
@@ -30,14 +30,14 @@
 
 ### Requirement: 触发器只入队,不在控制面同步跑 ingest
 
-所有 ingest 触发器(上传/导入、connector sync、cron、webhook)SHALL 改为**入队并返回 job id**,SHALL NOT 在控制面请求线程内同步执行 parse/chunk/embed。`kb_admin_api` 的 sync/导入端点 SHALL 返回 job id(或对 admin sync 提供"入队+等完成"语义)。
+所有当前已存在的 ingest 触发器(上传/导入、connector sync)SHALL 改为**先入队再消费**,SHALL NOT 直接在旧的控制面 execute 路径里同步 `asyncio.run` 跑完整 ingest。`kb_admin_api` 的 sync/导入端点 SHALL 返回 job id(或对 admin sync 提供"入队+等完成"语义)。
 
 #### Scenario: sync 端点不再同步阻塞
 
 - **WHEN** admin 触发 connector sync
 - **THEN** 端点入队 job 并立即返回 job id(或入队+等该 job 完成),不在请求线程内跑完整 ingest
 
-#### Scenario: cron / webhook 触发入队
+#### Scenario: 未来新增 trigger 复用同一入队 seam
 
-- **WHEN** cron 或 webhook 触发某 KB 的摄取
-- **THEN** 系统入队 job,而非同步跑 ingest
+- **WHEN** 后续新增 cron 或 webhook 形式的 KB ingest 触发器
+- **THEN** 它们 SHALL 复用同一 `kb_ingest_jobs` enqueue seam,而非另起同步执行路径

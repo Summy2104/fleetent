@@ -182,6 +182,68 @@ def test_real_sync_requires_confirm(client, monkeypatch):
     assert r.status_code == 200 and r.json()["status"] == "synced"
 
 
+def test_execute_sync_enqueues_job_and_dry_run_stays_inline(client, monkeypatch):
+    token = _session_for("admin")
+    client.post("/admin/kb/connectors", headers=_hdr(token), json=_GDRIVE)
+
+    calls = {"dry_run": 0, "enqueue": 0, "drain": 0}
+
+    async def _fake_sync(connector_id, *, settings=None, dry_run=True, **kw):
+        calls["dry_run"] += 1
+        return SimpleNamespace(
+            connector_id=connector_id,
+            status="dry_run_ok",
+            summary={"planned": 2},
+            error=None,
+        )
+
+    monkeypatch.setattr(api.knowledge_base, "run_connector_sync", _fake_sync)
+    monkeypatch.setattr(
+        api.kb_ingest_jobs,
+        "enqueue_connector_job",
+        lambda connector: calls.__setitem__("enqueue", calls["enqueue"] + 1) or {"id": "job-1"},
+    )
+    monkeypatch.setattr(
+        api,
+        "_drain_kb_ingest_job",
+        lambda job_id: (
+            calls.__setitem__("drain", calls["drain"] + 1)
+            or {
+                "job_id": job_id,
+                "status": "sync_succeeded",
+                "summary": {"ingested": 3},
+                "error": None,
+            }
+        ),
+    )
+
+    execute = client.post(
+        "/admin/kb/connectors/pilot-drive/sync",
+        headers=_hdr(token, confirm=True),
+        json={"dry_run": False},
+    )
+    assert execute.status_code == 200
+    assert execute.json() == {
+        "connector_id": "pilot-drive",
+        "job_id": "job-1",
+        "status": "sync_succeeded",
+        "summary": {"ingested": 3},
+        "error": None,
+    }
+
+    dry_run = client.post(
+        "/admin/kb/connectors/pilot-drive/sync", headers=_hdr(token), json={"dry_run": True}
+    )
+    assert dry_run.status_code == 200
+    assert dry_run.json() == {
+        "connector_id": "pilot-drive",
+        "status": "dry_run_ok",
+        "summary": {"planned": 2},
+        "error": None,
+    }
+    assert calls == {"dry_run": 1, "enqueue": 1, "drain": 1}
+
+
 def test_custom_yaml_roundtrip_and_not_in_ingestion_model(client):
     token = _session_for("admin")
     # author custom as YAML; stored as JSON, returned with a custom_yaml for display

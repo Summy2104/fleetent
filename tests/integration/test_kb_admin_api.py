@@ -315,6 +315,46 @@ def test_import_document_passes_through(client, monkeypatch):  # 场景 103
     assert seen == {"t": "default", "k": "sales", "source": "paste", "fmt": "markdown"}
 
 
+def test_import_document_enqueues_and_waits_for_result(client, monkeypatch):
+    monkeypatch.setattr(
+        api,
+        "kb_ingest_text",
+        lambda *args, **kwargs: pytest.fail("execute import must enqueue instead of direct ingest"),
+    )
+    monkeypatch.setattr(
+        api,
+        "_enqueue_import_job",
+        lambda kb_id, body: {"id": "job-import-1", "kb_id": kb_id, "tenant_id": body.tenant_id},
+    )
+    monkeypatch.setattr(
+        api,
+        "_drain_kb_ingest_job",
+        lambda job_id: {
+            "job_id": job_id,
+            "document_id": "d1",
+            "chunks": 3,
+            "filename": "paste.md",
+            "source": "paste.md",
+            "wired": True,
+        },
+    )
+    token, _ = _session_for("admin")
+    r = client.post(
+        "/admin/kb/sales/documents",
+        headers=_hdr(token),
+        json={"source": "paste.md", "content": "# hello", "document_format": "markdown"},
+    )
+    assert r.status_code == 200
+    assert r.json() == {
+        "job_id": "job-import-1",
+        "document_id": "d1",
+        "chunks": 3,
+        "filename": "paste.md",
+        "source": "paste.md",
+        "wired": True,
+    }
+
+
 def test_import_viewer_forbidden(client):
     token, _ = _session_for("viewer")
     r = client.post(
@@ -566,14 +606,26 @@ def test_kbs_for_agent_filters_archived(client, monkeypatch):
 
 
 def test_sync_directory_returns_summary(client, monkeypatch):
-    seen = {}
     monkeypatch.setattr(
         api,
         "kb_sync_directory",
-        lambda t, k, path: (
-            seen.update(t=t, k=k, path=path)
-            or {"scanned": 10, "ingested": 7, "skipped": 2, "failed": 1}
-        ),
+        lambda *args, **kwargs: pytest.fail("execute sync must enqueue instead of direct sync"),
+    )
+    monkeypatch.setattr(
+        api,
+        "_enqueue_sync_directory_job",
+        lambda kb_id, body: {"id": "job-sync-1", "kb_id": kb_id, "tenant_id": body.tenant_id},
+    )
+    monkeypatch.setattr(
+        api,
+        "_drain_kb_ingest_job",
+        lambda job_id: {
+            "job_id": job_id,
+            "scanned": 10,
+            "ingested": 7,
+            "skipped": 2,
+            "failed": 1,
+        },
     )
     token, _ = _session_for("admin")
     r = client.post(
@@ -582,8 +634,13 @@ def test_sync_directory_returns_summary(client, monkeypatch):
         json={"path": "/data/docs"},
     )
     assert r.status_code == 200
-    assert r.json() == {"scanned": 10, "ingested": 7, "skipped": 2, "failed": 1}
-    assert seen == {"t": "default", "k": "sales", "path": "/data/docs"}
+    assert r.json() == {
+        "job_id": "job-sync-1",
+        "scanned": 10,
+        "ingested": 7,
+        "skipped": 2,
+        "failed": 1,
+    }
 
 
 def test_host_wired_sync_directory_uses_real_local_sync(host_wired_client, tmp_path):
