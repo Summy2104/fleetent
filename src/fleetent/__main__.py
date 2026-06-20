@@ -100,7 +100,7 @@ def main(argv: list[str] | None = None) -> None:
         node_app.main()
         return
 
-    if argv and argv[0] == "tui":
+    if argv and argv[0] == "chat":
         from fleetent.tui import app as tui_app
 
         tui_app.main(argv[1:])

@@ -75,7 +75,7 @@ def test_install_without_agent_id_installs_runtime_and_prints_tutorial(tmp_path:
     # Tutorial guides the operator to create an agent themselves.
     assert "fleetent agent init" in out
     assert "fleetent agent run" in out
-    assert "fleetent tui --url ws://localhost:<port>/ws --token <FLEETENT_TUI_TOKEN>" in out
+    assert "fleetent chat --url ws://localhost:<port>/ws --token <FLEETENT_TUI_TOKEN>" in out
     assert _RETIRED_TUI_CMD not in out
     # No agent home produced by the script.
     assert not (home / ".fleetent" / "agents").exists()

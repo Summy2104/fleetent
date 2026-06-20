@@ -132,7 +132,7 @@ main() {
         echo "  1. fleetent agent init <agent-id>"
         echo "  2. Edit $FLEETENT_HOME/agents/<agent-id>/agent.yaml + .env   (chmod 600 .env)"
         echo "  3. fleetent agent run <agent-id> [--port 8766]"
-        echo "  4. fleetent tui --url ws://localhost:<port>/ws --token <FLEETENT_TUI_TOKEN>"
+        echo "  4. fleetent chat --url ws://localhost:<port>/ws --token <FLEETENT_TUI_TOKEN>"
         echo
     fi
 

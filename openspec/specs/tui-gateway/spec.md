@@ -103,7 +103,7 @@ TBD - created by archiving change tui-gateway. Update Purpose after archive.
 
 ### Requirement: 终端 TUI 客户端
 
-系统 SHALL 提供一个纯 Python 终端客户端(入口 `fleetent tui` 子命令),连接 `/ws`,消费 `event` 通知做增量渲染:流式文本、工具调用展示、状态/spinner。客户端 SHALL 提供多行输入与斜杠命令(`/new`、`/session`、`/abort`、`/approve`、`/quit`、`/help`),并使输入行与流式输出在同一终端共存而不互相破坏。客户端 SHALL 支持通过 `--url`/`--token` 指定服务端地址与认证。不得引入 Node 或前端构建链。
+系统 SHALL 提供一个纯 Python 终端客户端(入口 `fleetent chat` 子命令),连接 `/ws`,消费 `event` 通知做增量渲染:流式文本、工具调用展示、状态/spinner。客户端 SHALL 提供多行输入与斜杠命令(`/new`、`/session`、`/abort`、`/approve`、`/quit`、`/help`),并使输入行与流式输出在同一终端共存而不互相破坏。客户端 SHALL 支持通过 `--url`/`--token` 指定服务端地址与认证。不得引入 Node 或前端构建链。
 
 #### Scenario: 流式增量渲染
 - **WHEN** 客户端收到一串 `text_delta` 事件
@@ -122,9 +122,9 @@ TBD - created by archiving change tui-gateway. Update Purpose after archive.
 - **WHEN** 客户端收到 `tool_call`/`tool_result` 事件
 - **THEN** 终端以可辨识的方式展示工具名与(截断的)结果
 
-#### Scenario: 入口经 fleetent tui 子命令
+#### Scenario: 入口经 fleetent chat 子命令
 - **WHEN** 用户启动终端客户端
-- **THEN** 经 `fleetent tui`(而非已移除的独立 `fleetent-tui` console-script)
+- **THEN** 经 `fleetent chat`(而非已改名的旧 `tui` 子命令或已移除的独立 `fleetent-tui` console-script)
 
 ### Requirement: 客户端断连处理
 
@@ -137,4 +137,3 @@ TBD - created by archiving change tui-gateway. Update Purpose after archive.
 #### Scenario: 连接超时
 - **WHEN** 在配置的超时内未能建立连接
 - **THEN** 客户端报告超时错误并退出或重试
-

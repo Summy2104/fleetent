@@ -49,7 +49,7 @@ def test_node_without_start_errors(monkeypatch: pytest.MonkeyPatch, capsys) -> N
     assert "Usage: fleetent node start" in capsys.readouterr().err
 
 
-def test_tui_subcommand_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_chat_subcommand_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[list[str]] = []
     tui_app_module = importlib.import_module("fleetent.tui.app")
 
@@ -57,11 +57,28 @@ def test_tui_subcommand_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
         calls.append(argv or [])
 
     monkeypatch.setattr(tui_app_module, "main", fake_main)
-    monkeypatch.setattr("sys.argv", ["fleetent", "tui", "--help"])
+    monkeypatch.setattr("sys.argv", ["fleetent", "chat", "--help"])
 
     cli.main()
 
     assert calls == [["--help"]]
+
+
+def test_tui_no_longer_dispatches_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    prompts: list[str] = []
+    sys.modules.pop("fleetent.tui.app", None)
+
+    def fake_run(user_input: str) -> str:
+        prompts.append(user_input)
+        return "ok"
+
+    monkeypatch.setattr(cli, "run", fake_run)
+    monkeypatch.setattr("sys.argv", ["fleetent", "tui", "--help"])
+
+    cli.main()
+
+    assert prompts == ["tui --help"]
+    assert "fleetent.tui.app" not in sys.modules
 
 
 def test_agent_run_does_not_import_platform(monkeypatch: pytest.MonkeyPatch) -> None:

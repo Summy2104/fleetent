@@ -147,7 +147,7 @@ uv run mypy src                                             # 类型检查
 uv run fleetent "hello"                                     # CLI agent
 POST /admin/service-principals  # body: {"name": "Alice"}            # 用户管理
 uvicorn fleetent.server:app --reload --port 8765            # HTTP 服务（默认端口 8765）
-uv run fleetent tui --token ma-<key>                       # 交互式终端 TUI
+uv run fleetent chat --token ma-<key>                      # 交互式终端 TUI
 ```
 
 ---

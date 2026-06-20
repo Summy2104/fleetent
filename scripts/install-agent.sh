@@ -52,7 +52,7 @@ After installation, create and run an agent:
   1. fleetent agent init <agent-id>
   2. Edit $FLEETENT_HOME/agents/<agent-id>/agent.yaml + .env  (chmod 600 .env)
   3. fleetent agent run <agent-id> [--port N]
-  4. fleetent tui --url ws://localhost:<N>/ws --token <FLEETENT_TUI_TOKEN>
+  4. fleetent chat --url ws://localhost:<N>/ws --token <FLEETENT_TUI_TOKEN>
 
 Note: the <agent-id> positional argument was removed — agent creation is now a
 separate step (`fleetent agent init`), decoupled from runtime installation.
@@ -134,7 +134,7 @@ print_tutorial() {
     echo "  1. fleetent agent init <agent-id>"
     echo "  2. Edit $FLEETENT_HOME/agents/<agent-id>/agent.yaml + .env   (chmod 600 .env)"
     echo "  3. fleetent agent run <agent-id> [--port 8766]"
-    echo "  4. fleetent tui --url ws://localhost:<port>/ws --token <FLEETENT_TUI_TOKEN>"
+    echo "  4. fleetent chat --url ws://localhost:<port>/ws --token <FLEETENT_TUI_TOKEN>"
     echo
     echo "(FLEETENT_TUI_TOKEN is generated into the agent's .env by 'fleetent agent init'.)"
 }

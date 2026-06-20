@@ -176,7 +176,7 @@ def test_full_run_delegates_to_both_role_scripts(tmp_path: Path) -> None:
     assert "Setting up platform" in out
     # install-defer-agent-init: no default agent is seeded; a create-agent tutorial is printed.
     assert "fleetent agent init" in out
-    assert "fleetent tui --url ws://localhost:<port>/ws --token <FLEETENT_TUI_TOKEN>" in out
+    assert "fleetent chat --url ws://localhost:<port>/ws --token <FLEETENT_TUI_TOKEN>" in out
     assert _RETIRED_TUI_CMD not in out
     assert not (home / ".fleetent" / "agents" / "default").exists()
     assert "Developer install complete" in out
