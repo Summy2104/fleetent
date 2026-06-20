@@ -44,3 +44,12 @@ def test_command_modules_has_no_empty_module() -> None:
 
     assert "im" not in module_names
     assert "agents" not in module_names
+
+
+def test_memory_shared_cli_removed() -> None:
+    parser = _build_parser()
+    top_level = parser._subparsers._group_actions[0].choices
+    module_names = {module.__name__.rsplit(".", 1)[-1] for module in admin_main._COMMAND_MODULES}
+
+    assert "memory" not in top_level
+    assert "shared_memory" not in module_names
