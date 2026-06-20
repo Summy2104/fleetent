@@ -2,7 +2,7 @@
 
 这份文档跟踪 2026-06-20 一轮架构讨论定下的方向:把 KB / memory 数据、ingest 管道、部署拓扑统一到一套"可插拔、消模式"的形态。**目标态见 [target-architecture.md §12](../architecture/target-architecture.md)**;讨论结论的可视化(KB 全链路时序图 + 配置归属图)见会话 artifact。本文是从现状到目标的**变更序列 + 进度**。
 
-> ⚠️ 大部分是**方向**,尚未实现。落地经 OpenSpec change,按下方 Phase 顺序。
+> 进度(2026-06-20):**单机目标态已全部落地**——Phase A(ingest 队列+worker)+ Phase C(砍 standalone)+ B1(底座可插拔抽象 + 本地 SQLite 后端)均已 apply。**只剩 B2(网络后端)占位**,等真走分布式 + 有网络DB环境再实施。
 
 ## 当前结论
 
@@ -33,36 +33,37 @@
 
 落地形态:多触发器 → DB 队列 → 唯一 kb-worker → ingest 核;队列经 `db.py` 边界、worker 不 import platform;明文凭据不入队(只写 `cred_ref`,运行时按 ref 解析留 Phase B)。**单机 ingest worker 链已齐**(target-architecture §12 的单机形态)。
 
-### Phase B — 可插拔数据底座(blocked 占位,分布式才展开)
+### Phase B — 可插拔数据底座(B1 ✅ 已落地;B2 占位)
 
-| change | 状态 | 内容 | 触发判据 |
+| change | 状态 | 内容 | 前置/触发 |
 | --- | --- | --- | --- |
-| `agent-data-substrate-pluggable` | blocked 占位 | 底座后端抽象(本地文件↔网络 DB)+ 网络后端实现 + `connector-cred-job-ref`(运行时按 ref 从 Vault 解析) | 部署真走分布式(agent 与 ingest 不再共享文件系统) |
+| `substrate-backend-abstraction`(B1) | ✅ landed (`2ff2a1b9`) | db.py 开库边界做可插拔后端抽象(`BaseSubstrateBackend` + `SubstrateCapabilities` + `create_substrate` 按 URL scheme 选);本地 SQLite=默认实现、行为零变化;agent 侧三关系库(agent_state/shared_memory/kb)经工厂开库(tenant_router 收口);管理库未纳入(随 B2) | — |
+| `network-substrate-backend`(B2) | blocked 占位 | 在 B1 抽象下加 Postgres/Qdrant 网络后端 + `connector-cred-job-ref`(运行时按 ref 从 Vault 解析);postgres scheme 现在工厂里是 "not supported yet",B2 把它换成真实现 | 部署真走分布式 + 有网络DB/多机环境可端到端验证 |
 
-> 取代了旧的 `knowledge-base-standalone-service` 占位:本轮把"KB 升格独立服务"重构成"可插拔底座 + kb-worker"(retrieval 留 agent、management 留 platform、store 进可插拔底座),不再需要 bespoke KB 服务。旧占位已移除。
-> 最重、纯重构;展开时可能按数据族(KB/memory/sessions/向量)细分多个 change。向量底座已部分可换 Qdrant,减一点量。
+> 由旧的合并占位 `agent-data-substrate-pluggable` 拆来(B1 转真已落地、B2 留占位);更早的 `knowledge-base-standalone-service` 占位已移除(本轮把"KB 升格独立服务"重构成"可插拔底座 + kb-worker",不需 bespoke KB 服务)。
+> B1 单机就有价值(数据层边界清、SQLite 零变化、为 B2 留干净挂载点);B2 最重、无分布式环境前不实施。
 
 ### Phase C — 部署拓扑收敛(✅ 已落地 2026-06-20)
 
 | change | 状态 | 内容 |
 | --- | --- | --- |
-| `node-launches-agent-single-host` | ✅ landed | 单机也经 node 拉起 agent(统一);production 不再直起。`fleetent agent run` 保留为 node 用的原语(也可 dev 直跑) |
-| `remove-standalone-deployment` | ✅ landed | 砍 standalone 部署、platform 始终在场;已改 AGENTS.md「agent 必须能在无 platform 环境运行」那条措辞(解耦契约部分不变);install/docs 已同步 |
+| `remove-standalone-deployment` | ✅ landed (`7dd04f54`) | 砍 standalone 部署模式、platform 始终在场、node 永远拉起 agent;`fleetent agent run`/`init` 保留为 node 原语+dev(**未删**);改 AGENTS.md 规则措辞(解耦契约「单向不可逆」**原样保留**);install-agent.sh repurpose 为 agent-host(node) installer;docs/§12 同步 |
+
+> 原计划的 `node-launches-agent-single-host` 已**吸收进本 change**——`retire-inmemory-controller` 后 node 已是唯一 launcher,无独立工作可做。
 
 ## 两条路径
 
-- **到单机目标态** ≈ Phase A(3)+ Phase C(2)= **5 个 change**(底座留本地文件,不碰 B)
-- **再到分布式** ≈ + Phase B(可插拔底座 + 凭据 job-ref)
+- **到单机目标态** ≈ Phase A(3)+ B1(1)+ Phase C(1)= **5 个 change,✅ 已全部落地**(底座留本地 SQLite 后端)
+- **再到分布式** ≈ + B2(`network-substrate-backend`:网络后端 + 凭据 job-ref)
 
 ## 依赖图
 
 ```
-链 A:  kb-ingest-queue → kb-worker → kb-worker-config-file
-                              └→ (connector-cred-job-ref,属 B)
-链 B:  agent-data-substrate-pluggable(后端抽象 → 网络后端 → cred-job-ref)
-链 C:  node-launches-agent-single-host → remove-standalone-deployment
+链 A:  kb-ingest-queue → kb-worker → kb-worker-config-file          ✅ 全落地
+链 B:  substrate-backend-abstraction(✅ B1) → network-substrate-backend(B2 占位 + connector-cred-job-ref)
+链 C:  remove-standalone-deployment ✅(已吸收 node-launches-agent-single-host)
 ```
-链内串行;链间基本独立(connector-cred-job-ref 跨链挂在 kb-worker 之后)。
+链内串行;链间基本独立。单机目标态(A + B1 + C)已全落地;只剩 B2 等分布式环境。
 
 ## 参考
 
