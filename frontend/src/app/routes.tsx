@@ -4,6 +4,7 @@ import { Navigate, NavLink, Route, Routes, useNavigate } from 'react-router-dom'
 import { useAuthSession } from '@/app/auth';
 import { AgentsPage } from '@/features/agents/page';
 import { SkillsPage } from '@/features/skills/page';
+import { KnowledgeBasePage } from '@/features/kb/page';
 import { SessionsPage } from '@/features/sessions/page';
 import { ProvidersPage } from '@/features/providers/page';
 import { UsersPage } from '@/features/users/page';
@@ -11,7 +12,6 @@ import { UsersPage } from '@/features/users/page';
 // Domains not yet migrated to the SPA: deep-link into the legacy console by tab anchor.
 // (nodes / tenancy have no legacy tab and stay UI-less until natively migrated.)
 const legacyLinks: Array<{ href: string; label: string }> = [
-  { href: '/admin/ui-legacy#kb', label: 'Knowledge Base' },
   { href: '/admin/ui-legacy#oauth', label: 'Connectors' },
   { href: '/admin/ui-legacy#stats', label: 'Statistics' },
 ];
@@ -144,6 +144,17 @@ function AppLayout(): JSX.Element {
                   isActive ? 'bg-primary text-primary-foreground' : 'bg-secondary/80 text-foreground',
                 ].join(' ')
               }
+              to="/kb"
+            >
+              Knowledge Base
+            </NavLink>
+            <NavLink
+              className={({ isActive }) =>
+                [
+                  'block rounded-xl px-4 py-3 text-sm font-medium transition-colors',
+                  isActive ? 'bg-primary text-primary-foreground' : 'bg-secondary/80 text-foreground',
+                ].join(' ')
+              }
               to="/users"
             >
               Users
@@ -176,6 +187,10 @@ function AppLayout(): JSX.Element {
             <Route
               element={<ProvidersPage />}
               path="/providers"
+            />
+            <Route
+              element={<KnowledgeBasePage />}
+              path="/kb"
             />
             <Route
               element={<UsersPage />}

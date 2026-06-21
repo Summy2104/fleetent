@@ -45,6 +45,7 @@ describe('admin routes', () => {
       '/providers'
     );
     expect(nav.getByRole('link', { name: 'Skills' })).toHaveAttribute('href', '/skills');
+    expect(nav.getByRole('link', { name: 'Knowledge Base' })).toHaveAttribute('href', '/kb');
   });
 
   it('shows legacy deep links for not-yet-migrated domains', async () => {
@@ -54,10 +55,6 @@ describe('admin routes', () => {
 
     await screen.findByRole('heading', { name: 'Agents' });
     const nav = within(screen.getByRole('navigation'));
-    expect(nav.getByRole('link', { name: 'Knowledge Base' })).toHaveAttribute(
-      'href',
-      '/admin/ui-legacy#kb'
-    );
     expect(nav.getByRole('link', { name: 'Connectors' })).toHaveAttribute(
       'href',
       '/admin/ui-legacy#oauth'
@@ -102,6 +99,21 @@ describe('admin routes', () => {
 
     expect(await screen.findByRole('heading', { name: 'Sessions' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Sessions' })).toHaveAttribute('href', '/sessions');
+  });
+
+  it('renders knowledge base as a native route instead of a legacy deep link', async () => {
+    server.use(
+      http.get('http://fleetent.test/admin/kb', () => HttpResponse.json([])),
+      http.get('http://fleetent.test/admin/kb/connectors', () => HttpResponse.json([]))
+    );
+
+    renderRoutes('/kb', 'session-token');
+
+    expect(await screen.findByRole('heading', { name: 'Knowledge Base' })).toBeInTheDocument();
+    const nav = within(screen.getByRole('navigation'));
+    const knowledgeBaseLinks = nav.getAllByRole('link', { name: 'Knowledge Base' });
+    expect(knowledgeBaseLinks).toHaveLength(1);
+    expect(knowledgeBaseLinks[0]).toHaveAttribute('href', '/kb');
   });
 
   it('renders the users page as a native route', async () => {
