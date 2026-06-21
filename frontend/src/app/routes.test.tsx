@@ -37,6 +37,7 @@ describe('admin routes', () => {
 
     expect(await screen.findByRole('heading', { name: 'Agents' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Agents' })).toHaveAttribute('href', '/agents');
+    expect(screen.getByRole('link', { name: 'Chat' })).toHaveAttribute('href', '/chat');
     expect(screen.getByRole('link', { name: 'Sessions' })).toHaveAttribute('href', '/sessions');
     expect(screen.getByRole('link', { name: 'Users' })).toHaveAttribute('href', '/users');
     expect(screen.getByRole('link', { name: 'Providers' })).toHaveAttribute(
@@ -77,6 +78,16 @@ describe('admin routes', () => {
 
     expect(await screen.findByRole('heading', { name: 'Providers' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Providers' })).toHaveAttribute('href', '/providers');
+  });
+
+  it('renders chat as a native route in the SPA', async () => {
+    server.use(http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])));
+
+    renderRoutes('/chat', 'session-token');
+
+    expect(await screen.findByRole('heading', { name: 'Chat Console' })).toBeInTheDocument();
+    const nav = within(screen.getByRole('navigation'));
+    expect(nav.getByRole('link', { name: 'Chat' })).toHaveAttribute('href', '/chat');
   });
 
   it('renders sessions as a native route in the SPA', async () => {
