@@ -44,8 +44,8 @@ describe('admin routes', () => {
       'href',
       '/providers'
     );
-    expect(nav.getByRole('link', { name: 'Skills' })).toHaveAttribute('href', '/skills');
-    expect(nav.getByRole('link', { name: 'Knowledge Base' })).toHaveAttribute('href', '/kb');
+    expect(nav.getAllByRole('link', { name: 'Skills' })[0]).toHaveAttribute('href', '/skills');
+    expect(nav.getAllByRole('link', { name: 'Knowledge Base' })[0]).toHaveAttribute('href', '/kb');
   });
 
   it('shows legacy deep links for not-yet-migrated domains', async () => {
@@ -55,10 +55,10 @@ describe('admin routes', () => {
 
     await screen.findByRole('heading', { name: 'Agents' });
     const nav = within(screen.getByRole('navigation'));
-    expect(nav.getByRole('link', { name: 'Connectors' })).toHaveAttribute(
-      'href',
-      '/admin/ui-legacy#oauth'
-    );
+    const skillLinks = nav.getAllByRole('link', { name: 'Skills' });
+    expect(skillLinks[1]).toHaveAttribute('href', '/admin/ui-legacy#skills');
+    const knowledgeBaseLinks = nav.getAllByRole('link', { name: 'Knowledge Base' });
+    expect(knowledgeBaseLinks[1]).toHaveAttribute('href', '/admin/ui-legacy#kb');
     expect(nav.getByRole('link', { name: 'Statistics' })).toHaveAttribute(
       'href',
       '/admin/ui-legacy#stats'
@@ -84,7 +84,7 @@ describe('admin routes', () => {
 
     expect(await screen.findByRole('heading', { name: 'Skills' })).toBeInTheDocument();
     const nav = within(screen.getByRole('navigation'));
-    expect(nav.getByRole('link', { name: 'Skills' })).toHaveAttribute('href', '/skills');
+    expect(nav.getAllByRole('link', { name: 'Skills' })[0]).toHaveAttribute('href', '/skills');
   });
 
   it('renders sessions as a native route in the SPA', async () => {
@@ -112,7 +112,6 @@ describe('admin routes', () => {
     expect(await screen.findByRole('heading', { name: 'Knowledge Base' })).toBeInTheDocument();
     const nav = within(screen.getByRole('navigation'));
     const knowledgeBaseLinks = nav.getAllByRole('link', { name: 'Knowledge Base' });
-    expect(knowledgeBaseLinks).toHaveLength(1);
     expect(knowledgeBaseLinks[0]).toHaveAttribute('href', '/kb');
   });
 
@@ -127,5 +126,28 @@ describe('admin routes', () => {
 
     expect(await screen.findByRole('heading', { name: 'Users' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Users' })).toHaveAttribute('href', '/users');
+  });
+
+  it('renders connectors as a native route and removes the legacy connectors link', async () => {
+    server.use(
+      http.get('http://fleetent.test/admin/connectors', () => HttpResponse.json([])),
+      http.get('http://fleetent.test/admin/connectors/grants', () =>
+        HttpResponse.json({ grants: [], consent_hint: 'browser flow required' })
+      ),
+      http.get('http://fleetent.test/admin/mcp/servers', () => HttpResponse.json([])),
+      http.get('http://fleetent.test/admin/mcp/doctor', () => HttpResponse.json({ checks: [] }))
+    );
+
+    renderRoutes('/connectors', 'session-token');
+
+    expect(await screen.findByRole('heading', { name: 'Connectors' })).toBeInTheDocument();
+    const nav = within(screen.getByRole('navigation'));
+    const connectorLinks = nav.getAllByRole('link', { name: 'Connectors' });
+    expect(connectorLinks).toHaveLength(1);
+    expect(connectorLinks[0]).toHaveAttribute('href', '/connectors');
+    expect(nav.getAllByRole('link', { name: 'Skills' })[1]).toHaveAttribute(
+      'href',
+      '/admin/ui-legacy#skills'
+    );
   });
 });
