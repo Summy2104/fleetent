@@ -22,7 +22,7 @@ The console SHALL let an admin open a request's detail and a session's trace.
 - **THEN** the console calls `GET /admin/stats/sessions/{session_id}/trace` and renders it
 
 ### Requirement: Export and reports
-The console SHALL let an admin trigger a stats export and generate a report.
+The console SHALL let an admin trigger a stats export. Report generation is not offered (there is no `POST /admin/stats/reports` endpoint).
 
 #### Scenario: Trigger export
 - **WHEN** an admin clicks export

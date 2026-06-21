@@ -4,6 +4,8 @@ model-router / observability seams are monkeypatched so the tests exercise the
 management behaviour (CRUD, masking, route orchestration, role guards, audit).
 """
 
+from pathlib import Path
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -197,23 +199,21 @@ def test_routes_endpoints_removed_but_health_remains(fresh_client):
     token, _ = _session_for("admin")
     _add(fresh_client, token, pid="a")
 
-    assert fresh_client.get(_LEGACY_ROUTES_PATH, headers=_hdr(token)).status_code == 404
-    assert (
-        fresh_client.put(
-            f"{_LEGACY_ROUTES_PATH}/code",
-            headers=_hdr(token),
-            json={"provider_ids": ["a"]},
-        ).status_code
-        == 404
-    )
-    assert (
-        fresh_client.get(f"{_LEGACY_ROUTES_PATH}/code/preview", headers=_hdr(token)).status_code
-        == 404
-    )
-
     health = fresh_client.get("/admin/providers/health", headers=_hdr(token))
     assert health.status_code == 200
     assert health.json()["providers"] == [{"id": "a", "available": True, "recovers_at": None}]
+
+
+def test_provider_routes_ui_and_router_entries_removed() -> None:
+    paths = {getattr(route, "path", None) for route in api.router.routes}
+    assert "/admin/providers/routes" not in paths
+    assert "/admin/providers/routes/{task_type}" not in paths
+    assert "/admin/providers/routes/{task_type}/preview" not in paths
+
+    admin_html = (
+        Path(__file__).parents[2] / "src" / "fleetent" / "static" / "admin.html"
+    ).read_text(encoding="utf-8")
+    assert '"/providers/routes"' not in admin_html
 
 
 # --- health probe state view (4.7/4.8) --------------------------------------

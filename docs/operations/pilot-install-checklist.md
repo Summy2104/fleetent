@@ -136,35 +136,29 @@ GET /admin/kb/connectors/eng-drive/status
 
 ## Observability 查询
 
-查询 run trace：
+查询 agent overview：
 
 ```bash
-GET /admin/observability/traces?run_id=run-1&limit=20
+GET /admin/stats/agents/<agent_id>/overview
 ```
 
-查询失败事件：
+查询 tool 聚合：
 
 ```bash
-GET /admin/observability/traces?event_type=agent_run_failed&limit=50
+GET /admin/stats/agents/<agent_id>/tools
 ```
 
-查询 usage：
+查询 session trace drill-down：
 
 ```bash
-GET /admin/observability/usage?user_id=user-1&limit=100
-```
-
-查询 performance：
-
-```bash
-GET /admin/observability/performance?agent=agent-1&limit=100
+GET /admin/stats/sessions/<session_id>/trace
 ```
 
 验收点：
 
-- `traces` 只输出事件元数据和 payload key summary，不输出 payload 原值。
-- `usage` 输出 run count、token usage 和 by-model summary。
-- `performance` 输出失败率、延迟、LLM / tool / fallback / permission 指标。
+- overview 输出 usage、approvals、cost 聚合，不输出 payload 原值。
+- tools 输出按工具聚合的调用与错误概览。
+- session trace drill-down 用于定位单次会话内的事件链路。
 
 ## Diagnostics 与 Retention
 
@@ -209,7 +203,7 @@ uv run fleetent admin diagnostics retention apply
 3. 用**同一备份批次**按镜像结构把全部库复制回 `data/` 对应位置（如 `…/management.db` → `data/management.db`，及 `<tenant>/`、`<tenant>/<agent_id>/` 子目录下各库），替换当前 DB 文件，保证多库一致、不混用不同时间点的备份。
 4. 重启 fleetent 服务。
 5. 再次运行 `GET /health`。
-6. 运行 `GET /admin/observability/traces?event_type=agent_run_failed&limit=20` 查看回滚后是否仍有失败事件。
+6. 运行 `GET /admin/stats/agents/<agent_id>/overview` 与 `GET /admin/stats/sessions/<session_id>/trace`，确认回滚后统计与 trace 查询恢复可用。
 
 回滚不自动删除 diagnostics package 和 logs；保留它们用于问题上报。
 
@@ -242,9 +236,9 @@ uv run fleetent admin diagnostics retention apply
 - [ ] Google Drive / Confluence connector `check` 通过或失败原因明确。
 - [ ] KB connector `sync --dry-run` 通过。
 - [ ] KB connector `sync` 完成并可查询 `status`。
-- [ ] `GET /admin/observability/traces` 可查询测试 run。
-- [ ] `GET /admin/observability/usage` 可查询 usage summary。
-- [ ] `GET /admin/observability/performance` 可查询 performance summary。
+- [ ] `GET /admin/stats/agents/<agent_id>/overview` 可查询测试 run 的聚合统计。
+- [ ] `GET /admin/stats/agents/<agent_id>/tools` 可查询工具调用概览。
+- [ ] `GET /admin/stats/sessions/<session_id>/trace` 可 drill-down 到单次会话 trace。
 - [ ] `fleetent admin diagnostics export` 可生成脱敏诊断包。
 - [ ] `fleetent admin diagnostics retention dry-run` 可输出候选数量。
 - [ ] 回滚负责人和问题上报路径已确认。
@@ -257,7 +251,7 @@ uv run fleetent admin diagnostics retention apply
 - `scripts/upgrade.py --dry-run` 输出摘要。
 - `GET /health` 结果。
 - connector `check` / `status` 的脱敏输出。
-- observability `traces` / `usage` / `performance` 的脱敏输出。
+- stats overview / tools / session trace 的脱敏输出。
 - diagnostics export 生成的本地包路径。
 - 回滚是否执行、使用的 SQLite backup 路径和回滚后 health check 结果。
 

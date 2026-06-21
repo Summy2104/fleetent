@@ -44,7 +44,6 @@ from fleetent.platform.connector_management import connector_admin_api, vault_pr
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import provider_admin_api
 from fleetent.platform.node_management import node_admin_api, node_desired_state_api
-from fleetent.platform.observability_management import observability_admin_api
 from fleetent.platform.skill_management import skill_admin_api
 from fleetent.platform.tenancy import admin_api as tenancy_admin_api
 from fleetent.platform.user_management import user_admin_api
@@ -227,7 +226,6 @@ app.include_router(stats_admin_api.router)
 app.include_router(agent_apply_api.router)
 app.include_router(node_desired_state_api.router)
 app.include_router(node_admin_api.router)
-app.include_router(observability_admin_api.router)
 app.include_router(tenancy_admin_api.router)
 
 

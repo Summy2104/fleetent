@@ -24,10 +24,3 @@ The console SHALL let an admin take over, release, inject a message, force-end, 
 #### Scenario: Force-end a session
 - **WHEN** an admin force-ends a session
 - **THEN** the console calls `POST /admin/sessions/{session_id}/force-end`
-
-### Requirement: Chat playground
-The console SHALL provide a chat playground to start a session and send a message via `/admin/chat` endpoints.
-
-#### Scenario: Start a playground chat
-- **WHEN** an admin starts a chat and sends a message
-- **THEN** the console calls `POST /admin/chat/start` then `POST /admin/chat/{session_id}/message`

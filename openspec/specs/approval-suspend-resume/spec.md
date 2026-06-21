@@ -54,6 +54,14 @@ context of the message or click that triggered the resolution — so resumed out
 in the original chat/thread with upload capability intact. The resolved pending entry
 MUST be removed from `meta.pending_approvals`.
 
+The tool_context injected for the resumed execution SHALL carry the run's **workspace
+scope key**, resolved equivalently to a normal turn (session id under `session` scope,
+agent name under `agent` scope; same single resolver). This keeps scope_key-dependent
+behavior working for approval-gated tools: the stdio MCP `/workspace`→host-path argument
+translation and the `/exchange` product attribution/registration MUST apply to a tool
+executed on resume exactly as they do on a normal (non-gated) turn. The resumed
+tool_context MUST NOT be a scope_key-less variant of the normal-turn tool_context.
+
 The resumed run's **final reply** (including the delivery fact trailer) SHALL be delivered
 by the resume path itself via the persisted-address replier, so it returns to the original
 conversation (the same channel thread, or the same DM). The reply_func of the message or
@@ -100,6 +108,15 @@ continuation's finalize includes the receipts from the resumed tool execution.
 - **THEN** the resumed final reply (with the 📬 receipt) is delivered to the persisted
   address (the original channel thread / original DM) via the persisted-address replier,
   and the triggering message/click reply_func is NOT used to post it
+
+#### Scenario: resumed tool carries the workspace scope key
+
+- **WHEN** an approval-gated stdio MCP tool (e.g. `email__send_email` with a
+  `/workspace/...` attachment path) is executed on resume
+- **THEN** the injected tool_context carries the run's workspace scope key, so the
+  `/workspace` argument is translated to the host workspace path and the server reads the
+  file — identical to a non-gated turn — rather than receiving the unresolved container
+  path and failing
 
 ### Requirement: Pending approvals survive a process restart
 
