@@ -1,5 +1,5 @@
 import { MemoryRouter } from 'react-router-dom';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 
@@ -42,6 +42,31 @@ describe('admin routes', () => {
     expect(screen.getByRole('link', { name: 'Providers' })).toHaveAttribute(
       'href',
       '/providers'
+    );
+  });
+
+  it('shows legacy deep links for not-yet-migrated domains', async () => {
+    server.use(http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])));
+
+    renderRoutes('/agents', 'session-token');
+
+    await screen.findByRole('heading', { name: 'Agents' });
+    const nav = within(screen.getByRole('navigation'));
+    expect(nav.getByRole('link', { name: 'Skills' })).toHaveAttribute(
+      'href',
+      '/admin/ui-legacy#skills'
+    );
+    expect(nav.getByRole('link', { name: 'Knowledge Base' })).toHaveAttribute(
+      'href',
+      '/admin/ui-legacy#kb'
+    );
+    expect(nav.getByRole('link', { name: 'Connectors' })).toHaveAttribute(
+      'href',
+      '/admin/ui-legacy#oauth'
+    );
+    expect(nav.getByRole('link', { name: 'Statistics' })).toHaveAttribute(
+      'href',
+      '/admin/ui-legacy#stats'
     );
   });
 

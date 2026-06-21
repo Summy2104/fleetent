@@ -1,5 +1,5 @@
 import { MemoryRouter } from 'react-router-dom';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -224,23 +224,29 @@ describe('agents page parity baseline', () => {
     await user.click(screen.getByRole('button', { name: 'Activate v2 for alpha' }));
     expect(await screen.findByText('v2 active')).toBeInTheDocument();
 
-    expect(screen.getByRole('link', { name: 'Skills' })).toHaveAttribute(
+    // Scope to the agent's bindings aside so these don't match the same-named
+    // top-level legacy nav links (Skills / Knowledge Base) in the sidebar.
+    const bindings = within(
+      screen.getByRole('heading', { name: 'Bindings and legacy entry points' })
+        .closest('aside') as HTMLElement
+    );
+    expect(bindings.getByRole('link', { name: 'Skills' })).toHaveAttribute(
       'href',
       '/admin/ui-legacy#skills'
     );
-    expect(screen.getByRole('link', { name: 'Knowledge Base' })).toHaveAttribute(
+    expect(bindings.getByRole('link', { name: 'Knowledge Base' })).toHaveAttribute(
       'href',
       '/admin/ui-legacy#kb'
     );
-    expect(screen.getByRole('link', { name: 'MCP Servers' })).toHaveAttribute(
+    expect(bindings.getByRole('link', { name: 'MCP Servers' })).toHaveAttribute(
       'href',
       '/admin/ui-legacy#agents'
     );
-    expect(screen.getByRole('link', { name: 'OAuth Bindings' })).toHaveAttribute(
+    expect(bindings.getByRole('link', { name: 'OAuth Bindings' })).toHaveAttribute(
       'href',
       '/admin/ui-legacy#agents'
     );
-    expect(screen.getByRole('link', { name: 'User Bindings' })).toHaveAttribute(
+    expect(bindings.getByRole('link', { name: 'User Bindings' })).toHaveAttribute(
       'href',
       '/admin/ui-legacy#agents'
     );

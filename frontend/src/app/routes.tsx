@@ -7,7 +7,14 @@ import { SessionsPage } from '@/features/sessions/page';
 import { ProvidersPage } from '@/features/providers/page';
 import { UsersPage } from '@/features/users/page';
 
-const legacyLinks: Array<{ href: string; label: string }> = [];
+// Domains not yet migrated to the SPA: deep-link into the legacy console by tab anchor.
+// (nodes / tenancy have no legacy tab and stay UI-less until natively migrated.)
+const legacyLinks: Array<{ href: string; label: string }> = [
+  { href: '/admin/ui-legacy#skills', label: 'Skills' },
+  { href: '/admin/ui-legacy#kb', label: 'Knowledge Base' },
+  { href: '/admin/ui-legacy#oauth', label: 'Connectors' },
+  { href: '/admin/ui-legacy#stats', label: 'Statistics' },
+];
 
 function LoginPage(): JSX.Element {
   const auth = useAuthSession();
