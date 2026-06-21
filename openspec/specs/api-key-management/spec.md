@@ -93,6 +93,25 @@ Keys with an expiry SHALL trigger a renewal reminder N days before expiry and be
 - **WHEN** 非 admin 角色用户调用该端点
 - **THEN** 系统返回 403
 
+### Requirement: API key revoke and rotate in the React SPA
+
+The React admin SPA SHALL let an admin, for a selected user, list API keys, create a key, **rotate** a key, and **revoke** an individual key — closing the legacy gap where keys could only be created. A newly created or rotated key's plaintext value SHALL be shown once for copy and SHALL NOT be re-displayed or re-fetched afterward; the list SHALL show only a masked prefix.
+
+#### Scenario: Revoke an individual key
+
+- **WHEN** an admin revokes a listed key and confirms
+- **THEN** the SPA calls `DELETE /admin/keys/{key_id}` and the key is removed from the list
+
+#### Scenario: Rotate a key shows the new secret once
+
+- **WHEN** an admin rotates a key
+- **THEN** the SPA calls `POST /admin/users/{id}/rotate-key`, shows the new plaintext key once for copy, and the list afterward shows only the masked prefix
+
+#### Scenario: Plaintext key is never re-shown
+
+- **WHEN** the key list is re-rendered or re-fetched after creation/rotation
+- **THEN** no plaintext key value is displayed; only the masked prefix is shown
+
 ### Requirement: 按用户原子轮换 key HTTP API
 
 平台 SHALL 在 `POST /admin/users/{user_id}/rotate-key` 暴露按用户原子轮换端点，包装 `user_store.rotate_key(user_id)`：撤销该用户全部 active key 并签发一把新 key。新 key 明文 MUST 一次性返回。user 不存在 SHALL 返回 404。端点 MUST 要求 admin 角色并写审计。等价于 CLI `rotate-key`。
@@ -111,4 +130,3 @@ Keys with an expiry SHALL trigger a renewal reminder N days before expiry and be
 
 - **WHEN** 非 admin 角色用户调用该端点
 - **THEN** 系统返回 403
-

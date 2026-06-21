@@ -36,9 +36,23 @@ describe('admin routes', () => {
     renderRoutes('/agents', 'session-token');
 
     expect(await screen.findByRole('heading', { name: 'Agents' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Users' })).toHaveAttribute('href', '/users');
     expect(screen.getByRole('link', { name: 'Providers' })).toHaveAttribute(
       'href',
       '/admin/ui-legacy#providers'
     );
+  });
+
+  it('renders the users page as a native route', async () => {
+    server.use(
+      http.get('http://fleetent.test/admin/users', () => HttpResponse.json([])),
+      http.get('http://fleetent.test/admin/im-users', () => HttpResponse.json([])),
+      http.get('http://fleetent.test/admin/users/u1/keys', () => HttpResponse.json([]))
+    );
+
+    renderRoutes('/users', 'session-token');
+
+    expect(await screen.findByRole('heading', { name: 'Users' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Users' })).toHaveAttribute('href', '/users');
   });
 });
