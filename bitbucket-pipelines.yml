@@ -27,6 +27,7 @@ definitions:
           - corepack enable
           - yarn --version
           - make frontend-install
+          - make frontend-build
           - make test-frontend
     - step: &daily-integration-coverage
         name: integration tests + combined coverage
