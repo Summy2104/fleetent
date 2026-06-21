@@ -3,6 +3,7 @@ image: python:3.12
 definitions:
   caches:
     uv: ~/.cache/uv
+    yarn: frontend/node_modules
   steps:
     - step: &unit-coverage
         name: unit tests + coverage
@@ -14,6 +15,19 @@ definitions:
           - uv sync --frozen --group dev
           - uv run alembic upgrade head
           - make test-unit-ci
+    - step: &frontend-gate
+        name: frontend gate
+        caches:
+          - yarn
+        script:
+          - apt-get update
+          - apt-get install -y curl ca-certificates gnupg
+          - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+          - apt-get install -y nodejs
+          - corepack enable
+          - yarn --version
+          - make frontend-install
+          - make test-frontend
     - step: &daily-integration-coverage
         name: integration tests + combined coverage
         caches:
@@ -29,10 +43,12 @@ pipelines:
   pull-requests:
     '**':
       - step: *unit-coverage
+      - step: *frontend-gate
 
   branches:
     main:
       - step: *unit-coverage
+      - step: *frontend-gate
 
   custom:
     integration-tests:

@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color: hsl(222 47% 11%);
+    background:
+      radial-gradient(circle at top left, rgba(34, 197, 94, 0.16), transparent 32%),
+      radial-gradient(circle at top right, rgba(6, 182, 212, 0.18), transparent 28%),
+      linear-gradient(180deg, hsl(210 20% 98%), hsl(210 20% 96%));
+    font-family:
+      'IBM Plex Sans',
+      'Segoe UI',
+      sans-serif;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply min-h-screen bg-background text-foreground antialiased;
+  }
+}
