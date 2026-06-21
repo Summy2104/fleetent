@@ -58,3 +58,6 @@ docs/local/
 
 # Generated architecture diagrams
 docs/architecture/*.html
+
+# local dev deployment (FLEETENT_HOME)
+.fleetent-dev/
