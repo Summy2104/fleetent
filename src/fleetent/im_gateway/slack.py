@@ -103,6 +103,16 @@ def _loading_messages_for_event(evt: dict[str, Any]) -> list[str]:
     return [_tool_status_text(n) for n in names]
 
 
+def _has_postable_content(text: str, blocks: list[dict[str, Any]] | None) -> bool:
+    """Whether a reply has content Slack will accept.
+
+    Slack rejects ``chat.postMessage`` with empty text and no blocks (``no_text``), which
+    bubbles a SlackApiError into the bolt listener and breaks reply/approval delivery. A
+    reply with neither (an empty agent turn) is skipped rather than posted.
+    """
+    return bool((text or "").strip()) or bool(blocks)
+
+
 async def _make_status_funcs(
     client: Any,
     channel: str,
@@ -134,7 +144,7 @@ async def _make_status_funcs(
                 await client.assistant_threads_setStatus(
                     channel_id=channel, thread_ts=reply_thread, status=""
                 )
-        if say is not None:
+        if say is not None and _has_postable_content(text, blocks):
             kwargs: dict[str, Any] = {"text": text, "thread_ts": reply_thread}
             if blocks is not None:
                 kwargs["blocks"] = blocks
@@ -226,6 +236,8 @@ async def handle_approval_action(
         from fleetent.im_gateway.normalizer import NormalizedMessage, SessionContext
 
         async def _reply(text: str, blocks: list[dict[str, Any]] | None = None) -> None:
+            if not _has_postable_content(text, blocks):
+                return
             kwargs: dict[str, Any] = {"channel": channel, "text": text}
             if blocks is not None:
                 kwargs["blocks"] = blocks
@@ -434,6 +446,8 @@ async def _route_assistant_message(
     async def reply_func(text: str, blocks: list[dict[str, Any]] | None = None) -> None:
         with contextlib.suppress(Exception):
             await set_status("")
+        if not _has_postable_content(text, blocks):
+            return
         if blocks is not None:
             await say(text=text, blocks=blocks)
         else:
