@@ -42,3 +42,16 @@ def test_cli_normal_prompt_runs(monkeypatch, capsys) -> None:
 
     assert ran == ["你好"]
     assert "REPLY" in capsys.readouterr().out
+
+
+def test_cli_session_command_rejected_no_session(monkeypatch, capsys) -> None:
+    # CLI one-shot is stateless: a session command returns the no-session hint, no loop.
+    _stub_config(monkeypatch)
+    ran: list[str] = []
+    monkeypatch.setattr(mainmod, "run", lambda s: ran.append(s) or "RAN")
+
+    mainmod.main(["/clear"])
+
+    out = capsys.readouterr().out
+    assert "不可用" in out  # _NO_SESSION_HINT
+    assert ran == []

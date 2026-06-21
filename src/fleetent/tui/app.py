@@ -27,14 +27,19 @@ from fleetent.structured_logging import get_logger
 from fleetent.tui import protocol as p
 from fleetent.tui import render
 from fleetent.tui.backend import GatewayBackend
-from fleetent.tui.commands import KNOWN_COMMANDS, SlashCommandCompleter, parse_command
+from fleetent.tui.commands import (
+    DISPATCHER_COMMANDS,
+    KNOWN_COMMANDS,
+    SlashCommandCompleter,
+    parse_command,
+)
 
 _logger = get_logger("tui.app")
 
 DEFAULT_URL = "ws://127.0.0.1:8765/ws"
 _HELP = (
     "commands: /new /session /abort [run_id] /approve <id> <approved|rejected> "
-    "/user [内容|clear] /quit /help"
+    "/user [内容|clear] /clear /compact /context /usage /cost /quit /help"
 )
 
 # A sink that prints rendered FormattedText; ``end`` lets streaming text stay inline.
@@ -118,8 +123,8 @@ class AppController:
             else:
                 self._status("usage: /approve <id> <approved|rejected>")
             return True
-        if cmd.name == "user":
-            result = await self.backend.user(text.strip())
+        if cmd.name in DISPATCHER_COMMANDS:
+            result = await self.backend.command(text.strip())
             self._status(str(result.get("reply", "")))
             return True
 

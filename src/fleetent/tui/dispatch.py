@@ -13,7 +13,7 @@ from typing import Any, Literal, cast
 
 from fleetent.governance import approval_router
 from fleetent.identity import Principal
-from fleetent.runtime import CancelToken, run_stream, user_instructions
+from fleetent.runtime import CancelToken, commands, run_stream
 from fleetent.session import manager as session_mgr
 from fleetent.structured_logging import get_logger
 from fleetent.tui import protocol as p
@@ -148,10 +148,12 @@ async def dispatch(conn: Connection, request: dict[str, Any]) -> dict[str, Any] 
         sessions = session_mgr.list_session_ids(_session_prefix(conn.user_id))
         return p.make_response(req_id, {"sessions": sessions})
 
-    if method == p.METHOD_USER:
-        if not conn.agent_name:
-            return p.make_response(req_id, {"reply": "未绑定 agent，无法管理用户指令。"})
-        reply = user_instructions.handle_user_command(conn.agent_name, str(params.get("text", "")))
-        return p.make_response(req_id, {"reply": reply or "用法：/user [内容|clear]"})
+    if method in (p.METHOD_COMMAND, p.METHOD_USER):
+        # Both route through the shared dispatcher; METHOD_USER kept for compat.
+        ctx = commands.CommandContext(
+            agent_id=conn.agent_name, session_id=conn.session_id, user_id=conn.user_id
+        )
+        reply = await commands.handle_command(ctx, str(params.get("text", "")))
+        return p.make_response(req_id, {"reply": reply or "（不是命令)"})
 
     return p.make_error(req_id, p.METHOD_NOT_FOUND, f"unknown method: {method}")

@@ -23,6 +23,8 @@ METHOD_APPROVE = "approve"
 METHOD_SESSION_NEW = "session.new"
 METHOD_SESSION_LIST = "session.list"
 METHOD_USER = "user"
+# Generalized slash-command method: server calls runtime.commands.handle_command.
+METHOD_COMMAND = "command"
 
 # Server→client event types (carried in an ``event`` notification's ``params.type``).
 EVENT_GATEWAY_READY = "gateway.ready"
