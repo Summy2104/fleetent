@@ -10,14 +10,7 @@ import { SessionsPage } from '@/features/sessions/page';
 import { ProvidersPage } from '@/features/providers/page';
 import { UsersPage } from '@/features/users/page';
 import { ChatPage } from '@/features/chat/page';
-
-// Domains not yet migrated to the SPA: deep-link into the legacy console by tab anchor.
-// (nodes / tenancy have no legacy tab and stay UI-less until natively migrated.)
-const legacyLinks: Array<{ href: string; label: string }> = [
-  { href: '/admin/ui-legacy#skills', label: 'Skills' },
-  { href: '/admin/ui-legacy#kb', label: 'Knowledge Base' },
-  { href: '/admin/ui-legacy#stats', label: 'Statistics' },
-];
+import { StatsPage } from '@/features/stats/page';
 
 function LoginPage(): JSX.Element {
   const auth = useAuthSession();
@@ -180,19 +173,21 @@ function AppLayout(): JSX.Element {
                   isActive ? 'bg-primary text-primary-foreground' : 'bg-secondary/80 text-foreground',
                 ].join(' ')
               }
+              to="/stats"
+            >
+              Statistics
+            </NavLink>
+            <NavLink
+              className={({ isActive }) =>
+                [
+                  'block rounded-xl px-4 py-3 text-sm font-medium transition-colors',
+                  isActive ? 'bg-primary text-primary-foreground' : 'bg-secondary/80 text-foreground',
+                ].join(' ')
+              }
               to="/chat"
             >
               Chat
             </NavLink>
-            {legacyLinks.map((item) => (
-              <a
-                className="block rounded-xl bg-secondary/50 px-4 py-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
-                href={item.href}
-                key={item.label}
-              >
-                {item.label}
-              </a>
-            ))}
           </nav>
         </aside>
         <div className="rounded-3xl border bg-card/85 p-8 shadow-soft backdrop-blur">
@@ -224,6 +219,10 @@ function AppLayout(): JSX.Element {
             <Route
               element={<UsersPage />}
               path="/users"
+            />
+            <Route
+              element={<StatsPage />}
+              path="/stats"
             />
             <Route
               element={<ChatPage />}

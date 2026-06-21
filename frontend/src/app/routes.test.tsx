@@ -48,21 +48,58 @@ describe('admin routes', () => {
     expect(nav.getAllByRole('link', { name: 'Knowledge Base' })[0]).toHaveAttribute('href', '/kb');
   });
 
-  it('shows legacy deep links for not-yet-migrated domains', async () => {
+  it('keeps migrated domains on native routes without duplicate legacy deep links', async () => {
     server.use(http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])));
 
     renderRoutes('/agents', 'session-token');
 
     await screen.findByRole('heading', { name: 'Agents' });
     const nav = within(screen.getByRole('navigation'));
-    const skillLinks = nav.getAllByRole('link', { name: 'Skills' });
-    expect(skillLinks[1]).toHaveAttribute('href', '/admin/ui-legacy#skills');
-    const knowledgeBaseLinks = nav.getAllByRole('link', { name: 'Knowledge Base' });
-    expect(knowledgeBaseLinks[1]).toHaveAttribute('href', '/admin/ui-legacy#kb');
-    expect(nav.getByRole('link', { name: 'Statistics' })).toHaveAttribute(
-      'href',
-      '/admin/ui-legacy#stats'
+    expect(nav.getAllByRole('link', { name: 'Skills' })).toHaveLength(1);
+    expect(nav.getAllByRole('link', { name: 'Knowledge Base' })).toHaveLength(1);
+    expect(nav.getAllByRole('link', { name: 'Statistics' })).toHaveLength(1);
+  });
+
+  it('renders statistics as a native route instead of a legacy deep link', async () => {
+    server.use(
+      http.get('http://fleetent.test/admin/agents', () =>
+        HttpResponse.json([
+          {
+            agent_name: 'alpha',
+            provenance: 'adhoc',
+            status: 'enabled',
+            system_prompt: 'Alpha prompt',
+          },
+        ])
+      ),
+      http.get('http://fleetent.test/admin/stats/agents/alpha/overview', () =>
+        HttpResponse.json({
+          agent_id: 'alpha',
+          approvals: { approved: 2 },
+          cost: { total: 1.1 },
+          performance: { p95_ms: 700 },
+          usage: { calls: 9, total_tokens: 600 },
+        })
+      ),
+      http.get('http://fleetent.test/admin/stats/compare', () =>
+        HttpResponse.json([{ agent_id: 'alpha', value: 9 }])
+      ),
+      http.get('http://fleetent.test/admin/stats/agents/alpha/tools', () =>
+        HttpResponse.json({
+          coverage: { allowed: 2, used: 1 },
+          top_tools: { top: [['read_file', 9]] },
+        })
+      ),
+      http.get('http://fleetent.test/admin/stats/per-user', () =>
+        HttpResponse.json([{ user_id: 'u1', calls: 9, total_tokens: 600 }])
+      )
     );
+
+    renderRoutes('/stats', 'session-token');
+
+    expect(await screen.findByRole('heading', { name: 'Statistics' })).toBeInTheDocument();
+    const nav = within(screen.getByRole('navigation'));
+    expect(nav.getByRole('link', { name: 'Statistics' })).toHaveAttribute('href', '/stats');
   });
 
   it('renders providers as a native route instead of a legacy deep link', async () => {
@@ -145,10 +182,7 @@ describe('admin routes', () => {
     const connectorLinks = nav.getAllByRole('link', { name: 'Connectors' });
     expect(connectorLinks).toHaveLength(1);
     expect(connectorLinks[0]).toHaveAttribute('href', '/connectors');
-    expect(nav.getAllByRole('link', { name: 'Skills' })[1]).toHaveAttribute(
-      'href',
-      '/admin/ui-legacy#skills'
-    );
+    expect(nav.getAllByRole('link', { name: 'Skills' })).toHaveLength(1);
   });
 
   it('renders chat as a native route in the SPA', async () => {
