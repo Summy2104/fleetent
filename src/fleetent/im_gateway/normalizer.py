@@ -425,6 +425,7 @@ async def _resume_pending_in_session(
             progress_func=progress_func,
             session_context=session_context,
             conversation_address=conversation_address,
+            skill_authoring_enabled=agent.skill_authoring_enabled if agent else False,
         )
 
     # upload_func is rebuilt for parity with the inbound path; the resumed run delivers
@@ -693,6 +694,7 @@ async def route(msg: NormalizedMessage) -> None:
                 progress_func=msg.progress_func,
                 session_context=msg.session_context,
                 conversation_address=msg.conversation_address,
+                skill_authoring_enabled=agent.skill_authoring_enabled if agent else False,
             )
 
         # P4: session_end hook — observe after run completes, before session save.

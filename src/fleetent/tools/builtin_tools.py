@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime
+import json
 import logging
 import os
 import re
@@ -315,13 +316,20 @@ def github_connection_status(*, client: dict[str, Any]) -> str:
 
 
 @tool
-def read_skill(name: str, tool_context: ToolContext | None = None) -> str:
+def read_skill(
+    name: str,
+    file_path: str | None = None,
+    tool_context: ToolContext | None = None,
+) -> str:
     """Read a skill's full instructions by name (from the <available_skills> list).
 
     When a skill in the available_skills catalog matches the task, call this with
-    its <name> to load the full SKILL.md, then follow it. Returns an error string
-    if no skill with that name is registered, or a refusal if the skill failed the
-    static injection audit (its content never reaches the model this way).
+    its <name> to load the full SKILL.md, then follow it. Pass `file_path` (a path
+    relative to the skill directory, e.g. ``references/api.md``) to instead read one
+    of the skill's supporting files; the path is confined to the skill directory.
+    Returns an error string if no skill with that name is registered, or a refusal
+    if the skill failed the static injection audit (its content never reaches the
+    model this way).
     """
     from fleetent.skills import registry as skill_registry
 
@@ -330,14 +338,111 @@ def read_skill(name: str, tool_context: ToolContext | None = None) -> str:
         return f"error: no skill named {name!r}"
     if entry.audit_blocked:
         # Refuse before load(): a severe injection hit means the body must not
-        # reach the model. load() itself still returns it for manual triage.
+        # reach the model. load() itself still returns it for manual triage. The
+        # same gate applies to supporting files so no part of a blocked skill leaks.
         _audit_skill_refusal(name, tool_context)
         return f"error: skill {name!r} was blocked by the static injection audit"
+    if file_path is not None:
+        out = skill_registry.read_skill_file(name, file_path)
+        _record_skill_hit(name, tool_context)
+        return out
     body = skill_registry.load(name)
     _record_skill_hit(name, tool_context)
     # Append the fixed exec-face / $SKILLS_DIR guidance so the model runs the skill's
     # scripts via run_code under the single /workspace world (skill-read-on-demand).
     return body + skill_registry._READ_SKILL_GUIDANCE
+
+
+@tool
+def list_skills(keyword: str | None = None, category: str | None = None) -> str:
+    """List available skills (name + description) as JSON, optionally filtered.
+
+    The on-demand query for the skill catalog: use it when the always-injected
+    <available_skills> list is truncated, or to narrow by topic. `keyword` matches
+    (case-insensitive) a skill's name, description, or tags; `category` matches a
+    tag. Both omitted lists every available skill. Returns only names and
+    descriptions — call `read_skill` with a name to load a skill's full content.
+    """
+    from fleetent.skills import registry as skill_registry
+
+    return json.dumps(skill_registry.query_skills(keyword=keyword, category=category))
+
+
+@tool(risk_level="medium")
+def skill_manage(
+    action: Literal["create", "patch", "edit", "delete", "write_file", "remove_file"],
+    name: str,
+    content: str | None = None,
+    file_path: str | None = None,
+    file_content: str | None = None,
+    old_string: str | None = None,
+    new_string: str | None = None,
+    replace_all: bool = False,
+    tool_context: ToolContext | None = None,
+) -> str:
+    """Create, edit, or delete a skill in this agent's own skill library.
+
+    User-driven authoring of the agent's skills. Every action is a write and is
+    routed through the approval gate, so it takes effect only after a human approves.
+    Actions: `create` (new skill from `content` = full SKILL.md), `edit` (rewrite
+    SKILL.md with `content`), `patch` (replace `old_string` with `new_string` in
+    SKILL.md, or in `file_path` when given; `replace_all` for every occurrence),
+    `delete` (remove the skill), `write_file` (write `file_content` to `file_path`),
+    `remove_file` (delete `file_path`). Writes are confined to this agent's skills;
+    builtin skills are read-only. Returns an `ok:`/`error:` result string.
+    """
+    from fleetent.skills import registry as skill_registry
+
+    try:
+        if action == "create":
+            created_at = datetime.datetime.now(datetime.UTC).isoformat()
+            skill_registry.create_skill(name, content or "", created_at=created_at)
+        elif action == "edit":
+            skill_registry.edit_skill(name, content or "")
+        elif action == "patch":
+            skill_registry.patch_skill(
+                name,
+                old_string or "",
+                new_string or "",
+                file_path=file_path,
+                replace_all=replace_all,
+            )
+        elif action == "delete":
+            skill_registry.delete_skill(name)
+        elif action == "write_file":
+            skill_registry.write_skill_file(name, file_path or "", file_content or "")
+        elif action == "remove_file":
+            skill_registry.remove_skill_file(name, file_path or "")
+        else:
+            return f"error: unknown action {action!r}"
+    except (ValueError, OSError) as exc:
+        return f"error: {exc}"
+    _record_skill_authored(action, name, tool_context)
+    return f"ok: skill_manage {action} for skill {name!r} succeeded"
+
+
+def _record_skill_authored(action: str, name: str, tool_context: ToolContext | None) -> None:
+    """Record a successful skill_manage write as an agent-side observability trace.
+
+    Best-effort and agent-side only (never a platform store, per agent/platform
+    decoupling): a recording failure is logged and swallowed so it never changes the
+    write outcome. The platform reads authoring activity from this trace.
+    """
+    from fleetent.observability.traces import TraceEvent, record_trace_event
+
+    session_id = tool_context.session_id if tool_context else None
+    try:
+        record_trace_event(
+            TraceEvent(
+                run_id=session_id or "",
+                event_type="skill_authored",
+                payload={"skill_name": name, "action": action},
+                session_id=session_id,
+                agent_name=tool_context.agent_name if tool_context else None,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 — observability is a side channel; never block
+        logger.warning("skill_authored_record_failed", extra={"skill": name, "error": str(exc)})
 
 
 def _record_skill_hit(name: str, tool_context: ToolContext | None) -> None:
@@ -923,7 +1028,11 @@ async def send_im_message(
                 "（Telegram 用户需先与 bot 对话过）。"
             )
     sent = await outbound.send_to(
-        resolved_platform, connector, eff_target, text, target_type=eff_target_type,
+        resolved_platform,
+        connector,
+        eff_target,
+        text,
+        target_type=eff_target_type,
         thread=eff_thread,
     )
     _record_delivery(tool_context, sent)
@@ -953,8 +1062,12 @@ async def send_im_message(
         try:
             host = _resolve_outbound_path(raw, tool_context, approved=_gated)
             rcpt = await outbound.send_file_to(
-                resolved_platform, connector, eff_target, str(host),
-                target_type=eff_target_type, thread=eff_thread,
+                resolved_platform,
+                connector,
+                eff_target,
+                str(host),
+                target_type=eff_target_type,
+                thread=eff_thread,
             )
         except Exception as exc:  # noqa: BLE001 — per-file degrade, never abort the batch
             skipped.append(f"{raw}（{exc}）")
