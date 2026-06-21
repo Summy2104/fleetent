@@ -36,7 +36,10 @@ class DirectHttpAgentTransport:
         *,
         content_type: str = "application/json",
     ) -> Response:
-        async with httpx.AsyncClient(timeout=None) as client:
+        # Client is NOT wrapped in async with — its lifecycle is bound to _iter() so
+        # the connection stays open until the StreamingResponse body is fully consumed.
+        client = httpx.AsyncClient(timeout=None)
+        try:
             upstream = await client.send(
                 client.build_request(
                     "POST",
@@ -49,27 +52,32 @@ class DirectHttpAgentTransport:
                 ),
                 stream=True,
             )
-            if upstream.status_code >= 400:
-                content = await upstream.aread()
-                await upstream.aclose()
-                return Response(
-                    content=content,
-                    status_code=upstream.status_code,
-                    media_type=upstream.headers.get("content-type"),
-                )
-
-            async def _iter() -> AsyncIterator[bytes]:
-                try:
-                    async for chunk in upstream.aiter_bytes():
-                        yield chunk
-                finally:
-                    await upstream.aclose()
-
-            return StreamingResponse(
-                _iter(),
+        except Exception:
+            await client.aclose()
+            raise
+        if upstream.status_code >= 400:
+            content = await upstream.aread()
+            await upstream.aclose()
+            await client.aclose()
+            return Response(
+                content=content,
                 status_code=upstream.status_code,
-                media_type=upstream.headers.get("content-type", "text/event-stream"),
+                media_type=upstream.headers.get("content-type"),
             )
+
+        async def _iter() -> AsyncIterator[bytes]:
+            try:
+                async for chunk in upstream.aiter_bytes():
+                    yield chunk
+            finally:
+                await upstream.aclose()
+                await client.aclose()
+
+        return StreamingResponse(
+            _iter(),
+            status_code=upstream.status_code,
+            media_type=upstream.headers.get("content-type", "text/event-stream"),
+        )
 
     async def ws(self, node_id: str, agent_name: str, websocket: WebSocket) -> None:
         try:

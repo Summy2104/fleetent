@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import socket as _sock
 from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
-from fastapi import WebSocket
-from fastapi.testclient import TestClient
+import uvicorn
+from fastapi import FastAPI, WebSocket
 from fastapi.responses import StreamingResponse
+from fastapi.testclient import TestClient
 
 from fleetent import server, user_store
 from fleetent.node.config import NodeConfig
@@ -179,3 +182,78 @@ def test_managed_agent_chat_routes_by_placement_and_requires_admin_session(
         headers={"Authorization": "Session sess-1"},
     ) as ws:
         assert ws.receive_text() == '{"type":"ready"}'
+
+
+async def test_direct_http_transport_chat_streams_complete_body_over_real_socket(
+    monkeypatch,
+) -> None:
+    """Regression: DirectHttpAgentTransport.chat must relay the complete SSE body.
+
+    The bug: async with httpx.AsyncClient closed the client on return, before
+    Starlette consumed the StreamingResponse body iterator. Real loopback socket
+    is required — in-memory mocks bypass the timing. Body iterator is consumed
+    after chat() returns to reproduce the exact bug timing.
+    """
+    from fleetent.platform.node_management.agent_transport import DirectHttpAgentTransport
+
+    CHUNKS = [b"data: chunk1\n\n", b"data: chunk2\n\n", b"data: chunk3\n\n"]
+
+    with _sock.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        forwarder_port = s.getsockname()[1]
+
+    # Real streaming "forwarder" endpoint on a real socket
+    fake_forwarder = FastAPI()
+
+    @fake_forwarder.post("/forward/agents/support/chat")
+    async def _fwd_chat() -> StreamingResponse:
+        async def _body():
+            for chunk in CHUNKS:
+                yield chunk
+                await asyncio.sleep(0.005)
+
+        return StreamingResponse(_body(), media_type="text/event-stream")
+
+    srv = uvicorn.Server(
+        uvicorn.Config(fake_forwarder, host="127.0.0.1", port=forwarder_port, log_level="error")
+    )
+    serve_task = asyncio.create_task(srv.serve())
+    while not srv.started:
+        await asyncio.sleep(0.01)
+
+    try:
+        monkeypatch.setattr(
+            "fleetent.platform.node_management.agent_transport.forwarder_base_url",
+            lambda node_id: f"http://127.0.0.1:{forwarder_port}",
+        )
+        monkeypatch.setattr(
+            "fleetent.platform.node_management.agent_transport.node_store.get_node_service_key",
+            lambda node_id: "ma-node-key",
+        )
+
+        transport = DirectHttpAgentTransport()
+
+        body = b""
+        try:
+            # chat() returns a StreamingResponse; async with inside chat() exits here,
+            # closing the httpx client — the bug is that the TCP connection also closes.
+            response = await transport.chat(
+                "node-a", "support", b'{"message":"ping"}', content_type="application/json"
+            )
+            # Consume body_iterator exactly as Starlette would after the handler returns
+            chunks: list[bytes] = []
+            async for chunk in response.body_iterator:  # type: ignore[union-attr]
+                chunks.append(chunk)
+            body = b"".join(chunks)
+        except Exception:
+            body = b""
+
+        assert body, "body must not be empty (regression: premature httpx client close yielded 0 bytes)"
+        for chunk in CHUNKS:
+            assert chunk in body, f"missing SSE chunk {chunk!r} from DirectHttpAgentTransport.chat"
+    finally:
+        srv.should_exit = True
+        try:
+            await asyncio.wait_for(serve_task, timeout=5.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            pass
