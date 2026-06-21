@@ -260,3 +260,42 @@ async def test_assistant_message_carries_outbound_connectors(monkeypatch):
     )
 
     assert routed["msg"].outbound_connectors == {"slack": client}
+
+
+# ── empty-reply guard (no_text) ────────────────────────────────────────────────
+
+
+def test_has_postable_content():
+    from fleetent.im_gateway.slack import _has_postable_content
+
+    assert _has_postable_content("", None) is False
+    assert _has_postable_content("   ", None) is False
+    assert _has_postable_content("\n", None) is False
+    assert _has_postable_content("hi", None) is True
+    assert _has_postable_content("", [{"type": "section"}]) is True
+
+
+async def test_make_status_funcs_skips_empty_reply():
+    from fleetent.im_gateway import slack as slack_mod
+
+    client = MagicMock()
+    client.assistant_threads_setStatus = AsyncMock()
+    say = AsyncMock()
+    reply_func, _ = await slack_mod._make_status_funcs(client, "C1", "t1", say)
+    await reply_func("")
+    await reply_func("   ")
+    say.assert_not_awaited()  # empty text + no blocks must NOT call Slack (no_text)
+
+
+async def test_make_status_funcs_posts_nonempty_or_blocks():
+    from fleetent.im_gateway import slack as slack_mod
+
+    client = MagicMock()
+    client.assistant_threads_setStatus = AsyncMock()
+    say = AsyncMock()
+    reply_func, _ = await slack_mod._make_status_funcs(client, "C1", "t1", say)
+    await reply_func("hi")
+    say.assert_awaited()  # non-empty text posts
+    say.reset_mock()
+    await reply_func("", blocks=[{"type": "section"}])
+    say.assert_awaited()  # blocks-only message still posts
