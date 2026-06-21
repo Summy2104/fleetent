@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import socket
 import subprocess
 from pathlib import Path
 from typing import Protocol
@@ -15,18 +16,24 @@ class BaseProcessBackend(Protocol):
 
     def is_alive(self, agent_name: str) -> int | None: ...
 
+    def gateway_port(self, agent_name: str) -> int | None: ...
+
 
 class LocalProcessBackend:
     def __init__(self, config: NodeConfig) -> None:
         self._config = config
+        self._gateway_ports: dict[str, int] = {}
 
     def spawn(self, agent_name: str, env: dict[str, str] | None = None) -> None:
+        port = self._gateway_ports.setdefault(agent_name, self._allocate_loopback_port())
         subprocess.Popen(
             [
                 "fleetent",
                 "agent",
                 "run",
                 agent_name,
+                "--port",
+                str(port),
                 "--home",
                 str(self._home_dir(agent_name)),
             ],
@@ -58,5 +65,14 @@ class LocalProcessBackend:
             return None
         return pid
 
+    def gateway_port(self, agent_name: str) -> int | None:
+        return self._gateway_ports.get(agent_name)
+
     def _home_dir(self, agent_name: str) -> Path:
         return self._config.home_dir / "agents" / agent_name
+
+    def _allocate_loopback_port(self) -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            sock.listen(1)
+            return int(sock.getsockname()[1])

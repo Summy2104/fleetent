@@ -573,8 +573,10 @@ def build_app(agent_name: str) -> FastAPI:
     _local_bearer = LocalBearerAdapter()
 
     def _authenticate(authorization: str = Header(default="")) -> Principal:  # noqa: B008
-        token = authorization.removeprefix("Bearer ").strip()
-        principal = _local_bearer(token) if authorization.startswith("Bearer ") else None
+        principal = None
+        if authorization.startswith("Bearer "):
+            token = authorization.removeprefix("Bearer ").strip()
+            principal = _local_bearer(token) or _validate_tui_token(authorization)
         if principal is None:
             raise HTTPException(status_code=401, detail="invalid or missing bearer token")
         return principal

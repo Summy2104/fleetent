@@ -8,6 +8,7 @@ references secrets by env-var name only (never plaintext) — so the agent is ru
 
 from __future__ import annotations
 
+import secrets
 import shutil
 import sqlite3
 from hashlib import sha256
@@ -41,6 +42,7 @@ if TYPE_CHECKING:
     from fleetent.knowledge_base.config import KnowledgeConfigSnapshot
 
 _logger = get_logger("agent_lifecycle.materialize")
+_TUI_TOKEN_ENV = "FLEETENT_TUI_TOKEN"
 
 
 def _active_version(agent: agent_store.Agent) -> int:
@@ -397,6 +399,22 @@ def _parse_env(text: str) -> dict[str, str]:
     return values
 
 
+def _ensure_managed_tui_token(existing: dict[str, str], *, agent_id: int | None) -> str | None:
+    """Return a managed agent's TUI token, persisting it through the secret store."""
+    if agent_id is None:
+        return None
+    if secret_store.status(agent_id, _TUI_TOKEN_ENV) == "set":
+        stored = secret_store.get_decrypted(agent_id, _TUI_TOKEN_ENV)
+        if stored:
+            return stored
+    token = existing.get(_TUI_TOKEN_ENV, "") or f"ma-{secrets.token_hex(32)}"
+    try:
+        secret_store.set(agent_id, _TUI_TOKEN_ENV, token, "materialize")
+    except secret_store.SecretKeyError:
+        pass
+    return token
+
+
 def _seed_env(
     home: Path,
     names: list[str],
@@ -411,6 +429,10 @@ def _seed_env(
     """
     env_path = home / ".env"
     existing = _parse_env(env_path.read_text(encoding="utf-8")) if env_path.exists() else {}
+    managed_tui_token = _ensure_managed_tui_token(
+        existing,
+        agent_id=source_agent.id if source_agent is not None else None,
+    )
     slots_by_env = (
         {slot.env_name: slot for slot in credential_slots.list_slots(source_agent)}
         if source_agent is not None
@@ -438,12 +460,14 @@ def _seed_env(
             # bare write_home (no store context): keep the operator value, never touch tables
             value = existing.get(name, "")
         lines.append(f"{name}={value}")
+    if managed_tui_token:
+        lines.append(f"{_TUI_TOKEN_ENV}={managed_tui_token}")
     # keep any operator-added vars not referenced by the definition
     excluded = exclude_existing or set()
     for key, val in existing.items():
         if key in excluded:
             continue
-        if key not in names:
+        if key != _TUI_TOKEN_ENV and key not in names:
             lines.append(f"{key}={val}")
     env_path.write_text("\n".join(lines) + "\n" if lines else "", encoding="utf-8")
 
