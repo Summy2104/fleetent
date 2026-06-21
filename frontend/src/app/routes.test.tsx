@@ -194,4 +194,21 @@ describe('admin routes', () => {
     const nav = within(screen.getByRole('navigation'));
     expect(nav.getByRole('link', { name: 'Chat' })).toHaveAttribute('href', '/chat');
   });
+
+  it('renders tenancy as a native route in the SPA', async () => {
+    server.use(
+      http.get('http://fleetent.test/admin/me', () =>
+        HttpResponse.json({ email: 'admin@fleetent.test', id: 'admin-1', role: 'admin' })
+      ),
+      http.get('http://fleetent.test/admin/tenancy/tenants', () => HttpResponse.json([])),
+      http.get('http://fleetent.test/admin/tenancy/teams', () => HttpResponse.json([])),
+      http.get('http://fleetent.test/admin/users', () => HttpResponse.json([]))
+    );
+
+    renderRoutes('/tenancy', 'session-token');
+
+    expect(await screen.findByRole('heading', { name: 'Tenancy' })).toBeInTheDocument();
+    const nav = within(screen.getByRole('navigation'));
+    expect(nav.getByRole('link', { name: 'Tenancy' })).toHaveAttribute('href', '/tenancy');
+  });
 });
