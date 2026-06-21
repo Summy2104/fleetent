@@ -160,4 +160,20 @@ describe('admin routes', () => {
     const nav = within(screen.getByRole('navigation'));
     expect(nav.getByRole('link', { name: 'Chat' })).toHaveAttribute('href', '/chat');
   });
+
+  it('renders nodes as a native route in the SPA', async () => {
+    server.use(
+      http.get('http://fleetent.test/admin/nodes', () => HttpResponse.json([])),
+      http.get('http://fleetent.test/admin/agents', ({ request }) => {
+        expect(new URL(request.url).searchParams.get('include_archived')).toBe('true');
+        return HttpResponse.json([]);
+      })
+    );
+
+    renderRoutes('/nodes', 'session-token');
+
+    expect(await screen.findByRole('heading', { name: 'Nodes' })).toBeInTheDocument();
+    const nav = within(screen.getByRole('navigation'));
+    expect(nav.getByRole('link', { name: 'Nodes' })).toHaveAttribute('href', '/nodes');
+  });
 });

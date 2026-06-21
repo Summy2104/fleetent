@@ -8,6 +8,7 @@ import { KnowledgeBasePage } from '@/features/kb/page';
 import { ConnectorsPage } from '@/features/connectors/page';
 import { SessionsPage } from '@/features/sessions/page';
 import { ProvidersPage } from '@/features/providers/page';
+import { NodesPage } from '@/features/nodes/page';
 import { UsersPage } from '@/features/users/page';
 import { ChatPage } from '@/features/chat/page';
 
@@ -169,6 +170,17 @@ function AppLayout(): JSX.Element {
                   isActive ? 'bg-primary text-primary-foreground' : 'bg-secondary/80 text-foreground',
                 ].join(' ')
               }
+              to="/nodes"
+            >
+              Nodes
+            </NavLink>
+            <NavLink
+              className={({ isActive }) =>
+                [
+                  'block rounded-xl px-4 py-3 text-sm font-medium transition-colors',
+                  isActive ? 'bg-primary text-primary-foreground' : 'bg-secondary/80 text-foreground',
+                ].join(' ')
+              }
               to="/users"
             >
               Users
@@ -220,6 +232,10 @@ function AppLayout(): JSX.Element {
             <Route
               element={<ConnectorsPage />}
               path="/connectors"
+            />
+            <Route
+              element={<NodesPage />}
+              path="/nodes"
             />
             <Route
               element={<UsersPage />}
