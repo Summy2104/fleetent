@@ -1,14 +1,14 @@
 ## 1. dev master key 助手（item 1）
 
-- [ ] 1.1 **测试（红）**：新增 `tests/unit/test_dev_secret_key.py`，对
+- [x] 1.1 **测试（红）**：新增 `tests/unit/test_dev_secret_key.py`，对
   `scripts/dev_secret_key.py::ensure_dev_secret_key(home)` 断言：(a) 首次调用在 `<home>/.dev_secret_key`
   生成一个**合法 Fernet key**（可被 `cryptography.fernet.Fernet(key)` 接受）；(b) 幂等——二次调用
   返回与首次**相同**的 key、不覆盖文件。用 `tmp_path` 作 home（纯文件 IO，归 unit）。先跑见红
   （助手尚不存在）。
-- [ ] 1.2 **实现（绿）**：写 `scripts/dev_secret_key.py`：`ensure_dev_secret_key(home)` 文件存在则读、
+- [x] 1.2 **实现（绿）**：写 `scripts/dev_secret_key.py`：`ensure_dev_secret_key(home)` 文件存在则读、
   否则 `Fernet.generate_key()` 写入并返回；`__main__` 入口打印 key（供 Makefile `$(shell ...)` 取用）。
   跑 1.1 见绿。
-- [ ] 1.3 Makefile 接线：`dev-bootstrap` 调用助手确保 key 存在；`DEV_TARGETS` export
+- [x] 1.3 Makefile 接线：`dev-bootstrap` 调用助手确保 key 存在；`DEV_TARGETS` export
   `FLEETENT_SECRET_KEY`（从 `<FLEETENT_HOME>/.dev_secret_key` 读）；`.dev_secret_key` 加入
   `.gitignore`。（Makefile wiring 无单测，靠 task 3.3 live 复跑实证。）
 

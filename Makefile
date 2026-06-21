@@ -103,9 +103,12 @@ $(DEV_TARGETS): export FLEETENT_HOME := $(FLEETENT_HOME)
 $(DEV_TARGETS): export DATABASE_URL := $(DATABASE_URL)
 $(DEV_TARGETS): export NODE_ID := $(NODE_ID)
 $(DEV_TARGETS): export NODE_PLATFORM_URL := $(NODE_PLATFORM_URL)
+$(DEV_TARGETS): export FLEETENT_SECRET_KEY := $(shell cat "$(FLEETENT_HOME)/.dev_secret_key" 2>/dev/null || true)
+$(DEV_TARGETS): export FLEETENT_FORWARDER_HOST_OVERRIDE := 127.0.0.1
 
 dev-bootstrap: ## Init dev home: migrate management DB + seed built-in admin
 	mkdir -p "$(FLEETENT_HOME)/data"
+	uv run python scripts/dev_secret_key.py
 	uv run alembic upgrade head
 	uv run fleetent admin seed-builtin-admin
 
