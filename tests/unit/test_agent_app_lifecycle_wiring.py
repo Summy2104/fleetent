@@ -115,3 +115,57 @@ async def test_start_infra_cleanup_failure_does_not_block_startup(tmp_path: Path
         await agent_app._start_infra(_agent_without_mcp(), tmp_path / "data")  # must not raise
 
     session_maint.assert_called_once()
+
+
+async def test_start_infra_skips_reflection_scheduler_when_disabled(tmp_path: Path) -> None:
+    with (
+        _NOOP_INIT_SCHEMA,
+        _NOOP_RECONCILE,
+        patch(
+            "fleetent.integrations.sandbox.enablement.get_effective_mode",
+            AsyncMock(return_value=Mode.OFF),
+        ),
+        patch("fleetent.session.manager.start_session_maintenance"),
+        patch("fleetent.reflection.scheduler.start_reflection_scheduler") as reflection_sched,
+    ):
+        agent = _agent_without_mcp()
+        agent.reflection.enabled = False
+        await agent_app._start_infra(agent, tmp_path / "data")
+
+    reflection_sched.assert_not_called()
+
+
+async def test_start_infra_starts_reflection_scheduler_when_enabled(tmp_path: Path) -> None:
+    with (
+        _NOOP_INIT_SCHEMA,
+        _NOOP_RECONCILE,
+        patch(
+            "fleetent.integrations.sandbox.enablement.get_effective_mode",
+            AsyncMock(return_value=Mode.OFF),
+        ),
+        patch("fleetent.session.manager.start_session_maintenance"),
+        patch("fleetent.reflection.scheduler.start_reflection_scheduler") as reflection_sched,
+    ):
+        agent = _agent_without_mcp()
+        agent.reflection.enabled = True
+        agent.reflection.interval_seconds = 12.5
+        agent.name = "support"
+        await agent_app._start_infra(agent, tmp_path / "data")
+
+    reflection_sched.assert_called_once_with(interval=12.5, scope="support")
+
+
+async def test_agent_runtime_stop_stops_reflection_scheduler() -> None:
+    with patch(
+        "fleetent.reflection.scheduler.stop_reflection_scheduler",
+        AsyncMock(),
+    ) as reflection_stop:
+        runtime = agent_app.AgentRuntime(
+            agent=MagicMock(),
+            supervisor=MagicMock(stop_all=AsyncMock()),
+            telegram_supervisor=MagicMock(stop_all=AsyncMock()),
+            scheduler=MagicMock(shutdown=AsyncMock()),
+        )
+        await runtime.stop()
+
+    reflection_stop.assert_awaited_once()

@@ -370,6 +370,15 @@ class SandboxSettings(BaseModel):
     multi_user: bool = True
 
 
+class ReflectionSettings(BaseModel):
+    """Per-agent reflection scheduler settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    interval_seconds: float = 86400.0
+
+
 class AgentFile(BaseModel):
     """Schema for a self-contained ``agent.yaml``."""
 
@@ -446,6 +455,7 @@ class AgentFile(BaseModel):
     session_max_total_mb: int = 1024
     session_max_count: int = 10000
     session_cleanup_interval_seconds: float = 3600.0
+    reflection: ReflectionSettings = Field(default_factory=ReflectionSettings)
     disabled_skills: list[str] = Field(default_factory=list)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     diagnostics: DiagnosticsSettings = Field(default_factory=DiagnosticsSettings)

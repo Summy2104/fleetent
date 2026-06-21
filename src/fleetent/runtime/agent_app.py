@@ -67,6 +67,9 @@ class AgentRuntime:
             await _stop_step("telegram_supervisor", self.telegram_supervisor.stop_all())
         if self.scheduler is not None:
             await _stop_step("scheduler", self.scheduler.shutdown())
+        from fleetent.reflection import scheduler as reflection_scheduler
+
+        await _stop_step("reflection_scheduler", reflection_scheduler.stop_reflection_scheduler())
 
 
 async def _stop_step(name: str, coro: Awaitable[None], timeout: float = 10.0) -> None:
@@ -330,6 +333,14 @@ async def _start_infra(
         except Exception as exc:  # noqa: BLE001 — MCP unavailable must not abort boot
             _logger.warn("agent_runtime_mcp_register_failed", error=str(exc))
     session_mgr.start_session_maintenance()
+    reflection_settings = getattr(agent, "reflection", None)
+    if reflection_settings is not None and getattr(reflection_settings, "enabled", False) is True:
+        from fleetent.reflection import scheduler as reflection_scheduler
+
+        reflection_scheduler.start_reflection_scheduler(
+            interval=reflection_settings.interval_seconds,
+            scope=agent.name,
+        )
     # Restart recovery: flag sessions active just before this (re)start so the next
     # request can be recognized as a resumed conversation. Best-effort — a scan
     # failure must never abort boot.
