@@ -547,16 +547,19 @@ async def route(msg: NormalizedMessage) -> None:
             await msg.reply_func(_REJECTION_MSG)
             return
 
-    # /user command: view/append/clear the per-agent user.md. Placed after the access
-    # gate (only authorized users may read or change the shared directives) and before
-    # the loop; a non-/user message returns None and proceeds normally. Tolerates a
-    # leading @mention so channel usage (`@bot /user ...`) is recognized too.
+    # Slash commands (/user /clear /compact /context /usage /cost) go through the shared
+    # dispatcher. Placed after the access gate (only authorized users may run them) and
+    # before the loop; a non-command returns None and proceeds normally. Tolerates a
+    # leading @mention so channel usage (`@bot /clear`) is recognized too.
     if agent is not None:
-        user_reply = user_instructions.handle_user_command(
-            agent.name, _strip_leading_mention(msg.text).strip()
+        from fleetent.runtime.commands import CommandContext, handle_command
+
+        cmd_reply = await handle_command(
+            CommandContext(agent_id=agent.name, session_id=msg.session_id, user_id=msg.user_id),
+            _strip_leading_mention(msg.text).strip(),
         )
-        if user_reply is not None:
-            await msg.reply_func(user_reply)
+        if cmd_reply is not None:
+            await msg.reply_func(cmd_reply)
             return
 
     from fleetent.integrations.sandbox import enablement as sandbox_enablement

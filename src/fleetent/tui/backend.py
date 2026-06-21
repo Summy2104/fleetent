@@ -105,9 +105,9 @@ class GatewayBackend:
     async def session_list(self) -> dict[str, Any]:
         return await self._request(p.METHOD_SESSION_LIST, {})
 
-    async def user(self, text: str) -> dict[str, Any]:
-        """View/append/clear the deployed agent's user.md via the ``/user`` command."""
-        return await self._request(p.METHOD_USER, {"text": text})
+    async def command(self, text: str) -> dict[str, Any]:
+        """Run a slash command (/user /clear /compact /context /usage /cost) server-side."""
+        return await self._request(p.METHOD_COMMAND, {"text": text})
 
     def _handle(self, raw: str) -> None:
         try:

@@ -96,6 +96,26 @@ async def test_user_view_when_empty(monkeypatch, tmp_path) -> None:
     assert replies and "尚未设置" in replies[0]
 
 
+async def test_clear_command_via_im(monkeypatch, tmp_path) -> None:
+    # A session command (not /user) flows through the shared dispatcher on the IM path.
+    _wire_common(monkeypatch, tmp_path)
+    cleared: list[str] = []
+
+    async def fake_clear(sid):
+        cleared.append(sid)
+
+    monkeypatch.setattr(session_mgr, "clear", fake_clear)
+    ran: list = []
+    monkeypatch.setattr(agent_loop, "run", lambda **k: (ran.append(k), _async("ok"))[1])
+
+    replies: list[str] = []
+    await normalizer.route(_msg("/clear", replies))
+
+    assert cleared == ["s1"]  # dispatcher invoked clear with this session
+    assert ran == []  # loop never ran
+    assert replies and "清空" in replies[0]
+
+
 async def test_normal_message_injects_user_md(monkeypatch, tmp_path) -> None:
     _wire_common(monkeypatch, tmp_path)
     # Seed a directive for agent "a".

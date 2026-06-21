@@ -11,7 +11,25 @@ from dataclasses import dataclass
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.document import Document
 
-KNOWN_COMMANDS = frozenset({"new", "session", "abort", "approve", "quit", "help", "user"})
+KNOWN_COMMANDS = frozenset(
+    {
+        "new",
+        "session",
+        "abort",
+        "approve",
+        "quit",
+        "help",
+        "user",
+        "clear",
+        "compact",
+        "context",
+        "usage",
+        "cost",
+    }
+)
+
+# Commands routed through the shared dispatcher (METHOD_COMMAND → handle_command).
+DISPATCHER_COMMANDS = frozenset({"user", "clear", "compact", "context", "usage", "cost"})
 
 
 @dataclass(frozen=True)

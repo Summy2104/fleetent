@@ -121,17 +121,18 @@ def main(argv: list[str] | None = None) -> None:
         )
         sys.exit(1)
 
-    # /user command: view/append/clear the deployed agent's user.md before the loop.
+    # Slash commands go through the shared dispatcher before the loop. CLI one-shot is
+    # stateless (session_id=None), so /user works but session commands return a hint.
     from fleetent import agent_config
-    from fleetent.runtime import user_instructions
+    from fleetent.runtime.commands import CommandContext, handle_command
 
     agent_config.scan()
     agent_id = agent_config.current().default_agent()
-    if agent_id:
-        user_reply = user_instructions.handle_user_command(agent_id, user_input)
-        if user_reply is not None:
-            print(user_reply)
-            return
+    ctx = CommandContext(agent_id=agent_id, session_id=None, user_id="default")
+    cmd_reply = asyncio.run(handle_command(ctx, user_input))
+    if cmd_reply is not None:
+        print(cmd_reply)
+        return
 
     print(run(user_input))
 
