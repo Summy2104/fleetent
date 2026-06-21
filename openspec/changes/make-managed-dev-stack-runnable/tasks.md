@@ -28,11 +28,11 @@
 
 ## 3. forwarder 地址 override（item 3）+ 收尾
 
-- [ ] 3.1 **测试（红）**：在 `tests/unit/test_platform_agent_gateway.py` 新增用例：
+- [x] 3.1 **测试（红）**：在 `tests/unit/test_platform_agent_gateway.py` 新增用例：
   `forwarder_contract.forwarder_base_url(node_id)` / `forwarder_ws_url(node_id)` 在设置
   `FLEETENT_FORWARDER_HOST_OVERRIDE` 时用 override host、未设时回落 `<node_id>.internal`
   默认契约（端口/scheme 不变）。用 monkeypatch.setenv。先跑见红。
-- [ ] 3.2 **实现（绿）**：改 `src/fleetent/node/forwarder_contract.py`：两函数 honor
+- [x] 3.2 **实现（绿）**：改 `src/fleetent/node/forwarder_contract.py`：两函数 honor
   `FLEETENT_FORWARDER_HOST_OVERRIDE`（设则用、否则 `<node_id>.internal`）。Makefile dev 目标
   export `FLEETENT_FORWARDER_HOST_OVERRIDE=127.0.0.1`。跑 3.1 见绿。
 - [ ] 3.3 **收尾**：`make test-pr` 全绿（对照 main 基线无新增失败）+ 相关测试
