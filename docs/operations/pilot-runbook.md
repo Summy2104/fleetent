@@ -232,7 +232,7 @@ docker compose up -d
 
 ```bash
 curl -fsS http://127.0.0.1:8765/health
-GET /admin/observability/traces?limit=5
+GET /admin/stats/agents/<agent_id>/overview
 uv run fleetent "hello"
 ```
 
@@ -242,13 +242,13 @@ uv run fleetent "hello"
 
 - 服务启动日志无配置错误、DB migration 错误或 secret 打印。
 - `/health` 返回 200。
-- `GET /admin/observability/traces?limit=5` 可执行。
+- `GET /admin/stats/agents/<agent_id>/overview` 可执行。
 - `fleetent "hello"` 产生一次可追踪 run；如果真实 LLM 未配置，应明确记录 `skipped` 或 `failed`。
 
 通过标准：
 
 - 服务可启动且 health check 通过。
-- 最小 CLI run 的结果能在 observability 中定位到。
+- 最小 CLI run 的结果能在 stats / trace 查询中定位到。
 
 失败判断：
 
@@ -266,32 +266,31 @@ uv run fleetent "hello"
 
 用户场景：
 
-- operator 接到“Agent 没有正确回答”或“connector 同步失败”的反馈，需要用 trace、usage、
-  performance 和 diagnostics 定位问题，但不能泄漏用户正文或凭据。
+- operator 接到“Agent 没有正确回答”或“connector 同步失败”的反馈，需要用 stats 聚合、
+  session trace 和 diagnostics 定位问题，但不能泄漏用户正文或凭据。
 
 操作步骤：
 
 1. 先执行一次最小 agent run，或选择本次验收中的任一测试 run。
-2. 查询 trace、usage、performance。
+2. 查询 overview、tools、session trace。
 3. 导出 diagnostics package。
 4. 检查 diagnostics manifest 和内容边界。
 
 命令：
 
 ```bash
-GET /admin/observability/traces?limit=20
-GET /admin/observability/traces?event_type=agent_run_failed&limit=50
-GET /admin/observability/usage?limit=100
-GET /admin/observability/performance?limit=100
+GET /admin/stats/agents/<agent_id>/overview
+GET /admin/stats/agents/<agent_id>/tools
+GET /admin/stats/sessions/<session_id>/trace
 uv run fleetent admin diagnostics export
 uv run fleetent admin diagnostics retention dry-run
 ```
 
 应该看到什么：
 
-- traces 里能看到 run id、event type、时间、状态和 payload key summary。
-- usage 里能看到 run count、token usage 和 by-model summary。
-- performance 里能看到失败率、延迟、LLM / tool / fallback / permission 指标。
+- overview 里能看到 usage、approvals 和 cost 聚合。
+- tools 里能看到工具调用与错误概览。
+- session trace 里能看到单次会话的事件详情。
 - diagnostics package 包含 manifest、logs、trace / usage / performance 摘要、connector status、
   environment 和 config summary。
 - diagnostics package 不包含 prompt、reply、tool payload、memory 内容、KB 文档正文 / chunks、
@@ -299,13 +298,13 @@ uv run fleetent admin diagnostics retention dry-run
 
 通过标准：
 
-- operator 能用 trace 定位一次 run。
-- usage 和 performance 输出能支持问题排查。
+- operator 能用 session trace 定位一次 run。
+- overview 和 tools 输出能支持问题排查。
 - diagnostics 脱敏边界符合要求。
 
 失败判断：
 
-- trace / usage / performance 不可查询：Pilot blocker 候选。
+- overview / tools / session trace 不可查询：Pilot blocker 候选。
 - diagnostics 泄漏 secret 或业务正文：No-Go。
 - retention dry-run 删除或修改数据：No-Go。
 
