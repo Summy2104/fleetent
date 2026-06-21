@@ -60,10 +60,6 @@ describe('admin routes', () => {
       'href',
       '/admin/ui-legacy#kb'
     );
-    expect(nav.getByRole('link', { name: 'Connectors' })).toHaveAttribute(
-      'href',
-      '/admin/ui-legacy#oauth'
-    );
     expect(nav.getByRole('link', { name: 'Statistics' })).toHaveAttribute(
       'href',
       '/admin/ui-legacy#stats'
@@ -104,5 +100,25 @@ describe('admin routes', () => {
 
     expect(await screen.findByRole('heading', { name: 'Users' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Users' })).toHaveAttribute('href', '/users');
+  });
+
+  it('renders connectors as a native route and removes the legacy connectors link', async () => {
+    server.use(
+      http.get('http://fleetent.test/admin/connectors', () => HttpResponse.json([])),
+      http.get('http://fleetent.test/admin/connectors/grants', () =>
+        HttpResponse.json({ grants: [], consent_hint: 'browser flow required' })
+      ),
+      http.get('http://fleetent.test/admin/mcp/servers', () => HttpResponse.json([])),
+      http.get('http://fleetent.test/admin/mcp/doctor', () => HttpResponse.json({ checks: [] }))
+    );
+
+    renderRoutes('/connectors', 'session-token');
+
+    expect(await screen.findByRole('heading', { name: 'Connectors' })).toBeInTheDocument();
+    const nav = within(screen.getByRole('navigation'));
+    const connectorLinks = nav.getAllByRole('link', { name: 'Connectors' });
+    expect(connectorLinks).toHaveLength(1);
+    expect(connectorLinks[0]).toHaveAttribute('href', '/connectors');
+    expect(nav.getByRole('link', { name: 'Skills' })).toHaveAttribute('href', '/admin/ui-legacy#skills');
   });
 });

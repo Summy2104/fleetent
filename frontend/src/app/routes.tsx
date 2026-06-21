@@ -3,6 +3,7 @@ import { Navigate, NavLink, Route, Routes, useNavigate } from 'react-router-dom'
 
 import { useAuthSession } from '@/app/auth';
 import { AgentsPage } from '@/features/agents/page';
+import { ConnectorsPage } from '@/features/connectors/page';
 import { SessionsPage } from '@/features/sessions/page';
 import { ProvidersPage } from '@/features/providers/page';
 import { UsersPage } from '@/features/users/page';
@@ -12,7 +13,6 @@ import { UsersPage } from '@/features/users/page';
 const legacyLinks: Array<{ href: string; label: string }> = [
   { href: '/admin/ui-legacy#skills', label: 'Skills' },
   { href: '/admin/ui-legacy#kb', label: 'Knowledge Base' },
-  { href: '/admin/ui-legacy#oauth', label: 'Connectors' },
   { href: '/admin/ui-legacy#stats', label: 'Statistics' },
 ];
 
@@ -133,6 +133,17 @@ function AppLayout(): JSX.Element {
                   isActive ? 'bg-primary text-primary-foreground' : 'bg-secondary/80 text-foreground',
                 ].join(' ')
               }
+              to="/connectors"
+            >
+              Connectors
+            </NavLink>
+            <NavLink
+              className={({ isActive }) =>
+                [
+                  'block rounded-xl px-4 py-3 text-sm font-medium transition-colors',
+                  isActive ? 'bg-primary text-primary-foreground' : 'bg-secondary/80 text-foreground',
+                ].join(' ')
+              }
               to="/users"
             >
               Users
@@ -161,6 +172,10 @@ function AppLayout(): JSX.Element {
             <Route
               element={<ProvidersPage />}
               path="/providers"
+            />
+            <Route
+              element={<ConnectorsPage />}
+              path="/connectors"
             />
             <Route
               element={<UsersPage />}
