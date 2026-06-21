@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.document import Document
 
-KNOWN_COMMANDS = frozenset({"new", "session", "abort", "approve", "quit", "help"})
+KNOWN_COMMANDS = frozenset({"new", "session", "abort", "approve", "quit", "help", "user"})
 
 
 @dataclass(frozen=True)
