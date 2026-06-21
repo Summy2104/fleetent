@@ -12,8 +12,11 @@ from tests.integration._migration_template import apply_migrations
 
 @pytest.fixture
 def db_path(tmp_path, monkeypatch):
+    from cryptography.fernet import Fernet
+
     db_path = tmp_path / "management.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("FLEETENT_SECRET_KEY", Fernet.generate_key().decode("ascii"))
     apply_migrations(db_path)
     return db_path
 

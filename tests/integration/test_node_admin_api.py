@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 import fleetent.agent_store as agent_store
@@ -14,6 +15,7 @@ def _client(tmp_path, monkeypatch) -> TestClient:
     db_path = tmp_path / "management.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("FLEETENT_SECRET_KEY", Fernet.generate_key().decode("ascii"))
     apply_migrations(db_path)
     return TestClient(app, raise_server_exceptions=True)
 

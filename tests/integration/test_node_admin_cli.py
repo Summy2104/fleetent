@@ -3,6 +3,8 @@ from __future__ import annotations
 from io import StringIO
 from unittest.mock import patch
 
+from cryptography.fernet import Fernet
+
 from fleetent import agent_store
 from tests.integration._migration_template import apply_migrations
 
@@ -27,6 +29,7 @@ def _run_admin(*args: str) -> tuple[str, str, int]:
 def test_node_admin_cli_register_list_pin_unpin_and_deregister(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "management.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("FLEETENT_SECRET_KEY", Fernet.generate_key().decode("ascii"))
     apply_migrations(db_path)
     agent = agent_store.create_agent("ops", "Ops.", ["shell"])
 

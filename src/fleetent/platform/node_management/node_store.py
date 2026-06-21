@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import logging
 import secrets
 import sqlite3
 from contextlib import suppress
@@ -17,6 +18,7 @@ from fleetent.user_store import _hash_key
 _COLS = "id, name, key_hash, labels, registered_at, last_seen_at, created_at, updated_at"
 _STATUS_COLS = "agent_id, node_id, phase, pid, health, detail, reported_at"
 _NODE_KEY_CACHE: dict[str, str] = {}
+_logger = logging.getLogger(__name__)
 
 
 def _database() -> SQLiteDatabase:
@@ -76,8 +78,19 @@ def register_node(
     except sqlite3.IntegrityError as exc:
         raise ValueError(f"node {node_id!r} already exists") from exc
     _NODE_KEY_CACHE[node_id] = plaintext
-    with suppress(Exception):
+    try:
         secret_store.set(None, _node_service_key_env(node_id), plaintext, "node.register")
+    except Exception as exc:
+        _logger.error(
+            "Failed to persist service key for node %r — check FLEETENT_SECRET_KEY or secret "
+            "backend: %s",
+            node_id,
+            exc,
+        )
+        _NODE_KEY_CACHE.pop(node_id, None)
+        with suppress(Exception):
+            _database().execute("DELETE FROM nodes WHERE id = :id", {"id": node_id})
+        raise
     node = get_node(node_id)
     assert node is not None
     return plaintext, node

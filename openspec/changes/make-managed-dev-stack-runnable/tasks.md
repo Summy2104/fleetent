@@ -14,15 +14,15 @@
 
 ## 2. register 不吞 key 持久化失败（item 2）
 
-- [ ] 2.1 **测试（红）**：在 `tests/integration/test_node_store.py` 新增用例：当 service key 的
+- [x] 2.1 **测试（红）**：在 `tests/integration/test_node_store.py` 新增用例：当 service key 的
   secret 持久化失败时（patch `secret_store.set` 抛异常，或不提供 `FLEETENT_SECRET_KEY` 触发
   `SecretKeyError`），`register_node` SHALL 抛出可诊断错误、且不在 `nodes` 表留下记录 / 不返回
   明文。先在当前代码跑：**必须见红**（现状是 suppress 吞掉、register 假成功）。
-- [ ] 2.2 **实现（绿）**：改 `src/fleetent/platform/node_management/node_store.py` 的
+- [x] 2.2 **实现（绿）**：改 `src/fleetent/platform/node_management/node_store.py` 的
   `register_node`：去掉 `with suppress(Exception)` 包裹的 `secret_store.set`；改为捕获 → `logger.error`
   明确信息（指明缺 master key / secret 后端问题）+ `raise`，使 register 整体失败。确保失败时不
   残留半成品 node（如先 set 再 insert，或失败后清理）。跑 2.1 见绿。
-- [ ] 2.3 核对既有 register 用例（`tests/integration/test_node_store.py` 正常路径、
+- [x] 2.3 核对既有 register 用例（`tests/integration/test_node_store.py` 正常路径、
   `tests/unit/test_node_admin_cli.py`、`test_node_admin_api.py`）：master key 就绪的正常登记仍绿；
   如有依赖"register 永不抛"的用例需按新语义更新（保持其原意）。
 
