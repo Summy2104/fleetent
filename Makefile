@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := help
 
 .PHONY: help install test t test-pr test-unit test-unit-ci test-coverage-ci test-integration test-e2e test-evaluation test-layers lint fmt check typecheck admin \
+	frontend-install frontend-build test-frontend \
 	dev-bootstrap platform node-provision node kb-worker agent chat dev-clean
 
 help:
@@ -68,6 +69,17 @@ typecheck: ## Type-check with mypy
 	uv run mypy src
 
 check: lint typecheck ## Run lint + typecheck
+
+frontend-install: ## Install frontend dependencies
+	yarn --cwd frontend install --frozen-lockfile
+
+frontend-build: ## Build frontend static assets
+	yarn --cwd frontend build
+
+test-frontend: ## Run frontend tests, coverage, typecheck, and lint
+	yarn --cwd frontend vitest run --coverage
+	yarn --cwd frontend tsc --noEmit
+	yarn --cwd frontend eslint .
 
 admin: ## Show admin CLI help
 	uv run fleetent admin --help
