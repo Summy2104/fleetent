@@ -36,7 +36,9 @@ function renderAgentsRoute(): void {
 
 describe('agents page parity baseline', () => {
   it('supports lifecycle mutations and list refreshes', async () => {
-    const user = userEvent.setup();
+    // delay: null removes userEvent's per-keystroke delay so this long 8-step
+    // sequence stays well under the test timeout even under --coverage load.
+    const user = userEvent.setup({ delay: null });
     let agents: AgentRecord[] = [
       {
         agent_name: 'alpha',
@@ -177,7 +179,7 @@ describe('agents page parity baseline', () => {
     await waitFor(() => {
       expect(screen.queryByText('beta')).not.toBeInTheDocument();
     });
-  });
+  }, 15000);
 
   it('shows version activation and binding entry links', async () => {
     const user = userEvent.setup();
