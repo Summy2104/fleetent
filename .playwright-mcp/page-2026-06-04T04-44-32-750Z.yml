@@ -1,9 +1,0 @@
-- generic [active] [ref=e1]:
-  - generic [ref=e3]:
-    - heading "Fleetent" [level=2] [ref=e4]
-    - paragraph [ref=e5]: Sign in to the fleetent Admin console
-    - generic [ref=e6]:
-      - textbox "Username" [ref=e7]
-      - textbox "Password" [ref=e8]
-      - button "Log in" [ref=e9] [cursor=pointer]
-  - text: ▶
