@@ -37,7 +37,12 @@ describe('admin routes', () => {
 
     expect(await screen.findByRole('heading', { name: 'Agents' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Agents' })).toHaveAttribute('href', '/agents');
-    expect(screen.getByRole('link', { name: 'Providers' })).toHaveAttribute('href', '/providers');
+    expect(screen.getByRole('link', { name: 'Sessions' })).toHaveAttribute('href', '/sessions');
+    expect(screen.getByRole('link', { name: 'Users' })).toHaveAttribute('href', '/users');
+    expect(screen.getByRole('link', { name: 'Providers' })).toHaveAttribute(
+      'href',
+      '/providers'
+    );
   });
 
   it('renders providers as a native route instead of a legacy deep link', async () => {
@@ -46,10 +51,7 @@ describe('admin routes', () => {
     renderRoutes('/providers', 'session-token');
 
     expect(await screen.findByRole('heading', { name: 'Providers' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Providers' })).toHaveAttribute(
-      'href',
-      '/providers'
-    );
+    expect(screen.getByRole('link', { name: 'Providers' })).toHaveAttribute('href', '/providers');
   });
 
   it('renders sessions as a native route in the SPA', async () => {
@@ -64,5 +66,18 @@ describe('admin routes', () => {
 
     expect(await screen.findByRole('heading', { name: 'Sessions' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Sessions' })).toHaveAttribute('href', '/sessions');
+  });
+
+  it('renders the users page as a native route', async () => {
+    server.use(
+      http.get('http://fleetent.test/admin/users', () => HttpResponse.json([])),
+      http.get('http://fleetent.test/admin/im-users', () => HttpResponse.json([])),
+      http.get('http://fleetent.test/admin/users/u1/keys', () => HttpResponse.json([]))
+    );
+
+    renderRoutes('/users', 'session-token');
+
+    expect(await screen.findByRole('heading', { name: 'Users' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Users' })).toHaveAttribute('href', '/users');
   });
 });

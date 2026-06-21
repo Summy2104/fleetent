@@ -14,6 +14,9 @@ async function parseResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     throw new Error(`request failed: ${response.status}`);
   }
+  if (response.status === 204) {
+    return undefined as T;
+  }
   return (await response.json()) as T;
 }
 

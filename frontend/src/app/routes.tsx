@@ -5,6 +5,7 @@ import { useAuthSession } from '@/app/auth';
 import { AgentsPage } from '@/features/agents/page';
 import { SessionsPage } from '@/features/sessions/page';
 import { ProvidersPage } from '@/features/providers/page';
+import { UsersPage } from '@/features/users/page';
 
 const legacyLinks: Array<{ href: string; label: string }> = [];
 
@@ -118,6 +119,17 @@ function AppLayout(): JSX.Element {
             >
               Providers
             </NavLink>
+            <NavLink
+              className={({ isActive }) =>
+                [
+                  'block rounded-xl px-4 py-3 text-sm font-medium transition-colors',
+                  isActive ? 'bg-primary text-primary-foreground' : 'bg-secondary/80 text-foreground',
+                ].join(' ')
+              }
+              to="/users"
+            >
+              Users
+            </NavLink>
             {legacyLinks.map((item) => (
               <a
                 className="block rounded-xl bg-secondary/50 px-4 py-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
@@ -142,6 +154,10 @@ function AppLayout(): JSX.Element {
             <Route
               element={<ProvidersPage />}
               path="/providers"
+            />
+            <Route
+              element={<UsersPage />}
+              path="/users"
             />
             <Route
               element={
