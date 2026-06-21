@@ -5,8 +5,6 @@ management behaviour (gating, reference protection, audit, role guards) rather
 than engine semantics. Covers platform.md scenarios 47-57.
 """
 
-from pathlib import Path
-
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -309,14 +307,6 @@ def test_skill_proposal_actions_removed_but_list_and_diff_remain() -> None:
     assert "/admin/skills/proposals/{proposal_id}/diff" in paths
     assert "/admin/skills/proposals/{proposal_id}/approve" not in paths
     assert "/admin/skills/proposals/{proposal_id}/reject" not in paths
-
-    admin_html = (
-        Path(__file__).parents[2] / "src" / "fleetent" / "static" / "admin.html"
-    ).read_text(encoding="utf-8")
-    assert "/skills/proposals" in admin_html
-    assert "/diff" in admin_html
-    assert "/approve" not in admin_html
-    assert "/reject" not in admin_html
 
 
 def test_list_proposals_uses_reflection(client, monkeypatch):

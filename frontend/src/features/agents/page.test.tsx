@@ -53,15 +53,10 @@ function renderAgentsRoute(): void {
   );
 }
 
-function expectNoLegacyBindingLinks(): void {
+function expectNoBindingLinks(): void {
   const bindingsPanel = screen.getByRole('heading', { name: 'Agent Bindings' }).closest('aside');
   expect(bindingsPanel).not.toBeNull();
-  for (const link of within(bindingsPanel as HTMLElement).queryAllByRole('link')) {
-    expect(link).not.toHaveAttribute(
-      'href',
-      expect.stringContaining('/admin/ui-legacy#')
-    );
-  }
+  expect(within(bindingsPanel as HTMLElement).queryAllByRole('link')).toHaveLength(0);
 }
 
 function installAgentBindingHandlers({
@@ -644,7 +639,7 @@ describe('agents page parity baseline', () => {
       expect(secretsControls.getByText('unset')).toBeInTheDocument();
     });
 
-    expectNoLegacyBindingLinks();
+    expectNoBindingLinks();
   }, 15000);
 
   it('keeps viewers read-only across all binding sections', async () => {
@@ -709,6 +704,6 @@ describe('agents page parity baseline', () => {
     expect(panel.queryByLabelText('Allow DMs')).not.toBeInTheDocument();
     expect(panel.queryByLabelText('Secret value for FLEETENT_ALPHA_API_KEY')).not.toBeInTheDocument();
 
-    expectNoLegacyBindingLinks();
+    expectNoBindingLinks();
   });
 });

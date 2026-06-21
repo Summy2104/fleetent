@@ -35,7 +35,7 @@ def _make_client(tmp_path, monkeypatch, dist_dir: Path | None) -> TestClient:
     return TestClient(server.app)
 
 
-def test_admin_ui_spa_and_legacy_routes_do_not_shadow_api(client: TestClient) -> None:
+def test_admin_ui_spa_and_missing_legacy_route_do_not_shadow_api(client: TestClient) -> None:
     root = client.get("/admin/ui")
     assert root.status_code == 200
     assert "frontend-shell" in root.text
@@ -45,8 +45,7 @@ def test_admin_ui_spa_and_legacy_routes_do_not_shadow_api(client: TestClient) ->
     assert "frontend-shell" in deep_link.text
 
     legacy = client.get("/admin/ui-legacy")
-    assert legacy.status_code == 200
-    assert 'data-tab="users"' in legacy.text
+    assert legacy.status_code == 404
 
     api = client.get("/admin/me")
     assert api.status_code == 401

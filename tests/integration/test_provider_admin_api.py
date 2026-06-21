@@ -4,8 +4,6 @@ model-router / observability seams are monkeypatched so the tests exercise the
 management behaviour (CRUD, masking, route orchestration, role guards, audit).
 """
 
-from pathlib import Path
-
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -209,11 +207,6 @@ def test_provider_routes_ui_and_router_entries_removed() -> None:
     assert "/admin/providers/routes" not in paths
     assert "/admin/providers/routes/{task_type}" not in paths
     assert "/admin/providers/routes/{task_type}/preview" not in paths
-
-    admin_html = (
-        Path(__file__).parents[2] / "src" / "fleetent" / "static" / "admin.html"
-    ).read_text(encoding="utf-8")
-    assert '"/providers/routes"' not in admin_html
 
 
 # --- health probe state view (4.7/4.8) --------------------------------------

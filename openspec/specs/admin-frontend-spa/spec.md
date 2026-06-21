@@ -1,5 +1,8 @@
-## ADDED Requirements
+# admin-frontend-spa Specification
 
+## Purpose
+定义平台管理 SPA 的工程形态、静态构建与 FastAPI 托管约束、认证与数据层行为，以及各管理域迁移完成后的前端能力基线，确保 `/admin/ui` 成为唯一且可验证的管理入口。
+## Requirements
 ### Requirement: SPA 工程与构建产物
 
 平台管理控制台 SHALL 由仓库根 `frontend/` 下的 React + TypeScript + Vite 工程构建。构建 MUST 产出**纯静态资源**(`frontend/dist/`),运行时 MUST NOT 依赖 Node 进程。`dist/` MUST 被 gitignore 并在 CI/打包期由 `yarn build` 生成。包管理 MUST 用 yarn(锁文件入库)。
@@ -10,19 +13,19 @@
 - **THEN** 生成 `frontend/dist/`,内含 `index.html` 与打包后的 JS/CSS 静态资源
 - **AND** 资源不引用任何外部 CDN / 运行时外链
 
-### Requirement: FastAPI 托管 SPA 且不遮蔽 API 与 legacy
+### Requirement: FastAPI 托管 SPA 且不遮蔽 API
 
-平台 SHALL 在 `/admin/ui` 托管构建出的 SPA,并对 `/admin/ui` 下的未知子路径回落到 SPA 的 `index.html`(client-side 路由)。该 fallback MUST NOT 遮蔽 `/admin/*` 的 admin API 端点,也 MUST NOT 遮蔽 `/admin/ui-legacy`。
+平台 SHALL 在 `/admin/ui` 托管构建出的 SPA,并对 `/admin/ui` 下的未知子路径回落到 SPA 的 `index.html`(client-side 路由)。该 fallback MUST NOT 遮蔽 `/admin/*` 的 admin API 端点。
 
 #### Scenario: 深链命中 SPA fallback
 
 - **WHEN** 浏览器直接访问 `/admin/ui/agents` 这类 client-side 路由
 - **THEN** 平台返回 SPA 的 `index.html`,由前端路由渲染对应页面
 
-#### Scenario: API 与 legacy 不被 fallback 吞掉
+#### Scenario: API 不被 fallback 吞掉
 
-- **WHEN** 请求命中某个 `/admin/<resource>` API 端点或 `/admin/ui-legacy`
-- **THEN** 平台返回该 API / legacy 页面本身,而非 SPA 的 `index.html`
+- **WHEN** 请求命中某个 `/admin/<resource>` API 端点
+- **THEN** 平台返回该 API 本身,而非 SPA 的 `index.html`
 
 ### Requirement: Deployed platform serves the built SPA from a resolvable dist
 
@@ -42,20 +45,6 @@ The platform SHALL resolve the admin SPA dist directory in a deployment-robust w
 
 - **WHEN** no built dist is found at the resolved location
 - **THEN** `/admin/ui` returns a 503 with a clear "frontend not built" message (not a blank/200 page)
-
-### Requirement: 新旧前端共存与切换
-
-重构期间平台 SHALL 同时提供新 SPA 与旧前端:旧 `admin.html` MUST 在 `/admin/ui-legacy` 全功能可达;`/admin/ui` MUST 服务新 SPA;新 SPA 中**尚未迁移**的领域导航 MUST 深链到 `/admin/ui-legacy` 对应位置,使运维在迁移任意阶段都有完整功能。
-
-#### Scenario: 未迁移域回落 legacy
-
-- **WHEN** 运维在新 SPA 中点击一个尚未迁移的领域(如 providers)
-- **THEN** 导航跳转到 `/admin/ui-legacy` 中该领域的功能,而非空白或报错
-
-#### Scenario: legacy 持续可用
-
-- **WHEN** 运维直接打开 `/admin/ui-legacy`
-- **THEN** 旧管理台全部功能照常可用(直到所有域迁完的后续 change 才移除)
 
 ### Requirement: SPA 认证与会话流
 
@@ -102,3 +91,4 @@ The platform SHALL resolve the admin SPA dist directory in a deployment-robust w
 
 - **WHEN** Playwright 对真实托管的 SPA 跑烟测:登录 → 进入 agents 页
 - **THEN** agents 列表成功渲染,证明「构建 → FastAPI 托管 → 认证 → 数据层 → 页面」整条链路连通
+

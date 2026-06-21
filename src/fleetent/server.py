@@ -64,7 +64,6 @@ from fleetent.tools.plugin_loader import load_plugins
 logger = logging.getLogger(__name__)
 
 ADMIN_UI_DIST_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"
-LEGACY_ADMIN_UI_PATH = Path(__file__).resolve().parent / "static" / "admin.html"
 
 
 def _admin_login_url(router_prefix: str) -> str:
@@ -260,10 +259,6 @@ def _admin_ui_dist_dir() -> Path:
     return ADMIN_UI_DIST_DIR
 
 
-def _legacy_admin_html() -> str:
-    return LEGACY_ADMIN_UI_PATH.read_text(encoding="utf-8")
-
-
 def _serve_spa_file(asset_path: str) -> Response:
     root = _admin_ui_dist_dir().resolve()
     requested = (root / asset_path).resolve()
@@ -280,11 +275,6 @@ def _serve_spa_file(asset_path: str) -> Response:
     return HTMLResponse(
         index_path.read_text(encoding="utf-8"), headers={"Cache-Control": "no-store"}
     )
-
-
-@app.get("/admin/ui-legacy", response_class=HTMLResponse)
-def admin_ui_legacy() -> Response:
-    return HTMLResponse(_legacy_admin_html(), headers={"Cache-Control": "no-store"})
 
 
 @app.get("/admin/ui", response_class=HTMLResponse)

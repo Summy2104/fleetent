@@ -5,11 +5,9 @@ Authentication uses a login session token in the Authorization header:
 This router does not import the agent loop, so it is testable in isolation.
 """
 
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
-from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from fleetent import audit_log, auth, user_store
@@ -20,7 +18,6 @@ router = APIRouter(prefix="/admin")
 
 IDLE_TIMEOUT_SECONDS = 1800
 _ADMIN_ROLES = {"admin", "built_in_admin"}
-_UI_PATH = Path(__file__).parents[2] / "static" / "admin.html"
 
 
 def _session_user(authorization: str | None, allow_must_reset: bool = False) -> user_store.User:
@@ -60,19 +57,6 @@ class LoginBody(BaseModel):
 
 class ChangePasswordBody(BaseModel):
     new_password: str
-
-
-@router.get("/ui", response_class=HTMLResponse)
-def admin_ui() -> HTMLResponse:
-    """Serve the self-contained admin console (vanilla JS, calls the JSON API).
-
-    no-store: the SPA is a single HTML doc that changes on every deploy; without this
-    browsers heuristically cache it (no Last-Modified/ETag) and serve stale UI.
-    """
-    return HTMLResponse(
-        _UI_PATH.read_text(encoding="utf-8"),
-        headers={"Cache-Control": "no-store"},
-    )
 
 
 def _resolve_login_user(identifier: str) -> user_store.User | None:
