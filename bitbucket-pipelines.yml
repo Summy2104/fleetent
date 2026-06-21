@@ -20,13 +20,12 @@ definitions:
           - make test-unit-ci
     - step: &frontend-gate
         name: frontend gate
+        # Node + make ship in the default node:22 image (Debian buildpack-deps base),
+        # so we skip the per-run apt/nodesource install the python:3.12 image needed.
+        image: node:22
         caches:
           - yarn
         script:
-          - apt-get update
-          - apt-get install -y curl ca-certificates gnupg
-          - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-          - apt-get install -y nodejs
           - corepack enable
           - yarn --version
           - make frontend-install
@@ -46,13 +45,16 @@ definitions:
 pipelines:
   pull-requests:
     '**':
-      - step: *unit-coverage
-      - step: *frontend-gate
+      # Independent gates: run concurrently so wall-clock is max(), not sum().
+      - parallel:
+          - step: *unit-coverage
+          - step: *frontend-gate
 
   branches:
     main:
-      - step: *unit-coverage
-      - step: *frontend-gate
+      - parallel:
+          - step: *unit-coverage
+          - step: *frontend-gate
 
   custom:
     integration-tests:
