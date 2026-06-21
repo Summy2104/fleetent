@@ -13,6 +13,9 @@ definitions:
           - pip install uv
           - export ANTHROPIC_API_KEY=test-key
           - uv sync --frozen --group dev
+          # Enforce the unit/integration layer boundary in CI (fast static scan,
+          # runs before the heavier coverage step so a misclassified test fails fast).
+          - make test-layers
           - uv run alembic upgrade head
           - make test-unit-ci
     - step: &frontend-gate
