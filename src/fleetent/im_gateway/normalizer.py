@@ -392,6 +392,9 @@ async def _resume_pending_in_session(
         agent_name=agent.name if agent else None,
         features=agent_features or {},
         session_id=session_id,
+        # scope_key mirrors the normal turn (loop.py) so /workspace arg translation and
+        # /exchange attribution apply to the resumed (approved) tool, not just live turns.
+        scope_key=agent_loop.resolve_scope_key(session_id, agent.name if agent else None),
         session_context=session_context,
         outbound_connectors=msg.outbound_connectors,
         run_id=str(uuid.uuid4()),

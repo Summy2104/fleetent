@@ -283,7 +283,7 @@ def _append_delivery_trailer(reply: str, tool_context: Any) -> str:
     return reply
 
 
-def _resolve_scope_key(session_id: str | None, agent_name: str | None) -> str | None:
+def resolve_scope_key(session_id: str | None, agent_name: str | None) -> str | None:
     """The workspace scope key for /exchange attribution (D0), mirroring /workspace.
 
     Reads the process sandbox manager's resolved scope so MCP-produced artifacts are
@@ -1743,7 +1743,7 @@ async def _run_inner(
         agent_name=agent_name,
         features=agent_features or {},
         session_id=session_id,
-        scope_key=_resolve_scope_key(session_id, agent_name),
+        scope_key=resolve_scope_key(session_id, agent_name),
         run_id=run_id,
         delivery_ledger=delivery_ledger,
         session_context=session_context,
@@ -2280,7 +2280,7 @@ async def run_stream(
         agent_name=agent_name,
         features=agent_features or {},
         session_id=session_id,
-        scope_key=_resolve_scope_key(session_id, agent_name),
+        scope_key=resolve_scope_key(session_id, agent_name),
         delivery_ledger=_stream_delivery_ledger,
         session_context=session_context,
         principal=principal,
