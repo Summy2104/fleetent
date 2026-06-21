@@ -82,3 +82,37 @@ def test_chat_nonempty_allowed_tools_passes_list(monkeypatch, tmp_path):
 
     assert resp.status_code == 200
     assert captured["allowed_tools"] == ["web_search"]
+
+
+def test_chat_accepts_tui_token_when_local_api_key_auth_missing(monkeypatch, tmp_path):
+    """Managed-agent ingress uses FLEETENT_TUI_TOKEN for /chat, not local api_keys."""
+    agents_dir = tmp_path / "agents"
+    _write_agent(agents_dir, "mybot", allowed_tools=[])
+    agent_config.scan(agents_dir)
+    monkeypatch.setenv("FLEETENT_TUI_TOKEN", "ma-chat-token")
+
+    captured: dict = {}
+
+    async def fake_run_stream(message, **kwargs):
+        captured["principal"] = kwargs.get("principal")
+        yield '{"type":"text","content":"ok"}'
+
+    monkeypatch.setattr(loop_mod, "run_stream", fake_run_stream)
+    monkeypatch.setattr(agent_app.LocalBearerAdapter, "__call__", lambda self, _token: None)
+
+    client = TestClient(agent_app.build_app("mybot"), raise_server_exceptions=True)
+
+    ok = client.post(
+        "/chat",
+        json={"message": "hi"},
+        headers={"Authorization": "Bearer ma-chat-token"},
+    )
+    rejected = client.post(
+        "/chat",
+        json={"message": "hi"},
+        headers={"Authorization": "Bearer wrong-token"},
+    )
+
+    assert ok.status_code == 200
+    assert captured["principal"] == Principal(user_id="local", tenant_id="default")
+    assert rejected.status_code == 401

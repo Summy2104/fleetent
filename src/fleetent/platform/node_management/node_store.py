@@ -6,14 +6,17 @@ import datetime
 import json
 import secrets
 import sqlite3
+from contextlib import suppress
 from typing import Any
 
 from fleetent.config import Settings
 from fleetent.db import SQLiteDatabase, create_database
+from fleetent.platform.agent_lifecycle import secret_store
 from fleetent.user_store import _hash_key
 
 _COLS = "id, name, key_hash, labels, registered_at, last_seen_at, created_at, updated_at"
 _STATUS_COLS = "agent_id, node_id, phase, pid, health, detail, reported_at"
+_NODE_KEY_CACHE: dict[str, str] = {}
 
 
 def _database() -> SQLiteDatabase:
@@ -72,6 +75,9 @@ def register_node(
             )
     except sqlite3.IntegrityError as exc:
         raise ValueError(f"node {node_id!r} already exists") from exc
+    _NODE_KEY_CACHE[node_id] = plaintext
+    with suppress(Exception):
+        secret_store.set(None, _node_service_key_env(node_id), plaintext, "node.register")
     node = get_node(node_id)
     assert node is not None
     return plaintext, node
@@ -101,6 +107,16 @@ def resolve_node_key(plaintext: str) -> dict[str, Any] | None:
     return _decode(row) if row else None
 
 
+def get_node_service_key(node_id: str) -> str | None:
+    cached = _NODE_KEY_CACHE.get(node_id)
+    if cached:
+        return cached
+    try:
+        return secret_store.get_decrypted(None, _node_service_key_env(node_id))
+    except Exception:
+        return None
+
+
 def deregister_node(node_id: str) -> None:
     placement_count = (
         _database()
@@ -114,6 +130,9 @@ def deregister_node(node_id: str) -> None:
     if int(placement_count["count"]) > 0:
         raise ValueError(f"node {node_id!r} still has pinned agents")
     _database().execute("DELETE FROM nodes WHERE id = :id", {"id": node_id})
+    _NODE_KEY_CACHE.pop(node_id, None)
+    with suppress(Exception):
+        secret_store.delete(None, _node_service_key_env(node_id))
 
 
 def touch_last_seen(node_id: str) -> None:
@@ -194,3 +213,7 @@ def _decode(row: dict[str, Any]) -> dict[str, Any]:
     out = dict(row)
     out["labels"] = json.loads(out["labels"]) if out.get("labels") else {}
     return out
+
+
+def _node_service_key_env(node_id: str) -> str:
+    return f"FLEETENT_NODE_FORWARDER_KEY__{node_id}"

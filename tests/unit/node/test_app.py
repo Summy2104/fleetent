@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from fleetent.node.config import ConfigError, NodeConfig
@@ -36,6 +38,14 @@ def test_main_loops_fetch_reconcile_and_report(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(app, "PlatformApiDesiredStateProvider", lambda config: FakeProvider())
     monkeypatch.setattr(app, "LocalProcessBackend", lambda config: object())
     monkeypatch.setattr(app, "NodeReconciler", lambda config, backend: FakeReconciler())
+    monkeypatch.setattr(
+        app,
+        "_start_forwarder",
+        lambda config, backend: (
+            SimpleNamespace(should_exit=False),
+            SimpleNamespace(join=lambda timeout=0: None),
+        ),
+    )
 
     def stop_after_first_sleep(seconds: int) -> None:
         raise KeyboardInterrupt
@@ -54,4 +64,3 @@ def test_main_exits_on_invalid_config(monkeypatch) -> None:
 
     with pytest.raises(SystemExit, match="1"):
         app.main()
-

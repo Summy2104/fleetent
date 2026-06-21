@@ -14,11 +14,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel
 
-from fleetent import agent_config, agent_store, connectors, cron_scheduler, user_store
+from fleetent import agent_config, agent_store, auth, connectors, cron_scheduler, user_store
 from fleetent.auth import seed_builtin_admin
 from fleetent.config import Settings, configure_logging
 from fleetent.governance.approval_router import resolve_approval_request
@@ -45,7 +45,12 @@ from fleetent.platform.chat_management import chat_admin_api
 from fleetent.platform.connector_management import connector_admin_api, vault_provider
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import provider_admin_api
-from fleetent.platform.node_management import node_admin_api, node_desired_state_api
+from fleetent.platform.node_management import (
+    node_admin_api,
+    node_desired_state_api,
+    placement_store,
+)
+from fleetent.platform.node_management.agent_transport import DirectHttpAgentTransport
 from fleetent.platform.skill_management import skill_admin_api
 from fleetent.platform.tenancy import admin_api as tenancy_admin_api
 from fleetent.platform.user_management import user_admin_api
@@ -446,6 +451,7 @@ wire_agent_store_seams()
 
 
 _platform_bearer = PlatformBearerAdapter()
+_agent_transport = DirectHttpAgentTransport()
 
 
 async def _authenticate(authorization: str = Header()) -> Principal:
@@ -457,6 +463,31 @@ async def _authenticate(authorization: str = Header()) -> Principal:
     if principal is None:
         raise HTTPException(status_code=401, detail="Invalid API key")
     return principal
+
+
+def _require_admin_session(authorization: str = Header(default="")) -> user_store.User:
+    if not authorization.startswith("Session "):
+        raise HTTPException(status_code=401, detail="Session token required")
+    token = authorization.split(" ", 1)[1]
+    user_id = auth.validate_session(token, 1800)
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="invalid or expired session")
+    user = user_store.get_by_id(user_id)
+    if user is None:
+        raise HTTPException(status_code=401, detail="invalid session")
+    if not auth.has_role(user, {"admin", "built_in_admin"}):
+        raise HTTPException(status_code=403, detail="admin required")
+    return user
+
+
+def _resolve_agent_node_id(agent_name: str) -> str:
+    agent = agent_store.get_by_name(agent_name)
+    if agent is None:
+        raise HTTPException(status_code=404, detail=f"agent {agent_name!r} not found")
+    placement = placement_store.get_for_agent(agent.id)
+    if placement is None:
+        raise HTTPException(status_code=503, detail=f"agent {agent_name!r} has no node placement")
+    return str(placement["node_id"])
 
 
 def _slack_adapter_configured() -> bool:
@@ -517,3 +548,24 @@ async def resolve_approval(approval_id: str, req: ApprovalRequest) -> dict:  # t
     if not found:
         raise HTTPException(status_code=404, detail=f"approval {approval_id} not found or expired")
     return {"status": "ok", "approval_id": approval_id, "decision": req.decision}
+
+
+@app.post("/admin/agents/{agent_name}/chat")
+async def managed_agent_chat(
+    agent_name: str,
+    request: Request,
+    admin: user_store.User = Depends(_require_admin_session),  # noqa: B008
+) -> Response:
+    del admin
+    return await _agent_transport.chat(
+        _resolve_agent_node_id(agent_name),
+        agent_name,
+        await request.body(),
+        content_type=request.headers.get("content-type", "application/json"),
+    )
+
+
+@app.websocket("/admin/agents/{agent_name}/ws")
+async def managed_agent_ws(websocket: WebSocket, agent_name: str) -> None:
+    _require_admin_session(websocket.headers.get("authorization", ""))
+    await _agent_transport.ws(_resolve_agent_node_id(agent_name), agent_name, websocket)
