@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import TextIO
 from urllib.parse import urlparse
 
+import yaml
+
 from fleetent.config import Settings
 
 
@@ -184,6 +186,40 @@ def rename_legacy_management_db(management_path: Path) -> bool:
     return True
 
 
+def backfill_default_agents(management_path: Path, agents_dir: Path) -> int:
+    """Backfill file-based bindings.default flags into agent_admin_state.is_default."""
+    from fleetent.db import SQLiteDatabase
+
+    if not agents_dir.exists():
+        return 0
+    db = SQLiteDatabase(path=management_path)
+    updated = 0
+    for agent_dir in sorted(p for p in agents_dir.iterdir() if (p / "agent.yaml").is_file()):
+        raw = yaml.safe_load((agent_dir / "agent.yaml").read_text(encoding="utf-8")) or {}
+        if not isinstance(raw, dict):
+            continue
+        bindings = raw.get("bindings") or {}
+        if not isinstance(bindings, dict) or not bool(bindings.get("default")):
+            continue
+        name = str(raw.get("name") or agent_dir.name)
+        row = db.execute("SELECT id FROM agents WHERE name = :name", {"name": name}).fetchone()
+        if row is None:
+            continue
+        db.execute(
+            """
+            INSERT INTO agent_admin_state
+                (agent_id, status, provenance, drift, is_default, archived_at, updated_at)
+            VALUES (:agent_id, 'enabled', 'adhoc', 0, 1, NULL, :updated_at)
+            ON CONFLICT(agent_id) DO UPDATE SET
+                is_default = 1,
+                updated_at = :updated_at
+            """,
+            {"agent_id": row["id"], "updated_at": datetime.now().isoformat()},
+        )
+        updated += 1
+    return updated
+
+
 def run_alembic_upgrade() -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["alembic", "upgrade", "head"],
@@ -270,6 +306,10 @@ def main(
         return result.returncode
 
     _write(stdout, result.stdout)
+    agents_dir = Path(os.environ.get("FLEETENT_AGENTS_DIR", str(data_dir.parent / "agents")))
+    backfilled = backfill_default_agents(database_path, agents_dir)
+    if backfilled:
+        _write(stdout, f"Backfilled default-agent flags: {backfilled}\n")
     return 0
 
 

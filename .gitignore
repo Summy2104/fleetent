@@ -34,6 +34,7 @@ secrets/
 # `.env` (above) ignores root Platform env and nested Agent env files.
 platform.yaml
 agent.yaml
+config/*.env
 config/*.yaml
 config/agent/*.yaml
 config/platform/*.yaml
@@ -57,3 +58,6 @@ docs/local/
 
 # Generated architecture diagrams
 docs/architecture/*.html
+
+# local dev deployment (FLEETENT_HOME)
+.fleetent-dev/

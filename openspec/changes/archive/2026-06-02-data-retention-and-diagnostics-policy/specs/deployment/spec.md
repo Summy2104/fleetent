@@ -5,7 +5,7 @@
 
 #### Scenario: Diagnostics export is documented
 - **WHEN** operator 阅读 deployment 文档
-- **THEN** 文档说明如何运行 `fleetent-admin diagnostics export`
+- **THEN** 文档说明如何运行 `fleetent admin diagnostics export`
 - **AND** 文档说明诊断包包含和不包含的内容
 
 #### Scenario: Retention default is documented
@@ -15,7 +15,7 @@
 
 #### Scenario: Manual retention is documented
 - **WHEN** operator 阅读 deployment 文档
-- **THEN** 文档说明如何运行 `fleetent-admin diagnostics retention dry-run`
+- **THEN** 文档说明如何运行 `fleetent admin diagnostics retention dry-run`
 - **AND** 文档说明只有显式开启 `diagnostics.retention.enabled=true` 后 apply 才会删除诊断数据
 
 #### Scenario: Backup deletion is out of scope

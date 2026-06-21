@@ -17,7 +17,7 @@ Pilot 部署需要一个默认、可重复、可解释的入口。这个入口�
 ### Pilot 默认模式
 
 ```bash
-docker compose run --rm fleetent uv run fleetent-admin init-config
+docker compose run --rm fleetent uv run fleetent admin init-config
 docker compose run --rm fleetent uv run python scripts/upgrade.py
 docker compose up -d
 curl -fsS http://127.0.0.1:8765/health
@@ -56,7 +56,7 @@ Docker image 应包含：
 
 ```bash
 uv run fleetent --help
-uv run fleetent-admin --help
+uv run fleetent admin --help
 uv run python scripts/upgrade.py --dry-run
 ```
 
@@ -94,9 +94,9 @@ ports:
 新增 operator 命令：
 
 ```bash
-uv run fleetent-admin init-config
-uv run fleetent-admin init-config --dry-run
-uv run fleetent-admin init-config --force
+uv run fleetent admin init-config
+uv run fleetent admin init-config --dry-run
+uv run fleetent admin init-config --force
 ```
 
 行为：
@@ -192,7 +192,7 @@ entrypoint 不自动 init-config。原因：
 文档应把 Docker Compose 放在 Pilot 默认路径：
 
 ```bash
-docker compose run --rm fleetent uv run fleetent-admin init-config
+docker compose run --rm fleetent uv run fleetent admin init-config
 docker compose run --rm fleetent uv run python scripts/upgrade.py --dry-run
 docker compose run --rm fleetent uv run python scripts/upgrade.py
 docker compose up -d

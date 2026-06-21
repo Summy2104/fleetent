@@ -43,8 +43,10 @@ from fleetent.platform.chat_management import chat_admin_api
 from fleetent.platform.connector_management import connector_admin_api, vault_provider
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import provider_admin_api
-from fleetent.platform.node_management import node_desired_state_api
+from fleetent.platform.node_management import node_admin_api, node_desired_state_api
+from fleetent.platform.observability_management import observability_admin_api
 from fleetent.platform.skill_management import skill_admin_api
+from fleetent.platform.tenancy import admin_api as tenancy_admin_api
 from fleetent.platform.user_management import user_admin_api
 from fleetent.platform.user_management.api_key_store import resolve as _resolve_api_key
 from fleetent.platform.user_management.platform_bearer_adapter import PlatformBearerAdapter
@@ -157,11 +159,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # AR7: load enabled plugins once at startup (same lifecycle as scan_skills /
     # mcp register_all). A missing plugins/ dir or a bad plugin never aborts boot.
     load_plugins()
-    # approval-suspend-resume: reconcile only EXPIRED pending approvals; non-expired
-    # ones survive the restart and stay resolvable (no blanket timeout anymore).
-    from fleetent.runtime.approval_resume import reconcile_expired_approvals
-
-    await reconcile_expired_approvals()
     try:
         settings = Settings()
     except Exception as exc:
@@ -229,6 +226,9 @@ app.include_router(agent_admin_api.router)
 app.include_router(stats_admin_api.router)
 app.include_router(agent_apply_api.router)
 app.include_router(node_desired_state_api.router)
+app.include_router(node_admin_api.router)
+app.include_router(observability_admin_api.router)
+app.include_router(tenancy_admin_api.router)
 
 
 _UNSET: Any = object()  # distinguishes "field omitted" from an explicit None (clear)
@@ -347,13 +347,34 @@ def wire_agent_store_seams() -> None:
     def _console_delete(name: str) -> bool:
         return agent_store.delete_agent(name)
 
-    def _apply_create(name: str, system_prompt: str, allowed_tools: list[str]) -> int:
-        agent_id = agent_store.create_agent(name, system_prompt, allowed_tools).id
+    def _apply_create(
+        name: str,
+        system_prompt: str,
+        allowed_tools: list[str],
+        model_overrides: dict[str, Any] | None = None,
+    ) -> int:
+        agent_id = agent_store.create_agent(
+            name,
+            system_prompt,
+            allowed_tools,
+            model_overrides=model_overrides,
+        ).id
         materialize.materialize_from_store(name)
         return agent_id
 
-    def _apply_update(name: str, system_prompt: str, allowed_tools: list[str]) -> None:
-        agent_store.create_version(name, system_prompt=system_prompt, allowed_tools=allowed_tools)
+    def _apply_update(
+        name: str,
+        system_prompt: str,
+        allowed_tools: list[str],
+        model_overrides: dict[str, Any] | None = None,
+    ) -> None:
+        kwargs: dict[str, Any] = {
+            "system_prompt": system_prompt,
+            "allowed_tools": allowed_tools,
+        }
+        if model_overrides is not None:
+            kwargs["model_overrides"] = model_overrides
+        agent_store.create_version(name, **kwargs)
         materialize.materialize_from_store(name)
 
     agent_console_api.get_agent_def = _get_def

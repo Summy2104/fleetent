@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from fleetent import db
+from fleetent.schema_migrations import migrate
 
 
 def _sqlite_url(path: Path) -> str:
@@ -28,6 +29,29 @@ def test_create_database_from_relative_sqlite_url():
 def test_create_database_rejects_unsupported_backend():
     with pytest.raises(ValueError, match="not supported"):
         db.create_database("postgresql://fleetent:secret@localhost/fleetent")
+
+
+def test_create_substrate_preserves_sqlite_migrations_and_pragmas(tmp_path: Path) -> None:
+    db_path = tmp_path / "substrate.db"
+    backend = db.create_substrate(_sqlite_url(db_path))
+
+    migrate(
+        backend,
+        [
+            (
+                1,
+                """
+                CREATE TABLE IF NOT EXISTS widgets (
+                    id TEXT PRIMARY KEY
+                )
+                """,
+            )
+        ],
+    )
+
+    assert sqlite3.connect(db_path).execute("PRAGMA user_version").fetchone() == (1,)
+    assert backend.execute("PRAGMA journal_mode").fetchone() == {"journal_mode": "wal"}
+    assert backend.execute("PRAGMA busy_timeout").fetchone() == {"timeout": 5000}
 
 
 def test_execute_supports_named_parameters_and_fetchone(tmp_path):

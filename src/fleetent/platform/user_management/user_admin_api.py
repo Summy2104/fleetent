@@ -151,6 +151,10 @@ class IssueKeyBody(BaseModel):
     expires_at: str | None = None
 
 
+class ServicePrincipalBody(BaseModel):
+    name: str
+
+
 def _user_dict(u: user_store.User) -> dict[str, Any]:
     return {
         "id": u.id,
@@ -185,6 +189,21 @@ def create_user(body: CreateUserBody, authorization: str | None = Header(None)) 
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _user_dict(user)
+
+
+@router.post("/service-principals", status_code=201)
+def create_service_principal(
+    body: ServicePrincipalBody, authorization: str | None = Header(None)
+) -> dict[str, Any]:
+    admin = _require_admin(authorization)
+    user, plaintext = user_store.create_user(body.name)
+    audit_log.write_audit(
+        admin.id,
+        "service_principal.create",
+        target_type="user",
+        target_id=user.id,
+    )
+    return {"user": _user_dict(user), "api_key_plaintext_once": plaintext}
 
 
 @router.get("/users/{user_id}")
@@ -306,6 +325,17 @@ def issue_key(
     )
     audit_log.write_audit(admin.id, "issue_key", target_type="user", target_id=user_id)
     return {"plaintext": plaintext, "key": meta}
+
+
+@router.post("/users/{user_id}/rotate-key")
+def rotate_user_key(user_id: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+    admin = _require_admin(authorization)
+    try:
+        user, plaintext = user_store.rotate_key(user_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="not found") from exc
+    audit_log.write_audit(admin.id, "user.rotate_key", target_type="user", target_id=user_id)
+    return {"user": _user_dict(user), "api_key_plaintext_once": plaintext}
 
 
 @router.delete("/keys/{key_id}", status_code=204)

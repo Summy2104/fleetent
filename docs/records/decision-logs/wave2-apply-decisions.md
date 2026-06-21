@@ -755,7 +755,7 @@ run_code 调用链：`run_code` 读 `tool_context.features`（无 context 时 `{
 ### 需 zy 核实
 
 1. **审计写 trace 待 SB9**：当前仅 `logger.info` 计数+名单，未写 traces 表；SB9 落地后是否将清理记录纳入 trace（design D4 已记「与 SB9 协调」）。
-2. **admin CLI 子命令**：design Open Question 提到 `fleetent-admin sandbox-cleanup` 按需入口，本 change 仅提供函数入口未加 CLI 子命令——是否需作为 SB8 收尾补一个 admin 子命令。
+2. **admin CLI 子命令**：design Open Question 提到 `fleetent admin sandbox-cleanup` 按需入口，本 change 仅提供函数入口未加 CLI 子命令——是否需作为 SB8 收尾补一个 admin 子命令。
 
 ## sandbox-trace-logging — feat/sandbox-trace-logging
 

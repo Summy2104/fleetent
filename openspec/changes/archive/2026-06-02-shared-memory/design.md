@@ -55,7 +55,7 @@ reflection 仍然负责生成 pending proposal 和审批状态。Shared Memory �
 - create/update/archive
 - apply approved proposal
 
-写操作需走 admin 权限和 audit log；若 admin API 依赖未就绪，可以先提供 `fleetent-admin memory shared ...`
+写操作需走 admin 权限和 audit log；若 admin API 依赖未就绪，可以先提供 `fleetent admin memory shared ...`
 CLI，但 spec 应保留 HTTP 管理面边界。
 
 ## Evaluation

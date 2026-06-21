@@ -1,3 +1,5 @@
+import logging
+
 from fleetent.agent_config import AgentFile
 from fleetent.model import ModelPolicySnapshot
 from fleetent.vector_store.backend import (
@@ -13,6 +15,7 @@ from fleetent.vector_store.embeddings import (
 
 _embedding: EmbeddingProvider
 _backend: VectorBackend
+_logger = logging.getLogger(__name__)
 
 
 def _platform_database_url() -> str:
@@ -28,7 +31,17 @@ def _configure(agent: AgentFile) -> None:
     if not agent.name:
         _embedding = DeterministicEmbeddingProvider()
     else:
-        _embedding = create_embedding_provider_from_policy(ModelPolicySnapshot.from_agent(agent))
+        policy = ModelPolicySnapshot.from_agent(agent)
+        if "embedding" not in policy.routes:
+            _logger.warning(
+                "Agent '%s' has no embedding route configured; falling back to deterministic "
+                "embeddings. Knowledge-base and vector retrieval quality will degrade. "
+                "Configure an embedding route for production use.",
+                agent.name,
+            )
+            _embedding = DeterministicEmbeddingProvider()
+        else:
+            _embedding = create_embedding_provider_from_policy(policy)
     database_url = agent.vector_store.database_url or _platform_database_url()
     _backend = create_vector_backend(agent.vector_store, database_url=database_url)
 

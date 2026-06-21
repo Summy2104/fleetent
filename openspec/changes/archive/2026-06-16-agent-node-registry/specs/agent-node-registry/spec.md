@@ -45,7 +45,7 @@
 
 #### Scenario: 通过 admin CLI 登记 node
 
-- **WHEN** 运维执行 `fleetent-admin node register <node-id>`
+- **WHEN** 运维执行 `fleetent admin node register <node-id>`
 - **THEN** 系统登记该 node 并打印一次性 service key（提示妥善保存）
 
 #### Scenario: 标签随登记记录（v1 不消费）

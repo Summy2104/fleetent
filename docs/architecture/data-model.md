@@ -135,7 +135,7 @@ graph TD
 |---|---|---|---|
 | `agents` | `id`=不可变身份 · `name`=可读标签 · `active_version_id`(裸 INTEGER 无 FK) · `supports_dm`/`supports_groups`；无 status 列 | — | agent 定义；管理逻辑 → [agent-management](../capabilities/agent-management.md) |
 | `agent_versions` | `agent_id` | → agents (CASCADE) | 不可变版本快照 |
-| `agent_admin_state` | PK `agent_id`；`status`/`provenance`/`drift`/`archived_at` | → agents (CASCADE) | 管理态（生命周期+自管+drift）→ [agent-management §2](../capabilities/agent-management.md) |
+| `agent_admin_state` | PK `agent_id`；`status`/`provenance`/`drift`/`archived_at`/`is_default`（默认 agent 标记，迁移 098；materialize→`bindings.default`，每 tenant 至多一个） | → agents (CASCADE) | 管理态（生命周期+自管+drift+默认）→ [agent-management §2](../capabilities/agent-management.md) |
 | `user_agents` | `(user_id, agent_id)` | → agents (CASCADE) | 用户↔agent 准入；materialize → `im.allow_users`（admin 维护）|
 | `agent_im_groups` | `(agent_id, platform, group_id)` | → agents (CASCADE) | IM 群白名单；materialize → `im.<platform>.allow_groups` |
 | `agent_kbs` | `agent_id` · `created_by` | → agents (CASCADE) | agent↔KB 绑定真相源；`kb_id` 软引用本 tenant `kb.db` |
@@ -283,7 +283,7 @@ erDiagram
 ```
 
 > **库内不变量**：① `reflection_proposals.target_ref` 多态——memory 类指 `memory_items.id`、skill 类指文件系统 skill 名，完整性由 apply 路径兜底（无 FK；图中 `memory_items → reflection_proposals` 边仅 `domain=memory` 成立）。② `traces` 挂 `session_id`（查询过滤）+ `run_id`（与 `sub_agent_runs` 同命名空间，关联子 agent trace 树）。③ `session_id`/`run_id`/`report_id` 均约定引用、**无时序保证无外键**：`approval_requests`/`traces` 可先于 `sessions` 索引行写入，`report_id` 可空。④ `approval_requests` 是审批单一真相源：tool-call subject 在 session meta `pending_approvals`、memory/skill subject 是同 id `reflection_proposals`，统一 resolve router 按 `subject_type` 分派。⑤ `tool_auto_approvals` 经**计算键** `fingerprint=hash(scope_key, tool_name, tool_args)`（`scope_key=requester_user_id`）关联，非存储 FK。
-> **跨库**：`memory_items.user_id` / `approval_requests.requester_user_id` ⇢ 管理库 `users`（managed 成立；standalone 可为不透明渠道 id）；tool-call `approval_requests.subject_id` ⇢ 本库 `sessions.session_id`。会话**内容**是 JSON 文件（`SESSIONS_DIR`，与元数据表物理分离）。
+> **跨库**：`memory_items.user_id` / `approval_requests.requester_user_id` ⇢ 管理库 `users`（managed 成立；direct-run 进程可为不透明渠道 id）；tool-call `approval_requests.subject_id` ⇢ 本库 `sessions.session_id`。会话**内容**是 JSON 文件（`SESSIONS_DIR`，与元数据表物理分离）。
 
 ### 3.4 共享记忆库（嵌入式 Y · `shared_memory.db` · agent 侧 · per-tenant）
 

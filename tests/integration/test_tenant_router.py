@@ -9,6 +9,7 @@ Verifies:
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from typing import Any
 
@@ -142,3 +143,10 @@ def test_replacing_backend_does_not_change_call_sites(tmp_path: Path) -> None:
     fake_router = TenantRouter(_FakeTenantBackend(tmp_path / "f.db", _FakeVectorBackend()))
     fake_scope = call_site(fake_router, "default")
     assert fake_scope.kb_db.path == tmp_path / "f.db"
+
+
+def test_sqlite_tenant_backend_uses_substrate_factory() -> None:
+    source = inspect.getsource(SQLiteTenantBackend)
+
+    assert "create_substrate(" in source
+    assert "SQLiteDatabase(path=" not in source

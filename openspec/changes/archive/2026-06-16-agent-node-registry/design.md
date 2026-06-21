@@ -8,7 +8,7 @@
 - 立 `nodes` + `agent_placements` 两张管理表（Alembic forward-only）。
 - node 手动登记：mint `ma-<hex>` service key、仅哈希持久化、可解析为 node 身份。
 - agent→node 1:1 显式 pin / unpin / 查询。
-- `fleetent-admin node register|list|deregister` 运维入口 + pin/unpin 入口。
+- `fleetent admin node register|list|deregister` 运维入口 + pin/unpin 入口。
 
 **Non-Goals:**
 - 不消费 status、不产期望态、不下发配置/secret（C2/C4）。

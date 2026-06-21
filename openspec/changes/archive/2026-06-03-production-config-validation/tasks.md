@@ -20,7 +20,7 @@
 
 ## 3. CLI and verification integration
 
-- [x] 3.1 Write failing tests: `fleetent-admin validate-config --profile pilot --format json` emits deterministic JSON summary.
+- [x] 3.1 Write failing tests: `fleetent admin validate-config --profile pilot --format json` emits deterministic JSON summary.
 - [x] 3.2 Implement: add admin CLI command and human-readable text output.
 - [x] 3.3 Verify green: run `uv run pytest tests/integration -x -q`.
 
@@ -30,7 +30,7 @@
 
 ## 4. Documentation and final checks
 
-- [x] 4.1 Write failing docs/check tests if applicable: Pilot runbook references `fleetent-admin validate-config`.
+- [x] 4.1 Write failing docs/check tests if applicable: Pilot runbook references `fleetent admin validate-config`.
 - [x] 4.2 Implement: update deployment docs and roadmaps.
 - [x] 4.3 Run `uv run ruff format src tests scripts`.
 - [x] 4.4 Run `uv run ruff check src tests scripts`.

@@ -1,11 +1,11 @@
-# dev-intern Agent 部署安装教程
+# dev-intern Agent Host 部署安装教程
 
-按 **dev-intern 现网部署方式**复刻一个 standalone agent（不依赖 platform 控制面）。
-现网形态：`fleetent v0.2.0`，systemd user service 跑在 `:8766`，`FLEETENT_HOME=~/.fleetent`，
-经 `scripts/install-agent.sh` 安装。
+按 **dev-intern 现网部署方式**复刻一个受管 agent host。部署上 platform 始终在场；
+本机运行 node，经它拉起 `dev-intern` agent。现网形态：`fleetent v0.2.0`，
+`FLEETENT_HOME=~/.fleetent`，经 `scripts/install-agent.sh` 安装 runtime + node。
 
 > 约定：下文 `$U` = 运行用户，`$HOME` = 其家目录（现网是 `ec2-user` / `/home/ec2-user`）。
-> agent home = `$FLEETENT_HOME/agents/dev-intern/`。
+> node 配置目录 = `$FLEETENT_HOME/node/`；materialized agent home = `$FLEETENT_HOME/agents/dev-intern/`。
 
 ---
 
@@ -29,16 +29,16 @@ uv python find ">=3.12"     # 确认 uv 能提供 3.12（install-agent.sh 的前
 git clone <fleetent 仓库> ~/src/fleetent     # 或拷贝源码
 cd ~/src/fleetent
 
-# 方式 A：官方脚本（推荐，等价于现网做法）
-scripts/install-agent.sh dev-intern
+# 方式 A：官方脚本（推荐，受管 agent host）
+scripts/install-agent.sh
 #   它依次做：uv python 检查 → `uv tool install --force --from . fleetent`
-#            → 持久化 FLEETENT_HOME 到 shell rc → `fleetent agent init dev-intern`
-#            → docker 预检 → 打印后续步骤
+#            → 持久化 FLEETENT_HOME 到 shell rc → docker 预检
+#            → 打印 node/.env + `fleetent node start` 后续步骤
 
 # 方式 B：手工等价
 uv tool install --force --from . fleetent
 export FLEETENT_HOME="$HOME/.fleetent"        # 建议写入 ~/.bashrc
-fleetent agent init dev-intern                # 脚手架 agents/dev-intern/{agent.yaml,.env}
+mkdir -p "$FLEETENT_HOME/node"
 ```
 
 > PyPI 索引可能超时：若 `uv tool install` 卡在拉依赖，改用离线 `--find-links <wheels 目录>`，
@@ -55,9 +55,19 @@ npx -y playwright install chromium
 ls ~/.cache/ms-playwright/
 ```
 
-## 4. agent 配置
+## 4. node 配置
 
-`fleetent agent init` 只生成最小模板。要复刻 dev-intern 的全部能力，用现网成品配置覆盖：
+在 `$FLEETENT_HOME/node/.env` 配置 node 接入 platform：
+
+```dotenv
+FLEETENT_NODE_PLATFORM_URL=https://<platform-host>:8765
+FLEETENT_NODE_ID=dev-intern-host
+FLEETENT_NODE_SERVICE_KEY=ma-<service-key>
+```
+
+## 5. agent 配置
+
+`dev-intern` 的 agent home 由 platform materialize 到本机。要复刻 dev-intern 的全部能力，用现网成品配置覆盖：
 
 ```
 $FLEETENT_HOME/agents/dev-intern/
@@ -88,7 +98,7 @@ $FLEETENT_HOME/agents/dev-intern/
 sed -i "s#/home/ec2-user#$HOME#g" $FLEETENT_HOME/agents/dev-intern/agent.yaml
 ```
 
-## 5. skills 同步
+## 6. skills 同步
 
 ```bash
 mkdir -p $FLEETENT_HOME/agents/dev-intern/skills
@@ -96,7 +106,7 @@ cp -r ~/src/fleetent/skills/* $FLEETENT_HOME/agents/dev-intern/skills/
 # getting-started 是 builtin（src/fleetent/builtin_skills/），自动加载，无需拷
 ```
 
-## 6. 密钥 `.env`（18 项；填好后 `chmod 600`）
+## 7. 密钥 `.env`（18 项；填好后 `chmod 600`）
 
 ```
 LLM_API_KEY
@@ -113,18 +123,18 @@ FLEETENT_TUI_TOKEN
 Slack token scope：bot 需 `channels:history` 且在目标频道；`SLACK_USER_TOKEN`(xoxp) 需
 `channels:history,groups:history,search:read,users:read`（解锁 slack-digest 搜索模式）。
 
-## 7. systemd user service + 开机自启
+## 8. systemd user service + 开机自启
 
 ```bash
 mkdir -p ~/.config/systemd/user
 cat > ~/.config/systemd/user/fleetent-dev-intern.service <<EOF
 [Unit]
-Description=Fleetent dev-intern Agent
+Description=Fleetent dev-intern Node
 After=network.target
 [Service]
 Type=simple
 Environment=FLEETENT_HOME=$HOME/.fleetent
-ExecStart=$HOME/.local/bin/fleetent agent run dev-intern --port 8766
+ExecStart=$HOME/.local/bin/fleetent node start
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
@@ -139,17 +149,17 @@ systemctl --user enable --now fleetent-dev-intern
 systemctl --user status fleetent-dev-intern
 ```
 
-## 8. 验证
+## 9. 验证
 
 ```bash
-journalctl --user -u fleetent-dev-intern -f         # 启动 + MCP 注册
+journalctl --user -u fleetent-dev-intern -f         # node 拉 agent + MCP 注册
 # 应用日志：~/.fleetent/agents/dev-intern/data/logs/<date>.log
 ```
 - Slack 频道 @bot 发一句 → 有回复（IM 网关连通）。
 - 逐 MCP 冒烟：armada(查业务线)、knowledge-bridge(列知识库；agent_id 固定 `bs-intern`)、
   middle(查中台账户)、email(看收件箱)、playwright(网页截图)、google-drive(列邮件模版)。
 
-## 9. 升级 / 重新部署
+## 10. 升级 / 重新部署
 
 ```bash
 cd ~/src/fleetent && git pull

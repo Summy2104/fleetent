@@ -93,19 +93,19 @@ flowchart TD
 - ✅ **Bearer token 认证**：`Authorization: Bearer ma-<64hex>`，`ma-` 前缀区分服务 key 与模型 API key
   - `get_by_api_key()` 经 `api_keys` 表 SHA-256 哈希比对，明文不落库，无外部 IdP
 
-- ✅ **CLI 鉴权模型：OS-level、无登录**：所有 `fleetent-admin ...` 命令直接读写本地 SQLite，不经过 HTTP 鉴权也不要求 admin 登录；访问控制完全交给 OS 层（ssh key / sudo / 数据目录文件权限），遵循 **"能 ssh 到主机即视为受信"** 的企业内部工具惯例（Camunda、PostgreSQL psql、Kafka CLI 等皆是此模型）
+- ✅ **CLI 鉴权模型：OS-level、无登录**：所有 `fleetent admin ...` 命令直接读写本地 SQLite，不经过 HTTP 鉴权也不要求 admin 登录；访问控制完全交给 OS 层（ssh key / sudo / 数据目录文件权限），遵循 **"能 ssh 到主机即视为受信"** 的企业内部工具惯例（Camunda、PostgreSQL psql、Kafka CLI 等皆是此模型）
   - 代价：审计日志只能记录 OS user（`root` / `ubuntu`），无法追溯到具体 fleetent admin 身份
   - 对策：v1.0 起 CLI 严格收窄到低危操作（建用户、加 IM allowlist），加黑 / 封禁 / 降级 / 改角色 等高危动作只能在 UI 中由 admin 角色完成（详见「规划中」权限矩阵 CLI 列）
 
-- ✅ **用户管理 CLI**：create-user、list-users、rotate-key
+- ✅ **用户管理 HTTP API**：`POST /admin/service-principals`、`GET /admin/users`、`POST /admin/users/{user_id}/rotate-key`
 
-- ✅ **IM 用户管理 CLI**：approve-user、block-user、list-pending（v1.0 起 IM 用户首次会话**默认放行**，`approve-user` / `list-pending` 仅作历史兼容；`block-user` 收回到 UI 由 admin 操作）
+- ✅ **IM 用户管理**：approve-user、list-pending 仅作历史兼容；`block-user` 已收回到 UI / HTTP API（v1.0 起 IM 用户首次会话**默认放行**）
 
 - ✅ **节点注册表（node registry）**：多机部署所需的 node 身份管理已落地
   - `nodes` 表（node_id / host / port / version / last_seen_at / status）已落 Alembic
   - `agent_placements` 表（agent↔node placement 关系）已落
   - node desired-state API：`POST /admin/nodes/{node_id}/desired-state` 已就位
-  - CLI：`uv run fleetent-admin node register|list|deregister` 可用
+  - CLI：`uv run fleetent admin node register|list|deregister` 可用
 
 ## 规划中（v1.0）
 
@@ -264,7 +264,7 @@ flowchart TD
 
 - [ ] **按 Agent 配置模型与运行参数**：每个 Agent 可绑定 [model-router](./model-router.md) 的 `models.targets` / `models.routes`、温度等 route 参数、以及该 Agent 维度的成本 / 步数预算上限（五层预算中的"单 agent"层，见 [agent-runtime](./agent-runtime.md)）；未显式配置时使用 Agent 模板默认值，配置仅声明意图，实际生效与回退由对应运行域解释
 
-- [ ] **绑定管理（UI 化）**：在 Agent 详情页可视化管理 user→agent、channel→agent 绑定与"设为默认 Agent"，等价于现有 CLI 的 `assign-channel` / `unassign-channel` / `set-default-agent`，并展示该 Agent 当前被哪些用户 / channel 引用（与删除保护共用同一引用视图）
+- [ ] **绑定管理（UI 化）**：在 Agent 详情页可视化管理 user→agent、channel→agent 绑定与"设为默认 Agent"，等价于现有 HTTP 绑定 / default-agent 端点，并展示该 Agent 当前被哪些用户 / channel 引用（与删除保护共用同一引用视图）
 
 - [ ] **按 Agent 观测与用量**：Agent 详情页一屏可见该 Agent 的调用次数、token / 成本用量曲线、错误率、平均时延、governance.permission_gate 触发与审批通过率、最近会话列表，可下钻到单会话 trace（数据源为 observability 的 traces，本页只做按 agent_id 的聚合视图）
 
@@ -766,7 +766,7 @@ flowchart LR
 - Then：有效 token 正常处理，无效或过期 token 返回 401
 
 **场景 2：CLI 创建用户**
-- Given：管理员执行 `create-user --name "Alice"`
+- Given：管理员调用 `POST /admin/service-principals` 创建 `"Alice"`
 - When：命令执行成功
 - Then：输出 API key，Alice 可立即用该 key 调用 /chat
 

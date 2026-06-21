@@ -91,6 +91,13 @@ models:
 - `audio_transcription`
 - `audio_generation`
 
+补充约定：
+- `embedding` route 对命名 Agent 属于**建议强配**而非强制 boot 前置条件。缺失时 vector-store runtime 会回落
+  deterministic embedding 并记录 WARN，让 chat-only managed agent 仍可启动。
+- 该回落只覆盖“route 完全缺失”。如果 `embedding` route 已声明但 target 协议不是
+  `http_embedding`，或缺少 endpoint，则仍按配置错误处理并阻止启动。
+- 生产环境应显式配置 `models.routes.embedding` 指向自托管 embedding provider，避免 KB / 向量检索质量退化。
+
 ## 现状
 
 - ✅ **Agent-scoped model policy**：runtime 从 active Agent snapshot 的 `models` section 解析，不使用全局 route YAML。

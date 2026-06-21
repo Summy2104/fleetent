@@ -33,12 +33,22 @@ def get_agent_def(name: str) -> dict[str, Any] | None:
     return None
 
 
-def create_agent_def(name: str, system_prompt: str, allowed_tools: list[str]) -> int:
+def create_agent_def(
+    name: str,
+    system_prompt: str,
+    allowed_tools: list[str],
+    model_overrides: dict[str, Any] | None = None,
+) -> int:
     """Create a new agent definition; returns its id. Bridges agent_store.create_agent."""
     return 0
 
 
-def update_agent_def(name: str, system_prompt: str, allowed_tools: list[str]) -> None:
+def update_agent_def(
+    name: str,
+    system_prompt: str,
+    allowed_tools: list[str],
+    model_overrides: dict[str, Any] | None = None,
+) -> None:
     """Update mutable fields of an existing agent. Bridges agent_store."""
     return None
 
@@ -61,6 +71,7 @@ class AgentSpec(BaseModel):
     name: str
     system_prompt: str
     allowed_tools: list[str] = []
+    model_overrides: dict[str, Any] | None = None
 
 
 class BatchBody(BaseModel):
@@ -70,11 +81,21 @@ class BatchBody(BaseModel):
 def _apply_one(spec: AgentSpec, actor_id: str) -> dict[str, Any]:
     existing = get_agent_def(spec.name)
     if existing is None:
-        agent_id = create_agent_def(spec.name, spec.system_prompt, spec.allowed_tools)
+        agent_id = create_agent_def(
+            spec.name,
+            spec.system_prompt,
+            spec.allowed_tools,
+            spec.model_overrides,
+        )
         action = "created"
     else:
         # name is immutable (it is the key); only mutable fields are updated. bindings untouched.
-        update_agent_def(spec.name, spec.system_prompt, spec.allowed_tools)
+        update_agent_def(
+            spec.name,
+            spec.system_prompt,
+            spec.allowed_tools,
+            spec.model_overrides,
+        )
         agent_id = int(existing["id"])
         was_adhoc = agent_admin_store.get_state(agent_id)["provenance"] == "adhoc"
         action = "adopted" if was_adhoc else "updated"

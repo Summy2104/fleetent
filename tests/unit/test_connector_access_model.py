@@ -116,12 +116,13 @@ def test_telegram_connector_rejects_channels_field():
         TelegramBinding(bot_token_env="BOT", channels=["-100"])  # type: ignore[call-arg]
 
 
-# ── Task 1.4: AgentFile 不再有 bindings 和 access 顶层字段 ──────────────────
+# ── Task 1.4: AgentFile 无顶层 access；bindings 仅保留控制面 materialize 字段 ─────
 
 
-def test_agentfile_has_no_bindings_field():
+def test_agentfile_bindings_defaults_to_control_plane_shape():
     agent = AgentFile(name="a", version=1, models=default_models())
-    assert not hasattr(agent, "bindings")
+    assert agent.bindings.default is False
+    assert agent.bindings.users == []
 
 
 def test_agentfile_has_no_access_field():
@@ -129,7 +130,7 @@ def test_agentfile_has_no_access_field():
     assert not hasattr(agent, "access")
 
 
-def test_agentfile_rejects_bindings_in_yaml(tmp_path):
+def test_agentfile_rejects_legacy_bindings_channels_in_yaml(tmp_path):
     home = _write(
         tmp_path / "agent.yaml",
         _agent_yaml("alice")
@@ -142,6 +143,23 @@ bindings:
 
     with pytest.raises(ValidationError):
         load_agent_home_file(home)
+
+
+def test_agentfile_accepts_materialized_bindings_default_in_yaml(tmp_path):
+    home = _write(
+        tmp_path / "agent.yaml",
+        _agent_yaml("alice")
+        + """
+bindings:
+  default: true
+  users: ["U1"]
+""",
+    )
+    from fleetent.agent_config import load_agent_home_file
+
+    agent = load_agent_home_file(home)
+    assert agent.bindings.default is True
+    assert agent.bindings.users == ["U1"]
 
 
 def test_agentfile_rejects_top_level_access_in_yaml(tmp_path):

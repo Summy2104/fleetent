@@ -1,10 +1,11 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install test t test-pr test-unit test-unit-ci test-coverage-ci test-integration test-e2e test-evaluation test-layers lint fmt check typecheck serve platform admin
+.PHONY: help install test t test-pr test-unit test-unit-ci test-coverage-ci test-integration test-e2e test-evaluation test-layers lint fmt check typecheck admin \
+	dev-bootstrap platform node-provision node kb-worker agent chat dev-clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 install: ## Install / sync dependencies
 	uv sync
@@ -68,11 +69,53 @@ typecheck: ## Type-check with mypy
 
 check: lint typecheck ## Run lint + typecheck
 
-serve: ## Start HTTP server with auto-reload (port 8765)
-	uv run uvicorn fleetent.server:app --reload --port 8765
-
-platform: ## Start platform control-plane (alias for serve)
-	uv run uvicorn fleetent.server:app --reload --port 8765
-
 admin: ## Show admin CLI help
-	uv run fleetent-admin --help
+	uv run fleetent admin --help
+
+# ---- local dev stack -------------------------------------------------------
+# All data/config lives under a gitignored dev home (override by exporting
+# FLEETENT_HOME / DATABASE_URL). These vars are exported ONLY for the dev-stack
+# targets below (target-specific), so they never leak into the test targets,
+# which isolate FLEETENT_HOME themselves. Run each long-running service in its
+# own terminal. NOTE: always `python -m uvicorn` (a bare `uv run uvicorn`
+# resolves to a system uvicorn that can't import fleetent).
+FLEETENT_HOME ?= $(CURDIR)/.fleetent-dev
+DATABASE_URL  ?= sqlite:///$(FLEETENT_HOME)/data/management.db
+PLATFORM_PORT ?= 8770
+AGENT_PORT    ?= 8765
+NODE_ID       ?= local-node
+NODE_PLATFORM_URL ?= http://127.0.0.1:$(PLATFORM_PORT)
+
+DEV_TARGETS := dev-bootstrap platform node-provision node kb-worker agent chat dev-clean
+$(DEV_TARGETS): export FLEETENT_HOME := $(FLEETENT_HOME)
+$(DEV_TARGETS): export DATABASE_URL := $(DATABASE_URL)
+$(DEV_TARGETS): export NODE_ID := $(NODE_ID)
+$(DEV_TARGETS): export NODE_PLATFORM_URL := $(NODE_PLATFORM_URL)
+
+dev-bootstrap: ## Init dev home: migrate management DB + seed built-in admin
+	mkdir -p "$(FLEETENT_HOME)/data"
+	uv run alembic upgrade head
+	uv run fleetent admin seed-builtin-admin
+
+platform: ## Start platform control-plane (admin API/UI), default port 8770
+	uv run python -m uvicorn fleetent.server:app --host 127.0.0.1 --port $(PLATFORM_PORT)
+
+node-provision: ## Register the dev node + write node/.env (idempotent; FORCE=1 to re-key)
+	uv run python scripts/dev_node_provision.py $(if $(FORCE),--force,)
+
+node: ## Start node supervisor (run node-provision first)
+	uv run fleetent node start
+
+kb-worker: ## Start the KB ingest worker (single queue consumer)
+	uv run fleetent kb-worker
+
+agent: ## Run one agent directly with HTTP /chat+/ws: make agent AGENT=<name> [AGENT_PORT=8765]
+	@test -n "$(AGENT)" || { echo "usage: make agent AGENT=<name> [AGENT_PORT=8765]"; exit 2; }
+	uv run fleetent agent run "$(AGENT)" --home "$(FLEETENT_HOME)/agents/$(AGENT)" --port $(AGENT_PORT)
+
+chat: ## Connect the terminal TUI to an agent: make chat TOKEN=<tui-token> [URL=ws://...]
+	@test -n "$(TOKEN)" || { echo "usage: make chat TOKEN=<tui-token> [URL=ws://...]"; exit 2; }
+	uv run fleetent chat --url "$(or $(URL),ws://127.0.0.1:$(AGENT_PORT)/ws)" --token "$(TOKEN)"
+
+dev-clean: ## Remove the entire dev home (.fleetent-dev by default)
+	rm -rf "$(FLEETENT_HOME)"

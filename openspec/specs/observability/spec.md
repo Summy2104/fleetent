@@ -713,65 +713,24 @@ performance summary SHALL 通过 `query_trace_events()` 读取 traces，而不�
 - **AND** 继续处理其他候选
 
 ### Requirement: Diagnostics admin CLI
-系统 SHALL 在 `fleetent-admin` 中提供 diagnostics export 和 retention 手动操作命令。
+系统 SHALL 在 `fleetent admin` 中提供 diagnostics export 和 retention 手动操作命令。
 
 #### Scenario: Export from CLI
-- **WHEN** operator 运行 `fleetent-admin diagnostics export`
+- **WHEN** operator 运行 `fleetent admin diagnostics export`
 - **THEN** CLI 调用 diagnostics export 并输出诊断包路径
 
 #### Scenario: Retention dry-run from CLI
-- **WHEN** operator 运行 `fleetent-admin diagnostics retention dry-run`
+- **WHEN** operator 运行 `fleetent admin diagnostics retention dry-run`
 - **THEN** CLI 输出将删除的诊断数据候选摘要
 - **AND** 不删除任何数据
 
 #### Scenario: Retention apply from CLI
-- **WHEN** operator 运行 `fleetent-admin diagnostics retention apply`
+- **WHEN** operator 运行 `fleetent admin diagnostics retention apply`
 - **THEN** CLI 执行手动 retention apply 或在 retention disabled 时返回非 0
 
 #### Scenario: Diagnostics CLI output is sanitized
 - **WHEN** CLI 输出 export、dry-run 或 apply 结果
 - **THEN** 输出不包含 token、secret、credential payload 或完整文档正文
-
-### Requirement: Observability admin trace query CLI
-系统 SHALL 在 `fleetent-admin` 中提供 observability trace 查询命令，使 operator 无需手写 SQL 即可查询 agent run trace events。
-
-#### Scenario: Query traces by filters
-- **WHEN** operator 运行 `fleetent-admin observability traces --run-id run-1 --event-type agent_run_completed --limit 20`
-- **THEN** CLI 调用 observability public API `query_trace_events(TraceQuery(...))`
-- **AND** 查询条件包含 run_id、event_type 和 limit
-
-#### Scenario: Query traces by session
-- **WHEN** operator 运行 `fleetent-admin observability traces --session-id session-1`
-- **THEN** CLI 调用 observability public API `query_trace_events(TraceQuery(session_id="session-1"))`
-
-#### Scenario: Trace output is bounded
-- **WHEN** trace event payload 包含 prompt、reply、tool payload、token、secret 或 credential 字段
-- **THEN** CLI 输出不包含 payload 原值
-- **AND** CLI 只展示事件元数据和 bounded payload key summary
-
-### Requirement: Observability admin usage query CLI
-系统 SHALL 在 `fleetent-admin` 中提供 usage summary 查询命令，使 operator 能查看 run count、token usage 和 model 分组。
-
-#### Scenario: Query usage summary by filters
-- **WHEN** operator 运行 `fleetent-admin observability usage --user-id user-1 --from 2026-06-02T00:00:00 --to 2026-06-02T23:59:59`
-- **THEN** CLI 调用 observability public API `get_usage_summary(UsageQuery(...))`
-- **AND** 输出包含 run count、prompt tokens、completion tokens、total tokens 和 by-model summary
-
-### Requirement: Observability admin performance query CLI
-系统 SHALL 在 `fleetent-admin` 中提供 performance summary 查询命令，使 operator 能查看失败率、延迟、LLM / tool / permission 指标。
-
-#### Scenario: Query performance summary by filters
-- **WHEN** operator 运行 `fleetent-admin observability performance --agent-id agent-1 --limit 100`
-- **THEN** CLI 调用 observability public API `get_performance_summary(PerformanceQuery(...))`
-- **AND** 输出包含 run count、failure rate、latency percentile、LLM、tool、fallback 和 permission summary
-
-### Requirement: Observability admin query rejects invalid time
-系统 SHALL 对 observability admin query 的非法时间过滤给出明确错误并以非零状态退出。
-
-#### Scenario: Invalid from timestamp
-- **WHEN** operator 运行 `fleetent-admin observability usage --from not-a-time`
-- **THEN** CLI 输出 invalid timestamp 错误
-- **AND** 进程以非零状态退出
 
 ### Requirement: session 模块结构化日志覆盖
 
@@ -784,4 +743,3 @@ performance summary SHALL 通过 `query_trace_events()` 读取 traces，而不�
 #### Scenario: session 维护失败日志脱敏
 - **WHEN** session 维护操作记录包含 session_id 或错误信息的 warn 日志
 - **THEN** 日志内容经过自动脱敏处理（Bearer token、API key、邮箱等被替换）
-

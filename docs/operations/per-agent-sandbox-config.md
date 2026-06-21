@@ -2,7 +2,7 @@
 
 Sandbox resource/hardening/lifecycle/skills-mount config moved off the machine-shared
 `platform.yaml` onto each agent's `agent.yaml`, so every agent owns its own sandbox
-profile and a standalone agent no longer depends on `platform.yaml` for these settings
+profile and a direct `fleetent agent run` process no longer depends on `platform.yaml` for these settings
 (`per-agent-sandbox-resources`).
 
 ## What moved
@@ -55,7 +55,7 @@ Notes:
   agent- vs session-scoped containers within one agent, pick the single profile you want.
 - **Remove the migrated keys from `platform.yaml`.** They are no longer read; leaving
   them has no effect (no deprecation warning is emitted).
-- A standalone agent with no `platform.yaml` now resolves its full sandbox resource
+- A direct `fleetent agent run` process with no `platform.yaml` now resolves its full sandbox resource
   profile from `agent.yaml` + code defaults.
 
 ## Code-execution enablement (`sandbox.mode` removed)

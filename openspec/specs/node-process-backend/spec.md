@@ -5,7 +5,7 @@ TBD - created by archiving change node-supervisor. Update Purpose after archive.
 ## Requirements
 ### Requirement: 可插拔进程后端接口
 
-系统 SHALL 定义 `fleetent-node` 用于启停/探活本地 agent 进程的进程后端接口（spawn / stop / is_alive），使 reconcile 逻辑与"具体怎么跑进程"解耦。后端经能力/选型注入（仿 sandbox 后端范式），v1 提供 `local` 实现；systemd 等后端列 roadmap、不在本 change。
+系统 SHALL 定义 `fleetent node start` 用于启停/探活本地 agent 进程的进程后端接口（spawn / stop / is_alive），使 reconcile 逻辑与"具体怎么跑进程"解耦。后端经能力/选型注入（仿 sandbox 后端范式），v1 提供 `local` 实现；systemd 等后端列 roadmap、不在本 change。
 
 #### Scenario: reconcile 经接口而非具体后端操作进程
 

@@ -47,11 +47,15 @@
 - **THEN** `approver_user_id` 为 NULL(解析时由上层 fallback / default-closed 处理)
 
 ### Requirement: 最小 provisioning(admin)
-系统 **MUST** 提供管理员可用的最小 provisioning 入口(admin CLI 或 API):创建主体、创建团队、设置某 user 的 `tenant_id`、设置主体/团队的 `approver_user_id`。这些操作 **MUST** 受现有 admin 鉴权保护并写审计。
+系统 **MUST** 提供管理员可用的最小 provisioning 入口，经**平台 HTTP API**（`/admin/tenancy/*`）：创建主体、创建团队、设置某 user 的 `tenant_id`、设置主体/团队的 `approver_user_id`。这些操作 **MUST** 受现有 admin 鉴权（session token）保护并写审计，**MUST NOT** 经绕过 server 直写管理库的 CLI 提供（见 module-boundaries「Admin CLI 直写管理库的边界」）。
 
 #### Scenario: 建主体并分配用户
-- **WHEN** admin 创建主体 "A主体" 并把用户 U 的 `tenant_id` 设为它
-- **THEN** "A主体" 行存在,U 的 `tenant_id` 指向它,且操作被审计
+- **WHEN** admin 经 HTTP API 创建主体 "A主体" 并把用户 U 的 `tenant_id` 设为它
+- **THEN** "A主体" 行存在，U 的 `tenant_id` 指向它，且操作被审计
+
+#### Scenario: provisioning 无直写 CLI 路径
+- **WHEN** 查看 `fleetent admin` 子命令
+- **THEN** 不存在 create-tenant / create-team / set-user-tenant / set-approver 等直写管理库的命令；provisioning 仅经 HTTP API
 
 ### Requirement: users 纳入 alembic + 启动门
 因需为 `users` 加外键列,本变更 **MUST** 将 `users` 表纳入 Alembic 管理(从 store `_init_db` 迁出);其后 `users` 的 schema **MUST** 仅由 alembic 维护。部署在使用前 **MUST** 先 `alembic upgrade head`(`users` 不再由 `_init_db` 自愈)。
@@ -95,3 +99,4 @@
 #### Scenario: 删审批人用户置空 approver_user_id
 - **WHEN** 删除一个被某 tenant / team 设为 `approver_user_id` 的 user
 - **THEN** 该 tenant / team 的 `approver_user_id` 被 SET NULL，删用户成功，主体本身保留
+

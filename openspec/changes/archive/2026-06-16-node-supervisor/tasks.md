@@ -1,6 +1,6 @@
 # Tasks
 
-> C3：node supervisor（新顶层 `node/` 包 + `fleetent-node` 二进制）。TDD 每步先窄命令见红→见绿。node 逻辑用 mock HTTP(respx)+mock subprocess 可 unit；真实 node↔platform↔spawn 端到端归 integration/e2e。**边界铁律**：`node/` 不 import platform、不 import runtime 内部（仅 HTTP + subprocess）。本 change 无管理库迁移。
+> C3：node supervisor（新顶层 `node/` 包 + `fleetent node start` 二进制）。TDD 每步先窄命令见红→见绿。node 逻辑用 mock HTTP(respx)+mock subprocess 可 unit；真实 node↔platform↔spawn 端到端归 integration/e2e。**边界铁律**：`node/` 不 import platform、不 import runtime 内部（仅 HTTP + subprocess）。本 change 无管理库迁移。
 
 ## 1. runtime CLI 加 `fleetent agent stop`
 
@@ -11,7 +11,7 @@
 ## 2. node 包骨架 + 配置 + 二进制
 
 - [x] 2.1 测试：配置加载（platform 基址/node-id/service key/FLEETENT_HOME/间隔）；缺必需项报错退出。见红
-- [x] 2.2 建 `src/fleetent/node/`（`__init__.py`、`config.py`），`pyproject.toml` 加 `fleetent-node` entry point。见绿
+- [x] 2.2 建 `src/fleetent/node/`（`__init__.py`、`config.py`），`pyproject.toml` 加 `fleetent node start` entry point。见绿
 - [x] 2.3 收尾跑全绿
 
 ## 3. desired-state provider（platform-api）+ 本地缓存
@@ -34,7 +34,7 @@
 
 ## 6. 守护主循环 + 二进制可跑
 
-- [x] 6.1 测试：`fleetent-node` 主循环按间隔 拉取→reconcile→上报；有效配置进入循环、无效退出。见红
+- [x] 6.1 测试：`fleetent node start` 主循环按间隔 拉取→reconcile→上报；有效配置进入循环、无效退出。见红
 - [x] 6.2 实现主循环入口（`node/app.py`），wire provider/backend/reconcile。见绿
 - [x] 6.3 收尾跑全绿
 

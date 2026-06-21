@@ -22,7 +22,7 @@
 
 ## 4. fleetent-admin 运维入口
 
-- [x] 4.1 测试：`fleetent-admin node register/list/deregister` 与 `pin/unpin` 子命令解析 + 调对应 store（CLI 解析可 unit；触 DB 的端到端走 integration）。见红
+- [x] 4.1 测试：`fleetent admin node register/list/deregister` 与 `pin/unpin` 子命令解析 + 调对应 store（CLI 解析可 unit；触 DB 的端到端走 integration）。见红
 - [x] 4.2 实现 `platform/admin_cli/nodes.py`（`register.py` 风格 `register(subparsers)`），并在 `admin_cli/main.py` 挂载；register 打印一次性 key。见绿
 - [x] 4.3 收尾跑相关测试全绿
 

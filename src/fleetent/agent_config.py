@@ -136,6 +136,15 @@ class ImBinding(BaseModel):
     telegram: TelegramBinding | None = None
 
 
+class AgentBindings(BaseModel):
+    """Optional top-level runtime bindings materialized by the control plane."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    default: bool = False
+    users: list[str] = Field(default_factory=list)
+
+
 class ModelTarget(BaseModel):
     """Agent-local model endpoint definition."""
 
@@ -440,6 +449,7 @@ class AgentFile(BaseModel):
     scheduling: SchedulingSettings = Field(default_factory=SchedulingSettings)
     webhooks: WebhooksSettings = Field(default_factory=WebhooksSettings)
     im: ImBinding = Field(default_factory=ImBinding)
+    bindings: AgentBindings = Field(default_factory=AgentBindings)
     approval: ApprovalRouting | None = None
 
 
@@ -635,6 +645,8 @@ def build_index(agents_dir: str | Path | None = None) -> AgentConfigIndex:
         for agent_dir in sorted(p for p in root.iterdir() if (p / AGENT_FILE_NAME).is_file()):
             agent = load_agent_file(agent_dir)
             agents[agent.name] = agent
+            if agent.bindings.default and default is None:
+                default = agent.name
 
     return AgentConfigIndex(agents=agents, default=default)
 

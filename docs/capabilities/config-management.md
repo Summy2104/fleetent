@@ -23,7 +23,7 @@
   - `config/` 不再是部署配置或模板命名空间；MCP 定义来自 Platform DB / materialized Agent config
 
 - ✅ **Docker Compose**：Pilot 默认部署入口
-  - Pilot 默认从 `docker compose run --rm fleetent uv run fleetent-admin init-config` 开始，
+  - Pilot 默认从 `docker compose run --rm fleetent uv run fleetent admin init-config` 开始，
     显式执行 `scripts/upgrade.py` 后再 `docker compose up -d`。
   - `uv run uvicorn fleetent.server:app` 只作为开发模式保留，不作为 Pilot 默认部署入口。
   - 当前 Dockerfile 和 docker-compose.yml 关键配置：
@@ -63,20 +63,20 @@
   - migration 失败时不会自动 rollback；已创建 backup 会保留，脚本返回非 0
   - 备份语义假定 upgrade 运行在停服 / 静默窗口（与既有 upgrade 语义一致），非在线一致性快照
 
-- ✅ **Pilot connector operations CLI**：`fleetent-admin kb connectors ...`
+- ✅ **Pilot connector operations HTTP API**：`/admin/kb/connectors/*`
   - `list` 列出 Platform Knowledge config / DB snapshot 中的 Google Drive / Confluence connector 安全摘要
   - `check <connector_id>` 检查 `credential_ref` 与 remote scope，返回 credential_missing / credential_invalid / auth_failed / scope_unreachable / ok
   - `sync <connector_id> --dry-run` 生成同步计划，不写 KB、source state 或 vector index
   - `sync <connector_id>` 手动执行同步并写入最近一次 status
   - `status <connector_id>` 查询最近一次 dry-run / sync 结果；输出不包含 credential payload、token、secret 或文档正文
 
-- ✅ **Diagnostics export / retention CLI**：`fleetent-admin diagnostics ...`
+- ✅ **Diagnostics export / retention CLI**：`fleetent admin diagnostics ...`
   - `export` 生成本地脱敏诊断包，包含 manifest、logs、trace / usage / performance 摘要、connector status、environment 和 config summary
   - `retention dry-run` 只展示将删除的 logs、traces 和 diagnostics export 包候选
   - `retention apply` 只有显式开启 `diagnostics.retention.enabled=true` 后才删除诊断数据
   - retention 不删除 memory、KB 文档 / chunks、connector source state、SQLite 主库或 SQLite backups
 
-- ✅ **Observability admin query CLI**：`fleetent-admin observability ...`
+- ✅ **Observability admin query HTTP API**：`/admin/observability/{traces,usage,performance}`
   - `traces` 查询 agent run trace events，只输出事件元数据和 payload key summary
   - `usage` 查询 run count、token usage 和 by-model summary
   - `performance` 查询失败率、延迟、LLM / tool / fallback / permission 指标
@@ -125,12 +125,12 @@ Pilot 环境中，Google Drive / Confluence connector 的真实 credential 不�
 常用操作：
 
 ```bash
-uv run fleetent-admin kb connectors list
-uv run fleetent-admin kb connectors check eng-drive
-uv run fleetent-admin kb connectors sync eng-drive --dry-run
+GET /admin/kb/connectors
+POST /admin/kb/connectors/eng-drive/check
+POST /admin/kb/connectors/eng-drive/sync  # body: {"dry_run": true}
 FLEETENT_GOOGLE_DRIVE_EXECUTE_SYNC=1 \
-  uv run fleetent-admin kb connectors sync eng-drive --yes --pilot-fixture
-uv run fleetent-admin kb connectors status eng-drive
+  POST /admin/kb/connectors/eng-drive/sync  # body: {"dry_run": false}
+GET /admin/kb/connectors/eng-drive/status
 ```
 
 排障方向：
@@ -146,8 +146,8 @@ uv run fleetent-admin kb connectors status eng-drive
 诊断包导出：
 
 ```bash
-uv run fleetent-admin diagnostics export
-uv run fleetent-admin diagnostics export --from 2026-06-02T00:00:00 --to 2026-06-02T23:59:59
+uv run fleetent admin diagnostics export
+uv run fleetent admin diagnostics export --from 2026-06-02T00:00:00 --to 2026-06-02T23:59:59
 ```
 
 诊断包默认写入 `data/diagnostics`。包内数据会二次脱敏，并排除 memory 内容、KB 文档正文 / chunks、
@@ -156,8 +156,8 @@ SQLite 主库、SQLite backups 和 connector credential 文件内容。
 手动 retention：
 
 ```bash
-uv run fleetent-admin diagnostics retention dry-run
-uv run fleetent-admin diagnostics retention apply
+uv run fleetent admin diagnostics retention dry-run
+uv run fleetent admin diagnostics retention apply
 ```
 
 默认 `diagnostics.retention.enabled=false`，因此 `apply` 会拒绝执行。只有在配置中显式
@@ -166,13 +166,13 @@ uv run fleetent-admin diagnostics retention apply
 
 ## Observability 查询
 
-Pilot 排障优先使用 admin CLI，不直接查询 SQLite：
+Pilot 排障优先使用 admin HTTP API，不直接查询 SQLite：
 
 ```bash
-uv run fleetent-admin observability traces --run-id run-1 --limit 20
-uv run fleetent-admin observability traces --event-type agent_run_failed --from 2026-06-02T00:00:00 --to 2026-06-02T23:59:59
-uv run fleetent-admin observability usage --user-id user-1 --limit 100
-uv run fleetent-admin observability performance --agent-id agent-1 --limit 100
+GET /admin/observability/traces?run_id=run-1&limit=20
+GET /admin/observability/traces?event_type=agent_run_failed&since=2026-06-02T00:00:00&until=2026-06-02T23:59:59
+GET /admin/observability/usage?user_id=user-1&limit=100
+GET /admin/observability/performance?agent=agent-1&limit=100
 ```
 
 `traces` 输出只包含 trace 元数据和 payload key summary，不输出 prompt、reply、tool payload 或 credential

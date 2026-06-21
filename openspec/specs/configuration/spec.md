@@ -25,10 +25,10 @@ IM 凭证经 per-agent `connectors` 的 `*_env` 引用提供。
 
 ### Requirement: Local configuration initialization
 
-系统 SHALL 提供 `fleetent-admin init-config` 作为 Platform home 配置初始化入口。
+系统 SHALL 提供 `fleetent admin init-config` 作为 Platform home 配置初始化入口。
 
 #### Scenario: Init config creates local Platform files
-- **WHEN** operator 运行 `fleetent-admin init-config`
+- **WHEN** operator 运行 `fleetent admin init-config`
 - **THEN** 系统从 `.env.example` 创建 `.env`
 - **AND** 从 `platform.yaml.example` 创建 `platform.yaml`
 - **AND** 创建 `data/`、`data/logs/`、`data/diagnostics/` 和 `secrets/`
@@ -40,12 +40,12 @@ IM 凭证经 per-agent `connectors` 的 `*_env` 引用提供。
 - **AND** 输出说明该文件已存在
 
 #### Scenario: Init config dry run does not write
-- **WHEN** operator 运行 `fleetent-admin init-config --dry-run`
+- **WHEN** operator 运行 `fleetent admin init-config --dry-run`
 - **THEN** 系统输出将创建、跳过或覆盖的路径
 - **AND** 不写入文件系统
 
 #### Scenario: Init config force overwrites generated files
-- **WHEN** operator 运行 `fleetent-admin init-config --force`
+- **WHEN** operator 运行 `fleetent admin init-config --force`
 - **THEN** 系统覆盖 `.env` 和 `platform.yaml`
 - **AND** 不删除未知文件
 - **AND** 不生成任何真实 secret 文件

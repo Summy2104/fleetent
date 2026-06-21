@@ -9,13 +9,16 @@ from pathlib import Path
 
 import pytest
 
+_RETIRED_TUI_CMD = "fleetent" + "-tui"
 
-def test_fleetent_admin_console_script_points_to_platform_entrypoint() -> None:
+
+def test_legacy_console_scripts_removed_from_pyproject() -> None:
     pyproject = tomllib.loads(Path("pyproject.toml").read_text())
+    scripts = pyproject["project"]["scripts"]
 
-    assert (
-        pyproject["project"]["scripts"]["fleetent-admin"] == "fleetent.platform.admin_cli.main:main"
-    )
+    assert "fleetent-admin" not in scripts
+    assert "fleetent-node" not in scripts
+    assert _RETIRED_TUI_CMD not in scripts
 
 
 def test_legacy_admin_module_is_not_importable() -> None:

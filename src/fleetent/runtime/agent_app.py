@@ -1,8 +1,9 @@
-"""Standalone agent runtime: boot one agent home as a self-contained process.
+"""Single-agent runtime process used by node and local dev/test.
 
 `fleetent agent run <agent-id>` loads a single agent home (`agent.yaml` + `.env` +
-`data/` + local access), runs the agent loop, and brings up that agent's IM connectors —
-with no platform service. Reuses the shared runtime libs (loop/run_stream, agent_config,
+`data/` + local access), runs the agent loop, and brings up that agent's IM connectors.
+Node uses this as the process primitive for managed deployments; developers may also run
+it directly for dev/test. Reuses the shared runtime libs (loop/run_stream, agent_config,
 session, MCP, sandbox, the per-agent Slack supervisor) but as an agent-scoped runtime,
 not the platform app (see openspec change ``agent-runtime-cli``). HTTP `/chat` + `/ws`
 are served only when a port is given.
@@ -48,7 +49,7 @@ class ApprovalRequest(BaseModel):
 
 @dataclass
 class AgentRuntime:
-    """Handle for a running standalone agent: its definition, IM supervisor, app."""
+    """Handle for one running agent process: its definition, IM supervisor, app."""
 
     agent: AgentFile
     supervisor: SlackSupervisor
@@ -139,7 +140,7 @@ def _check_tenant(principal: Principal, agent_tenant: str) -> bool:
 def _redirect_agent_data_paths(home_dir: Path) -> None:
     """Redirect all per-agent runtime data sinks to ``home_dir/data/``.
 
-    Called once per standalone agent boot before any infra initialisation. Assigns
+    Called once per agent-process boot before any infra initialisation. Assigns
     directly to module-level constants so the change takes effect for all subsequent
     operations in this process without introducing new env vars.
     """
@@ -158,7 +159,7 @@ def _redirect_agent_data_paths(home_dir: Path) -> None:
 def _configure_logging_from_agent(agent: AgentFile, home_dir: Path) -> None:
     """Apply agent.yaml log_format and observability.logging.* to the runtime logging system.
 
-    Called once per standalone agent process after the agent file is loaded. The platform
+    Called once per agent process after the agent file is loaded. The platform
     server path (server.py) continues to use configure_logging(Settings) unchanged.
     A blank ``directory`` resolves to ``home_dir/data/logs/``; a relative ``directory``
     resolves against ``home_dir`` (anchored like agent.yaml/.env, never the process CWD);
@@ -273,6 +274,9 @@ async def _start_infra(
     (== home_dir, mirroring the MCP `agent_home` derivation below).
     """
     _init_agent_db_schema(data_dir, agent_id=agent.name, tenant_id=agent.tenant_id)
+    from fleetent.runtime.approval_resume import reconcile_expired_approvals
+
+    await reconcile_expired_approvals()
     from fleetent.integrations.sandbox import enablement as sandbox_enablement
 
     # Select the configured sandbox backend (agent.yaml > platform.yaml > docker) and

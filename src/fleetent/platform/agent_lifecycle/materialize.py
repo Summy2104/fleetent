@@ -28,7 +28,7 @@ from fleetent.agent_config import (
     default_models,
 )
 from fleetent.config import McpServerSettings
-from fleetent.platform.agent_lifecycle import credential_slots, secret_store
+from fleetent.platform.agent_lifecycle import credential_slots, default_binding_store, secret_store
 from fleetent.platform.connector_management import mcp_server_store
 from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.model_provider_management import provider_admin_store
@@ -111,7 +111,8 @@ def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
         memory_namespace=agent.memory_namespace,
     )
     with_overrides = _apply_overrides(base, agent.config_overrides)
-    return _materialize_im_access(with_overrides, agent)
+    with_im_access = _materialize_im_access(with_overrides, agent)
+    return _materialize_default_binding(with_im_access, agent)
 
 
 def desired_state_payload_from_agent_file(agent_file: AgentFile) -> dict[str, Any]:
@@ -166,6 +167,16 @@ def _materialize_im_access(base: AgentFile, agent: agent_store.Agent) -> AgentFi
         access["allow_users"] = allow_users
         access.setdefault("allow_groups", [])
 
+    return AgentFile.model_validate(raw)
+
+
+def _materialize_default_binding(base: AgentFile, agent: agent_store.Agent) -> AgentFile:
+    raw = base.model_dump(mode="json", exclude_defaults=False)
+    bindings = raw.setdefault("bindings", {})
+    if default_binding_store.is_default(agent.id):
+        bindings["default"] = True
+    else:
+        bindings.pop("default", None)
     return AgentFile.model_validate(raw)
 
 

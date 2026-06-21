@@ -190,8 +190,8 @@ run_entity_extraction(tenant_id: str, kb_id: str, document_id: str | None = None
 CLI：
 
 ```bash
-fleetent-admin kb extract-entities --kb-id engineering
-fleetent-admin kb extract-entities --kb-id engineering --document-id doc-123
+fleetent admin kb extract-entities --kb-id engineering
+fleetent admin kb extract-entities --kb-id engineering --document-id doc-123
 ```
 
 后续 Admin API、scheduler 或 worker 可以触发同一 public API，但本 change 不实现后台运行。

@@ -16,6 +16,7 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "install.sh"
 SUPPORTED_FLAGS = ("--agent-only", "--platform-only", "--dir", "--help")
+_RETIRED_TUI_CMD = "fleetent" + "-tui"
 
 
 def _run(args: list[str], home: Path) -> subprocess.CompletedProcess[str]:
@@ -74,7 +75,7 @@ def test_unknown_flag_fails_fast(tmp_path: Path) -> None:
 # ── fake-uv harness ─────────────────────────────────────────────────────────
 # A stub `uv` on PATH lets us exercise ensure_uv/check_python/install_editable
 # and the delegated role scripts without touching the network. It logs every
-# invocation and, on `tool install`, creates the three entrypoints so the role
+# invocation and, on `tool install`, creates the required entrypoints so the role
 # scripts' `command -v fleetent` checks pass.
 
 _FAKE_UV = """#!/bin/bash
@@ -92,9 +93,7 @@ case "$1" in
     ;;
   tool)
     if [ "$2" = "install" ]; then
-      for c in fleetent fleetent-admin fleetent-tui; do
-        printf '#!/bin/bash\\n:' > "$FAKE_BIN/$c"; chmod +x "$FAKE_BIN/$c"
-      done
+      printf '#!/bin/bash\\n:' > "$FAKE_BIN/fleetent"; chmod +x "$FAKE_BIN/fleetent"
     fi
     ;;
 esac
@@ -177,6 +176,8 @@ def test_full_run_delegates_to_both_role_scripts(tmp_path: Path) -> None:
     assert "Setting up platform" in out
     # install-defer-agent-init: no default agent is seeded; a create-agent tutorial is printed.
     assert "fleetent agent init" in out
+    assert "fleetent chat --url ws://localhost:<port>/ws --token <FLEETENT_TUI_TOKEN>" in out
+    assert _RETIRED_TUI_CMD not in out
     assert not (home / ".fleetent" / "agents" / "default").exists()
     assert "Developer install complete" in out
 

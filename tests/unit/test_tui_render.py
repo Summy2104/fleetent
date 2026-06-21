@@ -59,8 +59,20 @@ def test_format_status_carries_message():
     assert "connecting" in _plain(render.format_status("connecting…"))
 
 
-def test_done_event_renders_newline_only():
-    assert _plain(render.format_event({"type": "done", "payload": {"content": "ok"}})) == "\n"
+def test_done_event_has_no_renderable_text():
+    # done carries no text; AppController flushes the streamed line itself.
+    assert render.format_event({"type": "done", "payload": {"content": "ok"}}) is None
+
+
+def test_structured_events_have_no_leading_newline():
+    # Inter-event separation is the caller's job; a leading newline here would stack
+    # blank lines between back-to-back structured events.
+    for ev in (
+        {"type": "tool_call", "payload": {"name": "calc", "args": {}}},
+        {"type": "tool_result", "payload": {"name": "calc", "content": "19"}},
+        {"type": "error", "payload": {"content": "boom"}},
+    ):
+        assert not _plain(render.format_event(ev)).startswith("\n")
 
 
 def test_unknown_event_returns_none():

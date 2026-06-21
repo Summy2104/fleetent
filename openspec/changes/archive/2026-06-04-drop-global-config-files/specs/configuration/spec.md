@@ -14,7 +14,7 @@ agent 运行时 SHALL 在 `settings.yaml` / `mcp.yaml` / `mcp.servers.yaml` 缺�
 - **AND** 启动不报错
 
 #### Scenario: init-config does not seed global config files
-- **WHEN** operator 运行 `fleetent-admin init-config`
+- **WHEN** operator 运行 `fleetent admin init-config`
 - **THEN** 不创建 `config/settings.yaml` 或 `config/mcp.servers.yaml`
 - **AND** 仍创建 `.env` 与数据目录
 

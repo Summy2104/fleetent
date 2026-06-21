@@ -88,12 +88,12 @@ check_python() {
 install_tool() {
     log_info "Installing fleetent binary (production mode)..."
     uv tool install --force --from "$REPO_ROOT" fleetent
-    if ! command -v fleetent-admin >/dev/null 2>&1; then
-        log_error "fleetent-admin not found after install."
+    if ! command -v fleetent >/dev/null 2>&1; then
+        log_error "fleetent not found after install."
         log_info "Run: uv tool update-shell"
         exit 1
     fi
-    log_success "Installed: fleetent fleetent-admin fleetent-tui"
+    log_success "Installed: fleetent"
 }
 
 setup_home_env() {
@@ -151,7 +151,7 @@ init_platform_db() {
 
 seed_admin() {
     log_info "Seeding built-in admin user..."
-    if uv run --project "$REPO_ROOT" fleetent-admin seed-builtin-admin 2>/dev/null; then
+    if uv run --project "$REPO_ROOT" fleetent admin seed-builtin-admin 2>/dev/null; then
         log_success "Admin seeded (check logs for initial password on first run)"
     else
         log_warn "seed-builtin-admin returned non-zero (may already exist — OK)"

@@ -23,6 +23,10 @@ _NOOP_INIT_SCHEMA = patch(
     "fleetent.runtime.agent_app._init_agent_db_schema",
     MagicMock(),
 )
+_NOOP_RECONCILE = patch(
+    "fleetent.runtime.approval_resume.reconcile_expired_approvals",
+    AsyncMock(return_value=0),
+)
 
 
 async def test_start_infra_cleans_orphans_and_starts_sweep_when_docker_available(
@@ -30,6 +34,7 @@ async def test_start_infra_cleans_orphans_and_starts_sweep_when_docker_available
 ) -> None:
     with (
         _NOOP_INIT_SCHEMA,
+        _NOOP_RECONCILE,
         patch(
             "fleetent.integrations.sandbox.enablement.get_effective_mode",
             AsyncMock(return_value=Mode.ON),
@@ -50,6 +55,7 @@ async def test_start_infra_skips_sandbox_lifecycle_when_docker_unavailable(
 ) -> None:
     with (
         _NOOP_INIT_SCHEMA,
+        _NOOP_RECONCILE,
         patch(
             "fleetent.integrations.sandbox.enablement.get_effective_mode",
             AsyncMock(return_value=Mode.OFF),
@@ -73,6 +79,7 @@ async def test_start_infra_inits_sandbox_manager_with_per_agent_skills_root(
     (sandbox-skill-mount-per-agent-root)."""
     with (
         _NOOP_INIT_SCHEMA,
+        _NOOP_RECONCILE,
         patch(
             "fleetent.integrations.sandbox.enablement.get_effective_mode",
             AsyncMock(return_value=Mode.ON),
@@ -92,6 +99,7 @@ async def test_start_infra_cleanup_failure_does_not_block_startup(tmp_path: Path
     """An orphan-cleanup error is logged; boot still proceeds to session maintenance."""
     with (
         _NOOP_INIT_SCHEMA,
+        _NOOP_RECONCILE,
         patch(
             "fleetent.integrations.sandbox.enablement.get_effective_mode",
             AsyncMock(return_value=Mode.ON),

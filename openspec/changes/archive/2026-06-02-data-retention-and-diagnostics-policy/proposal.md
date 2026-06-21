@@ -22,8 +22,8 @@ fleetent 已经有 structured logs、SQLite traces、usage summary、performance
   - config key summary
 - 导出内容必须二次脱敏，不包含 memory、KB 文档正文 / chunks、完整用户消息、credential、token、API key 或 SQLite 全库备份。
 - 新增手动 CLI：
-  - `fleetent-admin diagnostics export ...`
-  - `fleetent-admin diagnostics retention dry-run`
+  - `fleetent admin diagnostics export ...`
+  - `fleetent admin diagnostics retention dry-run`
   - `fleetent-admin diagnostics retention apply`
 - retention dry-run / apply 只处理诊断数据：
   - log files

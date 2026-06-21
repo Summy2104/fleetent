@@ -58,7 +58,7 @@ TDD Hard Gate 只管代码实现；文档、proposal.md、design.md、tasks.md �
 
 ### Agent / Platform 解耦（核心架构契约）
 
-agent 必须能在**没有 platform 的环境下独立运行**（`fleetent agent run`）。依赖方向**单向不可逆**：
+部署上 **platform 始终在场**；`fleetent agent run` 是 **node 拉起 agent 的原语**，也可供 dev/test 直接运行，**不是 standalone 部署模式**。依赖方向**单向不可逆**：
 
 ```
 platform（管理入口） ──→ agent runtime（被启停、被读取）
@@ -145,9 +145,9 @@ uv run ruff format src tests                                # 格式化
 uv run ruff check src tests                                 # lint
 uv run mypy src                                             # 类型检查
 uv run fleetent "hello"                                     # CLI agent
-uv run fleetent-admin create-user --name "Alice"            # 用户管理
+POST /admin/service-principals  # body: {"name": "Alice"}            # 用户管理
 uvicorn fleetent.server:app --reload --port 8765            # HTTP 服务（默认端口 8765）
-uv run fleetent-tui --token ma-<key>                        # 交互式终端 TUI
+uv run fleetent chat --token ma-<key>                      # 交互式终端 TUI
 ```
 
 ---

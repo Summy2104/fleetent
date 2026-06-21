@@ -10,7 +10,7 @@ fleetent 支持 agent 运行时与 platform **分机部署**（独立 `install-a
 - **新增 `nodes` 管理表**：node 身份（node-id）、service key（node↔platform 鉴权凭证，复用 `ma-` bearer 体系）、手动登记元数据、`labels`（未来调度用，v1 不消费）、心跳/last-seen 字段。
 - **新增 agent→node 显式 pin（placement）**：一个 agent 钉在**恰好一个** node 上（agent 是有状态单例，握 IM socket/独占 DB，非副本）。以独立 placement 表承载（保持 agent 定义纯净，placement 是运营态）。
 - **登记/钉绑入口**：
-  - node 登记（infra ops）→ `fleetent-admin node register|list|deregister`（属 bootstrap/ops 桶）。
+  - node 登记（infra ops）→ `fleetent admin node register|list|deregister`（属 bootstrap/ops 桶）。
   - agent→node pin（运营管理）→ HTTP API + 网页后台（与其它 agent 管理一致）。
 - 不做：自动调度、label selector 匹配、failover 重分配（均列编排 roadmap）；不消费 status（C2 才消费）；无 reconcile 行为。
 

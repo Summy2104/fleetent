@@ -95,13 +95,36 @@ async def test_unknown_command_renders_hint():
     assert any("frobnicate" in s for s in emitted)
 
 
-async def test_on_event_renders_and_clears_run_on_done():
+async def test_on_event_buffers_partial_text_and_flushes_on_done():
+    # A newline-less text_delta is buffered (not emitted) — partial lines don't persist
+    # above the prompt; done flushes the streamed text as one complete line.
     ctrl, _backend, emitted = _controller()
     ctrl.current_run_id = "r1"
     ctrl.on_event(p.make_event(p.EVENT_TEXT_DELTA, {"content": "streamed"}, run_id="r1")["params"])
-    assert any("streamed" in s for s in emitted)
+    assert emitted == []  # nothing emitted yet: no terminating newline
     ctrl.on_event(p.make_event(p.EVENT_DONE, {"content": ""}, run_id="r1")["params"])
+    assert "".join(emitted) == "streamed\n"  # flushed as a complete line
     assert ctrl.current_run_id is None
+
+
+async def test_on_event_emits_complete_lines_immediately():
+    ctrl, _backend, emitted = _controller()
+    ctrl.on_event(p.make_event(p.EVENT_TEXT_DELTA, {"content": "line one\npart"})["params"])
+    assert "".join(emitted) == "line one\n"  # whole line out, "part" held back
+    ctrl.on_event(p.make_event(p.EVENT_DONE, {"content": ""})["params"])
+    assert "".join(emitted) == "line one\npart\n"
+
+
+async def test_on_event_no_blank_lines_around_structured_events():
+    ctrl, _backend, emitted = _controller()
+    ctrl.on_event(p.make_event(p.EVENT_TEXT_DELTA, {"content": "let me check"})["params"])
+    ctrl.on_event(p.make_event(p.EVENT_TOOL_CALL, {"name": "calc", "args": {}})["params"])
+    ctrl.on_event(p.make_event(p.EVENT_TOOL_RESULT, {"name": "calc", "content": "19"})["params"])
+    ctrl.on_event(p.make_event(p.EVENT_DONE, {"content": ""})["params"])
+    joined = "".join(emitted)
+    assert "\n\n" not in joined  # no blank lines stacked
+    assert not joined.startswith("\n")  # no leading blank
+    assert "let me check\n" in joined and "calc" in joined and "19" in joined
 
 
 async def test_interrupt_aborts_current_run():

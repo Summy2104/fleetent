@@ -9,7 +9,7 @@
 
 ## 2. Platform home init/install/docker paths
 
-- [x] 2.1 Write failing tests: `fleetent-admin init-config` creates `.env` and
+- [x] 2.1 Write failing tests: `fleetent admin init-config` creates `.env` and
   `platform.yaml` from root examples; install creates `.env`, `platform.yaml`, and
   `agents/default/{agent.yaml,.env,data/}`; Docker Compose uses root `.env` and
   `platform.yaml`.

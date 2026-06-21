@@ -34,7 +34,7 @@ Docker image SHALL include enough project files to run the service, admin CLI an
 #### Scenario: Container can run operator commands
 - **WHEN** operator enters the fleetent container or uses `docker compose run --rm fleetent`
 - **THEN** `uv run fleetent --help` works
-- **AND** `uv run fleetent-admin --help` works
+- **AND** `uv run fleetent admin --help` works
 - **AND** `uv run python scripts/upgrade.py --dry-run` works
 
 ### Requirement: Explicit migration is recommended for Pilot
@@ -59,7 +59,7 @@ Deployment docs SHALL explain the Docker Compose first Pilot flow, local env fil
 
 #### Scenario: Init flow is documented
 - **WHEN** operator reads deployment docs
-- **THEN** docs instruct operator to run `fleetent-admin init-config`
+- **THEN** docs instruct operator to run `fleetent admin init-config`
 - **AND** docs explain which files and directories are created
 
 #### Scenario: Flat secrets directory is documented

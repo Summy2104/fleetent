@@ -11,7 +11,7 @@
   - `config/agent/.env.example`（agent 的 env：LLM keys + 该 agent 的 connector/MCP/KB token + 沙箱/vision/上下文调优）
   - `config/platform/.env.example`（平台 env：`ANTHROPIC_API_KEY`〔Settings 必填，共用〕+ `FLEETENT_AUTO_UPGRADE` + `DATABASE_URL` + TUI + LOG_FORMAT）
   - 删除根 `.env.example` 与 `config/agent.yaml.example`
-- **init_config**：`fleetent-admin init-config` 的 `.env` 模板源改为 `config/platform/.env.example`（平台脚手架）。
+- **init_config**：`fleetent admin init-config` 的 `.env` 模板源改为 `config/platform/.env.example`（平台脚手架）。
 - **Dockerfile**：COPY 路径更新到新模板位置。
 - **.gitignore**：忽略真实 `config/agent/agent.yaml`、`config/agent/.env`、`config/platform/.env`；保留 `*.example` 受版本控制。
 
