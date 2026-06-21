@@ -30,15 +30,25 @@ describe('admin routes', () => {
     expect(await screen.findByRole('heading', { name: 'Admin Login' })).toBeInTheDocument();
   });
 
-  it('renders the agents page and legacy deep links for unmigrated domains', async () => {
+  it('renders the agents page with native navigation links', async () => {
     server.use(http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])));
 
     renderRoutes('/agents', 'session-token');
 
     expect(await screen.findByRole('heading', { name: 'Agents' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Agents' })).toHaveAttribute('href', '/agents');
+    expect(screen.getByRole('link', { name: 'Providers' })).toHaveAttribute('href', '/providers');
+  });
+
+  it('renders providers as a native route instead of a legacy deep link', async () => {
+    server.use(http.get('http://fleetent.test/admin/providers', () => HttpResponse.json([])));
+
+    renderRoutes('/providers', 'session-token');
+
+    expect(await screen.findByRole('heading', { name: 'Providers' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Providers' })).toHaveAttribute(
       'href',
-      '/admin/ui-legacy#providers'
+      '/providers'
     );
   });
 

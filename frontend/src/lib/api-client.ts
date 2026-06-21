@@ -5,6 +5,7 @@ import { useAuthSession } from '@/app/auth';
 export type AdminApiClient = {
   get: <T>(path: string) => Promise<T>;
   post: <T>(path: string, body?: unknown, headers?: HeadersInit) => Promise<T>;
+  put: <T>(path: string, body: unknown) => Promise<T>;
   patch: <T>(path: string, body: unknown) => Promise<T>;
   delete: <T>(path: string, headers?: HeadersInit) => Promise<T>;
 };
@@ -48,6 +49,11 @@ export function useAdminApi(): AdminApiClient {
           body: body === undefined ? undefined : JSON.stringify(body),
           headers: extraHeaders,
           method: 'POST',
+        }),
+      put: <T>(path: string, body: unknown) =>
+        request<T>(path, {
+          body: JSON.stringify(body),
+          method: 'PUT',
         }),
       patch: <T>(path: string, body: unknown) =>
         request<T>(path, {
