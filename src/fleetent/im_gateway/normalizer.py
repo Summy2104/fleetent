@@ -393,6 +393,9 @@ async def _resume_pending_in_session(
         agent_name=agent.name if agent else None,
         features=agent_features or {},
         session_id=session_id,
+        # scope_key mirrors the normal turn (loop.py) so /workspace arg translation and
+        # /exchange attribution apply to the resumed (approved) tool, not just live turns.
+        scope_key=agent_loop.resolve_scope_key(session_id, agent.name if agent else None),
         session_context=session_context,
         outbound_connectors=msg.outbound_connectors,
         run_id=str(uuid.uuid4()),
@@ -423,6 +426,7 @@ async def _resume_pending_in_session(
             progress_func=progress_func,
             session_context=session_context,
             conversation_address=conversation_address,
+            skill_authoring_enabled=agent.skill_authoring_enabled if agent else False,
         )
 
     # upload_func is rebuilt for parity with the inbound path; the resumed run delivers
@@ -707,6 +711,7 @@ async def route(msg: NormalizedMessage) -> None:
                 progress_func=msg.progress_func,
                 session_context=msg.session_context,
                 conversation_address=msg.conversation_address,
+                skill_authoring_enabled=agent.skill_authoring_enabled if agent else False,
             )
 
         # P4: session_end hook — observe after run completes, before session save.

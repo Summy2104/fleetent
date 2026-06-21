@@ -26,7 +26,7 @@ def test_grouped_nav_present():
 
 def test_existing_tabs_still_reachable():
     html = ADMIN_HTML
-    for tab in ("users", "kb", "chat"):
+    for tab in ("users", "kb", "providers"):
         assert f'data-tab="{tab}"' in html
 
 
@@ -45,6 +45,21 @@ def test_active_tab_restore_falls_back_to_users():
     # restore validates against TAB_GROUP and defaults to users
     assert "TAB_GROUP" in body
     assert '"users"' in body
+
+
+def test_chat_playground_ui_removed() -> None:
+    html = ADMIN_HTML
+    assert 'data-tab="chat"' not in html
+    assert 'id="tab-chat"' not in html
+    assert '"/chat/start"' not in html
+    assert 'api("GET", "/chat/sessions")' not in html
+    assert "/chat/${encodeURIComponent(SESS_PG_ID)}/message" not in html
+
+
+def test_stats_reports_ui_removed_but_export_kept() -> None:
+    html = ADMIN_HTML
+    assert "/stats/export" in html
+    assert "/stats/reports" not in html
 
 
 # --- 2. Skills module ---------------------------------------------------------
@@ -125,16 +140,12 @@ def test_skills_proposals_review_wired():
     html = ADMIN_HTML
     assert "/skills/proposals" in html
     assert "/diff" in html
-    assert "/approve" in html
-    assert "/reject" in html
     assert "function skProposals" in html
-    assert "function skApprove" in html
-    assert "function skReject" in html
 
 
 def test_skills_confirm_header_for_high_risk():
     html = ADMIN_HTML
-    # force-publish / promote / approve require X-Confirm header
+    # force-publish still requires X-Confirm header
     assert '"X-Confirm": "true"' in html or "'X-Confirm': 'true'" in html
 
 
@@ -174,9 +185,6 @@ def test_providers_crud_and_actions_wired():
         "function pvEdit",
         "function pvDelete",
         "function pvTest",
-        "function pvRoutes",
-        "function pvSetRoute",
-        "function pvPreviewRoute",
     ):
         assert fn in html, fn
 
@@ -187,9 +195,6 @@ def test_providers_endpoints_present():
         "/providers/${",
         "/connectivity-test",
         "/observability",
-        '"/providers/routes"',
-        "/routes/",
-        "/preview",
     ):
         assert frag in html, frag
 
@@ -685,7 +690,6 @@ def test_stats_functions_present():
         "function stRequest",
         "function stTrace",
         "function stExport",
-        "function stReport",
     ):
         assert fn in html, fn
 
@@ -703,7 +707,6 @@ def test_stats_endpoints_present():
         "/sessions/",
         "/trace",
         "/stats/export",
-        "/stats/reports",
     ):
         assert frag in html, frag
 
@@ -729,10 +732,6 @@ def test_sessions_control_functions_present():
         "function sessClear",
         "function sessReset",
         "function sessBulk",
-        "function sessStart",
-        "function sessMessage",
-        "function sessPin",
-        "function sessExport",
     ):
         assert fn in html, fn
 
@@ -748,18 +747,13 @@ def test_sessions_endpoints_present():
         "/clear",
         "/reset",
         '"/sessions/bulk"',
-        '"/chat/start"',
-        "/chat/${",
-        "/message",
-        "/pin",
-        "/export",
     ):
         assert frag in html, frag
 
 
 def test_sessions_write_controls_admin_gated():
     html = ADMIN_HTML
-    assert "sess-create-bar" in html
+    assert "sess-bulk-bar" in html
 
 
 # --- 8. OAuth Connectors + MCP module -----------------------------------------
@@ -920,7 +914,6 @@ def test_sidebar_all_modules_reachable():
         "agents",
         "skills",
         "kb",
-        "chat",
         "providers",
         "oauth",
         "stats",
@@ -941,8 +934,7 @@ def test_page_header_primitive_present():
 
 def test_page_header_applied_to_each_module():
     html = ADMIN_HTML
-    # every module section carries a page header (one per top-level module tab)
-    assert html.count('class="page-header"') >= 10
+    assert html.count('class="page-header"') >= 9
 
 
 # --- Redesign: toast + confirm dialog -----------------------------------------
@@ -969,7 +961,7 @@ def test_tables_wrapped_in_scroll_container():
     html = ADMIN_HTML
     # every data table lives inside a horizontal scroll container
     assert html.count('class="table-scroll"') >= html.count("<table>")
-    assert html.count("<table>") >= 7
+    assert html.count("<table>") >= 6
 
 
 def test_empty_and_loading_state_helpers_present():
@@ -1013,8 +1005,6 @@ def test_viewer_hidden_write_containers_intact():
         "sk-create-bar",
         "pv-create-bar",
         "ag-create-bar",
-        "st-report-bar",
-        "sess-create-bar",
         "sess-bulk-bar",
     ):
         assert f'id="{cid}"' in html, cid
@@ -1271,17 +1261,6 @@ def test_agent_icon_picker_present():
     assert "a.icon" in card
 
 
-def test_chat_session_history_present():
-    html = ADMIN_HTML
-    # per-user session history sidebar in the chat module
-    assert 'id="chat-history-list"' in html
-    assert "function chatLoadHistory" in html
-    assert "function chatOpen" in html and "function chatDelete" in html
-    assert 'api("GET", "/chat/sessions")' in html
-    # delete + open hit the per-session endpoints
-    assert "/chat/${encodeURIComponent(sid)}" in html
-
-
 def test_api_error_message_handles_object_detail():
     html = ADMIN_HTML
     # object/array FastAPI `detail` (e.g. the "agent still bound" 409) renders
@@ -1418,7 +1397,6 @@ _MODULE_INPUTS = {
         "ag-filter",
         "ag-user-filter",
     ],
-    "chat": ["chat-agent", "chat-input"],
     "kb": ["kbc-id", "kbc-kind", "kbc-tenant", "kbc-kb", "kbc-desc", "kbc-enabled", "kbc-custom"],
     "providers": [
         "pv-id",
@@ -1433,8 +1411,6 @@ _MODULE_INPUTS = {
         "pv-max-tokens",
         "pv-temperature",
         "pv-filter",
-        "pv-route-tt",
-        "pv-route-ids",
     ],
     "connectors": [
         "mcp-id",
@@ -1473,8 +1449,6 @@ _MODULE_INPUTS = {
         "sess-status",
         "sess-filter",
         "sess-all",
-        "sess-pg-agent",
-        "sess-pg-msg",
     ],
     "stats": [
         "st-agent",
@@ -1485,8 +1459,6 @@ _MODULE_INPUTS = {
         "st-filter",
         "st-sort",
         "st-compare",
-        "st-report-period",
-        "st-report-to",
         "st-export-view",
         "st-trace-user",
     ],
@@ -1536,7 +1508,6 @@ _MODULE_BUTTONS = {
         "agSetSkill",
         "agActivateVersion",
     ],
-    "chat": ["chatNew", "chatSend", "chatOpen", "chatPin", "chatExport"],
     "kb": ["kbcOpenCreate", "kbcSave", "kbcOpenEdit", "kbcDelete", "kbcCheck", "kbcSync"],
     "providers": [
         "pvOpenCreate",
@@ -1544,8 +1515,6 @@ _MODULE_BUTTONS = {
         "pvOpenEdit",
         "pvDelete",
         "pvTest",
-        "pvSetRoute",
-        "pvPreviewRoute",
         "pvTogglePassword",
     ],
     "connectors": [
@@ -1567,8 +1536,6 @@ _MODULE_BUTTONS = {
         "skDisable",
         "skOpenImport",
         "skDoUpload",
-        "skApprove",
-        "skReject",
     ],
     "sessions": [
         "sessTakeover",
@@ -1578,9 +1545,6 @@ _MODULE_BUTTONS = {
         "sessClear",
         "sessReset",
         "sessBulk",
-        "sessExport",
-        "sessMessage",
-        "sessPin",
     ],
     "stats": [
         "stOverview",
@@ -1589,7 +1553,6 @@ _MODULE_BUTTONS = {
         "stRequest",
         "stTrace",
         "stCompare",
-        "stReport",
         "stExport",
     ],
 }
@@ -1606,12 +1569,10 @@ def test_every_module_action_button_present():
     assert problems == {}, f"module action buttons broken: {problems}"
 
 
-def test_all_ten_tabs_have_inventories():
-    """Guard the guard: all nine console tabs are covered by both inventories above."""
+def test_all_console_tabs_have_inventories():
     tabs = {
         "users",
         "agents",
-        "chat",
         "kb",
         "providers",
         "connectors",

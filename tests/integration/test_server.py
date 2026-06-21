@@ -51,6 +51,15 @@ def test_no_shared_memory_admin_router(client) -> None:
     assert client.get("/admin/memory/shared?scope_type=team&scope_id=eng").status_code == 404
 
 
+def test_observability_admin_routes_not_mounted() -> None:
+    import fleetent.server as srv
+
+    paths = {getattr(r, "path", None) for r in srv.app.routes}
+    assert "/admin/observability/traces" not in paths
+    assert "/admin/observability/usage" not in paths
+    assert "/admin/observability/performance" not in paths
+
+
 # ── cron scheduler lifespan ───────────────────────────────────────────────────
 
 

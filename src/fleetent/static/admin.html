@@ -577,7 +577,6 @@
       <div class="nav-group">
         <button class="nav-group-label" data-group="agents" onclick="switchGroup('agents')">Agents</button>
         <button class="nav-item" data-tab="agents" onclick="switchTab('agents')"><span class="nav-ico">🤖</span>Agents</button>
-        <button class="nav-item" data-tab="chat" onclick="switchTab('chat')"><span class="nav-ico">💬</span>Chat</button>
       </div>
       <div class="nav-group">
         <button class="nav-group-label" data-group="resources" onclick="switchGroup('resources')">Agent resources</button>
@@ -738,45 +737,12 @@
       </div>
     </section>
 
-    <section id="tab-chat" class="hidden">
-      <div class="page-header">
-        <h2 class="ph-title">Chat</h2>
-        <div class="ph-actions">
-          <button class="ghost small" id="chat-pin" onclick="chatPin()" disabled>Pin</button>
-          <button class="ghost small" id="chat-export" onclick="chatExport()" disabled>Export</button>
-          <button onclick="chatNew()">New chat</button>
-        </div>
-      </div>
-      <div class="chat-split">
-        <aside id="chat-history" class="chat-history">
-          <div class="chat-history-head">Your sessions</div>
-          <div id="chat-history-list"></div>
-        </aside>
-        <div class="chat-wrap" style="flex:1; min-width:0;">
-          <div class="chat-toolbar">
-            <label class="field-label" style="margin:0;">Agent</label>
-            <select id="chat-agent"></select>
-            <span id="chat-sid" class="muted" style="font-size:12px;"></span>
-          </div>
-          <div id="chat-log" class="chat-log">
-            <div class="chat-empty muted">Pick an agent and send a message to start.</div>
-          </div>
-          <div class="chat-composer">
-            <textarea id="chat-input" rows="1" placeholder="Message the agent…  (Enter to send, Shift+Enter for newline)"
-              oninput="chatAutogrow(this)" onkeydown="chatKey(event)"></textarea>
-            <button id="chat-send" class="primary" onclick="chatSend()">Send</button>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <section id="tab-providers" class="hidden">
       <div class="page-header">
         <h2 class="ph-title">Model Providers</h2>
         <div class="ph-filter">
           <div class="subtabs">
             <button class="subtab active" id="pv-tab-providers" onclick="pvSwitchSubtab('providers')">Providers</button>
-            <button class="subtab" id="pv-tab-routing" onclick="pvSwitchSubtab('routing')">Routing</button>
           </div>
         </div>
         <div class="ph-actions"><button class="ghost small" onclick="LOADERS.providers?.()">Refresh</button></div>
@@ -792,24 +758,6 @@
         <div id="pv-grid" class="connector-grid"></div>
       </div>
       
-      <!-- Routing subtab -->
-      <div id="pv-subtab-routing" class="hidden">
-        <div class="row" style="margin-bottom:12px;">
-          <span class="muted" style="flex:1;">Configure task-type routing and fallback chains</span>
-        </div>
-        <div class="table-scroll"><table>
-          <thead><tr><th>Task type</th><th>Provider chain (priority order)</th><th>Actions</th></tr></thead>
-          <tbody id="pv-routes-body"></tbody>
-        </table></div>
-        <div class="card row" style="margin-top:12px;">
-          <input id="pv-route-tt" placeholder="task_type (e.g. default)">
-          <input id="pv-route-ids" placeholder="provider ids (comma-separated, priority order)" style="flex:1;">
-          <button onclick="pvSetRoute()">Set route</button>
-          <button class="ghost" onclick="pvPreviewRoute()">Preview</button>
-        </div>
-        <pre id="pv-route-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
-      </div>
-
       <div id="pv-drawer" class="conn-drawer hidden">
         <div class="conn-drawer-head">
           <h3 id="pv-drawer-title">Provider</h3>
@@ -835,11 +783,6 @@
           <button onclick="stPerUser()">Per-user ranking</button>
           <select id="st-export-view"><option value="per-user">per-user</option><option value="tools">tools</option><option value="usage">usage</option></select>
           <button class="ghost" onclick="stExport()">Export CSV</button>
-          <span id="st-report-bar">
-            <select id="st-report-period"><option value="weekly">weekly</option><option value="monthly">monthly</option></select>
-            <input id="st-report-to" placeholder="recipient">
-            <button class="ghost" onclick="stReport()">Schedule report</button>
-          </span>
         </div>
         <pre id="st-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
       </div>
@@ -869,10 +812,6 @@
         <input id="sess-agent" placeholder="agent_name">
         <button onclick="loadSessions()">Search</button>
         <span style="flex:1;"></span>
-        <span id="sess-create-bar">
-          <input id="sess-pg-agent" placeholder="agent for playground">
-          <button onclick="sessStart()">Start playground</button>
-        </span>
       </div>
       <div class="table-scroll"><table>
         <thead><tr><th><input type="checkbox" id="sess-all" onchange="sessToggleAll(this.checked)"></th><th>Session</th><th>Origin</th><th>Agent</th><th>Status</th><th>Actions</th></tr></thead>
@@ -881,17 +820,6 @@
       <div id="sess-bulk-bar" class="row" style="margin-top:8px;">
         <button class="ghost danger" onclick="sessBulk('end')">Bulk end</button>
         <button class="ghost danger" onclick="sessBulk('clear')">Bulk clear</button>
-      </div>
-      <div id="sess-playground" class="card hidden" style="margin-top:12px;">
-        <div class="muted">Playground: <span id="sess-pg-id"></span></div>
-        <div class="row" style="margin-top:8px;">
-          <input id="sess-pg-msg" placeholder="message" style="flex:1;">
-          <button onclick="sessMessage()">Send</button>
-          <button class="ghost" onclick="sessPin()">Pin</button>
-          <button class="ghost" onclick="sessExport()">Export</button>
-        </div>
-        <pre id="sess-pg-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
-        <div class="muted" style="font-size:12px;">Streaming degraded to single-shot message (see design D5).</div>
       </div>
     </section>
 
@@ -1545,7 +1473,7 @@ async function enterApp() {
   IS_VIEWER = me.role === "viewer";
   $("whoami").textContent = (me.email || me.id) + " · " + me.role;
   if (IS_VIEWER) {
-    for (const id of ["create-bar", "kb-create-card", "sk-create-bar", "pv-create-bar", "ag-create-bar", "st-report-bar", "sess-create-bar", "sess-bulk-bar", "oc-create-bar"]) {
+    for (const id of ["create-bar", "kb-create-card", "sk-create-bar", "pv-create-bar", "ag-create-bar", "sess-bulk-bar", "oc-create-bar"]) {
       const el = $(id); if (el) el.classList.add("hidden");
     }
   }
@@ -2195,8 +2123,6 @@ async function skProposals() {
         <div class="reason">${esc(p.reason || "")}</div>
         <div class="row" style="gap:6px;">
           ${p.has_diff ? `<button class="small ghost" onclick="skProposalDiff('${esc(pid)}')">View diff</button>` : ""}
-          ${IS_VIEWER ? "" : `<button class="small" onclick="skApprove('${esc(pid)}')">Approve</button>
-          <button class="small danger" onclick="skReject('${esc(pid)}')">Reject</button>`}
         </div>
         <div class="prop-diff"></div>
       </div>`;
@@ -2206,14 +2132,6 @@ async function skProposalDiff(id) {
   const host = document.querySelector(`#prop-${CSS.escape(id)} .prop-diff`);
   try { const r = await api("GET", `/skills/proposals/${encodeURIComponent(id)}/diff`); if (host) host.innerHTML = skDiffHtml(r.diff); }
   catch (e) { if (host) host.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
-}
-async function skApprove(id) {
-  if (!await confirmDialog("Approve this proposal?")) return;
-  try { await api("POST", `/skills/proposals/${encodeURIComponent(id)}/approve`, null, { "X-Confirm": "true" }); skProposals(); toast("Proposal approved", "success"); } catch (e) { toast(e.message, "error"); }
-}
-async function skReject(id) {
-  if (!await confirmDialog("Reject this proposal?")) return;
-  try { await api("POST", `/skills/proposals/${encodeURIComponent(id)}/reject`); skProposals(); } catch (e) { toast(e.message, "error"); }
 }
 
 // One of two accepted sources: a folder (tree of {file, path}) or a single .zip.
@@ -2334,161 +2252,6 @@ async function skDoUpload() {
 }
 
 LOADERS.skills = () => loadSkills();
-
-// --- Chat (admin playground) -------------------------------------------------
-let CHAT_SID = null;
-let CHAT_BUSY = false;
-
-async function loadChat() {
-  let agents = [];
-  try { agents = await api("GET", "/agents?include_archived=true"); } catch (e) { agents = []; }
-  const opts = agents
-    .filter(a => (a.status || "enabled") !== "archived")
-    .map(a => {
-      const n = a.agent_name || a.name;
-      const tag = a.status && a.status !== "enabled" ? ` (${esc(a.status)})` : "";
-      return `<option value="${esc(n)}">${esc(n)}${tag}</option>`;
-    }).join("");
-  $("chat-agent").innerHTML = opts || '<option value="">(no agents — create one first)</option>';
-  chatLoadHistory();
-}
-
-async function chatLoadHistory() {
-  let rows = [];
-  try { rows = await api("GET", "/chat/sessions"); } catch (e) { rows = []; }
-  $("chat-history-list").innerHTML = rows.map(s => {
-    const when = (s.updated_at || "").replace("T", " ").slice(0, 16);
-    return `<div class="chat-hrow ${s.session_id === CHAT_SID ? "active" : ""}" onclick="chatOpen('${esc(s.session_id)}','${esc(s.agent_name || "")}')">
-      <div style="overflow:hidden;"><div class="ht">${esc(s.agent_name || "—")}${s.pinned ? " 📌" : ""}</div><div class="hx">${esc(when)}</div></div>
-      <button class="small ghost danger" onclick="event.stopPropagation(); chatDelete('${esc(s.session_id)}')">×</button>
-    </div>`;
-  }).join("") || `<div class="muted" style="padding:12px; font-size:12px;">No sessions yet.</div>`;
-}
-
-async function chatOpen(sid, agent) {
-  CHAT_SID = sid;
-  $("chat-sid").textContent = sid;
-  if (agent) $("chat-agent").value = agent;
-  $("chat-pin").disabled = false;
-  $("chat-export").disabled = false;
-  $("chat-log").innerHTML = '<div class="chat-empty muted">Loading…</div>';
-  try {
-    const r = await api("GET", `/chat/${encodeURIComponent(sid)}/export?fmt=json`);
-    $("chat-log").innerHTML = "";
-    const t = r.transcript || [];
-    if (!t.length) $("chat-log").innerHTML = '<div class="chat-empty muted">(empty session)</div>';
-    for (const m of t) {
-      const role = m.role === "user" ? "user" : "assistant";
-      chatBubble(role, typeof m.content === "string" ? m.content : JSON.stringify(m.content));
-    }
-  } catch (e) { $("chat-log").innerHTML = `<div class="chat-empty err">${esc(e.message)}</div>`; }
-  chatLoadHistory();
-}
-
-async function chatDelete(sid) {
-  if (!await confirmDialog("Delete this chat session?")) return;
-  try { await api("DELETE", `/chat/${encodeURIComponent(sid)}`); } catch (e) { toast(e.message, "error"); return; }
-  if (sid === CHAT_SID) chatNew();
-  chatLoadHistory();
-}
-
-function chatAutogrow(t) { t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 160) + "px"; }
-function chatKey(e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); chatSend(); } }
-
-function chatNew() {
-  CHAT_SID = null;
-  $("chat-log").innerHTML = '<div class="chat-empty muted">Pick an agent and send a message to start.</div>';
-  $("chat-sid").textContent = "";
-  $("chat-pin").disabled = true;
-  $("chat-export").disabled = true;
-  $("chat-input").focus();
-  chatLoadHistory();
-}
-
-function chatBubble(role, text) {
-  const log = $("chat-log");
-  const empty = log.querySelector(".chat-empty");
-  if (empty) empty.remove();
-  const wrap = document.createElement("div");
-  wrap.className = "chat-msg " + role;
-  wrap.innerHTML = `<div class="chat-avatar">${role === "user" ? "🧑" : "🤖"}</div><div class="chat-bubble"></div>`;
-  wrap.querySelector(".chat-bubble").textContent = text;
-  log.appendChild(wrap);
-  log.scrollTop = log.scrollHeight;
-  return wrap;
-}
-
-function chatToolNotes(events) {
-  const tools = (events || []).filter(e => ["tool_call", "tool_result", "error"].includes(e.type));
-  if (!tools.length) return "";
-  return `<div class="chat-tools">` + tools.map(e => {
-    if (e.type === "error") return `<div class="chat-tool" style="color:var(--danger)">⚠ ${esc(e.content || "")}</div>`;
-    if (e.type === "tool_call") return `<div class="chat-tool">🔧 ${esc(e.name || "tool")}(${esc(JSON.stringify(e.args || {}))})</div>`;
-    return `<div class="chat-tool">↳ ${esc(e.name || "")}: ${esc(String(e.content ?? "").slice(0, 200))}</div>`;
-  }).join("") + `</div>`;
-}
-
-async function chatSend() {
-  if (CHAT_BUSY) return;
-  const msg = $("chat-input").value.trim();
-  const agent = $("chat-agent").value;
-  if (!msg) return;
-  if (!agent) { toast("Pick an agent first", "error"); return; }
-  CHAT_BUSY = true;
-  $("chat-send").disabled = true;
-  $("chat-input").value = "";
-  chatAutogrow($("chat-input"));
-  chatBubble("user", msg);
-  const pending = chatBubble("assistant", "…");
-  pending.querySelector(".chat-bubble").classList.add("muted");
-  try {
-    if (!CHAT_SID) {
-      const s = await api("POST", "/chat/start", { agent_name: agent });
-      CHAT_SID = s.session_id;
-      $("chat-sid").textContent = CHAT_SID;
-      $("chat-pin").disabled = false;
-      $("chat-export").disabled = false;
-      chatLoadHistory();  // surface the new session in the sidebar
-    }
-    const r = await api("POST", `/chat/${encodeURIComponent(CHAT_SID)}/message`, { message: msg });
-    const bubble = pending.querySelector(".chat-bubble");
-    bubble.classList.remove("muted");
-    bubble.textContent = r.reply || "(no reply)";
-    const notes = chatToolNotes(r.events);
-    if (notes) pending.insertAdjacentHTML("beforeend", notes);
-  } catch (e) {
-    const bubble = pending.querySelector(".chat-bubble");
-    bubble.classList.remove("muted");
-    bubble.innerHTML = `<span style="color:var(--danger)">${esc(e.message)}</span>`;
-  } finally {
-    CHAT_BUSY = false;
-    $("chat-send").disabled = false;
-    $("chat-log").scrollTop = $("chat-log").scrollHeight;
-  }
-}
-
-async function chatPin() {
-  if (!CHAT_SID) return;
-  try { await api("POST", `/chat/${encodeURIComponent(CHAT_SID)}/pin`, {}); toast("Pinned", "success"); }
-  catch (e) { toast(e.message, "error"); }
-}
-
-async function chatExport() {
-  if (!CHAT_SID) return;
-  try {
-    const res = await fetch(`/admin/chat/${encodeURIComponent(CHAT_SID)}/export?fmt=markdown`,
-      { headers: { "Authorization": "Session " + TOKEN } });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const blob = await res.blob();
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = CHAT_SID + ".md";
-    a.click();
-    URL.revokeObjectURL(a.href);
-  } catch (e) { toast(e.message, "error"); }
-}
-
-LOADERS.chat = () => loadChat();
 
 // --- Agents -----------------------------------------------------------------
 
@@ -3627,7 +3390,6 @@ async function loadProviders() {
   try { PV_ALL = await api("GET", "/providers"); }
   catch (e) { $("pv-grid").innerHTML = `<div class="err" style="padding:24px;">${esc(e.message)}</div>`; return; }
   renderProviders();
-  pvRoutes();
 }
 
 function pvIcon(p) {
@@ -3931,52 +3693,13 @@ async function pvTest(id) {
     toast(e.message, "error");
   }
 }
-async function pvRoutes() {
-  let routes = {};
-  try { routes = await api("GET", "/providers/routes"); } catch (e) { return; }
-  $("pv-routes-body").innerHTML = Object.entries(routes).map(([tt, chain]) => `
-      <tr>
-        <td>${esc(tt)}</td>
-        <td class="muted">${esc((chain || []).join(" → ") || "—")}</td>
-        <td class="actions">
-          <button class="small ghost" onclick="pvPreviewRoute('${esc(tt)}')">Preview</button>
-        </td>
-      </tr>`).join("") || `<tr><td colspan="3" class="muted">No routes configured.</td></tr>`;
-}
-async function pvSetRoute() {
-  const tt = $("pv-route-tt").value.trim();
-  const ids = $("pv-route-ids").value.split(",").map(s => s.trim()).filter(Boolean);
-  if (!tt) { $("pv-route-out").textContent = "task_type required"; return; }
-  try { await api("PUT", `/providers/routes/${encodeURIComponent(tt)}`, { provider_ids: ids }); pvRoutes(); $("pv-route-out").textContent = "saved"; }
-  catch (e) { $("pv-route-out").textContent = e.message; }
-}
-async function pvPreviewRoute(tt) {
-  tt = tt || $("pv-route-tt").value.trim();
-  if (!tt) { $("pv-route-out").textContent = "task_type required"; return; }
-  try { const r = await api("GET", `/providers/routes/${encodeURIComponent(tt)}/preview`); $("pv-route-out").textContent = JSON.stringify(r, null, 2); }
-  catch (e) { $("pv-route-out").textContent = e.message; }
-}
 function pvSwitchSubtab(tab) {
-  // Update tab buttons
   $("pv-tab-providers").classList.toggle("active", tab === "providers");
-  $("pv-tab-routing").classList.toggle("active", tab === "routing");
-  
-  // Show/hide content
   $("pv-subtab-providers").classList.toggle("hidden", tab !== "providers");
-  $("pv-subtab-routing").classList.toggle("hidden", tab !== "routing");
-  
-  // Load routing data when switching to routing tab
-  if (tab === "routing") {
-    pvRoutes();
-  }
 }
 
 LOADERS.providers = () => {
   loadProviders();
-  // Load routing data if routing tab is active
-  if (!$("pv-subtab-routing").classList.contains("hidden")) {
-    pvRoutes();
-  }
 };
 
 // --- Statistics -------------------------------------------------------------
@@ -4047,18 +3770,9 @@ async function stExport() {
     URL.revokeObjectURL(a.href);
   } catch (e) { $("st-out").textContent = e.message; }
 }
-async function stReport() {
-  const agent = $("st-agent").value.trim(); if (!agent) { $("st-out").textContent = "agent_id required"; return; }
-  const body = { period: $("st-report-period").value, agent_id: agent, recipient: $("st-report-to").value };
-  try { const r = await api("POST", "/stats/reports", body); $("st-out").textContent = JSON.stringify(r, null, 2); }
-  catch (e) { $("st-out").textContent = e.message; }
-}
-
 LOADERS.stats = () => stPerUser();
 
-// --- Sessions + Chat playground ---------------------------------------------
-
-let SESS_PG_ID = null;
+// --- Sessions ---------------------------------------------------------------
 
 async function loadSessions() {
   const qs = [];
@@ -4120,39 +3834,6 @@ async function sessBulk(action) {
   const ids = sessPicked(); if (!ids.length) { toast("select sessions first"); return; }
   if (!await confirmDialog(`Bulk ${action} ${ids.length} session(s)? This cannot be undone.`)) return;
   try { await api("POST", "/sessions/bulk", { session_ids: ids, action }, { "X-Confirm": "true" }); loadSessions(); } catch (e) { toast(e.message, "error"); }
-}
-
-async function sessStart() {
-  const agent = $("sess-pg-agent").value.trim(); if (!agent) { toast("agent required"); return; }
-  try {
-    const r = await api("POST", "/chat/start", { agent_name: agent });
-    SESS_PG_ID = r.session_id;
-    $("sess-pg-id").textContent = SESS_PG_ID;
-    $("sess-pg-out").textContent = "";
-    $("sess-playground").classList.remove("hidden");
-  } catch (e) { toast(e.message, "error"); }
-}
-async function sessMessage() {
-  if (!SESS_PG_ID) return;
-  try { const r = await api("POST", `/chat/${encodeURIComponent(SESS_PG_ID)}/message`, { message: $("sess-pg-msg").value }); $("sess-pg-out").textContent = JSON.stringify(r, null, 2); }
-  catch (e) { $("sess-pg-out").textContent = e.message; }
-}
-async function sessPin() {
-  if (!SESS_PG_ID) return;
-  const note = prompt("Pin note (optional):") || null;
-  try { await api("POST", `/chat/${encodeURIComponent(SESS_PG_ID)}/pin`, { note }); $("sess-pg-out").textContent = "pinned"; }
-  catch (e) { $("sess-pg-out").textContent = e.message; }
-}
-async function sessExport() {
-  if (!SESS_PG_ID) return;
-  try {
-    const res = await fetch(`/admin/chat/${encodeURIComponent(SESS_PG_ID)}/export?fmt=markdown`, { headers: { "Authorization": "Session " + TOKEN } });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const blob = await res.blob();
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob); a.download = `${SESS_PG_ID}.md`; a.click();
-    URL.revokeObjectURL(a.href);
-  } catch (e) { $("sess-pg-out").textContent = e.message; }
 }
 
 LOADERS.sessions = () => loadSessions();
