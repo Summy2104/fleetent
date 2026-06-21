@@ -17,4 +17,4 @@
 
 - [x] 3.1 模块边界:owning=`tui`,无表/迁移/协议变更;不 import platform
 - [x] 3.2 文档:`app.py`/`render.py` docstring 同步新渲染机制
-- [ ] 3.3 门禁:`make test-pr` + `make test-unit-ci`(覆盖率)对照 main 基线无新增失败(归档前复跑)
+- [x] 3.3 门禁:`make test-pr` + `make test-unit-ci`(覆盖率)对照 main 基线无新增失败(归档前复跑)
