@@ -10,6 +10,7 @@ import { SessionsPage } from '@/features/sessions/page';
 import { ProvidersPage } from '@/features/providers/page';
 import { UsersPage } from '@/features/users/page';
 import { ChatPage } from '@/features/chat/page';
+import { TenancyPage } from '@/features/tenancy/page';
 
 // Domains not yet migrated to the SPA: deep-link into the legacy console by tab anchor.
 // (nodes / tenancy have no legacy tab and stay UI-less until natively migrated.)
@@ -180,6 +181,17 @@ function AppLayout(): JSX.Element {
                   isActive ? 'bg-primary text-primary-foreground' : 'bg-secondary/80 text-foreground',
                 ].join(' ')
               }
+              to="/tenancy"
+            >
+              Tenancy
+            </NavLink>
+            <NavLink
+              className={({ isActive }) =>
+                [
+                  'block rounded-xl px-4 py-3 text-sm font-medium transition-colors',
+                  isActive ? 'bg-primary text-primary-foreground' : 'bg-secondary/80 text-foreground',
+                ].join(' ')
+              }
               to="/chat"
             >
               Chat
@@ -224,6 +236,10 @@ function AppLayout(): JSX.Element {
             <Route
               element={<UsersPage />}
               path="/users"
+            />
+            <Route
+              element={<TenancyPage />}
+              path="/tenancy"
             />
             <Route
               element={<ChatPage />}
