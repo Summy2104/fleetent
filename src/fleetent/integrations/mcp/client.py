@@ -1135,11 +1135,23 @@ _WORKSPACE_PREFIX = "/workspace"
 
 
 def _translate_workspace_arg(value: str, host_dir: Path) -> str:
-    """Rewrite a container workspace path (``/workspace[/<rel>]``) to its host path."""
+    """Rewrite a container workspace path to its host path.
+
+    Absolute ``/workspace[/<rel>]`` is a deterministic prefix and always rewrites. A
+    workspace-relative ref (e.g. the image-gen ``generated/<uuid>.png`` the model often
+    passes verbatim, without the ``/workspace/`` prefix) rewrites ONLY when it resolves to
+    a real file inside the workspace — existence + containment disambiguate it from
+    ordinary string args (subject, body) and block ``..`` escapes.
+    """
     if value == _WORKSPACE_PREFIX:
         return str(host_dir)
     if value.startswith(_WORKSPACE_PREFIX + "/"):
         return str(host_dir / value[len(_WORKSPACE_PREFIX) + 1 :])
+    if value and not value.startswith("/") and "\n" not in value:
+        base = os.path.normpath(str(host_dir))
+        candidate = os.path.normpath(os.path.join(base, value))
+        if (candidate == base or candidate.startswith(base + os.sep)) and os.path.isfile(candidate):
+            return candidate
     return value
 
 
