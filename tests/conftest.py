@@ -86,6 +86,34 @@ def _reset_agent_config_index():  # type: ignore[no-untyped-def]
     agent_config._index = original
 
 
+_UNSET = object()
+
+
+@pytest.fixture(autouse=True)
+def _reset_vector_store_singletons():  # type: ignore[no-untyped-def]
+    # vector_store.runtime keeps the embedding/backend providers as module globals
+    # (rebuilt by configure_from_active_agent()). A test that publishes them must not
+    # leak into later tests: a leaked HttpEmbeddingProvider points at an unreachable
+    # agent endpoint, so any subsequent loop.run() retrieval test blocks on the real
+    # ~5s HTTP connect timeout — silently inflating the unit suite. Restore like the
+    # agent-config index above.
+    from fleetent.vector_store import runtime as vrt
+
+    original_embedding = getattr(vrt, "_embedding", _UNSET)
+    original_backend = getattr(vrt, "_backend", _UNSET)
+    yield
+    _restore(vrt, "_embedding", original_embedding)
+    _restore(vrt, "_backend", original_backend)
+
+
+def _restore(module: object, name: str, original: object) -> None:
+    if original is _UNSET:
+        if hasattr(module, name):
+            delattr(module, name)
+    else:
+        setattr(module, name, original)
+
+
 @pytest.fixture(autouse=True)
 def _isolate_database_url(monkeypatch: pytest.MonkeyPatch) -> None:
     """Prevent DATABASE_URL set by agent_app.boot() from leaking between tests.
