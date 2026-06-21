@@ -35,6 +35,7 @@ from fleetent.observability import (
     record_trace_event,
 )
 from fleetent.outbound import ConversationAddress
+from fleetent.runtime import user_instructions
 from fleetent.runtime.budget import BudgetChecker, BudgetConfig, BudgetUsage, grace_max_tokens
 from fleetent.runtime.cancellation import CancellationChecker, CancelToken
 from fleetent.runtime.context import (
@@ -1449,16 +1450,24 @@ def _assemble_prompt(
     base_system: str,
     skills_catalog: str,
     user_msg: dict[str, Any],
+    user_instructions: str = "",
 ) -> list[dict[str, Any]]:
     """Order messages stable→variable so the auto prefix cache can hit (D2).
 
-    The cacheable prefix is the first system message: the base system prompt plus
-    the <available_skills> catalog (already including its scan instruction), stable
-    across requests. Per-request long-term context (memory + knowledge) is appended
-    by run()/run_stream() via build_context after this, so the base prefix stays
-    stable (memory unified onto intelligence/long_term_ctx; class C).
+    The cacheable prefix is the first system message: the base system prompt, then
+    the per-agent user.md directives (``user_instructions``, stable for the agent),
+    then the <available_skills> catalog (already including its scan instruction).
+    All three are stable across requests. Per-request long-term context (memory +
+    knowledge) is appended by run()/run_stream() via build_context after this, so
+    the base prefix stays stable (memory unified onto intelligence/long_term_ctx;
+    class C). An empty ``user_instructions`` leaves the prefix byte-identical to
+    the pre-user.md behavior.
     """
-    base = f"{base_system}\n\n{skills_catalog}" if skills_catalog else base_system
+    base = base_system
+    if user_instructions:
+        base = f"{base}\n\n[用户指令]\n{user_instructions}"
+    if skills_catalog:
+        base = f"{base}\n\n{skills_catalog}"
     messages: list[dict[str, Any]] = [{"role": "system", "content": base}]
     messages.append(user_msg)
     return messages
@@ -2223,8 +2232,14 @@ def run_sync(
     )
     disabled_trace = collect_disabled_trace() or None
 
+    # user.md directives fold into the cacheable prefix (read fresh, never cached
+    # via AgentConfigIndex, so a /user write is visible next turn).
+    user_md = user_instructions.load(agent_name) if agent_name else ""
     messages = _assemble_prompt(
-        system_prompt, skills_catalog, {"role": "user", "content": user_input}
+        system_prompt,
+        skills_catalog,
+        {"role": "user", "content": user_input},
+        user_instructions=user_md,
     )
 
     async def _run() -> str:
@@ -2340,7 +2355,10 @@ async def run_stream(
         user_msg = build_message_with_images(user_input, images)
     else:
         user_msg = {"role": "user", "content": user_input}
-    messages: list[Any] = _assemble_prompt(system_prompt, skills_catalog, user_msg)
+    user_md = user_instructions.load(agent_name) if agent_name else ""
+    messages: list[Any] = _assemble_prompt(
+        system_prompt, skills_catalog, user_msg, user_instructions=user_md
+    )
 
     # Route to vision when images are present; raises before any LLM call if
     # images are present but no vision route is configured (D6, option A).

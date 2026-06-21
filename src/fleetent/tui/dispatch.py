@@ -13,7 +13,7 @@ from typing import Any, Literal, cast
 
 from fleetent.governance import approval_router
 from fleetent.identity import Principal
-from fleetent.runtime import CancelToken, run_stream
+from fleetent.runtime import CancelToken, run_stream, user_instructions
 from fleetent.session import manager as session_mgr
 from fleetent.structured_logging import get_logger
 from fleetent.tui import protocol as p
@@ -47,6 +47,7 @@ class Connection:
         principal: Principal | None = None,
         user_id: str | None = None,
         session_id: str | None = None,
+        agent_name: str | None = None,
     ) -> None:
         if principal is None:
             principal = Principal(user_id=user_id or "default", tenant_id="default")
@@ -54,6 +55,9 @@ class Connection:
         self.user_id = principal.user_id
         self.transport = transport
         self.session_id = session_id or _new_session_id(self.user_id)
+        # The deployed agent this connection runs as; powers user.md injection and
+        # the /user command. Set by the WS gateway from agent_app.serve's agent.
+        self.agent_name = agent_name
         self.cancel_tokens: dict[str, CancelToken] = {}
         self._tasks: set[asyncio.Task[None]] = set()
 
@@ -70,7 +74,11 @@ async def _stream_run(
     saw_terminal = False
     try:
         async for event in run_stream(
-            message, principal=conn.principal, session_id=session_id, cancel_token=token
+            message,
+            principal=conn.principal,
+            session_id=session_id,
+            cancel_token=token,
+            agent_name=conn.agent_name,
         ):
             event_type = str(event.get("type", ""))
             payload = {k: v for k, v in event.items() if k != "type"}
@@ -139,5 +147,11 @@ async def dispatch(conn: Connection, request: dict[str, Any]) -> dict[str, Any] 
     if method == p.METHOD_SESSION_LIST:
         sessions = session_mgr.list_session_ids(_session_prefix(conn.user_id))
         return p.make_response(req_id, {"sessions": sessions})
+
+    if method == p.METHOD_USER:
+        if not conn.agent_name:
+            return p.make_response(req_id, {"reply": "未绑定 agent，无法管理用户指令。"})
+        reply = user_instructions.handle_user_command(conn.agent_name, str(params.get("text", "")))
+        return p.make_response(req_id, {"reply": reply or "用法：/user [内容|clear]"})
 
     return p.make_error(req_id, p.METHOD_NOT_FOUND, f"unknown method: {method}")

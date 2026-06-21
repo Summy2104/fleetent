@@ -120,6 +120,19 @@ def main(argv: list[str] | None = None) -> None:
             file=sys.stderr,
         )
         sys.exit(1)
+
+    # /user command: view/append/clear the deployed agent's user.md before the loop.
+    from fleetent import agent_config
+    from fleetent.runtime import user_instructions
+
+    agent_config.scan()
+    agent_id = agent_config.current().default_agent()
+    if agent_id:
+        user_reply = user_instructions.handle_user_command(agent_id, user_input)
+        if user_reply is not None:
+            print(user_reply)
+            return
+
     print(run(user_input))
 
 

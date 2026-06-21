@@ -32,7 +32,10 @@ from fleetent.tui.commands import KNOWN_COMMANDS, SlashCommandCompleter, parse_c
 _logger = get_logger("tui.app")
 
 DEFAULT_URL = "ws://127.0.0.1:8765/ws"
-_HELP = "commands: /new /session /abort [run_id] /approve <id> <approved|rejected> /quit /help"
+_HELP = (
+    "commands: /new /session /abort [run_id] /approve <id> <approved|rejected> "
+    "/user [内容|clear] /quit /help"
+)
 
 # A sink that prints rendered FormattedText; ``end`` lets streaming text stay inline.
 EmitFn = Callable[[FormattedText, str], None]
@@ -114,6 +117,10 @@ class AppController:
                 await self.backend.approve(cmd.args[0], cmd.args[1])
             else:
                 self._status("usage: /approve <id> <approved|rejected>")
+            return True
+        if cmd.name == "user":
+            result = await self.backend.user(text.strip())
+            self._status(str(result.get("reply", "")))
             return True
 
         # Known commands are handled above; anything else is unknown.
