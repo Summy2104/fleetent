@@ -11,9 +11,11 @@ import logging
 import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel
 
 from fleetent import agent_config, agent_store, connectors, cron_scheduler, user_store
@@ -54,6 +56,9 @@ from fleetent.skills import scan as scan_skills
 from fleetent.tools.plugin_loader import load_plugins
 
 logger = logging.getLogger(__name__)
+
+ADMIN_UI_DIST_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+LEGACY_ADMIN_UI_PATH = Path(__file__).resolve().parent / "static" / "admin.html"
 
 
 def _admin_login_url(router_prefix: str) -> str:
@@ -227,6 +232,56 @@ app.include_router(agent_apply_api.router)
 app.include_router(node_desired_state_api.router)
 app.include_router(node_admin_api.router)
 app.include_router(tenancy_admin_api.router)
+
+
+def _remove_legacy_admin_ui_route() -> None:
+    app.router.routes = [
+        route for route in app.router.routes if getattr(route, "path", None) != "/admin/ui"
+    ]
+
+
+_remove_legacy_admin_ui_route()
+
+
+def _spa_index_path() -> Path:
+    return ADMIN_UI_DIST_DIR / "index.html"
+
+
+def _legacy_admin_html() -> str:
+    return LEGACY_ADMIN_UI_PATH.read_text(encoding="utf-8")
+
+
+def _serve_spa_file(asset_path: str) -> Response:
+    root = ADMIN_UI_DIST_DIR.resolve()
+    requested = (root / asset_path).resolve()
+    if requested.is_file() and str(requested).startswith(str(root)):
+        return FileResponse(requested)
+
+    index_path = _spa_index_path()
+    if not index_path.is_file():
+        raise HTTPException(status_code=503, detail="admin frontend dist not built")
+
+    if asset_path and "." in Path(asset_path).name:
+        raise HTTPException(status_code=404, detail="asset not found")
+
+    return HTMLResponse(
+        index_path.read_text(encoding="utf-8"), headers={"Cache-Control": "no-store"}
+    )
+
+
+@app.get("/admin/ui-legacy", response_class=HTMLResponse)
+def admin_ui_legacy() -> Response:
+    return HTMLResponse(_legacy_admin_html(), headers={"Cache-Control": "no-store"})
+
+
+@app.get("/admin/ui", response_class=HTMLResponse)
+def admin_ui() -> Response:
+    return _serve_spa_file("")
+
+
+@app.get("/admin/ui/{asset_path:path}", response_class=HTMLResponse)
+def admin_ui_spa(asset_path: str) -> Response:
+    return _serve_spa_file(asset_path)
 
 
 _UNSET: Any = object()  # distinguishes "field omitted" from an explicit None (clear)
