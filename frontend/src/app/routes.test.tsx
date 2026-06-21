@@ -150,4 +150,14 @@ describe('admin routes', () => {
       '/admin/ui-legacy#skills'
     );
   });
+
+  it('renders chat as a native route in the SPA', async () => {
+    server.use(http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])));
+
+    renderRoutes('/chat', 'session-token');
+
+    expect(await screen.findByRole('heading', { name: 'Chat Console' })).toBeInTheDocument();
+    const nav = within(screen.getByRole('navigation'));
+    expect(nav.getByRole('link', { name: 'Chat' })).toHaveAttribute('href', '/chat');
+  });
 });
