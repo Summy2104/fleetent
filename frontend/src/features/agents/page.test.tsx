@@ -14,9 +14,28 @@ const API_BASE_URL = 'http://fleetent.test';
 type AgentRecord = {
   agent_name: string;
   allowed_tools: string[];
+  is_default?: boolean;
   provenance: string;
   status: string;
   system_prompt: string;
+};
+
+type AgentDetailRecord = {
+  agent: string;
+  allowed_tools: string[];
+  status: string;
+  supports_dm?: boolean;
+  supports_groups?: boolean;
+  system_prompt: string;
+};
+
+type AgentBindingState = {
+  kbIds: string[];
+  mcpServers: string[];
+  oauth: Array<{ run_as: string; service_id: string }>;
+  secrets: Array<{ env_name: string; mode: string; status: string }>;
+  skills: Array<{ enabled: boolean; skill_name: string }>;
+  users: string[];
 };
 
 function renderAgentsRoute(): void {
@@ -34,48 +53,221 @@ function renderAgentsRoute(): void {
   );
 }
 
+function expectNoLegacyBindingLinks(): void {
+  const bindingsPanel = screen.getByRole('heading', { name: 'Agent Bindings' }).closest('aside');
+  expect(bindingsPanel).not.toBeNull();
+  for (const link of within(bindingsPanel as HTMLElement).queryAllByRole('link')) {
+    expect(link).not.toHaveAttribute(
+      'href',
+      expect.stringContaining('/admin/ui-legacy#')
+    );
+  }
+}
+
+function installAgentBindingHandlers({
+  agents,
+  bindingsByAgent,
+  detailByAgent,
+  role = 'admin',
+}: {
+  agents: AgentRecord[];
+  bindingsByAgent: Record<string, AgentBindingState>;
+  detailByAgent: Record<string, AgentDetailRecord>;
+  role?: 'admin' | 'viewer';
+}) {
+  server.use(
+    http.get(`${API_BASE_URL}/admin/me`, () =>
+      HttpResponse.json({
+        email: `${role}@fleetent.test`,
+        id: `${role}-1`,
+        role,
+      })
+    ),
+    http.get(`${API_BASE_URL}/admin/agents`, ({ request }) => {
+      expect(new URL(request.url).searchParams.get('include_archived')).toBe('true');
+      return HttpResponse.json(agents);
+    }),
+    http.get(`${API_BASE_URL}/admin/agents/:name`, ({ params }) =>
+      HttpResponse.json(detailByAgent[String(params.name)])
+    ),
+    http.get(`${API_BASE_URL}/admin/agents/:name/skills`, ({ params }) =>
+      HttpResponse.json(bindingsByAgent[String(params.name)].skills)
+    ),
+    http.get(`${API_BASE_URL}/admin/agents/:name/bindings`, ({ params }) =>
+      HttpResponse.json({
+        mcp_servers: bindingsByAgent[String(params.name)].mcpServers,
+        users: bindingsByAgent[String(params.name)].users,
+      })
+    ),
+    http.get(`${API_BASE_URL}/admin/agents/:name/bindings/oauth`, ({ params }) => {
+      const oauth = bindingsByAgent[String(params.name)].oauth;
+      return HttpResponse.json({
+        agent: String(params.name),
+        connector_ids: oauth.map((item) => item.service_id),
+        service_grants: oauth,
+      });
+    }),
+    http.get(`${API_BASE_URL}/admin/agents/:name/kbs`, ({ params }) =>
+      HttpResponse.json({
+        agent: String(params.name),
+        kb_ids: bindingsByAgent[String(params.name)].kbIds,
+      })
+    ),
+    http.get(`${API_BASE_URL}/admin/agents/:name/secrets`, ({ params }) =>
+      HttpResponse.json({
+        agent: String(params.name),
+        secrets: bindingsByAgent[String(params.name)].secrets,
+      })
+    ),
+    http.get(`${API_BASE_URL}/admin/skills`, () =>
+      HttpResponse.json([
+        { name: 'crm-ops' },
+        { name: 'incident-bridge' },
+      ])
+    ),
+    http.get(`${API_BASE_URL}/admin/mcp/servers`, () =>
+      HttpResponse.json([
+        {
+          agent_id: null,
+          command: 'mcp-filesystem',
+          id: 'filesystem',
+          status: 'ready',
+          tool_count: 4,
+          transport: 'stdio',
+        },
+        {
+          agent_id: null,
+          command: 'mcp-github',
+          id: 'github',
+          status: 'ready',
+          tool_count: 8,
+          transport: 'stdio',
+        },
+      ])
+    ),
+    http.get(`${API_BASE_URL}/admin/connectors`, () =>
+      HttpResponse.json([
+        { display_name: 'GitHub', enabled: true, id: 'github', protocol: 'oauth2' },
+        { display_name: 'Slack', enabled: true, id: 'slack', protocol: 'oauth2' },
+      ])
+    ),
+    http.get(`${API_BASE_URL}/admin/kb`, () =>
+      HttpResponse.json([
+        {
+          archived: false,
+          bound_agents: [],
+          chunk_count: 12,
+          description: 'Support knowledge',
+          doc_count: 2,
+          kb_id: 'support',
+          last_import: null,
+          tenant_id: 'default',
+        },
+        {
+          archived: false,
+          bound_agents: [],
+          chunk_count: 4,
+          description: 'Sales knowledge',
+          doc_count: 1,
+          kb_id: 'sales',
+          last_import: null,
+          tenant_id: 'default',
+        },
+      ])
+    ),
+    http.get(`${API_BASE_URL}/admin/users`, () =>
+      HttpResponse.json([
+        {
+          email: 'alice@fleetent.test',
+          id: 'u1',
+          must_reset: false,
+          name: 'Alice',
+          role: 'viewer',
+          status: 'active',
+        },
+        {
+          email: 'bob@fleetent.test',
+          id: 'u2',
+          must_reset: false,
+          name: 'Bob',
+          role: 'viewer',
+          status: 'active',
+        },
+      ])
+    )
+  );
+}
+
 describe('agents page parity baseline', () => {
   it('supports lifecycle mutations and list refreshes', async () => {
-    // delay: null removes userEvent's per-keystroke delay so this long 8-step
-    // sequence stays well under the test timeout even under --coverage load.
     const user = userEvent.setup({ delay: null });
-    let agents: AgentRecord[] = [
+    const agents: AgentRecord[] = [
       {
         agent_name: 'alpha',
         allowed_tools: ['read_file'],
+        is_default: false,
         provenance: 'adhoc',
         status: 'enabled',
         system_prompt: 'Alpha prompt',
       },
     ];
+    const detailByAgent: Record<string, AgentDetailRecord> = {
+      alpha: {
+        agent: 'alpha',
+        allowed_tools: ['read_file'],
+        status: 'enabled',
+        supports_dm: false,
+        supports_groups: false,
+        system_prompt: 'Alpha prompt',
+      },
+    };
+    const bindingsByAgent: Record<string, AgentBindingState> = {
+      alpha: {
+        kbIds: [],
+        mcpServers: [],
+        oauth: [],
+        secrets: [],
+        skills: [],
+        users: [],
+      },
+      beta: {
+        kbIds: [],
+        mcpServers: [],
+        oauth: [],
+        secrets: [],
+        skills: [],
+        users: [],
+      },
+    };
+
+    installAgentBindingHandlers({ agents, bindingsByAgent, detailByAgent });
 
     server.use(
-      http.get(`${API_BASE_URL}/admin/agents`, () => HttpResponse.json(agents)),
-      http.get(`${API_BASE_URL}/admin/agents/:name`, ({ params }) => {
-        const agent = agents.find((item) => item.agent_name === params.name);
-        return HttpResponse.json({
-          agent: agent?.agent_name,
-          allowed_tools: agent?.allowed_tools ?? [],
-          status: agent?.status ?? 'enabled',
-          system_prompt: agent?.system_prompt ?? '',
-        });
-      }),
       http.post(`${API_BASE_URL}/admin/agents`, async ({ request }) => {
         const body = (await request.json()) as {
           allowed_tools: string[];
           name: string;
           system_prompt: string;
         };
-        agents = [
+        agents.splice(0, agents.length, ...[
           ...agents,
           {
             agent_name: body.name,
             allowed_tools: body.allowed_tools,
+            is_default: false,
             provenance: 'adhoc',
             status: 'enabled',
             system_prompt: body.system_prompt,
           },
-        ];
+        ]);
+        detailByAgent[body.name] = {
+          agent: body.name,
+          allowed_tools: body.allowed_tools,
+          status: 'enabled',
+          supports_dm: false,
+          supports_groups: false,
+          system_prompt: body.system_prompt,
+        };
         return HttpResponse.json({ agent: body.name, status: 'enabled', provenance: 'adhoc' }, { status: 201 });
       }),
       http.patch(`${API_BASE_URL}/admin/agents/:name`, async ({ params, request }) => {
@@ -83,7 +275,7 @@ describe('agents page parity baseline', () => {
           allowed_tools?: string[];
           system_prompt?: string;
         };
-        agents = agents.map((agent) =>
+        const nextAgents = agents.map((agent) =>
           agent.agent_name === params.name
             ? {
                 ...agent,
@@ -92,48 +284,76 @@ describe('agents page parity baseline', () => {
               }
             : agent
         );
+        agents.splice(0, agents.length, ...nextAgents);
+        detailByAgent[String(params.name)] = {
+          ...detailByAgent[String(params.name)],
+          allowed_tools: body.allowed_tools ?? detailByAgent[String(params.name)].allowed_tools,
+          system_prompt: body.system_prompt ?? detailByAgent[String(params.name)].system_prompt,
+        };
         return HttpResponse.json({ ok: true });
       }),
       http.post(`${API_BASE_URL}/admin/agents/:name/disable`, ({ params }) => {
-        agents = agents.map((agent) =>
+        const nextAgents = agents.map((agent) =>
           agent.agent_name === params.name ? { ...agent, status: 'disabled' } : agent
         );
+        agents.splice(0, agents.length, ...nextAgents);
+        detailByAgent[String(params.name)] = {
+          ...detailByAgent[String(params.name)],
+          status: 'disabled',
+        };
         return HttpResponse.json({ ok: true });
       }),
       http.post(`${API_BASE_URL}/admin/agents/:name/enable`, ({ params }) => {
-        agents = agents.map((agent) =>
+        const nextAgents = agents.map((agent) =>
           agent.agent_name === params.name ? { ...agent, status: 'enabled' } : agent
         );
+        agents.splice(0, agents.length, ...nextAgents);
+        detailByAgent[String(params.name)] = {
+          ...detailByAgent[String(params.name)],
+          status: 'enabled',
+        };
         return HttpResponse.json({ ok: true });
       }),
       http.post(`${API_BASE_URL}/admin/agents/:name/archive`, ({ params, request }) => {
         expect(request.headers.get('x-confirm')).toBe('true');
-        agents = agents.map((agent) =>
+        const nextAgents = agents.map((agent) =>
           agent.agent_name === params.name ? { ...agent, status: 'archived' } : agent
         );
+        agents.splice(0, agents.length, ...nextAgents);
+        detailByAgent[String(params.name)] = {
+          ...detailByAgent[String(params.name)],
+          status: 'archived',
+        };
         return HttpResponse.json({ ok: true });
       }),
       http.post(`${API_BASE_URL}/admin/agents/:name/restore`, ({ params }) => {
-        agents = agents.map((agent) =>
+        const nextAgents = agents.map((agent) =>
           agent.agent_name === params.name ? { ...agent, status: 'enabled' } : agent
         );
+        agents.splice(0, agents.length, ...nextAgents);
+        detailByAgent[String(params.name)] = {
+          ...detailByAgent[String(params.name)],
+          status: 'enabled',
+        };
         return HttpResponse.json({ ok: true });
       }),
       http.post(`${API_BASE_URL}/admin/agents/:name/clone`, async ({ params, request }) => {
         const body = (await request.json()) as { new_name: string };
-        const source = agents.find((agent) => agent.agent_name === params.name);
-        agents = [
-          ...agents,
-          {
-            ...(source as AgentRecord),
-            agent_name: body.new_name,
-          },
-        ];
+        const source = agents.find((agent) => agent.agent_name === params.name) as AgentRecord;
+        agents.push({ ...source, agent_name: body.new_name });
+        detailByAgent[body.new_name] = {
+          ...detailByAgent[String(params.name)],
+          agent: body.new_name,
+        };
+        bindingsByAgent[body.new_name] = { ...bindingsByAgent[String(params.name)] };
         return HttpResponse.json({ ok: true });
       }),
       http.delete(`${API_BASE_URL}/admin/agents/:name`, ({ params, request }) => {
         expect(request.headers.get('x-confirm')).toBe('true');
-        agents = agents.filter((agent) => agent.agent_name !== params.name);
+        const nextAgents = agents.filter((agent) => agent.agent_name !== params.name);
+        agents.splice(0, agents.length, ...nextAgents);
+        delete detailByAgent[String(params.name)];
+        delete bindingsByAgent[String(params.name)];
         return HttpResponse.json({ ok: true });
       })
     );
@@ -181,30 +401,46 @@ describe('agents page parity baseline', () => {
     });
   }, 15000);
 
-  it('shows version activation and binding entry links', async () => {
-    const user = userEvent.setup();
+  it('renders native bindings, versions, and write-only secrets without legacy deep links', async () => {
+    const user = userEvent.setup({ delay: null });
     const agents: AgentRecord[] = [
       {
         agent_name: 'alpha',
         allowed_tools: ['read_file'],
+        is_default: false,
         provenance: 'adhoc',
         status: 'enabled',
         system_prompt: 'Alpha prompt',
       },
     ];
     let activeVersion = 1;
+    const detailByAgent: Record<string, AgentDetailRecord> = {
+      alpha: {
+        agent: 'alpha',
+        allowed_tools: ['read_file'],
+        status: 'enabled',
+        supports_dm: false,
+        supports_groups: false,
+        system_prompt: 'Alpha prompt',
+      },
+    };
+    const bindingsByAgent: Record<string, AgentBindingState> = {
+      alpha: {
+        kbIds: ['support'],
+        mcpServers: ['filesystem'],
+        oauth: [{ run_as: 'agent', service_id: 'github' }],
+        secrets: [{ env_name: 'FLEETENT_ALPHA_API_KEY', mode: 'inject', status: 'unset' }],
+        skills: [
+          { enabled: true, skill_name: 'crm-ops' },
+          { enabled: false, skill_name: 'incident-bridge' },
+        ],
+        users: ['u1'],
+      },
+    };
+
+    installAgentBindingHandlers({ agents, bindingsByAgent, detailByAgent });
 
     server.use(
-      http.get(`${API_BASE_URL}/admin/agents`, () => HttpResponse.json(agents)),
-      http.get(`${API_BASE_URL}/admin/agents/:name`, ({ params }) => {
-        const agent = agents.find((item) => item.agent_name === params.name);
-        return HttpResponse.json({
-          agent: agent?.agent_name,
-          allowed_tools: agent?.allowed_tools ?? [],
-          status: agent?.status ?? 'enabled',
-          system_prompt: agent?.system_prompt ?? '',
-        });
-      }),
       http.get(`${API_BASE_URL}/admin/agents/alpha/versions`, () =>
         HttpResponse.json([
           { id: 1, is_active: activeVersion === 1, version: 1 },
@@ -214,6 +450,85 @@ describe('agents page parity baseline', () => {
       http.post(`${API_BASE_URL}/admin/agents/alpha/versions/2/activate`, () => {
         activeVersion = 2;
         return HttpResponse.json({ active_version: 2 });
+      }),
+      http.put(`${API_BASE_URL}/admin/agents/alpha/skills/incident-bridge`, async ({ request }) => {
+        expect(await request.json()).toEqual({ enabled: true });
+        bindingsByAgent.alpha.skills = bindingsByAgent.alpha.skills.map((skill) =>
+          skill.skill_name === 'incident-bridge' ? { ...skill, enabled: true } : skill
+        );
+        return HttpResponse.json({ agent: 'alpha', enabled: true, skill_name: 'incident-bridge' });
+      }),
+      http.post(`${API_BASE_URL}/admin/agents/alpha/bindings/mcp/github`, () => {
+        bindingsByAgent.alpha.mcpServers = ['filesystem', 'github'];
+        return HttpResponse.json({ agent: 'alpha', bound: true, server_id: 'github' });
+      }),
+      http.delete(`${API_BASE_URL}/admin/agents/alpha/bindings/mcp/filesystem`, () => {
+        bindingsByAgent.alpha.mcpServers = ['github'];
+        return HttpResponse.json({ agent: 'alpha', bound: false, server_id: 'filesystem' });
+      }),
+      http.post(`${API_BASE_URL}/admin/agents/alpha/bindings/oauth/slack`, async ({ request }) => {
+        expect(await request.json()).toEqual({ run_as: 'user' });
+        bindingsByAgent.alpha.oauth = [
+          { run_as: 'agent', service_id: 'github' },
+          { run_as: 'user', service_id: 'slack' },
+        ];
+        return HttpResponse.json({ agent: 'alpha', bound: true, connector_id: 'slack', run_as: 'user' });
+      }),
+      http.delete(`${API_BASE_URL}/admin/agents/alpha/bindings/oauth/github`, () => {
+        bindingsByAgent.alpha.oauth = [{ run_as: 'user', service_id: 'slack' }];
+        return HttpResponse.json({ agent: 'alpha', bound: false, connector_id: 'github' });
+      }),
+      http.post(`${API_BASE_URL}/admin/agents/alpha/kbs`, async ({ request }) => {
+        expect(await request.json()).toEqual({ kb_id: 'sales' });
+        bindingsByAgent.alpha.kbIds = ['support', 'sales'];
+        return HttpResponse.json({ agent: 'alpha', bound: true, kb_id: 'sales' });
+      }),
+      http.delete(`${API_BASE_URL}/admin/agents/alpha/kbs/support`, () => {
+        bindingsByAgent.alpha.kbIds = ['sales'];
+        return HttpResponse.json({ agent: 'alpha', bound: false, kb_id: 'support' });
+      }),
+      http.post(`${API_BASE_URL}/admin/agents/alpha/bindings/users/u2`, () => {
+        bindingsByAgent.alpha.users = ['u1', 'u2'];
+        return HttpResponse.json({ agent: 'alpha', bound: true, user_id: 'u2' });
+      }),
+      http.delete(`${API_BASE_URL}/admin/agents/alpha/bindings/users/u1`, () => {
+        bindingsByAgent.alpha.users = ['u2'];
+        return HttpResponse.json({ agent: 'alpha', bound: false, user_id: 'u1' });
+      }),
+      http.post(`${API_BASE_URL}/admin/agents/alpha/bindings/groups`, async ({ request }) => {
+        expect(await request.json()).toEqual({ group_id: 'C0123', platform: 'slack' });
+        return HttpResponse.json({ agent: 'alpha', bound: true, group_id: 'C0123', platform: 'slack' }, { status: 201 });
+      }),
+      http.delete(`${API_BASE_URL}/admin/agents/alpha/bindings/groups/slack/C0123`, () =>
+        new HttpResponse(null, { status: 204 })
+      ),
+      http.put(`${API_BASE_URL}/admin/agents/alpha/im-capabilities`, async ({ request }) => {
+        expect(await request.json()).toEqual({ supports_dm: true, supports_groups: true });
+        detailByAgent.alpha = { ...detailByAgent.alpha, supports_dm: true, supports_groups: true };
+        return HttpResponse.json({ agent: 'alpha', supports_dm: true, supports_groups: true });
+      }),
+      http.put(`${API_BASE_URL}/admin/agents/alpha/default`, () => {
+        const nextAgents = agents.map((agent) => ({ ...agent, is_default: true }));
+        agents.splice(0, agents.length, ...nextAgents);
+        return HttpResponse.json({ agent: 'alpha', is_default: true });
+      }),
+      http.delete(`${API_BASE_URL}/admin/agents/default`, () => {
+        const nextAgents = agents.map((agent) => ({ ...agent, is_default: false }));
+        agents.splice(0, agents.length, ...nextAgents);
+        return HttpResponse.json({ cleared: true });
+      }),
+      http.put(`${API_BASE_URL}/admin/agents/alpha/secrets/FLEETENT_ALPHA_API_KEY`, async ({ request }) => {
+        expect(await request.json()).toEqual({ value: 'sk-live-secret' });
+        bindingsByAgent.alpha.secrets = [
+          { env_name: 'FLEETENT_ALPHA_API_KEY', mode: 'inject', status: 'set' },
+        ];
+        return HttpResponse.json({ env_name: 'FLEETENT_ALPHA_API_KEY', status: 'set' });
+      }),
+      http.delete(`${API_BASE_URL}/admin/agents/alpha/secrets/FLEETENT_ALPHA_API_KEY`, () => {
+        bindingsByAgent.alpha.secrets = [
+          { env_name: 'FLEETENT_ALPHA_API_KEY', mode: 'inject', status: 'unset' },
+        ];
+        return HttpResponse.json({ env_name: 'FLEETENT_ALPHA_API_KEY', status: 'unset' });
       })
     );
 
@@ -222,35 +537,178 @@ describe('agents page parity baseline', () => {
 
     await user.click(screen.getByRole('button', { name: 'Load versions for alpha' }));
     expect(await screen.findByText('v1 active')).toBeInTheDocument();
-
     await user.click(screen.getByRole('button', { name: 'Activate v2 for alpha' }));
     expect(await screen.findByText('v2 active')).toBeInTheDocument();
 
-    // Scope to the agent's bindings aside so these don't match the same-named
-    // top-level legacy nav links (Skills / Knowledge Base) in the sidebar.
-    const bindings = within(
-      screen.getByRole('heading', { name: 'Bindings and legacy entry points' })
-        .closest('aside') as HTMLElement
+    const skillsSection = screen.getByRole('heading', { name: 'Skills' }).closest('section');
+    const mcpSection = screen.getByRole('heading', { name: 'MCP Servers' }).closest('section');
+    const oauthSection = screen.getByRole('heading', { name: 'OAuth Connectors' }).closest('section');
+    const kbSection = screen.getByRole('heading', { name: 'Knowledge Bases' }).closest('section');
+    const usersSection = screen.getByRole('heading', { name: 'User Access' }).closest('section');
+    const imSection = screen.getByRole('heading', { name: 'IM Access' }).closest('section');
+    const defaultSection = screen.getByRole('heading', { name: 'Default Agent' }).closest('section');
+    const secretsSection = screen.getByRole('heading', { name: 'Secrets' }).closest('section');
+
+    expect(skillsSection).not.toBeNull();
+    expect(mcpSection).not.toBeNull();
+    expect(oauthSection).not.toBeNull();
+    expect(kbSection).not.toBeNull();
+    expect(usersSection).not.toBeNull();
+    expect(imSection).not.toBeNull();
+    expect(defaultSection).not.toBeNull();
+    expect(secretsSection).not.toBeNull();
+
+    const skillsControls = within(skillsSection as HTMLElement);
+    expect(skillsControls.getByText('crm-ops')).toBeInTheDocument();
+    await user.click(skillsControls.getByRole('button', { name: 'Enable incident-bridge' }));
+    await waitFor(() => {
+      expect(skillsControls.getByRole('button', { name: 'Disable incident-bridge' })).toBeInTheDocument();
+    });
+
+    const mcpControls = within(mcpSection as HTMLElement);
+    expect(mcpControls.getByText('filesystem')).toBeInTheDocument();
+    await user.selectOptions(mcpControls.getByLabelText('Add MCP server'), 'github');
+    await user.click(mcpControls.getByRole('button', { name: 'Bind MCP server' }));
+    expect(await mcpControls.findByText('github')).toBeInTheDocument();
+    await user.click(mcpControls.getByRole('button', { name: 'Remove filesystem' }));
+    await waitFor(() => {
+      expect(mcpControls.queryByRole('button', { name: 'Remove filesystem' })).not.toBeInTheDocument();
+    });
+
+    const oauthControls = within(oauthSection as HTMLElement);
+    expect(oauthControls.getByText('github')).toBeInTheDocument();
+    await user.selectOptions(oauthControls.getByLabelText('Add OAuth connector'), 'slack');
+    await user.selectOptions(oauthControls.getByLabelText('Run as'), 'user');
+    await user.click(oauthControls.getByRole('button', { name: 'Bind OAuth connector' }));
+    expect(await oauthControls.findByText('slack')).toBeInTheDocument();
+    await user.click(oauthControls.getByRole('button', { name: 'Remove github' }));
+    await waitFor(() => {
+      expect(oauthControls.queryByRole('button', { name: 'Remove github' })).not.toBeInTheDocument();
+    });
+
+    const kbControls = within(kbSection as HTMLElement);
+    expect(kbControls.getByText('support')).toBeInTheDocument();
+    await user.selectOptions(kbControls.getByLabelText('Add knowledge base'), 'sales');
+    await user.click(kbControls.getByRole('button', { name: 'Bind knowledge base' }));
+    expect(await kbControls.findByText('sales')).toBeInTheDocument();
+    await user.click(kbControls.getByRole('button', { name: 'Remove support' }));
+    await waitFor(() => {
+      expect(kbControls.queryByRole('button', { name: 'Remove support' })).not.toBeInTheDocument();
+    });
+
+    const userControls = within(usersSection as HTMLElement);
+    expect(userControls.getByText('u1')).toBeInTheDocument();
+    await user.selectOptions(userControls.getByLabelText('Add user access'), 'u2');
+    await user.click(userControls.getByRole('button', { name: 'Bind user' }));
+    expect(await userControls.findByText('u2')).toBeInTheDocument();
+    await user.click(userControls.getByRole('button', { name: 'Remove u1' }));
+    await waitFor(() => {
+      expect(userControls.queryByRole('button', { name: 'Remove u1' })).not.toBeInTheDocument();
+    });
+
+    const imControls = within(imSection as HTMLElement);
+    await user.type(imControls.getByLabelText('Group id'), 'C0123');
+    await user.click(imControls.getByRole('button', { name: 'Add group' }));
+    expect(await imControls.findByText('slack:C0123')).toBeInTheDocument();
+    await user.click(imControls.getByLabelText('Allow DMs'));
+    await user.click(imControls.getByLabelText('Allow groups'));
+    await user.click(imControls.getByRole('button', { name: 'Save IM capabilities' }));
+    expect(await imControls.findByText('DMs enabled')).toBeInTheDocument();
+    expect(await imControls.findByText('Groups enabled')).toBeInTheDocument();
+    await user.click(imControls.getByRole('button', { name: 'Remove slack:C0123' }));
+    await waitFor(() => {
+      expect(imControls.queryByText('slack:C0123')).not.toBeInTheDocument();
+    });
+
+    const defaultControls = within(defaultSection as HTMLElement);
+    await user.click(defaultControls.getByRole('button', { name: 'Set as default agent' }));
+    expect(await defaultControls.findByText('This agent is the default.')).toBeInTheDocument();
+    await user.click(defaultControls.getByRole('button', { name: 'Clear default agent' }));
+    await waitFor(async () => {
+      expect(await defaultControls.findByText('This agent is not the default.')).toBeInTheDocument();
+    });
+
+    const secretsControls = within(secretsSection as HTMLElement);
+    expect(secretsControls.getByText('FLEETENT_ALPHA_API_KEY')).toBeInTheDocument();
+    expect(secretsControls.getByText('unset')).toBeInTheDocument();
+    expect(secretsControls.queryByText('sk-live-secret')).not.toBeInTheDocument();
+    await user.type(secretsControls.getByLabelText('Secret value for FLEETENT_ALPHA_API_KEY'), 'sk-live-secret');
+    await user.click(secretsControls.getByRole('button', { name: 'Save secret FLEETENT_ALPHA_API_KEY' }));
+    expect(secretsControls.queryByDisplayValue('sk-live-secret')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(secretsControls.getByText('set')).toBeInTheDocument();
+      expect(secretsControls.queryByText('sk-live-secret')).not.toBeInTheDocument();
+    });
+    await user.click(secretsControls.getByRole('button', { name: 'Clear secret FLEETENT_ALPHA_API_KEY' }));
+    await waitFor(() => {
+      expect(secretsControls.getByText('unset')).toBeInTheDocument();
+    });
+
+    expectNoLegacyBindingLinks();
+  }, 15000);
+
+  it('keeps viewers read-only across all binding sections', async () => {
+    const agents: AgentRecord[] = [
+      {
+        agent_name: 'alpha',
+        allowed_tools: ['read_file'],
+        is_default: false,
+        provenance: 'adhoc',
+        status: 'enabled',
+        system_prompt: 'Alpha prompt',
+      },
+    ];
+    const detailByAgent: Record<string, AgentDetailRecord> = {
+      alpha: {
+        agent: 'alpha',
+        allowed_tools: ['read_file'],
+        status: 'enabled',
+        supports_dm: false,
+        supports_groups: false,
+        system_prompt: 'Alpha prompt',
+      },
+    };
+    const bindingsByAgent: Record<string, AgentBindingState> = {
+      alpha: {
+        kbIds: ['support'],
+        mcpServers: ['filesystem'],
+        oauth: [{ run_as: 'agent', service_id: 'github' }],
+        secrets: [{ env_name: 'FLEETENT_ALPHA_API_KEY', mode: 'inject', status: 'set' }],
+        skills: [{ enabled: true, skill_name: 'crm-ops' }],
+        users: ['u1'],
+      },
+    };
+
+    installAgentBindingHandlers({ agents, bindingsByAgent, detailByAgent, role: 'viewer' });
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/agents/alpha/versions`, () =>
+        HttpResponse.json([{ id: 1, is_active: true, version: 1 }])
+      )
     );
-    expect(bindings.getByRole('link', { name: 'Skills' })).toHaveAttribute(
-      'href',
-      '/admin/ui-legacy#skills'
-    );
-    expect(bindings.getByRole('link', { name: 'Knowledge Base' })).toHaveAttribute(
-      'href',
-      '/admin/ui-legacy#kb'
-    );
-    expect(bindings.getByRole('link', { name: 'MCP Servers' })).toHaveAttribute(
-      'href',
-      '/admin/ui-legacy#agents'
-    );
-    expect(bindings.getByRole('link', { name: 'OAuth Bindings' })).toHaveAttribute(
-      'href',
-      '/admin/ui-legacy#agents'
-    );
-    expect(bindings.getByRole('link', { name: 'User Bindings' })).toHaveAttribute(
-      'href',
-      '/admin/ui-legacy#agents'
-    );
+
+    renderAgentsRoute();
+    expect(await screen.findByText('alpha')).toBeInTheDocument();
+    expect(await screen.findAllByText('Viewer access is read-only.')).not.toHaveLength(0);
+
+    const bindingsPanel = screen.getByRole('heading', { name: 'Agent Bindings' }).closest('aside');
+    expect(bindingsPanel).not.toBeNull();
+    const panel = within(bindingsPanel as HTMLElement);
+
+    expect(panel.queryByRole('button', { name: /Bind / })).not.toBeInTheDocument();
+    expect(panel.queryByRole('button', { name: /Remove / })).not.toBeInTheDocument();
+    expect(panel.queryByRole('button', { name: /Enable / })).not.toBeInTheDocument();
+    expect(panel.queryByRole('button', { name: /Disable / })).not.toBeInTheDocument();
+    expect(panel.queryByRole('button', { name: 'Set as default agent' })).not.toBeInTheDocument();
+    expect(panel.queryByRole('button', { name: 'Clear default agent' })).not.toBeInTheDocument();
+    expect(panel.queryByLabelText('Add MCP server')).not.toBeInTheDocument();
+    expect(panel.queryByLabelText('Add OAuth connector')).not.toBeInTheDocument();
+    expect(panel.queryByLabelText('Add knowledge base')).not.toBeInTheDocument();
+    expect(panel.queryByLabelText('Add user access')).not.toBeInTheDocument();
+    expect(panel.queryByLabelText('Group id')).not.toBeInTheDocument();
+    expect(panel.queryByLabelText('Allow DMs')).not.toBeInTheDocument();
+    expect(panel.queryByLabelText('Secret value for FLEETENT_ALPHA_API_KEY')).not.toBeInTheDocument();
+
+    expectNoLegacyBindingLinks();
   });
 });
