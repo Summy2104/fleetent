@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -249,7 +250,14 @@ _remove_legacy_admin_ui_route()
 
 
 def _spa_index_path() -> Path:
-    return ADMIN_UI_DIST_DIR / "index.html"
+    return _admin_ui_dist_dir() / "index.html"
+
+
+def _admin_ui_dist_dir() -> Path:
+    override = os.environ.get("FLEETENT_ADMIN_UI_DIST")
+    if override:
+        return Path(override)
+    return ADMIN_UI_DIST_DIR
 
 
 def _legacy_admin_html() -> str:
@@ -257,7 +265,7 @@ def _legacy_admin_html() -> str:
 
 
 def _serve_spa_file(asset_path: str) -> Response:
-    root = ADMIN_UI_DIST_DIR.resolve()
+    root = _admin_ui_dist_dir().resolve()
     requested = (root / asset_path).resolve()
     if requested.is_file() and str(requested).startswith(str(root)):
         return FileResponse(requested)

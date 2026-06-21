@@ -24,6 +24,25 @@
 - **WHEN** 请求命中某个 `/admin/<resource>` API 端点或 `/admin/ui-legacy`
 - **THEN** 平台返回该 API / legacy 页面本身,而非 SPA 的 `index.html`
 
+### Requirement: Deployed platform serves the built SPA from a resolvable dist
+
+The platform SHALL resolve the admin SPA dist directory in a deployment-robust way: it SHALL honor a `FLEETENT_ADMIN_UI_DIST` environment variable when set, otherwise fall back to the repo-relative `frontend/dist`. When the dist exists, `/admin/ui` SHALL serve it; when it does not, the platform SHALL return a clear "frontend not built" error (503) rather than a blank page, so the failure is diagnosable.
+
+#### Scenario: Serve dist from an overridden location
+
+- **WHEN** `FLEETENT_ADMIN_UI_DIST` points at a directory containing a built SPA
+- **THEN** `/admin/ui` serves that build, regardless of the process working directory
+
+#### Scenario: Default resolution serves the built repo dist
+
+- **WHEN** `FLEETENT_ADMIN_UI_DIST` is unset and `frontend/dist` has been built
+- **THEN** `/admin/ui` serves the repo's built dist
+
+#### Scenario: Unbuilt dist gives a clear error
+
+- **WHEN** no built dist is found at the resolved location
+- **THEN** `/admin/ui` returns a 503 with a clear "frontend not built" message (not a blank/200 page)
+
 ### Requirement: 新旧前端共存与切换
 
 重构期间平台 SHALL 同时提供新 SPA 与旧前端:旧 `admin.html` MUST 在 `/admin/ui-legacy` 全功能可达;`/admin/ui` MUST 服务新 SPA;新 SPA 中**尚未迁移**的领域导航 MUST 深链到 `/admin/ui-legacy` 对应位置,使运维在迁移任意阶段都有完整功能。
