@@ -126,7 +126,7 @@ def _strip_secret_plumbing(value: Any) -> Any:
     if isinstance(value, dict):
         sanitized: dict[str, Any] = {}
         for key, item in value.items():
-            if key == "env" or key.endswith("_env") or key.endswith("credential_ref"):
+            if key == "env" or key.endswith("credential_ref"):
                 continue
             sanitized[key] = _strip_secret_plumbing(item)
         return sanitized
