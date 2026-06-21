@@ -26,8 +26,8 @@ The console SHALL let an admin create, edit, enable, disable, delete, and restor
 - **THEN** the console calls `PUT /admin/skills/{name}/agents/{agent_id}` and the binding appears
 
 ### Requirement: Skill proposal review
-The console SHALL list skill proposals and let an admin view a proposal diff and approve or reject it.
+The console SHALL list skill proposals and let an admin view a proposal diff. Approve / reject are not offered from the console: proposal approval is agent-owned and delivered to the approver via DM, with the console acting as a read-only projection.
 
-#### Scenario: Approve a proposal
-- **WHEN** an admin approves a listed proposal
-- **THEN** the console calls `POST /admin/skills/proposals/{id}/approve` and the proposal leaves the pending list
+#### Scenario: List and view a proposal diff
+- **WHEN** an admin opens the skill proposals list and selects a proposal
+- **THEN** the console lists proposals via `GET /admin/skills/proposals` and renders the diff via `GET /admin/skills/proposals/{id}/diff`, with no approve/reject controls

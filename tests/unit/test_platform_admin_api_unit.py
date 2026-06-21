@@ -231,12 +231,6 @@ def test_skill_admin_route_handlers_cover_lifecycle(monkeypatch: pytest.MonkeyPa
     assert skill_admin_api.skill_observability("s", auth_header)["hits"] == 3
     assert skill_admin_api.list_proposals(auth_header) == [{"id": "p1"}]
     assert skill_admin_api.proposal_diff("p1", auth_header)["diff"] == "+body"
-    with pytest.raises(HTTPException) as approve_blocked:
-        skill_admin_api.approve_proposal("p1", auth_header, "true")
-    assert approve_blocked.value.status_code == 409
-    with pytest.raises(HTTPException) as reject_blocked:
-        skill_admin_api.reject_proposal("p2", auth_header)
-    assert reject_blocked.value.status_code == 409
     assert reloaded
     assert audits
 

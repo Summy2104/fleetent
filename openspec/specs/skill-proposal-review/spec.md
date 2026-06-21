@@ -21,17 +21,3 @@ For each proposal the system SHALL present a change diff computed by comparing t
 - **WHEN** an admin opens an `update` proposal
 - **THEN** the response contains a diff between the reflection snapshot and the skill's current content
 
-### Requirement: Approve proposal
-On approve the system SHALL invoke the reflection domain to apply the change, set the proposal status to approved, and audit the action. The management surface SHALL NOT write the skill content directly.
-
-#### Scenario: Approve applies via reflection
-- **WHEN** an admin reviews an `update` proposal's rationale and diff in prod and clicks approve
-- **THEN** the reflection domain applies the change so the skill update takes effect, the proposal status becomes approved, and the approval is audited
-
-### Requirement: Reject proposal
-On reject the system SHALL close the proposal without altering the skill and SHALL audit the action.
-
-#### Scenario: Reject leaves skill unchanged
-- **WHEN** an admin rejects a `pending` delete proposal
-- **THEN** the proposal is closed, the target skill is not deleted and stays as-is, and the rejection is audited
-
