@@ -666,7 +666,9 @@ def build_app(agent_name: str) -> FastAPI:
             return
         await websocket.accept()
         transport = WSTransport(websocket)
-        conn = tui_dispatch.Connection(principal=tui_principal, transport=transport)
+        conn = tui_dispatch.Connection(
+            principal=tui_principal, transport=transport, agent_name=agent_name
+        )
         await transport.write(tui_proto.make_event(tui_proto.EVENT_GATEWAY_READY, {}))
         try:
             while True:
