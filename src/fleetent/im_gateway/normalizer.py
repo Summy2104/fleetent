@@ -12,6 +12,7 @@ from fleetent import agent_config
 from fleetent.agent_config import AgentFile, ImAccess
 from fleetent.identity import Principal
 from fleetent.im_gateway import access
+from fleetent.runtime import user_instructions
 from fleetent.runtime.approval_resume import resume_pending_approval
 
 logger = structlog.get_logger(__name__)
@@ -542,6 +543,18 @@ async def route(msg: NormalizedMessage) -> None:
             await msg.reply_func(_REJECTION_MSG)
             return
 
+    # /user command: view/append/clear the per-agent user.md. Placed after the access
+    # gate (only authorized users may read or change the shared directives) and before
+    # the loop; a non-/user message returns None and proceeds normally. Tolerates a
+    # leading @mention so channel usage (`@bot /user ...`) is recognized too.
+    if agent is not None:
+        user_reply = user_instructions.handle_user_command(
+            agent.name, _strip_leading_mention(msg.text).strip()
+        )
+        if user_reply is not None:
+            await msg.reply_func(user_reply)
+            return
+
     from fleetent.integrations.sandbox import enablement as sandbox_enablement
     from fleetent.model import ModelPolicySnapshot
     from fleetent.runtime import loop as agent_loop
@@ -587,7 +600,11 @@ async def route(msg: NormalizedMessage) -> None:
     # <available_skills> catalog. Per-user long-term context is injected by run().
     catalog = available_skills_prompt(allowed_skills=agent.allowed_skills if agent else None)
     disabled_trace = collect_disabled_trace() or None
-    system_content = "\n\n".join(p for p in [base_system, catalog] if p)
+    # Fold the per-agent user.md directives into the stable prefix, between the base
+    # system prompt and the skills catalog (same ordering as runtime _assemble_prompt).
+    user_md = user_instructions.load(agent.name) if agent else ""
+    user_block = f"[用户指令]\n{user_md}" if user_md else ""
+    system_content = "\n\n".join(p for p in [base_system, user_block, catalog] if p)
     # im-message-context: append the stable session frame (platform/scene/date+tz).
     if msg.session_context is not None:
         system_content = f"{system_content}\n\n{_session_frame_text(msg.session_context)}"
