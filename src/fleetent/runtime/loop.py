@@ -154,6 +154,22 @@ def _filter_code_execution(
     return [s for s in schemas if s["function"]["name"] != _RUN_CODE_TOOL]
 
 
+_SKILL_MANAGE_TOOL = "skill_manage"
+
+
+def _filter_skill_authoring(schemas: list[Any], *, enabled: bool) -> list[Any]:
+    """Drop `skill_manage` from schemas unless agent skill authoring is enabled (agent-skill-tools).
+
+    The model-facing skill write tool is opt-in per agent (`skill_authoring_enabled`,
+    default off). When disabled the tool's schema is removed here at schema-build time,
+    so the model never even sees it — the deployment must deliberately enable
+    agent-driven skill writes.
+    """
+    if enabled:
+        return schemas
+    return [s for s in schemas if s["function"]["name"] != _SKILL_MANAGE_TOOL]
+
+
 # Corrective warning injected when the loop-detection checker first flags a
 # suspected loop (AR4 D3/D4). Plain `user` role (D4) so it is not merged with the
 # leading system prompt by message_hygiene and stays visible on the next turn.
@@ -1594,6 +1610,7 @@ async def run(
     session_context: Any = None,
     conversation_address: ConversationAddress | None = None,
     delivery_ledger: list[Any] | None = None,
+    skill_authoring_enabled: bool = False,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
@@ -1652,6 +1669,7 @@ async def run(
             session_context=session_context,
             conversation_address=conversation_address,
             delivery_ledger=delivery_ledger,
+            skill_authoring_enabled=skill_authoring_enabled,
         )
     finally:
         _active_runs -= 1
@@ -1690,6 +1708,7 @@ async def _run_inner(
     session_context: Any = None,
     conversation_address: ConversationAddress | None = None,
     delivery_ledger: list[Any] | None = None,
+    skill_authoring_enabled: bool = False,
 ) -> str:
     # Image-bearing messages route to the vision model (D6); raises here if
     # images are present but no vision route is configured, before any LLM call.
@@ -1717,6 +1736,9 @@ async def _run_inner(
     # agent's schema when the (mode, features) pair disables it (alongside the
     # allowed_tools filter above).
     schemas = _filter_code_execution(schemas, sandbox_mode, agent_features)
+
+    # agent-skill-tools: drop skill_manage unless this agent opted into authoring.
+    schemas = _filter_skill_authoring(schemas, enabled=skill_authoring_enabled)
 
     # sandbox-containment-gating: read the active backend's bind-mount capability once
     # per run (not per gate decision) so the action gate's sandbox_capable reflects
@@ -2181,6 +2203,7 @@ def run_sync(
     agent_features: dict[str, Any] | None = None
     governance: GovernanceConfig | None = None
     model_policy: ModelPolicySnapshot | None = None
+    skill_authoring_enabled = False
     if agent is not None:
         from fleetent.runtime.snapshot import _governance_from_file
         from fleetent.tools.plugin_loader import expand_plugin_patterns
@@ -2193,6 +2216,7 @@ def run_sync(
         agent_features = agent.features
         governance = _governance_from_file(agent)
         model_policy = ModelPolicySnapshot.from_agent(agent)
+        skill_authoring_enabled = agent.skill_authoring_enabled
 
     skills_catalog = available_skills_prompt(
         allowed_skills=allowed_skills, available_tools=_visible_tool_names(allowed_tools)
@@ -2221,6 +2245,7 @@ def run_sync(
             sandbox_mode=sandbox_mode,
             governance=governance,
             model_policy=model_policy,
+            skill_authoring_enabled=skill_authoring_enabled,
         )
 
     return asyncio.run(_run())
@@ -2248,6 +2273,7 @@ async def run_stream(
     governance: GovernanceConfig | None = None,
     model_policy: ModelPolicySnapshot | None = None,
     session_context: Any = None,
+    skill_authoring_enabled: bool = False,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Async streaming version of run(). Yields SSE event dicts.
 
@@ -2488,6 +2514,7 @@ async def run_stream(
         ]
         # SB3 D1: code-execution enablement point, mirroring run().
         stream_schemas = _filter_code_execution(stream_schemas, sandbox_mode, agent_features)
+        stream_schemas = _filter_skill_authoring(stream_schemas, enabled=skill_authoring_enabled)
 
         try:
             stream, active_cfg, messages = await _stream_with_overflow_retry(

@@ -31,6 +31,7 @@ def _agent_file(**overrides: Any) -> Any:
         plugins=["github"],
         features={"code_execution": True},
         allowed_skills=["triage"],
+        skill_authoring_enabled=False,
         mcp_servers=[],
         scheduling=SimpleNamespace(enabled=False),
     )

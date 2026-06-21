@@ -706,9 +706,213 @@ def load(name: str) -> str:
     return Path(_index[name].path).read_text(encoding="utf-8")
 
 
+def _writable_skill_dir(name: str) -> Path:
+    """Return a skill's dir for a write op, refusing unknown/builtin skills (agent-skill-tools).
+
+    skill_manage writes are confined to per-agent (user-root) skills; a builtin/bundled
+    skill (index entry `builtin=True`) is read-only — raising here keeps that boundary in
+    one place for every mutating op (delete / edit / patch / write_file / remove_file).
+    """
+    entry = _index.get(name)
+    if entry is None:
+        raise ValueError(f"no skill named {name!r}")
+    if entry.builtin:
+        raise ValueError(f"skill {name!r} is a builtin skill and is read-only")
+    return Path(entry.path).parent
+
+
+def _resolve_within_skill(skill_dir: Path, rel_path: str) -> Path:
+    """Resolve `rel_path` under `skill_dir`, refusing a path that escapes it (agent-skill-tools)."""
+    base = skill_dir.resolve()
+    resolved = (base / rel_path).resolve()
+    if not resolved.is_relative_to(base):
+        raise ValueError(f"path {rel_path!r} escapes the skill directory")
+    return resolved
+
+
+def _reload_root(skills_dir: str | None) -> str:
+    """The skills root to rebuild the index from after a mutation (agent-skill-tools)."""
+    return skills_dir or _last_skills_dir or _resolve_skills_dir(None)
+
+
+def delete_skill(name: str, *, skills_dir: str | None = None) -> None:
+    """Delete a per-agent skill directory and hot-reload the index (agent-skill-tools).
+
+    Refuses unknown and builtin skills (`_writable_skill_dir`). After removal the
+    registry is reloaded so the skill leaves the index immediately.
+    """
+    skill_dir = _writable_skill_dir(name)
+    shutil.rmtree(skill_dir)
+    reload(_reload_root(skills_dir))
+
+
+def write_skill_file(
+    name: str, rel_path: str, content: str, *, skills_dir: str | None = None
+) -> Path:
+    """Write/overwrite a support file under a per-agent skill, then reload (agent-skill-tools).
+
+    Refuses unknown/builtin skills and paths escaping the skill directory. Writing the
+    SKILL.md itself through this path still runs the static injection audit (severe ->
+    refuse), so no write face can persist injected SKILL.md content unaudited.
+    """
+    skill_dir = _writable_skill_dir(name)
+    resolved = _resolve_within_skill(skill_dir, rel_path)
+    if resolved.name == "SKILL.md":
+        _validate_skill_bundle(content, str(resolved))
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    resolved.write_text(content, encoding="utf-8")
+    reload(_reload_root(skills_dir))
+    return resolved
+
+
+def remove_skill_file(name: str, rel_path: str, *, skills_dir: str | None = None) -> None:
+    """Remove a support file under a per-agent skill, then reload (agent-skill-tools).
+
+    Refuses unknown/builtin skills and escaping paths. SKILL.md cannot be removed this
+    way (use `delete_skill` to drop the whole skill) so a skill can't be left bodyless.
+    """
+    skill_dir = _writable_skill_dir(name)
+    resolved = _resolve_within_skill(skill_dir, rel_path)
+    if resolved.name == "SKILL.md":
+        raise ValueError("cannot remove SKILL.md via remove_file; delete the skill instead")
+    if resolved.is_file():
+        resolved.unlink()
+    reload(_reload_root(skills_dir))
+
+
+def patch_skill(
+    name: str,
+    old_string: str,
+    new_string: str,
+    *,
+    file_path: str | None = None,
+    replace_all: bool = False,
+    skills_dir: str | None = None,
+) -> Path:
+    """Targeted old->new replacement in a per-agent skill's SKILL.md or a support file.
+
+    Targets SKILL.md by default, or the support file at `file_path`. Refuses
+    unknown/builtin skills and escaping paths. `old_string` absent from the target
+    raises (no silent no-op). When the target is SKILL.md the post-patch full text is
+    re-audited and a `severe` injection hit refuses the write *before* persisting, so a
+    rejected patch leaves the skill byte-identical. Reloads after a successful write.
+    """
+    skill_dir = _writable_skill_dir(name)
+    target = (
+        skill_dir / "SKILL.md" if file_path is None else _resolve_within_skill(skill_dir, file_path)
+    )
+    content = target.read_text(encoding="utf-8")
+    if old_string not in content:
+        raise ValueError(f"old_string not found in {target.name!r}")
+    patched = (
+        content.replace(old_string, new_string)
+        if replace_all
+        else content.replace(old_string, new_string, 1)
+    )
+    if target.name == "SKILL.md":
+        _validate_skill_bundle(patched, str(target))
+    target.write_text(patched, encoding="utf-8")
+    reload(_reload_root(skills_dir))
+    return target
+
+
+def create_skill(
+    name: str,
+    content: str,
+    *,
+    created_at: str,
+    origin: str = "agent_tool",
+    skills_dir: str | None = None,
+) -> Path:
+    """Create a new per-agent skill from a SKILL.md body, stamping provenance (agent-skill-tools).
+
+    Refuses a name that already exists (in the index or on disk) so create never
+    clobbers. Reuses `write_skill`'s atomic bundle write, which injects the provenance
+    (`source` = origin, `applied_at` = caller-supplied timestamp — the registry never
+    reads the clock, keeping it deterministic) and runs the static injection audit
+    (severe -> refuse before persisting), then hot-reloads.
+    """
+    root = Path(_reload_root(skills_dir))
+    if name in _index or (root / name).exists():
+        raise ValueError(f"skill {name!r} already exists")
+    prov = SkillWriteProvenance(source=origin, proposal_id="", applied_at=created_at)
+    return write_skill(name, {"SKILL.md": content}, prov, skills_dir=str(root))
+
+
+def edit_skill(name: str, content: str, *, skills_dir: str | None = None) -> Path:
+    """Rewrite an existing per-agent skill's SKILL.md in place (agent-skill-tools).
+
+    Refuses unknown/builtin skills. Re-audits the new body (severe -> refuse before
+    writing) and leaves the skill's support files untouched, then hot-reloads. Unlike
+    `create_skill` it does not re-stamp provenance, so an edit preserves the original
+    authoring metadata.
+    """
+    skill_dir = _writable_skill_dir(name)
+    target = skill_dir / "SKILL.md"
+    _validate_skill_bundle(content, str(target))
+    target.write_text(content, encoding="utf-8")
+    reload(_reload_root(skills_dir))
+    return target
+
+
+def read_skill_file(name: str, rel_path: str) -> str:
+    """Return a support file's content from under a skill's directory (agent-skill-tools).
+
+    Reads a file addressed by `rel_path` relative to the skill's directory (e.g.
+    ``references/api.md``). The resolved path MUST stay within that directory: a
+    path escaping it via ``..`` or an absolute path is refused rather than read,
+    so a caller can never reach files outside the skill. Returns an explicit error
+    string (never raises) for an unknown skill, an escaping path, or a missing
+    file — mirroring `read_skill`'s by-name error contract.
+    """
+    entry = _index.get(name)
+    if entry is None:
+        return f"error: no skill named {name!r}"
+    skill_dir = Path(entry.path).parent.resolve()
+    resolved = (skill_dir / rel_path).resolve()
+    if not resolved.is_relative_to(skill_dir):
+        return f"error: path {rel_path!r} escapes skill {name!r} directory"
+    if not resolved.is_file():
+        return f"error: file {rel_path!r} not found in skill {name!r}"
+    return resolved.read_text(encoding="utf-8")
+
+
 def list_skills() -> list[dict[str, str]]:
     """Return all skills as [{"name": ..., "description": ...}]."""
     return [{"name": name, "description": entry.description} for name, entry in _index.items()]
+
+
+def query_skills(
+    keyword: str | None = None,
+    category: str | None = None,
+    include_disabled: bool = False,
+) -> list[dict[str, str]]:
+    """Query the index, returning [{"name","description"}] for eligible skills (agent-skill-tools).
+
+    The on-demand query face that complements the always-injected catalog (read on
+    demand when the catalog is capped/truncated or to filter by topic). `keyword` is a
+    case-insensitive substring matched against name, description, OR any tag; `category`
+    is matched against tags (fleetent skills have no dedicated category field — a
+    category is a tag). Both omitted returns every eligible skill. Disabled / audit-
+    blocked skills are excluded by default (the same `_disabled_reason` eligibility the
+    catalog uses, with no operator force-disable set applied here), so a skill the model
+    must not see never surfaces. Only name + description are returned — never the body.
+    """
+    kw = keyword.lower() if keyword else None
+    cat = category.lower() if category else None
+    result: list[dict[str, str]] = []
+    for name, entry in _index.items():
+        if not include_disabled and _disabled_reason(name, entry, set()) is not None:
+            continue
+        tags_lower = [t.lower() for t in entry.tags]
+        if kw is not None and not any(
+            kw in hay for hay in (name.lower(), entry.description.lower(), *tags_lower)
+        ):
+            continue
+        if cat is not None and cat not in tags_lower:
+            continue
+        result.append({"name": name, "description": entry.description})
+    return result
 
 
 class SkillIndex:

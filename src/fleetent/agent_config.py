@@ -384,6 +384,10 @@ class AgentFile(BaseModel):
     memory_namespace: str = ""
     skills_dir: str | None = None
     allowed_skills: list[str] = Field(default_factory=list)
+    # agent-skill-tools: gate for the model-facing skill_manage authoring tool.
+    # Default off — skill_manage only enters this agent's tool schema when explicitly
+    # enabled, so a deployment opts into agent-driven skill writes deliberately.
+    skill_authoring_enabled: bool = False
     allowed_tools: list[str] = Field(default_factory=list)
     plugins: list[str] = Field(default_factory=list)
     features: dict[str, Any] = Field(default_factory=dict)
