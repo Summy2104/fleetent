@@ -41,4 +41,18 @@ describe('admin routes', () => {
       '/admin/ui-legacy#providers'
     );
   });
+
+  it('renders sessions as a native route in the SPA', async () => {
+    server.use(
+      http.get('http://fleetent.test/admin/me', () =>
+        HttpResponse.json({ email: 'admin@fleetent.test', id: 'admin-1', role: 'admin' })
+      ),
+      http.get('http://fleetent.test/admin/sessions', () => HttpResponse.json([]))
+    );
+
+    renderRoutes('/sessions', 'session-token');
+
+    expect(await screen.findByRole('heading', { name: 'Sessions' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Sessions' })).toHaveAttribute('href', '/sessions');
+  });
 });

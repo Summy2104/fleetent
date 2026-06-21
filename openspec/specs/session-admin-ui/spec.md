@@ -1,26 +1,34 @@
 # session-admin-ui Specification
 
 ## Purpose
-TBD - created by syncing change add-admin-console-modules. Update Purpose after archive.
+Define the native React SPA requirements for session administration: browsing session lists and
+details, and performing governed session operations without relying on the legacy admin console.
 ## Requirements
-### Requirement: Sessions tab
-The admin console SHALL present a Sessions tab listing sessions from `GET /admin/sessions` and letting an admin open a session's detail.
+### Requirement: Sessions managed natively in the React SPA
+The React admin SPA SHALL render the sessions domain natively (not a deep-link to legacy): list
+sessions, open a session's detail, and perform governance actions against the existing admin API
+including takeover, release, inject, force-end, clear, reset, and batch actions. High-risk actions
+(force-end / clear / reset / batch) SHALL require a second confirmation. Write actions SHALL be
+admin-only; viewers are read-only. No chat playground is provided.
 
-#### Scenario: Admin sees sessions list
-- **WHEN** an admin opens the Sessions tab
+#### Scenario: List sessions and open detail
+- **WHEN** an admin opens the sessions view
 - **THEN** sessions are listed via `GET /admin/sessions`
+- **AND** opening a session calls `GET /admin/sessions/{session_id}` for detail
 
-#### Scenario: Viewer cannot control sessions
-- **WHEN** a viewer opens the Sessions tab
-- **THEN** takeover / release / inject / force-end / clear / reset controls are hidden
+#### Scenario: Governance action with confirmation
+- **WHEN** an admin force-ends, clears, or resets a session and confirms the second prompt
+- **THEN** the SPA calls the matching endpoint (`POST /admin/sessions/{session_id}/force-end`,
+  `/clear`, or `/reset`)
+- **AND** the session reflects the change
 
-### Requirement: Session control actions
-The console SHALL let an admin take over, release, inject a message, force-end, clear, and reset a session, calling the matching endpoints.
+#### Scenario: Viewer is read-only
+- **WHEN** a viewer opens the sessions view
+- **THEN** governance write controls (takeover / inject / force-end / clear / reset / batch) are
+  hidden or denied
+- **AND** the viewer can only browse
 
-#### Scenario: Take over a session
-- **WHEN** an admin takes over a session
-- **THEN** the console calls `POST /admin/sessions/{session_id}/takeover`
-
-#### Scenario: Force-end a session
-- **WHEN** an admin force-ends a session
-- **THEN** the console calls `POST /admin/sessions/{session_id}/force-end`
+#### Scenario: Sessions no longer deep-link to legacy
+- **WHEN** the SPA navigation is rendered
+- **THEN** sessions is a native route
+- **AND** sessions is not an entry in the legacy deep-link list

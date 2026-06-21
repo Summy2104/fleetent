@@ -3,6 +3,7 @@ import { Navigate, NavLink, Route, Routes, useNavigate } from 'react-router-dom'
 
 import { useAuthSession } from '@/app/auth';
 import { AgentsPage } from '@/features/agents/page';
+import { SessionsPage } from '@/features/sessions/page';
 
 const legacyLinks = [
   { href: '/admin/ui-legacy#providers', label: 'Providers' },
@@ -96,6 +97,17 @@ function AppLayout(): JSX.Element {
             >
               Agents
             </NavLink>
+            <NavLink
+              className={({ isActive }) =>
+                [
+                  'block rounded-xl px-4 py-3 text-sm font-medium transition-colors',
+                  isActive ? 'bg-primary text-primary-foreground' : 'bg-secondary/80 text-foreground',
+                ].join(' ')
+              }
+              to="/sessions"
+            >
+              Sessions
+            </NavLink>
             {legacyLinks.map((item) => (
               <a
                 className="block rounded-xl bg-secondary/50 px-4 py-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
@@ -112,6 +124,10 @@ function AppLayout(): JSX.Element {
             <Route
               element={<AgentsPage />}
               path="/agents"
+            />
+            <Route
+              element={<SessionsPage />}
+              path="/sessions"
             />
             <Route
               element={
