@@ -57,10 +57,14 @@ node IM-edge: drain 队列 → connector 投递到各渠道
 
 ## 切片建议
 
-1. **directed-reach 原语（平台/node 侧）**：`resolve_user_addresses(user_id)` 反查 `im_users` + 全发 fan-out 进 `im_outbound_queue`；无绑定→不投递+日志。纯出站方向、复用既有队列。
-2. **agent 侧 intent 出口**：`notify_user(user_id, message)` —— agent 产生意图，经 forwarder/node 交平台解析投递；dev agent-run 降级 no-op。
-3. **A4b 接入**：reflection 的 user-memory 提案（`reflection_user_memory_proposal` 路由，A4a 已落地）改为经 directed-reach 通知 `proposal.user_id` 本人；回复经既有审批链关联回提案。
-4. （后续/可选）降噪：per-agent 平台优先序；可达性可观测（送达/未达指标）。
+**A4b 一个 change 搞定**（下列 1-3 合一）。它们彼此**不是独立可发布的**——原语单独落地是死代码（无调用方）、agent intent 单独落地没人消费——只有三者一起才真正"提案送到本人"，拆开只制造"先建死代码再接线"的 churn。故合为一个 change：
+
+1. **directed-reach 原语**：`resolve_user_addresses(user_id)` 反查 `im_users` + 全发 fan-out 进 `im_outbound_queue`；无绑定→不投递+日志。
+2. **agent 侧 intent 出口**：`notify_user(user_id, message)` —— agent 入队 user_id-目标意图；node drain 时反查+投递；dev agent-run 降级 no-op。
+3. **A4b 接入**：reflection 的 user-memory 提案（`reflection_user_memory_proposal` 路由，A4a 已落地）经 directed-reach 通知 `proposal.user_id` 本人；回复经既有审批链关联回提案。
+
+**单独/deferred**：
+4. 降噪 per-agent 平台优先序 + 可达性可观测（送达/未达指标）—— opt-in 优化，A4b 不需要它即可工作。
 
 ## 关联与现状
 
