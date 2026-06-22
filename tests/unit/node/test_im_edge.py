@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
-import respx
 import httpx
+import respx
 
 from fleetent.node.config import NodeConfig
 from fleetent.node.provider import DesiredAgent, DesiredState
@@ -169,3 +167,71 @@ async def test_node_im_edge_host_forwards_managed_reply_back_to_connector(tmp_pa
         host.close()
 
     assert replies == ["managed reply"]
+
+
+async def test_node_im_edge_host_intercepts_link_command_before_forwarding(tmp_path) -> None:
+    from fleetent.im_gateway.normalizer import NormalizedMessage, SessionContext
+    from fleetent.node.im_edge import NodeIMEdgeHost
+
+    class FakeBackend:
+        def gateway_port(self, agent_name: str) -> int | None:
+            raise AssertionError(f"/link must not reach agent gateway for {agent_name}")
+
+    dispatcher_holder: list[object] = []
+    replies: list[str] = []
+    host = NodeIMEdgeHost(
+        _config(tmp_path),
+        backend=FakeBackend(),
+        dispatcher_setter=lambda fn: dispatcher_holder.append(fn),
+    )
+
+    async def fake_reply(text: str, blocks=None) -> None:
+        replies.append(text)
+
+    msg = NormalizedMessage(
+        platform="telegram",
+        session_id="session-1",
+        user_id="u-standalone",
+        text="/link abc123",
+        attachments=[],
+        reply_func=fake_reply,
+        agent_name="support",
+        session_context=SessionContext(
+            platform="telegram",
+            sender_id="424242",
+            sender_name="Alice",
+            chat_type="dm",
+            channel_name="424242",
+            was_mentioned=False,
+            thread_root="",
+        ),
+    )
+
+    requests: list[httpx.Request] = []
+    transport = httpx.MockTransport(
+        lambda request: (
+            requests.append(request),
+            httpx.Response(
+                200, json={"status": "linked", "user_id": "user-42", "tenant_id": "tenant-1"}
+            ),
+        )[1]
+    )
+    original_async_client = httpx.AsyncClient
+
+    class FakeAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs) -> None:
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    httpx.AsyncClient = FakeAsyncClient
+    try:
+        dispatcher = dispatcher_holder[-1]
+        assert callable(dispatcher)
+        await dispatcher(msg)
+    finally:
+        httpx.AsyncClient = original_async_client
+        host.close()
+
+    assert replies == ["Linked telegram account to your web identity."]
+    assert len(requests) == 1
+    assert requests[0].url.path == "/nodes/node-a/link-confirm"

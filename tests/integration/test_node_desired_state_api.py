@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import datetime
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -353,6 +354,117 @@ def test_post_identity_resolve_rejects_node_key_for_other_node(node_client: Test
     )
 
     assert response.status_code == 403
+
+
+def test_post_link_confirm_attaches_pending_identity_and_writes_audit(
+    node_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleetent.platform.im_gateway_management.pending_link_store import PendingLinkStore
+    from fleetent.platform.node_management import node_desired_state_api, node_store
+    from fleetent.platform.tenancy import store as tenancy_store
+
+    tenancy_store.create_tenant(id="tenant-1", name="Tenant 1")
+    user, _ = user_store.create_user("Alice", email="alice@example.com", tenant_id="tenant-1")
+    store = PendingLinkStore(ttl=datetime.timedelta(minutes=10))
+    store.put("link-code", user_id=user.id, tenant_id="tenant-1")
+    monkeypatch.setattr(node_desired_state_api, "_pending_links", store)
+    audits: list[tuple[object, ...]] = []
+    monkeypatch.setattr(
+        node_desired_state_api.audit_log, "write_audit", lambda *args, **kwargs: audits.append(args)
+    )
+    node_key, _ = node_store.register_node("node-a")
+
+    response = node_client.post(
+        "/nodes/node-a/link-confirm",
+        headers={"Authorization": f"Bearer {node_key}"},
+        json={
+            "platform": "telegram",
+            "platform_user_id": "424242",
+            "code": "link-code",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["user_id"] == user.id
+    assert audits
+
+
+def test_post_link_confirm_rejects_invalid_code(node_client: TestClient) -> None:
+    from fleetent.platform.node_management import node_store
+
+    node_key, _ = node_store.register_node("node-a")
+    response = node_client.post(
+        "/nodes/node-a/link-confirm",
+        headers={"Authorization": f"Bearer {node_key}"},
+        json={
+            "platform": "telegram",
+            "platform_user_id": "424242",
+            "code": "missing",
+        },
+    )
+
+    assert response.status_code == 404
+
+
+def test_post_link_confirm_rejects_attach_only_conflict(
+    node_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleetent.platform.im_gateway_management import identity as im_identity
+    from fleetent.platform.im_gateway_management.pending_link_store import PendingLinkStore
+    from fleetent.platform.node_management import node_desired_state_api, node_store
+    from fleetent.platform.tenancy import store as tenancy_store
+
+    tenancy_store.create_tenant(id="tenant-1", name="Tenant 1")
+    mapped = im_identity.get_or_create("telegram", "424242", "tenant-1")
+    target, _ = user_store.create_user("Bob", email="bob@example.com", tenant_id="tenant-1")
+    assert mapped.id != target.id
+    store = PendingLinkStore(ttl=datetime.timedelta(minutes=10))
+    store.put("link-code", user_id=target.id, tenant_id="tenant-1")
+    monkeypatch.setattr(node_desired_state_api, "_pending_links", store)
+    node_key, _ = node_store.register_node("node-a")
+
+    response = node_client.post(
+        "/nodes/node-a/link-confirm",
+        headers={"Authorization": f"Bearer {node_key}"},
+        json={
+            "platform": "telegram",
+            "platform_user_id": "424242",
+            "code": "link-code",
+        },
+    )
+
+    assert response.status_code == 409
+
+
+@pytest.mark.parametrize(
+    ("authorization", "expected_status"),
+    [
+        (None, 401),
+        ("Bearer ma-" + "0" * 64, 401),
+    ],
+)
+def test_post_link_confirm_rejects_missing_or_invalid_node_key(
+    node_client: TestClient,
+    authorization: str | None,
+    expected_status: int,
+) -> None:
+    from fleetent.platform.node_management import node_store
+
+    node_store.register_node("node-a")
+    headers = {} if authorization is None else {"Authorization": authorization}
+    response = node_client.post(
+        "/nodes/node-a/link-confirm",
+        headers=headers,
+        json={
+            "platform": "telegram",
+            "platform_user_id": "424242",
+            "code": "missing",
+        },
+    )
+
+    assert response.status_code == expected_status
 
 
 def test_post_status_enforces_node_auth_scope(node_client: TestClient) -> None:

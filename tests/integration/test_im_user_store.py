@@ -169,6 +169,15 @@ def test_rebind_unknown_identity_raises(db):
         im_user_store.rebind_im_identity(999999, target.id)
 
 
+def test_unlink_identity_deletes_mapping_and_is_idempotent(db):
+    user = im_user_store.get_or_create("telegram", "424242", "default")
+
+    im_user_store.unlink_identity("telegram", "424242")
+    im_user_store.unlink_identity("telegram", "424242")
+
+    assert im_user_store.list_im_identities(user.id) == []
+
+
 def test_unique_constraint(db):
     im_user_store.get_or_create("slack", "U123", "default")
     im_user_store.get_or_create("slack", "U123", "default")

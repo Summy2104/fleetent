@@ -71,6 +71,10 @@ def _get_mapped_user(platform: str, platform_user_id: str) -> User | None:
     return user
 
 
+def get_mapped_user(platform: str, platform_user_id: str) -> User | None:
+    return _get_mapped_user(platform, platform_user_id)
+
+
 def _attach_identity(platform: str, platform_user_id: str, user_id: str) -> User:
     now = datetime.datetime.now(datetime.UTC).isoformat()
     with _conn() as conn:
@@ -98,6 +102,10 @@ def _attach_identity(platform: str, platform_user_id: str, user_id: str) -> User
     existing = get_by_id(row[0])
     assert existing is not None
     return existing
+
+
+def attach_identity(platform: str, platform_user_id: str, user_id: str) -> User:
+    return _attach_identity(platform, platform_user_id, user_id)
 
 
 def resolve_or_provision(
@@ -353,6 +361,16 @@ def delete_im_identity(im_user_id: int, actor: str | None = None) -> None:
         target_type="im_user",
         target_id=str(im_user_id),
     )
+
+
+def unlink_identity(platform: str, platform_user_id: str) -> None:
+    """Delete one platform identity mapping if it exists."""
+    with _conn() as conn:
+        conn.execute(
+            """DELETE FROM im_users
+               WHERE platform = :platform AND platform_user_id = :puid""",
+            {"platform": platform, "puid": platform_user_id},
+        )
 
 
 def list_im_identities(user_id: str) -> list[dict[str, Any]]:

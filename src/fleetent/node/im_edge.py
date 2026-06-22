@@ -24,6 +24,16 @@ from fleetent.node.config import NodeConfig
 from fleetent.node.provider import DesiredState
 
 
+def _extract_link_code(text: str) -> str | None:
+    stripped = text.strip()
+    if not stripped.startswith("/link"):
+        return None
+    parts = stripped.split(maxsplit=1)
+    if len(parts) != 2 or not parts[1].strip():
+        return None
+    return parts[1].strip()
+
+
 class PlatformIdentityResolver:
     """Resolve IM identities for node-hosted connectors via the platform node API."""
 
@@ -253,6 +263,10 @@ class NodeIMEdgeHost:
         tmp.replace(self._dedup_path)
 
     async def _forward_inbound(self, msg: NormalizedMessage) -> None:
+        link_code = _extract_link_code(msg.text)
+        if link_code is not None:
+            await self._handle_link_command(msg, link_code)
+            return
         if self._backend is None:
             raise RuntimeError("node IM dispatcher requires a backend")
         port = self._backend.gateway_port(msg.agent_name)
@@ -275,6 +289,34 @@ class NodeIMEdgeHost:
         payload = dict(response.json())
         for reply in payload.get("replies", []):
             await _emit_reply(msg, dict(reply))
+
+    async def _handle_link_command(self, msg: NormalizedMessage, code: str) -> None:
+        sender_id = ""
+        if msg.session_context is not None:
+            sender_id = msg.session_context.sender_id
+        if not sender_id:
+            await msg.reply_func("Link failed: missing sender identity.")
+            return
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{self._config.platform_url}/nodes/{self._config.node_id}/link-confirm",
+                headers={"Authorization": f"Bearer {self._config.service_key}"},
+                json={
+                    "platform": msg.platform,
+                    "platform_user_id": sender_id,
+                    "code": code,
+                },
+            )
+        if response.status_code == 200:
+            await msg.reply_func(f"Linked {msg.platform} account to your web identity.")
+            return
+        detail = "Link failed."
+        with contextlib.suppress(Exception):
+            payload = dict(response.json())
+            raw_detail = payload.get("detail")
+            if isinstance(raw_detail, str) and raw_detail:
+                detail = f"Link failed: {raw_detail}"
+        await msg.reply_func(detail)
 
 
 def _materialize_slack_binding(
