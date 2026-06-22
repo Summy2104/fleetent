@@ -1,18 +1,18 @@
 ## 1. 配置解析:标准 map + x-fleetent(替代 list-of-id)
 
-- [ ] 1.1 写测试:`mcpServers`/`mcp_servers` map 解析、transport 自动判定(command→stdio / url→remote)、`${VAR}` 引用、`x-fleetent` 字段、legacy list 被拒(见红)
-- [ ] 1.2 实现 `config.py`:`McpServerSettings` 改 map-keyed + 新增 `XFleetentExt`(degrade_mode/file_root/file_isolation/auth/approval_rules);解析两种顶层 key + transport 自动判定 + `${VAR}`(见绿)
-- [ ] 1.3 写测试:`agent_config.AgentFile` 读 agent.yaml 新外形 + 序列化 round-trip(红)
-- [ ] 1.4 实现 `agent_config.py` 的 `mcp_servers` 新外形解析/序列化(绿)
-- [ ] 1.5 写测试:`McpServerSettings`→`McpServerConfig` 映射(map key→`id`、`x-fleetent.*`→对应字段;`McpServerConfig` 契约不变)(红)
-- [ ] 1.6 实现映射层(绿)
+- [x] 1.1 写测试:`mcpServers`/`mcp_servers` map 解析、transport 自动判定(command→stdio / url→remote)、`${VAR}` 引用、`x-fleetent` 字段、legacy list 被拒(见红)
+- [x] 1.2 实现 `config.py`:`McpServerSettings` 改 map-keyed + 新增 `XFleetentExt`(degrade_mode/file_root/file_isolation/auth/approval_rules);解析两种顶层 key + transport 自动判定 + `${VAR}`(见绿)
+- [x] 1.3 写测试:`agent_config.AgentFile` 读 agent.yaml 新外形 + 序列化 round-trip(红)
+- [x] 1.4 实现 `agent_config.py` 的 `mcp_servers` 新外形解析/序列化(绿)
+- [x] 1.5 写测试:`McpServerSettings`→`McpServerConfig` 映射(map key→`id`、`x-fleetent.*`→对应字段;`McpServerConfig` 契约不变)(红)
+- [x] 1.6 实现映射层(绿)
 
 ## 2. 工具名投影引擎(声明式模板)
 
-- [ ] 2.1 写测试:投影引擎——预设 `claude`/`hermes`/`opencode`/`skills`/`bare`、自定义 `template`、`sanitize`、`max_len`、默认 `claude`(红)
-- [ ] 2.2 实现新模块 `integrations/mcp/tool_naming.py`(模板渲染引擎,平台无关)(绿)
-- [ ] 2.3 写测试:`McpSettings.tool_naming` 配置解析(预设词 与 `{template, sanitize, max_len}` 两种形态)(红)
-- [ ] 2.4 实现 `McpSettings` 增加 `tool_naming` 字段(绿)
+- [x] 2.1 写测试:投影引擎——预设 `claude`/`hermes`/`opencode`/`skills`/`bare`、自定义 `template`、`sanitize`、`max_len`、默认 `claude`(红)
+- [x] 2.2 实现新模块 `integrations/mcp/tool_naming.py`(模板渲染引擎,平台无关)(绿)
+- [x] 2.3 写测试:`McpSettings.tool_naming` 配置解析(预设词 与 `{template, sanitize, max_len}` 两种形态)(红)
+- [x] 2.4 实现 `McpSettings` 增加 `tool_naming` 字段(绿)
 
 ## 3. 投影接入 + canonical 元数据 + 审批加固(安全核心)
 

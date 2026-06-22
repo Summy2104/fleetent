@@ -309,23 +309,7 @@ async def _start_infra(
         from fleetent.integrations import mcp as mcp_client
         from fleetent.integrations.mcp.client import McpServerConfig
 
-        configs = [
-            McpServerConfig(
-                id=s.id,
-                transport=s.transport,
-                url=s.url,
-                auth_type=s.auth_type,
-                api_key_env=s.api_key_env,
-                command=s.command,
-                args=list(s.args),
-                env=dict(s.env),
-                headers=dict(s.headers),
-                connect_timeout=s.connect_timeout,
-                call_timeout=s.call_timeout,
-                approval_rules=list(s.approval_rules),
-            )
-            for s in agent.mcp_servers
-        ]
+        configs = [McpServerConfig.from_settings(s) for s in agent.mcp_servers]
         try:
             # unified-file-exchange: the agent home (data_dir's parent) anchors each
             # stdio server's /exchange partition tree (cwd + XDG injection + root binding).

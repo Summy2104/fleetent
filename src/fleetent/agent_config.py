@@ -384,6 +384,21 @@ class AgentFile(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_mcp_servers(cls, data: Any) -> Any:
+        """Convert the standard map-keyed ``mcpServers``/``mcp_servers`` block into the
+        internal ``mcp_servers`` list. Rejects the legacy list-of-id form. Keeps ``${VAR}``
+        references intact (resolved at request time) so the inline-secret guard sees refs."""
+        if isinstance(data, dict) and ("mcpServers" in data or "mcp_servers" in data):
+            from fleetent.config import parse_mcp_servers
+
+            data = dict(data)
+            servers = parse_mcp_servers(data, expand_env=False)
+            data.pop("mcpServers", None)
+            data["mcp_servers"] = servers
+        return data
+
     name: str
     version: int
     tenant_id: str = "default"
@@ -607,7 +622,8 @@ def _is_env_reference(key: str, value: str) -> bool:
     # secrets can live in .env and be referenced without being flagged as inline secrets.
     if value.startswith("env:"):
         return _ENV_VAR_NAME_RE.fullmatch(value) is not None
-    return False
+    # Allow standard ${VAR} references (mcp-config-standardization); resolved at request time.
+    return "${" in value and "}" in value
 
 
 def _is_secret_reference_key(key: str) -> bool:

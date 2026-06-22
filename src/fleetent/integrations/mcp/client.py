@@ -150,6 +150,46 @@ class McpServerConfig:
     def __post_init__(self) -> None:
         _validate_degrade_mode(self)
 
+    @classmethod
+    def from_settings(cls, s: Any) -> McpServerConfig:
+        """Build a runtime config from an ``McpServerSettings``-like object (duck-typed).
+
+        Hoists the agent.yaml ``x-fleetent`` extensions (degrade_mode / file_root /
+        file_isolation / self-hosted OAuth / approval_rules) onto the runtime config.
+        Duck-typed on attributes so this module need not import ``fleetent.config``.
+        """
+        auth = getattr(s, "auth", None)
+        if auth is not None:
+            auth_type = getattr(auth, "type", "oauth2") or "oauth2"
+            token_url = getattr(auth, "token_url", "")
+            client_id = getattr(auth, "client_id", "")
+            client_secret_env = getattr(auth, "client_secret_env", "")
+            scope = getattr(auth, "scope", "")
+        else:
+            auth_type = getattr(s, "auth_type", "none")
+            token_url = client_id = client_secret_env = scope = ""
+        return cls(
+            id=s.id,
+            transport=s.transport,
+            url=getattr(s, "url", ""),
+            auth_type=auth_type,
+            api_key_env=getattr(s, "api_key_env", ""),
+            token_url=token_url,
+            client_id=client_id,
+            client_secret_env=client_secret_env,
+            scope=scope,
+            command=getattr(s, "command", ""),
+            args=list(getattr(s, "args", []) or []),
+            env=dict(getattr(s, "env", {}) or {}),
+            headers=dict(getattr(s, "headers", {}) or {}),
+            connect_timeout=getattr(s, "connect_timeout", 10.0),
+            call_timeout=getattr(s, "call_timeout", 30.0),
+            degrade_mode=getattr(s, "degrade_mode", "degrade"),
+            file_root=getattr(s, "file_root", ""),
+            file_isolation=getattr(s, "file_isolation", "on"),
+            approval_rules=list(getattr(s, "approval_rules", []) or []),
+        )
+
 
 _VALID_DEGRADE_MODES = ("degrade", "strict", "silent")
 
