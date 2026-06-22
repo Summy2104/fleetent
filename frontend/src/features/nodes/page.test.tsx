@@ -28,6 +28,41 @@ afterEach(() => {
 });
 
 describe('nodes page', () => {
+  it('loads already-pinned agents from the backend on mount', async () => {
+    const nodes = [
+      {
+        id: 'node-a',
+        labels: {},
+        last_seen_at: null,
+        name: 'Node A',
+        registered_at: '2026-06-21T09:00:00Z',
+      },
+    ];
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/nodes`, () => HttpResponse.json(nodes)),
+      http.get(`${API_BASE_URL}/admin/agents`, () => HttpResponse.json([])),
+      http.get(`${API_BASE_URL}/admin/nodes/node-a/placements`, () =>
+        HttpResponse.json([
+          {
+            agent_id: 7,
+            agent_name: 'alpha',
+            node_id: 'node-a',
+            pinned_at: '2026-06-21T11:10:00Z',
+            pinned_by: null,
+            updated_at: '2026-06-21T11:10:00Z',
+          },
+        ])
+      )
+    );
+
+    renderPage();
+
+    const nodeACard = await screen.findByRole('article', { name: 'node node-a' });
+    expect(await within(nodeACard).findByText('Pinned agents')).toBeInTheDocument();
+    expect(within(nodeACard).getByText('alpha')).toBeInTheDocument();
+  });
+
   it('renders nodes and supports register, delete confirmation, and pin or unpin flows', async () => {
     const user = userEvent.setup({ delay: null });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
@@ -56,12 +91,26 @@ describe('nodes page', () => {
       },
     ];
 
+    let placementsByNode: Record<string, Array<{ agent_id: number; agent_name: string }>> = {};
+
     server.use(
       http.get(`${API_BASE_URL}/admin/nodes`, () => HttpResponse.json(nodes)),
       http.get(`${API_BASE_URL}/admin/agents`, ({ request }) => {
         expect(new URL(request.url).searchParams.get('include_archived')).toBe('true');
         return HttpResponse.json(agents);
       }),
+      http.get(`${API_BASE_URL}/admin/nodes/:nodeId/placements`, ({ params }) =>
+        HttpResponse.json(
+          (placementsByNode[params.nodeId as string] ?? []).map((placement) => ({
+            agent_id: placement.agent_id,
+            agent_name: placement.agent_name,
+            node_id: params.nodeId,
+            pinned_at: '2026-06-21T11:10:00Z',
+            pinned_by: null,
+            updated_at: '2026-06-21T11:10:00Z',
+          }))
+        )
+      ),
       http.post(`${API_BASE_URL}/admin/nodes`, async ({ request }) => {
         const body = (await request.json()) as {
           labels: Record<string, string>;
@@ -88,6 +137,7 @@ describe('nodes page', () => {
       }),
       http.post(`${API_BASE_URL}/admin/nodes/node-a/pin`, async ({ request }) => {
         expect(await request.json()).toEqual({ agent_id: 7 });
+        placementsByNode = { ...placementsByNode, 'node-a': [{ agent_id: 7, agent_name: 'alpha' }] };
         return HttpResponse.json({
           agent_id: 7,
           node_id: 'node-a',
@@ -98,6 +148,7 @@ describe('nodes page', () => {
       }),
       http.delete(`${API_BASE_URL}/admin/nodes/node-a/pin`, ({ request }) => {
         expect(new URL(request.url).searchParams.get('agent_id')).toBe('7');
+        placementsByNode = { ...placementsByNode, 'node-a': [] };
         return new HttpResponse(null, { status: 204 });
       }),
       http.delete(`${API_BASE_URL}/admin/nodes/node-b`, ({ request }) => {
