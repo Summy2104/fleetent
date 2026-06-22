@@ -155,6 +155,20 @@ def _filter_code_execution(
     return [s for s in schemas if s["function"]["name"] != _RUN_CODE_TOOL]
 
 
+def _maybe_refresh_skills(enabled: bool) -> None:
+    """Reload skills if their files changed on disk, when hot-reload is enabled.
+
+    skill-external-hot-reload: called once per inbound message before catalog injection
+    so external skill changes take effect without a restart. Gated by the per-agent
+    ``skill_hot_reload`` flag (default on); a no-op (and cheap) when nothing changed.
+    """
+    if not enabled:
+        return
+    from fleetent.skills import registry as skill_registry
+
+    skill_registry.refresh_if_changed()
+
+
 _SKILL_MANAGE_TOOL = "skill_manage"
 
 
@@ -1071,6 +1085,56 @@ def _budget_add(usage: BudgetUsage, response_usage: Any) -> None:
         prompt if isinstance(prompt, int) else 0,
         completion if isinstance(completion, int) else 0,
     )
+
+
+def _last_tool_error(messages: list[Any]) -> str | None:
+    """The most recent tool-result content (normalized, truncated), or None.
+
+    Used to surface what the run was stuck on when an abnormal stop leaves no reply.
+    """
+    for message in reversed(messages):
+        if isinstance(message, dict) and message.get("role") == "tool":
+            content = message.get("content")
+            if isinstance(content, str) and content.strip():
+                return " ".join(content.split())[:200]
+    return None
+
+
+def _terminal_status_reply(stop_reason: StopReason, messages: list[Any]) -> str | None:
+    """A user-facing status line for an abnormal terminal stop, or None.
+
+    None for stops that already deliver their own reply (normal; budget_exceeded has a Grace
+    Call; awaiting_approval already sent its prompt; mcp_strict_unavailable returned its own
+    error up front). For loop_detected / consecutive_failures the last tool feedback/error is
+    appended so the user sees what blocked progress.
+    """
+    prefix = {
+        StopReason.loop_detected: "我在重复调用同一个工具但没有进展，已停止以免空转。",
+        StopReason.consecutive_failures: "连续多次工具调用失败，已停止。",
+        StopReason.approval_rejected: "操作未获批准，已取消。",
+        StopReason.cancelled: "任务已取消。",
+    }.get(stop_reason)
+    if prefix is None:
+        return None
+    if stop_reason in (StopReason.loop_detected, StopReason.consecutive_failures):
+        error = _last_tool_error(messages)
+        if error:
+            return (
+                f"{prefix}最后一步的反馈：「{error}」。"
+                "请换个方式或补充必要信息（如正确的参数 / ID）。"
+            )
+    return prefix
+
+
+def _finalize_reply(reply: str, stop_reason: StopReason, messages: list[Any]) -> str:
+    """Return the reply, substituting a terminal status when an abnormal stop left it empty.
+
+    Keeps a non-empty reply unchanged; only an abnormal stop with a blank reply (which the
+    empty-reply guard would otherwise drop, leaving the user with silence) is replaced.
+    """
+    if (reply or "").strip():
+        return reply
+    return _terminal_status_reply(stop_reason, messages) or reply
 
 
 async def _grace_call(
@@ -2115,6 +2179,9 @@ async def _run_inner(
             budget_config.max_tokens,
             reply,
         )
+    # Never end an abnormal stop in silence: an empty reply on loop_detected /
+    # consecutive_failures / cancelled / approval_rejected becomes a user-facing status.
+    reply = _finalize_reply(reply, stop_reason, messages)
     usage = response.usage if response else None
     user_input = _first_user_input(messages)
     _save_flap_state(session_id, flap_state)
@@ -2299,6 +2366,7 @@ async def run_stream(
     model_policy: ModelPolicySnapshot | None = None,
     session_context: Any = None,
     skill_authoring_enabled: bool = False,
+    skill_hot_reload: bool = True,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Async streaming version of run(). Yields SSE event dicts.
 
@@ -2317,6 +2385,8 @@ async def run_stream(
     """
     user_id = principal.user_id if principal is not None else "default"
 
+    # skill-external-hot-reload: reload externally-changed skills before catalog injection.
+    _maybe_refresh_skills(skill_hot_reload)
     # agent-skill-scoping: narrow the catalog to the agent's allowed_skills (empty /
     # None = no narrowing, all enabled skills visible).
     skills_catalog = available_skills_prompt(
@@ -2856,6 +2926,13 @@ async def run_stream(
                 reply = partial_reply
                 if partial_reply:
                     yield {"type": "text_delta", "content": partial_reply}
+
+    # Never end an abnormal stop in silence: substitute a user-facing status for an empty
+    # reply and stream it as a delta so it reaches the final output (parity with run()).
+    _finalized = _finalize_reply(reply, stop_reason, messages)
+    if _finalized != reply:
+        reply = _finalized
+        yield {"type": "text_delta", "content": reply}
 
     reply = await _apply_output_transform(reply, governance, session_id, agent_name, user_id)
     # delivery-receipts (§3): after the stream, append the fact trailer as a final delta

@@ -3,6 +3,7 @@
 import os
 import shutil
 import tempfile
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -60,6 +61,17 @@ class SkillEntry:
 
 _index: dict[str, SkillEntry] = {}
 _last_skills_dir: str | None = None
+
+# Lightweight fingerprint of the user skills root (skill-external-hot-reload): maps each
+# SKILL.md relative path -> (st_mtime_ns, st_size). Maintained in lockstep with `_index`
+# by scan()/reload() so `refresh_if_changed` has a baseline matching the indexed state.
+# Used only to decide *whether* to trigger reload(); never changes reload's scan scope.
+_manifest: dict[str, tuple[int, int]] = {}
+
+# Guards the compare-and-reload critical section in refresh_if_changed against concurrent
+# inbound messages (reload() itself is atomic; this just avoids redundant work / a torn
+# _manifest read-modify-write).
+_refresh_lock = threading.Lock()
 
 # Skills skipped during the last scan() because their SKILL.md could not be parsed.
 # A malformed skill is isolated (skipped, never crashes the scan) but recorded here
@@ -155,6 +167,32 @@ def _build_index(
     return index
 
 
+def _build_manifest(skills_dir: str | None = None) -> dict[str, tuple[int, int]]:
+    """Fingerprint the user skills root by stat-ing each SKILL.md (skill-external-hot-reload).
+
+    Returns ``{relpath: (st_mtime_ns, st_size)}`` over SKILL.md files under the user root.
+    Metadata only — never reads or parses file content — so it is cheap enough to run on
+    every inbound message. Covers the user root only (where runtime skill changes happen);
+    the package builtin dir does not change at runtime. A missing root yields ``{}``.
+    """
+    root = Path(_resolve_skills_dir(skills_dir))
+    manifest: dict[str, tuple[int, int]] = {}
+    if not root.is_dir():
+        return manifest
+    for dirpath, _dirs, files in os.walk(root, followlinks=True):
+        if "SKILL.md" not in files:
+            continue
+        p = Path(dirpath) / "SKILL.md"
+        try:
+            st = p.stat()
+        except OSError:
+            # A file vanishing mid-walk (concurrent delete) just changes the fingerprint;
+            # skip it rather than crash — the next pass reflects the settled state.
+            continue
+        manifest[str(p.relative_to(root))] = (st.st_mtime_ns, st.st_size)
+    return manifest
+
+
 def scan(skills_dir: str | None = None) -> None:
     """Scan platform builtin and user skills directories, building name → SkillEntry.
 
@@ -170,6 +208,9 @@ def scan(skills_dir: str | None = None) -> None:
     _last_skills_dir = _resolve_skills_dir(skills_dir)
     _index.clear()
     _index.update(new_index)
+    # Refresh the hot-reload fingerprint in lockstep with the index (skill-external-hot-reload).
+    _manifest.clear()
+    _manifest.update(_build_manifest(_last_skills_dir))
     _load_errors.clear()
     _load_errors.extend(new_errors)
     # Emit the summary only when something failed: a clean scan stays silent (the
@@ -177,6 +218,30 @@ def scan(skills_dir: str | None = None) -> None:
     # only one logged. Counts also available structured via load_errors().
     if _load_errors:
         logger.warning("skill_scan_complete", loaded=len(_index), failed=len(_load_errors))
+
+
+def refresh_if_changed(skills_dir: str | None = None) -> bool:
+    """Reload the index iff the user skills root changed since it was last built.
+
+    The agent-side hot-reload hook (skill-external-hot-reload): cheaply fingerprints the
+    user skills root (metadata only, no content read) and compares it to `_manifest`. If
+    identical, returns ``False`` and does nothing — the common per-message case. If the
+    fingerprint differs (a SKILL.md was added, removed, or its mtime/size changed), calls
+    the existing atomic `reload()` and returns ``True``.
+
+    `skills_dir` defaults to `_last_skills_dir` (the root the running agent was indexed
+    from). With no baseline (never scanned), returns ``False`` — there is nothing to
+    diff against. Guarded by `_refresh_lock` so concurrent inbound messages cannot race
+    the compare-and-reload or tear `_manifest`.
+    """
+    root = skills_dir or _last_skills_dir
+    if root is None:
+        return False
+    with _refresh_lock:
+        if _build_manifest(root) == _manifest:
+            return False
+        reload(root)
+        return True
 
 
 def reload(skills_dir: str | None = None) -> dict[str, Any]:
@@ -193,7 +258,7 @@ def reload(skills_dir: str | None = None) -> dict[str, Any]:
     Returns a summary: ``{"status": "ok", "loaded": N, "failed": M}`` on success,
     or ``{"status": "failed", "skills_dir": ..., "reason": ...}`` on failure.
     """
-    global _index, _load_errors, _last_skills_dir
+    global _index, _load_errors, _last_skills_dir, _manifest
     resolved = _resolve_skills_dir(skills_dir)
     new_errors: list[dict[str, str]] = []
     try:
@@ -206,6 +271,8 @@ def reload(skills_dir: str | None = None) -> dict[str, Any]:
     _index = new_index
     _load_errors = new_errors
     _last_skills_dir = resolved
+    # Refresh the hot-reload fingerprint to match the freshly built index.
+    _manifest = _build_manifest(resolved)
     if new_errors:
         logger.warning("skill_reload_complete", loaded=len(new_index), failed=len(new_errors))
     return {"status": "ok", "loaded": len(new_index), "failed": len(new_errors)}
