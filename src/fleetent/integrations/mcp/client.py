@@ -30,6 +30,7 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
+from fleetent.integrations.mcp.tool_naming import Projector, make_projector
 from mcp import ClientSession
 from mcp.client.auth import OAuthFlowError, OAuthTokenError
 from mcp.client.auth.extensions.client_credentials import ClientCredentialsOAuthProvider
@@ -39,8 +40,6 @@ from mcp.client.streamable_http import streamablehttp_client
 from mcp.shared.auth import OAuthClientInformationFull, OAuthMetadata
 from mcp.shared.auth import OAuthToken as SdkOAuthToken
 from mcp.types import LATEST_PROTOCOL_VERSION
-
-from fleetent.integrations.mcp.tool_naming import Projector, make_projector
 
 logger = logging.getLogger(__name__)
 
