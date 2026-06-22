@@ -12,7 +12,7 @@ because projected names — especially single-underscore presets like ``hermes``
 cannot be safely round-tripped by string splitting. Keeping render and resolve apart
 is what lets governance bind the canonical identity regardless of the projection.
 
-Agent-side only: must not import ``fleetent.platform.*``. The config type is duck-typed
+Agent-side only: never imports the platform control-plane. The config type is duck-typed
 (any object exposing ``template`` / ``sanitize`` / ``max_len``) to avoid coupling to
 ``fleetent.config.McpToolNamingTemplate``.
 """

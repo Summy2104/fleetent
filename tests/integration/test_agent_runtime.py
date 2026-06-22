@@ -61,7 +61,7 @@ def test_load_active_unpacks_file_fields(agents):
         system_prompt="You analyze.",
         allowed_tools=["shell", "github__*"],
         skills_dir="agents/analyst/skills",
-        mcp_servers=[{"id": "github", "url": "https://gh"}],
+        mcpServers={"github": {"url": "https://gh"}},
         memory_namespace="analyst",
     )
     snap = agent_runtime.load_active("analyst")
@@ -165,7 +165,7 @@ def test_resolve_mcp_servers_overlays_inline_on_defaults(agents):
     agents(
         "a",
         system_prompt="P",
-        mcp_servers=[{"id": "github", "transport": "http", "url": "https://agent-gh"}],
+        mcpServers={"github": {"transport": "http", "url": "https://agent-gh"}},
     )
     snap = agent_runtime.load_active("a")
     assert snap is not None

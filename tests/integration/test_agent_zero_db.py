@@ -29,7 +29,7 @@ def _write_agent(home) -> None:
                 "system_prompt": "S",
                 "models": agent_config.default_models().model_dump(mode="json"),
                 "allowed_tools": ["shell"],
-                "mcp_servers": [{"id": "acme", "transport": "http", "url": "https://acme"}],
+                "mcpServers": {"acme": {"transport": "http", "url": "https://acme"}},
             }
         ),
         encoding="utf-8",
