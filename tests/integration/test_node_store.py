@@ -7,6 +7,7 @@ import pytest
 from cryptography.fernet import Fernet
 
 from fleetent import agent_store
+from fleetent.secret_crypto import SecretKeyError
 from tests.integration._migration_template import apply_migrations
 
 
@@ -132,7 +133,7 @@ def test_register_node_raises_and_leaves_no_record_when_key_persist_fails(
     # Simulate secret persist failure (e.g. missing master key)
     monkeypatch.delenv("FLEETENT_SECRET_KEY", raising=False)
 
-    with pytest.raises(Exception):
+    with pytest.raises(SecretKeyError):
         node_store.register_node("node-fail")
 
     # Must not leave a half-committed node row

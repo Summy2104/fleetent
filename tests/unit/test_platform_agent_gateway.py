@@ -50,19 +50,6 @@ async def _collect_stream(response: StreamingResponse) -> bytes:
     return out
 
 
-def _admin_user() -> user_store.User:
-    return user_store.User(
-        id="admin-1",
-        name="Admin",
-        created_at="2026-06-03T00:00:00+00:00",
-        email="admin@example.com",
-        role="admin",
-        status="active",
-        must_reset=0,
-        password_hash="x",
-    )
-
-
 @pytest.mark.asyncio
 async def test_direct_http_transport_relays_chat_stream(monkeypatch: pytest.MonkeyPatch) -> None:
     import httpx

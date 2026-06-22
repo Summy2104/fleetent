@@ -35,7 +35,7 @@
 - [x] 3.2 **实现（绿）**：改 `src/fleetent/node/forwarder_contract.py`：两函数 honor
   `FLEETENT_FORWARDER_HOST_OVERRIDE`（设则用、否则 `<node_id>.internal`）。Makefile dev 目标
   export `FLEETENT_FORWARDER_HOST_OVERRIDE=127.0.0.1`。跑 3.1 见绿。
-- [ ] 3.3 **收尾**：`make test-pr` 全绿（对照 main 基线无新增失败）+ 相关测试
+- [x] 3.3 **收尾**：`make test-pr` 全绿（对照 main 基线无新增失败）+ 相关测试
   `uv run pytest tests/unit/test_dev_secret_key.py tests/integration/test_node_store.py tests/unit/test_platform_agent_gateway.py -q` 无新增失败；跑覆盖率门禁 `make test-unit-ci`（--fail-under=76）不被拉破。
 - [ ] 3.4 **（建议）live 实证**：隔离 dev home 走 `make dev-bootstrap → platform → node-provision →
   node`，确认 register 落库 key、`get_node_service_key` 非空、平台经 forwarder（override 到
