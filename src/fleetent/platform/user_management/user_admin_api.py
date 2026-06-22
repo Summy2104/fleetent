@@ -5,11 +5,9 @@ Authentication uses a login session token in the Authorization header:
 This router does not import the agent loop, so it is testable in isolation.
 """
 
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
-from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from fleetent import audit_log, auth, user_store
@@ -20,7 +18,6 @@ router = APIRouter(prefix="/admin")
 
 IDLE_TIMEOUT_SECONDS = 1800
 _ADMIN_ROLES = {"admin", "built_in_admin"}
-_UI_PATH = Path(__file__).parents[2] / "static" / "admin.html"
 
 
 def _session_user(authorization: str | None, allow_must_reset: bool = False) -> user_store.User:
@@ -60,19 +57,6 @@ class LoginBody(BaseModel):
 
 class ChangePasswordBody(BaseModel):
     new_password: str
-
-
-@router.get("/ui", response_class=HTMLResponse)
-def admin_ui() -> HTMLResponse:
-    """Serve the self-contained admin console (vanilla JS, calls the JSON API).
-
-    no-store: the SPA is a single HTML doc that changes on every deploy; without this
-    browsers heuristically cache it (no Last-Modified/ETag) and serve stale UI.
-    """
-    return HTMLResponse(
-        _UI_PATH.read_text(encoding="utf-8"),
-        headers={"Cache-Control": "no-store"},
-    )
 
 
 def _resolve_login_user(identifier: str) -> user_store.User | None:
@@ -151,6 +135,10 @@ class IssueKeyBody(BaseModel):
     expires_at: str | None = None
 
 
+class ServicePrincipalBody(BaseModel):
+    name: str
+
+
 def _user_dict(u: user_store.User) -> dict[str, Any]:
     return {
         "id": u.id,
@@ -185,6 +173,21 @@ def create_user(body: CreateUserBody, authorization: str | None = Header(None)) 
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _user_dict(user)
+
+
+@router.post("/service-principals", status_code=201)
+def create_service_principal(
+    body: ServicePrincipalBody, authorization: str | None = Header(None)
+) -> dict[str, Any]:
+    admin = _require_admin(authorization)
+    user, plaintext = user_store.create_user(body.name)
+    audit_log.write_audit(
+        admin.id,
+        "service_principal.create",
+        target_type="user",
+        target_id=user.id,
+    )
+    return {"user": _user_dict(user), "api_key_plaintext_once": plaintext}
 
 
 @router.get("/users/{user_id}")
@@ -306,6 +309,17 @@ def issue_key(
     )
     audit_log.write_audit(admin.id, "issue_key", target_type="user", target_id=user_id)
     return {"plaintext": plaintext, "key": meta}
+
+
+@router.post("/users/{user_id}/rotate-key")
+def rotate_user_key(user_id: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+    admin = _require_admin(authorization)
+    try:
+        user, plaintext = user_store.rotate_key(user_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="not found") from exc
+    audit_log.write_audit(admin.id, "user.rotate_key", target_type="user", target_id=user_id)
+    return {"user": _user_dict(user), "api_key_plaintext_once": plaintext}
 
 
 @router.delete("/keys/{key_id}", status_code=204)

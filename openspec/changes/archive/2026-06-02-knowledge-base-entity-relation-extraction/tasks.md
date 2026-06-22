@@ -62,7 +62,7 @@
 - [x] 7.2 Verify red：运行 `uv run pytest tests/unit -x -q`
 - [x] 7.3 Implement：导出 public API
 - [x] 7.4 Verify green：运行 `uv run pytest tests/unit -x -q`
-- [x] 7.5 Write failing tests：`fleetent-admin kb extract-entities --kb-id ... [--document-id ...]` 调用 explicit run 并输出脱敏 summary
+- [x] 7.5 Write failing tests：`fleetent admin kb extract-entities --kb-id ... [--document-id ...]` 调用 explicit run 并输出脱敏 summary
 - [x] 7.6 Verify red：运行 `uv run pytest tests/unit -x -q`
 - [x] 7.7 Implement：新增 admin CLI 命令
 - [x] 7.8 Verify green：运行 `uv run pytest tests/unit -x -q`

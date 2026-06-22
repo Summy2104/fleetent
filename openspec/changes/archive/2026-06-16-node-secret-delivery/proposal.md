@@ -9,7 +9,7 @@ agent 要连 Slack/Telegram/模型/MCP，必须拿到 secret（IM token、模型
 
 - **desired-state 扩展携带 secret**：C2 的分区响应中加入该 node 被 pin 的 agent 所需 secret 值（仍按 node 分区——node 只拿到自己 agent 的）。
 - **platform 出 secret**：从既有中心凭证库（`external_credential_store` / `vault_provider`）取值下发；中心 Vault 保持**唯一真相 + 中心轮换**（轮换后 node 下次 reconcile 重取）。
-- **node 注入子进程 env**：`fleetent-node` 把 secret 作为 env 传给 `Popen(fleetent agent run, env=…)`；agent 的 `load_dotenv(override=False)` 不覆盖已存在 env → **agent 进程零改动**，且 secret **仅在 node 内存 + 子进程 env，不写 node 盘**。
+- **node 注入子进程 env**：`fleetent node start` 把 secret 作为 env 传给 `Popen(fleetent agent run, env=…)`；agent 的 `load_dotenv(override=False)` 不覆盖已存在 env → **agent 进程零改动**，且 secret **仅在 node 内存 + 子进程 env，不写 node 盘**。
 - **安全基线（强制）**：TLS（mTLS 更佳）+ node 鉴权 + **按 node 分区授权**（node 取不到非自己 agent 的 secret）。
 - 不做：secret 引用间接（`vault://`）、JIT fetch endpoint、短期租约——均 roadmap；**HashiCorp Vault 后端列 roadmap，不进 v1**（其动态 secret/自动轮换对 fleetent 静态外部 token 基本不适用；真有用的审计/时限 token/policy 待合规客户真要时再上）。
 

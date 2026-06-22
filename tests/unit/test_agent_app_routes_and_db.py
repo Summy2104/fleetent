@@ -31,6 +31,7 @@ def _agent_file(**overrides: Any) -> Any:
         plugins=["github"],
         features={"code_execution": True},
         allowed_skills=["triage"],
+        skill_authoring_enabled=False,
         mcp_servers=[],
         scheduling=SimpleNamespace(enabled=False),
     )
@@ -148,6 +149,10 @@ async def test_start_infra_registers_mcp_and_resume_markers(
     monkeypatch.setattr(
         "fleetent.integrations.sandbox.enablement.get_effective_mode",
         AsyncMock(return_value=Mode.OFF),
+    )
+    monkeypatch.setattr(
+        "fleetent.runtime.approval_resume.reconcile_expired_approvals",
+        AsyncMock(return_value=0),
     )
     monkeypatch.setattr("fleetent.integrations.mcp.register_all", register_all)
     monkeypatch.setattr("fleetent.session.manager.start_session_maintenance", lambda: None)

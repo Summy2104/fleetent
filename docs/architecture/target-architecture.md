@@ -74,13 +74,14 @@ flowchart TB
 
 ### ② 控制 / 配置面 —— 人工驱动的配置编写
 - **性质**：同步 CRUD API，管理员/控制台操作；产出「核去读取」的配置与绑定。
-- **模块**：`platform/` 的 `askit_console`、`agent_management_console`、`connector_management`、`knowledge_base_management`（绑定/管理 API）、`model_provider_management`、`skill_management`、`user_management`、`chat_management`；`agent_store`（定义+版本）、`user_store`(用户 CRUD)、`connectors`(OAuth)、`auth`；`admin_cli` + `server` 的管理端点。
+- **模块**：`platform/` 的 `askit_console`、`agent_management_console`、`connector_management`、`knowledge_base_management`（绑定/管理 API）、`model_provider_management`、`skill_management`、`user_management`、`chat_management`；`agent_store`（定义+版本）、`user_store`(用户 CRUD)、`connectors`(OAuth)、`auth`；`server` 的管理端点(业务控制面写操作的唯一入口)。
+- **边界**：业务控制面写操作(租户/团队/审批人/用户归属、agent 定义等)MUST 走 `server` HTTP API,MUST NOT 由直写管理库的 CLI 承载;`admin_cli` 收窄为 **bootstrap**(seed-builtin-admin/init-config/validate-config)/ **基础设施供给**(node 注册·pin)/ **危险宿主级维护**(diagnostics·maintenance),不做业务 CRUD。详见 `module-boundaries` spec「Admin CLI 直写管理库的边界」。
 
 ### ③ 编排 / 监管面 —— 管 agent 的生命周期
 - **性质**：把②的配置 materialize 成下发载荷、把"哪些 agent 该在哪跑"的**期望态**调谐成真实进程、定时触发。**声明式 + daemon / 调度** character，独立于②的同步 CRUD。
-- **模型（kubelet 式，分机就绪）**：platform 只**声明期望态**（agent 的 `status` enabled/disabled/archived + agent→node 显式 pin），经 `GET /nodes/{id}/desired-state` 按 node 分区下发（含 materialized 非密配置 + 分区 secret）；每个 agent host 上一个 **node supervisor（`fleetent-node`）** 拉取期望态、在本地 **reconcile** per-agent 进程（启停、PID 文件真相、崩溃重拉、config-hash 漂移重启），并 `POST /nodes/{id}/status` 回报实际态。**"是否在跑"的真相在 node 的 PID 文件、不在 platform 内存**——platform 重启 re-adopt、不留孤儿。
+- **模型（kubelet 式，分机就绪）**：platform 只**声明期望态**（agent 的 `status` enabled/disabled/archived + agent→node 显式 pin），经 `GET /nodes/{id}/desired-state` 按 node 分区下发（含 materialized 非密配置 + 分区 secret）；每个 agent host 上一个 **node supervisor（`fleetent node start`）** 拉取期望态、在本地 **reconcile** per-agent 进程（启停、PID 文件真相、崩溃重拉、config-hash 漂移重启），并 `POST /nodes/{id}/status` 回报实际态。**"是否在跑"的真相在 node 的 PID 文件、不在 platform 内存**——platform 重启 re-adopt、不留孤儿。
 - **可用性**：node 本地缓存期望态 + 内存留 live secret，**platform 下线时在跑 agent 照常运行**（仅缺 secret 的新启动推迟）；本面挂了配置照样能改。
-- **模块**：platform 侧 `platform/node_management`（node 注册表 + placement + desired-state API）、`platform/agent_lifecycle`（materialize, secret_store, credential_slots）、`cron_scheduler` + `schedule_store`；node 侧 **`node/` 包 + `fleetent-node` 二进制**（platform 的 HTTP client + subprocess 拉 `fleetent agent run`，**不 import platform/runtime 内部**）。
+- **模块**：platform 侧 `platform/node_management`（node 注册表 + placement + desired-state API）、`platform/agent_lifecycle`（materialize, secret_store, credential_slots）、`cron_scheduler` + `schedule_store`；node 侧 **`node/` 包 + `fleetent node start` 二进制**（platform 的 HTTP client + subprocess 拉 `fleetent agent run`，**不 import platform/runtime 内部**）。
 - **边界注记**：`materialize`（store 配置 → 下发载荷/`agent.yaml`）是 **②→③ 的转换桥**——由②动作触发、产出③要用的运行时产物，归③（执行侧），别误当②的一部分。secret 经 desired-state 分区下发、node **env 注入子进程（内存不落盘、缓存剥 secret）**，config 保持非密。`resource_monitoring` **v1 整体外置移除**（→ Prometheus/Grafana，change `externalize-monitoring`，见 data-model §5.8）；`observability` 仅保留 agent 运行 trace。
 - **历史**：旧的 platform 内存 `AgentController` + `/admin/agents/{name}/start|stop|runtime-status` 已退役（change `retire-inmemory-controller`），由上述声明式期望态 + node reconcile 取代；`status` 不再是空头账面态。
 
@@ -141,7 +142,7 @@ flowchart TB
 
 ### 审批门泛化：自进化提案的路由
 
-> R1（§6.5）实现了**工具调用**的审批门；这里是它向**自进化提案**的泛化设计（部分未实现，设计保留）。审批门是 agent 侧 governance 能力（`permission_gate` 的异步非阻塞泛化），不是 platform 服务；proposal/approval 存 agent 数据。**统一一道门，按 proposal 类型路由渠道/审批人**：
+> R1（§6.5）实现了**工具调用**的审批门；这里是它向**自进化提案**的泛化设计（已落地:`approval_requests` 单一真相源 + `approval_router` 按 `subject_type` 分派 tool_call/memory_proposal/skill_proposal；reflection 提议复用 `permission_gate` 外呼通知）。审批门是 agent 侧 governance 能力（`permission_gate` 的异步非阻塞泛化），不是 platform 服务；proposal/approval 存 agent 数据。**统一一道门(`approval_router`),按 proposal 类型路由审批人;触达渠道统一为 agent-owned IM 外呼(`resolve_approvers`,无独立 review-channel 路由)**：
 
 | proposal 类型 | 渠道 | 找谁 |
 |---|---|---|
@@ -220,7 +221,7 @@ Principal { user_id, tenant_id }
 ```
 
 - **managed 模式**：IM edge 在进入核前，经 platform 在 `server.py` lifespan 注入的 resolver，把 `(platform, platform_user_id)` 归并成内部 `users.id`；首次见到自动建 `users` + `im_users` 绑定，tenant 不匹配直接拒绝并记诊断日志。该写入动作属于 platform-owned resolver，不构成 agent→platform 反向依赖。
-- **standalone 模式**：不注入 resolver，`im_gateway.access.resolve_identity()` 恒等透传渠道原生 id；agent 继续完全脱离 platform 运行。
+- **direct-run 模式**：不注入 resolver，`im_gateway.access.resolve_identity()` 恒等透传渠道原生 id；这保留了运行时解耦事实，但它是 dev/test 或最小运行路径，不再是受支持的 standalone 部署模式。
 
 ### 6.5 审批人解析(归属 team/主体,materialize 进配置)
 
@@ -234,7 +235,7 @@ agent.team_id 的审批人  ──无──►  tenant(主体) 的审批人  ─
 
 ### 6.6 端口与适配器(实现按部署"插")
 
-- **单机 agent**:最小本地实现(env / static token,如现 `_validate_tui_token`)——无 platform。
+- **直接 `fleetent agent run` 进程**：最小本地实现(env / static token,如现 `_validate_tui_token`)；保留给 node 原语与 dev/test，不构成受支持部署拓扑。
 - **platform**:完整实现(api_keys 表、角色、吊销)。
 - **企业/外部登录**:**OIDC 适配器,首发 Google**;同一适配器覆盖 Okta / Azure AD / Keycloak;严格内网客户改挂内网 IdP(Keycloak / 客户 AD),**端口不变**。
 
@@ -244,7 +245,7 @@ agent.team_id 的审批人  ──无──►  tenant(主体) 的审批人  ─
 | 渠道担保(IM 平台用户 id) | IM 终端用户 | im_users 映射 → user |
 | OIDC `id_token`(将来) | 人(企业登录) | OIDC 适配器验签 →(发 session) |
 
-**修掉 #1**:核只依赖 `Principal` 类型 + 基座 `Identity` 端口,**永不** import platform 的 user 管理——standalone agent 鉴权不再够进 platform,泄漏从根消失(不是打补丁)。
+**修掉 #1**:核只依赖 `Principal` 类型 + 基座 `Identity` 端口,**永不** import platform 的 user 管理——direct-run 进程的鉴权不再够进 platform,泄漏从根消失(不是打补丁)。
 
 > 主权注记:Google OIDC 登录流需联通 `accounts.google.com`、身份/邮箱经过 Google。当前 pilot 客户**接受外部登录**,故首发 Google;气隙 / 严格内网客户改挂内网 IdP。
 
@@ -300,7 +301,7 @@ platform 经"共享 store 读函数"读 = 依赖 agent 侧库的**读 schema**�
 - **不建议**现在拆微服务——多进程运维负担违背 lean/on-prem。
 - **建议**：四个面在单体内做成**一等的限界上下文**，边界画得像将来能独立成服务一样干净。
 - **可拆性预留**：哪天某个面需要独立扩容（最可能是 ④摄取管道——数据重、可异步），能整面抽出为独立服务而不必重写。判据是「面之间不互相 import、只经契约通信」。
-- **③编排已部分跨机落地**：node supervisor（`fleetent-node`）已是**可独立部署到各 agent host** 的组件，经 HTTP 契约（desired-state 拉取 + 实际态上报）与 platform 通信、不同进程（kubelet 式）。"边界画得像能独立成服务"在③已成真实跨机——支持 platform 独立部署 + N 个 agent node。
+- **③编排已部分跨机落地**：node supervisor（`fleetent node start`）已是**可独立部署到各 agent host** 的组件，经 HTTP 契约（desired-state 拉取 + 实际态上报）与 platform 通信、不同进程（kubelet 式）。"边界画得像能独立成服务"在③已成真实跨机——支持 platform 独立部署 + N 个 agent node。
 
 ---
 
@@ -318,14 +319,15 @@ platform 经"共享 store 读函数"读 = 依赖 agent 侧库的**读 schema**�
         governance(执行: agent_policy · permission_gate机制 · blocklist检查)
         agent_config         〔依赖 Identity 端口，不依赖其实现〕
 ①边缘 : im_gateway · webhook_router · im_user_store · server(/chat /ws)
-        · tui/(交互式终端 TUI) · outbound(IM 出站投递)
+        · tui/(终端客户端,命令 `fleetent chat`;包名仍 tui) · outbound(IM 出站投递)
 ②控制 : platform/{askit_console, agent_management_console, connector_management,
         knowledge_base_management, model_provider_management, skill_management,
         user_management, chat_management, reflection_management}
         · governance 管理 API(审批解析/封禁) · agent_store · user_store(CRUD)
-        · connectors · admin_cli · server(管理端点)
+        · connectors · server(管理端点;业务控制面写操作唯一入口)
+        〔admin_cli 不在此面:已收窄为 bootstrap/基础设施供给/危险维护,不做业务 CRUD〕
 ③编排 : platform/agent_lifecycle(materialize/secret) · platform/node_management(注册表/placement/desired-state API)
-        · node/(fleetent-node supervisor，跨机 HTTP client；当前物理上与平台同包，但内部不 import platform 实现，部署时可抽出为独立二进制)
+        · node/(fleetent node start supervisor，跨机 HTTP client；当前物理上与平台同包，但内部不 import platform 实现，部署时可抽出为独立二进制)
         · cron_scheduler · schedule_store
 ④摄取 : knowledge_base.ingest · connector sync
 基座  : db · config · paths · structured_logging · secret_scan · eval_logger
@@ -338,9 +340,31 @@ platform 经"共享 store 读函数"读 = 依赖 agent 侧库的**读 schema**�
 
 ## 11. 实现进度与 open questions
 
-**进度**：持久层数据架构（§4 五库 / §6 Identity / §7 只读投影）+ 多租户物理隔离**已落地**（持久层 #1–#4，详见 [`data-model.md`](./data-model.md) + [`persistence-redesign-decisions`](../records/decision-logs/persistence-redesign-decisions.md)）；模块边界重组（§3 四面 / §5 governance 三拆·reflection 两拆·KB 四分）**部分落地、持续推进**（KB 四分、Identity、向量整改、只读投影已成；四面/三拆按需逐步）。**③ 编排面的分机 agent 运行时编排（kubelet 式：node 注册表/placement + desired-state API + `fleetent-node` supervisor + secret env 注入 + 退役旧内存 controller）已落地**（2026-06，changes：agent-node-registry / node-desired-state-api / node-supervisor / node-secret-delivery / retire-inmemory-controller）；编排 roadmap 未做：systemd/k8s 进程后端、Consul/etcd + Vault 配置/secret provider、node failover/label 调度、单 agent HA（leader 选举）。
+**进度**：持久层数据架构（§4 五库 / §6 Identity / §7 只读投影）+ 多租户物理隔离**已落地**（持久层 #1–#4，详见 [`data-model.md`](./data-model.md) + [`persistence-redesign-decisions`](../records/decision-logs/persistence-redesign-decisions.md)）；模块边界重组（§3 四面 / §5 governance 三拆·reflection 两拆·KB 四分）**部分落地、持续推进**（KB 四分、Identity、向量整改、只读投影已成；四面/三拆按需逐步）。**③ 编排面的分机 agent 运行时编排（kubelet 式：node 注册表/placement + desired-state API + `fleetent node start` supervisor + secret env 注入 + 退役旧内存 controller）已落地**（2026-06，changes：agent-node-registry / node-desired-state-api / node-supervisor / node-secret-delivery / retire-inmemory-controller）；编排 roadmap 未做：systemd/k8s 进程后端、Consul/etcd + Vault 配置/secret provider、node failover/label 调度、单 agent HA（leader 选举）。
 
 **已定架构决策**（4 面不合并 / 单体可拆边界 / identity-属-edge / 三拆两拆 / resource_monitoring 外置等）的依据：见 [`architecture-decisions`](../records/decision-logs/architecture-decisions.md)。
 
 **open questions**：
 - 模块迁移顺序：先拆巨型文件（正交、低风险）还是先立面边界（结构优先）？（DB 层执行顺序已随持久层 #3 完成，与此正交。）
+
+---
+
+## 12. 目标方向：KB / memory / 部署拓扑（2026-06-20 定案）
+
+> 仅方向，尚未落地；实现需后续 OpenSpec change（建议顺序：kb-worker 配置文件化 → ingest 队列+worker → 底座可插拔后端）。
+
+**核心不变量**：每个组件单机/分布式**只差物理摆放,不差架构**——agent 永远由 node 拉起、ingest 永远是 worker、数据永远走 substrate；单机/分布式只差 **co-location + 后端选择**（队列后端 DB↔broker、底座后端 本地文件↔网络 DB，均可插拔，同一套接口）。
+
+**部署只两种,砍 standalone**：单机 / 分布式，**platform 始终在场**。单机 = platform + node + agent 同机，node 经 localhost 拉起 agent；分布式 = platform 与 agent host 分离，node 经网络拉起本机 agent。standalone（无 platform）**部署模式**已退役（消冗余/一致性）；但 **agent→platform 解耦契约保留**（agent MUST NOT import platform，护栏强制）。`fleetent agent run` 保留为 **node 拉起 agent 的原语**（也可 dev 直接跑，非部署模式）。
+
+**统一可插拔数据底座**：memory / KB / sessions / 向量 都是 agent 侧 per-tenant 数据，共用一个底座；单机=本地文件，分布式=网络托管 DB（Postgres/Qdrant，self-hostable）。**memory 与 KB 不各做独立服务**——是同一个"底座后端可插拔"的决定。唯一不对称：KB 多一个 **ingest 计算管道**（重 embedding），分布式可拆独立 worker；memory 的写轻、内联。
+
+**KB = 派生视图（非真相源）**：没人直接写 KB 内容。人改**数据源**、AI 只读 KB + 产 reflection report，问题靠"改源→重摄"修；KB 是数据源经 ingest 的纯派生、可重摄。对比 memory=真相源（agent 经审批门直写）。KB **不走 agent 审批门**（共享派生资源，remediation 归平台/人）。
+
+**Ingest = 一个核 + 多触发器 + DB 队列 + 唯一 worker**：核 `knowledge_base.ingest` 一份；触发器（上传/webhook/cron/admin sync）**全只入队**；`fleetent kb-worker` 是**唯一消费者/唯一写入方**（KB 单一写入方，保串行/重试/隔离）；admin sync = 入队+等完成；直接调核仅测试。**单机也拆 worker**（为消模式/隔离，非扩容），前提 DB 背队列（零 broker）+ 同 binary。
+
+**connector 配置归属（三层，job 是唯一桥）**：
+- **kb-worker 自身配置**（队列/底座/embedder/Vault 接入）= 部署级静态，放专属配置文件（平行 node-config-file）。
+- **connector 注册表**（源地址/参数/凭据**引用**）= Platform 管理库，单一真相源；**connector 配置不进 worker 配置**。
+- **connector 凭据** = Vault。platform 入队时把"非密 connector 配置 + 凭据 ref"塞进 job；worker 用自身 Vault 接入**运行时按 ref 解析**真凭据（secret 不在队列 at-rest，worker 不 import platform）。
+- 与 node 差异：node 由 platform 注入解析好的密钥（agent 无 Vault 权）；kb-worker 自持 Vault 接入按 ref 取。

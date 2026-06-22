@@ -136,6 +136,15 @@ class ImBinding(BaseModel):
     telegram: TelegramBinding | None = None
 
 
+class AgentBindings(BaseModel):
+    """Optional top-level runtime bindings materialized by the control plane."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    default: bool = False
+    users: list[str] = Field(default_factory=list)
+
+
 class ModelTarget(BaseModel):
     """Agent-local model endpoint definition."""
 
@@ -361,6 +370,15 @@ class SandboxSettings(BaseModel):
     multi_user: bool = True
 
 
+class ReflectionSettings(BaseModel):
+    """Per-agent reflection scheduler settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    interval_seconds: float = 86400.0
+
+
 class AgentFile(BaseModel):
     """Schema for a self-contained ``agent.yaml``."""
 
@@ -375,6 +393,10 @@ class AgentFile(BaseModel):
     memory_namespace: str = ""
     skills_dir: str | None = None
     allowed_skills: list[str] = Field(default_factory=list)
+    # agent-skill-tools: gate for the model-facing skill_manage authoring tool.
+    # Default off — skill_manage only enters this agent's tool schema when explicitly
+    # enabled, so a deployment opts into agent-driven skill writes deliberately.
+    skill_authoring_enabled: bool = False
     allowed_tools: list[str] = Field(default_factory=list)
     plugins: list[str] = Field(default_factory=list)
     features: dict[str, Any] = Field(default_factory=dict)
@@ -433,6 +455,7 @@ class AgentFile(BaseModel):
     session_max_total_mb: int = 1024
     session_max_count: int = 10000
     session_cleanup_interval_seconds: float = 3600.0
+    reflection: ReflectionSettings = Field(default_factory=ReflectionSettings)
     disabled_skills: list[str] = Field(default_factory=list)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     diagnostics: DiagnosticsSettings = Field(default_factory=DiagnosticsSettings)
@@ -440,6 +463,7 @@ class AgentFile(BaseModel):
     scheduling: SchedulingSettings = Field(default_factory=SchedulingSettings)
     webhooks: WebhooksSettings = Field(default_factory=WebhooksSettings)
     im: ImBinding = Field(default_factory=ImBinding)
+    bindings: AgentBindings = Field(default_factory=AgentBindings)
     approval: ApprovalRouting | None = None
 
 
@@ -635,6 +659,8 @@ def build_index(agents_dir: str | Path | None = None) -> AgentConfigIndex:
         for agent_dir in sorted(p for p in root.iterdir() if (p / AGENT_FILE_NAME).is_file()):
             agent = load_agent_file(agent_dir)
             agents[agent.name] = agent
+            if agent.bindings.default and default is None:
+                default = agent.name
 
     return AgentConfigIndex(agents=agents, default=default)
 

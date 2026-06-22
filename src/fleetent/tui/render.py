@@ -26,8 +26,11 @@ def _truncate(text: str, limit: int = RESULT_TRUNCATE_LIMIT) -> str:
 def format_event(event: dict[str, Any]) -> FormattedText | None:
     """Render one gateway event to FormattedText, or None if nothing to show.
 
-    Newlines are baked in so the app can always emit with ``end=""`` — streamed
-    ``text_delta`` stays on the same line, structured events stand on their own.
+    Structured events end with their own trailing newline but carry NO leading one:
+    inter-event spacing is the caller's job (``AppController`` flushes any open
+    streamed line before rendering one), so back-to-back events don't stack blanks.
+    ``text_delta`` is raw content (the app buffers it into complete lines) and
+    ``done`` renders nothing (the app flushes the final line).
     """
     event_type = event.get("type", "")
     payload = event.get("payload", {}) or {}
@@ -37,26 +40,26 @@ def format_event(event: dict[str, Any]) -> FormattedText | None:
     if event_type == p.EVENT_TOOL_CALL:
         name = str(payload.get("name", "?"))
         args = payload.get("args", {})
-        return FormattedText([("ansicyan", f"\n🔧 {name} "), ("ansibrightblack", f"{args}\n")])
+        return FormattedText([("ansicyan", f"🔧 {name} "), ("ansibrightblack", f"{args}\n")])
     if event_type == p.EVENT_TOOL_RESULT:
         name = str(payload.get("name", "?"))
         content = _truncate(str(payload.get("content", "")))
-        return FormattedText([("ansigreen", f"\n← {name}: "), ("", f"{content}\n")])
+        return FormattedText([("ansigreen", f"← {name}: "), ("", f"{content}\n")])
     if event_type == p.EVENT_ERROR:
-        return FormattedText([("ansired", f"\n⚠ error: {payload.get('content', '')}\n")])
+        return FormattedText([("ansired", f"⚠ error: {payload.get('content', '')}\n")])
     if event_type == p.EVENT_APPROVAL_REQUIRED:
         approval_id = payload.get("approval_id", "?")
         tool = payload.get("tool", "?")
         risk = payload.get("risk", "?")
         return FormattedText(
             [
-                ("ansiyellow", f"\n⚠ approval required [{approval_id}] "),
+                ("ansiyellow", f"⚠ approval required [{approval_id}] "),
                 ("", f"tool={tool} risk={risk}\n"),
                 ("ansibrightblack", f"   /approve {approval_id} approved|rejected\n"),
             ]
         )
     if event_type == p.EVENT_DONE:
-        return FormattedText([("", "\n")])  # close the streamed line
+        return None  # done carries no text; on_event flushes the streamed line
     return None
 
 

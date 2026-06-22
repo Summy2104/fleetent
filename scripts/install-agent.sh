@@ -1,18 +1,18 @@
 #!/bin/bash
 # ============================================================================
-# fleetent standalone agent runtime installer
+# fleetent agent host installer
 # ============================================================================
-# Installs the fleetent binary and sets FLEETENT_HOME, then prints a tutorial
-# guiding you to create an agent yourself. It does NOT create an agent home and
-# does NOT require alembic, fleetent-admin, or a running platform.
+# Installs the fleetent binary and node supervisor, sets FLEETENT_HOME, then
+# prints a tutorial guiding you to configure the node against a platform. It
+# does NOT create an agent home and does NOT require alembic.
 #
 # Usage:
 #   scripts/install-agent.sh [--dir PATH] [--help]
 #
-# After running, create and run an agent:
-#   fleetent agent init <agent-id>
-#   # edit $FLEETENT_HOME/agents/<agent-id>/agent.yaml + .env
-#   fleetent agent run <agent-id> [--port N]
+# After running, configure and start the node:
+#   mkdir -p "$FLEETENT_HOME/node"
+#   $EDITOR "$FLEETENT_HOME/node/.env"
+#   fleetent node start
 # ============================================================================
 
 set -e
@@ -38,8 +38,8 @@ FLEETENT_HOME_DIR="${FLEETENT_HOME:-$HOME/.fleetent}"
 
 usage() {
     cat <<'EOF'
-fleetent agent runtime installer — install the runtime + set FLEETENT_HOME
-(no platform required). Create agents yourself afterwards with `fleetent agent init`.
+fleetent agent host installer — install the runtime + node supervisor, then set
+FLEETENT_HOME for a managed agent host.
 
 Usage:
   scripts/install-agent.sh [options]
@@ -48,14 +48,20 @@ Options:
   --dir PATH  Override FLEETENT_HOME (default ~/.fleetent)
   --help      Show this help and exit
 
-After installation, create and run an agent:
-  1. fleetent agent init <agent-id>
-  2. Edit $FLEETENT_HOME/agents/<agent-id>/agent.yaml + .env  (chmod 600 .env)
-  3. fleetent agent run <agent-id> [--port N]
-  4. fleetent-tui --url ws://localhost:<N>/ws --token <FLEETENT_TUI_TOKEN>
+After installation, connect this host to platform:
+  1. mkdir -p "$FLEETENT_HOME/node"
+  2. Create $FLEETENT_HOME/node/.env with:
+       FLEETENT_NODE_PLATFORM_URL=https://platform.example.com
+       FLEETENT_NODE_ID=<node-id>
+       FLEETENT_NODE_SERVICE_KEY=ma-<service-key>
+  3. fleetent node start
 
-Note: the <agent-id> positional argument was removed — agent creation is now a
-separate step (`fleetent agent init`), decoupled from runtime installation.
+For local dev/test only:
+  - fleetent agent init <agent-id>
+  - fleetent agent run <agent-id> [--port N]
+
+Note: the old <agent-id> positional argument was removed. Production deployment
+goes through node; agent init/run remain available for dev/test.
 EOF
 }
 
@@ -71,7 +77,7 @@ parse_args() {
             -*)
                 log_error "Unknown option: $1"; usage >&2; exit 2 ;;
             *)
-                log_error "The agent-id argument was removed. Create the agent with: fleetent agent init $1"
+                log_error "The agent-id argument was removed. Configure node via $FLEETENT_HOME/node/.env and start with fleetent node start."
                 usage >&2; exit 2 ;;
         esac
     done
@@ -102,7 +108,7 @@ install_tool() {
         log_info "Run: uv tool update-shell"
         exit 1
     fi
-    log_success "Installed: fleetent fleetent-tui"
+    log_success "Installed: fleetent"
 }
 
 setup_home_env() {
@@ -128,15 +134,19 @@ precheck_docker() {
 }
 
 print_tutorial() {
-    log_success "fleetent runtime installed.  FLEETENT_HOME = $FLEETENT_HOME"
+    log_success "fleetent runtime + node supervisor installed.  FLEETENT_HOME = $FLEETENT_HOME"
     echo
-    echo "Next — create and run an agent:"
-    echo "  1. fleetent agent init <agent-id>"
-    echo "  2. Edit $FLEETENT_HOME/agents/<agent-id>/agent.yaml + .env   (chmod 600 .env)"
-    echo "  3. fleetent agent run <agent-id> [--port 8766]"
-    echo "  4. fleetent-tui --url ws://localhost:<port>/ws --token <FLEETENT_TUI_TOKEN>"
+    echo "Next — configure this agent host's node supervisor and connect it to platform:"
+    echo "  1. mkdir -p \"$FLEETENT_HOME/node\""
+    echo "  2. Create \$FLEETENT_HOME/node/.env with:"
+    echo "       FLEETENT_NODE_PLATFORM_URL=https://platform.example.com"
+    echo "       FLEETENT_NODE_ID=<node-id>"
+    echo "       FLEETENT_NODE_SERVICE_KEY=ma-<service-key>"
+    echo "  3. fleetent node start"
     echo
-    echo "(FLEETENT_TUI_TOKEN is generated into the agent's .env by 'fleetent agent init'.)"
+    echo "Local dev/test only:"
+    echo "  - fleetent agent init <agent-id>"
+    echo "  - fleetent agent run <agent-id> [--port 8766]"
 }
 
 main() {

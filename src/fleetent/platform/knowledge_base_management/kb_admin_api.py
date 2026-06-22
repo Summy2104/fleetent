@@ -16,6 +16,7 @@ Auth mirrors user_admin_api: reads allow viewer+admin, writes require admin.
 
 import asyncio
 import re
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
@@ -24,7 +25,7 @@ import yaml
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
-from fleetent import audit_log, auth, user_store
+from fleetent import audit_log, auth, kb_ingest_jobs, user_store
 from fleetent import knowledge_base as kb_runtime
 from fleetent.config import KnowledgeBaseSettings, Settings
 from fleetent.db import SQLiteDatabase, create_database
@@ -32,6 +33,7 @@ from fleetent.knowledge_base import operations as knowledge_base
 from fleetent.knowledge_base import parsers as legacy_parsers
 from fleetent.knowledge_base.core import KnowledgeChunk, KnowledgeStore
 from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
+from fleetent.knowledge_base.extraction import run_entity_extraction as _kb_run_entity_extraction
 from fleetent.knowledge_base.ingest.config import as_knowledge_base_settings
 from fleetent.knowledge_base.ingest.connectors.sync import (
     LocalDirectorySourceConfig,
@@ -72,6 +74,8 @@ IDLE_TIMEOUT_SECONDS = 1800
 _ADMIN_ROLES = {"admin", "built_in_admin"}
 _DEFAULT_TENANT = "default"
 _VALID_MODES = {"vector", "keyword", "hybrid"}
+_KB_INGEST_POLL_INTERVAL_SECONDS = 0.05
+_KB_INGEST_WAIT_TIMEOUT_SECONDS = 30.0
 
 
 # --- injectable engine seams (knowledge-base / observability follow-ups) -------
@@ -252,6 +256,32 @@ def kb_observation(tenant_id: str, kb_id: str) -> dict[str, Any]:
     return {"kb_id": kb_id, "recall_hits": 0, "zero_recall_docs": [], "sessions": []}
 
 
+def kb_extract_entities(
+    tenant_id: str,
+    kb_id: str,
+    document_id: str | None = None,
+) -> dict[str, Any]:
+    """Run explicit KB entity extraction through the knowledge-base public API."""
+    _require_active_kb(tenant_id, kb_id)
+    with _use_kb_runtime(tenant_id):
+        summary = asyncio.run(_kb_run_entity_extraction(tenant_id, kb_id, document_id=document_id))
+    return {
+        "id": summary.id,
+        "tenant_id": summary.tenant_id,
+        "kb_id": summary.kb_id,
+        "document_id": summary.document_id,
+        "extractor": summary.extractor,
+        "status": summary.status,
+        "documents_scanned": summary.documents_scanned,
+        "chunks_scanned": summary.chunks_scanned,
+        "entities_upserted": summary.entities_upserted,
+        "mentions_written": summary.mentions_written,
+        "relations_written": summary.relations_written,
+        "failed_count": summary.failed_count,
+        "error_summary": summary.error_summary,
+    }
+
+
 # --- auth helpers -------------------------------------------------------------
 
 
@@ -353,6 +383,11 @@ class EvalBody(BaseModel):
     tenant_id: str = _DEFAULT_TENANT
 
 
+class ExtractEntitiesBody(BaseModel):
+    tenant_id: str = _DEFAULT_TENANT
+    document_id: str | None = None
+
+
 def _parse_import_document(
     source: str, content: str, document_format: str
 ) -> legacy_parsers.ParsedDocument:
@@ -375,6 +410,52 @@ def _ingest_settings() -> KnowledgeBaseSettings:
 def _require_active_kb(tenant_id: str, kb_id: str) -> None:
     if not _kb_is_active_knowledge_base(tenant_id, kb_id, database=_knowledge_database(tenant_id)):
         raise HTTPException(status_code=404, detail="kb not found or archived")
+
+
+def _enqueue_import_job(kb_id: str, body: ImportBody) -> dict[str, Any]:
+    return kb_ingest_jobs.enqueue_job(
+        job_type="import_document",
+        tenant_id=body.tenant_id,
+        kb_id=kb_id,
+        connector_ref={
+            "source": body.source,
+            "content": body.content,
+            "document_format": body.document_format,
+        },
+    )
+
+
+def _enqueue_sync_directory_job(kb_id: str, body: SyncBody) -> dict[str, Any]:
+    return kb_ingest_jobs.enqueue_job(
+        job_type="sync_directory",
+        tenant_id=body.tenant_id,
+        kb_id=kb_id,
+        connector_ref={"path": body.path},
+    )
+
+
+def _enqueue_connector_sync_job(connector_id: str) -> dict[str, Any]:
+    connector = kb_connector_store.get_connector(connector_id)
+    if connector is None:
+        raise HTTPException(status_code=404, detail="connector not found")
+    return kb_ingest_jobs.enqueue_connector_job(connector)
+
+
+def _wait_for_kb_ingest_job(job_id: str) -> dict[str, Any]:
+    deadline = time.monotonic() + _KB_INGEST_WAIT_TIMEOUT_SECONDS
+    while True:
+        job = kb_ingest_jobs.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="kb ingest job not found")
+        status = str(job["status"])
+        if status == "done":
+            result = kb_ingest_jobs.get_job_result(job) or {}
+            return {"job_id": job_id, "status": status, **result}
+        if status == "failed":
+            return {"job_id": job_id, "status": status, "error": str(job.get("last_error") or "")}
+        if time.monotonic() >= deadline:
+            return {"job_id": job_id, "status": status}
+        time.sleep(_KB_INGEST_POLL_INTERVAL_SECONDS)
 
 
 def _chunk_to_search_result(chunk: KnowledgeChunk) -> dict[str, Any]:
@@ -513,7 +594,9 @@ def import_document(
     kb_id: str, body: ImportBody, authorization: str | None = Header(None)
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
-    result = kb_ingest_text(body.tenant_id, kb_id, body.source, body.content, body.document_format)
+    _require_active_kb(body.tenant_id, kb_id)
+    job = _enqueue_import_job(kb_id, body)
+    result = _wait_for_kb_ingest_job(str(job["id"]))
     audit_log.write_audit(
         user.id,
         "doc_import",
@@ -533,7 +616,9 @@ def sync_directory(
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
     _require_confirm(x_confirm)  # full resync is high-risk
-    result = kb_sync_directory(body.tenant_id, kb_id, body.path)
+    _require_active_kb(body.tenant_id, kb_id)
+    job = _enqueue_sync_directory_job(kb_id, body)
+    result = _wait_for_kb_ingest_job(str(job["id"]))
     audit_log.write_audit(user.id, "doc_sync", "kb", kb_id, detail={"path": body.path})
     return result
 
@@ -841,19 +926,43 @@ async def sync_kb_connector(
         raise HTTPException(status_code=404, detail="connector not found")
     if not body.dry_run:
         _require_confirm(x_confirm)  # real ingestion is high-risk
-    result = await knowledge_base.run_connector_sync(
-        connector_id, settings=_connector_settings(), dry_run=body.dry_run
-    )
+    if body.dry_run:
+        result = await knowledge_base.run_connector_sync(
+            connector_id, settings=_connector_settings(), dry_run=True
+        )
+        response = {
+            "connector_id": result.connector_id,
+            "status": result.status,
+            "summary": result.summary,
+            "error": result.error,
+        }
+    else:
+        job = _enqueue_connector_sync_job(connector_id)
+        response = _wait_for_kb_ingest_job(str(job["id"]))
     audit_log.write_audit(
         user.id,
         "kb_connector.sync",
         "kb_connector",
         connector_id,
-        detail={"dry_run": body.dry_run, "status": result.status},
+        detail={"dry_run": body.dry_run, "status": response["status"]},
     )
-    return {
-        "connector_id": result.connector_id,
-        "status": result.status,
-        "summary": result.summary,
-        "error": result.error,
-    }
+    if body.dry_run:
+        return response
+    return {"connector_id": connector_id, **response}
+
+
+@router.post("/{kb_id}/extract-entities", status_code=202)
+def extract_entities(
+    kb_id: str,
+    body: ExtractEntitiesBody,
+    authorization: str | None = Header(None),
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    try:
+        run = kb_extract_entities(body.tenant_id, kb_id, document_id=body.document_id)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    audit_log.write_audit(user.id, "kb_extract_entities", "kb", kb_id)
+    return {"status": "accepted", "run": run}

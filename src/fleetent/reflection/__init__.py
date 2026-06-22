@@ -5,6 +5,7 @@ from types import ModuleType
 from typing import Any, cast
 
 from . import reflection as _reflection
+from . import scheduler as scheduler
 from .reflection import *  # noqa: F403
 
 

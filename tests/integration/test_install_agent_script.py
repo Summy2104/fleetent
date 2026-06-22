@@ -1,9 +1,9 @@
-"""Behavioral tests for scripts/install-agent.sh (install-defer-agent-init).
+"""Behavioral tests for scripts/install-agent.sh (agent-host installer).
 
-install-agent.sh now only installs the fleetent runtime + sets FLEETENT_HOME, then
-prints a tutorial guiding the operator to create an agent themselves. It no longer
-runs `fleetent agent init`, produces no agent home, and takes no agent-id positional
-argument.
+install-agent.sh installs the fleetent runtime + node supervisor, sets FLEETENT_HOME,
+and prints a tutorial guiding the operator to configure `$FLEETENT_HOME/node/.env`
+and start `fleetent node start`. It does not scaffold an agent home, and mentions
+`fleetent agent init` / `fleetent agent run` only as dev/test workflows.
 
 All runs are isolated to a temp HOME via a fake `uv` on PATH that stubs `tool install`
 (seeding no-op entrypoints) and `python`, so nothing touches the network or the real
@@ -15,6 +15,7 @@ import subprocess
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "install-agent.sh"
+_RETIRED_TUI_CMD = "fleetent" + "-tui"
 
 _FAKE_UV = """#!/bin/bash
 echo "uv $*" >> "$UV_LOG"
@@ -23,9 +24,7 @@ case "$1" in
   python) [ "${FAKE_PYTHON_OK:-1}" = "1" ] && exit 0 || exit 1 ;;
   tool)
     if [ "$2" = "install" ]; then
-      for c in fleetent fleetent-admin fleetent-tui; do
-        printf '#!/bin/bash\\n:' > "$FAKE_BIN/$c"; chmod +x "$FAKE_BIN/$c"
-      done
+      printf '#!/bin/bash\\n:' > "$FAKE_BIN/fleetent"; chmod +x "$FAKE_BIN/fleetent"
     fi
     ;;
 esac
@@ -73,9 +72,18 @@ def test_install_without_agent_id_installs_runtime_and_prints_tutorial(tmp_path:
     # Runtime installed; no agent init was run.
     assert "tool install" in uv_log.read_text()
     assert "agent init" not in uv_log.read_text()
-    # Tutorial guides the operator to create an agent themselves.
+    # Tutorial guides the operator to configure node and start it against platform.
+    assert "node supervisor" in out
+    assert "$FLEETENT_HOME/node/.env" in out
+    assert "fleetent node start" in out
+    assert "FLEETENT_NODE_PLATFORM_URL" in out
+    assert "FLEETENT_NODE_ID" in out
+    assert "FLEETENT_NODE_SERVICE_KEY" in out
+    # agent init/run remain available only as dev/test guidance.
+    assert "dev/test" in out
     assert "fleetent agent init" in out
     assert "fleetent agent run" in out
+    assert _RETIRED_TUI_CMD not in out
     # No agent home produced by the script.
     assert not (home / ".fleetent" / "agents").exists()
 

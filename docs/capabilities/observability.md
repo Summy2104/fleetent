@@ -194,7 +194,7 @@ def get_logger(component: str) -> Logger:
   permission 等运行性能指标
 - source attribution：`InjectedContextTrace`、`record_injected_context()`、`injected_context` event
 - knowledge-base scope diagnostics：agent 没有显式 KB 绑定且默认 KB 为空时记录 `knowledge_base.agent_kb_scope_empty`
-- admin query CLI：`fleetent-admin observability traces|usage|performance` 提供 run trace、用量和性能排障入口
+- admin query HTTP API：`/admin/observability/{traces,usage,performance}` 提供 run trace、用量和性能排障入口
 - diagnostics export / retention：`export_diagnostics()` 生成本地脱敏诊断包，包含 logs、traces、usage / performance
   summary、connector 配置摘要和 latest status；`plan_diagnostics_retention()` /
   `apply_diagnostics_retention()` 只处理 logs、traces 和 diagnostics export 包，默认 disabled，不清理业务数据或备份
@@ -265,7 +265,7 @@ def get_logger(component: str) -> Logger:
   - 先提供 Python public API，不新增 rollup 表
   - 通过 `query_trace_events()` 读取数据，session 过滤在 API 读取后按 trace event 执行
   - 后续 platform / dashboard 可通过该 API 或后续 HTTP endpoint 读取
-- [x] **Admin 查询入口**（`observability-admin-query-api`）：`fleetent-admin observability traces|usage|performance`
+- [x] **Admin 查询入口**（`observability-admin-query-api`）：`/admin/observability/{traces,usage,performance}`
   - trace 查询只输出事件元数据和 payload key summary，不输出 payload 原值
   - usage / performance 查询复用 observability public API，不直接访问 SQLite 表
 - [ ] **预算查询接口**：供 agent-runtime 查询当前 run / session / 用户 / agent 用量

@@ -1,19 +1,12 @@
-"""Integration tests for tenancy admin provisioning — Task 5.1/5.2.
-
-Tests both the admin CLI commands and the REST API for tenant/team provisioning.
-Verifies admin auth guard and audit log writes.
-"""
+"""Integration tests for tenancy admin provisioning."""
 
 from __future__ import annotations
 
-from io import StringIO
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from fleetent import user_store
-from fleetent.platform.admin_cli.main import main as admin_cli_main
 from tests.integration.test_migrations import apply_migrations
 
 
@@ -23,92 +16,6 @@ def tmp_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     apply_migrations(db)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-
-
-def run_admin(*args: str) -> tuple[str, str, int]:
-    """Run admin CLI and return (stdout, stderr, exit_code)."""
-    stdout, stderr = StringIO(), StringIO()
-    exit_code = 0
-    with (
-        patch("sys.argv", ["fleetent-admin", *args]),
-        patch("sys.stdout", stdout),
-        patch("sys.stderr", stderr),
-    ):
-        try:
-            admin_cli_main()
-        except SystemExit as e:
-            exit_code = int(e.code or 0)
-    return stdout.getvalue(), stderr.getvalue(), exit_code
-
-
-# ── Admin CLI tests ───────────────────────────────────────────────────────────
-
-
-def test_create_tenant_cli(tmp_path: Path) -> None:
-    stdout, stderr, code = run_admin("create-tenant", "--id", "acme", "--name", "Acme Corp")
-    assert code == 0, stderr
-    assert "acme" in stdout or "Acme" in stdout
-
-
-def test_create_tenant_cli_generates_uuid_without_id(tmp_path: Path) -> None:
-    stdout, stderr, code = run_admin("create-tenant", "--name", "Auto ID Corp")
-    assert code == 0, stderr
-
-
-def test_create_team_cli(tmp_path: Path) -> None:
-    run_admin("create-tenant", "--id", "t1", "--name", "Tenant One")
-    stdout, stderr, code = run_admin(
-        "create-team", "--id", "eng", "--tenant-id", "t1", "--name", "Engineering"
-    )
-    assert code == 0, stderr
-    assert "eng" in stdout or "Engineering" in stdout
-
-
-def test_list_tenants_cli(tmp_path: Path) -> None:
-    run_admin("create-tenant", "--id", "listed", "--name", "Listed Corp")
-    stdout, _, code = run_admin("list-tenants")
-    assert code == 0
-    assert "listed" in stdout
-
-
-def test_set_user_tenant_cli(tmp_path: Path) -> None:
-    user, _ = user_store.create_user("Test User")
-    run_admin("create-tenant", "--id", "corp2", "--name", "Corp Two")
-    stdout, stderr, code = run_admin(
-        "set-user-tenant", "--user-id", user.id, "--tenant-id", "corp2"
-    )
-    assert code == 0, stderr
-    refreshed = user_store.get_by_id(user.id)
-    assert refreshed is not None
-    assert refreshed.tenant_id == "corp2"
-
-
-def test_set_tenant_approver_cli(tmp_path: Path) -> None:
-    approver, _ = user_store.create_user("Approver User")
-    stdout, stderr, code = run_admin(
-        "set-approver", "--type", "tenant", "--id", "default", "--user-id", approver.id
-    )
-    assert code == 0, stderr
-    from fleetent.platform.tenancy.store import get_tenant
-
-    tenant = get_tenant("default")
-    assert tenant is not None
-    assert tenant["approver_user_id"] == approver.id
-
-
-def test_set_team_approver_cli(tmp_path: Path) -> None:
-    run_admin("create-tenant", "--id", "t3", "--name", "T3")
-    run_admin("create-team", "--id", "team3", "--tenant-id", "t3", "--name", "Team Three")
-    approver, _ = user_store.create_user("Team Approver")
-    stdout, stderr, code = run_admin(
-        "set-approver", "--type", "team", "--id", "team3", "--user-id", approver.id
-    )
-    assert code == 0, stderr
-    from fleetent.platform.tenancy.store import get_team
-
-    team = get_team("team3")
-    assert team is not None
-    assert team["approver_user_id"] == approver.id
 
 
 # ── Admin API tests ───────────────────────────────────────────────────────────

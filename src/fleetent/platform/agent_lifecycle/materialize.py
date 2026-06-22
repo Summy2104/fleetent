@@ -8,6 +8,7 @@ references secrets by env-var name only (never plaintext) — so the agent is ru
 
 from __future__ import annotations
 
+import secrets
 import shutil
 import sqlite3
 from hashlib import sha256
@@ -28,7 +29,7 @@ from fleetent.agent_config import (
     default_models,
 )
 from fleetent.config import McpServerSettings
-from fleetent.platform.agent_lifecycle import credential_slots, secret_store
+from fleetent.platform.agent_lifecycle import credential_slots, default_binding_store, secret_store
 from fleetent.platform.connector_management import mcp_server_store
 from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.model_provider_management import provider_admin_store
@@ -41,6 +42,7 @@ if TYPE_CHECKING:
     from fleetent.knowledge_base.config import KnowledgeConfigSnapshot
 
 _logger = get_logger("agent_lifecycle.materialize")
+_TUI_TOKEN_ENV = "FLEETENT_TUI_TOKEN"
 
 
 def _active_version(agent: agent_store.Agent) -> int:
@@ -111,7 +113,8 @@ def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
         memory_namespace=agent.memory_namespace,
     )
     with_overrides = _apply_overrides(base, agent.config_overrides)
-    return _materialize_im_access(with_overrides, agent)
+    with_im_access = _materialize_im_access(with_overrides, agent)
+    return _materialize_default_binding(with_im_access, agent)
 
 
 def desired_state_payload_from_agent_file(agent_file: AgentFile) -> dict[str, Any]:
@@ -125,7 +128,7 @@ def _strip_secret_plumbing(value: Any) -> Any:
     if isinstance(value, dict):
         sanitized: dict[str, Any] = {}
         for key, item in value.items():
-            if key == "env" or key.endswith("_env") or key.endswith("credential_ref"):
+            if key == "env" or key.endswith("credential_ref"):
                 continue
             sanitized[key] = _strip_secret_plumbing(item)
         return sanitized
@@ -166,6 +169,16 @@ def _materialize_im_access(base: AgentFile, agent: agent_store.Agent) -> AgentFi
         access["allow_users"] = allow_users
         access.setdefault("allow_groups", [])
 
+    return AgentFile.model_validate(raw)
+
+
+def _materialize_default_binding(base: AgentFile, agent: agent_store.Agent) -> AgentFile:
+    raw = base.model_dump(mode="json", exclude_defaults=False)
+    bindings = raw.setdefault("bindings", {})
+    if default_binding_store.is_default(agent.id):
+        bindings["default"] = True
+    else:
+        bindings.pop("default", None)
     return AgentFile.model_validate(raw)
 
 
@@ -386,6 +399,22 @@ def _parse_env(text: str) -> dict[str, str]:
     return values
 
 
+def _ensure_managed_tui_token(existing: dict[str, str], *, agent_id: int | None) -> str | None:
+    """Return a managed agent's TUI token, persisting it through the secret store."""
+    if agent_id is None:
+        return None
+    if secret_store.status(agent_id, _TUI_TOKEN_ENV) == "set":
+        stored = secret_store.get_decrypted(agent_id, _TUI_TOKEN_ENV)
+        if stored:
+            return stored
+    token = existing.get(_TUI_TOKEN_ENV, "") or f"ma-{secrets.token_hex(32)}"
+    try:
+        secret_store.set(agent_id, _TUI_TOKEN_ENV, token, "materialize")
+    except secret_store.SecretKeyError:
+        pass
+    return token
+
+
 def _seed_env(
     home: Path,
     names: list[str],
@@ -400,6 +429,10 @@ def _seed_env(
     """
     env_path = home / ".env"
     existing = _parse_env(env_path.read_text(encoding="utf-8")) if env_path.exists() else {}
+    managed_tui_token = _ensure_managed_tui_token(
+        existing,
+        agent_id=source_agent.id if source_agent is not None else None,
+    )
     slots_by_env = (
         {slot.env_name: slot for slot in credential_slots.list_slots(source_agent)}
         if source_agent is not None
@@ -427,12 +460,14 @@ def _seed_env(
             # bare write_home (no store context): keep the operator value, never touch tables
             value = existing.get(name, "")
         lines.append(f"{name}={value}")
+    if managed_tui_token:
+        lines.append(f"{_TUI_TOKEN_ENV}={managed_tui_token}")
     # keep any operator-added vars not referenced by the definition
     excluded = exclude_existing or set()
     for key, val in existing.items():
         if key in excluded:
             continue
-        if key not in names:
+        if key != _TUI_TOKEN_ENV and key not in names:
             lines.append(f"{key}={val}")
     env_path.write_text("\n".join(lines) + "\n" if lines else "", encoding="utf-8")
 

@@ -34,11 +34,15 @@ def test_local_backend_spawn_uses_agent_run(monkeypatch, tmp_path) -> None:
 
     assert len(calls) == 1
     cmd, cwd, env = calls[0]
+    assigned_port = backend.gateway_port("support")
+    assert assigned_port is not None
     assert cmd == (
         "fleetent",
         "agent",
         "run",
         "support",
+        "--port",
+        str(assigned_port),
         "--home",
         str(tmp_path / "agents" / "support"),
     )

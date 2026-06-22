@@ -1,10 +1,10 @@
 ## ADDED Requirements
 
 ### Requirement: Local configuration initialization
-系统 SHALL 提供 `fleetent-admin init-config` 作为本地部署配置初始化入口。
+系统 SHALL 提供 `fleetent admin init-config` 作为本地部署配置初始化入口。
 
 #### Scenario: Init config creates local deployment files
-- **WHEN** operator 运行 `fleetent-admin init-config`
+- **WHEN** operator 运行 `fleetent admin init-config`
 - **THEN** 系统从 `.env.example` 创建 `.env`
 - **AND** 从 `config/settings.yaml.example` 创建 `config/settings.yaml`
 - **AND** 从 `config/mcp.servers.yaml.example` 创建 `config/mcp.servers.yaml`

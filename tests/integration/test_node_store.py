@@ -4,8 +4,10 @@ import json
 import sqlite3
 
 import pytest
+from cryptography.fernet import Fernet
 
 from fleetent import agent_store
+from fleetent.secret_crypto import SecretKeyError
 from tests.integration._migration_template import apply_migrations
 
 
@@ -13,6 +15,7 @@ from tests.integration._migration_template import apply_migrations
 def db_path(tmp_path, monkeypatch):
     db_path = tmp_path / "management.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("FLEETENT_SECRET_KEY", Fernet.generate_key().decode("ascii"))
     apply_migrations(db_path)
     return db_path
 
@@ -120,3 +123,18 @@ def test_deregister_occupied_node_raises_value_error(db_path) -> None:
 
     with pytest.raises(ValueError, match="still has pinned agents"):
         node_store.deregister_node("node-busy")
+
+
+def test_register_node_raises_and_leaves_no_record_when_key_persist_fails(
+    db_path, monkeypatch
+) -> None:
+    from fleetent.platform.node_management import node_store
+
+    # Simulate secret persist failure (e.g. missing master key)
+    monkeypatch.delenv("FLEETENT_SECRET_KEY", raising=False)
+
+    with pytest.raises(SecretKeyError):
+        node_store.register_node("node-fail")
+
+    # Must not leave a half-committed node row
+    assert node_store.list_nodes() == []

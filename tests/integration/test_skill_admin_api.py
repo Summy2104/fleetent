@@ -301,20 +301,12 @@ def test_force_publish_requires_confirm(client):
 # --- proposal inbox (场景 54/55) ---------------------------------------------
 
 
-def test_approve_proposal_is_read_only_projection(client):
-    token, uid = _session_for("admin")
-    r = client.post("/admin/skills/proposals/p1/approve", headers=_hdr(token, confirm=True))
-    assert uid
-    assert r.status_code == 409
-    assert "read-only" in r.json()["detail"]
-    assert not any(a["action"] == "skill.proposal_approve" for a in audit.search_audit())
-
-
-def test_reject_proposal_is_read_only_projection(client):
-    token, _ = _session_for("admin")
-    r = client.post("/admin/skills/proposals/p2/reject", headers=_hdr(token))
-    assert r.status_code == 409
-    assert "read-only" in r.json()["detail"]
+def test_skill_proposal_actions_removed_but_list_and_diff_remain() -> None:
+    paths = {getattr(route, "path", None) for route in api.router.routes}
+    assert "/admin/skills/proposals" in paths
+    assert "/admin/skills/proposals/{proposal_id}/diff" in paths
+    assert "/admin/skills/proposals/{proposal_id}/approve" not in paths
+    assert "/admin/skills/proposals/{proposal_id}/reject" not in paths
 
 
 def test_list_proposals_uses_reflection(client, monkeypatch):
@@ -380,18 +372,6 @@ def test_proposal_diff_real_reflection(client):
     r = client.get("/admin/skills/proposals/pr2/diff", headers=_hdr(token)).json()
     assert "@@" in r["diff"]
     assert r["target_skill"] == "demo"
-
-
-def test_approve_proposal_real_reflection_is_blocked(client):
-    from fleetent import reflection
-
-    _insert_proposal(reflection._state_db.path, pid="pr3")
-    token, _ = _session_for("admin")
-    r = client.post("/admin/skills/proposals/pr3/approve", headers=_hdr(token, confirm=True))
-    assert r.status_code == 409
-    # proposal stays pending because platform only exposes a read projection.
-    rows = client.get("/admin/skills/proposals", headers=_hdr(token)).json()
-    assert any(p["id"] == "pr3" for p in rows)
 
 
 def test_skill_content_endpoint(client, monkeypatch):

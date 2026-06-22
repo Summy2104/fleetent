@@ -153,8 +153,8 @@ def extract_message(template: str | None, payload: Any) -> str:
 
 - ✅ **触发期校验**：到点时从 store 重读任务行——已删除或已禁用的行绝不执行（绕过 facade 的写入者也拦得住）；owner 被拉黑或不存在时跳过执行
 
-- ✅ **Principal recheck 解耦（standalone 安全）**：cron 任务触发前会 recheck scheduled_task 的 principal（api_key 是否仍有效、未禁用）
-  - recheck 逻辑通过注入的 resolver 解耦：platform 启动时调用 `cron_scheduler.set_principal_resolver(_cron_principal_recheck)` 注入平台侧检查；standalone 模式下不注入（resolver=None），直接放行
+- ✅ **Principal recheck 解耦（direct-run 安全）**：cron 任务触发前会 recheck scheduled_task 的 principal（api_key 是否仍有效、未禁用）
+  - recheck 逻辑通过注入的 resolver 解耦：platform 启动时调用 `cron_scheduler.set_principal_resolver(_cron_principal_recheck)` 注入平台侧检查；直接 `fleetent agent run` 的进程不注入（resolver=None），直接放行
   - fail-closed 语义：recheck 异常时拒绝执行，而非忽略异常继续运行
   - cron 触发路径因此不 import `user_store`，也不打开 management 库（`decouple-cron-principal-recheck`，2026-06-16 归档）
 

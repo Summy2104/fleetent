@@ -12,8 +12,11 @@ from tests.integration._migration_template import apply_migrations
 
 @pytest.fixture
 def db_path(tmp_path, monkeypatch):
+    from cryptography.fernet import Fernet
+
     db_path = tmp_path / "management.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("FLEETENT_SECRET_KEY", Fernet.generate_key().decode("ascii"))
     apply_migrations(db_path)
     return db_path
 
@@ -66,15 +69,26 @@ def test_platform_user_bearer_rejects_node_service_key(db_path) -> None:
 def test_get_desired_state_returns_only_enabled_agents_for_node(node_client: TestClient) -> None:
     from fleetent import agent_store
     from fleetent.platform.agent_management_console import agent_admin_store
+    from fleetent.platform.model_provider_management import provider_admin_store
     from fleetent.platform.node_management import node_store, placement_store
 
     node_key, _ = node_store.register_node("node-a")
     node_store.register_node("node-b")
+    provider_admin_store.add_provider(
+        "claude-fast",
+        "https://api.anthropic.com/v1/",
+        "claude-haiku-4-5-20251001",
+        provider="anthropic",
+        protocol="openai_chat",
+        api_key="sk-inline-secret",
+        api_key_env="FLEETENT_AGENT_ENABLED_MODEL",
+    )
 
     enabled = agent_store.create_agent(
         "enabled",
         "Help users",
         ["shell"],
+        model_overrides={"default": [{"provider_id": "claude-fast"}]},
         config_overrides={
             "im": {
                 "slack": {
@@ -109,9 +123,11 @@ def test_get_desired_state_returns_only_enabled_agents_for_node(node_client: Tes
     config = payload["agents"][0]["config"]
     assert config["name"] == "enabled"
     assert config["system_prompt"] == "Help users"
+    assert config["models"]["targets"][0]["api_key_env"] == "FLEETENT_AGENT_ENABLED_MODEL"
     assert config["im"]["supports_dm"] is True
-    assert "bot_token_env" not in config["im"]["slack"]
-    assert "app_token_env" not in config["im"]["slack"]
+    assert config["im"]["slack"]["bot_token_env"] == "ENABLED_SLACK_BOT"
+    assert config["im"]["slack"]["app_token_env"] == "ENABLED_SLACK_APP"
+    assert "sk-inline-secret" not in str(config)
 
 
 def test_get_desired_state_returns_empty_agent_set_when_node_has_no_enabled_placements(
@@ -210,8 +226,8 @@ def test_get_desired_state_includes_only_set_secrets_for_enabled_agents_on_targe
     delivered = payload["agents"][0]
     assert delivered["secrets"] == {"ENABLED_SLACK_BOT": "xoxb-live-secret"}
     assert delivered["config"]["im"]["slack"]["access"]["require_approval"] is True
-    assert "bot_token_env" not in delivered["config"]["im"]["slack"]
-    assert "app_token_env" not in delivered["config"]["im"]["slack"]
+    assert delivered["config"]["im"]["slack"]["bot_token_env"] == "ENABLED_SLACK_BOT"
+    assert delivered["config"]["im"]["slack"]["app_token_env"] == "ENABLED_SLACK_APP"
     assert "ENABLED_SLACK_APP" not in delivered["secrets"]
     assert "other-node-secret" not in str(payload)
     assert "disabled-secret" not in str(payload)

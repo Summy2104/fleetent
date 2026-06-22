@@ -77,7 +77,11 @@ class NodeReconciler:
     def _post_status(self, desired_state: DesiredState) -> None:
         payload = {
             "agents": [
-                _status_payload(agent.agent_id, self._backend.is_alive(agent.name))
+                _status_payload(
+                    agent.agent_id,
+                    self._backend.is_alive(agent.name),
+                    self._agent_health(agent.name),
+                )
                 for agent in desired_state.agents
             ]
         }
@@ -91,6 +95,21 @@ class NodeReconciler:
             response.raise_for_status()
         except httpx.HTTPError:
             return
+
+    def _agent_health(self, agent_name: str) -> str | None:
+        pid = self._backend.is_alive(agent_name)
+        if pid is None:
+            return None
+
+        port = self._backend.gateway_port(agent_name)
+        if port is None:
+            return "healthy"
+
+        try:
+            response = httpx.get(f"http://127.0.0.1:{port}/health", timeout=1.0)
+        except Exception:
+            return "unhealthy"
+        return "healthy" if response.status_code == 200 else "unhealthy"
 
     def _write_home(self, agent_name: str, config: dict[str, Any]) -> None:
         home = self._home_dir(agent_name)
@@ -129,11 +148,12 @@ def _config_hash(config: dict[str, Any]) -> str:
     return sha256(yaml.safe_dump(config, sort_keys=True).encode("utf-8")).hexdigest()
 
 
-def _status_payload(agent_id: int, pid: int | None) -> dict[str, Any]:
+def _status_payload(agent_id: int, pid: int | None, health: str | None) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "agent_id": agent_id,
         "phase": "running" if pid is not None else "stopped",
     }
     if pid is not None:
         payload["pid"] = pid
+        payload["health"] = health
     return payload

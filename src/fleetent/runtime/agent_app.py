@@ -1,8 +1,9 @@
-"""Standalone agent runtime: boot one agent home as a self-contained process.
+"""Single-agent runtime process used by node and local dev/test.
 
 `fleetent agent run <agent-id>` loads a single agent home (`agent.yaml` + `.env` +
-`data/` + local access), runs the agent loop, and brings up that agent's IM connectors —
-with no platform service. Reuses the shared runtime libs (loop/run_stream, agent_config,
+`data/` + local access), runs the agent loop, and brings up that agent's IM connectors.
+Node uses this as the process primitive for managed deployments; developers may also run
+it directly for dev/test. Reuses the shared runtime libs (loop/run_stream, agent_config,
 session, MCP, sandbox, the per-agent Slack supervisor) but as an agent-scoped runtime,
 not the platform app (see openspec change ``agent-runtime-cli``). HTTP `/chat` + `/ws`
 are served only when a port is given.
@@ -48,7 +49,7 @@ class ApprovalRequest(BaseModel):
 
 @dataclass
 class AgentRuntime:
-    """Handle for a running standalone agent: its definition, IM supervisor, app."""
+    """Handle for one running agent process: its definition, IM supervisor, app."""
 
     agent: AgentFile
     supervisor: SlackSupervisor
@@ -66,6 +67,9 @@ class AgentRuntime:
             await _stop_step("telegram_supervisor", self.telegram_supervisor.stop_all())
         if self.scheduler is not None:
             await _stop_step("scheduler", self.scheduler.shutdown())
+        from fleetent.reflection import scheduler as reflection_scheduler
+
+        await _stop_step("reflection_scheduler", reflection_scheduler.stop_reflection_scheduler())
 
 
 async def _stop_step(name: str, coro: Awaitable[None], timeout: float = 10.0) -> None:
@@ -139,7 +143,7 @@ def _check_tenant(principal: Principal, agent_tenant: str) -> bool:
 def _redirect_agent_data_paths(home_dir: Path) -> None:
     """Redirect all per-agent runtime data sinks to ``home_dir/data/``.
 
-    Called once per standalone agent boot before any infra initialisation. Assigns
+    Called once per agent-process boot before any infra initialisation. Assigns
     directly to module-level constants so the change takes effect for all subsequent
     operations in this process without introducing new env vars.
     """
@@ -158,7 +162,7 @@ def _redirect_agent_data_paths(home_dir: Path) -> None:
 def _configure_logging_from_agent(agent: AgentFile, home_dir: Path) -> None:
     """Apply agent.yaml log_format and observability.logging.* to the runtime logging system.
 
-    Called once per standalone agent process after the agent file is loaded. The platform
+    Called once per agent process after the agent file is loaded. The platform
     server path (server.py) continues to use configure_logging(Settings) unchanged.
     A blank ``directory`` resolves to ``home_dir/data/logs/``; a relative ``directory``
     resolves against ``home_dir`` (anchored like agent.yaml/.env, never the process CWD);
@@ -273,15 +277,9 @@ async def _start_infra(
     (== home_dir, mirroring the MCP `agent_home` derivation below).
     """
     _init_agent_db_schema(data_dir, agent_id=agent.name, tenant_id=agent.tenant_id)
-
-    # approval-suspend-resume (#8): reconcile THIS agent's expired pending approvals now
-    # that _init_agent_db_schema has wired approval_store's per-agent state_db. This used
-    # to run in the platform lifespan, where no agent state_db is wired (crashed boot);
-    # it belongs here so each agent reconciles its own approvals against its own DB.
     from fleetent.runtime.approval_resume import reconcile_expired_approvals
 
     await reconcile_expired_approvals()
-
     from fleetent.integrations.sandbox import enablement as sandbox_enablement
 
     # Select the configured sandbox backend (agent.yaml > platform.yaml > docker) and
@@ -335,6 +333,14 @@ async def _start_infra(
         except Exception as exc:  # noqa: BLE001 — MCP unavailable must not abort boot
             _logger.warn("agent_runtime_mcp_register_failed", error=str(exc))
     session_mgr.start_session_maintenance()
+    reflection_settings = getattr(agent, "reflection", None)
+    if reflection_settings is not None and getattr(reflection_settings, "enabled", False) is True:
+        from fleetent.reflection import scheduler as reflection_scheduler
+
+        reflection_scheduler.start_reflection_scheduler(
+            interval=reflection_settings.interval_seconds,
+            scope=agent.name,
+        )
     # Restart recovery: flag sessions active just before this (re)start so the next
     # request can be recognized as a resumed conversation. Best-effort — a scan
     # failure must never abort boot.
@@ -578,8 +584,10 @@ def build_app(agent_name: str) -> FastAPI:
     _local_bearer = LocalBearerAdapter()
 
     def _authenticate(authorization: str = Header(default="")) -> Principal:  # noqa: B008
-        token = authorization.removeprefix("Bearer ").strip()
-        principal = _local_bearer(token) if authorization.startswith("Bearer ") else None
+        principal = None
+        if authorization.startswith("Bearer "):
+            token = authorization.removeprefix("Bearer ").strip()
+            principal = _local_bearer(token) or _validate_tui_token(authorization)
         if principal is None:
             raise HTTPException(status_code=401, detail="invalid or missing bearer token")
         return principal
@@ -632,6 +640,7 @@ def build_app(agent_name: str) -> FastAPI:
             ) or None
             kwargs["agent_features"] = agent.features
             kwargs["allowed_skills"] = agent.allowed_skills
+            kwargs["skill_authoring_enabled"] = agent.skill_authoring_enabled
             kwargs["governance"] = _governance_from_file(agent)
             kwargs["model_policy"] = ModelPolicySnapshot.from_agent(agent)
 
@@ -670,7 +679,9 @@ def build_app(agent_name: str) -> FastAPI:
             return
         await websocket.accept()
         transport = WSTransport(websocket)
-        conn = tui_dispatch.Connection(principal=tui_principal, transport=transport)
+        conn = tui_dispatch.Connection(
+            principal=tui_principal, transport=transport, agent_name=agent_name
+        )
         await transport.write(tui_proto.make_event(tui_proto.EVENT_GATEWAY_READY, {}))
         try:
             while True:

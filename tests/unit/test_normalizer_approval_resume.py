@@ -85,6 +85,31 @@ async def test_approve_with_pending_resolves_and_resumes(_resume_env):
     msg.reply_func.assert_awaited()
 
 
+def test_resolve_scope_key_is_public():
+    """The workspace scope-key resolver is public API so the resume path (im_gateway)
+    can thread it into the resumed tool_context, mirroring a normal turn."""
+    from fleetent.runtime import loop
+
+    assert hasattr(loop, "resolve_scope_key")
+    assert loop.resolve_scope_key("sess-1", "agentA")  # non-empty for either scope
+
+
+async def test_resumed_tool_context_carries_scope_key(_resume_env, monkeypatch):
+    """The tool_context injected for a resumed (approved) tool must carry the workspace
+    scope key, so /workspace arg translation + /exchange attribution apply (regression:
+    a scope_key-less resume context silently disabled stdio path translation)."""
+    from fleetent.runtime import loop as agent_loop
+
+    monkeypatch.setattr(agent_loop, "resolve_scope_key", lambda sid, an: f"SK::{sid}")
+    resolve, resume, entry = _resume_env
+    msg = _msg("approve abcd1234")
+
+    await normalizer.route(msg)
+
+    tc = resume.await_args.kwargs["tool_context"]
+    assert tc.scope_key == "SK::slack:dm:U_REQ:1.1"
+
+
 async def test_reject_with_pending_resumes_with_rejected(_resume_env):
     resolve, resume, entry = _resume_env
     msg = _msg("reject abcd1234")

@@ -66,7 +66,7 @@
   authenticate through the real admin/session flow.
 - [x] 5.2 Execute real HTTP calls for `/health`, `/admin/login`, `/admin/kb` create/list/import/list
   documents/preview/search/delete using the local server and migrated DB.
-- [x] 5.3 Execute CLI checks for `fleetent-admin memory shared ...`, vector reindex dry-run,
+- [x] 5.3 Execute CLI checks for `fleetent admin memory shared ...`, vector reindex dry-run,
   reflection dry-run, and memory compaction dry-run with isolated local state.
 - [x] 5.4 Record remaining skipped external-provider/SaaS items with explicit reason, owner, and
  复测条件; ask the operator for credentials or manual intervention when independent automation

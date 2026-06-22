@@ -31,7 +31,7 @@ mutation by requiring confirmation, execute opt-in and Pilot fixture acknowledge
 - **THEN** execute sync is skipped with a clear reason
 
 #### Scenario: Manual execute sync lacks safeguards
-- **WHEN** an operator runs `fleetent-admin kb connectors sync <connector_id>` without `--dry-run`
+- **WHEN** an operator calls `POST /admin/kb/connectors/<connector_id>/sync` without a dry-run body
 - **AND** confirmation, execute opt-in or Pilot fixture acknowledgement is absent
 - **THEN** the command exits before mutation
 - **AND** prints the required dry-run or execute safeguard
@@ -48,4 +48,3 @@ Pilot verification SHALL include connector status and real smoke pass/fail/skipp
 #### Scenario: Connector smoke skipped
 - **WHEN** connector smoke is skipped due to missing credentials
 - **THEN** the report includes the skipped reason and does not classify it as an automatic local test failure
-

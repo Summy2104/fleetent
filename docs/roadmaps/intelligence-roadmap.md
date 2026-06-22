@@ -233,13 +233,13 @@ flowchart TD
 
 完成标准：
 
-- Shared Memory 独立于 User Memory，支持 team / tenant scope、独立 vector namespace 和最小 admin CLI。
+- Shared Memory 独立于 User Memory，支持 team / tenant scope、独立 vector namespace，并通过 agent 侧 proposal/apply 生命周期受控落地。
 - long-term-ctx 按 agent `tenant_id` / `team_id` 解析 Shared Memory scope；policy 不能指定任意跨 tenant / team scope。
 - memory quality trend summary 只读聚合 User Memory、Shared Memory 和 maintenance proposal outcome，不触发自动维护。
 
 已完成 spec：
 
-- `shared-memory`：已完成 User Memory 之外的共享记忆实体、`shared_memory_items` 表、team / tenant scope、`shared:{scope_type}:{scope_id}` vector namespace、写入 / 更新 / 删除 lifecycle、reflection proposal apply 和最小 admin CLI；shared-memory 本身不负责 prompt 注入，注入已由 long-term-ctx context policy 按 agent 归属处理；默认不让管理员代批用户个人记忆，也不把企业共识直接混入 User Memory。
+- `shared-memory`：已完成 User Memory 之外的共享记忆实体、`shared_memory_items` 表、team / tenant scope、`shared:{scope_type}:{scope_id}` vector namespace、写入 / 更新 / 删除 lifecycle，以及 reflection proposal/apply 治理闭环；shared-memory 本身不负责 prompt 注入，注入已由 long-term-ctx context policy 按 agent 归属处理；默认不让管理员代批用户个人记忆，也不把企业共识直接混入 User Memory。
 - `long-term-context-agent-tenant-policy`：已实现并 archive，提交为 `dd8fbb5`。实现为 ownership-based context policy：tenant 默认 + agent 覆盖，Shared Memory scope 只从 agent `tenant_id` / `team_id` 派生，默认关闭，不表达任意 `scopes` 列表。
 - `memory-quality-trend-summary`：已实现并 archive，提交为 `70b9773`。实现为只读质量趋势，不触发 extraction、不自动维护 memory。
 

@@ -12,6 +12,7 @@ from fleetent import agent_config
 from fleetent.agent_config import AgentFile, ImAccess
 from fleetent.identity import Principal
 from fleetent.im_gateway import access
+from fleetent.runtime import user_instructions
 from fleetent.runtime.approval_resume import resume_pending_approval
 
 logger = structlog.get_logger(__name__)
@@ -392,6 +393,9 @@ async def _resume_pending_in_session(
         agent_name=agent.name if agent else None,
         features=agent_features or {},
         session_id=session_id,
+        # scope_key mirrors the normal turn (loop.py) so /workspace arg translation and
+        # /exchange attribution apply to the resumed (approved) tool, not just live turns.
+        scope_key=agent_loop.resolve_scope_key(session_id, agent.name if agent else None),
         session_context=session_context,
         outbound_connectors=msg.outbound_connectors,
         run_id=str(uuid.uuid4()),
@@ -422,6 +426,7 @@ async def _resume_pending_in_session(
             progress_func=progress_func,
             session_context=session_context,
             conversation_address=conversation_address,
+            skill_authoring_enabled=agent.skill_authoring_enabled if agent else False,
         )
 
     # upload_func is rebuilt for parity with the inbound path; the resumed run delivers
@@ -542,6 +547,21 @@ async def route(msg: NormalizedMessage) -> None:
             await msg.reply_func(_REJECTION_MSG)
             return
 
+    # Slash commands (/user /clear /compact /context /usage /cost) go through the shared
+    # dispatcher. Placed after the access gate (only authorized users may run them) and
+    # before the loop; a non-command returns None and proceeds normally. Tolerates a
+    # leading @mention so channel usage (`@bot /clear`) is recognized too.
+    if agent is not None:
+        from fleetent.runtime.commands import CommandContext, handle_command
+
+        cmd_reply = await handle_command(
+            CommandContext(agent_id=agent.name, session_id=msg.session_id, user_id=msg.user_id),
+            _strip_leading_mention(msg.text).strip(),
+        )
+        if cmd_reply is not None:
+            await msg.reply_func(cmd_reply)
+            return
+
     from fleetent.integrations.sandbox import enablement as sandbox_enablement
     from fleetent.model import ModelPolicySnapshot
     from fleetent.runtime import loop as agent_loop
@@ -587,7 +607,11 @@ async def route(msg: NormalizedMessage) -> None:
     # <available_skills> catalog. Per-user long-term context is injected by run().
     catalog = available_skills_prompt(allowed_skills=agent.allowed_skills if agent else None)
     disabled_trace = collect_disabled_trace() or None
-    system_content = "\n\n".join(p for p in [base_system, catalog] if p)
+    # Fold the per-agent user.md directives into the stable prefix, between the base
+    # system prompt and the skills catalog (same ordering as runtime _assemble_prompt).
+    user_md = user_instructions.load(agent.name) if agent else ""
+    user_block = f"[用户指令]\n{user_md}" if user_md else ""
+    system_content = "\n\n".join(p for p in [base_system, user_block, catalog] if p)
     # im-message-context: append the stable session frame (platform/scene/date+tz).
     if msg.session_context is not None:
         system_content = f"{system_content}\n\n{_session_frame_text(msg.session_context)}"
@@ -690,6 +714,7 @@ async def route(msg: NormalizedMessage) -> None:
                 progress_func=msg.progress_func,
                 session_context=msg.session_context,
                 conversation_address=msg.conversation_address,
+                skill_authoring_enabled=agent.skill_authoring_enabled if agent else False,
             )
 
         # P4: session_end hook — observe after run completes, before session save.

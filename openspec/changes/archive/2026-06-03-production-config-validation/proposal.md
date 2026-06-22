@@ -27,7 +27,7 @@ skipped / error 结果，减少人工排障。
 - **owning package**：`infrastructure/config` 概念归属；实现可放在 `fleetent.config` 附近或新增
   `fleetent.observability` / `platform.admin_cli` 入口暴露 summary。
 - **public API surface**：可新增 `validate_runtime_config(profile: str) -> ValidationReport` 和
-  `fleetent-admin validate-config`。
+  `fleetent admin validate-config`。
 - **owned tables**：无。
 - **config namespace**：无新运行配置；新增 CLI 参数/profile 名称。
 - **cross-module dependencies**：读取 config、model routes、MCP config、connector credential_ref 和

@@ -65,6 +65,7 @@ class SetApproverBody(BaseModel):
 # ── endpoints ─────────────────────────────────────────────────────────────────
 
 
+@router.post("/tenants")
 def api_create_tenant(
     body: CreateTenantBody,
     authorization: str | None = Header(None),
@@ -75,6 +76,7 @@ def api_create_tenant(
     return tenant
 
 
+@router.get("/tenants")
 def api_list_tenants(
     authorization: str | None = Header(None),
 ) -> list[dict]:
@@ -82,6 +84,7 @@ def api_list_tenants(
     return tenancy_store.list_tenants()
 
 
+@router.post("/teams")
 def api_create_team(
     body: CreateTeamBody,
     authorization: str | None = Header(None),
@@ -92,6 +95,7 @@ def api_create_team(
     return team
 
 
+@router.get("/teams")
 def api_list_teams(
     tenant_id: str | None = None,
     authorization: str | None = Header(None),
@@ -100,6 +104,7 @@ def api_list_teams(
     return tenancy_store.list_teams(tenant_id=tenant_id)
 
 
+@router.post("/users/{user_id}/tenant")
 def api_set_user_tenant(
     user_id: str,
     body: SetUserTenantBody,
@@ -120,6 +125,7 @@ def api_set_user_tenant(
     return {"status": "ok", "user_id": user_id, "tenant_id": body.tenant_id}
 
 
+@router.patch("/approvers/{entity_id}")
 def api_set_approver(
     entity_id: str,
     body: SetApproverBody,

@@ -535,7 +535,7 @@ async def test_shared_memory_search_and_listing_use_fake_database(monkeypatch):
     assert [item.id for item in search_results] == ["second", "first"]
 
 
-def test_shared_memory_new_item_insert_update_and_audit_paths(monkeypatch):
+def test_shared_memory_new_item_insert_and_update_paths(monkeypatch):
     inserted: list[dict[str, object]] = []
 
     class FakeDb:
@@ -559,35 +559,11 @@ def test_shared_memory_new_item_insert_update_and_audit_paths(monkeypatch):
     shared._update(item)  # noqa: SLF001
     assert [params["id"] for params in inserted] == [item.id, item.id]
 
-    events: list[Any] = []
-    monkeypatch.setattr(
-        "fleetent.observability.record_trace_event",
-        lambda event: events.append(event),
-    )
-    from fleetent.platform.admin_cli import shared_memory
 
-    shared_memory.record_shared_memory_admin_audit("create", item.id, "admin")
-    assert events[0].payload == {"action": "create", "item_id": item.id, "actor": "admin"}
-
-
-def test_shared_memory_audit_not_implemented_in_memory_core(monkeypatch):
-    """Shared-memory admin audit should be implemented in platform shell, not core."""
+def test_shared_memory_audit_not_implemented_in_memory_core():
+    """Shared-memory core should not expose platform admin audit hooks."""
 
     assert not hasattr(shared, "record_shared_memory_admin_audit")
-
-    events: list[Any] = []
-    monkeypatch.setattr(
-        "fleetent.platform.admin_cli.shared_memory.observability.record_trace_event",
-        lambda event: events.append(event),
-    )
-    from fleetent.platform.admin_cli import shared_memory
-
-    shared_memory.record_shared_memory_admin_audit("shared_memory.create", "item-1", "admin")
-    assert events[0].payload == {
-        "action": "shared_memory.create",
-        "item_id": "item-1",
-        "actor": "admin",
-    }
 
 
 async def test_provider_connectivity_handles_success_and_errors(monkeypatch):

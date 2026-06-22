@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 
 import httpx
 import respx
@@ -11,8 +12,13 @@ from fleetent.node.provider import DesiredAgent, DesiredState
 
 
 class FakeBackend:
-    def __init__(self, alive: dict[str, int | None]) -> None:
+    def __init__(
+        self,
+        alive: dict[str, int | None],
+        gateway_ports: dict[str, int | None] | None = None,
+    ) -> None:
         self.alive = alive
+        self.gateway_ports = gateway_ports or {}
         self.spawn_calls: list[tuple[str, dict[str, str] | None]] = []
         self.stop_calls: list[str] = []
 
@@ -24,6 +30,9 @@ class FakeBackend:
 
     def is_alive(self, agent_name: str) -> int | None:
         return self.alive.get(agent_name)
+
+    def gateway_port(self, agent_name: str) -> int | None:
+        return self.gateway_ports.get(agent_name)
 
 
 def _config(tmp_path) -> NodeConfig:
@@ -53,6 +62,10 @@ def _desired(
         ],
         source=source,
     )
+
+
+def _post_body(route: respx.Route) -> dict[str, object]:
+    return json.loads(route.calls[0].request.content)
 
 
 @respx.mock
@@ -201,6 +214,70 @@ def test_reconcile_status_post_failure_does_not_raise(tmp_path) -> None:
     NodeReconciler(_config(tmp_path), backend).reconcile(_desired())
 
     assert backend.spawn_calls == [("support", {})]
+
+
+@respx.mock
+def test_reconcile_reports_agent_health_from_loopback_probe_and_pid_fallback(tmp_path) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    respx.get("http://127.0.0.1:9101/health").mock(return_value=httpx.Response(200))
+    respx.get("http://127.0.0.1:9102/health").mock(return_value=httpx.Response(503))
+    status_route = respx.post("https://platform.internal/nodes/node-a/status").mock(
+        return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
+    )
+    desired = DesiredState(
+        node_id="node-a",
+        agents=[
+            DesiredAgent(agent_id=101, name="support", config={"name": "support"}, secrets={}),
+            DesiredAgent(agent_id=102, name="billing", config={"name": "billing"}, secrets={}),
+            DesiredAgent(agent_id=103, name="legacy", config={"name": "legacy"}, secrets={}),
+        ],
+    )
+    backend = FakeBackend(
+        {"support": 11111, "billing": 22222, "legacy": 33333},
+        gateway_ports={"support": 9101, "billing": 9102},
+    )
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(desired)
+
+    assert _post_body(status_route) == {
+        "agents": [
+            {"agent_id": 101, "phase": "running", "pid": 11111, "health": "healthy"},
+            {"agent_id": 102, "phase": "running", "pid": 22222, "health": "unhealthy"},
+            {"agent_id": 103, "phase": "running", "pid": 33333, "health": "healthy"},
+        ]
+    }
+
+
+@respx.mock
+def test_reconcile_marks_probe_errors_unhealthy_without_interrupting_other_agents(tmp_path) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    respx.get("http://127.0.0.1:9201/health").mock(side_effect=httpx.ConnectTimeout("boom"))
+    respx.get("http://127.0.0.1:9202/health").mock(return_value=httpx.Response(200))
+    status_route = respx.post("https://platform.internal/nodes/node-a/status").mock(
+        return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
+    )
+    desired = DesiredState(
+        node_id="node-a",
+        agents=[
+            DesiredAgent(agent_id=101, name="support", config={"name": "support"}, secrets={}),
+            DesiredAgent(agent_id=102, name="sales", config={"name": "sales"}, secrets={}),
+        ],
+    )
+    backend = FakeBackend(
+        {"support": 11111, "sales": 22222},
+        gateway_ports={"support": 9201, "sales": 9202},
+    )
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(desired)
+
+    assert _post_body(status_route) == {
+        "agents": [
+            {"agent_id": 101, "phase": "running", "pid": 11111, "health": "unhealthy"},
+            {"agent_id": 102, "phase": "running", "pid": 22222, "health": "healthy"},
+        ]
+    }
 
 
 @respx.mock

@@ -1,14 +1,22 @@
 """Tests for stats_admin_api (/admin/stats, read-only). Covers scenarios 74-85."""
 
+import importlib
+from datetime import UTC, datetime
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import fleetent.auth as auth
 import fleetent.governance.audit_log as audit
+import fleetent.observability.traces as trace_store
 import fleetent.platform.agent_statistics.stats_admin_api as api
+import fleetent.platform.model_provider_management.provider_admin_store as provider_admin_store
 import fleetent.user_store as user_store
-from fleetent.db import create_database
+from fleetent.db import SQLiteDatabase, create_database
+from fleetent.observability import TraceEvent
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 from tests.integration._migration_template import apply_migrations
 
 
@@ -44,6 +52,23 @@ def _session_for(role: str) -> tuple[str, str]:
 
 def _hdr(token: str) -> dict:
     return {"Authorization": f"Session {token}"}
+
+
+@pytest.fixture
+def real_client(tmp_path, monkeypatch):
+    importlib.reload(api)
+    managed_db = tmp_path / "managed.db"
+    apply_migrations(managed_db)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{managed_db}")
+    db_instance = create_database(f"sqlite:///{managed_db}")
+    monkeypatch.setattr(user_store, "_db", lambda: db_instance)
+    state_db = SQLiteDatabase(path=tmp_path / "agent_state.db")
+    migrate(state_db, AGENT_STATE_MIGRATIONS)
+    monkeypatch.setattr(trace_store, "_state_db", state_db)
+    app = FastAPI()
+    app.include_router(api.router)
+    return TestClient(app, raise_server_exceptions=True)
 
 
 def test_no_auth_401(client):
@@ -214,3 +239,54 @@ def test_export_returns_csv_per_user(client, monkeypatch):  # 场景 81 (CSV)
     assert "alice" in body
     detail = next(a for a in audit.search_audit() if a["action"] == "stats_export")["detail"]
     assert detail["view"] == "per-user"
+
+
+def test_stats_overview_uses_real_traces(real_client):  # task 2.1 red -> green
+    provider_admin_store.add_provider(
+        "provider-a",
+        base_url="https://example.invalid/v1",
+        model="gpt-5.5",
+        api_key="sk-test",
+    )
+    provider_admin_store.set_pricing("provider-a", input_price=1.0, output_price=2.0)
+    trace_store.record_trace_event(
+        TraceEvent(
+            id="trace-run-1",
+            run_id="run-1",
+            event_type="agent_run_completed",
+            payload={
+                "tokens": {"prompt": 100, "completion": 100, "total": 200},
+                "elapsed_s": 1.5,
+                "rounds": 2,
+                "model_used": "gpt-5.5",
+            },
+            user_id="user-1",
+            session_id="sess-1",
+            agent_name="ops",
+            ts=datetime(2026, 6, 18, 8, 0, tzinfo=UTC),
+        )
+    )
+    trace_store.record_trace_event(
+        TraceEvent(
+            id="trace-approval-1",
+            run_id="run-1",
+            event_type="permission_resolved",
+            payload={"decision": "approved"},
+            user_id="user-1",
+            session_id="sess-1",
+            agent_name="ops",
+            ts=datetime(2026, 6, 18, 8, 0, 1, tzinfo=UTC),
+        )
+    )
+    token, _ = _session_for("admin")
+
+    response = real_client.get("/admin/stats/agents/ops/overview", headers=_hdr(token))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["usage"]["calls"] == 1
+    assert body["usage"]["total_tokens"] == 200
+    assert body["approvals"]["triggered"] == 1
+    assert body["approvals"]["pass_rate"] == 1.0
+    assert body["cost"]["status"] == "ok"
+    assert body["cost"]["by_model"]["gpt-5.5"]["cost"] == 0.3

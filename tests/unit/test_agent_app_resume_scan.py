@@ -16,6 +16,10 @@ _NOOP_INIT_SCHEMA = patch(
     "fleetent.runtime.agent_app._init_agent_db_schema",
     MagicMock(),
 )
+_NOOP_RECONCILE = patch(
+    "fleetent.runtime.approval_resume.reconcile_expired_approvals",
+    AsyncMock(return_value=0),
+)
 
 # _start_infra now reconciles this agent's expired approvals (#8) right after
 # _init_agent_db_schema wires approval_store's state_db. These tests NOOP that wiring,

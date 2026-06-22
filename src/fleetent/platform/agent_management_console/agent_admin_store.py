@@ -28,6 +28,7 @@ def get_state(agent_id: int) -> dict[str, Any]:
                 agent_admin_state.status,
                 agent_admin_state.provenance,
                 agent_admin_state.drift,
+                agent_admin_state.is_default,
                 agent_admin_state.archived_at,
                 agent_admin_state.updated_at
             FROM agent_admin_state
@@ -45,6 +46,7 @@ def get_state(agent_id: int) -> dict[str, Any]:
             "status": "enabled",
             "provenance": "adhoc",
             "drift": 0,
+            "is_default": 0,
             "archived_at": None,
             "updated_at": None,
         }
@@ -74,6 +76,35 @@ def restore(agent_id: int) -> None:
     set_status(agent_id, "enabled")
 
 
+def set_default(agent_id: int) -> None:
+    tenant_id = _agent_tenant(agent_id)
+    if tenant_id is None:
+        raise ValueError(f"agent not found: {agent_id}")
+    with _database().transaction() as conn:
+        conn.execute(
+            """
+            UPDATE agent_admin_state
+            SET is_default = 0, updated_at = :updated_at
+            WHERE agent_id IN (
+                SELECT id FROM agents WHERE tenant_id = :tenant_id
+            )
+            """,
+            {"tenant_id": tenant_id, "updated_at": _now()},
+        )
+    _upsert(agent_id, {"is_default": 1})
+
+
+def clear_default() -> None:
+    _database().execute(
+        "UPDATE agent_admin_state SET is_default = 0, updated_at = :updated_at",
+        {"updated_at": _now()},
+    )
+
+
+def is_default(agent_id: int) -> bool:
+    return bool(get_state(agent_id).get("is_default", 0))
+
+
 def set_provenance(agent_id: int, provenance: str) -> None:
     if provenance not in {"managed", "adhoc"}:
         raise ValueError(f"unknown provenance: {provenance}")
@@ -98,6 +129,7 @@ def list_states(include_archived: bool = False) -> list[dict[str, Any]]:
             agent_admin_state.status,
             agent_admin_state.provenance,
             agent_admin_state.drift,
+            agent_admin_state.is_default,
             agent_admin_state.archived_at,
             agent_admin_state.updated_at
         FROM agent_admin_state
@@ -134,8 +166,14 @@ def delete_state(agent_id: int) -> None:
         )
 
 
-_FIELDS = {"status", "provenance", "drift", "archived_at"}
-_DEFAULTS = {"status": "enabled", "provenance": "adhoc", "drift": 0, "archived_at": None}
+_FIELDS = {"status", "provenance", "drift", "is_default", "archived_at"}
+_DEFAULTS = {
+    "status": "enabled",
+    "provenance": "adhoc",
+    "drift": 0,
+    "is_default": 0,
+    "archived_at": None,
+}
 
 
 def _agent_name(agent_id: int) -> str | None:
@@ -147,6 +185,15 @@ def _agent_name(agent_id: int) -> str | None:
     return None if row is None else str(row["name"])
 
 
+def _agent_tenant(agent_id: int) -> str | None:
+    row = (
+        _database()
+        .execute("SELECT tenant_id FROM agents WHERE id = :agent_id", {"agent_id": agent_id})
+        .fetchone()
+    )
+    return None if row is None else str(row["tenant_id"])
+
+
 def _upsert(agent_id: int, fields: dict[str, Any]) -> None:
     merged = {**_DEFAULTS, **{k: v for k, v in fields.items() if k in _FIELDS}}
     assignments = ", ".join(f"{k} = :{k}" for k in fields if k in _FIELDS)
@@ -155,8 +202,8 @@ def _upsert(agent_id: int, fields: dict[str, Any]) -> None:
         conn.execute(
             """
             INSERT INTO agent_admin_state
-                (agent_id, status, provenance, drift, archived_at, updated_at)
-            VALUES (:agent_id, :status, :provenance, :drift, :archived_at, :updated_at)
+                (agent_id, status, provenance, drift, is_default, archived_at, updated_at)
+            VALUES (:agent_id, :status, :provenance, :drift, :is_default, :archived_at, :updated_at)
             ON CONFLICT(agent_id) DO UPDATE SET {assignments}, updated_at = :updated_at
             """.replace("{assignments}", assignments),
             params,

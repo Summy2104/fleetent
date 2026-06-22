@@ -103,6 +103,16 @@ def _loading_messages_for_event(evt: dict[str, Any]) -> list[str]:
     return [_tool_status_text(n) for n in names]
 
 
+def _has_postable_content(text: str, blocks: list[dict[str, Any]] | None) -> bool:
+    """Whether a reply has content Slack will accept.
+
+    Slack rejects ``chat.postMessage`` with empty text and no blocks (``no_text``), which
+    bubbles a SlackApiError into the bolt listener and breaks reply/approval delivery. A
+    reply with neither (an empty agent turn) is skipped rather than posted.
+    """
+    return bool((text or "").strip()) or bool(blocks)
+
+
 async def _make_status_funcs(
     client: Any,
     channel: str,
@@ -134,7 +144,7 @@ async def _make_status_funcs(
                 await client.assistant_threads_setStatus(
                     channel_id=channel, thread_ts=reply_thread, status=""
                 )
-        if say is not None:
+        if say is not None and _has_postable_content(text, blocks):
             kwargs: dict[str, Any] = {"text": text, "thread_ts": reply_thread}
             if blocks is not None:
                 kwargs["blocks"] = blocks
@@ -226,6 +236,8 @@ async def handle_approval_action(
         from fleetent.im_gateway.normalizer import NormalizedMessage, SessionContext
 
         async def _reply(text: str, blocks: list[dict[str, Any]] | None = None) -> None:
+            if not _has_postable_content(text, blocks):
+                return
             kwargs: dict[str, Any] = {"channel": channel, "text": text}
             if blocks is not None:
                 kwargs["blocks"] = blocks
@@ -282,6 +294,17 @@ def _make_upload_func(
 _MAX_FILE_BYTES = 20 * 1024 * 1024
 
 
+def _is_html_response(resp: Any) -> bool:
+    """True when a download response is an HTML page rather than file bytes.
+
+    Slack serves a sign-in / error HTML page (not the file) when the bot token lacks the
+    required scope or has no access to the file; treating that HTML as file bytes would
+    poison downstream tools, so callers degrade instead.
+    """
+    ctype = resp.headers.get("content-type", "") if hasattr(resp, "headers") else ""
+    return ctype.split(";")[0].strip().lower() == "text/html"
+
+
 async def _download_attachments(files: list[dict[str, Any]], bot_token: str) -> list[Any]:
     """Download inbound Slack files for the agent (im-file-attachment).
 
@@ -298,7 +321,12 @@ async def _download_attachments(files: list[dict[str, Any]], bot_token: str) -> 
     headers = {"Authorization": f"Bearer {bot_token}"}
     cap_mb = _MAX_FILE_BYTES // (1024 * 1024)
     over_cap_note = f"超过大小上限（{cap_mb} MB）"
-    async with httpx.AsyncClient() as client:
+    # follow_redirects: Slack serves some file types (e.g. PDF) via a 302 from
+    # files.slack.com to the slack-files.com sandbox domain; the policy is undocumented
+    # and may apply to any type, so we follow unconditionally rather than special-casing.
+    # The redirect target is cross-origin, so httpx strips the Authorization header — safe,
+    # since that URL carries its own signed token.
+    async with httpx.AsyncClient(follow_redirects=True) as client:
         for f in files:
             mime = f.get("mimetype") or ""
             url = f.get("url_private")
@@ -310,6 +338,13 @@ async def _download_attachments(files: list[dict[str, Any]], bot_token: str) -> 
                     resp.raise_for_status()
                 except httpx.HTTPError as exc:
                     logger.warning("slack_image_download_failed", url=url, error=str(exc))
+                    continue
+                if _is_html_response(resp):
+                    logger.warning(
+                        "slack_image_download_failed",
+                        url=url,
+                        error="content-type=text/html (check bot token scopes / file access)",
+                    )
                     continue
                 out.append((resp.content, mime))
                 continue
@@ -327,6 +362,17 @@ async def _download_attachments(files: list[dict[str, Any]], bot_token: str) -> 
             except httpx.HTTPError as exc:
                 logger.warning(
                     "slack_file_download_failed", url=url, filename=filename, error=str(exc)
+                )
+                out.append(
+                    FileAttachment(data=None, mime=mime, filename=filename, note="文件下载失败")
+                )
+                continue
+            if _is_html_response(resp):
+                logger.warning(
+                    "slack_file_download_failed",
+                    url=url,
+                    filename=filename,
+                    error="content-type=text/html (check bot token scopes / file access)",
                 )
                 out.append(
                     FileAttachment(data=None, mime=mime, filename=filename, note="文件下载失败")
@@ -400,6 +446,8 @@ async def _route_assistant_message(
     async def reply_func(text: str, blocks: list[dict[str, Any]] | None = None) -> None:
         with contextlib.suppress(Exception):
             await set_status("")
+        if not _has_postable_content(text, blocks):
+            return
         if blocks is not None:
             await say(text=text, blocks=blocks)
         else:

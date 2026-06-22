@@ -1,12 +1,15 @@
-"""TUI main loop entry point (fleetent-tui).
+"""TUI main loop entry point (fleetent chat).
 
 ``AppController`` holds the testable interaction logic — a submitted line becomes a
 backend action (chat → ``send``; slash command → abort/approve/session/quit/help),
 and gateway events render to the terminal. Rendering goes through an injectable
-``emit`` sink (default: prompt_toolkit ``print_formatted_text``), which is
-patch_stdout-safe; ``run`` wires it to a ``PromptSession`` running concurrently
-with the backend's receive loop under ``patch_stdout`` so streamed output and the
-input line coexist. ``main`` parses ``--url``/``--token`` and starts the loop.
+``emit`` sink (default: ``print_formatted_text`` via ``run_in_terminal`` while the
+prompt runs, so output is committed above the live input line instead of erased by
+the prompt's next repaint). Streamed ``text_delta`` is buffered and emitted only as
+complete lines, because a partial (newline-less) line isn't committed to scrollback
+and would flash then disappear. ``run`` drives a ``PromptSession`` concurrently with
+the backend's receive loop under ``patch_stdout`` (which catches stray writes).
+``main`` parses ``--url``/``--token`` and starts the loop.
 """
 
 import argparse
@@ -16,6 +19,7 @@ from collections.abc import Callable
 from typing import Any, Protocol
 
 from prompt_toolkit import PromptSession, print_formatted_text
+from prompt_toolkit.application import get_app_or_none, run_in_terminal
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.patch_stdout import patch_stdout
 
@@ -23,19 +27,35 @@ from fleetent.structured_logging import get_logger
 from fleetent.tui import protocol as p
 from fleetent.tui import render
 from fleetent.tui.backend import GatewayBackend
-from fleetent.tui.commands import KNOWN_COMMANDS, SlashCommandCompleter, parse_command
+from fleetent.tui.commands import (
+    DISPATCHER_COMMANDS,
+    KNOWN_COMMANDS,
+    SlashCommandCompleter,
+    parse_command,
+)
 
 _logger = get_logger("tui.app")
 
 DEFAULT_URL = "ws://127.0.0.1:8765/ws"
-_HELP = "commands: /new /session /abort [run_id] /approve <id> <approved|rejected> /quit /help"
+_HELP = (
+    "commands: /new /session /abort [run_id] /approve <id> <approved|rejected> "
+    "/user [内容|clear] /clear /compact /context /usage /cost /quit /help"
+)
 
 # A sink that prints rendered FormattedText; ``end`` lets streaming text stay inline.
 EmitFn = Callable[[FormattedText, str], None]
 
 
 def _default_emit(text: FormattedText, end: str) -> None:
-    print_formatted_text(text, end=end)
+    # While the PromptSession app is running it owns the bottom of the screen and
+    # repaints it; a plain print lands in that region and the next repaint erases it
+    # ("flashes then disappears"). run_in_terminal suspends the app, prints above the
+    # prompt (committed to scrollback), then redraws — so streamed output persists.
+    app = get_app_or_none()
+    if app is not None and app.is_running:
+        run_in_terminal(lambda: print_formatted_text(text, end=end))
+    else:
+        print_formatted_text(text, end=end)
 
 
 class Backend(Protocol):
@@ -58,6 +78,11 @@ class AppController:
         self._emit = emit or _default_emit
         self.session_id = session_id
         self.current_run_id: str | None = None
+        # Streamed text_delta content accumulates here until a newline / a structured
+        # event / done, then is emitted as a COMPLETE line. Partial (newline-less)
+        # output isn't committed to the terminal scrollback and the prompt's repaint
+        # erases it ("flashes then disappears"), so we only ever emit whole lines.
+        self._text_buf = ""
 
     def _status(self, message: str) -> None:
         self._emit(render.format_status(message), "\n")
@@ -98,6 +123,10 @@ class AppController:
             else:
                 self._status("usage: /approve <id> <approved|rejected>")
             return True
+        if cmd.name in DISPATCHER_COMMANDS:
+            result = await self.backend.command(text.strip())
+            self._status(str(result.get("reply", "")))
+            return True
 
         # Known commands are handled above; anything else is unknown.
         if cmd.name not in KNOWN_COMMANDS:
@@ -105,12 +134,41 @@ class AppController:
         return True
 
     def on_event(self, event: dict[str, Any]) -> None:
-        """Render a gateway event; clear the active run on a terminal event."""
-        rendered = render.format_event(event)
-        if rendered is not None:
-            self._emit(rendered, "")  # newlines are baked into the rendered text
-        if event.get("type") in (p.EVENT_DONE, p.EVENT_ERROR):
+        """Render a gateway event.
+
+        Streamed ``text_delta`` accumulates and is emitted only as complete lines
+        (see ``_text_buf``); every other event first flushes any pending text, then
+        renders. Terminal events (``done``/``error``) clear the active run.
+        """
+        event_type = event.get("type", "")
+        if event_type == p.EVENT_TEXT_DELTA:
+            payload = event.get("payload", {}) or {}
+            self._text_buf += str(payload.get("content", ""))
+            self._flush_complete_lines()
+            return
+        self._flush_text(final=True)  # close any open streamed line before other output
+        if event_type != p.EVENT_DONE:  # done carries no renderable content
+            rendered = render.format_event(event)
+            if rendered is not None:
+                self._emit(rendered, "")
+        if event_type in (p.EVENT_DONE, p.EVENT_ERROR):
             self.current_run_id = None
+
+    def _flush_complete_lines(self) -> None:
+        """Emit any whole (newline-terminated) lines now; keep the trailing partial."""
+        if "\n" not in self._text_buf:
+            return
+        head, _, tail = self._text_buf.rpartition("\n")
+        self._emit(FormattedText([("", head + "\n")]), "")
+        self._text_buf = tail
+
+    def _flush_text(self, final: bool = False) -> None:
+        """Flush buffered streamed text. With ``final`` the trailing partial is closed
+        with a newline (a structured event or done is about to print on its own line)."""
+        self._flush_complete_lines()
+        if final and self._text_buf:
+            self._emit(FormattedText([("", self._text_buf + "\n")]), "")
+            self._text_buf = ""
 
     async def interrupt(self) -> None:
         """Ctrl-C: abort the in-flight run, if any."""
@@ -144,11 +202,11 @@ async def _run(url: str, token: str) -> None:
         await backend.close()
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(prog="fleetent-tui", description="fleetent terminal TUI")
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(prog="fleetent chat", description="fleetent terminal TUI")
     parser.add_argument("--url", default=os.environ.get("FLEETENT_TUI_URL", DEFAULT_URL))
     parser.add_argument("--token", default=os.environ.get("FLEETENT_TOKEN", ""))
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if not args.token:
         parser.error("a Bearer ma- key is required via --token or FLEETENT_TOKEN")
     asyncio.run(_run(args.url, args.token))

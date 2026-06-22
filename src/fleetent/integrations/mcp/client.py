@@ -1128,6 +1128,47 @@ def _rewrite_result_paths(
         return text
 
 
+# Container mount point for the run's workspace; a stdio MCP server is a host process in a
+# mount namespace where this path does not exist, so /workspace args are translated to the
+# host bind-mount source before the call (the symmetric input side of the result rewrite).
+_WORKSPACE_PREFIX = "/workspace"
+
+
+def _translate_workspace_arg(value: str, host_dir: Path) -> str:
+    """Rewrite a container workspace path to its host path.
+
+    Absolute ``/workspace[/<rel>]`` is a deterministic prefix and always rewrites. A
+    workspace-relative ref (e.g. the image-gen ``generated/<uuid>.png`` the model often
+    passes verbatim, without the ``/workspace/`` prefix) rewrites ONLY when it resolves to
+    a real file inside the workspace — existence + containment disambiguate it from
+    ordinary string args (subject, body) and block ``..`` escapes.
+    """
+    if value == _WORKSPACE_PREFIX:
+        return str(host_dir)
+    if value.startswith(_WORKSPACE_PREFIX + "/"):
+        return str(host_dir / value[len(_WORKSPACE_PREFIX) + 1 :])
+    if value and not value.startswith("/") and "\n" not in value:
+        base = os.path.normpath(str(host_dir))
+        candidate = os.path.normpath(os.path.join(base, value))
+        if (candidate == base or candidate.startswith(base + os.sep)) and os.path.isfile(candidate):
+            return candidate
+    return value
+
+
+def _translate_workspace_args(args: Any, host_dir: Path) -> Any:
+    """Recursively rewrite ``/workspace`` paths in tool args to host paths (stdio only).
+
+    Non-string leaves and non-``/workspace`` strings pass through unchanged.
+    """
+    if isinstance(args, str):
+        return _translate_workspace_arg(args, host_dir)
+    if isinstance(args, dict):
+        return {k: _translate_workspace_args(v, host_dir) for k, v in args.items()}
+    if isinstance(args, list):
+        return [_translate_workspace_args(v, host_dir) for v in args]
+    return args
+
+
 async def _call_via_session(
     server_id: str,
     tool_name: str,
@@ -1209,6 +1250,14 @@ async def _call_via_session_inner(
     # Known-unavailable server: short-circuit without touching the connection.
     if server._health is not HealthState.healthy:
         return _unavailable_result(server_id)
+
+    # A stdio server is a host process whose mount namespace has no /workspace; translate
+    # container workspace paths in the args to the run's host bind-mount source so the
+    # server can read files the agent produced (scope_key disambiguates the session).
+    if scope_key and server.transport == "stdio":
+        from fleetent.integrations.sandbox.manager import host_workspace_dir
+
+        args = _translate_workspace_args(args, host_workspace_dir(scope_key))
 
     session = _active_sessions.get((scope, server_id))
     if session is None:

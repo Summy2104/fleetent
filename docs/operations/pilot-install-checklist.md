@@ -40,7 +40,7 @@ runbook 的顺序执行；本清单用于核对安装、升级、备份、回滚
 Pilot 默认使用 Docker Compose。先初始化本地配置和目录：
 
 ```bash
-docker compose run --rm fleetent uv run fleetent-admin init-config
+docker compose run --rm fleetent uv run fleetent admin init-config
 ```
 
 编辑平台 `.env`、`agents/<agent-id>/agent.yaml`、`agents/<agent-id>/.env`，并把真实 secret 文件放入 `secrets/` 后，升级前先 dry-run：
@@ -98,32 +98,32 @@ curl -fsS http://127.0.0.1:8765/health
 查看 connector 配置摘要：
 
 ```bash
-uv run fleetent-admin kb connectors list
+GET /admin/kb/connectors
 ```
 
 检查单个 connector：
 
 ```bash
-uv run fleetent-admin kb connectors check eng-drive
+POST /admin/kb/connectors/eng-drive/check
 ```
 
 dry-run 同步：
 
 ```bash
-uv run fleetent-admin kb connectors sync eng-drive --dry-run
+POST /admin/kb/connectors/eng-drive/sync  # body: {"dry_run": true}
 ```
 
 执行同步：
 
 ```bash
 FLEETENT_GOOGLE_DRIVE_EXECUTE_SYNC=1 \
-  uv run fleetent-admin kb connectors sync eng-drive --yes --pilot-fixture
+  POST /admin/kb/connectors/eng-drive/sync  # body: {"dry_run": false}
 ```
 
 查看最近一次状态：
 
 ```bash
-uv run fleetent-admin kb connectors status eng-drive
+GET /admin/kb/connectors/eng-drive/status
 ```
 
 验收点：
@@ -136,60 +136,54 @@ uv run fleetent-admin kb connectors status eng-drive
 
 ## Observability 查询
 
-查询 run trace：
+查询 agent overview：
 
 ```bash
-uv run fleetent-admin observability traces --run-id run-1 --limit 20
+GET /admin/stats/agents/<agent_id>/overview
 ```
 
-查询失败事件：
+查询 tool 聚合：
 
 ```bash
-uv run fleetent-admin observability traces --event-type agent_run_failed --limit 50
+GET /admin/stats/agents/<agent_id>/tools
 ```
 
-查询 usage：
+查询 session trace drill-down：
 
 ```bash
-uv run fleetent-admin observability usage --user-id user-1 --limit 100
-```
-
-查询 performance：
-
-```bash
-uv run fleetent-admin observability performance --agent-id agent-1 --limit 100
+GET /admin/stats/sessions/<session_id>/trace
 ```
 
 验收点：
 
-- `traces` 只输出事件元数据和 payload key summary，不输出 payload 原值。
-- `usage` 输出 run count、token usage 和 by-model summary。
-- `performance` 输出失败率、延迟、LLM / tool / fallback / permission 指标。
+- overview 输出 usage、approvals、cost 聚合，不输出 payload 原值。
+- tools 输出按工具聚合的调用与错误概览。
+- session trace drill-down 用于定位单次会话内的事件链路。
 
 ## Diagnostics 与 Retention
 
 导出诊断包：
 
 ```bash
-uv run fleetent-admin diagnostics export
+uv run fleetent admin diagnostics export
 ```
 
 按时间导出诊断包：
 
 ```bash
-uv run fleetent-admin diagnostics export --from 2026-06-02T00:00:00 --to 2026-06-02T23:59:59
+uv run fleetent admin diagnostics export --from 2026-06-02T00:00:00 --to 2026-06-02T23:59:59
 ```
 
 retention dry-run：
 
 ```bash
-uv run fleetent-admin diagnostics retention dry-run
+uv run fleetent admin diagnostics retention dry-run
 ```
 
 retention apply：
 
 ```bash
-uv run fleetent-admin diagnostics retention apply
+uv run fleetent admin diagnostics retention apply
 ```
 
 验收点：
@@ -209,7 +203,7 @@ uv run fleetent-admin diagnostics retention apply
 3. 用**同一备份批次**按镜像结构把全部库复制回 `data/` 对应位置（如 `…/management.db` → `data/management.db`，及 `<tenant>/`、`<tenant>/<agent_id>/` 子目录下各库），替换当前 DB 文件，保证多库一致、不混用不同时间点的备份。
 4. 重启 fleetent 服务。
 5. 再次运行 `GET /health`。
-6. 运行 `uv run fleetent-admin observability traces --event-type agent_run_failed --limit 20` 查看回滚后是否仍有失败事件。
+6. 运行 `GET /admin/stats/agents/<agent_id>/overview` 与 `GET /admin/stats/sessions/<session_id>/trace`，确认回滚后统计与 trace 查询恢复可用。
 
 回滚不自动删除 diagnostics package 和 logs；保留它们用于问题上报。
 
@@ -221,11 +215,11 @@ uv run fleetent-admin diagnostics retention apply
 **在 agent host 上**
 1. 将代码仓库 clone 到 agent host
 2. 运行 `bash scripts/install-agent.sh` 安装 agent 运行时（不再带 agent-id），再 `fleetent agent init <agent-id>` 创建 agent home
-3. 在 platform 侧注册该 node：`uv run fleetent-admin node register --host <agent-host> --port <port>`
+3. 在 platform 侧注册该 node：`uv run fleetent admin node register --host <agent-host> --port <port>`
 
 **验证**
-- `uv run fleetent-admin node list` — 应显示已注册的 node 及其心跳状态
-- `uv run fleetent-admin node deregister <node-id>` — 如需下线
+- `uv run fleetent admin node list` — 应显示已注册的 node 及其心跳状态
+- `uv run fleetent admin node deregister <node-id>` — 如需下线
 
 **当前限制**
 - node 与 platform 须能互相访问（HTTP）
@@ -233,7 +227,7 @@ uv run fleetent-admin diagnostics retention apply
 
 ## Pilot 验收清单
 
-- [ ] Docker Compose 镜像构建完成，`fleetent-admin init-config` 成功。
+- [ ] Docker Compose 镜像构建完成，`fleetent admin init-config` 成功。
 - [ ] `scripts/upgrade.py --dry-run` 成功。
 - [ ] SQLite backup 已创建。
 - [ ] 服务启动成功，`GET /health` 返回 200。
@@ -242,11 +236,11 @@ uv run fleetent-admin diagnostics retention apply
 - [ ] Google Drive / Confluence connector `check` 通过或失败原因明确。
 - [ ] KB connector `sync --dry-run` 通过。
 - [ ] KB connector `sync` 完成并可查询 `status`。
-- [ ] `fleetent-admin observability traces` 可查询测试 run。
-- [ ] `fleetent-admin observability usage` 可查询 usage summary。
-- [ ] `fleetent-admin observability performance` 可查询 performance summary。
-- [ ] `fleetent-admin diagnostics export` 可生成脱敏诊断包。
-- [ ] `fleetent-admin diagnostics retention dry-run` 可输出候选数量。
+- [ ] `GET /admin/stats/agents/<agent_id>/overview` 可查询测试 run 的聚合统计。
+- [ ] `GET /admin/stats/agents/<agent_id>/tools` 可查询工具调用概览。
+- [ ] `GET /admin/stats/sessions/<session_id>/trace` 可 drill-down 到单次会话 trace。
+- [ ] `fleetent admin diagnostics export` 可生成脱敏诊断包。
+- [ ] `fleetent admin diagnostics retention dry-run` 可输出候选数量。
 - [ ] 回滚负责人和问题上报路径已确认。
 
 ## 问题上报包
@@ -257,7 +251,7 @@ uv run fleetent-admin diagnostics retention apply
 - `scripts/upgrade.py --dry-run` 输出摘要。
 - `GET /health` 结果。
 - connector `check` / `status` 的脱敏输出。
-- observability `traces` / `usage` / `performance` 的脱敏输出。
+- stats overview / tools / session trace 的脱敏输出。
 - diagnostics export 生成的本地包路径。
 - 回滚是否执行、使用的 SQLite backup 路径和回滚后 health check 结果。
 

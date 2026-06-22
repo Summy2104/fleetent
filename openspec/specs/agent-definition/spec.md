@@ -15,14 +15,14 @@ The system SHALL store agent definitions in the `agents` SQLite table with colum
 - **AND** this DB read serves authoring/console only; runtime message resolution does NOT use it (runtime is file-sourced)
 
 ### Requirement: User-to-agent assignment
-The system SHALL support assigning one or more agents to a user via the `user_agents` table.
+The system SHALL support assigning one or more agents to a user via the `user_agents` table. The assignment SHALL be operated through the HTTP admin API (`POST` / `DELETE /admin/agents/{name}/bindings/users/{user_id}`); the legacy admin CLI assign/unassign-user commands are removed.
 
-#### Scenario: User assigned via CLI
-- **WHEN** admin runs `fleetent-admin assign-user --user-id <id> --agent-name <name>`
+#### Scenario: User assigned via HTTP
+- **WHEN** admin calls `POST /admin/agents/{name}/bindings/users/{user_id}`
 - **THEN** a row exists in `user_agents(user_id, agent_id)`
 
-#### Scenario: User unassigned via CLI
-- **WHEN** admin runs `fleetent-admin unassign-user --user-id <id> --agent-name <name>`
+#### Scenario: User unassigned via HTTP
+- **WHEN** admin calls `DELETE /admin/agents/{name}/bindings/users/{user_id}`
 - **THEN** the matching row in `user_agents` is removed
 
 #### Scenario: Look up user's agent resolves to active snapshot
@@ -178,4 +178,3 @@ MCP 的两张管理表 SHALL 按"注册表 vs 绑定表"正名，与 skills/kbs 
 #### Scenario: 改名后 MCP 解析行为不变
 - **WHEN** materialize 为某 agent 解析 MCP servers
 - **THEN** 仍从绑定表（`agent_mcp_servers`）+ 版本快照 union 取 server_id，从注册表（`mcp_servers`）取定义（per-agent 行优先、全局 `agent_id=NULL` 行兜底），结果与改名前一致
-

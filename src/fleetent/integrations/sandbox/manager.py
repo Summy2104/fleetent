@@ -124,6 +124,23 @@ def _name_key(raw: str) -> str:
     return f"{sanitised[:prefix_budget]}-{digest}"
 
 
+def host_workspace_dir(scope_key: str) -> Path:
+    """The host directory bind-mounted at ``/workspace`` for a run's workspace scope key.
+
+    The same directory `SandboxManager.workspace_host_path` returns, but keyed directly by
+    the already-resolved `scope_key` the MCP chokepoint threads (`workspace_scope_key`), so
+    stdio MCP argument translation and the `/workspace` bind mount agree on one directory.
+    Pure: derives the path, does not create it.
+
+    Args:
+        scope_key: The run's workspace scope key (session id or agent name).
+
+    Returns:
+        The host workspace directory for that scope key.
+    """
+    return paths.workspaces_dir() / _name_key(scope_key)
+
+
 def _container_name(scope: WorkspaceScope, key: str) -> str:
     return f"{SANDBOX_NAME_PREFIX}{scope.value}-{_name_key(key)}"
 

@@ -167,27 +167,6 @@ class PricingBody(BaseModel):
     output_price_per_1k: float | None = None
 
 
-def _routes_removed() -> None:
-    raise HTTPException(status_code=404, detail="provider routes endpoint removed")
-
-
-@router.get("/routes")
-def removed_routes_list() -> None:
-    _routes_removed()
-
-
-@router.put("/routes/{task_type}")
-def removed_routes_update(task_type: str) -> None:
-    del task_type
-    _routes_removed()
-
-
-@router.get("/routes/{task_type}/preview")
-def removed_routes_preview(task_type: str) -> None:
-    del task_type
-    _routes_removed()
-
-
 @router.get("/health")
 def health(authorization: str | None = Header(None)) -> dict[str, Any]:
     _current_user(authorization)

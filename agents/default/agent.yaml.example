@@ -105,6 +105,8 @@ skills_dir: skills                 # null = global default skills dir
 allowed_skills:                    # empty = no narrowing (all enabled skills visible)
   - jira
   - slack-daily-jira
+skill_authoring_enabled: false     # true exposes the skill_manage tool (user-driven,
+                                   # approval-gated skill create/edit/delete); default off
 
 # ── tools / capabilities ──
 allowed_tools:                     # fnmatch patterns; MCP tools are "<server>__<tool>"
@@ -218,6 +220,11 @@ im:
       allow_users:
         - "u_alice"
       require_approval: true
+
+# ── control-plane materialized bindings ──
+bindings:
+  default: false                  # multi-agent deployments set true on the tenant default
+  users: []                       # optional explicit user bindings from the control plane
 
 # ── per-agent runtime governance (resolved from this agent.yaml; config consolidation).
 #    All values below equal the current defaults; omit any you don't override. ──

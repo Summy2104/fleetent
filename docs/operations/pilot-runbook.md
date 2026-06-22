@@ -26,7 +26,7 @@ No-Go 建议；最终判定仍由 operator 和 owner 复核。
 轻量门禁与手动维护边界：
 
 ```bash
-uv run fleetent-admin validate-config --profile pilot --format json
+uv run fleetent admin validate-config --profile pilot --format json
 uv run python scripts/generate_pilot_verification_report.py
 ```
 
@@ -152,22 +152,22 @@ test -f agents/<agent-id>/agent.yaml
 验收目标：
 
 - 证明项目依赖可安装。
-- 证明用户入口 `fleetent` 和管理入口 `fleetent-admin` 都可执行。
+- 证明用户入口 `fleetent` 和管理入口 `fleetent admin` 都可执行。
 
 操作步骤：
 
 ```bash
 docker compose build fleetent
 docker compose run --rm fleetent uv run fleetent --help
-docker compose run --rm fleetent uv run fleetent-admin --help
-docker compose run --rm fleetent uv run fleetent-admin init-config
+docker compose run --rm fleetent uv run fleetent admin --help
+docker compose run --rm fleetent uv run fleetent admin init-config
 ```
 
 应该看到什么：
 
 - 镜像构建成功。
 - `fleetent --help` 能显示 agent CLI 用法。
-- `fleetent-admin --help` 能显示管理命令。
+- `fleetent admin --help` 能显示管理命令。
 - `.env`、`agents/<agent-id>/agent.yaml`、`agents/<agent-id>/.env`、`data/`、`data/logs/`、
   `data/diagnostics/` 和 `secrets/` 已初始化；如果文件已存在，命令会跳过。
 
@@ -232,7 +232,7 @@ docker compose up -d
 
 ```bash
 curl -fsS http://127.0.0.1:8765/health
-uv run fleetent-admin observability traces --limit 5
+GET /admin/stats/agents/<agent_id>/overview
 uv run fleetent "hello"
 ```
 
@@ -242,13 +242,13 @@ uv run fleetent "hello"
 
 - 服务启动日志无配置错误、DB migration 错误或 secret 打印。
 - `/health` 返回 200。
-- `fleetent-admin observability traces --limit 5` 可执行。
+- `GET /admin/stats/agents/<agent_id>/overview` 可执行。
 - `fleetent "hello"` 产生一次可追踪 run；如果真实 LLM 未配置，应明确记录 `skipped` 或 `failed`。
 
 通过标准：
 
 - 服务可启动且 health check 通过。
-- 最小 CLI run 的结果能在 observability 中定位到。
+- 最小 CLI run 的结果能在 stats / trace 查询中定位到。
 
 失败判断：
 
@@ -266,32 +266,31 @@ uv run fleetent "hello"
 
 用户场景：
 
-- operator 接到“Agent 没有正确回答”或“connector 同步失败”的反馈，需要用 trace、usage、
-  performance 和 diagnostics 定位问题，但不能泄漏用户正文或凭据。
+- operator 接到“Agent 没有正确回答”或“connector 同步失败”的反馈，需要用 stats 聚合、
+  session trace 和 diagnostics 定位问题，但不能泄漏用户正文或凭据。
 
 操作步骤：
 
 1. 先执行一次最小 agent run，或选择本次验收中的任一测试 run。
-2. 查询 trace、usage、performance。
+2. 查询 overview、tools、session trace。
 3. 导出 diagnostics package。
 4. 检查 diagnostics manifest 和内容边界。
 
 命令：
 
 ```bash
-uv run fleetent-admin observability traces --limit 20
-uv run fleetent-admin observability traces --event-type agent_run_failed --limit 50
-uv run fleetent-admin observability usage --limit 100
-uv run fleetent-admin observability performance --limit 100
-uv run fleetent-admin diagnostics export
-uv run fleetent-admin diagnostics retention dry-run
+GET /admin/stats/agents/<agent_id>/overview
+GET /admin/stats/agents/<agent_id>/tools
+GET /admin/stats/sessions/<session_id>/trace
+uv run fleetent admin diagnostics export
+uv run fleetent admin diagnostics retention dry-run
 ```
 
 应该看到什么：
 
-- traces 里能看到 run id、event type、时间、状态和 payload key summary。
-- usage 里能看到 run count、token usage 和 by-model summary。
-- performance 里能看到失败率、延迟、LLM / tool / fallback / permission 指标。
+- overview 里能看到 usage、approvals 和 cost 聚合。
+- tools 里能看到工具调用与错误概览。
+- session trace 里能看到单次会话的事件详情。
 - diagnostics package 包含 manifest、logs、trace / usage / performance 摘要、connector status、
   environment 和 config summary。
 - diagnostics package 不包含 prompt、reply、tool payload、memory 内容、KB 文档正文 / chunks、
@@ -299,13 +298,13 @@ uv run fleetent-admin diagnostics retention dry-run
 
 通过标准：
 
-- operator 能用 trace 定位一次 run。
-- usage 和 performance 输出能支持问题排查。
+- operator 能用 session trace 定位一次 run。
+- overview 和 tools 输出能支持问题排查。
 - diagnostics 脱敏边界符合要求。
 
 失败判断：
 
-- trace / usage / performance 不可查询：Pilot blocker 候选。
+- overview / tools / session trace 不可查询：Pilot blocker 候选。
 - diagnostics 泄漏 secret 或业务正文：No-Go。
 - retention dry-run 删除或修改数据：No-Go。
 
@@ -553,17 +552,17 @@ uv run pytest tests/evaluation -x -q
 操作步骤：
 
 ```bash
-uv run fleetent-admin kb connectors list
-uv run fleetent-admin kb connectors check <google_drive_connector_id>
-uv run fleetent-admin kb connectors sync <google_drive_connector_id> --dry-run
-uv run fleetent-admin kb connectors status <google_drive_connector_id>
+GET /admin/kb/connectors
+POST /admin/kb/connectors/<google_drive_connector_id>/check
+POST /admin/kb/connectors/<google_drive_connector_id>/sync  # body: {"dry_run": true}
+GET /admin/kb/connectors/<google_drive_connector_id>/status
 ```
 
 如需真实 sync：
 
 ```bash
 FLEETENT_GOOGLE_DRIVE_EXECUTE_SYNC=1 \
-  uv run fleetent-admin kb connectors sync <google_drive_connector_id> --yes --pilot-fixture
+  POST /admin/kb/connectors/<google_drive_connector_id>/sync  # body: {"dry_run": false}
 ```
 
 应该看到什么：
@@ -611,17 +610,17 @@ FLEETENT_GOOGLE_DRIVE_EXECUTE_SYNC=1 \
 操作步骤：
 
 ```bash
-uv run fleetent-admin kb connectors list
-uv run fleetent-admin kb connectors check <confluence_connector_id>
-uv run fleetent-admin kb connectors sync <confluence_connector_id> --dry-run
-uv run fleetent-admin kb connectors status <confluence_connector_id>
+GET /admin/kb/connectors
+POST /admin/kb/connectors/<confluence_connector_id>/check
+POST /admin/kb/connectors/<confluence_connector_id>/sync  # body: {"dry_run": true}
+GET /admin/kb/connectors/<confluence_connector_id>/status
 ```
 
 如需真实 sync：
 
 ```bash
 FLEETENT_CONFLUENCE_EXECUTE_SYNC=1 \
-  uv run fleetent-admin kb connectors sync <confluence_connector_id> --yes --pilot-fixture
+  POST /admin/kb/connectors/<confluence_connector_id>/sync  # body: {"dry_run": false}
 ```
 
 应该看到什么：
@@ -765,13 +764,13 @@ retest_result:
 CLI 命令不可用：
 
 1. 运行 `docker compose build fleetent`。
-2. 运行 `docker compose run --rm fleetent uv run fleetent-admin --help`。
+2. 运行 `docker compose run --rm fleetent uv run fleetent admin --help`。
 3. 检查 `pyproject.toml` 的 `[project.scripts]`。
 4. 如镜像缓存异常，重新构建镜像后复测。
 
 KB connector 失败：
 
-1. 先跑 `kb connectors check`。
+1. 先调 `POST /admin/kb/connectors/<connector_id>/check`。
 2. 再跑 `sync --dry-run`。
 3. 只在 opt-in 和凭据完整时跑真实 sync。
 4. 记录 connector status，不把 token 或文档正文写进 issue。

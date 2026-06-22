@@ -13,8 +13,8 @@ latest `origin/main` exposed two Pilot blockers and one documentation gap:
   useful model output when the JSON array is wrapped in prose or a fenced block after a preamble;
   some fixtures also fail because real model content is not normalized tightly enough for the
   memory contract.
-- The manual intelligence validation guide still documents `fleetent-admin shared-memory ...`,
-  while the current CLI entrypoint is `fleetent-admin memory shared ...`.
+- The manual intelligence validation guide still documents `fleetent admin shared-memory ...`,
+  while the current CLI entrypoint is `fleetent admin memory shared ...`.
 
 The current deterministic tests remain valuable, but they do not prove the production surface that
 an operator actually validates: local server, migrated SQLite database, real provider route, and
@@ -31,7 +31,7 @@ HTTP/CLI entrypoints.
 - Make opt-in real LLM evaluation preserve the operator's real credential path instead of being
   forced to `ANTHROPIC_API_KEY=test-key` by default test setup.
 - Update intelligence validation docs and docs tests so the shared memory CLI commands match the
-  current `fleetent-admin memory shared ...` command tree and the production validation steps
+  current `fleetent admin memory shared ...` command tree and the production validation steps
   describe the real LLM credential behavior.
 
 ## Capabilities

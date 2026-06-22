@@ -24,7 +24,7 @@ TBD - created by archiving change node-secret-delivery. Update Purpose after arc
 
 ### Requirement: node 注入子进程 env，内存不落盘
 
-`fleetent-node` SHALL 把下发的 secret 作为环境变量注入 `fleetent agent run` 子进程（`Popen(env=...)`），**不写入 agent home 的 `agent.yaml`/`.env` 或任何磁盘文件**。agent 进程经既有 `load_dotenv(override=False)` 读取（已存在的 env 不被覆盖），**agent 进程零改动**。secret SHALL 仅存在于 node 内存与子进程环境。
+`fleetent node start` SHALL 把下发的 secret 作为环境变量注入 `fleetent agent run` 子进程（`Popen(env=...)`），**不写入 agent home 的 `agent.yaml`/`.env` 或任何磁盘文件**。agent 进程经既有 `load_dotenv(override=False)` 读取（已存在的 env 不被覆盖），**agent 进程零改动**。secret SHALL 仅存在于 node 内存与子进程环境。
 
 #### Scenario: secret 经 env 注入而非落盘
 
@@ -38,7 +38,7 @@ TBD - created by archiving change node-secret-delivery. Update Purpose after arc
 
 ### Requirement: 磁盘缓存剥除 secret 与 platform-down 降级
 
-`fleetent-node` 的 desired-state 磁盘缓存（C3 引入，兜 platform 单点）SHALL **只缓存非密 config，剥除 secret**——secret 永不落盘。platform 不可达回落缓存时：已在跑的 agent（secret 已在其进程 env 中）SHALL 继续运行/被 re-adopt；但**需要 secret 才能启动的 agent SHALL NOT 用无 secret 的缓存强行拉起**（缺 secret 的新启动推迟到 platform 恢复），并记录该推迟。
+`fleetent node start` 的 desired-state 磁盘缓存（C3 引入，兜 platform 单点）SHALL **只缓存非密 config，剥除 secret**——secret 永不落盘。platform 不可达回落缓存时：已在跑的 agent（secret 已在其进程 env 中）SHALL 继续运行/被 re-adopt；但**需要 secret 才能启动的 agent SHALL NOT 用无 secret 的缓存强行拉起**（缺 secret 的新启动推迟到 platform 恢复），并记录该推迟。
 
 #### Scenario: 缓存不含 secret
 

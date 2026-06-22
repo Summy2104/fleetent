@@ -135,10 +135,12 @@ async def test_apply_skill_proposal_to_boundary_handles_create_update_deprecate_
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     writes: list[tuple[str, dict[str, str], object]] = []
+    reloads: list[str] = []
     monkeypatch.setattr(
         "fleetent.skills.write_skill",
         lambda name, files, provenance: writes.append((name, files, provenance)),
     )
+    monkeypatch.setattr("fleetent.skills.registry.reload", lambda: reloads.append("reloaded"))
     monkeypatch.setattr(
         reflection,
         "_load_existing_skill_bundle",
@@ -185,6 +187,39 @@ async def test_apply_skill_proposal_to_boundary_handles_create_update_deprecate_
     assert writes[0][1]["SKILL.md"] == "draft-skill"
     assert writes[1][1]["SKILL.md"] == "draft-skill"
     assert writes[2][1]["SKILL.md"] == "disabled"
+    assert reloads == ["reloaded", "reloaded", "reloaded"]
+
+
+async def test_apply_skill_proposal_to_boundary_reload_failure_does_not_rollback_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proposal = reflection.SkillProposal(
+        id="sp-1",
+        type="create_skill",
+        target_skill="triage-alerts",
+        reason="Repeated work",
+        evidence_refs=["e1"],
+        risk_level="medium",
+        suggested_draft="draft",
+        suggested_diff=None,
+        status="approved",
+        created_at=datetime(2026, 6, 15, tzinfo=UTC),
+        updated_at=datetime(2026, 6, 15, tzinfo=UTC),
+    )
+    writes: list[str] = []
+    monkeypatch.setattr(
+        "fleetent.skills.write_skill",
+        lambda name, files, provenance: writes.append(name),
+    )
+    monkeypatch.setattr(
+        "fleetent.skills.registry.reload",
+        lambda: (_ for _ in ()).throw(RuntimeError("reload failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="reload failed"):
+        await reflection.apply_skill_proposal_to_boundary(proposal)
+
+    assert writes == ["triage-alerts"]
 
 
 async def test_apply_skill_proposal_updates_actor_and_blocks_rejected(monkeypatch) -> None:

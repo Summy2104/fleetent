@@ -5,8 +5,10 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
-from urllib.parse import unquote, urlparse
+from typing import Any, ClassVar
+from urllib.parse import unquote
+
+from fleetent.substrate.backend import BaseSubstrateBackend, SubstrateCapabilities
 
 Params = Mapping[str, object]
 Row = dict[str, Any]
@@ -61,9 +63,14 @@ class SQLiteConnection:
 
 
 @dataclass(frozen=True)
-class SQLiteDatabase:
+class SQLiteSubstrateBackend(BaseSubstrateBackend):
     path: Path
-    dialect: str = "sqlite"
+    dialect: ClassVar[str] = "sqlite"
+    capabilities: ClassVar[SubstrateCapabilities] = SubstrateCapabilities(
+        network=False,
+        shared_across_hosts=False,
+        embedded_migrations=True,
+    )
 
     def execute(self, sql: str, params: Params | None = None) -> DbResult:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -85,6 +92,12 @@ class SQLiteDatabase:
             conn.commit()
         finally:
             conn.close()
+
+    def local_path(self) -> str | None:
+        return str(self.path)
+
+
+SQLiteDatabase = SQLiteSubstrateBackend
 
 
 @dataclass(frozen=True)
@@ -123,15 +136,19 @@ class ReadOnlySQLiteDatabase:
             conn.close()
 
 
+def create_substrate(database_url: str) -> BaseSubstrateBackend:
+    """Create a substrate backend from a database URL or local path."""
+    from fleetent.substrate.factory import create_substrate as _create_substrate
+
+    return _create_substrate(database_url)
+
+
 def create_database(database_url: str) -> SQLiteDatabase:
     """Create a database adapter from a database URL."""
-    parsed = urlparse(database_url)
-    if parsed.scheme != "sqlite":
-        raise ValueError(f"database backend is not supported yet: {parsed.scheme}")
-    if parsed.netloc not in {"", "localhost"}:
-        raise ValueError("sqlite database_url must use a local file path")
-    path = _sqlite_path(database_url, parsed.path)
-    return SQLiteDatabase(path=path)
+    substrate = create_substrate(database_url)
+    if not isinstance(substrate, SQLiteSubstrateBackend):
+        raise ValueError(f"database backend is not supported yet: {substrate.dialect}")
+    return substrate
 
 
 def _rows_from_cursor(cursor: sqlite3.Cursor) -> list[Row]:

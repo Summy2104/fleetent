@@ -104,3 +104,78 @@ def test_bind_exchange_root_skips_without_agent_home_or_isolation_off(monkeypatc
     s2 = McpServerConfig(id="gw", transport="stdio", command="x", file_isolation="off")
     mcp_client._bind_exchange_root(s2, "/home")
     assert artifact_exchange._server_roots == {}
+
+
+# ── workspace path translation for stdio MCP args (host-process path view) ──
+
+
+def test_host_workspace_dir_from_scope_key():
+    from fleetent import paths
+    from fleetent.integrations.sandbox import manager
+
+    key = "slack:thread:C1:123.456"
+    assert manager.host_workspace_dir(key) == paths.workspaces_dir() / manager._name_key(key)
+
+
+def test_translate_workspace_arg_rewrites_workspace_prefix(tmp_path):
+    host = tmp_path / "ws"
+    assert mcp_client._translate_workspace_arg("/workspace/generated/x.png", host) == str(
+        host / "generated" / "x.png"
+    )
+    assert mcp_client._translate_workspace_arg("/workspace", host) == str(host)
+
+
+def test_translate_workspace_arg_leaves_non_workspace(tmp_path):
+    host = tmp_path / "ws"
+    for v in ["/etc/hosts", "hello", "generated/x.png", "/workspaceX/y"]:
+        assert mcp_client._translate_workspace_arg(v, host) == v
+
+
+def test_translate_workspace_args_recurses_dict_list(tmp_path):
+    host = tmp_path / "ws"
+    args = {"files": ["/workspace/a.png", "/etc/x"], "name": "x", "n": 3, "z": None}
+    out = mcp_client._translate_workspace_args(args, host)
+    assert out["files"][0] == str(host / "a.png")
+    assert out["files"][1] == "/etc/x"
+    assert out["name"] == "x" and out["n"] == 3 and out["z"] is None
+
+
+def test_translate_relative_workspace_file(tmp_path):
+    """A workspace-relative ref (image-gen "generated/<uuid>.png" the model passes verbatim)
+    resolving to a real file under the workspace is translated to the host path."""
+    host = tmp_path / "ws"
+    (host / "generated").mkdir(parents=True)
+    (host / "generated" / "x.png").write_bytes(b"png")
+    assert mcp_client._translate_workspace_arg("generated/x.png", host) == str(
+        host / "generated" / "x.png"
+    )
+
+
+def test_translate_relative_nonexistent_unchanged(tmp_path):
+    host = tmp_path / "ws"
+    host.mkdir()
+    assert mcp_client._translate_workspace_arg("nope.png", host) == "nope.png"
+
+
+def test_translate_relative_plaintext_unchanged(tmp_path):
+    host = tmp_path / "ws"
+    host.mkdir()
+    for v in ["可爱小狗", "Hi,\n\n请欣赏这只小狗\n\nBest", "send_email"]:
+        assert mcp_client._translate_workspace_arg(v, host) == v
+
+
+def test_translate_relative_escape_blocked(tmp_path):
+    host = tmp_path / "ws"
+    host.mkdir()
+    (tmp_path / "outside.png").write_bytes(b"x")  # real file OUTSIDE the workspace
+    assert mcp_client._translate_workspace_arg("../outside.png", host) == "../outside.png"
+
+
+def test_translate_args_relative_in_list(tmp_path):
+    host = tmp_path / "ws"
+    (host / "generated").mkdir(parents=True)
+    (host / "generated" / "x.png").write_bytes(b"png")
+    args = {"attachments": ["generated/x.png"], "subject": "可爱小狗"}
+    out = mcp_client._translate_workspace_args(args, host)
+    assert out["attachments"][0] == str(host / "generated" / "x.png")
+    assert out["subject"] == "可爱小狗"

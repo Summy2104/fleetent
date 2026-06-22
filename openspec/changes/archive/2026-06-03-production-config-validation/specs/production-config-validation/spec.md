@@ -29,5 +29,5 @@ The system SHALL expose validation results in human-readable and JSON output, an
 report SHALL include config validation status.
 
 #### Scenario: JSON validation summary
-- **WHEN** `fleetent-admin validate-config --profile pilot --format json` is run
+- **WHEN** `fleetent admin validate-config --profile pilot --format json` is run
 - **THEN** it emits stable JSON with profile, item statuses, reasons and final status

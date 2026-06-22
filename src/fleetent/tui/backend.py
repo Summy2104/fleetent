@@ -105,6 +105,10 @@ class GatewayBackend:
     async def session_list(self) -> dict[str, Any]:
         return await self._request(p.METHOD_SESSION_LIST, {})
 
+    async def command(self, text: str) -> dict[str, Any]:
+        """Run a slash command (/user /clear /compact /context /usage /cost) server-side."""
+        return await self._request(p.METHOD_COMMAND, {"text": text})
+
     def _handle(self, raw: str) -> None:
         try:
             obj = p.decode_frame(raw)

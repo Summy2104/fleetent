@@ -5,6 +5,8 @@ Engine seams are monkeypatched so the tests exercise the management behaviour
 """
 
 import sqlite3
+import threading
+import time
 
 import pytest
 from fastapi import FastAPI
@@ -17,6 +19,7 @@ import fleetent.platform.knowledge_base_management.agent_kbs_store as kbs_store
 import fleetent.platform.knowledge_base_management.kb_admin_api as api
 import fleetent.user_store as user_store
 from fleetent import vector_store
+from fleetent.knowledge_base.extraction_store import KnowledgeExtractionRun
 from fleetent.vector_store import SearchResult
 from tests.integration._migration_template import apply_migrations
 
@@ -84,6 +87,18 @@ def _hdr(token: str, confirm: bool = False) -> dict:
     if confirm:
         h["X-Confirm"] = "true"
     return h
+
+
+def _start_worker_once(delay_seconds: float = 0.05) -> threading.Thread:
+    from fleetent.knowledge_base import worker
+
+    def _run_worker_once() -> None:
+        time.sleep(delay_seconds)
+        worker.run_once()
+
+    background = threading.Thread(target=_run_worker_once)
+    background.start()
+    return background
 
 
 # --- auth / role (场景 108) ---------------------------------------------------
@@ -157,6 +172,7 @@ def test_default_admin_kb_route_uses_real_host_knowledge_base(host_wired_client)
     assert after_edit.status_code == 200
     assert after_edit.json()[0]["description"] == "Support runbook"
 
+    background = _start_worker_once()
     imported = host_wired_client.post(
         "/admin/kb/support/documents",
         headers=_hdr(token),
@@ -166,6 +182,7 @@ def test_default_admin_kb_route_uses_real_host_knowledge_base(host_wired_client)
             "content": "# Reset Guide\n\nRestart the billing service when ERR42 appears.",
         },
     )
+    background.join(timeout=1)
     assert imported.status_code == 200
     import_body = imported.json()
     assert import_body["document_id"]
@@ -266,6 +283,7 @@ def test_host_wired_import_writes_tenant_scoped_kb_files(tmp_path, monkeypatch):
     )
     assert created.status_code == 200
 
+    background = _start_worker_once()
     imported = client.post(
         "/admin/kb/support/documents",
         headers=_hdr(token),
@@ -276,6 +294,7 @@ def test_host_wired_import_writes_tenant_scoped_kb_files(tmp_path, monkeypatch):
             "tenant_id": "tenant-a",
         },
     )
+    background.join(timeout=1)
     assert imported.status_code == 200
 
     tenant_kb_db = tmp_path / "tenant-a" / "kb.db"
@@ -295,13 +314,25 @@ def test_host_wired_import_writes_tenant_scoped_kb_files(tmp_path, monkeypatch):
 
 
 def test_import_document_passes_through(client, monkeypatch):  # 场景 103
-    seen = {}
+    monkeypatch.setattr(api, "_require_active_kb", lambda tenant_id, kb_id: None)
     monkeypatch.setattr(
         api,
         "kb_ingest_text",
-        lambda t, k, source, content, fmt: (
-            seen.update(t=t, k=k, source=source, fmt=fmt) or {"document_id": "d1", "chunks": 3}
-        ),
+        lambda *args, **kwargs: pytest.fail("execute import must enqueue instead of direct ingest"),
+    )
+    monkeypatch.setattr(
+        api,
+        "_enqueue_import_job",
+        lambda kb_id, body: {
+            "id": "job-import-pass-through",
+            "kb_id": kb_id,
+            "tenant_id": body.tenant_id,
+        },
+    )
+    monkeypatch.setattr(
+        api,
+        "_wait_for_kb_ingest_job",
+        lambda job_id: {"job_id": job_id, "document_id": "d1", "chunks": 3},
     )
     token, _ = _session_for("admin")
     r = client.post(
@@ -310,8 +341,48 @@ def test_import_document_passes_through(client, monkeypatch):  # 场景 103
         json={"source": "paste", "content": "hello", "document_format": "markdown"},
     )
     assert r.status_code == 200
-    assert r.json()["chunks"] == 3
-    assert seen == {"t": "default", "k": "sales", "source": "paste", "fmt": "markdown"}
+    assert r.json() == {"job_id": "job-import-pass-through", "document_id": "d1", "chunks": 3}
+
+
+def test_import_document_enqueues_and_waits_for_result(client, monkeypatch):
+    monkeypatch.setattr(api, "_require_active_kb", lambda tenant_id, kb_id: None)
+    monkeypatch.setattr(
+        api,
+        "kb_ingest_text",
+        lambda *args, **kwargs: pytest.fail("execute import must enqueue instead of direct ingest"),
+    )
+    monkeypatch.setattr(
+        api,
+        "_enqueue_import_job",
+        lambda kb_id, body: {"id": "job-import-1", "kb_id": kb_id, "tenant_id": body.tenant_id},
+    )
+    monkeypatch.setattr(
+        api,
+        "_wait_for_kb_ingest_job",
+        lambda job_id: {
+            "job_id": job_id,
+            "document_id": "d1",
+            "chunks": 3,
+            "filename": "paste.md",
+            "source": "paste.md",
+            "wired": True,
+        },
+    )
+    token, _ = _session_for("admin")
+    r = client.post(
+        "/admin/kb/sales/documents",
+        headers=_hdr(token),
+        json={"source": "paste.md", "content": "# hello", "document_format": "markdown"},
+    )
+    assert r.status_code == 200
+    assert r.json() == {
+        "job_id": "job-import-1",
+        "document_id": "d1",
+        "chunks": 3,
+        "filename": "paste.md",
+        "source": "paste.md",
+        "wired": True,
+    }
 
 
 def test_import_viewer_forbidden(client):
@@ -405,6 +476,7 @@ def test_host_wired_archive_updates_visibility_search_and_binding(host_wired_cli
         json={"kb_id": "support", "description": "Support handbook"},
     )
     assert created.status_code == 200
+    background = _start_worker_once()
     imported = host_wired_client.post(
         "/admin/kb/support/documents",
         headers=_hdr(token),
@@ -414,6 +486,7 @@ def test_host_wired_archive_updates_visibility_search_and_binding(host_wired_cli
             "content": "# Reset Guide\n\nRestart the billing service when ERR42 appears.",
         },
     )
+    background.join(timeout=1)
     assert imported.status_code == 200
 
     archived = host_wired_client.delete(
@@ -486,6 +559,7 @@ def test_host_wired_delete_document_rejects_wrong_kb_and_preserves_document(host
             json={"kb_id": kb_id, "description": ""},
         )
         assert created.status_code == 200
+    background = _start_worker_once()
     imported = host_wired_client.post(
         "/admin/kb/support/documents",
         headers=_hdr(token),
@@ -495,6 +569,7 @@ def test_host_wired_delete_document_rejects_wrong_kb_and_preserves_document(host
             "content": "# Reset Guide\n\nRestart the billing service when ERR42 appears.",
         },
     )
+    background.join(timeout=1)
     assert imported.status_code == 200
     document_id = imported.json()["document_id"]
 
@@ -565,14 +640,27 @@ def test_kbs_for_agent_filters_archived(client, monkeypatch):
 
 
 def test_sync_directory_returns_summary(client, monkeypatch):
-    seen = {}
+    monkeypatch.setattr(api, "_require_active_kb", lambda tenant_id, kb_id: None)
     monkeypatch.setattr(
         api,
         "kb_sync_directory",
-        lambda t, k, path: (
-            seen.update(t=t, k=k, path=path)
-            or {"scanned": 10, "ingested": 7, "skipped": 2, "failed": 1}
-        ),
+        lambda *args, **kwargs: pytest.fail("execute sync must enqueue instead of direct sync"),
+    )
+    monkeypatch.setattr(
+        api,
+        "_enqueue_sync_directory_job",
+        lambda kb_id, body: {"id": "job-sync-1", "kb_id": kb_id, "tenant_id": body.tenant_id},
+    )
+    monkeypatch.setattr(
+        api,
+        "_wait_for_kb_ingest_job",
+        lambda job_id: {
+            "job_id": job_id,
+            "scanned": 10,
+            "ingested": 7,
+            "skipped": 2,
+            "failed": 1,
+        },
     )
     token, _ = _session_for("admin")
     r = client.post(
@@ -581,8 +669,13 @@ def test_sync_directory_returns_summary(client, monkeypatch):
         json={"path": "/data/docs"},
     )
     assert r.status_code == 200
-    assert r.json() == {"scanned": 10, "ingested": 7, "skipped": 2, "failed": 1}
-    assert seen == {"t": "default", "k": "sales", "path": "/data/docs"}
+    assert r.json() == {
+        "job_id": "job-sync-1",
+        "scanned": 10,
+        "ingested": 7,
+        "skipped": 2,
+        "failed": 1,
+    }
 
 
 def test_host_wired_sync_directory_uses_real_local_sync(host_wired_client, tmp_path):
@@ -597,13 +690,16 @@ def test_host_wired_sync_directory_uses_real_local_sync(host_wired_client, tmp_p
     )
     assert created.status_code == 200
 
+    background = _start_worker_once()
     synced = host_wired_client.post(
         "/admin/kb/support/sync",
         headers=_hdr(token, confirm=True),
         json={"path": str(fixture_dir)},
     )
+    background.join(timeout=1)
 
     assert synced.status_code == 200
+    assert not hasattr(api, "_drain_kb_ingest_job")
     assert synced.json()["wired"] is True
     assert synced.json()["scanned"] == 1
     assert synced.json()["ingested"] == 1
@@ -669,3 +765,99 @@ def test_observation_read_only_aggregation(client, monkeypatch):
     assert body["recall_hits"] == 42
     assert body["zero_recall_docs"] == ["d9"]
     assert body["sessions"] == ["s1", "s2"]
+
+
+def test_extract_entities_endpoint_exists(client, monkeypatch):
+    monkeypatch.setattr(api, "_require_active_kb", lambda tenant_id, kb_id: None)
+    monkeypatch.setattr(
+        api,
+        "kb_extract_entities",
+        lambda tenant_id, kb_id, document_id=None: {
+            "id": "run-1",
+            "tenant_id": tenant_id,
+            "kb_id": kb_id,
+            "document_id": document_id,
+            "extractor": "deterministic",
+            "status": "completed",
+            "documents_scanned": 1,
+            "chunks_scanned": 1,
+            "entities_upserted": 1,
+            "mentions_written": 1,
+            "relations_written": 0,
+            "failed_count": 0,
+            "error_summary": None,
+        },
+    )
+    token, _ = _session_for("admin")
+    response = client.post(
+        "/admin/kb/test-kb/extract-entities",
+        headers=_hdr(token),
+        json={},
+    )
+    assert response.status_code == 202
+
+
+def test_extract_entities_triggers_task(client, monkeypatch):
+    monkeypatch.setattr(api, "_require_active_kb", lambda tenant_id, kb_id: None)
+    called: list[tuple[str, str, str | None]] = []
+
+    def _extract(tenant_id: str, kb_id: str, document_id: str | None = None) -> dict[str, object]:
+        called.append((tenant_id, kb_id, document_id))
+        run = KnowledgeExtractionRun(
+            id="run-1",
+            tenant_id=tenant_id,
+            kb_id=kb_id,
+            document_id=document_id,
+            extractor="deterministic",
+            status="completed",
+            documents_scanned=2,
+            chunks_scanned=5,
+            entities_upserted=3,
+            mentions_written=4,
+            relations_written=1,
+            failed_count=0,
+        )
+        return run.__dict__
+
+    monkeypatch.setattr(api, "kb_extract_entities", _extract)
+    token, _ = _session_for("admin")
+
+    response = client.post(
+        "/admin/kb/support/extract-entities",
+        headers=_hdr(token),
+        json={"document_id": "doc-1"},
+    )
+
+    assert response.status_code == 202
+    assert called == [("default", "support", "doc-1")]
+    assert response.json()["run"]["kb_id"] == "support"
+
+
+def test_extract_entities_unknown_kb_returns_404(client):
+    token, _ = _session_for("admin")
+
+    response = client.post(
+        "/admin/kb/missing/extract-entities",
+        headers=_hdr(token),
+        json={},
+    )
+
+    assert response.status_code == 404
+
+
+def test_extract_entities_non_admin_returns_403(client, monkeypatch):
+    monkeypatch.setattr(api, "_require_active_kb", lambda tenant_id, kb_id: None)
+    monkeypatch.setattr(
+        api,
+        "kb_extract_entities",
+        lambda tenant_id, kb_id, document_id=None: {"kb_id": kb_id, "tenant_id": tenant_id},
+    )
+    token, _ = _session_for("viewer")
+
+    response = client.post(
+        "/admin/kb/support/extract-entities",
+        headers=_hdr(token),
+        json={},
+    )
+
+    assert response.status_code == 403

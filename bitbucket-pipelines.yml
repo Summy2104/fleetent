@@ -3,6 +3,7 @@ image: python:3.12
 definitions:
   caches:
     uv: ~/.cache/uv
+    yarn: frontend/node_modules
   steps:
     - step: &unit-coverage
         name: unit tests + coverage
@@ -12,8 +13,24 @@ definitions:
           - pip install uv
           - export ANTHROPIC_API_KEY=test-key
           - uv sync --frozen --group dev
+          # Enforce the unit/integration layer boundary in CI (fast static scan,
+          # runs before the heavier coverage step so a misclassified test fails fast).
+          - make test-layers
           - uv run alembic upgrade head
           - make test-unit-ci
+    - step: &frontend-gate
+        name: frontend gate
+        # Node + make ship in the default node:22 image (Debian buildpack-deps base),
+        # so we skip the per-run apt/nodesource install the python:3.12 image needed.
+        image: node:22
+        caches:
+          - yarn
+        script:
+          - corepack enable
+          - yarn --version
+          - make frontend-install
+          - make frontend-build
+          - make test-frontend
     - step: &daily-integration-coverage
         name: integration tests + combined coverage
         caches:
@@ -28,11 +45,16 @@ definitions:
 pipelines:
   pull-requests:
     '**':
-      - step: *unit-coverage
+      # Independent gates: run concurrently so wall-clock is max(), not sum().
+      - parallel:
+          - step: *unit-coverage
+          - step: *frontend-gate
 
   branches:
     main:
-      - step: *unit-coverage
+      - parallel:
+          - step: *unit-coverage
+          - step: *frontend-gate
 
   custom:
     integration-tests:

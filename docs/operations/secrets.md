@@ -39,5 +39,5 @@ api_token_env: FLEETENT_CONFLUENCE_TOKEN
 ```
 
 不要把真实 secret、token、credential payload 写入 `.env.example`、`agent.yaml.example`、日志、
-trace、diagnostics package、issue 或测试 fixture。`fleetent-admin init-config` 只创建空的
+trace、diagnostics package、issue 或测试 fixture。`fleetent admin init-config` 只创建空的
 `secrets/` 目录，不生成任何真实 secret 文件。

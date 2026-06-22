@@ -123,8 +123,8 @@ uv run pytest tests/integration/test_trace_events.py \
 
 ```bash
 test -f agents/<agent-id>/agent.yaml
-uv run fleetent-admin validate-config --profile pilot --format json
-uv run fleetent-admin kb connectors list
+uv run fleetent admin validate-config --profile pilot --format json
+GET /admin/kb/connectors
 ```
 
 人工复核：
@@ -132,7 +132,7 @@ uv run fleetent-admin kb connectors list
 - `agents/<agent-id>/agent.yaml` 不包含明文 API key、OAuth token、connector token 或 password。
 - MCP server、Google Drive、Confluence、embedding、rerank 等 credential 只包含 `*_env`
   引用。
-- `fleetent-admin kb connectors list` 输出不包含 token、credential payload 或文档正文。
+- `GET /admin/kb/connectors` 输出不包含 token、credential payload 或文档正文。
 
 失败分类：
 
@@ -151,8 +151,8 @@ uv run fleetent-admin kb connectors list
 执行：
 
 ```bash
-docker compose run --rm --entrypoint uv fleetent run fleetent-admin --help
-docker compose run --rm --entrypoint uv fleetent run fleetent-admin init-config
+docker compose run --rm --entrypoint uv fleetent run fleetent admin --help
+docker compose run --rm --entrypoint uv fleetent run fleetent admin init-config
 docker compose up -d
 docker compose ps
 ```
@@ -251,10 +251,10 @@ docker compose up -d
 准备一次测试 run 后执行：
 
 ```bash
-uv run fleetent-admin observability traces --limit 20
-uv run fleetent-admin observability traces --event-type agent_run_failed --limit 50
-uv run fleetent-admin observability usage --limit 100
-uv run fleetent-admin observability performance --limit 100
+GET /admin/observability/traces?limit=20
+GET /admin/observability/traces?event_type=agent_run_failed&limit=50
+GET /admin/observability/usage?limit=100
+GET /admin/observability/performance?limit=100
 ```
 
 人工复核：
@@ -281,8 +281,8 @@ uv run fleetent-admin observability performance --limit 100
 执行：
 
 ```bash
-uv run fleetent-admin diagnostics export
-uv run fleetent-admin diagnostics retention dry-run
+uv run fleetent admin diagnostics export
+uv run fleetent admin diagnostics retention dry-run
 ```
 
 人工复核：

@@ -93,7 +93,7 @@ def handle(args: argparse.Namespace) -> bool:
 
 必须保持：
 
-- `uv run fleetent-admin ...` 行为不变。
+- `uv run fleetent admin ...` 行为不变。
 - `from fleetent.admin import main` 可用。
 - 测试中 monkeypatch `fleetent.admin._SETTINGS_YAML` 的旧路径需要迁移到新模块路径。
 

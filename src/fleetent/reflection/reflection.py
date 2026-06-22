@@ -616,6 +616,7 @@ async def apply_skill_proposal(proposal_id: str, *, actor_user_id: str) -> Skill
 async def apply_skill_proposal_to_boundary(proposal: SkillProposal) -> None:
     """Apply a Skill proposal through the Skill management boundary."""
     from fleetent.skills import SkillWriteProvenance, write_skill
+    from fleetent.skills import registry as skill_registry
 
     if proposal.type in {"create_skill", "update_skill"}:
         files = proposal.files or {}
@@ -632,6 +633,7 @@ async def apply_skill_proposal_to_boundary(proposal: SkillProposal) -> None:
                 applied_at=datetime.now(UTC).replace(microsecond=0).isoformat(),
             ),
         )
+        skill_registry.reload()
         return
 
     if proposal.type == "deprecate_skill":
@@ -646,6 +648,7 @@ async def apply_skill_proposal_to_boundary(proposal: SkillProposal) -> None:
                 applied_at=datetime.now(UTC).replace(microsecond=0).isoformat(),
             ),
         )
+        skill_registry.reload()
         return
 
     raise ValueError(f"unsupported skill proposal type: {proposal.type}")

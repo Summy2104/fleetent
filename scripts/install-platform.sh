@@ -88,12 +88,12 @@ check_python() {
 install_tool() {
     log_info "Installing fleetent binary (production mode)..."
     uv tool install --force --from "$REPO_ROOT" fleetent
-    if ! command -v fleetent-admin >/dev/null 2>&1; then
-        log_error "fleetent-admin not found after install."
+    if ! command -v fleetent >/dev/null 2>&1; then
+        log_error "fleetent not found after install."
         log_info "Run: uv tool update-shell"
         exit 1
     fi
-    log_success "Installed: fleetent fleetent-admin fleetent-tui"
+    log_success "Installed: fleetent"
 }
 
 setup_home_env() {
@@ -113,6 +113,31 @@ setup_home_env() {
     fi
 }
 
+ensure_frontend_toolchain() {
+    if command -v node >/dev/null 2>&1 && command -v corepack >/dev/null 2>&1; then
+        corepack enable
+        return 0
+    fi
+
+    if [ "$(uname -s)" != "Linux" ] || ! command -v apt-get >/dev/null 2>&1; then
+        log_error "Node.js 22+ with corepack is required to build the admin frontend."
+        log_info "Install Node.js 22+ manually, then re-run scripts/install-platform.sh."
+        exit 1
+    fi
+
+    log_info "Installing Node.js 22 + corepack for admin frontend build..."
+    apt-get update
+    apt-get install -y curl ca-certificates gnupg
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    apt-get install -y nodejs
+    if ! command -v corepack >/dev/null 2>&1; then
+        log_error "corepack was not installed with Node.js. Install Node.js 22+ manually and retry."
+        exit 1
+    fi
+    corepack enable
+    log_success "Frontend toolchain ready: $(node --version)"
+}
+
 copy_platform_templates() {
     mkdir -p "$FLEETENT_HOME"
 
@@ -125,6 +150,24 @@ copy_platform_templates() {
         cp "$REPO_ROOT/platform.yaml.example" "$FLEETENT_HOME/platform.yaml"
         log_success "Created $FLEETENT_HOME/platform.yaml"
     fi
+
+    if [ -f "$FLEETENT_HOME/.env" ] && ! grep -q '^FLEETENT_ADMIN_UI_DIST=' "$FLEETENT_HOME/.env"; then
+        printf '\nFLEETENT_ADMIN_UI_DIST=%s/frontend/dist\n' "$REPO_ROOT" >> "$FLEETENT_HOME/.env"
+        log_success "Pinned FLEETENT_ADMIN_UI_DIST in $FLEETENT_HOME/.env"
+    fi
+}
+
+build_admin_frontend() {
+    ensure_frontend_toolchain
+    log_info "Installing frontend dependencies..."
+    make -C "$REPO_ROOT" frontend-install
+    log_info "Building admin frontend dist..."
+    make -C "$REPO_ROOT" frontend-build
+    if [ ! -f "$REPO_ROOT/frontend/dist/index.html" ]; then
+        log_error "Admin frontend build finished without frontend/dist/index.html."
+        exit 1
+    fi
+    log_success "Admin frontend dist ready: $REPO_ROOT/frontend/dist"
 }
 
 init_platform_db() {
@@ -151,7 +194,7 @@ init_platform_db() {
 
 seed_admin() {
     log_info "Seeding built-in admin user..."
-    if uv run --project "$REPO_ROOT" fleetent-admin seed-builtin-admin 2>/dev/null; then
+    if uv run --project "$REPO_ROOT" fleetent admin seed-builtin-admin 2>/dev/null; then
         log_success "Admin seeded (check logs for initial password on first run)"
     else
         log_warn "seed-builtin-admin returned non-zero (may already exist — OK)"
@@ -165,6 +208,7 @@ print_success() {
     echo "  1. Edit platform env:  $FLEETENT_HOME/.env"
     echo "  2. Edit platform config: $FLEETENT_HOME/platform.yaml"
     echo "  3. Start platform:     uvicorn fleetent.server:app --port 8765"
+    echo "     /admin/ui will serve the dist pinned by FLEETENT_ADMIN_UI_DIST in .env"
     echo "  4. Add agents:         scripts/install-agent.sh <agent-id>"
 }
 
@@ -175,6 +219,7 @@ main() {
     install_tool
     setup_home_env
     copy_platform_templates
+    build_admin_frontend
     init_platform_db
     seed_admin
     print_success

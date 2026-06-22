@@ -27,7 +27,7 @@
 
 以下能力均已落地（`platform/connector_management/`）：
 
-- **External Credential Vault**：`external_credentials` 表已就位（管理库，per-user per-service，加密存储），`vault_provider.py` 实现真实的凭证读写、OAuth token refresh、revoke；platform 启动时调用 `set_provider(vault_provider.get_credential)` 注入，standalone agent 保持默认 NeedsConsent stub
+- **External Credential Vault**：`external_credentials` 表已就位（管理库，per-user per-service，加密存储），`vault_provider.py` 实现真实的凭证读写、OAuth token refresh、revoke；platform 启动时调用 `set_provider(vault_provider.get_credential)` 注入，直接 `fleetent agent run` 的 dev/test 进程保持默认 NeedsConsent stub
 - **双协议支持**：`external_services.protocol` 支持 `oauth2`（OAuth consent + token refresh）和 `apikey`（用户提交密钥，无 refresh 概念）
 - **Admin CRUD 端点**：`connector_admin_api.py` 已提供 external_services 的 list / create / update / delete 端点
 - **Credential revoke**：`vault_provider.revoke_credential()` 删除凭证记录并调用外部 revoke endpoint（OAuth 服务）
@@ -172,9 +172,9 @@ MCP server 是**独立运行的东西**(远程服务 / 本地子进程),不是 i
 - SSE transport：连接池属 `fleetent.integrations.mcp`（agent-runtime），**connectors 只负责提供 per-user token**，建连/重连时由 `fleetent.integrations.mcp` 取用
 - 不论 transport,**token 的 consent / 存储 / refresh / revoke 始终在 connectors**,MCP server 不替平台管(厂商 server 只是"拿 token 去取数")
 
-### Vault provider 注入（platform vs standalone）
+### Vault provider 注入（platform vs direct agent run）
 
-- **Standalone agent**（`fleetent agent run`，无 platform）：`connectors.py` 的默认 provider 恒返回 NeedsConsent，不依赖任何 platform 代码
+- **直接 `fleetent agent run` 进程**（dev/test 或 node 外的最小运行路径）：`connectors.py` 的默认 provider 恒返回 NeedsConsent，不依赖任何 platform 代码
 - **Platform 部署**：platform 启动时（`server.py` lifespan）调用 `connectors.set_provider(vault_provider.get_credential)` 注入真实 Vault provider
 - 调用方（dispatch / agent-runtime）无感知，统一通过 `connectors.get_credential(user_id, service_id, scopes)` 获取
 

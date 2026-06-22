@@ -12,18 +12,28 @@ Auth: viewer + admin may read; per-user detail is masked for viewer when the dep
 flag MASK_PER_USER_FOR_VIEWER is on.
 """
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Response
 
-from fleetent import audit_log, auth, user_store
+from fleetent import agent_store, audit_log, auth, observability, user_store
 from fleetent.platform.agent_statistics import stats_store
+from fleetent.platform.model_provider_management import provider_admin_store
 
 router = APIRouter(prefix="/admin/stats")
 
 IDLE_TIMEOUT_SECONDS = 1800
 _ADMIN_ROLES = {"admin", "built_in_admin"}
 MASK_PER_USER_FOR_VIEWER = True
+_DEFAULT_TRACE_LIMIT = 1000
+_RUN_EVENT_TYPES = {"agent_run_completed", "agent_run_failed"}
+_WINDOWS = {
+    "1h": timedelta(hours=1),
+    "24h": timedelta(hours=24),
+    "7d": timedelta(days=7),
+    "30d": timedelta(days=30),
+}
 
 
 # --- injectable seams (observability / agent_store / model-provider / scheduling) ---
@@ -35,25 +45,89 @@ def fetch_traces(
     channel: str | None = None,
     window: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Fetch trace records (observability follow-up). Placeholder returns none."""
-    return []
+    """Fetch trace records from observability and flatten them for stats_store."""
+    del channel
+    start_ts, end_ts = _window_bounds(window)
+    events = observability.query_trace_events(
+        observability.TraceQuery(
+            user_id=user_id,
+            agent_name=agent_id,
+            start_ts=start_ts,
+            end_ts=end_ts,
+            limit=_DEFAULT_TRACE_LIMIT,
+        )
+    )
+    return [_trace_row(event) for event in events]
 
 
 def fetch_approvals(agent_id: str | None = None) -> list[dict[str, Any]]:
-    """Fetch permission_gate approval records (placeholder)."""
-    return []
+    """Fetch approval decisions from observability permission_resolved events."""
+    events = observability.query_trace_events(
+        observability.TraceQuery(
+            agent_name=agent_id,
+            event_type="permission_resolved",
+            limit=_DEFAULT_TRACE_LIMIT,
+        )
+    )
+    return [
+        {
+            "decision": event.payload.get("decision"),
+            "user_id": event.user_id,
+            "session_id": event.session_id,
+            "ts": event.ts.isoformat() if event.ts else None,
+        }
+        for event in events
+    ]
 
 
 def agent_allowed_tools(agent_id: str) -> list[str]:
     """The agent's allowed_tools allowlist (bridges agent_store)."""
-    return []
+    agent = agent_store.get_by_name(agent_id)
+    return [] if agent is None else agent.allowed_tools
 
 
 def pricing_table() -> dict[str, Any] | None:
-    """Per-model pricing from model-provider. None => table not online yet."""
-    return None
+    """Per-model pricing from model-provider."""
+    return {
+        str(provider["model"]): {
+            "input": provider.get("input_price_per_1k"),
+            "output": provider.get("output_price_per_1k"),
+        }
+        for provider in provider_admin_store.list_providers()
+        if provider.get("model")
+    }
 
 
+def _window_bounds(window: str | None) -> tuple[datetime | None, datetime | None]:
+    if window is None:
+        return None, None
+    now = datetime.now(UTC)
+    return now - _WINDOWS.get(window, _WINDOWS["7d"]), now
+
+
+def _trace_row(event: observability.TraceEvent) -> dict[str, Any]:
+    payload = dict(event.payload)
+    tokens = payload.get("tokens")
+    if isinstance(tokens, dict):
+        payload.setdefault("prompt_tokens", int(tokens.get("prompt", 0) or 0))
+        payload.setdefault("completion_tokens", int(tokens.get("completion", 0) or 0))
+        payload.setdefault("total_tokens", int(tokens.get("total", 0) or 0))
+    payload.setdefault("agent_id", event.agent_name)
+    payload.setdefault("agent_name", event.agent_name)
+    payload.setdefault("user_id", event.user_id)
+    payload.setdefault("session_id", event.session_id)
+    payload.setdefault("event_type", event.event_type)
+    payload.setdefault("run_id", event.run_id)
+    payload.setdefault("ts", event.ts.isoformat() if event.ts else None)
+    return payload
+
+
+def _run_traces(traces: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        trace
+        for trace in traces
+        if trace.get("event_type") in _RUN_EVENT_TYPES or trace.get("event_type") is None
+    ]
 
 
 # --- auth helpers -------------------------------------------------------------
@@ -86,12 +160,13 @@ def overview(
 ) -> dict[str, Any]:
     _current_user(authorization)
     traces = fetch_traces(agent_id=agent_id, window=window)
+    run_traces = _run_traces(traces)
     return {
         "agent_id": agent_id,
-        "usage": stats_store.aggregate_usage(traces),
-        "performance": stats_store.aggregate_performance(traces),
+        "usage": stats_store.aggregate_usage(run_traces),
+        "performance": stats_store.aggregate_performance(run_traces),
         "approvals": stats_store.approval_stats(fetch_approvals(agent_id)),
-        "cost": stats_store.cost(traces, pricing_table()),
+        "cost": stats_store.cost(run_traces, pricing_table()),
     }
 
 
@@ -102,14 +177,16 @@ def compare(
     _current_user(authorization)
     metrics: dict[str, dict[str, Any]] = {}
     for agent_id in [a for a in agents.split(",") if a]:
-        metrics[agent_id] = stats_store.aggregate_usage(fetch_traces(agent_id=agent_id))
+        metrics[agent_id] = stats_store.aggregate_usage(
+            _run_traces(fetch_traces(agent_id=agent_id))
+        )
     return stats_store.compare_agents(metrics, key)
 
 
 @router.get("/agents/{agent_id}/tools")
 def tools(agent_id: str, authorization: str | None = Header(None)) -> dict[str, Any]:
     _current_user(authorization)
-    traces = fetch_traces(agent_id=agent_id)
+    traces = _run_traces(fetch_traces(agent_id=agent_id))
     return {
         "top_tools": stats_store.top_tools(traces),
         "coverage": stats_store.allowed_tools_coverage(traces, agent_allowed_tools(agent_id)),
@@ -123,7 +200,10 @@ def per_user(
     authorization: str | None = Header(None),
 ) -> list[dict[str, Any]]:
     user = _current_user(authorization)
-    ranking = stats_store.per_user_ranking(fetch_traces(agent_id=agent_id), sort_by=sort_by)
+    ranking = stats_store.per_user_ranking(
+        _run_traces(fetch_traces(agent_id=agent_id)),
+        sort_by=sort_by,
+    )
     if MASK_PER_USER_FOR_VIEWER and not _is_admin(user):
         for row in ranking:
             row["user_id"] = "***"
@@ -136,7 +216,7 @@ def per_user(
 @router.get("/users/{user_id}/requests")
 def user_requests(user_id: str, authorization: str | None = Header(None)) -> list[dict[str, Any]]:
     _current_user(authorization)
-    return stats_store.build_request_list(fetch_traces(user_id=user_id), user_id)
+    return stats_store.build_request_list(_run_traces(fetch_traces(user_id=user_id)), user_id)
 
 
 @router.get("/requests/{request_id}")
@@ -162,12 +242,12 @@ def degraded_trace(
 
 def _export_rows(view: str, agent_id: str | None) -> list[dict[str, Any]]:
     if view == "per-user":
-        return stats_store.per_user_ranking(fetch_traces(agent_id=agent_id))
+        return stats_store.per_user_ranking(_run_traces(fetch_traces(agent_id=agent_id)))
     if view == "tools":
-        traces = fetch_traces(agent_id=agent_id)
+        traces = _run_traces(fetch_traces(agent_id=agent_id))
         return [{"tool": name, "calls": n} for name, n in stats_store.top_tools(traces)["top"]]
     # default: flat usage summary as a single row
-    return [stats_store.aggregate_usage(fetch_traces(agent_id=agent_id))]
+    return [stats_store.aggregate_usage(_run_traces(fetch_traces(agent_id=agent_id)))]
 
 
 @router.post("/export")

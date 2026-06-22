@@ -50,8 +50,8 @@
 
 ## 5. Admin CLI
 
-- [x] 5.1 Write failing tests: `fleetent-admin diagnostics export` 调用 export API 并输出包路径
-- [x] 5.2 Write failing tests: `fleetent-admin diagnostics retention dry-run` 输出候选摘要且不删除
+- [x] 5.1 Write failing tests: `fleetent admin diagnostics export` 调用 export API 并输出包路径
+- [x] 5.2 Write failing tests: `fleetent admin diagnostics retention dry-run` 输出候选摘要且不删除
 - [x] 5.3 Write failing tests: `fleetent-admin diagnostics retention apply` 在 disabled 时返回非 0
 - [x] 5.4 Write failing tests: CLI 输出不包含 token、secret、credential payload 或完整文档正文
 - [x] 5.5 Implement: admin CLI diagnostics commands

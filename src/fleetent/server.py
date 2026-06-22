@@ -8,16 +8,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel
 
-from fleetent import agent_config, agent_store, connectors, cron_scheduler, user_store
+from fleetent import agent_config, agent_store, auth, connectors, cron_scheduler, user_store
 from fleetent.auth import seed_builtin_admin
 from fleetent.config import Settings, configure_logging
 from fleetent.governance.approval_router import resolve_approval_request
@@ -44,17 +46,24 @@ from fleetent.platform.chat_management import chat_admin_api
 from fleetent.platform.connector_management import connector_admin_api, vault_provider
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import provider_admin_api
-from fleetent.platform.node_management import node_desired_state_api
+from fleetent.platform.node_management import (
+    node_admin_api,
+    node_desired_state_api,
+    placement_store,
+)
+from fleetent.platform.node_management.agent_transport import DirectHttpAgentTransport
 from fleetent.platform.skill_management import skill_admin_api
+from fleetent.platform.tenancy import admin_api as tenancy_admin_api
 from fleetent.platform.user_management import user_admin_api
 from fleetent.platform.user_management.api_key_store import resolve as _resolve_api_key
 from fleetent.platform.user_management.platform_bearer_adapter import PlatformBearerAdapter
-from fleetent.runtime import run_stream
 from fleetent.session import manager as session_mgr
 from fleetent.skills import scan as scan_skills
-from fleetent.tools.plugin_loader import expand_plugin_patterns, load_plugins
+from fleetent.tools.plugin_loader import load_plugins
 
 logger = logging.getLogger(__name__)
+
+ADMIN_UI_DIST_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 
 def _admin_login_url(router_prefix: str) -> str:
@@ -159,10 +168,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # AR7: load enabled plugins once at startup (same lifecycle as scan_skills /
     # mcp register_all). A missing plugins/ dir or a bad plugin never aborts boot.
     load_plugins()
-    # approval-suspend-resume (#8): expired-approval reconcile is agent-owned and runs in
-    # each agent's boot (agent_app._start_infra), where approval_store's per-agent state_db
-    # is wired. The platform process wires no agent state_db, so it MUST NOT reconcile here
-    # — doing so crashed boot with "approval_store: state_db not initialized".
     try:
         settings = Settings()
     except Exception as exc:
@@ -188,57 +193,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     logger.info("admin_login_url url=%s", _admin_login_url(user_admin_api.router.prefix))
 
-    # The running event loop, used by the admin "Chat" playground seams below to drive
-    # on-demand turns from sync admin handlers.
+    # The running event loop backs the session governance seams injected below.
     loop = asyncio.get_running_loop()
-
-    # Wire the admin "Chat" playground to the real agent loop (mirrors /chat): the
-    # selected agent is resolved by name from its file-driven config, and the turn
-    # runs through run_stream against the playground session. Without this the
-    # playground seams are inert placeholders.
-    def _pg_run(
-        agent_name: str,
-        session_id: str,
-        message: str,
-        overrides: dict[str, Any] | None,
-        bypass_medium: bool,
-    ) -> dict[str, Any]:
-        from fleetent.runtime.snapshot import _governance_from_file
-
-        af = agent_config.current().get(agent_name) if agent_name else None
-        kwargs: dict[str, Any] = {
-            "principal": Principal(user_id="playground", tenant_id="default"),
-            "session_id": session_id,
-        }
-        if af is not None:
-            kwargs["system_prompt"] = af.system_prompt
-            kwargs["allowed_tools"] = af.allowed_tools + expand_plugin_patterns(af.plugins)
-            kwargs["agent_name"] = af.name
-            kwargs["agent_features"] = af.features
-            kwargs["allowed_skills"] = af.allowed_skills
-            kwargs["governance"] = _governance_from_file(af)
-        events: list[dict[str, Any]] = []
-
-        async def _collect() -> str:
-            reply = ""
-            try:
-                async for ev in run_stream(message, **kwargs):
-                    etype = ev.get("type")
-                    if etype == "done":
-                        reply = ev.get("content", "")
-                    elif etype in ("tool_call", "tool_result", "error"):
-                        events.append(ev)
-            except Exception as exc:  # noqa: BLE001 — surface as a turn error, never a 500
-                events.append({"type": "error", "content": str(exc)})
-            return reply
-
-        reply = asyncio.run_coroutine_threadsafe(_collect(), loop).result()
-        return {"reply": reply, "events": events}
 
     def _pg_transcript(session_id: str) -> list[dict[str, Any]]:
         return asyncio.run_coroutine_threadsafe(session_mgr.load(session_id), loop).result()
 
-    chat_admin_api.run_playground = _pg_run
     chat_admin_api.load_transcript = _pg_transcript
     chat_admin_api.clear_session = lambda session_id: asyncio.run_coroutine_threadsafe(
         session_mgr.clear(session_id), loop
@@ -250,30 +210,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         session_mgr.reset(session_id, keep_turns), loop
     ).result()
 
-    # Platform-maintenance scheduler only (agent-owned-scheduled-tasks): user scheduled
-    # tasks are agent-runtime-owned and fired by each agent process, NOT the platform
-    # server. The platform keeps a bare scheduler purely for its own housekeeping
-    # (expired-playground purge); best-effort so a failure never blocks serving.
-    maint = AsyncIOScheduler()
-    try:
-        maint.add_job(
-            _run_playground_retention,
-            trigger="interval",
-            seconds=_PLAYGROUND_RETENTION_INTERVAL_SECONDS,
-            id="playground_retention",
-            replace_existing=True,
-        )
-        maint.start()
-    except Exception as exc:
-        logger.warning("platform_maintenance_scheduler_start_failed error=%s", exc)
-
     yield
-
-    try:
-        if maint.running:
-            maint.shutdown(wait=False)
-    except Exception as exc:
-        logger.warning("platform_maintenance_scheduler_shutdown_failed error=%s", exc)
     # Release MCP session hosts (platform registers global servers via register_all). Each
     # host tears down on its own task; failures are contained inside aclose_all().
     try:
@@ -298,6 +235,56 @@ app.include_router(agent_admin_api.router)
 app.include_router(stats_admin_api.router)
 app.include_router(agent_apply_api.router)
 app.include_router(node_desired_state_api.router)
+app.include_router(node_admin_api.router)
+app.include_router(tenancy_admin_api.router)
+
+
+def _remove_legacy_admin_ui_route() -> None:
+    app.router.routes = [
+        route for route in app.router.routes if getattr(route, "path", None) != "/admin/ui"
+    ]
+
+
+_remove_legacy_admin_ui_route()
+
+
+def _spa_index_path() -> Path:
+    return _admin_ui_dist_dir() / "index.html"
+
+
+def _admin_ui_dist_dir() -> Path:
+    override = os.environ.get("FLEETENT_ADMIN_UI_DIST")
+    if override:
+        return Path(override)
+    return ADMIN_UI_DIST_DIR
+
+
+def _serve_spa_file(asset_path: str) -> Response:
+    root = _admin_ui_dist_dir().resolve()
+    requested = (root / asset_path).resolve()
+    if requested.is_file() and str(requested).startswith(str(root)):
+        return FileResponse(requested)
+
+    index_path = _spa_index_path()
+    if not index_path.is_file():
+        raise HTTPException(status_code=503, detail="admin frontend dist not built")
+
+    if asset_path and "." in Path(asset_path).name:
+        raise HTTPException(status_code=404, detail="asset not found")
+
+    return HTMLResponse(
+        index_path.read_text(encoding="utf-8"), headers={"Cache-Control": "no-store"}
+    )
+
+
+@app.get("/admin/ui", response_class=HTMLResponse)
+def admin_ui() -> Response:
+    return _serve_spa_file("")
+
+
+@app.get("/admin/ui/{asset_path:path}", response_class=HTMLResponse)
+def admin_ui_spa(asset_path: str) -> Response:
+    return _serve_spa_file(asset_path)
 
 
 _UNSET: Any = object()  # distinguishes "field omitted" from an explicit None (clear)
@@ -416,13 +403,34 @@ def wire_agent_store_seams() -> None:
     def _console_delete(name: str) -> bool:
         return agent_store.delete_agent(name)
 
-    def _apply_create(name: str, system_prompt: str, allowed_tools: list[str]) -> int:
-        agent_id = agent_store.create_agent(name, system_prompt, allowed_tools).id
+    def _apply_create(
+        name: str,
+        system_prompt: str,
+        allowed_tools: list[str],
+        model_overrides: dict[str, Any] | None = None,
+    ) -> int:
+        agent_id = agent_store.create_agent(
+            name,
+            system_prompt,
+            allowed_tools,
+            model_overrides=model_overrides,
+        ).id
         materialize.materialize_from_store(name)
         return agent_id
 
-    def _apply_update(name: str, system_prompt: str, allowed_tools: list[str]) -> None:
-        agent_store.create_version(name, system_prompt=system_prompt, allowed_tools=allowed_tools)
+    def _apply_update(
+        name: str,
+        system_prompt: str,
+        allowed_tools: list[str],
+        model_overrides: dict[str, Any] | None = None,
+    ) -> None:
+        kwargs: dict[str, Any] = {
+            "system_prompt": system_prompt,
+            "allowed_tools": allowed_tools,
+        }
+        if model_overrides is not None:
+            kwargs["model_overrides"] = model_overrides
+        agent_store.create_version(name, **kwargs)
         materialize.materialize_from_store(name)
 
     agent_console_api.get_agent_def = _get_def
@@ -440,22 +448,8 @@ def wire_agent_store_seams() -> None:
 wire_agent_store_seams()
 
 
-_PLAYGROUND_RETENTION_INTERVAL_SECONDS = 24 * 3600
-
-
-def _run_playground_retention() -> None:
-    """Daily sweep: drop unpinned, expired playground sessions. Failures are isolated."""
-    import os
-
-    if not os.environ.get("DATABASE_URL"):
-        return
-    try:
-        chat_admin_api.purge_expired_playground()
-    except Exception:  # noqa: BLE001 — keep the periodic job alive
-        logger.exception("playground_retention_failed")
-
-
 _platform_bearer = PlatformBearerAdapter()
+_agent_transport = DirectHttpAgentTransport()
 
 
 async def _authenticate(authorization: str = Header()) -> Principal:
@@ -467,6 +461,31 @@ async def _authenticate(authorization: str = Header()) -> Principal:
     if principal is None:
         raise HTTPException(status_code=401, detail="Invalid API key")
     return principal
+
+
+def _require_admin_session(authorization: str = Header(default="")) -> user_store.User:
+    if not authorization.startswith("Session "):
+        raise HTTPException(status_code=401, detail="Session token required")
+    token = authorization.split(" ", 1)[1]
+    user_id = auth.validate_session(token, 1800)
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="invalid or expired session")
+    user = user_store.get_by_id(user_id)
+    if user is None:
+        raise HTTPException(status_code=401, detail="invalid session")
+    if not auth.has_role(user, {"admin", "built_in_admin"}):
+        raise HTTPException(status_code=403, detail="admin required")
+    return user
+
+
+def _resolve_agent_node_id(agent_name: str) -> str:
+    agent = agent_store.get_by_name(agent_name)
+    if agent is None:
+        raise HTTPException(status_code=404, detail=f"agent {agent_name!r} not found")
+    placement = placement_store.get_for_agent(agent.id)
+    if placement is None:
+        raise HTTPException(status_code=503, detail=f"agent {agent_name!r} has no node placement")
+    return str(placement["node_id"])
 
 
 def _slack_adapter_configured() -> bool:
@@ -527,3 +546,24 @@ async def resolve_approval(approval_id: str, req: ApprovalRequest) -> dict:  # t
     if not found:
         raise HTTPException(status_code=404, detail=f"approval {approval_id} not found or expired")
     return {"status": "ok", "approval_id": approval_id, "decision": req.decision}
+
+
+@app.post("/admin/agents/{agent_name}/chat")
+async def managed_agent_chat(
+    agent_name: str,
+    request: Request,
+    admin: user_store.User = Depends(_require_admin_session),  # noqa: B008
+) -> Response:
+    del admin
+    return await _agent_transport.chat(
+        _resolve_agent_node_id(agent_name),
+        agent_name,
+        await request.body(),
+        content_type=request.headers.get("content-type", "application/json"),
+    )
+
+
+@app.websocket("/admin/agents/{agent_name}/ws")
+async def managed_agent_ws(websocket: WebSocket, agent_name: str) -> None:
+    _require_admin_session(websocket.headers.get("authorization", ""))
+    await _agent_transport.ws(_resolve_agent_node_id(agent_name), agent_name, websocket)

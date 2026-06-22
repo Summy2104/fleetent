@@ -57,7 +57,7 @@ def test_kb_sync_execute_requires_yes():
     assert "requires --yes" in err
 
 
-def test_kb_connector_execute_sync_requires_cli_safeguards(monkeypatch):
+def test_kb_connector_execute_sync_command_removed(monkeypatch):
     from fleetent.knowledge_base import operations
 
     called = False
@@ -83,11 +83,11 @@ def test_kb_connector_execute_sync_requires_cli_safeguards(monkeypatch):
 
     assert code != 0
     assert out == ""
-    assert "requires --yes" in err
+    assert "invalid choice" in err
     assert called is False
 
 
-def test_kb_connector_execute_sync_runs_with_all_safeguards(monkeypatch):
+def test_kb_connector_execute_sync_command_removed_even_with_old_flags(monkeypatch):
     from fleetent.knowledge_base import operations
 
     calls: list[tuple[str, bool]] = []
@@ -118,10 +118,9 @@ def test_kb_connector_execute_sync_runs_with_all_safeguards(monkeypatch):
         "--pilot-fixture",
     )
 
-    assert code == 0
-    assert err == ""
-    assert calls == [("gdrive", False)]
-    assert "status=sync_succeeded" in out
+    assert code != 0
+    assert "invalid choice" in err
+    assert calls == []
 
 
 def test_maintenance_apply_records_trace_evidence(monkeypatch):

@@ -8,33 +8,23 @@ change agent-runtime-cli.
 ## Requirements
 ### Requirement: Standalone agent runtime via `fleetent agent run`
 
-The `fleetent` command SHALL provide `agent run <agent-id> [--port N]` that boots a
-single agent as a self-contained foreground process: it resolves the agent home at
-`FLEETENT_HOME/agents/<agent-id>/` (`agent.yaml` + `.env` + `data/` + local access), loads it,
-runs the agent loop, and starts that agent's IM connectors. The process SHALL run
-without any platform service.
+`fleetent agent run <agent-id> [--port N]` SHALL boot a single agent home as a foreground process (loop + bound IM + optional HTTP/ws): 解析 `FLEETENT_HOME/agents/<agent-id>/` 的 agent home（`agent.yaml` + `.env` + `data/`），加载并运行 agent loop、启动其 IM 连接。**该命令是 node 拉起 agent 的原语**（node 经 subprocess 调用它）**, 也可被开发者直接运行作 dev/test 调试**。
 
-Before scanning `agent.yaml`, `boot()` SHALL load `<home_dir>/.env` into the process
-`os.environ` using `load_dotenv(override=False)`. If the file does not exist the step
-SHALL be silently skipped. Variables already present in the process environment (injected
-by systemd `EnvironmentFile`, Docker `--env-file`, or shell `export`) SHALL take
-precedence over values in `.env`.
+该命令在运行时 **MUST NOT** 依赖 platform（agent→platform 解耦契约;agent 运行时不调 platform）。但"无 platform 的 standalone 部署"**不再是受支持的部署模式**——生产部署 platform 始终在场,agent 由 node 拉起、配置由 platform materialize 下发（见 `deployment`）。`fleetent agent run` 直接手跑仅用于 dev/test,不作部署形态。
 
-#### Scenario: Boot one agent from its home
-- **WHEN** `fleetent agent run support` is invoked and `FLEETENT_HOME/agents/support/agent.yaml`
-  exists
-- **THEN** the process loads that home's agent and starts its IM connectors, with no
-  platform server required
+Before scanning `agent.yaml`, `boot()` SHALL load `<home_dir>/.env` into the process `os.environ` using `load_dotenv(override=False)`; 文件不存在则静默跳过;进程环境（systemd / Docker / node 注入）优先。
 
-#### Scenario: .env is loaded before agent.yaml is scanned
-- **WHEN** `<home_dir>/.env` exists and contains `SLACK_BOT_TOKEN=xoxb-abc`
-- **THEN** `os.environ["SLACK_BOT_TOKEN"]` equals `xoxb-abc` by the time `scan_home()` runs
-- **AND** downstream consumers (`slack_supervisor`, `model/resolver`) read the correct value
+#### Scenario: node 经 agent run 拉起 agent
+- **WHEN** node reconcile 时对某 agent 调 `fleetent agent run <id> --home <materialized-home>`
+- **THEN** 该进程加载 materialized home 并运行,无需在该进程内 import 或调用 platform
 
-#### Scenario: Old flat agent home is not used
-- **WHEN** a legacy flat Agent home exists outside `FLEETENT_HOME/agents/<agent-id>/`
-- **AND** the canonical `FLEETENT_HOME/agents/support/agent.yaml` does not exist
-- **THEN** `fleetent agent run support` fails rather than loading the old flat path
+#### Scenario: dev 直接跑 agent run 调试
+- **WHEN** 开发者本地 `fleetent agent run support` 调试
+- **THEN** 进程加载该 home 并运行;这是 dev/test 用法,不是受支持的 standalone 部署
+
+#### Scenario: .env 在扫描 agent.yaml 前加载
+- **WHEN** `<home_dir>/.env` 存在且含 `SLACK_BOT_TOKEN=xoxb-abc`
+- **THEN** 该值在 `boot()` 扫描 agent.yaml 前进入 `os.environ`（进程已有同名值优先）
 
 ### Requirement: HTTP is opt-in via `--port`
 
@@ -226,4 +216,121 @@ generated with `secrets.token_hex(32)`.
 
 - **WHEN** `fleetent agent stop support` 但无 pid 文件或进程已退出
 - **THEN** 命令静默成功，不报错
+
+### Requirement: B 类冗余 CLI 命令已移除
+
+B 类冗余 CLI 命令 SHALL NOT 再通过 `fleetent admin` 暴露；运维与控制面 SHALL 改走对应 HTTP API。
+
+**Reason**: 以下命令均已有等价 HTTP API——其中 6 条的 API 由前置 change `complete-admin-api-coverage` 补齐——CLI 入口冗余。
+
+**Migration**:
+- `create-user` → `POST /admin/service-principals`（建服务账号即发 key）
+- `rotate-key` → `POST /admin/users/{user_id}/rotate-key`
+- `set-default-agent` → `PUT /admin/agents/{name}/default` / `DELETE /admin/agents/default`
+- `observability traces/usage/performance` → `GET /admin/observability/{traces,usage,performance}`
+- `list-users` → `GET /admin/users`；`block-user`（已是 no-op stub）→ `POST /admin/im-users/{id}/block`
+- `update-agent`/`list-agent-versions`/`activate-agent-version`/`show-agent` → `/admin/agents/{name}/*`
+- `assign-user`/`unassign-user` → `POST|DELETE /admin/agents/{name}/bindings/users/{user_id}`
+- `kb connectors list/check/status/sync` → `/admin/kb/connectors/*`
+
+已移除（共 18 条）：`create-user`、`list-users`、`rotate-key`、`block-user`、`update-agent`、`list-agent-versions`、`activate-agent-version`、`show-agent`、`assign-user`、`unassign-user`、`set-default-agent`、`kb connectors list`、`kb connectors check`、`kb connectors status`、`kb connectors sync`、`observability traces`、`observability usage`、`observability performance`。
+
+#### Scenario: 已移除命令不再可用
+
+- **WHEN** 用户运行 `fleetent admin create-user`（或其他已移除命令）
+- **THEN** argparse 报 `invalid choice` 错误（命令不存在）
+
+### Requirement: `fleetent admin` 子命令组
+
+`fleetent` 命令 SHALL 提供 `admin` 子命令组，作为平台管理 CLI 的**唯一**入口（旧 `fleetent-admin` console script 已移除）。`fleetent admin <cmd>` SHALL 复用 `platform.admin_cli` 实现；`fleetent admin --help` 的 usage 行 SHALL 显示 `fleetent admin`。admin 子命令的 import SHALL 懒加载，不在 `fleetent agent run` 启动路径触发。
+
+#### Scenario: admin 子命令可用
+
+- **WHEN** 用户运行 `fleetent admin list-tenants`（保留命令）
+- **THEN** 命令执行，输出与底层 `platform.admin_cli` 实现一致
+
+#### Scenario: 旧 fleetent-admin 入口不再存在
+
+- **WHEN** 查看 `pyproject.toml` 的 `[project.scripts]`
+- **THEN** 不含 `fleetent-admin` 入口；管理 CLI 仅经 `fleetent admin` 暴露
+
+#### Scenario: agent run 不加载 admin 代码
+
+- **WHEN** 调度到 `fleetent agent run` 分支（serve 被 mock，sys.modules 先清除 `fleetent.platform.admin_cli`）
+- **THEN** `fleetent.platform.admin_cli` 不在 `sys.modules`
+
+### Requirement: `fleetent node start` 子命令
+
+`fleetent` 命令 SHALL 提供 `node start`，启动 node supervisor，作为其**唯一**入口（旧 `fleetent-node` console script 已移除）。node 配置经 `FLEETENT_NODE_*` 环境变量，无命令行参数透传。
+
+#### Scenario: node start 启动 supervisor
+
+- **WHEN** 用户运行 `fleetent node start`
+- **THEN** node supervisor 启动，行为与旧 `fleetent-node` 相同
+
+#### Scenario: 旧 fleetent-node 入口不再存在
+
+- **WHEN** 查看 `pyproject.toml` 的 `[project.scripts]`
+- **THEN** 不含 `fleetent-node` 入口；node supervisor 仅经 `fleetent node start` 启动
+
+### Requirement: `fleetent chat` 子命令
+
+`fleetent` 命令 SHALL 提供 `chat` 子命令,作为终端交互客户端的**唯一**入口。`fleetent chat [--url <ws>] [--token <key>]` SHALL 连接 `/ws` 做多轮对话(含斜杠命令),行为等价于改名前的旧 `tui` 子命令 / 更早的 `fleetent-tui`。其 import SHALL 懒加载,不在 `fleetent agent run` 启动路径触发。
+
+#### Scenario: chat 子命令连接 /ws
+
+- **WHEN** 用户运行 `fleetent chat --url ws://localhost:8765/ws --token ma-<key>`
+- **THEN** 客户端连接该 `/ws` 并进入多轮对话
+
+#### Scenario: chat help 显示正确 prog 名
+
+- **WHEN** 用户运行 `fleetent chat --help`
+- **THEN** usage 行显示 `fleetent chat`
+
+#### Scenario: 旧 fleetent-tui 入口不再存在
+
+- **WHEN** 查看 `pyproject.toml` 的 `[project.scripts]`
+- **THEN** 不含 `fleetent-tui` 入口;终端 TUI 仅经 `fleetent chat` 子命令暴露
+
+#### Scenario: chat 沿用 env 默认
+
+- **WHEN** 设置 `FLEETENT_TUI_URL` / `FLEETENT_TOKEN` 后运行 `fleetent chat`
+- **THEN** 子命令读取这些环境变量作为 `--url` / `--token` 默认值
+
+### Requirement: `fleetent kb-worker` 子命令
+
+`fleetent` 命令 SHALL 提供 `kb-worker` 子命令,启动 KB ingest 队列的唯一消费者长驻进程。其 import SHALL 懒加载,不在 `fleetent agent run` 启动路径触发(对齐 `fleetent node start` 模式)。worker SHALL NOT `import fleetent.platform.*`。
+
+#### Scenario: kb-worker 启动并消费
+
+- **WHEN** 用户运行 `fleetent kb-worker`
+- **THEN** 进程进入循环:claim pending job → 调 ingest 核 → mark done/failed
+
+#### Scenario: agent run 不加载 kb-worker
+
+- **WHEN** 调度到 `fleetent agent run` 分支
+- **THEN** `fleetent kb-worker` 的实现模块未被 import(懒加载)
+
+### Requirement: 一次性 CLI 经 Principal 调用 agent loop
+
+`fleetent "<prompt>"` 一次性入口(`run_sync` → `_run`)SHALL 以 `principal=Principal(user_id=..., tenant_id="default")` 调用 `loop.run()`,SHALL NOT 传 `run()` 不接受的 `user_id` 关键字。`run()` / `run_stream()` 的签名(收 `principal`)SHALL 不变。
+
+#### Scenario: 一次性入口真实跑通
+
+- **WHEN** 执行 `fleetent "What is 7*8?"`(LLM 在 `get_client_and_config` 边界打桩)
+- **THEN** `_run → run()` 真实执行返回回复,**不抛 `TypeError: run() got an unexpected keyword argument`**
+
+#### Scenario: run 签名不变
+
+- **WHEN** 检视 `loop.run` / `loop.run_stream` 签名
+- **THEN** 仍收 `principal: Principal | None`;改的是一次性调用方,不是 run 本身
+
+### Requirement: 真实入口冒烟覆盖一次性路径
+
+集成测试 SHALL 覆盖一次性 `run_sync` 的**真实** `run()` 调用——在 `get_client_and_config` 边界打桩 LLM,**不得 mock `loop.run` 本身**(否则绕过入口签名)。
+
+#### Scenario: 冒烟执行真实 run() 而非 mock 它
+
+- **WHEN** 一次性入口冒烟运行
+- **THEN** 它 patch `get_client_and_config`(LLM 边界),`_run → run()` 真实执行;若入口与 run 签名不匹配,测试 SHALL fail
 
