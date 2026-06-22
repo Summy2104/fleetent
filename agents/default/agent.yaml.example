@@ -322,6 +322,9 @@ session_ttl_days: 30
 session_max_total_mb: 1024        # total size cap for all sessions on disk (MB)
 session_max_count: 10000          # max number of sessions retained
 session_cleanup_interval_seconds: 3600.0
+reflection:
+  enabled: false
+  interval_seconds: 86400
 disabled_skills: []
 
 # ── feature toggles (per-capability on/off + tuning) ──

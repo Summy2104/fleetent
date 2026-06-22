@@ -345,10 +345,16 @@ _FACE_NAMESPACES = (
 # wire the core to the edge face at app startup. Each entry must shrink as
 # the coupling is eliminated.
 _KNOWN_CORE_EDGE_EXCEPTIONS: set[str] = {
-    # agent_app.py bootstraps standalone agent mode: starts IM supervisors (SlackSupervisor,
-    # TelegramSupervisor) from the edge face and redirects im_gateway.access.APPROVALS_PATH.
+    # agent_app.py bootstraps standalone agent mode: starts IM supervisors from the
+    # no-platform-import edge face and redirects im_gateway.access.APPROVALS_PATH.
+    # Managed node-hosted IM stays outside the runtime core; this exception is only for
+    # standalone composition-root wiring, not a license for runtime logic to import edge.
     # Coupling is intentional at the composition-root level (not core logic).
     "fleetent.runtime.agent_app",
+    # node.im_edge is the managed deployment composition root: it hosts the IM edge face
+    # on node and wires injected dispatch/resolution without importing platform into
+    # im_gateway or runtime core logic.
+    "fleetent.node.im_edge",
 }
 
 # ②控制 face sub-packages (must not import ③ orchestration)

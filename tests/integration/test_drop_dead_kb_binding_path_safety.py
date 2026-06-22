@@ -43,12 +43,20 @@ def test_live_agent_kb_path_materializes_agent_knowledge_and_long_term_ctx_uses_
     )
     monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[]))
 
-    async def _search(query: str, tenant_id: str, kb_ids: list[str], limit: int, mode: str):
+    async def _search(
+        query: str,
+        tenant_id: str,
+        kb_ids: list[str],
+        limit: int,
+        mode: str,
+        audit_context=None,
+    ):
         assert query == "runbook"
         assert tenant_id == "acme"
         assert kb_ids == ["support-kb"]
         assert limit == 10
         assert mode == "hybrid"
+        assert audit_context is None
         return [
             KnowledgeChunk(
                 id="chunk-1",

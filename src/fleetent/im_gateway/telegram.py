@@ -77,10 +77,10 @@ def create_app(agent_name: str, config: dict[str, Any]) -> object:
             IMIdentityResolutionError,
             resolve_identity,
         )
+        from fleetent.im_gateway.inbound_dispatch import dispatch  # noqa: PLC0415
         from fleetent.im_gateway.normalizer import (  # noqa: PLC0415
             NormalizedMessage,
             SessionContext,
-            route,
         )
         from fleetent.outbound import ConversationAddress  # noqa: PLC0415
 
@@ -152,7 +152,7 @@ def create_app(agent_name: str, config: dict[str, Any]) -> object:
                 thread_root=str(reply_to.message_id) if reply_to else "",
             ),
         )
-        await route(msg)
+        await dispatch(msg)
 
     from telegram.ext import MessageHandler, filters
 
