@@ -28,7 +28,12 @@ from pydantic import BaseModel
 
 from fleetent import agent_config, paths
 from fleetent.agent_config import AgentFile
-from fleetent.identity import LocalBearerAdapter, Principal
+from fleetent.identity import (
+    INGRESS_PRINCIPAL_HEADER,
+    LocalBearerAdapter,
+    Principal,
+    decode_ingress_principal,
+)
 from fleetent.structured_logging import get_logger
 
 if TYPE_CHECKING:
@@ -138,6 +143,27 @@ def _check_tenant(principal: Principal, agent_tenant: str) -> bool:
     if agent_tenant == "default":
         return True
     return principal.tenant_id == agent_tenant
+
+
+def _resolve_ingress_principal(
+    authorization_header: str,
+    carried_principal_header: str | None,
+    *,
+    local_bearer: LocalBearerAdapter | None = None,
+) -> Principal:
+    """Resolve the effective ingress Principal inside the trusted transport boundary."""
+    principal = None
+    if authorization_header.startswith("Bearer "):
+        token = authorization_header.removeprefix("Bearer ").strip()
+        adapter = local_bearer or LocalBearerAdapter()
+        principal = adapter(token) or _validate_tui_token(authorization_header)
+    if principal is None:
+        raise HTTPException(status_code=401, detail="invalid or missing bearer token")
+    try:
+        carried_principal = decode_ingress_principal(carried_principal_header)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return carried_principal or principal
 
 
 def _redirect_agent_data_paths(home_dir: Path) -> None:
@@ -583,14 +609,17 @@ def build_app(agent_name: str) -> FastAPI:
 
     _local_bearer = LocalBearerAdapter()
 
-    def _authenticate(authorization: str = Header(default="")) -> Principal:  # noqa: B008
-        principal = None
-        if authorization.startswith("Bearer "):
-            token = authorization.removeprefix("Bearer ").strip()
-            principal = _local_bearer(token) or _validate_tui_token(authorization)
-        if principal is None:
-            raise HTTPException(status_code=401, detail="invalid or missing bearer token")
-        return principal
+    def _authenticate(
+        authorization: str = Header(default=""),  # noqa: B008
+        carried_principal_header: str | None = Header(  # noqa: B008
+            default=None, alias=INGRESS_PRINCIPAL_HEADER
+        ),
+    ) -> Principal:
+        return _resolve_ingress_principal(
+            authorization,
+            carried_principal_header,
+            local_bearer=_local_bearer,
+        )
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
@@ -672,16 +701,24 @@ def build_app(agent_name: str) -> FastAPI:
             )
             await websocket.close(code=1008)
             return
+        try:
+            principal = decode_ingress_principal(
+                websocket.headers.get(INGRESS_PRINCIPAL_HEADER.lower())
+            )
+        except ValueError:
+            await websocket.close(code=1008)
+            return
+        effective_principal = principal or tui_principal
         agent = agent_config.current().get(agent_name)
         agent_tenant = agent.tenant_id if agent is not None else "default"
-        if not _check_tenant(tui_principal, agent_tenant):
+        if not _check_tenant(effective_principal, agent_tenant):
             _logger.warn("tui_ws_cross_tenant_rejected", agent_tenant=agent_tenant)
             await websocket.close(code=1008)
             return
         await websocket.accept()
         transport = WSTransport(websocket)
         conn = tui_dispatch.Connection(
-            principal=tui_principal, transport=transport, agent_name=agent_name
+            principal=effective_principal, transport=transport, agent_name=agent_name
         )
         await transport.write(tui_proto.make_event(tui_proto.EVENT_GATEWAY_READY, {}))
         try:

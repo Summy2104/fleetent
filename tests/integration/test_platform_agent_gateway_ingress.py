@@ -120,7 +120,8 @@ def test_admin_chat_ingress_reaches_node_forwarder_and_agent(
     assert "echo:hi" in response.text
     assert captured["agent_auth"] == "Bearer ma-agent-token"
     principal = captured["principal"]
-    assert principal.user_id == "local"  # type: ignore[union-attr]
+    assert principal.user_id == "admin-1"  # type: ignore[union-attr]
+    assert principal.tenant_id == "default"  # type: ignore[union-attr]
 
 
 def test_managed_agent_chat_routes_by_placement_and_requires_admin_session(
@@ -136,19 +137,29 @@ def test_managed_agent_chat_routes_by_placement_and_requires_admin_session(
             body: bytes,
             *,
             content_type: str = "application/json",
+            principal=None,
         ):
             captured["node_id"] = node_id
             captured["agent_name"] = agent_name
             captured["body"] = body
             captured["content_type"] = content_type
+            captured["principal"] = principal
 
             async def _iter():
                 yield b"data: ok\n\n"
 
             return StreamingResponse(_iter(), media_type="text/event-stream")
 
-        async def ws(self, node_id: str, agent_name: str, websocket: WebSocket) -> None:
+        async def ws(
+            self,
+            node_id: str,
+            agent_name: str,
+            websocket: WebSocket,
+            *,
+            principal=None,
+        ) -> None:
             captured["ws_node_id"] = node_id
+            captured["ws_principal"] = principal
             await websocket.accept()
             await websocket.send_text('{"type":"ready"}')
             await websocket.close()
@@ -181,12 +192,16 @@ def test_managed_agent_chat_routes_by_placement_and_requires_admin_session(
     assert captured["agent_name"] == "support"
     assert captured["body"] == b'{"message":"hi"}'
     assert captured["content_type"] == "application/json"
+    assert captured["principal"].user_id == "admin-1"
+    assert captured["principal"].tenant_id == "default"
 
     with client.websocket_connect(
         "/admin/agents/support/ws",
         headers={"Authorization": "Session sess-1"},
     ) as ws:
         assert ws.receive_text() == '{"type":"ready"}'
+    assert captured["ws_principal"].user_id == "admin-1"
+    assert captured["ws_principal"].tenant_id == "default"
 
 
 async def test_direct_http_transport_chat_streams_complete_body_over_real_socket(

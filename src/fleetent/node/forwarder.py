@@ -10,6 +10,7 @@ from fastapi import FastAPI, Header, HTTPException, Request, WebSocket
 from fastapi.responses import Response, StreamingResponse
 from starlette.websockets import WebSocketDisconnect
 
+from fleetent.identity import INGRESS_PRINCIPAL_HEADER
 from fleetent.node.backend import BaseProcessBackend
 from fleetent.node.config import NodeConfig
 
@@ -62,6 +63,8 @@ def build_app(config: NodeConfig, backend: BaseProcessBackend) -> FastAPI:
         headers = {"Authorization": f"Bearer {token}"}
         if request.headers.get("content-type"):
             headers["Content-Type"] = request.headers["content-type"]
+        if request.headers.get(INGRESS_PRINCIPAL_HEADER):
+            headers[INGRESS_PRINCIPAL_HEADER] = request.headers[INGRESS_PRINCIPAL_HEADER]
         # Client is NOT wrapped in async with — its lifecycle is bound to _iter() so
         # the connection stays open until the StreamingResponse body is fully consumed.
         client = httpx.AsyncClient(timeout=None)
@@ -113,9 +116,14 @@ def build_app(config: NodeConfig, backend: BaseProcessBackend) -> FastAPI:
         token = _agent_tui_token(agent_name)
         upstream_url = f"ws://127.0.0.1:{port}/ws"
         try:
+            upstream_headers = {"Authorization": f"Bearer {token}"}
+            if websocket.headers.get(INGRESS_PRINCIPAL_HEADER.lower()):
+                upstream_headers[INGRESS_PRINCIPAL_HEADER] = websocket.headers[
+                    INGRESS_PRINCIPAL_HEADER.lower()
+                ]
             async with websockets.connect(
                 upstream_url,
-                additional_headers={"Authorization": f"Bearer {token}"},
+                additional_headers=upstream_headers,
             ) as upstream:
                 await websocket.accept()
 
