@@ -141,6 +141,29 @@ def _cron_principal_recheck(task: dict[str, Any]) -> Principal | None:
     return None
 
 
+def _build_platform_maintenance_scheduler(
+    scheduling: Any = None,
+    _scheduler: Any = None,
+) -> Any:
+    """Build and return a configured (but not yet started) APScheduler for platform-only
+    maintenance jobs.  Accepts an optional `_scheduler` for dependency injection in tests."""
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
+
+    from fleetent.config import SchedulingSettings
+    from fleetent.platform.knowledge_base_management.kb_connector_sweep import sweep
+
+    cfg: SchedulingSettings = scheduling if scheduling is not None else SchedulingSettings()
+    sched: Any = _scheduler if _scheduler is not None else AsyncIOScheduler()
+    sched.add_job(
+        sweep,
+        trigger="interval",
+        seconds=cfg.kb_connector_sweep_interval_seconds,
+        id="__kb_connector_sync_sweep__",
+        replace_existing=True,
+    )
+    return sched
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Wire platform api_keys resolver so user_store.authenticate queries the api_keys
@@ -208,7 +231,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         session_mgr.reset(session_id, keep_turns), loop
     ).result()
 
+    # Platform-side maintenance scheduler: runs sweep jobs in the platform process so
+    # agent-runtime cron_scheduler stays free of platform imports (boundary contract).
+    from fleetent.config import SchedulingSettings
+
+    platform_maint_sched = _build_platform_maintenance_scheduler(SchedulingSettings())
+    platform_maint_sched.start()
+
     yield
+
+    if platform_maint_sched.running:
+        platform_maint_sched.shutdown(wait=False)
     # Release MCP session hosts (platform registers global servers via register_all). Each
     # host tears down on its own task; failures are contained inside aclose_all().
     try:
