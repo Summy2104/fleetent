@@ -131,7 +131,15 @@ def resolve_host_path(root: Path, path: str) -> Path:
     symlink/TOCTOU gap documented in the design (no mount namespace without docker).
     """
     base = os.path.normpath(str(root))
-    if os.path.isabs(path):
+    # The model lives in the container's single-root /workspace world and may hand a
+    # /workspace[/<rel>] absolute path to host-side file tools (send_file, read/write).
+    # Strip that mount-point prefix and resolve under the host root. A look-alike like
+    # /workspace-evil is NOT the prefix and falls through to the escape check below.
+    if path == WORKSPACE:
+        path = ""
+    elif path.startswith(WORKSPACE + "/"):
+        path = path[len(WORKSPACE) + 1 :]
+    if path and os.path.isabs(path):
         candidate = os.path.normpath(path)
     else:
         candidate = os.path.normpath(os.path.join(base, path))

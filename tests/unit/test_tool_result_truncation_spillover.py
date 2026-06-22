@@ -125,3 +125,36 @@ def test_cleanup_removes_old_files(tmp_path):
 
     assert not old_file.exists()
     assert fresh_file.exists()
+
+
+# ── workspace_dir: spillover into the session workspace, workspace-relative hint ──
+
+
+def test_overflow_with_workspace_dir_writes_under_workspace(tmp_path):
+    big = "line content\n" * 6_000  # > 50KB
+    result = trt.truncate_tool_result(big, workspace_dir=tmp_path)
+    spill = tmp_path / ".fleetent_spillover"
+    files = list(spill.iterdir())
+    assert len(files) == 1 and files[0].suffix == ".txt"
+    assert files[0].read_text(encoding="utf-8") == big
+    # hint carries a WORKSPACE-RELATIVE path (read_file resolves it in-fence), not the
+    # host-absolute tmp prefix nor the global data_dir.
+    assert ".fleetent_spillover/" in result
+    assert str(tmp_path) not in result
+    assert "read_file" in result
+
+
+def test_overflow_with_workspace_dir_preview_kept(tmp_path):
+    big = "".join(f"L{i}\n" for i in range(6_000))
+    result = trt.truncate_tool_result(big, workspace_dir=tmp_path)
+    assert result.startswith("L0\n")  # first lines preserved as preview
+
+
+def test_overflow_without_workspace_dir_falls_back_to_global(tmp_path, monkeypatch):
+    monkeypatch.setattr(trt, "SPILLOVER_DIR", tmp_path / "spillover")
+    big = "line content\n" * 6_000
+    result = trt.truncate_tool_result(big)  # no workspace_dir → legacy global
+    files = list((tmp_path / "spillover").iterdir())
+    assert len(files) == 1
+    assert not (tmp_path / ".fleetent_spillover").exists()
+    assert str((tmp_path / "spillover")) in result  # legacy absolute path in hint

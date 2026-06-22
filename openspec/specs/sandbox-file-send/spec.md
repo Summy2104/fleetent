@@ -5,9 +5,14 @@ TBD - created by archiving change sandbox-file-egress. Update Purpose after arch
 ## Requirements
 ### Requirement: send_file 工具发送 workspace 产物给固定收件人
 
-系统 SHALL 提供宿主侧内置工具 `send_file(path)`，把工件作为文件附件送回**当前对话**。`path` MUST 在双根命名空间内解释：**workspace 相对路径**（沙箱优先执行的单根 `/workspace` 坐标系，经 `SandboxManager.workspace_host_path(scope, session_id, agent_name)` + `resolve_host_path` 翻译，与文件工具宿主围栏同一翻译）；或 **`/exchange/<server_id>/...` 规范路径**（经 file-exchange 归属校验解析到有效文件根内真实文件）。翻译 MUST 拒绝两根之外与 `..` 越界路径，越界 MUST 返回说明文本而非发送。
+系统 SHALL 提供宿主侧内置工具 `send_file(path)`，把工件作为文件附件送回**当前对话**。`path` MUST 在双根命名空间内解释：**workspace 路径**（沙箱优先执行的单根 `/workspace` 坐标系，经 `SandboxManager.workspace_host_path(scope, session_id, agent_name)` + `resolve_host_path` 翻译，与文件工具宿主围栏同一翻译）——既接受 **workspace 相对路径**（如 `report.xlsx`），也接受**容器 `/workspace[/<rel>]` 绝对路径**（如 `/workspace/outbound/report.xlsx`，剥去 `/workspace` 挂载点前缀后按宿主 root 解析，与模型所见的单根坐标系一致）；或 **`/exchange/<server_id>/...` 规范路径**（经 file-exchange 归属校验解析到有效文件根内真实文件）。翻译 MUST 拒绝两根之外、`..` 越界、以及 `/workspace` 仿冒前缀（如 `/workspace-evil/...`）路径，越界 MUST 返回说明文本而非发送。
 
 `send_file` 的收件人 MUST 由 harness 固定为**当前对话地址**，MUST NOT 接受任何由模型提供的收件人参数。对 LLM 暴露的参数 MUST 只有 `path`（`tool_context` 为 out-of-band 注入，不进 LLM schema）。当 `tool_context` 携带权威对话地址（`conversation_address`，含 `platform`/`chat_id`/`target_type`/`thread_id`，与文本回复同源）时，收件人 MUST 解析为该地址：当前会话为频道则文件 SHALL 发回该频道（`target_type="channel"`，并挂回 inbound thread）、为私信则发回该私信用户——即文件落到与文本回复完全相同的位置。当不携带对话地址（如 standalone CLI / 流式 / 无网关路径）时，收件人 MUST 回退为 `session_context` 的 `platform` + `sender_id` 私信（向后兼容旧行为）。收件人由 harness 固定而非模型可控，是 `send_file` 区别于 `send_im_message`（收件人由模型任意指定、故按接收方身份轴判审批）的核心安全契约。
+
+#### Scenario: 容器 /workspace 绝对路径被接受
+
+- **WHEN** agent 调用 `send_file(path="/workspace/outbound/report.xlsx")`（模型在容器单根坐标系下产出的绝对路径），且该文件在 workspace 内真实存在
+- **THEN** 路径翻译剥去 `/workspace` 前缀按宿主 root 解析到该文件，工具按当前对话地址将其作为附件发回（与传 `outbound/report.xlsx` 相对路径等效）
 
 #### Scenario: 频道会话文件发回频道
 
@@ -31,7 +36,7 @@ TBD - created by archiving change sandbox-file-egress. Update Purpose after arch
 
 #### Scenario: 路径逃出命名空间被拒
 
-- **WHEN** agent 调用 `send_file(path="../../etc/passwd")` 或一个两根之外的绝对路径
+- **WHEN** agent 调用 `send_file(path="../../etc/passwd")`、一个两根之外的绝对路径，或 `/workspace-evil/x` 仿冒前缀
 - **THEN** 路径翻译判定越界，工具 MUST NOT 读取或发送该文件，返回说明越界的文本
 
 #### Scenario: 收件人不取模型参数

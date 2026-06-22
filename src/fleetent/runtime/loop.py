@@ -393,6 +393,23 @@ def resolve_scope_key(session_id: str | None, agent_name: str | None) -> str | N
         return session_id
 
 
+def _spillover_workspace(session_id: str | None, agent_name: str | None) -> Any:
+    """The run's host workspace dir for tool-result spillover, or None.
+
+    Lets `truncate_tool_result` write oversized results under the session workspace so the
+    agent can `read_file` them back in-fence. Best-effort: None falls back to the global
+    spillover dir (legacy, unreadable-by-read_file) without breaking the run.
+    """
+    try:
+        from fleetent.integrations.sandbox.manager import host_workspace_dir
+
+        key = resolve_scope_key(session_id, agent_name)
+        return host_workspace_dir(key) if key else None
+    except Exception as exc:  # noqa: BLE001 — spillover location is auxiliary
+        _logger.debug("spillover_workspace_resolve_failed", error=str(exc))
+        return None
+
+
 def _strict_blocked_servers(allowed_tools: list[str] | None) -> list[str]:
     """Handle MCP degradation for this agent (MCP4): return strict-mode unavailable
     servers the agent is bound to (→ stop); log degrade(warning)/silent(debug) for
@@ -1057,7 +1074,13 @@ async def _backfill_slots(
         if not is_placeholder:
             content = redact_secrets(content)
         # T4: cap the messages copy (self-truncating tools manage their own size).
-        tool_content = content if is_self_truncating(slot.name) else truncate_tool_result(content)
+        tool_content = (
+            content
+            if is_self_truncating(slot.name)
+            else truncate_tool_result(
+                content, workspace_dir=_spillover_workspace(session_id, agent_name)
+            )
+        )
         messages.append({"role": "tool", "tool_call_id": slot.tc_id, "content": tool_content})
         state.record_tool_call(
             slot.name,
@@ -2950,7 +2973,11 @@ async def run_stream(
                     content = redact_secrets(hres.modified_content)
             # T4: truncate the messages copy only; the SSE event above kept the full result.
             tool_content = (
-                content if is_self_truncating(slot.name) else truncate_tool_result(content)
+                content
+                if is_self_truncating(slot.name)
+                else truncate_tool_result(
+                    content, workspace_dir=_spillover_workspace(session_id, agent_name)
+                )
             )
             messages.append({"role": "tool", "tool_call_id": slot.tc_id, "content": tool_content})
             state.record_tool_call(
