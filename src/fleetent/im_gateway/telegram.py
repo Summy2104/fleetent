@@ -11,6 +11,20 @@ logger = structlog.get_logger(__name__)
 _TELEGRAM_PHOTO_MIME = "image/jpeg"
 
 
+async def _send_typing_for_progress(bot: Any, chat_id: str, evt: dict[str, Any]) -> None:
+    """Re-arm Telegram's ~5s typing indicator for any progress event.
+
+    im-progress-heartbeat: the typing action self-expires after ~5s, so it must be
+    re-sent periodically — heartbeat events (emitted by the agent loop during long
+    LLM calls / tools / sub_agent runs) drive exactly that. Event content is irrelevant
+    (any progress event re-arms typing). Best-effort: a send failure is swallowed.
+    """
+    try:  # noqa: SIM105 — contextlib.suppress would obscure the awaited call
+        await bot.send_chat_action(chat_id=chat_id, action="typing")
+    except Exception:  # noqa: BLE001 — typing action is non-critical
+        pass
+
+
 async def _download_photo_attachments(message: Any, context: Any) -> list[tuple[bytes, str]]:
     """Download the largest PhotoSize of a Telegram message, if any.
 
@@ -102,12 +116,7 @@ def create_app(agent_name: str, config: dict[str, Any]) -> object:
             await update.message.reply_text(text)  # type: ignore[union-attr]
 
         async def progress_func(evt: dict) -> None:  # type: ignore[type-arg]
-            try:  # noqa: SIM105 — cannot use contextlib.suppress with async await
-                await context.bot.send_chat_action(  # type: ignore[attr-defined]
-                    chat_id=channel_id, action="typing"
-                )
-            except Exception:  # noqa: BLE001 — typing action is non-critical
-                pass
+            await _send_typing_for_progress(context.bot, channel_id, evt)  # type: ignore[attr-defined]
 
         attachments = await _download_photo_attachments(update.message, context)
         # Image messages carry their text in `caption`, not `text`.
