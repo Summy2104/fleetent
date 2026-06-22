@@ -21,12 +21,12 @@
 
 ## 5. spec 文档对齐（archive 时同步）
 
-- [ ] 5.1 `opsx:archive` 同步：新增 capability `kb-connector-scheduler`（delta 已在 change specs/ 下，archive 落到 openspec/specs/kb-connector-scheduler/）。
+- [x] 5.1 `opsx:archive` 同步：新增 capability `kb-connector-scheduler`（delta 已在 change specs/ 下，archive 落到 openspec/specs/kb-connector-scheduler/）。
 
 ## 6. 收尾门禁
 
-- [ ] 6.1 `make test-pr` 通过（对照 main 基线无新增失败）。
-- [ ] 6.2 `make test-unit-ci` 通过（CI 覆盖率关 coverage --fail-under=76）。
-- [ ] 6.3 跑相关测试：`uv run pytest tests/integration -q`（含 kb_connector_store / 迁移 / sweep / worker 相关，对照 main 基线无新增失败）。
-- [ ] 6.4 `uv run python scripts/check_module_boundaries.py` 通过（确认 sweep 未落 agent runtime、无 agent→platform 反向依赖）。
-- [ ] 6.5 merge 后、push 前跑 `uv run alembic heads` 确认**单一 head**；若并行 change 占了同号致多 head，把本迁移改号重链到对方之后（revision 改新号 / down_revision 指向对方），同步改文件名/测试，重跑迁移相关测试见绿再 push。
+- [x] 6.1 `make test-pr` 通过（对照 main 基线无新增失败）。
+- [x] 6.2 `make test-unit-ci` 通过（CI 覆盖率关 coverage --fail-under=76）。
+- [x] 6.3 跑相关测试：`uv run pytest tests/integration -q`（含 kb_connector_store / 迁移 / sweep / worker 相关，对照 main 基线无新增失败）。
+- [x] 6.4 `uv run python scripts/check_module_boundaries.py` 通过（确认 sweep 未落 agent runtime、无 agent→platform 反向依赖）。
+- [x] 6.5 merge 后、push 前跑 `uv run alembic heads` 确认**单一 head**；若并行 change 占了同号致多 head，把本迁移改号重链到对方之后（revision 改新号 / down_revision 指向对方），同步改文件名/测试，重跑迁移相关测试见绿再 push。
