@@ -52,6 +52,13 @@ class User:
 _FULL_COLS = "id, name, created_at, email, role, status, must_reset, password_hash, tenant_id"
 
 
+def _normalize_email(email: str | None) -> str | None:
+    if email is None:
+        return None
+    normalized = email.strip().lower()
+    return normalized or None
+
+
 def _db():
     from fleetent.config import Settings
     from fleetent.db import create_database
@@ -90,6 +97,7 @@ def create_user(
     plaintext = f"ma-{secrets.token_hex(32)}"
     now = datetime.datetime.now(datetime.UTC).isoformat()
     user_id = str(uuid.uuid4())
+    normalized_email = _normalize_email(email)
     db = _db()
     with db.transaction() as conn:
         conn.execute(
@@ -99,7 +107,7 @@ def create_user(
                 "id": user_id,
                 "name": name,
                 "created_at": now,
-                "email": email,
+                "email": normalized_email,
                 "tenant_id": tenant_id,
             },
         )
@@ -181,11 +189,17 @@ def get_by_id(user_id: str) -> User | None:
     return _row_to_user(row) if row else None
 
 
-def get_by_email(email: str) -> User | None:
+def get_by_email(tenant_id: str, email: str) -> User | None:
     """Look up a user by email. Returns None if not found."""
+    normalized_email = _normalize_email(email)
+    if normalized_email is None:
+        return None
     row = (
         _db()
-        .execute(f"SELECT {_FULL_COLS} FROM users WHERE email = :email", {"email": email})
+        .execute(
+            f"SELECT {_FULL_COLS} FROM users WHERE tenant_id = :tenant_id AND email = :email",
+            {"tenant_id": tenant_id, "email": normalized_email},
+        )
         .fetchone()
     )
     return _row_to_user(row) if row else None
@@ -291,14 +305,22 @@ def set_profile(user_id: str, name: str | None = None, email: str | None = None)
     Email must stay unique across users; reusing another user's email raises ValueError.
     Passing None for a field leaves it unchanged.
     """
+    current = get_by_id(user_id)
+    if current is None:
+        raise KeyError(f"User not found: {user_id}")
+    normalized_email = _normalize_email(email) if email is not None else None
     if email is not None:
-        existing = get_by_email(email)
+        existing = (
+            get_by_email(current.tenant_id, normalized_email)
+            if normalized_email is not None
+            else None
+        )
         if existing is not None and existing.id != user_id:
             raise ValueError("email already in use")
     if name is not None:
         _update_field(user_id, "name", name)
     if email is not None:
-        _update_field(user_id, "email", email)
+        _update_field(user_id, "email", normalized_email)
 
 
 def set_status(user_id: str, status: str) -> None:
@@ -331,11 +353,11 @@ def create_web_user(
     """
     from fleetent.governance import blocklist
 
-    normalized = email.strip() or None
+    normalized = _normalize_email(email)
     if normalized is not None:
         if blocklist.is_registration_blocked(normalized):
             raise PermissionError(f"email blocked from registration: {normalized}")
-        if get_by_email(normalized) is not None:
+        if get_by_email("default", normalized) is not None:
             raise ValueError(f"email already exists: {normalized}")
     user, _ = create_user(name=name, email=normalized)
     if role != "viewer":

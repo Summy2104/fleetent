@@ -5,12 +5,14 @@ User and owns the admin workbench over that mapping.
 """
 
 import datetime
+import sqlite3
 from typing import Any
 
 from fleetent.user_store import (
     User,
     _conn,
     create_user,
+    get_by_email,
     get_by_id,
     set_status,
 )
@@ -55,20 +57,21 @@ def _parse_meta(raw: Any) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def get_or_create(platform: str, platform_user_id: str, edge_tenant: str) -> User:
+def _get_mapped_user(platform: str, platform_user_id: str) -> User | None:
     with _conn() as conn:
         row = conn.execute(
             """SELECT user_id FROM im_users
                WHERE platform = :platform AND platform_user_id = :puid""",
             {"platform": platform, "puid": platform_user_id},
         ).fetchone()
-    if row:
-        user = get_by_id(row[0])
-        assert user is not None
-        return user
+    if row is None:
+        return None
+    user = get_by_id(row[0])
+    assert user is not None
+    return user
 
-    user, _ = create_user(name=f"{platform}:{platform_user_id}", tenant_id=edge_tenant)
 
+def _attach_identity(platform: str, platform_user_id: str, user_id: str) -> User:
     now = datetime.datetime.now(datetime.UTC).isoformat()
     with _conn() as conn:
         cursor = conn.execute(
@@ -78,12 +81,14 @@ def get_or_create(platform: str, platform_user_id: str, edge_tenant: str) -> Use
             {
                 "platform": platform,
                 "puid": platform_user_id,
-                "uid": user.id,
+                "uid": user_id,
                 "now": now,
             },
         )
         if cursor.rowcount:
-            return user
+            created = get_by_id(user_id)
+            assert created is not None
+            return created
         row = conn.execute(
             """SELECT user_id FROM im_users
                WHERE platform = :platform AND platform_user_id = :puid""",
@@ -93,6 +98,57 @@ def get_or_create(platform: str, platform_user_id: str, edge_tenant: str) -> Use
     existing = get_by_id(row[0])
     assert existing is not None
     return existing
+
+
+def resolve_or_provision(
+    tenant_id: str,
+    *,
+    verified_email: str | None = None,
+    channel: str | None = None,
+    platform_user_id: str | None = None,
+) -> User:
+    if channel is not None and platform_user_id is not None:
+        mapped = _get_mapped_user(channel, platform_user_id)
+        if mapped is not None:
+            return mapped
+
+    if verified_email is not None:
+        existing = get_by_email(tenant_id, verified_email)
+        if existing is not None:
+            if channel is not None and platform_user_id is not None:
+                return _attach_identity(channel, platform_user_id, existing.id)
+            return existing
+        try:
+            created, _ = create_user(
+                name=verified_email.strip(), email=verified_email, tenant_id=tenant_id
+            )
+        except sqlite3.IntegrityError:
+            created = get_by_email(tenant_id, verified_email)
+            assert created is not None
+        if channel is not None and platform_user_id is not None:
+            return _attach_identity(channel, platform_user_id, created.id)
+        return created
+
+    if channel is None or platform_user_id is None:
+        raise ValueError("channel and platform_user_id are required when verified_email is absent")
+
+    created, _ = create_user(name=f"{channel}:{platform_user_id}", tenant_id=tenant_id)
+    return _attach_identity(channel, platform_user_id, created.id)
+
+
+def get_or_create(
+    platform: str,
+    platform_user_id: str,
+    edge_tenant: str,
+    *,
+    verified_email: str | None = None,
+) -> User:
+    return resolve_or_provision(
+        edge_tenant,
+        verified_email=verified_email,
+        channel=platform,
+        platform_user_id=platform_user_id,
+    )
 
 
 def check_allowed_by_user_id(user_id: str) -> bool:

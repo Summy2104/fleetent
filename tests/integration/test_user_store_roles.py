@@ -52,9 +52,9 @@ def test_set_password_and_must_reset(db):
 
 def test_get_by_email(db):
     u, _ = user_store.create_user("Dan", email="dan@example.com")
-    found = user_store.get_by_email("dan@example.com")
+    found = user_store.get_by_email("default", "dan@example.com")
     assert found is not None and found.id == u.id
-    assert user_store.get_by_email("nobody@example.com") is None
+    assert user_store.get_by_email("default", "nobody@example.com") is None
 
 
 def test_idempotent_init_preserves_rows(db):

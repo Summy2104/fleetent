@@ -73,7 +73,7 @@ def test_get_by_email_found() -> None:
     from fleetent import user_store
 
     user, _ = user_store.create_user("Carol", email="carol@example.com")
-    found = user_store.get_by_email("carol@example.com")
+    found = user_store.get_by_email("default", "carol@example.com")
     assert found is not None
     assert found.id == user.id
 
@@ -81,7 +81,7 @@ def test_get_by_email_found() -> None:
 def test_get_by_email_not_found() -> None:
     from fleetent import user_store
 
-    assert user_store.get_by_email("nobody@example.com") is None
+    assert user_store.get_by_email("default", "nobody@example.com") is None
 
 
 def test_list_users_returns_all() -> None:

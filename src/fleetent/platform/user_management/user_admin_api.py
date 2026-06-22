@@ -65,7 +65,7 @@ def _resolve_login_user(identifier: str) -> user_store.User | None:
     Web users authenticate by email. The built-in admin is seeded with no email, so the
     login form's "Username" field also resolves it by its fixed built-in name.
     """
-    user = user_store.get_by_email(identifier)
+    user = user_store.get_by_email("default", identifier)
     if user is not None:
         return user
     if identifier == auth.BUILTIN_ADMIN_NAME:

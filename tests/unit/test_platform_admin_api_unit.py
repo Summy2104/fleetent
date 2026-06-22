@@ -281,7 +281,10 @@ def test_user_admin_route_handlers_cover_management(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(
         user_admin_api.user_store,
         "get_by_email",
-        lambda email: next((u for u in users.values() if u.email == email), None),
+        lambda tenant_id, email: next(
+            (u for u in users.values() if u.tenant_id == tenant_id and u.email == email),
+            None,
+        ),
     )
     monkeypatch.setattr(user_admin_api.user_store, "get_builtin_admin", lambda: admin)
     monkeypatch.setattr(user_admin_api.user_store, "list_users", lambda: list(users.values()))
@@ -437,7 +440,7 @@ def test_user_admin_route_error_branches(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(user_admin_api.auth, "validate_session", lambda token, idle: admin.id)
     monkeypatch.setattr(user_admin_api.auth, "has_role", lambda user, roles: user.role in roles)
     monkeypatch.setattr(user_admin_api.user_store, "get_by_id", lambda user_id: admin)
-    monkeypatch.setattr(user_admin_api.user_store, "get_by_email", lambda email: None)
+    monkeypatch.setattr(user_admin_api.user_store, "get_by_email", lambda tenant_id, email: None)
     with pytest.raises(HTTPException) as login_failed:
         user_admin_api.login(user_admin_api.LoginBody(email="missing@example.com", password="pw"))
     assert login_failed.value.status_code == 401
