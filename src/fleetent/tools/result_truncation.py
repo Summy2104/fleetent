@@ -43,6 +43,7 @@ def truncate_tool_result(
     result: str,
     max_bytes: int | None = None,
     self_truncates: bool = False,
+    workspace_dir: Path | None = None,
 ) -> str:
     """Return result capped to max_bytes, using spillover for normal tools.
 
@@ -52,6 +53,10 @@ def truncate_tool_result(
         self_truncates: When True, use the legacy head+tail+breadcrumb strategy
             instead of writing a spillover file. Set for tools like run_code and
             bash_exec that already cap their own output streams.
+        workspace_dir: The run's host workspace dir. When provided, the spillover
+            file is written under ``<workspace_dir>/.fleetent_spillover/`` and the
+            read-back hint uses a workspace-relative path so ``read_file`` can read it
+            back in-fence. When None, falls back to the global ``SPILLOVER_DIR``.
     """
     limit = MAX_TOOL_RESULT_BYTES if max_bytes is None else max_bytes
     orig = len(result.encode("utf-8"))
@@ -61,19 +66,31 @@ def truncate_tool_result(
     if self_truncates:
         return _head_tail_breadcrumb(result, limit, orig)
 
-    return _spillover(result, orig, limit)
+    return _spillover(result, orig, limit, workspace_dir)
 
 
-def _spillover(result: str, orig: int, limit: int) -> str:
+# Subdir under the session workspace where readable spillover files are written.
+_SPILLOVER_SUBDIR = ".fleetent_spillover"
+
+
+def _spillover(result: str, orig: int, limit: int, workspace_dir: Path | None) -> str:
     """Write full content to a spillover file; return preview + path + hint.
 
-    The combined preview+hint is guaranteed not to exceed limit bytes via a
-    final safety truncation (covers artificially small limits in tests and
-    edge cases where individual lines are unusually long).
+    With a ``workspace_dir`` the file lands under ``<ws>/.fleetent_spillover/`` and the
+    hint path is workspace-relative (``read_file`` resolves it in-fence in both container
+    and host modes); without one it falls back to the global ``SPILLOVER_DIR`` with an
+    absolute hint path. The combined preview+hint is guaranteed not to exceed limit bytes
+    via a final safety truncation.
     """
-    SPILLOVER_DIR.mkdir(parents=True, exist_ok=True)
-    spill_path = SPILLOVER_DIR / f"{uuid.uuid4().hex}.txt"
-    spill_path.write_text(result, encoding="utf-8")
+    name = f"{uuid.uuid4().hex}.txt"
+    if workspace_dir is not None:
+        out_dir = Path(workspace_dir) / _SPILLOVER_SUBDIR
+        hint_path = f"{_SPILLOVER_SUBDIR}/{name}"
+    else:
+        out_dir = SPILLOVER_DIR
+        hint_path = str(out_dir / name)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / name).write_text(result, encoding="utf-8")
 
     lines = result.splitlines()
     preview_lines = lines[:SPILLOVER_PREVIEW_LINES]
@@ -83,7 +100,7 @@ def _spillover(result: str, orig: int, limit: int) -> str:
     hint = _SPILLOVER_HINT.format(
         orig_kb=orig / 1024,
         lines=min(SPILLOVER_PREVIEW_LINES, len(lines)),
-        path=str(spill_path),
+        path=hint_path,
         next_offset=next_offset,
     )
     combined = preview + hint
