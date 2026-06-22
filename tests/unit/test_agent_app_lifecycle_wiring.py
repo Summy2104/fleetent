@@ -149,10 +149,15 @@ async def test_start_infra_starts_reflection_scheduler_when_enabled(tmp_path: Pa
         agent = _agent_without_mcp()
         agent.reflection.enabled = True
         agent.reflection.interval_seconds = 12.5
+        agent.reflection.auto_apply.allow_low_risk = True
         agent.name = "support"
         await agent_app._start_infra(agent, tmp_path / "data")
 
-    reflection_sched.assert_called_once_with(interval=12.5, scope="support")
+    reflection_sched.assert_called_once()
+    kwargs = reflection_sched.call_args.kwargs
+    assert kwargs["interval"] == 12.5
+    assert kwargs["scope"] == "support"
+    assert kwargs["auto_policy"].allow_low_risk is True
 
 
 async def test_agent_runtime_stop_stops_reflection_scheduler() -> None:

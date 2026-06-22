@@ -557,8 +557,32 @@ async def test_reflection_apply_memory_actions_and_guards(monkeypatch):
         reflection.AutoMaintenancePolicy(allow_low_risk=True),
     )
     assert not reflection._auto_apply_allowed(  # noqa: SLF001
+        _maintenance_proposal(action="suggest_shared_memory_or_kb", risk="low"),
+        reflection.AutoMaintenancePolicy(allow_low_risk=True),
+    )
+    assert not reflection._auto_apply_allowed(  # noqa: SLF001
         _maintenance_proposal(action="delete", risk="low"),
         reflection.AutoMaintenancePolicy(allow_low_risk=True),
+    )
+    assert not reflection._auto_apply_allowed(  # noqa: SLF001
+        _maintenance_proposal(action="merge", risk="low"),
+        reflection.AutoMaintenancePolicy(allow_low_risk=True),
+    )
+    assert not reflection._auto_apply_allowed(  # noqa: SLF001
+        _maintenance_proposal(action="rewrite", risk="low"),
+        reflection.AutoMaintenancePolicy(allow_low_risk=True),
+    )
+    assert not reflection._auto_apply_allowed(  # noqa: SLF001
+        _maintenance_proposal(action="compact", risk="low"),
+        reflection.AutoMaintenancePolicy(allow_low_risk=True),
+    )
+    assert not reflection._auto_apply_allowed(  # noqa: SLF001
+        _maintenance_proposal(action="mark_stale", risk="low"),
+        None,
+    )
+    assert not reflection._auto_apply_allowed(  # noqa: SLF001
+        _maintenance_proposal(action="mark_stale", risk="low"),
+        reflection.AutoMaintenancePolicy(allow_low_risk=False),
     )
     with pytest.raises(ValueError, match="user_id"):
         reflection._validate_proposal_input(" ", "delete", "low", ["m1"])  # noqa: SLF001

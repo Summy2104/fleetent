@@ -16,6 +16,7 @@ import yaml
 from fleetent import memory, observability
 from fleetent.db import SQLiteDatabase
 from fleetent.governance import approval_request_store
+from fleetent.structured_logging import get_logger
 
 FindingType = Literal["memory_candidate", "memory_conflict", "skill_opportunity"]
 KnowledgeBaseFindingType = Literal[
@@ -43,6 +44,7 @@ MaintenanceStatus = Literal["pending", "approved", "rejected", "applied", "expir
 ReflectionTrendGranularity = Literal["day", "week"]
 ReflectionTrendDomain = Literal["memory", "knowledge_base", "skill"]
 ProposalDomain = Literal["memory", "skill"]
+_logger = get_logger("reflection")
 
 
 def __getattr__(name: str) -> Any:
@@ -116,6 +118,9 @@ class AutoMaintenancePolicy:
     """Explicit opt-in policy for low-risk User Memory maintenance."""
 
     allow_low_risk: bool = False
+
+
+_AUTO_APPLY_ACTIONS = frozenset({"mark_stale"})
 
 
 @dataclass(frozen=True)
@@ -268,7 +273,11 @@ def get_reflection_trend_summary(query: ReflectionTrendQuery) -> ReflectionTrend
     return ReflectionTrendSummary(query=query, buckets=buckets, top_findings=top_findings)
 
 
-async def run_reflection(scope: str) -> ReflectionReport:
+async def run_reflection(
+    scope: str,
+    *,
+    auto_policy: AutoMaintenancePolicy | None = None,
+) -> ReflectionReport:
     """Read traces and memory signals, then generate a structured report."""
     now = datetime.now(UTC).replace(microsecond=0)
     start = now - timedelta(days=7)
@@ -293,6 +302,21 @@ async def run_reflection(scope: str) -> ReflectionReport:
         report_id=report.id,
     ):
         _persist_memory_maintenance_proposal(memory_proposal)
+        if auto_policy is None:
+            continue
+        try:
+            await apply_memory_maintenance_proposal(
+                memory_proposal.id,
+                auto_policy=auto_policy,
+            )
+        except Exception as exc:  # noqa: BLE001 - degrade to pending + continue
+            _logger.warn(
+                "reflection_memory_auto_apply_failed",
+                scope=scope,
+                proposal_id=memory_proposal.id,
+                action=memory_proposal.action,
+                error=str(exc),
+            )
     for skill_proposal in generate_skill_proposals(findings=findings, report_id=report.id):
         _persist_skill_proposal(skill_proposal)
     return report
@@ -1928,7 +1952,7 @@ def _auto_apply_allowed(
         auto_policy is not None
         and auto_policy.allow_low_risk
         and proposal.risk == "low"
-        and proposal.action not in {"delete", "merge", "rewrite", "compact"}
+        and proposal.action in _AUTO_APPLY_ACTIONS
     )
 
 

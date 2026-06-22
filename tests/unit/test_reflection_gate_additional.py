@@ -167,6 +167,30 @@ async def test_apply_memory_maintenance_proposal_auto_applies_low_risk_mark_stal
     assert events == [("memory_maintenance_proposal_applied", "applied")]
 
 
+@pytest.mark.parametrize("action", ["delete", "merge", "rewrite", "compact"])
+def test_auto_apply_allowed_rejects_non_whitelisted_actions(action: str) -> None:
+    assert not reflection_gate._auto_apply_allowed(  # noqa: SLF001
+        _memory_proposal(action=action, risk="low"),
+        AutoMaintenancePolicy(allow_low_risk=True),
+    )
+
+
+def test_auto_apply_allowed_rejects_shared_memory_suggestion_and_missing_policy() -> None:
+    shared_proposal = _memory_proposal(action="suggest_shared_memory_or_kb", risk="low")
+    assert not reflection_gate._auto_apply_allowed(  # noqa: SLF001
+        shared_proposal,
+        AutoMaintenancePolicy(allow_low_risk=True),
+    )
+    assert not reflection_gate._auto_apply_allowed(  # noqa: SLF001
+        _memory_proposal(action="mark_stale", risk="low"),
+        None,
+    )
+    assert not reflection_gate._auto_apply_allowed(  # noqa: SLF001
+        _memory_proposal(action="mark_stale", risk="low"),
+        AutoMaintenancePolicy(allow_low_risk=False),
+    )
+
+
 async def test_apply_memory_maintenance_proposal_expires_and_refuses_expired_proposal(
     monkeypatch,
 ) -> None:

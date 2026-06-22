@@ -16,6 +16,8 @@ from fleetent.reflection.reflection import (
     SkillProposal,
 )
 
+_AUTO_APPLY_ACTIONS = frozenset({"mark_stale"})
+
 DecisionInput = Literal[
     "approve",
     "approved",
@@ -508,7 +510,7 @@ def _auto_apply_allowed(
         auto_policy is not None
         and auto_policy.allow_low_risk
         and proposal.risk == "low"
-        and proposal.action not in {"delete", "merge", "rewrite", "compact"}
+        and proposal.action in _AUTO_APPLY_ACTIONS
     )
 
 

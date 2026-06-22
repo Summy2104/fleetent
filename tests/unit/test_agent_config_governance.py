@@ -158,6 +158,7 @@ def test_deployment_defaults_match_settings() -> None:
     assert af.session_cleanup_interval_seconds == 3600.0
     assert af.reflection.enabled is False
     assert af.reflection.interval_seconds == 86400.0
+    assert af.reflection.auto_apply.allow_low_risk is False
     assert af.disabled_skills == []
 
 
@@ -167,11 +168,28 @@ def test_reflection_settings_parse_and_override() -> None:
             reflection={
                 "enabled": True,
                 "interval_seconds": 123.5,
+                "auto_apply": {"allow_low_risk": True},
             }
         )
     )
     assert af.reflection.enabled is True
     assert af.reflection.interval_seconds == 123.5
+    assert af.reflection.auto_apply.allow_low_risk is True
+
+
+def test_reflection_auto_apply_rejects_unknown_key() -> None:
+    with pytest.raises(ValidationError):
+        agent_config.AgentFile.model_validate(
+            _agent_doc(
+                reflection={
+                    "enabled": True,
+                    "auto_apply": {
+                        "allow_low_risk": True,
+                        "allow_low_risks": True,
+                    },
+                }
+            )
+        )
 
 
 def test_nested_observability_reuses_submodel() -> None:

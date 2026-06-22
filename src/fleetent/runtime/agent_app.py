@@ -390,10 +390,16 @@ async def _start_infra(
     reflection_settings = getattr(agent, "reflection", None)
     if reflection_settings is not None and getattr(reflection_settings, "enabled", False) is True:
         from fleetent.reflection import scheduler as reflection_scheduler
+        from fleetent.reflection.reflection import AutoMaintenancePolicy
+
+        auto_policy = AutoMaintenancePolicy(
+            allow_low_risk=reflection_settings.auto_apply.allow_low_risk
+        )
 
         reflection_scheduler.start_reflection_scheduler(
             interval=reflection_settings.interval_seconds,
             scope=agent.name,
+            auto_policy=auto_policy,
         )
     # Restart recovery: flag sessions active just before this (re)start so the next
     # request can be recognized as a resumed conversation. Best-effort — a scan
