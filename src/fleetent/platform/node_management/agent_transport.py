@@ -10,6 +10,7 @@ from fastapi import HTTPException, WebSocket
 from fastapi.responses import Response, StreamingResponse
 from starlette.websockets import WebSocketDisconnect
 
+from fleetent.identity import INGRESS_PRINCIPAL_HEADER, Principal, encode_ingress_principal
 from fleetent.node.forwarder_contract import forwarder_base_url, forwarder_ws_url
 from fleetent.platform.node_management import node_store
 
@@ -22,9 +23,17 @@ class AgentTransport(Protocol):
         body: bytes,
         *,
         content_type: str = "application/json",
+        principal: Principal | None = None,
     ) -> Response: ...
 
-    async def ws(self, node_id: str, agent_name: str, websocket: WebSocket) -> None: ...
+    async def ws(
+        self,
+        node_id: str,
+        agent_name: str,
+        websocket: WebSocket,
+        *,
+        principal: Principal | None = None,
+    ) -> None: ...
 
 
 class DirectHttpAgentTransport:
@@ -35,7 +44,14 @@ class DirectHttpAgentTransport:
         body: bytes,
         *,
         content_type: str = "application/json",
+        principal: Principal | None = None,
     ) -> Response:
+        headers = {
+            "Authorization": f"Bearer {_node_service_key(node_id)}",
+            "Content-Type": content_type,
+        }
+        if principal is not None:
+            headers[INGRESS_PRINCIPAL_HEADER] = encode_ingress_principal(principal)
         # Client is NOT wrapped in async with — its lifecycle is bound to _iter() so
         # the connection stays open until the StreamingResponse body is fully consumed.
         client = httpx.AsyncClient(timeout=None)
@@ -45,10 +61,7 @@ class DirectHttpAgentTransport:
                     "POST",
                     f"{forwarder_base_url(node_id)}/forward/agents/{agent_name}/chat",
                     content=body,
-                    headers={
-                        "Authorization": f"Bearer {_node_service_key(node_id)}",
-                        "Content-Type": content_type,
-                    },
+                    headers=headers,
                 ),
                 stream=True,
             )
@@ -79,11 +92,21 @@ class DirectHttpAgentTransport:
             media_type=upstream.headers.get("content-type", "text/event-stream"),
         )
 
-    async def ws(self, node_id: str, agent_name: str, websocket: WebSocket) -> None:
+    async def ws(
+        self,
+        node_id: str,
+        agent_name: str,
+        websocket: WebSocket,
+        *,
+        principal: Principal | None = None,
+    ) -> None:
+        headers = {"Authorization": f"Bearer {_node_service_key(node_id)}"}
+        if principal is not None:
+            headers[INGRESS_PRINCIPAL_HEADER] = encode_ingress_principal(principal)
         try:
             async with websockets.connect(
                 f"{forwarder_ws_url(node_id)}/forward/agents/{agent_name}/ws",
-                additional_headers={"Authorization": f"Bearer {_node_service_key(node_id)}"},
+                additional_headers=headers,
             ) as upstream:
                 await websocket.accept()
 
