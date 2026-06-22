@@ -45,3 +45,33 @@ def test_only_failures():
     out = render_delivery_trailer([_r("file", False, error="boom")])
     assert "失败 1" in out and "boom" in out
     assert "文件 1（" not in out  # no success file group
+
+
+# ── _append_delivery_trailer emit switch (cron fired-runs suppress the trailer) ──
+
+
+def _ctx_with_receipt():
+    from types import SimpleNamespace
+
+    return SimpleNamespace(delivery_ledger=[_r("text", True)])
+
+
+def test_append_trailer_emit_true_appends():
+    from fleetent.runtime import loop
+
+    out = loop._append_delivery_trailer("body", _ctx_with_receipt(), emit=True)
+    assert out.startswith("body") and "📬" in out
+
+
+def test_append_trailer_emit_false_returns_reply_unchanged():
+    from fleetent.runtime import loop
+
+    out = loop._append_delivery_trailer("body", _ctx_with_receipt(), emit=False)
+    assert out == "body"  # fired-run: no operator-facing trailer
+
+
+def test_append_trailer_default_emit_is_true():
+    from fleetent.runtime import loop
+
+    out = loop._append_delivery_trailer("[SILENT]", _ctx_with_receipt())
+    assert "📬" in out  # default keeps interactive behavior

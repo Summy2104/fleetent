@@ -18,9 +18,26 @@ from fleetent.identity import SYSTEM_PRINCIPAL, Principal
 
 logger = logging.getLogger(__name__)
 
-# A fired task whose final reply is exactly this sentinel runs successfully but
-# delivers nothing — for "alert only when something changed" tasks.
+# A fired task whose final reply is this sentinel runs successfully but delivers
+# nothing — for "alert only when something changed" tasks.
 _SILENT_SENTINEL = "[SILENT]"
+
+
+def _is_silent_reply(reply: str | None) -> bool:
+    """Whether a fired task's reply is the silent-skip sentinel.
+
+    Robust to trailing content (whitespace, or an accidentally appended delivery trailer):
+    a reply is silent when it is None/blank, or its first non-blank line equals the
+    sentinel. This prevents leaking ``[SILENT]`` (or anything appended after it) to the
+    user when something tacks text onto the model's bare sentinel reply.
+    """
+    if reply is None:
+        return True
+    stripped = reply.strip()
+    if not stripped:
+        return True
+    return stripped.splitlines()[0].strip() == _SILENT_SENTINEL
+
 
 # Missed runs after process downtime coalesce into a single fire within this window
 # (APScheduler misfire_grace_time + coalesce); a one-shot past it is skipped, not fired
@@ -118,6 +135,10 @@ async def _agent_run(
         agent_name=agent_name,
         principal=principal,
         outbound_connectors=connectors or {},
+        # A fired task has no interlocutor; its reply is broadcast verbatim. The operator-
+        # facing delivery trailer would pollute the broadcast and corrupt the [SILENT]
+        # skip sentinel, so it is suppressed for fired runs.
+        emit_delivery_trailer=False,
     )
 
 
@@ -221,7 +242,7 @@ async def _deliver(
     the creation ``origin``. ``deliver.mode == "none"`` or a ``[SILENT]`` reply skips
     delivery. Unknown/absent connectors are logged and skipped (not an error per se).
     """
-    if reply is None or reply.strip() == _SILENT_SENTINEL:
+    if _is_silent_reply(reply):
         return None
     target = _resolve_delivery(task)
     if target is None:

@@ -1,6 +1,7 @@
 """Core agent loop: send → tool_calls? → dispatch → repeat → final reply."""
 
 import asyncio
+import contextlib
 import inspect
 import json
 import random
@@ -156,6 +157,57 @@ def _filter_code_execution(
     return [s for s in schemas if s["function"]["name"] != _RUN_CODE_TOOL]
 
 
+# im-progress-heartbeat: how often the heartbeat re-asserts the IM progress indicator.
+# Kept under Telegram's ~5s typing-action window so "typing…" never lapses. Module-level
+# so tests can shrink it. Injectable via the _progress_heartbeat `interval` arg.
+_HEARTBEAT_INTERVAL_S = 4.0
+
+
+async def _progress_heartbeat(progress_func: ProgressFunc, interval: float | None = None) -> None:
+    """Periodically emit a time-driven heartbeat progress event until cancelled.
+
+    im-progress-heartbeat: refreshes the IM progress indicator (Slack setStatus /
+    Telegram typing) during the silent gaps the event-driven `tool_call` progress
+    never covers — long LLM calls, a single long tool, an entire sub_agent run. The
+    event carries only ``type`` + ``elapsed_s`` (no tool args / nothing sensitive).
+    A `progress_func` failure is logged and swallowed (bulkheaded) so a flaky IM call
+    can never break the run; cancellation propagates normally.
+    """
+    iv = _HEARTBEAT_INTERVAL_S if interval is None else interval
+    start = time.monotonic()
+    while True:
+        await asyncio.sleep(iv)
+        try:
+            await progress_func({"type": "heartbeat", "elapsed_s": int(time.monotonic() - start)})
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — heartbeat is a side channel; never break the run
+            _logger.warn("progress_heartbeat_failed", error=str(exc))
+
+
+@contextlib.asynccontextmanager
+async def _heartbeat_during(
+    progress_func: ProgressFunc | None, *, is_sub_agent: bool
+) -> "AsyncGenerator[None, None]":
+    """Run a progress heartbeat for the duration of the wrapped block (im-progress-heartbeat).
+
+    Owner-task contract: the heartbeat task is created and cancelled in this same
+    coroutine. Only started for a top-level run with a real `progress_func`
+    (`is_sub_agent` runs rely on the parent's heartbeat and pass `progress_func=None`).
+    Cancellation in the `finally` guarantees no lingering task on any exit path.
+    """
+    task: asyncio.Task[None] | None = None
+    if progress_func is not None and not is_sub_agent:
+        task = asyncio.create_task(_progress_heartbeat(progress_func))
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
 def _maybe_refresh_skills(enabled: bool) -> None:
     """Reload skills if their files changed on disk, when hot-reload is enabled.
 
@@ -297,12 +349,20 @@ def _agent_bound_to_server(server_id: str, allowed_tools: list[str] | None) -> b
     )
 
 
-def _append_delivery_trailer(reply: str, tool_context: Any) -> str:
+def _append_delivery_trailer(reply: str, tool_context: Any, *, emit: bool = True) -> str:
     """Append the run's delivery fact trailer to the final reply, if any (§3, D4).
 
     The trailer is system-generated from the run's delivery ledger and concatenated AFTER
     the model's text, so the model cannot omit or rewrite it. Empty ledger → reply unchanged
-    (zero noise). Best-effort: a render failure never alters the reply."""
+    (zero noise). Best-effort: a render failure never alters the reply.
+
+    The trailer is an interactive, operator-facing delivery confirmation. ``emit=False``
+    suppresses it for non-interactive runs (fired scheduled tasks broadcast their reply
+    verbatim and have no interlocutor) so it cannot pollute the broadcast or the [SILENT]
+    sentinel.
+    """
+    if not emit:
+        return reply
     try:
         from fleetent.observability.traces import render_delivery_trailer
 
@@ -1688,6 +1748,7 @@ async def run(
     conversation_address: ConversationAddress | None = None,
     delivery_ledger: list[Any] | None = None,
     skill_authoring_enabled: bool = False,
+    emit_delivery_trailer: bool = True,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
@@ -1713,41 +1774,47 @@ async def run(
     global _active_runs
     _active_runs += 1
     try:
-        return await _run_inner(
-            messages=messages,
-            user_id=user_id,
-            principal=principal,
-            system_prompt=system_prompt,
-            is_sub_agent=is_sub_agent,
-            reply_func=reply_func,
-            allowed_tools=allowed_tools,
-            agent_name=agent_name,
-            max_turns=max_turns,
-            max_consecutive_failures=max_consecutive_failures,
-            max_tokens=max_tokens,
-            force_model=force_model,
-            disabled_skills_trace=disabled_skills_trace,
-            loop_repeat_threshold=loop_repeat_threshold,
-            loop_ignore_arg_keys=loop_ignore_arg_keys,
-            guardrail_repeat_threshold=guardrail_repeat_threshold,
-            cancel_token=cancel_token,
-            sandbox_mode=sandbox_mode,
-            agent_features=agent_features,
-            session_id=session_id,
-            allowed_skills=allowed_skills,
-            governance=governance,
-            model_policy=model_policy,
-            permission_gate_enabled=permission_gate_enabled,
-            permission_gate_medium_timeout=permission_gate_medium_timeout,
-            permission_gate_high_timeout=permission_gate_high_timeout,
-            approval_routing=approval_routing,
-            outbound_connectors=outbound_connectors,
-            progress_func=progress_func,
-            session_context=session_context,
-            conversation_address=conversation_address,
-            delivery_ledger=delivery_ledger,
-            skill_authoring_enabled=skill_authoring_enabled,
-        )
+        # im-progress-heartbeat: keep the IM progress indicator (Slack setStatus /
+        # Telegram typing) alive for the whole run, covering the long LLM / long tool /
+        # sub_agent gaps the event-driven tool_call progress never reaches. Owner-task
+        # scoped to this coroutine; a no-op for sub-agents / no progress_func.
+        async with _heartbeat_during(progress_func, is_sub_agent=is_sub_agent):
+            return await _run_inner(
+                messages=messages,
+                user_id=user_id,
+                principal=principal,
+                system_prompt=system_prompt,
+                is_sub_agent=is_sub_agent,
+                reply_func=reply_func,
+                allowed_tools=allowed_tools,
+                agent_name=agent_name,
+                max_turns=max_turns,
+                max_consecutive_failures=max_consecutive_failures,
+                max_tokens=max_tokens,
+                force_model=force_model,
+                disabled_skills_trace=disabled_skills_trace,
+                loop_repeat_threshold=loop_repeat_threshold,
+                loop_ignore_arg_keys=loop_ignore_arg_keys,
+                guardrail_repeat_threshold=guardrail_repeat_threshold,
+                cancel_token=cancel_token,
+                sandbox_mode=sandbox_mode,
+                agent_features=agent_features,
+                session_id=session_id,
+                allowed_skills=allowed_skills,
+                governance=governance,
+                model_policy=model_policy,
+                permission_gate_enabled=permission_gate_enabled,
+                permission_gate_medium_timeout=permission_gate_medium_timeout,
+                permission_gate_high_timeout=permission_gate_high_timeout,
+                approval_routing=approval_routing,
+                outbound_connectors=outbound_connectors,
+                progress_func=progress_func,
+                session_context=session_context,
+                conversation_address=conversation_address,
+                delivery_ledger=delivery_ledger,
+                skill_authoring_enabled=skill_authoring_enabled,
+                emit_delivery_trailer=emit_delivery_trailer,
+            )
     finally:
         _active_runs -= 1
 
@@ -1786,6 +1853,7 @@ async def _run_inner(
     conversation_address: ConversationAddress | None = None,
     delivery_ledger: list[Any] | None = None,
     skill_authoring_enabled: bool = False,
+    emit_delivery_trailer: bool = True,
 ) -> str:
     # Image-bearing messages route to the vision model (D6); raises here if
     # images are present but no vision route is configured, before any LLM call.
@@ -2262,7 +2330,7 @@ async def _run_inner(
         )
     # delivery-receipts (§3): the fact trailer is appended LAST — after on_response hooks —
     # so neither the model nor a hook can omit or rewrite it.
-    return _append_delivery_trailer(reply, tool_context)
+    return _append_delivery_trailer(reply, tool_context, emit=emit_delivery_trailer)
 
 
 def run_sync(
