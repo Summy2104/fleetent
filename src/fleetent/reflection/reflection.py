@@ -58,6 +58,14 @@ def __getattr__(name: str) -> Any:
 _MUTATING_ACTIONS = {"mark_stale", "merge", "rewrite", "compact", "delete"}
 
 
+def _proposal_routing_key(domain: ProposalDomain, action: str | None) -> str:
+    if domain == "skill":
+        return "reflection_skill_proposal"
+    if action == "suggest_shared_memory_or_kb":
+        return "reflection_shared_memory_proposal"
+    return "reflection_user_memory_proposal"
+
+
 def _default_approval_outbound_connectors_provider() -> dict[str, Any]:
     return {}
 
@@ -706,6 +714,7 @@ def create_memory_maintenance_proposal(
     _create_proposal_approval_request(
         proposal_id=proposal.id,
         domain="memory",
+        action=proposal.action,
         risk=proposal.risk,
         created_at=proposal.created_at,
         expires_at=proposal.expires_at,
@@ -713,6 +722,7 @@ def create_memory_maintenance_proposal(
     _schedule_pending_proposal_notification(
         proposal_id=proposal.id,
         domain="memory",
+        action=proposal.action,
         risk=proposal.risk,
     )
     _record_maintenance_event("memory_maintenance_proposal_created", proposal)
@@ -970,6 +980,7 @@ def _persist_memory_maintenance_proposal(proposal: MemoryProposal) -> None:
     _create_proposal_approval_request(
         proposal_id=proposal.id,
         domain="memory",
+        action=proposal.action,
         risk=proposal.risk,
         created_at=proposal.created_at,
         expires_at=proposal.expires_at,
@@ -977,6 +988,7 @@ def _persist_memory_maintenance_proposal(proposal: MemoryProposal) -> None:
     _schedule_pending_proposal_notification(
         proposal_id=proposal.id,
         domain="memory",
+        action=proposal.action,
         risk=proposal.risk,
     )
     _record_maintenance_event("memory_maintenance_proposal_created", proposal)
@@ -992,6 +1004,7 @@ def _persist_skill_proposal(proposal: SkillProposal) -> None:
     _create_proposal_approval_request(
         proposal_id=proposal.id,
         domain="skill",
+        action=None,
         risk=proposal.risk_level,
         created_at=proposal.created_at,
         expires_at=None,
@@ -999,6 +1012,7 @@ def _persist_skill_proposal(proposal: SkillProposal) -> None:
     _schedule_pending_proposal_notification(
         proposal_id=proposal.id,
         domain="skill",
+        action=None,
         risk=proposal.risk_level,
     )
 
@@ -1229,6 +1243,7 @@ def _schedule_pending_proposal_notification(
     *,
     proposal_id: str,
     domain: ProposalDomain,
+    action: str | None,
     risk: str,
 ) -> None:
     try:
@@ -1239,6 +1254,7 @@ def _schedule_pending_proposal_notification(
         _notify_pending_proposal(
             proposal_id=proposal_id,
             domain=domain,
+            action=action,
             risk=risk,
         )
     )
@@ -1248,6 +1264,7 @@ async def _notify_pending_proposal(
     *,
     proposal_id: str,
     domain: ProposalDomain,
+    action: str | None,
     risk: str,
 ) -> None:
     from fleetent import agent_config
@@ -1258,7 +1275,7 @@ async def _notify_pending_proposal(
     if approval_routing is None:
         return
 
-    tool_name = f"reflection_{domain}_proposal"
+    tool_name = _proposal_routing_key(domain, action)
     addresses, _policy = agent_config.resolve_approvers(approval_routing, risk, tool_name)
     addresses = [(platform, target) for platform, target in addresses if platform != "requester"]
     if not addresses:
@@ -1653,6 +1670,7 @@ def _create_proposal_approval_request(
     *,
     proposal_id: str,
     domain: ProposalDomain,
+    action: str | None,
     risk: str,
     created_at: datetime,
     expires_at: datetime | None,
@@ -1663,7 +1681,7 @@ def _create_proposal_approval_request(
         subject_id=proposal_id,
         requester_user_id=None,
         risk=risk,
-        routing_key=f"reflection_{domain}_proposal",
+        routing_key=_proposal_routing_key(domain, action),
         created_at=created_at.isoformat(),
         expires_at=_format_datetime(expires_at),
     )

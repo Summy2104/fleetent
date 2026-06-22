@@ -17,12 +17,10 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket
 from fastapi.responses import FileResponse, HTMLResponse, Response
-from pydantic import BaseModel
 
 from fleetent import agent_config, agent_store, auth, connectors, cron_scheduler, user_store
 from fleetent.auth import seed_builtin_admin
 from fleetent.config import Settings, configure_logging
-from fleetent.governance.approval_router import resolve_approval_request
 from fleetent.governance.permission_gate import list_approvals
 from fleetent.identity import Principal
 from fleetent.im_gateway.access import IMIdentityResolutionError, set_im_identity_resolver
@@ -527,25 +525,6 @@ async def health(request: Request) -> dict:  # type: ignore[type-arg]
 @app.get("/approvals")
 async def get_approvals(status: str | None = None) -> list:  # type: ignore[type-arg]
     return list_approvals(status=status)
-
-
-class ApprovalRequest(BaseModel):
-    decision: str  # "approved" | "rejected"
-    approver_user_id: str = "anonymous"
-
-
-@app.post("/approvals/{approval_id}/resolve")
-async def resolve_approval(approval_id: str, req: ApprovalRequest) -> dict:  # type: ignore[type-arg]
-    if req.decision not in ("approved", "rejected"):
-        raise HTTPException(status_code=400, detail="decision must be 'approved' or 'rejected'")
-    found = await resolve_approval_request(
-        approval_id=approval_id,
-        decision=req.decision,  # type: ignore[arg-type]
-        approver_user_id=req.approver_user_id,
-    )
-    if not found:
-        raise HTTPException(status_code=404, detail=f"approval {approval_id} not found or expired")
-    return {"status": "ok", "approval_id": approval_id, "decision": req.decision}
 
 
 @app.post("/admin/agents/{agent_name}/chat")

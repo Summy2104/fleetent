@@ -982,19 +982,5 @@ async def test_server_auth_health_and_approval(
     assert health["sandbox"]["backend"] == "docker"
     assert health["sandbox"]["backend_available"] is False
     assert health["sandbox"]["note"] == "off (docker unavailable)"
-
-    async def resolve(**kwargs: Any) -> bool:
-        return kwargs["approval_id"] == "a1"
-
-    monkeypatch.setattr(server, "resolve_approval_request", resolve)
-    assert (
-        await server.resolve_approval(
-            "a1", server.ApprovalRequest(decision="approved", approver_user_id="ops")
-        )
-    )["status"] == "ok"
-    with pytest.raises(HTTPException) as bad_decision:
-        await server.resolve_approval("a1", server.ApprovalRequest(decision="maybe"))
-    assert bad_decision.value.status_code == 400
-    with pytest.raises(HTTPException) as missing_approval:
-        await server.resolve_approval("missing", server.ApprovalRequest(decision="approved"))
-    assert missing_approval.value.status_code == 404
+    route_paths = {route.path for route in server.app.routes}
+    assert "/approvals/{approval_id}/resolve" not in route_paths
