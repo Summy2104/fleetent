@@ -298,10 +298,11 @@ def record_connector_status(
     _database(database).execute(
         """
         INSERT INTO knowledge_connector_sync_history
-            (id, connector_id, tenant_id, kb_id, status, summary_json, error, started_at, finished_at)
+            (id, connector_id, tenant_id, kb_id, status,
+             summary_json, error, started_at, finished_at)
         VALUES
-            (:id, :connector_id, :tenant_id, :kb_id, :status, :summary_json, :error,
-             :started_at, :finished_at)
+            (:id, :connector_id, :tenant_id, :kb_id, :status,
+             :summary_json, :error, :started_at, :finished_at)
         """,
         {
             "id": uuid.uuid4().hex,
@@ -328,8 +329,10 @@ def list_connector_sync_history(
     database: SQLiteDatabase | None = None,
 ) -> list[dict[str, Any]]:
     """Return the most recent sync history rows for a connector, newest first."""
-    rows = _database(database).execute(
-        """
+    rows = (
+        _database(database)
+        .execute(
+            """
         SELECT id, connector_id, tenant_id, kb_id, status, summary_json, error,
                started_at, finished_at
         FROM knowledge_connector_sync_history
@@ -337,8 +340,10 @@ def list_connector_sync_history(
         ORDER BY finished_at DESC
         LIMIT :limit
         """,
-        {"connector_id": connector_id, "limit": limit},
-    ).fetchall()
+            {"connector_id": connector_id, "limit": limit},
+        )
+        .fetchall()
+    )
     return [
         {
             "id": r["id"],

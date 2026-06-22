@@ -1,4 +1,4 @@
-"""Integration tests: kb_connector_store schedule fields (sync_interval_seconds + last_scheduled_sync_at)."""
+"""Integration tests: kb_connector_store schedule fields."""
 
 from __future__ import annotations
 

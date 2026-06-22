@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import MagicMock, call, patch
-
+from unittest.mock import patch
 
 # ── Task 3.1: expiry detection (pure function) ──────────────────────────────
 

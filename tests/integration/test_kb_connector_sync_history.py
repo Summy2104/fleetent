@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from fleetent.db import SQLiteDatabase
 from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
 from fleetent.schema_migrations import migrate

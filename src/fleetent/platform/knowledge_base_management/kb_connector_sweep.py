@@ -60,6 +60,4 @@ def sweep() -> None:
             enqueue_connector_job(row)
             update_last_scheduled_sync_at(connector_id, now.isoformat())
         except Exception:
-            logger.exception(
-                "kb_connector_sweep_enqueue_failed connector_id=%s", connector_id
-            )
+            logger.exception("kb_connector_sweep_enqueue_failed connector_id=%s", connector_id)

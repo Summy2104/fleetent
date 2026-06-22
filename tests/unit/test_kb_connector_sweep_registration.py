@@ -1,36 +1,58 @@
-"""Unit tests: KB connector sweep registered as cron interval job."""
+"""Unit tests: KB connector sweep registered as platform maintenance interval job."""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
-import fleetent.cron_scheduler as cron_mod
+from unittest.mock import MagicMock
 
 
 def test_sweep_registered_as_interval_job():
-    """_register_maintenance_jobs must add __kb_connector_sync_sweep__ interval job."""
-    scheduler = cron_mod.CronScheduler()
-    scheduler._scheduler = MagicMock()
+    """_build_platform_maintenance_scheduler must add __kb_connector_sync_sweep__ job."""
+    from fleetent.config import SchedulingSettings
+    from fleetent.server import _build_platform_maintenance_scheduler
 
-    scheduler._register_maintenance_jobs()
+    mock_sched = MagicMock()
+    _build_platform_maintenance_scheduler(SchedulingSettings(), _scheduler=mock_sched)
 
-    calls = scheduler._scheduler.add_job.call_args_list
-    job_ids = [c.kwargs.get("id") or (c.args[2] if len(c.args) > 2 else None) for c in calls]
-    # Flatten: add_job called with id as keyword
-    kw_ids = [c.kwargs.get("id") for c in calls]
+    kw_ids = [c.kwargs.get("id") for c in mock_sched.add_job.call_args_list]
     assert "__kb_connector_sync_sweep__" in kw_ids
 
 
 def test_sweep_registered_with_60s_default_interval():
     """Sweep must be registered with at least 60 seconds interval by default."""
-    scheduler = cron_mod.CronScheduler()
-    scheduler._scheduler = MagicMock()
+    from fleetent.config import SchedulingSettings
+    from fleetent.server import _build_platform_maintenance_scheduler
 
-    scheduler._register_maintenance_jobs()
+    mock_sched = MagicMock()
+    _build_platform_maintenance_scheduler(SchedulingSettings(), _scheduler=mock_sched)
 
-    calls = scheduler._scheduler.add_job.call_args_list
     sweep_call = next(
-        (c for c in calls if c.kwargs.get("id") == "__kb_connector_sync_sweep__"), None
+        (
+            c
+            for c in mock_sched.add_job.call_args_list
+            if c.kwargs.get("id") == "__kb_connector_sync_sweep__"
+        ),
+        None,
     )
     assert sweep_call is not None
     assert sweep_call.kwargs.get("seconds", 0) >= 60
+
+
+def test_sweep_interval_configurable():
+    """Sweep interval must respect kb_connector_sweep_interval_seconds setting."""
+    from fleetent.config import SchedulingSettings
+    from fleetent.server import _build_platform_maintenance_scheduler
+
+    mock_sched = MagicMock()
+    settings = SchedulingSettings(kb_connector_sweep_interval_seconds=300)
+    _build_platform_maintenance_scheduler(settings, _scheduler=mock_sched)
+
+    sweep_call = next(
+        (
+            c
+            for c in mock_sched.add_job.call_args_list
+            if c.kwargs.get("id") == "__kb_connector_sync_sweep__"
+        ),
+        None,
+    )
+    assert sweep_call is not None
+    assert sweep_call.kwargs.get("seconds") == 300

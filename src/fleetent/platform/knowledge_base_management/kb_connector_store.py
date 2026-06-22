@@ -167,11 +167,15 @@ def update_last_scheduled_sync_at(connector_id: str, at: str) -> None:
 
 def list_schedulable_connectors() -> list[dict[str, Any]]:
     """Return enabled connectors that have a sync_interval_seconds set (opt-in scheduling)."""
-    rows = _database().execute(
-        f"SELECT {_COLS} FROM kb_connectors"
-        " WHERE enabled = 1 AND sync_interval_seconds IS NOT NULL"
-        " ORDER BY connector_id"
-    ).fetchall()
+    rows = (
+        _database()
+        .execute(
+            f"SELECT {_COLS} FROM kb_connectors"
+            " WHERE enabled = 1 AND sync_interval_seconds IS NOT NULL"
+            " ORDER BY connector_id"
+        )
+        .fetchall()
+    )
     return [_decode(r) for r in rows]
 
 

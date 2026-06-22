@@ -364,7 +364,6 @@ class CronScheduler:
         _current = self
 
     def _register_maintenance_jobs(self) -> None:
-        from fleetent.platform.knowledge_base_management.kb_connector_sweep import sweep
         from fleetent.tools.result_truncation import cleanup_spillover
 
         self._scheduler.add_job(
@@ -373,13 +372,6 @@ class CronScheduler:
             hour=3,
             minute=0,
             id="__maintenance_spillover_cleanup__",
-            replace_existing=True,
-        )
-        self._scheduler.add_job(
-            sweep,
-            trigger="interval",
-            seconds=self._settings.kb_connector_sweep_interval_seconds,
-            id="__kb_connector_sync_sweep__",
             replace_existing=True,
         )
 
