@@ -30,6 +30,28 @@ describe('admin routes', () => {
     expect(await screen.findByRole('heading', { name: 'Admin Login' })).toBeInTheDocument();
   });
 
+  it('shows an SSO entry point on the login page', async () => {
+    renderRoutes('/login');
+
+    expect(await screen.findByRole('link', { name: 'Sign in with SSO' })).toHaveAttribute(
+      'href',
+      'http://fleetent.test/admin/oidc/login'
+    );
+  });
+
+  it('consumes an OIDC callback token from the login route query string', async () => {
+    server.use(
+      http.get('http://fleetent.test/admin/agents', ({ request }) => {
+        expect(request.headers.get('authorization')).toBe('Session oidc-session');
+        return HttpResponse.json([]);
+      })
+    );
+
+    renderRoutes('/login?token=oidc-session');
+
+    expect(await screen.findByRole('heading', { name: 'Agents' })).toBeInTheDocument();
+  });
+
   it('renders the agents page with native navigation links', async () => {
     server.use(http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])));
 
