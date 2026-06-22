@@ -23,10 +23,10 @@
 
 ## 4. 物化 + 样例 + 文档
 
-- [ ] 4.1 写测试:`materialize` 渲染的 agent.yaml 为新 `mcpServers` map 格式(红)
-- [ ] 4.2 实现 `platform/agent_lifecycle/materialize.py` 只产出新 map 格式(绿)
+- [x] 4.1 写测试:`materialize` 渲染的 agent.yaml 为新 `mcpServers` map 格式(红)
+- [x] 4.2 实现 `platform/agent_lifecycle/materialize.py` 只产出新 map 格式(绿)
 - [x] 4.3 更新 `agents/default/agent.yaml.example`:新 map + `x-fleetent` 块 + `mcp.tool_naming` 示例
-- [ ] 4.4 更新 `docs/capabilities/mcp.md`:配置格式(map+x-fleetent)、transport 自动判定、`tool_naming` 投影与默认命名约定
+- [x] 4.4 更新 `docs/capabilities/mcp.md`:配置格式(map+x-fleetent)、transport 自动判定、`tool_naming` 投影与默认命名约定
 
 ## 5. 收尾验证
 
