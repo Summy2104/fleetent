@@ -107,6 +107,8 @@ allowed_skills:                    # empty = no narrowing (all enabled skills vi
   - slack-daily-jira
 skill_authoring_enabled: false     # true exposes the skill_manage tool (user-driven,
                                    # approval-gated skill create/edit/delete); default off
+skill_hot_reload: true             # auto-reload skills when their files change on disk
+                                   # (checked before each message); false = boot scan only
 
 # ── tools / capabilities ──
 allowed_tools:                     # fnmatch patterns; MCP tools are "<server>__<tool>"

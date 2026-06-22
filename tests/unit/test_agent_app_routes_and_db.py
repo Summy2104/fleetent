@@ -32,6 +32,7 @@ def _agent_file(**overrides: Any) -> Any:
         features={"code_execution": True},
         allowed_skills=["triage"],
         skill_authoring_enabled=False,
+        skill_hot_reload=True,
         mcp_servers=[],
         scheduling=SimpleNamespace(enabled=False),
     )
