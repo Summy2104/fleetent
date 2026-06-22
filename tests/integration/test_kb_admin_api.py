@@ -7,6 +7,7 @@ Engine seams are monkeypatched so the tests exercise the management behaviour
 import sqlite3
 import threading
 import time
+from datetime import UTC, datetime
 
 import pytest
 from fastapi import FastAPI
@@ -20,6 +21,7 @@ import fleetent.platform.knowledge_base_management.kb_admin_api as api
 import fleetent.user_store as user_store
 from fleetent import vector_store
 from fleetent.knowledge_base.extraction_store import KnowledgeExtractionRun
+from fleetent.observability.traces import TraceEvent
 from fleetent.vector_store import SearchResult
 from tests.integration._migration_template import apply_migrations
 
@@ -611,12 +613,17 @@ def test_bind_and_reverse_lookup_consistent(client):
     assert rev["kb_ids"] == ["sales"]
 
 
-def test_eval_entry_read_only_for_viewer(client, monkeypatch):
-    monkeypatch.setattr(api, "kb_evaluation", lambda t, k: {"kb_id": k, "metrics": {"hit": 1}})
+def test_eval_entry_read_only_for_viewer(client):
     token, _ = _session_for("viewer")
     r = client.post("/admin/kb/evaluations", headers=_hdr(token), json={"kb_id": "sales"})
     assert r.status_code == 200
-    assert r.json()["metrics"]["hit"] == 1
+    body = r.json()
+    assert body["kb_id"] == "sales"
+    assert body["metrics"]["recall_at_k"] == 1.0
+    assert body["metrics"]["mrr"] == 1.0
+    assert body["metrics"]["query_count"] >= 1
+    assert body["hit_ranking"][0]["rank"] == 1
+    assert "wired" not in body
 
 
 # --- reverse lookup excludes archived KBs (任务 2.3/2.4) ----------------------
@@ -748,23 +755,63 @@ def test_list_documents_and_chunk_preview(client, monkeypatch):
 
 
 def test_observation_read_only_aggregation(client, monkeypatch):
+    def _event(
+        agent_name: str, session_id: str, latency_ms: float, hit_count: int, scores: list[float]
+    ):
+        return TraceEvent(
+            run_id=f"run-{session_id}",
+            event_type="kb_retrieval",
+            payload={
+                "latency_ms": latency_ms,
+                "hit_count": hit_count,
+                "scores": scores,
+                "kb_ids": ["sales"],
+            },
+            agent_name=agent_name,
+            session_id=session_id,
+            ts=datetime(2026, 6, 22, 10, 0, tzinfo=UTC),
+        )
+
+    monkeypatch.setattr(api.agent_kbs_store, "list_agents_for_kb", lambda tenant_id, kb_id: [7, 8])
     monkeypatch.setattr(
-        api,
-        "kb_observation",
-        lambda t, k: {
-            "kb_id": k,
-            "recall_hits": 42,
-            "zero_recall_docs": ["d9"],
-            "sessions": ["s1", "s2"],
-        },
+        api.kb_observation_agg.agent_store,
+        "get_agent_name_by_id",
+        lambda agent_id: {7: "ops-a", 8: "ops-b"}[agent_id],
+    )
+    monkeypatch.setattr(
+        api.kb_observation_agg,
+        "query_trace_events",
+        lambda query: iter(
+            {
+                "ops-a": [
+                    _event("ops-a", "s1", 10.0, 2, [0.9, 0.6]),
+                    _event("ops-a", "s2", 20.0, 0, []),
+                ],
+                "ops-b": [_event("ops-b", "s3", 40.0, 1, [0.4])],
+            }.get(str(query.agent_name), [])
+        ),
     )
     token, _ = _session_for("viewer")  # read-only, viewer allowed
     r = client.get("/admin/kb/sales/observation", headers=_hdr(token))
     assert r.status_code == 200
     body = r.json()
-    assert body["recall_hits"] == 42
-    assert body["zero_recall_docs"] == ["d9"]
-    assert body["sessions"] == ["s1", "s2"]
+    assert body["kb_id"] == "sales"
+    assert body["query_count"] == 3
+    assert body["hit_count"] == 3
+    assert body["zero_recall_rate"] == 1 / 3
+    assert body["latency_ms"] == {"p50": 20.0, "p95": 40.0}
+    assert body["score_distribution"] == {
+        "count": 3,
+        "min": 0.4,
+        "p50": 0.6,
+        "p95": 0.9,
+        "max": 0.9,
+    }
+    assert body["sessions"] == ["s1", "s2", "s3"]
+    assert "recall_hits" not in body
+    assert "recall_at_k" not in body
+    assert "mrr" not in body
+    assert "citation_rate" not in body
 
 
 def test_extract_entities_endpoint_exists(client, monkeypatch):

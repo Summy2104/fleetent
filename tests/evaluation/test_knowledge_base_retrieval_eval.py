@@ -2,9 +2,10 @@ from pathlib import Path
 
 import pytest
 
-from tests.evaluation.knowledge_base_retrieval_eval import (
+from fleetent.knowledge_base.retrieval.evaluation import (
     REQUIRED_FIXTURE_FIELDS,
     FixtureValidationError,
+    RealEmbeddingEvaluationSkipped,
     assert_query_expectations,
     load_fixtures,
     run_deterministic_fixture,
@@ -109,6 +110,11 @@ async def test_deterministic_runner_ingests_documents_and_validates_top_k(
     assert result.vector_db_path == tmp_path / "knowledge-base-retrieval-vectors.db"
     assert result.document_count == 2
     assert result.query_results[0].query == "payroll incidents HR operations"
+    assert result.metrics.recall_at_k == 1.0
+    assert result.metrics.mrr == 1.0
+    assert result.query_results[0].ranked_hit is not None
+    assert result.query_results[0].ranked_hit.rank == 1
+    assert result.query_results[0].ranked_hit.reciprocal_rank == 1.0
     assert_query_expectations(result.query_results[0])
 
 
@@ -154,7 +160,7 @@ async def test_runner_isolates_sqlite_and_vector_store_from_data_dir(tmp_path, m
 async def test_real_embedding_evaluation_skips_by_default(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("FLEETENT_EVAL_REAL_EMBEDDING", raising=False)
 
-    with pytest.raises(pytest.skip.Exception):
+    with pytest.raises(RealEmbeddingEvaluationSkipped):
         await run_real_embedding_fixture(load_fixtures()[0], tmp_path, monkeypatch)
 
 
@@ -166,7 +172,7 @@ async def test_real_embedding_evaluation_skips_without_provider_credentials(
     monkeypatch.setenv("FLEETENT_EVAL_EMBEDDING_MODEL", "bge-m3")
     monkeypatch.delenv("FLEETENT_EVAL_EMBEDDING_API_KEY", raising=False)
 
-    with pytest.raises(pytest.skip.Exception):
+    with pytest.raises(RealEmbeddingEvaluationSkipped):
         await run_real_embedding_fixture(load_fixtures()[0], tmp_path, monkeypatch)
 
 
@@ -176,5 +182,9 @@ async def test_knowledge_base_retrieval_fixture_expectations(
 ) -> None:
     result = await run_deterministic_fixture(fixture, tmp_path, monkeypatch)
 
+    assert result.metrics.recall_at_k == 1.0
+    assert result.metrics.mrr == 1.0
     for query_result in result.query_results:
+        assert query_result.ranked_hit is not None
+        assert query_result.ranked_hit.rank >= 1
         assert_query_expectations(query_result)

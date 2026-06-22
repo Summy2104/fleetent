@@ -801,10 +801,16 @@ def test_kb_admin_route_handlers_cover_management_and_documents(
     monkeypatch.setattr(
         kb_admin_api,
         "kb_evaluation",
-        lambda tenant_id, kb_id: {"kb_id": kb_id, "metrics": {"recall": 1.0}},
+        lambda tenant_id, kb_id: {
+            "kb_id": kb_id,
+            "metrics": {"recall_at_k": 1.0, "mrr": 1.0},
+            "hit_ranking": [{"rank": 1}],
+        },
     )
     monkeypatch.setattr(
-        kb_admin_api, "kb_observation", lambda tenant_id, kb_id: {"kb_id": kb_id, "recall_hits": 7}
+        kb_admin_api,
+        "kb_observation",
+        lambda tenant_id, kb_id: {"kb_id": kb_id, "query_count": 7, "sessions": ["s1"]},
     )
     monkeypatch.setattr(
         kb_admin_api.agent_kbs_store,
@@ -891,7 +897,7 @@ def test_kb_admin_route_handlers_cover_management_and_documents(
     )
     assert (
         kb_admin_api.run_evaluation(kb_admin_api.EvalBody(kb_id="kb2"), auth_header)["metrics"][
-            "recall"
+            "recall_at_k"
         ]
         == 1.0
     )
@@ -902,7 +908,7 @@ def test_kb_admin_route_handlers_cover_management_and_documents(
     assert kb_admin_api.agents_for_kb("kb2", authorization=auth_header)["agents"] == [8]
     assert kb_admin_api.kbs_for_agent(8, authorization=auth_header)["kb_ids"] == ["kb2"]
     assert kb_admin_api.unbind_agent("kb2", 8, authorization=auth_header)["bound"] is False
-    assert kb_admin_api.observation("kb2", authorization=auth_header)["recall_hits"] == 7
+    assert kb_admin_api.observation("kb2", authorization=auth_header)["query_count"] == 7
     with pytest.raises(HTTPException) as still_bound:
         kb_admin_api.archive_kb("kb1", authorization=auth_header, x_confirm="true")
     assert still_bound.value.status_code == 409
