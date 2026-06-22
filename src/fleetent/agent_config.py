@@ -388,15 +388,23 @@ class AgentFile(BaseModel):
     @classmethod
     def _normalize_mcp_servers(cls, data: Any) -> Any:
         """Convert the standard map-keyed ``mcpServers``/``mcp_servers`` block into the
-        internal ``mcp_servers`` list. Rejects the legacy list-of-id form. Keeps ``${VAR}``
-        references intact (resolved at request time) so the inline-secret guard sees refs."""
-        if isinstance(data, dict) and ("mcpServers" in data or "mcp_servers" in data):
+        internal ``mcp_servers`` list. Rejects the legacy raw list-of-id form, but leaves a
+        list of already-built ``McpServerSettings`` (internal construction) untouched. Keeps
+        ``${VAR}`` references intact (resolved at request time) so the inline-secret guard
+        sees references, not resolved secrets."""
+        if not isinstance(data, dict):
+            return data
+        block = data.get("mcpServers", data.get("mcp_servers"))
+        if isinstance(block, dict) or "mcpServers" in data:
             from fleetent.config import parse_mcp_servers
 
             data = dict(data)
-            servers = parse_mcp_servers(data, expand_env=False)
+            data["mcp_servers"] = parse_mcp_servers(data, expand_env=False)
             data.pop("mcpServers", None)
-            data["mcp_servers"] = servers
+        elif isinstance(block, list) and any(isinstance(e, dict) for e in block):
+            raise ValueError(
+                "legacy list-of-id `mcp_servers` is not supported; use the `mcpServers` map form"
+            )
         return data
 
     name: str

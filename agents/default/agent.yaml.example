@@ -173,30 +173,40 @@ long_term_ctx:
   conflict_preference: auto        # auto | memory | knowledge; default "auto"
 
 # ── MCP servers (inline; secrets via env reference only) ──
-mcp_servers:
-  - id: docs
-    transport: http
+# ── MCP servers (standard map-keyed; key = server id) ──
+# Drop-in: a standard `mcpServers` block (Claude Desktop / claude-code style) works as-is.
+# Transport is auto-detected (command→stdio, url→remote). fleetent-specific settings live
+# under each entry's `x-fleetent` extension block (standard MCP tooling ignores it).
+mcpServers:
+  docs:                                  # standard remote (streamable HTTP) + header auth
+    type: http
     url: https://docs.acme.internal/mcp
-    auth_type: bearer
-    api_key_env: ACME_DOCS_MCP_TOKEN   # env-var NAME, never the token value
-    connect_timeout: 10.0              # seconds for connect-phase ops (default 10.0)
-    call_timeout: 30.0                 # seconds for tool-call ops (default 30.0)
-  - id: billing
-    transport: stdio
+    headers:
+      Authorization: "Bearer ${ACME_DOCS_MCP_TOKEN}"  # ${VAR} env ref, resolved at request time
+    connect_timeout: 10.0
+    call_timeout: 30.0
+  billing:                               # standard stdio (transport auto-detected from `command`)
     command: /usr/local/bin/billing-mcp
-    args:
-      - "--mode"
-      - "readonly"
+    args: ["--mode", "readonly"]
     env:
-      BILLING_DB_DSN_ENV: BILLING_DB_DSN
-    # ── unified file-exchange (stdio only) ──
-    # By default a stdio server's products land in its convention partition tree
-    # (<agent_home>/exchange/<id>/data) and become addressable to the model under the
-    # /exchange/<id>/ namespace (send_file delivers them, file tools read them). Override:
-    # file_root: /var/lib/billing/out   # declare the server's real product dir explicitly
-                                         # (overrides the convention + any XDG_DATA_HOME)
-    # file_isolation: "off"             # opt OUT entirely — server reads the host's real
-                                         # ~/.config etc., products are NOT addressable
+      BILLING_DB_DSN: "${BILLING_DB_DSN}"
+    x-fleetent:                          # ── fleetent extensions (ignored by standard MCP tools) ──
+      degrade_mode: strict               # degrade | strict | silent
+      # /exchange file-bridging for stdio products:
+      # file_root: /var/lib/billing/out  # declare the server's real product dir explicitly
+      # file_isolation: "off"            # opt OUT of the convention env injection entirely
+      approval_rules:                    # per-tool approval (server-local tool names)
+        - tool: charge_card
+  crm:                                   # self-hosted OAuth2 (token_url customer-internal, never cloud)
+    type: http
+    url: https://crm.acme.internal/mcp
+    x-fleetent:
+      auth:
+        type: oauth2
+        token_url: https://auth.acme.internal/oauth/token
+        client_id: fleetent-crm
+        client_secret_env: CRM_OAUTH_SECRET  # env-var NAME, never the secret value
+        scope: "mcp.read mcp.write"
 
 # ── im (per-agent IM ingress; tokens via env reference only) ──
 im:
@@ -315,6 +325,11 @@ disabled_skills: []
 # ── feature toggles (per-capability on/off + tuning) ──
 mcp:
   enabled: true                   # set false to disable all MCP tool calls for this agent
+  # Tool-name projection (how MCP tool names are presented to the model). A preset:
+  #   claude(default) → mcp__{server}__{tool}   hermes → mcp_{server}_{tool}
+  #   opencode → {server}_{tool}   skills → {server}:{tool}   bare → {server}__{tool}
+  # or a custom template: { template: "mcp_{server}_{tool}", sanitize: snake, max_len: 64 }
+  tool_naming: claude
 
 scheduling:
   enabled: true                   # set false to disable APScheduler cron tasks for this agent

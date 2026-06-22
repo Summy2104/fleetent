@@ -16,16 +16,16 @@
 
 ## 3. 投影接入 + canonical 元数据 + 审批加固(安全核心)
 
-- [ ] 3.1 写测试:registry 按 canonical 注册 + 反查表 `投影名→(server_id, raw_tool)` + schema 出站投影 + tool_use 入站还原(含单下划线歧义场景如 `google_drive`)(红)
-- [ ] 3.2 实现 `integrations/mcp/client.py`:canonical 注册、存 `(server_id, raw_tool)` 元数据、注册期构建反查表(缓存)、LLM 边界 in/out 翻译(绿)
-- [ ] 3.3 写测试(防回归核心):每种 `tool_naming`(claude/hermes/bare)下 `approval_rules` 仍命中、`permission_gate` 仍拦截、只读工具不过度 gate;`allowed_tools` 匹配行为不变(红)
-- [ ] 3.4 实现 `governance/approval_policy`:MCP 风险改读注册的 `(server_id, raw_tool)` 元数据,移除 `partition("__")` 字符串切分(绿)
+- [x] 3.1 写测试:registry 按 canonical 注册 + 反查表 `投影名→(server_id, raw_tool)` + schema 出站投影 + tool_use 入站还原(含单下划线歧义场景如 `google_drive`)(红)
+- [x] 3.2 实现 `integrations/mcp/client.py`:canonical 注册、存 `(server_id, raw_tool)` 元数据、注册期构建反查表(缓存)、LLM 边界 in/out 翻译(绿)
+- [x] 3.3 写测试(防回归核心):每种 `tool_naming`(claude/hermes/bare)下 `approval_rules` 仍命中、`permission_gate` 仍拦截、只读工具不过度 gate;`allowed_tools` 匹配行为不变(红)
+- [x] 3.4 实现 `governance/approval_policy`:MCP 风险改读注册的 `(server_id, raw_tool)` 元数据,移除 `partition("__")` 字符串切分(绿)
 
 ## 4. 物化 + 样例 + 文档
 
 - [ ] 4.1 写测试:`materialize` 渲染的 agent.yaml 为新 `mcpServers` map 格式(红)
 - [ ] 4.2 实现 `platform/agent_lifecycle/materialize.py` 只产出新 map 格式(绿)
-- [ ] 4.3 更新 `agents/default/agent.yaml.example`:新 map + `x-fleetent` 块 + `mcp.tool_naming` 示例
+- [x] 4.3 更新 `agents/default/agent.yaml.example`:新 map + `x-fleetent` 块 + `mcp.tool_naming` 示例
 - [ ] 4.4 更新 `docs/capabilities/mcp.md`:配置格式(map+x-fleetent)、transport 自动判定、`tool_naming` 投影与默认命名约定
 
 ## 5. 收尾验证

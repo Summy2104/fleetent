@@ -32,7 +32,13 @@ Projection SHALL occur ONLY at the LLM boundary: tool schemas SHALL be presented
 - **THEN** the call resolves to server `google_drive`, tool `list_files` via the reverse-lookup table
 
 ### Requirement: Governance binds the canonical identity
-Approval and access control SHALL bind to the canonical `(server_id, raw_tool)` recorded at registration, independent of `mcp.tool_naming`. MCP risk classification SHALL read this metadata and SHALL NOT derive server/tool by parsing the tool-name string. For any `mcp.tool_naming` value, an MCP tool matched by an `approval_rules` entry SHALL still be gated, and `allowed_tools` matching SHALL behave identically.
+Governance (approval and access control) SHALL operate on the canonical identity, independent
+of `mcp.tool_naming`. The LLM boundary SHALL resolve a projected tool name back to its
+canonical name BEFORE governance runs, so risk classification and `allowed_tools` matching
+never see — and never parse — a projected name. For any `mcp.tool_naming` value, an MCP tool
+matched by an `approval_rules` entry SHALL still be gated, and `allowed_tools` matching SHALL
+behave identically. The canonical `(server_id, raw_tool)` identity recorded at registration
+is also exposed (``mcp_tool_identity``) for consumers that need the structured pair.
 
 #### Scenario: approval still triggers under any naming
 - **WHEN** an `approval_rules` entry requires approval for server `crm` tool `create_contact` AND `mcp.tool_naming` is `claude`, `hermes`, or `bare`
