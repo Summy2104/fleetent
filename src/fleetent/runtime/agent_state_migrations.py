@@ -42,6 +42,7 @@ Version history:
   v35  artifacts          (unified-file-exchange) MCP artifact ledger
   v36  artifacts.scope_key (unified-file-exchange D0) attribution = workspace scope key
   v37  traces.agent_name  (finalize-agent-identity) rename traces.agent_id column
+  v38  im_outbound_queue  (im-edge-on-node-outbound) managed async outbound queue
 """
 
 from __future__ import annotations
@@ -492,6 +493,24 @@ MIGRATIONS.append(
         CREATE INDEX IF NOT EXISTS idx_traces_agent_ts ON traces (agent_id, ts);
         CREATE INDEX IF NOT EXISTS idx_traces_tenant_event_ts ON traces (tenant_id, event_type, ts);
         ALTER TABLE traces RENAME COLUMN agent_id TO agent_name;
+        """,
+    )
+)
+MIGRATIONS.append(
+    (
+        MIGRATIONS[-1][0] + 1,
+        """
+        CREATE TABLE IF NOT EXISTS im_outbound_queue (
+            id            TEXT PRIMARY KEY,
+            platform      TEXT NOT NULL,
+            address_json  TEXT NOT NULL,
+            payload_json  TEXT NOT NULL,
+            dedup_key     TEXT NOT NULL,
+            status        TEXT NOT NULL DEFAULT 'pending',
+            attempts      INTEGER NOT NULL DEFAULT 0,
+            created_at    TEXT NOT NULL,
+            sent_at       TEXT
+        )
         """,
     )
 )

@@ -110,6 +110,25 @@ async def send_to(
     ``blocks`` is an optional platform-specific rich payload (Slack Block Kit);
     platforms without rich rendering ignore it and send the text fallback.
     """
+    from fleetent.outbound_connectors import ManagedOutboundConnector
+
+    if isinstance(connector, ManagedOutboundConnector):
+        connector.enqueue_text(
+            target=target,
+            text=text,
+            target_type=target_type,
+            thread=thread,
+            blocks=blocks,
+        )
+        return DeliveryReceipt(
+            ok=True,
+            platform=platform,
+            target=target,
+            target_type=target_type,
+            kind="text",
+            thread=thread,
+        )
+
     ref: str | None = None
     err: str | None = None
     if platform == "slack":
@@ -149,6 +168,24 @@ async def send_file_to(
     optionally threads the delivery (Slack ``thread_ts``). This is the single outbound file
     delivery point shared by the ``send_file`` tool and the IM adapters' upload path.
     """
+    from fleetent.outbound_connectors import ManagedOutboundConnector
+
+    if isinstance(connector, ManagedOutboundConnector):
+        connector.enqueue_file(
+            target=target,
+            path=path,
+            target_type=target_type,
+            thread=thread,
+        )
+        return DeliveryReceipt(
+            ok=True,
+            platform=platform,
+            target=target,
+            target_type=target_type,
+            kind="file",
+            thread=thread,
+        )
+
     ref: str | None = None
     err: str | None = None
     if platform == "slack":
@@ -396,6 +433,10 @@ async def is_reachable(platform: str, connector: Any, target: str) -> bool:
     - Telegram: only users who have previously /started the bot are reachable
       (bot must be able to get their chat info).
     """
+    from fleetent.outbound_connectors import ManagedOutboundConnector
+
+    if isinstance(connector, ManagedOutboundConnector):
+        return True
     if platform == "slack":
         return True  # Slack workspace users are always reachable via conversations.open
     if platform == "telegram":

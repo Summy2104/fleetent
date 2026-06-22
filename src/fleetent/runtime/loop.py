@@ -1927,8 +1927,11 @@ async def _run_inner(
         _logger.debug("sandbox_capability_probe_failed", error=str(exc))
         sandbox_workspace_mount = False
 
+    from fleetent.outbound_connectors import resolve_for_runtime
+
     start = time.monotonic()
     run_id = str(uuid.uuid4())
+    resolved_outbound_connectors = resolve_for_runtime(agent_name, outbound_connectors)
     # delivery-receipts (§2): run-level ledger collecting every outbound receipt this run,
     # read at finalize to render the fact trailer (§3). A caller may seed it (approval-suspend-
     # resume shares one ledger between the resumed tool execution and this continuation so the
@@ -1945,7 +1948,7 @@ async def _run_inner(
         delivery_ledger=delivery_ledger,
         session_context=session_context,
         principal=principal,
-        outbound_connectors=outbound_connectors or {},
+        outbound_connectors=resolved_outbound_connectors,
         # send-file-to-conversation: the authoritative delivery address (same one text
         # replies use) so send_file lands the file in the current conversation — channel
         # into that channel, DM into that DM — instead of always the requester's DM.
@@ -2207,7 +2210,7 @@ async def _run_inner(
             permission_gate_medium_timeout=permission_gate_medium_timeout,
             permission_gate_high_timeout=permission_gate_high_timeout,
             approval_routing=approval_routing,
-            outbound_connectors=outbound_connectors,
+            outbound_connectors=resolved_outbound_connectors,
             sandbox_effective_mode=sandbox_mode,
             sandbox_workspace_mount=sandbox_workspace_mount,
             conversation_address=conversation_address,
