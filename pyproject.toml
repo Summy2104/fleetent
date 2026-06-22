@@ -31,6 +31,7 @@ dependencies = [
     "html2text>=2024.2.26",
     "microsandbox>=0.5.6",
     "dulwich>=1.2.6",
+    "authlib>=1.6.5",
 ]
 
 [project.scripts]
