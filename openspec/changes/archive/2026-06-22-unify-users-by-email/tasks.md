@@ -32,4 +32,4 @@
 
 - [x] 6.1 `make test-pr` 全绿（对照 main 基线无新增失败）+ 跑相关集成 `uv run pytest tests/integration/test_user_email_join.py tests/integration/test_auth.py tests/integration/test_api_key_auth.py -q` + 既有 login/im 测试无新增失败。
 - [x] 6.2 **跨切面提示**：本 change 含 **Alembic 迁移 + 改 user_store 公开 API（被广泛依赖）**——属跨切面，收尾跑**更广的集成**（不只 scoped），确认无连带回归（任何建 user / 登录 / IM 解析的测试）。覆盖率门禁 `make test-unit-ci`（--fail-under=76）不被拉破。
-- [ ] 6.3 merge 后跑迁移 head 自检 `uv run alembic heads` 确认**单一 head**（并行 change 可能占号，撞号则改本迁移 down_revision 重链）。
+- [x] 6.3 merge 后跑迁移 head 自检 `uv run alembic heads` 确认**单一 head**（并行 change 可能占号，撞号则改本迁移 down_revision 重链）。
