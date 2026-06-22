@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import socket as _sock
 
@@ -58,7 +59,7 @@ def test_forwarder_chat_requires_node_key_and_injects_tui_token(monkeypatch, tmp
         return httpx.Response(
             200,
             headers={"content-type": "text/event-stream"},
-            content=b"data: {\"type\":\"text\",\"content\":\"ok\"}\n\n",
+            content=b'data: {"type":"text","content":"ok"}\n\n',
         )
 
     monkeypatch.setattr(httpx.AsyncClient, "send", fake_send)
@@ -92,7 +93,7 @@ async def test_forward_chat_streams_complete_body_over_real_socket(tmp_path) -> 
     home.mkdir(parents=True)
     (home / ".env").write_text("FLEETENT_TUI_TOKEN=ma-agent-token\n", encoding="utf-8")
 
-    CHUNKS = [b"data: chunk1\n\n", b"data: chunk2\n\n", b"data: chunk3\n\n"]
+    chunks = [b"data: chunk1\n\n", b"data: chunk2\n\n", b"data: chunk3\n\n"]
 
     with _sock.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -103,7 +104,7 @@ async def test_forward_chat_streams_complete_body_over_real_socket(tmp_path) -> 
     @upstream_app.post("/chat")
     async def _upstream_chat() -> StreamingResponse:
         async def _body():
-            for chunk in CHUNKS:
+            for chunk in chunks:
                 yield chunk
                 await asyncio.sleep(0.005)
 
@@ -117,6 +118,7 @@ async def test_forward_chat_streams_complete_body_over_real_socket(tmp_path) -> 
         await asyncio.sleep(0.01)
 
     try:
+
         class _RealBackend:
             def gateway_port(self, name: str) -> int | None:
                 return upstream_port
@@ -149,15 +151,15 @@ async def test_forward_chat_streams_complete_body_over_real_socket(tmp_path) -> 
         except Exception:
             body = b""
 
-        assert body, "body must not be empty (regression: premature httpx client close yielded 0 bytes)"
-        for chunk in CHUNKS:
+        assert body, (
+            "body must not be empty (regression: premature httpx client close yielded 0 bytes)"
+        )
+        for chunk in chunks:
             assert chunk in body, f"missing SSE chunk {chunk!r} from relayed body"
     finally:
         srv.should_exit = True
-        try:
+        with contextlib.suppress(TimeoutError, asyncio.CancelledError):
             await asyncio.wait_for(serve_task, timeout=5.0)
-        except (asyncio.TimeoutError, asyncio.CancelledError):
-            pass
 
 
 def test_forwarder_ws_requires_node_key(tmp_path) -> None:
@@ -168,6 +170,5 @@ def test_forwarder_ws_requires_node_key(tmp_path) -> None:
     app = build_app(_config(tmp_path), _Backend())
     client = TestClient(app)
 
-    with pytest.raises(WebSocketDisconnect):
-        with client.websocket_connect("/forward/agents/support/ws"):
-            pass
+    with pytest.raises(WebSocketDisconnect), client.websocket_connect("/forward/agents/support/ws"):
+        pass

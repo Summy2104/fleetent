@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import socket as _sock
 from pathlib import Path
 from types import SimpleNamespace
@@ -99,7 +100,9 @@ def test_admin_chat_ingress_reaches_node_forwarder_and_agent(
     monkeypatch.setattr(server.auth, "validate_session", lambda token, idle: "admin-1")
     monkeypatch.setattr(server.auth, "has_role", lambda user, roles: True)
     monkeypatch.setattr(server.user_store, "get_by_id", lambda user_id: _admin_user())
-    monkeypatch.setattr(server.agent_store, "get_by_name", lambda name: SimpleNamespace(id=7, name=name))
+    monkeypatch.setattr(
+        server.agent_store, "get_by_name", lambda name: SimpleNamespace(id=7, name=name)
+    )
     monkeypatch.setattr(
         server.placement_store,
         "get_for_agent",
@@ -117,7 +120,7 @@ def test_admin_chat_ingress_reaches_node_forwarder_and_agent(
     assert "echo:hi" in response.text
     assert captured["agent_auth"] == "Bearer ma-agent-token"
     principal = captured["principal"]
-    assert getattr(principal, "user_id") == "local"
+    assert principal.user_id == "local"  # type: ignore[union-attr]
 
 
 def test_managed_agent_chat_routes_by_placement_and_requires_admin_session(
@@ -154,7 +157,9 @@ def test_managed_agent_chat_routes_by_placement_and_requires_admin_session(
     monkeypatch.setattr(server.auth, "validate_session", lambda token, idle: "admin-1")
     monkeypatch.setattr(server.auth, "has_role", lambda user, roles: True)
     monkeypatch.setattr(server.user_store, "get_by_id", lambda user_id: _admin_user())
-    monkeypatch.setattr(server.agent_store, "get_by_name", lambda name: SimpleNamespace(id=7, name=name))
+    monkeypatch.setattr(
+        server.agent_store, "get_by_name", lambda name: SimpleNamespace(id=7, name=name)
+    )
     monkeypatch.setattr(
         server.placement_store,
         "get_for_agent",
@@ -196,7 +201,7 @@ async def test_direct_http_transport_chat_streams_complete_body_over_real_socket
     """
     from fleetent.platform.node_management.agent_transport import DirectHttpAgentTransport
 
-    CHUNKS = [b"data: chunk1\n\n", b"data: chunk2\n\n", b"data: chunk3\n\n"]
+    expected_chunks = [b"data: chunk1\n\n", b"data: chunk2\n\n", b"data: chunk3\n\n"]
 
     with _sock.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -208,7 +213,7 @@ async def test_direct_http_transport_chat_streams_complete_body_over_real_socket
     @fake_forwarder.post("/forward/agents/support/chat")
     async def _fwd_chat() -> StreamingResponse:
         async def _body():
-            for chunk in CHUNKS:
+            for chunk in expected_chunks:
                 yield chunk
                 await asyncio.sleep(0.005)
 
@@ -241,19 +246,19 @@ async def test_direct_http_transport_chat_streams_complete_body_over_real_socket
                 "node-a", "support", b'{"message":"ping"}', content_type="application/json"
             )
             # Consume body_iterator exactly as Starlette would after the handler returns
-            chunks: list[bytes] = []
+            received: list[bytes] = []
             async for chunk in response.body_iterator:  # type: ignore[union-attr]
-                chunks.append(chunk)
-            body = b"".join(chunks)
+                received.append(chunk)
+            body = b"".join(received)
         except Exception:
             body = b""
 
-        assert body, "body must not be empty (regression: premature httpx client close yielded 0 bytes)"
-        for chunk in CHUNKS:
+        assert body, (
+            "body must not be empty (regression: premature httpx client close yielded 0 bytes)"
+        )
+        for chunk in expected_chunks:
             assert chunk in body, f"missing SSE chunk {chunk!r} from DirectHttpAgentTransport.chat"
     finally:
         srv.should_exit = True
-        try:
+        with contextlib.suppress(TimeoutError, asyncio.CancelledError):
             await asyncio.wait_for(serve_task, timeout=5.0)
-        except (asyncio.TimeoutError, asyncio.CancelledError):
-            pass
