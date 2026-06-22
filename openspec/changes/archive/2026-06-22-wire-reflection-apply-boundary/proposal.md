@@ -12,7 +12,7 @@ reflection 审批链的 skill 分支有一个潜伏 bug + 一处命名/规格陈
 2. **spec 引用死表**：`skill-proposal-review` spec 仍写"从 `skill_proposals` 聚合 inbox"，但 `skill_proposals`
    已在 agent_state 迁移 v26 被 DROP，真实存储是统一表 `reflection_proposals`（`domain='skill'`）。spec 与实现脱节。
 
-3. **dataclass 命名冗长**：`MemoryMaintenanceProposal` 与同族的 `SkillProposal` 不对齐，"Maintenance" 中缀冗余。
+3. **dataclass 命名冗长**：`MemoryProposal` 与同族的 `SkillProposal` 不对齐，旧名里的 "Maintenance" 中缀冗余。
 
 现在做：这些是 reflection 审批链收尾的纯清理 + bug 修，不依赖任何待定决策（auto-apply 默认值、找对人规则均属后续切片），
 可独立先落地，解除 skill 提案应用这条路上的 landmine。
@@ -22,7 +22,7 @@ reflection 审批链的 skill 分支有一个潜伏 bug + 一处命名/规格陈
 - **接通 skill apply 边界**：reflection_gate 本地 `apply_skill_proposal_to_boundary` 不再 raise stub，改为**委托到
   `reflection_api.apply_skill_proposal_to_boundary`**（reflection.py 的真实现，单一真相源）。两条路径（真 API / fallback）
   都能正确应用 skill 提案。
-- **dataclass 改名** `MemoryMaintenanceProposal → MemoryProposal`：贯穿 `reflection/`、`governance/`、`memory/`
+- **dataclass 改名** `MemoryProposal`：贯穿 `reflection/`、`governance/`、`memory/`
   及测试（10 个文件），与 `SkillProposal` 命名对齐。纯重命名，不改字段、不改持久化（DB 存的是 `reflection_proposals`
   行的 `domain/kind`，不含类名）。
 - **修正 spec 陈旧引用**：`skill-proposal-review` inbox 来源从死表 `skill_proposals` 更正为

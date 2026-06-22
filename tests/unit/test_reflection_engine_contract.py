@@ -28,7 +28,7 @@ async def test_run_reflection_generates_pending_proposals_without_auto_apply(
     ]
 
     memory_proposals = [
-        reflection.MemoryMaintenanceProposal(
+        reflection.MemoryProposal(
             id="memory-proposal-1",
             user_id="user-1",
             action="rewrite",

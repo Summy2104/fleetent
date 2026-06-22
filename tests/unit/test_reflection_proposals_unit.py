@@ -385,7 +385,7 @@ def test_misc_reflection_helpers_cover_status_validation_time_and_skill_bundle(
     monkeypatch, tmp_path: Path
 ) -> None:
     now = datetime(2026, 6, 15, tzinfo=UTC)
-    proposal = reflection.MemoryMaintenanceProposal(
+    proposal = reflection.MemoryProposal(
         id="mp-1",
         user_id="user-1",
         action="mark_stale",

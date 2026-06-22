@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from fleetent.governance import reflection_gate
-from fleetent.reflection.reflection import AutoMaintenancePolicy, MemoryMaintenanceProposal
+from fleetent.reflection.reflection import AutoMaintenancePolicy, MemoryProposal
 
 
 def _memory_proposal(
@@ -18,9 +18,9 @@ def _memory_proposal(
     target_memory_ids: list[str] | None = None,
     expires_at: datetime | None = None,
     metadata_patch: dict[str, str] | None = None,
-) -> MemoryMaintenanceProposal:
+) -> MemoryProposal:
     now = datetime(2026, 6, 15, tzinfo=UTC)
-    return MemoryMaintenanceProposal(
+    return MemoryProposal(
         id="mp-1",
         user_id="user-1",
         action=action,  # type: ignore[arg-type]
@@ -140,7 +140,7 @@ async def test_apply_memory_maintenance_proposal_auto_applies_low_risk_mark_stal
 ) -> None:
     proposal = _memory_proposal(action="mark_stale", risk="low")
     applied = AsyncMock()
-    updates: list[MemoryMaintenanceProposal] = []
+    updates: list[MemoryProposal] = []
     events: list[tuple[str, str]] = []
 
     monkeypatch.setattr(reflection_gate, "_load_memory_proposal", lambda proposal_id: proposal)
@@ -171,7 +171,7 @@ async def test_apply_memory_maintenance_proposal_expires_and_refuses_expired_pro
     monkeypatch,
 ) -> None:
     proposal = _memory_proposal(expires_at=datetime.now(UTC) - timedelta(minutes=1))
-    updates: list[MemoryMaintenanceProposal] = []
+    updates: list[MemoryProposal] = []
 
     monkeypatch.setattr(reflection_gate, "_load_memory_proposal", lambda proposal_id: proposal)
     monkeypatch.setattr(
@@ -197,7 +197,7 @@ def test_memory_proposal_state_helpers_cover_reject_expire_and_shared_memory_app
         action="suggest_shared_memory_or_kb",
         metadata_patch={"target": "shared_memory"},
     )
-    updates: list[MemoryMaintenanceProposal] = []
+    updates: list[MemoryProposal] = []
     monkeypatch.setattr(reflection_gate, "_load_memory_proposal", lambda proposal_id: proposal)
     monkeypatch.setattr(
         reflection_gate.store,

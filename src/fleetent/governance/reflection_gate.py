@@ -12,7 +12,7 @@ from fleetent.reflection import reflection as reflection_api
 from fleetent.reflection import store
 from fleetent.reflection.reflection import (
     AutoMaintenancePolicy,
-    MemoryMaintenanceProposal,
+    MemoryProposal,
     SkillProposal,
 )
 
@@ -32,19 +32,19 @@ DecisionState = Literal["approve", "reject", "expire", "apply"]
 
 
 def _default_shared_memory_reviewer(
-    proposal: MemoryMaintenanceProposal,
+    proposal: MemoryProposal,
     actor_user_id: str | None,
 ) -> str:
     return actor_user_id or proposal.user_id
 
 
-_shared_memory_reviewer: Callable[[MemoryMaintenanceProposal, str | None], str] = (
+_shared_memory_reviewer: Callable[[MemoryProposal, str | None], str] = (
     _default_shared_memory_reviewer
 )
 
 
 def set_shared_memory_reviewer(
-    reviewer: Callable[[MemoryMaintenanceProposal, str | None], str],
+    reviewer: Callable[[MemoryProposal, str | None], str],
 ) -> None:
     """Inject a resolver for shared-memory reviewer identity."""
     global _shared_memory_reviewer
@@ -68,7 +68,7 @@ def _now() -> datetime:
     return datetime.now(UTC).replace(microsecond=0)
 
 
-def _load_memory_proposal(proposal_id: str) -> MemoryMaintenanceProposal:
+def _load_memory_proposal(proposal_id: str) -> MemoryProposal:
     proposal = store._get_maintenance_proposal(proposal_id)
     if proposal is None:
         raise ValueError("memory maintenance proposal does not exist")
@@ -84,7 +84,7 @@ def _load_skill_proposal(proposal_id: str) -> SkillProposal:
 
 def _load_proposal_type(
     proposal_id: str,
-) -> tuple[Literal["memory", "skill"], MemoryMaintenanceProposal | SkillProposal]:
+) -> tuple[Literal["memory", "skill"], MemoryProposal | SkillProposal]:
     memory_proposal = store._get_maintenance_proposal(proposal_id)
     if memory_proposal is not None:
         return "memory", memory_proposal
@@ -103,14 +103,14 @@ async def resolve_reflection_proposal_action(
     actor_user_id: str | None = None,
     reviewer_user_id: str | None = None,
     auto_policy: AutoMaintenancePolicy | None = None,
-) -> MemoryMaintenanceProposal | SkillProposal:
+) -> MemoryProposal | SkillProposal:
     """Resolve one reflection proposal through governance gate handlers."""
     use_public_reflection_api = getattr(reflection_api, "_state_db", None) is not None
     kind, proposal = _load_proposal_type(proposal_id)
     normalized = _decision(decision)
 
     if kind == "memory":
-        memory_proposal = cast(MemoryMaintenanceProposal, proposal)
+        memory_proposal = cast(MemoryProposal, proposal)
         actor = actor_user_id if actor_user_id is not None else memory_proposal.user_id
 
         if normalized == "approve":
@@ -248,7 +248,7 @@ async def resolve(
     actor_user_id: str | None = None,
     reviewer_user_id: str | None = None,
     auto_policy: AutoMaintenancePolicy | None = None,
-) -> MemoryMaintenanceProposal | SkillProposal:
+) -> MemoryProposal | SkillProposal:
     return await resolve_reflection_proposal_action(
         proposal_id,
         decision=decision,
@@ -339,14 +339,14 @@ async def apply_skill_proposal(
 
 
 async def apply_skill_proposal_to_boundary(proposal: SkillProposal) -> None:
-    raise RuntimeError("skill proposal apply boundary is not configured")
+    await reflection_api.apply_skill_proposal_to_boundary(proposal)
 
 
 def approve_memory_maintenance_proposal(
     proposal_id: str,
     *,
     actor_user_id: str,
-) -> MemoryMaintenanceProposal:
+) -> MemoryProposal:
     proposal = _load_memory_proposal(proposal_id)
     _require_owner(proposal, actor_user_id)
     _require_status(proposal, {"pending"})
@@ -361,7 +361,7 @@ def reject_memory_maintenance_proposal(
     *,
     actor_user_id: str,
     reason: str | None = None,
-) -> MemoryMaintenanceProposal:
+) -> MemoryProposal:
     proposal = _load_memory_proposal(proposal_id)
     _require_owner(proposal, actor_user_id)
     _require_status(proposal, {"pending"})
@@ -384,7 +384,7 @@ def reject_memory_maintenance_proposal(
 
 def expire_memory_maintenance_proposal(
     proposal_id: str,
-) -> MemoryMaintenanceProposal:
+) -> MemoryProposal:
     proposal = _load_memory_proposal(proposal_id)
     _require_status(proposal, {"pending", "approved"})
     updated = _with_status(proposal, "expired")
@@ -392,7 +392,7 @@ def expire_memory_maintenance_proposal(
     return updated
 
 
-def mark_shared_memory_proposal_applied(proposal_id: str) -> MemoryMaintenanceProposal:
+def mark_shared_memory_proposal_applied(proposal_id: str) -> MemoryProposal:
     proposal = _load_memory_proposal(proposal_id)
     _require_status(proposal, {"approved"})
     if proposal.action != "suggest_shared_memory_or_kb":
@@ -410,8 +410,8 @@ async def apply_memory_maintenance_proposal(
     *,
     actor_user_id: str | None = None,
     auto_policy: AutoMaintenancePolicy | None = None,
-    proposal: MemoryMaintenanceProposal | None = None,
-) -> MemoryMaintenanceProposal:
+    proposal: MemoryProposal | None = None,
+) -> MemoryProposal:
     proposal = proposal if proposal is not None else _load_memory_proposal(proposal_id)
     if _is_expired(proposal):
         proposal = _with_status(proposal, "expired")
@@ -438,7 +438,7 @@ async def apply_memory_maintenance_proposal(
 
 
 async def _apply_maintenance_action(
-    proposal: MemoryMaintenanceProposal,
+    proposal: MemoryProposal,
     *,
     actor_user_id: str | None = None,
 ) -> None:
@@ -501,7 +501,7 @@ async def _apply_maintenance_action(
 
 
 def _auto_apply_allowed(
-    proposal: MemoryMaintenanceProposal,
+    proposal: MemoryProposal,
     auto_policy: AutoMaintenancePolicy | None,
 ) -> bool:
     return (
@@ -512,13 +512,13 @@ def _auto_apply_allowed(
     )
 
 
-def _require_owner(proposal: MemoryMaintenanceProposal, actor_user_id: str) -> None:
+def _require_owner(proposal: MemoryProposal, actor_user_id: str) -> None:
     if actor_user_id != proposal.user_id:
         raise PermissionError("User Memory owner is required")
 
 
 def _require_status(
-    proposal: MemoryMaintenanceProposal,
+    proposal: MemoryProposal,
     allowed: set[str],
 ) -> None:
     if proposal.status not in allowed:
@@ -535,9 +535,9 @@ def _require_skill_proposal_status(
 
 
 def _with_status(
-    proposal: MemoryMaintenanceProposal,
+    proposal: MemoryProposal,
     status: str,
-) -> MemoryMaintenanceProposal:
+) -> MemoryProposal:
     return _replace_memory_proposal(
         proposal,
         status=status,
@@ -546,12 +546,12 @@ def _with_status(
 
 
 def _replace_memory_proposal(
-    proposal: MemoryMaintenanceProposal,
+    proposal: MemoryProposal,
     **changes: object,
-) -> MemoryMaintenanceProposal:
+) -> MemoryProposal:
     data = asdict(proposal)
     data.update(changes)
-    return MemoryMaintenanceProposal(**data)
+    return MemoryProposal(**data)
 
 
 def _replace_skill_proposal(
@@ -563,19 +563,19 @@ def _replace_skill_proposal(
     return SkillProposal(**data)
 
 
-def _is_expired(proposal: MemoryMaintenanceProposal) -> bool:
+def _is_expired(proposal: MemoryProposal) -> bool:
     if proposal.expires_at is None:
         return False
     return proposal.expires_at < _now()
 
 
-def _require_proposed_content(proposal: MemoryMaintenanceProposal) -> str:
+def _require_proposed_content(proposal: MemoryProposal) -> str:
     if proposal.proposed_content is None or not proposal.proposed_content.strip():
         raise ValueError("proposed_content is required")
     return proposal.proposed_content.strip()
 
 
-def _record_maintenance_event(event_type: str, proposal: MemoryMaintenanceProposal) -> None:
+def _record_maintenance_event(event_type: str, proposal: MemoryProposal) -> None:
     observability.record_trace_event(
         observability.TraceEvent(
             run_id=proposal.id,

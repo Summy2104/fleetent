@@ -23,7 +23,7 @@ reflection 审批链（agent 侧）当前结构：
 
 **Goals:**
 - 消除 skill 提案批准 → RuntimeError 的 landmine：gate 的 apply 边界委托到 reflection.py 真实现（单一真相源）。
-- dataclass `MemoryMaintenanceProposal → MemoryProposal` 全量改名，与 `SkillProposal` 对齐。
+- dataclass `MemoryProposal` 全量改名，与 `SkillProposal` 对齐。
 - 修正 `skill-proposal-review` spec 的死表引用，并把"approved skill 提案经边界应用"显式写进 spec。
 
 **Non-Goals:**
@@ -42,7 +42,7 @@ reflection 审批链（agent 侧）当前结构：
 （不直接在 fallback 里整体调 `reflection_api.apply_skill_proposal`，因 fallback 的存在本就是为 `_state_db` 未接场景，
 其 status 持久化走 gate 的 `store`；只替换最内层的 boundary 调用，改动面最小、语义最稳。）
 
-**D2 · dataclass 纯改名**：`MemoryMaintenanceProposal → MemoryProposal`，一次性替换 10 个文件
+**D2 · dataclass 纯改名**：改为 `MemoryProposal`，一次性替换 10 个文件
 （`reflection/reflection.py`、`reflection/store.py`、`governance/reflection_gate.py`、`memory/proposal_store.py`
 + 5 个单测 + 1 个集成测试）。字段、`reflection_proposals` 行结构、序列化均不变（DB 不存类名）。**不保留旧名 alias**——
 内部 dataclass，无外部 import 契约；保留 alias 反而留下二次清理债。
@@ -57,7 +57,7 @@ reflection 审批链（agent 侧）当前结构：
 - **fallback 路径在平台进程仍不完全正确**：即便 boundary 接到真实现，`write_skill`/`skill_registry` 是 agent 侧能力，
   平台进程未必有 agent 的 skill 目录。本切片只保证"不再 RuntimeError + agent 进程内正确"；平台 resolve 该不该存在留给 A3。
   这是有意的范围切割，避免 A1 隐含 A3 决策。
-- **改名波及面（10 文件）**：机械但广。靠 TDD 红/绿 + 全量 reflection/gate 单测兜底；改名后 `grep -rn MemoryMaintenanceProposal`
+- **改名波及面（10 文件）**：机械但广。靠 TDD 红/绿 + 全量 reflection/gate 单测兜底；改名后旧类型名 grep
   必须为空（含字符串/注释残留）。
 - **测试覆盖 stub 修复**：需新增/调整一个测试，断言"`_state_db` 未接（fallback）路径下 apply skill 提案不再 raise stub、
   而是调用到真实 boundary"——否则改动可能被现有只覆盖真 API 路径的测试漏掉。
