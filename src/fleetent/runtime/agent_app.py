@@ -285,6 +285,7 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     from fleetent import reflection, schedule_store
     from fleetent.governance import approval_request_store, approval_store
     from fleetent.governance import tool_auto_approvals_store as allowlist_store
+    from fleetent.im_gateway import outbound_queue_store
     from fleetent.knowledge_base import runtime as kb_runtime
     from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
     from fleetent.memory import shared as shared_memory
@@ -320,6 +321,7 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     runtime_context.set_state_db(agent_state_db)
     sub_agent_lifecycle.set_state_db(agent_state_db)
     schedule_store.set_state_db(agent_state_db)
+    outbound_queue_store.set_state_db(agent_state_db)
     # unified-file-exchange: wire the artifact ledger + per-scope hard-link views root
     # (data_dir is <agent_home>/data, so the exchange tree lives under data_dir.parent).
     from fleetent import artifact_exchange
@@ -415,11 +417,14 @@ async def _start_scheduler(agent: AgentFile) -> Any:
         return None
     from fleetent.cron_scheduler import CronScheduler
     from fleetent.im_gateway import connector_registry
+    from fleetent.outbound_connectors import resolve_for_runtime
 
     agent_name = agent.name
     scheduler = CronScheduler(
         settings=agent.scheduling,
-        connectors_resolver=lambda: connector_registry.snapshot(agent_name),
+        connectors_resolver=lambda: resolve_for_runtime(
+            agent_name, connector_registry.snapshot(agent_name)
+        ),
     )
     await scheduler.start()
     return scheduler
