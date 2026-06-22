@@ -554,16 +554,21 @@ async def managed_agent_chat(
     request: Request,
     admin: user_store.User = Depends(_require_admin_session),  # noqa: B008
 ) -> Response:
-    del admin
     return await _agent_transport.chat(
         _resolve_agent_node_id(agent_name),
         agent_name,
         await request.body(),
         content_type=request.headers.get("content-type", "application/json"),
+        principal=Principal(user_id=admin.id, tenant_id=admin.tenant_id),
     )
 
 
 @app.websocket("/admin/agents/{agent_name}/ws")
 async def managed_agent_ws(websocket: WebSocket, agent_name: str) -> None:
-    _require_admin_session(websocket.headers.get("authorization", ""))
-    await _agent_transport.ws(_resolve_agent_node_id(agent_name), agent_name, websocket)
+    admin = _require_admin_session(websocket.headers.get("authorization", ""))
+    await _agent_transport.ws(
+        _resolve_agent_node_id(agent_name),
+        agent_name,
+        websocket,
+        principal=Principal(user_id=admin.id, tenant_id=admin.tenant_id),
+    )

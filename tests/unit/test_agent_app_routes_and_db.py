@@ -10,7 +10,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.websockets import WebSocketDisconnect
 
-from fleetent.identity import Principal
+from fleetent.identity import Principal, encode_ingress_principal
 from fleetent.integrations.sandbox import Mode
 from fleetent.runtime import agent_app
 
@@ -34,6 +34,7 @@ def _agent_file(**overrides: Any) -> Any:
         skill_authoring_enabled=False,
         skill_hot_reload=True,
         mcp_servers=[],
+        mcp=SimpleNamespace(enabled=True, tool_naming="claude"),
         scheduling=SimpleNamespace(enabled=False),
     )
     for key, value in overrides.items():
@@ -307,3 +308,24 @@ async def test_build_app_ws_gateway_branches(monkeypatch: pytest.MonkeyPatch) ->
     assert any("gateway.ready" in frame for frame in ws.sent)
     assert any('"error"' in frame for frame in ws.sent)
     assert any('"result"' in frame for frame in ws.sent)
+
+    carried_ws = _FakeWebSocket(
+        {
+            "authorization": "Bearer ok",
+            "x-fleetent-principal": encode_ingress_principal(
+                Principal(user_id="operator-1", tenant_id="tenant-1")
+            ),
+        },
+        [json.dumps({"id": 2, "method": "send", "params": {"message": "hi"}})],
+    )
+    dispatch_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        agent_app,
+        "_validate_tui_token",
+        lambda auth: Principal(user_id="local", tenant_id="default"),
+    )
+    monkeypatch.setattr("fleetent.tui.dispatch.dispatch", dispatch_mock)
+    await endpoint(carried_ws)
+    assert dispatch_mock.await_args.args[0].principal == Principal(
+        user_id="operator-1", tenant_id="tenant-1"
+    )

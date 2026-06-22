@@ -28,8 +28,13 @@ _ATLASSIAN_TOKEN = "ATATT3xFfGF0ZGXFtI5uUGu1MyRoPx_S6Udq0BRnF2M4XwhJB_sxUHiWAS3q
 
 
 def _scan(mcp_servers: list[dict]) -> None:
+    # Standard map-keyed form (key = server id); test bodies keep the legacy list shape.
+    mapping = {}
+    for entry in mcp_servers:
+        entry = dict(entry)
+        mapping[entry.pop("id")] = entry
     agent = AgentFile.model_validate(
-        {"name": "t", "version": 1, "models": _MODELS, "mcp_servers": mcp_servers}
+        {"name": "t", "version": 1, "models": _MODELS, "mcpServers": mapping}
     )
     _reject_inline_secrets(agent, Path("agent.yaml"))
 

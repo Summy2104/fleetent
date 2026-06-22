@@ -28,6 +28,7 @@ from fleetent.model import ModelConfigError, ModelPolicySnapshot, ResolvedModelC
 from fleetent.model.provider_health import ProviderHealthCache, get_health_cache
 from fleetent.observability import (
     InjectedContextTrace,
+    KBRetrievalAuditContext,
     TraceEvent,
     build_tool_args_summary,
     record_injected_context,
@@ -714,6 +715,7 @@ async def _plan_run_slots(
     here in order; sub_agent becomes a pending slot whose runner self-gathers (D6). The
     result list preserves original `tool_calls` order so backfill can index 0..N-1.
     """
+    from fleetent.integrations import mcp as _mcp_client
     from fleetent.runtime import hooks
     from fleetent.runtime.hooks import HookContext
 
@@ -721,7 +723,9 @@ async def _plan_run_slots(
     for tc in tool_calls:
         if not hasattr(tc, "function"):
             continue
-        name = tc.function.name
+        # mcp-tool-name-projection: resolve a projected MCP tool name back to canonical so
+        # all downstream handling (guardrail / risk / dispatch) operates on canonical names.
+        name = _mcp_client.resolve_tool_name(tc.function.name)
         tc_fp = arg_fingerprint(tc.function.arguments, loop_checker.ignore_arg_keys)
         # AR10 guardrail (serial — depends on per-call streak in `state`, D2).
         action = evaluate_guardrail(state, name, tc_fp, guardrail_threshold)
@@ -1824,6 +1828,13 @@ async def _run_inner(
     # agent-skill-tools: drop skill_manage unless this agent opted into authoring.
     schemas = _filter_skill_authoring(schemas, enabled=skill_authoring_enabled)
 
+    # mcp-tool-name-projection: present MCP tools to the LLM under the configured projected
+    # name (registry stays canonical; calls are resolved back on tool_use). Applied last so
+    # all filtering above runs on canonical names.
+    from fleetent.integrations import mcp as _mcp_client
+
+    schemas = _mcp_client.project_schemas(schemas)
+
     # sandbox-containment-gating: read the active backend's bind-mount capability once
     # per run (not per gate decision) so the action gate's sandbox_capable reflects
     # whether file tools truly run in-container this run. Best-effort: a manager build
@@ -1866,7 +1877,17 @@ async def _run_inner(
     # break the run (mirrors the sandbox/eval_logger best-effort pattern).
     try:
         built_context = await build_context(
-            user_id, user_input, agent_name or "", active_cfg.max_tokens or 4096
+            user_id,
+            user_input,
+            agent_name or "",
+            active_cfg.max_tokens or 4096,
+            audit_context=KBRetrievalAuditContext(
+                run_id=run_id,
+                session_id=session_id,
+                user_id=user_id,
+                agent_name=agent_name,
+                tenant_id=principal.tenant_id if principal is not None else "default",
+            ),
         )
         _append_system_context(messages, system_prompt, built_context.text)
         _record_injected_context(run_id, built_context.sources, session_id=session_id)
@@ -2459,7 +2480,17 @@ async def run_stream(
     # trace. Best-effort — missing DB / disabled KB must not break the stream.
     try:
         built_context = await build_context(
-            user_id, user_input, agent_name or "", active_cfg.max_tokens or 4096
+            user_id,
+            user_input,
+            agent_name or "",
+            active_cfg.max_tokens or 4096,
+            audit_context=KBRetrievalAuditContext(
+                run_id=run_id,
+                session_id=session_id,
+                user_id=user_id,
+                agent_name=agent_name,
+                tenant_id=principal.tenant_id if principal is not None else "default",
+            ),
         )
         _append_system_context(messages, system_prompt, built_context.text)
         _record_injected_context(run_id, built_context.sources, session_id=session_id)

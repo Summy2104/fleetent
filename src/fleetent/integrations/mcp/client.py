@@ -30,6 +30,7 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
+from fleetent.integrations.mcp.tool_naming import Projector, make_projector
 from mcp import ClientSession
 from mcp.client.auth import OAuthFlowError, OAuthTokenError
 from mcp.client.auth.extensions.client_credentials import ClientCredentialsOAuthProvider
@@ -150,6 +151,46 @@ class McpServerConfig:
     def __post_init__(self) -> None:
         _validate_degrade_mode(self)
 
+    @classmethod
+    def from_settings(cls, s: Any) -> McpServerConfig:
+        """Build a runtime config from an ``McpServerSettings``-like object (duck-typed).
+
+        Hoists the agent.yaml ``x-fleetent`` extensions (degrade_mode / file_root /
+        file_isolation / self-hosted OAuth / approval_rules) onto the runtime config.
+        Duck-typed on attributes so this module need not import ``fleetent.config``.
+        """
+        auth = getattr(s, "auth", None)
+        if auth is not None:
+            auth_type = getattr(auth, "type", "oauth2") or "oauth2"
+            token_url = getattr(auth, "token_url", "")
+            client_id = getattr(auth, "client_id", "")
+            client_secret_env = getattr(auth, "client_secret_env", "")
+            scope = getattr(auth, "scope", "")
+        else:
+            auth_type = getattr(s, "auth_type", "none")
+            token_url = client_id = client_secret_env = scope = ""
+        return cls(
+            id=s.id,
+            transport=s.transport,
+            url=getattr(s, "url", ""),
+            auth_type=auth_type,
+            api_key_env=getattr(s, "api_key_env", ""),
+            token_url=token_url,
+            client_id=client_id,
+            client_secret_env=client_secret_env,
+            scope=scope,
+            command=getattr(s, "command", ""),
+            args=list(getattr(s, "args", []) or []),
+            env=dict(getattr(s, "env", {}) or {}),
+            headers=dict(getattr(s, "headers", {}) or {}),
+            connect_timeout=getattr(s, "connect_timeout", 10.0),
+            call_timeout=getattr(s, "call_timeout", 30.0),
+            degrade_mode=getattr(s, "degrade_mode", "degrade"),
+            file_root=getattr(s, "file_root", ""),
+            file_isolation=getattr(s, "file_isolation", "on"),
+            approval_rules=list(getattr(s, "approval_rules", []) or []),
+        )
+
 
 _VALID_DEGRADE_MODES = ("degrade", "strict", "silent")
 
@@ -163,6 +204,75 @@ def _validate_degrade_mode(server: McpServerConfig) -> None:
             server.degrade_mode,
         )
         server.degrade_mode = "degrade"
+
+
+# ── tool-name projection (mcp-tool-name-projection) ──────────────────────────
+# The registry keys MCP tools by the canonical `{server}__{tool}` name; the model sees a
+# configurable PROJECTED name. The reverse table is the source of truth for resolving a
+# model's tool call back to canonical — never by string-splitting the projected name (the
+# single-underscore presets are ambiguous). This state is agent-process-local runtime
+# state (built at registration), never persisted and never platform-side.
+_mcp_tool_meta: dict[str, tuple[str, str]] = {}  # canonical -> (server_id, raw_tool)
+_projector: Projector = make_projector("claude")
+_forward: dict[str, str] = {}  # canonical -> projected
+_reverse: dict[str, str] = {}  # projected -> canonical
+
+
+def set_tool_naming(tool_naming: Any) -> None:
+    """Set the active tool-name projection and rebuild the canonical↔projected maps."""
+    global _projector
+    _projector = make_projector(tool_naming)
+    _forward.clear()
+    _reverse.clear()
+    for canonical, (server_id, raw_tool) in _mcp_tool_meta.items():
+        projected = _projector.project(server_id, raw_tool)
+        _forward[canonical] = projected
+        _reverse[projected] = canonical
+
+
+def _record_tool_identity(canonical: str, server_id: str, raw_tool: str) -> None:
+    """Record an MCP tool's canonical identity and its projection under the active projector."""
+    _mcp_tool_meta[canonical] = (server_id, raw_tool)
+    projected = _projector.project(server_id, raw_tool)
+    _forward[canonical] = projected
+    _reverse[projected] = canonical
+
+
+def _forget_tool_identity(canonical: str) -> None:
+    _mcp_tool_meta.pop(canonical, None)
+    projected = _forward.pop(canonical, None)
+    if projected is not None:
+        _reverse.pop(projected, None)
+
+
+def project_tool_name(canonical: str) -> str:
+    """Canonical → model-facing projected name (passthrough for non-MCP tools)."""
+    return _forward.get(canonical, canonical)
+
+
+def resolve_tool_name(projected: str) -> str:
+    """Model-facing projected name → canonical (passthrough for non-MCP tools)."""
+    return _reverse.get(projected, projected)
+
+
+def mcp_tool_identity(canonical: str) -> tuple[str, str] | None:
+    """Return ``(server_id, raw_tool)`` for a canonical MCP tool name, else None."""
+    return _mcp_tool_meta.get(canonical)
+
+
+def project_schemas(schemas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return tool schemas with MCP names projected to model-facing names (copy on rename)."""
+    out: list[dict[str, Any]] = []
+    for schema in schemas:
+        name = schema.get("function", {}).get("name", "")
+        projected = _forward.get(name)
+        if projected is None or projected == name:
+            out.append(schema)
+            continue
+        renamed = copy.deepcopy(schema)
+        renamed["function"]["name"] = projected
+        out.append(renamed)
+    return out
 
 
 def is_server_available(server: McpServerConfig) -> bool:
@@ -335,8 +445,13 @@ async def aclose_all() -> None:
 
 
 async def register_all(
-    servers: list[McpServerConfig], scope: int | None = None, agent_home: Path | None = None
+    servers: list[McpServerConfig],
+    scope: int | None = None,
+    agent_home: Path | None = None,
+    tool_naming: Any = "claude",
 ) -> None:
+    global _projector
+    _projector = make_projector(tool_naming)  # active projection for this registration
     _failed_strict_servers.clear()  # recompute startup-failed strict set each registration
     for server in servers:
         try:
@@ -531,6 +646,7 @@ def _reregister_stdio_tools(server: McpServerConfig, tools: list[Any], scope: in
     prefix = f"{server.id}__"
     for name in [n for n in tr._registry if n.startswith(prefix)]:
         del tr._registry[name]
+        _forget_tool_identity(name)
     for tool_def in tools:
         _register_tool(server, _make_tool_name(server.id, tool_def.name), tool_def, scope)
     _register_utility_tools(server, scope)
@@ -911,6 +1027,7 @@ def unregister_server(server_id: str, scope: int | None = None) -> None:
     if scope is None:
         for name in [n for n in tr._registry if n.startswith(prefix)]:
             del tr._registry[name]
+            _forget_tool_identity(name)
     _server_registry.pop((scope, server_id), None)
     _active_sessions.pop((scope, server_id), None)
     # Sync context: wake the host so it tears itself down on its own task (no await here);
@@ -965,6 +1082,10 @@ def _register_tool(
     """Register one MCP tool. tool_def is an SDK Tool object (all transports go through
     the SDK ClientSession now), so name/description/inputSchema are attribute access."""
     import fleetent.tools.registry as tr
+
+    # Record canonical identity + projection (mcp-tool-name-projection) so the LLM boundary
+    # can present a projected name and resolve calls back to (server, raw_tool).
+    _record_tool_identity(tool_name, server.id, str(getattr(tool_def, "name", "")))
 
     input_schema = _sanitize_input_schema(getattr(tool_def, "inputSchema", None))
 

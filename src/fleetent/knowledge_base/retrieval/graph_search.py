@@ -1,13 +1,17 @@
 import json
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Literal
 
 from fleetent.db import SQLiteDatabase
 from fleetent.knowledge_base.core import KnowledgeChunk, KnowledgeReadable
 from fleetent.knowledge_base.core.store import KnowledgeStore
+from fleetent.observability import KBRetrievalAuditContext, record_kb_retrieval
+from fleetent.structured_logging import get_logger
 
 _NON_ALPHA_NUM_RE = re.compile(r"[^a-zA-Z0-9\u4e00-\u9fff]+")
+_logger = get_logger("knowledge_base")
 
 
 def _normalize_entity_name(name: str) -> str:
@@ -72,6 +76,7 @@ async def graph_search(
     limit: int = 10,
     depth: int = 1,
     store: KnowledgeReadable | None = None,
+    audit_context: KBRetrievalAuditContext | None = None,
 ) -> GraphSearchResult:
     """Search knowledge chunks using extracted entity graph evidence."""
 
@@ -92,16 +97,24 @@ async def graph_search(
             chunks=[],
         )
 
+    start = time.monotonic()
     database = _database()
     matched_entities = match_entities(database, query, resolved_tenant_id, resolved_kb_ids)
     if not matched_entities:
-        return GraphSearchResult(
+        result = GraphSearchResult(
             query=query,
             tenant_id=resolved_tenant_id,
             kb_ids=resolved_kb_ids,
             depth=depth,
             chunks=[],
         )
+        _record_graph_search_audit(
+            audit_context,
+            query=query,
+            result=result,
+            latency_ms=(time.monotonic() - start) * 1000.0,
+        )
+        return result
 
     resolved_store = store or KnowledgeStore(database)
     candidates: dict[str, GraphSearchChunk] = {}
@@ -182,13 +195,57 @@ async def graph_search(
         candidates.values(),
         key=lambda item: (-item.graph_score, item.chunk.position, item.chunk.id),
     )[:limit]
-    return GraphSearchResult(
+    result = GraphSearchResult(
         query=query,
         tenant_id=resolved_tenant_id,
         kb_ids=resolved_kb_ids,
         depth=depth,
         chunks=sorted_chunks,
     )
+    _record_graph_search_audit(
+        audit_context,
+        query=query,
+        result=result,
+        latency_ms=(time.monotonic() - start) * 1000.0,
+    )
+    return result
+
+
+def _record_graph_search_audit(
+    audit_context: KBRetrievalAuditContext | None,
+    *,
+    query: str,
+    result: GraphSearchResult,
+    latency_ms: float,
+) -> None:
+    if audit_context is None:
+        return
+    try:
+        record_kb_retrieval(
+            audit_context,
+            query=query,
+            results=[item.chunk for item in result.chunks],
+            latency_ms=latency_ms,
+            mode="graph",
+            kb_ids=result.kb_ids,
+            plaintext=_audit_plaintext_enabled(),
+        )
+    except Exception as exc:  # noqa: BLE001 — side channel; never break retrieval
+        _logger.warn(
+            "kb_graph_retrieval_audit_failed",
+            run_id=audit_context.run_id,
+            error=str(exc),
+        )
+
+
+def _audit_plaintext_enabled() -> bool:
+    from fleetent import agent_config
+    from fleetent.knowledge_base.retrieval._settings import kb_config
+
+    audit = getattr(agent_config.active_agent_or_default().knowledge, "retrieval_audit", None)
+    if audit is not None and hasattr(audit, "plaintext"):
+        return bool(audit.plaintext)
+    return bool(kb_config().retrieval_audit.plaintext)
 
 
 def _database() -> SQLiteDatabase:

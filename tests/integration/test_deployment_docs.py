@@ -150,6 +150,10 @@ def test_four_canonical_examples_are_complete_references():
     agent = AgentFile.model_validate(yaml.safe_load(agent_yaml.read_text(encoding="utf-8")))
     agent_fields = set(AgentFile.model_fields)
     example_fields = set((yaml.safe_load(agent_yaml.read_text(encoding="utf-8")) or {}).keys())
+    # The example uses the standard external `mcpServers` map key; the before-validator
+    # maps it onto the internal `mcp_servers` field, so it documents that field.
+    if "mcpServers" in example_fields:
+        example_fields.add("mcp_servers")
     assert agent.name
     assert not (agent_fields - example_fields)
 

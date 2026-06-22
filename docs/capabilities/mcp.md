@@ -58,7 +58,7 @@ flowchart TD
 
 - ✅ **认证**：API Key（从环境变量读取，附加 `Authorization: Bearer`）、自定义 HTTP headers、OAuth2（`client_credentials` 流，token 缓存与到期前刷新、刷新串行化；凭据错误时 sticky 标记 auth 不可用并提示重新授权，瞬时错误可重试）
 
-- ✅ **工具命名空间隔离**：来自不同服务的工具自动加 `{server_id}__{tool_name}` 前缀
+- ✅ **工具命名空间隔离**：registry 内部 canonical 名为 `{server_id}__{tool_name}`；模型看到的是**可投影**的名字（见「标准配置格式与工具名投影」）
   - 双下划线是命名空间分隔符，单下划线是工具名本身的合法字符
 
 - ✅ **Agent-scoped 注册**：注册表 / 会话按 `(agent_scope, server_id)` 键控，同一 server id 可在不同 agent 下携带各自凭据与会话，互不泄漏
@@ -99,6 +99,37 @@ flowchart TD
     > ⚠️ **安全取舍（窄审批面）**：默认姿态是「未声明即免审批」——审批面只覆盖「主动外发给当前对话以外的接收方」（私信/文件/邮件）。**新挂一个 MCP server 若不配 `approval_rules`，其危险操作（删文件、改数据等）默认免审批直跑**，安全责任在 agent owner 显式声明需审批的操作。
     >
     > **内置默认**：`google-workspace` 的 `manage_email`（`operation ∈ {send, reply, replyAll, forward}`）开箱即默认 `medium`（发邮件默认审批，关闭 MCP 零审批漏洞）；该默认可被 agent.yaml 对该 server 的显式 `approval_rules` 覆盖。
+
+## 标准配置格式与工具名投影（mcp-config-standardization）
+
+**配置外形**：MCP server 用事实标准 **map-keyed-by-name**（顶层 `mcpServers` 或 `mcp_servers`，key = server id）。一份标准 `.mcp.json` / `mcpServers` 块可 drop-in 粘贴。transport 自动判定（有 `command`→stdio，有 `url`→remote）；字符串支持 `${VAR}` 环境引用。**legacy list-of-id 形式不再支持**。
+
+**fleetent 扩展**：每个 server 的 fleetent 专属设置收进嵌套 `x-fleetent` 块（标准 MCP 工具忽略它）：`degrade_mode`、`file_root`/`file_isolation`（沙箱 `/exchange` 桥接）、`auth`（自托管 OAuth2：`token_url`/`client_id`/`client_secret_env`/`scope`，禁云）、`approval_rules`。
+
+```yaml
+mcpServers:
+  github: { command: npx, args: ["-y", "@modelcontextprotocol/server-github"],
+            env: { GITHUB_PERSONAL_ACCESS_TOKEN: "${GH_TOKEN}" } }
+  crm:
+    type: http
+    url: https://crm.acme.internal/mcp
+    x-fleetent:
+      auth: { type: oauth2, token_url: https://auth.acme.internal/token,
+              client_id: fleetent-crm, client_secret_env: CRM_OAUTH_SECRET }
+      approval_rules: [{ tool: create_contact }]
+```
+
+**工具名投影**：registry 始终以 canonical `{server}__{tool}` 注册；模型看到的名字由 `mcp.tool_naming` 决定（声明式模板）：
+
+| 预设 | 产出 |
+|---|---|
+| `claude`（默认） | `mcp__{server}__{tool}` |
+| `hermes` | `mcp_{server}_{tool}` |
+| `opencode` | `{server}_{tool}` |
+| `skills` | `{server}:{tool}` |
+| `bare` | `{server}__{tool}` |
+
+也可自定义模板：`tool_naming: { template: "mcp_{server}_{tool}", sanitize: snake, max_len: 64 }`。投影**只在 LLM 边界**翻译(出 schema 投影 / 入 tool_use 还原经反查表),dispatch / 审批 / 访问控制全程看 canonical——**任何 `tool_naming` 下审批不被绕过**。反查表是 agent 进程内瞬态(`integrations/mcp`),不落库、platform 不参与。
 
 ## 未来增强（本轮 6 变更程序已全部完成）
 
