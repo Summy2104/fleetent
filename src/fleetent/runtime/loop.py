@@ -155,6 +155,20 @@ def _filter_code_execution(
     return [s for s in schemas if s["function"]["name"] != _RUN_CODE_TOOL]
 
 
+def _maybe_refresh_skills(enabled: bool) -> None:
+    """Reload skills if their files changed on disk, when hot-reload is enabled.
+
+    skill-external-hot-reload: called once per inbound message before catalog injection
+    so external skill changes take effect without a restart. Gated by the per-agent
+    ``skill_hot_reload`` flag (default on); a no-op (and cheap) when nothing changed.
+    """
+    if not enabled:
+        return
+    from fleetent.skills import registry as skill_registry
+
+    skill_registry.refresh_if_changed()
+
+
 _SKILL_MANAGE_TOOL = "skill_manage"
 
 
@@ -2342,6 +2356,7 @@ async def run_stream(
     model_policy: ModelPolicySnapshot | None = None,
     session_context: Any = None,
     skill_authoring_enabled: bool = False,
+    skill_hot_reload: bool = True,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Async streaming version of run(). Yields SSE event dicts.
 
@@ -2360,6 +2375,8 @@ async def run_stream(
     """
     user_id = principal.user_id if principal is not None else "default"
 
+    # skill-external-hot-reload: reload externally-changed skills before catalog injection.
+    _maybe_refresh_skills(skill_hot_reload)
     # agent-skill-scoping: narrow the catalog to the agent's allowed_skills (empty /
     # None = no narrowing, all enabled skills visible).
     skills_catalog = available_skills_prompt(

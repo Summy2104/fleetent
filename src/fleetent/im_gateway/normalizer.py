@@ -157,6 +157,21 @@ def get_agent_for_context() -> AgentFile | None:
     return None if name is None else index.get(name)
 
 
+def _maybe_refresh_skills(agent: AgentFile | None) -> None:
+    """Reload skills if their files changed on disk, when this agent opts in.
+
+    skill-external-hot-reload: called once per inbound message before the skill catalog
+    is injected, so external edits/additions/deletions (manual, ``git pull``, sync) take
+    effect without restarting the agent. Gated by per-agent ``skill_hot_reload`` (default
+    on); reads the per-agent root the registry was last scanned from.
+    """
+    if agent is None or not getattr(agent, "skill_hot_reload", True):
+        return
+    from fleetent.skills import registry as skill_registry
+
+    skill_registry.refresh_if_changed()
+
+
 def _get_connector_access(agent: AgentFile | None, platform: str) -> ImAccess:
     """Return the ImAccess for the given platform, or a default-closed policy."""
     if agent is None:
@@ -603,6 +618,9 @@ async def route(msg: NormalizedMessage) -> None:
     model_policy = ModelPolicySnapshot.from_agent(agent) if agent else None
     # SB3: gate run_code on the IM path too; mode is resolved once per process.
     sandbox_mode = await sandbox_enablement.get_effective_mode()
+    # skill-external-hot-reload: pick up externally-changed skill files before injecting
+    # the catalog, so this message reflects the current on-disk skill set (no restart).
+    _maybe_refresh_skills(agent)
     # System message ordered stable→variable for prefix caching: base system + the
     # <available_skills> catalog. Per-user long-term context is injected by run().
     catalog = available_skills_prompt(allowed_skills=agent.allowed_skills if agent else None)

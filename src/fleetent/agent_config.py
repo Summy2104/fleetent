@@ -393,6 +393,10 @@ class AgentFile(BaseModel):
     memory_namespace: str = ""
     skills_dir: str | None = None
     allowed_skills: list[str] = Field(default_factory=list)
+    # skill-external-hot-reload: when true (default), the runtime checks the skills dir
+    # for external changes before each inbound message and reloads if changed. Set false
+    # to revert to boot-time scan + skill_manage-triggered reload only.
+    skill_hot_reload: bool = True
     # agent-skill-tools: gate for the model-facing skill_manage authoring tool.
     # Default off — skill_manage only enters this agent's tool schema when explicitly
     # enabled, so a deployment opts into agent-driven skill writes deliberately.
