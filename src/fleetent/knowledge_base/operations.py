@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import uuid
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -294,6 +295,64 @@ def record_connector_status(
             "updated_at": finished.isoformat(),
         },
     )
+    _database(database).execute(
+        """
+        INSERT INTO knowledge_connector_sync_history
+            (id, connector_id, tenant_id, kb_id, status, summary_json, error, started_at, finished_at)
+        VALUES
+            (:id, :connector_id, :tenant_id, :kb_id, :status, :summary_json, :error,
+             :started_at, :finished_at)
+        """,
+        {
+            "id": uuid.uuid4().hex,
+            "connector_id": connector_id,
+            "tenant_id": tenant_id,
+            "kb_id": kb_id,
+            "status": status,
+            "summary_json": json.dumps(
+                _redact_value(summary),
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            "error": _sanitize_text(error) if error else None,
+            "started_at": started.isoformat(),
+            "finished_at": finished.isoformat(),
+        },
+    )
+
+
+def list_connector_sync_history(
+    connector_id: str,
+    limit: int = 20,
+    *,
+    database: SQLiteDatabase | None = None,
+) -> list[dict[str, Any]]:
+    """Return the most recent sync history rows for a connector, newest first."""
+    rows = _database(database).execute(
+        """
+        SELECT id, connector_id, tenant_id, kb_id, status, summary_json, error,
+               started_at, finished_at
+        FROM knowledge_connector_sync_history
+        WHERE connector_id = :connector_id
+        ORDER BY finished_at DESC
+        LIMIT :limit
+        """,
+        {"connector_id": connector_id, "limit": limit},
+    ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "connector_id": r["connector_id"],
+            "tenant_id": r["tenant_id"],
+            "kb_id": r["kb_id"],
+            "status": r["status"],
+            "summary": json.loads(r["summary_json"]) if r.get("summary_json") else {},
+            "error": r["error"],
+            "started_at": r["started_at"],
+            "finished_at": r["finished_at"],
+        }
+        for r in rows
+    ]
 
 
 def real_connector_smoke_gate(
