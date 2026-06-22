@@ -42,14 +42,13 @@ def test_agent_with_headers_loads_and_scan_passes():
             "name": "t",
             "version": 1,
             "models": _MODELS,
-            "mcp_servers": [
-                {
-                    "id": "middle",
+            "mcpServers": {
+                "middle": {
                     "transport": "http",
                     "url": "https://middle.example/mcp",
                     "headers": {"X-API-Key": "env:MIDDLE_KEY"},
                 }
-            ],
+            },
         }
     )
     # headers preserved on the parsed model

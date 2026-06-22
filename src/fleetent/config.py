@@ -1,4 +1,6 @@
 import logging
+import os
+import re
 from pathlib import Path
 from typing import Any, Literal
 
@@ -170,6 +172,20 @@ class McpApprovalRule(BaseModel):
     when: dict[str, list[str]] | None = None
 
 
+class McpOAuthSettings(BaseModel):
+    """Self-hosted MCP OAuth2 (mcp-config-standardization).
+
+    ``token_url`` points at a customer-internal authorization server — never a cloud
+    identity service. ``client_secret_env`` is the env var NAME, never the secret value.
+    """
+
+    type: str = "oauth2"
+    token_url: str = ""
+    client_id: str = ""
+    client_secret_env: str = ""
+    scope: str = ""
+
+
 class McpServerSettings(BaseModel):
     id: str
     transport: str = "http"
@@ -179,27 +195,126 @@ class McpServerSettings(BaseModel):
     command: str = ""
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
-    # Custom HTTP headers for http transport, sent verbatim on every request (e.g. a
-    # server-specific X-API-Key that does not fit the Authorization: Bearer model).
-    # Values may use the env:VAR_NAME reference syntax, resolved at request time.
+    # Custom HTTP headers for http transport, sent verbatim on every request.
     headers: dict[str, str] = Field(default_factory=dict)
-    # Per-server HTTP timeouts in seconds (mcp-per-server-timeout); defaults match the
-    # client's built-in connect/call defaults so omitting them changes nothing.
+    # Per-server HTTP timeouts in seconds (mcp-per-server-timeout).
     connect_timeout: float = 10.0
     call_timeout: float = 30.0
+    # ── fleetent extensions (authored under the agent.yaml `x-fleetent` block) ──
+    # Degradation policy when the server is unavailable: "degrade" | "strict" | "silent".
+    degrade_mode: str = "degrade"
+    # /exchange file-bridging for stdio products; `file_root` overrides the convention dir,
+    # `file_isolation: "off"` opts the server out of the convention env injection.
+    file_root: str = ""
+    file_isolation: str = "on"
+    # Self-hosted OAuth2 (None = header/api-key auth or no auth).
+    auth: McpOAuthSettings | None = None
     # Per-server approval rules (approval-boundary-redesign D4): which operations on this MCP
     # server require approval. Empty = all operations no-approval (the narrow-surface default).
     approval_rules: list[McpApprovalRule] = Field(default_factory=list)
 
 
-class McpServersFile(BaseModel):
-    servers: list[McpServerSettings] = Field(default_factory=list)
+_ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def _expand_env_refs(value: Any) -> Any:
+    """Expand ``${VAR}`` references against the process environment (recursive).
+
+    Missing variables expand to the empty string. Matches the de-facto-standard config
+    substitution used by other MCP clients; applied at load time.
+    """
+    if isinstance(value, str):
+        return _ENV_REF_RE.sub(lambda m: os.environ.get(m.group(1), ""), value)
+    if isinstance(value, list):
+        return [_expand_env_refs(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _expand_env_refs(v) for k, v in value.items()}
+    return value
+
+
+def parse_mcp_servers(
+    raw: dict[str, Any], *, expand_env: bool = True
+) -> list[McpServerSettings]:
+    """Parse the standard map-keyed MCP server config block into ``McpServerSettings``.
+
+    Accepts the top-level ``mcpServers`` or ``mcp_servers`` key, where each entry is keyed
+    by the server name (= ``id``). Transport is auto-detected (``command``→stdio,
+    ``url``→remote) when unset; per-entry fleetent settings under ``x-fleetent`` are
+    hoisted. The legacy ``list-of-id`` form is rejected.
+
+    ``expand_env``: when True (standalone file load), ``${VAR}`` references are expanded
+    at parse time. The AgentFile path passes ``False`` to keep references intact so the
+    inline-secret guard sees the reference (not the resolved secret); the runtime resolves
+    them at request time.
+    """
+    block = raw.get("mcpServers")
+    if block is None:
+        block = raw.get("mcp_servers")
+    if block is None:
+        return []
+    if not isinstance(block, dict):
+        raise ValueError(
+            "MCP servers must be a map keyed by server name "
+            "(legacy list-of-id form is not supported)"
+        )
+    servers: list[McpServerSettings] = []
+    for name, body in block.items():
+        if not isinstance(body, dict):
+            raise ValueError(f"mcpServers[{name!r}] must be a mapping")
+        body = _expand_env_refs(dict(body)) if expand_env else dict(body)
+        ext = body.get("x-fleetent") or {}
+        if not isinstance(ext, dict):
+            raise ValueError(f"mcpServers[{name!r}].x-fleetent must be a mapping")
+        raw_transport = body.get("type") or body.get("transport") or ""
+        if raw_transport in ("", "remote", "http", "streamable-http", "sse"):
+            transport = "stdio" if body.get("command") else "http"
+        else:
+            transport = str(raw_transport)
+        auth_block = ext.get("auth")
+        servers.append(
+            McpServerSettings(
+                id=str(name),
+                transport=transport,
+                url=body.get("url", ""),
+                auth_type=body.get("auth_type", "none"),
+                api_key_env=body.get("api_key_env", ""),
+                command=body.get("command", ""),
+                args=list(body.get("args", []) or []),
+                env=dict(body.get("env", {}) or {}),
+                headers=dict(body.get("headers", {}) or {}),
+                connect_timeout=float(body.get("connect_timeout", 10.0)),
+                call_timeout=float(body.get("call_timeout", 30.0)),
+                degrade_mode=ext.get("degrade_mode", "degrade"),
+                file_root=ext.get("file_root", ""),
+                file_isolation=ext.get("file_isolation", "on"),
+                auth=McpOAuthSettings(**auth_block) if isinstance(auth_block, dict) else None,
+                approval_rules=[McpApprovalRule(**r) for r in (ext.get("approval_rules") or [])],
+            )
+        )
+    return servers
+
+
+class McpToolNamingTemplate(BaseModel):
+    """Custom tool-name projection template (mcp-tool-name-projection).
+
+    ``template`` uses ``{server}`` / ``{tool}`` placeholders; ``sanitize`` selects a
+    character policy; ``max_len`` caps the projected name length.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    template: str
+    sanitize: str = "none"
+    max_len: int = 64
 
 
 class McpSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = True
+    # Tool-name projection target: a preset alias (claude|hermes|opencode|skills|bare)
+    # or a custom template object. Default `claude` → mcp__{server}__{tool}.
+    tool_naming: str | McpToolNamingTemplate = "claude"
 
 
 class SchedulingSettings(BaseModel):
@@ -312,5 +427,5 @@ def load_mcp_server_settings(
 
     raw = yaml.safe_load(config_path.read_text()) or {}
     if not isinstance(raw, dict):
-        raise ValueError("MCP server YAML must contain a mapping with a servers list")
-    return McpServersFile.model_validate(raw).servers
+        raise ValueError("MCP server YAML must contain a mapping")
+    return parse_mcp_servers(raw)

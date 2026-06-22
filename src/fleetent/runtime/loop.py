@@ -706,6 +706,7 @@ async def _plan_run_slots(
     here in order; sub_agent becomes a pending slot whose runner self-gathers (D6). The
     result list preserves original `tool_calls` order so backfill can index 0..N-1.
     """
+    from fleetent.integrations import mcp as _mcp_client
     from fleetent.runtime import hooks
     from fleetent.runtime.hooks import HookContext
 
@@ -713,7 +714,9 @@ async def _plan_run_slots(
     for tc in tool_calls:
         if not hasattr(tc, "function"):
             continue
-        name = tc.function.name
+        # mcp-tool-name-projection: resolve a projected MCP tool name back to canonical so
+        # all downstream handling (guardrail / risk / dispatch) operates on canonical names.
+        name = _mcp_client.resolve_tool_name(tc.function.name)
         tc_fp = arg_fingerprint(tc.function.arguments, loop_checker.ignore_arg_keys)
         # AR10 guardrail (serial — depends on per-call streak in `state`, D2).
         action = evaluate_guardrail(state, name, tc_fp, guardrail_threshold)
@@ -1812,6 +1815,13 @@ async def _run_inner(
 
     # agent-skill-tools: drop skill_manage unless this agent opted into authoring.
     schemas = _filter_skill_authoring(schemas, enabled=skill_authoring_enabled)
+
+    # mcp-tool-name-projection: present MCP tools to the LLM under the configured projected
+    # name (registry stays canonical; calls are resolved back on tool_use). Applied last so
+    # all filtering above runs on canonical names.
+    from fleetent.integrations import mcp as _mcp_client
+
+    schemas = _mcp_client.project_schemas(schemas)
 
     # sandbox-containment-gating: read the active backend's bind-mount capability once
     # per run (not per gate decision) so the action gate's sandbox_capable reflects

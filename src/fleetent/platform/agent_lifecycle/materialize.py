@@ -8,6 +8,7 @@ references secrets by env-var name only (never plaintext) — so the agent is ru
 
 from __future__ import annotations
 
+import contextlib
 import secrets
 import shutil
 import sqlite3
@@ -320,6 +321,39 @@ def _mcp_servers_for_agent(agent: agent_store.Agent) -> list[McpServerSettings]:
     return servers
 
 
+# Fleetent extension fields and their defaults — dropped from the rendered map when default,
+# hoisted under `x-fleetent` when set (mcp-config-standardization).
+_FLEETENT_EXT_DEFAULTS: dict[str, Any] = {
+    "degrade_mode": "degrade",
+    "file_root": "",
+    "file_isolation": "on",
+    "auth": None,
+    "approval_rules": [],
+}
+
+
+def _mcp_payload_to_map(payload: dict[str, Any]) -> None:
+    """Rewrite a dumped AgentFile payload's ``mcp_servers`` list into the standard
+    ``mcpServers`` map (key = server id), hoisting non-default fleetent fields under each
+    entry's ``x-fleetent`` block. In place; no-op when there are no MCP servers."""
+    servers = payload.pop("mcp_servers", None)
+    if not servers:
+        return
+    mapping: dict[str, Any] = {}
+    for entry in servers:
+        entry = dict(entry)
+        sid = entry.pop("id")
+        ext = {}
+        for key, default in _FLEETENT_EXT_DEFAULTS.items():
+            value = entry.pop(key, default)
+            if value != default:
+                ext[key] = value
+        if ext:
+            entry["x-fleetent"] = ext
+        mapping[sid] = entry
+    payload["mcpServers"] = mapping
+
+
 def _knowledge_for_agent(agent: agent_store.Agent) -> AgentKnowledge:
     try:
         kb_ids = agent_kbs_store.list_kbs_for_agent(agent.tenant_id, agent.id)
@@ -408,10 +442,8 @@ def _ensure_managed_tui_token(existing: dict[str, str], *, agent_id: int | None)
         if stored:
             return stored
     token = existing.get(_TUI_TOKEN_ENV, "") or f"ma-{secrets.token_hex(32)}"
-    try:
+    with contextlib.suppress(secret_store.SecretKeyError):
         secret_store.set(agent_id, _TUI_TOKEN_ENV, token, "materialize")
-    except secret_store.SecretKeyError:
-        pass
     return token
 
 
@@ -517,6 +549,7 @@ def write_home(
     _logger.debug("agent_home_write_start", name=agent.name, path=str(home))
     (home / "data").mkdir(parents=True, exist_ok=True)
     payload = agent.model_dump(mode="json", exclude_defaults=False)
+    _mcp_payload_to_map(payload)  # render MCP servers in the standard mcpServers map form
     (home / AGENT_FILE_NAME).write_text(
         yaml.safe_dump(payload, sort_keys=False, allow_unicode=True), encoding="utf-8"
     )

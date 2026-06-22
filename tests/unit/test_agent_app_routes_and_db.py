@@ -34,6 +34,7 @@ def _agent_file(**overrides: Any) -> Any:
         skill_authoring_enabled=False,
         skill_hot_reload=True,
         mcp_servers=[],
+        mcp=SimpleNamespace(enabled=True, tool_naming="claude"),
         scheduling=SimpleNamespace(enabled=False),
     )
     for key, value in overrides.items():
