@@ -65,7 +65,7 @@ platform（管理入口） ──→ agent runtime（被启停、被读取）
 agent runtime ──✗──→ platform        # 严格禁止反向依赖
 ```
 
-- **agent 运行时模块**（`runtime/`、`session/`、`im_gateway/`、`tools/`、`integrations/`、`model/`、`observability/`、`governance/`、`memory/`、`long_term_ctx/`、`reflection/`）MUST NOT `import fleetent.platform.*`
+- **agent 运行时模块**（`runtime/`、`session/`、`im_gateway/`、`tools/`、`integrations/`、`model/`、`observability/`、`governance/`、`memory/`、`long_term_ctx/`、`reflection/`）MUST NOT `import fleetent.platform.*`。`im_gateway/` 仍是 **no-platform-import edge face**；managed 下执行宿主改为 **node**、身份 resolver 注入方改为 **node**，但 normalizer/loop 仍留在 agent。
 - **独立组件 / 基础设施**（`knowledge_base/`、`vector_store/`、`structured_logging.py`）同样 MUST NOT `import fleetent.platform.*`
 - **KB 读写边界**：`knowledge_base.retrieval` MUST NOT import `knowledge_base.ingest`（依赖护栏测试强制）
 - agent 运行时产生的数据（会话历史、压缩/token/恢复元数据、运行轨迹）只能落 agent 侧（session 文件、agent store、observability trace），**严禁写入 platform 管理表**
@@ -78,7 +78,7 @@ agent runtime ──✗──→ platform        # 严格禁止反向依赖
 
 长生命周期异步资源（网络连接、SDK 会话、子进程流）**必须有唯一 owner task**：**谁打开谁关闭**——enter 和 exit 发生在同一个 task 内（anyio cancel scope / task group 的硬性要求）。跨 task 只传**句柄**（供消费），不传生命周期操作；**禁止用模块级全局单例持有活资源**（如模块级 `AsyncExitStack` 装连接）——它由"谁先用谁的 task"enter、却在关停时被另一个 task 解栈，必然违反 task 亲和性并在 teardown 时崩溃整个进程（2026-06-11 事故）。关停链上每一步必须**舱壁化**（独立 try/except + 超时），单组件收尾失败只记日志、不改变进程退出码、不波及其它组件；优雅排水路径必须 exit 0。
 
-> 范式实现：IM 连接 supervisor（每连接一个 owner task，`stop()` 定向取消）、MCP 会话宿主（`integrations/mcp/client.py` 的 `_SessionHost` + `aclose_all()`）。护栏 `test_module_dependency_guardrails.py::test_no_module_level_asyncexitstack_singleton` 强制「src 内零模块级 AsyncExitStack 单例」。函数内局部 `AsyncExitStack`（同 task、作用域内）不受限。
+> 范式实现：IM 连接 supervisor（managed 宿主=node；standalone 宿主=agent，每连接一个 owner task，`stop()` 定向取消）、MCP 会话宿主（`integrations/mcp/client.py` 的 `_SessionHost` + `aclose_all()`）。护栏 `test_module_dependency_guardrails.py::test_no_module_level_asyncexitstack_singleton` 强制「src 内零模块级 AsyncExitStack 单例」。函数内局部 `AsyncExitStack`（同 task、作用域内）不受限。
 
 ---
 
@@ -100,7 +100,7 @@ src/fleetent/
   model/             # 模型路由和提供商健康
   observability/     # trace / usage / diagnostics
   session/           # 会话持久化
-  im_gateway/        # Slack / Telegram 适配器
+  im_gateway/        # Slack / Telegram edge face（managed 宿主=node；standalone 宿主=agent）
   tools/             # 工具注册 / 内置工具
   skills/            # Skill 注册和注入
   tui/               # 交互式终端 TUI

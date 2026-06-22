@@ -8,6 +8,7 @@ from fleetent.node.backend import LocalProcessBackend
 from fleetent.node.config import ConfigError, load_config
 from fleetent.node.forwarder import build_app as build_forwarder_app
 from fleetent.node.forwarder_contract import DEFAULT_FORWARDER_PORT
+from fleetent.node.im_edge import NodeIMEdgeHost
 from fleetent.node.provider import PlatformApiDesiredStateProvider
 from fleetent.node.reconcile import NodeReconciler
 
@@ -39,13 +40,17 @@ def main() -> None:
     provider = PlatformApiDesiredStateProvider(config)
     backend = LocalProcessBackend(config)
     reconciler = NodeReconciler(config, backend)
+    im_edge_host = NodeIMEdgeHost(config, backend=backend)
     forwarder_server, forwarder_thread = _start_forwarder(config, backend)
     try:
         while True:
-            reconciler.reconcile(provider.fetch())
+            desired_state = provider.fetch()
+            reconciler.reconcile(desired_state)
+            im_edge_host.reconcile(desired_state)
             time.sleep(config.interval_seconds)
     except KeyboardInterrupt:
         return
     finally:
+        im_edge_host.close()
         forwarder_server.should_exit = True
         forwarder_thread.join(timeout=5)

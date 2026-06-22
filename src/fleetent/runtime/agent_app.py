@@ -12,6 +12,7 @@ are served only when a port is given.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import json
 import os
@@ -50,6 +51,45 @@ class ChatRequest(BaseModel):
 class ApprovalRequest(BaseModel):
     decision: str  # "approved" | "rejected"
     approver_user_id: str = "anonymous"
+
+
+class ImAttachmentRequest(BaseModel):
+    kind: str
+    data_b64: str | None = None
+    mime: str
+    filename: str = ""
+    note: str = ""
+
+
+class ImSessionContextRequest(BaseModel):
+    platform: str
+    sender_id: str
+    sender_name: str = ""
+    chat_type: str = "dm"
+    channel_name: str = ""
+    was_mentioned: bool = False
+    thread_root: str = ""
+
+
+class ImRouteRequest(BaseModel):
+    platform: str
+    session_id: str
+    user_id: str
+    text: str
+    channel_id: str = ""
+    workspace_id: str = ""
+    agent_name: str = ""
+    session_context: ImSessionContextRequest | None = None
+    attachments: list[ImAttachmentRequest] = []
+
+
+class ImReply(BaseModel):
+    text: str
+    blocks: list[dict[str, Any]] | None = None
+
+
+class ImRouteResponse(BaseModel):
+    replies: list[ImReply]
 
 
 @dataclass
@@ -530,6 +570,7 @@ async def serve(
     port: int | None = None,
     home: str | Path | None = None,
     drain_timeout: float = 30.0,
+    start_im: bool = True,
 ) -> None:
     """Boot the agent and run it in the foreground until cancelled or drained.
 
@@ -547,7 +588,7 @@ async def serve(
     loop.add_signal_handler(signal.SIGUSR1, drain_event.set)
 
     try:
-        rt = await boot(agent_id, home=home, port=port)
+        rt = await boot(agent_id, home=home, port=port, start_im=start_im)
         try:
             if port is not None:
                 import uvicorn
@@ -670,6 +711,43 @@ def build_app(agent_name: str) -> FastAPI:
 
         return StreamingResponse(_stream(), media_type="text/event-stream")
 
+    @app.post("/im/route")
+    async def im_route(
+        req: ImRouteRequest,
+        principal: Principal = Depends(_authenticate),  # noqa: B008
+    ) -> ImRouteResponse:
+        from fleetent.im_gateway import normalizer
+
+        agent = agent_config.current().get(agent_name)
+        agent_tenant = agent.tenant_id if agent is not None else "default"
+        if not _check_tenant(principal, agent_tenant):
+            raise HTTPException(status_code=403, detail="cross-tenant access denied")
+        replies: list[ImReply] = []
+
+        async def _reply(text: str, blocks: list[dict[str, Any]] | None = None) -> None:
+            replies.append(ImReply(text=text, blocks=blocks))
+
+        await normalizer.route(
+            normalizer.NormalizedMessage(
+                platform=req.platform,
+                session_id=req.session_id,
+                user_id=req.user_id,
+                text=req.text,
+                attachments=_deserialize_im_attachments(req.attachments),
+                reply_func=_reply,
+                channel_id=req.channel_id,
+                workspace_id=req.workspace_id,
+                agent_name=req.agent_name or agent_name,
+                session_context=(
+                    normalizer.SessionContext(**req.session_context.model_dump())
+                    if req.session_context is not None
+                    else None
+                ),
+            ),
+            principal=principal,
+        )
+        return ImRouteResponse(replies=replies)
+
     @app.websocket("/ws")
     async def ws_gateway(websocket: WebSocket) -> None:
         from fleetent.tui import dispatch as tui_dispatch
@@ -727,3 +805,26 @@ def build_app(agent_name: str) -> FastAPI:
             await transport.close()
 
     return app
+
+
+def _deserialize_im_attachments(attachments: list[ImAttachmentRequest]) -> list[Any]:
+    from fleetent.im_gateway.normalizer import FileAttachment
+
+    decoded: list[Any] = []
+    for attachment in attachments:
+        if attachment.kind == "image":
+            if attachment.data_b64 is None:
+                continue
+            decoded.append((base64.b64decode(attachment.data_b64), attachment.mime))
+            continue
+        if attachment.kind == "file":
+            payload = base64.b64decode(attachment.data_b64) if attachment.data_b64 else None
+            decoded.append(
+                FileAttachment(
+                    data=payload,
+                    mime=attachment.mime,
+                    filename=attachment.filename,
+                    note=attachment.note,
+                )
+            )
+    return decoded

@@ -448,7 +448,8 @@ async def _route_assistant_message(
     batch so multi-tool turns show every in-flight tool, not only the last.
     """
     from fleetent.im_gateway.access import IMIdentityResolutionError, resolve_identity
-    from fleetent.im_gateway.normalizer import NormalizedMessage, SessionContext, route
+    from fleetent.im_gateway.inbound_dispatch import dispatch
+    from fleetent.im_gateway.normalizer import NormalizedMessage, SessionContext
     from fleetent.outbound import ConversationAddress
 
     channel = getattr(context, "channel_id", None) or payload.get("channel") or ""
@@ -526,7 +527,7 @@ async def _route_assistant_message(
             thread_root=thread_ts or payload.get("ts") or "",
         ),
     )
-    await route(msg)
+    await dispatch(msg)
 
 
 def create_app(agent_name: str, config: dict[str, Any]) -> object:
@@ -588,7 +589,8 @@ def create_app(agent_name: str, config: dict[str, Any]) -> object:
 
     async def _handle(event: dict[str, Any], client: Any, say: Any = None) -> None:
         from fleetent.im_gateway.access import IMIdentityResolutionError, resolve_identity
-        from fleetent.im_gateway.normalizer import NormalizedMessage, SessionContext, route
+        from fleetent.im_gateway.inbound_dispatch import dispatch
+        from fleetent.im_gateway.normalizer import NormalizedMessage, SessionContext
         from fleetent.outbound import ConversationAddress
 
         channel = event.get("channel") or ""
@@ -653,7 +655,7 @@ def create_app(agent_name: str, config: dict[str, Any]) -> object:
                 thread_root=reply_thread or "",
             ),
         )
-        await route(msg)
+        await dispatch(msg)
 
     @app.event("app_mention")
     async def handle_mention(event: dict[str, Any], client: Any, say: Any = None) -> None:

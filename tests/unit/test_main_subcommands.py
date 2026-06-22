@@ -105,6 +105,7 @@ def test_agent_run_does_not_import_platform(monkeypatch: pytest.MonkeyPatch) -> 
         *,
         port: int | None = None,
         home: str | None = None,
+        start_im: bool = True,
     ) -> None:
         return None
 
@@ -125,6 +126,7 @@ def test_tui_does_not_load_on_agent_run(monkeypatch: pytest.MonkeyPatch) -> None
         *,
         port: int | None = None,
         home: str | None = None,
+        start_im: bool = True,
     ) -> None:
         return None
 
@@ -144,6 +146,7 @@ def test_agent_run_does_not_import_kb_worker(monkeypatch: pytest.MonkeyPatch) ->
         *,
         port: int | None = None,
         home: str | None = None,
+        start_im: bool = True,
     ) -> None:
         return None
 

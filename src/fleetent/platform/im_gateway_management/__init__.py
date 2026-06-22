@@ -15,6 +15,7 @@ from fleetent.platform.im_gateway_management.identity import (
     list_pending,
     rebind_im_identity,
     restore_im_user,
+    resolve_or_provision,
     update_im_identity,
 )
 
@@ -32,6 +33,7 @@ __all__ = [
     "list_im_identities",
     "list_pending",
     "rebind_im_identity",
+    "resolve_or_provision",
     "update_im_identity",
     "restore_im_user",
 ]

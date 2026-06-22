@@ -275,6 +275,86 @@ def test_post_status_updates_last_seen_and_agent_projection(node_client: TestCli
     ]
 
 
+def test_post_identity_resolve_returns_resolve_or_provision_principal(
+    node_client: TestClient,
+) -> None:
+    from fleetent.platform.im_gateway_management.identity import resolve_or_provision
+    from fleetent.platform.node_management import node_store
+    from fleetent.platform.tenancy import store as tenancy_store
+
+    node_key, _ = node_store.register_node("node-a")
+    tenancy_store.create_tenant(id="tenant-1", name="Tenant 1")
+    expected = resolve_or_provision(
+        "tenant-1",
+        verified_email="alice@example.com",
+        channel="slack",
+        platform_user_id="U123",
+    )
+
+    response = node_client.post(
+        "/nodes/node-a/identity/resolve",
+        headers={"Authorization": f"Bearer {node_key}"},
+        json={
+            "tenant_id": "tenant-1",
+            "channel": "slack",
+            "platform_user_id": "U123",
+            "verified_email": "alice@example.com",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"user_id": expected.id, "tenant_id": expected.tenant_id}
+
+
+@pytest.mark.parametrize(
+    ("authorization", "expected_status"),
+    [
+        (None, 401),
+        ("Bearer ma-" + "0" * 64, 401),
+    ],
+)
+def test_post_identity_resolve_rejects_missing_or_invalid_node_key(
+    node_client: TestClient,
+    authorization: str | None,
+    expected_status: int,
+) -> None:
+    from fleetent.platform.node_management import node_store
+
+    node_store.register_node("node-a")
+    headers = {} if authorization is None else {"Authorization": authorization}
+
+    response = node_client.post(
+        "/nodes/node-a/identity/resolve",
+        headers=headers,
+        json={
+            "tenant_id": "tenant-1",
+            "channel": "slack",
+            "platform_user_id": "U123",
+        },
+    )
+
+    assert response.status_code == expected_status
+
+
+def test_post_identity_resolve_rejects_node_key_for_other_node(node_client: TestClient) -> None:
+    from fleetent.platform.node_management import node_store
+
+    node_a_key, _ = node_store.register_node("node-a")
+    node_store.register_node("node-b")
+
+    response = node_client.post(
+        "/nodes/node-b/identity/resolve",
+        headers={"Authorization": f"Bearer {node_a_key}"},
+        json={
+            "tenant_id": "tenant-1",
+            "channel": "slack",
+            "platform_user_id": "U123",
+        },
+    )
+
+    assert response.status_code == 403
+
+
 def test_post_status_enforces_node_auth_scope(node_client: TestClient) -> None:
     from fleetent.platform.node_management import node_store
 

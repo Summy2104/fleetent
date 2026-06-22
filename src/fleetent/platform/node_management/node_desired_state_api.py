@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from fleetent import agent_store
 from fleetent.platform.agent_lifecycle import credential_slots, materialize, secret_store
 from fleetent.platform.agent_management_console import agent_admin_store
+from fleetent.platform import im_gateway_management
 from fleetent.platform.node_management import node_store, placement_store
 
 router = APIRouter(prefix="/nodes")
@@ -27,6 +28,18 @@ class NodeAgentStatusReport(BaseModel):
 
 class NodeStatusBody(BaseModel):
     agents: list[NodeAgentStatusReport] = Field(default_factory=list)
+
+
+class NodeIdentityResolveBody(BaseModel):
+    tenant_id: str
+    channel: str
+    platform_user_id: str
+    verified_email: str | None = None
+
+
+class NodeIdentityResolveResponse(BaseModel):
+    user_id: str
+    tenant_id: str
 
 
 def _authenticate_node_request(node_id: str, authorization: str | None) -> dict[str, Any]:
@@ -91,6 +104,22 @@ def post_node_status(
             detail=report.detail,
         )
     return {"node_id": node_id, "updated": len(body.agents)}
+
+
+@router.post("/{node_id}/identity/resolve")
+def post_identity_resolve(
+    node_id: str,
+    body: NodeIdentityResolveBody,
+    node: dict[str, Any] = Depends(_authenticate_node),  # noqa: B008
+) -> NodeIdentityResolveResponse:
+    del node, node_id
+    user = im_gateway_management.resolve_or_provision(
+        body.tenant_id,
+        verified_email=body.verified_email,
+        channel=body.channel,
+        platform_user_id=body.platform_user_id,
+    )
+    return NodeIdentityResolveResponse(user_id=user.id, tenant_id=user.tenant_id)
 
 
 def _agent_secrets(agent: agent_store.Agent) -> dict[str, str]:

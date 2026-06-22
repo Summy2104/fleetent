@@ -244,6 +244,60 @@ async def test_build_app_chat_approvals_and_stream_error(monkeypatch: pytest.Mon
         )
 
 
+async def test_build_app_im_route_carries_principal_and_returns_sync_replies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_route(msg: Any, principal: Principal | None = None) -> None:
+        captured["msg"] = msg
+        captured["principal"] = principal
+        await msg.reply_func("node-managed reply")
+
+    monkeypatch.setattr(
+        agent_app.agent_config,
+        "current",
+        lambda: SimpleNamespace(get=lambda name: _agent_file()),
+    )
+    monkeypatch.setattr("fleetent.im_gateway.normalizer.route", fake_route)
+
+    app = agent_app.build_app("ops")
+    response = await _route(app, "/im/route").endpoint(
+        agent_app.ImRouteRequest(
+            platform="slack",
+            session_id="session-1",
+            user_id="u-real",
+            text="hello",
+            channel_id="C1",
+            agent_name="ops",
+            session_context=agent_app.ImSessionContextRequest(
+                platform="slack",
+                sender_id="U123",
+                sender_name="Alice",
+                chat_type="dm",
+                channel_name="C1",
+            ),
+        ),
+        Principal(user_id="u-real", tenant_id="tenant-1"),
+    )
+
+    assert response.model_dump() == {"replies": [{"text": "node-managed reply", "blocks": None}]}
+    assert captured["principal"] == Principal(user_id="u-real", tenant_id="tenant-1")
+    assert captured["msg"].user_id == "u-real"
+    assert captured["msg"].agent_name == "ops"
+
+    with pytest.raises(HTTPException, match="cross-tenant"):
+        await _route(app, "/im/route").endpoint(
+            agent_app.ImRouteRequest(
+                platform="slack",
+                session_id="session-1",
+                user_id="u-real",
+                text="hello",
+            ),
+            Principal(user_id="u-real", tenant_id="other"),
+        )
+
+
 class _FakeWebSocket:
     def __init__(self, headers: dict[str, str], messages: list[str]) -> None:
         self.headers = headers

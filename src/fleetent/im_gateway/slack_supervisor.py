@@ -42,6 +42,14 @@ class SlackSupervisor:
             return None
         return {"bot_token": bot, "app_token": app}
 
+    async def start_bound(self, agent_name: str, config: dict[str, Any]) -> None:
+        existing = self._tasks.get(agent_name)
+        if existing is not None and not existing.done():
+            return
+        self._status[agent_name] = "connecting"
+        self._configs[agent_name] = dict(config)
+        self._tasks[agent_name] = asyncio.create_task(self._run(agent_name, dict(config)))
+
     async def start(self, agent_name: str) -> None:
         agent = agent_config.current().get(agent_name)
         if agent is None or agent.im.slack is None:
@@ -51,12 +59,7 @@ class SlackSupervisor:
             self._status[agent_name] = "unconfigured"
             _logger.warn("slack_connector_unconfigured", agent=agent_name)
             return
-        existing = self._tasks.get(agent_name)
-        if existing is not None and not existing.done():
-            return
-        self._status[agent_name] = "connecting"
-        self._configs[agent_name] = config
-        self._tasks[agent_name] = asyncio.create_task(self._run(agent_name, config))
+        await self.start_bound(agent_name, config)
 
     async def _run(self, agent_name: str, config: dict[str, Any]) -> None:
         self._status[agent_name] = "connected"
@@ -95,6 +98,16 @@ class SlackSupervisor:
             if running and new_config != self._configs.get(name):
                 await self.stop(name)  # config changed → restart
             await self.start(name)
+
+    async def reload_bindings(self, bindings: dict[str, dict[str, Any]]) -> None:
+        declared = set(bindings)
+        for name in self.running() - declared:
+            await self.stop(name)
+        for name, config in bindings.items():
+            running = name in self._tasks and not self._tasks[name].done()
+            if running and config != self._configs.get(name):
+                await self.stop(name)
+            await self.start_bound(name, config)
 
     async def stop_all(self) -> None:
         for name in list(self._tasks):
