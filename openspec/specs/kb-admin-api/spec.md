@@ -87,11 +87,21 @@ The system SHALL list documents within a single KB (filename, source / source_ur
 - **THEN** D and its chunks and vector entries are removed via the engine, subsequent retrieval no longer returns D's content, and the deletion is audited (`doc_delete`)
 
 ### Requirement: Per-KB observation aggregation
-The KB detail view SHALL present a per-kb aggregation of recall hit counts / trends, referencing sessions, and long-term zero-recall documents, with drill-down into referencing session traces. The data source is the observability domain; this plane only aggregates by kb.
+KB detail 视图 SHALL 呈现按 kb 聚合的**检索 proxy 指标**，数据源为 observability 域的 `kb_retrieval` trace（③ kb-retrieval-audit 所写）；本平面只按 kb 聚合、read-only、不改 index。指标 SHALL 包含：**延迟 p50/p95、空召回率（命中 0 条的占比）、score 分布、query/hit 计数**，可下钻到引用的 session traces。
 
-#### Scenario: Per-KB recall aggregation is read-only
-- **WHEN** an admin opens a KB's observation view
-- **THEN** recall hit counts/trends and zero-recall documents are shown without modifying the index
+**线上 SHALL NOT 声称给出真实 recall**：真实 recall@k/MRR 需 ground-truth 标注，只能在离线评估（`/evaluations`）算；observation 平面只给无需标注的 proxy 指标（原占位字段 `recall_hits` 的"recall"语义被纠正为 proxy）。citation 率因当前无 citation 数据而暂不在本平面提供。
+
+#### Scenario: Per-KB proxy 指标只读聚合
+- **WHEN** admin 打开某 KB 的 observation 视图
+- **THEN** 展示从 `kb_retrieval` trace 聚合的延迟 p50/p95、空召回率、score 分布、计数（不修改 index），可下钻引用 session
+
+#### Scenario: 空召回也被计入
+- **WHEN** 该 KB 有命中 0 条的检索
+- **THEN** 空召回率指标反映这些 0 命中（来自 ③ 留痕的空召回事件）
+
+#### Scenario: 不在线上谎报真 recall
+- **WHEN** observation 视图展示指标
+- **THEN** 不出现需 ground-truth 的真实 recall@k/MRR（那归 /evaluations）；只展示 proxy 指标
 
 ### Requirement: Knowledge base management permissions and audit
 KB / document creation, import, deletion, archive, and agent binding SHALL be admin-only. Viewers SHALL only browse KBs, documents, and retrieval test results. High-risk actions (delete KB, delete document, full directory re-sync) SHALL require a second confirmation. All write operations SHALL be audited.

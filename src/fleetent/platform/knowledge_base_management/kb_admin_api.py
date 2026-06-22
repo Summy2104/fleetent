@@ -62,10 +62,17 @@ from fleetent.knowledge_base.management.runtime import (
 from fleetent.knowledge_base.management.runtime import (
     update_knowledge_base_description as _kb_update_knowledge_base_description,
 )
+from fleetent.knowledge_base.retrieval import evaluation as retrieval_evaluation
 from fleetent.knowledge_base.retrieval.search import SearchMode
 from fleetent.knowledge_base.retrieval.search import search as search_kb
 from fleetent.platform.agent_lifecycle import secret_store
-from fleetent.platform.knowledge_base_management import agent_kbs_store, kb_connector_store
+from fleetent.platform.knowledge_base_management import (
+    agent_kbs_store,
+    kb_connector_store,
+)
+from fleetent.platform.knowledge_base_management import (
+    kb_observation as kb_observation_agg,
+)
 from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
 
 router = APIRouter(prefix="/admin/kb")
@@ -248,12 +255,47 @@ def kb_search(
 
 def kb_evaluation(tenant_id: str, kb_id: str) -> dict[str, Any]:
     """Run deterministic retrieval evaluation (read-only). Bridges the eval runner."""
-    return {"kb_id": kb_id, "metrics": {}, "wired": False}
+    del tenant_id
+    result = asyncio.run(retrieval_evaluation.run_deterministic_fixture_suite())
+    return {
+        "kb_id": kb_id,
+        "metrics": _serialize_retrieval_metrics(result.metrics),
+        "hit_ranking": list(result.hit_ranking),
+        "fixtures": [
+            {
+                "name": fixture.fixture_name,
+                "document_count": fixture.document_count,
+                "metrics": _serialize_retrieval_metrics(fixture.metrics),
+                "queries": [
+                    {
+                        "query": query_result.query,
+                        "recall_at_k": query_result.recall_at_k,
+                        "forbidden_hits": list(query_result.forbidden_hits),
+                        "ranked_hit": (
+                            {
+                                "rank": query_result.ranked_hit.rank,
+                                "reciprocal_rank": query_result.ranked_hit.reciprocal_rank,
+                                "matched_snippets": list(query_result.ranked_hit.matched_snippets),
+                            }
+                            if query_result.ranked_hit is not None
+                            else None
+                        ),
+                    }
+                    for query_result in fixture.query_results
+                ],
+            }
+            for fixture in result.fixtures
+        ],
+    }
 
 
 def kb_observation(tenant_id: str, kb_id: str) -> dict[str, Any]:
     """Per-kb recall/citation/zero-recall aggregation. Owned by observability."""
-    return {"kb_id": kb_id, "recall_hits": 0, "zero_recall_docs": [], "sessions": []}
+    return kb_observation_agg.aggregate(
+        tenant_id,
+        kb_id,
+        agent_kbs_store.list_agents_for_kb(tenant_id, kb_id),
+    )
 
 
 def kb_extract_entities(
@@ -471,6 +513,19 @@ def _chunk_to_search_result(chunk: KnowledgeChunk) -> dict[str, Any]:
         "source_url": chunk.source_url,
         "section": chunk.metadata.get("section_title") or chunk.metadata.get("section_path", ""),
         "section_path": chunk.metadata.get("section_path", ""),
+    }
+
+
+def _serialize_retrieval_metrics(
+    metrics: retrieval_evaluation.RetrievalMetrics,
+) -> dict[str, Any]:
+    return {
+        "recall_at_k": metrics.recall_at_k,
+        "mrr": metrics.mrr,
+        "query_count": metrics.query_count,
+        "hit_count": metrics.hit_count,
+        "hit_rate": metrics.hit_rate,
+        "average_hit_rank": metrics.average_hit_rank,
     }
 
 
