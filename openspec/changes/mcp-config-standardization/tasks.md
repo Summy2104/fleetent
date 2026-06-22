@@ -30,6 +30,6 @@
 
 ## 5. 收尾验证
 
-- [ ] 5.1 `make test-pr` 全绿(判据「无新增失败」)+ 改动文件 ruff
-- [ ] 5.2 `fleetent agent run` 独立冒烟:无 platform 下读 agent.yaml 建表投影、MCP 工具按默认 `mcp__{server}__{tool}` 暴露、审批正常
-- [ ] 5.3 模块边界:`PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py` 确认 `integrations/mcp` 不 import platform
+- [x] 5.1 `make test-pr` 全绿(判据「无新增失败」)+ 改动文件 ruff
+- [x] 5.2 `fleetent agent run` 独立冒烟:无 platform 下读 agent.yaml 建表投影、MCP 工具按默认 `mcp__{server}__{tool}` 暴露、审批正常
+- [x] 5.3 模块边界:`PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py` 确认 `integrations/mcp` 不 import platform

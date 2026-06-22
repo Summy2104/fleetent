@@ -57,11 +57,16 @@ def test_agentfile_custom_tool_naming_template() -> None:
     assert af.mcp.tool_naming.template == "{server}:{tool}"
 
 
-def test_agentfile_rejects_legacy_list_form() -> None:
-    with pytest.raises(Exception):
-        agent_config.AgentFile.model_validate(
-            _doc(mcp_servers=[{"id": "github", "command": "npx"}])
-        )
+def test_legacy_list_form_rejected_on_file_load(tmp_path) -> None:
+    import yaml
+
+    path = tmp_path / "agent.yaml"
+    path.write_text(
+        yaml.safe_dump(_doc(mcp_servers=[{"id": "github", "command": "npx"}])),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="legacy list"):
+        agent_config.load_agent_home_file(path)
 
 
 def test_var_ref_header_kept_and_not_flagged(tmp_path) -> None:

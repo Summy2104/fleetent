@@ -418,7 +418,9 @@ def _write_agent(root, name: str, **overrides) -> None:
     doc.update(overrides)
     # Emit the standard map-keyed form; tests keep the legacy list shape for brevity.
     if isinstance(doc.get("mcp_servers"), list):
-        doc["mcpServers"] = {dict(e).pop("id"): {k: v for k, v in e.items() if k != "id"} for e in doc.pop("mcp_servers")}
+        doc["mcpServers"] = {
+            e["id"]: {k: v for k, v in e.items() if k != "id"} for e in doc.pop("mcp_servers")
+        }
     agent_dir = root / name
     agent_dir.mkdir(parents=True)
     (agent_dir / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")

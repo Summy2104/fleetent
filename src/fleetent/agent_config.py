@@ -388,23 +388,19 @@ class AgentFile(BaseModel):
     @classmethod
     def _normalize_mcp_servers(cls, data: Any) -> Any:
         """Convert the standard map-keyed ``mcpServers``/``mcp_servers`` block into the
-        internal ``mcp_servers`` list. Rejects the legacy raw list-of-id form, but leaves a
-        list of already-built ``McpServerSettings`` (internal construction) untouched. Keeps
-        ``${VAR}`` references intact (resolved at request time) so the inline-secret guard
-        sees references, not resolved secrets."""
+        internal ``mcp_servers`` list. A list value is left for native validation (it is the
+        model's own serialized form — `model_dump` → `model_validate` round-trips, e.g. in
+        materialize, must keep working); legacy list-of-id *files* are rejected at load time
+        (see ``load_agent_file``). Keeps ``${VAR}`` references intact (resolved at request
+        time) so the inline-secret guard sees references, not resolved secrets."""
         if not isinstance(data, dict):
             return data
-        block = data.get("mcpServers", data.get("mcp_servers"))
-        if isinstance(block, dict) or "mcpServers" in data:
+        if "mcpServers" in data or isinstance(data.get("mcp_servers"), dict):
             from fleetent.config import parse_mcp_servers
 
             data = dict(data)
             data["mcp_servers"] = parse_mcp_servers(data, expand_env=False)
             data.pop("mcpServers", None)
-        elif isinstance(block, list) and any(isinstance(e, dict) for e in block):
-            raise ValueError(
-                "legacy list-of-id `mcp_servers` is not supported; use the `mcpServers` map form"
-            )
         return data
 
     name: str
@@ -574,6 +570,10 @@ def load_agent_file(agent_dir: Path) -> AgentFile:
     if not isinstance(raw, dict):
         raise ValueError(f"{path} must contain a mapping")
     raw = _drop_ignored_legacy_governance_keys(raw)
+    if isinstance(raw.get("mcp_servers"), list) and raw["mcp_servers"]:
+        raise ValueError(
+            f"{path}: legacy list-of-id `mcp_servers` is not supported; use the `mcpServers` map"
+        )
     agent = AgentFile.model_validate(raw)
     if agent.name != agent_dir.name:
         raise ValueError(
@@ -648,6 +648,10 @@ def load_agent_home_file(path: Path) -> AgentFile:
     if not isinstance(raw, dict):
         raise ValueError(f"{path} must contain a mapping")
     raw = _drop_ignored_legacy_governance_keys(raw)
+    if isinstance(raw.get("mcp_servers"), list) and raw["mcp_servers"]:
+        raise ValueError(
+            f"{path}: legacy list-of-id `mcp_servers` is not supported; use the `mcpServers` map"
+        )
     agent = AgentFile.model_validate(raw)
     _reject_inline_secrets(agent, path)
     return agent
