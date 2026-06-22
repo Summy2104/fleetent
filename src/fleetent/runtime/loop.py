@@ -296,12 +296,20 @@ def _agent_bound_to_server(server_id: str, allowed_tools: list[str] | None) -> b
     )
 
 
-def _append_delivery_trailer(reply: str, tool_context: Any) -> str:
+def _append_delivery_trailer(reply: str, tool_context: Any, *, emit: bool = True) -> str:
     """Append the run's delivery fact trailer to the final reply, if any (§3, D4).
 
     The trailer is system-generated from the run's delivery ledger and concatenated AFTER
     the model's text, so the model cannot omit or rewrite it. Empty ledger → reply unchanged
-    (zero noise). Best-effort: a render failure never alters the reply."""
+    (zero noise). Best-effort: a render failure never alters the reply.
+
+    The trailer is an interactive, operator-facing delivery confirmation. ``emit=False``
+    suppresses it for non-interactive runs (fired scheduled tasks broadcast their reply
+    verbatim and have no interlocutor) so it cannot pollute the broadcast or the [SILENT]
+    sentinel.
+    """
+    if not emit:
+        return reply
     try:
         from fleetent.observability.traces import render_delivery_trailer
 
@@ -1684,6 +1692,7 @@ async def run(
     conversation_address: ConversationAddress | None = None,
     delivery_ledger: list[Any] | None = None,
     skill_authoring_enabled: bool = False,
+    emit_delivery_trailer: bool = True,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
@@ -1743,6 +1752,7 @@ async def run(
             conversation_address=conversation_address,
             delivery_ledger=delivery_ledger,
             skill_authoring_enabled=skill_authoring_enabled,
+            emit_delivery_trailer=emit_delivery_trailer,
         )
     finally:
         _active_runs -= 1
@@ -1782,6 +1792,7 @@ async def _run_inner(
     conversation_address: ConversationAddress | None = None,
     delivery_ledger: list[Any] | None = None,
     skill_authoring_enabled: bool = False,
+    emit_delivery_trailer: bool = True,
 ) -> str:
     # Image-bearing messages route to the vision model (D6); raises here if
     # images are present but no vision route is configured, before any LLM call.
@@ -2241,7 +2252,7 @@ async def _run_inner(
         )
     # delivery-receipts (§3): the fact trailer is appended LAST — after on_response hooks —
     # so neither the model nor a hook can omit or rewrite it.
-    return _append_delivery_trailer(reply, tool_context)
+    return _append_delivery_trailer(reply, tool_context, emit=emit_delivery_trailer)
 
 
 def run_sync(
