@@ -98,12 +98,19 @@ class LongTermContextSettings(BaseModel):
     conflict_preference: Literal["auto", "memory", "knowledge"] = "auto"
 
 
+class KnowledgeRetrievalAuditSettings(BaseModel):
+    plaintext: bool = False
+
+
 class KnowledgeBaseSettings(BaseModel):
     enabled: bool = False
     default_tenant_id: str = "default"
     default_kb_id: str = "global"
     chunk_size: int = 1_000
     chunk_overlap: int = 200
+    retrieval_audit: KnowledgeRetrievalAuditSettings = Field(
+        default_factory=KnowledgeRetrievalAuditSettings
+    )
     google_drive: "GoogleDriveConnectorsSettings" = Field(
         default_factory=lambda: GoogleDriveConnectorsSettings()
     )
@@ -232,9 +239,7 @@ def _expand_env_refs(value: Any) -> Any:
     return value
 
 
-def parse_mcp_servers(
-    raw: dict[str, Any], *, expand_env: bool = True
-) -> list[McpServerSettings]:
+def parse_mcp_servers(raw: dict[str, Any], *, expand_env: bool = True) -> list[McpServerSettings]:
     """Parse the standard map-keyed MCP server config block into ``McpServerSettings``.
 
     Accepts the top-level ``mcpServers`` or ``mcp_servers`` key, where each entry is keyed

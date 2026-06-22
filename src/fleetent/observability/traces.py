@@ -1,5 +1,6 @@
 """Agent run trace public API."""
 
+import hashlib
 import json
 import os
 import uuid
@@ -84,6 +85,17 @@ class InjectedContextTrace:
     metadata: dict[str, str]
 
 
+@dataclass(frozen=True)
+class KBRetrievalAuditContext:
+    """Context required to bind one KB retrieval trace to an agent run."""
+
+    run_id: str
+    session_id: str | None = None
+    user_id: str | None = None
+    agent_name: str | None = None
+    tenant_id: str = "default"
+
+
 def record_injected_context(
     run_id: str, sources: list[InjectedContextTrace], session_id: str | None = None
 ) -> None:
@@ -134,6 +146,52 @@ def record_tool_call(run_id: str, session_id: str | None, payload: dict[str, Any
         )
     except Exception as exc:  # noqa: BLE001 — side channel; never break the run
         _logger.warn("tool_call_trace_record_failed", run_id=run_id, error=str(exc))
+
+
+def record_kb_retrieval(
+    context: KBRetrievalAuditContext,
+    *,
+    query: str,
+    results: list[Any],
+    latency_ms: float,
+    mode: str,
+    kb_ids: list[str],
+    plaintext: bool = False,
+) -> None:
+    """Record one ``kb_retrieval`` trace event without affecting the caller."""
+
+    payload: dict[str, Any] = {
+        "result_ids": [str(getattr(result, "id", "")) for result in results],
+        "scores": [float(getattr(result, "score", 0.0)) for result in results],
+        "hit_count": len(results),
+        "latency_ms": latency_ms,
+        "mode": mode,
+        "kb_ids": list(kb_ids),
+        "query_hash": hashlib.sha256(query.encode("utf-8")).hexdigest(),
+    }
+    if plaintext:
+        payload["raw_query"] = query
+        payload["raw_chunks"] = [
+            {
+                "id": str(getattr(result, "id", "")),
+                "content": str(getattr(result, "content", "")),
+            }
+            for result in results
+        ]
+    try:
+        record_trace_event(
+            TraceEvent(
+                run_id=context.run_id,
+                event_type="kb_retrieval",
+                payload=payload,
+                session_id=context.session_id,
+                user_id=context.user_id,
+                agent_name=context.agent_name,
+                tenant_id=context.tenant_id,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 — side channel; never break the run
+        _logger.warn("kb_retrieval_trace_record_failed", run_id=context.run_id, error=str(exc))
 
 
 def mask_target(target: str | None) -> str:

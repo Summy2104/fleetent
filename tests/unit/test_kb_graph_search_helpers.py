@@ -1,5 +1,7 @@
 """Pure helpers of KB graph search: alias parsing, relation expansion, dedupe, merge."""
 
+from contextlib import suppress
+
 import pytest
 
 from fleetent.knowledge_base.models import KnowledgeChunk
@@ -34,6 +36,14 @@ class _FakeDB:
 
     def fetchall(self) -> list[dict[str, object]]:
         return self._rows
+
+
+class _FakeStore:
+    def __init__(self, chunks: list[KnowledgeChunk]) -> None:
+        self._chunks = {chunk.id: chunk for chunk in chunks}
+
+    def get_chunks_by_ids(self, _tenant_id: str, chunk_ids: list[str]) -> list[KnowledgeChunk]:
+        return [self._chunks[chunk_id] for chunk_id in chunk_ids if chunk_id in self._chunks]
 
 
 def _chunk(cid: str = "c1") -> KnowledgeChunk:
@@ -173,3 +183,120 @@ def test_add_candidate_inserts_then_merges_keeping_max_score():
     assert merged.reason == "relation_evidence"  # higher score's reason wins
     assert {e.id for e in merged.matched_entities} == {"e1", "e2"}
     assert merged.evidence_chunk_ids == ["c1", "c2"]
+
+
+def _monotonic(values: list[float]):
+    last = values[-1]
+    remaining = iter(values)
+
+    def _fake() -> float:
+        nonlocal last
+        with suppress(StopIteration):
+            last = next(remaining)
+        return last
+
+    return _fake
+
+
+async def test_graph_search_records_kb_retrieval(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleetent.knowledge_base.retrieval import graph_search as graph_search_module
+    from fleetent.observability import KBRetrievalAuditContext
+
+    captured: list[dict[str, object]] = []
+    entity = EntityRef(id="e1", entity_type="system", name="Web", normalized_name="web")
+    chunk = _chunk("c1")
+
+    monkeypatch.setattr(graph_search_module.time, "monotonic", _monotonic([30.0, 30.008]))
+    monkeypatch.setattr(graph_search_module, "_database", lambda: _FakeDB([]))
+    monkeypatch.setattr(graph_search_module, "match_entities", lambda *_args, **_kwargs: [entity])
+    monkeypatch.setattr(
+        graph_search_module,
+        "_direct_mention_chunk_ids",
+        lambda *_args, **_kwargs: ["c1"],
+    )
+    monkeypatch.setattr(
+        graph_search_module,
+        "record_kb_retrieval",
+        lambda context, **kwargs: captured.append({"context": context, **kwargs}),
+    )
+
+    result = await graph_search_module.graph_search(
+        "web service",
+        tenant_id="tenant-a",
+        kb_ids=["kb-1"],
+        store=_FakeStore([chunk]),
+        audit_context=KBRetrievalAuditContext(
+            run_id="run-1",
+            session_id="sess-1",
+            user_id="user-1",
+            agent_name="agent-1",
+            tenant_id="tenant-a",
+        ),
+    )
+
+    assert [item.chunk.id for item in result.chunks] == ["c1"]
+    assert len(captured) == 1
+    assert captured[0]["mode"] == "graph"
+    assert captured[0]["query"] == "web service"
+    assert captured[0]["kb_ids"] == ["kb-1"]
+    assert captured[0]["latency_ms"] == pytest.approx(8.0)
+    assert [chunk.id for chunk in captured[0]["results"]] == ["c1"]
+
+
+async def test_graph_search_records_empty_retrieval(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleetent.knowledge_base.retrieval import graph_search as graph_search_module
+    from fleetent.observability import KBRetrievalAuditContext
+
+    captured: list[dict[str, object]] = []
+
+    monkeypatch.setattr(graph_search_module.time, "monotonic", _monotonic([40.0, 40.003]))
+    monkeypatch.setattr(graph_search_module, "_database", lambda: _FakeDB([]))
+    monkeypatch.setattr(graph_search_module, "match_entities", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        graph_search_module,
+        "record_kb_retrieval",
+        lambda context, **kwargs: captured.append({"context": context, **kwargs}),
+    )
+
+    result = await graph_search_module.graph_search(
+        "no match",
+        tenant_id="tenant-a",
+        kb_ids=["kb-1"],
+        store=_FakeStore([]),
+        audit_context=KBRetrievalAuditContext(run_id="run-2", tenant_id="tenant-a"),
+    )
+
+    assert result.chunks == []
+    assert len(captured) == 1
+    assert captured[0]["results"] == []
+
+
+async def test_graph_search_swallows_audit_helper_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleetent.knowledge_base.retrieval import graph_search as graph_search_module
+    from fleetent.observability import KBRetrievalAuditContext
+
+    entity = EntityRef(id="e1", entity_type="system", name="Web", normalized_name="web")
+    chunk = _chunk("c1")
+
+    monkeypatch.setattr(graph_search_module, "_database", lambda: _FakeDB([]))
+    monkeypatch.setattr(graph_search_module, "match_entities", lambda *_args, **_kwargs: [entity])
+    monkeypatch.setattr(
+        graph_search_module,
+        "_direct_mention_chunk_ids",
+        lambda *_args, **_kwargs: ["c1"],
+    )
+    monkeypatch.setattr(
+        graph_search_module,
+        "record_kb_retrieval",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("audit down")),
+    )
+
+    result = await graph_search_module.graph_search(
+        "web service",
+        tenant_id="tenant-a",
+        kb_ids=["kb-1"],
+        store=_FakeStore([chunk]),
+        audit_context=KBRetrievalAuditContext(run_id="run-3", tenant_id="tenant-a"),
+    )
+
+    assert [item.chunk.id for item in result.chunks] == ["c1"]

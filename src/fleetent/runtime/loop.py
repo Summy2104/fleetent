@@ -28,6 +28,7 @@ from fleetent.model import ModelConfigError, ModelPolicySnapshot, ResolvedModelC
 from fleetent.model.provider_health import ProviderHealthCache, get_health_cache
 from fleetent.observability import (
     InjectedContextTrace,
+    KBRetrievalAuditContext,
     TraceEvent,
     build_tool_args_summary,
     record_injected_context,
@@ -1865,7 +1866,17 @@ async def _run_inner(
     # break the run (mirrors the sandbox/eval_logger best-effort pattern).
     try:
         built_context = await build_context(
-            user_id, user_input, agent_name or "", active_cfg.max_tokens or 4096
+            user_id,
+            user_input,
+            agent_name or "",
+            active_cfg.max_tokens or 4096,
+            audit_context=KBRetrievalAuditContext(
+                run_id=run_id,
+                session_id=session_id,
+                user_id=user_id,
+                agent_name=agent_name,
+                tenant_id=principal.tenant_id if principal is not None else "default",
+            ),
         )
         _append_system_context(messages, system_prompt, built_context.text)
         _record_injected_context(run_id, built_context.sources, session_id=session_id)
@@ -2458,7 +2469,17 @@ async def run_stream(
     # trace. Best-effort — missing DB / disabled KB must not break the stream.
     try:
         built_context = await build_context(
-            user_id, user_input, agent_name or "", active_cfg.max_tokens or 4096
+            user_id,
+            user_input,
+            agent_name or "",
+            active_cfg.max_tokens or 4096,
+            audit_context=KBRetrievalAuditContext(
+                run_id=run_id,
+                session_id=session_id,
+                user_id=user_id,
+                agent_name=agent_name,
+                tenant_id=principal.tenant_id if principal is not None else "default",
+            ),
         )
         _append_system_context(messages, system_prompt, built_context.text)
         _record_injected_context(run_id, built_context.sources, session_id=session_id)

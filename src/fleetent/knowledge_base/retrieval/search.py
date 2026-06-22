@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 from typing import Literal, Protocol
 
-from fleetent import vector_store
+from fleetent import agent_config, vector_store
 from fleetent.config import KnowledgeBaseSettings, RerankSettings
 from fleetent.knowledge_base.core import KnowledgeChunk, KnowledgeReadable
+from fleetent.observability import KBRetrievalAuditContext, record_kb_retrieval
 from fleetent.vector_store import rerank as rerank_runtime
 
 SearchMode = Literal["vector", "keyword", "hybrid"]
@@ -33,6 +35,7 @@ async def search(
     limit: int = 10,
     mode: SearchMode = "vector",
     rerank: bool = False,
+    audit_context: KBRetrievalAuditContext | None = None,
 ) -> list[KnowledgeChunk]:
     """Search knowledge chunks using vector, keyword, or hybrid retrieval."""
 
@@ -46,10 +49,11 @@ async def search(
     settings = _scope_settings()
     resolved_tenant_id = tenant_id or settings.default_tenant_id
     resolved_kb_ids = kb_ids or [settings.default_kb_id]
+    start = time.monotonic()
     if mode == "keyword":
-        return store.search_keyword(query, resolved_tenant_id, resolved_kb_ids, limit)
-    if mode == "hybrid":
-        return await _search_hybrid(
+        results = store.search_keyword(query, resolved_tenant_id, resolved_kb_ids, limit)
+    elif mode == "hybrid":
+        results = await _search_hybrid(
             query,
             resolved_tenant_id,
             resolved_kb_ids,
@@ -57,8 +61,55 @@ async def search(
             store,
             rerank=rerank,
         )
+    else:
+        results = await _search_vector(query, resolved_tenant_id, resolved_kb_ids, limit, store)
+    latency_ms = (time.monotonic() - start) * 1000.0
+    _record_search_audit(
+        audit_context,
+        query=query,
+        results=results,
+        latency_ms=latency_ms,
+        mode=mode,
+        kb_ids=resolved_kb_ids,
+    )
+    return results
 
-    return await _search_vector(query, resolved_tenant_id, resolved_kb_ids, limit, store)
+
+def _record_search_audit(
+    audit_context: KBRetrievalAuditContext | None,
+    *,
+    query: str,
+    results: list[KnowledgeChunk],
+    latency_ms: float,
+    mode: str,
+    kb_ids: list[str],
+) -> None:
+    if audit_context is None:
+        return
+    try:
+        record_kb_retrieval(
+            audit_context,
+            query=query,
+            results=results,
+            latency_ms=latency_ms,
+            mode=mode,
+            kb_ids=kb_ids,
+            plaintext=_audit_plaintext_enabled(),
+        )
+    except Exception as exc:  # noqa: BLE001 — side channel; never break retrieval
+        _logger().warn(
+            "kb_retrieval_audit_failed",
+            run_id=audit_context.run_id,
+            mode=mode,
+            error=str(exc),
+        )
+
+
+def _audit_plaintext_enabled() -> bool:
+    audit = getattr(agent_config.active_agent_or_default().knowledge, "retrieval_audit", None)
+    if audit is not None and hasattr(audit, "plaintext"):
+        return bool(audit.plaintext)
+    return bool(_scope_settings().retrieval_audit.plaintext)
 
 
 async def _search_vector(

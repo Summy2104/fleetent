@@ -242,12 +242,21 @@ class AgentRetrievalPolicy(BaseModel):
     rerank_route: str = ""
 
 
+class AgentKnowledgeRetrievalAudit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    plaintext: bool = False
+
+
 class AgentKnowledge(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
     bindings: list[AgentKnowledgeBinding] = Field(default_factory=list)
     retrieval_policy: AgentRetrievalPolicy = Field(default_factory=AgentRetrievalPolicy)
+    retrieval_audit: AgentKnowledgeRetrievalAudit = Field(
+        default_factory=AgentKnowledgeRetrievalAudit
+    )
 
     @model_validator(mode="after")
     def _validate_bindings(self) -> "AgentKnowledge":

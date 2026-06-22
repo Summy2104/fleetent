@@ -35,11 +35,13 @@ from fleetent.observability.pilot_verification import (
 )
 from fleetent.observability.traces import (
     InjectedContextTrace,
+    KBRetrievalAuditContext,
     TraceEvent,
     TraceQuery,
     build_tool_args_summary,
     query_trace_events,
     record_injected_context,
+    record_kb_retrieval,
     record_tool_call,
     record_trace_event,
 )
@@ -55,6 +57,7 @@ __all__ = [
     "DiagnosticsRetentionPlan",
     "DiagnosticsRetentionResult",
     "InjectedContextTrace",
+    "KBRetrievalAuditContext",
     "ModelPerformance",
     "ModelUsage",
     "PerformanceQuery",
@@ -80,6 +83,7 @@ __all__ = [
     "performance",
     "plan_diagnostics_retention",
     "query_trace_events",
+    "record_kb_retrieval",
     "real_smoke_gate",
     "recommend",
     "record_injected_context",
