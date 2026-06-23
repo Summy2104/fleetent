@@ -297,6 +297,62 @@ def test_export_skips_secret_files_in_manifest(tmp_path):
     assert "secrets/google.json" in skipped
 
 
+def test_sanitize_redacts_env_style_key_value_pairs():
+    """_sanitize must redact KEY=value lines where the key contains a secret word (task 5.3 / D6).
+
+    The existing _SECRET_WORD_RE uses word boundaries, so ANTHROPIC_API_KEY=value is NOT matched
+    because there is no word boundary before API_KEY inside a compound name. This test enforces
+    that the fallback covers compound env-var names like ANTHROPIC_API_KEY and FLEETENT_TUI_TOKEN.
+    """
+    from fleetent.observability.diagnostics import _sanitize
+
+    # Values must NOT contain any of the keywords (token/secret/etc.) so that only
+    # the KEY name triggers redaction — this is the gap the new pattern must close.
+    text = "ANTHROPIC_API_KEY=zxcvbnm12345678 other=stuff MYAPP_SECRET_KEY=qwerty98765432"
+    result = _sanitize(text)
+
+    assert "zxcvbnm12345678" not in result, "ANTHROPIC_API_KEY value was not redacted"
+    assert "qwerty98765432" not in result, "MYAPP_SECRET_KEY value was not redacted"
+    # non-secret keys must not be redacted
+    assert "other=stuff" in result
+
+
+def test_export_excludes_agent_env_files_from_archive(tmp_path):
+    """agent home .env files must not appear in the diagnostics archive (task 5.1 / D6)."""
+    from fleetent.observability.diagnostics import DiagnosticsExportRequest, export_diagnostics
+
+    # Create agent home with a .env containing real secrets
+    agent_home = tmp_path / "data" / "agents" / "support"
+    agent_home.mkdir(parents=True)
+    env_file = agent_home / ".env"
+    env_file.write_text("ANTHROPIC_API_KEY=sk-live-secret\nFLEETENT_TUI_TOKEN=ma-" + "a" * 64 + "\n")
+
+    data_dir = tmp_path / "data"
+
+    package = export_diagnostics(
+        DiagnosticsExportRequest(
+            output_dir=tmp_path / "exports",
+            data_dir=data_dir,
+            include_logs=False,
+            include_traces=False,
+            include_connector_status=False,
+        )
+    )
+
+    with zipfile.ZipFile(package.path) as archive:
+        manifest = json.loads(archive.read("manifest.json"))
+        all_names = archive.namelist()
+        all_content = "".join(archive.read(n).decode("utf-8", errors="replace") for n in all_names)
+
+    # .env must not appear in any archive file
+    assert "sk-live-secret" not in all_content
+    assert ".env" not in " ".join(all_names)
+
+    # skipped_artifacts must record the excluded .env with a redacted reference
+    skipped_names = {entry["name"] for entry in manifest["skipped_artifacts"]}
+    assert "agents/support/.env" in skipped_names
+
+
 def test_diagnostics_database_factory_builds_sqlite_database():
     from fleetent.db import SQLiteDatabase
     from fleetent.observability import diagnostics

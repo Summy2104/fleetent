@@ -23,6 +23,12 @@ _SECRET_WORD_RE = re.compile(
     r"\b(token|secret|password|api[_-]?key|authorization|credential)[\s:=_-]+([^\s,;]+)",
     re.IGNORECASE,
 )
+# Catches compound env-var names that contain a secret word as a substring but have no word
+# boundary before it (e.g. ANTHROPIC_API_KEY, MYAPP_SECRET_KEY, FLEETENT_TUI_TOKEN).
+# Only redacts values that look token-like (≥8 non-whitespace chars without = in the value).
+_ENV_SECRET_KEY_RE = re.compile(
+    r"(?i)\b([A-Z0-9_]*(?:token|secret|password|api[_-]?key|credential|authorization)[A-Z0-9_]*)=([^\s,;=]{8,})"
+)
 
 
 def _default_data_dir() -> Path:
@@ -320,6 +326,13 @@ def _forbidden_skips(data_dir: Path, secrets_dir: Path | None) -> list[dict[str,
             ):
                 rel = path.relative_to(data_dir).as_posix()
                 skipped.append({"name": f"data/{rel}", "reason": "sqlite database excluded"})
+        # Agent .env files contain live secrets — exclude and record a redacted reference only.
+        agents_dir = data_dir / "agents"
+        if agents_dir.is_dir():
+            for env_path in sorted(agents_dir.glob("*/.env")):
+                if env_path.is_file():
+                    rel = env_path.relative_to(data_dir).as_posix()
+                    skipped.append({"name": rel, "reason": "agent env file excluded"})
     if secrets_dir and secrets_dir.exists():
         for path in sorted(secrets_dir.iterdir()):
             if path.is_file():
@@ -371,6 +384,7 @@ def _safe_dataclass(value: Any) -> object:
 
 def _sanitize(value: str) -> str:
     redacted = _SECRET_WORD_RE.sub(r"\1 [REDACTED]", value)
+    redacted = _ENV_SECRET_KEY_RE.sub(r"\1=[REDACTED]", redacted)
     redacted = redacted.replace("secret [REDACTED] excluded", "secret file excluded")
     return str(_redact_value(redacted))
 
