@@ -42,6 +42,7 @@ from fleetent.platform.agent_statistics import stats_admin_api
 from fleetent.platform.askit_console import agent_apply_api
 from fleetent.platform.chat_management import chat_admin_api
 from fleetent.platform.connector_management import connector_admin_api, vault_provider
+from fleetent.platform.im_gateway_management import im_identity_admin_api
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import provider_admin_api
 from fleetent.platform.node_management import (
@@ -256,6 +257,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(title="fleetent", lifespan=lifespan)
 app.include_router(user_admin_api.router)
+app.include_router(im_identity_admin_api.router)
 app.include_router(skill_admin_api.router)
 app.include_router(provider_admin_api.router)
 app.include_router(kb_admin_api.router)
