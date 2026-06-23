@@ -120,6 +120,71 @@ def test_pin_and_unpin_agent(tmp_path, monkeypatch) -> None:
     assert placement_store.get_for_agent(agent.id) is None
 
 
+def test_list_node_placements_returns_agent_name(tmp_path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch)
+    node_store.register_node("node-a")
+    agent = agent_store.create_agent("ops", "Ops", ["shell"])
+    placement_store.pin_agent(agent.id, "node-a", pinned_by="admin")
+
+    response = client.get(
+        "/admin/nodes/node-a/placements",
+        headers=_session_header("admin"),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["agent_id"] == agent.id
+    assert body[0]["node_id"] == "node-a"
+    assert body[0]["agent_name"] == "ops"
+    assert body[0]["pinned_by"] == "admin"
+
+
+def test_list_node_placements_empty(tmp_path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch)
+    node_store.register_node("node-a")
+
+    response = client.get(
+        "/admin/nodes/node-a/placements",
+        headers=_session_header("admin"),
+    )
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_list_node_placements_isolated_per_node(tmp_path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch)
+    node_store.register_node("node-a")
+    node_store.register_node("node-b")
+    agent_a = agent_store.create_agent("ops-a", "Ops A", ["shell"])
+    agent_b = agent_store.create_agent("ops-b", "Ops B", ["shell"])
+    placement_store.pin_agent(agent_a.id, "node-a")
+    placement_store.pin_agent(agent_b.id, "node-b")
+
+    response = client.get(
+        "/admin/nodes/node-a/placements",
+        headers=_session_header("admin"),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [placement["agent_id"] for placement in body] == [agent_a.id]
+    assert body[0]["agent_name"] == "ops-a"
+
+
+def test_list_node_placements_requires_admin(tmp_path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch)
+    node_store.register_node("node-a")
+
+    response = client.get(
+        "/admin/nodes/node-a/placements",
+        headers=_session_header("viewer"),
+    )
+
+    assert response.status_code == 403
+
+
 def test_non_admin_returns_403(tmp_path, monkeypatch) -> None:
     client = _client(tmp_path, monkeypatch)
 

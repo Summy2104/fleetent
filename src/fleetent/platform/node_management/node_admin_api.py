@@ -8,7 +8,7 @@ from fastapi import APIRouter, Header, HTTPException, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from fleetent import audit_log, auth, user_store
+from fleetent import agent_store, audit_log, auth, user_store
 from fleetent.platform.node_management import node_store, placement_store
 
 router = APIRouter(prefix="/admin/nodes")
@@ -88,6 +88,20 @@ def deregister_node(node_id: str, authorization: str | None = Header(None)) -> R
         )
     audit_log.write_audit(user.id, "node.deregister", target_type="node", target_id=node_id)
     return Response(status_code=204)
+
+
+@router.get("/{node_id}/placements")
+def list_node_placements(
+    node_id: str,
+    authorization: str | None = Header(None),
+) -> list[dict[str, Any]]:
+    _require_admin(authorization)
+    placements = placement_store.list_by_node(node_id)
+    result: list[dict[str, Any]] = []
+    for placement in placements:
+        agent = agent_store.get_by_id(placement["agent_id"])
+        result.append({**placement, "agent_name": agent.name if agent is not None else None})
+    return result
 
 
 @router.post("/{node_id}/pin")
