@@ -17,6 +17,54 @@ def _config(tmp_path) -> NodeConfig:
     )
 
 
+# ---------------------------------------------------------------------------
+# Task 2.1 / 2.2 — PlatformAddressResolver
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_platform_address_resolver_returns_all_bindings(tmp_path) -> None:
+    from fleetent.node.im_edge import PlatformAddressResolver
+
+    route = respx.post("https://platform.internal/nodes/node-a/identity/addresses").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "addresses": [
+                    {"platform": "slack", "platform_user_id": "U_alice"},
+                    {"platform": "telegram", "platform_user_id": "TG_alice"},
+                ]
+            },
+        )
+    )
+    resolver = PlatformAddressResolver(_config(tmp_path))
+
+    addresses = resolver.resolve("user-42")
+
+    assert addresses == [
+        {"platform": "slack", "platform_user_id": "U_alice"},
+        {"platform": "telegram", "platform_user_id": "TG_alice"},
+    ]
+    assert route.called
+    request = route.calls[0].request
+    assert request.headers["Authorization"] == "Bearer ma-" + "1" * 64
+    assert b'"user_id":"user-42"' in request.content
+
+
+@respx.mock
+def test_platform_address_resolver_returns_empty_for_unbound_user(tmp_path) -> None:
+    from fleetent.node.im_edge import PlatformAddressResolver
+
+    respx.post("https://platform.internal/nodes/node-a/identity/addresses").mock(
+        return_value=httpx.Response(200, json={"addresses": []})
+    )
+    resolver = PlatformAddressResolver(_config(tmp_path))
+
+    addresses = resolver.resolve("user-unbound")
+
+    assert addresses == []
+
+
 @respx.mock
 def test_platform_identity_resolver_calls_node_identity_endpoint(tmp_path) -> None:
     from fleetent.node.im_edge import PlatformIdentityResolver

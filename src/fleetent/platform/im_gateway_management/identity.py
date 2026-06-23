@@ -363,6 +363,23 @@ def delete_im_identity(im_user_id: int, actor: str | None = None) -> None:
     )
 
 
+def resolve_user_addresses(user_id: str) -> list[dict[str, str]]:
+    """Return all IM bindings for a user as a list of {platform, platform_user_id} dicts.
+
+    Used by the node reverse-lookup endpoint to fan-out delivery to all of the user's
+    connected channels. Returns an empty list when the user has no bindings.
+    """
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT platform, platform_user_id FROM im_users WHERE user_id = :uid",
+            {"uid": user_id},
+        ).fetchall()
+    return [
+        {"platform": str(r["platform"]), "platform_user_id": str(r["platform_user_id"])}
+        for r in rows
+    ]
+
+
 def unlink_identity(platform: str, platform_user_id: str) -> None:
     """Delete one platform identity mapping if it exists."""
     with _conn() as conn:

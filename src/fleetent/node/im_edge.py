@@ -22,6 +22,9 @@ from fleetent.im_gateway.telegram_supervisor import TelegramSupervisor
 from fleetent.node.backend import BaseProcessBackend
 from fleetent.node.config import NodeConfig
 from fleetent.node.provider import DesiredState
+from fleetent.structured_logging import get_logger
+
+_logger = get_logger("node.im_edge")
 
 
 def _extract_link_code(text: str) -> str | None:
@@ -69,6 +72,31 @@ class PlatformIdentityResolver:
         return user_id
 
 
+class PlatformAddressResolver:
+    """Reverse-lookup all IM addresses for a user_id via the platform node API.
+
+    Called by node drain for user_id-targeted intents — agent never touches this directly.
+    """
+
+    def __init__(self, config: NodeConfig) -> None:
+        self._config = config
+
+    def resolve(self, user_id: str) -> list[dict[str, str]]:
+        response = httpx.post(
+            f"{self._config.platform_url}/nodes/{self._config.node_id}/identity/addresses",
+            headers={"Authorization": f"Bearer {self._config.service_key}"},
+            json={"user_id": user_id},
+            timeout=10.0,
+        )
+        try:
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise IMIdentityResolutionError(str(exc)) from exc
+        payload = dict(response.json())
+        addresses = payload.get("addresses", [])
+        return [dict(a) for a in addresses if isinstance(a, dict)]
+
+
 class NodeIMEdgeHost:
     """Own node-hosted IM supervisors and the injected managed identity resolver."""
 
@@ -89,6 +117,7 @@ class NodeIMEdgeHost:
         self._config = config
         self._backend = backend
         self._resolver = PlatformIdentityResolver(config)
+        self._address_resolver = PlatformAddressResolver(config)
         self._resolver_setter = resolver_setter
         self._dispatcher_setter = dispatcher_setter
         self._slack_supervisor = slack_supervisor or SlackSupervisor()
@@ -201,9 +230,14 @@ class NodeIMEdgeHost:
 
         address = json.loads(str(row["address_json"]))
         payload = json.loads(str(row["payload_json"]))
+        target_type = str(address.get("target_type", "user") or "user")
+
+        if target_type == "user_id":
+            await self._deliver_user_id_intent(agent_name, row, address, payload, connectors, db)
+            return
+
         platform = str(row["platform"])
         target = str(address.get("target", ""))
-        target_type = str(address.get("target_type", "user") or "user")
         thread = address.get("thread")
         connector = connectors.get(platform)
 
@@ -237,6 +271,55 @@ class NodeIMEdgeHost:
             await self._mark_queue_sent(agent_name, row)
         except Exception:
             return
+
+    async def _deliver_user_id_intent(
+        self,
+        agent_name: str,
+        row: dict[str, Any],
+        address: dict[str, Any],
+        payload: dict[str, Any],
+        connectors: dict[str, Any],
+        db: SQLiteDatabase,
+    ) -> None:
+        from fleetent import outbound
+
+        user_id = str(address.get("user_id", ""))
+        text = str(payload.get("text", ""))
+        blocks = payload.get("blocks") or None
+
+        try:
+            bindings = self._address_resolver.resolve(user_id)
+        except Exception as exc:
+            _logger.warn("directed_reach_address_lookup_failed", user_id=user_id, error=str(exc))
+            outbound_queue_store.mark_failed_with_db(db, str(row["id"]))
+            return
+
+        if not bindings:
+            _logger.info("directed_reach_no_bindings", user_id=user_id)
+            await self._mark_queue_sent(agent_name, row)
+            return
+
+        for binding in bindings:
+            plat = str(binding.get("platform", ""))
+            puid = str(binding.get("platform_user_id", ""))
+            connector = connectors.get(plat)
+            try:
+                await outbound.send_to(
+                    plat, connector, puid, text, target_type="user", blocks=blocks
+                )
+            except Exception as exc:
+                _logger.warn(
+                    "directed_reach_channel_delivery_failed",
+                    user_id=user_id,
+                    platform=plat,
+                    error=str(exc),
+                )
+
+        dedup_key = str(row.get("dedup_key", "") or "")
+        if dedup_key:
+            self._record_dedup_key(dedup_key)
+        with contextlib.suppress(Exception):
+            await self._mark_queue_sent(agent_name, row)
 
     async def _mark_queue_sent(self, agent_name: str, row: dict[str, Any]) -> None:
         db_path = self._agent_db_paths.get(agent_name)

@@ -68,7 +68,36 @@ def is_node_managed_runtime() -> bool:
     return all(required)
 
 
-def resolve_for_runtime(agent_name: str | None, connectors: dict[str, Any] | None) -> dict[str, Any]:
+def notify_user(
+    user_id: str,
+    message: str,
+    *,
+    blocks: list[dict[str, Any]] | None = None,
+) -> None:
+    """Enqueue a directed-reach notification to a user across all their IM channels.
+
+    In node-managed runtimes this writes a user_id-targeted intent to im_outbound_queue;
+    node drain handles the reverse address lookup and fan-out delivery. In standalone /
+    dev runtimes this is a no-op (no im_users table, no node to drain).
+    """
+    if not is_node_managed_runtime():
+        import logging
+
+        logging.getLogger(__name__).debug(
+            "notify_user: non-managed runtime, skipping delivery for user_id=%s", user_id
+        )
+        return
+    outbound_queue_store.enqueue(
+        platform="directed",
+        address={"target_type": "user_id", "user_id": user_id},
+        payload={"kind": "text", "text": message, "blocks": blocks or []},
+        dedup_key=f"notify_user:{user_id}:{uuid.uuid4()}",
+    )
+
+
+def resolve_for_runtime(
+    agent_name: str | None, connectors: dict[str, Any] | None
+) -> dict[str, Any]:
     """Return the effective outbound connectors for this runtime mode."""
     if connectors:
         return connectors
