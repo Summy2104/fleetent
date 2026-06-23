@@ -65,7 +65,7 @@ platform（管理入口） ──→ agent runtime（被启停、被读取）
 agent runtime ──✗──→ platform        # 严格禁止反向依赖
 ```
 
-- **agent 运行时模块**（`runtime/`、`session/`、`im_gateway/`、`tools/`、`integrations/`、`model/`、`observability/`、`governance/`、`memory/`、`long_term_ctx/`、`reflection/`）MUST NOT `import fleetent.platform.*`
+- **agent 运行时模块**（`runtime/`、`session/`、`im_gateway/`、`tools/`、`integrations/`、`model/`、`observability/`、`governance/`、`memory/`、`long_term_ctx/`、`reflection/`）MUST NOT `import fleetent.platform.*`。`im_gateway/` 仍是 **no-platform-import edge face**；managed 下执行宿主改为 **node**、身份 resolver 注入方改为 **node**，但 normalizer/loop 仍留在 agent。
 - **独立组件 / 基础设施**（`knowledge_base/`、`vector_store/`、`structured_logging.py`）同样 MUST NOT `import fleetent.platform.*`
 - **KB 读写边界**：`knowledge_base.retrieval` MUST NOT import `knowledge_base.ingest`（依赖护栏测试强制）
 - agent 运行时产生的数据（会话历史、压缩/token/恢复元数据、运行轨迹）只能落 agent 侧（session 文件、agent store、observability trace），**严禁写入 platform 管理表**
@@ -78,7 +78,7 @@ agent runtime ──✗──→ platform        # 严格禁止反向依赖
 
 长生命周期异步资源（网络连接、SDK 会话、子进程流）**必须有唯一 owner task**：**谁打开谁关闭**——enter 和 exit 发生在同一个 task 内（anyio cancel scope / task group 的硬性要求）。跨 task 只传**句柄**（供消费），不传生命周期操作；**禁止用模块级全局单例持有活资源**（如模块级 `AsyncExitStack` 装连接）——它由"谁先用谁的 task"enter、却在关停时被另一个 task 解栈，必然违反 task 亲和性并在 teardown 时崩溃整个进程（2026-06-11 事故）。关停链上每一步必须**舱壁化**（独立 try/except + 超时），单组件收尾失败只记日志、不改变进程退出码、不波及其它组件；优雅排水路径必须 exit 0。
 
-> 范式实现：IM 连接 supervisor（每连接一个 owner task，`stop()` 定向取消）、MCP 会话宿主（`integrations/mcp/client.py` 的 `_SessionHost` + `aclose_all()`）。护栏 `test_module_dependency_guardrails.py::test_no_module_level_asyncexitstack_singleton` 强制「src 内零模块级 AsyncExitStack 单例」。函数内局部 `AsyncExitStack`（同 task、作用域内）不受限。
+> 范式实现：IM 连接 supervisor（managed 宿主=node；standalone 宿主=agent，每连接一个 owner task，`stop()` 定向取消）、MCP 会话宿主（`integrations/mcp/client.py` 的 `_SessionHost` + `aclose_all()`）。护栏 `test_module_dependency_guardrails.py::test_no_module_level_asyncexitstack_singleton` 强制「src 内零模块级 AsyncExitStack 单例」。函数内局部 `AsyncExitStack`（同 task、作用域内）不受限。
 
 ---
 
@@ -89,20 +89,23 @@ agent runtime ──✗──→ platform        # 严格禁止反向依赖
 ```
 src/fleetent/
   platform/          # 平台控制面（管理 API / CLI）
+  node/              # 托管部署宿主：拉起 agent 进程、forwarder、IM-edge 宿主、reconcile
   runtime/           # agent 核心循环与生命周期
   memory/            # 用户记忆提取/存储/检索
   long_term_ctx/     # 长期上下文构建
   reflection/        # 反思报告生成
   knowledge_base/    # KB 检索/向量化/持久化
   vector_store/      # 向量嵌入和重排
+  substrate/         # agent 侧关系存储可插拔后端抽象（被 db.py 消费）
   governance/        # 审批门 / 权限 / 审计
   integrations/      # MCP client / 沙箱（sandbox/ 可插拔后端：backends/docker.py + backends/microsandbox.py）
   model/             # 模型路由和提供商健康
   observability/     # trace / usage / diagnostics
   session/           # 会话持久化
-  im_gateway/        # Slack / Telegram 适配器
+  im_gateway/        # Slack / Telegram edge face（managed 宿主=node；standalone 宿主=agent）
   tools/             # 工具注册 / 内置工具
   skills/            # Skill 注册和注入
+  builtin_skills/    # 内置 skill 包（如 getting-started）
   tui/               # 交互式终端 TUI
   structured_logging.py  # 跨域日志底座（顶层基础设施）
   server.py          # FastAPI 入口
@@ -241,3 +244,5 @@ FLEETENT_TOKEN         # Bearer token（--token 参数优先）
 - **MCP 会话宿主**：每个 MCP 会话由 `_SessionHost`（`integrations/mcp/client.py`）的专属 task 持有，transport/ClientSession 的 enter/exit 同 task；`_active_sessions[(scope,id)]` 仍存 live `ClientSession` 供消费，`_session_hosts` 存宿主管生命周期。关停经 `aclose_all()`（接入 `agent_app._drain_and_close` 排干之后、`server.py` lifespan shutdown）。测试用 stub `_transport_cm` + `ClientSession`；**anyio 硬约束：cancel scope 必须同 task enter/exit**，不得用模块级 `AsyncExitStack` 持有连接（护栏强制）
 - **model/resolver.py**：每次调用新建 client——故意的，client 无状态且廉价
 - **Sandbox 可插拔后端**：`integrations/sandbox` 抽象为 `BaseSandboxBackend`（`backend.py`）+ `backends/docker.py`（默认）+ `backends/microsandbox.py`（本地 microVM，Apache-2.0，需宿主 KVM/HVF + 预装 runtime，否则 `is_installed()` 探测失败 → mode 降级 OFF）。后端经 `factory.create_backend` 按 `sandbox.backend`（agent.yaml > platform.yaml > 默认 docker）选型。能力差异经 `BackendCapabilities`（`persist_workspace`/`workspace_mount`/`orphan_cleanup`）门控，manager/cleanup 按能力降级、不用 isinstance。`client.py` 是 `SandboxClient = DockerBackend` 的 re-export shim——`monkeypatch`/`patch` Docker 内部（如 `_KILL_GRACE_SECONDS`、`_logger`）须打在 `backends.docker`，打 shim 不生效
+- **Directed-reach 主动触达**：`outbound_connectors.notify_user(user_id, message, blocks=...)` 按内部 user_id 主动 DM 用户（不在对话里也能触达）。**agent 只发意图、不解析地址**：managed 下入队一条 `target_type="user_id"` 意图到 `im_outbound_queue`（platform=`directed`），node drain 经 `PlatformAddressResolver` 调平台 `POST /nodes/{id}/identity/addresses` 反查 `im_users` → 全发该用户所有绑定渠道（fan-out）；无绑定→不投递只记日志。非 node-managed（dev `agent run`）= no-op。设计权威 `docs/architecture/directed-reach.md`。首消费者=reflection user-memory 提案送本人审批。回复复用既有审批链（入站 resolver + `approve <id>`）
+- **KB connector 定时调度**：`platform/knowledge_base_management/kb_connector_sweep.py` 的 `sweep()` 由 platform `cron_scheduler` 定时跑（server.py lifespan 经 `add_interval_job` 注册、id `__kb_connector_sync_sweep__`），扫 `kb_connectors` 中 `enabled` 且配了 `sync_interval_seconds`、按 `last_scheduled_sync_at` 到期者 → `enqueue_connector_job` 入既有队列（去重=入队即推进 `last_scheduled_sync_at`），worker drain 跑 `run_connector_sync`；多行历史落 `knowledge_connector_sync_history`（KB core 嵌入式-Y）。kb_connectors schedule 字段在管理库（Alembic 101）

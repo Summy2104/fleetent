@@ -12,6 +12,7 @@ are served only when a port is given.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import json
 import os
@@ -28,7 +29,12 @@ from pydantic import BaseModel
 
 from fleetent import agent_config, paths
 from fleetent.agent_config import AgentFile
-from fleetent.identity import LocalBearerAdapter, Principal
+from fleetent.identity import (
+    INGRESS_PRINCIPAL_HEADER,
+    LocalBearerAdapter,
+    Principal,
+    decode_ingress_principal,
+)
 from fleetent.structured_logging import get_logger
 
 if TYPE_CHECKING:
@@ -45,6 +51,45 @@ class ChatRequest(BaseModel):
 class ApprovalRequest(BaseModel):
     decision: str  # "approved" | "rejected"
     approver_user_id: str = "anonymous"
+
+
+class ImAttachmentRequest(BaseModel):
+    kind: str
+    data_b64: str | None = None
+    mime: str
+    filename: str = ""
+    note: str = ""
+
+
+class ImSessionContextRequest(BaseModel):
+    platform: str
+    sender_id: str
+    sender_name: str = ""
+    chat_type: str = "dm"
+    channel_name: str = ""
+    was_mentioned: bool = False
+    thread_root: str = ""
+
+
+class ImRouteRequest(BaseModel):
+    platform: str
+    session_id: str
+    user_id: str
+    text: str
+    channel_id: str = ""
+    workspace_id: str = ""
+    agent_name: str = ""
+    session_context: ImSessionContextRequest | None = None
+    attachments: list[ImAttachmentRequest] = []
+
+
+class ImReply(BaseModel):
+    text: str
+    blocks: list[dict[str, Any]] | None = None
+
+
+class ImRouteResponse(BaseModel):
+    replies: list[ImReply]
 
 
 @dataclass
@@ -140,6 +185,27 @@ def _check_tenant(principal: Principal, agent_tenant: str) -> bool:
     return principal.tenant_id == agent_tenant
 
 
+def _resolve_ingress_principal(
+    authorization_header: str,
+    carried_principal_header: str | None,
+    *,
+    local_bearer: LocalBearerAdapter | None = None,
+) -> Principal:
+    """Resolve the effective ingress Principal inside the trusted transport boundary."""
+    principal = None
+    if authorization_header.startswith("Bearer "):
+        token = authorization_header.removeprefix("Bearer ").strip()
+        adapter = local_bearer or LocalBearerAdapter()
+        principal = adapter(token) or _validate_tui_token(authorization_header)
+    if principal is None:
+        raise HTTPException(status_code=401, detail="invalid or missing bearer token")
+    try:
+        carried_principal = decode_ingress_principal(carried_principal_header)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return carried_principal or principal
+
+
 def _redirect_agent_data_paths(home_dir: Path) -> None:
     """Redirect all per-agent runtime data sinks to ``home_dir/data/``.
 
@@ -219,6 +285,7 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     from fleetent import reflection, schedule_store
     from fleetent.governance import approval_request_store, approval_store
     from fleetent.governance import tool_auto_approvals_store as allowlist_store
+    from fleetent.im_gateway import outbound_queue_store
     from fleetent.knowledge_base import runtime as kb_runtime
     from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
     from fleetent.memory import shared as shared_memory
@@ -254,6 +321,7 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     runtime_context.set_state_db(agent_state_db)
     sub_agent_lifecycle.set_state_db(agent_state_db)
     schedule_store.set_state_db(agent_state_db)
+    outbound_queue_store.set_state_db(agent_state_db)
     # unified-file-exchange: wire the artifact ledger + per-scope hard-link views root
     # (data_dir is <agent_home>/data, so the exchange tree lives under data_dir.parent).
     from fleetent import artifact_exchange
@@ -309,37 +377,29 @@ async def _start_infra(
         from fleetent.integrations import mcp as mcp_client
         from fleetent.integrations.mcp.client import McpServerConfig
 
-        configs = [
-            McpServerConfig(
-                id=s.id,
-                transport=s.transport,
-                url=s.url,
-                auth_type=s.auth_type,
-                api_key_env=s.api_key_env,
-                command=s.command,
-                args=list(s.args),
-                env=dict(s.env),
-                headers=dict(s.headers),
-                connect_timeout=s.connect_timeout,
-                call_timeout=s.call_timeout,
-                approval_rules=list(s.approval_rules),
-            )
-            for s in agent.mcp_servers
-        ]
+        configs = [McpServerConfig.from_settings(s) for s in agent.mcp_servers]
         try:
             # unified-file-exchange: the agent home (data_dir's parent) anchors each
             # stdio server's /exchange partition tree (cwd + XDG injection + root binding).
-            await mcp_client.register_all(configs, agent_home=data_dir.parent)
+            await mcp_client.register_all(
+                configs, agent_home=data_dir.parent, tool_naming=agent.mcp.tool_naming
+            )
         except Exception as exc:  # noqa: BLE001 — MCP unavailable must not abort boot
             _logger.warn("agent_runtime_mcp_register_failed", error=str(exc))
     session_mgr.start_session_maintenance()
     reflection_settings = getattr(agent, "reflection", None)
     if reflection_settings is not None and getattr(reflection_settings, "enabled", False) is True:
         from fleetent.reflection import scheduler as reflection_scheduler
+        from fleetent.reflection.reflection import AutoMaintenancePolicy
+
+        auto_policy = AutoMaintenancePolicy(
+            allow_low_risk=reflection_settings.auto_apply.allow_low_risk
+        )
 
         reflection_scheduler.start_reflection_scheduler(
             interval=reflection_settings.interval_seconds,
             scope=agent.name,
+            auto_policy=auto_policy,
         )
     # Restart recovery: flag sessions active just before this (re)start so the next
     # request can be recognized as a resumed conversation. Best-effort — a scan
@@ -363,11 +423,14 @@ async def _start_scheduler(agent: AgentFile) -> Any:
         return None
     from fleetent.cron_scheduler import CronScheduler
     from fleetent.im_gateway import connector_registry
+    from fleetent.outbound_connectors import resolve_for_runtime
 
     agent_name = agent.name
     scheduler = CronScheduler(
         settings=agent.scheduling,
-        connectors_resolver=lambda: connector_registry.snapshot(agent_name),
+        connectors_resolver=lambda: resolve_for_runtime(
+            agent_name, connector_registry.snapshot(agent_name)
+        ),
     )
     await scheduler.start()
     return scheduler
@@ -518,6 +581,7 @@ async def serve(
     port: int | None = None,
     home: str | Path | None = None,
     drain_timeout: float = 30.0,
+    start_im: bool = True,
 ) -> None:
     """Boot the agent and run it in the foreground until cancelled or drained.
 
@@ -535,7 +599,7 @@ async def serve(
     loop.add_signal_handler(signal.SIGUSR1, drain_event.set)
 
     try:
-        rt = await boot(agent_id, home=home, port=port)
+        rt = await boot(agent_id, home=home, port=port, start_im=start_im)
         try:
             if port is not None:
                 import uvicorn
@@ -583,14 +647,17 @@ def build_app(agent_name: str) -> FastAPI:
 
     _local_bearer = LocalBearerAdapter()
 
-    def _authenticate(authorization: str = Header(default="")) -> Principal:  # noqa: B008
-        principal = None
-        if authorization.startswith("Bearer "):
-            token = authorization.removeprefix("Bearer ").strip()
-            principal = _local_bearer(token) or _validate_tui_token(authorization)
-        if principal is None:
-            raise HTTPException(status_code=401, detail="invalid or missing bearer token")
-        return principal
+    def _authenticate(
+        authorization: str = Header(default=""),  # noqa: B008
+        carried_principal_header: str | None = Header(  # noqa: B008
+            default=None, alias=INGRESS_PRINCIPAL_HEADER
+        ),
+    ) -> Principal:
+        return _resolve_ingress_principal(
+            authorization,
+            carried_principal_header,
+            local_bearer=_local_bearer,
+        )
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
@@ -641,6 +708,7 @@ def build_app(agent_name: str) -> FastAPI:
             kwargs["agent_features"] = agent.features
             kwargs["allowed_skills"] = agent.allowed_skills
             kwargs["skill_authoring_enabled"] = agent.skill_authoring_enabled
+            kwargs["skill_hot_reload"] = agent.skill_hot_reload
             kwargs["governance"] = _governance_from_file(agent)
             kwargs["model_policy"] = ModelPolicySnapshot.from_agent(agent)
 
@@ -653,6 +721,43 @@ def build_app(agent_name: str) -> FastAPI:
                 yield f"data: {json.dumps(err, ensure_ascii=False)}\n\n"
 
         return StreamingResponse(_stream(), media_type="text/event-stream")
+
+    @app.post("/im/route")
+    async def im_route(
+        req: ImRouteRequest,
+        principal: Principal = Depends(_authenticate),  # noqa: B008
+    ) -> ImRouteResponse:
+        from fleetent.im_gateway import normalizer
+
+        agent = agent_config.current().get(agent_name)
+        agent_tenant = agent.tenant_id if agent is not None else "default"
+        if not _check_tenant(principal, agent_tenant):
+            raise HTTPException(status_code=403, detail="cross-tenant access denied")
+        replies: list[ImReply] = []
+
+        async def _reply(text: str, blocks: list[dict[str, Any]] | None = None) -> None:
+            replies.append(ImReply(text=text, blocks=blocks))
+
+        await normalizer.route(
+            normalizer.NormalizedMessage(
+                platform=req.platform,
+                session_id=req.session_id,
+                user_id=req.user_id,
+                text=req.text,
+                attachments=_deserialize_im_attachments(req.attachments),
+                reply_func=_reply,
+                channel_id=req.channel_id,
+                workspace_id=req.workspace_id,
+                agent_name=req.agent_name or agent_name,
+                session_context=(
+                    normalizer.SessionContext(**req.session_context.model_dump())
+                    if req.session_context is not None
+                    else None
+                ),
+            ),
+            principal=principal,
+        )
+        return ImRouteResponse(replies=replies)
 
     @app.websocket("/ws")
     async def ws_gateway(websocket: WebSocket) -> None:
@@ -671,16 +776,24 @@ def build_app(agent_name: str) -> FastAPI:
             )
             await websocket.close(code=1008)
             return
+        try:
+            principal = decode_ingress_principal(
+                websocket.headers.get(INGRESS_PRINCIPAL_HEADER.lower())
+            )
+        except ValueError:
+            await websocket.close(code=1008)
+            return
+        effective_principal = principal or tui_principal
         agent = agent_config.current().get(agent_name)
         agent_tenant = agent.tenant_id if agent is not None else "default"
-        if not _check_tenant(tui_principal, agent_tenant):
+        if not _check_tenant(effective_principal, agent_tenant):
             _logger.warn("tui_ws_cross_tenant_rejected", agent_tenant=agent_tenant)
             await websocket.close(code=1008)
             return
         await websocket.accept()
         transport = WSTransport(websocket)
         conn = tui_dispatch.Connection(
-            principal=tui_principal, transport=transport, agent_name=agent_name
+            principal=effective_principal, transport=transport, agent_name=agent_name
         )
         await transport.write(tui_proto.make_event(tui_proto.EVENT_GATEWAY_READY, {}))
         try:
@@ -703,3 +816,26 @@ def build_app(agent_name: str) -> FastAPI:
             await transport.close()
 
     return app
+
+
+def _deserialize_im_attachments(attachments: list[ImAttachmentRequest]) -> list[Any]:
+    from fleetent.im_gateway.normalizer import FileAttachment
+
+    decoded: list[Any] = []
+    for attachment in attachments:
+        if attachment.kind == "image":
+            if attachment.data_b64 is None:
+                continue
+            decoded.append((base64.b64decode(attachment.data_b64), attachment.mime))
+            continue
+        if attachment.kind == "file":
+            payload = base64.b64decode(attachment.data_b64) if attachment.data_b64 else None
+            decoded.append(
+                FileAttachment(
+                    data=payload,
+                    mime=attachment.mime,
+                    filename=attachment.filename,
+                    note=attachment.note,
+                )
+            )
+    return decoded

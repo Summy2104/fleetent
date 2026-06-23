@@ -1,122 +1,93 @@
 # platform-agent-gateway Specification
 
 ## Purpose
-Define the platform-side gateway for routing operator requests to node-hosted agents,
-including ingress authentication, transport abstraction, node forwarder, and agent
-loopback binding.
-
+TBD - canonical spec structure repaired during archive of im-edge-on-node-outbound.
 ## Requirements
+### Requirement: Node hosts the IM edge for its placed agents
 
-### Requirement: Platform ingress for agent chat and WebSocket gateway
+在 managed 拓扑下，**node**（而非 agent 进程）SHALL 为其放置的 agent 持有 IM 连接（Slack Socket Mode 出站 WS / Telegram 出站 poll）并运行 IM-edge（adapter + supervisor）。agent 进程 SHALL NOT 再启动这些 IM 连接。连接生命周期 SHALL 与 agent 生命周期对齐（node 起某 agent 时一并开它的 IM 连接、停时关），每连接遵循既有 owner-task 契约。`im_gateway` 模块 SHALL 仍不 `import fleetent.platform.*`（身份解析经注入，见下）——它是换了执行宿主（agent→node）与注入方的 **edge face**。
 
-The platform SHALL expose operator ingress for managed agents at
-`POST /admin/agents/{name}/chat` and `/admin/agents/{name}/ws`, authenticated as an
-admin operator via session token. The platform SHALL look up the hosting node by
-agent→node placement and SHALL be the only externally exposed surface; agents and node
-forwarders SHALL NOT be exposed directly.
+standalone（无 platform）部署下，IM SHALL 仍可在 agent 进程内运行（resolver 未注入→退化），不破坏 `fleetent agent run` 基线。
 
-#### Scenario: Operator chats with a managed agent through the platform
+#### Scenario: 托管下 node 持 IM 连接
 
-- **WHEN** an authenticated admin sends a message to `/admin/agents/{name}/chat` for an
-  agent placed on a node
-- **THEN** the platform routes to that node and returns the agent response as a stream
+- **WHEN** node 启动一个放置于其上、配置了 IM 的 agent
+- **THEN** node 为该 agent 建立 Slack/Telegram 连接；agent 进程不建立 IM 连接
 
-#### Scenario: Unplaced or unknown agent
+#### Scenario: standalone 下 agent 仍可跑 IM
 
-- **WHEN** the target agent is not placed on any node, or does not exist
-- **THEN** the platform returns a clear not-available error and does not hang
+- **WHEN** 无 platform 的 standalone 运行
+- **THEN** IM 仍可在 agent 进程内工作（身份退化为原始 platform_user_id），`fleetent agent run` 不受影响
 
-#### Scenario: Non-admin denied at the front door
+### Requirement: Platform identity-resolution endpoint for nodes
 
-- **WHEN** a non-admin or unauthenticated caller hits the ingress
-- **THEN** the platform returns 401/403 and does not forward
+平台 SHALL 暴露一个 node 专用的身份解析端点（如 `POST /nodes/{node_id}/identity/resolve`），用 **node service key** 鉴权（既有 node→platform 通道），入参为渠道身份（platform、platform_user_id、可选 verified_email、tenant），调 `resolve_or_provision` 返回已解析的 `Principal`。node 注入一个**调用该端点**的 IM 身份 resolver；`im_gateway` 因此无需 import platform。
 
-### Requirement: AgentTransport abstraction with DirectHttp implementation
+#### Scenario: node 经平台端点解析 IM 身份
 
-The platform SHALL reach a node-hosted agent through an `AgentTransport` abstraction
-whose contract supports a request producing a streaming response. This change SHALL
-provide a `DirectHttp` implementation that dials the node forwarder. The seam SHALL allow
-an alternative reverse-channel implementation later without changing ingress, routing, or
-agent gateway behavior.
+- **WHEN** node 的 IM-edge 收到一条入站消息，调 `POST /nodes/{id}/identity/resolve`（带 node key）
+- **THEN** 平台用 `resolve_or_provision` 解析/并号，返回 `Principal{user_id, tenant_id}`
 
-承载流式中继的 HTTP client（及其连接池）MUST 存活到被中继的流被**完整消费**之后；transport
-MUST NOT 在返回流式响应的函数作用域退出时关闭该 client（例如不得用 `async with
-httpx.AsyncClient()` 包裹一个在函数返回后才被迭代的流）。否则流在被消费前连接已关，operator
-会收到空体或截断。
+#### Scenario: 未鉴权的解析调用被拒
 
-#### Scenario: DirectHttp reaches the forwarder
+- **WHEN** 无有效 node service key 调该端点
+- **THEN** 平台拒绝（401/403），不解析
 
-- **WHEN** the platform forwards an ingress request via the DirectHttp transport
-- **THEN** it dials the target node forwarder authenticated by the node key and relays
-  the streamed response back to the operator
+### Requirement: Node forwards resolved IM inbound to the local agent; sync reply returns via node
 
-#### Scenario: Streaming contract is preserved
+node IM-edge 解析出 Principal 后 SHALL 把 `{Principal, IM 入站}` 转给**本机 agent** 的 normalizer 入站（沿用 Principal-carrying 入站契约）；agent 跑 normalizer→loop、按该 Principal 归属本回合。本回合的**同步回复** SHALL 作为该转发的响应**返回给 node**，由持连接的 node 发回 IM——agent **MUST NOT** 依赖进程内 IM connector 直发同步回复。（异步/带外出站不在本要求，另行处理。）
 
-- **WHEN** an agent emits a streamed reply
-- **THEN** the transport relays chunks incrementally instead of buffering them into a
-  single blob
+#### Scenario: IM 入站经 node→agent→回复回发
 
-#### Scenario: 承载 client 存活到流消费完毕
+- **WHEN** 用户经 Slack/Telegram 发消息
+- **THEN** node 解析 Principal → 转给本机 agent normalizer → agent 跑 loop、按 Principal 归属 → 回复作为响应返回 node → node 发回 Slack/Telegram
 
-- **WHEN** transport 返回一个流式响应、其底层 HTTP client 在请求处理函数返回后才被消费
-- **THEN** operator 收到 agent 的**完整**流（与直连 agent 一致），而非因 client 提前关闭导致
-  的空体 / `ReadError` / 截断
+#### Scenario: agent 不持连接也能回复同步消息
 
-### Requirement: Node internal forwarder
+- **WHEN** agent 处理一条转发来的 IM 入站并产生回复
+- **THEN** 回复经转发响应回到 node 发出，agent 全程不持 IM 连接、不直发
 
-The node SHALL run an internal-only HTTP forwarder, authenticated by the node key, that
-relays a platform request to the target local agent loopback gateway port and injects
-that agent's `FLEETENT_TUI_TOKEN` from the managed `.env`. Agents SHALL bind loopback
-only and SHALL NOT be exposed beyond the node.
+### Requirement: Node delivers agent async outbound via a delivery-queue
 
-forwarder 中继流式响应时，承载该流的 HTTP client（及其连接池）MUST 存活到流被**完整消费**之后；
-forwarder MUST NOT 在返回 `StreamingResponse` 的处理函数作用域退出时关闭该 client。成功的流式
-路径 MUST 把 agent 的完整响应逐块转发回上游；仅在上游返回错误状态（`status_code >= 400`）时
-才允许整体 buffer 后返回。
+managed 下连接在 node、agent 进程无 live connector，因此 agent 的**异步/带外出站**（审批 DM、cron 触发外发、loop 内 send_im_message 等不经入站响应通道的出站）SHALL 经 **delivery-queue** 投递：agent 把出站意图写入本机 `agent_state.db` 的 `im_outbound_queue`（platform、conversation address、payload、dedup_key、status）；node 的 IM-edge SHALL 周期 **drain 本机队列**（读本地文件，非 RPC），经其持有的 connector 发出，再标记 sent。
 
-#### Scenario: Forwarder relays to the local agent
+投递 SHALL 为 **at-least-once + dedup**：node drain 用 `dedup_key` 防重发；发送失败的意图保留待重试（审批 DM 宁可能重发也不丢）。agent **只写自己侧队列、不持连接、不调 platform**；node **只读本机 agent 产物**——无 agent→platform。
 
-- **WHEN** the forwarder receives a node-key-authenticated request for an agent
-- **THEN** it forwards to that agent's loopback gateway port with that agent's
-  `FLEETENT_TUI_TOKEN` injected, and relays the streamed response
+standalone（连接在 agent 进程）下，异步出站 SHALL 维持现行进程内 connector 直发（不写队列），`fleetent agent run` 行为不变。
 
-#### Scenario: Forwarder rejects unauthenticated callers
+#### Scenario: managed 下审批 DM 经队列发出
 
-- **WHEN** a request without a valid node key hits the forwarder
-- **THEN** it is rejected and not forwarded
+- **WHEN** managed 下 permission_gate 要给审批人发 DM，但 agent 进程无 live connector
+- **THEN** agent 把出站意图写 `im_outbound_queue` → node drain → 经其 connector 发给审批人
 
-#### Scenario: forwarder 完整转发流式 body
+#### Scenario: node drain at-least-once + dedup
 
-- **WHEN** agent 在 loopback 端口对 forwarder 的转发请求返回多块 SSE 流
-- **THEN** forwarder 把全部块逐块转发回上游、不丢失，operator 收到非空的完整流（不因承载
-  client 在处理函数返回时被关闭而中继到 0 字节）
+- **WHEN** node drain 队列发送，且发送后标记前 node 重启
+- **THEN** 重启后该意图可能再次被取出，但凭 `dedup_key` 不重复发给用户（at-least-once 语义、dedup 兜重发）
 
-### Requirement: Node launches managed agents with a loopback gateway port
+#### Scenario: standalone 仍进程内直发
 
-The node supervisor SHALL launch each managed agent bound to a loopback gateway port and
-SHALL record that port so the forwarder can route to it. The port SHALL NOT be exposed
-outside the node.
+- **WHEN** 无平台/node 注入的 standalone 运行
+- **THEN** 异步出站走进程内 connector 直发、不写队列，`fleetent agent run` IM 行为不变
 
-#### Scenario: Managed agent gets a loopback port
+#### Scenario: 出站不破解耦
 
-- **WHEN** the node starts a placed agent
-- **THEN** the agent serves `/chat` and `/ws` on a loopback port and the node records the
-  agent→port mapping for forwarding
+- **WHEN** agent 产生任何异步出站
+- **THEN** agent 只写本机 `im_outbound_queue`（自己侧产物）、不持连接、无对 platform 的调用；node 读本机队列发出
 
-### Requirement: forwarder 地址解析可被环境覆盖
+### Requirement: node IM-edge 识别 /link 并经平台 confirm
 
-platform 拨 node forwarder 的地址默认 SHALL 为内网 DNS 契约 `<node_id>.internal`（生产内网解析）。
-为支持无此 DNS 的部署形态（如单机 dev：所有组件在同一 loopback），地址解析 SHALL 可被环境变量
-覆盖：当 override 设置时用之，未设置时回落到默认契约。该覆盖 MUST NOT 改变默认契约行为，也
-MUST NOT 改变 forwarder 的 node-key 鉴权与路由语义。
+绑定是平台侧操作（写 im_users），agent 不参与；因此 `/link <code>` 命令 SHALL 在 **node IM-edge** 识别（不下发给 agent normalizer），由 node 经 `POST /nodes/{node_id}/link-confirm`（**node service key 鉴权**）把 `(platform, platform_user_id, code)` 交给平台校验 + 绑定。平台据 code 找到对应 pending-link 的 user_id 后做 attach-only 绑定（见 im-user-mapping）。
 
-#### Scenario: 默认用内网 DNS 契约
+web 侧的 link 发起（出 code）与 unlink SHALL 经平台、由 **OIDC/admin session 认证**发起方。pending-link（`code → user_id`）SHALL 为短 TTL 的临时态。
 
-- **WHEN** 未设置 forwarder 地址 override
-- **THEN** platform 按 `<node_id>.internal`（既有默认端口）解析 forwarder 地址
+#### Scenario: /link 经 node→platform 绑定
 
-#### Scenario: 单机环境用 override 解析
+- **WHEN** 用户从 Telegram 发 `/link <code>`
+- **THEN** node IM-edge 识别它、调 `POST /nodes/{id}/link-confirm`（node-key）带 `(telegram, tg_id, code)`；平台校验 code 后 attach 绑定，不经 agent
 
-- **WHEN** 设置了 forwarder 地址 override（如指向 `127.0.0.1`）
-- **THEN** platform 按 override 解析 forwarder 地址，使无内网 DNS 的单机环境也能拨通 forwarder，
-  鉴权与路由行为不变
+#### Scenario: link 发起需已认证
+
+- **WHEN** 请求 web 端 link/initiate 或 unlink
+- **THEN** 须经 OIDC/admin session 认证发起方；未认证拒
+

@@ -187,4 +187,25 @@ MIGRATIONS: list[tuple[int, str]] = [
         "CREATE INDEX IF NOT EXISTS idx_kb_relations_document"
         " ON kb_relations (tenant_id, kb_id, evidence_document_id)",
     ),
+    (
+        17,
+        """
+        CREATE TABLE IF NOT EXISTS knowledge_connector_sync_history (
+            id              TEXT PRIMARY KEY,
+            connector_id    TEXT NOT NULL,
+            tenant_id       TEXT NOT NULL,
+            kb_id           TEXT NOT NULL,
+            status          TEXT NOT NULL,
+            summary_json    TEXT NOT NULL DEFAULT '{}',
+            error           TEXT,
+            started_at      DATETIME NOT NULL,
+            finished_at     DATETIME NOT NULL
+        )
+        """,
+    ),
+    (
+        18,
+        "CREATE INDEX IF NOT EXISTS idx_connector_sync_history_connector"
+        " ON knowledge_connector_sync_history (connector_id, finished_at)",
+    ),
 ]

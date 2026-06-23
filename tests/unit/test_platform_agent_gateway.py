@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi.responses import StreamingResponse
 
+from fleetent.identity import Principal
 from fleetent.node.forwarder_contract import (
     DEFAULT_FORWARDER_DOMAIN,
     DEFAULT_FORWARDER_PORT,
@@ -66,9 +67,11 @@ async def test_direct_http_transport_relays_chat_stream(monkeypatch: pytest.Monk
     )
 
     async def fake_send(self, request: httpx.Request, *, stream: bool = False) -> httpx.Response:
+        principal_header = '{"user_id":"u-edge","tenant_id":"tenant-1"}'
         assert str(request.url) == "http://node-a.internal:8786/forward/agents/support/chat"
         assert request.headers["Authorization"] == "Bearer ma-node-key"
         assert request.headers["Content-Type"] == "application/json"
+        assert request.headers["X-Fleetent-Principal"] == principal_header
         assert request.content == b'{"message":"hi"}'
         return httpx.Response(
             200,
@@ -77,7 +80,12 @@ async def test_direct_http_transport_relays_chat_stream(monkeypatch: pytest.Monk
         )
 
     monkeypatch.setattr(httpx.AsyncClient, "send", fake_send)
-    response = await DirectHttpAgentTransport().chat("node-a", "support", b'{"message":"hi"}')
+    response = await DirectHttpAgentTransport().chat(
+        "node-a",
+        "support",
+        b'{"message":"hi"}',
+        principal=Principal(user_id="u-edge", tenant_id="tenant-1"),
+    )
 
     assert isinstance(response, StreamingResponse)
     assert await _collect_stream(response) == b"data: one\n\ndata: two\n\n"

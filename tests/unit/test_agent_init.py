@@ -80,20 +80,35 @@ def test_refuses_overwrite_without_force(tmp_path) -> None:
     assert "version: 99" in (home / "agent.yaml").read_text(encoding="utf-8")
 
 
-def test_force_overwrites_agent_yaml_but_preserves_env(tmp_path) -> None:
+def test_force_overwrites_agent_yaml_but_preserves_env_with_token(tmp_path) -> None:
     home = tmp_path / "my-bot"
     agent_init.scaffold_agent_home("my-bot", home=home)
     (home / "agent.yaml").write_text("name: my-bot\nversion: 99\n", encoding="utf-8")
-    (home / ".env").write_text("FLEETENT_MODEL_PRIMARY_API_KEY=sk-real-keepme\n", encoding="utf-8")
+    existing_token = "ma-" + "c" * 64
+    (home / ".env").write_text(
+        f"FLEETENT_TUI_TOKEN={existing_token}\n",
+        encoding="utf-8",
+    )
 
     agent_init.scaffold_agent_home("my-bot", home=home, force=True)
 
     assert "version: 99" not in (home / "agent.yaml").read_text(encoding="utf-8")
     assert agent_config.load_agent_file(home).name == "my-bot"
-    # .env is never clobbered, even with --force (protects secrets).
-    assert (home / ".env").read_text(
-        encoding="utf-8"
-    ) == "FLEETENT_MODEL_PRIMARY_API_KEY=sk-real-keepme\n"
+    # .env with a valid token is preserved — token is not rotated.
+    env = (home / ".env").read_text(encoding="utf-8")
+    assert f"FLEETENT_TUI_TOKEN={existing_token}" in env
+
+
+def test_scaffold_backfills_token_when_env_exists_without_token(tmp_path) -> None:
+    home = tmp_path / "my-bot"
+    home.mkdir()
+    (home / ".env").write_text("SOME_VAR=value\n", encoding="utf-8")
+    agent_init.scaffold_agent_home("my-bot", home=home)
+
+    env = (home / ".env").read_text(encoding="utf-8")
+    lines = dict(line.split("=", 1) for line in env.strip().splitlines() if "=" in line)
+    assert "FLEETENT_TUI_TOKEN" in lines
+    assert lines["FLEETENT_TUI_TOKEN"].startswith("ma-")
 
 
 def test_default_home_is_under_fleetent_home_agents_dir(tmp_path, monkeypatch) -> None:
@@ -101,3 +116,56 @@ def test_default_home_is_under_fleetent_home_agents_dir(tmp_path, monkeypatch) -
     returned = agent_init.scaffold_agent_home("my-bot")
     assert returned == tmp_path / "agents" / "my-bot"
     assert (tmp_path / "agents" / "my-bot" / "agent.yaml").is_file()
+
+
+# --- ensure_env_scaffold tests (tasks 1.1-1.3) ---
+
+
+def test_ensure_env_scaffold_creates_env_with_tui_token(tmp_path) -> None:
+    home = tmp_path / "my-bot"
+    home.mkdir()
+
+    agent_init.ensure_env_scaffold(home)
+
+    env_path = home / ".env"
+    assert env_path.exists()
+    lines = dict(
+        line.split("=", 1)
+        for line in env_path.read_text(encoding="utf-8").strip().splitlines()
+        if "=" in line
+    )
+    assert "FLEETENT_TUI_TOKEN" in lines
+    token = lines["FLEETENT_TUI_TOKEN"]
+    assert token.startswith("ma-")
+    assert len(token) == 67  # "ma-" + 64 hex chars
+
+
+def test_ensure_env_scaffold_preserves_existing_token(tmp_path) -> None:
+    home = tmp_path / "my-bot"
+    home.mkdir()
+    existing_token = "ma-" + "b" * 64
+    (home / ".env").write_text(f"FLEETENT_TUI_TOKEN={existing_token}\n", encoding="utf-8")
+
+    agent_init.ensure_env_scaffold(home)
+
+    lines = dict(
+        line.split("=", 1)
+        for line in (home / ".env").read_text(encoding="utf-8").strip().splitlines()
+        if "=" in line
+    )
+    assert lines["FLEETENT_TUI_TOKEN"] == existing_token
+
+
+def test_ensure_env_scaffold_with_referenced_env_names(tmp_path) -> None:
+    home = tmp_path / "my-bot"
+    home.mkdir()
+
+    agent_init.ensure_env_scaffold(home, referenced_env_names=["ANTHROPIC_API_KEY", "SLACK_TOKEN"])
+
+    content = (home / ".env").read_text(encoding="utf-8")
+    lines = dict(line.split("=", 1) for line in content.strip().splitlines() if "=" in line)
+    assert lines.get("ANTHROPIC_API_KEY") == ""
+    assert lines.get("SLACK_TOKEN") == ""
+    assert "FLEETENT_TUI_TOKEN" in lines
+    for marker in ("sk-", "xoxb-", "xapp-"):
+        assert marker not in content

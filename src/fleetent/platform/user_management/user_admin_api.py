@@ -5,19 +5,37 @@ Authentication uses a login session token in the Authorization header:
 This router does not import the agent loop, so it is testable in isolation.
 """
 
+import secrets
+from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Cookie, Header, HTTPException
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from fleetent import audit_log, auth, user_store
+from fleetent.config import Settings
 from fleetent.platform import im_gateway_management as im
+from fleetent.platform.im_gateway_management.pending_link_store import PendingLinkStore
 from fleetent.platform.user_management import api_key_store, block_service
+from fleetent.platform.user_management.oidc import (
+    OidcAuthError,
+    OidcRelyingParty,
+    OidcSettings,
+    _oidc_tenant_for,
+    decode_flow_state,
+    encode_flow_state,
+    flow_cookie_ttl_seconds,
+)
 
 router = APIRouter(prefix="/admin")
 
 IDLE_TIMEOUT_SECONDS = 1800
 _ADMIN_ROLES = {"admin", "built_in_admin"}
+_OIDC_FLOW_COOKIE = "fleetent_oidc_flow"
+_LINK_CODE_TTL = timedelta(minutes=10)
+_pending_links = PendingLinkStore(ttl=_LINK_CODE_TTL)
 
 
 def _session_user(authorization: str | None, allow_must_reset: bool = False) -> user_store.User:
@@ -65,7 +83,7 @@ def _resolve_login_user(identifier: str) -> user_store.User | None:
     Web users authenticate by email. The built-in admin is seeded with no email, so the
     login form's "Username" field also resolves it by its fixed built-in name.
     """
-    user = user_store.get_by_email(identifier)
+    user = user_store.get_by_email("default", identifier)
     if user is not None:
         return user
     if identifier == auth.BUILTIN_ADMIN_NAME:
@@ -84,6 +102,72 @@ def login(body: LoginBody) -> dict[str, Any]:
         raise HTTPException(status_code=403, detail=f"account {user.status}")
     token = auth.create_session(user.id)
     return {"token": token, "role": user.role, "must_reset": bool(user.must_reset)}
+
+
+def _oidc_settings() -> OidcSettings:
+    return Settings().oidc
+
+
+def _require_oidc_settings() -> OidcSettings:
+    settings = _oidc_settings()
+    if not settings.enabled:
+        raise HTTPException(status_code=404, detail="oidc disabled")
+    return settings
+
+
+@router.get("/oidc/login")
+def oidc_login() -> RedirectResponse:
+    settings = _require_oidc_settings()
+    state = secrets.token_urlsafe(24)
+    nonce = secrets.token_urlsafe(24)
+    location = OidcRelyingParty(settings).build_authorize_url(state=state, nonce=nonce)
+    response = RedirectResponse(location, status_code=302)
+    response.set_cookie(
+        _OIDC_FLOW_COOKIE,
+        encode_flow_state(state, nonce),
+        httponly=True,
+        max_age=flow_cookie_ttl_seconds(),
+        samesite="lax",
+    )
+    return response
+
+
+@router.get("/oidc/callback")
+def oidc_callback(
+    code: str,
+    state: str,
+    oidc_flow: str | None = Cookie(None, alias=_OIDC_FLOW_COOKIE),
+) -> RedirectResponse:
+    settings = _require_oidc_settings()
+    if not oidc_flow:
+        raise HTTPException(status_code=401, detail="missing oidc flow cookie")
+    try:
+        flow = decode_flow_state(oidc_flow)
+        identity = OidcRelyingParty(settings).exchange_code(
+            code=code,
+            state=state,
+            expected_state=flow.state,
+            nonce=flow.nonce,
+            expected_nonce=flow.nonce,
+        )
+    except OidcAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    if identity.claims.get("email_verified") is not True:
+        raise HTTPException(status_code=401, detail="email claim must be verified")
+    if not identity.email.strip():
+        raise HTTPException(status_code=401, detail="email claim missing")
+
+    user = im.resolve_or_provision(
+        _oidc_tenant_for(identity.email, identity.claims, settings),
+        verified_email=identity.email,
+    )
+    if user.status != "active":
+        raise HTTPException(status_code=403, detail=f"account {user.status}")
+    token = auth.create_session(user.id)
+    response = RedirectResponse(f"/admin/ui/login?{urlencode({'token': token})}", status_code=302)
+    response.delete_cookie(_OIDC_FLOW_COOKIE)
+    return response
 
 
 @router.post("/logout")
@@ -139,6 +223,11 @@ class ServicePrincipalBody(BaseModel):
     name: str
 
 
+class LinkUnlinkBody(BaseModel):
+    platform: str
+    platform_user_id: str
+
+
 def _user_dict(u: user_store.User) -> dict[str, Any]:
     return {
         "id": u.id,
@@ -154,6 +243,46 @@ def _user_dict(u: user_store.User) -> dict[str, Any]:
 def list_users(authorization: str | None = Header(None)) -> list[dict[str, Any]]:
     _current_user(authorization)
     return [_user_dict(u) for u in user_store.list_users()]
+
+
+@router.post("/link/initiate")
+def initiate_link(authorization: str | None = Header(None)) -> dict[str, str]:
+    user = _current_user(authorization)
+    code = secrets.token_urlsafe(12)
+    now = datetime.now(UTC)
+    _pending_links.put(code, user_id=user.id, tenant_id=user.tenant_id, now=now)
+    audit_log.write_audit(
+        user.id,
+        "im.link.initiate",
+        target_type="user",
+        target_id=user.id,
+        detail={"code_source": "web_session"},
+    )
+    return {"code": code, "expires_at": (now + _LINK_CODE_TTL).isoformat()}
+
+
+@router.post("/link/unlink")
+def unlink_link(
+    body: LinkUnlinkBody,
+    authorization: str | None = Header(None),
+) -> dict[str, str]:
+    user = _current_user(authorization)
+    mapped = im.get_mapped_user(body.platform, body.platform_user_id)
+    if mapped is not None and mapped.id != user.id and not auth.has_role(user, _ADMIN_ROLES):
+        raise HTTPException(status_code=403, detail="forbidden")
+    im.unlink_identity(body.platform, body.platform_user_id)
+    audit_log.write_audit(
+        user.id,
+        "im.link.unlink",
+        target_type="im_user",
+        target_id=f"{body.platform}:{body.platform_user_id}",
+        detail={
+            "platform": body.platform,
+            "platform_user_id": body.platform_user_id,
+            "source": "web_session",
+        },
+    )
+    return {"status": "unlinked"}
 
 
 @router.post("/users", status_code=201)

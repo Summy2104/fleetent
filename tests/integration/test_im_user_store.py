@@ -41,10 +41,100 @@ def test_get_or_create_new_user(db):
     assert user.name == "slack:U123"
 
 
+def test_resolve_or_provision_attaches_existing_email_user(db):
+    tenancy_store.create_tenant(id="tenant-a", name="Tenant A")
+    existing, _ = user_store.create_user("Alice", email="alice@co", tenant_id="tenant-a")
+
+    resolved = im_user_store.resolve_or_provision(
+        "tenant-a",
+        verified_email="  Alice@Co ",
+        channel="slack",
+        platform_user_id="U-EMAIL",
+    )
+
+    assert resolved.id == existing.id
+    assert user_store.get_by_email("tenant-a", "alice@co").id == existing.id
+    assert im_user_store.list_im_identities(existing.id)[0]["platform_user_id"] == "U-EMAIL"
+
+
+def test_resolve_or_provision_creates_email_keyed_user_when_missing(db):
+    tenancy_store.create_tenant(id="tenant-a", name="Tenant A")
+
+    resolved = im_user_store.resolve_or_provision(
+        "tenant-a",
+        verified_email="Alice@Co",
+        channel="slack",
+        platform_user_id="U-NEW",
+    )
+
+    assert resolved.email == "alice@co"
+    assert resolved.tenant_id == "tenant-a"
+    assert im_user_store.list_im_identities(resolved.id)[0]["platform_user_id"] == "U-NEW"
+
+
+def test_resolve_or_provision_attach_only_keeps_existing_mapping(db):
+    tenancy_store.create_tenant(id="tenant-a", name="Tenant A")
+    mapped = im_user_store.get_or_create("slack", "U-LOCKED", "tenant-a")
+    email_user, _ = user_store.create_user("Alice", email="alice@co", tenant_id="tenant-a")
+
+    resolved = im_user_store.resolve_or_provision(
+        "tenant-a",
+        verified_email="alice@co",
+        channel="slack",
+        platform_user_id="U-LOCKED",
+    )
+
+    assert resolved.id == mapped.id
+    assert resolved.id != email_user.id
+    assert im_user_store.list_im_identities(mapped.id)[0]["platform_user_id"] == "U-LOCKED"
+    assert im_user_store.list_im_identities(email_user.id) == []
+
+
+def test_resolve_or_provision_race_reuses_existing_email_user(db, monkeypatch):
+    tenancy_store.create_tenant(id="tenant-a", name="Tenant A")
+    original_create_user = im_user_store.create_user
+    state = {"triggered": False}
+
+    def racing_create_user(name: str, email: str | None = None, tenant_id: str = "default"):
+        if email == "alice@co" and tenant_id == "tenant-a" and not state["triggered"]:
+            state["triggered"] = True
+            user_store.create_user("Concurrent", email="alice@co", tenant_id="tenant-a")
+        return original_create_user(name=name, email=email, tenant_id=tenant_id)
+
+    monkeypatch.setattr(im_user_store, "create_user", racing_create_user)
+
+    resolved = im_user_store.resolve_or_provision(
+        "tenant-a",
+        verified_email="alice@co",
+        channel="slack",
+        platform_user_id="U-RACE",
+    )
+
+    assert resolved.email == "alice@co"
+    assert len(im_user_store.list_im_identities(resolved.id)) == 1
+
+
 def test_get_or_create_returns_same_user(db):
     user1 = im_user_store.get_or_create("slack", "U123", "default")
     user2 = im_user_store.get_or_create("slack", "U123", "default")
     assert user1.id == user2.id
+
+
+def test_get_or_create_routes_verified_email_through_resolve_or_provision(db):
+    tenancy_store.create_tenant(id="tenant-a", name="Tenant A")
+    existing, _ = user_store.create_user("Alice", email="alice@co", tenant_id="tenant-a")
+
+    resolved = im_user_store.get_or_create(
+        "slack",
+        "U-ROUTE",
+        "tenant-a",
+        verified_email="  Alice@Co ",
+    )
+    fallback = im_user_store.get_or_create("telegram", "T-ROUTE", "tenant-a")
+
+    assert resolved.id == existing.id
+    assert fallback.name == "telegram:T-ROUTE"
+    assert fallback.email is None
 
 
 def test_different_platforms_different_users(db):
@@ -77,6 +167,15 @@ def test_rebind_unknown_identity_raises(db):
     target = im_user_store.get_or_create("slack", "U3", "default")
     with pytest.raises(ValueError):
         im_user_store.rebind_im_identity(999999, target.id)
+
+
+def test_unlink_identity_deletes_mapping_and_is_idempotent(db):
+    user = im_user_store.get_or_create("telegram", "424242", "default")
+
+    im_user_store.unlink_identity("telegram", "424242")
+    im_user_store.unlink_identity("telegram", "424242")
+
+    assert im_user_store.list_im_identities(user.id) == []
 
 
 def test_unique_constraint(db):

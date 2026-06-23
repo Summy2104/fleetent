@@ -10,6 +10,7 @@ installed global command has no repo working tree to read repository example tem
 from __future__ import annotations
 
 import secrets
+from collections.abc import Iterable
 from pathlib import Path
 
 import yaml
@@ -42,8 +43,8 @@ def _template_agent(agent_id: str) -> AgentFile:
     )
 
 
-def _referenced_env_names(agent: AgentFile) -> list[str]:
-    """Collect env-var names the agent references (always + MCP/IM binding ``*_env``)."""
+def referenced_env_names(agent: AgentFile) -> list[str]:
+    """Return env-var names the agent references (model keys + MCP/IM binding envs)."""
     names: set[str] = set()
     for target in agent.models.targets:
         if target.api_key_env:
@@ -57,6 +58,32 @@ def _referenced_env_names(agent: AgentFile) -> list[str]:
     if slack is not None:
         names.update(n for n in (slack.bot_token_env, slack.app_token_env) if n)
     return sorted(names)
+
+
+def ensure_env_scaffold(home_dir: Path, *, referenced_env_names: Iterable[str] = ()) -> None:
+    """Idempotently ensure <home>/.env exists with a valid FLEETENT_TUI_TOKEN.
+
+    If .env is absent or lacks FLEETENT_TUI_TOKEN, writes a fresh .env containing
+    a generated token plus empty-value placeholders for each referenced env name.
+    An existing .env that already carries FLEETENT_TUI_TOKEN is left untouched.
+    Real secrets are never written — callers supply those via process environment.
+    """
+    env_path = home_dir / ".env"
+    if env_path.exists():
+        parsed = {
+            k: v
+            for line in env_path.read_text(encoding="utf-8").splitlines()
+            if "=" in line
+            for k, _, v in (line.partition("="),)
+        }
+        if parsed.get("FLEETENT_TUI_TOKEN", ""):
+            return
+
+    home_dir.mkdir(parents=True, exist_ok=True)
+    tui_token = f"ma-{secrets.token_hex(32)}"
+    body = "".join(f"{name}=\n" for name in sorted(set(referenced_env_names)))
+    body += f"FLEETENT_TUI_TOKEN={tui_token}\n"
+    env_path.write_text(body, encoding="utf-8")
 
 
 def scaffold_agent_home(
@@ -80,11 +107,6 @@ def scaffold_agent_home(
         encoding="utf-8",
     )
 
-    env_path = home_dir / ".env"
-    if not env_path.exists():
-        tui_token = f"ma-{secrets.token_hex(32)}"
-        body = "".join(f"{name}=\n" for name in _referenced_env_names(agent))
-        body += f"FLEETENT_TUI_TOKEN={tui_token}\n"
-        env_path.write_text(body, encoding="utf-8")
+    ensure_env_scaffold(home_dir, referenced_env_names=referenced_env_names(agent))
 
     return home_dir

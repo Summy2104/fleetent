@@ -112,7 +112,7 @@ graph TD
 
 > 注：external_services / external_credentials / agent_service_grants（工具 OAuth Vault）已落管理库，详见 §3.2。
 
-> 宏观图只列各库主干实体；完整清单与库内关系见 §3.2–§3.6。`session_meta → sessions` 是全库唯一一条 mgmt→agent 方向跨库引用（platform 自有元数据挂 agent 会话，非 agent 反向写）。省略的跨库边：`reflection_proposals.*_user_id` / `approval_requests.approver_user_id` ⇢ `users`；agent 侧各表 `tenant_id` 接缝列 ⇢ `tenants`；`shared_memory_items.scope_id` 在 `scope_type=tenant` 时 ⇢ `tenants`。
+> 宏观图只列各库主干实体；完整清单与库内关系见 §3.2–§3.6。`session_meta → sessions` 是全库唯一一条 mgmt→agent 方向跨库引用（platform 自有元数据挂 agent 会话，非 agent 反向写）。省略的跨库边：`reflection_proposals.subject_user_id`/`actor_user_id` / `approval_requests.requester_user_id`/`approver_user_id` ⇢ `users`；agent 侧各表 `tenant_id` 接缝列 ⇢ `tenants`；`shared_memory_items.scope_id` 在 `scope_type=tenant` 时 ⇢ `tenants`。
 
 ### 3.2 管理库（Alembic · platform 侧）
 
@@ -166,7 +166,7 @@ graph TD
 
 | 表 | 键 / 关键列 | FK | 用途 |
 |---|---|---|---|
-| `kb_connectors` | connector 配置 + 自定义元数据 | — | KB 数据源配置（实际内容在 per-tenant `kb.db`）|
+| `kb_connectors` | connector 配置 + 自定义元数据 + 调度字段（`sync_interval_seconds`/`last_scheduled_sync_at`，迁移 101）| — | KB 数据源配置（实际内容在 per-tenant `kb.db`）；调度字段供 platform `kb_connector_sweep` 定时入队 sync |
 | `model_providers` | provider + api_key env | — | materialize 读：model_overrides → ModelTarget |
 | `audit_log` | 管理操作审计 | — (软引用 users) | 平台管理操作审计 |
 | `session_meta` | `session_id` · `agent_id` 可空 · origin/pinned/takeover | → agents (CASCADE) | platform chat 管理元数据（`session_id` 跨库逻辑引用 agent `sessions`）|

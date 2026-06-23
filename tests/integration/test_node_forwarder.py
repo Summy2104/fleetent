@@ -8,7 +8,8 @@ import socket as _sock
 import httpx
 import pytest
 import uvicorn
-from fastapi import FastAPI
+import websockets
+from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
@@ -162,6 +163,72 @@ async def test_forward_chat_streams_complete_body_over_real_socket(tmp_path) -> 
             await asyncio.wait_for(serve_task, timeout=5.0)
 
 
+async def test_forward_chat_relays_ingress_principal_header_over_real_socket(tmp_path) -> None:
+    home = tmp_path / "agents" / "support"
+    home.mkdir(parents=True)
+    (home / ".env").write_text("FLEETENT_TUI_TOKEN=ma-agent-token\n", encoding="utf-8")
+
+    with _sock.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        upstream_port = s.getsockname()[1]
+
+    captured: dict[str, str | None] = {}
+    upstream_app = FastAPI()
+
+    @upstream_app.post("/chat")
+    async def _upstream_chat(request: Request) -> StreamingResponse:
+        captured["principal_header"] = request.headers.get("x-fleetent-principal")
+
+        async def _body():
+            yield b'data: {"type":"text","content":"ok"}\n\n'
+
+        return StreamingResponse(_body(), media_type="text/event-stream")
+
+    srv = uvicorn.Server(
+        uvicorn.Config(upstream_app, host="127.0.0.1", port=upstream_port, log_level="error")
+    )
+    serve_task = asyncio.create_task(srv.serve())
+    while not srv.started:
+        await asyncio.sleep(0.01)
+
+    try:
+
+        class _RealBackend:
+            def gateway_port(self, name: str) -> int | None:
+                return upstream_port
+
+        forwarder = build_app(
+            NodeConfig(
+                platform_url="https://platform.internal",
+                node_id="node-a",
+                service_key="ma-" + "1" * 64,
+                home_dir=tmp_path,
+                interval_seconds=10,
+            ),
+            _RealBackend(),
+        )
+
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=forwarder), base_url="http://testserver"
+        ) as tc:
+            response = await tc.post(
+                "/forward/agents/support/chat",
+                content=b'{"message":"ping"}',
+                headers={
+                    "Authorization": "Bearer " + "ma-" + "1" * 64,
+                    "Content-Type": "application/json",
+                    "X-Fleetent-Principal": '{"user_id":"operator-1","tenant_id":"tenant-1"}',
+                },
+            )
+
+        assert response.status_code == 200
+        assert captured["principal_header"] == '{"user_id":"operator-1","tenant_id":"tenant-1"}'
+    finally:
+        srv.should_exit = True
+        with contextlib.suppress(TimeoutError, asyncio.CancelledError):
+            await asyncio.wait_for(serve_task, timeout=5.0)
+
+
 def test_forwarder_ws_requires_node_key(tmp_path) -> None:
     home = tmp_path / "agents" / "support"
     home.mkdir(parents=True)
@@ -172,3 +239,52 @@ def test_forwarder_ws_requires_node_key(tmp_path) -> None:
 
     with pytest.raises(WebSocketDisconnect), client.websocket_connect("/forward/agents/support/ws"):
         pass
+
+
+def test_forwarder_ws_relays_ingress_principal_header(monkeypatch, tmp_path) -> None:
+    home = tmp_path / "agents" / "support"
+    home.mkdir(parents=True)
+    (home / ".env").write_text("FLEETENT_TUI_TOKEN=ma-agent-token\n", encoding="utf-8")
+
+    captured: dict[str, object] = {}
+
+    class _FakeUpstream:
+        async def send(self, message: str) -> None:
+            return None
+
+        def __aiter__(self):
+            async def _iter():
+                yield '{"type":"ready"}'
+
+            return _iter()
+
+    class _FakeConnect:
+        async def __aenter__(self):
+            return _FakeUpstream()
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    def fake_connect(url: str, additional_headers: dict[str, str]):
+        captured["url"] = url
+        captured["headers"] = additional_headers
+        return _FakeConnect()
+
+    monkeypatch.setattr(websockets, "connect", fake_connect)
+    app = build_app(_config(tmp_path), _Backend())
+    client = TestClient(app)
+
+    with client.websocket_connect(
+        "/forward/agents/support/ws",
+        headers={
+            "Authorization": "Bearer " + "ma-" + "1" * 64,
+            "X-Fleetent-Principal": '{"user_id":"operator-1","tenant_id":"tenant-1"}',
+        },
+    ) as ws:
+        assert ws.receive_text() == '{"type":"ready"}'
+
+    assert captured["url"] == "ws://127.0.0.1:9011/ws"
+    assert captured["headers"] == {
+        "Authorization": "Bearer ma-agent-token",
+        "X-Fleetent-Principal": '{"user_id":"operator-1","tenant_id":"tenant-1"}',
+    }

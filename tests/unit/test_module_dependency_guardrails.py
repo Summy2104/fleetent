@@ -345,10 +345,16 @@ _FACE_NAMESPACES = (
 # wire the core to the edge face at app startup. Each entry must shrink as
 # the coupling is eliminated.
 _KNOWN_CORE_EDGE_EXCEPTIONS: set[str] = {
-    # agent_app.py bootstraps standalone agent mode: starts IM supervisors (SlackSupervisor,
-    # TelegramSupervisor) from the edge face and redirects im_gateway.access.APPROVALS_PATH.
+    # agent_app.py bootstraps standalone agent mode: starts IM supervisors from the
+    # no-platform-import edge face and redirects im_gateway.access.APPROVALS_PATH.
+    # Managed node-hosted IM stays outside the runtime core; this exception is only for
+    # standalone composition-root wiring, not a license for runtime logic to import edge.
     # Coupling is intentional at the composition-root level (not core logic).
     "fleetent.runtime.agent_app",
+    # node.im_edge is the managed deployment composition root: it hosts the IM edge face
+    # on node and wires injected dispatch/resolution without importing platform into
+    # im_gateway or runtime core logic.
+    "fleetent.node.im_edge",
 }
 
 # ②控制 face sub-packages (must not import ③ orchestration)
@@ -430,13 +436,18 @@ def test_core_modules_do_not_import_face_namespaces() -> None:
 
 
 def test_node_supervisor_does_not_import_platform_or_runtime() -> None:
+    # Allowed exception: node may import runtime.agent_init to call ensure_env_scaffold
+    # before spawning an agent process (node → runtime is the contract-sanctioned direction
+    # for the deployment host that starts/reads agent processes).
+    allowed_runtime_imports = {"fleetent.runtime.agent_init"}
+
     violations: list[str] = []
     for path in _src_python_paths():
         module_name = _module_name(path)
         if not module_name.startswith("fleetent.node"):
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        imported_modules = set(_iter_imported_modules(tree))
+        imported_modules = set(_iter_imported_modules(tree)) - allowed_runtime_imports
         if _is_imported_from(["fleetent.platform", "fleetent.runtime"], imported_modules):
             violations.append(module_name)
     assert not violations, (

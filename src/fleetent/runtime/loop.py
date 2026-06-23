@@ -1,6 +1,7 @@
 """Core agent loop: send → tool_calls? → dispatch → repeat → final reply."""
 
 import asyncio
+import contextlib
 import inspect
 import json
 import random
@@ -28,6 +29,7 @@ from fleetent.model import ModelConfigError, ModelPolicySnapshot, ResolvedModelC
 from fleetent.model.provider_health import ProviderHealthCache, get_health_cache
 from fleetent.observability import (
     InjectedContextTrace,
+    KBRetrievalAuditContext,
     TraceEvent,
     build_tool_args_summary,
     record_injected_context,
@@ -153,6 +155,71 @@ def _filter_code_execution(
     if is_code_execution_enabled(sandbox_mode, code_execution):
         return schemas
     return [s for s in schemas if s["function"]["name"] != _RUN_CODE_TOOL]
+
+
+# im-progress-heartbeat: how often the heartbeat re-asserts the IM progress indicator.
+# Kept under Telegram's ~5s typing-action window so "typing…" never lapses. Module-level
+# so tests can shrink it. Injectable via the _progress_heartbeat `interval` arg.
+_HEARTBEAT_INTERVAL_S = 4.0
+
+
+async def _progress_heartbeat(progress_func: ProgressFunc, interval: float | None = None) -> None:
+    """Periodically emit a time-driven heartbeat progress event until cancelled.
+
+    im-progress-heartbeat: refreshes the IM progress indicator (Slack setStatus /
+    Telegram typing) during the silent gaps the event-driven `tool_call` progress
+    never covers — long LLM calls, a single long tool, an entire sub_agent run. The
+    event carries only ``type`` + ``elapsed_s`` (no tool args / nothing sensitive).
+    A `progress_func` failure is logged and swallowed (bulkheaded) so a flaky IM call
+    can never break the run; cancellation propagates normally.
+    """
+    iv = _HEARTBEAT_INTERVAL_S if interval is None else interval
+    start = time.monotonic()
+    while True:
+        await asyncio.sleep(iv)
+        try:
+            await progress_func({"type": "heartbeat", "elapsed_s": int(time.monotonic() - start)})
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — heartbeat is a side channel; never break the run
+            _logger.warn("progress_heartbeat_failed", error=str(exc))
+
+
+@contextlib.asynccontextmanager
+async def _heartbeat_during(
+    progress_func: ProgressFunc | None, *, is_sub_agent: bool
+) -> "AsyncGenerator[None, None]":
+    """Run a progress heartbeat for the duration of the wrapped block (im-progress-heartbeat).
+
+    Owner-task contract: the heartbeat task is created and cancelled in this same
+    coroutine. Only started for a top-level run with a real `progress_func`
+    (`is_sub_agent` runs rely on the parent's heartbeat and pass `progress_func=None`).
+    Cancellation in the `finally` guarantees no lingering task on any exit path.
+    """
+    task: asyncio.Task[None] | None = None
+    if progress_func is not None and not is_sub_agent:
+        task = asyncio.create_task(_progress_heartbeat(progress_func))
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
+def _maybe_refresh_skills(enabled: bool) -> None:
+    """Reload skills if their files changed on disk, when hot-reload is enabled.
+
+    skill-external-hot-reload: called once per inbound message before catalog injection
+    so external skill changes take effect without a restart. Gated by the per-agent
+    ``skill_hot_reload`` flag (default on); a no-op (and cheap) when nothing changed.
+    """
+    if not enabled:
+        return
+    from fleetent.skills import registry as skill_registry
+
+    skill_registry.refresh_if_changed()
 
 
 _SKILL_MANAGE_TOOL = "skill_manage"
@@ -282,12 +349,20 @@ def _agent_bound_to_server(server_id: str, allowed_tools: list[str] | None) -> b
     )
 
 
-def _append_delivery_trailer(reply: str, tool_context: Any) -> str:
+def _append_delivery_trailer(reply: str, tool_context: Any, *, emit: bool = True) -> str:
     """Append the run's delivery fact trailer to the final reply, if any (§3, D4).
 
     The trailer is system-generated from the run's delivery ledger and concatenated AFTER
     the model's text, so the model cannot omit or rewrite it. Empty ledger → reply unchanged
-    (zero noise). Best-effort: a render failure never alters the reply."""
+    (zero noise). Best-effort: a render failure never alters the reply.
+
+    The trailer is an interactive, operator-facing delivery confirmation. ``emit=False``
+    suppresses it for non-interactive runs (fired scheduled tasks broadcast their reply
+    verbatim and have no interlocutor) so it cannot pollute the broadcast or the [SILENT]
+    sentinel.
+    """
+    if not emit:
+        return reply
     try:
         from fleetent.observability.traces import render_delivery_trailer
 
@@ -316,6 +391,23 @@ def resolve_scope_key(session_id: str | None, agent_name: str | None) -> str | N
     except Exception as exc:  # noqa: BLE001 — attribution key is auxiliary, never break the run
         _logger.debug("scope_key_resolve_fell_back_to_session", error=str(exc))
         return session_id
+
+
+def _spillover_workspace(session_id: str | None, agent_name: str | None) -> Any:
+    """The run's host workspace dir for tool-result spillover, or None.
+
+    Lets `truncate_tool_result` write oversized results under the session workspace so the
+    agent can `read_file` them back in-fence. Best-effort: None falls back to the global
+    spillover dir (legacy, unreadable-by-read_file) without breaking the run.
+    """
+    try:
+        from fleetent.integrations.sandbox.manager import host_workspace_dir
+
+        key = resolve_scope_key(session_id, agent_name)
+        return host_workspace_dir(key) if key else None
+    except Exception as exc:  # noqa: BLE001 — spillover location is auxiliary
+        _logger.debug("spillover_workspace_resolve_failed", error=str(exc))
+        return None
 
 
 def _strict_blocked_servers(allowed_tools: list[str] | None) -> list[str]:
@@ -692,6 +784,7 @@ async def _plan_run_slots(
     here in order; sub_agent becomes a pending slot whose runner self-gathers (D6). The
     result list preserves original `tool_calls` order so backfill can index 0..N-1.
     """
+    from fleetent.integrations import mcp as _mcp_client
     from fleetent.runtime import hooks
     from fleetent.runtime.hooks import HookContext
 
@@ -699,7 +792,9 @@ async def _plan_run_slots(
     for tc in tool_calls:
         if not hasattr(tc, "function"):
             continue
-        name = tc.function.name
+        # mcp-tool-name-projection: resolve a projected MCP tool name back to canonical so
+        # all downstream handling (guardrail / risk / dispatch) operates on canonical names.
+        name = _mcp_client.resolve_tool_name(tc.function.name)
         tc_fp = arg_fingerprint(tc.function.arguments, loop_checker.ignore_arg_keys)
         # AR10 guardrail (serial — depends on per-call streak in `state`, D2).
         action = evaluate_guardrail(state, name, tc_fp, guardrail_threshold)
@@ -979,7 +1074,13 @@ async def _backfill_slots(
         if not is_placeholder:
             content = redact_secrets(content)
         # T4: cap the messages copy (self-truncating tools manage their own size).
-        tool_content = content if is_self_truncating(slot.name) else truncate_tool_result(content)
+        tool_content = (
+            content
+            if is_self_truncating(slot.name)
+            else truncate_tool_result(
+                content, workspace_dir=_spillover_workspace(session_id, agent_name)
+            )
+        )
         messages.append({"role": "tool", "tool_call_id": slot.tc_id, "content": tool_content})
         state.record_tool_call(
             slot.name,
@@ -1068,6 +1169,56 @@ def _budget_add(usage: BudgetUsage, response_usage: Any) -> None:
         prompt if isinstance(prompt, int) else 0,
         completion if isinstance(completion, int) else 0,
     )
+
+
+def _last_tool_error(messages: list[Any]) -> str | None:
+    """The most recent tool-result content (normalized, truncated), or None.
+
+    Used to surface what the run was stuck on when an abnormal stop leaves no reply.
+    """
+    for message in reversed(messages):
+        if isinstance(message, dict) and message.get("role") == "tool":
+            content = message.get("content")
+            if isinstance(content, str) and content.strip():
+                return " ".join(content.split())[:200]
+    return None
+
+
+def _terminal_status_reply(stop_reason: StopReason, messages: list[Any]) -> str | None:
+    """A user-facing status line for an abnormal terminal stop, or None.
+
+    None for stops that already deliver their own reply (normal; budget_exceeded has a Grace
+    Call; awaiting_approval already sent its prompt; mcp_strict_unavailable returned its own
+    error up front). For loop_detected / consecutive_failures the last tool feedback/error is
+    appended so the user sees what blocked progress.
+    """
+    prefix = {
+        StopReason.loop_detected: "我在重复调用同一个工具但没有进展，已停止以免空转。",
+        StopReason.consecutive_failures: "连续多次工具调用失败，已停止。",
+        StopReason.approval_rejected: "操作未获批准，已取消。",
+        StopReason.cancelled: "任务已取消。",
+    }.get(stop_reason)
+    if prefix is None:
+        return None
+    if stop_reason in (StopReason.loop_detected, StopReason.consecutive_failures):
+        error = _last_tool_error(messages)
+        if error:
+            return (
+                f"{prefix}最后一步的反馈：「{error}」。"
+                "请换个方式或补充必要信息（如正确的参数 / ID）。"
+            )
+    return prefix
+
+
+def _finalize_reply(reply: str, stop_reason: StopReason, messages: list[Any]) -> str:
+    """Return the reply, substituting a terminal status when an abnormal stop left it empty.
+
+    Keeps a non-empty reply unchanged; only an abnormal stop with a blank reply (which the
+    empty-reply guard would otherwise drop, leaving the user with silence) is replaced.
+    """
+    if (reply or "").strip():
+        return reply
+    return _terminal_status_reply(stop_reason, messages) or reply
 
 
 async def _grace_call(
@@ -1620,6 +1771,7 @@ async def run(
     conversation_address: ConversationAddress | None = None,
     delivery_ledger: list[Any] | None = None,
     skill_authoring_enabled: bool = False,
+    emit_delivery_trailer: bool = True,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
@@ -1645,41 +1797,47 @@ async def run(
     global _active_runs
     _active_runs += 1
     try:
-        return await _run_inner(
-            messages=messages,
-            user_id=user_id,
-            principal=principal,
-            system_prompt=system_prompt,
-            is_sub_agent=is_sub_agent,
-            reply_func=reply_func,
-            allowed_tools=allowed_tools,
-            agent_name=agent_name,
-            max_turns=max_turns,
-            max_consecutive_failures=max_consecutive_failures,
-            max_tokens=max_tokens,
-            force_model=force_model,
-            disabled_skills_trace=disabled_skills_trace,
-            loop_repeat_threshold=loop_repeat_threshold,
-            loop_ignore_arg_keys=loop_ignore_arg_keys,
-            guardrail_repeat_threshold=guardrail_repeat_threshold,
-            cancel_token=cancel_token,
-            sandbox_mode=sandbox_mode,
-            agent_features=agent_features,
-            session_id=session_id,
-            allowed_skills=allowed_skills,
-            governance=governance,
-            model_policy=model_policy,
-            permission_gate_enabled=permission_gate_enabled,
-            permission_gate_medium_timeout=permission_gate_medium_timeout,
-            permission_gate_high_timeout=permission_gate_high_timeout,
-            approval_routing=approval_routing,
-            outbound_connectors=outbound_connectors,
-            progress_func=progress_func,
-            session_context=session_context,
-            conversation_address=conversation_address,
-            delivery_ledger=delivery_ledger,
-            skill_authoring_enabled=skill_authoring_enabled,
-        )
+        # im-progress-heartbeat: keep the IM progress indicator (Slack setStatus /
+        # Telegram typing) alive for the whole run, covering the long LLM / long tool /
+        # sub_agent gaps the event-driven tool_call progress never reaches. Owner-task
+        # scoped to this coroutine; a no-op for sub-agents / no progress_func.
+        async with _heartbeat_during(progress_func, is_sub_agent=is_sub_agent):
+            return await _run_inner(
+                messages=messages,
+                user_id=user_id,
+                principal=principal,
+                system_prompt=system_prompt,
+                is_sub_agent=is_sub_agent,
+                reply_func=reply_func,
+                allowed_tools=allowed_tools,
+                agent_name=agent_name,
+                max_turns=max_turns,
+                max_consecutive_failures=max_consecutive_failures,
+                max_tokens=max_tokens,
+                force_model=force_model,
+                disabled_skills_trace=disabled_skills_trace,
+                loop_repeat_threshold=loop_repeat_threshold,
+                loop_ignore_arg_keys=loop_ignore_arg_keys,
+                guardrail_repeat_threshold=guardrail_repeat_threshold,
+                cancel_token=cancel_token,
+                sandbox_mode=sandbox_mode,
+                agent_features=agent_features,
+                session_id=session_id,
+                allowed_skills=allowed_skills,
+                governance=governance,
+                model_policy=model_policy,
+                permission_gate_enabled=permission_gate_enabled,
+                permission_gate_medium_timeout=permission_gate_medium_timeout,
+                permission_gate_high_timeout=permission_gate_high_timeout,
+                approval_routing=approval_routing,
+                outbound_connectors=outbound_connectors,
+                progress_func=progress_func,
+                session_context=session_context,
+                conversation_address=conversation_address,
+                delivery_ledger=delivery_ledger,
+                skill_authoring_enabled=skill_authoring_enabled,
+                emit_delivery_trailer=emit_delivery_trailer,
+            )
     finally:
         _active_runs -= 1
 
@@ -1718,6 +1876,7 @@ async def _run_inner(
     conversation_address: ConversationAddress | None = None,
     delivery_ledger: list[Any] | None = None,
     skill_authoring_enabled: bool = False,
+    emit_delivery_trailer: bool = True,
 ) -> str:
     # Image-bearing messages route to the vision model (D6); raises here if
     # images are present but no vision route is configured, before any LLM call.
@@ -1749,6 +1908,13 @@ async def _run_inner(
     # agent-skill-tools: drop skill_manage unless this agent opted into authoring.
     schemas = _filter_skill_authoring(schemas, enabled=skill_authoring_enabled)
 
+    # mcp-tool-name-projection: present MCP tools to the LLM under the configured projected
+    # name (registry stays canonical; calls are resolved back on tool_use). Applied last so
+    # all filtering above runs on canonical names.
+    from fleetent.integrations import mcp as _mcp_client
+
+    schemas = _mcp_client.project_schemas(schemas)
+
     # sandbox-containment-gating: read the active backend's bind-mount capability once
     # per run (not per gate decision) so the action gate's sandbox_capable reflects
     # whether file tools truly run in-container this run. Best-effort: a manager build
@@ -1761,8 +1927,11 @@ async def _run_inner(
         _logger.debug("sandbox_capability_probe_failed", error=str(exc))
         sandbox_workspace_mount = False
 
+    from fleetent.outbound_connectors import resolve_for_runtime
+
     start = time.monotonic()
     run_id = str(uuid.uuid4())
+    resolved_outbound_connectors = resolve_for_runtime(agent_name, outbound_connectors)
     # delivery-receipts (§2): run-level ledger collecting every outbound receipt this run,
     # read at finalize to render the fact trailer (§3). A caller may seed it (approval-suspend-
     # resume shares one ledger between the resumed tool execution and this continuation so the
@@ -1779,7 +1948,7 @@ async def _run_inner(
         delivery_ledger=delivery_ledger,
         session_context=session_context,
         principal=principal,
-        outbound_connectors=outbound_connectors or {},
+        outbound_connectors=resolved_outbound_connectors,
         # send-file-to-conversation: the authoritative delivery address (same one text
         # replies use) so send_file lands the file in the current conversation — channel
         # into that channel, DM into that DM — instead of always the requester's DM.
@@ -1791,7 +1960,17 @@ async def _run_inner(
     # break the run (mirrors the sandbox/eval_logger best-effort pattern).
     try:
         built_context = await build_context(
-            user_id, user_input, agent_name or "", active_cfg.max_tokens or 4096
+            user_id,
+            user_input,
+            agent_name or "",
+            active_cfg.max_tokens or 4096,
+            audit_context=KBRetrievalAuditContext(
+                run_id=run_id,
+                session_id=session_id,
+                user_id=user_id,
+                agent_name=agent_name,
+                tenant_id=principal.tenant_id if principal is not None else "default",
+            ),
         )
         _append_system_context(messages, system_prompt, built_context.text)
         _record_injected_context(run_id, built_context.sources, session_id=session_id)
@@ -2031,7 +2210,7 @@ async def _run_inner(
             permission_gate_medium_timeout=permission_gate_medium_timeout,
             permission_gate_high_timeout=permission_gate_high_timeout,
             approval_routing=approval_routing,
-            outbound_connectors=outbound_connectors,
+            outbound_connectors=resolved_outbound_connectors,
             sandbox_effective_mode=sandbox_mode,
             sandbox_workspace_mount=sandbox_workspace_mount,
             conversation_address=conversation_address,
@@ -2105,6 +2284,9 @@ async def _run_inner(
             budget_config.max_tokens,
             reply,
         )
+    # Never end an abnormal stop in silence: an empty reply on loop_detected /
+    # consecutive_failures / cancelled / approval_rejected becomes a user-facing status.
+    reply = _finalize_reply(reply, stop_reason, messages)
     usage = response.usage if response else None
     user_input = _first_user_input(messages)
     _save_flap_state(session_id, flap_state)
@@ -2174,7 +2356,7 @@ async def _run_inner(
         )
     # delivery-receipts (§3): the fact trailer is appended LAST — after on_response hooks —
     # so neither the model nor a hook can omit or rewrite it.
-    return _append_delivery_trailer(reply, tool_context)
+    return _append_delivery_trailer(reply, tool_context, emit=emit_delivery_trailer)
 
 
 def run_sync(
@@ -2289,6 +2471,7 @@ async def run_stream(
     model_policy: ModelPolicySnapshot | None = None,
     session_context: Any = None,
     skill_authoring_enabled: bool = False,
+    skill_hot_reload: bool = True,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Async streaming version of run(). Yields SSE event dicts.
 
@@ -2307,6 +2490,8 @@ async def run_stream(
     """
     user_id = principal.user_id if principal is not None else "default"
 
+    # skill-external-hot-reload: reload externally-changed skills before catalog injection.
+    _maybe_refresh_skills(skill_hot_reload)
     # agent-skill-scoping: narrow the catalog to the agent's allowed_skills (empty /
     # None = no narrowing, all enabled skills visible).
     skills_catalog = available_skills_prompt(
@@ -2378,7 +2563,17 @@ async def run_stream(
     # trace. Best-effort — missing DB / disabled KB must not break the stream.
     try:
         built_context = await build_context(
-            user_id, user_input, agent_name or "", active_cfg.max_tokens or 4096
+            user_id,
+            user_input,
+            agent_name or "",
+            active_cfg.max_tokens or 4096,
+            audit_context=KBRetrievalAuditContext(
+                run_id=run_id,
+                session_id=session_id,
+                user_id=user_id,
+                agent_name=agent_name,
+                tenant_id=principal.tenant_id if principal is not None else "default",
+            ),
         )
         _append_system_context(messages, system_prompt, built_context.text)
         _record_injected_context(run_id, built_context.sources, session_id=session_id)
@@ -2781,7 +2976,11 @@ async def run_stream(
                     content = redact_secrets(hres.modified_content)
             # T4: truncate the messages copy only; the SSE event above kept the full result.
             tool_content = (
-                content if is_self_truncating(slot.name) else truncate_tool_result(content)
+                content
+                if is_self_truncating(slot.name)
+                else truncate_tool_result(
+                    content, workspace_dir=_spillover_workspace(session_id, agent_name)
+                )
             )
             messages.append({"role": "tool", "tool_call_id": slot.tc_id, "content": tool_content})
             state.record_tool_call(
@@ -2846,6 +3045,13 @@ async def run_stream(
                 reply = partial_reply
                 if partial_reply:
                     yield {"type": "text_delta", "content": partial_reply}
+
+    # Never end an abnormal stop in silence: substitute a user-facing status for an empty
+    # reply and stream it as a delta so it reaches the final output (parity with run()).
+    _finalized = _finalize_reply(reply, stop_reason, messages)
+    if _finalized != reply:
+        reply = _finalized
+        yield {"type": "text_delta", "content": reply}
 
     reply = await _apply_output_transform(reply, governance, session_id, agent_name, user_id)
     # delivery-receipts (§3): after the stream, append the fact trailer as a final delta

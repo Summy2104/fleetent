@@ -242,12 +242,21 @@ class AgentRetrievalPolicy(BaseModel):
     rerank_route: str = ""
 
 
+class AgentKnowledgeRetrievalAudit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    plaintext: bool = False
+
+
 class AgentKnowledge(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
     bindings: list[AgentKnowledgeBinding] = Field(default_factory=list)
     retrieval_policy: AgentRetrievalPolicy = Field(default_factory=AgentRetrievalPolicy)
+    retrieval_audit: AgentKnowledgeRetrievalAudit = Field(
+        default_factory=AgentKnowledgeRetrievalAudit
+    )
 
     @model_validator(mode="after")
     def _validate_bindings(self) -> "AgentKnowledge":
@@ -377,12 +386,40 @@ class ReflectionSettings(BaseModel):
 
     enabled: bool = False
     interval_seconds: float = 86400.0
+    auto_apply: "ReflectionAutoApplySettings" = Field(default_factory=lambda: ReflectionAutoApplySettings())
+
+
+class ReflectionAutoApplySettings(BaseModel):
+    """Per-agent reflection auto-apply settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    allow_low_risk: bool = False
 
 
 class AgentFile(BaseModel):
     """Schema for a self-contained ``agent.yaml``."""
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_mcp_servers(cls, data: Any) -> Any:
+        """Convert the standard map-keyed ``mcpServers``/``mcp_servers`` block into the
+        internal ``mcp_servers`` list. A list value is left for native validation (it is the
+        model's own serialized form — `model_dump` → `model_validate` round-trips, e.g. in
+        materialize, must keep working); legacy list-of-id *files* are rejected at load time
+        (see ``load_agent_file``). Keeps ``${VAR}`` references intact (resolved at request
+        time) so the inline-secret guard sees references, not resolved secrets."""
+        if not isinstance(data, dict):
+            return data
+        if "mcpServers" in data or isinstance(data.get("mcp_servers"), dict):
+            from fleetent.config import parse_mcp_servers
+
+            data = dict(data)
+            data["mcp_servers"] = parse_mcp_servers(data, expand_env=False)
+            data.pop("mcpServers", None)
+        return data
 
     name: str
     version: int
@@ -393,6 +430,10 @@ class AgentFile(BaseModel):
     memory_namespace: str = ""
     skills_dir: str | None = None
     allowed_skills: list[str] = Field(default_factory=list)
+    # skill-external-hot-reload: when true (default), the runtime checks the skills dir
+    # for external changes before each inbound message and reloads if changed. Set false
+    # to revert to boot-time scan + skill_manage-triggered reload only.
+    skill_hot_reload: bool = True
     # agent-skill-tools: gate for the model-facing skill_manage authoring tool.
     # Default off — skill_manage only enters this agent's tool schema when explicitly
     # enabled, so a deployment opts into agent-driven skill writes deliberately.
@@ -551,6 +592,10 @@ def load_agent_file(agent_dir: Path) -> AgentFile:
     if not isinstance(raw, dict):
         raise ValueError(f"{path} must contain a mapping")
     raw = _drop_ignored_legacy_governance_keys(raw)
+    if isinstance(raw.get("mcp_servers"), list) and raw["mcp_servers"]:
+        raise ValueError(
+            f"{path}: legacy list-of-id `mcp_servers` is not supported; use the `mcpServers` map"
+        )
     agent = AgentFile.model_validate(raw)
     if agent.name != agent_dir.name:
         raise ValueError(
@@ -607,7 +652,8 @@ def _is_env_reference(key: str, value: str) -> bool:
     # secrets can live in .env and be referenced without being flagged as inline secrets.
     if value.startswith("env:"):
         return _ENV_VAR_NAME_RE.fullmatch(value) is not None
-    return False
+    # Allow standard ${VAR} references (mcp-config-standardization); resolved at request time.
+    return "${" in value and "}" in value
 
 
 def _is_secret_reference_key(key: str) -> bool:
@@ -624,6 +670,10 @@ def load_agent_home_file(path: Path) -> AgentFile:
     if not isinstance(raw, dict):
         raise ValueError(f"{path} must contain a mapping")
     raw = _drop_ignored_legacy_governance_keys(raw)
+    if isinstance(raw.get("mcp_servers"), list) and raw["mcp_servers"]:
+        raise ValueError(
+            f"{path}: legacy list-of-id `mcp_servers` is not supported; use the `mcpServers` map"
+        )
     agent = AgentFile.model_validate(raw)
     _reject_inline_secrets(agent, path)
     return agent

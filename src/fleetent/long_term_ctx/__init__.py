@@ -11,6 +11,7 @@ from fleetent.db import SQLiteDatabase, create_database
 from fleetent.knowledge_base.core import KnowledgeStore
 from fleetent.knowledge_base.retrieval.search import SearchMode
 from fleetent.knowledge_base.retrieval.search import search as kb_search
+from fleetent.observability import KBRetrievalAuditContext
 
 _MEMORY_LIMIT = 10
 _KNOWLEDGE_LIMIT = 10
@@ -89,6 +90,7 @@ async def _kb_search_compat(
     kb_ids: list[str] | None = None,
     limit: int = 10,
     mode: SearchMode = "vector",
+    audit_context: KBRetrievalAuditContext | None = None,
 ) -> list[object]:
     return list(
         await kb_search(
@@ -98,6 +100,7 @@ async def _kb_search_compat(
             kb_ids=kb_ids,
             limit=limit,
             mode=mode,
+            audit_context=audit_context,
         )
     )
 
@@ -129,6 +132,7 @@ async def build_context(
     query: str,
     agent_id: str,
     available_tokens: int,
+    audit_context: KBRetrievalAuditContext | None = None,
 ) -> BuiltContext:
     """Build injectable long-term context from memory and optional knowledge sources."""
 
@@ -152,7 +156,13 @@ async def build_context(
 
     policy = _resolve_policy(available_tokens)
     memories = await memory.search(user_id, query, limit=_MEMORY_LIMIT)
-    knowledge_results = await _search_knowledge(user_id, query, agent_id, _KNOWLEDGE_LIMIT)
+    knowledge_results = await _search_knowledge(
+        user_id,
+        query,
+        agent_id,
+        _KNOWLEDGE_LIMIT,
+        audit_context=audit_context,
+    )
     if not memories and not knowledge_results:
         return BuiltContext(
             text="",
@@ -369,6 +379,7 @@ async def _search_knowledge(
     query: str,
     agent_id: str,
     limit: int,
+    audit_context: KBRetrievalAuditContext | None = None,
 ) -> list[object]:
     if _knowledge_provider is not None:
         return await _knowledge_provider(user_id, query, agent_id, limit)
@@ -390,6 +401,7 @@ async def _search_knowledge(
         kb_ids=kb_ids,
         limit=limit,
         mode=kb.retrieval_policy.mode,
+        audit_context=audit_context,
     )
     return list(results)
 
@@ -416,4 +428,11 @@ def _knowledge_source(item: object) -> ContextSource:
 
 
 def _database() -> SQLiteDatabase:
+    # In the agent process, _init_agent_db_schema wires _kb_db to the per-tenant kb.db at
+    # boot; prefer it so retrieval reads the right tenant KB instead of the management DB.
+    from fleetent.knowledge_base import runtime as _kb_runtime
+
+    kb_db = _kb_runtime._kb_db
+    if kb_db is not None:
+        return kb_db
     return create_database(Settings().database_url)

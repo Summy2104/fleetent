@@ -175,6 +175,7 @@ async def test_builtin_knowledge_provider_uses_knowledge_base_search_when_enable
         kb_ids=["global"],
         limit=10,
         mode="hybrid",
+        audit_context=None,
     )
     assert "[Knowledge]" in result.text
     assert "Fleetent can ingest markdown knowledge." in result.text

@@ -21,15 +21,14 @@ def _valid_doc() -> dict:
         "allowed_tools": ["search_*", "acme__*"],
         "plugins": ["acme"],
         "features": {"code_execution": True},
-        "mcp_servers": [
-            {
-                "id": "acme",
+        "mcpServers": {
+            "acme": {
                 "transport": "http",
                 "url": "https://acme.internal/mcp",
                 "auth_type": "bearer",
                 "api_key_env": "ACME_MCP_TOKEN",
             }
-        ],
+        },
     }
 
 
@@ -417,6 +416,11 @@ def test_load_agent_file_dir_name_mismatch_rejected(tmp_path) -> None:
 def _write_agent(root, name: str, **overrides) -> None:
     doc = {"name": name, "version": 1, "models": _valid_models_doc()}
     doc.update(overrides)
+    # Emit the standard map-keyed form; tests keep the legacy list shape for brevity.
+    if isinstance(doc.get("mcp_servers"), list):
+        doc["mcpServers"] = {
+            e["id"]: {k: v for k, v in e.items() if k != "id"} for e in doc.pop("mcp_servers")
+        }
     agent_dir = root / name
     agent_dir.mkdir(parents=True)
     (agent_dir / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")

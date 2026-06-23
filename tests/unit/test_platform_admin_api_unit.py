@@ -281,7 +281,10 @@ def test_user_admin_route_handlers_cover_management(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(
         user_admin_api.user_store,
         "get_by_email",
-        lambda email: next((u for u in users.values() if u.email == email), None),
+        lambda tenant_id, email: next(
+            (u for u in users.values() if u.tenant_id == tenant_id and u.email == email),
+            None,
+        ),
     )
     monkeypatch.setattr(user_admin_api.user_store, "get_builtin_admin", lambda: admin)
     monkeypatch.setattr(user_admin_api.user_store, "list_users", lambda: list(users.values()))
@@ -437,7 +440,7 @@ def test_user_admin_route_error_branches(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(user_admin_api.auth, "validate_session", lambda token, idle: admin.id)
     monkeypatch.setattr(user_admin_api.auth, "has_role", lambda user, roles: user.role in roles)
     monkeypatch.setattr(user_admin_api.user_store, "get_by_id", lambda user_id: admin)
-    monkeypatch.setattr(user_admin_api.user_store, "get_by_email", lambda email: None)
+    monkeypatch.setattr(user_admin_api.user_store, "get_by_email", lambda tenant_id, email: None)
     with pytest.raises(HTTPException) as login_failed:
         user_admin_api.login(user_admin_api.LoginBody(email="missing@example.com", password="pw"))
     assert login_failed.value.status_code == 401
@@ -798,10 +801,16 @@ def test_kb_admin_route_handlers_cover_management_and_documents(
     monkeypatch.setattr(
         kb_admin_api,
         "kb_evaluation",
-        lambda tenant_id, kb_id: {"kb_id": kb_id, "metrics": {"recall": 1.0}},
+        lambda tenant_id, kb_id: {
+            "kb_id": kb_id,
+            "metrics": {"recall_at_k": 1.0, "mrr": 1.0},
+            "hit_ranking": [{"rank": 1}],
+        },
     )
     monkeypatch.setattr(
-        kb_admin_api, "kb_observation", lambda tenant_id, kb_id: {"kb_id": kb_id, "recall_hits": 7}
+        kb_admin_api,
+        "kb_observation",
+        lambda tenant_id, kb_id: {"kb_id": kb_id, "query_count": 7, "sessions": ["s1"]},
     )
     monkeypatch.setattr(
         kb_admin_api.agent_kbs_store,
@@ -888,7 +897,7 @@ def test_kb_admin_route_handlers_cover_management_and_documents(
     )
     assert (
         kb_admin_api.run_evaluation(kb_admin_api.EvalBody(kb_id="kb2"), auth_header)["metrics"][
-            "recall"
+            "recall_at_k"
         ]
         == 1.0
     )
@@ -899,7 +908,7 @@ def test_kb_admin_route_handlers_cover_management_and_documents(
     assert kb_admin_api.agents_for_kb("kb2", authorization=auth_header)["agents"] == [8]
     assert kb_admin_api.kbs_for_agent(8, authorization=auth_header)["kb_ids"] == ["kb2"]
     assert kb_admin_api.unbind_agent("kb2", 8, authorization=auth_header)["bound"] is False
-    assert kb_admin_api.observation("kb2", authorization=auth_header)["recall_hits"] == 7
+    assert kb_admin_api.observation("kb2", authorization=auth_header)["query_count"] == 7
     with pytest.raises(HTTPException) as still_bound:
         kb_admin_api.archive_kb("kb1", authorization=auth_header, x_confirm="true")
     assert still_bound.value.status_code == 409
@@ -973,19 +982,5 @@ async def test_server_auth_health_and_approval(
     assert health["sandbox"]["backend"] == "docker"
     assert health["sandbox"]["backend_available"] is False
     assert health["sandbox"]["note"] == "off (docker unavailable)"
-
-    async def resolve(**kwargs: Any) -> bool:
-        return kwargs["approval_id"] == "a1"
-
-    monkeypatch.setattr(server, "resolve_approval_request", resolve)
-    assert (
-        await server.resolve_approval(
-            "a1", server.ApprovalRequest(decision="approved", approver_user_id="ops")
-        )
-    )["status"] == "ok"
-    with pytest.raises(HTTPException) as bad_decision:
-        await server.resolve_approval("a1", server.ApprovalRequest(decision="maybe"))
-    assert bad_decision.value.status_code == 400
-    with pytest.raises(HTTPException) as missing_approval:
-        await server.resolve_approval("missing", server.ApprovalRequest(decision="approved"))
-    assert missing_approval.value.status_code == 404
+    route_paths = {route.path for route in server.app.routes}
+    assert "/approvals/{approval_id}/resolve" not in route_paths

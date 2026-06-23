@@ -10,7 +10,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.websockets import WebSocketDisconnect
 
-from fleetent.identity import Principal
+from fleetent.identity import Principal, encode_ingress_principal
 from fleetent.integrations.sandbox import Mode
 from fleetent.runtime import agent_app
 
@@ -32,7 +32,9 @@ def _agent_file(**overrides: Any) -> Any:
         features={"code_execution": True},
         allowed_skills=["triage"],
         skill_authoring_enabled=False,
+        skill_hot_reload=True,
         mcp_servers=[],
+        mcp=SimpleNamespace(enabled=True, tool_naming="claude"),
         scheduling=SimpleNamespace(enabled=False),
     )
     for key, value in overrides.items():
@@ -244,6 +246,60 @@ async def test_build_app_chat_approvals_and_stream_error(monkeypatch: pytest.Mon
         )
 
 
+async def test_build_app_im_route_carries_principal_and_returns_sync_replies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_route(msg: Any, principal: Principal | None = None) -> None:
+        captured["msg"] = msg
+        captured["principal"] = principal
+        await msg.reply_func("node-managed reply")
+
+    monkeypatch.setattr(
+        agent_app.agent_config,
+        "current",
+        lambda: SimpleNamespace(get=lambda name: _agent_file()),
+    )
+    monkeypatch.setattr("fleetent.im_gateway.normalizer.route", fake_route)
+
+    app = agent_app.build_app("ops")
+    response = await _route(app, "/im/route").endpoint(
+        agent_app.ImRouteRequest(
+            platform="slack",
+            session_id="session-1",
+            user_id="u-real",
+            text="hello",
+            channel_id="C1",
+            agent_name="ops",
+            session_context=agent_app.ImSessionContextRequest(
+                platform="slack",
+                sender_id="U123",
+                sender_name="Alice",
+                chat_type="dm",
+                channel_name="C1",
+            ),
+        ),
+        Principal(user_id="u-real", tenant_id="tenant-1"),
+    )
+
+    assert response.model_dump() == {"replies": [{"text": "node-managed reply", "blocks": None}]}
+    assert captured["principal"] == Principal(user_id="u-real", tenant_id="tenant-1")
+    assert captured["msg"].user_id == "u-real"
+    assert captured["msg"].agent_name == "ops"
+
+    with pytest.raises(HTTPException, match="cross-tenant"):
+        await _route(app, "/im/route").endpoint(
+            agent_app.ImRouteRequest(
+                platform="slack",
+                session_id="session-1",
+                user_id="u-real",
+                text="hello",
+            ),
+            Principal(user_id="u-real", tenant_id="other"),
+        )
+
+
 class _FakeWebSocket:
     def __init__(self, headers: dict[str, str], messages: list[str]) -> None:
         self.headers = headers
@@ -308,3 +364,24 @@ async def test_build_app_ws_gateway_branches(monkeypatch: pytest.MonkeyPatch) ->
     assert any("gateway.ready" in frame for frame in ws.sent)
     assert any('"error"' in frame for frame in ws.sent)
     assert any('"result"' in frame for frame in ws.sent)
+
+    carried_ws = _FakeWebSocket(
+        {
+            "authorization": "Bearer ok",
+            "x-fleetent-principal": encode_ingress_principal(
+                Principal(user_id="operator-1", tenant_id="tenant-1")
+            ),
+        },
+        [json.dumps({"id": 2, "method": "send", "params": {"message": "hi"}})],
+    )
+    dispatch_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        agent_app,
+        "_validate_tui_token",
+        lambda auth: Principal(user_id="local", tenant_id="default"),
+    )
+    monkeypatch.setattr("fleetent.tui.dispatch.dispatch", dispatch_mock)
+    await endpoint(carried_ws)
+    assert dispatch_mock.await_args.args[0].principal == Principal(
+        user_id="operator-1", tenant_id="tenant-1"
+    )

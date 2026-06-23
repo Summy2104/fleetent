@@ -27,17 +27,25 @@ def test_parse_agent_run_with_port_and_home(tmp_path):
     assert ns.home == str(tmp_path)
 
 
+def test_parse_agent_run_with_no_im():
+    ns = cli._parse_agent_run(["support", "--no-im"])
+    assert ns.no_im is True
+
+
 def test_main_dispatches_agent_run(monkeypatch):
     served = {}
 
-    async def fake_serve(agent_id, *, port=None, home=None):
+    async def fake_serve(agent_id, *, port=None, home=None, start_im=True):
         served["agent_id"] = agent_id
         served["port"] = port
+        served["start_im"] = start_im
 
     monkeypatch.setattr(agent_app, "serve", fake_serve)
-    monkeypatch.setattr("sys.argv", ["fleetent", "agent", "run", "support", "--port", "8770"])
+    monkeypatch.setattr(
+        "sys.argv", ["fleetent", "agent", "run", "support", "--port", "8770", "--no-im"]
+    )
     cli.main()
-    assert served == {"agent_id": "support", "port": 8770}
+    assert served == {"agent_id": "support", "port": 8770, "start_im": False}
 
 
 def test_main_oneshot_still_works(monkeypatch, capsys):
@@ -289,7 +297,9 @@ def test_main_dispatches_agent_restart(tmp_path, monkeypatch) -> None:
         agent_app, "_stop_running", lambda home_dir, **kw: stop_calls.append(home_dir)
     )
 
-    async def fake_serve(agent_id: str, *, port: object = None, home: object = None) -> None:
+    async def fake_serve(
+        agent_id: str, *, port: object = None, home: object = None, start_im: bool = True
+    ) -> None:
         serve_calls.append(agent_id)
 
     monkeypatch.setattr(agent_app, "serve", fake_serve)

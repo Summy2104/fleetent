@@ -330,7 +330,8 @@ async def test_run_approval_rejected_terminates(mock_client, monkeypatch):
         result = await al.run(msgs, reply_func=AsyncMock(), max_turns=50)
     # one LLM call, then terminated at next checkpoint — not a second call
     assert mock_client.chat.completions.create.call_count == 1
-    assert result == ""
+    # abnormal stop no longer ends in silence: a user-facing status is returned
+    assert result and "未获批准" in result
     # rejected tool still has a placeholder tool_result (message contract intact)
     assert any(isinstance(m, dict) and m.get("role") == "tool" for m in captured["messages"])
 
@@ -406,7 +407,8 @@ async def test_run_cancelled_stops_before_llm_call(mock_client):
     token = CancelToken()
     token.cancel()
     reply = await al.run([{"role": "user", "content": "x"}], cancel_token=token)
-    assert reply == ""
+    # abnormal stop no longer ends in silence: a user-facing status is returned
+    assert reply and "取消" in reply
     # Checkpoint hit before the first LLM call: the model is never invoked.
     assert mock_client.chat.completions.create.call_count == 0
 
@@ -2049,7 +2051,9 @@ async def test_run_signal_a_warns_then_terminates(mock_client):
             loop_repeat_threshold=2,
         )
     assert captured.get("stop_reason") == StopReason.loop_detected
-    assert result == ""
+    # abnormal stop no longer ends in silence: a user-facing status (with the last tool
+    # feedback) is returned instead of an empty reply
+    assert result and "停止" in result
     # Force-stopped well before max_turns.
     assert mock_client.chat.completions.create.call_count < 10
 

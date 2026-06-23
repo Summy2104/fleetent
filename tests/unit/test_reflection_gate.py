@@ -4,8 +4,9 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 from fleetent.governance import reflection_gate
+from fleetent.reflection import reflection as reflection_api
 from fleetent.reflection import store
-from fleetent.reflection.reflection import MemoryMaintenanceProposal, SkillProposal
+from fleetent.reflection.reflection import MemoryProposal, SkillProposal
 
 
 def _now() -> datetime:
@@ -19,8 +20,8 @@ def _memory_proposal(
     action: str = "mark_stale",
     metadata_patch: dict[str, str] | None = None,
     target_memory_ids: list[str] | None = None,
-) -> MemoryMaintenanceProposal:
-    return MemoryMaintenanceProposal(
+) -> MemoryProposal:
+    return MemoryProposal(
         id=id,
         user_id=user_id,
         action=action,
@@ -66,7 +67,7 @@ async def test_resolve_approve_user_memory_proposal_calls_memory_boundary(
     monkeypatch,
 ) -> None:
     proposal = _memory_proposal()
-    updates: list[MemoryMaintenanceProposal] = []
+    updates: list[MemoryProposal] = []
     mark_user_memory_stale = AsyncMock()
 
     monkeypatch.setattr(store, "_get_maintenance_proposal", lambda _id: proposal)
@@ -129,7 +130,7 @@ async def test_resolve_approve_shared_memory_proposal_calls_shared_memory_bounda
         metadata_patch={"target": "shared_memory"},
         target_memory_ids=[],
     )
-    updates: list[MemoryMaintenanceProposal] = []
+    updates: list[MemoryProposal] = []
     apply_shared_memory_proposal = AsyncMock()
 
     monkeypatch.setattr(store, "_get_maintenance_proposal", lambda _id: proposal)
@@ -169,7 +170,7 @@ async def test_shared_memory_reviewer_resolver_is_injected(monkeypatch) -> None:
         metadata_patch={"target": "shared_memory"},
         target_memory_ids=[],
     )
-    updates: list[MemoryMaintenanceProposal] = []
+    updates: list[MemoryProposal] = []
     apply_shared_memory_proposal = AsyncMock()
 
     monkeypatch.setattr(store, "_get_maintenance_proposal", lambda _id: proposal)
@@ -218,11 +219,8 @@ async def test_resolve_approve_skill_proposal_calls_skill_boundary(
     monkeypatch.setattr(store, "_get_maintenance_proposal", lambda _id: None)
     monkeypatch.setattr(store, "_get_skill_proposal", lambda _id: proposal)
     monkeypatch.setattr(store, "_update_skill_proposal", updates.append)
-    monkeypatch.setattr(
-        reflection_gate,
-        "apply_skill_proposal_to_boundary",
-        apply_boundary,
-    )
+    monkeypatch.setattr(reflection_gate.reflection_api, "_state_db", None)
+    monkeypatch.setattr(reflection_api, "apply_skill_proposal_to_boundary", apply_boundary)
 
     result = await reflection_gate.resolve(
         proposal.id,

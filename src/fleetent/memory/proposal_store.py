@@ -24,7 +24,7 @@ MaintenanceStatus = Literal["pending", "approved", "rejected", "applied", "expir
 
 
 @dataclass(frozen=True)
-class MemoryMaintenanceProposal:
+class MemoryProposal:
     """Read model of a proposal row from the shared reflection table."""
 
     id: str
@@ -57,9 +57,9 @@ def _parse_optional_datetime(value: object) -> datetime | None:
     return _parse_datetime(value)
 
 
-def _to_dict(row: dict[str, Any]) -> MemoryMaintenanceProposal:
+def _to_dict(row: dict[str, Any]) -> MemoryProposal:
     payload = json.loads(str(row["payload_json"]))
-    return MemoryMaintenanceProposal(
+    return MemoryProposal(
         id=str(row["id"]),
         user_id=str(row["subject_user_id"]),
         action=cast(MaintenanceAction, row["kind"]),
@@ -83,7 +83,7 @@ def _to_dict(row: dict[str, Any]) -> MemoryMaintenanceProposal:
     )
 
 
-def get_memory_maintenance_proposal(proposal_id: str) -> MemoryMaintenanceProposal:
+def get_memory_maintenance_proposal(proposal_id: str) -> MemoryProposal:
     """Load one User Memory maintenance proposal by id."""
     row = (
         store.database()
@@ -107,7 +107,7 @@ def list_memory_maintenance_proposals(
     start_ts: datetime | None = None,
     *,
     status: MaintenanceStatus | None = None,
-) -> list[MemoryMaintenanceProposal]:
+) -> list[MemoryProposal]:
     """List User Memory maintenance proposals for one owner."""
     clauses = ["domain = 'memory'", "subject_user_id = :user_id"]
     params: dict[str, object] = {"user_id": user_id}
@@ -139,7 +139,7 @@ def list_memory_maintenance_proposals(
     return [proposal for proposal in proposals if proposal.status == status]
 
 
-def mark_shared_memory_proposal_applied(proposal_id: str) -> MemoryMaintenanceProposal:
+def mark_shared_memory_proposal_applied(proposal_id: str) -> MemoryProposal:
     """Mark one shared-memory-style proposal as applied and return the projection."""
     proposal = get_memory_maintenance_proposal(proposal_id)
     if proposal.status != "approved":
@@ -149,7 +149,7 @@ def mark_shared_memory_proposal_applied(proposal_id: str) -> MemoryMaintenancePr
     if proposal.metadata_patch.get("target") != "shared_memory":
         raise ValueError("proposal target is not shared_memory")
     now = datetime.now(UTC).replace(microsecond=0)
-    updated = MemoryMaintenanceProposal(
+    updated = MemoryProposal(
         id=proposal.id,
         user_id=proposal.user_id,
         action=proposal.action,

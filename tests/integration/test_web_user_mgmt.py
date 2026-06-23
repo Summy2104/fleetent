@@ -16,7 +16,7 @@ def db(tmp_path, monkeypatch):
 def test_create_web_user(db):
     u = user_store.create_web_user("a@x.com", "Alice", password_hash=auth.hash_password("pw"))
     assert u.email == "a@x.com"
-    assert user_store.get_by_email("a@x.com").id == u.id
+    assert user_store.get_by_email("default", "a@x.com").id == u.id
 
 
 def test_duplicate_email_rejected(db):

@@ -103,6 +103,28 @@ def _loading_messages_for_event(evt: dict[str, Any]) -> list[str]:
     return [_tool_status_text(n) for n in names]
 
 
+class _SlackStatusKeeper:
+    """Per-run status state so heartbeats keep the indicator alive without clobbering it.
+
+    im-progress-heartbeat: a `tool_call` event sets the current label/loading messages;
+    a `heartbeat` event re-asserts the last label with `· 已 Ns` appended (keepalive +
+    liveness) instead of resetting to a generic placeholder. The two event kinds never
+    clear each other.
+    """
+
+    def __init__(self) -> None:
+        self._label = _THINKING_STATUS
+        self._loading = [_THINKING_STATUS]
+
+    def text_and_loading(self, evt: dict[str, Any]) -> tuple[str, list[str]]:
+        if evt.get("type") == "heartbeat":
+            elapsed = int(evt.get("elapsed_s", 0))
+            return f"{self._label} · 已 {elapsed}s", self._loading
+        self._label = _status_text_for_event(evt)
+        self._loading = _loading_messages_for_event(evt)
+        return self._label, self._loading
+
+
 def _has_postable_content(text: str, blocks: list[dict[str, Any]] | None) -> bool:
     """Whether a reply has content Slack will accept.
 
@@ -150,15 +172,18 @@ async def _make_status_funcs(
                 kwargs["blocks"] = blocks
             await say(**kwargs)
 
+    keeper = _SlackStatusKeeper()
+
     async def progress_func(evt: dict[str, Any]) -> None:
         if not status_ok:
             return
+        status, loading = keeper.text_and_loading(evt)
         try:
             await client.assistant_threads_setStatus(
                 channel_id=channel,
                 thread_ts=reply_thread,
-                status=_status_text_for_event(evt),
-                loading_messages=_loading_messages_for_event(evt),
+                status=status,
+                loading_messages=loading,
             )
         except Exception as exc:  # noqa: BLE001 — status update failure must not break the run
             logger.warning("slack_progress_status_failed", error=str(exc))
@@ -423,7 +448,8 @@ async def _route_assistant_message(
     batch so multi-tool turns show every in-flight tool, not only the last.
     """
     from fleetent.im_gateway.access import IMIdentityResolutionError, resolve_identity
-    from fleetent.im_gateway.normalizer import NormalizedMessage, SessionContext, route
+    from fleetent.im_gateway.inbound_dispatch import dispatch
+    from fleetent.im_gateway.normalizer import NormalizedMessage, SessionContext
     from fleetent.outbound import ConversationAddress
 
     channel = getattr(context, "channel_id", None) or payload.get("channel") or ""
@@ -453,12 +479,12 @@ async def _route_assistant_message(
         else:
             await say(text)
 
+    keeper = _SlackStatusKeeper()
+
     async def progress_func(evt: dict[str, Any]) -> None:
+        status, loading = keeper.text_and_loading(evt)
         try:
-            await set_status(
-                _status_text_for_event(evt),
-                loading_messages=_loading_messages_for_event(evt),
-            )
+            await set_status(status, loading_messages=loading)
         except Exception as exc:  # noqa: BLE001 — status update failure must not break the run
             logger.warning("slack_progress_status_failed", error=str(exc))
 
@@ -501,7 +527,7 @@ async def _route_assistant_message(
             thread_root=thread_ts or payload.get("ts") or "",
         ),
     )
-    await route(msg)
+    await dispatch(msg)
 
 
 def create_app(agent_name: str, config: dict[str, Any]) -> object:
@@ -563,7 +589,8 @@ def create_app(agent_name: str, config: dict[str, Any]) -> object:
 
     async def _handle(event: dict[str, Any], client: Any, say: Any = None) -> None:
         from fleetent.im_gateway.access import IMIdentityResolutionError, resolve_identity
-        from fleetent.im_gateway.normalizer import NormalizedMessage, SessionContext, route
+        from fleetent.im_gateway.inbound_dispatch import dispatch
+        from fleetent.im_gateway.normalizer import NormalizedMessage, SessionContext
         from fleetent.outbound import ConversationAddress
 
         channel = event.get("channel") or ""
@@ -628,7 +655,7 @@ def create_app(agent_name: str, config: dict[str, Any]) -> object:
                 thread_root=reply_thread or "",
             ),
         )
-        await route(msg)
+        await dispatch(msg)
 
     @app.event("app_mention")
     async def handle_mention(event: dict[str, Any], client: Any, say: Any = None) -> None:

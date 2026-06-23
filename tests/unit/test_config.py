@@ -242,7 +242,7 @@ def test_mcp_server_yaml_parser_requires_explicit_path(tmp_path):
     implicit.write_text("servers:\n  - id: ignored\n", encoding="utf-8")
     explicit = tmp_path / "servers.yaml"
     explicit.write_text(
-        "servers:\n  - id: docs\n    transport: http\n    url: https://example.test/mcp\n",
+        "mcpServers:\n  docs:\n    transport: http\n    url: https://example.test/mcp\n",
         encoding="utf-8",
     )
 

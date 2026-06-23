@@ -17,12 +17,10 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket
 from fastapi.responses import FileResponse, HTMLResponse, Response
-from pydantic import BaseModel
 
 from fleetent import agent_config, agent_store, auth, connectors, cron_scheduler, user_store
 from fleetent.auth import seed_builtin_admin
 from fleetent.config import Settings, configure_logging
-from fleetent.governance.approval_router import resolve_approval_request
 from fleetent.governance.permission_gate import list_approvals
 from fleetent.identity import Principal
 from fleetent.im_gateway.access import IMIdentityResolutionError, set_im_identity_resolver
@@ -143,6 +141,29 @@ def _cron_principal_recheck(task: dict[str, Any]) -> Principal | None:
     return None
 
 
+def _build_platform_maintenance_scheduler(
+    scheduling: Any = None,
+    _scheduler: Any = None,
+) -> Any:
+    """Build and return a configured (but not yet started) APScheduler for platform-only
+    maintenance jobs.  Accepts an optional `_scheduler` for dependency injection in tests."""
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
+
+    from fleetent.config import SchedulingSettings
+    from fleetent.platform.knowledge_base_management.kb_connector_sweep import sweep
+
+    cfg: SchedulingSettings = scheduling if scheduling is not None else SchedulingSettings()
+    sched: Any = _scheduler if _scheduler is not None else AsyncIOScheduler()
+    sched.add_job(
+        sweep,
+        trigger="interval",
+        seconds=cfg.kb_connector_sweep_interval_seconds,
+        id="__kb_connector_sync_sweep__",
+        replace_existing=True,
+    )
+    return sched
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Wire platform api_keys resolver so user_store.authenticate queries the api_keys
@@ -210,7 +231,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         session_mgr.reset(session_id, keep_turns), loop
     ).result()
 
+    # Platform-side maintenance scheduler: runs sweep jobs in the platform process so
+    # agent-runtime cron_scheduler stays free of platform imports (boundary contract).
+    from fleetent.config import SchedulingSettings
+
+    platform_maint_sched = _build_platform_maintenance_scheduler(SchedulingSettings())
+    platform_maint_sched.start()
+
     yield
+
+    if platform_maint_sched.running:
+        platform_maint_sched.shutdown(wait=False)
     # Release MCP session hosts (platform registers global servers via register_all). Each
     # host tears down on its own task; failures are contained inside aclose_all().
     try:
@@ -529,41 +560,27 @@ async def get_approvals(status: str | None = None) -> list:  # type: ignore[type
     return list_approvals(status=status)
 
 
-class ApprovalRequest(BaseModel):
-    decision: str  # "approved" | "rejected"
-    approver_user_id: str = "anonymous"
-
-
-@app.post("/approvals/{approval_id}/resolve")
-async def resolve_approval(approval_id: str, req: ApprovalRequest) -> dict:  # type: ignore[type-arg]
-    if req.decision not in ("approved", "rejected"):
-        raise HTTPException(status_code=400, detail="decision must be 'approved' or 'rejected'")
-    found = await resolve_approval_request(
-        approval_id=approval_id,
-        decision=req.decision,  # type: ignore[arg-type]
-        approver_user_id=req.approver_user_id,
-    )
-    if not found:
-        raise HTTPException(status_code=404, detail=f"approval {approval_id} not found or expired")
-    return {"status": "ok", "approval_id": approval_id, "decision": req.decision}
-
-
 @app.post("/admin/agents/{agent_name}/chat")
 async def managed_agent_chat(
     agent_name: str,
     request: Request,
     admin: user_store.User = Depends(_require_admin_session),  # noqa: B008
 ) -> Response:
-    del admin
     return await _agent_transport.chat(
         _resolve_agent_node_id(agent_name),
         agent_name,
         await request.body(),
         content_type=request.headers.get("content-type", "application/json"),
+        principal=Principal(user_id=admin.id, tenant_id=admin.tenant_id),
     )
 
 
 @app.websocket("/admin/agents/{agent_name}/ws")
 async def managed_agent_ws(websocket: WebSocket, agent_name: str) -> None:
-    _require_admin_session(websocket.headers.get("authorization", ""))
-    await _agent_transport.ws(_resolve_agent_node_id(agent_name), agent_name, websocket)
+    admin = _require_admin_session(websocket.headers.get("authorization", ""))
+    await _agent_transport.ws(
+        _resolve_agent_node_id(agent_name),
+        agent_name,
+        websocket,
+        principal=Principal(user_id=admin.id, tenant_id=admin.tenant_id),
+    )

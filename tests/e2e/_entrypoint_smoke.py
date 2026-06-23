@@ -4,9 +4,8 @@ import contextlib
 import os
 import socket
 import subprocess
-import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import httpx
@@ -50,6 +49,38 @@ def wait_for_http_ready(proc: subprocess.Popen[str], url: str, *, timeout: float
             last_error = str(exc)
         time.sleep(0.2)
     raise AssertionError(f"timed out waiting for {url}: {last_error or 'no response'}")
+
+
+def wait_for_condition[T](
+    probe: Callable[[], T | None],
+    *,
+    timeout: float = 15.0,
+    interval: float = 0.2,
+    description: str,
+) -> T:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        value = probe()
+        if value is not None:
+            return value
+        time.sleep(interval)
+    raise AssertionError(f"timed out waiting for {description}")
+
+
+def run_command(
+    argv: list[str],
+    *,
+    env: dict[str, str],
+    cwd: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        argv,
+        cwd=str(cwd) if cwd is not None else None,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
 @contextlib.contextmanager

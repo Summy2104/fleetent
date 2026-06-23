@@ -41,6 +41,7 @@ def test_local_backend_spawn_uses_agent_run(monkeypatch, tmp_path) -> None:
         "agent",
         "run",
         "support",
+        "--no-im",
         "--port",
         str(assigned_port),
         "--home",
@@ -51,6 +52,23 @@ def test_local_backend_spawn_uses_agent_run(monkeypatch, tmp_path) -> None:
     assert env["BASE_ENV"] == "base-value"
     assert env["ANTHROPIC_API_KEY"] == "sk-live-secret"
     assert not (tmp_path / "agents" / "support" / ".env").exists()
+
+
+def test_local_backend_spawn_disables_agent_local_im(monkeypatch, tmp_path) -> None:
+    from fleetent.node.backend import LocalProcessBackend
+
+    calls: list[tuple[str, ...]] = []
+
+    def fake_popen(cmd: list[str], **kwargs):
+        calls.append(tuple(cmd))
+        return object()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    backend = LocalProcessBackend(_config(tmp_path))
+    backend.spawn("support")
+
+    assert "--no-im" in calls[0]
 
 
 def test_local_backend_stop_uses_agent_stop(monkeypatch, tmp_path) -> None:

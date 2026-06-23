@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .reflection import (
-    MemoryMaintenanceProposal,
+    MemoryProposal,
     SkillProposal,
     _database,
     _get_maintenance_proposal,
@@ -43,7 +43,7 @@ __all__ = [
     "_get_skill_proposal",
     "_update_skill_proposal",
     "_update_maintenance_proposal",
-    "MemoryMaintenanceProposal",
+    "MemoryProposal",
     "SkillProposal",
     "_trend_bucket_ranges",
     "_trend_findings_from_json",
