@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Navigate, NavLink, Route, Routes, useNavigate, useSearchParams } from 'react-router-dom';
 
 import { useAuthSession } from '@/app/auth';
+import { useAdminApi } from '@/lib/api-client';
 import { AgentsPage } from '@/features/agents/page';
 import { SkillsPage } from '@/features/skills/page';
 import { KnowledgeBasePage } from '@/features/kb/page';
@@ -50,8 +51,8 @@ function LoginPage(): JSX.Element {
       setError('Login failed');
       return;
     }
-    const body = (await response.json()) as { token: string };
-    auth.setToken(body.token);
+    const body = (await response.json()) as { token: string; must_reset?: boolean };
+    auth.setSession(body.token, Boolean(body.must_reset));
     navigate('/agents', { replace: true });
   };
 
@@ -97,6 +98,67 @@ function LoginPage(): JSX.Element {
           >
             Sign in with SSO
           </a>
+          {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        </div>
+      </div>
+    </main>
+  );
+}
+
+function ChangePasswordPage(): JSX.Element {
+  const auth = useAuthSession();
+  const api = useAdminApi();
+  const navigate = useNavigate();
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const onSubmit = async (): Promise<void> => {
+    setError(null);
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters');
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.post('/admin/change-password', { new_password: password });
+    } catch {
+      setBusy(false);
+      setError('Could not update password');
+      return;
+    }
+    auth.clearMustReset();
+    navigate('/agents', { replace: true });
+  };
+
+  return (
+    <main className="min-h-screen px-6 py-16">
+      <div className="mx-auto max-w-xl rounded-3xl border bg-card/90 p-10 shadow-soft backdrop-blur">
+        <p className="text-sm font-medium uppercase tracking-[0.3em] text-muted-foreground">
+          fleetent control plane
+        </p>
+        <h1 className="mt-3 text-4xl font-semibold tracking-tight">Change password</h1>
+        <p className="mt-4 text-base text-muted-foreground">
+          Your account must set a new password before you can manage the platform.
+        </p>
+        <div className="mt-8 grid gap-4">
+          <label className="grid gap-2 text-sm font-medium">
+            New password
+            <input
+              className="rounded-md border bg-white px-3 py-2"
+              onChange={(event) => setPassword(event.target.value)}
+              type="password"
+              value={password}
+            />
+          </label>
+          <button
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+            disabled={busy}
+            onClick={() => void onSubmit()}
+            type="button"
+          >
+            Update password
+          </button>
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
         </div>
       </div>
@@ -322,6 +384,11 @@ function RequireAuth(): JSX.Element {
         to="/login"
       />
     );
+  }
+  // The backend rejects every admin endpoint except /me and /change-password until the
+  // pending reset is cleared, so block the rest of the console behind the reset form.
+  if (auth.mustReset) {
+    return <ChangePasswordPage />;
   }
   return <AppLayout />;
 }
