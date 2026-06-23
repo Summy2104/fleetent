@@ -130,8 +130,8 @@ Every write SHALL emit an `audit_log` entry stamped with the acting user id.
 - **THEN** the response indicates confirmation is required and no state change occurs
 
 #### Scenario: Clone endpoint excludes bindings
-- **WHEN** an admin sends `POST /admin/agents/ops-bot/clone` with `{"name":"ops-bot-staging"}`
-- **THEN** the response is 201 with the new agent's snapshot, the new agent has no bindings, **its `status` is `disabled`**, and an `agent.clone` audit entry is written
+- **WHEN** an admin sends `POST /admin/agents/ops-bot/clone` with `{"new_name":"ops-bot-staging"}`
+- **THEN** the response is 200 with the clone summary, the new agent has no bindings, **its `status` is `disabled`**, and an `agent.clone` audit entry is written
 
 #### Scenario: Template list endpoint
 - **WHEN** an admin sends `GET /admin/agent-templates`

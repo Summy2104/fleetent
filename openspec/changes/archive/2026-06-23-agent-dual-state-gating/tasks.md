@@ -49,12 +49,12 @@
 
 ## 7. 收尾门禁
 
-- [ ] 7.1 `make test-pr` 通过（对照 main 基线无新增失败）。
-- [ ] 7.2 `uv run pytest tests/integration -q`（不带 `-x`）对照 main 基线无新增失败。
-- [ ] 7.3 改动文件 `uv run ruff check`/`ruff format` + `uv run mypy src` 干净。
-- [ ] 7.4 前端 `yarn vitest run src/features/agents` 通过。
-- [ ] 7.5 `PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py` 无新违规。
+- [x] 7.1 `make test-pr` 通过（对照 main 基线无新增失败）。
+- [x] 7.2 `uv run pytest tests/integration -q`（不带 `-x`）对照 main 基线无新增失败。
+- [x] 7.3 改动文件 `uv run ruff check`/`ruff format` + `uv run mypy src` 干净。
+- [x] 7.4 前端 `yarn vitest run src/features/agents` 通过。
+- [x] 7.5 `PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py` 无新违规。
 
 ## 8. spec 文档对齐（archive 时同步）
 
-- [ ] 8.1 `opsx:archive` 同步：`agent-admin-api`（create disabled + enable 守卫 + 双态查询）、`agent-lifecycle-toggle`（enable 需绑定 node + 起始 disabled）、`agent-admin-ui`（双态展示 + Enable gating）delta 落到 `openspec/specs/`。
+- [x] 8.1 `opsx:archive` 同步：`agent-admin-api`（create disabled + enable 守卫 + 双态查询）、`agent-lifecycle-toggle`（enable 需绑定 node + 起始 disabled）、`agent-admin-ui`（双态展示 + Enable gating）delta 落到 `openspec/specs/`。
