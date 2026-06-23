@@ -65,7 +65,7 @@
 | 测试 | 场景 | 状态 |
 |---|---|---|
 | `test_reflection_enabled_managed_agent_emits_scheduler_report` | reflection-enabled agent 的 scheduler 定时出报告 | ✅ |
-| `test_memory_mark_stale_proposal_can_be_approved_via_im_route` | **memory mark_stale 提案经 /im/route 审批→apply** | ⏭️ skip（managed agent gateway 不可发现）；**修复 `e2e-reflection-route-server` 已 propose、待 apply** |
+| `test_memory_mark_stale_proposal_can_be_approved_via_im_route` | **memory mark_stale 提案经 /im/route 审批→apply** | ✅（fix `e2e-reflection-route-server` 已落地 `39236f26`：改用 `_im_helpers.managed_agent_route_server` 起 spawned route server 驱动审批，原 skip 已转 passed） |
 | `test_reflection_scheduler_generates_pending_skill_proposal_from_repeated_task_pattern` | scheduler 从重复任务模式生成 pending skill 提案 | ✅ |
 
 ## 刻意不在 managed e2e 覆盖（由别处保障）
@@ -76,9 +76,10 @@
 
 ## 已知缺口 / TODO
 
-1. **reflection 的 approve→apply 半程** —— 当前 skip（gateway 不可发现）；fix change `e2e-reflection-route-server` 已 propose（复用 `_im_helpers.managed_agent_route_server`），apply 后本格转 ✅、reflection-lifecycle 名副其实。
-2. **沙箱执行** —— 仅在有 Docker 的环境跑；CI/本机无 Docker 时 skip。
-3. **MCP + Vault**（MCP 工具调用 + per-principal 凭据解析）—— 未做，按需再上（需新建 `_mcp_stub`）。
+1. **沙箱执行** —— 仅在有 Docker 的环境跑；CI/本机无 Docker 时 skip。
+2. **MCP + Vault**（MCP 工具调用 + per-principal 凭据解析）—— 未做，按需再上（需新建 `_mcp_stub`）。
+
+> 已收口：reflection 的 approve→apply 半程曾因 gateway 不可发现而 skip，fix `e2e-reflection-route-server`（`39236f26`）已落地，现 ✅。
 
 ## 预存烟测（非本批，背景参考）
 
