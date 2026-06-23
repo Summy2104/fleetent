@@ -1,17 +1,17 @@
 ## 1. 统一 env-name 收集器（D2）
 
-- [ ] 1.1 写测试（unit）：共享收集器对一个引用了 model `api_key_env` + `embedding.api_key_env` + `rerank.api_key_env` + `telegram.bot_token_env` + mcp `*_env` 的 AgentFile，返回**全部**这些名（flatten 口径）；先见红
-- [ ] 1.2 实现：把 `materialize._env_var_names` 的 flatten 逻辑提为共享 public 函数（runtime 侧可 import 的位置），令 1.1 见绿
-- [ ] 1.3 `runtime/agent_init.referenced_env_names` 改为复用共享收集器（或薄 re-export）；跑既有 agent_init 测试确认仍绿（必要时更新断言为全集）
+- [x] 1.1 写测试（unit）：共享收集器对一个引用了 model `api_key_env` + `embedding.api_key_env` + `rerank.api_key_env` + `telegram.bot_token_env` + mcp `*_env` 的 AgentFile，返回**全部**这些名（flatten 口径）；先见红
+- [x] 1.2 实现：把 `materialize._env_var_names` 的 flatten 逻辑提为共享 public 函数（runtime 侧可 import 的位置），令 1.1 见绿
+- [x] 1.3 `runtime/agent_init.referenced_env_names` 改为复用共享收集器（或薄 re-export）；跑既有 agent_init 测试确认仍绿（必要时更新断言为全集）
 
 ## 2. node 物化写完整 .env（D1/D3，env-only）
 
-- [ ] 2.1 写测试（unit/node）：`_write_home` / `ensure_env_scaffold` 对有 secrets 的 agent，写出 `0600` 的 `.env`，含全部引用名；本轮下发了值的名为真实值、未下发的为空占位；含保留的 `FLEETENT_TUI_TOKEN`；先见红
-- [ ] 2.2 写测试（unit/node）：已存在含 `FLEETENT_TUI_TOKEN` 的 `.env`，重写后 token 不变（幂等保留）；先见红
-- [ ] 2.3 实现：`ensure_env_scaffold` 演进为"写完整 `.env`（名+值+`0600`）"，值由调用方（node reconcile）传入 desired-state.`secrets`；令 2.1–2.2 见绿
-- [ ] 2.4 写测试（unit/node）：`backend.spawn` **不再**经 `Popen(env=secrets)` 注入 secret（secret 仅在 `.env`）；先见红
-- [ ] 2.5 实现：node reconcile 把收到的 secrets 传给 `.env` 写入而非 spawn 注入；移除 `backend.spawn` 的 secret 注入路径；令 2.4 见绿
-- [ ] 2.6 确认顺序：写 `agent.yaml` → 写完整 `.env`(`0600`) → `backend.spawn`
+- [x] 2.1 写测试（unit/node）：`_write_home` / `ensure_env_scaffold` 对有 secrets 的 agent，写出 `0600` 的 `.env`，含全部引用名；本轮下发了值的名为真实值、未下发的为空占位；含保留的 `FLEETENT_TUI_TOKEN`；先见红
+- [x] 2.2 写测试（unit/node）：已存在含 `FLEETENT_TUI_TOKEN` 的 `.env`，重写后 token 不变（幂等保留）；先见红
+- [x] 2.3 实现：`ensure_env_scaffold` 演进为"写完整 `.env`（名+值+`0600`）"，值由调用方（node reconcile）传入 desired-state.`secrets`；令 2.1–2.2 见绿
+- [x] 2.4 写测试（unit/node）：`backend.spawn` **不再**经 `Popen(env=secrets)` 注入 secret（secret 仅在 `.env`）；先见红
+- [x] 2.5 实现：node reconcile 把收到的 secrets 传给 `.env` 写入而非 spawn 注入；移除 `backend.spawn` 的 secret 注入路径；令 2.4 见绿
+- [x] 2.6 确认顺序：写 `agent.yaml` → 写完整 `.env`(`0600`) → `backend.spawn`
 
 ## 3. node-secret-injection 契约更新（缓存 / platform-down 韧性）
 

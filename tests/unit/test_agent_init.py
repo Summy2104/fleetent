@@ -169,3 +169,47 @@ def test_ensure_env_scaffold_with_referenced_env_names(tmp_path) -> None:
     assert "FLEETENT_TUI_TOKEN" in lines
     for marker in ("sk-", "xoxb-", "xapp-"):
         assert marker not in content
+
+
+# --- ensure_env_scaffold with secrets (tasks 2.1–2.2, D1/D3) ---
+
+
+def test_ensure_env_scaffold_writes_real_value_for_known_secret(tmp_path) -> None:
+    home = tmp_path / "my-bot"
+    home.mkdir()
+
+    agent_init.ensure_env_scaffold(
+        home,
+        referenced_env_names=["MODEL_API_KEY", "SLACK_TOKEN"],
+        secrets={"MODEL_API_KEY": "sk-live-secret"},
+    )
+
+    env_path = home / ".env"
+    assert env_path.exists()
+    # file must be 0600
+    assert oct(env_path.stat().st_mode & 0o777) == oct(0o600)
+    lines = dict(line.split("=", 1) for line in env_path.read_text(encoding="utf-8").strip().splitlines() if "=" in line)
+    assert lines["MODEL_API_KEY"] == "sk-live-secret"
+    assert lines["SLACK_TOKEN"] == ""  # not in secrets → empty placeholder
+    assert "FLEETENT_TUI_TOKEN" in lines
+
+
+def test_ensure_env_scaffold_preserves_tui_token_when_rewriting(tmp_path) -> None:
+    home = tmp_path / "my-bot"
+    home.mkdir()
+    existing_token = "ma-" + "e" * 64
+    (home / ".env").write_text(f"FLEETENT_TUI_TOKEN={existing_token}\n", encoding="utf-8")
+
+    agent_init.ensure_env_scaffold(
+        home,
+        referenced_env_names=["MODEL_API_KEY"],
+        secrets={"MODEL_API_KEY": "sk-live-secret"},
+    )
+
+    lines = dict(
+        line.split("=", 1)
+        for line in (home / ".env").read_text(encoding="utf-8").strip().splitlines()
+        if "=" in line
+    )
+    assert lines["FLEETENT_TUI_TOKEN"] == existing_token
+    assert lines["MODEL_API_KEY"] == "sk-live-secret"

@@ -19,11 +19,11 @@ class FakeBackend:
     ) -> None:
         self.alive = alive
         self.gateway_ports = gateway_ports or {}
-        self.spawn_calls: list[tuple[str, dict[str, str] | None]] = []
+        self.spawn_calls: list[str] = []
         self.stop_calls: list[str] = []
 
-    def spawn(self, agent_name: str, env: dict[str, str] | None = None) -> None:
-        self.spawn_calls.append((agent_name, env))
+    def spawn(self, agent_name: str) -> None:
+        self.spawn_calls.append(agent_name)
 
     def stop(self, agent_name: str) -> None:
         self.stop_calls.append(agent_name)
@@ -79,7 +79,7 @@ def test_reconcile_spawns_missing_desired_agent_after_writing_home(tmp_path) -> 
 
     NodeReconciler(_config(tmp_path), backend).reconcile(_desired())
 
-    assert backend.spawn_calls == [("support", {})]
+    assert backend.spawn_calls == ["support"]
     home = tmp_path / "agents" / "support"
     assert yaml.safe_load((home / "agent.yaml").read_text()) == {"name": "support"}
     assert route.called
@@ -136,7 +136,7 @@ def test_reconcile_respawns_crashed_agent(tmp_path) -> None:
 
     NodeReconciler(_config(tmp_path), backend).reconcile(_desired())
 
-    assert backend.spawn_calls == [("support", {})]
+    assert backend.spawn_calls == ["support"]
     assert route.called
 
 
@@ -162,7 +162,7 @@ def test_reconcile_restarts_running_agent_when_config_hash_changes(tmp_path) -> 
     NodeReconciler(_config(tmp_path), backend).reconcile(desired)
 
     assert backend.stop_calls == ["support"]
-    assert backend.spawn_calls == [("support", {})]
+    assert backend.spawn_calls == ["support"]
     hashes = (state_dir / "applied-config-hashes.json").read_text(encoding="utf-8")
     assert (
         hashlib.sha256(
@@ -213,7 +213,7 @@ def test_reconcile_status_post_failure_does_not_raise(tmp_path) -> None:
 
     NodeReconciler(_config(tmp_path), backend).reconcile(_desired())
 
-    assert backend.spawn_calls == [("support", {})]
+    assert backend.spawn_calls == ["support"]
 
 
 @respx.mock
@@ -280,31 +280,76 @@ def test_reconcile_marks_probe_errors_unhealthy_without_interrupting_other_agent
     }
 
 
+def _agent_config_with_api_key() -> dict:
+    """Minimal but valid AgentFile dict referencing ANTHROPIC_API_KEY."""
+    return {
+        "name": "support",
+        "version": 1,
+        "system_prompt": "You are support.",
+        "models": {
+            "targets": [
+                {
+                    "id": "primary",
+                    "provider": "anthropic",
+                    "protocol": "openai_chat",
+                    "base_url": "https://api.anthropic.com/v1/",
+                    "model": "claude-opus-4-8",
+                    "api_key_env": "ANTHROPIC_API_KEY",
+                }
+            ],
+            "routes": {"default": [{"target": "primary"}]},
+        },
+    }
+
+
 @respx.mock
-def test_reconcile_passes_secrets_to_spawn_and_reuses_them_on_hash_restart(tmp_path) -> None:
+def test_reconcile_writes_secrets_to_env_file_not_spawn(tmp_path) -> None:
+    """D1: secrets are written to .env; spawn has no env param."""
     from fleetent.node.reconcile import NodeReconciler
 
     route = respx.post("https://platform.internal/nodes/node-a/status").mock(
         return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
     )
     backend = FakeBackend({"support": None})
-    desired = _desired(secrets={"ANTHROPIC_API_KEY": "sk-live-secret"})
+    desired = _desired(
+        config=_agent_config_with_api_key(),
+        secrets={"ANTHROPIC_API_KEY": "sk-live-secret"},
+    )
 
     reconciler = NodeReconciler(_config(tmp_path), backend)
     reconciler.reconcile(desired)
 
+    # Secret is in .env, not injected via spawn
+    env_path = tmp_path / "agents" / "support" / ".env"
+    assert env_path.exists()
+    env_lines = dict(
+        line.split("=", 1)
+        for line in env_path.read_text(encoding="utf-8").strip().splitlines()
+        if "=" in line
+    )
+    assert env_lines["ANTHROPIC_API_KEY"] == "sk-live-secret"
+    assert oct(env_path.stat().st_mode & 0o777) == oct(0o600)
+
+    # spawn is called without extra env arg
+    assert backend.spawn_calls == ["support"]
+
+    # On config-hash restart, secrets are written to .env again
     backend.alive["support"] = 12345
+    updated_config = dict(_agent_config_with_api_key(), system_prompt="updated")
     desired_updated = _desired(
-        {"name": "support", "system_prompt": "updated"},
-        secrets={"ANTHROPIC_API_KEY": "sk-live-secret"},
+        config=updated_config,
+        secrets={"ANTHROPIC_API_KEY": "sk-live-secret-v2"},
     )
     reconciler.reconcile(desired_updated)
 
     assert backend.stop_calls == ["support"]
-    assert backend.spawn_calls == [
-        ("support", {"ANTHROPIC_API_KEY": "sk-live-secret"}),
-        ("support", {"ANTHROPIC_API_KEY": "sk-live-secret"}),
-    ]
+    assert backend.spawn_calls == ["support", "support"]
+    env_lines2 = dict(
+        line.split("=", 1)
+        for line in env_path.read_text(encoding="utf-8").strip().splitlines()
+        if "=" in line
+    )
+    assert env_lines2["ANTHROPIC_API_KEY"] == "sk-live-secret-v2"
     assert route.called
 
 

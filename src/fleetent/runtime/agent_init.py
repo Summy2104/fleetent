@@ -9,7 +9,7 @@ installed global command has no repo working tree to read repository example tem
 
 from __future__ import annotations
 
-import secrets
+import secrets as secrets_module
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -53,30 +53,45 @@ def referenced_env_names(agent: AgentFile) -> list[str]:
     return collect_env_var_names(agent)
 
 
-def ensure_env_scaffold(home_dir: Path, *, referenced_env_names: Iterable[str] = ()) -> None:
-    """Idempotently ensure <home>/.env exists with a valid FLEETENT_TUI_TOKEN.
+def ensure_env_scaffold(
+    home_dir: Path,
+    *,
+    referenced_env_names: Iterable[str] = (),
+    secrets: dict[str, str] | None = None,
+) -> None:
+    """Write a complete .env (0600) for the agent home.
 
-    If .env is absent or lacks FLEETENT_TUI_TOKEN, writes a fresh .env containing
-    a generated token plus empty-value placeholders for each referenced env name.
-    An existing .env that already carries FLEETENT_TUI_TOKEN is left untouched.
-    Real secrets are never written — callers supply those via process environment.
+    Always rewrites the file with the full set of referenced env-var names:
+    - Names present in ``secrets`` get their real value written.
+    - Names absent from ``secrets`` get an empty placeholder.
+    - FLEETENT_TUI_TOKEN is preserved from an existing .env or generated fresh.
+
+    The file is always written at mode 0600 and the home dir at 0700.
     """
     env_path = home_dir / ".env"
-    if env_path.exists():
-        parsed = {
-            k: v
-            for line in env_path.read_text(encoding="utf-8").splitlines()
-            if "=" in line
-            for k, _, v in (line.partition("="),)
-        }
-        if parsed.get("FLEETENT_TUI_TOKEN", ""):
-            return
-
     home_dir.mkdir(parents=True, exist_ok=True)
-    tui_token = f"ma-{secrets.token_hex(32)}"
-    body = "".join(f"{name}=\n" for name in sorted(set(referenced_env_names)))
-    body += f"FLEETENT_TUI_TOKEN={tui_token}\n"
-    env_path.write_text(body, encoding="utf-8")
+    home_dir.chmod(0o700)
+
+    # Preserve existing TUI token if present; generate a new one otherwise.
+    existing_token = ""
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("FLEETENT_TUI_TOKEN="):
+                existing_token = line.partition("=")[2]
+                break
+    tui_token = existing_token or f"ma-{secrets_module.token_hex(32)}"
+
+    resolved_secrets = secrets or {}
+    names = sorted(set(referenced_env_names))
+    lines: list[str] = []
+    for name in names:
+        value = resolved_secrets.get(name, "")
+        lines.append(f"{name}={value}")
+    lines.append(f"FLEETENT_TUI_TOKEN={tui_token}")
+
+    content = "\n".join(lines) + "\n" if lines else ""
+    env_path.write_text(content, encoding="utf-8")
+    env_path.chmod(0o600)
 
 
 def scaffold_agent_home(

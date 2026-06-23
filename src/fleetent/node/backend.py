@@ -10,7 +10,7 @@ from fleetent.node.config import NodeConfig
 
 
 class BaseProcessBackend(Protocol):
-    def spawn(self, agent_name: str, env: dict[str, str] | None = None) -> None: ...
+    def spawn(self, agent_name: str) -> None: ...
 
     def stop(self, agent_name: str) -> None: ...
 
@@ -24,7 +24,7 @@ class LocalProcessBackend:
         self._config = config
         self._gateway_ports: dict[str, int] = {}
 
-    def spawn(self, agent_name: str, env: dict[str, str] | None = None) -> None:
+    def spawn(self, agent_name: str) -> None:
         port = self._gateway_ports.setdefault(agent_name, self._allocate_loopback_port())
         subprocess.Popen(
             [
@@ -39,7 +39,6 @@ class LocalProcessBackend:
                 str(self._home_dir(agent_name)),
             ],
             cwd=str(self._config.home_dir),
-            env={**os.environ, **(env or {})},
         )
 
     def stop(self, agent_name: str) -> None:

@@ -19,21 +19,19 @@ def _config(tmp_path) -> NodeConfig:
 def test_local_backend_spawn_uses_agent_run(monkeypatch, tmp_path) -> None:
     from fleetent.node.backend import LocalProcessBackend
 
-    calls: list[tuple[tuple[str, ...], str | None, dict[str, str] | None]] = []
+    calls: list[tuple[tuple[str, ...], str | None]] = []
 
     def fake_popen(cmd: list[str], **kwargs):
-        calls.append((tuple(cmd), kwargs.get("cwd"), kwargs.get("env")))
+        calls.append((tuple(cmd), kwargs.get("cwd")))
         return object()
 
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
-    monkeypatch.setenv("PATH", os.environ["PATH"])
-    monkeypatch.setenv("BASE_ENV", "base-value")
 
     backend = LocalProcessBackend(_config(tmp_path))
-    backend.spawn("support", env={"ANTHROPIC_API_KEY": "sk-live-secret"})
+    backend.spawn("support")
 
     assert len(calls) == 1
-    cmd, cwd, env = calls[0]
+    cmd, cwd = calls[0]
     assigned_port = backend.gateway_port("support")
     assert assigned_port is not None
     assert cmd == (
@@ -48,10 +46,6 @@ def test_local_backend_spawn_uses_agent_run(monkeypatch, tmp_path) -> None:
         str(tmp_path / "agents" / "support"),
     )
     assert cwd == str(tmp_path)
-    assert env is not None
-    assert env["BASE_ENV"] == "base-value"
-    assert env["ANTHROPIC_API_KEY"] == "sk-live-secret"
-    assert not (tmp_path / "agents" / "support" / ".env").exists()
 
 
 def test_local_backend_spawn_disables_agent_local_im(monkeypatch, tmp_path) -> None:
@@ -131,3 +125,26 @@ def test_local_backend_is_alive_returns_none_for_stale_pid(monkeypatch, tmp_path
     backend = LocalProcessBackend(_config(tmp_path))
 
     assert backend.is_alive("support") is None
+
+
+# --- task 2.4: spawn must NOT inject secrets via process env ---
+
+
+def test_local_backend_spawn_does_not_inject_secrets_in_process_env(monkeypatch, tmp_path) -> None:
+    """After D1 (env-only), secrets live in .env only; spawn must not pass env to Popen."""
+    from fleetent.node.backend import LocalProcessBackend
+
+    popen_kwargs: list[dict] = []
+
+    def fake_popen(cmd: list[str], **kwargs):
+        popen_kwargs.append(kwargs)
+        return object()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    backend = LocalProcessBackend(_config(tmp_path))
+    backend.spawn("support")
+
+    assert len(popen_kwargs) == 1
+    # env=None means Popen inherits the parent env; no injected secret dict
+    assert popen_kwargs[0].get("env") is None

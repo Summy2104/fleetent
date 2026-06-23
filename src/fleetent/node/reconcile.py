@@ -49,28 +49,28 @@ class NodeReconciler:
                     continue
                 continue
             if pid is None:
-                self._write_home(name, desired.config)
+                self._write_home(name, desired.config, secrets=desired.secrets)
                 _logger.info(
                     "node_agent_spawn",
                     agent_name=name,
                     secret_env_names=sorted(desired.secrets),
                     secret_count=len(desired.secrets),
                 )
-                self._backend.spawn(name, env=desired.secrets)
+                self._backend.spawn(name)
                 hashes[name] = desired_hash
                 continue
 
             current_hash = hashes.get(name) or self._current_home_hash(name)
             if current_hash != desired_hash:
                 self._backend.stop(name)
-                self._write_home(name, desired.config)
+                self._write_home(name, desired.config, secrets=desired.secrets)
                 _logger.info(
                     "node_agent_spawn",
                     agent_name=name,
                     secret_env_names=sorted(desired.secrets),
                     secret_count=len(desired.secrets),
                 )
-                self._backend.spawn(name, env=desired.secrets)
+                self._backend.spawn(name)
                 hashes[name] = desired_hash
 
         self._write_hashes(hashes)
@@ -113,7 +113,9 @@ class NodeReconciler:
             return "unhealthy"
         return "healthy" if response.status_code == 200 else "unhealthy"
 
-    def _write_home(self, agent_name: str, config: dict[str, Any]) -> None:
+    def _write_home(
+        self, agent_name: str, config: dict[str, Any], *, secrets: dict[str, str] | None = None
+    ) -> None:
         home = self._home_dir(agent_name)
         home.mkdir(parents=True, exist_ok=True)
         (home / "agent.yaml").write_text(
@@ -125,7 +127,7 @@ class NodeReconciler:
         except Exception:
             _logger.warn("node_write_home_config_parse_error", agent_name=agent_name)
             env_names = []
-        ensure_env_scaffold(home, referenced_env_names=env_names)
+        ensure_env_scaffold(home, referenced_env_names=env_names, secrets=secrets)
 
     def _home_dir(self, agent_name: str) -> Path:
         return self._config.home_dir / "agents" / agent_name
