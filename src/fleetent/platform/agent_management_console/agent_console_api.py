@@ -321,7 +321,15 @@ def _def_response(name: str) -> dict[str, Any]:
         out["model_overrides"] = agent.get("model_overrides", {})
         out["memory_namespace"] = agent.get("memory_namespace", "default")
         out["icon"] = agent.get("icon")
-        out["config_overrides"] = agent.get("config_overrides", {})
+        config_overrides = agent.get("config_overrides", {})
+        out["config_overrides"] = config_overrides
+        # Serialized form so the console can round-trip the Advanced overrides box
+        # (IM connector creds live here) without shipping a YAML lib to the browser.
+        out["config_overrides_yaml"] = (
+            yaml.safe_dump(config_overrides, allow_unicode=True, sort_keys=False)
+            if config_overrides
+            else ""
+        )
     return out
 
 

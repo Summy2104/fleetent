@@ -1,5 +1,5 @@
 import { MemoryRouter } from 'react-router-dom';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -25,6 +25,7 @@ type AgentRecord = {
 type AgentDetailRecord = {
   agent: string;
   allowed_tools: string[];
+  config_overrides_yaml?: string;
   model_overrides?: Record<string, unknown>;
   status: string;
   supports_dm?: boolean;
@@ -972,5 +973,111 @@ describe('agents page model binding', () => {
 
     await waitFor(() => expect(captured.patch).toBeTruthy());
     expect(captured.patch?.model_overrides?.routes?.default?.[0]?.provider_id).toBe('openai-gpt4');
+  });
+});
+
+describe('agents page IM connector overrides', () => {
+  const emptyBindings = {
+    kbIds: [],
+    mcpServers: [],
+    oauth: [],
+    secrets: [],
+    skills: [],
+    users: [],
+  };
+
+  it('shows config overrides yaml in the bindings panel and saves edits via PATCH', async () => {
+    const user = userEvent.setup({ delay: null });
+    const agents: AgentRecord[] = [
+      {
+        agent_name: 'alpha',
+        allowed_tools: [],
+        provenance: 'adhoc',
+        status: 'enabled',
+        system_prompt: 'Alpha prompt',
+      },
+    ];
+    const detailByAgent: Record<string, AgentDetailRecord> = {
+      alpha: {
+        agent: 'alpha',
+        allowed_tools: [],
+        config_overrides_yaml: 'im:\n  slack:\n    bot_token_env: SLACK_BOT_TOKEN\n',
+        status: 'enabled',
+        supports_dm: false,
+        supports_groups: false,
+        system_prompt: 'Alpha prompt',
+      },
+    };
+
+    installAgentBindingHandlers({
+      agents,
+      bindingsByAgent: { alpha: { ...emptyBindings } },
+      detailByAgent,
+    });
+
+    const captured: { patch?: { config_overrides_yaml?: string } } = {};
+    server.use(
+      http.patch(`${API_BASE_URL}/admin/agents/:name`, async ({ request }) => {
+        captured.patch = (await request.json()) as { config_overrides_yaml?: string };
+        return HttpResponse.json({ ok: true });
+      })
+    );
+
+    renderAgentsRoute();
+    expect(await screen.findByText('alpha')).toBeInTheDocument();
+
+    const section = (await screen.findByRole('heading', { name: 'IM Connectors' })).closest(
+      'section'
+    );
+    expect(section).not.toBeNull();
+    const controls = within(section as HTMLElement);
+    const textarea = controls.getByLabelText<HTMLTextAreaElement>('Advanced overrides (YAML)');
+    await waitFor(() => expect(textarea.value).toContain('bot_token_env: SLACK_BOT_TOKEN'));
+
+    fireEvent.change(textarea, {
+      target: { value: 'im:\n  telegram:\n    bot_token_env: TG_TOKEN\n' },
+    });
+    await user.click(controls.getByRole('button', { name: 'Save overrides' }));
+
+    await waitFor(() => expect(captured.patch).toBeTruthy());
+    expect(captured.patch?.config_overrides_yaml).toContain('telegram');
+    expect(captured.patch?.config_overrides_yaml).toContain('TG_TOKEN');
+  });
+
+  it('hides the overrides editor controls from viewers', async () => {
+    const agents: AgentRecord[] = [
+      {
+        agent_name: 'alpha',
+        allowed_tools: [],
+        provenance: 'adhoc',
+        status: 'enabled',
+        system_prompt: 'Alpha prompt',
+      },
+    ];
+    const detailByAgent: Record<string, AgentDetailRecord> = {
+      alpha: {
+        agent: 'alpha',
+        allowed_tools: [],
+        config_overrides_yaml: 'im:\n  slack:\n    bot_token_env: SLACK_BOT_TOKEN\n',
+        status: 'enabled',
+        system_prompt: 'Alpha prompt',
+      },
+    };
+
+    installAgentBindingHandlers({
+      agents,
+      bindingsByAgent: { alpha: { ...emptyBindings } },
+      detailByAgent,
+      role: 'viewer',
+    });
+
+    renderAgentsRoute();
+    expect(await screen.findByText('alpha')).toBeInTheDocument();
+
+    const section = (await screen.findByRole('heading', { name: 'IM Connectors' })).closest(
+      'section'
+    );
+    const controls = within(section as HTMLElement);
+    expect(controls.queryByRole('button', { name: 'Save overrides' })).not.toBeInTheDocument();
   });
 });
