@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { AuthProvider } from '@/app/auth';
 import {
   useDeleteNodeMutation,
+  useNodePlacementsQuery,
   useNodesQuery,
   usePinAgentMutation,
   useRegisterNodeMutation,
@@ -137,6 +138,68 @@ describe('nodes api', () => {
     await waitFor(() => {
       expect(listRequests).toBeGreaterThan(beforeDelete);
       expect(nodesQuery.result.current.data?.map((node) => node.id)).toEqual(['node-a']);
+    });
+  });
+
+  it('loads placements for a node and refetches after pin and unpin', async () => {
+    let placementRequests = 0;
+    let placements: Array<{
+      agent_id: number;
+      agent_name: string | null;
+      node_id: string;
+      pinned_at: string;
+      pinned_by: string | null;
+      updated_at: string;
+    }> = [];
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/nodes/node-a/placements`, ({ request }) => {
+        placementRequests += 1;
+        expect(request.headers.get('authorization')).toBe('Session session-token');
+        return HttpResponse.json(placements);
+      }),
+      http.post(`${API_BASE_URL}/admin/nodes/node-a/pin`, async ({ request }) => {
+        expect(await request.json()).toEqual({ agent_id: 7 });
+        placements = [
+          {
+            agent_id: 7,
+            agent_name: 'alpha',
+            node_id: 'node-a',
+            pinned_at: '2026-06-21T11:10:00Z',
+            pinned_by: null,
+            updated_at: '2026-06-21T11:10:00Z',
+          },
+        ];
+        return HttpResponse.json(placements[0]);
+      }),
+      http.delete(`${API_BASE_URL}/admin/nodes/node-a/pin`, ({ request }) => {
+        expect(new URL(request.url).searchParams.get('agent_id')).toBe('7');
+        placements = [];
+        return new HttpResponse(null, { status: 204 });
+      })
+    );
+
+    const wrapper = createWrapper();
+    const placementsQuery = renderHook(() => useNodePlacementsQuery('node-a'), { wrapper });
+    const pinAgent = renderHook(() => usePinAgentMutation('node-a'), { wrapper });
+    const unpinAgent = renderHook(() => useUnpinAgentMutation('node-a'), { wrapper });
+
+    await waitFor(() => {
+      expect(placementsQuery.result.current.data).toEqual([]);
+    });
+
+    const beforePin = placementRequests;
+    await pinAgent.result.current.mutateAsync({ agent_id: 7 });
+    await waitFor(() => {
+      expect(placementRequests).toBeGreaterThan(beforePin);
+      expect(placementsQuery.result.current.data?.[0]?.agent_name).toBe('alpha');
+    });
+
+    const beforeUnpin = placementRequests;
+    await unpinAgent.result.current.mutateAsync(7);
+    await waitFor(() => {
+      expect(placementRequests).toBeGreaterThan(beforeUnpin);
+      expect(placementsQuery.result.current.data).toEqual([]);
     });
   });
 });

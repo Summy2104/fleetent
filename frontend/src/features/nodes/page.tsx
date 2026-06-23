@@ -4,6 +4,7 @@ import {
   type NodeAgentOption,
   useDeleteNodeMutation,
   useNodeAgentsQuery,
+  useNodePlacementsQuery,
   useNodesQuery,
   usePinAgentMutation,
   useRegisterNodeMutation,
@@ -35,10 +36,6 @@ function formatLabels(labels: Record<string, string>): string[] {
   return Object.entries(labels).map(([key, value]) => `${key}=${value}`);
 }
 
-function findAgentName(agents: NodeAgentOption[] | undefined, agentId: number): string {
-  return agents?.find((agent) => agent.agent_id === agentId)?.agent_name ?? String(agentId);
-}
-
 function NodeCard({
   agentOptions,
   nodeId,
@@ -46,10 +43,6 @@ function NodeCard({
   labels,
   lastSeenAt,
   registeredAt,
-  placements,
-  onDelete,
-  onPin,
-  onUnpin,
 }: {
   agentOptions: NodeAgentOption[];
   nodeId: string;
@@ -57,15 +50,21 @@ function NodeCard({
   labels: Record<string, string>;
   lastSeenAt: string | null;
   registeredAt: string;
-  placements: PlacementView[];
-  onDelete: () => void;
-  onPin: (agentId: number) => Promise<void>;
-  onUnpin: (agentId: number, agentName: string) => Promise<void>;
 }): JSX.Element {
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const remove = useDeleteNodeMutation(nodeId);
   const pin = usePinAgentMutation(nodeId);
   const unpin = useUnpinAgentMutation(nodeId);
+  const placementsQuery = useNodePlacementsQuery(nodeId);
+
+  const placements: PlacementView[] = useMemo(
+    () =>
+      (placementsQuery.data ?? []).map((placement) => ({
+        agent_id: placement.agent_id,
+        agent_name: placement.agent_name ?? String(placement.agent_id),
+      })),
+    [placementsQuery.data]
+  );
 
   const availableAgents = useMemo(
     () => agentOptions.filter((agent) => !placements.some((placement) => placement.agent_id === agent.agent_id)),
@@ -108,7 +107,7 @@ function NodeCard({
             if (!window.confirm(`Delete node ${nodeId}? This will affect agent placement.`)) {
               return;
             }
-            void remove.mutateAsync().then(() => onDelete());
+            void remove.mutateAsync();
           }}
           type="button"
         >
@@ -142,12 +141,9 @@ function NodeCard({
           className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
           disabled={!selectedAgentId}
           onClick={() =>
-            void pin
-              .mutateAsync({ agent_id: Number(selectedAgentId) })
-              .then(async () => {
-                await onPin(Number(selectedAgentId));
-                setSelectedAgentId('');
-              })
+            void pin.mutateAsync({ agent_id: Number(selectedAgentId) }).then(() => {
+              setSelectedAgentId('');
+            })
           }
           type="button"
         >
@@ -165,9 +161,7 @@ function NodeCard({
                 <span className="text-sm">{placement.agent_name}</span>
                 <button
                   className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-                  onClick={() =>
-                    void unpin.mutateAsync(placement.agent_id).then(() => onUnpin(placement.agent_id, placement.agent_name))
-                  }
+                  onClick={() => void unpin.mutateAsync(placement.agent_id)}
                   type="button"
                 >
                   {`Unpin ${placement.agent_name} from ${nodeId}`}
@@ -190,7 +184,6 @@ export function NodesPage(): JSX.Element {
   const [nodeName, setNodeName] = useState('');
   const [labels, setLabels] = useState('');
   const [lastRegisteredKey, setLastRegisteredKey] = useState<string | null>(null);
-  const [placementsByNode, setPlacementsByNode] = useState<Record<string, PlacementView[]>>({});
 
   const onRegister = async (): Promise<void> => {
     const result = await registerNode.mutateAsync({
@@ -271,30 +264,6 @@ export function NodesPage(): JSX.Element {
             lastSeenAt={node.last_seen_at}
             nodeId={node.id}
             nodeName={node.name}
-            onDelete={() => {
-              setPlacementsByNode((current) => {
-                const next = { ...current };
-                delete next[node.id];
-                return next;
-              });
-            }}
-            onPin={(agentId) => {
-              const agentName = findAgentName(agents.data, agentId);
-              setPlacementsByNode((current) => ({
-                ...current,
-                [node.id]: [...(current[node.id] ?? []).filter((placement) => placement.agent_id !== agentId), {
-                  agent_id: agentId,
-                  agent_name: agentName,
-                }],
-              }));
-            }}
-            onUnpin={(agentId) => {
-              setPlacementsByNode((current) => ({
-                ...current,
-                [node.id]: (current[node.id] ?? []).filter((placement) => placement.agent_id !== agentId),
-              }));
-            }}
-            placements={placementsByNode[node.id] ?? []}
             registeredAt={node.registered_at}
           />
         ))}
