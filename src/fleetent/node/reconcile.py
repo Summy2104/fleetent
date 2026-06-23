@@ -8,9 +8,11 @@ from typing import Any
 import httpx
 import yaml
 
+from fleetent.agent_config import AgentFile
 from fleetent.node.backend import BaseProcessBackend
 from fleetent.node.config import NodeConfig
 from fleetent.node.provider import DesiredState
+from fleetent.runtime.agent_init import ensure_env_scaffold, referenced_env_names
 from fleetent.structured_logging import get_logger
 
 _logger = get_logger("node.reconcile")
@@ -118,6 +120,12 @@ class NodeReconciler:
             yaml.safe_dump(config, sort_keys=False, allow_unicode=True),
             encoding="utf-8",
         )
+        try:
+            env_names = referenced_env_names(AgentFile.model_validate(config))
+        except Exception:
+            _logger.warn("node_write_home_config_parse_error", agent_name=agent_name)
+            env_names = []
+        ensure_env_scaffold(home, referenced_env_names=env_names)
 
     def _home_dir(self, agent_name: str) -> Path:
         return self._config.home_dir / "agents" / agent_name

@@ -349,6 +349,59 @@ def test_reconcile_defers_cached_start_without_secrets_but_keeps_running_agent(
 
 
 @respx.mock
+def test_write_home_creates_env_with_tui_token(tmp_path) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    backend = FakeBackend({"support": None})
+    respx.post("https://platform.internal/nodes/node-a/status").mock(
+        return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
+    )
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(_desired())
+
+    env_path = tmp_path / "agents" / "support" / ".env"
+    assert env_path.exists()
+    lines = dict(
+        line.split("=", 1)
+        for line in env_path.read_text(encoding="utf-8").strip().splitlines()
+        if "=" in line
+    )
+    assert "FLEETENT_TUI_TOKEN" in lines
+    token = lines["FLEETENT_TUI_TOKEN"]
+    assert token.startswith("ma-")
+    assert len(token) == 67
+
+
+@respx.mock
+def test_write_home_preserves_existing_env_token_on_config_restart(tmp_path) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    home = tmp_path / "agents" / "support"
+    home.mkdir(parents=True)
+    (home / "agent.yaml").write_text(yaml.safe_dump({"name": "support"}))
+    existing_token = "ma-" + "d" * 64
+    (home / ".env").write_text(f"FLEETENT_TUI_TOKEN={existing_token}\n", encoding="utf-8")
+
+    state_dir = tmp_path / "node"
+    state_dir.mkdir(parents=True)
+    (state_dir / "applied-config-hashes.json").write_text(
+        '{"support": "old-hash"}', encoding="utf-8"
+    )
+
+    backend = FakeBackend({"support": 12345})
+    respx.post("https://platform.internal/nodes/node-a/status").mock(
+        return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
+    )
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(
+        _desired({"name": "support", "version": 2})
+    )
+
+    env_content = (home / ".env").read_text(encoding="utf-8")
+    assert f"FLEETENT_TUI_TOKEN={existing_token}" in env_content
+
+
+@respx.mock
 def test_reconcile_logs_secret_metadata_without_plaintext_on_spawn(tmp_path, monkeypatch):
     from fleetent.node import reconcile as reconcile_module
     from fleetent.node.reconcile import NodeReconciler
@@ -361,6 +414,9 @@ def test_reconcile_logs_secret_metadata_without_plaintext_on_spawn(tmp_path, mon
     class FakeLogger:
         def info(self, message: str, **fields: object) -> None:
             records.append((message, fields))
+
+        def warn(self, message: str, **fields: object) -> None:
+            pass  # reconcile may warn on config parse errors; not under test here
 
     monkeypatch.setattr(reconcile_module, "_logger", FakeLogger())
     backend = FakeBackend({"support": None})
