@@ -240,6 +240,37 @@ def test_create_persists_content_to_pool_and_is_readable(client, tmp_path, monke
     assert any(s["name"] == "persisted" for s in registry.list_skills())
 
 
+def test_edit_persists_content_to_pool_and_is_readable(client, tmp_path, monkeypatch):
+    """Editing a skill must overwrite <skills_dir>/<name>/SKILL.md so the new content is
+    readable back, mirroring create-persist. Without the write the rescan reads stale
+    on-disk content and the edit is silently lost (skill-edit-persist-content)."""
+    import fleetent.skills.registry as registry
+
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(skills_dir))
+    monkeypatch.setattr(api, "engine_reload", lambda: registry.reload(str(skills_dir)))
+    monkeypatch.setattr(api, "engine_list_skills", registry.list_skills)
+    registry.reload(str(skills_dir))
+
+    original = "---\nname: editable\ndescription: original desc\n---\noriginal body"
+    token, _ = _session_for("admin")
+    created = client.post(
+        "/admin/skills", headers=_hdr(token), json={"name": "editable", "content": original}
+    )
+    assert created.status_code == 200
+
+    updated = "---\nname: editable\ndescription: updated desc\n---\nupdated body"
+    edited = client.put("/admin/skills/editable", headers=_hdr(token), json={"content": updated})
+    assert edited.status_code == 200
+    assert edited.json()["published"] is True
+
+    assert (skills_dir / "editable" / "SKILL.md").read_text(encoding="utf-8") == updated
+    got = client.get("/admin/skills/editable/content", headers=_hdr(token))
+    assert got.status_code == 200
+    assert got.json()["content"] == updated
+
+
 def test_create_persisted_skill_delivered_in_agent_bundle(client, tmp_path, monkeypatch):
     """A skill created inline must reach a bound agent's node skill-file bundle."""
     import base64
