@@ -386,6 +386,15 @@ class ReflectionSettings(BaseModel):
 
     enabled: bool = False
     interval_seconds: float = 86400.0
+    auto_apply: "ReflectionAutoApplySettings" = Field(default_factory=lambda: ReflectionAutoApplySettings())
+
+
+class ReflectionAutoApplySettings(BaseModel):
+    """Per-agent reflection auto-apply settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    allow_low_risk: bool = False
 
 
 class AgentFile(BaseModel):

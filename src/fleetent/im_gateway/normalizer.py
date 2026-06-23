@@ -469,7 +469,7 @@ async def _resume_pending_in_session(
     return reply
 
 
-async def route(msg: NormalizedMessage) -> None:
+async def route(msg: NormalizedMessage, principal: Principal | None = None) -> None:
     # Approval commands bypass the agent loop entirely (tolerate a leading @mention, so
     # channel approvals — where the bot must be @-mentioned — are recognized too).
     m = _match_approval_command(msg.text)
@@ -710,7 +710,7 @@ async def route(msg: NormalizedMessage) -> None:
         async with steering.register_run(session_id, token, max_pending=max_pending):
             response = await agent_loop.run(
                 messages=history,
-                principal=Principal(user_id=msg.user_id, tenant_id="default"),
+                principal=principal or Principal(user_id=msg.user_id, tenant_id="default"),
                 reply_func=msg.reply_func,
                 allowed_tools=allowed_tools,
                 disabled_skills_trace=disabled_trace,

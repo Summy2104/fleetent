@@ -16,6 +16,7 @@ from pydantic_settings import (
 )
 
 from fleetent import paths
+from fleetent.oidc_config import OidcSettings
 
 PLATFORM_YAML_PATH = paths.platform_yaml_path()
 # Empty after the config consolidation: the platform Settings carries no secret
@@ -325,6 +326,7 @@ class McpSettings(BaseModel):
 class SchedulingSettings(BaseModel):
     enabled: bool = True
     default_timezone: str = "UTC"
+    kb_connector_sweep_interval_seconds: int = 60
 
 
 class WebhooksSettings(BaseModel):
@@ -349,6 +351,7 @@ class Settings(BaseSettings):
         default_factory=lambda: f"sqlite:///{paths.data_dir() / 'management.db'}"
     )
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
+    oidc: OidcSettings = Field(default_factory=OidcSettings)
 
     @classmethod
     def settings_customise_sources(

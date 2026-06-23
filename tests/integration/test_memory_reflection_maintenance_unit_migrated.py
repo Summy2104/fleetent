@@ -40,11 +40,11 @@ def _use_db(monkeypatch, db_path) -> None:
 def test_memory_maintenance_public_api_is_importable():
     from fleetent.reflection import (
         AutoMaintenancePolicy,
-        MemoryMaintenanceProposal,
+        MemoryProposal,
         create_memory_maintenance_proposal,
     )
 
-    proposal = MemoryMaintenanceProposal(
+    proposal = MemoryProposal(
         id="proposal-1",
         user_id="user-1",
         action="rewrite",

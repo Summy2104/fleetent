@@ -131,6 +131,22 @@ def test_list_reflection_proposals_respects_missing_db_domain_and_status(monkeyp
     assert [record.id for record in all_records] == ["sp-pending", "sp-applied"]
 
 
+@pytest.mark.parametrize(
+    ("domain", "action", "expected"),
+    [
+        ("skill", None, "reflection_skill_proposal"),
+        ("memory", "suggest_shared_memory_or_kb", "reflection_shared_memory_proposal"),
+        ("memory", "mark_stale", "reflection_user_memory_proposal"),
+    ],
+)
+def test_proposal_routing_key_splits_memory_targets(
+    domain: str,
+    action: str | None,
+    expected: str,
+) -> None:
+    assert reflection._proposal_routing_key(domain, action) == expected  # noqa: SLF001
+
+
 async def test_apply_skill_proposal_to_boundary_handles_create_update_deprecate_and_errors(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -356,6 +372,71 @@ def test_create_and_persist_memory_and_skill_proposals_fire_side_effects(monkeyp
     assert persisted[-3:] == [("skill", "sp-1"), ("approval", "skill"), ("notify", "skill")]
 
 
+@pytest.mark.parametrize(
+    ("domain", "action", "expected"),
+    [
+        ("memory", "mark_stale", "reflection_user_memory_proposal"),
+        ("memory", "suggest_shared_memory_or_kb", "reflection_shared_memory_proposal"),
+        ("skill", None, "reflection_skill_proposal"),
+    ],
+)
+async def test_notify_and_create_proposal_share_same_routing_key(
+    monkeypatch: pytest.MonkeyPatch,
+    domain: str,
+    action: str | None,
+    expected: str,
+) -> None:
+    create_calls: list[str] = []
+    resolver_calls: list[str] = []
+    gate_calls: list[str] = []
+
+    monkeypatch.setattr(
+        reflection.approval_request_store,
+        "create_request",
+        lambda **kwargs: create_calls.append(kwargs["routing_key"]),
+    )
+    monkeypatch.setattr(
+        "fleetent.agent_config.active_agent",
+        lambda: SimpleNamespace(approval=object()),
+    )
+
+    class _Gate:
+        async def _notify_approvers(self, *, tool_name: str, **kwargs: object) -> None:
+            gate_calls.append(tool_name)
+
+    monkeypatch.setattr("fleetent.governance.permission_gate.PermissionGate", _Gate)
+    monkeypatch.setattr(
+        reflection, "_approval_outbound_connectors_provider", lambda: {"slack": object()}
+    )
+
+    def _resolve_approvers(
+        approval_routing: object, risk: str, tool_name: str
+    ) -> tuple[list[tuple[str, str]], str]:
+        resolver_calls.append(tool_name)
+        return ([("slack", "U1")], "any")
+
+    monkeypatch.setattr("fleetent.agent_config.resolve_approvers", _resolve_approvers)
+
+    reflection._create_proposal_approval_request(  # noqa: SLF001
+        proposal_id="proposal-1",
+        domain=domain,  # type: ignore[arg-type]
+        action=action,
+        risk="medium",
+        created_at=datetime(2026, 6, 15, tzinfo=UTC),
+        expires_at=None,
+    )
+    await reflection._notify_pending_proposal(  # noqa: SLF001
+        proposal_id="proposal-1",
+        domain=domain,  # type: ignore[arg-type]
+        action=action,
+        risk="medium",
+    )
+
+    assert create_calls == [expected]
+    assert resolver_calls == [expected]
+    assert gate_calls == [expected]
+
+
 def test_memory_and_skill_row_helpers_round_trip_and_status_helpers(monkeypatch) -> None:
     approval_rows = {
         "sp-1": {
@@ -385,7 +466,7 @@ def test_misc_reflection_helpers_cover_status_validation_time_and_skill_bundle(
     monkeypatch, tmp_path: Path
 ) -> None:
     now = datetime(2026, 6, 15, tzinfo=UTC)
-    proposal = reflection.MemoryMaintenanceProposal(
+    proposal = reflection.MemoryProposal(
         id="mp-1",
         user_id="user-1",
         action="mark_stale",

@@ -32,6 +32,7 @@ class LocalProcessBackend:
                 "agent",
                 "run",
                 agent_name,
+                "--no-im",
                 "--port",
                 str(port),
                 "--home",

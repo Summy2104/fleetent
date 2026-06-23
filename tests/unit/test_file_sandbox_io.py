@@ -87,3 +87,26 @@ def test_resolve_host_prefix_lookalike_rejected(tmp_path) -> None:
     sibling = str(tmp_path) + "-evil"
     with pytest.raises(ValueError):
         fsio.resolve_host_path(tmp_path, sibling + "/x")
+
+
+def test_resolve_host_workspace_abs_prefix_mapped_to_root(tmp_path) -> None:
+    # The model lives in the container /workspace world and may pass /workspace/<rel>
+    # absolute paths to host-side file tools (send_file, read/write).
+    assert fsio.resolve_host_path(tmp_path, "/workspace/outbound/x.png") == (
+        tmp_path / "outbound" / "x.png"
+    )
+
+
+def test_resolve_host_workspace_root_alone_maps_to_root(tmp_path) -> None:
+    assert fsio.resolve_host_path(tmp_path, "/workspace") == tmp_path
+
+
+def test_resolve_host_workspace_prefix_traversal_rejected(tmp_path) -> None:
+    with pytest.raises(ValueError):
+        fsio.resolve_host_path(tmp_path, "/workspace/../escape.txt")
+
+
+def test_resolve_host_workspace_lookalike_not_mapped(tmp_path) -> None:
+    # "/workspace-evil/..." must NOT be treated as the /workspace mount prefix.
+    with pytest.raises(ValueError):
+        fsio.resolve_host_path(tmp_path, "/workspace-evil/x")

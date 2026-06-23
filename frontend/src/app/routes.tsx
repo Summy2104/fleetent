@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Navigate, NavLink, Route, Routes, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Navigate, NavLink, Route, Routes, useNavigate, useSearchParams } from 'react-router-dom';
 
 import { useAuthSession } from '@/app/auth';
 import { AgentsPage } from '@/features/agents/page';
@@ -17,9 +17,24 @@ import { TenancyPage } from '@/features/tenancy/page';
 function LoginPage(): JSX.Element {
   const auth = useAuthSession();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [email, setEmail] = useState('admin@example.com');
   const [password, setPassword] = useState('adminpw');
   const [error, setError] = useState<string | null>(null);
+
+  const callbackToken = searchParams.get('token');
+
+  useEffect(() => {
+    if (!callbackToken) {
+      return;
+    }
+    auth.setToken(callbackToken);
+    navigate('/agents', { replace: true });
+  }, [auth, callbackToken, navigate]);
+
+  if (callbackToken) {
+    return <main className="min-h-screen px-6 py-16" />;
+  }
 
   const onSubmit = async (): Promise<void> => {
     setError(null);
@@ -75,6 +90,12 @@ function LoginPage(): JSX.Element {
           >
             Sign in
           </button>
+          <a
+            className="rounded-md border border-primary/30 px-4 py-2 text-center text-sm font-medium text-primary"
+            href={`${auth.baseUrl}/admin/oidc/login`}
+          >
+            Sign in with SSO
+          </a>
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
         </div>
       </div>

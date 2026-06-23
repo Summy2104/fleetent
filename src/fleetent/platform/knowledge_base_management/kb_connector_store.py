@@ -55,7 +55,10 @@ def _now() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat()
 
 
-_COLS = "connector_id, kind, enabled, tenant_id, kb_id, config, custom, created_at, updated_at"
+_COLS = (
+    "connector_id, kind, enabled, tenant_id, kb_id, config, custom, created_at, updated_at,"
+    " sync_interval_seconds, last_scheduled_sync_at"
+)
 
 
 def _decode(row: dict[str, Any]) -> dict[str, Any]:
@@ -63,6 +66,8 @@ def _decode(row: dict[str, Any]) -> dict[str, Any]:
     out["enabled"] = bool(out["enabled"])
     out["config"] = json.loads(out["config"]) if out.get("config") else {}
     out["custom"] = json.loads(out["custom"]) if out.get("custom") else {}
+    raw_interval = out.get("sync_interval_seconds")
+    out["sync_interval_seconds"] = int(raw_interval) if raw_interval is not None else None
     return out
 
 
@@ -101,7 +106,7 @@ def add_connector(
         conn.execute(
             f"INSERT INTO kb_connectors ({_COLS}) VALUES "
             "(:connector_id, :kind, :enabled, :tenant_id, :kb_id, :config, :custom, :created_at,"
-            " :updated_at)",
+            " :updated_at, :sync_interval_seconds, :last_scheduled_sync_at)",
             {
                 "connector_id": connector_id,
                 "kind": kind,
@@ -112,11 +117,13 @@ def add_connector(
                 "custom": json.dumps(custom or {}),
                 "created_at": now,
                 "updated_at": now,
+                "sync_interval_seconds": None,
+                "last_scheduled_sync_at": None,
             },
         )
 
 
-_EDITABLE = {"enabled", "tenant_id", "kb_id", "config", "custom"}
+_EDITABLE = {"enabled", "tenant_id", "kb_id", "config", "custom", "sync_interval_seconds"}
 
 
 def edit_connector(connector_id: str, **fields: Any) -> None:
@@ -147,6 +154,29 @@ def delete_connector(connector_id: str) -> bool:
             "DELETE FROM kb_connectors WHERE connector_id = :id", {"id": connector_id}
         )
         return bool(cur.rowcount)
+
+
+def update_last_scheduled_sync_at(connector_id: str, at: str) -> None:
+    """Advance last_scheduled_sync_at after a sweep enqueue (primary dedup mechanism)."""
+    with _database().transaction() as conn:
+        conn.execute(
+            "UPDATE kb_connectors SET last_scheduled_sync_at = :at WHERE connector_id = :id",
+            {"at": at, "id": connector_id},
+        )
+
+
+def list_schedulable_connectors() -> list[dict[str, Any]]:
+    """Return enabled connectors that have a sync_interval_seconds set (opt-in scheduling)."""
+    rows = (
+        _database()
+        .execute(
+            f"SELECT {_COLS} FROM kb_connectors"
+            " WHERE enabled = 1 AND sync_interval_seconds IS NOT NULL"
+            " ORDER BY connector_id"
+        )
+        .fetchall()
+    )
+    return [_decode(r) for r in rows]
 
 
 def _clean_config(kind: str, config: dict[str, Any]) -> dict[str, Any]:

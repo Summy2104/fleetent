@@ -16,6 +16,7 @@ import yaml
 from fleetent import memory, observability
 from fleetent.db import SQLiteDatabase
 from fleetent.governance import approval_request_store
+from fleetent.structured_logging import get_logger
 
 FindingType = Literal["memory_candidate", "memory_conflict", "skill_opportunity"]
 KnowledgeBaseFindingType = Literal[
@@ -43,6 +44,7 @@ MaintenanceStatus = Literal["pending", "approved", "rejected", "applied", "expir
 ReflectionTrendGranularity = Literal["day", "week"]
 ReflectionTrendDomain = Literal["memory", "knowledge_base", "skill"]
 ProposalDomain = Literal["memory", "skill"]
+_logger = get_logger("reflection")
 
 
 def __getattr__(name: str) -> Any:
@@ -54,6 +56,14 @@ def __getattr__(name: str) -> Any:
 
 
 _MUTATING_ACTIONS = {"mark_stale", "merge", "rewrite", "compact", "delete"}
+
+
+def _proposal_routing_key(domain: ProposalDomain, action: str | None) -> str:
+    if domain == "skill":
+        return "reflection_skill_proposal"
+    if action == "suggest_shared_memory_or_kb":
+        return "reflection_shared_memory_proposal"
+    return "reflection_user_memory_proposal"
 
 
 def _default_approval_outbound_connectors_provider() -> dict[str, Any]:
@@ -118,8 +128,11 @@ class AutoMaintenancePolicy:
     allow_low_risk: bool = False
 
 
+_AUTO_APPLY_ACTIONS = frozenset({"mark_stale"})
+
+
 @dataclass(frozen=True)
-class MemoryMaintenanceProposal:
+class MemoryProposal:
     """Owner-approved maintenance proposal for User Memory."""
 
     id: str
@@ -268,7 +281,11 @@ def get_reflection_trend_summary(query: ReflectionTrendQuery) -> ReflectionTrend
     return ReflectionTrendSummary(query=query, buckets=buckets, top_findings=top_findings)
 
 
-async def run_reflection(scope: str) -> ReflectionReport:
+async def run_reflection(
+    scope: str,
+    *,
+    auto_policy: AutoMaintenancePolicy | None = None,
+) -> ReflectionReport:
     """Read traces and memory signals, then generate a structured report."""
     now = datetime.now(UTC).replace(microsecond=0)
     start = now - timedelta(days=7)
@@ -293,6 +310,21 @@ async def run_reflection(scope: str) -> ReflectionReport:
         report_id=report.id,
     ):
         _persist_memory_maintenance_proposal(memory_proposal)
+        if auto_policy is None:
+            continue
+        try:
+            await apply_memory_maintenance_proposal(
+                memory_proposal.id,
+                auto_policy=auto_policy,
+            )
+        except Exception as exc:  # noqa: BLE001 - degrade to pending + continue
+            _logger.warn(
+                "reflection_memory_auto_apply_failed",
+                scope=scope,
+                proposal_id=memory_proposal.id,
+                action=memory_proposal.action,
+                error=str(exc),
+            )
     for skill_proposal in generate_skill_proposals(findings=findings, report_id=report.id):
         _persist_skill_proposal(skill_proposal)
     return report
@@ -342,9 +374,9 @@ def generate_memory_maintenance_proposals(
     findings: list[ReflectionFinding],
     *,
     report_id: str | None = None,
-) -> list[MemoryMaintenanceProposal]:
+) -> list[MemoryProposal]:
     """Generate User Memory maintenance proposals from reflection findings."""
-    proposals: list[MemoryMaintenanceProposal] = []
+    proposals: list[MemoryProposal] = []
     for finding in findings:
         if finding.type == "memory_candidate":
             fact = finding.metadata.get("fact", "").strip()
@@ -665,7 +697,7 @@ def create_memory_maintenance_proposal(
     evidence_ids: list[str],
     metadata_patch: dict[str, str] | None = None,
     expires_at: datetime | None = None,
-) -> MemoryMaintenanceProposal:
+) -> MemoryProposal:
     """Create and persist a pending User Memory maintenance proposal."""
     proposal = _build_memory_maintenance_proposal(
         user_id=user_id,
@@ -682,6 +714,7 @@ def create_memory_maintenance_proposal(
     _create_proposal_approval_request(
         proposal_id=proposal.id,
         domain="memory",
+        action=proposal.action,
         risk=proposal.risk,
         created_at=proposal.created_at,
         expires_at=proposal.expires_at,
@@ -689,7 +722,9 @@ def create_memory_maintenance_proposal(
     _schedule_pending_proposal_notification(
         proposal_id=proposal.id,
         domain="memory",
+        action=proposal.action,
         risk=proposal.risk,
+        user_id=proposal.user_id,
     )
     _record_maintenance_event("memory_maintenance_proposal_created", proposal)
     return proposal
@@ -707,11 +742,11 @@ def _build_memory_maintenance_proposal(
     metadata_patch: dict[str, str] | None = None,
     expires_at: datetime | None = None,
     report_id: str | None = None,
-) -> MemoryMaintenanceProposal:
+) -> MemoryProposal:
     """Build a pending User Memory maintenance proposal without side effects."""
     _validate_proposal_input(user_id, action, risk, target_memory_ids)
     now = datetime.now(UTC).replace(microsecond=0)
-    return MemoryMaintenanceProposal(
+    return MemoryProposal(
         id=str(uuid.uuid4()),
         user_id=user_id,
         action=action,
@@ -731,7 +766,7 @@ def _build_memory_maintenance_proposal(
     )
 
 
-def get_memory_maintenance_proposal(proposal_id: str) -> MemoryMaintenanceProposal:
+def get_memory_maintenance_proposal(proposal_id: str) -> MemoryProposal:
     """Load one User Memory maintenance proposal by id."""
     proposal = _get_maintenance_proposal(proposal_id)
     if proposal is None:
@@ -743,7 +778,7 @@ def list_memory_maintenance_proposals(
     user_id: str,
     *,
     status: MaintenanceStatus | None = None,
-) -> list[MemoryMaintenanceProposal]:
+) -> list[MemoryProposal]:
     """List User Memory maintenance proposals for one owner."""
     clauses = ["domain = 'memory'", "subject_user_id = :user_id"]
     params: dict[str, object] = {"user_id": user_id}
@@ -770,7 +805,7 @@ def approve_memory_maintenance_proposal(
     proposal_id: str,
     *,
     actor_user_id: str,
-) -> MemoryMaintenanceProposal:
+) -> MemoryProposal:
     """Approve a pending proposal as the User Memory owner."""
     proposal = get_memory_maintenance_proposal(proposal_id)
     _require_owner(proposal, actor_user_id)
@@ -790,7 +825,7 @@ def reject_memory_maintenance_proposal(
     proposal_id: str,
     *,
     actor_user_id: str,
-) -> MemoryMaintenanceProposal:
+) -> MemoryProposal:
     """Reject a pending proposal as the User Memory owner."""
     proposal = get_memory_maintenance_proposal(proposal_id)
     _require_owner(proposal, actor_user_id)
@@ -807,7 +842,7 @@ def reject_memory_maintenance_proposal(
     return updated
 
 
-def expire_memory_maintenance_proposal(proposal_id: str) -> MemoryMaintenanceProposal:
+def expire_memory_maintenance_proposal(proposal_id: str) -> MemoryProposal:
     """Expire a proposal that is no longer actionable."""
     proposal = get_memory_maintenance_proposal(proposal_id)
     _require_status(proposal, {"pending", "approved"})
@@ -820,7 +855,7 @@ def expire_memory_maintenance_proposal(proposal_id: str) -> MemoryMaintenancePro
     return updated
 
 
-def mark_shared_memory_proposal_applied(proposal_id: str) -> MemoryMaintenanceProposal:
+def mark_shared_memory_proposal_applied(proposal_id: str) -> MemoryProposal:
     """Mark an approved Shared Memory suggestion applied without User Memory owner mutation."""
     proposal = get_memory_maintenance_proposal(proposal_id)
     _require_status(proposal, {"approved"})
@@ -844,7 +879,7 @@ async def apply_memory_maintenance_proposal(
     *,
     actor_user_id: str | None = None,
     auto_policy: AutoMaintenancePolicy | None = None,
-) -> MemoryMaintenanceProposal:
+) -> MemoryProposal:
     """Apply an approved or explicitly auto-allowed User Memory maintenance proposal."""
     proposal = get_memory_maintenance_proposal(proposal_id)
     if _is_expired(proposal):
@@ -936,7 +971,7 @@ def _save_kb_reflection_report(report: KnowledgeBaseReflectionReport) -> None:
     )
 
 
-def _persist_memory_maintenance_proposal(proposal: MemoryMaintenanceProposal) -> None:
+def _persist_memory_maintenance_proposal(proposal: MemoryProposal) -> None:
     database = _database()
     if not database.path.exists():
         return
@@ -946,6 +981,7 @@ def _persist_memory_maintenance_proposal(proposal: MemoryMaintenanceProposal) ->
     _create_proposal_approval_request(
         proposal_id=proposal.id,
         domain="memory",
+        action=proposal.action,
         risk=proposal.risk,
         created_at=proposal.created_at,
         expires_at=proposal.expires_at,
@@ -953,7 +989,9 @@ def _persist_memory_maintenance_proposal(proposal: MemoryMaintenanceProposal) ->
     _schedule_pending_proposal_notification(
         proposal_id=proposal.id,
         domain="memory",
+        action=proposal.action,
         risk=proposal.risk,
+        user_id=proposal.user_id,
     )
     _record_maintenance_event("memory_maintenance_proposal_created", proposal)
 
@@ -968,6 +1006,7 @@ def _persist_skill_proposal(proposal: SkillProposal) -> None:
     _create_proposal_approval_request(
         proposal_id=proposal.id,
         domain="skill",
+        action=None,
         risk=proposal.risk_level,
         created_at=proposal.created_at,
         expires_at=None,
@@ -975,6 +1014,7 @@ def _persist_skill_proposal(proposal: SkillProposal) -> None:
     _schedule_pending_proposal_notification(
         proposal_id=proposal.id,
         domain="skill",
+        action=None,
         risk=proposal.risk_level,
     )
 
@@ -1205,7 +1245,9 @@ def _schedule_pending_proposal_notification(
     *,
     proposal_id: str,
     domain: ProposalDomain,
+    action: str | None,
     risk: str,
+    user_id: str | None = None,
 ) -> None:
     try:
         loop = asyncio.get_running_loop()
@@ -1215,7 +1257,9 @@ def _schedule_pending_proposal_notification(
         _notify_pending_proposal(
             proposal_id=proposal_id,
             domain=domain,
+            action=action,
             risk=risk,
+            user_id=user_id,
         )
     )
 
@@ -1224,17 +1268,32 @@ async def _notify_pending_proposal(
     *,
     proposal_id: str,
     domain: ProposalDomain,
+    action: str | None,
     risk: str,
+    user_id: str | None = None,
 ) -> None:
     from fleetent import agent_config
     from fleetent.governance.permission_gate import PermissionGate
 
+    tool_name = _proposal_routing_key(domain, action)
+
+    # user-memory proposals: deliver directly to the proposal owner via directed-reach
+    if tool_name == "reflection_user_memory_proposal" and user_id is not None:
+        from fleetent.outbound_connectors import notify_user
+
+        notify_user(
+            user_id,
+            f"Memory maintenance proposal pending your review. "
+            f"Reply 'approve {proposal_id}' to approve or 'reject {proposal_id}' to reject.",
+        )
+        return
+
+    # shared-memory and skill proposals: use existing approval-routing path
     active_agent = agent_config.active_agent()
     approval_routing = None if active_agent is None else active_agent.approval
     if approval_routing is None:
         return
 
-    tool_name = f"reflection_{domain}_proposal"
     addresses, _policy = agent_config.resolve_approvers(approval_routing, risk, tool_name)
     addresses = [(platform, target) for platform, target in addresses if platform != "requester"]
     if not addresses:
@@ -1434,7 +1493,7 @@ def _int_payload(payload: dict[str, Any], key: str) -> int | None:
     return None
 
 
-def _insert_maintenance_proposal(proposal: MemoryMaintenanceProposal) -> None:
+def _insert_maintenance_proposal(proposal: MemoryProposal) -> None:
     _database().execute(
         """
         INSERT INTO reflection_proposals (
@@ -1629,6 +1688,7 @@ def _create_proposal_approval_request(
     *,
     proposal_id: str,
     domain: ProposalDomain,
+    action: str | None,
     risk: str,
     created_at: datetime,
     expires_at: datetime | None,
@@ -1639,7 +1699,7 @@ def _create_proposal_approval_request(
         subject_id=proposal_id,
         requester_user_id=None,
         risk=risk,
-        routing_key=f"reflection_{domain}_proposal",
+        routing_key=_proposal_routing_key(domain, action),
         created_at=created_at.isoformat(),
         expires_at=_format_datetime(expires_at),
     )
@@ -1763,7 +1823,7 @@ def _real_skill_draft_enabled() -> bool:
     }
 
 
-def _update_maintenance_proposal(proposal: MemoryMaintenanceProposal) -> None:
+def _update_maintenance_proposal(proposal: MemoryProposal) -> None:
     _database().execute(
         """
         UPDATE reflection_proposals
@@ -1778,7 +1838,7 @@ def _update_maintenance_proposal(proposal: MemoryMaintenanceProposal) -> None:
     )
 
 
-def _get_maintenance_proposal(proposal_id: str) -> MemoryMaintenanceProposal | None:
+def _get_maintenance_proposal(proposal_id: str) -> MemoryProposal | None:
     row = (
         _database()
         .execute(
@@ -1796,7 +1856,7 @@ def _get_maintenance_proposal(proposal_id: str) -> MemoryMaintenanceProposal | N
     return _proposal_from_row(row)
 
 
-def _proposal_params(proposal: MemoryMaintenanceProposal) -> dict[str, object]:
+def _proposal_params(proposal: MemoryProposal) -> dict[str, object]:
     return {
         "id": proposal.id,
         "domain": "memory",
@@ -1822,9 +1882,9 @@ def _proposal_params(proposal: MemoryMaintenanceProposal) -> dict[str, object]:
     }
 
 
-def _proposal_from_row(row: dict[str, Any]) -> MemoryMaintenanceProposal:
+def _proposal_from_row(row: dict[str, Any]) -> MemoryProposal:
     payload = json.loads(str(row["payload_json"]))
-    return MemoryMaintenanceProposal(
+    return MemoryProposal(
         id=str(row["id"]),
         user_id=str(row["subject_user_id"]),
         action=cast(MaintenanceAction, row["kind"]),
@@ -1851,10 +1911,10 @@ def _proposal_from_row(row: dict[str, Any]) -> MemoryMaintenanceProposal:
 
 
 def _with_status(
-    proposal: MemoryMaintenanceProposal,
+    proposal: MemoryProposal,
     status: MaintenanceStatus,
-) -> MemoryMaintenanceProposal:
-    return MemoryMaintenanceProposal(
+) -> MemoryProposal:
+    return MemoryProposal(
         id=proposal.id,
         user_id=proposal.user_id,
         action=proposal.action,
@@ -1874,7 +1934,7 @@ def _with_status(
     )
 
 
-async def _apply_maintenance_action(proposal: MemoryMaintenanceProposal) -> None:
+async def _apply_maintenance_action(proposal: MemoryProposal) -> None:
     if proposal.action == "mark_stale":
         for memory_id in proposal.target_memory_ids:
             await memory.mark_user_memory_stale(proposal.user_id, memory_id)
@@ -1921,31 +1981,31 @@ async def _apply_maintenance_action(proposal: MemoryMaintenanceProposal) -> None
 
 
 def _auto_apply_allowed(
-    proposal: MemoryMaintenanceProposal,
+    proposal: MemoryProposal,
     auto_policy: AutoMaintenancePolicy | None,
 ) -> bool:
     return (
         auto_policy is not None
         and auto_policy.allow_low_risk
         and proposal.risk == "low"
-        and proposal.action not in {"delete", "merge", "rewrite", "compact"}
+        and proposal.action in _AUTO_APPLY_ACTIONS
     )
 
 
-def _require_owner(proposal: MemoryMaintenanceProposal, actor_user_id: str) -> None:
+def _require_owner(proposal: MemoryProposal, actor_user_id: str) -> None:
     if actor_user_id != proposal.user_id:
         raise PermissionError("User Memory owner is required")
 
 
 def _require_status(
-    proposal: MemoryMaintenanceProposal,
+    proposal: MemoryProposal,
     allowed: set[MaintenanceStatus],
 ) -> None:
     if proposal.status not in allowed:
         raise ValueError(f"cannot use {proposal.status} proposal")
 
 
-def _require_proposed_content(proposal: MemoryMaintenanceProposal) -> str:
+def _require_proposed_content(proposal: MemoryProposal) -> str:
     if proposal.proposed_content is None or not proposal.proposed_content.strip():
         raise ValueError("proposed_content is required")
     return proposal.proposed_content.strip()
@@ -1974,13 +2034,13 @@ def _validate_proposal_input(
         raise ValueError("target_memory_ids must not be empty")
 
 
-def _is_expired(proposal: MemoryMaintenanceProposal) -> bool:
+def _is_expired(proposal: MemoryProposal) -> bool:
     if proposal.expires_at is None:
         return False
     return proposal.expires_at < datetime.now(UTC).replace(microsecond=0)
 
 
-def _record_maintenance_event(event_type: str, proposal: MemoryMaintenanceProposal) -> None:
+def _record_maintenance_event(event_type: str, proposal: MemoryProposal) -> None:
     observability.record_trace_event(
         observability.TraceEvent(
             run_id=proposal.id,

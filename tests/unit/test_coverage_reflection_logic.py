@@ -105,9 +105,9 @@ def _maintenance_proposal(
     proposed_content: str | None = "New content",
     metadata_patch: dict[str, str] | None = None,
     expires_at: datetime | None = None,
-) -> reflection.MemoryMaintenanceProposal:
+) -> reflection.MemoryProposal:
     now = datetime(2026, 1, 1, tzinfo=UTC)
-    return reflection.MemoryMaintenanceProposal(
+    return reflection.MemoryProposal(
         id=id,
         user_id=user_id,
         action=action,  # type: ignore[arg-type]
@@ -177,7 +177,7 @@ def test_reflection_finding_generation_and_text_extraction():
 
 
 def test_reflection_generates_memory_and_skill_proposals(monkeypatch):
-    memory_proposals: list[reflection.MemoryMaintenanceProposal] = []
+    memory_proposals: list[reflection.MemoryProposal] = []
     skill_proposals: list[reflection.SkillProposal] = []
     # Neutralize persistence so this unit test exercises only generation logic; the
     # _persist_* wrappers are the ones that reach _database() (no _state_db injected here).
@@ -557,8 +557,32 @@ async def test_reflection_apply_memory_actions_and_guards(monkeypatch):
         reflection.AutoMaintenancePolicy(allow_low_risk=True),
     )
     assert not reflection._auto_apply_allowed(  # noqa: SLF001
+        _maintenance_proposal(action="suggest_shared_memory_or_kb", risk="low"),
+        reflection.AutoMaintenancePolicy(allow_low_risk=True),
+    )
+    assert not reflection._auto_apply_allowed(  # noqa: SLF001
         _maintenance_proposal(action="delete", risk="low"),
         reflection.AutoMaintenancePolicy(allow_low_risk=True),
+    )
+    assert not reflection._auto_apply_allowed(  # noqa: SLF001
+        _maintenance_proposal(action="merge", risk="low"),
+        reflection.AutoMaintenancePolicy(allow_low_risk=True),
+    )
+    assert not reflection._auto_apply_allowed(  # noqa: SLF001
+        _maintenance_proposal(action="rewrite", risk="low"),
+        reflection.AutoMaintenancePolicy(allow_low_risk=True),
+    )
+    assert not reflection._auto_apply_allowed(  # noqa: SLF001
+        _maintenance_proposal(action="compact", risk="low"),
+        reflection.AutoMaintenancePolicy(allow_low_risk=True),
+    )
+    assert not reflection._auto_apply_allowed(  # noqa: SLF001
+        _maintenance_proposal(action="mark_stale", risk="low"),
+        None,
+    )
+    assert not reflection._auto_apply_allowed(  # noqa: SLF001
+        _maintenance_proposal(action="mark_stale", risk="low"),
+        reflection.AutoMaintenancePolicy(allow_low_risk=False),
     )
     with pytest.raises(ValueError, match="user_id"):
         reflection._validate_proposal_input(" ", "delete", "low", ["m1"])  # noqa: SLF001
@@ -571,7 +595,7 @@ async def test_reflection_apply_memory_actions_and_guards(monkeypatch):
 
 
 async def test_reflection_apply_memory_proposal_full_flow(monkeypatch):
-    updated: list[reflection.MemoryMaintenanceProposal] = []
+    updated: list[reflection.MemoryProposal] = []
     events: list[str] = []
     applied: list[str] = []
     proposal = _maintenance_proposal(status="approved", action="mark_stale", risk="low")
@@ -582,7 +606,7 @@ async def test_reflection_apply_memory_proposal_full_flow(monkeypatch):
         reflection, "_record_maintenance_event", lambda event_type, _p: events.append(event_type)
     )
 
-    async def fake_apply(p: reflection.MemoryMaintenanceProposal) -> None:
+    async def fake_apply(p: reflection.MemoryProposal) -> None:
         applied.append(p.id)
 
     monkeypatch.setattr(reflection, "_apply_maintenance_action", fake_apply)
