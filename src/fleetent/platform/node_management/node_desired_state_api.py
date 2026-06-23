@@ -105,6 +105,7 @@ def get_desired_state(
                     materialize.agent_file_from_store(agent)
                 ),
                 "secrets": _agent_secrets(agent),
+                "skills": materialize.skill_bundles_for_agent(agent),
             }
         )
     return {"node_id": node_id, "agents": agents}
