@@ -288,9 +288,9 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     from fleetent.im_gateway import outbound_queue_store
     from fleetent.knowledge_base import runtime as kb_runtime
     from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
-    from fleetent.memory import shared as shared_memory
+    from fleetent.memory import agent_memory as agent_memory_module
     from fleetent.memory import store as memory_store
-    from fleetent.memory.shared_memory_migrations import MIGRATIONS as SHARED_MEMORY_MIGRATIONS
+    from fleetent.memory.agent_memory_migrations import MIGRATIONS as AGENT_MEMORY_MIGRATIONS
     from fleetent.observability import traces
     from fleetent.runtime import context as runtime_context
     from fleetent.runtime import sub_agent_lifecycle
@@ -303,12 +303,12 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     kb_db = tenant_scope.open_kb_db(KB_MIGRATIONS)
     kb_runtime.set_database(kb_db)
     kb_runtime.set_vector_backend(tenant_scope.kb_vector_backend)
-    sm_db = tenant_scope.open_shared_memory_db(SHARED_MEMORY_MIGRATIONS)
-    shared_memory.set_shared_memory_db(
-        sm_db,
-        tenant_scope.shared_memory_vector_backend,  # type: ignore[arg-type]
-    )
     agent_scope = router.agent_scope(tenant_id, agent_id)
+    am_db = agent_scope.open_agent_memory_db(AGENT_MEMORY_MIGRATIONS)
+    agent_memory_module.set_agent_memory_db(
+        am_db,
+        agent_scope.agent_memory_vector_backend,  # type: ignore[arg-type]
+    )
     agent_state_db = agent_scope.open_state_db(AGENT_STATE_MIGRATIONS)
     session_index.set_state_db(agent_state_db)
     traces.set_state_db(agent_state_db)
