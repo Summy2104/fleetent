@@ -43,6 +43,14 @@ class NodeIdentityResolveResponse(BaseModel):
     tenant_id: str
 
 
+class NodeAddressesBody(BaseModel):
+    user_id: str
+
+
+class NodeAddressesResponse(BaseModel):
+    addresses: list[dict[str, str]]
+
+
 class NodeLinkConfirmBody(BaseModel):
     platform: str
     platform_user_id: str
@@ -136,6 +144,17 @@ def post_identity_resolve(
         platform_user_id=body.platform_user_id,
     )
     return NodeIdentityResolveResponse(user_id=user.id, tenant_id=user.tenant_id)
+
+
+@router.post("/{node_id}/identity/addresses")
+def post_identity_addresses(
+    node_id: str,
+    body: NodeAddressesBody,
+    node: dict[str, Any] = Depends(_authenticate_node),  # noqa: B008
+) -> NodeAddressesResponse:
+    del node, node_id
+    addresses = im_gateway_management.resolve_user_addresses(body.user_id)
+    return NodeAddressesResponse(addresses=addresses)
 
 
 @router.post("/{node_id}/link-confirm")

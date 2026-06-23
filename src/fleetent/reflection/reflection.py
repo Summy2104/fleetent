@@ -724,6 +724,7 @@ def create_memory_maintenance_proposal(
         domain="memory",
         action=proposal.action,
         risk=proposal.risk,
+        user_id=proposal.user_id,
     )
     _record_maintenance_event("memory_maintenance_proposal_created", proposal)
     return proposal
@@ -990,6 +991,7 @@ def _persist_memory_maintenance_proposal(proposal: MemoryProposal) -> None:
         domain="memory",
         action=proposal.action,
         risk=proposal.risk,
+        user_id=proposal.user_id,
     )
     _record_maintenance_event("memory_maintenance_proposal_created", proposal)
 
@@ -1245,6 +1247,7 @@ def _schedule_pending_proposal_notification(
     domain: ProposalDomain,
     action: str | None,
     risk: str,
+    user_id: str | None = None,
 ) -> None:
     try:
         loop = asyncio.get_running_loop()
@@ -1256,6 +1259,7 @@ def _schedule_pending_proposal_notification(
             domain=domain,
             action=action,
             risk=risk,
+            user_id=user_id,
         )
     )
 
@@ -1266,16 +1270,30 @@ async def _notify_pending_proposal(
     domain: ProposalDomain,
     action: str | None,
     risk: str,
+    user_id: str | None = None,
 ) -> None:
     from fleetent import agent_config
     from fleetent.governance.permission_gate import PermissionGate
 
+    tool_name = _proposal_routing_key(domain, action)
+
+    # user-memory proposals: deliver directly to the proposal owner via directed-reach
+    if tool_name == "reflection_user_memory_proposal" and user_id is not None:
+        from fleetent.outbound_connectors import notify_user
+
+        notify_user(
+            user_id,
+            f"Memory maintenance proposal pending your review. "
+            f"Reply 'approve {proposal_id}' to approve or 'reject {proposal_id}' to reject.",
+        )
+        return
+
+    # shared-memory and skill proposals: use existing approval-routing path
     active_agent = agent_config.active_agent()
     approval_routing = None if active_agent is None else active_agent.approval
     if approval_routing is None:
         return
 
-    tool_name = _proposal_routing_key(domain, action)
     addresses, _policy = agent_config.resolve_approvers(approval_routing, risk, tool_name)
     addresses = [(platform, target) for platform, target in addresses if platform != "requester"]
     if not addresses:
