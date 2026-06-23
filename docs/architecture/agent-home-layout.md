@@ -80,8 +80,8 @@ agents/<id>/
                         （_redirect_agent_data_paths 把数据落点重定向到 home/data；
                          _init_agent_db_schema + tenant_router 建库；嵌入式迁移 migrate-on-open）
     ├── <tenant>/<id>/agent_state.db (+agent_vectors.db)   per-agent（traces/memory/approvals/sessions 元数据…）
+    ├── <tenant>/<id>/agent_memory.db (+vectors)            per-agent（agent 记忆；原 shared_memory 已去 scope 迁至 per-agent）
     ├── <tenant>/kb.db (+kb_vectors)                        per-tenant
-    ├── <tenant>/shared_memory.db (+vectors)                per-tenant
     ├── sessions/<sid>.json (+.lock)                        会话持久化（原子写 .tmp→rename）
     ├── logs/<date>.log
     ├── diagnostics/                                        诊断导出
