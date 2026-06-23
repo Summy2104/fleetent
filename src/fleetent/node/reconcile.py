@@ -35,6 +35,7 @@ class NodeReconciler:
             if desired is None:
                 if pid is not None:
                     self._backend.stop(name)
+                _erase_env(self._home_dir(name) / ".env")
                 continue
 
             desired_hash = _config_hash(desired.config)
@@ -168,6 +169,14 @@ class NodeReconciler:
     def _write_hashes(self, hashes: dict[str, str]) -> None:
         self._hash_path.parent.mkdir(parents=True, exist_ok=True)
         self._hash_path.write_text(json.dumps(hashes, sort_keys=True), encoding="utf-8")
+
+
+def _erase_env(env_path: Path) -> None:
+    """Bulkheaded erase of an agent's .env after it is stopped."""
+    try:
+        env_path.unlink(missing_ok=True)
+    except OSError:
+        _logger.warn("node_agent_env_wipe_failed", path=str(env_path))
 
 
 def _config_hash(config: dict[str, Any]) -> str:

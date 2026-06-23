@@ -447,6 +447,84 @@ def test_write_home_preserves_existing_env_token_on_config_restart(tmp_path) -> 
 
 
 @respx.mock
+def test_reconcile_wipes_env_file_when_agent_removed_from_desired(tmp_path) -> None:
+    """D4: when an agent is stopped (no longer desired), its .env is erased."""
+    from fleetent.node.reconcile import NodeReconciler
+
+    home = tmp_path / "agents" / "support"
+    home.mkdir(parents=True)
+    (home / "agent.yaml").write_text(yaml.safe_dump({"name": "support"}))
+    env_path = home / ".env"
+    env_path.write_text("ANTHROPIC_API_KEY=sk-live-secret\nFLEETENT_TUI_TOKEN=ma-" + "a" * 64 + "\n")
+    respx.post("https://platform.internal/nodes/node-a/status").mock(
+        return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
+    )
+    backend = FakeBackend({"support": 12345})
+
+    # Reconcile with empty desired set → agent is not desired → should stop and wipe .env
+    NodeReconciler(_config(tmp_path), backend).reconcile(
+        DesiredState(node_id="node-a", agents=[])
+    )
+
+    assert backend.stop_calls == ["support"]
+    assert not env_path.exists(), ".env must be erased after agent is stopped"
+
+
+@respx.mock
+def test_reconcile_env_wipe_failure_is_bulkheaded(tmp_path, monkeypatch) -> None:
+    """D4: .env erasure failure must not prevent other agents from being processed."""
+    import pathlib
+    from fleetent.node import reconcile as reconcile_module
+    from fleetent.node.reconcile import NodeReconciler
+
+    warnings: list[tuple[str, dict[str, object]]] = []
+
+    class FakeLogger:
+        def info(self, message: str, **fields: object) -> None:
+            pass
+
+        def warn(self, message: str, **fields: object) -> None:
+            warnings.append((message, fields))
+
+    monkeypatch.setattr(reconcile_module, "_logger", FakeLogger())
+
+    # support: not desired, has .env
+    home_support = tmp_path / "agents" / "support"
+    home_support.mkdir(parents=True)
+    env_path = home_support / ".env"
+    env_path.write_text("ANTHROPIC_API_KEY=sk-secret\n")
+
+    # billing: desired, should spawn
+    respx.post("https://platform.internal/nodes/node-a/status").mock(
+        return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
+    )
+    backend = FakeBackend({"support": 12345, "billing": None})
+
+    original_unlink = pathlib.Path.unlink
+
+    def bad_unlink(self, missing_ok: bool = False) -> None:
+        if self.name == ".env":
+            raise OSError("permission denied")
+        original_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(pathlib.Path, "unlink", bad_unlink)
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(
+        DesiredState(
+            node_id="node-a",
+            agents=[
+                DesiredAgent(agent_id=102, name="billing", config={"name": "billing"}, secrets={}),
+            ],
+        )
+    )
+
+    # billing should still spawn despite the .env erasure failure for support
+    assert "billing" in backend.spawn_calls
+    # the wipe failure should be logged
+    assert any("node_agent_env_wipe_failed" in msg for msg, _ in warnings)
+
+
+@respx.mock
 def test_reconcile_logs_secret_metadata_without_plaintext_on_spawn(tmp_path, monkeypatch):
     from fleetent.node import reconcile as reconcile_module
     from fleetent.node.reconcile import NodeReconciler

@@ -20,8 +20,8 @@
 
 ## 4. 生命周期擦除（D4）
 
-- [ ] 4.1 写测试（unit/node）：agent 从期望集移除（unpin/disable）被停后，其 home `.env` 被擦除；擦除失败舱壁化（只 log、不影响其它 agent）；先见红
-- [ ] 4.2 实现：node reconcile 在停掉不再期望 agent 后擦除其 `.env`，舱壁化；令 4.1 见绿
+- [x] 4.1 写测试（unit/node）：agent 从期望集移除（unpin/disable）被停后，其 home `.env` 被擦除；擦除失败舱壁化（只 log、不影响其它 agent）；先见红
+- [x] 4.2 实现：node reconcile 在停掉不再期望 agent 后擦除其 `.env`，舱壁化；令 4.1 见绿
 
 ## 5. 暴露面加固（D6）
 
