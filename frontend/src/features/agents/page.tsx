@@ -421,6 +421,7 @@ function AgentBindingsPanel({
   const setDefault = useSetDefaultAgentMutation(agent.agent_name);
   const clearDefault = useClearDefaultAgentMutation();
   const setImCapabilities = useSetAgentImCapabilitiesMutation(agent.agent_name);
+  const updateAgent = useUpdateAgentMutation(agent.agent_name);
 
   const [selectedMcpServer, setSelectedMcpServer] = useState('');
   const [selectedConnector, setSelectedConnector] = useState('');
@@ -433,6 +434,7 @@ function AgentBindingsPanel({
     supports_dm: false,
     supports_groups: false,
   });
+  const [overridesYaml, setOverridesYaml] = useState('');
 
   useEffect(() => {
     setCapabilities({
@@ -440,6 +442,10 @@ function AgentBindingsPanel({
       supports_groups: detail.data?.supports_groups ?? false,
     });
   }, [detail.data?.supports_dm, detail.data?.supports_groups, agent.agent_name]);
+
+  useEffect(() => {
+    setOverridesYaml(detail.data?.config_overrides_yaml ?? '');
+  }, [detail.data?.config_overrides_yaml, agent.agent_name]);
 
   const availableMcpServers = useMemo(() => {
     const bound = new Set(bindings.data?.mcp_servers ?? []);
@@ -463,6 +469,11 @@ function AgentBindingsPanel({
 
   const saveImCapabilities = async (): Promise<void> => {
     await setImCapabilities.mutateAsync(capabilities);
+  };
+
+  const saveOverrides = async (): Promise<void> => {
+    // Partial PATCH: send only the overrides; omitted prompt/tools are left untouched server-side.
+    await updateAgent.mutateAsync({ config_overrides_yaml: overridesYaml });
   };
 
   const createGroup = async (group: AgentImGroupInput): Promise<void> => {
@@ -702,6 +713,34 @@ function AgentBindingsPanel({
               Bind user
             </button>
           </div>
+        ) : null}
+      </section>
+
+      <section className="space-y-3 rounded-2xl border bg-white/70 p-4">
+        <h3 className="text-lg font-semibold">IM Connectors</h3>
+        <p className="text-sm text-muted-foreground">
+          Configure the Slack/Telegram connector (bot/app token env names) via agent.yaml
+          overrides. Tokens reference env-var names, never inline secrets.
+        </p>
+        <label className="grid gap-2 text-sm font-medium">
+          Advanced overrides (YAML)
+          <textarea
+            className="min-h-[160px] rounded-md border bg-white px-3 py-2 font-mono text-sm"
+            disabled={!canWrite}
+            onChange={(event) => setOverridesYaml(event.target.value)}
+            placeholder={'im:\n  slack:\n    bot_token_env: SLACK_BOT_TOKEN\n    app_token_env: SLACK_APP_TOKEN'}
+            value={overridesYaml}
+          />
+        </label>
+        {canWrite ? (
+          <button
+            className="self-start rounded-md bg-secondary px-3 py-2 text-sm font-medium"
+            disabled={updateAgent.isPending}
+            onClick={() => void saveOverrides()}
+            type="button"
+          >
+            Save overrides
+          </button>
         ) : null}
       </section>
 

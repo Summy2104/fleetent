@@ -3,6 +3,7 @@
 observability, provenance — CRUD/versioning belong to multi-agent-management)."""
 
 import pytest
+import yaml
 from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -168,6 +169,19 @@ def test_detail_null_placement_when_unbound(client, monkeypatch):
 
     assert body["runtime"] is None
     assert body["placement"] is None
+
+
+def test_detail_includes_config_overrides_yaml(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    agent_store.create_agent("ops", "Ops.", ["shell"])
+    overrides = {"im": {"slack": {"bot_token_env": "SLACK_BOT_TOKEN"}}}
+    agent_store.set_config_overrides("ops", overrides)
+    token, _ = _session_for("viewer")
+
+    body = client.get("/admin/agents/ops", headers=_hdr(token)).json()
+
+    assert body["config_overrides"] == overrides
+    assert yaml.safe_load(body["config_overrides_yaml"]) == overrides
 
 
 # --- default disabled on create / clone --------------------------------------

@@ -41,15 +41,17 @@ export type CreateAgentInput = {
 };
 
 export type UpdateAgentInput = {
-  system_prompt: string;
-  allowed_tools: string[];
+  system_prompt?: string;
+  allowed_tools?: string[];
   model_overrides?: AgentModelOverrides;
+  config_overrides_yaml?: string;
 };
 
 export type AgentDetail = {
   agent: string;
   allowed_tools: string[];
   model_overrides?: AgentModelOverrides;
+  config_overrides_yaml?: string;
   status: string;
   system_prompt: string;
   supports_dm?: boolean;
