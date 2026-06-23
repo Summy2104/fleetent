@@ -750,6 +750,34 @@ describe('agents page dual-state (runtime + placement gating)', () => {
     renderAgentsRoute();
 
     expect(await screen.findByText('Runtime: running on node-a (ok)')).toBeInTheDocument();
+    // the new runtime line must not displace the existing desired-state token
+    expect(screen.getByText('enabled')).toBeInTheDocument();
+  });
+
+  it('renders a phase-only runtime without node/health decoration', async () => {
+    const agents: AgentRecord[] = [
+      {
+        agent_name: 'alpha',
+        allowed_tools: [],
+        is_default: false,
+        placement: { node_id: 'node-a' },
+        provenance: 'adhoc',
+        runtime: { phase: 'stopped' },
+        status: 'enabled',
+        system_prompt: 'Alpha prompt',
+      },
+    ];
+    installAgentBindingHandlers({
+      agents,
+      bindingsByAgent: { alpha: emptyBindings },
+      detailByAgent: {
+        alpha: { agent: 'alpha', allowed_tools: [], status: 'enabled', system_prompt: 'p' },
+      },
+    });
+
+    renderAgentsRoute();
+
+    expect(await screen.findByText('Runtime: stopped')).toBeInTheDocument();
   });
 
   it('renders an explicit not-running state when runtime is null', async () => {

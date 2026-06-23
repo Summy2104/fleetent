@@ -93,15 +93,17 @@ def test_list_merges_runtime_and_placement(client, monkeypatch):
     row = next(r for r in rows if r["agent_name"] == "ops")
 
     assert row["status"] == "enabled"  # existing field unchanged
-    assert row["runtime"] == {
-        "phase": "running",
-        "health": "ok",
-        "pid": 999,
-        "node_id": node,
-        "reported_at": row["runtime"]["reported_at"],
-    }
+    assert row["provenance"] == "adhoc"  # existing field unchanged
+    assert set(row["runtime"]) == {"phase", "health", "pid", "node_id", "reported_at"}
+    assert row["runtime"]["phase"] == "running"
+    assert row["runtime"]["health"] == "ok"
+    assert row["runtime"]["pid"] == 999
+    assert row["runtime"]["node_id"] == node
     assert row["runtime"]["reported_at"]
+    assert set(row["placement"]) == {"node_id", "pinned_at", "pinned_by"}
     assert row["placement"]["node_id"] == node
+    assert row["placement"]["pinned_by"] == "admin"
+    assert row["placement"]["pinned_at"]
 
 
 def test_list_null_runtime_placement_when_absent(client, monkeypatch):
@@ -120,7 +122,7 @@ def test_list_null_runtime_placement_when_absent(client, monkeypatch):
 def test_detail_merges_runtime_and_placement(client, monkeypatch):
     _wire_real_store(monkeypatch)
     node = _seed_node(monkeypatch)
-    ops = agent_store.create_agent("ops", "Ops.", ["shell"])
+    ops = agent_store.create_agent("ops", "Ops prompt", ["read_*"])
     placement_store.pin_agent(ops.id, node)
     node_store.upsert_agent_status(ops.id, node_id=node, phase="running", pid=7, health="ok")
     token, _ = _session_for("viewer")
@@ -130,6 +132,31 @@ def test_detail_merges_runtime_and_placement(client, monkeypatch):
     assert body["runtime"]["phase"] == "running"
     assert body["runtime"]["node_id"] == node
     assert body["placement"]["node_id"] == node
+    # merge must not clobber existing definition fields
+    assert body["agent"] == "ops"
+    assert body["system_prompt"] == "Ops prompt"
+    assert body["allowed_tools"] == ["read_*"]
+    assert body["provenance"] == "adhoc"
+
+
+def test_runtime_and_placement_are_independent(client, monkeypatch):
+    """Asymmetric combos: pinned-without-status and status-without-pin."""
+    _wire_real_store(monkeypatch)
+    node = _seed_node(monkeypatch)
+    pinned = agent_store.create_agent("pinned", "p", ["shell"])
+    store.enable(pinned.id)
+    placement_store.pin_agent(pinned.id, node)  # bound but no status reported
+    running = agent_store.create_agent("running", "p", ["shell"])
+    store.enable(running.id)
+    node_store.upsert_agent_status(running.id, node_id=node, phase="running")  # status, no pin
+    token, _ = _session_for("admin")
+
+    rows = {r["agent_name"]: r for r in client.get("/admin/agents", headers=_hdr(token)).json()}
+
+    assert rows["pinned"]["runtime"] is None
+    assert rows["pinned"]["placement"]["node_id"] == node
+    assert rows["running"]["runtime"]["phase"] == "running"
+    assert rows["running"]["placement"] is None
 
 
 def test_detail_null_placement_when_unbound(client, monkeypatch):
