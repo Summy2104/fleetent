@@ -25,13 +25,13 @@
 
 ## 5. 暴露面加固（D6）
 
-- [ ] 5.1 写测试（unit/integration）：diagnostics 导出排除 `<home>/agents/*/.env`，manifest 仅记 redacted 引用摘要；先见红
-- [ ] 5.2 实现：把 agent home `.env` 纳入 diagnostics 导出/备份排除清单（复用既有 secret/SQLite 排除机制）；令 5.1 见绿
-- [ ] 5.3 写测试（unit）：redaction 兜底对 `.env` 形态 `KEY=<token-like>` 脱敏；先见红→实现见绿
+- [x] 5.1 写测试（unit/integration）：diagnostics 导出排除 `<home>/agents/*/.env`，manifest 仅记 redacted 引用摘要；先见红
+- [x] 5.2 实现：把 agent home `.env` 纳入 diagnostics 导出/备份排除清单（复用既有 secret/SQLite 排除机制）；令 5.1 见绿
+- [x] 5.3 写测试（unit）：redaction 兜底对 `.env` 形态 `KEY=<token-like>` 脱敏；先见红→实现见绿
 
 ## 6. 平台侧对齐与收尾
 
-- [ ] 6.1 确认平台 `materialize._seed_env` 与 node 走同一收集器口径，两条路径产物一致（写/更新对照测试）
+- [x] 6.1 确认平台 `materialize._seed_env` 与 node 走同一收集器口径，两条路径产物一致（写/更新对照测试）
 - [ ] 6.2 文档：在部署文档标注 prod 前提（`.env` `0600` + home `0700` + platform↔node TLS）；按 AGENTS.md 非代码产物须人工确认后再 commit
-- [ ] 6.3 跑 `PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py` 确认无新增跨包 internal import 违规
-- [ ] 6.4 change 收尾：`make test-pr` + `make test-unit-ci`（覆盖率门禁）全绿，对照 main 无新增失败；相关 node/runtime/diagnostics integration 测试无新增失败
+- [x] 6.3 跑 `PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py` 确认无新增跨包 internal import 违规
+- [x] 6.4 change 收尾：`make test-pr` + `make test-unit-ci`（覆盖率门禁）全绿，对照 main 无新增失败；相关 node/runtime/diagnostics integration 测试无新增失败
