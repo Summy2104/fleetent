@@ -32,6 +32,7 @@ type AgentDetailRecord = {
 };
 
 type AgentBindingState = {
+  groups?: Array<{ group_id: string; platform: string }>;
   kbIds: string[];
   mcpServers: string[];
   oauth: Array<{ run_as: string; service_id: string }>;
@@ -94,6 +95,7 @@ function installAgentBindingHandlers({
       HttpResponse.json({
         mcp_servers: bindingsByAgent[String(params.name)].mcpServers,
         users: bindingsByAgent[String(params.name)].users,
+        groups: bindingsByAgent[String(params.name)].groups ?? [],
       })
     ),
     http.get(`${API_BASE_URL}/admin/agents/:name/bindings/oauth`, ({ params }) => {
@@ -494,11 +496,18 @@ describe('agents page parity baseline', () => {
       }),
       http.post(`${API_BASE_URL}/admin/agents/alpha/bindings/groups`, async ({ request }) => {
         expect(await request.json()).toEqual({ group_id: 'C0123', platform: 'slack' });
+        bindingsByAgent.alpha.groups = [
+          ...(bindingsByAgent.alpha.groups ?? []),
+          { group_id: 'C0123', platform: 'slack' },
+        ];
         return HttpResponse.json({ agent: 'alpha', bound: true, group_id: 'C0123', platform: 'slack' }, { status: 201 });
       }),
-      http.delete(`${API_BASE_URL}/admin/agents/alpha/bindings/groups/slack/C0123`, () =>
-        new HttpResponse(null, { status: 204 })
-      ),
+      http.delete(`${API_BASE_URL}/admin/agents/alpha/bindings/groups/slack/C0123`, () => {
+        bindingsByAgent.alpha.groups = (bindingsByAgent.alpha.groups ?? []).filter(
+          (group) => !(group.platform === 'slack' && group.group_id === 'C0123')
+        );
+        return new HttpResponse(null, { status: 204 });
+      }),
       http.put(`${API_BASE_URL}/admin/agents/alpha/im-capabilities`, async ({ request }) => {
         expect(await request.json()).toEqual({ supports_dm: true, supports_groups: true });
         detailByAgent.alpha = { ...detailByAgent.alpha, supports_dm: true, supports_groups: true };

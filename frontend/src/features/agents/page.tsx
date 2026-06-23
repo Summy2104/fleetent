@@ -50,11 +50,6 @@ type AdminMe = {
   role: string;
 };
 
-type AgentImGroup = {
-  group_id: string;
-  platform: string;
-};
-
 function useAdminMeQuery() {
   const api = useAdminApi();
 
@@ -349,15 +344,9 @@ function SecretRow({
 function AgentBindingsPanel({
   agent,
   canWrite,
-  groups,
-  onAddGroup,
-  onRemoveGroup,
 }: {
   agent: AgentListItem;
   canWrite: boolean;
-  groups: AgentImGroup[];
-  onAddGroup: (group: AgentImGroup) => void;
-  onRemoveGroup: (group: AgentImGroup) => void;
 }): JSX.Element {
   const detail = useAgentDetailQuery(agent.agent_name);
   const skills = useAgentSkillsQuery(agent.agent_name);
@@ -428,14 +417,14 @@ function AgentBindingsPanel({
     await setImCapabilities.mutateAsync(capabilities);
   };
 
+  const boundGroups = bindings.data?.groups ?? [];
+
   const createGroup = async (group: AgentImGroupInput): Promise<void> => {
     await addImGroup.mutateAsync(group);
-    onAddGroup(group);
   };
 
   const deleteGroup = async (group: AgentImGroupInput): Promise<void> => {
     await removeImGroup.mutateAsync(group);
-    onRemoveGroup(group);
   };
 
   return (
@@ -670,7 +659,7 @@ function AgentBindingsPanel({
 
       <section className="space-y-3 rounded-2xl border bg-white/70 p-4">
         <h3 className="text-lg font-semibold">IM Access</h3>
-        <BindingList empty="No IM groups allowed." items={groups.map((group) => `${group.platform}:${group.group_id}`)} renderItem={(item) => (
+        <BindingList empty="No IM groups allowed." items={boundGroups.map((group) => `${group.platform}:${group.group_id}`)} renderItem={(item) => (
           <div className="flex items-center gap-2 rounded-full border px-3 py-1" key={item}>
             <span className="text-sm">{item}</span>
             {canWrite ? (
@@ -806,7 +795,6 @@ export function AgentsPage(): JSX.Element {
   const [name, setName] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
   const [allowedTools, setAllowedTools] = useState('');
-  const [groupsByAgent, setGroupsByAgent] = useState<Record<string, AgentImGroup[]>>({});
 
   useEffect(() => {
     if (!selectedName && agents.data && agents.data.length > 0) {
@@ -859,29 +847,6 @@ export function AgentsPage(): JSX.Element {
   };
 
   const canWrite = me.data?.role !== 'viewer';
-  const groups = selectedName ? groupsByAgent[selectedName] ?? [] : [];
-
-  const addImGroup = (group: AgentImGroup): void => {
-    if (!selectedName) {
-      return;
-    }
-    setGroupsByAgent((current) => ({
-      ...current,
-      [selectedName]: [...(current[selectedName] ?? []), group],
-    }));
-  };
-
-  const removeImGroup = (group: AgentImGroup): void => {
-    if (!selectedName) {
-      return;
-    }
-    setGroupsByAgent((current) => ({
-      ...current,
-      [selectedName]: (current[selectedName] ?? []).filter(
-        (item) => item.platform !== group.platform || item.group_id !== group.group_id
-      ),
-    }));
-  };
 
   return (
     <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
@@ -989,9 +954,6 @@ export function AgentsPage(): JSX.Element {
         <AgentBindingsPanel
           agent={selectedAgent}
           canWrite={canWrite}
-          groups={groups}
-          onAddGroup={addImGroup}
-          onRemoveGroup={removeImGroup}
         />
       ) : (
         <aside className="rounded-2xl border bg-white/75 p-5">
