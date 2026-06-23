@@ -7,6 +7,8 @@ import { describe, expect, it } from 'vitest';
 import { AuthProvider } from '@/app/auth';
 import { AppQueryProvider } from '@/app/query-client';
 import {
+  useCreateSkillMutation,
+  useEditSkillMutation,
   useForcePublishSkillMutation,
   useReloadSkillsMutation,
   useSetSkillAgentBindingMutation,
@@ -308,6 +310,135 @@ describe('skills api hooks', () => {
     await user.click(screen.getByRole('button', { name: 'reload' }));
     await waitFor(() => {
       expect(screen.getByTestId('skills')).toHaveTextContent('ops-guide:active:true:pass:');
+    });
+  });
+});
+
+function SkillsCrudProbe(): JSX.Element {
+  const skills = useSkillsQuery();
+  const content = useSkillContentQuery('ops-guide');
+  const create = useCreateSkillMutation();
+  const edit = useEditSkillMutation('ops-guide');
+
+  return (
+    <section>
+      <button
+        onClick={() =>
+          create.mutate({
+            content: '---\nname: new-skill\ndescription: fresh\n---\nnew body',
+            name: 'new-skill',
+          })
+        }
+        type="button"
+      >
+        create
+      </button>
+      <button
+        onClick={() =>
+          edit.mutate({ content: '---\nname: ops-guide\ndescription: helper\n---\nedited body' })
+        }
+        type="button"
+      >
+        edit
+      </button>
+      <div data-testid="skills">{skills.data?.map((skill) => skill.name).join('|')}</div>
+      <div data-testid="content">{content.data?.content}</div>
+    </section>
+  );
+}
+
+describe('skills create and edit hooks', () => {
+  it('creates a skill and refreshes the list', async () => {
+    const user = userEvent.setup();
+    let skills: SkillRecord[] = [
+      {
+        audit_verdict: 'pass',
+        description: 'Ops runbook helper',
+        drifted_agents: [],
+        enabling_agents: [],
+        global_enabled: true,
+        name: 'ops-guide',
+        source: 'adhoc',
+        status: 'active',
+      },
+    ];
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/skills`, () => HttpResponse.json(skills)),
+      http.get(`${API_BASE_URL}/admin/skills/:name/content`, ({ params }) =>
+        HttpResponse.json({ content: 'ops body', name: String(params.name ?? '') })
+      ),
+      http.post(`${API_BASE_URL}/admin/skills`, async ({ request }) => {
+        const body = (await request.json()) as { content: string; name: string; source?: string };
+        expect(body.name).toBe('new-skill');
+        expect(body.content).toContain('name: new-skill');
+        skills = [
+          ...skills,
+          {
+            audit_verdict: 'pass',
+            description: 'fresh',
+            drifted_agents: [],
+            enabling_agents: [],
+            global_enabled: false,
+            name: body.name,
+            source: body.source ?? 'adhoc',
+            status: 'active',
+          },
+        ];
+        return HttpResponse.json({ name: body.name, verdict: 'pass' });
+      })
+    );
+
+    renderWithProviders(<SkillsCrudProbe />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('skills')).toHaveTextContent('ops-guide');
+    });
+
+    await user.click(screen.getByRole('button', { name: 'create' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('skills')).toHaveTextContent('ops-guide|new-skill');
+    });
+  });
+
+  it('edits a skill and refreshes its content', async () => {
+    const user = userEvent.setup();
+    const skills: SkillRecord[] = [
+      {
+        audit_verdict: 'pass',
+        description: 'Ops runbook helper',
+        drifted_agents: [],
+        enabling_agents: [],
+        global_enabled: true,
+        name: 'ops-guide',
+        source: 'adhoc',
+        status: 'active',
+      },
+    ];
+    let content = '---\nname: ops-guide\ndescription: helper\n---\noriginal body';
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/skills`, () => HttpResponse.json(skills)),
+      http.get(`${API_BASE_URL}/admin/skills/:name/content`, ({ params }) =>
+        HttpResponse.json({ content, name: String(params.name ?? '') })
+      ),
+      http.put(`${API_BASE_URL}/admin/skills/:name`, async ({ params, request }) => {
+        const body = (await request.json()) as { content: string };
+        expect(String(params.name ?? '')).toBe('ops-guide');
+        content = body.content;
+        return HttpResponse.json({ name: String(params.name ?? ''), verdict: 'pass' });
+      })
+    );
+
+    renderWithProviders(<SkillsCrudProbe />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('content')).toHaveTextContent('original body');
+    });
+
+    await user.click(screen.getByRole('button', { name: 'edit' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('content')).toHaveTextContent('edited body');
     });
   });
 });
