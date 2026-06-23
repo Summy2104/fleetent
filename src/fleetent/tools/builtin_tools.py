@@ -995,6 +995,27 @@ async def send_im_message(
     """
     # Lazy import: keeps module load light and avoids cycles (builtin convention).
     from fleetent import outbound
+    from fleetent.governance import approval_policy
+
+    # No self-delivery to the current conversation (outbound-tool-no-self-conversation-send):
+    # replying to the current conversation is the harness's job — it delivers the final text
+    # reply automatically. A send_im_message whose target IS the current conversation would
+    # duplicate that reply, so it is a no-op here. risk_for == "none" iff the target resolves
+    # to the current conversation (and fails closed to "medium" without a session context),
+    # so this never suppresses genuine outreach to a third party.
+    if (
+        approval_policy.risk_for(
+            "send_im_message",
+            {"target": target, "target_type": target_type},
+            tool_context,
+            fallback="medium",
+        )
+        == "none"
+    ):
+        return (
+            "（未发送）回复当前对话无需调用本工具——直接输出文本即可，平台会自动发回当前会话；"
+            "如需发文件请用 send_file。send_im_message 仅用于主动发给其他用户/频道。"
+        )
 
     connectors = tool_context.outbound_connectors if tool_context else {}
     sc = getattr(tool_context, "session_context", None) if tool_context else None

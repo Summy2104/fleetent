@@ -1,9 +1,9 @@
-"""Integration: send_im_message conversation-pinning (fix-send-im-channel-self-dm-routing).
+"""Integration: send_im_message current-conversation no-op (outbound-tool-no-self-conversation-send).
 
-End-to-end through the real /exchange resolution + outbound kernel: a self-DM
-(target == sender, target_type == "user") issued from a CHANNEL conversation must deliver its
-text AND file to the channel thread (send_file parity), not the sender's private DM. A
-third-party send from the same channel is untouched (still the user target).
+A self-DM (target == sender, target_type == "user") issued from a CHANNEL conversation targets
+the current-conversation participant, so the tool no-ops (the harness already delivers the final
+reply) — nothing is sent, superseding the prior channel-pinning behavior. A third-party send
+from the same channel is untouched (still delivered to the user target).
 """
 
 from __future__ import annotations
@@ -57,10 +57,11 @@ def _ok(kind):
     return DeliveryReceipt(ok=True, platform="slack", target="x", target_type="x", kind=kind)
 
 
-async def test_channel_self_dm_pins_text_and_file_to_channel_thread(_exchange):
+async def test_channel_self_dm_is_noop(_exchange):
     from fleetent.tools.builtin_tools import send_im_message
 
-    # File owned by the run's own scope (K1) → resolves on the ungated self/reply path.
+    # File owned by the run's own scope (K1); the call targets the current sender (U1) from a
+    # channel → current conversation → no-op (the harness delivers the reply), nothing sent.
     artifact_exchange.register(server_id="gd", rel_path="chart.png", scope_key="K1")
     with (
         patch("fleetent.outbound.is_reachable", AsyncMock(return_value=True)),
@@ -76,16 +77,9 @@ async def test_channel_self_dm_pins_text_and_file_to_channel_thread(_exchange):
             tool_context=_channel_ctx("K1", sender="U1"),
         )
 
-    # text → channel thread, not U1's DM
-    assert send_to.call_args.args[2] == "C_CHAN"
-    assert send_to.call_args.kwargs["target_type"] == "channel"
-    assert send_to.call_args.kwargs["thread"] == "T_ROOT"
-    # file → same channel thread
-    assert send_file_to.call_args.args[2] == "C_CHAN"
-    assert send_file_to.call_args.kwargs["target_type"] == "channel"
-    assert send_file_to.call_args.kwargs["thread"] == "T_ROOT"
-    assert str(_exchange / "chart.png") == send_file_to.call_args.args[3]
-    assert "已发送" in result
+    send_to.assert_not_called()
+    send_file_to.assert_not_called()
+    assert "未发送" in result
 
 
 async def test_channel_third_party_send_not_pinned(_exchange):

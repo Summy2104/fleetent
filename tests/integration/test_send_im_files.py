@@ -111,12 +111,13 @@ async def test_send_im_message_delivers_cross_scope_artifact(_exchange):
     assert "已发送" in result
 
 
-async def test_send_im_to_current_convo_refuses_cross_scope_file(_exchange):
+async def test_send_im_to_current_convo_is_noop(_exchange):
     from fleetent.tools.builtin_tools import send_im_message
 
-    # target == current sender (U1) → reply to the current conversation → NOT gated, so no
-    # human approval occurred → a cross-scope (K1) artifact while the run is K2 must be
-    # refused (skipped), never auto-authorized. The text still delivers.
+    # target == current sender (U1) → the current conversation → no-op
+    # (outbound-tool-no-self-conversation-send): the harness delivers the reply, so the tool
+    # sends nothing — neither the text nor the (cross-scope) file. No ungated delivery path
+    # remains, so there is no place a cross-scope artifact could leak.
     artifact_exchange.register(server_id="gd", rel_path="report.xlsx", scope_key="K1")
     with (
         patch("fleetent.outbound.is_reachable", AsyncMock(return_value=True)),
@@ -127,7 +128,7 @@ async def test_send_im_to_current_convo_refuses_cross_scope_file(_exchange):
                     ok=True, platform="slack", target="x", target_type="user", kind="text"
                 )
             ),
-        ),
+        ) as send_to,
         patch(
             "fleetent.outbound.send_file_to",
             AsyncMock(
@@ -143,8 +144,9 @@ async def test_send_im_to_current_convo_refuses_cross_scope_file(_exchange):
             files=["/exchange/gd/report.xlsx"],
             tool_context=_ctx("K2"),
         )
-    send_file_to.assert_not_called()  # cross-scope file refused on the ungated reply path
-    assert "已发送" in result
+    send_to.assert_not_called()
+    send_file_to.assert_not_called()
+    assert "未发送" in result
 
 
 async def test_send_im_message_skips_invalid_file_entry(_exchange):
