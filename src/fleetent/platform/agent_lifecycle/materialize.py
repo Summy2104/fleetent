@@ -8,6 +8,7 @@ references secrets by env-var name only (never plaintext) — so the agent is ru
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import secrets
 import shutil
@@ -121,6 +122,64 @@ def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
 def desired_state_payload_from_agent_file(agent_file: AgentFile) -> dict[str, Any]:
     """Serialize the non-secret subset of an AgentFile for node desired-state delivery."""
     return _strip_secret_plumbing(agent_file.model_dump(mode="json", exclude_defaults=False))
+
+
+def skill_bundles_for_agent(agent: agent_store.Agent) -> list[dict[str, Any]]:
+    """Build the per-agent skill file bundles for node desired-state delivery.
+
+    Mirrors the runtime ``allowed_skills`` narrowing (``_allowed_skills_for`` + global
+    disable): a bound agent gets exactly its enabled skills; an un-narrowed agent gets the
+    full pool. Each bundle carries the skill's files (base64, binary-safe) and a
+    content-hash ``version`` so the node can detect skill drift and restart on change.
+    Skill files are non-secret, delivered separately from ``config``/``secrets``.
+    """
+    pool = Path(skill_registry._resolve_skills_dir(None))
+    if not pool.is_dir():
+        return []
+
+    names = _shipped_skill_names(agent, pool) - set(_global_disabled_skills())
+    bundles: list[dict[str, Any]] = []
+    for name in sorted(names):
+        skill_dir = pool / name
+        if not (skill_dir / "SKILL.md").is_file():
+            continue
+        bundles.append(
+            {
+                "name": name,
+                "version": _skill_dir_version(skill_dir),
+                "files": _read_skill_files(skill_dir),
+            }
+        )
+    return bundles
+
+
+def _shipped_skill_names(agent: agent_store.Agent, pool: Path) -> set[str]:
+    allowed = _allowed_skills_for(agent)
+    if allowed:
+        return set(allowed)
+    try:
+        narrowed = skill_admin_store.has_any_binding(agent.id)
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc):
+            raise
+        narrowed = False
+    if narrowed:
+        # bindings exist but none enabled — explicit narrowing to no skills
+        return set()
+    # no narrowing (no bindings + empty authored allowed_skills) — ship the full pool
+    return {p.name for p in pool.iterdir() if p.is_dir() and p.name != ".git"}
+
+
+def _read_skill_files(skill_dir: Path) -> list[dict[str, str]]:
+    files: list[dict[str, str]] = []
+    for path in sorted(p for p in skill_dir.rglob("*") if p.is_file() and ".git" not in p.parts):
+        files.append(
+            {
+                "path": path.relative_to(skill_dir).as_posix(),
+                "content_b64": base64.b64encode(path.read_bytes()).decode("ascii"),
+            }
+        )
+    return files
 
 
 def _strip_secret_plumbing(value: Any) -> Any:

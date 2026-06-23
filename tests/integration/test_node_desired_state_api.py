@@ -131,6 +131,104 @@ def test_get_desired_state_returns_only_enabled_agents_for_node(node_client: Tes
     assert "sk-inline-secret" not in str(config)
 
 
+def _write_skill(pool, name: str, *, body: str, extra: dict[str, str] | None = None) -> None:
+    skill_dir = pool / name
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(f"---\nname: {name}\n---\n{body}", encoding="utf-8")
+    for rel, content in (extra or {}).items():
+        dest = skill_dir / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(content, encoding="utf-8")
+
+
+def test_get_desired_state_includes_bound_skill_files(
+    node_client: TestClient, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent import agent_store
+    from fleetent.platform.node_management import node_store, placement_store
+    from fleetent.platform.skill_management import skill_admin_store
+
+    pool = tmp_path / "skill-pool"
+    _write_skill(pool, "alpha", body="alpha body", extra={"scripts/run.py": "print(1)\n"})
+    _write_skill(pool, "beta", body="beta body")
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(pool))
+
+    node_key, _ = node_store.register_node("node-a")
+    agent = agent_store.create_agent("support", "Help", ["shell"])
+    placement_store.pin_agent(agent.id, "node-a")
+    skill_admin_store.set_binding(agent.id, "alpha", True, "admin")
+
+    response = node_client.get(
+        "/nodes/node-a/desired-state", headers={"Authorization": f"Bearer {node_key}"}
+    )
+
+    assert response.status_code == 200
+    delivered = response.json()["agents"][0]
+    # only the bound skill is delivered; beta is excluded by the allowed-skills narrowing
+    assert [s["name"] for s in delivered["skills"]] == ["alpha"]
+    alpha = delivered["skills"][0]
+    assert alpha["version"]  # non-empty content-hash version
+    files = {f["path"]: base64.b64decode(f["content_b64"]).decode() for f in alpha["files"]}
+    assert files["SKILL.md"] == "---\nname: alpha\n---\nalpha body"
+    assert files["scripts/run.py"] == "print(1)\n"
+    # config narrowing stays consistent with the shipped file set
+    assert delivered["config"]["allowed_skills"] == ["alpha"]
+
+
+def test_get_desired_state_ships_full_pool_when_agent_not_narrowed(
+    node_client: TestClient, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent import agent_store
+    from fleetent.platform.node_management import node_store, placement_store
+
+    pool = tmp_path / "skill-pool"
+    _write_skill(pool, "alpha", body="a")
+    _write_skill(pool, "beta", body="b")
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(pool))
+
+    node_key, _ = node_store.register_node("node-a")
+    agent = agent_store.create_agent("support", "Help", ["shell"])
+    placement_store.pin_agent(agent.id, "node-a")
+
+    response = node_client.get(
+        "/nodes/node-a/desired-state", headers={"Authorization": f"Bearer {node_key}"}
+    )
+
+    assert response.status_code == 200
+    delivered = response.json()["agents"][0]
+    # no binding + empty allowed_skills => no narrowing => full pool
+    assert sorted(s["name"] for s in delivered["skills"]) == ["alpha", "beta"]
+
+
+def test_get_desired_state_excludes_globally_disabled_skill(
+    node_client: TestClient, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent import agent_store
+    from fleetent.platform.node_management import node_store, placement_store
+    from fleetent.platform.skill_management import skill_admin_store
+
+    pool = tmp_path / "skill-pool"
+    _write_skill(pool, "alpha", body="a")
+    _write_skill(pool, "gamma", body="g")
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(pool))
+
+    node_key, _ = node_store.register_node("node-a")
+    agent = agent_store.create_agent("support", "Help", ["shell"])
+    placement_store.pin_agent(agent.id, "node-a")
+    skill_admin_store.set_binding(agent.id, "alpha", True, "admin")
+    skill_admin_store.set_binding(agent.id, "gamma", True, "admin")
+    skill_admin_store.set_global_enabled("gamma", False)
+
+    response = node_client.get(
+        "/nodes/node-a/desired-state", headers={"Authorization": f"Bearer {node_key}"}
+    )
+
+    assert response.status_code == 200
+    delivered = response.json()["agents"][0]
+    # gamma is in the agent's allowed set but globally disabled -> excluded
+    assert [s["name"] for s in delivered["skills"]] == ["alpha"]
+
+
 def test_get_desired_state_returns_empty_agent_set_when_node_has_no_enabled_placements(
     node_client: TestClient,
 ) -> None:
