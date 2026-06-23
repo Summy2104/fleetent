@@ -40,14 +40,17 @@ class NodeReconciler:
             desired_hash = _config_hash(desired.config)
             if desired_state.source == "cache" and not desired.secrets:
                 if pid is None:
-                    _logger.warn(
-                        "node_secret_start_deferred",
-                        agent_name=name,
-                        secret_env_names=[],
-                        secret_count=0,
-                    )
+                    if not self._env_has_values(name):
+                        _logger.warn(
+                            "node_secret_start_deferred",
+                            agent_name=name,
+                            secret_env_names=[],
+                            secret_count=0,
+                        )
+                        continue
+                    # .env has values from prior materialization — boot from disk
+                else:
                     continue
-                continue
             if pid is None:
                 self._write_home(name, desired.config, secrets=desired.secrets)
                 _logger.info(
@@ -128,6 +131,19 @@ class NodeReconciler:
             _logger.warn("node_write_home_config_parse_error", agent_name=agent_name)
             env_names = []
         ensure_env_scaffold(home, referenced_env_names=env_names, secrets=secrets)
+
+    def _env_has_values(self, agent_name: str) -> bool:
+        """Return True if the agent's .env has at least one non-empty, non-TUI-token value."""
+        env_path = self._home_dir(agent_name) / ".env"
+        if not env_path.exists():
+            return False
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            if "=" not in line or line.startswith("#"):
+                continue
+            key, _, value = line.partition("=")
+            if key.strip() != "FLEETENT_TUI_TOKEN" and value.strip():
+                return True
+        return False
 
     def _home_dir(self, agent_name: str) -> Path:
         return self._config.home_dir / "agents" / agent_name

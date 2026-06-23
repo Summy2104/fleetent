@@ -15,8 +15,8 @@
 
 ## 3. node-secret-injection 契约更新（缓存 / platform-down 韧性）
 
-- [ ] 3.1 写测试（unit/node）：desired-state 磁盘缓存仍 strip secret（缓存内容无 secret 值）；先见红→实现/确认见绿
-- [ ] 3.2 写测试（integration）：platform 不可达时，已物化（`.env` 含真值）的 agent 可从盘上 `.env` 重启，不因缺 secret 推迟；先见红→实现见绿
+- [x] 3.1 写测试（unit/node）：desired-state 磁盘缓存仍 strip secret（缓存内容无 secret 值）；先见红→实现/确认见绿
+- [x] 3.2 写测试（integration）：platform 不可达时，已物化（`.env` 含真值）的 agent 可从盘上 `.env` 重启，不因缺 secret 推迟；先见红→实现见绿
 
 ## 4. 生命周期擦除（D4）
 
