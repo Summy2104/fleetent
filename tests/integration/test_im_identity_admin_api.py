@@ -137,6 +137,28 @@ def test_api_create_mapping_success(client):
     assert im.get_mapped_user("telegram", "T10").id == uid
 
 
+def test_api_create_mapping_blank_fields_returns_422(client):
+    uid = _seed_user("Jo")
+    response = client.post(
+        "/admin/im-identities",
+        headers=_session_header("admin"),
+        json={"platform": "  ", "platform_user_id": "  ", "user_id": uid},
+    )
+    assert response.status_code == 422
+    assert im.list_mappings() == []
+
+
+def test_api_must_reset_user_is_locked_out(client):
+    user, _ = user_store.create_user(name="reset-admin")
+    user_store.set_role(user.id, "admin")
+    user_store.set_password(user.id, auth.hash_password("pw"), must_reset=True)
+    token = auth.create_session(user.id)
+
+    response = client.get("/admin/im-identities", headers={"Authorization": f"Session {token}"})
+
+    assert response.status_code == 403
+
+
 def test_api_create_mapping_missing_user_returns_404(client):
     response = client.post(
         "/admin/im-identities",

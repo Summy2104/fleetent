@@ -34,6 +34,10 @@ def _session_user(authorization: str | None) -> user_store.User:
     user = user_store.get_by_id(user_id)
     if user is None:
         raise HTTPException(status_code=401, detail="invalid session")
+    # Mirror user_admin_api: a force-reset user is locked out of every route here
+    # (none of these are reachable mid-reset), matching the canonical session gate.
+    if user.must_reset:
+        raise HTTPException(status_code=403, detail="password reset required")
     return user
 
 
