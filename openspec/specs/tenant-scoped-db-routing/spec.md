@@ -8,21 +8,21 @@
 
 ### Requirement: 租户作用域路由入口
 
-系统 SHALL 提供路由入口，调用方只表达"在某作用域里访问"，由路由解析出物理后端句柄，MUST NOT 自行拼接物理路径或直接打开库文件。路由 SHALL 暴露两个**平级 typed 解析器**：`tenant_scope(tenant)`（per-tenant 资源，如 KB / 共享记忆）与 `agent_scope(tenant, agent_id)`（per-agent 资源）。返回类型随资源不同——`tenant_scope` 返回 per-tenant 句柄（如 KB 关系库 + 向量后端），`agent_scope` 返回 per-agent 句柄。
+系统 SHALL 提供路由入口，调用方只表达"在某作用域里访问"，由路由解析出物理后端句柄，MUST NOT 自行拼接物理路径或直接打开库文件。路由 SHALL 暴露两个**平级 typed 解析器**：`tenant_scope(tenant)`（per-tenant 资源，**仅 KB**）与 `agent_scope(tenant, agent_id)`（per-agent 资源，含 agent state、agent 向量、**agent memory**）。返回类型随资源不同——`tenant_scope` 返回 per-tenant 句柄（KB 关系库 + 向量后端），`agent_scope` 返回 per-agent 句柄（agent state / 向量 / agent memory）。**agent memory 是 per-agent 资源，MUST NOT 经 `tenant_scope` 解析**（不再有 per-tenant 的 `open_shared_memory_db`）。
 
 #### Scenario: 按主体解析 per-tenant 后端
 
 - **WHEN** 调用方请求 tenant `default` 的 KB 关系库与向量后端
 - **THEN** `tenant_scope("default")` 返回该主体对应的 `SQLiteDatabase` 连接与向量后端句柄
 
-#### Scenario: KB 关系库与向量库同源于一个 tenant 作用域
+#### Scenario: agent memory 经 agent_scope 解析
 
-- **WHEN** 同一 tenant 作用域同时取关系库与向量后端
-- **THEN** 二者由同一次 `tenant_scope(tenant)` 解析得到，绑定到同一主体
+- **WHEN** 调用方请求某 agent 的 agent memory 库
+- **THEN** 经 `agent_scope(tenant, agent_id)` 取得 per-agent 句柄；`tenant_scope` MUST NOT 提供 agent memory
 
 #### Scenario: 两个解析器平级共存
 
-- **WHEN** 调用方需要 per-tenant 资源或 per-agent 资源
+- **WHEN** 调用方需要 per-tenant 资源（KB）或 per-agent 资源（agent state / agent memory）
 - **THEN** 分别经 `tenant_scope(tenant)` 与 `agent_scope(tenant, agent_id)` 取得，二者平级、不互相嵌套
 
 ### Requirement: 可换后端抽象
@@ -101,20 +101,6 @@ KB 表 SHALL 保留 `tenant_id`/`kb_id` 列。SQLite 文件路由忽略 `tenant_
 
 - **WHEN** KB 关系库按主体路由到独立文件
 - **THEN** 表结构仍含 `tenant_id`/`kb_id` 列（供可换后端 / RLS 使用）
-
-### Requirement: tenant_scope 含共享记忆句柄
-
-`tenant_scope(tenant)` SHALL 除 KB 句柄外，再返回该主体的**共享记忆**句柄——`shared_memory.db` 关系连接 + `shared:` 家族向量后端。SQLite 后端 SHALL 映射到 `<tenant>/shared_memory.db` 与 `<tenant>/shared_memory_vectors.db`。共享记忆与 KB 同属 per-tenant 作用域，但 agent 对共享记忆取**读写**连接（KB 为只读）。
-
-#### Scenario: tenant_scope 返回共享记忆句柄
-
-- **WHEN** 解析 `tenant_scope(T)`
-- **THEN** 可取得 `<T>/shared_memory.db` 关系连接与 `shared:` 向量后端
-
-#### Scenario: agent 对共享记忆可写
-
-- **WHEN** agent 经 `tenant_scope` 取共享记忆连接
-- **THEN** 该连接为读写（共享记忆是多 agent 写的真相源），而 KB 连接为只读
 
 ### Requirement: 多主体 fan-out 与主体来源
 
