@@ -15,7 +15,9 @@ type AgentRecord = {
   agent_name: string;
   allowed_tools: string[];
   is_default?: boolean;
+  placement?: { node_id: string } | null;
   provenance: string;
+  runtime?: { health?: string | null; node_id?: string | null; phase?: string | null } | null;
   status: string;
   system_prompt: string;
 };
@@ -705,5 +707,144 @@ describe('agents page parity baseline', () => {
     expect(panel.queryByLabelText('Secret value for FLEETENT_ALPHA_API_KEY')).not.toBeInTheDocument();
 
     expectNoBindingLinks();
+  });
+});
+
+describe('agents page dual-state (runtime + placement gating)', () => {
+  const emptyBindings = {
+    kbIds: [],
+    mcpServers: [],
+    oauth: [],
+    secrets: [],
+    skills: [],
+    users: [],
+  };
+
+  it('shows runtime state on the card', async () => {
+    const agents: AgentRecord[] = [
+      {
+        agent_name: 'alpha',
+        allowed_tools: [],
+        is_default: false,
+        placement: { node_id: 'node-a' },
+        provenance: 'adhoc',
+        runtime: { health: 'ok', node_id: 'node-a', phase: 'running' },
+        status: 'enabled',
+        system_prompt: 'Alpha prompt',
+      },
+    ];
+    const detailByAgent: Record<string, AgentDetailRecord> = {
+      alpha: {
+        agent: 'alpha',
+        allowed_tools: [],
+        status: 'enabled',
+        system_prompt: 'Alpha prompt',
+      },
+    };
+    installAgentBindingHandlers({
+      agents,
+      bindingsByAgent: { alpha: emptyBindings },
+      detailByAgent,
+    });
+
+    renderAgentsRoute();
+
+    expect(await screen.findByText('Runtime: running on node-a (ok)')).toBeInTheDocument();
+    // the new runtime line must not displace the existing desired-state token
+    expect(screen.getByText('enabled')).toBeInTheDocument();
+  });
+
+  it('renders a phase-only runtime without node/health decoration', async () => {
+    const agents: AgentRecord[] = [
+      {
+        agent_name: 'alpha',
+        allowed_tools: [],
+        is_default: false,
+        placement: { node_id: 'node-a' },
+        provenance: 'adhoc',
+        runtime: { phase: 'stopped' },
+        status: 'enabled',
+        system_prompt: 'Alpha prompt',
+      },
+    ];
+    installAgentBindingHandlers({
+      agents,
+      bindingsByAgent: { alpha: emptyBindings },
+      detailByAgent: {
+        alpha: { agent: 'alpha', allowed_tools: [], status: 'enabled', system_prompt: 'p' },
+      },
+    });
+
+    renderAgentsRoute();
+
+    expect(await screen.findByText('Runtime: stopped')).toBeInTheDocument();
+  });
+
+  it('renders an explicit not-running state when runtime is null', async () => {
+    const agents: AgentRecord[] = [
+      {
+        agent_name: 'alpha',
+        allowed_tools: [],
+        is_default: false,
+        placement: null,
+        provenance: 'adhoc',
+        runtime: null,
+        status: 'disabled',
+        system_prompt: 'Alpha prompt',
+      },
+    ];
+    installAgentBindingHandlers({
+      agents,
+      bindingsByAgent: { alpha: emptyBindings },
+      detailByAgent: {
+        alpha: { agent: 'alpha', allowed_tools: [], status: 'disabled', system_prompt: 'p' },
+      },
+    });
+
+    renderAgentsRoute();
+
+    expect(await screen.findByText('Runtime: not running')).toBeInTheDocument();
+  });
+
+  it('disables Enable when the agent is not bound to a node', async () => {
+    const agents: AgentRecord[] = [
+      {
+        agent_name: 'gamma',
+        allowed_tools: [],
+        is_default: false,
+        placement: null,
+        provenance: 'adhoc',
+        runtime: null,
+        status: 'disabled',
+        system_prompt: 'Gamma prompt',
+      },
+      {
+        agent_name: 'delta',
+        allowed_tools: [],
+        is_default: false,
+        placement: { node_id: 'node-b' },
+        provenance: 'adhoc',
+        runtime: null,
+        status: 'disabled',
+        system_prompt: 'Delta prompt',
+      },
+    ];
+    installAgentBindingHandlers({
+      agents,
+      bindingsByAgent: { delta: emptyBindings, gamma: emptyBindings },
+      detailByAgent: {
+        delta: { agent: 'delta', allowed_tools: [], status: 'disabled', system_prompt: 'd' },
+        gamma: { agent: 'gamma', allowed_tools: [], status: 'disabled', system_prompt: 'g' },
+      },
+    });
+
+    renderAgentsRoute();
+
+    const unbound = await screen.findByRole('button', { name: 'Enable gamma' });
+    expect(unbound).toBeDisabled();
+    expect(unbound).toHaveAttribute('title', 'Pin this agent to a node before enabling');
+
+    const bound = screen.getByRole('button', { name: 'Enable delta' });
+    expect(bound).not.toBeDisabled();
   });
 });

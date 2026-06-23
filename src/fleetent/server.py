@@ -48,6 +48,7 @@ from fleetent.platform.model_provider_management import provider_admin_api
 from fleetent.platform.node_management import (
     node_admin_api,
     node_desired_state_api,
+    node_store,
     placement_store,
 )
 from fleetent.platform.node_management.agent_transport import DirectHttpAgentTransport
@@ -472,6 +473,12 @@ def wire_agent_store_seams() -> None:
     agent_console_api.delete_agent_def = _console_delete
     agent_console_api.set_agent_icon = agent_store.set_icon
     agent_console_api.agent_icons = agent_store.icons_by_name
+
+    # Dual-state read seams: surface node-reported runtime + placement in the console.
+    agent_console_api.get_agent_runtime = node_store.get_agent_status
+    agent_console_api.get_agent_placement = placement_store.get_for_agent
+    agent_console_api.list_agent_runtimes = node_store.list_agent_status
+    agent_console_api.list_agent_placements = placement_store.list_placements
 
     agent_apply_api.get_agent_def = _get_def
     agent_apply_api.create_agent_def = _apply_create

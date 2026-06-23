@@ -371,3 +371,39 @@ describe('agents api bindings hooks', () => {
     });
   });
 });
+
+describe('agents list dual-state contract', () => {
+  it('surfaces runtime and placement from the list endpoint', async () => {
+    const { server } = await import('@/test/msw/server');
+    server.use(
+      http.get(`${API_BASE_URL}/admin/agents`, () =>
+        HttpResponse.json([
+          {
+            agent_name: 'alpha',
+            provenance: 'adhoc',
+            status: 'enabled',
+            runtime: { phase: 'running', health: 'ok', pid: 7, node_id: 'node-a' },
+            placement: { node_id: 'node-a' },
+          },
+          {
+            agent_name: 'beta',
+            provenance: 'adhoc',
+            status: 'disabled',
+            runtime: null,
+            placement: null,
+          },
+        ])
+      )
+    );
+    const wrapper = createWrapper();
+
+    const { result } = renderHook(() => useAgentsQuery(), { wrapper });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const [alpha, beta] = result.current.data ?? [];
+    expect(alpha.runtime?.phase).toBe('running');
+    expect(alpha.placement?.node_id).toBe('node-a');
+    expect(beta.runtime).toBeNull();
+    expect(beta.placement).toBeNull();
+  });
+});
