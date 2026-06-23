@@ -391,6 +391,11 @@ def edit_skill(
         )
     source = skill_admin_store.get_source(name)
     verdict = engine_audit(body.content)
+    # Persist edited content to the pool before the engine_reload re-scans from disk;
+    # without this the rescan reads stale on-disk content and the edit is silently lost
+    # (mirrors create's _write_skill_content). A rejected (quarantined) edit is not written.
+    if verdict["verdict"] != "rejected":
+        _write_skill_content(name, body.content)
     result = _publish(name, body.content, verdict)
     result["source"] = source["source"]
     audit_log.write_audit(user.id, "skill.edit", "skill", name, detail=result)
