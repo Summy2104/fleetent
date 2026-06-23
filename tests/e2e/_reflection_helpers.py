@@ -4,18 +4,15 @@ import base64
 import contextlib
 import json
 import os
-import re
 import sys
 from collections.abc import Iterator
-from datetime import UTC, datetime
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
-import pytest
 
 from fleetent.identity import Principal, encode_ingress_principal
-
 from tests.e2e._entrypoint_smoke import (
     child_env,
     repo_root,
@@ -25,6 +22,7 @@ from tests.e2e._entrypoint_smoke import (
     wait_for_condition,
     wait_for_http_ready,
 )
+from tests.e2e._im_helpers import managed_agent_route_server
 from tests.e2e.conftest import _admin_session_headers, _agent_status, _register_node
 from tests.integration._migration_template import apply_migrations
 
@@ -37,7 +35,6 @@ class ReflectionManagedStack:
     agent_id: int
     agent_name: str
     agent_pid: int
-    gateway_port: int | None
     admin_session_headers: dict[str, str]
     agent_home: Path
     agent_state_db: Path
@@ -149,10 +146,6 @@ def managed_reflection_stack(
                     agent_id=agent_id,
                     agent_name=agent_name,
                     agent_pid=int(status["pid"]),
-                    gateway_port=_new_agent_gateway_port(
-                        exclude={llm_port, platform_port},
-                        agent_name=agent_name,
-                    ),
                     admin_session_headers=_admin_session_headers(platform_url),
                     agent_home=agent_home,
                     agent_state_db=agent_home / "data" / "default" / agent_name / "agent_state.db",
@@ -248,31 +241,26 @@ def approve_reflection_proposal_via_im(
     proposal_id: str,
     user_id: str,
 ) -> None:
-    gateway_port = stack.gateway_port or _new_agent_gateway_port(
-        exclude=set(),
-        agent_name=stack.agent_name,
-    )
-    if gateway_port is None:
-        pytest.skip("managed agent /im/route gateway is not externally discoverable in this harness")
     token = _agent_tui_token(stack.agent_home)
-    response = httpx.post(
-        f"http://127.0.0.1:{gateway_port}/im/route",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "X-Fleetent-Principal": encode_ingress_principal(
-                Principal(user_id=user_id, tenant_id="default")
-            ),
-        },
-        json={
-            "platform": "slack",
-            "session_id": f"approval-{proposal_id}",
-            "user_id": user_id,
-            "text": f"approve {proposal_id}",
-            "agent_name": stack.agent_name,
-        },
-        timeout=10.0,
-    )
-    response.raise_for_status()
+    with managed_agent_route_server(stack) as base_url:  # type: ignore[arg-type]
+        response = httpx.post(
+            f"{base_url}/im/route",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-Fleetent-Principal": encode_ingress_principal(
+                    Principal(user_id=user_id, tenant_id="default")
+                ),
+            },
+            json={
+                "platform": "slack",
+                "session_id": f"approval-{proposal_id}",
+                "user_id": user_id,
+                "text": f"approve {proposal_id}",
+                "agent_name": stack.agent_name,
+            },
+            timeout=10.0,
+        )
+        response.raise_for_status()
 
 
 def wait_for_memory_proposal_applied(
@@ -282,7 +270,9 @@ def wait_for_memory_proposal_applied(
     memory_id: str,
 ) -> dict[str, object]:
     return wait_for_condition(
-        lambda: _memory_apply_state(stack.agent_state_db, proposal_id=proposal_id, memory_id=memory_id),
+        lambda: _memory_apply_state(
+            stack.agent_state_db, proposal_id=proposal_id, memory_id=memory_id
+        ),
         timeout=10.0,
         interval=0.5,
         description="memory proposal applied state",
@@ -467,9 +457,7 @@ def _run_agent_side_script(stack: ReflectionManagedStack, script: str) -> dict[s
     )
     if result.returncode != 0:
         raise AssertionError(
-            "agent-side helper script failed\n"
-            f"stdout:\n{result.stdout}\n"
-            f"stderr:\n{result.stderr}"
+            f"agent-side helper script failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
     return json.loads(result.stdout)
 
@@ -486,9 +474,7 @@ def _run_agent_side_script_no_output(stack: ReflectionManagedStack, script: str)
     )
     if result.returncode != 0:
         raise AssertionError(
-            "agent-side helper script failed\n"
-            f"stdout:\n{result.stdout}\n"
-            f"stderr:\n{result.stderr}"
+            f"agent-side helper script failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
 
 
@@ -509,38 +495,3 @@ def _restore_env(previous_env: dict[str, str | None]) -> None:
 
 
 _ENV_KEYS = ("DATABASE_URL", "FLEETENT_HOME", "FLEETENT_SECRET_KEY")
-_LISTEN_PORT_RE = re.compile(r"(?:127\\.0\\.0\\.1|\\*):(\\d+) \\(LISTEN\\)")
-
-
-def _list_listening_ports() -> set[int]:
-    result = run_command(
-        ["lsof", "-nP", "-iTCP", "-sTCP:LISTEN"],
-        env=child_env(extra={}),
-        cwd=repo_root(),
-    )
-    if result.returncode != 0:
-        raise AssertionError(
-            "failed to list listening ports\n"
-            f"stdout:\n{result.stdout}\n"
-            f"stderr:\n{result.stderr}"
-        )
-    return {int(match.group(1)) for match in _LISTEN_PORT_RE.finditer(result.stdout)}
-
-
-def _new_agent_gateway_port(
-    *,
-    exclude: set[int],
-    agent_name: str,
-) -> int | None:
-    candidates = sorted(port for port in _list_listening_ports() if port not in exclude and port != 8786)
-    for port in candidates:
-        try:
-            response = httpx.get(f"http://127.0.0.1:{port}/health", timeout=0.5)
-        except httpx.HTTPError:
-            continue
-        if response.status_code != 200:
-            continue
-        payload = response.json()
-        if payload.get("agent") == agent_name:
-            return port
-    return None
