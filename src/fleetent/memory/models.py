@@ -7,10 +7,14 @@ from datetime import datetime
 from typing import Literal
 
 MemoryType = Literal["identity", "preferences", "context"]
+AgentMemoryType = Literal["context", "preference", "procedure"]
+AgentMemoryStatus = Literal["active", "stale", "archived"]
+AgentMemorySource = Literal["manual", "reflection_proposal"]
+# Legacy aliases — kept for any references still in flight; prefer Agent* names
 SharedMemoryScopeType = Literal["team", "tenant"]
-SharedMemoryType = Literal["context", "preference", "procedure"]
-SharedMemoryStatus = Literal["active", "stale", "archived"]
-SharedMemorySource = Literal["manual", "reflection_proposal"]
+SharedMemoryType = AgentMemoryType
+SharedMemoryStatus = AgentMemoryStatus
+SharedMemorySource = AgentMemorySource
 
 
 @dataclass(frozen=True)
@@ -27,8 +31,26 @@ class MemoryItem:
 
 
 @dataclass(frozen=True)
+class AgentMemoryItem:
+    """A confirmed agent-scoped semantic memory item.
+
+    Isolation is per-agent physical DB — no scope columns needed.
+    """
+
+    id: str
+    type: AgentMemoryType
+    content: str
+    status: AgentMemoryStatus
+    source: AgentMemorySource
+    source_ref: str | None
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
 class SharedMemoryItem:
-    """A confirmed shared semantic memory item scoped to a team or tenant."""
+    """Deprecated alias — use AgentMemoryItem instead."""
 
     id: str
     scope_type: SharedMemoryScopeType
