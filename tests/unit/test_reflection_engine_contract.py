@@ -162,6 +162,7 @@ async def test_run_reflection_auto_apply_attempts_each_memory_proposal_only_when
 
     persisted: list[str] = []
     applied: list[str] = []
+
     def persist(proposal: reflection.MemoryProposal) -> None:
         persisted.append(proposal.id)
 

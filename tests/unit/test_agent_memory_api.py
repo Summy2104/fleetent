@@ -10,7 +10,7 @@ def test_create_agent_memory_has_no_scope_parameters() -> None:
     import inspect
 
     module = importlib.import_module("fleetent.memory.agent_memory")
-    func = getattr(module, "create_agent_memory")
+    func = module.create_agent_memory
     sig = inspect.signature(func)
     params = set(sig.parameters)
     assert "scope_type" not in params, "create_agent_memory must not have scope_type parameter"
@@ -21,7 +21,7 @@ def test_search_agent_memory_has_no_scope_parameters() -> None:
     import inspect
 
     module = importlib.import_module("fleetent.memory.agent_memory")
-    func = getattr(module, "search_agent_memory")
+    func = module.search_agent_memory
     sig = inspect.signature(func)
     params = set(sig.parameters)
     assert "scope_type" not in params, "search_agent_memory must not have scope_type"
@@ -32,7 +32,7 @@ def test_list_agent_memory_has_no_scope_parameters() -> None:
     import inspect
 
     module = importlib.import_module("fleetent.memory.agent_memory")
-    func = getattr(module, "list_agent_memory")
+    func = module.list_agent_memory
     sig = inspect.signature(func)
     params = set(sig.parameters)
     assert "scope_type" not in params, "list_agent_memory must not have scope_type"
@@ -43,7 +43,7 @@ def test_iter_indexable_agent_memories_has_no_scope_parameters() -> None:
     import inspect
 
     module = importlib.import_module("fleetent.memory.agent_memory")
-    func = getattr(module, "iter_indexable_agent_memories")
+    func = module.iter_indexable_agent_memories
     sig = inspect.signature(func)
     params = set(sig.parameters)
     assert "scope_type" not in params, "iter_indexable_agent_memories must not have scope_type"
@@ -51,8 +51,9 @@ def test_iter_indexable_agent_memories_has_no_scope_parameters() -> None:
 
 
 def test_agent_memory_item_has_no_scope_fields() -> None:
-    from fleetent.memory.models import AgentMemoryItem
     import dataclasses
+
+    from fleetent.memory.models import AgentMemoryItem
 
     field_names = {f.name for f in dataclasses.fields(AgentMemoryItem)}
     assert "scope_type" not in field_names, "AgentMemoryItem must not have scope_type field"

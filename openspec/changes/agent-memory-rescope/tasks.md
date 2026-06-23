@@ -24,7 +24,7 @@
 
 ## 5. 收尾
 
-- [ ] 5.1 全库 grep 残留 `shared_memory`/`SharedMemory`/`scope_type.*shared` 清零（`vector_store/reindex.py` 等）；无遗漏
-- [ ] 5.2 跑 `PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py` 无新增跨包 internal import 违规
-- [ ] 5.3 文档：若最终采纳 D5 折叠方案，同步更新 `docs/architecture/agent-home-layout.md` 目标态树（非代码产物，人工确认后再 commit）
-- [ ] 5.4 change 收尾：`make test-pr` + `make test-unit-ci`（覆盖率门禁）全绿，对照 main 无新增失败；相关 memory/tenant_router/platform integration 测试无新增失败
+- [x] 5.1 全库 grep 残留 `shared_memory`/`SharedMemory`/`scope_type.*shared` 清零（`vector_store/reindex.py` 等）；无遗漏
+- [x] 5.2 跑 `PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py` 无新增跨包 internal import 违规
+- [x] 5.3 文档：若最终采纳 D5 折叠方案，同步更新 `docs/architecture/agent-home-layout.md` 目标态树（非代码产物，人工确认后再 commit）
+- [x] 5.4 change 收尾：`make test-pr` + `make test-unit-ci`（覆盖率门禁）全绿，对照 main 无新增失败；相关 memory/tenant_router/platform integration 测试无新增失败

@@ -31,7 +31,16 @@ def test_agent_memory_items_has_required_columns() -> None:
     create_stmts = [sql for _, sql in migrations if "create table" in sql.lower()]
     assert create_stmts, "no CREATE TABLE statement found"
     create_sql = create_stmts[0].lower()
-    for col in ("id", "type", "content", "status", "source", "created_by", "created_at", "updated_at"):
+    for col in (
+        "id",
+        "type",
+        "content",
+        "status",
+        "source",
+        "created_by",
+        "created_at",
+        "updated_at",
+    ):
         assert col in create_sql, f"expected column '{col}' in agent_memory_items DDL"
 
 
@@ -39,4 +48,6 @@ def test_no_shared_memory_items_table_in_migrations() -> None:
     module = importlib.import_module("fleetent.memory.agent_memory_migrations")
     migrations: list[tuple[int, str]] = module.MIGRATIONS
     all_sql = " ".join(sql for _, sql in migrations).lower()
-    assert "shared_memory_items" not in all_sql, "old shared_memory_items must not appear in agent migrations"
+    assert "shared_memory_items" not in all_sql, (
+        "old shared_memory_items must not appear in agent migrations"
+    )

@@ -40,9 +40,7 @@ def _default_agent_memory_reviewer(
     return actor_user_id or proposal.user_id
 
 
-_agent_memory_reviewer: Callable[[MemoryProposal, str | None], str] = (
-    _default_agent_memory_reviewer
-)
+_agent_memory_reviewer: Callable[[MemoryProposal, str | None], str] = _default_agent_memory_reviewer
 # Legacy alias — tests and callers that still use set_shared_memory_reviewer
 _shared_memory_reviewer = _agent_memory_reviewer
 

@@ -96,9 +96,7 @@ def test_memory_quality_trend_public_api_is_importable() -> None:
     ],
 )
 def test_build_empty_buckets_validates(start, end, bucket, message) -> None:
-    query = memory.MemoryQualityTrendQuery(
-        user_id=None, start_ts=start, end_ts=end, bucket=bucket
-    )
+    query = memory.MemoryQualityTrendQuery(user_id=None, start_ts=start, end_ts=end, bucket=bucket)
     with pytest.raises(ValueError, match=message):
         memory.get_memory_quality_trend_summary(query)
 

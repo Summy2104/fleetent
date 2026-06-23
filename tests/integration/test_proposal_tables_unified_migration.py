@@ -317,7 +317,9 @@ async def test_reflection_proposal_creates_unified_approval_request_and_router_a
         ),
     )
     monkeypatch.setattr(PermissionGate, "_notify_approvers", notify)
-    monkeypatch.setattr(agent_memory_module, "apply_agent_memory_proposal", apply_agent_memory_proposal)
+    monkeypatch.setattr(
+        agent_memory_module, "apply_agent_memory_proposal", apply_agent_memory_proposal
+    )
 
     proposal = reflection.create_memory_maintenance_proposal(
         user_id="u1",
