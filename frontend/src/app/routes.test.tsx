@@ -249,4 +249,20 @@ describe('admin routes', () => {
     const nav = within(screen.getByRole('navigation'));
     expect(nav.getByRole('link', { name: 'Nodes' })).toHaveAttribute('href', '/nodes');
   });
+
+  it('renders the user-IM identities page as a native route in the SPA', async () => {
+    server.use(
+      http.get('http://fleetent.test/admin/im-identities', () => HttpResponse.json([])),
+      http.get('http://fleetent.test/admin/users', () => HttpResponse.json([]))
+    );
+
+    renderRoutes('/im-identities', 'session-token');
+
+    expect(await screen.findByRole('heading', { name: '用户-IM 关系' })).toBeInTheDocument();
+    const nav = within(screen.getByRole('navigation'));
+    expect(nav.getByRole('link', { name: '用户-IM 关系' })).toHaveAttribute(
+      'href',
+      '/im-identities'
+    );
+  });
 });
