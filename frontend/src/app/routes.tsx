@@ -10,6 +10,7 @@ import { SessionsPage } from '@/features/sessions/page';
 import { ProvidersPage } from '@/features/providers/page';
 import { NodesPage } from '@/features/nodes/page';
 import { UsersPage } from '@/features/users/page';
+import { ImIdentitiesPage } from '@/features/im-identities/page';
 import { ChatPage } from '@/features/chat/page';
 import { StatsPage } from '@/features/stats/page';
 import { TenancyPage } from '@/features/tenancy/page';
@@ -207,6 +208,17 @@ function AppLayout(): JSX.Element {
                   isActive ? 'bg-primary text-primary-foreground' : 'bg-secondary/80 text-foreground',
                 ].join(' ')
               }
+              to="/im-identities"
+            >
+              用户-IM 关系
+            </NavLink>
+            <NavLink
+              className={({ isActive }) =>
+                [
+                  'block rounded-xl px-4 py-3 text-sm font-medium transition-colors',
+                  isActive ? 'bg-primary text-primary-foreground' : 'bg-secondary/80 text-foreground',
+                ].join(' ')
+              }
               to="/stats"
             >
               Statistics
@@ -268,6 +280,10 @@ function AppLayout(): JSX.Element {
             <Route
               element={<UsersPage />}
               path="/users"
+            />
+            <Route
+              element={<ImIdentitiesPage />}
+              path="/im-identities"
             />
             <Route
               element={<StatsPage />}
