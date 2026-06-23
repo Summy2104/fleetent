@@ -455,16 +455,16 @@ def test_reconcile_wipes_env_file_when_agent_removed_from_desired(tmp_path) -> N
     home.mkdir(parents=True)
     (home / "agent.yaml").write_text(yaml.safe_dump({"name": "support"}))
     env_path = home / ".env"
-    env_path.write_text("ANTHROPIC_API_KEY=sk-live-secret\nFLEETENT_TUI_TOKEN=ma-" + "a" * 64 + "\n")
+    env_path.write_text(
+        "ANTHROPIC_API_KEY=sk-live-secret\nFLEETENT_TUI_TOKEN=ma-" + "a" * 64 + "\n"
+    )
     respx.post("https://platform.internal/nodes/node-a/status").mock(
         return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
     )
     backend = FakeBackend({"support": 12345})
 
     # Reconcile with empty desired set → agent is not desired → should stop and wipe .env
-    NodeReconciler(_config(tmp_path), backend).reconcile(
-        DesiredState(node_id="node-a", agents=[])
-    )
+    NodeReconciler(_config(tmp_path), backend).reconcile(DesiredState(node_id="node-a", agents=[]))
 
     assert backend.stop_calls == ["support"]
     assert not env_path.exists(), ".env must be erased after agent is stopped"
@@ -474,6 +474,7 @@ def test_reconcile_wipes_env_file_when_agent_removed_from_desired(tmp_path) -> N
 def test_reconcile_env_wipe_failure_is_bulkheaded(tmp_path, monkeypatch) -> None:
     """D4: .env erasure failure must not prevent other agents from being processed."""
     import pathlib
+
     from fleetent.node import reconcile as reconcile_module
     from fleetent.node.reconcile import NodeReconciler
 

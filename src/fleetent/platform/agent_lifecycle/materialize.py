@@ -27,6 +27,7 @@ from fleetent.agent_config import (
     AgentModels,
     ModelRouteEntry,
     ModelTarget,
+    collect_env_var_names,
     default_models,
 )
 from fleetent.config import McpServerSettings
@@ -381,22 +382,9 @@ def home_dir(name: str) -> Path:
     return paths.base_dir() / "agents" / name
 
 
-def _env_var_names(
-    agent: AgentFile,
-) -> list[str]:
-    """Collect the env-var names the agent's home references."""
-    names: list[str] = []
-    for key, value in flatten(agent.model_dump(mode="json")):
-        if key.endswith("_env") and isinstance(value, str) and value:
-            names.append(value)
-    # stable order, de-duplicated
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for n in names:
-        if n and n not in seen:
-            seen.add(n)
-            ordered.append(n)
-    return ordered
+def _env_var_names(agent: AgentFile) -> list[str]:
+    """Collect the env-var names the agent's home references (delegates to shared collector)."""
+    return collect_env_var_names(agent)
 
 
 def _knowledge_env_var_names(knowledge_config: KnowledgeConfigSnapshot | None) -> set[str]:

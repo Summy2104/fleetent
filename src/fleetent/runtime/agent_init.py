@@ -15,7 +15,13 @@ from pathlib import Path
 
 import yaml
 
-from fleetent.agent_config import AgentFile, AgentModels, ModelRouteEntry, ModelTarget, collect_env_var_names
+from fleetent.agent_config import (
+    AgentFile,
+    AgentModels,
+    ModelRouteEntry,
+    ModelTarget,
+    collect_env_var_names,
+)
 from fleetent.runtime.agent_app import resolve_home
 
 

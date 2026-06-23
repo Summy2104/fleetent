@@ -4,6 +4,7 @@ When the platform is unreachable and the cache has no secrets, an agent that was
 previously materialized (.env contains real values) must be spawnable from disk —
 without being deferred by the 'no secrets from cache' gate.
 """
+
 from __future__ import annotations
 
 import httpx

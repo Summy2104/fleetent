@@ -386,7 +386,9 @@ class ReflectionSettings(BaseModel):
 
     enabled: bool = False
     interval_seconds: float = 86400.0
-    auto_apply: "ReflectionAutoApplySettings" = Field(default_factory=lambda: ReflectionAutoApplySettings())
+    auto_apply: "ReflectionAutoApplySettings" = Field(
+        default_factory=lambda: ReflectionAutoApplySettings()
+    )
 
 
 class ReflectionAutoApplySettings(BaseModel):
@@ -813,8 +815,7 @@ def collect_env_var_names(agent: AgentFile) -> list[str]:
     seen: set[str] = set()
     ordered: list[str] = []
     for key, value in flatten(agent.model_dump(mode="json")):
-        if key.endswith("_env") and isinstance(value, str) and value:
-            if value not in seen:
-                seen.add(value)
-                ordered.append(value)
+        if key.endswith("_env") and isinstance(value, str) and value and value not in seen:
+            seen.add(value)
+            ordered.append(value)
     return sorted(ordered)

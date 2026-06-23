@@ -325,7 +325,9 @@ def test_export_excludes_agent_env_files_from_archive(tmp_path):
     agent_home = tmp_path / "data" / "agents" / "support"
     agent_home.mkdir(parents=True)
     env_file = agent_home / ".env"
-    env_file.write_text("ANTHROPIC_API_KEY=sk-live-secret\nFLEETENT_TUI_TOKEN=ma-" + "a" * 64 + "\n")
+    env_file.write_text(
+        "ANTHROPIC_API_KEY=sk-live-secret\nFLEETENT_TUI_TOKEN=ma-" + "a" * 64 + "\n"
+    )
 
     data_dir = tmp_path / "data"
 

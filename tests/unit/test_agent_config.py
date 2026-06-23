@@ -762,3 +762,23 @@ def test_collect_env_var_names_returns_all_referenced_names() -> None:
     assert "ACME_MCP_TOKEN" in names
     # must be deduplicated and stable-ordered
     assert names == sorted(set(names))
+
+
+# --- task 6.1: platform and node alignment ---
+
+
+def test_platform_materialize_and_node_use_same_env_collector() -> None:
+    """Both platform materialize._env_var_names and node referenced_env_names
+    must produce identical output — they both delegate to collect_env_var_names."""
+    from fleetent.platform.agent_lifecycle.materialize import _env_var_names as platform_env_names
+    from fleetent.runtime.agent_init import referenced_env_names as node_env_names
+
+    agent = _make_agent_with_all_env_fields()
+
+    platform_result = platform_env_names(agent)
+    node_result = node_env_names(agent)
+
+    assert platform_result == node_result, (
+        "platform._env_var_names and node.referenced_env_names diverged — "
+        "both must delegate to collect_env_var_names"
+    )

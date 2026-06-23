@@ -188,7 +188,11 @@ def test_ensure_env_scaffold_writes_real_value_for_known_secret(tmp_path) -> Non
     assert env_path.exists()
     # file must be 0600
     assert oct(env_path.stat().st_mode & 0o777) == oct(0o600)
-    lines = dict(line.split("=", 1) for line in env_path.read_text(encoding="utf-8").strip().splitlines() if "=" in line)
+    lines = dict(
+        line.split("=", 1)
+        for line in env_path.read_text(encoding="utf-8").strip().splitlines()
+        if "=" in line
+    )
     assert lines["MODEL_API_KEY"] == "sk-live-secret"
     assert lines["SLACK_TOKEN"] == ""  # not in secrets → empty placeholder
     assert "FLEETENT_TUI_TOKEN" in lines
