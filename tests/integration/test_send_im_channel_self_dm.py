@@ -1,9 +1,9 @@
-"""Integration: send_im_message current-conversation no-op (outbound-tool-no-self-conversation-send).
+"""Integration: send_im_message no-ops the current conversation (no-self-conversation-send).
 
-A self-DM (target == sender, target_type == "user") issued from a CHANNEL conversation targets
-the current-conversation participant, so the tool no-ops (the harness already delivers the final
-reply) — nothing is sent, superseding the prior channel-pinning behavior. A third-party send
-from the same channel is untouched (still delivered to the user target).
+A self-DM (target == sender, target_type == "user") issued from a CHANNEL conversation
+targets the current-conversation participant, so the tool no-ops (the harness already
+delivers the final reply) — nothing is sent, superseding the prior channel-pinning behavior.
+A third-party send from the same channel is untouched (still delivered to the user target).
 """
 
 from __future__ import annotations

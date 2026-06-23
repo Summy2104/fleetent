@@ -724,7 +724,11 @@ async def schedule(
         "once 的触发时刻：ISO 时间或相对时长如 '+30m'，按 timezone 的本地时间解释",
     ] = "",
     interval_seconds: Annotated[int, "interval 的间隔秒数"] = 0,
-    message: Annotated[str, "generate/action 任务的指令（到点交给 agent 执行的 prompt）"] = "",
+    message: Annotated[
+        str,
+        "generate/action 任务的指令（到点交给 agent 的 prompt）。投递目标用 notify_target 配置，"
+        "勿在此写「发送给X/私信X」；generate 回复由调度器投递（勿自调发送工具），action 才自己发。",
+    ] = "",
     timezone: Annotated[
         str,
         "IANA 时区名，如 'Asia/Shanghai'。cron_expr/run_at 按此时区的本地时间解释——"
@@ -754,7 +758,10 @@ async def schedule(
       the parameter name, not a kind;
     - `interval`: every N seconds, set `interval_seconds`.
     Deliver target: notify_platform/notify_target (target_type user|channel); else defaults
-    to the chat the task was created in.
+    to the chat the task was created in. Delivery is CONFIGURED via notify_target, never written
+    into `message` — a `generate` task's reply is delivered by the scheduler (do NOT make the
+    agent self-send), while an `action` task delivers via the agent's own tools. A `generate`
+    task with no notify_target whose message says "send to X" is rejected.
 
     Pick task_type by asking: **does the message content need information only known at send
     time?**

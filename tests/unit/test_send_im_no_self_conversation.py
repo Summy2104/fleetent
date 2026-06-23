@@ -11,8 +11,6 @@ from __future__ import annotations
 import types
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from fleetent.outbound import ConversationAddress, DeliveryReceipt
 from fleetent.tools.registry import ToolContext
 

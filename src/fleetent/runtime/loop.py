@@ -1852,6 +1852,7 @@ async def run(
                 delivery_ledger=delivery_ledger,
                 skill_authoring_enabled=skill_authoring_enabled,
                 emit_delivery_trailer=emit_delivery_trailer,
+                suppress_outbound_tools=suppress_outbound_tools,
             )
     finally:
         _active_runs -= 1
@@ -1892,6 +1893,7 @@ async def _run_inner(
     delivery_ledger: list[Any] | None = None,
     skill_authoring_enabled: bool = False,
     emit_delivery_trailer: bool = True,
+    suppress_outbound_tools: bool = False,
 ) -> str:
     # Image-bearing messages route to the vision model (D6); raises here if
     # images are present but no vision route is configured, before any LLM call.
