@@ -28,15 +28,28 @@ export type AgentListItem = {
   placement?: AgentPlacement | null;
 };
 
+// Opaque per-agent model policy authored by the console. The known shape is
+// ``{ routes: { <route>: [{ provider_id }] }, __credential_slots__: {...} }``; kept loose so
+// non-route keys (e.g. credential slots) survive an edit round-trip untouched.
+export type AgentModelOverrides = Record<string, unknown>;
+
 export type CreateAgentInput = {
   name: string;
   system_prompt: string;
   allowed_tools: string[];
+  model_overrides?: AgentModelOverrides;
+};
+
+export type UpdateAgentInput = {
+  system_prompt: string;
+  allowed_tools: string[];
+  model_overrides?: AgentModelOverrides;
 };
 
 export type AgentDetail = {
   agent: string;
   allowed_tools: string[];
+  model_overrides?: AgentModelOverrides;
   status: string;
   system_prompt: string;
   supports_dm?: boolean;
@@ -179,8 +192,7 @@ export function useUpdateAgentMutation(name: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (input: Pick<CreateAgentInput, 'allowed_tools' | 'system_prompt'>) =>
-      api.patch(`/admin/agents/${name}`, input),
+    mutationFn: (input: UpdateAgentInput) => api.patch(`/admin/agents/${name}`, input),
     onSuccess: async () => {
       await invalidateAgentCoreQueries(queryClient, name);
     },

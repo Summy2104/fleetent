@@ -6,6 +6,7 @@ import {
   type AgentImCapabilitiesInput,
   type AgentImGroupInput,
   type AgentListItem,
+  type AgentModelOverrides,
   type AgentSecretRecord,
   type AgentSkillBinding,
   useActivateAgentVersionMutation,
@@ -41,6 +42,7 @@ import {
 } from '@/features/agents/api';
 import { useConnectorsQuery, useMcpServersQuery } from '@/features/connectors/api';
 import { useKbsQuery } from '@/features/kb/api';
+import { useProvidersQuery } from '@/features/providers/api';
 import { useSkillsQuery } from '@/features/skills/api';
 import { useUsersQuery } from '@/features/users/api';
 
@@ -69,6 +71,41 @@ function parseAllowedTools(value: string): string[] {
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+// The agent's default model route maps to a single provider id. The platform expands this into
+// the runtime model policy (materialize); chat resolves the "default" route, so it is the one
+// binding required to make an agent reach a real LLM.
+function defaultRouteProviderId(overrides: AgentModelOverrides | undefined): string {
+  const routes = (overrides?.routes ?? {}) as Record<string, Array<Record<string, unknown>>>;
+  const entry = routes.default?.[0];
+  if (!entry) {
+    return '';
+  }
+  // A provider id may be authored under any of these keys; take the first that is a string.
+  for (const value of [entry.provider_id, entry.provider, entry.target]) {
+    if (typeof value === 'string' && value) {
+      return value;
+    }
+  }
+  return '';
+}
+
+// Set (or clear) the default-route provider while preserving every other key the platform stores
+// alongside it (other routes, ``__credential_slots__``), so an edit never drops sibling state.
+function withDefaultRouteProvider(
+  overrides: AgentModelOverrides | undefined,
+  providerId: string
+): AgentModelOverrides {
+  const next: AgentModelOverrides = { ...(overrides ?? {}) };
+  const routes = { ...((next.routes as Record<string, unknown>) ?? {}) };
+  if (providerId) {
+    routes.default = [{ provider_id: providerId }];
+  } else {
+    delete routes.default;
+  }
+  next.routes = routes;
+  return next;
 }
 
 function formatStatus(agent: AgentListItem): string[] {
@@ -806,6 +843,8 @@ export function AgentsPage(): JSX.Element {
   const [name, setName] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
   const [allowedTools, setAllowedTools] = useState('');
+  const [modelProviderId, setModelProviderId] = useState('');
+  const [initialModelProviderId, setInitialModelProviderId] = useState('');
   const [groupsByAgent, setGroupsByAgent] = useState<Record<string, AgentImGroup[]>>({});
 
   useEffect(() => {
@@ -815,6 +854,7 @@ export function AgentsPage(): JSX.Element {
   }, [agents.data, selectedName]);
 
   const detail = useAgentDetailQuery(selectedName);
+  const providers = useProvidersQuery();
   const createAgent = useCreateAgentMutation();
   const updateAgent = useUpdateAgentMutation(selectedName ?? '');
   const versions = useAgentVersionsQuery(versionsOpenFor, versionsOpenFor === selectedName);
@@ -829,6 +869,9 @@ export function AgentsPage(): JSX.Element {
       setName(detail.data.agent);
       setSystemPrompt(detail.data.system_prompt);
       setAllowedTools(detail.data.allowed_tools.join(','));
+      const provider = defaultRouteProviderId(detail.data.model_overrides);
+      setModelProviderId(provider);
+      setInitialModelProviderId(provider);
     }
   }, [detail.data, mode]);
 
@@ -837,6 +880,8 @@ export function AgentsPage(): JSX.Element {
     setName('');
     setSystemPrompt('');
     setAllowedTools('');
+    setModelProviderId('');
+    setInitialModelProviderId('');
   };
 
   const onSubmit = async (): Promise<void> => {
@@ -845,15 +890,26 @@ export function AgentsPage(): JSX.Element {
         name,
         system_prompt: systemPrompt,
         allowed_tools: parseAllowedTools(allowedTools),
+        ...(modelProviderId
+          ? { model_overrides: withDefaultRouteProvider(undefined, modelProviderId) }
+          : {}),
       });
       resetForm();
       return;
     }
 
     if (selectedName) {
+      // Omit model_overrides when unchanged so the PATCH leaves the stored policy untouched;
+      // when changed, merge onto the current overrides to preserve credential slots/other routes.
+      const modelChanged = modelProviderId !== initialModelProviderId;
       await updateAgent.mutateAsync({
         system_prompt: systemPrompt,
         allowed_tools: parseAllowedTools(allowedTools),
+        ...(modelChanged
+          ? {
+              model_overrides: withDefaultRouteProvider(detail.data?.model_overrides, modelProviderId),
+            }
+          : {}),
       });
     }
   };
@@ -936,6 +992,25 @@ export function AgentsPage(): JSX.Element {
                 value={allowedTools}
               />
             </label>
+            <label className="grid gap-2 text-sm font-medium">
+              Model provider
+              <select
+                className="rounded-md border bg-white px-3 py-2"
+                onChange={(event) => setModelProviderId(event.target.value)}
+                value={modelProviderId}
+              >
+                <option value="">Built-in default</option>
+                {(providers.data ?? []).map((provider) => (
+                  <option key={provider.id} value={provider.id}>
+                    {provider.model ? `${provider.id} (${provider.model})` : provider.id}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="-mt-2 text-xs text-muted-foreground">
+              Picks the provider for the agent&apos;s default chat route. Set its API key in Secrets
+              below, then the node syncs it into the agent.
+            </p>
             <button
               className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
               onClick={() => void onSubmit()}

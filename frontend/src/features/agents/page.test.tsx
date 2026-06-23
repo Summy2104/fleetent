@@ -25,6 +25,7 @@ type AgentRecord = {
 type AgentDetailRecord = {
   agent: string;
   allowed_tools: string[];
+  model_overrides?: Record<string, unknown>;
   status: string;
   supports_dm?: boolean;
   supports_groups?: boolean;
@@ -189,6 +190,36 @@ function installAgentBindingHandlers({
           name: 'Bob',
           role: 'viewer',
           status: 'active',
+        },
+      ])
+    ),
+    http.get(`${API_BASE_URL}/admin/providers`, () =>
+      HttpResponse.json([
+        {
+          api_key: null,
+          api_key_env: 'FLEETENT_OPENAI_KEY',
+          api_key_set: true,
+          base_url: 'https://api.openai.example/v1',
+          description: null,
+          id: 'openai-gpt4',
+          input_price_per_1k: null,
+          model: 'gpt-4o',
+          output_price_per_1k: null,
+          protocol: 'openai_chat',
+          provider: 'openai',
+        },
+        {
+          api_key: null,
+          api_key_env: null,
+          api_key_set: false,
+          base_url: 'http://localhost:11434/v1',
+          description: null,
+          id: 'ollama-local',
+          input_price_per_1k: null,
+          model: 'llama3',
+          output_price_per_1k: null,
+          protocol: 'openai_chat',
+          provider: 'local',
         },
       ])
     )
@@ -846,5 +877,100 @@ describe('agents page dual-state (runtime + placement gating)', () => {
 
     const bound = screen.getByRole('button', { name: 'Enable delta' });
     expect(bound).not.toBeDisabled();
+  });
+});
+
+describe('agents page model binding', () => {
+  const emptyBindings = {
+    kbIds: [],
+    mcpServers: [],
+    oauth: [],
+    secrets: [],
+    skills: [],
+    users: [],
+  };
+
+  it('binds a model provider on create and round-trips the selection on edit', async () => {
+    const user = userEvent.setup({ delay: null });
+    const agents: AgentRecord[] = [
+      {
+        agent_name: 'alpha',
+        allowed_tools: [],
+        provenance: 'adhoc',
+        status: 'enabled',
+        system_prompt: 'Alpha prompt',
+      },
+    ];
+    const detailByAgent: Record<string, AgentDetailRecord> = {
+      alpha: {
+        agent: 'alpha',
+        allowed_tools: [],
+        model_overrides: { routes: { default: [{ provider_id: 'ollama-local' }] } },
+        status: 'enabled',
+        supports_dm: false,
+        supports_groups: false,
+        system_prompt: 'Alpha prompt',
+      },
+    };
+
+    installAgentBindingHandlers({
+      agents,
+      bindingsByAgent: { alpha: { ...emptyBindings } },
+      detailByAgent,
+    });
+
+    type CapturedModelBody = {
+      model_overrides?: { routes?: Record<string, Array<{ provider_id?: string }>> };
+      name?: string;
+    };
+    const captured: { create?: CapturedModelBody; patch?: CapturedModelBody } = {};
+    server.use(
+      http.post(`${API_BASE_URL}/admin/agents`, async ({ request }) => {
+        const body = (await request.json()) as CapturedModelBody;
+        captured.create = body;
+        const name = body.name ?? 'beta';
+        agents.push({
+          agent_name: name,
+          allowed_tools: [],
+          provenance: 'adhoc',
+          status: 'enabled',
+          system_prompt: 'Beta prompt',
+        });
+        detailByAgent[name] = {
+          agent: name,
+          allowed_tools: [],
+          status: 'enabled',
+          system_prompt: 'Beta prompt',
+        };
+        return HttpResponse.json({ agent: name, provenance: 'adhoc', status: 'enabled' }, { status: 201 });
+      }),
+      http.patch(`${API_BASE_URL}/admin/agents/:name`, async ({ request }) => {
+        captured.patch = (await request.json()) as CapturedModelBody;
+        return HttpResponse.json({ ok: true });
+      })
+    );
+
+    renderAgentsRoute();
+    expect(await screen.findByText('alpha')).toBeInTheDocument();
+
+    // Create: pick a provider for the default route.
+    await user.type(screen.getByLabelText('Agent name'), 'beta');
+    await user.type(screen.getByLabelText('System prompt'), 'Beta prompt');
+    await user.selectOptions(screen.getByLabelText('Model provider'), 'openai-gpt4');
+    await user.click(screen.getByRole('button', { name: 'Create agent' }));
+
+    await waitFor(() => expect(captured.create).toBeTruthy());
+    expect(captured.create?.model_overrides?.routes?.default?.[0]?.provider_id).toBe('openai-gpt4');
+
+    // Edit alpha: the existing provider is pre-selected, then changed.
+    await user.click(screen.getByRole('button', { name: 'Edit alpha' }));
+    await waitFor(() =>
+      expect(screen.getByLabelText<HTMLSelectElement>('Model provider').value).toBe('ollama-local')
+    );
+    await user.selectOptions(screen.getByLabelText('Model provider'), 'openai-gpt4');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(captured.patch).toBeTruthy());
+    expect(captured.patch?.model_overrides?.routes?.default?.[0]?.provider_id).toBe('openai-gpt4');
   });
 });
