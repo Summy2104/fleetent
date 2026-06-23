@@ -145,31 +145,36 @@ def aggregate_trace_events_across_agents(
     return results
 
 
-def read_shared_memory_for_tenant(
+def read_agent_memory_for_agents(
     router: TenantRouter,
-    tenant_id: str,
+    agents: list[tuple[str, str]],
 ) -> list[dict[str, Any]]:
-    """Return shared memory items for a tenant by reading its shared_memory.db read-only.
+    """Return agent memory items across per-agent agent_memory.db files (read-only).
 
-    Opens the tenant's shared_memory.db in read-only mode; no migration runs.
-    Returns an empty list if the DB file does not exist yet.
+    Each record is enriched with ``agent_id`` so the caller can identify the source.
+    Opens each agent's agent_memory.db read-only; agents whose DB does not exist are skipped.
 
     Args:
         router: Initialized TenantRouter pointing at the data directory.
-        tenant_id: The tenant whose shared memory to read.
+        agents: List of (tenant_id, agent_id) tuples to read from.
 
     Returns:
-        List of shared memory item rows.
+        Merged list of agent memory item dicts, each carrying an ``agent_id`` field.
     """
     import sqlite3
 
-    scope = router.tenant_scope(tenant_id)
-    try:
-        ro_db = scope.open_shared_memory_db_ro()
-        result = ro_db.execute(
-            "SELECT * FROM shared_memory_items ORDER BY created_at DESC LIMIT 100"
-        )
-        return result.fetchall()
-    except sqlite3.OperationalError:
-        # DB doesn't exist or table not yet created — return empty
-        return []
+    results: list[dict[str, Any]] = []
+    for tenant_id, agent_id in agents:
+        scope = router.agent_scope(tenant_id, agent_id)
+        try:
+            ro_db = scope.open_agent_memory_db_ro()
+            rows = ro_db.execute(
+                "SELECT * FROM agent_memory_items ORDER BY created_at DESC LIMIT 100"
+            ).fetchall()
+            for row in rows:
+                enriched = dict(row)
+                enriched["agent_id"] = agent_id
+                results.append(enriched)
+        except sqlite3.OperationalError:
+            pass
+    return results

@@ -33,24 +33,34 @@ DecisionInput = Literal[
 DecisionState = Literal["approve", "reject", "expire", "apply"]
 
 
-def _default_shared_memory_reviewer(
+def _default_agent_memory_reviewer(
     proposal: MemoryProposal,
     actor_user_id: str | None,
 ) -> str:
     return actor_user_id or proposal.user_id
 
 
-_shared_memory_reviewer: Callable[[MemoryProposal, str | None], str] = (
-    _default_shared_memory_reviewer
+_agent_memory_reviewer: Callable[[MemoryProposal, str | None], str] = (
+    _default_agent_memory_reviewer
 )
+# Legacy alias — tests and callers that still use set_shared_memory_reviewer
+_shared_memory_reviewer = _agent_memory_reviewer
+
+
+def set_agent_memory_reviewer(
+    reviewer: Callable[[MemoryProposal, str | None], str],
+) -> None:
+    """Inject a resolver for agent-memory reviewer identity."""
+    global _agent_memory_reviewer, _shared_memory_reviewer
+    _agent_memory_reviewer = reviewer
+    _shared_memory_reviewer = reviewer
 
 
 def set_shared_memory_reviewer(
     reviewer: Callable[[MemoryProposal, str | None], str],
 ) -> None:
-    """Inject a resolver for shared-memory reviewer identity."""
-    global _shared_memory_reviewer
-    _shared_memory_reviewer = reviewer
+    """Legacy alias for set_agent_memory_reviewer."""
+    set_agent_memory_reviewer(reviewer)
 
 
 def _decision(decision: DecisionInput) -> DecisionState:
@@ -394,16 +404,16 @@ def expire_memory_maintenance_proposal(
     return updated
 
 
-def mark_shared_memory_proposal_applied(proposal_id: str) -> MemoryProposal:
+def mark_agent_memory_proposal_applied(proposal_id: str) -> MemoryProposal:
     proposal = _load_memory_proposal(proposal_id)
     _require_status(proposal, {"approved"})
-    if proposal.action != "suggest_shared_memory_or_kb":
-        raise ValueError("proposal is not a shared memory suggestion")
-    if proposal.metadata_patch.get("target") != "shared_memory":
-        raise ValueError("proposal target is not shared_memory")
+    if proposal.action != "suggest_agent_memory_or_kb":
+        raise ValueError("proposal is not an agent memory suggestion")
+    if proposal.metadata_patch.get("target") != "agent_memory":
+        raise ValueError("proposal target is not agent_memory")
     updated = _with_status(proposal, "applied")
     store._update_maintenance_proposal(updated)
-    _record_maintenance_event("shared_memory_proposal_applied", updated)
+    _record_maintenance_event("agent_memory_proposal_applied", updated)
     return updated
 
 
@@ -481,23 +491,23 @@ async def _apply_maintenance_action(
             await memory.delete_user_memory(proposal.user_id, memory_id)
         return
 
-    if proposal.action == "suggest_shared_memory_or_kb":
+    if proposal.action in ("suggest_agent_memory_or_kb", "suggest_shared_memory_or_kb"):
         target = proposal.metadata_patch.get("target")
-        if target == "shared_memory":
-            actor = _shared_memory_reviewer(
+        if target in ("agent_memory", "shared_memory"):
+            actor = _agent_memory_reviewer(
                 proposal,
                 actor_user_id or proposal.user_id,
             )
-            from fleetent.memory import shared as shared_memory
+            from fleetent.memory import agent_memory as agent_memory_module
 
-            await shared_memory.apply_shared_memory_proposal(
+            await agent_memory_module.apply_agent_memory_proposal(
                 proposal.id,
                 actor_id=actor,
             )
             return
         if target == "knowledge_base":
             raise RuntimeError("knowledge base proposals are no longer handled on the agent side")
-        raise ValueError("proposal target is not shared_memory")
+        raise ValueError("proposal target is not agent_memory")
 
     raise ValueError(f"unsupported maintenance action: {proposal.action}")
 

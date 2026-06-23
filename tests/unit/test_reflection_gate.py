@@ -121,17 +121,17 @@ async def test_resolve_expire_skill_proposal_sets_expired_state(
     assert updates and updates[-1].status == "expired"
 
 
-async def test_resolve_approve_shared_memory_proposal_calls_shared_memory_boundary(
+async def test_resolve_approve_agent_memory_proposal_calls_agent_memory_boundary(
     monkeypatch,
 ) -> None:
     proposal = _memory_proposal(
-        id="mp-shared",
-        action="suggest_shared_memory_or_kb",
-        metadata_patch={"target": "shared_memory"},
+        id="mp-agent-mem",
+        action="suggest_agent_memory_or_kb",
+        metadata_patch={"target": "agent_memory"},
         target_memory_ids=[],
     )
     updates: list[MemoryProposal] = []
-    apply_shared_memory_proposal = AsyncMock()
+    apply_agent_memory_proposal = AsyncMock()
 
     monkeypatch.setattr(store, "_get_maintenance_proposal", lambda _id: proposal)
     monkeypatch.setattr(store, "_get_skill_proposal", lambda _id: None)
@@ -141,12 +141,12 @@ async def test_resolve_approve_shared_memory_proposal_calls_shared_memory_bounda
         "_record_maintenance_event",
         lambda _event_type, _proposal: None,
     )
-    from fleetent.memory import shared as shared_memory
+    from fleetent.memory import agent_memory as agent_memory_module
 
     monkeypatch.setattr(
-        shared_memory,
-        "apply_shared_memory_proposal",
-        apply_shared_memory_proposal,
+        agent_memory_module,
+        "apply_agent_memory_proposal",
+        apply_agent_memory_proposal,
     )
 
     result = await reflection_gate.resolve(
@@ -156,22 +156,22 @@ async def test_resolve_approve_shared_memory_proposal_calls_shared_memory_bounda
     )
 
     assert result.status == "applied"
-    apply_shared_memory_proposal.assert_awaited_once_with(
+    apply_agent_memory_proposal.assert_awaited_once_with(
         proposal.id,
         actor_id=proposal.user_id,
     )
     assert [proposal.status for proposal in updates] == ["approved", "applied"]
 
 
-async def test_shared_memory_reviewer_resolver_is_injected(monkeypatch) -> None:
+async def test_agent_memory_reviewer_resolver_is_injected(monkeypatch) -> None:
     proposal = _memory_proposal(
-        id="mp-shared-review",
-        action="suggest_shared_memory_or_kb",
-        metadata_patch={"target": "shared_memory"},
+        id="mp-agent-mem-review",
+        action="suggest_agent_memory_or_kb",
+        metadata_patch={"target": "agent_memory"},
         target_memory_ids=[],
     )
     updates: list[MemoryProposal] = []
-    apply_shared_memory_proposal = AsyncMock()
+    apply_agent_memory_proposal = AsyncMock()
 
     monkeypatch.setattr(store, "_get_maintenance_proposal", lambda _id: proposal)
     monkeypatch.setattr(store, "_get_skill_proposal", lambda _id: None)
@@ -181,17 +181,17 @@ async def test_shared_memory_reviewer_resolver_is_injected(monkeypatch) -> None:
         "_record_maintenance_event",
         lambda _event_type, _proposal: None,
     )
-    from fleetent.memory import shared as shared_memory
+    from fleetent.memory import agent_memory as agent_memory_module
 
     monkeypatch.setattr(
-        shared_memory,
-        "apply_shared_memory_proposal",
-        apply_shared_memory_proposal,
+        agent_memory_module,
+        "apply_agent_memory_proposal",
+        apply_agent_memory_proposal,
     )
-    original_reviewer = reflection_gate._shared_memory_reviewer
+    original_reviewer = reflection_gate._agent_memory_reviewer
 
     try:
-        reflection_gate.set_shared_memory_reviewer(
+        reflection_gate.set_agent_memory_reviewer(
             lambda _proposal, actor_id: "resolved-reviewer",
         )
 
@@ -201,9 +201,9 @@ async def test_shared_memory_reviewer_resolver_is_injected(monkeypatch) -> None:
             actor_user_id=proposal.user_id,
         )
     finally:
-        reflection_gate.set_shared_memory_reviewer(original_reviewer)
+        reflection_gate.set_agent_memory_reviewer(original_reviewer)
 
-    apply_shared_memory_proposal.assert_awaited_once_with(
+    apply_agent_memory_proposal.assert_awaited_once_with(
         proposal.id,
         actor_id="resolved-reviewer",
     )

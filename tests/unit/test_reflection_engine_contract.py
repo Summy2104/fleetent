@@ -132,10 +132,10 @@ async def test_run_reflection_auto_apply_attempts_each_memory_proposal_only_when
     shared_suggestion = reflection.MemoryProposal(
         id="memory-proposal-2",
         user_id="user-1",
-        action="suggest_shared_memory_or_kb",
+        action="suggest_agent_memory_or_kb",
         target_memory_ids=[],
         proposed_content="Team preference",
-        metadata_patch={"target": "shared_memory"},
+        metadata_patch={"target": "agent_memory"},
         risk="low",
         reason="Promote shared knowledge",
         evidence_ids=["trace-1"],

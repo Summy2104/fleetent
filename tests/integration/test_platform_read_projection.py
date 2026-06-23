@@ -284,25 +284,25 @@ def test_aggregate_trace_events_across_agents_resolves_platform_id_via_agent_nam
     ]
 
 
-def test_read_shared_memory_for_tenant(tmp_path: Path) -> None:
-    """Platform reads shared memory for a tenant directly (per-tenant, read-only)."""
-    from fleetent.memory import shared as shared_memory
-    from fleetent.memory.shared_memory_migrations import MIGRATIONS as SHARED_MEMORY_MIGRATIONS
+def test_read_agent_memory_for_agents(tmp_path: Path) -> None:
+    """Platform reads agent memory for per-agent agent_memory.db files read-only."""
+    from fleetent.memory import agent_memory as agent_memory_module
+    from fleetent.memory.agent_memory_migrations import MIGRATIONS as AGENT_MEMORY_MIGRATIONS
     from fleetent.platform import read_projection
     from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
 
     data_dir = tmp_path / "data"
     data_dir.mkdir()
 
-    # Set up shared memory for tenant-1 (write side)
+    # Boot write side for agent "bot" under tenant-1
     router = TenantRouter(SQLiteTenantBackend(data_dir=data_dir))
-    kb_scope = router.tenant_scope("tenant-1")
-    sm_db = kb_scope.open_shared_memory_db(SHARED_MEMORY_MIGRATIONS)
-    shared_memory.set_shared_memory_db(sm_db, kb_scope.shared_memory_vector_backend)  # type: ignore[arg-type]
+    agent_scope = router.agent_scope("tenant-1", "bot")
+    am_db = agent_scope.open_agent_memory_db(AGENT_MEMORY_MIGRATIONS)
+    agent_memory_module.set_agent_memory_db(am_db, agent_scope.agent_memory_vector_backend)  # type: ignore[arg-type]
 
-    # Platform reads shared memory read-only
-    rows = read_projection.read_shared_memory_for_tenant(router, "tenant-1")
-    assert isinstance(rows, list)  # returns a list (may be empty if no items seeded)
+    # Platform reads agent memory read-only across agents
+    rows = read_projection.read_agent_memory_for_agents(router, [("tenant-1", "bot")])
+    assert isinstance(rows, list)
 
 
 def test_registry_traversal_no_write_to_agent_dbs(tmp_path: Path) -> None:
