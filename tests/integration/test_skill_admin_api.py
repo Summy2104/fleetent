@@ -209,6 +209,95 @@ def test_create_and_import_write_source_to_skills_master(client, tmp_path, monke
     assert store.get_source("alpha")["source"] == "managed"
 
 
+def test_create_persists_content_to_pool_and_is_readable(client, tmp_path, monkeypatch):
+    """Inline create must materialize <skills_dir>/<name>/SKILL.md so the content is
+    readable back and the registry rescan indexes it (skill-create-persist-content)."""
+    import fleetent.skills.registry as registry
+
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    # Both the api seam and the registry resolve the pool via FLEETENT_SKILLS_DIR.
+    # reload() is pinned to this dir explicitly: the registry's module-level
+    # _last_skills_dir is process-shared and may be left pointing elsewhere by a
+    # prior test, which a no-arg reload() would otherwise rescan.
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(skills_dir))
+    monkeypatch.setattr(api, "engine_reload", lambda: registry.reload(str(skills_dir)))
+    monkeypatch.setattr(api, "engine_list_skills", registry.list_skills)
+    registry.reload(str(skills_dir))  # start from a clean index over the (empty) pool
+
+    content = "---\nname: persisted\ndescription: a persisted skill\n---\n# persisted\nhello"
+    token, _ = _session_for("admin")
+    created = client.post(
+        "/admin/skills", headers=_hdr(token), json={"name": "persisted", "content": content}
+    )
+    assert created.status_code == 200
+    assert created.json()["published"] is True
+
+    assert (skills_dir / "persisted" / "SKILL.md").read_text(encoding="utf-8") == content
+    got = client.get("/admin/skills/persisted/content", headers=_hdr(token))
+    assert got.status_code == 200
+    assert got.json()["content"] == content
+    assert any(s["name"] == "persisted" for s in registry.list_skills())
+
+
+def test_create_persisted_skill_delivered_in_agent_bundle(client, tmp_path, monkeypatch):
+    """A skill created inline must reach a bound agent's node skill-file bundle."""
+    import base64
+
+    import fleetent.skills.registry as registry
+    from fleetent.platform.agent_lifecycle import materialize
+
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(skills_dir))
+    monkeypatch.setattr(api, "engine_reload", lambda: registry.reload(str(skills_dir)))
+    registry.reload(str(skills_dir))
+
+    content = "---\nname: bundled\ndescription: bundled skill\n---\nbody"
+    token, _ = _session_for("admin")
+    agent = agent_store.create_agent("bundle-bot", "Prompt.", ["shell"])
+    assert (
+        client.post(
+            "/admin/skills", headers=_hdr(token), json={"name": "bundled", "content": content}
+        ).status_code
+        == 200
+    )
+    store.set_binding(agent.id, "bundled", enabled=True, updated_by="admin")
+
+    bundles = materialize.skill_bundles_for_agent(agent)
+    bundle = next(b for b in bundles if b["name"] == "bundled")
+    skill_md = next(f for f in bundle["files"] if f["path"] == "SKILL.md")
+    assert base64.b64decode(skill_md["content_b64"]).decode("utf-8") == content
+
+
+def test_create_rejected_not_persisted(client, tmp_path, monkeypatch):
+    """A rejected (quarantined) skill must not be written to the skills pool."""
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    monkeypatch.setattr(api, "engine_skills_dir", lambda: str(skills_dir))
+    monkeypatch.setattr(
+        api, "engine_audit", lambda content: {"verdict": "rejected", "rules": ["os.system("]}
+    )
+    token, _ = _session_for("admin")
+    r = client.post("/admin/skills", headers=_hdr(token), json={"name": "evil", "content": _VALID})
+    assert r.status_code == 200
+    assert r.json()["published"] is False
+    assert not (skills_dir / "evil").exists()
+
+
+def test_create_unsafe_name_rejected_without_persisting(client, tmp_path, monkeypatch):
+    """An unsafe skill name (path traversal) is rejected 422 and nothing is written."""
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    monkeypatch.setattr(api, "engine_skills_dir", lambda: str(skills_dir))
+    token, _ = _session_for("admin")
+    r = client.post(
+        "/admin/skills", headers=_hdr(token), json={"name": "../evil", "content": _VALID}
+    )
+    assert r.status_code == 422
+    assert list(skills_dir.iterdir()) == []
+
+
 def test_provenance_promote_discard_endpoints_removed(client):
     token, _ = _session_for("admin")
     promoted = client.post("/admin/skills/s/provenance/promote", headers=_hdr(token, confirm=True))
