@@ -259,7 +259,7 @@ def reload(skills_dir: str | None = None) -> dict[str, Any]:
     or ``{"status": "failed", "skills_dir": ..., "reason": ...}`` on failure.
     """
     global _index, _load_errors, _last_skills_dir, _manifest
-    resolved = _resolve_skills_dir(skills_dir)
+    resolved = _resolve_skills_dir(skills_dir or _last_skills_dir)
     new_errors: list[dict[str, str]] = []
     try:
         new_index = _build_index(resolved, new_errors)

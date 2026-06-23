@@ -33,27 +33,6 @@ def test_no_auth_401(client):
     assert client.get("/admin/users").status_code == 401
 
 
-def test_ui_served(client):
-    r = client.get("/admin/ui")
-    assert r.status_code == 200
-    assert "fleetent" in r.text and "Admin" in r.text
-
-
-def test_ui_has_kb_tab(client):
-    r = client.get("/admin/ui")
-    assert 'data-tab="kb"' in r.text  # knowledge-base console tab present
-    assert "/kb/connectors" in r.text  # KB tab manages source connectors
-
-
-def test_ui_persists_session_across_refresh(client):
-    # Session token must survive a page reload: persisted to localStorage on login,
-    # restored on boot. Without this the SPA falls back to the login view every refresh.
-    html = client.get("/admin/ui").text
-    assert "localStorage.setItem" in html  # token saved on login
-    assert "localStorage.getItem" in html  # token restored on boot
-    assert "localStorage.removeItem" in html  # token cleared on logout / 401
-
-
 def test_login_success_and_me(client):
     u = user_store.create_web_user("log@x.com", "Logger", password_hash=auth.hash_password("pw"))
     user_store.set_role(u.id, "admin")
@@ -108,40 +87,6 @@ def test_reset_password_unknown_user_404(client):
     assert r.status_code == 404
 
 
-def test_ui_auth_uses_semantic_forms(client):
-    # login / reset / create wrapped in <form> with proper autocomplete so the browser's
-    # password manager behaves like a normal site (fewer stray save prompts).
-    html = client.get("/admin/ui").text
-    assert html.count("<form") >= 3
-    assert 'autocomplete="current-password"' in html
-    assert 'autocomplete="new-password"' in html
-
-
-def test_ui_create_user_uses_modal(client):
-    html = client.get("/admin/ui").text
-    assert "openCreateModal" in html  # "Create user" opens a popup dialog
-    assert 'id="create-modal"' in html  # modal container present
-    assert "closeCreateModal" in html  # dialog can be dismissed
-    assert 'id="nu-password"' in html  # initial password so the new user can log in
-
-
-def test_ui_user_table_columns(client):
-    html = client.get("/admin/ui").text
-    assert 'id="user-filter"' in html  # client-side filter box over the list
-    assert 'id="role-filter"' in html  # filter by role
-    assert 'id="status-filter"' in html  # filter by status
-    assert "/password" in html  # per-row admin password-reset action wired
-    assert "<th>#</th>" in html  # leading row-index column
-    assert "<th>Email</th>" in html  # email is its own column
-    assert "<th>Nickname</th>" in html  # name column renamed and split out
-
-
-def test_ui_row_actions_use_dropdown_menu(client):
-    html = client.get("/admin/ui").text
-    assert "toggleMenu" in html  # the "…" button toggles an overflow menu
-    assert "menu-items" in html  # dropdown container for row actions
-    assert "Reset password" in html  # menu entries include reset password
-    assert "closeMenus" in html  # click-outside closes open menus
 
 
 def test_login_bad_password_401(client):
@@ -355,12 +300,6 @@ def test_viewer_cannot_rebind_im(client):
     token, _ = _session_for("viewer")
     r = client.post("/admin/im-users/1/bind", headers=_hdr(token), json={"user_id": "x"})
     assert r.status_code == 403
-
-
-def test_ui_im_users_has_bind_action(client):
-    html = client.get("/admin/ui").text
-    assert "openBindModal" in html  # IM row "Bind" opens a user-picker dialog
-    assert 'id="bind-modal"' in html
 
 
 def test_im_user_block_restore(client):

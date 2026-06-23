@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+
 import pytest
 
 from fleetent import agent_store
@@ -10,6 +12,7 @@ from tests.integration._migration_template import apply_migrations
 def migrated_db(tmp_path, monkeypatch):
     db_path = tmp_path / "management.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("FLEETENT_SECRET_KEY", base64.urlsafe_b64encode(b"a" * 32).decode())
     apply_migrations(db_path)
     return db_path
 

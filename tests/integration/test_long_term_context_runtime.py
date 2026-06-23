@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 
 import fleetent.runtime.loop as agent_loop
 from fleetent.agent_config import AgentModels, ModelRouteEntry, ModelTarget
@@ -71,6 +71,7 @@ async def test_agent_runtime_calls_long_term_context_builder_with_existing_signa
         "what should I use?",
         "agent-1",
         321,
+        audit_context=ANY,
     )
 
 
