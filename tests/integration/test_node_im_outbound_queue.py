@@ -151,8 +151,6 @@ async def test_node_im_edge_dedups_after_restart_before_mark_sent(
 
     host1 = NodeIMEdgeHost(_config(tmp_path))
     host1.reconcile(_desired_state())
-    original_mark_sent = host1._mark_queue_sent
-
     async def _crash_after_dedup(agent_name: str, row: dict[str, object]) -> None:
         raise RuntimeError("crash before mark_sent")
 

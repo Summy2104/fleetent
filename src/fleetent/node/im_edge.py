@@ -318,10 +318,8 @@ class NodeIMEdgeHost:
         dedup_key = str(row.get("dedup_key", "") or "")
         if dedup_key:
             self._record_dedup_key(dedup_key)
-        try:
+        with contextlib.suppress(Exception):
             await self._mark_queue_sent(agent_name, row)
-        except Exception:
-            pass
 
     async def _mark_queue_sent(self, agent_name: str, row: dict[str, Any]) -> None:
         db_path = self._agent_db_paths.get(agent_name)
