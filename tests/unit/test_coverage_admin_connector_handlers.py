@@ -127,6 +127,11 @@ def test_agent_admin_binding_skill_kb_oauth_and_mcp_handlers(monkeypatch):
         agent_admin_api.agent_store, "list_mcp_servers_for_agent", lambda _agent_id: ["db"]
     )
     monkeypatch.setattr(
+        agent_admin_api.agent_im_group_store,
+        "list_groups_for_agent",
+        lambda _agent_id: [{"platform": "slack", "group_id": "C1"}],
+    )
+    monkeypatch.setattr(
         agent_admin_api.mcp_server_store,
         "list_mcp_servers",
         lambda _agent_id: [{"server_id": "db"}],
@@ -192,6 +197,7 @@ def test_agent_admin_binding_skill_kb_oauth_and_mcp_handlers(monkeypatch):
     assert agent_admin_api.get_bindings("ops", authorization="Session token") == {
         "users": [],
         "mcp_servers": ["db"],
+        "groups": [{"platform": "slack", "group_id": "C1"}],
     }
     assert agent_admin_api.list_agent_skills("ops", authorization="Session token") == [
         {"skill_name": "skill-a", "enabled": True},

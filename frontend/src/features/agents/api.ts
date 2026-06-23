@@ -74,6 +74,7 @@ export type AgentSkillBinding = {
 export type AgentBindings = {
   mcp_servers: string[];
   users: string[];
+  groups: AgentImGroupInput[];
 };
 
 export type AgentOauthGrant = {
@@ -453,6 +454,7 @@ export function useSetAgentImCapabilitiesMutation(name: string) {
 
 export function useAddAgentImGroupMutation(name: string) {
   const api = useAdminApi();
+  const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: (input: AgentImGroupInput) =>
@@ -460,15 +462,22 @@ export function useAddAgentImGroupMutation(name: string) {
         `/admin/agents/${name}/bindings/groups`,
         input
       ),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: agentBindingsKey(name) });
+    },
   });
 }
 
 export function useRemoveAgentImGroupMutation(name: string) {
   const api = useAdminApi();
+  const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: ({ group_id, platform }: AgentImGroupInput) =>
       api.delete<void>(`/admin/agents/${name}/bindings/groups/${platform}/${group_id}`),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: agentBindingsKey(name) });
+    },
   });
 }
 

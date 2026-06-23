@@ -265,6 +265,7 @@ def test_get_bindings_shape(fresh_client):
     agent = agent_store.create_agent("ops", "Ops v1.", ["shell"])
     agent_store.assign_user("u-1", agent.id)
     agent_store.bind_mcp_server(agent.id, "github")
+    agent_im_group_store.bind(agent.id, "slack", "C0123")
     token, _ = _session_for("viewer")
 
     resp = fresh_client.get("/admin/agents/ops/bindings", headers=_hdr(token))
@@ -272,6 +273,7 @@ def test_get_bindings_shape(fresh_client):
     body = resp.json()
     assert body["users"] == ["u-1"]
     assert body["mcp_servers"] == ["github"]
+    assert body["groups"] == [{"platform": "slack", "group_id": "C0123"}]
     assert "channels" not in body
 
 
