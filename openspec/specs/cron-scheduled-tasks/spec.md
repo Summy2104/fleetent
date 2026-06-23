@@ -46,7 +46,7 @@ Tasks created via the `schedule` tool SHALL be persisted to the agent-side SQLit
 - **THEN** scheduler start logs a warning for that task, disables it (`enabled=0`), registers all the valid tasks, and the scheduler starts normally — boot completes
 
 ### Requirement: Cron trigger fires agent run asynchronously
-When a scheduled task's trigger (cron/once/interval) matches the current time, the scheduler SHALL fire **according to the task's `task_type`**: `notify` sends `notify_text` verbatim via the fire-time connector snapshot **without invoking `agent_loop.run`**; `generate` and `action` call `agent_loop.run()` with the task's `message`, `user_id`, resolved agent context, the fire-time `outbound_connectors` snapshot (so outbound tools like `send_im_message` reach the live IM connectors), and (for `generate`) the scheduled-run delivery statement. The trigger SHALL NOT block the scheduler event loop, and the run result SHALL be recorded in the observability trace. `last_status` SHALL reflect the **task intent** outcome per type — notify: delivery outcome; generate: run + delivery outcome; action: run outcome — never merely "the delivery API call succeeded".
+When a scheduled task's trigger (cron/once/interval) matches the current time, the scheduler SHALL fire **according to the task's `task_type`**: `notify` sends `notify_text` verbatim via the fire-time connector snapshot **without invoking `agent_loop.run`**; `generate` and `action` call `agent_loop.run()` with the task's `message`, `user_id`, resolved agent context, and the fire-time `outbound_connectors` snapshot. For `generate`, the run additionally receives the scheduled-run delivery statement AND is invoked with outbound-tool suppression (`suppress_outbound_tools=True`) so the run produces only the notification body and the scheduler performs the sole delivery (`send_im_message`/`send_file` are absent from a generate run's tool schema). For `action`, the run retains the outbound tools (so the agent delivers via its own tools and the scheduler does not broadcast). The trigger SHALL NOT block the scheduler event loop, and the run result SHALL be recorded in the observability trace. `last_status` SHALL reflect the **task intent** outcome per type — notify: delivery outcome; generate: run + delivery outcome; action: run outcome — never merely "the delivery API call succeeded".
 
 #### Scenario: Notify fire bypasses the agent
 - **WHEN** a `notify` task's trigger fires
@@ -56,9 +56,13 @@ When a scheduled task's trigger (cron/once/interval) matches the current time, t
 - **WHEN** a `generate` or `action` task's trigger fires
 - **THEN** `agent_loop.run()` is invoked with the task's message and user_id without blocking the scheduler loop
 
-#### Scenario: Fired run can deliver via IM tools
-- **WHEN** a task fires whose message asks the agent to send a message/notification to a channel or user
-- **THEN** the agent run receives the fire-time `outbound_connectors` snapshot, and an outbound IM tool invoked inside the run reaches the live connector (the run is not told "no connector available")
+#### Scenario: Action fire can deliver via IM tools
+- **WHEN** an `action` task fires whose message asks the agent to send a message/notification to a channel or user
+- **THEN** the agent run receives the fire-time `outbound_connectors` snapshot AND retains the outbound tools, so an outbound IM tool invoked inside the run reaches the live connector (the run is not told "no connector available")
+
+#### Scenario: Generate fire produces content but does not self-deliver
+- **WHEN** a `generate` task fires
+- **THEN** `agent_loop.run()` is invoked with `suppress_outbound_tools=True` so `send_im_message`/`send_file` are absent from the run's schema, and the final reply is delivered solely by the scheduler's broadcast
 
 #### Scenario: No connectors available degrades cleanly
 - **WHEN** a task fires while no IM connector is registered for the agent
@@ -314,3 +318,51 @@ The system SHALL resolve a scheduled task's effective timezone with the preceden
 - **WHEN** a daily task is stored as a local cron expression plus an IANA timezone that observes DST
 - **THEN** it fires at the same local wall-clock time before and after a daylight-saving transition (no fixed-UTC-offset drift), because the schedule was not normalized to UTC at creation
 
+
+### Requirement: Generate tasks reject embedded send instructions without an explicit target
+
+`schedule_store.create` SHALL reject a `generate` task whose delivery target is **not**
+explicitly configured (`deliver is None`) when its `message` contains a send/delivery
+imperative directed at a recipient (e.g. 私信 / 发送给 / 发给 / 推送给 / 发到 / send to / DM).
+Such a task is the recurring footgun: with no explicit `deliver`, the fired reply falls back to
+broadcasting to the creation `origin` (often the wrong place), and the embedded "send to X"
+instruction steers the model to self-deliver — together producing mis-routed or duplicate
+delivery. The rejection SHALL be a `ValueError` (surfaced by the `schedule` tool as a clean
+`error:` text, never an unhandled exception) whose message instructs the author to configure
+the delivery target via `notify_target`/`notify_target_type` instead of writing it into
+`message`, or to use `task_type="action"` so the agent delivers via its own tools.
+
+The guard SHALL be conservative — it triggers ONLY when all of `task_type == "generate"`,
+`deliver is None`, and a send-imperative match hold. A `generate` task with an explicit
+`deliver` (delivery is configured) SHALL pass even if its `message` mentions sending; an
+`action` task SHALL pass (self-delivery is its purpose); a `generate` task whose `message`
+contains no send imperative SHALL pass.
+
+The `schedule` tool's description/parameter guidance (delivered to the model via the tool
+schema) SHALL state the principle: the delivery target is configured via `notify_target`
+(NOT written into `message`); a `generate` task's reply is delivered by the scheduler (the
+model does not self-send), while an `action` task delivers via the agent's own tools.
+
+#### Scenario: Generate + no deliver + send instruction in message is rejected
+
+- **WHEN** `schedule_store.create(task_type="generate", deliver=None, message="把结果私信发送给 U1")`
+  is called
+- **THEN** it raises `ValueError` whose message tells the author to set `notify_target` or use
+  `task_type="action"`, and no task row is created
+
+#### Scenario: Generate with explicit deliver passes
+
+- **WHEN** a `generate` task is created with an explicit `deliver` target, even if its `message`
+  mentions sending to someone
+- **THEN** creation succeeds (the delivery target is configured)
+
+#### Scenario: Generate with a clean message passes
+
+- **WHEN** a `generate` task with no explicit `deliver` is created whose `message` contains no
+  send imperative (e.g. "查询金价并输出正文")
+- **THEN** creation succeeds
+
+#### Scenario: Action task with a send instruction passes
+
+- **WHEN** an `action` task is created whose `message` instructs the agent to send to a user
+- **THEN** creation succeeds (self-delivery is the purpose of an `action` task)

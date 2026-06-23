@@ -39,9 +39,6 @@ The tool's documented purpose SHALL describe it as **proactive outreach to other
 other channels** — replying to the current conversation is done with `send_file` (for files)
 or a plain text reply — so the model is not steered to route "send it to me" through this tool.
 
-Delivery to a third party (target ≠ current conversation) is unchanged: it is `medium`-gated,
-delivers via the connector, and an approved call authorizes cross-scope `/exchange` artifacts.
-
 #### Scenario: DM to a third-party user is gated
 
 - **WHEN** the agent calls `send_im_message(target="U_OTHER", text="hi")` in a Slack
@@ -57,9 +54,70 @@ delivers via the connector, and an approved call authorizes cross-scope `/exchan
   (nothing is delivered), and it returns a no-op text telling the model to reply with plain
   text instead — so the current-conversation reply is delivered once (by the harness), not twice
 
-#### Scenario: Self-DM from a channel is not delivered
+#### Scenario: post to a different channel is gated
+
+- **WHEN** the agent calls `send_im_message(target="C_NOTICE", text="...", target_type="channel")`
+  where `C_NOTICE` is not the current channel, and the call is approved
+- **THEN** the message is posted to the channel via `outbound.send_to`
+
+#### Scenario: self-DM from a channel is not delivered
+
+- **WHEN** the inbound conversation is a Slack **channel** (`chat_type == "channel"`) whose
+  sender is `U_SELF`, and the agent calls
+  `send_im_message(target="U_SELF", text="here", target_type="user", files=["report.png"])`
+- **THEN** the tool no-ops (no channel-pinned delivery): neither the text nor the file is sent,
+  and it returns the plain-text-reply guidance, because the target is the current-conversation
+  participant
+
+#### Scenario: self-DM from a DM conversation is a no-op
+
+- **WHEN** the inbound conversation is itself a DM with `U_SELF` (`chat_type != "channel"`) and
+  the agent calls `send_im_message(target="U_SELF", text="here", target_type="user")`
+- **THEN** the tool no-ops (the target is the current conversation) and returns the
+  plain-text-reply guidance
+
+#### Scenario: third-party DM from a channel is not affected
 
 - **WHEN** the inbound conversation is a channel and the agent calls
-  `send_im_message(target=<current sender>, target_type="user")`
-- **THEN** the tool no-ops (no channel-pinned delivery) and returns the plain-text-reply
-  guidance, because the target is the current conversation participant
+  `send_im_message(target="U_OTHER", text="hi", target_type="user")` where `U_OTHER` is not
+  the sender
+- **THEN** the call is `medium` (gated), and after approval the message is delivered to
+  `U_OTHER`'s DM
+
+#### Scenario: assistant-pane DM path injects connectors
+
+- **WHEN** the agent calls `send_im_message` from a Slack Assistant-pane conversation
+  (the `_route_assistant_message` inbound path)
+- **THEN** the Slack connector is available via `ToolContext.outbound_connectors`,
+  identical to the channel/plain-DM inbound path
+
+#### Scenario: platform defaults to the current conversation
+
+- **WHEN** `platform` is omitted in a Slack conversation
+- **THEN** the Slack connector is used
+
+#### Scenario: file attachment to a third party delivered after approval
+
+- **WHEN** the agent calls `send_im_message(target="U_OTHER", text="report", files=["/exchange/srv/report.xlsx"])`
+  where `U_OTHER` is not the current conversation participant, and the call is approved
+- **THEN** the artifact resolves through the namespace and is delivered to `U_OTHER` as a
+  file attachment alongside the text
+
+#### Scenario: cross-session artifact authorized by approval
+
+- **WHEN** the agent calls `send_im_message` to a third party with a `files` entry owned by
+  another session and the human approves the call
+- **THEN** the file is delivered — the approval itself is the cross-session authorization
+
+#### Scenario: invalid file entry degrades per-file
+
+- **WHEN** `files` contains one valid workspace path and one path outside the namespace
+- **THEN** the valid file is delivered, the invalid entry is reported in the result text,
+  and no exception is raised
+
+#### Scenario: fail-closed when the current address is unresolvable
+
+- **WHEN** the agent calls `send_im_message` but the current conversation address cannot be
+  resolved from the session context
+- **THEN** `approval_policy.risk_for` returns `medium` and the call passes the permission gate
+  before any delivery
