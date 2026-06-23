@@ -91,15 +91,42 @@ describe('im-identities page', () => {
     renderPage();
 
     await screen.findByRole('heading', { name: '用户-IM 关系' });
+    const submit = screen.getByRole('button', { name: '新增绑定' });
+    expect(submit).toBeDisabled();
     await user.selectOptions(screen.getByLabelText('平台'), 'telegram');
     await user.type(screen.getByLabelText('外部 ID'), 'T1');
     await user.selectOptions(screen.getByLabelText('内部用户'), 'user-bob');
-    await user.click(screen.getByRole('button', { name: '新增绑定' }));
+    expect(submit).toBeEnabled();
+    await user.click(submit);
 
     const row = await screen.findByRole('article', { name: 'mapping 2' });
     expect(within(row).getByText('telegram')).toBeInTheDocument();
     expect(within(row).getByText('T1')).toBeInTheDocument();
     expect(within(row).getByText(/Bob/)).toBeInTheDocument();
+  });
+
+  it('keeps the form and shows an error when create fails', async () => {
+    const user = userEvent.setup({ delay: null });
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/im-identities`, () => HttpResponse.json([])),
+      http.get(`${API_BASE_URL}/admin/users`, () => HttpResponse.json(USERS)),
+      http.post(`${API_BASE_URL}/admin/im-identities`, () =>
+        HttpResponse.json({ detail: 'im identity already exists' }, { status: 409 })
+      )
+    );
+
+    renderPage();
+
+    await screen.findByRole('heading', { name: '用户-IM 关系' });
+    await user.selectOptions(screen.getByLabelText('平台'), 'slack');
+    await user.type(screen.getByLabelText('外部 ID'), 'U1');
+    await user.selectOptions(screen.getByLabelText('内部用户'), 'user-alice');
+    await user.click(screen.getByRole('button', { name: '新增绑定' }));
+
+    expect(await screen.findByText(/新增绑定失败/)).toBeInTheDocument();
+    expect(screen.getByLabelText('外部 ID')).toHaveValue('U1');
+    expect(screen.queryByRole('article', { name: /mapping/ })).not.toBeInTheDocument();
   });
 
   it('deletes a binding and removes it from the list', async () => {

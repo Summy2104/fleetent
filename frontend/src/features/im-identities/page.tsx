@@ -37,13 +37,21 @@ function MappingCard({ mapping }: { mapping: ImMapping }): JSX.Element {
             if (!window.confirm(`Delete mapping ${mapping.platform}:${mapping.platform_user_id}?`)) {
               return;
             }
-            void deleteMapping.mutateAsync(mapping.id);
+            deleteMapping.mutate(mapping.id);
           }}
           type="button"
         >
           {`删除 ${mapping.platform_user_id}`}
         </button>
       </div>
+      {deleteMapping.isError ? (
+        <p
+          className="mt-2 text-sm text-red-600"
+          role="alert"
+        >
+          删除失败，请重试。
+        </p>
+      ) : null}
     </article>
   );
 }
@@ -57,14 +65,20 @@ export function ImIdentitiesPage(): JSX.Element {
   const [platformUserId, setPlatformUserId] = useState('');
   const [userId, setUserId] = useState('');
 
-  const onCreate = async (): Promise<void> => {
-    await createMapping.mutateAsync({
-      platform,
-      platform_user_id: platformUserId.trim(),
-      user_id: userId,
-    });
-    setPlatformUserId('');
-    setUserId('');
+  const onCreate = (): void => {
+    createMapping.mutate(
+      {
+        platform,
+        platform_user_id: platformUserId.trim(),
+        user_id: userId,
+      },
+      {
+        onSuccess: () => {
+          setPlatformUserId('');
+          setUserId('');
+        },
+      }
+    );
   };
 
   const canSubmit = Boolean(platformUserId.trim()) && Boolean(userId);
@@ -130,12 +144,20 @@ export function ImIdentitiesPage(): JSX.Element {
             </label>
             <button
               className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={!canSubmit}
-              onClick={() => void onCreate()}
+              disabled={!canSubmit || createMapping.isPending}
+              onClick={onCreate}
               type="button"
             >
               新增绑定
             </button>
+            {createMapping.isError ? (
+              <p
+                className="text-sm text-red-600"
+                role="alert"
+              >
+                新增绑定失败：该外部身份可能已被绑定，或目标用户不存在。
+              </p>
+            ) : null}
           </div>
         </section>
       </div>
