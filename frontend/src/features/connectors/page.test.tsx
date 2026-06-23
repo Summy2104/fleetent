@@ -141,7 +141,7 @@ describe('connectors page', () => {
     expect(await screen.findByRole('heading', { name: 'Connectors' })).toBeInTheDocument();
     expect(await screen.findByText('GitHub')).toBeInTheDocument();
     expect(screen.getByText('authorized')).toBeInTheDocument();
-    expect(screen.getByText('Agents: 7, 9')).toBeInTheDocument();
+    expect(await screen.findByText('Agents: 7, 9')).toBeInTheDocument();
 
     await user.type(screen.getByLabelText('Connector ID'), 'slack');
     await user.type(screen.getByLabelText('Display name'), 'Slack');
