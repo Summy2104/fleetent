@@ -42,10 +42,10 @@
 
 ## 6. 前端双态 + Enable gating（Vitest，TDD）
 
-- [ ] 6.1 写测试（先红）：`frontend/src/features/agents/`——
+- [x] 6.1 写测试（先红）：`frontend/src/features/agents/`——
   `api.test.tsx`：`AgentListItem`/`AgentDetail` 携带 `runtime`/`placement`（类型 + 解析）。
   `page.test.tsx`：MSW 返回带 `runtime`(running, node) + `placement`(node) 的 agent，断言卡片展示运行态（running/health/所在 node）；返回 `status=disabled` 且 `placement=null` 的 agent，断言「Enable」按钮 `disabled` 且有原因提示；`placement` 非空时 Enable 可点。先跑见红。
-- [ ] 6.2 实现（绿）：`api.ts` 给 `AgentListItem`/`AgentDetail` 增加 `runtime?`/`placement?` 类型；`page.tsx` `formatStatus`/卡片展示运行态，Enable 按钮在 `status==='disabled' && !placement` 时 `disabled` + 提示。同命令见绿。
+- [x] 6.2 实现（绿）：`api.ts` 给 `AgentListItem`/`AgentDetail` 增加 `runtime?`/`placement?` 类型；`page.tsx` `formatStatus`/卡片展示运行态，Enable 按钮在 `status==='disabled' && !placement` 时 `disabled` + 提示。同命令见绿。
 
 ## 7. 收尾门禁
 

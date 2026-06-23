@@ -2,6 +2,20 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useAdminApi } from '@/lib/api-client';
 
+export type AgentRuntime = {
+  phase?: string | null;
+  health?: string | null;
+  pid?: number | null;
+  node_id?: string | null;
+  reported_at?: string | null;
+};
+
+export type AgentPlacement = {
+  node_id: string;
+  pinned_at?: string | null;
+  pinned_by?: string | null;
+};
+
 export type AgentListItem = {
   agent_name: string;
   is_default?: boolean;
@@ -9,6 +23,9 @@ export type AgentListItem = {
   provenance: string;
   system_prompt?: string;
   allowed_tools?: string[];
+  // Node-reported runtime state (null when no node has reported) and node binding.
+  runtime?: AgentRuntime | null;
+  placement?: AgentPlacement | null;
 };
 
 export type CreateAgentInput = {
@@ -24,6 +41,8 @@ export type AgentDetail = {
   system_prompt: string;
   supports_dm?: boolean;
   supports_groups?: boolean;
+  runtime?: AgentRuntime | null;
+  placement?: AgentPlacement | null;
 };
 
 export type AgentVersion = {

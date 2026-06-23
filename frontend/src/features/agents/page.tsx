@@ -79,6 +79,22 @@ function formatStatus(agent: AgentListItem): string[] {
   return tokens;
 }
 
+const ENABLE_UNBOUND_HINT = 'Pin this agent to a node before enabling';
+
+function formatRuntime(agent: AgentListItem): string {
+  if (!agent.runtime) {
+    return 'not running';
+  }
+  const parts = [agent.runtime.phase ?? 'unknown'];
+  if (agent.runtime.node_id) {
+    parts.push(`on ${agent.runtime.node_id}`);
+  }
+  if (agent.runtime.health) {
+    parts.push(`(${agent.runtime.health})`);
+  }
+  return parts.join(' ');
+}
+
 function AgentCard({
   agent,
   detailPrompt,
@@ -98,6 +114,9 @@ function AgentCard({
   const restore = useAgentLifecycleMutation(agent.agent_name, 'restore');
   const clone = useCloneAgentMutation(agent.agent_name);
   const remove = useDeleteAgentMutation(agent.agent_name);
+
+  // Enabling an agent no node hosts is a no-op promise — gate the control on placement.
+  const enableBlocked = agent.status === 'disabled' && !agent.placement;
 
   const runDisableEnable = async (): Promise<unknown> => {
     return agent.status === 'disabled' ? enable.mutateAsync() : disable.mutateAsync();
@@ -119,6 +138,7 @@ function AgentCard({
             {agent.agent_name}
           </button>
           <p className="mt-2 text-sm text-muted-foreground">{formatStatus(agent).join(' · ')}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{`Runtime: ${formatRuntime(agent)}`}</p>
           {isSelected && (detailPrompt ?? agent.system_prompt) ? (
             <p className="mt-2 text-sm text-foreground">{detailPrompt ?? agent.system_prompt}</p>
           ) : null}
@@ -128,8 +148,10 @@ function AgentCard({
             {`Edit ${agent.agent_name}`}
           </button>
           <button
-            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
+            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
             onClick={() => void runDisableEnable()}
+            disabled={enableBlocked}
+            title={enableBlocked ? ENABLE_UNBOUND_HINT : undefined}
             type="button"
           >
             {agent.status === 'disabled' ? `Enable ${agent.agent_name}` : `Disable ${agent.agent_name}`}
