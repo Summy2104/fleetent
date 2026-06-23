@@ -87,12 +87,12 @@ def _default_capability_evidence() -> list[CapabilityEvidence]:
         CapabilityEvidence(
             "Memory",
             "passed",
-            "uv run pytest tests/integration/test_shared_memory.py -q",
+            "uv run pytest tests/integration/test_agent_memory_db_init.py -q",
             [
-                Path("tests/integration/test_shared_memory.py"),
+                Path("tests/integration/test_agent_memory_db_init.py"),
                 Path("tests/integration/test_memory_retention_compaction.py"),
             ],
-            ["item lifecycle, retention/compaction and tenant/team isolation"],
+            ["item lifecycle, retention/compaction and per-agent isolation"],
         ),
         CapabilityEvidence(
             "Long-term Context",

@@ -11,9 +11,10 @@ from enum import Enum
 
 
 class VectorFamily(Enum):
-    """Explicit enumeration of the three known vector namespace families."""
+    """Explicit enumeration of the four known vector namespace families."""
 
     MEMORY = "mem"
+    AGENT_MEMORY = "agentmem"
     SHARED = "shared"
     KB = "kb"
 
@@ -46,6 +47,11 @@ def memory_namespace(user_id: str) -> str:
     """Return mem:{user_id}.  Agent isolation is physical (per-agent DB), not namespace-based."""
     _require_non_empty(user_id, "user_id")
     return f"mem:{user_id}"
+
+
+def agent_memory_namespace() -> str:
+    """Return the fixed agent memory namespace — isolation is per-agent physical DB."""
+    return "agentmem:"
 
 
 def shared_namespace(scope_type: str, scope_id: str) -> str:

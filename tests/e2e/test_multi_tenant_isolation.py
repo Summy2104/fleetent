@@ -2,7 +2,7 @@
 
 Verifies that two tenants running on the same node have:
 1. Separate per-tenant data root directories.
-2. Zero cross-tenant data bleed via the shared-memory read path.
+2. Zero cross-tenant data bleed via the agent-memory read path.
 3. Physically disjoint SQLite files (file-level isolation).
 
 Lane: slow/nightly — runs under ``make test-e2e``, NOT in ``make test-pr``.
@@ -18,10 +18,10 @@ from tests.e2e._tenant_helpers import TwoTenantStack
 pytest_plugins = ["tests.e2e._tenant_helpers"]
 
 _INSERT_SQL = (
-    "INSERT INTO shared_memory_items "
-    "(id, scope_type, scope_id, type, content, status, source, created_by, created_at, updated_at)"
+    "INSERT INTO agent_memory_items "
+    "(id, type, content, status, source, source_ref, created_by, created_at, updated_at)"
     " VALUES"
-    " (:id, :scope_type, :scope_id, :type, :content, :status, :source,"
+    " (:id, :type, :content, :status, :source, :source_ref,"
     " :created_by, :created_at, :updated_at)"
 )
 _NOW = "2026-01-01T00:00:00+00:00"
@@ -49,15 +49,15 @@ def test_two_tenant_agents_ready_and_data_roots_independent(
 
 
 # ---------------------------------------------------------------------------
-# E2E-1  cross-tenant query — zero data bleed
+# E2E-1  cross-agent query — zero data bleed
 # ---------------------------------------------------------------------------
 
 
-def test_cross_tenant_query_no_data_bleed(
+def test_cross_agent_query_no_data_bleed(
     managed_stack_two_tenants: TwoTenantStack,
 ) -> None:
-    """Write to tenant-a's shared_memory; verify tenant-b's scope has zero results."""
-    from fleetent.memory.shared_memory_migrations import MIGRATIONS
+    """Write to agent-a's memory; verify agent-b's DB has zero results."""
+    from fleetent.memory.agent_memory_migrations import MIGRATIONS
     from fleetent.tenant_router import SQLiteTenantBackend
 
     stack = managed_stack_two_tenants
@@ -70,63 +70,61 @@ def test_cross_tenant_query_no_data_bleed(
     backend_a = SQLiteTenantBackend(data_dir=data_dir_a)
     backend_b = SQLiteTenantBackend(data_dir=data_dir_b)
 
-    # Write sentinel to tenant-a; verify tenant-b sees nothing.
-    scope_a = backend_a.resolve(stack.tenant_a_id)
-    sm_a = scope_a.open_shared_memory_db(MIGRATIONS)
-    with sm_a.transaction() as conn:
+    # Write sentinel to agent-a; verify agent-b sees nothing.
+    scope_a = backend_a.resolve_agent(stack.tenant_a_id, stack.agent_a_name)
+    am_a = scope_a.open_agent_memory_db(MIGRATIONS)
+    with am_a.transaction() as conn:
         conn.execute(
             _INSERT_SQL,
             {
                 "id": str(uuid.uuid4()),
-                "scope_type": "agent",
-                "scope_id": stack.agent_a_name,
-                "type": "fact",
+                "type": "context",
                 "content": sentinel_a,
                 "status": "active",
                 "source": "e2e-test",
+                "source_ref": None,
                 "created_by": "e2e",
                 "created_at": _NOW,
                 "updated_at": _NOW,
             },
         )
 
-    scope_b = backend_b.resolve(stack.tenant_b_id)
-    sm_b = scope_b.open_shared_memory_db(MIGRATIONS)
-    with sm_b.transaction() as conn:
+    scope_b = backend_b.resolve_agent(stack.tenant_b_id, stack.agent_b_name)
+    am_b = scope_b.open_agent_memory_db(MIGRATIONS)
+    with am_b.transaction() as conn:
         rows = conn.execute(
-            "SELECT content FROM shared_memory_items WHERE content = :sentinel",
+            "SELECT content FROM agent_memory_items WHERE content = :sentinel",
             {"sentinel": sentinel_a},
         ).fetchall()
-    assert len(rows) == 0, f"tenant-b unexpectedly found tenant-a sentinel: {rows}"
+    assert len(rows) == 0, f"agent-b unexpectedly found agent-a sentinel: {rows}"
 
-    # Reverse: write to tenant-b; verify tenant-a sees nothing.
-    scope_b2 = backend_b.resolve(stack.tenant_b_id)
-    sm_b2 = scope_b2.open_shared_memory_db(MIGRATIONS)
-    with sm_b2.transaction() as conn:
+    # Reverse: write to agent-b; verify agent-a sees nothing.
+    scope_b2 = backend_b.resolve_agent(stack.tenant_b_id, stack.agent_b_name)
+    am_b2 = scope_b2.open_agent_memory_db(MIGRATIONS)
+    with am_b2.transaction() as conn:
         conn.execute(
             _INSERT_SQL,
             {
                 "id": str(uuid.uuid4()),
-                "scope_type": "agent",
-                "scope_id": stack.agent_b_name,
-                "type": "fact",
+                "type": "context",
                 "content": sentinel_b,
                 "status": "active",
                 "source": "e2e-test",
+                "source_ref": None,
                 "created_by": "e2e",
                 "created_at": _NOW,
                 "updated_at": _NOW,
             },
         )
 
-    scope_a2 = backend_a.resolve(stack.tenant_a_id)
-    sm_a2 = scope_a2.open_shared_memory_db(MIGRATIONS)
-    with sm_a2.transaction() as conn:
+    scope_a2 = backend_a.resolve_agent(stack.tenant_a_id, stack.agent_a_name)
+    am_a2 = scope_a2.open_agent_memory_db(MIGRATIONS)
+    with am_a2.transaction() as conn:
         rows = conn.execute(
-            "SELECT content FROM shared_memory_items WHERE content = :sentinel",
+            "SELECT content FROM agent_memory_items WHERE content = :sentinel",
             {"sentinel": sentinel_b},
         ).fetchall()
-    assert len(rows) == 0, f"tenant-a unexpectedly found tenant-b sentinel: {rows}"
+    assert len(rows) == 0, f"agent-a unexpectedly found agent-b sentinel: {rows}"
 
 
 # ---------------------------------------------------------------------------

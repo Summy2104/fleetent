@@ -74,7 +74,7 @@ async def test_notify_pending_proposal_shared_memory_uses_approval_routing(
         await reflection._notify_pending_proposal(  # noqa: SLF001
             proposal_id="sp-shared-1",
             domain="memory",
-            action="suggest_shared_memory_or_kb",  # shared routing key
+            action="suggest_agent_memory_or_kb",  # agent memory routing key
             risk="low",
             user_id="user-99",
         )

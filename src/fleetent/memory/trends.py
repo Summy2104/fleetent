@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
-from fleetent.memory import proposal_store, shared, store
+from fleetent.memory import agent_memory, proposal_store, store
 
 
 def _list_memory_maintenance_proposals(user_id: str) -> list[Any]:
@@ -21,8 +21,6 @@ class MemoryQualityTrendQuery:
     """Filter and bucket settings for a read-only memory quality summary."""
 
     user_id: str | None
-    scope_type: str | None
-    scope_id: str | None
     start_ts: datetime
     end_ts: datetime
     bucket: TrendBucketSize = "week"
@@ -35,7 +33,7 @@ class MemoryQualityTrendBucket:
     start_ts: datetime
     end_ts: datetime
     user_memory_counts: dict[str, int]
-    shared_memory_counts: dict[str, int]
+    agent_memory_counts: dict[str, int]
     proposal_status_counts: dict[str, int]
     proposal_action_counts: dict[str, int]
     proposal_risk_counts: dict[str, int]
@@ -78,11 +76,11 @@ def get_memory_quality_trend_summary(
         bucket = buckets[index]
         object.__setattr__(bucket, "duplicate_candidate_count", count)
 
-    for row in _shared_memory_rows(query):
+    for row in _agent_memory_rows(query):
         updated_at = store.parse_datetime(row["updated_at"])
         bucket = _bucket_for_timestamp(buckets, updated_at)
         if bucket is not None:
-            _increment(bucket.shared_memory_counts, str(row["type"]))
+            _increment(bucket.agent_memory_counts, str(row["type"]))
 
     for proposal in _memory_maintenance_proposals(query):
         bucket = _bucket_for_timestamp(buckets, proposal.updated_at)
@@ -111,7 +109,7 @@ def _build_empty_buckets(query: MemoryQualityTrendQuery) -> list[MemoryQualityTr
                 start_ts=current,
                 end_ts=bucket_end,
                 user_memory_counts={},
-                shared_memory_counts={},
+                agent_memory_counts={},
                 proposal_status_counts={},
                 proposal_action_counts={},
                 proposal_risk_counts={},
@@ -173,7 +171,7 @@ def _duplicate_candidate_counts(
     return counts
 
 
-def _shared_memory_rows(query: MemoryQualityTrendQuery) -> list[dict[str, Any]]:
+def _agent_memory_rows(query: MemoryQualityTrendQuery) -> list[dict[str, Any]]:
     clauses = [
         "updated_at >= :start_ts",
         "updated_at < :end_ts",
@@ -182,19 +180,12 @@ def _shared_memory_rows(query: MemoryQualityTrendQuery) -> list[dict[str, Any]]:
         "start_ts": store.format_datetime(query.start_ts),
         "end_ts": store.format_datetime(query.end_ts),
     }
-    if query.scope_type is not None:
-        clauses.append("scope_type = :scope_type")
-        params["scope_type"] = query.scope_type
-    if query.scope_id is not None:
-        clauses.append("scope_id = :scope_id")
-        params["scope_id"] = query.scope_id
-
     return (
-        shared._shared_memory_database()
+        agent_memory._agent_memory_database()
         .execute(
             f"""
-            SELECT id, scope_type, scope_id, type, status, updated_at
-            FROM shared_memory_items
+            SELECT id, type, status, updated_at
+            FROM agent_memory_items
             WHERE {" AND ".join(clauses)}
             ORDER BY updated_at ASC, id ASC
             """,

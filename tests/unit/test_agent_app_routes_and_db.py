@@ -51,13 +51,13 @@ def test_init_agent_db_schema_wires_router_and_sinks(
 ) -> None:
     tenant_scope = SimpleNamespace(
         kb_vector_backend="kb-vector",
-        shared_memory_vector_backend="shared-vector",
         open_kb_db=lambda migrations: ("kb-db", migrations),
-        open_shared_memory_db=lambda migrations: ("shared-db", migrations),
     )
     agent_scope = SimpleNamespace(
         vector_backend="agent-vector",
+        agent_memory_vector_backend="agent-memory-vector",
         open_state_db=lambda migrations: ("state-db", migrations),
+        open_agent_memory_db=lambda migrations: ("agent-memory-db", migrations),
     )
     captures: list[tuple[str, Any]] = []
 
@@ -82,8 +82,8 @@ def test_init_agent_db_schema_wires_router_and_sinks(
         lambda backend: captures.append(("kb_vector", backend)),
     )
     monkeypatch.setattr(
-        "fleetent.memory.shared.set_shared_memory_db",
-        lambda db, backend: captures.append(("shared", (db, backend))),
+        "fleetent.memory.agent_memory.set_agent_memory_db",
+        lambda db, backend: captures.append(("agent_memory", (db, backend))),
     )
     for target, key in (
         ("fleetent.session.index.set_state_db", "session_index"),
