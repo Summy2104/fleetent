@@ -26,11 +26,11 @@
 
 ## 5. spec 文档对齐（archive 时同步）
 
-- [ ] 5.1 `opsx:archive` 新增 capability `directed-reach`（delta 已在 change specs/ 下，落到 openspec/specs/directed-reach/）。
+- [x] 5.1 `opsx:archive` 新增 capability `directed-reach`（delta 已在 change specs/ 下，落到 openspec/specs/directed-reach/）。
 
 ## 6. 收尾门禁
 
-- [ ] 6.1 `make test-pr` 通过（对照 main 基线无新增失败）。
-- [ ] 6.2 `make test-unit-ci` 通过（CI 覆盖率关 coverage --fail-under=76）。
-- [ ] 6.3 跑相关测试：reflection + outbound_connectors + node im_edge + im_gateway_management identity + node_desired_state_api 相关单测，及 `uv run pytest tests/integration -q`（端点/drain 跨进程，对照 main 基线无新增失败）。
-- [ ] 6.4 `uv run python scripts/check_module_boundaries.py` 通过（确认 agent 侧未 import platform、notify_user 不调 platform，反查只在 node→platform）。
+- [x] 6.1 `make test-pr` 通过（对照 main 基线无新增失败）。
+- [x] 6.2 `make test-unit-ci` 通过（CI 覆盖率关 coverage --fail-under=76）。
+- [x] 6.3 跑相关测试：reflection + outbound_connectors + node im_edge + im_gateway_management identity + node_desired_state_api 相关单测，及 `uv run pytest tests/integration -q`（端点/drain 跨进程，对照 main 基线无新增失败）。
+- [x] 6.4 `uv run python scripts/check_module_boundaries.py` 通过（确认 agent 侧未 import platform、notify_user 不调 platform，反查只在 node→platform）。
