@@ -1,6 +1,6 @@
 # 身份模型与渠道 Ingress 架构（车道 D 设计输入）
 
-> 状态：设计输入（探索定稿，未进 implementation）。本文固化 2026-06-22 一轮跨渠道身份/IM-gateway 设计探索的结论，供 review 后切片成 OpenSpec change。配套可视化见会话内两张 artifact（身份解析流程图 / 现状-vs-方案B 架构图）。
+> 状态：**已落地**（设计定稿 2026-06-22；切片 #1–#5 全部实现并归档 2026-06-22~23——#1 OIDC web login、#2 email 并号、#3 forwarder 统一入站 Principal、#4a/#4b IM-edge 下沉 node 进出站、#5 manual channel link）。本文固化 2026-06-22 一轮跨渠道身份/IM-gateway 设计探索的结论，现作为已实现架构的设计权威。出站定向触达（按 user_id 主动触达用户）是本线在出站方向的延伸，见 `directed-reach.md`。
 > 关联：`docs/architecture/data-model.md`（5 物理库 + 管理表权威）、`docs/architecture/target-architecture.md`、`AGENTS.md`（agent↔platform 解耦契约、异步资源生命周期契约）。
 
 ## 1. 问题

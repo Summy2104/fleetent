@@ -89,12 +89,14 @@ agent runtime ──✗──→ platform        # 严格禁止反向依赖
 ```
 src/fleetent/
   platform/          # 平台控制面（管理 API / CLI）
+  node/              # 托管部署宿主：拉起 agent 进程、forwarder、IM-edge 宿主、reconcile
   runtime/           # agent 核心循环与生命周期
   memory/            # 用户记忆提取/存储/检索
   long_term_ctx/     # 长期上下文构建
   reflection/        # 反思报告生成
   knowledge_base/    # KB 检索/向量化/持久化
   vector_store/      # 向量嵌入和重排
+  substrate/         # agent 侧关系存储可插拔后端抽象（被 db.py 消费）
   governance/        # 审批门 / 权限 / 审计
   integrations/      # MCP client / 沙箱（sandbox/ 可插拔后端：backends/docker.py + backends/microsandbox.py）
   model/             # 模型路由和提供商健康
@@ -103,6 +105,7 @@ src/fleetent/
   im_gateway/        # Slack / Telegram edge face（managed 宿主=node；standalone 宿主=agent）
   tools/             # 工具注册 / 内置工具
   skills/            # Skill 注册和注入
+  builtin_skills/    # 内置 skill 包（如 getting-started）
   tui/               # 交互式终端 TUI
   structured_logging.py  # 跨域日志底座（顶层基础设施）
   server.py          # FastAPI 入口
@@ -241,3 +244,5 @@ FLEETENT_TOKEN         # Bearer token（--token 参数优先）
 - **MCP 会话宿主**：每个 MCP 会话由 `_SessionHost`（`integrations/mcp/client.py`）的专属 task 持有，transport/ClientSession 的 enter/exit 同 task；`_active_sessions[(scope,id)]` 仍存 live `ClientSession` 供消费，`_session_hosts` 存宿主管生命周期。关停经 `aclose_all()`（接入 `agent_app._drain_and_close` 排干之后、`server.py` lifespan shutdown）。测试用 stub `_transport_cm` + `ClientSession`；**anyio 硬约束：cancel scope 必须同 task enter/exit**，不得用模块级 `AsyncExitStack` 持有连接（护栏强制）
 - **model/resolver.py**：每次调用新建 client——故意的，client 无状态且廉价
 - **Sandbox 可插拔后端**：`integrations/sandbox` 抽象为 `BaseSandboxBackend`（`backend.py`）+ `backends/docker.py`（默认）+ `backends/microsandbox.py`（本地 microVM，Apache-2.0，需宿主 KVM/HVF + 预装 runtime，否则 `is_installed()` 探测失败 → mode 降级 OFF）。后端经 `factory.create_backend` 按 `sandbox.backend`（agent.yaml > platform.yaml > 默认 docker）选型。能力差异经 `BackendCapabilities`（`persist_workspace`/`workspace_mount`/`orphan_cleanup`）门控，manager/cleanup 按能力降级、不用 isinstance。`client.py` 是 `SandboxClient = DockerBackend` 的 re-export shim——`monkeypatch`/`patch` Docker 内部（如 `_KILL_GRACE_SECONDS`、`_logger`）须打在 `backends.docker`，打 shim 不生效
+- **Directed-reach 主动触达**：`outbound_connectors.notify_user(user_id, message, blocks=...)` 按内部 user_id 主动 DM 用户（不在对话里也能触达）。**agent 只发意图、不解析地址**：managed 下入队一条 `target_type="user_id"` 意图到 `im_outbound_queue`（platform=`directed`），node drain 经 `PlatformAddressResolver` 调平台 `POST /nodes/{id}/identity/addresses` 反查 `im_users` → 全发该用户所有绑定渠道（fan-out）；无绑定→不投递只记日志。非 node-managed（dev `agent run`）= no-op。设计权威 `docs/architecture/directed-reach.md`。首消费者=reflection user-memory 提案送本人审批。回复复用既有审批链（入站 resolver + `approve <id>`）
+- **KB connector 定时调度**：`platform/knowledge_base_management/kb_connector_sweep.py` 的 `sweep()` 由 platform `cron_scheduler` 定时跑（server.py lifespan 经 `add_interval_job` 注册、id `__kb_connector_sync_sweep__`），扫 `kb_connectors` 中 `enabled` 且配了 `sync_interval_seconds`、按 `last_scheduled_sync_at` 到期者 → `enqueue_connector_job` 入既有队列（去重=入队即推进 `last_scheduled_sync_at`），worker drain 跑 `run_connector_sync`；多行历史落 `knowledge_connector_sync_history`（KB core 嵌入式-Y）。kb_connectors schedule 字段在管理库（Alembic 101）
