@@ -10,11 +10,6 @@ MemoryType = Literal["identity", "preferences", "context"]
 AgentMemoryType = Literal["context", "preference", "procedure"]
 AgentMemoryStatus = Literal["active", "stale", "archived"]
 AgentMemorySource = Literal["manual", "reflection_proposal"]
-# Legacy aliases — kept for any references still in flight; prefer Agent* names
-SharedMemoryScopeType = Literal["team", "tenant"]
-SharedMemoryType = AgentMemoryType
-SharedMemoryStatus = AgentMemoryStatus
-SharedMemorySource = AgentMemorySource
 
 
 @dataclass(frozen=True)
@@ -42,23 +37,6 @@ class AgentMemoryItem:
     content: str
     status: AgentMemoryStatus
     source: AgentMemorySource
-    source_ref: str | None
-    created_by: str
-    created_at: datetime
-    updated_at: datetime
-
-
-@dataclass(frozen=True)
-class SharedMemoryItem:
-    """Deprecated alias — use AgentMemoryItem instead."""
-
-    id: str
-    scope_type: SharedMemoryScopeType
-    scope_id: str
-    type: SharedMemoryType
-    content: str
-    status: SharedMemoryStatus
-    source: SharedMemorySource
     source_ref: str | None
     created_by: str
     created_at: datetime

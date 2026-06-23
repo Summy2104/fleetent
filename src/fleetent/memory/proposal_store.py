@@ -152,18 +152,6 @@ def mark_agent_memory_proposal_applied(proposal_id: str) -> MemoryProposal:
     return _mark_proposal_applied(proposal)
 
 
-def mark_shared_memory_proposal_applied(proposal_id: str) -> MemoryProposal:
-    """Mark one shared-memory-style proposal as applied and return the projection."""
-    proposal = get_memory_maintenance_proposal(proposal_id)
-    if proposal.status != "approved":
-        raise ValueError(f"cannot mark {proposal.status} proposal")
-    if proposal.action != "suggest_shared_memory_or_kb":
-        raise ValueError("proposal is not a shared memory suggestion")
-    if proposal.metadata_patch.get("target") != "shared_memory":
-        raise ValueError("proposal target is not shared_memory")
-    return _mark_proposal_applied(proposal)
-
-
 def _mark_proposal_applied(proposal: MemoryProposal) -> MemoryProposal:
     now = datetime.now(UTC).replace(microsecond=0)
     updated = MemoryProposal(

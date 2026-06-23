@@ -5,8 +5,8 @@ import pytest
 
 from fleetent import memory
 from fleetent.db import SQLiteDatabase, create_database
-from fleetent.memory import shared as shared_memory_store
-from fleetent.memory.shared_memory_migrations import MIGRATIONS as SHARED_MEMORY_MIGRATIONS
+from fleetent.memory import agent_memory as agent_memory_module
+from fleetent.memory.agent_memory_migrations import MIGRATIONS as AGENT_MEMORY_MIGRATIONS
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
 from fleetent.schema_migrations import migrate
 
@@ -16,16 +16,16 @@ def _patch_trend_db(monkeypatch, tmp_path):
     from tests.integration.test_migrations import apply_migrations
 
     db_path = tmp_path / "trends.db"
-    shared_db_path = tmp_path / "shared.db"
+    agent_db_path = tmp_path / "agent-memory.db"
     apply_migrations(db_path)
     migrate(SQLiteDatabase(path=db_path), AGENT_STATE_MIGRATIONS)
-    shared_db = SQLiteDatabase(path=shared_db_path)
-    migrate(shared_db, SHARED_MEMORY_MIGRATIONS)
+    agent_db = SQLiteDatabase(path=agent_db_path)
+    migrate(agent_db, AGENT_MEMORY_MIGRATIONS)
     database = create_database(f"sqlite:///{db_path}")
     monkeypatch.setattr(store, "database", lambda: database)
     monkeypatch.setattr(store, "_state_db", database)
-    monkeypatch.setattr(shared_memory_store, "_shared_memory_db", shared_db)
-    return database, shared_db
+    monkeypatch.setattr(agent_memory_module, "_agent_memory_db", agent_db)
+    return database, agent_db
 
 
 def _ts(day: int) -> datetime:
@@ -55,20 +55,18 @@ def _insert_memory(item_id, user_id, type_, content, updated, expires=None):
     )
 
 
-def _insert_shared(database, item_id, type_, updated, scope_type="team", scope_id="eng"):
+def _insert_agent_memory(database, item_id, type_, updated):
     database.execute(
         """
-        INSERT INTO shared_memory_items
-          (id, scope_type, scope_id, type, content, status, source,
+        INSERT INTO agent_memory_items
+          (id, type, content, status, source,
            source_ref, created_by, created_at, updated_at)
         VALUES
-          (:id, :scope_type, :scope_id, :type, 'c', 'active', 'manual',
+          (:id, :type, 'c', 'active', 'manual',
            NULL, 'admin', :ts, :ts)
         """,
         {
             "id": item_id,
-            "scope_type": scope_type,
-            "scope_id": scope_id,
             "type": type_,
             "ts": _fmt(updated),
         },
@@ -99,7 +97,7 @@ def test_memory_quality_trend_public_api_is_importable() -> None:
 )
 def test_build_empty_buckets_validates(start, end, bucket, message) -> None:
     query = memory.MemoryQualityTrendQuery(
-        user_id=None, scope_type=None, scope_id=None, start_ts=start, end_ts=end, bucket=bucket
+        user_id=None, start_ts=start, end_ts=end, bucket=bucket
     )
     with pytest.raises(ValueError, match=message):
         memory.get_memory_quality_trend_summary(query)
@@ -124,8 +122,6 @@ def test_daily_buckets_count_user_memories_and_expiry(monkeypatch, tmp_path) -> 
 
     query = memory.MemoryQualityTrendQuery(
         user_id="u1",
-        scope_type=None,
-        scope_id=None,
         start_ts=_ts(1),
         end_ts=_ts(4),
         bucket="day",
@@ -150,8 +146,6 @@ def test_duplicate_candidate_counts(monkeypatch, tmp_path) -> None:
 
     query = memory.MemoryQualityTrendQuery(
         user_id="u1",
-        scope_type=None,
-        scope_id=None,
         start_ts=_ts(1),
         end_ts=_ts(4),
         bucket="day",
@@ -161,17 +155,14 @@ def test_duplicate_candidate_counts(monkeypatch, tmp_path) -> None:
     assert sum(b.duplicate_candidate_count for b in summary.buckets) == 2
 
 
-def test_shared_memory_and_weekly_bucketing(monkeypatch, tmp_path) -> None:
-    _, shared_database = _patch_trend_db(monkeypatch, tmp_path)
-    _insert_shared(shared_database, "s1", "context", _ts(1))
-    _insert_shared(shared_database, "s2", "procedure", _ts(2))
-    # scope filter must exclude this one
-    _insert_shared(shared_database, "s3", "context", _ts(2), scope_id="other")
+def test_agent_memory_and_weekly_bucketing(monkeypatch, tmp_path) -> None:
+    _, agent_database = _patch_trend_db(monkeypatch, tmp_path)
+    _no_proposals(monkeypatch)
+    _insert_agent_memory(agent_database, "a1", "context", _ts(1))
+    _insert_agent_memory(agent_database, "a2", "procedure", _ts(2))
 
     query = memory.MemoryQualityTrendQuery(
         user_id=None,
-        scope_type="team",
-        scope_id="eng",
         start_ts=_ts(1),
         end_ts=_ts(8),
         bucket="week",
@@ -179,7 +170,7 @@ def test_shared_memory_and_weekly_bucketing(monkeypatch, tmp_path) -> None:
     summary = memory.get_memory_quality_trend_summary(query)
 
     assert len(summary.buckets) == 1
-    assert summary.buckets[0].shared_memory_counts == {"context": 1, "procedure": 1}
+    assert summary.buckets[0].agent_memory_counts == {"context": 1, "procedure": 1}
 
 
 def test_maintenance_proposals_counted(monkeypatch, tmp_path) -> None:
@@ -204,8 +195,6 @@ def test_maintenance_proposals_counted(monkeypatch, tmp_path) -> None:
 
     query = memory.MemoryQualityTrendQuery(
         user_id="u1",
-        scope_type=None,
-        scope_id=None,
         start_ts=_ts(1),
         end_ts=_ts(4),
         bucket="day",
@@ -222,8 +211,6 @@ def test_proposals_skipped_without_user(monkeypatch, tmp_path) -> None:
     _patch_trend_db(monkeypatch, tmp_path)
     query = memory.MemoryQualityTrendQuery(
         user_id=None,
-        scope_type=None,
-        scope_id=None,
         start_ts=_ts(1),
         end_ts=_ts(4),
         bucket="day",

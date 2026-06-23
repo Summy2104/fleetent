@@ -286,7 +286,7 @@ async def test_reflection_proposal_creates_unified_approval_request_and_router_a
     from fleetent import agent_config, reflection
     from fleetent.governance import approval_request_store, approval_router
     from fleetent.governance.permission_gate import PermissionGate
-    from fleetent.memory import shared as shared_memory
+    from fleetent.memory import agent_memory as agent_memory_module
 
     _boot_agent_state(tmp_path)
 
@@ -299,7 +299,7 @@ async def test_reflection_proposal_creates_unified_approval_request_and_router_a
         notified.append(approval_id)
         return ["slack:u1"]
 
-    async def apply_shared_memory_proposal(proposal_id: str, actor_id: str) -> None:
+    async def apply_agent_memory_proposal(proposal_id: str, actor_id: str) -> None:
         applied.append(f"{proposal_id}:{actor_id}")
 
     monkeypatch.setattr(
@@ -308,7 +308,7 @@ async def test_reflection_proposal_creates_unified_approval_request_and_router_a
         lambda: SimpleNamespace(
             approval=agent_config.ApprovalRouting(
                 by_tool={
-                    "reflection_memory_proposal": agent_config.ApprovalEntry(
+                    "reflection_agent_memory_proposal": agent_config.ApprovalEntry(
                         approvers=["slack:u1"],
                         policy="any",
                     )
@@ -317,17 +317,17 @@ async def test_reflection_proposal_creates_unified_approval_request_and_router_a
         ),
     )
     monkeypatch.setattr(PermissionGate, "_notify_approvers", notify)
-    monkeypatch.setattr(shared_memory, "apply_shared_memory_proposal", apply_shared_memory_proposal)
+    monkeypatch.setattr(agent_memory_module, "apply_agent_memory_proposal", apply_agent_memory_proposal)
 
     proposal = reflection.create_memory_maintenance_proposal(
         user_id="u1",
-        action="suggest_shared_memory_or_kb",
+        action="suggest_agent_memory_or_kb",
         target_memory_ids=[],
         proposed_content="A stable org fact",
         risk="low",
-        reason="shared fact",
+        reason="agent memory fact",
         evidence_ids=["trace-a"],
-        metadata_patch={"target": "shared_memory"},
+        metadata_patch={"target": "agent_memory"},
     )
 
     await asyncio.sleep(0)
@@ -336,7 +336,7 @@ async def test_reflection_proposal_creates_unified_approval_request_and_router_a
     assert request is not None
     assert request["subject_type"] == "memory_proposal"
     assert request["status"] == "pending"
-    assert request["routing_key"] == "reflection_memory_proposal"
+    assert request["routing_key"] == "reflection_agent_memory_proposal"
     assert notified == [proposal.id]
 
     ok = await approval_router.resolve_approval_request(

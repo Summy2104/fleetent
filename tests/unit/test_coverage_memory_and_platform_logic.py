@@ -7,12 +7,11 @@ from typing import Any
 import httpx
 import pytest
 
-from fleetent.memory import extraction, maintenance, shared, trends
+from fleetent.memory import extraction, maintenance, trends
 from fleetent.memory.models import (
     MemoryCompactionCandidate,
     MemoryItem,
     MemoryMaintenancePolicy,
-    SharedMemoryItem,
 )
 from fleetent.platform.model_provider_management import provider_connectivity
 
@@ -33,28 +32,6 @@ def _memory_item(
         created_at=now,
         updated_at=now,
         expires_at=expires_at,
-    )
-
-
-def _shared_item(
-    id: str = "sm1",
-    status: str = "active",
-    type: str = "context",
-    content: str = "Deploys happen on Fridays",
-) -> SharedMemoryItem:
-    now = datetime(2026, 1, 1, tzinfo=UTC)
-    return SharedMemoryItem(
-        id=id,
-        scope_type="team",
-        scope_id="eng",
-        type=type,  # type: ignore[arg-type]
-        content=content,
-        status=status,  # type: ignore[arg-type]
-        source="manual",
-        source_ref=None,
-        created_by="admin",
-        created_at=now,
-        updated_at=now,
     )
 
 
@@ -232,8 +209,6 @@ def test_memory_trends_buckets_counts_and_filters_with_fake_store(monkeypatch):
     start = datetime(2026, 1, 1, tzinfo=UTC)
     query = trends.MemoryQualityTrendQuery(
         user_id="u1",
-        scope_type="team",
-        scope_id="eng",
         start_ts=start,
         end_ts=start + timedelta(days=2),
         bucket="day",
@@ -268,11 +243,9 @@ def test_memory_trends_buckets_counts_and_filters_with_fake_store(monkeypatch):
             "expires_at": None,
         },
     ]
-    shared_rows = [
+    agent_memory_rows = [
         {
-            "id": "s1",
-            "scope_type": "team",
-            "scope_id": "eng",
+            "id": "a1",
             "type": "procedure",
             "status": "active",
             "updated_at": "2026-01-01T04:00:00+00:00",
@@ -292,10 +265,8 @@ def test_memory_trends_buckets_counts_and_filters_with_fake_store(monkeypatch):
             if "FROM memory_items" in sql:
                 assert params["user_id"] == "u1"
                 return FakeCursor(memory_rows)
-            assert "FROM shared_memory_items" in sql
-            assert params["scope_type"] == "team"
-            assert params["scope_id"] == "eng"
-            return FakeCursor(shared_rows)
+            assert "FROM agent_memory_items" in sql
+            return FakeCursor(agent_memory_rows)
 
     proposals = [
         SimpleNamespace(
@@ -313,14 +284,14 @@ def test_memory_trends_buckets_counts_and_filters_with_fake_store(monkeypatch):
     ]
     fake_db = FakeDb()
     monkeypatch.setattr(trends.store, "database", lambda: fake_db)
-    monkeypatch.setattr(trends.shared, "_shared_memory_db", fake_db)
+    monkeypatch.setattr(trends.agent_memory, "_agent_memory_db", fake_db)
     monkeypatch.setattr(trends, "_list_memory_maintenance_proposals", lambda user_id: proposals)
 
     summary = trends.get_memory_quality_trend_summary(query)
 
     assert len(summary.buckets) == 2
     assert summary.buckets[0].user_memory_counts == {"context": 1}
-    assert summary.buckets[0].shared_memory_counts == {"procedure": 1}
+    assert summary.buckets[0].agent_memory_counts == {"procedure": 1}
     assert summary.buckets[0].proposal_status_counts == {"open": 1}
     assert summary.buckets[0].proposal_action_counts == {"delete": 1}
     assert summary.buckets[0].proposal_risk_counts == {"low": 1}
@@ -332,15 +303,15 @@ def test_memory_trends_rejects_invalid_ranges_and_bucket_names():
     now = datetime(2026, 1, 1, tzinfo=UTC)
     with pytest.raises(ValueError, match="end_ts"):
         trends._build_empty_buckets(  # noqa: SLF001
-            trends.MemoryQualityTrendQuery(None, None, None, now, now, "day")
+            trends.MemoryQualityTrendQuery(None, now, now, "day")
         )
     with pytest.raises(ValueError, match="bucket"):
         trends._build_empty_buckets(  # noqa: SLF001
-            trends.MemoryQualityTrendQuery(None, None, None, now, now + timedelta(days=1), "month")  # type: ignore[arg-type]
+            trends.MemoryQualityTrendQuery(None, now, now + timedelta(days=1), "month")  # type: ignore[arg-type]
         )
     assert (
         trends._memory_maintenance_proposals(  # noqa: SLF001
-            trends.MemoryQualityTrendQuery(None, None, None, now, now + timedelta(days=1), "day")
+            trends.MemoryQualityTrendQuery(None, now, now + timedelta(days=1), "day")
         )
         == []
     )
@@ -410,160 +381,6 @@ def test_memory_maintenance_validation_and_dedupe():
     with pytest.raises(ValueError, match="max_identity"):
         maintenance.validate_maintenance_request("u1", MemoryMaintenancePolicy(max_identity=-1))
     assert maintenance.dedupe_ids(["a", "b", "a", "c", "b"]) == ["a", "b", "c"]
-
-
-async def test_shared_memory_validators_mapping_and_vector_sync(monkeypatch):
-    active = _shared_item(status="active")
-    archived = _shared_item(id="sm2", status="archived")
-    upserts: list[tuple[str, str]] = []  # (id, namespace)
-    deletes: list[tuple[str, str]] = []
-
-    monkeypatch.setattr(shared.vector_store, "shared_namespace", lambda scope, id: f"{scope}:{id}")
-
-    class _TrackingBackend:
-        async def upsert(self, id: str, vector: list[float], namespace: str) -> None:
-            upserts.append((id, namespace))
-
-        async def search(self, vector: list[float], namespace: str, limit: int = 10) -> list[Any]:
-            return []
-
-        async def delete(self, id: str, namespace: str) -> None:
-            deletes.append((id, namespace))
-
-        async def clear_namespace(self, namespace: str) -> None:
-            pass
-
-    monkeypatch.setattr(shared, "_shared_memory_vector_backend", _TrackingBackend())
-
-    assert shared._validate_scope_type("team") == "team"  # noqa: SLF001
-    assert shared._validate_type("procedure") == "procedure"  # noqa: SLF001
-    assert shared._validate_status("stale") == "stale"  # noqa: SLF001
-    assert shared._validate_source("reflection_proposal") == "reflection_proposal"  # noqa: SLF001
-    assert shared._validate_non_empty(" value ", "field") == "value"  # noqa: SLF001
-    assert shared._require_proposed_content(" proposed ") == "proposed"  # noqa: SLF001
-    with pytest.raises(ValueError, match="scope_type"):
-        shared._validate_scope_type("workspace")  # noqa: SLF001
-    with pytest.raises(ValueError, match="type"):
-        shared._validate_type("identity")  # noqa: SLF001
-    with pytest.raises(ValueError, match="status"):
-        shared._validate_status("deleted")  # noqa: SLF001
-    with pytest.raises(ValueError, match="source"):
-        shared._validate_source("sync")  # noqa: SLF001
-    with pytest.raises(ValueError, match="content"):
-        shared._validate_content(" ")  # noqa: SLF001
-    with pytest.raises(ValueError, match="proposed_content"):
-        shared._require_proposed_content(None)  # noqa: SLF001
-
-    row = shared._params(active)  # noqa: SLF001
-    assert row["created_at"] == "2026-01-01T00:00:00+00:00"
-    assert shared._row_to_item(row).content == active.content  # noqa: SLF001
-
-    await shared._sync_vector(active)  # noqa: SLF001
-    await shared._sync_vector(archived)  # noqa: SLF001
-    # vector was embedded → can only verify id+namespace, not content
-    assert upserts == [("sm1", "team:eng")]
-    assert deletes == [("sm2", "team:eng")]
-
-
-async def test_shared_memory_search_and_listing_use_fake_database(monkeypatch):
-    rows = [
-        shared._params(_shared_item("first", status="active")),  # noqa: SLF001
-        shared._params(_shared_item("second", status="stale")),  # noqa: SLF001
-        shared._params(_shared_item("archived", status="archived")),  # noqa: SLF001
-    ]
-    executed: list[tuple[str, dict[str, object]]] = []
-
-    class FakeCursor:
-        def __init__(self, result: list[dict[str, object]] | dict[str, object] | None) -> None:
-            self.result = result
-
-        def fetchall(self) -> list[dict[str, object]]:
-            assert isinstance(self.result, list)
-            return self.result
-
-        def fetchone(self) -> dict[str, object] | None:
-            assert self.result is None or isinstance(self.result, dict)
-            return self.result
-
-    class FakeDb:
-        def execute(self, sql: str, params: dict[str, object]) -> FakeCursor:
-            executed.append((sql, params))
-            if "WHERE id = :id" in sql:
-                return FakeCursor(rows[0] if params["id"] == "first" else None)
-            if "id IN" in sql:
-                return FakeCursor(rows)
-            return FakeCursor(rows)
-
-    monkeypatch.setattr(shared, "_shared_memory_db", FakeDb())
-
-    class _SearchBackend:
-        async def upsert(self, id: str, vector: list[float], namespace: str) -> None:
-            pass
-
-        async def search(self, vector: list[float], namespace: str, limit: int = 10) -> list[Any]:
-            return [
-                SimpleNamespace(id="archived"),
-                SimpleNamespace(id="second"),
-                SimpleNamespace(id="missing"),
-                SimpleNamespace(id="first"),
-            ]
-
-        async def delete(self, id: str, namespace: str) -> None:
-            pass
-
-        async def clear_namespace(self, namespace: str) -> None:
-            pass
-
-    monkeypatch.setattr(shared, "_shared_memory_vector_backend", _SearchBackend())
-    monkeypatch.setattr(shared.vector_store, "shared_namespace", lambda scope, id: f"{scope}:{id}")
-
-    assert shared.get_shared_memory("first").id == "first"
-    with pytest.raises(ValueError, match="does not exist"):
-        shared.get_shared_memory("missing")
-    assert [item.id for item in shared.list_shared_memory("team", "eng")] == [
-        "first",
-        "second",
-        "archived",
-    ]
-    indexable = list(shared.iter_indexable_shared_memories("team", "eng"))
-    assert [(item.id, item.namespace) for item in indexable] == [
-        ("first", "team:eng"),
-        ("second", "team:eng"),
-        ("archived", "team:eng"),
-    ]
-    search_results = await shared.search_shared_memory("team", "eng", "deploy", limit=4)
-    assert [item.id for item in search_results] == ["second", "first"]
-
-
-def test_shared_memory_new_item_insert_and_update_paths(monkeypatch):
-    inserted: list[dict[str, object]] = []
-
-    class FakeDb:
-        def execute(self, _sql: str, params: dict[str, object]) -> None:
-            inserted.append(params)
-
-    monkeypatch.setattr(shared, "_shared_memory_db", FakeDb())
-    item = shared._new_item(  # noqa: SLF001
-        scope_type="team",
-        scope_id="eng",
-        type="context",
-        content=" runbooks live in docs ",
-        created_by=" admin ",
-        source="manual",
-        source_ref=None,
-    )
-    assert item.content == "runbooks live in docs"
-    assert item.created_by == "admin"
-
-    shared._insert(item)  # noqa: SLF001
-    shared._update(item)  # noqa: SLF001
-    assert [params["id"] for params in inserted] == [item.id, item.id]
-
-
-def test_shared_memory_audit_not_implemented_in_memory_core():
-    """Shared-memory core should not expose platform admin audit hooks."""
-
-    assert not hasattr(shared, "record_shared_memory_admin_audit")
 
 
 async def test_provider_connectivity_handles_success_and_errors(monkeypatch):

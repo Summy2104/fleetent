@@ -104,7 +104,7 @@ def reindex(request: ReindexRequest) -> ReindexSummary:
 
 
 def _validate_request(request: ReindexRequest) -> None:
-    if request.owner not in {"memory", "knowledge_base", "shared_memory"}:
+    if request.owner not in {"memory", "knowledge_base", "agent_memory"}:
         raise ValueError(f"unsupported reindex owner: {request.owner}")
     if request.mode != "rebuild":
         raise ValueError(f"unsupported reindex mode: {request.mode}")
@@ -112,18 +112,13 @@ def _validate_request(request: ReindexRequest) -> None:
         raise ValueError("user_id is required for memory reindex")
     if request.owner == "knowledge_base" and not (request.kb_id and request.kb_id.strip()):
         raise ValueError("kb_id is required for knowledge_base reindex")
-    if request.owner == "shared_memory":
-        if not (request.scope_type and request.scope_type.strip()):
-            raise ValueError("scope_type is required for shared_memory reindex")
-        if not (request.scope_id and request.scope_id.strip()):
-            raise ValueError("scope_id is required for shared_memory reindex")
 
 
 def _namespace_for_request(request: ReindexRequest) -> str:
     if request.owner == "memory":
         return namespaces.memory_namespace(request.user_id or "")
-    if request.owner == "shared_memory":
-        return namespaces.shared_namespace(request.scope_type or "", request.scope_id or "")
+    if request.owner == "agent_memory":
+        return namespaces.agent_memory_namespace()
     return namespaces.knowledge_namespace(request.tenant_id, request.kb_id or "")
 
 
@@ -131,14 +126,9 @@ def _items_for_request(request: ReindexRequest) -> list[IndexableItem]:
     if request.owner == "memory":
         module = memory if memory is not None else _memory_module()
         return list(module.iter_indexable_memories(request.user_id or ""))
-    if request.owner == "shared_memory":
+    if request.owner == "agent_memory":
         module = memory if memory is not None else _memory_module()
-        return list(
-            module.iter_indexable_shared_memories(
-                request.scope_type or "",
-                request.scope_id or "",
-            )
-        )
+        return list(module.iter_indexable_agent_memories())
     module = knowledge_base if knowledge_base is not None else _knowledge_base_module()
     return list(module.iter_indexable_knowledge_chunks(request.tenant_id, request.kb_id or ""))
 
