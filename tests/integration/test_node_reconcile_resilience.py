@@ -52,16 +52,20 @@ class FakeBackend:
         self.spawn_calls: list[str] = []
         self.stop_calls: list[str] = []
 
-    def spawn(self, agent_name: str) -> None:
+    def spawn(self, agent_name: str, tenant_id: str = "default") -> None:
+        del tenant_id
         self.spawn_calls.append(agent_name)
 
-    def stop(self, agent_name: str) -> None:
+    def stop(self, agent_name: str, tenant_id: str = "default") -> None:
+        del tenant_id
         self.stop_calls.append(agent_name)
 
-    def is_alive(self, agent_name: str) -> int | None:
+    def is_alive(self, agent_name: str, tenant_id: str = "default") -> int | None:
+        del tenant_id
         return self.alive.get(agent_name)
 
-    def gateway_port(self, agent_name: str) -> int | None:
+    def gateway_port(self, agent_name: str, tenant_id: str = "default") -> int | None:
+        del agent_name, tenant_id
         return None
 
 
@@ -75,7 +79,7 @@ def test_reconcile_restarts_from_env_when_platform_down(tmp_path) -> None:
     )
 
     # Step 1: Agent home with a complete .env (previously materialized with real secrets)
-    home = tmp_path / "agents" / "support"
+    home = tmp_path / "tenants" / "default" / "agents" / "support"
     home.mkdir(parents=True)
     home.chmod(0o700)
     (home / "agent.yaml").write_text(
@@ -98,6 +102,7 @@ def test_reconcile_restarts_from_env_when_platform_down(tmp_path) -> None:
                 name="support",
                 config=_agent_config(),
                 secrets={},  # cache has no secrets
+                tenant_id="default",
             )
         ],
         source="cache",

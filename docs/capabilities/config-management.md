@@ -39,9 +39,9 @@
 - ✅ **SQLite-first 默认存储**：无需独立数据库服务
   - 数据在 data/ 目录，挂载 volume 持久化
   - 当前不要求 PostgreSQL；数据库访问通过统一 DB runtime 边界，避免把业务层写死到 SQLite
-  - `database_url` 默认指向 `sqlite:///data/management.db`（管理库文件名与概念名对齐）；非 SQLite backend 当前 fail fast
-  - 存量部署的旧管理库 `data/fleetent.db` 由 upgrade 脚本在 backup 之后、migrate 之前自动重命名为 `data/management.db`（含 `-wal`/`-shm` sidecar，幂等）；显式 `DATABASE_URL` 指向自定义文件名者不被改名
-  - 存量本地 `data/users.db` 不会自动迁移、复制或 fallback；需要保留数据时由 operator 手动重命名为 `data/management.db`，或选择重新初始化
+  - `database_url` 默认指向 `sqlite:///<FLEETENT_HOME>/management.db`（管理库文件名与概念名对齐）；非 SQLite backend 当前 fail fast
+  - 本 change 不做旧布局或旧文件名自动迁移；显式 `DATABASE_URL` 仍可指向自定义文件名
+  - 需要保留旧布局数据时由 operator 自行迁移或重建 tenant-first home
   - 不引入 ORM；schema lifecycle 双权威（按库分）：**管理库** = Alembic；**agent 侧库**（per-agent / 共享记忆 / KB）= 嵌入式 forward-only 迁移（Y，`user_version` migrate-on-open），不经 Alembic
 
 - ✅ **observability 数据落点已明确**：运行观测数据按用途分层持久化
@@ -105,13 +105,13 @@ docker compose run --rm fleetent uv run python scripts/upgrade.py
 ```bash
 docker compose run --rm fleetent uv run python scripts/upgrade.py --dry-run
 docker compose run --rm fleetent uv run python scripts/upgrade.py --backup-only
-docker compose run --rm fleetent uv run python scripts/upgrade.py --database-url sqlite:///data/management.db --backup-dir data/backups
+docker compose run --rm fleetent uv run python scripts/upgrade.py --database-url sqlite:////app/management.db --backup-dir data/backups
 ```
 
 如果 migration 失败，脚本不会自动 rollback。手动恢复步骤（覆盖多物理库）：
 
 1. 停止 fleetent 服务。
-2. 用同一个备份批次目录 `data/backups/YYYYMMDD-HHMMSS/` 整体替换数据目录下对应的全部库文件——按镜像结构把每个库（含 `<tenant>/` 与 `<tenant>/<agent_id>/` 子目录下的库及其 `-wal`/`-shm` sidecar）复制回 `data/` 对应位置，例如将 `data/backups/YYYYMMDD-HHMMSS/management.db` 复制回 `data/management.db`。
+2. 用同一个备份批次目录 `data/backups/YYYYMMDD-HHMMSS/` 整体替换数据目录下对应的全部库文件——按镜像结构把每个库（含 `tenants/<tenant>/agents/<agent>/data/` 下的库及其 `-wal`/`-shm` sidecar）复制回各自位置，例如将 `data/backups/YYYYMMDD-HHMMSS/management.db` 复制回 `<FLEETENT_HOME>/management.db`。
 3. 重启 fleetent 服务。
 
 务必使用**同一个备份批次**的各库，保证恢复后多库互相一致，不要混用不同时间点的备份。
@@ -195,7 +195,7 @@ GET /admin/observability/performance?agent=agent-1&limit=100
   - 升级前自动备份 SQLite 文件；migration 失败不自动 rollback
 
 - ✅ **统一 database_url 配置**：以 SQLite 为默认后端，保留后续 PostgreSQL 接入空间
-  - 默认值指向本机 `data/management.db`
+  - 默认值指向本机 `<FLEETENT_HOME>/management.db`
   - 业务 store 通过统一 DB runtime 获取连接和事务，不直接依赖 SQLite 文件路径
 
 ## 当前缺口

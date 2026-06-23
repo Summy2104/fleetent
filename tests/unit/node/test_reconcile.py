@@ -22,16 +22,16 @@ class FakeBackend:
         self.spawn_calls: list[str] = []
         self.stop_calls: list[str] = []
 
-    def spawn(self, agent_name: str) -> None:
+    def spawn(self, agent_name: str, tenant_id: str = "default") -> None:
         self.spawn_calls.append(agent_name)
 
-    def stop(self, agent_name: str) -> None:
+    def stop(self, agent_name: str, tenant_id: str = "default") -> None:
         self.stop_calls.append(agent_name)
 
-    def is_alive(self, agent_name: str) -> int | None:
+    def is_alive(self, agent_name: str, tenant_id: str = "default") -> int | None:
         return self.alive.get(agent_name)
 
-    def gateway_port(self, agent_name: str) -> int | None:
+    def gateway_port(self, agent_name: str, tenant_id: str = "default") -> int | None:
         return self.gateway_ports.get(agent_name)
 
 
@@ -49,6 +49,7 @@ def _desired(
     config: dict[str, object] | None = None,
     secrets: dict[str, str] | None = None,
     source: str = "remote",
+    tenant_id: str = "tenant-1",
 ) -> DesiredState:
     return DesiredState(
         node_id="node-a",
@@ -56,12 +57,17 @@ def _desired(
             DesiredAgent(
                 agent_id=101,
                 name="support",
-                config=config or {"name": "support"},
+                tenant_id=tenant_id,
+                config=config or {"name": "support", "tenant_id": tenant_id},
                 secrets=secrets or {},
             )
         ],
         source=source,
     )
+
+
+def _home(tmp_path, agent_name: str = "support", tenant_id: str = "tenant-1"):
+    return tmp_path / "tenants" / tenant_id / "agents" / agent_name
 
 
 def _post_body(route: respx.Route) -> dict[str, object]:
@@ -80,8 +86,11 @@ def test_reconcile_spawns_missing_desired_agent_after_writing_home(tmp_path) -> 
     NodeReconciler(_config(tmp_path), backend).reconcile(_desired())
 
     assert backend.spawn_calls == ["support"]
-    home = tmp_path / "agents" / "support"
-    assert yaml.safe_load((home / "agent.yaml").read_text()) == {"name": "support"}
+    home = _home(tmp_path)
+    assert yaml.safe_load((home / "agent.yaml").read_text()) == {
+        "name": "support",
+        "tenant_id": "tenant-1",
+    }
     assert route.called
 
 
@@ -89,9 +98,9 @@ def test_reconcile_spawns_missing_desired_agent_after_writing_home(tmp_path) -> 
 def test_reconcile_stops_running_agent_missing_from_desired(tmp_path) -> None:
     from fleetent.node.reconcile import NodeReconciler
 
-    home = tmp_path / "agents" / "support"
+    home = _home(tmp_path)
     home.mkdir(parents=True)
-    (home / "agent.yaml").write_text(yaml.safe_dump({"name": "support"}))
+    (home / "agent.yaml").write_text(yaml.safe_dump({"name": "support", "tenant_id": "tenant-1"}))
     route = respx.post("https://platform.internal/nodes/node-a/status").mock(
         return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
     )
@@ -107,9 +116,9 @@ def test_reconcile_stops_running_agent_missing_from_desired(tmp_path) -> None:
 def test_reconcile_readopts_live_agent_without_respawn(tmp_path) -> None:
     from fleetent.node.reconcile import NodeReconciler
 
-    home = tmp_path / "agents" / "support"
+    home = _home(tmp_path)
     home.mkdir(parents=True)
-    (home / "agent.yaml").write_text(yaml.safe_dump({"name": "support"}))
+    (home / "agent.yaml").write_text(yaml.safe_dump({"name": "support", "tenant_id": "tenant-1"}))
     route = respx.post("https://platform.internal/nodes/node-a/status").mock(
         return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
     )
@@ -126,9 +135,9 @@ def test_reconcile_readopts_live_agent_without_respawn(tmp_path) -> None:
 def test_reconcile_respawns_crashed_agent(tmp_path) -> None:
     from fleetent.node.reconcile import NodeReconciler
 
-    home = tmp_path / "agents" / "support"
+    home = _home(tmp_path)
     home.mkdir(parents=True)
-    (home / "agent.yaml").write_text(yaml.safe_dump({"name": "support"}))
+    (home / "agent.yaml").write_text(yaml.safe_dump({"name": "support", "tenant_id": "tenant-1"}))
     route = respx.post("https://platform.internal/nodes/node-a/status").mock(
         return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
     )
@@ -144,9 +153,9 @@ def test_reconcile_respawns_crashed_agent(tmp_path) -> None:
 def test_reconcile_restarts_running_agent_when_config_hash_changes(tmp_path) -> None:
     from fleetent.node.reconcile import NodeReconciler
 
-    home = tmp_path / "agents" / "support"
+    home = _home(tmp_path)
     home.mkdir(parents=True)
-    (home / "agent.yaml").write_text(yaml.safe_dump({"name": "support"}))
+    (home / "agent.yaml").write_text(yaml.safe_dump({"name": "support", "tenant_id": "tenant-1"}))
     state_dir = tmp_path / "node"
     state_dir.mkdir(parents=True)
     (state_dir / "applied-config-hashes.json").write_text(
@@ -157,7 +166,7 @@ def test_reconcile_restarts_running_agent_when_config_hash_changes(tmp_path) -> 
         return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
     )
     backend = FakeBackend({"support": 12345})
-    desired = _desired({"name": "support", "system_prompt": "updated"})
+    desired = _desired({"name": "support", "tenant_id": "tenant-1", "system_prompt": "updated"})
 
     NodeReconciler(_config(tmp_path), backend).reconcile(desired)
 
@@ -166,7 +175,10 @@ def test_reconcile_restarts_running_agent_when_config_hash_changes(tmp_path) -> 
     hashes = (state_dir / "applied-config-hashes.json").read_text(encoding="utf-8")
     assert (
         hashlib.sha256(
-            yaml.safe_dump({"name": "support", "system_prompt": "updated"}, sort_keys=True).encode()
+            yaml.safe_dump(
+                {"name": "support", "tenant_id": "tenant-1", "system_prompt": "updated"},
+                sort_keys=True,
+            ).encode()
         ).hexdigest()
         in hashes
     )
@@ -177,11 +189,11 @@ def test_reconcile_restarts_running_agent_when_config_hash_changes(tmp_path) -> 
 def test_reconcile_keeps_running_agent_when_config_hash_matches(tmp_path) -> None:
     from fleetent.node.reconcile import NodeReconciler
 
-    desired_config = {"name": "support", "system_prompt": "same"}
+    desired_config = {"name": "support", "tenant_id": "tenant-1", "system_prompt": "same"}
     desired_hash = hashlib.sha256(
         yaml.safe_dump(desired_config, sort_keys=True).encode()
     ).hexdigest()
-    home = tmp_path / "agents" / "support"
+    home = _home(tmp_path)
     home.mkdir(parents=True)
     (home / "agent.yaml").write_text(yaml.safe_dump(desired_config))
     state_dir = tmp_path / "node"
@@ -228,9 +240,27 @@ def test_reconcile_reports_agent_health_from_loopback_probe_and_pid_fallback(tmp
     desired = DesiredState(
         node_id="node-a",
         agents=[
-            DesiredAgent(agent_id=101, name="support", config={"name": "support"}, secrets={}),
-            DesiredAgent(agent_id=102, name="billing", config={"name": "billing"}, secrets={}),
-            DesiredAgent(agent_id=103, name="legacy", config={"name": "legacy"}, secrets={}),
+            DesiredAgent(
+                agent_id=101,
+                name="support",
+                tenant_id="tenant-1",
+                config={"name": "support", "tenant_id": "tenant-1"},
+                secrets={},
+            ),
+            DesiredAgent(
+                agent_id=102,
+                name="billing",
+                tenant_id="tenant-2",
+                config={"name": "billing", "tenant_id": "tenant-2"},
+                secrets={},
+            ),
+            DesiredAgent(
+                agent_id=103,
+                name="legacy",
+                tenant_id="tenant-3",
+                config={"name": "legacy", "tenant_id": "tenant-3"},
+                secrets={},
+            ),
         ],
     )
     backend = FakeBackend(
@@ -261,8 +291,20 @@ def test_reconcile_marks_probe_errors_unhealthy_without_interrupting_other_agent
     desired = DesiredState(
         node_id="node-a",
         agents=[
-            DesiredAgent(agent_id=101, name="support", config={"name": "support"}, secrets={}),
-            DesiredAgent(agent_id=102, name="sales", config={"name": "sales"}, secrets={}),
+            DesiredAgent(
+                agent_id=101,
+                name="support",
+                tenant_id="tenant-1",
+                config={"name": "support", "tenant_id": "tenant-1"},
+                secrets={},
+            ),
+            DesiredAgent(
+                agent_id=102,
+                name="sales",
+                tenant_id="tenant-2",
+                config={"name": "sales", "tenant_id": "tenant-2"},
+                secrets={},
+            ),
         ],
     )
     backend = FakeBackend(
@@ -320,7 +362,7 @@ def test_reconcile_writes_secrets_to_env_file_not_spawn(tmp_path) -> None:
     reconciler.reconcile(desired)
 
     # Secret is in .env, not injected via spawn
-    env_path = tmp_path / "agents" / "support" / ".env"
+    env_path = _home(tmp_path) / ".env"
     assert env_path.exists()
     env_lines = dict(
         line.split("=", 1)
@@ -404,7 +446,7 @@ def test_write_home_creates_env_with_tui_token(tmp_path) -> None:
 
     NodeReconciler(_config(tmp_path), backend).reconcile(_desired())
 
-    env_path = tmp_path / "agents" / "support" / ".env"
+    env_path = _home(tmp_path) / ".env"
     assert env_path.exists()
     lines = dict(
         line.split("=", 1)
@@ -421,9 +463,9 @@ def test_write_home_creates_env_with_tui_token(tmp_path) -> None:
 def test_write_home_preserves_existing_env_token_on_config_restart(tmp_path) -> None:
     from fleetent.node.reconcile import NodeReconciler
 
-    home = tmp_path / "agents" / "support"
+    home = _home(tmp_path)
     home.mkdir(parents=True)
-    (home / "agent.yaml").write_text(yaml.safe_dump({"name": "support"}))
+    (home / "agent.yaml").write_text(yaml.safe_dump({"name": "support", "tenant_id": "tenant-1"}))
     existing_token = "ma-" + "d" * 64
     (home / ".env").write_text(f"FLEETENT_TUI_TOKEN={existing_token}\n", encoding="utf-8")
 
@@ -439,7 +481,7 @@ def test_write_home_preserves_existing_env_token_on_config_restart(tmp_path) -> 
     )
 
     NodeReconciler(_config(tmp_path), backend).reconcile(
-        _desired({"name": "support", "version": 2})
+        _desired({"name": "support", "tenant_id": "tenant-1", "version": 2})
     )
 
     env_content = (home / ".env").read_text(encoding="utf-8")
@@ -451,9 +493,9 @@ def test_reconcile_wipes_env_file_when_agent_removed_from_desired(tmp_path) -> N
     """D4: when an agent is stopped (no longer desired), its .env is erased."""
     from fleetent.node.reconcile import NodeReconciler
 
-    home = tmp_path / "agents" / "support"
+    home = _home(tmp_path)
     home.mkdir(parents=True)
-    (home / "agent.yaml").write_text(yaml.safe_dump({"name": "support"}))
+    (home / "agent.yaml").write_text(yaml.safe_dump({"name": "support", "tenant_id": "tenant-1"}))
     env_path = home / ".env"
     env_path.write_text(
         "ANTHROPIC_API_KEY=sk-live-secret\nFLEETENT_TUI_TOKEN=ma-" + "a" * 64 + "\n"
@@ -490,7 +532,7 @@ def test_reconcile_env_wipe_failure_is_bulkheaded(tmp_path, monkeypatch) -> None
     monkeypatch.setattr(reconcile_module, "_logger", FakeLogger())
 
     # support: not desired, has .env
-    home_support = tmp_path / "agents" / "support"
+    home_support = _home(tmp_path)
     home_support.mkdir(parents=True)
     env_path = home_support / ".env"
     env_path.write_text("ANTHROPIC_API_KEY=sk-secret\n")
@@ -514,7 +556,13 @@ def test_reconcile_env_wipe_failure_is_bulkheaded(tmp_path, monkeypatch) -> None
         DesiredState(
             node_id="node-a",
             agents=[
-                DesiredAgent(agent_id=102, name="billing", config={"name": "billing"}, secrets={}),
+                DesiredAgent(
+                    agent_id=102,
+                    name="billing",
+                    tenant_id="tenant-2",
+                    config={"name": "billing", "tenant_id": "tenant-2"},
+                    secrets={},
+                ),
             ],
         )
     )
@@ -560,3 +608,124 @@ def test_reconcile_logs_secret_metadata_without_plaintext_on_spawn(tmp_path, mon
         )
     ]
     assert route.called
+
+
+@respx.mock
+def test_reconcile_skill_deploy_failure_does_not_block_home_write_or_spawn(tmp_path, monkeypatch):
+    from fleetent.node import reconcile as reconcile_module
+    from fleetent.node.reconcile import NodeReconciler
+
+    class FakeSkillDeployer:
+        def __init__(self, config) -> None:
+            del config
+
+        def sync(self, home, manifests) -> None:
+            del home, manifests
+            raise ValueError("bad bundle")
+
+    monkeypatch.setattr(reconcile_module, "NodeSkillDeployer", FakeSkillDeployer)
+    respx.post("https://platform.internal/nodes/node-a/status").mock(
+        return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
+    )
+    backend = FakeBackend({"support": None})
+    desired = DesiredState(
+        node_id="node-a",
+        agents=[
+            DesiredAgent(
+                agent_id=101,
+                name="support",
+                tenant_id="tenant-1",
+                config={"name": "support", "tenant_id": "tenant-1"},
+                skill_manifests=[
+                    {
+                        "name": "incident-review",
+                        "base_version": "abc123",
+                        "base_commit": "def456",
+                        "bundle_url": "/nodes/node-a/skills/incident-review/bundles/abc123.tar.gz",
+                        "bundle_sha256": "0" * 64,
+                    }
+                ],
+                secrets={},
+            )
+        ],
+    )
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(desired)
+
+    home = _home(tmp_path)
+    assert (home / "agent.yaml").is_file()
+    assert (home / ".env").is_file()
+    assert backend.spawn_calls == ["support"]
+
+
+@respx.mock
+def test_reconcile_posts_observed_skill_statuses(tmp_path, monkeypatch) -> None:
+    from fleetent.node import reconcile as reconcile_module
+    from fleetent.node.reconcile import NodeReconciler
+
+    class FakeSkillDeployer:
+        def __init__(self, config) -> None:
+            del config
+
+        def sync(self, home, manifests) -> None:
+            del home, manifests
+
+        def observe(self, home, manifests):
+            del home, manifests
+            return [
+                {
+                    "skill_name": "incident-review",
+                    "base_version": "abc123",
+                    "base_commit": "def456",
+                    "drift": True,
+                }
+            ]
+
+    monkeypatch.setattr(reconcile_module, "NodeSkillDeployer", FakeSkillDeployer)
+    status_route = respx.post("https://platform.internal/nodes/node-a/status").mock(
+        return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
+    )
+    backend = FakeBackend({"support": None})
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(
+        DesiredState(
+            node_id="node-a",
+            agents=[
+                DesiredAgent(
+                    agent_id=101,
+                    name="support",
+                    tenant_id="tenant-1",
+                    config={"name": "support", "tenant_id": "tenant-1"},
+                    skill_manifests=[
+                        {
+                            "name": "incident-review",
+                            "base_version": "abc123",
+                            "base_commit": "def456",
+                            "bundle_url": (
+                                "/nodes/node-a/skills/incident-review/bundles/abc123.tar.gz"
+                            ),
+                            "bundle_sha256": "0" * 64,
+                        }
+                    ],
+                    secrets={},
+                )
+            ],
+        )
+    )
+
+    assert _post_body(status_route) == {
+        "agents": [
+            {
+                "agent_id": 101,
+                "phase": "stopped",
+                "skills": [
+                    {
+                        "skill_name": "incident-review",
+                        "base_version": "abc123",
+                        "base_commit": "def456",
+                        "drift": True,
+                    }
+                ],
+            }
+        ]
+    }

@@ -5,20 +5,20 @@ Two flat typed resolvers:
   ``agent_scope(tenant, agent_id)`` → AgentScope{state_db, vector_backend,
                                                    agent_memory_db, agent_memory_vector_backend}
 
-SQLite backend layout under ``<data_dir>/``::
+SQLite backend layout under ``<fleetent_home>/``::
 
-  <tenant_id>/kb.db                       — KB relation tables (Y-managed)
-  <tenant_id>/kb_vectors.db               — KB vector store
-  <tenant_id>/<agent_id>/agent_state.db   — agent state (Y-managed)
-  <tenant_id>/<agent_id>/agent_vectors.db — agent vector store
-  <tenant_id>/<agent_id>/agent_memory.db  — agent memory relation tables (Y-managed)
-  <tenant_id>/<agent_id>/agent_memory_vectors.db — agent memory vector store (agentmem: family)
+  tenants/<tenant_id>/kb.db                                 — KB relation tables (Y-managed)
+  tenants/<tenant_id>/kb_vectors.db                         — KB vector store
+  tenants/<tenant_id>/agents/<agent_id>/data/agent_state.db — agent state (Y-managed)
+  tenants/<tenant_id>/agents/<agent_id>/data/agent_vectors.db — agent vector store
+  tenants/<tenant_id>/agents/<agent_id>/data/agent_memory.db  — agent memory tables
+  tenants/<tenant_id>/agents/<agent_id>/data/agent_memory_vectors.db — memory vector store
 
 Directory structure is private to SQLiteTenantBackend; call sites only
 express scope and get typed handles — they never see file paths.
 
 Multi-tenant fan-out (3d): call sites pass the real tenant_id from agent config;
-SQLiteTenantBackend maps each to its physical partition under ``<data_dir>/``.
+SQLiteTenantBackend maps each to its physical partition under ``<fleetent_home>/tenants/``.
 """
 
 from __future__ import annotations
@@ -132,12 +132,12 @@ class TenantBackend(Protocol):
 
 @dataclass(frozen=True)
 class SQLiteTenantBackend:
-    """SQLite backend: maps each scope to files under ``<data_dir>/``."""
+    """SQLite backend: maps each scope to files under ``<fleetent_home>/tenants/``."""
 
     data_dir: Path
 
     def resolve(self, tenant_id: str) -> KbScope:
-        tenant_dir = self.data_dir / tenant_id
+        tenant_dir = self.data_dir / "tenants" / tenant_id
         tenant_dir.mkdir(parents=True, exist_ok=True)
         kb_db = cast(SQLiteDatabase, create_substrate(f"sqlite:///{tenant_dir / 'kb.db'}"))
         kb_vector_backend = SQLiteVectorBackend(
@@ -150,7 +150,7 @@ class SQLiteTenantBackend:
         )
 
     def resolve_agent(self, tenant_id: str, agent_id: str) -> AgentScope:
-        agent_dir = self.data_dir / tenant_id / agent_id
+        agent_dir = self.data_dir / "tenants" / tenant_id / "agents" / agent_id / "data"
         agent_dir.mkdir(parents=True, exist_ok=True)
         state_db = cast(
             SQLiteDatabase,

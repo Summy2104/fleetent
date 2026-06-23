@@ -93,7 +93,7 @@ def test_agent_admin_yaml_bindings_versions_and_deploy(monkeypatch, tmp_path):
 
     deployed = agent_admin_api.deploy_agent("ops", authorization="Session token")
     assert deployed["deployed"] is True
-    assert (tmp_path / "agents" / "ops" / "agent.yaml").exists()
+    assert (tmp_path / "tenants" / "default" / "agents" / "ops" / "agent.yaml").exists()
     assert agent_admin_api.list_versions("ops", authorization="Session token")[0]["version"] == 1
     assert agent_admin_api.activate_version("ops", 2, authorization="Session token") == {
         "name": "ops",

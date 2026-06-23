@@ -11,7 +11,7 @@ import pytest
 def test_init_agent_db_schema_creates_agent_memory_db(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """After _init_agent_db_schema, per-agent agent_memory.db must exist under agent dir."""
+    """After _init_agent_db_schema, per-agent agent_memory.db must exist under agent home data."""
     from fleetent.runtime import agent_app
 
     data_dir = tmp_path / "data"
@@ -38,11 +38,11 @@ def test_init_agent_db_schema_creates_agent_memory_db(
     ):
         agent_app._init_agent_db_schema(data_dir, agent_id="myagent", tenant_id="tenant1")
 
-    agent_dir = data_dir / "tenant1" / "myagent"
-    assert (agent_dir / "agent_memory.db").exists(), (
-        "agent_memory.db must be created under per-agent directory"
+    agent_data_dir = tmp_path / "tenants" / "tenant1" / "agents" / "myagent" / "data"
+    assert (agent_data_dir / "agent_memory.db").exists(), (
+        "agent_memory.db must be created under per-agent data directory"
     )
-    assert not (data_dir / "tenant1" / "shared_memory.db").exists(), (
+    assert not (tmp_path / "tenants" / "tenant1" / "shared_memory.db").exists(), (
         "shared_memory.db must not exist — agent memory moved to per-agent scope"
     )
 
@@ -76,6 +76,6 @@ def test_init_agent_db_schema_no_shared_memory_db_at_tenant_level(
     ):
         agent_app._init_agent_db_schema(data_dir, agent_id="bot", tenant_id="acme")
 
-    tenant_dir = data_dir / "acme"
+    tenant_dir = tmp_path / "tenants" / "acme"
     for path in tenant_dir.rglob("shared_memory*.db"):
         raise AssertionError(f"shared_memory*.db must not exist after new init, found: {path}")

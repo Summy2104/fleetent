@@ -7,11 +7,17 @@ Covers task 1.1 of skill-backflow-review:
 
 from __future__ import annotations
 
+import base64
+import io
+import tarfile
 from pathlib import Path
 
+import httpx
 import pytest
+import respx
 
 from fleetent import agent_store
+from fleetent.platform.node_management import node_store, placement_store
 from fleetent.platform.skill_management import backflow_store, skill_admin_store
 from fleetent.platform.tenancy import store as tenancy_store
 from tests.integration._migration_template import apply_migrations
@@ -135,3 +141,51 @@ def test_list_pending_proposals(db, pool_dir, monkeypatch):
     assert len(rows) == 2
     assert all(r["status"] == "pending" for r in rows)
     assert all(r["skill_name"] == "crm-ops" for r in rows)
+
+
+@respx.mock
+def test_nominate_managed_skill_pulls_bundle_from_owning_node(db, pool_dir, monkeypatch):
+    from fleetent.platform.agent_management_console import agent_admin_store
+
+    monkeypatch.setenv("FLEETENT_FORWARDER_HOST_OVERRIDE", "forwarder.test")
+    monkeypatch.setenv(
+        "FLEETENT_SECRET_KEY",
+        base64.urlsafe_b64encode(b"7" * 32).decode("ascii"),
+    )
+    _setup_pool_skill(pool_dir, "crm-ops", "pool-v1")
+    agent = _create_agent()
+    agent_admin_store.set_provenance(agent.id, "managed")
+    node_key, _ = node_store.register_node("node-a")
+    placement_store.pin_agent(agent.id, "node-a")
+    skill_admin_store.set_binding(agent.id, "crm-ops", True, updated_by="admin")
+    skill_admin_store.set_base_version(agent.id, "crm-ops", "a" * 64)
+    skill_admin_store.set_base_commit(agent.id, "crm-ops", "b" * 40)
+    skill_admin_store.set_drift(agent.id, "crm-ops", drifted=True)
+
+    bundle_bytes = io.BytesIO()
+    with tarfile.open(fileobj=bundle_bytes, mode="w:gz") as archive:
+        for path, content in {
+            "crm-ops/SKILL.md": "---\nname: crm-ops\ndescription: test\n---\nevolved by node",
+            "crm-ops/scripts/sync.py": "print('node script')\n",
+        }.items():
+            data = content.encode("utf-8")
+            info = tarfile.TarInfo(path)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+
+    route = respx.get(
+        "http://forwarder.test:8786/forward/agents/support/skills/crm-ops/bundle"
+    ).mock(return_value=httpx.Response(200, content=bundle_bytes.getvalue()))
+
+    proposal_id = backflow_store.nominate(
+        agent_id=agent.id, skill_name="crm-ops", pool_dir=pool_dir
+    )
+
+    assert route.called
+    assert route.calls[0].request.headers["Authorization"] == f"Bearer {node_key}"
+    row = backflow_store.get_proposal(proposal_id)
+    assert row is not None
+    assert row["proposed_bundle"] == {
+        "SKILL.md": "---\nname: crm-ops\ndescription: test\n---\nevolved by node",
+        "scripts/sync.py": "print('node script')\n",
+    }

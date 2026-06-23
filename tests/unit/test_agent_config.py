@@ -573,11 +573,11 @@ def test_build_index_prefers_default_agent_home_as_sole_default(tmp_path, monkey
     home = tmp_path / "home"
     home.mkdir()
     # Another agent also exists; it must be ignored when the default Agent home is present.
-    agents_dir = home / "agents"
+    agents_dir = home / "tenants" / "default" / "agents"
     agents_dir.mkdir(parents=True)
     _write_agent(agents_dir, "other")
     # Default Agent home file: still forced default regardless.
-    default_home = home / "agents" / "default"
+    default_home = home / "tenants" / "default" / "agents" / "default"
     _write_config_agent(default_home, "default")
     monkeypatch.setenv("FLEETENT_HOME", str(home))
 
@@ -613,7 +613,7 @@ def test_build_index_ignores_old_home_root_agent_yaml(tmp_path, monkeypatch) -> 
     monkeypatch.delenv("FLEETENT_AGENTS_DIR", raising=False)
     # AGENTS_DIR is evaluated at import time; patch it so _resolve_agents_dir picks up the
     # isolated tmp directory instead of the real ~/.fleetent/agents.
-    monkeypatch.setattr(agent_config, "AGENTS_DIR", home / "agents")
+    monkeypatch.setattr(agent_config, "AGENTS_DIR", home / "tenants" / "default" / "agents")
 
     index = agent_config.build_index()
 

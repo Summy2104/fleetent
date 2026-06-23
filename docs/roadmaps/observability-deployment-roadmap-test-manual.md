@@ -288,7 +288,7 @@ uv run fleetent admin diagnostics retention dry-run
 人工复核：
 
 - package 包含 manifest、logs summary、trace / usage / performance summary、connector status、environment 和 config summary。
-- package 不包含 SQLite 主库（`data/management.db` 及 agent 侧各库）、`data/backups/`、credential 文件、secret 文件、完整 prompt / reply、KB chunks。
+- package 不包含 SQLite 主库（`management.db` 及 `tenants/<tenant>/agents/<agent>/data/` 下各库）、`data/backups/`、credential 文件、secret 文件、完整 prompt / reply、KB chunks。
 - redaction 后仍能定位错误类型、run id、connector id 和 skip reason。
 
 建议检查：

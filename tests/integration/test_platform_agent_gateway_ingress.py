@@ -19,17 +19,21 @@ from fleetent.runtime import agent_app
 
 
 class _Backend:
-    def gateway_port(self, agent_name: str) -> int | None:
+    def gateway_port(self, agent_name: str, tenant_id: str = "default") -> int | None:
+        del tenant_id
         assert agent_name == "support"
         return 9011
 
-    def spawn(self, agent_name: str, env=None) -> None:
+    def spawn(self, agent_name: str, tenant_id: str = "default", env=None) -> None:
+        del agent_name, tenant_id, env
         raise NotImplementedError
 
-    def stop(self, agent_name: str) -> None:
+    def stop(self, agent_name: str, tenant_id: str = "default") -> None:
+        del agent_name, tenant_id
         raise NotImplementedError
 
-    def is_alive(self, agent_name: str) -> int | None:
+    def is_alive(self, agent_name: str, tenant_id: str = "default") -> int | None:
+        del agent_name, tenant_id
         raise NotImplementedError
 
 
@@ -53,7 +57,7 @@ def test_admin_chat_ingress_reaches_node_forwarder_and_agent(
     import fleetent.runtime.loop as loop_mod
     from fleetent.platform.node_management.agent_transport import DirectHttpAgentTransport
 
-    agent_home = tmp_path / "agents" / "support"
+    agent_home = tmp_path / "tenants" / "default" / "agents" / "support"
     agent_home.mkdir(parents=True)
     (agent_home / ".env").write_text("FLEETENT_TUI_TOKEN=ma-agent-token\n", encoding="utf-8")
 

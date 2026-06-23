@@ -5,7 +5,7 @@
 
 ## 0. 一句话
 
-平台侧把 agent 的**定义 + 管理态 + 绑定**维护在管理库，经 **materialize** 单向刷成 agent 侧 `agent.yaml`；**node** 拉取"期望态"在自己进程里启停 agent、回报"上报态"。agent 运行时零 platform 依赖、只读自己的 `agent.yaml`。
+平台侧把 agent 的**定义 + 管理态 + 绑定**维护在管理库，并对 owning node 暴露 desired-state；**node** 拉取"期望态"并在 tenant-aware home 写 `agent.yaml` / `.env` / skills、启停 agent、回报"上报态"。agent 运行时零 platform 依赖、只读自己的 `agent.yaml`。
 
 ---
 
@@ -16,7 +16,7 @@
 | **身份/定义** | `agents`(id 不可变身份 / name 可读标签) · `agent_versions`(不可变快照) · `agents.active_version_id`(当前版本指针) | agent 是谁、定义历史 |
 | **管理态** | `agent_admin_state`(§2) | 开关意图 + 定义所有权 + drift |
 | **绑定族**（agent "拥有"什么）| `agent_kbs` · `mcp_servers`+`agent_mcp_servers` · `agent_skills` · `agent_service_grants` · `agent_secrets` · `agent_im_groups` · `user_agents` + 能力列 `agents.supports_dm/groups` | KB/工具/技能/凭证/密钥/IM 群/用户准入/能力 |
-| **桥** | （materialize，§5）| 平台表 → agent.yaml |
+| **桥** | （desired-state + node reconcile，§5）| 平台表 → node → agent home |
 | **编排** | `agent_placements`(期望态 pin→node) · `node_agent_status`(上报态) · `nodes`(节点注册) | 在哪跑 / 跑成啥样 |
 
 所有绑定族表都是 `agent_id` FK→agents.id **ON DELETE CASCADE**——删 agent 一刀清。
@@ -51,16 +51,16 @@ agent 的"定义谁拥有"治理——**这条是活的**（区别于 skill 自�
 - **显式激活**：`POST /admin/agents/{name}/versions/{v}/activate` 只改 `active_version_id`、不建新版本。**无自动回滚路径**——切版本是人工触发的唯一手段。
 - **agent 级能力**（features/plugins/allowed_skills/config_overrides/supports_dm/groups）**不版本化**，存 `agents` 表——避免"回滚版本→能力/IM 闸跟着变"的耦合。
 
-## 5. materialize：平台 → agent.yaml（单向桥）
+## 5. desired-state + node reconcile：平台 → node → agent home（单向桥）
 
-平台把 `agents`(活跃版本) + config_overrides + 绑定族 **刷成** agent 侧 `<FLEETENT_HOME>/agents/<name>/agent.yaml`：
+平台把 `agents`(活跃版本) + config_overrides + 绑定族投影为 desired-state，由 owning node 写入 agent 侧 `FLEETENT_HOME/tenants/<tenant>/agents/<name>/agent.yaml`：
 
 1. 组装 AgentFile（活跃版本数据）→ 应用 config_overrides（深合并）。
 2. 投影 IM 访问（`user_agents`/`agent_im_groups` → `im.allow_users`/`allow_groups`，见 [im-access-model](im-access-model.md)）。
 3. **剥离密钥字段**（含 `env`/`credential_ref` 的字段名去掉）——agent.yaml 不落明文密钥。
 4. 写文件。
 
-触发：create/update/apply/clone 后 `materialize_from_store(name)`；skill 全局改动 `rematerialize_all()`。**agent runtime MUST NOT import platform**——平台单向写产物，agent 只读。
+触发：create/update/apply/clone 后，下一次 `GET /nodes/{id}/desired-state` 会暴露新的期望配置；skill 全局改动与 per-agent 绑定变更也只更新管理库/desired-state，不直接写 managed home。**agent runtime MUST NOT import platform**——平台只产出期望态，node 是 managed home 唯一 writer。
 
 ## 6. node 编排（分布式，retire-inmemory-controller 之后）
 
@@ -94,7 +94,7 @@ flowchart LR
 
 - **期望态**：`agent_placements` 把 agent pin 到某 node（CLI `node pin`）。
 - **下发闸**：node 拉 `GET /nodes/{id}/desired-state`，平台只返回该 node 上**且 `agent_admin_state.status==enabled`** 的 agent，带 materialize 后的 config + 从 `agent_secrets` 取出的注入 secret。→ **disable/archive 一个 agent，它就不再被下发、不再运行**（status 真生效的落点；旧死函数 `agent_routing_status` 已删）。
-- **reconcile**：node supervisor 每 ~10s（`FLEETENT_NODE_INTERVAL_SECONDS`）对比 desired 与本地进程（PID 文件 + signal 0）——缺则写 agent.yaml + `spawn`（`fleetent agent run`，secret 经 env 注入）、多则 `stop`、配置哈希变则重启。
+- **reconcile**：node supervisor 每 ~10s（`FLEETENT_NODE_INTERVAL_SECONDS`）对比 desired 与本地进程（PID 文件 + signal 0）——缺则在 `tenants/<tenant>/agents/<name>/` 写 agent.yaml / `.env` / skills 并 `spawn`（`fleetent agent run`）、多则 `stop`、配置哈希变则重启。
 - **上报态**：reconcile 后 `POST /nodes/{id}/status` → `node_agent_status`（phase/pid/health，可观测）。
 - **离线自治**：拉取失败降级到本地 `desired-state-cache.json`；缓存无 secret 时延迟启动新 agent（已跑的继续）。
 - **node 鉴权**：service key `ma-<hex>`，平台存 SHA256 到 `nodes.key_hash`，每请求 `Authorization: Bearer`。
@@ -104,15 +104,15 @@ flowchart LR
 
 | 操作 | 入口 | 改表 | 触发 |
 |---|---|---|---|
-| create | `POST /admin/agents` | agents(v1)+versions+admin_state | materialize |
-| update | `PATCH /admin/agents/{name}` / HTTP `PATCH /admin/agents/{name}` | versions(vN)+admin_state(drift) | materialize |
-| clone | `POST /admin/agents/{name}/clone` | agents(v1)+versions+admin_state(adhoc) | materialize |
+| create | `POST /admin/agents` | agents(v1)+versions+admin_state | desired-state updated |
+| update | `PATCH /admin/agents/{name}` / HTTP `PATCH /admin/agents/{name}` | versions(vN)+admin_state(drift) | desired-state updated |
+| clone | `POST /admin/agents/{name}/clone` | agents(v1)+versions+admin_state(adhoc) | desired-state updated |
 | delete | `DELETE /admin/agents/{name}` | agents(CASCADE 清所有绑定) | 需 references 校验(user_agents)+X-Confirm；`_delete_agent_hook` 清外部凭证 |
 | enable/disable/archive/restore | `POST /admin/agents/{name}/{op}` | admin_state(status) | —（下次 desired-state 生效）|
-| apply / apply:batch | `POST /admin/agents/apply` | agents/versions + admin_state(provenance=managed) | materialize |
-| list/activate version | `GET\|POST /admin/agents/{name}/versions[/{v}/activate]` | agents(active_version_id) | 无自动 materialize |
+| apply / apply:batch | `POST /admin/agents/apply` | agents/versions + admin_state(provenance=managed) | desired-state updated |
+| list/activate version | `GET\|POST /admin/agents/{name}/versions[/{v}/activate]` | agents(active_version_id) | 无直接 home 写 |
 | pin / unpin | **仅 CLI** `node pin\|unpin` | agent_placements | 下次 desired-state 生效 |
-| assign/unassign user | `POST` / `DELETE /admin/agents/{name}/bindings/users/{user_id}` | user_agents | materialize(IM allow_users) |
+| assign/unassign user | `POST` / `DELETE /admin/agents/{name}/bindings/users/{user_id}` | user_agents | desired-state updated |
 
 ## 8. live / dead 速查
 
@@ -121,7 +121,7 @@ flowchart LR
 | `agent_admin_state.status` → node 下发闸 | ✅ live（node 模型接线后真生效）|
 | `provenance` managed/adhoc + apply/adopt | ✅ live |
 | 版本 create-on-edit / activate | ✅ live |
-| materialize 平台→agent.yaml | ✅ live |
+| desired-state + node 写 managed home | ✅ live |
 | node desired/reported reconcile + secret 注入 + 离线缓存 | ✅ live |
 | ~~`agent_routing_status()` 旧死函数~~ | ❌ 已删（被 node 下发闸取代）|
 | `drift` 调和（`clear_drift`/promote/discard）| ◐ **半闭环**——drift 标得上清不掉（`clear_drift` 零调用、apply 不清），功能缺口待补 |

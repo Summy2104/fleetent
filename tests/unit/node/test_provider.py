@@ -28,8 +28,18 @@ def test_provider_fetches_desired_state_and_writes_cache(tmp_path) -> None:
             json={
                 "node_id": "node-a",
                 "agents": [
-                    {"agent_id": 101, "name": "support", "config": {"name": "support"}},
-                    {"agent_id": 102, "name": "sales", "config": {"name": "sales"}},
+                    {
+                        "agent_id": 101,
+                        "name": "support",
+                        "tenant_id": "tenant-1",
+                        "config": {"name": "support", "tenant_id": "tenant-1"},
+                    },
+                    {
+                        "agent_id": 102,
+                        "name": "sales",
+                        "tenant_id": "tenant-2",
+                        "config": {"name": "sales", "tenant_id": "tenant-2"},
+                    },
                 ],
             },
         )
@@ -44,6 +54,7 @@ def test_provider_fetches_desired_state_and_writes_cache(tmp_path) -> None:
     assert request.headers["Authorization"] == "Bearer " + "ma-" + "1" * 64
     assert [agent.agent_id for agent in desired.agents] == [101, 102]
     assert [agent.name for agent in desired.agents] == ["support", "sales"]
+    assert [agent.tenant_id for agent in desired.agents] == ["tenant-1", "tenant-2"]
     cache = json.loads((tmp_path / "node" / "desired-state-cache.json").read_text())
     assert cache["node_id"] == "node-a"
     assert cache["agents"][0]["name"] == "support"
@@ -59,7 +70,14 @@ def test_provider_falls_back_to_cache_when_platform_unreachable(tmp_path) -> Non
         json.dumps(
             {
                 "node_id": "node-a",
-                "agents": [{"agent_id": 101, "name": "support", "config": {"name": "support"}}],
+                "agents": [
+                    {
+                        "agent_id": 101,
+                        "name": "support",
+                        "tenant_id": "tenant-1",
+                        "config": {"name": "support", "tenant_id": "tenant-1"},
+                    }
+                ],
             }
         )
     )
@@ -103,7 +121,8 @@ def test_provider_parses_secrets_but_strips_them_from_disk_cache(tmp_path) -> No
                     {
                         "agent_id": 101,
                         "name": "support",
-                        "config": {"name": "support"},
+                        "tenant_id": "tenant-1",
+                        "config": {"name": "support", "tenant_id": "tenant-1"},
                         "secrets": {"ANTHROPIC_API_KEY": "sk-live-secret"},
                     }
                 ],
@@ -137,7 +156,8 @@ def test_provider_reuses_last_live_secrets_when_falling_back_to_cache(tmp_path) 
                     {
                         "agent_id": 101,
                         "name": "support",
-                        "config": {"name": "support"},
+                        "tenant_id": "tenant-1",
+                        "config": {"name": "support", "tenant_id": "tenant-1"},
                         "secrets": {"ANTHROPIC_API_KEY": "sk-live-secret"},
                     }
                 ],
@@ -180,7 +200,8 @@ def test_provider_logs_secret_metadata_without_plaintext(tmp_path, monkeypatch) 
                     {
                         "agent_id": 101,
                         "name": "support",
-                        "config": {"name": "support"},
+                        "tenant_id": "tenant-1",
+                        "config": {"name": "support", "tenant_id": "tenant-1"},
                         "secrets": {"ANTHROPIC_API_KEY": "sk-live-secret"},
                     }
                 ],
@@ -213,3 +234,41 @@ def test_provider_logs_secret_metadata_without_plaintext(tmp_path, monkeypatch) 
             },
         ),
     ]
+
+
+@respx.mock
+def test_provider_keeps_skill_manifests_in_memory_and_cache(tmp_path) -> None:
+    from fleetent.node.provider import PlatformApiDesiredStateProvider
+
+    manifest = {
+        "name": "incident-review",
+        "base_version": "abc123",
+        "base_commit": "def456",
+        "bundle_url": "/nodes/node-a/skills/incident-review/bundles/abc123.tar.gz",
+        "bundle_sha256": "0" * 64,
+    }
+    respx.get("https://platform.internal/nodes/node-a/desired-state").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "node_id": "node-a",
+                "agents": [
+                    {
+                        "agent_id": 101,
+                        "name": "support",
+                        "tenant_id": "tenant-1",
+                        "config": {"name": "support", "tenant_id": "tenant-1"},
+                        "skill_manifests": [manifest],
+                    }
+                ],
+            },
+        )
+    )
+
+    provider = PlatformApiDesiredStateProvider(_config(tmp_path))
+
+    desired = provider.fetch()
+    cache = json.loads((tmp_path / "node" / "desired-state-cache.json").read_text(encoding="utf-8"))
+
+    assert desired.agents[0].skill_manifests == [manifest]
+    assert cache["agents"][0]["skill_manifests"] == [manifest]

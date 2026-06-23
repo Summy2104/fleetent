@@ -12,7 +12,7 @@ def test_agent_init_dispatch_scaffolds_home(tmp_path, monkeypatch, capsys) -> No
 
     cli.main()
 
-    home = tmp_path / "agents" / "my-bot"
+    home = tmp_path / "tenants" / "default" / "agents" / "my-bot"
     assert (home / "agent.yaml").is_file()
     assert agent_config.load_agent_file(home).name == "my-bot"
     out = capsys.readouterr().out

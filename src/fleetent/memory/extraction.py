@@ -223,7 +223,14 @@ def expires_at(memory_type: MemoryType, now: datetime) -> datetime | None:
 
 
 def targets_non_user_memory(action: dict[str, Any]) -> bool:
-    markers = {"agent_memory", "knowledge_base", "kb", "project_memory", "team_memory"}
+    markers = {
+        "agent_memory",
+        "shared_memory",
+        "knowledge_base",
+        "kb",
+        "project_memory",
+        "team_memory",
+    }
     for key in ("target", "target_scope", "memory_scope", "destination"):
         value = action.get(key)
         if isinstance(value, str) and value.strip().casefold() in markers:

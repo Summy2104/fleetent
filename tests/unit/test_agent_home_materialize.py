@@ -41,7 +41,7 @@ def test_create_writes_runnable_home(tmp_path, monkeypatch):
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
     home = materialize.write_home(_agent())
 
-    assert home == tmp_path / "agents" / "support"
+    assert home == tmp_path / "tenants" / "default" / "agents" / "support"
     af = load_agent_file(home)  # round-trips through the home schema (dir name == name)
     assert af.system_prompt == "Help the user."
     assert af.allowed_tools == ["shell"]
@@ -198,7 +198,7 @@ def test_materialize_preserves_kb_source_credential_env_values(tmp_path, monkeyp
             ]
         }
     )
-    home = tmp_path / "agents" / "support"
+    home = tmp_path / "tenants" / "default" / "agents" / "support"
     home.mkdir(parents=True)
     (home / ".env").write_text(
         "FLEETENT_CONFLUENCE_TOKEN=secret-token\nSUP_BOT=xoxb-real\nSUP_APP=xapp-real\n",

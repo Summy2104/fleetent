@@ -27,8 +27,8 @@ def test_kb_schema_established_in_tenant_scoped_db(tmp_path) -> None:
 
     _init_agent_db_schema(data_dir, agent_id="test-agent")
 
-    kb_db_path = data_dir / "default" / "kb.db"
-    assert kb_db_path.exists(), "router must create data/default/kb.db"
+    kb_db_path = tmp_path / "tenants" / "default" / "kb.db"
+    assert kb_db_path.exists(), "router must create tenants/default/kb.db"
 
     tables = _tables_in(kb_db_path)
     assert "knowledge_bases" in tables
@@ -46,7 +46,9 @@ def test_kb_tables_absent_from_main_agent_db(tmp_path) -> None:
 
     _init_agent_db_schema(data_dir, agent_id="test-agent")
 
-    agent_state_path = data_dir / "default" / "test-agent" / "agent_state.db"
+    agent_state_path = (
+        tmp_path / "tenants" / "default" / "agents" / "test-agent" / "data" / "agent_state.db"
+    )
     assert agent_state_path.exists()
     tables = _tables_in(agent_state_path)
     assert "knowledge_bases" not in tables, "KB tables must not pollute agent_state.db"
@@ -64,7 +66,9 @@ def test_memory_items_is_y_managed_in_agent_state_db(tmp_path) -> None:
 
     _init_agent_db_schema(data_dir, agent_id="test-agent")
 
-    agent_state_path = data_dir / "default" / "test-agent" / "agent_state.db"
+    agent_state_path = (
+        tmp_path / "tenants" / "default" / "agents" / "test-agent" / "data" / "agent_state.db"
+    )
     assert agent_state_path.exists()
     tables = _tables_in(agent_state_path)
     # memory_items, traces, and reflection_reports are all Y-managed in agent_state.db.
@@ -83,7 +87,9 @@ def test_traces_and_reflection_land_in_agent_state_db(tmp_path) -> None:
 
     _init_agent_db_schema(data_dir, agent_id="test-agent")
 
-    agent_state_path = data_dir / "default" / "test-agent" / "agent_state.db"
+    agent_state_path = (
+        tmp_path / "tenants" / "default" / "agents" / "test-agent" / "data" / "agent_state.db"
+    )
     assert agent_state_path.exists()
     agent_tables = _tables_in(agent_state_path)
     assert "traces" in agent_tables
@@ -121,9 +127,9 @@ async def test_agent_boot_search_reads_only_boot_tenant_kb(tmp_path, monkeypatch
         limit=5,
     )
     assert [chunk.tenant_id for chunk in tenant_a_results] == ["tenant-a"]
-    assert (data_dir / "tenant-a" / "kb_vectors.db").exists()
+    assert (tmp_path / "tenants" / "tenant-a" / "kb_vectors.db").exists()
 
-    router = TenantRouter(SQLiteTenantBackend(data_dir=data_dir))
+    router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path))
     tenant_b_scope = router.tenant_scope("tenant-b")
     runtime.set_database(tenant_b_scope.open_kb_db([]))
     runtime.set_vector_backend(tenant_b_scope.kb_vector_backend)

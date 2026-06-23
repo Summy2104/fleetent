@@ -71,7 +71,7 @@ def test_materialize_operator_preserves_existing_value_or_writes_empty(db, tmp_p
         mode="operator",
         env_name="FLEETENT_AGENT_SUPPORT_MODEL",
     )
-    home = tmp_path / "agents" / "support"
+    home = tmp_path / "tenants" / "default" / "agents" / "support"
     home.mkdir(parents=True)
     (home / ".env").write_text("FLEETENT_AGENT_SUPPORT_MODEL=operator-secret\n", encoding="utf-8")
 
@@ -122,7 +122,7 @@ def test_materialize_seeds_managed_tui_token_without_leaking_desired_state(
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
     agent = _agent_with_model_env()
 
-    home = tmp_path / "agents" / "support"
+    home = tmp_path / "tenants" / "default" / "agents" / "support"
     home.mkdir(parents=True)
     (home / ".env").write_text("FLEETENT_TUI_TOKEN=ma-existing-token\n", encoding="utf-8")
 

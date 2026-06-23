@@ -105,9 +105,9 @@ def scaffold_agent_home(
 ) -> Path:
     """Scaffold a runnable agent home and return its directory.
 
-    home = ``home`` if given else ``FLEETENT_HOME/agents/<agent_id>`` (same resolution as
-    ``fleetent agent run``). Refuses to overwrite an existing ``agent.yaml`` unless
-    ``force``; an existing ``.env`` is always preserved.
+    home = ``home`` if given else ``FLEETENT_HOME/tenants/default/agents/<agent_id>`` (same
+    resolution as ``fleetent agent run``). Refuses to overwrite an existing ``agent.yaml``
+    unless ``force``; an existing ``.env`` is always preserved.
     """
     home_dir = Path(home) if home is not None else resolve_home(agent_id)
     agent_yaml = home_dir / "agent.yaml"

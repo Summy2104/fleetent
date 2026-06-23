@@ -39,7 +39,7 @@ def test_settings_default_paths_follow_fleetent_home(
 
     s = Settings()
 
-    assert s.database_url == f"sqlite:///{tmp_path / 'data' / 'management.db'}"
+    assert s.database_url == f"sqlite:///{tmp_path / 'management.db'}"
     # Blank means "resolve at runtime": configure_structured_logging falls back to
     # data_dir()/logs when directory is empty, so the effective log path still follows
     # FLEETENT_HOME — only the stored default changed from absolute to blank.

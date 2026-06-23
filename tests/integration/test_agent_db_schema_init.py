@@ -217,8 +217,8 @@ def test_init_agent_db_schema_creates_all_agent_tables(tmp_path: Path) -> None:
     try:
         _init_agent_db_schema(data_dir, agent_id="test-agent")
 
-        # KB tables land in default/kb.db via TenantRouter + migrate-on-open.
-        kb_db_path = data_dir / "default" / "kb.db"
+        # KB tables land in tenants/default/kb.db via TenantRouter + migrate-on-open.
+        kb_db_path = tmp_path / "tenants" / "default" / "kb.db"
         assert kb_db_path.exists()
         kb_tables = _table_names(SQLiteDatabase(path=kb_db_path))
         assert "knowledge_bases" in kb_tables
@@ -228,7 +228,9 @@ def test_init_agent_db_schema_creates_all_agent_tables(tmp_path: Path) -> None:
         assert "knowledge_source_states" in kb_tables
 
         # sessions + traces + reflection_reports + memory_items + scheduled_tasks in agent_state.db.
-        agent_state_db_path = data_dir / "default" / "test-agent" / "agent_state.db"
+        agent_state_db_path = (
+            tmp_path / "tenants" / "default" / "agents" / "test-agent" / "data" / "agent_state.db"
+        )
         assert agent_state_db_path.exists()
         agent_tables = _table_names(SQLiteDatabase(path=agent_state_db_path))
         assert "sessions" in agent_tables
@@ -250,7 +252,9 @@ def test_init_agent_db_schema_idempotent(tmp_path: Path) -> None:
     try:
         _init_agent_db_schema(data_dir, agent_id="test-agent")
         _init_agent_db_schema(data_dir, agent_id="test-agent")
-        agent_state_db_path = data_dir / "default" / "test-agent" / "agent_state.db"
+        agent_state_db_path = (
+            tmp_path / "tenants" / "default" / "agents" / "test-agent" / "data" / "agent_state.db"
+        )
         assert (
             SQLiteDatabase(path=agent_state_db_path)
             .execute("SELECT name FROM sqlite_master WHERE name='traces'")
@@ -274,7 +278,9 @@ def test_init_agent_db_schema_data_dir_creates_scheduled_tasks(tmp_path: Path) -
     original_state_db = ss._state_db
     try:
         _init_agent_db_schema(data_dir, agent_id="test-agent")
-        agent_state_db_path = data_dir / "default" / "test-agent" / "agent_state.db"
+        agent_state_db_path = (
+            tmp_path / "tenants" / "default" / "agents" / "test-agent" / "data" / "agent_state.db"
+        )
         assert agent_state_db_path.exists()
         tables = _table_names(SQLiteDatabase(path=agent_state_db_path))
         assert "scheduled_tasks" in tables

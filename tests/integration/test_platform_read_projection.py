@@ -167,12 +167,12 @@ def test_readonly_kb_open_does_not_change_user_version(tmp_path: Path) -> None:
 # ── 2.3: platform registry traversal + read aggregation ─────────────────────
 
 
-def _seed_agent_db(data_dir: Path, tenant_id: str, agent_id: str) -> None:
+def _seed_agent_db(home_root: Path, tenant_id: str, agent_id: str) -> None:
     """Helper: boot agent DB and insert a session + approval for testing."""
     from fleetent.runtime.agent_app import _init_agent_db_schema
     from fleetent.session import index as session_index
 
-    _init_agent_db_schema(data_dir, agent_id=agent_id, tenant_id=tenant_id)
+    _init_agent_db_schema(home_root / "data", agent_id=agent_id, tenant_id=tenant_id)
 
     # Insert a session row directly (session_index was set by _init_agent_db_schema)
     session_index.record_activity(
@@ -187,14 +187,13 @@ def test_aggregate_sessions_across_agents(tmp_path: Path) -> None:
     from fleetent.platform import read_projection
     from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
 
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
+    home_root = tmp_path
 
-    _seed_agent_db(data_dir, "tenant-1", "agent-a")
-    _seed_agent_db(data_dir, "tenant-1", "agent-b")
-    _seed_agent_db(data_dir, "tenant-2", "agent-c")
+    _seed_agent_db(home_root, "tenant-1", "agent-a")
+    _seed_agent_db(home_root, "tenant-1", "agent-b")
+    _seed_agent_db(home_root, "tenant-2", "agent-c")
 
-    router = TenantRouter(SQLiteTenantBackend(data_dir=data_dir))
+    router = TenantRouter(SQLiteTenantBackend(data_dir=home_root))
 
     agents = [
         ("tenant-1", "agent-a"),
@@ -214,12 +213,11 @@ def test_aggregate_approvals_across_agents_read_only(tmp_path: Path) -> None:
     from fleetent.platform import read_projection
     from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
 
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
+    home_root = tmp_path
 
     # Seed two agents with approvals
     for tid, aid in [("t1", "bot"), ("t2", "bot")]:
-        _seed_agent_db(data_dir, tid, aid)
+        _seed_agent_db(home_root, tid, aid)
         approval_store.insert_approval(
             id=f"appr-{tid}-{aid}",
             session_id=f"sess-{tid}-{aid}",
@@ -230,7 +228,7 @@ def test_aggregate_approvals_across_agents_read_only(tmp_path: Path) -> None:
             created_at=datetime.datetime.now(datetime.UTC).isoformat(),
         )
 
-    router = TenantRouter(SQLiteTenantBackend(data_dir=data_dir))
+    router = TenantRouter(SQLiteTenantBackend(data_dir=home_root))
     agents = [("t1", "bot"), ("t2", "bot")]
 
     approvals = read_projection.aggregate_approvals_across_agents(router, agents)
@@ -249,8 +247,7 @@ def test_aggregate_trace_events_across_agents_resolves_platform_id_via_agent_nam
     from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
     from tests.integration.test_migrations import apply_migrations
 
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
+    home_root = tmp_path
     management_db = tmp_path / "management.db"
     apply_migrations(management_db)
 
@@ -260,8 +257,8 @@ def test_aggregate_trace_events_across_agents_resolves_platform_id_via_agent_nam
     tenancy_store.create_tenant(id="tenant-1", name="Tenant 1")
     agent = agent_store.create_agent("support", "Support.", ["shell"], tenant_id="tenant-1")
 
-    _seed_agent_db(data_dir, "tenant-1", "support")
-    router = TenantRouter(SQLiteTenantBackend(data_dir=data_dir))
+    _seed_agent_db(home_root, "tenant-1", "support")
+    router = TenantRouter(SQLiteTenantBackend(data_dir=home_root))
     write_db = router.agent_scope("tenant-1", "support").open_state_db(
         __import__("fleetent.runtime.agent_state_migrations", fromlist=["MIGRATIONS"]).MIGRATIONS
     )
@@ -310,14 +307,15 @@ def test_registry_traversal_no_write_to_agent_dbs(tmp_path: Path) -> None:
     from fleetent.platform import read_projection
     from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
 
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
+    home_root = tmp_path
 
-    _seed_agent_db(data_dir, "tenant-1", "bot")
-    router = TenantRouter(SQLiteTenantBackend(data_dir=data_dir))
+    _seed_agent_db(home_root, "tenant-1", "bot")
+    router = TenantRouter(SQLiteTenantBackend(data_dir=home_root))
 
     # Record user_version before traversal
-    state_db_path = data_dir / "tenant-1" / "bot" / "agent_state.db"
+    state_db_path = (
+        home_root / "tenants" / "tenant-1" / "agents" / "bot" / "data" / "agent_state.db"
+    )
     version_before = _user_version(state_db_path)
 
     # Traverse and aggregate

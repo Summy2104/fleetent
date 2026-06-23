@@ -111,11 +111,11 @@ def test_scaffold_backfills_token_when_env_exists_without_token(tmp_path) -> Non
     assert lines["FLEETENT_TUI_TOKEN"].startswith("ma-")
 
 
-def test_default_home_is_under_fleetent_home_agents_dir(tmp_path, monkeypatch) -> None:
+def test_default_home_is_under_fleetent_home_default_tenant_dir(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
     returned = agent_init.scaffold_agent_home("my-bot")
-    assert returned == tmp_path / "agents" / "my-bot"
-    assert (tmp_path / "agents" / "my-bot" / "agent.yaml").is_file()
+    assert returned == tmp_path / "tenants" / "default" / "agents" / "my-bot"
+    assert (tmp_path / "tenants" / "default" / "agents" / "my-bot" / "agent.yaml").is_file()
 
 
 # --- ensure_env_scaffold tests (tasks 1.1-1.3) ---

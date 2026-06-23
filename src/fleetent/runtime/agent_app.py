@@ -152,10 +152,10 @@ async def _drain_and_close(rt: AgentRuntime, drain_timeout: float) -> None:
 
 
 def resolve_home(agent_id: str, home: str | Path | None = None) -> Path:
-    """Resolve the agent home: explicit ``home`` wins, else ``FLEETENT_HOME/agents/<id>``."""
+    """Resolve the agent home: explicit ``home`` wins, else default-tenant home."""
     if home is not None:
         return Path(home)
-    return paths.base_dir() / "agents" / agent_id
+    return paths.agent_home_dir(agent_id)
 
 
 def _validate_tui_token(authorization_header: str) -> Principal | None:
@@ -298,7 +298,10 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     from fleetent.session import index as session_index
     from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
 
-    router = TenantRouter(SQLiteTenantBackend(data_dir=data_dir))
+    # Callers pass the running agent's ``<home>/data`` directory. TenantRouter resolves
+    # physical files from the enclosing Fleetent home so tenant-level KB and agent-level
+    # state share the same tenant-first root.
+    router = TenantRouter(SQLiteTenantBackend(data_dir=data_dir.parent))
     tenant_scope = router.tenant_scope(tenant_id)
     kb_db = tenant_scope.open_kb_db(KB_MIGRATIONS)
     kb_runtime.set_database(kb_db)

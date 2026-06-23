@@ -347,9 +347,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_nested_delimiter="__", extra="ignore")
 
     log_format: str = "console"
-    database_url: str = Field(
-        default_factory=lambda: f"sqlite:///{paths.data_dir() / 'management.db'}"
-    )
+    database_url: str = Field(default_factory=lambda: f"sqlite:///{paths.management_db_path()}")
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     oidc: OidcSettings = Field(default_factory=OidcSettings)
 

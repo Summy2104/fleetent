@@ -128,11 +128,11 @@ def test_resolve_is_default_only_in_multi_agent_scan(agents):
 
 
 def test_resolve_returns_forced_default_in_single_agent_mode(tmp_path, monkeypatch):
-    # Deployed single-agent mode (agents/default/agent.yaml under FLEETENT_HOME) is the
+    # Deployed single-agent mode (tenant-first default home under FLEETENT_HOME) is the
     # sole forced default; channel/user identifiers no longer influence resolution.
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
     monkeypatch.delenv("FLEETENT_AGENTS_DIR", raising=False)
-    home_agent = tmp_path / "agents" / "default"
+    home_agent = tmp_path / "tenants" / "default" / "agents" / "default"
     home_agent.mkdir(parents=True)
     (home_agent / "agent.yaml").write_text(
         yaml.safe_dump(

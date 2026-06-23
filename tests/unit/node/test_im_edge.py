@@ -17,6 +17,10 @@ def _config(tmp_path) -> NodeConfig:
     )
 
 
+def _home(tmp_path, agent_name: str = "support", tenant_id: str = "tenant-1"):
+    return tmp_path / "tenants" / tenant_id / "agents" / agent_name
+
+
 # ---------------------------------------------------------------------------
 # Task 2.1 / 2.2 — PlatformAddressResolver
 # ---------------------------------------------------------------------------
@@ -116,6 +120,7 @@ def test_node_im_edge_host_reconciles_materialized_bindings(tmp_path) -> None:
                 DesiredAgent(
                     agent_id=101,
                     name="support",
+                    tenant_id="tenant-1",
                     config={
                         "name": "support",
                         "tenant_id": "tenant-1",
@@ -153,12 +158,13 @@ async def test_node_im_edge_host_forwards_managed_reply_back_to_connector(tmp_pa
     from fleetent.node.im_edge import NodeIMEdgeHost
 
     class FakeBackend:
-        def gateway_port(self, agent_name: str) -> int | None:
+        def gateway_port(self, agent_name: str, tenant_id: str = "default") -> int | None:
             assert agent_name == "support"
+            assert tenant_id == "tenant-1"
             return 9011
 
     dispatcher_holder: list[object] = []
-    home = tmp_path / "agents" / "support"
+    home = _home(tmp_path)
     home.mkdir(parents=True)
     (home / ".env").write_text("FLEETENT_TUI_TOKEN=ma-agent-token\n", encoding="utf-8")
     host = NodeIMEdgeHost(
@@ -173,6 +179,7 @@ async def test_node_im_edge_host_forwards_managed_reply_back_to_connector(tmp_pa
                 DesiredAgent(
                     agent_id=101,
                     name="support",
+                    tenant_id="tenant-1",
                     config={"name": "support", "tenant_id": "tenant-1"},
                     secrets={},
                 )
@@ -222,7 +229,7 @@ async def test_node_im_edge_host_intercepts_link_command_before_forwarding(tmp_p
     from fleetent.node.im_edge import NodeIMEdgeHost
 
     class FakeBackend:
-        def gateway_port(self, agent_name: str) -> int | None:
+        def gateway_port(self, agent_name: str, tenant_id: str = "default") -> int | None:
             raise AssertionError(f"/link must not reach agent gateway for {agent_name}")
 
     dispatcher_holder: list[object] = []

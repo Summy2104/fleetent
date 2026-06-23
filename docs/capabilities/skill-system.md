@@ -4,7 +4,7 @@
 
 ## 0. 一句话
 
-Skill = `skills/` 下的 **SKILL.md 包**（可复用指令/playbook），agent 运行时 **read-on-demand** 注入；公共 skill 池是一个 **git-on-disk 仓库**，平台侧管 **绑定/治理/溯源 + 池版本 + drift + 回流**，经 **materialize** 单向同步进 agent.yaml + agent home；agent 侧零 platform 依赖、只读自己的副本，**绝不反写 platform**。
+Skill = `skills/` 下的 **SKILL.md 包**（可复用指令/playbook），agent 运行时 **read-on-demand** 注入；公共 skill 池由平台管理为 **immutable bundle source**，平台侧管 **绑定/治理/溯源 + 池版本 + drift + 回流**，经 desired-state manifest 单向下发给 node，由 node 部署到 agent home；agent 侧零 platform 依赖、只读自己的副本，**绝不反写 platform**。
 
 ---
 
@@ -49,7 +49,7 @@ skill 包零 `import fleetent.platform.*`；agent 只经 agent.yaml 读 `allowed
 
 > 合并要点：以前没有 skills 主表、两张元数据表无 FK；092 后有了主表，`agent_skills.skill_name` **FK→skills(name)**，治理与溯源同库同行、按 skill name 寻址。
 
-## 4. 平台 ↔ agent 同步（materialize，单向 + drift 感知）
+## 4. 平台 ↔ node ↔ agent 同步（desired-state manifest，单向 + drift 感知）
 
 ```mermaid
 flowchart LR
@@ -58,10 +58,10 @@ flowchart LR
     AS[agent_skills<br/>绑定 + drift/base_*]
     POOL[skill 池<br/>git 仓库]
   end
-  subgraph MAT[materialize 平台侧]
+  subgraph MAT[desired-state + node deploy]
     A1[_allowed_skills_for]
     A2[_global_disabled_skills]
-    A3[_copy_skills<br/>+ drift 检测]
+    A3[skill manifest + bundle deploy<br/>+ drift 观测]
   end
   subgraph AGENT[agent 侧 · agent.yaml + home]
     AY1[allowed_skills]
@@ -72,12 +72,12 @@ flowchart LR
   AS --> A1 --> AY1 --> RT
   SK -->|global_enabled=0| A2 --> AY2 --> RT
   POOL --> A3 --> HOME --> RT
-  A3 -.->|写回 drift/base_version/base_commit| AS
+  A3 -.->|node 上报 drift/base_version/base_commit| AS
 ```
 
 - `_allowed_skills_for`：agent 有绑定行→取 `enabled=1` 子集（空=显式收窄到无）；无绑定行→回退 authored `agent.allowed_skills`；缺表→authored 回退。
 - `_global_disabled_skills`：`skills.global_enabled=0` 的 skill 名 → `disabled_skills`。
-- `_copy_skills`：池 skill 整目录 `copytree` 进 `<home>/skills/`，**同时**做 drift 检测并把 `drift`/`base_version`/`base_commit` 写回 `agent_skills`（§6）；运行时再按 allowed/disabled 收窄。
+- skill bundle deploy：platform 为每个启用 skill 暴露 bundle manifest（`name/base_version/base_commit/bundle_url/bundle_sha256`），node 下载、校验、原子解压到 `<home>/skills/`，并在 status 中回报 `drift`/`base_version`/`base_commit`（§6）；运行时再按 allowed/disabled 收窄。
 - 注入审计在平台 admin 上传/创建/编辑路径**真实跑**（engine_audit→写 `skills.audit_verdict/rules`；severe→quarantined+不发布；force_publish 可经 `X-Confirm` 覆盖）。
 
 ## 5. skill 池 = git-on-disk 版本仓库（`pool_git.py`）
@@ -90,7 +90,7 @@ flowchart LR
 ## 6. drift 检测 + backflow 回流（self-managed 的活路径）
 
 ### 6.1 drift 检测（platform 单向判定）
-`agent_skills.drift`（per-agent-per-skill）标记该部署副本是否分叉。materialize `_copy_skills()` 期间检测，两个信号：
+`agent_skills.drift`（per-agent-per-skill）标记该部署副本是否分叉。该状态由 owning node 观测真实 home skill 副本后上报，两个信号：
 - **产物信号**：`_skill_has_runtime_provenance()` 扫 home 副本 SKILL.md frontmatter，有运行时写入迹象（§1 注入的 `source` 等）→ 疑似 drift。
 - **内容哈希**：`_skill_dir_version()` 对 home 副本逐文件 SHA256，与存储的 `base_version` 比对，不一致→`drift=1`。
 
@@ -99,11 +99,11 @@ flowchart LR
 ### 6.2 backflow 生命周期（`backflow_store.py` + `backflow_api.py`）
 agent 运行时改了 skill（drift=1）后，把进化回流到公共池的完整流程：
 
-1. **Nominate（提名）**：`nominate(agent_id, skill_name, pool_dir)`，前置 drift=1。捕获 home 副本**完整 bundle**（所有文件→`proposed_bundle` JSON）+ `base_version`/`base_commit` 快照；`_detect_conflict()` 比对 base 与池当前内容、标 `conflict`；写 `backflow_proposals`（status=pending）。
+1. **Nominate（提名）**：`nominate(agent_id, skill_name, pool_dir)`，前置 drift=1。平台先找 owning node，拉取该 home 副本**完整 bundle**（所有文件→`proposed_bundle` JSON）+ `base_version`/`base_commit` 快照；`_detect_conflict()` 比对 base 与池当前内容、标 `conflict`；写 `backflow_proposals`（status=pending）。
 2. **Review（diff）**：`get_proposal_diff()` 返回三向比较——`diff_vs_base`（用 `base_commit` 从池 git 取回基准）、`diff_vs_head`（vs 池当前 head）、`conflict` 标志（部署后池已被他人推进时显式暴露）。
 3. **决策（admin 控制台，平台治理鉴权 `_require_admin`）**：
-   - **Accept**：evolved bundle 原子写回池 → `commit_pool()` 新 commit → `set_current_version()` 前移指针 → 清该副本 drift → proposal=accepted（冲突时 `overridden_head` 记被覆盖的 head 供审计）。其余绑定该 skill 的 agent 下次 materialize 拿新版本。
-   - **Reject**：池不改、清 drift → 下次 materialize 该副本被池版本**覆盖**（进化丢弃）→ proposal=rejected。
+   - **Accept**：evolved bundle 原子写回池 → `commit_pool()` 新 commit → `set_current_version()` 前移指针 → 清该副本 drift → proposal=accepted（冲突时 `overridden_head` 记被覆盖的 head 供审计）。其余绑定该 skill 的 agent 下次 reconcile 会拿到新 bundle。
+   - **Reject**：池不改、清 drift → 下次 reconcile 该副本被期望 bundle**覆盖**（进化丢弃）→ proposal=rejected。
    - **Fork**：evolved bundle 作为**新命名 skill** 写回池（原 skill 不变）→ commit → 解绑原 skill、改绑 fork → 清原 skill drift → proposal=forked，`forked_as`=新名。
 
 > **为何不走 `approval_requests`**：回流改的是**共享池、影响整个 fleet**，是平台治理决策；与 agent 自进化审批（agent-owned/DM、只改单副本，走 approval_requests）性质不同。
@@ -116,7 +116,7 @@ agent 运行时改了 skill（drift=1）后，把进化回流到公共池的完�
 | 项 | 状态 |
 |---|---|
 | read-on-demand / catalog / 注入审计（agent 侧）| ✅ live（本轮未改）|
-| `agent_skills` 绑定 + materialize | ✅ live |
+| `agent_skills` 绑定 + desired-state manifests | ✅ live |
 | `skills` 治理（global_enabled→disabled_skills / audit→list 过滤 / force-publish）| ✅ live |
 | skill 池 git 版本化（pool_git）| ✅ live（本轮新增）|
 | drift 检测（双信号，platform 单向）| ✅ live（本轮新增）|

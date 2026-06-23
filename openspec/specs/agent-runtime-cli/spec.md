@@ -8,23 +8,22 @@ change agent-runtime-cli.
 ## Requirements
 ### Requirement: Standalone agent runtime via `fleetent agent run`
 
-`fleetent agent run <agent-id> [--port N]` SHALL boot a single agent home as a foreground process (loop + bound IM + optional HTTP/ws): 解析 `FLEETENT_HOME/agents/<agent-id>/` 的 agent home（`agent.yaml` + `.env` + `data/`），加载并运行 agent loop、启动其 IM 连接。**该命令是 node 拉起 agent 的原语**（node 经 subprocess 调用它）**, 也可被开发者直接运行作 dev/test 调试**。
+`fleetent agent run <agent-id> [--port N]` SHALL boot a single agent home as a foreground process (loop + bound IM + optional HTTP/ws): by default it resolves `FLEETENT_HOME/tenants/default/agents/<agent-id>/` for standalone/dev compatibility, while managed node invocations SHALL pass the tenant-aware home explicitly. The command loads `agent.yaml` + `.env` + `data/`, runs the agent loop, and brings up that agent's IM connectors. **该命令是 node 拉起 agent 的原语**, 也可被开发者直接运行作 dev/test 调试。
 
-该命令在运行时 **MUST NOT** 依赖 platform（agent→platform 解耦契约;agent 运行时不调 platform）。但"无 platform 的 standalone 部署"**不再是受支持的部署模式**——生产部署 platform 始终在场,agent 由 node 拉起、配置由 platform materialize 下发（见 `deployment`）。`fleetent agent run` 直接手跑仅用于 dev/test,不作部署形态。
+#### Scenario: Standalone default tenant run
+- **WHEN** developer runs `fleetent agent run support` without `--home`
+- **THEN** runtime loads `FLEETENT_HOME/tenants/default/agents/support/agent.yaml`
+- **AND** uses `FLEETENT_HOME/tenants/default/agents/support/data/` for runtime data
 
-Before scanning `agent.yaml`, `boot()` SHALL load `<home_dir>/.env` into the process `os.environ` using `load_dotenv(override=False)`; 文件不存在则静默跳过;进程环境（systemd / Docker / node 注入）优先。
+#### Scenario: Node passes explicit tenant-aware home
+- **WHEN** node starts tenant `acme` agent `support`
+- **THEN** it invokes the agent runtime with explicit home `FLEETENT_HOME/tenants/acme/agents/support`
+- **AND** runtime does not infer the wrong default tenant home
 
-#### Scenario: node 经 agent run 拉起 agent
-- **WHEN** node reconcile 时对某 agent 调 `fleetent agent run <id> --home <materialized-home>`
-- **THEN** 该进程加载 materialized home 并运行,无需在该进程内 import 或调用 platform
-
-#### Scenario: dev 直接跑 agent run 调试
-- **WHEN** 开发者本地 `fleetent agent run support` 调试
-- **THEN** 进程加载该 home 并运行;这是 dev/test 用法,不是受支持的 standalone 部署
-
-#### Scenario: .env 在扫描 agent.yaml 前加载
-- **WHEN** `<home_dir>/.env` 存在且含 `SLACK_BOT_TOKEN=xoxb-abc`
-- **THEN** 该值在 `boot()` 扫描 agent.yaml 前进入 `os.environ`（进程已有同名值优先）
+#### Scenario: Explicit home wins
+- **WHEN** `fleetent agent run support --home /tmp/custom-home` is used
+- **THEN** runtime loads `/tmp/custom-home/agent.yaml`
+- **AND** all agent data redirects under `/tmp/custom-home/data`
 
 ### Requirement: HTTP is opt-in via `--port`
 
@@ -55,24 +54,12 @@ without `--port` it runs IM/CLI/TUI-only with no HTTP listener.
 
 ### Requirement: Scaffold an agent home via `fleetent agent init`
 
-`fleetent agent init <agent-id>` SHALL scaffold a self-contained, runnable agent home under
-`FLEETENT_HOME/agents/<agent-id>/` from a built-in template, with zero platform/DB dependency.
-The generated home SHALL be directly runnable by `fleetent agent run <agent-id>`.
+`fleetent agent init <agent-id>` SHALL create `FLEETENT_HOME/tenants/default/agents/<agent-id>/` from a built-in template, with zero platform/DB dependency.
 
-#### Scenario: Init creates a runnable home
-- **WHEN** operator 运行 `fleetent agent init my-bot`
-- **THEN** 在 `FLEETENT_HOME/agents/my-bot/` 下创建 `agent.yaml`
-- **AND** `agent.yaml` 的 `name` 字段等于 `my-bot`（满足 `agent run` 的目录名==name 校验）
-- **AND** 生成的 `agent.yaml` 能被运行时加载器解析通过
-
-#### Scenario: Env scaffold lists referenced env-var names
-- **WHEN** init 写出 home
-- **THEN** 创建 `FLEETENT_HOME/agents/my-bot/.env`，列出生成 agent 引用的 env-var 名，值为空待填
-- **AND** 不写入任何真实密钥
-
-#### Scenario: Home override
-- **WHEN** operator 运行 `fleetent agent init my-bot --home /opt/agents/my-bot`
-- **THEN** 在该路径而非 `FLEETENT_HOME/agents/my-bot` 下 scaffold
+#### Scenario: Init writes default tenant home
+- **WHEN** developer runs `fleetent agent init solo`
+- **THEN** `FLEETENT_HOME/tenants/default/agents/solo/agent.yaml` exists
+- **AND** `.env`, `skills/`, and `data/` are initialized as standalone runtime inputs
 
 ### Requirement: Restart running agent via `fleetent agent restart`
 

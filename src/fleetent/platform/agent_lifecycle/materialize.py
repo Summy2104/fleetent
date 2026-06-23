@@ -1,9 +1,9 @@
-"""Materialize a runnable agent home from an authored definition (DB→file export).
+"""Materialize a runnable standalone/default-tenant agent home from an authored definition.
 
-The platform authors agents; this writes each agent's self-contained home —
-``FLEETENT_HOME/agents/<name>/agent.yaml`` (the full home schema) plus a ``.env`` scaffold that
-references secrets by env-var name only (never plaintext) — so the agent is runnable by
-``fleetent agent run`` (see openspec change ``platform-agent-lifecycle``).
+This legacy helper exports a self-contained home under the default-tenant shim
+(``FLEETENT_HOME/tenants/default/agents/<name>/agent.yaml``) plus a ``.env`` scaffold that
+references secrets by env-var name only (never plaintext). Managed deployment no longer uses
+this path as the real writer; node reconcile owns managed homes.
 """
 
 from __future__ import annotations
@@ -377,9 +377,22 @@ def _knowledge_for_agent(agent: agent_store.Agent) -> AgentKnowledge:
     )
 
 
-def home_dir(name: str) -> Path:
-    """The agent's home directory: ``FLEETENT_HOME/agents/<name>/``."""
-    return paths.base_dir() / "agents" / name
+def home_dir(name: str, tenant_id: str | None = None) -> Path:
+    """Resolve an agent home under tenant-first layout.
+
+    When ``tenant_id`` is omitted, prefer the DB-authored tenant for ``name`` and
+    fall back to the default-tenant shim for standalone compatibility.
+    """
+    resolved_tenant = tenant_id
+    if resolved_tenant is None:
+        try:
+            agent = agent_store.get_by_name(name)
+        except sqlite3.OperationalError as exc:
+            if "no such table: agents" not in str(exc):
+                raise
+            agent = None
+        resolved_tenant = agent.tenant_id if agent is not None else "default"
+    return paths.tenant_agent_home_dir(resolved_tenant, name)
 
 
 def _env_var_names(agent: AgentFile) -> list[str]:
@@ -532,7 +545,8 @@ def write_home(
     Rewrites ``agent.yaml`` from the definition and seeds/refreshes the ``.env`` scaffold.
     Idempotent: re-running rewrites the yaml and preserves operator ``.env`` values.
     """
-    home = home_dir(agent.name)
+    tenant_id = source_agent.tenant_id if source_agent is not None else None
+    home = home_dir(agent.name, tenant_id)
     home.mkdir(parents=True, exist_ok=True)
     _logger.debug("agent_home_write_start", name=agent.name, path=str(home))
     (home / "data").mkdir(parents=True, exist_ok=True)

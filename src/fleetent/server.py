@@ -33,7 +33,6 @@ from fleetent.observability.startup_diagnostics import (
     log_config_failed,
     log_config_loaded,
 )
-from fleetent.platform.agent_lifecycle import materialize
 from fleetent.platform.agent_management_console import (
     agent_admin_api,
     agent_console_api,
@@ -387,8 +386,6 @@ def wire_agent_store_seams() -> None:
             team_id=team_id,
             config_overrides=config_overrides,
         )
-        # platform-agent-lifecycle: materialize the runnable home on create.
-        materialize.materialize_from_store(name)
 
     def _console_update(
         name: str,
@@ -428,8 +425,6 @@ def wire_agent_store_seams() -> None:
         if memory_namespace is not None:
             kwargs["memory_namespace"] = memory_namespace
         agent_store.create_version(name, **kwargs)
-        # platform-agent-lifecycle: re-materialize the home on update.
-        materialize.materialize_from_store(name)
 
     def _console_delete(name: str) -> bool:
         return agent_store.delete_agent(name)
@@ -446,7 +441,6 @@ def wire_agent_store_seams() -> None:
             allowed_tools,
             model_overrides=model_overrides,
         ).id
-        materialize.materialize_from_store(name)
         return agent_id
 
     def _apply_update(
@@ -462,7 +456,6 @@ def wire_agent_store_seams() -> None:
         if model_overrides is not None:
             kwargs["model_overrides"] = model_overrides
         agent_store.create_version(name, **kwargs)
-        materialize.materialize_from_store(name)
 
     agent_console_api.get_agent_def = _get_def
     agent_console_api.create_agent_def = _console_create

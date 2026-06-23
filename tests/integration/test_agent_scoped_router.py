@@ -2,7 +2,7 @@
 
 Verifies:
 - agent_scope(tenant, agent_id) returns AgentScope{state_db, vector_backend}
-- SQLite backend maps to <tenant>/<agent_id>/agent_state.db + agent_vectors.db
+- SQLite backend maps to tenants/<tenant>/agents/<agent_id>/data/agent_state.db + agent_vectors.db
 - tenant_scope and agent_scope are flat peers (not nested)
 - Backend replaceable: injecting a fake backend leaves call sites unchanged
 - open_state_db(migrations) runs migrate-on-open and returns state_db
@@ -57,13 +57,17 @@ def test_agent_scope_returns_agent_scope(tmp_path: Path) -> None:
 def test_sqlite_backend_agent_state_db_path(tmp_path: Path) -> None:
     router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path))
     scope = router.agent_scope("default", "my-agent")
-    assert scope.state_db.path == tmp_path / "default" / "my-agent" / "agent_state.db"
+    assert scope.state_db.path == (
+        tmp_path / "tenants" / "default" / "agents" / "my-agent" / "data" / "agent_state.db"
+    )
 
 
 def test_sqlite_backend_agent_vectors_db_path(tmp_path: Path) -> None:
     router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path))
     scope = router.agent_scope("default", "my-agent")
-    expected = str(tmp_path / "default" / "my-agent" / "agent_vectors.db")
+    expected = str(
+        tmp_path / "tenants" / "default" / "agents" / "my-agent" / "data" / "agent_vectors.db"
+    )
     assert isinstance(scope.vector_backend, SQLiteVectorBackend)
     assert expected in scope.vector_backend.database_url
 
@@ -82,8 +86,8 @@ def test_different_tenants_get_different_paths(tmp_path: Path) -> None:
     scope_a = router.agent_scope("tenant-a", "bot")
     scope_b = router.agent_scope("tenant-b", "bot")
     assert scope_a.state_db.path != scope_b.state_db.path
-    assert "tenant-a" in str(scope_a.state_db.path)
-    assert "tenant-b" in str(scope_b.state_db.path)
+    assert scope_a.state_db.path.is_relative_to(tmp_path / "tenants" / "tenant-a")
+    assert scope_b.state_db.path.is_relative_to(tmp_path / "tenants" / "tenant-b")
 
 
 # ── 3: tenant_scope and agent_scope are flat peers ─────────────────────────

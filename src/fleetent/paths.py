@@ -57,16 +57,32 @@ def data_dir() -> Path:
 
 
 def agents_dir() -> Path:
-    return base_dir() / "agents"
+    return tenant_dir("default") / "agents"
+
+
+def management_db_path() -> Path:
+    return base_dir() / "management.db"
+
+
+def tenant_dir(tenant_id: str) -> Path:
+    return base_dir() / "tenants" / tenant_id
+
+
+def tenant_agent_home_dir(tenant_id: str, agent_id: str) -> Path:
+    return tenant_dir(tenant_id) / "agents" / agent_id
+
+
+def tenant_agent_data_dir(tenant_id: str, agent_id: str) -> Path:
+    return tenant_agent_home_dir(tenant_id, agent_id) / "data"
 
 
 def agent_home_dir(agent_id: str) -> Path:
-    return agents_dir() / agent_id
+    return tenant_agent_home_dir("default", agent_id)
 
 
 def agent_data_dir(agent_id: str) -> Path:
-    """Per-agent runtime data root: ``agents/<id>/data/``."""
-    return agents_dir() / agent_id / "data"
+    """Per-agent runtime data root default-tenant compatibility shim."""
+    return tenant_agent_data_dir("default", agent_id)
 
 
 def agent_file() -> Path:

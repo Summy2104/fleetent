@@ -30,7 +30,7 @@ def test_db_and_session_constants_derive_from_paths() -> None:
     _assert_derivation_in_clean_env(
         "from fleetent import paths, user_store; "
         "from fleetent.session import manager as session_manager; "
-        "assert user_store.DB_PATH == paths.data_dir() / 'management.db', user_store.DB_PATH; "
+        "assert user_store.DB_PATH == paths.management_db_path(), user_store.DB_PATH; "
         "assert session_manager.SESSIONS_DIR == paths.data_dir() / 'sessions'"
     )
     # session/index.py migrated away from users.db; it no longer exposes DB_PATH.
