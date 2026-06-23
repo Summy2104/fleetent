@@ -95,7 +95,9 @@ def notify_user(
     )
 
 
-def resolve_for_runtime(agent_name: str | None, connectors: dict[str, Any] | None) -> dict[str, Any]:
+def resolve_for_runtime(
+    agent_name: str | None, connectors: dict[str, Any] | None
+) -> dict[str, Any]:
     """Return the effective outbound connectors for this runtime mode."""
     if connectors:
         return connectors

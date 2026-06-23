@@ -19,7 +19,9 @@ def _config(tmp_path: Path) -> NodeConfig:
     )
 
 
-def _agent_state_db(tmp_path: Path, *, tenant_id: str = "tenant-1", agent_id: int = 101) -> SQLiteDatabase:
+def _agent_state_db(
+    tmp_path: Path, *, tenant_id: str = "tenant-1", agent_id: int = 101
+) -> SQLiteDatabase:
     from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
 
     path = tmp_path / "agents" / "support" / "data" / tenant_id / str(agent_id) / "agent_state.db"
@@ -127,7 +129,9 @@ async def test_node_im_edge_failed_send_increments_attempts_and_leaves_pending(
     assert dict(row) == {"status": "pending", "attempts": 1, "sent_at": None}
 
 
-async def test_node_im_edge_dedups_after_restart_before_mark_sent(tmp_path: Path, monkeypatch) -> None:
+async def test_node_im_edge_dedups_after_restart_before_mark_sent(
+    tmp_path: Path, monkeypatch
+) -> None:
     from fleetent.node.im_edge import NodeIMEdgeHost
     from fleetent.outbound import DeliveryReceipt
 
@@ -177,7 +181,9 @@ async def test_node_im_edge_dedups_after_restart_before_mark_sent(tmp_path: Path
 # ---------------------------------------------------------------------------
 
 
-def _queue_user_id_intent(db: SQLiteDatabase, user_id: str, *, dedup_key: str = "notify:user:1") -> str:
+def _queue_user_id_intent(
+    db: SQLiteDatabase, user_id: str, *, dedup_key: str = "notify:user:1"
+) -> str:
     import fleetent.im_gateway.outbound_queue_store as store
 
     store.set_state_db(db)
@@ -207,7 +213,9 @@ async def test_node_im_edge_drains_user_id_intent_fan_out(tmp_path: Path, monkey
         ]
 
     send_to = AsyncMock(
-        return_value=DeliveryReceipt(ok=True, platform="slack", target="U_alice", target_type="user", kind="text")
+        return_value=DeliveryReceipt(
+            ok=True, platform="slack", target="U_alice", target_type="user", kind="text"
+        )
     )
     monkeypatch.setattr("fleetent.outbound.send_to", send_to)
 
@@ -230,7 +238,9 @@ async def test_node_im_edge_drains_user_id_intent_fan_out(tmp_path: Path, monkey
     assert row["status"] == "sent"
 
 
-async def test_node_im_edge_user_id_intent_no_bindings_skips_delivery(tmp_path: Path, monkeypatch) -> None:
+async def test_node_im_edge_user_id_intent_no_bindings_skips_delivery(
+    tmp_path: Path, monkeypatch
+) -> None:
     from fleetent.node.im_edge import NodeIMEdgeHost
 
     db = _agent_state_db(tmp_path)
@@ -258,7 +268,9 @@ async def test_node_im_edge_user_id_intent_no_bindings_skips_delivery(tmp_path: 
     assert row["status"] == "sent"
 
 
-async def test_node_im_edge_user_id_intent_single_channel_failure_continues(tmp_path: Path, monkeypatch) -> None:
+async def test_node_im_edge_user_id_intent_single_channel_failure_continues(
+    tmp_path: Path, monkeypatch
+) -> None:
     """Single channel delivery failure must not stop fan-out to other channels."""
     from fleetent.node.im_edge import NodeIMEdgeHost
     from fleetent.outbound import DeliveryReceipt
@@ -279,7 +291,9 @@ async def test_node_im_edge_user_id_intent_single_channel_failure_continues(tmp_
         call_count += 1
         if platform == "slack":
             raise RuntimeError("slack connector unavailable")
-        return DeliveryReceipt(ok=True, platform=platform, target=target, target_type="user", kind="text")
+        return DeliveryReceipt(
+            ok=True, platform=platform, target=target, target_type="user", kind="text"
+        )
 
     monkeypatch.setattr("fleetent.outbound.send_to", _failing_first_send)
 

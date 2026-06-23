@@ -304,7 +304,9 @@ class NodeIMEdgeHost:
             puid = str(binding.get("platform_user_id", ""))
             connector = connectors.get(plat)
             try:
-                await outbound.send_to(plat, connector, puid, text, target_type="user", blocks=blocks)
+                await outbound.send_to(
+                    plat, connector, puid, text, target_type="user", blocks=blocks
+                )
             except Exception as exc:
                 _logger.warn(
                     "directed_reach_channel_delivery_failed",
