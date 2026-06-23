@@ -267,6 +267,14 @@ def test_agent_console_agent_lifecycle(monkeypatch):
     monkeypatch.setattr(
         agent_console_api, "references_for", lambda name: {"users": [], "channels": []}
     )
+    # Dual-state read seams (wired to real stores by server import) must be stubbed in
+    # this DB-less unit test. enable is gated on placement: pretend "ops" is pinned.
+    monkeypatch.setattr(
+        agent_console_api, "get_agent_placement", lambda agent_id: {"node_id": "node-a"}
+    )
+    monkeypatch.setattr(agent_console_api, "get_agent_runtime", lambda agent_id: None)
+    monkeypatch.setattr(agent_console_api, "list_agent_runtimes", lambda: [])
+    monkeypatch.setattr(agent_console_api, "list_agent_placements", lambda: [])
     monkeypatch.setattr(
         agent_console_api, "agent_observability_agg", lambda name, window: {"calls": 3}
     )

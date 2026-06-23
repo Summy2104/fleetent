@@ -207,6 +207,29 @@ def upsert_agent_status(
     return dict(row)
 
 
+def get_agent_status(agent_id: int) -> dict[str, Any] | None:
+    """Read the last reported actual state for one agent (read-only projection)."""
+    row = (
+        _database()
+        .execute(
+            f"SELECT {_STATUS_COLS} FROM node_agent_status WHERE agent_id = :agent_id",
+            {"agent_id": agent_id},
+        )
+        .fetchone()
+    )
+    return dict(row) if row else None
+
+
+def list_agent_status() -> list[dict[str, Any]]:
+    """Read every agent's last reported actual state (read-only projection)."""
+    rows = (
+        _database()
+        .execute(f"SELECT {_STATUS_COLS} FROM node_agent_status ORDER BY agent_id")
+        .fetchall()
+    )
+    return [dict(row) for row in rows]
+
+
 def list_agent_status_by_node(node_id: str) -> list[dict[str, Any]]:
     rows = (
         _database()

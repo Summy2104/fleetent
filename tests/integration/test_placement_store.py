@@ -51,6 +51,24 @@ def test_pin_missing_agent_or_node_raises_value_error(migrated_db) -> None:
         placement_store.pin_agent(agent.id, "node-missing")
 
 
+def test_list_placements_returns_all_rows(migrated_db) -> None:
+    from fleetent.platform.node_management import node_store, placement_store
+
+    assert placement_store.list_placements() == []
+
+    node_store.register_node("node-a")
+    node_store.register_node("node-b")
+    a = agent_store.create_agent("ops", "Ops.", ["shell"])
+    b = agent_store.create_agent("sre", "SRE.", ["shell"])
+    placement_store.pin_agent(a.id, "node-a")
+    placement_store.pin_agent(b.id, "node-b")
+
+    rows = placement_store.list_placements()
+
+    by_agent = {row["agent_id"]: row["node_id"] for row in rows}
+    assert by_agent == {a.id: "node-a", b.id: "node-b"}
+
+
 def test_unpin_removes_agent_placement(migrated_db) -> None:
     from fleetent.platform.node_management import node_store, placement_store
 
