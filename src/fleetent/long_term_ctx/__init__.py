@@ -428,4 +428,11 @@ def _knowledge_source(item: object) -> ContextSource:
 
 
 def _database() -> SQLiteDatabase:
+    # In the agent process, _init_agent_db_schema wires _kb_db to the per-tenant kb.db at
+    # boot; prefer it so retrieval reads the right tenant KB instead of the management DB.
+    from fleetent.knowledge_base import runtime as _kb_runtime
+
+    kb_db = _kb_runtime._kb_db
+    if kb_db is not None:
+        return kb_db
     return create_database(Settings().database_url)

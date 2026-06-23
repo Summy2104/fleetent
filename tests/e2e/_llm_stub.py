@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -13,6 +14,9 @@ app = FastAPI(title="fleetent-e2e-llm-stub")
 
 _RUN_CODE_TRIGGER = "sandbox_trigger"
 _RUN_CODE_ARGS = '{"code": "print(2+2)"}'
+
+_request_log: list[dict[str, Any]] = []
+_log_lock = threading.Lock()
 
 
 class ChatMessage(BaseModel):
@@ -146,8 +150,23 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/v1/requests")
+async def get_requests() -> list[dict[str, Any]]:
+    with _log_lock:
+        return list(_request_log)
+
+
+@app.delete("/v1/requests", status_code=204)
+async def clear_requests() -> None:
+    with _log_lock:
+        _request_log.clear()
+
+
 @app.post("/v1/chat/completions")
 async def chat_completions(body: ChatRequest):
+    with _log_lock:
+        _request_log.append(body.model_dump())
+
     if _has_tool_result(body.messages):
         # Second call after tool execution: echo the sandbox output as final reply
         reply = _tool_result_reply(body.messages)
