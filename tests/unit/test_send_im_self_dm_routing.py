@@ -54,7 +54,12 @@ def test_none_thread_preserved():
     assert out == {"recipient": "C_CHAN", "target_type": "channel", "thread": None}
 
 
-# --- wiring into send_im_message (task 3): the override reaches both outbound calls ----------
+# --- wiring into send_im_message --------------------------------------------------------------
+# outbound-tool-no-self-conversation-send: a send to the CURRENT conversation (the self-DM /
+# current-sender case) now no-ops upstream — the harness delivers the reply, so the tool sends
+# nothing (superseding the prior channel-pinning delivery). Third-party sends are unchanged.
+# (The pure `_resolve_self_dm_redirect` helper above is retained but is no longer reached for a
+# self-DM, because the no-op short-circuits before the redirect.)
 
 from unittest.mock import AsyncMock, patch  # noqa: E402
 
@@ -83,27 +88,26 @@ def _ok(kind, target):
     return DeliveryReceipt(ok=True, platform="slack", target=target, target_type="x", kind=kind)
 
 
-async def test_wiring_channel_self_dm_text_pinned_to_channel_thread():
+async def test_wiring_channel_self_dm_is_noop():
     from fleetent.tools.builtin_tools import send_im_message
 
     with (
         patch("fleetent.outbound.is_reachable", AsyncMock(return_value=True)),
         patch("fleetent.outbound.send_to", AsyncMock(return_value=_ok("text", "C_CHAN"))) as st,
     ):
-        await send_im_message(target="U_SELF", text="here", tool_context=_channel_ctx())
+        result = await send_im_message(target="U_SELF", text="here", tool_context=_channel_ctx())
 
-    # Text must go to the channel thread, not the sender's DM.
-    assert st.call_args.args[2] == "C_CHAN"
-    assert st.call_args.kwargs["target_type"] == "channel"
-    assert st.call_args.kwargs["thread"] == "111.222"
+    # Self-DM to the current sender → current conversation → no-op (harness delivers the reply).
+    st.assert_not_called()
+    assert "未发送" in result
 
 
-async def test_wiring_channel_self_dm_file_pinned_to_channel_thread():
+async def test_wiring_channel_self_dm_file_is_noop():
     from fleetent.tools.builtin_tools import send_im_message
 
     with (
         patch("fleetent.outbound.is_reachable", AsyncMock(return_value=True)),
-        patch("fleetent.outbound.send_to", AsyncMock(return_value=_ok("text", "C_CHAN"))),
+        patch("fleetent.outbound.send_to", AsyncMock(return_value=_ok("text", "C_CHAN"))) as st,
         patch(
             "fleetent.tools.builtin_tools._resolve_outbound_path",
             return_value="/host/report.png",
@@ -112,13 +116,13 @@ async def test_wiring_channel_self_dm_file_pinned_to_channel_thread():
             "fleetent.outbound.send_file_to", AsyncMock(return_value=_ok("file", "C_CHAN"))
         ) as sf,
     ):
-        await send_im_message(
+        result = await send_im_message(
             target="U_SELF", text="here", files=["report.png"], tool_context=_channel_ctx()
         )
 
-    assert sf.call_args.args[2] == "C_CHAN"
-    assert sf.call_args.kwargs["target_type"] == "channel"
-    assert sf.call_args.kwargs["thread"] == "111.222"
+    st.assert_not_called()
+    sf.assert_not_called()
+    assert "未发送" in result
 
 
 async def test_wiring_third_party_not_pinned():
