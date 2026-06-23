@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import httpx
@@ -13,11 +13,25 @@ _logger = get_logger("node.provider")
 
 
 @dataclass(frozen=True)
+class DesiredSkillFile:
+    path: str
+    content_b64: str
+
+
+@dataclass(frozen=True)
+class DesiredSkill:
+    name: str
+    version: str
+    files: list[DesiredSkillFile]
+
+
+@dataclass(frozen=True)
 class DesiredAgent:
     agent_id: int
     name: str
     config: dict[str, Any]
     secrets: dict[str, str]
+    skills: list[DesiredSkill] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -102,11 +116,26 @@ def _desired_state_from_payload(payload: dict[str, Any], *, source: str) -> Desi
                 secrets={
                     str(key): str(value) for key, value in dict(agent.get("secrets", {})).items()
                 },
+                skills=_skills_from_payload(agent.get("skills", [])),
             )
             for agent in payload.get("agents", [])
         ],
         source=source,
     )
+
+
+def _skills_from_payload(raw_skills: Any) -> list[DesiredSkill]:
+    return [
+        DesiredSkill(
+            name=str(skill["name"]),
+            version=str(skill["version"]),
+            files=[
+                DesiredSkillFile(path=str(f["path"]), content_b64=str(f["content_b64"]))
+                for f in skill.get("files", [])
+            ],
+        )
+        for skill in raw_skills
+    ]
 
 
 def _strip_secrets_for_cache(payload: dict[str, Any]) -> dict[str, Any]:
@@ -130,6 +159,7 @@ def _overlay_last_live_secrets(
                 name=agent.name,
                 config=agent.config,
                 secrets=dict(last_live_secrets_by_agent.get(agent.name, agent.secrets)),
+                skills=agent.skills,
             )
             for agent in state.agents
         ],

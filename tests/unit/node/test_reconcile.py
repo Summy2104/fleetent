@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 
@@ -8,7 +9,17 @@ import respx
 import yaml
 
 from fleetent.node.config import NodeConfig
-from fleetent.node.provider import DesiredAgent, DesiredState
+from fleetent.node.provider import DesiredAgent, DesiredSkill, DesiredSkillFile, DesiredState
+
+
+def _b64(data: bytes) -> str:
+    return base64.b64encode(data).decode()
+
+
+def _status_route() -> respx.Route:
+    return respx.post("https://platform.internal/nodes/node-a/status").mock(
+        return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
+    )
 
 
 class FakeBackend:
@@ -436,3 +447,330 @@ def test_reconcile_logs_secret_metadata_without_plaintext_on_spawn(tmp_path, mon
         )
     ]
     assert route.called
+
+
+def _config_hash_of(config: dict[str, object]) -> str:
+    return hashlib.sha256(yaml.safe_dump(config, sort_keys=True).encode()).hexdigest()
+
+
+def _desired_with_skills(
+    skills: list[DesiredSkill],
+    *,
+    config: dict[str, object] | None = None,
+    secrets: dict[str, str] | None = None,
+    source: str = "remote",
+) -> DesiredState:
+    return DesiredState(
+        node_id="node-a",
+        agents=[
+            DesiredAgent(
+                agent_id=101,
+                name="support",
+                config=config or {"name": "support"},
+                secrets=secrets or {},
+                skills=skills,
+            )
+        ],
+        source=source,
+    )
+
+
+@respx.mock
+def test_reconcile_materializes_skill_files_and_writes_manifest(tmp_path) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    _status_route()
+    backend = FakeBackend({"support": None})
+    skill = DesiredSkill(
+        name="alpha",
+        version="v1",
+        files=[
+            DesiredSkillFile(path="SKILL.md", content_b64=_b64(b"---\nname: alpha\n---\nbody")),
+            DesiredSkillFile(path="scripts/run.py", content_b64=_b64(b"print(1)\n")),
+        ],
+    )
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(_desired_with_skills([skill]))
+
+    skills_root = tmp_path / "agents" / "support" / "skills"
+    assert (skills_root / "alpha" / "SKILL.md").read_bytes() == b"---\nname: alpha\n---\nbody"
+    assert (skills_root / "alpha" / "scripts" / "run.py").read_bytes() == b"print(1)\n"
+    manifest = json.loads((tmp_path / "agents" / "support" / ".node-skills.json").read_text())
+    assert manifest == {"alpha": "v1"}
+    assert backend.spawn_calls == [("support", {})]
+
+
+@respx.mock
+def test_reconcile_restarts_when_skill_version_changes(tmp_path) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    config = {"name": "support"}
+    home = tmp_path / "agents" / "support"
+    (home / "skills" / "alpha").mkdir(parents=True)
+    (home / "skills" / "alpha" / "SKILL.md").write_text("old", encoding="utf-8")
+    (home / "agent.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+    (home / ".node-skills.json").write_text(json.dumps({"alpha": "v1"}), encoding="utf-8")
+    state_dir = tmp_path / "node"
+    state_dir.mkdir(parents=True)
+    (state_dir / "applied-config-hashes.json").write_text(
+        json.dumps({"support": _config_hash_of(config)}), encoding="utf-8"
+    )
+    _status_route()
+    backend = FakeBackend({"support": 12345})
+    skill = DesiredSkill(
+        name="alpha",
+        version="v2",
+        files=[DesiredSkillFile(path="SKILL.md", content_b64=_b64(b"new"))],
+    )
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(
+        _desired_with_skills([skill], config=config)
+    )
+
+    assert backend.stop_calls == ["support"]
+    assert backend.spawn_calls == [("support", {})]
+    assert (home / "skills" / "alpha" / "SKILL.md").read_text(encoding="utf-8") == "new"
+    assert json.loads((home / ".node-skills.json").read_text()) == {"alpha": "v2"}
+
+
+@respx.mock
+def test_reconcile_keeps_running_when_config_and_skills_unchanged(tmp_path) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    config = {"name": "support"}
+    home = tmp_path / "agents" / "support"
+    (home / "skills" / "alpha").mkdir(parents=True)
+    (home / "agent.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+    (home / ".node-skills.json").write_text(json.dumps({"alpha": "v1"}), encoding="utf-8")
+    state_dir = tmp_path / "node"
+    state_dir.mkdir(parents=True)
+    (state_dir / "applied-config-hashes.json").write_text(
+        json.dumps({"support": _config_hash_of(config)}), encoding="utf-8"
+    )
+    _status_route()
+    backend = FakeBackend({"support": 12345})
+    skill = DesiredSkill(
+        name="alpha",
+        version="v1",
+        files=[DesiredSkillFile(path="SKILL.md", content_b64=_b64(b"a"))],
+    )
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(
+        _desired_with_skills([skill], config=config)
+    )
+
+    assert backend.stop_calls == []
+    assert backend.spawn_calls == []
+
+
+@respx.mock
+def test_reconcile_cleans_removed_skill_but_keeps_unmanaged_dir(tmp_path) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    config = {"name": "support"}
+    home = tmp_path / "agents" / "support"
+    for name, body in (("alpha", "a"), ("beta", "b"), ("gamma", "builtin-copy")):
+        (home / "skills" / name).mkdir(parents=True)
+        (home / "skills" / name / "SKILL.md").write_text(body, encoding="utf-8")
+    (home / "agent.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+    # gamma is NOT node-managed (absent from manifest) — e.g. a builtin copy the agent materialized
+    (home / ".node-skills.json").write_text(
+        json.dumps({"alpha": "v1", "beta": "v1"}), encoding="utf-8"
+    )
+    state_dir = tmp_path / "node"
+    state_dir.mkdir(parents=True)
+    (state_dir / "applied-config-hashes.json").write_text(
+        json.dumps({"support": _config_hash_of(config)}), encoding="utf-8"
+    )
+    _status_route()
+    backend = FakeBackend({"support": 12345})
+    skill = DesiredSkill(
+        name="alpha",
+        version="v1",
+        files=[DesiredSkillFile(path="SKILL.md", content_b64=_b64(b"a"))],
+    )
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(
+        _desired_with_skills([skill], config=config)
+    )
+
+    assert (home / "skills" / "alpha" / "SKILL.md").exists()
+    assert not (home / "skills" / "beta").exists()
+    # unmanaged dir (not in node manifest) survives cleanup
+    assert (home / "skills" / "gamma" / "SKILL.md").exists()
+    assert json.loads((home / ".node-skills.json").read_text()) == {"alpha": "v1"}
+
+
+@respx.mock
+def test_reconcile_spawn_env_excludes_skills_dir_var(tmp_path) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    _status_route()
+    backend = FakeBackend({"support": None})
+    skill = DesiredSkill(
+        name="alpha",
+        version="v1",
+        files=[DesiredSkillFile(path="SKILL.md", content_b64=_b64(b"x"))],
+    )
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(
+        _desired_with_skills([skill], secrets={"ANTHROPIC_API_KEY": "sk"})
+    )
+
+    _name, env = backend.spawn_calls[0]
+    # agent run reads <home>/skills directly and ignores FLEETENT_SKILLS_DIR (agent_app.py),
+    # so node MUST NOT inject it — spawn env carries only the agent's secrets.
+    assert env == {"ANTHROPIC_API_KEY": "sk"}
+    assert "FLEETENT_SKILLS_DIR" not in (env or {})
+
+
+@respx.mock
+def test_reconcile_removes_home_of_disappeared_agent_under_remote(tmp_path) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    home = tmp_path / "agents" / "support"
+    (home / "skills" / "alpha").mkdir(parents=True)
+    (home / "agent.yaml").write_text(yaml.safe_dump({"name": "support"}), encoding="utf-8")
+    state_dir = tmp_path / "node"
+    state_dir.mkdir(parents=True)
+    (state_dir / "applied-config-hashes.json").write_text(
+        json.dumps({"support": "old-hash"}), encoding="utf-8"
+    )
+    _status_route()
+    backend = FakeBackend({"support": 12345})
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(
+        DesiredState(node_id="node-a", agents=[], source="remote")
+    )
+
+    assert backend.stop_calls == ["support"]
+    assert not home.exists()
+    hashes = json.loads((state_dir / "applied-config-hashes.json").read_text())
+    assert "support" not in hashes
+
+
+@respx.mock
+def test_reconcile_keeps_disappeared_agent_under_cache_source(tmp_path) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    home = tmp_path / "agents" / "support"
+    home.mkdir(parents=True)
+    (home / "agent.yaml").write_text(yaml.safe_dump({"name": "support"}), encoding="utf-8")
+    _status_route()
+    backend = FakeBackend({"support": 12345})
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(
+        DesiredState(node_id="node-a", agents=[], source="cache")
+    )
+
+    # cache fallback is non-authoritative: do not stop or delete a healthy local agent
+    assert backend.stop_calls == []
+    assert home.exists()
+
+
+@respx.mock
+def test_reconcile_remove_is_bulkheaded_when_stop_fails(tmp_path) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    home = tmp_path / "agents" / "support"
+    home.mkdir(parents=True)
+    (home / "agent.yaml").write_text(yaml.safe_dump({"name": "support"}), encoding="utf-8")
+    status_route = _status_route()
+
+    class BoomStopBackend(FakeBackend):
+        def stop(self, agent_name: str) -> None:
+            super().stop(agent_name)
+            raise RuntimeError("stop failed")
+
+    backend = BoomStopBackend({"support": 12345})
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(
+        DesiredState(node_id="node-a", agents=[], source="remote")
+    )
+
+    # stop raised but was bulkheaded: home still removed, status still posted
+    assert backend.stop_calls == ["support"]
+    assert not home.exists()
+    assert status_route.called
+
+
+@respx.mock
+def test_reconcile_tolerates_corrupt_skill_manifest(tmp_path) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    config = {"name": "support"}
+    home = tmp_path / "agents" / "support"
+    home.mkdir(parents=True)
+    (home / "agent.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+    (home / ".node-skills.json").write_text("{ not valid json", encoding="utf-8")
+    state_dir = tmp_path / "node"
+    state_dir.mkdir(parents=True)
+    (state_dir / "applied-config-hashes.json").write_text(
+        json.dumps({"support": _config_hash_of(config)}), encoding="utf-8"
+    )
+    status_route = _status_route()
+    backend = FakeBackend({"support": 12345})
+    skill = DesiredSkill(
+        name="alpha",
+        version="v1",
+        files=[DesiredSkillFile(path="SKILL.md", content_b64=_b64(b"a"))],
+    )
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(
+        _desired_with_skills([skill], config=config)
+    )
+
+    # a corrupt manifest must not abort the whole reconcile loop; it degrades to "missing"
+    # (-> treated as a skill change -> rewrite) and status is still posted.
+    assert status_route.called
+    assert json.loads((home / ".node-skills.json").read_text()) == {"alpha": "v1"}
+
+
+@respx.mock
+def test_reconcile_rejects_skill_file_path_escaping_skill_dir(tmp_path) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    _status_route()
+    backend = FakeBackend({"support": None})
+    skill = DesiredSkill(
+        name="alpha",
+        version="v1",
+        files=[
+            DesiredSkillFile(path="SKILL.md", content_b64=_b64(b"ok")),
+            DesiredSkillFile(path="../escape.txt", content_b64=_b64(b"evil")),
+        ],
+    )
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(_desired_with_skills([skill]))
+
+    skills_root = tmp_path / "agents" / "support" / "skills"
+    assert (skills_root / "alpha" / "SKILL.md").read_bytes() == b"ok"
+    # the traversal path is skipped — nothing written outside the skill dir
+    assert not (skills_root / "escape.txt").exists()
+    assert not (tmp_path / "agents" / "support" / "escape.txt").exists()
+
+
+@respx.mock
+def test_reconcile_rejects_skill_name_with_path_separator(tmp_path) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    _status_route()
+    backend = FakeBackend({"support": None})
+    bad = DesiredSkill(
+        name="../evil",
+        version="v1",
+        files=[DesiredSkillFile(path="SKILL.md", content_b64=_b64(b"x"))],
+    )
+    good = DesiredSkill(
+        name="alpha",
+        version="v1",
+        files=[DesiredSkillFile(path="SKILL.md", content_b64=_b64(b"ok"))],
+    )
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(_desired_with_skills([bad, good]))
+
+    home = tmp_path / "agents" / "support"
+    assert (home / "skills" / "alpha" / "SKILL.md").exists()
+    # "../evil" would resolve to <home>/agents/support/evil — must be rejected entirely
+    assert not (home / "evil").exists()
+    assert json.loads((home / ".node-skills.json").read_text()) == {"alpha": "v1"}
