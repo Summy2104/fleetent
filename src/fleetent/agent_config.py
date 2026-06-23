@@ -800,3 +800,21 @@ _DEFAULT_AGENT_FILE = AgentFile(name="", version=0, models=default_models())
 def active_agent_or_default() -> AgentFile:
     """The single active agent for this process, or a neutral default with schema defaults."""
     return active_agent() or _DEFAULT_AGENT_FILE
+
+
+def collect_env_var_names(agent: AgentFile) -> list[str]:
+    """Return all env-var names referenced by the agent config (stable, deduplicated).
+
+    Uses the flatten-all-*_env approach so every field — including embedding.api_key_env,
+    rerank.api_key_env, telegram.bot_token_env, and any future *_env field — is captured
+    without manual enumeration. This is the single authoritative collector; node and
+    platform both call it.
+    """
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for key, value in flatten(agent.model_dump(mode="json")):
+        if key.endswith("_env") and isinstance(value, str) and value:
+            if value not in seen:
+                seen.add(value)
+                ordered.append(value)
+    return sorted(ordered)

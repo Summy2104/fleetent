@@ -15,7 +15,7 @@ from pathlib import Path
 
 import yaml
 
-from fleetent.agent_config import AgentFile, AgentModels, ModelRouteEntry, ModelTarget
+from fleetent.agent_config import AgentFile, AgentModels, ModelRouteEntry, ModelTarget, collect_env_var_names
 from fleetent.runtime.agent_app import resolve_home
 
 
@@ -44,20 +44,13 @@ def _template_agent(agent_id: str) -> AgentFile:
 
 
 def referenced_env_names(agent: AgentFile) -> list[str]:
-    """Return env-var names the agent references (model keys + MCP/IM binding envs)."""
-    names: set[str] = set()
-    for target in agent.models.targets:
-        if target.api_key_env:
-            names.add(target.api_key_env)
-    for server in agent.mcp_servers:
-        for attr in ("api_key_env", "client_secret_env"):
-            value = getattr(server, attr, "")
-            if value:
-                names.add(value)
-    slack = agent.im.slack
-    if slack is not None:
-        names.update(n for n in (slack.bot_token_env, slack.app_token_env) if n)
-    return sorted(names)
+    """Return env-var names the agent references.
+
+    Thin re-export of the shared collector in agent_config so callers don't
+    need a second import. The shared collector uses flatten-all-*_env and catches
+    every field (embedding, rerank, telegram, MCP, etc.) without manual enumeration.
+    """
+    return collect_env_var_names(agent)
 
 
 def ensure_env_scaffold(home_dir: Path, *, referenced_env_names: Iterable[str] = ()) -> None:

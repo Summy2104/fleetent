@@ -691,3 +691,74 @@ def test_permission_gate_enabled_false() -> None:
     doc["permission_gate_enabled"] = False
     agent = agent_config.AgentFile.model_validate(doc)
     assert agent.permission_gate_enabled is False
+
+
+# --- collect_env_var_names (task 1.1 / D2 shared collector) ---
+
+
+def _make_agent_with_all_env_fields() -> agent_config.AgentFile:
+    """AgentFile referencing env vars in every category that flatten must catch."""
+    from fleetent.config import McpServerSettings
+
+    return agent_config.AgentFile(
+        name="full-env-agent",
+        version=1,
+        system_prompt="test",
+        models=agent_config.AgentModels(
+            targets=[
+                agent_config.ModelTarget(
+                    id="primary",
+                    provider="anthropic",
+                    protocol="openai_chat",
+                    base_url="https://api.anthropic.com/v1/",
+                    model="claude-opus-4-8",
+                    api_key_env="MODEL_API_KEY",
+                ),
+                agent_config.ModelTarget(
+                    id="emb",
+                    provider="local",
+                    protocol="http_embedding",
+                    endpoint="http://localhost:11434/v1/embeddings",
+                    api_key_env="EMBEDDING_API_KEY",
+                ),
+                agent_config.ModelTarget(
+                    id="rer",
+                    provider="local",
+                    protocol="http_rerank",
+                    endpoint="http://localhost:11434/v1/rerank",
+                    api_key_env="RERANK_API_KEY",
+                ),
+            ],
+            routes={
+                "default": [agent_config.ModelRouteEntry(target="primary")],
+                "embedding": [agent_config.ModelRouteEntry(target="emb")],
+                "rerank": [agent_config.ModelRouteEntry(target="rer")],
+            },
+        ),
+        im=agent_config.ImBinding(
+            telegram=agent_config.TelegramBinding(bot_token_env="TELEGRAM_BOT_TOKEN"),
+        ),
+        mcp_servers=[
+            McpServerSettings(
+                id="acme",
+                transport="http",
+                url="https://mcp.example.com",
+                auth_type="bearer",
+                api_key_env="ACME_MCP_TOKEN",
+            )
+        ],
+    )
+
+
+def test_collect_env_var_names_returns_all_referenced_names() -> None:
+    agent = _make_agent_with_all_env_fields()
+
+    names = agent_config.collect_env_var_names(agent)
+
+    assert "MODEL_API_KEY" in names
+    assert "EMBEDDING_API_KEY" in names
+    assert "RERANK_API_KEY" in names
+    assert "TELEGRAM_BOT_TOKEN" in names
+    assert "ACME_MCP_TOKEN" in names
+    # must be deduplicated and stable-ordered
+    assert names == sorted(set(names))
