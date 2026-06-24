@@ -62,7 +62,7 @@ def test_cross_agent_query_no_data_bleed(
     managed_stack_two_tenants: TwoTenantStack,
 ) -> None:
     """Write to agent-a's memory; verify agent-b's DB has zero results."""
-    from fleetent.memory.agent_memory_migrations import MIGRATIONS
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
     from fleetent.tenant_router import SQLiteTenantBackend
 
     stack = managed_stack_two_tenants
@@ -81,7 +81,7 @@ def test_cross_agent_query_no_data_bleed(
 
     # Write sentinel to agent-a; verify agent-b sees nothing.
     scope_a = backend_a.resolve_agent(stack.tenant_a_id, stack.agent_a_name)
-    am_a = scope_a.open_agent_memory_db(MIGRATIONS)
+    am_a = scope_a.open_agent_memory_db(AGENT_STATE_MIGRATIONS)
     with am_a.transaction() as conn:
         conn.execute(
             _INSERT_SQL,
@@ -99,7 +99,7 @@ def test_cross_agent_query_no_data_bleed(
         )
 
     scope_b = backend_b.resolve_agent(stack.tenant_b_id, stack.agent_b_name)
-    am_b = scope_b.open_agent_memory_db(MIGRATIONS)
+    am_b = scope_b.open_agent_memory_db(AGENT_STATE_MIGRATIONS)
     with am_b.transaction() as conn:
         rows = conn.execute(
             "SELECT content FROM agent_memory_items WHERE content = :sentinel",
@@ -109,7 +109,7 @@ def test_cross_agent_query_no_data_bleed(
 
     # Reverse: write to agent-b; verify agent-a sees nothing.
     scope_b2 = backend_b.resolve_agent(stack.tenant_b_id, stack.agent_b_name)
-    am_b2 = scope_b2.open_agent_memory_db(MIGRATIONS)
+    am_b2 = scope_b2.open_agent_memory_db(AGENT_STATE_MIGRATIONS)
     with am_b2.transaction() as conn:
         conn.execute(
             _INSERT_SQL,
@@ -127,7 +127,7 @@ def test_cross_agent_query_no_data_bleed(
         )
 
     scope_a2 = backend_a.resolve_agent(stack.tenant_a_id, stack.agent_a_name)
-    am_a2 = scope_a2.open_agent_memory_db(MIGRATIONS)
+    am_a2 = scope_a2.open_agent_memory_db(AGENT_STATE_MIGRATIONS)
     with am_a2.transaction() as conn:
         rows = conn.execute(
             "SELECT content FROM agent_memory_items WHERE content = :sentinel",

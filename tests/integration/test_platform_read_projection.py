@@ -284,8 +284,8 @@ def test_aggregate_trace_events_across_agents_resolves_platform_id_via_agent_nam
 def test_read_agent_memory_for_agents(tmp_path: Path) -> None:
     """Platform reads agent memory for per-agent agent_memory.db files read-only."""
     from fleetent.memory import agent_memory as agent_memory_module
-    from fleetent.memory.agent_memory_migrations import MIGRATIONS as AGENT_MEMORY_MIGRATIONS
     from fleetent.platform import read_projection
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
     from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
 
     data_dir = tmp_path / "data"
@@ -294,7 +294,7 @@ def test_read_agent_memory_for_agents(tmp_path: Path) -> None:
     # Boot write side for agent "bot" under tenant-1
     router = TenantRouter(SQLiteTenantBackend(data_dir=data_dir))
     agent_scope = router.agent_scope("tenant-1", "bot")
-    am_db = agent_scope.open_agent_memory_db(AGENT_MEMORY_MIGRATIONS)
+    am_db = agent_scope.open_state_db(AGENT_STATE_MIGRATIONS)
     agent_memory_module.set_agent_memory_db(am_db, agent_scope.agent_memory_vector_backend)  # type: ignore[arg-type]
 
     # Platform reads agent memory read-only across agents

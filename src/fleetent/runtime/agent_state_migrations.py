@@ -43,6 +43,9 @@ Version history:
   v36  artifacts.scope_key (unified-file-exchange D0) attribution = workspace scope key
   v37  traces.agent_name  (finalize-agent-identity) rename traces.agent_id column
   v38  im_outbound_queue  (im-edge-on-node-outbound) managed async outbound queue
+  v39  agent_memory_items (wire-agent-memory) consolidated from standalone agent_memory.db
+  v40  idx_agent_memory_status
+  v41  idx_agent_memory_source_ref
 """
 
 from __future__ import annotations
@@ -512,5 +515,40 @@ MIGRATIONS.append(
             sent_at       TEXT
         )
         """,
+    )
+)
+
+# ── v39-v41: agent_memory_items (wire-agent-memory) ──────────────────────────
+# Consolidated from the standalone agent_memory.db / agent_memory_migrations.py.
+# Isolation is per-agent physical DB (one agent_state.db per agent) — no scope columns.
+MIGRATIONS.append(
+    (
+        MIGRATIONS[-1][0] + 1,
+        """
+        CREATE TABLE IF NOT EXISTS agent_memory_items (
+            id          TEXT NOT NULL PRIMARY KEY,
+            type        TEXT NOT NULL,
+            content     TEXT NOT NULL,
+            status      TEXT NOT NULL,
+            source      TEXT NOT NULL,
+            source_ref  TEXT,
+            created_by  TEXT NOT NULL,
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL
+        )
+        """,
+    )
+)
+MIGRATIONS.append(
+    (
+        MIGRATIONS[-1][0] + 1,
+        "CREATE INDEX IF NOT EXISTS idx_agent_memory_status ON agent_memory_items (status)",
+    )
+)
+MIGRATIONS.append(
+    (
+        MIGRATIONS[-1][0] + 1,
+        "CREATE INDEX IF NOT EXISTS idx_agent_memory_source_ref"
+        " ON agent_memory_items (source, source_ref)",
     )
 )

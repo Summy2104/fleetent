@@ -1,8 +1,7 @@
 """Agent Memory public operations.
 
-Connection source: the per-agent agent_memory.db obtained via
-``agent_scope(tenant, agent_id).open_agent_memory_db(MIGRATIONS)`` in
-agent_app._init_agent_db_schema.  Call ``set_agent_memory_db(db, backend)``
+Connection source: agent_state.db via ``agent_scope.open_state_db(AGENT_STATE_MIGRATIONS)``
+in agent_app._init_agent_db_schema.  Call ``set_agent_memory_db(state_db, backend)``
 once at agent boot before any reads or writes.
 
 Vector operations use the injected ``_agent_memory_vector_backend``

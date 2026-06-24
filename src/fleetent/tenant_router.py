@@ -3,15 +3,14 @@
 Two flat typed resolvers:
   ``tenant_scope(tenant)`` → KbScope{kb_db, kb_vector_backend}
   ``agent_scope(tenant, agent_id)`` → AgentScope{state_db, vector_backend,
-                                                   agent_memory_db, agent_memory_vector_backend}
+                                                   agent_memory_vector_backend}
 
 SQLite backend layout under ``<fleetent_home>/``::
 
   tenants/<tenant_id>/kb.db                                 — KB relation tables (Y-managed)
   tenants/<tenant_id>/kb_vectors.db                         — KB vector store
-  tenants/<tenant_id>/agents/<agent_id>/data/agent_state.db — agent state (Y-managed)
+  tenants/<tenant_id>/agents/<agent_id>/data/agent_state.db — agent state + agent_memory_items (Y-managed)
   tenants/<tenant_id>/agents/<agent_id>/data/agent_vectors.db — agent vector store
-  tenants/<tenant_id>/agents/<agent_id>/data/agent_memory.db  — agent memory tables
   tenants/<tenant_id>/agents/<agent_id>/data/agent_memory_vectors.db — memory vector store
 
 Directory structure is private to SQLiteTenantBackend; call sites only
@@ -67,11 +66,15 @@ class KbScope:
 
 @dataclass(frozen=True)
 class AgentScope:
-    """Resolved scope for one agent's private state and memory resources."""
+    """Resolved scope for one agent's private state and memory resources.
+
+    agent_memory_items live in state_db (agent_state.db) since wire-agent-memory.
+    The separate agent_memory.db file is retired; agent_memory_vector_backend
+    (agentmem family) remains independent for vector operations.
+    """
 
     state_db: SQLiteDatabase
     vector_backend: VectorBackend
-    agent_memory_db: SQLiteDatabase | None = None
     agent_memory_vector_backend: VectorBackend | None = None
 
     def open_state_db(self, migrations: list[tuple[int, str]]) -> SQLiteDatabase:
@@ -91,35 +94,6 @@ class AgentScope:
         For platform-side projection only.  Raises if the DB file does not exist.
         """
         return ReadOnlySQLiteDatabase(path=self.state_db.path)
-
-    def open_agent_memory_db(self, migrations: list[tuple[int, str]]) -> SQLiteDatabase:
-        """Run migrate-on-open against agent_memory_db and return it.
-
-        Raises ValueError when agent_memory_db was not provisioned.
-        Idempotent when already at current version.
-        """
-        if self.agent_memory_db is None:
-            raise ValueError(
-                "agent_memory_db not provisioned in this AgentScope — "
-                "use SQLiteTenantBackend or supply agent_memory_db explicitly"
-            )
-        if self.agent_memory_db.capabilities.embedded_migrations:
-            from fleetent.schema_migrations import migrate
-
-            migrate(self.agent_memory_db, migrations)
-        return self.agent_memory_db
-
-    def open_agent_memory_db_ro(self) -> ReadOnlySQLiteDatabase:
-        """Return a read-only handle to agent_memory_db — no migration, no writes.
-
-        For platform-side projection only.  Raises if the DB file does not exist.
-        """
-        if self.agent_memory_db is None:
-            raise ValueError(
-                "agent_memory_db not provisioned in this AgentScope — "
-                "use SQLiteTenantBackend or supply agent_memory_db explicitly"
-            )
-        return ReadOnlySQLiteDatabase(path=self.agent_memory_db.path)
 
 
 class TenantBackend(Protocol):
@@ -159,17 +133,12 @@ class SQLiteTenantBackend:
         vector_backend = SQLiteVectorBackend(
             database_url=f"sqlite:///{agent_dir / 'agent_vectors.db'}"
         )
-        agent_memory_db = cast(
-            SQLiteDatabase,
-            create_substrate(f"sqlite:///{agent_dir / 'agent_memory.db'}"),
-        )
         agent_memory_vector_backend = SQLiteVectorBackend(
             database_url=f"sqlite:///{agent_dir / 'agent_memory_vectors.db'}"
         )
         return AgentScope(
             state_db=state_db,
             vector_backend=vector_backend,
-            agent_memory_db=agent_memory_db,
             agent_memory_vector_backend=agent_memory_vector_backend,
         )
 
