@@ -64,3 +64,24 @@ def test_tenant_first_docs_do_not_refer_to_legacy_canonical_paths() -> None:
     assert not offenders, (
         "tenant-first docs still mention legacy/platform-write contracts:\n" + "\n".join(offenders)
     )
+
+
+def test_dev_stack_makefile_uses_tenant_first_paths() -> None:
+    makefile = Path("Makefile").read_text(encoding="utf-8")
+
+    assert "DATABASE_URL  ?= sqlite:///$(FLEETENT_HOME)/management.db" in makefile
+    assert '--home "$(FLEETENT_HOME)/tenants/default/agents/$(AGENT)"' in makefile
+    assert "$(FLEETENT_HOME)/data/management.db" not in makefile
+    assert "$(FLEETENT_HOME)/agents/$(AGENT)" not in makefile
+
+
+def test_installers_initialize_root_management_db() -> None:
+    offenders: list[str] = []
+    for script in (Path("scripts/install.sh"), Path("scripts/install-platform.sh")):
+        content = script.read_text(encoding="utf-8")
+        if "$FLEETENT_HOME/data/management.db" in content:
+            offenders.append(f"{script}: $FLEETENT_HOME/data/management.db")
+        if "sqlite:///$FLEETENT_HOME/management.db" not in content:
+            offenders.append(f"{script}: missing root management.db URL")
+
+    assert not offenders, "installers still use legacy management DB path:\n" + "\n".join(offenders)

@@ -112,11 +112,11 @@ main() {
         bash "$SCRIPT_DIR/install-platform.sh" \
             --dir "$FLEETENT_HOME_DIR" --skip-db 2>/dev/null || true
         # Run db init ourselves since binary is already installed.
-        mkdir -p "$FLEETENT_HOME/data"
+        mkdir -p "$FLEETENT_HOME"
         local tmp_ini
         tmp_ini="$(mktemp)"
         sed -e "s|^script_location = .*|script_location = $REPO_ROOT/migrations|" \
-            -e "s|^sqlalchemy.url = .*|sqlalchemy.url = sqlite:///$FLEETENT_HOME/data/management.db|" \
+            -e "s|^sqlalchemy.url = .*|sqlalchemy.url = sqlite:///$FLEETENT_HOME/management.db|" \
             "$REPO_ROOT/alembic.ini" > "$tmp_ini"
         uv run --project "$REPO_ROOT" alembic -c "$tmp_ini" upgrade head \
             && log_success "Platform database ready"
@@ -130,7 +130,7 @@ main() {
         echo
         echo "Create and run an agent:"
         echo "  1. fleetent agent init <agent-id>"
-        echo "  2. Edit $FLEETENT_HOME/agents/<agent-id>/agent.yaml + .env   (chmod 600 .env)"
+        echo "  2. Edit $FLEETENT_HOME/tenants/default/agents/<agent-id>/agent.yaml + .env   (chmod 600 .env)"
         echo "  3. fleetent agent run <agent-id> [--port 8766]"
         echo "  4. fleetent chat --url ws://localhost:<port>/ws --token <FLEETENT_TUI_TOKEN>"
         echo

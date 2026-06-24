@@ -275,6 +275,26 @@ def _configure_logging_from_agent(agent: AgentFile, home_dir: Path) -> None:
     )
 
 
+def _tenant_router_root_for_agent_data_dir(
+    data_dir: Path, *, agent_id: str, tenant_id: str
+) -> Path:
+    """Return Fleetent home root for a tenant-first agent ``data/`` directory.
+
+    Tests and a few direct helpers still pass ``<home>/data`` where ``home`` is not a
+    tenant-first path. In that legacy shape, keep the previous "parent is root" behavior.
+    """
+    agent_home = data_dir.parent
+    if (
+        data_dir.name == "data"
+        and agent_home.name == agent_id
+        and agent_home.parent.name == "agents"
+        and agent_home.parent.parent.name == tenant_id
+        and agent_home.parent.parent.parent.name == "tenants"
+    ):
+        return agent_home.parent.parent.parent.parent
+    return data_dir.parent
+
+
 def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "default") -> None:
     """Bootstrap all agent-side DB tables anchored on data_dir.
 
@@ -298,10 +318,16 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     from fleetent.session import index as session_index
     from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
 
-    # Callers pass the running agent's ``<home>/data`` directory. TenantRouter resolves
-    # physical files from the enclosing Fleetent home so tenant-level KB and agent-level
-    # state share the same tenant-first root.
-    router = TenantRouter(SQLiteTenantBackend(data_dir=data_dir.parent))
+    # Callers pass the running agent's ``<home>/data`` directory. TenantRouter needs the
+    # enclosing Fleetent home root; otherwise a tenant-first home would get nested under
+    # ``<agent-home>/tenants/...`` at real node runtime.
+    router = TenantRouter(
+        SQLiteTenantBackend(
+            data_dir=_tenant_router_root_for_agent_data_dir(
+                data_dir, agent_id=agent_id, tenant_id=tenant_id
+            )
+        )
+    )
     tenant_scope = router.tenant_scope(tenant_id)
     kb_db = tenant_scope.open_kb_db(KB_MIGRATIONS)
     kb_runtime.set_database(kb_db)

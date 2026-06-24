@@ -242,6 +242,26 @@ def test_init_agent_db_schema_creates_all_agent_tables(tmp_path: Path) -> None:
         ss._state_db = original_state_db
 
 
+def test_init_agent_db_schema_with_tenant_agent_home_data_dir_stays_flat(
+    tmp_path: Path,
+) -> None:
+    import fleetent.schedule_store as ss
+    from fleetent.runtime.agent_app import _init_agent_db_schema
+
+    agent_home = tmp_path / "tenants" / "default" / "agents" / "support"
+    data_dir = agent_home / "data"
+    data_dir.mkdir(parents=True)
+    original_state_db = ss._state_db
+    try:
+        _init_agent_db_schema(data_dir, agent_id="support", tenant_id="default")
+
+        assert (data_dir / "agent_state.db").exists()
+        assert (data_dir / "agent_memory.db").exists()
+        assert not (agent_home / "tenants").exists()
+    finally:
+        ss._state_db = original_state_db
+
+
 def test_init_agent_db_schema_idempotent(tmp_path: Path) -> None:
     import fleetent.schedule_store as ss
     from fleetent.runtime.agent_app import _init_agent_db_schema
