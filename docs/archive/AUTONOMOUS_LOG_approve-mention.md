@@ -1,3 +1,5 @@
+> **[历史记录]** 本文档为一次性自动执行日志，已由对应 wave 的 decision log 汇总。仅供历史溯源参考。
+
 # 自主执行决策日志 — 2026-06-13（方案①：频道审批容忍 @mention）
 
 > 用户授权全程无人值守执行 OpenSpec change `approve-command-mention-tolerance`

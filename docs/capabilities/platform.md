@@ -3,6 +3,8 @@
 > 写作提醒：功能描述只写可观察的行为，不写内部实现细节。验收标准只写端到端可验证的行为。
 
 > **版本与范围（v1.0）**：本文档「现状」之外的全部内容——包括「架构总览」、「v1.0 规划」全部 bullet 与图、「验收标准」中标记 `(v1.0)` 的全部场景、「待决问题」全部条目——均纳入 fleetent **v1.0 设计与验收范围**，由 @Romanzhang 主导编写。v1.0 发布前所有 `(v1.0)` 场景须 100% 通过，「待决问题」须全部消化为明确决策或显式延期到 v1.1。
+>
+> **当前实现状态（2026-06-25）**：平台控制面 CLI（`fleetent platform`）、REST API、bearer token 认证、用户/API key 管理、node 注册与编排、agent 启停/placement 均已落地；**Admin Web 后台**（图中 `Admin Web 后台（v1.0）`）尚未实现，当前唯一管理入口是 `platform` CLI + HTTP API。platform 读侧投影（从 agent 侧产物读取 trace/session 数据）已有 admin query CLI 入口，但尚无 Web UI 展示层。
 
 ## 概述
 

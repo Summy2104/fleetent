@@ -4,10 +4,11 @@
 
 ## 当前结论
 
-**Pilot MVP 工程前置已基础完成。** 当前已有 admin query CLI、agent KB binding、connector operations、diagnostics / retention、Docker Compose Pilot 入口、Pilot install checklist、Pilot acceptance guide 和自动化验证报告入口。
+**Pilot MVP 工程前置已基础完成。** 当前已有 platform CLI（`fleetent platform`）、admin query CLI、agent KB binding、connector operations、diagnostics / retention、Docker Compose Pilot 入口、Pilot install checklist、Pilot acceptance guide 和自动化验证报告入口。
 
-**当前还不能仅凭本文件直接宣称全项目 Pilot Go。** Intelligence 和 Observability / Deployment
-专项 roadmap 已达到 Go；全项目 Pilot Go 仍需按 [Pilot acceptance guide](../operations/pilot-acceptance-guide.md)
+**Pilot 执行期（2026-06-25 现状）**：Intelligence ✅ Go（含 Agent Memory 落地）、Observability / Deployment ✅ Go、managed 栈 e2e harness ✅ 已建立（4 e2e 绿）、node supervisor / directed-reach ✅ 已落地。Runtime / Tooling 和 Platform / Governance / Channels 正在 Pilot 验收执行中。
+
+**当前还不能仅凭本文件直接宣称全项目 Pilot Go。** 仍需按 [Pilot acceptance guide](../operations/pilot-acceptance-guide.md)
 汇总 Runtime / Tooling、Platform / Governance / Channels 的剩余接入风险后输出最终 Go / Conditional Go / No-Go 判定。
 
 Pilot 验收前先生成自动化证据包：

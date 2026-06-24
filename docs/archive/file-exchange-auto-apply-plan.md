@@ -1,3 +1,5 @@
+> **[历史记录]** 本文档为 file-exchange 功能的执行计划过程产物，该功能已落地（`artifact_exchange.py`）。内容以落地代码为准。
+
 # file-exchange ③ 自动化执行工作流（待审核 — 审核通过后才执行）
 
 > 生成 2026-06-13。基线：`feat/unified-file-exchange`（= main `4ffa31c` + 本会话未提交的 D0 修订）。

@@ -1,3 +1,5 @@
+> **[历史记录]** 本文档为 2026-06 月中期架构草稿，已被 `docs/architecture/target-architecture.md` 定版取代。内容以当前架构文档为准。
+
 # fleetent 平台架构（2026-06）
 
 > 基于 main 分支当前代码（ab347ae → ff4e73e）生成，反映最新迁移状态。
