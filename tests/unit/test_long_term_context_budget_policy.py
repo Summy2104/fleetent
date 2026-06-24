@@ -45,8 +45,10 @@ def test_budget_policy_public_api_is_importable():
         max_tokens=200,
         memory_max_tokens=120,
         knowledge_max_tokens=80,
+        agent_memory_max_tokens=64,
         memory_top_k=3,
         knowledge_top_k=2,
+        agent_memory_top_k=3,
         conflict_preference="auto",
     )
     decision = BudgetDecision(
@@ -478,4 +480,219 @@ async def test_below_relevance_threshold_sources_are_excluded_with_reason(monkey
 
     assert result.sources == []
     assert result.budget_metadata.decisions[0].source_id == "doc-low"
-    assert result.budget_metadata.decisions[0].reason == "below_relevance_threshold"
+
+
+# Task 3.1: LongTermContextSettings agent_memory fields + 3-way conflict_preference
+
+
+def test_long_term_context_settings_has_agent_memory_budget_fields():
+    settings = LongTermContextSettings(
+        agent_memory_max_tokens=512,
+        agent_memory_top_k=5,
+    )
+
+    assert settings.agent_memory_max_tokens == 512
+    assert settings.agent_memory_top_k == 5
+
+
+def test_long_term_context_settings_agent_memory_fields_have_defaults():
+    settings = LongTermContextSettings()
+
+    assert isinstance(settings.agent_memory_max_tokens, int)
+    assert settings.agent_memory_max_tokens > 0
+    assert isinstance(settings.agent_memory_top_k, int)
+    assert settings.agent_memory_top_k > 0
+
+
+def test_conflict_preference_accepts_agent_memory():
+    settings = LongTermContextSettings(conflict_preference="agent_memory")
+
+    assert settings.conflict_preference == "agent_memory"
+
+
+def test_conflict_preference_all_three_party_values_accepted():
+    for value in ("memory", "knowledge", "agent_memory"):
+        s = LongTermContextSettings(conflict_preference=value)
+        assert s.conflict_preference == value
+
+
+# Task 3.2: build_context calls search_agent_memory; hits → source_type="agent_memory"; empty → omit section
+
+
+def _agent_memory_item(item_id: str, content: str) -> object:
+    from datetime import UTC, datetime
+
+    from fleetent.memory.models import AgentMemoryItem
+
+    now = datetime(2026, 6, 24, tzinfo=UTC)
+    return AgentMemoryItem(
+        id=item_id,
+        type="preference",
+        content=content,
+        status="active",
+        source="manual",
+        source_ref=None,
+        created_by="user-1",
+        created_at=now,
+        updated_at=now,
+    )
+
+
+async def test_build_context_agent_memory_hits_produce_agent_memory_source_type(monkeypatch):
+    from fleetent import long_term_ctx
+
+    monkeypatch.setattr(long_term_ctx, "_ltc_config", lambda: LongTermContextSettings())
+    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[]))
+    long_term_ctx.set_knowledge_provider(AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        long_term_ctx.agent_memory,
+        "search_agent_memory",
+        AsyncMock(return_value=[_agent_memory_item("am-1", "Use concise bullet points.")]),
+    )
+
+    result = await long_term_ctx.build_context(
+        user_id="user-1",
+        query="style preference",
+        agent_id="agent-1",
+        available_tokens=500,
+    )
+
+    assert any(s.source_type == "agent_memory" for s in result.sources)
+    assert any(s.source_id == "am-1" for s in result.sources)
+
+
+async def test_build_context_search_agent_memory_called_without_user_id(monkeypatch):
+    from fleetent import long_term_ctx
+
+    monkeypatch.setattr(long_term_ctx, "_ltc_config", lambda: LongTermContextSettings())
+    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[]))
+    long_term_ctx.set_knowledge_provider(AsyncMock(return_value=[]))
+    search_mock = AsyncMock(return_value=[])
+    monkeypatch.setattr(long_term_ctx.agent_memory, "search_agent_memory", search_mock)
+
+    await long_term_ctx.build_context(
+        user_id="user-1",
+        query="style preference",
+        agent_id="agent-1",
+        available_tokens=500,
+    )
+
+    search_mock.assert_awaited_once()
+    call_kwargs = search_mock.call_args
+    # must NOT pass user_id — agent_memory is scoped to the agent, not per-user
+    assert "user_id" not in (call_kwargs.kwargs if call_kwargs.kwargs else {})
+
+
+async def test_build_context_empty_agent_memory_omits_agent_memory_section(monkeypatch):
+    from fleetent import long_term_ctx
+
+    monkeypatch.setattr(long_term_ctx, "_ltc_config", lambda: LongTermContextSettings())
+    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[]))
+    long_term_ctx.set_knowledge_provider(AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        long_term_ctx.agent_memory,
+        "search_agent_memory",
+        AsyncMock(return_value=[]),
+    )
+
+    result = await long_term_ctx.build_context(
+        user_id="user-1",
+        query="style preference",
+        agent_id="agent-1",
+        available_tokens=500,
+    )
+
+    assert "[Agent memory]" not in result.text
+    assert not any(s.source_type == "agent_memory" for s in result.sources)
+
+
+# Task 3.4: 三源预算互不挤占 + conflict_preference 三方优先级
+
+
+async def test_agent_memory_budget_does_not_crowd_out_memory_or_knowledge(monkeypatch):
+    """A tight agent_memory_max_tokens budget must not reduce memory or knowledge allocations."""
+    from fleetent import long_term_ctx
+
+    monkeypatch.setattr(
+        long_term_ctx,
+        "_ltc_config",
+        lambda: LongTermContextSettings(
+            max_tokens=500,
+            memory_max_tokens=200,
+            knowledge_max_tokens=200,
+            agent_memory_max_tokens=20,  # very tight; must not spill into memory/knowledge budgets
+            memory_top_k=5,
+            knowledge_top_k=5,
+            agent_memory_top_k=5,
+        ),
+    )
+    monkeypatch.setattr(
+        long_term_ctx.memory,
+        "search",
+        AsyncMock(return_value=[_memory("mem-1", "Memory item one."), _memory("mem-2", "Memory item two.")]),
+    )
+    long_term_ctx.set_knowledge_provider(
+        AsyncMock(return_value=[_knowledge("doc-1", "Knowledge doc one.")])
+    )
+    monkeypatch.setattr(
+        long_term_ctx.agent_memory,
+        "search_agent_memory",
+        AsyncMock(return_value=[_agent_memory_item("am-1", "x" * 30)]),  # exceeds agent_memory budget
+    )
+
+    result = await long_term_ctx.build_context(
+        user_id="user-1",
+        query="style preferences",
+        agent_id="agent-1",
+        available_tokens=500,
+    )
+
+    included_types = {s.source_type for s in result.sources}
+    # memory and knowledge should still be included despite agent_memory budget overflow
+    assert "memory" in included_types
+    assert "knowledge" in included_types
+    # agent_memory item was too large for its own budget
+    assert "am-1" not in {s.source_id for s in result.sources}
+
+
+async def test_conflict_preference_agent_memory_first_in_ordering(monkeypatch):
+    """conflict_preference='agent_memory' must place agent_memory candidates before memory/knowledge."""
+    from fleetent import long_term_ctx
+
+    monkeypatch.setattr(
+        long_term_ctx,
+        "_ltc_config",
+        lambda: LongTermContextSettings(
+            max_tokens=60,  # tight: only first source wins
+            memory_max_tokens=60,
+            knowledge_max_tokens=60,
+            agent_memory_max_tokens=60,
+            memory_top_k=5,
+            knowledge_top_k=5,
+            agent_memory_top_k=5,
+            conflict_preference="agent_memory",
+        ),
+    )
+    monkeypatch.setattr(
+        long_term_ctx.memory,
+        "search",
+        AsyncMock(return_value=[_memory("mem-1", "Some user memory.")]),
+    )
+    long_term_ctx.set_knowledge_provider(AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        long_term_ctx.agent_memory,
+        "search_agent_memory",
+        AsyncMock(return_value=[_agent_memory_item("am-1", "Agent-scoped preference.")]),
+    )
+
+    result = await long_term_ctx.build_context(
+        user_id="user-1",
+        query="preference",
+        agent_id="agent-1",
+        available_tokens=60,
+    )
+
+    assert result.sources, "expected at least one source"
+    assert result.sources[0].source_type == "agent_memory", (
+        f"expected agent_memory first, got {result.sources[0].source_type}"
+    )

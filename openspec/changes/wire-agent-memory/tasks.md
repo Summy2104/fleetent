@@ -15,11 +15,11 @@
 
 ## 3. 读闭环：build_context 第三源 + 独立预算档
 
-- [ ] 3.1 写测试（unit）：`LongTermContextSettings` 含 `agent_memory_max_tokens`/`agent_memory_top_k`；`conflict_preference` 取三方值；先见红→实现 `config.py` 见绿
-- [ ] 3.2 写测试（unit）：`build_context` 调 `search_agent_memory`（不传 user_id），命中时产出 `source_type="agent_memory"` 候选；空则省略区段；先见红
-- [ ] 3.3 实现：`long_term_ctx/__init__.py` 加 agent_memory 检索 + `agent_memory_candidate` + 并入 `_ordered_candidates`/`_select_candidates`；`_select_candidates` 二元→三元（各源独立 `*_max_tokens`/`*_top_k`）；`_render_context` 加 agent_memory 区段；令 3.2 见绿
-- [ ] 3.4 写测试（unit）：三源预算互不挤占（agent_memory 缺省预算不影响既有 memory/knowledge 行为）；conflict_preference 三方优先级；先见红→实现见绿
-- [ ] 3.5 跑 long-term-ctx evaluation fixtures（`tests/evaluation`）确认确定性上下文无回归
+- [x] 3.1 写测试（unit）：`LongTermContextSettings` 含 `agent_memory_max_tokens`/`agent_memory_top_k`；`conflict_preference` 取三方值；先见红→实现 `config.py` 见绿
+- [x] 3.2 写测试（unit）：`build_context` 调 `search_agent_memory`（不传 user_id），命中时产出 `source_type="agent_memory"` 候选；空则省略区段；先见红
+- [x] 3.3 实现：`long_term_ctx/__init__.py` 加 agent_memory 检索 + `agent_memory_candidate` + 并入 `_ordered_candidates`/`_select_candidates`；`_select_candidates` 二元→三元（各源独立 `*_max_tokens`/`*_top_k`）；`_render_context` 加 agent_memory 区段；令 3.2 见绿
+- [x] 3.4 写测试（unit）：三源预算互不挤占（agent_memory 缺省预算不影响既有 memory/knowledge 行为）；conflict_preference 三方优先级；先见红→实现见绿
+- [x] 3.5 跑 long-term-ctx evaluation fixtures（`tests/evaluation`）确认确定性上下文无回归
 
 ## 4. 平台投影对齐
 
