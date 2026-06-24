@@ -87,6 +87,20 @@ _SYSTEM = "You are a helpful assistant with access to tools. Use them when neede
 
 _SUB_AGENT_TOOL = "sub_agent"
 
+# generate-fires-exclude-outbound-tools: builtin outbound delivery tools removed from a run's
+# schema when delivery is the platform's job (a generate cron fire), so the model cannot
+# self-deliver and duplicate the scheduler's broadcast.
+_OUTBOUND_DELIVERY_TOOLS = frozenset({"send_im_message", "send_file"})
+
+
+def _filter_outbound_tools(
+    schemas: list[dict[str, Any]], *, suppress: bool
+) -> list[dict[str, Any]]:
+    """Drop the builtin outbound delivery tools from ``schemas`` when ``suppress`` is True."""
+    if not suppress:
+        return schemas
+    return [s for s in schemas if s["function"]["name"] not in _OUTBOUND_DELIVERY_TOOLS]
+
 ReplyFunc = Callable[[str], Coroutine[Any, Any, None]]
 ProgressFunc = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -1772,6 +1786,7 @@ async def run(
     delivery_ledger: list[Any] | None = None,
     skill_authoring_enabled: bool = False,
     emit_delivery_trailer: bool = True,
+    suppress_outbound_tools: bool = False,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
@@ -1837,6 +1852,7 @@ async def run(
                 delivery_ledger=delivery_ledger,
                 skill_authoring_enabled=skill_authoring_enabled,
                 emit_delivery_trailer=emit_delivery_trailer,
+                suppress_outbound_tools=suppress_outbound_tools,
             )
     finally:
         _active_runs -= 1
@@ -1877,6 +1893,7 @@ async def _run_inner(
     delivery_ledger: list[Any] | None = None,
     skill_authoring_enabled: bool = False,
     emit_delivery_trailer: bool = True,
+    suppress_outbound_tools: bool = False,
 ) -> str:
     # Image-bearing messages route to the vision model (D6); raises here if
     # images are present but no vision route is configured, before any LLM call.
@@ -1899,6 +1916,10 @@ async def _run_inner(
     # Filter by agent-level allowed_tools (is_tool_visible also drops opt-in tools
     # like bash_exec under allow-all / bare `*`).
     schemas = [s for s in schemas if is_tool_visible(s["function"]["name"], allowed_tools)]
+
+    # generate-fires-exclude-outbound-tools: when delivery is the platform's job (a generate
+    # cron fire), drop the builtin outbound tools so the model cannot self-deliver.
+    schemas = _filter_outbound_tools(schemas, suppress=suppress_outbound_tools)
 
     # SB3 D1: the single code-execution enablement point — drop run_code from this
     # agent's schema when the (mode, features) pair disables it (alongside the

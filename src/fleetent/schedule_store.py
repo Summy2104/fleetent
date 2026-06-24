@@ -7,6 +7,7 @@ traces, reflection, memory, and approvals. No platform imports.
 """
 
 import json
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -14,6 +15,14 @@ from typing import Any
 from fleetent.db import SQLiteDatabase
 
 _state_db: SQLiteDatabase | None = None
+
+# schedule-create-delivery-guardrail: send/delivery imperatives that, when embedded in a
+# `generate` task's message WITHOUT an explicit `deliver`, signal the recurring footgun
+# (delivery falls back to the creation channel + the model self-delivers). Conservative by
+# design: only clear "send to a recipient" phrasings.
+_SEND_IMPERATIVE_RE = re.compile(
+    r"私信|发送给|发送到|发给|推送给|发到|转发给|send\s+to|\bDM\b", re.IGNORECASE
+)
 
 
 def set_state_db(db: SQLiteDatabase) -> None:
@@ -71,6 +80,18 @@ def create(
             raise ValueError("notify task requires a delivery target (deliver or origin)")
     elif not message:
         raise ValueError(f"{task_type} task requires message (the agent prompt)")
+    # schedule-create-delivery-guardrail: a `generate` task with no explicit `deliver` whose
+    # message embeds a send instruction is the recurring footgun — deliver falls back to the
+    # creation channel AND the model self-delivers (mis-routed/duplicate). Steer to an explicit
+    # delivery target (notify_target) or `action`. Conservative: all three conditions required.
+    if task_type == "generate" and deliver is None and message and _SEND_IMPERATIVE_RE.search(
+        message
+    ):
+        raise ValueError(
+            "generate 任务的回复由调度器投递到 deliver/origin 目标，不要在 message 里写"
+            "「发送给X / 私信X」等发送指令（否则会投错地方或重复发送）。请用 notify_target"
+            "/notify_target_type 指定投递目标，或改用 task_type=action 让 agent 自己发送。"
+        )
     task_id = str(uuid.uuid4())
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     row = {
