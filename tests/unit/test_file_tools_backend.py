@@ -29,7 +29,9 @@ class _FakeManager:
         self._root = root
         self.acquired: tuple | None = None
 
-    async def acquire(self, scope, session_id, agent_name, env=None) -> str:
+    async def acquire(
+        self, scope, session_id, agent_name, env=None, skill_mount_source=None
+    ) -> str:
         self.acquired = (scope, session_id, agent_name)
         return "ws-abc123"
 

@@ -746,6 +746,7 @@ def build_app(agent_name: str) -> FastAPI:
             kwargs["allowed_skills"] = agent.allowed_skills
             kwargs["skill_authoring_enabled"] = agent.skill_authoring_enabled
             kwargs["skill_hot_reload"] = agent.skill_hot_reload
+            kwargs["skill_user_access"] = agent.skill_user_access
             kwargs["governance"] = _governance_from_file(agent)
             kwargs["model_policy"] = ModelPolicySnapshot.from_agent(agent)
 

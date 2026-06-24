@@ -336,6 +336,11 @@ def read_skill(
     entry = skill_registry._index.get(name)
     if entry is None:
         return f"error: no skill named {name!r}"
+    # skill-user-access: a restricted skill the requester may not access is refused with
+    # the SAME text as a genuinely-missing skill — never disclose its existence. Gated
+    # before audit/load so it covers both the by-name and file_path paths.
+    if not _skill_visible_to_requester(name, tool_context):
+        return f"error: no skill named {name!r}"
     if entry.audit_blocked:
         # Refuse before load(): a severe injection hit means the body must not
         # reach the model. load() itself still returns it for manual triage. The
@@ -351,6 +356,54 @@ def read_skill(
     # Append the fixed exec-face / $SKILLS_DIR guidance so the model runs the skill's
     # scripts via run_code under the single /workspace world (skill-read-on-demand).
     return body + skill_registry._READ_SKILL_GUIDANCE
+
+
+def _skill_view_source(tool_context: ToolContext | None) -> str | None:
+    """Build this session's filtered skills view and return its path (skill-user-access).
+
+    When the agent declares `skill_user_access`, the sandbox must mount only the skills
+    this session's user may use — restricted skills the user can't access are physically
+    absent so `run_code`/`read_file` can't reach them. Computes the allowed skill names
+    (every indexed skill that passes `skill_visible_to_user` for this requester) and
+    builds the `.views/<scope_key>/` hardlink view. Returns None when no access map is
+    configured (then the caller mounts the full root, unchanged behavior).
+    """
+    access_map = getattr(tool_context, "skill_user_access", None)
+    if not access_map:
+        return None
+    from fleetent.skills import registry as skill_registry
+
+    principal = getattr(tool_context, "principal", None)
+    session_context = getattr(tool_context, "session_context", None)
+    return skill_registry.session_skill_view_for(
+        getattr(tool_context, "scope_key", None) or "default",
+        user_id=getattr(principal, "user_id", None),
+        chat_type=getattr(session_context, "chat_type", None),
+        access_map=access_map,
+        rebuild=False,
+    )
+
+
+def _skill_visible_to_requester(name: str, tool_context: ToolContext | None) -> bool:
+    """Whether the read_skill requester may access this skill (skill-user-access).
+
+    Resolves the requester user_id (from the principal) + chat_type (from the inbound
+    session context) and the active agent's `skill_user_access`, all carried on the
+    tool_context, and delegates to the registry's single visibility predicate. No
+    context (e.g. CLI direct call) → no access map → visible (unchanged).
+    """
+    from fleetent.skills import registry as skill_registry
+
+    access_map = getattr(tool_context, "skill_user_access", None)
+    if not access_map:
+        return True
+    principal = getattr(tool_context, "principal", None)
+    user_id = getattr(principal, "user_id", None)
+    session_context = getattr(tool_context, "session_context", None)
+    chat_type = getattr(session_context, "chat_type", None)
+    return skill_registry.skill_visible_to_user(
+        name, user_id=user_id, chat_type=chat_type, access_map=access_map
+    )
 
 
 @tool
@@ -599,7 +652,13 @@ async def run_code(
     features = tool_context.features if tool_context is not None else {}
     agent_env = features.get("sandbox_env")
     env = build_sandbox_env(agent_env=agent_env)
-    ws_id = await manager.acquire(scope, session_id, agent_name or "default", env=env)
+    ws_id = await manager.acquire(
+        scope,
+        session_id,
+        agent_name or "default",
+        env=env,
+        skill_mount_source=_skill_view_source(tool_context),
+    )
     # unified-file-exchange §4.7/4.8: on a backend without exchange_mount, stage the code's
     # attribution-passing /exchange refs into the container before exec (no-op on capable
     # backends, where the ro view mount already exposes them). Best-effort, never breaks run.
@@ -629,7 +688,13 @@ async def run_code(
         # drop the stale registration, rebuild on the same host-mounted workspace,
         # retry exactly once instead of surfacing an infrastructure error.
         manager.invalidate(scope, session_id, agent_name or "default")
-        ws_id = await manager.acquire(scope, session_id, agent_name or "default", env=env)
+        ws_id = await manager.acquire(
+            scope,
+            session_id,
+            agent_name or "default",
+            env=env,
+            skill_mount_source=_skill_view_source(tool_context),
+        )
         result = await _exec_or_cancel(
             manager.backend, ws_id, command, child, session_id=session_id
         )

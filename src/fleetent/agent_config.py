@@ -440,6 +440,10 @@ class AgentFile(BaseModel):
     # Default off — skill_manage only enters this agent's tool schema when explicitly
     # enabled, so a deployment opts into agent-driven skill writes deliberately.
     skill_authoring_enabled: bool = False
+    # skill-user-access: per-skill user allowlist {skill_name: [user_id, ...]}. A skill
+    # listed here is "restricted" — usable only by the listed users and only in DM; skills
+    # absent from this map are public (default empty = every skill public, unchanged).
+    skill_user_access: dict[str, list[str]] = Field(default_factory=dict)
     allowed_tools: list[str] = Field(default_factory=list)
     plugins: list[str] = Field(default_factory=list)
     features: dict[str, Any] = Field(default_factory=dict)

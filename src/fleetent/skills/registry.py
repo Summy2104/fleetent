@@ -180,6 +180,9 @@ def _build_manifest(skills_dir: str | None = None) -> dict[str, tuple[int, int]]
     if not root.is_dir():
         return manifest
     for dirpath, _dirs, files in os.walk(root, followlinks=True):
+        # Skip dot-dirs (.views session views, .tmp/.bak from write_skill) — they are
+        # not authored skills (skill-user-access: .views holds per-session hardlinks).
+        _dirs[:] = [d for d in _dirs if not d.startswith(".")]
         if "SKILL.md" not in files:
             continue
         p = Path(dirpath) / "SKILL.md"
@@ -347,6 +350,8 @@ def _scan_dir(
     # followlinks=True ensures symlinked skill directories are traversed (Python
     # Path.rglob does not follow symlinks by default until 3.13).
     for root, _dirs, files in os.walk(base, followlinks=True):
+        # Skip dot-dirs (.views session views, .tmp/.bak) — not authored skills.
+        _dirs[:] = [d for d in _dirs if not d.startswith(".")]
         if "SKILL.md" not in files:
             continue
         skill_md = Path(root) / "SKILL.md"
@@ -656,12 +661,39 @@ def _location_under_skills_dir(entry_path: str) -> str:
     return f"{_SKILLS_DIR_PLACEHOLDER}/{rel}"
 
 
+def skill_visible_to_user(
+    name: str,
+    *,
+    user_id: str | None,
+    chat_type: str | None,
+    access_map: dict[str, list[str]] | None,
+) -> bool:
+    """Whether a skill is visible to a given requester (skill-user-access).
+
+    A skill absent from `access_map` is public — visible to anyone, in any chat type.
+    A skill present in `access_map` is *restricted*: visible ONLY in a direct message
+    (`chat_type == "dm"`) AND when `user_id` is in its allowlist. In channels/groups the
+    container is shared across users, so restricted skills are never visible there. An
+    empty / None `access_map` makes every skill public (backward compatible). The single
+    predicate the catalog, read_skill, and the session view all route through.
+    """
+    if not access_map or name not in access_map:
+        return True
+    if chat_type != "dm":
+        return False
+    return user_id is not None and user_id in access_map[name]
+
+
 def available_skills_prompt(
     disabled_skills: list[str] | None = None,
     allowed_skills: list[str] | None = None,
     max_skills: int = 150,
     max_chars: int = 18000,
     available_tools: set[str] | None = None,
+    *,
+    user_id: str | None = None,
+    chat_type: str | None = None,
+    skill_user_access: dict[str, list[str]] | None = None,
 ) -> str:
     """Render the enabled skills as an openclaw-style skills section for the prompt.
 
@@ -701,6 +733,9 @@ def available_skills_prompt(
         if _disabled_reason(name, entry, disabled) is None
         and (allowed is None or name in allowed)
         and _tools_available(entry, available_tools)
+        and skill_visible_to_user(
+            name, user_id=user_id, chat_type=chat_type, access_map=skill_user_access
+        )
     ]
     if not entries:
         return ""
@@ -920,6 +955,89 @@ def edit_skill(name: str, content: str, *, skills_dir: str | None = None) -> Pat
     target.write_text(content, encoding="utf-8")
     reload(_reload_root(skills_dir))
     return target
+
+
+def _sanitize_scope_key(scope_key: str) -> str:
+    """Filesystem-safe scope key for the per-session view dir name (skill-user-access)."""
+    return "".join(c if c.isalnum() or c in "-_." else "_" for c in scope_key) or "default"
+
+
+def _hardlink_tree(src: Path, dst: Path) -> None:
+    """Recreate `src`'s tree under `dst` with hardlinked files (copy2 fallback).
+
+    Hardlinks keep zero-copy, content-identical views (same inode). On a cross-device
+    or unsupported-link error the file is copied instead — content stays correct.
+    """
+    for cur, _dirs, files in os.walk(src, followlinks=True):
+        rel = Path(cur).relative_to(src)
+        (dst / rel).mkdir(parents=True, exist_ok=True)
+        for f in files:
+            s, d = Path(cur) / f, dst / rel / f
+            try:
+                os.link(s, d)
+            except OSError:
+                shutil.copy2(s, d)
+
+
+def build_session_skill_view(
+    scope_key: str,
+    allowed_names: list[str],
+    *,
+    skills_dir: str | None = None,
+    rebuild: bool = True,
+) -> str:
+    """Build a per-session filtered skills view and return its path (skill-user-access).
+
+    Creates ``<skills_root>/.views/<scope_key>/`` containing only the skills in
+    `allowed_names` (each hardlinked from the real skill dir). This view is what the
+    sandbox bind-mounts at ``/workspace/skills`` for that session, so a restricted skill
+    the session user may not access is physically absent from their container — closing
+    the run_code / read_file path, not just catalog/read_skill. Rebuilt fresh each call
+    (idempotent); `.views` is skipped by scan (dot-dir prune) so it never re-indexes.
+    """
+    # Resolve to the root the index was built from (_last_skills_dir) when no explicit
+    # dir is given, so the view's hardlinks point at the live per-agent skills.
+    root = Path(_reload_root(skills_dir))
+    view = root / ".views" / _sanitize_scope_key(scope_key)
+    # rebuild=False (the per-tool-call hot path): reuse an existing view as-is — cheap and
+    # avoids rmtree-ing a dir a live container may have bind-mounted. The view is cleared on
+    # session/container recycle; allowlist/skill changes mid-session reflect after recycle.
+    if view.exists():
+        if not rebuild:
+            return str(view)
+        shutil.rmtree(view)
+    view.mkdir(parents=True, exist_ok=True)
+    for name in allowed_names:
+        src = root / name
+        if (src / "SKILL.md").is_file():
+            _hardlink_tree(src, view / name)
+    return str(view)
+
+
+def session_skill_view_for(
+    scope_key: str,
+    *,
+    user_id: str | None,
+    chat_type: str | None,
+    access_map: dict[str, list[str]] | None,
+    rebuild: bool = False,
+) -> str | None:
+    """Build the per-session filtered skills view for a requester, or None (skill-user-access).
+
+    Returns None when no `access_map` is configured (the caller then mounts the full skills
+    root — unchanged behavior). Otherwise computes the skills this requester may use (every
+    indexed skill passing `skill_visible_to_user`) and builds the `.views/<scope_key>/`
+    hardlink view, returning its path. Centralized here so both run_code and the file tools
+    delegate to the same logic without importing each other.
+    """
+    if not access_map:
+        return None
+    allowed = [
+        name
+        for name in _index
+        if skill_visible_to_user(name, user_id=user_id, chat_type=chat_type, access_map=access_map)
+    ]
+    return build_session_skill_view(scope_key, allowed, rebuild=rebuild)
 
 
 def read_skill_file(name: str, rel_path: str) -> str:
