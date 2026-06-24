@@ -23,9 +23,9 @@
   - `config/` 不再是部署配置或模板命名空间；MCP 定义来自 Platform DB / materialized Agent config
 
 - ✅ **Docker Compose**：Pilot 默认部署入口
-  - Pilot 默认从 `docker compose run --rm fleetent uv run fleetent admin init-config` 开始，
-    显式执行 `scripts/upgrade.py` 后再 `docker compose up -d`。
-  - `uv run uvicorn fleetent.server:app` 只作为开发模式保留，不作为 Pilot 默认部署入口。
+  - Pilot 默认从 `docker compose run --rm fleetent uv run fleetent platform init-config` 开始，
+    显式执行 `fleetent platform upgrade` 后再 `docker compose up -d`。
+  - `fleetent platform serve` 是主要服务启动入口；`uvicorn fleetent.server:app` 可直接作为 ASGI 应用访问，仅用于开发模式。
   - 当前 Dockerfile 和 docker-compose.yml 关键配置：
     - `extra_hosts: host.docker.internal:host-gateway`（Linux 宿主机访问，`fleetent.integrations.sandbox` 通过此地址调用宿主机工具进程）
     - `volumes: ./data:/app/data, ./agents:/app/agents, ./platform.yaml:/app/platform.yaml, ./secrets:/app/secrets:ro`
@@ -50,7 +50,7 @@
   - logs / traces / diagnostics export 已支持手动 retention dry-run / apply，默认不自动清理
   - SQLite backups 不在 diagnostics retention 范围内，备份保留由部署方管理
 
-- ✅ **SQLite 升级备份脚本**：`scripts/upgrade.py`
+- ✅ **SQLite 升级备份命令**：`fleetent platform upgrade`
   - `--database-url` 优先于 `DATABASE_URL`，`DATABASE_URL` 优先于 `Settings().database_url`
   - 当前只支持本地 SQLite database URL；非 SQLite、远程 SQLite、`:memory:` 都会 fail fast
   - **备份覆盖数据目录下全部物理库**（持久层 #3）：递归枚举 `data/` 下任意深度的 `*.db`（管理库 + per-tenant 的 KB / 共享记忆库 + per-agent 运行库 + 各向量库），逐库经统一 `db.py` 入口执行 `PRAGMA wal_checkpoint(TRUNCATE)` 后复制（含 `-wal`/`-shm` sidecar），避免 WAL 中未落盘的写丢失
@@ -60,7 +60,7 @@
   - `--dry-run` 只校验 database URL 并输出 backup / migration 计划，不要求 DB 文件存在，不创建备份，不运行 Alembic
   - `--backup-only` 只创建备份（同样覆盖全部物理库），不运行 Alembic
   - 非 dry-run 模式下管理库文件不存在（且无可迁移的旧 `fleetent.db`）会 fail fast；backup 成功后才会运行 migration
-  - migration 失败时不会自动 rollback；已创建 backup 会保留，脚本返回非 0
+  - migration 失败时不会自动 rollback；已创建 backup 会保留，命令返回非 0
   - 备份语义假定 upgrade 运行在停服 / 静默窗口（与既有 upgrade 语义一致），非在线一致性快照
 
 - ✅ **Pilot connector operations HTTP API**：`/admin/kb/connectors/*`
@@ -70,7 +70,7 @@
   - `sync <connector_id>` 手动执行同步并写入最近一次 status
   - `status <connector_id>` 查询最近一次 dry-run / sync 结果；输出不包含 credential payload、token、secret 或文档正文
 
-- ✅ **Diagnostics export / retention CLI**：`fleetent admin diagnostics ...`
+- ✅ **Diagnostics export / retention CLI**：`fleetent platform diagnostics ...`
   - `export` 生成本地脱敏诊断包，包含 manifest、logs、trace / usage / performance 摘要、connector status、environment 和 config summary
   - `retention dry-run` 只展示将删除的 logs、traces 和 diagnostics export 包候选
   - `retention apply` 只有显式开启 `diagnostics.retention.enabled=true` 后才删除诊断数据
@@ -97,15 +97,15 @@
 Docker Compose first 的 SQLite-first 部署升级入口：
 
 ```bash
-docker compose run --rm fleetent uv run python scripts/upgrade.py
+docker compose run --rm fleetent uv run fleetent platform upgrade
 ```
 
 常用选项：
 
 ```bash
-docker compose run --rm fleetent uv run python scripts/upgrade.py --dry-run
-docker compose run --rm fleetent uv run python scripts/upgrade.py --backup-only
-docker compose run --rm fleetent uv run python scripts/upgrade.py --database-url sqlite:////app/management.db --backup-dir data/backups
+docker compose run --rm fleetent uv run fleetent platform upgrade --dry-run
+docker compose run --rm fleetent uv run fleetent platform upgrade --backup-only
+docker compose run --rm fleetent uv run fleetent platform upgrade --database-url sqlite:////app/management.db --backup-dir data/backups
 ```
 
 如果 migration 失败，脚本不会自动 rollback。手动恢复步骤（覆盖多物理库）：
@@ -146,8 +146,8 @@ GET /admin/kb/connectors/eng-drive/status
 诊断包导出：
 
 ```bash
-uv run fleetent admin diagnostics export
-uv run fleetent admin diagnostics export --from 2026-06-02T00:00:00 --to 2026-06-02T23:59:59
+uv run fleetent platform diagnostics export
+uv run fleetent platform diagnostics export --from 2026-06-02T00:00:00 --to 2026-06-02T23:59:59
 ```
 
 诊断包默认写入 `data/diagnostics`。包内数据会二次脱敏，并排除 memory 内容、KB 文档正文 / chunks、
@@ -156,8 +156,8 @@ SQLite 主库、SQLite backups 和 connector credential 文件内容。
 手动 retention：
 
 ```bash
-uv run fleetent admin diagnostics retention dry-run
-uv run fleetent admin diagnostics retention apply
+uv run fleetent platform diagnostics retention dry-run
+uv run fleetent platform diagnostics retention apply
 ```
 
 默认 `diagnostics.retention.enabled=false`，因此 `apply` 会拒绝执行。只有在配置中显式

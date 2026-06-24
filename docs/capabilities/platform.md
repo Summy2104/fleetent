@@ -93,7 +93,7 @@ flowchart TD
 - ✅ **Bearer token 认证**：`Authorization: Bearer ma-<64hex>`，`ma-` 前缀区分服务 key 与模型 API key
   - `get_by_api_key()` 经 `api_keys` 表 SHA-256 哈希比对，明文不落库，无外部 IdP
 
-- ✅ **CLI 鉴权模型：OS-level、无登录**：所有 `fleetent admin ...` 命令直接读写本地 SQLite，不经过 HTTP 鉴权也不要求 admin 登录；访问控制完全交给 OS 层（ssh key / sudo / 数据目录文件权限），遵循 **"能 ssh 到主机即视为受信"** 的企业内部工具惯例（Camunda、PostgreSQL psql、Kafka CLI 等皆是此模型）
+- ✅ **CLI 鉴权模型：OS-level、无登录**：所有 `fleetent platform ...` 命令直接读写本地 SQLite，不经过 HTTP 鉴权也不要求 admin 登录；访问控制完全交给 OS 层（ssh key / sudo / 数据目录文件权限），遵循 **"能 ssh 到主机即视为受信"** 的企业内部工具惯例（Camunda、PostgreSQL psql、Kafka CLI 等皆是此模型）
   - 代价：审计日志只能记录 OS user（`root` / `ubuntu`），无法追溯到具体 fleetent admin 身份
   - 对策：v1.0 起 CLI 严格收窄到低危操作（建用户、加 IM allowlist），加黑 / 封禁 / 降级 / 改角色 等高危动作只能在 UI 中由 admin 角色完成（详见「规划中」权限矩阵 CLI 列）
 
@@ -105,7 +105,7 @@ flowchart TD
   - `nodes` 表（node_id / host / port / version / last_seen_at / status）已落 Alembic
   - `agent_placements` 表（agent↔node placement 关系）已落
   - node desired-state API：`POST /admin/nodes/{node_id}/desired-state` 已就位
-  - CLI：`uv run fleetent admin node register|list|deregister` 可用
+  - CLI：`uv run fleetent platform node register|list|deregister` 可用
 
 ## 规划中（v1.0）
 

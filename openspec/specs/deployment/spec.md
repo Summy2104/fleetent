@@ -4,11 +4,11 @@
 定义 on-prem deployment 的本地升级、备份和恢复基础能力，确保 SQLite-first 部署在 schema migration 前有可操作的备份和失败恢复路径。
 ## Requirements
 ### Requirement: SQLite upgrade entry point
-系统 SHALL 提供 `scripts/upgrade.py` 作为 SQLite-first on-prem upgrade entry point。
+系统 SHALL 提供 `fleetent platform upgrade` 作为 SQLite-first on-prem upgrade entry point。
 
-#### Scenario: Upgrade script exists
-- **WHEN** operator 查看仓库 scripts
-- **THEN** 存在 `scripts/upgrade.py`
+#### Scenario: Upgrade command exists
+- **WHEN** operator 查看可用命令
+- **THEN** `fleetent platform upgrade` 命令可用
 
 #### Scenario: Upgrade script reads effective database URL
 - **WHEN** operator 运行 upgrade script
@@ -53,7 +53,7 @@ upgrade script SHALL 在运行 Alembic migration 前创建 SQLite 备份，且�
 upgrade script SHALL 支持 dry-run，用于显示将执行的 backup 和 migration 操作而不修改文件系统。
 
 #### Scenario: Dry run does not write or migrate
-- **WHEN** operator 运行 `scripts/upgrade.py --dry-run`
+- **WHEN** operator 运行 `uv run fleetent platform upgrade --dry-run`
 - **THEN** script 输出将备份的 DB 路径和 migration 命令
 - **AND** 不要求 SQLite DB 文件已经存在
 - **AND** 不创建 backup 文件
@@ -63,7 +63,7 @@ upgrade script SHALL 支持 dry-run，用于显示将执行的 backup 和 migrat
 upgrade script SHALL 支持 backup-only，用于只创建 SQLite 备份而不运行 migration；该备份 SHALL 同样覆盖全部物理库。
 
 #### Scenario: Backup-only skips migration
-- **WHEN** operator 运行 `scripts/upgrade.py --backup-only`
+- **WHEN** operator 运行 `uv run fleetent platform upgrade --backup-only`
 - **THEN** script 备份数据目录下全部物理库（每库 checkpoint 后复制）
 - **AND** 不运行 Alembic migration
 
@@ -116,7 +116,7 @@ API, scheduler, or worker behavior.
 
 #### Scenario: Connector CLI commands are documented
 - **WHEN** operator 阅读部署或运维文档
-- **THEN** 文档列出 `/admin/kb/connectors/*` 与 `fleetent admin kb extract-entities` 的用途
+- **THEN** 文档列出 `/admin/kb/connectors/*` 与 `fleetent platform kb extract-entities` 的用途
 
 #### Scenario: Credential boundary is documented
 - **WHEN** operator 阅读部署或运维文档
@@ -132,7 +132,7 @@ API, scheduler, or worker behavior.
 
 #### Scenario: Diagnostics export is documented
 - **WHEN** operator 阅读 deployment 文档
-- **THEN** 文档说明如何运行 `fleetent admin diagnostics export`
+- **THEN** 文档说明如何运行 `fleetent platform diagnostics export`
 - **AND** 文档说明诊断包包含和不包含的内容
 
 #### Scenario: Retention default is documented
@@ -142,7 +142,7 @@ API, scheduler, or worker behavior.
 
 #### Scenario: Manual retention is documented
 - **WHEN** operator 阅读 deployment 文档
-- **THEN** 文档说明如何运行 `fleetent admin diagnostics retention dry-run`
+- **THEN** 文档说明如何运行 `fleetent platform diagnostics retention dry-run`
 - **AND** 文档说明只有显式开启 `diagnostics.retention.enabled=true` 后 apply 才会删除诊断数据
 
 #### Scenario: Backup deletion is out of scope
@@ -160,7 +160,7 @@ API, scheduler, or worker behavior.
 
 #### Scenario: Checklist covers install and upgrade
 - **WHEN** operator 阅读 checklist
-- **THEN** checklist 包含前置条件、配置、`scripts/upgrade.py --dry-run`、SQLite backup、`alembic upgrade head`、服务启动和 `/health` 检查
+- **THEN** checklist 包含前置条件、配置、`uv run fleetent platform upgrade --dry-run`、SQLite backup、`alembic upgrade head`、服务启动和 `/health` 检查
 
 #### Scenario: Checklist covers Pilot operations
 - **WHEN** operator 阅读 checklist
@@ -174,11 +174,11 @@ API, scheduler, or worker behavior.
 - **WHEN** operator 阅读 checklist 或准备问题上报包
 - **THEN** checklist 明确禁止把真实 secret、token、credential payload 写入 settings、日志、trace、diagnostics package、issue 或测试 fixture
 
-### Requirement: Fleetent admin command compatibility
-部署 SHALL 继续提供 `fleetent admin` 作为管理员和 operator 的本机 CLI 入口。
+### Requirement: Fleetent platform command compatibility
+部署 SHALL 继续提供 `fleetent platform` 作为管理员和 operator 的本机 CLI 入口。
 
-#### Scenario: Fleetent admin command remains available
-- **WHEN** operator 按部署文档运行 `uv run fleetent admin`
+#### Scenario: Fleetent platform command remains available
+- **WHEN** operator 按部署文档运行 `uv run fleetent platform`
 - **THEN** CLI 使用新的 `platform.admin_cli` 实现
 - **AND** 对 operator 暴露的命令名、参数和输出保持兼容
 
@@ -218,7 +218,7 @@ API, scheduler, or worker behavior.
 #### Scenario: Compose service is the documented Pilot default
 - **WHEN** operator 阅读 Pilot 部署文档或 runbook
 - **THEN** 文档优先使用 `docker compose` 流程启动 fleetent
-- **AND** 源码 `uv run uvicorn fleetent.server:app` 只标注为开发模式
+- **AND** 源码 `uv run fleetent platform serve` 只标注为开发模式（或等价的 `uv run uvicorn fleetent.server:app`）
 
 #### Scenario: Compose exposes the standard Pilot port
 - **WHEN** operator 使用 docker compose 启动 fleetent
@@ -246,24 +246,24 @@ Docker image SHALL include enough project files to run the service, admin CLI an
 #### Scenario: Container can run operator commands
 - **WHEN** operator enters the fleetent container or uses `docker compose run --rm fleetent`
 - **THEN** `uv run fleetent --help` works
-- **AND** `uv run fleetent admin --help` works
-- **AND** `uv run python scripts/upgrade.py --dry-run` works
+- **AND** `uv run fleetent platform --help` works
+- **AND** `uv run fleetent platform upgrade --dry-run` works
 
 ### Requirement: Explicit migration is recommended for Pilot
 Pilot deployment docs SHALL recommend explicit migration before service startup, while allowing optional auto-upgrade only by explicit opt-in.
 
 #### Scenario: Pilot migration is explicit
 - **WHEN** operator follows Pilot deployment runbook
-- **THEN** operator runs `docker compose run --rm fleetent uv run python scripts/upgrade.py`
+- **THEN** operator runs `docker compose run --rm fleetent uv run fleetent platform upgrade`
 - **AND** only after successful upgrade runs `docker compose up -d`
 
 #### Scenario: Auto-upgrade is disabled by default
 - **WHEN** `FLEETENT_AUTO_UPGRADE` is unset or false
-- **THEN** container startup does not run `scripts/upgrade.py`
+- **THEN** container startup does not run `fleetent platform upgrade`
 
 #### Scenario: Auto-upgrade is opt-in
 - **WHEN** `FLEETENT_AUTO_UPGRADE=true`
-- **THEN** container entrypoint runs `uv run python scripts/upgrade.py` before starting uvicorn
+- **THEN** container entrypoint runs `uv run fleetent platform upgrade` before starting the server
 - **AND** startup fails if upgrade fails
 
 ### Requirement: Docker deployment docs cover secrets and init flow
@@ -271,7 +271,7 @@ Deployment docs SHALL explain the Docker Compose first Pilot flow, local env fil
 
 #### Scenario: Init flow is documented
 - **WHEN** operator reads deployment docs
-- **THEN** docs instruct operator to run `fleetent admin init-config`
+- **THEN** docs instruct operator to run `fleetent platform init-config`
 - **AND** docs explain which files and directories are created
 
 #### Scenario: Flat secrets directory is documented

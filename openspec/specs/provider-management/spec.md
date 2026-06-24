@@ -163,12 +163,12 @@ A CLI interface SHALL provide all provider management capabilities for automatio
 
 #### Scenario: List providers via CLI
 - **GIVEN** 3 providers are configured
-- **WHEN** running `fleetent admin provider list`
+- **WHEN** running `fleetent platform provider list`
 - **THEN** a table shows id, name, type, model, status for each provider
 
 #### Scenario: Add provider via CLI
 - **GIVEN** admin wants to add a provider programmatically
-- **WHEN** running `fleetent admin provider add --id gpt4 --base-url https://... --model gpt-4`
+- **WHEN** running `fleetent platform provider add --id gpt4 --base-url https://... --model gpt-4`
 - **THEN** the provider is added and confirmation with masked key is shown
 
 ### Requirement: Provider Groups and Pools

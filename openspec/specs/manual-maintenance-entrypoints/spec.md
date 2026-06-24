@@ -46,7 +46,7 @@ real observability trace evidence recorded through the observability public API,
 
 #### Scenario: 平台无专用 agent memory 直写入口
 
-- **WHEN** 查看 `fleetent admin` 子命令与平台 HTTP API
+- **WHEN** 查看 `fleetent platform` 子命令与平台 HTTP API
 - **THEN** 不存在 `memory agent create/update/archive` CLI,也不存在 `/admin/memory/agent` 直写端点
 
 #### Scenario: agent memory 改动经 agent 侧生命周期

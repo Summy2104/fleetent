@@ -111,9 +111,9 @@ tables、config namespace 变化和 cross-module dependencies。
 ### Requirement: Admin CLI package split
 系统 SHALL expose the admin CLI through `platform.admin_cli` canonical package paths only; the legacy
 `fleetent.admin` shim SHALL NOT remain importable. The admin CLI SHALL be invoked exclusively via the
-`fleetent admin` subcommand of the single `fleetent` entrypoint; the standalone `fleetent-admin` console
+`fleetent platform` subcommand of the single `fleetent` entrypoint; the standalone `fleetent-admin` console
 script SHALL NOT exist in `pyproject.toml` (its deprecation shim is removed). `platform.admin_cli.main.main`
-SHALL remain importable as the canonical implementation that `fleetent admin` delegates to.
+SHALL remain importable as the canonical implementation that `fleetent platform` delegates to.
 
 #### Scenario: New admin CLI package entrypoint exists
 - **WHEN** 调用方导入 `fleetent.platform.admin_cli.main.main`
@@ -125,7 +125,7 @@ SHALL remain importable as the canonical implementation that `fleetent admin` de
 
 #### Scenario: No standalone admin console script
 - **WHEN** 查看 `pyproject.toml` 的 `[project.scripts]`
-- **THEN** 不含 `fleetent-admin` 入口；admin CLI 仅经 `fleetent admin` 子命令暴露
+- **THEN** 不含 `fleetent-admin` 入口；admin CLI 仅经 `fleetent platform` 子命令暴露
 
 ### Requirement: Admin CLI command domains
 admin CLI SHALL 按命令域拆分实现文件，降低单文件冲突。
@@ -320,7 +320,7 @@ flat→package 迁移收尾后，系统 SHALL expose runtime、model、tools、s
 
 #### Scenario: Current docs reference canonical admin CLI entrypoint
 - **WHEN** 读者查看当前 platform 或 architecture docs
-- **THEN** 文档使用 `fleetent.platform.admin_cli` 或 `fleetent admin` 子命令表示 admin CLI 入口
+- **THEN** 文档使用 `fleetent.platform.admin_cli` 或 `fleetent platform` 子命令表示 admin CLI 入口
 - **AND** 不把 `fleetent.admin` 或已移除的 `fleetent-admin` console script 描述为当前实现入口
 
 #### Scenario: Deleted legacy paths are not described as current APIs
@@ -345,7 +345,7 @@ agent-runtime 模块（`runtime`、`session`、`im_gateway`、`intelligence`、`
 
 ### Requirement: Admin CLI 直写管理库的边界
 
-`fleetent admin` CLI 直接访问管理面 store（不经平台 HTTP server 写管理库）SHALL 仅限以下三类：
+`fleetent platform` CLI 直接访问管理面 store（不经平台 HTTP server 写管理库）SHALL 仅限以下三类：
 
 - **真 bootstrap**：必须在 server 起来之前/之外运行的操作（如 `seed-builtin-admin` 创建首个内置 admin、`init-config`、`validate-config`）。
 - **基础设施供给**：`agent-node-registry` spec 已界定为"先于/独立于平台业务管理"的 ops 入口（node 登记/列举/注销/pin/unpin）。
@@ -355,13 +355,13 @@ agent-runtime 模块（`runtime`、`session`、`im_gateway`、`intelligence`、`
 
 #### Scenario: 业务控制面操作无直写 CLI
 
-- **WHEN** 查看 `fleetent admin` 子命令集合
+- **WHEN** 查看 `fleetent platform` 子命令集合
 - **THEN** 不存在 `create-tenant` / `list-tenants` / `create-team` / `set-user-tenant` / `set-approver` 等直写管理库的租户管理命令
 - **AND** 这些操作仅经 `/admin/tenancy/*` HTTP API 提供
 
 #### Scenario: bootstrap 与基础设施供给可直写
 
-- **WHEN** 运维执行 `fleetent admin seed-builtin-admin` 或 `fleetent admin node register`
+- **WHEN** 运维执行 `fleetent platform seed-builtin-admin` 或 `fleetent platform node register`
 - **THEN** 允许直接写管理库——前者是 server 起来前的 bootstrap，后者是 spec 认可的基础设施供给入口
 
 #### Scenario: 新增业务控制面操作走 HTTP

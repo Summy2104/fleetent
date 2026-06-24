@@ -725,19 +725,19 @@ performance summary SHALL 通过 `query_trace_events()` 读取 traces，而不�
 - **AND** 继续处理其他候选
 
 ### Requirement: Diagnostics admin CLI
-系统 SHALL 在 `fleetent admin` 中提供 diagnostics export 和 retention 手动操作命令。
+系统 SHALL 在 `fleetent platform` 中提供 diagnostics export 和 retention 手动操作命令。
 
 #### Scenario: Export from CLI
-- **WHEN** operator 运行 `fleetent admin diagnostics export`
+- **WHEN** operator 运行 `fleetent platform diagnostics export`
 - **THEN** CLI 调用 diagnostics export 并输出诊断包路径
 
 #### Scenario: Retention dry-run from CLI
-- **WHEN** operator 运行 `fleetent admin diagnostics retention dry-run`
+- **WHEN** operator 运行 `fleetent platform diagnostics retention dry-run`
 - **THEN** CLI 输出将删除的诊断数据候选摘要
 - **AND** 不删除任何数据
 
 #### Scenario: Retention apply from CLI
-- **WHEN** operator 运行 `fleetent admin diagnostics retention apply`
+- **WHEN** operator 运行 `fleetent platform diagnostics retention apply`
 - **THEN** CLI 执行手动 retention apply 或在 retention disabled 时返回非 0
 
 #### Scenario: Diagnostics CLI output is sanitized

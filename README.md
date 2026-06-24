@@ -17,7 +17,7 @@ fleetent 是一个面向企业内网部署的轻量 Agent 平台。项目基于 
 ### 一键安装（开发者 / 单机）
 
 Linux / macOS / WSL2：脚本会 bootstrap uv + Python 3.12，用 `uv tool install` 把
-`fleetent`（含 `fleetent admin` / `fleetent chat` 子命令）装成全局命令，并在 `FLEETENT_HOME`
+`fleetent`（含 `fleetent platform` / `fleetent chat` 子命令）装成全局命令，并在 `FLEETENT_HOME`
 （默认 `~/.fleetent`，与工作目录解耦）下铺设 Platform env + 初始化数据库。
 **安装脚本不再 seed 默认 Agent**——agent 由你用 `fleetent agent init` 按需创建（见下一节）。
 
@@ -69,7 +69,7 @@ uv run fleetent "What time is it, and what is 123 * 456?"
 启动 HTTP 服务：
 
 ```bash
-uv run uvicorn fleetent.server:app --reload --port 8765
+uv run fleetent platform serve --port 8765 --reload
 ```
 
 创建用户并调用 `/chat`：
