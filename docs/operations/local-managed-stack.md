@@ -126,7 +126,7 @@ pkill -f "platform serve"; pkill -f "fleetent node start"; pkill -f "fleetent ag
 | 现象 | 原因 / 修法 |
 |---|---|
 | platform 绑不上 8770（`address already in use`） | macOS `sharingd` 占 IPv6 dual-stack；用 `PLATFORM_PORT=8771` |
-| `make node-provision` 报 `'admin' is not a recognized command` | dev 脚本用了退役的 `fleetent admin`（已修为 `fleetent platform`，见 `scripts/dev_node_provision.py`） |
+| `make node-provision` 报 `'admin' is not a recognized command` | dev 脚本用了退役的 admin CLI 命名空间（已改走 `fleetent platform`，见 `scripts/dev_node_provision.py`） |
 | admin UI 看不到 agent / 聊不了 | 该 agent 是 `agent init` 的 standalone home，不在管理库；必须经平台建 + pin + enable |
 | enable 返回 409 `agent not bound to a node` | enable 前必须先 pin |
 | agent boot 崩 `embedding target ... unsupported protocol 'openai_chat'` | 别给 embedding/vision 配 chat 路由；删掉它们，靠 deterministic 回落 |
