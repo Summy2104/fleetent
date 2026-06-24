@@ -8,12 +8,14 @@
 
 ### Requirement: install-platform.sh deploys the platform control plane
 
-`scripts/install-platform.sh` SHALL install fleetent, run `alembic upgrade head` on
-`$FLEETENT_HOME/management.db`, seed the built-in admin, and build the admin SPA
-(`make frontend-install && make frontend-build`) so the deployed platform can serve
-`/admin/ui`. If node/yarn is unavailable, the script SHALL install it (or fail with a
-clear, actionable message) rather than silently skip the build. It SHALL NOT create any
-agent home directories.
+`scripts/install-platform.sh` SHALL install fleetent, run Platform DB migrations on
+`$FLEETENT_HOME/management.db`, seed the built-in admin via `fleetent platform
+seed-builtin-admin`, and build the admin SPA (`make frontend-install && make
+frontend-build`) so the deployed platform can serve `/admin/ui`. If node/yarn is
+unavailable, the script SHALL install it (or fail with a clear, actionable message)
+rather than silently skip the build. It SHALL NOT create any agent home directories.
+The post-install start instruction SHALL use `fleetent platform serve`, not a bare
+uvicorn command.
 
 #### Scenario: install-platform.sh creates platform DB
 
@@ -30,3 +32,9 @@ agent home directories.
 
 - **WHEN** node/yarn is not available on the install host
 - **THEN** the script installs it or aborts with a clear message and remediation, and SHALL NOT leave the platform with an unbuilt frontend silently
+
+#### Scenario: install prints platform serve command
+
+- **WHEN** `scripts/install-platform.sh` completes successfully
+- **THEN** next steps mention `fleetent platform serve`
+- **AND** next steps do not use bare `uvicorn fleetent.server:app`

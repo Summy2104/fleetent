@@ -45,5 +45,5 @@
 
 - [x] 6.1 Verify：`rg "fleetent admin|platform\\.admin_cli|admin_cli|uvicorn fleetent\\.server:app|python -m uvicorn fleetent\\.server:app" src tests Makefile README.md docs scripts openspec/specs`，确认仅历史 archive 或明确非主入口处残留
 - [x] 6.2 Verify：`PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py`
-- [ ] 6.3 Verify：`make test-pr`
-- [ ] 6.4 Verify：`uv run pytest tests/integration -q`，对照 main 基线无新增失败
+- [x] 6.3 Verify：`make test-pr`
+- [x] 6.4 Verify：`uv run pytest tests/integration -q`，对照 main 基线无新增失败
