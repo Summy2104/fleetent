@@ -1,4 +1,4 @@
-"""Knowledge-base connector admin CLI commands."""
+"""Knowledge-base connector platform CLI commands."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from fleetent.knowledge_base.extraction import (
     run_entity_extraction as _run_entity_extraction,
 )
 from fleetent.knowledge_base.extraction_store import KnowledgeExtractionRun
-from fleetent.platform.admin_cli.common import sanitize_cli_value
+from fleetent.platform.platform_cli.common import sanitize_cli_value
 from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
 
 

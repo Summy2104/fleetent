@@ -5,8 +5,8 @@ import json
 import sys
 
 from fleetent.platform import maintenance as maintenance_service
-from fleetent.platform.admin_cli.common import sanitize_cli_value, summary_line
 from fleetent.platform.maintenance import MaintenanceSummary
+from fleetent.platform.platform_cli.common import sanitize_cli_value, summary_line
 
 
 def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -67,7 +67,8 @@ def _run(args: argparse.Namespace) -> MaintenanceSummary:
         dry_run = args.maintenance_mode == "dry-run"
         if not dry_run:
             maintenance_service.require_confirmation(
-                yes=args.yes, dry_run_command="fleetent admin maintenance memory compact dry-run"
+                yes=args.yes,
+                dry_run_command="fleetent platform maintenance memory compact dry-run",
             )
         return maintenance_service.compact_memory(dry_run=dry_run, actor=args.actor)
 
@@ -77,7 +78,8 @@ def _run(args: argparse.Namespace) -> MaintenanceSummary:
             maintenance_service.require_confirmation(
                 yes=args.yes,
                 dry_run_command=(
-                    f"fleetent admin maintenance kb sync dry-run --connector-id {args.connector_id}"
+                    f"fleetent platform maintenance kb sync dry-run"
+                    f" --connector-id {args.connector_id}"
                 ),
             )
         return maintenance_service.run_kb_sync(
@@ -89,7 +91,7 @@ def _run(args: argparse.Namespace) -> MaintenanceSummary:
             maintenance_service.require_confirmation(
                 yes=args.yes,
                 dry_run_command=(
-                    "fleetent admin maintenance vector reindex --dry-run "
+                    "fleetent platform maintenance vector reindex --dry-run "
                     f"--namespace {args.namespace}"
                 ),
             )
@@ -102,7 +104,7 @@ def _run(args: argparse.Namespace) -> MaintenanceSummary:
             maintenance_service.require_confirmation(
                 yes=args.yes,
                 dry_run_command=(
-                    f"fleetent admin maintenance reflection run --dry-run --scope {args.scope}"
+                    f"fleetent platform maintenance reflection run --dry-run --scope {args.scope}"
                 ),
             )
         return maintenance_service.run_reflection(

@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install test t test-pr test-unit test-unit-ci test-coverage-ci test-integration test-e2e test-evaluation test-layers lint fmt check typecheck admin \
+.PHONY: help install test t test-pr test-unit test-unit-ci test-coverage-ci test-integration test-e2e test-evaluation test-layers lint fmt check typecheck platform-help \
 	frontend-install frontend-build test-frontend \
 	dev-bootstrap platform node-provision node kb-worker agent chat dev-clean
 
@@ -81,8 +81,8 @@ test-frontend: ## Run frontend tests, coverage, typecheck, and lint
 	yarn --cwd frontend tsc --noEmit
 	yarn --cwd frontend eslint .
 
-admin: ## Show admin CLI help
-	uv run fleetent admin --help
+platform-help: ## Show platform CLI help
+	uv run fleetent platform --help
 
 # ---- local dev stack -------------------------------------------------------
 # All data/config lives under a gitignored dev home (override by exporting
@@ -110,10 +110,10 @@ dev-bootstrap: ## Init dev home: migrate management DB + seed built-in admin
 	mkdir -p "$(FLEETENT_HOME)"
 	uv run python scripts/dev_secret_key.py
 	uv run alembic upgrade head
-	uv run fleetent admin seed-builtin-admin
+	uv run fleetent platform seed-builtin-admin
 
 platform: ## Start platform control-plane (admin API/UI), default port 8770
-	uv run python -m uvicorn fleetent.server:app --host 127.0.0.1 --port $(PLATFORM_PORT)
+	uv run fleetent platform serve --host 127.0.0.1 --port $(PLATFORM_PORT)
 
 node-provision: ## Register the dev node + write node/.env (idempotent; FORCE=1 to re-key)
 	uv run python scripts/dev_node_provision.py $(if $(FORCE),--force,)

@@ -1,19 +1,23 @@
-"""Admin CLI entrypoint."""
+"""Platform CLI entrypoint."""
 
 import argparse
 import sys
 
-from fleetent.platform.admin_cli import (
+from fleetent.platform.platform_cli import (
     config_validation,
     diagnostics,
     init_config,
     kb_connectors,
     maintenance,
     nodes,
+    serve,
+    upgrade,
     users,
 )
 
 _COMMAND_MODULES = (
+    serve,
+    upgrade,
     users,
     nodes,
     kb_connectors,
@@ -24,9 +28,9 @@ _COMMAND_MODULES = (
 )
 
 
-def main(argv: list[str] | None = None, prog: str = "fleetent admin") -> None:
-    """Run the fleetent admin CLI."""
-    parser = argparse.ArgumentParser(prog=prog, description="User management CLI")
+def main(argv: list[str] | None = None, prog: str = "fleetent platform") -> None:
+    """Run the fleetent platform CLI."""
+    parser = argparse.ArgumentParser(prog=prog, description="Platform control-plane CLI")
     subparsers = parser.add_subparsers(dest="cmd", required=True)
 
     for module in _COMMAND_MODULES:

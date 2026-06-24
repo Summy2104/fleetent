@@ -1,4 +1,4 @@
-"""Shared helpers for the admin CLI."""
+"""Shared helpers for the platform CLI."""
 
 import sys
 from collections.abc import Mapping

@@ -60,11 +60,11 @@ agent loop in-process.
 
 ### Requirement: 平台裸启动不依赖 agent 侧 state_db
 
-`uvicorn fleetent.server:app` SHALL 能在干净环境裸启动成功(lifespan 跑完、`/health` 可达),SHALL NOT 依赖 agent 侧 `state_db` 被初始化。平台 lifespan SHALL NOT 执行 agent 侧的 approval reconcile(`reconcile_expired_approvals`)等需要 per-agent `state_db` 的操作——这类操作归 agent 进程 boot(approval 是 agent 侧数据)。
+`fleetent platform serve` SHALL 能在干净环境裸启动成功(lifespan 跑完、`/health` 可达),SHALL NOT 依赖 agent 侧 `state_db` 被初始化。平台 lifespan SHALL NOT 执行 agent 侧的 approval reconcile(`reconcile_expired_approvals`)等需要 per-agent `state_db` 的操作——这类操作归 agent 进程 boot(approval 是 agent 侧数据)。
 
 #### Scenario: 平台裸启动成功
 
-- **WHEN** 在未 `set_state_db` 的干净进程里 `uvicorn fleetent.server:app` 启动
+- **WHEN** 在未 `set_state_db` 的干净进程里 `fleetent platform serve` 启动
 - **THEN** lifespan 跑完、`/health` 返回 200,**不抛 `approval_store: state_db not initialized`**
 
 #### Scenario: agent 侧 reconcile 不在平台 lifespan

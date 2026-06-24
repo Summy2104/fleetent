@@ -1,4 +1,4 @@
-"""User-related admin CLI commands."""
+"""User-related platform CLI commands."""
 
 from __future__ import annotations
 

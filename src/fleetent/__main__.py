@@ -99,11 +99,17 @@ def main(argv: list[str] | None = None) -> None:
         agent_app._stop_running(home_dir)
         return
 
-    if argv and argv[0] == "admin":
-        from fleetent.platform.admin_cli.main import main as admin_main
+    if argv and argv[0] == "platform":
+        from fleetent.platform.platform_cli.main import main as platform_main
 
-        admin_main(argv[1:], prog="fleetent admin")
+        platform_main(argv[1:], prog="fleetent platform")
         return
+
+    if argv and argv[0] == "admin":
+        print(
+            "error: 'admin' is not a recognized command; use 'fleetent platform'", file=sys.stderr
+        )
+        sys.exit(1)
 
     if argv and argv[0] == "node":
         if argv[1:] != ["start"]:

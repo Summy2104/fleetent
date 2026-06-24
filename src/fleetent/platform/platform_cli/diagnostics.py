@@ -1,4 +1,4 @@
-"""Diagnostics admin CLI commands."""
+"""Diagnostics platform CLI commands."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from fleetent.platform.admin_cli.common import sanitize_cli_value
+from fleetent.platform.platform_cli.common import sanitize_cli_value
 
 
 def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

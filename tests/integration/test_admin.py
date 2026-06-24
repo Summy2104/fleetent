@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from fleetent.platform.admin_cli.main import main as admin_cli_main
+from fleetent.platform.platform_cli.main import main as platform_cli_main
 from tests.integration.test_migrations import apply_migrations
 
 
@@ -15,7 +15,7 @@ def tmp_db(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
 
-def run_admin(*args: str) -> tuple[str, str, int]:
+def run_platform(*args: str) -> tuple[str, str, int]:
     stdout, stderr = StringIO(), StringIO()
     exit_code = 0
     with (
@@ -24,22 +24,22 @@ def run_admin(*args: str) -> tuple[str, str, int]:
         patch("sys.stderr", stderr),
     ):
         try:
-            admin_cli_main()
+            platform_cli_main()
         except SystemExit as e:
             exit_code = int(e.code or 0)
     return stdout.getvalue(), stderr.getvalue(), exit_code
 
 
-def test_admin_platform_entrypoint_is_importable():
-    assert callable(admin_cli_main)
+def test_platform_entrypoint_is_importable():
+    assert callable(platform_cli_main)
 
 
 def test_seed_builtin_admin():
-    out, _, code = run_admin("seed-builtin-admin")
+    out, _, code = run_platform("seed-builtin-admin")
     assert code == 0
     assert "initial_password" in out
 
-    out2, _, code2 = run_admin("seed-builtin-admin")
+    out2, _, code2 = run_platform("seed-builtin-admin")
     assert code2 == 0
     assert "already exists" in out2
 
@@ -57,8 +57,8 @@ def test_seed_builtin_admin():
         (("observability", "traces"), "observability"),
     ],
 )
-def test_removed_admin_commands_exit_with_invalid_choice(args: tuple[str, ...], needle: str):
-    _, err, code = run_admin(*args)
+def test_removed_platform_commands_exit_with_invalid_choice(args: tuple[str, ...], needle: str):
+    _, err, code = run_platform(*args)
 
     assert code != 0
     assert "invalid choice" in err.lower()
@@ -66,20 +66,20 @@ def test_removed_admin_commands_exit_with_invalid_choice(args: tuple[str, ...], 
 
 
 def test_list_pending_command_removed():
-    _, err, code = run_admin("list-pending")
+    _, err, code = run_platform("list-pending")
     assert code != 0
     assert "invalid choice" in err.lower()
 
 
 def test_approve_user_command_removed():
-    _, err, code = run_admin("approve-user", "--im-user-id", "1")
+    _, err, code = run_platform("approve-user", "--im-user-id", "1")
     assert code != 0
     assert "invalid choice" in err.lower()
 
 
 def test_removed_channel_assign_command():
     cmd = "assign" + "-channel"
-    _, err, code = run_admin(
+    _, err, code = run_platform(
         cmd, "--platform", "slack", "--channel-id", "C42", "--agent-name", "mybot"
     )
     assert code != 0
@@ -88,6 +88,6 @@ def test_removed_channel_assign_command():
 
 def test_removed_channel_unassign_command():
     cmd = "unassign" + "-channel"
-    _, err, code = run_admin(cmd, "--platform", "telegram", "--channel-id", "G7")
+    _, err, code = run_platform(cmd, "--platform", "telegram", "--channel-id", "G7")
     assert code != 0
     assert "invalid choice" in err.lower()

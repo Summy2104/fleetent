@@ -47,7 +47,7 @@ install script SHALL 探测 uv 是否已存在，仅在缺失时安装，并用 
 - **AND** 不满足时 fail fast 并提示所需版本
 
 ### Requirement: Global command installation
-install script SHALL 用 `uv tool install` 把 `fleetent` 安装为可在任意目录调用的全局命令。`fleetent-admin` / `fleetent-node` / `fleetent-tui` 不再作为独立 console script 安装——admin CLI 经 `fleetent admin` 子命令、node supervisor 经 `fleetent node start`、终端 TUI 经 `fleetent chat` 子命令调用。
+install script SHALL 用 `uv tool install` 把 `fleetent` 安装为可在任意目录调用的全局命令。`fleetent-admin` / `fleetent-node` / `fleetent-tui` 不再作为独立 console script 安装——admin CLI 经 `fleetent platform` 子命令、node supervisor 经 `fleetent node start`、终端 TUI 经 `fleetent chat` 子命令调用。
 
 #### Scenario: Entry point available globally
 - **WHEN** 安装完成

@@ -368,7 +368,7 @@ _CONTROL_FACE_PREFIXES = (
     "fleetent.platform.chat_management",
     "fleetent.platform.askit_console",
     "fleetent.platform.reflection_management",
-    "fleetent.platform.admin_cli",
+    "fleetent.platform.platform_cli",
     "fleetent.platform.agent_statistics",
     "fleetent.platform.im_gateway_management",
 )

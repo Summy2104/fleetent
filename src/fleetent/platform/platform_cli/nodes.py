@@ -1,4 +1,4 @@
-"""Admin CLI commands for node registry and placements."""
+"""Platform CLI commands for node registry and placements."""
 
 from __future__ import annotations
 

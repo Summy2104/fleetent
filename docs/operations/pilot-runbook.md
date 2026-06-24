@@ -4,7 +4,7 @@
 模块 owner 使用的人工验收手册：每一步都说明要证明什么能力、模拟什么场景、应该看到什么证据，以及失败时
 如何分类。
 
-Pilot 默认部署入口是 Docker Compose；源码环境下的 `uv run uvicorn fleetent.server:app` 只作为开发模式。
+Pilot 默认部署入口是 Docker Compose；`fleetent platform serve` 是主要服务启动入口，源码环境下的 `uv run uvicorn fleetent.server:app` 只作为开发模式。
 
 相关文档：
 
@@ -26,7 +26,7 @@ No-Go 建议；最终判定仍由 operator 和 owner 复核。
 轻量门禁与手动维护边界：
 
 ```bash
-uv run fleetent admin validate-config --profile pilot --format json
+uv run fleetent platform validate-config --profile pilot --format json
 uv run python scripts/generate_pilot_verification_report.py
 ```
 
@@ -152,22 +152,22 @@ test -f agents/<agent-id>/agent.yaml
 验收目标：
 
 - 证明项目依赖可安装。
-- 证明用户入口 `fleetent` 和管理入口 `fleetent admin` 都可执行。
+- 证明用户入口 `fleetent` 和管理入口 `fleetent platform` 都可执行。
 
 操作步骤：
 
 ```bash
 docker compose build fleetent
 docker compose run --rm fleetent uv run fleetent --help
-docker compose run --rm fleetent uv run fleetent admin --help
-docker compose run --rm fleetent uv run fleetent admin init-config
+docker compose run --rm fleetent uv run fleetent platform --help
+docker compose run --rm fleetent uv run fleetent platform init-config
 ```
 
 应该看到什么：
 
 - 镜像构建成功。
 - `fleetent --help` 能显示 agent CLI 用法。
-- `fleetent admin --help` 能显示管理命令。
+- `fleetent platform --help` 能显示管理命令。
 - `.env`、`agents/<agent-id>/agent.yaml`、`agents/<agent-id>/.env`、`data/`、`data/logs/`、
   `data/diagnostics/` 和 `secrets/` 已初始化；如果文件已存在，命令会跳过。
 
@@ -188,9 +188,9 @@ docker compose run --rm fleetent uv run fleetent admin init-config
 操作步骤：
 
 ```bash
-docker compose run --rm fleetent uv run python scripts/upgrade.py --dry-run
-docker compose run --rm fleetent uv run python scripts/upgrade.py --backup-only
-docker compose run --rm fleetent uv run python scripts/upgrade.py
+docker compose run --rm fleetent uv run fleetent platform upgrade --dry-run
+docker compose run --rm fleetent uv run fleetent platform upgrade --backup-only
+docker compose run --rm fleetent uv run fleetent platform upgrade
 ```
 
 应该看到什么：
@@ -236,7 +236,7 @@ GET /admin/stats/agents/<agent_id>/overview
 uv run fleetent "hello"
 ```
 
-`uv run uvicorn fleetent.server:app` 只作为开发模式保留，不作为 Pilot 默认部署入口。
+`fleetent platform serve` 是主要服务启动入口；`uvicorn fleetent.server:app` 可直接作为 ASGI 应用访问，仅用于开发模式。
 
 应该看到什么：
 
@@ -282,8 +282,8 @@ uv run fleetent "hello"
 GET /admin/stats/agents/<agent_id>/overview
 GET /admin/stats/agents/<agent_id>/tools
 GET /admin/stats/sessions/<session_id>/trace
-uv run fleetent admin diagnostics export
-uv run fleetent admin diagnostics retention dry-run
+uv run fleetent platform diagnostics export
+uv run fleetent platform diagnostics retention dry-run
 ```
 
 应该看到什么：
@@ -764,7 +764,7 @@ retest_result:
 CLI 命令不可用：
 
 1. 运行 `docker compose build fleetent`。
-2. 运行 `docker compose run --rm fleetent uv run fleetent admin --help`。
+2. 运行 `docker compose run --rm fleetent uv run fleetent platform --help`。
 3. 检查 `pyproject.toml` 的 `[project.scripts]`。
 4. 如镜像缓存异常，重新构建镜像后复测。
 

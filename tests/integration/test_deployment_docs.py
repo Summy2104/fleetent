@@ -235,9 +235,9 @@ def test_pilot_install_checklist_contains_required_commands():
     content = Path("docs/operations/pilot-install-checklist.md").read_text(encoding="utf-8")
 
     required_commands = [
-        "docker compose run --rm fleetent uv run fleetent admin init-config",
-        "docker compose run --rm fleetent uv run python scripts/upgrade.py --dry-run",
-        "docker compose run --rm fleetent uv run python scripts/upgrade.py",
+        "docker compose run --rm fleetent uv run fleetent platform init-config",
+        "docker compose run --rm fleetent uv run fleetent platform upgrade --dry-run",
+        "docker compose run --rm fleetent uv run fleetent platform upgrade",
         "docker compose up -d",
         "curl -fsS http://127.0.0.1:8765/health",
         "GET /admin/kb/connectors",
@@ -245,8 +245,8 @@ def test_pilot_install_checklist_contains_required_commands():
         "GET /admin/stats/agents/<agent_id>/overview",
         "GET /admin/stats/agents/<agent_id>/tools",
         "GET /admin/stats/sessions/<session_id>/trace",
-        "uv run fleetent admin diagnostics export",
-        "uv run fleetent admin diagnostics retention dry-run",
+        "uv run fleetent platform diagnostics export",
+        "uv run fleetent platform diagnostics retention dry-run",
     ]
     for command in required_commands:
         assert command in content
@@ -308,14 +308,14 @@ def test_pilot_runbook_contains_required_commands_and_failure_handling():
         "应该看到什么",
         "通过标准",
         "失败判断",
-        "docker compose run --rm fleetent uv run fleetent admin init-config",
-        "docker compose run --rm fleetent uv run python scripts/upgrade.py --dry-run",
-        "docker compose run --rm fleetent uv run python scripts/upgrade.py --backup-only",
-        "docker compose run --rm fleetent uv run python scripts/upgrade.py",
+        "docker compose run --rm fleetent uv run fleetent platform init-config",
+        "docker compose run --rm fleetent uv run fleetent platform upgrade --dry-run",
+        "docker compose run --rm fleetent uv run fleetent platform upgrade --backup-only",
+        "docker compose run --rm fleetent uv run fleetent platform upgrade",
         "docker compose up -d",
         "curl -fsS http://127.0.0.1:8765/health",
         "GET /admin/stats/agents/<agent_id>/overview",
-        "uv run fleetent admin diagnostics export",
+        "uv run fleetent platform diagnostics export",
         "uv run pytest tests/evaluation/test_memory_extraction_eval.py -q",
         "uv run pytest tests/evaluation/test_long_term_context_eval.py -q",
         "uv run pytest tests/evaluation/test_reflection_report_eval.py -q",

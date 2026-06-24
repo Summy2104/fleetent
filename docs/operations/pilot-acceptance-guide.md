@@ -25,7 +25,7 @@ Go / `Conditional Go` / No-Go 建议。真实 smoke 必须显式设置 opt-in fl
 验收目标：
 
 - 验证测试环境能完成配置加载、SQLite 升级、备份、恢复演练、服务启动和基础 health check。
-- 验证 operator 能通过 `fleetent admin` 查询 observability、导出 diagnostics，并定位一次测试 run。
+- 验证 operator 能通过 `fleetent platform` 查询 observability、导出 diagnostics，并定位一次测试 run。
 - 验证 memory、long-term context、reflection、knowledge base、vector store 的 Pilot MVP 基础链路可用。
 - 验证真实外部依赖的状态被明确记录为 `passed`、`failed` 或 `skipped`。
 - 输出一份可追踪的验收报告，明确 Pilot blocker、docs gap、enhancement 和 out-of-scope。
@@ -45,7 +45,7 @@ Go / Conditional Go / No-Go 标准：
 - 已按 [pilot-install-checklist.md](pilot-install-checklist.md) 完成安装、依赖同步和基础配置。
 - 当前分支、commit SHA、部署包版本和目标环境名称已记录。
 - operator 有测试环境 shell 权限、服务启停权限、`data/` 和 `config/` 读写权限。
-- Docker Compose 可用，且 `docker compose run --rm fleetent uv run fleetent admin --help` 能输出帮助。
+- Docker Compose 可用，且 `docker compose run --rm fleetent uv run fleetent platform --help` 能输出帮助。
 - 服务端口未被占用，测试环境允许访问企业批准的 LLM / embedding endpoint。
 - 测试数据不包含真实敏感客户数据；如必须使用真实企业数据，先确认数据 owner 和脱敏策略。
 
@@ -93,7 +93,7 @@ GET /admin/kb/connectors
 执行 dry-run：
 
 ```bash
-uv run python scripts/upgrade.py --dry-run
+uv run fleetent platform upgrade --dry-run
 ```
 
 通过标准：
@@ -104,19 +104,19 @@ uv run python scripts/upgrade.py --dry-run
 执行 upgrade：
 
 ```bash
-uv run python scripts/upgrade.py
+uv run fleetent platform upgrade
 ```
 
 通过标准：
 
 - SQLite backup 写入 `data/backups/YYYYMMDD-HHMMSS/`，按数据目录结构镜像全部物理库（管理库 `management.db` + per-tenant / per-agent 子目录下各库，含 WAL sidecar）。
 - backup 成功后才运行 `alembic upgrade head`。
-- migration 成功后服务仍能启动；migration 失败时保留 backup 且脚本返回非 0。
+- migration 成功后服务仍能启动；migration 失败时保留 backup 且命令返回非 0。
 
 执行 backup-only：
 
 ```bash
-uv run python scripts/upgrade.py --backup-only
+uv run fleetent platform upgrade --backup-only
 ```
 
 通过标准：
@@ -161,19 +161,19 @@ curl -fsS http://127.0.0.1:8765/health
 检查 CLI：
 
 ```bash
-docker compose run --rm fleetent uv run fleetent admin init-config --dry-run
-uv run fleetent admin --help
+docker compose run --rm fleetent uv run fleetent platform init-config --dry-run
+uv run fleetent platform --help
 GET /admin/observability/traces?limit=5
 uv run fleetent "hello"
 ```
 
-`uv run uvicorn fleetent.server:app` 只作为开发模式保留，不作为 Pilot 默认部署入口。
+`fleetent platform serve` 是主要服务启动入口；`uvicorn fleetent.server:app` 可直接作为 ASGI 应用访问，仅用于开发模式。
 
 通过标准：
 
 - 服务启动无配置错误、DB migration 错误或 secret 打印。
 - `/health` 返回 200。
-- `fleetent admin` 子命令可执行。
+- `fleetent platform` 子命令可执行。
 - CLI agent 可完成一次最小 run；如果真实 LLM 未配置，应记录为 `skipped: real LLM route not configured`
   或 `failed`，并说明是否影响 Go 判定。
 
@@ -201,8 +201,8 @@ GET /admin/observability/performance?limit=100
 导出 diagnostics：
 
 ```bash
-uv run fleetent admin diagnostics export
-uv run fleetent admin diagnostics retention dry-run
+uv run fleetent platform diagnostics export
+uv run fleetent platform diagnostics retention dry-run
 ```
 
 通过标准：

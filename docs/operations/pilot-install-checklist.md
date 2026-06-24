@@ -40,27 +40,27 @@ runbook 的顺序执行；本清单用于核对安装、升级、备份、回滚
 Pilot 默认使用 Docker Compose。先初始化本地配置和目录：
 
 ```bash
-docker compose run --rm fleetent uv run fleetent admin init-config
+docker compose run --rm fleetent uv run fleetent platform init-config
 ```
 
 编辑平台 `.env`、`agents/<agent-id>/agent.yaml`、`agents/<agent-id>/.env`，并把真实 secret 文件放入 `secrets/` 后，升级前先 dry-run：
 
 ```bash
-docker compose run --rm fleetent uv run python scripts/upgrade.py --dry-run
+docker compose run --rm fleetent uv run fleetent platform upgrade --dry-run
 ```
 
-dry-run 通过后执行升级脚本。脚本会在 SQLite backup 成功后运行 `alembic upgrade head`：
+dry-run 通过后执行升级。升级命令会在 SQLite backup 成功后运行 `alembic upgrade head`：
 
 > **迁移要求（当前 head）**：`api_keys`、`audit_log`、`im_users` 等管理表已由 Alembic 管理，应用启动前须先完成 `alembic upgrade head`；否则管理 API 会报 "no such table" 错误。
 
 ```bash
-docker compose run --rm fleetent uv run python scripts/upgrade.py
+docker compose run --rm fleetent uv run fleetent platform upgrade
 ```
 
 只做备份、不迁移：
 
 ```bash
-docker compose run --rm fleetent uv run python scripts/upgrade.py --backup-only
+docker compose run --rm fleetent uv run fleetent platform upgrade --backup-only
 ```
 
 验收点：
@@ -84,7 +84,7 @@ docker compose up -d
 curl -fsS http://127.0.0.1:8765/health
 ```
 
-`uv run uvicorn fleetent.server:app` 只作为开发模式保留，不作为 Pilot 默认部署入口。
+`fleetent platform serve` 是主要服务启动入口；`uvicorn fleetent.server:app` 可直接作为 ASGI 应用访问，仅用于开发模式。
 
 验收点：
 
@@ -165,25 +165,25 @@ GET /admin/stats/sessions/<session_id>/trace
 导出诊断包：
 
 ```bash
-uv run fleetent admin diagnostics export
+uv run fleetent platform diagnostics export
 ```
 
 按时间导出诊断包：
 
 ```bash
-uv run fleetent admin diagnostics export --from 2026-06-02T00:00:00 --to 2026-06-02T23:59:59
+uv run fleetent platform diagnostics export --from 2026-06-02T00:00:00 --to 2026-06-02T23:59:59
 ```
 
 retention dry-run：
 
 ```bash
-uv run fleetent admin diagnostics retention dry-run
+uv run fleetent platform diagnostics retention dry-run
 ```
 
 retention apply：
 
 ```bash
-uv run fleetent admin diagnostics retention apply
+uv run fleetent platform diagnostics retention apply
 ```
 
 验收点：
@@ -215,11 +215,11 @@ uv run fleetent admin diagnostics retention apply
 **在 agent host 上**
 1. 将代码仓库 clone 到 agent host
 2. 运行 `bash scripts/install-agent.sh` 安装 agent 运行时（不再带 agent-id），再 `fleetent agent init <agent-id>` 创建 agent home
-3. 在 platform 侧注册该 node：`uv run fleetent admin node register --host <agent-host> --port <port>`
+3. 在 platform 侧注册该 node：`uv run fleetent platform node register --host <agent-host> --port <port>`
 
 **验证**
-- `uv run fleetent admin node list` — 应显示已注册的 node 及其心跳状态
-- `uv run fleetent admin node deregister <node-id>` — 如需下线
+- `uv run fleetent platform node list` — 应显示已注册的 node 及其心跳状态
+- `uv run fleetent platform node deregister <node-id>` — 如需下线
 
 **当前限制**
 - node 与 platform 须能互相访问（HTTP）
@@ -227,8 +227,8 @@ uv run fleetent admin diagnostics retention apply
 
 ## Pilot 验收清单
 
-- [ ] Docker Compose 镜像构建完成，`fleetent admin init-config` 成功。
-- [ ] `scripts/upgrade.py --dry-run` 成功。
+- [ ] Docker Compose 镜像构建完成，`fleetent platform init-config` 成功。
+- [ ] `fleetent platform upgrade --dry-run` 成功。
 - [ ] SQLite backup 已创建。
 - [ ] 服务启动成功，`GET /health` 返回 200。
 - [ ] 默认 agent 可响应一次测试消息。
@@ -239,8 +239,8 @@ uv run fleetent admin diagnostics retention apply
 - [ ] `GET /admin/stats/agents/<agent_id>/overview` 可查询测试 run 的聚合统计。
 - [ ] `GET /admin/stats/agents/<agent_id>/tools` 可查询工具调用概览。
 - [ ] `GET /admin/stats/sessions/<session_id>/trace` 可 drill-down 到单次会话 trace。
-- [ ] `fleetent admin diagnostics export` 可生成脱敏诊断包。
-- [ ] `fleetent admin diagnostics retention dry-run` 可输出候选数量。
+- [ ] `fleetent platform diagnostics export` 可生成脱敏诊断包。
+- [ ] `fleetent platform diagnostics retention dry-run` 可输出候选数量。
 - [ ] 回滚负责人和问题上报路径已确认。
 
 ## 问题上报包
@@ -248,7 +248,7 @@ uv run fleetent admin diagnostics retention apply
 问题上报包应包含：
 
 - fleetent 版本、commit SHA 和部署时间。
-- `scripts/upgrade.py --dry-run` 输出摘要。
+- `fleetent platform upgrade --dry-run` 输出摘要。
 - `GET /health` 结果。
 - connector `check` / `status` 的脱敏输出。
 - stats overview / tools / session trace 的脱敏输出。

@@ -1,7 +1,7 @@
 import json
 from types import SimpleNamespace
 
-from tests.integration.test_admin import run_admin
+from tests.integration.test_admin import run_platform as run_admin
 
 
 def test_validate_config_cli_json_outputs_deterministic_summary(tmp_path, monkeypatch):

@@ -20,7 +20,7 @@
 ```mermaid
 flowchart TB
   EDGE["① 边缘 / 网关面<br/>外部事件入口<br/>im_gateway · webhook · /chat /ws"]
-  CTRL["② 控制 / 配置面<br/>人工驱动的 配置 / 审批 / review API<br/>各 *_management · governance管理API · *_store · admin_cli"]
+  CTRL["② 控制 / 配置面<br/>人工驱动的 配置 / 审批 / review API<br/>各 *_management · governance管理API · *_store · platform_cli"]
   ORCH["③ 编排 / 监管面<br/>进程启停 · materialize · 定时(cron)<br/>agent_lifecycle · cron · schedule"]
   INGEST["④ 摄取 / 数据管道面<br/>异步 · 定时 · 批量<br/>knowledge_base.ingest · connector sync"]
 
@@ -75,7 +75,7 @@ flowchart TB
 ### ② 控制 / 配置面 —— 人工驱动的配置编写
 - **性质**：同步 CRUD API，管理员/控制台操作；产出「核去读取」的配置与绑定。
 - **模块**：`platform/` 的 `askit_console`、`agent_management_console`、`connector_management`、`knowledge_base_management`（绑定/管理 API）、`model_provider_management`、`skill_management`、`user_management`、`chat_management`；`agent_store`（定义+版本）、`user_store`(用户 CRUD)、`connectors`(OAuth)、`auth`；`server` 的管理端点(业务控制面写操作的唯一入口)。
-- **边界**：业务控制面写操作(租户/团队/审批人/用户归属、agent 定义等)MUST 走 `server` HTTP API,MUST NOT 由直写管理库的 CLI 承载;`admin_cli` 收窄为 **bootstrap**(seed-builtin-admin/init-config/validate-config)/ **基础设施供给**(node 注册·pin)/ **危险宿主级维护**(diagnostics·maintenance),不做业务 CRUD。详见 `module-boundaries` spec「Admin CLI 直写管理库的边界」。
+- **边界**：业务控制面写操作(租户/团队/审批人/用户归属、agent 定义等)MUST 走 `server` HTTP API,MUST NOT 由直写管理库的 CLI 承载;`platform_cli` 收窄为 **bootstrap**(seed-builtin-admin/init-config/validate-config)/ **基础设施供给**(node 注册·pin)/ **危险宿主级维护**(diagnostics·maintenance),不做业务 CRUD。详见 `module-boundaries` spec「Admin CLI 直写管理库的边界」。
 
 ### ③ 编排 / 监管面 —— 管 agent 的生命周期
 - **性质**：把②的配置 materialize 成下发载荷、把"哪些 agent 该在哪跑"的**期望态**调谐成真实进程、定时触发。**声明式 + daemon / 调度** character，独立于②的同步 CRUD。
@@ -325,7 +325,7 @@ platform 经"共享 store 读函数"读 = 依赖 agent 侧库的**读 schema**�
         user_management, chat_management, reflection_management}
         · governance 管理 API(审批解析/封禁) · agent_store · user_store(CRUD)
         · connectors · server(管理端点;业务控制面写操作唯一入口)
-        〔admin_cli 不在此面:已收窄为 bootstrap/基础设施供给/危险维护,不做业务 CRUD〕
+        〔platform_cli 不在此面:已收窄为 bootstrap/基础设施供给/危险维护,不做业务 CRUD〕
 ③编排 : platform/agent_lifecycle(materialize/secret) · platform/node_management(注册表/placement/desired-state API)
         · node/(fleetent node start supervisor，跨机 HTTP client；当前物理上与平台同包，但内部不 import platform 实现，部署时可抽出为独立二进制)
         · cron_scheduler · schedule_store
