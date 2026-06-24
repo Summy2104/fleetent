@@ -39,7 +39,7 @@ async def test_fire_independent_semantics_unique_sessions(tmp_path, monkeypatch)
     )
     sids: list[str] = []
 
-    async def fake_run(messages, agent_name=None, principal=None, connectors=None):
+    async def fake_run(messages, agent_name=None, principal=None, connectors=None, suppress_outbound=False):
         return "ok"
 
     async def spy_save(sid, messages, **kw):
@@ -65,7 +65,7 @@ async def test_fire_fixed_semantics_accumulates(tmp_path, monkeypatch):
     )
     captured_msgs: list = []
 
-    async def fake_run(messages, agent_name=None, principal=None, connectors=None):
+    async def fake_run(messages, agent_name=None, principal=None, connectors=None, suppress_outbound=False):
         captured_msgs.append(list(messages))  # snapshot what run received (at entry)
         # Simulate agent_loop.run mutating the list in place into the full convo:
         # append a tool-call assistant turn + the final assistant reply.
@@ -108,7 +108,7 @@ async def test_fire_saves_with_user_and_agent(tmp_path, monkeypatch):
     )
     captured: dict = {}
 
-    async def fake_run(messages, agent_name=None, principal=None, connectors=None):
+    async def fake_run(messages, agent_name=None, principal=None, connectors=None, suppress_outbound=False):
         messages.append({"role": "assistant", "content": "ok"})  # run mutates in place
         return "ok"
 
