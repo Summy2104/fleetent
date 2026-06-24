@@ -62,7 +62,9 @@ def test_agent_app_routes_traces_and_reflection_tables_to_agent_state_db(tmp_pat
 
     _init_agent_db_schema(data_dir, agent_id="agent-1", tenant_id="default")
 
-    agent_state_db_path = data_dir / "default" / "agent-1" / "agent_state.db"
+    agent_state_db_path = (
+        tmp_path / "tenants" / "default" / "agents" / "agent-1" / "data" / "agent_state.db"
+    )
     assert agent_state_db_path.exists()
     assert {"traces", "reflection_reports", "memory_items"} <= _tables(agent_state_db_path)
     assert not (data_dir / "fleetent.db").exists(), "no standalone fleetent.db should be created"

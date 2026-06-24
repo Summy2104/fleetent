@@ -53,6 +53,7 @@ def test_kb_migrations_create_expected_tables(tmp_path: Path) -> None:
         "knowledge_chunks",
         "knowledge_source_states",
         "knowledge_connector_status",
+        "knowledge_connector_sync_history",
         "kb_entities",
         "kb_entity_mentions",
         "kb_relations",

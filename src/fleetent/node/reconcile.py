@@ -12,6 +12,7 @@ from fleetent.agent_config import AgentFile
 from fleetent.node.backend import BaseProcessBackend
 from fleetent.node.config import NodeConfig
 from fleetent.node.provider import DesiredState
+from fleetent.node.skill_deployer import NodeSkillDeployer
 from fleetent.runtime.agent_init import ensure_env_scaffold, referenced_env_names
 from fleetent.structured_logging import get_logger
 
@@ -23,6 +24,7 @@ class NodeReconciler:
         self._config = config
         self._backend = backend
         self._hash_path = config.home_dir / "node" / "applied-config-hashes.json"
+        self._skill_deployer = NodeSkillDeployer(config)
 
     def reconcile(self, desired_state: DesiredState) -> None:
         desired_by_name = {agent.name: agent for agent in desired_state.agents}
@@ -31,17 +33,18 @@ class NodeReconciler:
 
         for name in sorted(known_names):
             desired = desired_by_name.get(name)
-            pid = self._backend.is_alive(name)
+            tenant_id = desired.tenant_id if desired is not None else self._local_tenant_id(name)
+            pid = self._backend.is_alive(name, tenant_id)
             if desired is None:
                 if pid is not None:
-                    self._backend.stop(name)
-                _erase_env(self._home_dir(name) / ".env")
+                    self._backend.stop(name, tenant_id)
+                _erase_env(self._home_dir(name, tenant_id) / ".env")
                 continue
 
             desired_hash = _config_hash(desired.config)
             if desired_state.source == "cache" and not desired.secrets:
                 if pid is None:
-                    if not self._env_has_values(name):
+                    if not self._env_has_values(name, desired.tenant_id):
                         _logger.warn(
                             "node_secret_start_deferred",
                             agent_name=name,
@@ -52,29 +55,42 @@ class NodeReconciler:
                     # .env has values from prior materialization — boot from disk
                 else:
                     continue
+
             if pid is None:
-                self._write_home(name, desired.config, secrets=desired.secrets)
+                self._write_home(
+                    name,
+                    desired.tenant_id,
+                    desired.config,
+                    skill_manifests=desired.skill_manifests,
+                    secrets=desired.secrets,
+                )
                 _logger.info(
                     "node_agent_spawn",
                     agent_name=name,
                     secret_env_names=sorted(desired.secrets),
                     secret_count=len(desired.secrets),
                 )
-                self._backend.spawn(name)
+                self._backend.spawn(name, desired.tenant_id)
                 hashes[name] = desired_hash
                 continue
 
-            current_hash = hashes.get(name) or self._current_home_hash(name)
+            current_hash = hashes.get(name) or self._current_home_hash(name, desired.tenant_id)
             if current_hash != desired_hash:
-                self._backend.stop(name)
-                self._write_home(name, desired.config, secrets=desired.secrets)
+                self._backend.stop(name, desired.tenant_id)
+                self._write_home(
+                    name,
+                    desired.tenant_id,
+                    desired.config,
+                    skill_manifests=desired.skill_manifests,
+                    secrets=desired.secrets,
+                )
                 _logger.info(
                     "node_agent_spawn",
                     agent_name=name,
                     secret_env_names=sorted(desired.secrets),
                     secret_count=len(desired.secrets),
                 )
-                self._backend.spawn(name)
+                self._backend.spawn(name, desired.tenant_id)
                 hashes[name] = desired_hash
 
         self._write_hashes(hashes)
@@ -85,8 +101,9 @@ class NodeReconciler:
             "agents": [
                 _status_payload(
                     agent.agent_id,
-                    self._backend.is_alive(agent.name),
-                    self._agent_health(agent.name),
+                    self._backend.is_alive(agent.name, agent.tenant_id),
+                    self._agent_health(agent.name, agent.tenant_id),
+                    self._observe_skills(agent.name, agent.tenant_id, agent.skill_manifests),
                 )
                 for agent in desired_state.agents
             ]
@@ -102,12 +119,12 @@ class NodeReconciler:
         except httpx.HTTPError:
             return
 
-    def _agent_health(self, agent_name: str) -> str | None:
-        pid = self._backend.is_alive(agent_name)
+    def _agent_health(self, agent_name: str, tenant_id: str) -> str | None:
+        pid = self._backend.is_alive(agent_name, tenant_id)
         if pid is None:
             return None
 
-        port = self._backend.gateway_port(agent_name)
+        port = self._backend.gateway_port(agent_name, tenant_id)
         if port is None:
             return "healthy"
 
@@ -118,9 +135,15 @@ class NodeReconciler:
         return "healthy" if response.status_code == 200 else "unhealthy"
 
     def _write_home(
-        self, agent_name: str, config: dict[str, Any], *, secrets: dict[str, str] | None = None
+        self,
+        agent_name: str,
+        tenant_id: str,
+        config: dict[str, Any],
+        *,
+        skill_manifests: list[dict[str, str]] | None = None,
+        secrets: dict[str, str] | None = None,
     ) -> None:
-        home = self._home_dir(agent_name)
+        home = self._home_dir(agent_name, tenant_id)
         home.mkdir(parents=True, exist_ok=True)
         (home / "agent.yaml").write_text(
             yaml.safe_dump(config, sort_keys=False, allow_unicode=True),
@@ -132,10 +155,19 @@ class NodeReconciler:
             _logger.warn("node_write_home_config_parse_error", agent_name=agent_name)
             env_names = []
         ensure_env_scaffold(home, referenced_env_names=env_names, secrets=secrets)
+        if skill_manifests:
+            try:
+                self._skill_deployer.sync(home, skill_manifests)
+            except Exception as exc:
+                _logger.warn(
+                    "node_skill_deploy_failed",
+                    agent_name=agent_name,
+                    error=str(exc),
+                )
 
-    def _env_has_values(self, agent_name: str) -> bool:
+    def _env_has_values(self, agent_name: str, tenant_id: str) -> bool:
         """Return True if the agent's .env has at least one non-empty, non-TUI-token value."""
-        env_path = self._home_dir(agent_name) / ".env"
+        env_path = self._home_dir(agent_name, tenant_id) / ".env"
         if not env_path.exists():
             return False
         for line in env_path.read_text(encoding="utf-8").splitlines():
@@ -146,22 +178,37 @@ class NodeReconciler:
                 return True
         return False
 
-    def _home_dir(self, agent_name: str) -> Path:
-        return self._config.home_dir / "agents" / agent_name
+    def _home_dir(self, agent_name: str, tenant_id: str) -> Path:
+        return self._config.home_dir / "tenants" / tenant_id / "agents" / agent_name
 
     def _local_agent_names(self) -> list[str]:
-        agents_dir = self._config.home_dir / "agents"
-        if not agents_dir.exists():
+        tenants_dir = self._config.home_dir / "tenants"
+        if not tenants_dir.exists():
             return []
-        return [path.name for path in agents_dir.iterdir() if path.is_dir()]
+        names: list[str] = []
+        for tenant_dir in tenants_dir.iterdir():
+            agents_dir = tenant_dir / "agents"
+            if not agents_dir.exists():
+                continue
+            names.extend(path.name for path in agents_dir.iterdir() if path.is_dir())
+        return names
+
+    def _local_tenant_id(self, agent_name: str) -> str:
+        tenants_dir = self._config.home_dir / "tenants"
+        if not tenants_dir.exists():
+            return "default"
+        for tenant_dir in tenants_dir.iterdir():
+            if (tenant_dir / "agents" / agent_name).is_dir():
+                return tenant_dir.name
+        return "default"
 
     def _read_hashes(self) -> dict[str, str]:
         if not self._hash_path.exists():
             return {}
         return dict(json.loads(self._hash_path.read_text(encoding="utf-8")))
 
-    def _current_home_hash(self, agent_name: str) -> str | None:
-        agent_file = self._home_dir(agent_name) / "agent.yaml"
+    def _current_home_hash(self, agent_name: str, tenant_id: str) -> str | None:
+        agent_file = self._home_dir(agent_name, tenant_id) / "agent.yaml"
         if not agent_file.exists():
             return None
         return _config_hash(dict(yaml.safe_load(agent_file.read_text(encoding="utf-8")) or {}))
@@ -169,6 +216,17 @@ class NodeReconciler:
     def _write_hashes(self, hashes: dict[str, str]) -> None:
         self._hash_path.parent.mkdir(parents=True, exist_ok=True)
         self._hash_path.write_text(json.dumps(hashes, sort_keys=True), encoding="utf-8")
+
+    def _observe_skills(
+        self,
+        agent_name: str,
+        tenant_id: str,
+        manifests: list[dict[str, str]],
+    ) -> list[dict[str, str | bool]]:
+        observe = getattr(self._skill_deployer, "observe", None)
+        if observe is None:
+            return []
+        return observe(self._home_dir(agent_name, tenant_id), manifests)
 
 
 def _erase_env(env_path: Path) -> None:
@@ -183,7 +241,12 @@ def _config_hash(config: dict[str, Any]) -> str:
     return sha256(yaml.safe_dump(config, sort_keys=True).encode("utf-8")).hexdigest()
 
 
-def _status_payload(agent_id: int, pid: int | None, health: str | None) -> dict[str, Any]:
+def _status_payload(
+    agent_id: int,
+    pid: int | None,
+    health: str | None,
+    skills: list[dict[str, str | bool]] | None = None,
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "agent_id": agent_id,
         "phase": "running" if pid is not None else "stopped",
@@ -191,4 +254,6 @@ def _status_payload(agent_id: int, pid: int | None, health: str | None) -> dict[
     if pid is not None:
         payload["pid"] = pid
         payload["health"] = health
+    if skills:
+        payload["skills"] = skills
     return payload

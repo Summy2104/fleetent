@@ -3,7 +3,7 @@
 Verifies:
 - tenant_scope(tenant) resolves to {kb_db, kb_vector_backend}
 - Both resolved from one tenant_scope call (same tenant binding)
-- SQLite backend maps default scope to <data_dir>/default/kb.db
+- SQLite backend maps default scope to <fleetent_home>/tenants/default/kb.db
 - Backend is replaceable without changing call sites
 """
 
@@ -64,7 +64,7 @@ def test_scope_single_call_binds_both_backends(tmp_path: Path) -> None:
     assert scope.tenant_id == "default"
 
 
-# ── 3.1-c: SQLite backend maps default scope to <data_dir>/default/ files ──
+# ── 3.1-c: SQLite backend maps default scope to <fleetent_home>/tenants/default/ files ──
 
 
 def test_sqlite_backend_maps_default_to_tenant_directory(tmp_path: Path) -> None:
@@ -72,9 +72,7 @@ def test_sqlite_backend_maps_default_to_tenant_directory(tmp_path: Path) -> None
     scope = router.tenant_scope("default")
 
     assert isinstance(scope.kb_db, SQLiteDatabase)
-    assert "default" in str(scope.kb_db.path)
-    # File must be inside the data_dir
-    assert scope.kb_db.path.is_relative_to(tmp_path)
+    assert scope.kb_db.path == tmp_path / "tenants" / "default" / "kb.db"
 
 
 def test_sqlite_backend_different_tenants_use_different_directories(tmp_path: Path) -> None:

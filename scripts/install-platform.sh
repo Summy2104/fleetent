@@ -174,17 +174,17 @@ init_platform_db() {
     if [ "$SKIP_DB" = true ]; then
         log_info "Skipping database init (--skip-db)"; return 0
     fi
-    mkdir -p "$FLEETENT_HOME/data"
+    mkdir -p "$FLEETENT_HOME"
     log_info "Initialising platform database (alembic upgrade head)..."
 
     local tmp_ini
     tmp_ini="$(mktemp)"
     sed -e "s|^script_location = .*|script_location = $REPO_ROOT/migrations|" \
-        -e "s|^sqlalchemy.url = .*|sqlalchemy.url = sqlite:///$FLEETENT_HOME/data/management.db|" \
+        -e "s|^sqlalchemy.url = .*|sqlalchemy.url = sqlite:///$FLEETENT_HOME/management.db|" \
         "$REPO_ROOT/alembic.ini" > "$tmp_ini"
 
     if uv run --project "$REPO_ROOT" alembic -c "$tmp_ini" upgrade head; then
-        log_success "Platform database ready: $FLEETENT_HOME/data/management.db"
+        log_success "Platform database ready: $FLEETENT_HOME/management.db"
     else
         rm -f "$tmp_ini"
         log_error "Alembic migration failed."; exit 1

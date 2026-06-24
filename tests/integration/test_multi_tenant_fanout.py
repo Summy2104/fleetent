@@ -30,7 +30,7 @@ def _db_paths_under(root: Path) -> set[Path]:
 
 
 def test_init_agent_db_schema_routes_by_tenant_id(tmp_path: Path) -> None:
-    """When tenant_id='acme', all agent DBs land under data/acme/, not data/default/."""
+    """When tenant_id='acme', all agent DBs land under tenants/acme/, not tenants/default/."""
     from fleetent.runtime.agent_app import _init_agent_db_schema
 
     data_dir = tmp_path / "data"
@@ -38,22 +38,22 @@ def test_init_agent_db_schema_routes_by_tenant_id(tmp_path: Path) -> None:
 
     _init_agent_db_schema(data_dir, agent_id="bot", tenant_id="acme")
 
-    # KB must be under <tenant>/
-    kb_path = data_dir / "acme" / "kb.db"
-    assert kb_path.exists(), "KB must be at data/acme/kb.db, not default/"
+    # KB must be under tenants/<tenant>/
+    kb_path = tmp_path / "tenants" / "acme" / "kb.db"
+    assert kb_path.exists(), "KB must be at tenants/acme/kb.db, not default/"
 
-    # Agent state must be under <tenant>/<agent_id>/
-    state_path = data_dir / "acme" / "bot" / "agent_state.db"
-    assert state_path.exists(), "Agent state must be at data/acme/bot/agent_state.db"
+    # Agent state must be under tenants/<tenant>/agents/<agent_id>/data/
+    state_path = tmp_path / "tenants" / "acme" / "agents" / "bot" / "data" / "agent_state.db"
+    assert state_path.exists(), "Agent state must be at tenants/acme/agents/bot/data/agent_state.db"
 
     # No 'default' directory should be created
-    assert not (data_dir / "default").exists(), (
+    assert not (tmp_path / "tenants" / "default").exists(), (
         "Must not fall back to 'default' when tenant_id given"
     )
 
 
 def test_init_agent_db_schema_default_tenant_still_works(tmp_path: Path) -> None:
-    """Backward compat: omitting tenant_id (or passing 'default') uses data/default/."""
+    """Backward compat: omitting tenant_id (or passing 'default') uses tenants/default/."""
     from fleetent.runtime.agent_app import _init_agent_db_schema
 
     data_dir = tmp_path / "data"
@@ -62,10 +62,12 @@ def test_init_agent_db_schema_default_tenant_still_works(tmp_path: Path) -> None
     # default tenant — no tenant_id arg (backward compat)
     _init_agent_db_schema(data_dir, agent_id="bot")
 
-    kb_path = data_dir / "default" / "kb.db"
-    assert kb_path.exists(), "Default tenant KB must be at data/default/kb.db"
-    state_path = data_dir / "default" / "bot" / "agent_state.db"
-    assert state_path.exists(), "Default tenant state must be at data/default/bot/agent_state.db"
+    kb_path = tmp_path / "tenants" / "default" / "kb.db"
+    assert kb_path.exists(), "Default tenant KB must be at tenants/default/kb.db"
+    state_path = tmp_path / "tenants" / "default" / "agents" / "bot" / "data" / "agent_state.db"
+    assert state_path.exists(), (
+        "Default tenant state must be at tenants/default/agents/bot/data/agent_state.db"
+    )
 
 
 # ── 1.1-b: KB tables land in tenant-scoped KB db ───────────────────────────
@@ -80,7 +82,7 @@ def test_kb_tables_land_in_tenant_scoped_db(tmp_path: Path) -> None:
 
     _init_agent_db_schema(data_dir, agent_id="bot", tenant_id="acme")
 
-    kb_path = data_dir / "acme" / "kb.db"
+    kb_path = tmp_path / "tenants" / "acme" / "kb.db"
     tables = _tables_in(kb_path)
     assert "knowledge_bases" in tables
     assert "knowledge_chunks" in tables
@@ -139,14 +141,14 @@ def test_two_agent_boots_different_tenants_no_cross_contamination(tmp_path: Path
     # Boot T2/bot (same agent name, different tenant)
     _init_agent_db_schema(data_dir, agent_id="bot", tenant_id="tenant-2")
 
-    t1_state = data_dir / "tenant-1" / "bot" / "agent_state.db"
-    t2_state = data_dir / "tenant-2" / "bot" / "agent_state.db"
+    t1_state = tmp_path / "tenants" / "tenant-1" / "agents" / "bot" / "data" / "agent_state.db"
+    t2_state = tmp_path / "tenants" / "tenant-2" / "agents" / "bot" / "data" / "agent_state.db"
 
     assert t1_state.exists(), "T1 agent state DB must exist"
     assert t2_state.exists(), "T2 agent state DB must exist"
     assert t1_state != t2_state
 
     # T1 directory must not contain T2 db files and vice versa
-    t1_dbs = _db_paths_under(data_dir / "tenant-1")
-    t2_dbs = _db_paths_under(data_dir / "tenant-2")
+    t1_dbs = _db_paths_under(tmp_path / "tenants" / "tenant-1")
+    t2_dbs = _db_paths_under(tmp_path / "tenants" / "tenant-2")
     assert t1_dbs.isdisjoint(t2_dbs), "T1 and T2 database sets must be fully disjoint"

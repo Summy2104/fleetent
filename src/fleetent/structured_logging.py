@@ -29,7 +29,7 @@ _LEVELS = {
 class _LoggingConfig:
     console_level: str = "info"
     file_level: str = "debug"
-    directory: Path = field(default_factory=lambda: paths.data_dir() / "logs")
+    directory: Path = field(default_factory=paths.logs_dir)
     console_stream: TextIO = sys.stdout
 
 
@@ -95,7 +95,7 @@ def configure_structured_logging(
 ) -> None:
     """Configure structured logging outputs."""
     global _config
-    resolved_dir = Path(directory) if directory else paths.data_dir() / "logs"
+    resolved_dir = Path(directory) if directory else paths.logs_dir()
     _config = _LoggingConfig(
         console_level=console_level,
         file_level=file_level,

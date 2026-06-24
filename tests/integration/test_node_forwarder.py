@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import io
 import json
 import socket as _sock
+import tarfile
 
 import httpx
 import pytest
@@ -19,18 +21,23 @@ from fleetent.node.forwarder import build_app
 
 
 class _Backend:
-    def gateway_port(self, agent_name: str) -> int | None:
+    def gateway_port(self, agent_name: str, tenant_id: str = "default") -> int | None:
         assert agent_name == "support"
+        assert tenant_id == "tenant-1"
         return 9011
 
-    def spawn(self, agent_name: str, env=None) -> None:
+    def spawn(self, agent_name: str, tenant_id: str = "default", env=None) -> None:
         raise NotImplementedError
 
-    def stop(self, agent_name: str) -> None:
+    def stop(self, agent_name: str, tenant_id: str = "default") -> None:
         raise NotImplementedError
 
-    def is_alive(self, agent_name: str) -> int | None:
+    def is_alive(self, agent_name: str, tenant_id: str = "default") -> int | None:
         raise NotImplementedError
+
+
+def _home(tmp_path, agent_name: str = "support", tenant_id: str = "tenant-1"):
+    return tmp_path / "tenants" / tenant_id / "agents" / agent_name
 
 
 def _config(tmp_path) -> NodeConfig:
@@ -46,7 +53,7 @@ def _config(tmp_path) -> NodeConfig:
 def test_forwarder_chat_requires_node_key_and_injects_tui_token(monkeypatch, tmp_path) -> None:
     import httpx
 
-    home = tmp_path / "agents" / "support"
+    home = _home(tmp_path)
     home.mkdir(parents=True)
     (home / ".env").write_text("FLEETENT_TUI_TOKEN=ma-agent-token\n", encoding="utf-8")
 
@@ -71,7 +78,10 @@ def test_forwarder_chat_requires_node_key_and_injects_tui_token(monkeypatch, tmp
     accepted = client.post(
         "/forward/agents/support/chat",
         json={"message": "hi"},
-        headers={"Authorization": "Bearer " + "ma-" + "1" * 64},
+        headers={
+            "Authorization": "Bearer " + "ma-" + "1" * 64,
+            "X-Fleetent-Tenant-Id": "tenant-1",
+        },
     )
 
     assert rejected.status_code == 401
@@ -90,7 +100,7 @@ async def test_forward_chat_streams_complete_body_over_real_socket(tmp_path) -> 
     A real loopback TCP connection is required — in-memory mocks bypass the timing
     because aiter_bytes() still works even after the client object is closed.
     """
-    home = tmp_path / "agents" / "support"
+    home = _home(tmp_path)
     home.mkdir(parents=True)
     (home / ".env").write_text("FLEETENT_TUI_TOKEN=ma-agent-token\n", encoding="utf-8")
 
@@ -121,7 +131,8 @@ async def test_forward_chat_streams_complete_body_over_real_socket(tmp_path) -> 
     try:
 
         class _RealBackend:
-            def gateway_port(self, name: str) -> int | None:
+            def gateway_port(self, name: str, tenant_id: str = "default") -> int | None:
+                assert tenant_id == "tenant-1"
                 return upstream_port
 
         forwarder = build_app(
@@ -146,6 +157,7 @@ async def test_forward_chat_streams_complete_body_over_real_socket(tmp_path) -> 
                     headers={
                         "Authorization": "Bearer " + "ma-" + "1" * 64,
                         "Content-Type": "application/json",
+                        "X-Fleetent-Tenant-Id": "tenant-1",
                     },
                 )
             body = response.content
@@ -164,7 +176,7 @@ async def test_forward_chat_streams_complete_body_over_real_socket(tmp_path) -> 
 
 
 async def test_forward_chat_relays_ingress_principal_header_over_real_socket(tmp_path) -> None:
-    home = tmp_path / "agents" / "support"
+    home = _home(tmp_path)
     home.mkdir(parents=True)
     (home / ".env").write_text("FLEETENT_TUI_TOKEN=ma-agent-token\n", encoding="utf-8")
 
@@ -194,7 +206,8 @@ async def test_forward_chat_relays_ingress_principal_header_over_real_socket(tmp
     try:
 
         class _RealBackend:
-            def gateway_port(self, name: str) -> int | None:
+            def gateway_port(self, name: str, tenant_id: str = "default") -> int | None:
+                assert tenant_id == "tenant-1"
                 return upstream_port
 
         forwarder = build_app(
@@ -218,6 +231,7 @@ async def test_forward_chat_relays_ingress_principal_header_over_real_socket(tmp
                     "Authorization": "Bearer " + "ma-" + "1" * 64,
                     "Content-Type": "application/json",
                     "X-Fleetent-Principal": '{"user_id":"operator-1","tenant_id":"tenant-1"}',
+                    "X-Fleetent-Tenant-Id": "tenant-1",
                 },
             )
 
@@ -230,7 +244,7 @@ async def test_forward_chat_relays_ingress_principal_header_over_real_socket(tmp
 
 
 def test_forwarder_ws_requires_node_key(tmp_path) -> None:
-    home = tmp_path / "agents" / "support"
+    home = _home(tmp_path)
     home.mkdir(parents=True)
     (home / ".env").write_text("FLEETENT_TUI_TOKEN=ma-agent-token\n", encoding="utf-8")
 
@@ -242,7 +256,7 @@ def test_forwarder_ws_requires_node_key(tmp_path) -> None:
 
 
 def test_forwarder_ws_relays_ingress_principal_header(monkeypatch, tmp_path) -> None:
-    home = tmp_path / "agents" / "support"
+    home = _home(tmp_path)
     home.mkdir(parents=True)
     (home / ".env").write_text("FLEETENT_TUI_TOKEN=ma-agent-token\n", encoding="utf-8")
 
@@ -279,6 +293,7 @@ def test_forwarder_ws_relays_ingress_principal_header(monkeypatch, tmp_path) -> 
         headers={
             "Authorization": "Bearer " + "ma-" + "1" * 64,
             "X-Fleetent-Principal": '{"user_id":"operator-1","tenant_id":"tenant-1"}',
+            "X-Fleetent-Tenant-Id": "tenant-1",
         },
     ) as ws:
         assert ws.receive_text() == '{"type":"ready"}'
@@ -288,3 +303,33 @@ def test_forwarder_ws_relays_ingress_principal_header(monkeypatch, tmp_path) -> 
         "Authorization": "Bearer ma-agent-token",
         "X-Fleetent-Principal": '{"user_id":"operator-1","tenant_id":"tenant-1"}',
     }
+
+
+def test_forwarder_serves_local_skill_bundle_for_platform(tmp_path) -> None:
+    home = _home(tmp_path)
+    skill_dir = home / "skills" / "incident-review" / "scripts"
+    skill_dir.mkdir(parents=True)
+    (home / "skills" / "incident-review" / "SKILL.md").write_text(
+        "---\nname: incident-review\ndescription: d\n---\nbody\n",
+        encoding="utf-8",
+    )
+    (skill_dir / "helper.py").write_text("print('ok')\n", encoding="utf-8")
+    (home / ".env").write_text("FLEETENT_TUI_TOKEN=ma-agent-token\n", encoding="utf-8")
+
+    app = build_app(_config(tmp_path), _Backend())
+    client = TestClient(app)
+
+    response = client.get(
+        "/forward/agents/support/skills/incident-review/bundle",
+        headers={
+            "Authorization": "Bearer " + "ma-" + "1" * 64,
+            "X-Fleetent-Tenant-Id": "tenant-1",
+        },
+    )
+
+    assert response.status_code == 200
+    with tarfile.open(fileobj=io.BytesIO(response.content), mode="r:gz") as archive:
+        assert sorted(archive.getnames()) == [
+            "incident-review/SKILL.md",
+            "incident-review/scripts/helper.py",
+        ]

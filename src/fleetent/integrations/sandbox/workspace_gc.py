@@ -30,7 +30,7 @@ from pathlib import Path
 
 from fleetent import paths
 from fleetent.integrations.sandbox.hardening import is_blocked_mount
-from fleetent.integrations.sandbox.manager import _name_key
+from fleetent.integrations.sandbox.manager import _name_key, workspace_root_override
 from fleetent.structured_logging import get_logger
 
 _logger = get_logger("sandbox.workspace_gc")
@@ -41,14 +41,18 @@ _logger = get_logger("sandbox.workspace_gc")
 _DEFAULT_AGENT_RETENTION_SECONDS = 86_400.0
 
 
+def _workspace_root() -> Path:
+    return workspace_root_override() or paths.workspaces_dir()
+
+
 def _session_dir_for(session_id: str) -> Path:
     """The session-scope workspace dir for ``session_id`` (collision-free key)."""
-    return paths.workspaces_dir() / _name_key(session_id)
+    return _workspace_root() / _name_key(session_id)
 
 
 def _agent_dir_for(agent_name: str) -> Path:
     """The agent-scope workspace dir for ``agent_name`` (collision-free key)."""
-    return paths.workspaces_dir() / _name_key(agent_name)
+    return _workspace_root() / _name_key(agent_name)
 
 
 def _guarded(path: Path) -> bool:
@@ -60,7 +64,7 @@ def _guarded(path: Path) -> bool:
     if is_blocked_mount(path):
         _logger.warn("workspace_gc_blocked_mount_refused", path=str(path))
         return False
-    root_real = os.path.realpath(str(paths.workspaces_dir()))
+    root_real = os.path.realpath(str(_workspace_root()))
     target_real = os.path.realpath(str(path))
     if target_real != root_real and not target_real.startswith(root_real + os.sep):
         _logger.warn("workspace_gc_outside_root_refused", path=str(path), root=root_real)

@@ -2,9 +2,9 @@ from datetime import UTC, datetime, timedelta
 
 from fleetent import memory
 from fleetent.db import SQLiteDatabase, create_database
-from fleetent.memory import shared as shared_memory_store
+from fleetent.memory import agent_memory as agent_memory_module
 from fleetent.memory import store as memory_store
-from fleetent.memory.shared_memory_migrations import MIGRATIONS as SHARED_MEMORY_MIGRATIONS
+from fleetent.memory.agent_memory_migrations import MIGRATIONS as AGENT_MEMORY_MIGRATIONS
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
 from fleetent.schema_migrations import migrate
 from tests.integration.test_migrations import apply_migrations
@@ -52,8 +52,6 @@ def test_memory_quality_trend_buckets_user_memory_counts_and_expired_context(
     summary = memory.get_memory_quality_trend_summary(
         memory.MemoryQualityTrendQuery(
             user_id="alice",
-            scope_type=None,
-            scope_id=None,
             start_ts=start,
             end_ts=start + timedelta(days=2),
             bucket="day",
@@ -67,8 +65,8 @@ def test_memory_quality_trend_buckets_user_memory_counts_and_expired_context(
     assert [bucket.expired_context_count for bucket in summary.buckets] == [0, 1]
 
 
-def test_memory_quality_trend_keeps_shared_memory_counts_separate(tmp_path, monkeypatch) -> None:
-    database, shared_database = _patch_database(tmp_path, monkeypatch)
+def test_memory_quality_trend_keeps_agent_memory_counts_separate(tmp_path, monkeypatch) -> None:
+    database, agent_db = _patch_database(tmp_path, monkeypatch)
     start = datetime(2026, 6, 1, tzinfo=UTC)
     _insert_memory(
         database,
@@ -78,13 +76,11 @@ def test_memory_quality_trend_keeps_shared_memory_counts_separate(tmp_path, monk
         content="User context remains per-user.",
         updated_at=start + timedelta(hours=1),
     )
-    _insert_shared_memory(
-        shared_database,
-        id="team-procedure",
-        scope_type="team",
-        scope_id="eng",
+    _insert_agent_memory(
+        agent_db,
+        id="agent-procedure",
         type="procedure",
-        content="Team deploys use the release checklist.",
+        content="Agent deploys use the release checklist.",
         status="active",
         updated_at=start + timedelta(hours=2),
     )
@@ -92,8 +88,6 @@ def test_memory_quality_trend_keeps_shared_memory_counts_separate(tmp_path, monk
     summary = memory.get_memory_quality_trend_summary(
         memory.MemoryQualityTrendQuery(
             user_id="alice",
-            scope_type="team",
-            scope_id="eng",
             start_ts=start,
             end_ts=start + timedelta(days=1),
             bucket="day",
@@ -102,7 +96,7 @@ def test_memory_quality_trend_keeps_shared_memory_counts_separate(tmp_path, monk
 
     [bucket] = summary.buckets
     assert bucket.user_memory_counts == {"context": 1}
-    assert bucket.shared_memory_counts == {"procedure": 1}
+    assert bucket.agent_memory_counts == {"procedure": 1}
 
 
 def test_memory_quality_trend_includes_maintenance_proposal_counts(tmp_path, monkeypatch) -> None:
@@ -130,11 +124,11 @@ def test_memory_quality_trend_includes_maintenance_proposal_counts(tmp_path, mon
     )
     rejected = reflection.create_memory_maintenance_proposal(
         user_id="alice",
-        action="suggest_shared_memory_or_kb",
+        action="suggest_agent_memory_or_kb",
         target_memory_ids=[],
         proposed_content="Team uses GitHub Flow.",
         risk="high",
-        reason="Shared candidate.",
+        reason="Agent memory candidate.",
         evidence_ids=["trace-3"],
     )
     reflection.approve_memory_maintenance_proposal(approved.id, actor_user_id="alice")
@@ -143,8 +137,6 @@ def test_memory_quality_trend_includes_maintenance_proposal_counts(tmp_path, mon
     summary = memory.get_memory_quality_trend_summary(
         memory.MemoryQualityTrendQuery(
             user_id="alice",
-            scope_type=None,
-            scope_id=None,
             start_ts=pending.created_at - timedelta(seconds=1),
             end_ts=datetime.now(UTC) + timedelta(seconds=1),
             bucket="day",
@@ -156,7 +148,7 @@ def test_memory_quality_trend_includes_maintenance_proposal_counts(tmp_path, mon
     assert bucket.proposal_action_counts == {
         "delete": 1,
         "rewrite": 1,
-        "suggest_shared_memory_or_kb": 1,
+        "suggest_agent_memory_or_kb": 1,
     }
     assert bucket.proposal_risk_counts == {"high": 1, "low": 1, "medium": 1}
 
@@ -166,21 +158,19 @@ def _patch_database(tmp_path, monkeypatch) -> tuple[SQLiteDatabase, SQLiteDataba
     from fleetent.observability import traces
 
     db_path = tmp_path / "memory-quality-trends.db"
-    shared_db_path = tmp_path / "shared-memory.db"
+    agent_db_path = tmp_path / "agent-memory.db"
     apply_migrations(db_path)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     db = create_database(f"sqlite:///{db_path}")
-    shared_db = SQLiteDatabase(path=shared_db_path)
+    agent_db = SQLiteDatabase(path=agent_db_path)
     migrate(db, AGENT_STATE_MIGRATIONS)
-    migrate(shared_db, SHARED_MEMORY_MIGRATIONS)
+    migrate(agent_db, AGENT_MEMORY_MIGRATIONS)
     monkeypatch.setattr(memory_store, "_state_db", db)
-    monkeypatch.setattr(shared_memory_store, "_shared_memory_db", shared_db)
-    # reflection no longer falls back to DATABASE_URL (agent-runtime-db-routing-cleanup):
-    # inject its per-agent state DB explicitly.
+    monkeypatch.setattr(agent_memory_module, "_agent_memory_db", agent_db)
     monkeypatch.setattr(reflection, "_state_db", db)
     monkeypatch.setattr(traces, "_state_db", db)
-    return db, shared_db
+    return db, agent_db
 
 
 def _insert_memory(
@@ -214,12 +204,10 @@ def _insert_memory(
     )
 
 
-def _insert_shared_memory(
+def _insert_agent_memory(
     database: SQLiteDatabase,
     *,
     id: str,
-    scope_type: str,
-    scope_id: str,
     type: str,
     content: str,
     status: str,
@@ -227,19 +215,17 @@ def _insert_shared_memory(
 ) -> None:
     database.execute(
         """
-        INSERT INTO shared_memory_items (
-            id, scope_type, scope_id, type, content, status, source, source_ref,
+        INSERT INTO agent_memory_items (
+            id, type, content, status, source, source_ref,
             created_by, created_at, updated_at
         )
         VALUES (
-            :id, :scope_type, :scope_id, :type, :content, :status, :source, :source_ref,
+            :id, :type, :content, :status, :source, :source_ref,
             :created_by, :created_at, :updated_at
         )
         """,
         {
             "id": id,
-            "scope_type": scope_type,
-            "scope_id": scope_id,
             "type": type,
             "content": content,
             "status": status,

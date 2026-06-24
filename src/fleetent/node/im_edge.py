@@ -144,15 +144,15 @@ class NodeIMEdgeHost:
         telegram_bindings: dict[str, dict[str, str]] = {}
         agent_db_paths: dict[str, Path] = {}
         for agent in desired_state.agents:
-            tenant_id = str(agent.config.get("tenant_id", "default"))
+            tenant_id = agent.tenant_id
             tenant_by_agent[agent.name] = tenant_id
             agent_db_paths[agent.name] = (
                 self._config.home_dir
+                / "tenants"
+                / tenant_id
                 / "agents"
                 / agent.name
                 / "data"
-                / tenant_id
-                / str(agent.agent_id)
                 / "agent_state.db"
             )
             im_config = dict(agent.config.get("im", {}))
@@ -352,11 +352,11 @@ class NodeIMEdgeHost:
             return
         if self._backend is None:
             raise RuntimeError("node IM dispatcher requires a backend")
-        port = self._backend.gateway_port(msg.agent_name)
+        tenant_id = self._resolver._tenant_by_agent.get(msg.agent_name, "default")
+        port = self._backend.gateway_port(msg.agent_name, tenant_id)
         if port is None:
             raise RuntimeError(f"agent {msg.agent_name!r} is unavailable")
-        token = _agent_tui_token(self._config, msg.agent_name)
-        tenant_id = self._resolver._tenant_by_agent.get(msg.agent_name, "default")
+        token = _agent_tui_token(self._config, msg.agent_name, tenant_id)
         principal = Principal(user_id=msg.user_id, tenant_id=tenant_id)
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(
@@ -434,8 +434,8 @@ def _materialize_telegram_binding(
     return {"bot_token": bot_token}
 
 
-def _agent_tui_token(config: NodeConfig, agent_name: str) -> str:
-    env_path = config.home_dir / "agents" / agent_name / ".env"
+def _agent_tui_token(config: NodeConfig, agent_name: str, tenant_id: str) -> str:
+    env_path = config.home_dir / "tenants" / tenant_id / "agents" / agent_name / ".env"
     if not env_path.exists():
         raise RuntimeError(f"agent {agent_name!r} has no env scaffold")
     for line in env_path.read_text(encoding="utf-8").splitlines():

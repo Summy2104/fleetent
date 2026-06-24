@@ -157,4 +157,20 @@ def test_overflow_without_workspace_dir_falls_back_to_global(tmp_path, monkeypat
     files = list((tmp_path / "spillover").iterdir())
     assert len(files) == 1
     assert not (tmp_path / ".fleetent_spillover").exists()
-    assert str((tmp_path / "spillover")) in result  # legacy absolute path in hint
+    assert str(tmp_path / "spillover") in result  # legacy absolute path in hint
+
+
+def test_overflow_without_workspace_dir_uses_agent_data_after_runtime_redirect(tmp_path):
+    from fleetent.runtime import agent_app
+
+    home = tmp_path / "agent-home"
+    agent_app._redirect_agent_data_paths(home)
+
+    big = "line content\n" * 6_000
+    result = trt.truncate_tool_result(big)
+
+    spillover = home / "data" / "tool_spillover"
+    files = list(spillover.iterdir())
+    assert len(files) == 1
+    assert str(spillover) in result
+    assert not (tmp_path / "data" / "tool_spillover").exists()

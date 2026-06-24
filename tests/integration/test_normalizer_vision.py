@@ -21,9 +21,9 @@ PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"payload" * 4
 
 def _bind_default_agent(tmp_path, monkeypatch):
     """Deploy a single home agent allowing 'u1' (bindings were removed from AgentFile;
-    the deployed agents/default/agent.yaml is the forced default and the IM gate
+    the deployed tenant-first default home is the forced default and the IM gate
     lives on the per-platform connector declaration)."""
-    d = tmp_path / "agents" / "default"
+    d = tmp_path / "tenants" / "default" / "agents" / "default"
     d.mkdir(parents=True, exist_ok=True)
     doc = {
         "name": "default",

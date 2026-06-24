@@ -104,13 +104,6 @@ def test_agent_def_dict_and_wire_agent_store_seams(monkeypatch: pytest.MonkeyPat
         "set_config_overrides",
         lambda *args: created.append(("set_config_overrides", args, {})),
     )
-    materialized: list[str] = []
-    monkeypatch.setattr(
-        server.materialize,
-        "materialize_from_store",
-        lambda name: materialized.append(name),
-    )
-
     server.wire_agent_store_seams()
 
     created_id = agent_apply_api.create_agent_def("ops", "prompt", ["shell"])
@@ -146,7 +139,6 @@ def test_agent_def_dict_and_wire_agent_store_seams(monkeypatch: pytest.MonkeyPat
     )
     assert agent_console_api.delete_agent_def("ops") is True
 
-    assert materialized == ["ops", "ops", "dev", "ops"]
     assert any(name == "set_identity" for name, *_ in created)
     assert any(name == "set_config_overrides" for name, *_ in created)
     assert any(

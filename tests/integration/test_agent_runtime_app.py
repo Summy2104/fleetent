@@ -154,7 +154,9 @@ def test_chat_requires_auth(tmp_path, monkeypatch):
 
 def test_resolve_home_uses_fleetent_home(tmp_path, monkeypatch):
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
-    assert agent_app.resolve_home("support") == tmp_path / "agents" / "support"
+    assert agent_app.resolve_home("support") == (
+        tmp_path / "tenants" / "default" / "agents" / "support"
+    )
     # explicit override wins
     assert agent_app.resolve_home("support", home=tmp_path / "x") == tmp_path / "x"
 

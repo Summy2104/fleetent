@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from fleetent import agent_store, audit_log
@@ -12,7 +14,10 @@ from fleetent.platform import im_gateway_management
 from fleetent.platform.agent_lifecycle import credential_slots, materialize, secret_store
 from fleetent.platform.agent_management_console import agent_admin_store
 from fleetent.platform.node_management import node_store, placement_store
+from fleetent.platform.skill_management import bundle_cache
+from fleetent.platform.skill_management.pool_git import pool_version_for_skill
 from fleetent.platform.user_management import user_admin_api
+from fleetent.skills import registry as skill_registry
 
 router = APIRouter(prefix="/nodes")
 
@@ -25,6 +30,14 @@ class NodeAgentStatusReport(BaseModel):
     pid: int | None = None
     health: str | None = None
     detail: str | None = None
+    skills: list[NodeSkillStatusReport] = Field(default_factory=list)
+
+
+class NodeSkillStatusReport(BaseModel):
+    skill_name: str
+    base_version: str
+    base_commit: str
+    drift: bool = False
 
 
 class NodeStatusBody(BaseModel):
@@ -101,13 +114,36 @@ def get_desired_state(
             {
                 "agent_id": agent.id,
                 "name": agent.name,
+                "tenant_id": agent.tenant_id,
                 "config": materialize.desired_state_payload_from_agent_file(
                     materialize.agent_file_from_store(agent)
                 ),
+                "skill_manifests": _skill_manifests_for(node_id, agent),
                 "secrets": _agent_secrets(agent),
             }
         )
     return {"node_id": node_id, "agents": agents}
+
+
+@router.get("/{node_id}/skills/{skill_name}/bundles/{base_version}.tar.gz")
+def get_skill_bundle(
+    node_id: str,
+    skill_name: str,
+    base_version: str,
+    node: dict[str, Any] = Depends(_authenticate_node),  # noqa: B008
+) -> FileResponse:
+    del node
+    artifact = bundle_cache.ensure_bundle_cached(
+        pool_dir=_skill_pool_dir(),
+        cache_dir=_bundle_cache_dir(),
+        skill_name=skill_name,
+        base_version=base_version,
+    )
+    return FileResponse(
+        artifact.bundle_path,
+        media_type="application/gzip",
+        filename=artifact.bundle_path.name,
+    )
 
 
 @router.post("/{node_id}/status")
@@ -127,6 +163,7 @@ def post_node_status(
             health=report.health,
             detail=report.detail,
         )
+        _project_skill_status(report)
     return {"node_id": node_id, "updated": len(body.agents)}
 
 
@@ -200,3 +237,58 @@ def _agent_secrets(agent: agent_store.Agent) -> dict[str, str]:
         if value is not None:
             secrets[slot.env_name] = value
     return secrets
+
+
+def _project_skill_status(report: NodeAgentStatusReport) -> None:
+    from fleetent.platform.agent_management_console import agent_admin_store
+    from fleetent.platform.skill_management import skill_admin_store
+
+    any_drift = False
+    for skill in report.skills:
+        skill_admin_store.set_base_version(report.agent_id, skill.skill_name, skill.base_version)
+        skill_admin_store.set_base_commit(report.agent_id, skill.skill_name, skill.base_commit)
+        skill_admin_store.set_drift(report.agent_id, skill.skill_name, drifted=skill.drift)
+        any_drift = any_drift or skill.drift
+    if report.skills:
+        if any_drift:
+            agent_admin_store.mark_drift(report.agent_id)
+        else:
+            agent_admin_store.clear_drift(report.agent_id)
+
+
+def _skill_manifests_for(node_id: str, agent: agent_store.Agent) -> list[dict[str, str]]:
+    pool_dir = _skill_pool_dir()
+    manifests: list[dict[str, str]] = []
+    for skill_name in materialize.agent_file_from_store(agent).allowed_skills:
+        skill_dir = pool_dir / skill_name
+        if not skill_dir.is_dir():
+            continue
+        base_version = bundle_cache.skill_directory_version(skill_dir)
+        artifact = bundle_cache.ensure_bundle_cached(
+            pool_dir=pool_dir,
+            cache_dir=_bundle_cache_dir(),
+            skill_name=skill_name,
+            base_version=base_version,
+        )
+        manifests.append(
+            {
+                "name": skill_name,
+                "base_version": base_version,
+                "base_commit": pool_version_for_skill(pool_dir, skill_name) or "",
+                "bundle_url": (
+                    f"/nodes/{node_id}/skills/{skill_name}/bundles/{base_version}.tar.gz"
+                ),
+                "bundle_sha256": artifact.bundle_sha256,
+            }
+        )
+    return manifests
+
+
+def _skill_pool_dir() -> Path:
+    return Path(skill_registry._resolve_skills_dir(None))
+
+
+def _bundle_cache_dir() -> Path:
+    from fleetent import paths
+
+    return paths.base_dir() / "skill-bundles"

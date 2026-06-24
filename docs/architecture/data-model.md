@@ -5,7 +5,7 @@
 > **维护规则**：任何 change 增删表 / 改列 / 改关系，MUST 同步对应实体清单**与 erDiagram**（图文同改）。
 > **配套**：[`target-architecture.md`](./target-architecture.md)（核+4面+基座 · Identity §6 · 只读投影 §7）· [`agent-management.md`](../capabilities/agent-management.md)（agent 生命周期/自管/绑定/编排）· [`skill-system.md`](../capabilities/skill-system.md) · [`im-access-model.md`](../capabilities/im-access-model.md)。
 
-## 1. 物理拓扑（5 库类型 · 按主体物理分区）
+## 1. 物理拓扑（5 库类型 · tenant-first 物理分区）
 
 数据分布在 **5 类物理库**，多主体时按**主体（tenant）物理分区**：
 
@@ -13,37 +13,47 @@
 |---|---|---|---|
 | **管理库** | 单库、跨主体（仅受管模式存在） | **Alembic** | platform 读写；agent 物理够不到 |
 | **per-agent 运行库** | 每 (主体, agent) 一文件 | 嵌入式 Y | 该 agent 读写；platform 只读投影 |
-| **共享记忆库** | per-tenant | 嵌入式 Y | 同主体多 agent 读写（真相源）；platform 只读 |
+| **agent memory 库** | per-agent | 嵌入式 Y | 该 agent 读写；platform 只读 |
 | **KB 关系库** | per-tenant | 嵌入式 Y | ingest 单写、agent 只读（派生视图）；platform 只读 |
 | **向量底座** | 独立 substrate，按家族（`mem:`/`shared:`/`kb:`）路由到对应 scope 的向量库（可换 Qdrant） | 嵌入式 Y | 随各消费层 |
 
 **目录布局与命名**（`X.db` 关系真相源 / `X_vectors.db` 向量索引配对）：
 
 ```
-data/
+FLEETENT_HOME/
   management.db                                   # 管理库（单库·跨主体·Alembic）
-  <tenant>/
-    kb.db / kb_vectors.db                         # KB 关系 / 向量（per-tenant）
-    shared_memory.db / shared_memory_vectors.db   # 共享记忆 关系 / 向量（per-tenant）
-    <agent_name>/
-      agent_state.db                              # 该 agent 关系真相源
-      agent_vectors.db                            # 该 agent 记忆向量
+  logs/                                           # platform structured logs
+  diagnostics/                                    # platform diagnostics exports
+  tenants/
+    <tenant>/
+      kb.db / kb_vectors.db                       # KB 关系 / 向量（per-tenant）
+      agents/
+        <agent_name>/
+          data/
+            agent_state.db                        # 该 agent 关系真相源
+            agent_vectors.db                      # 该 agent 记忆向量
+            agent_memory.db                       # 该 agent 记忆关系库
+            agent_memory_vectors.db               # 该 agent 记忆向量库
+            traces.jsonl                          # legacy JSONL trace fallback
+            sessions/ logs/ diagnostics/           # agent runtime 文件
+            workspaces/ tool_spillover/ sandbox_output/
+            im_approvals.json
 ```
 
-命名规则：per-tenant 层 `X`=资源名（`kb`/`shared_memory`，一资源一文件）；per-agent 层 `X`=归属（`agent_state`，一 agent 一文件、不按内容）。目录 `<tenant>/<agent_name>/` 用 agent 的可读 slug 圈定主体内的物理归属。
+命名规则：tenant 层 `X`=共享资源名（`kb`）；agent 层 `X`=归属（`agent_state` / `agent_memory`），home 已经圈定 `<tenant>/<agent_name>`，因此 `data/` 内不再重复嵌套 `<tenant>/<agent>`。
 
-**物理库计数**：2 主体 × 各 2 agent = **17 库**（管理 1 + 每主体〔2 agent×(关系+向量)=4 + 共享 2 + KB 2〕×2）。"5" 是**类型数**，非部署文件数。
+**物理库计数**：2 主体 × 各 2 agent = **17 库**（管理 1 + 每主体〔KB 2 + 2 agent×4 = 10〕×2）。"5" 是**类型数**，非部署文件数。
 
 **跨主体隔离**：agent 进程经 `agent.yaml` 只开本主体目录下的文件，物理上够不到别主体的库——合规"主体间互不可见"由文件边界结构性保证，非纪律级 `WHERE tenant_id`。
 
 ## 2. schema 权威、路由与并发
 
-- **双权威（按库分）**：管理库 **Alembic-only**；per-agent / 共享记忆 / KB 关系库走**嵌入式 forward-only 迁移（Y）**——schema 以代码中有序 `MIGRATIONS=[(ver,sql)]` 定义、DB 只存 `PRAGMA user_version`、**migrate-on-open**、每文件自迁、库版本 > 代码已知版本则拒启动（`SchemaTooNewError`）。空库与旧库同一代码路径。
+- **双权威（按库分）**：管理库 **Alembic-only**；per-agent state / agent memory / KB 关系库走**嵌入式 forward-only 迁移（Y）**——schema 以代码中有序 `MIGRATIONS=[(ver,sql)]` 定义、DB 只存 `PRAGMA user_version`、**migrate-on-open**、每文件自迁、库版本 > 代码已知版本则拒启动（`SchemaTooNewError`）。空库与旧库同一代码路径。
 - **关系完整性双层**：管理库经 `db.py` 的连接统一 `PRAGMA foreign_keys=ON`，声明了 FK 的管理表约束真实生效；store 写入校验承接 FK 难表达的语义约束（如 `agents.team_id` 与 `tenant_id` 的复合一致性）。agent 侧库以约定引用为主，其中 KB 关系库 `knowledge_documents → knowledge_chunks` 级联删除随 FK 真实生效。
 - **FK 不回扫存量**：SQLite 只约束启用后的新写入/删除，不修复历史违规行；旧违规引用被触碰时在该次写路径迟发失败。
 - **一文件一份 MIGRATIONS**：`agent_state.db` 由 `runtime/agent_state_migrations.py` 一份单调版本列表管——单文件单 `user_version`，不可每 store 各跑一份。
-- **路由（租户作用域 + 可换后端）**：`tenant_router` 暴露 `tenant_scope(tenant)`（KB + 共享记忆句柄）与 `agent_scope(tenant, agent_name)`（per-agent 句柄）。SQLite 后端映射到上述目录文件，后端可换（将来 PG per-tenant DB / RLS，调用点不变）。物理路由主体取自 **agent 的归属主体**（`agents.team_id`/`tenant_id`）；请求者 `Principal.tenant_id` 仅用于 edge 跨主体校验（`agent_app._check_tenant`）。
-- **并发**：所有 SQLite 连接启用 **WAL + busy_timeout**（关系库经 `db.py`、向量库经 `vector_store/backend.py`）——支撑只读投影读 + agent 写并发、共享记忆多 agent 写。
+- **路由（租户作用域 + 可换后端）**：`tenant_router` 暴露 `tenant_scope(tenant)`（KB 句柄）与 `agent_scope(tenant, agent_name)`（per-agent state / memory 句柄）。SQLite 后端映射到上述目录文件，后端可换（将来 PG per-tenant DB / RLS，调用点不变）。物理路由主体取自 **agent 的归属主体**（`agents.team_id`/`tenant_id`）；请求者 `Principal.tenant_id` 仅用于 edge 跨主体校验（`agent_app._check_tenant`）。
+- **并发**：所有 SQLite 连接启用 **WAL + busy_timeout**（关系库经 `db.py`、向量库经 `vector_store/backend.py`）——支撑只读投影读 + agent 写并发，以及 tenant 级 KB 的单写多读。
 - **agent 侧表保留 `tenant_id` 列**：文件路由忽略它，作"可换后端"接缝（将来 RLS 按它行级强制）。
 
 ## 3. 实体模型（按库归类）

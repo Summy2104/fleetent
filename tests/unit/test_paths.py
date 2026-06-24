@@ -31,8 +31,11 @@ def test_explicit_fleetent_home_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     monkeypatch.chdir(tmp_path)  # cwd irrelevant when env is set
 
     assert paths.base_dir() == home
+    assert paths.management_db_path() == home / "management.db"
+    assert paths.logs_dir() == home / "logs"
+    assert paths.diagnostics_dir() == home / "diagnostics"
     assert paths.data_dir() == home / "data"
-    assert paths.agents_dir() == home / "agents"
+    assert paths.tenant_dir("acme") == home / "tenants" / "acme"
 
 
 def test_repo_local_used_in_development(
@@ -42,8 +45,11 @@ def test_repo_local_used_in_development(
     monkeypatch.chdir(repo)
 
     assert paths.base_dir() == repo
+    assert paths.management_db_path() == repo / "management.db"
+    assert paths.logs_dir() == repo / "logs"
+    assert paths.diagnostics_dir() == repo / "diagnostics"
     assert paths.data_dir() == repo / "data"
-    assert paths.agents_dir() == repo / "agents"
+    assert paths.tenant_dir("default") == repo / "tenants" / "default"
 
 
 def test_repo_local_detected_by_platform_example(
@@ -65,8 +71,11 @@ def test_home_fallback_when_not_in_repo(
     monkeypatch.chdir(bare)
 
     assert paths.base_dir() == isolated_home / ".fleetent"
+    assert paths.management_db_path() == isolated_home / ".fleetent" / "management.db"
+    assert paths.logs_dir() == isolated_home / ".fleetent" / "logs"
+    assert paths.diagnostics_dir() == isolated_home / ".fleetent" / "diagnostics"
     assert paths.data_dir() == isolated_home / ".fleetent" / "data"
-    assert paths.agents_dir() == isolated_home / ".fleetent" / "agents"
+    assert paths.tenant_dir("default") == isolated_home / ".fleetent" / "tenants" / "default"
 
 
 def test_explicit_home_overrides_repo_local(
@@ -86,18 +95,24 @@ def test_derived_paths_under_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
     assert paths.platform_yaml_path() == home / "platform.yaml"
     assert paths.platform_env_path() == home / ".env"
+    assert paths.management_db_path() == home / "management.db"
+    assert paths.logs_dir() == home / "logs"
+    assert paths.diagnostics_dir() == home / "diagnostics"
     assert paths.sessions_dir() == home / "data" / "sessions"
 
 
 def test_default_agent_file_under_agents_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # The default materialized Agent runtime lives under agents/default.
+    # The default standalone Agent runtime lives under tenants/default/agents/default.
     home = tmp_path / "h"
     monkeypatch.setenv("FLEETENT_HOME", str(home))
 
-    assert paths.agent_file() == home / "agents" / "default" / "agent.yaml"
-    assert paths.agent_home_dir("support") == home / "agents" / "support"
+    assert paths.agent_file() == home / "tenants" / "default" / "agents" / "default" / "agent.yaml"
+    assert paths.tenant_agent_home_dir("acme", "support") == (
+        home / "tenants" / "acme" / "agents" / "support"
+    )
+    assert paths.agent_home_dir("support") == home / "tenants" / "default" / "agents" / "support"
 
 
 def test_agent_data_dir_derives_from_agents_dir(
@@ -106,15 +121,25 @@ def test_agent_data_dir_derives_from_agents_dir(
     home = tmp_path / "h"
     monkeypatch.setenv("FLEETENT_HOME", str(home))
 
-    assert paths.agent_data_dir("my-bot") == home / "agents" / "my-bot" / "data"
+    assert paths.tenant_agent_data_dir("acme", "my-bot") == (
+        home / "tenants" / "acme" / "agents" / "my-bot" / "data"
+    )
+    assert (
+        paths.agent_data_dir("my-bot")
+        == home / "tenants" / "default" / "agents" / "my-bot" / "data"
+    )
 
 
 def test_agent_data_dir_injectable_via_monkeypatch(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(paths, "agents_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        paths, "tenant_agent_home_dir", lambda tenant_id, agent_id: tmp_path / tenant_id / agent_id
+    )
 
-    assert paths.agent_data_dir("test-agent") == tmp_path / "test-agent" / "data"
+    assert paths.tenant_agent_data_dir("tenant-a", "test-agent") == (
+        tmp_path / "tenant-a" / "test-agent" / "data"
+    )
 
 
 def test_workspaces_dir_under_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

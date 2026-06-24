@@ -7,20 +7,28 @@ from fleetent.vector_store import SearchResult
 FIXTURE = Path("tests/evaluation/fixtures/shared_memory/basic.json")
 
 
-async def test_shared_memory_evaluation_covers_scope_archive_and_proposal_apply(
+async def test_agent_memory_evaluation_covers_create_archive_and_proposal_apply(
     monkeypatch, tmp_path
 ):
     from fleetent import memory, reflection
-    from fleetent.memory import shared, store
+    from fleetent.db import SQLiteDatabase
+    from fleetent.memory import agent_memory as agent_memory_module
+    from fleetent.memory import store
+    from fleetent.memory.agent_memory_migrations import MIGRATIONS as AGENT_MEMORY_MIGRATIONS
+    from fleetent.schema_migrations import migrate
     from tests.integration.test_migrations import apply_migrations
 
     fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    db_path = tmp_path / "shared-memory-eval.db"
+    db_path = tmp_path / "agent-memory-eval.db"
+    agent_db_path = tmp_path / "agent-memory.db"
     apply_migrations(db_path)
     database = create_database(f"sqlite:///{db_path}")
+    agent_db = SQLiteDatabase(path=agent_db_path)
+    migrate(agent_db, AGENT_MEMORY_MIGRATIONS)
     monkeypatch.setattr(store, "database", lambda: database)
     monkeypatch.setattr(reflection, "_database", lambda: database)
     monkeypatch.setattr(reflection.observability, "record_trace_event", lambda event: None)
+    monkeypatch.setattr(agent_memory_module, "_agent_memory_db", agent_db)
 
     indexed: dict[str, tuple[str, str]] = {}
 
@@ -38,59 +46,43 @@ async def test_shared_memory_evaluation_covers_scope_archive_and_proposal_apply(
         ]
         return matches[:limit]
 
-    monkeypatch.setattr(shared.vector_store, "upsert", upsert)
-    monkeypatch.setattr(shared.vector_store, "delete", delete)
-    monkeypatch.setattr(shared.vector_store, "search", search)
+    monkeypatch.setattr(agent_memory_module.vector_store, "upsert", upsert)
+    monkeypatch.setattr(agent_memory_module.vector_store, "delete", delete)
+    monkeypatch.setattr(agent_memory_module.vector_store, "search", search)
 
     for item in fixture["items"]:
-        created = await memory.create_shared_memory(
-            scope_type=fixture["scope_type"],
-            scope_id=fixture["scope_id"],
+        created = await memory.create_agent_memory(
             type=item["type"],
             content=item["content"],
             created_by="eval",
         )
-        results = await memory.search_shared_memory(
-            fixture["scope_type"],
-            fixture["scope_id"],
-            item["expected_query"],
-        )
+        results = await memory.search_agent_memory(item["expected_query"])
         assert created.id in {result.id for result in results}
 
-    archived = await memory.create_shared_memory(
-        scope_type=fixture["scope_type"],
-        scope_id=fixture["scope_id"],
+    archived = await memory.create_agent_memory(
         type=fixture["archived"]["type"],
         content=fixture["archived"]["content"],
         created_by="eval",
     )
-    await memory.archive_shared_memory(archived.id)
-    results = await memory.search_shared_memory(
-        fixture["scope_type"],
-        fixture["scope_id"],
-        "archived",
-    )
+    await memory.archive_agent_memory(archived.id)
+    results = await memory.search_agent_memory("archived")
     assert archived.id not in {result.id for result in results}
 
     proposal = reflection.create_memory_maintenance_proposal(
         user_id="owner",
-        action="suggest_shared_memory_or_kb",
+        action="suggest_agent_memory_or_kb",
         target_memory_ids=[],
         proposed_content=fixture["proposal"]["content"],
         risk="medium",
         reason="Evaluation proposal.",
         evidence_ids=["eval-trace"],
         metadata_patch={
-            "target": "shared_memory",
-            "scope_type": fixture["scope_type"],
-            "scope_id": fixture["scope_id"],
+            "target": "agent_memory",
             "type": fixture["proposal"]["type"],
         },
     )
     reflection.approve_memory_maintenance_proposal(proposal.id, actor_user_id="owner")
-    applied = await memory.apply_shared_memory_proposal(proposal.id, actor_id="owner")
-    results = await memory.search_shared_memory(
-        fixture["scope_type"], fixture["scope_id"], "github"
-    )
+    applied = await memory.apply_agent_memory_proposal(proposal.id, actor_id="owner")
+    results = await memory.search_agent_memory("github")
 
     assert applied.id in {result.id for result in results}

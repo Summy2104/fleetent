@@ -57,6 +57,7 @@ _logger = get_logger("sandbox.manager")
 # by committing a container that ran end-user code. The next acquire boots read-only
 # from it when present, else falls back to the backend default base image.
 _DEPS_IMAGE_TPL = "fleetent-sandbox-deps-{key}:latest"
+_WORKSPACE_ROOT: Path | None = None
 
 
 class WorkspaceScope(StrEnum):
@@ -124,6 +125,21 @@ def _name_key(raw: str) -> str:
     return f"{sanitised[:prefix_budget]}-{digest}"
 
 
+def set_workspace_root(root: Path | None) -> None:
+    """Override the sandbox workspace root for the current process."""
+    global _WORKSPACE_ROOT
+    _WORKSPACE_ROOT = root
+
+
+def workspace_root_override() -> Path | None:
+    return _WORKSPACE_ROOT
+
+
+def workspace_root() -> Path:
+    """Return the effective host root for sandbox workspace directories."""
+    return _WORKSPACE_ROOT or paths.workspaces_dir()
+
+
 def host_workspace_dir(scope_key: str) -> Path:
     """The host directory bind-mounted at ``/workspace`` for a run's workspace scope key.
 
@@ -138,7 +154,7 @@ def host_workspace_dir(scope_key: str) -> Path:
     Returns:
         The host workspace directory for that scope key.
     """
-    return paths.workspaces_dir() / _name_key(scope_key)
+    return workspace_root() / _name_key(scope_key)
 
 
 def _container_name(scope: WorkspaceScope, key: str) -> str:
@@ -427,7 +443,7 @@ class SandboxManager:
         scope key. Idempotent: creates the dir tree if missing.
         """
         key = workspace_scope_key(scope, session_id, agent_name)
-        ws_path = paths.workspaces_dir() / _name_key(key)
+        ws_path = workspace_root() / _name_key(key)
         # sandbox-hardening: never bind-mount a host dir under a sensitive root (a
         # misconfigured FLEETENT_HOME could otherwise expose ~/.ssh, /etc, etc.).
         # Checked before mkdir so a blocked path leaves no directory behind.

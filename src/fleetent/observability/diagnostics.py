@@ -149,7 +149,7 @@ def plan_diagnostics_retention(
     diagnostics = settings or _default_diagnostics()
     current = now or datetime.now(UTC)
     logs = _old_files(
-        log_dir or _default_data_dir() / "logs",
+        log_dir or paths.logs_dir(),
         diagnostics.retention.logs_days,
         current,
         suffixes=(".log",),
@@ -327,12 +327,14 @@ def _forbidden_skips(data_dir: Path, secrets_dir: Path | None) -> list[dict[str,
                 rel = path.relative_to(data_dir).as_posix()
                 skipped.append({"name": f"data/{rel}", "reason": "sqlite database excluded"})
         # Agent .env files contain live secrets — exclude and record a redacted reference only.
-        agents_dir = data_dir / "agents"
-        if agents_dir.is_dir():
-            for env_path in sorted(agents_dir.glob("*/.env")):
-                if env_path.is_file():
-                    rel = env_path.relative_to(data_dir).as_posix()
-                    skipped.append({"name": rel, "reason": "agent env file excluded"})
+        for env_path in sorted(data_dir.rglob(".env")):
+            if not env_path.is_file():
+                continue
+            rel_parts = env_path.relative_to(data_dir).parts
+            if "agents" not in rel_parts:
+                continue
+            rel = env_path.relative_to(data_dir).as_posix()
+            skipped.append({"name": rel, "reason": "agent env file excluded"})
     if secrets_dir and secrets_dir.exists():
         for path in sorted(secrets_dir.iterdir()):
             if path.is_file():

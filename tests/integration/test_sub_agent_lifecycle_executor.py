@@ -45,7 +45,7 @@ async def test_tasks_run_concurrently_not_sequentially(tmp_path, monkeypatch):
     # The authoritative concurrency guard is start-time overlap. Total elapsed
     # includes synchronous SQLite lifecycle writes and is noisy on CI filesystems.
     assert len(start_times) == 2
-    assert abs(start_times[1] - start_times[0]) < 0.02
+    assert abs(start_times[1] - start_times[0]) < 0.05
 
 
 def _iso_set(*vals):

@@ -72,7 +72,7 @@ environment:
   `FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN`、`FLEETENT_CONFLUENCE_TOKEN`。
 - MCP server credential 只包含 `api_key_env` 等非敏感引用。
 - `.env`、系统环境变量或受控 secret 文件只留在测试环境本机，不进入 git、trace、日志、diagnostics package 或 issue。
-- `database_url` 指向测试环境管理库 SQLite 文件，例如 `sqlite:///data/management.db`。
+- `database_url` 指向测试环境管理库 SQLite 文件，例如 `sqlite:////app/management.db`。
 
 建议检查：
 
@@ -128,7 +128,7 @@ uv run python scripts/upgrade.py --backup-only
 
 1. 停止 fleetent 服务。
 2. 记录当前数据目录和 restore 来源备份批次目录。
-3. 用同一备份批次按镜像结构把全部库复制回 `data/` 对应位置（如 `…/management.db` → `data/management.db`，及各 `<tenant>/<agent_id>/` 子目录库），不混用不同时间点的备份。
+3. 用同一备份批次按镜像结构把全部库复制回各自位置（如 `…/management.db` → `<FLEETENT_HOME>/management.db`，以及 `tenants/<tenant>/agents/<agent>/data/` 下各库），不混用不同时间点的备份。
 4. 重启 fleetent 服务。
 5. 再次执行 `GET /health`。
 6. 运行 observability 查询确认恢复后可查询事件。

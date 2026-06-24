@@ -9,12 +9,12 @@ TBD - created by archiving change redesign-skill-schema-drift-protection. Update
 
 #### Scenario: 漂移副本不被覆盖
 - **WHEN** agent "support-bot" 的 skill "crm-ops" 在 `agent_skills` 中 `drift=1`，触发该 agent 重新 materialize
-- **THEN** `home/agents/support-bot/skills/crm-ops/` 不被池版本覆盖，进化内容保留
+- **THEN** `home/tenants/default/agents/support-bot/skills/crm-ops/` 不被池版本覆盖，进化内容保留
 - **AND** 写一条「保护跳过覆盖」的审计日志
 
 #### Scenario: 未漂移副本正常刷新
 - **WHEN** agent "support-bot" 的 skill "billing" 在 `agent_skills` 中 `drift=0`，触发重新 materialize
-- **THEN** `home/agents/support-bot/skills/billing/` 被池版本正常覆盖刷新
+- **THEN** `home/tenants/default/agents/support-bot/skills/billing/` 被池版本正常覆盖刷新
 
 #### Scenario: 子目录粒度不连带冻结
 - **WHEN** 同一 agent 下 "crm-ops" 漂移而 "billing" 未漂移，触发 materialize

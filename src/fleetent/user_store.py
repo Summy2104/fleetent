@@ -13,7 +13,7 @@ from fleetent import paths
 
 # Kept for test legacy-shim and module-boundary detection; not used as a DB entry point
 # after retire-raw-sqlite-connect (all connections go through db.py boundary).
-DB_PATH = paths.data_dir() / "management.db"
+DB_PATH = paths.management_db_path()
 
 
 def _hash_key(plaintext: str) -> str:

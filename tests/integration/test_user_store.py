@@ -46,7 +46,7 @@ def _assert_derivation_in_clean_env(code: str) -> None:
 def test_default_db_path_uses_management_database():
     _assert_derivation_in_clean_env(
         "from fleetent import paths, user_store; "
-        "assert user_store.DB_PATH == paths.data_dir() / 'management.db', user_store.DB_PATH"
+        "assert user_store.DB_PATH == paths.management_db_path(), user_store.DB_PATH"
     )
 
 
@@ -55,7 +55,7 @@ def test_legacy_re_exports_inherit_default_db_path():
         "from fleetent import paths; "
         "import fleetent.platform.user_management.api_key_store as k; "
         "from fleetent.governance import audit_log; "
-        "expected = paths.data_dir() / 'management.db'; "
+        "expected = paths.management_db_path(); "
         "mods = [k, audit_log]; "
         "bad = [m.__name__ for m in mods if m.DB_PATH != expected]; "
         "assert not bad, bad"

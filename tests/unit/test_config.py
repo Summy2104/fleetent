@@ -15,7 +15,7 @@ def isolate_settings_dotenv(tmp_path, monkeypatch):
 
 def test_settings_defaults():
     s = Settings()
-    assert s.database_url == f"sqlite:///{paths.data_dir() / 'management.db'}"
+    assert s.database_url == f"sqlite:///{paths.management_db_path()}"
     assert s.log_format == "console"
 
 
@@ -254,7 +254,7 @@ def test_mcp_server_yaml_parser_requires_explicit_path(tmp_path):
 def test_alembic_ini_uses_default_management_database_url():
     alembic_ini = (Path(__file__).parents[2] / "alembic.ini").read_text()
 
-    assert "sqlalchemy.url = sqlite:///data/management.db" in alembic_ini
+    assert "sqlalchemy.url = sqlite:///management.db" in alembic_ini
     assert "sqlalchemy.url = sqlite:///data/fleetent.db" not in alembic_ini
     assert "sqlalchemy.url = sqlite:///data/users.db" not in alembic_ini
 
@@ -266,7 +266,7 @@ def test_settings_missing_yaml_file_uses_typed_defaults(tmp_path, monkeypatch):
 
     s = Settings()
 
-    assert s.database_url == f"sqlite:///{paths.data_dir() / 'management.db'}"
+    assert s.database_url == f"sqlite:///{paths.management_db_path()}"
     assert s.log_format == "console"
 
 
@@ -341,7 +341,7 @@ def test_agent_knowledge_defaults():
 def test_diagnostics_defaults_are_conservative():
     s = AgentFile(name="t", version=1, models=default_models())
 
-    assert s.diagnostics.export_dir == str(paths.data_dir() / "diagnostics")
+    assert s.diagnostics.export_dir == str(paths.diagnostics_dir())
     assert s.diagnostics.retention.enabled is False
     assert s.diagnostics.retention.logs_days is None
     assert s.diagnostics.retention.traces_days is None

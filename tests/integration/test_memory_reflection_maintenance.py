@@ -188,7 +188,7 @@ async def test_team_or_project_fact_suggests_shared_memory_or_kb(tmp_path, monke
 
     assert len(proposals) == 1
     proposal = proposals[0]
-    assert proposal.action == "suggest_shared_memory_or_kb"
+    assert proposal.action == "suggest_agent_memory_or_kb"
     assert proposal.target_memory_ids == []
     assert proposal.risk == "low"
     assert "not_user_memory" in proposal.metadata_patch["boundary"]

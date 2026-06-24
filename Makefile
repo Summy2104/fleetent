@@ -92,7 +92,7 @@ admin: ## Show admin CLI help
 # own terminal. NOTE: always `python -m uvicorn` (a bare `uv run uvicorn`
 # resolves to a system uvicorn that can't import fleetent).
 FLEETENT_HOME ?= $(CURDIR)/.fleetent-dev
-DATABASE_URL  ?= sqlite:///$(FLEETENT_HOME)/data/management.db
+DATABASE_URL  ?= sqlite:///$(FLEETENT_HOME)/management.db
 PLATFORM_PORT ?= 8770
 AGENT_PORT    ?= 8765
 NODE_ID       ?= local-node
@@ -107,7 +107,7 @@ $(DEV_TARGETS): export FLEETENT_SECRET_KEY := $(shell cat "$(FLEETENT_HOME)/.dev
 $(DEV_TARGETS): export FLEETENT_FORWARDER_HOST_OVERRIDE := 127.0.0.1
 
 dev-bootstrap: ## Init dev home: migrate management DB + seed built-in admin
-	mkdir -p "$(FLEETENT_HOME)/data"
+	mkdir -p "$(FLEETENT_HOME)"
 	uv run python scripts/dev_secret_key.py
 	uv run alembic upgrade head
 	uv run fleetent admin seed-builtin-admin
@@ -126,7 +126,7 @@ kb-worker: ## Start the KB ingest worker (single queue consumer)
 
 agent: ## Run one agent directly with HTTP /chat+/ws: make agent AGENT=<name> [AGENT_PORT=8765]
 	@test -n "$(AGENT)" || { echo "usage: make agent AGENT=<name> [AGENT_PORT=8765]"; exit 2; }
-	uv run fleetent agent run "$(AGENT)" --home "$(FLEETENT_HOME)/agents/$(AGENT)" --port $(AGENT_PORT)
+	uv run fleetent agent run "$(AGENT)" --home "$(FLEETENT_HOME)/tenants/default/agents/$(AGENT)" --port $(AGENT_PORT)
 
 chat: ## Connect the terminal TUI to an agent: make chat TOKEN=<tui-token> [URL=ws://...]
 	@test -n "$(TOKEN)" || { echo "usage: make chat TOKEN=<tui-token> [URL=ws://...]"; exit 2; }

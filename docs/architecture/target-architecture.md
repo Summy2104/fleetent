@@ -271,12 +271,12 @@ A 的好处：读停掉的 agent 的历史也行（读文件不需进程）；�
 
 > **platform 读侧 = 只读 router（可换后端）+ 各 store 的只读查询函数 + 管理库 registry（发现）**
 
-- **发现**：从 `management.db`（tenants/agents registry）知道有哪些主体/agent → 用同一个 `tenant_router` 按 `<tenant>/<agent_id>/` 布局定位文件。
+- **发现**：从 `management.db`（tenants/agents registry）知道有哪些主体/agent → 用同一个 `tenant_router` 按 `tenants/<tenant>/agents/<agent>/data/` 布局定位文件。
 - **打开**：router 提供**只读模式**句柄（如 SQLite `mode=ro`），结构上写不进去。
 - **查询**：platform **不手写 SQL**，调 **agent 侧 store 的只读查询函数**（与 agent 共享同一份代码、喂只读连接）——schema 变时读函数随之改，不漂移。
 - **聚合**：跨 agent/主体统计 = 遍历 registry → 逐个只读开 → app 内聚合（fleetent 个位数主体规模够用）；热路径统计读 append-only `trace`（`observability/usage.py` 已是此模式）。
 
-依赖方向仍单向：platform → 读 agent 侧（允许）；agent ✗→ platform。**配置反向也是 platform→agent 单向**：platform 的决定（绑定/审批人等）部署时 **materialize 进 `agent.yaml`（推）**，agent 只读自己 home（不拉 `management.db`）。
+依赖方向仍单向：platform → 读 agent 侧（允许）；agent ✗→ platform。**配置反向也是 platform→node→agent 单向**：platform 的决定（绑定/审批人等）进入 desired-state，node 在目标 home 写 `agent.yaml` / `.env` / skills；agent 只读自己 home（不拉 `management.db`）。
 
 ### 7.3 各资源的读侧应用
 

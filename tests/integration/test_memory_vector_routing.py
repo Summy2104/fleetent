@@ -86,7 +86,9 @@ async def test_agent_boot_routes_memory_vectors_to_agent_scoped_backend(
         agent_id="agent-a",
         tenant_id="default",
     )
-    agent_a_state_db = data_dir / "default" / "agent-a" / "agent_state.db"
+    agent_a_state_db = (
+        tmp_path / "tenants" / "default" / "agents" / "agent-a" / "data" / "agent_state.db"
+    )
     _insert_memory_row(agent_a_state_db, id="mem-a", user_id="alice", content="Agent A original")
     await memory_layer.update_user_memory_content("alice", "mem-a", "Agent A updated")
 
@@ -95,12 +97,18 @@ async def test_agent_boot_routes_memory_vectors_to_agent_scoped_backend(
         agent_id="agent-b",
         tenant_id="default",
     )
-    agent_b_state_db = data_dir / "default" / "agent-b" / "agent_state.db"
+    agent_b_state_db = (
+        tmp_path / "tenants" / "default" / "agents" / "agent-b" / "data" / "agent_state.db"
+    )
     _insert_memory_row(agent_b_state_db, id="mem-b", user_id="alice", content="Agent B original")
     await memory_layer.update_user_memory_content("alice", "mem-b", "Agent B updated")
 
-    agent_a_vectors_db = data_dir / "default" / "agent-a" / "agent_vectors.db"
-    agent_b_vectors_db = data_dir / "default" / "agent-b" / "agent_vectors.db"
+    agent_a_vectors_db = (
+        tmp_path / "tenants" / "default" / "agents" / "agent-a" / "data" / "agent_vectors.db"
+    )
+    agent_b_vectors_db = (
+        tmp_path / "tenants" / "default" / "agents" / "agent-b" / "data" / "agent_vectors.db"
+    )
     assert _vector_rows(agent_a_vectors_db) == [("mem:alice", "mem-a")]
     assert _vector_rows(agent_b_vectors_db) == [("mem:alice", "mem-b")]
     vector_store.upsert.assert_not_awaited()

@@ -175,8 +175,8 @@ def test_auto_apply_allowed_rejects_non_whitelisted_actions(action: str) -> None
     )
 
 
-def test_auto_apply_allowed_rejects_shared_memory_suggestion_and_missing_policy() -> None:
-    shared_proposal = _memory_proposal(action="suggest_shared_memory_or_kb", risk="low")
+def test_auto_apply_allowed_rejects_agent_memory_suggestion_and_missing_policy() -> None:
+    shared_proposal = _memory_proposal(action="suggest_agent_memory_or_kb", risk="low")
     assert not reflection_gate._auto_apply_allowed(  # noqa: SLF001
         shared_proposal,
         AutoMaintenancePolicy(allow_low_risk=True),
@@ -252,12 +252,12 @@ def test_memory_proposal_state_helpers_cover_reject_expire_and_shared_memory_app
         "_load_memory_proposal",
         lambda proposal_id: _memory_proposal(
             status="approved",
-            action="suggest_shared_memory_or_kb",
-            metadata_patch={"target": "shared_memory"},
+            action="suggest_agent_memory_or_kb",
+            metadata_patch={"target": "agent_memory"},
             target_memory_ids=[],
         ),
     )
-    applied = reflection_gate.mark_shared_memory_proposal_applied("mp-1")
+    applied = reflection_gate.mark_agent_memory_proposal_applied("mp-1")
     assert applied.status == "applied"
 
 
@@ -325,16 +325,16 @@ async def test_apply_maintenance_action_merge_delete_and_kb_paths(monkeypatch) -
     with pytest.raises(RuntimeError, match="knowledge base proposals"):
         await reflection_gate._apply_maintenance_action(  # noqa: SLF001
             _memory_proposal(
-                action="suggest_shared_memory_or_kb",
+                action="suggest_agent_memory_or_kb",
                 metadata_patch={"target": "knowledge_base"},
                 target_memory_ids=[],
             )
         )
 
-    with pytest.raises(ValueError, match="proposal target is not shared_memory"):
+    with pytest.raises(ValueError, match="proposal target is not agent_memory"):
         await reflection_gate._apply_maintenance_action(  # noqa: SLF001
             _memory_proposal(
-                action="suggest_shared_memory_or_kb",
+                action="suggest_agent_memory_or_kb",
                 metadata_patch={"target": "other"},
                 target_memory_ids=[],
             )

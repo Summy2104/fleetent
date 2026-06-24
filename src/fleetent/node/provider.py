@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import httpx
@@ -16,8 +16,10 @@ _logger = get_logger("node.provider")
 class DesiredAgent:
     agent_id: int
     name: str
+    tenant_id: str
     config: dict[str, Any]
-    secrets: dict[str, str]
+    skill_manifests: list[dict[str, str]] = field(default_factory=list)
+    secrets: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -98,7 +100,14 @@ def _desired_state_from_payload(payload: dict[str, Any], *, source: str) -> Desi
             DesiredAgent(
                 agent_id=int(agent["agent_id"]),
                 name=str(agent["name"]),
+                tenant_id=str(
+                    agent.get("tenant_id") or dict(agent["config"]).get("tenant_id") or "default"
+                ),
                 config=dict(agent["config"]),
+                skill_manifests=[
+                    {str(key): str(value) for key, value in dict(item).items()}
+                    for item in agent.get("skill_manifests", [])
+                ],
                 secrets={
                     str(key): str(value) for key, value in dict(agent.get("secrets", {})).items()
                 },
@@ -128,7 +137,9 @@ def _overlay_last_live_secrets(
             DesiredAgent(
                 agent_id=agent.agent_id,
                 name=agent.name,
+                tenant_id=agent.tenant_id,
                 config=agent.config,
+                skill_manifests=list(agent.skill_manifests),
                 secrets=dict(last_live_secrets_by_agent.get(agent.name, agent.secrets)),
             )
             for agent in state.agents

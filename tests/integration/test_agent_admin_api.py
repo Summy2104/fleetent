@@ -559,7 +559,7 @@ def test_deploy_writes_agent_yaml(fresh_client, tmp_path, monkeypatch):
     token, _ = _session_for("admin")
     r = fresh_client.post("/admin/agents/dep-bot/deploy", headers=_hdr(token))
     assert r.status_code == 200, r.text
-    dest = home / "agents" / "dep-bot" / "agent.yaml"
+    dest = home / "tenants" / "default" / "agents" / "dep-bot" / "agent.yaml"
     assert dest.exists()
     assert r.json()["path"] == str(dest)
     doc = _yaml.safe_load(dest.read_text())

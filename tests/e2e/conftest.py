@@ -20,6 +20,7 @@ from tests.e2e._entrypoint_smoke import (
     wait_for_condition,
     wait_for_http_ready,
 )
+from tests.e2e._path_helpers import agent_home_dir
 from tests.integration._migration_template import apply_migrations
 
 _SERVICE_KEY_RE = re.compile(r"service_key:\s*(ma-[0-9a-f]+)")
@@ -76,9 +77,7 @@ def _register_node(*, env: dict[str, str], node_id: str) -> str:
     )
     if result.returncode != 0:
         raise AssertionError(
-            "node register failed\n"
-            f"stdout:\n{result.stdout}\n"
-            f"stderr:\n{result.stderr}"
+            f"node register failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
     match = _SERVICE_KEY_RE.search(result.stdout)
     if match is None:
@@ -231,7 +230,7 @@ def managed_stack(
                 db_path=db_path,
             )
         finally:
-            agent_home = home_dir / "agents" / agent_name
+            agent_home = agent_home_dir(home_dir, agent_name)
             if agent_home.exists():
                 stop = run_command(
                     [

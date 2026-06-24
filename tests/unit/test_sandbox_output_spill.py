@@ -78,3 +78,16 @@ def test_public_api_exports_cap_or_spill() -> None:
     from fleetent.integrations.sandbox import cap_or_spill as exported
 
     assert exported is output_spill.cap_or_spill
+
+
+def test_spill_uses_agent_data_after_runtime_redirect(tmp_path: Path) -> None:
+    from fleetent.runtime import agent_app
+
+    home = tmp_path / "agent-home"
+    agent_app._redirect_agent_data_paths(home)
+
+    output_spill.cap_or_spill("E" * 3000, 500, label="stdout")
+
+    spillover = home / "data" / "sandbox_output"
+    assert len(list(spillover.glob("*.txt"))) == 1
+    assert not (tmp_path / "data" / "sandbox_output").exists()

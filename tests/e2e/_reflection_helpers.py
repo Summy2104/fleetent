@@ -23,6 +23,7 @@ from tests.e2e._entrypoint_smoke import (
     wait_for_http_ready,
 )
 from tests.e2e._im_helpers import managed_agent_route_server
+from tests.e2e._path_helpers import agent_home_dir, agent_state_db_path
 from tests.e2e.conftest import _admin_session_headers, _agent_status, _register_node
 from tests.integration._migration_template import apply_migrations
 
@@ -138,7 +139,7 @@ def managed_reflection_stack(
                     description="managed reflection agent healthy status",
                 )
 
-                agent_home = home_dir / "agents" / agent_name
+                agent_home = agent_home_dir(home_dir, agent_name)
                 yield ReflectionManagedStack(
                     platform_url=platform_url,
                     node_id=node_id,
@@ -148,7 +149,7 @@ def managed_reflection_stack(
                     agent_pid=int(status["pid"]),
                     admin_session_headers=_admin_session_headers(platform_url),
                     agent_home=agent_home,
-                    agent_state_db=agent_home / "data" / "default" / agent_name / "agent_state.db",
+                    agent_state_db=agent_state_db_path(home_dir, agent_name),
                     home_dir=home_dir,
                     db_path=db_path,
                     common_env=common_env,
@@ -205,7 +206,13 @@ from fleetent.memory import store as memory_store
 from fleetent.memory.models import MemoryItem
 from fleetent.runtime.agent_app import _init_agent_db_schema
 
-agent_home = Path(os.environ["FLEETENT_HOME"]) / "agents" / "{stack.agent_name}"
+agent_home = (
+    Path(os.environ["FLEETENT_HOME"])
+    / "tenants"
+    / "default"
+    / "agents"
+    / "{stack.agent_name}"
+)
 agent = agent_config.scan_home(agent_home)
 _init_agent_db_schema(agent_home / "data", agent_id=agent.name, tenant_id=agent.tenant_id)
 now = datetime.now(UTC).replace(microsecond=0)
@@ -287,7 +294,13 @@ from pathlib import Path
 from fleetent import agent_config, observability
 from fleetent.runtime.agent_app import _init_agent_db_schema
 
-agent_home = Path(os.environ["FLEETENT_HOME"]) / "agents" / "{stack.agent_name}"
+agent_home = (
+    Path(os.environ["FLEETENT_HOME"])
+    / "tenants"
+    / "default"
+    / "agents"
+    / "{stack.agent_name}"
+)
 agent = agent_config.scan_home(agent_home)
 _init_agent_db_schema(agent_home / "data", agent_id=agent.name, tenant_id=agent.tenant_id)
 

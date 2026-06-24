@@ -12,6 +12,7 @@ from fleetent.integrations.sandbox.manager import (
     WorkspaceScope,
     _container_name,
     _name_key,
+    host_workspace_dir,
     workspace_scope_key,
 )
 
@@ -361,6 +362,16 @@ async def test_acquire_session_creates_workspace_dir_and_passes_path(monkeypatch
     _, kwargs = client.create_workspace.call_args
     assert kwargs["workspace_host_path"] == str(tmp_path / "s1")
     assert (tmp_path / "s1").is_dir()
+
+
+def test_host_workspace_dir_uses_agent_data_after_runtime_redirect(monkeypatch, tmp_path):
+    from fleetent.runtime import agent_app
+
+    home = tmp_path / "agent-home"
+    monkeypatch.setattr("fleetent.integrations.sandbox.manager._WORKSPACE_ROOT", None)
+    agent_app._redirect_agent_data_paths(home)
+
+    assert host_workspace_dir("session:abc") == home / "data" / "workspaces" / "session-abc"
 
 
 async def test_acquire_agent_scope_workspace_uses_agent_name(monkeypatch, tmp_path):

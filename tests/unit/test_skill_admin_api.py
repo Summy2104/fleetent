@@ -71,7 +71,7 @@ def test_engine_audit_returns_suspicious_for_non_severe_hit() -> None:
     assert result["rules"]
 
 
-# ── re-materialize triggers (skill-admin-trigger-rematerialize) ───────────────
+# ── managed lifecycle guardrails (tenant-first-layout) ───────────────────────
 
 
 def _admin_user() -> object:
@@ -81,8 +81,8 @@ def _admin_user() -> object:
     return u
 
 
-def test_disable_skill_triggers_rematerialize_all() -> None:
-    """disable_skill() must re-materialize every agent after writing DB."""
+def test_disable_skill_does_not_materialize_managed_agent_homes() -> None:
+    """disable_skill() only updates control-plane state; node applies desired-state later."""
     with (
         patch.object(skill_admin_api, "_require_admin", return_value=_admin_user()),
         patch.object(skill_admin_api.skill_admin_store, "set_global_enabled"),
@@ -91,11 +91,11 @@ def test_disable_skill_triggers_rematerialize_all() -> None:
         patch.object(skill_admin_api, "_rematerialize_all") as mock_remat,
     ):
         skill_admin_api.disable_skill("crm-ops", authorization="Session t")
-        mock_remat.assert_called_once()
+        mock_remat.assert_not_called()
 
 
-def test_enable_skill_triggers_rematerialize_all() -> None:
-    """enable_skill() must re-materialize every agent after writing DB."""
+def test_enable_skill_does_not_materialize_managed_agent_homes() -> None:
+    """enable_skill() only updates control-plane state; node applies desired-state later."""
     with (
         patch.object(skill_admin_api, "_require_admin", return_value=_admin_user()),
         patch.object(skill_admin_api.skill_admin_store, "set_global_enabled"),
@@ -104,31 +104,29 @@ def test_enable_skill_triggers_rematerialize_all() -> None:
         patch.object(skill_admin_api, "_rematerialize_all") as mock_remat,
     ):
         skill_admin_api.enable_skill("crm-ops", authorization="Session t")
-        mock_remat.assert_called_once()
+        mock_remat.assert_not_called()
 
 
-def test_set_binding_rematerializes_only_that_agent() -> None:
-    """set_skill_agent_binding() re-materializes just the bound agent, by name."""
+def test_set_binding_does_not_materialize_agent_home() -> None:
+    """set_skill_agent_binding() only changes bindings; node updates home on reconcile."""
     body = skill_admin_api.BindingBody(enabled=True)
     with (
         patch.object(skill_admin_api, "_require_admin", return_value=_admin_user()),
         patch.object(skill_admin_api.skill_admin_store, "set_binding"),
         patch.object(skill_admin_api.audit_log, "write_audit"),
-        patch.object(skill_admin_api.agent_store, "get_agent_name_by_id", return_value="support"),
         patch.object(skill_admin_api, "_rematerialize_agent") as mock_remat_one,
     ):
         skill_admin_api.set_skill_agent_binding("crm-ops", 7, body, authorization="Session t")
-        mock_remat_one.assert_called_once_with("support")
+        mock_remat_one.assert_not_called()
 
 
-def test_set_binding_skips_rematerialize_when_agent_unknown() -> None:
-    """When the agent id resolves to no name, binding still written, no re-materialize."""
+def test_set_binding_still_skips_materialize_when_agent_unknown() -> None:
+    """When the agent id resolves to no name, binding still written and no home write occurs."""
     body = skill_admin_api.BindingBody(enabled=True)
     with (
         patch.object(skill_admin_api, "_require_admin", return_value=_admin_user()),
         patch.object(skill_admin_api.skill_admin_store, "set_binding"),
         patch.object(skill_admin_api.audit_log, "write_audit"),
-        patch.object(skill_admin_api.agent_store, "get_agent_name_by_id", return_value=None),
         patch.object(skill_admin_api, "_rematerialize_agent") as mock_remat_one,
     ):
         skill_admin_api.set_skill_agent_binding("crm-ops", 999, body, authorization="Session t")

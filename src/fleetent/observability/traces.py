@@ -355,7 +355,7 @@ def query_trace_events(query: TraceQuery) -> Iterator[TraceEvent]:
 
 
 def _database_url() -> str:
-    default = f"sqlite:///{paths.data_dir() / 'management.db'}"
+    default = f"sqlite:///{paths.management_db_path()}"
     return os.environ.get("DATABASE_URL", default)
 
 

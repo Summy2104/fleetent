@@ -26,6 +26,7 @@ from tests.e2e._entrypoint_smoke import (
     running_process,
     wait_for_http_ready,
 )
+from tests.e2e._path_helpers import agent_home_dir
 from tests.integration._migration_template import apply_migrations
 
 
@@ -94,12 +95,8 @@ def _setup_provider_and_tenants(
         protocol="openai_chat",
         api_key_env="FLEETENT_AGENT_MODEL_MT",
     )
-    tenancy_store.create_tenant(
-        id=tenant_a_id, name=f"E2E Tenant {tenant_a_id}", status="active"
-    )
-    tenancy_store.create_tenant(
-        id=tenant_b_id, name=f"E2E Tenant {tenant_b_id}", status="active"
-    )
+    tenancy_store.create_tenant(id=tenant_a_id, name=f"E2E Tenant {tenant_a_id}", status="active")
+    tenancy_store.create_tenant(id=tenant_b_id, name=f"E2E Tenant {tenant_b_id}", status="active")
 
 
 def _seed_tenant_agent(name: str, *, tenant_id: str, node_id: str) -> tuple[int, str]:
@@ -279,7 +276,8 @@ def managed_stack_two_tenants(
             )
         finally:
             for name in (agent_a_name, agent_b_name):
-                agent_home = home_dir / "agents" / name
+                tenant_id = "tenant-a" if name == agent_a_name else "tenant-b"
+                agent_home = agent_home_dir(home_dir, name, tenant_id=tenant_id)
                 if agent_home.exists():
                     stop = run_command(
                         [

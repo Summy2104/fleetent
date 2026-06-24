@@ -322,7 +322,7 @@ def test_export_excludes_agent_env_files_from_archive(tmp_path):
     from fleetent.observability.diagnostics import DiagnosticsExportRequest, export_diagnostics
 
     # Create agent home with a .env containing real secrets
-    agent_home = tmp_path / "data" / "agents" / "support"
+    agent_home = tmp_path / "data" / "tenants" / "acme" / "agents" / "support"
     agent_home.mkdir(parents=True)
     env_file = agent_home / ".env"
     env_file.write_text(
@@ -352,7 +352,7 @@ def test_export_excludes_agent_env_files_from_archive(tmp_path):
 
     # skipped_artifacts must record the excluded .env with a redacted reference
     skipped_names = {entry["name"] for entry in manifest["skipped_artifacts"]}
-    assert "agents/support/.env" in skipped_names
+    assert "tenants/acme/agents/support/.env" in skipped_names
 
 
 def test_diagnostics_database_factory_builds_sqlite_database():

@@ -23,7 +23,12 @@ def _restore_runtime_state_dbs():
         ss._state_db,
     )
     yield
-    runtime_context._state_db, sub_agent_lifecycle._state_db, memory_store._state_db, ss._state_db = saved  # noqa: E501
+    (
+        runtime_context._state_db,
+        sub_agent_lifecycle._state_db,
+        memory_store._state_db,
+        ss._state_db,
+    ) = saved  # noqa: E501
 
 
 _RUNTIME_TABLES = (
@@ -58,7 +63,9 @@ def test_standalone_boot_lands_runtime_tables_in_agent_state_db(
     # Boot the agent's DB schema exactly as `fleetent agent run` does, without any platform.
     agent_app._init_agent_db_schema(data_dir, agent_id="solo-bot", tenant_id="default")
 
-    agent_state_db = data_dir / "default" / "solo-bot" / "agent_state.db"
+    agent_state_db = (
+        tmp_path / "tenants" / "default" / "agents" / "solo-bot" / "data" / "agent_state.db"
+    )
     assert agent_state_db.exists()
     tables = _tables(agent_state_db)
     for table in _RUNTIME_TABLES:

@@ -2,7 +2,7 @@
 
 ## Purpose
 每个 standalone agent 进程（`fleetent agent run <id>`）的运行时数据（sessions、DB、logs、
-diagnostics、IM approvals）写入该 agent 专属的 `agents/<id>/data/` 目录，而非共享的
+diagnostics、IM approvals）写入该 agent 专属的 `tenants/default/agents/<id>/data/` 目录，而非共享的
 `FLEETENT_HOME/data/`，实现 per-agent 数据完全隔离。
 
 ## Requirements
@@ -21,7 +21,7 @@ Boot SHALL NOT create `fleetent.db` and SHALL NOT read or set `DATABASE_URL`.
 #### Scenario: Sessions land in agent home
 
 - **WHEN** `fleetent agent run my-bot` starts
-- **THEN** `session.manager.SESSIONS_DIR` SHALL equal `~/.fleetent/agents/my-bot/data/sessions/`
+- **THEN** `session.manager.SESSIONS_DIR` SHALL equal `~/.fleetent/tenants/default/agents/my-bot/data/sessions/`
 - **AND** all new session files SHALL be written to that directory
 
 #### Scenario: DB lands in agent home
@@ -44,18 +44,18 @@ Boot SHALL NOT create `fleetent.db` and SHALL NOT read or set `DATABASE_URL`.
 
 - **WHEN** `fleetent agent run my-bot` starts
 - **THEN** `im_gateway.access.APPROVALS_PATH` SHALL equal
-  `~/.fleetent/agents/my-bot/data/im_approvals.json`
+  `~/.fleetent/tenants/default/agents/my-bot/data/im_approvals.json`
 
 ### Requirement: Log directory defaults to agent home
 
-When `agent.observability.logging.directory` is blank or unset, the structured log sink
-SHALL default to `home_dir/data/logs/`. A non-blank value SHALL be used as-is (absolute
-or CWD-relative).
+The structured log sink SHALL default to `home_dir/data/logs/` when
+`agent.observability.logging.directory` is blank or unset. A non-blank value SHALL be
+used as-is (absolute or CWD-relative).
 
 #### Scenario: Blank directory resolves to agent-home logs
 
 - **WHEN** `agent.observability.logging.directory` is `""` (blank)
-- **THEN** log files SHALL be written to `agents/<id>/data/logs/`
+- **THEN** log files SHALL be written to `tenants/default/agents/<id>/data/logs/`
 
 #### Scenario: Explicit directory overrides agent home
 
@@ -71,6 +71,6 @@ data directories and SHALL NOT read each other's sessions or DB rows.
 #### Scenario: Separate sessions per agent
 
 - **WHEN** `fleetent agent run agent-a` and `fleetent agent run agent-b` both run
-- **THEN** agent-a writes sessions to `agents/agent-a/data/sessions/`
-- **AND** agent-b writes sessions to `agents/agent-b/data/sessions/`
+- **THEN** agent-a writes sessions to `tenants/default/agents/agent-a/data/sessions/`
+- **AND** agent-b writes sessions to `tenants/default/agents/agent-b/data/sessions/`
 - **AND** neither directory contains files from the other agent

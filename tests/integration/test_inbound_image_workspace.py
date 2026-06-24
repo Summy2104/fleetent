@@ -19,7 +19,7 @@ PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"payload" * 8
 
 
 def _bind_default_agent(tmp_path, monkeypatch):
-    d = tmp_path / "agents" / "default"
+    d = tmp_path / "tenants" / "default" / "agents" / "default"
     d.mkdir(parents=True, exist_ok=True)
     doc = {
         "name": "default",

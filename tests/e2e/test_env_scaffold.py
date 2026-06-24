@@ -3,11 +3,13 @@
 Regression test for: node _write_home must call ensure_env_scaffold so that
 forwarder/IM-edge can always find FLEETENT_TUI_TOKEN without 503 errors.
 """
+
 from __future__ import annotations
 
 import httpx
 
 from tests.e2e._entrypoint_smoke import wait_for_condition
+from tests.e2e._path_helpers import agent_home_dir
 
 
 def test_env_scaffold_created_for_freshly_pinned_agent(managed_stack) -> None:
@@ -43,7 +45,7 @@ def test_env_scaffold_created_for_freshly_pinned_agent(managed_stack) -> None:
 
     # Node reconcile (interval=1s) should create .env via ensure_env_scaffold
     # inside _write_home before spawning the agent process.
-    env_path = managed_stack.home_dir / "agents" / "fresh-bot" / ".env"
+    env_path = agent_home_dir(managed_stack.home_dir, "fresh-bot") / ".env"
     # wait_for_condition expects None when not-yet-ready; False would return immediately.
     wait_for_condition(
         lambda: env_path.exists() or None,

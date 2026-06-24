@@ -25,8 +25,7 @@ from typing import Any
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from fleetent import agent_store, audit_log, auth, user_store
-from fleetent.platform.agent_lifecycle import materialize
+from fleetent import audit_log, auth, user_store
 from fleetent.platform.reflection_management import (
     reflection_list_proposals,
     reflection_proposal_diff,
@@ -100,13 +99,14 @@ def engine_observability(skill_name: str) -> dict[str, Any]:
 
 
 def _rematerialize_all() -> list[str]:
-    """Re-export every agent's home after a global skill-state change. Injectable seam."""
-    return materialize.rematerialize_all()
+    """Legacy seam kept for tests; managed deployment updates homes via node reconcile."""
+    return []
 
 
 def _rematerialize_agent(name: str) -> None:
-    """Re-export one agent's home after a per-agent binding change. Injectable seam."""
-    materialize.materialize_from_store(name)
+    """Legacy seam kept for tests; managed deployment updates homes via node reconcile."""
+    del name
+    return None
 
 
 # --- auth helpers -------------------------------------------------------------
@@ -388,7 +388,6 @@ def disable_skill(name: str, authorization: str | None = Header(None)) -> dict[s
     skill_admin_store.set_global_enabled(name, False)
     engine_set_global_disabled(name, True)
     audit_log.write_audit(user.id, "skill.disable", "skill", name)
-    _rematerialize_all()
     return {"name": name, "global_enabled": 0}
 
 
@@ -398,7 +397,6 @@ def enable_skill(name: str, authorization: str | None = Header(None)) -> dict[st
     skill_admin_store.set_global_enabled(name, True)
     engine_set_global_disabled(name, False)
     audit_log.write_audit(user.id, "skill.enable", "skill", name)
-    _rematerialize_all()
     return {"name": name, "global_enabled": 1}
 
 
@@ -459,9 +457,6 @@ def set_skill_agent_binding(
     skill_admin_store.set_binding(agent_id, name, body.enabled, updated_by=user.id)
     action = "skill.agent_enable" if body.enabled else "skill.agent_disable"
     audit_log.write_audit(user.id, action, "skill", name, detail={"agent_id": agent_id})
-    agent_name = agent_store.get_agent_name_by_id(agent_id)
-    if agent_name is not None:
-        _rematerialize_agent(agent_name)
     return {"name": name, "agent_id": agent_id, "enabled": body.enabled}
 
 

@@ -99,7 +99,7 @@ async def test_serve_without_port_opens_no_http(monkeypatch):
 async def test_serve_writes_pid_file_during_run(tmp_path, monkeypatch) -> None:
     """serve() writes os.getpid() to .fleetent.pid and removes it on exit."""
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
-    home_dir = tmp_path / "agents" / "test-bot"
+    home_dir = tmp_path / "tenants" / "default" / "agents" / "test-bot"
     home_dir.mkdir(parents=True)
 
     pid_during_wait: list[str] = []
@@ -126,7 +126,7 @@ async def test_serve_writes_pid_file_during_run(tmp_path, monkeypatch) -> None:
 async def test_serve_removes_pid_file_on_boot_exception(tmp_path, monkeypatch) -> None:
     """serve() cleans up the PID file even when boot() raises."""
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
-    home_dir = tmp_path / "agents" / "test-bot"
+    home_dir = tmp_path / "tenants" / "default" / "agents" / "test-bot"
     home_dir.mkdir(parents=True)
 
     monkeypatch.setattr(agent_app, "boot", AsyncMock(side_effect=RuntimeError("boot failed")))
@@ -143,7 +143,7 @@ async def test_serve_removes_pid_file_on_boot_exception(tmp_path, monkeypatch) -
 async def test_serve_drain_on_sigusr1_stops_supervisor_and_exits(tmp_path, monkeypatch) -> None:
     """serve() reacts to SIGUSR1 by calling supervisor.stop_all() then exiting."""
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
-    home_dir = tmp_path / "agents" / "test-bot"
+    home_dir = tmp_path / "tenants" / "default" / "agents" / "test-bot"
     home_dir.mkdir(parents=True)
 
     rt = MagicMock()
@@ -266,7 +266,7 @@ def test_parse_agent_stop_with_home(tmp_path) -> None:
 def test_main_dispatches_agent_stop(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
 
-    resolved_home = tmp_path / "agents" / "my-bot"
+    resolved_home = tmp_path / "tenants" / "default" / "agents" / "my-bot"
     resolve_calls: list[tuple[str, str | None]] = []
     stop_calls: list[object] = []
 

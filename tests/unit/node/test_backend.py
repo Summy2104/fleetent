@@ -16,6 +16,10 @@ def _config(tmp_path) -> NodeConfig:
     )
 
 
+def _home(tmp_path, agent_name: str = "support", tenant_id: str = "default"):
+    return tmp_path / "tenants" / tenant_id / "agents" / agent_name
+
+
 def test_local_backend_spawn_uses_agent_run(monkeypatch, tmp_path) -> None:
     from fleetent.node.backend import LocalProcessBackend
 
@@ -43,7 +47,7 @@ def test_local_backend_spawn_uses_agent_run(monkeypatch, tmp_path) -> None:
         "--port",
         str(assigned_port),
         "--home",
-        str(tmp_path / "agents" / "support"),
+        str(_home(tmp_path)),
     )
     assert cwd == str(tmp_path)
 
@@ -87,7 +91,7 @@ def test_local_backend_stop_uses_agent_stop(monkeypatch, tmp_path) -> None:
                 "stop",
                 "support",
                 "--home",
-                str(tmp_path / "agents" / "support"),
+                str(_home(tmp_path)),
             ),
             True,
         )
@@ -97,7 +101,7 @@ def test_local_backend_stop_uses_agent_stop(monkeypatch, tmp_path) -> None:
 def test_local_backend_is_alive_reads_pid_file_and_checks_process(monkeypatch, tmp_path) -> None:
     from fleetent.node.backend import LocalProcessBackend
 
-    home = tmp_path / "agents" / "support"
+    home = _home(tmp_path)
     home.mkdir(parents=True)
     (home / ".fleetent.pid").write_text("12345")
 
@@ -113,7 +117,7 @@ def test_local_backend_is_alive_reads_pid_file_and_checks_process(monkeypatch, t
 def test_local_backend_is_alive_returns_none_for_stale_pid(monkeypatch, tmp_path) -> None:
     from fleetent.node.backend import LocalProcessBackend
 
-    home = tmp_path / "agents" / "support"
+    home = _home(tmp_path)
     home.mkdir(parents=True)
     (home / ".fleetent.pid").write_text("12345")
 

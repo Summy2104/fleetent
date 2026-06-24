@@ -194,8 +194,8 @@ def test_init_db_runs_alembic_against_fleetent_home(tmp_path: Path) -> None:
     log = uv_log.read_text()
     assert "alembic" in log and "upgrade head" in log
     # The transient alembic config targets the FLEETENT_HOME database.
-    assert f"sqlite:///{home / '.fleetent' / 'data' / 'management.db'}" in log
-    assert (home / ".fleetent" / "data").is_dir()
+    assert f"sqlite:///{home / '.fleetent' / 'management.db'}" in log
+    assert (home / ".fleetent").is_dir()
 
 
 def test_dir_flag_overrides_home(tmp_path: Path) -> None:
@@ -208,8 +208,8 @@ def test_dir_flag_overrides_home(tmp_path: Path) -> None:
     result = _run_env(["--dir", str(custom)], env, home)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert f"sqlite:///{custom / 'data' / 'management.db'}" in uv_log.read_text()
-    assert (custom / "data").is_dir()
+    assert f"sqlite:///{custom / 'management.db'}" in uv_log.read_text()
+    assert custom.is_dir()
     assert not (home / ".fleetent" / "data").exists()
 
 

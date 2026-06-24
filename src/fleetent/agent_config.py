@@ -694,9 +694,10 @@ def build_index(agents_dir: str | Path | None = None) -> AgentConfigIndex:
     """Build a fresh resolution index (pure; no globals).
 
     Default installed Agent mode: when no explicit ``agents_dir`` /
-    ``FLEETENT_AGENTS_DIR`` is given and ``agents/default/agent.yaml`` exists, load it
-    as the sole, forced-default agent. The old home-root ``agent.yaml`` single-file
-    mode is not a current MVP deployment path. Otherwise scan the agents directory.
+    ``FLEETENT_AGENTS_DIR`` is given and the default-tenant home
+    ``tenants/default/agents/default/agent.yaml`` exists, load it as the sole,
+    forced-default agent. The old home-root ``agent.yaml`` single-file mode is not
+    a current MVP deployment path. Otherwise scan the agents directory.
     """
     if agents_dir is None and "FLEETENT_AGENTS_DIR" not in os.environ:
         default_file = paths.agent_file()
