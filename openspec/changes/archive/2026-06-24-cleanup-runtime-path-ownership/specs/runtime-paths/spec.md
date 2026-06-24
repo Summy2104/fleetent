@@ -18,6 +18,8 @@
 - **THEN** `FLEETENT_HOME` 的读取只出现在 `paths.py`、node config bootstrap 或显式 CLI/provision 边界
 - **AND** 其它模块不直接读取家目录环境变量来定位 runtime paths
 
+## ADDED Requirements
+
 ### Requirement: Home-level path ownership
 
 `FLEETENT_HOME` 根目录 SHALL 只默认承载跨租户控制面和宿主级产物：`management.db`、`platform.yaml`、平台 `.env`、dev-only `.dev_secret_key`、`node/`、`logs/`、`diagnostics/`、`tenants/`。系统默认路径 SHALL NOT 使用 `FLEETENT_HOME/data/` 承载 platform 或 agent runtime 产物。

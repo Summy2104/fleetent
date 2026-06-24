@@ -23,6 +23,8 @@ At boot, before runtime infrastructure can write files, the process SHALL redire
 - **THEN** runtime loads `/tmp/custom-home/agent.yaml`
 - **AND** all agent data redirects under `/tmp/custom-home/data`
 
+## ADDED Requirements
+
 ### Requirement: Agent runtime legacy trace path is agent-scoped
 
 While the legacy JSONL trace API remains importable, agent runtime SHALL bind its trace file to `<agent-home>/data/traces.jsonl`, not `FLEETENT_HOME/data/traces.jsonl`.

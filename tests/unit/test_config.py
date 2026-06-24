@@ -341,7 +341,7 @@ def test_agent_knowledge_defaults():
 def test_diagnostics_defaults_are_conservative():
     s = AgentFile(name="t", version=1, models=default_models())
 
-    assert s.diagnostics.export_dir == str(paths.data_dir() / "diagnostics")
+    assert s.diagnostics.export_dir == str(paths.diagnostics_dir())
     assert s.diagnostics.retention.enabled is False
     assert s.diagnostics.retention.logs_days is None
     assert s.diagnostics.retention.traces_days is None

@@ -53,6 +53,11 @@ def base_dir() -> Path:
 
 
 def data_dir() -> Path:
+    """Legacy compatibility data root.
+
+    New platform or agent runtime defaults should use semantic accessors such
+    as ``logs_dir()``, ``diagnostics_dir()``, or ``tenant_agent_data_dir()``.
+    """
     return base_dir() / "data"
 
 
@@ -62,6 +67,14 @@ def agents_dir() -> Path:
 
 def management_db_path() -> Path:
     return base_dir() / "management.db"
+
+
+def logs_dir() -> Path:
+    return base_dir() / "logs"
+
+
+def diagnostics_dir() -> Path:
+    return base_dir() / "diagnostics"
 
 
 def tenant_dir(tenant_id: str) -> Path:

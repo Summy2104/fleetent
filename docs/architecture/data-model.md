@@ -22,6 +22,8 @@
 ```
 FLEETENT_HOME/
   management.db                                   # 管理库（单库·跨主体·Alembic）
+  logs/                                           # platform structured logs
+  diagnostics/                                    # platform diagnostics exports
   tenants/
     <tenant>/
       kb.db / kb_vectors.db                       # KB 关系 / 向量（per-tenant）
@@ -32,6 +34,10 @@ FLEETENT_HOME/
             agent_vectors.db                      # 该 agent 记忆向量
             agent_memory.db                       # 该 agent 记忆关系库
             agent_memory_vectors.db               # 该 agent 记忆向量库
+            traces.jsonl                          # legacy JSONL trace fallback
+            sessions/ logs/ diagnostics/           # agent runtime 文件
+            workspaces/ tool_spillover/ sandbox_output/
+            im_approvals.json
 ```
 
 命名规则：tenant 层 `X`=共享资源名（`kb`）；agent 层 `X`=归属（`agent_state` / `agent_memory`），home 已经圈定 `<tenant>/<agent_name>`，因此 `data/` 内不再重复嵌套 `<tenant>/<agent>`。

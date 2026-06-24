@@ -13,6 +13,7 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
+from tests.e2e._path_helpers import agent_home_dir
 from tests.e2e._tenant_helpers import TwoTenantStack
 
 pytest_plugins = ["tests.e2e._tenant_helpers"]
@@ -41,8 +42,12 @@ def test_two_tenant_agents_ready_and_data_roots_independent(
     assert stack.agent_b_status["phase"] == "running"
     assert stack.agent_b_status["health"] == "healthy"
 
-    data_root_a = stack.home_dir / "agents" / stack.agent_a_name / "data" / stack.tenant_a_id
-    data_root_b = stack.home_dir / "agents" / stack.agent_b_name / "data" / stack.tenant_b_id
+    data_root_a = (
+        agent_home_dir(stack.home_dir, stack.agent_a_name, tenant_id=stack.tenant_a_id) / "data"
+    )
+    data_root_b = (
+        agent_home_dir(stack.home_dir, stack.agent_b_name, tenant_id=stack.tenant_b_id) / "data"
+    )
     assert data_root_a.exists(), f"tenant-a data root missing: {data_root_a}"
     assert data_root_b.exists(), f"tenant-b data root missing: {data_root_b}"
     assert data_root_a != data_root_b
@@ -64,8 +69,12 @@ def test_cross_agent_query_no_data_bleed(
     sentinel_a = f"sentinel-a-{uuid.uuid4()}"
     sentinel_b = f"sentinel-b-{uuid.uuid4()}"
 
-    data_dir_a = stack.home_dir / "agents" / stack.agent_a_name / "data"
-    data_dir_b = stack.home_dir / "agents" / stack.agent_b_name / "data"
+    data_dir_a = (
+        agent_home_dir(stack.home_dir, stack.agent_a_name, tenant_id=stack.tenant_a_id) / "data"
+    )
+    data_dir_b = (
+        agent_home_dir(stack.home_dir, stack.agent_b_name, tenant_id=stack.tenant_b_id) / "data"
+    )
 
     backend_a = SQLiteTenantBackend(data_dir=data_dir_a)
     backend_b = SQLiteTenantBackend(data_dir=data_dir_b)
@@ -138,8 +147,8 @@ def test_file_level_physical_isolation(
     """SQLite files for each tenant live in disjoint directory trees."""
     stack = managed_stack_two_tenants
 
-    agents_dir_a = stack.home_dir / "agents" / stack.agent_a_name
-    agents_dir_b = stack.home_dir / "agents" / stack.agent_b_name
+    agents_dir_a = agent_home_dir(stack.home_dir, stack.agent_a_name, tenant_id=stack.tenant_a_id)
+    agents_dir_b = agent_home_dir(stack.home_dir, stack.agent_b_name, tenant_id=stack.tenant_b_id)
 
     files_a = {p.resolve() for p in agents_dir_a.rglob("*.db")}
     files_b = {p.resolve() for p in agents_dir_b.rglob("*.db")}
@@ -159,12 +168,12 @@ def test_file_level_physical_isolation(
             f"tenant-b file {f} leaked into tenant-a agent dir"
         )
 
-    tenant_dir_a = stack.home_dir / "agents" / stack.agent_a_name / "data" / stack.tenant_a_id
-    tenant_dir_b = stack.home_dir / "agents" / stack.agent_b_name / "data" / stack.tenant_b_id
-    assert tenant_dir_a.exists()
-    assert tenant_dir_b.exists()
-    assert not _is_relative_to(tenant_dir_a, tenant_dir_b)
-    assert not _is_relative_to(tenant_dir_b, tenant_dir_a)
+    data_dir_a = agents_dir_a / "data"
+    data_dir_b = agents_dir_b / "data"
+    assert data_dir_a.exists()
+    assert data_dir_b.exists()
+    assert not _is_relative_to(data_dir_a, data_dir_b)
+    assert not _is_relative_to(data_dir_b, data_dir_a)
 
 
 def _is_relative_to(path: Path, base: Path) -> bool:

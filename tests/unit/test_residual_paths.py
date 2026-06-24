@@ -11,7 +11,7 @@ def test_logging_config_default_directory_follows_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
-    assert structured_logging._LoggingConfig().directory == tmp_path / "data" / "logs"
+    assert structured_logging._LoggingConfig().directory == tmp_path / "logs"
 
 
 def test_diagnostics_default_data_dir_follows_home(
@@ -85,3 +85,31 @@ def test_installers_initialize_root_management_db() -> None:
             offenders.append(f"{script}: missing root management.db URL")
 
     assert not offenders, "installers still use legacy management DB path:\n" + "\n".join(offenders)
+
+
+def test_runtime_sources_do_not_reintroduce_legacy_canonical_runtime_paths() -> None:
+    roots = (Path("src/fleetent"), Path("tests/e2e"))
+    allowed = {
+        Path("src/fleetent/runtime/agent_app.py"),
+    }
+    banned_patterns = (
+        "FLEETENT_HOME/data/",
+        "home/agents/",
+        "data/default/",
+        "data/<tenant>/<agent>",
+        "data/management.db",
+    )
+
+    offenders: list[str] = []
+    for root in roots:
+        for path in root.rglob("*"):
+            if path.suffix not in {".py", ".md"} or path in allowed:
+                continue
+            content = path.read_text(encoding="utf-8")
+            for pattern in banned_patterns:
+                if pattern in content:
+                    offenders.append(f"{path}: {pattern}")
+
+    assert not offenders, "runtime/e2e sources still mention legacy canonical paths:\n" + "\n".join(
+        offenders
+    )

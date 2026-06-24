@@ -38,16 +38,15 @@ def test_init_config_dry_run_prints_planned_paths_without_writing(tmp_path, monk
     for path in [
         ".env",
         "platform.yaml",
-        "data/",
-        "data/logs/",
-        "data/diagnostics/",
+        "logs/",
+        "diagnostics/",
         "secrets/",
     ]:
         assert f"create {path}" in out
     assert "config/settings.yaml" not in out
     assert "config/mcp.servers.yaml" not in out
 
-    for path in [".env", "platform.yaml", "data", "secrets"]:
+    for path in [".env", "platform.yaml", "logs", "diagnostics", "secrets"]:
         assert not (tmp_path / path).exists()
 
 
@@ -68,8 +67,9 @@ def test_init_config_skips_existing_files_by_default(tmp_path, monkeypatch):
     assert (tmp_path / "platform.yaml").read_text(
         encoding="utf-8"
     ) == "knowledge:\n  mode: embedded\n"
-    assert (tmp_path / "data/logs").is_dir()
-    assert (tmp_path / "data/diagnostics").is_dir()
+    assert (tmp_path / "logs").is_dir()
+    assert (tmp_path / "diagnostics").is_dir()
+    assert not (tmp_path / "data").exists()
     assert (tmp_path / "secrets").is_dir()
 
 

@@ -21,9 +21,8 @@ _GENERATED_FILES = (
     ("platform.yaml.example", "platform.yaml"),
 )
 _GENERATED_DIRS = (
-    "data/",
-    "data/logs/",
-    "data/diagnostics/",
+    "logs/",
+    "diagnostics/",
     "secrets/",
 )
 

@@ -4,8 +4,7 @@ Design (task 1.3 probe conclusions):
 - CronScheduler.start() loads pre-existing agent_state.db rows at boot — pre-seeding
   is the only reliable cross-process task injection path.
 - SchedulingSettings.enabled defaults True → any standalone agent boots the scheduler.
-- agent_state.db physical path: agent_home / "data" / "default" / agent_name / "agent_state.db"
-  (mirrors tenant_router.SQLiteTenantBackend.resolve_agent logic).
+- agent_state.db physical path: agent_home / "data" / "agent_state.db".
 - task_type="notify", deliver=None, origin=None → _deliver() returns None (no connector
   error), _record_run writes last_status="ok" unconditionally — no LLM needed.
 - user_id="default" → _resolve_cron_principal short-circuits, no management DB needed.
@@ -102,8 +101,7 @@ def _poll_run_state(db_path: Path, task_id: str) -> dict[str, object]:
             conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
             conn.row_factory = sqlite3.Row
             row = conn.execute(
-                "SELECT id, last_run_at, last_status, last_error "
-                "FROM scheduled_tasks WHERE id = ?",
+                "SELECT id, last_run_at, last_status, last_error FROM scheduled_tasks WHERE id = ?",
                 (task_id,),
             ).fetchone()
             conn.close()
@@ -112,10 +110,7 @@ def _poll_run_state(db_path: Path, task_id: str) -> dict[str, object]:
         except sqlite3.OperationalError:
             pass
         time.sleep(0.5)
-    raise TimeoutError(
-        f"cron task {task_id} did not fire within {_FIRE_TIMEOUT}s "
-        f"(db={db_path})"
-    )
+    raise TimeoutError(f"cron task {task_id} did not fire within {_FIRE_TIMEOUT}s (db={db_path})")
 
 
 @pytest.fixture
@@ -127,10 +122,7 @@ def cron_probe(tmp_path: Path) -> Iterator[CronProbe]:
     fleetent_home = tmp_path / "cron-home"
     fleetent_home.mkdir()
 
-    # agent_state.db path mirrors agent_app._init_agent_db_schema:
-    #   data_dir = home_dir/"data"; router.agent_scope("default", agent.name)
-    #   => data_dir / "default" / agent_name / "agent_state.db"
-    state_db_path = agent_home / "data" / "default" / _AGENT_NAME / "agent_state.db"
+    state_db_path = agent_home / "data" / "agent_state.db"
 
     _write_agent_yaml(agent_home)
     task_id = _create_state_db(state_db_path)
@@ -144,10 +136,16 @@ def cron_probe(tmp_path: Path) -> Iterator[CronProbe]:
         }
     )
     argv = [
-        sys.executable, "-m", "fleetent",
-        "agent", "run", _AGENT_NAME,
-        "--home", str(agent_home),
-        "--port", str(port),
+        sys.executable,
+        "-m",
+        "fleetent",
+        "agent",
+        "run",
+        _AGENT_NAME,
+        "--home",
+        str(agent_home),
+        "--port",
+        str(port),
     ]
 
     with running_process(argv, env=env, cwd=repo_root()) as proc:

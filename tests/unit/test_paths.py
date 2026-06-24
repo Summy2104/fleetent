@@ -32,6 +32,8 @@ def test_explicit_fleetent_home_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 
     assert paths.base_dir() == home
     assert paths.management_db_path() == home / "management.db"
+    assert paths.logs_dir() == home / "logs"
+    assert paths.diagnostics_dir() == home / "diagnostics"
     assert paths.data_dir() == home / "data"
     assert paths.tenant_dir("acme") == home / "tenants" / "acme"
 
@@ -44,6 +46,8 @@ def test_repo_local_used_in_development(
 
     assert paths.base_dir() == repo
     assert paths.management_db_path() == repo / "management.db"
+    assert paths.logs_dir() == repo / "logs"
+    assert paths.diagnostics_dir() == repo / "diagnostics"
     assert paths.data_dir() == repo / "data"
     assert paths.tenant_dir("default") == repo / "tenants" / "default"
 
@@ -68,6 +72,8 @@ def test_home_fallback_when_not_in_repo(
 
     assert paths.base_dir() == isolated_home / ".fleetent"
     assert paths.management_db_path() == isolated_home / ".fleetent" / "management.db"
+    assert paths.logs_dir() == isolated_home / ".fleetent" / "logs"
+    assert paths.diagnostics_dir() == isolated_home / ".fleetent" / "diagnostics"
     assert paths.data_dir() == isolated_home / ".fleetent" / "data"
     assert paths.tenant_dir("default") == isolated_home / ".fleetent" / "tenants" / "default"
 
@@ -90,6 +96,8 @@ def test_derived_paths_under_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert paths.platform_yaml_path() == home / "platform.yaml"
     assert paths.platform_env_path() == home / ".env"
     assert paths.management_db_path() == home / "management.db"
+    assert paths.logs_dir() == home / "logs"
+    assert paths.diagnostics_dir() == home / "diagnostics"
     assert paths.sessions_dir() == home / "data" / "sessions"
 
 

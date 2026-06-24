@@ -59,7 +59,7 @@ class DiagnosticsRetentionSettings(BaseModel):
 
 
 class DiagnosticsSettings(BaseModel):
-    export_dir: str = Field(default_factory=lambda: str(paths.data_dir() / "diagnostics"))
+    export_dir: str = Field(default_factory=lambda: str(paths.diagnostics_dir()))
     retention: DiagnosticsRetentionSettings = Field(default_factory=DiagnosticsRetentionSettings)
 
 

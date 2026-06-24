@@ -213,13 +213,21 @@ def _redirect_agent_data_paths(home_dir: Path) -> None:
     directly to module-level constants so the change takes effect for all subsequent
     operations in this process without introducing new env vars.
     """
+    from fleetent import eval_logger
     from fleetent.im_gateway import access
+    from fleetent.integrations.sandbox import manager as sandbox_manager
+    from fleetent.integrations.sandbox import output_spill
     from fleetent.observability import diagnostics
     from fleetent.session import manager as session_mgr
+    from fleetent.tools import result_truncation
 
     data_dir = home_dir / "data"
     session_mgr.SESSIONS_DIR = data_dir / "sessions"
     access.APPROVALS_PATH = data_dir / "im_approvals.json"
+    eval_logger.TRACE_PATH = data_dir / "traces.jsonl"
+    sandbox_manager.set_workspace_root(data_dir / "workspaces")
+    result_truncation.SPILLOVER_DIR = data_dir / "tool_spillover"
+    output_spill.SANDBOX_OUTPUT_DIR = data_dir / "sandbox_output"
     # Replace the _default_data_dir callable so diagnostics export/retention
     # resolve to this agent's data dir, not the global FLEETENT_HOME/data/.
     diagnostics._default_data_dir = lambda: data_dir  # type: ignore[assignment]

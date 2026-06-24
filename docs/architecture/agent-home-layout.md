@@ -36,6 +36,8 @@ FLEETENT_HOME/
 ├── platform.yaml                      [OPER]  平台配置（手写）
 ├── .env                               [OPER]  平台级 env（手写）
 ├── management.db                      [PLAT]  管理库 · 控制面权威（Alembic 维护）
+├── logs/                              [PLAT]  platform structured logs 默认目录
+├── diagnostics/                       [PLAT]  platform diagnostics export 默认目录
 ├── node/                              [NODE]  节点身份与状态（仅 agent 宿主）
 │   ├── .env                           [CLI/NODE] provision：service key + 平台 URL + node id
 │   ├── desired-state-cache.json       [NODE]  reconcile/provider 缓存（剥除 secret，仅保留 manifest 元数据）
@@ -71,10 +73,13 @@ tenants/<tenant>/agents/<id>/
                          _init_agent_db_schema + tenant_router 建库；嵌入式迁移 migrate-on-open）
     ├── agent_state.db (+agent_vectors.db)                 per-agent（traces/memory/approvals/sessions 元数据…）
     ├── agent_memory.db (+vectors)                         per-agent（agent 记忆）
+    ├── traces.jsonl                                        legacy JSONL trace fallback
     ├── sessions/<sid>.json (+.lock)                        会话持久化（原子写 .tmp→rename）
     ├── logs/<date>.log
     ├── diagnostics/                                        诊断导出
     ├── workspaces/                                         沙箱工作区（bind-mount 进容器）
+    ├── tool_spillover/                                     大工具结果落盘
+    ├── sandbox_output/                                     run_code 大 stdout/stderr 落盘
     └── im_approvals.json                                   IM 用户准入本地状态
 ```
 
@@ -112,6 +117,7 @@ node 状态（node/）                          →  [NODE] 自己（provision +
 FLEETENT_HOME/
 ├── platform.yaml / .env / .dev_secret_key   [OPER]  部署/运维配置
 ├── management.db                            [PLAT]  控制面 · 跨租户单库（裸放根）
+├── logs/ diagnostics/                       [PLAT]  宿主级日志与诊断导出
 ├── node/                                    [NODE]  节点身份 · 跨租户（.env + cache + hashes）
 └── tenants/<tenant>/                        ← 一个租户的完整足迹 = 一棵子树
     ├── kb.db (+kb_vectors)                  租户级共享：kb-worker 写 / 各 agent 读（并发只读安全）
@@ -120,7 +126,8 @@ FLEETENT_HOME/
         └── data/                            [AGENT]  拍平，无 <tenant>/<id>/ 冗余嵌套
             ├── agent_state.db (+vectors)
             ├── agent_memory.db (+vectors)       ← 原 shared_memory：agent 级、去 team/tenant scope
-            └── sessions/ logs/ diagnostics/ workspaces/ im_approvals.json
+            └── traces.jsonl sessions/ logs/ diagnostics/ workspaces/
+                tool_spillover/ sandbox_output/ im_approvals.json
 ```
 
 ## 不变量（这就是"职责边界显式表达"）
