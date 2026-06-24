@@ -109,14 +109,14 @@ tables、config namespace 变化和 cross-module dependencies。
 - **THEN** 仓库不包含运行时代码或数据库 schema 变更
 
 ### Requirement: Admin CLI package split
-系统 SHALL expose the admin CLI through `platform.admin_cli` canonical package paths only; the legacy
+系统 SHALL expose the admin CLI through `platform.platform_cli` canonical package paths only; the legacy
 `fleetent.admin` shim SHALL NOT remain importable. The admin CLI SHALL be invoked exclusively via the
 `fleetent platform` subcommand of the single `fleetent` entrypoint; the standalone `fleetent-admin` console
-script SHALL NOT exist in `pyproject.toml` (its deprecation shim is removed). `platform.admin_cli.main.main`
+script SHALL NOT exist in `pyproject.toml` (its deprecation shim is removed). `platform.platform_cli.main.main`
 SHALL remain importable as the canonical implementation that `fleetent platform` delegates to.
 
 #### Scenario: New admin CLI package entrypoint exists
-- **WHEN** 调用方导入 `fleetent.platform.admin_cli.main.main`
+- **WHEN** 调用方导入 `fleetent.platform.platform_cli.main.main`
 - **THEN** 导入成功
 
 #### Scenario: Legacy admin entrypoint is removed
@@ -131,11 +131,11 @@ SHALL remain importable as the canonical implementation that `fleetent platform`
 admin CLI SHALL 按命令域拆分实现文件，降低单文件冲突。
 
 #### Scenario: User and IM commands are split
-- **WHEN** 查看 `platform.admin_cli`
+- **WHEN** 查看 `platform.platform_cli`
 - **THEN** user commands 和 IM commands 分别位于独立模块
 
 #### Scenario: Pilot operations commands are split
-- **WHEN** 查看 `platform.admin_cli`
+- **WHEN** 查看 `platform.platform_cli`
 - **THEN** KB connector、diagnostics 和 observability commands 分别位于独立模块
 
 #### Scenario: Existing admin CLI behavior is preserved
@@ -143,7 +143,7 @@ admin CLI SHALL 按命令域拆分实现文件，降低单文件冲突。
 - **THEN** 用户、IM、agent/channel、schedule、KB connector、diagnostics 和 observability 命令行为保持不变
 
 #### Scenario: Command modules expose a small registration contract
-- **WHEN** 查看 `platform.admin_cli` 的命令域模块
+- **WHEN** 查看 `platform.platform_cli` 的命令域模块
 - **THEN** 每个模块通过 `register(subparsers)` 注册自身命令
 - **AND** 通过 `handle(args)` 处理自身命令并返回是否已处理
 
@@ -320,7 +320,7 @@ flat→package 迁移收尾后，系统 SHALL expose runtime、model、tools、s
 
 #### Scenario: Current docs reference canonical admin CLI entrypoint
 - **WHEN** 读者查看当前 platform 或 architecture docs
-- **THEN** 文档使用 `fleetent.platform.admin_cli` 或 `fleetent platform` 子命令表示 admin CLI 入口
+- **THEN** 文档使用 `fleetent.platform.platform_cli` 或 `fleetent platform` 子命令表示 admin CLI 入口
 - **AND** 不把 `fleetent.admin` 或已移除的 `fleetent-admin` console script 描述为当前实现入口
 
 #### Scenario: Deleted legacy paths are not described as current APIs

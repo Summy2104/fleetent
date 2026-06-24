@@ -233,12 +233,12 @@ B 类冗余 CLI 命令 SHALL NOT 再通过 `fleetent platform` 暴露；运维�
 
 ### Requirement: `fleetent platform` 子命令组
 
-`fleetent` 命令 SHALL 提供 `platform` 子命令组，作为平台管理 CLI 的**唯一**入口（旧 `fleetent-admin` console script 已移除）。`fleetent platform <cmd>` SHALL 复用 `platform.admin_cli` 实现；`fleetent platform --help` 的 usage 行 SHALL 显示 `fleetent platform`。platform 子命令的 import SHALL 懒加载，不在 `fleetent agent run` 启动路径触发。
+`fleetent` 命令 SHALL 提供 `platform` 子命令组，作为平台管理 CLI 的**唯一**入口（旧 `fleetent-admin` console script 已移除）。`fleetent platform <cmd>` SHALL 复用 `platform.platform_cli` 实现；`fleetent platform --help` 的 usage 行 SHALL 显示 `fleetent platform`。platform 子命令的 import SHALL 懒加载，不在 `fleetent agent run` 启动路径触发。
 
 #### Scenario: platform 子命令可用
 
 - **WHEN** 用户运行 `fleetent platform list-tenants`（保留命令）
-- **THEN** 命令执行，输出与底层 `platform.admin_cli` 实现一致
+- **THEN** 命令执行，输出与底层 `platform.platform_cli` 实现一致
 
 #### Scenario: 旧 fleetent-admin 入口不再存在
 
@@ -247,8 +247,8 @@ B 类冗余 CLI 命令 SHALL NOT 再通过 `fleetent platform` 暴露；运维�
 
 #### Scenario: agent run 不加载 admin 代码
 
-- **WHEN** 调度到 `fleetent agent run` 分支（serve 被 mock，sys.modules 先清除 `fleetent.platform.admin_cli`）
-- **THEN** `fleetent.platform.admin_cli` 不在 `sys.modules`
+- **WHEN** 调度到 `fleetent agent run` 分支（serve 被 mock，sys.modules 先清除 `fleetent.platform.platform_cli`）
+- **THEN** `fleetent.platform.platform_cli` 不在 `sys.modules`
 
 ### Requirement: `fleetent node start` 子命令
 

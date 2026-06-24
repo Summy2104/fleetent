@@ -5,7 +5,7 @@ def test_pilot_runbook_documents_validation_gate_and_manual_maintenance_boundari
     runbook = Path("docs/operations/pilot-runbook.md").read_text(encoding="utf-8")
 
     for expected in [
-        "uv run fleetent admin validate-config --profile pilot --format json",
+        "uv run fleetent platform validate-config --profile pilot --format json",
         (
             "diagnostics package 不包含 SQLite 主库、备份、secret 文件、完整 prompt/reply "
             "或 KB document body"

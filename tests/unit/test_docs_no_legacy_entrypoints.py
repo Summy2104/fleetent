@@ -22,6 +22,7 @@ _CURRENT_DOC_DIRS = [
 
 _ARCHIVE_PATTERNS = [
     re.compile(r"docs/archive"),
+    re.compile(r"docs/records"),   # historical integration records, not current operational docs
     re.compile(r"openspec/changes/archive"),
 ]
 

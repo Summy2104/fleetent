@@ -179,7 +179,7 @@ API, scheduler, or worker behavior.
 
 #### Scenario: Fleetent platform command remains available
 - **WHEN** operator 按部署文档运行 `uv run fleetent platform`
-- **THEN** CLI 使用新的 `platform.admin_cli` 实现
+- **THEN** CLI 使用新的 `platform.platform_cli` 实现
 - **AND** 对 operator 暴露的命令名、参数和输出保持兼容
 
 ### Requirement: Pilot acceptance guide
