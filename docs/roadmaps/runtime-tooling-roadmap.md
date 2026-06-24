@@ -6,6 +6,8 @@
 
 **基础执行链路已可用。** HTTP / IM / TUI 请求可以进入 agent loop，完成模型调用、工具调用、session 持久化、部分治理和 trace 写入。
 
+**Pilot 执行期（2026-06-25 现状）**：v1.0 执行引擎增强已大量落地，含 MCP session continuity、sandbox 可插拔后端（Docker/microsandbox）、skill read-on-demand 注入、session compaction。managed 栈 e2e 覆盖（harness + chat + node 生命周期）已建立（2026-06-22，Change A 落地）。
+
 **运行治理仍需持续收敛。** v1.0 执行引擎的大量增强已落地（实施状态以 `openspec/changes/archive/` 为准；历史排期见 [v1.0-roadmap.md](../../records/roadmaps/v1.0-roadmap.md)），但 runtime、tooling、MCP、sandbox、skill、session 的最终生产默认策略仍需要随 Pilot 反馈调整。
 
 **Pilot 风险主要来自端到端链路稳定性。** 真实用户路径会同时穿过 agent loop、model fallback、tool dispatch、approval、MCP / sandbox、session 和 observability。单点能力可用不等于整条执行链路可验收。

@@ -4,10 +4,12 @@
 
 ## 当前结论
 
-**Observability / Deployment 已达到能力簇 Go。** 2026-06-04 已在本机 `local-as-server`
+**Observability / Deployment 已达到能力簇 Go ✅。** 2026-06-04 已在本机 `local-as-server`
 模式完成人工验证：Docker Compose 启动、health check、`validate-config`、SQLite backup / upgrade /
 restore drill、trace / usage / performance 查询、diagnostics export / redaction 和 Pilot verification
 report 均可用。
+
+**Pilot 执行期（2026-06-25 现状）**：5 物理库拓扑（management.db + per-agent agent_state.db + per-tenant KB / agent_memory + vector backends）已全部落地，嵌入式前向迁移（Y）均已上线。managed 栈 live e2e 已验证（2026-06-22）。
 
 **该结论不是全项目 Pilot Go。** 真实 LLM / embedding / rerank / Google Drive / Confluence smoke
 归 Runtime / Model Router 与 Intelligence roadmap 继续验证；本 roadmap 只负责记录 smoke 状态和提供可观测、

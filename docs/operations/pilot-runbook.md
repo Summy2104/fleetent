@@ -752,7 +752,49 @@ retest_command:
 retest_result:
 ```
 
-## 15. 常见失败定位顺序
+## 15. Node Supervisor 验收（managed 部署）
+
+验收目标：
+
+- 证明 node 成功注册到 platform 并可见。
+- 证明 node 能按 desired-state 拉起 agent 进程。
+- 证明 agent placement 在 node 上正确落地。
+
+适用范围：仅 managed 部署（有独立 node 进程）；dev `fleetent agent run` 跳过本节。
+
+操作步骤：
+
+```bash
+# 查看已注册 node
+uv run fleetent platform nodes list
+
+# 查看 node 期望状态与实际状态
+uv run fleetent platform nodes show <node_id>
+
+# 触发 reconcile（如 node 已运行）
+uv run fleetent platform nodes reconcile <node_id>
+```
+
+应该看到什么：
+
+- `nodes list` 返回至少一条 node 记录，状态为 `online` 或 `registered`。
+- `nodes show` 显示 `desired_agents` 与 `actual_agents` 匹配（或 reconcile 正在进行）。
+- agent 进程在对应 node 机器上运行，且 `/health` 可访问。
+- IM 连接（Slack / Telegram）由 node 侧 supervisor 建立，agent 日志中无直接 IM SDK 初始化。
+
+通过标准：
+
+- node 在 platform 侧可见且状态正常。
+- agent 进程由 node 拉起，不需要手动 `fleetent agent run`。
+- 一次 managed 模式下的 IM 对话可正常完成。
+
+失败判断：
+
+- node 未注册：检查 node 启动配置（`FLEETENT_NODE_TOKEN`、platform endpoint）。
+- desired_agents 不匹配：检查 reconcile 日志和 agent placement 策略。
+- IM 连接未建立：检查 node IM-edge 宿主日志，确认 connector token 注入。
+
+## 16. 常见失败定位顺序
 
 服务无法启动：
 

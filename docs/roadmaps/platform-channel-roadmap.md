@@ -4,11 +4,13 @@
 
 ## 当前结论
 
-**基础控制面和接入面已部分完成。** 当前已有 admin CLI、API key / user 管理、agent 管理、IM gateway、channel / user binding、scheduler 和 webhook 基础能力。
+**基础控制面和接入面已部分完成。** 当前已有 platform CLI（`fleetent platform`）、REST API、bearer token 认证、API key / user 管理、agent 管理、node 注册与编排、IM gateway、channel / user binding、scheduler 和 webhook 基础能力。
 
-**Pilot 阶段更依赖“可操作”和“可排查”而非完整 UI。** 缺 review UI、policy UI、connector credential 管理、sync history 和 dashboard 不一定阻塞第一次 Pilot，但需要通过 CLI、API、runbook 和 diagnostics 提供可验证替代路径。
+**Pilot 执行期（2026-06-25 现状）**：node supervisor / desired-state / reconcile 已落地；directed-reach（`notify_user`）已落地；Admin Web UI 尚未实现，管理入口为 CLI + HTTP API。Webhook 入口已从 platform server 移除，待以 agent runtime API 形式回归。
 
-**主要风险在真实接入和权限边界。** Slack / Telegram / Webhook / scheduler / user-scoped connectors 会穿过用户、agent、channel、tenant、审批和审计边界，Pilot 前需要用真实或准真实环境复核。
+**Pilot 阶段更依赖”可操作”和”可排查”而非完整 UI。** 缺 review UI、policy UI、connector credential 管理、sync history 和 dashboard 不一定阻塞第一次 Pilot，但需要通过 CLI、API、runbook 和 diagnostics 提供可验证替代路径。
+
+**主要风险在真实接入和权限边界。** Slack / Telegram / scheduler / user-scoped connectors 会穿过用户、agent、channel、tenant、审批和审计边界，Pilot 前需要用真实或准真实环境复核。
 
 ## 范围
 
