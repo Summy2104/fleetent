@@ -149,10 +149,10 @@ def read_agent_memory_for_agents(
     router: TenantRouter,
     agents: list[tuple[str, str]],
 ) -> list[dict[str, Any]]:
-    """Return agent memory items across per-agent agent_memory.db files (read-only).
+    """Return agent memory items from per-agent agent_state.db files (read-only).
 
     Each record is enriched with ``agent_id`` so the caller can identify the source.
-    Opens each agent's agent_memory.db read-only; agents whose DB does not exist are skipped.
+    Opens each agent's agent_state.db read-only; agents whose DB does not exist are skipped.
 
     Args:
         router: Initialized TenantRouter pointing at the data directory.
@@ -167,7 +167,7 @@ def read_agent_memory_for_agents(
     for tenant_id, agent_id in agents:
         scope = router.agent_scope(tenant_id, agent_id)
         try:
-            ro_db = scope.open_agent_memory_db_ro()
+            ro_db = scope.open_state_db_ro()
             rows = ro_db.execute(
                 "SELECT * FROM agent_memory_items ORDER BY created_at DESC LIMIT 100"
             ).fetchall()

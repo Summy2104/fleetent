@@ -23,7 +23,7 @@
 
 ## 4. 平台投影对齐
 
-- [ ] 4.1 写测试（integration）：platform agent_memory 投影改读 `agent_state.db` 的 `agent_memory_items`（只读不迁移），不读独立 `agent_memory.db`；先见红→实现 `platform/read_projection.py` 见绿
+- [x] 4.1 写测试（integration）：platform agent_memory 投影改读 `agent_state.db` 的 `agent_memory_items`（只读不迁移），不读独立 `agent_memory.db`；先见红→实现 `platform/read_projection.py` 见绿
 
 ## 5. 端到端 + 收尾
 
