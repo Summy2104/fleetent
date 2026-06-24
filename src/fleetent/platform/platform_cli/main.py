@@ -11,11 +11,13 @@ from fleetent.platform.platform_cli import (
     maintenance,
     nodes,
     serve,
+    upgrade,
     users,
 )
 
 _COMMAND_MODULES = (
     serve,
+    upgrade,
     users,
     nodes,
     kb_connectors,
