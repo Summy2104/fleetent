@@ -22,7 +22,7 @@ _CURRENT_DOC_DIRS = [
 
 _ARCHIVE_PATTERNS = [
     re.compile(r"docs/archive"),
-    re.compile(r"docs/records"),   # historical integration records, not current operational docs
+    re.compile(r"docs/records"),  # historical integration records, not current operational docs
     re.compile(r"openspec/changes/archive"),
 ]
 
@@ -38,10 +38,10 @@ _LEGACY_PATTERNS = [
 
 # Allowed exceptions: comment lines, historical notes in non-archive docs, AGENTS.md
 _ALLOWED_CONTEXTS = [
-    re.compile(r"^\s*#"),                       # comment line
-    re.compile(r"^>"),                          # blockquote (historical note in design docs)
-    re.compile(r"^\s*-\s*\*\*Breaking"),        # design doc risk section
-    re.compile(r"技术上仍可用"),                 # explicit "still works technically" note
+    re.compile(r"^\s*#"),  # comment line
+    re.compile(r"^>"),  # blockquote (historical note in design docs)
+    re.compile(r"^\s*-\s*\*\*Breaking"),  # design doc risk section
+    re.compile(r"技术上仍可用"),  # explicit "still works technically" note
     re.compile(r"scripts/upgrade\.py.*可保留"),  # design doc noting script can stay
     re.compile(r"scripts/upgrade\.py.*实现载体"),
     re.compile(r"scripts/upgrade\.py.*short"),
@@ -50,7 +50,7 @@ _ALLOWED_CONTEXTS = [
     re.compile(r"scripts/upgrade\.py.*内部"),
     re.compile(r"scripts/upgrade\.py.*thin"),
     re.compile(r"scripts/upgrade\.py.*兼容"),
-    re.compile(r"scripts\.upgrade"),            # python import path in source
+    re.compile(r"scripts\.upgrade"),  # python import path in source
     # uvicorn still works as a bare ASGI app; allowed when line explicitly says dev-mode/ASGI-direct
     re.compile(r"仅用于开发模式"),
     re.compile(r"只作为开发模式"),
@@ -100,7 +100,6 @@ def test_no_legacy_entrypoints_in_current_docs() -> None:
                     violations.append(f"{rel}:{lineno}: {line.strip()}")
                     break
 
-    assert not violations, (
-        "Legacy CLI entrypoints found in current docs/Makefile:\n"
-        + "\n".join(f"  {v}" for v in violations)
+    assert not violations, "Legacy CLI entrypoints found in current docs/Makefile:\n" + "\n".join(
+        f"  {v}" for v in violations
     )

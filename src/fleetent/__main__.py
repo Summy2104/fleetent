@@ -106,7 +106,9 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     if argv and argv[0] == "admin":
-        print("error: 'admin' is not a recognized command; use 'fleetent platform'", file=sys.stderr)
+        print(
+            "error: 'admin' is not a recognized command; use 'fleetent platform'", file=sys.stderr
+        )
         sys.exit(1)
 
     if argv and argv[0] == "node":

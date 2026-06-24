@@ -5,8 +5,8 @@ import json
 import sys
 
 from fleetent.platform import maintenance as maintenance_service
-from fleetent.platform.platform_cli.common import sanitize_cli_value, summary_line
 from fleetent.platform.maintenance import MaintenanceSummary
+from fleetent.platform.platform_cli.common import sanitize_cli_value, summary_line
 
 
 def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

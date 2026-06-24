@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 from typing import TextIO
 
 
@@ -26,9 +25,13 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     )
     parser.add_argument("--database-url", help="Override the management database URL")
     parser.add_argument(
-        "--backup-dir", default=None, help="Root directory for backup batches (default: data/backups)"
+        "--backup-dir",
+        default=None,
+        help="Root directory for backup batches (default: data/backups)",
     )
-    parser.add_argument("--dry-run", action="store_true", help="Print planned operations; do nothing")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Print planned operations; do nothing"
+    )
     parser.add_argument("--backup-only", action="store_true", help="Back up only; skip Alembic")
 
 

@@ -17,9 +17,7 @@ def test_platform_subcommand_dispatches(monkeypatch: pytest.MonkeyPatch) -> None
         calls.append((argv or [], prog))
 
     monkeypatch.setattr(platform_main_module, "main", fake_main)
-    monkeypatch.setattr(
-        "sys.argv", ["fleetent", "platform", "validate-config", "--format", "json"]
-    )
+    monkeypatch.setattr("sys.argv", ["fleetent", "platform", "validate-config", "--format", "json"])
 
     cli.main()
 

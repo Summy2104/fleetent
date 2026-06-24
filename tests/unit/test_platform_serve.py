@@ -39,7 +39,9 @@ def test_serve_calls_uvicorn_with_host_and_port(monkeypatch: pytest.MonkeyPatch)
 
     assert code == 0
     assert err == ""
-    assert calls == [{"app": "fleetent.server:app", "host": "127.0.0.1", "port": 8770, "reload": False}]
+    assert calls == [
+        {"app": "fleetent.server:app", "host": "127.0.0.1", "port": 8770, "reload": False}
+    ]
 
 
 def test_serve_default_host_and_port(monkeypatch: pytest.MonkeyPatch) -> None:

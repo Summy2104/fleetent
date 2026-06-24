@@ -52,7 +52,9 @@ def test_node_admin_cli_register_list_pin_unpin_and_deregister(tmp_path, monkeyp
     assert "node-a" in out
     assert "region=eu" in out
 
-    out, err, code = _run_platform("node", "pin", "--agent-id", str(agent.id), "--node-id", "node-a")
+    out, err, code = _run_platform(
+        "node", "pin", "--agent-id", str(agent.id), "--node-id", "node-a"
+    )
     assert code == 0
     assert err == ""
     assert f"agent {agent.id}" in out
