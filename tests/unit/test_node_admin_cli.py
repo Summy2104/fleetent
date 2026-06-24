@@ -3,10 +3,10 @@ from __future__ import annotations
 from io import StringIO
 from unittest.mock import patch
 
-from fleetent.platform.admin_cli.main import main as admin_cli_main
+from fleetent.platform.platform_cli.main import main as platform_cli_main
 
 
-def _run_admin(*args: str) -> tuple[str, str, int]:
+def _run_platform(*args: str) -> tuple[str, str, int]:
     stdout, stderr = StringIO(), StringIO()
     exit_code = 0
     with (
@@ -15,14 +15,14 @@ def _run_admin(*args: str) -> tuple[str, str, int]:
         patch("sys.stderr", stderr),
     ):
         try:
-            admin_cli_main()
+            platform_cli_main()
         except SystemExit as exc:
             exit_code = int(exc.code or 0)
     return stdout.getvalue(), stderr.getvalue(), exit_code
 
 
 def test_node_cli_dispatches_register_list_deregister_pin_and_unpin(monkeypatch) -> None:
-    from fleetent.platform.admin_cli import nodes
+    from fleetent.platform.platform_cli import nodes
 
     calls: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
     monkeypatch.setattr(
@@ -74,7 +74,7 @@ def test_node_cli_dispatches_register_list_deregister_pin_and_unpin(monkeypatch)
         lambda agent_id: calls.append(("unpin", (agent_id,), {})),
     )
 
-    out, err, code = _run_admin(
+    out, err, code = _run_platform(
         "node",
         "register",
         "node-a",
@@ -89,25 +89,25 @@ def test_node_cli_dispatches_register_list_deregister_pin_and_unpin(monkeypatch)
     assert err == ""
     assert "service_key: ma-" in out
 
-    out, err, code = _run_admin("node", "list")
+    out, err, code = _run_platform("node", "list")
     assert code == 0
     assert err == ""
     assert "node-a" in out
     assert "region=eu" in out
 
-    out, err, code = _run_admin(
+    out, err, code = _run_platform(
         "node", "pin", "--agent-id", "7", "--node-id", "node-a", "--by", "ops"
     )
     assert code == 0
     assert err == ""
     assert "agent 7" in out
 
-    out, err, code = _run_admin("node", "unpin", "--agent-id", "7")
+    out, err, code = _run_platform("node", "unpin", "--agent-id", "7")
     assert code == 0
     assert err == ""
     assert "agent 7" in out
 
-    out, err, code = _run_admin("node", "deregister", "node-a")
+    out, err, code = _run_platform("node", "deregister", "node-a")
     assert code == 0
     assert err == ""
     assert "node-a" in out

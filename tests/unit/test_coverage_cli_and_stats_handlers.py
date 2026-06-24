@@ -5,7 +5,7 @@ import sys
 from types import SimpleNamespace
 from typing import Any
 
-from fleetent.platform.admin_cli import kb_connectors, users
+from fleetent.platform.platform_cli import kb_connectors, users
 from fleetent.platform.agent_statistics import stats_admin_api
 
 

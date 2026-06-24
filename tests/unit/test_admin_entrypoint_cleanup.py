@@ -26,3 +26,10 @@ def test_legacy_admin_module_is_not_importable() -> None:
 
     with pytest.raises(ModuleNotFoundError):
         importlib.import_module("fleetent.admin")
+
+
+def test_legacy_admin_cli_package_is_not_importable() -> None:
+    sys.modules.pop("fleetent.platform.admin_cli", None)
+
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("fleetent.platform.admin_cli")

@@ -6,13 +6,13 @@ import sys
 
 import pytest
 
-admin_main = importlib.import_module("fleetent.platform.admin_cli.main")
+platform_main = importlib.import_module("fleetent.platform.platform_cli.main")
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="fleetent admin")
+    parser = argparse.ArgumentParser(prog="fleetent platform")
     subparsers = parser.add_subparsers(dest="cmd", required=True)
-    for module in admin_main._COMMAND_MODULES:
+    for module in platform_main._COMMAND_MODULES:
         module.register(subparsers)
     return parser
 
@@ -43,25 +43,25 @@ def test_removed_commands_absent() -> None:
 
 
 def test_command_modules_has_no_empty_module() -> None:
-    module_names = {module.__name__.rsplit(".", 1)[-1] for module in admin_main._COMMAND_MODULES}
+    module_names = {module.__name__.rsplit(".", 1)[-1] for module in platform_main._COMMAND_MODULES}
 
     assert "im" not in module_names
     assert "agents" not in module_names
 
 
 def test_observability_module_removed() -> None:
-    module_names = {module.__name__.rsplit(".", 1)[-1] for module in admin_main._COMMAND_MODULES}
-    sys.modules.pop("fleetent.platform.admin_cli.observability", None)
+    module_names = {module.__name__.rsplit(".", 1)[-1] for module in platform_main._COMMAND_MODULES}
+    sys.modules.pop("fleetent.platform.platform_cli.observability", None)
 
     assert "observability" not in module_names
     with pytest.raises(ModuleNotFoundError):
-        importlib.import_module("fleetent.platform.admin_cli.observability")
+        importlib.import_module("fleetent.platform.platform_cli.observability")
 
 
 def test_memory_shared_cli_removed() -> None:
     parser = _build_parser()
     top_level = parser._subparsers._group_actions[0].choices
-    module_names = {module.__name__.rsplit(".", 1)[-1] for module in admin_main._COMMAND_MODULES}
+    module_names = {module.__name__.rsplit(".", 1)[-1] for module in platform_main._COMMAND_MODULES}
 
     assert "memory" not in top_level
     assert "shared_memory" not in module_names

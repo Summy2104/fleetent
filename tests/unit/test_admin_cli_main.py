@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from fleetent.platform.admin_cli.main import main
+from fleetent.platform.platform_cli.main import main
 
 
 def test_main_accepts_argv_param(capsys: pytest.CaptureFixture[str]) -> None:
@@ -13,8 +13,8 @@ def test_main_accepts_argv_param(capsys: pytest.CaptureFixture[str]) -> None:
     assert "usage:" in capsys.readouterr().out
 
 
-def test_help_prog_is_fleetent_admin(capsys: pytest.CaptureFixture[str]) -> None:
+def test_help_prog_is_fleetent_platform(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit):
         main(argv=["--help"])
 
-    assert "usage: fleetent admin" in capsys.readouterr().out
+    assert "usage: fleetent platform" in capsys.readouterr().out
