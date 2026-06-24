@@ -213,12 +213,12 @@ def test_reflection_generates_memory_and_skill_proposals(monkeypatch):
 
     memory_proposals.extend(reflection.generate_memory_maintenance_proposals("u1", findings))
     assert [proposal.action for proposal in memory_proposals] == [
-        "suggest_shared_memory_or_kb",
+        "suggest_agent_memory_or_kb",
         "rewrite",
         "merge",
     ]
     assert memory_proposals[0].metadata_patch["boundary"] == (
-        "not_user_memory:suggest_shared_memory_or_kb"
+        "not_user_memory:suggest_agent_memory_or_kb"
     )
 
     skill_proposals.extend(
@@ -533,7 +533,7 @@ async def test_reflection_apply_memory_actions_and_guards(monkeypatch):
         _maintenance_proposal(action="delete", target_memory_ids=["m7"])
     )
     await reflection._apply_maintenance_action(  # noqa: SLF001
-        _maintenance_proposal(action="suggest_shared_memory_or_kb", target_memory_ids=[])
+        _maintenance_proposal(action="suggest_agent_memory_or_kb", target_memory_ids=[])
     )
     assert calls == [
         ("stale", ("u1", "m1")),
@@ -557,7 +557,7 @@ async def test_reflection_apply_memory_actions_and_guards(monkeypatch):
         reflection.AutoMaintenancePolicy(allow_low_risk=True),
     )
     assert not reflection._auto_apply_allowed(  # noqa: SLF001
-        _maintenance_proposal(action="suggest_shared_memory_or_kb", risk="low"),
+        _maintenance_proposal(action="suggest_agent_memory_or_kb", risk="low"),
         reflection.AutoMaintenancePolicy(allow_low_risk=True),
     )
     assert not reflection._auto_apply_allowed(  # noqa: SLF001

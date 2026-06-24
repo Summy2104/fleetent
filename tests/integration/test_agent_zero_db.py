@@ -17,9 +17,9 @@ def _boom(*args, **kwargs):
 
 
 def _write_agent(home) -> None:
-    # Deployed single-agent home layout: agents/default/agent.yaml is the forced
+    # Deployed single-agent home layout: tenants/default/agents/default/agent.yaml is the forced
     # default (bindings were removed from AgentFile; resolution is default-only).
-    d = home / "agents" / "default"
+    d = home / "tenants" / "default" / "agents" / "default"
     d.mkdir(parents=True)
     (d / "agent.yaml").write_text(
         yaml.safe_dump(

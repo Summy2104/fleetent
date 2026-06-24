@@ -11,9 +11,13 @@ it is never touched by agent runtime modules.
 from __future__ import annotations
 
 import datetime
+import io
 import json
+import tarfile
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 from fleetent import agent_store, paths
 from fleetent.config import Settings
@@ -184,9 +188,12 @@ def _row_to_proposal(row: Any) -> dict[str, Any] | None:
 def _capture_proposed_bundle(
     *, agent_id: int, skill_name: str, proposed_content: str | None
 ) -> dict[str, str]:
-    agent_name = agent_store.get_agent_name_by_id(agent_id)
-    if agent_name is not None:
-        skill_dir = paths.agent_home_dir(agent_name) / "skills" / skill_name
+    remote_bundle = _capture_bundle_from_owning_node(agent_id=agent_id, skill_name=skill_name)
+    if remote_bundle is not None:
+        return remote_bundle
+    agent = agent_store.get_by_id(agent_id)
+    if agent is not None:
+        skill_dir = paths.tenant_agent_home_dir(agent.tenant_id, agent.name) / "skills" / skill_name
         if skill_dir.is_dir():
             bundle: dict[str, str] = {}
             for path in sorted(
@@ -198,6 +205,47 @@ def _capture_proposed_bundle(
     if proposed_content is None:
         raise ValueError(f"skill {skill_name!r} has no materialized bundle to nominate")
     return {"SKILL.md": proposed_content}
+
+
+def _capture_bundle_from_owning_node(*, agent_id: int, skill_name: str) -> dict[str, str] | None:
+    from fleetent.node.forwarder_contract import forwarder_base_url
+    from fleetent.platform.node_management import node_store, placement_store
+
+    agent = agent_store.get_by_id(agent_id)
+    if agent is None:
+        return None
+    placement = placement_store.get_for_agent(agent_id)
+    if placement is None:
+        return None
+    node_id = str(placement["node_id"])
+    service_key = node_store.get_node_service_key(node_id)
+    if not service_key:
+        return None
+    response = httpx.get(
+        f"{forwarder_base_url(node_id)}/forward/agents/{agent.name}/skills/{skill_name}/bundle",
+        headers={
+            "Authorization": f"Bearer {service_key}",
+            "X-Fleetent-Tenant-Id": agent.tenant_id,
+        },
+        timeout=10.0,
+    )
+    response.raise_for_status()
+    bundle: dict[str, str] = {}
+    with tarfile.open(fileobj=io.BytesIO(response.content), mode="r:gz") as archive:
+        for member in archive.getmembers():
+            if member.isdir():
+                continue
+            member_path = Path(member.name)
+            if member_path.is_absolute() or ".." in member_path.parts:
+                raise ValueError(f"unsafe node bundle member path: {member.name}")
+            if any(part == ".git" for part in member_path.parts):
+                raise ValueError(f"unsafe node bundle member path: {member.name}")
+            extracted = archive.extractfile(member)
+            if extracted is None:
+                raise ValueError(f"unable to extract node bundle member: {member.name}")
+            relpath = Path(*member_path.parts[1:]).as_posix()
+            bundle[relpath] = extracted.read().decode("utf-8")
+    return bundle or None
 
 
 def get_proposal_diff(proposal_id: int, *, pool_dir: Path) -> dict[str, Any]:

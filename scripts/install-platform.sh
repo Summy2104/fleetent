@@ -10,7 +10,7 @@
 #
 # After running, configure the platform:
 #   1. Edit $FLEETENT_HOME/.env and $FLEETENT_HOME/platform.yaml
-#   2. Start platform: uvicorn fleetent.server:app --port 8765
+#   2. Start platform: fleetent platform serve --port 8765
 # ============================================================================
 
 set -e
@@ -50,7 +50,7 @@ Options:
 After installation:
   1. Edit $FLEETENT_HOME/.env  (set FLEETENT_SECRET_KEY etc.)
   2. Edit $FLEETENT_HOME/platform.yaml
-  3. Start: uvicorn fleetent.server:app --port 8765
+  3. Start: fleetent platform serve --port 8765
 EOF
 }
 
@@ -174,17 +174,17 @@ init_platform_db() {
     if [ "$SKIP_DB" = true ]; then
         log_info "Skipping database init (--skip-db)"; return 0
     fi
-    mkdir -p "$FLEETENT_HOME/data"
+    mkdir -p "$FLEETENT_HOME"
     log_info "Initialising platform database (alembic upgrade head)..."
 
     local tmp_ini
     tmp_ini="$(mktemp)"
     sed -e "s|^script_location = .*|script_location = $REPO_ROOT/migrations|" \
-        -e "s|^sqlalchemy.url = .*|sqlalchemy.url = sqlite:///$FLEETENT_HOME/data/management.db|" \
+        -e "s|^sqlalchemy.url = .*|sqlalchemy.url = sqlite:///$FLEETENT_HOME/management.db|" \
         "$REPO_ROOT/alembic.ini" > "$tmp_ini"
 
     if uv run --project "$REPO_ROOT" alembic -c "$tmp_ini" upgrade head; then
-        log_success "Platform database ready: $FLEETENT_HOME/data/management.db"
+        log_success "Platform database ready: $FLEETENT_HOME/management.db"
     else
         rm -f "$tmp_ini"
         log_error "Alembic migration failed."; exit 1
@@ -194,7 +194,7 @@ init_platform_db() {
 
 seed_admin() {
     log_info "Seeding built-in admin user..."
-    if uv run --project "$REPO_ROOT" fleetent admin seed-builtin-admin 2>/dev/null; then
+    if uv run --project "$REPO_ROOT" fleetent platform seed-builtin-admin 2>/dev/null; then
         log_success "Admin seeded (check logs for initial password on first run)"
     else
         log_warn "seed-builtin-admin returned non-zero (may already exist — OK)"
@@ -207,7 +207,7 @@ print_success() {
     echo "Next steps:"
     echo "  1. Edit platform env:  $FLEETENT_HOME/.env"
     echo "  2. Edit platform config: $FLEETENT_HOME/platform.yaml"
-    echo "  3. Start platform:     uvicorn fleetent.server:app --port 8765"
+    echo "  3. Start platform:     fleetent platform serve --port 8765"
     echo "     /admin/ui will serve the dist pinned by FLEETENT_ADMIN_UI_DIST in .env"
     echo "  4. Add agents:         scripts/install-agent.sh <agent-id>"
 }

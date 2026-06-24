@@ -573,11 +573,11 @@ def test_build_index_prefers_default_agent_home_as_sole_default(tmp_path, monkey
     home = tmp_path / "home"
     home.mkdir()
     # Another agent also exists; it must be ignored when the default Agent home is present.
-    agents_dir = home / "agents"
+    agents_dir = home / "tenants" / "default" / "agents"
     agents_dir.mkdir(parents=True)
     _write_agent(agents_dir, "other")
     # Default Agent home file: still forced default regardless.
-    default_home = home / "agents" / "default"
+    default_home = home / "tenants" / "default" / "agents" / "default"
     _write_config_agent(default_home, "default")
     monkeypatch.setenv("FLEETENT_HOME", str(home))
 
@@ -613,7 +613,7 @@ def test_build_index_ignores_old_home_root_agent_yaml(tmp_path, monkeypatch) -> 
     monkeypatch.delenv("FLEETENT_AGENTS_DIR", raising=False)
     # AGENTS_DIR is evaluated at import time; patch it so _resolve_agents_dir picks up the
     # isolated tmp directory instead of the real ~/.fleetent/agents.
-    monkeypatch.setattr(agent_config, "AGENTS_DIR", home / "agents")
+    monkeypatch.setattr(agent_config, "AGENTS_DIR", home / "tenants" / "default" / "agents")
 
     index = agent_config.build_index()
 
@@ -691,3 +691,94 @@ def test_permission_gate_enabled_false() -> None:
     doc["permission_gate_enabled"] = False
     agent = agent_config.AgentFile.model_validate(doc)
     assert agent.permission_gate_enabled is False
+
+
+# --- collect_env_var_names (task 1.1 / D2 shared collector) ---
+
+
+def _make_agent_with_all_env_fields() -> agent_config.AgentFile:
+    """AgentFile referencing env vars in every category that flatten must catch."""
+    from fleetent.config import McpServerSettings
+
+    return agent_config.AgentFile(
+        name="full-env-agent",
+        version=1,
+        system_prompt="test",
+        models=agent_config.AgentModels(
+            targets=[
+                agent_config.ModelTarget(
+                    id="primary",
+                    provider="anthropic",
+                    protocol="openai_chat",
+                    base_url="https://api.anthropic.com/v1/",
+                    model="claude-opus-4-8",
+                    api_key_env="MODEL_API_KEY",
+                ),
+                agent_config.ModelTarget(
+                    id="emb",
+                    provider="local",
+                    protocol="http_embedding",
+                    endpoint="http://localhost:11434/v1/embeddings",
+                    api_key_env="EMBEDDING_API_KEY",
+                ),
+                agent_config.ModelTarget(
+                    id="rer",
+                    provider="local",
+                    protocol="http_rerank",
+                    endpoint="http://localhost:11434/v1/rerank",
+                    api_key_env="RERANK_API_KEY",
+                ),
+            ],
+            routes={
+                "default": [agent_config.ModelRouteEntry(target="primary")],
+                "embedding": [agent_config.ModelRouteEntry(target="emb")],
+                "rerank": [agent_config.ModelRouteEntry(target="rer")],
+            },
+        ),
+        im=agent_config.ImBinding(
+            telegram=agent_config.TelegramBinding(bot_token_env="TELEGRAM_BOT_TOKEN"),
+        ),
+        mcp_servers=[
+            McpServerSettings(
+                id="acme",
+                transport="http",
+                url="https://mcp.example.com",
+                auth_type="bearer",
+                api_key_env="ACME_MCP_TOKEN",
+            )
+        ],
+    )
+
+
+def test_collect_env_var_names_returns_all_referenced_names() -> None:
+    agent = _make_agent_with_all_env_fields()
+
+    names = agent_config.collect_env_var_names(agent)
+
+    assert "MODEL_API_KEY" in names
+    assert "EMBEDDING_API_KEY" in names
+    assert "RERANK_API_KEY" in names
+    assert "TELEGRAM_BOT_TOKEN" in names
+    assert "ACME_MCP_TOKEN" in names
+    # must be deduplicated and stable-ordered
+    assert names == sorted(set(names))
+
+
+# --- task 6.1: platform and node alignment ---
+
+
+def test_platform_materialize_and_node_use_same_env_collector() -> None:
+    """Both platform materialize._env_var_names and node referenced_env_names
+    must produce identical output — they both delegate to collect_env_var_names."""
+    from fleetent.platform.agent_lifecycle.materialize import _env_var_names as platform_env_names
+    from fleetent.runtime.agent_init import referenced_env_names as node_env_names
+
+    agent = _make_agent_with_all_env_fields()
+
+    platform_result = platform_env_names(agent)
+    node_result = node_env_names(agent)
+
+    assert platform_result == node_result, (
+        "platform._env_var_names and node.referenced_env_names diverged — "
+        "both must delegate to collect_env_var_names"
+    )

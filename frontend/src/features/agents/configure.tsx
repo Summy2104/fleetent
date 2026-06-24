@@ -591,6 +591,7 @@ const IM_PLATFORMS = ['slack', 'telegram'] as const;
 
 function ImCapabilitiesTab({ agentName, canWrite }: { agentName: string; canWrite: boolean }): JSX.Element {
   const detail = useAgentDetailQuery(agentName);
+  const bindings = useAgentBindingsQuery(agentName);
   const setCaps = useSetAgentImCapabilitiesMutation(agentName);
   const addGroup = useAddAgentImGroupMutation(agentName);
   const removeGroup = useRemoveAgentImGroupMutation(agentName);
@@ -598,9 +599,10 @@ function ImCapabilitiesTab({ agentName, canWrite }: { agentName: string; canWrit
   const [caps, setCaps2] = useState<AgentImCapabilitiesInput>({ supports_dm: false, supports_groups: false });
   const [platform, setPlatform] = useState<string>('slack');
   const [groupId, setGroupId] = useState('');
-  // The backend exposes no "list bound groups" endpoint, so this list reflects
-  // the groups added/removed during the current session only.
-  const [groups, setGroups] = useState<AgentImGroupInput[]>([]);
+
+  // Bound groups are read back from the bindings endpoint; add/remove invalidate
+  // that query, so the list reflects the persisted state (and survives reload).
+  const groups = bindings.data?.groups ?? [];
 
   useEffect(() => {
     setCaps2({
@@ -613,19 +615,11 @@ function ImCapabilitiesTab({ agentName, canWrite }: { agentName: string; canWrit
     const id = groupId.trim();
     if (!id) return;
     await addGroup.mutateAsync({ platform, group_id: id });
-    setGroups((current) =>
-      current.some((group) => group.platform === platform && group.group_id === id)
-        ? current
-        : [...current, { platform, group_id: id }]
-    );
     setGroupId('');
   };
 
   const onRemoveGroup = async (target: AgentImGroupInput): Promise<void> => {
     await removeGroup.mutateAsync(target);
-    setGroups((current) =>
-      current.filter((group) => !(group.platform === target.platform && group.group_id === target.group_id))
-    );
   };
 
   return (
@@ -703,7 +697,7 @@ function ImCapabilitiesTab({ agentName, canWrite }: { agentName: string; canWrit
           </div>
         ) : null}
         {groups.length === 0 ? (
-          <EmptyState label="No groups added in this session" />
+          <EmptyState label="No groups bound" />
         ) : (
           <div className="flex flex-wrap gap-2">
             {groups.map((group) => (

@@ -14,7 +14,7 @@ def _write_home_agent(home, **overrides) -> None:
         "models": agent_config.default_models().model_dump(mode="json"),
     }
     doc.update(overrides)
-    agent_home = home / "agents" / "default"
+    agent_home = home / "tenants" / "default" / "agents" / "default"
     agent_home.mkdir(parents=True, exist_ok=True)
     (agent_home / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
 

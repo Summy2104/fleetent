@@ -124,6 +124,7 @@ async def _agent_run(
     agent_name: str | None = None,
     principal: Principal | None = None,
     connectors: dict[str, Any] | None = None,
+    suppress_outbound: bool = False,
 ) -> str:
     from fleetent.runtime import loop as agent_loop
 
@@ -139,6 +140,10 @@ async def _agent_run(
         # facing delivery trailer would pollute the broadcast and corrupt the [SILENT]
         # skip sentinel, so it is suppressed for fired runs.
         emit_delivery_trailer=False,
+        # generate-fires-exclude-outbound-tools: a `generate` fire's reply is delivered by the
+        # scheduler, so its run must not expose outbound tools (else the model self-delivers and
+        # duplicates the broadcast). `action` fires keep them (they deliver via their own tools).
+        suppress_outbound_tools=suppress_outbound,
     )
 
 
@@ -213,6 +218,9 @@ async def _fire(task: dict[str, Any], connectors: dict[str, Any] | None = None) 
             agent_name=task.get("agent_name"),
             principal=principal,
             connectors=connectors,
+            # generate delivers via the scheduler → suppress outbound tools in the run;
+            # action delivers via its own tools → keep them.
+            suppress_outbound=(task_type == "generate"),
         )
     except Exception as exc:  # noqa: BLE001 — record the failure, never crash the scheduler
         logger.warning("cron_fire_run_failed task=%s error=%s", task.get("id"), exc)

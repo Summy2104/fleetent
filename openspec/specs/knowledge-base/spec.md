@@ -1227,12 +1227,12 @@ knowledge-base SHALL expose explicit entity extraction through public API and ad
 - **THEN** 导入成功
 
 #### Scenario: Admin CLI triggers extraction
-- **WHEN** operator 运行 `fleetent admin kb extract-entities --kb-id <kb_id>`
+- **WHEN** operator 运行 `fleetent platform kb extract-entities --kb-id <kb_id>`
 - **THEN** CLI 调用 KB-level explicit extraction run
 - **AND** 输出脱敏 run summary
 
 #### Scenario: Admin CLI supports document scope
-- **WHEN** operator 运行 `fleetent admin kb extract-entities --kb-id <kb_id> --document-id <document_id>`
+- **WHEN** operator 运行 `fleetent platform kb extract-entities --kb-id <kb_id> --document-id <document_id>`
 - **THEN** CLI 调用 document-level explicit extraction run
 - **AND** 输出脱敏 run summary
 

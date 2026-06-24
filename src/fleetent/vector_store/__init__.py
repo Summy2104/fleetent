@@ -1,5 +1,6 @@
 from fleetent.vector_store.backend import SearchResult
 from fleetent.vector_store.namespaces import (
+    agent_memory_namespace,
     knowledge_namespace,
     memory_namespace,
     shared_namespace,
@@ -38,6 +39,7 @@ __all__ = [
     "create_rerank_provider",
     "delete",
     "embed_text",
+    "agent_memory_namespace",
     "knowledge_namespace",
     "memory_namespace",
     "shared_namespace",

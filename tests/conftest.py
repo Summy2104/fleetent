@@ -64,6 +64,15 @@ def _reset_provider_health_cache(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _reset_sandbox_workspace_root():  # type: ignore[no-untyped-def]
+    from fleetent.integrations.sandbox import manager as sandbox_manager
+
+    sandbox_manager.set_workspace_root(None)
+    yield
+    sandbox_manager.set_workspace_root(None)
+
+
+@pytest.fixture(autouse=True)
 def _reset_long_term_ctx_knowledge_provider():  # type: ignore[no-untyped-def]
     # long_term_ctx holds the knowledge provider in a module global; tests that
     # set it must not leak it into later tests (ordering-dependent failures).

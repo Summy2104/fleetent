@@ -138,13 +138,15 @@ function CreateAgentDialog({
           </Button>
           <Button
             disabled={create.isPending || !name}
-            onClick={async () => {
-              await create.mutateAsync({
-                name,
-                system_prompt: systemPrompt,
-                allowed_tools: parseAllowedTools(allowedTools),
-              });
-              onOpenChange(false);
+            onClick={() => {
+              void (async () => {
+                await create.mutateAsync({
+                  name,
+                  system_prompt: systemPrompt,
+                  allowed_tools: parseAllowedTools(allowedTools),
+                });
+                onOpenChange(false);
+              })();
             }}
           >
             Create agent

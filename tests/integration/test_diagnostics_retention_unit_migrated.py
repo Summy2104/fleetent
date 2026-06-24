@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime, timedelta
 
 from fleetent.config import DiagnosticsRetentionSettings, DiagnosticsSettings
@@ -36,7 +37,6 @@ def test_retention_plan_identifies_old_logs_and_exports(tmp_path):
     for path in (old_log, old_export):
         timestamp = (now - timedelta(days=40)).timestamp()
         path.touch()
-        import os
 
         os.utime(path, (timestamp, timestamp))
 
@@ -49,6 +49,33 @@ def test_retention_plan_identifies_old_logs_and_exports(tmp_path):
     assert old_log in plan.log_files
     assert new_log not in plan.log_files
     assert old_export in plan.diagnostic_exports
+
+
+def test_retention_plan_defaults_to_root_logs_dir(monkeypatch, tmp_path):
+    from fleetent.observability.diagnostics import plan_diagnostics_retention
+
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    old_root_log = logs_dir / "2026-05-01.log"
+    old_root_log.write_text("old")
+    legacy_logs_dir = tmp_path / "data" / "logs"
+    legacy_logs_dir.mkdir(parents=True)
+    legacy_log = legacy_logs_dir / "2026-05-01.log"
+    legacy_log.write_text("legacy")
+    now = datetime(2026, 6, 2, tzinfo=UTC)
+    timestamp = (now - timedelta(days=40)).timestamp()
+
+    os.utime(old_root_log, (timestamp, timestamp))
+    os.utime(legacy_log, (timestamp, timestamp))
+
+    plan = plan_diagnostics_retention(
+        settings=_settings(tmp_path, enabled=True, logs_days=7),
+        now=now,
+    )
+
+    assert old_root_log in plan.log_files
+    assert legacy_log not in plan.log_files
 
 
 def test_retention_days_none_produces_no_candidates(tmp_path):

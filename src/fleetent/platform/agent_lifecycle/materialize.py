@@ -1,9 +1,9 @@
-"""Materialize a runnable agent home from an authored definition (DB→file export).
+"""Materialize a runnable standalone/default-tenant agent home from an authored definition.
 
-The platform authors agents; this writes each agent's self-contained home —
-``FLEETENT_HOME/agents/<name>/agent.yaml`` (the full home schema) plus a ``.env`` scaffold that
-references secrets by env-var name only (never plaintext) — so the agent is runnable by
-``fleetent agent run`` (see openspec change ``platform-agent-lifecycle``).
+This legacy helper exports a self-contained home under the default-tenant shim
+(``FLEETENT_HOME/tenants/default/agents/<name>/agent.yaml``) plus a ``.env`` scaffold that
+references secrets by env-var name only (never plaintext). Managed deployment no longer uses
+this path as the real writer; node reconcile owns managed homes.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from fleetent.agent_config import (
     AgentModels,
     ModelRouteEntry,
     ModelTarget,
+    collect_env_var_names,
     default_models,
 )
 from fleetent.config import McpServerSettings
@@ -120,7 +121,12 @@ def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
 
 def desired_state_payload_from_agent_file(agent_file: AgentFile) -> dict[str, Any]:
     """Serialize the non-secret subset of an AgentFile for node desired-state delivery."""
-    return _strip_secret_plumbing(agent_file.model_dump(mode="json", exclude_defaults=False))
+    payload = _strip_secret_plumbing(agent_file.model_dump(mode="json", exclude_defaults=False))
+    # Render MCP servers in the standard ``mcpServers`` map form the agent runtime accepts;
+    # the legacy ``mcp_servers`` list is rejected by ``load_agent_file``. Done after secret
+    # stripping so ``env``/``credential_ref`` are already removed from each server entry.
+    _mcp_payload_to_map(payload)
+    return payload
 
 
 def _strip_secret_plumbing(value: Any) -> Any:
@@ -376,27 +382,27 @@ def _knowledge_for_agent(agent: agent_store.Agent) -> AgentKnowledge:
     )
 
 
-def home_dir(name: str) -> Path:
-    """The agent's home directory: ``FLEETENT_HOME/agents/<name>/``."""
-    return paths.base_dir() / "agents" / name
+def home_dir(name: str, tenant_id: str | None = None) -> Path:
+    """Resolve an agent home under tenant-first layout.
+
+    When ``tenant_id`` is omitted, prefer the DB-authored tenant for ``name`` and
+    fall back to the default-tenant shim for standalone compatibility.
+    """
+    resolved_tenant = tenant_id
+    if resolved_tenant is None:
+        try:
+            agent = agent_store.get_by_name(name)
+        except sqlite3.OperationalError as exc:
+            if "no such table: agents" not in str(exc):
+                raise
+            agent = None
+        resolved_tenant = agent.tenant_id if agent is not None else "default"
+    return paths.tenant_agent_home_dir(resolved_tenant, name)
 
 
-def _env_var_names(
-    agent: AgentFile,
-) -> list[str]:
-    """Collect the env-var names the agent's home references."""
-    names: list[str] = []
-    for key, value in flatten(agent.model_dump(mode="json")):
-        if key.endswith("_env") and isinstance(value, str) and value:
-            names.append(value)
-    # stable order, de-duplicated
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for n in names:
-        if n and n not in seen:
-            seen.add(n)
-            ordered.append(n)
-    return ordered
+def _env_var_names(agent: AgentFile) -> list[str]:
+    """Collect the env-var names the agent's home references (delegates to shared collector)."""
+    return collect_env_var_names(agent)
 
 
 def _knowledge_env_var_names(knowledge_config: KnowledgeConfigSnapshot | None) -> set[str]:
@@ -544,7 +550,8 @@ def write_home(
     Rewrites ``agent.yaml`` from the definition and seeds/refreshes the ``.env`` scaffold.
     Idempotent: re-running rewrites the yaml and preserves operator ``.env`` values.
     """
-    home = home_dir(agent.name)
+    tenant_id = source_agent.tenant_id if source_agent is not None else None
+    home = home_dir(agent.name, tenant_id)
     home.mkdir(parents=True, exist_ok=True)
     _logger.debug("agent_home_write_start", name=agent.name, path=str(home))
     (home / "data").mkdir(parents=True, exist_ok=True)

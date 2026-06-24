@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import base64
 import datetime
+import hashlib
+import io
+import tarfile
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -234,6 +237,111 @@ def test_get_desired_state_includes_only_set_secrets_for_enabled_agents_on_targe
     assert "disabled-secret" not in str(payload)
 
 
+def test_get_desired_state_exports_knowledge_bindings_without_source_construction(
+    node_client: TestClient,
+) -> None:
+    from fleetent import agent_store
+    from fleetent.platform.knowledge_base_management import agent_kbs_store
+    from fleetent.platform.node_management import node_store, placement_store
+    from fleetent.platform.tenancy import store as tenancy_store
+
+    tenancy_store.create_tenant(id="acme", name="Acme")
+    node_key, _ = node_store.register_node("node-a")
+    agent = agent_store.create_agent("support", "Help users", ["shell"], tenant_id="acme")
+    agent_kbs_store.bind("acme", "support-kb", agent.id, created_by="admin")
+    placement_store.pin_agent(agent.id, "node-a")
+
+    response = node_client.get(
+        "/nodes/node-a/desired-state",
+        headers={"Authorization": f"Bearer {node_key}"},
+    )
+
+    assert response.status_code == 200
+    delivered = response.json()["agents"][0]
+    assert delivered["tenant_id"] == "acme"
+    binding = delivered["config"]["knowledge"]["bindings"][0]
+    assert binding["tenant_id"] == "acme"
+    assert binding["kb_id"] == "support-kb"
+    assert binding["default"] is True
+    assert "google_drive" not in str(delivered["config"])
+    assert "confluence" not in str(delivered["config"])
+
+
+def test_get_desired_state_includes_skill_manifest_and_bundle_download_is_immutable(
+    node_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from fleetent import agent_store
+    from fleetent.platform.node_management import node_store, placement_store
+    from fleetent.platform.skill_management import pool_git, skill_admin_store
+    from fleetent.platform.tenancy import store as tenancy_store
+
+    pool_dir = tmp_path / "skills-pool"
+    skill_dir = pool_dir / "incident-review"
+    (skill_dir / "scripts").mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: incident-review\ndescription: Review incidents\n---\nbody\n",
+        encoding="utf-8",
+    )
+    (skill_dir / "scripts" / "helper.py").write_text("print('ok')\n", encoding="utf-8")
+    (skill_dir / ".git").mkdir()
+    (skill_dir / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(pool_dir))
+    pool_git.init_pool(pool_dir)
+
+    node_key, _ = node_store.register_node("node-a")
+    tenancy_store.create_tenant(id="acme", name="Acme")
+    agent = agent_store.create_agent("support", "Help users", ["shell"], tenant_id="acme")
+    skill_admin_store.set_binding(agent.id, "incident-review", True, updated_by="admin")
+    placement_store.pin_agent(agent.id, "node-a")
+
+    response = node_client.get(
+        "/nodes/node-a/desired-state",
+        headers={"Authorization": f"Bearer {node_key}"},
+    )
+
+    assert response.status_code == 200
+    manifest = response.json()["agents"][0]["skill_manifests"][0]
+    assert manifest["name"] == "incident-review"
+    assert manifest["base_version"]
+    assert manifest["base_commit"]
+    assert manifest["bundle_url"].endswith(
+        f"/nodes/node-a/skills/incident-review/bundles/{manifest['base_version']}.tar.gz"
+    )
+    assert "Review incidents" not in str(manifest)
+
+    first = node_client.get(
+        manifest["bundle_url"],
+        headers={"Authorization": f"Bearer {node_key}"},
+    )
+    assert first.status_code == 200
+    assert hashlib.sha256(first.content).hexdigest() == manifest["bundle_sha256"]
+    with tarfile.open(fileobj=io.BytesIO(first.content), mode="r:gz") as archive:
+        assert sorted(archive.getnames()) == [
+            "incident-review/SKILL.md",
+            "incident-review/scripts/helper.py",
+        ]
+
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: incident-review\ndescription: Review incidents\n---\nchanged\n",
+        encoding="utf-8",
+    )
+    pool_git.commit_pool(
+        pool_dir,
+        message="edit: mutate pool skill after cache",
+        author="test <test@fleetent>",
+        skill_name="incident-review",
+    )
+
+    second = node_client.get(
+        manifest["bundle_url"],
+        headers={"Authorization": f"Bearer {node_key}"},
+    )
+    assert second.status_code == 200
+    assert second.content == first.content
+
+
 def test_post_status_updates_last_seen_and_agent_projection(node_client: TestClient) -> None:
     from fleetent import agent_store
     from fleetent.platform.node_management import node_store
@@ -274,6 +382,43 @@ def test_post_status_updates_last_seen_and_agent_projection(node_client: TestCli
             "reported_at": statuses[0]["reported_at"],
         }
     ]
+
+
+def test_post_status_projects_skill_drift_to_agent_skills(node_client: TestClient) -> None:
+    from fleetent import agent_store
+    from fleetent.platform.node_management import node_store
+    from fleetent.platform.skill_management import skill_admin_store
+
+    node_key, _ = node_store.register_node("node-a")
+    agent = agent_store.create_agent("enabled", "Help users", ["shell"])
+    skill_admin_store.set_binding(agent.id, "incident-review", True, updated_by="admin")
+
+    response = node_client.post(
+        "/nodes/node-a/status",
+        headers={"Authorization": f"Bearer {node_key}"},
+        json={
+            "agents": [
+                {
+                    "agent_id": agent.id,
+                    "phase": "running",
+                    "skills": [
+                        {
+                            "skill_name": "incident-review",
+                            "base_version": "abc123",
+                            "base_commit": "def456",
+                            "drift": True,
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    drift = skill_admin_store.get_drift(agent.id, "incident-review")
+    assert drift["base_version"] == "abc123"
+    assert drift["base_commit"] == "def456"
+    assert drift["drift"] == 1
 
 
 def test_post_identity_resolve_returns_resolve_or_provision_principal(

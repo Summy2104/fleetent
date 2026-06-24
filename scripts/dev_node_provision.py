@@ -27,9 +27,9 @@ def _home_dir() -> Path:
 
 
 def _run_admin(*args: str) -> subprocess.CompletedProcess[str]:
-    # python -m fleetent re-dispatches to the admin CLI under the active interpreter.
+    # python -m fleetent re-dispatches to the platform CLI under the active interpreter.
     return subprocess.run(
-        [sys.executable, "-m", "fleetent", "admin", "node", *args],
+        [sys.executable, "-m", "fleetent", "platform", "node", *args],
         capture_output=True,
         text=True,
     )

@@ -50,7 +50,7 @@ scheme so the layer gate passes.
 系统 SHALL 有冒烟测试**执行真实入口路径**,使"测试绿"蕴含"入口能启动",而非被 mock/fixture 掩盖。冒烟 SHALL NOT mock 掉被测的入口本身(如 mock `loop.run` 来测一次性、用预先 `set_state_db` 的 fixture 掩盖平台裸启动)。
 
 至少覆盖:
-- **平台裸启动**:以 subprocess 真起 `python -m uvicorn fleetent.server:app`(非系统 `uvicorn`),轮询 `/health` 返回 200;进程退出/超时即 fail。
+- **平台裸启动**:以 subprocess 真起 `fleetent platform serve`(或等价的 `python -m uvicorn fleetent.server:app`，仅限测试基础设施中直接使用 ASGI app 入口时),轮询 `/health` 返回 200;进程退出/超时即 fail。
 - **agent serve**:以 subprocess 真起 `fleetent agent run <id> --port`,`/health`(或 `/chat`)可达。
 - **一次性 run()**:`run_sync` 在 `get_client_and_config` 边界打桩 LLM,`_run → run()` 真实执行(见 agent-runtime-cli)。
 

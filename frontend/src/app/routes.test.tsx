@@ -1,5 +1,6 @@
 import { MemoryRouter } from 'react-router-dom';
 import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 
@@ -8,11 +9,12 @@ import { AppQueryProvider } from '@/app/query-client';
 import { AdminRoutes } from '@/app/routes';
 import { server } from '@/test/msw/server';
 
-function renderRoutes(route: string, token?: string): void {
+function renderRoutes(route: string, token?: string, mustReset?: boolean): void {
   render(
     <AuthProvider
       baseUrl="http://fleetent.test"
       initialToken={token ?? null}
+      initialMustReset={mustReset ?? false}
     >
       <AppQueryProvider>
         <MemoryRouter initialEntries={[route]}>
@@ -28,6 +30,34 @@ describe('admin routes', () => {
     renderRoutes('/agents');
 
     expect(await screen.findByRole('heading', { name: 'Admin Login' })).toBeInTheDocument();
+  });
+
+  it('forces a password change when the session requires a reset', async () => {
+    server.use(http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])));
+
+    renderRoutes('/agents', 'session-token', true);
+
+    expect(await screen.findByRole('heading', { name: 'Change password' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Agents' })).not.toBeInTheDocument();
+  });
+
+  it('lets the admin complete the forced password change and enter the app', async () => {
+    server.use(
+      http.post('http://fleetent.test/admin/change-password', async ({ request }) => {
+        const body = (await request.json()) as { new_password: string };
+        expect(body.new_password).toBe('s3cret-new');
+        return HttpResponse.json({ status: 'password_changed' });
+      }),
+      http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([]))
+    );
+
+    renderRoutes('/agents', 'session-token', true);
+
+    const field = await screen.findByLabelText('New password');
+    await userEvent.type(field, 's3cret-new');
+    await userEvent.click(screen.getByRole('button', { name: 'Update password' }));
+
+    expect(await screen.findByRole('heading', { name: 'Agents' })).toBeInTheDocument();
   });
 
   it('shows an SSO entry point on the login page', async () => {
@@ -248,5 +278,21 @@ describe('admin routes', () => {
     expect(await screen.findByRole('heading', { name: 'Nodes' })).toBeInTheDocument();
     const nav = within(screen.getByRole('navigation'));
     expect(nav.getByRole('link', { name: 'Nodes' })).toHaveAttribute('href', '/nodes');
+  });
+
+  it('renders the user-IM identities page as a native route in the SPA', async () => {
+    server.use(
+      http.get('http://fleetent.test/admin/im-identities', () => HttpResponse.json([])),
+      http.get('http://fleetent.test/admin/users', () => HttpResponse.json([]))
+    );
+
+    renderRoutes('/im-identities', 'session-token');
+
+    expect(await screen.findByRole('heading', { name: '用户-IM 关系' })).toBeInTheDocument();
+    const nav = within(screen.getByRole('navigation'));
+    expect(nav.getByRole('link', { name: '用户-IM 关系' })).toHaveAttribute(
+      'href',
+      '/im-identities'
+    );
   });
 });

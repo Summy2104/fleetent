@@ -50,28 +50,27 @@ TBD - created by archiving change node-supervisor. Update Purpose after archive.
 
 `fleetent node start` SHALL 把期望集调谐成本地真实进程，幂等：
 
-- 期望含某 agent ∧ 其本地未在跑 → 写下发 `config` 到本地 agent home，再经进程后端拉起。
-- 某 agent 本地在跑 ∧ 不在期望集（被 disable/archive/unpin）→ 经进程后端优雅停。
+- 期望含某 agent ∧ 其本地未在跑 → 在 `tenants/<tenant>/agents/<agent>/` 写下发 config、env 与 skills，再经进程后端拉起。
+- 某 agent 本地在跑 ∧ 不在期望集（被 disable/archive/unpin）→ 经进程后端优雅停，并擦除该 agent 的 `.env` secret scaffold。
 - **实际态真相取本地 PID 文件 + 探活**，不依赖守护自身内存——故 `fleetent node start` 重启后 SHALL re-adopt 仍在跑的 agent（不重复拉起、不误杀）。
 - 某 agent 期望在跑但进程已死（崩溃）→ 下一轮重新拉起。
 
 #### Scenario: 拉起缺失的期望 agent
-
-- **WHEN** 期望含 agentA 且本地无其存活进程
-- **THEN** node 写 agentA 的 config 到本地 home 并拉起其进程
+- **WHEN** 期望含 tenant `acme` 的 agentA 且本地无其存活进程
+- **THEN** node 写 `tenants/acme/agents/agentA/agent.yaml`
+- **AND** 写 `.env` 和 desired skills
+- **AND** 拉起其进程
 
 #### Scenario: 停掉不再期望的 agent
-
 - **WHEN** agentB 本地在跑但不在本轮期望集
 - **THEN** node 优雅停 agentB
+- **AND** 擦除该 tenant-aware home 下的 `.env`
 
 #### Scenario: 守护重启后 re-adopt
-
-- **WHEN** `fleetent node start` 重启，本地 PID 文件显示 agentA 仍存活且仍在期望集
+- **WHEN** `fleetent node start` 重启，本地 tenant-aware PID 文件显示 agentA 仍存活且仍在期望集
 - **THEN** node 不重复拉起 agentA、不杀它
 
 #### Scenario: 崩溃的期望 agent 被重拉
-
 - **WHEN** agentA 在期望集但其 PID 文件对应进程已不存活
 - **THEN** 下一轮 reconcile 重新拉起 agentA
 
@@ -121,4 +120,66 @@ When the node supervisor reports actual state, it SHALL determine and include ea
 
 - **WHEN** probing one agent raises or times out
 - **THEN** that agent is reported `unhealthy`, the exception does not propagate, and the loop continues
+
+### Requirement: Materialize 时 scaffold agent .env / TUI token
+
+`fleetent node start` 在 reconcile 把某个期望 agent 的 home materialize（写 `agent.yaml`）时，SHALL 同时写出一个**完整的 `.env`**（文件权限 `0600`），作为该 agent 所有运行期 env 的单一真相：
+
+- SHALL 列出 `agent.yaml` 引用到的**全部** `*_env` 名——口径为对 agent 定义做 `flatten` 全字段扫描（与平台 `materialize` 同一收集器），**不得**用手枚举子集（消除漏 `embedding`/`rerank`/`telegram`/各 `*_env` 的旧不一致）。
+- 对每个名，SHALL 写入其真实值：来自本轮 desired-state 下发的 `secrets`（managed），或既有 operator 值（standalone / operator 手填）。下发 / 已有值缺失的名 SHALL 以空值占位写出（仍可见、可补），node 实现 SHALL 记录"被引用但无值"的名以便排障。
+- SHALL 含一个有效的 `FLEETENT_TUI_TOKEN`（`ma-<64 hex>`）：缺则生成、已存在则原样保留（MUST NOT 轮换在跑 agent 的既有 token）。
+- 真实 secret 值由此**写入 `.env`**（env-only，见 `node-secret-injection`），不再经进程 env 注入。
+
+该 token 仍是 forwarder（`/forward/agents/{name}/chat`）与 IM-edge 注入 agent loopback `/chat` 的 `Authorization: Bearer` 凭据。
+
+#### Scenario: 新 materialize 的 agent 获得完整 .env
+
+- **WHEN** node reconcile materialize 一个 home 此前不存在 `.env` 的期望 agent
+- **THEN** 该 home 出现 `0600` 的 `.env`，含 `agent.yaml` 引用到的全部 `*_env` 名 + `FLEETENT_TUI_TOKEN`
+- **AND** 凡本轮 desired-state 下发了值的名，`.env` 中为真实值（非空占位）
+- **AND** 经 forwarder `/forward/agents/{name}/chat` 触达该 agent 不再返回 503 `has no env scaffold`
+
+#### Scenario: env 名收集为统一 flatten 口径
+
+- **WHEN** agent 配置同时引用 model `api_key_env`、`embedding.api_key_env`、`rerank.api_key_env`、`telegram.bot_token_env`
+- **THEN** materialize 出的 `.env` SHALL 同时列出这四者（flatten 全字段），node 与平台两条路径产物一致
+
+#### Scenario: TUI token 幂等保留
+
+- **WHEN** node reconcile materialize 一个 `.env` 已含 `FLEETENT_TUI_TOKEN=ma-...` 的 agent
+- **THEN** 该 `FLEETENT_TUI_TOKEN` 值保持不变，node MUST NOT 因 materialize 而轮换或清空它
+
+### Requirement: 停用 agent 时擦除其 .env
+
+`fleetent node start` 在某 agent 不再属于本 node 期望集（`unpin` / `disable` / 删除）而被停掉进程时，SHALL 擦除该 agent home 的 `.env`，不为已停用 agent 在盘上保留明文 secret。该擦除 SHALL 舱壁化（单 agent 擦除失败只记日志，不影响其它 agent 的 reconcile）。
+
+#### Scenario: 停用即擦 .env
+
+- **WHEN** agentA 从本 node unpin（或 disable / 删除），node 停掉其进程
+- **THEN** agentA home 的 `.env` 被擦除，盘上不再留其明文 secret
+- **AND** 单个擦除失败只记日志，不改变进程退出码、不波及其它 agent
+
+### Requirement: Node deploys skill bundles atomically
+
+node SHALL 根据 desired-state skill manifest 下载缺失或过期的 skill bundle，校验 `bundle_sha256`，安全解压到临时目录，再原子替换 `skills/<skill>/`。node MUST NOT 直接访问 Git 仓库。
+
+#### Scenario: Missing skill is deployed
+- **WHEN** desired-state 要求 skill `foo` 的 `base_version=abc`，本地没有该版本
+- **THEN** node 从 manifest 的 bundle URL 下载 bundle
+- **AND** 校验 hash 后部署到 agent home `skills/foo/`
+- **AND** 记录本地部署的 `base_version` 与 `base_commit`
+
+#### Scenario: Existing matching skill is skipped
+- **WHEN** 本地 `skills/foo/` 已记录 `base_version=abc`
+- **THEN** node 不重新下载或覆盖该 skill
+
+#### Scenario: Drifted skill is not overwritten
+- **WHEN** 本地 `skills/foo/` 已 drift
+- **THEN** node 不用 desired bundle 覆盖该目录
+- **AND** 在 status 中上报 drift
+
+#### Scenario: Unsafe bundle is rejected
+- **WHEN** 下载的 bundle 含绝对路径、`..`、`.git`、symlink/hardlink 逃逸或 hash 不匹配
+- **THEN** node 拒绝部署
+- **AND** 不修改当前 agent home skill 副本
 

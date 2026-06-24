@@ -1,6 +1,6 @@
 """Agent runtime paths derive from the resolver.
 
-Note: ``admin_cli.init_config`` is intentionally excluded — its file/dir lists
+Note: ``platform_cli.init_config`` is intentionally excluded — its file/dir lists
 are a scaffold layout relative to an operator-chosen ``root`` argument, not
 runtime path resolution, so they must stay relative.
 """

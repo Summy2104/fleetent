@@ -24,7 +24,7 @@ def _agent_state_db(
 ) -> SQLiteDatabase:
     from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
 
-    path = tmp_path / "agents" / "support" / "data" / tenant_id / str(agent_id) / "agent_state.db"
+    path = tmp_path / "tenants" / tenant_id / "agents" / "support" / "data" / "agent_state.db"
     db = SQLiteDatabase(path=path)
     migrate(db, AGENT_STATE_MIGRATIONS)
     return db
@@ -37,6 +37,7 @@ def _desired_state() -> DesiredState:
             DesiredAgent(
                 agent_id=101,
                 name="support",
+                tenant_id="tenant-1",
                 config={"name": "support", "tenant_id": "tenant-1"},
                 secrets={},
             )

@@ -11,6 +11,7 @@ import {
   Server,
   Sparkles,
   Users,
+  UserCog,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -55,6 +56,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Admin',
     items: [
       { to: '/users', label: 'Users', icon: Users },
+      { to: '/im-identities', label: 'IM Identities', icon: UserCog },
       { to: '/tenancy', label: 'Tenancy', icon: Building2 },
       { to: '/stats', label: 'Statistics', icon: BarChart3 },
     ],

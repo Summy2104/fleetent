@@ -94,3 +94,52 @@ def test_secret_embedded_in_url_still_rejected():
                 }
             ]
         )
+
+
+_USER_UUID = "5f5904ef-efcf-42bb-82fa-ad5a150b078c"
+
+
+def _scan_im(im: dict) -> None:
+    agent = AgentFile.model_validate({"name": "t", "version": 1, "models": _MODELS, "im": im})
+    _reject_inline_secrets(agent, Path("agent.yaml"))
+
+
+def test_im_access_allow_users_uuid_not_rejected():
+    # Platform materializes internal user ids (UUIDs) into allow_users; a UUID's
+    # length/entropy must not be flagged as an inline secret.
+    _scan_im(
+        {
+            "supports_dm": True,
+            "slack": {
+                "bot_token_env": "SUPPORT_SLACK_BOT",
+                "app_token_env": "SUPPORT_SLACK_APP",
+                "access": {"allow_users": [_USER_UUID]},
+            },
+        }
+    )
+
+
+def test_im_access_allow_groups_uuid_not_rejected():
+    # allow_groups on a telegram binding is an id list too — also exempt.
+    _scan_im(
+        {
+            "supports_groups": True,
+            "telegram": {
+                "bot_token_env": "SUPPORT_TG_BOT",
+                "access": {"allow_groups": [_USER_UUID]},
+            },
+        }
+    )
+
+
+def test_im_inline_bot_token_still_rejected():
+    # The exemption must not relax scanning of secret-bearing im fields.
+    with pytest.raises(ValueError, match="inline secret"):
+        _scan_im(
+            {
+                "slack": {
+                    "bot_token_env": _ATLASSIAN_TOKEN,
+                    "app_token_env": "SUPPORT_SLACK_APP",
+                }
+            }
+        )

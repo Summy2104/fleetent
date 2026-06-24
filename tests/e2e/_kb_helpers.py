@@ -1,18 +1,18 @@
 """KB e2e fixtures and helpers — owned exclusively by e2e-kb-chain."""
+
 from __future__ import annotations
 
 import asyncio
 import base64
 import contextlib
 import json
+import socket
 import sqlite3
 import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
-import socket
 
 import httpx
 import pytest
@@ -26,6 +26,7 @@ from tests.e2e._entrypoint_smoke import (
     wait_for_condition,
     wait_for_http_ready,
 )
+from tests.e2e._path_helpers import agent_home_dir, agent_state_db_path
 from tests.e2e.conftest import _admin_session_headers, _agent_status, _register_node
 from tests.integration._migration_template import apply_migrations
 
@@ -97,7 +98,7 @@ def _seed_agent_with_kb(
     secret_store.set(agent.id, "FLEETENT_AGENT_KB_SUPPORT_MODEL", "sk-e2e-kb-stub", "e2e")
 
     # Create the KB record in the per-tenant kb.db.
-    data_dir = home_dir / "agents" / _AGENT_NAME / "data"
+    data_dir = agent_home_dir(home_dir, _AGENT_NAME, tenant_id=_TENANT_ID) / "data"
     kb_scope = _open_kb_scope(data_dir)
     kb_create(_TENANT_ID, _KB_ID, "E2E test KB", database=kb_scope.kb_db)
 
@@ -154,9 +155,7 @@ async def _pre_ingest(data_dir: Path) -> None:
 
 def read_kb_retrieval_traces(home_dir: Path, agent_name: str) -> list[dict[str, Any]]:
     """Read kb_retrieval trace events from the agent's state DB (raw SQLite)."""
-    state_db_path = (
-        home_dir / "agents" / agent_name / "data" / _TENANT_ID / agent_name / "agent_state.db"
-    )
+    state_db_path = agent_state_db_path(home_dir, agent_name, tenant_id=_TENANT_ID)
     if not state_db_path.exists():
         return []
     conn = sqlite3.connect(str(state_db_path))
@@ -204,9 +203,7 @@ def clear_stub_requests(stub_v1_url: str) -> None:
     httpx.delete(f"{stub_v1_url}/requests", timeout=5.0).raise_for_status()
 
 
-def find_system_messages_containing(
-    stub_requests: list[dict[str, Any]], keyword: str
-) -> list[str]:
+def find_system_messages_containing(stub_requests: list[dict[str, Any]], keyword: str) -> list[str]:
     """Return system message contents that include keyword, across all recorded requests."""
     hits: list[str] = []
     for req in stub_requests:
@@ -301,7 +298,7 @@ def managed_kb_stack(
     )
 
     # Pre-populate KB before node/agent start so the agent boots with data ready.
-    data_dir = home_dir / "agents" / agent_name / "data"
+    data_dir = agent_home_dir(home_dir, agent_name, tenant_id=_TENANT_ID) / "data"
     asyncio.run(_pre_ingest(data_dir=data_dir))
 
     platform_port = reserve_port()
@@ -361,7 +358,7 @@ def managed_kb_stack(
                 stub_v1_url=llm_stub_base_url,
             )
         finally:
-            agent_home = home_dir / "agents" / agent_name
+            agent_home = agent_home_dir(home_dir, agent_name, tenant_id=_TENANT_ID)
             if agent_home.exists():
                 stop = run_command(
                     [

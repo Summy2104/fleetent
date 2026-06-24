@@ -182,12 +182,13 @@ def test_record_injected_context_skips_empty_sources(monkeypatch):
 
 
 def test_trace_database_url_fallback_uses_default_management_database(monkeypatch):
-    from fleetent import paths
     from fleetent.observability import traces
 
     monkeypatch.delenv("DATABASE_URL", raising=False)
 
-    assert traces._database_url() == f"sqlite:///{paths.data_dir() / 'management.db'}"
+    from fleetent import paths
+
+    assert traces._database_url() == f"sqlite:///{paths.management_db_path()}"
 
 
 def test_query_trace_events_can_filter_injected_context_events(trace_db):

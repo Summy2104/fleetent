@@ -125,6 +125,53 @@ def test_deregister_occupied_node_raises_value_error(db_path) -> None:
         node_store.deregister_node("node-busy")
 
 
+def test_get_agent_status_reads_back_reported_state(db_path) -> None:
+    from fleetent.platform.node_management import node_store
+
+    node_store.register_node("node-a")
+    agent = agent_store.create_agent("ops", "Ops.", ["shell"])
+    node_store.upsert_agent_status(
+        agent.id, node_id="node-a", phase="running", pid=4321, health="ok"
+    )
+
+    status = node_store.get_agent_status(agent.id)
+
+    assert status is not None
+    assert status["agent_id"] == agent.id
+    assert status["node_id"] == "node-a"
+    assert status["phase"] == "running"
+    assert status["pid"] == 4321
+    assert status["health"] == "ok"
+    assert status["reported_at"]
+
+
+def test_get_agent_status_missing_returns_none(db_path) -> None:
+    from fleetent.platform.node_management import node_store
+
+    agent = agent_store.create_agent("ops", "Ops.", ["shell"])
+
+    assert node_store.get_agent_status(agent.id) is None
+
+
+def test_list_agent_status_returns_all_rows(db_path) -> None:
+    from fleetent.platform.node_management import node_store
+
+    assert node_store.list_agent_status() == []
+
+    node_store.register_node("node-a")
+    a = agent_store.create_agent("ops", "Ops.", ["shell"])
+    b = agent_store.create_agent("sre", "SRE.", ["shell"])
+    node_store.upsert_agent_status(a.id, node_id="node-a", phase="running", pid=1)
+    node_store.upsert_agent_status(b.id, node_id="node-a", phase="stopped")
+
+    rows = node_store.list_agent_status()
+
+    by_agent = {row["agent_id"]: row for row in rows}
+    assert set(by_agent) == {a.id, b.id}
+    assert by_agent[a.id]["phase"] == "running"
+    assert by_agent[b.id]["phase"] == "stopped"
+
+
 def test_register_node_raises_and_leaves_no_record_when_key_persist_fails(
     db_path, monkeypatch
 ) -> None:

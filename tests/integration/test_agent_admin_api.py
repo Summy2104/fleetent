@@ -265,6 +265,7 @@ def test_get_bindings_shape(fresh_client):
     agent = agent_store.create_agent("ops", "Ops v1.", ["shell"])
     agent_store.assign_user("u-1", agent.id)
     agent_store.bind_mcp_server(agent.id, "github")
+    agent_im_group_store.bind(agent.id, "slack", "C0123")
     token, _ = _session_for("viewer")
 
     resp = fresh_client.get("/admin/agents/ops/bindings", headers=_hdr(token))
@@ -272,6 +273,7 @@ def test_get_bindings_shape(fresh_client):
     body = resp.json()
     assert body["users"] == ["u-1"]
     assert body["mcp_servers"] == ["github"]
+    assert body["groups"] == [{"platform": "slack", "group_id": "C0123"}]
     assert "channels" not in body
 
 
@@ -542,48 +544,19 @@ def test_export_agent_yaml_unknown_404(client):
     assert r.status_code == 404
 
 
-# --- deploy agent.yaml to the runtime agents dir ------------------------------
+# --- spec guardrail: platform must not write agent homes ----------------------
 
 
-def test_deploy_writes_agent_yaml(fresh_client, tmp_path, monkeypatch):
-    import yaml as _yaml
+def test_platform_does_not_write_agent_home_via_deploy_route(fresh_client):
+    """Spec scenario: No platform endpoint writes an agent home.
 
-    home = tmp_path / "home"
-    monkeypatch.setenv("FLEETENT_HOME", str(home))
-    agent_store.create_agent(
-        "dep-bot",
-        "You are dep-bot.",
-        ["read_file"],
-        plugins=["p1"],
+    POST /admin/agents/{name}/deploy must not be wired on the platform app.
+    After the route is removed, authenticated admin requests return 404 (route not found).
+    """
+    agent_store.create_agent("probe-agent", "probe", [])
+    token, _ = _session_for("admin")
+    r = fresh_client.post("/admin/agents/probe-agent/deploy", headers=_hdr(token))
+    assert r.status_code == 404, (
+        "deploy route must not exist; platform must not write agent homes"
+        " (spec: platform-control-plane)"
     )
-    token, _ = _session_for("admin")
-    r = fresh_client.post("/admin/agents/dep-bot/deploy", headers=_hdr(token))
-    assert r.status_code == 200, r.text
-    dest = home / "agents" / "dep-bot" / "agent.yaml"
-    assert dest.exists()
-    assert r.json()["path"] == str(dest)
-    doc = _yaml.safe_load(dest.read_text())
-    assert doc["name"] == "dep-bot"
-    assert "models" in doc
-    assert "model_overrides" not in doc
-    assert doc["allowed_tools"] == ["read_file"]
-    assert doc["plugins"] == ["p1"]
-
-    # redeploy overwrites in place after an edit
-    agent_store.create_version("dep-bot", system_prompt="changed")
-    r2 = fresh_client.post("/admin/agents/dep-bot/deploy", headers=_hdr(token))
-    assert r2.status_code == 200
-    assert "changed" in dest.read_text()
-
-
-def test_deploy_viewer_forbidden(fresh_client):
-    agent_store.create_agent("dep2", "x", [])
-    token, _ = _session_for("viewer")
-    r = fresh_client.post("/admin/agents/dep2/deploy", headers=_hdr(token))
-    assert r.status_code == 403
-
-
-def test_deploy_unknown_agent_404(client):
-    token, _ = _session_for("admin")
-    r = client.post("/admin/agents/ghost/deploy", headers=_hdr(token))
-    assert r.status_code == 404

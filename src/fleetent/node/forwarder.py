@@ -13,6 +13,7 @@ from starlette.websockets import WebSocketDisconnect
 from fleetent.identity import INGRESS_PRINCIPAL_HEADER
 from fleetent.node.backend import BaseProcessBackend
 from fleetent.node.config import NodeConfig
+from fleetent.node.skill_deployer import bundle_skill_directory
 
 
 def _parse_env(text: str) -> dict[str, str]:
@@ -35,14 +36,14 @@ def build_app(config: NodeConfig, backend: BaseProcessBackend) -> FastAPI:
         if authorization.removeprefix("Bearer ").strip() != config.service_key:
             raise HTTPException(status_code=401, detail="Invalid node API key")
 
-    def _agent_port(agent_name: str) -> int:
-        port = backend.gateway_port(agent_name)
+    def _agent_port(agent_name: str, tenant_id: str = "default") -> int:
+        port = backend.gateway_port(agent_name, tenant_id)
         if port is None:
             raise HTTPException(status_code=503, detail=f"agent {agent_name!r} is unavailable")
         return port
 
-    def _agent_tui_token(agent_name: str) -> str:
-        env_path = Path(config.home_dir) / "agents" / agent_name / ".env"
+    def _agent_tui_token(agent_name: str, tenant_id: str = "default") -> str:
+        env_path = Path(config.home_dir) / "tenants" / tenant_id / "agents" / agent_name / ".env"
         if not env_path.exists():
             raise HTTPException(status_code=503, detail=f"agent {agent_name!r} has no env scaffold")
         token = _parse_env(env_path.read_text(encoding="utf-8")).get("FLEETENT_TUI_TOKEN", "")
@@ -57,8 +58,9 @@ def build_app(config: NodeConfig, backend: BaseProcessBackend) -> FastAPI:
         authorization: str | None = Header(None),
     ) -> Response:
         _check_node_key(authorization)
-        port = _agent_port(agent_name)
-        token = _agent_tui_token(agent_name)
+        tenant_id = request.headers.get("x-fleetent-tenant-id", "default")
+        port = _agent_port(agent_name, tenant_id)
+        token = _agent_tui_token(agent_name, tenant_id)
         body = await request.body()
         headers = {"Authorization": f"Bearer {token}"}
         if request.headers.get("content-type"):
@@ -112,8 +114,9 @@ def build_app(config: NodeConfig, backend: BaseProcessBackend) -> FastAPI:
         except HTTPException:
             await websocket.close(code=1008)
             return
-        port = _agent_port(agent_name)
-        token = _agent_tui_token(agent_name)
+        tenant_id = websocket.headers.get("x-fleetent-tenant-id", "default")
+        port = _agent_port(agent_name, tenant_id)
+        token = _agent_tui_token(agent_name, tenant_id)
         upstream_url = f"ws://127.0.0.1:{port}/ws"
         try:
             upstream_headers = {"Authorization": f"Bearer {token}"}
@@ -143,5 +146,27 @@ def build_app(config: NodeConfig, backend: BaseProcessBackend) -> FastAPI:
         except Exception:
             if websocket.client_state.name != "DISCONNECTED":
                 await websocket.close(code=1011)
+
+    @app.get("/forward/agents/{agent_name}/skills/{skill_name}/bundle")
+    async def forward_skill_bundle(
+        agent_name: str,
+        skill_name: str,
+        request: Request,
+        authorization: str | None = Header(None),
+    ) -> Response:
+        _check_node_key(authorization)
+        tenant_id = request.headers.get("x-fleetent-tenant-id", "default")
+        skill_dir = (
+            Path(config.home_dir)
+            / "tenants"
+            / tenant_id
+            / "agents"
+            / agent_name
+            / "skills"
+            / skill_name
+        )
+        if not skill_dir.is_dir():
+            raise HTTPException(status_code=404, detail=f"skill {skill_name!r} not found")
+        return Response(content=bundle_skill_directory(skill_dir), media_type="application/gzip")
 
     return app

@@ -82,3 +82,29 @@ def test_admin_im_router_removed(tmp_path, monkeypatch, isolated_schedule_db):
     resp = client.get(_OWNER_ROUTE)
 
     assert resp.status_code == 404
+
+
+def test_lifespan_boots_when_approval_state_db_unwired(tmp_path, monkeypatch, isolated_schedule_db):
+    """Regression (#8): the platform process never wires approval_store's per-agent
+    state_db — approvals are agent-owned, the platform has no single agent_state.db.
+    Its lifespan must therefore boot WITHOUT invoking the agent-side approval reconcile;
+    otherwise approval_store.database() raises 'state_db not initialized' and startup
+    crashes (as it does under a real `uvicorn fleetent.server:app`).
+
+    We force _state_db=None to reproduce the fresh-process production condition that the
+    other lifespan tests accidentally mask via a leaked module-global (conftest's
+    _reset_traces_reflection_state_db resets traces/reflection but not approval_store).
+    """
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
+    apply_migrations(tmp_path / "users.db")
+    monkeypatch.chdir(tmp_path)
+
+    from fleetent.governance import approval_store
+
+    monkeypatch.setattr(approval_store, "_state_db", None)
+
+    import fleetent.server as srv
+
+    # Entering the context triggers FastAPI lifespan startup; it must not raise.
+    with TestClient(srv.app):
+        pass

@@ -135,7 +135,7 @@ def test_list_reflection_proposals_respects_missing_db_domain_and_status(monkeyp
     ("domain", "action", "expected"),
     [
         ("skill", None, "reflection_skill_proposal"),
-        ("memory", "suggest_shared_memory_or_kb", "reflection_shared_memory_proposal"),
+        ("memory", "suggest_agent_memory_or_kb", "reflection_agent_memory_proposal"),
         ("memory", "mark_stale", "reflection_user_memory_proposal"),
     ],
 )
@@ -376,7 +376,7 @@ def test_create_and_persist_memory_and_skill_proposals_fire_side_effects(monkeyp
     ("domain", "action", "expected"),
     [
         ("memory", "mark_stale", "reflection_user_memory_proposal"),
-        ("memory", "suggest_shared_memory_or_kb", "reflection_shared_memory_proposal"),
+        ("memory", "suggest_agent_memory_or_kb", "reflection_agent_memory_proposal"),
         ("skill", None, "reflection_skill_proposal"),
     ],
 )

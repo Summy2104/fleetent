@@ -54,7 +54,7 @@
 - **THEN** "A主体" 行存在，U 的 `tenant_id` 指向它，且操作被审计
 
 #### Scenario: provisioning 无直写 CLI 路径
-- **WHEN** 查看 `fleetent admin` 子命令
+- **WHEN** 查看 `fleetent platform` 子命令
 - **THEN** 不存在 create-tenant / create-team / set-user-tenant / set-approver 等直写管理库的命令；provisioning 仅经 HTTP API
 
 ### Requirement: users 纳入 alembic + 启动门

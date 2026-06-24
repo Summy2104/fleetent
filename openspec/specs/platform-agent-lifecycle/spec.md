@@ -7,45 +7,39 @@ process without monitoring it. Created by archiving change platform-agent-lifecy
 ## Requirements
 ### Requirement: Create/update materializes a runnable agent home
 
-When the platform creates or updates an agent, it SHALL materialize that agent's
-self-contained home under `FLEETENT_HOME/agents/<agent-id>/`: an `agent.yaml`
-(definition + `connectors` + per-agent `access` block), a `.env` scaffold, and `data/`,
-so the agent is runnable by `fleetent agent run`.
+When the platform creates or updates a managed agent, it SHALL update the management database and make a new desired-state payload available to the owning node. Platform SHALL NOT write the managed agent's real home directly. The owning node SHALL materialize the runnable home under `FLEETENT_HOME/tenants/<tenant>/agents/<agent>/`.
 
-#### Scenario: Create writes the home
-- **WHEN** an admin creates agent `support` on the platform
-- **THEN** `FLEETENT_HOME/agents/support/agent.yaml` is written from the authored definition
-- **AND** `FLEETENT_HOME/agents/support/.env` is present, with secrets referenced only by env-var name
-- **AND** `FLEETENT_HOME/agents/support/data/` exists
+#### Scenario: Create exposes desired state
+- **WHEN** an admin creates managed agent `support` on the platform
+- **THEN** platform persists the authored definition in management DB
+- **AND** `GET /nodes/{node-id}/desired-state` includes `support` for its placement
+- **AND** platform does not write `tenants/<tenant>/agents/support/agent.yaml` itself
 
-#### Scenario: Update re-materializes
+#### Scenario: Update changes desired state
 - **WHEN** an admin edits `support`'s definition
-- **THEN** `FLEETENT_HOME/agents/support/agent.yaml` is rewritten to match
-- **AND** operator-provided `.env` secret values are preserved
+- **THEN** platform updates the management DB source of truth
+- **AND** the next desired-state response contains the updated agent config
+- **AND** the owning node is responsible for rewriting the home and restarting if needed
 
 ### Requirement: Agent materialization writes self-contained Agent homes
 
-平台 materialize SHALL 将每个 Agent 写成 self-contained Agent home under
-`agents/<agent-id>/`. 该 home SHALL 包含 `agent.yaml`, `.env`, and `data/`; runtime SHALL be
-able to run from that home without Platform DB access. Platform-owned config files such as
-`platform.yaml` and embedded Knowledge construction files SHALL NOT be written into Agent homes.
+Managed Agent homes SHALL be self-contained under `tenants/<tenant>/agents/<agent>/`, but in managed mode the writer SHALL be node reconcile. Platform-owned config files such as `platform.yaml` and embedded Knowledge construction files SHALL NOT be written into Agent homes.
 
-#### Scenario: Materialize writes Agent home
-- **WHEN** 平台部署 Agent `support`
-- **THEN** materialize 写入 `agents/support/agent.yaml`
-- **AND** 写入或保留 `agents/support/.env`
-- **AND** 确保 `agents/support/data/` 存在
+#### Scenario: Node materializes Agent home
+- **WHEN** node reconciles desired agent `support` in tenant `acme`
+- **THEN** node writes `tenants/acme/agents/support/agent.yaml`
+- **AND** writes or preserves `tenants/acme/agents/support/.env`
+- **AND** ensures `tenants/acme/agents/support/data/` exists
 
-#### Scenario: Old flat deploy path is not written
-- **WHEN** 平台部署 Agent `support`
-- **THEN** 不写入 `support/agent.yaml`
-- **AND** 不写入 Platform home root `agent.yaml`
+#### Scenario: Platform managed path does not write home
+- **WHEN** platform creates, updates, clones, or applies a managed agent definition
+- **THEN** platform does not write `agent.yaml`, `.env`, `skills/`, or `data/` under that agent's home
 
 #### Scenario: Knowledge binding export only
 - **WHEN** 一个 agent 绑定了 KB
-- **THEN** 生成的 `agent.yaml` 含 `knowledge.bindings`
+- **THEN** desired-state 中的 agent config 含 `knowledge.bindings`
 - **AND** 不含 Google Drive / Confluence source construction details
-- **AND** materialize 不写 standalone Knowledge YAML
+- **AND** platform 不写 standalone Knowledge YAML 到 agent home
 
 ### Requirement: `.env` materialization resolves by credential mode
 
@@ -119,25 +113,15 @@ agent 引用的密钥占位 SHALL NOT 出现在 Platform ENV 模板中——它�
 
 ### Requirement: Materialize 将平台 skill 文件分发到 agent home
 
-为使 agent home 自包含（agent 进程只读自己的 home），`write_home()` SHALL 在写出 `agent.yaml` 与 `data/` 后，把平台全局 skills 目录（`skill_registry._resolve_skills_dir(None)`）下的全部 skill 目录复制到 `<home>/skills/`。
+平台 SHALL NOT 直接将 skill 文件分发到 managed agent home。平台 SHALL 在 desired-state 中提供 skill manifest 与 bundle URL；node SHALL 下载 bundle 并部署到 agent home 的 `skills/` 目录。standalone/local helper MAY copy skills locally, but it is not the managed production path.
 
-- 复制 SHALL 是幂等的（重复 materialize 覆盖同名文件，不报错）
-- 当全局 skills 目录不存在时，复制 SHALL 被跳过，不抛异常
-- 复制失败（IO 错误）SHALL 记录结构化告警但不阻断 materialize（agent.yaml 已写出）
-- 全量复制：所有 skill 进入 home，运行时可见性由 agent.yaml 的 `allowed_skills` / `disabled_skills` 决定（文件分发与可见性解耦）
+#### Scenario: Platform desired state references skill bundles
+- **WHEN** agent `support` 启用 skill `foo`
+- **THEN** desired-state 包含 `foo` 的 `base_version`、`base_commit`、`bundle_url` 与 `bundle_sha256`
+- **AND** platform 不 copy `foo` 到 managed agent home
 
-#### Scenario: skill 文件复制到 agent home
-
-- **WHEN** 全局 skills 目录含 `crm-ops/SKILL.md`，对 agent "support" 触发 materialize
-- **THEN** `<support-home>/skills/crm-ops/SKILL.md` 存在且内容与源一致
-
-#### Scenario: 源目录缺失时安全跳过
-
-- **WHEN** 全局 skills 目录不存在，触发 materialize
-- **THEN** materialize 正常完成，`<home>/skills/` 不被创建（或为空），不抛异常
-
-#### Scenario: 重复 materialize 幂等
-
-- **WHEN** 对同一 agent 连续两次 materialize
-- **THEN** 第二次覆盖 `<home>/skills/` 中的同名文件，不因目录已存在而报错
+#### Scenario: Node deploys skill files
+- **WHEN** node reconcile 看到本地缺少 desired skill `foo` 的 `base_version`
+- **THEN** node 下载 bundle
+- **AND** 解压部署到 `tenants/<tenant>/agents/<agent>/skills/foo/`
 

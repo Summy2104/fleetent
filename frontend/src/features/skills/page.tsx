@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { GitCompare, Inbox, RefreshCw } from 'lucide-react';
+import { GitCompare, Inbox, Plus, RefreshCw } from 'lucide-react';
 
 import { useAdminApi } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
@@ -10,6 +10,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -31,10 +32,14 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import {
   type SkillListItem,
   type SkillProposal,
+  useCreateSkillMutation,
+  useEditSkillMutation,
   useForcePublishSkillMutation,
   useReloadSkillsMutation,
   useSetSkillAgentBindingMutation,
@@ -88,20 +93,142 @@ function CodeBlock({ children }: { children: string }): JSX.Element {
 
 function ContentDialog({
   skillName,
+  canWrite,
   onOpenChange,
 }: {
   skillName: string | null;
+  canWrite: boolean;
   onOpenChange: (open: boolean) => void;
 }): JSX.Element {
   const content = useSkillContentQuery(skillName);
+  const edit = useEditSkillMutation(skillName ?? '');
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+
+  // Reset back to read-only whenever the dialog targets a different skill.
+  useEffect(() => {
+    setEditing(false);
+  }, [skillName]);
+
+  // Mirror refetched content into the read-only view, but never clobber an
+  // in-progress edit draft.
+  useEffect(() => {
+    if (!editing) {
+      setDraft(content.data?.content ?? '');
+    }
+  }, [content.data?.content, editing]);
+
+  const save = async (): Promise<void> => {
+    await edit.mutateAsync({ content: draft });
+    setEditing(false);
+  };
+
   return (
     <Dialog open={Boolean(skillName)} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Content · {skillName}</DialogTitle>
-          <DialogDescription>Read-only view of the published skill definition.</DialogDescription>
+          <DialogDescription>
+            {editing ? 'Edit the published skill definition.' : 'The published skill definition (SKILL.md).'}
+          </DialogDescription>
         </DialogHeader>
-        <CodeBlock>{content.data?.content ?? ''}</CodeBlock>
+        {editing ? (
+          <Textarea
+            aria-label="Skill content editor"
+            className="min-h-72 font-mono"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+          />
+        ) : (
+          <CodeBlock>{content.data?.content ?? ''}</CodeBlock>
+        )}
+        {canWrite ? (
+          <DialogFooter>
+            {editing ? (
+              <>
+                <Button variant="outline" onClick={() => setEditing(false)}>
+                  Cancel
+                </Button>
+                <Button disabled={edit.isPending} onClick={() => void save()}>
+                  Save content
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setDraft(content.data?.content ?? '');
+                  setEditing(true);
+                }}
+              >
+                Edit content
+              </Button>
+            )}
+          </DialogFooter>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─────────────────────────── Create skill dialog ───────────────────────────
+
+const CREATE_TEMPLATE = '---\nname: \ndescription: \n---\n\n';
+
+function CreateSkillDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}): JSX.Element {
+  const create = useCreateSkillMutation();
+  const [name, setName] = useState('');
+  const [content, setContent] = useState('');
+
+  const submit = async (): Promise<void> => {
+    await create.mutateAsync({ content, name });
+    setName('');
+    setContent('');
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>New skill</DialogTitle>
+          <DialogDescription>Create a skill and its initial SKILL.md definition.</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-3">
+          <div className="grid gap-1.5">
+            <Label htmlFor="new-skill-name">Name</Label>
+            <Input
+              id="new-skill-name"
+              placeholder="skill-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="new-skill-content">Content</Label>
+            <Textarea
+              id="new-skill-content"
+              className="min-h-64 font-mono"
+              placeholder={CREATE_TEMPLATE}
+              value={content}
+              onChange={(event) => setContent(event.target.value)}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button disabled={!name.trim() || !content.trim() || create.isPending} onClick={() => void submit()}>
+            Create skill
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -420,6 +547,7 @@ export function SkillsPage(): JSX.Element {
   const [bindingsFor, setBindingsFor] = useState<string | null>(null);
   const [proposalsFor, setProposalsFor] = useState<string | null>(null);
   const [proposalDiffId, setProposalDiffId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
 
   const canWrite = me.data?.role !== 'viewer';
 
@@ -448,9 +576,14 @@ export function SkillsPage(): JSX.Element {
           <Badge variant="secondary">{skills.data?.length ?? 0}</Badge>
         </div>
         {canWrite ? (
-          <Button variant="outline" onClick={() => void reload.mutateAsync()}>
-            <RefreshCw className="size-4" /> Reload index
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={() => setCreating(true)}>
+              <Plus className="size-4" /> New skill
+            </Button>
+            <Button variant="outline" onClick={() => void reload.mutateAsync()}>
+              <RefreshCw className="size-4" /> Reload index
+            </Button>
+          </div>
         ) : null}
       </div>
 
@@ -499,7 +632,12 @@ export function SkillsPage(): JSX.Element {
         </table>
       </div>
 
-      <ContentDialog skillName={contentFor} onOpenChange={(open) => !open && setContentFor(null)} />
+      <CreateSkillDialog open={creating} onOpenChange={setCreating} />
+      <ContentDialog
+        skillName={contentFor}
+        canWrite={canWrite}
+        onOpenChange={(open) => !open && setContentFor(null)}
+      />
       <VersionsDialog skillName={versionsFor} onOpenChange={(open) => !open && setVersionsFor(null)} />
       <BindingsDialog
         skillName={bindingsFor}

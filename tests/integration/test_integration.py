@@ -26,7 +26,7 @@ def _bind_default_agent(tmp_path: Path, user_id: str, monkeypatch) -> None:
 
     import fleetent.agent_config as agent_config
 
-    d = tmp_path / "agents" / "default"
+    d = tmp_path / "tenants" / "default" / "agents" / "default"
     d.mkdir(parents=True, exist_ok=True)
     doc = {
         "name": "default",

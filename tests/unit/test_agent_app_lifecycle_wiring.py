@@ -28,6 +28,14 @@ _NOOP_RECONCILE = patch(
     AsyncMock(return_value=0),
 )
 
+# _start_infra now reconciles this agent's expired approvals (#8) right after
+# _init_agent_db_schema wires approval_store's state_db. These tests NOOP that wiring,
+# so they must stub reconcile too — it would otherwise find no state_db and raise.
+_NOOP_RECONCILE = patch(
+    "fleetent.runtime.approval_resume.reconcile_expired_approvals",
+    AsyncMock(),
+)
+
 
 async def test_start_infra_cleans_orphans_and_starts_sweep_when_docker_available(
     tmp_path: Path,

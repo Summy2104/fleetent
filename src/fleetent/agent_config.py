@@ -386,7 +386,9 @@ class ReflectionSettings(BaseModel):
 
     enabled: bool = False
     interval_seconds: float = 86400.0
-    auto_apply: "ReflectionAutoApplySettings" = Field(default_factory=lambda: ReflectionAutoApplySettings())
+    auto_apply: "ReflectionAutoApplySettings" = Field(
+        default_factory=lambda: ReflectionAutoApplySettings()
+    )
 
 
 class ReflectionAutoApplySettings(BaseModel):
@@ -606,6 +608,20 @@ def load_agent_file(agent_dir: Path) -> AgentFile:
     return agent
 
 
+# Structural, non-secret fields whose values must not be scanned for inline secrets.
+# IM access allowlists hold id lists (internal user ids are UUIDs whose length/entropy
+# would otherwise trip the heuristic), not credentials; scoping to these two access
+# paths keeps `bot_token_env` and other secret-bearing fields under `im` scanned.
+_SKIP_SECRET_SCAN_SEGMENTS = (
+    ".args.",
+    ".command",
+    ".id",
+    ".transport",
+    ".access.allow_users.",
+    ".access.allow_groups.",
+)
+
+
 def _reject_inline_secrets(agent: AgentFile, path: Path) -> None:
     """Reject inline plaintext secrets in MCP/IM binding defs; secrets go via env refs."""
     payload = {
@@ -619,10 +635,9 @@ def _reject_inline_secrets(agent: AgentFile, path: Path) -> None:
         "knowledge": agent.knowledge.model_dump(),
     }
     for key, value in flatten(payload):
-        # Skip structural, non-secret fields: CLI args (e.g. npm package specs), command
-        # names, plain ids, transport names. `.url` is intentionally NOT skipped — a URL
-        # may embed a credential (e.g. ?token=...) and must still be scanned.
-        if any(seg in key for seg in (".args.", ".command", ".id", ".transport")):
+        # `.url` is intentionally NOT skipped — a URL may embed a credential
+        # (e.g. ?token=...) and must still be scanned.
+        if any(seg in key for seg in _SKIP_SECRET_SCAN_SEGMENTS):
             continue
         if (
             isinstance(value, str)
@@ -692,9 +707,10 @@ def build_index(agents_dir: str | Path | None = None) -> AgentConfigIndex:
     """Build a fresh resolution index (pure; no globals).
 
     Default installed Agent mode: when no explicit ``agents_dir`` /
-    ``FLEETENT_AGENTS_DIR`` is given and ``agents/default/agent.yaml`` exists, load it
-    as the sole, forced-default agent. The old home-root ``agent.yaml`` single-file
-    mode is not a current MVP deployment path. Otherwise scan the agents directory.
+    ``FLEETENT_AGENTS_DIR`` is given and the default-tenant home
+    ``tenants/default/agents/default/agent.yaml`` exists, load it as the sole,
+    forced-default agent. The old home-root ``agent.yaml`` single-file mode is not
+    a current MVP deployment path. Otherwise scan the agents directory.
     """
     if agents_dir is None and "FLEETENT_AGENTS_DIR" not in os.environ:
         default_file = paths.agent_file()
@@ -800,3 +816,20 @@ _DEFAULT_AGENT_FILE = AgentFile(name="", version=0, models=default_models())
 def active_agent_or_default() -> AgentFile:
     """The single active agent for this process, or a neutral default with schema defaults."""
     return active_agent() or _DEFAULT_AGENT_FILE
+
+
+def collect_env_var_names(agent: AgentFile) -> list[str]:
+    """Return all env-var names referenced by the agent config (stable, deduplicated).
+
+    Uses the flatten-all-*_env approach so every field — including embedding.api_key_env,
+    rerank.api_key_env, telegram.bot_token_env, and any future *_env field — is captured
+    without manual enumeration. This is the single authoritative collector; node and
+    platform both call it.
+    """
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for key, value in flatten(agent.model_dump(mode="json")):
+        if key.endswith("_env") and isinstance(value, str) and value and value not in seen:
+            seen.add(value)
+            ordered.append(value)
+    return sorted(ordered)

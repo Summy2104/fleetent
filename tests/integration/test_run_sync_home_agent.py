@@ -10,7 +10,7 @@ from fleetent.integrations.sandbox import enablement as se
 
 
 def _write_home_agent(home, **fields):
-    agent_home = home / "agents" / "default"
+    agent_home = home / "tenants" / "default" / "agents" / "default"
     agent_home.mkdir(parents=True, exist_ok=True)
     doc = {
         "name": "default",

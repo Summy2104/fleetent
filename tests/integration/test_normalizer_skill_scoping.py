@@ -28,7 +28,7 @@ def _write_agent(home, monkeypatch, **fields):
         },
     }
     doc.update(fields)
-    d = home / "agents" / "default"
+    d = home / "tenants" / "default" / "agents" / "default"
     d.mkdir(parents=True, exist_ok=True)
     (d / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
     monkeypatch.setenv("FLEETENT_HOME", str(home))

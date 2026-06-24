@@ -45,11 +45,11 @@ service-key authentication, and operator-driven registration lifecycle.
 
 ### Requirement: node 登记的运维入口
 
-系统 SHALL 通过 `fleetent admin`（bootstrap/ops 入口）提供 node 登记、列举、注销命令——node 登记属基础设施运维动作，先于 / 独立于平台业务管理。
+系统 SHALL 通过 `fleetent platform`（bootstrap/ops 入口）提供 node 登记、列举、注销命令——node 登记属基础设施运维动作，先于 / 独立于平台业务管理。
 
-#### Scenario: 通过 admin CLI 登记 node
+#### Scenario: 通过 platform CLI 登记 node
 
-- **WHEN** 运维执行 `fleetent admin node register <node-id>`
+- **WHEN** 运维执行 `fleetent platform node register <node-id>`
 - **THEN** 系统登记该 node 并打印一次性 service key（提示妥善保存）
 
 #### Scenario: 标签随登记记录（v1 不消费）
@@ -59,7 +59,7 @@ service-key authentication, and operator-driven registration lifecycle.
 
 ### Requirement: node 管理 admin HTTP API
 
-系统 SHALL 在 `/admin/nodes` 下暴露管理员可用的 HTTP API，覆盖 node 注册、列举、注销、pin 与 unpin。所有端点 SHALL 使用 `Authorization: Session <token>` 做管理员鉴权，而不是 node 自身的 Bearer service key。底层操作 SHALL 复用 `node_store` 与 `placement_store`，与 `fleetent admin node` CLI 保持功能等价。注销成功 SHALL 返回 204；unpin 成功 SHALL 返回 204。注销仍有 pinned agent 的 node 时，409 响应体 SHALL 列出被 pin 的 agent（供运维知道需先解除哪些 pin）。
+系统 SHALL 在 `/admin/nodes` 下暴露管理员可用的 HTTP API，覆盖 node 注册、列举、注销、pin 与 unpin。所有端点 SHALL 使用 `Authorization: Session <token>` 做管理员鉴权，而不是 node 自身的 Bearer service key。底层操作 SHALL 复用 `node_store` 与 `placement_store`，与 `fleetent platform node` CLI 保持功能等价。注销成功 SHALL 返回 204；unpin 成功 SHALL 返回 204。注销仍有 pinned agent 的 node 时，409 响应体 SHALL 列出被 pin 的 agent（供运维知道需先解除哪些 pin）。
 
 #### Scenario: 管理员通过 HTTP 注册 node
 

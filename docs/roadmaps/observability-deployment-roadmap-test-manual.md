@@ -47,8 +47,7 @@ observability_deployment_acceptance:
 - 可以把当前机器当作单节点准生产环境完成本手册的大部分人工验证。
 - 推荐使用 Docker Compose 在本机启动 Pilot 入口，这样能同时覆盖部署入口、配置初始化、volume、backup 和
   diagnostics 路径。
-- 源码环境下的 `uv run uvicorn fleetent.server:app --reload` 只作为开发模式补充证据；如果用它替代
-  Docker Compose，需要把 `FLEETENT_DOCKER_COMPOSE_SMOKE` 记录为 skipped，并说明原因。
+- 源码环境下的 `uv run fleetent platform serve` 是标准服务启动入口；`uvicorn fleetent.server:app --reload` 可直接作为 ASGI 应用访问，仅用于开发模式补充证据；如果用它替代 Docker Compose，需要把 `FLEETENT_DOCKER_COMPOSE_SMOKE` 记录为 skipped，并说明原因。
 - 本机模式可以验证 config validation、SQLite backup / upgrade / restore drill、trace / usage /
   performance 查询、diagnostics export / redaction 和 Pilot verification report。
 - 本机模式不能替代生产主机安全基线、客户网络策略、多节点部署、长期容量压测、真实公网回调和企业运维流程。
@@ -123,7 +122,7 @@ uv run pytest tests/integration/test_trace_events.py \
 
 ```bash
 test -f agents/<agent-id>/agent.yaml
-uv run fleetent admin validate-config --profile pilot --format json
+uv run fleetent platform validate-config --profile pilot --format json
 GET /admin/kb/connectors
 ```
 
@@ -151,8 +150,8 @@ GET /admin/kb/connectors
 执行：
 
 ```bash
-docker compose run --rm --entrypoint uv fleetent run fleetent admin --help
-docker compose run --rm --entrypoint uv fleetent run fleetent admin init-config
+docker compose run --rm --entrypoint uv fleetent run fleetent platform --help
+docker compose run --rm --entrypoint uv fleetent run fleetent platform init-config
 docker compose up -d
 docker compose ps
 ```
@@ -191,19 +190,19 @@ curl -fsS http://127.0.0.1:8765/health || true
 执行 dry-run：
 
 ```bash
-uv run python scripts/upgrade.py --dry-run
+uv run fleetent platform upgrade --dry-run
 ```
 
 执行 backup-only：
 
 ```bash
-uv run python scripts/upgrade.py --backup-only
+uv run fleetent platform upgrade --backup-only
 ```
 
 执行 upgrade：
 
 ```bash
-uv run python scripts/upgrade.py
+uv run fleetent platform upgrade
 ```
 
 人工 restore drill：
@@ -281,14 +280,14 @@ GET /admin/observability/performance?limit=100
 执行：
 
 ```bash
-uv run fleetent admin diagnostics export
-uv run fleetent admin diagnostics retention dry-run
+uv run fleetent platform diagnostics export
+uv run fleetent platform diagnostics retention dry-run
 ```
 
 人工复核：
 
 - package 包含 manifest、logs summary、trace / usage / performance summary、connector status、environment 和 config summary。
-- package 不包含 SQLite 主库（`data/management.db` 及 agent 侧各库）、`data/backups/`、credential 文件、secret 文件、完整 prompt / reply、KB chunks。
+- package 不包含 SQLite 主库（`management.db` 及 `tenants/<tenant>/agents/<agent>/data/` 下各库）、`data/backups/`、credential 文件、secret 文件、完整 prompt / reply、KB chunks。
 - redaction 后仍能定位错误类型、run id、connector id 和 skip reason。
 
 建议检查：

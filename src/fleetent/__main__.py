@@ -19,7 +19,10 @@ from fleetent.runtime import run_sync as run
 
 def _parse_agent_run(args: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="fleetent agent run")
-    parser.add_argument("agent_id", help="agent id (home at FLEETENT_HOME/agents/<agent-id>/)")
+    parser.add_argument(
+        "agent_id",
+        help="agent id (home at FLEETENT_HOME/tenants/default/agents/<agent-id>/)",
+    )
     parser.add_argument("--port", type=int, default=None, help="serve HTTP /chat + /ws on PORT")
     parser.add_argument("--home", default=None, help="override the agent home directory")
     parser.add_argument("--no-im", action="store_true", help="disable in-process IM supervisors")
@@ -28,7 +31,10 @@ def _parse_agent_run(args: list[str]) -> argparse.Namespace:
 
 def _parse_agent_restart(args: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="fleetent agent restart")
-    parser.add_argument("agent_id", help="agent id (home at FLEETENT_HOME/agents/<agent-id>/)")
+    parser.add_argument(
+        "agent_id",
+        help="agent id (home at FLEETENT_HOME/tenants/default/agents/<agent-id>/)",
+    )
     parser.add_argument("--port", type=int, default=None, help="serve HTTP /chat + /ws on PORT")
     parser.add_argument("--home", default=None, help="override the agent home directory")
     parser.add_argument("--no-im", action="store_true", help="disable in-process IM supervisors")
@@ -37,14 +43,20 @@ def _parse_agent_restart(args: list[str]) -> argparse.Namespace:
 
 def _parse_agent_stop(args: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="fleetent agent stop")
-    parser.add_argument("agent_id", help="agent id (home at FLEETENT_HOME/agents/<agent-id>/)")
+    parser.add_argument(
+        "agent_id",
+        help="agent id (home at FLEETENT_HOME/tenants/default/agents/<agent-id>/)",
+    )
     parser.add_argument("--home", default=None, help="override the agent home directory")
     return parser.parse_args(args)
 
 
 def _parse_agent_init(args: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="fleetent agent init")
-    parser.add_argument("agent_id", help="agent id (home at FLEETENT_HOME/agents/<agent-id>/)")
+    parser.add_argument(
+        "agent_id",
+        help="agent id (home at FLEETENT_HOME/tenants/default/agents/<agent-id>/)",
+    )
     parser.add_argument("--home", default=None, help="override the agent home directory")
     parser.add_argument("--force", action="store_true", help="overwrite an existing agent.yaml")
     return parser.parse_args(args)
@@ -87,11 +99,17 @@ def main(argv: list[str] | None = None) -> None:
         agent_app._stop_running(home_dir)
         return
 
-    if argv and argv[0] == "admin":
-        from fleetent.platform.admin_cli.main import main as admin_main
+    if argv and argv[0] == "platform":
+        from fleetent.platform.platform_cli.main import main as platform_main
 
-        admin_main(argv[1:], prog="fleetent admin")
+        platform_main(argv[1:], prog="fleetent platform")
         return
+
+    if argv and argv[0] == "admin":
+        print(
+            "error: 'admin' is not a recognized command; use 'fleetent platform'", file=sys.stderr
+        )
+        sys.exit(1)
 
     if argv and argv[0] == "node":
         if argv[1:] != ["start"]:

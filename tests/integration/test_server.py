@@ -170,6 +170,7 @@ def test_clone_persists_via_wired_seam(tmp_path, monkeypatch, isolated_schedule_
     assert r.status_code == 200
     copy = agent_store.get_by_name("ops-copy")
     assert copy is not None and copy.system_prompt == "Ops prompt"
+    assert not (tmp_path / "tenants" / "default" / "agents" / "ops-copy").exists()
 
 
 def test_apply_persists_via_wired_seam(tmp_path, monkeypatch, isolated_schedule_db):
@@ -184,6 +185,7 @@ def test_apply_persists_via_wired_seam(tmp_path, monkeypatch, isolated_schedule_
     assert r.status_code == 200
     found = agent_store.get_by_name("fresh")
     assert found is not None and found.system_prompt == "Fresh."
+    assert not (tmp_path / "tenants" / "default" / "agents" / "fresh").exists()
 
 
 def test_apply_persists_model_overrides_via_wired_seam(tmp_path, monkeypatch, isolated_schedule_db):
@@ -395,8 +397,7 @@ def test_create_persists_version_config_via_wired_seam(tmp_path, monkeypatch, is
     assert a.mcp_server_ids == ["github"]
     assert a.model_overrides == {"model": "x"}
     assert a.memory_namespace == "team"
-    # platform-agent-lifecycle: create materialized the runnable home
-    assert (tmp_path / "agents" / "cfg" / "agent.yaml").exists()
+    assert not (tmp_path / "tenants" / "default" / "agents" / "cfg").exists()
 
 
 def test_update_overrides_only_provided_via_wired_seam(tmp_path, monkeypatch, isolated_schedule_db):
@@ -413,3 +414,4 @@ def test_update_overrides_only_provided_via_wired_seam(tmp_path, monkeypatch, is
     a = agent_store.get_by_name("cfg")
     assert a.memory_namespace == "team"
     assert a.skills_dir == "/s"  # inherited
+    assert not (tmp_path / "tenants" / "default" / "agents" / "cfg").exists()

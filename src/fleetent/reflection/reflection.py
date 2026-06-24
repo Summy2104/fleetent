@@ -37,7 +37,8 @@ MaintenanceAction = Literal[
     "rewrite",
     "compact",
     "delete",
-    "suggest_shared_memory_or_kb",
+    "suggest_agent_memory_or_kb",
+    "suggest_shared_memory_or_kb",  # legacy — kept for reading old records
 ]
 MaintenanceRisk = Literal["low", "medium", "high"]
 MaintenanceStatus = Literal["pending", "approved", "rejected", "applied", "expired"]
@@ -61,8 +62,8 @@ _MUTATING_ACTIONS = {"mark_stale", "merge", "rewrite", "compact", "delete"}
 def _proposal_routing_key(domain: ProposalDomain, action: str | None) -> str:
     if domain == "skill":
         return "reflection_skill_proposal"
-    if action == "suggest_shared_memory_or_kb":
-        return "reflection_shared_memory_proposal"
+    if action in ("suggest_agent_memory_or_kb", "suggest_shared_memory_or_kb"):
+        return "reflection_agent_memory_proposal"
     return "reflection_user_memory_proposal"
 
 
@@ -386,14 +387,14 @@ def generate_memory_maintenance_proposals(
                 proposals.append(
                     _build_memory_maintenance_proposal(
                         user_id=user_id,
-                        action="suggest_shared_memory_or_kb",
+                        action="suggest_agent_memory_or_kb",
                         target_memory_ids=[],
                         proposed_content=fact,
                         risk="low",
                         reason=finding.summary,
                         evidence_ids=finding.evidence_ids,
                         metadata_patch={
-                            "boundary": "not_user_memory:suggest_shared_memory_or_kb",
+                            "boundary": "not_user_memory:suggest_agent_memory_or_kb",
                             "source_finding": finding.type,
                         },
                         report_id=report_id,
@@ -855,14 +856,14 @@ def expire_memory_maintenance_proposal(proposal_id: str) -> MemoryProposal:
     return updated
 
 
-def mark_shared_memory_proposal_applied(proposal_id: str) -> MemoryProposal:
-    """Mark an approved Shared Memory suggestion applied without User Memory owner mutation."""
+def mark_agent_memory_proposal_applied(proposal_id: str) -> MemoryProposal:
+    """Mark an approved Agent Memory suggestion applied without User Memory owner mutation."""
     proposal = get_memory_maintenance_proposal(proposal_id)
     _require_status(proposal, {"approved"})
-    if proposal.action != "suggest_shared_memory_or_kb":
-        raise ValueError("proposal is not a shared memory suggestion")
-    if proposal.metadata_patch.get("target") != "shared_memory":
-        raise ValueError("proposal target is not shared_memory")
+    if proposal.action != "suggest_agent_memory_or_kb":
+        raise ValueError("proposal is not an agent memory suggestion")
+    if proposal.metadata_patch.get("target") != "agent_memory":
+        raise ValueError("proposal target is not agent_memory")
     updated = _with_status(proposal, "applied")
     updated = replace(
         updated,
@@ -870,7 +871,7 @@ def mark_shared_memory_proposal_applied(proposal_id: str) -> MemoryProposal:
         applied_at=datetime.now(UTC).replace(microsecond=0),
     )
     _update_maintenance_proposal(updated)
-    _record_maintenance_event("shared_memory_proposal_applied", updated)
+    _record_maintenance_event("agent_memory_proposal_applied", updated)
     return updated
 
 
@@ -1960,12 +1961,12 @@ async def _apply_maintenance_action(proposal: MemoryProposal) -> None:
         for memory_id in proposal.target_memory_ids:
             await memory.delete_user_memory(proposal.user_id, memory_id)
         return
-    if proposal.action == "suggest_shared_memory_or_kb":
+    if proposal.action in ("suggest_agent_memory_or_kb", "suggest_shared_memory_or_kb"):
         target = proposal.metadata_patch.get("target")
-        if target == "shared_memory":
-            from fleetent.memory import shared as shared_memory
+        if target in ("agent_memory", "shared_memory"):
+            from fleetent.memory import agent_memory as agent_memory_module
 
-            await shared_memory.apply_shared_memory_proposal(
+            await agent_memory_module.apply_agent_memory_proposal(
                 proposal.id,
                 actor_id=proposal.user_id,
             )
@@ -1973,10 +1974,9 @@ async def _apply_maintenance_action(proposal: MemoryProposal) -> None:
         if target == "knowledge_base":
             raise RuntimeError("knowledge base proposals are no longer handled on the agent side")
         if target is None:
-            # Older proposals may not yet carry a concrete shared-memory / KB target.
-            # Preserve the legacy "no user-memory write" behavior for those records.
+            # Older proposals may not yet carry a concrete target — preserve legacy no-op behavior.
             return
-        raise ValueError("proposal target is not shared_memory")
+        raise ValueError("proposal target is not agent_memory")
     raise ValueError(f"unsupported maintenance action: {proposal.action}")
 
 
@@ -2025,7 +2025,8 @@ def _validate_proposal_input(
         "rewrite",
         "compact",
         "delete",
-        "suggest_shared_memory_or_kb",
+        "suggest_agent_memory_or_kb",
+        "suggest_shared_memory_or_kb",  # legacy — reading old records
     }:
         raise ValueError(f"unsupported maintenance action: {action}")
     if risk not in {"low", "medium", "high"}:

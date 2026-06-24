@@ -35,12 +35,12 @@ def test_platform_read_projection_uses_readonly_connections(tmp_path: Path) -> N
 
     # Must use _ro variants, not the migrate-on-open originals
     assert "open_state_db_ro" in attr_calls, "read_projection must call open_state_db_ro"
-    assert "open_shared_memory_db_ro" in attr_calls, (
-        "read_projection must call open_shared_memory_db_ro"
+    assert "open_agent_memory_db_ro" in attr_calls, (
+        "read_projection must call open_agent_memory_db_ro"
     )
 
     # Must NOT call the write-side open (which would trigger migrations)
-    forbidden = {"open_state_db", "open_kb_db", "open_shared_memory_db"}
+    forbidden = {"open_state_db", "open_kb_db", "open_agent_memory_db"}
     used_forbidden = forbidden & set(attr_calls)
     assert not used_forbidden, (
         f"read_projection must not call migrate-on-open functions: {used_forbidden}"
@@ -130,13 +130,13 @@ def test_different_tenants_have_non_overlapping_paths(tmp_path: Path) -> None:
     t2_path = t2_agent.state_db.path
 
     # Paths must be completely disjoint
-    assert not t1_path.is_relative_to(tmp_path / "tenant-2"), (
+    assert not t1_path.is_relative_to(tmp_path / "tenants" / "tenant-2"), (
         "T1 agent path must not be inside T2 directory"
     )
-    assert not t2_path.is_relative_to(tmp_path / "tenant-1"), (
+    assert not t2_path.is_relative_to(tmp_path / "tenants" / "tenant-1"), (
         "T2 agent path must not be inside T1 directory"
     )
 
     # Confirm T1 path is under tenant-1/ and T2 under tenant-2/
-    assert t1_path.is_relative_to(tmp_path / "tenant-1")
-    assert t2_path.is_relative_to(tmp_path / "tenant-2")
+    assert t1_path.is_relative_to(tmp_path / "tenants" / "tenant-1")
+    assert t2_path.is_relative_to(tmp_path / "tenants" / "tenant-2")

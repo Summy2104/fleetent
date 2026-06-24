@@ -368,7 +368,7 @@ _CONTROL_FACE_PREFIXES = (
     "fleetent.platform.chat_management",
     "fleetent.platform.askit_console",
     "fleetent.platform.reflection_management",
-    "fleetent.platform.admin_cli",
+    "fleetent.platform.platform_cli",
     "fleetent.platform.agent_statistics",
     "fleetent.platform.im_gateway_management",
 )
@@ -399,7 +399,6 @@ _KNOWN_PLANE_BOUNDARY_VIOLATIONS: set[tuple[str, str]] = {
     ),
     ("fleetent.platform.agent_lifecycle.materialize", "fleetent.platform.skill_management"),
     # ②控制 modules call ③编排 to trigger re-materialization after store changes
-    ("fleetent.platform.skill_management.skill_admin_api", "fleetent.platform.agent_lifecycle"),
     (
         "fleetent.platform.knowledge_base_management.kb_admin_api",
         "fleetent.platform.agent_lifecycle",
@@ -436,18 +435,45 @@ def test_core_modules_do_not_import_face_namespaces() -> None:
 
 
 def test_node_supervisor_does_not_import_platform_or_runtime() -> None:
+    # Allowed exception: node may import runtime.agent_init to call ensure_env_scaffold
+    # before spawning an agent process (node → runtime is the contract-sanctioned direction
+    # for the deployment host that starts/reads agent processes).
+    allowed_runtime_imports = {"fleetent.runtime.agent_init"}
+
     violations: list[str] = []
     for path in _src_python_paths():
         module_name = _module_name(path)
         if not module_name.startswith("fleetent.node"):
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        imported_modules = set(_iter_imported_modules(tree))
+        imported_modules = set(_iter_imported_modules(tree)) - allowed_runtime_imports
         if _is_imported_from(["fleetent.platform", "fleetent.runtime"], imported_modules):
             violations.append(module_name)
     assert not violations, (
         "fleetent.node must stay as HTTP client + subprocess orchestrator only; "
         "forbidden imports found in: " + ", ".join(violations)
+    )
+
+
+def test_node_skill_path_does_not_depend_on_git_pool_semantics() -> None:
+    """Node skill deploy/read path must treat platform as bundle API, never a git client."""
+    offenders: list[str] = []
+    forbidden_tokens = (
+        "pool_git",
+        "git clone",
+        "git pull",
+        "dulwich",
+    )
+    for path in _src_python_paths():
+        module_name = _module_name(path)
+        if not module_name.startswith("fleetent.node"):
+            continue
+        content = path.read_text(encoding="utf-8")
+        if any(token in content for token in forbidden_tokens):
+            offenders.append(module_name)
+    assert not offenders, (
+        "fleetent.node must consume immutable skill bundles only, not git/pool semantics: "
+        + ", ".join(offenders)
     )
 
 

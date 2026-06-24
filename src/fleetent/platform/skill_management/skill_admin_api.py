@@ -25,8 +25,7 @@ from typing import Any
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from fleetent import agent_store, audit_log, auth, user_store
-from fleetent.platform.agent_lifecycle import materialize
+from fleetent import audit_log, auth, user_store
 from fleetent.platform.reflection_management import (
     reflection_list_proposals,
     reflection_proposal_diff,
@@ -100,13 +99,14 @@ def engine_observability(skill_name: str) -> dict[str, Any]:
 
 
 def _rematerialize_all() -> list[str]:
-    """Re-export every agent's home after a global skill-state change. Injectable seam."""
-    return materialize.rematerialize_all()
+    """Legacy seam kept for tests; managed deployment updates homes via node reconcile."""
+    return []
 
 
 def _rematerialize_agent(name: str) -> None:
-    """Re-export one agent's home after a per-agent binding change. Injectable seam."""
-    materialize.materialize_from_store(name)
+    """Legacy seam kept for tests; managed deployment updates homes via node reconcile."""
+    del name
+    return None
 
 
 # --- auth helpers -------------------------------------------------------------
@@ -248,8 +248,15 @@ def create_skill(body: SkillBody, authorization: str | None = Header(None)) -> d
         raise HTTPException(
             status_code=422, detail="invalid frontmatter (name/description required)"
         )
+    if not _safe_skill_name(body.name):
+        raise HTTPException(status_code=422, detail=f"unsafe skill name: {body.name!r}")
     skill_admin_store.set_source(body.name, body.source)
     verdict = engine_audit(body.content)
+    # Persist inline content to the pool so it is readable back, scanned by the engine
+    # reload, and delivered to agents by node sync — mirroring _import_skill_dir's
+    # on-disk materialization. A rejected (quarantined) skill is never written.
+    if verdict["verdict"] != "rejected":
+        _write_skill_content(body.name, body.content)
     result = _publish(body.name, body.content, verdict)
     audit_log.write_audit(user.id, "skill.create", "skill", body.name, detail=result)
     return result
@@ -257,6 +264,17 @@ def create_skill(body: SkillBody, authorization: str | None = Header(None)) -> d
 
 def _safe_skill_name(name: str) -> bool:
     return bool(name) and ".." not in name and all(c.isalnum() or c in "._-" for c in name)
+
+
+def _write_skill_content(name: str, content: str) -> None:
+    """Materialize an inline-created skill's SKILL.md into the skills pool.
+
+    Caller guarantees ``name`` passed ``_safe_skill_name`` (no path traversal). The
+    engine_reload triggered by _publish then rescans the pool and indexes the skill.
+    """
+    dest_dir = Path(engine_skills_dir()) / name
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    (dest_dir / "SKILL.md").write_text(content, encoding="utf-8")
 
 
 def _import_skill_dir(src_dir: Path, source: str) -> dict[str, Any]:
@@ -373,6 +391,11 @@ def edit_skill(
         )
     source = skill_admin_store.get_source(name)
     verdict = engine_audit(body.content)
+    # Persist edited content to the pool before the engine_reload re-scans from disk;
+    # without this the rescan reads stale on-disk content and the edit is silently lost
+    # (mirrors create's _write_skill_content). A rejected (quarantined) edit is not written.
+    if verdict["verdict"] != "rejected":
+        _write_skill_content(name, body.content)
     result = _publish(name, body.content, verdict)
     result["source"] = source["source"]
     audit_log.write_audit(user.id, "skill.edit", "skill", name, detail=result)
@@ -388,7 +411,6 @@ def disable_skill(name: str, authorization: str | None = Header(None)) -> dict[s
     skill_admin_store.set_global_enabled(name, False)
     engine_set_global_disabled(name, True)
     audit_log.write_audit(user.id, "skill.disable", "skill", name)
-    _rematerialize_all()
     return {"name": name, "global_enabled": 0}
 
 
@@ -398,7 +420,6 @@ def enable_skill(name: str, authorization: str | None = Header(None)) -> dict[st
     skill_admin_store.set_global_enabled(name, True)
     engine_set_global_disabled(name, False)
     audit_log.write_audit(user.id, "skill.enable", "skill", name)
-    _rematerialize_all()
     return {"name": name, "global_enabled": 1}
 
 
@@ -459,9 +480,6 @@ def set_skill_agent_binding(
     skill_admin_store.set_binding(agent_id, name, body.enabled, updated_by=user.id)
     action = "skill.agent_enable" if body.enabled else "skill.agent_disable"
     audit_log.write_audit(user.id, action, "skill", name, detail={"agent_id": agent_id})
-    agent_name = agent_store.get_agent_name_by_id(agent_id)
-    if agent_name is not None:
-        _rematerialize_agent(agent_name)
     return {"name": name, "agent_id": agent_id, "enabled": body.enabled}
 
 

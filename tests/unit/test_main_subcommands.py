@@ -9,19 +9,30 @@ from fleetent import __main__ as cli
 from fleetent.runtime import agent_app
 
 
-def test_admin_subcommand_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_platform_subcommand_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[list[str], str]] = []
-    admin_main_module = importlib.import_module("fleetent.platform.admin_cli.main")
+    platform_main_module = importlib.import_module("fleetent.platform.platform_cli.main")
 
-    def fake_main(argv: list[str] | None = None, prog: str = "fleetent admin") -> None:
+    def fake_main(argv: list[str] | None = None, prog: str = "fleetent platform") -> None:
         calls.append((argv or [], prog))
 
-    monkeypatch.setattr(admin_main_module, "main", fake_main)
-    monkeypatch.setattr("sys.argv", ["fleetent", "admin", "validate-config", "--format", "json"])
+    monkeypatch.setattr(platform_main_module, "main", fake_main)
+    monkeypatch.setattr("sys.argv", ["fleetent", "platform", "validate-config", "--format", "json"])
 
     cli.main()
 
-    assert calls == [(["validate-config", "--format", "json"], "fleetent admin")]
+    assert calls == [(["validate-config", "--format", "json"], "fleetent platform")]
+
+
+def test_admin_subcommand_fails_as_unknown(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("sys.argv", ["fleetent", "admin", "validate-config"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main()
+
+    assert exc_info.value.code != 0
 
 
 def test_node_start_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -98,7 +109,7 @@ def test_tui_no_longer_dispatches_client(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_agent_run_does_not_import_platform(monkeypatch: pytest.MonkeyPatch) -> None:
-    sys.modules.pop("fleetent.platform.admin_cli", None)
+    sys.modules.pop("fleetent.platform.platform_cli", None)
 
     async def fake_serve(
         agent_id: str,
@@ -114,7 +125,7 @@ def test_agent_run_does_not_import_platform(monkeypatch: pytest.MonkeyPatch) -> 
 
     cli.main()
 
-    assert "fleetent.platform.admin_cli" not in sys.modules
+    assert "fleetent.platform.platform_cli" not in sys.modules
 
 
 def test_tui_does_not_load_on_agent_run(monkeypatch: pytest.MonkeyPatch) -> None:

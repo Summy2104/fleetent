@@ -2,6 +2,20 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useAdminApi } from '@/lib/api-client';
 
+export type AgentRuntime = {
+  phase?: string | null;
+  health?: string | null;
+  pid?: number | null;
+  node_id?: string | null;
+  reported_at?: string | null;
+};
+
+export type AgentPlacement = {
+  node_id: string;
+  pinned_at?: string | null;
+  pinned_by?: string | null;
+};
+
 export type AgentListItem = {
   agent_name: string;
   is_default?: boolean;
@@ -9,12 +23,28 @@ export type AgentListItem = {
   provenance: string;
   system_prompt?: string;
   allowed_tools?: string[];
+  // Node-reported runtime state (null when no node has reported) and node binding.
+  runtime?: AgentRuntime | null;
+  placement?: AgentPlacement | null;
 };
+
+// Opaque per-agent model policy authored by the console. The known shape is
+// ``{ routes: { <route>: [{ provider_id }] }, __credential_slots__: {...} }``; kept loose so
+// non-route keys (e.g. credential slots) survive an edit round-trip untouched.
+export type AgentModelOverrides = Record<string, unknown>;
 
 export type CreateAgentInput = {
   name: string;
   system_prompt: string;
   allowed_tools: string[];
+  model_overrides?: AgentModelOverrides;
+};
+
+export type UpdateAgentInput = {
+  system_prompt?: string;
+  allowed_tools?: string[];
+  model_overrides?: AgentModelOverrides;
+  config_overrides_yaml?: string;
 };
 
 // Fields the PATCH /admin/agents/{name} endpoint accepts (UpdateBody). All
@@ -29,6 +59,8 @@ export type UpdateAgentInput = {
 export type AgentDetail = {
   agent: string;
   allowed_tools: string[];
+  model_overrides?: AgentModelOverrides;
+  config_overrides_yaml?: string;
   status: string;
   system_prompt: string;
   supports_dm?: boolean;
@@ -37,6 +69,8 @@ export type AgentDetail = {
   memory_namespace?: string;
   provenance?: string;
   version?: number;
+  runtime?: AgentRuntime | null;
+  placement?: AgentPlacement | null;
 };
 
 export type AgentRequiredEnvRow = {
@@ -65,6 +99,7 @@ export type AgentSkillBinding = {
 export type AgentBindings = {
   mcp_servers: string[];
   users: string[];
+  groups: AgentImGroupInput[];
 };
 
 export type AgentOauthGrant = {
@@ -444,6 +479,7 @@ export function useSetAgentImCapabilitiesMutation(name: string) {
 
 export function useAddAgentImGroupMutation(name: string) {
   const api = useAdminApi();
+  const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: (input: AgentImGroupInput) =>
@@ -451,15 +487,22 @@ export function useAddAgentImGroupMutation(name: string) {
         `/admin/agents/${name}/bindings/groups`,
         input
       ),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: agentBindingsKey(name) });
+    },
   });
 }
 
 export function useRemoveAgentImGroupMutation(name: string) {
   const api = useAdminApi();
+  const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: ({ group_id, platform }: AgentImGroupInput) =>
       api.delete<void>(`/admin/agents/${name}/bindings/groups/${platform}/${group_id}`),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: agentBindingsKey(name) });
+    },
   });
 }
 

@@ -16,24 +16,26 @@ def _config(tmp_path) -> NodeConfig:
     )
 
 
+def _home(tmp_path, agent_name: str = "support", tenant_id: str = "default"):
+    return tmp_path / "tenants" / tenant_id / "agents" / agent_name
+
+
 def test_local_backend_spawn_uses_agent_run(monkeypatch, tmp_path) -> None:
     from fleetent.node.backend import LocalProcessBackend
 
-    calls: list[tuple[tuple[str, ...], str | None, dict[str, str] | None]] = []
+    calls: list[tuple[tuple[str, ...], str | None]] = []
 
     def fake_popen(cmd: list[str], **kwargs):
-        calls.append((tuple(cmd), kwargs.get("cwd"), kwargs.get("env")))
+        calls.append((tuple(cmd), kwargs.get("cwd")))
         return object()
 
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
-    monkeypatch.setenv("PATH", os.environ["PATH"])
-    monkeypatch.setenv("BASE_ENV", "base-value")
 
     backend = LocalProcessBackend(_config(tmp_path))
-    backend.spawn("support", env={"ANTHROPIC_API_KEY": "sk-live-secret"})
+    backend.spawn("support")
 
     assert len(calls) == 1
-    cmd, cwd, env = calls[0]
+    cmd, cwd = calls[0]
     assigned_port = backend.gateway_port("support")
     assert assigned_port is not None
     assert cmd == (
@@ -45,13 +47,9 @@ def test_local_backend_spawn_uses_agent_run(monkeypatch, tmp_path) -> None:
         "--port",
         str(assigned_port),
         "--home",
-        str(tmp_path / "agents" / "support"),
+        str(_home(tmp_path)),
     )
     assert cwd == str(tmp_path)
-    assert env is not None
-    assert env["BASE_ENV"] == "base-value"
-    assert env["ANTHROPIC_API_KEY"] == "sk-live-secret"
-    assert not (tmp_path / "agents" / "support" / ".env").exists()
 
 
 def test_local_backend_spawn_disables_agent_local_im(monkeypatch, tmp_path) -> None:
@@ -93,7 +91,7 @@ def test_local_backend_stop_uses_agent_stop(monkeypatch, tmp_path) -> None:
                 "stop",
                 "support",
                 "--home",
-                str(tmp_path / "agents" / "support"),
+                str(_home(tmp_path)),
             ),
             True,
         )
@@ -103,7 +101,7 @@ def test_local_backend_stop_uses_agent_stop(monkeypatch, tmp_path) -> None:
 def test_local_backend_is_alive_reads_pid_file_and_checks_process(monkeypatch, tmp_path) -> None:
     from fleetent.node.backend import LocalProcessBackend
 
-    home = tmp_path / "agents" / "support"
+    home = _home(tmp_path)
     home.mkdir(parents=True)
     (home / ".fleetent.pid").write_text("12345")
 
@@ -119,7 +117,7 @@ def test_local_backend_is_alive_reads_pid_file_and_checks_process(monkeypatch, t
 def test_local_backend_is_alive_returns_none_for_stale_pid(monkeypatch, tmp_path) -> None:
     from fleetent.node.backend import LocalProcessBackend
 
-    home = tmp_path / "agents" / "support"
+    home = _home(tmp_path)
     home.mkdir(parents=True)
     (home / ".fleetent.pid").write_text("12345")
 
@@ -131,3 +129,26 @@ def test_local_backend_is_alive_returns_none_for_stale_pid(monkeypatch, tmp_path
     backend = LocalProcessBackend(_config(tmp_path))
 
     assert backend.is_alive("support") is None
+
+
+# --- task 2.4: spawn must NOT inject secrets via process env ---
+
+
+def test_local_backend_spawn_does_not_inject_secrets_in_process_env(monkeypatch, tmp_path) -> None:
+    """After D1 (env-only), secrets live in .env only; spawn must not pass env to Popen."""
+    from fleetent.node.backend import LocalProcessBackend
+
+    popen_kwargs: list[dict] = []
+
+    def fake_popen(cmd: list[str], **kwargs):
+        popen_kwargs.append(kwargs)
+        return object()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    backend = LocalProcessBackend(_config(tmp_path))
+    backend.spawn("support")
+
+    assert len(popen_kwargs) == 1
+    # env=None means Popen inherits the parent env; no injected secret dict
+    assert popen_kwargs[0].get("env") is None

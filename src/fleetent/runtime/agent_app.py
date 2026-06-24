@@ -152,10 +152,10 @@ async def _drain_and_close(rt: AgentRuntime, drain_timeout: float) -> None:
 
 
 def resolve_home(agent_id: str, home: str | Path | None = None) -> Path:
-    """Resolve the agent home: explicit ``home`` wins, else ``FLEETENT_HOME/agents/<id>``."""
+    """Resolve the agent home: explicit ``home`` wins, else default-tenant home."""
     if home is not None:
         return Path(home)
-    return paths.base_dir() / "agents" / agent_id
+    return paths.agent_home_dir(agent_id)
 
 
 def _validate_tui_token(authorization_header: str) -> Principal | None:
@@ -213,13 +213,21 @@ def _redirect_agent_data_paths(home_dir: Path) -> None:
     directly to module-level constants so the change takes effect for all subsequent
     operations in this process without introducing new env vars.
     """
+    from fleetent import eval_logger
     from fleetent.im_gateway import access
+    from fleetent.integrations.sandbox import manager as sandbox_manager
+    from fleetent.integrations.sandbox import output_spill
     from fleetent.observability import diagnostics
     from fleetent.session import manager as session_mgr
+    from fleetent.tools import result_truncation
 
     data_dir = home_dir / "data"
     session_mgr.SESSIONS_DIR = data_dir / "sessions"
     access.APPROVALS_PATH = data_dir / "im_approvals.json"
+    eval_logger.TRACE_PATH = data_dir / "traces.jsonl"
+    sandbox_manager.set_workspace_root(data_dir / "workspaces")
+    result_truncation.SPILLOVER_DIR = data_dir / "tool_spillover"
+    output_spill.SANDBOX_OUTPUT_DIR = data_dir / "sandbox_output"
     # Replace the _default_data_dir callable so diagnostics export/retention
     # resolve to this agent's data dir, not the global FLEETENT_HOME/data/.
     diagnostics._default_data_dir = lambda: data_dir  # type: ignore[assignment]
@@ -275,6 +283,26 @@ def _configure_logging_from_agent(agent: AgentFile, home_dir: Path) -> None:
     )
 
 
+def _tenant_router_root_for_agent_data_dir(
+    data_dir: Path, *, agent_id: str, tenant_id: str
+) -> Path:
+    """Return Fleetent home root for a tenant-first agent ``data/`` directory.
+
+    Tests and a few direct helpers still pass ``<home>/data`` where ``home`` is not a
+    tenant-first path. In that legacy shape, keep the previous "parent is root" behavior.
+    """
+    agent_home = data_dir.parent
+    if (
+        data_dir.name == "data"
+        and agent_home.name == agent_id
+        and agent_home.parent.name == "agents"
+        and agent_home.parent.parent.name == tenant_id
+        and agent_home.parent.parent.parent.name == "tenants"
+    ):
+        return agent_home.parent.parent.parent.parent
+    return data_dir.parent
+
+
 def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "default") -> None:
     """Bootstrap all agent-side DB tables anchored on data_dir.
 
@@ -288,9 +316,9 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     from fleetent.im_gateway import outbound_queue_store
     from fleetent.knowledge_base import runtime as kb_runtime
     from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
-    from fleetent.memory import shared as shared_memory
+    from fleetent.memory import agent_memory as agent_memory_module
     from fleetent.memory import store as memory_store
-    from fleetent.memory.shared_memory_migrations import MIGRATIONS as SHARED_MEMORY_MIGRATIONS
+    from fleetent.memory.agent_memory_migrations import MIGRATIONS as AGENT_MEMORY_MIGRATIONS
     from fleetent.observability import traces
     from fleetent.runtime import context as runtime_context
     from fleetent.runtime import sub_agent_lifecycle
@@ -298,17 +326,26 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     from fleetent.session import index as session_index
     from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
 
-    router = TenantRouter(SQLiteTenantBackend(data_dir=data_dir))
+    # Callers pass the running agent's ``<home>/data`` directory. TenantRouter needs the
+    # enclosing Fleetent home root; otherwise a tenant-first home would get nested under
+    # ``<agent-home>/tenants/...`` at real node runtime.
+    router = TenantRouter(
+        SQLiteTenantBackend(
+            data_dir=_tenant_router_root_for_agent_data_dir(
+                data_dir, agent_id=agent_id, tenant_id=tenant_id
+            )
+        )
+    )
     tenant_scope = router.tenant_scope(tenant_id)
     kb_db = tenant_scope.open_kb_db(KB_MIGRATIONS)
     kb_runtime.set_database(kb_db)
     kb_runtime.set_vector_backend(tenant_scope.kb_vector_backend)
-    sm_db = tenant_scope.open_shared_memory_db(SHARED_MEMORY_MIGRATIONS)
-    shared_memory.set_shared_memory_db(
-        sm_db,
-        tenant_scope.shared_memory_vector_backend,  # type: ignore[arg-type]
-    )
     agent_scope = router.agent_scope(tenant_id, agent_id)
+    am_db = agent_scope.open_agent_memory_db(AGENT_MEMORY_MIGRATIONS)
+    agent_memory_module.set_agent_memory_db(
+        am_db,
+        agent_scope.agent_memory_vector_backend,  # type: ignore[arg-type]
+    )
     agent_state_db = agent_scope.open_state_db(AGENT_STATE_MIGRATIONS)
     session_index.set_state_db(agent_state_db)
     traces.set_state_db(agent_state_db)

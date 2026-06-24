@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install test t test-pr test-unit test-unit-ci test-coverage-ci test-integration test-e2e test-evaluation test-layers lint fmt check typecheck admin \
+.PHONY: help install test t test-pr test-unit test-unit-ci test-coverage-ci test-integration test-e2e test-evaluation test-layers lint fmt check typecheck platform-help \
 	frontend-install frontend-build test-frontend \
 	dev-bootstrap platform node-provision node kb-worker agent chat dev-clean
 
@@ -81,8 +81,8 @@ test-frontend: ## Run frontend tests, coverage, typecheck, and lint
 	yarn --cwd frontend tsc --noEmit
 	yarn --cwd frontend eslint .
 
-admin: ## Show admin CLI help
-	uv run fleetent admin --help
+platform-help: ## Show platform CLI help
+	uv run fleetent platform --help
 
 # ---- local dev stack -------------------------------------------------------
 # All data/config lives under a gitignored dev home (override by exporting
@@ -92,7 +92,7 @@ admin: ## Show admin CLI help
 # own terminal. NOTE: always `python -m uvicorn` (a bare `uv run uvicorn`
 # resolves to a system uvicorn that can't import fleetent).
 FLEETENT_HOME ?= $(CURDIR)/.fleetent-dev
-DATABASE_URL  ?= sqlite:///$(FLEETENT_HOME)/data/management.db
+DATABASE_URL  ?= sqlite:///$(FLEETENT_HOME)/management.db
 PLATFORM_PORT ?= 8770
 AGENT_PORT    ?= 8765
 NODE_ID       ?= local-node
@@ -107,13 +107,13 @@ $(DEV_TARGETS): export FLEETENT_SECRET_KEY := $(shell cat "$(FLEETENT_HOME)/.dev
 $(DEV_TARGETS): export FLEETENT_FORWARDER_HOST_OVERRIDE := 127.0.0.1
 
 dev-bootstrap: ## Init dev home: migrate management DB + seed built-in admin
-	mkdir -p "$(FLEETENT_HOME)/data"
+	mkdir -p "$(FLEETENT_HOME)"
 	uv run python scripts/dev_secret_key.py
 	uv run alembic upgrade head
-	uv run fleetent admin seed-builtin-admin
+	uv run fleetent platform seed-builtin-admin
 
 platform: ## Start platform control-plane (admin API/UI), default port 8770
-	uv run python -m uvicorn fleetent.server:app --host 127.0.0.1 --port $(PLATFORM_PORT)
+	uv run fleetent platform serve --host 127.0.0.1 --port $(PLATFORM_PORT)
 
 node-provision: ## Register the dev node + write node/.env (idempotent; FORCE=1 to re-key)
 	uv run python scripts/dev_node_provision.py $(if $(FORCE),--force,)
@@ -126,7 +126,7 @@ kb-worker: ## Start the KB ingest worker (single queue consumer)
 
 agent: ## Run one agent directly with HTTP /chat+/ws: make agent AGENT=<name> [AGENT_PORT=8765]
 	@test -n "$(AGENT)" || { echo "usage: make agent AGENT=<name> [AGENT_PORT=8765]"; exit 2; }
-	uv run fleetent agent run "$(AGENT)" --home "$(FLEETENT_HOME)/agents/$(AGENT)" --port $(AGENT_PORT)
+	uv run fleetent agent run "$(AGENT)" --home "$(FLEETENT_HOME)/tenants/default/agents/$(AGENT)" --port $(AGENT_PORT)
 
 chat: ## Connect the terminal TUI to an agent: make chat TOKEN=<tui-token> [URL=ws://...]
 	@test -n "$(TOKEN)" || { echo "usage: make chat TOKEN=<tui-token> [URL=ws://...]"; exit 2; }

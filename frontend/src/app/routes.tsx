@@ -22,6 +22,7 @@ import { SessionsPage } from '@/features/sessions/page';
 import { ProvidersPage } from '@/features/providers/page';
 import { NodesPage } from '@/features/nodes/page';
 import { UsersPage } from '@/features/users/page';
+import { ImIdentitiesPage } from '@/features/im-identities/page';
 import { ChatPage } from '@/features/chat/page';
 import { StatsPage } from '@/features/stats/page';
 import { TenancyPage } from '@/features/tenancy/page';
@@ -35,6 +36,7 @@ function useMe() {
 
 // Full-screen gate shown when the logged-in user still has must_reset set.
 function ChangePasswordGate(): JSX.Element {
+  const auth = useAuthSession();
   return (
     <main className="grid min-h-screen place-items-center px-6 py-16">
       <div className="w-full max-w-md rounded-2xl border border-border bg-card/80 p-8 shadow-soft backdrop-blur">
@@ -49,7 +51,7 @@ function ChangePasswordGate(): JSX.Element {
           You need to set a new password before continuing.
         </p>
         <div className="mt-7">
-          <ChangePasswordFields submitLabel="Set password & continue" />
+          <ChangePasswordFields submitLabel="Set password & continue" onDone={() => auth.clearMustReset()} />
         </div>
       </div>
     </main>
@@ -93,8 +95,8 @@ function LoginPage(): JSX.Element {
       setError('Login failed');
       return;
     }
-    const body = (await response.json()) as { token: string };
-    auth.setToken(body.token);
+    const body = (await response.json()) as { token: string; must_reset?: boolean };
+    auth.setSession(body.token, Boolean(body.must_reset));
     navigate('/agents', { replace: true });
   };
 
@@ -279,6 +281,7 @@ function AppLayout(): JSX.Element {
             <Route element={<McpPage />} path="/mcp" />
             <Route element={<NodesPage />} path="/nodes" />
             <Route element={<UsersPage />} path="/users" />
+            <Route element={<ImIdentitiesPage />} path="/im-identities" />
             <Route element={<StatsPage />} path="/stats" />
             <Route element={<TenancyPage />} path="/tenancy" />
             <Route element={<ChatPage />} path="/chat" />
@@ -294,12 +297,24 @@ function AppLayout(): JSX.Element {
 function RequireAuth(): JSX.Element {
   const auth = useAuthSession();
   const me = useMe();
+
+  // The server (`/admin/me`) is the source of truth for must_reset. Once it resolves
+  // and reports no pending reset, drop any stale locally-persisted flag — otherwise a
+  // leftover `mustReset` in localStorage (e.g. a password changed via the profile page,
+  // or cleared on another tab) keeps re-opening the gate on every reload.
+  useEffect(() => {
+    if (me.data && !me.data.must_reset && auth.mustReset) {
+      auth.clearMustReset();
+    }
+  }, [me.data, auth]);
+
   if (!auth.token) {
     return <Navigate replace to="/login" />;
   }
-  // First-login (or admin-forced) password reset must be completed before
-  // anything else — the backend 403s every admin action until then.
-  if (me.data?.must_reset) {
+  // Prefer the server's answer; fall back to the login-time hint only until /me loads
+  // (avoids a flash of the console before the gate on a genuine first login).
+  const mustReset = me.data ? Boolean(me.data.must_reset) : auth.mustReset;
+  if (mustReset) {
     return <ChangePasswordGate />;
   }
   return <AppLayout />;
