@@ -4,7 +4,7 @@ Connection source: agent_state.db via ``agent_scope.open_state_db(AGENT_STATE_MI
 in agent_app._init_agent_db_schema.  Call ``set_agent_memory_db(state_db, backend)``
 once at agent boot before any reads or writes.
 
-Vector operations use the injected ``_agent_memory_vector_backend``
+Vector operations use the injected per-agent vector backend
 (agentmem: family, per-agent) rather than the global vector_store backend.
 Embedding still uses the global provider via ``vector_store.embed_text``.
 Isolation is provided by the per-agent physical DB — no scope columns needed.
@@ -37,7 +37,7 @@ _STATUSES = {"active", "stale", "archived"}
 _SOURCES = {"manual", "reflection_proposal"}
 
 _agent_memory_db: SQLiteDatabase | None = None
-_agent_memory_vector_backend: VectorBackend | None = None
+_vector_backend: VectorBackend | None = None
 
 _NAMESPACE = vector_store.agent_memory_namespace()
 
@@ -47,9 +47,9 @@ def set_agent_memory_db(db: SQLiteDatabase, vector_backend: VectorBackend) -> No
 
     Called once at agent boot after ``agent_scope.open_state_db(AGENT_STATE_MIGRATIONS)``.
     """
-    global _agent_memory_db, _agent_memory_vector_backend
+    global _agent_memory_db, _vector_backend
     _agent_memory_db = db
-    _agent_memory_vector_backend = vector_backend
+    _vector_backend = vector_backend
 
 
 def _agent_memory_database() -> SQLiteDatabase:
@@ -62,12 +62,12 @@ def _agent_memory_database() -> SQLiteDatabase:
 
 
 def _agent_memory_backend() -> VectorBackend:
-    if _agent_memory_vector_backend is None:
+    if _vector_backend is None:
         raise RuntimeError(
-            "memory/agent_memory: agent_memory_vector_backend not initialized"
+            "memory/agent_memory: vector backend not initialized"
             " — call set_agent_memory_db(db, backend) at boot"
         )
-    return _agent_memory_vector_backend
+    return _vector_backend
 
 
 async def create_agent_memory(

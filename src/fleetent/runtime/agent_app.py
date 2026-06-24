@@ -344,7 +344,7 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     # agent_memory_items now live in agent_state.db (wire-agent-memory D3).
     agent_memory_module.set_agent_memory_db(
         agent_state_db,
-        agent_scope.agent_memory_vector_backend,  # type: ignore[arg-type]
+        agent_scope.vector_backend,
     )
     session_index.set_state_db(agent_state_db)
     traces.set_state_db(agent_state_db)

@@ -36,11 +36,9 @@ async def test_approve_agent_memory_proposal_creates_memory_item_and_marks_appli
 
     from fleetent.memory import agent_memory
 
-    vector_backend = SQLiteVectorBackend(
-        database_url=f"sqlite:///{tmp_path / 'agent_memory_vectors.db'}"
-    )
+    vector_backend = SQLiteVectorBackend(database_url=f"sqlite:///{tmp_path / 'agent_vectors.db'}")
     monkeypatch.setattr(agent_memory, "_agent_memory_db", db)
-    monkeypatch.setattr(agent_memory, "_agent_memory_vector_backend", vector_backend)
+    monkeypatch.setattr(agent_memory, "_vector_backend", vector_backend)
     monkeypatch.setattr(vector_store, "embed_text", AsyncMock(return_value=[0.1, 0.2, 0.3]))
 
     from fleetent import reflection as reflection_api
@@ -95,11 +93,9 @@ async def test_approved_agent_memory_proposal_is_injected_by_build_context(tmp_p
 
     db = _boot_agent_state(tmp_path, monkeypatch)
 
-    vector_backend = SQLiteVectorBackend(
-        database_url=f"sqlite:///{tmp_path / 'agent_memory_vectors.db'}"
-    )
+    vector_backend = SQLiteVectorBackend(database_url=f"sqlite:///{tmp_path / 'agent_vectors.db'}")
     monkeypatch.setattr(agent_memory, "_agent_memory_db", db)
-    monkeypatch.setattr(agent_memory, "_agent_memory_vector_backend", vector_backend)
+    monkeypatch.setattr(agent_memory, "_vector_backend", vector_backend)
     monkeypatch.setattr(vector_store, "embed_text", AsyncMock(return_value=[0.1, 0.2, 0.3]))
 
     # Wire build_context sources: user memory and knowledge both empty

@@ -4,9 +4,7 @@
 standalone agent 进程（`fleetent agent run <id>`）启动时自动建立 agent-side DB schema，
 无需外部 alembic 步骤。agent 运行时表由 per-agent / per-tenant 物理库上的统一嵌入式
 `MIGRATIONS` 建立；管理库 schema 仅由 alembic 维护。
-
 ## Requirements
-
 ### Requirement: _start_infra initializes agent DB schema before any store access
 
 `agent_app._start_infra()` SHALL call `_init_agent_db_schema()` as its first operation,
@@ -19,8 +17,10 @@ tenant-scoped `kb.db` is created via its embedded migrations. **Agent memory is 
 relational table inside `agent_state.db`, NOT a separate `agent_memory.db`**; there is no
 `agent_memory.db` and no `shared_memory.db`. `agent_memory_items` SHALL NOT contain
 `scope_type` / `scope_id` columns (agent isolation is provided by the per-agent physical DB).
-The standalone agent process SHALL NOT create a `fleetent.db` file, and SHALL NOT require
-`DATABASE_URL` to be set for agent-side schema bootstrap.
+**Agent memory vectors SHALL share the single per-agent vector store `agent_vectors.db`
+(namespace `agentmem:`) with user-memory vectors (namespace `mem:{user_id}`); there is NO
+separate `agent_memory_vectors.db`.** The standalone agent process SHALL NOT create a
+`fleetent.db` file, and SHALL NOT require `DATABASE_URL` to be set for agent-side schema bootstrap.
 
 #### Scenario: Fresh agent DB gets all tables on first boot
 
@@ -31,12 +31,12 @@ The standalone agent process SHALL NOT create a `fleetent.db` file, and SHALL NO
 - **AND** the tenant-scoped `kb.db` SHALL contain
   `knowledge_bases`, `knowledge_documents`, `knowledge_chunks`, `chunks_fts`, `knowledge_source_states`
 
-#### Scenario: No separate agent_memory.db / shared_memory.db
+#### Scenario: One per-agent vector store, no separate agent_memory.db / shared_memory.db / agent_memory_vectors.db
 
 - **WHEN** `_init_agent_db_schema()` completes for an agent
-- **THEN** no `agent_memory.db` and no `shared_memory.db` are created under the agent's `data/`
-- **AND** agent memory relational rows live in `agent_state.db` (`agent_memory_items`); agent
-  memory **vectors** remain in the separate `agent_memory_vectors.db` (`agentmem` vector family)
+- **THEN** no `agent_memory.db`, no `shared_memory.db`, and no `agent_memory_vectors.db` are created under the agent's `data/`
+- **AND** agent memory relational rows live in `agent_state.db` (`agent_memory_items`)
+- **AND** agent memory vectors live in the single per-agent `agent_vectors.db` (namespace `agentmem:`), alongside user-memory vectors (namespace `mem:{user_id}`)
 
 #### Scenario: No fleetent.db is created
 
@@ -158,3 +158,4 @@ converge on the same schema.
 #### Scenario: legacy agent state DB drops the retired table on upgrade
 - **WHEN** 某旧库仍带有 retired cross-run budget table 并升级到统一 `MIGRATIONS` 最新版本
 - **THEN** 升级后该表被移除，且其余 agent-side 表保持可用
+

@@ -2,16 +2,14 @@
 
 Two flat typed resolvers:
   ``tenant_scope(tenant)`` → KbScope{kb_db, kb_vector_backend}
-  ``agent_scope(tenant, agent_id)`` → AgentScope{state_db, vector_backend,
-                                                   agent_memory_vector_backend}
+  ``agent_scope(tenant, agent_id)`` → AgentScope{state_db, vector_backend}
 
 SQLite backend layout under ``<fleetent_home>/``::
 
   tenants/<tenant_id>/kb.db                                 — KB relation tables (Y-managed)
   tenants/<tenant_id>/kb_vectors.db                         — KB vector store
   tenants/<tenant_id>/agents/<agent_id>/data/agent_state.db — state + agent_memory_items
-  tenants/<tenant_id>/agents/<agent_id>/data/agent_vectors.db — agent vector store
-  tenants/<tenant_id>/agents/<agent_id>/data/agent_memory_vectors.db — memory vector store
+  tenants/<tenant_id>/agents/<agent_id>/data/agent_vectors.db — mem:* + agentmem:* vector store
 
 Directory structure is private to SQLiteTenantBackend; call sites only
 express scope and get typed handles — they never see file paths.
@@ -69,13 +67,12 @@ class AgentScope:
     """Resolved scope for one agent's private state and memory resources.
 
     agent_memory_items live in state_db (agent_state.db) since wire-agent-memory.
-    The separate agent_memory.db file is retired; agent_memory_vector_backend
-    (agentmem family) remains independent for vector operations.
+    The separate agent_memory.db file is retired, and agentmem vectors now share
+    the single per-agent vector backend with mem:* namespaces.
     """
 
     state_db: SQLiteDatabase
     vector_backend: VectorBackend
-    agent_memory_vector_backend: VectorBackend | None = None
 
     def open_state_db(self, migrations: list[tuple[int, str]]) -> SQLiteDatabase:
         """Run migrate-on-open against state_db and return it.
@@ -133,13 +130,9 @@ class SQLiteTenantBackend:
         vector_backend = SQLiteVectorBackend(
             database_url=f"sqlite:///{agent_dir / 'agent_vectors.db'}"
         )
-        agent_memory_vector_backend = SQLiteVectorBackend(
-            database_url=f"sqlite:///{agent_dir / 'agent_memory_vectors.db'}"
-        )
         return AgentScope(
             state_db=state_db,
             vector_backend=vector_backend,
-            agent_memory_vector_backend=agent_memory_vector_backend,
         )
 
 

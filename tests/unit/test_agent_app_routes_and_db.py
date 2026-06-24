@@ -56,7 +56,6 @@ def test_init_agent_db_schema_wires_router_and_sinks(
     )
     agent_scope = SimpleNamespace(
         vector_backend="agent-vector",
-        agent_memory_vector_backend="agent-memory-vector",
         open_state_db=lambda migrations: ("state-db", migrations),
     )
     captures: list[tuple[str, Any]] = []
@@ -114,6 +113,10 @@ def test_init_agent_db_schema_wires_router_and_sinks(
     assert ("agent_scope", ("tenant-1", "ops")) in captures
     assert ("kb_vector", "kb-vector") in captures
     assert ("agent_vector", "agent-vector") in captures
+    assert any(
+        key == "agent_memory" and value[0][0] == "state-db" and value[1] == "agent-vector"
+        for key, value in captures
+    )
     assert any(key == "artifact_db" for key, _ in captures)
     assert ("views_root", tmp_path / "exchange" / ".views") in captures
 
