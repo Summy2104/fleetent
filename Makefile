@@ -110,10 +110,10 @@ dev-bootstrap: ## Init dev home: migrate management DB + seed built-in admin
 	mkdir -p "$(FLEETENT_HOME)"
 	uv run python scripts/dev_secret_key.py
 	uv run alembic upgrade head
-	uv run fleetent admin seed-builtin-admin
+	uv run fleetent platform seed-builtin-admin
 
 platform: ## Start platform control-plane (admin API/UI), default port 8770
-	uv run python -m uvicorn fleetent.server:app --host 127.0.0.1 --port $(PLATFORM_PORT)
+	uv run fleetent platform serve --host 127.0.0.1 --port $(PLATFORM_PORT)
 
 node-provision: ## Register the dev node + write node/.env (idempotent; FORCE=1 to re-key)
 	uv run python scripts/dev_node_provision.py $(if $(FORCE),--force,)
