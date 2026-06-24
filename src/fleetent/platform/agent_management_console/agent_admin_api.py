@@ -12,7 +12,7 @@ import yaml
 from fastapi import APIRouter, Body, Header, HTTPException, Response, status
 from pydantic import BaseModel
 
-from fleetent import agent_store, audit_log, auth, paths, user_store
+from fleetent import agent_store, audit_log, auth, user_store
 from fleetent.platform.agent_lifecycle import credential_slots, secret_store
 from fleetent.platform.agent_lifecycle.materialize import agent_file_from_store
 from fleetent.platform.agent_management_console import agent_admin_store, agent_im_group_store
@@ -156,26 +156,6 @@ def export_agent_yaml(name: str, authorization: str | None = Header(None)) -> di
     _current_user(authorization)
     agent = _require_agent(name)
     return {"agent": name, "yaml": _build_agent_yaml(agent)}
-
-
-@router.post("/agents/{name}/deploy")
-def deploy_agent(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
-    """Write (overwrite) the agent.yaml at ``<FLEETENT home>/agents/<name>/agent.yaml``.
-
-    Target: ``~/.fleetent/agents/<name>/agent.yaml`` (honors FLEETENT_HOME). Picking it up
-    into the runtime index is owned elsewhere; this just generates the file.
-    """
-    user = _require_admin(authorization)
-    agent = _require_agent(name)
-    if "/" in name or "\\" in name or name in (".", ".."):
-        raise HTTPException(status_code=400, detail="invalid agent name")
-    dest = paths.agent_home_dir(name) / "agent.yaml"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(_build_agent_yaml(agent), encoding="utf-8")
-    audit_log.write_audit(
-        user.id, "agent.deploy", target_type="agent", target_id=name, detail={"path": str(dest)}
-    )
-    return {"agent": name, "path": str(dest), "deployed": True}
 
 
 @router.get("/agents/{name}/versions")

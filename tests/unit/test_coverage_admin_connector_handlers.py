@@ -43,7 +43,7 @@ def _patch_agent_admin_auth(monkeypatch: pytest.MonkeyPatch, module: Any) -> Non
     monkeypatch.setattr(module.audit_log, "write_audit", lambda *args, **kwargs: None)
 
 
-def test_agent_admin_yaml_bindings_versions_and_deploy(monkeypatch, tmp_path):
+def test_agent_admin_yaml_bindings_and_versions(monkeypatch):
     _patch_agent_admin_auth(monkeypatch, agent_admin_api)
     agent = _agent()
     calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
@@ -84,26 +84,18 @@ def test_agent_admin_yaml_bindings_versions_and_deploy(monkeypatch, tmp_path):
         "activate_version",
         lambda *args: calls.append(("activate", args, {})),
     )
-    monkeypatch.setattr(agent_admin_api.paths, "base_dir", lambda: tmp_path)
 
     exported = agent_admin_api.export_agent_yaml("ops", authorization="Session token")
     assert exported["agent"] == "ops"
     assert "mcp_servers:" in exported["yaml"]
     assert "bindings:" in exported["yaml"]
 
-    deployed = agent_admin_api.deploy_agent("ops", authorization="Session token")
-    assert deployed["deployed"] is True
-    assert (tmp_path / "tenants" / "default" / "agents" / "ops" / "agent.yaml").exists()
     assert agent_admin_api.list_versions("ops", authorization="Session token")[0]["version"] == 1
     assert agent_admin_api.activate_version("ops", 2, authorization="Session token") == {
         "name": "ops",
         "active_version": 2,
     }
     assert calls == [("activate", ("ops", 2), {})]
-
-    with pytest.raises(HTTPException) as exc:
-        agent_admin_api.deploy_agent("../bad", authorization="Session token")
-    assert exc.value.status_code == 400
 
 
 def test_agent_admin_binding_skill_kb_oauth_and_mcp_handlers(monkeypatch):
