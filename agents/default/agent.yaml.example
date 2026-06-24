@@ -109,6 +109,12 @@ skill_authoring_enabled: false     # true exposes the skill_manage tool (user-dr
                                    # approval-gated skill create/edit/delete); default off
 skill_hot_reload: true             # auto-reload skills when their files change on disk
                                    # (checked before each message); false = boot scan only
+skill_user_access: {}              # per-skill user allowlist (skill name -> [user_id, ...]).
+                                   # listed skills are "restricted": visible/usable ONLY in DM
+                                   # by the listed users — hidden from catalog, refused by
+                                   # read_skill, and physically absent from other users'
+                                   # sandbox view. unlisted skills stay open to all. e.g.
+                                   #   payroll-tools: ["U0123", "U0456"]
 
 # ── tools / capabilities ──
 allowed_tools:                     # fnmatch patterns; MCP tools are "<server>__<tool>"

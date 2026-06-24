@@ -213,6 +213,9 @@ class _ContainerBackend:
     manager: SandboxManager | None = None
     agent_name: str = "default"
     env: dict[str, str] | None = None
+    # skill-user-access: the per-session filtered skills view path (or None for full root),
+    # carried so a self-healing re-acquire re-mounts the same filtered view.
+    skill_mount_source: str | None = None
 
     async def _exec(self, command: str, stdin: bytes | None = None) -> ExecResult:
         async def _call() -> ExecResult:
@@ -232,7 +235,11 @@ class _ContainerBackend:
             # (the host-mounted workspace survives), retry exactly once.
             self.manager.invalidate(self.manager.scope, self.session_id, self.agent_name)
             self.ws_id = await self.manager.acquire(
-                self.manager.scope, self.session_id, self.agent_name, env=self.env
+                self.manager.scope,
+                self.session_id,
+                self.agent_name,
+                env=self.env,
+                skill_mount_source=self.skill_mount_source,
             )
             res = await _call()
         return res
@@ -431,6 +438,28 @@ async def _resolve_backend(
     return await _select_backend(tool_context)
 
 
+def _skill_view_source_for(tool_context: ToolContext | None) -> str | None:
+    """Per-session filtered skills view path for this requester, or None (skill-user-access).
+
+    None when no `skill_user_access` is configured (full root mounted, unchanged). Delegates
+    the visibility/view logic to the skills registry so this stays import-light.
+    """
+    access_map = getattr(tool_context, "skill_user_access", None)
+    if not access_map:
+        return None
+    from fleetent.skills import registry as skill_registry
+
+    principal = getattr(tool_context, "principal", None)
+    session_context = getattr(tool_context, "session_context", None)
+    return skill_registry.session_skill_view_for(
+        getattr(tool_context, "scope_key", None) or "default",
+        user_id=getattr(principal, "user_id", None),
+        chat_type=getattr(session_context, "chat_type", None),
+        access_map=access_map,
+        rebuild=False,
+    )
+
+
 async def _select_backend(tool_context: ToolContext | None) -> _ContainerBackend | _HostBackend:
     """Pick the container backend when the sandbox is usable, else the host fence.
 
@@ -455,13 +484,20 @@ async def _select_backend(tool_context: ToolContext | None) -> _ContainerBackend
 
     features = tool_context.features if tool_context else {}
     env = build_sandbox_env(agent_env=features.get("sandbox_env"))
-    ws_id = await manager.acquire(manager.scope, session_id, agent_name, env=env)
+    # skill-user-access: mount this session's filtered skills view so restricted skills
+    # the requester can't access are physically absent (so read_file/search/run_code in
+    # the shared per-session container can't reach them). None => full root (unchanged).
+    skill_mount_source = _skill_view_source_for(tool_context)
+    ws_id = await manager.acquire(
+        manager.scope, session_id, agent_name, env=env, skill_mount_source=skill_mount_source
+    )
     return _ContainerBackend(
         client=manager.backend,
         ws_id=ws_id,
         session_id=session_id,
         manager=manager,
         agent_name=agent_name,
+        skill_mount_source=skill_mount_source,
         env=env,
     )
 

@@ -62,6 +62,10 @@ class ToolContext:
     # an outbound import. None = no gateway address (standalone CLI / streaming) → send_file
     # falls back to session_context.sender_id (DM).
     conversation_address: Any = None
+    # skill-user-access: the active agent's per-skill user allowlist {skill: [user_id...]}.
+    # read_skill uses it (with principal.user_id + session_context.chat_type) to refuse
+    # restricted skills for unauthorized requesters. Empty = no restrictions.
+    skill_user_access: dict[str, list[str]] = field(default_factory=dict)
 
 
 _registry: dict[str, tuple[Callable[..., Any], ToolSchema]] = {}

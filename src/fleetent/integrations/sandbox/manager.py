@@ -248,28 +248,33 @@ class SandboxManager:
         assert self.resources_by_scope is not None
         return self.resources_by_scope[scope]
 
-    def _resolve_skill_mount(self) -> SkillMount | None:
+    def _resolve_skill_mount(self, source_override: str | None = None) -> SkillMount | None:
         """Resolve the skills bind-mount for a fresh create, or None when off (D2-D4).
 
         Returns None when the skill mount is disabled or the backend cannot bind-mount
         (degraded backends fall back to the OFF skills-supply contract elsewhere).
-        Otherwise resolves the effective (user) skills root, materializes package
-        builtin skills into it so their resources are reachable under `$SKILLS_DIR`,
-        and validates the source against `is_blocked_mount` before constructing the
-        `SkillMount` — a source under a sensitive root raises rather than mounting.
+        Without `source_override`: resolves the effective (user) skills root, materializes
+        package builtin skills into it, and mounts the whole root (unchanged behavior).
+        With `source_override` (skill-user-access): the runtime supplies a pre-built
+        per-session filtered view path containing exactly the skills that session may use;
+        it is mounted as-is (no materialize, the view is already complete). Either way the
+        source is validated against `is_blocked_mount` before constructing the `SkillMount`.
         """
         cfg = self.skill_mount
         if cfg is None or not cfg.enabled:
             return None
         if not self.backend.capabilities.workspace_mount:
             return None
-        # Lazy import: skills.registry is a sibling agent-runtime package; importing it
-        # at module load would risk a cycle through paths/agent_config.
-        from fleetent.skills import registry as skill_registry
+        if source_override is not None:
+            root = source_override
+        else:
+            # Lazy import: skills.registry is a sibling agent-runtime package; importing it
+            # at module load would risk a cycle through paths/agent_config.
+            from fleetent.skills import registry as skill_registry
 
-        source = cfg.source
-        root = skill_registry.effective_skill_root(source)
-        skill_registry.materialize_builtin_skills(source)
+            source = cfg.source
+            root = skill_registry.effective_skill_root(source)
+            skill_registry.materialize_builtin_skills(source)
         if is_blocked_mount(root):
             raise ValueError(f"refusing to mount skills under a blocked host path: {root}")
         return SkillMount(host_src=str(root), read_only=cfg.read_only)
@@ -280,6 +285,7 @@ class SandboxManager:
         session_id: str,
         agent_name: str,
         env: dict[str, str] | None = None,
+        skill_mount_source: str | None = None,
     ) -> str:
         """Return a workspace id for (workspace_scope, key), reusing or creating.
 
@@ -333,7 +339,7 @@ class SandboxManager:
         # sandbox-skill-mount: resolve before the reuse decision so the mount source/mode
         # contributes to config_hash — changing it rebuilds a reused container. A blocked
         # source raises here, before any create.
-        skill_mount = self._resolve_skill_mount()
+        skill_mount = self._resolve_skill_mount(skill_mount_source)
         # unified-file-exchange: on a capable backend, ro-mount the run's scope view dir at
         # /exchange (ensured to exist, possibly empty, before create). Keyed by the same
         # scope_key as /workspace, so consumption and attribution agree.
