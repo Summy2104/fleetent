@@ -121,7 +121,12 @@ def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
 
 def desired_state_payload_from_agent_file(agent_file: AgentFile) -> dict[str, Any]:
     """Serialize the non-secret subset of an AgentFile for node desired-state delivery."""
-    return _strip_secret_plumbing(agent_file.model_dump(mode="json", exclude_defaults=False))
+    payload = _strip_secret_plumbing(agent_file.model_dump(mode="json", exclude_defaults=False))
+    # Render MCP servers in the standard ``mcpServers`` map form the agent runtime accepts;
+    # the legacy ``mcp_servers`` list is rejected by ``load_agent_file``. Done after secret
+    # stripping so ``env``/``credential_ref`` are already removed from each server entry.
+    _mcp_payload_to_map(payload)
+    return payload
 
 
 def _strip_secret_plumbing(value: Any) -> Any:

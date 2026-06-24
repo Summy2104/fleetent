@@ -10,6 +10,7 @@ import pytest
 from fleetent import agent_store, server
 from fleetent.platform.agent_management_console import agent_console_api
 from fleetent.platform.askit_console import agent_apply_api
+from fleetent.platform.node_management import node_store, placement_store
 
 
 def _agent(**overrides: Any) -> agent_store.Agent:
@@ -145,6 +146,15 @@ def test_agent_def_dict_and_wire_agent_store_seams(monkeypatch: pytest.MonkeyPat
         item[0] == "create_version" and item[2]["allowed_tools"] == ["shell", "read"]
         for item in created
     )
+
+
+def test_wire_agent_store_seams_wires_dual_state_read_seams() -> None:
+    server.wire_agent_store_seams()
+
+    assert agent_console_api.get_agent_runtime is node_store.get_agent_status
+    assert agent_console_api.get_agent_placement is placement_store.get_for_agent
+    assert agent_console_api.list_agent_runtimes is node_store.list_agent_status
+    assert agent_console_api.list_agent_placements is placement_store.list_placements
 
 
 def test_server_does_not_import_run_stream() -> None:

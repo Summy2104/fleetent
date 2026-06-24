@@ -122,6 +122,31 @@ def agent_observability_agg(agent_name: str, window: str) -> dict[str, Any]:
     return agent_observability.aggregate(agent_name, window)
 
 
+# --- injectable seams (node_management read-only projections) -----------------
+# Wired in server.py to node_store / placement_store. Default no-ops so the console
+# degrades to desired-state-only (and unit tests can mock them) when unwired.
+
+
+def get_agent_runtime(agent_id: int) -> dict[str, Any] | None:
+    """Last reported actual state for one agent. Bridges node_store.get_agent_status."""
+    return None
+
+
+def get_agent_placement(agent_id: int) -> dict[str, Any] | None:
+    """The agent's node placement, or None if unpinned. Bridges placement_store.get_for_agent."""
+    return None
+
+
+def list_agent_runtimes() -> list[dict[str, Any]]:
+    """All agents' reported actual state. Bridges node_store.list_agent_status (list view)."""
+    return []
+
+
+def list_agent_placements() -> list[dict[str, Any]]:
+    """All agent→node placements. Bridges placement_store.list_placements (list view)."""
+    return []
+
+
 # --- auth helpers -------------------------------------------------------------
 
 
@@ -204,6 +229,30 @@ class UpdateBody(BaseModel):
 # --- list ---------------------------------------------------------------------
 
 
+def _runtime_view(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Project a node_agent_status row to the response shape, or None when unreported."""
+    if row is None:
+        return None
+    return {
+        "phase": row.get("phase"),
+        "health": row.get("health"),
+        "pid": row.get("pid"),
+        "node_id": row.get("node_id"),
+        "reported_at": row.get("reported_at"),
+    }
+
+
+def _placement_view(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Project an agent_placements row to the response shape, or None when unpinned."""
+    if row is None:
+        return None
+    return {
+        "node_id": row.get("node_id"),
+        "pinned_at": row.get("pinned_at"),
+        "pinned_by": row.get("pinned_by"),
+    }
+
+
 @router.get("/agents")
 def list_agents(
     include_archived: bool = False, authorization: str | None = Header(None)
@@ -215,8 +264,14 @@ def list_agents(
         icons = agent_icons()
     except Exception:  # noqa: BLE001 — best-effort avatar lookup
         icons = {}
+    # Batch the dual-state projection (one read each) and join by agent_id — no N+1.
+    runtimes = {r["agent_id"]: r for r in list_agent_runtimes()}
+    placements = {r["agent_id"]: r for r in list_agent_placements()}
     for r in rows:
+        agent_id = r.get("agent_id")
         r["icon"] = icons.get(str(r.get("agent_name") or ""))
+        r["runtime"] = _runtime_view(runtimes.get(agent_id))
+        r["placement"] = _placement_view(placements.get(agent_id))
     return rows
 
 
@@ -248,6 +303,10 @@ def _def_response(name: str) -> dict[str, Any]:
         "agent": name,
         "provenance": state["provenance"],
         "status": state["status"],
+        "runtime": _runtime_view(get_agent_runtime(agent_id)) if agent_id is not None else None,
+        "placement": (
+            _placement_view(get_agent_placement(agent_id)) if agent_id is not None else None
+        ),
     }
     if agent is not None:
         out["version"] = agent.get("version", 1)
@@ -262,7 +321,15 @@ def _def_response(name: str) -> dict[str, Any]:
         out["model_overrides"] = agent.get("model_overrides", {})
         out["memory_namespace"] = agent.get("memory_namespace", "default")
         out["icon"] = agent.get("icon")
-        out["config_overrides"] = agent.get("config_overrides", {})
+        config_overrides = agent.get("config_overrides", {})
+        out["config_overrides"] = config_overrides
+        # Serialized form so the console can round-trip the Advanced overrides box
+        # (IM connector creds live here) without shipping a YAML lib to the browser.
+        out["config_overrides_yaml"] = (
+            yaml.safe_dump(config_overrides, allow_unicode=True, sort_keys=False)
+            if config_overrides
+            else ""
+        )
     return out
 
 
@@ -350,7 +417,9 @@ def create_agent(body: CreateBody, authorization: str | None = Header(None)) -> 
     )
     agent_id = _require_agent_id(body.name)
     agent_admin_store.set_provenance(agent_id, "adhoc")
-    agent_admin_store.enable(agent_id)
+    # New agents start disabled: not yet pinned to a node, so "enabled" would be a
+    # promise no node can keep (desired-state pull filters on status == enabled).
+    agent_admin_store.disable(agent_id)
     audit_log.write_audit(user.id, "agent.create", "agent", body.name)
     return _def_response(body.name)
 
@@ -430,7 +499,11 @@ def delete_agent(
 @router.post("/agents/{name}/enable")
 def enable_agent(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
     user = _require_admin(authorization)
-    agent_admin_store.enable(_require_agent_id(name))
+    agent_id = _require_agent_id(name)
+    # Enabling an agent that no node hosts is a no-op promise: gate on node placement.
+    if get_agent_placement(agent_id) is None:
+        raise HTTPException(status_code=409, detail="agent not bound to a node")
+    agent_admin_store.enable(agent_id)
     audit_log.write_audit(user.id, "agent.enable", "agent", name)
     return {"agent": name, "status": "enabled"}
 
@@ -489,9 +562,9 @@ def clone_agent(
         src.get("model_overrides", {}),
         src.get("memory_namespace", "default"),
     )
-    # clone is a fresh adhoc agent with no bindings and default enabled status
+    # clone is a fresh adhoc agent with no bindings; starts disabled (not pinned yet)
     agent_id = _require_agent_id(body.new_name)
     agent_admin_store.set_provenance(agent_id, "adhoc")
-    agent_admin_store.enable(agent_id)
+    agent_admin_store.disable(agent_id)
     audit_log.write_audit(user.id, "agent.clone", "agent", body.new_name, detail={"source": name})
     return {"agent": body.new_name, "cloned_from": name, "provenance": "adhoc"}

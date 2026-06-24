@@ -41,11 +41,13 @@ from fleetent.platform.agent_statistics import stats_admin_api
 from fleetent.platform.askit_console import agent_apply_api
 from fleetent.platform.chat_management import chat_admin_api
 from fleetent.platform.connector_management import connector_admin_api, vault_provider
+from fleetent.platform.im_gateway_management import im_identity_admin_api
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import provider_admin_api
 from fleetent.platform.node_management import (
     node_admin_api,
     node_desired_state_api,
+    node_store,
     placement_store,
 )
 from fleetent.platform.node_management.agent_transport import DirectHttpAgentTransport
@@ -255,6 +257,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(title="fleetent", lifespan=lifespan)
 app.include_router(user_admin_api.router)
+app.include_router(im_identity_admin_api.router)
 app.include_router(skill_admin_api.router)
 app.include_router(provider_admin_api.router)
 app.include_router(kb_admin_api.router)
@@ -463,6 +466,12 @@ def wire_agent_store_seams() -> None:
     agent_console_api.delete_agent_def = _console_delete
     agent_console_api.set_agent_icon = agent_store.set_icon
     agent_console_api.agent_icons = agent_store.icons_by_name
+
+    # Dual-state read seams: surface node-reported runtime + placement in the console.
+    agent_console_api.get_agent_runtime = node_store.get_agent_status
+    agent_console_api.get_agent_placement = placement_store.get_for_agent
+    agent_console_api.list_agent_runtimes = node_store.list_agent_status
+    agent_console_api.list_agent_placements = placement_store.list_placements
 
     agent_apply_api.get_agent_def = _get_def
     agent_apply_api.create_agent_def = _apply_create

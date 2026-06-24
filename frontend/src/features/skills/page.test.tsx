@@ -245,3 +245,122 @@ describe('skills page parity baseline', () => {
     });
   });
 });
+
+describe('skills page create and edit', () => {
+  function stubReadEndpoints(getSkills: () => SkillRecord[], getContent: () => string): void {
+    server.use(
+      http.get(`${API_BASE_URL}/admin/skills`, () => HttpResponse.json(getSkills())),
+      http.get(`${API_BASE_URL}/admin/skills/:name/content`, ({ params }) =>
+        HttpResponse.json({ content: getContent(), name: String(params.name ?? '') })
+      ),
+      http.get(`${API_BASE_URL}/admin/skills/:name/agents`, () => HttpResponse.json([])),
+      http.get(`${API_BASE_URL}/admin/skills/proposals`, () => HttpResponse.json([]))
+    );
+  }
+
+  it('creates a new skill from the form and refreshes the list', async () => {
+    const user = userEvent.setup();
+    let skills: SkillRecord[] = [
+      {
+        audit_verdict: 'pass',
+        description: 'Onboarding helper',
+        drifted_agents: [],
+        enabling_agents: [],
+        global_enabled: true,
+        name: 'welcome-pack',
+        source: 'marketplace',
+        status: 'active',
+      },
+    ];
+
+    stubReadEndpoints(
+      () => skills,
+      () => 'welcome body'
+    );
+    server.use(
+      http.post(`${API_BASE_URL}/admin/skills`, async ({ request }) => {
+        const body = (await request.json()) as { content: string; name: string };
+        expect(body.name).toBe('promo-helper');
+        expect(body.content).toContain('promo-helper');
+        skills = [
+          ...skills,
+          {
+            audit_verdict: 'pass',
+            description: 'promo',
+            drifted_agents: [],
+            enabling_agents: [],
+            global_enabled: false,
+            name: body.name,
+            source: 'adhoc',
+            status: 'active',
+          },
+        ];
+        return HttpResponse.json({ name: body.name, verdict: 'pass' });
+      })
+    );
+
+    renderSkillsPage();
+
+    expect(await screen.findByRole('button', { name: 'welcome-pack' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'New skill' }));
+    await user.type(screen.getByLabelText('New skill name'), 'promo-helper');
+    await user.type(
+      screen.getByLabelText('New skill content'),
+      '---{enter}name: promo-helper{enter}description: promo{enter}---{enter}body'
+    );
+    await user.click(screen.getByRole('button', { name: 'Create skill' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'promo-helper' })).toBeInTheDocument();
+    });
+    expect(screen.queryByLabelText('New skill name')).not.toBeInTheDocument();
+  });
+
+  it('edits the selected skill content and refreshes the preview', async () => {
+    const user = userEvent.setup();
+    const skills: SkillRecord[] = [
+      {
+        audit_verdict: 'pass',
+        description: 'Onboarding helper',
+        drifted_agents: [],
+        enabling_agents: [],
+        global_enabled: true,
+        name: 'welcome-pack',
+        source: 'marketplace',
+        status: 'active',
+      },
+    ];
+    let content = '---\nname: welcome-pack\ndescription: helper\n---\noriginal body';
+
+    stubReadEndpoints(
+      () => skills,
+      () => content
+    );
+    server.use(
+      http.put(`${API_BASE_URL}/admin/skills/:name`, async ({ params, request }) => {
+        const body = (await request.json()) as { content: string };
+        expect(String(params.name ?? '')).toBe('welcome-pack');
+        content = body.content;
+        return HttpResponse.json({ name: String(params.name ?? ''), verdict: 'pass' });
+      })
+    );
+
+    renderSkillsPage();
+
+    await waitFor(() => {
+      expect(screen.getByText(/original body/)).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Edit content' }));
+    const editor = screen.getByLabelText('Skill content editor');
+    await user.clear(editor);
+    await user.type(editor, 'rewritten body');
+    await user.click(screen.getByRole('button', { name: 'Save content' }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/rewritten body/)).toBeInTheDocument();
+    });
+    expect(screen.queryByLabelText('Skill content editor')).not.toBeInTheDocument();
+  });
+});

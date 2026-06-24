@@ -67,6 +67,12 @@ def list_by_node(node_id: str) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def list_placements() -> list[dict[str, Any]]:
+    """Read every agent→node placement (read-only)."""
+    rows = _database().execute(f"SELECT {_COLS} FROM agent_placements ORDER BY agent_id").fetchall()
+    return [dict(row) for row in rows]
+
+
 def get_for_agent(agent_id: int) -> dict[str, Any] | None:
     row = (
         _database()

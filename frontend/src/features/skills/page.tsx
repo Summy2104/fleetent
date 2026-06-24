@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import {
   type SkillAgentBinding,
   type SkillListItem,
+  useCreateSkillMutation,
+  useEditSkillMutation,
   useForcePublishSkillMutation,
   useReloadSkillsMutation,
   useSetSkillAgentBindingMutation,
@@ -99,12 +101,143 @@ function BindingToggle({
   );
 }
 
+const CREATE_TEMPLATE = '---\nname: \ndescription: \n---\n\n';
+
+function CreateSkillForm({ onDone }: { onDone: () => void }): JSX.Element {
+  const create = useCreateSkillMutation();
+  const [name, setName] = useState('');
+  const [content, setContent] = useState('');
+
+  const submit = async (): Promise<void> => {
+    await create.mutateAsync({ content, name });
+    onDone();
+  };
+
+  return (
+    <section className="rounded-2xl border bg-white/75 p-5">
+      <h2 className="text-lg font-semibold">New skill</h2>
+      <div className="mt-4 grid gap-3">
+        <input
+          aria-label="New skill name"
+          className="rounded-md border px-3 py-2 text-sm"
+          onChange={(event) => setName(event.target.value)}
+          placeholder="skill-name"
+          value={name}
+        />
+        <textarea
+          aria-label="New skill content"
+          className="min-h-48 rounded-md border px-3 py-2 font-mono text-sm"
+          onChange={(event) => setContent(event.target.value)}
+          placeholder={CREATE_TEMPLATE}
+          value={content}
+        />
+        <div className="flex gap-2">
+          <button
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+            disabled={!name.trim() || !content.trim() || create.isPending}
+            onClick={() => void submit()}
+            type="button"
+          >
+            Create skill
+          </button>
+          <button
+            className="rounded-md bg-secondary px-4 py-2 text-sm font-medium"
+            onClick={onDone}
+            type="button"
+          >
+            Cancel new skill
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SelectedSkillPanel({
+  content,
+  name,
+}: {
+  content: string;
+  name: string | null;
+}): JSX.Element {
+  const edit = useEditSkillMutation(name ?? '');
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(content);
+
+  // Keep the read-only view in sync with refetched content while not editing; an
+  // active edit keeps the operator's in-progress draft instead of clobbering it.
+  useEffect(() => {
+    if (!editing) {
+      setDraft(content);
+    }
+  }, [content, editing]);
+
+  const save = async (): Promise<void> => {
+    await edit.mutateAsync({ content: draft });
+    setEditing(false);
+  };
+
+  return (
+    <section className="rounded-2xl border bg-white/75 p-5">
+      <div className="flex items-center justify-between gap-4">
+        <h2 className="text-lg font-semibold">
+          {name ? `Selected skill: ${name}` : 'Selected skill'}
+        </h2>
+        {name && !editing ? (
+          <button
+            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
+            onClick={() => {
+              setDraft(content);
+              setEditing(true);
+            }}
+            type="button"
+          >
+            Edit content
+          </button>
+        ) : null}
+      </div>
+      {editing ? (
+        <div className="mt-4 grid gap-3">
+          <textarea
+            aria-label="Skill content editor"
+            className="min-h-72 rounded-xl border px-3 py-2 font-mono text-sm"
+            onChange={(event) => setDraft(event.target.value)}
+            value={draft}
+          />
+          <div className="flex gap-2">
+            <button
+              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+              disabled={edit.isPending}
+              onClick={() => void save()}
+              type="button"
+            >
+              Save content
+            </button>
+            <button
+              className="rounded-md bg-secondary px-4 py-2 text-sm font-medium"
+              onClick={() => setEditing(false)}
+              type="button"
+            >
+              Cancel edit
+            </button>
+          </div>
+        </div>
+      ) : (
+        <pre className="mt-4 max-h-80 overflow-auto rounded-xl bg-slate-950 p-4 text-sm text-slate-50">
+          {content}
+        </pre>
+      )}
+    </section>
+  );
+}
+
 export function SkillsPage(): JSX.Element {
   const skills = useSkillsQuery();
   const proposals = useSkillProposalsQuery();
   const reload = useReloadSkillsMutation();
 
   const [selectedName, setSelectedName] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const [versionsOpenFor, setVersionsOpenFor] = useState<string | null>(null);
   const [selectedRef, setSelectedRef] = useState<string | null>(null);
   const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
@@ -141,15 +274,26 @@ export function SkillsPage(): JSX.Element {
                 returning to the legacy console.
               </p>
             </div>
-            <button
-              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-              onClick={() => void reload.mutateAsync()}
-              type="button"
-            >
-              Reload skill index
-            </button>
+            <div className="flex gap-2">
+              <button
+                className="rounded-md bg-secondary px-4 py-2 text-sm font-medium"
+                onClick={() => setCreating((open) => !open)}
+                type="button"
+              >
+                New skill
+              </button>
+              <button
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+                onClick={() => void reload.mutateAsync()}
+                type="button"
+              >
+                Reload skill index
+              </button>
+            </div>
           </div>
         </header>
+
+        {creating ? <CreateSkillForm onDone={() => setCreating(false)} /> : null}
 
         <section className="grid gap-4">
           {skills.data?.map((skill) => (
@@ -202,14 +346,12 @@ export function SkillsPage(): JSX.Element {
       </div>
 
       <div className="space-y-6">
-        <section className="rounded-2xl border bg-white/75 p-5">
-          <h2 className="text-lg font-semibold">
-            {selectedSkill ? `Selected skill: ${selectedSkill.name}` : 'Selected skill'}
-          </h2>
-          <pre className="mt-4 max-h-80 overflow-auto rounded-xl bg-slate-950 p-4 text-sm text-slate-50">
-            {content.data?.content ?? ''}
-          </pre>
-        </section>
+        {/* key resets editor state (editing/draft) when the operator switches skills */}
+        <SelectedSkillPanel
+          content={content.data?.content ?? ''}
+          key={selectedSkill?.name ?? 'none'}
+          name={selectedSkill?.name ?? null}
+        />
 
         {selectedName && bindings.data ? (
           <BindingsEditor

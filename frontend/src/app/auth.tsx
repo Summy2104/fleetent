@@ -11,29 +11,32 @@ import {
 } from 'react';
 
 const TOKEN_STORAGE_KEY = 'fleetent.admin.token';
+// Persisted alongside the token so a forced password reset survives a page reload:
+// the backend rejects every admin call except /me and /change-password while it is set.
+const MUST_RESET_STORAGE_KEY = 'fleetent.admin.must_reset';
 const memoryStorage = new Map<string, string>();
 
-function readToken(): string | null {
+function readStored(key: string): string | null {
   try {
-    return window.localStorage?.getItem(TOKEN_STORAGE_KEY) ?? memoryStorage.get(TOKEN_STORAGE_KEY) ?? null;
+    return window.localStorage?.getItem(key) ?? memoryStorage.get(key) ?? null;
   } catch {
-    return memoryStorage.get(TOKEN_STORAGE_KEY) ?? null;
+    return memoryStorage.get(key) ?? null;
   }
 }
 
-function writeToken(token: string): void {
-  memoryStorage.set(TOKEN_STORAGE_KEY, token);
+function writeStored(key: string, value: string): void {
+  memoryStorage.set(key, value);
   try {
-    window.localStorage?.setItem(TOKEN_STORAGE_KEY, token);
+    window.localStorage?.setItem(key, value);
   } catch {
     return;
   }
 }
 
-function clearStoredToken(): void {
-  memoryStorage.delete(TOKEN_STORAGE_KEY);
+function clearStored(key: string): void {
+  memoryStorage.delete(key);
   try {
-    window.localStorage?.removeItem(TOKEN_STORAGE_KEY);
+    window.localStorage?.removeItem(key);
   } catch {
     return;
   }
@@ -42,7 +45,10 @@ function clearStoredToken(): void {
 type AuthContextValue = {
   baseUrl: string;
   token: string | null;
+  mustReset: boolean;
   setToken: (token: string) => void;
+  setSession: (token: string, mustReset: boolean) => void;
+  clearMustReset: () => void;
   clearToken: () => void;
 };
 
@@ -51,32 +57,66 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({
   baseUrl,
   initialToken = null,
+  initialMustReset = false,
   onSessionExpired,
   children,
 }: {
   baseUrl: string;
   initialToken?: string | null;
+  initialMustReset?: boolean;
   onSessionExpired?: () => void;
   children: ReactNode;
 }): JSX.Element {
   const [token, setTokenState] = useState<string | null>(() => {
-    return initialToken ?? readToken();
+    return initialToken ?? readStored(TOKEN_STORAGE_KEY);
+  });
+  const [mustReset, setMustResetState] = useState<boolean>(() => {
+    return initialMustReset || readStored(MUST_RESET_STORAGE_KEY) === '1';
   });
 
   useEffect(() => {
     if (initialToken) {
-      writeToken(initialToken);
+      writeStored(TOKEN_STORAGE_KEY, initialToken);
     }
   }, [initialToken]);
 
-  const setToken = useCallback((nextToken: string): void => {
-    writeToken(nextToken);
-    setTokenState(nextToken);
+  const persistMustReset = useCallback((next: boolean): void => {
+    if (next) {
+      writeStored(MUST_RESET_STORAGE_KEY, '1');
+    } else {
+      clearStored(MUST_RESET_STORAGE_KEY);
+    }
+    setMustResetState(next);
   }, []);
 
+  // OIDC callback path: token only, no pending reset (provisioned users are verified).
+  const setToken = useCallback(
+    (nextToken: string): void => {
+      writeStored(TOKEN_STORAGE_KEY, nextToken);
+      setTokenState(nextToken);
+      persistMustReset(false);
+    },
+    [persistMustReset]
+  );
+
+  const setSession = useCallback(
+    (nextToken: string, nextMustReset: boolean): void => {
+      writeStored(TOKEN_STORAGE_KEY, nextToken);
+      setTokenState(nextToken);
+      persistMustReset(nextMustReset);
+    },
+    [persistMustReset]
+  );
+
+  const clearMustReset = useCallback((): void => {
+    persistMustReset(false);
+  }, [persistMustReset]);
+
   const clearToken = useCallback((): void => {
-    clearStoredToken();
+    clearStored(TOKEN_STORAGE_KEY);
+    clearStored(MUST_RESET_STORAGE_KEY);
     setTokenState(null);
+    setMustResetState(false);
     onSessionExpired?.();
   }, [onSessionExpired]);
 
@@ -84,10 +124,13 @@ export function AuthProvider({
     () => ({
       baseUrl,
       token,
+      mustReset,
       setToken,
+      setSession,
+      clearMustReset,
       clearToken,
     }),
-    [baseUrl, clearToken, setToken, token]
+    [baseUrl, clearMustReset, clearToken, mustReset, setSession, setToken, token]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

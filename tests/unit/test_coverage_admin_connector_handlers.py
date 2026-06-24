@@ -119,6 +119,11 @@ def test_agent_admin_binding_skill_kb_oauth_and_mcp_handlers(monkeypatch):
         agent_admin_api.agent_store, "list_mcp_servers_for_agent", lambda _agent_id: ["db"]
     )
     monkeypatch.setattr(
+        agent_admin_api.agent_im_group_store,
+        "list_groups_for_agent",
+        lambda _agent_id: [{"platform": "slack", "group_id": "C1"}],
+    )
+    monkeypatch.setattr(
         agent_admin_api.mcp_server_store,
         "list_mcp_servers",
         lambda _agent_id: [{"server_id": "db"}],
@@ -184,6 +189,7 @@ def test_agent_admin_binding_skill_kb_oauth_and_mcp_handlers(monkeypatch):
     assert agent_admin_api.get_bindings("ops", authorization="Session token") == {
         "users": [],
         "mcp_servers": ["db"],
+        "groups": [{"platform": "slack", "group_id": "C1"}],
     }
     assert agent_admin_api.list_agent_skills("ops", authorization="Session token") == [
         {"skill_name": "skill-a", "enabled": True},
@@ -259,6 +265,14 @@ def test_agent_console_agent_lifecycle(monkeypatch):
     monkeypatch.setattr(
         agent_console_api, "references_for", lambda name: {"users": [], "channels": []}
     )
+    # Dual-state read seams (wired to real stores by server import) must be stubbed in
+    # this DB-less unit test. enable is gated on placement: pretend "ops" is pinned.
+    monkeypatch.setattr(
+        agent_console_api, "get_agent_placement", lambda agent_id: {"node_id": "node-a"}
+    )
+    monkeypatch.setattr(agent_console_api, "get_agent_runtime", lambda agent_id: None)
+    monkeypatch.setattr(agent_console_api, "list_agent_runtimes", lambda: [])
+    monkeypatch.setattr(agent_console_api, "list_agent_placements", lambda: [])
     monkeypatch.setattr(
         agent_console_api, "agent_observability_agg", lambda name, window: {"calls": 3}
     )
