@@ -27,7 +27,7 @@
 
 ## 5. 端到端 + 收尾
 
-- [ ] 5.1 写测试（integration/e2e）：批准 agent_memory proposal → 后续对话 `build_context` 注入该 agent memory（trace 含 `source_type="agent_memory"`）；先见红→接通见绿
-- [ ] 5.2 grep 残留：`agent_memory.db`、`open_agent_memory_db`、`agent_memory_migrations` 引用清零（src+tests）
-- [ ] 5.3 `PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py` 无新增跨包违规
-- [ ] 5.4 change 收尾：`make test-pr` + `make test-unit-ci`（覆盖率门禁）全绿，对照 main 无新增失败；相关 memory/long_term_ctx/tenant_router/platform integration 无新增失败
+- [x] 5.1 写测试（integration/e2e）：批准 agent_memory proposal → 后续对话 `build_context` 注入该 agent memory（trace 含 `source_type="agent_memory"`）；先见红→接通见绿
+- [x] 5.2 grep 残留：`agent_memory.db`、`open_agent_memory_db`、`agent_memory_migrations` 引用清零（src+tests）
+- [x] 5.3 `PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py` 无新增跨包违规
+- [x] 5.4 change 收尾：`make test-pr` + `make test-unit-ci`（覆盖率门禁）全绿，对照 main 无新增失败；相关 memory/long_term_ctx/tenant_router/platform integration 无新增失败
