@@ -3,6 +3,8 @@
 observability, provenance — CRUD/versioning belong to multi-agent-management)."""
 
 import pytest
+import yaml
+from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -12,6 +14,7 @@ import fleetent.governance.audit_log as audit
 import fleetent.platform.agent_management_console.agent_admin_store as store
 import fleetent.platform.agent_management_console.agent_console_api as api
 import fleetent.user_store as user_store
+from fleetent.platform.node_management import node_store, placement_store
 from tests.integration._migration_template import apply_migrations
 
 
@@ -62,14 +65,196 @@ def test_viewer_can_read_not_write(client):
 def test_disable_then_enable(client, monkeypatch):
     agent_store.create_agent("ops", "Ops.", ["shell"])
     _wire_real_store(monkeypatch)
-    token, _ = _session_for("admin")
-    client.post("/admin/agents/ops/disable", headers=_hdr(token))
     ops = agent_store.get_by_name("ops")
     assert ops is not None
+    # enable now requires a node binding, so pin one for the round-trip
+    node = _seed_node(monkeypatch)
+    placement_store.pin_agent(ops.id, node)
+    token, _ = _session_for("admin")
+    client.post("/admin/agents/ops/disable", headers=_hdr(token))
     assert store.get_state(ops.id)["status"] == "disabled"
     client.post("/admin/agents/ops/enable", headers=_hdr(token))
     assert store.get_state(ops.id)["status"] == "enabled"
     assert any(a["action"] == "agent.disable" for a in audit.search_audit())
+
+
+# --- dual-state query: runtime + placement projection ------------------------
+
+
+def test_list_merges_runtime_and_placement(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    node = _seed_node(monkeypatch)
+    ops = agent_store.create_agent("ops", "Ops.", ["shell"])
+    store.enable(ops.id)  # admin_state row so the agent shows in list_states()
+    placement_store.pin_agent(ops.id, node, pinned_by="admin")
+    node_store.upsert_agent_status(ops.id, node_id=node, phase="running", pid=999, health="ok")
+    token, _ = _session_for("admin")
+
+    rows = client.get("/admin/agents", headers=_hdr(token)).json()
+    row = next(r for r in rows if r["agent_name"] == "ops")
+
+    assert row["status"] == "enabled"  # existing field unchanged
+    assert row["provenance"] == "adhoc"  # existing field unchanged
+    assert set(row["runtime"]) == {"phase", "health", "pid", "node_id", "reported_at"}
+    assert row["runtime"]["phase"] == "running"
+    assert row["runtime"]["health"] == "ok"
+    assert row["runtime"]["pid"] == 999
+    assert row["runtime"]["node_id"] == node
+    assert row["runtime"]["reported_at"]
+    assert set(row["placement"]) == {"node_id", "pinned_at", "pinned_by"}
+    assert row["placement"]["node_id"] == node
+    assert row["placement"]["pinned_by"] == "admin"
+    assert row["placement"]["pinned_at"]
+
+
+def test_list_null_runtime_placement_when_absent(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    ops = agent_store.create_agent("ops", "Ops.", ["shell"])
+    store.enable(ops.id)  # admin_state row so the agent shows in list_states()
+    token, _ = _session_for("admin")
+
+    rows = client.get("/admin/agents", headers=_hdr(token)).json()
+    row = next(r for r in rows if r["agent_name"] == "ops")
+
+    assert row["runtime"] is None
+    assert row["placement"] is None
+
+
+def test_detail_merges_runtime_and_placement(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    node = _seed_node(monkeypatch)
+    ops = agent_store.create_agent("ops", "Ops prompt", ["read_*"])
+    placement_store.pin_agent(ops.id, node)
+    node_store.upsert_agent_status(ops.id, node_id=node, phase="running", pid=7, health="ok")
+    token, _ = _session_for("viewer")
+
+    body = client.get("/admin/agents/ops", headers=_hdr(token)).json()
+
+    assert body["runtime"]["phase"] == "running"
+    assert body["runtime"]["node_id"] == node
+    assert body["placement"]["node_id"] == node
+    # merge must not clobber existing definition fields
+    assert body["agent"] == "ops"
+    assert body["system_prompt"] == "Ops prompt"
+    assert body["allowed_tools"] == ["read_*"]
+    assert body["provenance"] == "adhoc"
+
+
+def test_runtime_and_placement_are_independent(client, monkeypatch):
+    """Asymmetric combos: pinned-without-status and status-without-pin."""
+    _wire_real_store(monkeypatch)
+    node = _seed_node(monkeypatch)
+    pinned = agent_store.create_agent("pinned", "p", ["shell"])
+    store.enable(pinned.id)
+    placement_store.pin_agent(pinned.id, node)  # bound but no status reported
+    running = agent_store.create_agent("running", "p", ["shell"])
+    store.enable(running.id)
+    node_store.upsert_agent_status(running.id, node_id=node, phase="running")  # status, no pin
+    token, _ = _session_for("admin")
+
+    rows = {r["agent_name"]: r for r in client.get("/admin/agents", headers=_hdr(token)).json()}
+
+    assert rows["pinned"]["runtime"] is None
+    assert rows["pinned"]["placement"]["node_id"] == node
+    assert rows["running"]["runtime"]["phase"] == "running"
+    assert rows["running"]["placement"] is None
+
+
+def test_detail_null_placement_when_unbound(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    agent_store.create_agent("ops", "Ops.", ["shell"])
+    token, _ = _session_for("viewer")
+
+    body = client.get("/admin/agents/ops", headers=_hdr(token)).json()
+
+    assert body["runtime"] is None
+    assert body["placement"] is None
+
+
+def test_detail_includes_config_overrides_yaml(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    agent_store.create_agent("ops", "Ops.", ["shell"])
+    overrides = {"im": {"slack": {"bot_token_env": "SLACK_BOT_TOKEN"}}}
+    agent_store.set_config_overrides("ops", overrides)
+    token, _ = _session_for("viewer")
+
+    body = client.get("/admin/agents/ops", headers=_hdr(token)).json()
+
+    assert body["config_overrides"] == overrides
+    assert yaml.safe_load(body["config_overrides_yaml"]) == overrides
+
+
+# --- default disabled on create / clone --------------------------------------
+
+
+def test_create_defaults_disabled(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    token, _ = _session_for("admin")
+    r = client.post(
+        "/admin/agents",
+        headers=_hdr(token),
+        json={"name": "newbot", "system_prompt": "hi", "allowed_tools": ["shell"]},
+    )
+    assert r.status_code == 201
+    created = agent_store.get_by_name("newbot")
+    assert created is not None
+    assert store.get_state(created.id)["status"] == "disabled"
+    assert r.json()["status"] == "disabled"
+
+
+def test_clone_defaults_disabled(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    agent_store.create_agent("ops", "p", ["read_*"])
+    token, _ = _session_for("admin")
+    r = client.post("/admin/agents/ops/clone", headers=_hdr(token), json={"new_name": "ops2"})
+    assert r.status_code == 200
+    clone = agent_store.get_by_name("ops2")
+    assert clone is not None
+    assert store.get_state(clone.id)["status"] == "disabled"
+
+
+# --- enable guard: must be bound to a node -----------------------------------
+
+
+def test_enable_rejected_when_not_bound(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    ops = agent_store.create_agent("ops", "Ops.", ["shell"])
+    store.disable(ops.id)
+    token, _ = _session_for("admin")
+
+    r = client.post("/admin/agents/ops/enable", headers=_hdr(token))
+
+    assert r.status_code == 409
+    assert "agent not bound to a node" in str(r.json()["detail"])
+    assert store.get_state(ops.id)["status"] == "disabled"
+    assert not any(a["action"] == "agent.enable" for a in audit.search_audit())
+
+
+def test_enable_succeeds_when_bound(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    node = _seed_node(monkeypatch)
+    ops = agent_store.create_agent("ops", "Ops.", ["shell"])
+    store.disable(ops.id)
+    placement_store.pin_agent(ops.id, node)
+    token, _ = _session_for("admin")
+
+    r = client.post("/admin/agents/ops/enable", headers=_hdr(token))
+
+    assert r.status_code == 200
+    assert store.get_state(ops.id)["status"] == "enabled"
+    assert any(a["action"] == "agent.enable" for a in audit.search_audit())
+
+
+def test_disable_not_gated_by_binding(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    ops = agent_store.create_agent("ops", "Ops.", ["shell"])
+    store.enable(ops.id)  # enabled but never pinned
+    token, _ = _session_for("admin")
+
+    r = client.post("/admin/agents/ops/disable", headers=_hdr(token))
+
+    assert r.status_code == 200
+    assert store.get_state(ops.id)["status"] == "disabled"
 
 
 # --- archive + binding protection + restore (场景 40/41) ---------------------
@@ -244,6 +429,22 @@ def _wire_real_store(monkeypatch):
     monkeypatch.setattr(api, "set_agent_icon", agent_store.set_icon)
     monkeypatch.setattr(api, "agent_icons", agent_store.icons_by_name)
 
+    # Dual-state read seams wired to the real node_management stores (mirrors server.py).
+    # raising=False keeps this forward-compatible while the seams are being introduced.
+    monkeypatch.setattr(api, "get_agent_runtime", node_store.get_agent_status, raising=False)
+    monkeypatch.setattr(api, "get_agent_placement", placement_store.get_for_agent, raising=False)
+    monkeypatch.setattr(api, "list_agent_runtimes", node_store.list_agent_status, raising=False)
+    monkeypatch.setattr(
+        api, "list_agent_placements", placement_store.list_placements, raising=False
+    )
+
+
+def _seed_node(monkeypatch, node_id: str = "node-a") -> str:
+    """Register a node (needs a master key) so placements/status can reference it."""
+    monkeypatch.setenv("FLEETENT_SECRET_KEY", Fernet.generate_key().decode("ascii"))
+    node_store.register_node(node_id)
+    return node_id
+
 
 def test_create_agent_persists_and_lists(client, monkeypatch):
     _wire_real_store(monkeypatch)
@@ -261,7 +462,8 @@ def test_create_agent_persists_and_lists(client, monkeypatch):
     found = agent_store.get_by_name("newbot")
     assert found is not None and found.system_prompt == "hi"
     st = store.get_state(found.id)
-    assert st["provenance"] == "adhoc" and st["status"] == "enabled"
+    # New agents default to disabled (must be pinned to a node before enable).
+    assert st["provenance"] == "adhoc" and st["status"] == "disabled"
     assert "newbot" in {a["agent_name"] for a in store.list_states()}
 
 

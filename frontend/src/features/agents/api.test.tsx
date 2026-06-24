@@ -12,12 +12,14 @@ import {
   useAgentSecretsQuery,
   useAgentSkillsQuery,
   useAgentsQuery,
+  useAddAgentImGroupMutation,
   useBindAgentKbMutation,
   useBindAgentMcpMutation,
   useBindAgentOauthMutation,
   useBindAgentUserMutation,
   useClearDefaultAgentMutation,
   useDeleteAgentSecretMutation,
+  useRemoveAgentImGroupMutation,
   useSetAgentImCapabilitiesMutation,
   useSetAgentSecretMutation,
   useSetAgentSkillMutation,
@@ -67,6 +69,7 @@ describe('agents api bindings hooks', () => {
     let bindings = {
       mcp_servers: ['filesystem'],
       users: ['u1'],
+      groups: [{ platform: 'slack', group_id: 'C1' }],
     };
     let oauth = {
       connector_ids: ['github'],
@@ -140,6 +143,21 @@ describe('agents api bindings hooks', () => {
       http.delete(`${API_BASE_URL}/admin/agents/alpha/bindings/users/u1`, () => {
         bindings = { ...bindings, users: ['u2'] };
         return HttpResponse.json({ agent: 'alpha', bound: false, user_id: 'u1' });
+      }),
+      http.post(`${API_BASE_URL}/admin/agents/alpha/bindings/groups`, async ({ request }) => {
+        expect(await request.json()).toEqual({ platform: 'slack', group_id: 'C2' });
+        bindings = {
+          ...bindings,
+          groups: [
+            { platform: 'slack', group_id: 'C1' },
+            { platform: 'slack', group_id: 'C2' },
+          ],
+        };
+        return HttpResponse.json({ agent: 'alpha', bound: true, platform: 'slack', group_id: 'C2' });
+      }),
+      http.delete(`${API_BASE_URL}/admin/agents/alpha/bindings/groups/slack/C1`, () => {
+        bindings = { ...bindings, groups: [{ platform: 'slack', group_id: 'C2' }] };
+        return new HttpResponse(null, { status: 204 });
       })
     );
 
@@ -156,6 +174,9 @@ describe('agents api bindings hooks', () => {
       });
       expect(bindingsQuery.result.current.data?.mcp_servers).toEqual(['filesystem']);
       expect(bindingsQuery.result.current.data?.users).toEqual(['u1']);
+      expect(bindingsQuery.result.current.data?.groups).toEqual([
+        { platform: 'slack', group_id: 'C1' },
+      ]);
       expect(oauthQuery.result.current.data?.connector_ids).toEqual(['github']);
       expect(kbsQuery.result.current.data?.kb_ids).toEqual(['support']);
     });
@@ -169,6 +190,8 @@ describe('agents api bindings hooks', () => {
     const unbindKb = renderHook(() => useUnbindAgentKbMutation('alpha'), { wrapper });
     const bindUser = renderHook(() => useBindAgentUserMutation('alpha'), { wrapper });
     const unbindUser = renderHook(() => useUnbindAgentUserMutation('alpha'), { wrapper });
+    const addGroup = renderHook(() => useAddAgentImGroupMutation('alpha'), { wrapper });
+    const removeGroup = renderHook(() => useRemoveAgentImGroupMutation('alpha'), { wrapper });
 
     let previousSkillsCalls = skillsCalls;
     let previousBindingsCalls = bindingsCalls;
@@ -235,6 +258,25 @@ describe('agents api bindings hooks', () => {
     await waitFor(() => {
       expect(bindingsCalls).toBeGreaterThan(previousBindingsCalls);
       expect(bindingsQuery.result.current.data?.users).toEqual(['u2']);
+    });
+    previousBindingsCalls = bindingsCalls;
+
+    await addGroup.result.current.mutateAsync({ platform: 'slack', group_id: 'C2' });
+    await waitFor(() => {
+      expect(bindingsCalls).toBeGreaterThan(previousBindingsCalls);
+      expect(bindingsQuery.result.current.data?.groups).toEqual([
+        { platform: 'slack', group_id: 'C1' },
+        { platform: 'slack', group_id: 'C2' },
+      ]);
+    });
+    previousBindingsCalls = bindingsCalls;
+
+    await removeGroup.result.current.mutateAsync({ platform: 'slack', group_id: 'C1' });
+    await waitFor(() => {
+      expect(bindingsCalls).toBeGreaterThan(previousBindingsCalls);
+      expect(bindingsQuery.result.current.data?.groups).toEqual([
+        { platform: 'slack', group_id: 'C2' },
+      ]);
     });
   });
 
@@ -369,5 +411,41 @@ describe('agents api bindings hooks', () => {
     await waitFor(() => {
       expect(agentListCalls).toBeGreaterThan(previousAgentListCalls);
     });
+  });
+});
+
+describe('agents list dual-state contract', () => {
+  it('surfaces runtime and placement from the list endpoint', async () => {
+    const { server } = await import('@/test/msw/server');
+    server.use(
+      http.get(`${API_BASE_URL}/admin/agents`, () =>
+        HttpResponse.json([
+          {
+            agent_name: 'alpha',
+            provenance: 'adhoc',
+            status: 'enabled',
+            runtime: { phase: 'running', health: 'ok', pid: 7, node_id: 'node-a' },
+            placement: { node_id: 'node-a' },
+          },
+          {
+            agent_name: 'beta',
+            provenance: 'adhoc',
+            status: 'disabled',
+            runtime: null,
+            placement: null,
+          },
+        ])
+      )
+    );
+    const wrapper = createWrapper();
+
+    const { result } = renderHook(() => useAgentsQuery(), { wrapper });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const [alpha, beta] = result.current.data ?? [];
+    expect(alpha.runtime?.phase).toBe('running');
+    expect(alpha.placement?.node_id).toBe('node-a');
+    expect(beta.runtime).toBeNull();
+    expect(beta.placement).toBeNull();
   });
 });

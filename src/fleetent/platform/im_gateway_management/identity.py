@@ -108,6 +108,58 @@ def attach_identity(platform: str, platform_user_id: str, user_id: str) -> User:
     return _attach_identity(platform, platform_user_id, user_id)
 
 
+def create_mapping(
+    platform: str,
+    platform_user_id: str,
+    user_id: str,
+    actor: str | None = None,
+) -> dict[str, Any]:
+    """Admin-create an IM identity mapping bound to an existing internal user. Audited.
+
+    Unlike ``attach_identity`` (idempotent INSERT OR IGNORE used by the gateway), this is
+    the admin-workbench primitive: it fails loudly so the API can surface conflicts.
+
+    Raises ValueError "target user not found" if ``user_id`` has no user, or
+    "im identity already exists" if ``(platform, platform_user_id)`` is already mapped.
+    """
+    from fleetent import audit_log
+
+    user = get_by_id(user_id)
+    if user is None:
+        raise ValueError(f"target user not found: {user_id}")
+    now = datetime.datetime.now(datetime.UTC).isoformat()
+    with _conn() as conn:
+        try:
+            cursor = conn.execute(
+                """INSERT INTO im_users (platform, platform_user_id, user_id, created_at)
+                   VALUES (:platform, :puid, :uid, :now)""",
+                {"platform": platform, "puid": platform_user_id, "uid": user_id, "now": now},
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError(f"im identity already exists: {platform}:{platform_user_id}") from exc
+        new_id = cursor.lastrowid
+    audit_log.write_audit(
+        actor,
+        "create_im_user",
+        target_type="im_user",
+        target_id=f"{platform}:{platform_user_id}",
+        detail={
+            "platform": platform,
+            "platform_user_id": platform_user_id,
+            "user_id": user_id,
+        },
+    )
+    return {
+        "id": new_id,
+        "platform": platform,
+        "platform_user_id": platform_user_id,
+        "user_id": user_id,
+        "user_name": user.name,
+        "user_email": user.email,
+        "created_at": now,
+    }
+
+
 def resolve_or_provision(
     tenant_id: str,
     *,
@@ -431,6 +483,34 @@ def list_all() -> list[dict[str, Any]]:
             "allowed": r["status"] != "blocked",
             "created_at": r["created_at"],
             "metadata": _parse_meta(r["meta_json"]),
+        }
+        for r in rows
+    ]
+
+
+def list_mappings() -> list[dict[str, Any]]:
+    """All IM identity mappings joined with the bound internal user's name and email.
+
+    For the admin user↔IM relationship workbench: each row carries the platform handle
+    plus the internal user it resolves to (name + email), so the page can show who an
+    external identity maps to without a second lookup.
+    """
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT im.id, im.platform, im.platform_user_id, im.user_id, im.created_at,"
+            " users.name AS user_name, users.email AS user_email"
+            " FROM im_users AS im JOIN users ON users.id = im.user_id"
+            " ORDER BY im.created_at, im.id"
+        ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "platform": r["platform"],
+            "platform_user_id": r["platform_user_id"],
+            "user_id": r["user_id"],
+            "user_name": r["user_name"],
+            "user_email": r["user_email"],
+            "created_at": r["created_at"],
         }
         for r in rows
     ]

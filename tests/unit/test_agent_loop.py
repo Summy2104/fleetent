@@ -2583,6 +2583,38 @@ def test_run_sync_passes_effective_sandbox_mode(monkeypatch):
     assert captured.get("sandbox_mode") is se.Mode.OFF
 
 
+def test_run_sync_calls_inner_run_with_principal_not_user_id(monkeypatch):
+    """run_sync must hand identity to run() as a Principal, never as a bare user_id.
+
+    run() was refactored to accept `principal: Principal` and derive user_id from it;
+    the CLI call site lagged behind and still passed `user_id=`, which raises TypeError
+    against the real signature. Existing run_sync tests stub run() with `**kw`, so they
+    swallow the bad kwarg and never catch the mismatch — this test pins the call-site
+    contract directly.
+    """
+    from unittest.mock import AsyncMock
+
+    import fleetent.integrations.sandbox.enablement as se
+
+    captured: dict = {}
+
+    async def fake_run(messages, **kw):
+        captured.update(kw)
+        return "done"
+
+    monkeypatch.setattr(al, "scan_skills", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **kw: "")
+    monkeypatch.setattr(al, "collect_disabled_trace", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "run", fake_run)
+    monkeypatch.setattr(se, "get_effective_mode", AsyncMock(return_value=se.Mode.OFF))
+
+    al.run_sync("hi", user_id="alice")
+
+    assert "user_id" not in captured, "run() takes a Principal, not a bare user_id kwarg"
+    assert isinstance(captured.get("principal"), Principal)
+    assert captured["principal"].user_id == "alice"
+
+
 async def test_safe_dispatch_forwards_user_id():
     """_safe_dispatch threads user_id into dispatch (connector credential isolation)."""
     captured: dict[str, object] = {}

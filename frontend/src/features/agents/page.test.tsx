@@ -1,5 +1,5 @@
 import { MemoryRouter } from 'react-router-dom';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -15,7 +15,9 @@ type AgentRecord = {
   agent_name: string;
   allowed_tools: string[];
   is_default?: boolean;
+  placement?: { node_id: string } | null;
   provenance: string;
+  runtime?: { health?: string | null; node_id?: string | null; phase?: string | null } | null;
   status: string;
   system_prompt: string;
 };
@@ -23,6 +25,8 @@ type AgentRecord = {
 type AgentDetailRecord = {
   agent: string;
   allowed_tools: string[];
+  config_overrides_yaml?: string;
+  model_overrides?: Record<string, unknown>;
   status: string;
   supports_dm?: boolean;
   supports_groups?: boolean;
@@ -30,6 +34,7 @@ type AgentDetailRecord = {
 };
 
 type AgentBindingState = {
+  groups?: Array<{ group_id: string; platform: string }>;
   kbIds: string[];
   mcpServers: string[];
   oauth: Array<{ run_as: string; service_id: string }>;
@@ -92,6 +97,7 @@ function installAgentBindingHandlers({
       HttpResponse.json({
         mcp_servers: bindingsByAgent[String(params.name)].mcpServers,
         users: bindingsByAgent[String(params.name)].users,
+        groups: bindingsByAgent[String(params.name)].groups ?? [],
       })
     ),
     http.get(`${API_BASE_URL}/admin/agents/:name/bindings/oauth`, ({ params }) => {
@@ -187,6 +193,36 @@ function installAgentBindingHandlers({
           name: 'Bob',
           role: 'viewer',
           status: 'active',
+        },
+      ])
+    ),
+    http.get(`${API_BASE_URL}/admin/providers`, () =>
+      HttpResponse.json([
+        {
+          api_key: null,
+          api_key_env: 'FLEETENT_OPENAI_KEY',
+          api_key_set: true,
+          base_url: 'https://api.openai.example/v1',
+          description: null,
+          id: 'openai-gpt4',
+          input_price_per_1k: null,
+          model: 'gpt-4o',
+          output_price_per_1k: null,
+          protocol: 'openai_chat',
+          provider: 'openai',
+        },
+        {
+          api_key: null,
+          api_key_env: null,
+          api_key_set: false,
+          base_url: 'http://localhost:11434/v1',
+          description: null,
+          id: 'ollama-local',
+          input_price_per_1k: null,
+          model: 'llama3',
+          output_price_per_1k: null,
+          protocol: 'openai_chat',
+          provider: 'local',
         },
       ])
     )
@@ -492,11 +528,18 @@ describe('agents page parity baseline', () => {
       }),
       http.post(`${API_BASE_URL}/admin/agents/alpha/bindings/groups`, async ({ request }) => {
         expect(await request.json()).toEqual({ group_id: 'C0123', platform: 'slack' });
+        bindingsByAgent.alpha.groups = [
+          ...(bindingsByAgent.alpha.groups ?? []),
+          { group_id: 'C0123', platform: 'slack' },
+        ];
         return HttpResponse.json({ agent: 'alpha', bound: true, group_id: 'C0123', platform: 'slack' }, { status: 201 });
       }),
-      http.delete(`${API_BASE_URL}/admin/agents/alpha/bindings/groups/slack/C0123`, () =>
-        new HttpResponse(null, { status: 204 })
-      ),
+      http.delete(`${API_BASE_URL}/admin/agents/alpha/bindings/groups/slack/C0123`, () => {
+        bindingsByAgent.alpha.groups = (bindingsByAgent.alpha.groups ?? []).filter(
+          (group) => !(group.platform === 'slack' && group.group_id === 'C0123')
+        );
+        return new HttpResponse(null, { status: 204 });
+      }),
       http.put(`${API_BASE_URL}/admin/agents/alpha/im-capabilities`, async ({ request }) => {
         expect(await request.json()).toEqual({ supports_dm: true, supports_groups: true });
         detailByAgent.alpha = { ...detailByAgent.alpha, supports_dm: true, supports_groups: true };
@@ -705,5 +748,345 @@ describe('agents page parity baseline', () => {
     expect(panel.queryByLabelText('Secret value for FLEETENT_ALPHA_API_KEY')).not.toBeInTheDocument();
 
     expectNoBindingLinks();
+  });
+});
+
+describe('agents page dual-state (runtime + placement gating)', () => {
+  const emptyBindings = {
+    kbIds: [],
+    mcpServers: [],
+    oauth: [],
+    secrets: [],
+    skills: [],
+    users: [],
+  };
+
+  it('shows runtime state on the card', async () => {
+    const agents: AgentRecord[] = [
+      {
+        agent_name: 'alpha',
+        allowed_tools: [],
+        is_default: false,
+        placement: { node_id: 'node-a' },
+        provenance: 'adhoc',
+        runtime: { health: 'ok', node_id: 'node-a', phase: 'running' },
+        status: 'enabled',
+        system_prompt: 'Alpha prompt',
+      },
+    ];
+    const detailByAgent: Record<string, AgentDetailRecord> = {
+      alpha: {
+        agent: 'alpha',
+        allowed_tools: [],
+        status: 'enabled',
+        system_prompt: 'Alpha prompt',
+      },
+    };
+    installAgentBindingHandlers({
+      agents,
+      bindingsByAgent: { alpha: emptyBindings },
+      detailByAgent,
+    });
+
+    renderAgentsRoute();
+
+    expect(await screen.findByText('Runtime: running on node-a (ok)')).toBeInTheDocument();
+    // the new runtime line must not displace the existing desired-state token
+    expect(screen.getByText('enabled')).toBeInTheDocument();
+  });
+
+  it('renders a phase-only runtime without node/health decoration', async () => {
+    const agents: AgentRecord[] = [
+      {
+        agent_name: 'alpha',
+        allowed_tools: [],
+        is_default: false,
+        placement: { node_id: 'node-a' },
+        provenance: 'adhoc',
+        runtime: { phase: 'stopped' },
+        status: 'enabled',
+        system_prompt: 'Alpha prompt',
+      },
+    ];
+    installAgentBindingHandlers({
+      agents,
+      bindingsByAgent: { alpha: emptyBindings },
+      detailByAgent: {
+        alpha: { agent: 'alpha', allowed_tools: [], status: 'enabled', system_prompt: 'p' },
+      },
+    });
+
+    renderAgentsRoute();
+
+    expect(await screen.findByText('Runtime: stopped')).toBeInTheDocument();
+  });
+
+  it('renders an explicit not-running state when runtime is null', async () => {
+    const agents: AgentRecord[] = [
+      {
+        agent_name: 'alpha',
+        allowed_tools: [],
+        is_default: false,
+        placement: null,
+        provenance: 'adhoc',
+        runtime: null,
+        status: 'disabled',
+        system_prompt: 'Alpha prompt',
+      },
+    ];
+    installAgentBindingHandlers({
+      agents,
+      bindingsByAgent: { alpha: emptyBindings },
+      detailByAgent: {
+        alpha: { agent: 'alpha', allowed_tools: [], status: 'disabled', system_prompt: 'p' },
+      },
+    });
+
+    renderAgentsRoute();
+
+    expect(await screen.findByText('Runtime: not running')).toBeInTheDocument();
+  });
+
+  it('disables Enable when the agent is not bound to a node', async () => {
+    const agents: AgentRecord[] = [
+      {
+        agent_name: 'gamma',
+        allowed_tools: [],
+        is_default: false,
+        placement: null,
+        provenance: 'adhoc',
+        runtime: null,
+        status: 'disabled',
+        system_prompt: 'Gamma prompt',
+      },
+      {
+        agent_name: 'delta',
+        allowed_tools: [],
+        is_default: false,
+        placement: { node_id: 'node-b' },
+        provenance: 'adhoc',
+        runtime: null,
+        status: 'disabled',
+        system_prompt: 'Delta prompt',
+      },
+    ];
+    installAgentBindingHandlers({
+      agents,
+      bindingsByAgent: { delta: emptyBindings, gamma: emptyBindings },
+      detailByAgent: {
+        delta: { agent: 'delta', allowed_tools: [], status: 'disabled', system_prompt: 'd' },
+        gamma: { agent: 'gamma', allowed_tools: [], status: 'disabled', system_prompt: 'g' },
+      },
+    });
+
+    renderAgentsRoute();
+
+    const unbound = await screen.findByRole('button', { name: 'Enable gamma' });
+    expect(unbound).toBeDisabled();
+    expect(unbound).toHaveAttribute('title', 'Pin this agent to a node before enabling');
+
+    const bound = screen.getByRole('button', { name: 'Enable delta' });
+    expect(bound).not.toBeDisabled();
+  });
+});
+
+describe('agents page model binding', () => {
+  const emptyBindings = {
+    kbIds: [],
+    mcpServers: [],
+    oauth: [],
+    secrets: [],
+    skills: [],
+    users: [],
+  };
+
+  it('binds a model provider on create and round-trips the selection on edit', async () => {
+    const user = userEvent.setup({ delay: null });
+    const agents: AgentRecord[] = [
+      {
+        agent_name: 'alpha',
+        allowed_tools: [],
+        provenance: 'adhoc',
+        status: 'enabled',
+        system_prompt: 'Alpha prompt',
+      },
+    ];
+    const detailByAgent: Record<string, AgentDetailRecord> = {
+      alpha: {
+        agent: 'alpha',
+        allowed_tools: [],
+        model_overrides: { routes: { default: [{ provider_id: 'ollama-local' }] } },
+        status: 'enabled',
+        supports_dm: false,
+        supports_groups: false,
+        system_prompt: 'Alpha prompt',
+      },
+    };
+
+    installAgentBindingHandlers({
+      agents,
+      bindingsByAgent: { alpha: { ...emptyBindings } },
+      detailByAgent,
+    });
+
+    type CapturedModelBody = {
+      model_overrides?: { routes?: Record<string, Array<{ provider_id?: string }>> };
+      name?: string;
+    };
+    const captured: { create?: CapturedModelBody; patch?: CapturedModelBody } = {};
+    server.use(
+      http.post(`${API_BASE_URL}/admin/agents`, async ({ request }) => {
+        const body = (await request.json()) as CapturedModelBody;
+        captured.create = body;
+        const name = body.name ?? 'beta';
+        agents.push({
+          agent_name: name,
+          allowed_tools: [],
+          provenance: 'adhoc',
+          status: 'enabled',
+          system_prompt: 'Beta prompt',
+        });
+        detailByAgent[name] = {
+          agent: name,
+          allowed_tools: [],
+          status: 'enabled',
+          system_prompt: 'Beta prompt',
+        };
+        return HttpResponse.json({ agent: name, provenance: 'adhoc', status: 'enabled' }, { status: 201 });
+      }),
+      http.patch(`${API_BASE_URL}/admin/agents/:name`, async ({ request }) => {
+        captured.patch = (await request.json()) as CapturedModelBody;
+        return HttpResponse.json({ ok: true });
+      })
+    );
+
+    renderAgentsRoute();
+    expect(await screen.findByText('alpha')).toBeInTheDocument();
+
+    // Create: pick a provider for the default route.
+    await user.type(screen.getByLabelText('Agent name'), 'beta');
+    await user.type(screen.getByLabelText('System prompt'), 'Beta prompt');
+    await user.selectOptions(screen.getByLabelText('Model provider'), 'openai-gpt4');
+    await user.click(screen.getByRole('button', { name: 'Create agent' }));
+
+    await waitFor(() => expect(captured.create).toBeTruthy());
+    expect(captured.create?.model_overrides?.routes?.default?.[0]?.provider_id).toBe('openai-gpt4');
+
+    // Edit alpha: the existing provider is pre-selected, then changed.
+    await user.click(screen.getByRole('button', { name: 'Edit alpha' }));
+    await waitFor(() =>
+      expect(screen.getByLabelText<HTMLSelectElement>('Model provider').value).toBe('ollama-local')
+    );
+    await user.selectOptions(screen.getByLabelText('Model provider'), 'openai-gpt4');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(captured.patch).toBeTruthy());
+    expect(captured.patch?.model_overrides?.routes?.default?.[0]?.provider_id).toBe('openai-gpt4');
+  });
+});
+
+describe('agents page IM connector overrides', () => {
+  const emptyBindings = {
+    kbIds: [],
+    mcpServers: [],
+    oauth: [],
+    secrets: [],
+    skills: [],
+    users: [],
+  };
+
+  it('shows config overrides yaml in the bindings panel and saves edits via PATCH', async () => {
+    const user = userEvent.setup({ delay: null });
+    const agents: AgentRecord[] = [
+      {
+        agent_name: 'alpha',
+        allowed_tools: [],
+        provenance: 'adhoc',
+        status: 'enabled',
+        system_prompt: 'Alpha prompt',
+      },
+    ];
+    const detailByAgent: Record<string, AgentDetailRecord> = {
+      alpha: {
+        agent: 'alpha',
+        allowed_tools: [],
+        config_overrides_yaml: 'im:\n  slack:\n    bot_token_env: SLACK_BOT_TOKEN\n',
+        status: 'enabled',
+        supports_dm: false,
+        supports_groups: false,
+        system_prompt: 'Alpha prompt',
+      },
+    };
+
+    installAgentBindingHandlers({
+      agents,
+      bindingsByAgent: { alpha: { ...emptyBindings } },
+      detailByAgent,
+    });
+
+    const captured: { patch?: { config_overrides_yaml?: string } } = {};
+    server.use(
+      http.patch(`${API_BASE_URL}/admin/agents/:name`, async ({ request }) => {
+        captured.patch = (await request.json()) as { config_overrides_yaml?: string };
+        return HttpResponse.json({ ok: true });
+      })
+    );
+
+    renderAgentsRoute();
+    expect(await screen.findByText('alpha')).toBeInTheDocument();
+
+    const section = (await screen.findByRole('heading', { name: 'IM Connectors' })).closest(
+      'section'
+    );
+    expect(section).not.toBeNull();
+    const controls = within(section as HTMLElement);
+    const textarea = controls.getByLabelText<HTMLTextAreaElement>('Advanced overrides (YAML)');
+    await waitFor(() => expect(textarea.value).toContain('bot_token_env: SLACK_BOT_TOKEN'));
+
+    fireEvent.change(textarea, {
+      target: { value: 'im:\n  telegram:\n    bot_token_env: TG_TOKEN\n' },
+    });
+    await user.click(controls.getByRole('button', { name: 'Save overrides' }));
+
+    await waitFor(() => expect(captured.patch).toBeTruthy());
+    expect(captured.patch?.config_overrides_yaml).toContain('telegram');
+    expect(captured.patch?.config_overrides_yaml).toContain('TG_TOKEN');
+  });
+
+  it('hides the overrides editor controls from viewers', async () => {
+    const agents: AgentRecord[] = [
+      {
+        agent_name: 'alpha',
+        allowed_tools: [],
+        provenance: 'adhoc',
+        status: 'enabled',
+        system_prompt: 'Alpha prompt',
+      },
+    ];
+    const detailByAgent: Record<string, AgentDetailRecord> = {
+      alpha: {
+        agent: 'alpha',
+        allowed_tools: [],
+        config_overrides_yaml: 'im:\n  slack:\n    bot_token_env: SLACK_BOT_TOKEN\n',
+        status: 'enabled',
+        system_prompt: 'Alpha prompt',
+      },
+    };
+
+    installAgentBindingHandlers({
+      agents,
+      bindingsByAgent: { alpha: { ...emptyBindings } },
+      detailByAgent,
+      role: 'viewer',
+    });
+
+    renderAgentsRoute();
+    expect(await screen.findByText('alpha')).toBeInTheDocument();
+
+    const section = (await screen.findByRole('heading', { name: 'IM Connectors' })).closest(
+      'section'
+    );
+    const controls = within(section as HTMLElement);
+    expect(controls.queryByRole('button', { name: 'Save overrides' })).not.toBeInTheDocument();
   });
 });

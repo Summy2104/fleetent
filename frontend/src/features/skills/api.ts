@@ -50,6 +50,14 @@ type SkillLifecycleAction = 'delete' | 'disable' | 'enable' | 'restore';
 type BindingInput = {
   enabled: boolean;
 };
+type CreateSkillInput = {
+  content: string;
+  name: string;
+  source?: string;
+};
+type EditSkillInput = {
+  content: string;
+};
 
 function invalidateSkillList(queryClient: ReturnType<typeof useQueryClient>): Promise<void> {
   return queryClient.invalidateQueries({ queryKey: ['skills'] });
@@ -120,6 +128,35 @@ export function useSkillProposalDiffQuery(proposalId: string | null, enabled: bo
     enabled: enabled && Boolean(proposalId),
     queryKey: ['skill-proposal-diff', proposalId],
     queryFn: () => api.get<SkillDiff>(`/admin/skills/proposals/${proposalId}/diff`),
+  });
+}
+
+export function useCreateSkillMutation() {
+  const api = useAdminApi();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: CreateSkillInput) =>
+      api.post('/admin/skills', { source: 'adhoc', ...input }),
+    onSuccess: async () => {
+      await invalidateSkillList(queryClient);
+    },
+  });
+}
+
+export function useEditSkillMutation(name: string) {
+  const api = useAdminApi();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: EditSkillInput) => api.put(`/admin/skills/${name}`, input),
+    onSuccess: async () => {
+      await Promise.all([
+        invalidateSkillList(queryClient),
+        queryClient.invalidateQueries({ queryKey: ['skill-content', name] }),
+        queryClient.invalidateQueries({ queryKey: ['skill-versions', name] }),
+      ]);
+    },
   });
 }
 

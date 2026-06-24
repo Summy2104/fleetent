@@ -138,6 +138,8 @@ async def test_start_infra_registers_mcp_and_resume_markers(
     agent = _agent_file(mcp_servers=[mcp_server])
     register_all = AsyncMock()
     monkeypatch.setattr(agent_app, "_init_agent_db_schema", lambda *args, **kwargs: None)
+    # _start_infra reconciles expired approvals (#8) after the (here NOOP'd) state_db wiring.
+    monkeypatch.setattr("fleetent.runtime.approval_resume.reconcile_expired_approvals", AsyncMock())
     monkeypatch.setattr(
         "fleetent.integrations.sandbox.factory.create_backend",
         lambda current_agent: "backend",

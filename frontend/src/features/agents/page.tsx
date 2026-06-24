@@ -6,6 +6,7 @@ import {
   type AgentImCapabilitiesInput,
   type AgentImGroupInput,
   type AgentListItem,
+  type AgentModelOverrides,
   type AgentSecretRecord,
   type AgentSkillBinding,
   useActivateAgentVersionMutation,
@@ -41,6 +42,7 @@ import {
 } from '@/features/agents/api';
 import { useConnectorsQuery, useMcpServersQuery } from '@/features/connectors/api';
 import { useKbsQuery } from '@/features/kb/api';
+import { useProvidersQuery } from '@/features/providers/api';
 import { useSkillsQuery } from '@/features/skills/api';
 import { useUsersQuery } from '@/features/users/api';
 
@@ -48,11 +50,6 @@ type AdminMe = {
   email: string;
   id: string;
   role: string;
-};
-
-type AgentImGroup = {
-  group_id: string;
-  platform: string;
 };
 
 function useAdminMeQuery() {
@@ -71,12 +68,63 @@ function parseAllowedTools(value: string): string[] {
     .filter(Boolean);
 }
 
+// The agent's default model route maps to a single provider id. The platform expands this into
+// the runtime model policy (materialize); chat resolves the "default" route, so it is the one
+// binding required to make an agent reach a real LLM.
+function defaultRouteProviderId(overrides: AgentModelOverrides | undefined): string {
+  const routes = (overrides?.routes ?? {}) as Record<string, Array<Record<string, unknown>>>;
+  const entry = routes.default?.[0];
+  if (!entry) {
+    return '';
+  }
+  // A provider id may be authored under any of these keys; take the first that is a string.
+  for (const value of [entry.provider_id, entry.provider, entry.target]) {
+    if (typeof value === 'string' && value) {
+      return value;
+    }
+  }
+  return '';
+}
+
+// Set (or clear) the default-route provider while preserving every other key the platform stores
+// alongside it (other routes, ``__credential_slots__``), so an edit never drops sibling state.
+function withDefaultRouteProvider(
+  overrides: AgentModelOverrides | undefined,
+  providerId: string
+): AgentModelOverrides {
+  const next: AgentModelOverrides = { ...(overrides ?? {}) };
+  const routes = { ...((next.routes as Record<string, unknown>) ?? {}) };
+  if (providerId) {
+    routes.default = [{ provider_id: providerId }];
+  } else {
+    delete routes.default;
+  }
+  next.routes = routes;
+  return next;
+}
+
 function formatStatus(agent: AgentListItem): string[] {
   const tokens = [agent.status];
   if (agent.is_default) {
     tokens.push('default');
   }
   return tokens;
+}
+
+const ENABLE_UNBOUND_HINT = 'Pin this agent to a node before enabling';
+
+function formatRuntime(agent: AgentListItem): string {
+  if (!agent.runtime) {
+    return 'not running';
+  }
+  const parts = [agent.runtime.phase ?? 'unknown'];
+  if (agent.runtime.node_id) {
+    parts.push(`on ${agent.runtime.node_id}`);
+  }
+  if (agent.runtime.health) {
+    parts.push(`(${agent.runtime.health})`);
+  }
+  return parts.join(' ');
 }
 
 function AgentCard({
@@ -99,6 +147,9 @@ function AgentCard({
   const clone = useCloneAgentMutation(agent.agent_name);
   const remove = useDeleteAgentMutation(agent.agent_name);
 
+  // Enabling an agent no node hosts is a no-op promise — gate the control on placement.
+  const enableBlocked = agent.status === 'disabled' && !agent.placement;
+
   const runDisableEnable = async (): Promise<unknown> => {
     return agent.status === 'disabled' ? enable.mutateAsync() : disable.mutateAsync();
   };
@@ -119,6 +170,7 @@ function AgentCard({
             {agent.agent_name}
           </button>
           <p className="mt-2 text-sm text-muted-foreground">{formatStatus(agent).join(' · ')}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{`Runtime: ${formatRuntime(agent)}`}</p>
           {isSelected && (detailPrompt ?? agent.system_prompt) ? (
             <p className="mt-2 text-sm text-foreground">{detailPrompt ?? agent.system_prompt}</p>
           ) : null}
@@ -128,8 +180,10 @@ function AgentCard({
             {`Edit ${agent.agent_name}`}
           </button>
           <button
-            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
+            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
             onClick={() => void runDisableEnable()}
+            disabled={enableBlocked}
+            title={enableBlocked ? ENABLE_UNBOUND_HINT : undefined}
             type="button"
           >
             {agent.status === 'disabled' ? `Enable ${agent.agent_name}` : `Disable ${agent.agent_name}`}
@@ -327,15 +381,9 @@ function SecretRow({
 function AgentBindingsPanel({
   agent,
   canWrite,
-  groups,
-  onAddGroup,
-  onRemoveGroup,
 }: {
   agent: AgentListItem;
   canWrite: boolean;
-  groups: AgentImGroup[];
-  onAddGroup: (group: AgentImGroup) => void;
-  onRemoveGroup: (group: AgentImGroup) => void;
 }): JSX.Element {
   const detail = useAgentDetailQuery(agent.agent_name);
   const skills = useAgentSkillsQuery(agent.agent_name);
@@ -362,6 +410,7 @@ function AgentBindingsPanel({
   const setDefault = useSetDefaultAgentMutation(agent.agent_name);
   const clearDefault = useClearDefaultAgentMutation();
   const setImCapabilities = useSetAgentImCapabilitiesMutation(agent.agent_name);
+  const updateAgent = useUpdateAgentMutation(agent.agent_name);
 
   const [selectedMcpServer, setSelectedMcpServer] = useState('');
   const [selectedConnector, setSelectedConnector] = useState('');
@@ -374,6 +423,7 @@ function AgentBindingsPanel({
     supports_dm: false,
     supports_groups: false,
   });
+  const [overridesYaml, setOverridesYaml] = useState('');
 
   useEffect(() => {
     setCapabilities({
@@ -381,6 +431,10 @@ function AgentBindingsPanel({
       supports_groups: detail.data?.supports_groups ?? false,
     });
   }, [detail.data?.supports_dm, detail.data?.supports_groups, agent.agent_name]);
+
+  useEffect(() => {
+    setOverridesYaml(detail.data?.config_overrides_yaml ?? '');
+  }, [detail.data?.config_overrides_yaml, agent.agent_name]);
 
   const availableMcpServers = useMemo(() => {
     const bound = new Set(bindings.data?.mcp_servers ?? []);
@@ -406,14 +460,19 @@ function AgentBindingsPanel({
     await setImCapabilities.mutateAsync(capabilities);
   };
 
+  const saveOverrides = async (): Promise<void> => {
+    // Partial PATCH: send only the overrides; omitted prompt/tools are left untouched server-side.
+    await updateAgent.mutateAsync({ config_overrides_yaml: overridesYaml });
+  };
+
+  const boundGroups = bindings.data?.groups ?? [];
+
   const createGroup = async (group: AgentImGroupInput): Promise<void> => {
     await addImGroup.mutateAsync(group);
-    onAddGroup(group);
   };
 
   const deleteGroup = async (group: AgentImGroupInput): Promise<void> => {
     await removeImGroup.mutateAsync(group);
-    onRemoveGroup(group);
   };
 
   return (
@@ -647,8 +706,36 @@ function AgentBindingsPanel({
       </section>
 
       <section className="space-y-3 rounded-2xl border bg-white/70 p-4">
+        <h3 className="text-lg font-semibold">IM Connectors</h3>
+        <p className="text-sm text-muted-foreground">
+          Configure the Slack/Telegram connector (bot/app token env names) via agent.yaml
+          overrides. Tokens reference env-var names, never inline secrets.
+        </p>
+        <label className="grid gap-2 text-sm font-medium">
+          Advanced overrides (YAML)
+          <textarea
+            className="min-h-[160px] rounded-md border bg-white px-3 py-2 font-mono text-sm"
+            disabled={!canWrite}
+            onChange={(event) => setOverridesYaml(event.target.value)}
+            placeholder={'im:\n  slack:\n    bot_token_env: SLACK_BOT_TOKEN\n    app_token_env: SLACK_APP_TOKEN'}
+            value={overridesYaml}
+          />
+        </label>
+        {canWrite ? (
+          <button
+            className="self-start rounded-md bg-secondary px-3 py-2 text-sm font-medium"
+            disabled={updateAgent.isPending}
+            onClick={() => void saveOverrides()}
+            type="button"
+          >
+            Save overrides
+          </button>
+        ) : null}
+      </section>
+
+      <section className="space-y-3 rounded-2xl border bg-white/70 p-4">
         <h3 className="text-lg font-semibold">IM Access</h3>
-        <BindingList empty="No IM groups allowed." items={groups.map((group) => `${group.platform}:${group.group_id}`)} renderItem={(item) => (
+        <BindingList empty="No IM groups allowed." items={boundGroups.map((group) => `${group.platform}:${group.group_id}`)} renderItem={(item) => (
           <div className="flex items-center gap-2 rounded-full border px-3 py-1" key={item}>
             <span className="text-sm">{item}</span>
             {canWrite ? (
@@ -784,7 +871,8 @@ export function AgentsPage(): JSX.Element {
   const [name, setName] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
   const [allowedTools, setAllowedTools] = useState('');
-  const [groupsByAgent, setGroupsByAgent] = useState<Record<string, AgentImGroup[]>>({});
+  const [modelProviderId, setModelProviderId] = useState('');
+  const [initialModelProviderId, setInitialModelProviderId] = useState('');
 
   useEffect(() => {
     if (!selectedName && agents.data && agents.data.length > 0) {
@@ -793,6 +881,7 @@ export function AgentsPage(): JSX.Element {
   }, [agents.data, selectedName]);
 
   const detail = useAgentDetailQuery(selectedName);
+  const providers = useProvidersQuery();
   const createAgent = useCreateAgentMutation();
   const updateAgent = useUpdateAgentMutation(selectedName ?? '');
   const versions = useAgentVersionsQuery(versionsOpenFor, versionsOpenFor === selectedName);
@@ -807,6 +896,9 @@ export function AgentsPage(): JSX.Element {
       setName(detail.data.agent);
       setSystemPrompt(detail.data.system_prompt);
       setAllowedTools(detail.data.allowed_tools.join(','));
+      const provider = defaultRouteProviderId(detail.data.model_overrides);
+      setModelProviderId(provider);
+      setInitialModelProviderId(provider);
     }
   }, [detail.data, mode]);
 
@@ -815,6 +907,8 @@ export function AgentsPage(): JSX.Element {
     setName('');
     setSystemPrompt('');
     setAllowedTools('');
+    setModelProviderId('');
+    setInitialModelProviderId('');
   };
 
   const onSubmit = async (): Promise<void> => {
@@ -823,43 +917,31 @@ export function AgentsPage(): JSX.Element {
         name,
         system_prompt: systemPrompt,
         allowed_tools: parseAllowedTools(allowedTools),
+        ...(modelProviderId
+          ? { model_overrides: withDefaultRouteProvider(undefined, modelProviderId) }
+          : {}),
       });
       resetForm();
       return;
     }
 
     if (selectedName) {
+      // Omit model_overrides when unchanged so the PATCH leaves the stored policy untouched;
+      // when changed, merge onto the current overrides to preserve credential slots/other routes.
+      const modelChanged = modelProviderId !== initialModelProviderId;
       await updateAgent.mutateAsync({
         system_prompt: systemPrompt,
         allowed_tools: parseAllowedTools(allowedTools),
+        ...(modelChanged
+          ? {
+              model_overrides: withDefaultRouteProvider(detail.data?.model_overrides, modelProviderId),
+            }
+          : {}),
       });
     }
   };
 
   const canWrite = me.data?.role !== 'viewer';
-  const groups = selectedName ? groupsByAgent[selectedName] ?? [] : [];
-
-  const addImGroup = (group: AgentImGroup): void => {
-    if (!selectedName) {
-      return;
-    }
-    setGroupsByAgent((current) => ({
-      ...current,
-      [selectedName]: [...(current[selectedName] ?? []), group],
-    }));
-  };
-
-  const removeImGroup = (group: AgentImGroup): void => {
-    if (!selectedName) {
-      return;
-    }
-    setGroupsByAgent((current) => ({
-      ...current,
-      [selectedName]: (current[selectedName] ?? []).filter(
-        (item) => item.platform !== group.platform || item.group_id !== group.group_id
-      ),
-    }));
-  };
 
   return (
     <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
@@ -914,6 +996,25 @@ export function AgentsPage(): JSX.Element {
                 value={allowedTools}
               />
             </label>
+            <label className="grid gap-2 text-sm font-medium">
+              Model provider
+              <select
+                className="rounded-md border bg-white px-3 py-2"
+                onChange={(event) => setModelProviderId(event.target.value)}
+                value={modelProviderId}
+              >
+                <option value="">Built-in default</option>
+                {(providers.data ?? []).map((provider) => (
+                  <option key={provider.id} value={provider.id}>
+                    {provider.model ? `${provider.id} (${provider.model})` : provider.id}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="-mt-2 text-xs text-muted-foreground">
+              Picks the provider for the agent&apos;s default chat route. Set its API key in Secrets
+              below, then the node syncs it into the agent.
+            </p>
             <button
               className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
               onClick={() => void onSubmit()}
@@ -967,9 +1068,6 @@ export function AgentsPage(): JSX.Element {
         <AgentBindingsPanel
           agent={selectedAgent}
           canWrite={canWrite}
-          groups={groups}
-          onAddGroup={addImGroup}
-          onRemoveGroup={removeImGroup}
         />
       ) : (
         <aside className="rounded-2xl border bg-white/75 p-5">

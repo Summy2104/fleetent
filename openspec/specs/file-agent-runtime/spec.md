@@ -92,6 +92,14 @@ command arguments (`args`, e.g. an npm package spec like `@scope/mcp-server-x`),
 ids (`id`), and transport names (`transport`). The scan SHALL still inspect `url` values,
 which may embed credentials.
 
+The scan SHALL NOT flag IM access allowlist entries — values under
+`im.<platform>.access.allow_users` and `im.<platform>.access.allow_groups`. These are id
+lists (internal user ids — which are UUIDs — and group ids), not credentials; the platform
+materializes internal user ids (UUIDs) into `allow_users`, and a UUID's length/entropy
+would otherwise trip the inline-secret heuristic. This exemption SHALL be scoped to those
+two access paths only and SHALL NOT relax scanning of any secret-bearing field under `im`
+(e.g. `bot_token_env`, `app_token_env`).
+
 #### Scenario: Inline plaintext secret is rejected
 
 - **WHEN** an agent file's `mcp_servers` entry contains an inline token-like value in an
@@ -116,6 +124,19 @@ which may embed credentials.
 - **WHEN** an agent file references secrets only by env-var name (e.g.
   `api_key_env: ACME_MCP_TOKEN`, `bot_token_env: SUPPORT_SLACK_BOT`)
 - **THEN** the scan accepts the file
+
+#### Scenario: IM access allowlist with internal user UUID is not flagged
+
+- **WHEN** an agent file's `im.slack.access.allow_users` (or `im.telegram.access.allow_groups`)
+  contains an internal user id in UUID form (e.g. `5f5904ef-efcf-42bb-82fa-ad5a150b078c`),
+  as materialized by the platform for an agent bound to a user
+- **THEN** the scan does not treat it as an inline secret and the file loads
+
+#### Scenario: Inline token in im binding is still rejected
+
+- **WHEN** an agent file sets `im.slack.bot_token_env` to an inline token-like value
+  (e.g. `xoxb-...`) instead of an env-var name
+- **THEN** the scan fails fast, naming the agent and field
 
 #### Scenario: Secret embedded in url is still rejected
 

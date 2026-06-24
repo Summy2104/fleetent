@@ -302,6 +302,7 @@ def get_bindings(name: str, authorization: str | None = Header(None)) -> dict[st
     return {
         "users": agent_store.list_users_for_agent(agent.id),
         "mcp_servers": agent_store.list_mcp_servers_for_agent(agent.id),
+        "groups": agent_im_group_store.list_groups_for_agent(agent.id),
     }
 
 

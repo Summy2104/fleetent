@@ -248,8 +248,15 @@ def create_skill(body: SkillBody, authorization: str | None = Header(None)) -> d
         raise HTTPException(
             status_code=422, detail="invalid frontmatter (name/description required)"
         )
+    if not _safe_skill_name(body.name):
+        raise HTTPException(status_code=422, detail=f"unsafe skill name: {body.name!r}")
     skill_admin_store.set_source(body.name, body.source)
     verdict = engine_audit(body.content)
+    # Persist inline content to the pool so it is readable back, scanned by the engine
+    # reload, and delivered to agents by node sync — mirroring _import_skill_dir's
+    # on-disk materialization. A rejected (quarantined) skill is never written.
+    if verdict["verdict"] != "rejected":
+        _write_skill_content(body.name, body.content)
     result = _publish(body.name, body.content, verdict)
     audit_log.write_audit(user.id, "skill.create", "skill", body.name, detail=result)
     return result
@@ -257,6 +264,17 @@ def create_skill(body: SkillBody, authorization: str | None = Header(None)) -> d
 
 def _safe_skill_name(name: str) -> bool:
     return bool(name) and ".." not in name and all(c.isalnum() or c in "._-" for c in name)
+
+
+def _write_skill_content(name: str, content: str) -> None:
+    """Materialize an inline-created skill's SKILL.md into the skills pool.
+
+    Caller guarantees ``name`` passed ``_safe_skill_name`` (no path traversal). The
+    engine_reload triggered by _publish then rescans the pool and indexes the skill.
+    """
+    dest_dir = Path(engine_skills_dir()) / name
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    (dest_dir / "SKILL.md").write_text(content, encoding="utf-8")
 
 
 def _import_skill_dir(src_dir: Path, source: str) -> dict[str, Any]:
@@ -373,6 +391,11 @@ def edit_skill(
         )
     source = skill_admin_store.get_source(name)
     verdict = engine_audit(body.content)
+    # Persist edited content to the pool before the engine_reload re-scans from disk;
+    # without this the rescan reads stale on-disk content and the edit is silently lost
+    # (mirrors create's _write_skill_content). A rejected (quarantined) edit is not written.
+    if verdict["verdict"] != "rejected":
+        _write_skill_content(name, body.content)
     result = _publish(name, body.content, verdict)
     result["source"] = source["source"]
     audit_log.write_audit(user.id, "skill.edit", "skill", name, detail=result)
