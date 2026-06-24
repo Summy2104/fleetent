@@ -149,7 +149,7 @@ def plan_diagnostics_retention(
     diagnostics = settings or _default_diagnostics()
     current = now or datetime.now(UTC)
     logs = _old_files(
-        log_dir or _default_data_dir() / "logs",
+        log_dir or paths.logs_dir(),
         diagnostics.retention.logs_days,
         current,
         suffixes=(".log",),
