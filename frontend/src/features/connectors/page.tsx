@@ -1,670 +1,525 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { ExternalLink, Inbox, KeyRound, Plus, Trash2 } from 'lucide-react';
 
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  type ConnectorEditInput,
+  type ConnectorGrant,
   type ConnectorRecord,
-  type McpServerRecord,
-  useConnectorAgentBindingsQuery,
   useConnectorAuthorizeQuery,
   useConnectorCredentialsMutation,
   useConnectorGrantsQuery,
-  useConnectorLifecycleQuery,
   useConnectorTestMutation,
   useConnectorsQuery,
   useCreateConnectorMutation,
-  useCreateMcpServerMutation,
   useDeleteConnectorMutation,
-  useDeleteMcpServerMutation,
-  useMcpDoctorQuery,
-  useMcpReconnectMutation,
-  useMcpServerTestMutation,
-  useMcpServerToolsQuery,
-  useMcpServersQuery,
   useOffboardingQuery,
   useRevokeConnectorGrantMutation,
   useUpdateConnectorMutation,
-  useUpdateMcpServerMutation,
 } from '@/features/connectors/api';
 
-type ConnectorFormState = {
-  id: string;
-  displayName: string;
-  protocol: 'oauth2' | 'apikey';
-  enabled: boolean;
-};
+const PROTOCOLS = ['oauth2', 'apikey'] as const;
 
-type McpFormState = {
-  id: string;
-  transport: string;
-  command: string;
-  url: string;
-  enabled: boolean;
-};
-
-function emptyConnectorForm(): ConnectorFormState {
-  return {
-    id: '',
-    displayName: '',
-    protocol: 'oauth2',
-    enabled: true,
-  };
+function grantStatusVariant(status: string): 'success' | 'warning' | 'destructive' | 'secondary' {
+  if (status === 'authorized') return 'success';
+  if (status === 'needs_reauth') return 'warning';
+  if (status === 'credential_error') return 'destructive';
+  return 'secondary';
 }
 
-function emptyMcpForm(): McpFormState {
-  return {
-    id: '',
-    transport: 'stdio',
-    command: '',
-    url: '',
-    enabled: true,
+// ─────────────────────────── Add / Edit dialog ───────────────────────────
+
+function ConnectorDialog({
+  open,
+  editing,
+  onOpenChange,
+}: {
+  open: boolean;
+  editing: ConnectorRecord | null;
+  onOpenChange: (open: boolean) => void;
+}): JSX.Element {
+  const create = useCreateConnectorMutation();
+  const update = useUpdateConnectorMutation(editing?.id ?? '');
+  const isEdit = editing !== null;
+
+  const [id, setId] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [protocol, setProtocol] = useState<string>('oauth2');
+  const [enabled, setEnabled] = useState(true);
+  const [oauthConfig, setOauthConfig] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setId(editing?.id ?? '');
+      setDisplayName(editing?.display_name ?? '');
+      setProtocol(editing?.protocol ?? 'oauth2');
+      setEnabled(editing?.enabled ?? true);
+      setOauthConfig(editing?.oauth_config ? JSON.stringify(editing.oauth_config, null, 2) : '');
+      setError(null);
+    }
+  }, [open, editing]);
+
+  const submit = async (): Promise<void> => {
+    let parsedConfig: Record<string, unknown> | undefined;
+    if (oauthConfig.trim()) {
+      try {
+        parsedConfig = JSON.parse(oauthConfig) as Record<string, unknown>;
+      } catch {
+        setError('oauth_config is not valid JSON.');
+        return;
+      }
+    }
+
+    if (isEdit) {
+      const input: ConnectorEditInput = { display_name: displayName, protocol: protocol as ConnectorRecord['protocol'], enabled };
+      if (parsedConfig) input.oauth_config = parsedConfig;
+      await update.mutateAsync(input);
+    } else {
+      const input: ConnectorRecord = {
+        id: id.trim(),
+        display_name: displayName,
+        protocol: protocol as ConnectorRecord['protocol'],
+        enabled,
+        ...(parsedConfig ? { oauth_config: parsedConfig } : {}),
+      };
+      await create.mutateAsync(input);
+    }
+    onOpenChange(false);
   };
+
+  const canSubmit = (isEdit || id.trim().length > 0) && displayName.trim().length > 0;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{isEdit ? `Edit ${editing?.display_name}` : 'Add connector'}</DialogTitle>
+          <DialogDescription>External OAuth / API-key service the agents can call.</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4">
+          <div className="grid gap-2">
+            <Label htmlFor="conn-id">
+              Connector ID <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              id="conn-id"
+              placeholder="e.g. github"
+              disabled={isEdit}
+              value={id}
+              onChange={(event) => setId(event.target.value)}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="conn-name">
+              Display name <span className="text-destructive">*</span>
+            </Label>
+            <Input id="conn-name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+          </div>
+          <div className="grid gap-2">
+            <Label>Protocol</Label>
+            <Select value={protocol} onValueChange={setProtocol}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PROTOCOLS.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {option}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <label className="flex items-center justify-between text-sm">
+            Enabled
+            <Switch checked={enabled} aria-label="Enabled" onCheckedChange={setEnabled} />
+          </label>
+          <div className="grid gap-2">
+            <Label htmlFor="conn-config">OAuth config (JSON, optional)</Label>
+            <Textarea
+              id="conn-config"
+              className="min-h-28 font-mono text-xs"
+              placeholder='{"authorize_url": "...", "client_id": "..."}'
+              value={oauthConfig}
+              onChange={(event) => setOauthConfig(event.target.value)}
+            />
+          </div>
+          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button disabled={!canSubmit || create.isPending || update.isPending} onClick={() => void submit()}>
+            {isEdit ? 'Save' : 'Create'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
-function ConnectorCard({
+// ─────────────────────────── API-key credential dialog ───────────────────────────
+
+function CredentialDialog({
+  connectorId,
+  onOpenChange,
+}: {
+  connectorId: string | null;
+  onOpenChange: (open: boolean) => void;
+}): JSX.Element {
+  const setCredential = useConnectorCredentialsMutation(connectorId ?? '');
+  const [apiKey, setApiKey] = useState('');
+
+  useEffect(() => {
+    if (connectorId) setApiKey('');
+  }, [connectorId]);
+
+  return (
+    <Dialog open={Boolean(connectorId)} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Set API key · {connectorId}</DialogTitle>
+          <DialogDescription>The key is encrypted and bound to your own session user.</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-2">
+          <Label htmlFor="conn-key">API key</Label>
+          <Input
+            id="conn-key"
+            type="password"
+            value={apiKey}
+            onChange={(event) => setApiKey(event.target.value)}
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            disabled={!apiKey || setCredential.isPending}
+            onClick={async () => {
+              await setCredential.mutateAsync({ api_key: apiKey });
+              onOpenChange(false);
+            }}
+          >
+            Submit
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─────────────────────────── Authorize action ───────────────────────────
+
+function AuthorizeAction({ connectorId }: { connectorId: string }): JSX.Element {
+  const [requested, setRequested] = useState(false);
+  const authorize = useConnectorAuthorizeQuery(requested ? connectorId : null);
+
+  useEffect(() => {
+    if (authorize.data?.authorize_url) {
+      window.open(authorize.data.authorize_url, '_blank', 'noopener');
+      setRequested(false);
+    }
+  }, [authorize.data]);
+
+  return (
+    <DropdownMenuItem onSelect={() => setRequested(true)}>
+      <ExternalLink /> Authorize
+    </DropdownMenuItem>
+  );
+}
+
+// ─────────────────────────── Connector row ───────────────────────────
+
+function ConnectorRow({
   connector,
   onEdit,
-  onLoadAuthorize,
-  onSelectOffboardingUser,
-  onSavedCredentials,
+  onSetCredential,
 }: {
   connector: ConnectorRecord;
   onEdit: () => void;
-  onLoadAuthorize: () => void;
-  onSavedCredentials: () => void;
-  onSelectOffboardingUser: (userId: string) => void;
+  onSetCredential: () => void;
 }): JSX.Element {
-  const lifecycle = useConnectorLifecycleQuery(connector.id);
-  const bindings = useConnectorAgentBindingsQuery(connector.id);
-  const testConnector = useConnectorTestMutation(connector.id);
-  const credentialsMutation = useConnectorCredentialsMutation(connector.id);
-  const deleteConnector = useDeleteConnectorMutation(connector.id);
-  const [apiKey, setApiKey] = useState('');
-
-  const lifecycleSummary = lifecycle.data
-    ? `Refresh ok ${lifecycle.data.refresh_ok} / failed ${lifecycle.data.refresh_failed} / reauth ${lifecycle.data.reauths}`
-    : null;
-  const testSummary = testConnector.data
-    ? testConnector.data.success
-      ? `Token valid; ${testConnector.data.active_grants ?? 0} active grants`
-      : testConnector.data.error ?? 'Connector test failed'
-    : null;
-
-  const onDelete = async (): Promise<void> => {
-    if (!window.confirm(`Delete connector ${connector.id}?`)) {
-      return;
-    }
-    await deleteConnector.mutateAsync();
-  };
-
-  const onSaveCredentials = async (): Promise<void> => {
-    await credentialsMutation.mutateAsync({ api_key: apiKey });
-    setApiKey('');
-    onSavedCredentials();
-  };
+  const test = useConnectorTestMutation(connector.id);
+  const remove = useDeleteConnectorMutation(connector.id);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   return (
-    <article className="rounded-2xl border bg-white/80 p-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h3 className="text-xl font-semibold">{connector.display_name}</h3>
-          <p className="mt-1 text-sm text-muted-foreground">{connector.id}</p>
-          <p className="mt-1 text-sm text-muted-foreground">{connector.protocol}</p>
-          <p className="mt-1 text-sm text-muted-foreground">{connector.enabled ? 'enabled' : 'disabled'}</p>
-          {bindings.data ? (
-            <p className="mt-1 text-sm text-muted-foreground">{`Agents: ${bindings.data.agent_ids.join(', ')}`}</p>
-          ) : null}
-          {lifecycleSummary ? <p className="mt-2 text-sm text-muted-foreground">{lifecycleSummary}</p> : null}
-          {testSummary ? <p className="mt-2 text-sm font-medium">{testSummary}</p> : null}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button className="rounded-md bg-secondary px-3 py-2 text-sm font-medium" onClick={onEdit} type="button">
-            {`Edit ${connector.display_name}`}
-          </button>
-          <button
-            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-            onClick={() => void testConnector.mutateAsync()}
-            type="button"
-          >
-            {`Test ${connector.display_name}`}
-          </button>
-          <button
-            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-            onClick={onLoadAuthorize}
-            type="button"
-          >
-            {`Load authorize link for ${connector.display_name}`}
-          </button>
-          <button
-            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-            onClick={() => onSelectOffboardingUser('u1')}
-            type="button"
-          >
-            Load offboarding defaults
-          </button>
-          <button
-            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-            onClick={() => void onDelete()}
-            type="button"
-          >
-            {`Delete ${connector.display_name}`}
-          </button>
-        </div>
-      </div>
+    <tr className="border-b border-border last:border-0 hover:bg-accent/30">
+      <td className="px-4 py-3 font-mono text-sm text-foreground">{connector.id}</td>
+      <td className="px-4 py-3 text-sm text-foreground">{connector.display_name}</td>
+      <td className="px-4 py-3 text-sm text-muted-foreground">{connector.protocol}</td>
+      <td className="px-4 py-3">
+        <Badge variant={connector.enabled ? 'success' : 'secondary'}>
+          {connector.enabled ? 'enabled' : 'disabled'}
+        </Badge>
+        {test.data ? (
+          <span className="ml-2 text-xs text-muted-foreground">
+            {test.data.success ? (test.data.token_valid ? 'token valid' : 'reachable') : test.data.error ?? 'failed'}
+          </span>
+        ) : null}
+      </td>
+      <td className="px-4 py-3 text-right">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="secondary" size="sm" aria-label={`Actions for ${connector.id}`}>
+              Actions
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => setTimeout(onEdit, 0)}>Edit</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void test.mutateAsync()}>Test connection</DropdownMenuItem>
+            {connector.protocol === 'oauth2' ? <AuthorizeAction connectorId={connector.id} /> : null}
+            {connector.protocol === 'apikey' ? (
+              <DropdownMenuItem onSelect={() => setTimeout(onSetCredential, 0)}>
+                <KeyRound /> Set API key
+              </DropdownMenuItem>
+            ) : null}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem destructive onSelect={() => setTimeout(() => setConfirmDelete(true), 0)}>
+              <Trash2 /> Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
-      <div className="mt-4 grid gap-3 border-t pt-4 md:grid-cols-[1fr_auto]">
-        <label className="grid gap-2 text-sm font-medium">
-          API key
-          <input
-            className="rounded-md border bg-white px-3 py-2"
-            onChange={(event) => setApiKey(event.target.value)}
-            type="password"
-            value={apiKey}
-          />
-        </label>
-        <div className="flex items-end">
-          <button
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-            onClick={() => void onSaveCredentials()}
-            type="button"
-          >
-            {`Save ${connector.display_name} credentials`}
-          </button>
-        </div>
-      </div>
-    </article>
+        <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete {connector.id}?</AlertDialogTitle>
+              <AlertDialogDescription>This removes the connector configuration.</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={() => void remove.mutateAsync()}>Delete</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </td>
+    </tr>
   );
 }
 
-function GrantRow({
-  connectorId,
-  grant,
-}: {
-  connectorId: string;
-  grant: { user_id: string; connector_id: string; status: string };
-}): JSX.Element {
+// ─────────────────────────── Authorization matrix ───────────────────────────
+
+function GrantRow({ grant }: { grant: ConnectorGrant }): JSX.Element {
   const revoke = useRevokeConnectorGrantMutation(grant.user_id, grant.connector_id);
-
-  const onRevoke = async (): Promise<void> => {
-    if (!window.confirm(`Revoke ${grant.connector_id} for ${grant.user_id}?`)) {
-      return;
-    }
-    await revoke.mutateAsync();
-  };
-
   return (
-    <div className="flex items-center justify-between gap-4 rounded-xl border bg-white/70 p-3">
-      <div>
-        <p className="font-medium">{grant.user_id}</p>
-        <p className="text-sm text-muted-foreground">{grant.status}</p>
-      </div>
-      <button
-        className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-        onClick={() => void onRevoke()}
-        type="button"
-      >
-        {`Revoke ${connectorId} for ${grant.user_id}`}
-      </button>
-    </div>
+    <tr className="border-b border-border last:border-0">
+      <td className="px-4 py-2.5 font-mono text-sm text-foreground">{grant.user_id}</td>
+      <td className="px-4 py-2.5 text-sm text-muted-foreground">{grant.connector_id}</td>
+      <td className="px-4 py-2.5">
+        <Badge variant={grantStatusVariant(grant.status)}>{grant.status}</Badge>
+      </td>
+      <td className="px-4 py-2.5 text-right">
+        <Button size="sm" variant="ghost" onClick={() => void revoke.mutateAsync()}>
+          Revoke
+        </Button>
+      </td>
+    </tr>
   );
 }
 
-function McpServerCard({
-  onEdit,
-  onLoadTools,
-  server,
-}: {
-  onEdit: () => void;
-  onLoadTools: () => void;
-  server: McpServerRecord;
-}): JSX.Element {
-  const reconnect = useMcpReconnectMutation(server.id);
-  const testServer = useMcpServerTestMutation(server.id);
-  const deleteServer = useDeleteMcpServerMutation(server.id);
-
-  const onDelete = async (): Promise<void> => {
-    if (!window.confirm(`Delete MCP server ${server.id}?`)) {
-      return;
-    }
-    await deleteServer.mutateAsync();
-  };
+function AuthorizationMatrix(): JSX.Element {
+  const grants = useConnectorGrantsQuery();
+  const [offboardId, setOffboardId] = useState('');
+  const [offboardTarget, setOffboardTarget] = useState<string | null>(null);
+  const offboarding = useOffboardingQuery(offboardTarget);
 
   return (
-    <article className="rounded-2xl border bg-white/80 p-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h3 className="text-xl font-semibold">{server.id}</h3>
-          <p className="mt-1 text-sm text-muted-foreground">{server.transport}</p>
-          <p className="mt-1 text-sm text-muted-foreground">{server.status}</p>
-          {server.command ? <p className="mt-1 text-sm text-muted-foreground">{server.command}</p> : null}
-          {server.url ? <p className="mt-1 text-sm text-muted-foreground">{server.url}</p> : null}
-          {reconnect.data?.reconnected ? (
-            <p className="mt-2 text-sm font-medium">{`Reconnect requested for ${server.id}`}</p>
-          ) : null}
-          {testServer.data ? (
-            <p className="mt-2 text-sm font-medium">{`Connected; ${testServer.data.tools_count ?? 0} tools`}</p>
+    <Card className="border-none bg-transparent shadow-none">
+      <CardHeader className="px-0">
+        <CardTitle>Authorization matrix</CardTitle>
+        <p className="text-sm text-muted-foreground">{grants.data?.consent_hint}</p>
+      </CardHeader>
+      <CardContent className="space-y-4 px-0">
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full">
+            <thead className="bg-secondary/50">
+              <tr>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">User</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Connector</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
+                <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(grants.data?.grants ?? []).map((grant) => (
+                <GrantRow key={`${grant.user_id}:${grant.connector_id}`} grant={grant} />
+              ))}
+              {grants.data && grants.data.grants.length === 0 ? (
+                <tr>
+                  <td colSpan={4}>
+                    <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
+                      <Inbox className="size-6 opacity-50" />
+                      <span className="text-sm">No grants</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+
+        <Separator />
+
+        <div className="space-y-2">
+          <Label className="text-sm font-semibold text-foreground">Offboarding</Label>
+          <div className="flex items-center gap-2">
+            <Input
+              className="max-w-xs"
+              placeholder="user-id"
+              value={offboardId}
+              onChange={(event) => setOffboardId(event.target.value)}
+            />
+            <Button variant="secondary" onClick={() => setOffboardTarget(offboardId.trim() || null)}>
+              Load offboarding summary
+            </Button>
+          </div>
+          {offboarding.data ? (
+            <p className="text-sm text-muted-foreground">
+              Revoked: {offboarding.data.revoked.join(', ') || '—'} · Failed:{' '}
+              {offboarding.data.failed.join(', ') || '—'}
+            </p>
           ) : null}
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button className="rounded-md bg-secondary px-3 py-2 text-sm font-medium" onClick={onEdit} type="button">
-            {`Edit ${server.id}`}
-          </button>
-          <button
-            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-            onClick={() => void reconnect.mutateAsync()}
-            type="button"
-          >
-            {`Reconnect ${server.id}`}
-          </button>
-          <button
-            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-            onClick={() => void testServer.mutateAsync()}
-            type="button"
-          >
-            {`Test ${server.id}`}
-          </button>
-          <button
-            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-            onClick={onLoadTools}
-            type="button"
-          >
-            {`Load tools for ${server.id}`}
-          </button>
-          <button
-            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-            onClick={() => void onDelete()}
-            type="button"
-          >
-            {`Delete ${server.id}`}
-          </button>
-        </div>
-      </div>
-    </article>
+      </CardContent>
+    </Card>
   );
 }
+
+// ─────────────────────────── Page ───────────────────────────
 
 export function ConnectorsPage(): JSX.Element {
   const connectors = useConnectorsQuery();
-  const grants = useConnectorGrantsQuery();
-  const mcpServers = useMcpServersQuery();
-  const createConnector = useCreateConnectorMutation();
-  const createMcpServer = useCreateMcpServerMutation();
-  const [connectorForm, setConnectorForm] = useState<ConnectorFormState>(emptyConnectorForm);
-  const [connectorMode, setConnectorMode] = useState<'create' | 'edit'>('create');
-  const [selectedConnectorId, setSelectedConnectorId] = useState<string | null>(null);
-  const [authorizeFor, setAuthorizeFor] = useState<string | null>(null);
-  const [credentialsMessage, setCredentialsMessage] = useState<string | null>(null);
-  const [offboardingDraft, setOffboardingDraft] = useState('u1');
-  const [offboardingTarget, setOffboardingTarget] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<ConnectorRecord | null>(null);
+  const [credentialFor, setCredentialFor] = useState<string | null>(null);
 
-  const [mcpForm, setMcpForm] = useState<McpFormState>(emptyMcpForm);
-  const [mcpMode, setMcpMode] = useState<'create' | 'edit'>('create');
-  const [selectedMcpId, setSelectedMcpId] = useState<string | null>(null);
-  const [toolsFor, setToolsFor] = useState<string | null>(null);
-  const [doctorVisible, setDoctorVisible] = useState(false);
-
-  const authorizeQuery = useConnectorAuthorizeQuery(authorizeFor);
-  const offboarding = useOffboardingQuery(offboardingTarget);
-  const updateConnector = useUpdateConnectorMutation(selectedConnectorId ?? '');
-  const updateMcpServer = useUpdateMcpServerMutation(selectedMcpId ?? '');
-  const tools = useMcpServerToolsQuery(toolsFor);
-  const doctor = useMcpDoctorQuery();
-
-  useEffect(() => {
-    if (!selectedConnectorId && connectors.data?.length) {
-      setSelectedConnectorId(connectors.data[0].id);
-    }
-  }, [connectors.data, selectedConnectorId]);
-
-  useEffect(() => {
-    if (!selectedMcpId && mcpServers.data?.length) {
-      setSelectedMcpId(mcpServers.data[0].id);
-    }
-  }, [mcpServers.data, selectedMcpId]);
-
-  const onSubmitConnector = async (): Promise<void> => {
-    const payload = {
-      id: connectorForm.id,
-      display_name: connectorForm.displayName,
-      protocol: connectorForm.protocol,
-      enabled: connectorForm.enabled,
-    } as const;
-
-    if (connectorMode === 'create') {
-      await createConnector.mutateAsync(payload);
-      setSelectedConnectorId(connectorForm.id);
-      setConnectorForm(emptyConnectorForm());
-      return;
-    }
-
-    await updateConnector.mutateAsync({
-      display_name: connectorForm.displayName,
-      enabled: connectorForm.enabled,
-      protocol: connectorForm.protocol,
-    });
-  };
-
-  const onSubmitMcp = async (): Promise<void> => {
-    const payload = {
-      id: mcpForm.id,
-      transport: mcpForm.transport,
-      command: mcpForm.command || undefined,
-      url: mcpForm.url || undefined,
-      enabled: mcpForm.enabled,
-    };
-
-    if (mcpMode === 'create') {
-      await createMcpServer.mutateAsync(payload);
-      setSelectedMcpId(mcpForm.id);
-      setMcpForm(emptyMcpForm());
-      return;
-    }
-
-    await updateMcpServer.mutateAsync({
-      enabled: mcpForm.enabled,
-      transport: mcpForm.transport,
-      url: mcpForm.url || undefined,
-      command: mcpForm.command || undefined,
-    });
-  };
+  const filtered = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    const list = connectors.data ?? [];
+    if (!term) return list;
+    return list.filter(
+      (connector) =>
+        connector.id.toLowerCase().includes(term) || connector.display_name.toLowerCase().includes(term)
+    );
+  }, [connectors.data, query]);
 
   return (
-    <section className="space-y-8">
-      <header className="space-y-2">
-        <p className="text-sm font-medium uppercase tracking-[0.25em] text-muted-foreground">Native SPA</p>
-        <h1 className="text-3xl font-semibold tracking-tight">Connectors</h1>
-        <p className="text-sm text-muted-foreground">
-          OAuth external services and MCP servers now run as first-class admin domains instead of
-          the legacy `#oauth` tab.
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-semibold tracking-tight">Connector</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          External OAuth / API-key services and the per-user authorization matrix.
         </p>
-      </header>
+      </div>
 
-      <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-        <div className="space-y-6">
-          <div className="rounded-2xl border bg-white/75 p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">OAuth external services</h2>
-              {connectorMode === 'edit' ? (
-                <button
-                  className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-                  onClick={() => {
-                    setConnectorMode('create');
-                    setConnectorForm(emptyConnectorForm());
-                  }}
-                  type="button"
-                >
-                  New draft
-                </button>
-              ) : null}
-            </div>
+      <Tabs defaultValue="connectors">
+        <TabsList className="flex w-full flex-wrap justify-start">
+          <TabsTrigger value="connectors">Connectors</TabsTrigger>
+          <TabsTrigger value="grants">Grants matrix</TabsTrigger>
+        </TabsList>
 
-            <div className="grid gap-4">
-              <label className="grid gap-2 text-sm font-medium">
-                Connector ID
-                <input
-                  className="rounded-md border bg-white px-3 py-2"
-                  disabled={connectorMode === 'edit'}
-                  onChange={(event) =>
-                    setConnectorForm((current) => ({ ...current, id: event.target.value }))
-                  }
-                  value={connectorForm.id}
-                />
-              </label>
-              <label className="grid gap-2 text-sm font-medium">
-                Display name
-                <input
-                  className="rounded-md border bg-white px-3 py-2"
-                  onChange={(event) =>
-                    setConnectorForm((current) => ({ ...current, displayName: event.target.value }))
-                  }
-                  value={connectorForm.displayName}
-                />
-              </label>
-              <label className="grid gap-2 text-sm font-medium">
-                Protocol
-                <select
-                  className="rounded-md border bg-white px-3 py-2"
-                  onChange={(event) =>
-                    setConnectorForm((current) => ({
-                      ...current,
-                      protocol: event.target.value as 'oauth2' | 'apikey',
-                    }))
-                  }
-                  value={connectorForm.protocol}
-                >
-                  <option value="oauth2">oauth2</option>
-                  <option value="apikey">apikey</option>
-                </select>
-              </label>
-              <label className="inline-flex items-center gap-2 text-sm font-medium">
-                <input
-                  checked={connectorForm.enabled}
-                  onChange={(event) =>
-                    setConnectorForm((current) => ({ ...current, enabled: event.target.checked }))
-                  }
-                  type="checkbox"
-                />
-                Connector enabled
-              </label>
-              <button
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-                onClick={() => void onSubmitConnector()}
-                type="button"
-              >
-                {connectorMode === 'create' ? 'Create connector' : 'Save changes'}
-              </button>
-            </div>
-          </div>
-
-          <div className="grid gap-4">
-            {connectors.data?.map((connector) => (
-              <ConnectorCard
-                connector={connector}
-                key={connector.id}
-                onEdit={() => {
-                  setSelectedConnectorId(connector.id);
-                  setConnectorMode('edit');
-                  setConnectorForm({
-                    id: connector.id,
-                    displayName: connector.display_name,
-                    protocol: connector.protocol,
-                    enabled: connector.enabled,
-                  });
-                }}
-                onLoadAuthorize={() => setAuthorizeFor(connector.id)}
-                onSavedCredentials={() => {
-                  setCredentialsMessage(`Credentials saved for ${connector.display_name}`);
-                }}
-                onSelectOffboardingUser={(userId) => {
-                  setOffboardingDraft(userId);
-                }}
-              />
-            ))}
-          </div>
-        </div>
-
-        <aside className="space-y-4 rounded-2xl border bg-white/75 p-5">
-          <h2 className="text-lg font-semibold">Authorization matrix</h2>
-          <p className="text-sm text-muted-foreground">{grants.data?.consent_hint}</p>
-          <div className="grid gap-3">
-            {grants.data?.grants.map((grant) => (
-              <GrantRow
-                connectorId={grant.connector_id}
-                grant={grant}
-                key={`${grant.user_id}:${grant.connector_id}`}
-              />
-            ))}
-          </div>
-          {authorizeQuery.data ? (
-            <a
-              className="inline-flex rounded-md bg-secondary px-4 py-2 text-sm font-medium"
-              href={authorizeQuery.data.authorize_url}
-              rel="noreferrer"
-              target="_blank"
+        <TabsContent value="connectors" className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <Input
+              className="max-w-xs"
+              placeholder="Search connectors…"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            <Button
+              onClick={() => {
+                setEditing(null);
+                setDialogOpen(true);
+              }}
             >
-              Open browser authorize flow
-            </a>
-          ) : null}
-          {credentialsMessage ? <p className="text-sm font-medium">{credentialsMessage}</p> : null}
-
-          <div className="grid gap-3 border-t pt-4">
-            <label className="grid gap-2 text-sm font-medium">
-              Offboarding user ID
-              <input
-                className="rounded-md border bg-white px-3 py-2"
-                onChange={(event) => setOffboardingDraft(event.target.value)}
-                value={offboardingDraft}
-              />
-            </label>
-            <button
-              className="rounded-md bg-secondary px-4 py-2 text-sm font-medium"
-              onClick={() => setOffboardingTarget(offboardingDraft)}
-              type="button"
-            >
-              Load offboarding summary
-            </button>
-            {offboarding.data ? (
-              <div className="rounded-xl border bg-white/70 p-3 text-sm">
-                <p>{`Revoked: ${offboarding.data.revoked.join(', ') || 'none'}`}</p>
-                <p>{`Failed: ${offboarding.data.failed.join(', ') || 'none'}`}</p>
-              </div>
-            ) : null}
-          </div>
-        </aside>
-      </section>
-
-      <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-        <div className="space-y-6">
-          <div className="rounded-2xl border bg-white/75 p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">MCP servers</h2>
-              {mcpMode === 'edit' ? (
-                <button
-                  className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-                  onClick={() => {
-                    setMcpMode('create');
-                    setMcpForm(emptyMcpForm());
-                  }}
-                  type="button"
-                >
-                  New MCP draft
-                </button>
-              ) : null}
-            </div>
-            <div className="grid gap-4">
-              <label className="grid gap-2 text-sm font-medium">
-                MCP server ID
-                <input
-                  className="rounded-md border bg-white px-3 py-2"
-                  disabled={mcpMode === 'edit'}
-                  onChange={(event) => setMcpForm((current) => ({ ...current, id: event.target.value }))}
-                  value={mcpForm.id}
-                />
-              </label>
-              <label className="grid gap-2 text-sm font-medium">
-                MCP transport
-                <select
-                  className="rounded-md border bg-white px-3 py-2"
-                  onChange={(event) =>
-                    setMcpForm((current) => ({ ...current, transport: event.target.value }))
-                  }
-                  value={mcpForm.transport}
-                >
-                  <option value="stdio">stdio</option>
-                  <option value="http">http</option>
-                  <option value="websocket">websocket</option>
-                </select>
-              </label>
-              <label className="grid gap-2 text-sm font-medium">
-                Command
-                <input
-                  className="rounded-md border bg-white px-3 py-2"
-                  onChange={(event) =>
-                    setMcpForm((current) => ({ ...current, command: event.target.value }))
-                  }
-                  value={mcpForm.command}
-                />
-              </label>
-              <label className="grid gap-2 text-sm font-medium">
-                URL
-                <input
-                  className="rounded-md border bg-white px-3 py-2"
-                  onChange={(event) => setMcpForm((current) => ({ ...current, url: event.target.value }))}
-                  value={mcpForm.url}
-                />
-              </label>
-              <label className="inline-flex items-center gap-2 text-sm font-medium">
-                <input
-                  checked={mcpForm.enabled}
-                  onChange={(event) =>
-                    setMcpForm((current) => ({ ...current, enabled: event.target.checked }))
-                  }
-                  type="checkbox"
-                />
-                Enabled
-              </label>
-              <button
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-                onClick={() => void onSubmitMcp()}
-                type="button"
-              >
-                {mcpMode === 'create' ? 'Create MCP server' : 'Save MCP changes'}
-              </button>
-            </div>
+              <Plus className="size-4" /> Add connector
+            </Button>
           </div>
 
-          <div className="grid gap-4">
-            {mcpServers.data?.map((server) => (
-              <McpServerCard
-                key={server.id}
-                onEdit={() => {
-                  setSelectedMcpId(server.id);
-                  setMcpMode('edit');
-                  setMcpForm({
-                    id: server.id,
-                    transport: server.transport,
-                    command: server.command ?? '',
-                    url: server.url ?? '',
-                    enabled: server.enabled ?? true,
-                  });
-                }}
-                onLoadTools={() => setToolsFor(server.id)}
-                server={server}
-              />
-            ))}
+          <div className="overflow-x-auto rounded-lg border border-border">
+            <table className="w-full">
+              <thead className="bg-secondary/50">
+                <tr>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">ID</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Name</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Protocol</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((connector) => (
+                  <ConnectorRow
+                    key={connector.id}
+                    connector={connector}
+                    onEdit={() => {
+                      setEditing(connector);
+                      setDialogOpen(true);
+                    }}
+                    onSetCredential={() => setCredentialFor(connector.id)}
+                  />
+                ))}
+                {connectors.data && filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={5}>
+                      <div className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
+                        <Inbox className="size-6 opacity-50" />
+                        <span className="text-sm">{query ? 'No matching connectors.' : 'No connectors'}</span>
+                      </div>
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
           </div>
-        </div>
+        </TabsContent>
 
-        <aside className="space-y-4 rounded-2xl border bg-white/75 p-5">
-          <h2 className="text-lg font-semibold">Live MCP inspection</h2>
-          <button
-            className="rounded-md bg-secondary px-4 py-2 text-sm font-medium"
-            onClick={() => setDoctorVisible(true)}
-            type="button"
-          >
-            Load doctor checks
-          </button>
-          {tools.data?.tools?.length ? (
-            <div className="rounded-xl border bg-white/70 p-3 text-sm">
-              <p className="font-medium">Tools</p>
-              {tools.data.tools.map((tool) => (
-                <p key={tool.name}>{tool.name}</p>
-              ))}
-            </div>
-          ) : null}
-          {doctorVisible ? (
-            <div
-              className="rounded-xl border bg-white/70 p-3 text-sm"
-              data-testid="mcp-doctor"
-            >
-              {doctor.data?.checks.map((check, index) => (
-                <div className="flex justify-between gap-3" key={`${String(check.name)}-${index}`}>
-                  <span>{String(check.name)}</span>
-                  <span>{String(check.level)}</span>
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </aside>
-      </section>
-    </section>
+        <TabsContent value="grants">
+          <AuthorizationMatrix />
+        </TabsContent>
+      </Tabs>
+
+      <ConnectorDialog open={dialogOpen} editing={editing} onOpenChange={setDialogOpen} />
+      <CredentialDialog connectorId={credentialFor} onOpenChange={(open) => !open && setCredentialFor(null)} />
+    </div>
   );
 }

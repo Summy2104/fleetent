@@ -1,67 +1,56 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { MoreVertical, Plus, Trash2 } from 'lucide-react';
 
 import { useAdminApi } from '@/lib/api-client';
+import { cn } from '@/lib/utils';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
-  type AgentImCapabilitiesInput,
-  type AgentImGroupInput,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import {
   type AgentListItem,
-  type AgentSecretRecord,
-  type AgentSkillBinding,
-  useActivateAgentVersionMutation,
-  useAddAgentImGroupMutation,
-  useAgentBindingsQuery,
-  useAgentDetailQuery,
-  useAgentKbsQuery,
-  useAgentOauthBindingsQuery,
   useAgentsQuery,
-  useAgentSecretsQuery,
-  useAgentSkillsQuery,
-  useAgentVersionsQuery,
-  useBindAgentKbMutation,
-  useBindAgentMcpMutation,
-  useBindAgentOauthMutation,
-  useBindAgentUserMutation,
   useClearDefaultAgentMutation,
   useCloneAgentMutation,
   useCreateAgentMutation,
   useDeleteAgentMutation,
-  useDeleteAgentSecretMutation,
-  useSetAgentImCapabilitiesMutation,
-  useSetAgentSecretMutation,
-  useSetAgentSkillMutation,
   useSetDefaultAgentMutation,
-  useRemoveAgentImGroupMutation,
-  useUnbindAgentKbMutation,
-  useUnbindAgentMcpMutation,
-  useUnbindAgentOauthMutation,
-  useUnbindAgentUserMutation,
-  useUpdateAgentMutation,
   useAgentLifecycleMutation,
 } from '@/features/agents/api';
-import { useConnectorsQuery, useMcpServersQuery } from '@/features/connectors/api';
-import { useKbsQuery } from '@/features/kb/api';
-import { useSkillsQuery } from '@/features/skills/api';
-import { useUsersQuery } from '@/features/users/api';
 
-type AdminMe = {
-  email: string;
-  id: string;
-  role: string;
-};
-
-type AgentImGroup = {
-  group_id: string;
-  platform: string;
-};
+type AdminMe = { email: string; id: string; role: string };
 
 function useAdminMeQuery() {
   const api = useAdminApi();
-
-  return useQuery({
-    queryKey: ['admin-me'],
-    queryFn: () => api.get<AdminMe>('/admin/me'),
-  });
+  return useQuery({ queryKey: ['admin-me'], queryFn: () => api.get<AdminMe>('/admin/me') });
 }
 
 function parseAllowedTools(value: string): string[] {
@@ -71,26 +60,111 @@ function parseAllowedTools(value: string): string[] {
     .filter(Boolean);
 }
 
-function formatStatus(agent: AgentListItem): string[] {
-  const tokens = [agent.status];
-  if (agent.is_default) {
-    tokens.push('default');
-  }
-  return tokens;
+function initials(name: string): string {
+  const parts = name.replace(/[-_]/g, ' ').split(' ').filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
 }
 
-function AgentCard({
+function statusVariant(status: string): 'success' | 'warning' | 'secondary' {
+  if (status === 'archived') return 'warning';
+  if (status === 'disabled') return 'secondary';
+  return 'success';
+}
+
+function statusDot(status: string): string {
+  if (status === 'archived') return 'bg-warning';
+  if (status === 'disabled') return 'bg-muted-foreground';
+  return 'bg-success';
+}
+
+// ─────────────────────────── Create dialog ───────────────────────────
+
+function CreateAgentDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}): JSX.Element {
+  const create = useCreateAgentMutation();
+  const [name, setName] = useState('');
+  const [systemPrompt, setSystemPrompt] = useState('');
+  const [allowedTools, setAllowedTools] = useState('');
+
+  // Reset fields whenever the dialog re-opens.
+  useEffect(() => {
+    if (open) {
+      setName('');
+      setSystemPrompt('');
+      setAllowedTools('');
+    }
+  }, [open]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>New Agent</DialogTitle>
+          <DialogDescription>Create an adhoc agent. It starts enabled with no bindings.</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4">
+          <div className="grid gap-2">
+            <Label htmlFor="new-name">Agent name</Label>
+            <Input id="new-name" value={name} onChange={(event) => setName(event.target.value)} />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="new-prompt">System prompt</Label>
+            <Textarea
+              id="new-prompt"
+              className="min-h-32"
+              value={systemPrompt}
+              onChange={(event) => setSystemPrompt(event.target.value)}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="new-tools">Allowed tools (comma-separated)</Label>
+            <Input
+              id="new-tools"
+              placeholder="tool_a, tool_b"
+              value={allowedTools}
+              onChange={(event) => setAllowedTools(event.target.value)}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            disabled={create.isPending || !name}
+            onClick={async () => {
+              await create.mutateAsync({
+                name,
+                system_prompt: systemPrompt,
+                allowed_tools: parseAllowedTools(allowedTools),
+              });
+              onOpenChange(false);
+            }}
+          >
+            Create agent
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─────────────────────────── Row ───────────────────────────
+
+function AgentRow({
   agent,
-  detailPrompt,
-  isSelected,
-  onEdit,
-  onLoadVersions,
+  canWrite,
+  onConfigure,
 }: {
   agent: AgentListItem;
-  detailPrompt?: string;
-  isSelected: boolean;
-  onEdit: () => void;
-  onLoadVersions: () => void;
+  canWrite: boolean;
+  onConfigure: () => void;
 }): JSX.Element {
   const disable = useAgentLifecycleMutation(agent.agent_name, 'disable');
   const enable = useAgentLifecycleMutation(agent.agent_name, 'enable');
@@ -98,885 +172,144 @@ function AgentCard({
   const restore = useAgentLifecycleMutation(agent.agent_name, 'restore');
   const clone = useCloneAgentMutation(agent.agent_name);
   const remove = useDeleteAgentMutation(agent.agent_name);
-
-  const runDisableEnable = async (): Promise<unknown> => {
-    return agent.status === 'disabled' ? enable.mutateAsync() : disable.mutateAsync();
-  };
-
-  const runArchiveRestore = async (): Promise<unknown> => {
-    return agent.status === 'archived' ? restore.mutateAsync() : archive.mutateAsync();
-  };
-
-  return (
-    <article className="rounded-2xl border bg-white/80 p-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <button
-            className="text-left text-xl font-semibold"
-            onClick={onEdit}
-            type="button"
-          >
-            {agent.agent_name}
-          </button>
-          <p className="mt-2 text-sm text-muted-foreground">{formatStatus(agent).join(' · ')}</p>
-          {isSelected && (detailPrompt ?? agent.system_prompt) ? (
-            <p className="mt-2 text-sm text-foreground">{detailPrompt ?? agent.system_prompt}</p>
-          ) : null}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button className="rounded-md bg-secondary px-3 py-2 text-sm font-medium" onClick={onEdit} type="button">
-            {`Edit ${agent.agent_name}`}
-          </button>
-          <button
-            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-            onClick={() => void runDisableEnable()}
-            type="button"
-          >
-            {agent.status === 'disabled' ? `Enable ${agent.agent_name}` : `Disable ${agent.agent_name}`}
-          </button>
-          <button
-            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-            onClick={() => void runArchiveRestore()}
-            type="button"
-          >
-            {agent.status === 'archived' ? `Restore ${agent.agent_name}` : `Archive ${agent.agent_name}`}
-          </button>
-          <button
-            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-            onClick={() => void clone.mutateAsync(`${agent.agent_name}-copy`)}
-            type="button"
-          >
-            {`Clone ${agent.agent_name}`}
-          </button>
-          <button
-            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-            onClick={() => void remove.mutateAsync()}
-            type="button"
-          >
-            {`Delete ${agent.agent_name}`}
-          </button>
-          <button
-            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-            onClick={onLoadVersions}
-            type="button"
-          >
-            {`Load versions for ${agent.agent_name}`}
-          </button>
-        </div>
-      </div>
-    </article>
-  );
-}
-
-function BindingList({
-  empty,
-  items,
-  renderItem,
-}: {
-  empty: string;
-  items: string[];
-  renderItem?: (item: string) => JSX.Element;
-}): JSX.Element {
-  if (!items.length) {
-    return <p className="text-sm text-muted-foreground">{empty}</p>;
-  }
-
-  return (
-    <div className="flex flex-wrap gap-2">
-      {items.map((item) =>
-        renderItem ? renderItem(item) : <span className="rounded-full border px-3 py-1 text-sm" key={item}>{item}</span>
-      )}
-    </div>
-  );
-}
-
-function SkillBindingRow({
-  agentName,
-  canWrite,
-  binding,
-}: {
-  agentName: string;
-  canWrite: boolean;
-  binding: AgentSkillBinding;
-}): JSX.Element {
-  const setSkill = useSetAgentSkillMutation(agentName, binding.skill_name);
-
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border px-3 py-2">
-      <span className="text-sm font-medium">{binding.skill_name}</span>
-      {canWrite ? (
-        <button
-          className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-          onClick={() => void setSkill.mutateAsync({ enabled: !binding.enabled })}
-          type="button"
-        >
-          {binding.enabled ? `Disable ${binding.skill_name}` : `Enable ${binding.skill_name}`}
-        </button>
-      ) : (
-        <span className="text-sm text-muted-foreground">{binding.enabled ? 'enabled' : 'disabled'}</span>
-      )}
-    </div>
-  );
-}
-
-function SecretsSection({
-  agentName,
-  canWrite,
-  secrets,
-}: {
-  agentName: string;
-  canWrite: boolean;
-  secrets: AgentSecretRecord[];
-}): JSX.Element {
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
-
-  return (
-    <section className="space-y-3 rounded-2xl border bg-white/70 p-4">
-      <h3 className="text-lg font-semibold">Secrets</h3>
-      {!secrets.length ? <p className="text-sm text-muted-foreground">No secret slots declared.</p> : null}
-      <div className="space-y-3">
-        {secrets.map((secret) => (
-          <SecretRow
-            agentName={agentName}
-            canWrite={canWrite}
-            draft={drafts[secret.env_name] ?? ''}
-            key={secret.env_name}
-            onDraftChange={(value) =>
-              setDrafts((current) => ({
-                ...current,
-                [secret.env_name]: value,
-              }))
-            }
-            onSaved={() =>
-              setDrafts((current) => ({
-                ...current,
-                [secret.env_name]: '',
-              }))
-            }
-            secret={secret}
-          />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function SecretRow({
-  agentName,
-  canWrite,
-  draft,
-  onDraftChange,
-  onSaved,
-  secret,
-}: {
-  agentName: string;
-  canWrite: boolean;
-  draft: string;
-  onDraftChange: (value: string) => void;
-  onSaved: () => void;
-  secret: AgentSecretRecord;
-}): JSX.Element {
-  const setSecret = useSetAgentSecretMutation(agentName, secret.env_name);
-  const deleteSecret = useDeleteAgentSecretMutation(agentName, secret.env_name);
-
-  const saveSecret = async (): Promise<void> => {
-    if (!draft) {
-      return;
-    }
-    await setSecret.mutateAsync(draft);
-    onSaved();
-  };
-
-  return (
-    <div className="space-y-3 rounded-xl border px-3 py-3">
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-sm font-medium">{secret.env_name}</span>
-        <span className="text-sm text-muted-foreground">{secret.status}</span>
-      </div>
-      {canWrite ? (
-        <div className="grid gap-3 md:grid-cols-[1fr_auto_auto]">
-          <label className="grid gap-2 text-sm font-medium">
-            {`Secret value for ${secret.env_name}`}
-            <input
-              className="rounded-md border bg-white px-3 py-2"
-              onChange={(event) => onDraftChange(event.target.value)}
-              type="password"
-              value={draft}
-            />
-          </label>
-          <button
-            className="self-end rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-            onClick={() => void saveSecret()}
-            type="button"
-          >
-            {`Save secret ${secret.env_name}`}
-          </button>
-          <button
-            className="self-end rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-            onClick={() => void deleteSecret.mutateAsync()}
-            type="button"
-          >
-            {`Clear secret ${secret.env_name}`}
-          </button>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function AgentBindingsPanel({
-  agent,
-  canWrite,
-  groups,
-  onAddGroup,
-  onRemoveGroup,
-}: {
-  agent: AgentListItem;
-  canWrite: boolean;
-  groups: AgentImGroup[];
-  onAddGroup: (group: AgentImGroup) => void;
-  onRemoveGroup: (group: AgentImGroup) => void;
-}): JSX.Element {
-  const detail = useAgentDetailQuery(agent.agent_name);
-  const skills = useAgentSkillsQuery(agent.agent_name);
-  const bindings = useAgentBindingsQuery(agent.agent_name);
-  const oauth = useAgentOauthBindingsQuery(agent.agent_name);
-  const kbs = useAgentKbsQuery(agent.agent_name);
-  const secrets = useAgentSecretsQuery(agent.agent_name);
-  const skillCatalog = useSkillsQuery();
-  const mcpServers = useMcpServersQuery();
-  const connectors = useConnectorsQuery();
-  const kbCatalog = useKbsQuery();
-  const users = useUsersQuery();
-
-  const bindMcp = useBindAgentMcpMutation(agent.agent_name);
-  const unbindMcp = useUnbindAgentMcpMutation(agent.agent_name);
-  const bindOauth = useBindAgentOauthMutation(agent.agent_name);
-  const unbindOauth = useUnbindAgentOauthMutation(agent.agent_name);
-  const bindKb = useBindAgentKbMutation(agent.agent_name);
-  const unbindKb = useUnbindAgentKbMutation(agent.agent_name);
-  const bindUser = useBindAgentUserMutation(agent.agent_name);
-  const unbindUser = useUnbindAgentUserMutation(agent.agent_name);
-  const addImGroup = useAddAgentImGroupMutation(agent.agent_name);
-  const removeImGroup = useRemoveAgentImGroupMutation(agent.agent_name);
   const setDefault = useSetDefaultAgentMutation(agent.agent_name);
   const clearDefault = useClearDefaultAgentMutation();
-  const setImCapabilities = useSetAgentImCapabilitiesMutation(agent.agent_name);
-
-  const [selectedMcpServer, setSelectedMcpServer] = useState('');
-  const [selectedConnector, setSelectedConnector] = useState('');
-  const [runAs, setRunAs] = useState<'agent' | 'user'>('user');
-  const [selectedKb, setSelectedKb] = useState('');
-  const [selectedUser, setSelectedUser] = useState('');
-  const [groupPlatform, setGroupPlatform] = useState('slack');
-  const [groupId, setGroupId] = useState('');
-  const [capabilities, setCapabilities] = useState<AgentImCapabilitiesInput>({
-    supports_dm: false,
-    supports_groups: false,
-  });
-
-  useEffect(() => {
-    setCapabilities({
-      supports_dm: detail.data?.supports_dm ?? false,
-      supports_groups: detail.data?.supports_groups ?? false,
-    });
-  }, [detail.data?.supports_dm, detail.data?.supports_groups, agent.agent_name]);
-
-  const availableMcpServers = useMemo(() => {
-    const bound = new Set(bindings.data?.mcp_servers ?? []);
-    return (mcpServers.data ?? []).filter((server) => !bound.has(server.id));
-  }, [bindings.data?.mcp_servers, mcpServers.data]);
-
-  const availableConnectors = useMemo(() => {
-    const bound = new Set(oauth.data?.connector_ids ?? []);
-    return (connectors.data ?? []).filter((connector) => !bound.has(connector.id));
-  }, [connectors.data, oauth.data?.connector_ids]);
-
-  const availableKbs = useMemo(() => {
-    const bound = new Set(kbs.data?.kb_ids ?? []);
-    return (kbCatalog.data ?? []).filter((kb) => !bound.has(kb.kb_id));
-  }, [kbCatalog.data, kbs.data?.kb_ids]);
-
-  const availableUsers = useMemo(() => {
-    const bound = new Set(bindings.data?.users ?? []);
-    return (users.data ?? []).filter((user) => !bound.has(user.id));
-  }, [bindings.data?.users, users.data]);
-
-  const saveImCapabilities = async (): Promise<void> => {
-    await setImCapabilities.mutateAsync(capabilities);
-  };
-
-  const createGroup = async (group: AgentImGroupInput): Promise<void> => {
-    await addImGroup.mutateAsync(group);
-    onAddGroup(group);
-  };
-
-  const deleteGroup = async (group: AgentImGroupInput): Promise<void> => {
-    await removeImGroup.mutateAsync(group);
-    onRemoveGroup(group);
-  };
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   return (
-    <aside className="space-y-4 rounded-2xl border bg-white/75 p-5">
-      <header className="space-y-2">
-        <h2 className="text-lg font-semibold">Agent Bindings</h2>
-        <p className="text-sm text-muted-foreground">{`Native controls for ${agent.agent_name}.`}</p>
-        {!canWrite ? <p className="text-sm text-muted-foreground">Viewer access is read-only.</p> : null}
-      </header>
+    <div className="flex items-center gap-4 rounded-lg border border-border bg-card px-4 py-3 transition-colors hover:bg-accent/40">
+      <button
+        type="button"
+        className="flex min-w-0 flex-1 items-center gap-4 text-left"
+        onClick={onConfigure}
+      >
+        <span className="grid size-10 shrink-0 place-items-center rounded-full bg-secondary text-xs font-semibold text-foreground">
+          {initials(agent.agent_name)}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-2">
+            <span className="truncate text-sm font-semibold text-foreground">{agent.agent_name}</span>
+            <span className={cn('size-1.5 rounded-full', statusDot(agent.status))} />
+            {agent.is_default ? <Badge variant="default">default</Badge> : null}
+            <Badge variant={statusVariant(agent.status)}>{agent.status}</Badge>
+          </span>
+          {agent.system_prompt ? (
+            <span className="mt-0.5 line-clamp-1 block text-sm text-muted-foreground">{agent.system_prompt}</span>
+          ) : null}
+        </span>
+      </button>
+      <span className="hidden shrink-0 text-xs text-muted-foreground sm:block">{agent.provenance}</span>
 
-      <section className="space-y-3 rounded-2xl border bg-white/70 p-4">
-        <h3 className="text-lg font-semibold">Skills</h3>
-        <div className="space-y-2">
-          {(skills.data ?? []).map((binding) => (
-            <SkillBindingRow agentName={agent.agent_name} binding={binding} canWrite={canWrite} key={binding.skill_name} />
-          ))}
-        </div>
-        {!skills.data?.length && skillCatalog.data?.length ? (
-          <div className="space-y-2">
-            {skillCatalog.data.map((skill) => (
-              <SkillBindingRow
-                agentName={agent.agent_name}
-                binding={{ enabled: false, skill_name: skill.name }}
-                canWrite={canWrite}
-                key={skill.name}
-              />
-            ))}
-          </div>
-        ) : null}
-      </section>
-
-      <section className="space-y-3 rounded-2xl border bg-white/70 p-4">
-        <h3 className="text-lg font-semibold">MCP Servers</h3>
-        <BindingList empty="No MCP servers bound." items={bindings.data?.mcp_servers ?? []} renderItem={(item) => (
-          <div className="flex items-center gap-2 rounded-full border px-3 py-1" key={item}>
-            <span className="text-sm">{item}</span>
-            {canWrite ? (
-              <button className="text-sm font-medium" onClick={() => void unbindMcp.mutateAsync(item)} type="button">
-                {`Remove ${item}`}
-              </button>
-            ) : null}
-          </div>
-        )} />
-        {canWrite ? (
-          <div className="grid gap-3 md:grid-cols-[1fr_auto]">
-            <label className="grid gap-2 text-sm font-medium">
-              Add MCP server
-              <select
-                className="rounded-md border bg-white px-3 py-2"
-                onChange={(event) => setSelectedMcpServer(event.target.value)}
-                value={selectedMcpServer}
-              >
-                <option value="">Select a server</option>
-                {availableMcpServers.map((server) => (
-                  <option key={server.id} value={server.id}>
-                    {server.id}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              className="self-end rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-              onClick={() => {
-                if (!selectedMcpServer) {
-                  return;
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="secondary" size="sm" aria-label={`Actions for ${agent.agent_name}`}>
+            Actions <MoreVertical className="size-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={onConfigure}>Configure</DropdownMenuItem>
+          {canWrite ? (
+            <>
+              <DropdownMenuItem
+                onSelect={() =>
+                  agent.status === 'disabled' ? void enable.mutateAsync() : void disable.mutateAsync()
                 }
-                void bindMcp.mutateAsync(selectedMcpServer);
-                setSelectedMcpServer('');
-              }}
-              type="button"
-            >
-              Bind MCP server
-            </button>
-          </div>
-        ) : null}
-      </section>
-
-      <section className="space-y-3 rounded-2xl border bg-white/70 p-4">
-        <h3 className="text-lg font-semibold">OAuth Connectors</h3>
-        <BindingList empty="No OAuth connectors bound." items={oauth.data?.service_grants.map((item) => item.service_id) ?? []} renderItem={(item) => {
-          const runAsValue = oauth.data?.service_grants.find((grant) => grant.service_id === item)?.run_as ?? 'user';
-          return (
-            <div className="flex items-center gap-2 rounded-full border px-3 py-1" key={item}>
-              <span className="text-sm">{item}</span>
-              <span className="text-xs text-muted-foreground">{runAsValue}</span>
-              {canWrite ? (
-                <button className="text-sm font-medium" onClick={() => void unbindOauth.mutateAsync(item)} type="button">
-                  {`Remove ${item}`}
-                </button>
-              ) : null}
-            </div>
-          );
-        }} />
-        {canWrite ? (
-          <div className="grid gap-3">
-            <div className="grid gap-3 md:grid-cols-[1fr_160px_auto]">
-              <label className="grid gap-2 text-sm font-medium">
-                Add OAuth connector
-                <select
-                  className="rounded-md border bg-white px-3 py-2"
-                  onChange={(event) => setSelectedConnector(event.target.value)}
-                  value={selectedConnector}
-                >
-                  <option value="">Select a connector</option>
-                  {availableConnectors.map((connector) => (
-                    <option key={connector.id} value={connector.id}>
-                      {connector.id}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="grid gap-2 text-sm font-medium">
-                Run as
-                <select
-                  className="rounded-md border bg-white px-3 py-2"
-                  onChange={(event) => setRunAs(event.target.value as 'agent' | 'user')}
-                  value={runAs}
-                >
-                  <option value="user">user</option>
-                  <option value="agent">agent</option>
-                </select>
-              </label>
-              <button
-                className="self-end rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-                onClick={() => {
-                  if (!selectedConnector) {
-                    return;
-                  }
-                  void bindOauth.mutateAsync({ connectorId: selectedConnector, runAs });
-                  setSelectedConnector('');
-                }}
-                type="button"
               >
-                Bind OAuth connector
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </section>
-
-      <section className="space-y-3 rounded-2xl border bg-white/70 p-4">
-        <h3 className="text-lg font-semibold">Knowledge Bases</h3>
-        <BindingList empty="No knowledge bases bound." items={kbs.data?.kb_ids ?? []} renderItem={(item) => (
-          <div className="flex items-center gap-2 rounded-full border px-3 py-1" key={item}>
-            <span className="text-sm">{item}</span>
-            {canWrite ? (
-              <button className="text-sm font-medium" onClick={() => void unbindKb.mutateAsync(item)} type="button">
-                {`Remove ${item}`}
-              </button>
-            ) : null}
-          </div>
-        )} />
-        {canWrite ? (
-          <div className="grid gap-3 md:grid-cols-[1fr_auto]">
-            <label className="grid gap-2 text-sm font-medium">
-              Add knowledge base
-              <select
-                className="rounded-md border bg-white px-3 py-2"
-                onChange={(event) => setSelectedKb(event.target.value)}
-                value={selectedKb}
-              >
-                <option value="">Select a knowledge base</option>
-                {availableKbs.map((kb) => (
-                  <option key={kb.kb_id} value={kb.kb_id}>
-                    {kb.kb_id}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              className="self-end rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-              onClick={() => {
-                if (!selectedKb) {
-                  return;
+                {agent.status === 'disabled' ? 'Enable' : 'Disable'}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() =>
+                  agent.status === 'archived' ? void restore.mutateAsync() : void archive.mutateAsync()
                 }
-                void bindKb.mutateAsync(selectedKb);
-                setSelectedKb('');
-              }}
-              type="button"
-            >
-              Bind knowledge base
-            </button>
-          </div>
-        ) : null}
-      </section>
-
-      <section className="space-y-3 rounded-2xl border bg-white/70 p-4">
-        <h3 className="text-lg font-semibold">User Access</h3>
-        <BindingList empty="No users bound." items={bindings.data?.users ?? []} renderItem={(item) => (
-          <div className="flex items-center gap-2 rounded-full border px-3 py-1" key={item}>
-            <span className="text-sm">{item}</span>
-            {canWrite ? (
-              <button className="text-sm font-medium" onClick={() => void unbindUser.mutateAsync(item)} type="button">
-                {`Remove ${item}`}
-              </button>
-            ) : null}
-          </div>
-        )} />
-        {canWrite ? (
-          <div className="grid gap-3 md:grid-cols-[1fr_auto]">
-            <label className="grid gap-2 text-sm font-medium">
-              Add user access
-              <select
-                className="rounded-md border bg-white px-3 py-2"
-                onChange={(event) => setSelectedUser(event.target.value)}
-                value={selectedUser}
               >
-                <option value="">Select a user</option>
-                {availableUsers.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.id}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              className="self-end rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-              onClick={() => {
-                if (!selectedUser) {
-                  return;
-                }
-                void bindUser.mutateAsync(selectedUser);
-                setSelectedUser('');
-              }}
-              type="button"
-            >
-              Bind user
-            </button>
-          </div>
-        ) : null}
-      </section>
-
-      <section className="space-y-3 rounded-2xl border bg-white/70 p-4">
-        <h3 className="text-lg font-semibold">IM Access</h3>
-        <BindingList empty="No IM groups allowed." items={groups.map((group) => `${group.platform}:${group.group_id}`)} renderItem={(item) => (
-          <div className="flex items-center gap-2 rounded-full border px-3 py-1" key={item}>
-            <span className="text-sm">{item}</span>
-            {canWrite ? (
-              <button
-                className="text-sm font-medium"
-                onClick={() => {
-                  const [platform, groupIdValue] = item.split(':');
-                  void deleteGroup({ group_id: groupIdValue, platform });
-                }}
-                type="button"
+                {agent.status === 'archived' ? 'Restore' : 'Archive'}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void clone.mutateAsync(`${agent.agent_name}-copy`)}>
+                Clone
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => (agent.is_default ? void clearDefault.mutateAsync() : void setDefault.mutateAsync())}
               >
-                {`Remove ${item}`}
-              </button>
-            ) : null}
-          </div>
-        )} />
-        <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
-          <span>{capabilities.supports_dm ? 'DMs enabled' : 'DMs disabled'}</span>
-          <span>{capabilities.supports_groups ? 'Groups enabled' : 'Groups disabled'}</span>
-        </div>
-        {canWrite ? (
-          <div className="grid gap-3">
-            <div className="grid gap-3 md:grid-cols-[160px_1fr_auto]">
-              <label className="grid gap-2 text-sm font-medium">
-                Platform
-                <select
-                  className="rounded-md border bg-white px-3 py-2"
-                  onChange={(event) => setGroupPlatform(event.target.value)}
-                  value={groupPlatform}
-                >
-                  <option value="slack">slack</option>
-                  <option value="telegram">telegram</option>
-                </select>
-              </label>
-              <label className="grid gap-2 text-sm font-medium">
-                Group id
-                <input
-                  className="rounded-md border bg-white px-3 py-2"
-                  onChange={(event) => setGroupId(event.target.value)}
-                  value={groupId}
-                />
-              </label>
-              <button
-                className="self-end rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-                onClick={() => {
-                  if (!groupId) {
-                    return;
-                  }
-                  void createGroup({ group_id: groupId, platform: groupPlatform });
-                  setGroupId('');
-                }}
-                type="button"
-              >
-                Add group
-              </button>
-            </div>
-            <div className="flex flex-wrap gap-4">
-              <label className="flex items-center gap-2 text-sm font-medium">
-                <input
-                  checked={capabilities.supports_dm}
-                  onChange={(event) =>
-                    setCapabilities((current) => ({
-                      ...current,
-                      supports_dm: event.target.checked,
-                    }))
-                  }
-                  type="checkbox"
-                />
-                Allow DMs
-              </label>
-              <label className="flex items-center gap-2 text-sm font-medium">
-                <input
-                  checked={capabilities.supports_groups}
-                  onChange={(event) =>
-                    setCapabilities((current) => ({
-                      ...current,
-                      supports_groups: event.target.checked,
-                    }))
-                  }
-                  type="checkbox"
-                />
-                Allow groups
-              </label>
-              <button
-                className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-                onClick={() => void saveImCapabilities()}
-                type="button"
-              >
-                Save IM capabilities
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </section>
+                {agent.is_default ? 'Clear default' : 'Set as default'}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem destructive onSelect={() => setTimeout(() => setConfirmDelete(true), 0)}>
+                <Trash2 /> Delete
+              </DropdownMenuItem>
+            </>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
 
-      <section className="space-y-3 rounded-2xl border bg-white/70 p-4">
-        <h3 className="text-lg font-semibold">Default Agent</h3>
-        <p className="text-sm text-muted-foreground">
-          {agent.is_default ? 'This agent is the default.' : 'This agent is not the default.'}
-        </p>
-        {canWrite ? (
-          agent.is_default ? (
-            <button
-              className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-              onClick={() => void clearDefault.mutateAsync()}
-              type="button"
-            >
-              Clear default agent
-            </button>
-          ) : (
-            <button
-              className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-              onClick={() => void setDefault.mutateAsync()}
-              type="button"
-            >
-              Set as default agent
-            </button>
-          )
-        ) : null}
-      </section>
-
-      <SecretsSection agentName={agent.agent_name} canWrite={canWrite} secrets={secrets.data?.secrets ?? []} />
-    </aside>
+      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {agent.agent_name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the agent definition. Agents with active bindings cannot be deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void remove.mutateAsync()}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
   );
 }
+
+// ─────────────────────────── Page ───────────────────────────
 
 export function AgentsPage(): JSX.Element {
   const me = useAdminMeQuery();
   const agents = useAgentsQuery();
-  const [selectedName, setSelectedName] = useState<string | null>(null);
-  const [mode, setMode] = useState<'create' | 'edit'>('create');
-  const [versionsOpenFor, setVersionsOpenFor] = useState<string | null>(null);
-  const [name, setName] = useState('');
-  const [systemPrompt, setSystemPrompt] = useState('');
-  const [allowedTools, setAllowedTools] = useState('');
-  const [groupsByAgent, setGroupsByAgent] = useState<Record<string, AgentImGroup[]>>({});
-
-  useEffect(() => {
-    if (!selectedName && agents.data && agents.data.length > 0) {
-      setSelectedName(agents.data[0].agent_name);
-    }
-  }, [agents.data, selectedName]);
-
-  const detail = useAgentDetailQuery(selectedName);
-  const createAgent = useCreateAgentMutation();
-  const updateAgent = useUpdateAgentMutation(selectedName ?? '');
-  const versions = useAgentVersionsQuery(versionsOpenFor, versionsOpenFor === selectedName);
-  const activateVersion = useActivateAgentVersionMutation(selectedName ?? '');
-
-  const selectedAgent = useMemo(() => {
-    return (agents.data ?? []).find((agent) => agent.agent_name === selectedName) ?? null;
-  }, [agents.data, selectedName]);
-
-  useEffect(() => {
-    if (mode === 'edit' && detail.data) {
-      setName(detail.data.agent);
-      setSystemPrompt(detail.data.system_prompt);
-      setAllowedTools(detail.data.allowed_tools.join(','));
-    }
-  }, [detail.data, mode]);
-
-  const resetForm = (): void => {
-    setMode('create');
-    setName('');
-    setSystemPrompt('');
-    setAllowedTools('');
-  };
-
-  const onSubmit = async (): Promise<void> => {
-    if (mode === 'create') {
-      await createAgent.mutateAsync({
-        name,
-        system_prompt: systemPrompt,
-        allowed_tools: parseAllowedTools(allowedTools),
-      });
-      resetForm();
-      return;
-    }
-
-    if (selectedName) {
-      await updateAgent.mutateAsync({
-        system_prompt: systemPrompt,
-        allowed_tools: parseAllowedTools(allowedTools),
-      });
-    }
-  };
+  const navigate = useNavigate();
+  const [query, setQuery] = useState('');
+  const [createOpen, setCreateOpen] = useState(false);
 
   const canWrite = me.data?.role !== 'viewer';
-  const groups = selectedName ? groupsByAgent[selectedName] ?? [] : [];
 
-  const addImGroup = (group: AgentImGroup): void => {
-    if (!selectedName) {
-      return;
-    }
-    setGroupsByAgent((current) => ({
-      ...current,
-      [selectedName]: [...(current[selectedName] ?? []), group],
-    }));
-  };
-
-  const removeImGroup = (group: AgentImGroup): void => {
-    if (!selectedName) {
-      return;
-    }
-    setGroupsByAgent((current) => ({
-      ...current,
-      [selectedName]: (current[selectedName] ?? []).filter(
-        (item) => item.platform !== group.platform || item.group_id !== group.group_id
-      ),
-    }));
-  };
+  const filtered = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    const list = agents.data ?? [];
+    if (!term) return list;
+    return list.filter((agent) => agent.agent_name.toLowerCase().includes(term));
+  }, [agents.data, query]);
 
   return (
-    <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-      <div className="space-y-6">
-        <header className="space-y-2">
-          <p className="text-sm font-medium uppercase tracking-[0.25em] text-muted-foreground">
-            Native SPA
-          </p>
-          <h1 className="text-3xl font-semibold tracking-tight">Agents</h1>
-          <p className="text-sm text-muted-foreground">
-            Lifecycle operations, bindings, IM access, default selection, and write-only secrets stay inside the React admin UI.
-          </p>
-          {!canWrite ? <p className="text-sm text-muted-foreground">Viewer access is read-only.</p> : null}
-        </header>
-
-        <section className="rounded-2xl border bg-white/75 p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Create or edit agent</h2>
-            {mode === 'edit' ? (
-              <button
-                className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-                onClick={resetForm}
-                type="button"
-              >
-                New draft
-              </button>
-            ) : null}
-          </div>
-          <div className="grid gap-4">
-            <label className="grid gap-2 text-sm font-medium">
-              Agent name
-              <input
-                className="rounded-md border bg-white px-3 py-2"
-                disabled={mode === 'edit'}
-                onChange={(event) => setName(event.target.value)}
-                value={name}
-              />
-            </label>
-            <label className="grid gap-2 text-sm font-medium">
-              System prompt
-              <textarea
-                className="min-h-32 rounded-md border bg-white px-3 py-2"
-                onChange={(event) => setSystemPrompt(event.target.value)}
-                value={systemPrompt}
-              />
-            </label>
-            <label className="grid gap-2 text-sm font-medium">
-              Allowed tools
-              <input
-                className="rounded-md border bg-white px-3 py-2"
-                onChange={(event) => setAllowedTools(event.target.value)}
-                value={allowedTools}
-              />
-            </label>
-            <button
-              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-              onClick={() => void onSubmit()}
-              type="button"
-            >
-              {mode === 'create' ? 'Create agent' : 'Save changes'}
-            </button>
-          </div>
-        </section>
-
-        <section className="grid gap-4">
-          {agents.data?.map((agent) => (
-            <div key={agent.agent_name}>
-              <AgentCard
-                agent={agent}
-                detailPrompt={selectedName === agent.agent_name ? detail.data?.system_prompt : undefined}
-                isSelected={selectedName === agent.agent_name}
-                onEdit={() => {
-                  setSelectedName(agent.agent_name);
-                  setMode('edit');
-                }}
-                onLoadVersions={() => {
-                  setSelectedName(agent.agent_name);
-                  setVersionsOpenFor(agent.agent_name);
-                }}
-              />
-              {versionsOpenFor === agent.agent_name && versions.data ? (
-                <div className="mt-4 space-y-2 border-t pt-4">
-                  {versions.data.map((version) => (
-                    <div className="flex items-center justify-between gap-4" key={version.id}>
-                      <span className="text-sm font-medium">{`v${version.version}${version.is_active ? ' active' : ''}`}</span>
-                      {!version.is_active ? (
-                        <button
-                          className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground"
-                          onClick={() => void activateVersion.mutateAsync(version.version)}
-                          type="button"
-                        >
-                          {`Activate v${version.version} for ${agent.agent_name}`}
-                        </button>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ))}
-        </section>
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <h2 className="text-xl font-semibold tracking-tight">Agents</h2>
+          <Badge variant="secondary">{agents.data?.length ?? 0}</Badge>
+        </div>
+        {canWrite ? (
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus className="size-4" /> New Agent
+          </Button>
+        ) : null}
       </div>
 
-      {selectedAgent ? (
-        <AgentBindingsPanel
-          agent={selectedAgent}
-          canWrite={canWrite}
-          groups={groups}
-          onAddGroup={addImGroup}
-          onRemoveGroup={removeImGroup}
-        />
-      ) : (
-        <aside className="rounded-2xl border bg-white/75 p-5">
-          <h2 className="text-lg font-semibold">Agent Bindings</h2>
-          <p className="mt-2 text-sm text-muted-foreground">Select an agent to manage bindings.</p>
-        </aside>
-      )}
-    </section>
+      <Input placeholder="Search agents…" value={query} onChange={(event) => setQuery(event.target.value)} />
+
+      <div className="space-y-2">
+        {filtered.map((agent) => (
+          <AgentRow
+            key={agent.agent_name}
+            agent={agent}
+            canWrite={canWrite}
+            onConfigure={() => navigate(`/agents/${agent.agent_name}/configure`)}
+          />
+        ))}
+        {agents.data && filtered.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border py-12 text-center text-sm text-muted-foreground">
+            {query ? 'No agents match your search.' : 'No agents yet. Create one to get started.'}
+          </div>
+        ) : null}
+      </div>
+
+      <CreateAgentDialog open={createOpen} onOpenChange={setCreateOpen} />
+    </div>
   );
 }

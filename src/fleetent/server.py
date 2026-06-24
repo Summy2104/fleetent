@@ -261,8 +261,11 @@ app.include_router(provider_admin_api.router)
 app.include_router(kb_admin_api.router)
 app.include_router(connector_admin_api.router)
 app.include_router(chat_admin_api.router)
-app.include_router(agent_console_api.router)
+# agent_admin_api must precede agent_console_api: its literal DELETE
+# /agents/default route would otherwise be shadowed by the console's parametric
+# DELETE /agents/{name}, breaking clear-default with a 404.
 app.include_router(agent_admin_api.router)
+app.include_router(agent_console_api.router)
 app.include_router(stats_admin_api.router)
 app.include_router(agent_apply_api.router)
 app.include_router(node_desired_state_api.router)
