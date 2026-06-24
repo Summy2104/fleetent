@@ -516,7 +516,7 @@ def test_conflict_preference_all_three_party_values_accepted():
         assert s.conflict_preference == value
 
 
-# Task 3.2: build_context calls search_agent_memory; hits → source_type="agent_memory"; empty → omit section
+# Task 3.2: build_context calls search_agent_memory; hits produce source_type="agent_memory"
 
 
 def _agent_memory_item(item_id: str, content: str) -> object:
@@ -629,7 +629,12 @@ async def test_agent_memory_budget_does_not_crowd_out_memory_or_knowledge(monkey
     monkeypatch.setattr(
         long_term_ctx.memory,
         "search",
-        AsyncMock(return_value=[_memory("mem-1", "Memory item one."), _memory("mem-2", "Memory item two.")]),
+        AsyncMock(
+            return_value=[
+                _memory("mem-1", "Memory item one."),
+                _memory("mem-2", "Memory item two."),
+            ]
+        ),
     )
     long_term_ctx.set_knowledge_provider(
         AsyncMock(return_value=[_knowledge("doc-1", "Knowledge doc one.")])
@@ -637,7 +642,9 @@ async def test_agent_memory_budget_does_not_crowd_out_memory_or_knowledge(monkey
     monkeypatch.setattr(
         long_term_ctx.agent_memory,
         "search_agent_memory",
-        AsyncMock(return_value=[_agent_memory_item("am-1", "x" * 30)]),  # exceeds agent_memory budget
+        AsyncMock(
+            return_value=[_agent_memory_item("am-1", "x" * 30)]
+        ),  # exceeds agent_memory budget
     )
 
     result = await long_term_ctx.build_context(
@@ -656,7 +663,7 @@ async def test_agent_memory_budget_does_not_crowd_out_memory_or_knowledge(monkey
 
 
 async def test_conflict_preference_agent_memory_first_in_ordering(monkeypatch):
-    """conflict_preference='agent_memory' must place agent_memory candidates before memory/knowledge."""
+    """conflict_preference='agent_memory' places agent_memory candidates first."""
     from fleetent import long_term_ctx
 
     monkeypatch.setattr(

@@ -35,8 +35,10 @@ def test_platform_read_projection_uses_readonly_connections(tmp_path: Path) -> N
 
     # Must use _ro variants, not the migrate-on-open originals
     assert "open_state_db_ro" in attr_calls, "read_projection must call open_state_db_ro"
-    assert "open_agent_memory_db_ro" in attr_calls, (
-        "read_projection must call open_agent_memory_db_ro"
+    # open_agent_memory_db_ro retired: agent_memory_items now live in agent_state.db
+    assert "open_agent_memory_db_ro" not in attr_calls, (
+        "read_projection must NOT call open_agent_memory_db_ro — agent_memory_items "
+        "now live in agent_state.db; use open_state_db_ro"
     )
 
     # Must NOT call the write-side open (which would trigger migrations)

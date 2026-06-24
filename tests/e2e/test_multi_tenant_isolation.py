@@ -80,9 +80,10 @@ def test_cross_agent_query_no_data_bleed(
     backend_b = SQLiteTenantBackend(data_dir=data_dir_b)
 
     # Write sentinel to agent-a; verify agent-b sees nothing.
+    # agent_memory_items now live in agent_state.db (consolidated from agent_memory.db)
     scope_a = backend_a.resolve_agent(stack.tenant_a_id, stack.agent_a_name)
-    am_a = scope_a.open_agent_memory_db(AGENT_STATE_MIGRATIONS)
-    with am_a.transaction() as conn:
+    state_a = scope_a.open_state_db(AGENT_STATE_MIGRATIONS)
+    with state_a.transaction() as conn:
         conn.execute(
             _INSERT_SQL,
             {
@@ -99,8 +100,8 @@ def test_cross_agent_query_no_data_bleed(
         )
 
     scope_b = backend_b.resolve_agent(stack.tenant_b_id, stack.agent_b_name)
-    am_b = scope_b.open_agent_memory_db(AGENT_STATE_MIGRATIONS)
-    with am_b.transaction() as conn:
+    state_b = scope_b.open_state_db(AGENT_STATE_MIGRATIONS)
+    with state_b.transaction() as conn:
         rows = conn.execute(
             "SELECT content FROM agent_memory_items WHERE content = :sentinel",
             {"sentinel": sentinel_a},
@@ -109,8 +110,8 @@ def test_cross_agent_query_no_data_bleed(
 
     # Reverse: write to agent-b; verify agent-a sees nothing.
     scope_b2 = backend_b.resolve_agent(stack.tenant_b_id, stack.agent_b_name)
-    am_b2 = scope_b2.open_agent_memory_db(AGENT_STATE_MIGRATIONS)
-    with am_b2.transaction() as conn:
+    state_b2 = scope_b2.open_state_db(AGENT_STATE_MIGRATIONS)
+    with state_b2.transaction() as conn:
         conn.execute(
             _INSERT_SQL,
             {
@@ -127,8 +128,8 @@ def test_cross_agent_query_no_data_bleed(
         )
 
     scope_a2 = backend_a.resolve_agent(stack.tenant_a_id, stack.agent_a_name)
-    am_a2 = scope_a2.open_agent_memory_db(AGENT_STATE_MIGRATIONS)
-    with am_a2.transaction() as conn:
+    state_a2 = scope_a2.open_state_db(AGENT_STATE_MIGRATIONS)
+    with state_a2.transaction() as conn:
         rows = conn.execute(
             "SELECT content FROM agent_memory_items WHERE content = :sentinel",
             {"sentinel": sentinel_b},

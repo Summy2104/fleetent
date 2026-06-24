@@ -9,7 +9,7 @@ SQLite backend layout under ``<fleetent_home>/``::
 
   tenants/<tenant_id>/kb.db                                 — KB relation tables (Y-managed)
   tenants/<tenant_id>/kb_vectors.db                         — KB vector store
-  tenants/<tenant_id>/agents/<agent_id>/data/agent_state.db — agent state + agent_memory_items (Y-managed)
+  tenants/<tenant_id>/agents/<agent_id>/data/agent_state.db — state + agent_memory_items
   tenants/<tenant_id>/agents/<agent_id>/data/agent_vectors.db — agent vector store
   tenants/<tenant_id>/agents/<agent_id>/data/agent_memory_vectors.db — memory vector store
 

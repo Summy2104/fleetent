@@ -256,7 +256,9 @@ def test_init_agent_db_schema_with_tenant_agent_home_data_dir_stays_flat(
         _init_agent_db_schema(data_dir, agent_id="support", tenant_id="default")
 
         assert (data_dir / "agent_state.db").exists()
-        assert (data_dir / "agent_memory.db").exists()
+        assert not (data_dir / "agent_memory.db").exists(), (
+            "agent_memory.db must NOT be created — agent_memory_items live in agent_state.db"
+        )
         assert not (agent_home / "tenants").exists()
     finally:
         ss._state_db = original_state_db

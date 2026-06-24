@@ -58,7 +58,6 @@ def test_init_agent_db_schema_wires_router_and_sinks(
         vector_backend="agent-vector",
         agent_memory_vector_backend="agent-memory-vector",
         open_state_db=lambda migrations: ("state-db", migrations),
-        open_agent_memory_db=lambda migrations: ("agent-memory-db", migrations),
     )
     captures: list[tuple[str, Any]] = []
 

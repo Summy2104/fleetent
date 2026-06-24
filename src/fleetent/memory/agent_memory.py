@@ -45,7 +45,7 @@ _NAMESPACE = vector_store.agent_memory_namespace()
 def set_agent_memory_db(db: SQLiteDatabase, vector_backend: VectorBackend) -> None:
     """Inject the per-agent memory DB and vector backend.
 
-    Called once at agent boot after ``agent_scope.open_agent_memory_db()``.
+    Called once at agent boot after ``agent_scope.open_state_db(AGENT_STATE_MIGRATIONS)``.
     """
     global _agent_memory_db, _agent_memory_vector_backend
     _agent_memory_db = db

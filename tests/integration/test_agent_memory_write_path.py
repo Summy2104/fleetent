@@ -1,4 +1,5 @@
-"""Integration: approve a target=agent_memory proposal truly writes to agent_memory_items."""
+"""Integration: approve a target=agent_memory proposal truly writes to agent_memory_items
+and is subsequently injected by build_context as a source_type="agent_memory" candidate."""
 
 from __future__ import annotations
 
@@ -30,7 +31,7 @@ def _boot_agent_state(tmp_path, monkeypatch, agent_id="agent"):
 async def test_approve_agent_memory_proposal_creates_memory_item_and_marks_applied(
     tmp_path, monkeypatch
 ):
-    """Resolving an agent_memory proposal must write agent_memory_items row and mark status=applied."""
+    """Resolving an agent_memory proposal must write agent_memory_items and mark status=applied."""
     db = _boot_agent_state(tmp_path, monkeypatch)
 
     from fleetent.memory import agent_memory
@@ -82,3 +83,60 @@ async def test_approve_agent_memory_proposal_creates_memory_item_and_marks_appli
     results = await agent_memory.search_agent_memory("bullet points explanations")
     assert len(results) >= 1
     assert results[0].id == items[0].id
+
+
+# Task 5.1: approve proposal → build_context injects agent memory
+
+
+async def test_approved_agent_memory_proposal_is_injected_by_build_context(tmp_path, monkeypatch):
+    """End-to-end: approve proposal → build_context injects it as agent_memory source."""
+    from fleetent import long_term_ctx
+    from fleetent.memory import agent_memory
+
+    db = _boot_agent_state(tmp_path, monkeypatch)
+
+    vector_backend = SQLiteVectorBackend(
+        database_url=f"sqlite:///{tmp_path / 'agent_memory_vectors.db'}"
+    )
+    monkeypatch.setattr(agent_memory, "_agent_memory_db", db)
+    monkeypatch.setattr(agent_memory, "_agent_memory_vector_backend", vector_backend)
+    monkeypatch.setattr(vector_store, "embed_text", AsyncMock(return_value=[0.1, 0.2, 0.3]))
+
+    # Wire build_context sources: user memory and knowledge both empty
+    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[]))
+    long_term_ctx.set_knowledge_provider(AsyncMock(return_value=[]))
+
+    # Approve the proposal — writes to agent_memory_items
+    from fleetent import reflection as reflection_api
+
+    proposed_content = "Always respond in bullet points for complex topics"
+    proposal = reflection_api.create_memory_maintenance_proposal(
+        user_id="user-1",
+        action="suggest_agent_memory_or_kb",
+        target_memory_ids=[],
+        proposed_content=proposed_content,
+        metadata_patch={"target": "agent_memory", "type": "preference"},
+        risk="low",
+        reason="style preference observed",
+        evidence_ids=["trace-1"],
+    )
+
+    from fleetent.governance.reflection_gate import resolve_reflection_proposal_action
+
+    await resolve_reflection_proposal_action(
+        proposal.id, decision="approve", actor_user_id="user-1"
+    )
+
+    # build_context must return the agent memory item as a source
+    result = await long_term_ctx.build_context(
+        user_id="user-1",
+        query="how to respond to complex questions",
+        agent_id="agent-1",
+        available_tokens=2000,
+    )
+
+    assert any(s.source_type == "agent_memory" for s in result.sources), (
+        f"expected agent_memory source in {[s.source_type for s in result.sources]}"
+    )
+    assert "[Agent memory]" in result.text
+    assert proposed_content in result.text

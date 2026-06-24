@@ -30,5 +30,14 @@ def test_agent_memory_items_required_columns_in_state_migrations() -> None:
     ]
     assert create_stmts, "no CREATE TABLE for agent_memory_items found in AGENT_STATE_MIGRATIONS"
     ddl = create_stmts[0].lower()
-    for col in ("id", "type", "content", "status", "source", "created_by", "created_at", "updated_at"):
+    for col in (
+        "id",
+        "type",
+        "content",
+        "status",
+        "source",
+        "created_by",
+        "created_at",
+        "updated_at",
+    ):
         assert col in ddl, f"missing column '{col}' in agent_memory_items DDL"

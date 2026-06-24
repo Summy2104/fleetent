@@ -7,7 +7,6 @@ from fleetent import memory
 from fleetent.db import SQLiteDatabase, create_database
 from fleetent.memory import agent_memory as agent_memory_module
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
-from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
 from fleetent.schema_migrations import migrate
 
 
