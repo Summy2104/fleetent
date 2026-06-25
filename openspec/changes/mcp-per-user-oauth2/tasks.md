@@ -4,11 +4,11 @@
 
 ## 1. OAuth 协议逻辑模块(纯逻辑,与传输/部署无关)
 
-- [ ] 1.1 (test, unit) PKCE:生成 code_verifier/code_challenge(S256)、校验配对;授权 URL 拼装含 response_type/client_id/redirect_uri/scope/state/code_challenge
-- [ ] 1.2 (test, unit) state:生成不可猜随机 state、绑定 (user_id, agent_id, server_id)+verifier、一次性消费、过期(短 TTL)判定;非法/过期/已消费 state 被拒
-- [ ] 1.3 (test, unit) code 交换与 refresh 算法:构造 token 端点请求(client_secret_post)、解析 access/refresh/expires;refresh_token grant 刷新;真认证错误 vs 瞬时错误分类
-- [ ] 1.4 (impl) 实现 OAuth 协议逻辑模块(PKCE / state 管理 / code 交换 / refresh),纯函数 + 可注入时钟,无活资源、无全局可变态
-- [ ] 1.5 (refactor) 确保协议模块不依赖传输与部署形态,可被 standalone 与未来 managed 共用
+- [x] 1.1 (test, unit) PKCE:生成 code_verifier/code_challenge(S256)、校验配对;授权 URL 拼装含 response_type/client_id/redirect_uri/scope/state/code_challenge
+- [x] 1.2 (test, unit) state:生成不可猜随机 state、绑定 (user_id, agent_id, server_id)+verifier、一次性消费、过期(短 TTL)判定;非法/过期/已消费 state 被拒
+- [x] 1.3 (test, unit) code 交换与 refresh 算法:构造 token 端点请求(client_secret_post)、解析 access/refresh/expires;refresh_token grant 刷新;真认证错误 vs 瞬时错误分类
+- [x] 1.4 (impl) 实现 OAuth 协议逻辑模块(PKCE / state 管理 / code 交换 / refresh),纯函数 + 可注入时钟,无活资源、无全局可变态
+- [x] 1.5 (refactor) 确保协议模块不依赖传输与部署形态,可被 standalone 与未来 managed 共用
 
 ## 2. per-user token 存储抽象 + 注入缝
 
