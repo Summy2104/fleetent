@@ -165,6 +165,24 @@ def _build_platform_maintenance_scheduler(
     return sched
 
 
+def _ensure_skill_pool_git() -> None:
+    """Ensure the shared skill pool is a git repo so backflow accept/fork can commit.
+
+    The pool-is-a-git-repo invariant is owned by the platform, not by any manual
+    setup: skills can arrive via the admin API or be dropped in by hand, neither of
+    which git-initializes the pool, and ``commit_pool`` requires an existing repo.
+    Idempotent (a no-op once the pool is a repo); best-effort (a failure is logged
+    and never aborts boot).
+    """
+    try:
+        from fleetent.platform.skill_management import pool_git
+        from fleetent.skills import registry as skill_registry
+
+        pool_git.init_pool(Path(skill_registry._resolve_skills_dir(None)))
+    except Exception:
+        logger.warning("skill_pool_git_init_failed", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Wire platform api_keys resolver so user_store.authenticate queries the api_keys
@@ -184,6 +202,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
 
     scan_skills()
+    # backflow-pool-git: the shared skill pool must be a git repo before any write,
+    # because backflow accept/fork commit into it. Ensure it once at boot (idempotent).
+    _ensure_skill_pool_git()
     # file-driven-agent-config: scan agent.yaml files once at startup (same lifecycle
     # as scan_skills); the in-memory index drives zero-DB runtime agent resolution.
     agent_config.scan()
