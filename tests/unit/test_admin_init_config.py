@@ -23,6 +23,7 @@ def run_platform(*args: str) -> tuple[str, str, int]:
 
 def write_config_examples(root: Path) -> None:
     # init-config seeds Platform home files from root examples.
+    root.mkdir(parents=True, exist_ok=True)
     (root / ".env.example").write_text("FLEETENT_AUTO_UPGRADE=false\n", encoding="utf-8")
     (root / "platform.yaml.example").write_text("knowledge:\n  mode: embedded\n", encoding="utf-8")
 
@@ -31,7 +32,7 @@ def test_init_config_dry_run_prints_planned_paths_without_writing(tmp_path, monk
     write_config_examples(tmp_path)
     monkeypatch.chdir(tmp_path)
 
-    out, err, code = run_platform("init-config", "--dry-run")
+    out, err, code = run_platform("init-config", "--dry-run", "--home", str(tmp_path))
 
     assert code == 0
     assert err == ""
@@ -56,7 +57,7 @@ def test_init_config_skips_existing_files_by_default(tmp_path, monkeypatch):
     existing_env = tmp_path / ".env"
     existing_env.write_text("OPENAI_API_KEY=local\n", encoding="utf-8")
 
-    out, err, code = run_platform("init-config")
+    out, err, code = run_platform("init-config", "--home", str(tmp_path))
 
     assert code == 0
     assert err == ""
@@ -83,7 +84,7 @@ def test_init_config_force_overwrites_generated_files_and_keeps_unknown_files(
     unknown_secret.parent.mkdir()
     unknown_secret.write_text("keep me\n", encoding="utf-8")
 
-    out, err, code = run_platform("init-config", "--force")
+    out, err, code = run_platform("init-config", "--force", "--home", str(tmp_path))
 
     assert code == 0
     assert err == ""
@@ -91,3 +92,42 @@ def test_init_config_force_overwrites_generated_files_and_keeps_unknown_files(
     assert "create platform.yaml" in out
     assert (tmp_path / ".env").read_text(encoding="utf-8") == "FLEETENT_AUTO_UPGRADE=false\n"
     assert unknown_secret.read_text(encoding="utf-8") == "keep me\n"
+
+
+def test_init_config_uses_explicit_home_instead_of_cwd(tmp_path, monkeypatch):
+    template_root = tmp_path / "templates"
+    write_config_examples(template_root)
+    target_root = tmp_path / "home"
+    monkeypatch.chdir(template_root)
+
+    out, err, code = run_platform("init-config", "--home", str(target_root))
+
+    assert code == 0
+    assert err == ""
+    assert "create .env" in out
+    assert (target_root / ".env").read_text(encoding="utf-8") == "FLEETENT_AUTO_UPGRADE=false\n"
+    assert (target_root / "platform.yaml").read_text(
+        encoding="utf-8"
+    ) == "knowledge:\n  mode: embedded\n"
+    assert not (template_root / ".env").exists()
+    assert not (template_root / "platform.yaml").exists()
+
+
+def test_init_config_defaults_to_fleetent_home_instead_of_cwd(tmp_path, monkeypatch):
+    template_root = tmp_path / "templates"
+    write_config_examples(template_root)
+    target_root = tmp_path / "fleetent-home"
+    monkeypatch.chdir(template_root)
+    monkeypatch.setenv("FLEETENT_HOME", str(target_root))
+
+    out, err, code = run_platform("init-config")
+
+    assert code == 0
+    assert err == ""
+    assert "create .env" in out
+    assert (target_root / ".env").read_text(encoding="utf-8") == "FLEETENT_AUTO_UPGRADE=false\n"
+    assert (target_root / "platform.yaml").read_text(
+        encoding="utf-8"
+    ) == "knowledge:\n  mode: embedded\n"
+    assert not (template_root / ".env").exists()
+    assert not (template_root / "platform.yaml").exists()

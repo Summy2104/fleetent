@@ -93,8 +93,8 @@ platform-help: ## Show platform CLI help
 # resolves to a system uvicorn that can't import fleetent).
 FLEETENT_HOME ?= $(CURDIR)/.fleetent-dev
 DATABASE_URL  ?= sqlite:///$(FLEETENT_HOME)/management.db
-PLATFORM_PORT ?= 8770
-AGENT_PORT    ?= 8765
+PLATFORM_PORT ?= 8765
+AGENT_PORT    ?= 8766
 NODE_ID       ?= local-node
 NODE_PLATFORM_URL ?= http://127.0.0.1:$(PLATFORM_PORT)
 
@@ -111,8 +111,11 @@ dev-bootstrap: ## Init dev home: migrate management DB + seed built-in admin
 	uv run python scripts/dev_secret_key.py
 	uv run alembic upgrade head
 	uv run fleetent platform seed-builtin-admin
+	uv run fleetent platform init-config --home "$(FLEETENT_HOME)"
+	uv run fleetent node init-config
+	uv run fleetent kb-worker init-config
 
-platform: ## Start platform control-plane (admin API/UI), default port 8770
+platform: ## Start platform control-plane (admin API/UI), default port 8765
 	uv run fleetent platform serve --host 127.0.0.1 --port $(PLATFORM_PORT)
 
 node-provision: ## Register the dev node + write node/.env (idempotent; FORCE=1 to re-key)
@@ -124,8 +127,8 @@ node: ## Start node supervisor (run node-provision first)
 kb-worker: ## Start the KB ingest worker (single queue consumer)
 	uv run fleetent kb-worker
 
-agent: ## Run one agent directly with HTTP /chat+/ws: make agent AGENT=<name> [AGENT_PORT=8765]
-	@test -n "$(AGENT)" || { echo "usage: make agent AGENT=<name> [AGENT_PORT=8765]"; exit 2; }
+agent: ## Run one agent directly with HTTP /chat+/ws: make agent AGENT=<name> [AGENT_PORT=8766]
+	@test -n "$(AGENT)" || { echo "usage: make agent AGENT=<name> [AGENT_PORT=8766]"; exit 2; }
 	uv run fleetent agent run "$(AGENT)" --home "$(FLEETENT_HOME)/tenants/default/agents/$(AGENT)" --port $(AGENT_PORT)
 
 chat: ## Connect the terminal TUI to an agent: make chat TOKEN=<tui-token> [URL=ws://...]

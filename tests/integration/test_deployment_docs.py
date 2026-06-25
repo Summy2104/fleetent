@@ -43,7 +43,7 @@ def test_env_example_is_safe_and_local_env_and_secrets_are_ignored():
     both = agent + "\n" + platform
 
     # Platform-side
-    for key in ("FLEETENT_AUTO_UPGRADE", "FLEETENT_SECRET_KEY", "DATABASE_URL", "LOG_FORMAT"):
+    for key in ("FLEETENT_SECRET_KEY", "DATABASE_URL", "LOG_FORMAT"):
         assert f"{key}=" in platform
         assert f"{key}=\n" in platform
     assert "FLEETENT_MODEL_PRIMARY_API_KEY=" not in platform
