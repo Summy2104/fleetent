@@ -47,12 +47,18 @@ _server_registry: dict[tuple[int | None, str], McpServerConfig] = {}
 # Ids of strict-mode servers that failed to register at startup (MCP4 D5): not in
 # _server_registry (never registered) yet still strict-unavailable for the query.
 _failed_strict_servers: set[str] = set()
-_active_sessions: dict[tuple[int | None, str], Any] = {}  # (scope, server_id) -> ClientSession
-# (scope, server_id) -> session host. Each MCP session is owned by a dedicated task
+# Live-session key (mcp-per-user-oauth2 D2). A plain server keeps the historical 2-tuple
+# (scope, server_id) — byte-identical to the pre-per-user keying. A per-user oauth server
+# (oauth_grant == "authorization_code") uses a 3-tuple (scope, server_id, user_id) so each
+# user gets an isolated session/process. Keys are heterogeneous on purpose: the spec
+# requires non-per-user keys to remain (scope, server_id) exactly.
+SessionKey = tuple[int | None, str] | tuple[int | None, str, str | None]
+_active_sessions: dict[SessionKey, Any] = {}  # session key -> ClientSession
+# session key -> session host. Each MCP session is owned by a dedicated task
 # (_SessionHost.task) so the SDK transport's anyio cancel scope is entered AND exited in
 # the same task — a shared module-level AsyncExitStack unwound from another task crashes
 # the process on teardown (2026-06-11 graceful-shutdown crash).
-_session_hosts: dict[tuple[int | None, str], _SessionHost] = {}
+_session_hosts: dict[SessionKey, _SessionHost] = {}
 _HOST_CLOSE_TIMEOUT = 5.0  # seconds to await a host's graceful teardown before cancelling
 
 _MAX_TOOL_PAGES = 100  # tools/list pagination safety cap: stop following nextCursor past this
@@ -146,6 +152,12 @@ class McpServerConfig:
     # unified-file-exchange: serializes the "call + product-dir diff" window per server so
     # concurrent calls cannot mis-attribute each other's newly-written files (D2 diff layer).
     _call_window_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
+    # mcp-per-user-oauth2 (D2): per-user call-window locks for a per-user oauth server, so
+    # distinct users' concurrent calls don't serialize against each other. Keyed by user_id;
+    # lazily populated. Non-per-user servers never touch this and keep _call_window_lock.
+    _per_user_call_window_locks: dict[str, asyncio.Lock] = field(
+        default_factory=dict, repr=False, compare=False
+    )
     # Agent-scope key dimension (next<-main integration): registries/sessions are keyed
     # by (agent_scope, id) so the same server id can carry distinct credentials/sessions
     # per agent. None = the global (startup) scope. Distinct from the oauth `scope` str.
@@ -349,6 +361,46 @@ def unavailable_servers() -> list[tuple[str, str]]:
 
 def _make_tool_name(server_id: str, tool_name: str) -> str:
     return f"{server_id}__{tool_name}"
+
+
+# === mcp-per-user-oauth2: per-user session-key dimension (D2) ===============
+
+
+def _is_per_user_oauth(server: McpServerConfig) -> bool:
+    """Whether a server uses per-user OAuth delegation (authorization_code grant).
+
+    Only these servers extend the live-session key with a user dimension; every other
+    server (no oauth, or client_credentials machine identity) keeps the historical
+    ``(scope, server_id)`` keying unchanged. The predicate is the single switch the
+    key/lock helpers branch on, so the per-user vs plain paths never diverge by hand.
+    """
+    return server.auth_type == "oauth2" and server.oauth_grant == "authorization_code"
+
+
+def _session_key(server: McpServerConfig, scope: int | None, user_id: str | None) -> SessionKey:
+    """Compute the live-session/host key for a server under (scope, user).
+
+    Centralizes the keying so every read/write of ``_active_sessions`` / ``_session_hosts``
+    agrees on the shape: a plain server keeps the legacy 2-tuple ``(scope, server_id)``
+    (byte-identical), a per-user oauth server uses ``(scope, server_id, user_id)`` so each
+    user is isolated. The two shapes coexist in the same dicts by design.
+    """
+    if _is_per_user_oauth(server):
+        return (scope, server.id, user_id)
+    return (scope, server.id)
+
+
+def _call_window_lock_for(server: McpServerConfig, user_id: str | None) -> asyncio.Lock:
+    """The call-window lock to serialize a server's product-dir diff window under (D2).
+
+    A per-user oauth server descends to a per-(server, user) lock so two different users'
+    concurrent calls do not serialize against each other; every other server keeps the
+    single per-server ``_call_window_lock`` (behavior unchanged). Per-user locks are lazily
+    created and held in a per-server map keyed by user_id.
+    """
+    if not _is_per_user_oauth(server) or user_id is None:
+        return server._call_window_lock
+    return server._per_user_call_window_locks.setdefault(user_id, asyncio.Lock())
 
 
 # === MCP3: connection health & reconnect ===================================
@@ -671,14 +723,16 @@ async def _refresh_stdio_tools(server: McpServerConfig, scope: int | None, sessi
     """Re-list and re-register a stdio server's tools after a list_changed notification.
 
     Identity-guarded (ignores a notification from a session that has since been replaced)
-    and deduped via a per-server lock (coalesces a burst of notifications).
+    and deduped via a per-server lock (coalesces a burst of notifications). Tools are
+    user-agnostic, so the refresh tracks the registration-time (user_id=None) session slot.
     """
-    if _active_sessions.get((scope, server.id)) is not session:
+    refresh_key = _session_key(server, scope, None)
+    if _active_sessions.get(refresh_key) is not session:
         return
     if server._list_refresh_lock.locked():
         return
     async with server._list_refresh_lock:
-        if _active_sessions.get((scope, server.id)) is not session:
+        if _active_sessions.get(refresh_key) is not session:
             return
         try:
             tools = await _list_all_tools(session)
@@ -699,7 +753,8 @@ def _make_message_handler(server: McpServerConfig, scope: int | None) -> Any:
     async def handler(message: Any) -> None:
         if not _is_tools_list_changed(message):
             return
-        current = _active_sessions.get((scope, server.id))
+        # Tools are user-agnostic; track the registration-time (user_id=None) session slot.
+        current = _active_sessions.get(_session_key(server, scope, None))
         if current is not None:
             asyncio.create_task(_refresh_stdio_tools(server, scope, current))
 
@@ -800,14 +855,18 @@ async def _host_session(
             logger.warning("mcp_session_teardown_failed server_id=%s error=%s", server.id, exc)
 
 
-async def _open_session_for(server: McpServerConfig, scope: int | None) -> Any:
+async def _open_session_for(
+    server: McpServerConfig, scope: int | None, user_id: str | None = None
+) -> Any:
     """Open a transport-specific ClientSession owned by a dedicated host task, initialized.
 
     Unified across stdio / http / sse: the SDK owns the wire; the host task holds the
     transport + ClientSession contexts (entered/exited in that one task). The live
-    ClientSession is stored in _active_sessions[(scope, id)] for reuse and lazy reconnect;
-    its host in _session_hosts[(scope, id)] for lifecycle.
+    ClientSession is stored in _active_sessions[key] for reuse and lazy reconnect; its host
+    in _session_hosts[key] for lifecycle. ``user_id`` selects the per-user session slot for
+    a per-user oauth server (ignored — keyed under None — for every other server).
     """
+    key = _session_key(server, scope, user_id)
     headers = {} if server.transport == "stdio" else await _http_headers(server)
     loop = asyncio.get_event_loop()
     ready: asyncio.Future = loop.create_future()
@@ -822,10 +881,8 @@ async def _open_session_for(server: McpServerConfig, scope: int | None) -> Any:
         with contextlib.suppress(BaseException):
             await asyncio.gather(task, return_exceptions=True)
         raise
-    _session_hosts[(scope, server.id)] = _SessionHost(
-        task=task, close_event=close_event, session=session
-    )
-    _active_sessions[(scope, server.id)] = session
+    _session_hosts[key] = _SessionHost(task=task, close_event=close_event, session=session)
+    _active_sessions[key] = session
     return session
 
 
@@ -1044,12 +1101,18 @@ def unregister_server(server_id: str, scope: int | None = None) -> None:
             del tr._registry[name]
             _forget_tool_identity(name)
     _server_registry.pop((scope, server_id), None)
-    _active_sessions.pop((scope, server_id), None)
-    # Sync context: wake the host so it tears itself down on its own task (no await here);
-    # the host self-removes nothing else, so drop our handle too.
-    host = _session_hosts.pop((scope, server_id), None)
-    if host is not None:
-        host.close_event.set()
+    # A per-user oauth server holds one session/host per user (keys (scope, server_id, *));
+    # drop every matching slot, not just the None one, so no per-user host is orphaned.
+    keys = [k for k in _active_sessions if k[0] == scope and k[1] == server_id]
+    for k in keys:
+        _active_sessions.pop(k, None)
+    host_keys = [k for k in _session_hosts if k[0] == scope and k[1] == server_id]
+    for k in host_keys:
+        # Sync context: wake each host so it tears itself down on its own task (no await
+        # here); the host self-removes nothing else, so drop our handle too.
+        host = _session_hosts.pop(k, None)
+        if host is not None:
+            host.close_event.set()
 
 
 def _rewrite_refs(node: Any) -> Any:
@@ -1217,16 +1280,20 @@ def _normalize_tool_result(content_blocks: Any, *, structured_content: Any, is_e
     return text
 
 
-async def _reopen_session(server: McpServerConfig, scope: int | None) -> Any | None:
+async def _reopen_session(
+    server: McpServerConfig, scope: int | None, user_id: str | None = None
+) -> Any | None:
     """Lazily re-open a dropped ClientSession (any transport) once. Returns the new
     session, or None if reopen failed. Closes the prior host first (no leak), then
-    replaces the server's _active_sessions / _session_hosts entry."""
-    old = _session_hosts.pop((scope, server.id), None)
-    _active_sessions.pop((scope, server.id), None)
+    replaces the server's _active_sessions / _session_hosts entry. ``user_id`` targets the
+    per-user session slot for a per-user oauth server (None slot for every other server)."""
+    key = _session_key(server, scope, user_id)
+    old = _session_hosts.pop(key, None)
+    _active_sessions.pop(key, None)
     if old is not None:
         await _close_host(old)  # best-effort; a stuck/erroring old host never blocks reopen
     try:
-        return await _open_session_for(server, scope)
+        return await _open_session_for(server, scope, user_id)
     except Exception as exc:  # noqa: BLE001 — reopen failure → caller marks unavailable
         logger.warning("mcp_reopen_failed server_id=%s error=%s", server.id, exc)
         return None
@@ -1340,7 +1407,7 @@ async def _call_via_session(
         )
     assert server is not None
 
-    async with server._call_window_lock:
+    async with _call_window_lock_for(server, user_id):
         before = artifact_exchange.snapshot_products(root)
         text = await _call_via_session_inner(
             server_id,
@@ -1383,6 +1450,13 @@ async def _call_via_session_inner(
     # oauth2 server marked auth-unavailable: return directly, no call.
     if server.auth_type == "oauth2" and server._auth_unavailable:
         return _auth_unavailable_result(server_id)
+    # per-user oauth without a routable user_id is unauthorized for this caller: no shared
+    # session to fall back on. Report "auth unavailable" rather than crashing or leaking
+    # another user's session. (Group 6 will replace this with an authorization trigger.)
+    if _is_per_user_oauth(server) and user_id is None:
+        # TODO(group6): emit the per-user authorization link instead of a static degrade.
+        logger.info("mcp_per_user_no_user_id server_id=%s", server_id)
+        return _auth_unavailable_result(server_id)
     # Known-unavailable server: short-circuit without touching the connection.
     if server._health is not HealthState.healthy:
         return _unavailable_result(server_id)
@@ -1395,9 +1469,10 @@ async def _call_via_session_inner(
 
         args = _translate_workspace_args(args, host_workspace_dir(scope_key))
 
-    session = _active_sessions.get((scope, server_id))
+    key = _session_key(server, scope, user_id)
+    session = _active_sessions.get(key)
     if session is None:
-        session = await _reopen_session(server, scope)
+        session = await _reopen_session(server, scope, user_id)
         if session is None:
             # An oauth genuine-auth failure during open sets the sticky flag; report it
             # specifically rather than as a connection problem.
@@ -1416,7 +1491,7 @@ async def _call_via_session_inner(
             return oauth_degraded
         if not _is_disconnect_error(exc):
             raise
-        new_session = await _reopen_session(server, scope)
+        new_session = await _reopen_session(server, scope, user_id)
         if new_session is None:
             set_health(server, HealthState.unavailable)
             return _unavailable_result(server_id)
@@ -1511,24 +1586,35 @@ async def _invoke_utility(session: Any, util_name: str, args: dict[str, Any]) ->
 
 
 async def _call_utility(
-    server_id: str, util_name: str, args: dict[str, Any], scope: int | None = None
+    server_id: str,
+    util_name: str,
+    args: dict[str, Any],
+    scope: int | None = None,
+    *,
+    user_id: str | None = None,
 ) -> str:
     """Dispatch a resources/prompts utility tool through the held SDK ClientSession.
 
     Same auth/health/lazy-reconnect contract as ``_call_via_session`` — all transports go
-    through one session method; a dropped connection re-opens once and retries.
+    through one session method; a dropped connection re-opens once and retries. ``user_id``
+    routes to the caller's per-user session for a per-user oauth server (None slot otherwise).
     """
     server = _server_registry.get((scope, server_id))
     if server is None:
         raise KeyError(f"Unknown MCP server: {server_id}")
     if server.auth_type == "oauth2" and server._auth_unavailable:
         return _auth_unavailable_result(server_id)
+    if _is_per_user_oauth(server) and user_id is None:
+        # TODO(group6): emit the per-user authorization link instead of a static degrade.
+        logger.info("mcp_per_user_no_user_id server_id=%s util=%s", server_id, util_name)
+        return _auth_unavailable_result(server_id)
     if server._health is not HealthState.healthy:
         return _unavailable_result(server_id)
 
-    session = _active_sessions.get((scope, server_id))
+    key = _session_key(server, scope, user_id)
+    session = _active_sessions.get(key)
     if session is None:
-        session = await _reopen_session(server, scope)
+        session = await _reopen_session(server, scope, user_id)
         if session is None:
             if server.auth_type == "oauth2" and server._auth_unavailable:
                 return _auth_unavailable_result(server_id)
@@ -1543,7 +1629,7 @@ async def _call_utility(
             return oauth_degraded
         if not _is_disconnect_error(exc):
             raise
-        new_session = await _reopen_session(server, scope)
+        new_session = await _reopen_session(server, scope, user_id)
         if new_session is None:
             set_health(server, HealthState.unavailable)
             return _unavailable_result(server_id)
@@ -1611,8 +1697,14 @@ def _register_utility_tool(
 
     tool_name = _make_tool_name(server.id, util_name)
 
-    async def call(**kwargs: object) -> str:
-        return await _call_utility(server.id, util_name, dict(kwargs), server._agent_scope)
+    async def call(tool_context: Any = None, **kwargs: object) -> str:
+        # tool_context binds to this param (never into kwargs → never leaks to MCP args).
+        # principal.user_id routes a per-user oauth server's utility call to that user's session.
+        principal = getattr(tool_context, "principal", None)
+        user_id = getattr(principal, "user_id", None)
+        return await _call_utility(
+            server.id, util_name, dict(kwargs), server._agent_scope, user_id=user_id
+        )
 
     tool_schema: tr.ToolSchema = {
         "type": "function",

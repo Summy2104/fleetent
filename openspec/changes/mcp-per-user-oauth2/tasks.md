@@ -20,10 +20,10 @@
 
 ## 3. 会话键扩维(向后兼容)
 
-- [ ] 3.1 (test, unit) 会话/注册键:per-user oauth 服务键为 (scope, server_id, user_id);非 per-user 服务键仍为 (scope, server_id);旧调用路径兼容
-- [ ] 3.2 (test, unit) 工具名投影保持 user-agnostic({server_id}__{tool_name});路由按 principal.user_id 选会话
-- [ ] 3.3 (impl) 扩展会话注册/查找键含 user 维度(仅 per-user oauth 服务生效),保留旧键路径;相关 per-server 锁(如 _call_window_lock)对 per-user 降到 (server,user) 粒度
-- [ ] 3.4 (impl) call_tool 路由:按当前 principal.user_id 解析/选择该用户会话(已透传的 user_id)
+- [x] 3.1 (test, unit) 会话/注册键:per-user oauth 服务键为 (scope, server_id, user_id);非 per-user 服务键仍为 (scope, server_id);旧调用路径兼容
+- [x] 3.2 (test, unit) 工具名投影保持 user-agnostic({server_id}__{tool_name});路由按 principal.user_id 选会话
+- [x] 3.3 (impl) 扩展会话注册/查找键含 user 维度(仅 per-user oauth 服务生效),保留旧键路径;相关 per-server 锁(如 _call_window_lock)对 per-user 降到 (server,user) 粒度
+- [x] 3.4 (impl) call_tool 路由:按当前 principal.user_id 解析/选择该用户会话(已透传的 user_id)
 
 ## 4. http per-user 会话 + 逐请求 Bearer
 
