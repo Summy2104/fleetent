@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { MoreVertical, Plus, Trash2 } from 'lucide-react';
 
+import { useT } from '@/i18n';
 import { useAdminApi } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -87,6 +88,7 @@ function CreateAgentDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }): JSX.Element {
+  const t = useT();
   const create = useCreateAgentMutation();
   const [name, setName] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
@@ -105,16 +107,16 @@ function CreateAgentDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New Agent</DialogTitle>
-          <DialogDescription>Create an adhoc agent. It starts enabled with no bindings.</DialogDescription>
+          <DialogTitle>{t('agents.newAgent')}</DialogTitle>
+          <DialogDescription>{t('agents.createDescription')}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
           <div className="grid gap-2">
-            <Label htmlFor="new-name">Agent name</Label>
+            <Label htmlFor="new-name">{t('agents.nameLabel')}</Label>
             <Input id="new-name" value={name} onChange={(event) => setName(event.target.value)} />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="new-prompt">System prompt</Label>
+            <Label htmlFor="new-prompt">{t('agents.systemPromptLabel')}</Label>
             <Textarea
               id="new-prompt"
               className="min-h-32"
@@ -123,7 +125,7 @@ function CreateAgentDialog({
             />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="new-tools">Allowed tools (comma-separated)</Label>
+            <Label htmlFor="new-tools">{t('agents.allowedToolsLabel')}</Label>
             <Input
               id="new-tools"
               placeholder="tool_a, tool_b"
@@ -134,7 +136,7 @@ function CreateAgentDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button
             disabled={create.isPending || !name}
@@ -149,7 +151,7 @@ function CreateAgentDialog({
               })();
             }}
           >
-            Create agent
+            {t('agents.createButton')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -168,6 +170,7 @@ function AgentRow({
   canWrite: boolean;
   onConfigure: () => void;
 }): JSX.Element {
+  const t = useT();
   const disable = useAgentLifecycleMutation(agent.agent_name, 'disable');
   const enable = useAgentLifecycleMutation(agent.agent_name, 'enable');
   const archive = useAgentLifecycleMutation(agent.agent_name, 'archive', { 'X-Confirm': 'true' });
@@ -192,7 +195,7 @@ function AgentRow({
           <span className="flex items-center gap-2">
             <span className="truncate text-sm font-semibold text-foreground">{agent.agent_name}</span>
             <span className={cn('size-1.5 rounded-full', statusDot(agent.status))} />
-            {agent.is_default ? <Badge variant="default">default</Badge> : null}
+            {agent.is_default ? <Badge variant="default">{t('agents.defaultBadge')}</Badge> : null}
             <Badge variant={statusVariant(agent.status)}>{agent.status}</Badge>
           </span>
           {agent.system_prompt ? (
@@ -204,12 +207,12 @@ function AgentRow({
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="secondary" size="sm" aria-label={`Actions for ${agent.agent_name}`}>
-            Actions <MoreVertical className="size-4" />
+          <Button variant="secondary" size="sm" aria-label={t('agents.actionsFor', { name: agent.agent_name })}>
+            {t('agents.actions')} <MoreVertical className="size-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={onConfigure}>Configure</DropdownMenuItem>
+          <DropdownMenuItem onSelect={onConfigure}>{t('agents.configure')}</DropdownMenuItem>
           {canWrite ? (
             <>
               <DropdownMenuItem
@@ -217,26 +220,26 @@ function AgentRow({
                   agent.status === 'disabled' ? void enable.mutateAsync() : void disable.mutateAsync()
                 }
               >
-                {agent.status === 'disabled' ? 'Enable' : 'Disable'}
+                {agent.status === 'disabled' ? t('agents.enable') : t('agents.disable')}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={() =>
                   agent.status === 'archived' ? void restore.mutateAsync() : void archive.mutateAsync()
                 }
               >
-                {agent.status === 'archived' ? 'Restore' : 'Archive'}
+                {agent.status === 'archived' ? t('agents.restore') : t('agents.archive')}
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void clone.mutateAsync(`${agent.agent_name}-copy`)}>
-                Clone
+                {t('agents.clone')}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={() => (agent.is_default ? void clearDefault.mutateAsync() : void setDefault.mutateAsync())}
               >
-                {agent.is_default ? 'Clear default' : 'Set as default'}
+                {agent.is_default ? t('agents.clearDefault') : t('agents.setAsDefault')}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem destructive onSelect={() => setTimeout(() => setConfirmDelete(true), 0)}>
-                <Trash2 /> Delete
+                <Trash2 /> {t('agents.delete')}
               </DropdownMenuItem>
             </>
           ) : null}
@@ -246,14 +249,12 @@ function AgentRow({
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete {agent.agent_name}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This permanently removes the agent definition. Agents with active bindings cannot be deleted.
-            </AlertDialogDescription>
+            <AlertDialogTitle>{t('agents.deleteTitle', { name: agent.agent_name })}</AlertDialogTitle>
+            <AlertDialogDescription>{t('agents.deleteDescription')}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void remove.mutateAsync()}>Delete</AlertDialogAction>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void remove.mutateAsync()}>{t('agents.delete')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -264,6 +265,7 @@ function AgentRow({
 // ─────────────────────────── Page ───────────────────────────
 
 export function AgentsPage(): JSX.Element {
+  const t = useT();
   const me = useAdminMeQuery();
   const agents = useAgentsQuery();
   const navigate = useNavigate();
@@ -283,17 +285,17 @@ export function AgentsPage(): JSX.Element {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-xl font-semibold tracking-tight">Agents</h2>
+          <h2 className="text-xl font-semibold tracking-tight">{t('agents.title')}</h2>
           <Badge variant="secondary">{agents.data?.length ?? 0}</Badge>
         </div>
         {canWrite ? (
           <Button onClick={() => setCreateOpen(true)}>
-            <Plus className="size-4" /> New Agent
+            <Plus className="size-4" /> {t('agents.newAgent')}
           </Button>
         ) : null}
       </div>
 
-      <Input placeholder="Search agents…" value={query} onChange={(event) => setQuery(event.target.value)} />
+      <Input placeholder={t('agents.searchPlaceholder')} value={query} onChange={(event) => setQuery(event.target.value)} />
 
       <div className="space-y-2">
         {filtered.map((agent) => (
@@ -306,7 +308,7 @@ export function AgentsPage(): JSX.Element {
         ))}
         {agents.data && filtered.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border py-12 text-center text-sm text-muted-foreground">
-            {query ? 'No agents match your search.' : 'No agents yet. Create one to get started.'}
+            {query ? t('agents.noMatch') : t('agents.emptyState')}
           </div>
         ) : null}
       </div>

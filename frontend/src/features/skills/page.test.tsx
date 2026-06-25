@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { AuthProvider } from '@/app/auth';
 import { AppQueryProvider } from '@/app/query-client';
+import { I18nProvider } from '@/i18n';
 import { SkillsPage } from '@/features/skills/page';
 import { server } from '@/test/msw/server';
 
@@ -35,9 +36,11 @@ function renderSkillsPage(): void {
       initialToken="session-token"
     >
       <AppQueryProvider>
-        <MemoryRouter>
-          <SkillsPage />
-        </MemoryRouter>
+        <I18nProvider>
+          <MemoryRouter>
+            <SkillsPage />
+          </MemoryRouter>
+        </I18nProvider>
       </AppQueryProvider>
     </AuthProvider>
   );

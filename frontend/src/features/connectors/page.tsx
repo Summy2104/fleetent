@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ExternalLink, Inbox, KeyRound, Plus, Trash2 } from 'lucide-react';
 
+import { useT } from '@/i18n';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -72,6 +73,7 @@ function ConnectorDialog({
   editing: ConnectorRecord | null;
   onOpenChange: (open: boolean) => void;
 }): JSX.Element {
+  const t = useT();
   const create = useCreateConnectorMutation();
   const update = useUpdateConnectorMutation(editing?.id ?? '');
   const isEdit = editing !== null;
@@ -100,7 +102,7 @@ function ConnectorDialog({
       try {
         parsedConfig = JSON.parse(oauthConfig) as Record<string, unknown>;
       } catch {
-        setError('oauth_config is not valid JSON.');
+        setError(t('connectors.oauthConfigInvalidJson'));
         return;
       }
     }
@@ -128,17 +130,19 @@ function ConnectorDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{isEdit ? `Edit ${editing?.display_name}` : 'Add connector'}</DialogTitle>
-          <DialogDescription>External OAuth / API-key service the agents can call.</DialogDescription>
+          <DialogTitle>
+            {isEdit ? t('connectors.editTitle', { name: editing?.display_name ?? '' }) : t('connectors.addTitle')}
+          </DialogTitle>
+          <DialogDescription>{t('connectors.dialogDescription')}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
           <div className="grid gap-2">
             <Label htmlFor="conn-id">
-              Connector ID <span className="text-destructive">*</span>
+              {t('connectors.connectorIdLabel')} <span className="text-destructive">*</span>
             </Label>
             <Input
               id="conn-id"
-              placeholder="e.g. github"
+              placeholder={t('connectors.connectorIdPlaceholder')}
               disabled={isEdit}
               value={id}
               onChange={(event) => setId(event.target.value)}
@@ -146,12 +150,12 @@ function ConnectorDialog({
           </div>
           <div className="grid gap-2">
             <Label htmlFor="conn-name">
-              Display name <span className="text-destructive">*</span>
+              {t('connectors.displayNameLabel')} <span className="text-destructive">*</span>
             </Label>
             <Input id="conn-name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
           </div>
           <div className="grid gap-2">
-            <Label>Protocol</Label>
+            <Label>{t('connectors.protocolLabel')}</Label>
             <Select value={protocol} onValueChange={setProtocol}>
               <SelectTrigger>
                 <SelectValue />
@@ -166,11 +170,11 @@ function ConnectorDialog({
             </Select>
           </div>
           <label className="flex items-center justify-between text-sm">
-            Enabled
-            <Switch checked={enabled} aria-label="Enabled" onCheckedChange={setEnabled} />
+            {t('connectors.enabledLabel')}
+            <Switch checked={enabled} aria-label={t('connectors.enabledLabel')} onCheckedChange={setEnabled} />
           </label>
           <div className="grid gap-2">
-            <Label htmlFor="conn-config">OAuth config (JSON, optional)</Label>
+            <Label htmlFor="conn-config">{t('connectors.oauthConfigLabel')}</Label>
             <Textarea
               id="conn-config"
               className="min-h-28 font-mono text-xs"
@@ -183,10 +187,10 @@ function ConnectorDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t('connectors.cancel')}
           </Button>
           <Button disabled={!canSubmit || create.isPending || update.isPending} onClick={() => void submit()}>
-            {isEdit ? 'Save' : 'Create'}
+            {isEdit ? t('connectors.save') : t('connectors.create')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -203,6 +207,7 @@ function CredentialDialog({
   connectorId: string | null;
   onOpenChange: (open: boolean) => void;
 }): JSX.Element {
+  const t = useT();
   const setCredential = useConnectorCredentialsMutation(connectorId ?? '');
   const [apiKey, setApiKey] = useState('');
 
@@ -214,11 +219,11 @@ function CredentialDialog({
     <Dialog open={Boolean(connectorId)} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Set API key · {connectorId}</DialogTitle>
-          <DialogDescription>The key is encrypted and bound to your own session user.</DialogDescription>
+          <DialogTitle>{t('connectors.setApiKeyTitle', { name: connectorId ?? '' })}</DialogTitle>
+          <DialogDescription>{t('connectors.setApiKeyDescription')}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-2">
-          <Label htmlFor="conn-key">API key</Label>
+          <Label htmlFor="conn-key">{t('connectors.apiKeyLabel')}</Label>
           <Input
             id="conn-key"
             type="password"
@@ -228,7 +233,7 @@ function CredentialDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t('connectors.cancel')}
           </Button>
           <Button
             disabled={!apiKey || setCredential.isPending}
@@ -237,7 +242,7 @@ function CredentialDialog({
               onOpenChange(false);
             }}
           >
-            Submit
+            {t('connectors.submit')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -248,6 +253,7 @@ function CredentialDialog({
 // ─────────────────────────── Authorize action ───────────────────────────
 
 function AuthorizeAction({ connectorId }: { connectorId: string }): JSX.Element {
+  const t = useT();
   const [requested, setRequested] = useState(false);
   const authorize = useConnectorAuthorizeQuery(requested ? connectorId : null);
 
@@ -260,7 +266,7 @@ function AuthorizeAction({ connectorId }: { connectorId: string }): JSX.Element 
 
   return (
     <DropdownMenuItem onSelect={() => setRequested(true)}>
-      <ExternalLink /> Authorize
+      <ExternalLink /> {t('connectors.authorize')}
     </DropdownMenuItem>
   );
 }
@@ -276,6 +282,7 @@ function ConnectorRow({
   onEdit: () => void;
   onSetCredential: () => void;
 }): JSX.Element {
+  const t = useT();
   const test = useConnectorTestMutation(connector.id);
   const remove = useDeleteConnectorMutation(connector.id);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -287,33 +294,39 @@ function ConnectorRow({
       <td className="px-4 py-3 text-sm text-muted-foreground">{connector.protocol}</td>
       <td className="px-4 py-3">
         <Badge variant={connector.enabled ? 'success' : 'secondary'}>
-          {connector.enabled ? 'enabled' : 'disabled'}
+          {connector.enabled ? t('connectors.statusEnabled') : t('connectors.statusDisabled')}
         </Badge>
         {test.data ? (
           <span className="ml-2 text-xs text-muted-foreground">
-            {test.data.success ? (test.data.token_valid ? 'token valid' : 'reachable') : test.data.error ?? 'failed'}
+            {test.data.success
+              ? test.data.token_valid
+                ? t('connectors.tokenValid')
+                : t('connectors.reachable')
+              : test.data.error ?? t('connectors.testFailed')}
           </span>
         ) : null}
       </td>
       <td className="px-4 py-3 text-right">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="secondary" size="sm" aria-label={`Actions for ${connector.id}`}>
-              Actions
+            <Button variant="secondary" size="sm" aria-label={t('connectors.actionsFor', { name: connector.id })}>
+              {t('connectors.actions')}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => setTimeout(onEdit, 0)}>Edit</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => void test.mutateAsync()}>Test connection</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setTimeout(onEdit, 0)}>{t('connectors.edit')}</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void test.mutateAsync()}>
+              {t('connectors.testConnection')}
+            </DropdownMenuItem>
             {connector.protocol === 'oauth2' ? <AuthorizeAction connectorId={connector.id} /> : null}
             {connector.protocol === 'apikey' ? (
               <DropdownMenuItem onSelect={() => setTimeout(onSetCredential, 0)}>
-                <KeyRound /> Set API key
+                <KeyRound /> {t('connectors.setApiKey')}
               </DropdownMenuItem>
             ) : null}
             <DropdownMenuSeparator />
             <DropdownMenuItem destructive onSelect={() => setTimeout(() => setConfirmDelete(true), 0)}>
-              <Trash2 /> Delete
+              <Trash2 /> {t('connectors.delete')}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -321,12 +334,12 @@ function ConnectorRow({
         <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Delete {connector.id}?</AlertDialogTitle>
-              <AlertDialogDescription>This removes the connector configuration.</AlertDialogDescription>
+              <AlertDialogTitle>{t('connectors.deleteConfirmTitle', { name: connector.id })}</AlertDialogTitle>
+              <AlertDialogDescription>{t('connectors.deleteConfirmDescription')}</AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={() => void remove.mutateAsync()}>Delete</AlertDialogAction>
+              <AlertDialogCancel>{t('connectors.cancel')}</AlertDialogCancel>
+              <AlertDialogAction onClick={() => void remove.mutateAsync()}>{t('connectors.delete')}</AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
@@ -338,6 +351,7 @@ function ConnectorRow({
 // ─────────────────────────── Authorization matrix ───────────────────────────
 
 function GrantRow({ grant }: { grant: ConnectorGrant }): JSX.Element {
+  const t = useT();
   const revoke = useRevokeConnectorGrantMutation(grant.user_id, grant.connector_id);
   return (
     <tr className="border-b border-border last:border-0">
@@ -348,7 +362,7 @@ function GrantRow({ grant }: { grant: ConnectorGrant }): JSX.Element {
       </td>
       <td className="px-4 py-2.5 text-right">
         <Button size="sm" variant="ghost" onClick={() => void revoke.mutateAsync()}>
-          Revoke
+          {t('connectors.revoke')}
         </Button>
       </td>
     </tr>
@@ -356,6 +370,7 @@ function GrantRow({ grant }: { grant: ConnectorGrant }): JSX.Element {
 }
 
 function AuthorizationMatrix(): JSX.Element {
+  const t = useT();
   const grants = useConnectorGrantsQuery();
   const [offboardId, setOffboardId] = useState('');
   const [offboardTarget, setOffboardTarget] = useState<string | null>(null);
@@ -364,7 +379,7 @@ function AuthorizationMatrix(): JSX.Element {
   return (
     <Card className="border-none bg-transparent shadow-none">
       <CardHeader className="px-0">
-        <CardTitle>Authorization matrix</CardTitle>
+        <CardTitle>{t('connectors.authorizationMatrix')}</CardTitle>
         <p className="text-sm text-muted-foreground">{grants.data?.consent_hint}</p>
       </CardHeader>
       <CardContent className="space-y-4 px-0">
@@ -372,10 +387,10 @@ function AuthorizationMatrix(): JSX.Element {
           <table className="w-full">
             <thead className="bg-secondary/50">
               <tr>
-                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">User</th>
-                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Connector</th>
-                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
-                <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Actions</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('connectors.columnUser')}</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('connectors.columnConnector')}</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('connectors.columnStatus')}</th>
+                <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('connectors.columnActions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -387,7 +402,7 @@ function AuthorizationMatrix(): JSX.Element {
                   <td colSpan={4}>
                     <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
                       <Inbox className="size-6 opacity-50" />
-                      <span className="text-sm">No grants</span>
+                      <span className="text-sm">{t('connectors.noGrants')}</span>
                     </div>
                   </td>
                 </tr>
@@ -399,22 +414,22 @@ function AuthorizationMatrix(): JSX.Element {
         <Separator />
 
         <div className="space-y-2">
-          <Label className="text-sm font-semibold text-foreground">Offboarding</Label>
+          <Label className="text-sm font-semibold text-foreground">{t('connectors.offboarding')}</Label>
           <div className="flex items-center gap-2">
             <Input
               className="max-w-xs"
-              placeholder="user-id"
+              placeholder={t('connectors.offboardingUserIdPlaceholder')}
               value={offboardId}
               onChange={(event) => setOffboardId(event.target.value)}
             />
             <Button variant="secondary" onClick={() => setOffboardTarget(offboardId.trim() || null)}>
-              Load offboarding summary
+              {t('connectors.loadOffboardingSummary')}
             </Button>
           </div>
           {offboarding.data ? (
             <p className="text-sm text-muted-foreground">
-              Revoked: {offboarding.data.revoked.join(', ') || '—'} · Failed:{' '}
-              {offboarding.data.failed.join(', ') || '—'}
+              {t('connectors.offboardingRevoked')}: {offboarding.data.revoked.join(', ') || '—'} ·{' '}
+              {t('connectors.offboardingFailed')}: {offboarding.data.failed.join(', ') || '—'}
             </p>
           ) : null}
         </div>
@@ -426,6 +441,7 @@ function AuthorizationMatrix(): JSX.Element {
 // ─────────────────────────── Page ───────────────────────────
 
 export function ConnectorsPage(): JSX.Element {
+  const t = useT();
   const connectors = useConnectorsQuery();
   const [query, setQuery] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -445,23 +461,21 @@ export function ConnectorsPage(): JSX.Element {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold tracking-tight">Connector</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          External OAuth / API-key services and the per-user authorization matrix.
-        </p>
+        <h2 className="text-xl font-semibold tracking-tight">{t('connectors.pageTitle')}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{t('connectors.pageDescription')}</p>
       </div>
 
       <Tabs defaultValue="connectors">
         <TabsList className="flex w-full flex-wrap justify-start">
-          <TabsTrigger value="connectors">Connectors</TabsTrigger>
-          <TabsTrigger value="grants">Grants matrix</TabsTrigger>
+          <TabsTrigger value="connectors">{t('connectors.tabConnectors')}</TabsTrigger>
+          <TabsTrigger value="grants">{t('connectors.tabGrantsMatrix')}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="connectors" className="space-y-4">
           <div className="flex items-center justify-between gap-3">
             <Input
               className="max-w-xs"
-              placeholder="Search connectors…"
+              placeholder={t('connectors.searchPlaceholder')}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
@@ -471,7 +485,7 @@ export function ConnectorsPage(): JSX.Element {
                 setDialogOpen(true);
               }}
             >
-              <Plus className="size-4" /> Add connector
+              <Plus className="size-4" /> {t('connectors.addConnector')}
             </Button>
           </div>
 
@@ -479,11 +493,11 @@ export function ConnectorsPage(): JSX.Element {
             <table className="w-full">
               <thead className="bg-secondary/50">
                 <tr>
-                  <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">ID</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Name</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Protocol</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
-                  <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Actions</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('connectors.columnId')}</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('connectors.columnName')}</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('connectors.columnProtocol')}</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('connectors.columnStatus')}</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('connectors.columnActions')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -503,7 +517,9 @@ export function ConnectorsPage(): JSX.Element {
                     <td colSpan={5}>
                       <div className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
                         <Inbox className="size-6 opacity-50" />
-                        <span className="text-sm">{query ? 'No matching connectors.' : 'No connectors'}</span>
+                        <span className="text-sm">
+                          {query ? t('connectors.noMatching') : t('connectors.empty')}
+                        </span>
                       </div>
                     </td>
                   </tr>

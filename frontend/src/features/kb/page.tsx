@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useState } from 'react';
 import { Inbox, Plus, Trash2 } from 'lucide-react';
 
+import { useT } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -92,6 +93,7 @@ function KbDialog({
   editing: KnowledgeBase | null;
   onOpenChange: (open: boolean) => void;
 }): JSX.Element {
+  const t = useT();
   const create = useCreateKbMutation();
   const update = useUpdateKbMutation(editing?.kb_id ?? '');
   const isEdit = editing !== null;
@@ -118,18 +120,20 @@ function KbDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{isEdit ? `Edit ${editing?.kb_id}` : 'Add knowledge base'}</DialogTitle>
-          <DialogDescription>A knowledge base holds documents the agents can retrieve.</DialogDescription>
+          <DialogTitle>
+            {isEdit ? t('kb.editKbTitle', { name: editing?.kb_id ?? '' }) : t('kb.addKbTitle')}
+          </DialogTitle>
+          <DialogDescription>{t('kb.kbDialogDescription')}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
           <div className="grid gap-2">
             <Label htmlFor="kb-id">
-              Knowledge base ID <span className="text-destructive">*</span>
+              {t('kb.kbIdLabel')} <span className="text-destructive">*</span>
             </Label>
             <Input id="kb-id" disabled={isEdit} value={kbId} onChange={(event) => setKbId(event.target.value)} />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="kb-description">Description</Label>
+            <Label htmlFor="kb-description">{t('kb.descriptionLabel')}</Label>
             <Input
               id="kb-description"
               value={description}
@@ -139,13 +143,13 @@ function KbDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t('kb.cancel')}
           </Button>
           <Button
             disabled={(!isEdit && !kbId.trim()) || create.isPending || update.isPending}
             onClick={() => void submit()}
           >
-            {isEdit ? 'Save' : 'Create'}
+            {isEdit ? t('kb.save') : t('kb.create')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -162,6 +166,7 @@ function DocumentsDialog({
   kbId: string | null;
   onOpenChange: (open: boolean) => void;
 }): JSX.Element {
+  const t = useT();
   const documents = useDocumentsQuery(kbId);
   const ingest = useIngestDocumentMutation(kbId ?? '');
   const deleteDocument = useDeleteDocumentMutation(kbId ?? '');
@@ -187,18 +192,18 @@ function DocumentsDialog({
     <Dialog open={Boolean(kbId)} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Documents · {kbId}</DialogTitle>
-          <DialogDescription>Paste content to ingest, or remove existing documents.</DialogDescription>
+          <DialogTitle>{t('kb.documentsTitle', { name: kbId ?? '' })}</DialogTitle>
+          <DialogDescription>{t('kb.documentsDescription')}</DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-3">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="grid gap-2">
-              <Label htmlFor="doc-source">Source</Label>
+              <Label htmlFor="doc-source">{t('kb.sourceLabel')}</Label>
               <Input id="doc-source" value={source} onChange={(event) => setSource(event.target.value)} />
             </div>
             <div className="grid gap-2">
-              <Label>Format</Label>
+              <Label>{t('kb.formatLabel')}</Label>
               <Select value={format} onValueChange={setFormat}>
                 <SelectTrigger>
                   <SelectValue />
@@ -214,7 +219,7 @@ function DocumentsDialog({
             </div>
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="doc-content">Content</Label>
+            <Label htmlFor="doc-content">{t('kb.contentLabel')}</Label>
             <Textarea
               id="doc-content"
               className="min-h-28"
@@ -223,7 +228,7 @@ function DocumentsDialog({
             />
           </div>
           <Button className="justify-self-start" disabled={!content || ingest.isPending} onClick={() => void submit()}>
-            <Plus className="size-4" /> Ingest document
+            <Plus className="size-4" /> {t('kb.ingestDocument')}
           </Button>
         </div>
 
@@ -235,12 +240,14 @@ function DocumentsDialog({
             >
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-foreground">{document.filename}</p>
-                <p className="text-xs text-muted-foreground">{document.chunks} chunks</p>
+                <p className="text-xs text-muted-foreground">
+                  {t('kb.chunksCount', { count: document.chunks })}
+                </p>
               </div>
               <Button
                 size="icon"
                 variant="ghost"
-                aria-label={`Delete ${document.filename}`}
+                aria-label={t('kb.deleteDocument', { name: document.filename })}
                 onClick={() =>
                   void deleteDocument.mutateAsync({ document_id: document.document_id, tenant_id: TENANT })
                 }
@@ -250,7 +257,7 @@ function DocumentsDialog({
             </div>
           ))}
           {documents.data && documents.data.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No documents yet.</p>
+            <p className="text-sm text-muted-foreground">{t('kb.noDocuments')}</p>
           ) : null}
         </div>
       </DialogContent>
@@ -267,6 +274,7 @@ function SyncDialog({
   kbId: string | null;
   onOpenChange: (open: boolean) => void;
 }): JSX.Element {
+  const t = useT();
   const sync = useSyncDocumentsMutation(kbId ?? '');
   const [path, setPath] = useState('');
 
@@ -278,16 +286,16 @@ function SyncDialog({
     <Dialog open={Boolean(kbId)} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Sync · {kbId}</DialogTitle>
-          <DialogDescription>Ingest every supported file under a local directory.</DialogDescription>
+          <DialogTitle>{t('kb.syncTitle', { name: kbId ?? '' })}</DialogTitle>
+          <DialogDescription>{t('kb.syncDescription')}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-2">
-          <Label htmlFor="sync-path">Directory path</Label>
+          <Label htmlFor="sync-path">{t('kb.directoryPathLabel')}</Label>
           <Input id="sync-path" value={path} onChange={(event) => setPath(event.target.value)} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t('kb.cancel')}
           </Button>
           <Button
             disabled={!path || sync.isPending}
@@ -296,7 +304,7 @@ function SyncDialog({
               onOpenChange(false);
             }}
           >
-            Sync
+            {t('kb.sync')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -317,6 +325,7 @@ function KbRow({
   onDocuments: () => void;
   onSync: () => void;
 }): JSX.Element {
+  const t = useT();
   const remove = useDeleteKbMutation(kb.kb_id);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -332,24 +341,26 @@ function KbRow({
         {kb.bound_agents.length ? kb.bound_agents.join(', ') : '-'}
       </td>
       <td className="px-4 py-3">
-        <Badge variant={kb.archived ? 'warning' : 'success'}>{kb.archived ? 'archived' : 'active'}</Badge>
+        <Badge variant={kb.archived ? 'warning' : 'success'}>
+          {kb.archived ? t('kb.archived') : t('kb.active')}
+        </Badge>
       </td>
       <td className="px-4 py-3 text-right">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="secondary" size="sm" aria-label={`Actions for ${kb.kb_id}`}>
-              Actions
+            <Button variant="secondary" size="sm" aria-label={t('kb.actionsFor', { name: kb.kb_id })}>
+              {t('kb.actions')}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => setTimeout(onEdit, 0)}>Edit</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setTimeout(onDocuments, 0)}>Documents</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setTimeout(onSync, 0)}>Sync</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setTimeout(onEdit, 0)}>{t('kb.edit')}</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setTimeout(onDocuments, 0)}>{t('kb.documents')}</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setTimeout(onSync, 0)}>{t('kb.syncAction')}</DropdownMenuItem>
             {!kb.archived ? (
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem destructive onSelect={() => setTimeout(() => setConfirmDelete(true), 0)}>
-                  <Trash2 /> Delete
+                  <Trash2 /> {t('kb.delete')}
                 </DropdownMenuItem>
               </>
             ) : null}
@@ -359,15 +370,13 @@ function KbRow({
         <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Delete {kb.kb_id}?</AlertDialogTitle>
-              <AlertDialogDescription>
-                Archives the knowledge base. KBs still bound to agents cannot be archived.
-              </AlertDialogDescription>
+              <AlertDialogTitle>{t('kb.deleteKbConfirmTitle', { name: kb.kb_id })}</AlertDialogTitle>
+              <AlertDialogDescription>{t('kb.deleteKbConfirmDescription')}</AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogCancel>{t('kb.cancel')}</AlertDialogCancel>
               <AlertDialogAction onClick={() => void remove.mutateAsync({ tenant_id: TENANT })}>
-                Delete
+                {t('kb.delete')}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -388,6 +397,7 @@ function ConnectorDialog({
   editing: KbConnector | null;
   onOpenChange: (open: boolean) => void;
 }): JSX.Element {
+  const t = useT();
   const create = useCreateConnectorMutation();
   const update = useUpdateConnectorMutation(editing?.connector_id ?? '');
   const isEdit = editing !== null;
@@ -419,7 +429,7 @@ function ConnectorDialog({
     try {
       config = JSON.parse(configJson || '{}') as Record<string, unknown>;
     } catch {
-      setError('config is not valid JSON.');
+      setError(t('kb.invalidConfigJson'));
       return;
     }
     if (isEdit) {
@@ -444,14 +454,16 @@ function ConnectorDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{isEdit ? `Edit ${editing?.connector_id}` : 'Add connector'}</DialogTitle>
-          <DialogDescription>Google Drive / Confluence ingestion source for a knowledge base.</DialogDescription>
+          <DialogTitle>
+            {isEdit ? t('kb.editConnectorTitle', { name: editing?.connector_id ?? '' }) : t('kb.addConnectorTitle')}
+          </DialogTitle>
+          <DialogDescription>{t('kb.connectorDialogDescription')}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label htmlFor="conn-id">
-                Connector ID <span className="text-destructive">*</span>
+                {t('kb.connectorIdLabel')} <span className="text-destructive">*</span>
               </Label>
               <Input
                 id="conn-id"
@@ -461,7 +473,7 @@ function ConnectorDialog({
               />
             </div>
             <div className="grid gap-2">
-              <Label>Kind</Label>
+              <Label>{t('kb.kindLabel')}</Label>
               <Select value={kind} onValueChange={setKind} disabled={isEdit}>
                 <SelectTrigger>
                   <SelectValue />
@@ -478,16 +490,16 @@ function ConnectorDialog({
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="grid gap-2">
-              <Label htmlFor="conn-kb">Knowledge base ID</Label>
+              <Label htmlFor="conn-kb">{t('kb.kbIdLabel')}</Label>
               <Input id="conn-kb" value={kbId} onChange={(event) => setKbId(event.target.value)} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="conn-desc">Description</Label>
+              <Label htmlFor="conn-desc">{t('kb.descriptionLabel')}</Label>
               <Input id="conn-desc" value={description} onChange={(event) => setDescription(event.target.value)} />
             </div>
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="conn-config">Config (JSON)</Label>
+            <Label htmlFor="conn-config">{t('kb.configJsonLabel')}</Label>
             <Textarea
               id="conn-config"
               className="min-h-24 font-mono text-xs"
@@ -496,7 +508,7 @@ function ConnectorDialog({
             />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="conn-yaml">Custom YAML (optional)</Label>
+            <Label htmlFor="conn-yaml">{t('kb.customYamlLabel')}</Label>
             <Textarea
               id="conn-yaml"
               className="min-h-20 font-mono text-xs"
@@ -505,20 +517,20 @@ function ConnectorDialog({
             />
           </div>
           <label className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm">
-            Enabled
-            <Switch checked={enabled} aria-label="Enabled" onCheckedChange={setEnabled} />
+            {t('kb.enabledLabel')}
+            <Switch checked={enabled} aria-label={t('kb.enabledLabel')} onCheckedChange={setEnabled} />
           </label>
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t('kb.cancel')}
           </Button>
           <Button
             disabled={(!isEdit && !connectorId.trim()) || create.isPending || update.isPending}
             onClick={() => void submit()}
           >
-            {isEdit ? 'Save' : 'Create'}
+            {isEdit ? t('kb.save') : t('kb.create')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -535,6 +547,7 @@ function ConnectorRow({
   connector: KbConnector;
   onEdit: () => void;
 }): JSX.Element {
+  const t = useT();
   const status = useConnectorStatusQuery(connector.connector_id);
   const check = useConnectorCheckMutation(connector.connector_id);
   const sync = useConnectorSyncMutation(connector.connector_id);
@@ -548,7 +561,7 @@ function ConnectorRow({
       <td className="px-4 py-3 text-sm text-muted-foreground">{connector.kb_id}</td>
       <td className="px-4 py-3">
         <Badge variant={connector.enabled ? 'success' : 'secondary'}>
-          {connector.enabled ? 'enabled' : 'disabled'}
+          {connector.enabled ? t('kb.enabled') : t('kb.disabled')}
         </Badge>
         <span className="ml-2 text-xs text-muted-foreground">
           {check.data ? check.data.status : status.data?.status ?? ''}
@@ -557,19 +570,19 @@ function ConnectorRow({
       <td className="px-4 py-3 text-right">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="secondary" size="sm" aria-label={`Actions for ${connector.connector_id}`}>
-              Actions
+            <Button variant="secondary" size="sm" aria-label={t('kb.actionsFor', { name: connector.connector_id })}>
+              {t('kb.actions')}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => setTimeout(onEdit, 0)}>Edit</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => void check.mutateAsync()}>Check</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setTimeout(onEdit, 0)}>{t('kb.edit')}</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void check.mutateAsync()}>{t('kb.check')}</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void sync.mutateAsync({ dry_run: true })}>
-              Sync (dry-run)
+              {t('kb.syncDryRun')}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem destructive onSelect={() => setTimeout(() => setConfirmDelete(true), 0)}>
-              <Trash2 /> Delete
+              <Trash2 /> {t('kb.delete')}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -577,12 +590,12 @@ function ConnectorRow({
         <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Delete {connector.connector_id}?</AlertDialogTitle>
-              <AlertDialogDescription>This removes the connector configuration.</AlertDialogDescription>
+              <AlertDialogTitle>{t('kb.deleteConnectorConfirmTitle', { name: connector.connector_id })}</AlertDialogTitle>
+              <AlertDialogDescription>{t('kb.deleteConnectorConfirmDescription')}</AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={() => void remove.mutateAsync()}>Delete</AlertDialogAction>
+              <AlertDialogCancel>{t('kb.cancel')}</AlertDialogCancel>
+              <AlertDialogAction onClick={() => void remove.mutateAsync()}>{t('kb.delete')}</AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
@@ -594,6 +607,7 @@ function ConnectorRow({
 // ─────────────────────────── Page ───────────────────────────
 
 export function KnowledgeBasePage(): JSX.Element {
+  const t = useT();
   const kbs = useKbsQuery();
   const connectors = useKbConnectorsQuery();
 
@@ -608,40 +622,38 @@ export function KnowledgeBasePage(): JSX.Element {
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-xl font-semibold tracking-tight">Knowledge Base</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Libraries, documents, syncs, and ingestion connectors.
-        </p>
+        <h2 className="text-xl font-semibold tracking-tight">{t('kb.title')}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{t('kb.subtitle')}</p>
       </div>
 
       <Tabs defaultValue="kbs">
         <TabsList>
-          <TabsTrigger value="kbs">Knowledge bases</TabsTrigger>
-          <TabsTrigger value="connectors">Connectors</TabsTrigger>
+          <TabsTrigger value="kbs">{t('kb.tabKbs')}</TabsTrigger>
+          <TabsTrigger value="connectors">{t('kb.tabConnectors')}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="kbs" className="space-y-4">
           <div className="flex items-center justify-between gap-3">
-            <Badge variant="secondary">{kbs.data?.length ?? 0} bases</Badge>
+            <Badge variant="secondary">{t('kb.basesCount', { count: kbs.data?.length ?? 0 })}</Badge>
             <Button
               onClick={() => {
                 setEditingKb(null);
                 setKbDialogOpen(true);
               }}
             >
-              <Plus className="size-4" /> Add knowledge base
+              <Plus className="size-4" /> {t('kb.addKb')}
             </Button>
           </div>
           <div className="overflow-x-auto rounded-lg border border-border">
             <table className="w-full">
               <thead className="bg-secondary/50">
                 <tr>
-                  <Th>Knowledge base</Th>
-                  <Th>Docs</Th>
-                  <Th>Chunks</Th>
-                  <Th>Bound agents</Th>
-                  <Th>Status</Th>
-                  <Th className="text-right">Actions</Th>
+                  <Th>{t('kb.colKb')}</Th>
+                  <Th>{t('kb.colDocs')}</Th>
+                  <Th>{t('kb.colChunks')}</Th>
+                  <Th>{t('kb.colBoundAgents')}</Th>
+                  <Th>{t('kb.colStatus')}</Th>
+                  <Th className="text-right">{t('kb.colActions')}</Th>
                 </tr>
               </thead>
               <tbody>
@@ -658,7 +670,7 @@ export function KnowledgeBasePage(): JSX.Element {
                   />
                 ))}
                 {kbs.data && kbs.data.length === 0 ? (
-                  <EmptyRow colSpan={6} label="No knowledge bases yet." />
+                  <EmptyRow colSpan={6} label={t('kb.noKbs')} />
                 ) : null}
               </tbody>
             </table>
@@ -667,25 +679,25 @@ export function KnowledgeBasePage(): JSX.Element {
 
         <TabsContent value="connectors" className="space-y-4">
           <div className="flex items-center justify-between gap-3">
-            <Badge variant="secondary">{connectors.data?.length ?? 0} connectors</Badge>
+            <Badge variant="secondary">{t('kb.connectorsCount', { count: connectors.data?.length ?? 0 })}</Badge>
             <Button
               onClick={() => {
                 setEditingConnector(null);
                 setConnectorDialogOpen(true);
               }}
             >
-              <Plus className="size-4" /> Add connector
+              <Plus className="size-4" /> {t('kb.addConnector')}
             </Button>
           </div>
           <div className="overflow-x-auto rounded-lg border border-border">
             <table className="w-full">
               <thead className="bg-secondary/50">
                 <tr>
-                  <Th>Connector</Th>
-                  <Th>Kind</Th>
-                  <Th>KB</Th>
-                  <Th>Status</Th>
-                  <Th className="text-right">Actions</Th>
+                  <Th>{t('kb.colConnector')}</Th>
+                  <Th>{t('kb.colKind')}</Th>
+                  <Th>{t('kb.colConnectorKb')}</Th>
+                  <Th>{t('kb.colStatus')}</Th>
+                  <Th className="text-right">{t('kb.colActions')}</Th>
                 </tr>
               </thead>
               <tbody>
@@ -700,7 +712,7 @@ export function KnowledgeBasePage(): JSX.Element {
                   />
                 ))}
                 {connectors.data && connectors.data.length === 0 ? (
-                  <EmptyRow colSpan={5} label="No connectors yet." />
+                  <EmptyRow colSpan={5} label={t('kb.noConnectors')} />
                 ) : null}
               </tbody>
             </table>

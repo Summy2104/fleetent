@@ -11,6 +11,7 @@ import {
   Search,
 } from 'lucide-react';
 
+import { useT } from '@/i18n';
 import { useAdminApi } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -83,6 +84,7 @@ function SessionActions({
   canWrite: boolean;
   session: SessionListItem;
 }): JSX.Element | null {
+  const t = useT();
   const takeover = useTakeoverSessionMutation(session.session_id);
   const release = useReleaseSessionMutation(session.session_id);
   const inject = useInjectSessionMutation(session.session_id);
@@ -100,7 +102,7 @@ function SessionActions({
   }
 
   const runInject = async (): Promise<void> => {
-    const content = window.prompt('Inject message content:');
+    const content = window.prompt(t('sessions.injectPrompt'));
     if (!content) {
       return;
     }
@@ -120,29 +122,33 @@ function SessionActions({
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" aria-label={`Actions for ${session.session_id}`}>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={t('sessions.actionsFor', { id: session.session_id })}
+          >
             <MoreVertical className="size-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem onSelect={() => void takeover.mutateAsync()}>
-            <LogIn /> Take over
+            <LogIn /> {t('sessions.takeOver')}
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => void release.mutateAsync()}>
-            <LogOut /> Release
+            <LogOut /> {t('sessions.release')}
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => void runInject()}>
-            <MessageSquarePlus /> Inject
+            <MessageSquarePlus /> {t('sessions.inject')}
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => setConfirmReset(true)}>
-            <RotateCcw /> Reset
+            <RotateCcw /> {t('sessions.reset')}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem destructive onSelect={() => setConfirmClear(true)}>
-            <Eraser /> Clear transcript
+            <Eraser /> {t('sessions.clearTranscript')}
           </DropdownMenuItem>
           <DropdownMenuItem destructive onSelect={() => setConfirmForceEnd(true)}>
-            <Ban /> Force end
+            <Ban /> {t('sessions.forceEnd')}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -150,13 +156,13 @@ function SessionActions({
       <AlertDialog open={confirmReset} onOpenChange={setConfirmReset}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Reset {session.session_id}?</AlertDialogTitle>
+            <AlertDialogTitle>{t('sessions.resetTitle', { id: session.session_id })}</AlertDialogTitle>
             <AlertDialogDescription>
-              This trims the session context and cannot be undone.
+              {t('sessions.resetDescription')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="grid gap-2">
-            <Label htmlFor={`keep-turns-${session.session_id}`}>Keep how many recent turns?</Label>
+            <Label htmlFor={`keep-turns-${session.session_id}`}>{t('sessions.keepTurns')}</Label>
             <Input
               id={`keep-turns-${session.session_id}`}
               type="number"
@@ -166,8 +172,8 @@ function SessionActions({
             />
           </div>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void runReset()}>Reset</AlertDialogAction>
+            <AlertDialogCancel>{t('sessions.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void runReset()}>{t('sessions.reset')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -175,14 +181,14 @@ function SessionActions({
       <AlertDialog open={confirmClear} onOpenChange={setConfirmClear}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Clear transcript of {session.session_id}?</AlertDialogTitle>
+            <AlertDialogTitle>{t('sessions.clearTitle', { id: session.session_id })}</AlertDialogTitle>
             <AlertDialogDescription>
-              This permanently erases the session transcript and cannot be undone.
+              {t('sessions.clearDescription')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void clear.mutateAsync()}>Clear</AlertDialogAction>
+            <AlertDialogCancel>{t('sessions.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void clear.mutateAsync()}>{t('sessions.clear')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -190,14 +196,14 @@ function SessionActions({
       <AlertDialog open={confirmForceEnd} onOpenChange={setConfirmForceEnd}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Force-end {session.session_id}?</AlertDialogTitle>
+            <AlertDialogTitle>{t('sessions.forceEndTitle', { id: session.session_id })}</AlertDialogTitle>
             <AlertDialogDescription>
-              This terminates the live session and cannot be undone.
+              {t('sessions.forceEndDescription')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void forceEnd.mutateAsync()}>Force end</AlertDialogAction>
+            <AlertDialogCancel>{t('sessions.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void forceEnd.mutateAsync()}>{t('sessions.forceEnd')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -222,6 +228,7 @@ function SessionRow({
   onSelect: () => void;
   onTogglePicked: () => void;
 }): JSX.Element {
+  const t = useT();
   return (
     <div
       className={cn(
@@ -231,7 +238,7 @@ function SessionRow({
     >
       {isAdmin ? (
         <input
-          aria-label={`Select session ${session.session_id}`}
+          aria-label={t('sessions.selectSession', { id: session.session_id })}
           checked={picked}
           onChange={onTogglePicked}
           type="checkbox"
@@ -267,34 +274,35 @@ function SessionRow({
 // ─────────────────────────── Detail panel ───────────────────────────
 
 function SessionDetailPanel({ sessionId }: { sessionId: string | null }): JSX.Element {
+  const t = useT();
   const detail = useSessionDetailQuery(sessionId);
   const meta = detail.data?.meta;
 
   return (
     <Card className="lg:sticky lg:top-24">
       <CardHeader>
-        <CardTitle>Session detail</CardTitle>
+        <CardTitle>{t('sessions.detailTitle')}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {meta ? (
           <>
             <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
               <div>
-                <dt className="text-xs text-muted-foreground">Session ID</dt>
+                <dt className="text-xs text-muted-foreground">{t('sessions.sessionId')}</dt>
                 <dd className="break-all font-mono text-foreground">{meta.session_id}</dd>
               </div>
               <div>
-                <dt className="text-xs text-muted-foreground">Status</dt>
+                <dt className="text-xs text-muted-foreground">{t('sessions.statusLabel')}</dt>
                 <dd>
                   <Badge variant={statusVariant(meta.status)}>{meta.status}</Badge>
                 </dd>
               </div>
               <div>
-                <dt className="text-xs text-muted-foreground">Origin</dt>
+                <dt className="text-xs text-muted-foreground">{t('sessions.origin')}</dt>
                 <dd className="text-foreground">{meta.origin}</dd>
               </div>
               <div>
-                <dt className="text-xs text-muted-foreground">Agent</dt>
+                <dt className="text-xs text-muted-foreground">{t('sessions.agent')}</dt>
                 <dd className="text-foreground">{meta.agent_name ?? '—'}</dd>
               </div>
             </dl>
@@ -302,7 +310,7 @@ function SessionDetailPanel({ sessionId }: { sessionId: string | null }): JSX.El
             <Separator />
 
             <div className="space-y-3">
-              <h3 className="text-sm font-semibold text-foreground">Transcript</h3>
+              <h3 className="text-sm font-semibold text-foreground">{t('sessions.transcript')}</h3>
               {detail.data?.transcript.length ? (
                 detail.data.transcript.map((entry, index) => (
                   <article
@@ -318,12 +326,12 @@ function SessionDetailPanel({ sessionId }: { sessionId: string | null }): JSX.El
                   </article>
                 ))
               ) : (
-                <p className="text-sm text-muted-foreground">No transcript entries.</p>
+                <p className="text-sm text-muted-foreground">{t('sessions.noTranscriptEntries')}</p>
               )}
             </div>
           </>
         ) : (
-          <p className="text-sm text-muted-foreground">Select a session to inspect its transcript.</p>
+          <p className="text-sm text-muted-foreground">{t('sessions.selectSessionToInspect')}</p>
         )}
       </CardContent>
     </Card>
@@ -333,6 +341,7 @@ function SessionDetailPanel({ sessionId }: { sessionId: string | null }): JSX.El
 // ─────────────────────────── Page ───────────────────────────
 
 export function SessionsPage(): JSX.Element {
+  const t = useT();
   const me = useAdminMeQuery();
   const [filters, setFilters] = useState<SessionsFilter>({});
   const [draftStatus, setDraftStatus] = useState('');
@@ -402,13 +411,13 @@ export function SessionsPage(): JSX.Element {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-xl font-semibold tracking-tight">Sessions</h2>
+          <h2 className="text-xl font-semibold tracking-tight">{t('sessions.title')}</h2>
           <Badge variant="secondary">{sessions.data?.length ?? 0}</Badge>
-          {!isAdmin ? <Badge variant="outline">read-only</Badge> : null}
+          {!isAdmin ? <Badge variant="outline">{t('sessions.readOnly')}</Badge> : null}
         </div>
         {isAdmin && pickedSessionIds.length ? (
           <Button variant="destructive" onClick={() => setConfirmBulk(true)}>
-            <Eraser className="size-4" /> Bulk clear ({pickedSessionIds.length})
+            <Eraser className="size-4" /> {t('sessions.bulkClear', { count: pickedSessionIds.length })}
           </Button>
         ) : null}
       </div>
@@ -418,18 +427,18 @@ export function SessionsPage(): JSX.Element {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Search className="size-4 text-primary" /> Filters
+                <Search className="size-4 text-primary" /> {t('sessions.filters')}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <Input
-                placeholder="Search sessions…"
+                placeholder={t('sessions.searchPlaceholder')}
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
               />
               <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <div className="grid gap-2">
-                  <Label className="text-xs text-muted-foreground">Status</Label>
+                  <Label className="text-xs text-muted-foreground">{t('sessions.statusLabel')}</Label>
                   <Select
                     value={draftStatus || 'all'}
                     onValueChange={(value) => setDraftStatus(value === 'all' ? '' : value)}
@@ -438,7 +447,7 @@ export function SessionsPage(): JSX.Element {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All statuses</SelectItem>
+                      <SelectItem value="all">{t('sessions.allStatuses')}</SelectItem>
                       <SelectItem value="active">active</SelectItem>
                       <SelectItem value="idle">idle</SelectItem>
                       <SelectItem value="ended">ended</SelectItem>
@@ -446,11 +455,11 @@ export function SessionsPage(): JSX.Element {
                   </Select>
                 </div>
                 <div className="grid gap-2">
-                  <Label className="text-xs text-muted-foreground">User ID</Label>
+                  <Label className="text-xs text-muted-foreground">{t('sessions.userId')}</Label>
                   <Input value={draftUserId} onChange={(event) => setDraftUserId(event.target.value)} />
                 </div>
                 <div className="grid gap-2">
-                  <Label className="text-xs text-muted-foreground">Agent name</Label>
+                  <Label className="text-xs text-muted-foreground">{t('sessions.agentName')}</Label>
                   <Input
                     value={draftAgentName}
                     onChange={(event) => setDraftAgentName(event.target.value)}
@@ -458,7 +467,7 @@ export function SessionsPage(): JSX.Element {
                 </div>
               </div>
               <Button variant="outline" onClick={applyFilters}>
-                Apply filters
+                {t('sessions.applyFilters')}
               </Button>
             </CardContent>
           </Card>
@@ -477,7 +486,7 @@ export function SessionsPage(): JSX.Element {
             ))}
             {visibleSessions.length === 0 ? (
               <div className="rounded-lg border border-dashed border-border py-12 text-center text-sm text-muted-foreground">
-                No sessions.
+                {t('sessions.noSessions')}
               </div>
             ) : null}
           </div>
@@ -489,14 +498,14 @@ export function SessionsPage(): JSX.Element {
       <AlertDialog open={confirmBulk} onOpenChange={setConfirmBulk}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Bulk clear {pickedSessionIds.length} session(s)?</AlertDialogTitle>
+            <AlertDialogTitle>{t('sessions.bulkClearTitle', { count: pickedSessionIds.length })}</AlertDialogTitle>
             <AlertDialogDescription>
-              This permanently erases the selected transcripts and cannot be undone.
+              {t('sessions.bulkClearDescription')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void runBulkClear()}>Bulk clear</AlertDialogAction>
+            <AlertDialogCancel>{t('sessions.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void runBulkClear()}>{t('sessions.bulkClearAction')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

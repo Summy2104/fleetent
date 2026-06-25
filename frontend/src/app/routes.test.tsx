@@ -7,21 +7,27 @@ import { describe, expect, it } from 'vitest';
 import { AuthProvider } from '@/app/auth';
 import { AppQueryProvider } from '@/app/query-client';
 import { AdminRoutes } from '@/app/routes';
+import { ThemeProvider } from '@/app/theme';
+import { I18nProvider } from '@/i18n';
 import { server } from '@/test/msw/server';
 
 function renderRoutes(route: string, token?: string, mustReset?: boolean): void {
   render(
-    <AuthProvider
-      baseUrl="http://fleetent.test"
-      initialToken={token ?? null}
-      initialMustReset={mustReset ?? false}
-    >
-      <AppQueryProvider>
-        <MemoryRouter initialEntries={[route]}>
-          <AdminRoutes />
-        </MemoryRouter>
-      </AppQueryProvider>
-    </AuthProvider>
+    <I18nProvider>
+      <ThemeProvider>
+        <AuthProvider
+          baseUrl="http://fleetent.test"
+          initialToken={token ?? null}
+          initialMustReset={mustReset ?? false}
+        >
+          <AppQueryProvider>
+            <MemoryRouter initialEntries={[route]}>
+              <AdminRoutes />
+            </MemoryRouter>
+          </AppQueryProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </I18nProvider>
   );
 }
 

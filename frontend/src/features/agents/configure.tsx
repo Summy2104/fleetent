@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Download, Eye, EyeOff, Inbox, Trash2, X } from 'lucide-react';
 
+import { useT } from '@/i18n';
 import { useAdminApi } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -17,6 +18,7 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   type AgentImCapabilitiesInput,
   type AgentImGroupInput,
+  type AgentModelOverrides,
   type AgentSkillBinding,
   useActivateAgentVersionMutation,
   useAddAgentImGroupMutation,
@@ -44,6 +46,7 @@ import {
 } from '@/features/agents/api';
 import { useMcpServersQuery } from '@/features/connectors/api';
 import { useKbsQuery } from '@/features/kb/api';
+import { useProvidersQuery } from '@/features/providers/api';
 import { useUsersQuery } from '@/features/users/api';
 
 type AdminMe = { email: string; id: string; role: string };
@@ -85,6 +88,36 @@ function Th({ children, className }: { children: ReactNode; className?: string }
 
 type BindOption = { value: string; label: string };
 
+// The agent's default model route maps to a single provider id; the platform expands it
+// into the full model policy. Read it from model_overrides, taking the first string key any
+// authoring style may have used.
+function defaultRouteProviderId(overrides: AgentModelOverrides | undefined): string {
+  const routes = (overrides?.routes ?? {}) as Record<string, Array<Record<string, unknown>>>;
+  const entry = routes.default?.[0];
+  if (!entry) return '';
+  for (const value of [entry.provider_id, entry.provider, entry.target]) {
+    if (typeof value === 'string' && value) return value;
+  }
+  return '';
+}
+
+// Set (or clear) the default-route provider while preserving every sibling key the platform
+// stores alongside it (other routes, credential slots), so an edit never drops that state.
+function withDefaultRouteProvider(
+  overrides: AgentModelOverrides | undefined,
+  providerId: string
+): AgentModelOverrides {
+  const next: AgentModelOverrides = { ...(overrides ?? {}) };
+  const routes = { ...((next.routes as Record<string, unknown>) ?? {}) };
+  if (providerId) {
+    routes.default = [{ provider_id: providerId }];
+  } else {
+    delete routes.default;
+  }
+  next.routes = routes;
+  return next;
+}
+
 function BindSelectEditor({
   title,
   placeholder,
@@ -106,6 +139,7 @@ function BindSelectEditor({
   onBind: (value: string) => void;
   onUnbind: (value: string) => void;
 }): JSX.Element {
+  const t = useT();
   // Resolve a bound id back to its human label (email / name) for the chips.
   const labelOf = useMemo(() => {
     const map = new Map(options.map((option) => [option.value, option.label]));
@@ -126,7 +160,7 @@ function BindSelectEditor({
           }}
         >
           <SelectTrigger className="max-w-xs">
-            <SelectValue placeholder={available.length === 0 ? 'Nothing to add' : placeholder} />
+            <SelectValue placeholder={available.length === 0 ? t('agents.nothingToAdd') : placeholder} />
           </SelectTrigger>
           <SelectContent>
             {available.map((option) => (
@@ -150,7 +184,7 @@ function BindSelectEditor({
               {canWrite ? (
                 <button
                   type="button"
-                  aria-label={`Remove ${labelOf(item)}`}
+                  aria-label={t('agents.remove', { name: labelOf(item) })}
                   className="grid size-4 place-items-center rounded-full text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
                   onClick={() => onUnbind(item)}
                 >
@@ -168,29 +202,42 @@ function BindSelectEditor({
 // ─────────────────────────── tabs ───────────────────────────
 
 function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boolean }): JSX.Element {
+  const t = useT();
   const detail = useAgentDetailQuery(agentName);
   const update = useUpdateAgentMutation(agentName);
+  const allProviders = useProvidersQuery();
 
   const [systemPrompt, setSystemPrompt] = useState('');
   const [allowedTools, setAllowedTools] = useState('');
   const [memoryNamespace, setMemoryNamespace] = useState('');
+  const [providerId, setProviderId] = useState('');
 
   useEffect(() => {
     if (detail.data) {
       setSystemPrompt(detail.data.system_prompt);
       setAllowedTools(detail.data.allowed_tools.join(', '));
       setMemoryNamespace(detail.data.memory_namespace ?? 'default');
+      setProviderId(defaultRouteProviderId(detail.data.model_overrides));
     }
   }, [detail.data]);
+
+  const onSave = (): void => {
+    void update.mutateAsync({
+      system_prompt: systemPrompt,
+      allowed_tools: parseAllowedTools(allowedTools),
+      memory_namespace: memoryNamespace.trim() || 'default',
+      model_overrides: withDefaultRouteProvider(detail.data?.model_overrides, providerId),
+    });
+  };
 
   return (
     <div className="grid max-w-2xl gap-5">
       <div className="grid gap-2">
-        <Label>Name</Label>
+        <Label>{t('agents.nameFieldLabel')}</Label>
         <Input value={agentName} disabled />
       </div>
       <div className="grid gap-2">
-        <Label htmlFor="cfg-prompt">System prompt</Label>
+        <Label htmlFor="cfg-prompt">{t('agents.systemPromptLabel')}</Label>
         <Textarea
           id="cfg-prompt"
           className="min-h-40"
@@ -200,7 +247,7 @@ function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boo
         />
       </div>
       <div className="grid gap-2">
-        <Label htmlFor="cfg-tools">Allowed tools (comma-separated)</Label>
+        <Label htmlFor="cfg-tools">{t('agents.allowedToolsLabel')}</Label>
         <Input
           id="cfg-tools"
           placeholder="tool_a, tool_b"
@@ -210,7 +257,7 @@ function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boo
         />
       </div>
       <div className="grid gap-2">
-        <Label htmlFor="cfg-ns">Memory namespace</Label>
+        <Label htmlFor="cfg-ns">{t('agents.memoryNamespaceLabel')}</Label>
         <Input
           id="cfg-ns"
           disabled={!canWrite}
@@ -218,19 +265,35 @@ function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boo
           onChange={(event) => setMemoryNamespace(event.target.value)}
         />
       </div>
+      <section className="space-y-3">
+        <TabHeading>{t('agents.modelProvider')}</TabHeading>
+        <p className="text-sm text-muted-foreground">{t('agents.modelProviderHint')}</p>
+        {canWrite ? (
+          <Select
+            value={providerId || undefined}
+            disabled={allProviders.isLoading || update.isPending}
+            onValueChange={setProviderId}
+          >
+            <SelectTrigger className="max-w-xs">
+              <SelectValue placeholder={t('agents.selectProvider')} />
+            </SelectTrigger>
+            <SelectContent>
+              {(allProviders.data ?? []).map((provider) => (
+                <SelectItem key={provider.id} value={provider.id}>
+                  {provider.model ? `${provider.id} · ${provider.model}` : provider.id}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <p className="text-sm text-foreground">{providerId || '—'}</p>
+        )}
+      </section>
+
       {canWrite ? (
         <div>
-          <Button
-            disabled={update.isPending}
-            onClick={() =>
-              void update.mutateAsync({
-                system_prompt: systemPrompt,
-                allowed_tools: parseAllowedTools(allowedTools),
-                memory_namespace: memoryNamespace.trim() || 'default',
-              })
-            }
-          >
-            Save
+          <Button disabled={update.isPending} onClick={onSave}>
+            {t('common.save')}
           </Button>
         </div>
       ) : null}
@@ -238,30 +301,40 @@ function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boo
   );
 }
 
-function BindingsTab({ agentName, canWrite }: { agentName: string; canWrite: boolean }): JSX.Element {
+function McpServersTab({ agentName, canWrite }: { agentName: string; canWrite: boolean }): JSX.Element {
+  const t = useT();
   const bindings = useAgentBindingsQuery(agentName);
-  const kbs = useAgentKbsQuery(agentName);
-
-  // Catalogs that populate the dropdowns (all selectable targets in the platform).
-  const allUsers = useUsersQuery();
   const allServers = useMcpServersQuery();
-  const allKbs = useKbsQuery();
-
-  const bindUser = useBindAgentUserMutation(agentName);
-  const unbindUser = useUnbindAgentUserMutation(agentName);
   const bindMcp = useBindAgentMcpMutation(agentName);
   const unbindMcp = useUnbindAgentMcpMutation(agentName);
-  const bindKb = useBindAgentKbMutation(agentName);
-  const unbindKb = useUnbindAgentKbMutation(agentName);
 
-  const userOptions = useMemo<BindOption[]>(
-    () => (allUsers.data ?? []).map((user) => ({ value: user.id, label: user.email || user.name || user.id })),
-    [allUsers.data]
-  );
   const serverOptions = useMemo<BindOption[]>(
     () => (allServers.data ?? []).map((server) => ({ value: server.id, label: server.id })),
     [allServers.data]
   );
+
+  return (
+    <BindSelectEditor
+      title={t('agents.mcpServers')}
+      placeholder={t('agents.selectMcpServer')}
+      canWrite={canWrite}
+      loading={allServers.isLoading}
+      options={serverOptions}
+      items={bindings.data?.mcp_servers ?? []}
+      emptyLabel={t('agents.noMcpServers')}
+      onBind={(value) => void bindMcp.mutateAsync(value)}
+      onUnbind={(value) => void unbindMcp.mutateAsync(value)}
+    />
+  );
+}
+
+function KnowledgeBasesTab({ agentName, canWrite }: { agentName: string; canWrite: boolean }): JSX.Element {
+  const t = useT();
+  const kbs = useAgentKbsQuery(agentName);
+  const allKbs = useKbsQuery();
+  const bindKb = useBindAgentKbMutation(agentName);
+  const unbindKb = useUnbindAgentKbMutation(agentName);
+
   const kbOptions = useMemo<BindOption[]>(
     () =>
       (allKbs.data ?? [])
@@ -271,43 +344,17 @@ function BindingsTab({ agentName, canWrite }: { agentName: string; canWrite: boo
   );
 
   return (
-    <div className="space-y-6">
-      <BindSelectEditor
-        title="Users"
-        placeholder="Select a user"
-        canWrite={canWrite}
-        loading={allUsers.isLoading}
-        options={userOptions}
-        items={bindings.data?.users ?? []}
-        emptyLabel="No users"
-        onBind={(value) => void bindUser.mutateAsync(value)}
-        onUnbind={(value) => void unbindUser.mutateAsync(value)}
-      />
-      <Separator />
-      <BindSelectEditor
-        title="MCP Servers"
-        placeholder="Select an MCP server"
-        canWrite={canWrite}
-        loading={allServers.isLoading}
-        options={serverOptions}
-        items={bindings.data?.mcp_servers ?? []}
-        emptyLabel="No MCP servers"
-        onBind={(value) => void bindMcp.mutateAsync(value)}
-        onUnbind={(value) => void unbindMcp.mutateAsync(value)}
-      />
-      <Separator />
-      <BindSelectEditor
-        title="Knowledge Bases"
-        placeholder="Select a knowledge base"
-        canWrite={canWrite}
-        loading={allKbs.isLoading}
-        options={kbOptions}
-        items={kbs.data?.kb_ids ?? []}
-        emptyLabel="No knowledge bases"
-        onBind={(value) => void bindKb.mutateAsync(value)}
-        onUnbind={(value) => void unbindKb.mutateAsync(value)}
-      />
-    </div>
+    <BindSelectEditor
+      title={t('agents.knowledgeBases')}
+      placeholder={t('agents.selectKnowledgeBase')}
+      canWrite={canWrite}
+      loading={allKbs.isLoading}
+      options={kbOptions}
+      items={kbs.data?.kb_ids ?? []}
+      emptyLabel={t('agents.noKnowledgeBases')}
+      onBind={(value) => void bindKb.mutateAsync(value)}
+      onUnbind={(value) => void unbindKb.mutateAsync(value)}
+    />
   );
 }
 
@@ -320,6 +367,7 @@ function SkillRow({
   binding: AgentSkillBinding;
   canWrite: boolean;
 }): JSX.Element {
+  const t = useT();
   const setSkill = useSetAgentSkillMutation(agentName, binding.skill_name);
   return (
     <tr className="border-b border-border last:border-0">
@@ -332,7 +380,7 @@ function SkillRow({
             onCheckedChange={(checked) => void setSkill.mutateAsync({ enabled: checked })}
           />
         ) : (
-          <span className="text-xs text-muted-foreground">{binding.enabled ? 'enabled' : 'disabled'}</span>
+          <span className="text-xs text-muted-foreground">{binding.enabled ? t('agents.enabledStatus') : t('agents.disabledStatus')}</span>
         )}
       </td>
     </tr>
@@ -340,17 +388,18 @@ function SkillRow({
 }
 
 function SkillsTab({ agentName, canWrite }: { agentName: string; canWrite: boolean }): JSX.Element {
+  const t = useT();
   const skills = useAgentSkillsQuery(agentName);
   if (skills.data && skills.data.length === 0) {
-    return <EmptyState label="No skills available" />;
+    return <EmptyState label={t('agents.noSkillsAvailable')} />;
   }
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full">
         <thead className="bg-secondary/50">
           <tr>
-            <Th>Skill</Th>
-            <Th className="text-right">Enabled</Th>
+            <Th>{t('agents.skillColumn')}</Th>
+            <Th className="text-right">{t('agents.enabledColumn')}</Th>
           </tr>
         </thead>
         <tbody>
@@ -374,6 +423,7 @@ function SecretRow({
   status: string;
   canWrite: boolean;
 }): JSX.Element {
+  const t = useT();
   const deleteSecret = useDeleteAgentSecretMutation(agentName, envName);
   return (
     <div className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2">
@@ -381,7 +431,7 @@ function SecretRow({
       <div className="flex items-center gap-2">
         <Badge variant={status === 'set' ? 'success' : 'outline'}>{status}</Badge>
         {canWrite ? (
-          <Button size="icon" variant="ghost" aria-label={`Clear ${envName}`} onClick={() => void deleteSecret.mutateAsync()}>
+          <Button size="icon" variant="ghost" aria-label={t('agents.clearSecret', { name: envName })} onClick={() => void deleteSecret.mutateAsync()}>
             <Trash2 className="size-4" />
           </Button>
         ) : null}
@@ -391,6 +441,7 @@ function SecretRow({
 }
 
 function SecretsTab({ agentName, canWrite }: { agentName: string; canWrite: boolean }): JSX.Element {
+  const t = useT();
   const required = useAgentRequiredEnvQuery(agentName);
   const secrets = useAgentSecretsQuery(agentName);
   const setSecret = useSetAgentSecretValueMutation(agentName);
@@ -409,18 +460,18 @@ function SecretsTab({ agentName, canWrite }: { agentName: string; canWrite: bool
   return (
     <div className="space-y-6">
       <section className="space-y-3">
-        <TabHeading>Required environment</TabHeading>
+        <TabHeading>{t('agents.requiredEnvironment')}</TabHeading>
         {required.data && required.data.required_env.length === 0 ? (
-          <EmptyState label="No required environment" />
+          <EmptyState label={t('agents.noRequiredEnvironment')} />
         ) : (
           <div className="overflow-x-auto rounded-lg border border-border">
             <table className="w-full">
               <thead className="bg-secondary/50">
                 <tr>
-                  <Th>Env name</Th>
-                  <Th>Source</Th>
-                  <Th>Mode</Th>
-                  <Th>Status</Th>
+                  <Th>{t('agents.envNameColumn')}</Th>
+                  <Th>{t('agents.sourceColumn')}</Th>
+                  <Th>{t('agents.modeColumn')}</Th>
+                  <Th>{t('agents.statusColumn')}</Th>
                 </tr>
               </thead>
               <tbody>
@@ -443,14 +494,14 @@ function SecretsTab({ agentName, canWrite }: { agentName: string; canWrite: bool
       <Separator />
 
       <section className="space-y-3">
-        <TabHeading>Secrets</TabHeading>
+        <TabHeading>{t('agents.secrets')}</TabHeading>
         {canWrite ? (
           <div className="flex flex-wrap items-end gap-2">
             <div className="grid gap-1.5">
-              <Label className="text-xs text-muted-foreground">Env name</Label>
+              <Label className="text-xs text-muted-foreground">{t('agents.envNameColumn')}</Label>
               <Select value={selectedEnv} onValueChange={setSelectedEnv}>
                 <SelectTrigger className="w-48">
-                  <SelectValue placeholder="Select env" />
+                  <SelectValue placeholder={t('agents.selectEnv')} />
                 </SelectTrigger>
                 <SelectContent>
                   {envOptions.map((name) => (
@@ -462,18 +513,18 @@ function SecretsTab({ agentName, canWrite }: { agentName: string; canWrite: bool
               </Select>
             </div>
             <div className="grid gap-1.5">
-              <Label className="text-xs text-muted-foreground">Value</Label>
+              <Label className="text-xs text-muted-foreground">{t('agents.valueLabel')}</Label>
               <div className="relative">
                 <Input
                   className="w-64 pr-9"
                   type={reveal ? 'text' : 'password'}
-                  placeholder="secret value"
+                  placeholder={t('agents.secretValuePlaceholder')}
                   value={value}
                   onChange={(event) => setValue(event.target.value)}
                 />
                 <button
                   type="button"
-                  aria-label={reveal ? 'Hide value' : 'Show value'}
+                  aria-label={reveal ? t('agents.hideValue') : t('agents.showValue')}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
                   onClick={() => setReveal((current) => !current)}
                 >
@@ -488,13 +539,13 @@ function SecretsTab({ agentName, canWrite }: { agentName: string; canWrite: bool
                 setValue('');
               }}
             >
-              Set Secret
+              {t('agents.setSecret')}
             </Button>
           </div>
         ) : null}
 
         {secrets.data && secrets.data.secrets.length === 0 ? (
-          <EmptyState label="No secrets" />
+          <EmptyState label={t('agents.noSecrets')} />
         ) : (
           <div className="space-y-2">
             {(secrets.data?.secrets ?? []).map((secret) => (
@@ -514,6 +565,7 @@ function SecretsTab({ agentName, canWrite }: { agentName: string; canWrite: bool
 }
 
 function DeployTab({ agentName, canWrite }: { agentName: string; canWrite: boolean }): JSX.Element {
+  const t = useT();
   const versions = useAgentVersionsQuery(agentName, true);
   const deploy = useDeployAgentMutation(agentName);
   const activate = useActivateAgentVersionMutation(agentName);
@@ -534,19 +586,19 @@ function DeployTab({ agentName, canWrite }: { agentName: string; canWrite: boole
     <div className="space-y-6">
       {canWrite ? (
         <Button disabled={deploy.isPending} onClick={() => void deploy.mutateAsync()}>
-          Deploy current version
+          {t('agents.deployCurrentVersion')}
         </Button>
       ) : null}
 
       <section className="space-y-3">
-        <TabHeading>Version history</TabHeading>
+        <TabHeading>{t('agents.versionHistory')}</TabHeading>
         <div className="overflow-x-auto rounded-lg border border-border">
           <table className="w-full">
             <thead className="bg-secondary/50">
               <tr>
-                <Th>Version</Th>
-                <Th>Active</Th>
-                <Th className="text-right">Actions</Th>
+                <Th>{t('agents.versionColumn')}</Th>
+                <Th>{t('agents.activeColumn')}</Th>
+                <Th className="text-right">{t('agents.actionsColumn')}</Th>
               </tr>
             </thead>
             <tbody>
@@ -554,12 +606,12 @@ function DeployTab({ agentName, canWrite }: { agentName: string; canWrite: boole
                 <tr key={version.id} className="border-b border-border last:border-0">
                   <td className="px-3 py-2.5 font-mono text-sm text-foreground">v{version.version}</td>
                   <td className="px-3 py-2.5">
-                    {version.is_active ? <Badge variant="success">active</Badge> : null}
+                    {version.is_active ? <Badge variant="success">{t('agents.activeBadge')}</Badge> : null}
                   </td>
                   <td className="px-3 py-2.5 text-right">
                     {!version.is_active && canWrite ? (
                       <Button size="sm" variant="outline" onClick={() => void activate.mutateAsync(version.version)}>
-                        Activate
+                        {t('agents.activate')}
                       </Button>
                     ) : null}
                   </td>
@@ -568,7 +620,7 @@ function DeployTab({ agentName, canWrite }: { agentName: string; canWrite: boole
               {versions.data && versions.data.length === 0 ? (
                 <tr>
                   <td colSpan={3}>
-                    <EmptyState label="No versions" />
+                    <EmptyState label={t('agents.noVersions')} />
                   </td>
                 </tr>
               ) : null}
@@ -578,9 +630,9 @@ function DeployTab({ agentName, canWrite }: { agentName: string; canWrite: boole
       </section>
 
       <section className="space-y-3">
-        <TabHeading>YAML export</TabHeading>
+        <TabHeading>{t('agents.yamlExport')}</TabHeading>
         <Button variant="outline" disabled={exportYaml.isPending} onClick={() => void downloadYaml()}>
-          <Download className="size-4" /> Export YAML
+          <Download className="size-4" /> {t('agents.exportYaml')}
         </Button>
       </section>
     </div>
@@ -590,19 +642,31 @@ function DeployTab({ agentName, canWrite }: { agentName: string; canWrite: boole
 const IM_PLATFORMS = ['slack', 'telegram'] as const;
 
 function ImCapabilitiesTab({ agentName, canWrite }: { agentName: string; canWrite: boolean }): JSX.Element {
+  const t = useT();
   const detail = useAgentDetailQuery(agentName);
   const bindings = useAgentBindingsQuery(agentName);
   const setCaps = useSetAgentImCapabilitiesMutation(agentName);
   const addGroup = useAddAgentImGroupMutation(agentName);
   const removeGroup = useRemoveAgentImGroupMutation(agentName);
+  const bindUser = useBindAgentUserMutation(agentName);
+  const unbindUser = useUnbindAgentUserMutation(agentName);
+  const update = useUpdateAgentMutation(agentName);
+  const allUsers = useUsersQuery();
 
   const [caps, setCaps2] = useState<AgentImCapabilitiesInput>({ supports_dm: false, supports_groups: false });
   const [platform, setPlatform] = useState<string>('slack');
   const [groupId, setGroupId] = useState('');
+  const [configYaml, setConfigYaml] = useState('');
+  const [configDirty, setConfigDirty] = useState(false);
 
   // Bound groups are read back from the bindings endpoint; add/remove invalidate
   // that query, so the list reflects the persisted state (and survives reload).
   const groups = bindings.data?.groups ?? [];
+
+  const userOptions = useMemo<BindOption[]>(
+    () => (allUsers.data ?? []).map((user) => ({ value: user.id, label: user.email || user.name || user.id })),
+    [allUsers.data]
+  );
 
   useEffect(() => {
     setCaps2({
@@ -610,6 +674,13 @@ function ImCapabilitiesTab({ agentName, canWrite }: { agentName: string; canWrit
       supports_groups: detail.data?.supports_groups ?? false,
     });
   }, [detail.data?.supports_dm, detail.data?.supports_groups]);
+
+  // Mirror server-side overrides into the editor, but never clobber an in-progress edit.
+  useEffect(() => {
+    if (!configDirty) {
+      setConfigYaml(detail.data?.config_overrides_yaml ?? '');
+    }
+  }, [detail.data?.config_overrides_yaml, configDirty]);
 
   const onAddGroup = async (): Promise<void> => {
     const id = groupId.trim();
@@ -622,23 +693,28 @@ function ImCapabilitiesTab({ agentName, canWrite }: { agentName: string; canWrit
     await removeGroup.mutateAsync(target);
   };
 
+  const onSaveOverrides = async (): Promise<void> => {
+    await update.mutateAsync({ config_overrides_yaml: configYaml });
+    setConfigDirty(false);
+  };
+
   return (
     <div className="max-w-xl space-y-6">
       <section className="space-y-4">
-        <TabHeading>Capabilities</TabHeading>
+        <TabHeading>{t('agents.capabilities')}</TabHeading>
         <label className="flex items-center justify-between gap-4 text-sm">
-          Supports direct messages
+          {t('agents.supportsDirectMessages')}
           <Switch
-            aria-label="Supports direct messages"
+            aria-label={t('agents.supportsDirectMessages')}
             disabled={!canWrite}
             checked={caps.supports_dm}
             onCheckedChange={(checked) => setCaps2((current) => ({ ...current, supports_dm: checked }))}
           />
         </label>
         <label className="flex items-center justify-between gap-4 text-sm">
-          Supports group chats
+          {t('agents.supportsGroupChats')}
           <Switch
-            aria-label="Supports group chats"
+            aria-label={t('agents.supportsGroupChats')}
             disabled={!canWrite}
             checked={caps.supports_groups}
             onCheckedChange={(checked) => setCaps2((current) => ({ ...current, supports_groups: checked }))}
@@ -646,7 +722,7 @@ function ImCapabilitiesTab({ agentName, canWrite }: { agentName: string; canWrit
         </label>
         {canWrite ? (
           <Button size="sm" disabled={setCaps.isPending} onClick={() => void setCaps.mutateAsync(caps)}>
-            Save
+            {t('common.save')}
           </Button>
         ) : null}
       </section>
@@ -654,14 +730,12 @@ function ImCapabilitiesTab({ agentName, canWrite }: { agentName: string; canWrit
       <Separator />
 
       <section className="space-y-3">
-        <TabHeading>Group access</TabHeading>
-        <p className="text-sm text-muted-foreground">
-          Bind the Slack / Telegram groups this agent is allowed to respond in.
-        </p>
+        <TabHeading>{t('agents.groupAccess')}</TabHeading>
+        <p className="text-sm text-muted-foreground">{t('agents.groupAccessHint')}</p>
         {canWrite ? (
           <div className="flex flex-wrap items-end gap-2">
             <div className="grid gap-1.5">
-              <Label className="text-xs text-muted-foreground">Platform</Label>
+              <Label className="text-xs text-muted-foreground">{t('agents.platformLabel')}</Label>
               <Select value={platform} onValueChange={setPlatform}>
                 <SelectTrigger className="w-36">
                   <SelectValue />
@@ -676,10 +750,10 @@ function ImCapabilitiesTab({ agentName, canWrite }: { agentName: string; canWrit
               </Select>
             </div>
             <div className="grid gap-1.5">
-              <Label className="text-xs text-muted-foreground">Group id</Label>
+              <Label className="text-xs text-muted-foreground">{t('agents.groupIdLabel')}</Label>
               <Input
                 className="w-56"
-                placeholder="e.g. C0123 / -1001234567"
+                placeholder={t('agents.groupIdPlaceholder')}
                 value={groupId}
                 onChange={(event) => setGroupId(event.target.value)}
                 onKeyDown={(event) => {
@@ -692,12 +766,12 @@ function ImCapabilitiesTab({ agentName, canWrite }: { agentName: string; canWrit
               disabled={!groupId.trim() || addGroup.isPending}
               onClick={() => void onAddGroup()}
             >
-              Add
+              {t('agents.add')}
             </Button>
           </div>
         ) : null}
         {groups.length === 0 ? (
-          <EmptyState label="No groups bound" />
+          <EmptyState label={t('agents.noGroupsBound')} />
         ) : (
           <div className="flex flex-wrap gap-2">
             {groups.map((group) => (
@@ -710,7 +784,7 @@ function ImCapabilitiesTab({ agentName, canWrite }: { agentName: string; canWrit
                 {canWrite ? (
                   <button
                     type="button"
-                    aria-label={`Remove ${group.platform}:${group.group_id}`}
+                    aria-label={t('agents.remove', { name: `${group.platform}:${group.group_id}` })}
                     className="grid size-4 place-items-center rounded-full text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
                     onClick={() => void onRemoveGroup(group)}
                   >
@@ -722,6 +796,48 @@ function ImCapabilitiesTab({ agentName, canWrite }: { agentName: string; canWrit
           </div>
         )}
       </section>
+
+      <Separator />
+
+      <BindSelectEditor
+        title={t('agents.users')}
+        placeholder={t('agents.selectUser')}
+        canWrite={canWrite}
+        loading={allUsers.isLoading}
+        options={userOptions}
+        items={bindings.data?.users ?? []}
+        emptyLabel={t('agents.noUsers')}
+        onBind={(value) => void bindUser.mutateAsync(value)}
+        onUnbind={(value) => void unbindUser.mutateAsync(value)}
+      />
+
+      <Separator />
+
+      <section className="space-y-3">
+        <TabHeading>{t('agents.imConnectors')}</TabHeading>
+        <p className="text-sm text-muted-foreground">{t('agents.imConnectorsHint')}</p>
+        <div className="grid gap-2">
+          <Label htmlFor="cfg-overrides" className="text-xs text-muted-foreground">
+            {t('agents.advancedOverrides')}
+          </Label>
+          <Textarea
+            id="cfg-overrides"
+            className="min-h-48 font-mono"
+            disabled={!canWrite}
+            placeholder={'im:\n  slack:\n    bot_token_env: SLACK_BOT_TOKEN\n    app_token_env: SLACK_APP_TOKEN'}
+            value={configYaml}
+            onChange={(event) => {
+              setConfigDirty(true);
+              setConfigYaml(event.target.value);
+            }}
+          />
+        </div>
+        {canWrite ? (
+          <Button size="sm" disabled={!configDirty || update.isPending} onClick={() => void onSaveOverrides()}>
+            {t('agents.saveOverrides')}
+          </Button>
+        ) : null}
+      </section>
     </div>
   );
 }
@@ -729,6 +845,7 @@ function ImCapabilitiesTab({ agentName, canWrite }: { agentName: string; canWrit
 // ─────────────────────────── Page ───────────────────────────
 
 export function AgentConfigurePage(): JSX.Element {
+  const t = useT();
   const params = useParams();
   const navigate = useNavigate();
   const me = useAdminMeQuery();
@@ -736,33 +853,37 @@ export function AgentConfigurePage(): JSX.Element {
   const canWrite = me.data?.role !== 'viewer';
 
   if (!agentName) {
-    return <p className="text-sm text-muted-foreground">Agent not found.</p>;
+    return <p className="text-sm text-muted-foreground">{t('agents.notFound')}</p>;
   }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" aria-label="Back to agents" onClick={() => navigate('/agents')}>
+        <Button variant="ghost" size="icon" aria-label={t('agents.backToAgents')} onClick={() => navigate('/agents')}>
           <ArrowLeft className="size-4" />
         </Button>
-        <h2 className="text-xl font-semibold tracking-tight">Configure · {agentName}</h2>
+        <h2 className="text-xl font-semibold tracking-tight">{t('agents.configureTitle', { name: agentName })}</h2>
       </div>
 
       <Tabs defaultValue="overview">
         <TabsList className="flex w-full flex-wrap justify-start">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="bindings">Bindings</TabsTrigger>
-          <TabsTrigger value="skills">Skills</TabsTrigger>
-          <TabsTrigger value="secrets">Secrets</TabsTrigger>
-          <TabsTrigger value="deploy">Deploy</TabsTrigger>
-          <TabsTrigger value="im">IM Capabilities</TabsTrigger>
+          <TabsTrigger value="overview">{t('agents.tabOverview')}</TabsTrigger>
+          <TabsTrigger value="mcp">{t('agents.mcpServers')}</TabsTrigger>
+          <TabsTrigger value="kb">{t('agents.knowledgeBases')}</TabsTrigger>
+          <TabsTrigger value="skills">{t('agents.tabSkills')}</TabsTrigger>
+          <TabsTrigger value="secrets">{t('agents.secrets')}</TabsTrigger>
+          <TabsTrigger value="deploy">{t('agents.tabDeploy')}</TabsTrigger>
+          <TabsTrigger value="im">{t('agents.tabImCapabilities')}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview">
           <OverviewTab agentName={agentName} canWrite={canWrite} />
         </TabsContent>
-        <TabsContent value="bindings">
-          <BindingsTab agentName={agentName} canWrite={canWrite} />
+        <TabsContent value="mcp">
+          <McpServersTab agentName={agentName} canWrite={canWrite} />
+        </TabsContent>
+        <TabsContent value="kb">
+          <KnowledgeBasesTab agentName={agentName} canWrite={canWrite} />
         </TabsContent>
         <TabsContent value="skills">
           <SkillsTab agentName={agentName} canWrite={canWrite} />

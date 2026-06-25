@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Inbox, Plus } from 'lucide-react';
 
 import { useAdminApi } from '@/lib/api-client';
+import { useT } from '@/i18n';
 import { cn } from '@/lib/utils';
 import {
   type ImMapping,
@@ -67,6 +68,7 @@ function AddMappingDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }): JSX.Element {
+  const t = useT();
   const users = useBindableUsersQuery();
   const create = useCreateMappingMutation();
   const [platform, setPlatform] = useState(PLATFORMS[0]);
@@ -87,12 +89,12 @@ function AddMappingDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add mapping</DialogTitle>
-          <DialogDescription>Bind an external IM identity to an internal user.</DialogDescription>
+          <DialogTitle>{t('imIdentities.addMapping')}</DialogTitle>
+          <DialogDescription>{t('imIdentities.dialogDescription')}</DialogDescription>
         </DialogHeader>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="grid gap-1.5">
-            <Label>Platform</Label>
+            <Label>{t('imIdentities.platform')}</Label>
             <Select value={platform} onValueChange={setPlatform}>
               <SelectTrigger>
                 <SelectValue />
@@ -107,19 +109,19 @@ function AddMappingDialog({
             </Select>
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="ext-id">External ID</Label>
+            <Label htmlFor="ext-id">{t('imIdentities.externalId')}</Label>
             <Input
               id="ext-id"
-              placeholder="e.g. U0123 / 123456"
+              placeholder={t('imIdentities.externalIdPlaceholder')}
               value={platformUserId}
               onChange={(event) => setPlatformUserId(event.target.value)}
             />
           </div>
           <div className="grid gap-1.5 sm:col-span-2">
-            <Label>Internal user</Label>
+            <Label>{t('imIdentities.internalUser')}</Label>
             <Select value={userId} onValueChange={setUserId}>
               <SelectTrigger>
-                <SelectValue placeholder="Select a user" />
+                <SelectValue placeholder={t('imIdentities.selectUser')} />
               </SelectTrigger>
               <SelectContent>
                 {(users.data ?? []).map((user) => (
@@ -133,10 +135,10 @@ function AddMappingDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button disabled={!canSubmit || create.isPending} onClick={() => void submit()}>
-            Create
+            {t('imIdentities.createSubmit')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -147,6 +149,7 @@ function AddMappingDialog({
 // ─────────────────────────── Row ───────────────────────────
 
 function MappingRow({ mapping, canWrite }: { mapping: ImMapping; canWrite: boolean }): JSX.Element {
+  const t = useT();
   const deleteMapping = useDeleteMappingMutation();
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -167,9 +170,12 @@ function MappingRow({ mapping, canWrite }: { mapping: ImMapping; canWrite: boole
               <Button
                 variant="secondary"
                 size="sm"
-                aria-label={`Actions for ${mapping.platform}:${mapping.platform_user_id}`}
+                aria-label={t('imIdentities.actionsLabel', {
+                  platform: mapping.platform,
+                  id: mapping.platform_user_id,
+                })}
               >
-                Actions
+                {t('imIdentities.actions')}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -177,7 +183,7 @@ function MappingRow({ mapping, canWrite }: { mapping: ImMapping; canWrite: boole
                 className="text-destructive"
                 onSelect={() => setTimeout(() => setConfirmDelete(true), 0)}
               >
-                Delete
+                {t('common.delete')}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -186,16 +192,19 @@ function MappingRow({ mapping, canWrite }: { mapping: ImMapping; canWrite: boole
         <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Delete mapping?</AlertDialogTitle>
+              <AlertDialogTitle>{t('imIdentities.deleteTitle')}</AlertDialogTitle>
               <AlertDialogDescription>
-                Unbind {mapping.platform}:{mapping.platform_user_id} from {mapping.user_name}. You can
-                re-add it later.
+                {t('imIdentities.deleteDescription', {
+                  platform: mapping.platform,
+                  id: mapping.platform_user_id,
+                  name: mapping.user_name,
+                })}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
               <AlertDialogAction onClick={() => void deleteMapping.mutateAsync(mapping.id)}>
-                Delete
+                {t('common.delete')}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -208,6 +217,7 @@ function MappingRow({ mapping, canWrite }: { mapping: ImMapping; canWrite: boole
 // ─────────────────────────── Page ───────────────────────────
 
 export function ImIdentitiesPage(): JSX.Element {
+  const t = useT();
   const me = useAdminMeQuery();
   const mappings = useImMappingsQuery();
   const [adding, setAdding] = useState(false);
@@ -219,28 +229,26 @@ export function ImIdentitiesPage(): JSX.Element {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-xl font-semibold tracking-tight">IM Identities</h2>
+          <h2 className="text-xl font-semibold tracking-tight">{t('nav.imIdentities')}</h2>
           <Badge variant="secondary">{list.length}</Badge>
         </div>
         {canWrite ? (
           <Button onClick={() => setAdding(true)}>
-            <Plus className="size-4" /> Add mapping
+            <Plus className="size-4" /> {t('imIdentities.addMapping')}
           </Button>
         ) : null}
       </div>
 
-      <p className="text-sm text-muted-foreground">
-        Maps each external IM identity to the internal user it is bound to.
-      </p>
+      <p className="text-sm text-muted-foreground">{t('imIdentities.pageDescription')}</p>
 
       <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full">
           <thead className="bg-secondary/50">
             <tr>
-              <Th>Platform</Th>
-              <Th>External ID</Th>
-              <Th>User</Th>
-              <Th className="text-right">Actions</Th>
+              <Th>{t('imIdentities.platform')}</Th>
+              <Th>{t('imIdentities.externalId')}</Th>
+              <Th>{t('imIdentities.user')}</Th>
+              <Th className="text-right">{t('imIdentities.actions')}</Th>
             </tr>
           </thead>
           <tbody>
@@ -252,7 +260,7 @@ export function ImIdentitiesPage(): JSX.Element {
                 <td colSpan={4}>
                   <div className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
                     <Inbox className="size-6 opacity-50" />
-                    <span className="text-sm">No mappings yet.</span>
+                    <span className="text-sm">{t('imIdentities.emptyState')}</span>
                   </div>
                 </td>
               </tr>

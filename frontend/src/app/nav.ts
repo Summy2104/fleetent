@@ -12,57 +12,64 @@ import {
   Sparkles,
   Users,
   UserCog,
+  UsersRound,
   type LucideIcon,
 } from 'lucide-react';
 
+import type { MessageKey } from '@/i18n';
+
 export type NavItem = {
   to: string;
-  label: string;
+  /** i18n key resolved at render time（见 `src/i18n/messages.ts`）。 */
+  labelKey: MessageKey;
   icon: LucideIcon;
 };
 
 export type NavGroup = {
-  label: string | null;
+  /** 分组标题的 i18n key；无标题分组为 null。 */
+  labelKey: MessageKey | null;
   items: NavItem[];
 };
 
 /** Keep the existing 11 features; only regroup them for the new visual shell. */
 export const NAV_GROUPS: NavGroup[] = [
   {
-    label: null,
+    labelKey: null,
     items: [
-      { to: '/agents', label: 'Agents', icon: Bot },
-      { to: '/chat', label: 'Chat', icon: MessagesSquare },
-      { to: '/sessions', label: 'Sessions', icon: History },
+      { to: '/agents', labelKey: 'nav.agents', icon: Bot },
+      { to: '/chat', labelKey: 'nav.chat', icon: MessagesSquare },
+      { to: '/sessions', labelKey: 'nav.sessions', icon: History },
     ],
   },
   {
-    label: 'Knowledge & Skills',
+    labelKey: 'nav.group.knowledgeSkills',
     items: [
-      { to: '/skills', label: 'Skills', icon: Sparkles },
-      { to: '/kb', label: 'Knowledge Base', icon: BookOpen },
+      { to: '/skills', labelKey: 'nav.skills', icon: Sparkles },
+      { to: '/kb', labelKey: 'nav.kb', icon: BookOpen },
     ],
   },
   {
-    label: 'Integrations',
+    labelKey: 'nav.group.integrations',
     items: [
-      { to: '/providers', label: 'Providers', icon: Cpu },
-      { to: '/connectors', label: 'Connector', icon: Plug },
-      { to: '/mcp', label: 'MCP Servers', icon: Boxes },
-      { to: '/nodes', label: 'Nodes', icon: Server },
+      { to: '/providers', labelKey: 'nav.providers', icon: Cpu },
+      { to: '/connectors', labelKey: 'nav.connectors', icon: Plug },
+      { to: '/mcp', labelKey: 'nav.mcp', icon: Boxes },
+      { to: '/nodes', labelKey: 'nav.nodes', icon: Server },
     ],
   },
   {
-    label: 'Admin',
+    labelKey: 'nav.group.admin',
     items: [
-      { to: '/users', label: 'Users', icon: Users },
-      { to: '/im-identities', label: 'IM Identities', icon: UserCog },
-      { to: '/tenancy', label: 'Tenancy', icon: Building2 },
-      { to: '/stats', label: 'Statistics', icon: BarChart3 },
+      { to: '/users', labelKey: 'nav.users', icon: Users },
+      { to: '/im-identities', labelKey: 'nav.imIdentities', icon: UserCog },
+      { to: '/tenancy', labelKey: 'nav.tenancy', icon: Building2 },
+      { to: '/teams', labelKey: 'nav.teams', icon: UsersRound },
+      { to: '/stats', labelKey: 'nav.stats', icon: BarChart3 },
     ],
   },
 ];
 
-export const NAV_TITLES: Record<string, string> = Object.fromEntries(
-  NAV_GROUPS.flatMap((group) => group.items).map((item) => [item.to, item.label])
+/** 路由路径 → 页面标题 i18n key（Topbar 标题复用导航词条）。 */
+export const NAV_TITLE_KEYS: Record<string, MessageKey> = Object.fromEntries(
+  NAV_GROUPS.flatMap((group) => group.items).map((item) => [item.to, item.labelKey])
 );

@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Copy, KeyRound, MoreVertical, Plus, RefreshCw, Trash2, UserPlus } from 'lucide-react';
 
 import { useAdminApi } from '@/lib/api-client';
+import { useT } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -96,12 +97,13 @@ function SecretDialog({
   secret: string | null;
   onDismiss: () => void;
 }): JSX.Element {
+  const t = useT();
   return (
     <Dialog open={Boolean(secret)} onOpenChange={(open) => !open && onDismiss()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New API key</DialogTitle>
-          <DialogDescription>Copy this key now. It will not be shown again.</DialogDescription>
+          <DialogTitle>{t('users.newApiKey')}</DialogTitle>
+          <DialogDescription>{t('users.newApiKeyDescription')}</DialogDescription>
         </DialogHeader>
         <div className="rounded-md border border-warning/40 bg-warning/10 p-4">
           <p className="break-all font-mono text-sm text-foreground">{secret}</p>
@@ -111,9 +113,9 @@ function SecretDialog({
             variant="outline"
             onClick={() => secret && void navigator.clipboard?.writeText(secret)}
           >
-            <Copy className="size-4" /> Copy
+            <Copy className="size-4" /> {t('users.copy')}
           </Button>
-          <Button onClick={onDismiss}>Dismiss new secret</Button>
+          <Button onClick={onDismiss}>{t('users.dismissNewSecret')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -146,6 +148,7 @@ function UserFormDialog({
   busy: boolean;
   onSubmit: (state: UserFormState) => Promise<void>;
 }): JSX.Element {
+  const t = useT();
   const [state, setState] = useState<UserFormState>({
     email: '',
     name: '',
@@ -175,16 +178,16 @@ function UserFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{mode === 'create' ? 'Create user' : `Edit ${user?.name ?? 'user'}`}</DialogTitle>
+          <DialogTitle>{mode === 'create' ? t('users.createUser') : t('users.editUser', { name: user?.name ?? t('users.userFallback') })}</DialogTitle>
           <DialogDescription>
             {mode === 'create'
-              ? 'Create a new admin user with an initial role and password.'
-              : 'Update profile, role, or reset the password.'}
+              ? t('users.createUserDescription')
+              : t('users.editUserDescription')}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
           <div className="grid gap-2">
-            <Label htmlFor="user-name">User name</Label>
+            <Label htmlFor="user-name">{t('users.userName')}</Label>
             <Input
               id="user-name"
               value={state.name}
@@ -192,7 +195,7 @@ function UserFormDialog({
             />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="user-email">Email</Label>
+            <Label htmlFor="user-email">{t('users.email')}</Label>
             <Input
               id="user-email"
               value={state.email}
@@ -200,12 +203,12 @@ function UserFormDialog({
             />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="user-role">Role</Label>
+            <Label htmlFor="user-role">{t('users.role')}</Label>
             <Select
               value={state.role}
               onValueChange={(value) => setState((current) => ({ ...current, role: value }))}
             >
-              <SelectTrigger id="user-role" aria-label="Role">
+              <SelectTrigger id="user-role" aria-label={t('users.role')}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -218,16 +221,16 @@ function UserFormDialog({
             </Select>
           </div>
           <label className="flex items-center justify-between gap-3 text-sm font-medium">
-            Must reset password on first login
+            {t('users.mustResetPassword')}
             <Switch
               checked={state.mustReset}
-              aria-label="Must reset password on first login"
+              aria-label={t('users.mustResetPassword')}
               onCheckedChange={(checked) => setState((current) => ({ ...current, mustReset: checked }))}
             />
           </label>
           {mode === 'create' ? (
             <div className="grid gap-2">
-              <Label htmlFor="user-password">Password</Label>
+              <Label htmlFor="user-password">{t('users.password')}</Label>
               <Input
                 id="user-password"
                 type="password"
@@ -237,7 +240,7 @@ function UserFormDialog({
             </div>
           ) : (
             <div className="grid gap-2">
-              <Label htmlFor="user-reset-password">Reset password</Label>
+              <Label htmlFor="user-reset-password">{t('users.resetPassword')}</Label>
               <Input
                 id="user-reset-password"
                 type="password"
@@ -251,10 +254,10 @@ function UserFormDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t('users.cancel')}
           </Button>
           <Button disabled={busy || !state.name} onClick={() => void onSubmit(state)}>
-            {mode === 'create' ? 'Create user' : 'Save changes'}
+            {mode === 'create' ? t('users.createUser') : t('users.saveChanges')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -273,6 +276,7 @@ function BlockUserDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }): JSX.Element {
+  const t = useT();
   const blockUser = useBlockUserMutation(user.id);
   const [reason, setReason] = useState('');
 
@@ -286,16 +290,16 @@ function BlockUserDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Block {user.name}</DialogTitle>
-          <DialogDescription>The user will be unable to sign in until unblocked.</DialogDescription>
+          <DialogTitle>{t('users.blockUser', { name: user.name })}</DialogTitle>
+          <DialogDescription>{t('users.blockUserDescription')}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-2">
-          <Label htmlFor="block-reason">Block reason</Label>
+          <Label htmlFor="block-reason">{t('users.blockReason')}</Label>
           <Input id="block-reason" value={reason} onChange={(event) => setReason(event.target.value)} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t('users.cancel')}
           </Button>
           <Button
             variant="destructive"
@@ -306,7 +310,7 @@ function BlockUserDialog({
               })
             }
           >
-            Block
+            {t('users.block')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -331,6 +335,7 @@ function UserRow({
   onEdit: () => void;
   onManageKeys: () => void;
 }): JSX.Element {
+  const t = useT();
   const unblockUser = useUnblockUserMutation(user.id);
   const deleteUser = useDeleteUserMutation(user.id);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -355,7 +360,7 @@ function UserRow({
             <Badge variant={statusVariant(user.status)}>{user.status}</Badge>
           </span>
           <span className="mt-0.5 block truncate text-sm text-muted-foreground">
-            {user.email ?? 'no email'}
+            {user.email ?? t('users.noEmail')}
           </span>
         </span>
       </button>
@@ -363,21 +368,21 @@ function UserRow({
       {canWrite ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" aria-label={`Actions for ${user.name}`}>
+            <Button variant="ghost" size="icon" aria-label={t('users.actionsFor', { name: user.name })}>
               <MoreVertical className="size-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={onEdit}>Edit</DropdownMenuItem>
+            <DropdownMenuItem onSelect={onEdit}>{t('users.edit')}</DropdownMenuItem>
             {user.status === 'blocked' ? (
-              <DropdownMenuItem onSelect={() => void unblockUser.mutateAsync()}>Unblock</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void unblockUser.mutateAsync()}>{t('users.unblock')}</DropdownMenuItem>
             ) : (
-              <DropdownMenuItem onSelect={() => setBlockOpen(true)}>Block</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setBlockOpen(true)}>{t('users.block')}</DropdownMenuItem>
             )}
-            <DropdownMenuItem onSelect={() => setTimeout(onManageKeys, 0)}>API keys</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setTimeout(onManageKeys, 0)}>{t('users.apiKeys')}</DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem destructive onSelect={() => setConfirmDelete(true)}>
-              <Trash2 /> Delete
+              <Trash2 /> {t('users.delete')}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -388,14 +393,14 @@ function UserRow({
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete {user.name}?</AlertDialogTitle>
+            <AlertDialogTitle>{t('users.deleteUserConfirmTitle', { name: user.name })}</AlertDialogTitle>
             <AlertDialogDescription>
-              This permanently removes the user and revokes all of their API keys.
+              {t('users.deleteUserConfirmDescription')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void deleteUser.mutateAsync()}>Delete</AlertDialogAction>
+            <AlertDialogCancel>{t('users.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void deleteUser.mutateAsync()}>{t('users.delete')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -418,6 +423,7 @@ function IssueKeyDialog({
   onOpenChange: (open: boolean) => void;
   onSecret: (secret: string) => void;
 }): JSX.Element {
+  const t = useT();
   const createKey = useCreateKeyMutation(userId);
   const [note, setNote] = useState('');
   const [scope, setScope] = useState('*');
@@ -447,25 +453,25 @@ function IssueKeyDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Issue key for {userName}</DialogTitle>
-          <DialogDescription>The plaintext key is shown once after creation.</DialogDescription>
+          <DialogTitle>{t('users.issueKeyFor', { name: userName })}</DialogTitle>
+          <DialogDescription>{t('users.issueKeyDescription')}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
           <div className="grid gap-2">
-            <Label htmlFor="key-note">Key note</Label>
+            <Label htmlFor="key-note">{t('users.keyNote')}</Label>
             <Input id="key-note" value={note} onChange={(event) => setNote(event.target.value)} />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="key-scope">Key scope</Label>
+            <Label htmlFor="key-scope">{t('users.keyScope')}</Label>
             <Input id="key-scope" value={scope} onChange={(event) => setScope(event.target.value)} />
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t('users.cancel')}
           </Button>
           <Button disabled={createKey.isPending} onClick={() => void onIssue()}>
-            Issue key
+            {t('users.issueKey')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -488,6 +494,7 @@ function KeysDialog({
   canWrite: boolean;
   onSecret: (secret: string) => void;
 }): JSX.Element {
+  const t = useT();
   const userKeys = useUserKeysQuery(user.id);
   const rotateKey = useRotateKeyMutation(user.id);
   const revokeKey = useRevokeKeyMutation(user.id);
@@ -504,17 +511,17 @@ function KeysDialog({
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <KeyRound className="size-4 text-primary" /> API keys · {user.name}
+            <KeyRound className="size-4 text-primary" /> {t('users.apiKeysFor', { name: user.name })}
           </DialogTitle>
-          <DialogDescription>Issue, rotate, and revoke API keys for this user.</DialogDescription>
+          <DialogDescription>{t('users.apiKeysDescription')}</DialogDescription>
         </DialogHeader>
         {canWrite ? (
           <div className="flex flex-wrap gap-2">
             <Button size="sm" onClick={() => setIssueOpen(true)}>
-              <KeyRound className="size-4" /> Issue key
+              <KeyRound className="size-4" /> {t('users.issueKey')}
             </Button>
             <Button size="sm" variant="secondary" onClick={() => void onRotate()}>
-              <RefreshCw className="size-4" /> Rotate key
+              <RefreshCw className="size-4" /> {t('users.rotateKey')}
             </Button>
           </div>
         ) : null}
@@ -530,22 +537,22 @@ function KeysDialog({
                 {key.masked}
               </span>
               <span className="shrink-0 font-mono text-xs text-muted-foreground">{key.prefix}</span>
-              {key.revoked_at ? <Badge variant="secondary">revoked</Badge> : null}
+              {key.revoked_at ? <Badge variant="secondary">{t('users.revoked')}</Badge> : null}
             </div>
             {canWrite && !key.revoked_at ? (
               <Button
                 size="sm"
                 variant="ghost"
-                aria-label={`Revoke key ${key.id}`}
+                aria-label={t('users.revokeKeyAria', { id: key.id })}
                 onClick={() => setRevokeTarget({ id: key.id, masked: key.masked })}
               >
-                <Trash2 className="size-4" /> Revoke
+                <Trash2 className="size-4" /> {t('users.revoke')}
               </Button>
             ) : null}
           </div>
         ))}
         {userKeys.data && userKeys.data.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No API keys for this user.</p>
+          <p className="text-sm text-muted-foreground">{t('users.noApiKeys')}</p>
         ) : null}
       </div>
 
@@ -562,20 +569,20 @@ function KeysDialog({
       <AlertDialog open={Boolean(revokeTarget)} onOpenChange={(open) => !open && setRevokeTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Revoke key {revokeTarget?.masked}?</AlertDialogTitle>
+            <AlertDialogTitle>{t('users.revokeKeyConfirmTitle', { masked: revokeTarget?.masked ?? '' })}</AlertDialogTitle>
             <AlertDialogDescription>
-              The key is immediately invalidated and cannot be restored.
+              {t('users.revokeKeyConfirmDescription')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('users.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 if (revokeTarget) void revokeKey.mutateAsync(revokeTarget.id);
                 setRevokeTarget(null);
               }}
             >
-              {revokeTarget ? `Revoke key ${revokeTarget.id}` : 'Revoke'}
+              {revokeTarget ? t('users.revokeKeyAria', { id: revokeTarget.id }) : t('users.revoke')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -596,6 +603,7 @@ function ImUserRow({
   users: UserListItem[];
   canWrite: boolean;
 }): JSX.Element {
+  const t = useT();
   const bindImUser = useBindImUserMutation(imUser.id);
   const blockImUser = useBlockImUserMutation(imUser.id);
   const restoreImUser = useRestoreImUserMutation(imUser.id);
@@ -614,7 +622,7 @@ function ImUserRow({
           <Badge variant="secondary">{imUser.user_id}</Badge>
           <Badge variant={statusVariant(imUser.status)}>{imUser.status}</Badge>
           <Badge variant={imUser.allowed ? 'success' : 'destructive'}>
-            {imUser.allowed ? 'allowed' : 'not allowed'}
+            {imUser.allowed ? t('users.allowed') : t('users.notAllowed')}
           </Badge>
         </div>
       </div>
@@ -622,7 +630,7 @@ function ImUserRow({
       {canWrite ? (
         <div className="grid gap-3">
           <div className="grid gap-2">
-            <Label htmlFor={`im-bind-${imUser.id}`}>Bind to user</Label>
+            <Label htmlFor={`im-bind-${imUser.id}`}>{t('users.bindToUser')}</Label>
             <Select
               value={boundUser}
               onValueChange={(value) => {
@@ -630,7 +638,7 @@ function ImUserRow({
                 void bindImUser.mutateAsync({ user_id: value });
               }}
             >
-              <SelectTrigger id={`im-bind-${imUser.id}`} aria-label="Bind to user">
+              <SelectTrigger id={`im-bind-${imUser.id}`} aria-label={t('users.bindToUser')}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -643,7 +651,7 @@ function ImUserRow({
             </Select>
           </div>
           <div className="grid gap-2">
-            <Label htmlFor={`im-reason-${imUser.id}`}>IM reason</Label>
+            <Label htmlFor={`im-reason-${imUser.id}`}>{t('users.imReason')}</Label>
             <Input
               id={`im-reason-${imUser.id}`}
               value={reason}
@@ -660,12 +668,12 @@ function ImUserRow({
                   : restoreImUser.mutateAsync({ reason }))
               }
             >
-              {imUser.allowed ? 'Block identity' : 'Restore identity'}
+              {imUser.allowed ? t('users.blockIdentity') : t('users.restoreIdentity')}
             </Button>
           </div>
         </div>
       ) : (
-        <p className="text-xs text-muted-foreground">Viewer access is read-only.</p>
+        <p className="text-xs text-muted-foreground">{t('users.viewerReadOnly')}</p>
       )}
     </div>
   );
@@ -674,6 +682,7 @@ function ImUserRow({
 // ─────────────────────────── Page ───────────────────────────
 
 export function UsersPage(): JSX.Element {
+  const t = useT();
   const me = useAdminMeQuery();
   const users = useUsersQuery();
   const imUsers = useImUsersQuery();
@@ -743,7 +752,7 @@ export function UsersPage(): JSX.Element {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-xl font-semibold tracking-tight">Users</h2>
+          <h2 className="text-xl font-semibold tracking-tight">{t('users.title')}</h2>
           <Badge variant="secondary">{users.data?.length ?? 0}</Badge>
         </div>
         {canWrite ? (
@@ -753,20 +762,19 @@ export function UsersPage(): JSX.Element {
               setFormOpen(true);
             }}
           >
-            <UserPlus className="size-4" /> Create user
+            <UserPlus className="size-4" /> {t('users.createUser')}
           </Button>
         ) : null}
       </div>
 
       <p className="max-w-2xl text-sm text-muted-foreground">
-        User administration, API key lifecycle, and IM identity controls run natively in the React
-        admin surface.
+        {t('users.pageDescription')}
       </p>
 
       <Tabs defaultValue="users">
         <TabsList>
-          <TabsTrigger value="users">Users</TabsTrigger>
-          <TabsTrigger value="im">IM identities</TabsTrigger>
+          <TabsTrigger value="users">{t('users.tabUsers')}</TabsTrigger>
+          <TabsTrigger value="im">{t('users.tabImIdentities')}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="users">
@@ -788,7 +796,7 @@ export function UsersPage(): JSX.Element {
             ))}
             {users.data && users.data.length === 0 ? (
               <div className="rounded-lg border border-dashed border-border py-12 text-center text-sm text-muted-foreground">
-                No users yet. Create one to get started.
+                {t('users.emptyUsers')}
               </div>
             ) : null}
           </div>
@@ -806,7 +814,7 @@ export function UsersPage(): JSX.Element {
             ))}
             {imUsers.data && imUsers.data.length === 0 ? (
               <div className="rounded-lg border border-dashed border-border py-12 text-center text-sm text-muted-foreground">
-                No IM identities linked yet.
+                {t('users.emptyImIdentities')}
               </div>
             ) : null}
           </div>

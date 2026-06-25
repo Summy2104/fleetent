@@ -40,18 +40,13 @@ export type CreateAgentInput = {
   model_overrides?: AgentModelOverrides;
 };
 
-export type UpdateAgentInput = {
-  system_prompt?: string;
-  allowed_tools?: string[];
-  model_overrides?: AgentModelOverrides;
-  config_overrides_yaml?: string;
-};
-
 // Fields the PATCH /admin/agents/{name} endpoint accepts (UpdateBody). All
 // optional — omitted fields are left unchanged.
 export type UpdateAgentInput = {
   system_prompt?: string;
   allowed_tools?: string[];
+  model_overrides?: AgentModelOverrides;
+  config_overrides_yaml?: string;
   icon?: string | null;
   memory_namespace?: string;
 };

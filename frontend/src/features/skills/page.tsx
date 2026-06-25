@@ -1,7 +1,8 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { GitCompare, Inbox, Plus, RefreshCw } from 'lucide-react';
+import { GitCompare, Inbox, RefreshCw } from 'lucide-react';
 
+import { useT } from '@/i18n';
 import { useAdminApi } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -10,7 +11,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -32,14 +32,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Textarea } from '@/components/ui/textarea';
 import {
   type SkillListItem,
   type SkillProposal,
-  useCreateSkillMutation,
-  useEditSkillMutation,
   useForcePublishSkillMutation,
   useReloadSkillsMutation,
   useSetSkillAgentBindingMutation,
@@ -93,142 +89,21 @@ function CodeBlock({ children }: { children: string }): JSX.Element {
 
 function ContentDialog({
   skillName,
-  canWrite,
   onOpenChange,
 }: {
   skillName: string | null;
-  canWrite: boolean;
   onOpenChange: (open: boolean) => void;
 }): JSX.Element {
+  const t = useT();
   const content = useSkillContentQuery(skillName);
-  const edit = useEditSkillMutation(skillName ?? '');
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState('');
-
-  // Reset back to read-only whenever the dialog targets a different skill.
-  useEffect(() => {
-    setEditing(false);
-  }, [skillName]);
-
-  // Mirror refetched content into the read-only view, but never clobber an
-  // in-progress edit draft.
-  useEffect(() => {
-    if (!editing) {
-      setDraft(content.data?.content ?? '');
-    }
-  }, [content.data?.content, editing]);
-
-  const save = async (): Promise<void> => {
-    await edit.mutateAsync({ content: draft });
-    setEditing(false);
-  };
-
   return (
     <Dialog open={Boolean(skillName)} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Content · {skillName}</DialogTitle>
-          <DialogDescription>
-            {editing ? 'Edit the published skill definition.' : 'The published skill definition (SKILL.md).'}
-          </DialogDescription>
+          <DialogTitle>{t('skills.contentTitle', { name: skillName ?? '' })}</DialogTitle>
+          <DialogDescription>{t('skills.contentDescription')}</DialogDescription>
         </DialogHeader>
-        {editing ? (
-          <Textarea
-            aria-label="Skill content editor"
-            className="min-h-72 font-mono"
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-          />
-        ) : (
-          <CodeBlock>{content.data?.content ?? ''}</CodeBlock>
-        )}
-        {canWrite ? (
-          <DialogFooter>
-            {editing ? (
-              <>
-                <Button variant="outline" onClick={() => setEditing(false)}>
-                  Cancel
-                </Button>
-                <Button disabled={edit.isPending} onClick={() => void save()}>
-                  Save content
-                </Button>
-              </>
-            ) : (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setDraft(content.data?.content ?? '');
-                  setEditing(true);
-                }}
-              >
-                Edit content
-              </Button>
-            )}
-          </DialogFooter>
-        ) : null}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ─────────────────────────── Create skill dialog ───────────────────────────
-
-const CREATE_TEMPLATE = '---\nname: \ndescription: \n---\n\n';
-
-function CreateSkillDialog({
-  open,
-  onOpenChange,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}): JSX.Element {
-  const create = useCreateSkillMutation();
-  const [name, setName] = useState('');
-  const [content, setContent] = useState('');
-
-  const submit = async (): Promise<void> => {
-    await create.mutateAsync({ content, name });
-    setName('');
-    setContent('');
-    onOpenChange(false);
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>New skill</DialogTitle>
-          <DialogDescription>Create a skill and its initial SKILL.md definition.</DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-3">
-          <div className="grid gap-1.5">
-            <Label htmlFor="new-skill-name">Name</Label>
-            <Input
-              id="new-skill-name"
-              placeholder="skill-name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="new-skill-content">Content</Label>
-            <Textarea
-              id="new-skill-content"
-              className="min-h-64 font-mono"
-              placeholder={CREATE_TEMPLATE}
-              value={content}
-              onChange={(event) => setContent(event.target.value)}
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button disabled={!name.trim() || !content.trim() || create.isPending} onClick={() => void submit()}>
-            Create skill
-          </Button>
-        </DialogFooter>
+        <CodeBlock>{content.data?.content ?? ''}</CodeBlock>
       </DialogContent>
     </Dialog>
   );
@@ -243,6 +118,7 @@ function VersionsDialog({
   skillName: string | null;
   onOpenChange: (open: boolean) => void;
 }): JSX.Element {
+  const t = useT();
   const [selectedRef, setSelectedRef] = useState<string | null>(null);
   const versions = useSkillVersionsQuery(skillName, Boolean(skillName));
   const diff = useSkillDiffQuery(skillName, selectedRef, Boolean(selectedRef));
@@ -255,8 +131,8 @@ function VersionsDialog({
     <Dialog open={Boolean(skillName)} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Versions · {skillName}</DialogTitle>
-          <DialogDescription>Browse commit history and inspect the diff for any revision.</DialogDescription>
+          <DialogTitle>{t('skills.versionsTitle', { name: skillName ?? '' })}</DialogTitle>
+          <DialogDescription>{t('skills.versionsDescription')}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-2">
           {(versions.data ?? []).map((version) => (
@@ -273,12 +149,12 @@ function VersionsDialog({
                 variant={selectedRef === version.sha ? 'secondary' : 'outline'}
                 onClick={() => setSelectedRef(version.sha)}
               >
-                <GitCompare className="size-4" /> Diff
+                <GitCompare className="size-4" /> {t('skills.diff')}
               </Button>
             </div>
           ))}
           {versions.data && versions.data.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No version history.</p>
+            <p className="text-sm text-muted-foreground">{t('skills.noVersionHistory')}</p>
           ) : null}
         </div>
         {diff.data?.diff ? <CodeBlock>{diff.data.diff}</CodeBlock> : null}
@@ -302,6 +178,7 @@ function BindingToggle({
   skillName: string;
   canWrite: boolean;
 }): JSX.Element {
+  const t = useT();
   const update = useSetSkillAgentBindingMutation(skillName, agentId);
   return (
     <div className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2">
@@ -309,7 +186,9 @@ function BindingToggle({
       {canWrite ? (
         <Switch aria-label={label} checked={enabled} onCheckedChange={(checked) => update.mutate({ enabled: checked })} />
       ) : (
-        <span className="text-xs text-muted-foreground">{enabled ? 'enabled' : 'disabled'}</span>
+        <span className="text-xs text-muted-foreground">
+          {enabled ? t('skills.enabled') : t('skills.disabled')}
+        </span>
       )}
     </div>
   );
@@ -324,13 +203,14 @@ function BindingsDialog({
   canWrite: boolean;
   onOpenChange: (open: boolean) => void;
 }): JSX.Element {
+  const t = useT();
   const bindings = useSkillAgentBindingsQuery(skillName);
   return (
     <Dialog open={Boolean(skillName)} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Agent bindings · {skillName}</DialogTitle>
-          <DialogDescription>Toggle which agents this skill is enabled for.</DialogDescription>
+          <DialogTitle>{t('skills.bindingsTitle', { name: skillName ?? '' })}</DialogTitle>
+          <DialogDescription>{t('skills.bindingsDescription')}</DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
           {(bindings.data ?? []).map((binding) => (
@@ -344,7 +224,7 @@ function BindingsDialog({
             />
           ))}
           {bindings.data && bindings.data.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No agents bound.</p>
+            <p className="text-sm text-muted-foreground">{t('skills.noAgentsBound')}</p>
           ) : null}
         </div>
       </DialogContent>
@@ -361,18 +241,19 @@ function ProposalDiffDialog({
   proposalId: string | null;
   onOpenChange: (open: boolean) => void;
 }): JSX.Element {
+  const t = useT();
   const diff = useSkillProposalDiffQuery(proposalId, Boolean(proposalId));
   return (
     <Dialog open={Boolean(proposalId)} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Proposal diff</DialogTitle>
-          <DialogDescription>Read-only reflection proposal. Apply it from the agent workflow.</DialogDescription>
+          <DialogTitle>{t('skills.proposalDiffTitle')}</DialogTitle>
+          <DialogDescription>{t('skills.proposalDiffDescription')}</DialogDescription>
         </DialogHeader>
         {diff.data?.diff ? (
           <CodeBlock>{diff.data.diff}</CodeBlock>
         ) : (
-          <p className="text-sm text-muted-foreground">No diff available for this proposal.</p>
+          <p className="text-sm text-muted-foreground">{t('skills.noProposalDiff')}</p>
         )}
       </DialogContent>
     </Dialog>
@@ -392,12 +273,13 @@ function ProposalsDialog({
   onDiff: (id: string) => void;
   onOpenChange: (open: boolean) => void;
 }): JSX.Element {
+  const t = useT();
   return (
     <Dialog open={Boolean(skillName)} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Proposals · {skillName}</DialogTitle>
-          <DialogDescription>Reflection-generated change proposals targeting this skill.</DialogDescription>
+          <DialogTitle>{t('skills.proposalsTitle', { name: skillName ?? '' })}</DialogTitle>
+          <DialogDescription>{t('skills.proposalsDescription')}</DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
           {proposals.map((proposal) => (
@@ -416,13 +298,13 @@ function ProposalsDialog({
               </div>
               {proposal.has_diff ? (
                 <Button size="sm" variant="outline" onClick={() => onDiff(proposal.id)}>
-                  <GitCompare className="size-4" /> Diff
+                  <GitCompare className="size-4" /> {t('skills.diff')}
                 </Button>
               ) : null}
             </div>
           ))}
           {proposals.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No proposals for this skill.</p>
+            <p className="text-sm text-muted-foreground">{t('skills.noProposals')}</p>
           ) : null}
         </div>
       </DialogContent>
@@ -449,6 +331,7 @@ function SkillRow({
   onBindings: () => void;
   onProposals: () => void;
 }): JSX.Element {
+  const t = useT();
   const toggle = useSkillLifecycleMutation(skill.name, skill.global_enabled ? 'disable' : 'enable');
   const restore = useSkillLifecycleMutation(skill.name, 'restore');
   const archive = useSkillLifecycleMutation(skill.name, 'delete');
@@ -469,7 +352,7 @@ function SkillRow({
       </td>
       <td className="px-4 py-3">
         <Badge variant={skill.global_enabled ? 'success' : 'secondary'}>
-          {skill.global_enabled ? 'enabled' : 'disabled'}
+          {skill.global_enabled ? t('skills.enabled') : t('skills.disabled')}
         </Badge>
       </td>
       <td className="px-4 py-3">
@@ -482,32 +365,41 @@ function SkillRow({
       <td className="px-4 py-3 text-right">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="secondary" size="sm" aria-label={`Actions for ${skill.name}`}>
-              Actions
+            <Button variant="secondary" size="sm" aria-label={t('skills.actionsFor', { name: skill.name })}>
+              {t('skills.actions')}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => setTimeout(onViewContent, 0)}>View content</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setTimeout(onVersions, 0)}>Versions</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setTimeout(onBindings, 0)}>Agent bindings</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setTimeout(onViewContent, 0)}>
+              {t('skills.viewContent')}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setTimeout(onVersions, 0)}>{t('skills.versions')}</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setTimeout(onBindings, 0)}>
+              {t('skills.agentBindings')}
+            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setTimeout(onProposals, 0)}>
-              Proposals{proposalCount > 0 ? ` (${proposalCount})` : ''}
+              {t('skills.proposals')}
+              {proposalCount > 0 ? ` (${proposalCount})` : ''}
             </DropdownMenuItem>
             {canWrite ? (
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={() => void toggle.mutateAsync()}>
-                  {skill.global_enabled ? 'Disable' : 'Enable'}
+                  {skill.global_enabled ? t('skills.disable') : t('skills.enable')}
                 </DropdownMenuItem>
                 {skill.status === 'archived' ? (
-                  <DropdownMenuItem onSelect={() => void restore.mutateAsync()}>Restore</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => void restore.mutateAsync()}>
+                    {t('skills.restore')}
+                  </DropdownMenuItem>
                 ) : (
                   <DropdownMenuItem onSelect={() => setTimeout(() => setConfirmArchive(true), 0)}>
-                    Archive
+                    {t('skills.archive')}
                   </DropdownMenuItem>
                 )}
                 {canForcePublish ? (
-                  <DropdownMenuItem onSelect={() => void forcePublish.mutateAsync()}>Force publish</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => void forcePublish.mutateAsync()}>
+                    {t('skills.forcePublish')}
+                  </DropdownMenuItem>
                 ) : null}
               </>
             ) : null}
@@ -517,14 +409,12 @@ function SkillRow({
         <AlertDialog open={confirmArchive} onOpenChange={setConfirmArchive}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Archive {skill.name}?</AlertDialogTitle>
-              <AlertDialogDescription>
-                Archiving removes the skill from active rollout. You can restore it later.
-              </AlertDialogDescription>
+              <AlertDialogTitle>{t('skills.archiveConfirmTitle', { name: skill.name })}</AlertDialogTitle>
+              <AlertDialogDescription>{t('skills.archiveConfirmDescription')}</AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={() => void archive.mutateAsync()}>Archive</AlertDialogAction>
+              <AlertDialogCancel>{t('skills.cancel')}</AlertDialogCancel>
+              <AlertDialogAction onClick={() => void archive.mutateAsync()}>{t('skills.archive')}</AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
@@ -536,6 +426,7 @@ function SkillRow({
 // ─────────────────────────── Page ───────────────────────────
 
 export function SkillsPage(): JSX.Element {
+  const t = useT();
   const me = useAdminMeQuery();
   const skills = useSkillsQuery();
   const proposals = useSkillProposalsQuery();
@@ -547,7 +438,6 @@ export function SkillsPage(): JSX.Element {
   const [bindingsFor, setBindingsFor] = useState<string | null>(null);
   const [proposalsFor, setProposalsFor] = useState<string | null>(null);
   const [proposalDiffId, setProposalDiffId] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
 
   const canWrite = me.data?.role !== 'viewer';
 
@@ -572,24 +462,19 @@ export function SkillsPage(): JSX.Element {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-xl font-semibold tracking-tight">Skills</h2>
+          <h2 className="text-xl font-semibold tracking-tight">{t('skills.title')}</h2>
           <Badge variant="secondary">{skills.data?.length ?? 0}</Badge>
         </div>
         {canWrite ? (
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => setCreating(true)}>
-              <Plus className="size-4" /> New skill
-            </Button>
-            <Button variant="outline" onClick={() => void reload.mutateAsync()}>
-              <RefreshCw className="size-4" /> Reload index
-            </Button>
-          </div>
+          <Button variant="outline" onClick={() => void reload.mutateAsync()}>
+            <RefreshCw className="size-4" /> {t('skills.reloadIndex')}
+          </Button>
         ) : null}
       </div>
 
       <Input
         className="max-w-xs"
-        placeholder="Search skills…"
+        placeholder={t('skills.searchPlaceholder')}
         value={query}
         onChange={(event) => setQuery(event.target.value)}
       />
@@ -598,11 +483,11 @@ export function SkillsPage(): JSX.Element {
         <table className="w-full">
           <thead className="bg-secondary/50">
             <tr>
-              <Th>Skill</Th>
-              <Th>Status</Th>
-              <Th>Enabled</Th>
-              <Th>Audit</Th>
-              <Th className="text-right">Actions</Th>
+              <Th>{t('skills.colSkill')}</Th>
+              <Th>{t('skills.colStatus')}</Th>
+              <Th>{t('skills.colEnabled')}</Th>
+              <Th>{t('skills.colAudit')}</Th>
+              <Th className="text-right">{t('skills.colActions')}</Th>
             </tr>
           </thead>
           <tbody>
@@ -623,7 +508,9 @@ export function SkillsPage(): JSX.Element {
                 <td colSpan={5}>
                   <div className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
                     <Inbox className="size-6 opacity-50" />
-                    <span className="text-sm">{query ? 'No matching skills.' : 'No skills registered yet.'}</span>
+                    <span className="text-sm">
+                      {query ? t('skills.noMatching') : t('skills.empty')}
+                    </span>
                   </div>
                 </td>
               </tr>
@@ -632,10 +519,8 @@ export function SkillsPage(): JSX.Element {
         </table>
       </div>
 
-      <CreateSkillDialog open={creating} onOpenChange={setCreating} />
       <ContentDialog
         skillName={contentFor}
-        canWrite={canWrite}
         onOpenChange={(open) => !open && setContentFor(null)}
       />
       <VersionsDialog skillName={versionsFor} onOpenChange={(open) => !open && setVersionsFor(null)} />

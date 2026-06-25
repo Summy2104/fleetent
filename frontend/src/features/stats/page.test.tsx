@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AuthProvider } from '@/app/auth';
 import { StatsPage } from '@/features/stats/page';
+import { I18nProvider } from '@/i18n';
 import { server } from '@/test/msw/server';
 
 const API_BASE_URL = 'http://fleetent.test';
@@ -20,14 +21,16 @@ function renderStatsPage(): void {
   });
 
   render(
-    <AuthProvider
-      baseUrl={API_BASE_URL}
-      initialToken="session-token"
-    >
-      <QueryClientProvider client={queryClient}>
-        <StatsPage />
-      </QueryClientProvider>
-    </AuthProvider>
+    <I18nProvider>
+      <AuthProvider
+        baseUrl={API_BASE_URL}
+        initialToken="session-token"
+      >
+        <QueryClientProvider client={queryClient}>
+          <StatsPage />
+        </QueryClientProvider>
+      </AuthProvider>
+    </I18nProvider>
   );
 }
 

@@ -6,20 +6,23 @@ import { describe, expect, it } from 'vitest';
 import { AuthProvider } from '@/app/auth';
 import { AppQueryProvider } from '@/app/query-client';
 import { ChatPage } from '@/features/chat/page';
+import { I18nProvider } from '@/i18n';
 import { server } from '@/test/msw/server';
 
 const API_BASE_URL = 'http://fleetent.test';
 
 function renderChatPage(): void {
   render(
-    <AuthProvider
-      baseUrl={API_BASE_URL}
-      initialToken="session-token"
-    >
-      <AppQueryProvider>
-        <ChatPage />
-      </AppQueryProvider>
-    </AuthProvider>
+    <I18nProvider>
+      <AuthProvider
+        baseUrl={API_BASE_URL}
+        initialToken="session-token"
+      >
+        <AppQueryProvider>
+          <ChatPage />
+        </AppQueryProvider>
+      </AuthProvider>
+    </I18nProvider>
   );
 }
 

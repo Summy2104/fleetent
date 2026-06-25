@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Clock, Copy, Pin, PinOff, Plus, Server, Tag, Trash2 } from 'lucide-react';
 
 import { useAdminApi } from '@/lib/api-client';
+import { useT } from '@/i18n';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -80,6 +81,7 @@ function RegisterNodeDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }): JSX.Element {
+  const t = useT();
   const registerNode = useRegisterNodeMutation();
   const [nodeId, setNodeId] = useState('');
   const [nodeName, setNodeName] = useState('');
@@ -114,20 +116,20 @@ function RegisterNodeDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Register node</DialogTitle>
+          <DialogTitle>{t('nodes.registerNode')}</DialogTitle>
           <DialogDescription>
-            Register a deployment node, then pin agents to control placement.
+            {t('nodes.registerNodeDescription')}
           </DialogDescription>
         </DialogHeader>
 
         {serviceKey ? (
           <div className="space-y-3 rounded-md border border-warning/40 bg-warning/10 p-4">
-            <p className="text-sm font-medium text-foreground">Service key (shown once)</p>
+            <p className="text-sm font-medium text-foreground">{t('nodes.serviceKeyShownOnce')}</p>
             <code className="block max-h-40 overflow-y-auto break-all rounded-md border border-border bg-background/60 p-3 font-mono text-xs text-foreground">
               {serviceKey}
             </code>
             <p className="text-xs text-muted-foreground">
-              Copy this key now — it cannot be retrieved again.
+              {t('nodes.serviceKeyCopyHint')}
             </p>
             <div className="flex gap-2">
               <Button
@@ -135,10 +137,10 @@ function RegisterNodeDialog({
                 variant="outline"
                 onClick={() => void navigator.clipboard?.writeText(serviceKey)}
               >
-                <Copy className="size-4" /> Copy key
+                <Copy className="size-4" /> {t('nodes.copyKey')}
               </Button>
               <Button size="sm" variant="secondary" onClick={() => handleOpenChange(false)}>
-                Done
+                {t('nodes.done')}
               </Button>
             </div>
           </div>
@@ -146,7 +148,7 @@ function RegisterNodeDialog({
           <>
             <div className="grid gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="node-id">Node ID</Label>
+                <Label htmlFor="node-id">{t('nodes.nodeId')}</Label>
                 <Input
                   id="node-id"
                   value={nodeId}
@@ -154,7 +156,7 @@ function RegisterNodeDialog({
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="node-name">Node name</Label>
+                <Label htmlFor="node-name">{t('nodes.nodeName')}</Label>
                 <Input
                   id="node-name"
                   value={nodeName}
@@ -162,7 +164,7 @@ function RegisterNodeDialog({
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="node-labels">Labels</Label>
+                <Label htmlFor="node-labels">{t('nodes.labels')}</Label>
                 <Input
                   id="node-labels"
                   placeholder="region=us, rack=r1"
@@ -173,13 +175,13 @@ function RegisterNodeDialog({
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => handleOpenChange(false)}>
-                Cancel
+                {t('nodes.cancel')}
               </Button>
               <Button
                 disabled={!nodeId || registerNode.isPending}
                 onClick={() => void onRegister()}
               >
-                Register node
+                {t('nodes.registerNode')}
               </Button>
             </DialogFooter>
           </>
@@ -202,6 +204,7 @@ function PinAgentDialog({
   onOpenChange: (open: boolean) => void;
   availableAgents: NodeAgentOption[];
 }): JSX.Element {
+  const t = useT();
   const pin = usePinAgentMutation(nodeId);
   const [selectedAgentId, setSelectedAgentId] = useState('');
 
@@ -222,16 +225,16 @@ function PinAgentDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Pin agent to {nodeId}</DialogTitle>
+          <DialogTitle>{t('nodes.pinAgentTo', { nodeId })}</DialogTitle>
           <DialogDescription>
-            Pinning an agent forces it to run on this node.
+            {t('nodes.pinAgentDescription')}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-2">
-          <Label htmlFor={`pin-agent-${nodeId}`}>Agent</Label>
+          <Label htmlFor={`pin-agent-${nodeId}`}>{t('nodes.agent')}</Label>
           <Select value={selectedAgentId} onValueChange={setSelectedAgentId}>
-            <SelectTrigger id={`pin-agent-${nodeId}`} aria-label="Agent">
-              <SelectValue placeholder="Select agent" />
+            <SelectTrigger id={`pin-agent-${nodeId}`} aria-label={t('nodes.agent')}>
+              <SelectValue placeholder={t('nodes.selectAgent')} />
             </SelectTrigger>
             <SelectContent>
               {availableAgents.map((agent) => (
@@ -242,15 +245,15 @@ function PinAgentDialog({
             </SelectContent>
           </Select>
           {!availableAgents.length ? (
-            <p className="text-sm text-muted-foreground">All agents are already pinned here.</p>
+            <p className="text-sm text-muted-foreground">{t('nodes.allAgentsPinned')}</p>
           ) : null}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t('nodes.cancel')}
           </Button>
           <Button disabled={!selectedAgentId || pin.isPending} onClick={() => void onPin()}>
-            Pin agent
+            {t('nodes.pinAgent')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -277,6 +280,7 @@ function NodeCard({
   lastSeenAt: string | null;
   registeredAt: string;
 }): JSX.Element {
+  const t = useT();
   const remove = useDeleteNodeMutation(nodeId);
   const unpin = useUnpinAgentMutation(nodeId);
   const placementsQuery = useNodePlacementsQuery(nodeId);
@@ -320,7 +324,7 @@ function NodeCard({
             <Button
               size="icon"
               variant="ghost"
-              aria-label={`Delete ${nodeId}`}
+              aria-label={t('nodes.deleteNode', { nodeId })}
               onClick={() => setConfirmDelete(true)}
             >
               <Trash2 className="size-4" />
@@ -332,10 +336,10 @@ function NodeCard({
       <CardContent className="space-y-5">
         <div className="flex flex-col gap-1.5 text-xs text-muted-foreground sm:flex-row sm:gap-6">
           <span className="inline-flex items-center gap-1.5">
-            <Clock className="size-3.5" /> Registered: {registeredAt}
+            <Clock className="size-3.5" /> {t('nodes.registered', { date: registeredAt })}
           </span>
           <span className="inline-flex items-center gap-1.5">
-            <Clock className="size-3.5" /> Last seen: {lastSeenAt ?? 'never reported'}
+            <Clock className="size-3.5" /> {t('nodes.lastSeen', { date: lastSeenAt ?? t('nodes.neverReported') })}
           </span>
         </div>
 
@@ -348,7 +352,7 @@ function NodeCard({
               </Badge>
             ))
           ) : (
-            <span className="text-sm text-muted-foreground">No labels</span>
+            <span className="text-sm text-muted-foreground">{t('nodes.noLabels')}</span>
           )}
         </div>
 
@@ -356,17 +360,17 @@ function NodeCard({
 
         <section className="space-y-3">
           <div className="flex items-center justify-between gap-3">
-            <h3 className="text-sm font-semibold text-foreground">Agent placement</h3>
+            <h3 className="text-sm font-semibold text-foreground">{t('nodes.agentPlacement')}</h3>
             {canWrite ? (
               <Button size="sm" variant="outline" onClick={() => setPinOpen(true)}>
-                <Pin className="size-4" /> Pin agent to {nodeId}
+                <Pin className="size-4" /> {t('nodes.pinAgentTo', { nodeId })}
               </Button>
             ) : null}
           </div>
 
           {placements.length > 0 ? (
             <div className="space-y-2">
-              <p className="text-sm font-medium text-foreground">Pinned agents</p>
+              <p className="text-sm font-medium text-foreground">{t('nodes.pinnedAgents')}</p>
               {placements.map((placement) => (
                 <div
                   key={placement.agent_id}
@@ -377,17 +381,17 @@ function NodeCard({
                     <Button
                       size="sm"
                       variant="ghost"
-                      aria-label={`Unpin ${placement.agent_name} from ${nodeId}`}
+                      aria-label={t('nodes.unpinFrom', { name: placement.agent_name, nodeId })}
                       onClick={() => void unpin.mutateAsync(placement.agent_id)}
                     >
-                      <PinOff className="size-4" /> Unpin
+                      <PinOff className="size-4" /> {t('nodes.unpin')}
                     </Button>
                   ) : null}
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">No agents pinned to this node.</p>
+            <p className="text-sm text-muted-foreground">{t('nodes.noAgentsPinned')}</p>
           )}
         </section>
       </CardContent>
@@ -404,14 +408,14 @@ function NodeCard({
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete node {nodeId}?</AlertDialogTitle>
+            <AlertDialogTitle>{t('nodes.deleteNodeConfirmTitle', { nodeId })}</AlertDialogTitle>
             <AlertDialogDescription>
-              This will affect agent placement. Pinned agents will be rescheduled elsewhere.
+              {t('nodes.deleteNodeConfirmDescription')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void remove.mutateAsync()}>Delete</AlertDialogAction>
+            <AlertDialogCancel>{t('nodes.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void remove.mutateAsync()}>{t('nodes.delete')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -422,6 +426,7 @@ function NodeCard({
 // ─────────────────────────── Page ───────────────────────────
 
 export function NodesPage(): JSX.Element {
+  const t = useT();
   const me = useAdminMeQuery();
   const nodes = useNodesQuery();
   const agents = useNodeAgentsQuery();
@@ -433,19 +438,18 @@ export function NodesPage(): JSX.Element {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-xl font-semibold tracking-tight">Nodes</h2>
+          <h2 className="text-xl font-semibold tracking-tight">{t('nodes.title')}</h2>
           <Badge variant="secondary">{nodes.data?.length ?? 0}</Badge>
         </div>
         {canWrite ? (
           <Button onClick={() => setRegisterOpen(true)}>
-            <Plus className="size-4" /> Register node
+            <Plus className="size-4" /> {t('nodes.registerNode')}
           </Button>
         ) : null}
       </div>
 
       <p className="max-w-2xl text-sm text-muted-foreground">
-        Register nodes, inspect placement metadata, and pin or unpin agents without dropping to CLI
-        or raw admin API calls.
+        {t('nodes.pageDescription')}
       </p>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -463,7 +467,7 @@ export function NodesPage(): JSX.Element {
         ))}
         {nodes.data && nodes.data.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border py-12 text-center text-sm text-muted-foreground lg:col-span-2">
-            No nodes registered yet.
+            {t('nodes.empty')}
           </div>
         ) : null}
       </div>

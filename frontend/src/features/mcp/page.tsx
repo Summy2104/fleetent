@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Inbox, Plus, Trash2, X } from 'lucide-react';
 
+import { useT } from '@/i18n';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -64,6 +65,7 @@ function ServerDialog({
   editing: McpServerRecord | null;
   onOpenChange: (open: boolean) => void;
 }): JSX.Element {
+  const t = useT();
   const create = useCreateMcpServerMutation();
   const update = useUpdateMcpServerMutation(editing?.id ?? '');
   const isEdit = editing !== null;
@@ -113,17 +115,17 @@ function ServerDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{isEdit ? `Edit ${editing?.id}` : 'Add MCP Server'}</DialogTitle>
-          <DialogDescription>Register an MCP server the platform can connect agents to.</DialogDescription>
+          <DialogTitle>{isEdit ? t('mcp.editTitle', { name: editing?.id ?? '' }) : t('mcp.addTitle')}</DialogTitle>
+          <DialogDescription>{t('mcp.dialogDescription')}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
           <div className="grid gap-2">
             <Label htmlFor="mcp-id">
-              ID <span className="text-destructive">*</span>
+              {t('mcp.idLabel')} <span className="text-destructive">*</span>
             </Label>
             <Input
               id="mcp-id"
-              placeholder="e.g. filesystem"
+              placeholder={t('mcp.idPlaceholder')}
               disabled={isEdit}
               value={id}
               onChange={(event) => setId(event.target.value)}
@@ -131,7 +133,7 @@ function ServerDialog({
           </div>
 
           <div className="grid gap-2">
-            <Label>Transport</Label>
+            <Label>{t('mcp.transportLabel')}</Label>
             <Select value={transport} onValueChange={setTransport}>
               <SelectTrigger>
                 <SelectValue />
@@ -149,11 +151,11 @@ function ServerDialog({
           {transport === 'stdio' ? (
             <div className="grid gap-2">
               <Label htmlFor="mcp-command">
-                Command <span className="text-destructive">*</span>
+                {t('mcp.commandLabel')} <span className="text-destructive">*</span>
               </Label>
               <Input
                 id="mcp-command"
-                placeholder="e.g. npx -y @modelcontextprotocol/server-filesystem"
+                placeholder={t('mcp.commandPlaceholder')}
                 value={command}
                 onChange={(event) => setCommand(event.target.value)}
               />
@@ -161,7 +163,7 @@ function ServerDialog({
           ) : (
             <div className="grid gap-2">
               <Label htmlFor="mcp-url">
-                Server URL <span className="text-destructive">*</span>
+                {t('mcp.serverUrlLabel')} <span className="text-destructive">*</span>
               </Label>
               <Input
                 id="mcp-url"
@@ -173,7 +175,7 @@ function ServerDialog({
           )}
 
           <div className="grid gap-2">
-            <Label>Env (optional)</Label>
+            <Label>{t('mcp.envLabel')}</Label>
             <div className="space-y-2">
               {env.map((pair, index) => (
                 <div key={index} className="flex items-center gap-2">
@@ -187,7 +189,7 @@ function ServerDialog({
                   />
                   <Input
                     className="flex-1"
-                    placeholder="value"
+                    placeholder={t('mcp.envValuePlaceholder')}
                     value={pair.value}
                     onChange={(event) =>
                       setEnv((current) => current.map((p, i) => (i === index ? { ...p, value: event.target.value } : p)))
@@ -196,7 +198,7 @@ function ServerDialog({
                   <Button
                     size="icon"
                     variant="ghost"
-                    aria-label="Remove env var"
+                    aria-label={t('mcp.removeEnvVar')}
                     onClick={() => setEnv((current) => current.filter((_, i) => i !== index))}
                   >
                     <X className="size-4" />
@@ -208,17 +210,17 @@ function ServerDialog({
                 className="w-full border-dashed"
                 onClick={() => setEnv((current) => [...current, { key: '', value: '' }])}
               >
-                <Plus className="size-4" /> Add
+                <Plus className="size-4" /> {t('mcp.addEnvVar')}
               </Button>
             </div>
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t('mcp.cancel')}
           </Button>
           <Button disabled={!canSubmit || create.isPending || update.isPending} onClick={() => void submit()}>
-            {isEdit ? 'Save' : 'Create'}
+            {isEdit ? t('mcp.save') : t('mcp.create')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -237,6 +239,7 @@ function ServerRow({
   onEdit: () => void;
   onViewTools: () => void;
 }): JSX.Element {
+  const t = useT();
   const test = useMcpServerTestMutation(server.id);
   const reconnect = useMcpReconnectMutation(server.id);
   const remove = useDeleteMcpServerMutation(server.id);
@@ -250,7 +253,9 @@ function ServerRow({
         <Badge variant={statusVariant(server.status)}>{server.status}</Badge>
         {test.data ? (
           <span className="ml-2 text-xs text-muted-foreground">
-            {test.data.connected ? `connected · ${test.data.tools_count ?? 0} tools` : test.data.error ?? 'failed'}
+            {test.data.connected
+              ? t('mcp.connectedTools', { count: test.data.tools_count ?? 0 })
+              : test.data.error ?? t('mcp.testFailed')}
           </span>
         ) : null}
       </td>
@@ -258,18 +263,18 @@ function ServerRow({
       <td className="px-4 py-3 text-right">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="secondary" size="sm" aria-label={`Actions for ${server.id}`}>
-              Actions
+            <Button variant="secondary" size="sm" aria-label={t('mcp.actionsFor', { name: server.id })}>
+              {t('mcp.actions')}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => setTimeout(onEdit, 0)}>Edit</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => void test.mutateAsync()}>Test connection</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => void reconnect.mutateAsync()}>Reconnect</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setTimeout(onViewTools, 0)}>View tools</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setTimeout(onEdit, 0)}>{t('mcp.edit')}</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void test.mutateAsync()}>{t('mcp.testConnection')}</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void reconnect.mutateAsync()}>{t('mcp.reconnect')}</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setTimeout(onViewTools, 0)}>{t('mcp.viewTools')}</DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem destructive onSelect={() => setTimeout(() => setConfirmDelete(true), 0)}>
-              <Trash2 /> Delete
+              <Trash2 /> {t('mcp.delete')}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -277,12 +282,12 @@ function ServerRow({
         <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Delete {server.id}?</AlertDialogTitle>
-              <AlertDialogDescription>This removes the MCP server registration.</AlertDialogDescription>
+              <AlertDialogTitle>{t('mcp.deleteConfirmTitle', { name: server.id })}</AlertDialogTitle>
+              <AlertDialogDescription>{t('mcp.deleteConfirmDescription')}</AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={() => void remove.mutateAsync()}>Delete</AlertDialogAction>
+              <AlertDialogCancel>{t('mcp.cancel')}</AlertDialogCancel>
+              <AlertDialogAction onClick={() => void remove.mutateAsync()}>{t('mcp.delete')}</AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
@@ -300,14 +305,15 @@ function ToolsDialog({
   serverId: string | null;
   onOpenChange: (open: boolean) => void;
 }): JSX.Element {
+  const t = useT();
   const tools = useMcpServerToolsQuery(serverId);
 
   return (
     <Dialog open={Boolean(serverId)} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Tools · {serverId}</DialogTitle>
-          <DialogDescription>Live tools/list from a real handshake with the server.</DialogDescription>
+          <DialogTitle>{t('mcp.toolsTitle', { name: serverId ?? '' })}</DialogTitle>
+          <DialogDescription>{t('mcp.toolsDescription')}</DialogDescription>
         </DialogHeader>
         {tools.data?.error ? (
           <p className="text-sm text-destructive">{tools.data.error}</p>
@@ -321,7 +327,9 @@ function ToolsDialog({
             ))}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">{tools.isLoading ? 'Connecting…' : 'No tools reported.'}</p>
+          <p className="text-sm text-muted-foreground">
+            {tools.isLoading ? t('mcp.connecting') : t('mcp.noToolsReported')}
+          </p>
         )}
       </DialogContent>
     </Dialog>
@@ -331,6 +339,7 @@ function ToolsDialog({
 // ─────────────────────────── Page ───────────────────────────
 
 export function McpPage(): JSX.Element {
+  const t = useT();
   const servers = useMcpServersQuery();
   const [query, setQuery] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -356,21 +365,19 @@ export function McpPage(): JSX.Element {
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-xl font-semibold tracking-tight">MCP Servers</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Inspect MCP servers, probe their tools, run connectivity tests, and trigger reconnects.
-        </p>
+        <h2 className="text-xl font-semibold tracking-tight">{t('mcp.pageTitle')}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{t('mcp.pageDescription')}</p>
       </div>
 
       <div className="flex items-center justify-between gap-3">
         <Input
           className="max-w-xs"
-          placeholder="Search servers…"
+          placeholder={t('mcp.searchPlaceholder')}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
         <Button onClick={openCreate}>
-          <Plus className="size-4" /> Add MCP Server
+          <Plus className="size-4" /> {t('mcp.addServer')}
         </Button>
       </div>
 
@@ -378,11 +385,11 @@ export function McpPage(): JSX.Element {
         <table className="w-full">
           <thead className="bg-secondary/50">
             <tr>
-              <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">ID</th>
-              <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Transport</th>
-              <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
-              <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tools</th>
-              <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Actions</th>
+              <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('mcp.columnId')}</th>
+              <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('mcp.columnTransport')}</th>
+              <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('mcp.columnStatus')}</th>
+              <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('mcp.columnTools')}</th>
+              <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('mcp.columnActions')}</th>
             </tr>
           </thead>
           <tbody>
@@ -399,7 +406,7 @@ export function McpPage(): JSX.Element {
                 <td colSpan={5}>
                   <div className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
                     <Inbox className="size-6 opacity-50" />
-                    <span className="text-sm">{query ? 'No matching servers.' : 'No MCP servers'}</span>
+                    <span className="text-sm">{query ? t('mcp.noMatching') : t('mcp.empty')}</span>
                   </div>
                 </td>
               </tr>

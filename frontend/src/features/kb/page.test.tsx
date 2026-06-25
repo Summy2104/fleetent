@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AuthProvider } from '@/app/auth';
 import { AppQueryProvider } from '@/app/query-client';
+import { I18nProvider } from '@/i18n';
 import { KnowledgeBasePage } from '@/features/kb/page';
 import { server } from '@/test/msw/server';
 
@@ -46,7 +47,9 @@ function renderPage(): void {
   render(
     <AuthProvider baseUrl={API_BASE_URL} initialToken="session-token">
       <AppQueryProvider>
-        <KnowledgeBasePage />
+        <I18nProvider>
+          <KnowledgeBasePage />
+        </I18nProvider>
       </AppQueryProvider>
     </AuthProvider>
   );

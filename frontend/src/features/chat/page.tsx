@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Bot, MessageSquare, Send, Square } from 'lucide-react';
 
+import { useT } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -43,6 +44,7 @@ function MessageBubble({
 }
 
 export function ChatPage(): JSX.Element {
+  const t = useT();
   const agents = useAgentsQuery();
   const { abort, error, isStreaming, messages, sendMessage } = useAgentChat();
   const [selectedAgent, setSelectedAgent] = useState('');
@@ -93,29 +95,29 @@ export function ChatPage(): JSX.Element {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-xl font-semibold tracking-tight">Chat Console</h2>
+          <h2 className="text-xl font-semibold tracking-tight">{t('chat.title')}</h2>
           <Badge variant="secondary">{agents.data?.length ?? 0}</Badge>
         </div>
-        {isStreaming ? <Badge variant="success">streaming</Badge> : null}
+        {isStreaming ? <Badge variant="success">{t('chat.streaming')}</Badge> : null}
       </div>
 
       <div className="grid items-start gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
         <Card className="shadow-none lg:sticky lg:top-6 lg:self-start">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Bot className="size-4 text-primary" /> Target agent
+              <Bot className="size-4 text-primary" /> {t('chat.targetAgent')}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-2">
-              <Label htmlFor="chat-agent">Agent</Label>
+              <Label htmlFor="chat-agent">{t('chat.agent')}</Label>
               <Select
                 value={selectedAgent}
                 onValueChange={setSelectedAgent}
                 disabled={agents.isLoading || showEmptyAgents}
               >
                 <SelectTrigger id="chat-agent">
-                  <SelectValue placeholder="Select an agent" />
+                  <SelectValue placeholder={t('chat.selectAgent')} />
                 </SelectTrigger>
                 <SelectContent>
                   {(agents.data ?? []).map((agent) => (
@@ -128,20 +130,20 @@ export function ChatPage(): JSX.Element {
             </div>
 
             {agents.isLoading ? (
-              <p className="text-sm text-muted-foreground">Loading agents…</p>
+              <p className="text-sm text-muted-foreground">{t('chat.loadingAgents')}</p>
             ) : null}
             {showEmptyAgents ? (
-              <p className="text-sm text-muted-foreground">No agents available.</p>
+              <p className="text-sm text-muted-foreground">{t('chat.noAgentsAvailable')}</p>
             ) : null}
 
             <div className="rounded-lg border border-border bg-secondary/30 p-4 text-sm">
               {activeAgent ? (
                 <span className="flex items-center gap-2 text-muted-foreground">
-                  Status
+                  {t('chat.status')}
                   <Badge variant={statusVariant(activeAgent.status)}>{activeAgent.status}</Badge>
                 </span>
               ) : (
-                <span className="text-muted-foreground">Select an available agent to begin.</span>
+                <span className="text-muted-foreground">{t('chat.selectAvailableAgent')}</span>
               )}
             </div>
           </CardContent>
@@ -150,7 +152,7 @@ export function ChatPage(): JSX.Element {
         <Card className="flex flex-col shadow-none">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <MessageSquare className="size-4 text-primary" /> Transcript
+              <MessageSquare className="size-4 text-primary" /> {t('chat.transcript')}
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-1 flex-col gap-4">
@@ -159,7 +161,7 @@ export function ChatPage(): JSX.Element {
               data-testid="chat-transcript"
             >
               {messages.length === 0 ? (
-                <p className="m-auto text-sm text-muted-foreground">No messages yet.</p>
+                <p className="m-auto text-sm text-muted-foreground">{t('chat.noMessagesYet')}</p>
               ) : (
                 messages.map((message: ChatMessage) => (
                   <div
@@ -187,11 +189,11 @@ export function ChatPage(): JSX.Element {
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="chat-message">Message</Label>
+              <Label htmlFor="chat-message">{t('chat.message')}</Label>
               <Textarea
                 id="chat-message"
                 className="min-h-28"
-                placeholder="Type an operator message… (⌘/Ctrl + Enter to send)"
+                placeholder={t('chat.messagePlaceholder')}
                 disabled={showEmptyAgents}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
@@ -201,16 +203,16 @@ export function ChatPage(): JSX.Element {
 
             <div className="flex items-center justify-between gap-3">
               <p className="text-sm text-muted-foreground">
-                {isStreaming ? 'Streaming response from the selected agent.' : 'Ready to send.'}
+                {isStreaming ? t('chat.streamingResponse') : t('chat.readyToSend')}
               </p>
               <div className="flex items-center gap-2">
                 {isStreaming ? (
                   <Button variant="outline" onClick={() => abort()}>
-                    <Square className="size-4" /> Stop
+                    <Square className="size-4" /> {t('chat.stop')}
                   </Button>
                 ) : null}
                 <Button disabled={!canSend} onClick={() => void onSubmit()}>
-                  <Send className="size-4" /> Send
+                  <Send className="size-4" /> {t('chat.send')}
                 </Button>
               </div>
             </div>

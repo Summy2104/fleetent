@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useAdminApi } from '@/lib/api-client';
+import { useT } from '@/i18n';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -37,6 +38,7 @@ export function ChangePasswordFields({
   submitLabel: string;
   onDone?: () => void;
 }): JSX.Element {
+  const t = useT();
   const change = useChangePasswordMutation();
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -44,11 +46,11 @@ export function ChangePasswordFields({
 
   const submit = async (): Promise<void> => {
     if (!password) {
-      setError('Please enter a new password.');
+      setError(t('profile.errEnterPassword'));
       return;
     }
     if (password !== confirm) {
-      setError('Passwords do not match.');
+      setError(t('profile.errPasswordMismatch'));
       return;
     }
     setError(null);
@@ -61,7 +63,7 @@ export function ChangePasswordFields({
   return (
     <div className="grid gap-4">
       <div className="grid gap-2">
-        <Label htmlFor="cp-new">New password</Label>
+        <Label htmlFor="cp-new">{t('profile.newPassword')}</Label>
         <Input
           id="cp-new"
           type="password"
@@ -71,7 +73,7 @@ export function ChangePasswordFields({
         />
       </div>
       <div className="grid gap-2">
-        <Label htmlFor="cp-confirm">Confirm new password</Label>
+        <Label htmlFor="cp-confirm">{t('profile.confirmNewPassword')}</Label>
         <Input
           id="cp-confirm"
           type="password"
@@ -99,6 +101,7 @@ function initials(value: string): string {
 // ─────────────────────────── User center ───────────────────────────
 
 export function ProfilePage(): JSX.Element {
+  const t = useT();
   const me = useMe();
   const updateUser = useUpdateUserMutation(me.data?.id ?? '');
 
@@ -122,21 +125,21 @@ export function ProfilePage(): JSX.Element {
           {initials(displayName)}
         </span>
         <div>
-          <h2 className="text-xl font-semibold tracking-tight">Account</h2>
-          <p className="text-sm text-muted-foreground">Manage your profile and password.</p>
+          <h2 className="text-xl font-semibold tracking-tight">{t('profile.account')}</h2>
+          <p className="text-sm text-muted-foreground">{t('profile.subtitle')}</p>
         </div>
       </div>
 
       <Separator />
 
       <section className="space-y-4">
-        <h3 className="text-base font-semibold text-foreground">Profile</h3>
+        <h3 className="text-base font-semibold text-foreground">{t('profile.profile')}</h3>
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <Badge variant="outline">role: {me.data?.role ?? '—'}</Badge>
           <span className="font-mono text-xs text-muted-foreground">id: {me.data?.id ?? '—'}</span>
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="profile-email">Email</Label>
+          <Label htmlFor="profile-email">{t('profile.email')}</Label>
           <Input
             id="profile-email"
             disabled={!canEditProfile}
@@ -145,7 +148,7 @@ export function ProfilePage(): JSX.Element {
           />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="profile-name">Username (leave blank to keep)</Label>
+          <Label htmlFor="profile-name">{t('profile.username')}</Label>
           <Input
             id="profile-name"
             placeholder={me.data?.role ?? ''}
@@ -165,18 +168,18 @@ export function ProfilePage(): JSX.Element {
               })
             }
           >
-            Save
+            {t('profile.save')}
           </Button>
         ) : (
-          <p className="text-sm text-muted-foreground">Viewer role can't edit account info.</p>
+          <p className="text-sm text-muted-foreground">{t('profile.viewerCantEdit')}</p>
         )}
       </section>
 
       <Separator />
 
       <section className="space-y-4">
-        <h3 className="text-base font-semibold text-foreground">Change password</h3>
-        <ChangePasswordFields submitLabel="Save password" />
+        <h3 className="text-base font-semibold text-foreground">{t('profile.changePassword')}</h3>
+        <ChangePasswordFields submitLabel={t('profile.savePassword')} />
       </section>
     </div>
   );

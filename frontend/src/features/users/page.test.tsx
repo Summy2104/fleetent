@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '@/app/auth';
 import { AppQueryProvider } from '@/app/query-client';
 import { UsersPage } from '@/features/users/page';
+import { I18nProvider } from '@/i18n';
 import { server } from '@/test/msw/server';
 
 const API_BASE_URL = 'http://fleetent.test';
@@ -40,14 +41,16 @@ type ImUserRecord = {
 
 function renderUsersPage(): void {
   render(
-    <AuthProvider
-      baseUrl={API_BASE_URL}
-      initialToken="session-token"
-    >
-      <AppQueryProvider>
-        <UsersPage />
-      </AppQueryProvider>
-    </AuthProvider>
+    <I18nProvider>
+      <AuthProvider
+        baseUrl={API_BASE_URL}
+        initialToken="session-token"
+      >
+        <AppQueryProvider>
+          <UsersPage />
+        </AppQueryProvider>
+      </AuthProvider>
+    </I18nProvider>
   );
 }
 

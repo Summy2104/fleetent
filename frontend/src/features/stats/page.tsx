@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Download } from 'lucide-react';
 
+import { useT } from '@/i18n';
 import { useAgentsQuery } from '@/features/agents/api';
 import {
   useAgentOverviewQuery,
@@ -51,6 +52,7 @@ function EventList({
   events: Array<Record<string, unknown>> | undefined;
   title: string;
 }): JSX.Element {
+  const t = useT();
   return (
     <Card aria-label={title}>
       <CardHeader>
@@ -67,7 +69,7 @@ function EventList({
             </p>
           ))
         ) : (
-          <p className="text-sm text-muted-foreground">Select a record to inspect its event stream.</p>
+          <p className="text-sm text-muted-foreground">{t('stats.selectRecordToInspect')}</p>
         )}
       </CardContent>
     </Card>
@@ -85,6 +87,7 @@ function StatsDashboard({
   agentNames: string[];
   window: string;
 }): JSX.Element {
+  const t = useT();
   const overview = useAgentOverviewQuery(agentName, window);
   const compare = useCompareAgentsQuery(agentNames, 'calls');
   const tools = useAgentToolsQuery(agentName);
@@ -101,7 +104,7 @@ function StatsDashboard({
       <div className="grid gap-6 xl:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Agent overview</CardTitle>
+            <CardTitle>{t('stats.agentOverview')}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <MetricList value={overview.data?.usage} />
@@ -111,17 +114,17 @@ function StatsDashboard({
           </CardContent>
         </Card>
 
-        <Card aria-label="Agent comparison">
+        <Card aria-label={t('stats.agentComparison')}>
           <CardHeader>
-            <CardTitle>Agent comparison</CardTitle>
+            <CardTitle>{t('stats.agentComparison')}</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-secondary/50 text-muted-foreground">
                   <tr>
-                    <th className="px-3 py-2 text-left font-medium">Agent</th>
-                    <th className="px-3 py-2 text-right font-medium">Calls</th>
+                    <th className="px-3 py-2 text-left font-medium">{t('stats.agentColumn')}</th>
+                    <th className="px-3 py-2 text-right font-medium">{t('stats.callsColumn')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -141,7 +144,7 @@ function StatsDashboard({
       <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
         <Card>
           <CardHeader>
-            <CardTitle>Per-user usage</CardTitle>
+            <CardTitle>{t('stats.perUserUsage')}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {perUser.data?.map((row) => (
@@ -166,20 +169,20 @@ function StatsDashboard({
                       setSelectedSession(null);
                     }}
                   >
-                    View requests
+                    {t('stats.viewRequests')}
                   </Button>
                 </div>
               </div>
             ))}
             {perUser.data && perUser.data.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No per-user usage yet.</p>
+              <p className="text-sm text-muted-foreground">{t('stats.noPerUserUsage')}</p>
             ) : null}
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Tool coverage</CardTitle>
+            <CardTitle>{t('stats.toolCoverage')}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <MetricList value={tools.data?.coverage} />
@@ -198,7 +201,7 @@ function StatsDashboard({
       <div className="grid gap-6 xl:grid-cols-3">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Requests</CardTitle>
+            <CardTitle className="text-base">{t('stats.requests')}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {userRequests.data?.length ? (
@@ -210,11 +213,11 @@ function StatsDashboard({
                     <p className="text-xs text-muted-foreground">{`session_id: ${sessionId ?? 'n/a'}`}</p>
                     <div className="flex flex-wrap gap-2 pt-1">
                       <Button variant="outline" size="sm" onClick={() => setSelectedRequest(request.request_id)}>
-                        Open request
+                        {t('stats.openRequest')}
                       </Button>
                       {sessionId ? (
                         <Button variant="outline" size="sm" onClick={() => setSelectedSession(sessionId)}>
-                          Open session trace
+                          {t('stats.openSessionTrace')}
                         </Button>
                       ) : null}
                     </div>
@@ -222,13 +225,13 @@ function StatsDashboard({
                 );
               })
             ) : (
-              <p className="text-sm text-muted-foreground">Pick a user to inspect request history.</p>
+              <p className="text-sm text-muted-foreground">{t('stats.pickUserToInspect')}</p>
             )}
           </CardContent>
         </Card>
 
-        <EventList events={requestDetail.data?.events} title="Request detail" />
-        <EventList events={sessionTrace.data?.events} title="Session trace" />
+        <EventList events={requestDetail.data?.events} title={t('stats.requestDetail')} />
+        <EventList events={sessionTrace.data?.events} title={t('stats.sessionTrace')} />
       </div>
     </div>
   );
@@ -237,6 +240,7 @@ function StatsDashboard({
 // ─────────────────────────── Page ───────────────────────────
 
 export function StatsPage(): JSX.Element {
+  const t = useT();
   const agents = useAgentsQuery();
   const exportMutation = useStatsExportMutation();
 
@@ -264,12 +268,12 @@ export function StatsPage(): JSX.Element {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-xl font-semibold tracking-tight">Statistics</h2>
+      <h2 className="text-xl font-semibold tracking-tight">{t('stats.title')}</h2>
 
       <div className="flex flex-wrap items-center gap-3">
         <Select value={pickedAgent} onValueChange={setPickedAgent} disabled={!agents.data?.length}>
           <SelectTrigger className="w-56">
-            <SelectValue placeholder="Pick an agent" />
+            <SelectValue placeholder={t('stats.pickAnAgent')} />
           </SelectTrigger>
           <SelectContent>
             {agentNames.map((name) => (
@@ -297,7 +301,7 @@ export function StatsPage(): JSX.Element {
           disabled={!pickedAgent}
           onClick={() => setLoaded({ agent: pickedAgent, window: pickedWindow })}
         >
-          Load
+          {t('stats.load')}
         </Button>
 
         <Button
@@ -305,21 +309,21 @@ export function StatsPage(): JSX.Element {
           disabled={!pickedAgent || exportMutation.isPending}
           onClick={() => void runExport('per-user')}
         >
-          <Download className="size-4" /> Export per-user CSV
+          <Download className="size-4" /> {t('stats.exportPerUserCsv')}
         </Button>
         <Button
           variant="outline"
           disabled={!pickedAgent || exportMutation.isPending}
           onClick={() => void runExport('tools')}
         >
-          <Download className="size-4" /> Export tools CSV
+          <Download className="size-4" /> {t('stats.exportToolsCsv')}
         </Button>
       </div>
 
       {loaded ? (
         <StatsDashboard agentName={loaded.agent} agentNames={agentNames} window={loaded.window} />
       ) : (
-        <p className="text-sm text-muted-foreground">Pick an agent and load to view its dashboard.</p>
+        <p className="text-sm text-muted-foreground">{t('stats.pickAgentAndLoad')}</p>
       )}
     </div>
   );
