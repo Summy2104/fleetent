@@ -61,9 +61,9 @@
 
 ## 9. 契约护栏与端到端
 
-- [ ] 9.1 (test, unit) 模块依赖护栏:本变更未新增 agent runtime → platform 反向 import;未新增模块级活资源(AsyncExitStack/连接)单例
-- [ ] 9.2 (test, integration) standalone 端到端:用户无 token→收链接→(模拟)授权回调入库→后续以该用户身份调用成功(http 路径)
-- [ ] 9.3 (test, integration) 无 platform 基线:platform 表不存在环境下 fleetent agent run 基础对话与无 per-user oauth 配置的 MCP 服务行为不变
+- [x] 9.1 (test, unit) 模块依赖护栏:本变更未新增 agent runtime → platform 反向 import;未新增模块级活资源(AsyncExitStack/连接)单例
+- [x] 9.2 (test, integration) standalone 端到端:用户无 token→收链接→(模拟)授权回调入库→后续以该用户身份调用成功(http 路径)
+- [x] 9.3 (test, integration) 无 platform 基线:platform 表不存在环境下 fleetent agent run 基础对话与无 per-user oauth 配置的 MCP 服务行为不变
 
 ## 10. 收尾
 
