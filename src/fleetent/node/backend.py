@@ -24,10 +24,11 @@ class LocalProcessBackend:
     def __init__(self, config: NodeConfig) -> None:
         self._config = config
         self._gateway_ports: dict[str, int] = {}
+        self._procs: dict[str, subprocess.Popen[bytes]] = {}
 
     def spawn(self, agent_name: str, tenant_id: str = "default") -> None:
         port = self._gateway_ports.setdefault(agent_name, self._allocate_loopback_port())
-        subprocess.Popen(
+        self._procs[agent_name] = subprocess.Popen(
             [
                 "fleetent",
                 "agent",
@@ -43,19 +44,30 @@ class LocalProcessBackend:
         )
 
     def stop(self, agent_name: str, tenant_id: str = "default") -> None:
-        subprocess.run(
-            [
-                "fleetent",
-                "agent",
-                "stop",
-                agent_name,
-                "--home",
-                str(self._home_dir(agent_name, tenant_id)),
-            ],
-            check=True,
-        )
+        try:
+            subprocess.run(
+                [
+                    "fleetent",
+                    "agent",
+                    "stop",
+                    agent_name,
+                    "--home",
+                    str(self._home_dir(agent_name, tenant_id)),
+                ],
+                check=True,
+            )
+        finally:
+            proc = self._procs.pop(agent_name, None)
+            if proc is not None:
+                proc.poll()
 
     def is_alive(self, agent_name: str, tenant_id: str = "default") -> int | None:
+        proc = self._procs.get(agent_name)
+        if proc is not None:
+            proc.poll()
+            if proc.returncode is not None:
+                return None
+
         pid_file = self._home_dir(agent_name, tenant_id) / ".fleetent.pid"
         if not pid_file.exists():
             return None
