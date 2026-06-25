@@ -12,6 +12,10 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    // Interaction-heavy component tests (Radix Select/Dialog flows driven by
+    // userEvent) run well under the 5s default normally, but v8 coverage
+    // instrumentation slows them enough to flake — give ample headroom.
+    testTimeout: 15000,
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
     setupFiles: ['./src/test/setup.ts'],
     coverage: {
