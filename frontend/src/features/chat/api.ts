@@ -29,12 +29,28 @@ type UseAgentChatResult = {
   sendMessage: (agentName: string, message: string) => Promise<void>;
 };
 
-function toIngressError(agentName: string, status: number): string {
+type IngressErrorBody = {
+  detail?: unknown;
+};
+
+async function readIngressErrorDetail(response: Response): Promise<string | null> {
+  try {
+    const body = (await response.json()) as IngressErrorBody;
+    return typeof body.detail === 'string' && body.detail.length > 0 ? body.detail : null;
+  } catch {
+    return null;
+  }
+}
+
+function toIngressError(agentName: string, status: number, detail: string | null): string {
+  if (detail) {
+    return `Agent "${agentName}": ${detail}`;
+  }
   if (status === 404) {
     return `Agent "${agentName}" was not found.`;
   }
   if (status === 503) {
-    return `Agent "${agentName}" is unavailable because it has no active placement.`;
+    return `Agent "${agentName}" is currently unavailable.`;
   }
   return `Agent "${agentName}" request failed with status ${status}.`;
 }
@@ -153,7 +169,8 @@ export function useAgentChat(): UseAgentChatResult {
         }
 
         if (!response.ok) {
-          const ingressError = toIngressError(agentName, response.status);
+          const detail = await readIngressErrorDetail(response);
+          const ingressError = toIngressError(agentName, response.status, detail);
           setError(ingressError);
           setMessages((current) =>
             updateMessage(current, assistantId, (currentMessage) => ({
