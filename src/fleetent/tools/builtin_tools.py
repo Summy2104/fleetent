@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 if TYPE_CHECKING:
     from fleetent.integrations.sandbox.manager import WorkspaceScope
 
-from fleetent import eval_logger
+from fleetent import eval_logger, memory
 from fleetent.integrations.sandbox import (
     BaseSandboxBackend,
     ExecResult,
@@ -302,6 +302,40 @@ def whoami(tool_context: ToolContext | None = None) -> str:
         f"场景: {scene}\n"
         f"当前时间: {now}"
     )
+
+
+@tool
+async def recall_memory(subject: str | None = None, tool_context: ToolContext | None = None) -> str:
+    """List the stored long-term memories about the current user, in full.
+
+    Use when the user asks to see what you remember — "列出我的所有记忆", "你记得
+    我什么", or "你记得张三什么" (pass that person's name as ``subject``). Unlike
+    the relevant memories auto-injected each turn, this returns EVERYTHING stored
+    for the current user (no relevance ranking, no truncation), grouped by who
+    each fact is about. Leave ``subject`` empty for all; set it to filter to one
+    person (e.g. the user, the assistant, or a named contact). Never raises.
+    """
+    principal = getattr(tool_context, "principal", None) if tool_context else None
+    user_id = getattr(principal, "user_id", None) if principal else None
+    if not user_id:
+        return "无法确定当前用户身份，暂时无法列出记忆。"
+    try:
+        facts = memory.list_active_facts(user_id, subject=subject)
+    except Exception as exc:  # noqa: BLE001 — recall must never break the turn
+        return f"读取记忆时出错：{exc}"
+    if not facts:
+        scope = f"关于「{subject}」的" if subject else ""
+        return f"目前没有{scope}记忆。"
+
+    grouped: dict[str, list[str]] = {}
+    for fact in facts:
+        line = fact.statement or f"{fact.subject} {fact.relation}: {fact.object}"
+        grouped.setdefault(fact.subject, []).append(line)
+    sections = []
+    for subj, lines in grouped.items():
+        body = "\n".join(f"- {line}" for line in lines)
+        sections.append(f"【{subj}】\n{body}")
+    return "\n\n".join(sections)
 
 
 @tool(connector="github", scopes=["repo"])

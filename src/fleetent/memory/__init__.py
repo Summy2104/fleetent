@@ -22,7 +22,7 @@ from fleetent.memory.agent_memory import (
 )
 from fleetent.memory.facts_lifecycle import pin_fact, retract_fact
 from fleetent.memory.facts_pipeline import run_pipeline
-from fleetent.memory.facts_store import set_facts_db
+from fleetent.memory.facts_store import list_active_facts, set_facts_db
 from fleetent.memory.maintenance import run_memory_maintenance
 from fleetent.memory.models import (
     AgentMemoryItem,
@@ -115,6 +115,7 @@ __all__ = [
     "iter_indexable_agent_memories",
     "iter_indexable_memories",
     "list_agent_memory",
+    "list_active_facts",
     "mark_user_memory_stale",
     "merge_user_memories",
     "pin_fact",

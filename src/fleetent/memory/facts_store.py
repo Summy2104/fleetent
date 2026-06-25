@@ -149,6 +149,29 @@ def active_facts_for_relation(user_id: str, subject: str, relation: str) -> list
     return [_row_to_fact(row) for row in rows]
 
 
+def list_active_facts(user_id: str, subject: str | None = None) -> list[Fact]:
+    """Return ALL active facts for a user_id (optionally one subject), no limit.
+
+    Full enumeration for "show me everything" recall — distinct from
+    active_facts_for_relation (one relation) and search_facts (semantic top-N).
+    Pure read: no vector search, no access-count side effects, no truncation.
+    """
+    clauses = ["user_id = :user_id", "status = 'active'"]
+    params: dict[str, object] = {"user_id": user_id}
+    if subject is not None:
+        clauses.append("subject = :subject")
+        params["subject"] = subject
+    rows = (
+        _facts_database()
+        .execute(
+            f"SELECT * FROM facts WHERE {' AND '.join(clauses)} ORDER BY created_at ASC",
+            params,
+        )
+        .fetchall()
+    )
+    return [_row_to_fact(row) for row in rows]
+
+
 def update_fact_access(fact_id: str, accessed_at: datetime) -> None:
     """Increment access_count, set last_accessed_at, set first_accessed_at once."""
     _facts_database().execute(

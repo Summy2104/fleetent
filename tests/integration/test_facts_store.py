@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from fleetent.db import SQLiteDatabase
-from fleetent.schema_migrations import migrate
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 
 
 def _open_db(tmp_path: Path) -> SQLiteDatabase:
@@ -378,3 +377,86 @@ def test_update_fact_access_first_accessed_at_only_set_once(tmp_path: Path) -> N
     # first_accessed_at must still be the original `now`
     assert updated.first_accessed_at == now
     assert updated.last_accessed_at == later
+
+
+def test_list_active_facts_returns_all_subjects(tmp_path: Path) -> None:
+    from fleetent.memory import facts_store
+    from fleetent.memory.facts_models import Fact
+
+    db = _open_db(tmp_path)
+    facts_store.set_facts_db(db, None)  # type: ignore[arg-type]
+    now = _now()
+
+    def _mk(fid: str, subject: str, relation: str, obj: str, status: str = "active") -> Fact:
+        return Fact(
+            fact_id=fid,
+            user_id="u1",
+            subject=subject,
+            relation=relation,
+            object=obj,
+            cardinality="multi",
+            status=status,
+            access_count=0,  # type: ignore[arg-type]
+            first_accessed_at=None,
+            last_accessed_at=None,
+            expires_at=None,
+            valid_until=None,
+            created_at=now,
+            updated_at=now,
+            source_turn=None,
+        )
+
+    facts_store.insert_fact(_mk("a", "user", "name", "Xin"))
+    facts_store.insert_fact(_mk("b", "agent", "name", "fleetent"))
+    facts_store.insert_fact(_mk("c", "张三", "works_at", "Acme"))
+    facts_store.insert_fact(_mk("d", "user", "name", "old", status="archived"))
+
+    out = facts_store.list_active_facts("u1")
+    # all active subjects, archived excluded
+    assert {(f.subject, f.object) for f in out} == {
+        ("user", "Xin"),
+        ("agent", "fleetent"),
+        ("张三", "Acme"),
+    }
+
+
+def test_list_active_facts_subject_filter(tmp_path: Path) -> None:
+    from fleetent.memory import facts_store
+    from fleetent.memory.facts_models import Fact
+
+    db = _open_db(tmp_path)
+    facts_store.set_facts_db(db, None)  # type: ignore[arg-type]
+    now = _now()
+
+    def _mk(fid: str, subject: str, obj: str) -> Fact:
+        return Fact(
+            fact_id=fid,
+            user_id="u1",
+            subject=subject,
+            relation="works_at",
+            object=obj,
+            cardinality="multi",
+            status="active",
+            access_count=0,
+            first_accessed_at=None,
+            last_accessed_at=None,
+            expires_at=None,
+            valid_until=None,
+            created_at=now,
+            updated_at=now,
+            source_turn=None,
+        )
+
+    facts_store.insert_fact(_mk("a", "张三", "Acme"))
+    facts_store.insert_fact(_mk("b", "user", "Northstar"))
+
+    out = facts_store.list_active_facts("u1", subject="张三")
+    assert {f.object for f in out} == {"Acme"}
+
+
+def test_list_active_facts_empty(tmp_path: Path) -> None:
+    from fleetent.memory import facts_store
+
+    db = _open_db(tmp_path)
+    facts_store.set_facts_db(db, None)  # type: ignore[arg-type]
+    assert facts_store.list_active_facts("nobody") == []
