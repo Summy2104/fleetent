@@ -346,6 +346,8 @@ def _wire_real_store(monkeypatch):
             "memory_namespace": a.memory_namespace,
             "icon": a.icon,
             "config_overrides": a.config_overrides,
+            "supports_dm": a.supports_dm,
+            "supports_groups": a.supports_groups,
         }
 
     def _create(
@@ -550,6 +552,18 @@ def test_get_full_definition(client, monkeypatch):
     assert r.status_code == 200
     assert r.json()["system_prompt"] == "Ops prompt"
     assert r.json()["allowed_tools"] == ["read_*"]
+
+
+def test_get_surfaces_im_capabilities(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    agent_store.create_agent("ops", "Ops prompt", ["read_*"])
+    agent_store.set_im_capabilities("ops", supports_dm=True, supports_groups=True)
+    token, _ = _session_for("viewer")
+    r = client.get("/admin/agents/ops", headers=_hdr(token))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["supports_dm"] is True
+    assert body["supports_groups"] is True
 
 
 def test_get_missing_404(client, monkeypatch):

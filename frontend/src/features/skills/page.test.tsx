@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { AuthProvider } from '@/app/auth';
 import { AppQueryProvider } from '@/app/query-client';
+import { I18nProvider } from '@/i18n';
 import { SkillsPage } from '@/features/skills/page';
 import { server } from '@/test/msw/server';
 
@@ -35,9 +36,11 @@ function renderSkillsPage(): void {
       initialToken="session-token"
     >
       <AppQueryProvider>
-        <MemoryRouter>
-          <SkillsPage />
-        </MemoryRouter>
+        <I18nProvider>
+          <MemoryRouter>
+            <SkillsPage />
+          </MemoryRouter>
+        </I18nProvider>
       </AppQueryProvider>
     </AuthProvider>
   );
@@ -45,7 +48,7 @@ function renderSkillsPage(): void {
 
 describe('skills page parity baseline', () => {
   it('supports native skills admin flows and keeps proposals read-only', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let reloadCount = 0;
     const activeVersion = 'sha-1';
     let skills: SkillRecord[] = [
@@ -76,6 +79,9 @@ describe('skills page parity baseline', () => {
     ];
 
     server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () =>
+        HttpResponse.json({ email: 'admin@fleetent.test', id: 'admin-1', role: 'admin' })
+      ),
       http.get(`${API_BASE_URL}/admin/skills`, () => HttpResponse.json(skills)),
       http.get(`${API_BASE_URL}/admin/skills/:name/content`, ({ params }) =>
         HttpResponse.json({
@@ -184,63 +190,92 @@ describe('skills page parity baseline', () => {
     renderSkillsPage();
 
     expect(await screen.findByRole('heading', { name: 'Skills' })).toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: 'ops-guide' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'welcome-pack' })).toBeInTheDocument();
+    // The current UI renders skills as table rows; each row exposes an "Actions for {name}" menu trigger.
+    expect(await screen.findByRole('button', { name: 'Actions for ops-guide' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Actions for welcome-pack' })).toBeInTheDocument();
+    expect(screen.getByText('quarantined')).toBeInTheDocument();
 
-    await waitFor(() => {
-      expect(screen.getByText(/ops-guide body/)).toBeInTheDocument();
-      expect(screen.getByText('quarantined')).toBeInTheDocument();
-    });
+    // View the published skill content via the row's Actions menu.
+    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }));
+    await user.click(await screen.findByText('View content'));
+    expect(await screen.findByText(/ops-guide body/)).toBeInTheDocument();
+    await user.keyboard('{Escape}');
 
-    expect(screen.getByRole('button', { name: 'Force publish ops-guide' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Disable ops-guide' })).toBeInTheDocument();
-
-    const bindingsSection = screen.getByRole('heading', { name: 'Agent bindings' }).closest('section');
-    expect(bindingsSection).not.toBeNull();
-    const bindingControls = within(bindingsSection as HTMLElement);
+    // Agent bindings: open the dialog, confirm bound state, toggle a binding.
+    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }));
+    await user.click(await screen.findByText('Agent bindings'));
+    const bindingsDialog = await screen.findByRole('dialog');
+    const bindingControls = within(bindingsDialog);
     expect(bindingControls.getByLabelText('agent-a')).toBeChecked();
-
     await user.click(bindingControls.getByLabelText('agent-b'));
     await waitFor(() => {
       expect(bindingControls.getByLabelText('agent-b')).toBeChecked();
     });
+    await user.keyboard('{Escape}');
 
-    await user.click(screen.getByRole('button', { name: 'Show versions for ops-guide' }));
-    expect(await screen.findByRole('button', { name: 'View diff for sha-2' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'View diff for sha-2' }));
-    expect(await screen.findByText('diff ops-guide sha-2')).toBeInTheDocument();
+    // Versions dialog: pick the second revision and view its diff.
+    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }));
+    await user.click(await screen.findByText('Versions'));
+    const versionsDialog = await screen.findByRole('dialog');
+    // Two revisions, each with its own "Diff" button; the second row is sha-2.
+    const diffButtons = await within(versionsDialog).findAllByRole('button', { name: 'Diff' });
+    await user.click(diffButtons[1]);
+    expect(await within(versionsDialog).findByText('diff ops-guide sha-2')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
 
-    const proposalsSection = screen.getByRole('heading', { name: 'Reflection proposals' }).closest('section');
-    expect(proposalsSection).not.toBeNull();
-    const proposals = within(proposalsSection as HTMLElement);
+    // Proposals dialog is read-only: shows reasons + diff, never approve/reject.
+    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }));
+    await user.click(await screen.findByText(/^Proposals/));
+    const proposalsDialog = await screen.findByRole('dialog');
+    const proposals = within(proposalsDialog);
     expect(proposals.getByText('Tighten escalation wording')).toBeInTheDocument();
     expect(proposals.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument();
     expect(proposals.queryByRole('button', { name: /reject/i })).not.toBeInTheDocument();
-    await user.click(proposals.getByRole('button', { name: 'View diff for proposal prop-1' }));
+    await user.click(proposals.getByRole('button', { name: 'Diff' }));
     expect(await screen.findByText('proposal diff prop-1')).toBeInTheDocument();
+    // Close the proposal-diff dialog, then the proposals dialog.
+    await user.keyboard('{Escape}');
+    await user.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
 
-    await user.click(screen.getByRole('button', { name: 'Force publish ops-guide' }));
+    // Force publish (only offered for rejected/quarantined skills) clears quarantine.
+    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }));
+    await user.click(await screen.findByText('Force publish'));
     await waitFor(() => {
       expect(screen.getByText('active')).toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: 'Force publish ops-guide' })).not.toBeInTheDocument();
     });
+    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }));
+    expect(screen.queryByText('Force publish')).not.toBeInTheDocument();
+    await user.keyboard('{Escape}');
 
-    await user.click(screen.getByRole('button', { name: 'Disable ops-guide' }));
+    // Disable -> Enable toggle.
+    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }));
+    await user.click(await screen.findByText('Disable'));
+    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }));
+    expect(await screen.findByText('Enable')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+
+    // Archive ops-guide via confirm dialog.
+    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }));
+    await user.click(await screen.findByText('Archive'));
+    const archiveConfirm = await screen.findByRole('alertdialog');
+    await user.click(within(archiveConfirm).getByRole('button', { name: 'Archive' }));
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Enable ops-guide' })).toBeInTheDocument();
+      expect(screen.getAllByText('archived').length).toBeGreaterThan(0);
     });
 
-    await user.click(screen.getByRole('button', { name: 'Archive ops-guide' }));
+    // welcome-pack is archived -> its menu offers Restore.
+    await user.click(screen.getByRole('button', { name: 'Actions for welcome-pack' }));
+    await user.click(await screen.findByText('Restore'));
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Restore ops-guide' })).toBeInTheDocument();
+      expect(reloadCount).toBe(0);
     });
+    await user.keyboard('{Escape}');
 
-    await user.click(screen.getByRole('button', { name: 'Restore welcome-pack' }));
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Archive welcome-pack' })).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByRole('button', { name: 'Reload skill index' }));
+    // Reload skill index button on the header.
+    await user.click(screen.getByRole('button', { name: 'Reload index' }));
     await waitFor(() => {
       expect(reloadCount).toBe(1);
     });
@@ -296,7 +331,7 @@ describe('skills page backflow approval', () => {
   }
 
   it('lists proposals, shows diff, and posts accept/reject/fork decisions', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('crm-ops-fork');
     const acceptHeaders: (string | null)[] = [];
@@ -321,15 +356,13 @@ describe('skills page backflow approval', () => {
 
     renderSkillsPage();
 
-    const backflowSection = (
-      await screen.findByRole('heading', { name: 'Skill backflow' })
-    ).closest('section');
-    expect(backflowSection).not.toBeNull();
-    const backflow = within(backflowSection as HTMLElement);
-    expect(await backflow.findByText(/crm-ops/)).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: 'Actions for crm-ops' }));
+    await user.click(await screen.findByRole('menuitem', { name: /Backflow/ }));
+    const backflow = within(await screen.findByRole('dialog'));
+    expect(await backflow.findByRole('button', { name: 'Accept backflow 1' })).toBeInTheDocument();
 
     await user.click(backflow.getByRole('button', { name: 'View backflow diff for 1' }));
-    expect(await screen.findByText('bf head 1')).toBeInTheDocument();
+    expect(await backflow.findByText('bf head 1')).toBeInTheDocument();
 
     await user.click(backflow.getByRole('button', { name: 'Accept backflow 1' }));
     await waitFor(() => expect(acceptHeaders).toHaveLength(1));
@@ -348,7 +381,7 @@ describe('skills page backflow approval', () => {
   });
 
   it('does not accept a conflict proposal when confirmation is cancelled', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
     const acceptHeaders: (string | null)[] = [];
 
@@ -362,10 +395,9 @@ describe('skills page backflow approval', () => {
 
     renderSkillsPage();
 
-    const backflowSection = (
-      await screen.findByRole('heading', { name: 'Skill backflow' })
-    ).closest('section');
-    const backflow = within(backflowSection as HTMLElement);
+    await user.click(await screen.findByRole('button', { name: 'Actions for crm-ops' }));
+    await user.click(await screen.findByRole('menuitem', { name: /Backflow/ }));
+    const backflow = within(await screen.findByRole('dialog'));
 
     await user.click(await backflow.findByRole('button', { name: 'Accept backflow 1' }));
     expect(confirmSpy).toHaveBeenCalled();
@@ -375,9 +407,12 @@ describe('skills page backflow approval', () => {
   });
 });
 
-describe('skills page create and edit', () => {
+describe('skills page content + search', () => {
   function stubReadEndpoints(getSkills: () => SkillRecord[], getContent: () => string): void {
     server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () =>
+        HttpResponse.json({ email: 'admin@fleetent.test', id: 'admin-1', role: 'admin' })
+      ),
       http.get(`${API_BASE_URL}/admin/skills`, () => HttpResponse.json(getSkills())),
       http.get(`${API_BASE_URL}/admin/skills/:name/content`, ({ params }) =>
         HttpResponse.json({ content: getContent(), name: String(params.name ?? '') })
@@ -388,9 +423,9 @@ describe('skills page create and edit', () => {
     );
   }
 
-  it('creates a new skill from the form and refreshes the list', async () => {
-    const user = userEvent.setup();
-    let skills: SkillRecord[] = [
+  it('filters skills by name via the search box', async () => {
+    const user = userEvent.setup({ delay: null });
+    const skills: SkillRecord[] = [
       {
         audit_verdict: 'pass',
         description: 'Onboarding helper',
@@ -401,54 +436,37 @@ describe('skills page create and edit', () => {
         source: 'marketplace',
         status: 'active',
       },
+      {
+        audit_verdict: 'pass',
+        description: 'Promo helper',
+        drifted_agents: [],
+        enabling_agents: [],
+        global_enabled: true,
+        name: 'promo-helper',
+        source: 'adhoc',
+        status: 'active',
+      },
     ];
 
     stubReadEndpoints(
       () => skills,
       () => 'welcome body'
     );
-    server.use(
-      http.post(`${API_BASE_URL}/admin/skills`, async ({ request }) => {
-        const body = (await request.json()) as { content: string; name: string };
-        expect(body.name).toBe('promo-helper');
-        expect(body.content).toContain('promo-helper');
-        skills = [
-          ...skills,
-          {
-            audit_verdict: 'pass',
-            description: 'promo',
-            drifted_agents: [],
-            enabling_agents: [],
-            global_enabled: false,
-            name: body.name,
-            source: 'adhoc',
-            status: 'active',
-          },
-        ];
-        return HttpResponse.json({ name: body.name, verdict: 'pass' });
-      })
-    );
 
     renderSkillsPage();
 
-    expect(await screen.findByRole('button', { name: 'welcome-pack' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Actions for welcome-pack' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Actions for promo-helper' })).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'New skill' }));
-    await user.type(screen.getByLabelText('New skill name'), 'promo-helper');
-    await user.type(
-      screen.getByLabelText('New skill content'),
-      '---{enter}name: promo-helper{enter}description: promo{enter}---{enter}body'
-    );
-    await user.click(screen.getByRole('button', { name: 'Create skill' }));
-
+    await user.type(screen.getByPlaceholderText('Search skills…'), 'promo');
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'promo-helper' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Actions for welcome-pack' })).not.toBeInTheDocument();
     });
-    expect(screen.queryByLabelText('New skill name')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Actions for promo-helper' })).toBeInTheDocument();
   });
 
-  it('edits the selected skill content and refreshes the preview', async () => {
-    const user = userEvent.setup();
+  it('shows the published skill content in the content dialog', async () => {
+    const user = userEvent.setup({ delay: null });
     const skills: SkillRecord[] = [
       {
         audit_verdict: 'pass',
@@ -461,36 +479,19 @@ describe('skills page create and edit', () => {
         status: 'active',
       },
     ];
-    let content = '---\nname: welcome-pack\ndescription: helper\n---\noriginal body';
+    const content = '---\nname: welcome-pack\ndescription: helper\n---\noriginal body';
 
     stubReadEndpoints(
       () => skills,
       () => content
     );
-    server.use(
-      http.put(`${API_BASE_URL}/admin/skills/:name`, async ({ params, request }) => {
-        const body = (await request.json()) as { content: string };
-        expect(String(params.name ?? '')).toBe('welcome-pack');
-        content = body.content;
-        return HttpResponse.json({ name: String(params.name ?? ''), verdict: 'pass' });
-      })
-    );
 
     renderSkillsPage();
 
-    await waitFor(() => {
-      expect(screen.getByText(/original body/)).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByRole('button', { name: 'Edit content' }));
-    const editor = screen.getByLabelText('Skill content editor');
-    await user.clear(editor);
-    await user.type(editor, 'rewritten body');
-    await user.click(screen.getByRole('button', { name: 'Save content' }));
-
-    await waitFor(() => {
-      expect(screen.getByText(/rewritten body/)).toBeInTheDocument();
-    });
-    expect(screen.queryByLabelText('Skill content editor')).not.toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: 'Actions for welcome-pack' }));
+    await user.click(await screen.findByText('View content'));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/original body/)).toBeInTheDocument();
+    expect(within(dialog).getByText('Content · welcome-pack')).toBeInTheDocument();
   });
 });

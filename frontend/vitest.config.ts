@@ -12,6 +12,19 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    // Interaction-heavy component tests (Radix Select/Dialog flows driven by
+    // userEvent) run well under the 5s default normally, but v8 coverage
+    // instrumentation plus worker contention slows them enough to flake —
+    // give ample headroom. 45s only ever bites a genuinely stuck test.
+    testTimeout: 60000,
+    hookTimeout: 60000,
+    // Cap parallelism hard: under v8 coverage the heavy page suites (Radix
+    // Select/Dialog flows driven by userEvent) starve each other for CPU when
+    // many workers run at once, producing flaky timeouts that move between
+    // files run to run. Two workers keeps each suite on enough cores to finish
+    // well within the timeout; we trade wall-clock for deterministic runs.
+    maxWorkers: 2,
+    minWorkers: 1,
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
     setupFiles: ['./src/test/setup.ts'],
     coverage: {

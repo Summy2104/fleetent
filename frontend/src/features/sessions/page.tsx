@@ -1,7 +1,43 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import {
+  Ban,
+  Eraser,
+  LogIn,
+  LogOut,
+  MessageSquarePlus,
+  MoreVertical,
+  RotateCcw,
+  Search,
+} from 'lucide-react';
 
+import { useT } from '@/i18n';
 import { useAdminApi } from '@/lib/api-client';
+import { cn } from '@/lib/utils';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import {
   useBulkSessionMutation,
   useClearSessionMutation,
@@ -32,6 +68,15 @@ function useAdminMeQuery() {
   });
 }
 
+function statusVariant(status: string): 'success' | 'warning' | 'secondary' | 'outline' {
+  if (status === 'active') return 'success';
+  if (status === 'idle') return 'warning';
+  if (status === 'ended') return 'secondary';
+  return 'outline';
+}
+
+// ─────────────────────────── Session actions ───────────────────────────
+
 function SessionActions({
   canWrite,
   session,
@@ -39,6 +84,7 @@ function SessionActions({
   canWrite: boolean;
   session: SessionListItem;
 }): JSX.Element | null {
+  const t = useT();
   const takeover = useTakeoverSessionMutation(session.session_id);
   const release = useReleaseSessionMutation(session.session_id);
   const inject = useInjectSessionMutation(session.session_id);
@@ -46,12 +92,17 @@ function SessionActions({
   const clear = useClearSessionMutation(session.session_id);
   const forceEnd = useForceEndSessionMutation(session.session_id);
 
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [confirmForceEnd, setConfirmForceEnd] = useState(false);
+  const [resetKeepTurns, setResetKeepTurns] = useState('2');
+
   if (!canWrite) {
     return null;
   }
 
   const runInject = async (): Promise<void> => {
-    const content = window.prompt('Inject message content:');
+    const content = window.prompt(t('sessions.injectPrompt'));
     if (!content) {
       return;
     }
@@ -59,79 +110,238 @@ function SessionActions({
   };
 
   const runReset = async (): Promise<void> => {
-    const keepTurnsValue = window.prompt('Keep how many recent turns?', '2');
-    if (keepTurnsValue === null) {
-      return;
-    }
-    if (!window.confirm(`Reset session ${session.session_id}? This cannot be undone.`)) {
-      return;
-    }
-    const keepTurns = Number.parseInt(keepTurnsValue, 10);
+    const keepTurns = Number.parseInt(resetKeepTurns, 10);
     if (Number.isNaN(keepTurns)) {
       return;
     }
     await reset.mutateAsync({ keepTurns });
+    setConfirmReset(false);
   };
 
   return (
-    <div className="flex flex-wrap gap-2">
-      <button
-        className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-        onClick={() => void takeover.mutateAsync()}
-        type="button"
-      >
-        Take over
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={t('sessions.actionsFor', { id: session.session_id })}
+          >
+            <MoreVertical className="size-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={() => void takeover.mutateAsync()}>
+            <LogIn /> {t('sessions.takeOver')}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => void release.mutateAsync()}>
+            <LogOut /> {t('sessions.release')}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => void runInject()}>
+            <MessageSquarePlus /> {t('sessions.inject')}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setConfirmReset(true)}>
+            <RotateCcw /> {t('sessions.reset')}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem destructive onSelect={() => setConfirmClear(true)}>
+            <Eraser /> {t('sessions.clearTranscript')}
+          </DropdownMenuItem>
+          <DropdownMenuItem destructive onSelect={() => setConfirmForceEnd(true)}>
+            <Ban /> {t('sessions.forceEnd')}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <AlertDialog open={confirmReset} onOpenChange={setConfirmReset}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('sessions.resetTitle', { id: session.session_id })}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('sessions.resetDescription')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="grid gap-2">
+            <Label htmlFor={`keep-turns-${session.session_id}`}>{t('sessions.keepTurns')}</Label>
+            <Input
+              id={`keep-turns-${session.session_id}`}
+              type="number"
+              min={0}
+              value={resetKeepTurns}
+              onChange={(event) => setResetKeepTurns(event.target.value)}
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('sessions.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void runReset()}>{t('sessions.reset')}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={confirmClear} onOpenChange={setConfirmClear}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('sessions.clearTitle', { id: session.session_id })}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('sessions.clearDescription')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('sessions.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void clear.mutateAsync()}>{t('sessions.clear')}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={confirmForceEnd} onOpenChange={setConfirmForceEnd}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('sessions.forceEndTitle', { id: session.session_id })}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('sessions.forceEndDescription')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('sessions.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void forceEnd.mutateAsync()}>{t('sessions.forceEnd')}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+
+// ─────────────────────────── Session row ───────────────────────────
+
+function SessionRow({
+  session,
+  isAdmin,
+  selected,
+  picked,
+  onSelect,
+  onTogglePicked,
+}: {
+  session: SessionListItem;
+  isAdmin: boolean;
+  selected: boolean;
+  picked: boolean;
+  onSelect: () => void;
+  onTogglePicked: () => void;
+}): JSX.Element {
+  const t = useT();
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-3 rounded-lg border px-4 py-3 transition-colors',
+        selected ? 'border-primary/40 bg-primary/[0.04]' : 'border-border bg-card hover:bg-accent/40'
+      )}
+    >
+      {isAdmin ? (
+        <input
+          aria-label={t('sessions.selectSession', { id: session.session_id })}
+          checked={picked}
+          onChange={onTogglePicked}
+          type="checkbox"
+          className="size-4 shrink-0 accent-primary"
+        />
+      ) : null}
+
+      <button type="button" className="flex min-w-0 flex-1 flex-col gap-1 text-left" onClick={onSelect}>
+        <span className="flex items-center gap-2">
+          <span className="truncate font-mono text-sm font-medium text-foreground">
+            {session.session_id}
+          </span>
+          <Badge variant={statusVariant(session.status)}>{session.status}</Badge>
+        </span>
+        <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+          <span>{session.origin}</span>
+          <span>·</span>
+          <span>{session.agent_name ?? '—'}</span>
+          {session.user_id ? (
+            <>
+              <span>·</span>
+              <span>{session.user_id}</span>
+            </>
+          ) : null}
+        </span>
       </button>
-      <button
-        className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-        onClick={() => void release.mutateAsync()}
-        type="button"
-      >
-        Release
-      </button>
-      <button
-        className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-        onClick={() => void runInject()}
-        type="button"
-      >
-        Inject
-      </button>
-      <button
-        className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-        onClick={() => void runReset()}
-        type="button"
-      >
-        Reset
-      </button>
-      <button
-        className="rounded-md bg-red-100 px-3 py-2 text-sm font-medium text-red-700"
-        onClick={() => {
-          if (!window.confirm(`Clear transcript of ${session.session_id}? This cannot be undone.`)) {
-            return;
-          }
-          void clear.mutateAsync();
-        }}
-        type="button"
-      >
-        Clear
-      </button>
-      <button
-        className="rounded-md bg-red-100 px-3 py-2 text-sm font-medium text-red-700"
-        onClick={() => {
-          if (!window.confirm(`Force-end session ${session.session_id}? This cannot be undone.`)) {
-            return;
-          }
-          void forceEnd.mutateAsync();
-        }}
-        type="button"
-      >
-        Force end
-      </button>
+
+      <SessionActions canWrite={isAdmin} session={session} />
     </div>
   );
 }
 
+// ─────────────────────────── Detail panel ───────────────────────────
+
+function SessionDetailPanel({ sessionId }: { sessionId: string | null }): JSX.Element {
+  const t = useT();
+  const detail = useSessionDetailQuery(sessionId);
+  const meta = detail.data?.meta;
+
+  return (
+    <Card className="lg:sticky lg:top-24">
+      <CardHeader>
+        <CardTitle>{t('sessions.detailTitle')}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {meta ? (
+          <>
+            <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="text-xs text-muted-foreground">{t('sessions.sessionId')}</dt>
+                <dd className="break-all font-mono text-foreground">{meta.session_id}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">{t('sessions.statusLabel')}</dt>
+                <dd>
+                  <Badge variant={statusVariant(meta.status)}>{meta.status}</Badge>
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">{t('sessions.origin')}</dt>
+                <dd className="text-foreground">{meta.origin}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">{t('sessions.agent')}</dt>
+                <dd className="text-foreground">{meta.agent_name ?? '—'}</dd>
+              </div>
+            </dl>
+
+            <Separator />
+
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-foreground">{t('sessions.transcript')}</h3>
+              {detail.data?.transcript.length ? (
+                detail.data.transcript.map((entry, index) => (
+                  <article
+                    className="rounded-lg border border-border bg-secondary/30 p-4"
+                    key={`${entry.role}-${index}`}
+                  >
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                      {entry.role}
+                    </p>
+                    <p className="mt-2 whitespace-pre-wrap break-words text-sm text-foreground">
+                      {entry.content}
+                    </p>
+                  </article>
+                ))
+              ) : (
+                <p className="text-sm text-muted-foreground">{t('sessions.noTranscriptEntries')}</p>
+              )}
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">{t('sessions.selectSessionToInspect')}</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─────────────────────────── Page ───────────────────────────
+
 export function SessionsPage(): JSX.Element {
+  const t = useT();
   const me = useAdminMeQuery();
   const [filters, setFilters] = useState<SessionsFilter>({});
   const [draftStatus, setDraftStatus] = useState('');
@@ -140,9 +350,9 @@ export function SessionsPage(): JSX.Element {
   const [search, setSearch] = useState('');
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [pickedSessionIds, setPickedSessionIds] = useState<string[]>([]);
+  const [confirmBulk, setConfirmBulk] = useState(false);
 
   const sessions = useSessionsQuery(filters);
-  const detail = useSessionDetailQuery(selectedSessionId);
   const bulk = useBulkSessionMutation();
 
   const isAdmin = me.data?.role !== 'viewer';
@@ -173,8 +383,6 @@ export function SessionsPage(): JSX.Element {
     );
   }, [selectedSessionId, sessions.data]);
 
-  const selectedMeta = detail.data?.meta;
-
   const togglePicked = (sessionId: string): void => {
     setPickedSessionIds((current) =>
       current.includes(sessionId)
@@ -195,198 +403,112 @@ export function SessionsPage(): JSX.Element {
     if (!pickedSessionIds.length) {
       return;
     }
-    if (!window.confirm(`Bulk clear ${pickedSessionIds.length} session(s)? This cannot be undone.`)) {
-      return;
-    }
     await bulk.mutateAsync({ action: 'clear', sessionIds: pickedSessionIds });
+    setConfirmBulk(false);
   };
 
   return (
-    <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-      <div className="space-y-6">
-        <header className="space-y-2">
-          <p className="text-sm font-medium uppercase tracking-[0.25em] text-muted-foreground">
-            Native SPA
-          </p>
-          <h1 className="text-3xl font-semibold tracking-tight">Sessions</h1>
-          <p className="text-sm text-muted-foreground">
-            Browse active session metadata, inspect transcript detail, and govern live sessions
-            without dropping back to the legacy console.
-          </p>
-          {!isAdmin ? <p className="text-sm text-muted-foreground">Viewer access is read-only.</p> : null}
-        </header>
-
-        <section className="rounded-2xl border bg-white/75 p-5">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <label className="grid gap-2 text-sm font-medium">
-              Search sessions
-              <input
-                className="rounded-md border bg-white px-3 py-2"
-                onChange={(event) => setSearch(event.target.value)}
-                value={search}
-              />
-            </label>
-            <label className="grid gap-2 text-sm font-medium">
-              Status
-              <select
-                className="rounded-md border bg-white px-3 py-2"
-                onChange={(event) => setDraftStatus(event.target.value)}
-                value={draftStatus}
-              >
-                <option value="">All statuses</option>
-                <option value="active">active</option>
-                <option value="idle">idle</option>
-                <option value="ended">ended</option>
-              </select>
-            </label>
-            <label className="grid gap-2 text-sm font-medium">
-              User ID
-              <input
-                className="rounded-md border bg-white px-3 py-2"
-                onChange={(event) => setDraftUserId(event.target.value)}
-                value={draftUserId}
-              />
-            </label>
-            <label className="grid gap-2 text-sm font-medium">
-              Agent name
-              <input
-                className="rounded-md border bg-white px-3 py-2"
-                onChange={(event) => setDraftAgentName(event.target.value)}
-                value={draftAgentName}
-              />
-            </label>
-          </div>
-          <div className="mt-4 flex flex-wrap gap-3">
-            <button
-              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-              onClick={applyFilters}
-              type="button"
-            >
-              Apply filters
-            </button>
-            {isAdmin ? (
-              <button
-                className="rounded-md bg-red-100 px-4 py-2 text-sm font-medium text-red-700"
-                onClick={() => void runBulkClear()}
-                type="button"
-              >
-                Bulk clear selected
-              </button>
-            ) : null}
-          </div>
-        </section>
-
-        <section className="rounded-2xl border bg-white/75 p-5">
-          <table className="w-full border-collapse text-left">
-            <thead>
-              <tr className="border-b text-sm text-muted-foreground">
-                <th className="py-3">{isAdmin ? 'Pick' : 'View'}</th>
-                <th className="py-3">Session</th>
-                <th className="py-3">Origin</th>
-                <th className="py-3">Agent</th>
-                <th className="py-3">Status</th>
-                <th className="py-3">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleSessions.map((session) => (
-                <tr
-                  className="border-b align-top"
-                  key={session.session_id}
-                >
-                  <td className="py-3 pr-3">
-                    {isAdmin ? (
-                      <input
-                        aria-label={`Select session ${session.session_id}`}
-                        checked={pickedSessionIds.includes(session.session_id)}
-                        onChange={() => togglePicked(session.session_id)}
-                        type="checkbox"
-                      />
-                    ) : (
-                      <button
-                        className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-                        onClick={() => setSelectedSessionId(session.session_id)}
-                        type="button"
-                      >
-                        Open
-                      </button>
-                    )}
-                  </td>
-                  <td className="py-3 pr-3">
-                    <button
-                      className="text-left font-medium"
-                      onClick={() => setSelectedSessionId(session.session_id)}
-                      type="button"
-                    >
-                      {session.session_id}
-                    </button>
-                  </td>
-                  <td className="py-3 pr-3 text-sm text-muted-foreground">{session.origin}</td>
-                  <td className="py-3 pr-3">{session.agent_name ?? '—'}</td>
-                  <td className="py-3 pr-3">{session.status}</td>
-                  <td className="py-3">
-                    <SessionActions
-                      canWrite={isAdmin}
-                      session={session}
-                    />
-                  </td>
-                </tr>
-              ))}
-              {visibleSessions.length === 0 ? (
-                <tr>
-                  <td
-                    className="py-6 text-sm text-muted-foreground"
-                    colSpan={6}
-                  >
-                    No sessions.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </section>
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <h2 className="text-xl font-semibold tracking-tight">{t('sessions.title')}</h2>
+          <Badge variant="secondary">{sessions.data?.length ?? 0}</Badge>
+          {!isAdmin ? <Badge variant="outline">{t('sessions.readOnly')}</Badge> : null}
+        </div>
+        {isAdmin && pickedSessionIds.length ? (
+          <Button variant="destructive" onClick={() => setConfirmBulk(true)}>
+            <Eraser className="size-4" /> {t('sessions.bulkClear', { count: pickedSessionIds.length })}
+          </Button>
+        ) : null}
       </div>
 
-      <section className="rounded-2xl border bg-white/75 p-5">
-        <h2 className="text-lg font-semibold">Session detail</h2>
-        {selectedMeta ? (
-          <div className="mt-4 space-y-4">
-            <dl className="grid gap-3 text-sm md:grid-cols-2">
-              <div>
-                <dt className="font-medium text-muted-foreground">Session ID</dt>
-                <dd>{selectedMeta.session_id}</dd>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="space-y-5">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Search className="size-4 text-primary" /> {t('sessions.filters')}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Input
+                placeholder={t('sessions.searchPlaceholder')}
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div className="grid gap-2">
+                  <Label className="text-xs text-muted-foreground">{t('sessions.statusLabel')}</Label>
+                  <Select
+                    value={draftStatus || 'all'}
+                    onValueChange={(value) => setDraftStatus(value === 'all' ? '' : value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">{t('sessions.allStatuses')}</SelectItem>
+                      <SelectItem value="active">active</SelectItem>
+                      <SelectItem value="idle">idle</SelectItem>
+                      <SelectItem value="ended">ended</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label className="text-xs text-muted-foreground">{t('sessions.userId')}</Label>
+                  <Input value={draftUserId} onChange={(event) => setDraftUserId(event.target.value)} />
+                </div>
+                <div className="grid gap-2">
+                  <Label className="text-xs text-muted-foreground">{t('sessions.agentName')}</Label>
+                  <Input
+                    value={draftAgentName}
+                    onChange={(event) => setDraftAgentName(event.target.value)}
+                  />
+                </div>
               </div>
-              <div>
-                <dt className="font-medium text-muted-foreground">Status</dt>
-                <dd>{selectedMeta.status}</dd>
+              <Button variant="outline" onClick={applyFilters}>
+                {t('sessions.applyFilters')}
+              </Button>
+            </CardContent>
+          </Card>
+
+          <div className="space-y-2">
+            {visibleSessions.map((session) => (
+              <SessionRow
+                key={session.session_id}
+                session={session}
+                isAdmin={isAdmin}
+                selected={selectedSessionId === session.session_id}
+                picked={pickedSessionIds.includes(session.session_id)}
+                onSelect={() => setSelectedSessionId(session.session_id)}
+                onTogglePicked={() => togglePicked(session.session_id)}
+              />
+            ))}
+            {visibleSessions.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border py-12 text-center text-sm text-muted-foreground">
+                {t('sessions.noSessions')}
               </div>
-              <div>
-                <dt className="font-medium text-muted-foreground">Origin</dt>
-                <dd>{selectedMeta.origin}</dd>
-              </div>
-              <div>
-                <dt className="font-medium text-muted-foreground">Agent</dt>
-                <dd>{selectedMeta.agent_name ?? '—'}</dd>
-              </div>
-            </dl>
-            <div className="space-y-3">
-              {detail.data?.transcript.map((entry, index) => (
-                <article
-                  className="rounded-xl border bg-white p-4"
-                  key={`${entry.role}-${index}`}
-                >
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                    {entry.role}
-                  </p>
-                  <p className="mt-2 text-sm">{entry.content}</p>
-                </article>
-              ))}
-            </div>
+            ) : null}
           </div>
-        ) : (
-          <p className="mt-4 text-sm text-muted-foreground">Select a session to inspect its transcript.</p>
-        )}
-      </section>
-    </section>
+        </div>
+
+        <SessionDetailPanel sessionId={selectedSessionId} />
+      </div>
+
+      <AlertDialog open={confirmBulk} onOpenChange={setConfirmBulk}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('sessions.bulkClearTitle', { count: pickedSessionIds.length })}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('sessions.bulkClearDescription')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('sessions.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void runBulkClear()}>{t('sessions.bulkClearAction')}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
   );
 }

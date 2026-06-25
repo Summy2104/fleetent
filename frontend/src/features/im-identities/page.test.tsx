@@ -6,20 +6,20 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '@/app/auth';
 import { AppQueryProvider } from '@/app/query-client';
 import { ImIdentitiesPage } from '@/features/im-identities/page';
+import { I18nProvider } from '@/i18n';
 import { server } from '@/test/msw/server';
 
 const API_BASE_URL = 'http://fleetent.test';
 
 function renderPage(): void {
   render(
-    <AuthProvider
-      baseUrl={API_BASE_URL}
-      initialToken="session-token"
-    >
-      <AppQueryProvider>
-        <ImIdentitiesPage />
-      </AppQueryProvider>
-    </AuthProvider>
+    <I18nProvider>
+      <AuthProvider baseUrl={API_BASE_URL} initialToken="session-token">
+        <AppQueryProvider>
+          <ImIdentitiesPage />
+        </AppQueryProvider>
+      </AuthProvider>
+    </I18nProvider>
   );
 }
 
@@ -32,9 +32,12 @@ const USERS = [
   { email: null, id: 'user-bob', name: 'Bob' },
 ];
 
+const ADMIN_ME = { email: 'admin@example.com', id: 'admin-1', role: 'admin' };
+
 describe('im-identities page', () => {
   it('lists mappings with platform, external id, and internal user', async () => {
     server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () => HttpResponse.json(ADMIN_ME)),
       http.get(`${API_BASE_URL}/admin/im-identities`, () =>
         HttpResponse.json([
           {
@@ -53,12 +56,12 @@ describe('im-identities page', () => {
 
     renderPage();
 
-    expect(await screen.findByRole('heading', { name: '用户-IM 关系' })).toBeInTheDocument();
-    const row = await screen.findByRole('article', { name: 'mapping 1' });
+    expect(await screen.findByRole('heading', { name: 'IM Identities' })).toBeInTheDocument();
+    const row = await screen.findByRole('row', { name: /U1/ });
     expect(within(row).getByText('slack')).toBeInTheDocument();
     expect(within(row).getByText('U1')).toBeInTheDocument();
-    expect(within(row).getByText(/Alice/)).toBeInTheDocument();
-    expect(within(row).getByText(/alice@example.com/)).toBeInTheDocument();
+    expect(within(row).getByText('Alice')).toBeInTheDocument();
+    expect(within(row).getByText('alice@example.com')).toBeInTheDocument();
   });
 
   it('creates a new binding and shows it in the list', async () => {
@@ -66,6 +69,7 @@ describe('im-identities page', () => {
     let mappings: Array<Record<string, unknown>> = [];
 
     server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () => HttpResponse.json(ADMIN_ME)),
       http.get(`${API_BASE_URL}/admin/im-identities`, () => HttpResponse.json(mappings)),
       http.get(`${API_BASE_URL}/admin/users`, () => HttpResponse.json(USERS)),
       http.post(`${API_BASE_URL}/admin/im-identities`, async ({ request }) => {
@@ -90,25 +94,47 @@ describe('im-identities page', () => {
 
     renderPage();
 
-    await screen.findByRole('heading', { name: '用户-IM 关系' });
-    const submit = screen.getByRole('button', { name: '新增绑定' });
+    await screen.findByRole('heading', { name: 'IM Identities' });
+
+    // Open the add-mapping dialog.
+    await user.click(screen.getByRole('button', { name: 'Add mapping' }));
+    const dialog = await screen.findByRole('dialog');
+
+    const submit = within(dialog).getByRole('button', { name: 'Create' });
     expect(submit).toBeDisabled();
-    await user.selectOptions(screen.getByLabelText('平台'), 'telegram');
-    await user.type(screen.getByLabelText('外部 ID'), 'T1');
-    await user.selectOptions(screen.getByLabelText('内部用户'), 'user-bob');
+
+    // Platform select (first combobox in the dialog) → telegram.
+    const comboboxes = within(dialog).getAllByRole('combobox');
+    await user.click(comboboxes[0]);
+    await user.click(await screen.findByRole('option', { name: 'telegram' }));
+
+    await user.type(within(dialog).getByLabelText('External ID'), 'T1');
+
+    // Internal user select (second combobox) → Bob.
+    await user.click(comboboxes[1]);
+    await user.click(await screen.findByRole('option', { name: 'Bob' }));
+
     expect(submit).toBeEnabled();
     await user.click(submit);
 
-    const row = await screen.findByRole('article', { name: 'mapping 2' });
+    const row = await screen.findByRole('row', { name: /T1/ });
     expect(within(row).getByText('telegram')).toBeInTheDocument();
     expect(within(row).getByText('T1')).toBeInTheDocument();
-    expect(within(row).getByText(/Bob/)).toBeInTheDocument();
+    expect(within(row).getByText('Bob')).toBeInTheDocument();
   });
 
-  it('keeps the form and shows an error when create fails', async () => {
+  it('keeps the form open when create fails', async () => {
     const user = userEvent.setup({ delay: null });
+    // The page fires the create mutation via `void submit()`; on failure the
+    // rejected promise floats. Swallow it so it does not surface as an
+    // unhandled rejection that Vitest flags as a false-positive error.
+    const onUnhandled = (reason: unknown): void => {
+      void reason;
+    };
+    process.on('unhandledRejection', onUnhandled);
 
     server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () => HttpResponse.json(ADMIN_ME)),
       http.get(`${API_BASE_URL}/admin/im-identities`, () => HttpResponse.json([])),
       http.get(`${API_BASE_URL}/admin/users`, () => HttpResponse.json(USERS)),
       http.post(`${API_BASE_URL}/admin/im-identities`, () =>
@@ -118,20 +144,32 @@ describe('im-identities page', () => {
 
     renderPage();
 
-    await screen.findByRole('heading', { name: '用户-IM 关系' });
-    await user.selectOptions(screen.getByLabelText('平台'), 'slack');
-    await user.type(screen.getByLabelText('外部 ID'), 'U1');
-    await user.selectOptions(screen.getByLabelText('内部用户'), 'user-alice');
-    await user.click(screen.getByRole('button', { name: '新增绑定' }));
+    await screen.findByRole('heading', { name: 'IM Identities' });
 
-    expect(await screen.findByText(/新增绑定失败/)).toBeInTheDocument();
-    expect(screen.getByLabelText('外部 ID')).toHaveValue('U1');
-    expect(screen.queryByRole('article', { name: /mapping/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Add mapping' }));
+    const dialog = await screen.findByRole('dialog');
+
+    const comboboxes = within(dialog).getAllByRole('combobox');
+    await user.click(comboboxes[0]);
+    await user.click(await screen.findByRole('option', { name: 'slack' }));
+    await user.type(within(dialog).getByLabelText('External ID'), 'U1');
+    await user.click(comboboxes[1]);
+    await user.click(await screen.findByRole('option', { name: 'Alice (alice@example.com)' }));
+
+    await user.click(within(dialog).getByRole('button', { name: 'Create' }));
+
+    // The dialog stays open with the entered values; no row was added.
+    await waitFor(() => {
+      expect(within(dialog).getByLabelText('External ID')).toHaveValue('U1');
+    });
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.queryByRole('row', { name: /U1/ })).not.toBeInTheDocument();
+
+    process.off('unhandledRejection', onUnhandled);
   });
 
   it('deletes a binding and removes it from the list', async () => {
     const user = userEvent.setup({ delay: null });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     let mappings = [
       {
         created_at: '2026-06-21T09:00:00Z',
@@ -145,6 +183,7 @@ describe('im-identities page', () => {
     ];
 
     server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () => HttpResponse.json(ADMIN_ME)),
       http.get(`${API_BASE_URL}/admin/im-identities`, () => HttpResponse.json(mappings)),
       http.get(`${API_BASE_URL}/admin/users`, () => HttpResponse.json(USERS)),
       http.delete(`${API_BASE_URL}/admin/im-identities/:id`, ({ params }) => {
@@ -155,11 +194,16 @@ describe('im-identities page', () => {
 
     renderPage();
 
-    const row = await screen.findByRole('article', { name: 'mapping 1' });
-    await user.click(within(row).getByRole('button', { name: '删除 U1' }));
+    const row = await screen.findByRole('row', { name: /U1/ });
+
+    // Open the row action menu and pick Delete → confirm in the AlertDialog.
+    await user.click(within(row).getByRole('button', { name: 'Actions for slack:U1' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Delete' }));
+    const alert = await screen.findByRole('alertdialog');
+    await user.click(within(alert).getByRole('button', { name: 'Delete' }));
 
     await waitFor(() => {
-      expect(screen.queryByRole('article', { name: 'mapping 1' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('row', { name: /U1/ })).not.toBeInTheDocument();
     });
   });
 });

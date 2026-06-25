@@ -1,17 +1,29 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Building2 } from 'lucide-react';
 
 import {
-  type TeamListItem,
   type TenantListItem,
   useAssignUserTenantMutation,
-  useCreateTeamMutation,
   useCreateTenantMutation,
   useSetApproverMutation,
-  useTeamsQuery,
   useTenantsQuery,
 } from '@/features/tenancy/api';
 import { useAdminApi } from '@/lib/api-client';
+import { useT } from '@/i18n';
+import { cn } from '@/lib/utils';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Separator } from '@/components/ui/separator';
 
 type AdminMe = {
   email: string;
@@ -47,12 +59,20 @@ function useTenancyUsersQuery() {
   });
 }
 
+const SELECT_CLASS = cn(
+  'flex h-9 w-full appearance-none rounded-md border border-input bg-background/60 px-3 py-1 text-sm shadow-sm transition-colors',
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50'
+);
+
+// ─────────────────────────── Tenant / Team cards ───────────────────────────
+
 function TenantCard({
   tenant,
   canWrite,
   onApproverChange,
   onSaveApprover,
   selectedApprover,
+  saving,
   users,
 }: {
   tenant: TenantListItem;
@@ -60,142 +80,72 @@ function TenantCard({
   onApproverChange: (value: string) => void;
   onSaveApprover: () => void;
   selectedApprover: string;
+  saving: boolean;
   users: TenancyUser[];
 }): JSX.Element {
+  const t = useT();
   return (
-    <article
-      className="rounded-2xl border bg-white/75 p-5"
-      data-testid={`tenant-card-${tenant.id}`}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h3 className="text-lg font-semibold">{tenant.name}</h3>
-          <p className="mt-1 text-sm text-muted-foreground">{tenant.id}</p>
-          <p className="mt-1 text-sm text-muted-foreground">{tenant.status}</p>
-          <p className="mt-2 text-sm">{`Approver: ${tenant.approver_user_id ?? 'Unassigned'}`}</p>
-        </div>
+    <Card data-testid={`tenant-card-${tenant.id}`}>
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between gap-2">
+          <span className="flex items-center gap-2">
+            <Building2 className="size-4 text-primary" /> {tenant.name}
+          </span>
+          <Badge variant={tenant.status === 'active' ? 'success' : 'secondary'}>{tenant.status}</Badge>
+        </CardTitle>
+        <CardDescription className="font-mono text-xs">{tenant.id}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          {t('tenancy.approverLine', { value: tenant.approver_user_id ?? t('tenancy.unassigned') })}
+        </p>
         {canWrite ? (
-          <div className="grid gap-2">
-            <label className="grid gap-2 text-sm font-medium">
-              {`Tenant approver for ${tenant.id}`}
+          <>
+            <Separator />
+            <div className="grid gap-2">
+              <Label htmlFor={`tenant-approver-${tenant.id}`} className="text-xs text-muted-foreground">
+                {t('tenancy.tenantApproverFor', { id: tenant.id })}
+              </Label>
               <select
-                aria-label={`Tenant approver for ${tenant.id}`}
-                className="rounded-md border bg-white px-3 py-2"
+                id={`tenant-approver-${tenant.id}`}
+                aria-label={t('tenancy.tenantApproverFor', { id: tenant.id })}
+                className={SELECT_CLASS}
                 onChange={(event) => onApproverChange(event.target.value)}
                 value={selectedApprover}
               >
-                <option value="">None</option>
+                <option value="">{t('tenancy.none')}</option>
                 {users.map((user) => (
-                  <option
-                    key={user.id}
-                    value={user.id}
-                  >
+                  <option key={user.id} value={user.id}>
                     {user.name}
                   </option>
                 ))}
               </select>
-            </label>
-            <button
-              className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-              onClick={onSaveApprover}
-              type="button"
-            >
-              {`Save tenant approver for ${tenant.id}`}
-            </button>
-          </div>
+              <Button variant="outline" disabled={saving} onClick={onSaveApprover}>
+                {t('tenancy.saveTenantApproverFor', { id: tenant.id })}
+              </Button>
+            </div>
+          </>
         ) : null}
-      </div>
-    </article>
+      </CardContent>
+    </Card>
   );
 }
 
-function TeamCard({
-  canWrite,
-  onApproverChange,
-  onSaveApprover,
-  selectedApprover,
-  team,
-  users,
-}: {
-  canWrite: boolean;
-  onApproverChange: (value: string) => void;
-  onSaveApprover: () => void;
-  selectedApprover: string;
-  team: TeamListItem;
-  users: TenancyUser[];
-}): JSX.Element {
-  return (
-    <article
-      className="rounded-2xl border bg-white/75 p-5"
-      data-testid={`team-card-${team.id}`}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h3 className="text-lg font-semibold">{team.name}</h3>
-          <p className="mt-1 text-sm text-muted-foreground">{team.id}</p>
-          <p className="mt-1 text-sm text-muted-foreground">{`Tenant: ${team.tenant_id}`}</p>
-          <p className="mt-2 text-sm">{`Approver: ${team.approver_user_id ?? 'Unassigned'}`}</p>
-        </div>
-        {canWrite ? (
-          <div className="grid gap-2">
-            <label className="grid gap-2 text-sm font-medium">
-              {`Team approver for ${team.id}`}
-              <select
-                aria-label={`Team approver for ${team.id}`}
-                className="rounded-md border bg-white px-3 py-2"
-                onChange={(event) => onApproverChange(event.target.value)}
-                value={selectedApprover}
-              >
-                <option value="">None</option>
-                {users.map((user) => (
-                  <option
-                    key={user.id}
-                    value={user.id}
-                  >
-                    {user.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-              onClick={onSaveApprover}
-              type="button"
-            >
-              {`Save team approver for ${team.id}`}
-            </button>
-          </div>
-        ) : null}
-      </div>
-    </article>
-  );
-}
+// ─────────────────────────── Page ───────────────────────────
 
 export function TenancyPage(): JSX.Element {
+  const t = useT();
   const me = useAdminMeQuery();
   const users = useTenancyUsersQuery();
   const tenants = useTenantsQuery();
-  const teams = useTeamsQuery();
   const createTenant = useCreateTenantMutation();
-  const createTeam = useCreateTeamMutation();
   const assignUserTenant = useAssignUserTenantMutation();
   const [tenantName, setTenantName] = useState('');
-  const [teamName, setTeamName] = useState('');
-  const [teamTenantId, setTeamTenantId] = useState('');
   const [tenantAssignments, setTenantAssignments] = useState<Record<string, string>>({});
   const [tenantApprovers, setTenantApprovers] = useState<Record<string, string>>({});
-  const [teamApprovers, setTeamApprovers] = useState<Record<string, string>>({});
 
   const canWrite = me.data ? me.data.role !== 'viewer' : false;
   const isViewer = me.data?.role === 'viewer';
-
-  useEffect(() => {
-    if (!tenants.data?.length) {
-      setTeamTenantId('');
-      return;
-    }
-    setTeamTenantId((current) => current || tenants.data[0].id);
-  }, [tenants.data]);
 
   useEffect(() => {
     if (!users.data) {
@@ -223,202 +173,151 @@ export function TenancyPage(): JSX.Element {
     });
   }, [tenants.data]);
 
-  useEffect(() => {
-    if (!teams.data) {
-      return;
-    }
-    setTeamApprovers((current) => {
-      const next = { ...current };
-      for (const team of teams.data) {
-        next[team.id] = current[team.id] ?? team.approver_user_id ?? '';
-      }
-      return next;
-    });
-  }, [teams.data]);
-
   const createTenantDraft = async (): Promise<void> => {
     await createTenant.mutateAsync({ name: tenantName, status: 'active' });
     setTenantName('');
   };
 
-  const createTeamDraft = async (): Promise<void> => {
-    await createTeam.mutateAsync({ name: teamName, tenant_id: teamTenantId });
-    setTeamName('');
-  };
+  const userList = users.data ?? [];
+  const tenantList = tenants.data ?? [];
 
   return (
-    <section className="grid gap-6">
-      <header className="space-y-2">
-        <p className="text-sm font-medium uppercase tracking-[0.25em] text-muted-foreground">
-          Native SPA
-        </p>
-        <h1 className="text-3xl font-semibold tracking-tight">Tenancy</h1>
-        <p className="text-sm text-muted-foreground">
-          Manage tenants, teams, user tenancy assignment, and approval ownership in the native
-          React admin surface.
-        </p>
-        {isViewer ? <p className="text-sm text-muted-foreground">Viewer access is read-only.</p> : null}
+    <section className="space-y-6">
+      <header className="space-y-1">
+        <h1 className="text-xl font-semibold tracking-tight">{t('tenancy.title')}</h1>
+        <p className="text-sm text-muted-foreground">{t('tenancy.subtitle')}</p>
+        {isViewer ? (
+          <p className="text-xs text-muted-foreground">{t('tenancy.viewerReadOnly')}</p>
+        ) : null}
       </header>
 
       {canWrite ? (
-        <section className="grid gap-6 xl:grid-cols-2">
-          <div className="rounded-2xl border bg-white/75 p-5">
-            <h2 className="text-lg font-semibold">Create tenant</h2>
-            <div className="mt-4 grid gap-4">
-              <label className="grid gap-2 text-sm font-medium">
-                Tenant name
-                <input
-                  className="rounded-md border bg-white px-3 py-2"
+        <section className="grid gap-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>{t('tenancy.createTenant')}</CardTitle>
+              <CardDescription>{t('tenancy.createTenantDesc')}</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="tenant-name">{t('tenancy.tenantName')}</Label>
+                <Input
+                  id="tenant-name"
                   onChange={(event) => setTenantName(event.target.value)}
                   value={tenantName}
                 />
-              </label>
-              <button
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-                onClick={() => void createTenantDraft()}
-                type="button"
-              >
-                Create tenant
-              </button>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border bg-white/75 p-5">
-            <h2 className="text-lg font-semibold">Create team</h2>
-            <div className="mt-4 grid gap-4">
-              <label className="grid gap-2 text-sm font-medium">
-                Team name
-                <input
-                  className="rounded-md border bg-white px-3 py-2"
-                  onChange={(event) => setTeamName(event.target.value)}
-                  value={teamName}
-                />
-              </label>
-              <label className="grid gap-2 text-sm font-medium">
-                Team tenant
-                <select
-                  className="rounded-md border bg-white px-3 py-2"
-                  onChange={(event) => setTeamTenantId(event.target.value)}
-                  value={teamTenantId}
-                >
-                  {tenants.data?.map((tenant) => (
-                    <option
-                      key={tenant.id}
-                      value={tenant.id}
-                    >
-                      {tenant.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-                onClick={() => void createTeamDraft()}
-                type="button"
-              >
-                Create team
-              </button>
-            </div>
-          </div>
+              </div>
+              <Button disabled={createTenant.isPending || !tenantName} onClick={() => void createTenantDraft()}>
+                {t('tenancy.createTenant')}
+              </Button>
+            </CardContent>
+          </Card>
         </section>
       ) : null}
 
-      <section className="grid gap-4 xl:grid-cols-2">
-        <div className="space-y-4">
-          <h2 className="text-xl font-semibold">Tenants</h2>
-          {tenants.data?.map((tenant) => (
-            <TenantActions
-              canWrite={canWrite}
-              key={tenant.id}
-              tenant={tenant}
-              tenantApprovers={tenantApprovers}
-              users={users.data ?? []}
-            />
-          ))}
+      <section className="space-y-4">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold text-foreground">{t('tenancy.tenants')}</h2>
+          <Badge variant="secondary">{tenantList.length}</Badge>
         </div>
-        <div className="space-y-4">
-          <h2 className="text-xl font-semibold">Teams</h2>
-          {teams.data?.map((team) => (
-            <TeamActions
-              canWrite={canWrite}
-              key={team.id}
-              team={team}
-              teamApprovers={teamApprovers}
-              users={users.data ?? []}
-            />
-          ))}
-        </div>
-      </section>
-
-      <section className="rounded-2xl border bg-white/75 p-5">
-        <h2 className="text-xl font-semibold">User tenancy assignment</h2>
-        <div className="mt-4 grid gap-4">
-          {users.data?.map((user) => (
-            <div
-              className="rounded-xl border bg-white p-4"
-              key={user.id}
-            >
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div>
-                  <p className="font-medium">{user.name}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {tenantAssignments[user.id] || user.tenant_id
-                      ? `${user.name} -> ${tenantAssignments[user.id] || user.tenant_id}`
-                      : 'Unassigned'}
-                  </p>
-                </div>
-                {canWrite ? (
-                  <div className="flex flex-wrap items-end gap-3">
-                    <label className="grid gap-2 text-sm font-medium">
-                      {`Assign tenant for ${user.name}`}
-                      <select
-                        aria-label={`Assign tenant for ${user.name}`}
-                        className="rounded-md border bg-white px-3 py-2"
-                        onChange={(event) =>
-                          setTenantAssignments((current) => ({
-                            ...current,
-                            [user.id]: event.target.value,
-                          }))
-                        }
-                        value={tenantAssignments[user.id] ?? user.tenant_id ?? ''}
-                      >
-                        <option value="">None</option>
-                        {tenants.data?.map((tenant) => (
-                          <option
-                            key={tenant.id}
-                            value={tenant.id}
-                          >
-                            {tenant.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <button
-                      className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-                      onClick={() =>
-                        void assignUserTenant
-                          .mutateAsync({
-                            tenant_id: tenantAssignments[user.id] ?? '',
-                            user_id: user.id,
-                          })
-                          .then(() => {
-                            setTenantAssignments((current) => ({
-                              ...current,
-                              [user.id]: tenantAssignments[user.id] ?? '',
-                            }));
-                          })
-                      }
-                      type="button"
-                    >
-                      {`Assign tenant for ${user.name}`}
-                    </button>
-                  </div>
-                ) : null}
-              </div>
+        <div className="grid gap-4 xl:grid-cols-2">
+          {tenantList.map((tenant, index) => (
+            <div key={tenant.id} className={index < 2 ? 'xl:col-span-2' : undefined}>
+              <TenantActions
+                canWrite={canWrite}
+                tenant={tenant}
+                tenantApprovers={tenantApprovers}
+                users={userList}
+              />
             </div>
           ))}
         </div>
+        {!tenantList.length ? (
+          <div className="rounded-lg border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+            {t('tenancy.noTenants')}
+          </div>
+        ) : null}
       </section>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t('tenancy.userAssignment')}</CardTitle>
+          <CardDescription>{t('tenancy.userAssignmentDesc')}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {userList.map((user) => (
+            <div
+              key={user.id}
+              className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-border bg-card px-4 py-3"
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground">{user.name}</p>
+                <p className="text-sm text-muted-foreground">
+                  {tenantAssignments[user.id] || user.tenant_id
+                    ? t('tenancy.assignmentLine', {
+                        name: user.name,
+                        tenant: tenantAssignments[user.id] || user.tenant_id || '',
+                      })
+                    : t('tenancy.unassigned')}
+                </p>
+              </div>
+              {canWrite ? (
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="grid w-56 gap-1.5">
+                    <Label
+                      htmlFor={`assign-tenant-${user.id}`}
+                      className="text-xs text-muted-foreground"
+                    >
+                      {t('tenancy.assignTenantFor', { name: user.name })}
+                    </Label>
+                    <select
+                      id={`assign-tenant-${user.id}`}
+                      aria-label={t('tenancy.assignTenantFor', { name: user.name })}
+                      className={SELECT_CLASS}
+                      onChange={(event) =>
+                        setTenantAssignments((current) => ({
+                          ...current,
+                          [user.id]: event.target.value,
+                        }))
+                      }
+                      value={tenantAssignments[user.id] ?? user.tenant_id ?? ''}
+                    >
+                      <option value="">{t('tenancy.none')}</option>
+                      {tenantList.map((tenant) => (
+                        <option key={tenant.id} value={tenant.id}>
+                          {tenant.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <Button
+                    variant="outline"
+                    disabled={assignUserTenant.isPending}
+                    onClick={() =>
+                      void assignUserTenant
+                        .mutateAsync({
+                          tenant_id: tenantAssignments[user.id] ?? '',
+                          user_id: user.id,
+                        })
+                        .then(() => {
+                          setTenantAssignments((current) => ({
+                            ...current,
+                            [user.id]: tenantAssignments[user.id] ?? '',
+                          }));
+                        })
+                    }
+                  >
+                    {t('tenancy.assignTenantFor', { name: user.name })}
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          ))}
+          {!userList.length ? (
+            <p className="text-sm text-muted-foreground">{t('tenancy.noUsers')}</p>
+          ) : null}
+        </CardContent>
+      </Card>
     </section>
   );
 
@@ -450,43 +349,9 @@ export function TenancyPage(): JSX.Element {
             entity_type: 'tenant',
           })
         }
+        saving={setApprover.isPending}
         selectedApprover={tenantApprovers[tenant.id] ?? tenant.approver_user_id ?? ''}
         tenant={tenant}
-        users={users}
-      />
-    );
-  }
-
-  function TeamActions({
-    canWrite,
-    team,
-    teamApprovers,
-    users,
-  }: {
-    canWrite: boolean;
-    team: TeamListItem;
-    teamApprovers: Record<string, string>;
-    users: TenancyUser[];
-  }): JSX.Element {
-    const setApprover = useSetApproverMutation(team.id);
-
-    return (
-      <TeamCard
-        canWrite={canWrite}
-        onApproverChange={(value) =>
-          setTeamApprovers((current) => ({
-            ...current,
-            [team.id]: value,
-          }))
-        }
-        onSaveApprover={() =>
-          void setApprover.mutateAsync({
-            approver_user_id: teamApprovers[team.id] || null,
-            entity_type: 'team',
-          })
-        }
-        selectedApprover={teamApprovers[team.id] ?? team.approver_user_id ?? ''}
-        team={team}
         users={users}
       />
     );

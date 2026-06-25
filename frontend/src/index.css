@@ -4,14 +4,53 @@
 
 @layer base {
   :root {
-    color: hsl(222 47% 11%);
-    background:
-      radial-gradient(circle at top left, rgba(34, 197, 94, 0.16), transparent 32%),
-      radial-gradient(circle at top right, rgba(6, 182, 212, 0.18), transparent 28%),
-      linear-gradient(180deg, hsl(210 20% 98%), hsl(210 20% 96%));
+    /* Dark control-plane theme: deep navy ground + mint/emerald accent. */
+    --background: 216 33% 7%;
+    --foreground: 213 31% 91%;
+
+    --card: 215 28% 10%;
+    --card-foreground: 213 31% 91%;
+
+    --popover: 215 30% 9%;
+    --popover-foreground: 213 31% 91%;
+
+    --primary: 158 64% 52%;
+    --primary-foreground: 216 40% 8%;
+
+    --secondary: 214 22% 14%;
+    --secondary-foreground: 213 31% 91%;
+
+    --muted: 214 22% 14%;
+    --muted-foreground: 214 14% 58%;
+
+    --accent: 214 22% 16%;
+    --accent-foreground: 213 31% 95%;
+
+    --destructive: 0 72% 60%;
+    --destructive-foreground: 213 31% 96%;
+
+    --border: 214 20% 17%;
+    --input: 214 20% 17%;
+    --ring: 158 64% 52%;
+
+    --sidebar: 218 35% 6%;
+    --sidebar-foreground: 213 20% 72%;
+    --sidebar-accent: 214 24% 14%;
+    --sidebar-border: 214 22% 13%;
+
+    --success: 158 64% 52%;
+    --warning: 38 92% 60%;
+
+    --radius: 0.65rem;
+
+    color-scheme: dark;
     font-family:
-      'IBM Plex Sans',
+      'Inter',
+      -apple-system,
+      BlinkMacSystemFont,
       'Segoe UI',
+      'PingFang SC',
+      'Microsoft YaHei',
       sans-serif;
   }
 
@@ -19,7 +58,38 @@
     @apply border-border;
   }
 
+  html,
   body {
     @apply min-h-screen bg-background text-foreground antialiased;
+  }
+
+  body {
+    background:
+      radial-gradient(60% 50% at 100% 0%, hsl(158 64% 40% / 0.06), transparent 60%),
+      radial-gradient(50% 40% at 0% 0%, hsl(200 80% 40% / 0.05), transparent 55%),
+      hsl(var(--background));
+  }
+
+  /* Components own their own :focus-visible styles. A global ring here would
+     stack a second (offset) ring on top of the component's ring — reading as a
+     double border. Keep only a lightweight fallback for native elements that
+     have no component-level focus style. */
+  a:focus-visible,
+  summary:focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+
+  /* Slim dark scrollbars to match the surface. */
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 999px;
+    border: 2px solid hsl(var(--background));
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
   }
 }
