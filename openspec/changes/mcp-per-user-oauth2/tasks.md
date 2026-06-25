@@ -67,6 +67,6 @@
 
 ## 10. 收尾
 
-- [ ] 10.1 跑受影响层测试(unit + 相关 integration),无新增失败
-- [ ] 10.2 make test-pr 全绿(changed-vs-main ruff;层边界检查);改动文件 ruff format + mypy
-- [ ] 10.3 自检 owning package / public API / owned tables / config namespace / cross-module deps / shim plan 与 proposal 一致
+- [x] 10.1 跑受影响层测试(unit + 相关 integration),无新增失败
+- [x] 10.2 make test-pr 全绿(changed-vs-main ruff;层边界检查);改动文件 ruff format + mypy
+- [x] 10.3 自检 owning package / public API / owned tables / config namespace / cross-module deps / shim plan 与 proposal 一致
