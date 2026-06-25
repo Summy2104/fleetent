@@ -13,6 +13,19 @@ export default defineConfig({
   server: {
     host: '127.0.0.1',
     port: 4173,
+    // Dev-only: forward admin API calls to the platform backend. The frontend
+    // itself is served under /admin/ui, so bypass that prefix and proxy the rest.
+    proxy: {
+      '/admin': {
+        target: 'http://127.0.0.1:8770',
+        changeOrigin: true,
+        bypass(req) {
+          if (req.url?.startsWith('/admin/ui')) {
+            return req.url;
+          }
+        },
+      },
+    },
   },
   preview: {
     host: '127.0.0.1',

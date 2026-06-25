@@ -161,7 +161,7 @@ function SkillsApiProbe(): JSX.Element {
 
 describe('skills api hooks', () => {
   it('loads skills data and refreshes affected queries after lifecycle mutations', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let skills: SkillRecord[] = [
       {
         audit_verdict: 'pass',
@@ -358,7 +358,7 @@ function BackflowApiProbe(): JSX.Element {
 
 describe('backflow api hooks', () => {
   it('lists proposals, loads diff, and posts accept/reject/fork', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const acceptCalls: (string | null)[] = [];
     let rejected = false;
     let forkedWith: { fork_name: string } | null = null;
@@ -460,7 +460,7 @@ function SkillsCrudProbe(): JSX.Element {
 
 describe('skills create and edit hooks', () => {
   it('creates a skill and refreshes the list', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let skills: SkillRecord[] = [
       {
         audit_verdict: 'pass',
@@ -513,7 +513,7 @@ describe('skills create and edit hooks', () => {
   });
 
   it('edits a skill and refreshes its content', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const skills: SkillRecord[] = [
       {
         audit_verdict: 'pass',

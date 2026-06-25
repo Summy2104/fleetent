@@ -1,5 +1,10 @@
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Inbox, Plus } from 'lucide-react';
 
+import { useAdminApi } from '@/lib/api-client';
+import { useT } from '@/i18n';
+import { cn } from '@/lib/utils';
 import {
   type ImMapping,
   useBindableUsersQuery,
@@ -7,173 +12,264 @@ import {
   useDeleteMappingMutation,
   useImMappingsQuery,
 } from '@/features/im-identities/api';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const PLATFORMS = ['slack', 'telegram', 'whatsapp'];
 
-function MappingCard({ mapping }: { mapping: ImMapping }): JSX.Element {
-  const deleteMapping = useDeleteMappingMutation();
+type AdminMe = { email: string; id: string; role: string };
 
+function useAdminMeQuery() {
+  const api = useAdminApi();
+  return useQuery({ queryKey: ['admin-me'], queryFn: () => api.get<AdminMe>('/admin/me') });
+}
+
+function Th({ children, className }: { children: ReactNode; className?: string }): JSX.Element {
   return (
-    <article
-      aria-label={`mapping ${mapping.id}`}
-      className="rounded-2xl border bg-white/80 p-5"
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full bg-secondary px-3 py-1 text-xs font-medium">
-              {mapping.platform}
-            </span>
-            <span className="font-mono text-sm">{mapping.platform_user_id}</span>
-          </div>
-          <p className="text-sm">
-            {`${mapping.user_name} · ${mapping.user_email ?? 'no email'}`}
-          </p>
-          <p className="text-xs text-muted-foreground">{mapping.user_id}</p>
-        </div>
-        <button
-          className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-          onClick={() => {
-            if (!window.confirm(`Delete mapping ${mapping.platform}:${mapping.platform_user_id}?`)) {
-              return;
-            }
-            deleteMapping.mutate(mapping.id);
-          }}
-          type="button"
-        >
-          {`删除 ${mapping.platform_user_id}`}
-        </button>
-      </div>
-      {deleteMapping.isError ? (
-        <p
-          className="mt-2 text-sm text-red-600"
-          role="alert"
-        >
-          删除失败，请重试。
-        </p>
-      ) : null}
-    </article>
+    <th className={cn('px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground', className)}>
+      {children}
+    </th>
   );
 }
 
-export function ImIdentitiesPage(): JSX.Element {
-  const mappings = useImMappingsQuery();
-  const users = useBindableUsersQuery();
-  const createMapping = useCreateMappingMutation();
+// ─────────────────────────── Add mapping dialog ───────────────────────────
 
+function AddMappingDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}): JSX.Element {
+  const t = useT();
+  const users = useBindableUsersQuery();
+  const create = useCreateMappingMutation();
   const [platform, setPlatform] = useState(PLATFORMS[0]);
   const [platformUserId, setPlatformUserId] = useState('');
   const [userId, setUserId] = useState('');
 
-  const onCreate = (): void => {
-    createMapping.mutate(
-      {
-        platform,
-        platform_user_id: platformUserId.trim(),
-        user_id: userId,
-      },
-      {
-        onSuccess: () => {
-          setPlatformUserId('');
-          setUserId('');
-        },
-      }
-    );
-  };
-
   const canSubmit = Boolean(platformUserId.trim()) && Boolean(userId);
 
+  const submit = async (): Promise<void> => {
+    await create.mutateAsync({ platform, platform_user_id: platformUserId.trim(), user_id: userId });
+    setPlatform(PLATFORMS[0]);
+    setPlatformUserId('');
+    setUserId('');
+    onOpenChange(false);
+  };
+
   return (
-    <section className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-      <div className="space-y-6">
-        <header className="space-y-2">
-          <p className="text-sm font-medium uppercase tracking-[0.25em] text-muted-foreground">
-            Native SPA
-          </p>
-          <h1 className="text-3xl font-semibold tracking-tight">用户-IM 关系</h1>
-          <p className="text-sm text-muted-foreground">
-            管理"外部 IM 身份 ↔ 内部用户"映射：查看每个渠道身份绑到哪个用户，手动新增或删除绑定。
-          </p>
-        </header>
-
-        <section className="rounded-2xl border bg-white/75 p-5">
-          <h2 className="text-lg font-semibold">新增绑定</h2>
-          <div className="mt-4 grid gap-4">
-            <label className="grid gap-2 text-sm font-medium">
-              平台
-              <select
-                className="rounded-md border bg-white px-3 py-2"
-                onChange={(event) => setPlatform(event.target.value)}
-                value={platform}
-              >
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t('imIdentities.addMapping')}</DialogTitle>
+          <DialogDescription>{t('imIdentities.dialogDescription')}</DialogDescription>
+        </DialogHeader>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="grid gap-1.5">
+            <Label>{t('imIdentities.platform')}</Label>
+            <Select value={platform} onValueChange={setPlatform}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
                 {PLATFORMS.map((option) => (
-                  <option
-                    key={option}
-                    value={option}
-                  >
+                  <SelectItem key={option} value={option}>
                     {option}
-                  </option>
+                  </SelectItem>
                 ))}
-              </select>
-            </label>
-            <label className="grid gap-2 text-sm font-medium">
-              外部 ID
-              <input
-                className="rounded-md border bg-white px-3 py-2"
-                onChange={(event) => setPlatformUserId(event.target.value)}
-                value={platformUserId}
-              />
-            </label>
-            <label className="grid gap-2 text-sm font-medium">
-              内部用户
-              <select
-                className="rounded-md border bg-white px-3 py-2"
-                onChange={(event) => setUserId(event.target.value)}
-                value={userId}
-              >
-                <option value="">选择用户</option>
-                {(users.data ?? []).map((user) => (
-                  <option
-                    key={user.id}
-                    value={user.id}
-                  >
-                    {user.email ? `${user.name} (${user.email})` : user.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={!canSubmit || createMapping.isPending}
-              onClick={onCreate}
-              type="button"
-            >
-              新增绑定
-            </button>
-            {createMapping.isError ? (
-              <p
-                className="text-sm text-red-600"
-                role="alert"
-              >
-                新增绑定失败：该外部身份可能已被绑定，或目标用户不存在。
-              </p>
-            ) : null}
+              </SelectContent>
+            </Select>
           </div>
-        </section>
+          <div className="grid gap-1.5">
+            <Label htmlFor="ext-id">{t('imIdentities.externalId')}</Label>
+            <Input
+              id="ext-id"
+              placeholder={t('imIdentities.externalIdPlaceholder')}
+              value={platformUserId}
+              onChange={(event) => setPlatformUserId(event.target.value)}
+            />
+          </div>
+          <div className="grid gap-1.5 sm:col-span-2">
+            <Label>{t('imIdentities.internalUser')}</Label>
+            <Select value={userId} onValueChange={setUserId}>
+              <SelectTrigger>
+                <SelectValue placeholder={t('imIdentities.selectUser')} />
+              </SelectTrigger>
+              <SelectContent>
+                {(users.data ?? []).map((user) => (
+                  <SelectItem key={user.id} value={user.id}>
+                    {user.email ? `${user.name} (${user.email})` : user.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            {t('common.cancel')}
+          </Button>
+          <Button disabled={!canSubmit || create.isPending} onClick={() => void submit()}>
+            {t('imIdentities.createSubmit')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─────────────────────────── Row ───────────────────────────
+
+function MappingRow({ mapping, canWrite }: { mapping: ImMapping; canWrite: boolean }): JSX.Element {
+  const t = useT();
+  const deleteMapping = useDeleteMappingMutation();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  return (
+    <tr className="border-b border-border last:border-0 hover:bg-accent/30">
+      <td className="px-4 py-3">
+        <Badge variant="outline">{mapping.platform}</Badge>
+      </td>
+      <td className="px-4 py-3 font-mono text-sm text-foreground">{mapping.platform_user_id}</td>
+      <td className="px-4 py-3">
+        <div className="text-sm text-foreground">{mapping.user_name}</div>
+        <div className="text-xs text-muted-foreground">{mapping.user_email ?? mapping.user_id}</div>
+      </td>
+      <td className="px-4 py-3 text-right">
+        {canWrite ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="secondary"
+                size="sm"
+                aria-label={t('imIdentities.actionsLabel', {
+                  platform: mapping.platform,
+                  id: mapping.platform_user_id,
+                })}
+              >
+                {t('imIdentities.actions')}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                className="text-destructive"
+                onSelect={() => setTimeout(() => setConfirmDelete(true), 0)}
+              >
+                {t('common.delete')}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
+
+        <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t('imIdentities.deleteTitle')}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t('imIdentities.deleteDescription', {
+                  platform: mapping.platform,
+                  id: mapping.platform_user_id,
+                  name: mapping.user_name,
+                })}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+              <AlertDialogAction onClick={() => void deleteMapping.mutateAsync(mapping.id)}>
+                {t('common.delete')}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </td>
+    </tr>
+  );
+}
+
+// ─────────────────────────── Page ───────────────────────────
+
+export function ImIdentitiesPage(): JSX.Element {
+  const t = useT();
+  const me = useAdminMeQuery();
+  const mappings = useImMappingsQuery();
+  const [adding, setAdding] = useState(false);
+
+  const canWrite = me.data?.role !== 'viewer';
+  const list = mappings.data ?? [];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <h2 className="text-xl font-semibold tracking-tight">{t('nav.imIdentities')}</h2>
+          <Badge variant="secondary">{list.length}</Badge>
+        </div>
+        {canWrite ? (
+          <Button onClick={() => setAdding(true)}>
+            <Plus className="size-4" /> {t('imIdentities.addMapping')}
+          </Button>
+        ) : null}
       </div>
 
-      <div className="space-y-4">
-        {mappings.data?.length ? (
-          mappings.data.map((mapping) => (
-            <MappingCard
-              key={mapping.id}
-              mapping={mapping}
-            />
-          ))
-        ) : (
-          <p className="text-sm text-muted-foreground">暂无映射。</p>
-        )}
+      <p className="text-sm text-muted-foreground">{t('imIdentities.pageDescription')}</p>
+
+      <div className="overflow-x-auto rounded-lg border border-border">
+        <table className="w-full">
+          <thead className="bg-secondary/50">
+            <tr>
+              <Th>{t('imIdentities.platform')}</Th>
+              <Th>{t('imIdentities.externalId')}</Th>
+              <Th>{t('imIdentities.user')}</Th>
+              <Th className="text-right">{t('imIdentities.actions')}</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((mapping) => (
+              <MappingRow key={mapping.id} mapping={mapping} canWrite={canWrite} />
+            ))}
+            {mappings.data && list.length === 0 ? (
+              <tr>
+                <td colSpan={4}>
+                  <div className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
+                    <Inbox className="size-6 opacity-50" />
+                    <span className="text-sm">{t('imIdentities.emptyState')}</span>
+                  </div>
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
       </div>
-    </section>
+
+      <AddMappingDialog open={adding} onOpenChange={setAdding} />
+    </div>
   );
 }

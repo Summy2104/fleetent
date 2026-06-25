@@ -108,7 +108,7 @@ describe('chat api hooks', () => {
   });
 
   it('loads agents and streams SSE deltas with authorization headers', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
 
     server.use(
       http.get(`${API_BASE_URL}/admin/agents`, () =>
@@ -150,7 +150,7 @@ describe('chat api hooks', () => {
   });
 
   it('maps 404 and 503 ingress errors to clear user-facing messages', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
 
     server.use(
       http.get(`${API_BASE_URL}/admin/agents`, () =>
@@ -188,7 +188,7 @@ describe('chat api hooks', () => {
   });
 
   it('surfaces ingress error detail from 503 responses', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
 
     server.use(
       http.get(`${API_BASE_URL}/admin/agents`, () =>
@@ -217,7 +217,7 @@ describe('chat api hooks', () => {
   });
 
   it('falls back to neutral messages when ingress error detail is unavailable', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
 
     server.use(
       http.get(`${API_BASE_URL}/admin/agents`, () =>
@@ -257,7 +257,7 @@ describe('chat api hooks', () => {
   });
 
   it('surfaces stream error events as assistant-visible failures', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
 
     server.use(
       http.get(`${API_BASE_URL}/admin/agents`, () =>
@@ -285,7 +285,7 @@ describe('chat api hooks', () => {
   });
 
   it('aborts active streams without appending later chunks', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const encoder = new TextEncoder();
     let releaseSecondChunk: (() => void) | null = null;
 

@@ -120,7 +120,7 @@ function ProvidersProbe(): JSX.Element {
 
 describe('providers api', () => {
   it('loads providers and refreshes the list after create, update, and delete mutations', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let providers: ProviderRecord[] = [
       {
         api_key: '****',
@@ -211,7 +211,7 @@ describe('providers api', () => {
   });
 
   it('posts connectivity tests and pricing updates through the provider admin endpoints', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
 
     server.use(
       http.get(`${API_BASE_URL}/admin/providers`, () =>
