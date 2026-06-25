@@ -42,6 +42,28 @@ def test_node_router_mounted():
     assert "/nodes/{node_id}/status" in paths
 
 
+def test_lifespan_initializes_skill_pool_as_git_repo(tmp_path, monkeypatch):
+    """Platform boot must make the shared skill pool a git repo.
+
+    Regression: a non-git pool made backflow accept/fork raise FileNotFoundError
+    (.git/fleetent.lock) and return 500. The pool-is-a-git-repo invariant must be
+    established by the platform at startup, not left to a manual init.
+    """
+    from fleetent.platform.skill_management.pool_git import _is_git_repo
+
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'mgmt.db'}")
+    apply_migrations(tmp_path / "mgmt.db")
+    pool = tmp_path / "skills"
+    (pool / "demo").mkdir(parents=True)
+    (pool / "demo" / "SKILL.md").write_text("---\nname: demo\n---\nbody\n", encoding="utf-8")
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(pool))
+
+    assert not _is_git_repo(pool)  # before boot: a plain directory
+    with TestClient(app):  # trigger lifespan startup
+        pass
+    assert _is_git_repo(pool)  # after boot: platform has git-initialized the pool
+
+
 def test_backflow_router_mounted(client):
     from fleetent.server import app
 
