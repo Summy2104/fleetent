@@ -140,10 +140,13 @@ def test_call_window_lock_plain_server_is_per_server():
 async def test_per_user_server_routes_to_distinct_sessions(monkeypatch):
     server = _per_user_server("puo")
     mc._server_registry[(None, "puo")] = server
+    # Group 6: a routable user with a token reaches the session-open path (no-token would
+    # short-circuit to an authorization trigger instead).
+    monkeypatch.setattr(mc, "resolve_user_token", lambda *a, **k: object())
 
     opened: list[str | None] = []
 
-    async def _fake_open(srv, scope, user_id=None):
+    async def _fake_open(srv, scope, user_id=None, agent_id=None):
         opened.append(user_id)
         sess = _FakeSession()
         mc._active_sessions[mc._session_key(srv, scope, user_id)] = sess
@@ -162,10 +165,11 @@ async def test_per_user_server_routes_to_distinct_sessions(monkeypatch):
 async def test_per_user_same_user_reuses_session(monkeypatch):
     server = _per_user_server("puo")
     mc._server_registry[(None, "puo")] = server
+    monkeypatch.setattr(mc, "resolve_user_token", lambda *a, **k: object())
 
     open_count = {"n": 0}
 
-    async def _fake_open(srv, scope, user_id=None):
+    async def _fake_open(srv, scope, user_id=None, agent_id=None):
         open_count["n"] += 1
         sess = _FakeSession()
         mc._active_sessions[mc._session_key(srv, scope, user_id)] = sess
@@ -184,7 +188,7 @@ async def test_plain_server_ignores_user_dim(monkeypatch):
     server = _plain_http_server("plain")
     mc._server_registry[(None, "plain")] = server
 
-    async def _fake_open(srv, scope, user_id=None):
+    async def _fake_open(srv, scope, user_id=None, agent_id=None):
         sess = _FakeSession()
         mc._active_sessions[mc._session_key(srv, scope, user_id)] = sess
         return sess
@@ -201,7 +205,7 @@ async def test_per_user_server_missing_user_returns_auth_unavailable(monkeypatch
     server = _per_user_server("puo")
     mc._server_registry[(None, "puo")] = server
 
-    async def _fake_open(srv, scope, user_id=None):  # must not be reached
+    async def _fake_open(srv, scope, user_id=None, agent_id=None):  # must not be reached
         raise AssertionError("should not open a session without a user_id")
 
     monkeypatch.setattr(mc, "_open_session_for", _fake_open)

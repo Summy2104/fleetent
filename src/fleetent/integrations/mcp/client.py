@@ -33,6 +33,7 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
+from fleetent.integrations.mcp import authorization as _authz
 from fleetent.integrations.mcp.per_user_tokens import resolve_user_token
 from fleetent.integrations.mcp.tool_naming import Projector, make_projector
 from mcp import ClientSession
@@ -505,6 +506,65 @@ def _auth_unavailable_result(server_id: str) -> str:
         f"{_UNAVAILABLE_RESULT_PREFIX} '{server_id}' authentication unavailable: re-authorize "
         f"or check the OAuth2 credentials."
     )
+
+
+def _needs_authorization_result(server_id: str, *, delivered: bool) -> str:
+    """Tool-call result text when a per-user oauth call has no token yet (Group 6, D8).
+
+    Returned on the degrade chain (never raised): the user must authorize before this
+    server can act on their behalf. The authorization link is delivered out-of-band via a
+    private DM (never embedded here, since the result may surface in a shared channel), so
+    the text only tells the user a link was sent — or, when no IM delivery path exists,
+    that authorization is required.
+    """
+    if delivered:
+        return (
+            f"{_UNAVAILABLE_RESULT_PREFIX} '{server_id}' needs your authorization. An "
+            f"authorization link has been sent to you privately (DM) — open it to grant access, "
+            f"then try again."
+        )
+    return (
+        f"{_UNAVAILABLE_RESULT_PREFIX} '{server_id}' needs your authorization before it can act "
+        f"on your behalf. Please authorize this server, then try again."
+    )
+
+
+async def _emit_authorization_link(server: McpServerConfig, user_id: str, agent_id: str) -> bool:
+    """Build + deliver a per-user authorization link for the triple (Group 6, D8).
+
+    Thin indirection over :func:`authorization.emit_authorization_link` so call-tool sites
+    trigger authorization without referencing the seam module directly (and so tests can
+    patch this one symbol). Returns True iff the link was delivered (e.g. DM'd).
+    """
+    return await _authz.emit_authorization_link(server, user_id, agent_id)
+
+
+async def _trigger_per_user_authorization(
+    server: McpServerConfig, user_id: str | None, agent_id: str | None
+) -> str:
+    """Emit an authorization link and return the degrade-chain "needs authorization" text.
+
+    Called when a per-user oauth call has no resolvable token. With a routable user_id the
+    link is built + delivered (best-effort DM); without one (unroutable caller) no link can
+    be addressed, so only the generic "authorization required" notice is returned.
+    """
+    if user_id is None:
+        logger.info("mcp_per_user_no_user_id server_id=%s", server.id)
+        return _needs_authorization_result(server.id, delivered=False)
+    delivered = await _emit_authorization_link(server, user_id, agent_id or "")
+    return _needs_authorization_result(server.id, delivered=delivered)
+
+
+def _has_user_token(server: McpServerConfig, user_id: str | None, agent_id: str | None) -> bool:
+    """Whether the calling user already has a per-user token for this server (Group 6).
+
+    Resolves through the injectable per-user token seam by the ``(server, user, agent)``
+    isolation triple; a None token (no token / unresolvable) is the explicit signal that
+    drives the authorization trigger rather than an error.
+    """
+    if user_id is None:
+        return False
+    return resolve_user_token(server.id, user_id, agent_id) is not None
 
 
 def _oauth_degraded_result(server: McpServerConfig, exc: BaseException) -> str | None:
@@ -1521,6 +1581,10 @@ def _register_tool(
         session_id = getattr(tool_context, "session_id", None)
         principal = getattr(tool_context, "principal", None)
         user_id = getattr(principal, "user_id", None)
+        # agent_name completes the per-user oauth token isolation triple (Group 6, D1). The
+        # authorization-link DM deliverer (Group 6, D8) is bound at the dispatch site (the
+        # IM/outbound layer), so the MCP client never imports outbound here.
+        agent_id = getattr(tool_context, "agent_name", None)
         return await _call_via_session(
             server.id,
             tool_def.name,
@@ -1529,6 +1593,7 @@ def _register_tool(
             scope_key=scope_key,
             session_id=session_id,
             user_id=user_id,
+            agent_id=agent_id,
         )
 
     schema: tr.ToolSchema = {
@@ -1627,19 +1692,23 @@ def _normalize_tool_result(content_blocks: Any, *, structured_content: Any, is_e
 
 
 async def _reopen_session(
-    server: McpServerConfig, scope: int | None, user_id: str | None = None
+    server: McpServerConfig,
+    scope: int | None,
+    user_id: str | None = None,
+    agent_id: str | None = None,
 ) -> Any | None:
     """Lazily re-open a dropped ClientSession (any transport) once. Returns the new
     session, or None if reopen failed. Closes the prior host first (no leak), then
     replaces the server's _active_sessions / _session_hosts entry. ``user_id`` targets the
-    per-user session slot for a per-user oauth server (None slot for every other server)."""
+    per-user session slot for a per-user oauth server (None slot for every other server);
+    ``agent_id`` completes the per-user token isolation triple at (re)spawn time."""
     key = _session_key(server, scope, user_id)
     old = _session_hosts.pop(key, None)
     _active_sessions.pop(key, None)
     if old is not None:
         await _close_host(old)  # best-effort; a stuck/erroring old host never blocks reopen
     try:
-        return await _open_session_for(server, scope, user_id)
+        return await _open_session_for(server, scope, user_id, agent_id)
     except Exception as exc:  # noqa: BLE001 — reopen failure → caller marks unavailable
         logger.warning("mcp_reopen_failed server_id=%s error=%s", server.id, exc)
         return None
@@ -1776,6 +1845,7 @@ async def _call_via_session(
     scope_key: str | None = None,
     session_id: str | None = None,
     user_id: str | None = None,
+    agent_id: str | None = None,
 ) -> str:
     """Invoke a tool, then apply the call-window diff fallback when attributing (D2).
 
@@ -1799,6 +1869,7 @@ async def _call_via_session(
             scope_key=scope_key,
             session_id=session_id,
             user_id=user_id,
+            agent_id=agent_id,
         )
     assert server is not None
 
@@ -1812,6 +1883,7 @@ async def _call_via_session(
             scope_key=scope_key,
             session_id=session_id,
             user_id=user_id,
+            agent_id=agent_id,
         )
         try:
             artifact_exchange.diff_register(
@@ -1831,6 +1903,7 @@ async def _call_via_session_inner(
     scope_key: str | None = None,
     session_id: str | None = None,
     user_id: str | None = None,
+    agent_id: str | None = None,
 ) -> str:
     """Invoke a tool through the held SDK ClientSession (any transport).
 
@@ -1845,13 +1918,11 @@ async def _call_via_session_inner(
     # oauth2 server marked auth-unavailable: return directly, no call.
     if server.auth_type == "oauth2" and server._auth_unavailable:
         return _auth_unavailable_result(server_id)
-    # per-user oauth without a routable user_id is unauthorized for this caller: no shared
-    # session to fall back on. Report "auth unavailable" rather than crashing or leaking
-    # another user's session. (Group 6 will replace this with an authorization trigger.)
-    if _is_per_user_oauth(server) and user_id is None:
-        # TODO(group6): emit the per-user authorization link instead of a static degrade.
-        logger.info("mcp_per_user_no_user_id server_id=%s", server_id)
-        return _auth_unavailable_result(server_id)
+    # per-user oauth with no resolvable (user, agent, server) token: trigger this user's
+    # own authorization (build + DM a link) and return a "needs authorization" result on
+    # the degrade chain — never crash, never open or reuse another user's session (D8).
+    if _is_per_user_oauth(server) and not _has_user_token(server, user_id, agent_id):
+        return await _trigger_per_user_authorization(server, user_id, agent_id)
     # Known-unavailable server: short-circuit without touching the connection.
     if server._health is not HealthState.healthy:
         return _unavailable_result(server_id)
@@ -1870,13 +1941,13 @@ async def _call_via_session_inner(
     # never authenticates with a stale token (D4).
     if (
         _stdio_token_expired(server, key)
-        and await _restart_stdio_for_fresh_token(server, scope, user_id, None) is None
+        and await _restart_stdio_for_fresh_token(server, scope, user_id, agent_id) is None
     ):
         set_health(server, HealthState.unavailable)
         return _unavailable_result(server_id)
     session = _active_sessions.get(key)
     if session is None:
-        session = await _reopen_session(server, scope, user_id)
+        session = await _reopen_session(server, scope, user_id, agent_id)
         if session is None:
             # An oauth genuine-auth failure during open sets the sticky flag; report it
             # specifically rather than as a connection problem.
@@ -1896,7 +1967,7 @@ async def _call_via_session_inner(
         # Per-user stdio 401: the subprocess's token was rejected — re-spawn with the
         # store's current (refreshed) token and retry once (D4) before any degrade.
         if _is_per_user_stdio(server) and _is_401_error(exc):
-            restarted = await _restart_stdio_for_fresh_token(server, scope, user_id, None)
+            restarted = await _restart_stdio_for_fresh_token(server, scope, user_id, agent_id)
             if restarted is None:
                 set_health(server, HealthState.unavailable)
                 return _unavailable_result(server_id)
@@ -1945,6 +2016,7 @@ async def call_tool(
     scope_key: str | None = None,
     session_id: str | None = None,
     user_id: str | None = None,
+    agent_id: str | None = None,
 ) -> str:
     server = _server_registry.get((scope, server_id))
     if server is None:
@@ -1957,6 +2029,7 @@ async def call_tool(
         scope_key=scope_key,
         session_id=session_id,
         user_id=user_id,
+        agent_id=agent_id,
     )
 
 
@@ -2016,29 +2089,30 @@ async def _call_utility(
     scope: int | None = None,
     *,
     user_id: str | None = None,
+    agent_id: str | None = None,
 ) -> str:
     """Dispatch a resources/prompts utility tool through the held SDK ClientSession.
 
     Same auth/health/lazy-reconnect contract as ``_call_via_session`` — all transports go
     through one session method; a dropped connection re-opens once and retries. ``user_id``
-    routes to the caller's per-user session for a per-user oauth server (None slot otherwise).
+    routes to the caller's per-user session for a per-user oauth server (None slot otherwise);
+    ``agent_id`` completes the per-user token isolation triple.
     """
     server = _server_registry.get((scope, server_id))
     if server is None:
         raise KeyError(f"Unknown MCP server: {server_id}")
     if server.auth_type == "oauth2" and server._auth_unavailable:
         return _auth_unavailable_result(server_id)
-    if _is_per_user_oauth(server) and user_id is None:
-        # TODO(group6): emit the per-user authorization link instead of a static degrade.
-        logger.info("mcp_per_user_no_user_id server_id=%s util=%s", server_id, util_name)
-        return _auth_unavailable_result(server_id)
+    # per-user oauth with no resolvable token → trigger this user's authorization (D8).
+    if _is_per_user_oauth(server) and not _has_user_token(server, user_id, agent_id):
+        return await _trigger_per_user_authorization(server, user_id, agent_id)
     if server._health is not HealthState.healthy:
         return _unavailable_result(server_id)
 
     key = _session_key(server, scope, user_id)
     session = _active_sessions.get(key)
     if session is None:
-        session = await _reopen_session(server, scope, user_id)
+        session = await _reopen_session(server, scope, user_id, agent_id)
         if session is None:
             if server.auth_type == "oauth2" and server._auth_unavailable:
                 return _auth_unavailable_result(server_id)
@@ -2053,7 +2127,7 @@ async def _call_utility(
             return oauth_degraded
         if not _is_disconnect_error(exc):
             raise
-        new_session = await _reopen_session(server, scope, user_id)
+        new_session = await _reopen_session(server, scope, user_id, agent_id)
         if new_session is None:
             set_health(server, HealthState.unavailable)
             return _unavailable_result(server_id)
@@ -2123,11 +2197,18 @@ def _register_utility_tool(
 
     async def call(tool_context: Any = None, **kwargs: object) -> str:
         # tool_context binds to this param (never into kwargs → never leaks to MCP args).
-        # principal.user_id routes a per-user oauth server's utility call to that user's session.
+        # principal.user_id routes a per-user oauth server's utility call to that user's session;
+        # agent_name completes the per-user token isolation triple (Group 6, D1).
         principal = getattr(tool_context, "principal", None)
         user_id = getattr(principal, "user_id", None)
+        agent_id = getattr(tool_context, "agent_name", None)
         return await _call_utility(
-            server.id, util_name, dict(kwargs), server._agent_scope, user_id=user_id
+            server.id,
+            util_name,
+            dict(kwargs),
+            server._agent_scope,
+            user_id=user_id,
+            agent_id=agent_id,
         )
 
     tool_schema: tr.ToolSchema = {

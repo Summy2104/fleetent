@@ -259,6 +259,45 @@ def make_uploader(connectors: dict[str, Any], address: ConversationAddress) -> A
     return upload_func
 
 
+def make_mcp_authz_deliverer(tool_context: Any) -> Any:
+    """Build a per-call MCP authorization-link DM deliverer from a tool context (D8).
+
+    The returned coroutine ``deliver(user_id, agent_id, server_id, url) -> bool`` sends the
+    authorization link to the *requesting user themselves* as a private DM
+    (``target_type="user"``), NEVER to a shared channel — even when the triggering call
+    arrived in a channel — so another participant cannot intercept the link's one-shot
+    ``state``. The DM address is the requester's own platform id taken from the inbound
+    ``session_context`` (sender), falling back to the conversation address's ``user_id``.
+
+    Returns None when no live IM connector / requester address is available (e.g. a TUI or
+    HTTP run): the caller then degrades with a "needs authorization" notice but no DM.
+    """
+    connectors: dict[str, Any] = getattr(tool_context, "outbound_connectors", {}) or {}
+    session_context = getattr(tool_context, "session_context", None)
+    address = getattr(tool_context, "conversation_address", None)
+
+    platform = getattr(session_context, "platform", "") or getattr(address, "platform", "")
+    # The DM recipient is the sender — the requester — not the (possibly channel) chat id.
+    target = getattr(session_context, "sender_id", "") or getattr(address, "user_id", "")
+    connector = connectors.get(platform) if platform else None
+    if not platform or not target or connector is None:
+        return None
+
+    async def deliver(user_id: str, agent_id: str, server_id: str, url: str) -> bool:
+        msg = (
+            f"🔐 Authorize MCP server `{server_id}` to act on your behalf:\n{url}\n"
+            "Open the link to grant access, then retry your request."
+        )
+        receipt = await send_to(platform, connector, target, msg, target_type="user")
+        if not receipt.ok:
+            logger.warning(
+                "mcp_authz_dm_failed", server_id=server_id, platform=platform, error=receipt.error
+            )
+        return receipt.ok
+
+    return deliver
+
+
 def approval_prompt_blocks(
     approval_id: str, tool_name: str, risk_level: str, summary: str = ""
 ) -> list[dict[str, Any]]:

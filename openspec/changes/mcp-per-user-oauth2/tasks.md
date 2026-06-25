@@ -43,10 +43,10 @@
 
 ## 6. 无 token 触发授权 + 链接投递(standalone)
 
-- [ ] 6.1 (test, unit) 无 token:call_tool 命中无 token 时返回明确「需授权」结果(不抛异常、不卡住,挂 degrade 链);已有有效 token 正常执行
-- [ ] 6.2 (test, unit) 授权链接生成:含 PKCE+state(绑 user×agent×server),redirect_uri 精确匹配配置
-- [ ] 6.3 (impl) 无 token 分支 + 授权链接生成接线;standalone 经 agent 自身 IM 连接器把链接私信给本人(DM,不进频道)
-- [ ] 6.4 (test, unit) 隔离:agent1 授权不被 agent2 使用;共享频道中按发送者 user_id 解析(B 无 token 则 B 触发授权,不复用 A)
+- [x] 6.1 (test, unit) 无 token:call_tool 命中无 token 时返回明确「需授权」结果(不抛异常、不卡住,挂 degrade 链);已有有效 token 正常执行
+- [x] 6.2 (test, unit) 授权链接生成:含 PKCE+state(绑 user×agent×server),redirect_uri 精确匹配配置
+- [x] 6.3 (impl) 无 token 分支 + 授权链接生成接线;standalone 经 agent 自身 IM 连接器把链接私信给本人(DM,不进频道)
+- [x] 6.4 (test, unit) 隔离:agent1 授权不被 agent2 使用;共享频道中按发送者 user_id 解析(B 无 token 则 B 触发授权,不复用 A)
 
 ## 7. standalone 自挂回调端点
 
