@@ -191,6 +191,67 @@ def test_reject_leaves_pool_unchanged_and_clears_drift(app, db, pool_dir, admin_
     assert backflow_store.get_proposal(pid)["status"] == "rejected"
 
 
+def test_list_backflow_returns_pending_metadata_without_bundle(app, db, pool_dir, admin_token):
+    """GET /admin/skills/backflow lists pending proposals (admin-only, no bundle)."""
+    _commit_skill(pool_dir, "billing", "v1")
+    agent = _create_agent()
+    pid = _nominate(agent, "billing", pool_dir)
+
+    client = TestClient(app, raise_server_exceptions=True)
+
+    assert client.get("/admin/skills/backflow").status_code == 401
+
+    viewer, _ = user_store.create_user("viewer")
+    viewer_token = auth.create_session(viewer.id)
+    assert (
+        client.get(
+            "/admin/skills/backflow", headers={"Authorization": f"Session {viewer_token}"}
+        ).status_code
+        == 403
+    )
+
+    resp = client.get("/admin/skills/backflow", headers={"Authorization": f"Session {admin_token}"})
+    assert resp.status_code == 200
+    items = resp.json()
+    assert len(items) == 1
+    item = items[0]
+    assert item["id"] == pid
+    assert item["status"] == "pending"
+    assert item["agent_id"] == agent.id
+    assert item["agent_name"] == agent.name
+    assert item["skill_name"] == "billing"
+    assert "conflict" in item
+    assert "created_at" in item
+    assert "proposed_bundle" not in item
+
+
+def test_backflow_diff_returns_dual_diff_and_404_for_missing(app, db, pool_dir, admin_token):
+    """GET /admin/skills/backflow/{id}/diff returns vs-base/vs-head/conflict; 404 if absent."""
+    _commit_skill(pool_dir, "search", "v1")
+    agent = _create_agent()
+    pid = _nominate(agent, "search", pool_dir)
+
+    client = TestClient(app, raise_server_exceptions=True)
+
+    assert client.get(f"/admin/skills/backflow/{pid}/diff").status_code == 401
+
+    resp = client.get(
+        f"/admin/skills/backflow/{pid}/diff",
+        headers={"Authorization": f"Session {admin_token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "diff_vs_base" in body
+    assert "diff_vs_head" in body
+    assert "conflict" in body
+
+    missing = client.get(
+        "/admin/skills/backflow/999999/diff",
+        headers={"Authorization": f"Session {admin_token}"},
+    )
+    assert missing.status_code == 404
+
+
 def test_fork_creates_full_bundle_and_rebinds_source_agent(
     app, db, pool_dir, admin_token, monkeypatch
 ):
