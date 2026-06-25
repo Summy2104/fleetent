@@ -3,7 +3,8 @@
 All transports go through the official `mcp` SDK's ClientSession over a transport-specific
 stream pair, held alive in a module-level AsyncExitStack:
   - stdio: `stdio_client` (subprocess stdin/stdout)
-  - http:  `streamablehttp_client` (Streamable HTTP)
+  - http:  `streamable_http_client(url, http_client=...)` (Streamable HTTP; the legacy
+           `streamablehttp_client(headers=,auth=)` entry is kept as a re-export shim)
   - sse:   `sse_client` (legacy Server-Sent Events)
 
 The SDK owns the wire protocol (JSON-RPC, initialize handshake, session id, Accept
@@ -21,6 +22,7 @@ import copy
 import json
 import logging
 import os
+from collections.abc import Callable, Generator
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -30,13 +32,15 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
+from fleetent.integrations.mcp.per_user_tokens import resolve_user_token
 from fleetent.integrations.mcp.tool_naming import Projector, make_projector
 from mcp import ClientSession
 from mcp.client.auth import OAuthFlowError, OAuthTokenError
 from mcp.client.auth.extensions.client_credentials import ClientCredentialsOAuthProvider
 from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
+from mcp.shared._httpx_utils import create_mcp_http_client
 from mcp.shared.auth import OAuthClientInformationFull, OAuthMetadata
 from mcp.shared.auth import OAuthToken as SdkOAuthToken
 from mcp.types import LATEST_PROTOCOL_VERSION
@@ -780,11 +784,94 @@ async def _http_headers(server: McpServerConfig) -> dict[str, str]:
     return headers
 
 
-def _transport_cm(server: McpServerConfig, headers: dict[str, str]) -> Any:
+class _PerUserBearerAuth(httpx.Auth):
+    """httpx.Auth that injects the calling user's *current* OAuth bearer per request (D3).
+
+    Holds a ``token_getter`` callable bound to one ``(server, user, agent)`` triple and
+    reads it on every request in ``auth_flow``, so a token refreshed in the store between
+    requests is picked up by the next request transparently — no ClientSession rebuild.
+    When the getter returns None (no token) no Authorization header is set, leaving the
+    resource end to answer 401 / drive the degrade path rather than sending a stale bearer.
+    """
+
+    def __init__(self, token_getter: Callable[[], str | None]) -> None:
+        self._token_getter = token_getter
+
+    def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
+        token = self._token_getter()
+        if token:
+            request.headers["Authorization"] = f"Bearer {token}"
+        yield request
+
+
+def _per_user_token_getter(
+    server_id: str, user_id: str, agent_id: str | None
+) -> Callable[[], str | None]:
+    """Build a token getter closing over ``(server_id, user_id, agent_id)`` (D3).
+
+    The returned callable resolves the user's *current* access token from the per-user
+    token store on each invocation (None when none is stored). This group does NOT refresh
+    or write tokens (that is Group 7); the getter only reflects what the store holds now,
+    which is exactly what makes refresh transparent to the live session.
+    """
+
+    def getter() -> str | None:
+        token = resolve_user_token(server_id, user_id, agent_id)
+        return token.access_token if token is not None else None
+
+    return getter
+
+
+def _http_auth(
+    server: McpServerConfig, user_id: str | None, agent_id: str | None
+) -> httpx.Auth | None:
+    """The httpx.Auth bound to a server's http(s) client.
+
+    A per-user oauth server (authorization_code) gets a ``_PerUserBearerAuth`` bound to the
+    calling user, injecting that user's current token per request. Every other server keeps
+    the historical auth: the SDK client_credentials provider for oauth2, None otherwise.
+    """
+    if _is_per_user_oauth(server):
+        if user_id is None:
+            return None  # unroutable; caller short-circuits before reaching here
+        return _PerUserBearerAuth(_per_user_token_getter(server.id, user_id, agent_id))
+    return _oauth_auth(server)
+
+
+def _build_http_client(
+    server: McpServerConfig,
+    headers: dict[str, str],
+    user_id: str | None,
+    agent_id: str | None,
+) -> httpx.AsyncClient:
+    """Build the httpx.AsyncClient fed to the new streamable-http transport (D3).
+
+    Uses the SDK's ``create_mcp_http_client`` so the MCP defaults (follow_redirects, the
+    timeout shape) match the legacy transport exactly. Per-server timeouts map as before:
+    connect_timeout → the connection/request timeout, call_timeout → the streamed read.
+    The auth handler is per-user for a per-user oauth server, else the historical auth.
+    """
+    timeout = httpx.Timeout(server.connect_timeout, read=server.call_timeout)
+    return create_mcp_http_client(
+        headers=headers or None,
+        timeout=timeout,
+        auth=_http_auth(server, user_id, agent_id),
+    )
+
+
+def _transport_cm(
+    server: McpServerConfig,
+    headers: dict[str, str],
+    user_id: str | None = None,
+    agent_id: str | None = None,
+) -> Any:
     """Return the SDK transport context manager for the server's transport.
 
     All three SDK clients yield a stream tuple whose first two items are the
-    (read, write) streams fed to a ClientSession.
+    (read, write) streams fed to a ClientSession. The http path uses the non-deprecated
+    ``streamable_http_client(url, http_client=...)`` for both per-user and plain servers:
+    per-user binds a ``_PerUserBearerAuth`` over ``(server, user, agent)``, plain servers
+    build an equivalent client from the existing headers/auth so their behavior is unchanged.
     """
     if server.transport == "stdio":
         return stdio_client(_stdio_params(server))
@@ -799,7 +886,13 @@ def _transport_cm(server: McpServerConfig, headers: dict[str, str]) -> Any:
             sse_read_timeout=server.call_timeout,
             auth=_oauth_auth(server),
         )
-    # default: streamable http
+    # default: streamable http on the non-deprecated API. A plain server routes through the
+    # legacy `streamablehttp_client` shim (preserves any external monkeypatch / behavior);
+    # a per-user oauth server builds its user-bound client and uses the new API directly so
+    # the per-user auth is attached without round-tripping the legacy headers/auth kwargs.
+    if _is_per_user_oauth(server):
+        http_client = _build_http_client(server, headers, user_id, agent_id)
+        return streamable_http_client(server.url, http_client=http_client)
     return streamablehttp_client(
         server.url,
         headers=headers,
@@ -807,6 +900,29 @@ def _transport_cm(server: McpServerConfig, headers: dict[str, str]) -> Any:
         sse_read_timeout=server.call_timeout,
         auth=_oauth_auth(server),
     )
+
+
+def streamablehttp_client(
+    url: str,
+    headers: dict[str, str] | None = None,
+    timeout: float = 30.0,
+    sse_read_timeout: float = 300.0,
+    auth: httpx.Auth | None = None,
+) -> Any:
+    """Re-export shim for the deprecated `streamablehttp_client(headers=,auth=)` entry (D3).
+
+    The SDK deprecated the headers/timeout/auth kwargs in favor of
+    ``streamable_http_client(url, http_client=...)``. This wrapper keeps the legacy
+    signature usable (for existing call sites / tests) while internally building an
+    ``httpx.AsyncClient`` from those kwargs and delegating to the non-deprecated API — so
+    non-per-user http behavior is unchanged but rides the new transport underneath.
+    """
+    client = create_mcp_http_client(
+        headers=headers or None,
+        timeout=httpx.Timeout(timeout, read=sse_read_timeout),
+        auth=auth,
+    )
+    return streamable_http_client(url, http_client=client)
 
 
 @dataclass
@@ -829,16 +945,20 @@ async def _host_session(
     headers: dict[str, str],
     ready: asyncio.Future,
     close_event: asyncio.Event,
+    user_id: str | None = None,
+    agent_id: str | None = None,
 ) -> None:
     """Session owner coroutine: enter transport + ClientSession, init, park, exit — same task.
 
     On a successful open it resolves ``ready`` with the live session and parks on
     ``close_event``; on an open failure it propagates the error through ``ready``. A
     teardown error (exit phase) is the host's own and is logged, never propagated — the
-    process must not die because one connector failed to close (2026-06-11).
+    process must not die because one connector failed to close (2026-06-11). ``user_id`` /
+    ``agent_id`` bind the http transport's per-user bearer auth (ignored for non-per-user
+    servers); the per-user httpx.AsyncClient is entered/exited in this owner task only.
     """
     try:
-        async with _transport_cm(server, headers) as streams:
+        async with _transport_cm(server, headers, user_id, agent_id) as streams:
             read, write = streams[0], streams[1]
             async with ClientSession(
                 read, write, message_handler=_make_message_handler(server, scope)
@@ -856,7 +976,10 @@ async def _host_session(
 
 
 async def _open_session_for(
-    server: McpServerConfig, scope: int | None, user_id: str | None = None
+    server: McpServerConfig,
+    scope: int | None,
+    user_id: str | None = None,
+    agent_id: str | None = None,
 ) -> Any:
     """Open a transport-specific ClientSession owned by a dedicated host task, initialized.
 
@@ -864,14 +987,17 @@ async def _open_session_for(
     transport + ClientSession contexts (entered/exited in that one task). The live
     ClientSession is stored in _active_sessions[key] for reuse and lazy reconnect; its host
     in _session_hosts[key] for lifecycle. ``user_id`` selects the per-user session slot for
-    a per-user oauth server (ignored — keyed under None — for every other server).
+    a per-user oauth server (ignored — keyed under None — for every other server) and, with
+    ``agent_id``, binds that user's per-request bearer auth on the http transport.
     """
     key = _session_key(server, scope, user_id)
     headers = {} if server.transport == "stdio" else await _http_headers(server)
     loop = asyncio.get_event_loop()
     ready: asyncio.Future = loop.create_future()
     close_event = asyncio.Event()
-    task = asyncio.ensure_future(_host_session(server, scope, headers, ready, close_event))
+    task = asyncio.ensure_future(
+        _host_session(server, scope, headers, ready, close_event, user_id, agent_id)
+    )
     try:
         session = await asyncio.wait_for(ready, server.connect_timeout)
     except (Exception, asyncio.CancelledError):

@@ -27,10 +27,10 @@
 
 ## 4. http per-user 会话 + 逐请求 Bearer
 
-- [ ] 4.1 (test, unit) 自定义 _PerUserBearerAuth:auth_flow 每请求读该用户当前 token 设 Authorization: Bearer;token 变化时下一请求带新 token(透明刷新)
-- [ ] 4.2 (test, unit) per-user http 会话开启:为每用户建独立 ClientSession,auth 绑定该用户;不同用户独立、同用户复用
-- [ ] 4.3 (impl) 实现 http per-user 会话 + _PerUserBearerAuth;迁移到 streamable_http_client(url, http_client=带 auth 的 AsyncClient),旧 streamablehttp_client 入口保留 re-export shim
-- [ ] 4.4 (test, unit) shim 兼容:旧入口仍可用(对照现有 http 服务行为不变)
+- [x] 4.1 (test, unit) 自定义 _PerUserBearerAuth:auth_flow 每请求读该用户当前 token 设 Authorization: Bearer;token 变化时下一请求带新 token(透明刷新)
+- [x] 4.2 (test, unit) per-user http 会话开启:为每用户建独立 ClientSession,auth 绑定该用户;不同用户独立、同用户复用
+- [x] 4.3 (impl) 实现 http per-user 会话 + _PerUserBearerAuth;迁移到 streamable_http_client(url, http_client=带 auth 的 AsyncClient),旧 streamablehttp_client 入口保留 re-export shim
+- [x] 4.4 (test, unit) shim 兼容:旧入口仍可用(对照现有 http 服务行为不变)
 
 ## 5. stdio per-user 子进程池与生命周期
 

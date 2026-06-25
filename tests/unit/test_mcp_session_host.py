@@ -60,7 +60,7 @@ def _patch_transport(monkeypatch, rec: dict, *, exit_raises: bool = False):
                 raise RuntimeError("teardown boom")
             return False
 
-    monkeypatch.setattr(client, "_transport_cm", lambda server, headers: _CM(rec))
+    monkeypatch.setattr(client, "_transport_cm", lambda server, headers, *a, **k: _CM(rec))
     monkeypatch.setattr(client, "ClientSession", _StubSession)
     monkeypatch.setattr(client, "_capture_init_result", lambda *a, **k: None)
 
