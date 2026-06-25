@@ -75,7 +75,7 @@ def _loop_env(monkeypatch):
         lambda: [{"type": "function", "function": {"name": "send_im_message", "parameters": {}}}],
     )
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
-    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(al, "run_pipeline_from_conversation", AsyncMock())
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     monkeypatch.setattr(al, "collect_disabled_trace", lambda *a, **k: None)
     monkeypatch.setattr(
@@ -183,7 +183,7 @@ async def test_run_injects_outstanding_approval_note(monkeypatch):
 
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
-    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(al, "run_pipeline_from_conversation", AsyncMock())
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     monkeypatch.setattr(al, "collect_disabled_trace", lambda *a, **k: None)
     monkeypatch.setattr(

@@ -62,7 +62,7 @@ async def test_memory_candidate_generates_pending_proposal_without_modifying_mem
         ),
     ]
     monkeypatch.setattr(observability, "query_trace_events", lambda query: events)
-    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reflection.memory, "search_facts", AsyncMock(return_value=[]))
 
     report = await reflection.run_reflection("user-1")
     proposals = reflection.generate_memory_maintenance_proposals("user-1", report.findings)
@@ -110,25 +110,30 @@ async def test_memory_conflict_generates_owner_review_proposal_without_memory_wr
                 ),
             )
     before = _memory_rows(db_path)
+    from fleetent.memory.facts_models import Fact, SearchResult
+
+    def _fact(fid: str, obj: str) -> Fact:
+        return Fact(
+            fact_id=fid,
+            user_id="user-1",
+            subject="user",
+            relation="located_in",
+            object=obj,
+            cardinality="single",
+            status="active",
+            access_count=0,
+            first_accessed_at=None,
+            last_accessed_at=None,
+            expires_at=None,
+            valid_until=None,
+            created_at=now,
+            updated_at=now,
+            source_turn=None,
+        )
+
     memories = [
-        memory_layer.MemoryItem(
-            id="mem-1",
-            user_id="user-1",
-            type="identity",
-            content="User location is Shanghai",
-            created_at=now,
-            updated_at=now,
-            expires_at=None,
-        ),
-        memory_layer.MemoryItem(
-            id="mem-2",
-            user_id="user-1",
-            type="identity",
-            content="User location is Beijing",
-            created_at=now,
-            updated_at=now,
-            expires_at=None,
-        ),
+        SearchResult(fact=_fact("mem-1", "Shanghai"), score=0.9),
+        SearchResult(fact=_fact("mem-2", "Beijing"), score=0.85),
     ]
     _use_db(monkeypatch, db_path)
     monkeypatch.setattr(
@@ -144,7 +149,7 @@ async def test_memory_conflict_generates_owner_review_proposal_without_memory_wr
             )
         ],
     )
-    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=memories))
+    monkeypatch.setattr(reflection.memory, "search_facts", AsyncMock(return_value=memories))
 
     report = await reflection.run_reflection("user-1")
     proposals = reflection.generate_memory_maintenance_proposals("user-1", report.findings)
@@ -181,7 +186,7 @@ async def test_team_or_project_fact_suggests_shared_memory_or_kb(tmp_path, monke
         ),
     ]
     monkeypatch.setattr(observability, "query_trace_events", lambda query: events)
-    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reflection.memory, "search_facts", AsyncMock(return_value=[]))
 
     report = await reflection.run_reflection("user-1")
     proposals = reflection.generate_memory_maintenance_proposals("user-1", report.findings)

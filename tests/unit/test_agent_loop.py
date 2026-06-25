@@ -186,7 +186,7 @@ def mock_client(monkeypatch) -> AsyncMock:
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(al, "run_pipeline_from_conversation", AsyncMock())
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     # Avoid instantiating Settings() (needs an API key) in the default-limits path.
@@ -821,7 +821,7 @@ def mock_client_fb(monkeypatch) -> AsyncMock:
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(al, "run_pipeline_from_conversation", AsyncMock())
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     monkeypatch.setattr(
@@ -1205,7 +1205,7 @@ async def test_run_routes_to_vision_when_image_present(monkeypatch):
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(al, "run_pipeline_from_conversation", AsyncMock())
     monkeypatch.setattr(
         al,
         "resolve_limits",
@@ -1251,7 +1251,7 @@ async def test_run_uses_agent_model_policy_default_route(monkeypatch):
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(al, "run_pipeline_from_conversation", AsyncMock())
     monkeypatch.setattr(
         al,
         "resolve_limits",
@@ -1287,7 +1287,7 @@ async def test_run_uses_agent_model_policy_vision_route(monkeypatch):
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(al, "run_pipeline_from_conversation", AsyncMock())
     monkeypatch.setattr(
         al,
         "resolve_limits",
@@ -1380,7 +1380,7 @@ async def test_run_stream_routes_to_vision_with_images(monkeypatch):
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(al, "run_pipeline_from_conversation", AsyncMock())
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     monkeypatch.setattr(
         al,
@@ -1693,7 +1693,7 @@ def _wire_loop(monkeypatch, client, cfg):
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(al, "run_pipeline_from_conversation", AsyncMock())
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     monkeypatch.setattr(
@@ -1787,7 +1787,7 @@ def _capture_stream_wire(monkeypatch, *, memory: str, catalog: str) -> dict:
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(al, "run_pipeline_from_conversation", AsyncMock())
     # memory param retained for call-site compat; memory injection now goes through
     # build_context (class C), which is best-effort and no-ops without a configured DB.
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **kw: catalog)

@@ -61,7 +61,7 @@ async def test_run_reflection_generates_pending_proposals_without_auto_apply(
     ]
 
     monkeypatch.setattr(observability, "query_trace_events", lambda query: fake_events)
-    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reflection.memory, "search_facts", AsyncMock(return_value=[]))
     monkeypatch.setattr(
         reflection_impl,
         "generate_memory_maintenance_proposals",
@@ -146,7 +146,7 @@ async def test_run_reflection_auto_apply_attempts_each_memory_proposal_only_when
     )
 
     monkeypatch.setattr(observability, "query_trace_events", lambda query: fake_events)
-    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reflection.memory, "search_facts", AsyncMock(return_value=[]))
     monkeypatch.setattr(
         reflection_impl,
         "generate_memory_maintenance_proposals",
@@ -234,7 +234,7 @@ async def test_run_reflection_auto_apply_failures_are_bulkeaded(
     )
 
     monkeypatch.setattr(observability, "query_trace_events", lambda query: fake_events)
-    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reflection.memory, "search_facts", AsyncMock(return_value=[]))
     monkeypatch.setattr(
         reflection_impl,
         "generate_memory_maintenance_proposals",

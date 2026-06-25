@@ -8,7 +8,7 @@ from fleetent import agent_config
 from fleetent.agent_config import AgentConfigIndex, AgentFile, default_models
 from fleetent.config import LongTermContextSettings
 from fleetent.knowledge_base import KnowledgeChunk
-from fleetent.memory import MemoryItem
+from fleetent.memory.facts_models import Fact, SearchResult
 
 
 def _publish_agent(monkeypatch, agent: AgentFile) -> None:
@@ -16,6 +16,39 @@ def _publish_agent(monkeypatch, agent: AgentFile) -> None:
         agent_config,
         "_index",
         AgentConfigIndex(agents={agent.name: agent}, default=agent.name),
+    )
+
+
+def _mem_result(
+    object_text: str,
+    fact_id: str = "mem-1",
+    *,
+    relation: str = "has_preference",
+    subject: str = "user",
+    statement: str | None = None,
+    score: float = 0.9,
+) -> SearchResult:
+    now = datetime.now(UTC)
+    return SearchResult(
+        fact=Fact(
+            fact_id=fact_id,
+            user_id="user-1",
+            subject=subject,
+            relation=relation,
+            object=object_text,
+            cardinality="multi",
+            status="active",
+            access_count=0,
+            first_accessed_at=None,
+            last_accessed_at=None,
+            expires_at=None,
+            valid_until=None,
+            created_at=now,
+            updated_at=now,
+            source_turn=None,
+            statement=statement,
+        ),
+        score=score,
     )
 
 
@@ -40,7 +73,7 @@ async def test_zero_token_budget_returns_empty_context_without_provider_calls(mo
 
     memory_search = AsyncMock()
     knowledge_search = AsyncMock()
-    monkeypatch.setattr(long_term_ctx.memory, "search", memory_search)
+    monkeypatch.setattr(long_term_ctx.memory, "search_facts", memory_search)
     long_term_ctx.set_knowledge_provider(knowledge_search)
 
     result = await long_term_ctx.build_context(
@@ -60,7 +93,7 @@ async def test_build_context_calls_memory_search_with_user_query_and_limit(monke
     from fleetent import long_term_ctx
 
     memory_search = AsyncMock(return_value=[])
-    monkeypatch.setattr(long_term_ctx.memory, "search", memory_search)
+    monkeypatch.setattr(long_term_ctx.memory, "search_facts", memory_search)
     long_term_ctx.set_knowledge_provider(None)
 
     await long_term_ctx.build_context(
@@ -76,17 +109,8 @@ async def test_build_context_calls_memory_search_with_user_query_and_limit(monke
 async def test_memory_results_are_formatted_with_memory_source_summary(monkeypatch):
     from fleetent import long_term_ctx
 
-    now = datetime(2026, 5, 31, tzinfo=UTC)
-    memory = MemoryItem(
-        id="mem-1",
-        user_id="user-1",
-        type="preferences",
-        content="User prefers Python for backend services",
-        created_at=now,
-        updated_at=now,
-        expires_at=None,
-    )
-    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[memory]))
+    memory = _mem_result("User prefers Python for backend services")
+    monkeypatch.setattr(long_term_ctx.memory, "search_facts", AsyncMock(return_value=[memory]))
     long_term_ctx.set_knowledge_provider(None)
 
     result = await long_term_ctx.build_context(
@@ -100,23 +124,40 @@ async def test_memory_results_are_formatted_with_memory_source_summary(monkeypat
     assert "User prefers Python for backend services" in result.text
     assert result.sources[0].source_type == "memory"
     assert result.sources[0].source_id == "mem-1"
-    assert result.sources[0].metadata == {"type": "preferences"}
+    assert result.sources[0].metadata == {"relation": "has_preference"}
+
+
+async def test_memory_injection_uses_statement_when_present(monkeypatch):
+    from fleetent import long_term_ctx
+
+    # An agent-subject fact whose statement names the subject explicitly must be
+    # injected verbatim, so the model reads "用户希望助手回答简洁" not "agent tone: 简洁".
+    memory = _mem_result(
+        "简洁",
+        relation="tone",
+        subject="agent",
+        statement="用户希望助手回答简洁",
+    )
+    monkeypatch.setattr(long_term_ctx.memory, "search_facts", AsyncMock(return_value=[memory]))
+    long_term_ctx.set_knowledge_provider(None)
+
+    result = await long_term_ctx.build_context(
+        user_id="user-1",
+        query="语气",
+        agent_id="agent-1",
+        available_tokens=200,
+    )
+
+    assert "用户希望助手回答简洁" in result.text
+    # The raw triple join must NOT appear when a statement is available.
+    assert "agent tone" not in result.text
 
 
 async def test_missing_knowledge_provider_does_not_block_memory_context(monkeypatch):
     from fleetent import long_term_ctx
 
-    now = datetime(2026, 5, 31, tzinfo=UTC)
-    memory = MemoryItem(
-        id="mem-1",
-        user_id="user-1",
-        type="identity",
-        content="User works on fleetent",
-        created_at=now,
-        updated_at=now,
-        expires_at=None,
-    )
-    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[memory]))
+    memory = _mem_result("User works on fleetent")
+    monkeypatch.setattr(long_term_ctx.memory, "search_facts", AsyncMock(return_value=[memory]))
     long_term_ctx.set_knowledge_provider(None)
 
     result = await long_term_ctx.build_context(
@@ -158,7 +199,7 @@ async def test_builtin_knowledge_provider_uses_knowledge_base_search_when_enable
         source_url=None,
     )
     knowledge_search = AsyncMock(return_value=[chunk])
-    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(long_term_ctx.memory, "search_facts", AsyncMock(return_value=[]))
     monkeypatch.setattr(long_term_ctx.knowledge_base, "search", knowledge_search)
     long_term_ctx.set_knowledge_provider(None)
 
@@ -203,7 +244,7 @@ async def test_builtin_knowledge_provider_disabled_does_not_call_knowledge_base(
         ),
     )
     knowledge_search = AsyncMock(return_value=[])
-    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(long_term_ctx.memory, "search_facts", AsyncMock(return_value=[]))
     monkeypatch.setattr(long_term_ctx.knowledge_base, "search", knowledge_search)
     long_term_ctx.set_knowledge_provider(None)
 
@@ -246,16 +287,7 @@ async def test_build_context_keeps_budget_policy_path_for_memory_and_knowledge(m
             conflict_preference="memory",
         ),
     )
-    now = datetime(2026, 5, 31, tzinfo=UTC)
-    memory_item = MemoryItem(
-        id="mem-1",
-        user_id="user-1",
-        type="preference",
-        content="User prefers on-prem deployment guidance.",
-        created_at=now,
-        updated_at=now,
-        expires_at=None,
-    )
+    memory_item = _mem_result("User prefers on-prem deployment guidance.")
     knowledge_chunk = KnowledgeChunk(
         id="chunk-1",
         document_id="doc-1",
@@ -268,7 +300,9 @@ async def test_build_context_keeps_budget_policy_path_for_memory_and_knowledge(m
         source="manual",
         source_url=None,
     )
-    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[memory_item]))
+    monkeypatch.setattr(
+        long_term_ctx.memory, "search_facts", AsyncMock(return_value=[memory_item])
+    )
     monkeypatch.setattr(
         long_term_ctx.knowledge_base, "search", AsyncMock(return_value=[knowledge_chunk])
     )
@@ -298,7 +332,7 @@ async def test_build_context_keeps_budget_policy_path_for_memory_and_knowledge(m
 async def test_empty_knowledge_results_are_omitted(monkeypatch):
     from fleetent import long_term_ctx
 
-    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(long_term_ctx.memory, "search_facts", AsyncMock(return_value=[]))
     knowledge_search = AsyncMock(return_value=[])
     long_term_ctx.set_knowledge_provider(knowledge_search)
 
@@ -318,23 +352,14 @@ async def test_empty_knowledge_results_are_omitted(monkeypatch):
 async def test_memory_and_knowledge_results_are_included_with_sources(monkeypatch):
     from fleetent import long_term_ctx
 
-    now = datetime(2026, 5, 31, tzinfo=UTC)
-    memory = MemoryItem(
-        id="mem-1",
-        user_id="user-1",
-        type="context",
-        content="User is deploying on-prem",
-        created_at=now,
-        updated_at=now,
-        expires_at=None,
-    )
+    memory = _mem_result("User is deploying on-prem")
     knowledge = SimpleNamespace(
         id="doc-1",
         content="Fleetent supports self-hosted deployment.",
         score=0.8,
         metadata={"title": "Deployment guide"},
     )
-    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[memory]))
+    monkeypatch.setattr(long_term_ctx.memory, "search_facts", AsyncMock(return_value=[memory]))
     long_term_ctx.set_knowledge_provider(AsyncMock(return_value=[knowledge]))
 
     result = await long_term_ctx.build_context(
@@ -355,33 +380,24 @@ async def test_memory_and_knowledge_results_are_included_with_sources(monkeypatc
 async def test_budget_pressure_keeps_memory_and_omits_low_priority_knowledge(monkeypatch):
     from fleetent import long_term_ctx
 
-    now = datetime(2026, 5, 31, tzinfo=UTC)
-    memory = MemoryItem(
-        id="mem-1",
-        user_id="user-1",
-        type="identity",
-        content="User prefers concise answers.",
-        created_at=now,
-        updated_at=now,
-        expires_at=None,
-    )
+    memory = _mem_result("User prefers concise answers.")
     knowledge = SimpleNamespace(
         id="doc-1",
         content="Knowledge chunk " + ("too large " * 30),
         score=0.95,
         metadata={"title": "Large doc"},
     )
-    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[memory]))
+    monkeypatch.setattr(long_term_ctx.memory, "search_facts", AsyncMock(return_value=[memory]))
     long_term_ctx.set_knowledge_provider(AsyncMock(return_value=[knowledge]))
 
     result = await long_term_ctx.build_context(
         user_id="user-1",
         query="answer style",
         agent_id="agent-1",
-        available_tokens=70,
+        available_tokens=78,
     )
 
-    assert len(result.text) <= 70
+    assert len(result.text) <= 78
     assert "User prefers concise answers." in result.text
     assert "Knowledge chunk" not in result.text
     assert [source.source_id for source in result.sources] == ["mem-1"]

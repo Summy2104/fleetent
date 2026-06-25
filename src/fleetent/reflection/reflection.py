@@ -2097,11 +2097,12 @@ def _parse_optional_datetime(value: object) -> datetime | None:
 
 async def _read_memory_signals(
     scope: str, events: list[observability.TraceEvent]
-) -> list[memory.MemoryItem]:
+) -> list[Any]:
+    """Return facts SearchResults relevant to the reflected events (empty if none)."""
     query = _events_to_text(events)
     if not query:
         return []
-    return await memory.search(scope, query, limit=10)
+    return await memory.search_facts(scope, query, limit=10)
 
 
 def _events_to_text(events: list[observability.TraceEvent]) -> str:
@@ -2128,7 +2129,7 @@ def _text_values(value: Any) -> list[str]:
 
 
 def _generate_findings(
-    events: list[observability.TraceEvent], memory_signals: list[memory.MemoryItem]
+    events: list[observability.TraceEvent], memory_signals: list[Any]
 ) -> list[ReflectionFinding]:
     findings: list[ReflectionFinding] = []
     findings.extend(_memory_candidate_findings(events, memory_signals))
@@ -2137,10 +2138,14 @@ def _generate_findings(
     return findings
 
 
+def _fact_text(fact: Any) -> str:
+    return f"{fact.subject} {fact.relation} {fact.object}"
+
+
 def _memory_candidate_findings(
-    events: list[observability.TraceEvent], memory_signals: list[memory.MemoryItem]
+    events: list[observability.TraceEvent], memory_signals: list[Any]
 ) -> list[ReflectionFinding]:
-    existing = {item.content.strip().casefold() for item in memory_signals}
+    existing = {_fact_text(r.fact).strip().casefold() for r in memory_signals}
     by_fact: dict[str, list[str]] = {}
     for event in events:
         fact = event.payload.get("memory_fact")
@@ -2165,29 +2170,35 @@ def _memory_candidate_findings(
 
 
 def _memory_conflict_findings(
-    memory_signals: list[memory.MemoryItem],
+    memory_signals: list[Any],
 ) -> list[ReflectionFinding]:
-    by_field: dict[str, dict[str, list[memory.MemoryItem]]] = {}
-    for item in memory_signals:
-        parsed = _parse_memory_field_value(item.content)
-        if parsed is None:
+    """Surface single-valued relations that hold more than one distinct object.
+
+    A single-cardinality relation (e.g. located_in, is_role) should have exactly
+    one active value; multiple distinct objects signal a conflict the owner
+    should reconcile.  Multi-valued relations coexist by design and are skipped.
+    """
+    by_relation: dict[tuple[str, str], dict[str, Any]] = {}
+    for result in memory_signals:
+        fact = result.fact
+        if fact.cardinality != "single":
             continue
-        field, value = parsed
-        by_field.setdefault(field, {}).setdefault(value.casefold(), []).append(item)
+        key = (fact.subject, fact.relation)
+        by_relation.setdefault(key, {}).setdefault(fact.object.casefold(), fact)
 
     findings: list[ReflectionFinding] = []
-    for field, values in by_field.items():
+    for (subject, relation), values in by_relation.items():
         if len(values) < 2:
             continue
-        conflicting_items = [items[0] for items in values.values()]
-        evidence_ids = [item.id for item in conflicting_items]
-        summaries = "; ".join(item.content for item in conflicting_items)
+        conflicting = list(values.values())
+        evidence_ids = [fact.fact_id for fact in conflicting]
+        summaries = "; ".join(_fact_text(fact) for fact in conflicting)
         findings.append(
             ReflectionFinding(
                 type="memory_conflict",
-                summary=f"Conflicting memory signals for {field}: {summaries}",
+                summary=f"Conflicting memory signals for {relation}: {summaries}",
                 evidence_ids=evidence_ids,
-                metadata={"field": field},
+                metadata={"field": relation, "subject": subject},
             )
         )
     return findings

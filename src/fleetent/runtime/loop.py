@@ -24,7 +24,7 @@ from fleetent.governance.permission_gate import _default_gate
 from fleetent.identity import Principal
 from fleetent.integrations.sandbox import Mode, is_code_execution_enabled, redact_secrets
 from fleetent.long_term_ctx import ContextSource, build_context
-from fleetent.memory import extract_and_update
+from fleetent.memory.facts_pipeline import run_pipeline_from_conversation
 from fleetent.model import ModelConfigError, ModelPolicySnapshot, ResolvedModelConfig
 from fleetent.model.provider_health import ProviderHealthCache, get_health_cache
 from fleetent.observability import (
@@ -2353,7 +2353,9 @@ async def _run_inner(
     # Memory extraction unified onto intelligence/memory (class C). Best-effort and
     # awaited (same blocking profile as the prior inline extract_and_save).
     try:
-        await extract_and_update(user_id, messages, model_policy=policy)
+        await run_pipeline_from_conversation(
+            user_id, messages, model_policy=policy, source_turn=session_id
+        )
     except Exception as exc:  # noqa: BLE001 — memory extraction is auxiliary
         _logger.debug("memory_extraction_skipped", error=str(exc))
     reply = await _apply_output_transform(reply, governance, session_id, agent_name, user_id)
@@ -3150,6 +3152,8 @@ async def run_stream(
     # Memory extraction unified onto intelligence/memory (class C). Best-effort and
     # awaited (same blocking profile as the prior inline extract_and_save).
     try:
-        await extract_and_update(user_id, messages, model_policy=policy)
+        await run_pipeline_from_conversation(
+            user_id, messages, model_policy=policy, source_turn=session_id
+        )
     except Exception as exc:  # noqa: BLE001 — memory extraction is auxiliary
         _logger.debug("memory_extraction_skipped", error=str(exc))

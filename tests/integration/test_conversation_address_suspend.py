@@ -71,7 +71,7 @@ def _suspend_env(monkeypatch, tmp_path):
         lambda: [{"type": "function", "function": {"name": "send_im_message", "parameters": {}}}],
     )
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
-    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(al, "run_pipeline_from_conversation", AsyncMock())
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     monkeypatch.setattr(al, "collect_disabled_trace", lambda *a, **k: None)
     monkeypatch.setattr(

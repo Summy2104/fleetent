@@ -94,6 +94,33 @@ def _memory(id: str, content: str) -> MemoryItem:
     )
 
 
+def _fact_result(
+    fact_id: str, relation: str, obj: str, *, cardinality: str = "single", score: float = 0.9
+):
+    """Build a facts SearchResult for reflection signal tests."""
+    from fleetent.memory.facts_models import Fact, SearchResult
+
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    fact = Fact(
+        fact_id=fact_id,
+        user_id="u1",
+        subject="user",
+        relation=relation,
+        object=obj,
+        cardinality=cardinality,  # type: ignore[arg-type]
+        status="active",
+        access_count=0,
+        first_accessed_at=None,
+        last_accessed_at=None,
+        expires_at=None,
+        valid_until=None,
+        created_at=now,
+        updated_at=now,
+        source_turn=None,
+    )
+    return SearchResult(fact=fact, score=score)
+
+
 def _maintenance_proposal(
     *,
     id: str = "mp1",
@@ -152,10 +179,11 @@ def test_reflection_finding_generation_and_text_extraction():
         _event("r2", {"memory_fact": "User likes tea", "task_pattern": "triage alerts"}),
         _event("r3", {"nested": {"text": ["alpha", {"more": "beta"}]}}),
     ]
+    # Two single-cardinality facts on the same relation with different objects → conflict.
     memories = [
-        _memory("m1", "User role is engineer"),
-        _memory("m2", "User role is manager"),
-        _memory("m3", "not parseable"),
+        _fact_result("m1", "is_role", "engineer"),
+        _fact_result("m2", "is_role", "manager"),
+        _fact_result("m3", "has_skill", "python"),
     ]
 
     findings = reflection._generate_findings(events, memories)  # noqa: SLF001
@@ -168,11 +196,6 @@ def test_reflection_finding_generation_and_text_extraction():
     assert reflection._events_to_text(events) == (  # noqa: SLF001
         "User likes tea\ntriage alerts\nUser likes tea\ntriage alerts\nalpha\nbeta"
     )
-    assert reflection._parse_memory_field_value("User role is engineer") == (  # noqa: SLF001
-        "role",
-        "engineer",
-    )
-    assert reflection._parse_memory_field_value("No marker") is None  # noqa: SLF001
     assert reflection._event_evidence_id(_event("run", {}, id="event-id")) == "event-id"  # noqa: SLF001
 
 

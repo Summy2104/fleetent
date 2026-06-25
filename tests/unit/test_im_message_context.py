@@ -223,7 +223,7 @@ async def test_run_threads_session_context_to_tool(monkeypatch):
     )
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(al, "run_pipeline_from_conversation", AsyncMock())
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     monkeypatch.setattr(
         al,
@@ -313,7 +313,7 @@ async def test_run_threads_outbound_connectors_to_tool(monkeypatch):
     )
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(al, "run_pipeline_from_conversation", AsyncMock())
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     monkeypatch.setattr(
         al,

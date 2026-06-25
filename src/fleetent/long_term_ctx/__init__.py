@@ -3,7 +3,7 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Literal
+from typing import Any, Literal
 
 from fleetent import memory
 from fleetent.config import LongTermContextSettings, Settings
@@ -159,7 +159,10 @@ async def build_context(
         )
 
     policy = _resolve_policy(available_tokens)
-    memories = await memory.search(user_id, query, limit=_MEMORY_LIMIT)
+    # Retrieve across all subjects (user / agent / third parties). Each fact's
+    # statement names its subject explicitly, so the model can tell whose fact it
+    # is without us filtering by subject (which would hide agent/third-party facts).
+    memories = await memory.search_facts(user_id, query, limit=_MEMORY_LIMIT)
     knowledge_results = await _search_knowledge(
         user_id,
         query,
@@ -375,14 +378,37 @@ def _render_context(candidates: list[_ContextCandidate]) -> str:
     return "\n".join(lines)
 
 
-def _memory_candidate(memory_item: memory.MemoryItem) -> _ContextCandidate:
-    line = f"- {memory_item.content}"
+def _subject_phrase(subject: str) -> str:
+    """Render a fact subject as a possessive phrase for context lines.
+
+    'user' → "The user's"; 'agent' → "Your"; a named third party → "{name}'s".
+    """
+    if subject == "user":
+        return "The user's"
+    if subject == "agent":
+        return "Your"
+    return f"{subject}'s"
+
+
+def _memory_candidate(result: Any) -> _ContextCandidate:
+    """Build a context candidate from a facts SearchResult (fact + score).
+
+    Prefer the fact's ``statement`` — an LLM-written sentence with an explicit
+    subject ("用户的名字是 Xin") — so the model never mistakes a fact ABOUT the
+    user for one about itself.  Pre-statement rows (statement IS NULL) fall back
+    to a subject-qualified join of the triple.
+    """
+    fact = result.fact
+    if fact.statement:
+        line = f"- {fact.statement}"
+    else:
+        line = f"- {_subject_phrase(fact.subject)} {fact.relation}: {fact.object}"
     return _ContextCandidate(
         source=ContextSource(
             source_type="memory",
-            source_id=memory_item.id,
-            score=1.0,
-            metadata={"type": memory_item.type},
+            source_id=fact.fact_id,
+            score=result.score,
+            metadata={"relation": fact.relation},
             token_estimate=len(line),
         ),
         line=line,

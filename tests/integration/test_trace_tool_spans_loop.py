@@ -49,7 +49,7 @@ def mock_loop_env(monkeypatch):
     monkeypatch.setattr(loop_mod, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(loop_mod, "log_run", lambda *a, **kw: None)
     monkeypatch.setattr(loop_mod, "log", lambda *a, **kw: None, raising=False)
-    monkeypatch.setattr(loop_mod, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(loop_mod, "run_pipeline_from_conversation", AsyncMock())
     monkeypatch.setattr(loop_mod, "available_skills_prompt", lambda *a, **k: "")
     # get_risk_level feeds the trace's static "risk" field; evaluate_risk_level feeds the
     # gate decision (default low → ungated; reject-path tests override it below).
