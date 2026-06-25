@@ -3,9 +3,7 @@
 ## Purpose
 定义 `fleetent platform` CLI namespace — Platform/control-plane 的唯一本地 CLI 入口。
 涵盖 namespace 约束、serve 命令、upgrade 命令及角色术语分离约定。
-
 ## Requirements
-
 ### Requirement: Platform CLI namespace
 
 系统 SHALL 提供 `fleetent platform` 作为 Platform/control-plane 的唯一本地 CLI
@@ -14,6 +12,8 @@ SHALL 位于该 namespace 下。系统 SHALL NOT 提供 `fleetent admin` 兼容 
 
 `admin` 一词仍可作为权限角色、built-in admin 用户和 HTTP `/admin/*` 路径语义存在；本
 requirement 只约束 `fleetent` CLI namespace。
+
+`fleetent platform init-config` SHALL 接受 `--home <path>` 参数；未传入时默认用 `paths.base_dir()`（受 `FLEETENT_HOME` 控制），不再隐含 `cwd`。
 
 #### Scenario: Platform CLI dispatches
 
@@ -30,6 +30,11 @@ requirement 只约束 `fleetent` CLI namespace。
 
 - **WHEN** 调度到 `fleetent agent run`
 - **THEN** Platform CLI 实现模块未被 import
+
+#### Scenario: init-config 使用 --home 而非 cwd
+
+- **WHEN** operator 在任意目录运行 `fleetent platform init-config --home /opt/fleetent`
+- **THEN** `.env` 和 `platform.yaml` 在 `/opt/fleetent/` 下创建，当前工作目录不影响结果
 
 ### Requirement: Platform serve command
 
@@ -80,3 +85,4 @@ separate authorization model change explicitly migrates them.
 - **WHEN** operator 运行 `fleetent platform seed-builtin-admin`
 - **THEN** 系统创建或复用 built-in admin 用户
 - **AND** 用户 role 仍为 `built_in_admin`
+

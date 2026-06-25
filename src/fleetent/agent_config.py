@@ -827,13 +827,30 @@ def collect_env_var_names(agent: AgentFile) -> list[str]:
 
     Uses the flatten-all-*_env approach so every field — including embedding.api_key_env,
     rerank.api_key_env, telegram.bot_token_env, and any future *_env field — is captured
-    without manual enumeration. This is the single authoritative collector; node and
-    platform both call it.
+    without manual enumeration. MCP ``env`` / ``headers`` dict values may also reference
+    process env via ``env:VAR_NAME`` and must be collected as well. This is the single
+    authoritative collector; node and platform both call it.
     """
     seen: set[str] = set()
     ordered: list[str] = []
+
+    def add_name(name: str) -> None:
+        if name and name not in seen:
+            seen.add(name)
+            ordered.append(name)
+
     for key, value in flatten(agent.model_dump(mode="json")):
-        if key.endswith("_env") and isinstance(value, str) and value and value not in seen:
-            seen.add(value)
-            ordered.append(value)
+        if key.endswith("_env") and isinstance(value, str):
+            add_name(value)
+
+    for server in agent.model_dump(mode="json").get("mcp_servers", []):
+        if not isinstance(server, dict):
+            continue
+        for field_name in ("env", "headers"):
+            mapping = server.get(field_name)
+            if not isinstance(mapping, dict):
+                continue
+            for value in mapping.values():
+                if isinstance(value, str) and value.startswith("env:"):
+                    add_name(value.removeprefix("env:"))
     return sorted(ordered)
