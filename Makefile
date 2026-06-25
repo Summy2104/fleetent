@@ -91,6 +91,13 @@ platform-help: ## Show platform CLI help
 # which isolate FLEETENT_HOME themselves. Run each long-running service in its
 # own terminal. NOTE: always `python -m uvicorn` (a bare `uv run uvicorn`
 # resolves to a system uvicorn that can't import fleetent).
+#
+# FLEETENT_SECRET_KEY uses deferred `=` (NOT `:=`): it must be read from
+# .dev_secret_key when each recipe RUNS, not at parse time. `dev-reset` deletes
+# and regenerates the key mid-invocation (dev-clean → dev-bootstrap), so a
+# parse-time `:=` would capture the stale pre-reset key and node-provision would
+# encrypt the node service key with a key that no longer matches the file —
+# breaking platform ingress with "service key unavailable".
 FLEETENT_HOME ?= $(CURDIR)/.fleetent-dev
 DATABASE_URL  ?= sqlite:///$(FLEETENT_HOME)/management.db
 PLATFORM_PORT ?= 8765
@@ -103,7 +110,7 @@ $(DEV_TARGETS): export FLEETENT_HOME := $(FLEETENT_HOME)
 $(DEV_TARGETS): export DATABASE_URL := $(DATABASE_URL)
 $(DEV_TARGETS): export NODE_ID := $(NODE_ID)
 $(DEV_TARGETS): export NODE_PLATFORM_URL := $(NODE_PLATFORM_URL)
-$(DEV_TARGETS): export FLEETENT_SECRET_KEY := $(shell cat "$(FLEETENT_HOME)/.dev_secret_key" 2>/dev/null || true)
+$(DEV_TARGETS): export FLEETENT_SECRET_KEY = $(shell cat "$(FLEETENT_HOME)/.dev_secret_key" 2>/dev/null || true)
 $(DEV_TARGETS): export FLEETENT_FORWARDER_HOST_OVERRIDE := 127.0.0.1
 
 dev-bootstrap: ## Init dev home: migrate management DB + seed built-in admin + scaffold env files
