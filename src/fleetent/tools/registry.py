@@ -323,20 +323,25 @@ def dispatch(
     )
     # Agent-scoped MCP: route through the scope-keyed session, not the global closure.
     if is_mcp and mcp_scope is not None:
+        from fleetent.integrations.mcp import authorization as mcp_authz
         from fleetent.integrations.mcp import client as mcp_client
 
         server_id, tool_name = name.split(_MCP_SEP, 1)
         # Thread /exchange attribution (D0): same scope_key the global path carries via
         # the wrapper's tool_context, plus session_id/user_id for the ledger audit columns.
         principal = getattr(tool_context, "principal", None)
-        return mcp_client.call_tool(
+        # Bind a per-call authorization-link DM deliverer (Group 6 D8): the dispatch site
+        # holds the live connectors + requester address, so a per-user oauth no-token call
+        # can DM the link to the requester without coupling the MCP client to outbound.
+        return _call_mcp_with_authz(
+            mcp_client,
+            mcp_authz,
             server_id,
             tool_name,
             kwargs,
-            scope=mcp_scope,
-            scope_key=getattr(tool_context, "scope_key", None),
-            session_id=getattr(tool_context, "session_id", None),
-            user_id=getattr(principal, "user_id", None),
+            tool_context,
+            mcp_scope,
+            getattr(principal, "user_id", None),
         )
 
     if name not in _registry:
@@ -350,6 +355,11 @@ def dispatch(
 
     connector_meta = get_connector(name)
     if connector_meta is None:
+        # Global-scope MCP tools dispatch through their registered closure (not the
+        # mcp_scope branch above); bind the per-call authorization-link DM deliverer
+        # (Group 6, D8) here too so a no-token per-user oauth call DMs the requester.
+        if is_mcp and tool_context is not None:
+            return _run_global_mcp_with_authz(fn, kwargs, tool_context)
         return cast(ToolReturn, fn(**kwargs))
 
     from fleetent import connectors
@@ -369,6 +379,67 @@ def dispatch(
     # Inject the client out-of-band (keyword-only, excluded from the schema); it
     # is never written back into kwargs, so it cannot reach the return value or trace.
     return cast(ToolReturn, fn(**kwargs, client=cred.client))
+
+
+async def _call_mcp_with_authz(
+    mcp_client: Any,
+    mcp_authz: Any,
+    server_id: str,
+    tool_name: str,
+    kwargs: dict[str, Any],
+    tool_context: ToolContext | None,
+    mcp_scope: int,
+    user_id: str | None,
+) -> str:
+    """Run an agent-scoped MCP call with a per-call authorization-link DM deliverer bound.
+
+    Builds the deliverer from the live tool_context (connectors + requester address) and
+    binds it on the authorization seam for the duration of the call (Group 6 D8), so a
+    per-user oauth no-token call can privately DM the requester their authorization link.
+    The bind is task-local (ContextVar) and always reset, so concurrent calls never share a
+    deliverer. A None deliverer (no IM path) leaves the boot-level fallback in effect.
+    """
+    from fleetent.outbound import make_mcp_authz_deliverer
+
+    deliverer = make_mcp_authz_deliverer(tool_context) if tool_context is not None else None
+    token = mcp_authz.bind_call_deliverer(deliverer)
+    try:
+        result: str = await mcp_client.call_tool(
+            server_id,
+            tool_name,
+            kwargs,
+            scope=mcp_scope,
+            scope_key=getattr(tool_context, "scope_key", None),
+            session_id=getattr(tool_context, "session_id", None),
+            user_id=user_id,
+            # agent_name completes the per-user oauth token isolation triple (D1): one
+            # agent's user delegation is never reusable by another agent.
+            agent_id=getattr(tool_context, "agent_name", None),
+        )
+        return result
+    finally:
+        mcp_authz.reset_call_deliverer(token)
+
+
+async def _run_global_mcp_with_authz(
+    fn: Callable[..., Any], kwargs: dict[str, Any], tool_context: ToolContext
+) -> str:
+    """Run a global-scope MCP tool closure with a per-call authorization deliverer bound.
+
+    Mirrors :func:`_call_mcp_with_authz` for the global path: builds the DM deliverer from
+    the live tool_context, binds it task-locally for the call, and always resets it. The
+    MCP client reads the deliverer through its seam, so it never imports outbound itself.
+    """
+    from fleetent.integrations.mcp import authorization as mcp_authz
+    from fleetent.outbound import make_mcp_authz_deliverer
+
+    deliverer = make_mcp_authz_deliverer(tool_context)
+    token = mcp_authz.bind_call_deliverer(deliverer)
+    try:
+        result: str = await fn(**kwargs)
+        return result
+    finally:
+        mcp_authz.reset_call_deliverer(token)
 
 
 def _build_schema(fn: Callable[..., Any]) -> ToolSchema:

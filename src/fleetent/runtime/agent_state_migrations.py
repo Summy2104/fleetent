@@ -552,3 +552,29 @@ MIGRATIONS.append(
         " ON agent_memory_items (source, source_ref)",
     )
 )
+
+# ── v42: mcp_user_tokens (mcp-per-user-oauth2 slice 1) ───────────────────────
+# Standalone per-user MCP OAuth token store (D7). Isolation key is the
+# (user_id, agent_id, server_id) triple; access/refresh are stored as Fernet
+# ciphertext (never plaintext) via the shared secret_crypto helper. agent_id is
+# carried even though the file is already per-agent, so the triple matches the
+# resolver seam and a future shared library can reuse the same schema.
+MIGRATIONS.append(
+    (
+        MIGRATIONS[-1][0] + 1,
+        """
+        CREATE TABLE IF NOT EXISTS mcp_user_tokens (
+            user_id                 TEXT NOT NULL,
+            agent_id                TEXT NOT NULL,
+            server_id               TEXT NOT NULL,
+            access_token_ciphertext TEXT NOT NULL,
+            refresh_token_ciphertext TEXT,
+            expires_at              REAL,
+            scope                   TEXT,
+            created_at              TEXT NOT NULL,
+            updated_at              TEXT NOT NULL,
+            PRIMARY KEY (user_id, agent_id, server_id)
+        )
+        """,
+    )
+)
