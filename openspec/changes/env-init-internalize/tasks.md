@@ -1,7 +1,7 @@
-## 1. 修复 collect_env_var_names（MCP env: 引用）
+## 1. 修复 collect_env_var_names（MCP env: 和 headers: 引用）
 
-- [ ] 1.1 测试：`collect_env_var_names` 对含 `env: {"DB_URL": "env:MY_DATABASE_URL"}` 的 MCP server 返回 `MY_DATABASE_URL`（红）
-- [ ] 1.2 实现：在 `agent_config.py` 的 `collect_env_var_names` 中额外扫描 MCP server `env` dict，提取 `"env:"` 前缀值的变量名，合并去重
+- [ ] 1.1 测试：`collect_env_var_names` 对含 `env: {"DB_URL": "env:MY_DATABASE_URL"}` 的 MCP server 返回 `MY_DATABASE_URL`；对含 `headers: {"Authorization": "env:MY_TOKEN"}` 的 http MCP server 返回 `MY_TOKEN`；纯值（无 `env:` 前缀）不被收集（红）
+- [ ] 1.2 实现：在 `agent_config.py` 的 `collect_env_var_names` 中额外扫描 MCP server 的 `env` dict **和 `headers` dict**，提取 `"env:"` 前缀值的变量名，与 `*_env` 结果合并去重
 - [ ] 1.3 测试通过（绿）；运行 `uv run pytest tests/unit -q` 确认无新增失败
 
 ## 2. platform init-config 支持 --home
@@ -25,7 +25,7 @@
 ## 5. 更新四个 .env.example 文件
 
 - [ ] 5.1 `.env.example`（平台）：删除 `FLEETENT_AUTO_UPGRADE`、`MICROSANDBOX_URL`；加注释区分"平台服务端"与"TUI 客户端"两区块；确认 `FLEETENT_FORWARDER_HOST_OVERRIDE` 不在此文件（node 级变量）
-- [ ] 5.2 `agents/default/.env.example`（agent）：补充 `FLEETENT_TUI_TOKEN=`（注明自动生成）；删除 `PERMISSION_GATE_*`、`CONTEXT_*`；补充 MCP `env:VAR` 使用说明注释
+- [ ] 5.2 `agents/default/.env.example`（agent）：补充 `FLEETENT_TUI_TOKEN=`（注明自动生成）；删除 `PERMISSION_GATE_*`、`CONTEXT_*`；补充 MCP `env:VAR`（含 `env:` 和 `headers:` 两处）使用说明注释；加注释提示"启用 `web_search` 工具时手动补 `SEARXNG_URL=`"（硬编码 env var，物化器不自动补，见 design Open Questions）
 - [ ] 5.3 `kb-worker.env.example`：将生产路径（`/var/lib/fleetent/`）改为 dev 友好注释，提供 dev 默认值示例（`sqlite:///$(FLEETENT_HOME)/management.db`）；补充 `FLEETENT_HOME` 须由进程环境提供的说明
 - [ ] 5.4 `node.env.example`：补充 `FLEETENT_FORWARDER_HOST_OVERRIDE=`；`FLEETENT_NODE_PLATFORM_URL` 端口保持 8765（文档约定）
 

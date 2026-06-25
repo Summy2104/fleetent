@@ -49,17 +49,23 @@ SHALL NOT 出现在任何 `.env.example` 模板中。
 
 ### Requirement: collect_env_var_names 覆盖 MCP stdio env: 引用
 
-`collect_env_var_names` SHALL 除收集所有 `*_env` 字段外，还收集 MCP server `env:` dict 中
-以 `"env:"` 前缀开头的值所引用的变量名（截取前缀后的部分）。结果 SHALL 与 `*_env` 收集结果
-合并去重、排序后返回。
+`collect_env_var_names` SHALL 除收集所有 `*_env` 字段外，还收集 MCP server **`env:` dict
+和 `headers:` dict** 中以 `"env:"` 前缀开头的值所引用的变量名（截取前缀后的部分）。结果
+SHALL 与 `*_env` 收集结果合并去重、排序后返回。
 
-此行为与 `mcp/client.py` 的 `_resolve_env_ref` 逻辑一致，确保 MCP stdio 服务的环境变量
-引用在 agent `.env` scaffold 中有对应占位。
+此行为与 `mcp/client.py` 的 `_resolve_env_ref` 逻辑一致——该解析器同时作用于 stdio
+`env:` 值（`_subprocess_env`）和 http `headers:` 值（`_http_headers`），两处的 `env:`
+引用都 SHALL 被收集，确保 MCP 服务的环境变量引用在 agent `.env` scaffold 中有对应占位。
 
-#### Scenario: MCP env:VAR 引用被收集
+#### Scenario: MCP env:VAR 引用被收集（stdio env）
 
 - **WHEN** agent.yaml 中某 MCP server 配置 `env: {DB_URL: "env:MY_DATABASE_URL"}`
 - **THEN** `collect_env_var_names` 返回值包含 `MY_DATABASE_URL`
+
+#### Scenario: MCP headers 中的 env:VAR 引用被收集（http headers）
+
+- **WHEN** agent.yaml 中某 MCP server 配置 `headers: {Authorization: "env:MY_TOKEN"}`
+- **THEN** `collect_env_var_names` 返回值包含 `MY_TOKEN`
 
 #### Scenario: MCP env 纯值不被误收集
 

@@ -23,6 +23,12 @@
 - 不处理 node `init-config` 生成 service key（service key 仍由 `dev_node_provision.py` 负责）
 - 不修改 `ensure_env_scaffold` 的值注入逻辑（只修收集逻辑）
 - 不引入自动端口冲突检测
+- **不为 Agent `.env` 引入 copy-from-example 路径**：Agent `.env` 始终是 materialize 的部署
+  产物（DB authored 定义 + secret_store → `ensure_env_scaffold`/`_seed_env` 物化），`init-config`
+  的 copy-from-example 模式**只适用于三个基础设施服务**（platform/node/kb-worker，这些是
+  operator 自己作权威的进程配置）。`agents/default/.env.example` 仅作人工参考模板，无任何代码
+  copy 它；本 change 对它的修改是文档对齐，不改变其"非权威"地位。
+- **不引入"工具/特性声明自身所需 env var"的机制**：见 Open Questions 中的硬编码 env var 盲区。
 
 ## Decisions
 
@@ -40,7 +46,11 @@
 
 MCP stdio 的 `env:` 块是 `dict[str, str]`，值若以 `"env:"` 前缀开头则表示从进程环境解析（`client.py:539`）。
 
-**决定**：在 `collect_env_var_names` 中，对 `model_dump()` 结果额外扫描 MCP server `env` dict 的 value，提取 `"env:"` 前缀后的变量名，与 `*_env` 字段结果合并去重。
+**决定**：在 `collect_env_var_names` 中，对 `model_dump()` 结果额外扫描 MCP server 的 `env`
+dict **和 `headers` dict** 的 value，提取 `"env:"` 前缀后的变量名，与 `*_env` 字段结果合并去重。
+`headers` 必须一并扫描——`_resolve_env_ref` 在 `client.py` 中同时作用于 stdio `env:` 值
+（`_subprocess_env`，line 575）和 http `headers:` 值（`_http_headers`，line 703），漏掉 headers
+会导致用 `env:` 引用鉴权头的 http MCP server 的密钥占位缺失。
 
 不修改 `_env_var_names` 在 `materialize.py` 中的调用路径——两者共用 `collect_env_var_names`，自然生效。
 
@@ -64,7 +74,28 @@ MCP stdio 的 `env:` 块是 `dict[str, str]`，值若以 `"env:"` 前缀开头�
 
 - **端口改动影响现有 dev 实例**：已经跑起来的 `.fleetent-dev/node/.env` 里的 `FLEETENT_NODE_PLATFORM_URL` 指向旧端口（8771/8770），需要 `--force` 重新 provision。这是 dev-only 影响，文档说明即可。
 
-- **`collect_env_var_names` 扩展的 MCP env: 覆盖范围**：只有 value 严格以 `"env:"` 开头的才被收集，与 `client.py` 的解析逻辑完全一致。空字符串或纯值不受影响。
+- **`collect_env_var_names` 扩展的 MCP env:/headers: 覆盖范围**：只有 `env` 和 `headers` 两个 dict 中 value 严格以 `"env:"` 开头的才被收集，与 `client.py` 的解析逻辑完全一致。空字符串或纯值不受影响。
+
+## Open Questions
+
+### 硬编码 env var 盲区（结构性，超出本 change）
+
+部分 env var 由工具/特性**硬编码名字直接读取**，从不在 `agent.yaml` 中以 `*_env` 字段或
+`env:` 引用形式声明，因此 `collect_env_var_names`（flatten + `*_env` + MCP `env:`/`headers:`）
+**结构上无法捕获**：
+
+- `SEARXNG_URL`：`web_search` 工具的 `availability` lambda 与函数体直接 `os.getenv("SEARXNG_URL")`
+  （`tools/web_tools.py:126,137`）。这是合法的自托管生产变量（符合内网原则）。
+- `FLEETENT_REFLECTION_REAL_SKILL_DRAFT`（`reflection/reflection.py:1820`）及 `FLEETENT_EVAL_*`
+  系列：纯 dev / 评估开关，不属于任何部署模板。
+
+**本 change 的处置**：
+- `SEARXNG_URL` → 在 `agents/default/.env.example` 加注释，提示"启用 `web_search` 工具时手动
+  补 `SEARXNG_URL=`"。不塞进物化器（无声明机制，硬编码会很 hacky）。
+- eval / reflection flag → 不进任何 `.env.example`（dev-only）。
+
+**遗留架构问题（不在本 change 解决）**：缺少"工具/特性声明自身所需 env var"的统一机制。
+若未来工具的环境依赖增多，应考虑让 `@tool` 注册声明所需 env var 名，由物化器据此补全占位。
 
 ## Migration Plan
 
