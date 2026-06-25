@@ -34,12 +34,12 @@
 
 ## 5. stdio per-user 子进程池与生命周期
 
-- [ ] 5.1 (test, unit) per-user 子进程键与复用:不同用户不同子进程、同用户复用;token 注入子进程 env(stub spawn)
-- [ ] 5.2 (test, unit) owner-task 生命周期:每子进程唯一 owner task,enter/exit 同 task;回收经向 owner task 发信号(stop 定向)完成,不跨 task 拆栈
-- [ ] 5.3 (test, unit) token 过期/401 重启:子进程寿命≤token 有效期,过期或 401 用刷新后 token 重启后重试
-- [ ] 5.4 (test, unit) 上限与回收:空闲超时回收;总量上限 + 每用户上限,驱逐记日志(非静默);孤儿清理钩子
-- [ ] 5.5 (impl) 实现 stdio per-user 子进程池(spawn/复用/路由)、owner-task 持有与定向取消、过期重启、空闲回收、上限驱逐、孤儿清理
-- [ ] 5.6 (test, unit) 关停舱壁化:逐子进程独立超时收尾,单点失败只记日志、不改优雅退出码
+- [x] 5.1 (test, unit) per-user 子进程键与复用:不同用户不同子进程、同用户复用;token 注入子进程 env(stub spawn)
+- [x] 5.2 (test, unit) owner-task 生命周期:每子进程唯一 owner task,enter/exit 同 task;回收经向 owner task 发信号(stop 定向)完成,不跨 task 拆栈
+- [x] 5.3 (test, unit) token 过期/401 重启:子进程寿命≤token 有效期,过期或 401 用刷新后 token 重启后重试
+- [x] 5.4 (test, unit) 上限与回收:空闲超时回收;总量上限 + 每用户上限,驱逐记日志(非静默);孤儿清理钩子
+- [x] 5.5 (impl) 实现 stdio per-user 子进程池(spawn/复用/路由)、owner-task 持有与定向取消、过期重启、空闲回收、上限驱逐、孤儿清理
+- [x] 5.6 (test, unit) 关停舱壁化:逐子进程独立超时收尾,单点失败只记日志、不改优雅退出码
 
 ## 6. 无 token 触发授权 + 链接投递(standalone)
 

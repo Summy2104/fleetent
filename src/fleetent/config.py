@@ -204,6 +204,10 @@ class McpOAuthSettings(BaseModel):
     # authorization_code-only fields (ignored by client_credentials).
     authorization_endpoint: str = ""
     redirect_path: str = ""
+    # stdio per-user oauth (mcp-per-user-oauth2 D4): env var name the user's access token is
+    # injected under at subprocess spawn. Empty → the runtime default. http transports and
+    # client_credentials ignore it.
+    token_env: str = ""
 
     @model_validator(mode="after")
     def _require_authorization_code_fields(self) -> "McpOAuthSettings":

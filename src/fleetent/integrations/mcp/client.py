@@ -22,6 +22,7 @@ import copy
 import json
 import logging
 import os
+import time
 from collections.abc import Callable, Generator
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
@@ -64,6 +65,20 @@ _active_sessions: dict[SessionKey, Any] = {}  # session key -> ClientSession
 # the process on teardown (2026-06-11 graceful-shutdown crash).
 _session_hosts: dict[SessionKey, _SessionHost] = {}
 _HOST_CLOSE_TIMEOUT = 5.0  # seconds to await a host's graceful teardown before cancelling
+
+# stdio per-user subprocess pool sizing/lifetime (mcp-per-user-oauth2 D4). Injectable so
+# tests drive tiny values; production defaults keep the PID/memory footprint bounded since
+# a per-user stdio server costs one subprocess per (user × server).
+_STDIO_IDLE_TIMEOUT = 600.0  # seconds a per-user stdio host may sit idle before reaping
+_STDIO_MAX_TOTAL = 64  # global cap on live per-user stdio subprocesses
+_STDIO_MAX_PER_USER = 8  # per-user cap on live per-user stdio subprocesses (across servers)
+_STDIO_REAP_INTERVAL = 60.0  # background reaper sweep cadence
+
+
+def _stdio_clock() -> float:
+    """Monotonic time source for the stdio pool (idle/LRU/expiry); patched in tests."""
+    return time.monotonic()
+
 
 _MAX_TOOL_PAGES = 100  # tools/list pagination safety cap: stop following nextCursor past this
 
@@ -121,6 +136,11 @@ class McpServerConfig:
     oauth_grant: str = "client_credentials"
     authorization_endpoint: str = ""
     redirect_path: str = ""
+    # stdio per-user oauth (mcp-per-user-oauth2 D4): env var name the user's access token is
+    # injected under at subprocess spawn. Empty → the module default _DEFAULT_STDIO_TOKEN_ENV.
+    # Only consulted for a per-user oauth stdio server; every other server ignores it entirely
+    # (no token var is ever injected), so plain stdio env stays byte-identical.
+    token_env: str = ""
     # stdio fields
     command: str = ""  # e.g. "npx" or "python"
     args: list[str] = field(
@@ -192,11 +212,13 @@ class McpServerConfig:
             oauth_grant = getattr(auth, "grant", "client_credentials") or "client_credentials"
             authorization_endpoint = getattr(auth, "authorization_endpoint", "")
             redirect_path = getattr(auth, "redirect_path", "")
+            token_env = getattr(auth, "token_env", "")
         else:
             auth_type = getattr(s, "auth_type", "none")
             token_url = client_id = client_secret_env = scope = ""
             oauth_grant = "client_credentials"
             authorization_endpoint = redirect_path = ""
+            token_env = ""
         return cls(
             id=s.id,
             transport=s.transport,
@@ -210,6 +232,7 @@ class McpServerConfig:
             oauth_grant=oauth_grant,
             authorization_endpoint=authorization_endpoint,
             redirect_path=redirect_path,
+            token_env=token_env,
             command=getattr(s, "command", ""),
             args=list(getattr(s, "args", []) or []),
             env=dict(getattr(s, "env", {}) or {}),
@@ -394,6 +417,27 @@ def _session_key(server: McpServerConfig, scope: int | None, user_id: str | None
     return (scope, server.id)
 
 
+# Default env var name a per-user oauth stdio server's access token is injected under when
+# the config leaves `token_env` empty (mcp-per-user-oauth2 D4). Only ever set for per-user
+# oauth stdio subprocesses; plain stdio servers never see it.
+_DEFAULT_STDIO_TOKEN_ENV = "MCP_OAUTH_ACCESS_TOKEN"
+
+
+def _stdio_token_env_name(server: McpServerConfig) -> str:
+    """The env var name a per-user oauth stdio server's access token spawns under."""
+    return server.token_env or _DEFAULT_STDIO_TOKEN_ENV
+
+
+def _is_per_user_stdio(server: McpServerConfig) -> bool:
+    """Whether a server is a per-user oauth server on the stdio transport (D4).
+
+    Only these servers get the per-user subprocess pool: token-into-env injection, the
+    pool caps, idle reaping, expiry/401 restart, and orphan cleanup. Every other server
+    (plain stdio, http per-user, http/sse machine-identity) is untouched by all of it.
+    """
+    return server.transport == "stdio" and _is_per_user_oauth(server)
+
+
 def _call_window_lock_for(server: McpServerConfig, user_id: str | None) -> asyncio.Lock:
     """The call-window lock to serialize a server's product-dir diff window under (D2).
 
@@ -515,6 +559,123 @@ async def aclose_all() -> None:
         await asyncio.gather(*(_close_host(h) for h in hosts), return_exceptions=True)
 
 
+# === mcp-per-user-oauth2 (D4): per-user stdio subprocess pool lifecycle =======
+
+
+def _is_per_user_stdio_key(key: SessionKey) -> bool:
+    """Whether a live-session key belongs to a per-user oauth stdio host.
+
+    The pool caps / reaper / orphan cleanup operate only on per-user stdio hosts; a
+    3-tuple key whose registered server is per-user stdio identifies one. http per-user
+    hosts (also 3-tuple) and every 2-tuple plain key are deliberately left out.
+    """
+    if len(key) != 3:
+        return False
+    server = _server_registry.get((key[0], key[1]))
+    return server is not None and _is_per_user_stdio(server)
+
+
+def _per_user_stdio_host_items() -> list[tuple[SessionKey, _SessionHost]]:
+    """All live (key, host) pairs that are per-user oauth stdio hosts."""
+    return [(k, h) for k, h in _session_hosts.items() if _is_per_user_stdio_key(k)]
+
+
+async def _evict_host(key: SessionKey, reason: str) -> None:
+    """Drop one host from the pool and tear it down on its own owner task (logged).
+
+    The host owns its transport's cancel scope, so eviction is a close-signal (via
+    ``_close_host``) — never a cross-task unwind. Always logged so a cap-driven drop is
+    never silent. Removing the registry handle first makes the slot immediately reusable.
+    """
+    host = _session_hosts.pop(key, None)
+    _active_sessions.pop(key, None)
+    if host is None:
+        return
+    logger.warning("mcp_stdio_evict key=%r reason=%s", key, reason)
+    await _close_host(host)
+
+
+async def _enforce_stdio_caps(server: McpServerConfig, user_id: str | None) -> None:
+    """Evict LRU per-user stdio host(s) so spawning one more honors the pool caps (D4).
+
+    Enforces the per-user cap first (LRU among the same user's hosts), then the global
+    total cap (LRU across all per-user stdio hosts). Eviction frees one slot for the
+    impending spawn; each drop is logged (never silent). Only per-user stdio hosts are
+    counted — plain/http hosts are exempt.
+    """
+    items = _per_user_stdio_host_items()
+    # Per-user cap: count this user's live hosts; evict the oldest until one slot is free.
+    user_items = sorted(
+        (it for it in items if it[1].user_id == user_id), key=lambda it: it[1].last_used
+    )
+    while len(user_items) >= _STDIO_MAX_PER_USER:
+        key, _ = user_items.pop(0)
+        await _evict_host(key, "per_user_cap")
+    # Total cap: recount (eviction may have changed the set) and evict global LRU.
+    items = sorted(_per_user_stdio_host_items(), key=lambda it: it[1].last_used)
+    while len(items) >= _STDIO_MAX_TOTAL:
+        key, _ = items.pop(0)
+        await _evict_host(key, "total_cap")
+
+
+async def _reap_idle_stdio_hosts() -> None:
+    """Reap per-user stdio hosts idle past the timeout (background reaper sweep, D4).
+
+    A host is reaped by signaling its owner task to close (``_close_host``) — the owner
+    task runs its own teardown so enter/exit stay on the same task (no cross-task unwind).
+    Best-effort and contained: a single reap failure never aborts the sweep.
+    """
+    now = _stdio_clock()
+    stale = [k for k, h in _per_user_stdio_host_items() if now - h.last_used >= _STDIO_IDLE_TIMEOUT]
+    for key in stale:
+        await _evict_host(key, "idle_timeout")
+
+
+async def cleanup_orphan_stdio_hosts() -> None:
+    """Tear down every per-user stdio host (orphan-cleanup hook, D4).
+
+    Wired into agent shutdown / abnormal-exit cleanup so per-user subprocesses do not
+    outlive the agent. Each host closes on its own owner task; failures are contained so
+    one stuck subprocess never blocks the rest or changes the exit code.
+    """
+    keys = [k for k, _ in _per_user_stdio_host_items()]
+    for key in keys:
+        await _evict_host(key, "orphan_cleanup")
+
+
+_stdio_reaper_task: asyncio.Task[None] | None = None
+
+
+async def _stdio_reaper_loop() -> None:
+    """Periodic reaper loop: sweep idle per-user stdio hosts on the reap interval."""
+    while True:
+        await asyncio.sleep(_STDIO_REAP_INTERVAL)
+        try:
+            await _reap_idle_stdio_hosts()
+        except Exception as exc:  # noqa: BLE001 — a sweep failure must not kill the reaper
+            logger.warning("mcp_stdio_reap_failed error=%s", exc)
+
+
+def start_stdio_reaper() -> None:
+    """Start the background idle-reaper task (idempotent); wired at agent boot."""
+    global _stdio_reaper_task
+    if _stdio_reaper_task is not None and not _stdio_reaper_task.done():
+        return
+    _stdio_reaper_task = asyncio.ensure_future(_stdio_reaper_loop())
+
+
+async def stop_stdio_reaper() -> None:
+    """Stop the background reaper task (best-effort, bounded); wired at shutdown."""
+    global _stdio_reaper_task
+    task = _stdio_reaper_task
+    _stdio_reaper_task = None
+    if task is None:
+        return
+    task.cancel()
+    with contextlib.suppress(BaseException):
+        await asyncio.gather(task, return_exceptions=True)
+
+
 async def register_all(
     servers: list[McpServerConfig],
     scope: int | None = None,
@@ -632,16 +793,27 @@ def _convention_env(server: McpServerConfig, agent_home: Path) -> dict[str, str]
     }
 
 
-def _subprocess_env(server: McpServerConfig, agent_home: Path | None = None) -> dict[str, str]:
+def _subprocess_env(
+    server: McpServerConfig,
+    agent_home: Path | None = None,
+    user_id: str | None = None,
+    agent_id: str | None = None,
+) -> dict[str, str]:
     """Environment for a stdio MCP subprocess (mcp-stdio-isolation).
 
-    Merge order is safe host whitelist < convention injection < explicitly declared env.
-    The convention layer (unified-file-exchange) points the server's XDG dirs at its
-    ``<agent_home>/exchange/<id>`` partition tree so its products land in the addressable
-    ``/exchange`` namespace; an explicitly configured XDG is adopted in place (it wins).
-    ``file_isolation: "off"`` or a missing ``agent_home`` skips the convention (the latter
-    keeps legacy call sites byte-identical). The full platform environment is never
-    inherited; ``env:VAR_NAME`` values resolve from the parent process environment.
+    Merge order is safe host whitelist < convention injection < explicitly declared env <
+    per-user oauth token. The convention layer (unified-file-exchange) points the server's
+    XDG dirs at its ``<agent_home>/exchange/<id>`` partition tree so its products land in
+    the addressable ``/exchange`` namespace; an explicitly configured XDG is adopted in
+    place (it wins). ``file_isolation: "off"`` or a missing ``agent_home`` skips the
+    convention (the latter keeps legacy call sites byte-identical). The full platform
+    environment is never inherited; ``env:VAR_NAME`` values resolve from the parent
+    process environment.
+
+    For a per-user oauth stdio server (mcp-per-user-oauth2 D4) the calling user's *current*
+    access token is injected under ``token_env`` (or the default name) at spawn so the
+    subprocess authenticates as that user; refresh is by re-spawn, never in-place mutation.
+    Every other server gets no token var at all, so its env stays byte-identical.
     """
     resolved = {k: _resolve_env_ref(v) for k, v in server.env.items()}
     convention = (
@@ -649,7 +821,12 @@ def _subprocess_env(server: McpServerConfig, agent_home: Path | None = None) -> 
         if agent_home is not None and server.file_isolation != "off"
         else {}
     )
-    return {**_safe_base_env(), **convention, **resolved}
+    env = {**_safe_base_env(), **convention, **resolved}
+    if _is_per_user_stdio(server) and user_id is not None:
+        token = resolve_user_token(server.id, user_id, agent_id)
+        if token is not None and token.access_token:
+            env[_stdio_token_env_name(server)] = token.access_token
+    return env
 
 
 def _convention_applies(server: McpServerConfig, agent_home: Path | None) -> bool:
@@ -657,13 +834,18 @@ def _convention_applies(server: McpServerConfig, agent_home: Path | None) -> boo
     return agent_home is not None and server.file_isolation != "off"
 
 
-def _stdio_params(server: McpServerConfig) -> StdioServerParameters:
+def _stdio_params(
+    server: McpServerConfig, user_id: str | None = None, agent_id: str | None = None
+) -> StdioServerParameters:
     """Build the stdio subprocess parameters, applying the /exchange convention.
 
     When the server carries an `_agent_home` (set at registration) and isolation is on,
     the subprocess runs in its partition root `<agent_home>/exchange/<id>` (created here
     so the spawn never fails on a missing cwd) with the convention XDG triple injected.
     Otherwise the legacy params (no cwd, no convention) are produced byte-identically.
+
+    ``user_id`` / ``agent_id`` drive the per-user oauth token-into-env injection (D4) and
+    are ignored (no token var) for every non-per-user-oauth stdio server.
     """
     agent_home = server._agent_home
     cwd: str | None = None
@@ -675,7 +857,7 @@ def _stdio_params(server: McpServerConfig) -> StdioServerParameters:
     return StdioServerParameters(
         command=server.command,
         args=server.args,
-        env=_subprocess_env(server, agent_home),
+        env=_subprocess_env(server, agent_home, user_id, agent_id),
         cwd=cwd,
     )
 
@@ -874,7 +1056,7 @@ def _transport_cm(
     build an equivalent client from the existing headers/auth so their behavior is unchanged.
     """
     if server.transport == "stdio":
-        return stdio_client(_stdio_params(server))
+        return stdio_client(_stdio_params(server, user_id, agent_id))
     # Per-server timeouts map onto the SDK transport: connect_timeout governs the
     # connection / request POST (`timeout`), call_timeout the streamed tool-result read
     # (`sse_read_timeout`) — the long-lived session means both are set once, at open.
@@ -932,11 +1114,19 @@ class _SessionHost:
     The transport + ClientSession context managers are entered and exited inside
     ``task`` only; other tasks interact through ``session`` (consume) and ``close_event``
     (request teardown), never by entering/exiting the contexts themselves.
+
+    The pool-bookkeeping fields are only meaningful for a per-user oauth stdio host
+    (mcp-per-user-oauth2 D4): ``last_used`` drives idle reaping + LRU eviction,
+    ``token_expires_at`` bounds the subprocess lifetime to its token's validity, and
+    ``user_id`` keys the per-user cap. They are inert for every other host.
     """
 
     task: asyncio.Task[None]
     close_event: asyncio.Event
     session: Any = None
+    last_used: float = 0.0
+    token_expires_at: float | None = None
+    user_id: str | None = None
 
 
 async def _host_session(
@@ -991,6 +1181,12 @@ async def _open_session_for(
     ``agent_id``, binds that user's per-request bearer auth on the http transport.
     """
     key = _session_key(server, scope, user_id)
+    # Per-user oauth stdio only: honor the pool caps before spawning a new subprocess, so a
+    # new user/server cannot push the live count past the global / per-user limit. Eviction
+    # closes the LRU host(s) on their own owner task (signal, never cross-task unwind) and
+    # logs — never a silent drop. Reusing an existing key (same user) is not a new spawn.
+    if _is_per_user_stdio(server) and key not in _session_hosts:
+        await _enforce_stdio_caps(server, user_id)
     headers = {} if server.transport == "stdio" else await _http_headers(server)
     loop = asyncio.get_event_loop()
     ready: asyncio.Future = loop.create_future()
@@ -1007,9 +1203,33 @@ async def _open_session_for(
         with contextlib.suppress(BaseException):
             await asyncio.gather(task, return_exceptions=True)
         raise
-    _session_hosts[key] = _SessionHost(task=task, close_event=close_event, session=session)
+    now = _stdio_clock()
+    token_expiry = _stdio_token_expiry(server, user_id, agent_id)
+    _session_hosts[key] = _SessionHost(
+        task=task,
+        close_event=close_event,
+        session=session,
+        last_used=now,
+        token_expires_at=token_expiry,
+        user_id=user_id,
+    )
     _active_sessions[key] = session
     return session
+
+
+def _stdio_token_expiry(
+    server: McpServerConfig, user_id: str | None, agent_id: str | None
+) -> float | None:
+    """Absolute expiry to bound a per-user stdio host's lifetime, else None (D4).
+
+    Reads the token the subprocess just spawned with so the pool can pre-empt a call once
+    that token has expired (re-spawn with a refreshed token). None for every non-per-user
+    stdio host (no lifetime bound) or when the token carries no expiry.
+    """
+    if not _is_per_user_stdio(server) or user_id is None:
+        return None
+    token = resolve_user_token(server.id, user_id, agent_id)
+    return token.expires_at if token is not None else None
 
 
 async def _register_session_server(server: McpServerConfig, scope: int | None = None) -> None:
@@ -1425,6 +1645,55 @@ async def _reopen_session(
         return None
 
 
+def _is_401_error(exc: BaseException) -> bool:
+    """Whether an exception is an HTTP 401 (Unauthorized) — the token-rejected signal (D4)."""
+    return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 401
+
+
+def _stdio_token_expired(server: McpServerConfig, key: SessionKey) -> bool:
+    """Whether a per-user stdio host's spawn token has passed its expiry (D4).
+
+    A subprocess authenticates with the token baked into its env at spawn; once that token
+    expires the subprocess is stale and MUST be re-spawned with a refreshed token. False
+    for any non-per-user-stdio host or a host with no known expiry.
+    """
+    if not _is_per_user_stdio(server):
+        return False
+    host = _session_hosts.get(key)
+    if host is None or host.token_expires_at is None:
+        return False
+    return _stdio_clock() >= host.token_expires_at
+
+
+async def _restart_stdio_for_fresh_token(
+    server: McpServerConfig, scope: int | None, user_id: str | None, agent_id: str | None
+) -> Any | None:
+    """Re-spawn a per-user stdio subprocess so it picks up the store's *current* token (D4).
+
+    Closes the stale host on its owner task and re-opens, re-resolving the token at spawn
+    (the store may already hold a refreshed token from Group 6/7's refresh; if it does not,
+    the new subprocess simply spawns with whatever the store currently holds and the call
+    degrades downstream). Returns the new session, or None when the re-spawn failed.
+    """
+    key = _session_key(server, scope, user_id)
+    old = _session_hosts.pop(key, None)
+    _active_sessions.pop(key, None)
+    if old is not None:
+        await _close_host(old)
+    try:
+        return await _open_session_for(server, scope, user_id, agent_id)
+    except Exception as exc:  # noqa: BLE001 — re-spawn failure → caller degrades
+        logger.warning("mcp_stdio_restart_failed server_id=%s error=%s", server.id, exc)
+        return None
+
+
+def _touch_host(key: SessionKey) -> None:
+    """Mark a host as just used (drives idle reaping + LRU eviction); no-op if absent."""
+    host = _session_hosts.get(key)
+    if host is not None:
+        host.last_used = _stdio_clock()
+
+
 def _result_to_text(result: Any) -> str:
     """Normalize an SDK CallToolResult into the agent-facing text (base64 never inlined)."""
     return _normalize_tool_result(
@@ -1596,6 +1865,15 @@ async def _call_via_session_inner(
         args = _translate_workspace_args(args, host_workspace_dir(scope_key))
 
     key = _session_key(server, scope, user_id)
+    # Per-user stdio: a subprocess outlives its token only until the token expires; pre-empt
+    # the call by re-spawning with the store's current (refreshed) token so the subprocess
+    # never authenticates with a stale token (D4).
+    if (
+        _stdio_token_expired(server, key)
+        and await _restart_stdio_for_fresh_token(server, scope, user_id, None) is None
+    ):
+        set_health(server, HealthState.unavailable)
+        return _unavailable_result(server_id)
     session = _active_sessions.get(key)
     if session is None:
         session = await _reopen_session(server, scope, user_id)
@@ -1615,6 +1893,25 @@ async def _call_via_session_inner(
         oauth_degraded = _oauth_degraded_result(server, exc)
         if oauth_degraded is not None:
             return oauth_degraded
+        # Per-user stdio 401: the subprocess's token was rejected — re-spawn with the
+        # store's current (refreshed) token and retry once (D4) before any degrade.
+        if _is_per_user_stdio(server) and _is_401_error(exc):
+            restarted = await _restart_stdio_for_fresh_token(server, scope, user_id, None)
+            if restarted is None:
+                set_health(server, HealthState.unavailable)
+                return _unavailable_result(server_id)
+            try:
+                result = await restarted.call_tool(tool_name, args)
+            except Exception as retry_exc:  # noqa: BLE001 — restart+retry failed → degrade
+                logger.warning(
+                    "mcp_stdio_401_retry_failed server_id=%s error=%s", server_id, retry_exc
+                )
+                set_health(server, HealthState.unavailable)
+                return _unavailable_result(server_id)
+            reset_health(server)
+            _touch_host(key)
+            text = _result_to_text(result)
+            return _rewrite_result_paths(server_id, text, scope_key, session_id, user_id)
         if not _is_disconnect_error(exc):
             raise
         new_session = await _reopen_session(server, scope, user_id)
@@ -1631,6 +1928,7 @@ async def _call_via_session_inner(
             set_health(server, HealthState.unavailable)
             return _unavailable_result(server_id)
         reset_health(server)  # retry succeeded → server is healthy again
+    _touch_host(key)
     text = _result_to_text(result)
     return _rewrite_result_paths(server_id, text, scope_key, session_id, user_id)
 

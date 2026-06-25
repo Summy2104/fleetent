@@ -148,6 +148,9 @@ async def _drain_and_close(rt: AgentRuntime, drain_timeout: float) -> None:
         _logger.warn("agent_drain_timed_out", active_runs_remaining=_loop._active_runs)
     else:
         _logger.info("agent_drain_completed")
+    # Stop the per-user stdio reaper before releasing sessions; aclose_all() then tears
+    # down every host (incl. per-user stdio subprocesses) on its own owner task (D4).
+    await _stop_step("mcp_stdio_reaper", mcp.stop_stdio_reaper())
     await _stop_step("mcp_sessions", mcp.aclose_all())
 
 
@@ -420,6 +423,9 @@ async def _start_infra(
             await mcp_client.register_all(
                 configs, agent_home=data_dir.parent, tool_naming=agent.mcp.tool_naming
             )
+            # mcp-per-user-oauth2 D4: start the idle-reaper for the per-user stdio
+            # subprocess pool (no-op unless a per-user oauth stdio server is configured).
+            mcp_client.start_stdio_reaper()
         except Exception as exc:  # noqa: BLE001 — MCP unavailable must not abort boot
             _logger.warn("agent_runtime_mcp_register_failed", error=str(exc))
     session_mgr.start_session_maintenance()
