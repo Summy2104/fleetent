@@ -552,3 +552,12 @@ MIGRATIONS.append(
         " ON agent_memory_items (source, source_ref)",
     )
 )
+
+# ── v42-v46: user memory facts (user-memory-v2) ──────────────────────────────
+# Three-tuple (subject, relation, object) facts replace free-text memory_items.
+# facts_migrations.py holds the schema; appended here to share the single
+# PRAGMA user_version stamp on agent_state.db.
+from fleetent.memory.facts_migrations import FACTS_MIGRATIONS as _FACTS_MIGRATIONS  # noqa: E402
+
+for _label, _sql in _FACTS_MIGRATIONS:
+    MIGRATIONS.append((MIGRATIONS[-1][0] + 1, _sql))
