@@ -34,8 +34,14 @@ import {
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import {
+  type BackflowProposal,
   type SkillListItem,
   type SkillProposal,
+  useBackflowAcceptMutation,
+  useBackflowDiffQuery,
+  useBackflowForkMutation,
+  useBackflowProposalsQuery,
+  useBackflowRejectMutation,
   useForcePublishSkillMutation,
   useReloadSkillsMutation,
   useSetSkillAgentBindingMutation,
@@ -98,12 +104,14 @@ function ContentDialog({
   const content = useSkillContentQuery(skillName);
   return (
     <Dialog open={Boolean(skillName)} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-4xl">
         <DialogHeader>
           <DialogTitle>{t('skills.contentTitle', { name: skillName ?? '' })}</DialogTitle>
           <DialogDescription>{t('skills.contentDescription')}</DialogDescription>
         </DialogHeader>
-        <CodeBlock>{content.data?.content ?? ''}</CodeBlock>
+        <div className="max-h-[70vh] overflow-auto">
+          <CodeBlock>{content.data?.content ?? ''}</CodeBlock>
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -312,24 +320,67 @@ function ProposalsDialog({
   );
 }
 
+function BackflowDialog({
+  skillName,
+  proposals,
+  onViewDiff,
+  diffText,
+  onOpenChange,
+}: {
+  skillName: string | null;
+  proposals: BackflowProposal[];
+  onViewDiff: (id: number) => void;
+  diffText: string | null;
+  onOpenChange: (open: boolean) => void;
+}): JSX.Element {
+  const t = useT();
+  return (
+    <Dialog open={Boolean(skillName)} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t('skills.backflowTitle', { name: skillName ?? '' })}</DialogTitle>
+          <DialogDescription>{t('skills.backflowDescription')}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          {proposals.map((proposal) => (
+            <BackflowProposalCard key={proposal.id} onViewDiff={onViewDiff} proposal={proposal} />
+          ))}
+          {proposals.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t('skills.noBackflow')}</p>
+          ) : null}
+          {diffText ? (
+            <pre className="mt-2 max-h-72 overflow-auto rounded-xl bg-slate-950 p-4 text-sm text-slate-50">
+              {diffText}
+            </pre>
+          ) : null}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─────────────────────────── Skill row ───────────────────────────
 
 function SkillRow({
   skill,
   canWrite,
   proposalCount,
+  backflowCount,
   onViewContent,
   onVersions,
   onBindings,
   onProposals,
+  onBackflow,
 }: {
   skill: SkillListItem;
   canWrite: boolean;
   proposalCount: number;
+  backflowCount: number;
   onViewContent: () => void;
   onVersions: () => void;
   onBindings: () => void;
   onProposals: () => void;
+  onBackflow: () => void;
 }): JSX.Element {
   const t = useT();
   const toggle = useSkillLifecycleMutation(skill.name, skill.global_enabled ? 'disable' : 'enable');
@@ -381,6 +432,10 @@ function SkillRow({
               {t('skills.proposals')}
               {proposalCount > 0 ? ` (${proposalCount})` : ''}
             </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setTimeout(onBackflow, 0)}>
+              {t('skills.backflow')}
+              {backflowCount > 0 ? ` (${backflowCount})` : ''}
+            </DropdownMenuItem>
             {canWrite ? (
               <>
                 <DropdownMenuSeparator />
@@ -423,6 +478,88 @@ function SkillRow({
   );
 }
 
+function BackflowProposalCard({
+  onViewDiff,
+  proposal,
+}: {
+  onViewDiff: (id: number) => void;
+  proposal: BackflowProposal;
+}): JSX.Element {
+  const accept = useBackflowAcceptMutation(proposal.id);
+  const reject = useBackflowRejectMutation(proposal.id);
+  const fork = useBackflowForkMutation(proposal.id);
+
+  const onAccept = async (): Promise<void> => {
+    if (proposal.conflict) {
+      // Pool advanced past the proposal's base — require an explicit override decision.
+      if (!window.confirm(`Pool advanced for ${proposal.skill_name}. Override pool head?`)) {
+        return;
+      }
+      await accept.mutateAsync({ confirm: true });
+      return;
+    }
+    await accept.mutateAsync({});
+  };
+
+  const onFork = async (): Promise<void> => {
+    const forkName = window.prompt(
+      `New skill name to fork ${proposal.skill_name} as`,
+      `${proposal.skill_name}-fork`
+    );
+    if (!forkName) {
+      return;
+    }
+    await fork.mutateAsync({ fork_name: forkName });
+  };
+
+  return (
+    <article
+      className="rounded-xl border bg-white p-4"
+      key={proposal.id}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-semibold">{proposal.skill_name}</p>
+          <p className="text-sm text-muted-foreground">
+            {`from ${proposal.agent_name ?? `agent ${proposal.agent_id}`}${
+              proposal.conflict ? ' · conflict' : ''
+            }`}
+          </p>
+        </div>
+        <div className="flex flex-wrap justify-end gap-2">
+          <button
+            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
+            onClick={() => onViewDiff(proposal.id)}
+            type="button"
+          >
+            {`View backflow diff for ${proposal.id}`}
+          </button>
+          <button
+            className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground"
+            onClick={() => void onAccept()}
+            type="button"
+          >
+            {`Accept backflow ${proposal.id}`}
+          </button>
+          <button
+            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
+            onClick={() => void reject.mutateAsync()}
+            type="button"
+          >
+            {`Reject backflow ${proposal.id}`}
+          </button>
+          <button
+            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
+            onClick={() => void onFork()}
+            type="button"
+          >
+            {`Fork backflow ${proposal.id}`}
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
 // ─────────────────────────── Page ───────────────────────────
 
 export function SkillsPage(): JSX.Element {
@@ -430,6 +567,7 @@ export function SkillsPage(): JSX.Element {
   const me = useAdminMeQuery();
   const skills = useSkillsQuery();
   const proposals = useSkillProposalsQuery();
+  const backflow = useBackflowProposalsQuery();
   const reload = useReloadSkillsMutation();
 
   const [query, setQuery] = useState('');
@@ -438,8 +576,11 @@ export function SkillsPage(): JSX.Element {
   const [bindingsFor, setBindingsFor] = useState<string | null>(null);
   const [proposalsFor, setProposalsFor] = useState<string | null>(null);
   const [proposalDiffId, setProposalDiffId] = useState<string | null>(null);
+  const [backflowFor, setBackflowFor] = useState<string | null>(null);
+  const [selectedBackflowId, setSelectedBackflowId] = useState<number | null>(null);
 
   const canWrite = me.data?.role !== 'viewer';
+  const backflowDiff = useBackflowDiffQuery(selectedBackflowId, selectedBackflowId !== null);
 
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -457,6 +598,16 @@ export function SkillsPage(): JSX.Element {
     });
     return map;
   }, [proposals.data]);
+
+  const backflowBySkill = useMemo(() => {
+    const map = new Map<string, BackflowProposal[]>();
+    (backflow.data ?? []).forEach((proposal) => {
+      const list = map.get(proposal.skill_name) ?? [];
+      list.push(proposal);
+      map.set(proposal.skill_name, list);
+    });
+    return map;
+  }, [backflow.data]);
 
   return (
     <div className="space-y-6">
@@ -497,10 +648,12 @@ export function SkillsPage(): JSX.Element {
                 skill={skill}
                 canWrite={canWrite}
                 proposalCount={proposalsBySkill.get(skill.name)?.length ?? 0}
+                backflowCount={backflowBySkill.get(skill.name)?.length ?? 0}
                 onViewContent={() => setContentFor(skill.name)}
                 onVersions={() => setVersionsFor(skill.name)}
                 onBindings={() => setBindingsFor(skill.name)}
                 onProposals={() => setProposalsFor(skill.name)}
+                onBackflow={() => setBackflowFor(skill.name)}
               />
             ))}
             {skills.data && filtered.length === 0 ? (
@@ -536,6 +689,18 @@ export function SkillsPage(): JSX.Element {
         onOpenChange={(open) => !open && setProposalsFor(null)}
       />
       <ProposalDiffDialog proposalId={proposalDiffId} onOpenChange={(open) => !open && setProposalDiffId(null)} />
+      <BackflowDialog
+        skillName={backflowFor}
+        proposals={backflowFor ? backflowBySkill.get(backflowFor) ?? [] : []}
+        onViewDiff={setSelectedBackflowId}
+        diffText={backflowDiff.data?.diff_vs_head ?? null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setBackflowFor(null);
+            setSelectedBackflowId(null);
+          }
+        }}
+      />
     </div>
   );
 }

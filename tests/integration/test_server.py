@@ -42,6 +42,19 @@ def test_node_router_mounted():
     assert "/nodes/{node_id}/status" in paths
 
 
+def test_backflow_router_mounted(client):
+    from fleetent.server import app
+
+    paths = {getattr(r, "path", None) for r in app.routes}
+    assert "/admin/skills/backflow" in paths
+    assert "/admin/skills/backflow/{proposal_id}/diff" in paths
+    assert "/admin/skills/backflow/{proposal_id}/accept" in paths
+    assert "/admin/skills/backflow/{proposal_id}/reject" in paths
+    assert "/admin/skills/backflow/{proposal_id}/fork" in paths
+    # Mounted and reachable: unauthenticated list returns 401 (auth), not 404 (no route).
+    assert client.get("/admin/skills/backflow").status_code == 401
+
+
 def test_no_shared_memory_admin_router(client) -> None:
     import fleetent.server as srv
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,8 @@ from fleetent.platform.user_management import user_admin_api
 from fleetent.skills import registry as skill_registry
 
 router = APIRouter(prefix="/nodes")
+
+_logger = logging.getLogger(__name__)
 
 _resolve_node_key = node_store.resolve_node_key
 
@@ -241,7 +244,7 @@ def _agent_secrets(agent: agent_store.Agent) -> dict[str, str]:
 
 def _project_skill_status(report: NodeAgentStatusReport) -> None:
     from fleetent.platform.agent_management_console import agent_admin_store
-    from fleetent.platform.skill_management import skill_admin_store
+    from fleetent.platform.skill_management import backflow_store, skill_admin_store
 
     any_drift = False
     for skill in report.skills:
@@ -249,6 +252,22 @@ def _project_skill_status(report: NodeAgentStatusReport) -> None:
         skill_admin_store.set_base_commit(report.agent_id, skill.skill_name, skill.base_commit)
         skill_admin_store.set_drift(report.agent_id, skill.skill_name, drifted=skill.drift)
         any_drift = any_drift or skill.drift
+        if skill.drift:
+            # Best-effort auto-nomination: a failed bundle capture (e.g. the owning
+            # node is briefly unreachable) must not fail status ingestion.
+            try:
+                backflow_store.nominate_if_absent(
+                    agent_id=report.agent_id,
+                    skill_name=skill.skill_name,
+                    pool_dir=_skill_pool_dir(),
+                )
+            except Exception:
+                _logger.warning(
+                    "auto-nominate backflow failed for agent=%s skill=%s",
+                    report.agent_id,
+                    skill.skill_name,
+                    exc_info=True,
+                )
     if report.skills:
         if any_drift:
             agent_admin_store.mark_drift(report.agent_id)

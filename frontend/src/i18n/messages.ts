@@ -237,6 +237,10 @@ const en = {
   "skills.proposalsDescription":
     "Reflection-generated change proposals targeting this skill.",
   "skills.noProposals": "No proposals for this skill.",
+  "skills.backflow": "Backflow",
+  "skills.backflowTitle": "Skill backflow · {name}",
+  "skills.backflowDescription": "Agent-side edits proposed back to this skill. Accept, reject, or fork them.",
+  "skills.noBackflow": "No backflow proposals for this skill.",
 
   // Knowledge Base 页
   "kb.title": "Knowledge Base",
@@ -940,6 +944,10 @@ const zh: Messages = {
   "skills.proposalsTitle": "提案 · {name}",
   "skills.proposalsDescription": "由反思生成、针对该技能的变更提案。",
   "skills.noProposals": "该技能暂无提案。",
+  "skills.backflow": "回流",
+  "skills.backflowTitle": "技能回流 · {name}",
+  "skills.backflowDescription": "由 Agent 侧改动回流到该技能的提案。可接受、拒绝或派生。",
+  "skills.noBackflow": "该技能暂无回流提案。",
 
   // Knowledge Base 页
   "kb.title": "知识库",

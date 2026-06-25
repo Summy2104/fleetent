@@ -51,7 +51,7 @@ from fleetent.platform.node_management import (
     placement_store,
 )
 from fleetent.platform.node_management.agent_transport import DirectHttpAgentTransport
-from fleetent.platform.skill_management import skill_admin_api
+from fleetent.platform.skill_management import backflow_api, skill_admin_api
 from fleetent.platform.tenancy import admin_api as tenancy_admin_api
 from fleetent.platform.user_management import user_admin_api
 from fleetent.platform.user_management.api_key_store import resolve as _resolve_api_key
@@ -259,6 +259,7 @@ app = FastAPI(title="fleetent", lifespan=lifespan)
 app.include_router(user_admin_api.router)
 app.include_router(im_identity_admin_api.router)
 app.include_router(skill_admin_api.router)
+app.include_router(backflow_api.router)
 app.include_router(provider_admin_api.router)
 app.include_router(kb_admin_api.router)
 app.include_router(connector_admin_api.router)
