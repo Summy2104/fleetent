@@ -8,7 +8,7 @@ the ``(user_id, agent_id, server_id)`` triple.
 
 The migrated DB handle is injected at construction (mirroring ``artifact_exchange`` /
 ``sub_agent_lifecycle``); all SQL goes through the unified :mod:`fleetent.db` boundary
-with named parameters and no raw ``sqlite3.connect`` or ORM. No ``fleetent.platform.*``
+with named parameters and no raw ``sqlite3.connect`` or ORM. No platform-package
 import — this is standalone agent-side state.
 """
 

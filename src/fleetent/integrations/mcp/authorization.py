@@ -16,7 +16,7 @@ independent of the SDK session machinery in ``client.py``:
   the link to the requesting user (never a shared channel, to prevent state theft).
 
 This module imports only sibling MCP modules (``oauth_authcode`` / ``per_user_tokens``);
-it does not import ``fleetent.platform.*`` nor the outbound/IM layer, and holds no live
+it does not import the platform package nor the outbound/IM layer, and holds no live
 resource at module scope (the state store and the deliverer are injectable references).
 """
 

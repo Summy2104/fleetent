@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 
 from fleetent import agent_config, paths
@@ -367,6 +367,13 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
 
     artifact_exchange.set_state_db(agent_state_db)
     artifact_exchange.set_views_root(data_dir.parent / "exchange" / ".views")
+    # mcp-per-user-oauth2 (Group 7): wire the standalone encrypted per-user token store +
+    # transparent refresher onto the local seams. Pure local wiring (no platform), so it is
+    # safe under the no-platform baseline; managed boot (slice 2) injects its own resolver.
+    from fleetent.integrations.mcp.standalone_callback import wire_standalone_oauth
+    from fleetent.integrations.mcp.standalone_token_store import StandaloneUserTokenStore
+
+    wire_standalone_oauth(StandaloneUserTokenStore(agent_state_db))
 
 
 async def _start_infra(
@@ -704,6 +711,26 @@ def build_app(agent_name: str) -> FastAPI:
     @app.get("/health")
     async def health() -> dict[str, Any]:
         return {"status": "ok", "agent": agent_name}
+
+    @app.get("/oauth/callback")
+    async def oauth_callback(code: str | None = None, state: str | None = None) -> Any:
+        """Standalone self-hosted OAuth Authorization Code callback (mcp-per-user-oauth2 7.2).
+
+        Identity is reverse-resolved from the one-shot ``state`` alone (never from any login
+        state on this request): an invalid / expired / already-used ``state`` is rejected
+        with 400 and no token is exchanged or written. On success the ``code`` is exchanged
+        and the user's token is stored encrypted in the local per-user library, and a plain
+        success page tells the user to return to the conversation.
+        """
+        from fleetent.integrations.mcp.per_user_tokens import get_local_user_token_store
+        from fleetent.integrations.mcp.standalone_callback import handle_oauth_callback
+
+        result = await handle_oauth_callback(
+            code=code, state=state, store=get_local_user_token_store()
+        )
+        if not result.ok:
+            raise HTTPException(status_code=400, detail=result.detail)
+        return PlainTextResponse("Authorization successful — return to your conversation.")
 
     # Approval endpoints: allow medium/high-risk tool calls to be approved without
     # requiring the full platform server. Standalone agents need these so that IM

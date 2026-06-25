@@ -119,6 +119,16 @@ def set_local_user_token_store(store: UserTokenStore) -> None:
     _local_store = store
 
 
+def get_local_user_token_store() -> UserTokenStore:
+    """Return the standalone local token store (the SQLite-backed store after boot wiring).
+
+    The standalone OAuth callback persists exchanged tokens here so a later call's
+    ``resolve_user_token`` (which consults this same store when no resolver is injected)
+    reads them. Independent of the resolver seam; not used on the managed path.
+    """
+    return _local_store
+
+
 def resolve_user_token(
     server_id: str, user_id: str, agent_id: str | None = None
 ) -> UserToken | None:

@@ -17,6 +17,7 @@ import pytest
 
 import fleetent.integrations.mcp.client as mc
 from fleetent.integrations.mcp.client import McpServerConfig
+from fleetent.integrations.mcp.per_user_tokens import UserToken
 
 
 def _tool(name: str, desc: str = "d") -> SimpleNamespace:
@@ -142,7 +143,9 @@ async def test_per_user_server_routes_to_distinct_sessions(monkeypatch):
     mc._server_registry[(None, "puo")] = server
     # Group 6: a routable user with a token reaches the session-open path (no-token would
     # short-circuit to an authorization trigger instead).
-    monkeypatch.setattr(mc, "resolve_user_token", lambda *a, **k: object())
+    monkeypatch.setattr(
+        mc, "resolve_user_token", lambda *a, **k: UserToken("tok", None, None, "read")
+    )
 
     opened: list[str | None] = []
 
@@ -165,7 +168,9 @@ async def test_per_user_server_routes_to_distinct_sessions(monkeypatch):
 async def test_per_user_same_user_reuses_session(monkeypatch):
     server = _per_user_server("puo")
     mc._server_registry[(None, "puo")] = server
-    monkeypatch.setattr(mc, "resolve_user_token", lambda *a, **k: object())
+    monkeypatch.setattr(
+        mc, "resolve_user_token", lambda *a, **k: UserToken("tok", None, None, "read")
+    )
 
     open_count = {"n": 0}
 

@@ -23,7 +23,7 @@ import json
 import logging
 import os
 import time
-from collections.abc import Callable, Generator
+from collections.abc import Awaitable, Callable, Generator
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -34,7 +34,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 from fleetent.integrations.mcp import authorization as _authz
-from fleetent.integrations.mcp.per_user_tokens import resolve_user_token
+from fleetent.integrations.mcp.per_user_tokens import UserToken, resolve_user_token
 from fleetent.integrations.mcp.tool_naming import Projector, make_projector
 from mcp import ClientSession
 from mcp.client.auth import OAuthFlowError, OAuthTokenError
@@ -555,16 +555,90 @@ async def _trigger_per_user_authorization(
     return _needs_authorization_result(server.id, delivered=delivered)
 
 
-def _has_user_token(server: McpServerConfig, user_id: str | None, agent_id: str | None) -> bool:
-    """Whether the calling user already has a per-user token for this server (Group 6).
+def find_registered_server(server_id: str, scope: int | None = None) -> McpServerConfig | None:
+    """Return the registered config for ``(scope, server_id)``, or None when unknown.
 
-    Resolves through the injectable per-user token seam by the ``(server, user, agent)``
-    isolation triple; a None token (no token / unresolvable) is the explicit signal that
-    drives the authorization trigger rather than an error.
+    Public read of the live registry so out-of-band sites (the standalone OAuth callback /
+    refresher) can resolve a server's OAuth config (token_url / client_id /
+    client_secret_env / oauth_grant) by id without importing the private registry dict.
+    """
+    return _server_registry.get((scope, server_id))
+
+
+# === mcp-per-user-oauth2 (Group 7, D7): transparent token refresh seam ===========
+# An injectable async refresher ``(server_id, user_id, agent_id, token) -> UserToken | None``
+# used to silently refresh an expired-but-refreshable access token before a per-user call,
+# so the refresh is transparent to the caller (D7/7.3). standalone boot wires a refresher
+# that calls ``oauth_authcode.refresh_token`` and writes the rotated token to the local
+# store; managed (slice 2) may inject a different one. A None return means "could not
+# refresh" (genuine auth failure) — the call then degrades to "needs authorization". The
+# seam holds only a callable reference (no live resource, no agent→platform import).
+TokenRefresher = Callable[[str, str, str | None, UserToken], "Awaitable[UserToken | None]"]
+
+_token_refresher: TokenRefresher | None = None
+
+
+def set_token_refresher(refresher: TokenRefresher | None) -> None:
+    """Wire (or clear) the injected transparent token refresher (D7).
+
+    Called once at agent boot (standalone) so an expired-but-refreshable token is refreshed
+    in place before the call proceeds. Passing None disables transparent refresh (the call
+    then degrades on the expired token, never crashing).
+    """
+    global _token_refresher
+    _token_refresher = refresher
+
+
+def get_token_refresher() -> TokenRefresher | None:
+    """Return the wired transparent token refresher, or None when none is set."""
+    return _token_refresher
+
+
+def _token_is_expired(token: UserToken, *, now: float) -> bool:
+    """Whether a token's access token has passed its expiry on the wall clock (D7).
+
+    A token with no known ``expires_at`` is treated as live (never proactively refreshed):
+    only an explicit expiry drives a transparent refresh.
+    """
+    return token.expires_at is not None and now >= token.expires_at
+
+
+async def _ensure_fresh_user_token(
+    server: McpServerConfig, user_id: str | None, agent_id: str | None
+) -> bool:
+    """Ensure the caller has a usable (refreshed if needed) per-user token (D7/7.3).
+
+    Resolves the user's stored token; when it is expired and a refresh token is held, the
+    wired refresher is invoked to rotate it in place (transparent to the caller) and the
+    result is persisted by the refresher. Returns whether a usable token now exists:
+
+    * no token at all → False (drives this user's authorization trigger);
+    * live token (or expired but no refresher / no refresh token) → True (call proceeds;
+      a stale-but-present token lets the resource end answer / degrade);
+    * refresh failed genuinely (refresher returned None) → False (drives re-authorization).
+
+    Never raises: a transient refresher error is contained so the call still proceeds on
+    the existing token rather than crashing the agent loop.
     """
     if user_id is None:
         return False
-    return resolve_user_token(server.id, user_id, agent_id) is not None
+    token = resolve_user_token(server.id, user_id, agent_id)
+    if token is None:
+        return False
+    refresher = _token_refresher
+    if (
+        refresher is None
+        or token.refresh_token is None
+        or not _token_is_expired(token, now=time.time())
+    ):
+        return True
+    try:
+        refreshed = await refresher(server.id, user_id, agent_id, token)
+    except Exception as exc:  # noqa: BLE001 — a transient refresh error must not crash the call
+        logger.warning("mcp_token_refresh_failed server_id=%s error=%s", server.id, exc)
+        return True  # keep the (stale) token; the call degrades downstream, never crashes
+    # None = genuine auth failure (refresher cleared the bad token): re-authorization needed.
+    return refreshed is not None
 
 
 def _oauth_degraded_result(server: McpServerConfig, exc: BaseException) -> str | None:
@@ -1918,10 +1992,12 @@ async def _call_via_session_inner(
     # oauth2 server marked auth-unavailable: return directly, no call.
     if server.auth_type == "oauth2" and server._auth_unavailable:
         return _auth_unavailable_result(server_id)
-    # per-user oauth with no resolvable (user, agent, server) token: trigger this user's
-    # own authorization (build + DM a link) and return a "needs authorization" result on
-    # the degrade chain — never crash, never open or reuse another user's session (D8).
-    if _is_per_user_oauth(server) and not _has_user_token(server, user_id, agent_id):
+    # per-user oauth: ensure the (user, agent, server) token is present and fresh. An
+    # expired-but-refreshable token is refreshed in place (transparent, D7/7.3); a missing
+    # token (or a genuinely un-refreshable one) triggers this user's own authorization
+    # (build + DM a link) and returns a "needs authorization" result on the degrade chain —
+    # never crash, never open or reuse another user's session (D8).
+    if _is_per_user_oauth(server) and not await _ensure_fresh_user_token(server, user_id, agent_id):
         return await _trigger_per_user_authorization(server, user_id, agent_id)
     # Known-unavailable server: short-circuit without touching the connection.
     if server._health is not HealthState.healthy:
@@ -2103,8 +2179,8 @@ async def _call_utility(
         raise KeyError(f"Unknown MCP server: {server_id}")
     if server.auth_type == "oauth2" and server._auth_unavailable:
         return _auth_unavailable_result(server_id)
-    # per-user oauth with no resolvable token → trigger this user's authorization (D8).
-    if _is_per_user_oauth(server) and not _has_user_token(server, user_id, agent_id):
+    # per-user oauth: refresh-if-expired then trigger authorization on a missing/dead token.
+    if _is_per_user_oauth(server) and not await _ensure_fresh_user_token(server, user_id, agent_id):
         return await _trigger_per_user_authorization(server, user_id, agent_id)
     if server._health is not HealthState.healthy:
         return _unavailable_result(server_id)

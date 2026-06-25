@@ -50,9 +50,9 @@
 
 ## 7. standalone 自挂回调端点
 
-- [ ] 7.1 (test, integration) GET /oauth/callback:合法 state→反查 (user,agent,server)+verifier→code 交换→加密入库→作废 state;非法/过期/已消费 state 被拒、不写 token(FastAPI TestClient)
-- [ ] 7.2 (impl) agent FastAPI 挂 /oauth/callback,接 OAuth 协议模块 + 本地 token store;不依赖回调请求登录态(身份由 state 反查)
-- [ ] 7.3 (test, integration) access token 过期→agent 用 refresh 自刷新并继续调用,对调用方透明
+- [x] 7.1 (test, integration) GET /oauth/callback:合法 state→反查 (user,agent,server)+verifier→code 交换→加密入库→作废 state;非法/过期/已消费 state 被拒、不写 token(FastAPI TestClient)
+- [x] 7.2 (impl) agent FastAPI 挂 /oauth/callback,接 OAuth 协议模块 + 本地 token store;不依赖回调请求登录态(身份由 state 反查)
+- [x] 7.3 (test, integration) access token 过期→agent 用 refresh 自刷新并继续调用,对调用方透明
 
 ## 8. 配置
 
