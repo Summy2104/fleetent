@@ -38,7 +38,7 @@ def test_platform_env_template_contains_only_empty_platform_vars():
 
 
 def test_agent_env_template_contains_complete_empty_agent_refs_not_platform_vars():
-    entries = _env_entries(ROOT / "agents" / "default" / ".env.example")
+    entries = _env_entries(ROOT / "agent.env.example")
 
     assert "FLEETENT_MODEL_PRIMARY_API_KEY" in entries
     assert "SUPPORT_SLACK_BOT" in entries
