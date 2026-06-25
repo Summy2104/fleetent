@@ -218,3 +218,96 @@ export function useSetSkillAgentBindingMutation(name: string, agentId: number) {
     },
   });
 }
+
+// --- skill backflow (platform governance) -----------------------------------
+
+export type BackflowProposal = {
+  agent_id: number;
+  agent_name: string | null;
+  base_commit: string | null;
+  base_version: string | null;
+  conflict: number;
+  created_at: string;
+  forked_as: string | null;
+  id: number;
+  skill_name: string;
+  status: string;
+};
+
+export type BackflowDiff = {
+  conflict: boolean;
+  diff_vs_base: string;
+  diff_vs_head: string;
+};
+
+type BackflowAcceptInput = {
+  confirm?: boolean;
+};
+type BackflowForkInput = {
+  fork_name: string;
+};
+
+function invalidateBackflow(queryClient: ReturnType<typeof useQueryClient>): Promise<void> {
+  return queryClient.invalidateQueries({ queryKey: ['backflow-proposals'] });
+}
+
+export function useBackflowProposalsQuery() {
+  const api = useAdminApi();
+
+  return useQuery({
+    queryKey: ['backflow-proposals'],
+    queryFn: () => api.get<BackflowProposal[]>('/admin/skills/backflow'),
+  });
+}
+
+export function useBackflowDiffQuery(proposalId: number | null, enabled: boolean) {
+  const api = useAdminApi();
+
+  return useQuery({
+    enabled: enabled && proposalId !== null,
+    queryKey: ['backflow-diff', proposalId],
+    queryFn: () => api.get<BackflowDiff>(`/admin/skills/backflow/${proposalId}/diff`),
+  });
+}
+
+export function useBackflowAcceptMutation(proposalId: number) {
+  const api = useAdminApi();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input?: BackflowAcceptInput) =>
+      api.post(
+        `/admin/skills/backflow/${proposalId}/accept`,
+        undefined,
+        input?.confirm ? { 'X-Confirm': 'true' } : undefined
+      ),
+    onSuccess: async () => {
+      await invalidateBackflow(queryClient);
+    },
+  });
+}
+
+export function useBackflowRejectMutation(proposalId: number) {
+  const api = useAdminApi();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => api.post(`/admin/skills/backflow/${proposalId}/reject`),
+    onSuccess: async () => {
+      await invalidateBackflow(queryClient);
+    },
+  });
+}
+
+export function useBackflowForkMutation(proposalId: number) {
+  const api = useAdminApi();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: BackflowForkInput) =>
+      api.post(`/admin/skills/backflow/${proposalId}/fork`, input),
+    onSuccess: async () => {
+      await invalidateBackflow(queryClient);
+    },
+  });
+}
