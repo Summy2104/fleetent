@@ -77,7 +77,7 @@ async def test_create_agent_memory_reads_from_injected_db() -> None:
 
     with (
         patch.object(module, "_agent_memory_db", mock_db),
-        patch.object(module, "_agent_memory_vector_backend", mock_backend),
+        patch.object(module, "_vector_backend", mock_backend),
         patch("fleetent.vector_store.embed_text", mock_embed),
         patch.object(mock_backend, "upsert", mock_upsert),
     ):

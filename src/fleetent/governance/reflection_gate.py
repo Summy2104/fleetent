@@ -409,7 +409,8 @@ def mark_agent_memory_proposal_applied(proposal_id: str) -> MemoryProposal:
         raise ValueError("proposal is not an agent memory suggestion")
     if proposal.metadata_patch.get("target") != "agent_memory":
         raise ValueError("proposal target is not agent_memory")
-    updated = _with_status(proposal, "applied")
+    now = _now()
+    updated = _replace_memory_proposal(proposal, status="applied", updated_at=now, applied_at=now)
     store._update_maintenance_proposal(updated)
     _record_maintenance_event("agent_memory_proposal_applied", updated)
     return updated
@@ -441,7 +442,8 @@ async def apply_memory_maintenance_proposal(
         proposal,
         actor_user_id=actor_user_id or proposal.user_id,
     )
-    updated = _with_status(proposal, "applied")
+    now = _now()
+    updated = _replace_memory_proposal(proposal, status="applied", updated_at=now, applied_at=now)
     store._update_maintenance_proposal(updated)
     _record_maintenance_event("memory_maintenance_proposal_applied", updated)
     return updated

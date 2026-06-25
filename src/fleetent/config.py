@@ -94,9 +94,11 @@ class LongTermContextSettings(BaseModel):
     max_tokens: int = 2_048
     memory_max_tokens: int = 1_024
     knowledge_max_tokens: int = 1_024
+    agent_memory_max_tokens: int = 512
     memory_top_k: int = 10
     knowledge_top_k: int = 10
-    conflict_preference: Literal["auto", "memory", "knowledge"] = "auto"
+    agent_memory_top_k: int = 5
+    conflict_preference: Literal["auto", "memory", "knowledge", "agent_memory"] = "auto"
 
 
 class KnowledgeRetrievalAuditSettings(BaseModel):

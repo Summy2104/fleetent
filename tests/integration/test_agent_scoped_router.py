@@ -10,6 +10,7 @@ Verifies:
 
 from __future__ import annotations
 
+import dataclasses
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,7 @@ def test_agent_scope_returns_agent_scope(tmp_path: Path) -> None:
     assert isinstance(result, AgentScope)
     assert isinstance(result.state_db, SQLiteDatabase)
     assert result.vector_backend is not None
+    assert {f.name for f in dataclasses.fields(AgentScope)} == {"state_db", "vector_backend"}
 
 
 # ── 2: SQLite backend path mapping ─────────────────────────────────────────

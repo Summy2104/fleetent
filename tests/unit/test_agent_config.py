@@ -626,8 +626,8 @@ def test_repo_agent_yaml_example_loads_as_single_agent_file() -> None:
     from pathlib import Path
 
     repo = Path(__file__).resolve().parents[2]
-    example = repo / "agents" / "default" / "agent.yaml.example"
-    assert example.is_file(), "agents/default/agent.yaml.example must exist (installer template)"
+    example = repo / "agent.yaml.example"
+    assert example.is_file(), "agent.yaml.example must exist at repo root (installer template)"
     raw = yaml.safe_load(example.read_text(encoding="utf-8"))
     assert "knowledge_base" not in raw
     agent = agent_config.load_agent_home_file(example)
@@ -762,6 +762,59 @@ def test_collect_env_var_names_returns_all_referenced_names() -> None:
     assert "ACME_MCP_TOKEN" in names
     # must be deduplicated and stable-ordered
     assert names == sorted(set(names))
+
+
+def test_collect_env_var_names_includes_mcp_env_and_headers_env_refs() -> None:
+    from fleetent.config import McpServerSettings
+
+    agent = agent_config.AgentFile(
+        name="mcp-env-ref-agent",
+        version=1,
+        system_prompt="test",
+        models={
+            "targets": [
+                {
+                    "id": "primary",
+                    "provider": "anthropic",
+                    "protocol": "openai_chat",
+                    "base_url": "https://api.anthropic.com/v1/",
+                    "model": "claude-opus-4-8",
+                    "api_key_env": "MODEL_API_KEY",
+                }
+            ],
+            "routes": {"default": [{"target": "primary"}]},
+        },
+        mcp_servers=[
+            McpServerSettings(
+                id="stdio-docs",
+                transport="stdio",
+                command="python",
+                args=["server.py"],
+                env={
+                    "DB_URL": "env:MY_DATABASE_URL",
+                    "STATIC_FLAG": "literal",
+                    "SECOND_DB_URL": "env:MY_DATABASE_URL",
+                },
+            ),
+            McpServerSettings(
+                id="http-docs",
+                transport="http",
+                url="https://mcp.example.com",
+                headers={
+                    "Authorization": "env:MY_TOKEN",
+                    "X-Plain": "literal",
+                },
+            ),
+        ],
+    )
+
+    names = agent_config.collect_env_var_names(agent)
+
+    assert "MODEL_API_KEY" in names
+    assert "MY_DATABASE_URL" in names
+    assert "MY_TOKEN" in names
+    assert "literal" not in names
+    assert names.count("MY_DATABASE_URL") == 1
 
 
 # --- task 6.1: platform and node alignment ---

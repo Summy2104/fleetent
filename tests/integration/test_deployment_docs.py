@@ -33,7 +33,7 @@ def _env_keys(path: Path) -> set[str]:
 
 
 def test_env_example_is_safe_and_local_env_and_secrets_are_ignored():
-    agent_env = Path("agents/default/.env.example")
+    agent_env = Path("agent.env.example")
     platform_env = Path(".env.example")
     gitignore = Path(".gitignore").read_text(encoding="utf-8")
 
@@ -43,7 +43,7 @@ def test_env_example_is_safe_and_local_env_and_secrets_are_ignored():
     both = agent + "\n" + platform
 
     # Platform-side
-    for key in ("FLEETENT_AUTO_UPGRADE", "FLEETENT_SECRET_KEY", "DATABASE_URL", "LOG_FORMAT"):
+    for key in ("FLEETENT_SECRET_KEY", "DATABASE_URL", "LOG_FORMAT"):
         assert f"{key}=" in platform
         assert f"{key}=\n" in platform
     assert "FLEETENT_MODEL_PRIMARY_API_KEY=" not in platform
@@ -93,11 +93,12 @@ def test_global_config_example_templates_removed():
     assert not Path("config/knowledge.yaml.example").exists()
     assert Path(".env.example").exists()
     assert Path("platform.yaml.example").exists()
-    assert Path("agents/default/agent.yaml.example").exists()
-    assert Path("agents/default/.env.example").exists()
-    assert not Path("agents/default/.env.standalone.example").exists()
-    assert not Path("agents/default/agent.configure.yaml.example").exists()
-    assert not Path("agents/default/agent.defaults.yaml.example").exists()
+    assert Path("agent.yaml.example").exists()
+    assert Path("agent.env.example").exists()
+    assert not Path("agents/default").exists()
+    assert not Path("agent.env.standalone.example").exists()
+    assert not Path("agent.configure.yaml.example").exists()
+    assert not Path("agent.defaults.yaml.example").exists()
     assert not Path("config").exists()
     assert not Path("config/agent").exists()
     assert not Path("config/platform").exists()
@@ -142,8 +143,8 @@ def test_four_canonical_examples_are_complete_references():
     from fleetent.agent_config import AgentFile
     from fleetent.knowledge_base.config import load_knowledge_config
 
-    agent_yaml = Path("agents/default/agent.yaml.example")
-    agent_env = Path("agents/default/.env.example")
+    agent_yaml = Path("agent.yaml.example")
+    agent_env = Path("agent.env.example")
     platform_yaml = Path("platform.yaml.example")
     platform_env = Path(".env.example")
 
@@ -172,8 +173,7 @@ def test_dockerfile_includes_deployment_runtime_assets_and_port():
 
     required_phrases = [
         "COPY scripts/ ./scripts/",
-        "COPY platform.yaml.example ./.env.example ./",
-        "COPY agents/default/ ./agents/default/",
+        "COPY platform.yaml.example .env.example agent.yaml.example agent.env.example ./",
         'ENTRYPOINT ["./scripts/docker_entrypoint.sh"]',
         "EXPOSE 8765",
     ]
@@ -384,7 +384,7 @@ def test_materialize_covers_agent_yaml_example_env_refs(tmp_path, monkeypatch):
     from fleetent.platform.agent_lifecycle import materialize
 
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
-    doc = yaml.safe_load(Path("agents/default/agent.yaml.example").read_text(encoding="utf-8"))
+    doc = yaml.safe_load(Path("agent.yaml.example").read_text(encoding="utf-8"))
 
     refs: set[str] = set()
 

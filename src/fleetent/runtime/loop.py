@@ -101,6 +101,7 @@ def _filter_outbound_tools(
         return schemas
     return [s for s in schemas if s["function"]["name"] not in _OUTBOUND_DELIVERY_TOOLS]
 
+
 ReplyFunc = Callable[[str], Coroutine[Any, Any, None]]
 ProgressFunc = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -1785,6 +1786,7 @@ async def run(
     conversation_address: ConversationAddress | None = None,
     delivery_ledger: list[Any] | None = None,
     skill_authoring_enabled: bool = False,
+    skill_user_access: dict[str, list[str]] | None = None,
     emit_delivery_trailer: bool = True,
     suppress_outbound_tools: bool = False,
 ) -> str:
@@ -1851,6 +1853,7 @@ async def run(
                 conversation_address=conversation_address,
                 delivery_ledger=delivery_ledger,
                 skill_authoring_enabled=skill_authoring_enabled,
+                skill_user_access=skill_user_access,
                 emit_delivery_trailer=emit_delivery_trailer,
                 suppress_outbound_tools=suppress_outbound_tools,
             )
@@ -1892,6 +1895,7 @@ async def _run_inner(
     conversation_address: ConversationAddress | None = None,
     delivery_ledger: list[Any] | None = None,
     skill_authoring_enabled: bool = False,
+    skill_user_access: dict[str, list[str]] | None = None,
     emit_delivery_trailer: bool = True,
     suppress_outbound_tools: bool = False,
 ) -> str:
@@ -1974,6 +1978,9 @@ async def _run_inner(
         # replies use) so send_file lands the file in the current conversation — channel
         # into that channel, DM into that DM — instead of always the requester's DM.
         conversation_address=conversation_address,
+        # skill-user-access: carry the agent's per-skill allowlist so read_skill + the
+        # sandbox skills view gate restricted skills per requester.
+        skill_user_access=skill_user_access or {},
     )
     user_input = _first_user_content(messages)
     # Class-A wiring: inject long-term context (KB + memory) and record the
@@ -2416,6 +2423,7 @@ def run_sync(
     governance: GovernanceConfig | None = None
     model_policy: ModelPolicySnapshot | None = None
     skill_authoring_enabled = False
+    skill_user_access: dict[str, list[str]] = {}
     if agent is not None:
         from fleetent.runtime.snapshot import _governance_from_file
         from fleetent.tools.plugin_loader import expand_plugin_patterns
@@ -2429,9 +2437,14 @@ def run_sync(
         governance = _governance_from_file(agent)
         model_policy = ModelPolicySnapshot.from_agent(agent)
         skill_authoring_enabled = agent.skill_authoring_enabled
+        skill_user_access = agent.skill_user_access
 
     skills_catalog = available_skills_prompt(
-        allowed_skills=allowed_skills, available_tools=_visible_tool_names(allowed_tools)
+        allowed_skills=allowed_skills,
+        available_tools=_visible_tool_names(allowed_tools),
+        user_id=user_id,
+        chat_type="dm",  # CLI one-shot is a single-operator direct session
+        skill_user_access=skill_user_access,
     )
     disabled_trace = collect_disabled_trace() or None
 
@@ -2459,6 +2472,7 @@ def run_sync(
             agent_name=agent_name,
             agent_features=agent_features,
             allowed_skills=allowed_skills,
+            skill_user_access=skill_user_access,
             disabled_skills_trace=disabled_trace,
             sandbox_mode=sandbox_mode,
             governance=governance,
@@ -2493,6 +2507,7 @@ async def run_stream(
     session_context: Any = None,
     skill_authoring_enabled: bool = False,
     skill_hot_reload: bool = True,
+    skill_user_access: dict[str, list[str]] | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Async streaming version of run(). Yields SSE event dicts.
 
@@ -2514,9 +2529,14 @@ async def run_stream(
     # skill-external-hot-reload: reload externally-changed skills before catalog injection.
     _maybe_refresh_skills(skill_hot_reload)
     # agent-skill-scoping: narrow the catalog to the agent's allowed_skills (empty /
-    # None = no narrowing, all enabled skills visible).
+    # None = no narrowing, all enabled skills visible). skill-user-access: also hide
+    # restricted skills from this requester (per user_id + chat_type).
     skills_catalog = available_skills_prompt(
-        allowed_skills=allowed_skills, available_tools=_visible_tool_names(allowed_tools)
+        allowed_skills=allowed_skills,
+        available_tools=_visible_tool_names(allowed_tools),
+        user_id=user_id,
+        chat_type=getattr(session_context, "chat_type", None),
+        skill_user_access=skill_user_access,
     )
     disabled_trace = collect_disabled_trace() or None
 

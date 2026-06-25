@@ -65,7 +65,7 @@ def _send_msg_then_claim_more(final_text: str):
     tc.id = "tc1"
     tc.type = "function"
     tc.function.name = "send_im_message"
-    tc.function.arguments = json.dumps({"target": "U1", "text": "通知"})
+    tc.function.arguments = json.dumps({"target": "U2", "text": "通知"})
     m1 = MagicMock(content=None, tool_calls=[tc], refusal=None)
     m1.model_dump.return_value = {
         "role": "assistant",

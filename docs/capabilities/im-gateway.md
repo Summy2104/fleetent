@@ -18,6 +18,7 @@
 
 - ✅ **NormalizedMessage 归一化**：统一消息格式，包含 platform、session_id、user_id、text、channel_id、reply_func
   - reply_func 是平台相关的回写函数，agent_loop 不感知平台细节
+  - **执行宿主（managed vs standalone）**：normalizer / loop 始终留在 agent 进程内；managed 模式下 IM 连接 supervisor 宿主由 agent 改为 **node**（node 拉起连接，身份 resolver 也由 node 注入），agent 只消费归一化后的 NormalizedMessage。dev `fleetent agent run` 的 standalone 模式下，宿主仍在 agent 进程，resolver 不注入（恒等透传渠道原生 id）
 
 - ✅ **Slack Socket Mode 适配器**：slack-bolt 接入，实时接收消息
   - 支持 DM 和频道消息
@@ -42,6 +43,8 @@
 
 - ✅ **HTTP API channel 绑定**：透传 x-platform / x-channel-id 请求头
   - 支持通过 HTTP API 模拟 IM 场景的 channel 绑定
+
+- ✅ **出站投递（`im_outbound_queue`）**：agent 主动发消息时不直接调用 IM SDK，而是入队一条意图记录（platform + address_json + payload）。managed 模式下 node IM-edge drain 该队列并通过对应 connector 投递；dev standalone 模式降级为 no-op + 日志。出站投递由 `outbound_queue_store` 持久化，以 per-agent `agent_state.db` 存储（已落地）。定向触达（`notify_user`）是出站队列的特殊消费者，见 [directed-reach.md](../architecture/directed-reach.md)。
 
 ## 数据模型
 

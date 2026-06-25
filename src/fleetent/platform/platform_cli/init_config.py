@@ -7,6 +7,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from fleetent import paths
+
 
 @dataclass(frozen=True)
 class InitConfigPlanItem:
@@ -47,14 +49,17 @@ def plan_init_config(root: Path, *, force: bool = False) -> list[InitConfigPlanI
     return items
 
 
-def apply_init_config(root: Path, *, force: bool = False) -> list[InitConfigPlanItem]:
+def apply_init_config(
+    root: Path, *, force: bool = False, template_root: Path | None = None
+) -> list[InitConfigPlanItem]:
     """Create local deployment config files and directories."""
+    source_root = template_root or Path.cwd()
     plan = plan_init_config(root, force=force)
     for source, target in _GENERATED_FILES:
         target_path = root / target
         if target_path.exists() and not force:
             continue
-        source_path = root / source
+        source_path = source_root / source
         if not source_path.exists():
             print(f"missing template: {source}", file=sys.stderr)
             sys.exit(1)
@@ -71,6 +76,7 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     parser = subparsers.add_parser("init-config", help="Initialize local deployment config")
     parser.add_argument("--dry-run", action="store_true", help="Print planned changes only")
     parser.add_argument("--force", action="store_true", help="Overwrite generated files")
+    parser.add_argument("--home", default=None, help="Initialize config under HOME instead of cwd")
 
 
 def handle(args: argparse.Namespace) -> bool:
@@ -78,10 +84,11 @@ def handle(args: argparse.Namespace) -> bool:
     if args.cmd != "init-config":
         return False
 
+    root = Path(args.home).expanduser() if args.home else paths.base_dir()
     if args.dry_run:
-        plan = plan_init_config(Path.cwd(), force=args.force)
+        plan = plan_init_config(root, force=args.force)
     else:
-        plan = apply_init_config(Path.cwd(), force=args.force)
+        plan = apply_init_config(root, force=args.force)
 
     for item in plan:
         print(f"{item.action} {item.path}")

@@ -318,7 +318,6 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
     from fleetent.memory import agent_memory as agent_memory_module
     from fleetent.memory import store as memory_store
-    from fleetent.memory.agent_memory_migrations import MIGRATIONS as AGENT_MEMORY_MIGRATIONS
     from fleetent.observability import traces
     from fleetent.runtime import context as runtime_context
     from fleetent.runtime import sub_agent_lifecycle
@@ -341,12 +340,12 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     kb_runtime.set_database(kb_db)
     kb_runtime.set_vector_backend(tenant_scope.kb_vector_backend)
     agent_scope = router.agent_scope(tenant_id, agent_id)
-    am_db = agent_scope.open_agent_memory_db(AGENT_MEMORY_MIGRATIONS)
-    agent_memory_module.set_agent_memory_db(
-        am_db,
-        agent_scope.agent_memory_vector_backend,  # type: ignore[arg-type]
-    )
     agent_state_db = agent_scope.open_state_db(AGENT_STATE_MIGRATIONS)
+    # agent_memory_items now live in agent_state.db (wire-agent-memory D3).
+    agent_memory_module.set_agent_memory_db(
+        agent_state_db,
+        agent_scope.vector_backend,
+    )
     session_index.set_state_db(agent_state_db)
     traces.set_state_db(agent_state_db)
     reflection.set_state_db(agent_state_db)
@@ -746,6 +745,7 @@ def build_app(agent_name: str) -> FastAPI:
             kwargs["allowed_skills"] = agent.allowed_skills
             kwargs["skill_authoring_enabled"] = agent.skill_authoring_enabled
             kwargs["skill_hot_reload"] = agent.skill_hot_reload
+            kwargs["skill_user_access"] = agent.skill_user_access
             kwargs["governance"] = _governance_from_file(agent)
             kwargs["model_policy"] = ModelPolicySnapshot.from_agent(agent)
 

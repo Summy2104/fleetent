@@ -20,6 +20,13 @@ def _home(tmp_path, agent_name: str = "support", tenant_id: str = "default"):
     return tmp_path / "tenants" / tenant_id / "agents" / agent_name
 
 
+class _FakePopen:
+    returncode: int | None = None
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+
 def test_local_backend_spawn_uses_agent_run(monkeypatch, tmp_path) -> None:
     from fleetent.node.backend import LocalProcessBackend
 
@@ -27,7 +34,7 @@ def test_local_backend_spawn_uses_agent_run(monkeypatch, tmp_path) -> None:
 
     def fake_popen(cmd: list[str], **kwargs):
         calls.append((tuple(cmd), kwargs.get("cwd")))
-        return object()
+        return _FakePopen()
 
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
@@ -59,7 +66,7 @@ def test_local_backend_spawn_disables_agent_local_im(monkeypatch, tmp_path) -> N
 
     def fake_popen(cmd: list[str], **kwargs):
         calls.append(tuple(cmd))
-        return object()
+        return _FakePopen()
 
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
@@ -98,6 +105,20 @@ def test_local_backend_stop_uses_agent_stop(monkeypatch, tmp_path) -> None:
     ]
 
 
+def test_local_backend_stop_removes_spawned_process_handle(monkeypatch, tmp_path) -> None:
+    from fleetent.node.backend import LocalProcessBackend
+
+    proc = _FakePopen()
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kwargs: proc)
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kwargs: object())
+
+    backend = LocalProcessBackend(_config(tmp_path))
+    backend.spawn("support")
+    backend.stop("support")
+
+    assert "support" not in backend._procs
+
+
 def test_local_backend_is_alive_reads_pid_file_and_checks_process(monkeypatch, tmp_path) -> None:
     from fleetent.node.backend import LocalProcessBackend
 
@@ -131,6 +152,50 @@ def test_local_backend_is_alive_returns_none_for_stale_pid(monkeypatch, tmp_path
     assert backend.is_alive("support") is None
 
 
+def test_local_backend_is_alive_returns_none_for_exited_spawned_child(
+    monkeypatch, tmp_path
+) -> None:
+    from fleetent.node.backend import LocalProcessBackend
+
+    home = _home(tmp_path)
+    home.mkdir(parents=True)
+    (home / ".fleetent.pid").write_text("12345")
+
+    proc = _FakePopen()
+    proc.returncode = -9
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kwargs: proc)
+    monkeypatch.setattr(os, "kill", lambda pid, sig: None)
+
+    backend = LocalProcessBackend(_config(tmp_path))
+    backend.spawn("support")
+
+    assert backend.is_alive("support") is None
+
+
+def test_local_backend_is_alive_prefers_spawned_child_returncode_over_os_kill(
+    monkeypatch, tmp_path
+) -> None:
+    from fleetent.node.backend import LocalProcessBackend
+
+    home = _home(tmp_path)
+    home.mkdir(parents=True)
+    (home / ".fleetent.pid").write_text("12345")
+
+    proc = _FakePopen()
+    proc.returncode = 1
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kwargs: proc)
+
+    def fake_kill(pid: int, sig: int) -> None:
+        raise AssertionError("os.kill should not be consulted after the child exited")
+
+    monkeypatch.setattr(os, "kill", fake_kill)
+
+    backend = LocalProcessBackend(_config(tmp_path))
+    backend.spawn("support")
+
+    assert backend.is_alive("support") is None
+
+
 # --- task 2.4: spawn must NOT inject secrets via process env ---
 
 
@@ -142,7 +207,7 @@ def test_local_backend_spawn_does_not_inject_secrets_in_process_env(monkeypatch,
 
     def fake_popen(cmd: list[str], **kwargs):
         popen_kwargs.append(kwargs)
-        return object()
+        return _FakePopen()
 
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
 

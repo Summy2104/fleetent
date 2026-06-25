@@ -14,7 +14,7 @@ async def test_agent_memory_evaluation_covers_create_archive_and_proposal_apply(
     from fleetent.db import SQLiteDatabase
     from fleetent.memory import agent_memory as agent_memory_module
     from fleetent.memory import store
-    from fleetent.memory.agent_memory_migrations import MIGRATIONS as AGENT_MEMORY_MIGRATIONS
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
     from fleetent.schema_migrations import migrate
     from tests.integration.test_migrations import apply_migrations
 
@@ -24,7 +24,7 @@ async def test_agent_memory_evaluation_covers_create_archive_and_proposal_apply(
     apply_migrations(db_path)
     database = create_database(f"sqlite:///{db_path}")
     agent_db = SQLiteDatabase(path=agent_db_path)
-    migrate(agent_db, AGENT_MEMORY_MIGRATIONS)
+    migrate(agent_db, AGENT_STATE_MIGRATIONS)
     monkeypatch.setattr(store, "database", lambda: database)
     monkeypatch.setattr(reflection, "_database", lambda: database)
     monkeypatch.setattr(reflection.observability, "record_trace_event", lambda event: None)

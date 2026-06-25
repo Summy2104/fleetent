@@ -113,7 +113,7 @@ describe('chat page', () => {
     expect(transcript.getByText('tool exploded')).toBeInTheDocument();
   });
 
-  it('shows explicit unavailable messaging for unknown and unplaced agents', async () => {
+  it('surfaces ingress error detail for unknown and unavailable agents', async () => {
     const user = userEvent.setup();
 
     server.use(
@@ -124,10 +124,10 @@ describe('chat page', () => {
         ])
       ),
       http.post(`${API_BASE_URL}/admin/agents/ghost/chat`, () =>
-        HttpResponse.json({ error: 'not found' }, { status: 404 })
+        HttpResponse.json({ detail: 'agent ghost not found' }, { status: 404 })
       ),
       http.post(`${API_BASE_URL}/admin/agents/orphan/chat`, () =>
-        HttpResponse.json({ error: 'no placement' }, { status: 503 })
+        HttpResponse.json({ detail: "node 'local-node' service key unavailable" }, { status: 503 })
       )
     );
 
@@ -136,14 +136,14 @@ describe('chat page', () => {
 
     await user.type(screen.getByLabelText('Message'), 'hello');
     await user.click(screen.getByRole('button', { name: 'Send message' }));
-    expect(await screen.findByText('Agent "ghost" was not found.')).toBeInTheDocument();
+    expect(await screen.findByText('Agent "ghost": agent ghost not found')).toBeInTheDocument();
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Agent' }), 'orphan');
     await user.clear(screen.getByLabelText('Message'));
     await user.type(screen.getByLabelText('Message'), 'again');
     await user.click(screen.getByRole('button', { name: 'Send message' }));
     expect(
-      await screen.findByText('Agent "orphan" is unavailable because it has no active placement.')
+      await screen.findByText(`Agent "orphan": node 'local-node' service key unavailable`)
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Message')).toBeEnabled();
   });

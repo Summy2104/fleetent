@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
+.pytest_cache/
+.ruff_cache/
 
 # uv
 .python-version-cache/
@@ -17,6 +19,12 @@ data/
 logs/
 reports/
 .tmp/
+# Stray management DB created when a bare `fleetent` command runs in the repo
+# checkout without FLEETENT_HOME (paths.base_dir() falls back to repo root).
+/management.db
+/management.db-shm
+/management.db-wal
+/tenants/
 
 # Env
 .env

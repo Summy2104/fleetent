@@ -4,7 +4,6 @@ from fleetent import memory
 from fleetent.db import SQLiteDatabase, create_database
 from fleetent.memory import agent_memory as agent_memory_module
 from fleetent.memory import store as memory_store
-from fleetent.memory.agent_memory_migrations import MIGRATIONS as AGENT_MEMORY_MIGRATIONS
 from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
 from fleetent.schema_migrations import migrate
 from tests.integration.test_migrations import apply_migrations
@@ -165,7 +164,7 @@ def _patch_database(tmp_path, monkeypatch) -> tuple[SQLiteDatabase, SQLiteDataba
     db = create_database(f"sqlite:///{db_path}")
     agent_db = SQLiteDatabase(path=agent_db_path)
     migrate(db, AGENT_STATE_MIGRATIONS)
-    migrate(agent_db, AGENT_MEMORY_MIGRATIONS)
+    migrate(agent_db, AGENT_STATE_MIGRATIONS)
     monkeypatch.setattr(memory_store, "_state_db", db)
     monkeypatch.setattr(agent_memory_module, "_agent_memory_db", agent_db)
     monkeypatch.setattr(reflection, "_state_db", db)

@@ -33,6 +33,7 @@ def _agent_file(**overrides: Any) -> Any:
         allowed_skills=["triage"],
         skill_authoring_enabled=False,
         skill_hot_reload=True,
+        skill_user_access={},
         mcp_servers=[],
         mcp=SimpleNamespace(enabled=True, tool_naming="claude"),
         scheduling=SimpleNamespace(enabled=False),
@@ -55,9 +56,7 @@ def test_init_agent_db_schema_wires_router_and_sinks(
     )
     agent_scope = SimpleNamespace(
         vector_backend="agent-vector",
-        agent_memory_vector_backend="agent-memory-vector",
         open_state_db=lambda migrations: ("state-db", migrations),
-        open_agent_memory_db=lambda migrations: ("agent-memory-db", migrations),
     )
     captures: list[tuple[str, Any]] = []
 
@@ -114,6 +113,10 @@ def test_init_agent_db_schema_wires_router_and_sinks(
     assert ("agent_scope", ("tenant-1", "ops")) in captures
     assert ("kb_vector", "kb-vector") in captures
     assert ("agent_vector", "agent-vector") in captures
+    assert any(
+        key == "agent_memory" and value[0][0] == "state-db" and value[1] == "agent-vector"
+        for key, value in captures
+    )
     assert any(key == "artifact_db" for key, _ in captures)
     assert ("views_root", tmp_path / "exchange" / ".views") in captures
 

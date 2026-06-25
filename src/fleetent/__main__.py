@@ -112,14 +112,18 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(1)
 
     if argv and argv[0] == "node":
-        if argv[1:] != ["start"]:
-            print("Usage: fleetent node start", file=sys.stderr)
-            sys.exit(1)
+        if argv[1:2] == ["start"]:
+            from fleetent.node import app as node_app
 
-        from fleetent.node import app as node_app
+            node_app.main()
+            return
+        if argv[1:2] == ["init-config"]:
+            from fleetent.node import init_config as node_init_config
 
-        node_app.main()
-        return
+            node_init_config.main(argv[2:])
+            return
+        print("Usage: fleetent node start | fleetent node init-config", file=sys.stderr)
+        sys.exit(1)
 
     if argv and argv[0] == "chat":
         from fleetent.tui import app as tui_app
@@ -128,6 +132,11 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     if argv and argv[0] == "kb-worker":
+        if argv[1:2] == ["init-config"]:
+            from fleetent.knowledge_base import worker_init_config
+
+            worker_init_config.main(argv[2:])
+            return
         from fleetent.knowledge_base import worker as kb_worker
 
         kb_worker.main(argv[1:])

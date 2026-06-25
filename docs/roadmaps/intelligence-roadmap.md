@@ -6,7 +6,7 @@
 
 **MVP Foundation 已完成。** Memory、Long-term Context、Reflection、Vector Store 和 Knowledge Base 已具备核心 API、store、配置边界、默认测试和 OpenSpec 批次。
 
-**Pilot 后增强首批已大体完成。** advanced parsers、entity extraction、graph_search、KB hybrid rerank、query planner、KB reflection reports、SkillProposal、reflection trend、Shared Memory、context policy、memory quality trend 已落地。
+**Pilot 后增强首批已大体完成。** advanced parsers、entity extraction、graph_search、KB hybrid rerank、query planner、KB reflection reports、SkillProposal、reflection trend、Agent Memory（原 Shared Memory，已重命名并收归 agent 级 per-agent 物理库）、context policy、memory quality trend 已落地。
 
 **Go。** Google Drive / Confluence 已完成真实 API check、sync 和本地 KB 入库验证；Jina embedding / rerank provider 已完成真实 smoke、evaluation 和 228 chunk 全量 reindex 验证；Memory extraction、Long-term Context 和 Reflection 的真实 LLM / provider smoke 已通过。生产化入口缺口已接受为 post-Go non-blocking backlog，不阻塞当前 Intelligence Go 判定。
 
@@ -31,8 +31,8 @@
 
 | 能力域 | 文档 | 负责范围 |
 | --- | --- | --- |
-| Memory | [../memory.md](../memory.md) | User Memory、Shared Memory、extraction、merge/update/delete、retention / compaction、quality trend |
-| Long-term Context | [../long-term-ctx.md](../long-term-ctx.md) | memory / KB / Shared Memory context selection、token budget、prompt injection、context policy |
+| Memory | [../memory.md](../memory.md) | User Memory、Agent Memory（原 Shared Memory）、extraction、merge/update/delete、retention / compaction、quality trend |
+| Long-term Context | [../long-term-ctx.md](../long-term-ctx.md) | memory / KB / Agent Memory context selection、token budget、prompt injection、context policy |
 | Reflection | [../reflection.md](../reflection.md) | trace / memory / KB 反思、User Memory maintenance proposal、SkillProposal、trend summary |
 | Vector Store | [../vector-store.md](../vector-store.md) | vector backend、embedding / rerank provider、reindex |
 | Knowledge Base | [../knowledge-base.md](../knowledge-base.md) | document ingest、local / Google Drive / Confluence sync、hybrid / graph / rerank / planner |
@@ -49,7 +49,7 @@
 | --- | --- | --- | --- | --- |
 | MVP Foundation | 已实现 | 核心 API、store、配置边界、默认测试、evaluation baseline、OpenSpec 批次 | 无 foundation 级大缺口 | 无 |
 | Pilot MVP 工程前置 | Go | agent KB binding、connector operations、默认可见范围、local ingest、deterministic evaluation、Google Drive / Confluence 真实入库 smoke、真实 KB retrieval E2E、全量真实 embedding reindex | 无当前 Go blocker | platform UI / HTTP 查询入口 |
-| Pilot 后增强首批 | Go | advanced parsers、entity extraction、graph_search、KB hybrid rerank、query planner、KB reflection reports、SkillProposal、reflection trend、Shared Memory、context policy、memory quality trend、真实 embedding / rerank smoke、真实 LLM smoke | 无当前 Go blocker | 自动知识库修复、自动 skill 发布 |
+| Pilot 后增强首批 | Go ✅ | advanced parsers、entity extraction、graph_search、KB hybrid rerank、query planner、KB reflection reports、SkillProposal、reflection trend、Agent Memory（原 Shared Memory，2026-06-24 重命名落地）、context policy、memory quality trend、真实 embedding / rerank smoke、真实 LLM smoke | 无当前 Go blocker | 自动知识库修复、自动 skill 发布 |
 | 管理和运维入口 | Post-Go backlog | admin CLI 和 public API 可用 | policy admin API、review UI、scheduler / worker、full sync history、后台 reindex job runtime、告警 | dashboard / workflow UI |
 | 高复杂增强 | 暂缓 | 已完成进入条件评估 | 无 | document-level ACL、OCR / VLM / 扫描 PDF、sqlite-vec / Qdrant / OpenSearch adapter、真实 tokenizer、LLM-driven selection |
 
@@ -57,8 +57,8 @@
 
 | 能力 | 当前状态 | 已有基础 | 当前缺口 | 后续增强 |
 | --- | --- | --- | --- | --- |
-| Memory semantic store | 基础完成 | SQLite `memory_items`、create/update/delete/ignore、vector index、mock evaluation、combined embedding evaluation、retention / compaction API、owner-approved reflection maintenance apply API、Shared Memory `shared_memory_items`、team / tenant scope、`shared:{scope_type}:{scope_id}` namespace、只读 memory quality trend summary | scheduler / review UI / 告警；Shared Memory 生产默认策略和编辑入口 | 真实 LLM 长期质量评估 |
-| Long-term context | 基础完成 | memory / knowledge provider 接入、context source attribution、deterministic evaluation fixture、deterministic budget policy；agent / tenant context policy（tenant 默认 + agent 覆盖）按 agent 归属注入 Shared Memory（tenant / team），默认关闭、无跨 tenant/team 访问 | policy 编辑 UI 与 admin API | 真实 tokenizer、个性化 budget、LLM-driven selection |
+| Memory semantic store | 基础完成 ✅ | SQLite `memory_items`、create/update/delete/ignore、vector index、mock evaluation、combined embedding evaluation、retention / compaction API、owner-approved reflection maintenance apply API、Agent Memory `agent_memory_items`（per-agent 物理库，`agentmem:` namespace，2026-06-24 落地）、只读 memory quality trend summary | scheduler / review UI / 告警；Agent Memory 生产默认策略和编辑入口 | 真实 LLM 长期质量评估 |
+| Long-term context | 基础完成 | memory / knowledge provider 接入、context source attribution、deterministic evaluation fixture、deterministic budget policy；agent context policy（tenant 默认 + agent 覆盖）按 context policy 控制 Agent Memory 注入，默认关闭 | policy 编辑 UI 与 admin API | 真实 tokenizer、个性化 budget、LLM-driven selection |
 | Reflection | 基础完成 | 读取 trace / memory 生成建议报告、deterministic report evaluation、User Memory maintenance proposal lifecycle、KB reflection reports、SkillProposal lifecycle、只读 reflection trend summary | review UI / scheduler / scope-aware SkillProposal 归属 | 自动知识库修复、自动 skill 发布 |
 | Vector store | Go | public API、namespace、in-memory backend、SQLite backend、embedding / rerank provider abstraction、同步 reindex API、provider retry / pacing、combined embedding evaluation、KB hybrid rerank 接入与 deterministic rerank evaluation、Jina embedding / rerank 真实 smoke、全量真实 provider reindex | 后台 reindex job runtime 为 post-Go backlog | sqlite-vec、Qdrant、OpenSearch adapter |
 | Knowledge base | Go | local ingest、parser registry、PDF / DOCX / PPTX / XLSX parser、chunking、vector + BM25 + hybrid retrieval、sync planner、evaluation fixture、reindex source iterator、combined embedding evaluation、Google Drive / Confluence connector baseline、Google Sheets / Slides export parsing、entity extraction schema + explicit run、`kb_extraction_runs`、`kb_entities`、独立于 search 的 `graph_search` depth 0/1 graph evidence、hybrid rerank、规则型 query planner、agent 到多 KB 绑定、connector operations CLI / latest status、Google Drive / Confluence 真实入库 smoke、真实 KB retrieval E2E、全量真实 embedding reindex | 生产凭据管理、scheduler / full sync history 为 post-Go backlog；graph / rerank 已通过 planner 串联但尚未成为 `search(mode="auto")` 默认路径 | document-level ACL、attachments / OCR / VLM |

@@ -15,12 +15,11 @@ RUN uv sync --no-dev --frozen
 COPY src/ ./src/
 COPY migrations/ ./migrations/
 COPY scripts/ ./scripts/
-COPY platform.yaml.example ./.env.example ./
-COPY agents/default/ ./agents/default/
+COPY platform.yaml.example .env.example agent.yaml.example agent.env.example ./
 COPY alembic.ini ./
 
 # Create runtime dirs
-RUN mkdir -p data agents/default secrets && chmod +x scripts/docker_entrypoint.sh
+RUN mkdir -p data secrets && chmod +x scripts/docker_entrypoint.sh
 
 EXPOSE 8765
 

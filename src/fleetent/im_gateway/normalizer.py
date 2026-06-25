@@ -442,6 +442,7 @@ async def _resume_pending_in_session(
             session_context=session_context,
             conversation_address=conversation_address,
             skill_authoring_enabled=agent.skill_authoring_enabled if agent else False,
+            skill_user_access=agent.skill_user_access if agent else None,
         )
 
     # upload_func is rebuilt for parity with the inbound path; the resumed run delivers
@@ -623,7 +624,13 @@ async def route(msg: NormalizedMessage, principal: Principal | None = None) -> N
     _maybe_refresh_skills(agent)
     # System message ordered stable→variable for prefix caching: base system + the
     # <available_skills> catalog. Per-user long-term context is injected by run().
-    catalog = available_skills_prompt(allowed_skills=agent.allowed_skills if agent else None)
+    # skill-user-access: hide restricted skills from this requester (user_id + chat_type).
+    catalog = available_skills_prompt(
+        allowed_skills=agent.allowed_skills if agent else None,
+        user_id=msg.user_id,
+        chat_type=_chat_type(msg),
+        skill_user_access=agent.skill_user_access if agent else None,
+    )
     disabled_trace = collect_disabled_trace() or None
     # Fold the per-agent user.md directives into the stable prefix, between the base
     # system prompt and the skills catalog (same ordering as runtime _assemble_prompt).
@@ -733,6 +740,7 @@ async def route(msg: NormalizedMessage, principal: Principal | None = None) -> N
                 session_context=msg.session_context,
                 conversation_address=msg.conversation_address,
                 skill_authoring_enabled=agent.skill_authoring_enabled if agent else False,
+                skill_user_access=agent.skill_user_access if agent else None,
             )
 
         # P4: session_end hook — observe after run completes, before session save.

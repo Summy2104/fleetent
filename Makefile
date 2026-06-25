@@ -2,7 +2,7 @@
 
 .PHONY: help install test t test-pr test-unit test-unit-ci test-coverage-ci test-integration test-e2e test-evaluation test-layers lint fmt check typecheck platform-help \
 	frontend-install frontend-build test-frontend \
-	dev-bootstrap platform node-provision node kb-worker agent chat dev-clean
+	dev-bootstrap dev-reset platform node-provision node kb-worker agent chat dev-clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -91,43 +91,59 @@ platform-help: ## Show platform CLI help
 # which isolate FLEETENT_HOME themselves. Run each long-running service in its
 # own terminal. NOTE: always `python -m uvicorn` (a bare `uv run uvicorn`
 # resolves to a system uvicorn that can't import fleetent).
+#
+# FLEETENT_SECRET_KEY uses deferred `=` (NOT `:=`): it must be read from
+# .dev_secret_key when each recipe RUNS, not at parse time. `dev-reset` deletes
+# and regenerates the key mid-invocation (dev-clean → dev-bootstrap), so a
+# parse-time `:=` would capture the stale pre-reset key and node-provision would
+# encrypt the node service key with a key that no longer matches the file —
+# breaking platform ingress with "service key unavailable".
 FLEETENT_HOME ?= $(CURDIR)/.fleetent-dev
 DATABASE_URL  ?= sqlite:///$(FLEETENT_HOME)/management.db
-PLATFORM_PORT ?= 8770
-AGENT_PORT    ?= 8765
+PLATFORM_PORT ?= 8765
+AGENT_PORT    ?= 8766
 NODE_ID       ?= local-node
 NODE_PLATFORM_URL ?= http://127.0.0.1:$(PLATFORM_PORT)
 
-DEV_TARGETS := dev-bootstrap platform node-provision node kb-worker agent chat dev-clean
+DEV_TARGETS := dev-bootstrap dev-reset platform node-provision node kb-worker agent chat dev-clean
 $(DEV_TARGETS): export FLEETENT_HOME := $(FLEETENT_HOME)
 $(DEV_TARGETS): export DATABASE_URL := $(DATABASE_URL)
 $(DEV_TARGETS): export NODE_ID := $(NODE_ID)
 $(DEV_TARGETS): export NODE_PLATFORM_URL := $(NODE_PLATFORM_URL)
-$(DEV_TARGETS): export FLEETENT_SECRET_KEY := $(shell cat "$(FLEETENT_HOME)/.dev_secret_key" 2>/dev/null || true)
+$(DEV_TARGETS): export FLEETENT_SECRET_KEY = $(shell cat "$(FLEETENT_HOME)/.dev_secret_key" 2>/dev/null || true)
 $(DEV_TARGETS): export FLEETENT_FORWARDER_HOST_OVERRIDE := 127.0.0.1
 
-dev-bootstrap: ## Init dev home: migrate management DB + seed built-in admin
+dev-bootstrap: ## Init dev home: migrate management DB + seed built-in admin + scaffold env files
 	mkdir -p "$(FLEETENT_HOME)"
 	uv run python scripts/dev_secret_key.py
 	uv run alembic upgrade head
 	uv run fleetent platform seed-builtin-admin
+	uv run fleetent platform init-config --home "$(FLEETENT_HOME)"
+	uv run fleetent node init-config
+	uv run fleetent kb-worker init-config
 
-platform: ## Start platform control-plane (admin API/UI), default port 8770
+dev-reset: dev-clean dev-bootstrap node-provision ## Wipe + re-init dev home from scratch (clean → bootstrap → provision node)
+	@echo "dev home reset: $(FLEETENT_HOME) — start services with 'make platform', 'make node', 'make kb-worker'"
+
+platform: ## Start platform control-plane (admin API/UI), default port 8765
 	uv run fleetent platform serve --host 127.0.0.1 --port $(PLATFORM_PORT)
 
 node-provision: ## Register the dev node + write node/.env (idempotent; FORCE=1 to re-key)
 	uv run python scripts/dev_node_provision.py $(if $(FORCE),--force,)
 
-node: ## Start node supervisor (run node-provision first)
+node: node-provision ## Start node supervisor (auto-provisions node/.env first; idempotent)
 	uv run fleetent node start
 
 kb-worker: ## Start the KB ingest worker (single queue consumer)
 	uv run fleetent kb-worker
 
-agent: ## Run one agent directly with HTTP /chat+/ws: make agent AGENT=<name> [AGENT_PORT=8765]
-	@test -n "$(AGENT)" || { echo "usage: make agent AGENT=<name> [AGENT_PORT=8765]"; exit 2; }
+agent: ## Run one agent directly with HTTP /chat+/ws: make agent AGENT=<name> [AGENT_PORT=8766]
+	@test -n "$(AGENT)" || { echo "usage: make agent AGENT=<name> [AGENT_PORT=8766]"; exit 2; }
 	uv run fleetent agent run "$(AGENT)" --home "$(FLEETENT_HOME)/tenants/default/agents/$(AGENT)" --port $(AGENT_PORT)
 
+# NOTE: the default URL targets AGENT_PORT, which only matches an agent started via
+# `make agent`. Node-managed agents (`make node`) listen on a random loopback port
+# allocated per spawn — pass URL=ws://127.0.0.1:<that-port>/ws explicitly for those.
 chat: ## Connect the terminal TUI to an agent: make chat TOKEN=<tui-token> [URL=ws://...]
 	@test -n "$(TOKEN)" || { echo "usage: make chat TOKEN=<tui-token> [URL=ws://...]"; exit 2; }
 	uv run fleetent chat --url "$(or $(URL),ws://127.0.0.1:$(AGENT_PORT)/ws)" --token "$(TOKEN)"

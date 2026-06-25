@@ -11,8 +11,8 @@
 # static global secret inventory. The committed process-level .env.example holds only
 # cross-agent vars, e.g. FLEETENT_SECRET_KEY — the secret-store master key for
 # inject-mode values.
-# (This template ends in `.example`; install.sh copies it to
-#  FLEETENT_HOME/agents/default/agent.yaml for the default local Agent.)
+# (This template ends in `.example`; it is copied to the agent home as
+#  FLEETENT_HOME/tenants/default/agents/<id>/agent.yaml for the default local Agent.)
 #
 # Single-agent mode: this agent is the sole, forced-default agent, so there is no
 # routing table and `bindings.default` does not apply. `bindings.channels/users`
@@ -109,6 +109,12 @@ skill_authoring_enabled: false     # true exposes the skill_manage tool (user-dr
                                    # approval-gated skill create/edit/delete); default off
 skill_hot_reload: true             # auto-reload skills when their files change on disk
                                    # (checked before each message); false = boot scan only
+skill_user_access: {}              # per-skill user allowlist (skill name -> [user_id, ...]).
+                                   # listed skills are "restricted": visible/usable ONLY in DM
+                                   # by the listed users — hidden from catalog, refused by
+                                   # read_skill, and physically absent from other users'
+                                   # sandbox view. unlisted skills stay open to all. e.g.
+                                   #   payroll-tools: ["U0123", "U0456"]
 
 # ── tools / capabilities ──
 allowed_tools:                     # fnmatch patterns; MCP tools are "<server>__<tool>"

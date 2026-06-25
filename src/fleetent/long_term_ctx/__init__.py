@@ -11,12 +11,13 @@ from fleetent.db import SQLiteDatabase, create_database
 from fleetent.knowledge_base.core import KnowledgeStore
 from fleetent.knowledge_base.retrieval.search import SearchMode
 from fleetent.knowledge_base.retrieval.search import search as kb_search
+from fleetent.memory import agent_memory
 from fleetent.observability import KBRetrievalAuditContext
 
 _MEMORY_LIMIT = 10
 _KNOWLEDGE_LIMIT = 10
 
-ConflictPreference = Literal["auto", "memory", "knowledge"]
+ConflictPreference = Literal["auto", "memory", "knowledge", "agent_memory"]
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,7 @@ class BudgetMetadata:
     effective_budget: int = 0
     memory_used_tokens: int = 0
     knowledge_used_tokens: int = 0
+    agent_memory_used_tokens: int = 0
     decisions: list[BudgetDecision] = field(default_factory=list)
 
 
@@ -58,8 +60,10 @@ class BudgetPolicy:
     max_tokens: int
     memory_max_tokens: int
     knowledge_max_tokens: int
+    agent_memory_max_tokens: int
     memory_top_k: int
     knowledge_top_k: int
+    agent_memory_top_k: int
     conflict_preference: ConflictPreference = "auto"
 
 
@@ -163,7 +167,14 @@ async def build_context(
         _KNOWLEDGE_LIMIT,
         audit_context=audit_context,
     )
-    if not memories and not knowledge_results:
+    try:
+        agent_memory_results = await agent_memory.search_agent_memory(
+            query, limit=policy.agent_memory_top_k
+        )
+    except RuntimeError:
+        # agent_memory backend not wired in this process (e.g. platform-only context)
+        agent_memory_results = []
+    if not memories and not knowledge_results and not agent_memory_results:
         return BuiltContext(
             text="",
             sources=[],
@@ -178,12 +189,17 @@ async def build_context(
         (_knowledge_candidate(item) for item in knowledge_results),
         key=lambda candidate: (-candidate.source.score, candidate.source.source_id),
     )
+    agent_memory_candidates = sorted(
+        (_agent_memory_candidate(item) for item in agent_memory_results),
+        key=lambda candidate: (-candidate.source.score, candidate.source.source_id),
+    )
     selection = _select_candidates(
         _ordered_candidates(
             query=query,
             policy=policy,
             memory_candidates=memory_candidates,
             knowledge_candidates=knowledge_candidates,
+            agent_memory_candidates=agent_memory_candidates,
         ),
         policy=policy,
     )
@@ -195,6 +211,7 @@ async def build_context(
             effective_budget=policy.max_tokens,
             memory_used_tokens=selection.memory_used_tokens,
             knowledge_used_tokens=selection.knowledge_used_tokens,
+            agent_memory_used_tokens=selection.agent_memory_used_tokens,
             decisions=selection.decisions,
         ),
     )
@@ -206,8 +223,10 @@ def _resolve_policy(available_tokens: int) -> BudgetPolicy:
         max_tokens=min(available_tokens, settings.max_tokens),
         memory_max_tokens=settings.memory_max_tokens,
         knowledge_max_tokens=settings.knowledge_max_tokens,
+        agent_memory_max_tokens=settings.agent_memory_max_tokens,
         memory_top_k=settings.memory_top_k,
         knowledge_top_k=settings.knowledge_top_k,
+        agent_memory_top_k=settings.agent_memory_top_k,
         conflict_preference=settings.conflict_preference,
     )
 
@@ -218,20 +237,26 @@ class _Selection:
     decisions: list[BudgetDecision]
     memory_used_tokens: int
     knowledge_used_tokens: int
+    agent_memory_used_tokens: int
 
 
 def _select_candidates(candidates: list[_ContextCandidate], *, policy: BudgetPolicy) -> _Selection:
     included: list[_ContextCandidate] = []
     decisions: list[BudgetDecision] = []
-    included_by_type = {"memory": 0, "knowledge": 0}
-    used_by_type = {"memory": 0, "knowledge": 0}
+    included_by_type = {"memory": 0, "knowledge": 0, "agent_memory": 0}
+    used_by_type = {"memory": 0, "knowledge": 0, "agent_memory": 0}
 
     for candidate in candidates:
         source_type = candidate.source.source_type
-        top_k = policy.memory_top_k if source_type == "memory" else policy.knowledge_top_k
-        source_budget = (
-            policy.memory_max_tokens if source_type == "memory" else policy.knowledge_max_tokens
-        )
+        if source_type == "memory":
+            top_k = policy.memory_top_k
+            source_budget = policy.memory_max_tokens
+        elif source_type == "agent_memory":
+            top_k = policy.agent_memory_top_k
+            source_budget = policy.agent_memory_max_tokens
+        else:
+            top_k = policy.knowledge_top_k
+            source_budget = policy.knowledge_max_tokens
         reason = ""
         if candidate.source.score <= 0:
             reason = "below_relevance_threshold"
@@ -256,6 +281,7 @@ def _select_candidates(candidates: list[_ContextCandidate], *, policy: BudgetPol
         decisions=decisions,
         memory_used_tokens=used_by_type["memory"],
         knowledge_used_tokens=used_by_type["knowledge"],
+        agent_memory_used_tokens=used_by_type["agent_memory"],
     )
 
 
@@ -265,16 +291,20 @@ def _ordered_candidates(
     policy: BudgetPolicy,
     memory_candidates: list[_ContextCandidate],
     knowledge_candidates: list[_ContextCandidate],
+    agent_memory_candidates: list[_ContextCandidate],
 ) -> list[_ContextCandidate]:
     preference = policy.conflict_preference
     if preference == "auto":
         preference = _infer_conflict_preference(query)
     if preference == "knowledge":
-        return [*knowledge_candidates, *memory_candidates]
-    return [*memory_candidates, *knowledge_candidates]
+        return [*knowledge_candidates, *agent_memory_candidates, *memory_candidates]
+    if preference == "agent_memory":
+        return [*agent_memory_candidates, *memory_candidates, *knowledge_candidates]
+    # "memory" and default
+    return [*memory_candidates, *agent_memory_candidates, *knowledge_candidates]
 
 
-def _infer_conflict_preference(query: str) -> Literal["memory", "knowledge"]:
+def _infer_conflict_preference(query: str) -> Literal["memory", "knowledge", "agent_memory"]:
     normalized = query.casefold()
     personal_markers = (
         " my ",
@@ -324,6 +354,13 @@ def _decision(candidate: _ContextCandidate, *, included: bool, reason: str) -> B
     )
 
 
+_SECTION_HEADERS = {
+    "memory": "[Long-term memory]",
+    "agent_memory": "[Agent memory]",
+    "knowledge": "[Knowledge]",
+}
+
+
 def _render_context(candidates: list[_ContextCandidate]) -> str:
     lines: list[str] = []
     active_section = ""
@@ -332,7 +369,7 @@ def _render_context(candidates: list[_ContextCandidate]) -> str:
         if source_type != active_section:
             if lines:
                 lines.append("")
-            lines.append("[Long-term memory]" if source_type == "memory" else "[Knowledge]")
+            lines.append(_SECTION_HEADERS.get(source_type, "[Knowledge]"))
             active_section = source_type
         lines.append(candidate.line)
     return "\n".join(lines)
@@ -346,6 +383,21 @@ def _memory_candidate(memory_item: memory.MemoryItem) -> _ContextCandidate:
             source_id=memory_item.id,
             score=1.0,
             metadata={"type": memory_item.type},
+            token_estimate=len(line),
+        ),
+        line=line,
+        token_estimate=len(line),
+    )
+
+
+def _agent_memory_candidate(item: agent_memory.AgentMemoryItem) -> _ContextCandidate:
+    line = f"- {item.content}"
+    return _ContextCandidate(
+        source=ContextSource(
+            source_type="agent_memory",
+            source_id=item.id,
+            score=1.0,
+            metadata={"type": item.type},
             token_estimate=len(line),
         ),
         line=line,
