@@ -54,7 +54,7 @@ function renderTenancyPage(): void {
 
 describe('tenancy page', () => {
   it('lets admins list and create tenants, assign user tenancy, and set tenant approvers', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let tenants: TenantRecord[] = [
       {
         approver_user_id: null,

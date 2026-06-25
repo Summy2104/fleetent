@@ -40,7 +40,7 @@ afterEach(() => {
 
 describe('sessions page', () => {
   it('supports browsing, detail, governance actions, and dangerous confirmations for admins', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let sessions = [
       {
         session_id: 'sess-1',

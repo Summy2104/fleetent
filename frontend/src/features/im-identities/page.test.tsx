@@ -65,7 +65,7 @@ describe('im-identities page', () => {
   });
 
   it('creates a new binding and shows it in the list', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let mappings: Array<Record<string, unknown>> = [];
 
     server.use(
@@ -124,7 +124,7 @@ describe('im-identities page', () => {
   });
 
   it('keeps the form open when create fails', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     // The page fires the create mutation via `void submit()`; on failure the
     // rejected promise floats. Swallow it so it does not surface as an
     // unhandled rejection that Vitest flags as a false-positive error.
@@ -169,7 +169,7 @@ describe('im-identities page', () => {
   });
 
   it('deletes a binding and removes it from the list', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let mappings = [
       {
         created_at: '2026-06-21T09:00:00Z',

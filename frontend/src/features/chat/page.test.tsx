@@ -28,7 +28,7 @@ function renderChatPage(): void {
 
 describe('chat page', () => {
   it('streams assistant replies into the transcript and surfaces stream errors in the conversation', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const encoder = new TextEncoder();
     const tail: { release: (() => void) | null } = { release: null };
 
@@ -119,7 +119,7 @@ describe('chat page', () => {
   });
 
   it('surfaces ingress error detail for unknown and unavailable agents', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
 
     server.use(
       http.get(`${API_BASE_URL}/admin/agents`, () =>

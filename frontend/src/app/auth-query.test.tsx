@@ -104,7 +104,7 @@ describe('admin auth + query data layer', () => {
   });
 
   it('invalidates the agents list after a successful mutation', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let agents = [{ agent_name: 'alpha', status: 'enabled', provenance: 'adhoc' }];
 
     server.use(

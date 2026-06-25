@@ -33,7 +33,7 @@ function renderTeamsPage(): void {
 
 describe('teams page', () => {
   it('lets admins list and create teams, and set a team approver', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let teams: TeamRecord[] = [
       {
         approver_user_id: null,

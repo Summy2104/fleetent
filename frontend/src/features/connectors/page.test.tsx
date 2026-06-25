@@ -32,7 +32,7 @@ afterEach(() => {
 
 describe('connectors page', () => {
   it('supports oauth connector create, edit, delete, test, authorize, revoke, offboarding, and keeps credentials write-only', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     vi.spyOn(window, 'open').mockReturnValue(null);
 
     let connectors: Array<{
@@ -190,5 +190,5 @@ describe('connectors page', () => {
     await waitFor(() => {
       expect(screen.queryByText('GitHub Enterprise')).not.toBeInTheDocument();
     });
-  }, 15000);
+  });
 });

@@ -69,7 +69,7 @@ afterEach(() => {
 
 describe('users page parity baseline', () => {
   it('supports user CRUD, role changes, block/unblock, delete, and one-time key secrets', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let keyListCalls = 0;
     let users: UserRecord[] = [
       {
@@ -299,7 +299,7 @@ describe('users page parity baseline', () => {
   });
 
   it('supports IM identity bind, block, and restore flows', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let users: UserRecord[] = [
       {
         email: 'alice@fleetent.test',

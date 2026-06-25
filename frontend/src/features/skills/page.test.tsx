@@ -48,7 +48,7 @@ function renderSkillsPage(): void {
 
 describe('skills page parity baseline', () => {
   it('supports native skills admin flows and keeps proposals read-only', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let reloadCount = 0;
     const activeVersion = 'sha-1';
     let skills: SkillRecord[] = [
@@ -331,7 +331,7 @@ describe('skills page backflow approval', () => {
   }
 
   it('lists proposals, shows diff, and posts accept/reject/fork decisions', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('crm-ops-fork');
     const acceptHeaders: (string | null)[] = [];
@@ -381,7 +381,7 @@ describe('skills page backflow approval', () => {
   });
 
   it('does not accept a conflict proposal when confirmation is cancelled', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
     const acceptHeaders: (string | null)[] = [];
 
@@ -424,7 +424,7 @@ describe('skills page content + search', () => {
   }
 
   it('filters skills by name via the search box', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const skills: SkillRecord[] = [
       {
         audit_verdict: 'pass',
@@ -466,7 +466,7 @@ describe('skills page content + search', () => {
   });
 
   it('shows the published skill content in the content dialog', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const skills: SkillRecord[] = [
       {
         audit_verdict: 'pass',

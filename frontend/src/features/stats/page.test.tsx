@@ -49,7 +49,7 @@ afterEach(() => {
 
 describe('stats page', () => {
   it('renders per-user, overview, compare, request detail, session trace, and export flows', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const nativeCreateObjectUrl =
       typeof URL.createObjectURL === 'function'
         ? (blob: Blob | MediaSource) => URL.createObjectURL(blob)

@@ -46,7 +46,7 @@ afterEach(() => {
 
 describe('providers page', () => {
   it('renders masked providers and supports create, edit, delete, connectivity tests, and pricing updates', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     let providers: ProviderRecord[] = [
@@ -209,5 +209,5 @@ describe('providers page', () => {
     await waitFor(() => {
       expect(screen.queryByText('alpha')).not.toBeInTheDocument();
     });
-  }, 15000);
+  });
 });

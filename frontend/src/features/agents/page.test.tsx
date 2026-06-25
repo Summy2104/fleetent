@@ -436,7 +436,7 @@ describe('agents list page lifecycle', () => {
     await waitFor(() => {
       expect(screen.queryByText('beta')).not.toBeInTheDocument();
     });
-  }, 20000);
+  });
 
   it('toggles the default badge via the row action menu', async () => {
     const user = userEvent.setup({ delay: null });
@@ -698,7 +698,7 @@ describe('agent configure page bindings', () => {
       const refreshedV2 = screen.getByText('v2').closest('tr') as HTMLElement;
       expect(within(refreshedV2).getByText('active')).toBeInTheDocument();
     });
-  }, 30000);
+  });
 
   it('keeps viewers read-only across binding tabs', async () => {
     const user = userEvent.setup({ delay: null });
@@ -767,7 +767,7 @@ describe('agent configure page bindings', () => {
     expect(screen.getByRole('switch', { name: 'Supports direct messages' })).toBeDisabled();
     expect(screen.queryByPlaceholderText('e.g. C0123 / -1001234567')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add' })).not.toBeInTheDocument();
-  }, 20000);
+  });
 });
 
 describe('agents list page status display', () => {

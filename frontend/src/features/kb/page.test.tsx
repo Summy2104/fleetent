@@ -57,7 +57,7 @@ function renderPage(): void {
 
 describe('knowledge base page', () => {
   it('supports kb create/edit/delete plus document ingest, list, delete, and sync', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
 
     let knowledgeBases: KnowledgeBaseRecord[] = [
       {
@@ -256,7 +256,7 @@ describe('knowledge base page', () => {
   });
 
   it('supports connector registration, status, check, sync, edit, and delete', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
 
     let connectors: ConnectorRecord[] = [
       {
