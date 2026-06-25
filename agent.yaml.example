@@ -11,8 +11,8 @@
 # static global secret inventory. The committed process-level .env.example holds only
 # cross-agent vars, e.g. FLEETENT_SECRET_KEY — the secret-store master key for
 # inject-mode values.
-# (This template ends in `.example`; install.sh copies it to
-#  FLEETENT_HOME/agents/default/agent.yaml for the default local Agent.)
+# (This template ends in `.example`; it is copied to the agent home as
+#  FLEETENT_HOME/tenants/default/agents/<id>/agent.yaml for the default local Agent.)
 #
 # Single-agent mode: this agent is the sole, forced-default agent, so there is no
 # routing table and `bindings.default` does not apply. `bindings.channels/users`
