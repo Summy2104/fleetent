@@ -155,8 +155,13 @@ describe('stats page', () => {
     expect(await screen.findByRole('heading', { name: 'Statistics' })).toBeInTheDocument();
 
     // The dashboard mounts only after picking an agent (auto-filled to the first)
-    // and pressing Load.
-    await user.click(await screen.findByRole('button', { name: 'Load' }));
+    // and pressing Load. The Load button stays disabled until the agents query
+    // resolves and the auto-fill effect sets the picked agent, so wait for it to
+    // become enabled before clicking — otherwise the click lands on a disabled
+    // button and is silently dropped.
+    const loadButton = await screen.findByRole('button', { name: 'Load' });
+    await waitFor(() => expect(loadButton).toBeEnabled());
+    await user.click(loadButton);
 
     await waitFor(() => {
       expect(screen.getByText('u1')).toBeInTheDocument();
