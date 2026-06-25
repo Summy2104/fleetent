@@ -1,7 +1,7 @@
 """Tests for stats_admin_api (/admin/stats, read-only). Covers scenarios 74-85."""
 
 import importlib
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import FastAPI
@@ -249,6 +249,10 @@ def test_stats_overview_uses_real_traces(real_client):  # task 2.1 red -> green
         api_key="sk-test",
     )
     provider_admin_store.set_pricing("provider-a", input_price=1.0, output_price=2.0)
+    # Anchor traces to "now" rather than a fixed calendar date: the overview
+    # endpoint defaults to a 7d window relative to the wall clock, so a hardcoded
+    # past date silently falls out of the window once enough real time elapses.
+    recent = datetime.now(UTC) - timedelta(minutes=5)
     trace_store.record_trace_event(
         TraceEvent(
             id="trace-run-1",
@@ -263,7 +267,7 @@ def test_stats_overview_uses_real_traces(real_client):  # task 2.1 red -> green
             user_id="user-1",
             session_id="sess-1",
             agent_name="ops",
-            ts=datetime(2026, 6, 18, 8, 0, tzinfo=UTC),
+            ts=recent,
         )
     )
     trace_store.record_trace_event(
@@ -275,7 +279,7 @@ def test_stats_overview_uses_real_traces(real_client):  # task 2.1 red -> green
             user_id="user-1",
             session_id="sess-1",
             agent_name="ops",
-            ts=datetime(2026, 6, 18, 8, 0, 1, tzinfo=UTC),
+            ts=recent + timedelta(seconds=1),
         )
     )
     token, _ = _session_for("admin")

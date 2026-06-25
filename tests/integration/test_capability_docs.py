@@ -25,9 +25,7 @@ def test_owner_roadmap_marks_advanced_file_parsers_complete():
 
 
 def test_pilot_capability_verification_report_is_documented():
-    roadmap = Path("docs/roadmaps/pilot-readiness-roadmap.md").read_text(
-        encoding="utf-8"
-    )
+    roadmap = Path("docs/roadmaps/pilot-readiness-roadmap.md").read_text(encoding="utf-8")
     acceptance = Path("docs/operations/pilot-acceptance-guide.md").read_text(encoding="utf-8")
     runbook = Path("docs/operations/pilot-runbook.md").read_text(encoding="utf-8")
 
@@ -110,19 +108,19 @@ def test_capability_docs_describe_skill_reflection_proposals_scope():
         assert "不自动改 skill" in content
 
 
-def test_capability_docs_describe_shared_memory_scope():
+def test_capability_docs_describe_agent_memory_scope():
     memory_doc = Path("docs/capabilities/memory.md").read_text(encoding="utf-8")
     long_term_doc = Path("docs/capabilities/long-term-ctx.md").read_text(encoding="utf-8")
     roadmap = Path("docs/roadmaps/intelligence-roadmap.md").read_text(encoding="utf-8")
 
     for content in [memory_doc, long_term_doc, roadmap]:
         assert "Shared Memory" in content
-        assert "team" in content
-        assert "tenant" in content
-        # Shared Memory prompt injection is governed by the long-term-ctx context policy.
+        # Shared/Agent Memory prompt injection is governed by the long-term-ctx context policy.
         assert "context policy" in content
 
-    # The raw vector namespace remains documented in the data-layer docs.
-    for content in [memory_doc, roadmap]:
-        assert "shared_memory_items" in content
-        assert "shared:{scope_type}:{scope_id}" in content
+    # The agent-memory rescope renamed shared memory to agent-level Agent Memory
+    # (the team/tenant scope was dropped): memory.md describes the migrated surface,
+    # storage table, and vector namespace.
+    assert "Agent Memory" in memory_doc
+    assert "agent_memory_items" in memory_doc
+    assert "agentmem:" in memory_doc
