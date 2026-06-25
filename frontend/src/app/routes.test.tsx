@@ -43,7 +43,7 @@ describe('admin routes', () => {
 
     renderRoutes('/agents', 'session-token', true);
 
-    expect(await screen.findByRole('heading', { name: 'Change password' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Set a new password' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Agents' })).not.toBeInTheDocument();
   });
 
@@ -61,18 +61,19 @@ describe('admin routes', () => {
 
     const field = await screen.findByLabelText('New password');
     await userEvent.type(field, 's3cret-new');
-    await userEvent.click(screen.getByRole('button', { name: 'Update password' }));
+    // The gate now also requires a matching confirmation before the submit enables.
+    await userEvent.type(screen.getByLabelText('Confirm new password'), 's3cret-new');
+    await userEvent.click(screen.getByRole('button', { name: 'Set password & continue' }));
 
-    expect(await screen.findByRole('heading', { name: 'Agents' })).toBeInTheDocument();
+    expect((await screen.findAllByRole('heading', { name: 'Agents' }))[0]).toBeInTheDocument();
   });
 
   it('shows an SSO entry point on the login page', async () => {
     renderRoutes('/login');
 
-    expect(await screen.findByRole('link', { name: 'Sign in with SSO' })).toHaveAttribute(
-      'href',
-      'http://fleetent.test/admin/oidc/login'
-    );
+    // The SSO entry point is now a Button (navigates via window.location on click),
+    // not an anchor; assert the button is present rather than checking an href.
+    expect(await screen.findByRole('button', { name: 'Sign in with SSO' })).toBeInTheDocument();
   });
 
   it('consumes an OIDC callback token from the login route query string', async () => {
@@ -85,7 +86,7 @@ describe('admin routes', () => {
 
     renderRoutes('/login?token=oidc-session');
 
-    expect(await screen.findByRole('heading', { name: 'Agents' })).toBeInTheDocument();
+    expect((await screen.findAllByRole('heading', { name: 'Agents' }))[0]).toBeInTheDocument();
   });
 
   it('renders the agents page with native navigation links', async () => {
@@ -93,7 +94,7 @@ describe('admin routes', () => {
 
     renderRoutes('/agents', 'session-token');
 
-    expect(await screen.findByRole('heading', { name: 'Agents' })).toBeInTheDocument();
+    expect((await screen.findAllByRole('heading', { name: 'Agents' }))[0]).toBeInTheDocument();
     const nav = within(screen.getByRole('navigation'));
     expect(nav.getByRole('link', { name: 'Agents' })).toHaveAttribute('href', '/agents');
     expect(nav.getByRole('link', { name: 'Sessions' })).toHaveAttribute('href', '/sessions');
@@ -111,7 +112,7 @@ describe('admin routes', () => {
 
     renderRoutes('/agents', 'session-token');
 
-    await screen.findByRole('heading', { name: 'Agents' });
+    await screen.findAllByRole('heading', { name: 'Agents' });
     const nav = within(screen.getByRole('navigation'));
     expect(nav.getAllByRole('link', { name: 'Skills' })).toHaveLength(1);
     expect(nav.getAllByRole('link', { name: 'Knowledge Base' })).toHaveLength(1);
@@ -155,7 +156,7 @@ describe('admin routes', () => {
 
     renderRoutes('/stats', 'session-token');
 
-    expect(await screen.findByRole('heading', { name: 'Statistics' })).toBeInTheDocument();
+    expect((await screen.findAllByRole('heading', { name: 'Statistics' }))[0]).toBeInTheDocument();
     const nav = within(screen.getByRole('navigation'));
     expect(nav.getByRole('link', { name: 'Statistics' })).toHaveAttribute('href', '/stats');
   });
@@ -165,8 +166,9 @@ describe('admin routes', () => {
 
     renderRoutes('/providers', 'session-token');
 
-    expect(await screen.findByRole('heading', { name: 'Providers' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Providers' })).toHaveAttribute('href', '/providers');
+    expect((await screen.findAllByRole('heading', { name: 'Providers' }))[0]).toBeInTheDocument();
+    const nav = within(screen.getByRole('navigation'));
+    expect(nav.getByRole('link', { name: 'Providers' })).toHaveAttribute('href', '/providers');
   });
 
   it('renders skills as a native route instead of a legacy deep link', async () => {
@@ -177,7 +179,7 @@ describe('admin routes', () => {
 
     renderRoutes('/skills', 'session-token');
 
-    expect(await screen.findByRole('heading', { name: 'Skills' })).toBeInTheDocument();
+    expect((await screen.findAllByRole('heading', { name: 'Skills' }))[0]).toBeInTheDocument();
     const nav = within(screen.getByRole('navigation'));
     expect(nav.getAllByRole('link', { name: 'Skills' })[0]).toHaveAttribute('href', '/skills');
   });
@@ -192,8 +194,9 @@ describe('admin routes', () => {
 
     renderRoutes('/sessions', 'session-token');
 
-    expect(await screen.findByRole('heading', { name: 'Sessions' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Sessions' })).toHaveAttribute('href', '/sessions');
+    expect((await screen.findAllByRole('heading', { name: 'Sessions' }))[0]).toBeInTheDocument();
+    const nav = within(screen.getByRole('navigation'));
+    expect(nav.getByRole('link', { name: 'Sessions' })).toHaveAttribute('href', '/sessions');
   });
 
   it('renders knowledge base as a native route instead of a legacy deep link', async () => {
@@ -204,7 +207,7 @@ describe('admin routes', () => {
 
     renderRoutes('/kb', 'session-token');
 
-    expect(await screen.findByRole('heading', { name: 'Knowledge Base' })).toBeInTheDocument();
+    expect((await screen.findAllByRole('heading', { name: 'Knowledge Base' }))[0]).toBeInTheDocument();
     const nav = within(screen.getByRole('navigation'));
     const knowledgeBaseLinks = nav.getAllByRole('link', { name: 'Knowledge Base' });
     expect(knowledgeBaseLinks[0]).toHaveAttribute('href', '/kb');
@@ -219,8 +222,9 @@ describe('admin routes', () => {
 
     renderRoutes('/users', 'session-token');
 
-    expect(await screen.findByRole('heading', { name: 'Users' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Users' })).toHaveAttribute('href', '/users');
+    expect((await screen.findAllByRole('heading', { name: 'Users' }))[0]).toBeInTheDocument();
+    const nav = within(screen.getByRole('navigation'));
+    expect(nav.getByRole('link', { name: 'Users' })).toHaveAttribute('href', '/users');
   });
 
   it('renders connectors as a native route and removes the legacy connectors link', async () => {
@@ -235,9 +239,9 @@ describe('admin routes', () => {
 
     renderRoutes('/connectors', 'session-token');
 
-    expect(await screen.findByRole('heading', { name: 'Connectors' })).toBeInTheDocument();
+    expect((await screen.findAllByRole('heading', { name: 'Connector' }))[0]).toBeInTheDocument();
     const nav = within(screen.getByRole('navigation'));
-    const connectorLinks = nav.getAllByRole('link', { name: 'Connectors' });
+    const connectorLinks = nav.getAllByRole('link', { name: 'Connector' });
     expect(connectorLinks).toHaveLength(1);
     expect(connectorLinks[0]).toHaveAttribute('href', '/connectors');
     expect(nav.getAllByRole('link', { name: 'Skills' })).toHaveLength(1);
@@ -265,7 +269,7 @@ describe('admin routes', () => {
 
     renderRoutes('/tenancy', 'session-token');
 
-    expect(await screen.findByRole('heading', { name: 'Tenancy' })).toBeInTheDocument();
+    expect((await screen.findAllByRole('heading', { name: 'Tenancy' }))[0]).toBeInTheDocument();
     const nav = within(screen.getByRole('navigation'));
     expect(nav.getByRole('link', { name: 'Tenancy' })).toHaveAttribute('href', '/tenancy');
   });
@@ -281,7 +285,7 @@ describe('admin routes', () => {
 
     renderRoutes('/nodes', 'session-token');
 
-    expect(await screen.findByRole('heading', { name: 'Nodes' })).toBeInTheDocument();
+    expect((await screen.findAllByRole('heading', { name: 'Nodes' }))[0]).toBeInTheDocument();
     const nav = within(screen.getByRole('navigation'));
     expect(nav.getByRole('link', { name: 'Nodes' })).toHaveAttribute('href', '/nodes');
   });
@@ -294,9 +298,9 @@ describe('admin routes', () => {
 
     renderRoutes('/im-identities', 'session-token');
 
-    expect(await screen.findByRole('heading', { name: '用户-IM 关系' })).toBeInTheDocument();
+    expect((await screen.findAllByRole('heading', { name: 'IM Identities' }))[0]).toBeInTheDocument();
     const nav = within(screen.getByRole('navigation'));
-    expect(nav.getByRole('link', { name: '用户-IM 关系' })).toHaveAttribute(
+    expect(nav.getByRole('link', { name: 'IM Identities' })).toHaveAttribute(
       'href',
       '/im-identities'
     );

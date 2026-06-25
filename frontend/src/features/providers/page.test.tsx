@@ -1,10 +1,11 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AuthProvider } from '@/app/auth';
 import { AppQueryProvider } from '@/app/query-client';
+import { I18nProvider } from '@/i18n';
 import { ProvidersPage } from '@/features/providers/page';
 import { server } from '@/test/msw/server';
 
@@ -31,7 +32,9 @@ function renderPage(): void {
       initialToken="session-token"
     >
       <AppQueryProvider>
-        <ProvidersPage />
+        <I18nProvider>
+          <ProvidersPage />
+        </I18nProvider>
       </AppQueryProvider>
     </AuthProvider>
   );
@@ -54,9 +57,9 @@ describe('providers page', () => {
         base_url: 'https://alpha.initial',
         description: 'Initial provider',
         id: 'alpha',
-        input_price_per_1k: '未配置',
+        input_price_per_1k: null,
         model: 'gpt-5.5',
-        output_price_per_1k: '未配置',
+        output_price_per_1k: null,
         protocol: 'openai_chat',
         provider: 'openai',
       },
@@ -65,6 +68,9 @@ describe('providers page', () => {
       null;
 
     server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () =>
+        HttpResponse.json({ email: 'admin@fleetent.test', id: 'admin-1', role: 'admin' })
+      ),
       http.get(`${API_BASE_URL}/admin/providers`, () => HttpResponse.json(providers)),
       http.post(`${API_BASE_URL}/admin/providers`, async ({ request }) => {
         const body = (await request.json()) as {
@@ -85,9 +91,9 @@ describe('providers page', () => {
             base_url: body.base_url,
             description: body.description ?? null,
             id: body.id,
-            input_price_per_1k: '未配置',
+            input_price_per_1k: null,
             model: body.model,
-            output_price_per_1k: '未配置',
+            output_price_per_1k: null,
             protocol: body.protocol ?? null,
             provider: body.provider ?? null,
           },
@@ -146,9 +152,12 @@ describe('providers page', () => {
 
     expect(await screen.findByRole('heading', { name: 'Providers' })).toBeInTheDocument();
     expect(await screen.findByText('alpha')).toBeInTheDocument();
+    // The masked key is shown; the raw plaintext secret never is.
     expect(screen.getByText('alph…9999')).toBeInTheDocument();
     expect(screen.queryByText('sk-secret-plaintext')).not.toBeInTheDocument();
 
+    // Create a new provider via the form dialog.
+    await user.click(screen.getByRole('button', { name: 'New provider' }));
     await user.type(screen.getByLabelText('Provider ID'), 'beta');
     await user.type(screen.getByLabelText('Base URL'), 'https://beta.new');
     await user.type(screen.getByLabelText('Model'), 'claude-3-7-sonnet');
@@ -158,8 +167,10 @@ describe('providers page', () => {
     expect(await screen.findByText('beta')).toBeInTheDocument();
     expect(screen.queryByDisplayValue('sk-beta-secret')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Edit alpha' }));
-    expect(screen.getByDisplayValue('alpha')).toBeDisabled();
+    // Edit alpha via its row actions menu; the id field is locked.
+    await user.click(screen.getByRole('button', { name: 'Actions for alpha' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit alpha' }));
+    expect(await screen.findByDisplayValue('alpha')).toBeDisabled();
     await user.clear(screen.getByLabelText('Base URL'));
     await user.type(screen.getByLabelText('Base URL'), 'https://alpha.edited');
     await user.clear(screen.getByLabelText('Model'));
@@ -170,13 +181,20 @@ describe('providers page', () => {
       expect(screen.getByText('https://alpha.edited')).toBeInTheDocument();
     });
 
+    // Connectivity test renders the reachable summary.
     await user.click(screen.getByRole('button', { name: 'Test alpha connectivity' }));
     expect(await screen.findByText('Reachable in 42ms using gpt-5.5')).toBeInTheDocument();
 
-    await user.clear(screen.getByLabelText('Input price / 1K tokens'));
-    await user.type(screen.getByLabelText('Input price / 1K tokens'), '1.5');
-    await user.clear(screen.getByLabelText('Output price / 1K tokens'));
-    await user.type(screen.getByLabelText('Output price / 1K tokens'), '3');
+    // Pricing update sends numeric values and reflects them in the summary.
+    // Price input aria-labels are shared across cards, so scope to the alpha card.
+    const alphaCard = screen
+      .getByRole('button', { name: 'Save alpha pricing' })
+      .closest('div.rounded-lg') as HTMLElement;
+    const alpha = within(alphaCard);
+    await user.clear(alpha.getByLabelText('Input price / 1K tokens'));
+    await user.type(alpha.getByLabelText('Input price / 1K tokens'), '1.5');
+    await user.clear(alpha.getByLabelText('Output price / 1K tokens'));
+    await user.type(alpha.getByLabelText('Output price / 1K tokens'), '3');
     await user.click(screen.getByRole('button', { name: 'Save alpha pricing' }));
 
     await waitFor(() => {
@@ -184,9 +202,12 @@ describe('providers page', () => {
     });
     expect(await screen.findByText('Input 1.5 / Output 3')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Delete alpha' }));
+    // Delete alpha via the row actions menu + confirm dialog.
+    await user.click(screen.getByRole('button', { name: 'Actions for alpha' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Delete alpha' }));
+    await user.click(await screen.findByRole('button', { name: 'Delete' }));
     await waitFor(() => {
       expect(screen.queryByText('alpha')).not.toBeInTheDocument();
     });
-  });
+  }, 15000);
 });

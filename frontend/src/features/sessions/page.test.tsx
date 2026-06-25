@@ -63,11 +63,8 @@ describe('sessions page', () => {
     ];
     const actionLog: string[] = [];
 
-    const confirmSpy = vi.spyOn(window, 'confirm').mockImplementation(() => true);
-    const promptSpy = vi
-      .spyOn(window, 'prompt')
-      .mockImplementationOnce(() => 'human override')
-      .mockImplementationOnce(() => '3');
+    // Inject content is still gathered via window.prompt in the redesigned UI.
+    const promptSpy = vi.spyOn(window, 'prompt').mockImplementation(() => 'human override');
 
     server.use(
       http.get(`${API_BASE_URL}/admin/me`, () =>
@@ -134,34 +131,74 @@ describe('sessions page', () => {
     expect(await screen.findByRole('heading', { name: 'Sessions' })).toBeInTheDocument();
     expect(await screen.findByText('sess-1')).toBeInTheDocument();
     expect(screen.getByText('sess-2')).toBeInTheDocument();
+    // First session is auto-selected; its transcript renders in the detail panel.
     expect(await screen.findByText('opened-sess-1')).toBeInTheDocument();
 
-    const sessionsTable = screen.getByRole('table');
-    await user.type(screen.getByLabelText('Search sessions'), 'sess-2');
-    expect(within(sessionsTable).queryByText('sess-1')).not.toBeInTheDocument();
-    expect(within(sessionsTable).getByText('sess-2')).toBeInTheDocument();
+    // Client-side search filters the rendered session list. The detail panel may
+    // still echo the selected session id, so assert membership via the row checkbox.
+    await user.type(screen.getByPlaceholderText('Search sessions…'), 'sess-2');
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Select session sess-1')).not.toBeInTheDocument();
+    });
+    expect(screen.getByLabelText('Select session sess-2')).toBeInTheDocument();
+    await user.clear(screen.getByPlaceholderText('Search sessions…'));
+    expect(await screen.findByLabelText('Select session sess-1')).toBeInTheDocument();
 
-    await user.clear(screen.getByLabelText('Search sessions'));
-    await user.selectOptions(screen.getByLabelText('Status'), 'idle');
+    // Status filter is a Radix Select; choosing "idle" + Apply re-queries the API.
+    await user.click(screen.getByRole('combobox'));
+    await user.click(await screen.findByRole('option', { name: 'idle' }));
     await user.click(screen.getByRole('button', { name: 'Apply filters' }));
-    expect(await within(sessionsTable).findByText('sess-2')).toBeInTheDocument();
-    expect(within(sessionsTable).queryByText('sess-1')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Select session sess-1')).not.toBeInTheDocument();
+    });
+    expect(screen.getByLabelText('Select session sess-2')).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText('Status'), '');
+    await user.click(screen.getByRole('combobox'));
+    await user.click(await screen.findByRole('option', { name: 'All statuses' }));
     await user.click(screen.getByRole('button', { name: 'Apply filters' }));
-    expect(await within(sessionsTable).findByText('sess-1')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Select session sess-1')).toBeInTheDocument();
 
-    const firstRow = screen.getByRole('row', { name: /sess-1/i });
-    await user.click(within(firstRow).getByRole('button', { name: 'Take over' }));
-    await user.click(within(firstRow).getByRole('button', { name: 'Release' }));
-    await user.click(within(firstRow).getByRole('button', { name: 'Inject' }));
-    await user.click(within(firstRow).getByRole('button', { name: 'Reset' }));
-    await user.click(within(firstRow).getByRole('button', { name: 'Clear' }));
-    await user.click(within(firstRow).getByRole('button', { name: 'Force end' }));
+    // Governance actions live behind a per-session dropdown menu.
+    const openMenu = async (): Promise<void> => {
+      await user.click(screen.getByRole('button', { name: 'Actions for sess-1' }));
+    };
 
+    await openMenu();
+    await user.click(await screen.findByRole('menuitem', { name: 'Take over' }));
+
+    await openMenu();
+    await user.click(await screen.findByRole('menuitem', { name: 'Release' }));
+
+    await openMenu();
+    await user.click(await screen.findByRole('menuitem', { name: 'Inject' }));
+
+    // Reset opens a confirmation dialog with an editable keep-turns input.
+    await openMenu();
+    await user.click(await screen.findByRole('menuitem', { name: 'Reset' }));
+    const resetDialog = await screen.findByRole('alertdialog');
+    const keepTurnsInput = within(resetDialog).getByLabelText('Keep how many recent turns?');
+    await user.clear(keepTurnsInput);
+    await user.type(keepTurnsInput, '3');
+    await user.click(within(resetDialog).getByRole('button', { name: 'Reset' }));
+
+    // Clear transcript confirmation.
+    await openMenu();
+    await user.click(await screen.findByRole('menuitem', { name: 'Clear transcript' }));
+    const clearDialog = await screen.findByRole('alertdialog');
+    await user.click(within(clearDialog).getByRole('button', { name: 'Clear' }));
+
+    // Force end confirmation.
+    await openMenu();
+    await user.click(await screen.findByRole('menuitem', { name: 'Force end' }));
+    const forceEndDialog = await screen.findByRole('alertdialog');
+    await user.click(within(forceEndDialog).getByRole('button', { name: 'Force end' }));
+
+    // Bulk clear: pick both sessions then confirm.
     await user.click(screen.getByLabelText('Select session sess-1'));
     await user.click(screen.getByLabelText('Select session sess-2'));
-    await user.click(screen.getByRole('button', { name: 'Bulk clear selected' }));
+    await user.click(screen.getByRole('button', { name: /Bulk clear/ }));
+    const bulkDialog = await screen.findByRole('alertdialog');
+    await user.click(within(bulkDialog).getByRole('button', { name: 'Bulk clear' }));
 
     await waitFor(() => {
       expect(actionLog).toEqual([
@@ -175,9 +212,8 @@ describe('sessions page', () => {
       ]);
     });
 
-    expect(confirmSpy).toHaveBeenCalledTimes(4);
-    expect(promptSpy).toHaveBeenCalledTimes(2);
-    expect(await within(sessionsTable).findByText('ended')).toBeInTheDocument();
+    expect(promptSpy).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('ended')).toBeInTheDocument();
   });
 
   it('keeps viewers in read-only mode', async () => {
@@ -214,10 +250,9 @@ describe('sessions page', () => {
 
     expect(await screen.findByText('sess-1')).toBeInTheDocument();
     expect(await screen.findByText('opened-sess-1')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Take over' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Release' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Inject' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Bulk clear selected' })).not.toBeInTheDocument();
-    expect(screen.getByText('Viewer access is read-only.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Actions for sess-1' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Select session sess-1')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Bulk clear/ })).not.toBeInTheDocument();
+    expect(screen.getByText('read-only')).toBeInTheDocument();
   });
 });

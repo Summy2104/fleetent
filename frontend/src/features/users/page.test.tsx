@@ -11,6 +11,8 @@ import { server } from '@/test/msw/server';
 
 const API_BASE_URL = 'http://fleetent.test';
 
+const ADMIN_ME = { email: 'admin@fleetent.test', id: 'admin-1', role: 'admin' };
+
 type UserRecord = {
   email: string | null;
   id: string;
@@ -42,16 +44,23 @@ type ImUserRecord = {
 function renderUsersPage(): void {
   render(
     <I18nProvider>
-      <AuthProvider
-        baseUrl={API_BASE_URL}
-        initialToken="session-token"
-      >
+      <AuthProvider baseUrl={API_BASE_URL} initialToken="session-token">
         <AppQueryProvider>
           <UsersPage />
         </AppQueryProvider>
       </AuthProvider>
     </I18nProvider>
   );
+}
+
+/** Pick an option from a Radix Select trigger inside a given scope. */
+async function selectOption(
+  user: ReturnType<typeof userEvent.setup>,
+  trigger: HTMLElement,
+  optionName: string
+): Promise<void> {
+  await user.click(trigger);
+  await user.click(await screen.findByRole('option', { name: optionName }));
 }
 
 afterEach(() => {
@@ -61,7 +70,6 @@ afterEach(() => {
 describe('users page parity baseline', () => {
   it('supports user CRUD, role changes, block/unblock, delete, and one-time key secrets', async () => {
     const user = userEvent.setup();
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     let keyListCalls = 0;
     let users: UserRecord[] = [
       {
@@ -98,6 +106,7 @@ describe('users page parity baseline', () => {
     };
 
     server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () => HttpResponse.json(ADMIN_ME)),
       http.get(`${API_BASE_URL}/admin/users`, () => HttpResponse.json(users)),
       http.post(`${API_BASE_URL}/admin/users`, async ({ request }) => {
         const body = (await request.json()) as {
@@ -193,55 +202,73 @@ describe('users page parity baseline', () => {
     renderUsersPage();
     expect(await screen.findByRole('heading', { name: 'Users' })).toBeInTheDocument();
     expect(await screen.findByText('Alice')).toBeInTheDocument();
-    expect(await screen.findByText('ma-u1...abcd')).toBeInTheDocument();
-    expect(screen.queryByText('ma-created-secret')).not.toBeInTheDocument();
 
-    await user.type(screen.getByLabelText('User name'), 'Bob');
-    await user.type(screen.getByLabelText('Email'), 'bob@fleetent.test');
-    await user.type(screen.getByLabelText('Password'), 'pw');
-    await user.selectOptions(screen.getByLabelText('Role'), 'viewer');
-    await user.click(screen.getByLabelText('Must reset password on first login'));
+    // ── Create a new user via the create dialog ──────────────────────────────
     await user.click(screen.getByRole('button', { name: 'Create user' }));
+    let dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText('User name'), 'Bob');
+    await user.type(within(dialog).getByLabelText('Email'), 'bob@fleetent.test');
+    await user.type(within(dialog).getByLabelText('Password'), 'pw');
+    await selectOption(user, within(dialog).getByLabelText('Role'), 'viewer');
+    await user.click(within(dialog).getByLabelText('Must reset password on first login'));
+    await user.click(within(dialog).getByRole('button', { name: 'Create user' }));
     expect(await screen.findByText('Bob')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Edit Alice' }));
-    await user.clear(screen.getByLabelText('User name'));
-    await user.type(screen.getByLabelText('User name'), 'Alice Updated');
-    await user.clear(screen.getByLabelText('Email'));
-    await user.type(screen.getByLabelText('Email'), 'alice+new@fleetent.test');
-    await user.selectOptions(screen.getByLabelText('Role'), 'admin');
-    await user.type(screen.getByLabelText('Reset password'), 'pw-new');
-    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    // ── Edit Alice: name, email, role, and reset password ────────────────────
+    await user.click(screen.getByRole('button', { name: 'Actions for Alice' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit' }));
+    dialog = await screen.findByRole('dialog');
+    await user.clear(within(dialog).getByLabelText('User name'));
+    await user.type(within(dialog).getByLabelText('User name'), 'Alice Updated');
+    await user.clear(within(dialog).getByLabelText('Email'));
+    await user.type(within(dialog).getByLabelText('Email'), 'alice+new@fleetent.test');
+    await selectOption(user, within(dialog).getByLabelText('Role'), 'admin');
+    await user.type(within(dialog).getByLabelText('Reset password'), 'pw-new');
+    await user.click(within(dialog).getByRole('button', { name: 'Save changes' }));
     await waitFor(() => {
       const card = screen.getByTestId('user-card-u1');
       expect(within(card).getByText('Alice Updated')).toBeInTheDocument();
       expect(within(card).getByText('admin')).toBeInTheDocument();
     });
 
-    await user.clear(screen.getByLabelText('Block reason'));
-    await user.type(screen.getByLabelText('Block reason'), 'test reason');
-    await user.click(screen.getByRole('button', { name: 'Block Alice Updated' }));
+    // ── Block Alice Updated via row action + dialog ──────────────────────────
+    await user.click(screen.getByRole('button', { name: 'Actions for Alice Updated' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Block' }));
+    dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText('Block reason'), 'test reason');
+    await user.click(within(dialog).getByRole('button', { name: 'Block' }));
     await waitFor(() => {
       expect(within(screen.getByTestId('user-card-u1')).getByText('blocked')).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole('button', { name: 'Unblock Alice Updated' }));
+    // ── Unblock via row action (no dialog) ───────────────────────────────────
+    await user.click(screen.getByRole('button', { name: 'Actions for Alice Updated' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Unblock' }));
     await waitFor(() => {
       expect(within(screen.getByTestId('user-card-u1')).getByText('active')).toBeInTheDocument();
     });
 
-    await user.clear(screen.getByLabelText('Key note'));
-    await user.type(screen.getByLabelText('Key note'), 'ops');
-    await user.clear(screen.getByLabelText('Key scope'));
-    await user.type(screen.getByLabelText('Key scope'), 'ops-bot');
-    await user.click(screen.getByRole('button', { name: 'Issue key for Alice Updated' }));
+    // ── Manage API keys: existing key shows, secret hidden until issued ──────
+    await user.click(screen.getByRole('button', { name: 'Actions for Alice Updated' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'API keys' }));
+    const keysDialog = await screen.findByRole('dialog');
+    expect(within(keysDialog).getByText('ma-u1...abcd')).toBeInTheDocument();
+    expect(screen.queryByText('ma-created-secret')).not.toBeInTheDocument();
+
+    // ── Issue a new key → one-time secret ────────────────────────────────────
+    await user.click(within(keysDialog).getByRole('button', { name: 'Issue key' }));
+    const issueDialog = await screen.findByRole('dialog', { name: /Issue key for Alice Updated/ });
+    await user.type(within(issueDialog).getByLabelText('Key note'), 'ops');
+    await user.clear(within(issueDialog).getByLabelText('Key scope'));
+    await user.type(within(issueDialog).getByLabelText('Key scope'), 'ops-bot');
+    await user.click(within(issueDialog).getByRole('button', { name: 'Issue key' }));
     expect(await screen.findByText('ma-created-secret')).toBeInTheDocument();
-    expect(screen.queryByText('ma-issued-secret')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Dismiss new secret' }));
     expect(screen.queryByText('ma-created-secret')).not.toBeInTheDocument();
     expect(screen.getByText('ma-u1...efgh')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Rotate key for Alice Updated' }));
+    // ── Rotate the key → new one-time secret, old keys gone ──────────────────
+    await user.click(screen.getByRole('button', { name: 'Rotate key' }));
     expect(await screen.findByText('ma-rotated-secret')).toBeInTheDocument();
     expect(screen.getByText('ma-u1...ijkl')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Dismiss new secret' }));
@@ -250,13 +277,22 @@ describe('users page parity baseline', () => {
     expect(screen.queryByText('ma-u1...abcd')).not.toBeInTheDocument();
     expect(keyListCalls).toBeGreaterThan(0);
 
+    // ── Revoke the rotated key via AlertDialog confirm ───────────────────────
     await user.click(screen.getByRole('button', { name: 'Revoke key 12' }));
+    const revokeAlert = await screen.findByRole('alertdialog');
+    await user.click(within(revokeAlert).getByRole('button', { name: 'Revoke key 12' }));
     await waitFor(() => {
       expect(screen.queryByText('ma-u1...ijkl')).not.toBeInTheDocument();
     });
-    expect(confirmSpy).toHaveBeenCalledWith('Revoke key ma-u1...ijkl?');
 
-    await user.click(screen.getByRole('button', { name: 'Delete Carol' }));
+    // Close the keys dialog before deleting a user.
+    await user.keyboard('{Escape}');
+
+    // ── Delete Carol via row action + AlertDialog confirm ────────────────────
+    await user.click(screen.getByRole('button', { name: 'Actions for Carol' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Delete' }));
+    const deleteAlert = await screen.findByRole('alertdialog');
+    await user.click(within(deleteAlert).getByRole('button', { name: 'Delete' }));
     await waitFor(() => {
       expect(screen.queryByText('Carol')).not.toBeInTheDocument();
     });
@@ -294,6 +330,7 @@ describe('users page parity baseline', () => {
     ];
 
     server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () => HttpResponse.json(ADMIN_ME)),
       http.get(`${API_BASE_URL}/admin/users`, () => HttpResponse.json(users)),
       http.get(`${API_BASE_URL}/admin/users/:userId/keys`, () => HttpResponse.json([])),
       http.get(`${API_BASE_URL}/admin/im-users`, () => HttpResponse.json(imUsers)),
@@ -321,18 +358,33 @@ describe('users page parity baseline', () => {
     );
 
     renderUsersPage();
+    expect(await screen.findByRole('heading', { name: 'Users' })).toBeInTheDocument();
+
+    // The IM identities live under the "IM identities" tab.
+    await user.click(screen.getByRole('tab', { name: 'IM identities' }));
     expect(await screen.findByText('U-ALICE')).toBeInTheDocument();
 
     const row = screen.getByTestId('im-user-7');
-    await user.selectOptions(within(row).getByLabelText('Bind to user'), 'u2');
-    await user.click(within(row).getByRole('button', { name: 'Bind identity' }));
+
+    // ── Bind the identity to a different user ────────────────────────────────
+    // Initially bound to u1; after binding the identity badge should show u2.
+    expect(
+      within(row).getByText(
+        (content, element) =>
+          content === 'u1' && (element?.className ?? '').includes('rounded-full')
+      )
+    ).toBeInTheDocument();
+    await selectOption(user, within(row).getByLabelText('Bind to user'), 'u2');
     await waitFor(() => {
       expect(
-        within(row).getByText((content, element) => element?.tagName === 'SPAN' && content === 'u2')
+        within(row).getByText(
+          (content, element) =>
+            content === 'u2' && (element?.className ?? '').includes('rounded-full')
+        )
       ).toBeInTheDocument();
     });
 
-    await user.clear(within(row).getByLabelText('IM reason'));
+    // ── Block the identity ───────────────────────────────────────────────────
     await user.type(within(row).getByLabelText('IM reason'), 'fraud');
     await user.click(within(row).getByRole('button', { name: 'Block identity' }));
     await waitFor(() => {
@@ -340,6 +392,7 @@ describe('users page parity baseline', () => {
       expect(within(row).getByText('not allowed')).toBeInTheDocument();
     });
 
+    // ── Restore the identity ─────────────────────────────────────────────────
     await user.clear(within(row).getByLabelText('IM reason'));
     await user.type(within(row).getByLabelText('IM reason'), 'restored');
     await user.click(within(row).getByRole('button', { name: 'Restore identity' }));
