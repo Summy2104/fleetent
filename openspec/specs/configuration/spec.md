@@ -21,7 +21,7 @@ IM 凭证经 per-agent `connectors` 的 `*_env` 引用提供。
 #### Scenario: Settings example is not required for deployed agent
 - **WHEN** 查看部署模板
 - **THEN** `config/settings.yaml.example` 不需要存在
-- **AND** 默认部署 agent 的非敏感示例配置位于 `agents/default/agent.yaml.example`
+- **AND** 默认部署 agent 的非敏感示例配置位于根目录 `agent.yaml.example`
 
 ### Requirement: Local configuration initialization
 
@@ -96,7 +96,8 @@ Embedding and rerank HTTP provider configuration SHALL support environment-varia
 repo root in local development and `FLEETENT_HOME` in installed deployments. Platform side SHALL
 own `.env`, `platform.yaml`, Platform DB, Agent authoring/deployment/materialize, and default
 embedded platform capabilities such as Knowledge / Memory / Worker. Agent side SHALL own
-`agents/<agent-id>/agent.yaml`, `agents/<agent-id>/.env`, and `agents/<agent-id>/data/`.
+`tenants/<tenant-id>/agents/<agent-id>/agent.yaml`、`tenants/<tenant-id>/agents/<agent-id>/.env`
+和 `tenants/<tenant-id>/agents/<agent-id>/data/`(默认租户为 `default`)。
 
 `config/` SHALL NOT be a current runtime config namespace, template namespace, or fallback
 namespace.
@@ -108,7 +109,7 @@ namespace.
 - **AND** Platform runtime does not require `config/`
 
 #### Scenario: Agent home is self-contained
-- **WHEN** 查看一个已 materialize 的 Agent home
+- **WHEN** 查看一个已 materialize 的 Agent home(`tenants/<tenant-id>/agents/<agent-id>/`)
 - **THEN** 它包含 `agent.yaml`、`.env` 和 `data/`
 - **AND** `agent.yaml` 只含非敏感配置与 env 引用
 - **AND** `.env` 只含该 Agent runtime 所需变量
@@ -121,7 +122,7 @@ environment variables.
 `FLEETENT_SECRET_KEY`、`DATABASE_URL`、平台日志、TUI token、embedded Platform service credentials
 等平台进程变量 SHALL belong to Platform `.env`. Model provider key、Agent IM token、Agent MCP
 secret、Agent-local runtime secret 等 Agent runtime variables SHALL belong to
-`agents/<agent-id>/.env`.
+`tenants/<tenant-id>/agents/<agent-id>/.env`.
 
 #### Scenario: Platform env template contains only Platform variables
 - **WHEN** 读取 `.env.example`
@@ -130,21 +131,21 @@ secret、Agent-local runtime secret 等 Agent runtime variables SHALL belong to
 
 #### Scenario: Agent required env is materialized
 - **WHEN** 一个 Agent 引用 model / MCP / connector secret env
-- **THEN** materialize 在 `agents/<agent-id>/.env` 中写入对应 env 名和值或空占位
+- **THEN** materialize 在 `tenants/<tenant-id>/agents/<agent-id>/.env` 中写入对应 env 名和值或空占位
 - **AND** 不写入 `FLEETENT_SECRET_KEY`、`DATABASE_URL` 或 Platform-owned KB construction env
 
 ### Requirement: Canonical templates avoid ambiguous agent paths
 
-Repository examples SHALL live beside the runtime files they template. The repository SHALL provide
-exactly these canonical config examples:
+Repository examples SHALL live beside the runtime files they template,统一平铺在仓库根目录。The
+repository SHALL provide exactly these canonical config examples:
 
 - `.env.example`
 - `platform.yaml.example`
-- `agents/default/agent.yaml.example`
-- `agents/default/.env.example`
+- `agent.yaml.example`
+- `agent.env.example`
 
 The repository SHALL NOT use `config/` as a deployment template namespace and SHALL NOT ship extra
-Agent config/env examples under `agents/default/` that do not map one-to-one to runtime files.
+Agent config/env examples that do not map one-to-one to runtime files.
 
 The four canonical examples SHALL be comprehensive references, not minimal skeletons. They MUST include
 all currently supported non-secret fields for their runtime file and all env key references used by the
@@ -156,28 +157,29 @@ paired YAML example.
 - **AND** 存在 `platform.yaml.example`
 - **AND** 不需要通过 `config/` 理解 Platform 配置
 
-#### Scenario: Default Agent examples live with default Agent home
+#### Scenario: Default Agent examples live at repo root
 - **WHEN** 查看默认 Agent 模板
-- **THEN** 存在 `agents/default/agent.yaml.example`
-- **AND** 存在 `agents/default/.env.example`
-- **AND** 不存在 `agents/default/.env.standalone.example`
-- **AND** 不存在 `agents/default/agent.configure.yaml.example`
-- **AND** 不存在 `agents/default/agent.defaults.yaml.example`
+- **THEN** 存在根目录 `agent.yaml.example`
+- **AND** 存在根目录 `agent.env.example`
+- **AND** 不存在 `agents/default/` 目录
+- **AND** 不存在 `agent.env.standalone.example`
+- **AND** 不存在 `agent.configure.yaml.example`
+- **AND** 不存在 `agent.defaults.yaml.example`
 
 #### Scenario: Config directory is absent
 - **WHEN** 查看仓库根目录
 - **THEN** `config/` 不存在
 
 #### Scenario: Agent YAML example covers the Agent schema
-- **WHEN** `agents/default/agent.yaml.example` is parsed
+- **WHEN** `agent.yaml.example` is parsed
 - **THEN** it validates as an `AgentFile`
 - **AND** every supported `AgentFile` field is present in the example unless the field is explicitly
   documented as generated-only or internal-only
 
 #### Scenario: Agent env example covers Agent YAML env refs
-- **WHEN** env references are extracted from `agents/default/agent.yaml.example`
-- **THEN** every referenced env key exists in `agents/default/.env.example`
-- **AND** `agents/default/.env.example` does not point operators to deleted noncanonical env examples
+- **WHEN** env references are extracted from `agent.yaml.example`
+- **THEN** every referenced env key exists in `agent.env.example`
+- **AND** `agent.env.example` does not point operators to deleted noncanonical env examples
 
 #### Scenario: Platform examples cover Platform env refs
 - **WHEN** env references are extracted from `platform.yaml.example`

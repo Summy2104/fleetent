@@ -22,4 +22,4 @@
 
 - [x] 4.1 全仓 grep 旧模板路径（排除 `openspec/changes/archive/` 与 `/admin/agents/default` API 路由），确认无遗漏 live 引用。
 - [x] 4.2 `make test-pr` 全绿（3666 passed）+ `uv run pytest tests/integration -q`：2070 passed，仅余 1 个预存基线失败 `test_capability_docs::test_capability_docs_describe_shared_memory_scope`（在干净 main 上同样失败，shared_memory→agent_memory 文档改名遗留，owner 非本 change），无新增失败。
-- [ ] 4.3 spec delta 由 `opsx:archive` 应用到 `openspec/specs/`（configuration / file-agent-runtime / install-bootstrap），不手改 live spec。
+- [x] 4.3 spec delta 由 `opsx:archive` 应用到 `openspec/specs/`（configuration / file-agent-runtime / install-bootstrap），不手改 live spec。
