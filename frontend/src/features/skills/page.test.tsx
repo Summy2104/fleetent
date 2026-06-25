@@ -2,7 +2,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { AuthProvider } from '@/app/auth';
 import { AppQueryProvider } from '@/app/query-client';
@@ -177,7 +177,8 @@ describe('skills page parity baseline', () => {
       ),
       http.get(`${API_BASE_URL}/admin/skills/proposals/:id/diff`, ({ params }) =>
         HttpResponse.json({ diff: `proposal diff ${String(params.id ?? '')}` })
-      )
+      ),
+      http.get(`${API_BASE_URL}/admin/skills/backflow`, () => HttpResponse.json([]))
     );
 
     renderSkillsPage();
@@ -246,6 +247,134 @@ describe('skills page parity baseline', () => {
   });
 });
 
+describe('skills page backflow approval', () => {
+  const baseSkills: SkillRecord[] = [
+    {
+      audit_verdict: 'pass',
+      description: 'CRM ops helper',
+      drifted_agents: ['support'],
+      enabling_agents: ['support'],
+      global_enabled: true,
+      name: 'crm-ops',
+      source: 'adhoc',
+      status: 'active',
+    },
+  ];
+
+  function stubBaseReads(): void {
+    server.use(
+      http.get(`${API_BASE_URL}/admin/skills`, () => HttpResponse.json(baseSkills)),
+      http.get(`${API_BASE_URL}/admin/skills/:name/content`, ({ params }) =>
+        HttpResponse.json({ content: `${String(params.name ?? '')} body`, name: String(params.name ?? '') })
+      ),
+      http.get(`${API_BASE_URL}/admin/skills/:name/agents`, () => HttpResponse.json([])),
+      http.get(`${API_BASE_URL}/admin/skills/proposals`, () => HttpResponse.json([])),
+      http.get(`${API_BASE_URL}/admin/skills/backflow`, () =>
+        HttpResponse.json([
+          {
+            agent_id: 7,
+            agent_name: 'support',
+            base_commit: 'c1',
+            base_version: 'v1',
+            conflict: 1,
+            created_at: '2026-06-25T00:00:00Z',
+            forked_as: null,
+            id: 1,
+            skill_name: 'crm-ops',
+            status: 'pending',
+          },
+        ])
+      ),
+      http.get(`${API_BASE_URL}/admin/skills/backflow/:id/diff`, ({ params }) =>
+        HttpResponse.json({
+          conflict: true,
+          diff_vs_base: `bf base ${String(params.id ?? '')}`,
+          diff_vs_head: `bf head ${String(params.id ?? '')}`,
+        })
+      )
+    );
+  }
+
+  it('lists proposals, shows diff, and posts accept/reject/fork decisions', async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('crm-ops-fork');
+    const acceptHeaders: (string | null)[] = [];
+    let rejected = false;
+    let forkedWith: { fork_name: string } | null = null;
+
+    stubBaseReads();
+    server.use(
+      http.post(`${API_BASE_URL}/admin/skills/backflow/:id/accept`, ({ request }) => {
+        acceptHeaders.push(request.headers.get('x-confirm'));
+        return HttpResponse.json({ new_version: 'sha', ok: true, proposal_id: 1, user: 'admin' });
+      }),
+      http.post(`${API_BASE_URL}/admin/skills/backflow/:id/reject`, () => {
+        rejected = true;
+        return HttpResponse.json({ ok: true, proposal_id: 1, user: 'admin' });
+      }),
+      http.post(`${API_BASE_URL}/admin/skills/backflow/:id/fork`, async ({ request }) => {
+        forkedWith = (await request.json()) as { fork_name: string };
+        return HttpResponse.json({ forked_as: forkedWith.fork_name, ok: true, proposal_id: 1, user: 'admin' });
+      })
+    );
+
+    renderSkillsPage();
+
+    const backflowSection = (
+      await screen.findByRole('heading', { name: 'Skill backflow' })
+    ).closest('section');
+    expect(backflowSection).not.toBeNull();
+    const backflow = within(backflowSection as HTMLElement);
+    expect(await backflow.findByText(/crm-ops/)).toBeInTheDocument();
+
+    await user.click(backflow.getByRole('button', { name: 'View backflow diff for 1' }));
+    expect(await screen.findByText('bf head 1')).toBeInTheDocument();
+
+    await user.click(backflow.getByRole('button', { name: 'Accept backflow 1' }));
+    await waitFor(() => expect(acceptHeaders).toHaveLength(1));
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(acceptHeaders[0]).toBe('true');
+
+    await user.click(backflow.getByRole('button', { name: 'Reject backflow 1' }));
+    await waitFor(() => expect(rejected).toBe(true));
+
+    await user.click(backflow.getByRole('button', { name: 'Fork backflow 1' }));
+    await waitFor(() => expect(forkedWith).toEqual({ fork_name: 'crm-ops-fork' }));
+    expect(promptSpy).toHaveBeenCalled();
+
+    confirmSpy.mockRestore();
+    promptSpy.mockRestore();
+  });
+
+  it('does not accept a conflict proposal when confirmation is cancelled', async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const acceptHeaders: (string | null)[] = [];
+
+    stubBaseReads();
+    server.use(
+      http.post(`${API_BASE_URL}/admin/skills/backflow/:id/accept`, ({ request }) => {
+        acceptHeaders.push(request.headers.get('x-confirm'));
+        return HttpResponse.json({ ok: true, proposal_id: 1, user: 'admin' });
+      })
+    );
+
+    renderSkillsPage();
+
+    const backflowSection = (
+      await screen.findByRole('heading', { name: 'Skill backflow' })
+    ).closest('section');
+    const backflow = within(backflowSection as HTMLElement);
+
+    await user.click(await backflow.findByRole('button', { name: 'Accept backflow 1' }));
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(acceptHeaders).toHaveLength(0);
+
+    confirmSpy.mockRestore();
+  });
+});
+
 describe('skills page create and edit', () => {
   function stubReadEndpoints(getSkills: () => SkillRecord[], getContent: () => string): void {
     server.use(
@@ -254,7 +383,8 @@ describe('skills page create and edit', () => {
         HttpResponse.json({ content: getContent(), name: String(params.name ?? '') })
       ),
       http.get(`${API_BASE_URL}/admin/skills/:name/agents`, () => HttpResponse.json([])),
-      http.get(`${API_BASE_URL}/admin/skills/proposals`, () => HttpResponse.json([]))
+      http.get(`${API_BASE_URL}/admin/skills/proposals`, () => HttpResponse.json([])),
+      http.get(`${API_BASE_URL}/admin/skills/backflow`, () => HttpResponse.json([]))
     );
   }
 

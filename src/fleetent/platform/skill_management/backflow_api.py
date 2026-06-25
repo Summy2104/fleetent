@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
-from fleetent import auth, user_store
+from fleetent import agent_store, auth, user_store
 from fleetent.platform.skill_management import backflow_store, skill_admin_store
 from fleetent.platform.skill_management.pool_git import commit_pool
 from fleetent.skills import registry as skill_registry
@@ -109,7 +109,39 @@ def _write_bundle_atomic(skill_dir: Path, bundle: dict[str, str]) -> None:
         raise
 
 
-# --- endpoints ----------------------------------------------------------------
+# --- read endpoints -----------------------------------------------------------
+
+
+@router.get("")
+def list_backflow_proposals(
+    status: str = "pending",
+    authorization: str | None = Header(default=None),
+) -> list[dict[str, Any]]:
+    """List backflow proposals (admin-only); excludes the full ``proposed_bundle``."""
+    _require_admin(authorization)
+    items: list[dict[str, Any]] = []
+    for proposal in backflow_store.list_proposals(status=status):
+        item = {key: value for key, value in proposal.items() if key != "proposed_bundle"}
+        agent = agent_store.get_by_id(proposal["agent_id"])
+        item["agent_name"] = agent.name if agent is not None else None
+        items.append(item)
+    return items
+
+
+@router.get("/{proposal_id}/diff")
+def get_backflow_diff(
+    proposal_id: int,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Return the dual diff (vs base / vs head) for a backflow proposal (admin-only)."""
+    _require_admin(authorization)
+    try:
+        return backflow_store.get_proposal_diff(proposal_id, pool_dir=_pool_dir())
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+# --- decision endpoints -------------------------------------------------------
 
 
 @router.post("/{proposal_id}/accept")

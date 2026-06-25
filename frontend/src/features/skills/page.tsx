@@ -1,8 +1,14 @@
 import { useEffect, useState } from 'react';
 
 import {
+  type BackflowProposal,
   type SkillAgentBinding,
   type SkillListItem,
+  useBackflowAcceptMutation,
+  useBackflowDiffQuery,
+  useBackflowForkMutation,
+  useBackflowProposalsQuery,
+  useBackflowRejectMutation,
   useCreateSkillMutation,
   useEditSkillMutation,
   useForcePublishSkillMutation,
@@ -231,9 +237,93 @@ function SelectedSkillPanel({
   );
 }
 
+function BackflowProposalCard({
+  onViewDiff,
+  proposal,
+}: {
+  onViewDiff: (id: number) => void;
+  proposal: BackflowProposal;
+}): JSX.Element {
+  const accept = useBackflowAcceptMutation(proposal.id);
+  const reject = useBackflowRejectMutation(proposal.id);
+  const fork = useBackflowForkMutation(proposal.id);
+
+  const onAccept = async (): Promise<void> => {
+    if (proposal.conflict) {
+      // Pool advanced past the proposal's base — require an explicit override decision.
+      if (!window.confirm(`Pool advanced for ${proposal.skill_name}. Override pool head?`)) {
+        return;
+      }
+      await accept.mutateAsync({ confirm: true });
+      return;
+    }
+    await accept.mutateAsync({});
+  };
+
+  const onFork = async (): Promise<void> => {
+    const forkName = window.prompt(
+      `New skill name to fork ${proposal.skill_name} as`,
+      `${proposal.skill_name}-fork`
+    );
+    if (!forkName) {
+      return;
+    }
+    await fork.mutateAsync({ fork_name: forkName });
+  };
+
+  return (
+    <article
+      className="rounded-xl border bg-white p-4"
+      key={proposal.id}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-semibold">{proposal.skill_name}</p>
+          <p className="text-sm text-muted-foreground">
+            {`from ${proposal.agent_name ?? `agent ${proposal.agent_id}`}${
+              proposal.conflict ? ' · conflict' : ''
+            }`}
+          </p>
+        </div>
+        <div className="flex flex-wrap justify-end gap-2">
+          <button
+            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
+            onClick={() => onViewDiff(proposal.id)}
+            type="button"
+          >
+            {`View backflow diff for ${proposal.id}`}
+          </button>
+          <button
+            className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground"
+            onClick={() => void onAccept()}
+            type="button"
+          >
+            {`Accept backflow ${proposal.id}`}
+          </button>
+          <button
+            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
+            onClick={() => void reject.mutateAsync()}
+            type="button"
+          >
+            {`Reject backflow ${proposal.id}`}
+          </button>
+          <button
+            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
+            onClick={() => void onFork()}
+            type="button"
+          >
+            {`Fork backflow ${proposal.id}`}
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 export function SkillsPage(): JSX.Element {
   const skills = useSkillsQuery();
   const proposals = useSkillProposalsQuery();
+  const backflow = useBackflowProposalsQuery();
   const reload = useReloadSkillsMutation();
 
   const [selectedName, setSelectedName] = useState<string | null>(null);
@@ -241,6 +331,7 @@ export function SkillsPage(): JSX.Element {
   const [versionsOpenFor, setVersionsOpenFor] = useState<string | null>(null);
   const [selectedRef, setSelectedRef] = useState<string | null>(null);
   const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
+  const [selectedBackflowId, setSelectedBackflowId] = useState<number | null>(null);
 
   useEffect(() => {
     if (!skills.data || skills.data.length === 0) {
@@ -258,6 +349,7 @@ export function SkillsPage(): JSX.Element {
   const versions = useSkillVersionsQuery(versionsOpenFor, versionsOpenFor === selectedName);
   const diff = useSkillDiffQuery(selectedName, selectedRef, Boolean(selectedRef));
   const proposalDiff = useSkillProposalDiffQuery(selectedProposalId, Boolean(selectedProposalId));
+  const backflowDiff = useBackflowDiffQuery(selectedBackflowId, selectedBackflowId !== null);
 
   return (
     <section className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
@@ -416,6 +508,24 @@ export function SkillsPage(): JSX.Element {
           {proposalDiff.data?.diff ? (
             <pre className="mt-4 max-h-72 overflow-auto rounded-xl bg-slate-950 p-4 text-sm text-slate-50">
               {proposalDiff.data.diff}
+            </pre>
+          ) : null}
+        </section>
+
+        <section className="rounded-2xl border bg-white/75 p-5">
+          <h2 className="text-lg font-semibold">Skill backflow</h2>
+          <div className="mt-4 grid gap-4">
+            {backflow.data?.map((proposal) => (
+              <BackflowProposalCard
+                key={proposal.id}
+                onViewDiff={setSelectedBackflowId}
+                proposal={proposal}
+              />
+            ))}
+          </div>
+          {backflowDiff.data ? (
+            <pre className="mt-4 max-h-72 overflow-auto rounded-xl bg-slate-950 p-4 text-sm text-slate-50">
+              {backflowDiff.data.diff_vs_head}
             </pre>
           ) : null}
         </section>

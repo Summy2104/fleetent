@@ -7,6 +7,11 @@ import { describe, expect, it } from 'vitest';
 import { AuthProvider } from '@/app/auth';
 import { AppQueryProvider } from '@/app/query-client';
 import {
+  useBackflowAcceptMutation,
+  useBackflowDiffQuery,
+  useBackflowForkMutation,
+  useBackflowProposalsQuery,
+  useBackflowRejectMutation,
   useCreateSkillMutation,
   useEditSkillMutation,
   useForcePublishSkillMutation,
@@ -311,6 +316,112 @@ describe('skills api hooks', () => {
     await waitFor(() => {
       expect(screen.getByTestId('skills')).toHaveTextContent('ops-guide:active:true:pass:');
     });
+  });
+});
+
+function BackflowApiProbe(): JSX.Element {
+  const proposals = useBackflowProposalsQuery();
+  const diff = useBackflowDiffQuery(1, true);
+  const accept = useBackflowAcceptMutation(1);
+  const reject = useBackflowRejectMutation(1);
+  const fork = useBackflowForkMutation(1);
+
+  return (
+    <section>
+      <button
+        onClick={() => accept.mutate({ confirm: true })}
+        type="button"
+      >
+        accept
+      </button>
+      <button
+        onClick={() => reject.mutate()}
+        type="button"
+      >
+        reject
+      </button>
+      <button
+        onClick={() => fork.mutate({ fork_name: 'crm-ops-fork' })}
+        type="button"
+      >
+        fork
+      </button>
+      <div data-testid="bf-proposals">
+        {proposals.data
+          ?.map((p) => `${p.id}:${p.skill_name}:${p.agent_name}:${p.conflict}`)
+          .join('|')}
+      </div>
+      <div data-testid="bf-diff">{diff.data?.diff_vs_head}</div>
+    </section>
+  );
+}
+
+describe('backflow api hooks', () => {
+  it('lists proposals, loads diff, and posts accept/reject/fork', async () => {
+    const user = userEvent.setup();
+    const acceptCalls: (string | null)[] = [];
+    let rejected = false;
+    let forkedWith: { fork_name: string } | null = null;
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/skills/backflow`, () =>
+        HttpResponse.json([
+          {
+            agent_id: 7,
+            agent_name: 'support',
+            base_commit: 'c1',
+            base_version: 'v1',
+            conflict: 1,
+            created_at: '2026-06-25T00:00:00Z',
+            forked_as: null,
+            id: 1,
+            skill_name: 'crm-ops',
+            status: 'pending',
+          },
+        ])
+      ),
+      http.get(`${API_BASE_URL}/admin/skills/backflow/:id/diff`, ({ params }) =>
+        HttpResponse.json({
+          conflict: true,
+          diff_vs_base: `base ${String(params.id ?? '')}`,
+          diff_vs_head: `head ${String(params.id ?? '')}`,
+        })
+      ),
+      http.post(`${API_BASE_URL}/admin/skills/backflow/:id/accept`, ({ request }) => {
+        acceptCalls.push(request.headers.get('x-confirm'));
+        return HttpResponse.json({ new_version: 'sha', ok: true, proposal_id: 1, user: 'admin' });
+      }),
+      http.post(`${API_BASE_URL}/admin/skills/backflow/:id/reject`, () => {
+        rejected = true;
+        return HttpResponse.json({ ok: true, proposal_id: 1, user: 'admin' });
+      }),
+      http.post(`${API_BASE_URL}/admin/skills/backflow/:id/fork`, async ({ request }) => {
+        forkedWith = (await request.json()) as { fork_name: string };
+        return HttpResponse.json({
+          forked_as: forkedWith.fork_name,
+          ok: true,
+          proposal_id: 1,
+          user: 'admin',
+        });
+      })
+    );
+
+    renderWithProviders(<BackflowApiProbe />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('bf-proposals')).toHaveTextContent('1:crm-ops:support:1');
+      expect(screen.getByTestId('bf-diff')).toHaveTextContent('head 1');
+    });
+
+    await user.click(screen.getByRole('button', { name: 'accept' }));
+    await waitFor(() => expect(acceptCalls).toHaveLength(1));
+    expect(acceptCalls[0]).toBe('true');
+
+    await user.click(screen.getByRole('button', { name: 'reject' }));
+    await waitFor(() => expect(rejected).toBe(true));
+
+    await user.click(screen.getByRole('button', { name: 'fork' }));
+    await waitFor(() => expect(forkedWith).toEqual({ fork_name: 'crm-ops-fork' }));
   });
 });
 
