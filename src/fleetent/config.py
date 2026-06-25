@@ -99,6 +99,9 @@ class LongTermContextSettings(BaseModel):
     knowledge_top_k: int = 10
     agent_memory_top_k: int = 5
     conflict_preference: Literal["auto", "memory", "knowledge", "agent_memory"] = "auto"
+    # Per-retrieval-path timeout: a path exceeding this is degraded to empty so a
+    # stalled external embedding proxy cannot block the whole build_context.
+    retrieval_timeout_seconds: float = 5.0
 
 
 class KnowledgeRetrievalAuditSettings(BaseModel):
