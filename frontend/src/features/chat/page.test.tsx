@@ -6,28 +6,31 @@ import { describe, expect, it } from 'vitest';
 import { AuthProvider } from '@/app/auth';
 import { AppQueryProvider } from '@/app/query-client';
 import { ChatPage } from '@/features/chat/page';
+import { I18nProvider } from '@/i18n';
 import { server } from '@/test/msw/server';
 
 const API_BASE_URL = 'http://fleetent.test';
 
 function renderChatPage(): void {
   render(
-    <AuthProvider
-      baseUrl={API_BASE_URL}
-      initialToken="session-token"
-    >
-      <AppQueryProvider>
-        <ChatPage />
-      </AppQueryProvider>
-    </AuthProvider>
+    <I18nProvider>
+      <AuthProvider
+        baseUrl={API_BASE_URL}
+        initialToken="session-token"
+      >
+        <AppQueryProvider>
+          <ChatPage />
+        </AppQueryProvider>
+      </AuthProvider>
+    </I18nProvider>
   );
 }
 
 describe('chat page', () => {
   it('streams assistant replies into the transcript and surfaces stream errors in the conversation', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const encoder = new TextEncoder();
-    let releaseTail: (() => void) | null = null;
+    const tail: { release: (() => void) | null } = { release: null };
 
     server.use(
       http.get(`${API_BASE_URL}/admin/agents`, () =>
@@ -40,7 +43,7 @@ describe('chat page', () => {
             async start(controller) {
               controller.enqueue(encoder.encode('data: {"type":"text_delta","content":"hel"}\n\n'));
               await new Promise<void>((resolve) => {
-                releaseTail = resolve;
+                tail.release = resolve;
               });
               controller.enqueue(encoder.encode('data: {"type":"text_delta","content":"lo"}\n\n'));
               controller.enqueue(encoder.encode('data: {"type":"done","content":""}\n\n'));
@@ -80,18 +83,23 @@ describe('chat page', () => {
     renderChatPage();
 
     expect(await screen.findByRole('heading', { name: 'Chat Console' })).toBeInTheDocument();
-    expect((await screen.findByRole('option', { name: 'alpha' })).selected).toBe(true);
+    // First agent is auto-selected; the Radix Select trigger reflects the chosen name.
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'Agent' })).toHaveTextContent('alpha');
+    });
     expect(screen.getByText('No messages yet.')).toBeInTheDocument();
 
     await user.type(screen.getByLabelText('Message'), 'hello');
-    await user.click(screen.getByRole('button', { name: 'Send message' }));
+    await user.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
       expect(screen.getByText('hel')).toBeInTheDocument();
     });
-    expect(screen.getByRole('button', { name: 'Streaming…' })).toBeDisabled();
+    // While streaming, the Send button is disabled and a Stop control appears.
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled();
 
-    releaseTail?.();
+    tail.release?.();
 
     await waitFor(() => {
       expect(screen.getByText('hello')).toBeInTheDocument();
@@ -99,7 +107,7 @@ describe('chat page', () => {
 
     await user.clear(screen.getByLabelText('Message'));
     await user.type(screen.getByLabelText('Message'), 'fail');
-    await user.click(screen.getByRole('button', { name: 'Send message' }));
+    await user.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
       expect(screen.getByText('tool exploded')).toBeInTheDocument();
@@ -111,7 +119,7 @@ describe('chat page', () => {
   });
 
   it('surfaces ingress error detail for unknown and unavailable agents', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
 
     server.use(
       http.get(`${API_BASE_URL}/admin/agents`, () =>
@@ -130,15 +138,20 @@ describe('chat page', () => {
 
     renderChatPage();
     await screen.findByRole('heading', { name: 'Chat Console' });
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'Agent' })).toHaveTextContent('ghost');
+    });
 
     await user.type(screen.getByLabelText('Message'), 'hello');
-    await user.click(screen.getByRole('button', { name: 'Send message' }));
+    await user.click(screen.getByRole('button', { name: 'Send' }));
     expect(await screen.findByText('Agent "ghost": agent ghost not found')).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Agent' }), 'orphan');
+    // Switch the target agent via the Radix Select.
+    await user.click(screen.getByRole('combobox', { name: 'Agent' }));
+    await user.click(await screen.findByRole('option', { name: 'orphan' }));
     await user.clear(screen.getByLabelText('Message'));
     await user.type(screen.getByLabelText('Message'), 'again');
-    await user.click(screen.getByRole('button', { name: 'Send message' }));
+    await user.click(screen.getByRole('button', { name: 'Send' }));
     expect(
       await screen.findByText(`Agent "orphan": node 'local-node' service key unavailable`)
     ).toBeInTheDocument();
@@ -157,6 +170,6 @@ describe('chat page', () => {
 
     expect(screen.getByText('Loading agents…')).toBeInTheDocument();
     expect(await screen.findByText('No agents available.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
   });
 });

@@ -51,7 +51,7 @@ from fleetent.platform.node_management import (
     placement_store,
 )
 from fleetent.platform.node_management.agent_transport import DirectHttpAgentTransport
-from fleetent.platform.skill_management import skill_admin_api
+from fleetent.platform.skill_management import backflow_api, skill_admin_api
 from fleetent.platform.tenancy import admin_api as tenancy_admin_api
 from fleetent.platform.user_management import user_admin_api
 from fleetent.platform.user_management.api_key_store import resolve as _resolve_api_key
@@ -259,12 +259,16 @@ app = FastAPI(title="fleetent", lifespan=lifespan)
 app.include_router(user_admin_api.router)
 app.include_router(im_identity_admin_api.router)
 app.include_router(skill_admin_api.router)
+app.include_router(backflow_api.router)
 app.include_router(provider_admin_api.router)
 app.include_router(kb_admin_api.router)
 app.include_router(connector_admin_api.router)
 app.include_router(chat_admin_api.router)
-app.include_router(agent_console_api.router)
+# agent_admin_api must precede agent_console_api: its literal DELETE
+# /agents/default route would otherwise be shadowed by the console's parametric
+# DELETE /agents/{name}, breaking clear-default with a 404.
 app.include_router(agent_admin_api.router)
+app.include_router(agent_console_api.router)
 app.include_router(stats_admin_api.router)
 app.include_router(agent_apply_api.router)
 app.include_router(node_desired_state_api.router)
@@ -347,6 +351,8 @@ def _agent_def_dict(agent: agent_store.Agent | None) -> dict[str, Any] | None:
         "memory_namespace": agent.memory_namespace,
         "icon": agent.icon,
         "config_overrides": agent.config_overrides,
+        "supports_dm": agent.supports_dm,
+        "supports_groups": agent.supports_groups,
     }
 
 

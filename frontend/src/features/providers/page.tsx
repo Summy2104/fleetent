@@ -1,14 +1,60 @@
 import { useEffect, useState } from 'react';
-
+import { useQuery } from '@tanstack/react-query';
 import {
+  Activity,
+  KeyRound,
+  MoreVertical,
+  Pencil,
+  Plus,
+  Server,
+  Trash2,
+} from 'lucide-react';
+
+import { useAdminApi } from '@/lib/api-client';
+import { useT } from '@/i18n';
+import { cn } from '@/lib/utils';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Separator } from '@/components/ui/separator';
+import {
+  type ProviderListItem,
   useConnectivityTestMutation,
   useCreateProviderMutation,
   useDeleteProviderMutation,
   useProvidersQuery,
   useUpdatePricingMutation,
   useUpdateProviderMutation,
-  type ProviderListItem,
 } from '@/features/providers/api';
+
+type AdminMe = { email: string; id: string; role: string };
 
 type ProviderFormState = {
   apiKey: string;
@@ -19,6 +65,11 @@ type ProviderFormState = {
   protocol: string;
   provider: string;
 };
+
+function useAdminMeQuery() {
+  const api = useAdminApi();
+  return useQuery({ queryKey: ['admin-me'], queryFn: () => api.get<AdminMe>('/admin/me') });
+}
 
 function emptyForm(): ProviderFormState {
   return {
@@ -36,22 +87,141 @@ function priceInputValue(value: number | string | null): string {
   return typeof value === 'number' ? String(value) : '';
 }
 
+function priceLabel(value: number | string | null, unsetLabel: string): string {
+  return value === null || value === undefined || value === '' ? unsetLabel : String(value);
+}
+
+// ─────────────────────────── Create / edit dialog ───────────────────────────
+
+function ProviderFormDialog({
+  mode,
+  open,
+  onOpenChange,
+  form,
+  setForm,
+  busy,
+  onSubmit,
+}: {
+  mode: 'create' | 'edit';
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  form: ProviderFormState;
+  setForm: (updater: (current: ProviderFormState) => ProviderFormState) => void;
+  busy: boolean;
+  onSubmit: () => Promise<void>;
+}): JSX.Element {
+  const t = useT();
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            {mode === 'create' ? t('providers.dialogCreateTitle') : t('providers.dialogEditTitle', { id: form.id })}
+          </DialogTitle>
+          <DialogDescription>
+            {mode === 'create'
+              ? t('providers.dialogCreateDescription')
+              : t('providers.dialogEditDescription')}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4">
+          <div className="grid gap-2">
+            <Label htmlFor="provider-id">{t('providers.fieldProviderId')}</Label>
+            <Input
+              id="provider-id"
+              disabled={mode === 'edit'}
+              value={form.id}
+              onChange={(event) => setForm((current) => ({ ...current, id: event.target.value }))}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="provider-base-url">{t('providers.fieldBaseUrl')}</Label>
+            <Input
+              id="provider-base-url"
+              value={form.baseUrl}
+              onChange={(event) => setForm((current) => ({ ...current, baseUrl: event.target.value }))}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="provider-model">{t('providers.fieldModel')}</Label>
+            <Input
+              id="provider-model"
+              value={form.model}
+              onChange={(event) => setForm((current) => ({ ...current, model: event.target.value }))}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="provider-api-key">{t('providers.fieldApiKey')}</Label>
+            <Input
+              id="provider-api-key"
+              type="password"
+              placeholder={mode === 'edit' ? t('providers.apiKeyPlaceholder') : ''}
+              value={form.apiKey}
+              onChange={(event) => setForm((current) => ({ ...current, apiKey: event.target.value }))}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="provider-description">{t('providers.fieldDescription')}</Label>
+            <Input
+              id="provider-description"
+              value={form.description}
+              onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="provider-vendor">{t('providers.fieldVendor')}</Label>
+              <Input
+                id="provider-vendor"
+                value={form.provider}
+                onChange={(event) => setForm((current) => ({ ...current, provider: event.target.value }))}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="provider-protocol">{t('providers.fieldProtocol')}</Label>
+              <Input
+                id="provider-protocol"
+                value={form.protocol}
+                onChange={(event) => setForm((current) => ({ ...current, protocol: event.target.value }))}
+              />
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            {t('common.cancel')}
+          </Button>
+          <Button
+            disabled={busy || !form.id || (mode === 'create' && (!form.baseUrl || !form.model))}
+            onClick={() => void onSubmit()}
+          >
+            {mode === 'create' ? t('providers.createSubmit') : t('providers.editSubmit')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─────────────────────────── Provider card ───────────────────────────
+
 function ProviderCard({
   provider,
-  isSelected,
+  canWrite,
   onEdit,
-  onSelect,
 }: {
-  isSelected: boolean;
-  onEdit: () => void;
-  onSelect: () => void;
   provider: ProviderListItem;
+  canWrite: boolean;
+  onEdit: () => void;
 }): JSX.Element {
+  const t = useT();
   const connectivityTest = useConnectivityTestMutation(provider.id);
   const deleteProvider = useDeleteProviderMutation(provider.id);
   const updatePricing = useUpdatePricingMutation(provider.id);
+
   const [inputPrice, setInputPrice] = useState(priceInputValue(provider.input_price_per_1k));
   const [outputPrice, setOutputPrice] = useState(priceInputValue(provider.output_price_per_1k));
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     setInputPrice(priceInputValue(provider.input_price_per_1k));
@@ -60,125 +230,172 @@ function ProviderCard({
 
   const connectivityMessage = connectivityTest.data
     ? connectivityTest.data.reachable
-      ? `Reachable in ${connectivityTest.data.latency_ms ?? '?'}ms using ${connectivityTest.data.model ?? provider.model}`
-      : connectivityTest.data.error ?? 'Connectivity test failed'
+      ? t('providers.connectivityReachable', {
+          latency: connectivityTest.data.latency_ms ?? '?',
+          model: connectivityTest.data.model ?? provider.model,
+        })
+      : connectivityTest.data.error ?? t('providers.connectivityFailed')
     : null;
 
-  const handleDelete = async (): Promise<void> => {
-    if (!window.confirm(`Delete provider ${provider.id}?`)) {
-      return;
-    }
-    await deleteProvider.mutateAsync();
-  };
-
   return (
-    <article className="rounded-2xl border bg-white/80 p-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <button
-            className="text-left text-xl font-semibold"
-            onClick={onSelect}
-            type="button"
-          >
-            {provider.id}
-          </button>
-          <p className="mt-2 text-sm text-muted-foreground">{provider.base_url}</p>
-          <p className="mt-1 text-sm text-muted-foreground">{provider.model}</p>
-          <p className="mt-1 text-sm text-muted-foreground">{provider.api_key ?? 'No key configured'}</p>
-          {provider.description ? (
-            <p className="mt-2 text-sm text-foreground">{provider.description}</p>
-          ) : null}
-          {connectivityMessage ? <p className="mt-2 text-sm text-foreground">{connectivityMessage}</p> : null}
-          <p className="mt-2 text-sm font-medium">
-            {`Input ${provider.input_price_per_1k ?? '未配置'} / Output ${provider.output_price_per_1k ?? '未配置'}`}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button className="rounded-md bg-secondary px-3 py-2 text-sm font-medium" onClick={onEdit} type="button">
-            {`Edit ${provider.id}`}
-          </button>
-          <button
-            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-            onClick={() => void connectivityTest.mutateAsync()}
-            type="button"
-          >
-            {`Test ${provider.id} connectivity`}
-          </button>
-          <button
-            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-            onClick={() => void handleDelete()}
-            type="button"
-          >
-            {`Delete ${provider.id}`}
-          </button>
-        </div>
-      </div>
-
-      {isSelected ? (
-        <div className="mt-4 grid gap-3 border-t pt-4 md:grid-cols-[1fr_1fr_auto]">
-          <label className="grid gap-2 text-sm font-medium">
-            Input price / 1K tokens
-            <input
-              className="rounded-md border bg-white px-3 py-2"
-              onChange={(event) => setInputPrice(event.target.value)}
-              value={inputPrice}
-            />
-          </label>
-          <label className="grid gap-2 text-sm font-medium">
-            Output price / 1K tokens
-            <input
-              className="rounded-md border bg-white px-3 py-2"
-              onChange={(event) => setOutputPrice(event.target.value)}
-              value={outputPrice}
-            />
-          </label>
-          <div className="flex items-end">
-            <button
-              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-              onClick={() =>
-                void updatePricing.mutateAsync({
-                  input_price_per_1k: inputPrice === '' ? null : Number(inputPrice),
-                  output_price_per_1k: outputPrice === '' ? null : Number(outputPrice),
-                })
-              }
-              type="button"
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Server className="size-4 text-primary" /> {provider.id}
+              {provider.provider ? <Badge variant="outline">{provider.provider}</Badge> : null}
+            </CardTitle>
+            <p className="truncate text-sm text-muted-foreground">{provider.base_url}</p>
+            <p className="truncate text-sm text-muted-foreground">{provider.model}</p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              aria-label={t('providers.testConnectivityLabel', { id: provider.id })}
+              onClick={() => void connectivityTest.mutateAsync()}
+              disabled={connectivityTest.isPending}
             >
-              {`Save ${provider.id} pricing`}
-            </button>
+              <Activity className="size-4" /> {t('providers.test')}
+            </Button>
+            {canWrite ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" aria-label={t('providers.actionsLabel', { id: provider.id })}>
+                    <MoreVertical className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem aria-label={t('providers.editLabel', { id: provider.id })} onSelect={onEdit}>
+                    <Pencil /> {t('common.edit')}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    destructive
+                    aria-label={t('providers.deleteLabel', { id: provider.id })}
+                    onSelect={() => setConfirmDelete(true)}
+                  >
+                    <Trash2 /> {t('common.delete')}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
           </div>
         </div>
-      ) : null}
-    </article>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+            <KeyRound className="size-3.5" />
+            <span className="font-mono">{provider.api_key ?? t('providers.noKeyConfigured')}</span>
+          </span>
+          <Badge variant={provider.api_key_set ? 'success' : 'outline'}>
+            {provider.api_key_set ? t('providers.keySet') : t('providers.noKey')}
+          </Badge>
+        </div>
+
+        {provider.description ? <p className="text-sm text-foreground">{provider.description}</p> : null}
+
+        {connectivityMessage ? (
+          <p
+            className={cn(
+              'text-sm',
+              connectivityTest.data?.reachable ? 'text-success' : 'text-destructive'
+            )}
+          >
+            {connectivityMessage}
+          </p>
+        ) : null}
+
+        <Separator />
+
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-foreground">{t('providers.pricingHeading')}</h3>
+            <span className="text-xs text-muted-foreground">
+              {t('providers.pricingSummary', {
+                input: priceLabel(provider.input_price_per_1k, t('providers.priceUnset')),
+                output: priceLabel(provider.output_price_per_1k, t('providers.priceUnset')),
+              })}
+            </span>
+          </div>
+          {canWrite ? (
+            <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">{t('providers.inputPriceLabel')}</Label>
+                <Input
+                  aria-label={t('providers.inputPriceLabel')}
+                  value={inputPrice}
+                  onChange={(event) => setInputPrice(event.target.value)}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">{t('providers.outputPriceLabel')}</Label>
+                <Input
+                  aria-label={t('providers.outputPriceLabel')}
+                  value={outputPrice}
+                  onChange={(event) => setOutputPrice(event.target.value)}
+                />
+              </div>
+              <Button
+                variant="secondary"
+                aria-label={t('providers.savePricingLabel', { id: provider.id })}
+                disabled={updatePricing.isPending}
+                onClick={() =>
+                  void updatePricing.mutateAsync({
+                    input_price_per_1k: inputPrice === '' ? null : Number(inputPrice),
+                    output_price_per_1k: outputPrice === '' ? null : Number(outputPrice),
+                  })
+                }
+              >
+                {t('providers.savePricing')}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      </CardContent>
+
+      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('providers.deleteTitle', { id: provider.id })}</AlertDialogTitle>
+            <AlertDialogDescription>{t('providers.deleteDescription')}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void deleteProvider.mutateAsync()}>
+              {t('common.delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </Card>
   );
 }
 
+// ─────────────────────────── Page ───────────────────────────
+
 export function ProvidersPage(): JSX.Element {
+  const t = useT();
+  const me = useAdminMeQuery();
   const providers = useProvidersQuery();
   const createProvider = useCreateProviderMutation();
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mode, setMode] = useState<'create' | 'edit'>('create');
   const [form, setForm] = useState<ProviderFormState>(emptyForm);
+  const [formOpen, setFormOpen] = useState(false);
 
-  useEffect(() => {
-    if (!selectedId && providers.data && providers.data.length > 0) {
-      setSelectedId(providers.data[0].id);
-    }
-  }, [providers.data, selectedId]);
-
-  const resetForm = (): void => {
-    setMode('create');
-    setForm(emptyForm());
-  };
-
-  const selectedProvider = providers.data?.find((provider) => provider.id === selectedId) ?? null;
+  const canWrite = me.data?.role !== 'viewer';
   const updateProvider = useUpdateProviderMutation(selectedId ?? '');
 
-  useEffect(() => {
-    if (selectedId && providers.data && !selectedProvider) {
-      setSelectedId(providers.data[0]?.id ?? null);
-      resetForm();
-    }
-  }, [providers.data, selectedId, selectedProvider]);
+  const openCreate = (): void => {
+    setMode('create');
+    setForm(emptyForm());
+    setSelectedId(null);
+    setFormOpen(true);
+  };
 
   const startEdit = (provider: ProviderListItem): void => {
     setSelectedId(provider.id);
@@ -192,6 +409,7 @@ export function ProvidersPage(): JSX.Element {
       protocol: provider.protocol ?? '',
       provider: provider.provider ?? '',
     });
+    setFormOpen(true);
   };
 
   const onSubmit = async (): Promise<void> => {
@@ -205,8 +423,7 @@ export function ProvidersPage(): JSX.Element {
         protocol: form.protocol || undefined,
         provider: form.provider || undefined,
       });
-      setSelectedId(form.id);
-      resetForm();
+      setFormOpen(false);
       return;
     }
 
@@ -222,127 +439,49 @@ export function ProvidersPage(): JSX.Element {
       protocol: form.protocol || undefined,
       provider: form.provider || undefined,
     });
-    setForm((current) => ({ ...current, apiKey: '' }));
+    setFormOpen(false);
   };
 
   return (
-    <section className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-      <div className="space-y-6">
-        <header className="space-y-2">
-          <p className="text-sm font-medium uppercase tracking-[0.25em] text-muted-foreground">
-            Native SPA
-          </p>
-          <h1 className="text-3xl font-semibold tracking-tight">Providers</h1>
-          <p className="text-sm text-muted-foreground">
-            Manage model providers natively, including secret rotation, connectivity checks, and
-            pricing updates.
-          </p>
-        </header>
-
-        <section className="rounded-2xl border bg-white/75 p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Create or edit provider</h2>
-            {mode === 'edit' ? (
-              <button
-                className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-                onClick={resetForm}
-                type="button"
-              >
-                New draft
-              </button>
-            ) : null}
-          </div>
-          <div className="grid gap-4">
-            <label className="grid gap-2 text-sm font-medium">
-              Provider ID
-              <input
-                className="rounded-md border bg-white px-3 py-2"
-                disabled={mode === 'edit'}
-                onChange={(event) => setForm((current) => ({ ...current, id: event.target.value }))}
-                value={form.id}
-              />
-            </label>
-            <label className="grid gap-2 text-sm font-medium">
-              Base URL
-              <input
-                className="rounded-md border bg-white px-3 py-2"
-                onChange={(event) => setForm((current) => ({ ...current, baseUrl: event.target.value }))}
-                value={form.baseUrl}
-              />
-            </label>
-            <label className="grid gap-2 text-sm font-medium">
-              Model
-              <input
-                className="rounded-md border bg-white px-3 py-2"
-                onChange={(event) => setForm((current) => ({ ...current, model: event.target.value }))}
-                value={form.model}
-              />
-            </label>
-            <label className="grid gap-2 text-sm font-medium">
-              API Key
-              <input
-                className="rounded-md border bg-white px-3 py-2"
-                onChange={(event) => setForm((current) => ({ ...current, apiKey: event.target.value }))}
-                type="password"
-                value={form.apiKey}
-              />
-            </label>
-            <label className="grid gap-2 text-sm font-medium">
-              Description
-              <input
-                className="rounded-md border bg-white px-3 py-2"
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, description: event.target.value }))
-                }
-                value={form.description}
-              />
-            </label>
-            <label className="grid gap-2 text-sm font-medium">
-              Vendor
-              <input
-                className="rounded-md border bg-white px-3 py-2"
-                onChange={(event) => setForm((current) => ({ ...current, provider: event.target.value }))}
-                value={form.provider}
-              />
-            </label>
-            <label className="grid gap-2 text-sm font-medium">
-              Protocol
-              <input
-                className="rounded-md border bg-white px-3 py-2"
-                onChange={(event) => setForm((current) => ({ ...current, protocol: event.target.value }))}
-                value={form.protocol}
-              />
-            </label>
-            <button
-              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-              onClick={() => void onSubmit()}
-              type="button"
-            >
-              {mode === 'create' ? 'Create provider' : 'Save changes'}
-            </button>
-          </div>
-        </section>
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <h2 className="text-xl font-semibold tracking-tight">{t('nav.providers')}</h2>
+          <Badge variant="secondary">{providers.data?.length ?? 0}</Badge>
+        </div>
+        {canWrite ? (
+          <Button onClick={openCreate}>
+            <Plus className="size-4" /> {t('providers.newProvider')}
+          </Button>
+        ) : null}
       </div>
 
-      <section className="grid gap-4">
+      <div className="grid gap-4 lg:grid-cols-2">
         {providers.data?.map((provider) => (
           <ProviderCard
-            isSelected={provider.id === selectedId}
             key={provider.id}
-            onEdit={() => startEdit(provider)}
-            onSelect={() => setSelectedId(provider.id)}
             provider={provider}
+            canWrite={canWrite}
+            onEdit={() => startEdit(provider)}
           />
         ))}
-        {!providers.data?.length ? (
-          <p className="rounded-2xl border bg-white/80 p-5 text-sm text-muted-foreground">
-            No providers configured yet.
-          </p>
-        ) : null}
-        {selectedProvider ? (
-          <p className="text-sm text-muted-foreground">{`Selected provider: ${selectedProvider.id}`}</p>
-        ) : null}
-      </section>
-    </section>
+      </div>
+
+      {providers.data && providers.data.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border py-12 text-center text-sm text-muted-foreground">
+          {t('providers.emptyState')}
+        </div>
+      ) : null}
+
+      <ProviderFormDialog
+        mode={mode}
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        form={form}
+        setForm={setForm}
+        busy={createProvider.isPending || updateProvider.isPending}
+        onSubmit={onSubmit}
+      />
+    </div>
   );
 }

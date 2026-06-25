@@ -40,11 +40,15 @@ export type CreateAgentInput = {
   model_overrides?: AgentModelOverrides;
 };
 
+// Fields the PATCH /admin/agents/{name} endpoint accepts (UpdateBody). All
+// optional — omitted fields are left unchanged.
 export type UpdateAgentInput = {
   system_prompt?: string;
   allowed_tools?: string[];
   model_overrides?: AgentModelOverrides;
   config_overrides_yaml?: string;
+  icon?: string | null;
+  memory_namespace?: string;
 };
 
 export type AgentDetail = {
@@ -56,8 +60,24 @@ export type AgentDetail = {
   system_prompt: string;
   supports_dm?: boolean;
   supports_groups?: boolean;
+  icon?: string | null;
+  memory_namespace?: string;
+  provenance?: string;
+  version?: number;
   runtime?: AgentRuntime | null;
   placement?: AgentPlacement | null;
+};
+
+export type AgentRequiredEnvRow = {
+  env_name: string;
+  source: string;
+  mode: string;
+  status: string;
+};
+
+export type AgentRequiredEnv = {
+  agent: string;
+  required_env: AgentRequiredEnvRow[];
 };
 
 export type AgentVersion = {
@@ -538,5 +558,55 @@ export function useDeleteAgentSecretMutation(name: string, envName: string) {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: agentSecretsKey(name) });
     },
+  });
+}
+
+// Same PUT endpoint as useSetAgentSecretMutation, but the env name is supplied at
+// call time — for the "select env → set value" form where env is chosen dynamically.
+export function useSetAgentSecretValueMutation(name: string) {
+  const api = useAdminApi();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ envName, value }: { envName: string; value: string }) =>
+      api.put<{ env_name: string; status: string }>(`/admin/agents/${name}/secrets/${envName}`, { value }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: agentSecretsKey(name) });
+    },
+  });
+}
+
+// GET /admin/agents/{name}/required-env → declared env slots + their fulfilment.
+export function useAgentRequiredEnvQuery(name: string | null) {
+  const api = useAdminApi();
+
+  return useQuery({
+    enabled: Boolean(name),
+    queryKey: ['agents', name, 'required-env'],
+    queryFn: () => api.get<AgentRequiredEnv>(`/admin/agents/${name}/required-env`),
+  });
+}
+
+// POST /admin/agents/{name}/deploy → materialize the active version to the agent home.
+export function useDeployAgentMutation(name: string) {
+  const api = useAdminApi();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () =>
+      api.post<{ agent: string; path: string; deployed: boolean }>(`/admin/agents/${name}/deploy`),
+    onSuccess: async () => {
+      await invalidateAgentCoreQueries(queryClient, name);
+    },
+  });
+}
+
+// GET /admin/agents/{name}/agent-yaml → rendered agent.yaml for export. Modeled as
+// a mutation since it is triggered on demand by a button, not auto-fetched.
+export function useExportAgentYamlMutation(name: string) {
+  const api = useAdminApi();
+
+  return useMutation({
+    mutationFn: () => api.get<{ agent: string; yaml: string }>(`/admin/agents/${name}/agent-yaml`),
   });
 }

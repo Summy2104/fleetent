@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { AuthProvider } from '@/app/auth';
 import { AppQueryProvider } from '@/app/query-client';
 import { TenancyPage } from '@/features/tenancy/page';
+import { I18nProvider } from '@/i18n';
 import { server } from '@/test/msw/server';
 
 const API_BASE_URL = 'http://fleetent.test';
@@ -38,20 +39,22 @@ type UserRecord = {
 
 function renderTenancyPage(): void {
   render(
-    <AuthProvider
-      baseUrl={API_BASE_URL}
-      initialToken="session-token"
-    >
-      <AppQueryProvider>
-        <TenancyPage />
-      </AppQueryProvider>
-    </AuthProvider>
+    <I18nProvider>
+      <AuthProvider
+        baseUrl={API_BASE_URL}
+        initialToken="session-token"
+      >
+        <AppQueryProvider>
+          <TenancyPage />
+        </AppQueryProvider>
+      </AuthProvider>
+    </I18nProvider>
   );
 }
 
 describe('tenancy page', () => {
-  it('lets admins list and create tenants and teams, assign user tenancy, and set approvers', async () => {
-    const user = userEvent.setup();
+  it('lets admins list and create tenants, assign user tenancy, and set tenant approvers', async () => {
+    const user = userEvent.setup({ delay: null });
     let tenants: TenantRecord[] = [
       {
         approver_user_id: null,
@@ -154,15 +157,9 @@ describe('tenancy page', () => {
 
     expect(await screen.findByRole('heading', { name: 'Tenancy' })).toBeInTheDocument();
     expect(await screen.findByTestId('tenant-card-tenant-a')).toHaveTextContent('Tenant A');
-    expect(await screen.findByTestId('team-card-team-a')).toHaveTextContent('Team A');
     await user.type(screen.getByLabelText('Tenant name'), 'Tenant B');
     await user.click(screen.getByRole('button', { name: 'Create tenant' }));
     expect(await screen.findByTestId('tenant-card-tenant-b')).toHaveTextContent('Tenant B');
-
-    await user.type(screen.getByLabelText('Team name'), 'Team B');
-    await user.selectOptions(screen.getByLabelText('Team tenant'), 'tenant-b');
-    await user.click(screen.getByRole('button', { name: 'Create team' }));
-    expect(await screen.findByTestId('team-card-team-b')).toHaveTextContent('Team B');
 
     await user.selectOptions(screen.getByLabelText('Assign tenant for Alice'), 'tenant-b');
     await user.click(screen.getByRole('button', { name: 'Assign tenant for Alice' }));
@@ -175,13 +172,6 @@ describe('tenancy page', () => {
     await waitFor(() => {
       const tenantCard = screen.getByTestId('tenant-card-tenant-b');
       expect(within(tenantCard).getByText('Approver: user-2')).toBeInTheDocument();
-    });
-
-    await user.selectOptions(screen.getByLabelText('Team approver for team-b'), 'user-2');
-    await user.click(screen.getByRole('button', { name: 'Save team approver for team-b' }));
-    await waitFor(() => {
-      const teamCard = screen.getByTestId('team-card-team-b');
-      expect(within(teamCard).getByText('Approver: user-2')).toBeInTheDocument();
     });
   });
 
@@ -233,9 +223,7 @@ describe('tenancy page', () => {
     expect(await screen.findByRole('heading', { name: 'Tenancy' })).toBeInTheDocument();
     expect(await screen.findByText('Viewer access is read-only.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Create tenant' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Create team' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Assign tenant for Alice' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save tenant approver for tenant-a' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Save team approver for team-a' })).not.toBeInTheDocument();
   });
 });

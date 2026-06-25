@@ -87,6 +87,7 @@ export type McpServerInput = {
   args?: string[];
   agent_id?: number | null;
   enabled?: boolean;
+  env?: Record<string, string>;
 };
 
 export type McpServerEditInput = Partial<McpServerInput>;

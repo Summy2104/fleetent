@@ -201,7 +201,7 @@ function UsersApiProbe(): JSX.Element {
 
 describe('users api hooks', () => {
   it('refreshes users and keys after CRUD, role, block, rotate, revoke, and password actions', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let resetCalls = 0;
     let users: UserRecord[] = [
       {
@@ -391,7 +391,7 @@ describe('users api hooks', () => {
   });
 
   it('refreshes IM identities after bind, block, and restore actions', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let imUsers: ImUserRecord[] = [
       {
         allowed: true,
