@@ -26,6 +26,12 @@ export default tseslint.config(
     rules: {
       ...reactHooks.configs.recommended.rules,
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
+      // Allow intentionally-unused bindings: `_`-prefixed names and the
+      // destructure-to-omit idiom (`const { id, ...rest } = obj`).
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', ignoreRestSiblings: true },
+      ],
     },
   }
 );

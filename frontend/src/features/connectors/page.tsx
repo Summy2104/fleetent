@@ -237,10 +237,9 @@ function CredentialDialog({
           </Button>
           <Button
             disabled={!apiKey || setCredential.isPending}
-            onClick={async () => {
-              await setCredential.mutateAsync({ api_key: apiKey });
-              onOpenChange(false);
-            }}
+            onClick={() =>
+              void setCredential.mutateAsync({ api_key: apiKey }).then(() => onOpenChange(false))
+            }
           >
             {t('connectors.submit')}
           </Button>

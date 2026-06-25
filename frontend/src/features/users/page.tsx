@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Copy, KeyRound, MoreVertical, Plus, RefreshCw, Trash2, UserPlus } from 'lucide-react';
+import { Copy, KeyRound, MoreVertical, RefreshCw, Trash2, UserPlus } from 'lucide-react';
 
 import { useAdminApi } from '@/lib/api-client';
 import { useT } from '@/i18n';

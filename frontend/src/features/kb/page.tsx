@@ -299,10 +299,9 @@ function SyncDialog({
           </Button>
           <Button
             disabled={!path || sync.isPending}
-            onClick={async () => {
-              await sync.mutateAsync({ path, tenant_id: TENANT });
-              onOpenChange(false);
-            }}
+            onClick={() =>
+              void sync.mutateAsync({ path, tenant_id: TENANT }).then(() => onOpenChange(false))
+            }
           >
             {t('kb.sync')}
           </Button>
