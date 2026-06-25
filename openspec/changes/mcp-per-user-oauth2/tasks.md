@@ -12,11 +12,11 @@
 
 ## 2. per-user token 存储抽象 + 注入缝
 
-- [ ] 2.1 (test, unit) 注入缝 set_user_token_resolver:未注入回退本地;注入后经注入实现;按 (server_id, user_id[, agent_id]) 解析;返回 None 表示无 token
-- [ ] 2.2 (test, unit) token 存储抽象接口:get/put/delete 按 (user_id, agent_id, server_id) 隔离;不同三元组互不影响
-- [ ] 2.3 (impl) 定义 token 存储抽象 + set_user_token_resolver 模块级缝(仿 set_im_identity_resolver),standalone 默认本地实现
-- [ ] 2.4 (test, integration) standalone 本地加密 token 表:嵌入式 forward-only 迁移建表(migrate-on-open + 版本闸)、密文存 access/refresh/expiry/scope、按三元组 CRUD;tmp_path 隔离
-- [ ] 2.5 (impl) standalone 本地 token store:手写 SQL 走 store 边界、named parameters、不绕 db.py;加密落库
+- [x] 2.1 (test, unit) 注入缝 set_user_token_resolver:未注入回退本地;注入后经注入实现;按 (server_id, user_id[, agent_id]) 解析;返回 None 表示无 token
+- [x] 2.2 (test, unit) token 存储抽象接口:get/put/delete 按 (user_id, agent_id, server_id) 隔离;不同三元组互不影响
+- [x] 2.3 (impl) 定义 token 存储抽象 + set_user_token_resolver 模块级缝(仿 set_im_identity_resolver),standalone 默认本地实现
+- [x] 2.4 (test, integration) standalone 本地加密 token 表:嵌入式 forward-only 迁移建表(migrate-on-open + 版本闸)、密文存 access/refresh/expiry/scope、按三元组 CRUD;tmp_path 隔离
+- [x] 2.5 (impl) standalone 本地 token store:手写 SQL 走 store 边界、named parameters、不绕 db.py;加密落库
 
 ## 3. 会话键扩维(向后兼容)
 
@@ -56,8 +56,8 @@
 
 ## 8. 配置
 
-- [ ] 8.1 (test, unit) agent.yaml mcp_servers[].auth 解析:oauth2 authorization_code 字段(authorization_endpoint/token_url/client_id/client_secret_env/scope/redirect_path);缺字段报错清晰
-- [ ] 8.2 (impl) 扩展 McpServerSettings/McpServerConfig 支持 authorization_code 配置;client_credentials 配置与行为不变
+- [x] 8.1 (test, unit) agent.yaml mcp_servers[].auth 解析:oauth2 authorization_code 字段(authorization_endpoint/token_url/client_id/client_secret_env/scope/redirect_path);缺字段报错清晰
+- [x] 8.2 (impl) 扩展 McpServerSettings/McpServerConfig 支持 authorization_code 配置;client_credentials 配置与行为不变
 
 ## 9. 契约护栏与端到端
 

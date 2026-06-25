@@ -104,6 +104,13 @@ class McpServerConfig:
     client_id: str = ""
     client_secret_env: str = ""  # env var holding the client secret (not stored in plaintext)
     scope: str = ""
+    # OAuth2 grant selector (mcp-per-user-oauth2): "client_credentials" (machine identity,
+    # the historical default) or "authorization_code" (per-user delegation). The two paths
+    # coexist; client_credentials behavior is unchanged when this stays at the default.
+    # authorization_endpoint / redirect_path are authorization_code-only (empty otherwise).
+    oauth_grant: str = "client_credentials"
+    authorization_endpoint: str = ""
+    redirect_path: str = ""
     # stdio fields
     command: str = ""  # e.g. "npx" or "python"
     args: list[str] = field(
@@ -166,9 +173,14 @@ class McpServerConfig:
             client_id = getattr(auth, "client_id", "")
             client_secret_env = getattr(auth, "client_secret_env", "")
             scope = getattr(auth, "scope", "")
+            oauth_grant = getattr(auth, "grant", "client_credentials") or "client_credentials"
+            authorization_endpoint = getattr(auth, "authorization_endpoint", "")
+            redirect_path = getattr(auth, "redirect_path", "")
         else:
             auth_type = getattr(s, "auth_type", "none")
             token_url = client_id = client_secret_env = scope = ""
+            oauth_grant = "client_credentials"
+            authorization_endpoint = redirect_path = ""
         return cls(
             id=s.id,
             transport=s.transport,
@@ -179,6 +191,9 @@ class McpServerConfig:
             client_id=client_id,
             client_secret_env=client_secret_env,
             scope=scope,
+            oauth_grant=oauth_grant,
+            authorization_endpoint=authorization_endpoint,
+            redirect_path=redirect_path,
             command=getattr(s, "command", ""),
             args=list(getattr(s, "args", []) or []),
             env=dict(getattr(s, "env", {}) or {}),
