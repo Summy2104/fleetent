@@ -3,7 +3,6 @@ from fleetent.vector_store.namespaces import (
     agent_memory_namespace,
     knowledge_namespace,
     memory_namespace,
-    shared_namespace,
 )
 from fleetent.vector_store.reindex import (
     IndexableItem,
@@ -42,7 +41,6 @@ __all__ = [
     "agent_memory_namespace",
     "knowledge_namespace",
     "memory_namespace",
-    "shared_namespace",
     "reindex",
     "search",
     "upsert",

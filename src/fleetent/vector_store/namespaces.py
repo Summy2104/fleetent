@@ -3,6 +3,10 @@
 Namespaces are dot-separated strings like ``mem:user-1`` or ``kb:default:global``.
 VectorFamily enumerates the three known prefix groups; family_of() is the single
 routing entry point — ad-hoc ``startswith`` checks are banned (§5.6).
+
+The retired ``shared:`` family (cross-tenant Shared Memory) was removed in the
+agent-memory rescope: memory is now agent-level (``agentmem:``), so ``family_of``
+fail-fasts on any leftover ``shared:`` namespace.
 """
 
 from __future__ import annotations
@@ -11,11 +15,10 @@ from enum import Enum
 
 
 class VectorFamily(Enum):
-    """Explicit enumeration of the four known vector namespace families."""
+    """Explicit enumeration of the three known vector namespace families."""
 
     MEMORY = "mem"
     AGENT_MEMORY = "agentmem"
-    SHARED = "shared"
     KB = "kb"
 
 
@@ -52,13 +55,6 @@ def memory_namespace(user_id: str) -> str:
 def agent_memory_namespace() -> str:
     """Return the fixed agent memory namespace — isolation is per-agent physical DB."""
     return "agentmem:"
-
-
-def shared_namespace(scope_type: str, scope_id: str) -> str:
-    """Return shared:{scope_type}:{scope_id}."""
-    _require_non_empty(scope_type, "scope_type")
-    _require_non_empty(scope_id, "scope_id")
-    return f"shared:{scope_type}:{scope_id}"
 
 
 def knowledge_namespace(tenant_id: str, kb_id: str) -> str:
