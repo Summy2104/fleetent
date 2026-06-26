@@ -153,6 +153,11 @@ def _migrate_subject(
         _insert_fact_in_tx(conn, migrated)
 
 
+def _normalize(value: str) -> str:
+    """Case/whitespace-insensitive key for comparing fact objects."""
+    return " ".join(value.split()).casefold()
+
+
 def _commit_one(
     conn: SQLiteConnection,
     user_id: str,
@@ -161,17 +166,24 @@ def _commit_one(
     source_turn: str | None,
 ) -> Fact | None:
     """Apply one classified fact's verdict.  Returns the new Fact or None (skipped)."""
-    if cf.verdict in ("Equivalent", "NewSubsumed"):
-        # New fact adds nothing — skip.
-        return None
-
     existing = _active_facts_in_tx(conn, user_id, cf.subject, cf.relation)
 
     superseded_ids: list[str] = []
     if cf.cardinality == "single":
-        # A single-valued relation: any prior active value is replaced.
+        # A single-valued relation holds exactly one current value. Decide
+        # deterministically, NOT by the LLM verdict (which mislabels a clearly
+        # different new value — e.g. a new name vs the old — as Equivalent and
+        # would wrongly skip the update): if some active value already equals the
+        # new one (case/space-insensitive), it's a true no-op; otherwise the new
+        # value replaces all prior active values.
+        new_norm = _normalize(cf.object)
+        if any(_normalize(f.object) == new_norm for f in existing):
+            return None
         if existing:
             superseded_ids = [f.fact_id for f in existing]
+    elif cf.verdict in ("Equivalent", "NewSubsumed"):
+        # multi + new fact adds nothing — skip.
+        return None
     elif cf.verdict == "Contradict":
         # multi + contradict: supersede only the contradicted (most similar) facts.
         # Without an embedding comparison here we supersede all existing — the

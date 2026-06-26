@@ -354,3 +354,56 @@ def test_rename_migration_dedupes_against_existing_new_subject(tmp_path: Path) -
     assert {f.object for f in sid} == {"U09M"}
     # 张三 fully archived.
     assert facts_store.active_facts_for_relation("u1", "张三", "works_at") == []
+
+
+def test_single_relation_overrides_despite_equivalent_verdict(tmp_path: Path) -> None:
+    from fleetent.memory import facts_commit
+
+    db = _open_db(tmp_path)
+    facts_store.set_facts_db(db, None)  # type: ignore[arg-type]
+    facts_store.insert_fact(_seed_fact_subject("old", "agent", "name", "AI 助手"))
+    # Force the old (multi) cardinality to single to mirror the name relation.
+    facts_store.update_fact_status("old", "active")  # ensure active
+    # Re-insert as single is simpler: clear and add a single one.
+    db.execute("UPDATE facts SET cardinality='single' WHERE fact_id='old'")
+
+    # LLM misjudges a clearly-different new name as Equivalent. For a single
+    # relation the new value must STILL override the old (deterministic).
+    cf = ClassifiedFact(
+        subject="agent",
+        relation="name",
+        object="Fleetent",
+        temporal="none",
+        cardinality="single",
+        verdict="Equivalent",  # wrong verdict from the LLM
+        statement="助手叫 Fleetent",
+    )
+    new_facts = facts_commit.commit_facts("u1", [cf], db, source_turn="t1")
+
+    assert len(new_facts) == 1  # new name was stored despite Equivalent verdict
+    old = facts_store.get_fact("old")
+    assert old is not None and old.status == "superseded"
+    active = facts_store.active_facts_for_relation("u1", "agent", "name")
+    assert {f.object for f in active} == {"Fleetent"}
+
+
+def test_single_relation_same_value_still_skips(tmp_path: Path) -> None:
+    from fleetent.memory import facts_commit
+
+    db = _open_db(tmp_path)
+    facts_store.set_facts_db(db, None)  # type: ignore[arg-type]
+    facts_store.insert_fact(_seed_fact_subject("old", "agent", "name", "Fleetent"))
+    db.execute("UPDATE facts SET cardinality='single' WHERE fact_id='old'")
+
+    # Same value (case/space-insensitive) → no new row, old stays.
+    cf = ClassifiedFact(
+        subject="agent", relation="name", object=" fleetent ",
+        temporal="none", cardinality="single", verdict="Orthogonal",
+        statement="助手叫 Fleetent",
+    )
+    new_facts = facts_commit.commit_facts("u1", [cf], db, source_turn="t1")
+
+    assert new_facts == []  # identical value → skipped
+    active = facts_store.active_facts_for_relation("u1", "agent", "name")
+    assert {f.object for f in active} == {"Fleetent"}
+    assert facts_store.get_fact("old").status == "active"
