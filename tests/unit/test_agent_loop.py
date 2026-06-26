@@ -1803,6 +1803,14 @@ def _capture_stream_wire(monkeypatch, *, memory: str, catalog: str) -> dict:
 
 
 _BASE = "You are a helpful assistant with access to tools. Use them when needed."
+_MEMORY_NOTE = (
+    "\n\n[记忆系统说明]\n"
+    "你拥有长期记忆系统。用户说的事实（偏好、关系、背景信息等）会在对话结束后自动提取并存入记忆数据库，"
+    "无需你主动调用任何工具来保存——直接在对话中自然回应即可，记忆会自动更新。\n"
+    "每轮对话开始时，与当前话题相关的记忆会自动注入到上下文（见 [Long-term context] 部分）。\n"
+    "如需查看用户的全部记忆，使用 recall_memory 工具。"
+)
+_BASE_WITH_MEMORY = _BASE + _MEMORY_NOTE
 
 
 async def test_run_stream_base_system_prefix_stable_across_variable_content(monkeypatch):
@@ -1818,7 +1826,7 @@ async def test_run_stream_base_system_prefix_stable_across_variable_content(monk
     second = cap2["messages"][0]
 
     assert first["role"] == "system"
-    assert first["content"] == f"{_BASE}\n\nCATALOG-X"
+    assert first["content"] == f"{_BASE_WITH_MEMORY}\n\nCATALOG-X"
     assert second["content"] == first["content"]
 
 
@@ -1839,7 +1847,7 @@ async def test_run_stream_no_variable_content_is_single_base_system(monkeypatch)
     msgs = cap["messages"]
     system_msgs = [m for m in msgs if m["role"] == "system"]
     assert len(system_msgs) == 1
-    assert system_msgs[0]["content"] == _BASE
+    assert system_msgs[0]["content"] == _BASE_WITH_MEMORY
 
 
 def test_run_sync_base_system_prefix_stable_across_variable_content(monkeypatch):
@@ -1862,7 +1870,7 @@ def test_run_sync_base_system_prefix_stable_across_variable_content(monkeypatch)
     # (class C), not by run_sync's prompt assembly, so the cacheable prefix here is
     # exactly base+catalog and identical across runs.
     assert run1[0]["role"] == "system"
-    assert run1[0]["content"] == f"{_BASE}\n\nCATALOG-X"
+    assert run1[0]["content"] == f"{_BASE_WITH_MEMORY}\n\nCATALOG-X"
     assert run2[0]["content"] == run1[0]["content"]
 
 

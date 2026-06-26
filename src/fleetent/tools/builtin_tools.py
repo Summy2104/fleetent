@@ -314,6 +314,10 @@ async def recall_memory(subject: str | None = None, tool_context: ToolContext | 
     for the current user (no relevance ranking, no truncation), grouped by who
     each fact is about. Leave ``subject`` empty for all; set it to filter to one
     person (e.g. the user, the assistant, or a named contact). Never raises.
+
+    Note: memories are extracted automatically after each conversation turn — there
+    is no separate "save memory" tool. When a user shares new information, just
+    acknowledge it naturally; the pipeline will persist it.
     """
     principal = getattr(tool_context, "principal", None) if tool_context else None
     user_id = getattr(principal, "user_id", None) if principal else None

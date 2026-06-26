@@ -266,7 +266,7 @@ async def test_total_budget_excludes_candidates_that_do_not_fit(monkeypatch):
         long_term_ctx,
         "_ltc_config",
         lambda: _ltc(
-            max_tokens=62,
+            max_tokens=90,
             memory_max_tokens=500,
             knowledge_max_tokens=500,
             memory_top_k=10,
@@ -286,10 +286,10 @@ async def test_total_budget_excludes_candidates_that_do_not_fit(monkeypatch):
         user_id="user-1",
         query="preferences",
         agent_id="agent-1",
-        available_tokens=62,
+        available_tokens=90,
     )
 
-    assert len(result.text) <= 62
+    assert len(result.text) <= 90
     assert [source.source_id for source in result.sources] == ["mem-1"]
     assert any(
         decision.source_id == "doc-1" and decision.reason == "total_budget_exceeded"
@@ -370,7 +370,7 @@ async def test_personal_history_queries_prefer_memory_when_budget_forces_a_choic
         long_term_ctx,
         "_ltc_config",
         lambda: _ltc(
-            max_tokens=52,
+            max_tokens=80,
             memory_max_tokens=500,
             knowledge_max_tokens=500,
             memory_top_k=10,
@@ -389,7 +389,7 @@ async def test_personal_history_queries_prefer_memory_when_budget_forces_a_choic
         user_id="user-1",
         query="remember my preference",
         agent_id="agent-1",
-        available_tokens=52,
+        available_tokens=80,
     )
 
     assert [source.source_id for source in result.sources] == ["mem-1"]

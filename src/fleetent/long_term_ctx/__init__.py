@@ -420,9 +420,9 @@ def _decision(candidate: _ContextCandidate, *, included: bool, reason: str) -> B
 
 
 _SECTION_HEADERS = {
-    "memory": "[Long-term memory]",
-    "agent_memory": "[Agent memory]",
-    "knowledge": "[Knowledge]",
+    "memory": "[Long-term memory — 你记住的关于用户的事实]",
+    "agent_memory": "[Agent memory — 你自己的记忆笔记]",
+    "knowledge": "[Knowledge — 知识库检索结果]",
 }
 
 
