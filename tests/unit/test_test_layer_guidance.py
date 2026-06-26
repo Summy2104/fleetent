@@ -15,7 +15,7 @@ def test_project_guidance_documents_test_layer_guard_and_unit_boundaries():
     assert "`tmp_path`" in guidance
     # CLAUDE.md is an @AGENTS.md include pointer; guidance content lives in AGENTS.md.
     assert "@AGENTS.md" in claude_guidance
-    assert "`sqlite3`" in guidance
+    assert "`import sqlite3`" in guidance
     assert "`DB_PATH`" in guidance
     assert "`_init_db()`" in guidance
     assert "`DATABASE_URL=sqlite:///...`" in guidance
