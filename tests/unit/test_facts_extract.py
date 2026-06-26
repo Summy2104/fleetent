@@ -301,3 +301,25 @@ async def test_extract_without_known_relations_still_works() -> None:
     # Omitting known_relations keeps the old behavior (back-compat).
     facts = await facts_pipeline.extract_facts(turn_content="...", llm_client=_FakeLLM(payload))
     assert len(facts) == 1
+
+
+async def test_prompt_guides_skill_naming_not_relation_folding() -> None:
+    from fleetent.memory import facts_pipeline
+
+    # Skills go to has_skill with a canonical object name, not knows_how_to_X /
+    # object='true', so the same skill is not stored as near-duplicates.
+    prompt = facts_pipeline._extract_system_prompt(None)
+    low = prompt.lower()
+    assert "has_skill" in low
+    assert "knows_how_to_at_mention" in low  # the named anti-example
+    assert "true" in low  # forbids object='true'
+
+
+async def test_prompt_excludes_realtime_system_meta() -> None:
+    from fleetent.memory import facts_pipeline
+
+    # Tool count / live status / agent capability are not durable user facts.
+    prompt = facts_pipeline._extract_system_prompt(None)
+    assert "11" in prompt  # the tool-count anti-example
+    low = prompt.lower()
+    assert "real-time" in low or "system/meta" in low or "tool count" in low
