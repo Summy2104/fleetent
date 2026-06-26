@@ -97,7 +97,7 @@ class NodeReconciler:
         self._post_status(desired_state)
 
     def _post_status(self, desired_state: DesiredState) -> None:
-        payload = {
+        payload: dict[str, object] = {
             "agents": [
                 _status_payload(
                     agent.agent_id,
@@ -108,6 +108,8 @@ class NodeReconciler:
                 for agent in desired_state.agents
             ]
         }
+        if self._config.advertise_host:
+            payload["forward_host"] = self._config.advertise_host
         try:
             response = httpx.post(
                 f"{self._config.platform_url}/nodes/{self._config.node_id}/status",

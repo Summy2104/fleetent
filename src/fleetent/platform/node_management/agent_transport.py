@@ -11,7 +11,11 @@ from fastapi.responses import Response, StreamingResponse
 from starlette.websockets import WebSocketDisconnect
 
 from fleetent.identity import INGRESS_PRINCIPAL_HEADER, Principal, encode_ingress_principal
-from fleetent.node.forwarder_contract import forwarder_base_url, forwarder_ws_url
+from fleetent.node.forwarder_contract import (
+    DEFAULT_FORWARDER_PORT,
+    forwarder_base_url,
+    forwarder_ws_url,
+)
 from fleetent.platform.node_management import node_store
 
 
@@ -59,7 +63,7 @@ class DirectHttpAgentTransport:
             upstream = await client.send(
                 client.build_request(
                     "POST",
-                    f"{forwarder_base_url(node_id)}/forward/agents/{agent_name}/chat",
+                    f"{_forwarder_base_url(node_id)}/forward/agents/{agent_name}/chat",
                     content=body,
                     headers=headers,
                 ),
@@ -105,7 +109,7 @@ class DirectHttpAgentTransport:
             headers[INGRESS_PRINCIPAL_HEADER] = encode_ingress_principal(principal)
         try:
             async with websockets.connect(
-                f"{forwarder_ws_url(node_id)}/forward/agents/{agent_name}/ws",
+                f"{_forwarder_ws_url(node_id)}/forward/agents/{agent_name}/ws",
                 additional_headers=headers,
             ) as upstream:
                 await websocket.accept()
@@ -125,6 +129,25 @@ class DirectHttpAgentTransport:
             return
         except Exception as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def _forwarder_base_url(node_id: str) -> str:
+    """Resolve the node forwarder base URL, preferring the node-reported address.
+
+    Priority: reported forward_host (DB) → FLEETENT_FORWARDER_HOST_OVERRIDE → {node_id}.internal.
+    Reading the reported address here (platform side) keeps node/ off the management DB.
+    """
+    host = node_store.get_forward_host(node_id)
+    if host:
+        return f"http://{host}:{DEFAULT_FORWARDER_PORT}"
+    return forwarder_base_url(node_id)
+
+
+def _forwarder_ws_url(node_id: str) -> str:
+    host = node_store.get_forward_host(node_id)
+    if host:
+        return f"ws://{host}:{DEFAULT_FORWARDER_PORT}"
+    return forwarder_ws_url(node_id)
 
 
 def _node_service_key(node_id: str) -> str:
