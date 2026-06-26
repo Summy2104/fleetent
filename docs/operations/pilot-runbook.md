@@ -810,6 +810,12 @@ CLI 命令不可用：
 3. 检查 `pyproject.toml` 的 `[project.scripts]`。
 4. 如镜像缓存异常，重新构建镜像后复测。
 
+managed chat 转发失败（`POST /admin/agents/<agent>/chat` 返回 500，日志含 `httpx.ConnectError` / `Name or service not known`）：
+
+1. 确认 agent 本身存活（node 上 agent `/health` 可访问、`agent.yaml` 与模型供应商正常）——多数情况下断点在转发寻址，不在 agent。
+2. 给该 node 配 `FLEETENT_NODE_ADVERTISE_HOST=<本机对 platform 可达地址>`（单机 pilot 用 `127.0.0.1`），重启 node，等一次 status 心跳上报后复测。
+3. 寻址优先级：node 上报地址（`nodes.forward_host`）→ `FLEETENT_FORWARDER_HOST_OVERRIDE` → `{node_id}.internal`（约定兜底，依赖外部 DNS）。未配上报地址且无 override 时才回落到 `.internal`，多机拓扑下不要用全局 override。
+
 KB connector 失败：
 
 1. 先调 `POST /admin/kb/connectors/<connector_id>/check`。
