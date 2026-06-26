@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 
 class _FakeLLM:
     def __init__(self, content: str) -> None:
@@ -36,14 +34,14 @@ async def test_extract_single_fact() -> None:
     from fleetent.memory import facts_pipeline
 
     payload = json.dumps(
-        [{"subject": "user", "relation": "is_role", "object": "Python developer", "temporal": "none"}]
+        [{"subject": "user", "relation": "is_role", "object": "dev", "temporal": "none"}]
     )
     facts = await facts_pipeline.extract_facts(
-        turn_content="I am a Python developer", llm_client=_FakeLLM(payload)
+        turn_content="I am a developer", llm_client=_FakeLLM(payload)
     )
     assert len(facts) == 1
     assert facts[0].relation == "is_role"
-    assert facts[0].object == "Python developer"
+    assert facts[0].object == "dev"
     assert facts[0].temporal == "none"
 
 
@@ -287,8 +285,8 @@ async def test_extract_prompt_uses_temporal_enum_not_dates() -> None:
     for label in ("today", "this_week", "this_month", "none"):
         assert label in low
     assert "do not output any date" in low
-    # One-off event vs ongoing state must still be distinguished by example.
-    assert "薄饼" in prompt  # one-off event → 'today'
+    # One-off event vs ongoing state must still be distinguished.
+    assert "one-off event" in low  # → 'today'
     assert "ongoing" in low  # durable state → 'none'
 
 
@@ -311,7 +309,7 @@ async def test_prompt_guides_skill_naming_not_relation_folding() -> None:
     prompt = facts_pipeline._extract_system_prompt(None)
     low = prompt.lower()
     assert "has_skill" in low
-    assert "knows_how_to_at_mention" in low  # the named anti-example
+    assert "fold the skill into the relation" in low  # forbids knows_how_to_X folding
     assert "true" in low  # forbids object='true'
 
 
@@ -323,3 +321,15 @@ async def test_prompt_excludes_realtime_system_meta() -> None:
     assert "11" in prompt  # the tool-count anti-example
     low = prompt.lower()
     assert "real-time" in low or "system/meta" in low or "tool count" in low
+
+
+async def test_prompt_uses_placeholders_not_realistic_example_values() -> None:
+    from fleetent.memory import facts_pipeline
+
+    # Realistic example values (小派/张三/张洋/Xin) leak: the LLM copies them out
+    # as real facts (the agent|name=小派 ghost). Examples must be placeholders.
+    prompt = facts_pipeline._extract_system_prompt(None)
+    for leaked in ("小派", "张三", "张洋", "Xin", "Shanghai"):
+        assert leaked not in prompt, f"prompt leaks realistic example value: {leaked}"
+    # placeholder form must be present (teaching by <...> shape)
+    assert "<" in prompt and ">" in prompt
