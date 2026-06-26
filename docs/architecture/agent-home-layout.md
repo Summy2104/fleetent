@@ -124,8 +124,7 @@ FLEETENT_HOME/
     └── agents/<name>/                       name=不可变 handle（rename 已移除）；单一 owner
         ├── agent.yaml  .env(0600)  .fleetent.pid  skills/
         └── data/                            [AGENT]  拍平，无 <tenant>/<id>/ 冗余嵌套
-            ├── agent_state.db (+vectors)
-            ├── agent_memory.db (+vectors)       ← 原 shared_memory：agent 级、去 team/tenant scope
+            ├── agent_state.db (+vectors)        state + agent_memory_items（原 shared_memory：agent 级、去 team/tenant scope，并入 state 库 v39）；vectors = mem:* + agentmem:*
             └── traces.jsonl sessions/ logs/ diagnostics/ workspaces/
                 tool_spillover/ sandbox_output/ im_approvals.json
 ```
@@ -146,7 +145,7 @@ tenants/<t>/  = 该租户的一切（KB + 它的 agents + 各 agent 的运行时
 | B | `management.db` 独占根；**全局根零 agent 侧文件**（裸 CLI 默认 agent 也走一个 home） | #2 #3 |
 | C | per-agent `data/` **拍平**（home 已是 agent 作用域，去掉内层 `<tenant>/<id>/`）；命名统一 `agent_state.db` | #3 #4 |
 | D | KB → `tenants/<t>/kb.db`，**跨 agent 共享**（kb-worker 写、各 agent 只读） | #2 #4 |
-| E | shared memory → 正名 **agent memory**，**agent 级**，**删 team/tenant scope**，住 agent `home/data`；跨租户共享靠 promote 到 KB | （新发现：原半成品） |
+| E | shared memory → 正名 **agent memory**，**agent 级**，**删 team/tenant scope**，**并入 agent `agent_state.db`（v39，无独立库文件）**；跨租户共享靠 promote 到 KB | （新发现：原半成品） |
 | F | **租户优先**：`tenants/<t>/agents/<name>/`；name 不可变、作路径键（可读 + 稳定）；单租户接受 `tenants/default/` 一层 | #2 #4 |
 | G | dev 噪音：文档钉死 canonical 集合；`make` 等 dev 产物收进非 canonical 位置（如 `.dev/`） | #5 |
 

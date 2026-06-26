@@ -1,21 +1,20 @@
 # fleetent 数据模型与物理拓扑（as-built）
 
 > **现状权威参考**——只描述"当前 schema 是什么"。变更史（哪个迁移、哪一期落地）见 git 与 [`records/decision-logs/`](../records/decision-logs/)；设计 rationale（R1/R2/B2、物理 vs 逻辑、向量模型 A、实体减法等）见 [`persistence-redesign-decisions.md`](../records/decision-logs/persistence-redesign-decisions.md)。
-> **列级 schema 真相源是迁移**：管理库 `migrations/`（Alembic）；agent 侧库 `runtime/agent_state_migrations.py` / `knowledge_base/core/migrations.py` / `memory/shared_memory_migrations.py`（嵌入式 Y）。本文实体清单为导航，不逐列复制。
+> **列级 schema 真相源是迁移**：管理库 `migrations/`（Alembic）；agent 侧库 `runtime/agent_state_migrations.py` / `knowledge_base/core/migrations.py`（嵌入式 Y）。本文实体清单为导航，不逐列复制。
 > **维护规则**：任何 change 增删表 / 改列 / 改关系，MUST 同步对应实体清单**与 erDiagram**（图文同改）。
 > **配套**：[`target-architecture.md`](./target-architecture.md)（核+4面+基座 · Identity §6 · 只读投影 §7）· [`agent-management.md`](../capabilities/agent-management.md)（agent 生命周期/自管/绑定/编排）· [`skill-system.md`](../capabilities/skill-system.md) · [`im-access-model.md`](../capabilities/im-access-model.md)。
 
 ## 1. 物理拓扑（5 库类型 · tenant-first 物理分区）
 
-数据分布在 **5 类物理库**，多主体时按**主体（tenant）物理分区**：
+数据分布在 **4 类物理库**，多主体时按**主体（tenant）物理分区**：
 
 | 库类型 | 形态 | schema 权威 | 写者 / 访问 |
 |---|---|---|---|
 | **管理库** | 单库、跨主体（仅受管模式存在） | **Alembic** | platform 读写；agent 物理够不到 |
-| **per-agent 运行库** | 每 (主体, agent) 一文件 | 嵌入式 Y | 该 agent 读写；platform 只读投影 |
-| **agent memory 库** | per-agent | 嵌入式 Y | 该 agent 读写；platform 只读 |
+| **per-agent 运行库** | 每 (主体, agent) 一文件（state + `agent_memory_items`） | 嵌入式 Y | 该 agent 读写；platform 只读投影 |
 | **KB 关系库** | per-tenant | 嵌入式 Y | ingest 单写、agent 只读（派生视图）；platform 只读 |
-| **向量底座** | 独立 substrate，按家族（`mem:`/`shared:`/`kb:`）路由到对应 scope 的向量库（可换 Qdrant） | 嵌入式 Y | 随各消费层 |
+| **向量底座** | 独立 substrate，按家族（`mem:`/`agentmem:`/`kb:`）路由到对应 scope 的向量库（可换 Qdrant） | 嵌入式 Y | 随各消费层 |
 
 **目录布局与命名**（`X.db` 关系真相源 / `X_vectors.db` 向量索引配对）：
 
@@ -30,29 +29,27 @@ FLEETENT_HOME/
       agents/
         <agent_name>/
           data/
-            agent_state.db                        # 该 agent 关系真相源
-            agent_vectors.db                      # 该 agent 记忆向量
-            agent_memory.db                       # 该 agent 记忆关系库
-            agent_memory_vectors.db               # 该 agent 记忆向量库
+            agent_state.db                        # 该 agent 关系真相源（含 agent_memory_items）
+            agent_vectors.db                      # 该 agent 向量（mem:* 用户记忆 + agentmem:* agent 记忆）
             traces.jsonl                          # legacy JSONL trace fallback
             sessions/ logs/ diagnostics/           # agent runtime 文件
             workspaces/ tool_spillover/ sandbox_output/
             im_approvals.json
 ```
 
-命名规则：tenant 层 `X`=共享资源名（`kb`）；agent 层 `X`=归属（`agent_state` / `agent_memory`），home 已经圈定 `<tenant>/<agent_name>`，因此 `data/` 内不再重复嵌套 `<tenant>/<agent>`。
+命名规则：tenant 层 `X`=共享资源名（`kb`）；agent 层 `X`=归属（`agent_state`），home 已经圈定 `<tenant>/<agent_name>`，因此 `data/` 内不再重复嵌套 `<tenant>/<agent>`。
 
-**物理库计数**：2 主体 × 各 2 agent = **17 库**（管理 1 + 每主体〔KB 2 + 2 agent×4 = 10〕×2）。"5" 是**类型数**，非部署文件数。
+**物理库计数**：2 主体 × 各 2 agent = **13 库**（管理 1 + 每主体〔KB 2 + 2 agent×2 = 6〕×2）。"4" 是**类型数**，非部署文件数。
 
 **跨主体隔离**：agent 进程经 `agent.yaml` 只开本主体目录下的文件，物理上够不到别主体的库——合规"主体间互不可见"由文件边界结构性保证，非纪律级 `WHERE tenant_id`。
 
 ## 2. schema 权威、路由与并发
 
-- **双权威（按库分）**：管理库 **Alembic-only**；per-agent state / agent memory / KB 关系库走**嵌入式 forward-only 迁移（Y）**——schema 以代码中有序 `MIGRATIONS=[(ver,sql)]` 定义、DB 只存 `PRAGMA user_version`、**migrate-on-open**、每文件自迁、库版本 > 代码已知版本则拒启动（`SchemaTooNewError`）。空库与旧库同一代码路径。
+- **双权威（按库分）**：管理库 **Alembic-only**；per-agent state（含 agent memory）/ KB 关系库走**嵌入式 forward-only 迁移（Y）**——schema 以代码中有序 `MIGRATIONS=[(ver,sql)]` 定义、DB 只存 `PRAGMA user_version`、**migrate-on-open**、每文件自迁、库版本 > 代码已知版本则拒启动（`SchemaTooNewError`）。空库与旧库同一代码路径。
 - **关系完整性双层**：管理库经 `db.py` 的连接统一 `PRAGMA foreign_keys=ON`，声明了 FK 的管理表约束真实生效；store 写入校验承接 FK 难表达的语义约束（如 `agents.team_id` 与 `tenant_id` 的复合一致性）。agent 侧库以约定引用为主，其中 KB 关系库 `knowledge_documents → knowledge_chunks` 级联删除随 FK 真实生效。
 - **FK 不回扫存量**：SQLite 只约束启用后的新写入/删除，不修复历史违规行；旧违规引用被触碰时在该次写路径迟发失败。
 - **一文件一份 MIGRATIONS**：`agent_state.db` 由 `runtime/agent_state_migrations.py` 一份单调版本列表管——单文件单 `user_version`，不可每 store 各跑一份。
-- **路由（租户作用域 + 可换后端）**：`tenant_router` 暴露 `tenant_scope(tenant)`（KB 句柄）与 `agent_scope(tenant, agent_name)`（per-agent state / memory 句柄）。SQLite 后端映射到上述目录文件，后端可换（将来 PG per-tenant DB / RLS，调用点不变）。物理路由主体取自 **agent 的归属主体**（`agents.team_id`/`tenant_id`）；请求者 `Principal.tenant_id` 仅用于 edge 跨主体校验（`agent_app._check_tenant`）。
+- **路由（租户作用域 + 可换后端）**：`tenant_router` 暴露 `tenant_scope(tenant)`（KB 句柄）与 `agent_scope(tenant, agent_name)`（per-agent state〔含 `agent_memory_items`〕+ 向量句柄）。SQLite 后端映射到上述目录文件，后端可换（将来 PG per-tenant DB / RLS，调用点不变）。物理路由主体取自 **agent 的归属主体**（`agents.team_id`/`tenant_id`）；请求者 `Principal.tenant_id` 仅用于 edge 跨主体校验（`agent_app._check_tenant`）。
 - **并发**：所有 SQLite 连接启用 **WAL + busy_timeout**（关系库经 `db.py`、向量库经 `vector_store/backend.py`）——支撑只读投影读 + agent 写并发，以及 tenant 级 KB 的单写多读。
 - **agent 侧表保留 `tenant_id` 列**：文件路由忽略它，作"可换后端"接缝（将来 RLS 按它行级强制）。
 
@@ -63,7 +60,7 @@ FLEETENT_HOME/
 
 ### 3.1 物理库全景（宏观）
 
-5 物理库 + 库间**跨库逻辑引用**（虚线 = `*_id` 约定，非 DB 外键；agent 侧库物理分离、无跨文件外键）：
+4 物理库 + 库间**跨库逻辑引用**（虚线 = `*_id` 约定，非 DB 外键；agent 侧库物理分离、无跨文件外键）：
 
 ```mermaid
 graph TD
@@ -85,6 +82,7 @@ graph TD
     sessions
     traces
     memory_items
+    agent_memory_items
     approval_requests
     reflection_reports
     reflection_proposals
@@ -97,9 +95,6 @@ graph TD
     knowledge_chunks
     kb_entities
   end
-  subgraph SHARED["共享记忆 shared_memory.db ｜ agent 侧 · per-tenant"]
-    shared_memory_items
-  end
   subgraph VEC["向量底座 ｜ agent 侧 · 按家族路由"]
     vector_items
   end
@@ -110,19 +105,18 @@ graph TD
   approval_requests -. requester_user_id .-> users
   scheduled_tasks -. session_id .-> sessions
   scheduled_tasks -. user_id .-> users
-  shared_memory_items -. "scope_id(team|tenant)" .-> teams
   session_meta -. session_id .-> sessions
   agent_kbs -. kb_id .-> knowledge_bases
   kb_connectors -. "tenant_id,kb_id" .-> knowledge_bases
   vector_items -. "mem:" .-> memory_items
-  vector_items -. "shared:" .-> shared_memory_items
+  vector_items -. "agentmem:" .-> agent_memory_items
   vector_items -. "kb:" .-> knowledge_chunks
   nodes --> agent_placements
 ```
 
 > 注：external_services / external_credentials / agent_service_grants（工具 OAuth Vault）已落管理库，详见 §3.2。
 
-> 宏观图只列各库主干实体；完整清单与库内关系见 §3.2–§3.6。`session_meta → sessions` 是全库唯一一条 mgmt→agent 方向跨库引用（platform 自有元数据挂 agent 会话，非 agent 反向写）。省略的跨库边：`reflection_proposals.subject_user_id`/`actor_user_id` / `approval_requests.requester_user_id`/`approver_user_id` ⇢ `users`；agent 侧各表 `tenant_id` 接缝列 ⇢ `tenants`；`shared_memory_items.scope_id` 在 `scope_type=tenant` 时 ⇢ `tenants`。
+> 宏观图只列各库主干实体；完整清单与库内关系见 §3.2–§3.6。`session_meta → sessions` 是全库唯一一条 mgmt→agent 方向跨库引用（platform 自有元数据挂 agent 会话，非 agent 反向写）。省略的跨库边：`reflection_proposals.subject_user_id`/`actor_user_id` / `approval_requests.requester_user_id`/`approver_user_id` ⇢ `users`；agent 侧各表 `tenant_id` 接缝列 ⇢ `tenants`。
 
 ### 3.2 管理库（Alembic · platform 侧）
 
@@ -295,9 +289,9 @@ erDiagram
 > **库内不变量**：① `reflection_proposals.target_ref` 多态——memory 类指 `memory_items.id`、skill 类指文件系统 skill 名，完整性由 apply 路径兜底（无 FK；图中 `memory_items → reflection_proposals` 边仅 `domain=memory` 成立）。② `traces` 挂 `session_id`（查询过滤）+ `run_id`（与 `sub_agent_runs` 同命名空间，关联子 agent trace 树）。③ `session_id`/`run_id`/`report_id` 均约定引用、**无时序保证无外键**：`approval_requests`/`traces` 可先于 `sessions` 索引行写入，`report_id` 可空。④ `approval_requests` 是审批单一真相源：tool-call subject 在 session meta `pending_approvals`、memory/skill subject 是同 id `reflection_proposals`，统一 resolve router 按 `subject_type` 分派。⑤ `tool_auto_approvals` 经**计算键** `fingerprint=hash(scope_key, tool_name, tool_args)`（`scope_key=requester_user_id`）关联，非存储 FK。
 > **跨库**：`memory_items.user_id` / `approval_requests.requester_user_id` ⇢ 管理库 `users`（managed 成立；direct-run 进程可为不透明渠道 id）；tool-call `approval_requests.subject_id` ⇢ 本库 `sessions.session_id`。会话**内容**是 JSON 文件（`SESSIONS_DIR`，与元数据表物理分离）。
 
-### 3.4 共享记忆库（嵌入式 Y · `shared_memory.db` · agent 侧 · per-tenant）
+### 3.4 Agent 记忆（`agent_memory_items` · 住在 per-agent `agent_state.db`）
 
-`shared_memory_items`：team/tenant scope 共享记忆，同主体多 agent 写的真相源。
+`agent_memory_items`：agent 级已确认上下文 / 偏好 / 流程（`context` / `preference` / `procedure`），由 reflection proposal apply 写入、owner 审批门控。**无 team/tenant scope**（agent-memory rescope：原 "Shared Memory" 已正名为 Agent Memory 并收归 agent 级）；不再有独立的 `shared_memory.db` 物理文件——表随 `agent_state_migrations.py`（v39 起）住在该 agent 的 `agent_state.db`。向量走 `agentmem:` 家族，落同 agent 的 `agent_vectors.db`。
 
 ### 3.5 KB 关系库（嵌入式 Y · `kb.db` · agent / ingest 侧 · per-tenant）
 
@@ -324,11 +318,11 @@ erDiagram
 
 ### 3.6 向量底座（独立 substrate · 按家族路由）
 
-`vector_items`：每 scope 一个向量库文件——`mem:`→当前 agent `agent_vectors.db`（库内再按 `mem:{user_id}` 分区）；`shared:`→`shared_memory_vectors.db`；`kb:`→`kb_vectors.db`。
+`vector_items`：按家族路由——`mem:`（用户记忆，库内再按 `mem:{user_id}` 分区）与 `agentmem:`（agent 记忆）都落当前 agent 的 `agent_vectors.db`；`kb:`→per-tenant `kb_vectors.db`。
 
 ## 4. 多租户与隔离
 
-- **tenant = 主体（法人/商户）**，`teams` 在其下；`users.tenant_id` 给组织归属。v1 **不建 `team_members`**——共享记忆/KB/审批走 **agent 归属 team**（`agents.team_id`），不需请求者 team。
+- **tenant = 主体（法人/商户）**，`teams` 在其下；`users.tenant_id` 给组织归属。v1 **不建 `team_members`**——KB/审批走 **agent 归属 team**（`agents.team_id`），不需请求者 team（agent 记忆已收 agent 级、与 team 无关）。
 - **隔离 = 物理 per-tenant**：合规"主体间互不可见"由目录/文件边界保证。管理库单库跨主体（注册中心，不存业务对话/KB）；业务数据按主体分目录。
 - **可换后端**：SQLite 文件路由是当下后端；保留 `tenant_id` 列以接住将来 PG（per-tenant DB 或 RLS）。
 - **审批人**：`teams.approver_user_id` / `tenants.approver_user_id`，解析链 `agent.team_id 审批人 → tenant 审批人 → reject`（default-closed），部署时 materialize 进 `agent.yaml`。

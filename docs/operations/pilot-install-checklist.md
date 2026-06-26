@@ -66,7 +66,7 @@ docker compose run --rm fleetent uv run fleetent platform upgrade --backup-only
 验收点：
 
 - dry-run 输出 database URL、backup 路径和 migration 计划。
-- 非 dry-run 模式下，SQLite backup 写入 `data/backups/YYYYMMDD-HHMMSS/`，按数据目录结构**镜像全部物理库**（管理库 `management.db` + per-tenant 的 KB / 共享记忆库 + per-agent `agent_state.db` + 各向量库，含 `-wal`/`-shm`）。
+- 非 dry-run 模式下，SQLite backup 写入 `data/backups/YYYYMMDD-HHMMSS/`，按数据目录结构**镜像全部物理库**（管理库 `management.db` + per-tenant 的 KB 库 + per-agent `agent_state.db`〔含 agent memory〕 + 各向量库，含 `-wal`/`-shm`）。
 - 只有 backup 成功后才运行 `alembic upgrade head`。
 - migration 失败时保留 backup，不自动 rollback。
 

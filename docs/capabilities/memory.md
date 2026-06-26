@@ -135,7 +135,7 @@ async def search_agent_memory(query: str, limit: int = 10) -> list[AgentMemoryIt
 
 
 def get_memory_quality_trend_summary(query: MemoryQualityTrendQuery) -> MemoryQualityTrendSummary:
-    """只读聚合 User Memory、Shared Memory 和维护 proposal 质量趋势；不触发提取或清理。"""
+    """只读聚合 User Memory、Agent Memory 和维护 proposal 质量趋势；不触发提取或清理。"""
 ```
 
 ## 现状
@@ -218,7 +218,7 @@ def get_memory_quality_trend_summary(query: MemoryQualityTrendQuery) -> MemoryQu
 - 默认命令：`uv run pytest tests/evaluation -x -q`。该命令只运行 deterministic mock
   evaluation，真实 LLM fixture case 默认 skip。
 - Memory Quality Trend evaluation 使用 deterministic fixture 覆盖 exact duplicate candidate、expired
-  context bucket 和 Shared Memory 与 User Memory 分离；runner 写入 tmp SQLite 并调用
+  context bucket 和 Agent Memory 与 User Memory 分离；runner 写入 tmp SQLite 并调用
   `get_memory_quality_trend_summary()`，不运行真实 LLM、不触发自动维护。
 - 手动真实 LLM evaluation：设置 `FLEETENT_EVAL_REAL_LLM=1` 并提供 provider API key 后运行
   `uv run pytest tests/evaluation/test_memory_extraction_eval.py -q`。runner 会使用真实

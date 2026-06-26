@@ -120,11 +120,11 @@ src/fleetent/
 
 ## 数据与 Schema 生命周期
 
-**5 物理库 + 按主体物理分区已落地**（持久层 #3，详见 `docs/architecture/data-model.md`）：管理库（单库、跨主体）+ per-agent 运行库 + per-tenant 共享记忆库 / KB 关系库 + 向量底座，多主体时按 `<tenant>/<agent_id>/` 目录物理隔离。管理库真实文件为 `data/management.db`（存量部署的旧 `fleetent.db` 由 `scripts/upgrade.py` 在升级时重命名）。
+**4 物理库 + 按主体物理分区已落地**（持久层 #3，详见 `docs/architecture/data-model.md`）：管理库（单库、跨主体）+ per-agent 运行库（state + `agent_memory_items`）+ per-tenant KB 关系库 + 向量底座，多主体时按 `<tenant>/<agent_id>/` 目录物理隔离。管理库真实文件为 `data/management.db`（存量部署的旧 `fleetent.db` 由 `scripts/upgrade.py` 在升级时重命名）。agent_memory rescope 后，原独立的 per-tenant 共享记忆库已退役，`agent_memory_items` 并入 per-agent `agent_state.db`。
 
 **双权威**：
 - **管理表**（users/api_keys/tenants/teams/scheduled_tasks 等，管理库）→ 仅由 **Alembic** 维护，不在 store 中 `_init_db()` 建表
-- **agent 侧表**（traces/memory_items/sessions/approvals/KB/reflection 等，per-agent / per-tenant 库）→ **嵌入式 forward-only 迁移（Y）已落地**：每物理文件一份有序 `MIGRATIONS=[(ver,sql)]` + `PRAGMA user_version` + migrate-on-open + 版本闸（`agent_state_migrations.py`、`knowledge_base/core/migrations.py`、`memory/shared_memory_migrations.py`），脱离 Alembic 单机自建
+- **agent 侧表**（traces/memory_items/sessions/approvals/KB/reflection 等，per-agent / per-tenant 库）→ **嵌入式 forward-only 迁移（Y）已落地**：每物理文件一份有序 `MIGRATIONS=[(ver,sql)]` + `PRAGMA user_version` + migrate-on-open + 版本闸（`agent_state_migrations.py`〔含 `agent_memory_items` v39〕、`knowledge_base/core/migrations.py`），脱离 Alembic 单机自建
 
 测试用 `tmp_path + monkeypatch` 隔离，绝不触碰 `data/`。
 

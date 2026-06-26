@@ -9,7 +9,7 @@ reflection 默认不直接修改 User Memory、skills 或 knowledge base。
 
 **负责**：通过 observability trace API 读取 agent 执行历史，生成统一 `reflection_reports`；为 User Memory 与 skills 生成统一 `reflection_proposals(domain=memory|skill)`；为提案创建 `approval_requests(subject_type=memory_proposal|skill_proposal)`；对 pending proposal 走 agent-owned 审批外呼；在 approved 后按 domain 调用对应 public boundary apply。
 
-**不负责**：实时处理（异步定期触发，不在请求链路上）、platform console 审批、知识库文档内容修改（KB 只产 report，不写回）、Shared Memory 实现、管理员替用户确认 User Memory 修改。
+**不负责**：实时处理（异步定期触发，不在请求链路上）、platform console 审批、知识库文档内容修改（KB 只产 report，不写回）、Agent Memory 实现、管理员替用户确认 User Memory 修改。
 
 **三个作用目标**：
 - **memory reflection**：per-user，生成 `memory_candidate` / `memory_conflict` 建议，并可转成 owner-scoped maintenance proposal

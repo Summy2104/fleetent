@@ -99,8 +99,8 @@ flowchart TB
 
 **`db` 与 `vector_store` 的物理形态**（决议详见 `data-model.md` §5.1–§5.2、§5.7）：
 
-- **5 物理库**：管理库（Alembic 唯一权威，受管模式专用）/ per-agent 运行库（每 agent 一文件）/ 共享记忆库 / KB 关系库 / 向量底座；各层**按主体（tenant）物理分区**（多租户，§5.7）。
-- **schema 权威二元**：管理库 Alembic-only；agent 侧三库（per-agent / 共享记忆 / KB 关系）用**嵌入式 forward-only 迁移**（schema 定义在代码、`migrate-on-open`、无需 Alembic 编排），取代 `ensure_schema`。
+- **4 物理库**：管理库（Alembic 唯一权威，受管模式专用）/ per-agent 运行库（每 agent 一文件，state + `agent_memory_items`）/ KB 关系库 / 向量底座；各层**按主体（tenant）物理分区**（多租户，§5.7）。
+- **schema 权威二元**：管理库 Alembic-only；agent 侧两库（per-agent state〔含 agent memory〕/ KB 关系）用**嵌入式 forward-only 迁移**（schema 定义在代码、`migrate-on-open`、无需 Alembic 编排），取代 `ensure_schema`。
 - **`vector_store`** 按 `VectorFamily`（`mem:` / `shared:` / `kb:`）枚举路由到不同物理后端，namespace 标识是路由键而非自由字符串。
 
 ---
@@ -138,7 +138,7 @@ flowchart TB
 | `platform/reflection_management` | 建议 inbox / diff / trend 的只读投影 | **② 控制面** |
 | 反思建议**存储**（`reflection_reports` / `reflection_proposals`） | 核产出的数据 | **基座 / agent 侧 store**——核**写 agent 侧产物**，②的管理 API **只读**它做 review，**不可让核反向写 platform 表**（遵 §1 解耦：platform 读 agent 产物，不要求 agent 反向写入） |
 
-注：建议经审批后的「落地写」遵 §1 自进化规则——**真相源**（memory/shared-memory/skill）经门直接写、**派生视图**（KB）不直接写（走 agent-curated 沉淀源 → connector sync）。
+注：建议经审批后的「落地写」遵 §1 自进化规则——**真相源**（user memory / agent memory / skill）经门直接写、**派生视图**（KB）不直接写（走 agent-curated 沉淀源 → connector sync）。
 
 ### 审批门泛化：自进化提案的路由
 
@@ -147,7 +147,7 @@ flowchart TB
 | proposal 类型 | 渠道 | 找谁 |
 |---|---|---|
 | user memory | IM（agent 自主，`reply_func` 式推送） | 该 user 本人 |
-| shared memory | IM（agent 自主） | team/tenant 负责人 |
+| agent memory | IM（agent 自主） | agent 归属 team 负责人 |
 | skill | IM / DM（agent-owned 外呼） | team/tenant 负责人（非 requester） |
 | KB | 不进 proposal；只产 report | 无 agent-side approver |
 
@@ -198,7 +198,7 @@ Principal { user_id, tenant_id }
 ```
 - **`user_id`**:内部 user id(与 `memory_items.user_id` 等同值);核用它 scope 记忆/会话。
 - **`tenant_id`**:主体;核用它路由到该主体的物理库(§5.7);单机 = `default`。
-- **刻意精瘦**:`role` / 密码 / `scopes` / `display_name` 挡在端口外(edge/governance/platform 的事);**不带 team**——共享记忆/KB/审批都走 **agent 的归属 team**(配置),不需要请求者的 team(见 §6.5)。字段名沿用全库惯例(`user_id`/`tenant_id`),不用裸 `id`。
+- **刻意精瘦**:`role` / 密码 / `scopes` / `display_name` 挡在端口外(edge/governance/platform 的事);**不带 team**——KB/审批都走 **agent 的归属 team**(配置),不需要请求者的 team(见 §6.5)。字段名沿用全库惯例(`user_id`/`tenant_id`),不用裸 `id`。
 
 **`Principal`(请求者) ≠ agent identity(运行的 agent)** —— 核运行时同时握两个身份对象,别混:
 
@@ -207,7 +207,7 @@ Principal { user_id, tenant_id }
 | `Principal` | 请求者(谁在问) | `{ user_id, tenant_id }` | edge 从凭证解析 |
 | agent identity | 运行的 agent | `{ agent_id, tenant_id, team_id }` | agent 配置/定义 |
 
-- **`team_id` 只在 agent identity**(= **agent 的归属 team**,驱动共享记忆 team-scope);**用户的 team 不带**——所以 "Principal 不带 team" 与 long-term context / shared memory 读取 agent 的 `team_id` **不冲突**(那是 agent 的 team)。
+- **`team_id` 只在 agent identity**(= **agent 的归属 team**,驱动 KB / 审批的归属);**用户的 team 不带**——所以 "Principal 不带 team" 与 KB / 审批读取 agent 的 `team_id` **不冲突**(那是 agent 的 team)。(注：agent 记忆已收 agent 级,不再有 team-scope。)
 - **两个 `tenant_id`**:edge 校验 `Principal.tenant_id == agent 主体`(**跨主体不许访问**);核**物理路由按 agent 的主体**开库(经校验后二者相等)。Principal 留 `tenant_id` 供 edge 校验 + 审计 + 防御性核对。
 
 ### 6.4 一条流程(Slack 消息)
@@ -217,7 +217,7 @@ Principal { user_id, tenant_id }
 2. 解析身份     (slack,U123) → user_id  → Principal{user_id, tenant_id=连接器的主体}
 3. 访问控制     该 user 能用此 agent?(查绑定/allowlist,用到"人的 team")  ← 人的 team 在 edge 用掉、不进核
 4. 递进核       loop.run(principal, message)
-5. 核运行       principal.user_id → scope 记忆/会话;tenant_id → 路由库;agent 配置的归属 team → 共享记忆桶
+5. 核运行       principal.user_id → scope 记忆/会话;tenant_id → 路由库;agent 配置的归属 team → KB / 审批归属
 ```
 
 - **managed 模式**：IM edge 在进入核前，经 platform 在 `server.py` lifespan 注入的 resolver，把 `(platform, platform_user_id)` 归并成内部 `users.id`；首次见到自动建 `users` + `im_users` 绑定，tenant 不匹配直接拒绝并记诊断日志。该写入动作属于 platform-owned resolver，不构成 agent→platform 反向依赖。
@@ -225,7 +225,7 @@ Principal { user_id, tenant_id }
 
 ### 6.5 审批人解析(归属 team/主体,materialize 进配置)
 
-agent 可被**多个 team 的人使用**,但对它的**共享记忆/KB/高危工具审批**,归 **agent 归属 team 的审批人**(非请求者的 team)。解析链:
+agent 可被**多个 team 的人使用**,但对它的**KB/高危工具审批**,归 **agent 归属 team 的审批人**(非请求者的 team)。解析链:
 
 ```
 agent.team_id 的审批人  ──无──►  tenant(主体) 的审批人  ──无──►  on_no_approver: reject(default-closed)
@@ -284,9 +284,9 @@ A 的好处：读停掉的 agent 的历史也行（读文件不需进程）；�
 |---|---|---|---|
 | user memory | per-agent `agent_state.db` | **维护提案审核**（自进化）；用户记忆**内容投影 = 可选、v1 暂不接 console**（隐私） | 跨该 user 谈过的 agent 遍历 |
 | approvals | per-agent `agent_state.db` | R1 只读下游投影：审批状态/历史 | 单 agent；**join 身份**（不透明 actor → 真实身份经 #4/management 解析） |
-| shared memory | per-tenant `shared_memory.db` | R2 读投影：团队/租户共享记忆审核 | per-tenant 一库直读（不遍历 agent） |
+| agent memory | per-agent `agent_state.db` | 读投影：agent 记忆审核（自进化 proposal apply 的产物） | 单 agent（agent 级，无 team/tenant scope） |
 
-注：approvals 的"显示是谁批"软依赖 #4（身份解析）；读部分独立可先做。shared memory 的**多写者协调是写侧问题、与本读侧投影正交**。
+注：approvals 的"显示是谁批"软依赖 #4（身份解析）；读部分独立可先做。agent memory 收 agent 级后由该 agent 单写，不再有跨 agent 多写者协调问题。
 
 ### 7.4 schema 读耦合（取舍）
 

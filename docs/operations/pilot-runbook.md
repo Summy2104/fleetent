@@ -313,7 +313,7 @@ uv run fleetent platform diagnostics retention dry-run
 验收目标：
 
 - 证明 User Memory 能从交互中产生，并在后续交互中被利用。
-- 证明 User Memory 归属于用户，不会误进入 KB 或 tenant 级共享记忆。
+- 证明 User Memory 归属于用户，不会误进入 KB 或 agent 级 Agent Memory。
 - 证明 maintenance 只生成候选，不自动改写用户记忆。
 
 用户场景：

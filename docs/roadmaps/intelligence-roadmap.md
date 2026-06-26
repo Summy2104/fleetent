@@ -117,9 +117,9 @@
 
 已完成 spec：
 
-- `memory-retention-and-compaction`：提供 per-user dry-run / apply 维护 API，覆盖 expired context、per-type over-limit 和 exact duplicate compaction；不做 Shared Memory、scheduler 或 reflection 自动写回。
+- `memory-retention-and-compaction`：提供 per-user dry-run / apply 维护 API，覆盖 expired context、per-type over-limit 和 exact duplicate compaction；不做 Agent Memory、scheduler 或 reflection 自动写回。
 - `long-term-context-budget-policy`：提供 effective budget、memory / knowledge source budget、source top-k、query intent / explicit conflict preference 和 BudgetMetadata decision attribution；不做 LLM-driven selection、summarization、memory 写回或 connector ACL 策略。
-- `memory-reflection-maintenance`：提供 reflection-owned User Memory maintenance proposals、owner approval / reject / apply lifecycle、低风险显式自动策略和 observability 事件；不做 Shared Memory、管理员默认代批、UI、skill proposal 或 KB 写回。
+- `memory-reflection-maintenance`：提供 reflection-owned User Memory maintenance proposals、owner approval / reject / apply lifecycle、低风险显式自动策略和 observability 事件；不做 Agent Memory、管理员默认代批、UI、skill proposal 或 KB 写回。
 
 剩余缺口：
 
@@ -227,15 +227,17 @@ flowchart TD
     SKILL_PROP --> REF_TREND
 ```
 
-## P3：共享记忆与上下文策略增强
+## P3：Agent 记忆与上下文策略增强
 
-目标：把 memory / long-term context 从个人记忆扩展到团队协作语境，同时保持 User Memory owner boundary 和 agent ownership 边界。
+> **已被 agent-memory rescope 取代（2026-06-23/24）**：原 "Shared Memory" 已正名为 **Agent Memory** 并**收归 agent 级**，删掉 team/tenant scope；`shared_memory_items` 表并入 per-agent `agent_state.db`、vector namespace 改为 `agentmem:`。下文 "已完成 spec" 保留当时落地记录，goal / gap 已按 as-built 更新。
+
+目标：把 memory / long-term context 从个人记忆扩展到 agent 级协作语境，同时保持 User Memory owner boundary 和 agent ownership 边界。
 
 完成标准：
 
-- Shared Memory 独立于 User Memory，支持 team / tenant scope、独立 vector namespace，并通过 agent 侧 proposal/apply 生命周期受控落地。
-- long-term-ctx 按 agent `tenant_id` / `team_id` 解析 Shared Memory scope；policy 不能指定任意跨 tenant / team scope。
-- memory quality trend summary 只读聚合 User Memory、Shared Memory 和 maintenance proposal outcome，不触发自动维护。
+- Agent Memory 独立于 User Memory，agent 级（无 team/tenant scope）、独立 vector namespace（`agentmem:`），并通过 agent 侧 proposal/apply 生命周期受控落地。
+- long-term-ctx 的 context policy 决定是否注入 Agent Memory；不表达任意跨 tenant / team scope。
+- memory quality trend summary 只读聚合 User Memory、Agent Memory 和 maintenance proposal outcome，不触发自动维护。
 
 已完成 spec：
 
@@ -245,8 +247,8 @@ flowchart TD
 
 剩余缺口：
 
-- Shared Memory 生产默认策略、policy 编辑 UI / admin API、review UI 和告警尚未实现。
-- Shared Memory 的默认启用范围仍需结合 Pilot 反馈确认。
+- Agent Memory 生产默认策略、policy 编辑 UI / admin API、review UI 和告警尚未实现。
+- Agent Memory 的默认启用范围仍需结合 Pilot 反馈确认。
 
 依赖顺序：
 
@@ -277,7 +279,7 @@ flowchart TD
 ### 管理和运维入口
 
 - `long-term-context-policy-admin-api`：context policy 管理入口。
-- `memory-reflection-review-ui`：User Memory / Shared Memory / SkillProposal review 入口。
+- `memory-reflection-review-ui`：User Memory / Agent Memory / SkillProposal review 入口。
 - `connector-scheduler-and-sync-history`：scheduler / worker / full sync history。
 - `vector-store-reindex-job-runtime`：后台 reindex job runtime 和操作历史。
 
