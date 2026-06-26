@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 import structlog
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
     DotEnvSettingsSource,
@@ -186,17 +186,50 @@ class McpApprovalRule(BaseModel):
 
 
 class McpOAuthSettings(BaseModel):
-    """Self-hosted MCP OAuth2 (mcp-config-standardization).
+    """Self-hosted MCP OAuth2 (mcp-config-standardization / mcp-per-user-oauth2).
 
     ``token_url`` points at a customer-internal authorization server — never a cloud
     identity service. ``client_secret_env`` is the env var NAME, never the secret value.
+
+    ``grant`` selects the OAuth2 grant: ``client_credentials`` (machine identity, the
+    historical default) or ``authorization_code`` (per-user delegation). The
+    authorization_code path additionally requires ``authorization_endpoint`` (where the
+    user is sent to authorize) and ``redirect_path`` (the agent-hosted callback path); it
+    is validated below so a misconfigured server fails loudly at load time.
     """
 
     type: str = "oauth2"
+    grant: Literal["client_credentials", "authorization_code"] = "client_credentials"
     token_url: str = ""
     client_id: str = ""
     client_secret_env: str = ""
     scope: str = ""
+    # authorization_code-only fields (ignored by client_credentials).
+    authorization_endpoint: str = ""
+    redirect_path: str = ""
+    # stdio per-user oauth (mcp-per-user-oauth2 D4): env var name the user's access token is
+    # injected under at subprocess spawn. Empty → the runtime default. http transports and
+    # client_credentials ignore it.
+    token_env: str = ""
+
+    @model_validator(mode="after")
+    def _require_authorization_code_fields(self) -> "McpOAuthSettings":
+        """Reject an authorization_code grant that is missing fields it cannot run without.
+
+        Validated against the user-delegation flow's hard prerequisites: the user must be
+        sent to ``authorization_endpoint``, identified by ``client_id``, and the returned
+        code exchanged at ``token_url``. ``client_credentials`` is unaffected.
+        """
+        if self.grant != "authorization_code":
+            return self
+        missing = [
+            name
+            for name in ("authorization_endpoint", "client_id", "token_url")
+            if not getattr(self, name)
+        ]
+        if missing:
+            raise ValueError("authorization_code grant requires non-empty " + ", ".join(missing))
+        return self
 
 
 class McpServerSettings(BaseModel):

@@ -61,15 +61,14 @@ def test_public_api_is_importable():
 
 def test_namespace_helpers_return_fixed_formats():
     from fleetent.vector_store import (
+        agent_memory_namespace,
         knowledge_namespace,
         memory_namespace,
-        shared_namespace,
     )
 
     assert memory_namespace("u1") == "mem:u1"
+    assert agent_memory_namespace() == "agentmem:"
     assert knowledge_namespace("default", "global") == "kb:default:global"
-    assert shared_namespace("team", "eng") == "shared:team:eng"
-    assert shared_namespace("tenant", "acme") == "shared:tenant:acme"
 
 
 def test_memory_namespace_single_param_returns_user_scoped():

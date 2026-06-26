@@ -1,7 +1,7 @@
 # 身份模型与渠道 Ingress 架构（车道 D 设计输入）
 
 > 状态：**已落地**（设计定稿 2026-06-22；切片 #1–#5 全部实现并归档 2026-06-22~23——#1 OIDC web login、#2 email 并号、#3 forwarder 统一入站 Principal、#4a/#4b IM-edge 下沉 node 进出站、#5 manual channel link）。本文固化 2026-06-22 一轮跨渠道身份/IM-gateway 设计探索的结论，现作为已实现架构的设计权威。出站定向触达（按 user_id 主动触达用户）是本线在出站方向的延伸，见 `directed-reach.md`。
-> 关联：`docs/architecture/data-model.md`（5 物理库 + 管理表权威）、`docs/architecture/target-architecture.md`、`AGENTS.md`（agent↔platform 解耦契约、异步资源生命周期契约）。
+> 关联：`docs/architecture/data-model.md`（4 物理库 + 管理表权威）、`docs/architecture/target-architecture.md`、`AGENTS.md`（agent↔platform 解耦契约、异步资源生命周期契约）。
 
 ## 1. 问题
 
@@ -9,7 +9,7 @@
 
 → managed 拓扑下 agent 是 node 上的独立进程：(1) 平台 resolver 没注入进 agent 进程 → `resolve_identity` 退化返回原始 `platform_user_id`；(2) agent **禁止写管理库**；(3) **platform→agent 单向**，agent 不能反调平台。**结果：IM 终结在 agent、身份却必须在平台绑，跨不过这条边界。** 单进程部署能跑通，分布式 managed 下断。
 
-同时一个产品决定推高了身份的目标：**同一员工从 Slack 和 web 找同一 agent，要被当成同一个人**（共享记忆/审批/历史）——即需要**跨渠道把一个真人并成一个唯一 ID**，这是两个参考实现（openclaw / hermes）都刻意没做的（它们单用户/单租户、不需要）。
+同时一个产品决定推高了身份的目标：**同一员工从 Slack 和 web 找同一 agent，要被当成同一个人**（跨渠道统一的记忆/审批/历史）——即需要**跨渠道把一个真人并成一个唯一 ID**，这是两个参考实现（openclaw / hermes）都刻意没做的（它们单用户/单租户、不需要）。
 
 ## 2. 已定决策
 

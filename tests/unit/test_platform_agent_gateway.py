@@ -62,6 +62,10 @@ async def test_direct_http_transport_relays_chat_stream(monkeypatch: pytest.Monk
         lambda node_id: "http://node-a.internal:8786",
     )
     monkeypatch.setattr(
+        "fleetent.platform.node_management.agent_transport.node_store.get_forward_host",
+        lambda node_id: None,
+    )
+    monkeypatch.setattr(
         "fleetent.platform.node_management.agent_transport.node_store.get_node_service_key",
         lambda node_id: "ma-node-key",
     )

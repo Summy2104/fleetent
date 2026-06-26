@@ -42,7 +42,7 @@
   - `database_url` 默认指向 `sqlite:///<FLEETENT_HOME>/management.db`（管理库文件名与概念名对齐）；非 SQLite backend 当前 fail fast
   - 本 change 不做旧布局或旧文件名自动迁移；显式 `DATABASE_URL` 仍可指向自定义文件名
   - 需要保留旧布局数据时由 operator 自行迁移或重建 tenant-first home
-  - 不引入 ORM；schema lifecycle 双权威（按库分）：**管理库** = Alembic；**agent 侧库**（per-agent / 共享记忆 / KB）= 嵌入式 forward-only 迁移（Y，`user_version` migrate-on-open），不经 Alembic
+  - 不引入 ORM；schema lifecycle 双权威（按库分）：**管理库** = Alembic；**agent 侧库**（per-agent〔state + agent memory〕/ KB）= 嵌入式 forward-only 迁移（Y，`user_version` migrate-on-open），不经 Alembic
 
 - ✅ **observability 数据落点已明确**：运行观测数据按用途分层持久化
   - agent traces v1.0 使用 SQLite `traces` 表，通过 DB runtime 访问
@@ -53,7 +53,7 @@
 - ✅ **SQLite 升级备份命令**：`fleetent platform upgrade`
   - `--database-url` 优先于 `DATABASE_URL`，`DATABASE_URL` 优先于 `Settings().database_url`
   - 当前只支持本地 SQLite database URL；非 SQLite、远程 SQLite、`:memory:` 都会 fail fast
-  - **备份覆盖数据目录下全部物理库**（持久层 #3）：递归枚举 `data/` 下任意深度的 `*.db`（管理库 + per-tenant 的 KB / 共享记忆库 + per-agent 运行库 + 各向量库），逐库经统一 `db.py` 入口执行 `PRAGMA wal_checkpoint(TRUNCATE)` 后复制（含 `-wal`/`-shm` sidecar），避免 WAL 中未落盘的写丢失
+  - **备份覆盖数据目录下全部物理库**（持久层 #3）：递归枚举 `data/` 下任意深度的 `*.db`（管理库 + per-tenant 的 KB 库 + per-agent 运行库〔含 agent memory〕 + 各向量库），逐库经统一 `db.py` 入口执行 `PRAGMA wal_checkpoint(TRUNCATE)` 后复制（含 `-wal`/`-shm` sidecar），避免 WAL 中未落盘的写丢失
   - 备份写入 `data/backups/YYYYMMDD-HHMMSS/`，按原数据目录相对结构**镜像**每一个库（含 `<tenant>/` 与 `<tenant>/<agent_id>/` 子目录）
   - 备份发现以递归扫文件为主、管理库 registry（tenants）兜底交叉核对：登记但目录缺失的主体以告警形式提示，停机 agent 的库仍被递归发现并备份
   - `--backup-dir` 可覆盖备份根目录，便于自定义部署和测试

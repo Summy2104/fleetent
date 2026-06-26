@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 
 from fleetent import agent_config, paths
@@ -151,6 +151,9 @@ async def _drain_and_close(rt: AgentRuntime, drain_timeout: float) -> None:
     from fleetent.memory import facts_lifecycle
 
     await _stop_step("facts_archive_sweep", facts_lifecycle.stop_archive_sweep())
+    # Stop the per-user stdio reaper before releasing sessions; aclose_all() then tears
+    # down every host (incl. per-user stdio subprocesses) on its own owner task (D4).
+    await _stop_step("mcp_stdio_reaper", mcp.stop_stdio_reaper())
     await _stop_step("mcp_sessions", mcp.aclose_all())
 
 
@@ -348,7 +351,7 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     # agent_memory_items now live in agent_state.db (wire-agent-memory D3).
     agent_memory_module.set_agent_memory_db(
         agent_state_db,
-        agent_scope.agent_memory_vector_backend,  # type: ignore[arg-type]
+        agent_scope.vector_backend,
     )
     session_index.set_state_db(agent_state_db)
     traces.set_state_db(agent_state_db)
@@ -370,6 +373,13 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
 
     artifact_exchange.set_state_db(agent_state_db)
     artifact_exchange.set_views_root(data_dir.parent / "exchange" / ".views")
+    # mcp-per-user-oauth2 (Group 7): wire the standalone encrypted per-user token store +
+    # transparent refresher onto the local seams. Pure local wiring (no platform), so it is
+    # safe under the no-platform baseline; managed boot (slice 2) injects its own resolver.
+    from fleetent.integrations.mcp.standalone_callback import wire_standalone_oauth
+    from fleetent.integrations.mcp.standalone_token_store import StandaloneUserTokenStore
+
+    wire_standalone_oauth(StandaloneUserTokenStore(agent_state_db))
 
 
 async def _start_infra(
@@ -426,6 +436,9 @@ async def _start_infra(
             await mcp_client.register_all(
                 configs, agent_home=data_dir.parent, tool_naming=agent.mcp.tool_naming
             )
+            # mcp-per-user-oauth2 D4: start the idle-reaper for the per-user stdio
+            # subprocess pool (no-op unless a per-user oauth stdio server is configured).
+            mcp_client.start_stdio_reaper()
         except Exception as exc:  # noqa: BLE001 — MCP unavailable must not abort boot
             _logger.warn("agent_runtime_mcp_register_failed", error=str(exc))
     session_mgr.start_session_maintenance()
@@ -715,6 +728,26 @@ def build_app(agent_name: str) -> FastAPI:
     @app.get("/health")
     async def health() -> dict[str, Any]:
         return {"status": "ok", "agent": agent_name}
+
+    @app.get("/oauth/callback")
+    async def oauth_callback(code: str | None = None, state: str | None = None) -> Any:
+        """Standalone self-hosted OAuth Authorization Code callback (mcp-per-user-oauth2 7.2).
+
+        Identity is reverse-resolved from the one-shot ``state`` alone (never from any login
+        state on this request): an invalid / expired / already-used ``state`` is rejected
+        with 400 and no token is exchanged or written. On success the ``code`` is exchanged
+        and the user's token is stored encrypted in the local per-user library, and a plain
+        success page tells the user to return to the conversation.
+        """
+        from fleetent.integrations.mcp.per_user_tokens import get_local_user_token_store
+        from fleetent.integrations.mcp.standalone_callback import handle_oauth_callback
+
+        result = await handle_oauth_callback(
+            code=code, state=state, store=get_local_user_token_store()
+        )
+        if not result.ok:
+            raise HTTPException(status_code=400, detail=result.detail)
+        return PlainTextResponse("Authorization successful — return to your conversation.")
 
     # Approval endpoints: allow medium/high-risk tool calls to be approved without
     # requiring the full platform server. Standalone agents need these so that IM

@@ -1,0 +1,386 @@
+# Self-contained agent definition for a deployed single agent.
+#
+# Layout: this file is materialized to one Agent runtime home:
+#   FLEETENT_HOME/agents/<agent-id>/agent.yaml
+# alongside that Agent's .env and data/.
+# The deployed agent runtime reads ONLY this file + .env; data is local under
+# FLEETENT_HOME/agents/<agent-id>/data/. Secrets are NEVER inlined — reference them
+# by env-var name.
+# The Agent `.env` is generated/refreshed from these references by platform
+# materialize (or copied from the console required-env panel), not maintained as a
+# static global secret inventory. The committed process-level .env.example holds only
+# cross-agent vars, e.g. FLEETENT_SECRET_KEY — the secret-store master key for
+# inject-mode values.
+# (This template ends in `.example`; it is copied to the agent home as
+#  FLEETENT_HOME/tenants/default/agents/<id>/agent.yaml for the default local Agent.)
+#
+# Single-agent mode: this agent is the sole, forced-default agent, so there is no
+# routing table and `bindings.default` does not apply. `bindings.channels/users`
+# act only as ingress filters for this one agent.
+#
+# Migrating from an older global config (config consolidation): every agent-runtime
+# knob that used to live in `config/settings.yaml` now lives HERE in agent.yaml —
+#   • intelligence: vector_store / embedding / rerank / knowledge / long_term_ctx / mcp
+#   • governance:   context_* / agent_max_* / permission_gate_* /
+#                   tool_default_timeout_seconds / provider_* (see "runtime governance" below)
+#   • deployment:   log_format / session_* / disabled_skills /
+#                   observability / diagnostics / scheduling / webhooks
+#   • default agent: the old `default_agent_name` is now `bindings.default: true`
+#   • IM tokens:     the old slack_/telegram_ tokens are now `im.*` `*_env` refs (Slack)
+#                    or owner-level env vars (Telegram); never inline
+# The platform `config/settings.yaml` keeps only `database_url` / `log_format` / `observability`.
+name: support-bot                  # required; the agent's name (any value in single-agent mode)
+version: 3                         # required
+tenant_id: acme-corp               # optional, default "default"
+team_id: cs-team-01                # optional, default null
+
+# ── runtime definition ──
+system_prompt: |
+  你是 Acme 公司的客户支持助手 support-bot。
+  - 用中文回答用户的产品和账单问题
+  - 不确定的信息先用 search_docs 工具检索知识库再作答
+  - 涉及退款、账户删除等敏感操作必须走人工审批
+  - 保持礼貌、简洁，单次回复不超过 5 句话
+models:
+  targets:
+    - id: primary
+      provider: anthropic
+      protocol: openai_chat
+      base_url: https://api.anthropic.com/v1/
+      model: claude-opus-4-8
+      api_key_env: FLEETENT_MODEL_PRIMARY_API_KEY
+      max_tokens: 4096
+      # params flow straight to the chat.completions call. To enable backend
+      # reasoning (DeepSeek-R1 / QwQ / o-series, etc.), set reasoning_effort or
+      # extra_body.reasoning here; run_stream then emits reasoning_delta events.
+      # params:
+      #   reasoning_effort: high
+    - id: fast
+      provider: anthropic
+      protocol: openai_chat
+      base_url: https://api.anthropic.com/v1/
+      model: claude-haiku-4-5-20251001
+      api_key_env: FLEETENT_MODEL_FAST_API_KEY
+      max_tokens: 1024
+      params:
+        temperature: 0
+    - id: embedding
+      provider: local
+      protocol: http_embedding
+      endpoint: http://localhost:9002/v1/embeddings
+      model: bge-m3
+      api_key_env: FLEETENT_MODEL_EMBEDDING_API_KEY
+      params:
+        dimensions: 64
+    - id: rerank
+      provider: local
+      protocol: http_rerank
+      endpoint: http://localhost:9003/v1/rerank
+      model: bge-reranker
+      api_key_env: FLEETENT_MODEL_RERANK_API_KEY
+    - id: image
+      provider: local
+      protocol: openai_image_generation
+      endpoint: http://localhost:9004/v1/images/generations
+      model: flux-schnell
+  routes:
+    default:
+      - target: primary
+      - target: fast
+    memory_extraction:
+      - target: fast
+        max_tokens: 1024
+        params:
+          temperature: 0
+    vision:
+      - target: primary
+    embedding:
+      - target: embedding
+    rerank:
+      - target: rerank
+    image_generation:
+      - target: image
+memory_namespace: support-bot      # default ""
+skills_dir: skills                 # null = global default skills dir
+allowed_skills:                    # empty = no narrowing (all enabled skills visible)
+  - jira
+  - slack-daily-jira
+skill_authoring_enabled: false     # true exposes the skill_manage tool (user-driven,
+                                   # approval-gated skill create/edit/delete); default off
+skill_hot_reload: true             # auto-reload skills when their files change on disk
+                                   # (checked before each message); false = boot scan only
+skill_user_access: {}              # per-skill user allowlist (skill name -> [user_id, ...]).
+                                   # listed skills are "restricted": visible/usable ONLY in DM
+                                   # by the listed users — hidden from catalog, refused by
+                                   # read_skill, and physically absent from other users'
+                                   # sandbox view. unlisted skills stay open to all. e.g.
+                                   #   payroll-tools: ["U0123", "U0456"]
+
+# ── tools / capabilities ──
+allowed_tools:                     # fnmatch patterns; MCP tools are "<server>__<tool>"
+  - "search_*"
+  - "read_skill"
+  - "read_file"
+  - "docs__*"
+  - "jira__*"
+plugins:
+  - acme-docs
+  - billing
+features:
+  code_execution: true             # expose the run_code sandbox tool
+  sandbox_env:
+    TZ: Asia/Shanghai
+    LANG: zh_CN.UTF-8
+
+# ── intelligence configuration (non-secret; credentials via .env references) ──
+vector_store:
+  backend: sqlite                  # memory | sqlite; default "memory"
+  database_url: sqlite:///data/vector_store.db
+
+embedding:
+  backend: http                    # deterministic | http; default "deterministic"
+  dimensions: 64
+  dimensions_env: FLEETENT_EMBED_DIMENSIONS   # overrides `dimensions` at runtime
+  endpoint: ""
+  endpoint_env: FLEETENT_EMBED_ENDPOINT
+  model: ""
+  model_env: FLEETENT_EMBED_MODEL
+  api_key_env: FLEETENT_EMBED_API_KEY
+  timeout_seconds: 10.0
+
+rerank:
+  backend: http                    # disabled | http; default "disabled"
+  endpoint: ""
+  endpoint_env: FLEETENT_RERANK_ENDPOINT
+  model: ""
+  model_env: FLEETENT_RERANK_MODEL
+  api_key_env: FLEETENT_RERANK_API_KEY
+  timeout_seconds: 10.0
+
+knowledge:
+  enabled: true
+  bindings:
+    - tenant_id: pilot-tenant
+      kb_id: pilot-kb
+      default: true
+      permissions:
+        search: true
+  retrieval_policy:
+    mode: hybrid                   # vector | keyword | hybrid; default "hybrid"
+    top_k: 10
+    rerank: true
+    embedding_route: embedding
+    rerank_route: rerank
+
+long_term_ctx:
+  max_tokens: 2048
+  memory_max_tokens: 1024
+  knowledge_max_tokens: 1024
+  memory_top_k: 10
+  knowledge_top_k: 10
+  conflict_preference: auto        # auto | memory | knowledge; default "auto"
+
+# ── MCP servers (inline; secrets via env reference only) ──
+# ── MCP servers (standard map-keyed; key = server id) ──
+# Drop-in: a standard `mcpServers` block (Claude Desktop / claude-code style) works as-is.
+# Transport is auto-detected (command→stdio, url→remote). fleetent-specific settings live
+# under each entry's `x-fleetent` extension block (standard MCP tooling ignores it).
+mcpServers:
+  docs:                                  # standard remote (streamable HTTP) + header auth
+    type: http
+    url: https://docs.acme.internal/mcp
+    headers:
+      Authorization: "Bearer ${ACME_DOCS_MCP_TOKEN}"  # ${VAR} env ref, resolved at request time
+    connect_timeout: 10.0
+    call_timeout: 30.0
+  billing:                               # standard stdio (transport auto-detected from `command`)
+    command: /usr/local/bin/billing-mcp
+    args: ["--mode", "readonly"]
+    env:
+      BILLING_DB_DSN: "${BILLING_DB_DSN}"
+    x-fleetent:                          # ── fleetent extensions (ignored by standard MCP tools) ──
+      degrade_mode: strict               # degrade | strict | silent
+      # /exchange file-bridging for stdio products:
+      # file_root: /var/lib/billing/out  # declare the server's real product dir explicitly
+      # file_isolation: "off"            # opt OUT of the convention env injection entirely
+      approval_rules:                    # per-tool approval (server-local tool names)
+        - tool: charge_card
+  crm:                                   # self-hosted OAuth2 (token_url customer-internal, never cloud)
+    type: http
+    url: https://crm.acme.internal/mcp
+    x-fleetent:
+      auth:
+        type: oauth2
+        token_url: https://auth.acme.internal/oauth/token
+        client_id: fleetent-crm
+        client_secret_env: CRM_OAUTH_SECRET  # env-var NAME, never the secret value
+        scope: "mcp.read mcp.write"
+
+# ── im (per-agent IM ingress; tokens via env reference only) ──
+im:
+  supports_dm: true
+  supports_groups: true
+  slack:
+    bot_token_env: SUPPORT_SLACK_BOT   # env-var NAME (xoxb- token lives in .env)
+    app_token_env: SUPPORT_SLACK_APP   # env-var NAME (xapp- Socket Mode token)
+    access:                            # per-binding access rules (default-closed)
+      allow_groups:
+        - C0123ABCD
+        - C0456EFGH
+      allow_users:
+        - "u_alice"
+      require_approval: true
+  telegram:
+    bot_token_env: SUPPORT_TG_BOT      # env-var NAME (bot token lives in .env)
+    access:                            # per-binding access rules (default-closed)
+      allow_groups:
+        - "-1001234567890"
+      allow_users:
+        - "u_alice"
+      require_approval: true
+
+# ── control-plane materialized bindings ──
+bindings:
+  default: false                  # multi-agent deployments set true on the tenant default
+  users: []                       # optional explicit user bindings from the control plane
+
+# ── per-agent runtime governance (resolved from this agent.yaml; config consolidation).
+#    All values below equal the current defaults; omit any you don't override. ──
+
+# context window management
+context_max_tokens: 200000         # hard ceiling for the context window
+context_compress_threshold: 0.8   # trigger compression when token_count / context_max_tokens exceeds this
+context_tmax_ratio: 0.8           # Tmax = context_max_tokens * ratio; used by compressor as target ceiling
+context_tretained_ratio: 0.6      # Tretained = context_max_tokens * ratio; tokens to retain after compression
+context_keep_recent: 10           # number of most-recent messages always kept verbatim
+compression_initial_intent_max: 2 # max leading user messages preserved whole during compression
+context_flap_window: 3            # suppress re-compression within this many turns after one fires
+context_min_savings_ratio: 0.10   # skip compression if projected savings < this fraction
+context_min_interval_turns: 1     # minimum turns between consecutive compressions
+
+# loop detection / guardrails
+agent_loop_repeat_threshold: 3    # identical tool-call sequences before loop is declared
+guardrail_repeat_threshold: 3     # identical assistant utterances before guardrail fires
+loop_detect_ignore_arg_keys: []   # argument keys excluded from loop-detection fingerprint
+
+# turn / token limits
+agent_max_turns: 50               # max tool-use turns per request; -1 = unlimited
+agent_max_consecutive_failures: 3 # consecutive tool errors before aborting
+agent_max_tokens: -1              # max output tokens per LLM call; -1 = model default
+tool_default_timeout_seconds: 30.0
+sub_agent_timeout_seconds: 300
+agent_tool_parallel_max: 8        # max concurrent tool calls per turn
+
+# run-time input steering: how a new IM message is handled while a run is in flight
+steering_mode: steer              # steer (inject into the running task) | queue | interrupt
+steering_max_pending: 8           # max queued steered messages per session
+
+# hooks: in-process Python extension points (loaded from the plugins dir via @hook)
+hooks_enabled: false              # master switch; off = no dispatch, no behavior change
+hooks_decision_failure: open      # decision-hook failure: open(fail-open+audit) | strict(fail-closed)
+hooks_timeout_seconds: 5.0        # per-hook timeout (seconds)
+
+# grace-call budget (reserved for the final summary call after budget is nearly exhausted)
+agent_grace_call_token_ratio: 0.05  # fraction of session budget reserved for grace call
+agent_grace_call_min_tokens: 512    # minimum tokens guaranteed for grace call regardless of ratio
+
+# permission gate — controls human-in-the-loop approval for medium/high-risk tools
+permission_gate_enabled: true             # false = skip approval gate entirely (all risk levels auto-execute)
+permission_gate_medium_timeout_seconds: 300
+permission_gate_high_timeout_seconds: 3600
+
+# action gate — per-risk handling mode for gated tool calls (action-gate)
+#   direct   = execute without paging
+#   sandbox  = run inside the sandbox container without paging; the action gate
+#              fail-closes to approval automatically when the runtime is NOT closed
+#              (no docker / sandbox mode degraded to off / not executing in-container)
+#   approval = page a human approver (default)
+#
+# Recommended for closed, trusted deployments (e.g. sandbox mode=all on a trusted
+# intranet): set action_gate_medium_mode to `sandbox` to cash in免审批 — medium-risk
+# operations run inside the closed container without paging an approver, while staying
+# fail-closed (auto-upgraded to approval) whenever containment is not actually in effect.
+# See docs/capabilities/governance.md → "封闭即免审批" and the sandbox mode选型指引.
+action_gate_medium_mode: approval
+# High-risk operations stay on `approval` by default and are NOT relaxed alongside
+# medium: cashing in medium免审批 (medium_mode=sandbox) does not touch the high面.
+action_gate_high_mode: approval
+
+# approval routing — who gets paged when the gate fires (agent-owned-approval)
+# null = no approvers configured → default-closed (gated calls are rejected).
+approval: null
+# approval:
+#   by_risk:
+#     medium:
+#       approvers: ["slack:U012ABCDEF"]   # platform:target outbound DM addresses
+#       policy: any                        # any = first decision wins
+#     high:
+#       approvers: ["slack:U012ABCDEF", "telegram:123456789"]
+#       policy: any
+
+# provider circuit breaker
+provider_failure_threshold: 3     # consecutive failures before a provider is marked unhealthy
+provider_cooldown_seconds: 60     # seconds a tripped provider stays in cooldown
+
+# ── per-agent deployment / process knobs ──
+log_format: console               # console | json (configures agent runtime log output format)
+session_ttl_days: 30
+session_max_total_mb: 1024        # total size cap for all sessions on disk (MB)
+session_max_count: 10000          # max number of sessions retained
+session_cleanup_interval_seconds: 3600.0
+reflection:
+  enabled: false
+  interval_seconds: 86400
+disabled_skills: []
+
+# ── feature toggles (per-capability on/off + tuning) ──
+mcp:
+  enabled: true                   # set false to disable all MCP tool calls for this agent
+  # Tool-name projection (how MCP tool names are presented to the model). A preset:
+  #   claude(default) → mcp__{server}__{tool}   hermes → mcp_{server}_{tool}
+  #   opencode → {server}_{tool}   skills → {server}:{tool}   bare → {server}__{tool}
+  # or a custom template: { template: "mcp_{server}_{tool}", sanitize: snake, max_len: 64 }
+  tool_naming: claude
+
+scheduling:
+  enabled: true                   # set false to disable APScheduler cron tasks for this agent
+  # Fallback timezone for tasks created without an explicit one. cron_expr fields are read
+  # as local wall-clock in this zone (e.g. set "Asia/Shanghai" so "0 18 * * *" means 18:00
+  # Beijing). A task that names its own timezone overrides this.
+  default_timezone: "UTC"
+
+webhooks:
+  enabled: true                   # set false to reject all inbound webhook calls
+  max_body_bytes: 1048576         # max webhook request body size (bytes); default 1 MiB
+
+# ── sandbox backend (code execution) ──
+sandbox:
+  backend: null                   # null = inherit platform.yaml sandbox.backend (default docker);
+                                  # "docker" or "microsandbox" to pin this agent's backend
+  multi_user: true                # fail-safe default: every agent treated as multi-user, so a
+                                  # configured workspace_scope=agent is forced to per-user `session`
+                                  # isolation (prevents cross-user data leakage). Set false ONLY for a
+                                  # genuine single-user deployment that wants agent-scope data reuse.
+  microsandbox:
+    image: null                   # null = backend default base image; e.g. "python:3.12" for microsandbox
+                                  # microsandbox needs host virtualization (KVM/HVF) + preinstalled runtime;
+                                  # if unavailable the sandbox degrades to OFF (no code execution)
+
+# ── observability ──
+observability:
+  logging:
+    console_level: info           # log level for stderr: debug | info | warning | error
+    file_level: debug             # log level for the rotating file sink
+    directory: ""                    # blank = agents/<id>/data/logs/ (recommended); set explicit path to override
+    json_file: true               # write structured JSON log file in addition to console
+
+diagnostics:
+  export_dir: data/diagnostics    # directory for diagnostic export bundles
+  retention:
+    enabled: false                # set true to auto-purge old diagnostic data
+    logs_days: null               # null = keep forever; integer = days to retain log files
+    traces_days: null             # days to retain agent run traces
+    diagnostic_exports_days: null # days to retain diagnostic export bundles
+
+# NOTE: database_url is intentionally NOT accepted here.
+# The database location is derived from the agent home (<home>/data/fleetent.db).

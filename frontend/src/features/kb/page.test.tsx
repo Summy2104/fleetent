@@ -1,10 +1,11 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { AuthProvider } from '@/app/auth';
 import { AppQueryProvider } from '@/app/query-client';
+import { I18nProvider } from '@/i18n';
 import { KnowledgeBasePage } from '@/features/kb/page';
 import { server } from '@/test/msw/server';
 
@@ -46,20 +47,17 @@ function renderPage(): void {
   render(
     <AuthProvider baseUrl={API_BASE_URL} initialToken="session-token">
       <AppQueryProvider>
-        <KnowledgeBasePage />
+        <I18nProvider>
+          <KnowledgeBasePage />
+        </I18nProvider>
       </AppQueryProvider>
     </AuthProvider>
   );
 }
 
-afterEach(() => {
-  vi.restoreAllMocks();
-});
-
 describe('knowledge base page', () => {
-  it('supports kb create/edit/delete plus document ingest, list, delete, and sync feedback', async () => {
-    const user = userEvent.setup();
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('supports kb create/edit/delete plus document ingest, list, delete, and sync', async () => {
+    const user = userEvent.setup({ delay: null });
 
     let knowledgeBases: KnowledgeBaseRecord[] = [
       {
@@ -189,51 +187,76 @@ describe('knowledge base page', () => {
 
     expect(await screen.findByRole('heading', { name: 'Knowledge Base' })).toBeInTheDocument();
     expect(await screen.findByText('support')).toBeInTheDocument();
-    expect(await screen.findByText('support.md')).toBeInTheDocument();
-    expect(screen.getByText('Bound agents: 7')).toBeInTheDocument();
+    // Bound-agent ids render in the table row.
+    expect(screen.getByRole('button', { name: 'Actions for support' })).toBeInTheDocument();
+    expect(screen.getByText('7')).toBeInTheDocument();
 
-    await user.type(screen.getByLabelText('Knowledge base ID'), 'ops');
-    await user.type(screen.getByLabelText('Description'), 'Operations runbook');
-    await user.click(screen.getByRole('button', { name: 'Create knowledge base' }));
-    expect(await screen.findByRole('button', { name: 'ops' })).toBeInTheDocument();
+    // Create a knowledge base via the Add dialog.
+    await user.click(screen.getByRole('button', { name: 'Add knowledge base' }));
+    const createDialog = await screen.findByRole('dialog');
+    await user.type(within(createDialog).getByLabelText(/Knowledge base ID/), 'ops');
+    await user.type(within(createDialog).getByLabelText('Description'), 'Operations runbook');
+    await user.click(within(createDialog).getByRole('button', { name: 'Create' }));
+    expect(await screen.findByRole('button', { name: 'Actions for ops' })).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Edit support' }));
-    expect(screen.getByDisplayValue('support')).toBeDisabled();
-    await user.clear(screen.getByLabelText('Description'));
-    await user.type(screen.getByLabelText('Description'), 'Support runbook');
-    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    // Edit the support kb description.
+    await user.click(screen.getByRole('button', { name: 'Actions for support' }));
+    await user.click(await screen.findByText('Edit'));
+    const editDialog = await screen.findByRole('dialog');
+    expect(within(editDialog).getByDisplayValue('support')).toBeDisabled();
+    await user.clear(within(editDialog).getByLabelText('Description'));
+    await user.type(within(editDialog).getByLabelText('Description'), 'Support runbook');
+    await user.click(within(editDialog).getByRole('button', { name: 'Save' }));
     expect(await screen.findByText('Support runbook')).toBeInTheDocument();
 
-    await user.clear(screen.getByLabelText('Document source'));
-    await user.type(screen.getByLabelText('Document source'), 'new-guide.md');
-    await user.clear(screen.getByLabelText('Document content'));
-    await user.type(screen.getByLabelText('Document content'), '# Guide{enter}{enter}Reset billing.');
-    await user.click(screen.getByRole('button', { name: 'Ingest document' }));
-    expect(await screen.findByText('Imported new-guide.md with 1 chunks.')).toBeInTheDocument();
-    expect(await screen.findByText('new-guide.md')).toBeInTheDocument();
+    // Open Documents dialog: ingest a new doc, see it listed, then delete the original.
+    await user.click(screen.getByRole('button', { name: 'Actions for support' }));
+    await user.click(await screen.findByText('Documents'));
+    const docsDialog = await screen.findByRole('dialog');
+    const docs = within(docsDialog);
+    expect(await docs.findByText('support.md')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Delete support.md' }));
+    await user.clear(docs.getByLabelText('Source'));
+    await user.type(docs.getByLabelText('Source'), 'new-guide.md');
+    await user.type(docs.getByLabelText('Content'), '# Guide{enter}{enter}Reset billing.');
+    await user.click(docs.getByRole('button', { name: 'Ingest document' }));
+    expect(await docs.findByText('new-guide.md')).toBeInTheDocument();
+
+    await user.click(docs.getByRole('button', { name: 'Delete support.md' }));
     await waitFor(() => {
-      expect(screen.queryByText('support.md')).not.toBeInTheDocument();
+      expect(docs.queryByText('support.md')).not.toBeInTheDocument();
+    });
+    await user.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
 
-    await user.clear(screen.getByLabelText('Sync path'));
-    await user.type(screen.getByLabelText('Sync path'), '/data/support');
-    await user.click(screen.getByRole('button', { name: 'Sync documents' }));
+    // Sync dialog posts the directory path.
+    await user.click(screen.getByRole('button', { name: 'Actions for support' }));
+    await user.click(await screen.findByText('Sync'));
+    const syncDialog = await screen.findByRole('dialog');
+    await user.clear(within(syncDialog).getByLabelText('Directory path'));
+    await user.type(within(syncDialog).getByLabelText('Directory path'), '/data/support');
+    await user.click(within(syncDialog).getByRole('button', { name: 'Sync' }));
     await waitFor(() => {
       expect(lastSyncBody).toEqual({ path: '/data/support', tenant_id: 'default' });
     });
-    expect(await screen.findByText('Sync queued: scanned 1, ingested 1, failed 0.')).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Delete support' }));
     await waitFor(() => {
-      expect(screen.queryByText('support')).not.toBeInTheDocument();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    // Delete the support kb via the confirm dialog.
+    await user.click(screen.getByRole('button', { name: 'Actions for support' }));
+    await user.click(await screen.findByText('Delete'));
+    const confirm = await screen.findByRole('alertdialog');
+    await user.click(within(confirm).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Actions for support' })).not.toBeInTheDocument();
     });
   });
 
-  it('supports connector registration, status, check, sync, edit, and delete within the selected kb', async () => {
-    const user = userEvent.setup();
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('supports connector registration, status, check, sync, edit, and delete', async () => {
+    const user = userEvent.setup({ delay: null });
 
     let connectors: ConnectorRecord[] = [
       {
@@ -249,6 +272,7 @@ describe('knowledge base page', () => {
       },
     ];
     let lastSyncBody: { dry_run: boolean } | null = null;
+    let lastPatchBody: Partial<ConnectorRecord> | null = null;
 
     server.use(
       http.get(`${API_BASE_URL}/admin/kb`, () =>
@@ -277,6 +301,7 @@ describe('knowledge base page', () => {
       }),
       http.patch(`${API_BASE_URL}/admin/kb/connectors/pilot-drive`, async ({ request }) => {
         const body = (await request.json()) as Partial<ConnectorRecord>;
+        lastPatchBody = body;
         connectors = connectors.map((connector) =>
           connector.connector_id === 'pilot-drive' ? { ...connector, ...body } : connector
         );
@@ -315,35 +340,60 @@ describe('knowledge base page', () => {
     renderPage();
 
     expect(await screen.findByRole('heading', { name: 'Knowledge Base' })).toBeInTheDocument();
-    expect(await screen.findByText('pilot-drive')).toBeInTheDocument();
-    expect(await screen.findByText('Status: idle')).toBeInTheDocument();
 
-    await user.type(screen.getByLabelText('Connector ID'), 'pilot-drive-2');
-    await user.selectOptions(screen.getByLabelText('Connector kind'), 'google_drive');
-    await user.clear(screen.getByLabelText('Connector description'));
-    await user.type(screen.getByLabelText('Connector description'), 'Second drive');
-    await user.clear(screen.getByLabelText('Connector config (JSON)'));
+    // Switch to the Connectors tab.
+    await user.click(screen.getByRole('tab', { name: 'Connectors' }));
+    expect(await screen.findByText('pilot-drive')).toBeInTheDocument();
+    // Connector status renders inline next to the enabled badge.
+    expect(await screen.findByText('idle')).toBeInTheDocument();
+
+    // Register a second connector via the Add dialog (kind via Radix Select).
+    await user.click(screen.getByRole('button', { name: 'Add connector' }));
+    const createDialog = await screen.findByRole('dialog');
+    await user.type(within(createDialog).getByLabelText(/Connector ID/), 'pilot-drive-2');
+    await user.clear(within(createDialog).getByLabelText('Description'));
+    await user.type(within(createDialog).getByLabelText('Description'), 'Second drive');
+    const configField = within(createDialog).getByLabelText('Config (JSON)');
+    await user.clear(configField);
+    await user.click(configField);
     await user.paste('{"folder_id":"FOLDER999"}');
-    await user.click(screen.getByRole('button', { name: 'Create connector' }));
+    await user.click(within(createDialog).getByRole('button', { name: 'Create' }));
     expect(await screen.findByText('pilot-drive-2')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Check pilot-drive' }));
-    expect(await screen.findByText('Check result: ok - reachable')).toBeInTheDocument();
+    // Check the connector (status text flips to the check result).
+    await user.click(screen.getByRole('button', { name: 'Actions for pilot-drive' }));
+    await user.click(await screen.findByText('Check'));
+    expect(await screen.findByText('ok')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Sync pilot-drive' }));
+    // Dry-run sync posts { dry_run: true }.
+    await user.click(screen.getByRole('button', { name: 'Actions for pilot-drive' }));
+    await user.click(await screen.findByText('Sync (dry-run)'));
     await waitFor(() => {
       expect(lastSyncBody).toEqual({ dry_run: true });
     });
-    expect(await screen.findByText('Sync result: dry_run_ok ({"planned":2})')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Edit connector pilot-drive' }));
-    expect(screen.getByDisplayValue('pilot-drive')).toBeDisabled();
-    await user.clear(screen.getByLabelText('Connector description'));
-    await user.type(screen.getByLabelText('Connector description'), 'Updated support drive');
-    await user.click(screen.getByRole('button', { name: 'Save connector' }));
-    expect(await screen.findByText('Updated support drive')).toBeInTheDocument();
+    // Edit the connector description.
+    await user.click(screen.getByRole('button', { name: 'Actions for pilot-drive' }));
+    await user.click(await screen.findByText('Edit'));
+    const editDialog = await screen.findByRole('dialog');
+    expect(within(editDialog).getByDisplayValue('pilot-drive')).toBeDisabled();
+    await user.clear(within(editDialog).getByLabelText('Description'));
+    await user.type(within(editDialog).getByLabelText('Description'), 'Updated support drive');
+    await user.click(within(editDialog).getByRole('button', { name: 'Save' }));
+    // The connector row does not render the description, so assert the patched
+    // payload + dialog dismissal (mutation success closes the dialog).
+    await waitFor(() => {
+      expect(lastPatchBody?.description).toBe('Updated support drive');
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
 
-    await user.click(screen.getByRole('button', { name: 'Delete connector pilot-drive' }));
+    // Delete the connector via the confirm dialog.
+    await user.click(screen.getByRole('button', { name: 'Actions for pilot-drive' }));
+    await user.click(await screen.findByText('Delete'));
+    const confirm = await screen.findByRole('alertdialog');
+    await user.click(within(confirm).getByRole('button', { name: 'Delete' }));
     await waitFor(() => {
       expect(screen.queryByText('pilot-drive')).not.toBeInTheDocument();
     });

@@ -118,9 +118,8 @@ def reindex(request: ReindexRequest) -> ReindexSummary:
 - combined memory+KB embedding evaluation 使用 deterministic embedding 默认验证 memory 和 KB 都能通过 reindex 后检索；真实 HTTP embedding smoke 显式 opt-in
 
 **物理分库路由（per-agent / per-tenant）**
-- Agent 工作记忆向量 → 各 agent 专属 `agent_vectors.db`（per-agent 物理隔离，路径：`<tenant_id>/<agent_id>/agent_vectors.db`）
+- 用户记忆 + agent 记忆向量（`mem:*` / `agentmem:*`）→ 各 agent 专属 `agent_vectors.db`（per-agent 物理隔离，路径：`<tenant_id>/<agent_id>/agent_vectors.db`）
 - KB 向量 → 各 tenant 专属 `kb_vectors.db`（per-tenant 物理隔离，路径：`<tenant_id>/kb_vectors.db`）
-- 共享记忆向量 → 各 tenant 专属 `shared_memory_vectors.db`（路径：`<tenant_id>/shared_memory_vectors.db`）
 - 具体路径由 `tenant_router.py` 管理，通过注入的 `SQLiteVectorBackend` 实例访问
 - 全局 `vector_store` runtime 提供 `embed_text()` 和后端配置入口，不作为 memory/KB 的直接读写路径
 

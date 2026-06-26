@@ -313,7 +313,7 @@ uv run fleetent platform diagnostics retention dry-run
 验收目标：
 
 - 证明 User Memory 能从交互中产生，并在后续交互中被利用。
-- 证明 User Memory 归属于用户，不会误进入 KB 或 tenant 级共享记忆。
+- 证明 User Memory 归属于用户，不会误进入 KB 或 agent 级 Agent Memory。
 - 证明 maintenance 只生成候选，不自动改写用户记忆。
 
 用户场景：
@@ -752,7 +752,49 @@ retest_command:
 retest_result:
 ```
 
-## 15. 常见失败定位顺序
+## 15. Node Supervisor 验收（managed 部署）
+
+验收目标：
+
+- 证明 node 成功注册到 platform 并可见。
+- 证明 node 能按 desired-state 拉起 agent 进程。
+- 证明 agent placement 在 node 上正确落地。
+
+适用范围：仅 managed 部署（有独立 node 进程）；dev `fleetent agent run` 跳过本节。
+
+操作步骤：
+
+```bash
+# 查看已注册 node
+uv run fleetent platform nodes list
+
+# 查看 node 期望状态与实际状态
+uv run fleetent platform nodes show <node_id>
+
+# 触发 reconcile（如 node 已运行）
+uv run fleetent platform nodes reconcile <node_id>
+```
+
+应该看到什么：
+
+- `nodes list` 返回至少一条 node 记录，状态为 `online` 或 `registered`。
+- `nodes show` 显示 `desired_agents` 与 `actual_agents` 匹配（或 reconcile 正在进行）。
+- agent 进程在对应 node 机器上运行，且 `/health` 可访问。
+- IM 连接（Slack / Telegram）由 node 侧 supervisor 建立，agent 日志中无直接 IM SDK 初始化。
+
+通过标准：
+
+- node 在 platform 侧可见且状态正常。
+- agent 进程由 node 拉起，不需要手动 `fleetent agent run`。
+- 一次 managed 模式下的 IM 对话可正常完成。
+
+失败判断：
+
+- node 未注册：检查 node 启动配置（`FLEETENT_NODE_TOKEN`、platform endpoint）。
+- desired_agents 不匹配：检查 reconcile 日志和 agent placement 策略。
+- IM 连接未建立：检查 node IM-edge 宿主日志，确认 connector token 注入。
+
+## 16. 常见失败定位顺序
 
 服务无法启动：
 
@@ -767,6 +809,12 @@ CLI 命令不可用：
 2. 运行 `docker compose run --rm fleetent uv run fleetent platform --help`。
 3. 检查 `pyproject.toml` 的 `[project.scripts]`。
 4. 如镜像缓存异常，重新构建镜像后复测。
+
+managed chat 转发失败（`POST /admin/agents/<agent>/chat` 返回 500，日志含 `httpx.ConnectError` / `Name or service not known`）：
+
+1. 确认 agent 本身存活（node 上 agent `/health` 可访问、`agent.yaml` 与模型供应商正常）——多数情况下断点在转发寻址，不在 agent。
+2. 给该 node 配 `FLEETENT_NODE_ADVERTISE_HOST=<本机对 platform 可达地址>`（单机 pilot 用 `127.0.0.1`），重启 node，等一次 status 心跳上报后复测。
+3. 寻址优先级：node 上报地址（`nodes.forward_host`）→ `FLEETENT_FORWARDER_HOST_OVERRIDE` → `{node_id}.internal`（约定兜底，依赖外部 DNS）。未配上报地址且无 override 时才回落到 `.internal`，多机拓扑下不要用全局 override。
 
 KB connector 失败：
 

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 from fleetent import memory as memory_layer
 from fleetent import vector_store
+from fleetent.memory import agent_memory
 from fleetent.runtime.agent_app import _init_agent_db_schema
 
 
@@ -112,3 +113,52 @@ async def test_agent_boot_routes_memory_vectors_to_agent_scoped_backend(
     assert _vector_rows(agent_a_vectors_db) == [("mem:alice", "mem-a")]
     assert _vector_rows(agent_b_vectors_db) == [("mem:alice", "mem-b")]
     vector_store.upsert.assert_not_awaited()
+
+
+async def test_shared_agent_vector_store_keeps_user_and_agent_memory_isolated(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+
+    vectors = {
+        "User memory stored": [1.0, 0.0],
+        "user query": [1.0, 0.0],
+        "Agent preference stored": [0.0, 1.0],
+        "agent query": [0.0, 1.0],
+    }
+    monkeypatch.setattr(
+        vector_store,
+        "embed_text",
+        AsyncMock(side_effect=lambda text: vectors[text]),
+    )
+    monkeypatch.setattr(vector_store, "upsert", AsyncMock())
+    monkeypatch.setattr(vector_store, "delete", AsyncMock())
+
+    _init_agent_db_schema(data_dir, agent_id="agent-a", tenant_id="default")
+
+    agent_root = tmp_path / "tenants" / "default" / "agents" / "agent-a" / "data"
+    state_db = agent_root / "agent_state.db"
+    _insert_memory_row(state_db, id="mem-a", user_id="alice", content="Original")
+    await memory_layer.update_user_memory_content("alice", "mem-a", "User memory stored")
+    agent_item = await agent_memory.create_agent_memory(
+        type="preference",
+        content="Agent preference stored",
+        created_by="system",
+    )
+
+    vector_rows = _vector_rows(agent_root / "agent_vectors.db")
+    assert {namespace for namespace, _ in vector_rows} == {"mem:alice", "agentmem:"}
+    retired_vectors_db = agent_root / ("agent_memory" + "_vectors.db")
+    assert not retired_vectors_db.exists()
+
+    user_results = await memory_layer.search("alice", "user query")
+    agent_results = await agent_memory.search_agent_memory("agent query")
+    assert [item.id for item in user_results] == ["mem-a"]
+    assert [item.id for item in agent_results] == [agent_item.id]
+
+    assert agent_item.id not in {
+        item.id for item in await memory_layer.search("alice", "agent query")
+    }
+    assert "mem-a" not in {item.id for item in await agent_memory.search_agent_memory("user query")}

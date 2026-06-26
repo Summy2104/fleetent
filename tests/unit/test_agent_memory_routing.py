@@ -26,13 +26,11 @@ def test_agent_scope_does_not_have_agent_memory_db_field() -> None:
     )
 
 
-def test_agent_scope_retains_agent_memory_vector_backend() -> None:
+def test_agent_scope_exposes_only_shared_vector_backend() -> None:
     import dataclasses
 
     field_names = {f.name for f in dataclasses.fields(AgentScope)}
-    assert "agent_memory_vector_backend" in field_names, (
-        "AgentScope must retain agent_memory_vector_backend — vector store stays independent"
-    )
+    assert field_names == {"state_db", "vector_backend"}
 
 
 def test_kb_scope_does_not_have_open_shared_memory_db() -> None:

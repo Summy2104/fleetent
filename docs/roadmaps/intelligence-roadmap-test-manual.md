@@ -99,7 +99,8 @@ export FLEETENT_CONFLUENCE_SCOPE=<pilot_space_or_page_scope>
 先跑默认门禁：
 
 ```bash
-uv run pytest tests/integration/test_shared_memory.py \
+uv run pytest tests/integration/test_agent_memory_write_path.py \
+  tests/integration/test_memory_agent_scope.py \
   tests/integration/test_long_term_context_runtime.py \
   tests/integration/test_reflection.py \
   tests/integration/test_kb_reflection_reports.py \
@@ -129,20 +130,20 @@ uv run pytest tests/integration/test_shared_memory.py \
 目标：
 
 - User Memory 可写入、检索、更新、删除或标记 stale。
-- Shared Memory 可按 tenant / team scope 隔离。
+- Agent Memory 按 **agent 级**物理隔离（无 tenant / team scope），落 per-agent `agent_state.db`。
 - Memory maintenance proposal 不会未经 owner 批准自动改写 User Memory。
 
 建议操作：
 
 ```bash
-uv run pytest tests/integration/test_shared_memory.py tests/integration/test_memory_retention_compaction.py -q
+uv run pytest tests/integration/test_agent_memory_write_path.py tests/integration/test_memory_agent_scope.py tests/integration/test_memory_retention_compaction.py -q
 ```
 
 人工复核：
 
-- 结合 `tests/integration/test_shared_memory.py` 的用例记录，确认 Shared Memory 只落在目标 tenant / team scope。
+- 结合 `tests/integration/test_memory_agent_scope.py` 的用例记录，确认 Agent Memory 只落在目标 agent 的 per-agent 库（agent 级隔离）。
 - 验收记录中保存 memory item id、scope、status，不保存完整用户对话。
-- reflection maintenance proposal 初始为 pending；Shared Memory apply / reject 必须有 owner 审批或 apply 记录。
+- reflection maintenance proposal 初始为 pending；Agent Memory apply / reject 必须有 owner 审批或 apply 记录。
 
 失败分类：
 

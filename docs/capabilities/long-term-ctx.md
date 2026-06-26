@@ -13,9 +13,9 @@ long-term-ctx 仍可基于 memory 正常工作。
 
 **不负责**：存储任何数据、记忆提取（→ memory）、文档索引（→ knowledge_base）、in-session 上下文压缩（→ context_mgr）、trace 持久化（→ observability）。
 
-**Shared Memory 说明**：Shared Memory 仍是 memory 能力的一部分，scope 仍按 agent 归属的
-`tenant` / `team` 划分；但把 Shared Memory 通过 long-term-ctx 的 `context policy` 注入 prompt
-的那条设计已在当前版本 descope，现行 live path 只组装 User Memory + Knowledge Base。
+**Agent Memory 说明**：Agent Memory（原 Shared Memory，已正名并收归 **agent 级**、无 tenant/team
+scope）仍是 memory 能力的一部分；但把 Agent Memory 通过 long-term-ctx 的 `context policy` 注入
+prompt 的那条设计已在当前版本 descope，现行 live path 只组装 User Memory + Knowledge Base。
 
 **调用关系**：
 - 依赖：`fleetent.memory`（search）、knowledge_base optional provider（search，KB 范围取自 agent.yaml 的 `knowledge_base_ids`，由管理库 `agent_kbs` materialize）、agent `long_term_ctx.*` 配置（token 预算上限和来源分配策略）

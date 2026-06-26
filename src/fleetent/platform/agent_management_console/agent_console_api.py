@@ -321,6 +321,10 @@ def _def_response(name: str) -> dict[str, Any]:
         out["model_overrides"] = agent.get("model_overrides", {})
         out["memory_namespace"] = agent.get("memory_namespace", "default")
         out["icon"] = agent.get("icon")
+        # IM chat-type capability switches — echoed so the console toggles reflect
+        # the persisted state instead of resetting to false on reload.
+        out["supports_dm"] = bool(agent.get("supports_dm", False))
+        out["supports_groups"] = bool(agent.get("supports_groups", False))
         config_overrides = agent.get("config_overrides", {})
         out["config_overrides"] = config_overrides
         # Serialized form so the console can round-trip the Advanced overrides box

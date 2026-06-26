@@ -177,24 +177,25 @@ material under `im` MUST be referenced by environment-variable name only.
 
 ### Requirement: Single-file agent home loading
 
-Agent runtime SHALL load a self-contained Agent home at `agents/<agent-id>/`. The default installed
-Agent SHALL live at `agents/default/agent.yaml`. Root `agent.yaml` single-file mode is not a
-current MVP deployment path.
+Agent runtime SHALL load a self-contained Agent home at
+`FLEETENT_HOME/tenants/<tenant-id>/agents/<agent-id>/`(默认租户为 `default`)。The default
+standalone/dev Agent SHALL resolve to `FLEETENT_HOME/tenants/default/agents/<agent-id>/agent.yaml`。
+Root `agent.yaml` single-file mode is not a current MVP deployment path.
 
 #### Scenario: Default Agent home is loaded
-- **WHEN** runtime loads the default installed Agent
-- **THEN** it reads `agents/default/agent.yaml`
+- **WHEN** runtime loads the default standalone Agent
+- **THEN** it reads `FLEETENT_HOME/tenants/default/agents/<agent-id>/agent.yaml`
 - **AND** it does not require `agent.yaml` at Platform home root
 
 #### Scenario: Explicit Agent home is loaded
 - **WHEN** operator runs `fleetent agent run support`
-- **THEN** runtime reads `agents/support/agent.yaml` by default
+- **THEN** runtime reads `FLEETENT_HOME/tenants/default/agents/support/agent.yaml` by default
 - **AND** `--home` may still override the Agent home path
 
 #### Scenario: Root agent yaml is not the default path
 - **WHEN** a root-level Agent YAML exists in Platform home
 - **THEN** runtime does not treat it as the canonical default deployment config
-- **AND** docs instruct operators to use `agents/<agent-id>/agent.yaml`
+- **AND** docs instruct operators to use `tenants/<tenant-id>/agents/<agent-id>/agent.yaml`
 
 ### Requirement: Agent file may carry intelligence configuration
 The agent file model SHALL accept optional typed intelligence configuration blocks so the

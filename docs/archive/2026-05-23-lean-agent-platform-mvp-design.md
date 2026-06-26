@@ -1,3 +1,5 @@
+> **[历史记录]** 本文档为 2026-05-23 MVP 设计提案，已被后续 wave 决策文档和落地代码取代。内容以 `docs/architecture/` 和 `openspec/changes/archive/` 为准。
+
 # Lean Agent Platform — Slack/Telegram MVP 设计方案
 
 **日期**：2026-05-23

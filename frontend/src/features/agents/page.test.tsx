@@ -6,7 +6,9 @@ import { describe, expect, it } from 'vitest';
 
 import { AuthProvider } from '@/app/auth';
 import { AppQueryProvider } from '@/app/query-client';
+import { ThemeProvider } from '@/app/theme';
 import { AdminRoutes } from '@/app/routes';
+import { I18nProvider } from '@/i18n';
 import { server } from '@/test/msw/server';
 
 const API_BASE_URL = 'http://fleetent.test';
@@ -43,25 +45,38 @@ type AgentBindingState = {
   users: string[];
 };
 
-function renderAgentsRoute(): void {
+function renderAgentsRoute(initialPath = '/agents'): void {
   render(
-    <AuthProvider
-      baseUrl={API_BASE_URL}
-      initialToken="session-token"
-    >
-      <AppQueryProvider>
-        <MemoryRouter initialEntries={['/agents']}>
-          <AdminRoutes />
-        </MemoryRouter>
-      </AppQueryProvider>
-    </AuthProvider>
+    <I18nProvider>
+      <ThemeProvider>
+        <AuthProvider
+          baseUrl={API_BASE_URL}
+          initialToken="session-token"
+        >
+          <AppQueryProvider>
+            <MemoryRouter initialEntries={[initialPath]}>
+              <AdminRoutes />
+            </MemoryRouter>
+          </AppQueryProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </I18nProvider>
   );
 }
 
-function expectNoBindingLinks(): void {
-  const bindingsPanel = screen.getByRole('heading', { name: 'Agent Bindings' }).closest('aside');
-  expect(bindingsPanel).not.toBeNull();
-  expect(within(bindingsPanel as HTMLElement).queryAllByRole('link')).toHaveLength(0);
+// Open the row action menu for an agent on the list page.
+async function openActions(user: ReturnType<typeof userEvent.setup>, name: string): Promise<void> {
+  await user.click(await screen.findByRole('button', { name: `Actions for ${name}` }));
+}
+
+// Drive a Radix <Select>: open the trigger (a combobox) and click the option text.
+async function selectOption(
+  user: ReturnType<typeof userEvent.setup>,
+  trigger: HTMLElement,
+  optionText: string | RegExp
+): Promise<void> {
+  await user.click(trigger);
+  await user.click(await screen.findByRole('option', { name: optionText }));
 }
 
 function installAgentBindingHandlers({
@@ -119,6 +134,10 @@ function installAgentBindingHandlers({
         agent: String(params.name),
         secrets: bindingsByAgent[String(params.name)].secrets,
       })
+    ),
+    // The Secrets tab also pulls declared required-env slots.
+    http.get(`${API_BASE_URL}/admin/agents/:name/required-env`, ({ params }) =>
+      HttpResponse.json({ agent: String(params.name), required_env: [] })
     ),
     http.get(`${API_BASE_URL}/admin/skills`, () =>
       HttpResponse.json([
@@ -229,7 +248,7 @@ function installAgentBindingHandlers({
   );
 }
 
-describe('agents page parity baseline', () => {
+describe('agents list page lifecycle', () => {
   it('supports lifecycle mutations and list refreshes', async () => {
     const user = userEvent.setup({ delay: null });
     const agents: AgentRecord[] = [
@@ -301,28 +320,6 @@ describe('agents page parity baseline', () => {
         };
         return HttpResponse.json({ agent: body.name, status: 'enabled', provenance: 'adhoc' }, { status: 201 });
       }),
-      http.patch(`${API_BASE_URL}/admin/agents/:name`, async ({ params, request }) => {
-        const body = (await request.json()) as {
-          allowed_tools?: string[];
-          system_prompt?: string;
-        };
-        const nextAgents = agents.map((agent) =>
-          agent.agent_name === params.name
-            ? {
-                ...agent,
-                allowed_tools: body.allowed_tools ?? agent.allowed_tools,
-                system_prompt: body.system_prompt ?? agent.system_prompt,
-              }
-            : agent
-        );
-        agents.splice(0, agents.length, ...nextAgents);
-        detailByAgent[String(params.name)] = {
-          ...detailByAgent[String(params.name)],
-          allowed_tools: body.allowed_tools ?? detailByAgent[String(params.name)].allowed_tools,
-          system_prompt: body.system_prompt ?? detailByAgent[String(params.name)].system_prompt,
-        };
-        return HttpResponse.json({ ok: true });
-      }),
       http.post(`${API_BASE_URL}/admin/agents/:name/disable`, ({ params }) => {
         const nextAgents = agents.map((agent) =>
           agent.agent_name === params.name ? { ...agent, status: 'disabled' } : agent
@@ -393,46 +390,101 @@ describe('agents page parity baseline', () => {
     expect(await screen.findByText('alpha')).toBeInTheDocument();
     expect(screen.getByText('Alpha prompt')).toBeInTheDocument();
 
-    await user.type(screen.getByLabelText('Agent name'), 'beta');
-    await user.type(screen.getByLabelText('System prompt'), 'Beta prompt');
-    await user.type(screen.getByLabelText('Allowed tools'), 'read_file,write_file');
-    await user.click(screen.getByRole('button', { name: 'Create agent' }));
+    // Create a new agent via the "New Agent" dialog.
+    await user.click(screen.getByRole('button', { name: 'New Agent' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText('Agent name'), 'beta');
+    await user.type(within(dialog).getByLabelText('System prompt'), 'Beta prompt');
+    await user.type(within(dialog).getByLabelText('Allowed tools (comma-separated)'), 'read_file,write_file');
+    await user.click(within(dialog).getByRole('button', { name: 'Create agent' }));
     expect(await screen.findByText('beta')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Edit alpha' }));
-    await user.clear(screen.getByLabelText('System prompt'));
-    await user.type(screen.getByLabelText('System prompt'), 'Alpha v2');
-    await user.click(screen.getByRole('button', { name: 'Save changes' }));
-    await waitFor(() => {
-      expect(screen.getAllByText('Alpha v2').length).toBeGreaterThan(0);
-    });
-
-    await user.click(screen.getByRole('button', { name: 'Disable alpha' }));
+    // Disable alpha via its row action menu.
+    await openActions(user, 'alpha');
+    await user.click(await screen.findByRole('menuitem', { name: 'Disable' }));
     expect(await screen.findByText('disabled')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Enable alpha' }));
+    // Enable alpha again.
+    await openActions(user, 'alpha');
+    await user.click(await screen.findByRole('menuitem', { name: 'Enable' }));
     await waitFor(() => {
       expect(screen.getAllByText('enabled').length).toBeGreaterThan(0);
     });
 
-    await user.click(screen.getByRole('button', { name: 'Archive alpha' }));
+    // Archive alpha (sends X-Confirm header).
+    await openActions(user, 'alpha');
+    await user.click(await screen.findByRole('menuitem', { name: 'Archive' }));
     expect(await screen.findByText('archived')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Restore alpha' }));
+    // Restore alpha.
+    await openActions(user, 'alpha');
+    await user.click(await screen.findByRole('menuitem', { name: 'Restore' }));
     await waitFor(() => {
       expect(screen.getAllByText('enabled').length).toBeGreaterThan(0);
     });
 
-    await user.click(screen.getByRole('button', { name: 'Clone alpha' }));
+    // Clone alpha → alpha-copy.
+    await openActions(user, 'alpha');
+    await user.click(await screen.findByRole('menuitem', { name: 'Clone' }));
     expect(await screen.findByText('alpha-copy')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Delete beta' }));
+    // Delete beta via the action menu + confirm dialog.
+    await openActions(user, 'beta');
+    await user.click(await screen.findByRole('menuitem', { name: 'Delete' }));
+    const confirm = await screen.findByRole('alertdialog');
+    await user.click(within(confirm).getByRole('button', { name: 'Delete' }));
     await waitFor(() => {
       expect(screen.queryByText('beta')).not.toBeInTheDocument();
     });
-  }, 15000);
+  });
 
-  it('renders native bindings, versions, and write-only secrets without legacy deep links', async () => {
+  it('toggles the default badge via the row action menu', async () => {
+    const user = userEvent.setup({ delay: null });
+    const agents: AgentRecord[] = [
+      {
+        agent_name: 'alpha',
+        allowed_tools: [],
+        is_default: false,
+        provenance: 'adhoc',
+        status: 'enabled',
+        system_prompt: 'Alpha prompt',
+      },
+    ];
+    installAgentBindingHandlers({
+      agents,
+      bindingsByAgent: { alpha: { kbIds: [], mcpServers: [], oauth: [], secrets: [], skills: [], users: [] } },
+      detailByAgent: {
+        alpha: { agent: 'alpha', allowed_tools: [], status: 'enabled', system_prompt: 'p' },
+      },
+    });
+    server.use(
+      http.put(`${API_BASE_URL}/admin/agents/alpha/default`, () => {
+        agents.splice(0, agents.length, ...agents.map((agent) => ({ ...agent, is_default: true })));
+        return HttpResponse.json({ agent: 'alpha', is_default: true });
+      }),
+      http.delete(`${API_BASE_URL}/admin/agents/default`, () => {
+        agents.splice(0, agents.length, ...agents.map((agent) => ({ ...agent, is_default: false })));
+        return HttpResponse.json({ cleared: true });
+      })
+    );
+
+    renderAgentsRoute();
+    expect(await screen.findByText('alpha')).toBeInTheDocument();
+
+    await openActions(user, 'alpha');
+    await user.click(await screen.findByRole('menuitem', { name: 'Set as default' }));
+    expect(await screen.findByText('default')).toBeInTheDocument();
+
+    await openActions(user, 'alpha');
+    await user.click(await screen.findByRole('menuitem', { name: 'Clear default' }));
+    await waitFor(() => {
+      expect(screen.queryByText('default')).not.toBeInTheDocument();
+    });
+  });
+});
+
+describe('agent configure page bindings', () => {
+  it('edits versions, skills, mcp, kb, users, im, and write-only secrets', async () => {
     const user = userEvent.setup({ delay: null });
     const agents: AgentRecord[] = [
       {
@@ -497,18 +549,6 @@ describe('agents page parity baseline', () => {
         bindingsByAgent.alpha.mcpServers = ['github'];
         return HttpResponse.json({ agent: 'alpha', bound: false, server_id: 'filesystem' });
       }),
-      http.post(`${API_BASE_URL}/admin/agents/alpha/bindings/oauth/slack`, async ({ request }) => {
-        expect(await request.json()).toEqual({ run_as: 'user' });
-        bindingsByAgent.alpha.oauth = [
-          { run_as: 'agent', service_id: 'github' },
-          { run_as: 'user', service_id: 'slack' },
-        ];
-        return HttpResponse.json({ agent: 'alpha', bound: true, connector_id: 'slack', run_as: 'user' });
-      }),
-      http.delete(`${API_BASE_URL}/admin/agents/alpha/bindings/oauth/github`, () => {
-        bindingsByAgent.alpha.oauth = [{ run_as: 'user', service_id: 'slack' }];
-        return HttpResponse.json({ agent: 'alpha', bound: false, connector_id: 'github' });
-      }),
       http.post(`${API_BASE_URL}/admin/agents/alpha/kbs`, async ({ request }) => {
         expect(await request.json()).toEqual({ kb_id: 'sales' });
         bindingsByAgent.alpha.kbIds = ['support', 'sales'];
@@ -545,16 +585,6 @@ describe('agents page parity baseline', () => {
         detailByAgent.alpha = { ...detailByAgent.alpha, supports_dm: true, supports_groups: true };
         return HttpResponse.json({ agent: 'alpha', supports_dm: true, supports_groups: true });
       }),
-      http.put(`${API_BASE_URL}/admin/agents/alpha/default`, () => {
-        const nextAgents = agents.map((agent) => ({ ...agent, is_default: true }));
-        agents.splice(0, agents.length, ...nextAgents);
-        return HttpResponse.json({ agent: 'alpha', is_default: true });
-      }),
-      http.delete(`${API_BASE_URL}/admin/agents/default`, () => {
-        const nextAgents = agents.map((agent) => ({ ...agent, is_default: false }));
-        agents.splice(0, agents.length, ...nextAgents);
-        return HttpResponse.json({ cleared: true });
-      }),
       http.put(`${API_BASE_URL}/admin/agents/alpha/secrets/FLEETENT_ALPHA_API_KEY`, async ({ request }) => {
         expect(await request.json()).toEqual({ value: 'sk-live-secret' });
         bindingsByAgent.alpha.secrets = [
@@ -570,122 +600,108 @@ describe('agents page parity baseline', () => {
       })
     );
 
-    renderAgentsRoute();
-    expect(await screen.findByText('alpha')).toBeInTheDocument();
+    // Configure lives on its own route; navigate straight to it.
+    renderAgentsRoute('/agents/alpha/configure');
+    expect(await screen.findByRole('heading', { name: 'Configure · alpha' })).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Load versions for alpha' }));
-    expect(await screen.findByText('v1 active')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Activate v2 for alpha' }));
-    expect(await screen.findByText('v2 active')).toBeInTheDocument();
-
-    const skillsSection = screen.getByRole('heading', { name: 'Skills' }).closest('section');
-    const mcpSection = screen.getByRole('heading', { name: 'MCP Servers' }).closest('section');
-    const oauthSection = screen.getByRole('heading', { name: 'OAuth Connectors' }).closest('section');
-    const kbSection = screen.getByRole('heading', { name: 'Knowledge Bases' }).closest('section');
-    const usersSection = screen.getByRole('heading', { name: 'User Access' }).closest('section');
-    const imSection = screen.getByRole('heading', { name: 'IM Access' }).closest('section');
-    const defaultSection = screen.getByRole('heading', { name: 'Default Agent' }).closest('section');
-    const secretsSection = screen.getByRole('heading', { name: 'Secrets' }).closest('section');
-
-    expect(skillsSection).not.toBeNull();
-    expect(mcpSection).not.toBeNull();
-    expect(oauthSection).not.toBeNull();
-    expect(kbSection).not.toBeNull();
-    expect(usersSection).not.toBeNull();
-    expect(imSection).not.toBeNull();
-    expect(defaultSection).not.toBeNull();
-    expect(secretsSection).not.toBeNull();
-
-    const skillsControls = within(skillsSection as HTMLElement);
-    expect(skillsControls.getByText('crm-ops')).toBeInTheDocument();
-    await user.click(skillsControls.getByRole('button', { name: 'Enable incident-bridge' }));
+    // Skills tab: flip incident-bridge on via its switch.
+    await user.click(screen.getByRole('tab', { name: 'Skills' }));
+    expect(await screen.findByText('crm-ops')).toBeInTheDocument();
+    const incidentSwitch = screen.getByRole('switch', { name: 'incident-bridge' });
+    expect(incidentSwitch).not.toBeChecked();
+    await user.click(incidentSwitch);
     await waitFor(() => {
-      expect(skillsControls.getByRole('button', { name: 'Disable incident-bridge' })).toBeInTheDocument();
+      expect(screen.getByRole('switch', { name: 'incident-bridge' })).toBeChecked();
     });
 
-    const mcpControls = within(mcpSection as HTMLElement);
-    expect(mcpControls.getByText('filesystem')).toBeInTheDocument();
-    await user.selectOptions(mcpControls.getByLabelText('Add MCP server'), 'github');
-    await user.click(mcpControls.getByRole('button', { name: 'Bind MCP server' }));
-    expect(await mcpControls.findByText('github')).toBeInTheDocument();
-    await user.click(mcpControls.getByRole('button', { name: 'Remove filesystem' }));
+    // MCP Servers tab: bind github via the select, then unbind filesystem chip.
+    await user.click(screen.getByRole('tab', { name: 'MCP Servers' }));
+    expect(await screen.findByText('filesystem')).toBeInTheDocument();
+    await selectOption(user, screen.getByRole('combobox'), 'github');
+    expect(await screen.findByText('github')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Remove filesystem' }));
     await waitFor(() => {
-      expect(mcpControls.queryByRole('button', { name: 'Remove filesystem' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Remove filesystem' })).not.toBeInTheDocument();
     });
 
-    const oauthControls = within(oauthSection as HTMLElement);
-    expect(oauthControls.getByText('github')).toBeInTheDocument();
-    await user.selectOptions(oauthControls.getByLabelText('Add OAuth connector'), 'slack');
-    await user.selectOptions(oauthControls.getByLabelText('Run as'), 'user');
-    await user.click(oauthControls.getByRole('button', { name: 'Bind OAuth connector' }));
-    expect(await oauthControls.findByText('slack')).toBeInTheDocument();
-    await user.click(oauthControls.getByRole('button', { name: 'Remove github' }));
+    // Knowledge Bases tab: bind sales, unbind support.
+    await user.click(screen.getByRole('tab', { name: 'Knowledge Bases' }));
+    expect(await screen.findByText('support · Support knowledge')).toBeInTheDocument();
+    await selectOption(user, screen.getByRole('combobox'), 'sales · Sales knowledge');
+    expect(await screen.findByText('sales · Sales knowledge')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Remove support · Support knowledge' }));
     await waitFor(() => {
-      expect(oauthControls.queryByRole('button', { name: 'Remove github' })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Remove support · Support knowledge' })
+      ).not.toBeInTheDocument();
     });
 
-    const kbControls = within(kbSection as HTMLElement);
-    expect(kbControls.getByText('support')).toBeInTheDocument();
-    await user.selectOptions(kbControls.getByLabelText('Add knowledge base'), 'sales');
-    await user.click(kbControls.getByRole('button', { name: 'Bind knowledge base' }));
-    expect(await kbControls.findByText('sales')).toBeInTheDocument();
-    await user.click(kbControls.getByRole('button', { name: 'Remove support' }));
+    // IM Capabilities tab: bind a user, add a group, toggle capabilities.
+    await user.click(screen.getByRole('tab', { name: 'IM Capabilities' }));
+    expect(await screen.findByText('alice@fleetent.test')).toBeInTheDocument();
+    // The tab has a platform select and the Users BindSelectEditor combobox;
+    // the latter is the last combobox rendered in this tab.
+    const comboboxes = screen.getAllByRole('combobox');
+    const usersCombobox = comboboxes[comboboxes.length - 1];
+    await selectOption(user, usersCombobox, 'bob@fleetent.test');
+    expect(await screen.findByText('bob@fleetent.test')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Remove alice@fleetent.test' }));
     await waitFor(() => {
-      expect(kbControls.queryByRole('button', { name: 'Remove support' })).not.toBeInTheDocument();
+      expect(screen.queryByText('alice@fleetent.test')).not.toBeInTheDocument();
     });
 
-    const userControls = within(usersSection as HTMLElement);
-    expect(userControls.getByText('u1')).toBeInTheDocument();
-    await user.selectOptions(userControls.getByLabelText('Add user access'), 'u2');
-    await user.click(userControls.getByRole('button', { name: 'Bind user' }));
-    expect(await userControls.findByText('u2')).toBeInTheDocument();
-    await user.click(userControls.getByRole('button', { name: 'Remove u1' }));
+    // Add an IM group (the group-id input is identified by its placeholder).
+    await user.type(screen.getByPlaceholderText('e.g. C0123 / -1001234567'), 'C0123');
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+    expect(await screen.findByText('C0123')).toBeInTheDocument();
+
+    // Toggle the capability switches and persist them.
+    await user.click(screen.getByRole('switch', { name: 'Supports direct messages' }));
+    await user.click(screen.getByRole('switch', { name: 'Supports group chats' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => {
-      expect(userControls.queryByRole('button', { name: 'Remove u1' })).not.toBeInTheDocument();
+      expect(screen.getByRole('switch', { name: 'Supports direct messages' })).toBeChecked();
     });
 
-    const imControls = within(imSection as HTMLElement);
-    await user.type(imControls.getByLabelText('Group id'), 'C0123');
-    await user.click(imControls.getByRole('button', { name: 'Add group' }));
-    expect(await imControls.findByText('slack:C0123')).toBeInTheDocument();
-    await user.click(imControls.getByLabelText('Allow DMs'));
-    await user.click(imControls.getByLabelText('Allow groups'));
-    await user.click(imControls.getByRole('button', { name: 'Save IM capabilities' }));
-    expect(await imControls.findByText('DMs enabled')).toBeInTheDocument();
-    expect(await imControls.findByText('Groups enabled')).toBeInTheDocument();
-    await user.click(imControls.getByRole('button', { name: 'Remove slack:C0123' }));
+    // Remove the IM group.
+    await user.click(screen.getByRole('button', { name: 'Remove slack:C0123' }));
     await waitFor(() => {
-      expect(imControls.queryByText('slack:C0123')).not.toBeInTheDocument();
+      expect(screen.queryByText('C0123')).not.toBeInTheDocument();
     });
 
-    const defaultControls = within(defaultSection as HTMLElement);
-    await user.click(defaultControls.getByRole('button', { name: 'Set as default agent' }));
-    expect(await defaultControls.findByText('This agent is the default.')).toBeInTheDocument();
-    await user.click(defaultControls.getByRole('button', { name: 'Clear default agent' }));
-    await waitFor(async () => {
-      expect(await defaultControls.findByText('This agent is not the default.')).toBeInTheDocument();
-    });
-
-    const secretsControls = within(secretsSection as HTMLElement);
-    expect(secretsControls.getByText('FLEETENT_ALPHA_API_KEY')).toBeInTheDocument();
-    expect(secretsControls.getByText('unset')).toBeInTheDocument();
-    expect(secretsControls.queryByText('sk-live-secret')).not.toBeInTheDocument();
-    await user.type(secretsControls.getByLabelText('Secret value for FLEETENT_ALPHA_API_KEY'), 'sk-live-secret');
-    await user.click(secretsControls.getByRole('button', { name: 'Save secret FLEETENT_ALPHA_API_KEY' }));
-    expect(secretsControls.queryByDisplayValue('sk-live-secret')).not.toBeInTheDocument();
+    // Secrets tab: write-only secret value, never echoed back.
+    await user.click(screen.getByRole('tab', { name: 'Secrets' }));
+    expect(await screen.findByText('FLEETENT_ALPHA_API_KEY')).toBeInTheDocument();
+    expect(screen.getByText('unset')).toBeInTheDocument();
+    expect(screen.queryByText('sk-live-secret')).not.toBeInTheDocument();
+    await selectOption(user, screen.getByRole('combobox'), 'FLEETENT_ALPHA_API_KEY');
+    await user.type(screen.getByPlaceholderText('secret value'), 'sk-live-secret');
+    await user.click(screen.getByRole('button', { name: 'Set Secret' }));
     await waitFor(() => {
-      expect(secretsControls.getByText('set')).toBeInTheDocument();
-      expect(secretsControls.queryByText('sk-live-secret')).not.toBeInTheDocument();
+      expect(screen.getByText('set')).toBeInTheDocument();
     });
-    await user.click(secretsControls.getByRole('button', { name: 'Clear secret FLEETENT_ALPHA_API_KEY' }));
+    expect(screen.queryByDisplayValue('sk-live-secret')).not.toBeInTheDocument();
+    expect(screen.queryByText('sk-live-secret')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Clear FLEETENT_ALPHA_API_KEY' }));
     await waitFor(() => {
-      expect(secretsControls.getByText('unset')).toBeInTheDocument();
+      expect(screen.getByText('unset')).toBeInTheDocument();
     });
 
-    expectNoBindingLinks();
-  }, 15000);
+    // Deploy tab: versions auto-load; v1 is active so only v2 offers an Activate button.
+    await user.click(screen.getByRole('tab', { name: 'Deploy' }));
+    expect(await screen.findByText('v1')).toBeInTheDocument();
+    const v2Row = screen.getByText('v2').closest('tr') as HTMLElement;
+    expect(within(v2Row).queryByText('active')).not.toBeInTheDocument();
+    await user.click(within(v2Row).getByRole('button', { name: 'Activate' }));
+    // After activation the active badge moves to v2.
+    await waitFor(() => {
+      const refreshedV2 = screen.getByText('v2').closest('tr') as HTMLElement;
+      expect(within(refreshedV2).getByText('active')).toBeInTheDocument();
+    });
+  });
 
-  it('keeps viewers read-only across all binding sections', async () => {
+  it('keeps viewers read-only across binding tabs', async () => {
+    const user = userEvent.setup({ delay: null });
     const agents: AgentRecord[] = [
       {
         agent_name: 'alpha',
@@ -725,33 +741,36 @@ describe('agents page parity baseline', () => {
       )
     );
 
-    renderAgentsRoute();
-    expect(await screen.findByText('alpha')).toBeInTheDocument();
-    expect(await screen.findAllByText('Viewer access is read-only.')).not.toHaveLength(0);
+    renderAgentsRoute('/agents/alpha/configure');
+    expect(await screen.findByRole('heading', { name: 'Configure · alpha' })).toBeInTheDocument();
 
-    const bindingsPanel = screen.getByRole('heading', { name: 'Agent Bindings' }).closest('aside');
-    expect(bindingsPanel).not.toBeNull();
-    const panel = within(bindingsPanel as HTMLElement);
+    // MCP tab: read-only — chip shows, but no add-select and no remove buttons.
+    await user.click(screen.getByRole('tab', { name: 'MCP Servers' }));
+    expect(await screen.findByText('filesystem')).toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Remove / })).not.toBeInTheDocument();
 
-    expect(panel.queryByRole('button', { name: /Bind / })).not.toBeInTheDocument();
-    expect(panel.queryByRole('button', { name: /Remove / })).not.toBeInTheDocument();
-    expect(panel.queryByRole('button', { name: /Enable / })).not.toBeInTheDocument();
-    expect(panel.queryByRole('button', { name: /Disable / })).not.toBeInTheDocument();
-    expect(panel.queryByRole('button', { name: 'Set as default agent' })).not.toBeInTheDocument();
-    expect(panel.queryByRole('button', { name: 'Clear default agent' })).not.toBeInTheDocument();
-    expect(panel.queryByLabelText('Add MCP server')).not.toBeInTheDocument();
-    expect(panel.queryByLabelText('Add OAuth connector')).not.toBeInTheDocument();
-    expect(panel.queryByLabelText('Add knowledge base')).not.toBeInTheDocument();
-    expect(panel.queryByLabelText('Add user access')).not.toBeInTheDocument();
-    expect(panel.queryByLabelText('Group id')).not.toBeInTheDocument();
-    expect(panel.queryByLabelText('Allow DMs')).not.toBeInTheDocument();
-    expect(panel.queryByLabelText('Secret value for FLEETENT_ALPHA_API_KEY')).not.toBeInTheDocument();
+    // Skills tab: switch is replaced by a read-only status label.
+    await user.click(screen.getByRole('tab', { name: 'Skills' }));
+    expect(await screen.findByText('crm-ops')).toBeInTheDocument();
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
 
-    expectNoBindingLinks();
+    // Secrets tab: no set form, no clear buttons.
+    await user.click(screen.getByRole('tab', { name: 'Secrets' }));
+    expect(await screen.findByText('FLEETENT_ALPHA_API_KEY')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Set Secret' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Clear / })).not.toBeInTheDocument();
+
+    // IM tab: capability switches are disabled and there is no save control.
+    await user.click(screen.getByRole('tab', { name: 'IM Capabilities' }));
+    expect(await screen.findByText('alice@fleetent.test')).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Supports direct messages' })).toBeDisabled();
+    expect(screen.queryByPlaceholderText('e.g. C0123 / -1001234567')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add' })).not.toBeInTheDocument();
   });
 });
 
-describe('agents page dual-state (runtime + placement gating)', () => {
+describe('agents list page status display', () => {
   const emptyBindings = {
     kbIds: [],
     mcpServers: [],
@@ -761,7 +780,7 @@ describe('agents page dual-state (runtime + placement gating)', () => {
     users: [],
   };
 
-  it('shows runtime state on the card', async () => {
+  it('shows the desired-state status badge for a running agent', async () => {
     const agents: AgentRecord[] = [
       {
         agent_name: 'alpha',
@@ -774,54 +793,21 @@ describe('agents page dual-state (runtime + placement gating)', () => {
         system_prompt: 'Alpha prompt',
       },
     ];
-    const detailByAgent: Record<string, AgentDetailRecord> = {
-      alpha: {
-        agent: 'alpha',
-        allowed_tools: [],
-        status: 'enabled',
-        system_prompt: 'Alpha prompt',
-      },
-    };
-    installAgentBindingHandlers({
-      agents,
-      bindingsByAgent: { alpha: emptyBindings },
-      detailByAgent,
-    });
-
-    renderAgentsRoute();
-
-    expect(await screen.findByText('Runtime: running on node-a (ok)')).toBeInTheDocument();
-    // the new runtime line must not displace the existing desired-state token
-    expect(screen.getByText('enabled')).toBeInTheDocument();
-  });
-
-  it('renders a phase-only runtime without node/health decoration', async () => {
-    const agents: AgentRecord[] = [
-      {
-        agent_name: 'alpha',
-        allowed_tools: [],
-        is_default: false,
-        placement: { node_id: 'node-a' },
-        provenance: 'adhoc',
-        runtime: { phase: 'stopped' },
-        status: 'enabled',
-        system_prompt: 'Alpha prompt',
-      },
-    ];
     installAgentBindingHandlers({
       agents,
       bindingsByAgent: { alpha: emptyBindings },
       detailByAgent: {
-        alpha: { agent: 'alpha', allowed_tools: [], status: 'enabled', system_prompt: 'p' },
+        alpha: { agent: 'alpha', allowed_tools: [], status: 'enabled', system_prompt: 'Alpha prompt' },
       },
     });
 
     renderAgentsRoute();
 
-    expect(await screen.findByText('Runtime: stopped')).toBeInTheDocument();
+    expect(await screen.findByText('alpha')).toBeInTheDocument();
+    expect(screen.getByText('enabled')).toBeInTheDocument();
   });
 
-  it('renders an explicit not-running state when runtime is null', async () => {
+  it('shows the disabled status badge when the agent is not running', async () => {
     const agents: AgentRecord[] = [
       {
         agent_name: 'alpha',
@@ -844,63 +830,13 @@ describe('agents page dual-state (runtime + placement gating)', () => {
 
     renderAgentsRoute();
 
-    expect(await screen.findByText('Runtime: not running')).toBeInTheDocument();
-  });
-
-  it('disables Enable when the agent is not bound to a node', async () => {
-    const agents: AgentRecord[] = [
-      {
-        agent_name: 'gamma',
-        allowed_tools: [],
-        is_default: false,
-        placement: null,
-        provenance: 'adhoc',
-        runtime: null,
-        status: 'disabled',
-        system_prompt: 'Gamma prompt',
-      },
-      {
-        agent_name: 'delta',
-        allowed_tools: [],
-        is_default: false,
-        placement: { node_id: 'node-b' },
-        provenance: 'adhoc',
-        runtime: null,
-        status: 'disabled',
-        system_prompt: 'Delta prompt',
-      },
-    ];
-    installAgentBindingHandlers({
-      agents,
-      bindingsByAgent: { delta: emptyBindings, gamma: emptyBindings },
-      detailByAgent: {
-        delta: { agent: 'delta', allowed_tools: [], status: 'disabled', system_prompt: 'd' },
-        gamma: { agent: 'gamma', allowed_tools: [], status: 'disabled', system_prompt: 'g' },
-      },
-    });
-
-    renderAgentsRoute();
-
-    const unbound = await screen.findByRole('button', { name: 'Enable gamma' });
-    expect(unbound).toBeDisabled();
-    expect(unbound).toHaveAttribute('title', 'Pin this agent to a node before enabling');
-
-    const bound = screen.getByRole('button', { name: 'Enable delta' });
-    expect(bound).not.toBeDisabled();
+    expect(await screen.findByText('alpha')).toBeInTheDocument();
+    expect(screen.getByText('disabled')).toBeInTheDocument();
   });
 });
 
-describe('agents page model binding', () => {
-  const emptyBindings = {
-    kbIds: [],
-    mcpServers: [],
-    oauth: [],
-    secrets: [],
-    skills: [],
-    users: [],
-  };
-
-  it('binds a model provider on create and round-trips the selection on edit', async () => {
+describe('agents configure page model binding', () => {
+  it('round-trips the model provider selection on the overview tab', async () => {
     const user = userEvent.setup({ delay: null });
     const agents: AgentRecord[] = [
       {
@@ -925,77 +861,39 @@ describe('agents page model binding', () => {
 
     installAgentBindingHandlers({
       agents,
-      bindingsByAgent: { alpha: { ...emptyBindings } },
+      bindingsByAgent: { alpha: { kbIds: [], mcpServers: [], oauth: [], secrets: [], skills: [], users: [] } },
       detailByAgent,
     });
 
     type CapturedModelBody = {
       model_overrides?: { routes?: Record<string, Array<{ provider_id?: string }>> };
-      name?: string;
     };
-    const captured: { create?: CapturedModelBody; patch?: CapturedModelBody } = {};
+    const captured: { patch?: CapturedModelBody } = {};
     server.use(
-      http.post(`${API_BASE_URL}/admin/agents`, async ({ request }) => {
-        const body = (await request.json()) as CapturedModelBody;
-        captured.create = body;
-        const name = body.name ?? 'beta';
-        agents.push({
-          agent_name: name,
-          allowed_tools: [],
-          provenance: 'adhoc',
-          status: 'enabled',
-          system_prompt: 'Beta prompt',
-        });
-        detailByAgent[name] = {
-          agent: name,
-          allowed_tools: [],
-          status: 'enabled',
-          system_prompt: 'Beta prompt',
-        };
-        return HttpResponse.json({ agent: name, provenance: 'adhoc', status: 'enabled' }, { status: 201 });
-      }),
       http.patch(`${API_BASE_URL}/admin/agents/:name`, async ({ request }) => {
         captured.patch = (await request.json()) as CapturedModelBody;
         return HttpResponse.json({ ok: true });
       })
     );
 
-    renderAgentsRoute();
-    expect(await screen.findByText('alpha')).toBeInTheDocument();
+    renderAgentsRoute('/agents/alpha/configure');
+    expect(await screen.findByRole('heading', { name: 'Configure · alpha' })).toBeInTheDocument();
 
-    // Create: pick a provider for the default route.
-    await user.type(screen.getByLabelText('Agent name'), 'beta');
-    await user.type(screen.getByLabelText('System prompt'), 'Beta prompt');
-    await user.selectOptions(screen.getByLabelText('Model provider'), 'openai-gpt4');
-    await user.click(screen.getByRole('button', { name: 'Create agent' }));
+    // Overview tab is the default. The existing provider is pre-selected on the trigger.
+    const trigger = screen.getByRole('combobox');
+    await waitFor(() => expect(trigger).toHaveTextContent('ollama-local'));
 
-    await waitFor(() => expect(captured.create).toBeTruthy());
-    expect(captured.create?.model_overrides?.routes?.default?.[0]?.provider_id).toBe('openai-gpt4');
-
-    // Edit alpha: the existing provider is pre-selected, then changed.
-    await user.click(screen.getByRole('button', { name: 'Edit alpha' }));
-    await waitFor(() =>
-      expect(screen.getByLabelText<HTMLSelectElement>('Model provider').value).toBe('ollama-local')
-    );
-    await user.selectOptions(screen.getByLabelText('Model provider'), 'openai-gpt4');
-    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    // Switch to the openai provider and save.
+    await selectOption(user, trigger, /openai-gpt4/);
+    await user.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(captured.patch).toBeTruthy());
     expect(captured.patch?.model_overrides?.routes?.default?.[0]?.provider_id).toBe('openai-gpt4');
   });
 });
 
-describe('agents page IM connector overrides', () => {
-  const emptyBindings = {
-    kbIds: [],
-    mcpServers: [],
-    oauth: [],
-    secrets: [],
-    skills: [],
-    users: [],
-  };
-
-  it('shows config overrides yaml in the bindings panel and saves edits via PATCH', async () => {
+describe('agents configure page IM connector overrides', () => {
+  it('shows config overrides yaml and saves edits via PATCH', async () => {
     const user = userEvent.setup({ delay: null });
     const agents: AgentRecord[] = [
       {
@@ -1020,7 +918,7 @@ describe('agents page IM connector overrides', () => {
 
     installAgentBindingHandlers({
       agents,
-      bindingsByAgent: { alpha: { ...emptyBindings } },
+      bindingsByAgent: { alpha: { kbIds: [], mcpServers: [], oauth: [], secrets: [], skills: [], users: [] } },
       detailByAgent,
     });
 
@@ -1032,21 +930,17 @@ describe('agents page IM connector overrides', () => {
       })
     );
 
-    renderAgentsRoute();
-    expect(await screen.findByText('alpha')).toBeInTheDocument();
+    renderAgentsRoute('/agents/alpha/configure');
+    expect(await screen.findByRole('heading', { name: 'Configure · alpha' })).toBeInTheDocument();
 
-    const section = (await screen.findByRole('heading', { name: 'IM Connectors' })).closest(
-      'section'
-    );
-    expect(section).not.toBeNull();
-    const controls = within(section as HTMLElement);
-    const textarea = controls.getByLabelText<HTMLTextAreaElement>('Advanced overrides (YAML)');
+    await user.click(screen.getByRole('tab', { name: 'IM Capabilities' }));
+    const textarea = (await screen.findByLabelText<HTMLTextAreaElement>('Advanced overrides (YAML)'));
     await waitFor(() => expect(textarea.value).toContain('bot_token_env: SLACK_BOT_TOKEN'));
 
     fireEvent.change(textarea, {
       target: { value: 'im:\n  telegram:\n    bot_token_env: TG_TOKEN\n' },
     });
-    await user.click(controls.getByRole('button', { name: 'Save overrides' }));
+    await user.click(screen.getByRole('button', { name: 'Save overrides' }));
 
     await waitFor(() => expect(captured.patch).toBeTruthy());
     expect(captured.patch?.config_overrides_yaml).toContain('telegram');
@@ -1054,6 +948,7 @@ describe('agents page IM connector overrides', () => {
   });
 
   it('hides the overrides editor controls from viewers', async () => {
+    const user = userEvent.setup({ delay: null });
     const agents: AgentRecord[] = [
       {
         agent_name: 'alpha',
@@ -1075,18 +970,16 @@ describe('agents page IM connector overrides', () => {
 
     installAgentBindingHandlers({
       agents,
-      bindingsByAgent: { alpha: { ...emptyBindings } },
+      bindingsByAgent: { alpha: { kbIds: [], mcpServers: [], oauth: [], secrets: [], skills: [], users: [] } },
       detailByAgent,
       role: 'viewer',
     });
 
-    renderAgentsRoute();
-    expect(await screen.findByText('alpha')).toBeInTheDocument();
+    renderAgentsRoute('/agents/alpha/configure');
+    expect(await screen.findByRole('heading', { name: 'Configure · alpha' })).toBeInTheDocument();
 
-    const section = (await screen.findByRole('heading', { name: 'IM Connectors' })).closest(
-      'section'
-    );
-    const controls = within(section as HTMLElement);
-    expect(controls.queryByRole('button', { name: 'Save overrides' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('tab', { name: 'IM Capabilities' }));
+    expect(await screen.findByLabelText('Advanced overrides (YAML)')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save overrides' })).not.toBeInTheDocument();
   });
 });

@@ -295,7 +295,7 @@ def test_read_agent_memory_for_agents(tmp_path: Path) -> None:
     router = TenantRouter(SQLiteTenantBackend(data_dir=data_dir))
     agent_scope = router.agent_scope("tenant-1", "bot")
     am_db = agent_scope.open_state_db(AGENT_STATE_MIGRATIONS)
-    agent_memory_module.set_agent_memory_db(am_db, agent_scope.agent_memory_vector_backend)  # type: ignore[arg-type]
+    agent_memory_module.set_agent_memory_db(am_db, agent_scope.vector_backend)
 
     # Platform reads agent memory read-only across agents
     rows = read_projection.read_agent_memory_for_agents(router, [("tenant-1", "bot")])

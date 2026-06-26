@@ -66,7 +66,7 @@ docker compose run --rm fleetent uv run fleetent platform upgrade --backup-only
 验收点：
 
 - dry-run 输出 database URL、backup 路径和 migration 计划。
-- 非 dry-run 模式下，SQLite backup 写入 `data/backups/YYYYMMDD-HHMMSS/`，按数据目录结构**镜像全部物理库**（管理库 `management.db` + per-tenant 的 KB / 共享记忆库 + per-agent `agent_state.db` + 各向量库，含 `-wal`/`-shm`）。
+- 非 dry-run 模式下，SQLite backup 写入 `data/backups/YYYYMMDD-HHMMSS/`，按数据目录结构**镜像全部物理库**（管理库 `management.db` + per-tenant 的 KB 库 + per-agent `agent_state.db`〔含 agent memory〕 + 各向量库，含 `-wal`/`-shm`）。
 - 只有 backup 成功后才运行 `alembic upgrade head`。
 - migration 失败时保留 backup，不自动 rollback。
 
@@ -218,8 +218,15 @@ uv run fleetent platform diagnostics retention apply
 3. 在 platform 侧注册该 node：`uv run fleetent platform node register --host <agent-host> --port <port>`
 
 **验证**
-- `uv run fleetent platform node list` — 应显示已注册的 node 及其心跳状态
-- `uv run fleetent platform node deregister <node-id>` — 如需下线
+- `uv run fleetent platform nodes list` — 应显示已注册的 node 及其心跳状态和 desired/actual agent 数
+- `uv run fleetent platform nodes show <node-id>` — 查看 desired_agents 与 actual_agents 是否收敛
+- `uv run fleetent platform nodes reconcile <node-id>` — 手动触发 reconcile（如自动 reconcile 延迟）
+- `uv run fleetent platform nodes deregister <node-id>` — 如需下线
+
+**Node supervisor 与 agent placement 验证**
+- desired-state 配置中列出需要运行的 agent：platform 侧设置 `desired_agents` 列表
+- node supervisor 自动拉起 / 维护 agent 进程，无需手动 `fleetent agent run`
+- IM 连接（Slack / Telegram）由 node IM-edge supervisor 建立，不在 agent 进程内直接连接
 
 **当前限制**
 - node 与 platform 须能互相访问（HTTP）
@@ -242,6 +249,9 @@ uv run fleetent platform diagnostics retention apply
 - [ ] `fleetent platform diagnostics export` 可生成脱敏诊断包。
 - [ ] `fleetent platform diagnostics retention dry-run` 可输出候选数量。
 - [ ] 回滚负责人和问题上报路径已确认。
+- [ ] （managed）`fleetent platform nodes list` 显示 node 已注册且状态正常。
+- [ ] （managed）`nodes show <node-id>` 的 desired_agents 与 actual_agents 已收敛。
+- [ ] （managed）IM 对话经 node IM-edge 完成一次端到端测试（非 `fleetent agent run` 直连）。
 
 ## 问题上报包
 

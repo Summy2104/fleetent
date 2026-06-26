@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -10,9 +11,11 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from fleetent import agent_store, audit_log
+from fleetent.agent_config import collect_env_var_names
 from fleetent.platform import im_gateway_management
 from fleetent.platform.agent_lifecycle import credential_slots, materialize, secret_store
 from fleetent.platform.agent_management_console import agent_admin_store
+from fleetent.platform.model_provider_management import provider_admin_store
 from fleetent.platform.node_management import node_store, placement_store
 from fleetent.platform.skill_management import bundle_cache
 from fleetent.platform.skill_management.pool_git import pool_version_for_skill
@@ -20,6 +23,8 @@ from fleetent.platform.user_management import user_admin_api
 from fleetent.skills import registry as skill_registry
 
 router = APIRouter(prefix="/nodes")
+
+_logger = logging.getLogger(__name__)
 
 _resolve_node_key = node_store.resolve_node_key
 
@@ -42,6 +47,7 @@ class NodeSkillStatusReport(BaseModel):
 
 class NodeStatusBody(BaseModel):
     agents: list[NodeAgentStatusReport] = Field(default_factory=list)
+    forward_host: str | None = None
 
 
 class NodeIdentityResolveBody(BaseModel):
@@ -154,6 +160,8 @@ def post_node_status(
 ) -> dict[str, Any]:
     del node
     node_store.touch_last_seen(node_id)
+    if body.forward_host:
+        node_store.set_forward_host(node_id, body.forward_host)
     for report in body.agents:
         node_store.upsert_agent_status(
             report.agent_id,
@@ -236,12 +244,22 @@ def _agent_secrets(agent: agent_store.Agent) -> dict[str, str]:
         value = secret_store.get_decrypted(agent.id, slot.env_name)
         if value is not None:
             secrets[slot.env_name] = value
+    # Seed model env from the provider row (shared source of truth) for any referenced env
+    # name not already supplied by a per-agent inject slot, mirroring materialize._seed_env so
+    # node-managed agents resolve the same model key as platform-direct materialize.
+    agent_file = materialize.agent_file_from_store(agent)
+    for env_name in collect_env_var_names(agent_file):
+        if env_name in secrets:
+            continue
+        provider_key = provider_admin_store.provider_key_for_env(env_name)
+        if provider_key:
+            secrets[env_name] = provider_key
     return secrets
 
 
 def _project_skill_status(report: NodeAgentStatusReport) -> None:
     from fleetent.platform.agent_management_console import agent_admin_store
-    from fleetent.platform.skill_management import skill_admin_store
+    from fleetent.platform.skill_management import backflow_store, skill_admin_store
 
     any_drift = False
     for skill in report.skills:
@@ -249,6 +267,22 @@ def _project_skill_status(report: NodeAgentStatusReport) -> None:
         skill_admin_store.set_base_commit(report.agent_id, skill.skill_name, skill.base_commit)
         skill_admin_store.set_drift(report.agent_id, skill.skill_name, drifted=skill.drift)
         any_drift = any_drift or skill.drift
+        if skill.drift:
+            # Best-effort auto-nomination: a failed bundle capture (e.g. the owning
+            # node is briefly unreachable) must not fail status ingestion.
+            try:
+                backflow_store.nominate_if_absent(
+                    agent_id=report.agent_id,
+                    skill_name=skill.skill_name,
+                    pool_dir=_skill_pool_dir(),
+                )
+            except Exception:
+                _logger.warning(
+                    "auto-nominate backflow failed for agent=%s skill=%s",
+                    report.agent_id,
+                    skill.skill_name,
+                    exc_info=True,
+                )
     if report.skills:
         if any_drift:
             agent_admin_store.mark_drift(report.agent_id)

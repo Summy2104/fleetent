@@ -6,8 +6,6 @@ import sqlite3
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 
 def _tables(db_path: Path) -> set[str]:
     conn = sqlite3.connect(db_path)
@@ -120,3 +118,37 @@ def test_init_agent_db_schema_no_shared_memory_db_at_tenant_level(
     tenant_dir = tmp_path / "tenants" / "acme"
     for path in tenant_dir.rglob("shared_memory*.db"):
         raise AssertionError(f"shared_memory*.db must not exist after new init, found: {path}")
+
+
+def test_init_agent_db_schema_boot_does_not_create_separate_agent_memory_vector_db(
+    tmp_path: Path,
+) -> None:
+    """Boot must not create a retired second vector DB for agent memory."""
+    from fleetent.runtime import agent_app
+
+    data_dir = tmp_path / "data"
+
+    with (
+        patch("fleetent.reflection.set_state_db"),
+        patch("fleetent.session.index.set_state_db"),
+        patch("fleetent.observability.traces.set_state_db"),
+        patch("fleetent.memory.store.set_state_db"),
+        patch("fleetent.memory.store.set_vector_backend"),
+        patch("fleetent.governance.approval_request_store.set_state_db"),
+        patch("fleetent.governance.approval_store.set_state_db"),
+        patch("fleetent.governance.tool_auto_approvals_store.set_state_db"),
+        patch("fleetent.runtime.context.set_state_db"),
+        patch("fleetent.runtime.sub_agent_lifecycle.set_state_db"),
+        patch("fleetent.schedule_store.set_state_db"),
+        patch("fleetent.im_gateway.outbound_queue_store.set_state_db"),
+        patch("fleetent.artifact_exchange.set_state_db"),
+        patch("fleetent.artifact_exchange.set_views_root"),
+        patch("fleetent.knowledge_base.runtime.set_database"),
+        patch("fleetent.knowledge_base.runtime.set_vector_backend"),
+        patch("fleetent.memory.agent_memory.set_agent_memory_db"),
+    ):
+        agent_app._init_agent_db_schema(data_dir, agent_id="bot", tenant_id="acme")
+
+    agent_data_dir = tmp_path / "tenants" / "acme" / "agents" / "bot" / "data"
+    retired_vectors_db = agent_data_dir / ("agent_memory" + "_vectors.db")
+    assert not retired_vectors_db.exists()

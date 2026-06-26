@@ -20,7 +20,6 @@ _EXPECTED_PUBLIC_SYMBOLS = {
     "memory_namespace",
     "reindex",
     "search",
-    "shared_namespace",
     "upsert",
 }
 

@@ -75,6 +75,11 @@ def test_agent_def_dict_and_wire_agent_store_seams(monkeypatch: pytest.MonkeyPat
     )
     assert server._agent_def_dict(None) is None
     assert server._agent_def_dict(_agent())["version"] == 3
+    # IM chat-type capability switches must round-trip through the console seam so
+    # the detail endpoint can echo them back (otherwise the UI toggles read false).
+    caps = server._agent_def_dict(_agent(supports_dm=True, supports_groups=True))
+    assert caps["supports_dm"] is True
+    assert caps["supports_groups"] is True
 
     created: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
     monkeypatch.setattr(server.agent_store, "get_by_name", lambda name: _agent(name=name))

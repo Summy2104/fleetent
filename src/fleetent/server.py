@@ -51,7 +51,7 @@ from fleetent.platform.node_management import (
     placement_store,
 )
 from fleetent.platform.node_management.agent_transport import DirectHttpAgentTransport
-from fleetent.platform.skill_management import skill_admin_api
+from fleetent.platform.skill_management import backflow_api, skill_admin_api
 from fleetent.platform.tenancy import admin_api as tenancy_admin_api
 from fleetent.platform.user_management import user_admin_api
 from fleetent.platform.user_management.api_key_store import resolve as _resolve_api_key
@@ -165,6 +165,24 @@ def _build_platform_maintenance_scheduler(
     return sched
 
 
+def _ensure_skill_pool_git() -> None:
+    """Ensure the shared skill pool is a git repo so backflow accept/fork can commit.
+
+    The pool-is-a-git-repo invariant is owned by the platform, not by any manual
+    setup: skills can arrive via the admin API or be dropped in by hand, neither of
+    which git-initializes the pool, and ``commit_pool`` requires an existing repo.
+    Idempotent (a no-op once the pool is a repo); best-effort (a failure is logged
+    and never aborts boot).
+    """
+    try:
+        from fleetent.platform.skill_management import pool_git
+        from fleetent.skills import registry as skill_registry
+
+        pool_git.init_pool(Path(skill_registry._resolve_skills_dir(None)))
+    except Exception:
+        logger.warning("skill_pool_git_init_failed", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Wire platform api_keys resolver so user_store.authenticate queries the api_keys
@@ -184,6 +202,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
 
     scan_skills()
+    # backflow-pool-git: the shared skill pool must be a git repo before any write,
+    # because backflow accept/fork commit into it. Ensure it once at boot (idempotent).
+    _ensure_skill_pool_git()
     # file-driven-agent-config: scan agent.yaml files once at startup (same lifecycle
     # as scan_skills); the in-memory index drives zero-DB runtime agent resolution.
     agent_config.scan()
@@ -259,12 +280,16 @@ app = FastAPI(title="fleetent", lifespan=lifespan)
 app.include_router(user_admin_api.router)
 app.include_router(im_identity_admin_api.router)
 app.include_router(skill_admin_api.router)
+app.include_router(backflow_api.router)
 app.include_router(provider_admin_api.router)
 app.include_router(kb_admin_api.router)
 app.include_router(connector_admin_api.router)
 app.include_router(chat_admin_api.router)
-app.include_router(agent_console_api.router)
+# agent_admin_api must precede agent_console_api: its literal DELETE
+# /agents/default route would otherwise be shadowed by the console's parametric
+# DELETE /agents/{name}, breaking clear-default with a 404.
 app.include_router(agent_admin_api.router)
+app.include_router(agent_console_api.router)
 app.include_router(stats_admin_api.router)
 app.include_router(agent_apply_api.router)
 app.include_router(node_desired_state_api.router)
@@ -347,6 +372,8 @@ def _agent_def_dict(agent: agent_store.Agent | None) -> dict[str, Any] | None:
         "memory_namespace": agent.memory_namespace,
         "icon": agent.icon,
         "config_overrides": agent.config_overrides,
+        "supports_dm": agent.supports_dm,
+        "supports_groups": agent.supports_groups,
     }
 
 

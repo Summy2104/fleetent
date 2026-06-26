@@ -17,7 +17,6 @@ from fleetent.vector_store.namespaces import (
     memory_namespace,
 )
 
-
 # ── 5.1-a: known prefixes map to correct family ────────────────────────────
 
 
@@ -29,8 +28,15 @@ def test_family_of_mem_with_sub_namespace() -> None:
     assert family_of("mem:user-1:shared") == VectorFamily.MEMORY
 
 
-def test_family_of_shared_prefix_returns_shared() -> None:
-    assert family_of("shared:org:acme") == VectorFamily.SHARED
+def test_family_of_agentmem_prefix_returns_agent_memory() -> None:
+    assert family_of("agentmem:") == VectorFamily.AGENT_MEMORY
+
+
+def test_family_of_retired_shared_prefix_raises() -> None:
+    # Shared Memory was retired in the agent-memory rescope; "shared:" is no longer
+    # a known family and must fail-fast rather than mis-route to a wrong backend.
+    with pytest.raises(ValueError, match="unknown vector namespace family"):
+        family_of("shared:org:acme")
 
 
 def test_family_of_kb_prefix_returns_kb() -> None:

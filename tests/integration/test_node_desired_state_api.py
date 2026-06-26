@@ -632,3 +632,44 @@ def test_post_status_enforces_node_auth_scope(node_client: TestClient) -> None:
         json={"agents": []},
     )
     assert unauthorized.status_code == 401
+
+
+def test_get_desired_state_seeds_provider_inline_key_for_model_env(
+    node_client: TestClient,
+) -> None:
+    from fleetent import agent_store
+    from fleetent.platform.model_provider_management import provider_admin_store
+    from fleetent.platform.node_management import node_store, placement_store
+
+    node_key, _ = node_store.register_node("node-a")
+    # The provider row carries the inline model key (the shared source of truth) and no
+    # per-agent inject slot is created for it.
+    provider_admin_store.add_provider(
+        "glm-5",
+        "https://example.test/v1/",
+        "zai.glm-5",
+        provider="zai",
+        protocol="openai_chat",
+        api_key="sk-provider-inline-key",
+        api_key_env="FLEETENT_MODEL_GLM_5_API_KEY",
+    )
+    agent = agent_store.create_agent(
+        "enabled",
+        "Help users",
+        ["shell"],
+        model_overrides={"default": [{"provider_id": "glm-5"}]},
+    )
+    placement_store.pin_agent(agent.id, "node-a")
+
+    response = node_client.get(
+        "/nodes/node-a/desired-state",
+        headers={"Authorization": f"Bearer {node_key}"},
+    )
+
+    assert response.status_code == 200
+    delivered = response.json()["agents"][0]
+    # Node-managed agents must receive the provider key the same way platform-direct
+    # materialize seeds it into .env, even without a dedicated inject slot.
+    assert delivered["secrets"]["FLEETENT_MODEL_GLM_5_API_KEY"] == "sk-provider-inline-key"
+    # The inline plaintext key must never leak into the non-secret config payload.
+    assert "sk-provider-inline-key" not in str(delivered["config"])

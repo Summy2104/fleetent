@@ -1,6 +1,6 @@
 # Directed Reach：按 user_id 主动触达内部用户
 
-> 状态：设计定稿（2026-06-23），待切片为 OpenSpec change。
+> 状态：已落地（2026-06-24）。`notify_user` agent 侧意图出口、`outbound_queue_store` 持久化、`suppress_outbound` 测试开关均已实现并合并 main。
 > 关联：[identity-channel-ingress.md](identity-channel-ingress.md)（车道 D 身份/渠道线）、车道 A 的 A4b。
 
 ## 背景与问题
@@ -68,6 +68,12 @@ node IM-edge: drain 队列 → connector 投递到各渠道
 
 ## 关联与现状
 
-- **A4a 已落地**（`reflection-approval-routing`，2026-06-23）：reflection 提案已按域+目标细分路由 key（`reflection_user_memory_proposal` / `reflection_shared_memory_proposal` / `reflection_skill_proposal`）。本设计的切片 3 正是给 `reflection_user_memory_proposal` 补上"真正送到本人"的投递。
+- **directed-reach 已落地**（2026-06-24，merge 到 main）：
+  - `outbound_connectors.notify_user(user_id, message, blocks=...)` agent 侧意图出口：入队 `target_type="user_id"` 意图到 `im_outbound_queue`（`outbound_queue_store` per-agent 持久化）
+  - managed 模式：node drain 经 `PlatformAddressResolver` 调平台 `POST /nodes/{id}/identity/addresses` 反查 `im_users` → fan-out 全渠道；无绑定→不投递+日志
+  - dev `agent run` 降级 no-op（`suppress_outbound` 测试开关也已落地）
+  - reflection user-memory 提案已接入 directed-reach，提案送本人审批
+
+- **A4a 已落地**（`reflection-approval-routing`，2026-06-23）：reflection 提案已按域+目标细分路由 key（`reflection_user_memory_proposal` / `reflection_agent_memory_proposal` / `reflection_skill_proposal`）。directed-reach 已给 `reflection_user_memory_proposal` 接入真实投递。
 - **车道 D 身份线**（#2 email 并号 / #4a IM-edge inbound / #4b outbound queue / #5 /link）提供了：绑定表 `im_users`、node IM-edge 宿主、出站队列脊柱。directed-reach 是这条线在**出站定向**方向的自然延伸。
 - A4b 之外的消费者（长任务完成通知、审批升级再触达等）后续按需接入同一原语。

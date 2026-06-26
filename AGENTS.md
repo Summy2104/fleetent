@@ -2,7 +2,7 @@
 
 面向企业 on-premises 部署的 Lean Agent 平台。Python + FastAPI，无 AI 框架依赖，支持 Slack / Telegram / WhatsApp，数据不出内网。
 
-**基础设施原则**：所有外部服务组件必须可自托管（self-hostable），数据不出客户内网。PostgreSQL、Redis、Qdrant、RabbitMQ 等有官方 Docker 镜像的组件均可引入；Pinecone Cloud、OpenAI Embeddings API 等云托管专有服务禁止使用。
+**基础设施原则**：所有外部服务组件必须可自托管。有官方 Docker 镜像的组件（PostgreSQL、Redis、Qdrant、RabbitMQ 等）可引入；云托管专有服务（Pinecone Cloud、OpenAI Embeddings API 等）禁止使用。
 
 ---
 
@@ -18,21 +18,19 @@ AI 和所有团队成员必须遵守。违反任何一条 = 违反流程，需�
 
 ### Commit 规范
 
-格式：`type(scope): 简短描述`（英文，动词开头，scope 可选）
+格式：`type(scope): 简短描述`（英文，动词开头，scope 可选）。type 仅限 `feat` / `fix` / `refactor` / `test` / `docs` / `chore`。
 
-type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`
-
-禁止：`update`、`fix bug`、`wip` 等模糊描述；一次 commit 不要混入多个不相关改动。
+禁止：`update`、`fix bug`、`wip` 等模糊描述；一次 commit 混入多个不相关改动。
 
 ### TDD Hard Gate
 
-每个实现 task 必须严格按顺序执行，不可跳步：
+每个实现 task 必须严格按顺序，不可跳步：
 
-1. **写测试** → 运行**最窄相关命令**（`uv run pytest <file>::<test> -x -q`）→ **必须看到红**（若直接绿：测试未覆盖目标行为，先修测试）
-2. **写实现** → 运行同一命令 → **必须看到绿**
-3. 可选 refactor → 确保仍然绿
+1. **写测试** → 跑**最窄相关命令**（`uv run pytest <file>::<test> -x -q`）→ **必须见红**（若直接绿：测试未覆盖目标行为，先修测试）
+2. **写实现** → 跑同一命令 → **必须见绿**
+3. 可选 refactor → 确保仍绿
 
-Hard Gate 管「必须见红 → 见绿」纪律，**不规定范围**；task / PR 收尾跑什么范围见「测试规范 · 何时跑什么」。跳过任何一步 = 违反流程。
+Hard Gate 只管「见红 → 见绿」纪律，**不规定范围**；task / PR 收尾的跑测范围见「测试规范 · 何时跑什么」。
 
 ### 非代码产物提交
 
@@ -40,21 +38,15 @@ TDD Hard Gate 只管代码实现；文档、proposal.md、design.md、tasks.md �
 
 ### OpenSpec 工作流
 
-> **前置条件**：所有工作流从 main 最新代码出发，开始前执行 `git pull origin main`。
+> **前置条件**：所有工作流从 main 最新代码出发，开始前 `git pull origin main`。
 
 1. **opsx:propose** — 写 proposal.md、specs/、design.md（可选）、tasks.md；tasks.md 中**测试任务必须在对应实现任务之前**
 2. **建 worktree + 功能分支** — `git worktree add .worktrees/<change-name> -b feat/<change-name>`
 3. **opsx:apply** — 按 task 执行，每个 task 强制 TDD；完成后标记 `[x]`
-4. **opsx:archive** — 所有 checkbox 为 `[x]` 后，在**功能分支**归档并同步 specs（archive 表示"实现完成"，不代表已上线到 main）。若 specs 已先经 **opsx:sync** 单独同步（实现先进 main、或并行切片的后续 propose 需要最新 specs 时），archive 仅做归档移动
-5. **推送 + 清理 worktree** — 清理前提：分支已推送到 remote、worktree 干净、无未提交改动；之后再决定 merge / PR
+4. **opsx:archive** — 所有 checkbox 为 `[x]` 后，在**功能分支**归档并同步 specs（archive = "实现完成"，非"已上线 main"）。若 specs 已先经 **opsx:sync** 单独同步，archive 仅做归档移动
+5. **推送 + 清理 worktree** — 前提：分支已推送 remote、worktree 干净、无未提交改动；之后再决定 merge / PR
 
-**proposal / design 进入 implementation 前必须声明模块边界影响**：
-- owning package（如 `runtime` / `platform` / `governance` / ...）
-- public API surface（允许其他模块 import 的函数、dataclass、service interface）
-- owned tables（新增或修改的持久化表；无则写无）
-- config namespace（新增配置所属命名空间；无则写无）
-- cross-module dependencies（依赖哪些模块 public API，是否触碰共享契约）
-- migration / shim plan（移动平铺模块时如何保留 re-export 兼容）
+**proposal / design 进入 implementation 前必须声明模块边界影响**：owning package、public API surface、owned tables（无则写无）、config namespace（无则写无）、cross-module dependencies、migration / shim plan。
 
 ### Agent / Platform 解耦（核心架构契约）
 
@@ -65,20 +57,18 @@ platform（管理入口） ──→ agent runtime（被启停、被读取）
 agent runtime ──✗──→ platform        # 严格禁止反向依赖
 ```
 
-- **agent 运行时模块**（`runtime/`、`session/`、`im_gateway/`、`tools/`、`integrations/`、`model/`、`observability/`、`governance/`、`memory/`、`long_term_ctx/`、`reflection/`）MUST NOT `import fleetent.platform.*`。`im_gateway/` 仍是 **no-platform-import edge face**；managed 下执行宿主改为 **node**、身份 resolver 注入方改为 **node**，但 normalizer/loop 仍留在 agent。
-- **独立组件 / 基础设施**（`knowledge_base/`、`vector_store/`、`structured_logging.py`）同样 MUST NOT `import fleetent.platform.*`
-- **KB 读写边界**：`knowledge_base.retrieval` MUST NOT import `knowledge_base.ingest`（依赖护栏测试强制）
-- agent 运行时产生的数据（会话历史、压缩/token/恢复元数据、运行轨迹）只能落 agent 侧（session 文件、agent store、observability trace），**严禁写入 platform 管理表**
-- platform 需要 agent 数据时读 agent 侧产物，而非要求 agent 反向写入 platform 表
+- **agent 运行时模块**（`runtime/`、`session/`、`im_gateway/`、`tools/`、`integrations/`、`model/`、`observability/`、`governance/`、`memory/`、`long_term_ctx/`、`reflection/`）和**独立组件 / 基础设施**（`knowledge_base/`、`vector_store/`、`structured_logging.py`）MUST NOT `import fleetent.platform.*`。`im_gateway/` 是 **no-platform-import edge face**；managed 下执行宿主=node、身份 resolver 注入方=node，但 normalizer/loop 仍留在 agent。
+- **KB 读写边界**：`knowledge_base.retrieval` MUST NOT import `knowledge_base.ingest`（护栏强制）
+- agent 运行时产生的数据（会话历史、压缩/token/恢复元数据、运行轨迹）只能落 agent 侧（session 文件、agent store、observability trace），**严禁写入 platform 管理表**；platform 需要时读 agent 侧产物，不要求反向写入
 - **验证基线**：任何改动后，agent 必须能在「无 platform、platform 的 DB 表不存在」环境下完成 `fleetent agent run` 对话
 
-> 现状（2026-06-11 审计后）：agent 运行时 + 独立组件对 platform 的反向 import **已彻底归零**。`user_store.authenticate` 经注入的 `_api_key_resolver` 解耦（platform 启动时 `set_api_key_resolver` 注入，standalone agent 留 None）。护栏 `tests/unit/test_module_dependency_guardrails.py` 的 `_KNOWN_TRANSITIVE_PLATFORM_LEAKS` 已清空（`= set()`）：任何新增的 agent→platform 传递泄漏都会 fail。不得新增同类反向依赖。
+> 解耦机制：`user_store.authenticate` 经注入的 `_api_key_resolver` 解耦（platform 启动 `set_api_key_resolver` 注入，standalone agent 留 None）。护栏 `tests/unit/test_module_dependency_guardrails.py` 的 `_KNOWN_TRANSITIVE_PLATFORM_LEAKS` 为空集——任何新增的 agent→platform 传递泄漏都会 fail。不得新增同类反向依赖。
 
 ### 异步资源生命周期（owner-task 契约）
 
-长生命周期异步资源（网络连接、SDK 会话、子进程流）**必须有唯一 owner task**：**谁打开谁关闭**——enter 和 exit 发生在同一个 task 内（anyio cancel scope / task group 的硬性要求）。跨 task 只传**句柄**（供消费），不传生命周期操作；**禁止用模块级全局单例持有活资源**（如模块级 `AsyncExitStack` 装连接）——它由"谁先用谁的 task"enter、却在关停时被另一个 task 解栈，必然违反 task 亲和性并在 teardown 时崩溃整个进程（2026-06-11 事故）。关停链上每一步必须**舱壁化**（独立 try/except + 超时），单组件收尾失败只记日志、不改变进程退出码、不波及其它组件；优雅排水路径必须 exit 0。
+长生命周期异步资源（网络连接、SDK 会话、子进程流）**必须有唯一 owner task**：**谁打开谁关闭**——enter 和 exit 在同一 task 内（anyio cancel scope / task group 硬性要求）。跨 task 只传**句柄**（供消费），不传生命周期操作。**禁止用模块级全局单例持有活资源**（如模块级 `AsyncExitStack` 装连接）：它由"谁先用"的 task enter、却在关停时被另一 task 解栈，必然违反 task 亲和性并在 teardown 崩溃整个进程。关停链每一步必须**舱壁化**（独立 try/except + 超时），单组件收尾失败只记日志、不改退出码、不波及其它组件；优雅排水路径必须 exit 0。
 
-> 范式实现：IM 连接 supervisor（managed 宿主=node；standalone 宿主=agent，每连接一个 owner task，`stop()` 定向取消）、MCP 会话宿主（`integrations/mcp/client.py` 的 `_SessionHost` + `aclose_all()`）。护栏 `test_module_dependency_guardrails.py::test_no_module_level_asyncexitstack_singleton` 强制「src 内零模块级 AsyncExitStack 单例」。函数内局部 `AsyncExitStack`（同 task、作用域内）不受限。
+> 范式实现：IM 连接 supervisor（每连接一个 owner task，`stop()` 定向取消）、MCP 会话宿主（`integrations/mcp/client.py` 的 `_SessionHost` + `aclose_all()`）。护栏 `test_no_module_level_asyncexitstack_singleton` 强制「src 内零模块级 AsyncExitStack 单例」；函数内局部 `AsyncExitStack`（同 task、作用域内）不受限。
 
 ---
 
@@ -120,11 +110,11 @@ src/fleetent/
 
 ## 数据与 Schema 生命周期
 
-**5 物理库 + 按主体物理分区已落地**（持久层 #3，详见 `docs/architecture/data-model.md`）：管理库（单库、跨主体）+ per-agent 运行库 + per-tenant 共享记忆库 / KB 关系库 + 向量底座，多主体时按 `<tenant>/<agent_id>/` 目录物理隔离。管理库真实文件为 `data/management.db`（存量部署的旧 `fleetent.db` 由 `scripts/upgrade.py` 在升级时重命名）。
+**4 物理库 + 按主体物理分区**（详见 `docs/architecture/data-model.md`）：管理库（单库、跨主体，真实文件 `data/management.db`）+ per-agent 运行库（state，含 `agent_memory_items`）+ per-tenant KB 关系库 + 向量底座，多主体时按 `<tenant>/<agent_id>/` 目录物理隔离。
 
 **双权威**：
 - **管理表**（users/api_keys/tenants/teams/scheduled_tasks 等，管理库）→ 仅由 **Alembic** 维护，不在 store 中 `_init_db()` 建表
-- **agent 侧表**（traces/memory_items/sessions/approvals/KB/reflection 等，per-agent / per-tenant 库）→ **嵌入式 forward-only 迁移（Y）已落地**：每物理文件一份有序 `MIGRATIONS=[(ver,sql)]` + `PRAGMA user_version` + migrate-on-open + 版本闸（`agent_state_migrations.py`、`knowledge_base/core/migrations.py`、`memory/shared_memory_migrations.py`），脱离 Alembic 单机自建
+- **agent 侧表**（traces/memory_items/sessions/approvals/KB/reflection 等，per-agent / per-tenant 库）→ **嵌入式 forward-only 迁移**：每物理文件一份有序 `MIGRATIONS=[(ver,sql)]` + `PRAGMA user_version` + migrate-on-open + 版本闸（`agent_state_migrations.py`、`knowledge_base/core/migrations.py`），脱离 Alembic 单机自建
 
 测试用 `tmp_path + monkeypatch` 隔离，绝不触碰 `data/`。
 
@@ -136,10 +126,8 @@ src/fleetent/
 uv sync                                                     # 安装依赖
 make test-pr                                                # PR 门禁（unit + 层边界 + 改动文件 ruff，必须全绿）
 uv run pytest <file>::<test> -x -q                          # TDD 红/绿每一步（最窄命令）
-uv run pytest tests/unit -q                                 # 单元测试
-uv run pytest tests/integration -q                         # 集成测试（收尾对照 main 基线）
-make test-unit                                              # 同上（make 快捷）
-make test-integration                                       # 同上（make 快捷）
+make test-unit                                              # 单元测试（= uv run pytest tests/unit -q）
+make test-integration                                       # 集成测试（收尾对照 main 基线）
 uv run pytest tests/e2e                                     # 端到端测试
 uv run pytest tests/evaluation                              # 效果评估测试
 uv run python scripts/check_test_layers.py                  # 检查 unit/integration 层边界（已含在 make test-pr）
@@ -148,9 +136,9 @@ uv run ruff format src tests                                # 格式化
 uv run ruff check src tests                                 # lint
 uv run mypy src                                             # 类型检查
 uv run fleetent "hello"                                     # CLI agent
-POST /admin/service-principals  # body: {"name": "Alice"}            # 用户管理
-uvicorn fleetent.server:app --reload --port 8765            # HTTP 服务（默认端口 8765）
+uvicorn fleetent.server:app --reload --port 8765           # HTTP 服务（默认端口 8765）
 uv run fleetent chat --token ma-<key>                      # 交互式终端 TUI
+POST /admin/service-principals  body: {"name": "Alice"}    # 用户管理
 ```
 
 ---
@@ -187,9 +175,9 @@ uv run fleetent chat --token ma-<key>                      # 交互式终端 TUI
 | e2e | `tests/e2e/` | 完整链路；默认不进 PR 门禁 |
 | evaluation | `tests/evaluation/` | 效果评估；不得接入真实 LLM |
 
-`tmp_path` 只用于纯解析/配置/序列化；一旦用于真实 DB/schema/CRUD，测试必须放 integration。历史平铺测试已迁移；不得继续向 `tests/` 根目录新增 `test_*.py`。
+`tmp_path` 只用于纯解析/配置/序列化；一旦用于真实 DB/schema/CRUD，测试必须放 integration。不得继续向 `tests/` 根目录新增 `test_*.py`。
 
-unit 不得涉及真实 DB file、schema、CRUD 或 store/runtime 协作：禁止使用 FastAPI `TestClient` / app lifespan、运行 Alembic migration、导入 `tests.integration.*` helper、验证真实 SQLite schema lifecycle / DB runtime orchestration、导入 `sqlite3` 后创建真实 DB file、调用生产 `_init_db()`、用 `DATABASE_URL=sqlite:///...` 指向持久路径。unit 只可覆盖：只读 legacy shim / public API / path constant 级别的代码逻辑。
+unit 禁止涉及真实 DB file、schema、CRUD 或 store/runtime 协作：禁用 FastAPI `TestClient` / app lifespan、跑 Alembic migration、导入 `tests.integration.*` helper、验证真实 SQLite schema lifecycle / DB runtime orchestration、`import sqlite3` 后建真实 DB file、调用生产 `_init_db()`、用 `DATABASE_URL=sqlite:///...` 指向持久路径。unit 只可覆盖只读 legacy shim / public API / path constant 级逻辑。
 
 ### 何时跑什么
 
@@ -199,9 +187,9 @@ unit 不得涉及真实 DB file、schema、CRUD 或 store/runtime 协作：禁�
 | 单 task 收尾 | 受影响层（unit 或 integration） | 该层无新增失败 |
 | change / PR 收尾 | `make test-pr` + `uv run pytest tests/integration -q`（不带 `-x`，对照 main 基线） | test-pr 全绿；integration 无新增失败 |
 
-覆盖门禁口径：push 路径仅看 unit，`make test-unit-ci` 的 `coverage report --fail-under=76`；每日定时路径看合并覆盖，`make test-coverage-ci` 的 `coverage report --fail-under=88`。
+覆盖门禁：push 路径仅看 unit（`make test-unit-ci`，`--fail-under=76`）；每日定时路径看合并覆盖（`make test-coverage-ci`，`--fail-under=88`）。
 
-**门禁判据是「无新增失败」，不是零失败**：当前（2026-06）约有 2 unit + 19 integration 预先存在失败（`permission_gate` / agent-access 重构遗留，owner 非测试改动者）；其中 2 个 unit（`test_loop_permission_gate.py`，flaky）已在 `make test-pr` 用 `--deselect` quarantine。`make test-pr` 的 ruff 只扫本分支 changed-vs-main 的 `.py`——你只对自己改过的文件负责。
+**门禁判据是「无新增失败」，不是零失败**：存在一批预先存在的失败（`permission_gate` / agent-access 重构遗留，owner 非测试改动者），其中 flaky 的 `test_loop_permission_gate.py` 已在 `make test-pr` 用 `--deselect` quarantine。`make test-pr` 的 ruff 只扫本分支 changed-vs-main 的 `.py`——你只对自己改过的文件负责。
 
 ### Mock 策略
 
@@ -232,17 +220,20 @@ FLEETENT_TOKEN         # Bearer token（--token 参数优先）
 
 ## Gotchas
 
-- **工具注册**：`tools/builtin_tools.py` 通过 import 副作用注册工具；`tools/__init__.py` 顶部 `from fleetent.tools import builtin_tools` 承载此副作用，`runtime/loop.py` 顶部 `import fleetent.tools` 触发注册，否则 `get_schemas()` 返回空
-- **Skill 扫描**：`skills/registry.scan()` 在服务启动时运行（FastAPI lifespan）；CLI `run()` 每次调用时扫描
-- **Context identity check**：`runtime/context.py` 的 `_keep_tail()` 使用 identity check（`m is tail[0]`），不用 `==`；patch/monkeypatch 目标须指 `fleetent.runtime.context`，patch 旧 shim `fleetent.context_mgr` 不生效
+> 多数条目对应 `docs/architecture/*.md` 权威设计文档，这里只记触发陷阱的关键点。
+
+- **工具注册**：`tools/builtin_tools.py` 经 import 副作用注册工具；`tools/__init__.py` 顶部 `from fleetent.tools import builtin_tools` 承载此副作用，`runtime/loop.py` 顶部 `import fleetent.tools` 触发注册，否则 `get_schemas()` 返回空
+- **Skill 扫描**：`skills/registry.scan()` 服务启动时跑（FastAPI lifespan）；CLI `run()` 每次调用时扫描
+- **Context identity check**：`runtime/context.py` 的 `_keep_tail()` 用 identity check（`m is tail[0]`），不用 `==`；patch 目标须指 `fleetent.runtime.context`，patch 旧 shim `fleetent.context_mgr` 不生效
 - **Runtime shim**：旧扁平路径（`agent_loop`/`context_mgr`/`agent_runtime`/`sub_agent`/`cancellation` 等 13 个）仅留 re-export shim；`monkeypatch.setattr` 须指真实子模块（如 `fleetent.runtime.loop`），patch shim 不生效
 - **Session 原子写**：`session/manager.py` 写 `.json.tmp → rename`；测试中 monkeypatch `session_mgr.SESSIONS_DIR`
 - **路径常量**：`DB_PATH`/`SESSIONS_DIR` 等在 import 时从 `paths.py` 求值一次；测试整体重定向用 `monkeypatch.setenv("FLEETENT_HOME", tmp_path)` + `importlib.reload()`，或 `monkeypatch.setattr(module, "<CONST>", ...)`
 - **Bearer token 格式**：`Authorization: Bearer ma-<64hex>`（`ma-` 前缀区分服务 key 与模型 API key）
 - **MCP 工具名**：`{server_id}__{tool_name}`（双下划线）
-- **统一文件交换区 `/exchange`**（`artifact_exchange.py`）：MCP server 产物经 `/exchange/<server_id>/<rel>` 第二逻辑根寻址（与 `/workspace` 并列）。**归属轴 = workspace scope key（D0）**：`scope_key = workspace_scope_key(scope, session_id, agent_name)`（SESSION→session_id / AGENT→agent_name，与 `/workspace` 同源），`tenant_id`/`user_id` 不是文件隔离 key（前者 platform 概念、后者仅 memory/审批）。台账 `artifacts` 表 `scope_key` 列=访问/可见性，`session_id`/`user_id` 列=审计。发现两层：stdio 启动注入约定 cwd+XDG（`_stdio_params`）→ 咽喉 `_call_via_session` 结果路径确定性改写+登记（`rewrite_and_register`）→ 调用窗口 diff 兜底（`diff_register` + per-server `_call_window_lock`）。归属校验在 `resolve(path, scope_key, approved)` 一处：本 scope 放行 / 跨 scope 拒绝（唯一豁免=已过 permission gate 的 `approved`）。消费：`.views/<scope_key>/` 硬链接视图 ro 挂载为容器 `/exchange`（`exchange_mount` 能力，Docker=True；无能力后端走 `stage_file` staging 降级）。`send_file` callable risk（DM∧本scope∧交互→low，否则 medium 升级审批）；`send_im_message` 加 `files`（恒 medium，批准即跨 scope 授权）。`set_state_db`+`set_views_root` 在 `agent_app._init_agent_db_schema` 接线，未接线则台账休眠（register 抛 RuntimeError 被 best-effort 吞）
-- **MCP 会话宿主**：每个 MCP 会话由 `_SessionHost`（`integrations/mcp/client.py`）的专属 task 持有，transport/ClientSession 的 enter/exit 同 task；`_active_sessions[(scope,id)]` 仍存 live `ClientSession` 供消费，`_session_hosts` 存宿主管生命周期。关停经 `aclose_all()`（接入 `agent_app._drain_and_close` 排干之后、`server.py` lifespan shutdown）。测试用 stub `_transport_cm` + `ClientSession`；**anyio 硬约束：cancel scope 必须同 task enter/exit**，不得用模块级 `AsyncExitStack` 持有连接（护栏强制）
 - **model/resolver.py**：每次调用新建 client——故意的，client 无状态且廉价
-- **Sandbox 可插拔后端**：`integrations/sandbox` 抽象为 `BaseSandboxBackend`（`backend.py`）+ `backends/docker.py`（默认）+ `backends/microsandbox.py`（本地 microVM，Apache-2.0，需宿主 KVM/HVF + 预装 runtime，否则 `is_installed()` 探测失败 → mode 降级 OFF）。后端经 `factory.create_backend` 按 `sandbox.backend`（agent.yaml > platform.yaml > 默认 docker）选型。能力差异经 `BackendCapabilities`（`persist_workspace`/`workspace_mount`/`orphan_cleanup`）门控，manager/cleanup 按能力降级、不用 isinstance。`client.py` 是 `SandboxClient = DockerBackend` 的 re-export shim——`monkeypatch`/`patch` Docker 内部（如 `_KILL_GRACE_SECONDS`、`_logger`）须打在 `backends.docker`，打 shim 不生效
-- **Directed-reach 主动触达**：`outbound_connectors.notify_user(user_id, message, blocks=...)` 按内部 user_id 主动 DM 用户（不在对话里也能触达）。**agent 只发意图、不解析地址**：managed 下入队一条 `target_type="user_id"` 意图到 `im_outbound_queue`（platform=`directed`），node drain 经 `PlatformAddressResolver` 调平台 `POST /nodes/{id}/identity/addresses` 反查 `im_users` → 全发该用户所有绑定渠道（fan-out）；无绑定→不投递只记日志。非 node-managed（dev `agent run`）= no-op。设计权威 `docs/architecture/directed-reach.md`。首消费者=reflection user-memory 提案送本人审批。回复复用既有审批链（入站 resolver + `approve <id>`）
-- **KB connector 定时调度**：`platform/knowledge_base_management/kb_connector_sweep.py` 的 `sweep()` 由 platform `cron_scheduler` 定时跑（server.py lifespan 经 `add_interval_job` 注册、id `__kb_connector_sync_sweep__`），扫 `kb_connectors` 中 `enabled` 且配了 `sync_interval_seconds`、按 `last_scheduled_sync_at` 到期者 → `enqueue_connector_job` 入既有队列（去重=入队即推进 `last_scheduled_sync_at`），worker drain 跑 `run_connector_sync`；多行历史落 `knowledge_connector_sync_history`（KB core 嵌入式-Y）。kb_connectors schedule 字段在管理库（Alembic 101）
+- **统一文件交换区 `/exchange`**（`artifact_exchange.py`）：MCP server 产物经 `/exchange/<server_id>/<rel>` 寻址（与 `/workspace` 并列）。**隔离轴 = workspace scope key**（`scope_key = workspace_scope_key(...)`，SESSION→session_id / AGENT→agent_name），`tenant_id`/`user_id` **不是**文件隔离 key（仅审计）。归属校验集中在 `resolve(path, scope_key, approved)`：本 scope 放行 / 跨 scope 拒绝（唯一豁免=已过 permission gate 的 `approved`）。**接线陷阱**：`set_state_db`+`set_views_root` 在 `agent_app._init_agent_db_schema` 接线，未接线则台账休眠（register 抛 RuntimeError 被 best-effort 吞）。
+- **MCP 会话宿主**：每个会话由 `_SessionHost`（`integrations/mcp/client.py`）专属 task 持有，transport/ClientSession 的 enter/exit 同 task（见上「owner-task 契约」）；`_active_sessions` 存 live `ClientSession` 供消费，`_session_hosts` 管生命周期，关停经 `aclose_all()`。测试用 stub `_transport_cm` + `ClientSession`。
+- **Sandbox 可插拔后端**：`integrations/sandbox` = `BaseSandboxBackend` + `backends/docker.py`（默认）+ `backends/microsandbox.py`（需宿主 KVM/HVF + 预装 runtime，否则探测失败降级 OFF），经 `factory.create_backend` 按 `sandbox.backend` 选型，能力差异经 `BackendCapabilities` 门控（不用 isinstance）。`client.py` 是 `SandboxClient = DockerBackend` 的 shim——`monkeypatch` Docker 内部（如 `_KILL_GRACE_SECONDS`）须打在 `backends.docker`，打 shim 不生效。
+- **Directed-reach 主动触达**（权威 `docs/architecture/directed-reach.md`）：`outbound_connectors.notify_user(user_id, ...)` 按内部 user_id 主动 DM。**agent 只发意图、不解析地址**：managed 下入队 `target_type="user_id"` 意图到 `im_outbound_queue`，node drain 经 `PlatformAddressResolver` 反查 `im_users` → fan-out 该用户所有绑定渠道（无绑定→只记日志）。非 node-managed（dev `agent run`）= no-op。
+- **platform→node 转发寻址**：platform 拨 node forwarder（`platform/node_management/agent_transport.py`）的目标 host 优先级 = **`nodes.forward_host`（node 上报）→ `FLEETENT_FORWARDER_HOST_OVERRIDE`（platform env）→ `{node_id}.internal`（约定兜底，依赖外部 DNS）**；端口/协议（8786 / http+ws）不变。node 经**可选** env `FLEETENT_NODE_ADVERTISE_HOST` 在 status 心跳的 `forward_host` 上报本机可达地址（未设则不上报、回落兜底），platform 经 `node_store.set_forward_host`/`get_forward_host` 持久化于管理库 `nodes` 列。寻址读 platform 自有 `node_store`，**不让 `node/` 引入 DB**；`forwarder_contract.py` 纯函数保留作兜底。寻址优先级覆盖逻辑只在 `agent_transport`，unit/integration 测它时须 mock `node_store.get_forward_host`（否则撞真实管理库 `nodes` 表）。
+- **KB connector 定时调度**：`platform/knowledge_base_management/kb_connector_sweep.py` 的 `sweep()` 由 platform `cron_scheduler` 定时跑（server.py lifespan 注册，id `__kb_connector_sync_sweep__`），扫 `kb_connectors` 中 enabled 且配了 `sync_interval_seconds`、到期者入既有队列（去重=入队即推进 `last_scheduled_sync_at`），worker drain 跑 `run_connector_sync`。schedule 字段在管理库（Alembic 101）。

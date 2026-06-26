@@ -15,7 +15,9 @@ from fleetent.db import SQLiteDatabase, create_database
 from fleetent.platform.agent_lifecycle import secret_store
 from fleetent.user_store import _hash_key
 
-_COLS = "id, name, key_hash, labels, registered_at, last_seen_at, created_at, updated_at"
+_COLS = (
+    "id, name, key_hash, labels, registered_at, last_seen_at, created_at, updated_at, forward_host"
+)
 _STATUS_COLS = "agent_id, node_id, phase, pid, health, detail, reported_at"
 _NODE_KEY_CACHE: dict[str, str] = {}
 _logger = logging.getLogger(__name__)
@@ -158,6 +160,32 @@ def touch_last_seen(node_id: str) -> None:
         """,
         {"id": node_id, "last_seen_at": now, "updated_at": now},
     )
+
+
+def set_forward_host(node_id: str, forward_host: str) -> None:
+    """Persist the node-reported address platform dials to reach its forwarder.
+
+    Updates an existing node only; an UPDATE that matches no row is a no-op (never
+    inserts a node that was never registered).
+    """
+    now = _now()
+    _database().execute(
+        """
+        UPDATE nodes
+        SET forward_host = :forward_host, updated_at = :updated_at
+        WHERE id = :id
+        """,
+        {"id": node_id, "forward_host": forward_host, "updated_at": now},
+    )
+
+
+def get_forward_host(node_id: str) -> str | None:
+    row = (
+        _database()
+        .execute("SELECT forward_host FROM nodes WHERE id = :id", {"id": node_id})
+        .fetchone()
+    )
+    return str(row["forward_host"]) if row and row["forward_host"] is not None else None
 
 
 def upsert_agent_status(

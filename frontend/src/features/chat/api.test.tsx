@@ -108,7 +108,7 @@ describe('chat api hooks', () => {
   });
 
   it('loads agents and streams SSE deltas with authorization headers', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
 
     server.use(
       http.get(`${API_BASE_URL}/admin/agents`, () =>
@@ -150,7 +150,7 @@ describe('chat api hooks', () => {
   });
 
   it('maps 404 and 503 ingress errors to clear user-facing messages', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
 
     server.use(
       http.get(`${API_BASE_URL}/admin/agents`, () =>
@@ -160,10 +160,79 @@ describe('chat api hooks', () => {
         ])
       ),
       http.post(`${API_BASE_URL}/admin/agents/ghost/chat`, () =>
-        HttpResponse.json({ error: 'not found' }, { status: 404 })
+        HttpResponse.json({ detail: 'agent ghost not found' }, { status: 404 })
       ),
       http.post(`${API_BASE_URL}/admin/agents/orphan/chat`, () =>
-        HttpResponse.json({ error: 'no placement' }, { status: 503 })
+        HttpResponse.json({ detail: 'no node placement for agent orphan' }, { status: 503 })
+      )
+    );
+
+    renderWithProviders(<ChatApiProbe />);
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-names')).toHaveTextContent('ghost|orphan');
+    });
+
+    await user.click(screen.getByRole('button', { name: 'send ghost' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('error')).toHaveTextContent(
+        'Agent "ghost": agent ghost not found'
+      );
+    });
+
+    await user.click(screen.getByRole('button', { name: 'send orphan' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('error')).toHaveTextContent(
+        'Agent "orphan": no node placement for agent orphan'
+      );
+    });
+  });
+
+  it('surfaces ingress error detail from 503 responses', async () => {
+    const user = userEvent.setup({ delay: null });
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/agents`, () =>
+        HttpResponse.json([{ agent_name: 'orphan', provenance: 'adhoc', status: 'enabled' }])
+      ),
+      http.post(`${API_BASE_URL}/admin/agents/orphan/chat`, () =>
+        HttpResponse.json(
+          { detail: "node 'local-node' service key unavailable" },
+          { status: 503 }
+        )
+      )
+    );
+
+    renderWithProviders(<ChatApiProbe />);
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-names')).toHaveTextContent('orphan');
+    });
+
+    await user.click(screen.getByRole('button', { name: 'send orphan' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('error')).toHaveTextContent(
+        `Agent "orphan": node 'local-node' service key unavailable`
+      );
+    });
+    expect(screen.getByTestId('error')).not.toHaveTextContent('no active placement');
+  });
+
+  it('falls back to neutral messages when ingress error detail is unavailable', async () => {
+    const user = userEvent.setup({ delay: null });
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/agents`, () =>
+        HttpResponse.json([
+          { agent_name: 'ghost', provenance: 'adhoc', status: 'disabled' },
+          { agent_name: 'orphan', provenance: 'adhoc', status: 'enabled' },
+        ])
+      ),
+      http.post(
+        `${API_BASE_URL}/admin/agents/ghost/chat`,
+        () => new Response(null, { status: 404 })
+      ),
+      http.post(
+        `${API_BASE_URL}/admin/agents/orphan/chat`,
+        () => new Response('upstream unavailable', { status: 503 })
       )
     );
 
@@ -180,13 +249,15 @@ describe('chat api hooks', () => {
     await user.click(screen.getByRole('button', { name: 'send orphan' }));
     await waitFor(() => {
       expect(screen.getByTestId('error')).toHaveTextContent(
-        'Agent "orphan" is unavailable because it has no active placement.'
+        'Agent "orphan" is currently unavailable.'
       );
     });
+    expect(screen.getByTestId('error')).not.toHaveTextContent('no node placement');
+    expect(screen.getByTestId('error')).not.toHaveTextContent('no active placement');
   });
 
   it('surfaces stream error events as assistant-visible failures', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
 
     server.use(
       http.get(`${API_BASE_URL}/admin/agents`, () =>
@@ -214,7 +285,7 @@ describe('chat api hooks', () => {
   });
 
   it('aborts active streams without appending later chunks', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const encoder = new TextEncoder();
     let releaseSecondChunk: (() => void) | null = null;
 

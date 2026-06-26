@@ -37,7 +37,7 @@
 
 | change | 状态 | 内容 | 前置/触发 |
 | --- | --- | --- | --- |
-| `substrate-backend-abstraction`(B1) | ✅ landed (`2ff2a1b9`) | db.py 开库边界做可插拔后端抽象(`BaseSubstrateBackend` + `SubstrateCapabilities` + `create_substrate` 按 URL scheme 选);本地 SQLite=默认实现、行为零变化;agent 侧三关系库(agent_state/shared_memory/kb)经工厂开库(tenant_router 收口);管理库未纳入(随 B2) | — |
+| `substrate-backend-abstraction`(B1) | ✅ landed (`2ff2a1b9`) | db.py 开库边界做可插拔后端抽象(`BaseSubstrateBackend` + `SubstrateCapabilities` + `create_substrate` 按 URL scheme 选);本地 SQLite=默认实现、行为零变化;agent 侧关系库(agent_state〔含 agent memory〕/kb)经工厂开库(tenant_router 收口);管理库未纳入(随 B2) | — |
 | `network-substrate-backend`(B2) | blocked 占位 | 在 B1 抽象下加 Postgres/Qdrant 网络后端 + `connector-cred-job-ref`(运行时按 ref 从 Vault 解析);postgres scheme 现在工厂里是 "not supported yet",B2 把它换成真实现 | 部署真走分布式 + 有网络DB/多机环境可端到端验证 |
 
 > 由旧的合并占位 `agent-data-substrate-pluggable` 拆来(B1 转真已落地、B2 留占位);更早的 `knowledge-base-standalone-service` 占位已移除(本轮把"KB 升格独立服务"重构成"可插拔底座 + kb-worker",不需 bespoke KB 服务)。

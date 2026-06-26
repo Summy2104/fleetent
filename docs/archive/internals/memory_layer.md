@@ -1,3 +1,5 @@
+> **[历史记录]** 本文档为过程产物，描述的是早期 JSONL 格式的 memory 实现，已被 SQLite `memory_items` + `agent_memory_items` 架构取代。内容以落地代码和当前架构文档为准。
+
 # memory_layer.py
 
 ## 注入侧流程

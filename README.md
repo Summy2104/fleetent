@@ -27,10 +27,9 @@ scripts/install.sh                 # 或 --agent-only / --platform-only / --dir 
 # 然后按下一节用 `fleetent agent init <agent-id>` 创建并运行 agent
 ```
 
-> 仓库示例模板贴近运行位置：Platform 使用根目录 `.env.example` 和
-> `platform.yaml.example`；Agent 模板为 `agents/default/agent.yaml.example` 和
-> `agents/default/.env.example`，`fleetent agent init <id>` 据此 scaffold 到
-> `agents/<id>/agent.yaml` + `.env`。
+> 仓库示例模板统一放在根目录：Platform 用 `.env.example` 和 `platform.yaml.example`；
+> Agent 模板为 `agent.yaml.example` 和 `agent.env.example`，`fleetent agent init <id>`
+> 据此 scaffold 到 `<FLEETENT_HOME>/tenants/default/agents/<id>/agent.yaml` + `.env`。
 
 > 这是面向开发者 / 单机快速体验的路径。**on-prem 生产部署请用 Docker**
 > （`Dockerfile` + `docker-compose.yml`），环境可复现、数据不出内网。
@@ -40,8 +39,8 @@ scripts/install.sh                 # 或 --agent-only / --platform-only / --dir 
 `fleetent agent init` 从内置模板 scaffold 出一个可独立运行的 agent home：
 
 ```bash
-fleetent agent init my-bot              # 生成 ~/.fleetent/agents/my-bot/{agent.yaml,.env}
-$EDITOR ~/.fleetent/agents/my-bot/agent.yaml ~/.fleetent/agents/my-bot/.env
+fleetent agent init my-bot              # 生成 ~/.fleetent/tenants/default/agents/my-bot/{agent.yaml,.env}
+$EDITOR ~/.fleetent/tenants/default/agents/my-bot/agent.yaml ~/.fleetent/tenants/default/agents/my-bot/.env
 fleetent agent run my-bot --port 8766   # 把该 agent 当独立服务跑（loop + IM + sandbox）
 ```
 
@@ -56,8 +55,8 @@ fleetent agent run my-bot --port 8766   # 把该 agent 当独立服务跑（loop
 git clone <repo-url>
 cd fleetent
 uv sync
-fleetent agent init my-bot --home .fleetent-dev/agents/my-bot
-$EDITOR .fleetent-dev/agents/my-bot/agent.yaml .fleetent-dev/agents/my-bot/.env
+fleetent agent init my-bot --home .fleetent-dev/tenants/default/agents/my-bot
+$EDITOR .fleetent-dev/tenants/default/agents/my-bot/agent.yaml .fleetent-dev/tenants/default/agents/my-bot/.env
 ```
 
 运行一次 CLI 请求：
@@ -131,7 +130,7 @@ observability traces, usage, diagnostics, session persistence
 
 ## 配置
 
-部署后的 Agent runtime 从自己的 `agents/<agent-id>/agent.yaml` 和 `.env` 读取配置。真实 secret 不写入 YAML；配置文件只保存
+部署后的 Agent runtime 从自己的 `tenants/<tenant-id>/agents/<agent-id>/agent.yaml` 和 `.env` 读取配置（默认租户为 `default`）。真实 secret 不写入 YAML；配置文件只保存
 `api_key_env`、`*_env` 这类环境变量名引用。
 
 常规 LLM 路径需要：
@@ -203,7 +202,7 @@ def search_database(query: str, limit: int = 10) -> str:
     ...
 ```
 
-MCP-compatible 工具服务可以写入 `agents/<agent-id>/agent.yaml` 的 `mcp_servers`：
+MCP-compatible 工具服务可以写入 `tenants/<tenant-id>/agents/<agent-id>/agent.yaml` 的 `mcp_servers`：
 
 ```yaml
 mcp_servers:

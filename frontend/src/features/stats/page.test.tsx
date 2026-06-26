@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AuthProvider } from '@/app/auth';
 import { StatsPage } from '@/features/stats/page';
+import { I18nProvider } from '@/i18n';
 import { server } from '@/test/msw/server';
 
 const API_BASE_URL = 'http://fleetent.test';
@@ -20,15 +21,26 @@ function renderStatsPage(): void {
   });
 
   render(
-    <AuthProvider
-      baseUrl={API_BASE_URL}
-      initialToken="session-token"
-    >
-      <QueryClientProvider client={queryClient}>
-        <StatsPage />
-      </QueryClientProvider>
-    </AuthProvider>
+    <I18nProvider>
+      <AuthProvider
+        baseUrl={API_BASE_URL}
+        initialToken="session-token"
+      >
+        <QueryClientProvider client={queryClient}>
+          <StatsPage />
+        </QueryClientProvider>
+      </AuthProvider>
+    </I18nProvider>
   );
+}
+
+/** Resolve a Card by its accessible aria-label (Card renders a plain div). */
+function cardByLabel(label: string): HTMLElement {
+  const node = document.querySelector(`[aria-label="${label}"]`);
+  if (!(node instanceof HTMLElement)) {
+    throw new Error(`No element with aria-label "${label}"`);
+  }
+  return node;
 }
 
 afterEach(() => {
@@ -37,7 +49,7 @@ afterEach(() => {
 
 describe('stats page', () => {
   it('renders per-user, overview, compare, request detail, session trace, and export flows', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const nativeCreateObjectUrl =
       typeof URL.createObjectURL === 'function'
         ? (blob: Blob | MediaSource) => URL.createObjectURL(blob)
@@ -141,32 +153,51 @@ describe('stats page', () => {
     renderStatsPage();
 
     expect(await screen.findByRole('heading', { name: 'Statistics' })).toBeInTheDocument();
+
+    // The dashboard mounts only after picking an agent (auto-filled to the first)
+    // and pressing Load. The Load button stays disabled until the agents query
+    // resolves and the auto-fill effect sets the picked agent, so wait for it to
+    // become enabled before clicking — otherwise the click lands on a disabled
+    // button and is silently dropped.
+    const loadButton = await screen.findByRole('button', { name: 'Load' });
+    await waitFor(() => expect(loadButton).toBeEnabled());
+    await user.click(loadButton);
+
     await waitFor(() => {
       expect(screen.getByText('u1')).toBeInTheDocument();
+      // calls: 12 appears in both overview usage and the per-user row.
       expect(screen.getAllByText('calls: 12').length).toBeGreaterThan(0);
       expect(screen.getByText('p95_ms: 750')).toBeInTheDocument();
-      expect(screen.getByText('alpha: 12')).toBeInTheDocument();
-      expect(screen.getByText('read_file (8)')).toBeInTheDocument();
+      expect(screen.getByText('read_file')).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole('button', { name: 'View requests for u1' }));
+    // Compare table renders agent id and value in separate cells.
+    const compareSection = within(cardByLabel('Agent comparison'));
+    expect(compareSection.getByText('alpha')).toBeInTheDocument();
+    expect(compareSection.getByText('12')).toBeInTheDocument();
+    expect(compareSection.getByText('beta')).toBeInTheDocument();
+    expect(compareSection.getByText('9')).toBeInTheDocument();
+
+    // Inspect u1's request history. Each per-user row has its own "View requests".
+    const u1Row = screen.getByText('u1').closest('div.rounded-lg') as HTMLElement;
+    await user.click(within(u1Row).getByRole('button', { name: 'View requests' }));
     expect(await screen.findByText('req-1')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Open request req-1' }));
+    const req1Row = screen.getByText('req-1').closest('div.rounded-lg') as HTMLElement;
+    await user.click(within(req1Row).getByRole('button', { name: 'Open request' }));
     expect(await screen.findByText('hello')).toBeInTheDocument();
     expect(screen.getByText('ack')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Open session trace sess-1' }));
-    expect(await screen.findByText('read_file')).toBeInTheDocument();
+    await user.click(within(req1Row).getByRole('button', { name: 'Open session trace' }));
+    const sessionTraceCard = within(cardByLabel('Session trace'));
+    expect(await sessionTraceCard.findByText('read_file')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Export current view' }));
+    // Export per-user CSV triggers a blob download.
+    await user.click(screen.getByRole('button', { name: 'Export per-user CSV' }));
     await waitFor(() => {
       expect(createObjectUrl).toHaveBeenCalledTimes(1);
       expect(clickSpy).toHaveBeenCalledTimes(1);
       expect(revokeObjectUrl).toHaveBeenCalledTimes(1);
     });
-
-    const compareSection = within(screen.getByRole('region', { name: 'Agent comparison' }));
-    expect(compareSection.getByText('beta: 9')).toBeInTheDocument();
   });
 });

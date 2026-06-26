@@ -1,3 +1,5 @@
+> **[历史记录]** 本文档为一次性自动执行日志，已由对应 wave 的 decision log 汇总。仅供历史溯源参考。
+
 # 自主执行决策日志 — 2026-06-10
 
 > 用户授权全程无人值守执行两个 OpenSpec change（apply → archive → push → PR → merge to main），问题与决策点记录于此供最后审核。

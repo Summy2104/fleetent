@@ -99,6 +99,26 @@ def nominate(
     return int(row["id"])
 
 
+def nominate_if_absent(*, agent_id: int, skill_name: str, pool_dir: Path) -> int | None:
+    """Nominate a drifted skill for backflow unless a pending proposal already exists.
+
+    Dedup is checked first so the (potentially remote) bundle capture in ``nominate``
+    is skipped when a pending proposal is already on file.
+
+    Args:
+        agent_id: The agent whose drifted home copy is being nominated.
+        skill_name: The skill to nominate for backflow.
+        pool_dir: The shared pool directory (used to detect conflict at nomination time).
+
+    Returns:
+        The new proposal row id, or None if a pending proposal already exists.
+    """
+    existing = list_proposals(agent_id=agent_id, skill_name=skill_name, status="pending")
+    if existing:
+        return None
+    return nominate(agent_id=agent_id, skill_name=skill_name, pool_dir=pool_dir)
+
+
 def _detect_conflict(pool_dir: Path, skill_name: str, base_version: str | None) -> bool:
     """Return True if the pool skill has changed since base_version was captured."""
     if base_version is None:
