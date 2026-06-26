@@ -148,7 +148,12 @@ def _migrate_subject(
             created_at=now,
             updated_at=now,
             source_turn=source_turn,
-            statement=old.statement,
+            # The statement hard-codes the old name ("张三在 Northstar 工作"); rewrite
+            # it to the new name so injection (which prefers statement) doesn't keep
+            # showing the renamed-away identity.
+            statement=(
+                old.statement.replace(old_subject, new_subject) if old.statement else None
+            ),
         )
         _insert_fact_in_tx(conn, migrated)
 

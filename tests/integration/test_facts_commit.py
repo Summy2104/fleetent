@@ -407,3 +407,33 @@ def test_single_relation_same_value_still_skips(tmp_path: Path) -> None:
     active = facts_store.active_facts_for_relation("u1", "agent", "name")
     assert {f.object for f in active} == {"Fleetent"}
     assert facts_store.get_fact("old").status == "active"
+
+
+def test_rename_rewrites_statement_subject(tmp_path: Path) -> None:
+    from fleetent.memory import facts_commit
+    from fleetent.memory.facts_models import Fact
+
+    db = _open_db(tmp_path)
+    facts_store.set_facts_db(db, None)  # type: ignore[arg-type]
+    now = _now()
+    # 张三 fact whose statement hard-codes the old name.
+    facts_store.insert_fact(
+        Fact(
+            fact_id="zs", user_id="u1", subject="张三", relation="works_at",
+            object="Northstar", cardinality="single", status="active", access_count=0,
+            first_accessed_at=None, last_accessed_at=None, expires_at=None,
+            valid_until=None, created_at=now, updated_at=now, source_turn=None,
+            statement="张三在 Northstar 工作",
+        )
+    )
+    rename = ClassifiedFact(
+        subject="张三", relation="renamed_to", object="张洋", temporal="none",
+        cardinality="single", verdict="Orthogonal", statement="张三改名张洋",
+    )
+    facts_commit.commit_facts("u1", [rename], db, source_turn="t1")
+
+    migrated = facts_store.active_facts_for_relation("u1", "张洋", "works_at")
+    assert len(migrated) == 1
+    # statement must now say 张洋, not the stale 张三
+    assert "张洋" in (migrated[0].statement or "")
+    assert "张三" not in (migrated[0].statement or "")
