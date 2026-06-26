@@ -98,6 +98,10 @@ def test_admin_chat_ingress_reaches_node_forwarder_and_agent(
         lambda node_id: "http://node-a.internal:8786",
     )
     monkeypatch.setattr(
+        "fleetent.platform.node_management.agent_transport.node_store.get_forward_host",
+        lambda node_id: None,
+    )
+    monkeypatch.setattr(
         "fleetent.platform.node_management.agent_transport.node_store.get_node_service_key",
         lambda node_id: "ma-node-key",
     )
@@ -249,6 +253,10 @@ async def test_direct_http_transport_chat_streams_complete_body_over_real_socket
         monkeypatch.setattr(
             "fleetent.platform.node_management.agent_transport.forwarder_base_url",
             lambda node_id: f"http://127.0.0.1:{forwarder_port}",
+        )
+        monkeypatch.setattr(
+            "fleetent.platform.node_management.agent_transport.node_store.get_forward_host",
+            lambda node_id: None,
         )
         monkeypatch.setattr(
             "fleetent.platform.node_management.agent_transport.node_store.get_node_service_key",

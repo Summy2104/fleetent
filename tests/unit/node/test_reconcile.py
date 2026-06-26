@@ -729,3 +729,34 @@ def test_reconcile_posts_observed_skill_statuses(tmp_path, monkeypatch) -> None:
             }
         ]
     }
+
+
+@respx.mock
+def test_reconcile_status_includes_forward_host_when_advertised(tmp_path) -> None:
+    import dataclasses
+
+    from fleetent.node.reconcile import NodeReconciler
+
+    status_route = respx.post("https://platform.internal/nodes/node-a/status").mock(
+        return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 0})
+    )
+    config = dataclasses.replace(_config(tmp_path), advertise_host="10.38.8.143")
+
+    NodeReconciler(config, FakeBackend({})).reconcile(DesiredState(node_id="node-a", agents=[]))
+
+    assert _post_body(status_route)["forward_host"] == "10.38.8.143"
+
+
+@respx.mock
+def test_reconcile_status_omits_forward_host_when_not_advertised(tmp_path) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    status_route = respx.post("https://platform.internal/nodes/node-a/status").mock(
+        return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 0})
+    )
+
+    NodeReconciler(_config(tmp_path), FakeBackend({})).reconcile(
+        DesiredState(node_id="node-a", agents=[])
+    )
+
+    assert "forward_host" not in _post_body(status_route)

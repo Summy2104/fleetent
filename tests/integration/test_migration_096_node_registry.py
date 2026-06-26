@@ -74,6 +74,7 @@ def test_head_schema_adds_nodes_and_agent_placements(tmp_path: Path) -> None:
         "last_seen_at",
         "created_at",
         "updated_at",
+        "forward_host",
     ]
     assert node_pk == ["id"]
     assert ["key_hash"] in node_unique_indexes.values()

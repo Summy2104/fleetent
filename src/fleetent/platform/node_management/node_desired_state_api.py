@@ -45,6 +45,7 @@ class NodeSkillStatusReport(BaseModel):
 
 class NodeStatusBody(BaseModel):
     agents: list[NodeAgentStatusReport] = Field(default_factory=list)
+    forward_host: str | None = None
 
 
 class NodeIdentityResolveBody(BaseModel):
@@ -157,6 +158,8 @@ def post_node_status(
 ) -> dict[str, Any]:
     del node
     node_store.touch_last_seen(node_id)
+    if body.forward_host:
+        node_store.set_forward_host(node_id, body.forward_host)
     for report in body.agents:
         node_store.upsert_agent_status(
             report.agent_id,

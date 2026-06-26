@@ -16,6 +16,7 @@ class NodeConfig:
     service_key: str
     home_dir: Path
     interval_seconds: int = 10
+    advertise_host: str | None = None
 
 
 def load_config() -> NodeConfig:
@@ -31,12 +32,14 @@ def load_config() -> NodeConfig:
     node_id = _require_env("FLEETENT_NODE_ID")
     service_key = _require_env("FLEETENT_NODE_SERVICE_KEY")
     interval_seconds = int(os.environ.get("FLEETENT_NODE_INTERVAL_SECONDS", "10"))
+    advertise_host = os.environ.get("FLEETENT_NODE_ADVERTISE_HOST", "").strip() or None
     return NodeConfig(
         platform_url=platform_url.rstrip("/"),
         node_id=node_id,
         service_key=service_key,
         home_dir=home_dir,
         interval_seconds=interval_seconds,
+        advertise_host=advertise_host,
     )
 
 
