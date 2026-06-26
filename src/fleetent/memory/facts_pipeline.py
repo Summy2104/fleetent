@@ -252,12 +252,20 @@ async def run_pipeline_from_conversation(
 
 
 def _conversation_to_text(conversation: list[dict[str, Any]]) -> str:
+    """Render only USER messages for extraction.
+
+    Memories are extracted from what the user states, never from the assistant's
+    own output. Including assistant turns lets the agent reciting existing
+    memories (e.g. listing them) get re-extracted as "new" facts, resurrecting
+    archived/superseded entities and amplifying duplicates.
+    """
     parts: list[str] = []
     for message in conversation:
-        role = message.get("role", "")
+        if message.get("role") != "user":
+            continue
         content = message.get("content", "")
         if isinstance(content, str) and content.strip():
-            parts.append(f"{role}: {content.strip()}")
+            parts.append(content.strip())
     return "\n".join(parts)
 
 
