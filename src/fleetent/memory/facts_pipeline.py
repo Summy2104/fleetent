@@ -173,6 +173,10 @@ async def run_pipeline(
         "facts_extracted",
         user_id=user_id,
         source_turn=source_turn,
+        # The user-turn text fed to extraction (truncated), so "0 facts" can be
+        # judged against the actual input — was it really nothing to extract, or
+        # did extraction miss a stated fact?
+        input=_truncate(turn_content, 300),
         count=len(raws),
         triples=[f"{r.subject}|{r.relation}={r.object}" for r in raws],
     )
@@ -268,6 +272,12 @@ def _conversation_to_text(conversation: list[dict[str, Any]]) -> str:
         if isinstance(content, str) and content.strip():
             parts.append(content.strip())
     return "\n".join(parts)
+
+
+def _truncate(text: str, limit: int) -> str:
+    """Trim text to limit chars (with an ellipsis marker) for log fields."""
+    text = text.strip()
+    return text if len(text) <= limit else text[:limit] + "…"
 
 
 def _facts_db_and_backend() -> tuple[Any, Any]:

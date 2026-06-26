@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import json
-
-import pytest
-
 from fleetent.memory.facts_models import ClassifiedFact, RawFact, ResolvedFact
 
 
@@ -102,3 +98,34 @@ async def test_run_pipeline_no_facts_skips_commit(monkeypatch) -> None:
         source_turn="t1",
     )
     assert called["commit"] is False
+
+
+async def test_run_pipeline_logs_input_for_diagnosis(monkeypatch) -> None:
+    from fleetent.memory import facts_pipeline
+
+    logged = {}
+
+    async def _fake_extract(turn_content, llm_client, known_relations=None, user_aliases=None):
+        return []  # 0 facts — the case we need to diagnose
+
+    class _Slog:
+        def info(self, event, **fields):
+            if event == "facts_extracted":
+                logged.update(fields)
+
+    monkeypatch.setattr(facts_pipeline, "extract_facts", _fake_extract)
+    monkeypatch.setattr(facts_pipeline, "_relation_store", lambda: _FakeRelationStore())
+    monkeypatch.setattr(facts_pipeline, "_known_user_aliases", lambda uid: set())
+    monkeypatch.setattr(facts_pipeline, "slog", _Slog())
+
+    await facts_pipeline.run_pipeline(
+        user_id="u1",
+        turn_content="我刚换了一家新公司",
+        db=object(),
+        vector_backend=object(),
+        llm_client=object(),
+        source_turn="t1",
+    )
+    # The input must be logged so a 0-fact extraction is auditable.
+    assert logged.get("input") == "我刚换了一家新公司"
+    assert logged.get("count") == 0
