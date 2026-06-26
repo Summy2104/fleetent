@@ -41,6 +41,8 @@ platform 拨 node forwarder（转发 agent chat / WS）时，目标 host SHALL �
 
 此优先级 SHALL 在 platform 侧实现（读 platform 自有的 node 注册表），MUST NOT 使 node 运行时模块依赖管理库。未上报地址的 node SHALL 自动回落到 override 或 `.internal` 约定，保持既有行为。
 
+node 上报的 `forward_host` 由 node 自报并被拼入拨号 URL，因此在用于拨号前 SHALL 校验为合法的 IPv4 字面量或 RFC-1123 主机名。含 URL 走私字符（`@`、`/`、`?`、`#`、`:`、空白等）的值 SHALL 被拒绝并回落到 override / `.internal`（防 SSRF：避免被引导拨向非预期 host）。loopback / 内网地址（如 `127.0.0.1`、`10.x`）合法放行——同机 / 内网部署正是主用法。
+
 #### Scenario: 已上报地址的 node 用持久化地址转发
 
 - **WHEN** 某 node 的 `forward_host` 为 `10.38.8.143`，platform 向其转发 agent chat
@@ -56,3 +58,9 @@ platform 拨 node forwarder（转发 agent chat / WS）时，目标 host SHALL �
 - **WHEN** 设了 `FLEETENT_FORWARDER_HOST_OVERRIDE=127.0.0.1`
 - **THEN** 对**未上报** `forward_host` 的 node，platform 拨 `http://127.0.0.1:8786/...`
 - **AND** 对**已上报** `forward_host` 的 node，platform 仍优先用其上报地址，不被 override 覆盖
+
+#### Scenario: 拒绝非法上报地址（防 SSRF）
+
+- **WHEN** 某 node 的 `forward_host` 含非主机名字符（如 `evil.com/path`、`node-a@evil.com`、带端口或空白）
+- **THEN** platform 忽略该值并回落到 override / `{node_id}.internal`，不据此拨号
+- **AND** loopback / 内网地址（如 `127.0.0.1`、`10.38.8.143`）视为合法，正常用于拨号
