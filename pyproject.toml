@@ -55,6 +55,7 @@ dev = [
     "types-pyyaml>=6.0.12.20260518",
     "pytest-cov>=7.1.0",
     "types-openpyxl>=3.1.5.20260518",
+    "pytest-xdist>=3.6.0",
 ]
 
 [tool.ruff]

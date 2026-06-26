@@ -50,6 +50,9 @@ test-coverage-ci: ## Run daily unit+integration tests with 88% combined coverage
 test-integration: ## Run integration tests
 	uv run pytest tests/integration
 
+test-integration-ci: ## PR gate: integration tests in parallel, no coverage (~1min)
+	uv run pytest tests/integration -q -n auto -p no:cacheprovider
+
 test-e2e: ## Run end-to-end tests
 	uv run pytest tests/e2e
 
