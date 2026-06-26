@@ -328,15 +328,17 @@ def test_pilot_runbook_contains_required_commands_and_failure_handling():
         assert phrase in content
 
 
-def test_intelligence_roadmap_manual_references_shared_memory_governance_flow():
+def test_intelligence_roadmap_manual_references_agent_memory_governance_flow():
     content = Path("docs/roadmaps/intelligence-roadmap-test-manual.md").read_text(encoding="utf-8")
 
     assert "fleetent-admin shared-memory" not in content
     assert "fleetent-admin" not in content
     assert "fleetent-node" not in content
     assert "fleetent admin memory shared" not in content
-    assert "Shared Memory apply / reject" in content
-    assert "tests/integration/test_shared_memory.py" in content
+    # The rescope renamed Shared Memory → Agent Memory; the manual now drives the
+    # governance flow through the agent-memory write-path integration test.
+    assert "Agent Memory apply / reject" in content
+    assert "tests/integration/test_agent_memory_write_path.py" in content
 
 
 def test_intelligence_roadmap_manual_documents_real_llm_credentials_safely():

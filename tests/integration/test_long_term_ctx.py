@@ -120,7 +120,7 @@ async def test_memory_results_are_formatted_with_memory_source_summary(monkeypat
         available_tokens=200,
     )
 
-    assert "[Long-term memory]" in result.text
+    assert "[Long-term memory" in result.text
     assert "User prefers Python for backend services" in result.text
     assert result.sources[0].source_type == "memory"
     assert result.sources[0].source_id == "mem-1"
@@ -168,7 +168,7 @@ async def test_missing_knowledge_provider_does_not_block_memory_context(monkeypa
     )
 
     assert "User works on fleetent" in result.text
-    assert "[Knowledge]" not in result.text
+    assert "[Knowledge" not in result.text
 
 
 async def test_builtin_knowledge_provider_uses_knowledge_base_search_when_enabled(monkeypatch):
@@ -218,7 +218,7 @@ async def test_builtin_knowledge_provider_uses_knowledge_base_search_when_enable
         mode="hybrid",
         audit_context=None,
     )
-    assert "[Knowledge]" in result.text
+    assert "[Knowledge" in result.text
     assert "Fleetent can ingest markdown knowledge." in result.text
     assert result.sources == [
         long_term_ctx.ContextSource(
@@ -346,7 +346,7 @@ async def test_empty_knowledge_results_are_omitted(monkeypatch):
     knowledge_search.assert_awaited_once_with("user-1", "deployment", "agent-1", 10)
     assert result.text == ""
     assert result.sources == []
-    assert "[Knowledge]" not in result.text
+    assert "[Knowledge" not in result.text
 
 
 async def test_memory_and_knowledge_results_are_included_with_sources(monkeypatch):
@@ -369,9 +369,9 @@ async def test_memory_and_knowledge_results_are_included_with_sources(monkeypatc
         available_tokens=300,
     )
 
-    assert "[Long-term memory]" in result.text
+    assert "[Long-term memory" in result.text
     assert "User is deploying on-prem" in result.text
-    assert "[Knowledge]" in result.text
+    assert "[Knowledge" in result.text
     assert "Fleetent supports self-hosted deployment." in result.text
     assert [source.source_type for source in result.sources] == ["memory", "knowledge"]
     assert [source.source_id for source in result.sources] == ["mem-1", "doc-1"]
@@ -390,14 +390,18 @@ async def test_budget_pressure_keeps_memory_and_omits_low_priority_knowledge(mon
     monkeypatch.setattr(long_term_ctx.memory, "search_facts", AsyncMock(return_value=[memory]))
     long_term_ctx.set_knowledge_provider(AsyncMock(return_value=[knowledge]))
 
+    # The budget is a char-count proxy: the memory section ("[Long-term memory — …]"
+    # header + one fact line) renders to ~91 chars, while the large knowledge chunk
+    # is ~318. Pick a budget that admits memory but excludes the low-priority
+    # knowledge. (Tune this if the section header wording changes its length.)
     result = await long_term_ctx.build_context(
         user_id="user-1",
         query="answer style",
         agent_id="agent-1",
-        available_tokens=78,
+        available_tokens=100,
     )
 
-    assert len(result.text) <= 78
+    assert len(result.text) <= 100
     assert "User prefers concise answers." in result.text
     assert "Knowledge chunk" not in result.text
     assert [source.source_id for source in result.sources] == ["mem-1"]

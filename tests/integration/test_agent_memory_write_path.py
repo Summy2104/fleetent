@@ -134,5 +134,8 @@ async def test_approved_agent_memory_proposal_is_injected_by_build_context(tmp_p
     assert any(s.source_type == "agent_memory" for s in result.sources), (
         f"expected agent_memory source in {[s.source_type for s in result.sources]}"
     )
-    assert "[Agent memory]" in result.text
+    # Assert on the stable English prefix only; the section header carries a
+    # bilingual suffix ("[Agent memory — …]") whose wording must not re-break
+    # this test.
+    assert "[Agent memory" in result.text
     assert proposed_content in result.text
