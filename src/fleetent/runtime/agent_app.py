@@ -148,6 +148,9 @@ async def _drain_and_close(rt: AgentRuntime, drain_timeout: float) -> None:
         _logger.warn("agent_drain_timed_out", active_runs_remaining=_loop._active_runs)
     else:
         _logger.info("agent_drain_completed")
+    from fleetent.memory import facts_lifecycle
+
+    await _stop_step("facts_archive_sweep", facts_lifecycle.stop_archive_sweep())
     # Stop the per-user stdio reaper before releasing sessions; aclose_all() then tears
     # down every host (incl. per-user stdio subprocesses) on its own owner task (D4).
     await _stop_step("mcp_stdio_reaper", mcp.stop_stdio_reaper())
@@ -320,6 +323,7 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     from fleetent.knowledge_base import runtime as kb_runtime
     from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
     from fleetent.memory import agent_memory as agent_memory_module
+    from fleetent.memory import facts_store
     from fleetent.memory import store as memory_store
     from fleetent.observability import traces
     from fleetent.runtime import context as runtime_context
@@ -354,6 +358,8 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     reflection.set_state_db(agent_state_db)
     memory_store.set_state_db(agent_state_db)
     memory_store.set_vector_backend(agent_scope.vector_backend)
+    # user-memory-v2: facts tables share agent_state.db and the per-agent vector backend.
+    facts_store.set_facts_db(agent_state_db, agent_scope.vector_backend)
     approval_request_store.set_state_db(agent_state_db)
     approval_store.set_state_db(agent_state_db)
     allowlist_store.set_state_db(agent_state_db)
@@ -436,6 +442,17 @@ async def _start_infra(
         except Exception as exc:  # noqa: BLE001 — MCP unavailable must not abort boot
             _logger.warn("agent_runtime_mcp_register_failed", error=str(exc))
     session_mgr.start_session_maintenance()
+    # user-memory-v2: start the short-term facts archive sweep. Best-effort — a
+    # failure here is logged and never aborts boot (the DB/backend were wired in
+    # _init_agent_db_schema via facts_store.set_facts_db).
+    try:
+        from fleetent.memory import facts_lifecycle, facts_store
+
+        facts_lifecycle.start_archive_sweep(
+            facts_store._facts_database(), facts_store._facts_vector_backend
+        )
+    except Exception as exc:  # noqa: BLE001 — facts sweep must not abort boot
+        _logger.warn("agent_runtime_facts_sweep_start_failed", error=str(exc))
     reflection_settings = getattr(agent, "reflection", None)
     if reflection_settings is not None and getattr(reflection_settings, "enabled", False) is True:
         from fleetent.reflection import scheduler as reflection_scheduler

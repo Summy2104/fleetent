@@ -186,7 +186,7 @@ def mock_client(monkeypatch) -> AsyncMock:
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(al, "run_pipeline_from_conversation", AsyncMock())
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     # Avoid instantiating Settings() (needs an API key) in the default-limits path.
@@ -821,7 +821,7 @@ def mock_client_fb(monkeypatch) -> AsyncMock:
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(al, "run_pipeline_from_conversation", AsyncMock())
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     monkeypatch.setattr(
@@ -1205,7 +1205,7 @@ async def test_run_routes_to_vision_when_image_present(monkeypatch):
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(al, "run_pipeline_from_conversation", AsyncMock())
     monkeypatch.setattr(
         al,
         "resolve_limits",
@@ -1251,7 +1251,7 @@ async def test_run_uses_agent_model_policy_default_route(monkeypatch):
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(al, "run_pipeline_from_conversation", AsyncMock())
     monkeypatch.setattr(
         al,
         "resolve_limits",
@@ -1287,7 +1287,7 @@ async def test_run_uses_agent_model_policy_vision_route(monkeypatch):
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(al, "run_pipeline_from_conversation", AsyncMock())
     monkeypatch.setattr(
         al,
         "resolve_limits",
@@ -1380,7 +1380,7 @@ async def test_run_stream_routes_to_vision_with_images(monkeypatch):
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(al, "run_pipeline_from_conversation", AsyncMock())
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     monkeypatch.setattr(
         al,
@@ -1693,7 +1693,7 @@ def _wire_loop(monkeypatch, client, cfg):
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(al, "run_pipeline_from_conversation", AsyncMock())
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     monkeypatch.setattr(
@@ -1787,7 +1787,7 @@ def _capture_stream_wire(monkeypatch, *, memory: str, catalog: str) -> dict:
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(al, "run_pipeline_from_conversation", AsyncMock())
     # memory param retained for call-site compat; memory injection now goes through
     # build_context (class C), which is best-effort and no-ops without a configured DB.
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **kw: catalog)
@@ -1803,6 +1803,14 @@ def _capture_stream_wire(monkeypatch, *, memory: str, catalog: str) -> dict:
 
 
 _BASE = "You are a helpful assistant with access to tools. Use them when needed."
+_MEMORY_NOTE = (
+    "\n\n[记忆系统说明]\n"
+    "你拥有长期记忆系统。用户说的事实（偏好、关系、背景信息等）会在对话结束后自动提取并存入记忆数据库，"
+    "无需你主动调用任何工具来保存——直接在对话中自然回应即可，记忆会自动更新。\n"
+    "每轮对话开始时，与当前话题相关的记忆会自动注入到上下文（见 [Long-term context] 部分）。\n"
+    "如需查看用户的全部记忆，使用 recall_memory 工具。"
+)
+_BASE_WITH_MEMORY = _BASE + _MEMORY_NOTE
 
 
 async def test_run_stream_base_system_prefix_stable_across_variable_content(monkeypatch):
@@ -1818,7 +1826,7 @@ async def test_run_stream_base_system_prefix_stable_across_variable_content(monk
     second = cap2["messages"][0]
 
     assert first["role"] == "system"
-    assert first["content"] == f"{_BASE}\n\nCATALOG-X"
+    assert first["content"] == f"{_BASE_WITH_MEMORY}\n\nCATALOG-X"
     assert second["content"] == first["content"]
 
 
@@ -1839,7 +1847,7 @@ async def test_run_stream_no_variable_content_is_single_base_system(monkeypatch)
     msgs = cap["messages"]
     system_msgs = [m for m in msgs if m["role"] == "system"]
     assert len(system_msgs) == 1
-    assert system_msgs[0]["content"] == _BASE
+    assert system_msgs[0]["content"] == _BASE_WITH_MEMORY
 
 
 def test_run_sync_base_system_prefix_stable_across_variable_content(monkeypatch):
@@ -1862,7 +1870,7 @@ def test_run_sync_base_system_prefix_stable_across_variable_content(monkeypatch)
     # (class C), not by run_sync's prompt assembly, so the cacheable prefix here is
     # exactly base+catalog and identical across runs.
     assert run1[0]["role"] == "system"
-    assert run1[0]["content"] == f"{_BASE}\n\nCATALOG-X"
+    assert run1[0]["content"] == f"{_BASE_WITH_MEMORY}\n\nCATALOG-X"
     assert run2[0]["content"] == run1[0]["content"]
 
 

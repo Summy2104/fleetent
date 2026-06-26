@@ -124,7 +124,7 @@ async def test_run_reflection_reads_memory_layer_signals(monkeypatch):
     )
     search = AsyncMock(return_value=[])
     monkeypatch.setattr(observability, "query_trace_events", lambda query: [event])
-    monkeypatch.setattr(reflection.memory, "search", search)
+    monkeypatch.setattr(reflection.memory, "search_facts", search)
 
     await reflection.run_reflection("user-1")
 
@@ -139,7 +139,7 @@ async def test_run_reflection_does_not_call_memory_write_api(monkeypatch):
 
     write_memory = AsyncMock()
     monkeypatch.setattr(observability, "query_trace_events", lambda query: [])
-    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reflection.memory, "search_facts", AsyncMock(return_value=[]))
     monkeypatch.setattr(memory_layer, "extract_and_update", write_memory)
 
     await reflection.run_reflection("user-1")
@@ -167,7 +167,7 @@ async def test_repeated_user_fact_generates_memory_candidate(monkeypatch):
         ),
     ]
     monkeypatch.setattr(observability, "query_trace_events", lambda query: events)
-    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reflection.memory, "search_facts", AsyncMock(return_value=[]))
 
     report = await reflection.run_reflection("user-1")
 
@@ -181,28 +181,50 @@ async def test_repeated_user_fact_generates_memory_candidate(monkeypatch):
 
 
 async def test_conflicting_memory_signals_generate_memory_conflict(monkeypatch):
-    from fleetent import memory as memory_layer
     from fleetent import observability, reflection
+    from fleetent.memory.facts_models import Fact, SearchResult
 
     now = datetime.now(UTC)
     memories = [
-        memory_layer.MemoryItem(
-            id="mem-1",
-            user_id="user-1",
-            type="identity",
-            content="User location is Shanghai",
-            created_at=now,
-            updated_at=now,
-            expires_at=None,
+        SearchResult(
+            fact=Fact(
+                fact_id="mem-1",
+                user_id="user-1",
+                subject="user",
+                relation="located_in",
+                object="Shanghai",
+                cardinality="single",
+                status="active",
+                access_count=0,
+                first_accessed_at=None,
+                last_accessed_at=None,
+                expires_at=None,
+                valid_until=None,
+                created_at=now,
+                updated_at=now,
+                source_turn=None,
+            ),
+            score=0.9,
         ),
-        memory_layer.MemoryItem(
-            id="mem-2",
-            user_id="user-1",
-            type="identity",
-            content="User location is Beijing",
-            created_at=now,
-            updated_at=now,
-            expires_at=None,
+        SearchResult(
+            fact=Fact(
+                fact_id="mem-2",
+                user_id="user-1",
+                subject="user",
+                relation="located_in",
+                object="Beijing",
+                cardinality="single",
+                status="active",
+                access_count=0,
+                first_accessed_at=None,
+                last_accessed_at=None,
+                expires_at=None,
+                valid_until=None,
+                created_at=now,
+                updated_at=now,
+                source_turn=None,
+            ),
+            score=0.8,
         ),
     ]
     monkeypatch.setattr(
@@ -218,13 +240,14 @@ async def test_conflicting_memory_signals_generate_memory_conflict(monkeypatch):
             )
         ],
     )
-    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=memories))
+    monkeypatch.setattr(reflection.memory, "search_facts", AsyncMock(return_value=memories))
 
     report = await reflection.run_reflection("user-1")
 
     [finding] = [item for item in report.findings if item.type == "memory_conflict"]
     assert finding.evidence_ids == ["mem-1", "mem-2"]
-    assert finding.metadata["field"] == "location"
+    assert finding.metadata["field"] == "located_in"
+    assert finding.metadata["subject"] == "user"
 
 
 async def test_repeated_task_pattern_generates_skill_opportunity(monkeypatch):
@@ -249,7 +272,7 @@ async def test_repeated_task_pattern_generates_skill_opportunity(monkeypatch):
         ),
     ]
     monkeypatch.setattr(observability, "query_trace_events", lambda query: events)
-    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reflection.memory, "search_facts", AsyncMock(return_value=[]))
 
     report = await reflection.run_reflection("user-1")
 
@@ -295,7 +318,7 @@ async def test_run_reflection_persists_report_without_raw_transcript(tmp_path, m
     ]
     _use_db(monkeypatch, db_path)
     monkeypatch.setattr(observability, "query_trace_events", lambda query: events)
-    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reflection.memory, "search_facts", AsyncMock(return_value=[]))
 
     report = await reflection.run_reflection("user-1")
 
@@ -360,7 +383,7 @@ async def test_run_reflection_persists_generated_proposals_with_report_id(tmp_pa
     ]
     _use_db(monkeypatch, db_path)
     monkeypatch.setattr(observability, "query_trace_events", lambda query: events)
-    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reflection.memory, "search_facts", AsyncMock(return_value=[]))
 
     report = await reflection.run_reflection("user-1")
 
@@ -407,7 +430,7 @@ async def test_run_reflection_persists_report_proposal_provenance_links(tmp_path
     ]
     _use_db(monkeypatch, db_path)
     monkeypatch.setattr(observability, "query_trace_events", lambda query: events)
-    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reflection.memory, "search_facts", AsyncMock(return_value=[]))
 
     report = await reflection.run_reflection("user-1")
 
@@ -487,8 +510,8 @@ async def test_reportless_proposal_persists_null_report_id_and_remains_usable(
 
 
 async def test_memory_findings_do_not_modify_memory_items_table(tmp_path, monkeypatch):
-    from fleetent import memory as memory_layer
     from fleetent import observability, reflection
+    from fleetent.memory.facts_models import Fact, SearchResult
 
     db_path = tmp_path / "reflection.db"
     _prepare_db(db_path)
@@ -513,24 +536,47 @@ async def test_memory_findings_do_not_modify_memory_items_table(tmp_path, monkey
         )
         before = conn.execute("SELECT id, content FROM memory_items ORDER BY id").fetchall()
 
+    parsed_now = datetime.fromisoformat(now)
     memories = [
-        memory_layer.MemoryItem(
-            id="mem-1",
-            user_id="user-1",
-            type="identity",
-            content="User location is Shanghai",
-            created_at=datetime.fromisoformat(now),
-            updated_at=datetime.fromisoformat(now),
-            expires_at=None,
+        SearchResult(
+            fact=Fact(
+                fact_id="mem-1",
+                user_id="user-1",
+                subject="user",
+                relation="located_in",
+                object="Shanghai",
+                cardinality="single",
+                status="active",
+                access_count=0,
+                first_accessed_at=None,
+                last_accessed_at=None,
+                expires_at=None,
+                valid_until=None,
+                created_at=parsed_now,
+                updated_at=parsed_now,
+                source_turn=None,
+            ),
+            score=0.9,
         ),
-        memory_layer.MemoryItem(
-            id="mem-2",
-            user_id="user-1",
-            type="identity",
-            content="User location is Beijing",
-            created_at=datetime.fromisoformat(now),
-            updated_at=datetime.fromisoformat(now),
-            expires_at=None,
+        SearchResult(
+            fact=Fact(
+                fact_id="mem-2",
+                user_id="user-1",
+                subject="user",
+                relation="located_in",
+                object="Beijing",
+                cardinality="single",
+                status="active",
+                access_count=0,
+                first_accessed_at=None,
+                last_accessed_at=None,
+                expires_at=None,
+                valid_until=None,
+                created_at=parsed_now,
+                updated_at=parsed_now,
+                source_turn=None,
+            ),
+            score=0.8,
         ),
     ]
     events = [
@@ -551,7 +597,7 @@ async def test_memory_findings_do_not_modify_memory_items_table(tmp_path, monkey
     ]
     _use_db(monkeypatch, db_path)
     monkeypatch.setattr(observability, "query_trace_events", lambda query: events)
-    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=memories))
+    monkeypatch.setattr(reflection.memory, "search_facts", AsyncMock(return_value=memories))
 
     await reflection.run_reflection("user-1")
 
@@ -590,7 +636,7 @@ async def test_skill_opportunity_does_not_modify_skills_directory(tmp_path, monk
     ]
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(observability, "query_trace_events", lambda query: events)
-    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reflection.memory, "search_facts", AsyncMock(return_value=[]))
 
     await reflection.run_reflection("user-1")
 

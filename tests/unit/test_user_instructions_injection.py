@@ -35,7 +35,12 @@ def test_assemble_empty_user_instructions_identical_to_legacy() -> None:
 
 def test_assemble_empty_instructions_and_skills_just_base() -> None:
     msgs = al._assemble_prompt("BASE", "", {"role": "user", "content": "hi"}, user_instructions="")
-    assert msgs[0]["content"] == "BASE"
+    # base_system is always augmented with the memory system note; no instructions
+    # or skills appended when both are empty.
+    content = msgs[0]["content"]
+    assert content.startswith("BASE\n\n[记忆系统说明]")
+    assert "[用户指令]" not in content
+    assert "[SKILLS]" not in content
 
 
 # --- run_stream wiring (mocked LLM) -----------------------------------------
@@ -56,7 +61,7 @@ def mock_client(monkeypatch) -> AsyncMock:
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(al, "run_pipeline_from_conversation", AsyncMock())
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     monkeypatch.setattr(al, "evaluate_risk_level", lambda name, args, ctx: "none")
     monkeypatch.setattr(

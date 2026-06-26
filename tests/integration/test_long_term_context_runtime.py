@@ -51,7 +51,7 @@ async def test_agent_runtime_calls_long_term_context_builder_with_existing_signa
     monkeypatch.setattr(agent_loop, "get_schemas", lambda: [])
     monkeypatch.setattr(agent_loop, "maybe_compress", lambda messages, **kwargs: messages)
     monkeypatch.setattr(agent_loop, "match_skill", lambda _: None)
-    monkeypatch.setattr(agent_loop, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(agent_loop, "run_pipeline_from_conversation", AsyncMock())
     monkeypatch.setattr(agent_loop, "build_context", build_context)
     monkeypatch.setattr(agent_loop, "record_trace_event", lambda event: None)
     monkeypatch.setattr(agent_loop, "record_injected_context", lambda run_id, sources: None)

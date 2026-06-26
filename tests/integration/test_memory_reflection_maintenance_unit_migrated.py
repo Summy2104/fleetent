@@ -431,107 +431,31 @@ async def test_extract_ignores_unsupported_shared_memory_or_kb_actions(tmp_path,
     extraction.vector_store.upsert.assert_not_awaited()
 
 
-async def test_context_update_refreshes_ttl_and_rejects_cross_type_target(tmp_path, monkeypatch):
-    from fleetent import memory as memory_layer
-
-    db_path = tmp_path / "memory.db"
-    apply_migrations(db_path)
-    _use_db(monkeypatch, db_path)
-    monkeypatch.setattr(memory_store, "_state_db", SQLiteDatabase(path=db_path))
-    monkeypatch.setattr(extraction.vector_store, "upsert", AsyncMock())
-    created_at = datetime(2026, 5, 1, tzinfo=UTC).isoformat()
-    old_expiry = (datetime.now(UTC).replace(microsecond=0) + timedelta(days=1)).isoformat()
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
-            INSERT INTO memory_items (
-                id, user_id, type, content, created_at, updated_at, expires_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                "context-1",
-                "user-1",
-                "context",
-                "User is working on billing",
-                created_at,
-                created_at,
-                old_expiry,
-            ),
-        )
-        conn.execute(
-            """
-            INSERT INTO memory_items (
-                id, user_id, type, content, created_at, updated_at, expires_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                "identity-1",
-                "user-1",
-                "identity",
-                "User is an engineer",
-                created_at,
-                created_at,
-                None,
-            ),
-        )
-    before = datetime.now(UTC).replace(microsecond=0) + timedelta(days=30)
-    _patch_extraction(
-        monkeypatch,
-        """
-        [
-          {
-            "action": "update",
-            "target_id": "context-1",
-            "type": "context",
-            "content": "User is working on billing migration"
-          },
-          {
-            "action": "update",
-            "target_id": "identity-1",
-            "type": "context",
-            "content": "Wrong cross-type update"
-          }
-        ]
-        """,
-    )
-
-    await memory_layer.extract_and_update("user-1", [{"role": "user", "content": "facts"}])
-
-    after = datetime.now(UTC).replace(microsecond=0) + timedelta(days=30)
-    with sqlite3.connect(db_path) as conn:
-        conn.row_factory = sqlite3.Row
-        context = dict(
-            conn.execute(
-                "SELECT content, expires_at FROM memory_items WHERE id = ?", ("context-1",)
-            ).fetchone()
-        )
-        identity = dict(
-            conn.execute(
-                "SELECT content, expires_at FROM memory_items WHERE id = ?", ("identity-1",)
-            ).fetchone()
-        )
-
-    assert context["content"] == "User is working on billing migration"
-    assert before <= datetime.fromisoformat(context["expires_at"]) <= after
-    assert identity["content"] == "User is an engineer"
-    assert identity["expires_at"] is None
-
-
 def test_reflection_finding_filters_existing_and_single_evidence_memory_candidates():
-    from fleetent import memory as memory_layer
     from fleetent import observability, reflection
+    from fleetent.memory.facts_models import Fact, SearchResult
 
+    now = datetime(2026, 6, 2, tzinfo=UTC)
     existing = [
-        memory_layer.MemoryItem(
-            id="mem-1",
-            user_id="user-1",
-            type="preferences",
-            content="User prefers concise replies",
-            created_at=datetime(2026, 6, 2, tzinfo=UTC),
-            updated_at=datetime(2026, 6, 2, tzinfo=UTC),
-            expires_at=None,
+        SearchResult(
+            fact=Fact(
+                fact_id="mem-1",
+                user_id="user-1",
+                subject="User",
+                relation="prefers",
+                object="concise replies",
+                cardinality="multi",
+                status="active",
+                access_count=0,
+                first_accessed_at=None,
+                last_accessed_at=None,
+                expires_at=None,
+                valid_until=None,
+                created_at=now,
+                updated_at=now,
+                source_turn=None,
+            ),
+            score=0.9,
         )
     ]
     events = [

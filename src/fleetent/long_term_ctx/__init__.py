@@ -1,9 +1,11 @@
 """Long-term context construction for agent prompts."""
 
+import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Literal
+from typing import Any, Literal
 
 from fleetent import memory
 from fleetent.config import LongTermContextSettings, Settings
@@ -13,9 +15,56 @@ from fleetent.knowledge_base.retrieval.search import SearchMode
 from fleetent.knowledge_base.retrieval.search import search as kb_search
 from fleetent.memory import agent_memory
 from fleetent.observability import KBRetrievalAuditContext
+from fleetent.structured_logging import get_logger
 
 _MEMORY_LIMIT = 10
 _KNOWLEDGE_LIMIT = 10
+
+_logger = get_logger("long_term_ctx")
+
+
+async def _retrieve_with_timeout[T](
+    name: str,
+    coro_factory: Callable[[], Awaitable[T]],
+    *,
+    timeout: float,
+    empty: T,
+) -> T:
+    """Run one retrieval path under a timeout, degrading to ``empty`` on failure.
+
+    Returns the path's result on success.  On timeout OR any exception the path
+    is degraded to ``empty`` and a warning is logged (never re-raised) so one
+    stalled/failing path cannot block or crash the others.  Per-path latency and
+    outcome are logged for "which path was slow" diagnosis.
+    """
+    started = time.monotonic()
+    try:
+        result = await asyncio.wait_for(coro_factory(), timeout)
+        _logger.info(
+            "ltc_retrieval_path",
+            path=name,
+            elapsed_ms=round((time.monotonic() - started) * 1000, 1),
+            timed_out=False,
+        )
+        return result
+    except TimeoutError:
+        _logger.warn(
+            "ltc_retrieval_timeout",
+            path=name,
+            elapsed_ms=round((time.monotonic() - started) * 1000, 1),
+            timeout_s=timeout,
+        )
+        return empty
+    except Exception as exc:  # noqa: BLE001 — one path's failure must not break the others
+        _logger.warn(
+            "ltc_retrieval_failed",
+            path=name,
+            error_type=type(exc).__name__,
+            error=str(exc),
+            elapsed_ms=round((time.monotonic() - started) * 1000, 1),
+        )
+        return empty
+
 
 ConflictPreference = Literal["auto", "memory", "knowledge", "agent_memory"]
 
@@ -159,21 +208,37 @@ async def build_context(
         )
 
     policy = _resolve_policy(available_tokens)
-    memories = await memory.search(user_id, query, limit=_MEMORY_LIMIT)
-    knowledge_results = await _search_knowledge(
-        user_id,
-        query,
-        agent_id,
-        _KNOWLEDGE_LIMIT,
-        audit_context=audit_context,
+    # Retrieve across all subjects (user / agent / third parties). Each fact's
+    # statement names its subject explicitly, so the model can tell whose fact it
+    # is without us filtering by subject (which would hide agent/third-party facts).
+    #
+    # The three paths are independent and each hits an external embedding proxy
+    # that can stall; run them concurrently under a per-path timeout so a single
+    # slow path degrades to empty instead of blocking the whole reply. A degraded
+    # (empty) path is equivalent to "no hits" for the downstream merge/budget.
+    timeout = _ltc_config().retrieval_timeout_seconds
+    memories, knowledge_results, agent_memory_results = await asyncio.gather(
+        _retrieve_with_timeout(
+            "memory",
+            lambda: memory.search_facts(user_id, query, limit=_MEMORY_LIMIT),
+            timeout=timeout,
+            empty=[],
+        ),
+        _retrieve_with_timeout(
+            "knowledge",
+            lambda: _search_knowledge(
+                user_id, query, agent_id, _KNOWLEDGE_LIMIT, audit_context=audit_context
+            ),
+            timeout=timeout,
+            empty=[],
+        ),
+        _retrieve_with_timeout(
+            "agent_memory",
+            lambda: agent_memory.search_agent_memory(query, limit=policy.agent_memory_top_k),
+            timeout=timeout,
+            empty=[],
+        ),
     )
-    try:
-        agent_memory_results = await agent_memory.search_agent_memory(
-            query, limit=policy.agent_memory_top_k
-        )
-    except RuntimeError:
-        # agent_memory backend not wired in this process (e.g. platform-only context)
-        agent_memory_results = []
     if not memories and not knowledge_results and not agent_memory_results:
         return BuiltContext(
             text="",
@@ -355,9 +420,9 @@ def _decision(candidate: _ContextCandidate, *, included: bool, reason: str) -> B
 
 
 _SECTION_HEADERS = {
-    "memory": "[Long-term memory]",
-    "agent_memory": "[Agent memory]",
-    "knowledge": "[Knowledge]",
+    "memory": "[Long-term memory — 你记住的关于用户的事实]",
+    "agent_memory": "[Agent memory — 你自己的记忆笔记]",
+    "knowledge": "[Knowledge — 知识库检索结果]",
 }
 
 
@@ -375,14 +440,37 @@ def _render_context(candidates: list[_ContextCandidate]) -> str:
     return "\n".join(lines)
 
 
-def _memory_candidate(memory_item: memory.MemoryItem) -> _ContextCandidate:
-    line = f"- {memory_item.content}"
+def _subject_phrase(subject: str) -> str:
+    """Render a fact subject as a possessive phrase for context lines.
+
+    'user' → "The user's"; 'agent' → "Your"; a named third party → "{name}'s".
+    """
+    if subject == "user":
+        return "The user's"
+    if subject == "agent":
+        return "Your"
+    return f"{subject}'s"
+
+
+def _memory_candidate(result: Any) -> _ContextCandidate:
+    """Build a context candidate from a facts SearchResult (fact + score).
+
+    Prefer the fact's ``statement`` — an LLM-written sentence with an explicit
+    subject ("用户的名字是 Xin") — so the model never mistakes a fact ABOUT the
+    user for one about itself.  Pre-statement rows (statement IS NULL) fall back
+    to a subject-qualified join of the triple.
+    """
+    fact = result.fact
+    if fact.statement:
+        line = f"- {fact.statement}"
+    else:
+        line = f"- {_subject_phrase(fact.subject)} {fact.relation}: {fact.object}"
     return _ContextCandidate(
         source=ContextSource(
             source_type="memory",
-            source_id=memory_item.id,
-            score=1.0,
-            metadata={"type": memory_item.type},
+            source_id=fact.fact_id,
+            score=result.score,
+            metadata={"relation": fact.relation},
             token_estimate=len(line),
         ),
         line=line,

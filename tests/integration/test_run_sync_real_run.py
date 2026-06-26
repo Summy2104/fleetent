@@ -49,6 +49,6 @@ def test_run_sync_executes_real_run_with_model_boundary_stubbed(tmp_path, monkey
     fake_client.chat.completions.create = AsyncMock(return_value=_text_response("56"))
 
     monkeypatch.setattr(loop, "_build_async_client", lambda resolved, api_key: fake_client)
-    monkeypatch.setattr(loop, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(loop, "run_pipeline_from_conversation", AsyncMock())
 
     assert loop.run_sync("What is 7 * 8?", user_id="alice") == "56"

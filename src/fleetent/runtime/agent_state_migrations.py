@@ -553,7 +553,16 @@ MIGRATIONS.append(
     )
 )
 
-# ── v42: mcp_user_tokens (mcp-per-user-oauth2 slice 1) ───────────────────────
+# ── v42-v47: user memory facts (user-memory-v2) ──────────────────────────────
+# Three-tuple (subject, relation, object) facts replace free-text memory_items.
+# facts_migrations.py holds the schema; appended here to share the single
+# PRAGMA user_version stamp on agent_state.db.
+from fleetent.memory.facts_migrations import FACTS_MIGRATIONS as _FACTS_MIGRATIONS  # noqa: E402
+
+for _label, _sql in _FACTS_MIGRATIONS:
+    MIGRATIONS.append((MIGRATIONS[-1][0] + 1, _sql))
+
+# ── v48: mcp_user_tokens (mcp-per-user-oauth2 slice 1) ───────────────────────
 # Standalone per-user MCP OAuth token store (D7). Isolation key is the
 # (user_id, agent_id, server_id) triple; access/refresh are stored as Fernet
 # ciphertext (never plaintext) via the shared secret_crypto helper. agent_id is

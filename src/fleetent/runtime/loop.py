@@ -24,7 +24,7 @@ from fleetent.governance.permission_gate import _default_gate
 from fleetent.identity import Principal
 from fleetent.integrations.sandbox import Mode, is_code_execution_enabled, redact_secrets
 from fleetent.long_term_ctx import ContextSource, build_context
-from fleetent.memory import extract_and_update
+from fleetent.memory.facts_pipeline import run_pipeline_from_conversation
 from fleetent.model import ModelConfigError, ModelPolicySnapshot, ResolvedModelConfig
 from fleetent.model.provider_health import ProviderHealthCache, get_health_cache
 from fleetent.observability import (
@@ -1630,6 +1630,14 @@ def _assemble_prompt(
     the pre-user.md behavior.
     """
     base = base_system
+    base = (
+        f"{base}\n\n"
+        "[记忆系统说明]\n"
+        "你拥有长期记忆系统。用户说的事实（偏好、关系、背景信息等）会在对话结束后自动提取并存入记忆数据库，"
+        "无需你主动调用任何工具来保存——直接在对话中自然回应即可，记忆会自动更新。\n"
+        "每轮对话开始时，与当前话题相关的记忆会自动注入到上下文（见 [Long-term context] 部分）。\n"
+        "如需查看用户的全部记忆，使用 recall_memory 工具。"
+    )
     if user_instructions:
         base = f"{base}\n\n[用户指令]\n{user_instructions}"
     if skills_catalog:
@@ -1665,14 +1673,19 @@ def _extract_cache_tokens(usage: Any) -> dict[str, int] | None:
 # wiring, grafted from main's agent_loop during the architecture merge (follow-up
 # class A). build_context / trace recording are best-effort at the call sites in
 # run()/run_stream() so a missing DB or disabled KB never breaks a run.
-_LONG_TERM_CONTEXT_HEADER = "[Long-term context]"
+_LONG_TERM_CONTEXT_HEADER = (
+    "[Long-term context]\n"
+    "以下是你已知的关于用户的记忆和背景知识，直接当作事实使用，无需询问用户确认："
+)
 
 
-def _first_user_content(messages: list[Any]) -> str:
+def _latest_user_content(messages: list[Any]) -> str:
+    last = ""
     for message in messages:
         if isinstance(message, dict) and message.get("role") == "user":
             content = message.get("content", "")
-            return content if isinstance(content, str) else str(content)
+            last = content if isinstance(content, str) else str(content)
+    return last
     return ""
 
 
@@ -1982,7 +1995,7 @@ async def _run_inner(
         # sandbox skills view gate restricted skills per requester.
         skill_user_access=skill_user_access or {},
     )
-    user_input = _first_user_content(messages)
+    user_input = _latest_user_content(messages)
     # Class-A wiring: inject long-term context (KB + memory) and record the
     # injected-context trace. Best-effort — a missing DB / disabled KB must not
     # break the run (mirrors the sandbox/eval_logger best-effort pattern).
@@ -2353,7 +2366,9 @@ async def _run_inner(
     # Memory extraction unified onto intelligence/memory (class C). Best-effort and
     # awaited (same blocking profile as the prior inline extract_and_save).
     try:
-        await extract_and_update(user_id, messages, model_policy=policy)
+        await run_pipeline_from_conversation(
+            user_id, messages, model_policy=policy, source_turn=session_id
+        )
     except Exception as exc:  # noqa: BLE001 — memory extraction is auxiliary
         _logger.debug("memory_extraction_skipped", error=str(exc))
     reply = await _apply_output_transform(reply, governance, session_id, agent_name, user_id)
@@ -3150,6 +3165,8 @@ async def run_stream(
     # Memory extraction unified onto intelligence/memory (class C). Best-effort and
     # awaited (same blocking profile as the prior inline extract_and_save).
     try:
-        await extract_and_update(user_id, messages, model_policy=policy)
+        await run_pipeline_from_conversation(
+            user_id, messages, model_policy=policy, source_turn=session_id
+        )
     except Exception as exc:  # noqa: BLE001 — memory extraction is auxiliary
         _logger.debug("memory_extraction_skipped", error=str(exc))

@@ -43,7 +43,7 @@ def mock_loop_env(monkeypatch) -> MagicMock:
     monkeypatch.setattr(loop, "get_schemas", lambda: [])
     monkeypatch.setattr(loop, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(loop, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(loop, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(loop, "run_pipeline_from_conversation", AsyncMock())
     monkeypatch.setattr(loop, "available_skills_prompt", lambda *a, **k: "")
     monkeypatch.setattr(
         loop,
