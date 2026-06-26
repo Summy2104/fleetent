@@ -154,6 +154,26 @@ def list_providers() -> list[dict[str, Any]]:
     return [_decode(r) for r in rows]
 
 
+def provider_key_for_env(env_name: str) -> str | None:
+    """Return a provider's inline plaintext key whose ``api_key_env`` matches ``env_name``.
+
+    The provider row is the shared source of truth for a model key, so both platform-direct
+    materialize and node desired-state delivery seed an agent's model env from here when no
+    per-agent inject slot supplies it.
+
+    Args:
+        env_name: The agent-referenced model API-key env-var name.
+
+    Returns:
+        The matching provider's inline ``api_key``, or ``None`` if no provider declares this
+        env name or the matching provider has no inline key.
+    """
+    for provider in list_providers():
+        if provider.get("api_key_env") == env_name and provider.get("api_key"):
+            return str(provider["api_key"])
+    return None
+
+
 def _decode(row: dict[str, Any]) -> dict[str, Any]:
     out = dict(row)
     for jf in _JSON_FIELDS:

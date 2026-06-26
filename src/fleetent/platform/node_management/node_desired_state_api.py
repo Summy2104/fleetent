@@ -11,9 +11,11 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from fleetent import agent_store, audit_log
+from fleetent.agent_config import collect_env_var_names
 from fleetent.platform import im_gateway_management
 from fleetent.platform.agent_lifecycle import credential_slots, materialize, secret_store
 from fleetent.platform.agent_management_console import agent_admin_store
+from fleetent.platform.model_provider_management import provider_admin_store
 from fleetent.platform.node_management import node_store, placement_store
 from fleetent.platform.skill_management import bundle_cache
 from fleetent.platform.skill_management.pool_git import pool_version_for_skill
@@ -242,6 +244,16 @@ def _agent_secrets(agent: agent_store.Agent) -> dict[str, str]:
         value = secret_store.get_decrypted(agent.id, slot.env_name)
         if value is not None:
             secrets[slot.env_name] = value
+    # Seed model env from the provider row (shared source of truth) for any referenced env
+    # name not already supplied by a per-agent inject slot, mirroring materialize._seed_env so
+    # node-managed agents resolve the same model key as platform-direct materialize.
+    agent_file = materialize.agent_file_from_store(agent)
+    for env_name in collect_env_var_names(agent_file):
+        if env_name in secrets:
+            continue
+        provider_key = provider_admin_store.provider_key_for_env(env_name)
+        if provider_key:
+            secrets[env_name] = provider_key
     return secrets
 
 

@@ -422,10 +422,7 @@ def _provider_key_for_env(env_name: str) -> str | None:
     Lets a provider authored with an inline key seed the agent's ``.env`` without a separate
     inject slot — the provider row is the shared source of truth for that model key.
     """
-    for provider in provider_admin_store.list_providers():
-        if provider.get("api_key_env") == env_name and provider.get("api_key"):
-            return str(provider["api_key"])
-    return None
+    return provider_admin_store.provider_key_for_env(env_name)
 
 
 def _parse_env(text: str) -> dict[str, str]:
