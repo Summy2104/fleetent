@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import ipaddress
+import logging
+import re
 from collections.abc import AsyncIterator
 from typing import Protocol
 
@@ -17,6 +20,31 @@ from fleetent.node.forwarder_contract import (
     forwarder_ws_url,
 )
 from fleetent.platform.node_management import node_store
+
+_logger = logging.getLogger(__name__)
+
+# RFC-1123 hostname: dot-separated labels of [A-Za-z0-9-], each 1-63 chars, not
+# starting/ending with a hyphen; total length <= 253. Anchored, so any value with
+# URL-smuggling characters (/, ?, #, @, :, whitespace, _) fails to match.
+_HOSTNAME_RE = re.compile(
+    r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*$"
+)
+
+
+def _is_valid_forward_host(host: str) -> bool:
+    """Whether a node-reported forward_host is safe to interpolate into a dial URL.
+
+    The value is self-reported by the node and spliced into ``http://{host}:port``.
+    Without this guard a value carrying URL-smuggling characters (``@``, ``/``,
+    ``?``, ``#``, ``:``, whitespace) could redirect the platform's request to a
+    different host (SSRF). Accept only a bare IPv4 literal or RFC-1123 hostname.
+    Loopback/private addresses are intentionally allowed — colocated on-prem nodes
+    legitimately advertise ``127.0.0.1`` or internal IPs.
+    """
+    try:
+        return ipaddress.ip_address(host).version == 4
+    except ValueError:
+        return bool(_HOSTNAME_RE.match(host))
 
 
 class AgentTransport(Protocol):
@@ -138,15 +166,19 @@ def _forwarder_base_url(node_id: str) -> str:
     Reading the reported address here (platform side) keeps node/ off the management DB.
     """
     host = node_store.get_forward_host(node_id)
-    if host:
+    if host and _is_valid_forward_host(host):
         return f"http://{host}:{DEFAULT_FORWARDER_PORT}"
+    if host:
+        _logger.warning("ignoring malformed reported forward_host %r for node %s", host, node_id)
     return forwarder_base_url(node_id)
 
 
 def _forwarder_ws_url(node_id: str) -> str:
     host = node_store.get_forward_host(node_id)
-    if host:
+    if host and _is_valid_forward_host(host):
         return f"ws://{host}:{DEFAULT_FORWARDER_PORT}"
+    if host:
+        _logger.warning("ignoring malformed reported forward_host %r for node %s", host, node_id)
     return forwarder_ws_url(node_id)
 
 
