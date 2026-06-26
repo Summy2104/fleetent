@@ -47,15 +47,16 @@ def commit_facts(
     new_facts: list[Fact] = []
 
     with db.transaction() as conn:
+        # Process directives (rename/forget) before inserting new facts so that
+        # forget directives only retract facts that existed before this turn —
+        # not companion facts inserted in the same transaction.
         for cf in classified:
             if cf.relation == RENAME_RELATION:
-                # A rename directive, not a fact: migrate the whole old subject
-                # (subject) to the new name (object), then drop the directive.
                 _migrate_subject(conn, user_id, cf.subject, cf.object, now, source_turn)
-                continue
-            if cf.relation == FORGET_RELATION:
-                # A forget directive, not a fact: retract the matching fact(s).
+            elif cf.relation == FORGET_RELATION:
                 _forget(conn, user_id, cf.subject, cf.object, now)
+        for cf in classified:
+            if cf.relation in (RENAME_RELATION, FORGET_RELATION):
                 continue
             inserted = _commit_one(conn, user_id, cf, now, source_turn)
             if inserted is not None:

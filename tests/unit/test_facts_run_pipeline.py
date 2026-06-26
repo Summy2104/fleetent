@@ -17,7 +17,9 @@ async def test_run_pipeline_end_to_end(monkeypatch) -> None:
 
     captured: dict[str, object] = {}
 
-    async def _fake_extract(turn_content, llm_client, known_relations=None, user_aliases=None):
+    async def _fake_extract(
+        turn_content, llm_client, known_relations=None, user_aliases=None, active_facts=None
+    ):
         return [RawFact(subject="user", relation="has_skill", object="Rust", temporal="none")]
 
     async def _fake_resolve(raw, store, llm_client):
@@ -53,6 +55,7 @@ async def test_run_pipeline_end_to_end(monkeypatch) -> None:
     monkeypatch.setattr(facts_pipeline, "_commit_facts", _fake_commit)
     monkeypatch.setattr(facts_pipeline, "_sync_vectors", _fake_sync)
     monkeypatch.setattr(facts_pipeline, "_active_facts_for_relation", lambda *a: [])
+    monkeypatch.setattr(facts_pipeline, "_all_active_facts_for_user", lambda uid: [])
     monkeypatch.setattr(facts_pipeline, "_relation_store", lambda: _FakeRelationStore())
     monkeypatch.setattr(facts_pipeline, "_known_user_aliases", lambda uid: set())
 
@@ -76,7 +79,9 @@ async def test_run_pipeline_no_facts_skips_commit(monkeypatch) -> None:
 
     called = {"commit": False}
 
-    async def _fake_extract(turn_content, llm_client, known_relations=None, user_aliases=None):
+    async def _fake_extract(
+        turn_content, llm_client, known_relations=None, user_aliases=None, active_facts=None
+    ):
         return []
 
     def _fake_commit(user_id, classified, db, *, source_turn):
@@ -85,9 +90,9 @@ async def test_run_pipeline_no_facts_skips_commit(monkeypatch) -> None:
 
     monkeypatch.setattr(facts_pipeline, "extract_facts", _fake_extract)
     monkeypatch.setattr(facts_pipeline, "_commit_facts", _fake_commit)
+    monkeypatch.setattr(facts_pipeline, "_all_active_facts_for_user", lambda uid: [])
     monkeypatch.setattr(facts_pipeline, "_relation_store", lambda: _FakeRelationStore())
     monkeypatch.setattr(facts_pipeline, "_known_user_aliases", lambda uid: set())
-    monkeypatch.setattr(facts_pipeline, "_relation_store", lambda: _FakeRelationStore())
 
     await facts_pipeline.run_pipeline(
         user_id="u1",
@@ -105,7 +110,9 @@ async def test_run_pipeline_logs_input_for_diagnosis(monkeypatch) -> None:
 
     logged = {}
 
-    async def _fake_extract(turn_content, llm_client, known_relations=None, user_aliases=None):
+    async def _fake_extract(
+        turn_content, llm_client, known_relations=None, user_aliases=None, active_facts=None
+    ):
         return []  # 0 facts — the case we need to diagnose
 
     class _Slog:
@@ -114,6 +121,7 @@ async def test_run_pipeline_logs_input_for_diagnosis(monkeypatch) -> None:
                 logged.update(fields)
 
     monkeypatch.setattr(facts_pipeline, "extract_facts", _fake_extract)
+    monkeypatch.setattr(facts_pipeline, "_all_active_facts_for_user", lambda uid: [])
     monkeypatch.setattr(facts_pipeline, "_relation_store", lambda: _FakeRelationStore())
     monkeypatch.setattr(facts_pipeline, "_known_user_aliases", lambda uid: set())
     monkeypatch.setattr(facts_pipeline, "slog", _Slog())

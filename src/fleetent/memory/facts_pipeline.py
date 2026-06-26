@@ -76,6 +76,12 @@ EXTRACT_SYSTEM = (
     "For a PROGRAMMING LANGUAGE the user likes/uses, ALWAYS use "
     "relation='prefers_language' (object = the language), never prefers_tool — "
     "reserve prefers_tool for non-language tools (editors, frameworks, CLIs). "
+    "For things the user DISLIKES, HATES, or says they do NOT like ('我不喜欢X' / "
+    "'I don't like X' / '我讨厌X' / 'X 太烂了'), ALWAYS extract BOTH: "
+    "(1) relation='dislikes', object=<the thing> — to record the aversion; AND "
+    "(2) if [已有记忆] shows a contradicting positive fact about the same object "
+    "(e.g. likes=X or prefers_language=X), also emit relation='forget', object=<the thing> "
+    "— to retract the old fact. Never skip the 'dislikes' fact; never emit only 'forget'. "
     "For a SKILL or thing the user knows how to do, use relation='has_skill' with "
     "object = a SHORT canonical skill NAME (e.g. object=<short skill name>), NOT a "
     "boolean/restatement. Never fold the skill into the relation name and never use "
@@ -133,12 +139,38 @@ _REUSE_INSTRUCTION = (
     "Existing relations:\n{relations}"
 )
 
+_CONFLICT_RETRACT_INSTRUCTION = (
+    "\n\nExisting memories will be shown in the user message under [已有记忆]. "
+    "When a new statement DIRECTLY contradicts an existing memory (same object, "
+    "opposite sentiment or meaning — e.g. user now dislikes something they "
+    "previously liked, or denies a fact they previously stated): "
+    "(1) FIRST emit the new fact normally (e.g. relation='dislikes', object=<the thing>); "
+    "(2) THEN also emit relation='forget', object=<the contradicted object> to retract "
+    "the old memory. Always emit the new fact — never emit only 'forget'. "
+    "Only emit 'forget' for DIRECT contradictions. Do NOT emit 'forget' for "
+    "complementary, related, or merely different facts."
+)
+
 
 def _extract_system_prompt(known_relations: list[str] | None) -> str:
+    base = EXTRACT_SYSTEM + _CONFLICT_RETRACT_INSTRUCTION
     if not known_relations:
-        return EXTRACT_SYSTEM
+        return base
     listed = ", ".join(sorted(known_relations))
-    return EXTRACT_SYSTEM + _REUSE_INSTRUCTION.format(relations=listed)
+    return base + _REUSE_INSTRUCTION.format(relations=listed)
+
+
+def _format_active_facts(facts: list[Fact]) -> str:
+    """Render active facts as a compact snapshot appended to the user message.
+
+    Format: [已有记忆]\\nsubject|relation=object\\n...
+    Gives the extraction LLM visibility into existing memories so it can emit
+    'forget' directives when new statements directly contradict old facts.
+    """
+    if not facts:
+        return ""
+    lines = [f"{f.subject}|{f.relation}={f.object}" for f in facts]
+    return "\n\n[已有记忆]\n" + "\n".join(lines)
 
 
 _VERDICTS: frozenset[str] = frozenset(
@@ -166,8 +198,13 @@ async def run_pipeline(
     # Names the user is already known by, so the LLM using the user's own name as a
     # subject ("Xin works_at …") folds back to 'user' instead of duplicating them.
     user_aliases = _known_user_aliases(user_id)
+    active_facts = _all_active_facts_for_user(user_id)
     raws = await extract_facts(
-        turn_content, llm_client, known_relations=known, user_aliases=user_aliases
+        turn_content,
+        llm_client,
+        known_relations=known,
+        user_aliases=user_aliases,
+        active_facts=active_facts,
     )
     slog.info(
         "facts_extracted",
@@ -327,6 +364,13 @@ def _known_user_aliases(user_id: str) -> set[str]:
     return {f.object.casefold() for f in names}
 
 
+def _all_active_facts_for_user(user_id: str) -> list[Fact]:
+    """Return all active facts for subject='user' to inject into extraction context."""
+    from fleetent.memory import facts_store
+
+    return facts_store.list_active_facts(user_id, subject="user")
+
+
 def _commit_facts(
     user_id: str, classified: list[Any], db: Any, *, source_turn: str | None
 ) -> list[Fact]:
@@ -353,6 +397,7 @@ async def extract_facts(
     llm_client: Any,
     known_relations: list[str] | None = None,
     user_aliases: set[str] | None = None,
+    active_facts: list[Fact] | None = None,
 ) -> list[RawFact]:
     """Extract raw (subject, relation, object) triples from a conversation turn.
 
@@ -364,19 +409,25 @@ async def extract_facts(
     prior name facts); a subject matching one is folded back to 'user' so the
     same person is not split into 'user' vs their own name.
 
+    ``active_facts`` is the current user's active facts snapshot. When provided,
+    it is appended to the user message so the LLM can detect cross-relation
+    contradictions and emit 'forget' directives to retract conflicting old facts.
+
     Malformed entries are skipped with a warning; unparseable LLM output yields
     an empty list.  No DB or vector access here — pure extraction.
     """
     if llm_client is None:
         return []
     system_prompt = _extract_system_prompt(known_relations)
+    snapshot_suffix = _format_active_facts(active_facts or [])
+    user_message = turn_content + snapshot_suffix
     try:
         create_completion = llm_client.chat.completions.create
         response = await create_completion(
             model=getattr(llm_client, "_fleetent_model", "gpt-4o-mini"),
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": turn_content},
+                {"role": "user", "content": user_message},
             ],
             temperature=0,
         )
