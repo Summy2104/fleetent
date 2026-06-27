@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 
 from fleetent.config import Settings
@@ -25,6 +23,9 @@ def test_settings_loads_oidc_defaults_and_platform_yaml(tmp_path, monkeypatch):
                 "  client_id: fleetent-web",
                 "  client_secret_env: FLEETENT_OIDC_CLIENT_SECRET",
                 "  redirect_uri: https://fleetent.example.com/admin/oidc/callback",
+                "  allowed_email_domains:",
+                "    - acme.com",
+                "    - eu.acme.com",
                 "  tenant: acme",
             ]
         ),
@@ -40,8 +41,17 @@ def test_settings_loads_oidc_defaults_and_platform_yaml(tmp_path, monkeypatch):
     assert settings.oidc.client_id == "fleetent-web"
     assert settings.oidc.client_secret_env == "FLEETENT_OIDC_CLIENT_SECRET"
     assert settings.oidc.redirect_uri == "https://fleetent.example.com/admin/oidc/callback"
+    assert settings.oidc.allowed_email_domains == ["acme.com", "eu.acme.com"]
     assert settings.oidc.scopes == ["openid", "email"]
     assert settings.oidc.tenant == "acme"
+
+
+def test_settings_loads_oidc_allowed_email_domains_from_env(monkeypatch):
+    monkeypatch.setenv("OIDC__ALLOWED_EMAIL_DOMAINS", '["acme.com","example.org"]')
+
+    settings = Settings()
+
+    assert settings.oidc.allowed_email_domains == ["acme.com", "example.org"]
 
 
 def test_validate_config_rejects_inline_oidc_secret_like_value(tmp_path):

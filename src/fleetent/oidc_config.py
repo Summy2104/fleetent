@@ -12,5 +12,6 @@ class OidcSettings(BaseModel):
     client_id: str = ""
     client_secret_env: str = ""
     redirect_uri: str = ""
+    allowed_email_domains: list[str] = Field(default_factory=list)
     scopes: list[str] = Field(default_factory=lambda: ["openid", "email"])
     tenant: str = "default"

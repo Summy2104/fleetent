@@ -18,13 +18,14 @@ from tests.integration._migration_template import apply_migrations
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
     monkeypatch.setenv("FLEETENT_SECRET_KEY", Fernet.generate_key().decode("ascii"))
+    auth._SESSIONS.clear()
     apply_migrations(tmp_path / "users.db")
     app = FastAPI()
     app.include_router(api.router)
     return TestClient(app, raise_server_exceptions=True)
 
 
-def _enable_oidc(monkeypatch, email: str):
+def _enable_oidc(monkeypatch, email: str, allowed_email_domains: list[str] | None = None):
     if tenancy_store.get_tenant("acme") is None:
         tenancy_store.create_tenant(id="acme", name="Acme")
     monkeypatch.setattr(
@@ -36,6 +37,7 @@ def _enable_oidc(monkeypatch, email: str):
             client_id="fleetent-web",
             redirect_uri="https://fleetent.example.com/admin/oidc/callback",
             tenant="acme",
+            allowed_email_domains=allowed_email_domains or [],
         ),
     )
 
@@ -79,6 +81,16 @@ def _session_user_from_redirect(location: str) -> user_store.User:
     return user
 
 
+def _callback_with_fresh_flow(client: TestClient):
+    login = client.get("/admin/oidc/login", follow_redirects=False)
+    state = parse_qs(urlparse(login.headers["location"]).query)["state"][0]
+    return client.get(
+        "/admin/oidc/callback",
+        params={"code": "good-code", "state": state},
+        follow_redirects=False,
+    )
+
+
 def test_oidc_login_redirects_to_idp_and_sets_flow_cookie(client, monkeypatch):
     _enable_oidc(monkeypatch, "person@example.com")
 
@@ -110,6 +122,54 @@ def test_oidc_callback_provisions_email_user_and_creates_session(client, monkeyp
     assert user.tenant_id == "acme"
     assert user.role == "viewer"
     assert im_user_store.list_im_identities(user.id) == []
+
+
+def test_oidc_callback_rejects_disallowed_email_domain_without_session_or_user(
+    client,
+    monkeypatch,
+):
+    email = "person@gmail.com"
+    _enable_oidc(monkeypatch, email, allowed_email_domains=["acme.com"])
+    sessions_before = set(auth._SESSIONS)
+
+    response = _callback_with_fresh_flow(client)
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "email domain not allowed"
+    assert "location" not in response.headers
+    assert set(auth._SESSIONS) == sessions_before
+    assert user_store.get_by_email("acme", email) is None
+
+
+def test_oidc_callback_allows_configured_email_domain(client, monkeypatch):
+    email = "Alice@ACME.com"
+    _enable_oidc(monkeypatch, email, allowed_email_domains=["acme.com"])
+
+    response = _callback_with_fresh_flow(client)
+
+    assert response.status_code == 302
+    user = _session_user_from_redirect(response.headers["location"])
+    assert user.email == email.lower()
+    assert user.tenant_id == "acme"
+
+
+def test_oidc_callback_rejects_existing_user_with_disallowed_email_domain(
+    client,
+    monkeypatch,
+):
+    email = "existing.person@gmail.com"
+    if tenancy_store.get_tenant("acme") is None:
+        tenancy_store.create_tenant(id="acme", name="Acme")
+    existing, _ = user_store.create_user("Existing Person", email=email, tenant_id="acme")
+    _enable_oidc(monkeypatch, email, allowed_email_domains=["acme.com"])
+    sessions_before = set(auth._SESSIONS)
+
+    response = _callback_with_fresh_flow(client)
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "email domain not allowed"
+    assert set(auth._SESSIONS) == sessions_before
+    assert user_store.get_by_email("acme", email).id == existing.id
 
 
 def test_oidc_callback_reuses_existing_email_user_without_duplicate_create(client, monkeypatch):

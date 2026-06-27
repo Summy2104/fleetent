@@ -16,20 +16,23 @@ from pydantic import BaseModel
 
 from fleetent import audit_log, auth, user_store
 from fleetent.config import Settings
+from fleetent.oidc_config import OidcSettings
 from fleetent.platform import im_gateway_management as im
 from fleetent.platform.im_gateway_management.pending_link_store import PendingLinkStore
 from fleetent.platform.user_management import api_key_store, block_service
 from fleetent.platform.user_management.oidc import (
     OidcAuthError,
     OidcRelyingParty,
-    OidcSettings,
     _oidc_tenant_for,
     decode_flow_state,
+    email_domain_allowed,
     encode_flow_state,
     flow_cookie_ttl_seconds,
 )
+from fleetent.structured_logging import get_logger
 
 router = APIRouter(prefix="/admin")
+_logger = get_logger("platform.user_management")
 
 IDLE_TIMEOUT_SECONDS = 1800
 _ADMIN_ROLES = {"admin", "built_in_admin"}
@@ -157,6 +160,10 @@ def oidc_callback(
         raise HTTPException(status_code=401, detail="email claim must be verified")
     if not identity.email.strip():
         raise HTTPException(status_code=401, detail="email claim missing")
+    if not email_domain_allowed(identity.email, settings.allowed_email_domains):
+        domain = identity.email.rsplit("@", 1)[-1].lower() if "@" in identity.email else ""
+        _logger.warn("oidc email domain denied", domain=domain, issuer=settings.issuer)
+        raise HTTPException(status_code=403, detail="email domain not allowed")
 
     user = im.resolve_or_provision(
         _oidc_tenant_for(identity.email, identity.claims, settings),
