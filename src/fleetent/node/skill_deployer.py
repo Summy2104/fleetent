@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import io
 import json
-import os
 import shutil
 import tarfile
 import tempfile
@@ -27,17 +26,26 @@ class NodeSkillDeployer:
         for manifest in manifests:
             self._sync_one(skills_root, manifest)
 
-    def observe(self, agent_home: Path, manifests: list[dict[str, str]]) -> list[dict[str, str | bool]]:
+    def observe(
+        self, agent_home: Path, manifests: list[dict[str, str]]
+    ) -> list[dict[str, str | bool]]:
         skills_root = agent_home / "skills"
         observed: list[dict[str, str | bool]] = []
         for manifest in manifests:
             skill_name = manifest["name"]
             skill_dir = skills_root / skill_name
             current_hash = _skill_home_hash(skill_dir)
+            metadata = _read_metadata(skill_dir)
+            deployed_hash = metadata.get("home_hash") if metadata is not None else None
+            # Drift = the home copy changed since we deployed it. Compare against the
+            # deploy-time home_hash (same _skill_home_hash algorithm), never against
+            # base_version: the platform derives base_version with a different
+            # (bundle-member) algorithm, so it never equals current_hash even for
+            # identical content and would flag every node-managed skill as drifted.
             drift = bool(
                 current_hash is not None
                 and (
-                    current_hash != manifest["base_version"]
+                    (deployed_hash is not None and current_hash != deployed_hash)
                     or _has_runtime_provenance(skill_dir)
                 )
             )
@@ -54,14 +62,21 @@ class NodeSkillDeployer:
     def _sync_one(self, skills_root: Path, manifest: dict[str, str]) -> None:
         skill_name = manifest["name"]
         desired_version = manifest["base_version"]
+        desired_epoch = int(manifest.get("resync_epoch") or 0)
         skill_dir = skills_root / skill_name
         metadata = _read_metadata(skill_dir)
         current_hash = _skill_home_hash(skill_dir)
+        local_epoch = int(metadata.get("resync_epoch") or 0) if metadata is not None else 0
 
-        if metadata is not None and metadata.get("home_hash") != current_hash:
-            return
-        if metadata is not None and metadata.get("base_version") == desired_version:
-            return
+        # A bumped resync_epoch (set by the platform after a backflow accept/reject/fork)
+        # forces a redeploy that overrides local drift — the decision has resolved it, so
+        # the home copy must return to the pool head instead of staying drifted forever.
+        force = desired_epoch > local_epoch
+        if not force:
+            if metadata is not None and metadata.get("home_hash") != current_hash:
+                return
+            if metadata is not None and metadata.get("base_version") == desired_version:
+                return
 
         bundle_bytes = self._download_bundle(manifest)
         extracted_skill_dir = _extract_bundle(bundle_bytes, skill_name)
@@ -74,6 +89,7 @@ class NodeSkillDeployer:
                     "base_version": desired_version,
                     "base_commit": manifest["base_commit"],
                     "home_hash": deployed_hash,
+                    "resync_epoch": str(desired_epoch),
                 },
             )
         finally:

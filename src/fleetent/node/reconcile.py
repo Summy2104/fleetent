@@ -92,6 +92,12 @@ class NodeReconciler:
                 )
                 self._backend.spawn(name, desired.tenant_id)
                 hashes[name] = desired_hash
+            else:
+                # Running with unchanged config: still reconcile skills every tick so new
+                # pool versions and post-backflow forced resyncs (resync_epoch) are applied
+                # without waiting for a respawn — otherwise an accepted/rejected drift never
+                # clears on the node and re-nomination loops forever.
+                self._sync_skills(name, desired.tenant_id, desired.skill_manifests)
 
         self._write_hashes(hashes)
         self._post_status(desired_state)
@@ -157,15 +163,26 @@ class NodeReconciler:
             _logger.warn("node_write_home_config_parse_error", agent_name=agent_name)
             env_names = []
         ensure_env_scaffold(home, referenced_env_names=env_names, secrets=secrets)
-        if skill_manifests:
-            try:
-                self._skill_deployer.sync(home, skill_manifests)
-            except Exception as exc:
-                _logger.warn(
-                    "node_skill_deploy_failed",
-                    agent_name=agent_name,
-                    error=str(exc),
-                )
+        self._sync_skills(agent_name, tenant_id, skill_manifests)
+
+    def _sync_skills(
+        self,
+        agent_name: str,
+        tenant_id: str,
+        skill_manifests: list[dict[str, str]] | None,
+    ) -> None:
+        """Bulkheaded skill deploy; a bad bundle is logged, never aborts reconcile."""
+        if not skill_manifests:
+            return
+        home = self._home_dir(agent_name, tenant_id)
+        try:
+            self._skill_deployer.sync(home, skill_manifests)
+        except Exception as exc:
+            _logger.warn(
+                "node_skill_deploy_failed",
+                agent_name=agent_name,
+                error=str(exc),
+            )
 
     def _env_has_values(self, agent_name: str, tenant_id: str) -> bool:
         """Return True if the agent's .env has at least one non-empty, non-TUI-token value."""

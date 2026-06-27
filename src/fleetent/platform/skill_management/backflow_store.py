@@ -228,8 +228,8 @@ def _capture_proposed_bundle(
 
 
 def _capture_bundle_from_owning_node(*, agent_id: int, skill_name: str) -> dict[str, str] | None:
-    from fleetent.node.forwarder_contract import forwarder_base_url
     from fleetent.platform.node_management import node_store, placement_store
+    from fleetent.platform.node_management.node_addressing import resolve_forwarder_base_url
 
     agent = agent_store.get_by_id(agent_id)
     if agent is None:
@@ -242,7 +242,7 @@ def _capture_bundle_from_owning_node(*, agent_id: int, skill_name: str) -> dict[
     if not service_key:
         return None
     response = httpx.get(
-        f"{forwarder_base_url(node_id)}/forward/agents/{agent.name}/skills/{skill_name}/bundle",
+        f"{resolve_forwarder_base_url(node_id)}/forward/agents/{agent.name}/skills/{skill_name}/bundle",
         headers={
             "Authorization": f"Bearer {service_key}",
             "X-Fleetent-Tenant-Id": agent.tenant_id,
