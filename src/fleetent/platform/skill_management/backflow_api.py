@@ -198,8 +198,10 @@ def accept_proposal(
     if new_sha is not None:
         skill_admin_store.set_current_version(skill_name, new_sha)
 
-    # Clear drift for the source agent
+    # Clear drift and signal the owning node to re-sync its home copy to the new pool
+    # head; otherwise the node keeps reporting drift and re-nomination loops forever.
     skill_admin_store.set_drift(agent_id, skill_name, drifted=False)
+    skill_admin_store.bump_resync_epoch(agent_id, skill_name)
 
     # Close proposal; record overridden_head if conflict
     backflow_store.set_status(proposal_id, "accepted", overridden_head=overridden_head)
@@ -222,8 +224,10 @@ def reject_proposal(
     skill_name: str = row["skill_name"]
     agent_id: int = row["agent_id"]
 
-    # Clear drift so next materialize will overwrite the evolved home copy
+    # Reject discards the local evolution: clear drift and signal the owning node to
+    # re-sync its home copy back to the (unchanged) pool head, reverting the edit.
     skill_admin_store.set_drift(agent_id, skill_name, drifted=False)
+    skill_admin_store.bump_resync_epoch(agent_id, skill_name)
 
     # Close proposal
     backflow_store.set_status(proposal_id, "rejected")
@@ -270,7 +274,9 @@ def fork_proposal(
     # Rebind the source agent to the fork and clear drift on the original binding.
     skill_admin_store.set_binding(agent_id, skill_name, False, updated_by=user.name)
     skill_admin_store.set_binding(agent_id, fork_name, True, updated_by=user.name)
+    # The fork became a new skill; revert the original on the node and clear its drift.
     skill_admin_store.set_drift(agent_id, skill_name, drifted=False)
+    skill_admin_store.bump_resync_epoch(agent_id, skill_name)
 
     # Close proposal
     backflow_store.set_status(proposal_id, "forked", forked_as=fork_name)
