@@ -501,6 +501,8 @@ def list_mcp_servers(
             "url": row["url"],
             "command": row["command"],
             "args": row["args"],
+            "env": row["env"],
+            "headers": row["headers"],
             "enabled": row["enabled"],
             "status": "configured" if row["enabled"] else "disabled",
             "tool_count": 0,

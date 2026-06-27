@@ -66,6 +66,7 @@ def test_agent_admin_yaml_bindings_and_versions(monkeypatch):
                 "command": "",
                 "args": None,
                 "env": None,
+                "headers": None,
             }
             if sid == "global" and agent_id is None
             else None
@@ -471,6 +472,8 @@ async def test_connector_admin_catalog_mcp_and_grant_handlers(monkeypatch):
             "url": "https://mcp",
             "command": "",
             "args": None,
+            "env": None,
+            "headers": None,
             "enabled": True,
             "agent_id": None,
         }
@@ -496,6 +499,8 @@ async def test_connector_admin_catalog_mcp_and_grant_handlers(monkeypatch):
                 "url": kwargs["url"],
                 "command": kwargs["command"],
                 "args": kwargs["args"],
+                "env": kwargs.get("env"),
+                "headers": kwargs.get("headers"),
                 "enabled": True,
                 "agent_id": kwargs.get("agent_id"),
             },
