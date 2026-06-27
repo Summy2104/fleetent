@@ -23,6 +23,37 @@ _KNOWLEDGE_LIMIT = 10
 _logger = get_logger("long_term_ctx")
 
 
+# ── indirection seams for always-facts (monkeypatchable in unit tests) ────────
+
+
+def _list_always_facts(user_id: str) -> list[Any]:
+    from fleetent.memory import facts_store
+
+    return facts_store.list_always_facts(user_id)
+
+
+async def _search_facts_situational(user_id: str, query: str, limit: int) -> list[Any]:
+    return await memory.search_facts(user_id, query, limit=limit)
+
+
+async def _search_agent_memory(query: str, limit: int) -> list[Any]:
+    return await agent_memory.search_agent_memory(query, limit=limit)
+
+
+async def _search_knowledge_seam(
+    user_id: str,
+    query: str,
+    agent_id: str,
+    limit: int,
+    audit_context: Any = None,
+) -> list[Any]:
+    return await _search_knowledge(user_id, query, agent_id, limit, audit_context=audit_context)
+
+
+# Alias exposed for monkeypatching in tests
+_search_knowledge_ref = _search_knowledge_seam
+
+
 async def _retrieve_with_timeout[T](
     name: str,
     coro_factory: Callable[[], Awaitable[T]],
@@ -208,6 +239,17 @@ async def build_context(
         )
 
     policy = _resolve_policy(available_tokens)
+
+    # Always-scope facts: unconditional injection — pure SQL, no vector, no timeout.
+    # Run synchronously before the concurrent retrieval so they are always present
+    # regardless of whether the vector paths degrade. Best-effort: DB not yet wired
+    # (unit tests, eval harness) must not break the run.
+    try:
+        always_facts = _list_always_facts(user_id)
+    except Exception:
+        always_facts = []
+    always_candidates = [_always_fact_candidate(f) for f in always_facts]
+
     # Retrieve across all subjects (user / agent / third parties). Each fact's
     # statement names its subject explicitly, so the model can tell whose fact it
     # is without us filtering by subject (which would hide agent/third-party facts).
@@ -220,7 +262,7 @@ async def build_context(
     memories, knowledge_results, agent_memory_results = await asyncio.gather(
         _retrieve_with_timeout(
             "memory",
-            lambda: memory.search_facts(user_id, query, limit=_MEMORY_LIMIT),
+            lambda: _search_facts_situational(user_id, query, _MEMORY_LIMIT),
             timeout=timeout,
             empty=[],
         ),
@@ -234,12 +276,12 @@ async def build_context(
         ),
         _retrieve_with_timeout(
             "agent_memory",
-            lambda: agent_memory.search_agent_memory(query, limit=policy.agent_memory_top_k),
+            lambda: _search_agent_memory(query, policy.agent_memory_top_k),
             timeout=timeout,
             empty=[],
         ),
     )
-    if not memories and not knowledge_results and not agent_memory_results:
+    if not always_candidates and not memories and not knowledge_results and not agent_memory_results:
         return BuiltContext(
             text="",
             sources=[],
@@ -270,8 +312,8 @@ async def build_context(
     )
 
     return BuiltContext(
-        text=_render_context(selection.included),
-        sources=[candidate.source for candidate in selection.included],
+        text=_render_context_with_always(always_candidates, selection.included),
+        sources=[candidate.source for candidate in always_candidates] + [candidate.source for candidate in selection.included],
         budget_metadata=BudgetMetadata(
             effective_budget=policy.max_tokens,
             memory_used_tokens=selection.memory_used_tokens,
@@ -425,6 +467,8 @@ _SECTION_HEADERS = {
     "knowledge": "[Knowledge — 知识库检索结果]",
 }
 
+_ALWAYS_SECTION_HEADER = "[Behavioral directives — 始终生效的行为规则]"
+
 
 def _render_context(candidates: list[_ContextCandidate]) -> str:
     lines: list[str] = []
@@ -438,6 +482,43 @@ def _render_context(candidates: list[_ContextCandidate]) -> str:
             active_section = source_type
         lines.append(candidate.line)
     return "\n".join(lines)
+
+
+def _render_context_with_always(
+    always_candidates: list[_ContextCandidate],
+    situational_candidates: list[_ContextCandidate],
+) -> str:
+    """Render always-scope facts first (unconditional), then situational candidates."""
+    parts: list[str] = []
+    if always_candidates:
+        parts.append(_ALWAYS_SECTION_HEADER)
+        for candidate in always_candidates:
+            parts.append(candidate.line)
+    situational_text = _render_context(situational_candidates)
+    if situational_text:
+        if parts:
+            parts.append("")
+        parts.append(situational_text)
+    return "\n".join(parts)
+
+
+def _always_fact_candidate(fact: Any) -> _ContextCandidate:
+    """Build a context candidate for an always-scope fact (score=1.0, no vector)."""
+    if fact.statement:
+        line = f"- {fact.statement}"
+    else:
+        line = f"- {_subject_phrase(fact.subject)} {fact.relation}: {fact.object}"
+    return _ContextCandidate(
+        source=ContextSource(
+            source_type="memory",
+            source_id=fact.fact_id,
+            score=1.0,
+            metadata={"relation": fact.relation, "scope": "always"},
+            token_estimate=len(line),
+        ),
+        line=line,
+        token_estimate=len(line),
+    )
 
 
 def _subject_phrase(subject: str) -> str:
