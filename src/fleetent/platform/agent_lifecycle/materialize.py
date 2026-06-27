@@ -121,11 +121,19 @@ def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
 
 def desired_state_payload_from_agent_file(agent_file: AgentFile) -> dict[str, Any]:
     """Serialize the non-secret subset of an AgentFile for node desired-state delivery."""
-    payload = _strip_secret_plumbing(agent_file.model_dump(mode="json", exclude_defaults=False))
+    dumped = agent_file.model_dump(mode="json", exclude_defaults=False)
+    # Capture each MCP server's ``env:`` references (variable-name pointers, like
+    # ``api_key_env``) before secret stripping removes every ``env`` block. Plaintext env
+    # values are NOT captured — they stay stripped so a secret is never delivered inline.
+    mcp_env_refs = _mcp_env_refs_by_id(dumped)
+    payload: dict[str, Any] = _strip_secret_plumbing(dumped)
     # Render MCP servers in the standard ``mcpServers`` map form the agent runtime accepts;
     # the legacy ``mcp_servers`` list is rejected by ``load_agent_file``. Done after secret
     # stripping so ``env``/``credential_ref`` are already removed from each server entry.
     _mcp_payload_to_map(payload)
+    # Re-attach the preserved ``env:`` references onto the rendered ``mcpServers`` map so the
+    # node collects their var names (``referenced_env_names``) and fills them from secrets.
+    _restore_mcp_env_refs(payload, mcp_env_refs)
     return payload
 
 
@@ -140,6 +148,37 @@ def _strip_secret_plumbing(value: Any) -> Any:
             sanitized[key] = _strip_secret_plumbing(item)
         return sanitized
     return value
+
+
+def _mcp_env_refs_by_id(dumped: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """Per-server ``env:`` references from a dumped AgentFile, keyed by server id.
+
+    Only ``env:VAR`` reference values are kept — they name a ``.env`` variable (a non-secret
+    pointer, like ``api_key_env``), so delivering them is safe. Plaintext or non-string
+    values are dropped here and left to ``_strip_secret_plumbing``.
+    """
+    refs: dict[str, dict[str, str]] = {}
+    for server in dumped.get("mcp_servers") or []:
+        if not isinstance(server, dict):
+            continue
+        env = server.get("env")
+        if not isinstance(env, dict):
+            continue
+        kept = {str(k): v for k, v in env.items() if isinstance(v, str) and v.startswith("env:")}
+        if kept:
+            refs[str(server["id"])] = kept
+    return refs
+
+
+def _restore_mcp_env_refs(payload: dict[str, Any], refs: dict[str, dict[str, str]]) -> None:
+    """Re-attach preserved ``env:`` references onto the rendered ``mcpServers`` map (in place)."""
+    servers = payload.get("mcpServers")
+    if not isinstance(servers, dict):
+        return
+    for server_id, env in refs.items():
+        entry = servers.get(server_id)
+        if isinstance(entry, dict):
+            entry["env"] = env
 
 
 def _materialize_im_access(base: AgentFile, agent: agent_store.Agent) -> AgentFile:
@@ -322,6 +361,7 @@ def _mcp_servers_for_agent(agent: agent_store.Agent) -> list[McpServerSettings]:
                 command=row["command"],
                 args=row["args"] or [],
                 env=row["env"] or {},
+                headers=row["headers"] or {},
             )
         )
     return servers

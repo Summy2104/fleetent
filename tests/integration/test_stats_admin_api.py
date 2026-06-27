@@ -20,28 +20,31 @@ from fleetent.schema_migrations import migrate
 from tests.integration._migration_template import apply_migrations
 
 
-@pytest.fixture(scope="module")
-def client(tmp_path_factory):
-    mp = pytest.MonkeyPatch()
-    tmp_path = tmp_path_factory.mktemp("db")
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    # Function-scoped on purpose: the real_client fixture does importlib.reload(api),
+    # which re-executes the api module in place and discards any stubs set on it. A
+    # module-scoped client fixture set its api.* stubs once, so a real_client test
+    # interleaved before another client test (random order) wiped them and the
+    # client test hit the real fetch_traces → "no such table: traces". Re-applying
+    # the stubs per test makes client tests immune to that reload.
     managed_db = tmp_path / "managed.db"
-    mp.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     # schedule_store (report scheduling) runs on the unified runtime; point it at a
     # migrated managed DB so scheduled_tasks exists.
-    mp.setenv("DATABASE_URL", f"sqlite:///{managed_db}")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{managed_db}")
     apply_migrations(managed_db)
     # Patch user_store._db directly so _session_for() calls in test bodies work
     # regardless of the autouse _isolate_database_url fixture deleting DATABASE_URL.
     db_instance = create_database(f"sqlite:///{managed_db}")
-    mp.setattr(user_store, "_db", lambda: db_instance)
-    mp.setattr(api, "fetch_traces", lambda **kw: [])
-    mp.setattr(api, "fetch_approvals", lambda agent_id=None: [])
-    mp.setattr(api, "agent_allowed_tools", lambda aid: [])
-    mp.setattr(api, "pricing_table", lambda: None)
+    monkeypatch.setattr(user_store, "_db", lambda: db_instance)
+    monkeypatch.setattr(api, "fetch_traces", lambda **kw: [])
+    monkeypatch.setattr(api, "fetch_approvals", lambda agent_id=None: [])
+    monkeypatch.setattr(api, "agent_allowed_tools", lambda aid: [])
+    monkeypatch.setattr(api, "pricing_table", lambda: None)
     app = FastAPI()
     app.include_router(api.router)
-    yield TestClient(app, raise_server_exceptions=True)
-    mp.undo()
+    return TestClient(app, raise_server_exceptions=True)
 
 
 def _session_for(role: str) -> tuple[str, str]:

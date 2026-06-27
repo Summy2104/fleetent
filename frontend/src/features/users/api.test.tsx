@@ -11,8 +11,13 @@ import {
   useBlockImUserMutation,
   useBlockUserMutation,
   useCreateKeyMutation,
+  useCreateImMappingMutation,
   useCreateUserMutation,
+  useCreateServicePrincipalMutation,
+  useDeleteImUserMutation,
   useDeleteUserMutation,
+  useImIdentityFieldsQuery,
+  useInitiateLinkMutation,
   useImUsersQuery,
   useResetPasswordMutation,
   useRestoreImUserMutation,
@@ -20,7 +25,9 @@ import {
   useRotateKeyMutation,
   useSetRoleMutation,
   useUnblockUserMutation,
+  useUpdateImUserMutation,
   useUpdateUserMutation,
+  useUnlinkIdentityMutation,
   useUserKeysQuery,
   useUsersQuery,
 } from '@/features/users/api';
@@ -50,6 +57,7 @@ type KeyRecord = {
 type ImUserRecord = {
   allowed: boolean;
   id: number;
+  metadata?: Record<string, unknown>;
   platform: string;
   platform_user_id: string;
   status: string;
@@ -71,7 +79,9 @@ function UsersApiProbe(): JSX.Element {
   const users = useUsersQuery();
   const keys = useUserKeysQuery('u1');
   const imUsers = useImUsersQuery();
+  const imFields = useImIdentityFieldsQuery();
   const createUser = useCreateUserMutation();
+  const createServicePrincipal = useCreateServicePrincipalMutation();
   const updateUser = useUpdateUserMutation('u1');
   const setRole = useSetRoleMutation('u1');
   const blockUser = useBlockUserMutation('u1');
@@ -79,11 +89,16 @@ function UsersApiProbe(): JSX.Element {
   const resetPassword = useResetPasswordMutation('u1');
   const deleteUser = useDeleteUserMutation('u2');
   const createKey = useCreateKeyMutation('u1');
+  const createImMapping = useCreateImMappingMutation();
   const rotateKey = useRotateKeyMutation('u1');
   const revokeKey = useRevokeKeyMutation('u1');
   const bindImUser = useBindImUserMutation(7);
   const blockImUser = useBlockImUserMutation(7);
   const restoreImUser = useRestoreImUserMutation(7);
+  const updateImUser = useUpdateImUserMutation(7);
+  const deleteImUser = useDeleteImUserMutation(7);
+  const initiateLink = useInitiateLinkMutation();
+  const unlinkIdentity = useUnlinkIdentityMutation();
 
   return (
     <section>
@@ -99,6 +114,16 @@ function UsersApiProbe(): JSX.Element {
         type="button"
       >
         create user
+      </button>
+      <button
+        onClick={() => {
+          void createServicePrincipal.mutateAsync({ name: 'svc-ingest' }).then((result) => {
+            window.sessionStorage.setItem('service-principal-key', result.api_key_plaintext_once);
+          });
+        }}
+        type="button"
+      >
+        create service principal
       </button>
       <button
         onClick={() =>
@@ -168,10 +193,55 @@ function UsersApiProbe(): JSX.Element {
         revoke key
       </button>
       <button
+        onClick={() =>
+          createImMapping.mutate({
+            platform: 'telegram',
+            platform_user_id: 'T007',
+            user_id: 'u2',
+          })
+        }
+        type="button"
+      >
+        create im mapping
+      </button>
+      <button
         onClick={() => bindImUser.mutate({ user_id: 'u2' })}
         type="button"
       >
         bind im user
+      </button>
+      <button
+        onClick={() =>
+          updateImUser.mutate({
+            metadata: { display_name: 'Alice Slack', notes: 'vip' },
+            platform_user_id: 'U007-NEW',
+          })
+        }
+        type="button"
+      >
+        update im user
+      </button>
+      <button
+        onClick={() => deleteImUser.mutate()}
+        type="button"
+      >
+        delete im user
+      </button>
+      <button
+        onClick={() => {
+          void initiateLink.mutateAsync().then((result) => {
+            window.sessionStorage.setItem('link-code', `${result.code}:${result.expires_at}`);
+          });
+        }}
+        type="button"
+      >
+        initiate link
+      </button>
+      <button
+        onClick={() => unlinkIdentity.mutate({ platform: 'slack', platform_user_id: 'U007-NEW' })}
+        type="button"
+      >
+        unlink identity
       </button>
       <button
         onClick={() => blockImUser.mutate({ reason: 'fraud' })}
@@ -193,7 +263,12 @@ function UsersApiProbe(): JSX.Element {
         {keys.data?.map((key) => `${key.id}:${key.prefix}:${key.masked}`).join('|')}
       </div>
       <div data-testid="im-users">
-        {imUsers.data?.map((user) => `${user.id}:${user.user_id}:${user.status}:${user.allowed}`).join('|')}
+        {imUsers.data
+          ?.map((user) => `${user.id}:${user.platform_user_id}:${user.user_id}:${user.status}:${user.allowed}`)
+          .join('|')}
+      </div>
+      <div data-testid="im-fields">
+        {imFields.data?.slack?.map((field) => `${field.key}:${field.label}`).join('|')}
       </div>
     </section>
   );
@@ -254,6 +329,22 @@ describe('users api hooks', () => {
           },
         ];
         return HttpResponse.json(users[2], { status: 201 });
+      }),
+      http.post(`${API_BASE_URL}/admin/service-principals`, async ({ request }) => {
+        expect(await request.json()).toEqual({ name: 'svc-ingest' });
+        const created = {
+          email: null,
+          id: 'svc1',
+          must_reset: false,
+          name: 'svc-ingest',
+          role: 'viewer',
+          status: 'active',
+        };
+        users = [...users, created];
+        return HttpResponse.json(
+          { user: created, api_key_plaintext_once: 'ma-service-principal-secret' },
+          { status: 201 }
+        );
       }),
       http.patch(`${API_BASE_URL}/admin/users/u1`, async ({ request }) => {
         const body = (await request.json()) as { email: string; name: string };
@@ -330,7 +421,8 @@ describe('users api hooks', () => {
         keys = [];
         return new HttpResponse(null, { status: 204 });
       }),
-      http.get(`${API_BASE_URL}/admin/im-users`, () => HttpResponse.json([]))
+      http.get(`${API_BASE_URL}/admin/im-users`, () => HttpResponse.json([])),
+      http.get(`${API_BASE_URL}/admin/im-users/fields`, () => HttpResponse.json({}))
     );
 
     renderWithProviders(<UsersApiProbe />);
@@ -340,6 +432,12 @@ describe('users api hooks', () => {
     await user.click(screen.getByRole('button', { name: 'create user' }));
     await waitFor(() => {
       expect(screen.getByText(/u3:Bob:viewer:active/)).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'create service principal' }));
+    await waitFor(() => {
+      expect(screen.getByText(/svc1:svc-ingest:viewer:active/)).toBeInTheDocument();
+      expect(window.sessionStorage.getItem('service-principal-key')).toBe('ma-service-principal-secret');
     });
 
     await user.click(screen.getByRole('button', { name: 'update user' }));
@@ -390,7 +488,7 @@ describe('users api hooks', () => {
     });
   });
 
-  it('refreshes IM identities after bind, block, and restore actions', async () => {
+  it('refreshes IM identities after create, bind, block, and restore actions', async () => {
     const user = userEvent.setup({ delay: null });
     let imUsers: ImUserRecord[] = [
       {
@@ -407,10 +505,77 @@ describe('users api hooks', () => {
       http.get(`${API_BASE_URL}/admin/users`, () => HttpResponse.json([])),
       http.get(`${API_BASE_URL}/admin/users/u1/keys`, () => HttpResponse.json([])),
       http.get(`${API_BASE_URL}/admin/im-users`, () => HttpResponse.json(imUsers)),
+      http.get(`${API_BASE_URL}/admin/im-users/fields`, () =>
+        HttpResponse.json({
+          slack: [
+            { key: 'display_name', label: 'Display name' },
+            { key: 'notes', label: 'Notes', multiline: true },
+          ],
+        })
+      ),
+      http.post(`${API_BASE_URL}/admin/im-identities`, async ({ request }) => {
+        expect((await request.json()) as { platform: string; platform_user_id: string; user_id: string }).toEqual({
+          platform: 'telegram',
+          platform_user_id: 'T007',
+          user_id: 'u2',
+        });
+        imUsers = [
+          ...imUsers,
+          {
+            allowed: true,
+            id: 8,
+            platform: 'telegram',
+            platform_user_id: 'T007',
+            status: 'active',
+            user_id: 'u2',
+          },
+        ];
+        return HttpResponse.json({
+          created_at: '2026-06-27T10:00:00Z',
+          id: 8,
+          platform: 'telegram',
+          platform_user_id: 'T007',
+          user_email: null,
+          user_id: 'u2',
+          user_name: 'Bob',
+        }, { status: 201 });
+      }),
       http.post(`${API_BASE_URL}/admin/im-users/7/bind`, async ({ request }) => {
         expect((await request.json()) as { user_id: string }).toEqual({ user_id: 'u2' });
         imUsers = imUsers.map((item) => (item.id === 7 ? { ...item, user_id: 'u2' } : item));
         return HttpResponse.json({ status: 'bound' });
+      }),
+      http.patch(`${API_BASE_URL}/admin/im-users/7`, async ({ request }) => {
+        expect(await request.json()).toEqual({
+          metadata: { display_name: 'Alice Slack', notes: 'vip' },
+          platform_user_id: 'U007-NEW',
+        });
+        imUsers = imUsers.map((item) =>
+          item.id === 7
+            ? {
+                ...item,
+                metadata: { display_name: 'Alice Slack', notes: 'vip' },
+                platform_user_id: 'U007-NEW',
+              }
+            : item
+        );
+        return HttpResponse.json({ status: 'updated' });
+      }),
+      http.delete(`${API_BASE_URL}/admin/im-users/7`, () => {
+        imUsers = imUsers.filter((item) => item.id !== 7);
+        return new HttpResponse(null, { status: 204 });
+      }),
+      http.post(`${API_BASE_URL}/admin/link/initiate`, async ({ request }) => {
+        expect(await request.text()).toBe('');
+        return HttpResponse.json({
+          code: 'link-code-123',
+          expires_at: '2026-06-27T10:10:00+00:00',
+        });
+      }),
+      http.post(`${API_BASE_URL}/admin/link/unlink`, async ({ request }) => {
+        expect(await request.json()).toEqual({ platform: 'slack', platform_user_id: 'U007-NEW' });
+        imUsers = imUsers.filter((item) => item.platform_user_id !== 'U007-NEW');
+        return HttpResponse.json({ status: 'unlinked' });
       }),
       http.post(`${API_BASE_URL}/admin/im-users/7/block`, async ({ request }) => {
         expect((await request.json()) as { reason: string }).toEqual({ reason: 'fraud' });
@@ -429,21 +594,49 @@ describe('users api hooks', () => {
     );
 
     renderWithProviders(<UsersApiProbe />);
-    expect(await screen.findByText(/7:u1:active:true/)).toBeInTheDocument();
+    expect(await screen.findByText(/7:U007:u1:active:true/)).toBeInTheDocument();
+    expect(screen.getByText(/display_name:Display name/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'create im mapping' }));
+    await waitFor(() => {
+      expect(screen.getByText(/8:T007:u2:active:true/)).toBeInTheDocument();
+    });
 
     await user.click(screen.getByRole('button', { name: 'bind im user' }));
     await waitFor(() => {
-      expect(screen.getByText(/7:u2:active:true/)).toBeInTheDocument();
+      expect(screen.getByText(/7:U007:u2:active:true/)).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'update im user' }));
+    await waitFor(() => {
+      expect(screen.getByText(/7:U007-NEW:u2:active:true/)).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'initiate link' }));
+    await waitFor(() => {
+      expect(window.sessionStorage.getItem('link-code')).toBe(
+        'link-code-123:2026-06-27T10:10:00+00:00'
+      );
     });
 
     await user.click(screen.getByRole('button', { name: 'block im user' }));
     await waitFor(() => {
-      expect(screen.getByText(/7:u2:blocked:false/)).toBeInTheDocument();
+      expect(screen.getByText(/7:U007-NEW:u2:blocked:false/)).toBeInTheDocument();
     });
 
     await user.click(screen.getByRole('button', { name: 'restore im user' }));
     await waitFor(() => {
-      expect(screen.getByText(/7:u2:active:true/)).toBeInTheDocument();
+      expect(screen.getByText(/7:U007-NEW:u2:active:true/)).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'unlink identity' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('im-users')).not.toHaveTextContent('7:U007-NEW');
+    });
+
+    await user.click(screen.getByRole('button', { name: 'delete im user' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('im-users')).not.toHaveTextContent('7:U007-NEW');
     });
   });
 });

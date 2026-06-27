@@ -339,6 +339,43 @@ def set_base_commit(agent_id: int, skill_name: str, base_commit: str | None) -> 
         )
 
 
+def bump_resync_epoch(agent_id: int, skill_name: str) -> None:
+    """Increment the resync epoch so the owning node force-redeploys this skill once.
+
+    Called after a backflow decision (accept/reject/fork) to instruct the node to
+    return its drifted home copy to the pool head; without it the node preserves the
+    local drift and re-triggers nomination indefinitely.
+    """
+    with _database().transaction() as conn:
+        conn.execute(
+            """
+            UPDATE agent_skills
+            SET resync_epoch = resync_epoch + 1,
+                updated_at = :updated_at
+            WHERE agent_id = :agent_id AND skill_name = :skill_name
+            """,
+            {"agent_id": agent_id, "skill_name": skill_name, "updated_at": _now()},
+        )
+
+
+def get_resync_epoch(agent_id: int, skill_name: str) -> int:
+    """Return the current resync epoch for a binding (0 if unset or no row)."""
+    row = (
+        _database()
+        .execute(
+            """
+            SELECT resync_epoch FROM agent_skills
+            WHERE agent_id = :agent_id AND skill_name = :skill_name
+            """,
+            {"agent_id": agent_id, "skill_name": skill_name},
+        )
+        .fetchone()
+    )
+    if row is None or row["resync_epoch"] is None:
+        return 0
+    return int(row["resync_epoch"])
+
+
 def drifted_agents(skill_name: str) -> list[int]:
     """Return agent ids whose deployed skill copy is marked drifted."""
     rows = (

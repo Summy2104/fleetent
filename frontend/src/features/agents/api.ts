@@ -291,15 +291,15 @@ export function useAgentSkillsQuery(name: string | null) {
   });
 }
 
-export function useSetAgentSkillMutation(name: string, skillName: string) {
+export function useSetAgentSkillMutation(name: string) {
   const api = useAdminApi();
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (input: Pick<AgentSkillBinding, 'enabled'>) =>
+    mutationFn: (input: AgentSkillBinding) =>
       api.put<{ agent: string; enabled: boolean; skill_name: string }>(
-        `/admin/agents/${name}/skills/${skillName}`,
-        input
+        `/admin/agents/${name}/skills/${input.skill_name}`,
+        { enabled: input.enabled }
       ),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: agentSkillsKey(name) });

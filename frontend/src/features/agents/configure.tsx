@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { MultiSelect, type MultiSelectOption } from '@/components/ui/multi-select';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
@@ -19,7 +20,6 @@ import {
   type AgentImCapabilitiesInput,
   type AgentImGroupInput,
   type AgentModelOverrides,
-  type AgentSkillBinding,
   useActivateAgentVersionMutation,
   useAddAgentImGroupMutation,
   useAgentBindingsQuery,
@@ -358,57 +358,61 @@ function KnowledgeBasesTab({ agentName, canWrite }: { agentName: string; canWrit
   );
 }
 
-function SkillRow({
-  agentName,
-  binding,
-  canWrite,
-}: {
-  agentName: string;
-  binding: AgentSkillBinding;
-  canWrite: boolean;
-}): JSX.Element {
-  const t = useT();
-  const setSkill = useSetAgentSkillMutation(agentName, binding.skill_name);
-  return (
-    <tr className="border-b border-border last:border-0">
-      <td className="px-3 py-2.5 text-sm text-foreground">{binding.skill_name}</td>
-      <td className="px-3 py-2.5 text-right">
-        {canWrite ? (
-          <Switch
-            aria-label={binding.skill_name}
-            checked={binding.enabled}
-            onCheckedChange={(checked) => void setSkill.mutateAsync({ enabled: checked })}
-          />
-        ) : (
-          <span className="text-xs text-muted-foreground">{binding.enabled ? t('agents.enabledStatus') : t('agents.disabledStatus')}</span>
-        )}
-      </td>
-    </tr>
-  );
-}
-
 function SkillsTab({ agentName, canWrite }: { agentName: string; canWrite: boolean }): JSX.Element {
   const t = useT();
   const skills = useAgentSkillsQuery(agentName);
+  const setSkill = useSetAgentSkillMutation(agentName);
+
+  const options = useMemo<MultiSelectOption[]>(
+    () => (skills.data ?? []).map((binding) => ({ value: binding.skill_name, label: binding.skill_name })),
+    [skills.data]
+  );
+  const selected = useMemo(
+    () => (skills.data ?? []).filter((binding) => binding.enabled).map((binding) => binding.skill_name),
+    [skills.data]
+  );
+
   if (skills.data && skills.data.length === 0) {
     return <EmptyState label={t('agents.noSkillsAvailable')} />;
   }
+
+  if (!canWrite) {
+    return (
+      <section className="space-y-3">
+        <TabHeading>{t('agents.skillsTitle')}</TabHeading>
+        {selected.length === 0 ? (
+          <EmptyState label={t('agents.noSkillsBound')} />
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {selected.map((name) => (
+              <span
+                key={name}
+                className="inline-flex items-center rounded-full border border-border bg-secondary/60 px-3 py-1 text-sm"
+              >
+                {name}
+              </span>
+            ))}
+          </div>
+        )}
+      </section>
+    );
+  }
+
   return (
-    <div className="overflow-x-auto rounded-lg border border-border">
-      <table className="w-full">
-        <thead className="bg-secondary/50">
-          <tr>
-            <Th>{t('agents.skillColumn')}</Th>
-            <Th className="text-right">{t('agents.enabledColumn')}</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {(skills.data ?? []).map((binding) => (
-            <SkillRow key={binding.skill_name} agentName={agentName} binding={binding} canWrite={canWrite} />
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <section className="space-y-3">
+      <TabHeading>{t('agents.skillsTitle')}</TabHeading>
+      <MultiSelect
+        className="max-w-xl"
+        triggerLabel={t('agents.skillsTitle')}
+        placeholder={t('agents.selectSkills')}
+        searchPlaceholder={t('agents.searchSkills')}
+        noMatchLabel={t('agents.noSkillsMatch')}
+        removeLabel={(name) => t('agents.remove', { name })}
+        options={options}
+        selected={selected}
+        onToggle={(value, enabled) => void setSkill.mutateAsync({ skill_name: value, enabled })}
+      />
+    </section>
   );
 }
 

@@ -604,14 +604,16 @@ describe('agent configure page bindings', () => {
     renderAgentsRoute('/agents/alpha/configure');
     expect(await screen.findByRole('heading', { name: 'Configure · alpha' })).toBeInTheDocument();
 
-    // Skills tab: flip incident-bridge on via its switch.
+    // Skills tab: enable incident-bridge from the searchable multi-select.
     await user.click(screen.getByRole('tab', { name: 'Skills' }));
     expect(await screen.findByText('crm-ops')).toBeInTheDocument();
-    const incidentSwitch = screen.getByRole('switch', { name: 'incident-bridge' });
-    expect(incidentSwitch).not.toBeChecked();
-    await user.click(incidentSwitch);
+    await user.click(screen.getByRole('combobox', { name: 'Skills' }));
+    await user.click(await screen.findByRole('option', { name: 'incident-bridge' }));
     await waitFor(() => {
-      expect(screen.getByRole('switch', { name: 'incident-bridge' })).toBeChecked();
+      expect(screen.getByRole('option', { name: 'incident-bridge' })).toHaveAttribute(
+        'aria-selected',
+        'true'
+      );
     });
 
     // MCP Servers tab: bind github via the select, then unbind filesystem chip.
@@ -750,10 +752,10 @@ describe('agent configure page bindings', () => {
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Remove / })).not.toBeInTheDocument();
 
-    // Skills tab: switch is replaced by a read-only status label.
+    // Skills tab: the editor is hidden; bound skills show as read-only chips.
     await user.click(screen.getByRole('tab', { name: 'Skills' }));
     expect(await screen.findByText('crm-ops')).toBeInTheDocument();
-    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
 
     // Secrets tab: no set form, no clear buttons.
     await user.click(screen.getByRole('tab', { name: 'Secrets' }));
