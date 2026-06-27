@@ -30,12 +30,13 @@ def test_unit_ci_coverage_gate_keeps_required_scope_and_threshold():
     pipelines = Path("bitbucket-pipelines.yml").read_text(encoding="utf-8")
     guidance = Path("AGENTS.md").read_text(encoding="utf-8")
 
-    assert "uv run coverage run --source=src/fleetent -m pytest tests/unit" in makefile
-    assert "uv run coverage report --fail-under=76" in makefile
-    assert "uv run coverage run --source=src/fleetent -m pytest tests/unit tests/integration" in (
-        makefile
-    )
-    assert "uv run coverage report --fail-under=88" in makefile
+    # Coverage runs in parallel (pytest-cov merges per-worker data; total is identical to
+    # the old serial `coverage run`). The invariants the gate must keep: scope is
+    # src/fleetent and the 76% / 88% thresholds hold.
+    assert "uv run pytest tests/unit -q -n auto -p no:cacheprovider" in makefile
+    assert "--cov=src/fleetent --cov-report=term-missing --cov-fail-under=76" in makefile
+    assert "uv run pytest tests/unit tests/integration -q -n auto -p no:cacheprovider" in makefile
+    assert "--cov=src/fleetent --cov-report=term-missing --cov-fail-under=88" in makefile
     assert "make test-coverage-ci" in pipelines
     # Integration became a pre-merge gate (2026-06-27): the PR/main path now runs
     # unit + frontend + integration; the daily path keeps the combined-coverage gate.

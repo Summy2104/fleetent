@@ -26,7 +26,7 @@ PR_DESELECT :=
 # format/lint debt across other owners' modules, so a whole-tree gate is unviable
 # and you are only accountable for files you touched.
 test-pr: ## PR gate (must be green): unit (minus quarantine) + layer boundaries + ruff on changed files
-	uv run pytest tests/unit -q $(PR_DESELECT)
+	uv run pytest tests/unit -q -n auto -p no:cacheprovider $(PR_DESELECT)
 	uv run python scripts/check_test_layers.py
 	@changed="$$( { git diff --name-only --diff-filter=ACMR main...HEAD -- '*.py'; git diff --name-only --diff-filter=ACMR -- '*.py'; git diff --name-only --cached --diff-filter=ACMR -- '*.py'; } | sort -u | while IFS= read -r f; do [ -f "$$f" ] && printf '%s\n' "$$f"; done )"; \
 	if [ -n "$$changed" ]; then \
@@ -37,15 +37,15 @@ test-pr: ## PR gate (must be green): unit (minus quarantine) + layer boundaries 
 	fi
 
 test-unit: ## Run unit tests
-	uv run pytest tests/unit
+	uv run pytest tests/unit -n auto -p no:cacheprovider
 
-test-unit-ci: ## Run CI unit tests with 76% coverage gate
-	uv run coverage run --source=src/fleetent -m pytest tests/unit
-	uv run coverage report --fail-under=76
+test-unit-ci: ## Run CI unit tests with 76% coverage gate (parallel; pytest-cov merges worker data)
+	uv run pytest tests/unit -q -n auto -p no:cacheprovider \
+		--cov=src/fleetent --cov-report=term-missing --cov-fail-under=76
 
-test-coverage-ci: ## Run daily unit+integration tests with 88% combined coverage gate
-	uv run coverage run --source=src/fleetent -m pytest tests/unit tests/integration
-	uv run coverage report --fail-under=88
+test-coverage-ci: ## Run daily unit+integration tests with 88% combined coverage gate (parallel)
+	uv run pytest tests/unit tests/integration -q -n auto -p no:cacheprovider \
+		--cov=src/fleetent --cov-report=term-missing --cov-fail-under=88
 
 test-integration: ## Run integration tests
 	uv run pytest tests/integration
