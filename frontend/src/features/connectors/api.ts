@@ -73,6 +73,8 @@ export type McpServerRecord = {
   url?: string;
   command?: string;
   args?: string[];
+  env?: Record<string, string>;
+  headers?: Record<string, string>;
   enabled?: boolean;
   status: string;
   tool_count: number;
@@ -88,6 +90,7 @@ export type McpServerInput = {
   agent_id?: number | null;
   enabled?: boolean;
   env?: Record<string, string>;
+  headers?: Record<string, string>;
 };
 
 export type McpServerEditInput = Partial<McpServerInput>;
