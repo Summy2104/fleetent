@@ -992,9 +992,12 @@ function ImUserRow({
     >
       <div className="space-y-2">
         <p className="font-medium text-foreground">{imUser.platform_user_id}</p>
+        {imUser.user_email ? (
+          <p className="text-sm text-muted-foreground">{imUser.user_email}</p>
+        ) : null}
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <Badge variant="outline">{imUser.platform}</Badge>
-          <Badge variant="secondary">{imUser.user_id}</Badge>
+          <Badge variant="secondary">{imUser.user_name || imUser.user_id}</Badge>
           <Badge variant={statusVariant(imUser.status)}>{imUser.status}</Badge>
           <Badge variant={imUser.allowed ? 'success' : 'destructive'}>
             {imUser.allowed ? t('users.allowed') : t('users.notAllowed')}
@@ -1019,7 +1022,7 @@ function ImUserRow({
               <SelectContent>
                 {users.map((user) => (
                   <SelectItem key={user.id} value={user.id}>
-                    {user.id}
+                    {user.name}
                   </SelectItem>
                 ))}
               </SelectContent>
