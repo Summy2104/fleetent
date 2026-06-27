@@ -58,11 +58,11 @@ async def test_direct_http_transport_relays_chat_stream(monkeypatch: pytest.Monk
     from fleetent.platform.node_management.agent_transport import DirectHttpAgentTransport
 
     monkeypatch.setattr(
-        "fleetent.platform.node_management.agent_transport.forwarder_base_url",
+        "fleetent.platform.node_management.node_addressing.forwarder_base_url",
         lambda node_id: "http://node-a.internal:8786",
     )
     monkeypatch.setattr(
-        "fleetent.platform.node_management.agent_transport.node_store.get_forward_host",
+        "fleetent.platform.node_management.node_addressing.node_store.get_forward_host",
         lambda node_id: None,
     )
     monkeypatch.setattr(
