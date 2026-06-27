@@ -130,77 +130,29 @@ FACTS_MIGRATIONS: list[tuple[str, str]] = [
             f"            ('{rel}', '{card}', datetime('now'))" for rel, card in SEED_RELATIONS
         ),
     ),
+    # statement: an LLM-generated natural-language rendering of the triple, used
+    # verbatim at injection time so the model reads an unambiguous sentence
+    # ("用户的名字是 Xin" / "用户希望助手回答简洁") instead of a machine-joined line.
+    # Triples still drive retrieval/dedup/supersede; statement drives injection.
     (
         "facts_statement",
         "ALTER TABLE facts ADD COLUMN statement TEXT",
     ),
+    # scope: 'situational' = recalled by vector similarity (default); 'always' =
+    # unconditionally injected into every prompt regardless of query.  Used for
+    # behavioral directives (response_style, never_do, etc.) that must never be
+    # missed due to low semantic overlap with the current query.
     (
         "facts_scope",
         "ALTER TABLE facts ADD COLUMN scope TEXT NOT NULL DEFAULT 'situational'",
     ),
+    # Backfill: known always-relations get scope='always'.  Conservative: only
+    # relations in the explicit soft/hard lists; unknowns stay 'situational'.
     (
         "facts_scope_backfill",
         "UPDATE facts SET scope = 'always' WHERE relation IN ("
         "'response_style', 'tone', 'format', 'language', 'output_format',"
         "'never_do', 'always_do', 'security', 'approval_required'"
         ") AND status = 'active'",
-    ),
-    # Rename facts → memory_items.  The old legacy memory_items table (id/type/content
-    # schema) is dropped first.  On new databases where facts was never created the
-    # DROP / RENAME are both no-ops via IF EXISTS guards using a CREATE+INSERT+DROP
-    # pattern (SQLite has no ALTER TABLE ... RENAME ... IF EXISTS).
-    (
-        "rename_facts_to_memory_items",
-        """
-        DROP TABLE IF EXISTS memory_items;
-        CREATE TABLE IF NOT EXISTS memory_items (
-            fact_id             TEXT PRIMARY KEY,
-            user_id             TEXT NOT NULL,
-            subject             TEXT NOT NULL,
-            relation            TEXT NOT NULL,
-            object              TEXT NOT NULL,
-            cardinality         TEXT NOT NULL DEFAULT 'single'
-                CHECK (cardinality IN ('single', 'multi')),
-            status              TEXT NOT NULL DEFAULT 'active'
-                CHECK (status IN ('active', 'superseded', 'archived', 'retracted')),
-            access_count        INTEGER NOT NULL DEFAULT 0,
-            first_accessed_at   TEXT,
-            last_accessed_at    TEXT,
-            expires_at          TEXT,
-            valid_until         TEXT,
-            created_at          TEXT NOT NULL,
-            updated_at          TEXT NOT NULL,
-            source_turn         TEXT,
-            statement           TEXT,
-            scope               TEXT NOT NULL DEFAULT 'situational'
-        );
-        INSERT INTO memory_items SELECT
-            fact_id, user_id, subject, relation, object, cardinality, status,
-            access_count, first_accessed_at, last_accessed_at, expires_at,
-            valid_until, created_at, updated_at, source_turn, statement,
-            COALESCE(scope, 'situational')
-        FROM facts;
-        DROP TABLE IF EXISTS facts;
-        CREATE INDEX IF NOT EXISTS idx_memory_items_user_rel
-            ON memory_items (user_id, subject, relation, status);
-        """,
-    ),
-    # Rebuild fact_edges with FK pointing to memory_items (was facts before rename).
-    # SQLite FK enforcement is off by default, but the DDL FK reference to a
-    # dropped table breaks on some pragma configurations.
-    (
-        "rebuild_fact_edges_fk",
-        """
-        CREATE TABLE IF NOT EXISTS fact_edges_new (
-            edge_id         TEXT PRIMARY KEY,
-            from_fact_id    TEXT NOT NULL REFERENCES memory_items(fact_id),
-            to_fact_id      TEXT NOT NULL REFERENCES memory_items(fact_id),
-            edge_type       TEXT NOT NULL DEFAULT 'supersedes',
-            created_at      TEXT NOT NULL
-        );
-        INSERT OR IGNORE INTO fact_edges_new SELECT * FROM fact_edges;
-        DROP TABLE IF EXISTS fact_edges;
-        ALTER TABLE fact_edges_new RENAME TO fact_edges;
-        """,
     ),
 ]
