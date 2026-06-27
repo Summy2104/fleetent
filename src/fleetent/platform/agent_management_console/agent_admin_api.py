@@ -507,6 +507,12 @@ def _required_env_items(agent: agent_store.Agent) -> list[dict[str, Any]]:
     for server in agent_file.mcp_servers:
         if server.api_key_env:
             sources.setdefault(server.api_key_env, "MCP")
+        # env/headers values may reference a secret via the ``env:VAR`` prefix; the value
+        # itself is a reference (not the secret), so the operator fills VAR on the Secrets tab.
+        for mapping in (server.env, server.headers):
+            for value in mapping.values():
+                if isinstance(value, str) and value.startswith("env:"):
+                    sources.setdefault(value[4:], "MCP")
     if agent_file.im.slack is not None:
         sources.setdefault(agent_file.im.slack.bot_token_env, "IM")
         sources.setdefault(agent_file.im.slack.app_token_env, "IM")

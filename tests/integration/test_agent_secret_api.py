@@ -101,6 +101,36 @@ def test_required_env_reflects_new_mcp_without_false_positives(client):
     assert "FLEETENT_SECRET_KEY" not in env_names
 
 
+def test_required_env_includes_mcp_env_and_header_refs(client):
+    """MCP env/headers 里的 env:XXX 引用要进 required-env；明文值不算（mcp-secret-via-ui）。"""
+    agent = agent_store.create_agent("support", "p", [], mcp_server_ids=["jira", "armada"])
+    agent_mcp_server_store.add_mcp_server(
+        None,
+        "jira",
+        transport="stdio",
+        command="npx",
+        args=["-y", "@aashari/mcp-server-atlassian-jira"],
+        env={"ATLASSIAN_API_TOKEN": "env:ATLASSIAN_API_TOKEN"},
+    )
+    agent_mcp_server_store.add_mcp_server(
+        None,
+        "armada",
+        transport="http",
+        url="https://armada.internal/mcp",
+        headers={"Authorization": "env:ARMADA_AUTH", "X-Static": "plain-value"},
+    )
+    agent_store.bind_mcp_server(agent.id, "jira")
+    agent_store.bind_mcp_server(agent.id, "armada")
+    token, _ = _session_for("viewer")
+
+    body = client.get("/admin/agents/support/required-env", headers=_hdr(token)).json()
+
+    refs = {item["env_name"]: item for item in body["required_env"]}
+    assert refs["ATLASSIAN_API_TOKEN"]["source"] == "MCP"
+    assert refs["ARMADA_AUTH"]["source"] == "MCP"
+    assert "plain-value" not in refs  # 明文 header 值不被当成 env 名
+
+
 def test_secret_api_is_write_only_and_delete_clears_value(client):
     _create_agent_with_required_env()
     token, _ = _session_for("admin")
