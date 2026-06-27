@@ -1962,30 +1962,14 @@ def _with_status(
 
 
 async def _apply_maintenance_action(proposal: MemoryProposal) -> None:
-    if proposal.action == "mark_stale":
-        for memory_id in proposal.target_memory_ids:
-            await memory.mark_user_memory_stale(proposal.user_id, memory_id)
-        return
-    if proposal.action in {"rewrite", "compact"}:
-        content = _require_proposed_content(proposal)
-        if not proposal.target_memory_ids:
-            raise ValueError("target_memory_ids must not be empty")
-        await memory.update_user_memory_content(
-            proposal.user_id,
-            proposal.target_memory_ids[0],
-            content,
+    if proposal.action in {"mark_stale", "rewrite", "compact", "merge", "delete"}:
+        # These actions targeted the legacy memory_items (id/type/content) table which
+        # has been removed.  They are no-ops until facts-system maintenance APIs are built.
+        _logger.debug(
+            "reflection_maintenance_action_noop",
+            action=proposal.action,
+            proposal_id=proposal.id,
         )
-        return
-    if proposal.action == "merge":
-        await memory.merge_user_memories(
-            proposal.user_id,
-            proposal.target_memory_ids,
-            _require_proposed_content(proposal),
-        )
-        return
-    if proposal.action == "delete":
-        for memory_id in proposal.target_memory_ids:
-            await memory.delete_user_memory(proposal.user_id, memory_id)
         return
     if proposal.action in ("suggest_agent_memory_or_kb", "suggest_shared_memory_or_kb"):
         target = proposal.metadata_patch.get("target")

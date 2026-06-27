@@ -601,8 +601,18 @@ def test_memory_items_columns_no_namespace(tmp_path: Path) -> None:
     db = _open(tmp_path)
     migrate(db, AGENT_STATE_MIGRATIONS)
     cols = _columns(db.path, "memory_items")
-    assert cols == {"id", "user_id", "type", "content", "created_at", "updated_at", "expires_at"}
+    # memory_items now holds the facts triple schema (renamed from facts table)
+    expected = {
+        "fact_id", "user_id", "subject", "relation", "object", "cardinality",
+        "status", "access_count", "first_accessed_at", "last_accessed_at",
+        "expires_at", "valid_until", "created_at", "updated_at",
+        "source_turn", "statement", "scope",
+    }
+    assert expected <= cols
     assert "namespace" not in cols
+    assert "id" not in cols
+    assert "type" not in cols
+    assert "content" not in cols
 
 
 def test_memory_items_indexes_created(tmp_path: Path) -> None:
@@ -613,8 +623,7 @@ def test_memory_items_indexes_created(tmp_path: Path) -> None:
     conn = __import__("sqlite3").connect(db.path)
     indexes = {row[1] for row in conn.execute("PRAGMA index_list(memory_items)").fetchall()}
     conn.close()
-    assert "idx_memory_items_user_type" in indexes
-    assert "idx_memory_items_user_expires" in indexes
+    assert "idx_memory_items_user_rel" in indexes
 
 
 # ── 7: scheduled_tasks created (retire-standalone-fleetent-db) ───────────────

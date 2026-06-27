@@ -19,7 +19,7 @@ from typing import cast
 
 from fleetent import vector_store
 from fleetent.db import SQLiteDatabase
-from fleetent.memory import store
+from fleetent.memory._datetime_utils import format_datetime, parse_datetime
 from fleetent.memory.models import (
     AgentMemoryItem,
     AgentMemorySource,
@@ -305,8 +305,8 @@ def _row_to_item(row: dict[str, object]) -> AgentMemoryItem:
         source=cast(AgentMemorySource, row["source"]),
         source_ref=str(row["source_ref"]) if row["source_ref"] is not None else None,
         created_by=str(row["created_by"]),
-        created_at=store.parse_datetime(row["created_at"]),
-        updated_at=store.parse_datetime(row["updated_at"]),
+        created_at=parse_datetime(row["created_at"]),
+        updated_at=parse_datetime(row["updated_at"]),
     )
 
 
@@ -319,8 +319,8 @@ def _params(item: AgentMemoryItem) -> dict[str, object]:
         "source": item.source,
         "source_ref": item.source_ref,
         "created_by": item.created_by,
-        "created_at": store.format_datetime(item.created_at),
-        "updated_at": store.format_datetime(item.updated_at),
+        "created_at": format_datetime(item.created_at),
+        "updated_at": format_datetime(item.updated_at),
     }
 
 

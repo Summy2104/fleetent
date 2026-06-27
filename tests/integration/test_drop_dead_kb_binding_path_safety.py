@@ -41,7 +41,7 @@ def test_live_agent_kb_path_materializes_agent_knowledge_and_long_term_ctx_uses_
         "_index",
         AgentConfigIndex(agents={"support": exported}, default="support"),
     )
-    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(long_term_ctx.memory, "search_facts", AsyncMock(return_value=[]))
 
     async def _search(
         query: str,

@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 
 from fleetent.db import SQLiteDatabase
 from fleetent.memory import facts_store
-from fleetent.memory.store import format_datetime
+from fleetent.memory._datetime_utils import format_datetime
 from fleetent.vector_store.namespaces import memory_namespace
 
 logger = logging.getLogger(__name__)

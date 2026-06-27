@@ -8,14 +8,14 @@ def _boot_agent_state(tmp_path, agent_id="agent"):
     """Open a migrated per-agent agent_state.db and inject it into the agent-side stores."""
     from fleetent import reflection
     from fleetent.governance import approval_request_store
-    from fleetent.memory import store as memory_store
+    from fleetent.memory import proposal_store as memory_proposal_store
     from fleetent.observability import traces
 
     router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path / "data"))
     db = router.agent_scope("default", agent_id).open_state_db(MIGRATIONS)
     reflection.set_state_db(db)
     approval_request_store.set_state_db(db)
-    memory_store.set_state_db(db)
+    memory_proposal_store.set_state_db(db)
     traces.set_state_db(db)
     return db
 
@@ -66,16 +66,11 @@ async def test_unified_reflection_proposals_lifecycle_updates_single_table(tmp_p
 
     _boot_agent_state(tmp_path)
 
-    memory_calls: list[tuple[str, tuple[object, ...]]] = []
     skill_calls: list[str] = []
-
-    async def mark_stale(user_id: str, memory_id: str) -> None:
-        memory_calls.append(("mark_stale", (user_id, memory_id)))
 
     async def apply_skill(proposal) -> None:
         skill_calls.append(proposal.target_skill)
 
-    monkeypatch.setattr(reflection.memory, "mark_user_memory_stale", mark_stale)
     monkeypatch.setattr(reflection, "apply_skill_proposal_to_boundary", apply_skill)
 
     memory_proposal = reflection.create_memory_maintenance_proposal(
@@ -115,7 +110,6 @@ async def test_unified_reflection_proposals_lifecycle_updates_single_table(tmp_p
 
     assert applied_memory.status == "applied"
     assert rejected_skill.status == "rejected"
-    assert memory_calls == [("mark_stale", ("u1", "m1"))]
     assert skill_calls == []
     assert {(item.domain, item.status, item.id) for item in listed} == {
         ("memory", "applied", memory_proposal.id),
@@ -129,16 +123,11 @@ async def test_unified_apply_dispatch_is_domain_isolated(tmp_path, monkeypatch):
 
     _boot_agent_state(tmp_path)
 
-    memory_calls: list[str] = []
     skill_calls: list[str] = []
-
-    async def mark_stale(user_id: str, memory_id: str) -> None:
-        memory_calls.append(f"{user_id}:{memory_id}")
 
     async def apply_skill(proposal) -> None:
         skill_calls.append(proposal.target_skill)
 
-    monkeypatch.setattr(reflection.memory, "mark_user_memory_stale", mark_stale)
     monkeypatch.setattr(reflection, "apply_skill_proposal_to_boundary", apply_skill)
 
     memory_proposal = reflection.create_memory_maintenance_proposal(
@@ -166,7 +155,6 @@ async def test_unified_apply_dispatch_is_domain_isolated(tmp_path, monkeypatch):
     await reflection.apply_memory_maintenance_proposal(memory_proposal.id, actor_user_id="u1")
     await reflection.apply_skill_proposal(skill_proposal.id, actor_user_id="reviewer-1")
 
-    assert memory_calls == ["u1:m1"]
     assert skill_calls == ["ship-release"]
 
 

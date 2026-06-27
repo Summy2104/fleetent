@@ -63,12 +63,13 @@ def _skill_proposal(
     )
 
 
-async def test_resolve_approve_user_memory_proposal_calls_memory_boundary(
+async def test_resolve_approve_user_memory_proposal_noop_maintenance(
     monkeypatch,
 ) -> None:
+    # Legacy maintenance actions (mark_stale etc.) are no-ops; resolve still
+    # transitions status approved → applied without calling any memory function.
     proposal = _memory_proposal()
     updates: list[MemoryProposal] = []
-    mark_user_memory_stale = AsyncMock()
 
     monkeypatch.setattr(store, "_get_maintenance_proposal", lambda _id: proposal)
     monkeypatch.setattr(store, "_get_skill_proposal", lambda _id: None)
@@ -78,13 +79,6 @@ async def test_resolve_approve_user_memory_proposal_calls_memory_boundary(
         "_record_maintenance_event",
         lambda _event_type, _proposal: None,
     )
-    from fleetent import memory as memory_module
-
-    monkeypatch.setattr(
-        memory_module,
-        "mark_user_memory_stale",
-        mark_user_memory_stale,
-    )
 
     result = await reflection_gate.resolve(
         proposal.id,
@@ -93,11 +87,7 @@ async def test_resolve_approve_user_memory_proposal_calls_memory_boundary(
     )
 
     assert result.status == "applied"
-    mark_user_memory_stale.assert_awaited_once_with(
-        proposal.user_id,
-        proposal.target_memory_ids[0],
-    )
-    assert [proposal.status for proposal in updates] == ["approved", "applied"]
+    assert [p.status for p in updates] == ["approved", "applied"]
 
 
 async def test_resolve_expire_skill_proposal_sets_expired_state(

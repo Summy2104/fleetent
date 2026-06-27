@@ -8,8 +8,24 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
+from fleetent.db import SQLiteDatabase
 from fleetent.governance import approval_request_store
-from fleetent.memory import store
+from fleetent.memory._datetime_utils import format_datetime
+
+_db: SQLiteDatabase | None = None
+
+
+def set_state_db(db: SQLiteDatabase) -> None:
+    global _db
+    _db = db
+
+
+def _database() -> SQLiteDatabase:
+    if _db is None:
+        raise RuntimeError(
+            "memory/proposal_store: db not initialized — call set_state_db(db) at boot"
+        )
+    return _db
 
 MaintenanceAction = Literal[
     "mark_stale",
@@ -87,7 +103,7 @@ def _to_dict(row: dict[str, Any]) -> MemoryProposal:
 def get_memory_maintenance_proposal(proposal_id: str) -> MemoryProposal:
     """Load one User Memory maintenance proposal by id."""
     row = (
-        store.database()
+        _database()
         .execute(
             """
             SELECT *
@@ -114,7 +130,7 @@ def list_memory_maintenance_proposals(
     params: dict[str, object] = {"user_id": user_id}
     if start_ts is not None:
         clauses.append("updated_at >= :start_ts")
-        params["start_ts"] = store.format_datetime(start_ts)
+        params["start_ts"] = format_datetime(start_ts)
     query = f"""
             SELECT *
             FROM reflection_proposals
@@ -123,7 +139,7 @@ def list_memory_maintenance_proposals(
             """
     try:
         rows = (
-            store.database()
+            _database()
             .execute(
                 query,
                 params,
@@ -170,7 +186,7 @@ def _mark_proposal_applied(proposal: MemoryProposal) -> MemoryProposal:
         expires_at=proposal.expires_at,
         report_id=proposal.report_id,
     )
-    store.database().execute(
+    _database().execute(
         """
         UPDATE reflection_proposals
         SET updated_at = :updated_at,
@@ -184,7 +200,7 @@ def _mark_proposal_applied(proposal: MemoryProposal) -> MemoryProposal:
         """,
         {
             "id": updated.id,
-            "updated_at": store.format_datetime(updated.updated_at),
+            "updated_at": format_datetime(updated.updated_at),
             "payload_json": json.dumps(
                 {
                     "target_memory_ids": updated.target_memory_ids,
@@ -197,7 +213,7 @@ def _mark_proposal_applied(proposal: MemoryProposal) -> MemoryProposal:
             "risk": updated.risk,
             "reason": updated.reason,
             "actor_user_id": None,
-            "applied_at": store.format_datetime(updated.updated_at),
+            "applied_at": format_datetime(updated.updated_at),
         },
     )
     return updated
@@ -205,7 +221,7 @@ def _mark_proposal_applied(proposal: MemoryProposal) -> MemoryProposal:
 
 def _approval_request_row(proposal_id: object) -> dict[str, Any] | None:
     try:
-        approval_request_store.set_state_db(store.database())
+        approval_request_store.set_state_db(_database())
         return approval_request_store.get_request(str(proposal_id))
     except RuntimeError:
         return None

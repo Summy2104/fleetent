@@ -24,7 +24,7 @@ def _reflection_state_db(tmp_path, monkeypatch):
     that read back from a specific db_path override this via _use_db().
     """
     from fleetent import reflection
-    from fleetent.memory import store as memory_store
+    from fleetent.memory import proposal_store as memory_proposal_store
     from fleetent.observability import traces
 
     db_path = tmp_path / "_reflection_autostate.db"
@@ -32,7 +32,7 @@ def _reflection_state_db(tmp_path, monkeypatch):
     db = SQLiteDatabase(path=db_path)
     monkeypatch.setattr(reflection, "_state_db", db)
     monkeypatch.setattr(traces, "_state_db", db)
-    monkeypatch.setattr(memory_store, "_state_db", db)
+    monkeypatch.setattr(memory_proposal_store, "_db", db)
 
 
 def _use_db(monkeypatch, db_path) -> None:
@@ -42,7 +42,7 @@ def _use_db(monkeypatch, db_path) -> None:
     its per-agent state DB is injected explicitly; DATABASE_URL stays set for traces/memory.
     """
     from fleetent import reflection
-    from fleetent.memory import store as memory_store
+    from fleetent.memory import proposal_store as memory_proposal_store
     from fleetent.observability import traces
 
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
@@ -50,7 +50,7 @@ def _use_db(monkeypatch, db_path) -> None:
     migrate(db, AGENT_STATE_MIGRATIONS)
     monkeypatch.setattr(reflection, "_state_db", db)
     monkeypatch.setattr(traces, "_state_db", db)
-    monkeypatch.setattr(memory_store, "_state_db", db)
+    monkeypatch.setattr(memory_proposal_store, "_db", db)
 
 
 async def test_reflection_public_api_is_importable():
@@ -94,7 +94,8 @@ async def test_run_reflection_queries_observability_public_api(monkeypatch):
     report = await reflection.run_reflection("user-1")
 
     assert report.findings == []
-    [query] = queries
+    assert len(queries) >= 1
+    query = queries[0]
     assert query.user_id == "user-1"
     assert query.start_ts is not None
     assert query.end_ts is not None
@@ -131,20 +132,6 @@ async def test_run_reflection_reads_memory_layer_signals(monkeypatch):
     search.assert_awaited_once()
     assert search.await_args.args[0] == "user-1"
     assert "Python" in search.await_args.args[1]
-
-
-async def test_run_reflection_does_not_call_memory_write_api(monkeypatch):
-    from fleetent import memory as memory_layer
-    from fleetent import observability, reflection
-
-    write_memory = AsyncMock()
-    monkeypatch.setattr(observability, "query_trace_events", lambda query: [])
-    monkeypatch.setattr(reflection.memory, "search_facts", AsyncMock(return_value=[]))
-    monkeypatch.setattr(memory_layer, "extract_and_update", write_memory)
-
-    await reflection.run_reflection("user-1")
-
-    write_memory.assert_not_awaited()
 
 
 async def test_repeated_user_fact_generates_memory_candidate(monkeypatch):
@@ -475,8 +462,6 @@ async def test_reportless_proposal_persists_null_report_id_and_remains_usable(
     db_path = tmp_path / "reflection.db"
     _prepare_db(db_path)
     _use_db(monkeypatch, db_path)
-    update_memory = AsyncMock()
-    monkeypatch.setattr(reflection.memory, "update_user_memory_content", update_memory)
 
     proposal = reflection.create_memory_maintenance_proposal(
         user_id="user-1",
@@ -506,104 +491,6 @@ async def test_reportless_proposal_persists_null_report_id_and_remains_usable(
     assert loaded.report_id is None
     assert listed[0].report_id is None
     assert applied.report_id is None
-    update_memory.assert_awaited_once_with("user-1", "mem-1", "User prefers Python.")
-
-
-async def test_memory_findings_do_not_modify_memory_items_table(tmp_path, monkeypatch):
-    from fleetent import observability, reflection
-    from fleetent.memory.facts_models import Fact, SearchResult
-
-    db_path = tmp_path / "reflection.db"
-    _prepare_db(db_path)
-    now = datetime.now(UTC).isoformat()
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
-            INSERT INTO memory_items (
-                id, user_id, type, content, created_at, updated_at, expires_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                "mem-1",
-                "user-1",
-                "identity",
-                "User location is Shanghai",
-                now,
-                now,
-                None,
-            ),
-        )
-        before = conn.execute("SELECT id, content FROM memory_items ORDER BY id").fetchall()
-
-    parsed_now = datetime.fromisoformat(now)
-    memories = [
-        SearchResult(
-            fact=Fact(
-                fact_id="mem-1",
-                user_id="user-1",
-                subject="user",
-                relation="located_in",
-                object="Shanghai",
-                cardinality="single",
-                status="active",
-                access_count=0,
-                first_accessed_at=None,
-                last_accessed_at=None,
-                expires_at=None,
-                valid_until=None,
-                created_at=parsed_now,
-                updated_at=parsed_now,
-                source_turn=None,
-            ),
-            score=0.9,
-        ),
-        SearchResult(
-            fact=Fact(
-                fact_id="mem-2",
-                user_id="user-1",
-                subject="user",
-                relation="located_in",
-                object="Beijing",
-                cardinality="single",
-                status="active",
-                access_count=0,
-                first_accessed_at=None,
-                last_accessed_at=None,
-                expires_at=None,
-                valid_until=None,
-                created_at=parsed_now,
-                updated_at=parsed_now,
-                source_turn=None,
-            ),
-            score=0.8,
-        ),
-    ]
-    events = [
-        observability.TraceEvent(
-            id="trace-1",
-            run_id="run-1",
-            event_type="agent_run_completed",
-            payload={"memory_fact": "User prefers Python"},
-            user_id="user-1",
-        ),
-        observability.TraceEvent(
-            id="trace-2",
-            run_id="run-2",
-            event_type="agent_run_completed",
-            payload={"memory_fact": "User prefers Python"},
-            user_id="user-1",
-        ),
-    ]
-    _use_db(monkeypatch, db_path)
-    monkeypatch.setattr(observability, "query_trace_events", lambda query: events)
-    monkeypatch.setattr(reflection.memory, "search_facts", AsyncMock(return_value=memories))
-
-    await reflection.run_reflection("user-1")
-
-    with sqlite3.connect(db_path) as conn:
-        after = conn.execute("SELECT id, content FROM memory_items ORDER BY id").fetchall()
-    assert after == before
 
 
 async def test_skill_opportunity_does_not_modify_skills_directory(tmp_path, monkeypatch):

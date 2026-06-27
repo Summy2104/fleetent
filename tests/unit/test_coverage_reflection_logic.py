@@ -8,7 +8,6 @@ from typing import Any
 import pytest
 
 from fleetent import observability, reflection
-from fleetent.memory.models import MemoryItem
 
 
 class _Cursor:
@@ -78,19 +77,6 @@ def _event(
         payload=payload,
         id=id,
         tenant_id=tenant_id,
-    )
-
-
-def _memory(id: str, content: str) -> MemoryItem:
-    now = datetime(2026, 1, 1, tzinfo=UTC)
-    return MemoryItem(
-        id=id,
-        user_id="u1",
-        type="identity",
-        content=content,
-        created_at=now,
-        updated_at=now,
-        expires_at=None,
     )
 
 
@@ -513,68 +499,19 @@ def test_reflection_memory_proposal_lifecycle_uses_fake_store(monkeypatch):
         reflection.get_memory_maintenance_proposal("missing")
 
 
-async def test_reflection_apply_memory_actions_and_guards(monkeypatch):
-    calls: list[tuple[str, tuple[Any, ...]]] = []
-
-    async def record(name: str, *args: Any) -> None:
-        calls.append((name, args))
-
-    monkeypatch.setattr(
-        reflection.memory, "mark_user_memory_stale", lambda *args: record("stale", *args)
-    )
-    monkeypatch.setattr(
-        reflection.memory,
-        "update_user_memory_content",
-        lambda *args: record("update", *args),
-    )
-    monkeypatch.setattr(
-        reflection.memory, "merge_user_memories", lambda *args: record("merge", *args)
-    )
-    monkeypatch.setattr(
-        reflection.memory, "delete_user_memory", lambda *args: record("delete", *args)
-    )
-
-    await reflection._apply_maintenance_action(  # noqa: SLF001
-        _maintenance_proposal(action="mark_stale", target_memory_ids=["m1", "m2"])
-    )
-    await reflection._apply_maintenance_action(  # noqa: SLF001
-        _maintenance_proposal(
-            action="rewrite", target_memory_ids=["m3"], proposed_content=" revised "
-        )
-    )
-    await reflection._apply_maintenance_action(  # noqa: SLF001
-        _maintenance_proposal(
-            action="compact", target_memory_ids=["m4"], proposed_content=" compacted "
-        )
-    )
-    await reflection._apply_maintenance_action(  # noqa: SLF001
-        _maintenance_proposal(
-            action="merge", target_memory_ids=["m5", "m6"], proposed_content="merged"
-        )
-    )
-    await reflection._apply_maintenance_action(  # noqa: SLF001
-        _maintenance_proposal(action="delete", target_memory_ids=["m7"])
-    )
-    await reflection._apply_maintenance_action(  # noqa: SLF001
-        _maintenance_proposal(action="suggest_agent_memory_or_kb", target_memory_ids=[])
-    )
-    assert calls == [
-        ("stale", ("u1", "m1")),
-        ("stale", ("u1", "m2")),
-        ("update", ("u1", "m3", "revised")),
-        ("update", ("u1", "m4", "compacted")),
-        ("merge", ("u1", ["m5", "m6"], "merged")),
-        ("delete", ("u1", "m7")),
-    ]
-
-    with pytest.raises(ValueError, match="proposed_content"):
+async def test_reflection_apply_memory_actions_and_guards():
+    # Legacy maintenance actions (mark_stale/rewrite/compact/merge/delete) are
+    # no-ops after the legacy memory_items table was removed.
+    for action in ("mark_stale", "rewrite", "compact", "merge", "delete"):
         await reflection._apply_maintenance_action(  # noqa: SLF001
-            _maintenance_proposal(action="rewrite", target_memory_ids=["m1"], proposed_content=" ")
+            _maintenance_proposal(
+                action=action,
+                target_memory_ids=["m1"],
+                proposed_content="x" if action in ("rewrite", "compact") else None,
+            )
         )
-    with pytest.raises(ValueError, match="target_memory_ids"):
-        await reflection._apply_maintenance_action(  # noqa: SLF001
-            _maintenance_proposal(action="rewrite", target_memory_ids=[], proposed_content="x")
-        )
+    # suggest_agent_memory_or_kb is handled by a separate branch (not no-op).
+    # Only test the auto_apply and validation helpers.
     assert reflection._auto_apply_allowed(  # noqa: SLF001
         _maintenance_proposal(action="mark_stale", risk="low"),
         reflection.AutoMaintenancePolicy(allow_low_risk=True),

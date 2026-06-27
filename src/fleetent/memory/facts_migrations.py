@@ -153,11 +153,54 @@ FACTS_MIGRATIONS: list[tuple[str, str]] = [
         "rename_facts_to_memory_items",
         """
         DROP TABLE IF EXISTS memory_items;
-        CREATE TABLE IF NOT EXISTS memory_items AS SELECT * FROM facts WHERE 0;
-        INSERT INTO memory_items SELECT * FROM facts;
+        CREATE TABLE IF NOT EXISTS memory_items (
+            fact_id             TEXT PRIMARY KEY,
+            user_id             TEXT NOT NULL,
+            subject             TEXT NOT NULL,
+            relation            TEXT NOT NULL,
+            object              TEXT NOT NULL,
+            cardinality         TEXT NOT NULL DEFAULT 'single'
+                CHECK (cardinality IN ('single', 'multi')),
+            status              TEXT NOT NULL DEFAULT 'active'
+                CHECK (status IN ('active', 'superseded', 'archived', 'retracted')),
+            access_count        INTEGER NOT NULL DEFAULT 0,
+            first_accessed_at   TEXT,
+            last_accessed_at    TEXT,
+            expires_at          TEXT,
+            valid_until         TEXT,
+            created_at          TEXT NOT NULL,
+            updated_at          TEXT NOT NULL,
+            source_turn         TEXT,
+            statement           TEXT,
+            scope               TEXT NOT NULL DEFAULT 'situational'
+        );
+        INSERT INTO memory_items SELECT
+            fact_id, user_id, subject, relation, object, cardinality, status,
+            access_count, first_accessed_at, last_accessed_at, expires_at,
+            valid_until, created_at, updated_at, source_turn, statement,
+            COALESCE(scope, 'situational')
+        FROM facts;
         DROP TABLE IF EXISTS facts;
         CREATE INDEX IF NOT EXISTS idx_memory_items_user_rel
             ON memory_items (user_id, subject, relation, status);
+        """,
+    ),
+    # Rebuild fact_edges with FK pointing to memory_items (was facts before rename).
+    # SQLite FK enforcement is off by default, but the DDL FK reference to a
+    # dropped table breaks on some pragma configurations.
+    (
+        "rebuild_fact_edges_fk",
+        """
+        CREATE TABLE IF NOT EXISTS fact_edges_new (
+            edge_id         TEXT PRIMARY KEY,
+            from_fact_id    TEXT NOT NULL REFERENCES memory_items(fact_id),
+            to_fact_id      TEXT NOT NULL REFERENCES memory_items(fact_id),
+            edge_type       TEXT NOT NULL DEFAULT 'supersedes',
+            created_at      TEXT NOT NULL
+        );
+        INSERT OR IGNORE INTO fact_edges_new SELECT * FROM fact_edges;
+        DROP TABLE IF EXISTS fact_edges;
+        ALTER TABLE fact_edges_new RENAME TO fact_edges;
         """,
     ),
 ]

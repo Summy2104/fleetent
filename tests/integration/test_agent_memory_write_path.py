@@ -15,7 +15,7 @@ def _boot_agent_state(tmp_path, monkeypatch, agent_id="agent"):
     """Wire all agent-side stores to a fresh migrated state_db; use monkeypatch for cleanup."""
     from fleetent import reflection
     from fleetent.governance import approval_request_store
-    from fleetent.memory import store as memory_store
+    from fleetent.memory import proposal_store as memory_proposal_store
     from fleetent.observability import traces
 
     router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path / "data"))
@@ -23,7 +23,7 @@ def _boot_agent_state(tmp_path, monkeypatch, agent_id="agent"):
 
     monkeypatch.setattr(reflection, "_state_db", db)
     monkeypatch.setattr(approval_request_store, "_state_db", db)
-    monkeypatch.setattr(memory_store, "_state_db", db)
+    monkeypatch.setattr(memory_proposal_store, "_db", db)
     monkeypatch.setattr(traces, "_state_db", db)
     return db
 
@@ -99,7 +99,7 @@ async def test_approved_agent_memory_proposal_is_injected_by_build_context(tmp_p
     monkeypatch.setattr(vector_store, "embed_text", AsyncMock(return_value=[0.1, 0.2, 0.3]))
 
     # Wire build_context sources: user memory and knowledge both empty
-    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(long_term_ctx.memory, "search_facts", AsyncMock(return_value=[]))
     long_term_ctx.set_knowledge_provider(AsyncMock(return_value=[]))
 
     # Approve the proposal — writes to agent_memory_items

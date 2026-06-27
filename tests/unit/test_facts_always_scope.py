@@ -169,7 +169,7 @@ class _FakeResult:
         self._facts = facts
 
     def fetchall(self) -> list[dict]:
-        from fleetent.memory.store import format_datetime
+        from fleetent.memory._datetime_utils import format_datetime
 
         rows = []
         for f in self._facts:

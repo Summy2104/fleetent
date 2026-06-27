@@ -19,7 +19,7 @@ from fleetent.memory.facts_models import (
     FactStatus,
     RelationCluster,
 )
-from fleetent.memory.store import format_datetime, parse_datetime, parse_optional_datetime
+from fleetent.memory._datetime_utils import format_datetime, parse_datetime, parse_optional_datetime
 from fleetent.vector_store.backend import VectorBackend
 
 _facts_db: SQLiteDatabase | None = None

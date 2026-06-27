@@ -22,7 +22,7 @@ from fleetent.memory.facts_models import (
     Fact,
 )
 from fleetent.memory.facts_temporal import temporal_boundary
-from fleetent.memory.store import format_datetime
+from fleetent.memory._datetime_utils import format_datetime
 from fleetent.vector_store.namespaces import memory_namespace
 from fleetent.vector_store.runtime import embed_text
 

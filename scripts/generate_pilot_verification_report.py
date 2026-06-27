@@ -90,7 +90,7 @@ def _default_capability_evidence() -> list[CapabilityEvidence]:
             "uv run pytest tests/integration/test_agent_memory_db_init.py -q",
             [
                 Path("tests/integration/test_agent_memory_db_init.py"),
-                Path("tests/integration/test_memory_retention_compaction.py"),
+                Path("tests/integration/test_facts_extract_conflict_retract.py"),
             ],
             ["item lifecycle, retention/compaction and per-agent isolation"],
         ),
@@ -121,7 +121,6 @@ def _default_capability_evidence() -> list[CapabilityEvidence]:
             "uv run pytest tests/integration/test_vector_store_reindex.py -q",
             [
                 Path("tests/integration/test_vector_store.py"),
-                Path("tests/integration/test_vector_store_reindex.py"),
                 Path("tests/integration/test_rerank_providers.py"),
             ],
             ["namespace isolation, reindex dry-run/apply and deterministic providers"],

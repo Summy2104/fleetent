@@ -12,21 +12,21 @@ def _restore_runtime_state_dbs():
     """Restore the process-global state-db handles boot() mutates (context / sub_agent /
     memory_store / schedule_store); the conftest only resets traces + reflection."""
     import fleetent.schedule_store as ss
-    from fleetent.memory import store as memory_store
+    from fleetent.memory import proposal_store as memory_proposal_store
     from fleetent.runtime import context as runtime_context
     from fleetent.runtime import sub_agent_lifecycle
 
     saved = (
         runtime_context._state_db,
         sub_agent_lifecycle._state_db,
-        memory_store._state_db,
+        memory_proposal_store._db,
         ss._state_db,
     )
     yield
     (
         runtime_context._state_db,
         sub_agent_lifecycle._state_db,
-        memory_store._state_db,
+        memory_proposal_store._db,
         ss._state_db,
     ) = saved  # noqa: E501
 
@@ -52,7 +52,7 @@ def test_standalone_boot_lands_runtime_tables_in_agent_state_db(
     tmp_path, monkeypatch, _restore_runtime_state_dbs
 ):
     from fleetent import reflection
-    from fleetent.memory import store as memory_store
+    from fleetent.memory import proposal_store as memory_proposal_store
     from fleetent.runtime import agent_app, sub_agent_lifecycle
     from fleetent.runtime import context as runtime_context
     from fleetent.runtime.sub_agent_lifecycle import SubAgentLifecycle
@@ -106,7 +106,7 @@ def test_standalone_boot_lands_runtime_tables_in_agent_state_db(
     # ...and proposal_store reads them back from that same physical file.
     from fleetent.memory import proposal_store
 
-    assert memory_store.database().path == agent_state_db
+    assert memory_proposal_store._database().path == agent_state_db
     assert proposal_store.get_memory_maintenance_proposal(proposal.id).id == proposal.id
 
     # No fleetent.db must be created — standalone no longer anchors to DATABASE_URL.
