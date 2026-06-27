@@ -80,6 +80,11 @@ class ChangePasswordBody(BaseModel):
     new_password: str
 
 
+class OidcConfigResponse(BaseModel):
+    enabled: bool
+    label: str
+
+
 def _resolve_login_user(identifier: str) -> user_store.User | None:
     """Resolve the login identifier to a user.
 
@@ -116,6 +121,12 @@ def _require_oidc_settings() -> OidcSettings:
     if not settings.enabled:
         raise HTTPException(status_code=404, detail="oidc disabled")
     return settings
+
+
+@router.get("/oidc/config")
+def oidc_config() -> OidcConfigResponse:
+    settings = _oidc_settings()
+    return OidcConfigResponse(enabled=settings.enabled, label=settings.button_label)
 
 
 @router.get("/oidc/login")

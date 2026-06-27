@@ -25,7 +25,12 @@ def client(tmp_path, monkeypatch):
     return TestClient(app, raise_server_exceptions=True)
 
 
-def _enable_oidc(monkeypatch, email: str, allowed_email_domains: list[str] | None = None):
+def _enable_oidc(
+    monkeypatch,
+    email: str,
+    allowed_email_domains: list[str] | None = None,
+    button_label: str = "",
+):
     if tenancy_store.get_tenant("acme") is None:
         tenancy_store.create_tenant(id="acme", name="Acme")
     monkeypatch.setattr(
@@ -35,7 +40,9 @@ def _enable_oidc(monkeypatch, email: str, allowed_email_domains: list[str] | Non
             enabled=True,
             issuer="https://idp.example.com/realms/acme",
             client_id="fleetent-web",
+            client_secret_env="FLEETENT_OIDC_CLIENT_SECRET",
             redirect_uri="https://fleetent.example.com/admin/oidc/callback",
+            button_label=button_label,
             tenant="acme",
             allowed_email_domains=allowed_email_domains or [],
         ),
@@ -89,6 +96,33 @@ def _callback_with_fresh_flow(client: TestClient):
         params={"code": "good-code", "state": state},
         follow_redirects=False,
     )
+
+
+def test_oidc_config_reports_disabled_without_auth_or_sensitive_fields(client):
+    response = client.get("/admin/oidc/config")
+
+    assert response.status_code == 200
+    assert response.json() == {"enabled": False, "label": ""}
+    assert set(response.json()) == {"enabled", "label"}
+    assert "client_secret" not in response.text
+    assert "issuer" not in response.text
+    assert "client_id" not in response.text
+
+
+def test_oidc_config_reports_enabled_label_without_leaking_sensitive_fields(client, monkeypatch):
+    _enable_oidc(monkeypatch, "person@example.com", button_label="Sign in with Google")
+
+    response = client.get("/admin/oidc/config")
+
+    assert response.status_code == 200
+    assert response.json() == {"enabled": True, "label": "Sign in with Google"}
+    assert set(response.json()) == {"enabled", "label"}
+    assert "FLEETENT_OIDC_CLIENT_SECRET" not in response.text
+    assert "https://idp.example.com/realms/acme" not in response.text
+    assert "fleetent-web" not in response.text
+    assert "client_secret" not in response.text
+    assert "issuer" not in response.text
+    assert "client_id" not in response.text
 
 
 def test_oidc_login_redirects_to_idp_and_sets_flow_cookie(client, monkeypatch):
