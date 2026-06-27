@@ -36,11 +36,13 @@ def build_app(config: NodeConfig, backend: BaseProcessBackend) -> FastAPI:
         if authorization.removeprefix("Bearer ").strip() != config.service_key:
             raise HTTPException(status_code=401, detail="Invalid node API key")
 
-    def _agent_port(agent_name: str, tenant_id: str = "default") -> int:
-        port = backend.gateway_port(agent_name, tenant_id)
-        if port is None:
-            raise HTTPException(status_code=503, detail=f"agent {agent_name!r} is unavailable")
-        return port
+    def _agent_endpoint(agent_name: str, tenant_id: str = "default") -> tuple[str, int]:
+        try:
+            return backend.agent_endpoint(agent_name, tenant_id)
+        except KeyError:
+            raise HTTPException(
+                status_code=503, detail=f"agent {agent_name!r} is unavailable"
+            ) from None
 
     def _agent_tui_token(agent_name: str, tenant_id: str = "default") -> str:
         env_path = Path(config.home_dir) / "tenants" / tenant_id / "agents" / agent_name / ".env"
@@ -59,7 +61,7 @@ def build_app(config: NodeConfig, backend: BaseProcessBackend) -> FastAPI:
     ) -> Response:
         _check_node_key(authorization)
         tenant_id = request.headers.get("x-fleetent-tenant-id", "default")
-        port = _agent_port(agent_name, tenant_id)
+        host, port = _agent_endpoint(agent_name, tenant_id)
         token = _agent_tui_token(agent_name, tenant_id)
         body = await request.body()
         headers = {"Authorization": f"Bearer {token}"}
@@ -74,7 +76,7 @@ def build_app(config: NodeConfig, backend: BaseProcessBackend) -> FastAPI:
             upstream = await client.send(
                 client.build_request(
                     "POST",
-                    f"http://127.0.0.1:{port}/chat",
+                    f"http://{host}:{port}/chat",
                     content=body,
                     headers=headers,
                 ),
@@ -115,9 +117,9 @@ def build_app(config: NodeConfig, backend: BaseProcessBackend) -> FastAPI:
             await websocket.close(code=1008)
             return
         tenant_id = websocket.headers.get("x-fleetent-tenant-id", "default")
-        port = _agent_port(agent_name, tenant_id)
+        host, port = _agent_endpoint(agent_name, tenant_id)
         token = _agent_tui_token(agent_name, tenant_id)
-        upstream_url = f"ws://127.0.0.1:{port}/ws"
+        upstream_url = f"ws://{host}:{port}/ws"
         try:
             upstream_headers = {"Authorization": f"Bearer {token}"}
             if websocket.headers.get(INGRESS_PRINCIPAL_HEADER.lower()):

@@ -28,6 +28,62 @@ def test_load_config_from_env(monkeypatch, tmp_path) -> None:
     assert loaded.service_key == "ma-" + "1" * 64
     assert loaded.home_dir == tmp_path
     assert loaded.interval_seconds == 15
+    assert loaded.backend == "process"
+
+
+def test_load_config_reads_container_backend_from_env(monkeypatch, tmp_path) -> None:
+    from fleetent.node import config
+
+    _set_required_env(
+        monkeypatch,
+        platform_url="https://platform.internal",
+        node_id="node-a",
+        service_key="ma-" + "1" * 64,
+    )
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+    monkeypatch.setenv("FLEETENT_NODE_BACKEND", "container")
+
+    loaded = config.load_config()
+
+    assert loaded.backend == "container"
+
+
+def test_load_config_reads_container_backend_options_from_env(monkeypatch, tmp_path) -> None:
+    from fleetent.node import config
+
+    _set_required_env(
+        monkeypatch,
+        platform_url="https://platform.internal",
+        node_id="node-a",
+        service_key="ma-" + "1" * 64,
+    )
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+    monkeypatch.setenv("FLEETENT_NODE_BACKEND", "container")
+    monkeypatch.setenv("FLEETENT_NODE_AGENT_IMAGE", "fleetent:test")
+    monkeypatch.setenv("FLEETENT_NODE_AGENT_NETWORK", "fleetent-net")
+    monkeypatch.setenv("FLEETENT_NODE_AGENT_INTERNAL_PORT", "18765")
+
+    loaded = config.load_config()
+
+    assert loaded.agent_image == "fleetent:test"
+    assert loaded.agent_network == "fleetent-net"
+    assert loaded.agent_internal_port == 18765
+
+
+def test_load_config_rejects_unknown_backend(monkeypatch, tmp_path) -> None:
+    from fleetent.node import config
+
+    _set_required_env(
+        monkeypatch,
+        platform_url="https://platform.internal",
+        node_id="node-a",
+        service_key="ma-" + "1" * 64,
+    )
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+    monkeypatch.setenv("FLEETENT_NODE_BACKEND", "kubernetes")
+
+    with pytest.raises(config.ConfigError, match="FLEETENT_NODE_BACKEND"):
+        config.load_config()
 
 
 @pytest.mark.parametrize(

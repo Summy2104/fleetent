@@ -36,7 +36,8 @@ def test_main_loops_fetch_reconcile_and_report(monkeypatch, tmp_path) -> None:
 
     monkeypatch.setattr(app, "load_config", lambda: _config(tmp_path))
     monkeypatch.setattr(app, "PlatformApiDesiredStateProvider", lambda config: FakeProvider())
-    monkeypatch.setattr(app, "LocalProcessBackend", lambda config: object())
+    backend = object()
+    monkeypatch.setattr(app, "create_process_backend", lambda config: backend)
     monkeypatch.setattr(app, "NodeReconciler", lambda config, backend: FakeReconciler())
     monkeypatch.setattr(
         app,

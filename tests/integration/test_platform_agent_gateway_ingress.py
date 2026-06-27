@@ -24,6 +24,11 @@ class _Backend:
         assert agent_name == "support"
         return 9011
 
+    def agent_endpoint(self, agent_name: str, tenant_id: str = "default") -> tuple[str, int]:
+        del tenant_id
+        assert agent_name == "support"
+        return ("127.0.0.1", 9011)
+
     def spawn(self, agent_name: str, tenant_id: str = "default", env=None) -> None:
         del agent_name, tenant_id, env
         raise NotImplementedError

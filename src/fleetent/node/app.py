@@ -4,7 +4,7 @@ import sys
 import time
 from threading import Thread
 
-from fleetent.node.backend import LocalProcessBackend
+from fleetent.node.backend import create_process_backend
 from fleetent.node.config import ConfigError, load_config
 from fleetent.node.forwarder import build_app as build_forwarder_app
 from fleetent.node.forwarder_contract import DEFAULT_FORWARDER_PORT
@@ -38,7 +38,7 @@ def main() -> None:
         raise SystemExit(1) from exc
 
     provider = PlatformApiDesiredStateProvider(config)
-    backend = LocalProcessBackend(config)
+    backend = create_process_backend(config)
     reconciler = NodeReconciler(config, backend)
     im_edge_host = NodeIMEdgeHost(config, backend=backend)
     forwarder_server, forwarder_thread = _start_forwarder(config, backend)

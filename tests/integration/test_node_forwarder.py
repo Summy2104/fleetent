@@ -26,6 +26,11 @@ class _Backend:
         assert tenant_id == "tenant-1"
         return 9011
 
+    def agent_endpoint(self, agent_name: str, tenant_id: str = "default") -> tuple[str, int]:
+        assert agent_name == "support"
+        assert tenant_id == "tenant-1"
+        return ("agent-support", 9011)
+
     def spawn(self, agent_name: str, tenant_id: str = "default", env=None) -> None:
         raise NotImplementedError
 
@@ -86,7 +91,7 @@ def test_forwarder_chat_requires_node_key_and_injects_tui_token(monkeypatch, tmp
 
     assert rejected.status_code == 401
     assert accepted.status_code == 200
-    assert captured["url"] == "http://127.0.0.1:9011/chat"
+    assert captured["url"] == "http://agent-support:9011/chat"
     assert captured["auth"] == "Bearer ma-agent-token"
     assert captured["content_type"] == "application/json"
     assert json.loads(captured["body"]) == {"message": "hi"}
@@ -134,6 +139,10 @@ async def test_forward_chat_streams_complete_body_over_real_socket(tmp_path) -> 
             def gateway_port(self, name: str, tenant_id: str = "default") -> int | None:
                 assert tenant_id == "tenant-1"
                 return upstream_port
+
+            def agent_endpoint(self, name: str, tenant_id: str = "default") -> tuple[str, int]:
+                assert tenant_id == "tenant-1"
+                return ("127.0.0.1", upstream_port)
 
         forwarder = build_app(
             NodeConfig(
@@ -209,6 +218,10 @@ async def test_forward_chat_relays_ingress_principal_header_over_real_socket(tmp
             def gateway_port(self, name: str, tenant_id: str = "default") -> int | None:
                 assert tenant_id == "tenant-1"
                 return upstream_port
+
+            def agent_endpoint(self, name: str, tenant_id: str = "default") -> tuple[str, int]:
+                assert tenant_id == "tenant-1"
+                return ("127.0.0.1", upstream_port)
 
         forwarder = build_app(
             NodeConfig(
@@ -298,7 +311,7 @@ def test_forwarder_ws_relays_ingress_principal_header(monkeypatch, tmp_path) -> 
     ) as ws:
         assert ws.receive_text() == '{"type":"ready"}'
 
-    assert captured["url"] == "ws://127.0.0.1:9011/ws"
+    assert captured["url"] == "ws://agent-support:9011/ws"
     assert captured["headers"] == {
         "Authorization": "Bearer ma-agent-token",
         "X-Fleetent-Principal": '{"user_id":"operator-1","tenant_id":"tenant-1"}',

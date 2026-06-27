@@ -16,6 +16,31 @@ def _config(tmp_path) -> NodeConfig:
     )
 
 
+def _config_with_backend(tmp_path, backend: str) -> NodeConfig:
+    return NodeConfig(
+        platform_url="https://platform.internal",
+        node_id="node-a",
+        service_key="ma-" + "1" * 64,
+        home_dir=tmp_path,
+        interval_seconds=10,
+        backend=backend,
+    )
+
+
+def _container_config(tmp_path) -> NodeConfig:
+    return NodeConfig(
+        platform_url="https://platform.internal",
+        node_id="node-a",
+        service_key="ma-" + "1" * 64,
+        home_dir=tmp_path,
+        interval_seconds=10,
+        backend="container",
+        agent_image="fleetent:test",
+        agent_network="fleetent-net",
+        agent_internal_port=18765,
+    )
+
+
 def _home(tmp_path, agent_name: str = "support", tenant_id: str = "default"):
     return tmp_path / "tenants" / tenant_id / "agents" / agent_name
 
@@ -59,6 +84,31 @@ def test_local_backend_spawn_uses_agent_run(monkeypatch, tmp_path) -> None:
     assert cwd == str(tmp_path)
 
 
+def test_create_process_backend_defaults_to_local_process_backend(tmp_path) -> None:
+    from fleetent.node.backend import LocalProcessBackend, create_process_backend
+
+    backend = create_process_backend(_config(tmp_path))
+
+    assert isinstance(backend, LocalProcessBackend)
+
+
+def test_create_process_backend_selects_container_backend(tmp_path) -> None:
+    from fleetent.node.backend import ContainerBackend, create_process_backend
+
+    backend = create_process_backend(_config_with_backend(tmp_path, "container"))
+
+    assert isinstance(backend, ContainerBackend)
+
+
+def test_local_backend_agent_endpoint_returns_loopback_and_gateway_port(tmp_path) -> None:
+    from fleetent.node.backend import LocalProcessBackend
+
+    backend = LocalProcessBackend(_config(tmp_path))
+    backend._gateway_ports["support"] = 9011
+
+    assert backend.agent_endpoint("support", "tenant-1") == ("127.0.0.1", 9011)
+
+
 def test_local_backend_spawn_disables_agent_local_im(monkeypatch, tmp_path) -> None:
     from fleetent.node.backend import LocalProcessBackend
 
@@ -74,6 +124,183 @@ def test_local_backend_spawn_disables_agent_local_im(monkeypatch, tmp_path) -> N
     backend.spawn("support")
 
     assert "--no-im" in calls[0]
+
+
+def test_container_backend_spawn_runs_agent_container_with_labels_network_and_mounts(
+    monkeypatch, tmp_path
+) -> None:
+    from fleetent.node.backend import ContainerBackend
+
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run(cmd: list[str], **kwargs):
+        calls.append(tuple(cmd))
+        return subprocess.CompletedProcess(cmd, 0, stdout="container-id\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    backend = ContainerBackend(_container_config(tmp_path))
+    backend.spawn("support", "tenant-1")
+
+    assert calls == [
+        (
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            "fleetent-agent-tenant-1-support",
+            "--label",
+            "fleetent.role=agent",
+            "--label",
+            "fleetent.agent.name=support",
+            "--label",
+            "fleetent.agent.tenant=tenant-1",
+            "--network",
+            "fleetent-net",
+            "--mount",
+            f"type=bind,source={tmp_path / 'tenants/tenant-1/agents/support'},"
+            f"target={tmp_path / 'tenants/tenant-1/agents/support'},readonly=false",
+            "--mount",
+            f"type=bind,source={tmp_path / 'tenants/tenant-1/kb.db'},"
+            f"target={tmp_path / 'tenants/tenant-1/kb.db'},readonly=true",
+            "--mount",
+            f"type=bind,source={tmp_path / 'tenants/tenant-1/kb_vectors.db'},"
+            f"target={tmp_path / 'tenants/tenant-1/kb_vectors.db'},readonly=true",
+            "fleetent:test",
+            "fleetent",
+            "agent",
+            "run",
+            "support",
+            "--no-im",
+            "--port",
+            "18765",
+            "--home",
+            str(tmp_path / "tenants/tenant-1/agents/support"),
+        )
+    ]
+
+
+def test_container_backend_is_alive_uses_label_filtered_running_container(
+    monkeypatch, tmp_path
+) -> None:
+    from fleetent.node.backend import ContainerBackend
+
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run(cmd: list[str], **kwargs):
+        calls.append(tuple(cmd))
+        return subprocess.CompletedProcess(cmd, 0, stdout="container-id\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    backend = ContainerBackend(_container_config(tmp_path))
+
+    assert backend.is_alive("support", "tenant-1") == 1
+    assert calls == [
+        (
+            "docker",
+            "ps",
+            "-q",
+            "--filter",
+            "label=fleetent.role=agent",
+            "--filter",
+            "label=fleetent.agent.name=support",
+            "--filter",
+            "label=fleetent.agent.tenant=tenant-1",
+            "--filter",
+            "status=running",
+        )
+    ]
+
+
+def test_container_backend_is_alive_returns_none_when_no_running_container(
+    monkeypatch, tmp_path
+) -> None:
+    from fleetent.node.backend import ContainerBackend
+
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""),
+    )
+
+    backend = ContainerBackend(_container_config(tmp_path))
+
+    assert backend.is_alive("support", "tenant-1") is None
+
+
+def test_container_backend_stop_execs_agent_stop(monkeypatch, tmp_path) -> None:
+    from fleetent.node.backend import ContainerBackend
+
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run(cmd: list[str], **kwargs):
+        calls.append(tuple(cmd))
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    backend = ContainerBackend(_container_config(tmp_path))
+    backend.stop("support", "tenant-1")
+
+    assert calls == [
+        (
+            "docker",
+            "exec",
+            "fleetent-agent-tenant-1-support",
+            "fleetent",
+            "agent",
+            "stop",
+            "support",
+            "--home",
+            str(tmp_path / "tenants/tenant-1/agents/support"),
+        )
+    ]
+
+
+def test_container_backend_stop_falls_back_to_docker_stop(monkeypatch, tmp_path) -> None:
+    from fleetent.node.backend import ContainerBackend
+
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run(cmd: list[str], **kwargs):
+        calls.append(tuple(cmd))
+        if cmd[:2] == ["docker", "exec"]:
+            raise subprocess.CalledProcessError(1, cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    backend = ContainerBackend(_container_config(tmp_path))
+    backend.stop("support", "tenant-1")
+
+    assert calls == [
+        (
+            "docker",
+            "exec",
+            "fleetent-agent-tenant-1-support",
+            "fleetent",
+            "agent",
+            "stop",
+            "support",
+            "--home",
+            str(tmp_path / "tenants/tenant-1/agents/support"),
+        ),
+        ("docker", "stop", "fleetent-agent-tenant-1-support"),
+    ]
+
+
+def test_container_backend_agent_endpoint_returns_container_name_and_internal_port(
+    tmp_path,
+) -> None:
+    from fleetent.node.backend import ContainerBackend
+
+    backend = ContainerBackend(_container_config(tmp_path))
+
+    assert backend.agent_endpoint("support", "tenant-1") == (
+        "fleetent-agent-tenant-1-support",
+        18765,
+    )
 
 
 def test_local_backend_stop_uses_agent_stop(monkeypatch, tmp_path) -> None:

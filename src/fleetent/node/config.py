@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal, cast
 
 
 class ConfigError(ValueError):
@@ -17,6 +18,10 @@ class NodeConfig:
     home_dir: Path
     interval_seconds: int = 10
     advertise_host: str | None = None
+    backend: Literal["process", "container"] = "process"
+    agent_image: str = "fleetent:latest"
+    agent_network: str = "fleetent"
+    agent_internal_port: int = 18765
 
 
 def load_config() -> NodeConfig:
@@ -33,6 +38,12 @@ def load_config() -> NodeConfig:
     service_key = _require_env("FLEETENT_NODE_SERVICE_KEY")
     interval_seconds = int(os.environ.get("FLEETENT_NODE_INTERVAL_SECONDS", "10"))
     advertise_host = os.environ.get("FLEETENT_NODE_ADVERTISE_HOST", "").strip() or None
+    backend = os.environ.get("FLEETENT_NODE_BACKEND", "process").strip() or "process"
+    if backend not in {"process", "container"}:
+        raise ConfigError("FLEETENT_NODE_BACKEND must be 'process' or 'container'")
+    agent_image = os.environ.get("FLEETENT_NODE_AGENT_IMAGE", "fleetent:latest").strip()
+    agent_network = os.environ.get("FLEETENT_NODE_AGENT_NETWORK", "fleetent").strip()
+    agent_internal_port = int(os.environ.get("FLEETENT_NODE_AGENT_INTERNAL_PORT", "18765"))
     return NodeConfig(
         platform_url=platform_url.rstrip("/"),
         node_id=node_id,
@@ -40,6 +51,10 @@ def load_config() -> NodeConfig:
         home_dir=home_dir,
         interval_seconds=interval_seconds,
         advertise_host=advertise_host,
+        backend=cast(Literal["process", "container"], backend),
+        agent_image=agent_image,
+        agent_network=agent_network,
+        agent_internal_port=agent_internal_port,
     )
 
 
