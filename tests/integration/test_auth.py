@@ -23,7 +23,7 @@ def test_seed_builtin_admin(db):
     result = auth.seed_builtin_admin()
     assert result is not None
     user, temp_password = result
-    assert user.role == "built_in_admin"
+    assert user.role == "admin"
     # fixed default credentials admin/admin; first login forces a password change
     assert user.name == auth.BUILTIN_ADMIN_NAME == "admin"
     assert temp_password == auth.BUILTIN_ADMIN_PASSWORD == "admin"
@@ -31,6 +31,38 @@ def test_seed_builtin_admin(db):
     assert auth.verify_password(temp_password, user_store.get_by_id(user.id).password_hash)
     # second seed is a no-op
     assert auth.seed_builtin_admin() is None
+
+
+def test_seed_builtin_admin_is_noop_when_active_admin_exists(db):
+    admin = user_store.create_web_user(
+        "owner@example.com", "Owner", password_hash=auth.hash_password("pw"), role="admin"
+    )
+
+    assert auth.seed_builtin_admin() is None
+    users = user_store.list_users()
+    assert [user.id for user in users] == [admin.id]
+
+
+def test_seed_builtin_admin_recreates_bootstrap_when_no_active_admin_exists(db):
+    admin = user_store.create_web_user(
+        "owner@example.com", "Owner", password_hash=auth.hash_password("pw"), role="admin"
+    )
+    with user_store._db().transaction() as conn:
+        conn.execute(
+            "UPDATE users SET status = :status WHERE id = :id",
+            {"status": "blocked", "id": admin.id},
+        )
+
+    result = auth.seed_builtin_admin()
+
+    assert result is not None
+    user, temp_password = result
+    assert user.name == auth.BUILTIN_ADMIN_NAME
+    assert user.email is None
+    assert user.role == "admin"
+    assert user.must_reset == 1
+    assert temp_password == auth.BUILTIN_ADMIN_PASSWORD
+    assert auth.verify_password(temp_password, user_store.get_by_id(user.id).password_hash)
 
 
 def test_seed_reasserts_must_reset_while_default_password(db):
@@ -57,8 +89,7 @@ def test_builtin_admin_cannot_be_demoted(db):
     user, _ = auth.seed_builtin_admin()
     with pytest.raises(PermissionError):
         user_store.set_role(user.id, "viewer")
-    # still built_in_admin
-    assert user_store.get_by_id(user.id).role == "built_in_admin"
+    assert user_store.get_by_id(user.id).role == "admin"
 
 
 def test_login_session_create_and_validate(db):
@@ -82,10 +113,10 @@ def test_has_role_and_require_role(db):
     u, _ = user_store.create_user("Cara")
     user_store.set_role(u.id, "viewer")
     viewer = user_store.get_by_id(u.id)
-    assert auth.has_role(viewer, {"admin", "built_in_admin"}) is False
+    assert auth.has_role(viewer, {"admin"}) is False
     with pytest.raises(PermissionError):
-        auth.require_role(viewer, {"admin", "built_in_admin"})
+        auth.require_role(viewer, {"admin"})
     user_store.set_role(u.id, "admin")
     admin = user_store.get_by_id(u.id)
-    assert auth.has_role(admin, {"admin", "built_in_admin"}) is True
-    auth.require_role(admin, {"admin", "built_in_admin"})  # no raise
+    assert auth.has_role(admin, {"admin"}) is True
+    auth.require_role(admin, {"admin"})  # no raise

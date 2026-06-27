@@ -28,7 +28,7 @@ from fleetent.platform.agent_management_console import (
 router = APIRouter(prefix="/admin")
 
 IDLE_TIMEOUT_SECONDS = 1800
-_ADMIN_ROLES = {"admin", "built_in_admin"}
+_ADMIN_ROLES = {"admin"}
 
 
 # --- injectable seams (agent_store / observability) ---------------------------

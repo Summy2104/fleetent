@@ -14,7 +14,7 @@ from fleetent.platform.tenancy import store as tenancy_store
 
 router = APIRouter(prefix="/admin/tenancy")
 
-_ADMIN_ROLES = {"admin", "built_in_admin"}
+_ADMIN_ROLES = {"admin"}
 _IDLE_TIMEOUT = 1800
 
 

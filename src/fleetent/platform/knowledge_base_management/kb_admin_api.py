@@ -78,7 +78,7 @@ from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
 router = APIRouter(prefix="/admin/kb")
 
 IDLE_TIMEOUT_SECONDS = 1800
-_ADMIN_ROLES = {"admin", "built_in_admin"}
+_ADMIN_ROLES = {"admin"}
 _DEFAULT_TENANT = "default"
 _VALID_MODES = {"vector", "keyword", "hybrid"}
 _KB_INGEST_POLL_INTERVAL_SECONDS = 0.05

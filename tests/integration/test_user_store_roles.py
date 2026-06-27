@@ -33,11 +33,31 @@ def test_defaults_role_viewer_status_active(db):
 
 def test_set_role_and_status(db):
     u, _ = user_store.create_user("Bob")
+    other_admin, _ = user_store.create_user("Other Admin")
+    user_store.set_role(other_admin.id, "admin")
     user_store.set_role(u.id, "admin")
     user_store.set_status(u.id, "disabled")
     fetched = user_store.get_by_id(u.id)
     assert fetched.role == "admin"
     assert fetched.status == "disabled"
+
+
+def test_would_orphan_admins_detects_last_active_admin_changes(db):
+    only_admin, _ = user_store.create_user("Only Admin")
+    viewer, _ = user_store.create_user("Viewer")
+    user_store.set_role(only_admin.id, "admin")
+
+    assert user_store._would_orphan_admins(only_admin.id, after_role="viewer") is True
+    assert user_store._would_orphan_admins(only_admin.id, after_status="blocked") is True
+    assert user_store._would_orphan_admins(only_admin.id, deleting=True) is True
+    assert user_store._would_orphan_admins(viewer.id, after_status="blocked") is False
+
+    second_admin, _ = user_store.create_user("Second Admin")
+    user_store.set_role(second_admin.id, "admin")
+
+    assert user_store._would_orphan_admins(only_admin.id, after_role="viewer") is False
+    assert user_store._would_orphan_admins(only_admin.id, after_status="blocked") is False
+    assert user_store._would_orphan_admins(only_admin.id, deleting=True) is False
 
 
 def test_set_password_and_must_reset(db):

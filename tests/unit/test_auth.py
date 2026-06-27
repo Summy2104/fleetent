@@ -129,7 +129,7 @@ def test_seed_builtin_admin_creates_when_absent(monkeypatch: Any) -> None:
     calls: dict[str, Any] = {}
     created = _user(id="admin-id", name=auth.BUILTIN_ADMIN_NAME)
 
-    monkeypatch.setattr(user_store, "get_builtin_admin", lambda: None)
+    monkeypatch.setattr(user_store, "count_active_admins", lambda: 0)
     monkeypatch.setattr(user_store, "create_user", lambda name, email: (created, "bootstrap-pass"))
     monkeypatch.setattr(
         user_store, "set_role", lambda uid, role: calls.update({"role": (uid, role)})
@@ -146,13 +146,14 @@ def test_seed_builtin_admin_creates_when_absent(monkeypatch: Any) -> None:
     user, temp_password = result
     assert user is created
     assert temp_password == auth.BUILTIN_ADMIN_PASSWORD
-    assert calls["role"] == ("admin-id", "built_in_admin")
+    assert calls["role"] == ("admin-id", "admin")
     assert calls["pw"][1] is True  # forced reset
 
 
 def test_seed_builtin_admin_noop_when_reset_already_required(monkeypatch: Any) -> None:
     existing = _user(id="admin-id", must_reset=1)
     set_reset_called = {"n": 0}
+    monkeypatch.setattr(user_store, "count_active_admins", lambda: 1)
     monkeypatch.setattr(user_store, "get_builtin_admin", lambda: existing)
     monkeypatch.setattr(
         user_store,
@@ -167,6 +168,7 @@ def test_seed_builtin_admin_reasserts_reset_on_default_password(monkeypatch: Any
     default_hash = auth.hash_password(auth.BUILTIN_ADMIN_PASSWORD)
     existing = _user(id="admin-id", must_reset=0, password_hash=default_hash)
     reasserted: dict[str, Any] = {}
+    monkeypatch.setattr(user_store, "count_active_admins", lambda: 1)
     monkeypatch.setattr(user_store, "get_builtin_admin", lambda: existing)
     monkeypatch.setattr(
         user_store, "set_must_reset", lambda uid, flag: reasserted.update({uid: flag})

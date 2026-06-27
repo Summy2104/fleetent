@@ -50,22 +50,24 @@ def verify_password(password: str, stored: str | None) -> bool:
 
 
 def seed_builtin_admin() -> tuple[user_store.User, str] | None:
-    """Create the built-in admin on first run. Returns (user, temp_password) or None.
+    """Create the bootstrap admin when no active admin exists.
 
-    Returns None (no-op) if a built-in admin already exists.
+    Returns (user, temp_password) when seeded, otherwise None.
     """
-    existing = user_store.get_builtin_admin()
-    if existing is not None:
+    if user_store.count_active_admins() > 0:
         # Insecure default admin/admin must stay gated: if the reset flag was cleared but the
         # password is still the bootstrap default, re-assert the forced reset on next startup.
-        if not existing.must_reset and verify_password(
-            BUILTIN_ADMIN_PASSWORD, existing.password_hash
+        existing = user_store.get_builtin_admin()
+        if (
+            existing is not None
+            and not existing.must_reset
+            and verify_password(BUILTIN_ADMIN_PASSWORD, existing.password_hash)
         ):
             user_store.set_must_reset(existing.id, True)
         return None
     temp_password = BUILTIN_ADMIN_PASSWORD
     user, _ = user_store.create_user(name=BUILTIN_ADMIN_NAME, email=None)
-    user_store.set_role(user.id, "built_in_admin")
+    user_store.set_role(user.id, "admin")
     # admin/admin is an insecure bootstrap credential: force a password change on first login.
     user_store.set_password(user.id, hash_password(temp_password), must_reset=True)
     refreshed = user_store.get_by_id(user.id)

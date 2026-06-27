@@ -533,7 +533,7 @@ def _require_admin_session(authorization: str = Header(default="")) -> user_stor
     user = user_store.get_by_id(user_id)
     if user is None:
         raise HTTPException(status_code=401, detail="invalid session")
-    if not auth.has_role(user, {"admin", "built_in_admin"}):
+    if not auth.has_role(user, {"admin"}):
         raise HTTPException(status_code=403, detail="admin required")
     return user
 

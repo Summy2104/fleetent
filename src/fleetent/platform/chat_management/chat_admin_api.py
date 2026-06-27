@@ -23,7 +23,7 @@ from fleetent.platform.chat_management import session_admin_store
 router = APIRouter(prefix="/admin")
 
 IDLE_TIMEOUT_SECONDS = 1800
-_ADMIN_ROLES = {"admin", "built_in_admin"}
+_ADMIN_ROLES = {"admin"}
 
 
 # --- injectable seams (agent-runtime / session / im-gateway follow-ups) -------
