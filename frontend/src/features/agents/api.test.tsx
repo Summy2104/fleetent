@@ -181,7 +181,7 @@ describe('agents api bindings hooks', () => {
       expect(kbsQuery.result.current.data?.kb_ids).toEqual(['support']);
     });
 
-    const setSkill = renderHook(() => useSetAgentSkillMutation('alpha', 'incident-bridge'), { wrapper });
+    const setSkill = renderHook(() => useSetAgentSkillMutation('alpha'), { wrapper });
     const bindMcp = renderHook(() => useBindAgentMcpMutation('alpha'), { wrapper });
     const unbindMcp = renderHook(() => useUnbindAgentMcpMutation('alpha'), { wrapper });
     const bindOauth = renderHook(() => useBindAgentOauthMutation('alpha'), { wrapper });
@@ -198,7 +198,7 @@ describe('agents api bindings hooks', () => {
     let previousOauthCalls = oauthCalls;
     let previousKbsCalls = kbsCalls;
 
-    await setSkill.result.current.mutateAsync({ enabled: true });
+    await setSkill.result.current.mutateAsync({ skill_name: 'incident-bridge', enabled: true });
     await waitFor(() => {
       expect(skillsCalls).toBeGreaterThan(previousSkillsCalls);
       expect(skillsQuery.result.current.data?.[1]?.enabled).toBe(true);
