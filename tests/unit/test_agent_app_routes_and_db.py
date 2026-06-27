@@ -88,7 +88,7 @@ def test_init_agent_db_schema_wires_router_and_sinks(
         ("fleetent.session.index.set_state_db", "session_index"),
         ("fleetent.observability.traces.set_state_db", "traces"),
         ("fleetent.reflection.set_state_db", "reflection"),
-        ("fleetent.memory.store.set_state_db", "memory_db"),
+        ("fleetent.memory.proposal_store.set_state_db", "memory_db"),
         ("fleetent.governance.approval_request_store.set_state_db", "approval_request"),
         ("fleetent.governance.approval_store.set_state_db", "approval_store"),
         ("fleetent.governance.tool_auto_approvals_store.set_state_db", "allowlist"),
@@ -99,8 +99,8 @@ def test_init_agent_db_schema_wires_router_and_sinks(
     ):
         monkeypatch.setattr(target, lambda db, _key=key: captures.append((_key, db)))
     monkeypatch.setattr(
-        "fleetent.memory.store.set_vector_backend",
-        lambda backend: captures.append(("agent_vector", backend)),
+        "fleetent.memory.facts_store.set_facts_db",
+        lambda db, backend: captures.append(("agent_vector", backend)),
     )
     monkeypatch.setattr(
         "fleetent.artifact_exchange.set_views_root",

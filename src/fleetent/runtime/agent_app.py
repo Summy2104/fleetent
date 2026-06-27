@@ -324,7 +324,7 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
     from fleetent.memory import agent_memory as agent_memory_module
     from fleetent.memory import facts_store
-    from fleetent.memory import store as memory_store
+    from fleetent.memory import proposal_store as memory_proposal_store
     from fleetent.observability import traces
     from fleetent.runtime import context as runtime_context
     from fleetent.runtime import sub_agent_lifecycle
@@ -356,8 +356,7 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     session_index.set_state_db(agent_state_db)
     traces.set_state_db(agent_state_db)
     reflection.set_state_db(agent_state_db)
-    memory_store.set_state_db(agent_state_db)
-    memory_store.set_vector_backend(agent_scope.vector_backend)
+    memory_proposal_store.set_state_db(agent_state_db)
     # user-memory-v2: facts tables share agent_state.db and the per-agent vector backend.
     facts_store.set_facts_db(agent_state_db, agent_scope.vector_backend)
     approval_request_store.set_state_db(agent_state_db)

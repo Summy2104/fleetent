@@ -365,7 +365,7 @@ def test_single_relation_overrides_despite_equivalent_verdict(tmp_path: Path) ->
     # Force the old (multi) cardinality to single to mirror the name relation.
     facts_store.update_fact_status("old", "active")  # ensure active
     # Re-insert as single is simpler: clear and add a single one.
-    db.execute("UPDATE facts SET cardinality='single' WHERE fact_id='old'")
+    db.execute("UPDATE memory_items SET cardinality='single' WHERE fact_id='old'")
 
     # LLM misjudges a clearly-different new name as Equivalent. For a single
     # relation the new value must STILL override the old (deterministic).
@@ -393,7 +393,7 @@ def test_single_relation_same_value_still_skips(tmp_path: Path) -> None:
     db = _open_db(tmp_path)
     facts_store.set_facts_db(db, None)  # type: ignore[arg-type]
     facts_store.insert_fact(_seed_fact_subject("old", "agent", "name", "Fleetent"))
-    db.execute("UPDATE facts SET cardinality='single' WHERE fact_id='old'")
+    db.execute("UPDATE memory_items SET cardinality='single' WHERE fact_id='old'")
 
     # Same value (case/space-insensitive) → no new row, old stays.
     cf = ClassifiedFact(

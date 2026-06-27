@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 
 from fleetent.db import SQLiteDatabase
 from fleetent.memory import facts_store
-from fleetent.memory.store import format_datetime
+from fleetent.memory._datetime_utils import format_datetime
 from fleetent.vector_store.namespaces import memory_namespace
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ async def archive_expired_facts(
 
     result = db.execute(
         """
-        SELECT fact_id, user_id FROM facts
+        SELECT fact_id, user_id FROM memory_items
         WHERE status = 'active'
           AND expires_at IS NOT NULL
           AND (
@@ -63,7 +63,7 @@ async def archive_expired_facts(
 
     db.execute(
         """
-        UPDATE facts
+        UPDATE memory_items
         SET status = 'archived', updated_at = :now
         WHERE status = 'active'
           AND expires_at IS NOT NULL

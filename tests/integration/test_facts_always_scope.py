@@ -68,7 +68,7 @@ def _fact(
 def test_scope_column_exists_after_migration(tmp_path: Path) -> None:
     db_path = tmp_path / "agent_state.db"
     _open_db(tmp_path)
-    assert "scope" in _columns(db_path, "facts")
+    assert "scope" in _columns(db_path, "memory_items")
 
 
 def test_scope_column_default_is_situational(tmp_path: Path) -> None:
@@ -98,26 +98,26 @@ def test_scope_backfill_sets_always_for_known_relations(tmp_path: Path) -> None:
     conn = sqlite3.connect(db_path)
     # Insert facts with scope forced to 'situational' to simulate pre-backfill state
     conn.execute(
-        "INSERT INTO facts (fact_id, user_id, subject, relation, object, cardinality, status, access_count, created_at, updated_at, scope) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO memory_items (fact_id, user_id, subject, relation, object, cardinality, status, access_count, created_at, updated_at, scope) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         ("pre-f1", "u1", "agent", "response_style", "加 xin", "single", "active", 0, now, now, "situational"),
     )
     conn.execute(
-        "INSERT INTO facts (fact_id, user_id, subject, relation, object, cardinality, status, access_count, created_at, updated_at, scope) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO memory_items (fact_id, user_id, subject, relation, object, cardinality, status, access_count, created_at, updated_at, scope) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         ("pre-f2", "u1", "user", "has_skill", "Python", "multi", "active", 0, now, now, "situational"),
     )
     conn.commit()
 
     # Re-run the backfill SQL as the migration would
     conn.execute(
-        "UPDATE facts SET scope = 'always' WHERE relation IN ("
+        "UPDATE memory_items SET scope = 'always' WHERE relation IN ("
         "'response_style', 'tone', 'format', 'language', 'output_format',"
         "'never_do', 'always_do', 'security', 'approval_required'"
         ") AND status = 'active'"
     )
     conn.commit()
 
-    row1 = conn.execute("SELECT scope FROM facts WHERE fact_id='pre-f1'").fetchone()
-    row2 = conn.execute("SELECT scope FROM facts WHERE fact_id='pre-f2'").fetchone()
+    row1 = conn.execute("SELECT scope FROM memory_items WHERE fact_id='pre-f1'").fetchone()
+    row2 = conn.execute("SELECT scope FROM memory_items WHERE fact_id='pre-f2'").fetchone()
     conn.close()
 
     assert row1[0] == "always"

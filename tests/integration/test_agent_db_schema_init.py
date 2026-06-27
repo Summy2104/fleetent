@@ -85,8 +85,7 @@ def test_memory_y_migrations_creates_indices(tmp_path: Path) -> None:
     db = _db(tmp_path)
     migrate(db, AGENT_STATE_MIGRATIONS)
     indices = _index_names(db)
-    assert "idx_memory_items_user_type" in indices
-    assert "idx_memory_items_user_expires" in indices
+    assert "idx_memory_items_user_rel" in indices
 
 
 def test_memory_y_migrations_idempotent(tmp_path: Path) -> None:

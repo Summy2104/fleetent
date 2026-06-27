@@ -19,7 +19,7 @@ from fleetent.memory.facts_models import (
     FactStatus,
     RelationCluster,
 )
-from fleetent.memory.store import format_datetime, parse_datetime, parse_optional_datetime
+from fleetent.memory._datetime_utils import format_datetime, parse_datetime, parse_optional_datetime
 from fleetent.vector_store.backend import VectorBackend
 
 _facts_db: SQLiteDatabase | None = None
@@ -57,7 +57,7 @@ def insert_fact(fact: Fact) -> None:
     """Insert one fact row.  Raises on duplicate fact_id."""
     _facts_database().execute(
         """
-        INSERT INTO facts (
+        INSERT INTO memory_items (
             fact_id, user_id, subject, relation, object, cardinality,
             status, access_count, first_accessed_at, last_accessed_at,
             expires_at, valid_until, created_at, updated_at, source_turn, statement, scope
@@ -76,7 +76,7 @@ def update_fact_status(fact_id: str, status: FactStatus) -> None:
     """Update a fact's status and bump updated_at to now (caller-provided)."""
     _facts_database().execute(
         """
-        UPDATE facts
+        UPDATE memory_items
         SET status = :status,
             updated_at = :updated_at
         WHERE fact_id = :fact_id
@@ -93,7 +93,7 @@ def set_fact_expires_at(fact_id: str, expires_at: datetime | None) -> None:
     """Set a fact's expires_at (NULL = long-term) and bump updated_at."""
     _facts_database().execute(
         """
-        UPDATE facts
+        UPDATE memory_items
         SET expires_at = :expires_at,
             updated_at = :updated_at
         WHERE fact_id = :fact_id
@@ -110,7 +110,7 @@ def get_fact(fact_id: str) -> Fact | None:
     """Load one fact by id, or None if it does not exist."""
     row = (
         _facts_database()
-        .execute("SELECT * FROM facts WHERE fact_id = :fact_id", {"fact_id": fact_id})
+        .execute("SELECT * FROM memory_items WHERE fact_id = :fact_id", {"fact_id": fact_id})
         .fetchone()
     )
     return _row_to_fact(row) if row is not None else None
@@ -124,7 +124,7 @@ def facts_by_ids(ids: list[str]) -> dict[str, Fact]:
     params: dict[str, object] = {f"id_{index}": fid for index, fid in enumerate(ids)}
     rows = (
         _facts_database()
-        .execute(f"SELECT * FROM facts WHERE fact_id IN ({placeholders})", params)
+        .execute(f"SELECT * FROM memory_items WHERE fact_id IN ({placeholders})", params)
         .fetchall()
     )
     return {str(row["fact_id"]): _row_to_fact(row) for row in rows}
@@ -136,7 +136,7 @@ def active_facts_for_relation(user_id: str, subject: str, relation: str) -> list
         _facts_database()
         .execute(
             """
-            SELECT * FROM facts
+            SELECT * FROM memory_items
             WHERE user_id = :user_id
               AND subject = :subject
               AND relation = :relation
@@ -169,7 +169,7 @@ def list_always_facts(user_id: str) -> list[Fact]:
     rows = (
         _facts_database()
         .execute(
-            "SELECT * FROM facts WHERE user_id = :user_id AND scope = 'always' AND status = 'active' ORDER BY created_at ASC",
+            "SELECT * FROM memory_items WHERE user_id = :user_id AND scope = 'always' AND status = 'active' ORDER BY created_at ASC",
             {"user_id": user_id},
         )
         .fetchall()
@@ -185,7 +185,7 @@ def _count_soft_always_facts(user_id: str) -> int:
     row = (
         _facts_database()
         .execute(
-            f"SELECT COUNT(*) as cnt FROM facts WHERE user_id = :user_id AND scope = 'always' AND status = 'active' AND relation IN ({placeholders})",
+            f"SELECT COUNT(*) as cnt FROM memory_items WHERE user_id = :user_id AND scope = 'always' AND status = 'active' AND relation IN ({placeholders})",
             params,
         )
         .fetchone()
@@ -201,7 +201,7 @@ def _oldest_soft_always_fact_id(user_id: str) -> str | None:
     row = (
         _facts_database()
         .execute(
-            f"SELECT fact_id FROM facts WHERE user_id = :user_id AND scope = 'always' AND status = 'active' AND relation IN ({placeholders}) ORDER BY updated_at ASC LIMIT 1",
+            f"SELECT fact_id FROM memory_items WHERE user_id = :user_id AND scope = 'always' AND status = 'active' AND relation IN ({placeholders}) ORDER BY updated_at ASC LIMIT 1",
             params,
         )
         .fetchone()
@@ -239,7 +239,7 @@ def list_active_facts(user_id: str, subject: str | None = None) -> list[Fact]:
     rows = (
         _facts_database()
         .execute(
-            f"SELECT * FROM facts WHERE {' AND '.join(clauses)} ORDER BY created_at ASC",
+            f"SELECT * FROM memory_items WHERE {' AND '.join(clauses)} ORDER BY created_at ASC",
             params,
         )
         .fetchall()
@@ -251,7 +251,7 @@ def update_fact_access(fact_id: str, accessed_at: datetime) -> None:
     """Increment access_count, set last_accessed_at, set first_accessed_at once."""
     _facts_database().execute(
         """
-        UPDATE facts
+        UPDATE memory_items
         SET access_count = access_count + 1,
             last_accessed_at = :accessed_at,
             first_accessed_at = COALESCE(first_accessed_at, :accessed_at),

@@ -24,7 +24,7 @@ def test_owner_capability_contract_evidence_covers_all_pilot_domains(tmp_path):
             capability="Memory",
             status="passed",
             command="uv run pytest tests/integration/test_shared_memory.py -q",
-            artifacts=[Path("tests/integration/test_memory_retention_compaction.py")],
+            artifacts=[Path("tests/integration/test_facts_extract_conflict_retract.py")],
             notes=["item lifecycle, retention/compaction, tenant/team isolation"],
         ),
         CapabilityEvidence(

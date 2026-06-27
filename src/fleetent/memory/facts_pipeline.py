@@ -27,6 +27,7 @@ from fleetent.memory.facts_models import (
     RelationCluster,
     ResolvedFact,
 )
+from fleetent.observability.traces import TraceEvent, record_trace_event
 from fleetent.structured_logging import get_logger
 from fleetent.vector_store.runtime import embed_text
 
@@ -195,6 +196,8 @@ async def run_pipeline(
     vector_backend: Any,
     llm_client: Any,
     source_turn: str | None,
+    run_id: str | None = None,
+    agent_name: str | None = None,
 ) -> None:
     """Run the full write pipeline for one conversation turn.
 
@@ -269,6 +272,66 @@ async def run_pipeline(
         ],
         committed_count=len(new_active),
     )
+    # Emit signals for newly committed facts AND for facts confirmed as Equivalent/
+    # NewSubsumed (user re-stated an existing fact): recurrence across turns is what
+    # reflection needs to promote a fact to agent_memory.
+    confirmed = _confirmed_facts_for_signals(user_id, classified)
+    _emit_memory_fact_signals(
+        new_active + confirmed, user_id=user_id, run_id=run_id, agent_name=agent_name
+    )
+
+
+def _confirmed_facts_for_signals(
+    user_id: str, classified: list[ClassifiedFact]
+) -> list[Fact]:
+    """Return existing active facts that were re-confirmed this turn (Equivalent/NewSubsumed).
+
+    These facts weren't re-written to the DB but the user mentioned them again, so
+    they deserve a memory_fact_observed signal for reflection to count recurrences.
+    """
+    from fleetent.memory import facts_store
+
+    confirmed: list[Fact] = []
+    for cf in classified:
+        if cf.verdict not in ("Equivalent", "NewSubsumed"):
+            continue
+        existing = facts_store.active_facts_for_relation(user_id, cf.subject, cf.relation)
+        confirmed.extend(existing)
+    return confirmed
+
+
+def _emit_memory_fact_signals(
+    facts: list[Fact],
+    *,
+    user_id: str,
+    run_id: str | None,
+    agent_name: str | None,
+) -> None:
+    """Emit a memory_fact_observed trace event for each newly committed fact.
+
+    Reflection reads these signals to discover memory candidates: a fact that
+    recurs across multiple turns (≥2 events with the same payload["memory_fact"]
+    text) and is not yet in agent_memory_items becomes a suggest_agent_memory_or_kb
+    proposal.  Best-effort — failure must not affect the calling pipeline.
+    """
+    if not facts or run_id is None:
+        return
+    try:
+        for fact in facts:
+            text = (fact.statement or f"{fact.subject} {fact.relation}: {fact.object}").strip()
+            if not text:
+                continue
+            record_trace_event(
+                TraceEvent(
+                    run_id=run_id,
+                    event_type="memory_fact_observed",
+                    payload={"memory_fact": text},
+                    user_id=user_id,
+                    agent_name=agent_name,
+                )
+            )
+    except Exception:  # noqa: BLE001 — trace emission must never break extraction
+        logger.debug("facts_pipeline: memory_fact signal emit failed", exc_info=True)
 
 
 async def run_pipeline_from_conversation(
@@ -277,6 +340,8 @@ async def run_pipeline_from_conversation(
     *,
     model_policy: Any = None,
     source_turn: str | None = None,
+    run_id: str | None = None,
+    agent_name: str | None = None,
 ) -> None:
     """Adapter from the runtime's (conversation, policy) shape to run_pipeline.
 
@@ -299,6 +364,8 @@ async def run_pipeline_from_conversation(
         vector_backend=vector_backend,
         llm_client=llm_client,
         source_turn=source_turn,
+        run_id=run_id,
+        agent_name=agent_name,
     )
 
 

@@ -50,7 +50,8 @@ def _fetch_all(db_path: Path, sql: str) -> list:
 
 def test_facts_table_exists_after_migration(tmp_path: Path) -> None:
     _, db_path = _open_migrated(tmp_path)
-    assert "facts" in _tables(db_path)
+    assert "memory_items" in _tables(db_path)
+    assert "facts" not in _tables(db_path)
 
 
 def test_fact_edges_table_exists_after_migration(tmp_path: Path) -> None:
@@ -65,12 +66,12 @@ def test_relation_clusters_table_exists_after_migration(tmp_path: Path) -> None:
 
 def test_facts_columns_complete(tmp_path: Path) -> None:
     _, db_path = _open_migrated(tmp_path)
-    cols = _columns(db_path, "facts")
+    cols = _columns(db_path, "memory_items")
     expected = {
         "fact_id", "user_id", "subject", "relation", "object",
         "cardinality", "status", "access_count", "first_accessed_at",
         "last_accessed_at", "expires_at", "valid_until",
-        "created_at", "updated_at", "source_turn", "statement",
+        "created_at", "updated_at", "source_turn", "statement", "scope",
     }
     assert expected <= cols
 
@@ -98,4 +99,4 @@ def test_idempotent_remigration(tmp_path: Path) -> None:
     db, db_path = _open_migrated(tmp_path)
     # Running migrate again on an already-migrated DB must not raise
     migrate(db, AGENT_STATE_MIGRATIONS)
-    assert "facts" in _tables(db_path)
+    assert "memory_items" in _tables(db_path)

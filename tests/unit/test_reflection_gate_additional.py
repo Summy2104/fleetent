@@ -292,35 +292,25 @@ def test_skill_proposal_state_helpers_cover_validation(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize("action", ["rewrite", "compact"])
-async def test_apply_maintenance_action_requires_content_and_target_for_rewrite_like_actions(
-    monkeypatch,
+async def test_apply_maintenance_action_legacy_rewrite_compact_are_noop(
     action: str,
 ) -> None:
+    # Legacy maintenance actions are no-ops after removal of the legacy memory_items table.
     proposal = _memory_proposal(action=action, proposed_content=" ", target_memory_ids=[])
-
-    with pytest.raises(ValueError, match="proposed_content is required"):
-        await reflection_gate._apply_maintenance_action(proposal)  # noqa: SLF001
+    await reflection_gate._apply_maintenance_action(proposal)  # noqa: SLF001 — must not raise
 
     proposal = _memory_proposal(action=action, target_memory_ids=[], proposed_content="updated")
-    with pytest.raises(ValueError, match="target_memory_ids must not be empty"):
-        await reflection_gate._apply_maintenance_action(proposal)  # noqa: SLF001
+    await reflection_gate._apply_maintenance_action(proposal)  # noqa: SLF001 — must not raise
 
 
-async def test_apply_maintenance_action_merge_delete_and_kb_paths(monkeypatch) -> None:
-    merge = AsyncMock()
-    delete = AsyncMock()
-    monkeypatch.setattr("fleetent.memory.merge_user_memories", merge)
-    monkeypatch.setattr("fleetent.memory.delete_user_memory", delete)
-
+async def test_apply_maintenance_action_kb_paths(monkeypatch) -> None:
+    # merge/delete are no-ops; only KB-dispatch and agent_memory paths are tested.
     await reflection_gate._apply_maintenance_action(  # noqa: SLF001
         _memory_proposal(action="merge", target_memory_ids=["m1", "m2"], proposed_content="merged")
     )
-    merge.assert_awaited_once_with("user-1", ["m1", "m2"], "merged")
-
     await reflection_gate._apply_maintenance_action(  # noqa: SLF001
         _memory_proposal(action="delete", target_memory_ids=["m1", "m2"])
     )
-    assert delete.await_count == 2
 
     with pytest.raises(RuntimeError, match="knowledge base proposals"):
         await reflection_gate._apply_maintenance_action(  # noqa: SLF001

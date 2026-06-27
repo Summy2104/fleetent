@@ -22,7 +22,7 @@ from fleetent.memory.facts_models import (
     Fact,
 )
 from fleetent.memory.facts_temporal import temporal_boundary
-from fleetent.memory.store import format_datetime
+from fleetent.memory._datetime_utils import format_datetime
 from fleetent.vector_store.namespaces import memory_namespace
 from fleetent.vector_store.runtime import embed_text
 
@@ -82,7 +82,7 @@ def _forget(
     whole_subject = not target_object.strip() or target_object.strip() == subject.strip()
     rows = conn.execute(
         """
-        SELECT * FROM facts
+        SELECT * FROM memory_items
         WHERE user_id = :user_id AND subject = :subject AND status = 'active'
         """,
         {"user_id": user_id, "subject": subject},
@@ -111,7 +111,7 @@ def _migrate_subject(
         return
     rows = conn.execute(
         """
-        SELECT * FROM facts
+        SELECT * FROM memory_items
         WHERE user_id = :user_id AND subject = :subject AND status = 'active'
         """,
         {"user_id": user_id, "subject": old_subject},
@@ -120,7 +120,7 @@ def _migrate_subject(
     # a repeated/duplicate rename directive must not pile up duplicates).
     existing_new = conn.execute(
         """
-        SELECT relation, object FROM facts
+        SELECT relation, object FROM memory_items
         WHERE user_id = :user_id AND subject = :subject AND status = 'active'
         """,
         {"user_id": user_id, "subject": new_subject},
@@ -288,7 +288,7 @@ def _active_facts_in_tx(
 ) -> list[Fact]:
     result = conn.execute(
         """
-        SELECT * FROM facts
+        SELECT * FROM memory_items
         WHERE user_id = :user_id AND subject = :subject
           AND relation = :relation AND status = 'active'
         ORDER BY created_at ASC
@@ -301,7 +301,7 @@ def _active_facts_in_tx(
 def _insert_fact_in_tx(conn: SQLiteConnection, fact: Fact) -> None:
     conn.execute(
         """
-        INSERT INTO facts (
+        INSERT INTO memory_items (
             fact_id, user_id, subject, relation, object, cardinality,
             status, access_count, first_accessed_at, last_accessed_at,
             expires_at, valid_until, created_at, updated_at, source_turn, statement, scope
@@ -318,7 +318,7 @@ def _insert_fact_in_tx(conn: SQLiteConnection, fact: Fact) -> None:
 
 def _update_status_in_tx(conn: SQLiteConnection, fact_id: str, status: str, now: datetime) -> None:
     conn.execute(
-        "UPDATE facts SET status = :status, updated_at = :now WHERE fact_id = :fact_id",
+        "UPDATE memory_items SET status = :status, updated_at = :now WHERE fact_id = :fact_id",
         {"status": status, "now": format_datetime(now), "fact_id": fact_id},
     )
 
