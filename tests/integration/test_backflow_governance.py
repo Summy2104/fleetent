@@ -298,3 +298,54 @@ def test_fork_creates_full_bundle_and_rebinds_source_agent(
     )
     assert original_binding["enabled"] == 0
     assert fork_binding["enabled"] == 1
+
+
+def test_accept_bumps_resync_epoch_for_node_resync(app, db, pool_dir, admin_token, monkeypatch):
+    """accept bumps resync_epoch so the owning node re-syncs and stops re-nominating."""
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(pool_dir))
+    _commit_skill(pool_dir, "crm-ops", "pool-v1")
+    agent = _create_agent()
+    pid = _nominate(agent, "crm-ops", pool_dir)
+    assert skill_admin_store.get_resync_epoch(agent.id, "crm-ops") == 0
+
+    client = TestClient(app, raise_server_exceptions=True)
+    resp = client.post(
+        f"/admin/skills/backflow/{pid}/accept",
+        headers={"Authorization": f"Session {admin_token}"},
+    )
+    assert resp.status_code == 200
+    assert skill_admin_store.get_resync_epoch(agent.id, "crm-ops") == 1
+
+
+def test_reject_bumps_resync_epoch_to_revert_node(app, db, pool_dir, admin_token, monkeypatch):
+    """reject bumps resync_epoch so the node reverts its drifted copy to the pool head."""
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(pool_dir))
+    _commit_skill(pool_dir, "crm-ops", "pool-v1")
+    agent = _create_agent()
+    pid = _nominate(agent, "crm-ops", pool_dir)
+
+    client = TestClient(app, raise_server_exceptions=True)
+    resp = client.post(
+        f"/admin/skills/backflow/{pid}/reject",
+        headers={"Authorization": f"Session {admin_token}"},
+    )
+    assert resp.status_code == 200
+    assert skill_admin_store.get_resync_epoch(agent.id, "crm-ops") == 1
+
+
+def test_skill_manifest_carries_resync_epoch(db, pool_dir, monkeypatch):
+    """The desired-state skill manifest exposes resync_epoch so the node can act on it."""
+    from fleetent.platform.node_management import node_desired_state_api as nds
+
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(pool_dir))
+    _commit_skill(pool_dir, "crm-ops", "pool-v1")
+    tenancy_store.create_tenant(id="acme", name="Acme")
+    agent = agent_store.create_agent("support", "p", ["crm-ops"], tenant_id="acme")
+    skill_admin_store.set_binding(agent.id, "crm-ops", True, updated_by="admin")
+
+    manifest = next(m for m in nds._skill_manifests_for("node-a", agent) if m["name"] == "crm-ops")
+    assert manifest["resync_epoch"] == "0"
+
+    skill_admin_store.bump_resync_epoch(agent.id, "crm-ops")
+    manifest2 = next(m for m in nds._skill_manifests_for("node-a", agent) if m["name"] == "crm-ops")
+    assert manifest2["resync_epoch"] == "1"

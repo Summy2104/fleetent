@@ -215,6 +215,77 @@ def test_reconcile_keeps_running_agent_when_config_hash_matches(tmp_path) -> Non
 
 
 @respx.mock
+def test_reconcile_syncs_skills_for_running_agent_without_respawn(tmp_path, monkeypatch) -> None:
+    # A running agent whose config is unchanged must still have its skills reconciled
+    # every tick, so new pool versions and post-backflow forced resyncs (resync_epoch)
+    # are applied without waiting for a respawn — otherwise accept/reject loops forever.
+    from fleetent.node import reconcile as reconcile_module
+    from fleetent.node.reconcile import NodeReconciler
+
+    sync_calls: list[object] = []
+
+    class FakeSkillDeployer:
+        def __init__(self, config) -> None:
+            del config
+
+        def sync(self, home, manifests) -> None:
+            del home
+            sync_calls.append(manifests)
+
+        def observe(self, home, manifests):
+            del home, manifests
+            return []
+
+    monkeypatch.setattr(reconcile_module, "NodeSkillDeployer", FakeSkillDeployer)
+
+    desired_config = {"name": "support", "tenant_id": "tenant-1", "system_prompt": "same"}
+    desired_hash = hashlib.sha256(
+        yaml.safe_dump(desired_config, sort_keys=True).encode()
+    ).hexdigest()
+    home = _home(tmp_path)
+    home.mkdir(parents=True)
+    (home / "agent.yaml").write_text(yaml.safe_dump(desired_config))
+    state_dir = tmp_path / "node"
+    state_dir.mkdir(parents=True)
+    (state_dir / "applied-config-hashes.json").write_text(
+        '{"support": "' + desired_hash + '"}', encoding="utf-8"
+    )
+    respx.post("https://platform.internal/nodes/node-a/status").mock(
+        return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
+    )
+    backend = FakeBackend({"support": 12345})  # already running
+    manifests = [
+        {
+            "name": "incident-review",
+            "base_version": "abc123",
+            "base_commit": "def456",
+            "bundle_url": "/nodes/node-a/skills/incident-review/bundles/abc123.tar.gz",
+            "bundle_sha256": "0" * 64,
+            "resync_epoch": "1",
+        }
+    ]
+    desired = DesiredState(
+        node_id="node-a",
+        agents=[
+            DesiredAgent(
+                agent_id=101,
+                name="support",
+                tenant_id="tenant-1",
+                config=desired_config,
+                skill_manifests=manifests,
+                secrets={},
+            )
+        ],
+    )
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(desired)
+
+    assert backend.spawn_calls == []
+    assert backend.stop_calls == []
+    assert sync_calls == [manifests]
+
+
+@respx.mock
 def test_reconcile_status_post_failure_does_not_raise(tmp_path) -> None:
     from fleetent.node.reconcile import NodeReconciler
 
