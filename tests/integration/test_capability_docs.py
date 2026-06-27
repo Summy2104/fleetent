@@ -114,8 +114,11 @@ def test_capability_docs_describe_agent_memory_scope():
     roadmap = Path("docs/roadmaps/intelligence-roadmap.md").read_text(encoding="utf-8")
 
     for content in [memory_doc, long_term_doc, roadmap]:
-        assert "Shared Memory" in content
-        # Shared/Agent Memory prompt injection is governed by the long-term-ctx context policy.
+        # The rescope renamed "Shared Memory" → "Agent Memory"; docs describe the
+        # renamed surface (some keep a "（原 Shared Memory）" annotation, but
+        # memory.md drops it entirely, so assert on the current name).
+        assert "Agent Memory" in content
+        # Agent Memory prompt injection is governed by the long-term-ctx context policy.
         assert "context policy" in content
 
     # The agent-memory rescope renamed shared memory to agent-level Agent Memory

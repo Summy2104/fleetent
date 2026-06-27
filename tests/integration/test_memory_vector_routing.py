@@ -153,12 +153,14 @@ async def test_shared_agent_vector_store_keeps_user_and_agent_memory_isolated(
     retired_vectors_db = agent_root / ("agent_memory" + "_vectors.db")
     assert not retired_vectors_db.exists()
 
-    user_results = await memory_layer.search("alice", "user query")
+    # Free-text user-memory search was retired by user-memory-v2: memory.search()
+    # now returns [] (facts live in a separate store), so the old user-side
+    # retrieval assertion no longer applies. Storage-layer isolation is already
+    # proven by the vector namespaces above; here we additionally verify the live
+    # agent-memory retrieval stays within its own "agentmem:" namespace and never
+    # surfaces the user-memory row.
     agent_results = await agent_memory.search_agent_memory("agent query")
-    assert [item.id for item in user_results] == ["mem-a"]
     assert [item.id for item in agent_results] == [agent_item.id]
-
-    assert agent_item.id not in {
-        item.id for item in await memory_layer.search("alice", "agent query")
+    assert "mem-a" not in {
+        item.id for item in await agent_memory.search_agent_memory("user query")
     }
-    assert "mem-a" not in {item.id for item in await agent_memory.search_agent_memory("user query")}

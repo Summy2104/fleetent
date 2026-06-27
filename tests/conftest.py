@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 from pathlib import Path
 
@@ -31,6 +32,34 @@ def _default_required_env(monkeypatch: pytest.MonkeyPatch) -> None:
     if os.environ.get("FLEETENT_EVAL_REAL_LLM") == "1":
         return
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+
+@pytest.fixture(autouse=True)
+def _reset_cron_current_scheduler():
+    """Isolate ``cron_scheduler._current`` — module-global state set by ``start()``.
+
+    A test that starts a scheduler (directly, or by booting an agent via
+    ``agent_app`` which calls ``CronScheduler.start()``) and does not shut it down
+    leaks the live scheduler into the next test on the same xdist worker. The
+    schedule-tool tests mock ``schedule_store.create`` to a row without ``cron_expr``
+    and assume ``current() is None`` (store-only path); a leaked ``_current`` routes
+    ``create_task`` through ``_register`` → ``task["cron_expr"]`` → KeyError. Local
+    runs distribute tests differently than CI, so this surfaces only under CI's
+    worker layout. Force the standalone (no running scheduler) state around every
+    test, mirroring the sibling ``_reset_cron_principal_resolver`` guard.
+    """
+    import fleetent.cron_scheduler as cs
+
+    saved = cs._current
+    cs._current = None
+    yield
+    leaked = cs._current
+    if leaked is not None:
+        inner = getattr(leaked, "_scheduler", None)
+        if inner is not None and getattr(inner, "running", False):
+            with contextlib.suppress(Exception):
+                inner.shutdown(wait=False)
+    cs._current = saved
 
 
 @pytest.fixture(autouse=True)

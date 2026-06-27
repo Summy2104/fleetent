@@ -37,5 +37,8 @@ def test_unit_ci_coverage_gate_keeps_required_scope_and_threshold():
     )
     assert "uv run coverage report --fail-under=88" in makefile
     assert "make test-coverage-ci" in pipelines
-    assert "push 路径仅看 unit" in guidance
-    assert "每日定时路径看合并覆盖" in guidance
+    # Integration became a pre-merge gate (2026-06-27): the PR/main path now runs
+    # unit + frontend + integration; the daily path keeps the combined-coverage gate.
+    assert "make test-integration-ci" in guidance
+    assert "每日定时路径" in guidance
+    assert "合并覆盖" in guidance

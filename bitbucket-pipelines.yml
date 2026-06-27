@@ -31,6 +31,20 @@ definitions:
           - make frontend-install
           - make frontend-build
           - make test-frontend
+    - step: &pr-integration
+        name: integration tests
+        caches:
+          - uv
+        script:
+          - pip install uv
+          - export ANTHROPIC_API_KEY=test-key
+          - uv sync --frozen --group dev
+          - uv run alembic upgrade head
+          # Parallel, no coverage instrumentation: ~1min vs ~13min for the daily
+          # coverage run. Gives integration a pre-merge signal it previously lacked
+          # (it only ran in the daily custom pipeline, so integration-only breakage
+          # passed PR + main and surfaced a day later).
+          - make test-integration-ci
     - step: &daily-integration-coverage
         name: integration tests + combined coverage
         caches:
@@ -49,12 +63,14 @@ pipelines:
       - parallel:
           - step: *unit-coverage
           - step: *frontend-gate
+          - step: *pr-integration
 
   branches:
     main:
       - parallel:
           - step: *unit-coverage
           - step: *frontend-gate
+          - step: *pr-integration
 
   custom:
     integration-tests:
