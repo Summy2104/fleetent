@@ -24,9 +24,9 @@ import { SessionsPage } from '@/features/sessions/page';
 import { ProvidersPage } from '@/features/providers/page';
 import { NodesPage } from '@/features/nodes/page';
 import { UsersPage } from '@/features/users/page';
-import { ImIdentitiesPage } from '@/features/im-identities/page';
 import { ChatPage } from '@/features/chat/page';
 import { StatsPage } from '@/features/stats/page';
+import { AuditPage } from '@/features/audit/page';
 import { TenancyPage } from '@/features/tenancy/page';
 import { TeamsPage } from '@/features/teams/page';
 
@@ -295,8 +295,8 @@ function AppLayout(): JSX.Element {
             <Route element={<McpPage />} path="/mcp" />
             <Route element={<NodesPage />} path="/nodes" />
             <Route element={<UsersPage />} path="/users" />
-            <Route element={<ImIdentitiesPage />} path="/im-identities" />
             <Route element={<StatsPage />} path="/stats" />
+            <Route element={<AuditPage />} path="/audit" />
             <Route element={<TenancyPage />} path="/tenancy" />
             <Route element={<TeamsPage />} path="/teams" />
             <Route element={<ChatPage />} path="/chat" />

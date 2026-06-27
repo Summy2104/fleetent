@@ -45,7 +45,16 @@ EXTRACT_SYSTEM = (
     "Extract durable facts from the conversation as (subject, relation, object) "
     "triples. Return a JSON array. Each item: "
     '{"subject": str, "relation": str, "object": str, "temporal": str, '
-    '"statement": str}. '
+    '"statement": str, "scope": str}. '
+    'scope classifies WHETHER the fact must ALWAYS be in effect or only when relevant. '
+    'Use scope="always" for BEHAVIORAL DIRECTIVES — instructions the user gives the '
+    'assistant that must be followed unconditionally every turn regardless of topic: '
+    'e.g. "every reply must end with xin", "never use Markdown", "always respond in English", '
+    '"never deploy without confirmation". '
+    'Use scope="situational" for FACTUAL PREFERENCES and PERSONAL FACTS — things that '
+    'are useful context but only relevant in certain conversations: '
+    'e.g. "user prefers TypeScript", "user works at Northstar", "user likes cats". '
+    'When in doubt, use scope="situational". '
     "IMPORTANT: every example below uses ANGLE-BRACKET PLACEHOLDERS like <a name>. "
     "Placeholders are illustrations of FORM only — NEVER copy a placeholder or an "
     "example value into your output. Extract only values the user actually states. "
@@ -474,12 +483,15 @@ def _entry_to_raw_fact(entry: Any, user_aliases: set[str] | None = None) -> RawF
     temporal = temporal.strip() if isinstance(temporal, str) and temporal.strip() else "none"
     statement = entry.get("statement")
     statement = statement.strip() if isinstance(statement, str) and statement.strip() else None
+    raw_scope = entry.get("scope")
+    scope = "always" if isinstance(raw_scope, str) and raw_scope.strip() == "always" else "situational"
     return RawFact(
         subject=_canonical_subject(subject.strip(), user_aliases),
         relation=relation.strip(),
         object=obj.strip(),
         temporal=temporal,
         statement=statement,
+        scope=scope,
     )
 
 
@@ -540,6 +552,7 @@ async def resolve_relation(
             temporal=raw.temporal,
             cardinality="single",
             statement=raw.statement,
+            scope=raw.scope,
         )
     query_vec = await embed_text(raw.relation)
     clusters = store.list_relation_clusters()
@@ -572,6 +585,7 @@ async def resolve_relation(
             temporal=raw.temporal,
             cardinality=best_cardinality,
             statement=raw.statement,
+            scope=raw.scope,
         )
 
     cardinality = await _judge_cardinality(raw.relation, llm_client)
@@ -590,6 +604,7 @@ async def resolve_relation(
         temporal=raw.temporal,
         cardinality=cardinality,
         statement=raw.statement,
+        scope=raw.scope,
     )
 
 
@@ -715,6 +730,7 @@ def _with_verdict(resolved: ResolvedFact, verdict: ClassifyVerdict) -> Classifie
         cardinality=resolved.cardinality,
         verdict=verdict,
         statement=resolved.statement,
+        scope=resolved.scope,
     )
 
 

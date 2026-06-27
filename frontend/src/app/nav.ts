@@ -8,10 +8,10 @@ import {
   History,
   MessagesSquare,
   Plug,
+  ScrollText,
   Server,
   Sparkles,
   Users,
-  UserCog,
   UsersRound,
   type LucideIcon,
 } from 'lucide-react';
@@ -61,10 +61,10 @@ export const NAV_GROUPS: NavGroup[] = [
     labelKey: 'nav.group.admin',
     items: [
       { to: '/users', labelKey: 'nav.users', icon: Users },
-      { to: '/im-identities', labelKey: 'nav.imIdentities', icon: UserCog },
       { to: '/tenancy', labelKey: 'nav.tenancy', icon: Building2 },
       { to: '/teams', labelKey: 'nav.teams', icon: UsersRound },
       { to: '/stats', labelKey: 'nav.stats', icon: BarChart3 },
+      { to: '/audit', labelKey: 'nav.audit', icon: ScrollText },
     ],
   },
 ];

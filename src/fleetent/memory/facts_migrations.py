@@ -138,4 +138,21 @@ FACTS_MIGRATIONS: list[tuple[str, str]] = [
         "facts_statement",
         "ALTER TABLE facts ADD COLUMN statement TEXT",
     ),
+    # scope: 'situational' = recalled by vector similarity (default); 'always' =
+    # unconditionally injected into every prompt regardless of query.  Used for
+    # behavioral directives (response_style, never_do, etc.) that must never be
+    # missed due to low semantic overlap with the current query.
+    (
+        "facts_scope",
+        "ALTER TABLE facts ADD COLUMN scope TEXT NOT NULL DEFAULT 'situational'",
+    ),
+    # Backfill: known always-relations get scope='always'.  Conservative: only
+    # relations in the explicit soft/hard lists; unknowns stay 'situational'.
+    (
+        "facts_scope_backfill",
+        "UPDATE facts SET scope = 'always' WHERE relation IN ("
+        "'response_style', 'tone', 'format', 'language', 'output_format',"
+        "'never_do', 'always_do', 'security', 'approval_required'"
+        ") AND status = 'active'",
+    ),
 ]

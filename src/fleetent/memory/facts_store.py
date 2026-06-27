@@ -15,6 +15,7 @@ from fleetent.memory.facts_models import (
     Cardinality,
     Fact,
     FactEdge,
+    FactScope,
     FactStatus,
     RelationCluster,
 )
@@ -59,12 +60,12 @@ def insert_fact(fact: Fact) -> None:
         INSERT INTO facts (
             fact_id, user_id, subject, relation, object, cardinality,
             status, access_count, first_accessed_at, last_accessed_at,
-            expires_at, valid_until, created_at, updated_at, source_turn, statement
+            expires_at, valid_until, created_at, updated_at, source_turn, statement, scope
         )
         VALUES (
             :fact_id, :user_id, :subject, :relation, :object, :cardinality,
             :status, :access_count, :first_accessed_at, :last_accessed_at,
-            :expires_at, :valid_until, :created_at, :updated_at, :source_turn, :statement
+            :expires_at, :valid_until, :created_at, :updated_at, :source_turn, :statement, :scope
         )
         """,
         _fact_params(fact),
@@ -147,6 +148,80 @@ def active_facts_for_relation(user_id: str, subject: str, relation: str) -> list
         .fetchall()
     )
     return [_row_to_fact(row) for row in rows]
+
+
+# Relations whose always-scope facts participate in the soft eviction pool.
+# Unknown relations default to hard (not in this set) — fail-safe direction.
+SOFT_ALWAYS_RELATIONS: frozenset[str] = frozenset(
+    {"response_style", "tone", "format", "language", "output_format"}
+)
+
+# Hard cap for the soft eviction pool (facts whose relation is in SOFT_ALWAYS_RELATIONS).
+_SOFT_ALWAYS_LIMIT: int = 15
+
+
+def list_always_facts(user_id: str) -> list[Fact]:
+    """Return all active always-scope facts for a user, unconditionally.
+
+    Pure SQL — does not call the vector backend or update access_count.
+    Used by build_context to inject behavioral directives on every turn.
+    """
+    rows = (
+        _facts_database()
+        .execute(
+            "SELECT * FROM facts WHERE user_id = :user_id AND scope = 'always' AND status = 'active' ORDER BY created_at ASC",
+            {"user_id": user_id},
+        )
+        .fetchall()
+    )
+    return [_row_to_fact(row) for row in rows]
+
+
+def _count_soft_always_facts(user_id: str) -> int:
+    """Count active always-scope facts in the soft eviction pool for a user."""
+    placeholders = ", ".join(f":r{i}" for i in range(len(SOFT_ALWAYS_RELATIONS)))
+    params: dict[str, object] = {f"r{i}": r for i, r in enumerate(SOFT_ALWAYS_RELATIONS)}
+    params["user_id"] = user_id
+    row = (
+        _facts_database()
+        .execute(
+            f"SELECT COUNT(*) as cnt FROM facts WHERE user_id = :user_id AND scope = 'always' AND status = 'active' AND relation IN ({placeholders})",
+            params,
+        )
+        .fetchone()
+    )
+    return int(row["cnt"]) if row else 0
+
+
+def _oldest_soft_always_fact_id(user_id: str) -> str | None:
+    """Return the fact_id of the oldest (updated_at ASC) soft always fact, or None."""
+    placeholders = ", ".join(f":r{i}" for i in range(len(SOFT_ALWAYS_RELATIONS)))
+    params: dict[str, object] = {f"r{i}": r for i, r in enumerate(SOFT_ALWAYS_RELATIONS)}
+    params["user_id"] = user_id
+    row = (
+        _facts_database()
+        .execute(
+            f"SELECT fact_id FROM facts WHERE user_id = :user_id AND scope = 'always' AND status = 'active' AND relation IN ({placeholders}) ORDER BY updated_at ASC LIMIT 1",
+            params,
+        )
+        .fetchone()
+    )
+    return str(row["fact_id"]) if row else None
+
+
+def _maybe_evict_soft_always(user_id: str, relation: str) -> None:
+    """Retract the oldest soft always fact when the soft pool is at or above the limit.
+
+    Only runs for soft relations (in SOFT_ALWAYS_RELATIONS). Hard relations and
+    unknown relations are never evicted — unknown defaults to hard as a fail-safe.
+    """
+    if relation not in SOFT_ALWAYS_RELATIONS:
+        return
+    if _count_soft_always_facts(user_id) < _SOFT_ALWAYS_LIMIT:
+        return
+    oldest_id = _oldest_soft_always_fact_id(user_id)
+    if oldest_id is not None:
+        update_fact_status(oldest_id, "retracted")
 
 
 def list_active_facts(user_id: str, subject: str | None = None) -> list[Fact]:
@@ -276,6 +351,8 @@ def list_relation_clusters() -> list[RelationCluster]:
 def _row_to_fact(row: dict[str, object]) -> Fact:
     from typing import cast
 
+    raw_scope = row.get("scope")
+    scope: FactScope = cast(FactScope, raw_scope) if raw_scope in ("situational", "always") else "situational"
     return Fact(
         fact_id=str(row["fact_id"]),
         user_id=str(row["user_id"]),
@@ -293,6 +370,7 @@ def _row_to_fact(row: dict[str, object]) -> Fact:
         updated_at=parse_datetime(row["updated_at"]),
         source_turn=str(row["source_turn"]) if row["source_turn"] is not None else None,
         statement=str(row["statement"]) if row.get("statement") is not None else None,
+        scope=scope,
     )
 
 
@@ -336,6 +414,7 @@ def _fact_params(fact: Fact) -> dict[str, object | None]:
         "updated_at": format_datetime(fact.updated_at),
         "source_turn": fact.source_turn,
         "statement": fact.statement,
+        "scope": fact.scope,
     }
 
 

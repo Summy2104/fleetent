@@ -8,6 +8,7 @@ from typing import Literal
 
 FactStatus = Literal["active", "superseded", "archived", "retracted"]
 Cardinality = Literal["single", "multi"]
+FactScope = Literal["situational", "always"]
 ClassifyVerdict = Literal["Equivalent", "Contradict", "NewSubsumed", "Subsumes", "Orthogonal"]
 
 # Pseudo-relation the LLM emits for "X 改叫 Y" — not a real relation: it is a
@@ -41,6 +42,7 @@ class Fact:
     updated_at: datetime
     source_turn: str | None
     statement: str | None = None
+    scope: FactScope = "situational"
 
 
 @dataclass(frozen=True)
@@ -79,6 +81,7 @@ class RawFact:
     # expiry date is computed in code (facts_temporal), never by the model.
     temporal: str = "none"
     statement: str | None = None
+    scope: FactScope = "situational"
 
 
 @dataclass(frozen=True)
@@ -91,6 +94,7 @@ class ResolvedFact:
     temporal: str = "none"
     cardinality: Cardinality = "multi"
     statement: str | None = None
+    scope: FactScope = "situational"
 
 
 @dataclass(frozen=True)
@@ -104,6 +108,7 @@ class ClassifiedFact:
     cardinality: Cardinality = "multi"
     verdict: ClassifyVerdict = "Orthogonal"
     statement: str | None = None
+    scope: FactScope = "situational"
 
 
 @dataclass(frozen=True)

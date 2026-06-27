@@ -155,6 +155,7 @@ def _migrate_subject(
             statement=(
                 old.statement.replace(old_subject, new_subject) if old.statement else None
             ),
+            scope=old.scope,
         )
         _insert_fact_in_tx(conn, migrated)
 
@@ -240,6 +241,7 @@ def _build_fact(
         updated_at=now,
         source_turn=source_turn,
         statement=cf.statement,
+        scope=cf.scope,
     )
 
 
@@ -302,12 +304,12 @@ def _insert_fact_in_tx(conn: SQLiteConnection, fact: Fact) -> None:
         INSERT INTO facts (
             fact_id, user_id, subject, relation, object, cardinality,
             status, access_count, first_accessed_at, last_accessed_at,
-            expires_at, valid_until, created_at, updated_at, source_turn, statement
+            expires_at, valid_until, created_at, updated_at, source_turn, statement, scope
         )
         VALUES (
             :fact_id, :user_id, :subject, :relation, :object, :cardinality,
             :status, :access_count, :first_accessed_at, :last_accessed_at,
-            :expires_at, :valid_until, :created_at, :updated_at, :source_turn, :statement
+            :expires_at, :valid_until, :created_at, :updated_at, :source_turn, :statement, :scope
         )
         """,
         facts_store._fact_params(fact),
