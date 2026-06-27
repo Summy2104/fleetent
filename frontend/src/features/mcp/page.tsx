@@ -54,6 +54,9 @@ function statusVariant(status: string): 'success' | 'secondary' | 'warning' {
 
 type EnvPair = { key: string; value: string };
 
+const toPairs = (map?: Record<string, string>): EnvPair[] =>
+  Object.entries(map ?? {}).map(([key, value]) => ({ key, value }));
+
 // ─────────────────────────── Add / Edit dialog ───────────────────────────
 
 function ServerDialog({
@@ -75,6 +78,8 @@ function ServerDialog({
   const [command, setCommand] = useState('');
   const [url, setUrl] = useState('');
   const [env, setEnv] = useState<EnvPair[]>([]);
+  const [args, setArgs] = useState<string[]>([]);
+  const [headers, setHeaders] = useState<EnvPair[]>([]);
 
   useEffect(() => {
     if (open) {
@@ -82,7 +87,9 @@ function ServerDialog({
       setTransport(editing?.transport ?? 'stdio');
       setCommand(editing?.command ?? '');
       setUrl(editing?.url ?? '');
-      setEnv([]);
+      setEnv(toPairs(editing?.env));
+      setArgs(editing?.args ?? []);
+      setHeaders(toPairs(editing?.headers));
     }
   }, [open, editing]);
 
@@ -90,8 +97,15 @@ function ServerDialog({
     const payload: McpServerInput = { id: id.trim(), transport, enabled: editing?.enabled ?? true };
     if (transport === 'stdio') {
       payload.command = command.trim() || undefined;
+      const cleanArgs = args.map((arg) => arg.trim()).filter(Boolean);
+      if (cleanArgs.length > 0) payload.args = cleanArgs;
     } else {
       payload.url = url.trim() || undefined;
+      const headerMap: Record<string, string> = {};
+      headers.forEach((pair) => {
+        if (pair.key.trim()) headerMap[pair.key.trim()] = pair.value;
+      });
+      if (Object.keys(headerMap).length > 0) payload.headers = headerMap;
     }
     const envMap: Record<string, string> = {};
     env.forEach((pair) => {
@@ -171,6 +185,86 @@ function ServerDialog({
                 value={url}
                 onChange={(event) => setUrl(event.target.value)}
               />
+            </div>
+          )}
+
+          {transport === 'stdio' ? (
+            <div className="grid gap-2">
+              <Label>{t('mcp.argsLabel')}</Label>
+              <div className="space-y-2">
+                {args.map((arg, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <Input
+                      className="flex-1"
+                      placeholder={t('mcp.argPlaceholder')}
+                      value={arg}
+                      onChange={(event) =>
+                        setArgs((current) => current.map((a, i) => (i === index ? event.target.value : a)))
+                      }
+                    />
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      aria-label={t('mcp.removeArg')}
+                      onClick={() => setArgs((current) => current.filter((_, i) => i !== index))}
+                    >
+                      <X className="size-4" />
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  variant="outline"
+                  className="w-full border-dashed"
+                  onClick={() => setArgs((current) => [...current, ''])}
+                >
+                  <Plus className="size-4" /> {t('mcp.addArg')}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-2">
+              <Label>{t('mcp.headersLabel')}</Label>
+              <div className="space-y-2">
+                {headers.map((pair, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <Input
+                      className="flex-1"
+                      placeholder={t('mcp.headerKeyPlaceholder')}
+                      value={pair.key}
+                      onChange={(event) =>
+                        setHeaders((current) =>
+                          current.map((p, i) => (i === index ? { ...p, key: event.target.value } : p))
+                        )
+                      }
+                    />
+                    <Input
+                      className="flex-1"
+                      placeholder={t('mcp.headerValuePlaceholder')}
+                      value={pair.value}
+                      onChange={(event) =>
+                        setHeaders((current) =>
+                          current.map((p, i) => (i === index ? { ...p, value: event.target.value } : p))
+                        )
+                      }
+                    />
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      aria-label={t('mcp.removeHeader')}
+                      onClick={() => setHeaders((current) => current.filter((_, i) => i !== index))}
+                    >
+                      <X className="size-4" />
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  variant="outline"
+                  className="w-full border-dashed"
+                  onClick={() => setHeaders((current) => [...current, { key: '', value: '' }])}
+                >
+                  <Plus className="size-4" /> {t('mcp.addHeader')}
+                </Button>
+              </div>
             </div>
           )}
 
