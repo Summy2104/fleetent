@@ -19,7 +19,7 @@ from fleetent.platform import im_gateway_management as im
 
 router = APIRouter(prefix="/admin/im-identities")
 
-_ADMIN_ROLES = {"admin", "built_in_admin"}
+_ADMIN_ROLES = {"admin"}
 _VIEWER_ROLES = {"viewer", *_ADMIN_ROLES}
 _IDLE_TIMEOUT_SECONDS = 1800
 

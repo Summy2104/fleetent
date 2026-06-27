@@ -32,6 +32,8 @@ On startup, if no active `admin` exists, the system SHALL seed a bootstrap admin
 - **WHEN** the server starts and zero active admins exist (e.g. all were removed/blocked)
 - **THEN** a bootstrap admin is re-seeded with `must_reset=1`
 
+## ADDED Requirements
+
 ### Requirement: Last admin is protected
 
 The system SHALL maintain the invariant that **at least one active `admin` always exists**. Any operation that would reduce the count of `role=admin AND status=active` to zero SHALL be rejected with 403 and persist nothing — this includes demoting, blocking, and deleting an admin, including a user performing the operation on themselves. There is no identity-pinned protected account; protection is purely the count floor. Any admin MAY appoint or remove other admins, subject to this floor. A user MAY always change their own password.

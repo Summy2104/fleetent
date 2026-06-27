@@ -46,7 +46,7 @@ _AgentYamlDumper.add_representer(str, _represent_str)
 router = APIRouter(prefix="/admin")
 
 IDLE_TIMEOUT_SECONDS = 1800
-_ADMIN_ROLES = {"admin", "built_in_admin"}
+_ADMIN_ROLES = {"admin"}
 
 
 class SecretWriteBody(BaseModel):

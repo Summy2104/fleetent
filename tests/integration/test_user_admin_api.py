@@ -54,7 +54,7 @@ def test_builtin_admin_login_by_username(client):
         json={"email": auth.BUILTIN_ADMIN_NAME, "password": auth.BUILTIN_ADMIN_PASSWORD},
     )
     assert r.status_code == 200
-    assert r.json()["role"] == "built_in_admin"
+    assert r.json()["role"] == "admin"
     assert r.json()["must_reset"] is True  # default admin must change password first
 
 
@@ -85,8 +85,6 @@ def test_reset_password_unknown_user_404(client):
     token, _ = _session_for("admin")
     r = client.post("/admin/users/ghost/password", json={"new_password": "z"}, headers=_hdr(token))
     assert r.status_code == 404
-
-
 
 
 def test_login_bad_password_401(client):
@@ -271,6 +269,45 @@ def test_admin_block_user_and_audit(client):
     assert user_store.get_by_id(uid).status == "blocked"
     audit_rows = client.get("/admin/audit?action=block_user", headers=_hdr(token)).json()
     assert any(row["target_id"] == uid for row in audit_rows)
+
+
+def test_last_active_admin_role_block_and_delete_are_rejected(client):
+    token, admin_id = _session_for("admin")
+
+    role_response = client.patch(
+        f"/admin/users/{admin_id}/role", headers=_hdr(token), json={"role": "viewer"}
+    )
+    assert role_response.status_code == 403
+    assert user_store.get_by_id(admin_id).role == "admin"
+
+    block_response = client.post(
+        f"/admin/users/{admin_id}/block", headers=_hdr(token), json={"reason": "self-lock"}
+    )
+    assert block_response.status_code == 403
+    assert user_store.get_by_id(admin_id).status == "active"
+
+    delete_response = client.delete(f"/admin/users/{admin_id}", headers=_hdr(token))
+    assert delete_response.status_code == 403
+    assert user_store.get_by_id(admin_id) is not None
+
+
+def test_admin_role_can_be_transferred_when_another_active_admin_exists(client):
+    token, admin_id = _session_for("admin")
+    target = client.post(
+        "/admin/users", headers=_hdr(token), json={"email": "next@x.com", "name": "Next"}
+    ).json()
+
+    promote_response = client.patch(
+        f"/admin/users/{target['id']}/role", headers=_hdr(token), json={"role": "admin"}
+    )
+    assert promote_response.status_code == 200
+
+    demote_self_response = client.patch(
+        f"/admin/users/{admin_id}/role", headers=_hdr(token), json={"role": "viewer"}
+    )
+    assert demote_self_response.status_code == 200
+    assert user_store.get_by_id(admin_id).role == "viewer"
+    assert user_store.get_by_id(target["id"]).role == "admin"
 
 
 def test_admin_rebind_im_identity_to_user(client):

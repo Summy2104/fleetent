@@ -24,7 +24,7 @@ from fleetent.skills import registry as skill_registry
 router = APIRouter(prefix="/admin/skills/backflow")
 
 IDLE_TIMEOUT_SECONDS = 1800
-_ADMIN_ROLES = {"admin", "built_in_admin"}
+_ADMIN_ROLES = {"admin"}
 
 
 # --- injectable seam (pool directory) ----------------------------------------

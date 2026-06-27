@@ -7,8 +7,7 @@ Lives in the platform control plane because it coordinates platform-owned stores
 
 import secrets
 
-from fleetent import user_store
-from fleetent import audit_log
+from fleetent import audit_log, user_store
 from fleetent.governance import blocklist
 from fleetent.platform import im_gateway_management as im
 from fleetent.platform.user_management import api_key_store
@@ -21,8 +20,6 @@ def block_user(
     user = user_store.get_by_id(user_id)
     if user is None:
         raise KeyError(f"user not found: {user_id}")
-    if user.role == "built_in_admin":
-        raise PermissionError("built-in admin cannot be blocked")
 
     user_store.set_status(user_id, "blocked")
     for key in api_key_store.list_keys(user_id):

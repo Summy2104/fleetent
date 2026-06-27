@@ -32,7 +32,7 @@ from fleetent.platform.connector_management import (
 router = APIRouter(prefix="/admin")
 
 IDLE_TIMEOUT_SECONDS = 1800
-_ADMIN_ROLES = {"admin", "built_in_admin"}
+_ADMIN_ROLES = {"admin"}
 _SENSITIVE = ("secret", "token", "refresh", "api_key", "password")
 _pending_consent_states: dict[str, tuple[str, str]] = {}
 

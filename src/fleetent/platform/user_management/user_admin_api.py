@@ -35,7 +35,7 @@ router = APIRouter(prefix="/admin")
 _logger = get_logger("platform.user_management")
 
 IDLE_TIMEOUT_SECONDS = 1800
-_ADMIN_ROLES = {"admin", "built_in_admin"}
+_ADMIN_ROLES = {"admin"}
 _OIDC_FLOW_COOKIE = "fleetent_oidc_flow"
 _LINK_CODE_TTL = timedelta(minutes=10)
 _pending_links = PendingLinkStore(ttl=_LINK_CODE_TTL)

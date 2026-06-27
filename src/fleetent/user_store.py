@@ -4,12 +4,14 @@ import datetime
 import hashlib
 import json
 import secrets
+import sqlite3
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from fleetent import paths
+from fleetent.db import Row, SQLiteDatabase
 
 # Kept for test legacy-shim and module-boundary detection; not used as a DB entry point
 # after retire-raw-sqlite-connect (all connections go through db.py boundary).
@@ -59,14 +61,14 @@ def _normalize_email(email: str | None) -> str | None:
     return normalized or None
 
 
-def _db():
+def _db() -> SQLiteDatabase:
     from fleetent.config import Settings
     from fleetent.db import create_database
 
     return create_database(Settings().database_url)
 
 
-def _conn():
+def _conn() -> sqlite3.Connection:
     """Compatibility shim for platform stores that import _conn from user_store.
 
     Returns a sqlite3.Connection that (a) reads DATABASE_URL from Settings (same source
@@ -75,8 +77,6 @@ def _conn():
     Callers use `with _conn() as conn: conn.execute(...)` — sqlite3.Connection is a
     context manager that auto-commits / rolls back.
     """
-    import sqlite3  # noqa: PLC0415 — kept local, this is a shim on the removal path
-
     from fleetent.db import _connect
 
     db = _db()  # resolves Settings().database_url to a Path
@@ -241,13 +241,31 @@ def rotate_key(user_id: str) -> tuple["User", str]:
 
 
 def get_builtin_admin() -> User | None:
-    """Return the built-in admin user, if seeded."""
+    """Return the bootstrap admin user, if seeded."""
     row = (
         _db()
-        .execute(f"SELECT {_FULL_COLS} FROM users WHERE role = 'built_in_admin' LIMIT 1")
+        .execute(
+            f"SELECT {_FULL_COLS} FROM users "
+            "WHERE role = :role AND name = :name AND email IS NULL "
+            "ORDER BY created_at LIMIT 1",
+            {"role": "admin", "name": "admin"},
+        )
         .fetchone()
     )
     return _row_to_user(row) if row else None
+
+
+def count_active_admins() -> int:
+    row = (
+        _db()
+        .execute(
+            "SELECT COUNT(*) AS count FROM users WHERE role = :role AND status = :status",
+            {"role": "admin", "status": "active"},
+        )
+        .fetchone()
+    )
+    assert row is not None
+    return int(row["count"])
 
 
 # Sentinel owner for rows backfilled before a built-in admin exists; reassigned to the
@@ -292,10 +310,10 @@ def get_or_create_service_principal(agent_id: int) -> str:
 
 def set_role(user_id: str, role: str) -> None:
     current = get_by_id(user_id)
-    if current is not None and current.role == "built_in_admin" and role != "built_in_admin":
-        raise PermissionError("built-in admin cannot be demoted")
     if current is not None and current.role == "service":
         raise PermissionError(f"service principal {user_id!r} cannot be assigned a human role")
+    if current is not None and current.role == "admin" and role != "admin":
+        _guard_admin_floor(user_id, after_role=role)
     _update_field(user_id, "role", role)
 
 
@@ -324,6 +342,8 @@ def set_profile(user_id: str, name: str | None = None, email: str | None = None)
 
 
 def set_status(user_id: str, status: str) -> None:
+    if status != "active":
+        _guard_admin_floor(user_id, after_status=status)
     _update_field(user_id, "status", status)
 
 
@@ -386,21 +406,51 @@ def bulk_import_users(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def disable_user(user_id: str) -> None:
-    _guard_not_builtin_admin(user_id, "disable")
     set_status(user_id, "disabled")
 
 
 def delete_user(user_id: str) -> None:
-    _guard_not_builtin_admin(user_id, "delete")
+    _guard_admin_floor(user_id, deleting=True)
     _guard_not_tenancy_approver(user_id)
     with _db().transaction() as conn:
         conn.execute("DELETE FROM users WHERE id = :id", {"id": user_id})
 
 
-def _guard_not_builtin_admin(user_id: str, op: str) -> None:
+def _guard_admin_floor(
+    user_id: str,
+    *,
+    after_role: str | None = None,
+    after_status: str | None = None,
+    deleting: bool = False,
+) -> None:
+    if _would_orphan_admins(
+        user_id, after_role=after_role, after_status=after_status, deleting=deleting
+    ):
+        raise PermissionError("operation would leave no active admin")
+
+
+def _would_orphan_admins(
+    user_id: str,
+    *,
+    after_role: str | None = None,
+    after_status: str | None = None,
+    deleting: bool = False,
+) -> bool:
     current = get_by_id(user_id)
-    if current is not None and current.role == "built_in_admin":
-        raise PermissionError(f"built-in admin cannot be {op}d")
+    if current is None:
+        return False
+
+    if current.role != "admin" or current.status != "active":
+        return False
+
+    active_admins = count_active_admins()
+    if deleting:
+        return active_admins == 1
+
+    next_role = after_role if after_role is not None else current.role
+    next_status = after_status if after_status is not None else current.status
+    target_remains_active_admin = next_role == "admin" and next_status == "active"
+    return active_admins == 1 and not target_remains_active_admin
 
 
 def _guard_not_tenancy_approver(user_id: str) -> None:
@@ -434,7 +484,7 @@ def _update_field(user_id: str, column: str, value: object) -> None:
         )
 
 
-def _row_to_user(row: dict) -> User:
+def _row_to_user(row: Row) -> User:
     return User(
         id=row["id"],
         name=row["name"],

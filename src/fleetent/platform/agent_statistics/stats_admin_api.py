@@ -24,7 +24,7 @@ from fleetent.platform.model_provider_management import provider_admin_store
 router = APIRouter(prefix="/admin/stats")
 
 IDLE_TIMEOUT_SECONDS = 1800
-_ADMIN_ROLES = {"admin", "built_in_admin"}
+_ADMIN_ROLES = {"admin"}
 MASK_PER_USER_FOR_VIEWER = True
 _DEFAULT_TRACE_LIMIT = 1000
 _RUN_EVENT_TYPES = {"agent_run_completed", "agent_run_failed"}

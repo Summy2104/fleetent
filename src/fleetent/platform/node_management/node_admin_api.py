@@ -13,7 +13,7 @@ from fleetent.platform.node_management import node_store, placement_store
 
 router = APIRouter(prefix="/admin/nodes")
 
-_ADMIN_ROLES = {"admin", "built_in_admin"}
+_ADMIN_ROLES = {"admin"}
 _IDLE_TIMEOUT = 1800
 
 
