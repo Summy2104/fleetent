@@ -11,7 +11,12 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from joserfc import jwt
 from joserfc.jwk import RSAKey
 
-from fleetent.platform.user_management.oidc import OidcAuthError, OidcRelyingParty, OidcSettings
+from fleetent.platform.user_management.oidc import (
+    OidcAuthError,
+    OidcRelyingParty,
+    OidcSettings,
+    email_domain_allowed,
+)
 
 
 def _private_key_pem() -> bytes:
@@ -62,6 +67,25 @@ def _id_token(
         payload,
         RSAKey.import_key(private_key_pem, parameters={"kid": "test-key"}),
     )
+
+
+@pytest.mark.parametrize(
+    ("email", "allowed_domains", "expected"),
+    [
+        ("person@example.com", [], True),
+        ("Alice@ACME.com", ["acme.com"], True),
+        ("person@example.org", ["acme.com"], False),
+        ("person@eu.acme.com", ["acme.com"], False),
+        ("person@example.org", ["acme.com", "example.org"], True),
+        ("not-an-email", ["acme.com"], False),
+    ],
+)
+def test_email_domain_allowed_uses_exact_case_insensitive_domain_match(
+    email: str,
+    allowed_domains: list[str],
+    expected: bool,
+) -> None:
+    assert email_domain_allowed(email, allowed_domains) is expected
 
 
 @respx.mock
@@ -150,7 +174,14 @@ def test_exchange_code_accepts_valid_verified_email_token():
         ({}, "state-123", "state-123", "wrong-nonce", "nonce-123", "nonce"),
         ({"email_verified": False}, "state-123", "state-123", "nonce-123", "nonce-123", "email"),
         ({"email": None}, "state-123", "state-123", "nonce-123", "nonce-123", "email"),
-        ({"issuer": "https://evil.example.com"}, "state-123", "state-123", "nonce-123", "nonce-123", "issuer"),
+        (
+            {"issuer": "https://evil.example.com"},
+            "state-123",
+            "state-123",
+            "nonce-123",
+            "nonce-123",
+            "issuer",
+        ),
         ({"audience": "other-client"}, "state-123", "state-123", "nonce-123", "nonce-123", "aud"),
         ({"expires_at": 1}, "state-123", "state-123", "nonce-123", "nonce-123", "expired"),
     ],

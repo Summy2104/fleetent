@@ -13,7 +13,6 @@ from joserfc.jwt import JWTClaimsRegistry
 
 from fleetent.oidc_config import OidcSettings
 
-
 _CLOCK_SKEW_SECONDS = 30
 _FLOW_COOKIE_TTL_SECONDS = 300
 
@@ -167,6 +166,18 @@ class OidcRelyingParty:
         if not env_name:
             return ""
         return os.environ.get(env_name, "")
+
+
+def email_domain_allowed(email: str, allowed_domains: list[str]) -> bool:
+    if not allowed_domains:
+        return True
+    if "@" not in email:
+        return False
+    domain = email.rsplit("@", 1)[-1].lower()
+    if not domain:
+        return False
+    return domain in {allowed_domain.lower() for allowed_domain in allowed_domains}
+
 
 def _oidc_tenant_for(email: str, claims: dict[str, Any], settings: OidcSettings) -> str:
     """Resolve the tenant for an OIDC-authenticated identity.
