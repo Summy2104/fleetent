@@ -80,6 +80,8 @@ export type ImUser = {
   platform_user_id: string;
   status: string;
   user_id: string;
+  user_name: string;
+  user_email: string | null;
 };
 
 export type ImIdentityField = {

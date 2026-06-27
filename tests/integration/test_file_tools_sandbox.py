@@ -7,6 +7,7 @@ boundary holds end-to-end: in-workspace IO works, out-of-workspace paths are rej
 
 from __future__ import annotations
 
+import os
 import subprocess
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -42,7 +43,15 @@ async def container(
     workspace_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> AsyncIterator[tuple[SandboxManager, str]]:
     mgr = SandboxManager(backend=SandboxClient(), scope=Scope.SESSION)
-    sess = "itest-files"
+    # The container name is host-global (derived from the session id). Under
+    # ``pytest -n auto`` the default ``--dist load`` spreads this file's tests
+    # across workers, so a fixed session id makes two workers race on the same
+    # Docker name ("Conflict ... already in use" / "No such container"). Scope
+    # the session id to the xdist worker — workers run tests sequentially, so a
+    # per-worker name is acquired/destroyed one at a time within a worker and is
+    # distinct across concurrent workers.
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "gw0")
+    sess = f"itest-files-{worker}"
     ws_id = await mgr.acquire(Scope.SESSION, sess, "bot")
     backend = file_tools._ContainerBackend(client=mgr.backend, ws_id=ws_id, session_id=sess)
 
@@ -57,10 +66,11 @@ async def container(
 
 
 async def test_write_then_read_roundtrip(container, workspace_root: Path) -> None:
+    _mgr, sess = container
     written = await write_file("notes/todo.txt", "buy milk\nship code\n")
     assert "written" in written
     # Visible on the host workspace dir (bind mount works)
-    host_file = workspace_root / "itest-files" / "notes" / "todo.txt"
+    host_file = workspace_root / sess / "notes" / "todo.txt"
     assert host_file.read_text() == "buy milk\nship code\n"
     # And readable back through the tool
     read = await read_file("notes/todo.txt")

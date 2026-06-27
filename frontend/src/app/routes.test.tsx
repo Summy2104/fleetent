@@ -107,6 +107,27 @@ describe('admin routes', () => {
     expect(nav.getAllByRole('link', { name: 'Knowledge Base' })[0]).toHaveAttribute('href', '/kb');
   });
 
+  it('signs out by notifying the backend and returning to the login page', async () => {
+    let logoutAuth: string | null = 'never-called';
+    server.use(
+      http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])),
+      http.post('http://fleetent.test/admin/logout', ({ request }) => {
+        logoutAuth = request.headers.get('authorization');
+        return HttpResponse.json({ status: 'logged_out' });
+      })
+    );
+
+    renderRoutes('/agents', 'session-token');
+    await screen.findAllByRole('heading', { name: 'Agents' });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+
+    // The backend session is torn down with the current token, then the UI
+    // drops the local session and redirects to the login page.
+    expect(await screen.findByRole('heading', { name: 'Admin Login' })).toBeInTheDocument();
+    expect(logoutAuth).toBe('Session session-token');
+  });
+
   it('keeps migrated domains on native routes without duplicate legacy deep links', async () => {
     server.use(http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])));
 

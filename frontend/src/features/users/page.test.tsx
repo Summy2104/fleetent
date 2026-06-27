@@ -40,6 +40,8 @@ type ImUserRecord = {
   platform_user_id: string;
   status: string;
   user_id: string;
+  user_name: string;
+  user_email?: string | null;
 };
 
 function renderUsersPage(): void {
@@ -299,6 +301,34 @@ describe('users page parity baseline', () => {
     });
   });
 
+  it('requires email and password before a platform user can be created', async () => {
+    const user = userEvent.setup({ delay: null });
+    server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () => HttpResponse.json(ADMIN_ME)),
+      http.get(`${API_BASE_URL}/admin/users`, () => HttpResponse.json([])),
+      http.get(`${API_BASE_URL}/admin/im-users`, () => HttpResponse.json([]))
+    );
+
+    renderUsersPage();
+    await screen.findByRole('heading', { name: 'Users' });
+
+    await user.click(screen.getByRole('button', { name: 'Create user' }));
+    const dialog = await screen.findByRole('dialog');
+    const submit = within(dialog).getByRole('button', { name: 'Create user' });
+
+    // Name only: a user with no email/password could never log in, so block submit.
+    await user.type(within(dialog).getByLabelText('User name'), 'Bob');
+    expect(submit).toBeDisabled();
+
+    // Email present but still no password.
+    await user.type(within(dialog).getByLabelText('Email'), 'bob@fleetent.test');
+    expect(submit).toBeDisabled();
+
+    // Both present: a login-capable account can be created.
+    await user.type(within(dialog).getByLabelText('Password'), 'pw');
+    expect(submit).toBeEnabled();
+  });
+
   it('supports IM identity bind, block, and restore flows', async () => {
     const user = userEvent.setup({ delay: null });
     let users: UserRecord[] = [
@@ -327,6 +357,8 @@ describe('users page parity baseline', () => {
         platform_user_id: 'U-ALICE',
         status: 'active',
         user_id: 'u1',
+        user_name: 'Alice',
+        user_email: 'alice@fleetent.test',
       },
     ];
 
@@ -337,7 +369,11 @@ describe('users page parity baseline', () => {
       http.get(`${API_BASE_URL}/admin/im-users`, () => HttpResponse.json(imUsers)),
       http.post(`${API_BASE_URL}/admin/im-users/7/bind`, async ({ request }) => {
         expect((await request.json()) as { user_id: string }).toEqual({ user_id: 'u2' });
-        imUsers = imUsers.map((item) => (item.id === 7 ? { ...item, user_id: 'u2' } : item));
+        imUsers = imUsers.map((item) =>
+          item.id === 7
+            ? { ...item, user_id: 'u2', user_name: 'Bob', user_email: 'bob@fleetent.test' }
+            : item
+        );
         return HttpResponse.json({ status: 'bound' });
       }),
       http.post(`${API_BASE_URL}/admin/im-users/7/block`, async ({ request }) => {
@@ -368,19 +404,20 @@ describe('users page parity baseline', () => {
     const row = screen.getByTestId('im-user-7');
 
     // ── Bind the identity to a different user ────────────────────────────────
-    // Initially bound to u1; after binding the identity badge should show u2.
+    // Initially bound to Alice; after binding the identity badge should name Bob,
+    // so an admin can tell who an external handle maps to without reading a UUID.
     expect(
       within(row).getByText(
         (content, element) =>
-          content === 'u1' && (element?.className ?? '').includes('rounded-full')
+          content === 'Alice' && (element?.className ?? '').includes('rounded-full')
       )
     ).toBeInTheDocument();
-    await selectOption(user, within(row).getByLabelText('Bind to user'), 'u2');
+    await selectOption(user, within(row).getByLabelText('Bind to user'), 'Bob');
     await waitFor(() => {
       expect(
         within(row).getByText(
           (content, element) =>
-            content === 'u2' && (element?.className ?? '').includes('rounded-full')
+            content === 'Bob' && (element?.className ?? '').includes('rounded-full')
         )
       ).toBeInTheDocument();
     });
@@ -444,6 +481,8 @@ describe('users page parity baseline', () => {
             platform_user_id: 'T1',
             status: 'active',
             user_id: 'u2',
+            user_name: 'Bob',
+            user_email: null,
           },
         ];
         return HttpResponse.json({
@@ -504,6 +543,8 @@ describe('users page parity baseline', () => {
         platform_user_id: 'U007',
         status: 'active',
         user_id: 'u1',
+        user_name: 'Alice',
+        user_email: 'alice@fleetent.test',
       },
     ];
 
