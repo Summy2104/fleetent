@@ -20,4 +20,4 @@
 
 - [x] 4.1 `make test-pr` 全绿（3928 passed）
 - [x] 4.2 `make test-integration-ci` 全绿（2154 passed, 23 skipped；零失败）
-- [ ] 4.3 archive 时按 `specs/node-desired-state-api` 的 MODIFIED delta 同步主 spec
+- [x] 4.3 archive 时按 `specs/node-desired-state-api` 的 MODIFIED delta 同步主 spec
