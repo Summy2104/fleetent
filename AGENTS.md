@@ -185,9 +185,9 @@ unit 禁止涉及真实 DB file、schema、CRUD 或 store/runtime 协作：禁�
 |------|------|------|
 | TDD 红/绿每步 | `uv run pytest <file>::<test> -x -q` | 见红/见绿 |
 | 单 task 收尾 | 受影响层（unit 或 integration） | 该层无新增失败 |
-| change / PR 收尾 | `make test-pr` + `uv run pytest tests/integration -q`（不带 `-x`，对照 main 基线） | test-pr 全绿；integration 无新增失败 |
+| change / PR 收尾 | `make test-pr` + `make test-integration-ci`（并行、无 coverage、`-n auto`，~1min） | 两者全绿 |
 
-覆盖门禁：push 路径仅看 unit（`make test-unit-ci`，`--fail-under=76`）；每日定时路径看合并覆盖（`make test-coverage-ci`，`--fail-under=88`）。
+CI 门禁：PR 和 main push 路径并行跑三格——unit+coverage（`make test-unit-ci`，`--fail-under=76`）、frontend、integration（`make test-integration-ci`，零失败，无 coverage 插桩）。每日定时路径（`custom: integration-tests`）跑合并覆盖（`make test-coverage-ci`，`--fail-under=88`）。**integration 现在是合并前门禁**（2026-06-27 加，根因见 memory：此前 integration 只在每日定时跑，integration-only 破坏会"PR 绿、main 绿、次日定时红"）。
 
 **门禁判据是「无新增失败」，不是零失败**：存在一批预先存在的失败（`permission_gate` / agent-access 重构遗留，owner 非测试改动者），其中 flaky 的 `test_loop_permission_gate.py` 已在 `make test-pr` 用 `--deselect` quarantine。`make test-pr` 的 ruff 只扫本分支 changed-vs-main 的 `.py`——你只对自己改过的文件负责。
 
