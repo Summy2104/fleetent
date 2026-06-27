@@ -43,6 +43,25 @@ def test_list_mappings_carries_user_name_and_email(db):
     assert row["user_email"] == "alice@example.com"
 
 
+def test_list_all_carries_user_name_and_email(db):
+    # The IM-users workbench renders the bound internal user; it must show the
+    # human name/email, not only the opaque user_id, while keeping the block-state
+    # fields (status/allowed/metadata) the page relies on.
+    user, _ = user_store.create_user(name="Alice", email="alice@example.com", tenant_id="default")
+    im.create_mapping("slack", "U1", user.id, actor="admin1")
+
+    rows = im.list_all()
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["user_id"] == user.id
+    assert row["user_name"] == "Alice"
+    assert row["user_email"] == "alice@example.com"
+    assert row["status"] == "active"
+    assert row["allowed"] is True
+    assert row["metadata"] == {}
+
+
 def test_create_mapping_persists_and_audits(db):
     user, _ = user_store.create_user(name="Bob", tenant_id="default")
 

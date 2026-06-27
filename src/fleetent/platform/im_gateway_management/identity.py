@@ -465,11 +465,16 @@ def list_im_identities(user_id: str) -> list[dict[str, Any]]:
 
 
 def list_all() -> list[dict[str, Any]]:
-    """All IM identities across all users (for the admin workbench)."""
+    """All IM identities across all users (for the admin workbench).
+
+    Each row carries the bound internal user's name and email alongside the opaque
+    user_id so the IM-users page can show who an external identity maps to, while
+    keeping the block-state fields (status/allowed/metadata) the page relies on.
+    """
     with _conn() as conn:
         rows = conn.execute(
             "SELECT im.id, im.platform, im.platform_user_id, im.user_id, im.created_at,"
-            " im.meta_json, users.status"
+            " im.meta_json, users.status, users.name AS user_name, users.email AS user_email"
             " FROM im_users AS im JOIN users ON users.id = im.user_id"
             " ORDER BY im.created_at"
         ).fetchall()
@@ -479,6 +484,8 @@ def list_all() -> list[dict[str, Any]]:
             "platform": r["platform"],
             "platform_user_id": r["platform_user_id"],
             "user_id": r["user_id"],
+            "user_name": r["user_name"],
+            "user_email": r["user_email"],
             "status": r["status"],
             "allowed": r["status"] != "blocked",
             "created_at": r["created_at"],
