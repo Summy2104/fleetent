@@ -91,12 +91,27 @@ def _hdr(token: str, confirm: bool = False) -> dict:
     return h
 
 
-def _start_worker_once(delay_seconds: float = 0.05) -> threading.Thread:
+def _start_worker_once(timeout_seconds: float = 10.0, poll: float = 0.01) -> threading.Thread:
+    """Run the KB ingest worker in the background until it claims one job.
+
+    The import/sync endpoints enqueue a job and then *block* in
+    ``_wait_for_kb_ingest_job`` until a worker processes it, so a worker must run
+    concurrently. A single ``run_once`` gated on a fixed sleep is racy: the job is
+    enqueued only after the endpoint's auth/active-kb checks, so under parallel
+    load (``pytest -n auto``) that enqueue can land after the sleep elapses. The
+    one shot then claims an empty queue and exits, the job is orphaned, and the
+    POST burns its full 30s wait timeout before returning a result with no
+    ``document_id``/``chunks`` — a flaky downstream failure. Poll ``run_once``
+    until it actually claims a job, removing the timing assumption entirely.
+    """
     from fleetent.knowledge_base import worker
 
     def _run_worker_once() -> None:
-        time.sleep(delay_seconds)
-        worker.run_once()
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            if worker.run_once() is not None:
+                return
+            time.sleep(poll)
 
     background = threading.Thread(target=_run_worker_once)
     background.start()

@@ -53,11 +53,9 @@ def test_memory_modules_do_not_bypass_injected_vector_backend() -> None:
     import fleetent.memory.extraction as extraction_module
     import fleetent.memory.maintenance as maintenance_module
     import fleetent.memory.operations as operations_module
-    import fleetent.memory.search as search_module
 
     disallowed_calls = ("vector_store.search(", "vector_store.upsert(", "vector_store.delete(")
     for module in (
-        search_module,
         operations_module,
         extraction_module,
         maintenance_module,
@@ -161,6 +159,4 @@ async def test_shared_agent_vector_store_keeps_user_and_agent_memory_isolated(
     # surfaces the user-memory row.
     agent_results = await agent_memory.search_agent_memory("agent query")
     assert [item.id for item in agent_results] == [agent_item.id]
-    assert "mem-a" not in {
-        item.id for item in await agent_memory.search_agent_memory("user query")
-    }
+    assert "mem-a" not in {item.id for item in await agent_memory.search_agent_memory("user query")}

@@ -7,11 +7,17 @@ from fleetent.schema_migrations import migrate
 
 def _patch_reflection_db(monkeypatch, tmp_path):
     from fleetent import reflection
+    from fleetent.governance import approval_request_store
 
     db_path = tmp_path / "skill-proposals.db"
     database = SQLiteDatabase(path=db_path)
     migrate(database, AGENT_STATE_MIGRATIONS)
+    # Mirror reflection.set_state_db(): persisting a proposal also creates an
+    # approval request via approval_request_store, which needs its own _state_db.
+    # Wiring only reflection left this test relying on a leaked global from a
+    # prior same-worker test. monkeypatch auto-restores both.
     monkeypatch.setattr(reflection, "_state_db", database)
+    monkeypatch.setattr(approval_request_store, "_state_db", database)
     return database
 
 
