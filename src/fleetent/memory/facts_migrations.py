@@ -130,29 +130,34 @@ FACTS_MIGRATIONS: list[tuple[str, str]] = [
             f"            ('{rel}', '{card}', datetime('now'))" for rel, card in SEED_RELATIONS
         ),
     ),
-    # statement: an LLM-generated natural-language rendering of the triple, used
-    # verbatim at injection time so the model reads an unambiguous sentence
-    # ("用户的名字是 Xin" / "用户希望助手回答简洁") instead of a machine-joined line.
-    # Triples still drive retrieval/dedup/supersede; statement drives injection.
     (
         "facts_statement",
         "ALTER TABLE facts ADD COLUMN statement TEXT",
     ),
-    # scope: 'situational' = recalled by vector similarity (default); 'always' =
-    # unconditionally injected into every prompt regardless of query.  Used for
-    # behavioral directives (response_style, never_do, etc.) that must never be
-    # missed due to low semantic overlap with the current query.
     (
         "facts_scope",
         "ALTER TABLE facts ADD COLUMN scope TEXT NOT NULL DEFAULT 'situational'",
     ),
-    # Backfill: known always-relations get scope='always'.  Conservative: only
-    # relations in the explicit soft/hard lists; unknowns stay 'situational'.
     (
         "facts_scope_backfill",
         "UPDATE facts SET scope = 'always' WHERE relation IN ("
         "'response_style', 'tone', 'format', 'language', 'output_format',"
         "'never_do', 'always_do', 'security', 'approval_required'"
         ") AND status = 'active'",
+    ),
+    # Rename facts → memory_items.  The old legacy memory_items table (id/type/content
+    # schema) is dropped first.  On new databases where facts was never created the
+    # DROP / RENAME are both no-ops via IF EXISTS guards using a CREATE+INSERT+DROP
+    # pattern (SQLite has no ALTER TABLE ... RENAME ... IF EXISTS).
+    (
+        "rename_facts_to_memory_items",
+        """
+        DROP TABLE IF EXISTS memory_items;
+        CREATE TABLE IF NOT EXISTS memory_items AS SELECT * FROM facts WHERE 0;
+        INSERT INTO memory_items SELECT * FROM facts;
+        DROP TABLE IF EXISTS facts;
+        CREATE INDEX IF NOT EXISTS idx_memory_items_user_rel
+            ON memory_items (user_id, subject, relation, status);
+        """,
     ),
 ]
