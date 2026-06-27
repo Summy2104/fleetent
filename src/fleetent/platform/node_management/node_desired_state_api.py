@@ -17,7 +17,7 @@ from fleetent.platform.agent_lifecycle import credential_slots, materialize, sec
 from fleetent.platform.agent_management_console import agent_admin_store
 from fleetent.platform.model_provider_management import provider_admin_store
 from fleetent.platform.node_management import node_store, placement_store
-from fleetent.platform.skill_management import bundle_cache
+from fleetent.platform.skill_management import bundle_cache, skill_admin_store
 from fleetent.platform.skill_management.pool_git import pool_version_for_skill
 from fleetent.platform.user_management import user_admin_api
 from fleetent.skills import registry as skill_registry
@@ -313,6 +313,7 @@ def _skill_manifests_for(node_id: str, agent: agent_store.Agent) -> list[dict[st
                     f"/nodes/{node_id}/skills/{skill_name}/bundles/{base_version}.tar.gz"
                 ),
                 "bundle_sha256": artifact.bundle_sha256,
+                "resync_epoch": str(skill_admin_store.get_resync_epoch(agent.id, skill_name)),
             }
         )
     return manifests

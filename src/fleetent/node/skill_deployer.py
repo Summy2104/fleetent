@@ -62,14 +62,21 @@ class NodeSkillDeployer:
     def _sync_one(self, skills_root: Path, manifest: dict[str, str]) -> None:
         skill_name = manifest["name"]
         desired_version = manifest["base_version"]
+        desired_epoch = int(manifest.get("resync_epoch") or 0)
         skill_dir = skills_root / skill_name
         metadata = _read_metadata(skill_dir)
         current_hash = _skill_home_hash(skill_dir)
+        local_epoch = int(metadata.get("resync_epoch") or 0) if metadata is not None else 0
 
-        if metadata is not None and metadata.get("home_hash") != current_hash:
-            return
-        if metadata is not None and metadata.get("base_version") == desired_version:
-            return
+        # A bumped resync_epoch (set by the platform after a backflow accept/reject/fork)
+        # forces a redeploy that overrides local drift — the decision has resolved it, so
+        # the home copy must return to the pool head instead of staying drifted forever.
+        force = desired_epoch > local_epoch
+        if not force:
+            if metadata is not None and metadata.get("home_hash") != current_hash:
+                return
+            if metadata is not None and metadata.get("base_version") == desired_version:
+                return
 
         bundle_bytes = self._download_bundle(manifest)
         extracted_skill_dir = _extract_bundle(bundle_bytes, skill_name)
@@ -82,6 +89,7 @@ class NodeSkillDeployer:
                     "base_version": desired_version,
                     "base_commit": manifest["base_commit"],
                     "home_hash": deployed_hash,
+                    "resync_epoch": str(desired_epoch),
                 },
             )
         finally:
