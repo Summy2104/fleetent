@@ -166,6 +166,8 @@ POST /admin/service-principals  body: {"name": "Alice"}    # 用户管理
 
 `asyncio_mode = auto`，async 测试无需 `@pytest.mark.asyncio`。
 
+> flaky / order-dependent / 并行 race 测试的复现与修复手册见 `docs/records/testing/flaky-tests-playbook.md`（含 CI 不随机化顺序的风险分类、根因清单、conftest 复位模式、验收标准）。
+
 ### 测试分层
 
 | 层 | 位置 | 规则 |
