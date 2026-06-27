@@ -301,6 +301,34 @@ describe('users page parity baseline', () => {
     });
   });
 
+  it('requires email and password before a platform user can be created', async () => {
+    const user = userEvent.setup({ delay: null });
+    server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () => HttpResponse.json(ADMIN_ME)),
+      http.get(`${API_BASE_URL}/admin/users`, () => HttpResponse.json([])),
+      http.get(`${API_BASE_URL}/admin/im-users`, () => HttpResponse.json([]))
+    );
+
+    renderUsersPage();
+    await screen.findByRole('heading', { name: 'Users' });
+
+    await user.click(screen.getByRole('button', { name: 'Create user' }));
+    const dialog = await screen.findByRole('dialog');
+    const submit = within(dialog).getByRole('button', { name: 'Create user' });
+
+    // Name only: a user with no email/password could never log in, so block submit.
+    await user.type(within(dialog).getByLabelText('User name'), 'Bob');
+    expect(submit).toBeDisabled();
+
+    // Email present but still no password.
+    await user.type(within(dialog).getByLabelText('Email'), 'bob@fleetent.test');
+    expect(submit).toBeDisabled();
+
+    // Both present: a login-capable account can be created.
+    await user.type(within(dialog).getByLabelText('Password'), 'pw');
+    expect(submit).toBeEnabled();
+  });
+
   it('supports IM identity bind, block, and restore flows', async () => {
     const user = userEvent.setup({ delay: null });
     let users: UserRecord[] = [

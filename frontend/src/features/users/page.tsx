@@ -265,7 +265,16 @@ function UserFormDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {t('users.cancel')}
           </Button>
-          <Button disabled={busy || !state.name} onClick={() => void onSubmit(state)}>
+          <Button
+            disabled={
+              busy ||
+              !state.name ||
+              // A platform user logs in by email + password; without both, the
+              // created account can never sign in. Edit mode keeps its own rules.
+              (mode === 'create' && (!state.email.trim() || !state.password))
+            }
+            onClick={() => void onSubmit(state)}
+          >
             {mode === 'create' ? t('users.createUser') : t('users.saveChanges')}
           </Button>
         </DialogFooter>
