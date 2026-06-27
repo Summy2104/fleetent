@@ -161,6 +161,14 @@ describe('admin routes', () => {
     expect(nav.getByRole('link', { name: 'Statistics' })).toHaveAttribute('href', '/stats');
   });
 
+  it('renders audit as a native route in the SPA', async () => {
+    renderRoutes('/audit', 'session-token');
+
+    expect((await screen.findAllByRole('heading', { name: 'Audit' }))[0]).toBeInTheDocument();
+    const nav = within(screen.getByRole('navigation'));
+    expect(nav.getByRole('link', { name: 'Audit' })).toHaveAttribute('href', '/audit');
+  });
+
   it('renders providers as a native route instead of a legacy deep link', async () => {
     server.use(http.get('http://fleetent.test/admin/providers', () => HttpResponse.json([])));
 
@@ -290,19 +298,13 @@ describe('admin routes', () => {
     expect(nav.getByRole('link', { name: 'Nodes' })).toHaveAttribute('href', '/nodes');
   });
 
-  it('renders the user-IM identities page as a native route in the SPA', async () => {
-    server.use(
-      http.get('http://fleetent.test/admin/im-identities', () => HttpResponse.json([])),
-      http.get('http://fleetent.test/admin/users', () => HttpResponse.json([]))
-    );
+  it('removes the standalone user-IM identities route and navigation item', async () => {
+    server.use(http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])));
 
     renderRoutes('/im-identities', 'session-token');
 
-    expect((await screen.findAllByRole('heading', { name: 'IM Identities' }))[0]).toBeInTheDocument();
+    expect((await screen.findAllByRole('heading', { name: 'Agents' }))[0]).toBeInTheDocument();
     const nav = within(screen.getByRole('navigation'));
-    expect(nav.getByRole('link', { name: 'IM Identities' })).toHaveAttribute(
-      'href',
-      '/im-identities'
-    );
+    expect(nav.queryByRole('link', { name: 'IM Identities' })).not.toBeInTheDocument();
   });
 });

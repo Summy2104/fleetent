@@ -47,4 +47,4 @@
 
 ## Open Questions
 
-- `GET /admin/audit` 是否已支持导出(CSV)或需前端自行从结果生成?实现 audit 页面前以后端实际能力为准——若后端无导出、`platform-audit-log` 又要求可导出,则前端基于已拉取结果生成 CSV(标注于 tasks)。
+- `GET /admin/audit` 不支持原生 CSV 导出,仅支持 `action` / `actor` / `target_id` 查询参数并返回 JSON 列表；审计页面基于当前已拉取结果在前端生成 CSV。
