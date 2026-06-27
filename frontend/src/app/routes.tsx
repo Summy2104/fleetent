@@ -31,10 +31,24 @@ import { TenancyPage } from '@/features/tenancy/page';
 import { TeamsPage } from '@/features/teams/page';
 
 type AdminMe = { email: string; id: string; role: string; must_reset?: boolean };
+type OidcConfig = { enabled: boolean; label: string };
 
 function useMe() {
   const api = useAdminApi();
   return useQuery({ queryKey: ['admin-me'], queryFn: () => api.get<AdminMe>('/admin/me') });
+}
+
+function useOidcConfigQuery(baseUrl: string) {
+  return useQuery({
+    queryKey: ['admin-oidc-config', baseUrl],
+    queryFn: async (): Promise<OidcConfig> => {
+      const response = await fetch(`${baseUrl}/admin/oidc/config`);
+      if (!response.ok) {
+        throw new Error('failed to load oidc config');
+      }
+      return (await response.json()) as OidcConfig;
+    },
+  });
 }
 
 // Full-screen gate shown when the logged-in user still has must_reset set.
@@ -68,6 +82,9 @@ function LoginPage(): JSX.Element {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const oidcConfig = useOidcConfigQuery(auth.baseUrl);
+  const showOidcLogin = oidcConfig.data?.enabled === true;
+  const oidcLoginLabel = oidcConfig.data?.label || t('login.signInWithSso');
 
   const callbackToken = searchParams.get('token');
 
@@ -139,14 +156,16 @@ function LoginPage(): JSX.Element {
           <Button disabled={!email.trim() || !password} onClick={() => void onSubmit()}>
             {t('common.signIn')}
           </Button>
-          <Button
-            variant="outline"
-            onClick={() => {
-              window.location.href = `${auth.baseUrl}/admin/oidc/login`;
-            }}
-          >
-            {t('login.signInWithSso')}
-          </Button>
+          {showOidcLogin ? (
+            <Button
+              variant="outline"
+              onClick={() => {
+                window.location.href = `${auth.baseUrl}/admin/oidc/login`;
+              }}
+            >
+              {oidcLoginLabel}
+            </Button>
+          ) : null}
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
         </div>
       </div>

@@ -19,6 +19,9 @@ oidc:
   client_id: fleetent-web
   client_secret_env: FLEETENT_OIDC_CLIENT_SECRET
   redirect_uri: https://fleetent.example.com/admin/oidc/callback
+  # Empty falls back to the UI default "Sign in with SSO"; set a deployment label
+  # such as "Sign in with Google" when the IdP should be named on the login button.
+  button_label: ""
   # Empty means no OIDC email-domain restriction. Entries are exact, case-insensitive
   # email domains; subdomains must be listed explicitly. This can be used together
   # with IdP-side domain restrictions.
