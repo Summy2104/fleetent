@@ -156,8 +156,23 @@ function LoginPage(): JSX.Element {
 
 function Sidebar({ onNavigate }: { onNavigate?: () => void }): JSX.Element {
   const auth = useAuthSession();
+  const api = useAdminApi();
   const me = useMe();
   const t = useT();
+
+  const signOut = async (): Promise<void> => {
+    try {
+      // Tear down the server-side session so the token can't be replayed until
+      // its idle timeout; the call carries the current token via the api client.
+      await api.post('/admin/logout');
+    } catch (error) {
+      // Best-effort: always drop the local session even if the network call
+      // fails (offline, or the token was already invalidated server-side).
+      console.warn('logout request failed', error);
+    } finally {
+      auth.clearToken();
+    }
+  };
 
   return (
     <aside className="flex h-full w-64 flex-col border-r border-sidebar-border bg-sidebar">
@@ -223,7 +238,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }): JSX.Element {
             size="icon"
             aria-label={t('common.signOut')}
             title={t('common.signOut')}
-            onClick={() => auth.clearToken()}
+            onClick={() => void signOut()}
           >
             <LogOut className="size-4" />
           </Button>
