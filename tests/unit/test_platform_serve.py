@@ -35,12 +35,12 @@ def test_serve_calls_uvicorn_with_host_and_port(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(serve_module, "_uvicorn_run", fake_run)
 
-    out, err, code = _run_platform("serve", "--host", "127.0.0.1", "--port", "8770")
+    out, err, code = _run_platform("serve", "--host", "127.0.0.1", "--port", "8767")
 
     assert code == 0
     assert err == ""
     assert calls == [
-        {"app": "fleetent.server:app", "host": "127.0.0.1", "port": 8770, "reload": False}
+        {"app": "fleetent.server:app", "host": "127.0.0.1", "port": 8767, "reload": False}
     ]
 
 
@@ -58,6 +58,8 @@ def test_serve_default_host_and_port(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert len(calls) == 1
     assert calls[0]["app"] == "fleetent.server:app"
+    assert calls[0]["host"] == "127.0.0.1"
+    assert calls[0]["port"] == 8765
     assert calls[0]["reload"] is False
 
 

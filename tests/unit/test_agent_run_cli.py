@@ -21,9 +21,9 @@ def test_parse_agent_run_defaults():
 
 
 def test_parse_agent_run_with_port_and_home(tmp_path):
-    ns = cli._parse_agent_run(["support", "--port", "8770", "--home", str(tmp_path)])
+    ns = cli._parse_agent_run(["support", "--port", "8767", "--home", str(tmp_path)])
     assert ns.agent_id == "support"
-    assert ns.port == 8770
+    assert ns.port == 8767
     assert ns.home == str(tmp_path)
 
 
@@ -42,10 +42,10 @@ def test_main_dispatches_agent_run(monkeypatch):
 
     monkeypatch.setattr(agent_app, "serve", fake_serve)
     monkeypatch.setattr(
-        "sys.argv", ["fleetent", "agent", "run", "support", "--port", "8770", "--no-im"]
+        "sys.argv", ["fleetent", "agent", "run", "support", "--port", "8767", "--no-im"]
     )
     cli.main()
-    assert served == {"agent_id": "support", "port": 8770, "start_im": False}
+    assert served == {"agent_id": "support", "port": 8767, "start_im": False}
 
 
 def test_main_oneshot_still_works(monkeypatch, capsys):
@@ -70,7 +70,7 @@ async def test_serve_with_port_mounts_http(monkeypatch):
     fake_server = MagicMock()
     fake_server.serve = AsyncMock()
     with patch("uvicorn.Server", return_value=fake_server) as server_cls, patch("uvicorn.Config"):
-        await agent_app.serve("support", port=8770)
+        await agent_app.serve("support", port=8767)
 
     server_cls.assert_called_once()  # HTTP listener constructed
     fake_server.serve.assert_awaited_once()
@@ -247,8 +247,8 @@ def test_parse_agent_restart_defaults() -> None:
 
 
 def test_parse_agent_restart_with_port_and_home(tmp_path) -> None:
-    ns = cli._parse_agent_restart(["my-bot", "--port", "8770", "--home", str(tmp_path)])
-    assert ns.port == 8770
+    ns = cli._parse_agent_restart(["my-bot", "--port", "8767", "--home", str(tmp_path)])
+    assert ns.port == 8767
     assert ns.home == str(tmp_path)
 
 

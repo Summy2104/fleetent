@@ -81,6 +81,28 @@ def test_resolve_ingress_principal_falls_back_to_transport_principal_when_header
     assert result == token_principal
 
 
+def test_resolve_ingress_principal_uses_tui_token_before_local_bearer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleetent.identity import encode_ingress_principal
+    from fleetent.runtime.agent_app import _resolve_ingress_principal
+
+    monkeypatch.setenv("FLEETENT_TUI_TOKEN", "ma-node-key")
+
+    def broken_local_bearer(token: str) -> Principal | None:
+        raise AssertionError(
+            "local bearer should not be consulted for the configured ingress token"
+        )
+
+    result = _resolve_ingress_principal(
+        "Bearer ma-node-key",
+        encode_ingress_principal(Principal(user_id="operator-1", tenant_id="tenant-1")),
+        local_bearer=broken_local_bearer,
+    )
+
+    assert result == Principal(user_id="operator-1", tenant_id="tenant-1")
+
+
 def test_resolve_ingress_principal_rejects_forged_header_without_valid_transport_token() -> None:
     from fleetent.identity import encode_ingress_principal
     from fleetent.runtime.agent_app import _resolve_ingress_principal

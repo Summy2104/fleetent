@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--node-id", default=os.environ.get("NODE_ID", "local-node"))
     parser.add_argument(
         "--platform-url",
-        default=os.environ.get("NODE_PLATFORM_URL", "http://127.0.0.1:8770"),
+        default=os.environ.get("NODE_PLATFORM_URL", "http://127.0.0.1:8765"),
     )
     parser.add_argument(
         "--force",

@@ -65,6 +65,12 @@ def _parse_agent_init(args: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> None:
     if argv is None:
         argv = sys.argv[1:]
+    if argv[:1] == ["version"]:
+        from fleetent.build_info import build_commit
+
+        print(build_commit())
+        return
+
     if argv[:2] == ["agent", "init"]:
         from fleetent.runtime import agent_init
 
@@ -76,9 +82,11 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     if argv[:2] == ["agent", "run"]:
+        from fleetent.build_info import log_service_startup
         from fleetent.runtime import agent_app
 
         ns = _parse_agent_run(argv[2:])
+        log_service_startup("agent")
         asyncio.run(agent_app.serve(ns.agent_id, port=ns.port, home=ns.home, start_im=not ns.no_im))
         return
 

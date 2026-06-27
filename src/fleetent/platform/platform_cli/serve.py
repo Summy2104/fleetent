@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 
 _DEFAULT_HOST = "127.0.0.1"
-_DEFAULT_PORT = 8770
+_DEFAULT_PORT = 8765
 
 
 def _uvicorn_run(app: str, *, host: str, port: int, reload: bool = False) -> None:
@@ -26,5 +26,8 @@ def handle(args: argparse.Namespace) -> bool:
     """Handle the serve subcommand."""
     if args.cmd != "serve":
         return False
+    from fleetent.build_info import log_service_startup
+
+    log_service_startup("platform")
     _uvicorn_run("fleetent.server:app", host=args.host, port=args.port, reload=args.reload)
     return True

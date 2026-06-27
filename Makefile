@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := help
 
 .PHONY: help install test t test-pr test-unit test-unit-ci test-coverage-ci test-integration test-e2e test-evaluation test-layers lint fmt check typecheck platform-help \
+	up down logs deploy redeploy deploy-status upgrade \
 	frontend-install frontend-build test-frontend \
 	dev-bootstrap dev-reset platform node-provision node kb-worker agent chat dev-clean
 
@@ -86,6 +87,46 @@ test-frontend: ## Run frontend tests, coverage, typecheck, and lint
 
 platform-help: ## Show platform CLI help
 	uv run fleetent platform --help
+
+# ---- production compose stack ---------------------------------------------
+COMPOSE ?= docker compose
+GIT_COMMIT ?= $(shell git rev-parse --short HEAD)
+FLEETENT_IMAGE ?= fleetent:$(GIT_COMMIT)
+DEPLOY_FLEETENT_HOME ?= /srv/fleetent
+
+DEPLOY_TARGETS := up down logs deploy redeploy deploy-status upgrade
+$(DEPLOY_TARGETS): export FLEETENT_HOME := $(DEPLOY_FLEETENT_HOME)
+$(DEPLOY_TARGETS): export GIT_COMMIT := $(GIT_COMMIT)
+$(DEPLOY_TARGETS): export FLEETENT_IMAGE := $(FLEETENT_IMAGE)
+
+up: ## Start the production Compose stack
+	$(COMPOSE) up -d
+
+down: ## Stop the production Compose stack without deleting volumes/data
+	$(COMPOSE) down
+
+logs: ## Follow production Compose logs
+	$(COMPOSE) logs -f --tail=200
+
+deploy: up ## Build if needed and start the production Compose stack
+
+redeploy: ## Rebuild the image from current source, then restart services only if build succeeds
+	@if $(COMPOSE) version >/dev/null 2>&1; then \
+		$(COMPOSE) build --build-arg GIT_COMMIT=$(GIT_COMMIT) && $(COMPOSE) up -d; \
+	else \
+		uv tool install --force .; \
+		echo "restart your bare-metal fleetent services to pick up $(GIT_COMMIT)"; \
+	fi
+
+deploy-status: ## Compare deployed image build commit with source HEAD
+	@deployed="$$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$(FLEETENT_IMAGE)" 2>/dev/null || true)"; \
+	if [ -z "$$deployed" ]; then \
+		deployed="$$(docker compose images -q platform 2>/dev/null | xargs docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' 2>/dev/null || true)"; \
+	fi; \
+	DEPLOYED_COMMIT="$$deployed" uv run python -c 'from fleetent import deploy_ops; import os, sys; status = deploy_ops.compare_commits(deployed_commit=os.environ.get("DEPLOYED_COMMIT", ""), head_commit=os.environ["GIT_COMMIT"]); print(status.message); sys.exit(1 if status.is_stale else 0)'
+
+upgrade: ## Run platform database upgrade in the production Compose stack
+	docker compose run --rm platform fleetent platform upgrade
 
 # ---- local dev stack -------------------------------------------------------
 # All data/config lives under a gitignored dev home (override by exporting

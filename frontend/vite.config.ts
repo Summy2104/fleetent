@@ -17,7 +17,7 @@ export default defineConfig({
     // itself is served under /admin/ui, so bypass that prefix and proxy the rest.
     proxy: {
       '/admin': {
-        target: 'http://127.0.0.1:8770',
+        target: 'http://127.0.0.1:8765',
         changeOrigin: true,
         bypass(req) {
           if (req.url?.startsWith('/admin/ui')) {

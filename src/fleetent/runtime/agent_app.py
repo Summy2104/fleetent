@@ -202,7 +202,7 @@ def _resolve_ingress_principal(
     if authorization_header.startswith("Bearer "):
         token = authorization_header.removeprefix("Bearer ").strip()
         adapter = local_bearer or LocalBearerAdapter()
-        principal = adapter(token) or _validate_tui_token(authorization_header)
+        principal = _validate_tui_token(authorization_header) or adapter(token)
     if principal is None:
         raise HTTPException(status_code=401, detail="invalid or missing bearer token")
     try:

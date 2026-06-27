@@ -251,4 +251,7 @@ def run(*, poll_interval: float) -> None:
 def main(argv: list[str] | None = None) -> None:
     load_config()
     ns = _parse_args(argv or [])
+    from fleetent.build_info import log_service_startup
+
+    log_service_startup("kb-worker")
     run(poll_interval=ns.poll_interval)

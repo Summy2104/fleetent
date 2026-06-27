@@ -157,6 +157,8 @@ def test_container_backend_spawn_runs_agent_container_with_labels_network_and_mo
             "fleetent.agent.tenant=tenant-1",
             "--network",
             "fleetent-net",
+            "--env-file",
+            str(tmp_path / "tenants/tenant-1/agents/support/.env"),
             "--mount",
             f"type=bind,source={tmp_path / 'tenants/tenant-1/agents/support'},"
             f"target={tmp_path / 'tenants/tenant-1/agents/support'},readonly=false",
@@ -178,6 +180,38 @@ def test_container_backend_spawn_runs_agent_container_with_labels_network_and_mo
             str(tmp_path / "tenants/tenant-1/agents/support"),
         )
     ]
+
+
+def test_container_backend_spawn_migrates_tenant_kb_before_readonly_mount(
+    monkeypatch, tmp_path
+) -> None:
+    from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
+    from fleetent.node import backend as backend_module
+    from fleetent.node.backend import ContainerBackend
+
+    def fake_run(cmd: list[str], **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout="container-id\n", stderr="")
+
+    migrated: list[tuple[object, list[tuple[int, str]]]] = []
+    substrates: list[str] = []
+
+    def fake_create_substrate(database_url: str) -> object:
+        substrates.append(database_url)
+        return object()
+
+    def fake_migrate(database: object, migrations: list[tuple[int, str]]) -> None:
+        migrated.append((database, migrations))
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(backend_module, "create_substrate", fake_create_substrate)
+    monkeypatch.setattr(backend_module, "migrate", fake_migrate)
+
+    backend = ContainerBackend(_container_config(tmp_path))
+    backend.spawn("support", "tenant-1")
+
+    assert substrates == [f"sqlite:///{tmp_path / 'tenants/tenant-1/kb.db'}"]
+    assert [migrations for _, migrations in migrated] == [KB_MIGRATIONS]
+    assert (tmp_path / "tenants/tenant-1/kb_vectors.db").exists()
 
 
 def test_container_backend_is_alive_uses_label_filtered_running_container(

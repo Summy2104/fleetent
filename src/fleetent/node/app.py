@@ -37,6 +37,9 @@ def main() -> None:
         print(str(exc), file=sys.stderr)
         raise SystemExit(1) from exc
 
+    from fleetent.build_info import log_service_startup
+
+    log_service_startup("node")
     provider = PlatformApiDesiredStateProvider(config)
     backend = create_process_backend(config)
     reconciler = NodeReconciler(config, backend)

@@ -31,8 +31,11 @@ scripts/install.sh                 # 或 --agent-only / --platform-only / --dir 
 > Agent 模板为 `agent.yaml.example` 和 `agent.env.example`，`fleetent agent init <id>`
 > 据此 scaffold 到 `<FLEETENT_HOME>/tenants/default/agents/<id>/agent.yaml` + `.env`。
 
-> 这是面向开发者 / 单机快速体验的路径。**on-prem 生产部署请用 Docker**
-> （`Dockerfile` + `docker-compose.yml`），环境可复现、数据不出内网。
+> 这是面向开发者 / 单机快速体验的路径。**Docker Compose 推荐生产路径**：
+> 使用 `Dockerfile` + `docker-compose.yml` 拉起 platform / node / kb-worker，
+> node 通过 `node.backend=container` 拉起 agent 兄弟容器。详见
+> `docs/deployment/compose.md`。裸机安装与 `node.backend=process` 仍保留用于开发、
+> 调试和回滚。
 
 ### 新建一个独立 agent（无平台依赖）
 

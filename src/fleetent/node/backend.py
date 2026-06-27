@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import Protocol
 
 from fleetent import paths
+from fleetent.db import create_substrate
+from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
 from fleetent.node.config import NodeConfig
+from fleetent.schema_migrations import migrate
 
 
 class BaseProcessBackend(Protocol):
@@ -107,6 +110,7 @@ class ContainerBackend:
     def spawn(self, agent_name: str, tenant_id: str = "default") -> None:
         home_dir = self._home_dir(agent_name, tenant_id)
         home_dir.mkdir(parents=True, exist_ok=True)
+        self._prepare_tenant_kb(tenant_id)
         subprocess.run(
             [
                 "docker",
@@ -122,6 +126,8 @@ class ContainerBackend:
                 f"fleetent.agent.tenant={tenant_id}",
                 "--network",
                 self._config.agent_network,
+                "--env-file",
+                str(home_dir / ".env"),
                 "--mount",
                 self._bind_mount(home_dir, read_only=False),
                 "--mount",
@@ -194,6 +200,12 @@ class ContainerBackend:
     def _tenant_dir(self, tenant_id: str) -> Path:
         relative = paths.tenant_dir(tenant_id).relative_to(paths.base_dir())
         return self._config.home_dir / relative
+
+    def _prepare_tenant_kb(self, tenant_id: str) -> None:
+        tenant_dir = self._tenant_dir(tenant_id)
+        tenant_dir.mkdir(parents=True, exist_ok=True)
+        migrate(create_substrate(f"sqlite:///{tenant_dir / 'kb.db'}"), KB_MIGRATIONS)
+        (tenant_dir / "kb_vectors.db").touch(exist_ok=True)
 
     def _home_dir(self, agent_name: str, tenant_id: str) -> Path:
         return self._tenant_dir(tenant_id) / "agents" / agent_name

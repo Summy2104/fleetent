@@ -1,14 +1,68 @@
+name: fleetent
+
+x-fleetent-build: &fleetent-build
+  context: .
+  args:
+    GIT_COMMIT: ${GIT_COMMIT:-unknown}
+
+x-fleetent-env: &fleetent-env
+  FLEETENT_HOME: ${FLEETENT_HOME:?set FLEETENT_HOME}
+  DATABASE_URL: sqlite:///${FLEETENT_HOME:?set FLEETENT_HOME}/management.db
+  FLEETENT_NODE_PLATFORM_URL: http://platform:8765
+  FLEETENT_NODE_AGENT_IMAGE: ${FLEETENT_IMAGE:-fleetent:${GIT_COMMIT:-latest}}
+  FLEETENT_NODE_AGENT_NETWORK: fleetent
+
+x-fleetent-home-volume: &fleetent-home-volume
+  - ${FLEETENT_HOME:?set FLEETENT_HOME}:${FLEETENT_HOME:?set FLEETENT_HOME}
+
 services:
-  fleetent:
-    build: .
-    env_file: .env
+  platform:
+    image: ${FLEETENT_IMAGE:-fleetent:${GIT_COMMIT:-latest}}
+    build: *fleetent-build
+    command: ["platform"]
+    env_file:
+      - .env
+    environment:
+      <<: *fleetent-env
+      FLEETENT_AUTO_UPGRADE: ${FLEETENT_AUTO_UPGRADE:-false}
     ports:
       - "8765:8765"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - ./data:/app/data
-      - ./agents:/app/agents
-      - ./platform.yaml:/app/platform.yaml
-      - ./secrets:/app/secrets:ro
+    volumes: *fleetent-home-volume
     restart: unless-stopped
+    networks:
+      - fleetent
+
+  node:
+    image: ${FLEETENT_IMAGE:-fleetent:${GIT_COMMIT:-latest}}
+    build: *fleetent-build
+    command: ["node"]
+    env_file:
+      - .env
+    environment:
+      <<: *fleetent-env
+      FLEETENT_NODE_BACKEND: container
+    ports:
+      - "8786:8786"
+    volumes:
+      - ${FLEETENT_HOME:?set FLEETENT_HOME}:${FLEETENT_HOME:?set FLEETENT_HOME}
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    networks:
+      - fleetent
+
+  kb-worker:
+    image: ${FLEETENT_IMAGE:-fleetent:${GIT_COMMIT:-latest}}
+    build: *fleetent-build
+    command: ["kb-worker"]
+    env_file:
+      - .env
+    environment:
+      <<: *fleetent-env
+    volumes: *fleetent-home-volume
+    restart: unless-stopped
+    networks:
+      - fleetent
+
+networks:
+  fleetent:
+    name: fleetent

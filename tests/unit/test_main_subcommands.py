@@ -9,6 +9,24 @@ from fleetent import __main__ as cli
 from fleetent.runtime import agent_app
 
 
+def test_version_prints_build_commit(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    monkeypatch.setenv("FLEETENT_BUILD_COMMIT", "5dc87584")
+
+    cli.main(["version"])
+
+    assert capsys.readouterr().out == "5dc87584\n"
+
+
+def test_version_prints_unknown_without_build_commit(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    monkeypatch.delenv("FLEETENT_BUILD_COMMIT", raising=False)
+
+    cli.main(["version"])
+
+    assert capsys.readouterr().out == "unknown\n"
+
+
 def test_platform_subcommand_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[list[str], str]] = []
     platform_main_module = importlib.import_module("fleetent.platform.platform_cli.main")

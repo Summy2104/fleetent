@@ -172,8 +172,15 @@ def test_dockerfile_includes_deployment_runtime_assets_and_port():
     content = Path("Dockerfile").read_text(encoding="utf-8")
 
     required_phrases = [
+        "FROM docker:27-cli AS docker-cli",
+        "COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker",
         "COPY scripts/ ./scripts/",
         "COPY platform.yaml.example .env.example agent.yaml.example agent.env.example ./",
+        'ENV PATH="/app/.venv/bin:$PATH"',
+        'ENV PYTHONPATH="/app:/app/src:$PYTHONPATH"',
+        "ARG GIT_COMMIT=unknown",
+        "ENV FLEETENT_BUILD_COMMIT=$GIT_COMMIT",
+        'LABEL org.opencontainers.image.revision="$GIT_COMMIT"',
         'ENTRYPOINT ["./scripts/docker_entrypoint.sh"]',
         "EXPOSE 8765",
     ]
@@ -181,21 +188,33 @@ def test_dockerfile_includes_deployment_runtime_assets_and_port():
         assert phrase in content
 
 
-def test_docker_compose_uses_local_env_mounts_and_port():
+def test_docker_compose_runs_managed_stack_with_path_parity_and_socket_boundary():
     content = Path("docker-compose.yml").read_text(encoding="utf-8")
 
     required_phrases = [
-        "env_file: .env",
-        "- ./data:/app/data",
-        "- ./agents:/app/agents",
-        "- ./platform.yaml:/app/platform.yaml",
-        "- ./secrets:/app/secrets:ro",
+        "platform:",
+        "node:",
+        "kb-worker:",
+        'command: ["platform"]',
+        'command: ["node"]',
+        'command: ["kb-worker"]',
         '"8765:8765"',
-        "host.docker.internal:host-gateway",
+        '"8786:8786"',
+        "FLEETENT_AUTO_UPGRADE: ${FLEETENT_AUTO_UPGRADE:-false}",
+        "FLEETENT_NODE_BACKEND: container",
+        "FLEETENT_NODE_AGENT_NETWORK: fleetent",
+        "/var/run/docker.sock:/var/run/docker.sock",
+        "${FLEETENT_HOME:?set FLEETENT_HOME}:${FLEETENT_HOME:?set FLEETENT_HOME}",
+        "name: fleetent",
     ]
     for phrase in required_phrases:
         assert phrase in content
-    assert ".env.production" not in content
+    assert content.count("/var/run/docker.sock:/var/run/docker.sock") == 1
+    auto_upgrade_lines = [
+        line for line in content.splitlines() if line.lstrip().startswith("FLEETENT_AUTO_UPGRADE:")
+    ]
+    assert len(auto_upgrade_lines) == 1
+    assert "./data:/app/data" not in content
 
 
 def test_legacy_mcp_yaml_is_not_tracked_or_required_by_deployment_docs():
@@ -376,6 +395,44 @@ def test_deployment_docs_are_docker_compose_first_and_use_port_8765():
     combined = "\n".join(docs.values())
     assert "Pilot 默认" in combined
     assert "uv run uvicorn fleetent.server:app` 只作为开发模式" in combined
+
+
+def test_compose_deployment_runbook_documents_operations_and_boundaries():
+    runbook = Path("docs/deployment/compose.md")
+
+    assert runbook.exists()
+    content = runbook.read_text(encoding="utf-8")
+
+    required_phrases = [
+        "Docker Compose 推荐生产路径",
+        "make up",
+        "make redeploy",
+        "make deploy-status",
+        "make upgrade",
+        "make down",
+        "path-parity",
+        "DEPLOY_FLEETENT_HOME",
+        "FLEETENT_HOME",
+        "docker.sock 信任边界",
+        "rootless Docker",
+        "platform / node / kb-worker",
+        "node.backend=container",
+        "agent 兄弟容器",
+        "build commit",
+        "陈旧",
+        "回滚",
+        "不带 -v",
+    ]
+    for phrase in required_phrases:
+        assert phrase in content
+
+
+def test_readme_points_production_deployments_to_compose_runbook():
+    content = Path("README.md").read_text(encoding="utf-8")
+
+    assert "Docker Compose 推荐生产路径" in content
+    assert "docs/deployment/compose.md" in content
+    assert "node.backend=process" in content
 
 
 def test_materialize_covers_agent_yaml_example_env_refs(tmp_path, monkeypatch):

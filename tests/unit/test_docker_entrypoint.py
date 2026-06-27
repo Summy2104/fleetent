@@ -6,7 +6,8 @@ def test_docker_entrypoint_auto_upgrade_is_explicit_opt_in():
 
     assert "${FLEETENT_AUTO_UPGRADE:-false}" in content
     assert '= "true"' in content
-    assert "uv run fleetent platform upgrade" in content
-    assert content.index("uv run fleetent platform upgrade") < content.index(
-        "exec uv run fleetent platform serve"
+    assert "fleetent platform upgrade" in content
+    assert content.index("fleetent platform upgrade") < content.index(
+        "exec fleetent platform serve"
     )
+    assert 'role="${1:-platform}"' in content
