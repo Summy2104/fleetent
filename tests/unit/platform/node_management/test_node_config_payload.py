@@ -50,9 +50,10 @@ def test_desired_state_payload_renders_mcp_servers_map() -> None:
     assert "mcp_servers" not in payload
     assert set(payload["mcpServers"]) == {"docs"}
     assert payload["mcpServers"]["docs"]["url"] == "https://mcp.internal/docs"
-    # non-secret env pointer kept; secret-bearing fields stripped
+    # env: references are non-secret variable-name pointers (like api_key_env) and are kept;
+    # secret-bearing fields (plaintext env values, credential_ref) are stripped
     assert payload["mcpServers"]["docs"]["api_key_env"] == "DOCS_API_KEY"
-    assert "env" not in payload["mcpServers"]["docs"]
+    assert payload["mcpServers"]["docs"]["env"] == {"DOCS_TOKEN": "env:DOCS_TOKEN"}
     assert "credential_ref" not in payload["mcpServers"]["docs"]
 
 
@@ -171,6 +172,19 @@ def test_serialize_desired_state_payload_still_strips_secret_values() -> None:
 
     payload = materialize.desired_state_payload_from_agent_file(agent_file)
 
-    assert "env" not in payload["mcpServers"]["docs"]
+    # env: reference survives (variable-name pointer); plaintext secret value is stripped
+    assert payload["mcpServers"]["docs"]["env"] == {"DOCS_SHARED_TOKEN": "env:DOCS_SHARED_TOKEN"}
     assert "credential_ref" not in payload["mcpServers"]["docs"]
     assert "sk-inline-docs-secret" not in str(payload)
+
+
+def test_desired_state_payload_env_ref_collected_by_node() -> None:
+    from fleetent.platform.agent_lifecycle import materialize
+    from fleetent.runtime.agent_init import referenced_env_names
+
+    payload = materialize.desired_state_payload_from_agent_file(_agent_file_with_mcp())
+
+    # node recomputes referenced env names from the delivered config; the preserved mcp
+    # env: reference must be collected so ensure_env_scaffold scaffolds and fills it.
+    names = referenced_env_names(AgentFile.model_validate(payload))
+    assert "DOCS_TOKEN" in names
