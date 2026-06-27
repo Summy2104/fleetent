@@ -105,6 +105,42 @@ def test_agent_file_from_store_exports_authored_runtime_config(db):
     )
 
 
+def test_agent_file_from_store_exports_mcp_headers(db):
+    """MCP 自定义 headers 必须随 materialize 导出（mcp-headers-managed-sync）。"""
+    agent = agent_store.create_agent("support", "p", [], mcp_server_ids=["docs"])
+    agent_mcp_server_store.add_mcp_server(
+        None,
+        "docs",
+        transport="http",
+        url="https://docs.acme.internal/mcp",
+        headers={"X-API-Key": "env:DOCS_KEY"},
+    )
+    agent_store.bind_mcp_server(agent.id, "docs")
+
+    exported = materialize.agent_file_from_store(agent_store.get_by_name("support"))
+
+    assert exported.mcp_servers[0].headers == {"X-API-Key": "env:DOCS_KEY"}
+
+
+def test_desired_state_payload_includes_mcp_headers(db):
+    """headers 不在 secret-strip 名单里，必须出现在发往 node 的 desired-state payload。"""
+    agent = agent_store.create_agent("support", "p", [], mcp_server_ids=["docs"])
+    agent_mcp_server_store.add_mcp_server(
+        None,
+        "docs",
+        transport="http",
+        url="https://docs.acme.internal/mcp",
+        headers={"X-API-Key": "env:DOCS_KEY"},
+    )
+    agent_store.bind_mcp_server(agent.id, "docs")
+
+    payload = materialize.desired_state_payload_from_agent_file(
+        materialize.agent_file_from_store(agent_store.get_by_name("support"))
+    )
+
+    assert payload["mcpServers"]["docs"]["headers"] == {"X-API-Key": "env:DOCS_KEY"}
+
+
 def test_agent_file_from_store_defaults_models_when_no_overrides(db):
     agent = agent_store.create_agent("basic", "p", [])
 

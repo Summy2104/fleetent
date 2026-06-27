@@ -322,6 +322,7 @@ def _mcp_servers_for_agent(agent: agent_store.Agent) -> list[McpServerSettings]:
                 command=row["command"],
                 args=row["args"] or [],
                 env=row["env"] or {},
+                headers=row["headers"] or {},
             )
         )
     return servers

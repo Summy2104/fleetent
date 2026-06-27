@@ -293,6 +293,26 @@ def test_mcp_server_list_exposes_owner_and_agent_filter(client, monkeypatch):
     assert internal["agent_id"] == agent_id
 
 
+def test_mcp_server_list_returns_env_and_headers_for_edit(client):
+    """list 必须回填 env/headers，否则前端编辑无法回显（mcp-form-args-headers）。"""
+    from fleetent.platform.connector_management import agent_mcp_server_store
+
+    agent_mcp_server_store.add_mcp_server(
+        None,
+        "armada",
+        transport="http",
+        url="https://armada.internal/mcp",
+        headers={"X-Tenant": "acme", "Authorization": "env:ARMADA_AUTH"},
+        env={"REGION": "us"},
+    )
+    token, _ = _session_for("admin")
+
+    listed = client.get("/admin/mcp/servers", headers=_hdr(token)).json()
+    armada = next(s for s in listed if s["id"] == "armada")
+    assert armada["headers"] == {"X-Tenant": "acme", "Authorization": "env:ARMADA_AUTH"}
+    assert armada["env"] == {"REGION": "us"}
+
+
 def test_global_mcp_server_added_via_api_is_listed(client):
     # A server created through the dialog is global (agent_id=None); it must show
     # in the default list, not only when an agent is selected.
