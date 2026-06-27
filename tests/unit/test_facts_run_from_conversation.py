@@ -9,7 +9,8 @@ async def test_adapter_builds_turn_text_and_delegates(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     async def _fake_run_pipeline(
-        *, user_id, turn_content, db, vector_backend, llm_client, source_turn
+        *, user_id, turn_content, db, vector_backend, llm_client, source_turn,
+        run_id=None, agent_name=None,
     ):
         captured["user_id"] = user_id
         captured["turn_content"] = turn_content

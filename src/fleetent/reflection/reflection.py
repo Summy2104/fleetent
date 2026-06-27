@@ -290,11 +290,29 @@ async def run_reflection(
     """Read traces and memory signals, then generate a structured report."""
     now = datetime.now(UTC).replace(microsecond=0)
     start = now - timedelta(days=7)
+    # Fetch general run events (limited) plus all memory_fact_observed signals
+    # within the window.  memory_fact_observed events carry the payload key that
+    # _memory_candidate_findings inspects; they must not be crowded out by the
+    # much-more-frequent agent_run_completed events under the shared limit=100 cap.
     events = list(
         observability.query_trace_events(
             observability.TraceQuery(user_id=scope, start_ts=start, end_ts=now)
         )
     )
+    signal_events = list(
+        observability.query_trace_events(
+            observability.TraceQuery(
+                user_id=scope,
+                event_type="memory_fact_observed",
+                start_ts=start,
+                end_ts=now,
+                limit=1000,
+            )
+        )
+    )
+    # Merge without duplicates (signal_events may already be in events if limit allowed it)
+    seen_ids = {e.id for e in events if e.id}
+    events = events + [e for e in signal_events if e.id not in seen_ids]
     memory_signals = await _read_memory_signals(scope, events)
     findings = _generate_findings(events, memory_signals)
     report = ReflectionReport(
@@ -396,6 +414,8 @@ def generate_memory_maintenance_proposals(
                         metadata_patch={
                             "boundary": "not_user_memory:suggest_agent_memory_or_kb",
                             "source_finding": finding.type,
+                            "target": "agent_memory",
+                            "type": "context",
                         },
                         report_id=report_id,
                     )
@@ -890,7 +910,13 @@ async def apply_memory_maintenance_proposal(
         raise ValueError(f"cannot apply {proposal.status} proposal")
 
     auto_allowed = _auto_apply_allowed(proposal, auto_policy)
-    if not auto_allowed:
+    # Agent-memory suggestions are self-owned: the user_id IS the owner, no external
+    # approval gate is needed.  Allow them to apply from "pending" without pre-approval.
+    is_agent_memory_suggestion = (
+        proposal.action == "suggest_agent_memory_or_kb"
+        and proposal.metadata_patch.get("target") == "agent_memory"
+    )
+    if not auto_allowed and not is_agent_memory_suggestion:
         if actor_user_id is None:
             raise PermissionError("owner approval is required")
         _require_owner(proposal, actor_user_id)
@@ -2095,6 +2121,9 @@ def _parse_optional_datetime(value: object) -> datetime | None:
     return _parse_datetime(value)
 
 
+_MEMORY_SIGNAL_QUERY_LIMIT = 512  # embedding models have short token limits
+
+
 async def _read_memory_signals(
     scope: str, events: list[observability.TraceEvent]
 ) -> list[Any]:
@@ -2102,7 +2131,7 @@ async def _read_memory_signals(
     query = _events_to_text(events)
     if not query:
         return []
-    return await memory.search_facts(scope, query, limit=10)
+    return await memory.search_facts(scope, query[:_MEMORY_SIGNAL_QUERY_LIMIT], limit=10)
 
 
 def _events_to_text(events: list[observability.TraceEvent]) -> str:

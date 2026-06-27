@@ -2367,7 +2367,8 @@ async def _run_inner(
     # awaited (same blocking profile as the prior inline extract_and_save).
     try:
         await run_pipeline_from_conversation(
-            user_id, messages, model_policy=policy, source_turn=session_id
+            user_id, messages, model_policy=policy, source_turn=session_id,
+            run_id=run_id, agent_name=agent_name,
         )
     except Exception as exc:  # noqa: BLE001 — memory extraction is auxiliary
         _logger.debug("memory_extraction_skipped", error=str(exc))
@@ -3166,7 +3167,8 @@ async def run_stream(
     # awaited (same blocking profile as the prior inline extract_and_save).
     try:
         await run_pipeline_from_conversation(
-            user_id, messages, model_policy=policy, source_turn=session_id
+            user_id, messages, model_policy=policy, source_turn=session_id,
+            run_id=run_id, agent_name=agent_name,
         )
     except Exception as exc:  # noqa: BLE001 — memory extraction is auxiliary
         _logger.debug("memory_extraction_skipped", error=str(exc))
