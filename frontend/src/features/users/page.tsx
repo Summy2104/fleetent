@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Copy, KeyRound, MoreVertical, RefreshCw, Trash2, UserPlus } from 'lucide-react';
+import { Copy, KeyRound, MoreVertical, Plus, RefreshCw, Trash2, UserPlus } from 'lucide-react';
 
-import { useAdminApi } from '@/lib/api-client';
+import { describeApiError, useAdminApi } from '@/lib/api-client';
 import { useT } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -37,23 +37,31 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Textarea } from '@/components/ui/textarea';
 import {
   type ImUser,
   type UserListItem,
   useBindImUserMutation,
   useBlockImUserMutation,
   useBlockUserMutation,
+  useCreateImMappingMutation,
   useCreateKeyMutation,
+  useCreateServicePrincipalMutation,
+  useDeleteImUserMutation,
   useCreateUserMutation,
+  useImIdentityFieldsQuery,
   useDeleteUserMutation,
   useImUsersQuery,
+  useInitiateLinkMutation,
   useResetPasswordMutation,
   useRestoreImUserMutation,
   useRevokeKeyMutation,
   useRotateKeyMutation,
   useSetRoleMutation,
   useUnblockUserMutation,
+  useUpdateImUserMutation,
   useUpdateUserMutation,
+  useUnlinkIdentityMutation,
   useUserKeysQuery,
   useUsersQuery,
 } from '@/features/users/api';
@@ -61,6 +69,7 @@ import {
 type AdminMe = { email: string; id: string; role: string };
 
 const ROLES = ['viewer', 'admin', 'built_in_admin'];
+const IM_PLATFORMS = ['slack', 'telegram', 'whatsapp'];
 
 function useAdminMeQuery() {
   const api = useAdminApi();
@@ -265,6 +274,75 @@ function UserFormDialog({
   );
 }
 
+function CreateServicePrincipalDialog({
+  open,
+  onOpenChange,
+  onSecret,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSecret: (secret: string) => void;
+}): JSX.Element {
+  const t = useT();
+  const createServicePrincipal = useCreateServicePrincipalMutation();
+  const [name, setName] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const reset = (): void => {
+    setName('');
+    setError(null);
+  };
+
+  const submit = async (): Promise<void> => {
+    setError(null);
+    try {
+      const result = await createServicePrincipal.mutateAsync({ name: name.trim() });
+      onSecret(result.api_key_plaintext_once);
+      reset();
+      onOpenChange(false);
+    } catch (exc) {
+      setError(describeApiError(exc));
+    }
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) reset();
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t('users.createServicePrincipal')}</DialogTitle>
+          <DialogDescription>{t('users.createServicePrincipalDescription')}</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-2">
+          <Label htmlFor="service-principal-name">{t('users.servicePrincipalName')}</Label>
+          <Input
+            id="service-principal-name"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+          />
+        </div>
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            {t('users.cancel')}
+          </Button>
+          <Button
+            disabled={!name.trim() || createServicePrincipal.isPending}
+            onClick={() => void submit()}
+          >
+            {t('users.createServicePrincipal')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─────────────────────────── Block user dialog ───────────────────────────
 
 function BlockUserDialog({
@@ -338,8 +416,28 @@ function UserRow({
   const t = useT();
   const unblockUser = useUnblockUserMutation(user.id);
   const deleteUser = useDeleteUserMutation(user.id);
+  const initiateLink = useInitiateLinkMutation();
+  const unlinkIdentity = useUnlinkIdentityMutation();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [blockOpen, setBlockOpen] = useState(false);
+  const [linkCode, setLinkCode] = useState<{ code: string; expires_at: string } | null>(null);
+  const [unlinkOpen, setUnlinkOpen] = useState(false);
+  const [unlinkPlatform, setUnlinkPlatform] = useState('');
+  const [unlinkExternalId, setUnlinkExternalId] = useState('');
+
+  const resetUnlink = (): void => {
+    setUnlinkPlatform('');
+    setUnlinkExternalId('');
+  };
+
+  const submitUnlink = async (): Promise<void> => {
+    await unlinkIdentity.mutateAsync({
+      platform: unlinkPlatform.trim(),
+      platform_user_id: unlinkExternalId.trim(),
+    });
+    resetUnlink();
+    setUnlinkOpen(false);
+  };
 
   return (
     <div
@@ -379,6 +477,16 @@ function UserRow({
             ) : (
               <DropdownMenuItem onSelect={() => setBlockOpen(true)}>{t('users.block')}</DropdownMenuItem>
             )}
+            <DropdownMenuItem
+              onSelect={() => {
+                void initiateLink.mutateAsync().then(setLinkCode);
+              }}
+            >
+              {t('users.initiateChannelLink')}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setTimeout(() => setUnlinkOpen(true), 0)}>
+              {t('users.unlinkChannelIdentity')}
+            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setTimeout(onManageKeys, 0)}>{t('users.apiKeys')}</DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem destructive onSelect={() => setConfirmDelete(true)}>
@@ -389,6 +497,69 @@ function UserRow({
       ) : null}
 
       <BlockUserDialog user={user} open={blockOpen} onOpenChange={setBlockOpen} />
+
+      <Dialog open={Boolean(linkCode)} onOpenChange={(open) => !open && setLinkCode(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('users.channelLinkCode')}</DialogTitle>
+            <DialogDescription>{t('users.channelLinkCodeDescription')}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 rounded-md border border-warning/40 bg-warning/10 p-4">
+            <p className="break-all font-mono text-sm text-foreground">{linkCode?.code}</p>
+            <p className="text-sm text-muted-foreground">
+              {t('users.channelLinkExpiresAt')}: {linkCode?.expires_at}
+            </p>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setLinkCode(null)}>{t('users.dismiss')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={unlinkOpen}
+        onOpenChange={(next) => {
+          if (!next) resetUnlink();
+          setUnlinkOpen(next);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('users.unlinkChannelIdentity')}</DialogTitle>
+            <DialogDescription>{t('users.unlinkChannelIdentityDescription')}</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor={`unlink-platform-${user.id}`}>{t('users.imPlatform')}</Label>
+              <Input
+                id={`unlink-platform-${user.id}`}
+                value={unlinkPlatform}
+                onChange={(event) => setUnlinkPlatform(event.target.value)}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor={`unlink-external-id-${user.id}`}>{t('users.imExternalId')}</Label>
+              <Input
+                id={`unlink-external-id-${user.id}`}
+                value={unlinkExternalId}
+                onChange={(event) => setUnlinkExternalId(event.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUnlinkOpen(false)}>
+              {t('users.cancel')}
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={!unlinkPlatform.trim() || !unlinkExternalId.trim() || unlinkIdentity.isPending}
+              onClick={() => void submitUnlink()}
+            >
+              {t('users.unlinkChannelIdentity')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>
@@ -594,6 +765,206 @@ function KeysDialog({
 
 // ─────────────────────────── IM identity row ───────────────────────────
 
+function AddImMappingDialog({
+  open,
+  onOpenChange,
+  users,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  users: UserListItem[];
+}): JSX.Element {
+  const t = useT();
+  const createMapping = useCreateImMappingMutation();
+  const [platform, setPlatform] = useState(IM_PLATFORMS[0]);
+  const [platformUserId, setPlatformUserId] = useState('');
+  const [userId, setUserId] = useState('');
+
+  const reset = (): void => {
+    setPlatform(IM_PLATFORMS[0]);
+    setPlatformUserId('');
+    setUserId('');
+  };
+
+  const submit = async (): Promise<void> => {
+    await createMapping.mutateAsync({
+      platform,
+      platform_user_id: platformUserId.trim(),
+      user_id: userId,
+    });
+    reset();
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) reset();
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t('users.addImMapping')}</DialogTitle>
+          <DialogDescription>{t('users.addImMappingDescription')}</DialogDescription>
+        </DialogHeader>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="grid gap-1.5">
+            <Label htmlFor="im-mapping-platform">{t('users.imPlatform')}</Label>
+            <Select value={platform} onValueChange={setPlatform}>
+              <SelectTrigger id="im-mapping-platform" aria-label={t('users.imPlatform')}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {IM_PLATFORMS.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {option}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="im-mapping-external-id">{t('users.imExternalId')}</Label>
+            <Input
+              id="im-mapping-external-id"
+              placeholder={t('users.imExternalIdPlaceholder')}
+              value={platformUserId}
+              onChange={(event) => setPlatformUserId(event.target.value)}
+            />
+          </div>
+          <div className="grid gap-1.5 sm:col-span-2">
+            <Label htmlFor="im-mapping-user">{t('users.imInternalUser')}</Label>
+            <Select value={userId} onValueChange={setUserId}>
+              <SelectTrigger id="im-mapping-user" aria-label={t('users.imInternalUser')}>
+                <SelectValue placeholder={t('users.selectUser')} />
+              </SelectTrigger>
+              <SelectContent>
+                {users.map((user) => (
+                  <SelectItem key={user.id} value={user.id}>
+                    {user.email ? `${user.name} (${user.email})` : user.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            {t('users.cancel')}
+          </Button>
+          <Button
+            disabled={!platformUserId.trim() || !userId || createMapping.isPending}
+            onClick={() => void submit()}
+          >
+            {t('users.create')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function EditImIdentityDialog({
+  imUser,
+  open,
+  onOpenChange,
+}: {
+  imUser: ImUser;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}): JSX.Element {
+  const t = useT();
+  const fields = useImIdentityFieldsQuery(open);
+  const updateImUser = useUpdateImUserMutation(imUser.id);
+  const [platformUserId, setPlatformUserId] = useState(imUser.platform_user_id);
+  const [metadata, setMetadata] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!open) return;
+    setPlatformUserId(imUser.platform_user_id);
+    setMetadata(
+      Object.fromEntries(
+        Object.entries(imUser.metadata ?? {}).map(([key, value]) => [
+          key,
+          metadataValueToString(value),
+        ])
+      )
+    );
+  }, [imUser, open]);
+
+  const platformFields = fields.data?.[imUser.platform] ?? [];
+
+  const submit = async (): Promise<void> => {
+    await updateImUser.mutateAsync({
+      metadata: Object.fromEntries(
+        platformFields.map((field) => [field.key, metadata[field.key]?.trim() ?? ''])
+      ),
+      platform_user_id: platformUserId.trim(),
+    });
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t('users.editImIdentity')}</DialogTitle>
+          <DialogDescription>{t('users.editImIdentityDescription')}</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4">
+          <div className="grid gap-2">
+            <Label htmlFor={`im-user-platform-id-${imUser.id}`}>{t('users.imExternalId')}</Label>
+            <Input
+              id={`im-user-platform-id-${imUser.id}`}
+              value={platformUserId}
+              onChange={(event) => setPlatformUserId(event.target.value)}
+            />
+          </div>
+          {platformFields.map((field) => (
+            <div key={field.key} className="grid gap-2">
+              <Label htmlFor={`im-user-${imUser.id}-${field.key}`}>{field.label}</Label>
+              {field.multiline ? (
+                <Textarea
+                  id={`im-user-${imUser.id}-${field.key}`}
+                  value={metadata[field.key] ?? ''}
+                  onChange={(event) =>
+                    setMetadata((current) => ({ ...current, [field.key]: event.target.value }))
+                  }
+                />
+              ) : (
+                <Input
+                  id={`im-user-${imUser.id}-${field.key}`}
+                  value={metadata[field.key] ?? ''}
+                  onChange={(event) =>
+                    setMetadata((current) => ({ ...current, [field.key]: event.target.value }))
+                  }
+                />
+              )}
+            </div>
+          ))}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            {t('users.cancel')}
+          </Button>
+          <Button disabled={!platformUserId.trim() || updateImUser.isPending} onClick={() => void submit()}>
+            {t('users.saveChanges')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function metadataValueToString(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return JSON.stringify(value) ?? '';
+}
+
 function ImUserRow({
   imUser,
   users,
@@ -607,9 +978,12 @@ function ImUserRow({
   const bindImUser = useBindImUserMutation(imUser.id);
   const blockImUser = useBlockImUserMutation(imUser.id);
   const restoreImUser = useRestoreImUserMutation(imUser.id);
+  const deleteImUser = useDeleteImUserMutation(imUser.id);
 
   const [boundUser, setBoundUser] = useState(imUser.user_id);
   const [reason, setReason] = useState('');
+  const [editOpen, setEditOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   return (
     <div
@@ -619,6 +993,7 @@ function ImUserRow({
       <div className="space-y-2">
         <p className="font-medium text-foreground">{imUser.platform_user_id}</p>
         <div className="flex flex-wrap items-center gap-2 text-sm">
+          <Badge variant="outline">{imUser.platform}</Badge>
           <Badge variant="secondary">{imUser.user_id}</Badge>
           <Badge variant={statusVariant(imUser.status)}>{imUser.status}</Badge>
           <Badge variant={imUser.allowed ? 'success' : 'destructive'}>
@@ -670,11 +1045,56 @@ function ImUserRow({
             >
               {imUser.allowed ? t('users.blockIdentity') : t('users.restoreIdentity')}
             </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  aria-label={t('users.imIdentityActionsFor', {
+                    platform: imUser.platform,
+                    id: imUser.platform_user_id,
+                  })}
+                >
+                  <MoreVertical className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => setTimeout(() => setEditOpen(true), 0)}>
+                  {t('users.editImMetadata')}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem destructive onSelect={() => setConfirmDelete(true)}>
+                  <Trash2 /> {t('users.deleteIdentity')}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       ) : (
         <p className="text-xs text-muted-foreground">{t('users.viewerReadOnly')}</p>
       )}
+
+      <EditImIdentityDialog imUser={imUser} open={editOpen} onOpenChange={setEditOpen} />
+
+      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('users.deleteIdentityTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('users.deleteIdentityDescription', {
+                platform: imUser.platform,
+                id: imUser.platform_user_id,
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('users.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void deleteImUser.mutateAsync()}>
+              {t('users.deleteIdentity')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -690,8 +1110,10 @@ export function UsersPage(): JSX.Element {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [formMode, setFormMode] = useState<'create' | 'edit'>('create');
   const [formOpen, setFormOpen] = useState(false);
+  const [servicePrincipalOpen, setServicePrincipalOpen] = useState(false);
   const [secret, setSecret] = useState<string | null>(null);
   const [keysForUserId, setKeysForUserId] = useState<string | null>(null);
+  const [addImMappingOpen, setAddImMappingOpen] = useState(false);
 
   const canWrite = me.data?.role !== 'viewer';
 
@@ -756,14 +1178,19 @@ export function UsersPage(): JSX.Element {
           <Badge variant="secondary">{users.data?.length ?? 0}</Badge>
         </div>
         {canWrite ? (
-          <Button
-            onClick={() => {
-              setFormMode('create');
-              setFormOpen(true);
-            }}
-          >
-            <UserPlus className="size-4" /> {t('users.createUser')}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={() => setServicePrincipalOpen(true)}>
+              <KeyRound className="size-4" /> {t('users.createServicePrincipal')}
+            </Button>
+            <Button
+              onClick={() => {
+                setFormMode('create');
+                setFormOpen(true);
+              }}
+            >
+              <UserPlus className="size-4" /> {t('users.createUser')}
+            </Button>
+          </div>
         ) : null}
       </div>
 
@@ -804,6 +1231,13 @@ export function UsersPage(): JSX.Element {
 
         <TabsContent value="im">
           <div className="space-y-4">
+            {canWrite ? (
+              <div className="flex justify-end">
+                <Button onClick={() => setAddImMappingOpen(true)}>
+                  <Plus className="size-4" /> {t('users.addImMapping')}
+                </Button>
+              </div>
+            ) : null}
             {imUsers.data?.map((imUser) => (
               <ImUserRow
                 key={imUser.id}
@@ -832,6 +1266,14 @@ export function UsersPage(): JSX.Element {
         />
       ) : null}
 
+      {canWrite ? (
+        <CreateServicePrincipalDialog
+          open={servicePrincipalOpen}
+          onOpenChange={setServicePrincipalOpen}
+          onSecret={setSecret}
+        />
+      ) : null}
+
       {keysForUserId
         ? (() => {
             const keysUser = users.data?.find((item) => item.id === keysForUserId);
@@ -846,6 +1288,14 @@ export function UsersPage(): JSX.Element {
             ) : null;
           })()
         : null}
+
+      {canWrite ? (
+        <AddImMappingDialog
+          open={addImMappingOpen}
+          onOpenChange={setAddImMappingOpen}
+          users={users.data ?? []}
+        />
+      ) : null}
 
       <SecretDialog secret={secret} onDismiss={() => setSecret(null)} />
     </div>

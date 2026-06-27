@@ -35,6 +35,7 @@ type KeyRecord = {
 type ImUserRecord = {
   allowed: boolean;
   id: number;
+  metadata?: Record<string, unknown>;
   platform: string;
   platform_user_id: string;
   status: string;
@@ -399,6 +400,307 @@ describe('users page parity baseline', () => {
     await waitFor(() => {
       expect(within(row).getByText('active')).toBeInTheDocument();
       expect(within(row).getByText('allowed')).toBeInTheDocument();
+    });
+  });
+
+  it('creates an IM mapping from the users page IM identities tab', async () => {
+    const user = userEvent.setup({ delay: null });
+    const users: UserRecord[] = [
+      {
+        email: 'alice@fleetent.test',
+        id: 'u1',
+        must_reset: false,
+        name: 'Alice',
+        role: 'viewer',
+        status: 'active',
+      },
+      {
+        email: null,
+        id: 'u2',
+        must_reset: false,
+        name: 'Bob',
+        role: 'viewer',
+        status: 'active',
+      },
+    ];
+    let imUsers: ImUserRecord[] = [];
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () => HttpResponse.json(ADMIN_ME)),
+      http.get(`${API_BASE_URL}/admin/users`, () => HttpResponse.json(users)),
+      http.get(`${API_BASE_URL}/admin/users/:userId/keys`, () => HttpResponse.json([])),
+      http.get(`${API_BASE_URL}/admin/im-users`, () => HttpResponse.json(imUsers)),
+      http.post(`${API_BASE_URL}/admin/im-identities`, async ({ request }) => {
+        expect(await request.json()).toEqual({
+          platform: 'telegram',
+          platform_user_id: 'T1',
+          user_id: 'u2',
+        });
+        imUsers = [
+          {
+            allowed: true,
+            id: 8,
+            platform: 'telegram',
+            platform_user_id: 'T1',
+            status: 'active',
+            user_id: 'u2',
+          },
+        ];
+        return HttpResponse.json({
+          created_at: '2026-06-27T10:00:00Z',
+          id: 8,
+          platform: 'telegram',
+          platform_user_id: 'T1',
+          user_email: null,
+          user_id: 'u2',
+          user_name: 'Bob',
+        }, { status: 201 });
+      })
+    );
+
+    renderUsersPage();
+    expect(await screen.findByRole('heading', { name: 'Users' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: 'IM identities' }));
+    expect(await screen.findByText('No IM identities linked yet.')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Add mapping' }));
+    const dialog = await screen.findByRole('dialog');
+    const submit = within(dialog).getByRole('button', { name: 'Create' });
+    expect(submit).toBeDisabled();
+
+    const comboboxes = within(dialog).getAllByRole('combobox');
+    await user.click(comboboxes[0]);
+    await user.click(await screen.findByRole('option', { name: 'telegram' }));
+    await user.type(within(dialog).getByLabelText('External ID'), 'T1');
+    await user.click(comboboxes[1]);
+    await user.click(await screen.findByRole('option', { name: 'Bob' }));
+
+    await user.click(submit);
+
+    const row = await screen.findByTestId('im-user-8');
+    expect(within(row).getByText('T1')).toBeInTheDocument();
+    expect(within(row).getByText('telegram')).toBeInTheDocument();
+  });
+
+  it('edits IM metadata from field definitions and deletes an IM identity', async () => {
+    const user = userEvent.setup({ delay: null });
+    const users: UserRecord[] = [
+      {
+        email: 'alice@fleetent.test',
+        id: 'u1',
+        must_reset: false,
+        name: 'Alice',
+        role: 'viewer',
+        status: 'active',
+      },
+    ];
+    let imUsers: ImUserRecord[] = [
+      {
+        allowed: true,
+        id: 7,
+        metadata: { display_name: 'Alice Old', notes: 'old note' },
+        platform: 'slack',
+        platform_user_id: 'U007',
+        status: 'active',
+        user_id: 'u1',
+      },
+    ];
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () => HttpResponse.json(ADMIN_ME)),
+      http.get(`${API_BASE_URL}/admin/users`, () => HttpResponse.json(users)),
+      http.get(`${API_BASE_URL}/admin/users/:userId/keys`, () => HttpResponse.json([])),
+      http.get(`${API_BASE_URL}/admin/im-users`, () => HttpResponse.json(imUsers)),
+      http.get(`${API_BASE_URL}/admin/im-users/fields`, () =>
+        HttpResponse.json({
+          slack: [
+            { key: 'display_name', label: 'Display name' },
+            { key: 'notes', label: 'Notes', multiline: true },
+          ],
+        })
+      ),
+      http.patch(`${API_BASE_URL}/admin/im-users/7`, async ({ request }) => {
+        expect(await request.json()).toEqual({
+          metadata: { display_name: 'Alice Slack', notes: 'vip' },
+          platform_user_id: 'U007-NEW',
+        });
+        imUsers = imUsers.map((item) =>
+          item.id === 7
+            ? {
+                ...item,
+                metadata: { display_name: 'Alice Slack', notes: 'vip' },
+                platform_user_id: 'U007-NEW',
+              }
+            : item
+        );
+        return HttpResponse.json({ status: 'updated' });
+      }),
+      http.delete(`${API_BASE_URL}/admin/im-users/7`, () => {
+        imUsers = [];
+        return new HttpResponse(null, { status: 204 });
+      })
+    );
+
+    renderUsersPage();
+    await user.click(await screen.findByRole('tab', { name: 'IM identities' }));
+
+    const row = await screen.findByTestId('im-user-7');
+    await user.click(within(row).getByRole('button', { name: 'Identity actions for slack:U007' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit metadata' }));
+
+    const dialog = await screen.findByRole('dialog');
+    await user.clear(within(dialog).getByLabelText('External ID'));
+    await user.type(within(dialog).getByLabelText('External ID'), 'U007-NEW');
+    await user.clear(within(dialog).getByLabelText('Display name'));
+    await user.type(within(dialog).getByLabelText('Display name'), 'Alice Slack');
+    await user.clear(within(dialog).getByLabelText('Notes'));
+    await user.type(within(dialog).getByLabelText('Notes'), 'vip');
+    await user.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('im-user-7')).toHaveTextContent('U007-NEW');
+    });
+
+    const updatedRow = screen.getByTestId('im-user-7');
+    await user.click(within(updatedRow).getByRole('button', { name: 'Identity actions for slack:U007-NEW' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Delete identity' }));
+    const alert = await screen.findByRole('alertdialog');
+    await user.click(within(alert).getByRole('button', { name: 'Delete identity' }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('im-user-7')).not.toBeInTheDocument();
+    });
+  });
+
+  it('creates a service principal, shows its one-time key, and keeps the form open on failure', async () => {
+    const user = userEvent.setup({ delay: null });
+    let users: UserRecord[] = [
+      {
+        email: 'alice@fleetent.test',
+        id: 'u1',
+        must_reset: false,
+        name: 'Alice',
+        role: 'viewer',
+        status: 'active',
+      },
+    ];
+    let failNext = true;
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () => HttpResponse.json(ADMIN_ME)),
+      http.get(`${API_BASE_URL}/admin/users`, () => HttpResponse.json(users)),
+      http.get(`${API_BASE_URL}/admin/users/:userId/keys`, () => HttpResponse.json([])),
+      http.get(`${API_BASE_URL}/admin/im-users`, () => HttpResponse.json([])),
+      http.post(`${API_BASE_URL}/admin/service-principals`, async ({ request }) => {
+        expect(await request.json()).toEqual({ name: failNext ? 'svc-fail' : 'svc-ingest' });
+        if (failNext) {
+          failNext = false;
+          return HttpResponse.json({ detail: 'service principal exists' }, { status: 409 });
+        }
+        const created = {
+          email: null,
+          id: 'svc1',
+          must_reset: false,
+          name: 'svc-ingest',
+          role: 'viewer',
+          status: 'active',
+        };
+        users = [...users, created];
+        return HttpResponse.json(
+          { user: created, api_key_plaintext_once: 'ma-service-principal-secret' },
+          { status: 201 }
+        );
+      })
+    );
+
+    renderUsersPage();
+    expect(await screen.findByRole('heading', { name: 'Users' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Create service principal' }));
+    let dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText('Service principal name'), 'svc-fail');
+    await user.click(within(dialog).getByRole('button', { name: 'Create service principal' }));
+
+    expect(await within(dialog).findByText('service principal exists')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Service principal name')).toHaveValue('svc-fail');
+
+    await user.clear(within(dialog).getByLabelText('Service principal name'));
+    await user.type(within(dialog).getByLabelText('Service principal name'), 'svc-ingest');
+    await user.click(within(dialog).getByRole('button', { name: 'Create service principal' }));
+
+    expect(await screen.findByText('ma-service-principal-secret')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Dismiss new secret' }));
+    expect(screen.queryByText('ma-service-principal-secret')).not.toBeInTheDocument();
+    expect(await screen.findByText('svc-ingest')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Create service principal' }));
+    dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByLabelText('Service principal name')).toHaveValue('');
+  });
+
+  it('initiates a channel link from user row actions and unlinks a channel identity', async () => {
+    const user = userEvent.setup({ delay: null });
+    const users: UserRecord[] = [
+      {
+        email: 'alice@fleetent.test',
+        id: 'u1',
+        must_reset: false,
+        name: 'Alice',
+        role: 'viewer',
+        status: 'active',
+      },
+    ];
+    let imUsers: ImUserRecord[] = [
+      {
+        allowed: true,
+        id: 7,
+        platform: 'slack',
+        platform_user_id: 'U007',
+        status: 'active',
+        user_id: 'u1',
+      },
+    ];
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () => HttpResponse.json(ADMIN_ME)),
+      http.get(`${API_BASE_URL}/admin/users`, () => HttpResponse.json(users)),
+      http.get(`${API_BASE_URL}/admin/users/:userId/keys`, () => HttpResponse.json([])),
+      http.get(`${API_BASE_URL}/admin/im-users`, () => HttpResponse.json(imUsers)),
+      http.post(`${API_BASE_URL}/admin/link/initiate`, async ({ request }) => {
+        expect(await request.text()).toBe('');
+        return HttpResponse.json({
+          code: 'link-code-123',
+          expires_at: '2026-06-27T10:10:00+00:00',
+        });
+      }),
+      http.post(`${API_BASE_URL}/admin/link/unlink`, async ({ request }) => {
+        expect(await request.json()).toEqual({ platform: 'slack', platform_user_id: 'U007' });
+        imUsers = [];
+        return HttpResponse.json({ status: 'unlinked' });
+      })
+    );
+
+    renderUsersPage();
+    expect(await screen.findByText('Alice')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Actions for Alice' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Initiate channel link' }));
+    let dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('link-code-123')).toBeInTheDocument();
+    expect(dialog).toHaveTextContent('2026-06-27T10:10:00+00:00');
+    await user.click(within(dialog).getByRole('button', { name: 'Dismiss' }));
+
+    await user.click(screen.getByRole('button', { name: 'Actions for Alice' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Unlink channel identity' }));
+    dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText('Platform'), 'slack');
+    await user.type(within(dialog).getByLabelText('External ID'), 'U007');
+    await user.click(within(dialog).getByRole('button', { name: 'Unlink channel identity' }));
+
+    await user.click(screen.getByRole('tab', { name: 'IM identities' }));
+    await waitFor(() => {
+      expect(screen.queryByTestId('im-user-7')).not.toBeInTheDocument();
     });
   });
 });
