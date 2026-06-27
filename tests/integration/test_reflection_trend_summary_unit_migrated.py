@@ -17,6 +17,7 @@ def test_skill_proposals_are_only_counted_for_global_scope(monkeypatch, tmp_path
 
     from fleetent import reflection
     from fleetent.db import create_database
+    from fleetent.governance import approval_request_store
     from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
     from fleetent.schema_migrations import migrate
     from tests.integration.test_migrations import apply_migrations
@@ -25,7 +26,13 @@ def test_skill_proposals_are_only_counted_for_global_scope(monkeypatch, tmp_path
     apply_migrations(db_path)
     migrate(create_database(f"sqlite:///{db_path}"), AGENT_STATE_MIGRATIONS)
     database = create_database(f"sqlite:///{db_path}")
-    monkeypatch.setattr(reflection, "_database", lambda: database)
+    # Wire both globals that reflection.set_state_db() wires at boot: persisting a
+    # skill proposal also creates an approval request via approval_request_store.
+    # Patching only reflection's db left approval_request_store._state_db unset, so
+    # the test silently relied on a prior test on the same worker leaking it —
+    # order-dependent RuntimeError otherwise. monkeypatch auto-restores both.
+    monkeypatch.setattr(reflection, "_state_db", database)
+    monkeypatch.setattr(approval_request_store, "_state_db", database)
 
     now = datetime.now(UTC).replace(microsecond=0)
     for proposal in reflection.generate_skill_proposals(
