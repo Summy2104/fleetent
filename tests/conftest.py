@@ -63,6 +63,26 @@ def _reset_cron_current_scheduler():
 
 
 @pytest.fixture(autouse=True)
+def _reset_structlog_config():
+    """Reset structlog's global config after every test.
+
+    ``config.py`` and ``runtime/agent_app.py`` call
+    ``structlog.configure(cache_logger_on_first_use=True)`` at boot. Once any test
+    that boots them runs, structlog stays in cached-logger mode globally, and a
+    later test's ``structlog.testing.capture_logs()`` no longer intercepts events
+    (cached bound loggers bypass the swapped processor chain) — so log-asserting
+    tests (e.g. skill registry) fail only when an app-booting test ran earlier on
+    the same worker. Order is randomized (pytest-randomly), so this is otherwise a
+    "passes alone, fails in suite" flake. Restore structlog defaults after each
+    test so every test starts from a clean, cache-free configuration.
+    """
+    import structlog
+
+    yield
+    structlog.reset_defaults()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_fleetent_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
