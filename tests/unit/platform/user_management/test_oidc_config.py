@@ -23,6 +23,7 @@ def test_settings_loads_oidc_defaults_and_platform_yaml(tmp_path, monkeypatch):
                 "  client_id: fleetent-web",
                 "  client_secret_env: FLEETENT_OIDC_CLIENT_SECRET",
                 "  redirect_uri: https://fleetent.example.com/admin/oidc/callback",
+                "  button_label: Sign in with Google",
                 "  allowed_email_domains:",
                 "    - acme.com",
                 "    - eu.acme.com",
@@ -41,6 +42,7 @@ def test_settings_loads_oidc_defaults_and_platform_yaml(tmp_path, monkeypatch):
     assert settings.oidc.client_id == "fleetent-web"
     assert settings.oidc.client_secret_env == "FLEETENT_OIDC_CLIENT_SECRET"
     assert settings.oidc.redirect_uri == "https://fleetent.example.com/admin/oidc/callback"
+    assert settings.oidc.button_label == "Sign in with Google"
     assert settings.oidc.allowed_email_domains == ["acme.com", "eu.acme.com"]
     assert settings.oidc.scopes == ["openid", "email"]
     assert settings.oidc.tenant == "acme"

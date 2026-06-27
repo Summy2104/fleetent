@@ -1,8 +1,8 @@
 import { MemoryRouter } from 'react-router-dom';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { HttpResponse, http } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { HttpResponse, delay, http } from 'msw';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { AuthProvider } from '@/app/auth';
 import { AppQueryProvider } from '@/app/query-client';
@@ -10,6 +10,14 @@ import { AdminRoutes } from '@/app/routes';
 import { ThemeProvider } from '@/app/theme';
 import { I18nProvider } from '@/i18n';
 import { server } from '@/test/msw/server';
+
+beforeEach(() => {
+  server.use(
+    http.get('http://fleetent.test/admin/oidc/config', () =>
+      HttpResponse.json({ enabled: false, label: '' })
+    )
+  );
+});
 
 function renderRoutes(route: string, token?: string, mustReset?: boolean): void {
   render(
@@ -68,11 +76,68 @@ describe('admin routes', () => {
     expect((await screen.findAllByRole('heading', { name: 'Agents' }))[0]).toBeInTheDocument();
   });
 
-  it('shows an SSO entry point on the login page', async () => {
+  it('hides the SSO entry point when OIDC is disabled', async () => {
+    server.use(
+      http.get('http://fleetent.test/admin/oidc/config', () =>
+        HttpResponse.json({ enabled: false, label: '' })
+      )
+    );
+
     renderRoutes('/login');
 
-    // The SSO entry point is now a Button (navigates via window.location on click),
-    // not an anchor; assert the button is present rather than checking an href.
+    expect(await screen.findByRole('heading', { name: 'Admin Login' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Sign in with SSO' })).not.toBeInTheDocument();
+    });
+  });
+
+  it('hides the SSO entry point while config is loading or failed', async () => {
+    server.use(
+      http.get('http://fleetent.test/admin/oidc/config', async () => {
+        await delay('infinite');
+        return HttpResponse.json({ enabled: true, label: 'Sign in with Google' });
+      })
+    );
+
+    renderRoutes('/login');
+
+    expect(await screen.findByRole('heading', { name: 'Admin Login' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sign in with Google' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sign in with SSO' })).not.toBeInTheDocument();
+
+    server.resetHandlers(
+      http.get('http://fleetent.test/admin/oidc/config', () => HttpResponse.error())
+    );
+    renderRoutes('/login');
+
+    expect(await screen.findAllByRole('heading', { name: 'Admin Login' })).toHaveLength(2);
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Sign in with Google' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Sign in with SSO' })).not.toBeInTheDocument();
+    });
+  });
+
+  it('shows the configured SSO label when OIDC is enabled', async () => {
+    server.use(
+      http.get('http://fleetent.test/admin/oidc/config', () =>
+        HttpResponse.json({ enabled: true, label: 'Sign in with Google' })
+      )
+    );
+
+    renderRoutes('/login');
+
+    expect(await screen.findByRole('button', { name: 'Sign in with Google' })).toBeInTheDocument();
+  });
+
+  it('falls back to the default SSO label when OIDC is enabled without a label', async () => {
+    server.use(
+      http.get('http://fleetent.test/admin/oidc/config', () =>
+        HttpResponse.json({ enabled: true, label: '' })
+      )
+    );
+
+    renderRoutes('/login');
+
     expect(await screen.findByRole('button', { name: 'Sign in with SSO' })).toBeInTheDocument();
   });
 
