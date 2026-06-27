@@ -553,13 +553,15 @@ MIGRATIONS.append(
     )
 )
 
-# ── v42-v47: user memory facts (user-memory-v2) ──────────────────────────────
+# ── v42-v49: user memory facts (user-memory-v2) ──────────────────────────────
 # Three-tuple (subject, relation, object) facts replace free-text memory_items.
 # facts_migrations.py holds the schema; appended here to share the single
-# PRAGMA user_version stamp on agent_state.db.
-from fleetent.memory.facts_migrations import FACTS_MIGRATIONS as _FACTS_MIGRATIONS  # noqa: E402
+# PRAGMA user_version stamp on agent_state.db.  The facts→memory_items RENAME is
+# intentionally NOT in this list — it is appended after mcp_user_tokens below so it
+# lands above v50 (see _FACTS_RENAME_MIGRATIONS).
+from fleetent.memory import facts_migrations as _facts_migrations  # noqa: E402
 
-for _label, _sql in _FACTS_MIGRATIONS:
+for _label, _sql in _facts_migrations.FACTS_MIGRATIONS:
     MIGRATIONS.append((MIGRATIONS[-1][0] + 1, _sql))
 
 # ── v48: mcp_user_tokens (mcp-per-user-oauth2 slice 1) ───────────────────────
@@ -587,3 +589,11 @@ MIGRATIONS.append(
         """,
     )
 )
+
+# ── v51-v52: facts → memory_items rename (user-memory-v2) ────────────────────
+# Appended AFTER mcp_user_tokens (v50) ON PURPOSE: the pre-rename binary stamped
+# live DBs at v50 (mcp_user_tokens), so these rename steps must take v51/v52 to be
+# applied on those DBs.  Folding them into the FACTS loop above would collide at
+# v50 and the migrate loop would skip the rename on every existing production DB.
+for _label, _sql in _facts_migrations.FACTS_RENAME_MIGRATIONS:
+    MIGRATIONS.append((MIGRATIONS[-1][0] + 1, _sql))

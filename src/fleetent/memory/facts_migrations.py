@@ -145,10 +145,21 @@ FACTS_MIGRATIONS: list[tuple[str, str]] = [
         "'never_do', 'always_do', 'security', 'approval_required'"
         ") AND status = 'active'",
     ),
-    # Rename facts → memory_items.  The old legacy memory_items table (id/type/content
-    # schema) is dropped first.  On new databases where facts was never created the
-    # DROP / RENAME are both no-ops via IF EXISTS guards using a CREATE+INSERT+DROP
-    # pattern (SQLite has no ALTER TABLE ... RENAME ... IF EXISTS).
+]
+
+# Rename facts → memory_items.  Kept SEPARATE from FACTS_MIGRATIONS and appended AFTER
+# mcp_user_tokens (v50) in runtime/agent_state_migrations.py so these steps get versions
+# ABOVE the highest version any live DB was ever stamped with.  Folding them into
+# FACTS_MIGRATIONS would land the rename on v50 — the version the pre-rename binary
+# assigned to mcp_user_tokens — and the migrate loop would then skip it (50 <= 50) on
+# every production DB already stamped at v50, stranding rows in `facts` while the code
+# reads `memory_items`.  See test_upgrade_from_legacy_v50_renames_facts_and_preserves_data.
+#
+# The old legacy memory_items table (id/type/content schema) is dropped first.  On new
+# databases where facts was never created the DROP / RENAME are both no-ops via IF EXISTS
+# guards using a CREATE+INSERT+DROP pattern (SQLite has no ALTER TABLE ... RENAME ... IF
+# EXISTS).
+FACTS_RENAME_MIGRATIONS: list[tuple[str, str]] = [
     (
         "rename_facts_to_memory_items",
         """
