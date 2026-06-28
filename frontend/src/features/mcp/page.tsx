@@ -32,7 +32,10 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { type AgentListItem, useAgentsQuery } from '@/features/agents/api';
 import {
+  type McpAuthType,
+  type McpOAuthClientCredentialsAuthConfig,
   type McpServerInput,
   type McpServerRecord,
   useCreateMcpServerMutation,
@@ -45,6 +48,7 @@ import {
 } from '@/features/connectors/api';
 
 const TRANSPORTS = ['stdio', 'http', 'websocket'] as const;
+const GLOBAL_SCOPE = 'global';
 
 function statusVariant(status: string): 'success' | 'secondary' | 'warning' {
   if (status === 'connected' || status === 'configured') return 'success';
@@ -62,10 +66,12 @@ const toPairs = (map?: Record<string, string>): EnvPair[] =>
 function ServerDialog({
   open,
   editing,
+  agents,
   onOpenChange,
 }: {
   open: boolean;
   editing: McpServerRecord | null;
+  agents: AgentListItem[];
   onOpenChange: (open: boolean) => void;
 }): JSX.Element {
   const t = useT();
@@ -77,16 +83,32 @@ function ServerDialog({
   const [transport, setTransport] = useState<string>('stdio');
   const [command, setCommand] = useState('');
   const [url, setUrl] = useState('');
+  const [agentScope, setAgentScope] = useState<string>(GLOBAL_SCOPE);
+  const [authType, setAuthType] = useState<McpAuthType>('none');
+  const [apiKeyEnv, setApiKeyEnv] = useState('');
+  const [oauthTokenUrl, setOauthTokenUrl] = useState('');
+  const [oauthClientId, setOauthClientId] = useState('');
+  const [oauthClientSecretEnv, setOauthClientSecretEnv] = useState('');
+  const [oauthScope, setOauthScope] = useState('');
   const [env, setEnv] = useState<EnvPair[]>([]);
   const [args, setArgs] = useState<string[]>([]);
   const [headers, setHeaders] = useState<EnvPair[]>([]);
 
   useEffect(() => {
     if (open) {
+      const authConfig = editing?.auth_config ?? {};
+      const oauthConfig = authConfig as Partial<McpOAuthClientCredentialsAuthConfig>;
       setId(editing?.id ?? '');
       setTransport(editing?.transport ?? 'stdio');
       setCommand(editing?.command ?? '');
       setUrl(editing?.url ?? '');
+      setAgentScope(editing?.agent_id == null ? GLOBAL_SCOPE : String(editing.agent_id));
+      setAuthType(editing?.auth_type ?? 'none');
+      setApiKeyEnv('key_env' in authConfig && typeof authConfig.key_env === 'string' ? authConfig.key_env : '');
+      setOauthTokenUrl(oauthConfig.token_url ?? '');
+      setOauthClientId(oauthConfig.client_id ?? '');
+      setOauthClientSecretEnv(oauthConfig.client_secret_env ?? '');
+      setOauthScope(oauthConfig.scope ?? '');
       setEnv(toPairs(editing?.env));
       setArgs(editing?.args ?? []);
       setHeaders(toPairs(editing?.headers));
@@ -94,7 +116,24 @@ function ServerDialog({
   }, [open, editing]);
 
   const submit = async (): Promise<void> => {
-    const payload: McpServerInput = { id: id.trim(), transport, enabled: editing?.enabled ?? true };
+    const payload: McpServerInput = {
+      id: id.trim(),
+      transport,
+      enabled: editing?.enabled ?? true,
+      auth_type: authType,
+      auth_config:
+        authType === 'api_key'
+          ? { key_env: apiKeyEnv.trim() }
+          : authType === 'oauth_client_credentials'
+            ? {
+                token_url: oauthTokenUrl.trim(),
+                client_id: oauthClientId.trim(),
+                client_secret_env: oauthClientSecretEnv.trim(),
+                scope: oauthScope.trim(),
+              }
+            : {},
+    };
+    if (!isEdit && agentScope !== GLOBAL_SCOPE) payload.agent_id = Number(agentScope);
     if (transport === 'stdio') {
       payload.command = command.trim() || undefined;
       const cleanArgs = args.map((arg) => arg.trim()).filter(Boolean);
@@ -123,7 +162,14 @@ function ServerDialog({
   };
 
   const canSubmit =
-    id.trim().length > 0 && (transport === 'stdio' ? command.trim().length > 0 : url.trim().length > 0);
+    id.trim().length > 0 &&
+    (transport === 'stdio' ? command.trim().length > 0 : url.trim().length > 0) &&
+    (authType === 'none' ||
+      (authType === 'api_key' && apiKeyEnv.trim().length > 0) ||
+      (authType === 'oauth_client_credentials' &&
+        oauthTokenUrl.trim().length > 0 &&
+        oauthClientId.trim().length > 0 &&
+        oauthClientSecretEnv.trim().length > 0));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -147,9 +193,26 @@ function ServerDialog({
           </div>
 
           <div className="grid gap-2">
+            <Label>{t('mcp.scopeLabel')}</Label>
+            <Select disabled={isEdit} value={agentScope} onValueChange={setAgentScope}>
+              <SelectTrigger aria-label={t('mcp.scopeLabel')}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={GLOBAL_SCOPE}>{t('mcp.scopeGlobalOption')}</SelectItem>
+                {agents.map((agent) => (
+                  <SelectItem key={agent.agent_name} value={String(agent.agent_id ?? agent.agent_name)}>
+                    {agent.agent_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid gap-2">
             <Label>{t('mcp.transportLabel')}</Label>
             <Select value={transport} onValueChange={setTransport}>
-              <SelectTrigger>
+              <SelectTrigger aria-label={t('mcp.transportLabel')}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -158,6 +221,20 @@ function ServerDialog({
                     {option}
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid gap-2">
+            <Label>{t('mcp.authTypeLabel')}</Label>
+            <Select value={authType} onValueChange={(value) => setAuthType(value as McpAuthType)}>
+              <SelectTrigger aria-label={t('mcp.authTypeLabel')}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">{t('mcp.authTypeNone')}</SelectItem>
+                <SelectItem value="api_key">{t('mcp.authTypeApiKey')}</SelectItem>
+                <SelectItem value="oauth_client_credentials">{t('mcp.authTypeOauthClientCredentials')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -187,6 +264,62 @@ function ServerDialog({
               />
             </div>
           )}
+
+          {authType === 'api_key' ? (
+            <div className="grid gap-2">
+              <Label htmlFor="mcp-auth-key-env">
+                {t('mcp.apiKeyEnvLabel')} <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="mcp-auth-key-env"
+                value={apiKeyEnv}
+                onChange={(event) => setApiKeyEnv(event.target.value)}
+              />
+            </div>
+          ) : null}
+
+          {authType === 'oauth_client_credentials' ? (
+            <>
+              <div className="grid gap-2">
+                <Label htmlFor="mcp-auth-token-url">
+                  {t('mcp.oauthTokenUrlLabel')} <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="mcp-auth-token-url"
+                  value={oauthTokenUrl}
+                  onChange={(event) => setOauthTokenUrl(event.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="mcp-auth-client-id">
+                  {t('mcp.oauthClientIdLabel')} <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="mcp-auth-client-id"
+                  value={oauthClientId}
+                  onChange={(event) => setOauthClientId(event.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="mcp-auth-client-secret-env">
+                  {t('mcp.oauthClientSecretEnvLabel')} <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="mcp-auth-client-secret-env"
+                  value={oauthClientSecretEnv}
+                  onChange={(event) => setOauthClientSecretEnv(event.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="mcp-auth-scope">{t('mcp.oauthScopeLabel')}</Label>
+                <Input
+                  id="mcp-auth-scope"
+                  value={oauthScope}
+                  onChange={(event) => setOauthScope(event.target.value)}
+                />
+              </div>
+            </>
+          ) : null}
 
           {transport === 'stdio' ? (
             <div className="grid gap-2">
@@ -326,10 +459,12 @@ function ServerDialog({
 
 function ServerRow({
   server,
+  scopeLabel,
   onEdit,
   onViewTools,
 }: {
   server: McpServerRecord;
+  scopeLabel: string;
   onEdit: () => void;
   onViewTools: () => void;
 }): JSX.Element {
@@ -342,6 +477,7 @@ function ServerRow({
   return (
     <tr className="border-b border-border last:border-0 hover:bg-accent/30">
       <td className="px-4 py-3 font-mono text-sm text-foreground">{server.id}</td>
+      <td className="px-4 py-3 text-sm text-muted-foreground">{scopeLabel}</td>
       <td className="px-4 py-3 text-sm text-muted-foreground">{server.transport}</td>
       <td className="px-4 py-3">
         <Badge variant={statusVariant(server.status)}>{server.status}</Badge>
@@ -435,6 +571,7 @@ function ToolsDialog({
 export function McpPage(): JSX.Element {
   const t = useT();
   const servers = useMcpServersQuery();
+  const agents = useAgentsQuery();
   const [query, setQuery] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<McpServerRecord | null>(null);
@@ -446,6 +583,10 @@ export function McpPage(): JSX.Element {
     if (!term) return list;
     return list.filter((server) => server.id.toLowerCase().includes(term));
   }, [servers.data, query]);
+  const agentNameById = useMemo(
+    () => Object.fromEntries((agents.data ?? []).flatMap((agent) => (agent.agent_id == null ? [] : [[agent.agent_id, agent.agent_name]]))),
+    [agents.data]
+  );
 
   const openCreate = (): void => {
     setEditing(null);
@@ -480,6 +621,7 @@ export function McpPage(): JSX.Element {
           <thead className="bg-secondary/50">
             <tr>
               <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('mcp.columnId')}</th>
+              <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('mcp.columnScope')}</th>
               <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('mcp.columnTransport')}</th>
               <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('mcp.columnStatus')}</th>
               <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('mcp.columnTools')}</th>
@@ -491,13 +633,18 @@ export function McpPage(): JSX.Element {
               <ServerRow
                 key={server.id}
                 server={server}
+                scopeLabel={
+                  server.agent_id == null
+                    ? t('mcp.scopeGlobalOption')
+                    : (agentNameById[server.agent_id] ?? t('mcp.scopeAgentFallback', { id: server.agent_id }))
+                }
                 onEdit={() => openEdit(server)}
                 onViewTools={() => setToolsFor(server.id)}
               />
             ))}
             {servers.data && filtered.length === 0 ? (
               <tr>
-                <td colSpan={5}>
+                <td colSpan={6}>
                   <div className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
                     <Inbox className="size-6 opacity-50" />
                     <span className="text-sm">{query ? t('mcp.noMatching') : t('mcp.empty')}</span>
@@ -509,7 +656,12 @@ export function McpPage(): JSX.Element {
         </table>
       </div>
 
-      <ServerDialog open={dialogOpen} editing={editing} onOpenChange={setDialogOpen} />
+      <ServerDialog
+        open={dialogOpen}
+        editing={editing}
+        agents={agents.data ?? []}
+        onOpenChange={setDialogOpen}
+      />
       <ToolsDialog serverId={toolsFor} onOpenChange={(open) => !open && setToolsFor(null)} />
     </div>
   );

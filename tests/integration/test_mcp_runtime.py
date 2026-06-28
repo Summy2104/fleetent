@@ -30,7 +30,14 @@ def clean_registry():
 
 
 def test_row_to_config_maps_fields(db):
-    store.add_mcp_server(None, "s1", transport="http", url="https://x/mcp", api_key_env="K")
+    store.add_mcp_server(
+        None,
+        "s1",
+        transport="http",
+        url="https://x/mcp",
+        auth_type="api_key",
+        auth_config={"key_env": "K"},
+    )
     cfg = mcp_runtime._row_to_config(store.get_mcp_server(None, "s1"))
     assert cfg.id == "s1"
     assert cfg.transport == "http"

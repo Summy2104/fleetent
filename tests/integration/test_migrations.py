@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from pathlib import Path
 
@@ -558,12 +559,90 @@ def test_agent_mcp_servers_table_and_columns(tmp_path):
         "transport",
         "url",
         "auth_type",
-        "api_key_env",
+        "auth_config",
         "command",
         "args",
         "env",
+        "headers",
         "created_at",
     }
+
+
+def test_upgrade_109_folds_api_key_env_into_auth_config_and_preserves_auth_type(tmp_path):
+    db = tmp_path / "test.db"
+    _upgrade_to(db, "108")
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """
+        INSERT INTO mcp_servers (
+            agent_id, server_id, transport, url, auth_type, api_key_env,
+            command, args, env, headers, enabled, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            None,
+            "github",
+            "http",
+            "https://mcp.internal/github",
+            "api_key",
+            "FLEETENT_GITHUB_MCP_KEY",
+            "",
+            None,
+            None,
+            '{"X-Trace":"1"}',
+            1,
+            "2026-06-29T00:00:00+00:00",
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO mcp_servers (
+            agent_id, server_id, transport, url, auth_type, api_key_env,
+            command, args, env, headers, enabled, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            None,
+            "public",
+            "http",
+            "https://mcp.internal/public",
+            "none",
+            "",
+            "",
+            None,
+            None,
+            None,
+            1,
+            "2026-06-29T00:00:00+00:00",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    _upgrade_to(db, "head")
+
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(mcp_servers)")}
+    github = conn.execute(
+        "SELECT auth_type, auth_config, headers FROM mcp_servers WHERE server_id = ?",
+        ("github",),
+    ).fetchone()
+    public = conn.execute(
+        "SELECT auth_type, auth_config, headers FROM mcp_servers WHERE server_id = ?",
+        ("public",),
+    ).fetchone()
+    conn.close()
+
+    assert "auth_config" in cols
+    assert "api_key_env" not in cols
+    assert {"auth_type", "headers"} <= cols
+    assert github["auth_type"] == "api_key"
+    assert json.loads(github["auth_config"]) == {"key_env": "FLEETENT_GITHUB_MCP_KEY"}
+    assert json.loads(github["headers"]) == {"X-Trace": "1"}
+    assert public["auth_type"] == "none"
+    assert json.loads(public["auth_config"]) == {}
+    assert public["headers"] is None
 
 
 def test_external_services_upgrade_preserves_existing_global_rows_at_093(tmp_path):

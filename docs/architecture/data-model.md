@@ -143,7 +143,7 @@ graph TD
 | `user_agents` | `(user_id, agent_id)` | → agents (CASCADE) | 用户↔agent 准入；materialize → `im.allow_users`（admin 维护）|
 | `agent_im_groups` | `(agent_id, platform, group_id)` | → agents (CASCADE) | IM 群白名单；materialize → `im.<platform>.allow_groups` |
 | `agent_kbs` | `agent_id` · `created_by` | → agents (CASCADE) | agent↔KB 绑定真相源；`kb_id` 软引用本 tenant `kb.db` |
-| `mcp_servers` | `agent_id` 可空 | → agents (CASCADE，agent-owned 行) | MCP 注册表（定义：transport/url/auth；含全局 `agent_id=NULL` 行）|
+| `mcp_servers` | `agent_id` 可空；`auth_type` + `auth_config`(JSON，非密字段与 secret env 引用名)；`headers` 保持连接级 | → agents (CASCADE，agent-owned 行) | MCP 注册表（定义：transport/url/auth；含全局 `agent_id=NULL` 行）|
 | `agent_mcp_servers` | `(agent_id, server_id)` | → agents (CASCADE) | agent↔MCP 挂载（绑定）；`server_id` 软引用 `mcp_servers` |
 | `agent_secrets` | `agent_id` 可空（agent/shared scope）| → agents (CASCADE) | 密文 secret（node 下发时注入）|
 | `agent_skills` | `(agent_id, skill_name)`；drift 列 `base_version`/`base_commit`/`drift`/`drift_at` | → agents (CASCADE) · → skills(name) | skill 启用 + 部署副本 drift；→ [skill-system](../capabilities/skill-system.md) |

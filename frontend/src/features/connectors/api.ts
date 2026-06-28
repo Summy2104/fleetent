@@ -2,10 +2,32 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useAdminApi } from '@/lib/api-client';
 
+export type McpAuthType = 'none' | 'api_key' | 'oauth_client_credentials';
+
+export type McpApiKeyAuthConfig = {
+  key_env: string;
+};
+
+export type McpOAuthClientCredentialsAuthConfig = {
+  token_url: string;
+  client_id: string;
+  client_secret_env: string;
+  scope: string;
+};
+
+export type McpAuthConfig = Record<string, never> | McpApiKeyAuthConfig | McpOAuthClientCredentialsAuthConfig;
+
+export const MCP_AUTH_FORM_FIELDS = {
+  api_key: ['key_env'],
+  oauth_client_credentials: ['token_url', 'client_id', 'client_secret_env', 'scope'],
+} as const;
+
 export type McpServerRecord = {
   id: string;
   transport: string;
   url?: string;
+  auth_type: McpAuthType;
+  auth_config: McpAuthConfig;
   command?: string;
   args?: string[];
   env?: Record<string, string>;
@@ -19,6 +41,8 @@ export type McpServerRecord = {
 export type McpServerInput = {
   id: string;
   transport: string;
+  auth_type: McpAuthType;
+  auth_config: McpAuthConfig;
   url?: string;
   command?: string;
   args?: string[];
