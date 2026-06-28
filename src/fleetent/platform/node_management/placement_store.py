@@ -50,9 +50,12 @@ def pin_agent(agent_id: int, node_id: str, *, pinned_by: str | None = None) -> d
 
 
 def unpin_agent(agent_id: int) -> None:
-    _database().execute(
-        "DELETE FROM agent_placements WHERE agent_id = :agent_id", {"agent_id": agent_id}
-    )
+    with _database().transaction() as conn:
+        conn.execute("DELETE FROM agent_placements WHERE agent_id = :agent_id", {"agent_id": agent_id})
+        conn.execute(
+            "DELETE FROM node_agent_status WHERE agent_id = :agent_id",
+            {"agent_id": agent_id},
+        )
 
 
 def list_by_node(node_id: str) -> list[dict[str, Any]]:

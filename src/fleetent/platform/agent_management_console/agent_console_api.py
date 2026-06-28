@@ -96,7 +96,7 @@ rename_agent_def: None = None  # removed — agent name is immutable after creat
 
 
 def references_for(agent_name: str) -> dict[str, Any]:
-    """Who references an agent (users/channels) — drives archive protection."""
+    """Who references an agent — drives archive protection."""
     agent = get_agent_def(agent_name)
     if agent is None:
         return {"users": [], "channels": []}
@@ -480,7 +480,7 @@ def delete_agent(
     user = _require_admin(authorization)
     agent_id = _require_agent_id(name)
     refs = references_for(name)
-    if refs["users"] or refs["channels"]:
+    if any(bool(value) for value in refs.values()):
         raise HTTPException(status_code=409, detail={"error": "agent still bound", **refs})
     _require_confirm(x_confirm)
     delete_agent_def(name)
@@ -520,7 +520,7 @@ def archive_agent(
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
     refs = references_for(name)
-    if refs["users"] or refs["channels"]:
+    if any(bool(value) for value in refs.values()):
         raise HTTPException(status_code=409, detail={"error": "agent still bound", **refs})
     _require_confirm(x_confirm)
     agent_admin_store.archive(_require_agent_id(name))

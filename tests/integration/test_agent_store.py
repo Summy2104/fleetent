@@ -91,16 +91,10 @@ def test_duplicate_name_raises(db):
         agent_store.create_agent("assistant", "p2", ["shell"])
 
 
-def test_assign_and_get_agent_for_user(db):
+def test_assign_user_persists_binding(db):
     agent = agent_store.create_agent("assistant", "prompt", ["shell"])
     agent_store.assign_user("user-1", agent.id)
-    found = agent_store.get_agent_for_user("user-1")
-    assert found is not None
-    assert found.id == agent.id
-
-
-def test_get_agent_for_user_unassigned(db):
-    assert agent_store.get_agent_for_user("user-99") is None
+    assert agent_store.list_users_for_agent(agent.id) == ["user-1"]
 
 
 # --- current-state updates ---
@@ -179,13 +173,14 @@ def test_existing_agent_backfills_default_tenant(db):
     assert found.team_id is None
 
 
-def test_ownership_survives_user_lookup(db):
+def test_ownership_survives_user_assignment(db):
     tenancy_store.create_tenant(id="acme", name="Acme")
     tenancy_store.create_team(id="support", tenant_id="acme", name="Support")
     agent = agent_store.create_agent("routed", "prompt", [], tenant_id="acme", team_id="support")
     agent_store.assign_user("user-1", agent.id)
-    by_user = agent_store.get_agent_for_user("user-1")
-    assert by_user is not None and by_user.tenant_id == "acme" and by_user.team_id == "support"
+    found = agent_store.get_by_name("routed")
+    assert found is not None and found.tenant_id == "acme" and found.team_id == "support"
+    assert agent_store.list_users_for_agent(agent.id) == ["user-1"]
 
 
 def test_create_agent_rejects_cross_tenant_team(db):
