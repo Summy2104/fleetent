@@ -20,16 +20,17 @@ import {
   type AgentImCapabilitiesInput,
   type AgentImGroupInput,
   type AgentModelOverrides,
+  useAgentSecretsQuery,
   useAddAgentImGroupMutation,
   useAgentBindingsQuery,
   useAgentDetailQuery,
   useAgentKbsQuery,
   useAgentRequiredEnvQuery,
-  useAgentSecretsQuery,
   useAgentSkillsQuery,
   useBindAgentKbMutation,
   useBindAgentMcpMutation,
   useBindAgentUserMutation,
+  useDeleteAgentSecretValueMutation,
   useDeleteAgentSecretMutation,
   useDeployAgentMutation,
   useExportAgentYamlMutation,
@@ -44,7 +45,7 @@ import {
 } from '@/features/agents/api';
 import { useMcpServersQuery } from '@/features/connectors/api';
 import { useKbsQuery } from '@/features/kb/api';
-import { useProvidersQuery } from '@/features/providers/api';
+import { useModelsQuery, useProvidersQuery } from '@/features/providers/api';
 import { useUsersQuery } from '@/features/users/api';
 
 type AdminMe = { email: string; id: string; role: string };
@@ -89,11 +90,11 @@ type BindOption = { value: string; label: string };
 // The agent's default model route maps to a single provider id; the platform expands it
 // into the full model policy. Read it from model_overrides, taking the first string key any
 // authoring style may have used.
-function defaultRouteProviderId(overrides: AgentModelOverrides | undefined): string {
+function defaultRouteModelId(overrides: AgentModelOverrides | undefined): string {
   const routes = (overrides?.routes ?? {}) as Record<string, Array<Record<string, unknown>>>;
   const entry = routes.default?.[0];
   if (!entry) return '';
-  for (const value of [entry.provider_id, entry.provider, entry.target]) {
+  for (const value of [entry.model_id, entry.provider_id, entry.provider, entry.target]) {
     if (typeof value === 'string' && value) return value;
   }
   return '';
@@ -101,14 +102,14 @@ function defaultRouteProviderId(overrides: AgentModelOverrides | undefined): str
 
 // Set (or clear) the default-route provider while preserving every sibling key the platform
 // stores alongside it (other routes, credential slots), so an edit never drops that state.
-function withDefaultRouteProvider(
+function withDefaultRouteModel(
   overrides: AgentModelOverrides | undefined,
-  providerId: string
+  modelId: string
 ): AgentModelOverrides {
   const next: AgentModelOverrides = { ...(overrides ?? {}) };
   const routes = { ...((next.routes as Record<string, unknown>) ?? {}) };
-  if (providerId) {
-    routes.default = [{ provider_id: providerId }];
+  if (modelId) {
+    routes.default = [{ model_id: modelId }];
   } else {
     delete routes.default;
   }
@@ -203,29 +204,68 @@ function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boo
   const t = useT();
   const detail = useAgentDetailQuery(agentName);
   const update = useUpdateAgentMutation(agentName);
+  const allModels = useModelsQuery();
   const allProviders = useProvidersQuery();
+  const secrets = useAgentSecretsQuery(agentName);
+  const setSecret = useSetAgentSecretValueMutation(agentName);
+  const deleteSecretValue = useDeleteAgentSecretValueMutation(agentName);
 
   const [systemPrompt, setSystemPrompt] = useState('');
   const [allowedTools, setAllowedTools] = useState('');
   const [memoryNamespace, setMemoryNamespace] = useState('');
-  const [providerId, setProviderId] = useState('');
+  const [modelId, setModelId] = useState('');
+  const [providerKeyOverride, setProviderKeyOverride] = useState('');
+  const [providerKeyDirty, setProviderKeyDirty] = useState(false);
+
+  const selectedModel = useMemo(
+    () => (allModels.data ?? []).find((model) => model.id === modelId) ?? null,
+    [allModels.data, modelId]
+  );
+  const selectedProvider = useMemo(
+    () =>
+      selectedModel
+        ? (allProviders.data ?? []).find((provider) => provider.id === selectedModel.provider_id) ?? null
+        : null,
+    [allProviders.data, selectedModel]
+  );
+  const selectedProviderEnv = selectedProvider?.api_key_env ?? '';
+  const selectedProviderSecretStatus = useMemo(
+    () =>
+      selectedProviderEnv
+        ? (secrets.data?.secrets ?? []).find((secret) => secret.env_name === selectedProviderEnv)?.status ?? 'unset'
+        : 'unset',
+    [secrets.data, selectedProviderEnv]
+  );
 
   useEffect(() => {
     if (detail.data) {
       setSystemPrompt(detail.data.system_prompt);
       setAllowedTools(detail.data.allowed_tools.join(', '));
       setMemoryNamespace(detail.data.memory_namespace ?? 'default');
-      setProviderId(defaultRouteProviderId(detail.data.model_overrides));
+      setModelId(defaultRouteModelId(detail.data.model_overrides));
+      setProviderKeyOverride('');
+      setProviderKeyDirty(false);
     }
   }, [detail.data]);
 
   const onSave = (): void => {
-    void update.mutateAsync({
-      system_prompt: systemPrompt,
-      allowed_tools: parseAllowedTools(allowedTools),
-      memory_namespace: memoryNamespace.trim() || 'default',
-      model_overrides: withDefaultRouteProvider(detail.data?.model_overrides, providerId),
-    });
+    void (async () => {
+      await update.mutateAsync({
+        system_prompt: systemPrompt,
+        allowed_tools: parseAllowedTools(allowedTools),
+        memory_namespace: memoryNamespace.trim() || 'default',
+        model_overrides: withDefaultRouteModel(detail.data?.model_overrides, modelId),
+      });
+      if (providerKeyDirty && selectedProviderEnv) {
+        if (providerKeyOverride) {
+          await setSecret.mutateAsync({ envName: selectedProviderEnv, value: providerKeyOverride });
+        } else if (selectedProviderSecretStatus === 'set') {
+          await deleteSecretValue.mutateAsync(selectedProviderEnv);
+        }
+        setProviderKeyDirty(false);
+        setProviderKeyOverride('');
+      }
+    })();
   };
 
   return (
@@ -268,25 +308,49 @@ function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boo
         <p className="text-sm text-muted-foreground">{t('agents.modelProviderHint')}</p>
         {canWrite ? (
           <Select
-            value={providerId || undefined}
-            disabled={allProviders.isLoading || update.isPending}
-            onValueChange={setProviderId}
+            value={modelId || undefined}
+            disabled={allModels.isLoading || update.isPending}
+            onValueChange={setModelId}
           >
             <SelectTrigger className="max-w-xs">
               <SelectValue placeholder={t('agents.selectProvider')} />
             </SelectTrigger>
             <SelectContent>
-              {(allProviders.data ?? []).map((provider) => (
-                <SelectItem key={provider.id} value={provider.id}>
-                  {provider.model ? `${provider.id} · ${provider.model}` : provider.id}
+              {(allModels.data ?? []).map((model) => (
+                <SelectItem key={model.id} value={model.id}>
+                  {model.model_name ? `${model.id} · ${model.model_name}` : model.id}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         ) : (
-          <p className="text-sm text-foreground">{providerId || '—'}</p>
+          <p className="text-sm text-foreground">{modelId || '—'}</p>
         )}
       </section>
+
+      {selectedProviderEnv ? (
+        <section className="space-y-3">
+          <TabHeading>Provider key override</TabHeading>
+          <p className="text-sm text-muted-foreground">
+            {selectedProviderEnv} · {selectedProviderSecretStatus}
+          </p>
+          {canWrite ? (
+            <div className="grid gap-2">
+              <Label htmlFor="cfg-provider-key">Provider API Key Override</Label>
+              <Input
+                id="cfg-provider-key"
+                type="password"
+                placeholder="Leave empty to use the shared provider key"
+                value={providerKeyOverride}
+                onChange={(event) => {
+                  setProviderKeyOverride(event.target.value);
+                  setProviderKeyDirty(true);
+                }}
+              />
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       {canWrite ? (
         <div>

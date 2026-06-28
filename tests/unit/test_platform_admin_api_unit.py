@@ -15,7 +15,7 @@ from fastapi import HTTPException
 from fleetent import server, user_store
 from fleetent.platform.chat_management import chat_admin_api
 from fleetent.platform.knowledge_base_management import kb_admin_api
-from fleetent.platform.model_provider_management import provider_admin_api
+from fleetent.platform.model_provider_management import model_admin_api, provider_admin_api
 from fleetent.platform.skill_management import skill_admin_api
 from fleetent.platform.user_management import user_admin_api
 
@@ -602,25 +602,27 @@ def test_chat_admin_route_error_branches(monkeypatch: pytest.MonkeyPatch) -> Non
     assert invalid_bulk.value.status_code == 422
 
 
-def test_provider_admin_handlers_cover_crud_health_and_observation(
+def test_provider_and_model_admin_handlers_cover_crud(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_auth(monkeypatch, provider_admin_api, _user())
+    _patch_auth(monkeypatch, model_admin_api, _user())
     providers: dict[str, dict[str, Any]] = {}
+    models: dict[str, dict[str, Any]] = {}
     audits: list[tuple[Any, ...]] = []
 
     def add_provider(provider_id: str, **kwargs: Any) -> None:
         providers[provider_id] = {
             "id": provider_id,
             "base_url": kwargs["base_url"],
-            "model": kwargs["model"],
+            "vendor": kwargs.get("provider"),
             "api_key": kwargs.get("api_key"),
-            "max_tokens": kwargs.get("max_tokens"),
-            "temperature": kwargs.get("temperature"),
-            "extra_params": kwargs.get("extra_params"),
-            "input_price_per_1k": None,
-            "output_price_per_1k": None,
+            "api_key_env": kwargs.get("api_key_env"),
+            "description": kwargs.get("description"),
         }
+
+    def add_model(model_id: str, **kwargs: Any) -> None:
+        models[model_id] = {"id": model_id, **kwargs}
 
     monkeypatch.setattr(
         provider_admin_api.provider_admin_store, "list_providers", lambda: list(providers.values())
@@ -642,54 +644,91 @@ def test_provider_admin_handlers_cover_crud_health_and_observation(
         lambda provider_id: providers.pop(provider_id, None),
     )
     monkeypatch.setattr(
-        provider_admin_api.provider_admin_store,
-        "set_pricing",
-        lambda provider_id, input_price, output_price: providers[provider_id].update(
-            {"input_price_per_1k": input_price, "output_price_per_1k": output_price}
-        ),
+        provider_admin_api.model_admin_store,
+        "list_models",
+        lambda provider_id=None, protocol=None: [
+            model
+            for model in models.values()
+            if (provider_id is None or model.get("provider_id") == provider_id)
+            and (protocol is None or model.get("protocol") == protocol)
+        ],
     )
     monkeypatch.setattr(
-        provider_admin_api,
-        "router_health_probe",
-        lambda: {"p1": {"available": False, "recovers_at": "later"}},
+        model_admin_api.provider_admin_store,
+        "get_provider",
+        lambda provider_id: providers.get(provider_id),
     )
     monkeypatch.setattr(
-        provider_admin_api,
+        model_admin_api.model_admin_store, "get_model", lambda model_id: models.get(model_id)
+    )
+    monkeypatch.setattr(
+        model_admin_api.model_admin_store,
+        "list_models",
+        lambda provider_id=None, protocol=None: list(models.values()),
+    )
+    monkeypatch.setattr(
+        model_admin_api.model_admin_store,
+        "references_for_model",
+        lambda model_id: {"agents": [], "models": []},
+    )
+    monkeypatch.setattr(
+        provider_admin_api.model_admin_store,
+        "references_for_provider",
+        lambda provider_id: {"agents": [], "models": []},
+    )
+    monkeypatch.setattr(model_admin_api.model_admin_store, "add_model", add_model)
+    monkeypatch.setattr(
+        model_admin_api.model_admin_store,
+        "edit_model",
+        lambda model_id, **changes: models[model_id].update(changes),
+    )
+    monkeypatch.setattr(
+        model_admin_api.model_admin_store,
+        "delete_model",
+        lambda model_id: models.pop(model_id, None),
+    )
+    monkeypatch.setattr(
+        model_admin_api,
         "router_connectivity_test",
-        lambda provider: {"reachable": True, "latency_ms": 12, "model": provider["model"]},
-    )
-    monkeypatch.setattr(
-        provider_admin_api,
-        "provider_observability",
-        lambda provider_id: {"provider_id": provider_id, "calls": 5},
+        lambda model, provider: {"reachable": True, "latency_ms": 12, "model": model["model_name"]},
     )
     monkeypatch.setattr(
         provider_admin_api.audit_log, "write_audit", lambda *args, **kwargs: audits.append(args)
+    )
+    monkeypatch.setattr(
+        model_admin_api.audit_log, "write_audit", lambda *args, **kwargs: audits.append(args)
     )
 
     auth_header = "Session token"
     created = provider_admin_api.add_provider(
         provider_admin_api.ProviderBody(
-            id="p1", base_url="https://models.local", model="gpt", api_key="secret"
+            id="p1", base_url="https://models.local", provider="openai", api_key="secret"
         ),
         auth_header,
     )
     assert created["api_key"] == "****"
     assert created["api_key_set"] is True
     assert provider_admin_api.list_providers(auth_header)[0]["id"] == "p1"
+    assert provider_admin_api.list_providers(auth_header)[0]["model_count"] == 0
     assert (
         provider_admin_api.edit_provider(
-            "p1", provider_admin_api.ProviderEditBody(model="gpt-next"), auth_header
-        )["model"]
-        == "gpt-next"
+            "p1", provider_admin_api.ProviderEditBody(base_url="https://next.local"), auth_header
+        )["base_url"]
+        == "https://next.local"
     )
-    assert provider_admin_api.health(auth_header)["providers"][0]["available"] is False
-    assert provider_admin_api.connectivity_test("p1", auth_header)["reachable"] is True
-    pricing = provider_admin_api.set_pricing(
-        "p1", provider_admin_api.PricingBody(input_price_per_1k=0.1), auth_header
+    created_model = model_admin_api.add_model(
+        model_admin_api.ModelBody(
+            id="m1",
+            provider_id="p1",
+            protocol="openai_chat",
+            model_name="gpt",
+            base_url="https://models.local",
+        ),
+        auth_header,
     )
-    assert pricing["output_price_per_1k"] == "未配置"
-    assert provider_admin_api.observability("p1", auth_header)["calls"] == 5
+    assert created_model["provider_id"] == "p1"
+    assert model_admin_api.connectivity_test("m1", auth_header)["reachable"] is True
+    assert model_admin_api.delete_model("m1", auth_header)["deleted"] is True
     assert provider_admin_api.delete_provider("p1", auth_header)["deleted"] is True
     assert audits
 
@@ -705,15 +744,20 @@ def test_provider_admin_route_error_branches(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(
         provider_admin_api.provider_admin_store, "add_provider", lambda *args, **kwargs: None
     )
+    monkeypatch.setattr(
+        provider_admin_api.model_admin_store,
+        "list_models",
+        lambda provider_id=None, protocol=None: [],
+    )
     with pytest.raises(HTTPException) as duplicate:
         provider_admin_api.add_provider(
-            provider_admin_api.ProviderBody(id="p1", base_url="u", model="m"),
+            provider_admin_api.ProviderBody(id="p1", base_url="u"),
             "Session token",
         )
     assert duplicate.value.status_code == 409
     with pytest.raises(HTTPException) as missing:
         provider_admin_api.edit_provider(
-            "missing", provider_admin_api.ProviderEditBody(model="m"), "Session token"
+            "missing", provider_admin_api.ProviderEditBody(base_url="u"), "Session token"
         )
     assert missing.value.status_code == 404
 

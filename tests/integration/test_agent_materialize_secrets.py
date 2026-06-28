@@ -152,3 +152,120 @@ def test_materialize_seeds_managed_tui_token_without_leaking_desired_state(
     )
     assert "FLEETENT_TUI_TOKEN" not in str(payload)
     assert match.group(1) not in str(payload)
+
+
+def test_seed_env_prefers_agent_inject_then_provider_key_then_shared_secret(
+    db, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+    provider_admin_store.add_provider(
+        "shared-provider",
+        "https://api.openai.com/v1/",
+        "gpt-5",
+        provider="openai",
+        protocol="openai_chat",
+        api_key="shared-provider-key",
+        api_key_env="FLEETENT_SHARED_MODEL_KEY",
+    )
+    agent = agent_store.create_agent(
+        "support",
+        "p",
+        [],
+        model_overrides={"default": [{"provider_id": "shared-provider"}]},
+    )
+    home = tmp_path / "tenants" / "default" / "agents" / "support"
+    home.mkdir(parents=True)
+
+    secret_store.set(None, "FLEETENT_SHARED_MODEL_KEY", "shared-secret-store", "admin")
+    materialize.write_home(
+        materialize.agent_file_from_store(agent_store.get_by_name("support")),
+        source_agent=agent,
+    )
+    assert "FLEETENT_SHARED_MODEL_KEY=shared-provider-key" in (home / ".env").read_text(
+        encoding="utf-8"
+    )
+
+    credential_slots.ensure_slot(
+        agent,
+        "env:FLEETENT_SHARED_MODEL_KEY",
+        mode="inject",
+        env_name="FLEETENT_SHARED_MODEL_KEY",
+    )
+    secret_store.set(agent.id, "FLEETENT_SHARED_MODEL_KEY", "agent-override-key", "admin")
+    materialize.write_home(
+        materialize.agent_file_from_store(agent_store.get_by_name("support")),
+        source_agent=agent,
+    )
+    assert "FLEETENT_SHARED_MODEL_KEY=agent-override-key" in (home / ".env").read_text(
+        encoding="utf-8"
+    )
+
+    secret_store.delete(agent.id, "FLEETENT_SHARED_MODEL_KEY")
+    provider_admin_store.edit_provider("shared-provider", api_key="")
+    materialize.write_home(
+        materialize.agent_file_from_store(agent_store.get_by_name("support")),
+        source_agent=agent,
+    )
+    assert "FLEETENT_SHARED_MODEL_KEY=shared-secret-store" in (home / ".env").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_rematerialize_all_refreshes_split_registry_agents_without_blank_model_envs(
+    db, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+    provider_admin_store.add_provider(
+        "chat-provider",
+        provider="anthropic",
+        api_key="provider-inline-key",
+        api_key_env="FLEETENT_CHAT_KEY",
+    )
+    provider_admin_store.add_provider(
+        "embed-provider",
+        provider="openai",
+        api_key_env="FLEETENT_EMBED_KEY",
+    )
+    from fleetent.platform.model_provider_management import model_admin_store
+
+    model_admin_store.add_model(
+        "chat-model",
+        provider_id="chat-provider",
+        protocol="openai_chat",
+        model_name="claude-sonnet",
+        base_url="https://chat.example/v1",
+    )
+    model_admin_store.add_model(
+        "embed-model",
+        provider_id="embed-provider",
+        protocol="http_embedding",
+        model_name="text-embedding-3-small",
+        endpoint="https://embed.example/v1/embeddings",
+    )
+    agent_store.create_agent(
+        "chat-agent",
+        "p",
+        [],
+        model_overrides={"routes": {"default": [{"model_id": "chat-model"}]}},
+    )
+    agent_store.create_agent(
+        "embed-agent",
+        "p",
+        [],
+        model_overrides={"routes": {"default": [{"model_id": "embed-model"}]}},
+    )
+    secret_store.set(None, "FLEETENT_EMBED_KEY", "shared-embed-key", "admin")
+
+    done = materialize.rematerialize_all()
+
+    assert set(done) == {"chat-agent", "embed-agent"}
+    chat_env = (tmp_path / "tenants" / "default" / "agents" / "chat-agent" / ".env").read_text(
+        encoding="utf-8"
+    )
+    embed_env = (tmp_path / "tenants" / "default" / "agents" / "embed-agent" / ".env").read_text(
+        encoding="utf-8"
+    )
+    assert "FLEETENT_CHAT_KEY=provider-inline-key" in chat_env
+    assert "FLEETENT_EMBED_KEY=shared-embed-key" in embed_env
+    assert "FLEETENT_CHAT_KEY=\n" not in chat_env
+    assert "FLEETENT_EMBED_KEY=\n" not in embed_env

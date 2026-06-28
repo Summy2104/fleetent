@@ -1,16 +1,6 @@
-"""Management-source persistence for model providers.
-
-This is the single source the admin console writes to (db runtime, named params,
-no ORM). Runtime route selection lives elsewhere; this module owns only provider
-management writes.
-
-api_key is stored as given (it must be usable for connectivity tests) but is never
-returned to clients in plaintext — masking is applied in the API serialization layer.
-Pricing columns are nullable: NULL = 未配置 (unset), distinct from an explicit 0.0.
-"""
+"""Management-source persistence for provider credentials on split registry tables."""
 
 import datetime
-import json
 from typing import Any
 
 from fleetent.config import Settings
@@ -25,158 +15,146 @@ def _now() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat()
 
 
-_PROVIDER_COLS = (
-    "id, description, provider, protocol, base_url, model, api_key, api_key_env, "
-    "max_tokens, temperature, extra_params, params, "
-    "input_price_per_1k, output_price_per_1k, created_at, updated_at"
-)
+_PROVIDER_COLS = "id, description, vendor, api_key, api_key_env, base_url, created_at, updated_at"
 
 
 def add_provider(
     provider_id: str,
-    base_url: str,
-    model: str,
+    base_url: str | None = None,
+    model: str | None = None,
     description: str | None = None,
     api_key: str | None = None,
     max_tokens: int | None = None,
-    temperature: float | None = None,
     extra_params: dict[str, Any] | None = None,
     provider: str | None = None,
     protocol: str | None = None,
     api_key_env: str | None = None,
     params: dict[str, Any] | None = None,
 ) -> None:
+    """Insert a provider row.
+
+    The ``model``-related arguments are kept only as a transition shim for existing
+    tests/helpers; when present, a same-id model row is created in ``models``.
+    """
     now = _now()
     with _database().transaction() as conn:
         conn.execute(
             """
-            INSERT INTO model_providers
-                (id, description, provider, protocol, base_url, model, api_key, api_key_env,
-                 max_tokens, temperature, extra_params, params, created_at, updated_at)
-            VALUES (:id, :description, :provider, :protocol, :base_url, :model, :api_key,
-                    :api_key_env, :max_tokens, :temperature, :extra_params, :params,
-                    :created_at, :updated_at)
+            INSERT INTO providers
+                (id, description, vendor, api_key, api_key_env, base_url, created_at, updated_at)
+            VALUES
+                (
+                    :id, :description, :vendor, :api_key, :api_key_env, :base_url,
+                    :created_at, :updated_at
+                )
             """,
             {
                 "id": provider_id,
                 "description": description,
-                "provider": provider,
-                "protocol": protocol,
-                "base_url": base_url,
-                "model": model,
+                "vendor": provider,
                 "api_key": api_key,
                 "api_key_env": api_key_env,
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-                "extra_params": json.dumps(extra_params) if extra_params else None,
-                "params": json.dumps(params) if params else None,
+                "base_url": base_url,
                 "created_at": now,
                 "updated_at": now,
             },
         )
 
+    if (
+        model is not None
+        or protocol is not None
+        or max_tokens is not None
+        or params
+        or extra_params
+    ):
+        from fleetent.platform.model_provider_management import model_admin_store
 
-_EDITABLE = {
-    "description",
-    "provider",
-    "protocol",
-    "base_url",
-    "model",
-    "max_tokens",
-    "temperature",
-    "extra_params",
-    "params",
-    "api_key",
-    "api_key_env",
-}
-_JSON_FIELDS = {"extra_params", "params"}
+        endpoint = None
+        normalized_base_url = base_url
+        if protocol in {"http_embedding", "http_rerank", "openai_image_generation"}:
+            endpoint = base_url
+            normalized_base_url = base_url
+        model_admin_store.add_model(
+            provider_id,
+            provider_id=provider_id,
+            protocol=protocol,
+            model_name=model,
+            base_url=normalized_base_url,
+            endpoint=endpoint,
+            max_tokens=max_tokens,
+            params=params,
+            extra_params=extra_params,
+            description=description,
+        )
+
+
+_EDITABLE = {"description", "vendor", "base_url", "api_key", "api_key_env"}
 
 
 def edit_provider(provider_id: str, **fields: Any) -> None:
     """Update provider fields. ``api_key=None`` means keep the existing key."""
-    updates = {k: v for k, v in fields.items() if k in _EDITABLE}
+    updates = {key: value for key, value in fields.items() if key in _EDITABLE}
     if "api_key" in updates and updates["api_key"] is None:
-        del updates["api_key"]  # blank = unchanged
-    for jf in _JSON_FIELDS:
-        if jf in updates and updates[jf] is not None:
-            updates[jf] = json.dumps(updates[jf])
+        del updates["api_key"]
     if not updates:
         return
     updates["updated_at"] = _now()
-    assignments = ", ".join(f"{k} = :{k}" for k in updates)
-    params = {**updates, "id": provider_id}
-    with _database().transaction() as conn:
-        conn.execute(f"UPDATE model_providers SET {assignments} WHERE id = :id", params)
-
-
-def set_pricing(provider_id: str, input_price: float | None, output_price: float | None) -> None:
-    """Set per-1k-token pricing. Pass None to leave a price 未配置."""
+    assignments = ", ".join(f"{key} = :{key}" for key in updates)
     with _database().transaction() as conn:
         conn.execute(
-            """
-            UPDATE model_providers
-            SET input_price_per_1k = :input_price,
-                output_price_per_1k = :output_price,
-                updated_at = :updated_at
-            WHERE id = :id
-            """,
-            {
-                "id": provider_id,
-                "input_price": input_price,
-                "output_price": output_price,
-                "updated_at": _now(),
-            },
+            f"UPDATE providers SET {assignments} WHERE id = :id",
+            {**updates, "id": provider_id},
         )
 
 
+def set_pricing(provider_id: str, input_price: float | None, output_price: float | None) -> None:
+    """Compatibility shim for legacy callers that still think pricing is provider-level."""
+    from fleetent.platform.model_provider_management import model_admin_store
+
+    model_admin_store.edit_model(
+        provider_id,
+        input_price_per_1k=input_price,
+        output_price_per_1k=output_price,
+    )
+
+
 def delete_provider(provider_id: str) -> None:
-    """Delete a provider."""
     with _database().transaction() as conn:
-        conn.execute("DELETE FROM model_providers WHERE id = :id", {"id": provider_id})
+        conn.execute("DELETE FROM providers WHERE id = :id", {"id": provider_id})
 
 
 def get_provider(provider_id: str) -> dict[str, Any] | None:
     row = (
         _database()
         .execute(
-            f"SELECT {_PROVIDER_COLS} FROM model_providers WHERE id = :id",
+            f"SELECT {_PROVIDER_COLS} FROM providers WHERE id = :id",
             {"id": provider_id},
         )
         .fetchone()
     )
-    return _decode(row) if row else None
+    return dict(row) if row else None
 
 
 def list_providers() -> list[dict[str, Any]]:
-    rows = (
-        _database().execute(f"SELECT {_PROVIDER_COLS} FROM model_providers ORDER BY id").fetchall()
-    )
-    return [_decode(r) for r in rows]
+    rows = _database().execute(f"SELECT {_PROVIDER_COLS} FROM providers ORDER BY id").fetchall()
+    return [dict(row) for row in rows]
 
 
 def provider_key_for_env(env_name: str) -> str | None:
-    """Return a provider's inline plaintext key whose ``api_key_env`` matches ``env_name``.
-
-    The provider row is the shared source of truth for a model key, so both platform-direct
-    materialize and node desired-state delivery seed an agent's model env from here when no
-    per-agent inject slot supplies it.
-
-    Args:
-        env_name: The agent-referenced model API-key env-var name.
-
-    Returns:
-        The matching provider's inline ``api_key``, or ``None`` if no provider declares this
-        env name or the matching provider has no inline key.
-    """
-    for provider in list_providers():
-        if provider.get("api_key_env") == env_name and provider.get("api_key"):
-            return str(provider["api_key"])
-    return None
-
-
-def _decode(row: dict[str, Any]) -> dict[str, Any]:
-    out = dict(row)
-    for jf in _JSON_FIELDS:
-        if out.get(jf):
-            out[jf] = json.loads(out[jf])
-    return out
+    row = (
+        _database()
+        .execute(
+            """
+        SELECT api_key
+        FROM providers
+        WHERE api_key_env = :env_name AND api_key IS NOT NULL
+        ORDER BY id
+        LIMIT 1
+        """,
+            {"env_name": env_name},
+        )
+        .fetchone()
+    )
+    if row is None:
+        return None
+    return str(row["api_key"])

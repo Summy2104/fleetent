@@ -43,6 +43,12 @@ def _cols(db_path: Path, table: str) -> set[str]:
         return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
 
 
+def _row(db_path: Path, sql: str, params: tuple[object, ...] = ()) -> sqlite3.Row | None:
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        return conn.execute(sql, params).fetchone()
+
+
 # ---------------------------------------------------------------------------
 # 2.1 schema after upgrade head
 # ---------------------------------------------------------------------------
@@ -235,3 +241,186 @@ def test_roundtrip_upgrade_downgrade_upgrade(tmp_path):
     assert "audit_log" in tables_after_reupgrade
     assert _OWNER_TABLE not in tables_after_reupgrade
     assert _LEGACY_TABLE not in tables_after_reupgrade
+
+
+def test_upgrade_creates_provider_and_model_tables(tmp_path):
+    db = tmp_path / "t.db"
+    _apply(db)
+
+    assert "providers" in _tables(db)
+    assert "models" in _tables(db)
+    assert _cols(db, "providers") == {
+        "id",
+        "vendor",
+        "api_key",
+        "api_key_env",
+        "base_url",
+        "description",
+        "created_at",
+        "updated_at",
+    }
+    assert _cols(db, "models") == {
+        "id",
+        "provider_id",
+        "protocol",
+        "model_name",
+        "base_url",
+        "endpoint",
+        "max_tokens",
+        "input_price_per_1k",
+        "output_price_per_1k",
+        "params",
+        "extra_params",
+        "description",
+        "created_at",
+        "updated_at",
+    }
+    assert "api_key" not in _cols(db, "models")
+    assert "api_key_env" not in _cols(db, "models")
+    assert "temperature" not in _cols(db, "providers")
+    assert "temperature" not in _cols(db, "models")
+
+
+def test_upgrade_backfills_model_providers_into_provider_and_model_rows(tmp_path):
+    db = tmp_path / "t.db"
+    _apply(db, "106")
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            """
+            INSERT INTO model_providers (
+                id, description, provider, protocol, base_url, model, api_key, api_key_env,
+                max_tokens, temperature, extra_params, params,
+                input_price_per_1k, output_price_per_1k, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "legacy-openai",
+                "legacy row",
+                "openai",
+                "openai_chat",
+                "https://api.openai.example/v1",
+                "gpt-5",
+                "sk-legacy",
+                "OPENAI_API_KEY",
+                4096,
+                0.7,
+                '{"top_p": 0.9}',
+                '{"reasoning_effort":"medium"}',
+                1.25,
+                5.0,
+                "2026-06-01T00:00:00+00:00",
+                "2026-06-02T00:00:00+00:00",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO model_providers (
+                id, description, provider, protocol, base_url, model, api_key, api_key_env,
+                max_tokens, temperature, extra_params, params,
+                input_price_per_1k, output_price_per_1k, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "legacy-custom",
+                "fallback vendor id",
+                None,
+                "http_embedding",
+                "https://embed.example/api",
+                "embed-1",
+                None,
+                "EMBED_API_KEY",
+                1024,
+                None,
+                None,
+                '{"truncate":"end"}',
+                None,
+                0.2,
+                "2026-06-03T00:00:00+00:00",
+                "2026-06-04T00:00:00+00:00",
+            ),
+        )
+        conn.commit()
+
+    _apply(db)
+
+    provider = _row(db, "SELECT * FROM providers WHERE id = ?", ("openai",))
+    assert provider is not None
+    assert provider["vendor"] == "openai"
+    assert provider["api_key"] == "sk-legacy"
+    assert provider["api_key_env"] == "OPENAI_API_KEY"
+    assert provider["base_url"] == "https://api.openai.example/v1"
+    assert provider["description"] == "legacy row"
+
+    model = _row(db, "SELECT * FROM models WHERE id = ?", ("legacy-openai",))
+    assert model is not None
+    assert model["id"] == "legacy-openai"
+    assert model["provider_id"] == "openai"
+    assert model["protocol"] == "openai_chat"
+    assert model["model_name"] == "gpt-5"
+    assert model["base_url"] == "https://api.openai.example/v1"
+    assert model["max_tokens"] == 4096
+    assert model["params"] == '{"reasoning_effort":"medium"}'
+    assert model["extra_params"] == '{"top_p": 0.9}'
+    assert model["input_price_per_1k"] == 1.25
+    assert model["output_price_per_1k"] == 5.0
+
+    fallback_provider = _row(
+        db, "SELECT * FROM providers WHERE id = ?", ("legacy-custom__provider",)
+    )
+    assert fallback_provider is not None
+    assert fallback_provider["vendor"] is None
+    fallback_model = _row(db, "SELECT * FROM models WHERE id = ?", ("legacy-custom",))
+    assert fallback_model is not None
+    assert fallback_model["provider_id"] == "legacy-custom__provider"
+    assert fallback_model["model_name"] == "embed-1"
+    assert "model_providers" not in _tables(db)
+
+
+def test_downgrade_rebuilds_model_providers_from_split_tables(tmp_path):
+    db = tmp_path / "t.db"
+    _apply(db, "106")
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            """
+            INSERT INTO model_providers (
+                id, description, provider, protocol, base_url, model, api_key, api_key_env,
+                max_tokens, temperature, extra_params, params,
+                input_price_per_1k, output_price_per_1k, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "legacy-anthropic",
+                "anthropic row",
+                "anthropic",
+                "openai_chat",
+                "https://anthropic.example/v1",
+                "claude-sonnet",
+                "sk-ant",
+                "ANTHROPIC_API_KEY",
+                8192,
+                0.2,
+                '{"top_p": 0.95}',
+                '{"temperature":0.2}',
+                3.0,
+                15.0,
+                "2026-06-10T00:00:00+00:00",
+                "2026-06-11T00:00:00+00:00",
+            ),
+        )
+        conn.commit()
+    _apply(db)
+
+    _downgrade(db, "106")
+
+    assert "providers" not in _tables(db)
+    assert "models" not in _tables(db)
+    row = _row(db, "SELECT * FROM model_providers WHERE id = ?", ("legacy-anthropic",))
+    assert row is not None
+    assert row["provider"] == "anthropic"
+    assert row["model"] == "claude-sonnet"
+    assert row["api_key"] == "sk-ant"
+    assert row["api_key_env"] == "ANTHROPIC_API_KEY"
+    assert row["base_url"] == "https://anthropic.example/v1"
+    assert row["temperature"] is None
+    assert row["params"] == '{"temperature":0.2}'
+    assert row["extra_params"] == '{"top_p": 0.95}'

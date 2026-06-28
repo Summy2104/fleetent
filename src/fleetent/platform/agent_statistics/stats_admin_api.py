@@ -19,7 +19,7 @@ from fastapi import APIRouter, Header, HTTPException, Response
 
 from fleetent import agent_store, audit_log, auth, observability, user_store
 from fleetent.platform.agent_statistics import stats_store
-from fleetent.platform.model_provider_management import provider_admin_store
+from fleetent.platform.model_provider_management import model_admin_store
 
 router = APIRouter(prefix="/admin/stats")
 
@@ -89,12 +89,12 @@ def agent_allowed_tools(agent_id: str) -> list[str]:
 def pricing_table() -> dict[str, Any] | None:
     """Per-model pricing from model-provider."""
     return {
-        str(provider["model"]): {
-            "input": provider.get("input_price_per_1k"),
-            "output": provider.get("output_price_per_1k"),
+        str(model["model_name"]): {
+            "input": model.get("input_price_per_1k"),
+            "output": model.get("output_price_per_1k"),
         }
-        for provider in provider_admin_store.list_providers()
-        if provider.get("model")
+        for model in model_admin_store.list_models()
+        if model.get("model_name")
     }
 
 

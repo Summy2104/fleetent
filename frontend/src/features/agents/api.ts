@@ -527,6 +527,19 @@ export function useDeleteAgentSecretMutation(name: string, envName: string) {
   });
 }
 
+export function useDeleteAgentSecretValueMutation(name: string) {
+  const api = useAdminApi();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (envName: string) =>
+      api.delete<{ env_name: string; status: string }>(`/admin/agents/${name}/secrets/${envName}`),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: agentSecretsKey(name) });
+    },
+  });
+}
+
 // Same PUT endpoint as useSetAgentSecretMutation, but the env name is supplied at
 // call time — for the "select env → set value" form where env is chosen dynamically.
 export function useSetAgentSecretValueMutation(name: string) {

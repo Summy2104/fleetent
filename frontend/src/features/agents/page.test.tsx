@@ -215,6 +215,36 @@ function installAgentBindingHandlers({
         },
       ])
     ),
+    http.get(`${API_BASE_URL}/admin/models`, () =>
+      HttpResponse.json([
+        {
+          base_url: 'https://api.openai.example/v1',
+          description: null,
+          id: 'openai-gpt4',
+          endpoint: null,
+          input_price_per_1k: null,
+          max_tokens: null,
+          model_name: 'gpt-4o',
+          output_price_per_1k: null,
+          params: null,
+          protocol: 'openai_chat',
+          provider_id: 'openai',
+        },
+        {
+          base_url: 'http://localhost:11434/v1',
+          description: null,
+          id: 'ollama-local',
+          endpoint: null,
+          input_price_per_1k: null,
+          max_tokens: null,
+          model_name: 'llama3',
+          output_price_per_1k: null,
+          params: null,
+          protocol: 'openai_chat',
+          provider_id: 'local',
+        },
+      ])
+    ),
     http.get(`${API_BASE_URL}/admin/providers`, () =>
       HttpResponse.json([
         {
@@ -223,24 +253,18 @@ function installAgentBindingHandlers({
           api_key_set: true,
           base_url: 'https://api.openai.example/v1',
           description: null,
-          id: 'openai-gpt4',
-          input_price_per_1k: null,
-          model: 'gpt-4o',
-          output_price_per_1k: null,
-          protocol: 'openai_chat',
+          id: 'openai',
+          model_count: 1,
           provider: 'openai',
         },
         {
           api_key: null,
-          api_key_env: null,
+          api_key_env: 'FLEETENT_OLLAMA_KEY',
           api_key_set: false,
           base_url: 'http://localhost:11434/v1',
           description: null,
-          id: 'ollama-local',
-          input_price_per_1k: null,
-          model: 'llama3',
-          output_price_per_1k: null,
-          protocol: 'openai_chat',
+          id: 'local',
+          model_count: 1,
           provider: 'local',
         },
       ])
@@ -850,7 +874,7 @@ describe('agents configure page model binding', () => {
       alpha: {
         agent: 'alpha',
         allowed_tools: [],
-        model_overrides: { routes: { default: [{ provider_id: 'ollama-local' }] } },
+        model_overrides: { routes: { default: [{ model_id: 'ollama-local' }] } },
         status: 'enabled',
         supports_dm: false,
         supports_groups: false,
@@ -865,7 +889,7 @@ describe('agents configure page model binding', () => {
     });
 
     type CapturedModelBody = {
-      model_overrides?: { routes?: Record<string, Array<{ provider_id?: string }>> };
+      model_overrides?: { routes?: Record<string, Array<{ model_id?: string }>> };
     };
     const captured: { patch?: CapturedModelBody } = {};
     server.use(
@@ -887,7 +911,126 @@ describe('agents configure page model binding', () => {
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(captured.patch).toBeTruthy());
-    expect(captured.patch?.model_overrides?.routes?.default?.[0]?.provider_id).toBe('openai-gpt4');
+    expect(captured.patch?.model_overrides?.routes?.default?.[0]?.model_id).toBe('openai-gpt4');
+  });
+
+  it('writes a per-agent provider key override for the selected model', async () => {
+    const user = userEvent.setup({ delay: null });
+    const agents: AgentRecord[] = [
+      {
+        agent_name: 'alpha',
+        allowed_tools: [],
+        provenance: 'adhoc',
+        status: 'enabled',
+        system_prompt: 'Alpha prompt',
+      },
+    ];
+    const detailByAgent: Record<string, AgentDetailRecord> = {
+      alpha: {
+        agent: 'alpha',
+        allowed_tools: [],
+        model_overrides: { routes: { default: [{ model_id: 'openai-gpt4' }] } },
+        status: 'enabled',
+        supports_dm: false,
+        supports_groups: false,
+        system_prompt: 'Alpha prompt',
+      },
+    };
+    const bindingsByAgent = {
+      alpha: {
+        kbIds: [],
+        mcpServers: [],
+        oauth: [],
+        secrets: [{ env_name: 'FLEETENT_OPENAI_KEY', mode: 'inject', status: 'unset' }],
+        skills: [],
+        users: [],
+      },
+    };
+
+    installAgentBindingHandlers({
+      agents,
+      bindingsByAgent,
+      detailByAgent,
+    });
+
+    server.use(
+      http.patch(`${API_BASE_URL}/admin/agents/:name`, () => HttpResponse.json({ ok: true })),
+      http.put(`${API_BASE_URL}/admin/agents/alpha/secrets/FLEETENT_OPENAI_KEY`, async ({ request }) => {
+        expect(await request.json()).toEqual({ value: 'sk-live-secret' });
+        bindingsByAgent.alpha.secrets = [{ env_name: 'FLEETENT_OPENAI_KEY', mode: 'inject', status: 'set' }];
+        return HttpResponse.json({ env_name: 'FLEETENT_OPENAI_KEY', status: 'set' });
+      })
+    );
+
+    renderAgentsRoute('/agents/alpha/configure');
+    expect(await screen.findByRole('heading', { name: 'Configure · alpha' })).toBeInTheDocument();
+    expect(await screen.findByText('FLEETENT_OPENAI_KEY · unset')).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Provider API Key Override'), 'sk-live-secret');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(bindingsByAgent.alpha.secrets[0].status).toBe('set');
+    });
+  });
+
+  it('clears the provider key override when saved empty', async () => {
+    const user = userEvent.setup({ delay: null });
+    const agents: AgentRecord[] = [
+      {
+        agent_name: 'alpha',
+        allowed_tools: [],
+        provenance: 'adhoc',
+        status: 'enabled',
+        system_prompt: 'Alpha prompt',
+      },
+    ];
+    const detailByAgent: Record<string, AgentDetailRecord> = {
+      alpha: {
+        agent: 'alpha',
+        allowed_tools: [],
+        model_overrides: { routes: { default: [{ model_id: 'openai-gpt4' }] } },
+        status: 'enabled',
+        supports_dm: false,
+        supports_groups: false,
+        system_prompt: 'Alpha prompt',
+      },
+    };
+    const bindingsByAgent = {
+      alpha: {
+        kbIds: [],
+        mcpServers: [],
+        oauth: [],
+        secrets: [{ env_name: 'FLEETENT_OPENAI_KEY', mode: 'inject', status: 'set' }],
+        skills: [],
+        users: [],
+      },
+    };
+
+    installAgentBindingHandlers({
+      agents,
+      bindingsByAgent,
+      detailByAgent,
+    });
+
+    server.use(
+      http.patch(`${API_BASE_URL}/admin/agents/:name`, () => HttpResponse.json({ ok: true })),
+      http.delete(`${API_BASE_URL}/admin/agents/alpha/secrets/FLEETENT_OPENAI_KEY`, () => {
+        bindingsByAgent.alpha.secrets = [{ env_name: 'FLEETENT_OPENAI_KEY', mode: 'inject', status: 'unset' }];
+        return HttpResponse.json({ env_name: 'FLEETENT_OPENAI_KEY', status: 'unset' });
+      })
+    );
+
+    renderAgentsRoute('/agents/alpha/configure');
+    expect(await screen.findByText('FLEETENT_OPENAI_KEY · set')).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Provider API Key Override'), 'temp');
+    await user.clear(screen.getByLabelText('Provider API Key Override'));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(bindingsByAgent.alpha.secrets[0].status).toBe('unset');
+    });
   });
 });
 

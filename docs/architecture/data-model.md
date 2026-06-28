@@ -72,7 +72,8 @@ graph TD
     api_keys
     agent_kbs
     kb_connectors
-    model_providers
+    providers
+    models
     session_meta
     nodes["nodes（节点注册）"]
     agent_placements["agent_placements（agent↔node 分配）"]
@@ -171,7 +172,8 @@ graph TD
 |---|---|---|---|
 | `kb_connectors` | connector 配置 + 自定义元数据 + 调度字段（`sync_interval_seconds`/`last_scheduled_sync_at`，迁移 101）| — | KB 数据源配置（实际内容在 per-tenant `kb.db`）；调度字段供 platform `kb_connector_sweep` 定时入队 sync |
 | `kb_ingest_jobs` | `id` TEXT PK · `job_type`/`tenant_id`/`kb_id` · `connector_ref`/`cred_ref` · `status`(pending/processing/completed/failed) · `attempts`/`max_attempts` · `claimed_at`/`finished_at`（迁移 099）| — | KB ingest 任务队列；`kb_connector_sweep` / 手动导入入队，`kb-worker` 原子 claim→run→done/failed（带重试）|
-| `model_providers` | provider + api_key env | — | materialize 读：model_overrides → ModelTarget |
+| `providers` | `id` · `vendor` · `api_key`/`api_key_env` · `base_url`(仅 UI 预填) · `description` | — | provider 身份 + 共享凭证边界；runtime 不直接读，materialize 经 `models.provider_id` join 取 `api_key_env` |
+| `models` | `id` · `provider_id` · `protocol` · `model_name` · `base_url/endpoint` · `max_tokens` · 定价/`params`/`extra_params` | `provider_id` → providers (RESTRICT) | 可调用模型目标注册表；agent authoring 以 `model_id` 引用，materialize 读：`model_overrides` → model → provider → `ModelTarget` |
 | `audit_log` | 管理操作审计 | — (软引用 users) | 平台管理操作审计 |
 | `session_meta` | `session_id` · `agent_id` 可空 · origin/pinned/takeover | → agents (CASCADE) | platform chat 管理元数据（`session_id` 跨库逻辑引用 agent `sessions`）|
 

@@ -303,8 +303,8 @@ def test_update_materializes_configured_model_overrides_via_console_write_path(
     assert response.status_code == 200
     exported = materialize.agent_file_from_store(agent_store.get_by_name("materialized-model"))
     assert exported.models != default_models()
-    assert exported.models.routes["default"][0].target == "default-0"
-    target = {item.id: item for item in exported.models.targets}["default-0"]
+    assert exported.models.routes["default"][0].target == "anthropic"
+    target = {item.id: item for item in exported.models.targets}["anthropic"]
     assert target.provider == "anthropic"
     assert target.model == "claude-haiku-4-5-20251001"
     assert target.base_url == "https://api.anthropic.com/v1/"

@@ -34,7 +34,7 @@ from fleetent.config import McpServerSettings
 from fleetent.platform.agent_lifecycle import credential_slots, default_binding_store, secret_store
 from fleetent.platform.connector_management import mcp_server_store
 from fleetent.platform.knowledge_base_management import agent_kbs_store
-from fleetent.platform.model_provider_management import provider_admin_store
+from fleetent.platform.model_provider_management import model_admin_store, provider_admin_store
 from fleetent.platform.skill_management import skill_admin_store
 from fleetent.secret_scan import flatten
 from fleetent.skills import registry as skill_registry
@@ -288,41 +288,53 @@ def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
 
 
 def _target_from_model_override(route_key: str, index: int, entry: dict[str, Any]) -> ModelTarget:
-    # A provider id may arrive under any of these keys depending on the authoring path:
-    # "provider_id" (canonical), "target" (two-part router), "provider" (console picker).
-    provider_id = None
-    provider = None
-    matched_key = None
-    for key in ("provider_id", "target", "provider"):
+    model_lookup_keys = ("model_id", "provider_id", "target", "provider")
+    for key in model_lookup_keys:
         candidate = entry.get(key)
-        if candidate and (row := provider_admin_store.get_provider(str(candidate))) is not None:
-            provider_id, provider, matched_key = candidate, row, key
-            break
-    # the id-carrying keys are lookup hints, not target fields — drop the matched one plus
-    # the always-aliases so a provider id can't leak into the target's vendor/id columns.
-    drop = {"provider_id", "target"} | ({matched_key} if matched_key else set())
-    source = {**(provider or {}), **{k: v for k, v in entry.items() if k not in drop}}
-    params = (provider or {}).get("params") or (provider or {}).get("extra_params") or {}
-    if not provider:
-        params = (
-            entry.get("target_params") or entry.get("params") or entry.get("extra_params") or {}
+        if not candidate:
+            continue
+        model = model_admin_store.get_model(str(candidate))
+        if model is None:
+            continue
+        provider = provider_admin_store.get_provider(str(model["provider_id"]))
+        if provider is None:
+            continue
+        params = _deep_merge(model.get("params") or {}, entry.get("params") or {})
+        return ModelTarget(
+            id=str(model["id"]),
+            provider=str(provider.get("vendor") or provider["id"]),
+            protocol=str(model.get("protocol") or "openai_chat"),
+            base_url=model.get("base_url"),
+            endpoint=model.get("endpoint"),
+            model=model.get("model_name"),
+            api_key_env=provider.get("api_key_env"),
+            max_tokens=entry.get("max_tokens") or model.get("max_tokens"),
+            params=params,
         )
-    target_id = str(provider_id or entry.get("id") or f"{route_key}-{index}")
-    protocol = str(source.get("protocol") or "openai_chat")
-    base_url = source.get("base_url")
-    endpoint = source.get("endpoint")
+
+    _logger.warn(
+        "legacy_model_override_fallback",
+        route_key=route_key,
+        index=index,
+        keys=sorted(entry.keys()),
+    )
+    provider_id = entry.get("provider_id") or entry.get("target") or entry.get("provider")
+    params = entry.get("target_params") or entry.get("params") or entry.get("extra_params") or {}
+    protocol = str(entry.get("protocol") or "openai_chat")
+    base_url = entry.get("base_url")
+    endpoint = entry.get("endpoint")
     if protocol in {"http_embedding", "http_rerank", "openai_image_generation"}:
         endpoint = endpoint or base_url
         base_url = None
     return ModelTarget(
-        id=target_id,
-        provider=str(source.get("provider") or provider_id or "custom"),
+        id=str(provider_id or entry.get("id") or f"{route_key}-{index}"),
+        provider=str(entry.get("provider") or provider_id or "custom"),
         protocol=protocol,
         base_url=base_url,
         endpoint=endpoint,
-        model=source.get("model"),
-        api_key_env=source.get("api_key_env"),
-        max_tokens=source.get("max_tokens"),
+        model=entry.get("model"),
+        api_key_env=entry.get("api_key_env"),
+        max_tokens=entry.get("max_tokens"),
         params=params,
     )
 
@@ -501,13 +513,7 @@ def _seed_env(
     lines: list[str] = []
     for name in names:
         slot = slots_by_env.get(name)
-        if source_agent is not None and slot is not None and slot.mode == "inject":
-            value = (
-                secret_store.get_decrypted(source_agent.id, name)
-                if secret_store.status(source_agent.id, name) == "set"
-                else ""
-            )
-        elif source_agent is not None:
+        if source_agent is not None:
             # real materialize (secret/provider tables exist): operator host value →
             # provider inline key → shared secret (e.g. KB token). status() needs no key.
             shared = (
@@ -515,7 +521,16 @@ def _seed_env(
                 if secret_store.status(None, name) == "set"
                 else ""
             )
-            value = existing.get(name, "") or (_provider_key_for_env(name) or "") or shared
+            if (
+                slot is not None
+                and slot.mode == "inject"
+                and secret_store.status(source_agent.id, name) == "set"
+            ):
+                value = secret_store.get_decrypted(source_agent.id, name)
+            elif slot is not None and slot.mode == "inject":
+                value = (_provider_key_for_env(name) or "") or shared
+            else:
+                value = existing.get(name, "") or (_provider_key_for_env(name) or "") or shared
         else:
             # bare write_home (no store context): keep the operator value, never touch tables
             value = existing.get(name, "")

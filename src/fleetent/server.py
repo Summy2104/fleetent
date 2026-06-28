@@ -42,7 +42,7 @@ from fleetent.platform.chat_management import chat_admin_api
 from fleetent.platform.connector_management import connector_admin_api, vault_provider
 from fleetent.platform.im_gateway_management import im_identity_admin_api
 from fleetent.platform.knowledge_base_management import kb_admin_api
-from fleetent.platform.model_provider_management import provider_admin_api
+from fleetent.platform.model_provider_management import model_admin_api, provider_admin_api
 from fleetent.platform.node_management import (
     node_admin_api,
     node_desired_state_api,
@@ -281,6 +281,7 @@ app.include_router(im_identity_admin_api.router)
 app.include_router(skill_admin_api.router)
 app.include_router(backflow_api.router)
 app.include_router(provider_admin_api.router)
+app.include_router(model_admin_api.router)
 app.include_router(kb_admin_api.router)
 app.include_router(connector_admin_api.router)
 app.include_router(chat_admin_api.router)

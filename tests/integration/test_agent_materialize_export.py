@@ -94,7 +94,7 @@ def test_agent_file_from_store_exports_authored_runtime_config(db):
     assert targets["claude-fast"].params == {"temperature": 0.2}
     assert targets["embed"].endpoint == "https://api.openai.com/v1/embeddings"
     assert targets["embed"].api_key_env == "FLEETENT_AGENT_SUPPORT_OPENAI"
-    assert targets["embed"].params == {"dimensions": 1536}
+    assert targets["embed"].params == {"dimensions": 768}
     assert exported.models.routes["default"][0].target == "claude-fast"
     assert exported.models.routes["embedding"][0].target == "embed"
     assert exported.models.routes["embedding"][0].params == {"dimensions": 768}
