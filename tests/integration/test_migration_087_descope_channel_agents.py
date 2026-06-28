@@ -58,7 +58,7 @@ def test_agent_delete_still_cascades_remaining_bindings_without_dead_channel_rou
         conn.execute(
             """
             INSERT INTO mcp_servers
-                (agent_id, server_id, transport, url, auth_type, api_key_env,
+                (agent_id, server_id, transport, url, auth_type, auth_config,
                  command, args, env, created_at, enabled, headers)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
@@ -68,7 +68,7 @@ def test_agent_delete_still_cascades_remaining_bindings_without_dead_channel_rou
                 "stdio",
                 "",
                 "none",
-                "",
+                "{}",
                 "npx",
                 '["-y", "@modelcontextprotocol/server-github"]',
                 None,

@@ -48,7 +48,7 @@ async def test_two_agents_same_github_route_to_separate_credentials(scoped_db, m
         transport="http",
         url="http://gh-a.test",
         auth_type="api_key",
-        api_key_env="GH_TOKEN_A",
+        auth_config={"key_env": "GH_TOKEN_A"},
     )
     agent_mcp_server_store.add_mcp_server(
         AGENT_B,
@@ -56,7 +56,7 @@ async def test_two_agents_same_github_route_to_separate_credentials(scoped_db, m
         transport="http",
         url="http://gh-b.test",
         auth_type="api_key",
-        api_key_env="GH_TOKEN_B",
+        auth_config={"key_env": "GH_TOKEN_B"},
     )
     monkeypatch.setenv("GH_TOKEN_A", "tok-A")
     monkeypatch.setenv("GH_TOKEN_B", "tok-B")
@@ -68,7 +68,7 @@ async def test_two_agents_same_github_route_to_separate_credentials(scoped_db, m
             transport=row["transport"],
             url=row["url"],
             auth_type=row["auth_type"],
-            api_key_env=row["api_key_env"],
+            api_key_env=row["auth_config"]["key_env"],
         )
 
     # Mock at the SDK seam (the client now runs on the official mcp SDK; a raw

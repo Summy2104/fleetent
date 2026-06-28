@@ -54,7 +54,7 @@ def test_head_schema_renames_mcp_tables_and_index(tmp_path: Path) -> None:
         "transport",
         "url",
         "auth_type",
-        "api_key_env",
+        "auth_config",
         "command",
         "args",
         "env",

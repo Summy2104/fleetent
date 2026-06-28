@@ -17,6 +17,7 @@ export type AgentPlacement = {
 };
 
 export type AgentListItem = {
+  agent_id?: number;
   agent_name: string;
   is_default?: boolean;
   status: string;

@@ -33,6 +33,11 @@ from fleetent.agent_config import (
 from fleetent.config import McpServerSettings
 from fleetent.platform.agent_lifecycle import credential_slots, default_binding_store, secret_store
 from fleetent.platform.connector_management import mcp_server_store
+from fleetent.platform.connector_management.mcp_auth import (
+    ApiKeyMcpAuthConfig,
+    OAuthClientCredentialsMcpAuthConfig,
+    parse_mcp_auth_config,
+)
 from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.model_provider_management import model_admin_store, provider_admin_store
 from fleetent.platform.skill_management import skill_admin_store
@@ -348,17 +353,31 @@ def _mcp_servers_for_agent(agent: agent_store.Agent) -> list[McpServerSettings]:
         ) or mcp_server_store.get_mcp_server(None, server_id)
         if row is None:
             continue
+        raw_auth_config = row.get("auth_config")
+        if raw_auth_config is None and row.get("api_key_env"):
+            raw_auth_config = {"key_env": row["api_key_env"]}
+        auth_config = parse_mcp_auth_config(row.get("auth_type"), raw_auth_config)
+        api_key_env = ""
+        auth = None
+        auth_type = "none"
+        if isinstance(auth_config, ApiKeyMcpAuthConfig):
+            auth_type = "api_key"
+            api_key_env = auth_config.key_env
+        elif isinstance(auth_config, OAuthClientCredentialsMcpAuthConfig):
+            auth_type = "oauth_client_credentials"
+            auth = auth_config
         servers.append(
             McpServerSettings(
                 id=server_id,
                 transport=row["transport"],
                 url=row["url"],
-                auth_type=row["auth_type"],
-                api_key_env=row["api_key_env"],
+                auth_type=auth_type,
+                api_key_env=api_key_env,
                 command=row["command"],
                 args=row["args"] or [],
                 env=row["env"] or {},
                 headers=row["headers"] or {},
+                auth=auth,
             )
         )
     return servers

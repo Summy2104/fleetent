@@ -12,6 +12,7 @@ import pytest
 from mcp.client.auth import OAuthTokenError
 
 import fleetent.integrations.mcp.client as mc
+from fleetent.config import McpServerSettings
 from fleetent.integrations.mcp.client import McpServerConfig, OAuthAuthUnavailableError
 
 
@@ -217,6 +218,21 @@ async def test_http_headers_keeps_api_key_bearer(monkeypatch):
     monkeypatch.setenv("MY_KEY", "secret")
     server = McpServerConfig(
         id="k", transport="http", url="https://h/mcp", auth_type="api_key", api_key_env="MY_KEY"
+    )
+    headers = await mc._http_headers(server)
+    assert headers["Authorization"] == "Bearer secret"
+
+
+async def test_http_headers_keeps_api_key_bearer_for_materialized_settings(monkeypatch):
+    monkeypatch.setenv("MATERIALIZED_KEY", "secret")
+    server = McpServerConfig.from_settings(
+        McpServerSettings(
+            id="k",
+            transport="http",
+            url="https://h/mcp",
+            auth_type="api_key",
+            api_key_env="MATERIALIZED_KEY",
+        )
     )
     headers = await mc._http_headers(server)
     assert headers["Authorization"] == "Bearer secret"

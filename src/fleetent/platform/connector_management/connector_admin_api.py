@@ -9,15 +9,80 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
+from fastapi.encoders import jsonable_encoder
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from fleetent import audit_log, auth, user_store
 from fleetent.platform.connector_management import mcp_server_store
+from fleetent.platform.connector_management.mcp_auth import (
+    ApiKeyMcpAuthConfig,
+    OAuthClientCredentialsMcpAuthConfig,
+    parse_mcp_auth_config,
+)
 
 router = APIRouter(prefix="/admin")
 
 IDLE_TIMEOUT_SECONDS = 1800
 _ADMIN_ROLES = {"admin"}
 _SENSITIVE = ("secret", "token", "refresh", "api_key", "password")
+
+
+def _normalized_auth_config(auth_type: str, auth_config: dict[str, Any]) -> dict[str, Any]:
+    parsed = parse_mcp_auth_config(auth_type, auth_config)
+    if isinstance(parsed, ApiKeyMcpAuthConfig):
+        return {"key_env": parsed.key_env}
+    if isinstance(parsed, OAuthClientCredentialsMcpAuthConfig):
+        return {
+            "token_url": parsed.token_url,
+            "client_id": parsed.client_id,
+            "client_secret_env": parsed.client_secret_env,
+            "scope": parsed.scope,
+        }
+    return {}
+
+
+class McpServerCreateBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    agent_id: int | None = None
+    transport: str = "stdio"
+    url: str = ""
+    auth_type: str = "none"
+    auth_config: dict[str, Any] = Field(default_factory=dict)
+    command: str = ""
+    args: list[str] | None = None
+    env: dict[str, str] | None = None
+    headers: dict[str, str] | None = None
+    enabled: bool = True
+
+    @model_validator(mode="after")
+    def _validate_auth(self) -> McpServerCreateBody:
+        self.auth_config = _normalized_auth_config(self.auth_type, self.auth_config)
+        return self
+
+
+class McpServerEditBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    transport: str | None = None
+    url: str | None = None
+    auth_type: str | None = None
+    auth_config: dict[str, Any] | None = None
+    command: str | None = None
+    args: list[str] | None = None
+    env: dict[str, str] | None = None
+    headers: dict[str, str] | None = None
+    enabled: bool | None = None
+
+    @model_validator(mode="after")
+    def _validate_auth(self) -> McpServerEditBody:
+        if self.auth_type is None and self.auth_config is None:
+            return self
+        if self.auth_type is None or self.auth_config is None:
+            raise ValueError("auth_type and auth_config must be updated together")
+        self.auth_config = _normalized_auth_config(self.auth_type, self.auth_config)
+        return self
 
 
 def mcp_list_servers() -> list[dict[str, Any]]:
@@ -78,6 +143,15 @@ def _mask_dict(value: dict[str, Any] | None) -> dict[str, Any]:
     return _mask(value)
 
 
+def _validate_body[T: BaseModel](model: type[T], body: T | dict[str, Any]) -> T:
+    if isinstance(body, BaseModel):
+        return body
+    try:
+        return model.model_validate(body)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=jsonable_encoder(exc.errors())) from exc
+
+
 def _session_user(authorization: str | None) -> user_store.User:
     if not authorization or not authorization.startswith("Session "):
         raise HTTPException(status_code=401, detail="not authenticated")
@@ -123,6 +197,8 @@ def list_mcp_servers(
             "id": row["server_id"],
             "transport": row["transport"],
             "url": row["url"],
+            "auth_type": row.get("auth_type") or "none",
+            "auth_config": row.get("auth_config") or {},
             "command": row["command"],
             "args": row["args"],
             "env": row["env"],
@@ -169,14 +245,15 @@ def reconnect_mcp(server_id: str, authorization: str | None = Header(None)) -> d
 @router.put("/mcp/servers/{server_id}")
 async def edit_mcp_server(
     server_id: str,
-    body: dict[str, Any],
+    body: McpServerEditBody | dict[str, Any],
     authorization: str | None = Header(None),
     agent_id: int | None = None,
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
     if mcp_server_store.get_mcp_server(agent_id, server_id) is None:
         raise HTTPException(status_code=404, detail="mcp server not found")
-    mcp_server_store.edit_mcp_server(agent_id, server_id, **body)
+    payload = _validate_body(McpServerEditBody, body).model_dump(exclude_none=True)
+    mcp_server_store.edit_mcp_server(agent_id, server_id, **payload)
     audit_log.write_audit(user.id, "mcp.edit", "mcp_server", server_id)
     await mcp_sync_server(server_id, agent_id)
     return {"success": True, "server_id": server_id}
@@ -199,29 +276,28 @@ async def delete_mcp_server(
 
 @router.post("/mcp/servers")
 async def create_mcp_server(
-    server: dict[str, Any], authorization: str | None = Header(None)
+    server: McpServerCreateBody | dict[str, Any], authorization: str | None = Header(None)
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
+    payload = _validate_body(McpServerCreateBody, server)
 
-    server_id = server.get("id") or server.get("server_id")
-    if not isinstance(server_id, str) or not server_id:
-        raise HTTPException(status_code=422, detail="server id is required")
-    agent_id = server.get("agent_id")
+    server_id = payload.id
+    agent_id = payload.agent_id
     if mcp_server_store.get_mcp_server(agent_id, server_id) is not None:
         raise HTTPException(status_code=409, detail="mcp server id already exists")
-    transport = server.get("transport", "stdio")
 
     mcp_server_store.add_mcp_server(
         agent_id=agent_id,
         server_id=server_id,
-        transport=transport,
-        url=server.get("url", ""),
-        auth_type=server.get("auth_type", "none"),
-        api_key_env=server.get("api_key_env", ""),
-        command=server.get("command", ""),
-        args=server.get("args"),
-        env=server.get("env"),
-        headers=server.get("headers"),
+        transport=payload.transport,
+        url=payload.url,
+        auth_type=payload.auth_type,
+        auth_config=payload.auth_config,
+        command=payload.command,
+        args=payload.args,
+        env=payload.env,
+        headers=payload.headers,
+        enabled=payload.enabled,
     )
 
     audit_log.write_audit(user.id, "mcp.create", "mcp_server", server_id)

@@ -407,8 +407,8 @@ def test_export_agent_yaml(fresh_client):
         "docs",
         transport="http",
         url="https://docs.acme.internal/mcp",
-        auth_type="bearer",
-        api_key_env="ACME_DOCS_MCP_TOKEN",
+        auth_type="api_key",
+        auth_config={"key_env": "ACME_DOCS_MCP_TOKEN"},
     )
     agent_store.bind_mcp_server(agent.id, "docs")
     agent_store.assign_user("u_alice", agent.id)
