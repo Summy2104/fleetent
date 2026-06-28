@@ -48,6 +48,26 @@ def _submit_url(service_id: str) -> str:
     return f"/admin/connectors/{service_id}/credentials"
 
 
+def _service_enabled(service: dict[str, object] | None) -> bool:
+    return service is None or service.get("enabled") is not False
+
+
+def _disabled_service_result(
+    user_id: str,
+    service_id: str,
+    protocol: str | None,
+) -> connectors.NeedsConsent:
+    if protocol == "apikey":
+        return connectors.NeedsConsent(
+            connector=service_id,
+            consent_url=_submit_url(service_id),
+        )
+    return connectors.NeedsConsent(
+        connector=service_id,
+        consent_url=_consent_url(user_id, service_id),
+    )
+
+
 def _get_apikey_credential(
     user_id: str, service_id: str
 ) -> connectors.Credential | connectors.NeedsConsent:
@@ -93,6 +113,9 @@ def _refresh_tokens(
         )
 
     service = external_service_store.get_service(service_id)
+    protocol = service.get("protocol") if service is not None else None
+    if not _service_enabled(service):
+        return _disabled_service_result(user_id, service_id, protocol if isinstance(protocol, str) else None)
     oauth_config = service.get("oauth_config", {}) if service is not None else {}
     token_url = oauth_config.get("token")
     client_id = oauth_config.get("client_id")
@@ -237,7 +260,14 @@ def get_credential(
 ) -> connectors.Credential | connectors.NeedsConsent | connectors.CredentialError:
     principal_user_id = _resolve_principal(user_id, service_id, agent_name)
     service = external_service_store.get_service(service_id)
-    if service is not None and service.get("protocol") == "apikey":
+    protocol = service.get("protocol") if service is not None else None
+    if not _service_enabled(service):
+        return _disabled_service_result(
+            principal_user_id,
+            service_id,
+            protocol if isinstance(protocol, str) else None,
+        )
+    if protocol == "apikey":
         return _get_apikey_credential(principal_user_id, service_id)
 
     credential = external_credential_store.get_credential(principal_user_id, service_id)
