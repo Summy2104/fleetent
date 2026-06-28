@@ -23,7 +23,6 @@ def _agent() -> agent_store.Agent:
         name="ops",
         system_prompt="Be useful",
         allowed_tools=["search"],
-        active_version_id=3,
         features={"code_execution": True},
         plugins=["plugin-a"],
         allowed_skills=["skill-a"],

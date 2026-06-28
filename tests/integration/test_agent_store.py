@@ -36,7 +36,6 @@ def test_create_and_get_agent(db):
 def test_create_agent_sets_current_version_v1(db):
     agent = agent_store.create_agent("assistant", "You are helpful.", ["shell"])
     assert agent.version == 1
-    assert agent.active_version_id is None
     found = agent_store.get_by_name("assistant")
     assert found is not None
     assert found.version == 1
