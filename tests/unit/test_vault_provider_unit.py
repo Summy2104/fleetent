@@ -357,6 +357,57 @@ def test_get_credential_returns_apikey_path(monkeypatch: pytest.MonkeyPatch) -> 
     assert result == connectors.Credential("github", {"api_key": "secret"})
 
 
+@pytest.mark.parametrize(
+    ("service", "expected"),
+    [
+        (
+            {"protocol": "apikey", "enabled": False},
+            connectors.NeedsConsent(
+                connector="github",
+                consent_url="/admin/connectors/github/credentials",
+            ),
+        ),
+        (
+            {"protocol": "oauth", "enabled": False},
+            connectors.NeedsConsent(
+                connector="github",
+                consent_url="/admin/connectors/authorize/github?user_id=user-1",
+            ),
+        ),
+    ],
+)
+def test_get_credential_returns_needs_consent_when_service_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+    service: dict[str, object],
+    expected: connectors.NeedsConsent,
+) -> None:
+    monkeypatch.setattr(
+        vault_provider, "_resolve_principal", lambda user_id, service_id, agent: user_id
+    )
+    monkeypatch.setattr(
+        vault_provider.external_service_store, "get_service", lambda service_id: service
+    )
+    monkeypatch.setattr(
+        vault_provider.external_credential_store,
+        "get_credential",
+        lambda user_id, service_id: {"status": "authorized", "payload": {"access_token": "ok"}},
+    )
+    monkeypatch.setattr(
+        vault_provider,
+        "_get_apikey_credential",
+        lambda *args: pytest.fail("disabled service should not resolve apikey credentials"),
+    )
+    monkeypatch.setattr(
+        vault_provider,
+        "_is_expired",
+        lambda payload: pytest.fail("disabled service should not inspect oauth expiry"),
+    )
+
+    result = vault_provider.get_credential("user-1", "github", ["repo"])
+
+    assert result == expected
+
+
 def test_get_credential_returns_needs_consent_for_missing_and_needs_reauth_statuses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -485,6 +536,32 @@ def test_get_credential_returns_authorized_credential_and_defaults_scopes(
         vault_provider.external_service_store,
         "get_service",
         lambda service_id: {"protocol": "oauth"},
+    )
+    monkeypatch.setattr(
+        vault_provider.external_credential_store,
+        "get_credential",
+        lambda user_id, service_id: {"status": "authorized", "payload": {"access_token": "ok"}},
+    )
+    monkeypatch.setattr(vault_provider, "_is_expired", lambda payload: False)
+
+    result = vault_provider.get_credential("user-1", "github", ["repo"])
+
+    assert result == connectors.Credential(
+        connector="github",
+        client={"access_token": "ok", "scopes": ["repo"]},
+    )
+
+
+def test_get_credential_allows_enabled_authorized_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        vault_provider, "_resolve_principal", lambda user_id, service_id, agent: user_id
+    )
+    monkeypatch.setattr(
+        vault_provider.external_service_store,
+        "get_service",
+        lambda service_id: {"protocol": "oauth", "enabled": True},
     )
     monkeypatch.setattr(
         vault_provider.external_credential_store,

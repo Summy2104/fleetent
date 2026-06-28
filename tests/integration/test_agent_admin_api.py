@@ -110,12 +110,11 @@ def test_bind_and_unbind_user(fresh_client):
 
     resp = fresh_client.post("/admin/agents/ops/bindings/users/u-42", headers=_hdr(token))
     assert resp.status_code == 200
-    bound = agent_store.get_agent_for_user("u-42")
-    assert bound is not None and bound.id == agent.id
+    assert agent_store.list_users_for_agent(agent.id) == ["u-42"]
 
     resp = fresh_client.delete("/admin/agents/ops/bindings/users/u-42", headers=_hdr(token))
     assert resp.status_code == 200
-    assert agent_store.get_agent_for_user("u-42") is None
+    assert agent_store.list_users_for_agent(agent.id) == []
 
 
 def test_bind_user_viewer_forbidden(fresh_client):

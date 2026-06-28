@@ -128,12 +128,80 @@ def references(agent_id: int) -> dict[str, Any]:
             {"aid": agent_id},
         ).fetchall()
     ]
-    return {"users": users, "channels": []}
+    im_groups = [
+        {"platform": str(r["platform"]), "group_id": str(r["group_id"])}
+        for r in db.execute(
+            """
+            SELECT platform, group_id
+            FROM agent_im_groups
+            WHERE agent_id = :aid
+            ORDER BY platform, group_id
+            """,
+            {"aid": agent_id},
+        ).fetchall()
+    ]
+    mcp_servers = [
+        str(r["server_id"])
+        for r in db.execute(
+            """
+            SELECT server_id
+            FROM agent_mcp_servers
+            WHERE agent_id = :aid
+            ORDER BY server_id
+            """,
+            {"aid": agent_id},
+        ).fetchall()
+    ]
+    kbs = [
+        str(r["kb_id"])
+        for r in db.execute(
+            """
+            SELECT kb_id
+            FROM agent_kbs
+            WHERE agent_id = :aid
+            ORDER BY kb_id
+            """,
+            {"aid": agent_id},
+        ).fetchall()
+    ]
+    service_grants = [
+        str(r["service_id"])
+        for r in db.execute(
+            """
+            SELECT service_id
+            FROM agent_service_grants
+            WHERE agent_id = :aid
+            ORDER BY service_id
+            """,
+            {"aid": agent_id},
+        ).fetchall()
+    ]
+    placements = [
+        str(r["node_id"])
+        for r in db.execute(
+            """
+            SELECT node_id
+            FROM agent_placements
+            WHERE agent_id = :aid
+            ORDER BY node_id
+            """,
+            {"aid": agent_id},
+        ).fetchall()
+    ]
+    return {
+        "users": users,
+        "channels": [],
+        "im_groups": im_groups,
+        "mcp_servers": mcp_servers,
+        "kbs": kbs,
+        "service_grants": service_grants,
+        "placements": placements,
+    }
 
 
 def is_referenced(agent_id: int) -> bool:
     refs = references(agent_id)
-    return bool(refs["users"] or refs["channels"])
+    return any(bool(value) for value in refs.values())
 
 
 def delete_state(agent_id: int) -> None:

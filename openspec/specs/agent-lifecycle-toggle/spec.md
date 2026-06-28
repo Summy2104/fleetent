@@ -21,15 +21,20 @@ An admin SHALL be able to disable an enabled agent and re-enable a disabled agen
 - **THEN** the `user_agents` rows for "ops-bot" are unchanged and the agent definition/versions are preserved
 
 ### Requirement: Binding protection before archive
-Archiving (soft delete) an agent SHALL be blocked while it is still bound to any user, or set as the default agent. The block response SHALL list the occupying users and whether it is the default. Archive SHALL only proceed when no references remain. （Channel 绑定已 descope，不再纳入阻挡判定。）
+Archiving (soft delete) an agent SHALL be blocked while it is still referenced by any of: a bound user, an IM group binding, an MCP server binding, a knowledge-base binding, an external-service grant, a node placement (pinned), or being set as the default agent. The block response SHALL enumerate the occupying references by type. Archive SHALL only proceed when no references of any type remain.（Channel 绑定已 descope，不再纳入阻挡判定。）
 
-#### Scenario: Archive blocked while bound
+#### Scenario: Archive blocked while bound to a user or default
 - **WHEN** an admin requests archive of "ops-bot" which is still bound to a user (or is the default agent)
-- **THEN** the request is rejected (409) and the response lists the occupying user ids and default flag
+- **THEN** the request is rejected (409) and the response lists the occupying references (including user ids and default flag)
 - **AND** the agent's `status` and `deleted_at` are unchanged
 
-#### Scenario: Archive proceeds after unbinding
-- **WHEN** "ops-bot" has no remaining user bindings and is not default, and an admin confirms archive
+#### Scenario: Archive blocked while bound to non-user resources
+- **WHEN** an admin requests archive of "ops-bot" which has no user binding and is not default, but still has an MCP / KB / skill-or-service grant / IM group binding or an active node placement
+- **THEN** the request is rejected (409) and the response lists the occupying reference types
+- **AND** the agent's `status` and `deleted_at` are unchanged
+
+#### Scenario: Archive proceeds after all references removed
+- **WHEN** "ops-bot" has no remaining references of any tracked type (no user/IM/MCP/KB/grant binding, no placement) and is not default, and an admin confirms archive
 - **THEN** the agent's `status` becomes `archived` and `deleted_at` is set in the same transaction
 - **AND** the agent is removed from the routable list and an `agent.archive` audit entry exists
 
@@ -64,7 +69,6 @@ The agent `status` field SHALL only transition along `enabled ↔ disabled`, `en
 - **WHEN** a transition not in the allowed set is requested (e.g. archive without passing binding protection)
 - **THEN** the request is rejected and `status` is unchanged
 
-
 ### Requirement: New agents start disabled
 
 A newly created or cloned agent SHALL start with `status=disabled`. 控制台 `create` 与 `clone` SHALL 显式落 `disabled`，使新 agent 在被显式 enable 之前不进入任何 node 的期望态拉取（`node-desired-state-api` 按 `status=="enabled"` 过滤）。这避免「enabled 但未绑定 node、不会被任何 node 拉起」的误导态。
@@ -93,3 +97,4 @@ The `enable` transition SHALL be gated on node placement: an agent SHALL only be
 #### Scenario: Disable is never gated
 - **WHEN** an admin requests `disable` for an agent (bound or not)
 - **THEN** `status` becomes `disabled`
+

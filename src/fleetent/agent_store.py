@@ -454,18 +454,6 @@ def unassign_user(user_id: str, agent_id: int) -> None:
     )
 
 
-def get_agent_for_user(user_id: str) -> Agent | None:
-    db = _db()
-    row = db.execute(
-        "SELECT a.name FROM agents a JOIN user_agents ua ON ua.agent_id = a.id "
-        "WHERE ua.user_id = :user_id LIMIT 1",
-        {"user_id": user_id},
-    ).fetchone()
-    if row is None:
-        return None
-    return get_by_name(str(row["name"]))
-
-
 def list_users_for_agent(agent_id: int) -> list[str]:
     rows = (
         _db()

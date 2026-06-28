@@ -144,7 +144,9 @@ def deregister_node(node_id: str) -> None:
     assert placement_count is not None
     if int(placement_count["count"]) > 0:
         raise ValueError(f"node {node_id!r} still has pinned agents")
-    _database().execute("DELETE FROM nodes WHERE id = :id", {"id": node_id})
+    with _database().transaction() as conn:
+        conn.execute("DELETE FROM node_agent_status WHERE node_id = :node_id", {"node_id": node_id})
+        conn.execute("DELETE FROM nodes WHERE id = :id", {"id": node_id})
     _NODE_KEY_CACHE.pop(node_id, None)
     with suppress(Exception):
         secret_store.delete(None, _node_service_key_env(node_id))

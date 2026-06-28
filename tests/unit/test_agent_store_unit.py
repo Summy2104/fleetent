@@ -307,7 +307,6 @@ def test_assignment_binding_and_default_agent_helpers(monkeypatch: pytest.Monkey
 
     agent_store.assign_user("u1", 7)
     agent_store.unassign_user("u1", 7)
-    assert agent_store.get_agent_for_user("u1") is not None
     assert agent_store.list_users_for_agent(7) == ["u1", "u2"]
     assert agent_store.list_im_groups_for_agent(7) == [{"platform": "slack", "group_id": "C1"}]
     agent_store.bind_mcp_server(7, "files", created_by="admin")

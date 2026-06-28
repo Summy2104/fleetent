@@ -11,7 +11,10 @@ import fleetent.auth as auth
 import fleetent.governance.audit_log as audit
 import fleetent.platform.agent_management_console.agent_admin_store as store
 import fleetent.platform.agent_management_console.agent_console_api as api
+import fleetent.platform.agent_management_console.agent_im_group_store as agent_im_group_store
 import fleetent.user_store as user_store
+from fleetent.platform.connector_management import agent_service_grant_store
+from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.node_management import node_store, placement_store
 from tests.integration._migration_template import apply_migrations
 
@@ -269,6 +272,31 @@ def test_archive_blocked_when_bound(client, monkeypatch):
     assert store.get_state(ops.id)["status"] != "archived"
 
 
+def test_archive_blocked_when_only_non_user_references_exist(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    node = _seed_node(monkeypatch)
+    ops = agent_store.create_agent("ops", "Ops.", ["shell"])
+    agent_store.bind_mcp_server(ops.id, "files", created_by="admin")
+    agent_kbs_store.bind("default", "kb-1", ops.id, created_by="admin")
+    agent_service_grant_store.bind(ops.id, "github", run_as="agent", created_by="admin")
+    agent_im_group_store.bind(ops.id, "slack", "C123", created_by="admin")
+    placement_store.pin_agent(ops.id, node, pinned_by="admin")
+    token, _ = _session_for("admin")
+
+    r = client.post("/admin/agents/ops/archive", headers=_hdr(token, confirm=True))
+
+    assert r.status_code == 409
+    detail = r.json()["detail"]
+    assert detail["mcp_servers"] == ["files"]
+    assert detail["kbs"] == ["kb-1"]
+    assert detail["service_grants"] == ["github"]
+    assert detail["im_groups"] == [{"platform": "slack", "group_id": "C123"}]
+    assert detail["placements"] == [node]
+    assert detail["users"] == []
+    assert detail["channels"] == []
+    assert store.get_state(ops.id)["status"] != "archived"
+
+
 def test_archive_requires_confirm_then_restore(client, monkeypatch):
     agent_store.create_agent("ops", "Ops.", ["shell"])
     _wire_real_store(monkeypatch)
@@ -281,6 +309,31 @@ def test_archive_requires_confirm_then_restore(client, monkeypatch):
     assert store.get_state(ops.id)["status"] == "archived"
     client.post("/admin/agents/ops/restore", headers=_hdr(token))
     assert store.get_state(ops.id)["status"] == "enabled"
+
+
+def test_unpin_agent_deletes_runtime_status_row(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    node = _seed_node(monkeypatch)
+    ops = agent_store.create_agent("ops", "Ops.", ["shell"])
+    placement_store.pin_agent(ops.id, node, pinned_by="admin")
+    node_store.upsert_agent_status(ops.id, node_id=node, phase="running", pid=123, health="ok")
+
+    placement_store.unpin_agent(ops.id)
+
+    assert placement_store.get_for_agent(ops.id) is None
+    assert node_store.get_agent_status(ops.id) is None
+
+
+def test_deregister_node_deletes_runtime_status_rows(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    node = _seed_node(monkeypatch)
+    ops = agent_store.create_agent("ops", "Ops.", ["shell"])
+    node_store.upsert_agent_status(ops.id, node_id=node, phase="running", pid=123, health="ok")
+
+    node_store.deregister_node(node)
+
+    assert node_store.get_node(node) is None
+    assert node_store.get_agent_status(ops.id) is None
 
 
 # --- clone (场景 42) ----------------------------------------------------------

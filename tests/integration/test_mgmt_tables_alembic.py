@@ -96,7 +96,7 @@ def test_upgrade_drops_owner_level_im_table(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_upgrade_noop_on_existing_api_keys(tmp_path):
+def test_upgrade_deletes_orphan_api_keys(tmp_path):
     db = tmp_path / "t.db"
     # Pre-create via _init_db DDL, insert a row
     with sqlite3.connect(db) as conn:
@@ -124,7 +124,7 @@ def test_upgrade_noop_on_existing_api_keys(tmp_path):
     _apply(db)
     with sqlite3.connect(db) as conn:
         count = conn.execute("SELECT COUNT(*) FROM api_keys").fetchone()[0]
-    assert count == 1, "existing api_keys row must survive upgrade"
+    assert count == 0, "orphan api_keys row must be deleted during upgrade"
 
 
 def test_upgrade_noop_on_existing_audit_log(tmp_path):
