@@ -83,9 +83,6 @@
 | `useAgentKbsQuery` | `GET /admin/agents/{name}/kbs` | — | `{agent, kb_ids[]}` |
 | `useBindAgentKbMutation` | `POST /admin/agents/{name}/kbs` | `{kb_id}` | `{agent, kb_id, bound:true}` |
 | `useUnbindAgentKbMutation` | `DELETE /admin/agents/{name}/kbs/{kbId}` | — | `{...bound:false}` |
-| `useAgentOauthBindingsQuery` | `GET /admin/agents/{name}/bindings/oauth` | — | `{agent, connector_ids[], service_grants:[{run_as, service_id}]}` |
-| `useBindAgentOauthMutation` | `POST /admin/agents/{name}/bindings/oauth/{connectorId}` | `{run_as:'agent'\|'user'}` | `{...run_as, bound:true}`;非法 run_as 422,未知 connector 404 |
-| `useUnbindAgentOauthMutation` | `DELETE /admin/agents/{name}/bindings/oauth/{connectorId}` | — | `{...bound:false}` |
 
 ### IM 能力 / group / Secret(均 admin)
 | Hook | 方法 路径 | 请求体 | 响应 |
@@ -222,27 +219,11 @@ provider 的增删改查、连通性测试、定价配置。`api_key` 始终掩�
 
 ---
 
-## 7. Connectors — 外部连接器与 MCP
+## 7. Connectors — MCP
 
-分两组:**OAuth/API-Key 连接器**(配置目录 + 每用户授权矩阵 + 凭据生命周期)和 **MCP servers**(配置 CRUD + 实时握手探测)。所有 secret/token 序列化层掩码为 `****`。读端点 viewer+,写端点 admin。后端 `connector_admin_api.py`。
+工具 OAuth Vault 已退役；控制台保留的 connectors 面只剩 **MCP servers**（配置 CRUD + 实时握手探测）。所有 secret 序列化层仍掩码为 `****`。读端点 viewer+，写端点 admin。后端 `connector_admin_api.py`。
 
-### 7a. OAuth / API-Key 连接器
-| Hook | 方法 路径 | 参数/请求体 | 响应/备注 |
-|------|-----------|-------------|-----------|
-| `useConnectorsQuery` | `GET /admin/connectors` | — | `[{id, display_name, protocol('oauth2'\|'apikey'), enabled, oauth_config?(掩码)}]` |
-| `useCreateConnectorMutation` | `POST /admin/connectors` | `{id, display_name, protocol(默认 oauth2), oauth_config?, enabled?}` | admin;id 重复 409,protocol 非法 422;审计 `connector.add` |
-| `useUpdateConnectorMutation` | `PUT /admin/connectors/{id}` | 可选 `display_name/protocol/oauth_config/enabled` | admin;不存在 404 |
-| `useDeleteConnectorMutation` | `DELETE /admin/connectors/{id}` | — | `{success, connector_id}`;admin |
-| `useConnectorLifecycleQuery` | `GET /admin/connectors/{id}/lifecycle` | — | `{connector_id, refresh_ok, refresh_failed, reauths}`(其余 TS 字段后端暂不填) |
-| `useConnectorAgentBindingsQuery` | `GET /admin/connectors/{id}/bindings/agents` | — | `{service_id, agent_ids[]}` |
-| `useConnectorGrantsQuery` | `GET /admin/connectors/grants` | — | `{grants:[{user_id, connector_id, status, ...}], consent_hint}`;status ∈ authorized/needs_reauth/credential_error |
-| `useOffboardingQuery` | `GET /admin/connectors/offboarding/{userId}` | — | `{user_id, revoked[], failed[]}`;离职级联撤销(幂等) |
-| `useConnectorAuthorizeQuery` | `GET /admin/connectors/authorize/{id}` | — | `{authorize_url}`;缺元数据 422 |
-| `useConnectorCredentialsMutation` | `POST /admin/connectors/{id}/credentials` | `{api_key}` | **仅需登录会话(非 admin)**,key 绑当前用户本人;非 apikey/空 422 |
-| `useConnectorTestMutation` | `POST /admin/connectors/{id}/test` | — | `{success, token_valid?, active_grants?, ...}`;不存在仍 200 但 success:false |
-| `useRevokeConnectorGrantMutation` | `POST /admin/connectors/grants/{userId}/{connectorId}/revoke` | `X-Confirm: true` | admin;`{revoked, user_id, connector_id}`;审计 `connector.revoke` |
-
-### 7b. MCP servers
+### 7a. MCP servers
 | Hook | 方法 路径 | 参数/请求体 | 响应/备注 |
 |------|-----------|-------------|-----------|
 | `useMcpServersQuery` | `GET /admin/mcp/servers` | (后端可选 `?agent_id=`) | `[{id, transport, url?, command?, args?, enabled?, status, tool_count, agent_id}]` |

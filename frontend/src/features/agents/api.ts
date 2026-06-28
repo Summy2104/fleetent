@@ -89,17 +89,6 @@ export type AgentBindings = {
   groups: AgentImGroupInput[];
 };
 
-export type AgentOauthGrant = {
-  run_as: string;
-  service_id: string;
-};
-
-export type AgentOauthBindings = {
-  agent: string;
-  connector_ids: string[];
-  service_grants: AgentOauthGrant[];
-};
-
 export type AgentKnowledgeBaseBindings = {
   agent: string;
   kb_ids: string[];
@@ -113,11 +102,6 @@ export type AgentImCapabilitiesInput = {
 export type AgentImGroupInput = {
   group_id: string;
   platform: string;
-};
-
-export type AgentOauthBindingInput = {
-  connectorId: string;
-  runAs: 'agent' | 'user';
 };
 
 export type AgentSecretRecord = {
@@ -143,10 +127,6 @@ function agentSkillsKey(name: string | null) {
 
 function agentBindingsKey(name: string | null) {
   return ['agents', name, 'bindings'] as const;
-}
-
-function agentOauthBindingsKey(name: string | null) {
-  return ['agents', name, 'oauth-bindings'] as const;
 }
 
 function agentKbsKey(name: string | null) {
@@ -309,47 +289,6 @@ export function useUnbindAgentMcpMutation(name: string) {
       ),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: agentBindingsKey(name) });
-    },
-  });
-}
-
-export function useAgentOauthBindingsQuery(name: string | null) {
-  const api = useAdminApi();
-
-  return useQuery({
-    enabled: Boolean(name),
-    queryKey: agentOauthBindingsKey(name),
-    queryFn: () => api.get<AgentOauthBindings>(`/admin/agents/${name}/bindings/oauth`),
-  });
-}
-
-export function useBindAgentOauthMutation(name: string) {
-  const api = useAdminApi();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: ({ connectorId, runAs }: AgentOauthBindingInput) =>
-      api.post<{ agent: string; bound: boolean; connector_id: string; run_as: string }>(
-        `/admin/agents/${name}/bindings/oauth/${connectorId}`,
-        { run_as: runAs }
-      ),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: agentOauthBindingsKey(name) });
-    },
-  });
-}
-
-export function useUnbindAgentOauthMutation(name: string) {
-  const api = useAdminApi();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (connectorId: string) =>
-      api.delete<{ agent: string; bound: boolean; connector_id: string }>(
-        `/admin/agents/${name}/bindings/oauth/${connectorId}`
-      ),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: agentOauthBindingsKey(name) });
     },
   });
 }

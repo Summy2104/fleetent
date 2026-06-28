@@ -10,7 +10,6 @@ from pathlib import Path
 import pytest
 
 import fleetent.agent_store as agent_store
-from fleetent.platform.connector_management import agent_oauth_binding_store
 from fleetent.platform.tenancy import store as tenancy_store
 from tests.integration._migration_template import apply_migrations
 
@@ -297,7 +296,6 @@ def test_delete_agent_removes_binding_children_in_same_transaction(db):
     tenancy_store.create_tenant(id="tenant-a", name="Tenant A")
     agent = agent_store.create_agent("bound", "v1", ["shell"], tenant_id="tenant-a")
     agent_store.bind_mcp_server(agent.id, "github")
-    agent_oauth_binding_store.bind(agent.id, "google-oauth")
 
     assert agent_store.delete_agent("bound") is True
 
@@ -306,12 +304,7 @@ def test_delete_agent_removes_binding_children_in_same_transaction(db):
         "SELECT COUNT(*) AS c FROM agent_mcp_servers WHERE agent_id = :aid",
         {"aid": agent.id},
     ).fetchone()
-    oauth_rows = database.execute(
-        "SELECT COUNT(*) AS c FROM agent_service_grants WHERE agent_id = :aid",
-        {"aid": agent.id},
-    ).fetchone()
     assert mcp_rows is not None and int(mcp_rows["c"]) == 0
-    assert oauth_rows is not None and int(oauth_rows["c"]) == 0
 
 
 def test_delete_agent_unknown_returns_false(db):

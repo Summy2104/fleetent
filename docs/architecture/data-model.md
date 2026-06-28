@@ -145,11 +145,8 @@ graph TD
 | `agent_kbs` | `agent_id` · `created_by` | → agents (CASCADE) | agent↔KB 绑定真相源；`kb_id` 软引用本 tenant `kb.db` |
 | `mcp_servers` | `agent_id` 可空 | → agents (CASCADE，agent-owned 行) | MCP 注册表（定义：transport/url/auth；含全局 `agent_id=NULL` 行）|
 | `agent_mcp_servers` | `(agent_id, server_id)` | → agents (CASCADE) | agent↔MCP 挂载（绑定）；`server_id` 软引用 `mcp_servers` |
-| `agent_service_grants` | `agent_id` · `run_as`(user/agent) | → agents (CASCADE) | agent↔外部服务授权；`service_id` 软引用 `external_services` |
 | `agent_secrets` | `agent_id` 可空（agent/shared scope）| → agents (CASCADE) | 密文 secret（node 下发时注入）|
 | `agent_skills` | `(agent_id, skill_name)`；drift 列 `base_version`/`base_commit`/`drift`/`drift_at` | → agents (CASCADE) · → skills(name) | skill 启用 + 部署副本 drift；→ [skill-system](../capabilities/skill-system.md) |
-| `external_services` | 单层全局**无 `agent_id`**；`protocol`=oauth2/apikey；`enabled` | — | 工具 OAuth 服务注册表（`client_secret` 走 env 不落库）；`enabled=false` 经 vault 解析链门控、拒绝授权/使用 |
-| `external_credentials` | PK `(user_id, service_id)`；`status`=authorized/needs_reauth/error | — (软引用 users/external_services) | per-principal Fernet 加密凭证（明文不出库）|
 
 **节点编排**（→ [agent-management §6](../capabilities/agent-management.md)；desired/reported reconcile）
 
@@ -198,10 +195,6 @@ erDiagram
   agents ||--o{ mcp_servers : "agent-owned MCP 注册"
   agents ||--o{ agent_mcp_servers : "MCP 绑定(agent侧)"
   mcp_servers ||..o{ agent_mcp_servers : "server_id 软引用"
-  external_services ||..o{ agent_service_grants : "service 绑定·admin"
-  agents ||--o{ agent_service_grants : "外部服务授权"
-  users ||..o{ external_credentials : "per-principal 凭证·vault"
-  external_services ||..o{ external_credentials : "service_id 软引用"
   agents ||--o{ agent_skills : "skill 绑定"
   skills ||--o{ agent_skills : "skill 主表(FK skill_name)"
   agents ||..o{ backflow_proposals : "skill 回流提案(agent_id 软引用)"

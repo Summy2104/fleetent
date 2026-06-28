@@ -7,7 +7,6 @@ import {
   Cpu,
   History,
   MessagesSquare,
-  Plug,
   ScrollText,
   Server,
   Sparkles,
@@ -52,7 +51,6 @@ export const NAV_GROUPS: NavGroup[] = [
     labelKey: 'nav.group.integrations',
     items: [
       { to: '/providers', labelKey: 'nav.providers', icon: Cpu },
-      { to: '/connectors', labelKey: 'nav.connectors', icon: Plug },
       { to: '/mcp', labelKey: 'nav.mcp', icon: Boxes },
       { to: '/nodes', labelKey: 'nav.nodes', icon: Server },
     ],

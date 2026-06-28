@@ -9,7 +9,6 @@ from alembic import command
 from alembic.config import Config
 
 from fleetent import agent_store
-from tests.integration._migration_template import apply_migrations
 
 
 def _upgrade_to(db_path: Path, revision: str) -> None:
@@ -39,9 +38,9 @@ def _foreign_keys(conn: sqlite3.Connection, table: str) -> list[tuple[object, ..
     return conn.execute(f"PRAGMA foreign_key_list({table})").fetchall()
 
 
-def test_head_schema_replaces_connectors_with_external_services(tmp_path: Path) -> None:
+def test_migration_093_replaces_connectors_with_external_services(tmp_path: Path) -> None:
     db = tmp_path / "mgmt.db"
-    apply_migrations(db)
+    _upgrade_to(db, "093")
 
     conn = sqlite3.connect(db)
     try:
@@ -61,9 +60,11 @@ def test_head_schema_replaces_connectors_with_external_services(tmp_path: Path) 
     assert "ux_connectors_global_scope" not in indexes
 
 
-def test_head_schema_renames_agent_oauth_bindings_to_agent_service_grants(tmp_path: Path) -> None:
+def test_migration_093_renames_agent_oauth_bindings_to_agent_service_grants(
+    tmp_path: Path,
+) -> None:
     db = tmp_path / "mgmt.db"
-    apply_migrations(db)
+    _upgrade_to(db, "093")
 
     conn = sqlite3.connect(db)
     try:
@@ -94,9 +95,9 @@ def test_head_schema_renames_agent_oauth_bindings_to_agent_service_grants(tmp_pa
     )
 
 
-def test_head_schema_adds_external_credentials(tmp_path: Path) -> None:
+def test_migration_093_adds_external_credentials(tmp_path: Path) -> None:
     db = tmp_path / "mgmt.db"
-    apply_migrations(db)
+    _upgrade_to(db, "093")
 
     conn = sqlite3.connect(db)
     try:
@@ -121,7 +122,7 @@ def test_head_schema_adds_external_credentials(tmp_path: Path) -> None:
     assert pk_columns == ["user_id", "service_id"]
 
 
-def test_upgrade_preserves_rows_and_delete_agent_cascades_service_grants(
+def test_upgrade_to_093_preserves_rows_and_delete_agent_cascades_service_grants(
     tmp_path: Path, monkeypatch
 ) -> None:
     db = tmp_path / "mgmt.db"
@@ -161,7 +162,7 @@ def test_upgrade_preserves_rows_and_delete_agent_cascades_service_grants(
     finally:
         conn.close()
 
-    _upgrade_to(db, "head")
+    _upgrade_to(db, "093")
     assert agent_store.delete_agent("ops") is True
 
     conn = sqlite3.connect(db)

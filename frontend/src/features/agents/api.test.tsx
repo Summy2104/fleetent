@@ -8,14 +8,12 @@ import {
   useAgentDetailQuery,
   useAgentBindingsQuery,
   useAgentKbsQuery,
-  useAgentOauthBindingsQuery,
   useAgentSecretsQuery,
   useAgentSkillsQuery,
   useAgentsQuery,
   useAddAgentImGroupMutation,
   useBindAgentKbMutation,
   useBindAgentMcpMutation,
-  useBindAgentOauthMutation,
   useBindAgentUserMutation,
   useClearDefaultAgentMutation,
   useDeleteAgentSecretMutation,
@@ -26,7 +24,6 @@ import {
   useSetDefaultAgentMutation,
   useUnbindAgentKbMutation,
   useUnbindAgentMcpMutation,
-  useUnbindAgentOauthMutation,
   useUnbindAgentUserMutation,
 } from '@/features/agents/api';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -55,12 +52,11 @@ function createWrapper(): ({ children }: { children: ReactNode }) => JSX.Element
 }
 
 describe('agents api bindings hooks', () => {
-  it('loads agent bindings and refreshes skills, mcp, oauth, kb, and user queries after mutations', async () => {
+  it('loads agent bindings and refreshes skills, mcp, kb, and user queries after mutations', async () => {
     const { server } = await import('@/test/msw/server');
 
     let skillsCalls = 0;
     let bindingsCalls = 0;
-    let oauthCalls = 0;
     let kbsCalls = 0;
     let skills = [
       { enabled: true, skill_name: 'crm-ops' },
@@ -70,10 +66,6 @@ describe('agents api bindings hooks', () => {
       mcp_servers: ['filesystem'],
       users: ['u1'],
       groups: [{ platform: 'slack', group_id: 'C1' }],
-    };
-    let oauth = {
-      connector_ids: ['github'],
-      service_grants: [{ run_as: 'agent', service_id: 'github' }],
     };
     let kbIds = ['support'];
 
@@ -85,10 +77,6 @@ describe('agents api bindings hooks', () => {
       http.get(`${API_BASE_URL}/admin/agents/alpha/bindings`, () => {
         bindingsCalls += 1;
         return HttpResponse.json(bindings);
-      }),
-      http.get(`${API_BASE_URL}/admin/agents/alpha/bindings/oauth`, () => {
-        oauthCalls += 1;
-        return HttpResponse.json(oauth);
       }),
       http.get(`${API_BASE_URL}/admin/agents/alpha/kbs`, () => {
         kbsCalls += 1;
@@ -108,24 +96,6 @@ describe('agents api bindings hooks', () => {
       http.delete(`${API_BASE_URL}/admin/agents/alpha/bindings/mcp/filesystem`, () => {
         bindings = { ...bindings, mcp_servers: ['github'] };
         return HttpResponse.json({ agent: 'alpha', bound: false, server_id: 'filesystem' });
-      }),
-      http.post(`${API_BASE_URL}/admin/agents/alpha/bindings/oauth/slack`, async ({ request }) => {
-        expect(await request.json()).toEqual({ run_as: 'user' });
-        oauth = {
-          connector_ids: ['github', 'slack'],
-          service_grants: [
-            { run_as: 'agent', service_id: 'github' },
-            { run_as: 'user', service_id: 'slack' },
-          ],
-        };
-        return HttpResponse.json({ agent: 'alpha', bound: true, connector_id: 'slack', run_as: 'user' });
-      }),
-      http.delete(`${API_BASE_URL}/admin/agents/alpha/bindings/oauth/github`, () => {
-        oauth = {
-          connector_ids: ['slack'],
-          service_grants: [{ run_as: 'user', service_id: 'slack' }],
-        };
-        return HttpResponse.json({ agent: 'alpha', bound: false, connector_id: 'github' });
       }),
       http.post(`${API_BASE_URL}/admin/agents/alpha/kbs`, async ({ request }) => {
         expect(await request.json()).toEqual({ kb_id: 'sales' });
@@ -164,7 +134,6 @@ describe('agents api bindings hooks', () => {
     const wrapper = createWrapper();
     const skillsQuery = renderHook(() => useAgentSkillsQuery('alpha'), { wrapper });
     const bindingsQuery = renderHook(() => useAgentBindingsQuery('alpha'), { wrapper });
-    const oauthQuery = renderHook(() => useAgentOauthBindingsQuery('alpha'), { wrapper });
     const kbsQuery = renderHook(() => useAgentKbsQuery('alpha'), { wrapper });
 
     await waitFor(() => {
@@ -177,15 +146,12 @@ describe('agents api bindings hooks', () => {
       expect(bindingsQuery.result.current.data?.groups).toEqual([
         { platform: 'slack', group_id: 'C1' },
       ]);
-      expect(oauthQuery.result.current.data?.connector_ids).toEqual(['github']);
       expect(kbsQuery.result.current.data?.kb_ids).toEqual(['support']);
     });
 
     const setSkill = renderHook(() => useSetAgentSkillMutation('alpha'), { wrapper });
     const bindMcp = renderHook(() => useBindAgentMcpMutation('alpha'), { wrapper });
     const unbindMcp = renderHook(() => useUnbindAgentMcpMutation('alpha'), { wrapper });
-    const bindOauth = renderHook(() => useBindAgentOauthMutation('alpha'), { wrapper });
-    const unbindOauth = renderHook(() => useUnbindAgentOauthMutation('alpha'), { wrapper });
     const bindKb = renderHook(() => useBindAgentKbMutation('alpha'), { wrapper });
     const unbindKb = renderHook(() => useUnbindAgentKbMutation('alpha'), { wrapper });
     const bindUser = renderHook(() => useBindAgentUserMutation('alpha'), { wrapper });
@@ -195,7 +161,6 @@ describe('agents api bindings hooks', () => {
 
     let previousSkillsCalls = skillsCalls;
     let previousBindingsCalls = bindingsCalls;
-    let previousOauthCalls = oauthCalls;
     let previousKbsCalls = kbsCalls;
 
     await setSkill.result.current.mutateAsync({ skill_name: 'incident-bridge', enabled: true });
@@ -218,20 +183,6 @@ describe('agents api bindings hooks', () => {
       expect(bindingsQuery.result.current.data?.mcp_servers).toEqual(['github']);
     });
     previousBindingsCalls = bindingsCalls;
-
-    await bindOauth.result.current.mutateAsync({ connectorId: 'slack', runAs: 'user' });
-    await waitFor(() => {
-      expect(oauthCalls).toBeGreaterThan(previousOauthCalls);
-      expect(oauthQuery.result.current.data?.connector_ids).toEqual(['github', 'slack']);
-    });
-    previousOauthCalls = oauthCalls;
-
-    await unbindOauth.result.current.mutateAsync('github');
-    await waitFor(() => {
-      expect(oauthCalls).toBeGreaterThan(previousOauthCalls);
-      expect(oauthQuery.result.current.data?.connector_ids).toEqual(['slack']);
-    });
-    previousOauthCalls = oauthCalls;
 
     await bindKb.result.current.mutateAsync('sales');
     await waitFor(() => {

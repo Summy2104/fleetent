@@ -1,4 +1,4 @@
-"""Integration tests for migration 085: cascade FK on agent MCP/OAuth binding tables."""
+"""Integration tests for migration 085: cascade FK on agent binding tables."""
 
 from __future__ import annotations
 
@@ -30,15 +30,13 @@ def test_head_schema_binding_tables_have_cascade_fk(tmp_path: Path) -> None:
     conn = sqlite3.connect(db)
     try:
         mcp_binding_fks = _fk_rows(conn, "agent_mcp_servers")
-        oauth_binding_fks = _fk_rows(conn, "agent_service_grants")
     finally:
         conn.close()
 
-    for fk_rows in (mcp_binding_fks, oauth_binding_fks):
-        assert any(
-            row[2] == "agents" and row[3] == "agent_id" and row[4] == "id" and row[6] == "CASCADE"
-            for row in fk_rows
-        )
+    assert any(
+        row[2] == "agents" and row[3] == "agent_id" and row[4] == "id" and row[6] == "CASCADE"
+        for row in mcp_binding_fks
+    )
 
 
 def test_upgrade_cleans_binding_orphans_and_preserves_live(tmp_path: Path, monkeypatch) -> None:
@@ -96,16 +94,15 @@ def test_upgrade_cleans_binding_orphans_and_preserves_live(tmp_path: Path, monke
         mcp_orphan = conn.execute(
             "SELECT COUNT(*) FROM agent_mcp_servers WHERE agent_id = 999999"
         ).fetchone()[0]
-        oauth_live = conn.execute(
-            "SELECT COUNT(*) FROM agent_service_grants WHERE agent_id = ?", (agent.id,)
-        ).fetchone()[0]
-        oauth_orphan = conn.execute(
-            "SELECT COUNT(*) FROM agent_service_grants WHERE agent_id = 999999"
-        ).fetchone()[0]
+        tables = {
+            str(row[0])
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
     finally:
         conn.close()
 
-    assert (mcp_live, mcp_orphan, oauth_live, oauth_orphan) == (1, 0, 1, 0)
+    assert (mcp_live, mcp_orphan) == (1, 0)
+    assert "agent_service_grants" not in tables
 
 
 def test_agent_delete_cascades_binding_rows_without_manual_clear(
@@ -117,9 +114,6 @@ def test_agent_delete_cascades_binding_rows_without_manual_clear(
 
     agent = agent_store.create_agent("ops", "Ops.", ["shell"])
     agent_store.bind_mcp_server(agent.id, "github")
-    from fleetent.platform.connector_management import agent_oauth_binding_store
-
-    agent_oauth_binding_store.bind(agent.id, "google-oauth")
 
     assert agent_store.delete_agent("ops") is True
 
@@ -128,10 +122,7 @@ def test_agent_delete_cascades_binding_rows_without_manual_clear(
         mcp = conn.execute(
             "SELECT COUNT(*) FROM agent_mcp_servers WHERE agent_id = ?", (agent.id,)
         ).fetchone()[0]
-        oauth = conn.execute(
-            "SELECT COUNT(*) FROM agent_service_grants WHERE agent_id = ?", (agent.id,)
-        ).fetchone()[0]
     finally:
         conn.close()
 
-    assert (mcp, oauth) == (0, 0)
+    assert mcp == 0

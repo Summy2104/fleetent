@@ -24,6 +24,15 @@ branch_labels = None
 depends_on = None
 
 
+def _has_table(name: str) -> bool:
+    return sa.inspect(op.get_bind()).has_table(name)
+
+
+def _has_index(table: str, name: str) -> bool:
+    inspector = sa.inspect(op.get_bind())
+    return any(index["name"] == name for index in inspector.get_indexes(table))
+
+
 def upgrade() -> None:
     # SQLite cannot drop a PRIMARY KEY in place; recreate the table to move from
     # PK(id) to a rowid table whose uniqueness is scoped by agent_id.
@@ -78,17 +87,21 @@ def upgrade() -> None:
         sa.Column("created_at", sa.Text(), nullable=False),
         sa.UniqueConstraint("agent_id", "server_id"),
     )
-    op.create_index(
-        "idx_agent_mcp_servers_agent", "agent_mcp_servers", ["agent_id", "server_id"]
-    )
+    op.create_index("idx_agent_mcp_servers_agent", "agent_mcp_servers", ["agent_id", "server_id"])
 
 
 def downgrade() -> None:
-    op.drop_index("idx_agent_mcp_servers_agent", table_name="agent_mcp_servers")
-    op.drop_table("agent_mcp_servers")
+    if _has_table("agent_mcp_servers"):
+        if _has_index("agent_mcp_servers", "idx_agent_mcp_servers_agent"):
+            op.drop_index("idx_agent_mcp_servers_agent", table_name="agent_mcp_servers")
+        op.drop_table("agent_mcp_servers")
 
-    op.drop_index("ux_connectors_agent_scope", table_name="connectors")
-    op.drop_index("ux_connectors_global_scope", table_name="connectors")
+    if not _has_table("connectors"):
+        return
+    if _has_index("connectors", "ux_connectors_agent_scope"):
+        op.drop_index("ux_connectors_agent_scope", table_name="connectors")
+    if _has_index("connectors", "ux_connectors_global_scope"):
+        op.drop_index("ux_connectors_global_scope", table_name="connectors")
     op.rename_table("connectors", "connectors_new")
     op.create_table(
         "connectors",

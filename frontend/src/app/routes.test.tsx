@@ -321,26 +321,6 @@ describe('admin routes', () => {
     expect(nav.getByRole('link', { name: 'Users' })).toHaveAttribute('href', '/users');
   });
 
-  it('renders connectors as a native route and removes the legacy connectors link', async () => {
-    server.use(
-      http.get('http://fleetent.test/admin/connectors', () => HttpResponse.json([])),
-      http.get('http://fleetent.test/admin/connectors/grants', () =>
-        HttpResponse.json({ grants: [], consent_hint: 'browser flow required' })
-      ),
-      http.get('http://fleetent.test/admin/mcp/servers', () => HttpResponse.json([])),
-      http.get('http://fleetent.test/admin/mcp/doctor', () => HttpResponse.json({ checks: [] }))
-    );
-
-    renderRoutes('/connectors', 'session-token');
-
-    expect((await screen.findAllByRole('heading', { name: 'Connector' }))[0]).toBeInTheDocument();
-    const nav = within(screen.getByRole('navigation'));
-    const connectorLinks = nav.getAllByRole('link', { name: 'Connector' });
-    expect(connectorLinks).toHaveLength(1);
-    expect(connectorLinks[0]).toHaveAttribute('href', '/connectors');
-    expect(nav.getAllByRole('link', { name: 'Skills' })).toHaveLength(1);
-  });
-
   it('renders chat as a native route in the SPA', async () => {
     server.use(http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])));
 

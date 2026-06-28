@@ -19,8 +19,8 @@ _logger = logging.getLogger(__name__)
 _UNSET: Any = object()
 
 # Optional hook called with the agent's integer id just before the agent row is
-# deleted. Platform registers this at startup to clean up service-principal
-# external_credentials; standalone agents leave it None. Best-effort: exceptions
+# deleted. Platform may register this at startup for management-plane cleanup;
+# standalone agents leave it None. Best-effort: exceptions
 # are caught, logged, and suppressed so delete_agent always completes.
 _delete_agent_hook: Callable[[int], None] | None = None
 

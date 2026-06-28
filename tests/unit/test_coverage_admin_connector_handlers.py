@@ -80,7 +80,7 @@ def test_agent_admin_yaml_bindings_and_versions(monkeypatch):
     assert calls == []
 
 
-def test_agent_admin_binding_skill_kb_oauth_and_mcp_handlers(monkeypatch):
+def test_agent_admin_binding_skill_kb_and_mcp_handlers(monkeypatch):
     _patch_agent_admin_auth(monkeypatch, agent_admin_api)
     agent = _agent()
     calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
@@ -145,27 +145,6 @@ def test_agent_admin_binding_skill_kb_oauth_and_mcp_handlers(monkeypatch):
         "unbind",
         lambda *args: calls.append(("kb_unbind", args, {})),
     )
-    monkeypatch.setattr(
-        agent_admin_api.agent_service_grant_store,
-        "list_services_for_agent",
-        lambda agent_id: [{"service_id": "gdrive", "run_as": "user"}],
-    )
-    monkeypatch.setattr(
-        agent_admin_api.agent_service_grant_store,
-        "bind",
-        lambda *args, **kwargs: calls.append(("oauth_bind", args, kwargs)),
-    )
-    monkeypatch.setattr(
-        agent_admin_api.agent_service_grant_store,
-        "unbind",
-        lambda *args: calls.append(("oauth_unbind", args, {})),
-    )
-    monkeypatch.setattr(
-        agent_admin_api.external_service_store,
-        "get_service",
-        lambda connector_id: {"service_id": connector_id} if connector_id == "gdrive" else None,
-    )
-
     assert agent_admin_api.bind_user("ops", "u1", authorization="Session token")["bound"]
     assert not agent_admin_api.unbind_user("ops", "u1", authorization="Session token")["bound"]
     assert agent_admin_api.get_bindings("ops", authorization="Session token") == {
@@ -189,19 +168,9 @@ def test_agent_admin_binding_skill_kb_oauth_and_mcp_handlers(monkeypatch):
     }
     assert agent_admin_api.bind_agent_kb("ops", "kb1", authorization="Session token")["bound"]
     assert not agent_admin_api.unbind_agent_kb("ops", "kb1", authorization="Session token")["bound"]
-    assert agent_admin_api.list_agent_oauth("ops", authorization="Session token") == {
-        "agent": "ops",
-        "service_grants": [{"service_id": "gdrive", "run_as": "user"}],
-        "connector_ids": ["gdrive"],
-    }
-    assert agent_admin_api.bind_oauth("ops", "gdrive", authorization="Session token")["bound"]
-    assert not agent_admin_api.unbind_oauth("ops", "gdrive", authorization="Session token")["bound"]
     with pytest.raises(HTTPException) as missing_mcp:
         agent_admin_api.bind_mcp("ops", "missing", authorization="Session token")
     assert missing_mcp.value.status_code == 404
-    with pytest.raises(HTTPException) as missing_oauth:
-        agent_admin_api.bind_oauth("ops", "missing", authorization="Session token")
-    assert missing_oauth.value.status_code == 404
 
 
 def test_agent_console_agent_lifecycle(monkeypatch):
@@ -333,97 +302,9 @@ def test_agent_console_agent_lifecycle(monkeypatch):
     assert bad_yaml.value.status_code == 422
 
 
-async def test_connector_admin_catalog_mcp_and_grant_handlers(monkeypatch):
+async def test_connector_admin_mcp_handlers(monkeypatch):
     _patch_agent_admin_auth(monkeypatch, connector_admin_api)
-    connectors = {
-        "gdrive": {
-            "id": "gdrive",
-            "display_name": "Drive",
-            "enabled": True,
-            "oauth_config": {"client_secret": "secret", "nested": [{"refresh_token": "tok"}]},
-        }
-    }
     calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
-    monkeypatch.setattr(
-        connector_admin_api,
-        "connectors_list_grants",
-        lambda agent_id=None: [{"connector_id": "gdrive", "access_token": "secret"}],
-    )
-    monkeypatch.setattr(
-        connector_admin_api,
-        "connectors_offboarding_result",
-        lambda user_id: {"user_id": user_id, "refresh_token": "secret"},
-    )
-    monkeypatch.setattr(
-        connector_admin_api,
-        "connectors_revoke",
-        lambda user_id, connector_id: {
-            "user_id": user_id,
-            "connector_id": connector_id,
-            "token": "secret",
-        },
-    )
-    monkeypatch.setattr(
-        connector_admin_api,
-        "connector_lifecycle_stats",
-        lambda connector_id: {
-            "active_grants": 2,
-            "last_refresh_success": True,
-            "last_refresh_at": "now",
-        },
-    )
-    monkeypatch.setattr(
-        connector_admin_api.external_service_store,
-        "list_services",
-        lambda: [
-            {
-                "service_id": "gdrive",
-                "display_name": "Drive",
-                "protocol": "oauth2",
-                "enabled": True,
-                "oauth_config": {"client_secret": "secret", "nested": [{"refresh_token": "tok"}]},
-            }
-        ],
-    )
-    monkeypatch.setattr(
-        connector_admin_api.external_service_store,
-        "get_service",
-        lambda connector_id: (
-            {
-                "service_id": connector_id,
-                "display_name": connectors[connector_id]["display_name"],
-                "protocol": connectors[connector_id].get("protocol", "oauth2"),
-                "enabled": connectors[connector_id]["enabled"],
-                "oauth_config": connectors[connector_id]["oauth_config"],
-            }
-            if connector_id in connectors
-            else None
-        ),
-    )
-    monkeypatch.setattr(
-        connector_admin_api.external_service_store,
-        "add_service",
-        lambda id, display_name, **kwargs: connectors.setdefault(
-            id,
-            {
-                "id": id,
-                "display_name": display_name,
-                "protocol": kwargs.get("protocol", "oauth2"),
-                "enabled": kwargs.get("enabled", True),
-                "oauth_config": kwargs.get("oauth_config") or {},
-            },
-        ),
-    )
-    monkeypatch.setattr(
-        connector_admin_api.external_service_store,
-        "edit_service",
-        lambda connector_id, **kwargs: connectors[connector_id].update(kwargs),
-    )
-    monkeypatch.setattr(
-        connector_admin_api.external_service_store,
-        "delete_service",
-        lambda connector_id: connectors.pop(connector_id, None),
-    )
     monkeypatch.setattr(
         connector_admin_api,
         "mcp_list_servers",
@@ -498,59 +379,6 @@ async def test_connector_admin_catalog_mcp_and_grant_handlers(monkeypatch):
         lambda agent_id, server_id: calls.append(("delete_mcp", (agent_id, server_id), {})),
     )
 
-    assert (
-        connector_admin_api.authorization_matrix(authorization="Session token")["grants"][0][
-            "access_token"
-        ]
-        == "****"
-    )
-    assert (
-        connector_admin_api.offboarding_result("u1", authorization="Session token")["refresh_token"]
-        == "****"
-    )
-    assert (
-        connector_admin_api.list_connectors(authorization="Session token")[0]["oauth_config"][
-            "client_secret"
-        ]
-        == "****"
-    )
-    assert (
-        connector_admin_api.add_connector(
-            connector_admin_api.ConnectorBody(id="slack", display_name="Slack"),
-            authorization="Session token",
-        )["id"]
-        == "slack"
-    )
-    assert (
-        connector_admin_api.edit_connector(
-            "slack",
-            connector_admin_api.ConnectorEditBody(display_name="Slack New", enabled=False),
-            authorization="Session token",
-        )["display_name"]
-        == "Slack New"
-    )
-    assert connector_admin_api.test_oauth_connector("slack", authorization="Session token")[
-        "token_valid"
-    ]
-    assert (
-        connector_admin_api.lifecycle("slack", authorization="Session token")["active_grants"] == 2
-    )
-    assert (
-        connector_admin_api.revoke_grant(
-            "u1", "slack", authorization="Session token", x_confirm="true"
-        )["token"]
-        == "****"
-    )
-    assert connector_admin_api.delete_connector("slack", authorization="Session token") == {
-        "success": True,
-        "connector_id": "slack",
-    }
-    with pytest.raises(HTTPException) as protocol_error:
-        connector_admin_api.add_connector(
-            connector_admin_api.ConnectorBody(id="bad", display_name="Bad", protocol="api_key"),
-            authorization="Session token",
-        )
-    assert protocol_error.value.status_code == 422
     assert (
         connector_admin_api.mcp_doctor_view(authorization="Session token")["checks"][0]["api_key"]
         == "****"
