@@ -1,14 +1,14 @@
 ## Why
 
-平台侧"工具 OAuth Vault"（`external_services` / `external_credentials` / `agent_service_grants` + `vault_provider` + `/admin/connectors*` + 前端 OAuth tab）是一套 **build-but-unwired 半成品**：架构、DB、API、前端 hook 全建好，但**零生产工具消费**——唯一声明 `@tool(connector=)` 的是测试工具 `github_connection_status`，前端 OAuth tab 从未渲染。团队已决定**工具凭证鉴权挪到 agent 侧实现**（非撤能力）。继续把这套死代码留在管理面，只会让"agent 接了什么"的模型与控制台持续被多义、悬空、命名错位污染。先做这一刀纯减法净化，后续的绑定模型/视图重构才能站在干净地基上。
+平台侧"工具 OAuth Vault"（外部服务表 / 凭证表 / grant 表 + 平台注入 provider + `/admin/connectors*` + 前端 OAuth tab）是一套 **build-but-unwired 半成品**：架构、DB、API、前端 hook 全建好，但**零生产工具消费**——唯一声明 `@tool(connector=)` 的是测试工具 `github_connection_status`，前端 OAuth tab 从未渲染。团队已决定**工具凭证鉴权挪到 agent 侧实现**（非撤能力）。继续把这套死代码留在管理面，只会让"agent 接了什么"的模型与控制台持续被多义、悬空、命名错位污染。先做这一刀纯减法净化，后续的绑定模型/视图重构才能站在干净地基上。
 
 ## What Changes
 
 - **删除管理库三表（BREAKING）**：`external_services`、`external_credentials`、`agent_service_grants`（Alembic 迁移 108，forward-only drop）。
-- **删除 platform 侧实现**：`vault_provider.py` 及三个 store（`external_service_store` / `external_credential_store` / `agent_service_grant_store`）。
+- **删除 platform 侧实现**：平台注入 provider 及三类 legacy store。
 - **删除管理 API（BREAKING）**：`/admin/connectors*`（list/add/edit/delete）、`/admin/connectors/grants` 授权矩阵、OAuth 授权 + 回调端点、`/admin/agents/{name}/bindings/oauth*`。
 - **删除前端 OAuth 面**：`features/connectors/` 的外部服务/grants 部分、悬空的 agent OAuth hooks、控制台的 OAuth Connectors tab 与 `/connectors` 导航/i18n。
-- **解除 platform 注入**：`server.py` 不再 `connectors.set_provider(vault_provider...)`，移除 delete-agent 清凭证 hook。
+- **解除 platform 注入**：`server.py` 不再注入平台 provider，移除 delete-agent 清凭证 hook。
 - **保留 agent 侧 seam（关键，非删除）**：`src/fleetent/connectors.py`（`get_credential` / `Credential` / `NeedsConsent` / `CredentialError` / `set_provider` / `_default_provider`）与 `tools/registry.py` 的 `@tool(connector=)` 通道**原样保留**。解除注入后 `_provider` 回落 `_default_provider`（恒 `NeedsConsent`）= **安全降级**，将来 agent 侧自行 `set_provider`。
 - **保留 canary**：测试工具 `github_connection_status` 保留，撤 vault 后返回 `NeedsConsent`，证明 seam 仍在。
 

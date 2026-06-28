@@ -21,6 +21,10 @@ branch_labels = None
 depends_on = None
 
 
+def _has_table(name: str) -> bool:
+    return sa.inspect(op.get_bind()).has_table(name)
+
+
 def upgrade() -> None:
     op.create_table(
         "connectors",
@@ -37,4 +41,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table("connectors")
+    if _has_table("connectors"):
+        op.drop_table("connectors")

@@ -164,18 +164,6 @@ def references(agent_id: int) -> dict[str, Any]:
             {"aid": agent_id},
         ).fetchall()
     ]
-    service_grants = [
-        str(r["service_id"])
-        for r in db.execute(
-            """
-            SELECT service_id
-            FROM agent_service_grants
-            WHERE agent_id = :aid
-            ORDER BY service_id
-            """,
-            {"aid": agent_id},
-        ).fetchall()
-    ]
     placements = [
         str(r["node_id"])
         for r in db.execute(
@@ -194,7 +182,7 @@ def references(agent_id: int) -> dict[str, Any]:
         "im_groups": im_groups,
         "mcp_servers": mcp_servers,
         "kbs": kbs,
-        "service_grants": service_grants,
+        "service_grants": [],
         "placements": placements,
     }
 

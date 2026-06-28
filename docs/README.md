@@ -77,7 +77,7 @@ docs/
 | [knowledge-base.md](capabilities/knowledge-base.md) | 企业文档知识库、local / Google Drive / Confluence 同步、hybrid / graph / rerank / planner | P1 | vector-store | 常乐 | 基础完成 |
 | [vector-store.md](capabilities/vector-store.md) | 向量索引、SQLite backend、embedding / rerank provider、同步 reindex | P1 | config-management | 常乐 | 基础完成 |
 | [config-management.md](capabilities/config-management.md) | on-premises 打包、配置管理、SQLite upgrade / backup | P1 | - | 常乐 | 基础完成 |
-| [connectors.md](capabilities/connectors.md) | 外部服务 Vault（external_services / external_credentials / agent_service_grants） | P2 | platform | 张亮 | 基础完成 |
+| [connectors.md](capabilities/connectors.md) | connector seam 与 agent-side 凭证注入口（platform vault 已退役） | P2 | runtime · tools | 张亮 | 基础完成 |
 | [reflection.md](capabilities/reflection.md) | User Memory / Skill / 知识库反思、proposal lifecycle、趋势聚合 | P2 | memory · skill · knowledge-base · observability | 常乐 | 基础完成 |
 | [agent-management.md](capabilities/agent-management.md) | Agent 生命周期、版本、管理态、materialize、node 编排（as-built 行为模型） | — | — | — | as-built |
 | [im-access-model.md](capabilities/im-access-model.md) | IM bot 接入身份、三层访问控制、配置同步契约（as-built 行为模型） | — | — | — | as-built |

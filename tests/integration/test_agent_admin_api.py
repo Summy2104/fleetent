@@ -17,8 +17,6 @@ import fleetent.platform.agent_lifecycle.secret_store as secret_store
 import fleetent.platform.agent_management_console.agent_admin_api as api
 import fleetent.platform.agent_management_console.agent_im_group_store as agent_im_group_store
 import fleetent.platform.connector_management.agent_mcp_server_store as agent_mcp_server_store
-import fleetent.platform.connector_management.agent_oauth_binding_store as agent_oauth_binding_store
-import fleetent.platform.connector_management.connector_config_store as connector_config_store
 import fleetent.platform.knowledge_base_management.agent_kbs_store as agent_kbs_store
 import fleetent.platform.skill_management.skill_admin_api as skill_api
 import fleetent.platform.skill_management.skill_admin_store as skill_admin_store
@@ -41,8 +39,6 @@ def _patch_all_stores(mp_or_monkeypatch, db_path: object) -> None:
     mp_or_monkeypatch.setattr(agent_kbs_store, "_database", lambda: db_instance)
     mp_or_monkeypatch.setattr(agent_im_group_store, "_database", lambda: db_instance)
     mp_or_monkeypatch.setattr(agent_mcp_server_store, "_database", lambda: db_instance)
-    mp_or_monkeypatch.setattr(agent_oauth_binding_store, "_database", lambda: db_instance)
-    mp_or_monkeypatch.setattr(connector_config_store, "_database", lambda: db_instance)
     mp_or_monkeypatch.setattr(credential_slots, "_database", lambda: db_instance)
     mp_or_monkeypatch.setattr(secret_store, "_database", lambda: db_instance)
     mp_or_monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
@@ -387,55 +383,6 @@ def test_kb_bind_unknown_agent_404(client):
     token, _ = _session_for("admin")
     r = client.post("/admin/agents/ghost/kbs", headers=_hdr(token), json={"kb_id": "kb1"})
     assert r.status_code == 404
-
-
-# --- agent OAuth connector bindings ------------------------------------------
-
-
-def _oauth_grants(client, token):
-    r = client.get("/admin/agents/ops/bindings/oauth", headers=_hdr(token))
-    return r.json()["service_grants"]
-
-
-def test_oauth_bind_list_unbind(fresh_client):
-    from fleetent.platform.connector_management import external_service_store
-
-    agent_store.create_agent("ops", "Ops.", ["shell"])
-    external_service_store.add_service("github", "GitHub")
-    token, _ = _session_for("admin")
-    assert _oauth_grants(fresh_client, token) == []
-    r = fresh_client.post(
-        "/admin/agents/ops/bindings/oauth/github",
-        headers=_hdr(token),
-        json={"run_as": "agent"},
-    )
-    assert r.status_code == 200
-    assert _oauth_grants(fresh_client, token) == [{"service_id": "github", "run_as": "agent"}]
-    d = fresh_client.delete("/admin/agents/ops/bindings/oauth/github", headers=_hdr(token))
-    assert d.status_code == 200
-    assert _oauth_grants(fresh_client, token) == []
-
-
-def test_oauth_bind_unknown_connector_404(fresh_client):
-    agent_store.create_agent("ops", "Ops.", ["shell"])
-    token, _ = _session_for("admin")
-    r = fresh_client.post(
-        "/admin/agents/ops/bindings/oauth/nope",
-        headers=_hdr(token),
-        json={"run_as": "user"},
-    )
-    assert r.status_code == 404
-
-
-def test_oauth_bind_viewer_forbidden(fresh_client):
-    agent_store.create_agent("ops", "Ops.", ["shell"])
-    token, _ = _session_for("viewer")
-    r = fresh_client.post(
-        "/admin/agents/ops/bindings/oauth/github",
-        headers=_hdr(token),
-        json={"run_as": "user"},
-    )
-    assert r.status_code == 403
 
 
 # --- export agent.yaml --------------------------------------------------------

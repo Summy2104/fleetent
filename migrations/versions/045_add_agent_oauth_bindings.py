@@ -20,6 +20,10 @@ branch_labels = None
 depends_on = None
 
 
+def _has_table(name: str) -> bool:
+    return sa.inspect(op.get_bind()).has_table(name)
+
+
 def upgrade() -> None:
     op.create_table(
         "agent_oauth_bindings",
@@ -32,4 +36,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table("agent_oauth_bindings")
+    if _has_table("agent_oauth_bindings"):
+        op.drop_table("agent_oauth_bindings")

@@ -1,25 +1,19 @@
 # oauth-mcp-admin-ui Specification
 
 ## Purpose
-TBD - created by syncing change add-admin-console-modules. Update Purpose after archive.
-## Requirements
+记录 admin SPA 中 OAuth connectors 面的退役结果，以及 MCP 面仍保留的边界。
+
+## REMOVED Requirements
+
 ### Requirement: OAuth connectors tab
-The admin console SHALL present an OAuth Connectors tab (distinct from the IM Connectors tab) listing external services registry entries with masked secrets from `GET /admin/connectors`, plus the per-user authorization (grants) matrix. Write controls SHALL be admin-only. HTTP 端点路径保持不变（向后兼容）。
-
-#### Scenario: Admin sees connectors and grants
-- **WHEN** an admin opens the OAuth Connectors tab
-- **THEN** external services are listed via `GET /admin/connectors` (secrets masked) and grants via `GET /admin/connectors/grants`
-
-#### Scenario: Viewer cannot mutate connectors
-- **WHEN** a viewer opens the tab
-- **THEN** create / edit / revoke controls are hidden
+**Reason**: OAuth connectors 的 platform 控制面已退役。
+**Migration**: 删 `/connectors` 路由、导航和 i18n；相关后端端点同步移除。
 
 ### Requirement: Connector CRUD and grant revoke
-The console SHALL let an admin add and edit an external service config and revoke a user's grant.
+**Reason**: 旧管理面不再存在。
+**Migration**: 删除前端 connector 增删改与 grant 吊销控件。
 
-#### Scenario: Revoke a grant
-- **WHEN** an admin revokes a user's service grant
-- **THEN** the console calls `POST /admin/connectors/grants/{user_id}/{connector_id}/revoke`
+## Requirements
 
 ### Requirement: MCP servers view
 The console SHALL show MCP server states with a doctor summary and let an admin reconnect a server and view its tools.

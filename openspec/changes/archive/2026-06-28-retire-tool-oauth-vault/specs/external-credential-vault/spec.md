@@ -1,7 +1,7 @@
 ## REMOVED Requirements
 
 > **共同 Reason**：整套工具 OAuth Vault 是 build-but-unwired 半成品——零生产工具消费（唯一 `@tool(connector=)` 为测试工具），前端 OAuth tab 从未渲染。团队决定工具凭证鉴权挪到 agent 侧实现，平台退役本能力。
-> **共同 Migration**：drop `external_services` / `external_credentials` 表（Alembic 108）；删 `external_service_store` / `external_credential_store` / `vault_provider`。agent 侧 `connectors.py` seam 保留（见 `connector-credential-injection`）；解除 platform 注入后 `get_credential` 经 `_default_provider` 安全降级为 `NeedsConsent`。将来 agent 侧自行实现并 `set_provider`。
+> **共同 Migration**：drop `external_services` / `external_credentials` 表（Alembic 108）；删 legacy service store / credential store / 平台 provider。agent 侧 `connectors.py` seam 保留（见 `connector-credential-injection`）；解除 platform 注入后 `get_credential` 经 `_default_provider` 安全降级为 `NeedsConsent`。将来 agent 侧自行实现并 `set_provider`。
 
 ### Requirement: 外部服务注册表（单层全局，多协议）
 **Reason**: 退役工具 OAuth Vault（半成品，零工具消费）。
@@ -17,7 +17,7 @@
 
 ### Requirement: Vault provider 经 seam 注入并按 principal 解析
 **Reason**: 退役 platform 侧 vault provider 实现。
-**Migration**: 删 `vault_provider`；`server.py` 不再 `set_provider`，seam 回落 `_default_provider`（`NeedsConsent`）。
+**Migration**: 删平台 provider；`server.py` 不再 `set_provider`，seam 回落 `_default_provider`（`NeedsConsent`）。
 
 ### Requirement: 最小 OAuth2 授权码 consent 流
 **Reason**: 退役 platform 侧 OAuth consent 流。
@@ -25,7 +25,7 @@
 
 ### Requirement: access token 过期自动刷新
 **Reason**: 随 vault provider 退役。
-**Migration**: token 刷新逻辑随 `vault_provider` 删除。
+**Migration**: token 刷新逻辑随平台 provider 删除。
 
 ### Requirement: refresh 失效与错误的状态流转
 **Reason**: 随 `external_credentials` 状态机退役。
@@ -41,10 +41,10 @@
 
 ### Requirement: API-key 凭证解析
 **Reason**: 随 vault provider 退役。
-**Migration**: API-key 解析随 `vault_provider` 删除。
+**Migration**: API-key 解析随平台 provider 删除。
 
 ### Requirement: provider 适配层支持多服务
-**Reason**: 随 `vault_provider` 退役。
+**Reason**: 随平台 provider 退役。
 **Migration**: 多服务适配随 provider 实现删除；agent 侧将来按需实现。
 
 ### Requirement: 禁用的外部服务在凭证解析被门控

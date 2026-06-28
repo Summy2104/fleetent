@@ -47,6 +47,7 @@ def test_default_provider_returns_needs_consent():
     result = connectors.get_credential("user-1", "google-drive", ["drive.readonly"])
     assert isinstance(result, connectors.NeedsConsent)
     assert result.connector == "google-drive"
+    assert result.consent_url == "https://consent.invalid/google-drive"
 
 
 def test_provider_seam_passthrough(monkeypatch):

@@ -171,7 +171,9 @@ def test_head_schema_adds_agent_fk_cascades_to_binding_tables_only(tmp_path: Pat
         user_agents_fks = _fk_rows(conn, "user_agents")
         mcp_servers_fks = _fk_rows(conn, "mcp_servers")
         agent_secrets_fks = _fk_rows(conn, "agent_secrets")
-        external_services_fks = _fk_rows(conn, "external_services")
+        tables = {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
     finally:
         conn.close()
 
@@ -180,7 +182,7 @@ def test_head_schema_adds_agent_fk_cascades_to_binding_tables_only(tmp_path: Pat
             row[2] == "agents" and row[3] == "agent_id" and row[4] == "id" and row[6] == "CASCADE"
             for row in fk_rows
         )
-    assert external_services_fks == []
+    assert "external_services" not in tables
     assert "agent_versions" not in tables
     assert _LEGACY_CHANNEL_BINDINGS_TABLE not in tables
 
