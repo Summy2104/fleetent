@@ -288,29 +288,6 @@ The agent admin API SHALL expose agent-side endpoints to manage an agent's knowl
 - **WHEN** a viewer calls the bind or unbind endpoint
 - **THEN** the request is rejected with 403
 
-### Requirement: Agent OAuth connector binding endpoints
-The agent admin API SHALL expose agent-side endpoints to manage which external services an agent may use, parallel to the MCP binding endpoints. Reads SHALL allow viewer or admin; writes SHALL require admin. Binding a service that does not exist in the external services registry SHALL be rejected. HTTP 端点路径与路径参数 token 保持不变（向后兼容）。
-
-#### Scenario: List an agent's OAuth connector bindings
-- **WHEN** a viewer or admin calls `GET /admin/agents/{name}/bindings/oauth`
-- **THEN** the response lists the service ids bound to that agent
-
-#### Scenario: Bind an OAuth connector to an agent
-- **WHEN** an admin calls `POST /admin/agents/{name}/bindings/oauth/{connector_id}` for an existing service
-- **THEN** the binding is created (idempotently) and the service id appears in the agent's bound list
-
-#### Scenario: Bind rejects unknown connector
-- **WHEN** an admin binds a connector_id that is not in the external services registry
-- **THEN** the request is rejected with 404
-
-#### Scenario: Unbind an OAuth connector from an agent
-- **WHEN** an admin calls `DELETE /admin/agents/{name}/bindings/oauth/{connector_id}`
-- **THEN** the binding is removed
-
-#### Scenario: Viewer cannot mutate OAuth bindings
-- **WHEN** a viewer calls the bind or unbind endpoint
-- **THEN** the request is rejected with 403
-
 ### Requirement: Agent list and detail surface runtime and placement state
 
 `GET /admin/agents`（列表）与 `GET /admin/agents/{name}`（详情）SHALL 在原有期望态字段（`status` 等）基础上,附带每个 agent 的**运行态**与**绑定**投影,且 SHALL NOT 破坏任何既有字段:
