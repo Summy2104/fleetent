@@ -104,11 +104,11 @@ def test_bind_and_unbind_user(fresh_client):
     agent = agent_store.create_agent("ops", "Ops v1.", ["shell"])
     token, _ = _session_for("admin")
 
-    resp = fresh_client.post("/admin/agents/ops/bindings/users/u-42", headers=_hdr(token))
+    resp = fresh_client.post("/admin/agents/ops/users/u-42", headers=_hdr(token))
     assert resp.status_code == 200
     assert agent_store.list_users_for_agent(agent.id) == ["u-42"]
 
-    resp = fresh_client.delete("/admin/agents/ops/bindings/users/u-42", headers=_hdr(token))
+    resp = fresh_client.delete("/admin/agents/ops/users/u-42", headers=_hdr(token))
     assert resp.status_code == 200
     assert agent_store.list_users_for_agent(agent.id) == []
 
@@ -116,7 +116,7 @@ def test_bind_and_unbind_user(fresh_client):
 def test_bind_user_viewer_forbidden(fresh_client):
     agent_store.create_agent("ops", "Ops v1.", ["shell"])
     token, _ = _session_for("viewer")
-    resp = fresh_client.post("/admin/agents/ops/bindings/users/u-42", headers=_hdr(token))
+    resp = fresh_client.post("/admin/agents/ops/users/u-42", headers=_hdr(token))
     assert resp.status_code == 403
 
 
@@ -134,7 +134,7 @@ def test_channel_binding_routes_are_removed(fresh_client):
 
 def test_bind_unknown_agent_404(client):
     token, _ = _session_for("admin")
-    resp = client.post("/admin/agents/ghost/bindings/users/u-1", headers=_hdr(token))
+    resp = client.post("/admin/agents/ghost/users/u-1", headers=_hdr(token))
     assert resp.status_code == 404
 
 
@@ -143,7 +143,7 @@ def test_bind_and_unbind_im_group(fresh_client):
     token, _ = _session_for("admin")
 
     resp = fresh_client.post(
-        "/admin/agents/ops/bindings/groups",
+        "/admin/agents/ops/groups",
         headers=_hdr(token),
         json={"platform": "slack", "group_id": "C0123"},
     )
@@ -153,7 +153,7 @@ def test_bind_and_unbind_im_group(fresh_client):
     ]
 
     resp = fresh_client.delete(
-        "/admin/agents/ops/bindings/groups/slack/C0123",
+        "/admin/agents/ops/groups/slack/C0123",
         headers=_hdr(token),
     )
     assert resp.status_code == 204
@@ -182,7 +182,7 @@ def test_im_group_and_capability_viewer_forbidden(fresh_client):
     token, _ = _session_for("viewer")
 
     group_resp = fresh_client.post(
-        "/admin/agents/ops/bindings/groups",
+        "/admin/agents/ops/groups",
         headers=_hdr(token),
         json={"platform": "slack", "group_id": "C0123"},
     )
@@ -200,7 +200,7 @@ def test_im_group_and_capability_unknown_agent_404(client):
     token, _ = _session_for("admin")
 
     group_resp = client.post(
-        "/admin/agents/ghost/bindings/groups",
+        "/admin/agents/ghost/groups",
         headers=_hdr(token),
         json={"platform": "slack", "group_id": "C0123"},
     )
@@ -217,25 +217,43 @@ def test_im_group_and_capability_unknown_agent_404(client):
 # --- bindings read ------------------------------------------------------------
 
 
-def test_get_bindings_shape(fresh_client):
+@pytest.mark.parametrize("role", ["viewer", "admin"])
+def test_get_agent_users(fresh_client, role):
     agent = agent_store.create_agent("ops", "Ops v1.", ["shell"])
     agent_store.assign_user("u-1", agent.id)
-    agent_store.bind_mcp_server(agent.id, "github")
-    agent_im_group_store.bind(agent.id, "slack", "C0123")
-    token, _ = _session_for("viewer")
+    token, _ = _session_for(role)
 
-    resp = fresh_client.get("/admin/agents/ops/bindings", headers=_hdr(token))
+    resp = fresh_client.get("/admin/agents/ops/users", headers=_hdr(token))
     assert resp.status_code == 200
-    body = resp.json()
-    assert body["users"] == ["u-1"]
-    assert body["mcp_servers"] == ["github"]
-    assert body["groups"] == [{"platform": "slack", "group_id": "C0123"}]
-    assert "channels" not in body
+    assert resp.json() == ["u-1"]
 
 
-def test_get_bindings_unknown_agent_404(client):
+@pytest.mark.parametrize("role", ["viewer", "admin"])
+def test_get_agent_groups(fresh_client, role):
+    agent = agent_store.create_agent("ops", "Ops v1.", ["shell"])
+    agent_im_group_store.bind(agent.id, "slack", "C0123")
+    token, _ = _session_for(role)
+
+    resp = fresh_client.get("/admin/agents/ops/groups", headers=_hdr(token))
+    assert resp.status_code == 200
+    assert resp.json() == [{"platform": "slack", "group_id": "C0123"}]
+
+
+@pytest.mark.parametrize("role", ["viewer", "admin"])
+def test_get_agent_mcp_servers(fresh_client, role):
+    agent = agent_store.create_agent("ops", "Ops v1.", ["shell"])
+    agent_store.bind_mcp_server(agent.id, "github")
+    token, _ = _session_for(role)
+
+    resp = fresh_client.get("/admin/agents/ops/mcp", headers=_hdr(token))
+    assert resp.status_code == 200
+    assert resp.json() == ["github"]
+
+
+@pytest.mark.parametrize("path", ["users", "groups", "mcp"])
+def test_get_binding_collection_unknown_agent_404(client, path):
     token, _ = _session_for("viewer")
-    resp = client.get("/admin/agents/ghost/bindings", headers=_hdr(token))
+    resp = client.get(f"/admin/agents/ghost/{path}", headers=_hdr(token))
     assert resp.status_code == 404
 
 
@@ -297,11 +315,11 @@ def test_bind_known_mcp_server(fresh_client, monkeypatch):
     monkeypatch.setattr(api, "_known_mcp_server_ids", lambda: {"github", "jira"})
     token, _ = _session_for("admin")
 
-    resp = fresh_client.post("/admin/agents/ops/bindings/mcp/github", headers=_hdr(token))
+    resp = fresh_client.post("/admin/agents/ops/mcp/github", headers=_hdr(token))
     assert resp.status_code == 200
     assert agent_store.list_mcp_servers_for_agent(agent.id) == ["github"]
 
-    resp = fresh_client.delete("/admin/agents/ops/bindings/mcp/github", headers=_hdr(token))
+    resp = fresh_client.delete("/admin/agents/ops/mcp/github", headers=_hdr(token))
     assert resp.status_code == 200
     assert agent_store.list_mcp_servers_for_agent(agent.id) == []
 
@@ -329,7 +347,7 @@ def test_bind_store_registered_mcp_server(fresh_client, monkeypatch):
         lambda agent_id: [{"server_id": "middle"}] if agent_id is None else [],
     )
     token, _ = _session_for("admin")
-    resp = fresh_client.post("/admin/agents/ops/bindings/mcp/middle", headers=_hdr(token))
+    resp = fresh_client.post("/admin/agents/ops/mcp/middle", headers=_hdr(token))
     assert resp.status_code == 200, resp.text
     assert agent_store.list_mcp_servers_for_agent(agent.id) == ["middle"]
 
@@ -339,7 +357,7 @@ def test_bind_unknown_mcp_server_404(fresh_client, monkeypatch):
     monkeypatch.setattr(api, "_known_mcp_server_ids", lambda: {"github"})
     token, _ = _session_for("admin")
 
-    resp = fresh_client.post("/admin/agents/ops/bindings/mcp/nope", headers=_hdr(token))
+    resp = fresh_client.post("/admin/agents/ops/mcp/nope", headers=_hdr(token))
     assert resp.status_code == 404
     assert agent_store.list_mcp_servers_for_agent(agent.id) == []
 
@@ -347,7 +365,7 @@ def test_bind_unknown_mcp_server_404(fresh_client, monkeypatch):
 def test_bind_mcp_viewer_forbidden(fresh_client):
     agent_store.create_agent("ops", "Ops v1.", ["shell"])
     token, _ = _session_for("viewer")
-    resp = fresh_client.post("/admin/agents/ops/bindings/mcp/github", headers=_hdr(token))
+    resp = fresh_client.post("/admin/agents/ops/mcp/github", headers=_hdr(token))
     assert resp.status_code == 403
 
 

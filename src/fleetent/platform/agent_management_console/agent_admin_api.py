@@ -154,7 +154,7 @@ def clear_default_agent(authorization: str | None = Header(None)) -> dict[str, A
     return {"cleared": True}
 
 
-@router.post("/agents/{name}/bindings/users/{user_id}")
+@router.post("/agents/{name}/users/{user_id}")
 def bind_user(name: str, user_id: str, authorization: str | None = Header(None)) -> dict[str, Any]:
     _require_admin(authorization)
     agent = _require_agent(name)
@@ -162,7 +162,7 @@ def bind_user(name: str, user_id: str, authorization: str | None = Header(None))
     return {"agent": name, "user_id": user_id, "bound": True}
 
 
-@router.delete("/agents/{name}/bindings/users/{user_id}")
+@router.delete("/agents/{name}/users/{user_id}")
 def unbind_user(
     name: str, user_id: str, authorization: str | None = Header(None)
 ) -> dict[str, Any]:
@@ -172,7 +172,7 @@ def unbind_user(
     return {"agent": name, "user_id": user_id, "bound": False}
 
 
-@router.post("/agents/{name}/bindings/groups", status_code=status.HTTP_201_CREATED)
+@router.post("/agents/{name}/groups", status_code=status.HTTP_201_CREATED)
 def bind_im_group(
     name: str,
     body: AgentImGroupBindingBody,
@@ -192,7 +192,7 @@ def bind_im_group(
 
 
 @router.delete(
-    "/agents/{name}/bindings/groups/{platform}/{group_id}", status_code=status.HTTP_204_NO_CONTENT
+    "/agents/{name}/groups/{platform}/{group_id}", status_code=status.HTTP_204_NO_CONTENT
 )
 def unbind_im_group(
     name: str,
@@ -243,18 +243,28 @@ def set_im_capabilities(
     }
 
 
-# --- aggregate bindings read --------------------------------------------------
+# --- per-type bindings read ---------------------------------------------------
 
 
-@router.get("/agents/{name}/bindings")
-def get_bindings(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+@router.get("/agents/{name}/users")
+def list_agent_users(name: str, authorization: str | None = Header(None)) -> list[str]:
     _current_user(authorization)
     agent = _require_agent(name)
-    return {
-        "users": agent_store.list_users_for_agent(agent.id),
-        "mcp_servers": agent_store.list_mcp_servers_for_agent(agent.id),
-        "groups": agent_im_group_store.list_groups_for_agent(agent.id),
-    }
+    return agent_store.list_users_for_agent(agent.id)
+
+
+@router.get("/agents/{name}/groups")
+def list_agent_groups(name: str, authorization: str | None = Header(None)) -> list[dict[str, Any]]:
+    _current_user(authorization)
+    agent = _require_agent(name)
+    return agent_im_group_store.list_groups_for_agent(agent.id)
+
+
+@router.get("/agents/{name}/mcp")
+def list_agent_mcp_servers(name: str, authorization: str | None = Header(None)) -> list[str]:
+    _current_user(authorization)
+    agent = _require_agent(name)
+    return agent_store.list_mcp_servers_for_agent(agent.id)
 
 
 # --- agent-side skill bindings ------------------------------------------------
@@ -296,7 +306,7 @@ def set_agent_skill(
 # --- agent MCP bindings -------------------------------------------------------
 
 
-@router.post("/agents/{name}/bindings/mcp/{server_id}")
+@router.post("/agents/{name}/mcp/{server_id}")
 def bind_mcp(name: str, server_id: str, authorization: str | None = Header(None)) -> dict[str, Any]:
     user = _require_admin(authorization)
     agent = _require_agent(name)
@@ -313,7 +323,7 @@ def bind_mcp(name: str, server_id: str, authorization: str | None = Header(None)
     return {"agent": name, "server_id": server_id, "bound": True}
 
 
-@router.delete("/agents/{name}/bindings/mcp/{server_id}")
+@router.delete("/agents/{name}/mcp/{server_id}")
 def unbind_mcp(
     name: str, server_id: str, authorization: str | None = Header(None)
 ) -> dict[str, Any]:

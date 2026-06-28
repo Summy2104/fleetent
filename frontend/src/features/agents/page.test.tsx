@@ -107,12 +107,14 @@ function installAgentBindingHandlers({
     http.get(`${API_BASE_URL}/admin/agents/:name/skills`, ({ params }) =>
       HttpResponse.json(bindingsByAgent[String(params.name)].skills)
     ),
-    http.get(`${API_BASE_URL}/admin/agents/:name/bindings`, ({ params }) =>
-      HttpResponse.json({
-        mcp_servers: bindingsByAgent[String(params.name)].mcpServers,
-        users: bindingsByAgent[String(params.name)].users,
-        groups: bindingsByAgent[String(params.name)].groups ?? [],
-      })
+    http.get(`${API_BASE_URL}/admin/agents/:name/users`, ({ params }) =>
+      HttpResponse.json(bindingsByAgent[String(params.name)].users)
+    ),
+    http.get(`${API_BASE_URL}/admin/agents/:name/groups`, ({ params }) =>
+      HttpResponse.json(bindingsByAgent[String(params.name)].groups ?? [])
+    ),
+    http.get(`${API_BASE_URL}/admin/agents/:name/mcp`, ({ params }) =>
+      HttpResponse.json(bindingsByAgent[String(params.name)].mcpServers)
     ),
     http.get(`${API_BASE_URL}/admin/agents/:name/kbs`, ({ params }) =>
       HttpResponse.json({
@@ -547,11 +549,11 @@ describe('agent configure page bindings', () => {
         );
         return HttpResponse.json({ agent: 'alpha', enabled: true, skill_name: 'incident-bridge' });
       }),
-      http.post(`${API_BASE_URL}/admin/agents/alpha/bindings/mcp/github`, () => {
+      http.post(`${API_BASE_URL}/admin/agents/alpha/mcp/github`, () => {
         bindingsByAgent.alpha.mcpServers = ['filesystem', 'github'];
         return HttpResponse.json({ agent: 'alpha', bound: true, server_id: 'github' });
       }),
-      http.delete(`${API_BASE_URL}/admin/agents/alpha/bindings/mcp/filesystem`, () => {
+      http.delete(`${API_BASE_URL}/admin/agents/alpha/mcp/filesystem`, () => {
         bindingsByAgent.alpha.mcpServers = ['github'];
         return HttpResponse.json({ agent: 'alpha', bound: false, server_id: 'filesystem' });
       }),
@@ -564,15 +566,15 @@ describe('agent configure page bindings', () => {
         bindingsByAgent.alpha.kbIds = ['sales'];
         return HttpResponse.json({ agent: 'alpha', bound: false, kb_id: 'support' });
       }),
-      http.post(`${API_BASE_URL}/admin/agents/alpha/bindings/users/u2`, () => {
+      http.post(`${API_BASE_URL}/admin/agents/alpha/users/u2`, () => {
         bindingsByAgent.alpha.users = ['u1', 'u2'];
         return HttpResponse.json({ agent: 'alpha', bound: true, user_id: 'u2' });
       }),
-      http.delete(`${API_BASE_URL}/admin/agents/alpha/bindings/users/u1`, () => {
+      http.delete(`${API_BASE_URL}/admin/agents/alpha/users/u1`, () => {
         bindingsByAgent.alpha.users = ['u2'];
         return HttpResponse.json({ agent: 'alpha', bound: false, user_id: 'u1' });
       }),
-      http.post(`${API_BASE_URL}/admin/agents/alpha/bindings/groups`, async ({ request }) => {
+      http.post(`${API_BASE_URL}/admin/agents/alpha/groups`, async ({ request }) => {
         expect(await request.json()).toEqual({ group_id: 'C0123', platform: 'slack' });
         bindingsByAgent.alpha.groups = [
           ...(bindingsByAgent.alpha.groups ?? []),
@@ -580,7 +582,7 @@ describe('agent configure page bindings', () => {
         ];
         return HttpResponse.json({ agent: 'alpha', bound: true, group_id: 'C0123', platform: 'slack' }, { status: 201 });
       }),
-      http.delete(`${API_BASE_URL}/admin/agents/alpha/bindings/groups/slack/C0123`, () => {
+      http.delete(`${API_BASE_URL}/admin/agents/alpha/groups/slack/C0123`, () => {
         bindingsByAgent.alpha.groups = (bindingsByAgent.alpha.groups ?? []).filter(
           (group) => !(group.platform === 'slack' && group.group_id === 'C0123')
         );

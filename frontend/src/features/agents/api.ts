@@ -84,12 +84,6 @@ export type AgentSkillBinding = {
   skill_name: string;
 };
 
-export type AgentBindings = {
-  mcp_servers: string[];
-  users: string[];
-  groups: AgentImGroupInput[];
-};
-
 export type AgentKnowledgeBaseBindings = {
   agent: string;
   kb_ids: string[];
@@ -126,8 +120,16 @@ function agentSkillsKey(name: string | null) {
   return ['agents', name, 'skills'] as const;
 }
 
-function agentBindingsKey(name: string | null) {
-  return ['agents', name, 'bindings'] as const;
+function agentUsersKey(name: string | null) {
+  return ['agents', name, 'users'] as const;
+}
+
+function agentGroupsKey(name: string | null) {
+  return ['agents', name, 'groups'] as const;
+}
+
+function agentMcpKey(name: string | null) {
+  return ['agents', name, 'mcp'] as const;
 }
 
 function agentKbsKey(name: string | null) {
@@ -254,13 +256,33 @@ export function useSetAgentSkillMutation(name: string) {
   });
 }
 
-export function useAgentBindingsQuery(name: string | null) {
+export function useAgentUsersQuery(name: string | null) {
   const api = useAdminApi();
 
   return useQuery({
     enabled: Boolean(name),
-    queryKey: agentBindingsKey(name),
-    queryFn: () => api.get<AgentBindings>(`/admin/agents/${name}/bindings`),
+    queryKey: agentUsersKey(name),
+    queryFn: () => api.get<string[]>(`/admin/agents/${name}/users`),
+  });
+}
+
+export function useAgentGroupsQuery(name: string | null) {
+  const api = useAdminApi();
+
+  return useQuery({
+    enabled: Boolean(name),
+    queryKey: agentGroupsKey(name),
+    queryFn: () => api.get<AgentImGroupInput[]>(`/admin/agents/${name}/groups`),
+  });
+}
+
+export function useAgentMcpQuery(name: string | null) {
+  const api = useAdminApi();
+
+  return useQuery({
+    enabled: Boolean(name),
+    queryKey: agentMcpKey(name),
+    queryFn: () => api.get<string[]>(`/admin/agents/${name}/mcp`),
   });
 }
 
@@ -271,10 +293,10 @@ export function useBindAgentMcpMutation(name: string) {
   return useMutation({
     mutationFn: (serverId: string) =>
       api.post<{ agent: string; bound: boolean; server_id: string }>(
-        `/admin/agents/${name}/bindings/mcp/${serverId}`
+        `/admin/agents/${name}/mcp/${serverId}`
       ),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: agentBindingsKey(name) });
+      await queryClient.invalidateQueries({ queryKey: agentMcpKey(name) });
     },
   });
 }
@@ -286,10 +308,10 @@ export function useUnbindAgentMcpMutation(name: string) {
   return useMutation({
     mutationFn: (serverId: string) =>
       api.delete<{ agent: string; bound: boolean; server_id: string }>(
-        `/admin/agents/${name}/bindings/mcp/${serverId}`
+        `/admin/agents/${name}/mcp/${serverId}`
       ),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: agentBindingsKey(name) });
+      await queryClient.invalidateQueries({ queryKey: agentMcpKey(name) });
     },
   });
 }
@@ -339,10 +361,10 @@ export function useBindAgentUserMutation(name: string) {
   return useMutation({
     mutationFn: (userId: string) =>
       api.post<{ agent: string; bound: boolean; user_id: string }>(
-        `/admin/agents/${name}/bindings/users/${userId}`
+        `/admin/agents/${name}/users/${userId}`
       ),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: agentBindingsKey(name) });
+      await queryClient.invalidateQueries({ queryKey: agentUsersKey(name) });
     },
   });
 }
@@ -354,10 +376,10 @@ export function useUnbindAgentUserMutation(name: string) {
   return useMutation({
     mutationFn: (userId: string) =>
       api.delete<{ agent: string; bound: boolean; user_id: string }>(
-        `/admin/agents/${name}/bindings/users/${userId}`
+        `/admin/agents/${name}/users/${userId}`
       ),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: agentBindingsKey(name) });
+      await queryClient.invalidateQueries({ queryKey: agentUsersKey(name) });
     },
   });
 }
@@ -385,11 +407,11 @@ export function useAddAgentImGroupMutation(name: string) {
   return useMutation({
     mutationFn: (input: AgentImGroupInput) =>
       api.post<{ agent: string; bound: boolean; group_id: string; platform: string }>(
-        `/admin/agents/${name}/bindings/groups`,
+        `/admin/agents/${name}/groups`,
         input
       ),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: agentBindingsKey(name) });
+      await queryClient.invalidateQueries({ queryKey: agentGroupsKey(name) });
     },
   });
 }
@@ -400,9 +422,9 @@ export function useRemoveAgentImGroupMutation(name: string) {
 
   return useMutation({
     mutationFn: ({ group_id, platform }: AgentImGroupInput) =>
-      api.delete<void>(`/admin/agents/${name}/bindings/groups/${platform}/${group_id}`),
+      api.delete<void>(`/admin/agents/${name}/groups/${platform}/${group_id}`),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: agentBindingsKey(name) });
+      await queryClient.invalidateQueries({ queryKey: agentGroupsKey(name) });
     },
   });
 }

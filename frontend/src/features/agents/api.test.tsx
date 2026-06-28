@@ -6,10 +6,12 @@ import { describe, expect, it } from 'vitest';
 import { AuthProvider } from '@/app/auth';
 import {
   useAgentDetailQuery,
-  useAgentBindingsQuery,
+  useAgentGroupsQuery,
   useAgentKbsQuery,
+  useAgentMcpQuery,
   useAgentSecretsQuery,
   useAgentSkillsQuery,
+  useAgentUsersQuery,
   useAgentsQuery,
   useAddAgentImGroupMutation,
   useBindAgentKbMutation,
@@ -52,21 +54,21 @@ function createWrapper(): ({ children }: { children: ReactNode }) => JSX.Element
 }
 
 describe('agents api bindings hooks', () => {
-  it('loads agent bindings and refreshes skills, mcp, kb, and user queries after mutations', async () => {
+  it('loads per-type agent bindings and refreshes affected queries after mutations', async () => {
     const { server } = await import('@/test/msw/server');
 
     let skillsCalls = 0;
-    let bindingsCalls = 0;
+    let usersCalls = 0;
+    let groupsCalls = 0;
+    let mcpCalls = 0;
     let kbsCalls = 0;
     let skills = [
       { enabled: true, skill_name: 'crm-ops' },
       { enabled: false, skill_name: 'incident-bridge' },
     ];
-    let bindings = {
-      mcp_servers: ['filesystem'],
-      users: ['u1'],
-      groups: [{ platform: 'slack', group_id: 'C1' }],
-    };
+    let mcpServers = ['filesystem'];
+    let users = ['u1'];
+    let groups = [{ platform: 'slack', group_id: 'C1' }];
     let kbIds = ['support'];
 
     server.use(
@@ -74,9 +76,17 @@ describe('agents api bindings hooks', () => {
         skillsCalls += 1;
         return HttpResponse.json(skills);
       }),
-      http.get(`${API_BASE_URL}/admin/agents/alpha/bindings`, () => {
-        bindingsCalls += 1;
-        return HttpResponse.json(bindings);
+      http.get(`${API_BASE_URL}/admin/agents/alpha/users`, () => {
+        usersCalls += 1;
+        return HttpResponse.json(users);
+      }),
+      http.get(`${API_BASE_URL}/admin/agents/alpha/groups`, () => {
+        groupsCalls += 1;
+        return HttpResponse.json(groups);
+      }),
+      http.get(`${API_BASE_URL}/admin/agents/alpha/mcp`, () => {
+        mcpCalls += 1;
+        return HttpResponse.json(mcpServers);
       }),
       http.get(`${API_BASE_URL}/admin/agents/alpha/kbs`, () => {
         kbsCalls += 1;
@@ -89,12 +99,12 @@ describe('agents api bindings hooks', () => {
         );
         return HttpResponse.json({ agent: 'alpha', enabled: true, skill_name: 'incident-bridge' });
       }),
-      http.post(`${API_BASE_URL}/admin/agents/alpha/bindings/mcp/github`, () => {
-        bindings = { ...bindings, mcp_servers: ['filesystem', 'github'] };
+      http.post(`${API_BASE_URL}/admin/agents/alpha/mcp/github`, () => {
+        mcpServers = ['filesystem', 'github'];
         return HttpResponse.json({ agent: 'alpha', bound: true, server_id: 'github' });
       }),
-      http.delete(`${API_BASE_URL}/admin/agents/alpha/bindings/mcp/filesystem`, () => {
-        bindings = { ...bindings, mcp_servers: ['github'] };
+      http.delete(`${API_BASE_URL}/admin/agents/alpha/mcp/filesystem`, () => {
+        mcpServers = ['github'];
         return HttpResponse.json({ agent: 'alpha', bound: false, server_id: 'filesystem' });
       }),
       http.post(`${API_BASE_URL}/admin/agents/alpha/kbs`, async ({ request }) => {
@@ -106,34 +116,33 @@ describe('agents api bindings hooks', () => {
         kbIds = ['sales'];
         return HttpResponse.json({ agent: 'alpha', bound: false, kb_id: 'support' });
       }),
-      http.post(`${API_BASE_URL}/admin/agents/alpha/bindings/users/u2`, () => {
-        bindings = { ...bindings, users: ['u1', 'u2'] };
+      http.post(`${API_BASE_URL}/admin/agents/alpha/users/u2`, () => {
+        users = ['u1', 'u2'];
         return HttpResponse.json({ agent: 'alpha', bound: true, user_id: 'u2' });
       }),
-      http.delete(`${API_BASE_URL}/admin/agents/alpha/bindings/users/u1`, () => {
-        bindings = { ...bindings, users: ['u2'] };
+      http.delete(`${API_BASE_URL}/admin/agents/alpha/users/u1`, () => {
+        users = ['u2'];
         return HttpResponse.json({ agent: 'alpha', bound: false, user_id: 'u1' });
       }),
-      http.post(`${API_BASE_URL}/admin/agents/alpha/bindings/groups`, async ({ request }) => {
+      http.post(`${API_BASE_URL}/admin/agents/alpha/groups`, async ({ request }) => {
         expect(await request.json()).toEqual({ platform: 'slack', group_id: 'C2' });
-        bindings = {
-          ...bindings,
-          groups: [
-            { platform: 'slack', group_id: 'C1' },
-            { platform: 'slack', group_id: 'C2' },
-          ],
-        };
+        groups = [
+          { platform: 'slack', group_id: 'C1' },
+          { platform: 'slack', group_id: 'C2' },
+        ];
         return HttpResponse.json({ agent: 'alpha', bound: true, platform: 'slack', group_id: 'C2' });
       }),
-      http.delete(`${API_BASE_URL}/admin/agents/alpha/bindings/groups/slack/C1`, () => {
-        bindings = { ...bindings, groups: [{ platform: 'slack', group_id: 'C2' }] };
+      http.delete(`${API_BASE_URL}/admin/agents/alpha/groups/slack/C1`, () => {
+        groups = [{ platform: 'slack', group_id: 'C2' }];
         return new HttpResponse(null, { status: 204 });
       })
     );
 
     const wrapper = createWrapper();
     const skillsQuery = renderHook(() => useAgentSkillsQuery('alpha'), { wrapper });
-    const bindingsQuery = renderHook(() => useAgentBindingsQuery('alpha'), { wrapper });
+    const usersQuery = renderHook(() => useAgentUsersQuery('alpha'), { wrapper });
+    const groupsQuery = renderHook(() => useAgentGroupsQuery('alpha'), { wrapper });
+    const mcpQuery = renderHook(() => useAgentMcpQuery('alpha'), { wrapper });
     const kbsQuery = renderHook(() => useAgentKbsQuery('alpha'), { wrapper });
 
     await waitFor(() => {
@@ -141,11 +150,11 @@ describe('agents api bindings hooks', () => {
         enabled: false,
         skill_name: 'incident-bridge',
       });
-      expect(bindingsQuery.result.current.data?.mcp_servers).toEqual(['filesystem']);
-      expect(bindingsQuery.result.current.data?.users).toEqual(['u1']);
-      expect(bindingsQuery.result.current.data?.groups).toEqual([
+      expect(usersQuery.result.current.data).toEqual(['u1']);
+      expect(groupsQuery.result.current.data).toEqual([
         { platform: 'slack', group_id: 'C1' },
       ]);
+      expect(mcpQuery.result.current.data).toEqual(['filesystem']);
       expect(kbsQuery.result.current.data?.kb_ids).toEqual(['support']);
     });
 
@@ -160,7 +169,9 @@ describe('agents api bindings hooks', () => {
     const removeGroup = renderHook(() => useRemoveAgentImGroupMutation('alpha'), { wrapper });
 
     let previousSkillsCalls = skillsCalls;
-    let previousBindingsCalls = bindingsCalls;
+    let previousUsersCalls = usersCalls;
+    let previousGroupsCalls = groupsCalls;
+    let previousMcpCalls = mcpCalls;
     let previousKbsCalls = kbsCalls;
 
     await setSkill.result.current.mutateAsync({ skill_name: 'incident-bridge', enabled: true });
@@ -172,17 +183,17 @@ describe('agents api bindings hooks', () => {
 
     await bindMcp.result.current.mutateAsync('github');
     await waitFor(() => {
-      expect(bindingsCalls).toBeGreaterThan(previousBindingsCalls);
-      expect(bindingsQuery.result.current.data?.mcp_servers).toEqual(['filesystem', 'github']);
+      expect(mcpCalls).toBeGreaterThan(previousMcpCalls);
+      expect(mcpQuery.result.current.data).toEqual(['filesystem', 'github']);
     });
-    previousBindingsCalls = bindingsCalls;
+    previousMcpCalls = mcpCalls;
 
     await unbindMcp.result.current.mutateAsync('filesystem');
     await waitFor(() => {
-      expect(bindingsCalls).toBeGreaterThan(previousBindingsCalls);
-      expect(bindingsQuery.result.current.data?.mcp_servers).toEqual(['github']);
+      expect(mcpCalls).toBeGreaterThan(previousMcpCalls);
+      expect(mcpQuery.result.current.data).toEqual(['github']);
     });
-    previousBindingsCalls = bindingsCalls;
+    previousMcpCalls = mcpCalls;
 
     await bindKb.result.current.mutateAsync('sales');
     await waitFor(() => {
@@ -200,32 +211,32 @@ describe('agents api bindings hooks', () => {
 
     await bindUser.result.current.mutateAsync('u2');
     await waitFor(() => {
-      expect(bindingsCalls).toBeGreaterThan(previousBindingsCalls);
-      expect(bindingsQuery.result.current.data?.users).toEqual(['u1', 'u2']);
+      expect(usersCalls).toBeGreaterThan(previousUsersCalls);
+      expect(usersQuery.result.current.data).toEqual(['u1', 'u2']);
     });
-    previousBindingsCalls = bindingsCalls;
+    previousUsersCalls = usersCalls;
 
     await unbindUser.result.current.mutateAsync('u1');
     await waitFor(() => {
-      expect(bindingsCalls).toBeGreaterThan(previousBindingsCalls);
-      expect(bindingsQuery.result.current.data?.users).toEqual(['u2']);
+      expect(usersCalls).toBeGreaterThan(previousUsersCalls);
+      expect(usersQuery.result.current.data).toEqual(['u2']);
     });
-    previousBindingsCalls = bindingsCalls;
+    previousUsersCalls = usersCalls;
 
     await addGroup.result.current.mutateAsync({ platform: 'slack', group_id: 'C2' });
     await waitFor(() => {
-      expect(bindingsCalls).toBeGreaterThan(previousBindingsCalls);
-      expect(bindingsQuery.result.current.data?.groups).toEqual([
+      expect(groupsCalls).toBeGreaterThan(previousGroupsCalls);
+      expect(groupsQuery.result.current.data).toEqual([
         { platform: 'slack', group_id: 'C1' },
         { platform: 'slack', group_id: 'C2' },
       ]);
     });
-    previousBindingsCalls = bindingsCalls;
+    previousGroupsCalls = groupsCalls;
 
     await removeGroup.result.current.mutateAsync({ platform: 'slack', group_id: 'C1' });
     await waitFor(() => {
-      expect(bindingsCalls).toBeGreaterThan(previousBindingsCalls);
-      expect(bindingsQuery.result.current.data?.groups).toEqual([
+      expect(groupsCalls).toBeGreaterThan(previousGroupsCalls);
+      expect(groupsQuery.result.current.data).toEqual([
         { platform: 'slack', group_id: 'C2' },
       ]);
     });

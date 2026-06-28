@@ -20,13 +20,15 @@ import {
   type AgentImCapabilitiesInput,
   type AgentImGroupInput,
   type AgentModelOverrides,
+  useAgentGroupsQuery,
   useAgentSecretsQuery,
   useAddAgentImGroupMutation,
-  useAgentBindingsQuery,
   useAgentDetailQuery,
   useAgentKbsQuery,
+  useAgentMcpQuery,
   useAgentRequiredEnvQuery,
   useAgentSkillsQuery,
+  useAgentUsersQuery,
   useBindAgentKbMutation,
   useBindAgentMcpMutation,
   useBindAgentUserMutation,
@@ -365,7 +367,7 @@ function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boo
 
 function McpServersTab({ agentName, canWrite }: { agentName: string; canWrite: boolean }): JSX.Element {
   const t = useT();
-  const bindings = useAgentBindingsQuery(agentName);
+  const mcpBindings = useAgentMcpQuery(agentName);
   const allServers = useMcpServersQuery();
   const bindMcp = useBindAgentMcpMutation(agentName);
   const unbindMcp = useUnbindAgentMcpMutation(agentName);
@@ -382,7 +384,7 @@ function McpServersTab({ agentName, canWrite }: { agentName: string; canWrite: b
       canWrite={canWrite}
       loading={allServers.isLoading}
       options={serverOptions}
-      items={bindings.data?.mcp_servers ?? []}
+      items={mcpBindings.data ?? []}
       emptyLabel={t('agents.noMcpServers')}
       onBind={(value) => void bindMcp.mutateAsync(value)}
       onUnbind={(value) => void unbindMcp.mutateAsync(value)}
@@ -669,7 +671,8 @@ const IM_PLATFORMS = ['slack', 'telegram'] as const;
 function ImCapabilitiesTab({ agentName, canWrite }: { agentName: string; canWrite: boolean }): JSX.Element {
   const t = useT();
   const detail = useAgentDetailQuery(agentName);
-  const bindings = useAgentBindingsQuery(agentName);
+  const groupsQuery = useAgentGroupsQuery(agentName);
+  const usersQuery = useAgentUsersQuery(agentName);
   const setCaps = useSetAgentImCapabilitiesMutation(agentName);
   const addGroup = useAddAgentImGroupMutation(agentName);
   const removeGroup = useRemoveAgentImGroupMutation(agentName);
@@ -686,7 +689,7 @@ function ImCapabilitiesTab({ agentName, canWrite }: { agentName: string; canWrit
 
   // Bound groups are read back from the bindings endpoint; add/remove invalidate
   // that query, so the list reflects the persisted state (and survives reload).
-  const groups = bindings.data?.groups ?? [];
+  const groups = groupsQuery.data ?? [];
 
   const userOptions = useMemo<BindOption[]>(
     () => (allUsers.data ?? []).map((user) => ({ value: user.id, label: user.email || user.name || user.id })),
@@ -830,7 +833,7 @@ function ImCapabilitiesTab({ agentName, canWrite }: { agentName: string; canWrit
         canWrite={canWrite}
         loading={allUsers.isLoading}
         options={userOptions}
-        items={bindings.data?.users ?? []}
+        items={usersQuery.data ?? []}
         emptyLabel={t('agents.noUsers')}
         onBind={(value) => void bindUser.mutateAsync(value)}
         onUnbind={(value) => void unbindUser.mutateAsync(value)}

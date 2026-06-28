@@ -147,11 +147,11 @@ def test_agent_admin_binding_skill_kb_and_mcp_handlers(monkeypatch):
     )
     assert agent_admin_api.bind_user("ops", "u1", authorization="Session token")["bound"]
     assert not agent_admin_api.unbind_user("ops", "u1", authorization="Session token")["bound"]
-    assert agent_admin_api.get_bindings("ops", authorization="Session token") == {
-        "users": [],
-        "mcp_servers": ["db"],
-        "groups": [{"platform": "slack", "group_id": "C1"}],
-    }
+    assert agent_admin_api.list_agent_users("ops", authorization="Session token") == []
+    assert agent_admin_api.list_agent_groups("ops", authorization="Session token") == [
+        {"platform": "slack", "group_id": "C1"}
+    ]
+    assert agent_admin_api.list_agent_mcp_servers("ops", authorization="Session token") == ["db"]
     assert agent_admin_api.list_agent_skills("ops", authorization="Session token") == [
         {"skill_name": "skill-a", "enabled": True},
         {"skill_name": "skill-b", "enabled": False},

@@ -39,13 +39,13 @@ The console SHALL let an admin enable, disable, archive, restore, and clone an a
 - **AND** viewer sessions still hide the admin-only items
 
 ### Requirement: Agent bindings and native configuration
-The agent detail view in the React SPA SHALL let an admin manage the agent and every binding **natively from one place (not deep-linked to the legacy console)**. It SHALL provide: an **edit** action that reads `GET /admin/agents/{name}` to prefill and saves via `PATCH /admin/agents/{name}`; lifecycle actions (enable, disable, archive/restore, delete with reference protection, clone); and a "manage the bound list" section for each binding type below. Every binding section SHALL show the agent's currently bound items and offer add/remove. The deploy section SHALL expose deploy/yaml export only; it SHALL NOT render version history or activation controls. All write controls SHALL be hidden from viewers.
+The agent detail view in the React SPA SHALL let an admin manage the agent and every binding **natively from one place (not deep-linked to the legacy console)**. It SHALL provide: an **edit** action that reads `GET /admin/agents/{name}` to prefill and saves via `PATCH /admin/agents/{name}`; lifecycle actions (enable, disable, archive/restore, delete with reference protection, clone); and a "manage the bound list" section for each binding type below. Each binding section SHALL read its current state from that type's **own per-type endpoint** (no aggregate `GET /admin/agents/{name}/bindings`). Every binding section SHALL show the agent's currently bound items and offer add/remove. The deploy section SHALL expose deploy/yaml export only; it SHALL NOT render version history or activation controls. All write controls SHALL be hidden from viewers.
 
 - **Skills**: load `GET /admin/agents/{name}/skills` and toggle per skill via `PUT /admin/agents/{name}/skills/{skill_name}`.
-- **Connectors**: MCP servers — options from `GET /admin/mcp/servers`, current state from `GET /admin/agents/{name}/bindings`, toggled via `POST`/`DELETE /admin/agents/{name}/bindings/mcp/{server_id}`; OAuth connectors — options from `GET /admin/connectors`, current state from `GET /admin/agents/{name}/bindings/oauth`, toggled via `POST`/`DELETE /admin/agents/{name}/bindings/oauth/{connector_id}`.
+- **Connectors**: MCP servers — options from `GET /admin/mcp/servers`, current state from `GET /admin/agents/{name}/mcp`, toggled via `POST`/`DELETE /admin/agents/{name}/mcp/{server_id}`.
 - **Knowledge bases**: list via `GET /admin/agents/{name}/kbs` and bind/unbind via `POST`/`DELETE /admin/agents/{name}/kbs/{kb_id}`.
-- **User access**: list via `GET /admin/agents/{name}/bindings` and bind/unbind via `POST`/`DELETE /admin/agents/{name}/bindings/users/{user_id}`.
-- **IM access**: manage the per-platform group whitelist via `POST /admin/agents/{name}/bindings/groups`, and toggle DM / group capabilities via `PUT /admin/agents/{name}/im-capabilities`.
+- **User access**: list via `GET /admin/agents/{name}/users` and bind/unbind via `POST`/`DELETE /admin/agents/{name}/users/{user_id}`.
+- **IM access**: list the per-platform group whitelist via `GET /admin/agents/{name}/groups`, manage it via `POST /admin/agents/{name}/groups` / `DELETE /admin/agents/{name}/groups/{platform}/{group_id}`, and toggle DM / group capabilities via `PUT /admin/agents/{name}/im-capabilities`.
 - **Default agent**: mark/unmark this agent as the tenant default via `PUT /admin/agents/{name}/default` / `DELETE /admin/agents/default`.
 - **Secrets**: list env-var slots via `GET /admin/agents/{name}/secrets` and set/clear a value via `PUT`/`DELETE /admin/agents/{name}/secrets/{env_name}`. A secret value SHALL be write-only — never displayed in plaintext.
 
@@ -54,12 +54,12 @@ The agent detail view in the React SPA SHALL let an admin manage the agent and e
 - **THEN** the SPA first reads `GET /admin/agents/{name}` to prefill, then calls `PATCH /admin/agents/{name}` and the change is reflected
 
 #### Scenario: Manage bound skills / connectors / KBs / users natively
-- **WHEN** an admin toggles a skill, binds/unbinds an MCP server or OAuth connector, binds/unbinds a knowledge base, or binds/unbinds a user
-- **THEN** the SPA calls the matching agent binding endpoint natively (no legacy deep-link) and the relevant bound list reflects the change
+- **WHEN** an admin toggles a skill, binds/unbinds an MCP server, binds/unbinds a knowledge base, or binds/unbinds a user
+- **THEN** the SPA calls the matching per-type agent binding endpoint natively (no legacy deep-link, no aggregate read) and the relevant bound list reflects the change
 
 #### Scenario: Manage IM access
 - **WHEN** an admin adds/removes an IM group from the agent's whitelist, or toggles DM / group capabilities
-- **THEN** the SPA calls `POST /admin/agents/{name}/bindings/groups` (resp. `PUT /admin/agents/{name}/im-capabilities`) and the state reflects the change
+- **THEN** the SPA calls `POST /admin/agents/{name}/groups` (resp. `PUT /admin/agents/{name}/im-capabilities`) and the state reflects the change
 
 #### Scenario: Set or clear the default agent
 - **WHEN** an admin marks this agent as default, or clears the default
@@ -167,3 +167,4 @@ When an agent is `disabled` and not bound to a node (`placement` is `null`), the
 #### Scenario: Enable actionable once bound
 - **WHEN** an agent is `disabled` and its `placement` is non-null
 - **THEN** the「Enable」control is actionable and triggers `POST /admin/agents/{name}/enable`
+
