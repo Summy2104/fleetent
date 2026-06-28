@@ -46,7 +46,7 @@ FLEETENT_HOME/
 ## 2. schema 权威、路由与并发
 
 - **双权威（按库分）**：管理库 **Alembic-only**；per-agent state（含 agent memory）/ KB 关系库走**嵌入式 forward-only 迁移（Y）**——schema 以代码中有序 `MIGRATIONS=[(ver,sql)]` 定义、DB 只存 `PRAGMA user_version`、**migrate-on-open**、每文件自迁、库版本 > 代码已知版本则拒启动（`SchemaTooNewError`）。空库与旧库同一代码路径。
-- **关系完整性双层**：管理库经 `db.py` 的连接统一 `PRAGMA foreign_keys=ON`，声明了 FK 的管理表约束真实生效；store 写入校验承接 FK 难表达的语义约束（如 `agents.team_id` 与 `tenant_id` 的复合一致性）。agent 侧库以约定引用为主，其中 KB 关系库 `knowledge_documents → knowledge_chunks` 级联删除随 FK 真实生效。
+- **关系完整性双层**：管理库经 `db.py` 的连接统一 `PRAGMA foreign_keys=ON`，声明了 FK 的管理表约束真实生效；`agents.team_id` 与 `tenant_id` 的复合一致性由 DB 复合外键 `(team_id, tenant_id) → teams(id, tenant_id)` 强制（迁移 106；`teams` 加 `UNIQUE(id, tenant_id)`），store 写入校验为第二层、给出可诊断错误。agent 侧库以约定引用为主，其中 KB 关系库 `knowledge_documents → knowledge_chunks` 级联删除随 FK 真实生效。
 - **FK 不回扫存量**：SQLite 只约束启用后的新写入/删除，不修复历史违规行；旧违规引用被触碰时在该次写路径迟发失败。
 - **一文件一份 MIGRATIONS**：`agent_state.db` 由 `runtime/agent_state_migrations.py` 一份单调版本列表管——单文件单 `user_version`，不可每 store 各跑一份。
 - **路由（租户作用域 + 可换后端）**：`tenant_router` 暴露 `tenant_scope(tenant)`（KB 句柄）与 `agent_scope(tenant, agent_name)`（per-agent state〔含 `agent_memory_items`〕+ 向量句柄）。SQLite 后端映射到上述目录文件，后端可换（将来 PG per-tenant DB / RLS，调用点不变）。物理路由主体取自 **agent 的归属主体**（`agents.team_id`/`tenant_id`）；请求者 `Principal.tenant_id` 仅用于 edge 跨主体校验（`agent_app._check_tenant`）。
@@ -127,9 +127,9 @@ graph TD
 | 表 | 键 / 关键列 | FK | 用途 |
 |---|---|---|---|
 | `users` | 根主体；`tenant_id`；**无 key 列** | — | 唯一身份；key 真相源在 `api_keys`（SHA-256，明文不落库）|
-| `api_keys` | `user_id` | — (软引用 users) | bearer key 哈希 |
+| `api_keys` | `user_id` | → users (CASCADE，迁移 106) | bearer key 哈希；删用户级联清 key，无孤儿 |
 | `tenants` | `approver_user_id` | — (软引用 users) | 主体（法人/商户）|
-| `teams` | `tenant_id` · `approver_user_id` | → tenants | 主体下设团队 |
+| `teams` | `tenant_id` · `approver_user_id` · UNIQUE`(id, tenant_id)`（迁移 106，复合 FK 目标） | → tenants (RESTRICT) · approver → users (SET NULL) | 主体下设团队 |
 | `blocked_registrations` | 按 email 匹配 | — | 注册封禁名单（control-plane only）|
 | `im_users` | `id` · UNIQUE`(platform, platform_user_id)` · `user_id` · `meta_json` | `user_id` → users (CASCADE) | 渠道身份 ⇄ 内部 user **纯双向映射**（无 owner_id/allowed；封禁走 `users.status`）|
 
@@ -137,7 +137,7 @@ graph TD
 
 | 表 | 键 / 关键列 | FK | 用途 |
 |---|---|---|---|
-| `agents` | `id`=不可变身份 · `name`=可读标签 · `version`=当前配置代次 · `system_prompt`/`allowed_tools`/`model_overrides`/`memory_namespace`/`skills_dir`/`supports_dm`/`supports_groups`；无 status 列 | — | agent 当前配置单一真相源；管理逻辑 → [agent-management](../capabilities/agent-management.md) |
+| `agents` | `id`=不可变身份 · `name`=可读标签 · `version`=当前配置代次 · `system_prompt`/`allowed_tools`/`model_overrides`/`memory_namespace`/`skills_dir`/`supports_dm`/`supports_groups`；无 status 列 | → tenants (RESTRICT) · `(team_id, tenant_id)` → teams 复合 (RESTRICT，迁移 106，强制 team 与 agent 同租户) | agent 当前配置单一真相源；管理逻辑 → [agent-management](../capabilities/agent-management.md) |
 | `agent_admin_state` | PK `agent_id`；`status`/`archived_at`/`is_default`（默认 agent 标记，迁移 098；materialize→`bindings.default`，每 tenant 至多一个） | → agents (CASCADE) | 管理态（生命周期+默认）→ [agent-management §2](../capabilities/agent-management.md) |
 | `user_agents` | `(user_id, agent_id)` | → agents (CASCADE) | 用户↔agent 准入；materialize → `im.allow_users`（admin 维护）|
 | `agent_im_groups` | `(agent_id, platform, group_id)` | → agents (CASCADE) | IM 群白名单；materialize → `im.<platform>.allow_groups` |
@@ -147,7 +147,7 @@ graph TD
 | `agent_service_grants` | `agent_id` · `run_as`(user/agent) | → agents (CASCADE) | agent↔外部服务授权；`service_id` 软引用 `external_services` |
 | `agent_secrets` | `agent_id` 可空（agent/shared scope）| → agents (CASCADE) | 密文 secret（node 下发时注入）|
 | `agent_skills` | `(agent_id, skill_name)`；drift 列 `base_version`/`base_commit`/`drift`/`drift_at` | → agents (CASCADE) · → skills(name) | skill 启用 + 部署副本 drift；→ [skill-system](../capabilities/skill-system.md) |
-| `external_services` | 单层全局**无 `agent_id`**；`protocol`=oauth2/apikey | — | 工具 OAuth 服务注册表（`client_secret` 走 env 不落库）|
+| `external_services` | 单层全局**无 `agent_id`**；`protocol`=oauth2/apikey；`enabled` | — | 工具 OAuth 服务注册表（`client_secret` 走 env 不落库）；`enabled=false` 经 vault 解析链门控、拒绝授权/使用 |
 | `external_credentials` | PK `(user_id, service_id)`；`status`=authorized/needs_reauth/error | — (软引用 users/external_services) | per-principal Fernet 加密凭证（明文不出库）|
 
 **节点编排**（→ [agent-management §6](../capabilities/agent-management.md)；desired/reported reconcile）
@@ -156,7 +156,7 @@ graph TD
 |---|---|---|---|
 | `nodes` | `id` TEXT PK · `key_hash` 唯一 · `labels` JSON · `last_seen_at` | — | 节点注册表（worker；key_hash=bearer 鉴权、心跳）|
 | `agent_placements` | PK `agent_id` · `node_id` · `pinned_by` | → agents (CASCADE) · → nodes (RESTRICT) | **期望态**：pin agent→node（node 有 pin 不可删）|
-| `node_agent_status` | PK `agent_id` · `node_id` · `phase`/`pid`/`health`/`detail` | → agents (CASCADE) · → nodes (CASCADE) | **上报态投影**：node 回报实际运行态 |
+| `node_agent_status` | PK `agent_id` · `node_id` · `phase`/`pid`/`health`/`detail` | → agents (CASCADE) · → nodes (CASCADE) | **上报态投影**：node 回报实际运行态；unpin/deregister 时同步清理（不留幽灵 running 行） |
 
 **Skill 治理**（→ [skill-system](../capabilities/skill-system.md)）
 
@@ -170,11 +170,12 @@ graph TD
 | 表 | 键 / 关键列 | FK | 用途 |
 |---|---|---|---|
 | `kb_connectors` | connector 配置 + 自定义元数据 + 调度字段（`sync_interval_seconds`/`last_scheduled_sync_at`，迁移 101）| — | KB 数据源配置（实际内容在 per-tenant `kb.db`）；调度字段供 platform `kb_connector_sweep` 定时入队 sync |
+| `kb_ingest_jobs` | `id` TEXT PK · `job_type`/`tenant_id`/`kb_id` · `connector_ref`/`cred_ref` · `status`(pending/processing/completed/failed) · `attempts`/`max_attempts` · `claimed_at`/`finished_at`（迁移 099）| — | KB ingest 任务队列；`kb_connector_sweep` / 手动导入入队，`kb-worker` 原子 claim→run→done/failed（带重试）|
 | `model_providers` | provider + api_key env | — | materialize 读：model_overrides → ModelTarget |
 | `audit_log` | 管理操作审计 | — (软引用 users) | 平台管理操作审计 |
 | `session_meta` | `session_id` · `agent_id` 可空 · origin/pinned/takeover | → agents (CASCADE) | platform chat 管理元数据（`session_id` 跨库逻辑引用 agent `sessions`）|
 
-> 下图只画有库内关系的主干表；独立/弱关联表不入图：`blocked_registrations`、`agent_secrets`、`kb_connectors`、`session_meta`。
+> 下图只画有库内关系的主干表；独立/弱关联表不入图：`blocked_registrations`、`agent_secrets`、`kb_connectors`、`kb_ingest_jobs`、`session_meta`。
 > **图例**：**实线** = 有 FK 约束的硬关系；**虚线** = 软引用（按 id/name 约定、无 FK）。边标记：`·admin` = FK 真实但仅 admin/console 消费、非 agent runtime；`·vault` = per-principal vault provider。
 
 ```mermaid
@@ -182,8 +183,8 @@ erDiagram
   tenants ||--o{ teams : "下设"
   tenants ||--o{ users : "tenant_id"
   tenants ||--o{ agents : "tenant_id"
-  teams ||--o{ agents : "team_id 归属·非runtime"
-  users ||..o{ api_keys : "has"
+  teams ||--o{ agents : "team_id 归属·复合FK同租户·非runtime"
+  users ||--o{ api_keys : "has·CASCADE"
   users ||..o{ user_agents : ""
   agents ||--o{ user_agents : "用户↔agent·admin"
   agents ||--o{ agent_im_groups : "IM 群白名单·admin"
