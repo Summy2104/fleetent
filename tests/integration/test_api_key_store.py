@@ -1,4 +1,5 @@
 import datetime
+import sqlite3
 
 import pytest
 
@@ -8,9 +9,18 @@ from tests.integration._migration_template import apply_migrations
 
 @pytest.fixture
 def db(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
-    apply_migrations(tmp_path / "users.db")
-    return tmp_path / "users.db"
+    db_path = tmp_path / "users.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    apply_migrations(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO users (id, name, created_at, email, tenant_id)
+            VALUES ('u1', 'User One', '2026-06-28T00:00:00+00:00', NULL, 'default')
+            """
+        )
+        conn.commit()
+    return db_path
 
 
 def _columns(db_path):
