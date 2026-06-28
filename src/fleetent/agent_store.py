@@ -47,7 +47,6 @@ class Agent:
     name: str
     system_prompt: str
     allowed_tools: list[str]
-    active_version_id: int | None = None
     version: int = 1
     # Extensible per-agent capability switches (SB3). Currently carries
     # `code_execution: bool | None`; SB5 reuses the same JSON column for
@@ -113,14 +112,6 @@ def _parse_caps(row: dict[str, Any]) -> dict[str, Any]:
 def _table_columns(conn: SQLiteConnection, table: str) -> set[str]:
     rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
     return {str(row["name"]) for row in rows}
-
-
-def _table_exists(conn: SQLiteConnection, table: str) -> bool:
-    row = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = :name",
-        {"name": table},
-    ).fetchone()
-    return row is not None
 
 
 def _validate_team_tenant(
@@ -198,52 +189,23 @@ def create_agent(
             {column: values[column] for column in insert_columns},
         ).lastrowid
 
-        if _table_exists(conn, "agent_versions"):
-            version_columns = _table_columns(conn, "agent_versions")
-            version_values: dict[str, Any] = {
-                "agent_id": int(agent_id or 0),
-                "version": 1,
-                "system_prompt": system_prompt,
-                "allowed_tools": json.dumps(allowed_tools),
-                "skills_dir": skills_dir,
-                "mcp_server_ids": json.dumps(mcp_server_ids) if mcp_server_ids is not None else None,
-                "model_overrides": json.dumps(model_overrides or {}),
-                "memory_namespace": memory_namespace,
-                "created_by_user_id": None,
-                "created_at": now,
-            }
-            version_insert_columns = [column for column in version_values if column in version_columns]
-            version_placeholders = ", ".join(f":{column}" for column in version_insert_columns)
-            version_id = conn.execute(
-                f"INSERT INTO agent_versions ({', '.join(version_insert_columns)}) "
-                f"VALUES ({version_placeholders})",
-                {column: version_values[column] for column in version_insert_columns},
-            ).lastrowid
-            if "active_version_id" in agent_columns:
-                conn.execute(
-                    "UPDATE agents SET active_version_id = :version_id WHERE id = :agent_id",
-                    {"version_id": int(version_id or 0), "agent_id": int(agent_id or 0)},
-                )
-
-        if _table_exists(conn, "agent_mcp_servers"):
-            for server_id in sorted(set(mcp_server_ids or [])):
-                conn.execute(
-                    "INSERT OR IGNORE INTO agent_mcp_servers "
-                    "(agent_id, server_id, created_at, created_by) "
-                    "VALUES (:agent_id, :server_id, :created_at, :created_by)",
-                    {
-                        "agent_id": int(agent_id or 0),
-                        "server_id": server_id,
-                        "created_at": now,
-                        "created_by": None,
-                    },
-                )
+        for server_id in sorted(set(mcp_server_ids or [])):
+            conn.execute(
+                "INSERT OR IGNORE INTO agent_mcp_servers "
+                "(agent_id, server_id, created_at, created_by) "
+                "VALUES (:agent_id, :server_id, :created_at, :created_by)",
+                {
+                    "agent_id": int(agent_id or 0),
+                    "server_id": server_id,
+                    "created_at": now,
+                    "created_by": None,
+                },
+            )
     return Agent(
         id=int(agent_id or 0),
         name=name,
         system_prompt=system_prompt,
         allowed_tools=allowed_tools,
-        active_version_id=None,
         version=1,
         features=features,
         plugins=plugins,
@@ -313,7 +275,6 @@ def _row_to_agent(row: dict[str, Any], *, mcp_server_ids: list[str] | None = Non
         version=int(row["version"]) if row["version"] is not None else 1,
         system_prompt=str(row["system_prompt"]),
         allowed_tools=json.loads(row["allowed_tools"]),
-        active_version_id=None,
         tenant_id=str(row["tenant_id"]) if row["tenant_id"] is not None else "default",
         team_id=str(row["team_id"]) if row["team_id"] is not None else None,
         skills_dir=row["skills_dir"],
@@ -556,10 +517,6 @@ def unbind_mcp_server(agent_id: int, server_id: str) -> None:
 
 
 def list_mcp_servers_for_agent(agent_id: int) -> list[str]:
-    if _db().execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_mcp_servers'"
-    ).fetchone() is None:
-        return []
     rows = (
         _db()
         .execute(

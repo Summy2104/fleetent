@@ -18,7 +18,6 @@ def _agent(**overrides: Any) -> agent_store.Agent:
         "name": "ops",
         "system_prompt": "prompt",
         "allowed_tools": ["shell"],
-        "active_version_id": None,
         "version": 3,
         "features": {"code_execution": True},
         "plugins": ["github"],

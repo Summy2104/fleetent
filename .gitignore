@@ -39,6 +39,9 @@ secrets/
 .worktrees/
 .claude/worktrees/
 
+# Scratch / local dev logs
+scratchpad/
+
 # Browser self-test artifacts (Playwright MCP)
 .playwright-mcp/
 

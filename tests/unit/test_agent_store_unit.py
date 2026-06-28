@@ -231,7 +231,6 @@ def test_create_agent_persists_current_state(monkeypatch: pytest.MonkeyPatch) ->
     )
     assert agent.id == 7
     assert agent.version == 1
-    assert agent.active_version_id is None
 
     def dup_execute(sql: str, params: dict[str, Any]) -> _Result:
         if "SELECT 1 FROM agents" in sql:

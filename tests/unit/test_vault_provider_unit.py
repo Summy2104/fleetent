@@ -67,7 +67,6 @@ def test_resolve_principal_returns_agent_service_principal_for_run_as_agent(
             name=name,
             system_prompt="",
             allowed_tools=[],
-            active_version_id=None,
             features={},
             plugins=[],
             allowed_skills=[],
@@ -108,7 +107,6 @@ def test_resolve_principal_keeps_caller_for_user_grant_missing_grant_or_missing_
             name=name,
             system_prompt="",
             allowed_tools=[],
-            active_version_id=None,
             features={},
             plugins=[],
             allowed_skills=[],
@@ -362,7 +360,9 @@ def test_get_credential_returns_apikey_path(monkeypatch: pytest.MonkeyPatch) -> 
 def test_get_credential_returns_needs_consent_for_missing_and_needs_reauth_statuses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(vault_provider, "_resolve_principal", lambda user_id, service_id, agent: user_id)
+    monkeypatch.setattr(
+        vault_provider, "_resolve_principal", lambda user_id, service_id, agent: user_id
+    )
     monkeypatch.setattr(
         vault_provider.external_service_store,
         "get_service",
@@ -393,7 +393,9 @@ def test_get_credential_returns_needs_consent_for_missing_and_needs_reauth_statu
 
 
 def test_get_credential_expired_path_delegates_to_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(vault_provider, "_resolve_principal", lambda user_id, service_id, agent: "agent:7")
+    monkeypatch.setattr(
+        vault_provider, "_resolve_principal", lambda user_id, service_id, agent: "agent:7"
+    )
     monkeypatch.setattr(
         vault_provider.external_service_store,
         "get_service",
@@ -423,7 +425,9 @@ def test_get_credential_expired_path_delegates_to_refresh(monkeypatch: pytest.Mo
 
 
 def test_get_credential_returns_error_for_error_status(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(vault_provider, "_resolve_principal", lambda user_id, service_id, agent: user_id)
+    monkeypatch.setattr(
+        vault_provider, "_resolve_principal", lambda user_id, service_id, agent: user_id
+    )
     monkeypatch.setattr(
         vault_provider.external_service_store,
         "get_service",
@@ -445,8 +449,12 @@ def test_get_credential_returns_error_for_error_status(monkeypatch: pytest.Monke
     )
 
 
-def test_get_credential_returns_needs_consent_for_unknown_status(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(vault_provider, "_resolve_principal", lambda user_id, service_id, agent: user_id)
+def test_get_credential_returns_needs_consent_for_unknown_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        vault_provider, "_resolve_principal", lambda user_id, service_id, agent: user_id
+    )
     monkeypatch.setattr(
         vault_provider.external_service_store,
         "get_service",
@@ -470,7 +478,9 @@ def test_get_credential_returns_needs_consent_for_unknown_status(monkeypatch: py
 def test_get_credential_returns_authorized_credential_and_defaults_scopes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(vault_provider, "_resolve_principal", lambda user_id, service_id, agent: user_id)
+    monkeypatch.setattr(
+        vault_provider, "_resolve_principal", lambda user_id, service_id, agent: user_id
+    )
     monkeypatch.setattr(
         vault_provider.external_service_store,
         "get_service",
