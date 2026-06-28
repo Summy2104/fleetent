@@ -1,4 +1,4 @@
-"""Management state for the Agent console: lifecycle status + provenance + drift."""
+"""Management state for the Agent console: lifecycle status + default binding."""
 
 import datetime
 from typing import Any
@@ -26,8 +26,6 @@ def get_state(agent_id: int) -> dict[str, Any]:
                 agent_admin_state.agent_id,
                 agents.name AS agent_name,
                 agent_admin_state.status,
-                agent_admin_state.provenance,
-                agent_admin_state.drift,
                 agent_admin_state.is_default,
                 agent_admin_state.archived_at,
                 agent_admin_state.updated_at
@@ -44,8 +42,6 @@ def get_state(agent_id: int) -> dict[str, Any]:
             "agent_id": agent_id,
             "agent_name": _agent_name(agent_id),
             "status": "enabled",
-            "provenance": "adhoc",
-            "drift": 0,
             "is_default": 0,
             "archived_at": None,
             "updated_at": None,
@@ -105,30 +101,12 @@ def is_default(agent_id: int) -> bool:
     return bool(get_state(agent_id).get("is_default", 0))
 
 
-def set_provenance(agent_id: int, provenance: str) -> None:
-    if provenance not in {"managed", "adhoc"}:
-        raise ValueError(f"unknown provenance: {provenance}")
-    _upsert(agent_id, {"provenance": provenance})
-
-
-def mark_drift(agent_id: int) -> None:
-    """Flag a managed agent as drifted (UI edited it out-of-band); adhoc is a no-op."""
-    if get_state(agent_id)["provenance"] == "managed":
-        _upsert(agent_id, {"drift": 1})
-
-
-def clear_drift(agent_id: int) -> None:
-    _upsert(agent_id, {"drift": 0})
-
-
 def list_states(include_archived: bool = False) -> list[dict[str, Any]]:
     sql = """
         SELECT
             agent_admin_state.agent_id,
             agents.name AS agent_name,
             agent_admin_state.status,
-            agent_admin_state.provenance,
-            agent_admin_state.drift,
             agent_admin_state.is_default,
             agent_admin_state.archived_at,
             agent_admin_state.updated_at
@@ -166,11 +144,9 @@ def delete_state(agent_id: int) -> None:
         )
 
 
-_FIELDS = {"status", "provenance", "drift", "is_default", "archived_at"}
+_FIELDS = {"status", "is_default", "archived_at"}
 _DEFAULTS = {
     "status": "enabled",
-    "provenance": "adhoc",
-    "drift": 0,
     "is_default": 0,
     "archived_at": None,
 }
@@ -202,8 +178,8 @@ def _upsert(agent_id: int, fields: dict[str, Any]) -> None:
         conn.execute(
             """
             INSERT INTO agent_admin_state
-                (agent_id, status, provenance, drift, is_default, archived_at, updated_at)
-            VALUES (:agent_id, :status, :provenance, :drift, :is_default, :archived_at, :updated_at)
+                (agent_id, status, is_default, archived_at, updated_at)
+            VALUES (:agent_id, :status, :is_default, :archived_at, :updated_at)
             ON CONFLICT(agent_id) DO UPDATE SET {assignments}, updated_at = :updated_at
             """.replace("{assignments}", assignments),
             params,

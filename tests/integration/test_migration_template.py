@@ -20,11 +20,31 @@ def _fresh_migrate(db_path: Path) -> None:
 
 
 def _schema(db_path: Path) -> list[tuple[str, str, str]]:
+    def _normalize_sql(sql: str | None) -> str:
+        if not sql or not sql.startswith("CREATE TABLE"):
+            return sql or ""
+        lines = [line.strip() for line in sql.splitlines()]
+        if len(lines) <= 2:
+            return sql
+        head = lines[0]
+        tail = lines[-1]
+        body = [line.rstrip(",") for line in lines[1:-1]]
+        split_at = len(body)
+        for index, line in enumerate(body):
+            if line.startswith(("PRIMARY KEY", "UNIQUE", "FOREIGN KEY", "CHECK", "CONSTRAINT")):
+                split_at = index
+                break
+        columns = body[:split_at]
+        constraints = sorted(body[split_at:])
+        normalized_body = columns + constraints
+        return "\n".join([head, *[f"\t{line}," for line in normalized_body[:-1]], f"\t{normalized_body[-1]}", tail])
+
     conn = sqlite3.connect(db_path)
     try:
-        return conn.execute(
+        rows = conn.execute(
             "SELECT type, name, sql FROM sqlite_master ORDER BY type, name"
         ).fetchall()
+        return [(row[0], row[1], _normalize_sql(row[2])) for row in rows]
     finally:
         conn.close()
 
@@ -32,6 +52,7 @@ def _schema(db_path: Path) -> list[tuple[str, str, str]]:
 def test_helper_schema_matches_fresh_migrate(tmp_path):
     helper_db = tmp_path / "helper.db"
     fresh_db = tmp_path / "fresh.db"
+    mt._template_db.cache_clear()
     mt.apply_migrations(helper_db)
     _fresh_migrate(fresh_db)
     assert _schema(helper_db) == _schema(fresh_db)

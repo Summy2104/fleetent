@@ -1,6 +1,4 @@
-"""Tests for agent_console_api (/admin/agents). Covers platform.md scenarios 36-46
-(the management-face additions: enable/disable, archive+protection, clone, templates,
-observability, provenance — CRUD/versioning belong to multi-agent-management)."""
+"""Tests for agent_console_api (/admin/agents)."""
 
 import pytest
 import yaml
@@ -93,8 +91,7 @@ def test_list_merges_runtime_and_placement(client, monkeypatch):
     rows = client.get("/admin/agents", headers=_hdr(token)).json()
     row = next(r for r in rows if r["agent_name"] == "ops")
 
-    assert row["status"] == "enabled"  # existing field unchanged
-    assert row["provenance"] == "adhoc"  # existing field unchanged
+    assert row["status"] == "enabled"
     assert set(row["runtime"]) == {"phase", "health", "pid", "node_id", "reported_at"}
     assert row["runtime"]["phase"] == "running"
     assert row["runtime"]["health"] == "ok"
@@ -137,7 +134,6 @@ def test_detail_merges_runtime_and_placement(client, monkeypatch):
     assert body["agent"] == "ops"
     assert body["system_prompt"] == "Ops prompt"
     assert body["allowed_tools"] == ["read_*"]
-    assert body["provenance"] == "adhoc"
 
 
 def test_runtime_and_placement_are_independent(client, monkeypatch):
@@ -300,7 +296,7 @@ def test_clone_copies_def_no_bindings(client, monkeypatch):
     assert clone is not None
     assert clone.system_prompt == "p"
     assert clone.allowed_tools == ["read_*"]
-    assert store.get_state(clone.id)["provenance"] == "adhoc"
+    assert store.get_state(clone.id)["status"] == "disabled"
 
 
 def test_clone_duplicate_name_rejected(client, monkeypatch):
@@ -401,9 +397,9 @@ def _wire_real_store(monkeypatch):
                     tenant_id if tenant_id is not None else cur.tenant_id,
                     team_id if team_id is not None else cur.team_id,
                 )
-        if config_overrides is not None:
-            agent_store.set_config_overrides(name, config_overrides)
         kwargs = {}
+        if config_overrides is not None:
+            kwargs["config_overrides"] = config_overrides
         if system_prompt is not None:
             kwargs["system_prompt"] = system_prompt
         if allowed_tools is not None:
@@ -416,7 +412,8 @@ def _wire_real_store(monkeypatch):
             kwargs["model_overrides"] = mo
         if mn is not None:
             kwargs["memory_namespace"] = mn
-        agent_store.create_version(name, **kwargs)
+        if kwargs:
+            agent_store.update_agent_config(name, **kwargs)
 
     def _refs(name):
         a = agent_store.get_by_name(name)
@@ -465,7 +462,7 @@ def test_create_agent_persists_and_lists(client, monkeypatch):
     assert found is not None and found.system_prompt == "hi"
     st = store.get_state(found.id)
     # New agents default to disabled (must be pinned to a node before enable).
-    assert st["provenance"] == "adhoc" and st["status"] == "disabled"
+    assert st["status"] == "disabled"
     assert "newbot" in {a["agent_name"] for a in store.list_states()}
 
 
@@ -572,14 +569,16 @@ def test_get_missing_404(client, monkeypatch):
     assert client.get("/admin/agents/ghost", headers=_hdr(token)).status_code == 404
 
 
-def test_patch_creates_new_active_version(client, monkeypatch):
+def test_patch_updates_current_config_and_bumps_version(client, monkeypatch):
     _wire_real_store(monkeypatch)
     agent_store.create_agent("ops", "v1", ["shell"])
     token, _ = _session_for("admin")
     r = client.patch("/admin/agents/ops", headers=_hdr(token), json={"system_prompt": "v2"})
     assert r.status_code == 200
-    assert agent_store.get_by_name("ops").system_prompt == "v2"
-    assert len(agent_store.list_versions("ops")) == 2
+    updated = agent_store.get_by_name("ops")
+    assert updated is not None
+    assert updated.system_prompt == "v2"
+    assert updated.version == 2
 
 
 def test_patch_capabilities_yaml_updates_tools(client, monkeypatch):
@@ -600,17 +599,6 @@ def test_patch_missing_404(client, monkeypatch):
     token, _ = _session_for("admin")
     r = client.patch("/admin/agents/ghost", headers=_hdr(token), json={"system_prompt": "x"})
     assert r.status_code == 404
-
-
-def test_patch_managed_marks_drift(client, monkeypatch):
-    _wire_real_store(monkeypatch)
-    agent_store.create_agent("ops", "v1", ["shell"])
-    ops = agent_store.get_by_name("ops")
-    assert ops is not None
-    store.set_provenance(ops.id, "managed")
-    token, _ = _session_for("admin")
-    client.patch("/admin/agents/ops", headers=_hdr(token), json={"system_prompt": "v2"})
-    assert store.get_state(ops.id)["drift"] == 1
 
 
 def test_delete_requires_confirm(client, monkeypatch):

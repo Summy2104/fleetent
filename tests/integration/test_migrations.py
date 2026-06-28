@@ -308,24 +308,15 @@ def test_agent_versions_table_and_columns(tmp_path):
     apply_migrations(db)
     conn = sqlite3.connect(db)
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    av_cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_versions)")}
     agent_cols = {row[1] for row in conn.execute("PRAGMA table_info(agents)")}
+    admin_cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_admin_state)")}
     conn.close()
-    assert "agent_versions" in tables
+    assert "agent_versions" not in tables
     assert _LEGACY_CHANNEL_BINDINGS_TABLE not in tables
-    assert av_cols >= {
-        "id",
-        "agent_id",
-        "version",
-        "system_prompt",
-        "allowed_tools",
-        "skills_dir",
-        "mcp_server_ids",
-        "model_overrides",
-        "memory_namespace",
-        "created_at",
-    }
-    assert "active_version_id" in agent_cols
+    assert {"version", "model_overrides", "memory_namespace", "skills_dir"} <= agent_cols
+    assert "active_version_id" not in agent_cols
+    assert "provenance" not in admin_cols
+    assert "drift" not in admin_cols
 
 
 def test_agent_v1_backfill_for_existing_rows(tmp_path):

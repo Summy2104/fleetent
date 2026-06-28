@@ -20,7 +20,6 @@ export type AgentListItem = {
   agent_name: string;
   is_default?: boolean;
   status: string;
-  provenance: string;
   system_prompt?: string;
   allowed_tools?: string[];
   // Node-reported runtime state (null when no node has reported) and node binding.
@@ -62,7 +61,6 @@ export type AgentDetail = {
   supports_groups?: boolean;
   icon?: string | null;
   memory_namespace?: string;
-  provenance?: string;
   version?: number;
   runtime?: AgentRuntime | null;
   placement?: AgentPlacement | null;
@@ -78,12 +76,6 @@ export type AgentRequiredEnvRow = {
 export type AgentRequiredEnv = {
   agent: string;
   required_env: AgentRequiredEnvRow[];
-};
-
-export type AgentVersion = {
-  id: number;
-  is_active: boolean;
-  version: number;
 };
 
 export type AgentSkillBinding = {
@@ -143,10 +135,6 @@ const AGENTS_QUERY_KEY = ['agents'] as const;
 
 function agentDetailKey(name: string | null) {
   return ['agents', name] as const;
-}
-
-function agentVersionsKey(name: string | null) {
-  return ['agent-versions', name] as const;
 }
 
 function agentSkillsKey(name: string | null) {
@@ -255,28 +243,6 @@ export function useDeleteAgentMutation(name: string) {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
       queryClient.removeQueries({ queryKey: agentDetailKey(name) });
-    },
-  });
-}
-
-export function useAgentVersionsQuery(name: string | null, enabled: boolean) {
-  const api = useAdminApi();
-
-  return useQuery({
-    enabled: enabled && Boolean(name),
-    queryKey: agentVersionsKey(name),
-    queryFn: () => api.get<AgentVersion[]>(`/admin/agents/${name}/versions`),
-  });
-}
-
-export function useActivateAgentVersionMutation(name: string) {
-  const api = useAdminApi();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (version: number) => api.post(`/admin/agents/${name}/versions/${version}/activate`),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: agentVersionsKey(name) });
     },
   });
 }

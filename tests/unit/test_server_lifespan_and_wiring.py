@@ -9,7 +9,6 @@ import pytest
 
 from fleetent import agent_store, server
 from fleetent.platform.agent_management_console import agent_console_api
-from fleetent.platform.askit_console import agent_apply_api
 from fleetent.platform.node_management import node_store, placement_store
 
 
@@ -19,7 +18,8 @@ def _agent(**overrides: Any) -> agent_store.Agent:
         "name": "ops",
         "system_prompt": "prompt",
         "allowed_tools": ["shell"],
-        "active_version_id": 11,
+        "active_version_id": None,
+        "version": 3,
         "features": {"code_execution": True},
         "plugins": ["github"],
         "allowed_skills": ["triage"],
@@ -70,9 +70,6 @@ def test_connector_edge_tenant_and_im_identity(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_agent_def_dict_and_wire_agent_store_seams(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        server.agent_store, "get_version_by_id", lambda version_id: SimpleNamespace(version=3)
-    )
     assert server._agent_def_dict(None) is None
     assert server._agent_def_dict(_agent())["version"] == 3
     # IM chat-type capability switches must round-trip through the console seam so
@@ -92,8 +89,8 @@ def test_agent_def_dict_and_wire_agent_store_seams(monkeypatch: pytest.MonkeyPat
     )
     monkeypatch.setattr(
         server.agent_store,
-        "create_version",
-        lambda *args, **kwargs: created.append(("create_version", args, kwargs)) or None,
+        "update_agent_config",
+        lambda *args, **kwargs: created.append(("update_agent_config", args, kwargs)) or _agent(),
     )
     monkeypatch.setattr(
         server.agent_store,
@@ -112,9 +109,6 @@ def test_agent_def_dict_and_wire_agent_store_seams(monkeypatch: pytest.MonkeyPat
     )
     server.wire_agent_store_seams()
 
-    created_id = agent_apply_api.create_agent_def("ops", "prompt", ["shell"])
-    assert created_id == 7
-    agent_apply_api.update_agent_def("ops", "next", ["read"])
     assert agent_console_api.get_agent_def("ops")["id"] == 7
     agent_console_api.create_agent_def(
         "dev",
@@ -146,9 +140,12 @@ def test_agent_def_dict_and_wire_agent_store_seams(monkeypatch: pytest.MonkeyPat
     assert agent_console_api.delete_agent_def("ops") is True
 
     assert any(name == "set_identity" for name, *_ in created)
-    assert any(name == "set_config_overrides" for name, *_ in created)
     assert any(
-        item[0] == "create_version" and item[2]["allowed_tools"] == ["shell", "read"]
+        item[0] == "update_agent_config" and item[2]["allowed_tools"] == ["shell", "read"]
+        for item in created
+    )
+    assert any(
+        item[0] == "update_agent_config" and item[2].get("config_overrides") == {"strict": False}
         for item in created
     )
 

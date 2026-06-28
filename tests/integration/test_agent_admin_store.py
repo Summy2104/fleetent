@@ -35,8 +35,6 @@ def test_default_state(store_db):
     assert s["agent_id"] == 999
     assert s["agent_name"] is None
     assert s["status"] == "enabled"
-    assert s["provenance"] == "adhoc"
-    assert s["drift"] == 0
 
 
 def test_enable_disable(store_db, agent_id):
@@ -59,31 +57,12 @@ def test_status_rejects_unknown(store_db, agent_id):
         store.set_status(agent_id, "bogus")
 
 
-def test_drift_only_for_managed(store_db):
-    adhoc = agent_store.create_agent("adhoc-agent", "Adhoc.", ["shell"]).id
-    managed = agent_store.create_agent("managed-agent", "Managed.", ["shell"]).id
-    store.mark_drift(adhoc)  # adhoc → no-op
-    assert store.get_state(adhoc)["drift"] == 0
-    store.set_provenance(managed, "managed")
-    store.mark_drift(managed)
-    assert store.get_state(managed)["drift"] == 1
-    store.clear_drift(managed)
-    assert store.get_state(managed)["drift"] == 0
-
-
-def test_provenance_flip_preserves_status_and_drift(store_db):
-    # provenance lives in the side table keyed by name; flipping it must not disturb the
-    # agent's lifecycle status or drift flag (identity/version/bindings live elsewhere).
+def test_state_updates_preserve_status_only(store_db):
     agent_id = agent_store.create_agent("svc", "Svc.", ["shell"]).id
-    store.set_provenance(agent_id, "managed")
     store.disable(agent_id)
-    store.mark_drift(agent_id)
-    store.set_provenance(agent_id, "adhoc")  # flip back
     s = store.get_state(agent_id)
     assert s["agent_name"] == "svc"
-    assert s["provenance"] == "adhoc"
-    assert s["status"] == "disabled"  # unchanged
-    assert s["drift"] == 1  # unchanged
+    assert s["status"] == "disabled"
 
 
 def test_list_excludes_archived(store_db):
@@ -109,7 +88,6 @@ def test_references_and_protection(store_db):
 
 def test_delete_state_removes_row(store_db):
     agent_id = agent_store.create_agent("gone", "Gone.", ["shell"]).id
-    store.set_provenance(agent_id, "adhoc")
     store.enable(agent_id)
     assert any(s["agent_name"] == "gone" for s in store.list_states())
     store.delete_state(agent_id)

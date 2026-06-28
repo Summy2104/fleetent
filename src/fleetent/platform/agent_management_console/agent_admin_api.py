@@ -1,9 +1,9 @@
-"""FastAPI router for /admin/agents version + binding management.
+"""FastAPI router for /admin/agents binding management.
 
-Adds the version-listing/activation and the user binding endpoints on
-top of the agent management console, reusing the same Session auth + role guards
-(viewer reads, admin writes). Agent rows and bindings come from agent_store; schema
-lifecycle is owned by Alembic. This module never imports the agent loop.
+Adds the user/group/MCP/secret binding endpoints on top of the agent management
+console, reusing the same Session auth + role guards (viewer reads, admin
+writes). Agent rows and bindings come from agent_store; schema lifecycle is
+owned by Alembic. This module never imports the agent loop.
 """
 
 from typing import Any
@@ -156,34 +156,6 @@ def export_agent_yaml(name: str, authorization: str | None = Header(None)) -> di
     _current_user(authorization)
     agent = _require_agent(name)
     return {"agent": name, "yaml": _build_agent_yaml(agent)}
-
-
-@router.get("/agents/{name}/versions")
-def list_versions(name: str, authorization: str | None = Header(None)) -> list[dict[str, Any]]:
-    _current_user(authorization)
-    _require_agent(name)
-    return [
-        {
-            "id": v.id,
-            "version": v.version,
-            "is_active": v.is_active,
-            "created_at": v.created_at,
-        }
-        for v in agent_store.list_versions(name)
-    ]
-
-
-@router.post("/agents/{name}/versions/{version}/activate")
-def activate_version(
-    name: str, version: int, authorization: str | None = Header(None)
-) -> dict[str, Any]:
-    _require_admin(authorization)
-    _require_agent(name)
-    try:
-        agent_store.activate_version(name, version)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return {"name": name, "active_version": version}
 
 
 @router.put("/agents/{name}/default")

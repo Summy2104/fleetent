@@ -137,9 +137,8 @@ graph TD
 
 | 表 | 键 / 关键列 | FK | 用途 |
 |---|---|---|---|
-| `agents` | `id`=不可变身份 · `name`=可读标签 · `active_version_id`(裸 INTEGER 无 FK) · `supports_dm`/`supports_groups`；无 status 列 | — | agent 定义；管理逻辑 → [agent-management](../capabilities/agent-management.md) |
-| `agent_versions` | `agent_id` | → agents (CASCADE) | 不可变版本快照 |
-| `agent_admin_state` | PK `agent_id`；`status`/`provenance`/`drift`/`archived_at`/`is_default`（默认 agent 标记，迁移 098；materialize→`bindings.default`，每 tenant 至多一个） | → agents (CASCADE) | 管理态（生命周期+自管+drift+默认）→ [agent-management §2](../capabilities/agent-management.md) |
+| `agents` | `id`=不可变身份 · `name`=可读标签 · `version`=当前配置代次 · `system_prompt`/`allowed_tools`/`model_overrides`/`memory_namespace`/`skills_dir`/`supports_dm`/`supports_groups`；无 status 列 | — | agent 当前配置单一真相源；管理逻辑 → [agent-management](../capabilities/agent-management.md) |
+| `agent_admin_state` | PK `agent_id`；`status`/`archived_at`/`is_default`（默认 agent 标记，迁移 098；materialize→`bindings.default`，每 tenant 至多一个） | → agents (CASCADE) | 管理态（生命周期+默认）→ [agent-management §2](../capabilities/agent-management.md) |
 | `user_agents` | `(user_id, agent_id)` | → agents (CASCADE) | 用户↔agent 准入；materialize → `im.allow_users`（admin 维护）|
 | `agent_im_groups` | `(agent_id, platform, group_id)` | → agents (CASCADE) | IM 群白名单；materialize → `im.<platform>.allow_groups` |
 | `agent_kbs` | `agent_id` · `created_by` | → agents (CASCADE) | agent↔KB 绑定真相源；`kb_id` 软引用本 tenant `kb.db` |
@@ -191,9 +190,7 @@ erDiagram
   users ||--o{ im_users : "平台用户→内部 user·CASCADE"
   users ||--o{ tenants : "approver_user_id·SET NULL"
   users ||--o{ teams : "approver_user_id·SET NULL"
-  agents ||--o{ agent_versions : "不可变快照"
-  users ||..o{ agent_versions : "created_by_user_id"
-  agents ||--|| agent_admin_state : "生命周期/provenance/drift·admin"
+  agents ||--|| agent_admin_state : "生命周期/默认·admin"
   agents ||--o{ agent_kbs : "KB 绑定真相源"
   agents ||--o{ mcp_servers : "agent-owned MCP 注册"
   agents ||--o{ agent_mcp_servers : "MCP 绑定(agent侧)"

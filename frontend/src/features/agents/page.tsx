@@ -203,8 +203,6 @@ function AgentRow({
           ) : null}
         </span>
       </button>
-      <span className="hidden shrink-0 text-xs text-muted-foreground sm:block">{agent.provenance}</span>
-
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="secondary" size="sm" aria-label={t('agents.actionsFor', { name: agent.agent_name })}>

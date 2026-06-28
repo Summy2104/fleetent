@@ -208,8 +208,8 @@ def backfill_default_agents(management_path: Path, agents_dir: Path) -> int:
         db.execute(
             """
             INSERT INTO agent_admin_state
-                (agent_id, status, provenance, drift, is_default, archived_at, updated_at)
-            VALUES (:agent_id, 'enabled', 'adhoc', 0, 1, NULL, :updated_at)
+                (agent_id, status, is_default, archived_at, updated_at)
+            VALUES (:agent_id, 'enabled', 1, NULL, :updated_at)
             ON CONFLICT(agent_id) DO UPDATE SET
                 is_default = 1,
                 updated_at = :updated_at

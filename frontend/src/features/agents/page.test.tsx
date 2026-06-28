@@ -470,6 +470,7 @@ describe('agents list page lifecycle', () => {
 
     renderAgentsRoute();
     expect(await screen.findByText('alpha')).toBeInTheDocument();
+    expect(screen.queryByText('adhoc')).not.toBeInTheDocument();
 
     await openActions(user, 'alpha');
     await user.click(await screen.findByRole('menuitem', { name: 'Set as default' }));
@@ -496,7 +497,6 @@ describe('agent configure page bindings', () => {
         system_prompt: 'Alpha prompt',
       },
     ];
-    let activeVersion = 1;
     const detailByAgent: Record<string, AgentDetailRecord> = {
       alpha: {
         agent: 'alpha',
@@ -520,19 +520,19 @@ describe('agent configure page bindings', () => {
         users: ['u1'],
       },
     };
+    let versionRequests = 0;
+    let activateRequests = 0;
 
     installAgentBindingHandlers({ agents, bindingsByAgent, detailByAgent });
 
     server.use(
-      http.get(`${API_BASE_URL}/admin/agents/alpha/versions`, () =>
-        HttpResponse.json([
-          { id: 1, is_active: activeVersion === 1, version: 1 },
-          { id: 2, is_active: activeVersion === 2, version: 2 },
-        ])
-      ),
-      http.post(`${API_BASE_URL}/admin/agents/alpha/versions/2/activate`, () => {
-        activeVersion = 2;
-        return HttpResponse.json({ active_version: 2 });
+      http.get(`${API_BASE_URL}/admin/agents/alpha/versions`, () => {
+        versionRequests += 1;
+        return HttpResponse.json([]);
+      }),
+      http.post(`${API_BASE_URL}/admin/agents/alpha/versions/:version/activate`, () => {
+        activateRequests += 1;
+        return HttpResponse.json({});
       }),
       http.put(`${API_BASE_URL}/admin/agents/alpha/skills/incident-bridge`, async ({ request }) => {
         expect(await request.json()).toEqual({ enabled: true });
@@ -603,6 +603,8 @@ describe('agent configure page bindings', () => {
     // Configure lives on its own route; navigate straight to it.
     renderAgentsRoute('/agents/alpha/configure');
     expect(await screen.findByRole('heading', { name: 'Configure · alpha' })).toBeInTheDocument();
+    expect(screen.queryByText('adhoc')).not.toBeInTheDocument();
+    expect(screen.queryByText('Version History')).not.toBeInTheDocument();
 
     // Skills tab: enable incident-bridge from the searchable multi-select.
     await user.click(screen.getByRole('tab', { name: 'Skills' }));
@@ -689,17 +691,12 @@ describe('agent configure page bindings', () => {
       expect(screen.getByText('unset')).toBeInTheDocument();
     });
 
-    // Deploy tab: versions auto-load; v1 is active so only v2 offers an Activate button.
+    // Deploy tab: version history is retired; deploy and yaml export remain.
     await user.click(screen.getByRole('tab', { name: 'Deploy' }));
-    expect(await screen.findByText('v1')).toBeInTheDocument();
-    const v2Row = screen.getByText('v2').closest('tr') as HTMLElement;
-    expect(within(v2Row).queryByText('active')).not.toBeInTheDocument();
-    await user.click(within(v2Row).getByRole('button', { name: 'Activate' }));
-    // After activation the active badge moves to v2.
-    await waitFor(() => {
-      const refreshedV2 = screen.getByText('v2').closest('tr') as HTMLElement;
-      expect(within(refreshedV2).getByText('active')).toBeInTheDocument();
-    });
+    expect(screen.queryByText('Version History')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Activate' })).not.toBeInTheDocument();
+    expect(versionRequests).toBe(0);
+    expect(activateRequests).toBe(0);
   });
 
   it('keeps viewers read-only across binding tabs', async () => {

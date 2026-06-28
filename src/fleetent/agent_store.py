@@ -1,23 +1,8 @@
-"""Agent definitions, immutable version snapshots, user/channel bindings, and
-per-agent capability switches.
+"""Agent definitions, bindings, and per-agent capability switches.
 
-Schema lifecycle is owned by Alembic (single source of truth): the agents table
-is created on the trunk, gains tenant_id/team_id (030), active_version_id (033),
-and the capability columns features/plugins/allowed_skills (036-038). This store
-reads and writes through the shared DB runtime boundary using named parameters;
-it never creates schema.
-
-Two concerns live side by side, reconciled during the next<-main integration:
-
-* **Versioning** (main): the runtime-facing fields (system_prompt, allowed_tools,
-  skills_dir, mcp_server_ids, model_overrides, memory_namespace) live in
-  ``agent_versions``; ``agents.active_version_id`` points at the active snapshot.
-  This drives the admin console and the snapshot-based ``agent_runtime``.
-* **Capabilities** (next): features/plugins/allowed_skills are per-agent (NOT
-  per-version) switches stored as JSON TEXT columns on ``agents``. The flat
-  ``Agent`` dataclass exposes them so the parameter-style agent_loop pipeline can
-  read them directly. ``get_by_name`` returns runtime fields from the active
-  version and caps from the agent row.
+Schema lifecycle is owned by Alembic (single source of truth). The agents table
+holds the current runtime config and per-agent capabilities in one place; MCP
+bindings remain normalized in ``agent_mcp_servers``.
 """
 
 import json
@@ -49,11 +34,10 @@ def set_delete_agent_hook(cb: Callable[[int], None]) -> None:
     _delete_agent_hook = cb
 
 
-# Agent-row columns beyond the version-derived runtime fields. Caps are not
-# versioned, so they are read straight off the agents row.
 _AGENT_ROW_COLUMNS = (
-    "id, name, active_version_id, features, plugins, allowed_skills, tenant_id, team_id, "
-    "icon, config_overrides, supports_dm, supports_groups"
+    "id, name, version, system_prompt, allowed_tools, features, plugins, allowed_skills, "
+    "tenant_id, team_id, skills_dir, model_overrides, memory_namespace, icon, "
+    "config_overrides, supports_dm, supports_groups"
 )
 
 
@@ -64,6 +48,7 @@ class Agent:
     system_prompt: str
     allowed_tools: list[str]
     active_version_id: int | None = None
+    version: int = 1
     # Extensible per-agent capability switches (SB3). Currently carries
     # `code_execution: bool | None`; SB5 reuses the same JSON column for
     # `sandbox_env`. Stored as a JSON TEXT column on the agents row.
@@ -95,21 +80,6 @@ class Agent:
     supports_groups: bool = False
 
 
-@dataclass
-class AgentVersion:
-    id: int
-    agent_id: int
-    version: int
-    system_prompt: str
-    allowed_tools: list[str]
-    skills_dir: str | None
-    mcp_server_ids: list[str] | None
-    model_overrides: dict[str, Any]
-    memory_namespace: str
-    created_at: str
-    is_active: bool = False
-
-
 def _db() -> SQLiteDatabase:
     return create_database(Settings().database_url)
 
@@ -138,6 +108,19 @@ def _parse_caps(row: dict[str, Any]) -> dict[str, Any]:
         "supports_dm": bool(row["supports_dm"]) if "supports_dm" in row else False,
         "supports_groups": bool(row["supports_groups"]) if "supports_groups" in row else False,
     }
+
+
+def _table_columns(conn: SQLiteConnection, table: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return {str(row["name"]) for row in rows}
+
+
+def _table_exists(conn: SQLiteConnection, table: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = :name",
+        {"name": table},
+    ).fetchone()
+    return row is not None
 
 
 def _validate_team_tenant(
@@ -179,11 +162,7 @@ def create_agent(
     icon: str | None = None,
     config_overrides: dict[str, Any] | None = None,
 ) -> Agent:
-    """Create an agent plus its version-1 snapshot in a single transaction.
-
-    Capabilities (features/plugins/allowed_skills) are stored on the agents row;
-    runtime fields are snapshotted into agent_versions v1.
-    """
+    """Create an agent in the current-state store."""
     features = features or {}
     plugins = plugins or []
     allowed_skills = allowed_skills or []
@@ -194,48 +173,78 @@ def create_agent(
         if conn.execute("SELECT 1 FROM agents WHERE name = :name", {"name": name}).fetchone():
             raise ValueError(f"agent {name!r} already exists")
         _validate_team_tenant(conn, agent_name=name, tenant_id=tenant_id, team_id=team_id)
+        agent_columns = _table_columns(conn, "agents")
+        values: dict[str, Any] = {
+            "name": name,
+            "version": 1,
+            "system_prompt": system_prompt,
+            "allowed_tools": json.dumps(allowed_tools),
+            "features": json.dumps(features),
+            "plugins": json.dumps(plugins),
+            "allowed_skills": json.dumps(allowed_skills),
+            "created_at": now,
+            "tenant_id": tenant_id,
+            "team_id": team_id,
+            "skills_dir": skills_dir,
+            "model_overrides": json.dumps(model_overrides or {}),
+            "memory_namespace": memory_namespace,
+            "icon": icon,
+            "config_overrides": json.dumps(config_overrides),
+        }
+        insert_columns = [column for column in values if column in agent_columns]
+        placeholders = ", ".join(f":{column}" for column in insert_columns)
         agent_id = conn.execute(
-            "INSERT INTO agents "
-            "(name, system_prompt, allowed_tools, features, plugins, allowed_skills, "
-            " created_at, tenant_id, team_id, icon, config_overrides) "
-            "VALUES (:name, :system_prompt, :allowed_tools, :features, :plugins, "
-            " :allowed_skills, :created_at, :tenant_id, :team_id, :icon, :config_overrides)",
-            {
-                "name": name,
+            f"INSERT INTO agents ({', '.join(insert_columns)}) VALUES ({placeholders})",
+            {column: values[column] for column in insert_columns},
+        ).lastrowid
+
+        if _table_exists(conn, "agent_versions"):
+            version_columns = _table_columns(conn, "agent_versions")
+            version_values: dict[str, Any] = {
+                "agent_id": int(agent_id or 0),
+                "version": 1,
                 "system_prompt": system_prompt,
                 "allowed_tools": json.dumps(allowed_tools),
-                "features": json.dumps(features),
-                "plugins": json.dumps(plugins),
-                "allowed_skills": json.dumps(allowed_skills),
+                "skills_dir": skills_dir,
+                "mcp_server_ids": json.dumps(mcp_server_ids) if mcp_server_ids is not None else None,
+                "model_overrides": json.dumps(model_overrides or {}),
+                "memory_namespace": memory_namespace,
+                "created_by_user_id": None,
                 "created_at": now,
-                "tenant_id": tenant_id,
-                "team_id": team_id,
-                "icon": icon,
-                "config_overrides": json.dumps(config_overrides),
-            },
-        ).lastrowid
-        version_id = _insert_version(
-            conn,
-            agent_id=int(agent_id or 0),
-            version=1,
-            system_prompt=system_prompt,
-            allowed_tools=allowed_tools,
-            skills_dir=skills_dir,
-            mcp_server_ids=mcp_server_ids,
-            model_overrides=model_overrides or {},
-            memory_namespace=memory_namespace,
-            now=now,
-        )
-        conn.execute(
-            "UPDATE agents SET active_version_id = :vid WHERE id = :aid",
-            {"vid": version_id, "aid": agent_id},
-        )
+            }
+            version_insert_columns = [column for column in version_values if column in version_columns]
+            version_placeholders = ", ".join(f":{column}" for column in version_insert_columns)
+            version_id = conn.execute(
+                f"INSERT INTO agent_versions ({', '.join(version_insert_columns)}) "
+                f"VALUES ({version_placeholders})",
+                {column: version_values[column] for column in version_insert_columns},
+            ).lastrowid
+            if "active_version_id" in agent_columns:
+                conn.execute(
+                    "UPDATE agents SET active_version_id = :version_id WHERE id = :agent_id",
+                    {"version_id": int(version_id or 0), "agent_id": int(agent_id or 0)},
+                )
+
+        if _table_exists(conn, "agent_mcp_servers"):
+            for server_id in sorted(set(mcp_server_ids or [])):
+                conn.execute(
+                    "INSERT OR IGNORE INTO agent_mcp_servers "
+                    "(agent_id, server_id, created_at, created_by) "
+                    "VALUES (:agent_id, :server_id, :created_at, :created_by)",
+                    {
+                        "agent_id": int(agent_id or 0),
+                        "server_id": server_id,
+                        "created_at": now,
+                        "created_by": None,
+                    },
+                )
     return Agent(
         id=int(agent_id or 0),
         name=name,
         system_prompt=system_prompt,
         allowed_tools=allowed_tools,
-        active_version_id=version_id,
+        active_version_id=None,
+        version=1,
         features=features,
         plugins=plugins,
         allowed_skills=allowed_skills,
@@ -275,10 +284,7 @@ def update_agent_tenancy(name: str, tenant_id: str, team_id: str | None) -> None
 
 def set_config_overrides(name: str, config_overrides: dict[str, Any]) -> None:
     """Replace an agent's agent.yaml field overrides (agent-level, not versioned)."""
-    _db().execute(
-        "UPDATE agents SET config_overrides = :co WHERE name = :name",
-        {"co": json.dumps(config_overrides or {}), "name": name},
-    )
+    update_agent_config(name, config_overrides=config_overrides)
 
 
 def set_im_capabilities(name: str, *, supports_dm: bool, supports_groups: bool) -> None:
@@ -300,55 +306,21 @@ def icons_by_name() -> dict[str, str]:
     return {str(r["name"]): str(r["icon"]) for r in rows}
 
 
-def _insert_version(
-    conn: SQLiteConnection,
-    *,
-    agent_id: int,
-    version: int,
-    system_prompt: str,
-    allowed_tools: list[str],
-    skills_dir: str | None,
-    mcp_server_ids: list[str] | None,
-    model_overrides: dict[str, Any],
-    memory_namespace: str,
-    now: str,
-    created_by_user_id: str | None = None,
-) -> int:
-    version_id = conn.execute(
-        "INSERT INTO agent_versions "
-        "(agent_id, version, system_prompt, allowed_tools, skills_dir, mcp_server_ids, "
-        " model_overrides, memory_namespace, created_by_user_id, created_at) "
-        "VALUES (:agent_id, :version, :system_prompt, :allowed_tools, :skills_dir, "
-        " :mcp_server_ids, :model_overrides, :memory_namespace, :created_by, :created_at)",
-        {
-            "agent_id": agent_id,
-            "version": version,
-            "system_prompt": system_prompt,
-            "allowed_tools": json.dumps(allowed_tools),
-            "skills_dir": skills_dir,
-            "mcp_server_ids": None if mcp_server_ids is None else json.dumps(mcp_server_ids),
-            "model_overrides": json.dumps(model_overrides),
-            "memory_namespace": memory_namespace,
-            "created_by": created_by_user_id,
-            "created_at": now,
-        },
-    ).lastrowid
-    return int(version_id or 0)
-
-
-def _row_to_version(row: dict[str, Any], active_version_id: int | None) -> AgentVersion:
-    return AgentVersion(
+def _row_to_agent(row: dict[str, Any], *, mcp_server_ids: list[str] | None = None) -> Agent:
+    return Agent(
         id=int(row["id"]),
-        agent_id=int(row["agent_id"]),
-        version=int(row["version"]),
+        name=str(row["name"]),
+        version=int(row["version"]) if row["version"] is not None else 1,
         system_prompt=str(row["system_prompt"]),
         allowed_tools=json.loads(row["allowed_tools"]),
+        active_version_id=None,
+        tenant_id=str(row["tenant_id"]) if row["tenant_id"] is not None else "default",
+        team_id=str(row["team_id"]) if row["team_id"] is not None else None,
         skills_dir=row["skills_dir"],
-        mcp_server_ids=None if row["mcp_server_ids"] is None else json.loads(row["mcp_server_ids"]),
+        mcp_server_ids=mcp_server_ids,
         model_overrides=json.loads(row["model_overrides"]) if row["model_overrides"] else {},
         memory_namespace=str(row["memory_namespace"]),
-        created_at=str(row["created_at"]),
-        is_active=int(row["id"]) == active_version_id,
+        **_parse_caps(row),
     )
 
 
@@ -360,166 +332,117 @@ def _get_agent_row(db: SQLiteDatabase, name: str) -> dict[str, Any] | None:
 
 
 def get_by_name(name: str) -> Agent | None:
-    """Return the agent: runtime fields from its active version, caps from the row."""
+    """Return the agent from the current-state row."""
     db = _db()
-    agent = _get_agent_row(db, name)
-    if agent is None:
+    row = _get_agent_row(db, name)
+    if row is None:
         return None
-    version = db.execute(
-        "SELECT * FROM agent_versions WHERE id = :vid",
-        {"vid": agent["active_version_id"]},
-    ).fetchone()
-    if version is None:
-        return None
-    return Agent(
-        id=int(agent["id"]),
-        name=str(agent["name"]),
-        system_prompt=str(version["system_prompt"]),
-        allowed_tools=json.loads(version["allowed_tools"]),
-        active_version_id=int(agent["active_version_id"]),
-        tenant_id=str(agent["tenant_id"]) if agent["tenant_id"] is not None else "default",
-        team_id=str(agent["team_id"]) if agent["team_id"] is not None else None,
-        skills_dir=version["skills_dir"],
-        mcp_server_ids=(
-            None if version["mcp_server_ids"] is None else json.loads(version["mcp_server_ids"])
-        ),
-        model_overrides=json.loads(version["model_overrides"])
-        if version["model_overrides"]
-        else {},
-        memory_namespace=str(version["memory_namespace"]),
-        **_parse_caps(agent),
-    )
+    return _row_to_agent(row, mcp_server_ids=list_mcp_servers_for_agent(int(row["id"])))
 
 
 def get_by_id(agent_id: int) -> Agent | None:
-    """Return the agent by integer id: runtime fields from active version, caps from the row."""
+    """Return the agent by integer id from the current-state row."""
     db = _db()
-    agent = db.execute(
+    row = db.execute(
         f"SELECT {_AGENT_ROW_COLUMNS} FROM agents WHERE id = :agent_id",
         {"agent_id": agent_id},
     ).fetchone()
-    if agent is None:
+    if row is None:
         return None
-    version = db.execute(
-        "SELECT * FROM agent_versions WHERE id = :vid",
-        {"vid": agent["active_version_id"]},
-    ).fetchone()
-    if version is None:
-        return None
-    return Agent(
-        id=int(agent["id"]),
-        name=str(agent["name"]),
-        system_prompt=str(version["system_prompt"]),
-        allowed_tools=json.loads(version["allowed_tools"]),
-        active_version_id=int(agent["active_version_id"]),
-        tenant_id=str(agent["tenant_id"]) if agent["tenant_id"] is not None else "default",
-        team_id=str(agent["team_id"]) if agent["team_id"] is not None else None,
-        skills_dir=version["skills_dir"],
-        mcp_server_ids=(
-            None if version["mcp_server_ids"] is None else json.loads(version["mcp_server_ids"])
-        ),
-        model_overrides=json.loads(version["model_overrides"])
-        if version["model_overrides"]
-        else {},
-        memory_namespace=str(version["memory_namespace"]),
-        **_parse_caps(agent),
-    )
+    return _row_to_agent(row, mcp_server_ids=list_mcp_servers_for_agent(int(row["id"])))
 
 
-def create_version(
+def update_agent_config(
     name: str,
     *,
-    system_prompt: Any = _UNSET,
-    allowed_tools: Any = _UNSET,
-    skills_dir: Any = _UNSET,
-    mcp_server_ids: Any = _UNSET,
-    model_overrides: Any = _UNSET,
-    memory_namespace: Any = _UNSET,
-    activate: bool = True,
-    created_by_user_id: str | None = None,
-) -> AgentVersion:
-    """Snapshot a new version: copy the active version, override provided fields."""
+    system_prompt: str | None = None,
+    allowed_tools: list[str] | None = None,
+    skills_dir: str | None = None,
+    mcp_server_ids: list[str] | None = None,
+    model_overrides: dict[str, Any] | None = None,
+    memory_namespace: str | None = None,
+    features: dict[str, Any] | None = None,
+    plugins: list[str] | None = None,
+    allowed_skills: list[str] | None = None,
+    tenant_id: str | None = None,
+    team_id: str | None = None,
+    config_overrides: dict[str, Any] | None = None,
+) -> Agent:
+    """Update the current-state agent config in place and bump its version."""
     db = _db()
-    now = _now()
     with db.transaction() as conn:
-        agent = conn.execute(
-            "SELECT id, active_version_id FROM agents WHERE name = :name", {"name": name}
-        ).fetchone()
-        if agent is None:
-            raise ValueError(f"agent {name!r} not found")
-        agent_id = int(agent["id"])
-        base = conn.execute(
-            "SELECT * FROM agent_versions WHERE id = :vid", {"vid": agent["active_version_id"]}
-        ).fetchone()
-        if base is None:
-            raise ValueError(f"agent {name!r} has no active version")
-        max_row = conn.execute(
-            "SELECT MAX(version) AS m FROM agent_versions WHERE agent_id = :aid",
-            {"aid": agent_id},
-        ).fetchone()
-        assert max_row is not None  # aggregate always returns a row
-        next_version = int(max_row["m"]) + 1
-
-        merged = _merge_version_fields(
-            base,
-            system_prompt=system_prompt,
-            allowed_tools=allowed_tools,
-            skills_dir=skills_dir,
-            mcp_server_ids=mcp_server_ids,
-            model_overrides=model_overrides,
-            memory_namespace=memory_namespace,
-        )
-        version_id = _insert_version(
-            conn,
-            agent_id=agent_id,
-            version=next_version,
-            now=now,
-            created_by_user_id=created_by_user_id,
-            **merged,
-        )
-        if activate:
-            conn.execute(
-                "UPDATE agents SET active_version_id = :vid WHERE id = :aid",
-                {"vid": version_id, "aid": agent_id},
-            )
-        active_id = version_id if activate else int(agent["active_version_id"])
         row = conn.execute(
-            "SELECT * FROM agent_versions WHERE id = :vid", {"vid": version_id}
+            """
+            SELECT id, version, tenant_id, team_id
+            FROM agents
+            WHERE name = :name
+            """,
+            {"name": name},
         ).fetchone()
-        assert row is not None  # just inserted
-    return _row_to_version(row, active_id)
+        if row is None:
+            raise ValueError(f"agent {name!r} not found")
 
+        next_tenant_id = tenant_id if tenant_id is not None else str(row["tenant_id"])
+        next_team_id = team_id if team_id is not None else row["team_id"]
+        _validate_team_tenant(
+            conn,
+            agent_name=name,
+            tenant_id=next_tenant_id,
+            team_id=None if next_team_id is None else str(next_team_id),
+        )
 
-def _merge_version_fields(
-    base: dict[str, Any],
-    *,
-    system_prompt: Any,
-    allowed_tools: Any,
-    skills_dir: Any,
-    mcp_server_ids: Any,
-    model_overrides: Any,
-    memory_namespace: Any,
-) -> dict[str, Any]:
-    return {
-        "system_prompt": str(base["system_prompt"]) if system_prompt is _UNSET else system_prompt,
-        "allowed_tools": (
-            json.loads(base["allowed_tools"]) if allowed_tools is _UNSET else allowed_tools
-        ),
-        "skills_dir": base["skills_dir"] if skills_dir is _UNSET else skills_dir,
-        "mcp_server_ids": (
-            (None if base["mcp_server_ids"] is None else json.loads(base["mcp_server_ids"]))
-            if mcp_server_ids is _UNSET
-            else mcp_server_ids
-        ),
-        "model_overrides": (
-            (json.loads(base["model_overrides"]) if base["model_overrides"] else {})
-            if model_overrides is _UNSET
-            else model_overrides
-        ),
-        "memory_namespace": (
-            str(base["memory_namespace"]) if memory_namespace is _UNSET else memory_namespace
-        ),
-    }
+        updates: dict[str, Any] = {"version": int(row["version"]) + 1}
+        if system_prompt is not None:
+            updates["system_prompt"] = system_prompt
+        if allowed_tools is not None:
+            updates["allowed_tools"] = json.dumps(allowed_tools)
+        if skills_dir is not None:
+            updates["skills_dir"] = skills_dir
+        if model_overrides is not None:
+            updates["model_overrides"] = json.dumps(model_overrides)
+        if memory_namespace is not None:
+            updates["memory_namespace"] = memory_namespace
+        if features is not None:
+            updates["features"] = json.dumps(features)
+        if plugins is not None:
+            updates["plugins"] = json.dumps(plugins)
+        if allowed_skills is not None:
+            updates["allowed_skills"] = json.dumps(allowed_skills)
+        if tenant_id is not None:
+            updates["tenant_id"] = tenant_id
+        if team_id is not None:
+            updates["team_id"] = team_id
+        if config_overrides is not None:
+            updates["config_overrides"] = json.dumps(config_overrides or {})
+
+        assignments = ", ".join(f"{key} = :{key}" for key in updates)
+        conn.execute(
+            f"UPDATE agents SET {assignments} WHERE name = :name",
+            {"name": name, **updates},
+        )
+
+        if mcp_server_ids is not None:
+            agent_id = int(row["id"])
+            conn.execute(
+                "DELETE FROM agent_mcp_servers WHERE agent_id = :agent_id",
+                {"agent_id": agent_id},
+            )
+            for server_id in sorted(set(mcp_server_ids)):
+                conn.execute(
+                    "INSERT OR IGNORE INTO agent_mcp_servers "
+                    "(agent_id, server_id, created_at, created_by) "
+                    "VALUES (:agent_id, :server_id, :created_at, :created_by)",
+                    {
+                        "agent_id": agent_id,
+                        "server_id": server_id,
+                        "created_at": _now(),
+                        "created_by": None,
+                    },
+                )
+
+    agent = get_by_name(name)
+    assert agent is not None
+    return agent
 
 
 def delete_agent(name: str) -> bool:
@@ -528,9 +451,7 @@ def delete_agent(name: str) -> bool:
     Returns True when an agent was removed, False when no such agent exists.
     Every agent-referencing table carries FK→agents.id ON DELETE CASCADE
     (identity-model 阶段 2–4), so deleting the ``agents`` row cascades to
-    versions / bindings / satellites with no orphans — no manual child deletes
-    needed. ``agents.active_version_id`` is a plain column (no FK), so the
-    cascade is unaffected by it.
+    bindings / satellites with no orphans — no manual child deletes needed.
     """
     db = _db()
     with db.transaction() as conn:
@@ -545,60 +466,6 @@ def delete_agent(name: str) -> bool:
                 _logger.warning("delete_agent cleanup hook failed for agent_id=%s", agent_id)
         conn.execute("DELETE FROM agents WHERE id = :aid", {"aid": agent_id})
     return True
-
-
-def activate_version(name: str, version: int) -> None:
-    db = _db()
-    with db.transaction() as conn:
-        row = conn.execute(
-            "SELECT av.id FROM agent_versions av JOIN agents a ON a.id = av.agent_id "
-            "WHERE a.name = :name AND av.version = :version",
-            {"name": name, "version": version},
-        ).fetchone()
-        if row is None:
-            raise ValueError(f"agent {name!r} has no version {version}")
-        conn.execute(
-            "UPDATE agents SET active_version_id = :vid WHERE name = :name",
-            {"vid": row["id"], "name": name},
-        )
-
-
-def list_versions(name: str) -> list[AgentVersion]:
-    db = _db()
-    agent = _get_agent_row(db, name)
-    if agent is None:
-        return []
-    rows = db.execute(
-        "SELECT * FROM agent_versions WHERE agent_id = :aid ORDER BY version DESC",
-        {"aid": agent["id"]},
-    ).fetchall()
-    return [_row_to_version(row, agent["active_version_id"]) for row in rows]
-
-
-def get_by_name_version(name: str, version: int) -> AgentVersion | None:
-    db = _db()
-    agent = _get_agent_row(db, name)
-    if agent is None:
-        return None
-    row = db.execute(
-        "SELECT * FROM agent_versions WHERE agent_id = :aid AND version = :version",
-        {"aid": agent["id"], "version": version},
-    ).fetchone()
-    if row is None:
-        return None
-    return _row_to_version(row, agent["active_version_id"])
-
-
-def get_version_by_id(version_id: int) -> AgentVersion | None:
-    db = _db()
-    row = db.execute(
-        "SELECT av.*, a.active_version_id AS agent_active "
-        "FROM agent_versions av JOIN agents a ON a.id = av.agent_id WHERE av.id = :vid",
-        {"vid": version_id},
-    ).fetchone()
-    if row is None:
-        return None
-    return _row_to_version(row, row["agent_active"])
 
 
 def get_agent_name_by_id(agent_id: int) -> str | None:
@@ -689,6 +556,10 @@ def unbind_mcp_server(agent_id: int, server_id: str) -> None:
 
 
 def list_mcp_servers_for_agent(agent_id: int) -> list[str]:
+    if _db().execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_mcp_servers'"
+    ).fetchone() is None:
+        return []
     rows = (
         _db()
         .execute(

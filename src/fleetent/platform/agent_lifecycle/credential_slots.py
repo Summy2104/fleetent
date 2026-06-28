@@ -1,4 +1,4 @@
-"""Credential slot metadata stored with the active agent version."""
+"""Credential slot metadata stored with the current agent config."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def ensure_slot(
     mode: SlotMode | None = None,
     env_name: str | None = None,
 ) -> CredentialSlot:
-    """Create or update metadata for one credential slot on the active version."""
+    """Create or update metadata for one credential slot on the current agent config."""
     if not slot_key.strip():
         raise ValueError("slot_key is required")
     if mode is not None and mode not in {"operator", "inject"}:
@@ -47,12 +47,11 @@ def ensure_slot(
     db = _database()
     with db.transaction() as conn:
         row = conn.execute(
-            "SELECT av.id, av.model_overrides FROM agent_versions av "
-            "JOIN agents a ON a.active_version_id = av.id WHERE a.id = :agent_id",
+            "SELECT model_overrides FROM agents WHERE id = :agent_id",
             {"agent_id": agent.id},
         ).fetchone()
         if row is None:
-            raise ValueError(f"agent {agent.name!r} has no active version")
+            raise ValueError(f"agent {agent.name!r} not found")
 
         overrides = json.loads(row["model_overrides"] or "{}")
         slots = _slots_from_overrides(overrides)
@@ -65,22 +64,21 @@ def ensure_slot(
         slots[slot_key] = {"env_name": next_env_name, "mode": next_mode}
         overrides[RESERVED_KEY] = slots
         conn.execute(
-            "UPDATE agent_versions SET model_overrides = :model_overrides WHERE id = :version_id",
+            "UPDATE agents SET model_overrides = :model_overrides WHERE id = :agent_id",
             {
                 "model_overrides": json.dumps(overrides),
-                "version_id": row["id"],
+                "agent_id": agent.id,
             },
         )
     return CredentialSlot(slot_key=slot_key, env_name=next_env_name, mode=next_mode)
 
 
 def list_slots(agent: agent_store.Agent) -> list[CredentialSlot]:
-    """List credential slots for the active agent version."""
+    """List credential slots for the current agent config."""
     row = (
         _database()
         .execute(
-            "SELECT av.model_overrides FROM agent_versions av "
-            "JOIN agents a ON a.active_version_id = av.id WHERE a.id = :agent_id",
+            "SELECT model_overrides FROM agents WHERE id = :agent_id",
             {"agent_id": agent.id},
         )
         .fetchone()

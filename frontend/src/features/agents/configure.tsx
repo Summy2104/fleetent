@@ -20,7 +20,6 @@ import {
   type AgentImCapabilitiesInput,
   type AgentImGroupInput,
   type AgentModelOverrides,
-  useActivateAgentVersionMutation,
   useAddAgentImGroupMutation,
   useAgentBindingsQuery,
   useAgentDetailQuery,
@@ -28,7 +27,6 @@ import {
   useAgentRequiredEnvQuery,
   useAgentSecretsQuery,
   useAgentSkillsQuery,
-  useAgentVersionsQuery,
   useBindAgentKbMutation,
   useBindAgentMcpMutation,
   useBindAgentUserMutation,
@@ -570,9 +568,7 @@ function SecretsTab({ agentName, canWrite }: { agentName: string; canWrite: bool
 
 function DeployTab({ agentName, canWrite }: { agentName: string; canWrite: boolean }): JSX.Element {
   const t = useT();
-  const versions = useAgentVersionsQuery(agentName, true);
   const deploy = useDeployAgentMutation(agentName);
-  const activate = useActivateAgentVersionMutation(agentName);
   const exportYaml = useExportAgentYamlMutation(agentName);
 
   const downloadYaml = async (): Promise<void> => {
@@ -593,45 +589,6 @@ function DeployTab({ agentName, canWrite }: { agentName: string; canWrite: boole
           {t('agents.deployCurrentVersion')}
         </Button>
       ) : null}
-
-      <section className="space-y-3">
-        <TabHeading>{t('agents.versionHistory')}</TabHeading>
-        <div className="overflow-x-auto rounded-lg border border-border">
-          <table className="w-full">
-            <thead className="bg-secondary/50">
-              <tr>
-                <Th>{t('agents.versionColumn')}</Th>
-                <Th>{t('agents.activeColumn')}</Th>
-                <Th className="text-right">{t('agents.actionsColumn')}</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {(versions.data ?? []).map((version) => (
-                <tr key={version.id} className="border-b border-border last:border-0">
-                  <td className="px-3 py-2.5 font-mono text-sm text-foreground">v{version.version}</td>
-                  <td className="px-3 py-2.5">
-                    {version.is_active ? <Badge variant="success">{t('agents.activeBadge')}</Badge> : null}
-                  </td>
-                  <td className="px-3 py-2.5 text-right">
-                    {!version.is_active && canWrite ? (
-                      <Button size="sm" variant="outline" onClick={() => void activate.mutateAsync(version.version)}>
-                        {t('agents.activate')}
-                      </Button>
-                    ) : null}
-                  </td>
-                </tr>
-              ))}
-              {versions.data && versions.data.length === 0 ? (
-                <tr>
-                  <td colSpan={3}>
-                    <EmptyState label={t('agents.noVersions')} />
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
 
       <section className="space-y-3">
         <TabHeading>{t('agents.yamlExport')}</TabHeading>

@@ -1,8 +1,8 @@
-"""Tests for agent_admin_api (/admin/agents version + binding REST).
+"""Tests for agent_admin_api (/admin/agents binding REST).
 
-Covers multi-agent-management tasks 11.1/11.3: version listing + activation and the
-four binding endpoints, all behind Session auth + role guards (viewer reads, admin
-writes). Schema comes from Alembic; agent rows come from agent_store.
+Covers binding endpoints and removed version routes, all behind Session auth +
+role guards (viewer reads, admin writes). Schema comes from Alembic; agent rows
+come from agent_store.
 """
 
 import pytest
@@ -89,54 +89,15 @@ def _hdr(token: str) -> dict:
     return {"Authorization": f"Session {token}"}
 
 
-# --- versions list ------------------------------------------------------------
+# --- removed version routes ---------------------------------------------------
 
 
-def test_versions_requires_auth(fresh_client):
+def test_version_routes_are_removed(fresh_client):
     agent_store.create_agent("ops", "Ops v1.", ["shell"])
-    assert fresh_client.get("/admin/agents/ops/versions").status_code == 401
-
-
-def test_versions_viewer_can_read_desc_with_is_active(fresh_client):
-    agent_store.create_agent("ops", "Ops v1.", ["shell"])
-    agent_store.create_version("ops", system_prompt="Ops v2.")
     token, _ = _session_for("viewer")
-
     resp = fresh_client.get("/admin/agents/ops/versions", headers=_hdr(token))
-    assert resp.status_code == 200
-    body = resp.json()
-    assert [v["version"] for v in body] == [2, 1]
-    active = [v for v in body if v["is_active"]]
-    assert len(active) == 1
-    assert active[0]["version"] == 2
-
-
-# --- activate -----------------------------------------------------------------
-
-
-def test_activate_admin_switches_active(fresh_client):
-    agent_store.create_agent("ops", "Ops v1.", ["shell"])
-    agent_store.create_version("ops", system_prompt="Ops v2.")
-    token, _ = _session_for("admin")
-
+    assert resp.status_code == 404
     resp = fresh_client.post("/admin/agents/ops/versions/1/activate", headers=_hdr(token))
-    assert resp.status_code == 200
-    versions = agent_store.list_versions("ops")
-    active = next(v for v in versions if v.is_active)
-    assert active.version == 1
-
-
-def test_activate_viewer_forbidden(fresh_client):
-    agent_store.create_agent("ops", "Ops v1.", ["shell"])
-    token, _ = _session_for("viewer")
-    resp = fresh_client.post("/admin/agents/ops/versions/1/activate", headers=_hdr(token))
-    assert resp.status_code == 403
-
-
-def test_activate_unknown_version_404(fresh_client):
-    agent_store.create_agent("ops", "Ops v1.", ["shell"])
-    token, _ = _session_for("admin")
-    resp = fresh_client.post("/admin/agents/ops/versions/99/activate", headers=_hdr(token))
     assert resp.status_code == 404
 
 

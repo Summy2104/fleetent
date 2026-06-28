@@ -173,16 +173,11 @@ def test_model_distribution_by_model_and_task_type():
     assert dist["by_task_type"]["code"] == {"calls": 1, "total_tokens": 200}
 
 
-def test_binding_facts_counts_and_provenance():
-    states = [
-        {"agent_name": "a", "provenance": "managed"},
-        {"agent_name": "b", "provenance": "adhoc"},
-        {"agent_name": "c", "provenance": "adhoc"},
-    ]
+def test_binding_facts_counts_and_default_agent():
+    states = [{"agent_name": "a"}, {"agent_name": "b"}, {"agent_name": "c"}]
     facts = s.binding_facts(bindings=4, default_agent="a", states=states)
     assert facts["bindings"] == 4
     assert facts["default_agent"] == "a"
-    assert facts["provenance"] == {"managed": 1, "adhoc": 2}
 
 
 # --- dimension drill-down (任务 3.5/3.6) --------------------------------------

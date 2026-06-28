@@ -258,15 +258,12 @@ def _agent_secrets(agent: agent_store.Agent) -> dict[str, str]:
 
 
 def _project_skill_status(report: NodeAgentStatusReport) -> None:
-    from fleetent.platform.agent_management_console import agent_admin_store
     from fleetent.platform.skill_management import backflow_store, skill_admin_store
 
-    any_drift = False
     for skill in report.skills:
         skill_admin_store.set_base_version(report.agent_id, skill.skill_name, skill.base_version)
         skill_admin_store.set_base_commit(report.agent_id, skill.skill_name, skill.base_commit)
         skill_admin_store.set_drift(report.agent_id, skill.skill_name, drifted=skill.drift)
-        any_drift = any_drift or skill.drift
         if skill.drift:
             # Best-effort auto-nomination: a failed bundle capture (e.g. the owning
             # node is briefly unreachable) must not fail status ingestion.
@@ -283,11 +280,6 @@ def _project_skill_status(report: NodeAgentStatusReport) -> None:
                     skill.skill_name,
                     exc_info=True,
                 )
-    if report.skills:
-        if any_drift:
-            agent_admin_store.mark_drift(report.agent_id)
-        else:
-            agent_admin_store.clear_drift(report.agent_id)
 
 
 def _skill_manifests_for(node_id: str, agent: agent_store.Agent) -> list[dict[str, str]]:

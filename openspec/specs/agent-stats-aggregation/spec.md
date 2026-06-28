@@ -93,11 +93,11 @@ The system SHALL list tools that are in an agent's `allowed_tools` allowlist but
 
 ### Requirement: Model, skill and binding distribution
 
-The system SHALL aggregate per agent: call / token / cost distribution by model and task_type, and binding facts (bound user / channel count, default-agent flag, managed vs ad-hoc source distribution). Skill-hit, memory-hit, and sub_agent-success metrics SHALL follow the dependent-field placeholder rule until emitted.
+The system SHALL aggregate per agent: call / token / cost distribution by model and task_type, and binding facts (bound user / channel count and default-agent flag). Skill-hit, memory-hit, and sub_agent-success metrics SHALL follow the dependent-field placeholder rule until emitted.
 
 #### Scenario: Distribution by model and binding facts shown
 - **WHEN** an admin opens the model / binding group for an agent
-- **THEN** the panel shows call / token distribution by model and task_type, plus bound user / channel counts, default flag, and source distribution
+- **THEN** the panel shows call / token distribution by model and task_type, plus bound user / channel counts and the default flag
 
 ### Requirement: Per-user usage and frequency ranking
 
@@ -148,4 +148,3 @@ The system SHALL allow any panel view to be exported as CSV / image, and SHALL a
 #### Scenario: Per-user detail redacted for viewer
 - **WHEN** deployment policy enables per-user redaction and a `viewer` opens the per-user view
 - **THEN** individual user identifiers are redacted while aggregate distributions remain visible
-

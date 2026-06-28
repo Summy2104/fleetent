@@ -33,20 +33,20 @@ def test_create_and_get_agent(db):
     assert found.allowed_tools == ["shell", "github__*"]
 
 
-def test_create_agent_sets_active_version_v1(db):
+def test_create_agent_sets_current_version_v1(db):
     agent = agent_store.create_agent("assistant", "You are helpful.", ["shell"])
-    assert agent.active_version_id is not None
-    versions = agent_store.list_versions("assistant")
-    assert len(versions) == 1
-    assert versions[0].version == 1
-    assert versions[0].is_active is True
-    assert versions[0].mcp_server_ids is None
-    assert versions[0].model_overrides == {}
-    assert versions[0].memory_namespace == "default"
+    assert agent.version == 1
+    assert agent.active_version_id is None
+    found = agent_store.get_by_name("assistant")
+    assert found is not None
+    assert found.version == 1
+    assert found.mcp_server_ids == []
+    assert found.model_overrides == {}
+    assert found.memory_namespace == "default"
 
 
 def test_create_agent_with_isolation_fields(db):
-    agent_store.create_agent(
+    agent = agent_store.create_agent(
         "analyst",
         "You analyze.",
         ["shell"],
@@ -55,11 +55,10 @@ def test_create_agent_with_isolation_fields(db):
         model_overrides={"default": {"model": "x"}},
         memory_namespace="analyst",
     )
-    [v1] = agent_store.list_versions("analyst")
-    assert v1.skills_dir == "agents/analyst/skills"
-    assert v1.mcp_server_ids == ["github"]
-    assert v1.model_overrides == {"default": {"model": "x"}}
-    assert v1.memory_namespace == "analyst"
+    assert agent.skills_dir == "agents/analyst/skills"
+    assert agent.mcp_server_ids == ["github"]
+    assert agent.model_overrides == {"default": {"model": "x"}}
+    assert agent.memory_namespace == "analyst"
 
 
 def test_agent_carries_active_version_config_fields(db):
@@ -105,62 +104,29 @@ def test_get_agent_for_user_unassigned(db):
     assert agent_store.get_agent_for_user("user-99") is None
 
 
-# --- versioning ---
+# --- current-state updates ---
 
 
-def test_create_version_copies_active_and_overrides_partial(db):
+def test_update_agent_config_bumps_version_and_preserves_unspecified_fields(db):
     agent_store.create_agent("assistant", "v1 prompt", ["shell"], memory_namespace="ns1")
-    v2 = agent_store.create_version("assistant", system_prompt="v2 prompt")
-    assert v2.version == 2
-    assert v2.system_prompt == "v2 prompt"
-    # unspecified fields copied from active (v1)
-    assert v2.allowed_tools == ["shell"]
-    assert v2.memory_namespace == "ns1"
-    # default activates the new version
-    assert agent_store.get_by_name("assistant").system_prompt == "v2 prompt"
+    updated = agent_store.update_agent_config("assistant", system_prompt="v2 prompt")
+    assert updated.version == 2
+    assert updated.system_prompt == "v2 prompt"
+    assert updated.allowed_tools == ["shell"]
+    assert updated.memory_namespace == "ns1"
 
 
-def test_create_version_without_activation_keeps_old_active(db):
-    agent_store.create_agent("assistant", "v1 prompt", ["shell"])
-    agent_store.create_version("assistant", system_prompt="v2 prompt", activate=False)
-    assert agent_store.get_by_name("assistant").system_prompt == "v1 prompt"
-    versions = agent_store.list_versions("assistant")
-    assert [v.version for v in versions] == [2, 1]
-    active = [v for v in versions if v.is_active]
-    assert len(active) == 1 and active[0].version == 1
-
-
-def test_activate_version_switches_active(db):
-    agent_store.create_agent("assistant", "v1 prompt", ["shell"])
-    agent_store.create_version("assistant", system_prompt="v2 prompt")  # active = 2
-    agent_store.activate_version("assistant", 1)
-    assert agent_store.get_by_name("assistant").system_prompt == "v1 prompt"
-
-
-def test_list_versions_desc_with_is_active(db):
-    agent_store.create_agent("assistant", "v1", ["shell"])
-    agent_store.create_version("assistant", system_prompt="v2")
-    agent_store.create_version("assistant", system_prompt="v3")
-    versions = agent_store.list_versions("assistant")
-    assert [v.version for v in versions] == [3, 2, 1]
-    assert versions[0].is_active is True
-    assert all(v.is_active is False for v in versions[1:])
-
-
-def test_get_by_name_version_returns_specific(db):
-    agent_store.create_agent("assistant", "v1 prompt", ["shell"])
-    agent_store.create_version("assistant", system_prompt="v2 prompt")
-    v1 = agent_store.get_by_name_version("assistant", 1)
-    assert v1 is not None and v1.system_prompt == "v1 prompt"
-    assert agent_store.get_by_name_version("assistant", 99) is None
-
-
-def test_get_by_name_reflects_active_version(db):
+def test_update_agent_config_replaces_selected_fields_in_place(db):
     agent_store.create_agent("assistant", "v1 prompt", ["shell", "github__*"])
-    agent_store.create_version("assistant", system_prompt="v2 prompt", allowed_tools=["web_search"])
-    found = agent_store.get_by_name("assistant")
-    assert found.system_prompt == "v2 prompt"
-    assert found.allowed_tools == ["web_search"]
+    updated = agent_store.update_agent_config(
+        "assistant",
+        system_prompt="v2 prompt",
+        allowed_tools=["web_search"],
+        mcp_server_ids=["docs"],
+    )
+    assert updated.system_prompt == "v2 prompt"
+    assert updated.allowed_tools == ["web_search"]
+    assert updated.mcp_server_ids == ["docs"]
 
 
 # --- agent ownership (tenant_id / team_id) ---
@@ -192,14 +158,13 @@ def test_create_agent_with_explicit_ownership(db):
 
 def test_existing_agent_backfills_default_tenant(db):
     # A row inserted without ownership columns (legacy shape) resolves to the
-    # migration's tenant_id default and a null team_id. The agent must still carry
-    # a v1 version snapshot, exactly as migration 033's backfill produces.
+    # migration's tenant_id default and a null team_id.
     from fleetent.config import Settings
     from fleetent.db import create_database
 
     database = create_database(Settings().database_url)
     with database.transaction() as conn:
-        agent_id = conn.execute(
+        conn.execute(
             "INSERT INTO agents (name, system_prompt, allowed_tools, created_at)"
             " VALUES (:name, :system_prompt, :allowed_tools, :created_at)",
             {
@@ -208,17 +173,6 @@ def test_existing_agent_backfills_default_tenant(db):
                 "allowed_tools": "[]",
                 "created_at": "2026-01-01T00:00:00+00:00",
             },
-        ).lastrowid
-        version_id = conn.execute(
-            "INSERT INTO agent_versions "
-            "(agent_id, version, system_prompt, allowed_tools, model_overrides, "
-            " memory_namespace, created_at) "
-            "VALUES (:aid, 1, 'p', '[]', '{}', 'default', :now)",
-            {"aid": agent_id, "now": "2026-01-01T00:00:00+00:00"},
-        ).lastrowid
-        conn.execute(
-            "UPDATE agents SET active_version_id = :vid WHERE id = :aid",
-            {"vid": version_id, "aid": agent_id},
         )
     found = agent_store.get_by_name("legacy")
     assert found is not None
@@ -329,15 +283,15 @@ def test_delete_agent_removes_agent_and_versions(db):
     from fleetent.db import create_database
 
     agent = agent_store.create_agent("doomed", "v1", ["shell"])
-    agent_store.create_version("doomed", system_prompt="v2")
-    agent_store.create_version("doomed", system_prompt="v3")
+    agent_store.update_agent_config("doomed", system_prompt="v2")
+    agent_store.update_agent_config("doomed", system_prompt="v3")
 
     assert agent_store.delete_agent("doomed") is True
     assert agent_store.get_by_name("doomed") is None
 
     database = create_database(Settings().database_url)
     rows = database.execute(
-        "SELECT COUNT(*) AS c FROM agent_versions WHERE agent_id = :aid", {"aid": agent.id}
+        "SELECT COUNT(*) AS c FROM agent_mcp_servers WHERE agent_id = :aid", {"aid": agent.id}
     ).fetchone()
     assert rows is not None and int(rows["c"]) == 0
 

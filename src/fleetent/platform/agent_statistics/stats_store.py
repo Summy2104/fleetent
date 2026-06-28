@@ -241,12 +241,10 @@ def model_distribution(traces: list[dict[str, Any]]) -> dict[str, Any]:
 def binding_facts(
     bindings: int, default_agent: str | None, states: list[dict[str, Any]]
 ) -> dict[str, Any]:
-    """Binding count + default agent + provenance breakdown across agent states."""
-    provenance = Counter(st.get("provenance", "adhoc") for st in states)
+    """Binding count + default agent across agent states."""
     return {
         "bindings": bindings,
         "default_agent": default_agent,
-        "provenance": dict(provenance),
     }
 
 

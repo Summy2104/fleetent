@@ -145,7 +145,7 @@ def test_list_pending_proposals(db, pool_dir, monkeypatch):
 
 @respx.mock
 def test_nominate_managed_skill_pulls_bundle_from_owning_node(db, pool_dir, monkeypatch):
-    from fleetent.platform.agent_management_console import agent_admin_store
+    from fleetent.platform.skill_management import skill_admin_store as skill_catalog_store
 
     monkeypatch.setenv("FLEETENT_FORWARDER_HOST_OVERRIDE", "forwarder.test")
     monkeypatch.setenv(
@@ -154,7 +154,7 @@ def test_nominate_managed_skill_pulls_bundle_from_owning_node(db, pool_dir, monk
     )
     _setup_pool_skill(pool_dir, "crm-ops", "pool-v1")
     agent = _create_agent()
-    agent_admin_store.set_provenance(agent.id, "managed")
+    skill_catalog_store.set_source("crm-ops", "managed")
     node_key, _ = node_store.register_node("node-a")
     placement_store.pin_agent(agent.id, "node-a")
     skill_admin_store.set_binding(agent.id, "crm-ops", True, updated_by="admin")

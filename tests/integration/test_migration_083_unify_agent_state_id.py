@@ -125,7 +125,7 @@ def test_upgrade_migrates_agent_name_keyed_admin_and_session_rows(tmp_path: Path
     try:
         admin_rows = conn.execute(
             """
-            SELECT agent_id, status, provenance, drift
+            SELECT agent_id, status
             FROM agent_admin_state
             ORDER BY agent_id
             """
@@ -140,6 +140,6 @@ def test_upgrade_migrates_agent_name_keyed_admin_and_session_rows(tmp_path: Path
     finally:
         conn.close()
 
-    assert admin_rows == [(support.id, "disabled", "managed", 1)]
+    assert admin_rows == [(support.id, "disabled")]
     assert session_rows == [("sess-support", support.id, "user-1", "slack:C1")]
     assert ops.id not in {row[0] for row in admin_rows}

@@ -36,7 +36,6 @@ export type NodeAgentOption = {
   agent_id: number;
   agent_name: string;
   status: string;
-  provenance: string;
 };
 
 function invalidateNodes(queryClient: ReturnType<typeof useQueryClient>): Promise<void> {

@@ -384,14 +384,24 @@ def test_post_status_updates_last_seen_and_agent_projection(node_client: TestCli
     ]
 
 
-def test_post_status_projects_skill_drift_to_agent_skills(node_client: TestClient) -> None:
+def test_post_status_projects_skill_drift_to_agent_skills(
+    node_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from fleetent import agent_store
     from fleetent.platform.node_management import node_store
-    from fleetent.platform.skill_management import skill_admin_store
+    from fleetent.platform.skill_management import backflow_store, skill_admin_store
 
     node_key, _ = node_store.register_node("node-a")
     agent = agent_store.create_agent("enabled", "Help users", ["shell"])
     skill_admin_store.set_binding(agent.id, "incident-review", True, updated_by="admin")
+    nominations: list[tuple[int, str]] = []
+    original_nominate = backflow_store.nominate_if_absent
+
+    def _record_nomination(*, agent_id: int, skill_name: str, pool_dir):
+        nominations.append((agent_id, skill_name))
+        return original_nominate(agent_id=agent_id, skill_name=skill_name, pool_dir=pool_dir)
+
+    monkeypatch.setattr(backflow_store, "nominate_if_absent", _record_nomination)
 
     response = node_client.post(
         "/nodes/node-a/status",
@@ -419,6 +429,7 @@ def test_post_status_projects_skill_drift_to_agent_skills(node_client: TestClien
     assert drift["base_version"] == "abc123"
     assert drift["base_commit"] == "def456"
     assert drift["drift"] == 1
+    assert nominations == [(agent.id, "incident-review")]
 
 
 def test_post_identity_resolve_returns_resolve_or_provision_principal(

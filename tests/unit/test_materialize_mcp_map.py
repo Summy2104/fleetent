@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import fleetent.agent_store as agent_store
 from fleetent.config import parse_mcp_servers
+from fleetent.platform.agent_lifecycle import materialize
 from fleetent.platform.agent_lifecycle.materialize import _mcp_payload_to_map
 
 
@@ -77,3 +81,30 @@ def test_no_mcp_servers_is_noop() -> None:
     payload = {"name": "a"}
     _mcp_payload_to_map(payload)
     assert "mcpServers" not in payload
+
+
+def test_mcp_server_lookup_uses_binding_table_only(monkeypatch) -> None:
+    monkeypatch.setattr(agent_store, "list_mcp_servers_for_agent", lambda _agent_id: ["github"])
+    monkeypatch.setattr(
+        materialize.mcp_server_store,
+        "get_mcp_server",
+        lambda agent_id, server_id: (
+            {
+                "transport": "stdio",
+                "url": "",
+                "auth_type": "none",
+                "api_key_env": "",
+                "command": "mcp-github",
+                "args": [],
+                "env": {},
+                "headers": {},
+            }
+            if server_id == "github"
+            else None
+        ),
+    )
+    agent = SimpleNamespace(id=7, mcp_server_ids=["legacy-docs"])
+
+    servers = materialize._mcp_servers_for_agent(agent)
+
+    assert [server.id for server in servers] == ["github"]

@@ -4,7 +4,6 @@ from typing import Any
 
 from fleetent import agent_config, agent_store
 from fleetent.agent_config import AgentConfigIndex, AgentFile
-from fleetent.agent_store import AgentVersion
 from fleetent.config import McpServerSettings
 from fleetent.runtime import snapshot
 
@@ -34,10 +33,10 @@ def _agent_file(**overrides: Any) -> AgentFile:
     return AgentFile(**base)
 
 
-def _version(**overrides: Any) -> AgentVersion:
+def _agent(**overrides: Any) -> agent_store.Agent:
     base: dict[str, Any] = {
-        "id": 99,
-        "agent_id": 7,
+        "id": 7,
+        "name": "support",
         "version": 5,
         "system_prompt": "db prompt",
         "allowed_tools": ["search"],
@@ -45,11 +44,9 @@ def _version(**overrides: Any) -> AgentVersion:
         "mcp_server_ids": ["github"],
         "model_overrides": {},
         "memory_namespace": "ns",
-        "created_at": "2026-01-01T00:00:00Z",
-        "is_active": True,
     }
     base.update(overrides)
-    return AgentVersion(**base)
+    return agent_store.Agent(**base)
 
 
 def _index(**overrides: Any) -> AgentConfigIndex:
@@ -102,59 +99,26 @@ def test_load_active_missing_returns_none(monkeypatch: Any) -> None:
 # --- DB-backed snapshots ----------------------------------------------------
 
 
-def test_snapshot_from_version_maps_fields() -> None:
-    snap = snapshot._snapshot("support", _version())
+def test_snapshot_from_agent_maps_fields() -> None:
+    snap = snapshot._snapshot_from_agent("support", _agent())
     assert snap.agent_id == "7"
     assert snap.name == "support"
     assert snap.version == 5
-    assert snap.version_id == 99
+    assert snap.version_id == 5
     assert snap.system_prompt == "db prompt"
     assert snap.mcp_server_ids == ["github"]
 
 
 def test_load_active_db_returns_active_version(monkeypatch: Any) -> None:
-    inactive = _version(id=1, is_active=False)
-    active = _version(id=2, is_active=True)
-    monkeypatch.setattr(agent_store, "list_versions", lambda name: [inactive, active])
+    monkeypatch.setattr(agent_store, "get_by_name", lambda name: _agent(version=2))
     snap = snapshot.load_active_db("support")
     assert snap is not None
     assert snap.version_id == 2
 
 
 def test_load_active_db_none_when_no_active(monkeypatch: Any) -> None:
-    monkeypatch.setattr(agent_store, "list_versions", lambda name: [_version(is_active=False)])
+    monkeypatch.setattr(agent_store, "get_by_name", lambda name: None)
     assert snapshot.load_active_db("support") is None
-
-
-def test_load_version_by_name_found(monkeypatch: Any) -> None:
-    monkeypatch.setattr(agent_store, "get_by_name_version", lambda name, v: _version(version=v))
-    snap = snapshot.load_version_by_name("support", 5)
-    assert snap is not None and snap.version == 5
-
-
-def test_load_version_by_name_not_found(monkeypatch: Any) -> None:
-    monkeypatch.setattr(agent_store, "get_by_name_version", lambda name, v: None)
-    assert snapshot.load_version_by_name("support", 5) is None
-
-
-def test_load_version_found(monkeypatch: Any) -> None:
-    monkeypatch.setattr(agent_store, "get_version_by_id", lambda vid: _version(id=vid))
-    monkeypatch.setattr(agent_store, "get_agent_name_by_id", lambda aid: "support")
-    snap = snapshot.load_version(99)
-    assert snap is not None
-    assert snap.version_id == 99
-    assert snap.name == "support"
-
-
-def test_load_version_none_when_version_missing(monkeypatch: Any) -> None:
-    monkeypatch.setattr(agent_store, "get_version_by_id", lambda vid: None)
-    assert snapshot.load_version(99) is None
-
-
-def test_load_version_none_when_name_missing(monkeypatch: Any) -> None:
-    monkeypatch.setattr(agent_store, "get_version_by_id", lambda vid: _version())
-    monkeypatch.setattr(agent_store, "get_agent_name_by_id", lambda aid: None)
-    assert snapshot.load_version(99) is None
 
 
 # --- request resolution -----------------------------------------------------
@@ -170,7 +134,7 @@ def test_resolve_agent_prefers_named_agent(monkeypatch: Any) -> None:
     assert snap is not None and snap.name == "def"
 
 
-def test_resolve_agent_falls_back_to_default(monkeypatch: Any) -> None:
+def test_resolve_agent_falls_back_to_default_for_unknown_user(monkeypatch: Any) -> None:
     agent = _agent_file(name="def")
     index = _index(agents={"def": agent}, default="def")
     monkeypatch.setattr(agent_config, "current", lambda: index)
@@ -284,7 +248,7 @@ def test_snapshot_from_file_governance_defaults_match_settings() -> None:
 
 
 def test_db_snapshot_carries_default_governance() -> None:
-    snap = snapshot._snapshot("support", _version())
+    snap = snapshot._snapshot_from_agent("support", _agent())
     # DB/authoring side gets the prior Settings-equivalent defaults.
     assert snap.governance.agent_max_turns == 50
     assert snap.governance.tool_default_timeout_seconds == 30.0

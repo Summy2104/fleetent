@@ -32,7 +32,9 @@ def test_head_schema_drops_dead_channel_route_table(tmp_path: Path) -> None:
 
     conn = _connect(db)
     try:
-        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        tables = {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
     finally:
         conn.close()
 
@@ -48,7 +50,7 @@ def test_agent_delete_still_cascades_remaining_bindings_without_dead_channel_rou
 
     agent = agent_store.create_agent("ops", "Ops.", ["shell"])
     agent_store.assign_user("u-live", agent.id)
-    agent_store.create_version("ops", system_prompt="Ops v2")
+    agent_store.update_agent_config("ops", system_prompt="Ops v2")
     agent_store.bind_mcp_server(agent.id, "github", created_by="seed")
 
     conn = _connect(db)
@@ -76,7 +78,9 @@ def test_agent_delete_still_cascades_remaining_bindings_without_dead_channel_rou
             ),
         )
         conn.commit()
-        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        tables = {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
     finally:
         conn.close()
 
@@ -90,14 +94,13 @@ def test_agent_delete_still_cascades_remaining_bindings_without_dead_channel_rou
             table: conn.execute(
                 f"SELECT COUNT(*) FROM {table} WHERE agent_id = ?", (agent.id,)
             ).fetchone()[0]
-            for table in ("user_agents", "agent_versions", "mcp_servers", "agent_mcp_servers")
+            for table in ("user_agents", "mcp_servers", "agent_mcp_servers")
         }
     finally:
         conn.close()
 
     assert counts == {
         "user_agents": 0,
-        "agent_versions": 0,
         "mcp_servers": 0,
         "agent_mcp_servers": 0,
     }

@@ -42,7 +42,8 @@ def test_unbind_mcp_server(db):
 
 def test_bind_does_not_mint_new_version(db):
     agent = agent_store.create_agent("support", "You help.", ["shell"])
-    before = agent_store.list_versions("support")
+    before = agent_store.get_by_name("support")
     agent_store.bind_mcp_server(agent.id, "github")
-    after = agent_store.list_versions("support")
-    assert len(after) == len(before)
+    after = agent_store.get_by_name("support")
+    assert before is not None and after is not None
+    assert after.version == before.version

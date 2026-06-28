@@ -38,7 +38,6 @@ from fleetent.platform.agent_management_console import (
     agent_console_api,
 )
 from fleetent.platform.agent_statistics import stats_admin_api
-from fleetent.platform.askit_console import agent_apply_api
 from fleetent.platform.chat_management import chat_admin_api
 from fleetent.platform.connector_management import connector_admin_api, vault_provider
 from fleetent.platform.im_gateway_management import im_identity_admin_api
@@ -291,7 +290,6 @@ app.include_router(chat_admin_api.router)
 app.include_router(agent_admin_api.router)
 app.include_router(agent_console_api.router)
 app.include_router(stats_admin_api.router)
-app.include_router(agent_apply_api.router)
 app.include_router(node_desired_state_api.router)
 app.include_router(node_admin_api.router)
 app.include_router(tenancy_admin_api.router)
@@ -352,14 +350,9 @@ def _agent_def_dict(agent: agent_store.Agent | None) -> dict[str, Any] | None:
     """Serialize an Agent to the dict shape the console/apply seams promise."""
     if agent is None:
         return None
-    version = 1
-    if agent.active_version_id is not None:
-        av = agent_store.get_version_by_id(agent.active_version_id)
-        if av is not None:
-            version = av.version
     return {
         "id": agent.id,
-        "version": version,  # active snapshot number (read-only in the console)
+        "version": agent.version,
         "tenant_id": agent.tenant_id,
         "team_id": agent.team_id,
         "system_prompt": agent.system_prompt,
@@ -378,10 +371,7 @@ def _agent_def_dict(agent: agent_store.Agent | None) -> dict[str, Any] | None:
 
 
 def wire_agent_store_seams() -> None:
-    """Bridge the console + apply agent seams to agent_store (production wiring).
-
-    Without this, clone/create/update/delete and apply act as inert stubs.
-    """
+    """Bridge the console agent seams to agent_store (production wiring)."""
 
     def _get_def(name: str) -> dict[str, Any] | None:
         return _agent_def_dict(agent_store.get_by_name(name))
@@ -439,8 +429,6 @@ def wire_agent_store_seams() -> None:
                     current.tenant_id if tenant_id is _UNSET else str(tenant_id),
                     current.team_id if team_id is _UNSET else team_id,  # type: ignore[arg-type]
                 )
-        if config_overrides is not _UNSET:
-            agent_store.set_config_overrides(name, config_overrides)  # type: ignore[arg-type]
         kwargs: dict[str, Any] = {}
         if system_prompt is not None:
             kwargs["system_prompt"] = system_prompt
@@ -454,38 +442,13 @@ def wire_agent_store_seams() -> None:
             kwargs["model_overrides"] = model_overrides
         if memory_namespace is not None:
             kwargs["memory_namespace"] = memory_namespace
-        agent_store.create_version(name, **kwargs)
+        if config_overrides is not _UNSET:
+            kwargs["config_overrides"] = config_overrides
+        if kwargs:
+            agent_store.update_agent_config(name, **kwargs)
 
     def _console_delete(name: str) -> bool:
         return agent_store.delete_agent(name)
-
-    def _apply_create(
-        name: str,
-        system_prompt: str,
-        allowed_tools: list[str],
-        model_overrides: dict[str, Any] | None = None,
-    ) -> int:
-        agent_id = agent_store.create_agent(
-            name,
-            system_prompt,
-            allowed_tools,
-            model_overrides=model_overrides,
-        ).id
-        return agent_id
-
-    def _apply_update(
-        name: str,
-        system_prompt: str,
-        allowed_tools: list[str],
-        model_overrides: dict[str, Any] | None = None,
-    ) -> None:
-        kwargs: dict[str, Any] = {
-            "system_prompt": system_prompt,
-            "allowed_tools": allowed_tools,
-        }
-        if model_overrides is not None:
-            kwargs["model_overrides"] = model_overrides
-        agent_store.create_version(name, **kwargs)
 
     agent_console_api.get_agent_def = _get_def
     agent_console_api.create_agent_def = _console_create
@@ -499,10 +462,6 @@ def wire_agent_store_seams() -> None:
     agent_console_api.get_agent_placement = placement_store.get_for_agent
     agent_console_api.list_agent_runtimes = node_store.list_agent_status
     agent_console_api.list_agent_placements = placement_store.list_placements
-
-    agent_apply_api.get_agent_def = _get_def
-    agent_apply_api.create_agent_def = _apply_create
-    agent_apply_api.update_agent_def = _apply_update
 
 
 wire_agent_store_seams()

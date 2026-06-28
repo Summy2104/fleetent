@@ -1,9 +1,4 @@
-"""Integration tests for agent_runtime snapshot loading and request resolution.
-
-Runtime resolution (``load_active``, ``resolve_agent_for_request``, ``connector_scope``,
-``resolve_mcp_servers``) is file-sourced (file-driven-agent-config). Version-specific
-loaders (``load_version``/``load_version_by_name``) stay DB-backed (authoring side).
-"""
+"""Integration tests for agent_runtime snapshot loading and request resolution."""
 
 import dataclasses
 
@@ -92,27 +87,18 @@ def test_load_active_reflects_file_version(agents):
     assert snap.version == 2
 
 
-# --- version-specific loaders stay DB-backed (authoring side) ---
+# --- DB-backed current-state loader ---
 
 
-def test_load_version_by_name_returns_specific(db):
+def test_load_active_db_returns_current_agent_state(db):
     agent_store.create_agent("a", "v1 prompt", ["shell"])
-    agent_store.create_version("a", system_prompt="v2 prompt")
-    v1 = agent_runtime.load_version_by_name("a", 1)
-    assert v1 is not None and v1.system_prompt == "v1 prompt" and v1.version == 1
-    assert agent_runtime.load_version_by_name("a", 99) is None
-    assert agent_runtime.load_version_by_name("missing", 1) is None
-
-
-def test_load_version_by_id(db):
-    agent_store.create_agent("a", "v1 prompt", ["shell"])
-    v2 = agent_store.create_version("a", system_prompt="v2 prompt", activate=False)
-    snap = agent_runtime.load_version(v2.id)
+    agent_store.update_agent_config("a", system_prompt="v2 prompt")
+    snap = agent_runtime.load_active_db("a")
     assert snap is not None
     assert snap.name == "a"
-    assert snap.version == v2.version
+    assert snap.version == 2
     assert snap.system_prompt == "v2 prompt"
-    assert agent_runtime.load_version(999999) is None
+    assert agent_runtime.load_active_db("missing") is None
 
 
 # --- resolve_agent_for_request: channel > user > default (file index) ---

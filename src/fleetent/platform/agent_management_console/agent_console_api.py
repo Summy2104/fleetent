@@ -2,13 +2,12 @@
 
 Layers the operational management face on top of the agent definition/binding store:
 enable/disable, archive (soft delete) with binding protection + restore, clone,
-managed/adhoc provenance + drift, and the per-agent
-observation view.
+and the per-agent observation view.
 
-Agent CRUD/versioning and the binding tables come from agent_store; per-agent metric
-aggregation comes from observability. Those are reached through injectable seams
-(mockable in tests). Lifecycle status / provenance / drift are persisted in
-agent_admin_store. Never imports the agent loop.
+Agent CRUD/current-state config and the binding tables come from agent_store;
+per-agent metric aggregation comes from observability. Those are reached through
+injectable seams (mockable in tests). Lifecycle status/default binding are
+persisted in agent_admin_store. Never imports the agent loop.
 
 Auth: reads allow viewer+admin, writes require admin; archive needs X-Confirm.
 """
@@ -84,10 +83,7 @@ def update_agent_def(
     team_id: str | None = None,
     config_overrides: dict[str, Any] | None = None,
 ) -> None:
-    """Edit an agent by snapshotting a new active version. Bridges create_version.
-
-    ``None`` fields are left unchanged (inherited from the prior active version).
-    """
+    """Edit an agent in place through the current-state config seam."""
     return None
 
 
@@ -294,14 +290,12 @@ def _def_response(name: str) -> dict[str, Any]:
             "agent_id": None,
             "agent_name": name,
             "status": "enabled",
-            "provenance": "adhoc",
         }
         if agent_id is None
         else agent_admin_store.get_state(agent_id)
     )
     out: dict[str, Any] = {
         "agent": name,
-        "provenance": state["provenance"],
         "status": state["status"],
         "runtime": _runtime_view(get_agent_runtime(agent_id)) if agent_id is not None else None,
         "placement": (
@@ -420,7 +414,6 @@ def create_agent(body: CreateBody, authorization: str | None = Header(None)) -> 
         config_overrides=_merge_overrides(body.config_overrides_yaml, body.config_overrides_fields),
     )
     agent_id = _require_agent_id(body.name)
-    agent_admin_store.set_provenance(agent_id, "adhoc")
     # New agents start disabled: not yet pinned to a node, so "enabled" would be a
     # promise no node can keep (desired-state pull filters on status == enabled).
     agent_admin_store.disable(agent_id)
@@ -442,7 +435,7 @@ def update_agent(
     name: str, body: UpdateBody, authorization: str | None = Header(None)
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
-    target_id = _require_agent_id(name)
+    _require_agent_id(name)
     target = name
     allowed_tools = body.allowed_tools
     if body.capabilities_yaml is not None:
@@ -474,7 +467,6 @@ def update_agent(
     )
     if body.icon is not None:
         set_agent_icon(target, body.icon)
-    agent_admin_store.mark_drift(target_id)  # no-op unless provenance is managed
     audit_log.write_audit(user.id, "agent.update", "agent", target)
     return _def_response(target)
 
@@ -568,7 +560,6 @@ def clone_agent(
     )
     # clone is a fresh adhoc agent with no bindings; starts disabled (not pinned yet)
     agent_id = _require_agent_id(body.new_name)
-    agent_admin_store.set_provenance(agent_id, "adhoc")
     agent_admin_store.disable(agent_id)
     audit_log.write_audit(user.id, "agent.clone", "agent", body.new_name, detail={"source": name})
-    return {"agent": body.new_name, "cloned_from": name, "provenance": "adhoc"}
+    return {"agent": body.new_name, "cloned_from": name}

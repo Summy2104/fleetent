@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
-from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -53,7 +52,7 @@ def _agent_row(**overrides: Any) -> dict[str, Any]:
     row = {
         "id": 7,
         "name": "ops",
-        "active_version_id": 11,
+        "version": 2,
         "features": json.dumps({"code_execution": True}),
         "plugins": json.dumps(["github"]),
         "allowed_skills": json.dumps(["triage"]),
@@ -63,24 +62,11 @@ def _agent_row(**overrides: Any) -> dict[str, Any]:
         "config_overrides": json.dumps({"governance": {"strict": True}}),
         "supports_dm": 1,
         "supports_groups": 0,
-    }
-    row.update(overrides)
-    return row
-
-
-def _version_row(**overrides: Any) -> dict[str, Any]:
-    row = {
-        "id": 11,
-        "agent_id": 7,
-        "version": 2,
         "system_prompt": "prompt",
         "allowed_tools": json.dumps(["shell"]),
         "skills_dir": "skills",
-        "mcp_server_ids": json.dumps(["files"]),
         "model_overrides": json.dumps({"default": "gpt"}),
         "memory_namespace": "ops",
-        "created_at": "2026-06-15T00:00:00+00:00",
-        "agent_active": 11,
     }
     row.update(overrides)
     return row
@@ -112,60 +98,112 @@ def test_parse_caps_and_validate_team_tenant() -> None:
         )
 
 
-def test_row_helpers_and_merge_fields() -> None:
-    version = agent_store._row_to_version(_version_row(), 11)  # noqa: SLF001
-    assert version.is_active is True
-    merged = agent_store._merge_version_fields(  # noqa: SLF001
-        _version_row(),
-        system_prompt=agent_store._UNSET,
-        allowed_tools=["shell", "read"],
-        skills_dir=agent_store._UNSET,
-        mcp_server_ids=agent_store._UNSET,
-        model_overrides=agent_store._UNSET,
-        memory_namespace="prod",
+def test_row_to_agent_reads_current_state_fields() -> None:
+    agent = agent_store._row_to_agent(  # noqa: SLF001
+        _agent_row(), mcp_server_ids=["files", "github"]
     )
-    assert merged["allowed_tools"] == ["shell", "read"]
-    assert merged["memory_namespace"] == "prod"
-    assert merged["skills_dir"] == "skills"
+    assert agent.version == 2
+    assert agent.system_prompt == "prompt"
+    assert agent.allowed_tools == ["shell"]
+    assert agent.mcp_server_ids == ["files", "github"]
 
 
-def test_get_by_name_and_versions_queries(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_by_name_and_id_read_runtime_fields_from_agents_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     def execute(sql: str, params: dict[str, Any]) -> _Result:
         if "FROM agents WHERE name" in sql:
             return _Result(row=_agent_row())
-        if "FROM agent_versions WHERE id" in sql or "FROM agent_versions WHERE agent_id" in sql:
-            return _Result(
-                row=_version_row(), rows=[_version_row(version=3), _version_row(version=2)]
-            )
+        if "FROM agents WHERE id" in sql:
+            return _Result(row=_agent_row())
+        if "SELECT server_id FROM agent_mcp_servers" in sql:
+            return _Result(rows=[{"server_id": "files"}, {"server_id": "github"}])
         return _Result()
 
     monkeypatch.setattr(agent_store, "_db", lambda: _Db(execute))
 
     agent = agent_store.get_by_name("ops")
     assert agent is not None and agent.name == "ops"
+    assert agent.version == 2
     assert agent.allowed_tools == ["shell"]
     assert agent.plugins == ["github"]
-    assert len(agent_store.list_versions("ops")) == 2
-    assert agent_store.get_by_name_version("ops", 2) is not None
+    assert agent.mcp_server_ids == ["files", "github"]
+
+    by_id = agent_store.get_by_id(7)
+    assert by_id is not None
+    assert by_id.system_prompt == "prompt"
+    assert by_id.memory_namespace == "ops"
+    assert by_id.mcp_server_ids == ["files", "github"]
 
 
-def test_get_by_name_returns_none_without_row_or_active_version(
+def test_get_by_name_returns_none_without_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(agent_store, "_db", lambda: _Db(lambda sql, params: _Result(row=None)))
     assert agent_store.get_by_name("ops") is None
-    assert agent_store.get_by_name_version("ops", 1) is None
 
     def execute(sql: str, params: dict[str, Any]) -> _Result:
         if "FROM agents WHERE name" in sql:
             return _Result(row=_agent_row())
-        return _Result(row=None)
+        return _Result()
 
     monkeypatch.setattr(agent_store, "_db", lambda: _Db(execute))
-    assert agent_store.get_by_name("ops") is None
+    assert agent_store.get_by_name("ops") is not None
 
 
-def test_create_agent_and_versions(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_update_agent_config_updates_agents_row_without_creating_versions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def execute(sql: str, params: dict[str, Any]) -> _Result:
+        calls.append((sql, params))
+        if "FROM agents" in sql and "WHERE name = :name" in sql and "version" in sql:
+            return _Result(
+                row=_agent_row(
+                    version=2,
+                    tenant_id="tenant-1",
+                    team_id="team-1",
+                    system_prompt="updated",
+                    allowed_tools=json.dumps(["shell", "read_file"]),
+                    skills_dir="skills-next",
+                    model_overrides=json.dumps({"default": "gpt-5"}),
+                    memory_namespace="ops-next",
+                    features=json.dumps({"code_execution": False}),
+                    plugins=json.dumps(["jira"]),
+                    allowed_skills=json.dumps(["triage", "deploy"]),
+                    config_overrides=json.dumps({"governance": {"strict": False}}),
+                )
+            )
+        if "SELECT tenant_id FROM teams WHERE id = :team_id" in sql:
+            return _Result(row={"tenant_id": "tenant-1"})
+        return _Result()
+
+    monkeypatch.setattr(agent_store, "_db", lambda: _Db(execute))
+
+    agent_store.update_agent_config(
+        "ops",
+        system_prompt="updated",
+        allowed_tools=["shell", "read_file"],
+        skills_dir="skills-next",
+        mcp_server_ids=["github"],
+        model_overrides={"default": "gpt-5"},
+        memory_namespace="ops-next",
+        features={"code_execution": False},
+        plugins=["jira"],
+        allowed_skills=["triage", "deploy"],
+        tenant_id="tenant-1",
+        team_id="team-1",
+        config_overrides={"governance": {"strict": False}},
+    )
+
+    assert any("UPDATE agents SET" in sql for sql, _ in calls)
+    assert any("DELETE FROM agent_mcp_servers" in sql for sql, _ in calls)
+    assert any("INSERT OR IGNORE INTO agent_mcp_servers" in sql for sql, _ in calls)
+    assert not any("INSERT INTO agent_versions" in sql for sql, _ in calls)
+
+
+def test_create_agent_persists_current_state(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
 
     def execute(sql: str, params: dict[str, Any]) -> _Result:
@@ -174,8 +212,6 @@ def test_create_agent_and_versions(monkeypatch: pytest.MonkeyPatch) -> None:
             return _Result(row=None)
         if "INSERT INTO agents" in sql:
             return _Result(lastrowid=7)
-        if "INSERT INTO agent_versions" in sql:
-            return _Result(lastrowid=11)
         return _Result()
 
     monkeypatch.setattr(agent_store, "_db", lambda: _Db(execute))
@@ -194,7 +230,8 @@ def test_create_agent_and_versions(monkeypatch: pytest.MonkeyPatch) -> None:
         config_overrides={"g": True},
     )
     assert agent.id == 7
-    assert agent.active_version_id == 11
+    assert agent.version == 1
+    assert agent.active_version_id is None
 
     def dup_execute(sql: str, params: dict[str, Any]) -> _Result:
         if "SELECT 1 FROM agents" in sql:
@@ -206,42 +243,23 @@ def test_create_agent_and_versions(monkeypatch: pytest.MonkeyPatch) -> None:
         agent_store.create_agent("ops", "prompt", ["shell"])
 
 
-def test_create_version_activate_and_error_paths(monkeypatch: pytest.MonkeyPatch) -> None:
-    def execute(sql: str, params: dict[str, Any]) -> _Result:
-        if "SELECT id, active_version_id FROM agents" in sql:
-            return _Result(row={"id": 7, "active_version_id": 11})
-        if "SELECT * FROM agent_versions WHERE id = :vid" in sql and params.get("vid") == 12:
-            return _Result(row=_version_row(id=12, version=3))
-        if "SELECT * FROM agent_versions WHERE id" in sql:
-            return _Result(row=_version_row())
-        if "SELECT MAX(version)" in sql:
-            return _Result(row={"m": 2})
-        if "INSERT INTO agent_versions" in sql:
-            return _Result(lastrowid=12)
-        return _Result()
-
-    monkeypatch.setattr(agent_store, "_db", lambda: _Db(execute))
-    monkeypatch.setattr(agent_store, "_now", lambda: "2026-06-15T00:00:00+00:00")
-    version = agent_store.create_version("ops", system_prompt="new", activate=False)
-    assert version.version == 3
-    assert version.is_active is False
-
-    monkeypatch.setattr(agent_store, "_db", lambda: _Db(lambda sql, params: _Result(row=None)))
-    with pytest.raises(ValueError, match="not found"):
-        agent_store.create_version("ops")
+def test_versioning_entrypoints_removed() -> None:
+    assert not hasattr(agent_store, "create_version")
+    assert not hasattr(agent_store, "activate_version")
+    assert not hasattr(agent_store, "list_versions")
+    assert not hasattr(agent_store, "get_by_name_version")
+    assert not hasattr(agent_store, "get_version_by_id")
 
 
-def test_update_delete_activation_and_lookup_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_update_delete_and_lookup_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
 
     def execute(sql: str, params: dict[str, Any]) -> _Result:
         calls.append((sql, params))
+        if "FROM agents" in sql and "WHERE name = :name" in sql and "version" in sql:
+            return _Result(row=_agent_row())
         if "SELECT id FROM agents WHERE name" in sql:
             return _Result(row={"id": 7})
-        if "SELECT av.id FROM agent_versions" in sql:
-            return _Result(row={"id": 11})
-        if "JOIN agents a ON a.id = av.agent_id WHERE av.id" in sql:
-            return _Result(row=_version_row())
         if "SELECT name FROM agents WHERE id" in sql:
             return _Result(row={"name": "ops"})
         if "SELECT name FROM agents ORDER BY name" in sql:
@@ -255,8 +273,6 @@ def test_update_delete_activation_and_lookup_helpers(monkeypatch: pytest.MonkeyP
     agent_store.set_icon("ops", "🤖")
     agent_store.set_config_overrides("ops", {"g": True})
     agent_store.set_im_capabilities("ops", supports_dm=True, supports_groups=False)
-    agent_store.activate_version("ops", 2)
-    assert agent_store.get_version_by_id(11) is not None
     assert agent_store.get_agent_name_by_id(7) == "ops"
     assert agent_store.list_all_names() == ["alpha", "ops"]
     assert agent_store.delete_agent("ops") is True
@@ -264,8 +280,6 @@ def test_update_delete_activation_and_lookup_helpers(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(agent_store, "_db", lambda: _Db(lambda sql, params: _Result(row=None)))
     assert agent_store.delete_agent("missing") is False
-    with pytest.raises(ValueError, match="has no version"):
-        agent_store.activate_version("ops", 2)
 
 
 def test_assignment_binding_and_default_agent_helpers(monkeypatch: pytest.MonkeyPatch) -> None:

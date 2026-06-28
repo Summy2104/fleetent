@@ -235,7 +235,7 @@ def test_seed_env_falls_back_to_provider_inline_key(db, tmp_path, monkeypatch):
 def test_agent_file_from_store_exports_active_version(db):
     agent_store.create_agent("ver", "v1", [])
     assert materialize.agent_file_from_store(agent_store.get_by_name("ver")).version == 1
-    agent_store.create_version("ver", system_prompt="v2")  # active becomes v2
+    agent_store.update_agent_config("ver", system_prompt="v2")
     assert materialize.agent_file_from_store(agent_store.get_by_name("ver")).version == 2
 
 

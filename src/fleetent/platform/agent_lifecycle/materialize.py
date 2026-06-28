@@ -48,19 +48,8 @@ _TUI_TOKEN_ENV = "FLEETENT_TUI_TOKEN"
 
 
 def _active_version(agent: agent_store.Agent) -> int:
-    """The agent's active version number (the real snapshot count), defaulting to 1.
-
-    Tolerates a legacy/partial DB without the ``agent_versions`` table (returns 1).
-    """
-    if agent.active_version_id is None:
-        return 1
-    try:
-        av = agent_store.get_version_by_id(agent.active_version_id)
-    except sqlite3.OperationalError as exc:
-        if "no such table" not in str(exc):
-            raise
-        return 1
-    return av.version if av is not None else 1
+    """The agent's current config version number, defaulting to 1."""
+    return int(getattr(agent, "version", 1) or 1)
 
 
 def _deep_merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
@@ -339,11 +328,7 @@ def _target_from_model_override(route_key: str, index: int, entry: dict[str, Any
 
 
 def _mcp_servers_for_agent(agent: agent_store.Agent) -> list[McpServerSettings]:
-    ids = list(
-        dict.fromkeys(
-            [*(agent.mcp_server_ids or []), *agent_store.list_mcp_servers_for_agent(agent.id)]
-        )
-    )
+    ids = agent_store.list_mcp_servers_for_agent(agent.id)
     servers: list[McpServerSettings] = []
     for server_id in ids:
         row = mcp_server_store.get_mcp_server(

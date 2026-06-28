@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -75,28 +74,11 @@ def test_agent_admin_yaml_bindings_and_versions(monkeypatch):
     monkeypatch.setattr(
         agent_admin_api.agent_store, "list_users_for_agent", lambda _agent_id: ["u1"]
     )
-    monkeypatch.setattr(
-        agent_admin_api.agent_store,
-        "list_versions",
-        lambda name: [SimpleNamespace(id=1, version=1, is_active=False, created_at="now")],
-    )
-    monkeypatch.setattr(
-        agent_admin_api.agent_store,
-        "activate_version",
-        lambda *args: calls.append(("activate", args, {})),
-    )
-
     exported = agent_admin_api.export_agent_yaml("ops", authorization="Session token")
     assert exported["agent"] == "ops"
     assert "mcp_servers:" in exported["yaml"]
     assert "bindings:" in exported["yaml"]
-
-    assert agent_admin_api.list_versions("ops", authorization="Session token")[0]["version"] == 1
-    assert agent_admin_api.activate_version("ops", 2, authorization="Session token") == {
-        "name": "ops",
-        "active_version": 2,
-    }
-    assert calls == [("activate", ("ops", 2), {})]
+    assert calls == []
 
 
 def test_agent_admin_binding_skill_kb_oauth_and_mcp_handlers(monkeypatch):
@@ -277,12 +259,10 @@ def test_agent_console_agent_lifecycle(monkeypatch):
     monkeypatch.setattr(
         agent_console_api, "agent_observability_agg", lambda name, window: {"calls": 3}
     )
-    state = {"provenance": "managed", "status": "enabled"}
+    state = {"status": "enabled"}
     monkeypatch.setattr(agent_console_api.agent_admin_store, "get_state", lambda name: state)
     for method in (
-        "set_provenance",
         "enable",
-        "mark_drift",
         "delete_state",
         "disable",
         "archive",
@@ -345,7 +325,7 @@ def test_agent_console_agent_lifecycle(monkeypatch):
     )
     assert agent_console_api.clone_agent(
         "ops", agent_console_api.CloneBody(new_name="clone"), authorization="Session token"
-    ) == {"agent": "clone", "cloned_from": "ops", "provenance": "adhoc"}
+    ) == {"agent": "clone", "cloned_from": "ops"}
     with pytest.raises(HTTPException) as bad_yaml:
         agent_console_api.create_agent(
             agent_console_api.CreateBody(name="bad", capabilities_yaml="- not-map"),

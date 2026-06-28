@@ -4,40 +4,21 @@
 TBD - created by archiving change 2026-05-29-multi-agent-management. Update Purpose after archive.
 ## Requirements
 ### Requirement: Version and binding endpoints reuse role-based Session auth
-The new `/admin/agents/*` version and binding endpoints SHALL authenticate via the existing Session scheme (`Authorization: Session <token>`, validated by `auth.validate_session`) and authorize via the `role` system: read endpoints allow `viewer`/`admin`/`built_in_admin`; write endpoints require `admin`/`built_in_admin`. They SHALL NOT introduce a `users.is_admin` column. Agent creation/update/lifecycle continues to be served by the existing `agent_apply_api` (`POST /admin/agents/apply`) and `agent_console_api` surfaces; this capability only adds version and binding endpoints.
+The new `/admin/agents/*` binding endpoints SHALL authenticate via the existing Session scheme (`Authorization: Session <token>`, validated by `auth.validate_session`) and authorize via the `role` system: read endpoints allow `viewer`/`admin`/`built_in_admin`; write endpoints require `admin`/`built_in_admin`. They SHALL NOT introduce a `users.is_admin` column. Agent creation/update/lifecycle continues to be served by the existing `agent_console_api` surfaces; this capability only adds binding endpoints.
 
 #### Scenario: Unauthenticated request rejected
-- **WHEN** a request to a `/admin/agents/*` version or binding endpoint carries no valid Session token
+- **WHEN** a request to a `/admin/agents/*` binding endpoint carries no valid Session token
 - **THEN** the response is 401
 
 #### Scenario: Viewer can read but not write
-- **WHEN** a `viewer` calls `GET /admin/agents/{name}/versions`
+- **WHEN** a `viewer` calls `GET /admin/agents/{name}/bindings`
 - **THEN** the response is 200
-- **AND WHEN** the same `viewer` calls `POST /admin/agents/{name}/versions/{v}/activate`
+- **AND WHEN** the same `viewer` calls `POST /admin/agents/{name}/bindings/users`
 - **THEN** the response is 403
 
 #### Scenario: Admin can write
-- **WHEN** an `admin` calls `POST /admin/agents/{name}/versions/{v}/activate` for an existing version
-- **THEN** the response is 200 and `active_version_id` references that version
-
-### Requirement: Version management endpoints
-The system SHALL expose endpoints for listing and activating an agent's versions.
-
-#### Scenario: List versions
-- **WHEN** an authorized user sends `GET /admin/agents/{name}/versions`
-- **THEN** the response is a JSON array sorted by `version` descending, each entry containing `version`, `version_id`, `created_at`, `created_by_user_id`, and a boolean `is_active`
-
-#### Scenario: List versions for missing agent
-- **WHEN** the agent does not exist
-- **THEN** the response is 404
-
-#### Scenario: Activate (rollback)
-- **WHEN** an admin sends `POST /admin/agents/{name}/versions/{version}/activate`
-- **THEN** the response is 200 and `active_version_id` references that version
-
-#### Scenario: Activate non-existent version
-- **WHEN** the requested version number does not exist for the agent
-- **THEN** the response is 404 and `active_version_id` is unchanged
+- **WHEN** an `admin` calls `POST /admin/agents/{name}/bindings/users` with body `{"user_id":"u1"}` for an existing agent
+- **THEN** the response is 201 and the binding is persisted
 
 ### Requirement: Binding endpoints
 The system SHALL expose endpoints to bind and unbind **users** to/from an agent, to bind and unbind **IM groups** (`platform` + `group_id`) for an agent, and to set the agent's **IM capability** flags (`supports_dm` / `supports_groups`), all requiring `admin`/`built_in_admin`. （Channel-routing 绑定已于阶段 1 移除；群白名单是访问控制、非路由——见 im-access-model。运行时强制属阶段 3。）
@@ -88,10 +69,10 @@ The lifecycle, clone, create-from-template, and observability endpoints under `/
 
 ### Requirement: Agent lifecycle, clone, template, and observability endpoints
 
-The system SHALL expose, in addition to the existing CRUD/version/binding endpoints:
+The system SHALL expose, in addition to the existing CRUD/binding endpoints:
 - `POST /admin/agents/{name}/enable` and `POST /admin/agents/{name}/disable` to toggle `status`. **`enable` SHALL be gated on node placement**: when the agent is not pinned to any node (`placement_store.get_for_agent` is `None`), `enable` SHALL be rejected with `409` and detail `agent not bound to a node`, the agent's `status` SHALL be unchanged, and no `agent.enable` audit entry SHALL be written. `disable` SHALL NOT be gated (disabling is always allowed).
 - `POST /admin/agents/{name}/archive` (binding-protected, requires confirmation) and `POST /admin/agents/{name}/restore`.
-- `POST /admin/agents/{name}/clone` to create a copy without bindings; the cloned agent SHALL be created with `provenance=adhoc` and `status=disabled`.
+- `POST /admin/agents/{name}/clone` to create a copy without bindings; the cloned agent SHALL be created with `status=disabled`.
 - `GET /admin/agent-templates` and create-from-template support.
 - `GET /admin/agents/{name}/observability` for the per-agent aggregated view.
 
@@ -134,9 +115,9 @@ Every write SHALL emit an `audit_log` entry stamped with the acting user id.
 
 The system SHALL expose, under role-based Session auth (write requires `admin`/`built_in_admin`, read allows `viewer` and above):
 
-- `POST /admin/agents` with body `{name, system_prompt?, allowed_tools?, skills_dir?, mcp_server_ids?, model_overrides?, memory_namespace?}` to create a new agent definition. It SHALL persist the def via `agent_store.create_agent` (passing through the optional version-config fields when provided) AND create an `agent_admin_state` row with `provenance=adhoc`, `status=disabled`（新建默认关闭，避免「enabled 但未绑定 node、不会被任何 node 拉起」的误导态；管理员须显式 enable 才进入 node 期望态拉取） so the agent appears in `GET /admin/agents`. It SHALL return 201 with the new agent's definition, or 409 if the name already exists.
-- `GET /admin/agents/{name}` to return the full agent definition resolved from the active version, including `system_prompt`, `allowed_tools`, `skills_dir`, `mcp_server_ids`, `model_overrides`, and `memory_namespace`. It SHALL return 404 if the agent does not exist.
-- `PATCH /admin/agents/{name}` with a subset of editable fields (`system_prompt`, `allowed_tools`, `skills_dir`, `mcp_server_ids`, `model_overrides`, `memory_namespace`) to edit the agent by creating and activating a new immutable version via `agent_store.create_version` (only provided fields overridden; omitted fields inherit the prior active version). If the agent's provenance is `managed`, it SHALL mark drift. It SHALL return 200 with the updated definition, or 404 if the agent does not exist.
+- `POST /admin/agents` with body `{name, system_prompt?, allowed_tools?, skills_dir?, mcp_server_ids?, model_overrides?, memory_namespace?}` to create a new agent definition. It SHALL persist the def via `agent_store.create_agent` (writing the optional config fields when provided onto the `agents` row) AND create an `agent_admin_state` row with `status=disabled`（新建默认关闭,避免「enabled 但未绑定 node、不会被任何 node 拉起」的误导态;管理员须显式 enable 才进入 node 期望态拉取）so the agent appears in `GET /admin/agents`. It SHALL return 201 with the new agent's definition, or 409 if the name already exists.
+- `GET /admin/agents/{name}` to return the full agent definition resolved directly from the `agents` row, including `system_prompt`, `allowed_tools`, `skills_dir`, `mcp_server_ids`, `model_overrides`, and `memory_namespace`. It SHALL return 404 if the agent does not exist.
+- `PATCH /admin/agents/{name}` with a subset of editable fields (`system_prompt`, `allowed_tools`, `skills_dir`, `mcp_server_ids`, `model_overrides`, `memory_namespace`) to edit the agent **in place via the single config-update choke point** (only provided fields overridden; omitted fields retain their prior value). No new version is created and no version pointer is changed. It SHALL return 200 with the updated definition, or 404 if the agent does not exist.
 - `DELETE /admin/agents/{name}` to hard-delete the agent. It SHALL require a confirmation header (`X-Confirm: true`) and SHALL be binding-protected: when the agent is referenced by user bindings the response is 409 and nothing is deleted. Otherwise it SHALL call `agent_store.delete_agent` and remove the `agent_admin_state` row, returning 200.
 
 Every write SHALL emit an `audit_log` entry stamped with the acting user id.
@@ -144,12 +125,12 @@ Every write SHALL emit an `audit_log` entry stamped with the acting user id.
 #### Scenario: Create persists def and state row
 
 - **WHEN** an admin sends `POST /admin/agents` with `{"name":"ops-bot","system_prompt":"hi","allowed_tools":["shell"]}`
-- **THEN** the response is 201, `agent_store.get_by_name("ops-bot")` returns the def, AND the agent appears in `GET /admin/agents` with provenance `adhoc` and status `disabled`
+- **THEN** the response is 201, `agent_store.get_by_name("ops-bot")` returns the def, AND the agent appears in `GET /admin/agents` with status `disabled`
 
-#### Scenario: Create persists version-config fields
+#### Scenario: Create persists config fields
 
 - **WHEN** an admin sends `POST /admin/agents` with `{"name":"ops-bot","skills_dir":"/s","mcp_server_ids":["github"],"model_overrides":{"model":"x"},"memory_namespace":"team"}`
-- **THEN** the response is 201 and `agent_store.get_by_name("ops-bot")` returns those four fields on the active version
+- **THEN** the response is 201 and `agent_store.get_by_name("ops-bot")` returns those four fields on the agent's row
 
 #### Scenario: Create duplicate name rejected
 
@@ -164,27 +145,22 @@ Every write SHALL emit an `audit_log` entry stamped with the acting user id.
 #### Scenario: Read full definition
 
 - **WHEN** an authorized user sends `GET /admin/agents/ops-bot`
-- **THEN** the response is 200 with the active version's `system_prompt`, `allowed_tools`, `skills_dir`, `mcp_server_ids`, `model_overrides`, and `memory_namespace`
+- **THEN** the response is 200 with the agent row's `system_prompt`, `allowed_tools`, `skills_dir`, `mcp_server_ids`, `model_overrides`, and `memory_namespace`
 
 #### Scenario: Read missing agent
 
 - **WHEN** `GET /admin/agents/nope` targets an agent that does not exist
 - **THEN** the response is 404
 
-#### Scenario: Update creates a new active version
+#### Scenario: Update edits the agent in place
 
 - **WHEN** an admin sends `PATCH /admin/agents/ops-bot` with `{"system_prompt":"v2"}`
-- **THEN** the response is 200, a new `agent_versions` row is created and activated, and `agent_store.get_by_name("ops-bot").system_prompt == "v2"`
+- **THEN** the response is 200, the `agents` row is updated in place (no new version row, no version pointer change), and `agent_store.get_by_name("ops-bot").system_prompt == "v2"`
 
-#### Scenario: Update overrides only provided version-config fields
+#### Scenario: Update overrides only provided config fields
 
-- **WHEN** an admin sends `PATCH /admin/agents/ops-bot` with `{"memory_namespace":"team"}` and the prior version had `skills_dir="/s"`
-- **THEN** the new active version has `memory_namespace == "team"` and still has `skills_dir == "/s"`
-
-#### Scenario: Update of managed agent marks drift
-
-- **WHEN** an admin edits an agent whose provenance is `managed`
-- **THEN** the agent's `drift` flag is set
+- **WHEN** an admin sends `PATCH /admin/agents/ops-bot` with `{"memory_namespace":"team"}` and the agent previously had `skills_dir="/s"`
+- **THEN** the updated `agents` row has `memory_namespace == "team"` and still has `skills_dir == "/s"`
 
 #### Scenario: Delete blocked by bindings
 
@@ -203,17 +179,12 @@ Every write SHALL emit an `audit_log` entry stamped with the acting user id.
 
 ### Requirement: Console and apply seams wired to the store
 
-The agent console and apply API seams (`get_agent_def`, `create_agent_def`, `update_agent_def`) SHALL be wired in `server.py` to the corresponding `agent_store` operations, so clone, create-from-template, and apply persist real definitions in production rather than acting as inert stubs.
+The agent console seams (`get_agent_def`, `create_agent_def`, `update_agent_def`) SHALL be wired in `server.py` to the corresponding `agent_store` operations, so clone and create-from-template persist real definitions in production rather than acting as inert stubs.
 
 #### Scenario: Clone persists via wired seam
 
 - **WHEN** the server is configured and an admin sends `POST /admin/agents/{name}/clone`
 - **THEN** the clone reads the source via the wired `get_agent_def` and writes the copy via the wired `create_agent_def`, and `agent_store.get_by_name(new_name)` returns the copy
-
-#### Scenario: Apply persists via wired seams
-
-- **WHEN** an admin sends `POST /admin/agents/apply` for a new spec
-- **THEN** the wired `create_agent_def` persists it and `agent_store.get_by_name(spec.name)` returns the def
 
 ### Requirement: Agent template management endpoints
 
@@ -262,7 +233,7 @@ Every write SHALL emit an `audit_log` entry stamped with the acting user id.
 - **THEN** the response is 403 and nothing is persisted
 
 ### Requirement: Agent creation requires an existing template
-`POST /admin/agents` SHALL require a `template_id` naming an existing agent template. A request missing `template_id` SHALL be rejected with 422; a request naming a template that does not exist SHALL be rejected with 404. On success the created agent's version snapshot SHALL persist the `template_id`, and `GET /admin/agents/{name}` SHALL include `template_id` in its response. Editing an agent (`PATCH /admin/agents/{name}`) SHALL NOT require `template_id`.
+`POST /admin/agents` SHALL require a `template_id` naming an existing agent template. A request missing `template_id` SHALL be rejected with 422; a request naming a template that does not exist SHALL be rejected with 404. On success the created agent definition SHALL persist the `template_id` on its `agents` row, and `GET /admin/agents/{name}` SHALL include `template_id` in its response. Editing an agent (`PATCH /admin/agents/{name}`) SHALL NOT require `template_id`.
 
 #### Scenario: Create without template_id rejected
 - **WHEN** an admin sends `POST /admin/agents` with a body omitting `template_id`
@@ -357,25 +328,25 @@ The agent admin API SHALL expose agent-side endpoints to manage which external s
 - **WHEN** a viewer calls the bind or unbind endpoint
 - **THEN** the request is rejected with 403
 
-
 ### Requirement: Agent list and detail surface runtime and placement state
 
-`GET /admin/agents`（列表）与 `GET /admin/agents/{name}`（详情）SHALL 在原有期望态字段（`status` / `provenance` 等）基础上，附带每个 agent 的**运行态**与**绑定**投影，且 SHALL NOT 破坏任何既有字段：
+`GET /admin/agents`（列表）与 `GET /admin/agents/{name}`（详情）SHALL 在原有期望态字段（`status` 等）基础上,附带每个 agent 的**运行态**与**绑定**投影,且 SHALL NOT 破坏任何既有字段:
 
-- `runtime`：来自 `node_agent_status`（经只读 seam `get_agent_runtime` / `list_agent_runtimes`，接线 `node_store`）。有上报行时为对象 `{phase, health, pid, node_id, reported_at}`；无上报行时为 `null`。
-- `placement`：来自 `agent_placements`（经只读 seam `get_agent_placement` / `list_agent_placements`，接线 `placement_store`）。已 pin 时为对象 `{node_id, pinned_at, pinned_by}`；未 pin 时为 `null`。
+- `runtime`:来自 `node_agent_status`（经只读 seam `get_agent_runtime` / `list_agent_runtimes`,接线 `node_store`）。有上报行时为对象 `{phase, health, pid, node_id, reported_at}`;无上报行时为 `null`。
+- `placement`:来自 `agent_placements`（经只读 seam `get_agent_placement` / `list_agent_placements`,接线 `placement_store`）。已 pin 时为对象 `{node_id, pinned_at, pinned_by}`;未 pin 时为 `null`。
 
-运行态是**只读投影**（控制真相在 node），platform 不据其做控制决策。列表 SHALL 用批量读取按 `agent_id` 合并，避免逐行 N+1。
+运行态是**只读投影**(控制真相在 node),platform 不据其做控制决策。列表 SHALL 用批量读取按 `agent_id` 合并,避免逐行 N+1。
 
 #### Scenario: 列表附带运行态与绑定
-- **WHEN** 某 agent 已 pin 到 node 且 node 上报其 `phase=running`、`pid`、`health`，管理员请求 `GET /admin/agents`
+- **WHEN** 某 agent 已 pin 到 node 且 node 上报其 `phase=running`、`pid`、`health`,管理员请求 `GET /admin/agents`
 - **THEN** 该 agent 行含 `runtime={phase:"running", health, pid, node_id, reported_at}` 与 `placement={node_id, ...}`
-- **AND** 既有字段 `status` / `provenance` / `agent_name` 不变
+- **AND** 既有字段 `status` / `agent_name` 不变
 
 #### Scenario: 未上报未绑定的 agent 投影为 null
-- **WHEN** 某 agent 既无 `node_agent_status` 行也无 `agent_placements` 行，管理员请求列表或详情
+- **WHEN** 某 agent 既无 `node_agent_status` 行也无 `agent_placements` 行,管理员请求列表或详情
 - **THEN** 该 agent 的 `runtime` 为 `null`、`placement` 为 `null`
 
 #### Scenario: 详情附带运行态与绑定
 - **WHEN** 管理员请求 `GET /admin/agents/{name}`
-- **THEN** 响应在既有 def 字段之外含 `runtime` 与 `placement`（按上述形态，无对应行为 `null`）
+- **THEN** 响应在既有 def 字段之外含 `runtime` 与 `placement`（按上述形态,无对应行为 `null`）
+

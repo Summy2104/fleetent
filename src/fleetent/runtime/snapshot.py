@@ -2,10 +2,10 @@
 
 Runtime resolution is file-sourced: the active snapshot and request routing come
 from the self-contained ``agent.yaml`` index (``agent_config``) with zero database
-access (file-driven-agent-config). Version-specific loaders
-(``load_version``/``load_version_by_name``) stay DB-backed for the authoring/console
-side. This module provides the pure tool-schema filter that enforces both the
-per-agent ``allowed_tools`` allowlist and the MCP server whitelist.
+access (file-driven-agent-config). The DB-backed helper reads only the current
+agent state for authoring/control-plane utilities. This module provides the pure
+tool-schema filter that enforces both the per-agent ``allowed_tools`` allowlist
+and the MCP server whitelist.
 
 It never imports the agent loop (one-way dependency: agent_loop -> agent_runtime).
 """
@@ -15,7 +15,7 @@ from typing import Any
 
 from fleetent import agent_config, agent_store
 from fleetent.agent_config import AgentFile, default_models
-from fleetent.agent_store import AgentVersion
+from fleetent.agent_store import Agent
 from fleetent.governance.agent_policy import is_tool_visible
 from fleetent.model import ModelPolicySnapshot
 from fleetent.structured_logging import get_logger
@@ -122,18 +122,18 @@ def _snapshot_from_file(agent: AgentFile) -> AgentSnapshot:
     )
 
 
-def _snapshot(name: str, version: AgentVersion) -> AgentSnapshot:
+def _snapshot_from_agent(name: str, agent: Agent) -> AgentSnapshot:
     return AgentSnapshot(
-        agent_id=str(version.agent_id),
+        agent_id=str(agent.id),
         name=name,
-        version=version.version,
-        version_id=version.id,
-        system_prompt=version.system_prompt,
-        allowed_tools=version.allowed_tools,
-        skills_dir=version.skills_dir,
-        mcp_server_ids=version.mcp_server_ids,
+        version=agent.version,
+        version_id=agent.version,
+        system_prompt=agent.system_prompt,
+        allowed_tools=agent.allowed_tools,
+        skills_dir=agent.skills_dir,
+        mcp_server_ids=agent.mcp_server_ids,
         model_policy=ModelPolicySnapshot.from_models(agent_id=name, models=default_models()),
-        memory_namespace=version.memory_namespace,
+        memory_namespace=agent.memory_namespace,
     )
 
 
@@ -149,22 +149,9 @@ def load_active(name: str) -> AgentSnapshot | None:
 
 
 def load_active_db(name: str) -> AgentSnapshot | None:
-    """DB-backed active snapshot for the authoring/console side (NOT the runtime path)."""
-    active = next((v for v in agent_store.list_versions(name) if v.is_active), None)
-    return None if active is None else _snapshot(name, active)
-
-
-def load_version_by_name(name: str, version: int) -> AgentSnapshot | None:
-    ver = agent_store.get_by_name_version(name, version)
-    return None if ver is None else _snapshot(name, ver)
-
-
-def load_version(version_id: int) -> AgentSnapshot | None:
-    ver = agent_store.get_version_by_id(version_id)
-    if ver is None:
-        return None
-    name = agent_store.get_agent_name_by_id(ver.agent_id)
-    return None if name is None else _snapshot(name, ver)
+    """DB-backed current snapshot for the authoring/console side (NOT the runtime path)."""
+    agent = agent_store.get_by_name(name)
+    return None if agent is None else _snapshot_from_agent(name, agent)
 
 
 def resolve_agent_for_request(
