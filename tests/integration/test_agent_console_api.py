@@ -10,8 +10,8 @@ import fleetent.agent_store as agent_store
 import fleetent.auth as auth
 import fleetent.governance.audit_log as audit
 import fleetent.platform.agent_management_console.agent_admin_store as store
-import fleetent.platform.agent_management_console.agent_im_group_store as agent_im_group_store
 import fleetent.platform.agent_management_console.agent_console_api as api
+import fleetent.platform.agent_management_console.agent_im_group_store as agent_im_group_store
 import fleetent.user_store as user_store
 from fleetent.platform.connector_management import agent_service_grant_store
 from fleetent.platform.knowledge_base_management import agent_kbs_store

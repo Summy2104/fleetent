@@ -51,7 +51,9 @@ def pin_agent(agent_id: int, node_id: str, *, pinned_by: str | None = None) -> d
 
 def unpin_agent(agent_id: int) -> None:
     with _database().transaction() as conn:
-        conn.execute("DELETE FROM agent_placements WHERE agent_id = :agent_id", {"agent_id": agent_id})
+        conn.execute(
+            "DELETE FROM agent_placements WHERE agent_id = :agent_id", {"agent_id": agent_id}
+        )
         conn.execute(
             "DELETE FROM node_agent_status WHERE agent_id = :agent_id",
             {"agent_id": agent_id},

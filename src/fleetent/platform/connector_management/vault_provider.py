@@ -115,7 +115,9 @@ def _refresh_tokens(
     service = external_service_store.get_service(service_id)
     protocol = service.get("protocol") if service is not None else None
     if not _service_enabled(service):
-        return _disabled_service_result(user_id, service_id, protocol if isinstance(protocol, str) else None)
+        return _disabled_service_result(
+            user_id, service_id, protocol if isinstance(protocol, str) else None
+        )
     oauth_config = service.get("oauth_config", {}) if service is not None else {}
     token_url = oauth_config.get("token")
     client_id = oauth_config.get("client_id")

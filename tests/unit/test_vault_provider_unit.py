@@ -384,14 +384,24 @@ def test_get_credential_returns_needs_consent_when_service_disabled(
     monkeypatch.setattr(
         vault_provider, "_resolve_principal", lambda user_id, service_id, agent: user_id
     )
-    monkeypatch.setattr(vault_provider.external_service_store, "get_service", lambda service_id: service)
+    monkeypatch.setattr(
+        vault_provider.external_service_store, "get_service", lambda service_id: service
+    )
     monkeypatch.setattr(
         vault_provider.external_credential_store,
         "get_credential",
         lambda user_id, service_id: {"status": "authorized", "payload": {"access_token": "ok"}},
     )
-    monkeypatch.setattr(vault_provider, "_get_apikey_credential", lambda *args: pytest.fail("disabled service should not resolve apikey credentials"))
-    monkeypatch.setattr(vault_provider, "_is_expired", lambda payload: pytest.fail("disabled service should not inspect oauth expiry"))
+    monkeypatch.setattr(
+        vault_provider,
+        "_get_apikey_credential",
+        lambda *args: pytest.fail("disabled service should not resolve apikey credentials"),
+    )
+    monkeypatch.setattr(
+        vault_provider,
+        "_is_expired",
+        lambda payload: pytest.fail("disabled service should not inspect oauth expiry"),
+    )
 
     result = vault_provider.get_credential("user-1", "github", ["repo"])
 

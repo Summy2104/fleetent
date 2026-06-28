@@ -53,9 +53,10 @@ def _delete_orphan_api_keys() -> None:
 
 def _fail_on_cross_tenant_team_refs() -> None:
     bind = op.get_bind()
-    rows = bind.execute(
-        sa.text(
-            """
+    rows = (
+        bind.execute(
+            sa.text(
+                """
             SELECT agents.id, agents.name, agents.tenant_id AS agent_tenant_id,
                    agents.team_id, teams.tenant_id AS team_tenant_id
             FROM agents
@@ -64,8 +65,11 @@ def _fail_on_cross_tenant_team_refs() -> None:
               AND teams.tenant_id != agents.tenant_id
             ORDER BY agents.id
             """
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     if not rows:
         return
     details = "; ".join(

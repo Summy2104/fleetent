@@ -87,7 +87,24 @@ def _seed_agent(
             icon,
             config_overrides
         )
-        VALUES (?, ?, 1, 'prompt', '[]', '{}', '[]', '[]', '2026-06-28T00:00:00+00:00', ?, ?, NULL, '{}', 'default', NULL, '{}')
+        VALUES (
+            ?,
+            ?,
+            1,
+            'prompt',
+            '[]',
+            '{}',
+            '[]',
+            '[]',
+            '2026-06-28T00:00:00+00:00',
+            ?,
+            ?,
+            NULL,
+            '{}',
+            'default',
+            NULL,
+            '{}'
+        )
         """,
         (agent_id, name, tenant_id, team_id),
     )
@@ -238,8 +255,12 @@ def test_head_schema_enforces_team_tenant_fk_and_api_key_cascade(tmp_path: Path)
                 """
             )
 
-        before = conn.execute("SELECT COUNT(*) AS count FROM api_keys WHERE user_id = 'user-1'").fetchone()
+        before = conn.execute(
+            "SELECT COUNT(*) AS count FROM api_keys WHERE user_id = 'user-1'"
+        ).fetchone()
         assert before is not None and before["count"] == 1
         conn.execute("DELETE FROM users WHERE id = 'user-1'")
-        after = conn.execute("SELECT COUNT(*) AS count FROM api_keys WHERE user_id = 'user-1'").fetchone()
+        after = conn.execute(
+            "SELECT COUNT(*) AS count FROM api_keys WHERE user_id = 'user-1'"
+        ).fetchone()
         assert after is not None and after["count"] == 0
