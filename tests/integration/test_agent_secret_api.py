@@ -131,6 +131,42 @@ def test_required_env_includes_mcp_env_and_header_refs(client):
     assert "plain-value" not in refs  # 明文 header 值不被当成 env 名
 
 
+def test_required_env_includes_mcp_oauth_auth_refs(client):
+    """MCP per-server OAuth(x-fleetent.auth) 的 client_secret_env 与 client_id 的 env:
+    引用要进 required-env——否则这些只活在 auth 块里的密钥无法在 UI 密钥页设置。"""
+    agent_store.create_agent(
+        "support",
+        "p",
+        [],
+        config_overrides={
+            "mcpServers": {
+                "gdrive": {
+                    "url": "https://drive.example/mcp",
+                    "x-fleetent": {
+                        "auth": {
+                            "type": "oauth2",
+                            "grant": "authorization_code",
+                            "token_url": "https://oauth.example/token",
+                            "authorization_endpoint": "https://oauth.example/auth",
+                            "redirect_path": "/oauth/callback",
+                            "client_id": "env:GDRIVE_CLIENT_ID",
+                            "client_secret_env": "GDRIVE_CLIENT_SECRET",
+                            "scope": "drive.readonly",
+                        }
+                    },
+                }
+            }
+        },
+    )
+    token, _ = _session_for("admin")
+
+    body = client.get("/admin/agents/support/required-env", headers=_hdr(token)).json()
+
+    refs = {item["env_name"]: item for item in body["required_env"]}
+    assert refs["GDRIVE_CLIENT_SECRET"]["source"] == "MCP"  # client_secret_env 是 env 名
+    assert refs["GDRIVE_CLIENT_ID"]["source"] == "MCP"  # client_id 的 env: 引用
+
+
 def test_secret_api_is_write_only_and_delete_clears_value(client):
     _create_agent_with_required_env()
     token, _ = _session_for("admin")

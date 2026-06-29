@@ -369,7 +369,6 @@ class McpSettings(BaseModel):
 class SchedulingSettings(BaseModel):
     enabled: bool = True
     default_timezone: str = "UTC"
-    kb_connector_sweep_interval_seconds: int = 60
 
 
 class WebhooksSettings(BaseModel):

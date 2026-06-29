@@ -73,6 +73,7 @@ from fleetent.vector_store.backend import VectorBackend
 _logger = get_logger("knowledge_base")
 _kb_db: SQLiteDatabase | None = None
 _kb_vector_backend: VectorBackend | None = None
+_kb_queue_database_url: str | None = None
 
 
 def set_database(db: SQLiteDatabase | None) -> None:
@@ -87,6 +88,13 @@ def set_vector_backend(vector_backend: VectorBackend | None) -> None:
 
     global _kb_vector_backend
     _kb_vector_backend = vector_backend
+
+
+def set_queue_database_url(queue_database_url: str | None) -> None:
+    """Inject the tenant-scoped KB ingest queue database for this process."""
+
+    global _kb_queue_database_url
+    _kb_queue_database_url = queue_database_url
 
 
 async def ingest_text(

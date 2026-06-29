@@ -107,7 +107,7 @@ node 状态（node/）                          →  [NODE] 自己（provision +
 3. **租户优先布局**：canonical home = `tenants/<tenant>/agents/<agent>/`。
 4. **agent data 拍平**：运行时 DB 与 sessions/logs/workspaces 都落 `<agent-home>/data/`。
 5. **KB 是 tenant 级**：`tenants/<tenant>/kb/kb.db` 与 `tenants/<tenant>/kb/kb_vectors.db`。
-6. **remote KB read 仍读同一租户子树**：`fleetent kb-serve`（Slice ②a）是每租户一进程的只读 server，boot 后固定读取 `tenants/<tenant>/kb/`；它解决 agent 远程读 KB，但不改变 ingest 仍由同机 `kb-worker` 写入该目录的事实。ingest 跨机搬迁属于后续 Slice ②b。
+6. **KB 服务可 standalone 运行但数据布局不变**：`fleetent kb-serve --config kb-service.yaml` 与 `fleetent kb-worker --config kb-service.yaml` 都固定读写同一租户子树 `tenants/<tenant>/kb/`；standalone 只把 connector 配置、secret、sweep 和 ingest 队列搬到 KB 主机本地，不改变 KB 物理布局。platform 托管 ingest 暂时并存，退役属于后续 `kb-retire-platform-ingest`。
 
 ---
 

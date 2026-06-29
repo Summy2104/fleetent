@@ -225,3 +225,49 @@ async def test_build_context_keeps_memory_and_always_facts_when_http_provider_de
     assert "User prefers concise answers." in result.text
     assert "[Knowledge" not in result.text
     assert [source.source_type for source in result.sources] == ["memory", "memory"]
+
+
+async def test_build_context_forwards_materialized_kb_ids_to_knowledge_provider(
+    monkeypatch,
+) -> None:
+    seen: dict[str, object] = {}
+
+    async def provider(principal, query, kb_ids, limit, audit_context):
+        seen["principal"] = principal
+        seen["query"] = query
+        seen["kb_ids"] = list(kb_ids)
+        seen["limit"] = limit
+        seen["audit_context"] = audit_context
+        return []
+
+    _publish_agent(
+        monkeypatch,
+        AgentFile(
+            name="agent-1",
+            version=1,
+            models=default_models(),
+            knowledge={
+                "enabled": True,
+                "bindings": [
+                    {"tenant_id": "tenant-a", "kb_id": "kb-1"},
+                    {"tenant_id": "tenant-a", "kb_id": "kb-2"},
+                ],
+            },
+        ),
+    )
+    monkeypatch.setattr(long_term_ctx.memory, "search_facts", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        long_term_ctx.agent_memory, "search_agent_memory", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(long_term_ctx, "_list_always_facts", lambda _user_id: [])
+    long_term_ctx.set_knowledge_provider(provider)
+
+    await long_term_ctx.build_context(
+        user_id="user-1",
+        query="deployment",
+        agent_id="agent-1",
+        available_tokens=300,
+    )
+
+    assert seen["query"] == "deployment"
+    assert seen["kb_ids"] == ["kb-1", "kb-2"]

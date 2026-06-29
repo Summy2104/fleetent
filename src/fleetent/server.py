@@ -153,19 +153,8 @@ def _build_platform_maintenance_scheduler(
     maintenance jobs.  Accepts an optional `_scheduler` for dependency injection in tests."""
     from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
 
-    from fleetent.config import SchedulingSettings
-    from fleetent.platform.knowledge_base_management.kb_connector_sweep import sweep
-
-    cfg: SchedulingSettings = scheduling if scheduling is not None else SchedulingSettings()
-    sched: Any = _scheduler if _scheduler is not None else AsyncIOScheduler()
-    sched.add_job(
-        sweep,
-        trigger="interval",
-        seconds=cfg.kb_connector_sweep_interval_seconds,
-        id="__kb_connector_sync_sweep__",
-        replace_existing=True,
-    )
-    return sched
+    del scheduling
+    return _scheduler if _scheduler is not None else AsyncIOScheduler()
 
 
 def _ensure_skill_pool_git() -> None:

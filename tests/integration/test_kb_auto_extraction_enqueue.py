@@ -6,23 +6,25 @@ from pathlib import Path
 from fleetent.db import SQLiteDatabase, create_database
 from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
 from fleetent.schema_migrations import migrate
-from tests.integration._migration_template import apply_migrations
 
 
-def _prepare_management_db(tmp_path: Path, monkeypatch) -> Path:
-    db_path = tmp_path / "management.db"
-    apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-    return db_path
+def _prepare_local_queue(tmp_path: Path) -> tuple[Path, str]:
+    queue_path = tmp_path / "kb-ingest-queue.db"
+    queue_url = f"sqlite:///{queue_path}"
+    from fleetent import kb_ingest_jobs
+
+    kb_ingest_jobs.get_job("missing", database_url=queue_url)
+    return queue_path, queue_url
 
 
-def _patch_runtime_database(monkeypatch, tmp_path: Path):
+def _patch_runtime_database(monkeypatch, tmp_path: Path, *, queue_url: str):
     from fleetent.knowledge_base import runtime
 
     db_path = tmp_path / "knowledge.db"
     migrate(SQLiteDatabase(path=db_path), KB_MIGRATIONS)
     database = create_database(f"sqlite:///{db_path}")
     monkeypatch.setattr(runtime, "_database", lambda: database)
+    monkeypatch.setattr(runtime, "_kb_queue_database_url", queue_url)
     monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
     monkeypatch.setattr(runtime.vector_store, "delete", _noop_delete)
     return database
@@ -52,8 +54,8 @@ async def _noop_delete(chunk_id: str, namespace: str) -> None:
 
 
 async def test_enabled_kb_ingest_enqueues_extraction_job(monkeypatch, tmp_path) -> None:
-    management_db_path = _prepare_management_db(tmp_path, monkeypatch)
-    _patch_runtime_database(monkeypatch, tmp_path)
+    queue_db_path, queue_url = _prepare_local_queue(tmp_path)
+    _patch_runtime_database(monkeypatch, tmp_path, queue_url=queue_url)
 
     from fleetent import kb_ingest_jobs
     from fleetent.knowledge_base import runtime
@@ -73,7 +75,7 @@ async def test_enabled_kb_ingest_enqueues_extraction_job(monkeypatch, tmp_path) 
         source="manual",
     )
 
-    rows = _job_rows(management_db_path)
+    rows = _job_rows(queue_db_path)
 
     assert document.id
     assert len(rows) == 1
@@ -82,8 +84,8 @@ async def test_enabled_kb_ingest_enqueues_extraction_job(monkeypatch, tmp_path) 
 
 
 async def test_disabled_kb_ingest_does_not_enqueue_extraction_job(monkeypatch, tmp_path) -> None:
-    management_db_path = _prepare_management_db(tmp_path, monkeypatch)
-    _patch_runtime_database(monkeypatch, tmp_path)
+    queue_db_path, queue_url = _prepare_local_queue(tmp_path)
+    _patch_runtime_database(monkeypatch, tmp_path, queue_url=queue_url)
 
     from fleetent.knowledge_base import runtime
 
@@ -97,14 +99,14 @@ async def test_disabled_kb_ingest_does_not_enqueue_extraction_job(monkeypatch, t
         source="manual",
     )
 
-    assert _job_rows(management_db_path) == []
+    assert _job_rows(queue_db_path) == []
 
 
 async def test_reingest_overwrite_enqueues_extraction_for_new_document(
     monkeypatch, tmp_path
 ) -> None:
-    management_db_path = _prepare_management_db(tmp_path, monkeypatch)
-    database = _patch_runtime_database(monkeypatch, tmp_path)
+    queue_db_path, queue_url = _prepare_local_queue(tmp_path)
+    database = _patch_runtime_database(monkeypatch, tmp_path, queue_url=queue_url)
 
     from fleetent import kb_ingest_jobs
     from fleetent.knowledge_base import runtime
@@ -131,7 +133,7 @@ async def test_reingest_overwrite_enqueues_extraction_for_new_document(
         source="manual",
     )
 
-    rows = _job_rows(management_db_path)
+    rows = _job_rows(queue_db_path)
     active_documents = database.execute(
         """
         SELECT id

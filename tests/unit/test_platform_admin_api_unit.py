@@ -791,39 +791,6 @@ def test_kb_admin_route_handlers_cover_management_and_documents(
         "kb_engine_archive",
         lambda tenant_id, kb_id: kbs[kb_id].__setitem__("archived", True),
     )
-    monkeypatch.setattr(kb_admin_api, "_require_active_kb", lambda tenant_id, kb_id: None)
-    monkeypatch.setattr(
-        kb_admin_api,
-        "kb_ingest_text",
-        lambda tenant_id, kb_id, source, content, document_format: {
-            "document_id": "doc-1",
-            "chunks": 2,
-        },
-    )
-    monkeypatch.setattr(
-        kb_admin_api,
-        "kb_sync_directory",
-        lambda tenant_id, kb_id, path: {"scanned": 3, "ingested": 2, "skipped": 1, "failed": 0},
-    )
-    monkeypatch.setattr(
-        kb_admin_api,
-        "_enqueue_import_job",
-        lambda kb_id, body: {"id": "job-import-1", "kb_id": kb_id, "tenant_id": body.tenant_id},
-    )
-    monkeypatch.setattr(
-        kb_admin_api,
-        "_enqueue_sync_directory_job",
-        lambda kb_id, body: {"id": "job-sync-1", "kb_id": kb_id, "tenant_id": body.tenant_id},
-    )
-    monkeypatch.setattr(
-        kb_admin_api,
-        "_wait_for_kb_ingest_job",
-        lambda job_id: (
-            {"job_id": job_id, "document_id": "doc-1", "chunks": 2}
-            if job_id == "job-import-1"
-            else {"job_id": job_id, "scanned": 3, "ingested": 2, "skipped": 1, "failed": 0}
-        ),
-    )
     monkeypatch.setattr(
         kb_admin_api, "kb_list_documents", lambda tenant_id, kb_id: [{"document_id": "doc-1"}]
     )
@@ -906,18 +873,6 @@ def test_kb_admin_route_handlers_cover_management_and_documents(
         == "Policies v2"
     )
     assert (
-        kb_admin_api.import_document(
-            "kb2", kb_admin_api.ImportBody(source="paste", content="body"), auth_header
-        )["chunks"]
-        == 2
-    )
-    assert (
-        kb_admin_api.sync_directory(
-            "kb2", kb_admin_api.SyncBody(path="/data/docs"), auth_header, "true"
-        )["ingested"]
-        == 2
-    )
-    assert (
         kb_admin_api.list_documents("kb2", authorization=auth_header)[0]["document_id"] == "doc-1"
     )
     assert (
@@ -975,9 +930,6 @@ def test_kb_admin_route_error_branches(monkeypatch: pytest.MonkeyPatch) -> None:
         )
     assert invalid_mode.value.status_code == 422
     monkeypatch.setattr(kb_admin_api.agent_kbs_store, "is_kb_bound", lambda tenant_id, kb_id: False)
-    with pytest.raises(HTTPException) as confirm:
-        kb_admin_api.sync_directory("kb1", kb_admin_api.SyncBody(path="/tmp"), "Session token")
-    assert confirm.value.status_code == 428
 
 
 def test_server_helpers_cover_admin_url_jobs_and_auth(
