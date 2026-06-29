@@ -372,6 +372,37 @@ def test_agent_knowledge_exposes_shared_tenant_id_for_valid_bindings() -> None:
     assert agent.knowledge.tenant_id == "tenant-a"
 
 
+def test_agent_knowledge_retrieval_policy_use_planner_defaults_false_and_parses() -> None:
+    default_agent = agent_config.AgentFile.model_validate(
+        {
+            "name": "pilot",
+            "version": 1,
+            "models": _valid_models_doc(),
+            "knowledge": {
+                "enabled": True,
+                "bindings": [{"tenant_id": "tenant-a", "kb_id": "support", "default": True}],
+            },
+        }
+    )
+
+    assert default_agent.knowledge.retrieval_policy.use_planner is False
+
+    parsed_agent = agent_config.AgentFile.model_validate(
+        {
+            "name": "pilot",
+            "version": 1,
+            "models": _valid_models_doc(),
+            "knowledge": {
+                "enabled": True,
+                "bindings": [{"tenant_id": "tenant-a", "kb_id": "support", "default": True}],
+                "retrieval_policy": {"mode": "hybrid", "use_planner": True},
+            },
+        }
+    )
+
+    assert parsed_agent.knowledge.retrieval_policy.use_planner is True
+
+
 @pytest.mark.parametrize("missing", ["tenant_id", "kb_id"])
 def test_agent_knowledge_binding_requires_tenant_and_kb(missing: str) -> None:
     binding = {"tenant_id": "tenant-a", "kb_id": "support"}

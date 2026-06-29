@@ -389,6 +389,8 @@ def get_connector_status(connector_id: str, *, settings: ConnectorSettings) -> C
 
 `search()` 保持显式底层模式，不改 `search()` 为 auto，也不要求调用方使用 planner。`plan_knowledge_search()` 是独立的规则型 API：普通 query 默认选择 hybrid；entity / relation-like query 先 graph search、不足时 hybrid fill；`rerank=True` 只标记 hybrid step。planner 不接 LLM planner、不做 query rewrite，不改变 vector / keyword / hybrid / graph / rerank 底层契约。
 
+Agent 被动检索默认仍走 `search(mode=...)`。只有当 agent.yaml 的 `knowledge.retrieval_policy.use_planner=true` 时，long-term-ctx 才会对被动 KB 检索走 `plan_knowledge_search()` / `execute_knowledge_search_plan()`；关系型 query 可升级到 graph evidence，无图谱数据时安全回落 hybrid，不改变既有预算/选择管线。
+
 `run_kb_reflection_report()` 由 reflection 拥有，用 knowledge-base public API 与 observability 信号生成 KB 质量只读报告，finding 类型包括 `missing_knowledge`、`stale_document`、`low_retrieval_quality`、`connector_sync_issue` 和 `entity_graph_gap`。报告持久化到 agent 侧 `reflection_reports(domain=knowledge_base)`，不自动写 KB、不触发 sync，也不创建 KB mutation proposal。
 
 ## 现状
@@ -437,6 +439,7 @@ def get_connector_status(connector_id: str, *, settings: ConnectorSettings) -> C
 - 检索已支持 SQLite FTS5/BM25 keyword mode、RRF hybrid mode、显式 hybrid rerank、
   独立 `graph_search()` 和规则型 `plan_knowledge_search()` / `execute_knowledge_search_plan()`；不提供
   `search(mode="auto")`，不接 LLM planner / query rewrite。
+- Agent 被动检索是 opt-in planner：`knowledge.retrieval_policy.use_planner` 默认 `false`，默认行为仍是 `search(mode=...)`；显式开启后，关系型 query 才会优先尝试 graph evidence，并在无图数据时回落 hybrid。
 - 外部 SaaS 数据源已有 fake-client 默认路径和手动 opt-in smoke scaffold；真实 Google Drive / Confluence API client 不进入默认测试路径。
 - long-term-ctx 通过 agent.yaml 的 `knowledge.bindings` 获取 agent 有效 KB 范围；bind/unbind 改的是管理库 `agent_kbs`，需经 platform→node reconcile 重 materialize 回 agent.yaml，运行时不直接查询管理库；更新在 agent 的下一个 session 边界生效，不中途热改进行中的对话。
 - `knowledge.bindings` 是单租户快照：同一 agent 的所有 binding 必须共享该 agent 的 `tenant_id`，materialize 与加载都会显式校验；尚未实现 document-level ACL。

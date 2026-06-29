@@ -8,6 +8,7 @@ from fleetent import agent_config
 from fleetent.agent_config import AgentConfigIndex, AgentFile, default_models
 from fleetent.config import LongTermContextSettings
 from fleetent.knowledge_base import KnowledgeChunk
+from fleetent.knowledge_base.retrieval.graph_search import GraphSearchChunk, GraphSearchResult
 from fleetent.memory.facts_models import Fact, SearchResult
 
 
@@ -49,6 +50,28 @@ def _mem_result(
             statement=statement,
         ),
         score=score,
+    )
+
+
+def _kb_chunk(
+    chunk_id: str,
+    content: str,
+    *,
+    score: float = 0.82,
+    tenant_id: str = "tenant-a",
+    kb_id: str = "global",
+) -> KnowledgeChunk:
+    return KnowledgeChunk(
+        id=chunk_id,
+        document_id=f"doc-{chunk_id}",
+        tenant_id=tenant_id,
+        kb_id=kb_id,
+        filename=f"{chunk_id}.md",
+        content=content,
+        position=0,
+        score=score,
+        source="manual",
+        source_url=None,
     )
 
 
@@ -231,6 +254,168 @@ async def test_builtin_knowledge_provider_uses_knowledge_base_search_when_enable
     ]
 
 
+async def test_builtin_knowledge_provider_keeps_search_path_when_planner_opt_in_is_false(
+    monkeypatch,
+):
+    from fleetent import long_term_ctx
+
+    _publish_agent(
+        monkeypatch,
+        AgentFile(
+            name="agent-1",
+            version=1,
+            models=default_models(),
+            knowledge={
+                "enabled": True,
+                "bindings": [{"tenant_id": "tenant-a", "kb_id": "global"}],
+                "retrieval_policy": {"mode": "hybrid", "use_planner": False},
+            },
+        ),
+    )
+    legacy_chunk = _kb_chunk("legacy-search", "Legacy search result.")
+    knowledge_search = AsyncMock(return_value=[legacy_chunk])
+    monkeypatch.setattr(long_term_ctx.memory, "search_facts", AsyncMock(return_value=[]))
+    monkeypatch.setattr(long_term_ctx.knowledge_base, "search", knowledge_search)
+    monkeypatch.setattr(
+        long_term_ctx.knowledge_base,
+        "plan_knowledge_search",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("planner must stay off")),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        long_term_ctx.knowledge_base,
+        "execute_knowledge_search_plan",
+        AsyncMock(
+            side_effect=AssertionError("planner execute must stay off when use_planner=false")
+        ),
+        raising=False,
+    )
+    long_term_ctx.set_knowledge_provider(None)
+
+    result = await long_term_ctx.build_context(
+        user_id="user-1",
+        query="markdown",
+        agent_id="agent-1",
+        available_tokens=300,
+    )
+
+    knowledge_search.assert_awaited_once_with(
+        "markdown",
+        tenant_id="tenant-a",
+        kb_ids=["global"],
+        limit=10,
+        mode="hybrid",
+        audit_context=None,
+    )
+    assert "Legacy search result." in result.text
+    assert [source.source_id for source in result.sources] == ["legacy-search"]
+
+
+async def test_builtin_knowledge_provider_uses_planner_for_relation_like_queries(monkeypatch):
+    from fleetent import long_term_ctx
+    from fleetent.knowledge_base import planner
+
+    _publish_agent(
+        monkeypatch,
+        AgentFile(
+            name="agent-1",
+            version=1,
+            models=default_models(),
+            knowledge={
+                "enabled": True,
+                "bindings": [{"tenant_id": "tenant-a", "kb_id": "global"}],
+                "retrieval_policy": {"mode": "hybrid", "use_planner": True},
+            },
+        ),
+    )
+    legacy_search = AsyncMock(return_value=[_kb_chunk("legacy-search", "legacy result")])
+    planner_graph = AsyncMock(
+        return_value=GraphSearchResult(
+            query="Which service depends on Billing API?",
+            tenant_id="tenant-a",
+            kb_ids=["global"],
+            depth=1,
+            chunks=[
+                GraphSearchChunk(
+                    chunk=_kb_chunk("graph-hit", "Billing API depends on Auth Service."),
+                    graph_score=1.0,
+                    reason="relation_evidence",
+                )
+            ],
+        )
+    )
+    planner_fill = AsyncMock(return_value=[])
+    monkeypatch.setattr(long_term_ctx.memory, "search_facts", AsyncMock(return_value=[]))
+    monkeypatch.setattr(long_term_ctx.knowledge_base, "search", legacy_search)
+    monkeypatch.setattr(planner, "graph_search", planner_graph)
+    monkeypatch.setattr(planner, "search", planner_fill)
+    long_term_ctx.set_knowledge_provider(None)
+
+    result = await long_term_ctx.build_context(
+        user_id="user-1",
+        query="Which service depends on Billing API?",
+        agent_id="agent-1",
+        available_tokens=300,
+    )
+
+    legacy_search.assert_not_awaited()
+    planner_graph.assert_awaited_once()
+    assert "Billing API depends on Auth Service." in result.text
+    assert [source.source_id for source in result.sources] == ["graph-hit"]
+
+
+async def test_builtin_knowledge_provider_planner_falls_back_to_hybrid_without_graph_data(
+    monkeypatch,
+):
+    from fleetent import long_term_ctx
+    from fleetent.knowledge_base import planner
+
+    _publish_agent(
+        monkeypatch,
+        AgentFile(
+            name="agent-1",
+            version=1,
+            models=default_models(),
+            knowledge={
+                "enabled": True,
+                "bindings": [{"tenant_id": "tenant-a", "kb_id": "global"}],
+                "retrieval_policy": {"mode": "hybrid", "use_planner": True},
+            },
+        ),
+    )
+    legacy_search = AsyncMock(return_value=[_kb_chunk("legacy-search", "legacy result")])
+    planner_graph = AsyncMock(
+        return_value=GraphSearchResult(
+            query="Which service depends on Billing API?",
+            tenant_id="tenant-a",
+            kb_ids=["global"],
+            depth=1,
+            chunks=[],
+        )
+    )
+    planner_fill = AsyncMock(
+        return_value=[_kb_chunk("hybrid-fill", "Hybrid fallback answered the dependency query.")]
+    )
+    monkeypatch.setattr(long_term_ctx.memory, "search_facts", AsyncMock(return_value=[]))
+    monkeypatch.setattr(long_term_ctx.knowledge_base, "search", legacy_search)
+    monkeypatch.setattr(planner, "graph_search", planner_graph)
+    monkeypatch.setattr(planner, "search", planner_fill)
+    long_term_ctx.set_knowledge_provider(None)
+
+    result = await long_term_ctx.build_context(
+        user_id="user-1",
+        query="Which service depends on Billing API?",
+        agent_id="agent-1",
+        available_tokens=300,
+    )
+
+    legacy_search.assert_not_awaited()
+    planner_graph.assert_awaited_once()
+    planner_fill.assert_awaited_once()
+    assert "Hybrid fallback answered the dependency query." in result.text
+    assert [source.source_id for source in result.sources] == ["hybrid-fill"]
+
+
 async def test_builtin_knowledge_provider_disabled_does_not_call_knowledge_base(monkeypatch):
     from fleetent import long_term_ctx
 
@@ -300,9 +485,7 @@ async def test_build_context_keeps_budget_policy_path_for_memory_and_knowledge(m
         source="manual",
         source_url=None,
     )
-    monkeypatch.setattr(
-        long_term_ctx.memory, "search_facts", AsyncMock(return_value=[memory_item])
-    )
+    monkeypatch.setattr(long_term_ctx.memory, "search_facts", AsyncMock(return_value=[memory_item]))
     monkeypatch.setattr(
         long_term_ctx.knowledge_base, "search", AsyncMock(return_value=[knowledge_chunk])
     )
