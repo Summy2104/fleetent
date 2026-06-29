@@ -7,10 +7,12 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any, Literal
 
+import httpx
+
 from fleetent import memory
 from fleetent.config import LongTermContextSettings, Settings
 from fleetent.db import SQLiteDatabase, create_database
-from fleetent.identity import Principal
+from fleetent.identity import INGRESS_PRINCIPAL_HEADER, Principal, encode_ingress_principal
 from fleetent.knowledge_base.core import KnowledgeStore
 from fleetent.knowledge_base.core.models import KnowledgeChunk
 from fleetent.knowledge_base.planner import KnowledgeSearchOptions, KnowledgeSearchPlan
@@ -257,6 +259,102 @@ class LocalKnowledgeProvider:
                 audit_context=audit_context,
             )
         )
+
+
+def _knowledge_chunk_to_wire_dict(chunk: KnowledgeChunk) -> dict[str, object]:
+    return {
+        "id": chunk.id,
+        "document_id": chunk.document_id,
+        "tenant_id": chunk.tenant_id,
+        "kb_id": chunk.kb_id,
+        "filename": chunk.filename,
+        "content": chunk.content,
+        "position": chunk.position,
+        "score": chunk.score,
+        "source": chunk.source,
+        "source_url": chunk.source_url,
+        "metadata": dict(chunk.metadata),
+    }
+
+
+def _knowledge_chunk_from_wire_dict(payload: dict[str, object]) -> KnowledgeChunk:
+    raw_metadata = payload.get("metadata", {})
+    metadata = (
+        {str(key): str(value) for key, value in raw_metadata.items()}
+        if isinstance(raw_metadata, dict)
+        else {}
+    )
+    return KnowledgeChunk(
+        id=str(payload["id"]),
+        document_id=str(payload["document_id"]),
+        tenant_id=str(payload["tenant_id"]),
+        kb_id=str(payload["kb_id"]),
+        filename=str(payload["filename"]),
+        content=str(payload["content"]),
+        position=int(payload["position"]),
+        score=float(payload["score"]),
+        source=str(payload["source"]),
+        source_url=str(payload["source_url"]) if payload.get("source_url") is not None else None,
+        metadata=metadata,
+    )
+
+
+class HttpKnowledgeProvider:
+    """Knowledge provider backed by a remote HTTP retrieval endpoint."""
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        service_key: str,
+        timeout_seconds: float = 5.0,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._url = url
+        self._service_key = service_key
+        self._timeout_seconds = timeout_seconds
+        self._transport = transport
+
+    async def __call__(
+        self,
+        principal: Principal,
+        query: str,
+        kb_ids: list[str],
+        limit: int,
+        audit_context: KBRetrievalAuditContext | None,
+    ) -> list[KnowledgeChunk]:
+        del audit_context
+        headers = {
+            "Authorization": f"Bearer {self._service_key}",
+            INGRESS_PRINCIPAL_HEADER: encode_ingress_principal(principal),
+        }
+        payload = {
+            "principal": {"user_id": principal.user_id, "tenant_id": principal.tenant_id},
+            "query": query,
+            "kb_ids": kb_ids,
+            "limit": limit,
+        }
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._timeout_seconds,
+                transport=self._transport,
+            ) as client:
+                response = await client.post(self._url, json=payload, headers=headers)
+            response.raise_for_status()
+            body = response.json()
+            return [
+                _knowledge_chunk_from_wire_dict(item)
+                for item in body.get("chunks", [])
+                if isinstance(item, dict)
+            ]
+        except httpx.HTTPError as exc:
+            _logger.warn(
+                "http_knowledge_provider_failed",
+                url=self._url,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            return []
 
 
 _default_knowledge_provider = LocalKnowledgeProvider()

@@ -309,6 +309,34 @@ def _tenant_router_root_for_agent_data_dir(
     return data_dir.parent
 
 
+def _resolve_auth_ref(auth_ref: str) -> str:
+    if auth_ref.startswith("env:"):
+        env_name = auth_ref.removeprefix("env:")
+        value = os.getenv(env_name)
+        if value:
+            return value
+        raise ValueError(f"knowledge.provider.auth_ref env var is missing: {env_name}")
+    path = Path(auth_ref.removeprefix("file://")).expanduser()
+    return path.read_text(encoding="utf-8")
+
+
+def _configure_knowledge_provider(agent: AgentFile, *, long_term_ctx: Any) -> None:
+    knowledge = getattr(agent, "knowledge", None)
+    provider = getattr(knowledge, "provider", None)
+    if provider is None:
+        long_term_ctx.set_knowledge_provider(None)
+        return
+    if provider.type != "http":
+        long_term_ctx.set_knowledge_provider(None)
+        return
+    long_term_ctx.set_knowledge_provider(
+        long_term_ctx.HttpKnowledgeProvider(
+            provider.url or "",
+            service_key=_resolve_auth_ref(provider.auth_ref or ""),
+        )
+    )
+
+
 def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "default") -> None:
     """Bootstrap all agent-side DB tables anchored on data_dir.
 
@@ -399,6 +427,7 @@ async def _start_infra(
     from fleetent.runtime.approval_resume import reconcile_expired_approvals
 
     await reconcile_expired_approvals()
+    from fleetent import long_term_ctx
     from fleetent.integrations.sandbox import enablement as sandbox_enablement
 
     # Select the configured sandbox backend (agent.yaml > platform.yaml > docker) and
@@ -407,6 +436,7 @@ async def _start_infra(
     from fleetent.session import manager as session_mgr
     from fleetent.tools.builtin_tools import init_sandbox_manager
 
+    _configure_knowledge_provider(agent, long_term_ctx=long_term_ctx)
     backend = create_backend(agent)
     init_sandbox_manager(agent, agent_skills_root=skills_root or (data_dir.parent / "skills"))
 
