@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import os
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
@@ -26,6 +28,8 @@ class KBServeConfig:
     host: str = "127.0.0.1"
     port: int = 8787
     default_mode: str = "hybrid"
+    data_dir: Path | None = None
+    queue_database_url: str = ""
 
 
 class PrincipalPayload(BaseModel):
@@ -42,9 +46,12 @@ class SearchRequest(BaseModel):
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="fleetent kb-serve")
-    parser.add_argument("--tenant", required=True, help="tenant id served by this process")
+    parser.add_argument("--tenant", default="", help="tenant id served by this process")
+    parser.add_argument("--service-key", default="", help="service key ref: env:VAR or file://path")
     parser.add_argument(
-        "--service-key", required=True, help="service key ref: env:VAR or file://path"
+        "--config",
+        default="",
+        help="standalone kb-service.yaml path; when set, service settings come from this file",
     )
     parser.add_argument("--host", default="127.0.0.1", help="bind host")
     parser.add_argument("--port", type=int, default=8787, help="bind port")
@@ -63,9 +70,9 @@ def _database() -> SQLiteDatabase:
     return create_database(Settings().database_url)
 
 
-def _tenant_router() -> TenantRouter:
-    data_dir = _database().path.parent
-    return TenantRouter(SQLiteTenantBackend(data_dir=data_dir))
+def _tenant_router(data_dir: Path | None = None) -> TenantRouter:
+    resolved_data_dir = data_dir or _database().path.parent
+    return TenantRouter(SQLiteTenantBackend(data_dir=resolved_data_dir))
 
 
 def _resolve_auth_ref(auth_ref: str) -> str:
@@ -79,8 +86,9 @@ def _resolve_auth_ref(auth_ref: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _bootstrap_runtime(tenant_id: str) -> None:
-    scope = _tenant_router().tenant_scope(tenant_id)
+def _bootstrap_runtime(tenant_id: str, *, data_dir: Path | None = None) -> None:
+    router = _tenant_router(data_dir) if data_dir is not None else _tenant_router()
+    scope = router.tenant_scope(tenant_id)
     kb_runtime.runtime.set_database(scope.open_kb_db(KB_MIGRATIONS))
     kb_runtime.runtime.set_vector_backend(scope.kb_vector_backend)
 
@@ -102,8 +110,42 @@ def _knowledge_chunk_to_wire_dict(chunk: KnowledgeChunk) -> dict[str, object]:
 
 
 def create_app(config: KBServeConfig):  # type: ignore[no-untyped-def]
-    _bootstrap_runtime(config.tenant_id)
-    app = FastAPI(title="fleetent kb-read-service")
+    previous_db = kb_runtime.runtime._kb_db
+    previous_backend = kb_runtime.runtime._kb_vector_backend
+    _bootstrap_runtime(config.tenant_id, data_dir=config.data_dir)
+    kb_runtime.runtime.set_database(previous_db)
+    kb_runtime.runtime.set_vector_backend(previous_backend)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        _bootstrap_runtime(config.tenant_id, data_dir=config.data_dir)
+        task: asyncio.Task[None] | None = None
+        if config.queue_database_url:
+            from fleetent.knowledge_base.service_config import (
+                load_kb_service_config,
+                validate_kb_service_boot,
+            )
+            from fleetent.knowledge_base.standalone_sweep import sweep
+
+            standalone_path = Path(os.environ["FLEETENT_KB_SERVICE_CONFIG"]).expanduser()
+            standalone_config = load_kb_service_config(standalone_path)
+            validate_kb_service_boot(standalone_config)
+
+            async def _sweep_loop() -> None:
+                while True:
+                    sweep(standalone_config, queue_database_url=config.queue_database_url)
+                    await asyncio.sleep(30.0)
+
+            task = asyncio.create_task(_sweep_loop())
+        try:
+            yield
+        finally:
+            if task is not None:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+
+    app = FastAPI(title="fleetent kb-read-service", lifespan=lifespan)
     app.state.kb_serve_config = config
     app.state.kb_service_key = _resolve_auth_ref(config.service_key_ref)
     app.state.kb_principal_type = Principal
@@ -163,13 +205,34 @@ def main(argv: list[str] | None = None) -> None:
 
         argv = sys.argv[1:]
     ns = _parse_args(argv)
-    config = KBServeConfig(
-        tenant_id=ns.tenant,
-        service_key_ref=ns.service_key,
-        host=ns.host,
-        port=ns.port,
-        default_mode=ns.mode,
-    )
+    if ns.config:
+        from fleetent.knowledge_base.service_config import (
+            load_kb_service_config,
+            validate_kb_service_boot,
+        )
+
+        os.environ["FLEETENT_KB_SERVICE_CONFIG"] = str(Path(ns.config).expanduser())
+        standalone_config = load_kb_service_config(Path(ns.config).expanduser())
+        validate_kb_service_boot(standalone_config)
+        config = KBServeConfig(
+            tenant_id=standalone_config.service.tenant_id,
+            service_key_ref=standalone_config.service.service_key_ref,
+            host=standalone_config.service.host,
+            port=standalone_config.service.port,
+            default_mode=standalone_config.retrieval.default_mode,
+            data_dir=standalone_config.data_dir(),
+            queue_database_url=standalone_config.queue_database_url(),
+        )
+    else:
+        if not ns.tenant or not ns.service_key:
+            raise SystemExit("--tenant and --service-key are required when --config is not set")
+        config = KBServeConfig(
+            tenant_id=ns.tenant,
+            service_key_ref=ns.service_key,
+            host=ns.host,
+            port=ns.port,
+            default_mode=ns.mode,
+        )
     app = create_app(config)
     from uvicorn import run as uvicorn_run
 

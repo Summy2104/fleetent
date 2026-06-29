@@ -9,13 +9,50 @@ from typing import Any
 
 from fleetent.config import Settings
 from fleetent.db import SQLiteDatabase, create_database
+from fleetent.schema_migrations import migrate
 
 _RESULT_KEY = "__result__"
 _REQUEST_KEY = "__request__"
+_LOCAL_QUEUE_MIGRATIONS: list[tuple[int, str]] = [
+    (
+        1,
+        """
+        CREATE TABLE IF NOT EXISTS kb_ingest_jobs (
+            id TEXT PRIMARY KEY,
+            job_type TEXT NOT NULL,
+            tenant_id TEXT NOT NULL,
+            kb_id TEXT NOT NULL,
+            connector_ref TEXT NOT NULL,
+            cred_ref TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            max_attempts INTEGER NOT NULL DEFAULT 3,
+            last_error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            claimed_at TEXT,
+            finished_at TEXT
+        )
+        """,
+    ),
+    (
+        2,
+        """
+        CREATE TABLE IF NOT EXISTS kb_connector_schedule_state (
+            connector_id TEXT PRIMARY KEY,
+            last_scheduled_sync_at TEXT
+        )
+        """,
+    ),
+]
 
 
-def _database() -> SQLiteDatabase:
-    return create_database(Settings().database_url)
+def _database(database_url: str | None = None) -> SQLiteDatabase:
+    url = database_url or Settings().database_url
+    database = create_database(url)
+    if database_url:
+        migrate(database, _LOCAL_QUEUE_MIGRATIONS)
+    return database
 
 
 def _now() -> str:
@@ -31,9 +68,9 @@ def _decode(row: dict[str, Any] | None) -> dict[str, Any] | None:
     return job
 
 
-def get_job(job_id: str) -> dict[str, Any] | None:
+def get_job(job_id: str, *, database_url: str | None = None) -> dict[str, Any] | None:
     row = (
-        _database()
+        _database(database_url)
         .execute(
             "SELECT * FROM kb_ingest_jobs WHERE id = :id",
             {"id": job_id},
@@ -43,10 +80,10 @@ def get_job(job_id: str) -> dict[str, Any] | None:
     return _decode(row)
 
 
-def has_active_worker(*, stale_after_seconds: float) -> bool:
+def has_active_worker(*, stale_after_seconds: float, database_url: str | None = None) -> bool:
     """Return whether unresolved jobs show recent claim activity."""
     row = (
-        _database()
+        _database(database_url)
         .execute(
             """
             SELECT MAX(claimed_at) AS latest_claimed_at
@@ -87,6 +124,7 @@ def enqueue_job(
     connector_ref: dict[str, Any],
     cred_ref: str = "",
     max_attempts: int = 3,
+    database_url: str | None = None,
 ) -> dict[str, Any]:
     job_id = str(uuid.uuid4())
     now = _now()
@@ -106,7 +144,7 @@ def enqueue_job(
         "claimed_at": None,
         "finished_at": None,
     }
-    with _database().transaction() as conn:
+    with _database(database_url).transaction() as conn:
         conn.execute(
             """
             INSERT INTO kb_ingest_jobs (
@@ -127,6 +165,7 @@ def enqueue_connector_job(
     connector_row: dict[str, Any],
     *,
     max_attempts: int = 3,
+    database_url: str | None = None,
 ) -> dict[str, Any]:
     config = dict(connector_row.get("config") or {})
     cred_ref = str(config.pop("credential_ref", "") or "")
@@ -146,12 +185,13 @@ def enqueue_connector_job(
         connector_ref=connector_ref,
         cred_ref=cred_ref,
         max_attempts=max_attempts,
+        database_url=database_url,
     )
 
 
-def claim_job(job_id: str) -> dict[str, Any] | None:
+def claim_job(job_id: str, *, database_url: str | None = None) -> dict[str, Any] | None:
     now = _now()
-    with _database().transaction() as conn:
+    with _database(database_url).transaction() as conn:
         row = conn.execute(
             """
             UPDATE kb_ingest_jobs
@@ -164,9 +204,9 @@ def claim_job(job_id: str) -> dict[str, Any] | None:
     return _decode(row)
 
 
-def claim_next_job() -> dict[str, Any] | None:
+def claim_next_job(*, database_url: str | None = None) -> dict[str, Any] | None:
     now = _now()
-    with _database().transaction() as conn:
+    with _database(database_url).transaction() as conn:
         row = conn.execute(
             """
             UPDATE kb_ingest_jobs
@@ -185,9 +225,14 @@ def claim_next_job() -> dict[str, Any] | None:
     return _decode(row)
 
 
-def mark_done(job_id: str, *, result: dict[str, Any] | None = None) -> dict[str, Any] | None:
+def mark_done(
+    job_id: str,
+    *,
+    result: dict[str, Any] | None = None,
+    database_url: str | None = None,
+) -> dict[str, Any] | None:
     now = _now()
-    with _database().transaction() as conn:
+    with _database(database_url).transaction() as conn:
         current = conn.execute(
             "SELECT connector_ref FROM kb_ingest_jobs WHERE id = :id",
             {"id": job_id},
@@ -217,8 +262,13 @@ def mark_done(job_id: str, *, result: dict[str, Any] | None = None) -> dict[str,
     return _decode(row)
 
 
-def mark_failed(job_id: str, error: str) -> dict[str, Any] | None:
-    with _database().transaction() as conn:
+def mark_failed(
+    job_id: str,
+    error: str,
+    *,
+    database_url: str | None = None,
+) -> dict[str, Any] | None:
+    with _database(database_url).transaction() as conn:
         current = conn.execute(
             "SELECT attempts, max_attempts FROM kb_ingest_jobs WHERE id = :id",
             {"id": job_id},
@@ -258,3 +308,42 @@ def mark_failed(job_id: str, error: str) -> dict[str, Any] | None:
                 {"id": job_id, "attempts": attempts, "error": error, "now": now},
             ).fetchone()
     return _decode(row)
+
+
+def get_last_scheduled_sync_at(
+    connector_id: str,
+    *,
+    database_url: str,
+) -> str | None:
+    row = (
+        _database(database_url)
+        .execute(
+            """
+        SELECT last_scheduled_sync_at
+        FROM kb_connector_schedule_state
+        WHERE connector_id = :connector_id
+        """,
+            {"connector_id": connector_id},
+        )
+        .fetchone()
+    )
+    if row is None:
+        return None
+    return str(row["last_scheduled_sync_at"]) if row["last_scheduled_sync_at"] else None
+
+
+def mark_connector_scheduled(
+    connector_id: str,
+    scheduled_at: str,
+    *,
+    database_url: str,
+) -> None:
+    _database(database_url).execute(
+        """
+        INSERT INTO kb_connector_schedule_state (connector_id, last_scheduled_sync_at)
+        VALUES (:connector_id, :scheduled_at)
+        ON CONFLICT(connector_id) DO UPDATE SET
+            last_scheduled_sync_at = excluded.last_scheduled_sync_at
+        """,
+        {"connector_id": connector_id, "scheduled_at": scheduled_at},
+    )
