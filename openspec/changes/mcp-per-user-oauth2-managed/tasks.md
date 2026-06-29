@@ -15,12 +15,12 @@
 
 ## 3. platform 回调 + node↔platform 端点 + 透明刷新
 
-- [ ] 3.1 写测试(红):`GET /oauth/callback` 以 state 反查 pending → 用 D6 换 token → 存管理库 → state 作废;非法/过期 state 被拒;client_secret 经 agent_secrets 解析不入表
-- [ ] 3.2 实现(绿):platform `GET /oauth/callback` 路由(复用 slice-1 D6 纯逻辑做 code→token)
-- [ ] 3.3 写测试(红):`POST /nodes/{id}/mcp/oauth-pending` 鉴 node service key 后登记 pending;非 node 调用被拒
-- [ ] 3.4 实现(绿):`POST /nodes/{id}/mcp/oauth-pending` 端点
-- [ ] 3.5 写测试(红):`POST /nodes/{id}/mcp/oauth-token` 返回有效 access token,过期且有 refresh 时透明刷新后返回,返回体不含 refresh_token;非 node 调用被拒
-- [ ] 3.6 实现(绿):`POST /nodes/{id}/mcp/oauth-token` 端点(复用 D6 refresh)
+- [x] 3.1 写测试(红):`GET /oauth/callback` 以 state 反查 pending → 用 D6 换 token → 存管理库 → state 作废;非法/过期 state 被拒;client_secret 经 agent_secrets 解析不入表
+- [x] 3.2 实现(绿):platform `GET /oauth/callback` 路由(复用 slice-1 D6 纯逻辑做 code→token)
+- [x] 3.3 写测试(红):`POST /nodes/{id}/mcp/oauth-pending` 鉴 node service key 后登记 pending;非 node 调用被拒
+- [x] 3.4 实现(绿):`POST /nodes/{id}/mcp/oauth-pending` 端点
+- [x] 3.5 写测试(红):`POST /nodes/{id}/mcp/oauth-token` 返回有效 access token,过期且有 refresh 时透明刷新后返回,返回体不含 refresh_token;非 node 调用被拒
+- [x] 3.6 实现(绿):`POST /nodes/{id}/mcp/oauth-token` 端点(复用 D6 refresh)
 
 ## 4. node agent→node 同步 loopback 通道
 

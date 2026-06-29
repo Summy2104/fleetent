@@ -30,6 +30,12 @@ def upgrade() -> None:
         sa.Column("refresh_token_ciphertext", sa.Text(), nullable=True),
         sa.Column("expires_at", sa.Float(), nullable=True),
         sa.Column("scope", sa.Text(), nullable=True),
+        # OAuth config carried with the token so transparent refresh is self-contained
+        # (no registry round-trip / agent_id-typing dance). client_secret_env is a secret
+        # env reference name, never a secret value.
+        sa.Column("token_url", sa.Text(), nullable=False, server_default=""),
+        sa.Column("client_id", sa.Text(), nullable=False, server_default=""),
+        sa.Column("client_secret_env", sa.Text(), nullable=False, server_default=""),
         sa.Column("created_at", sa.Text(), nullable=False),
         sa.Column("updated_at", sa.Text(), nullable=False),
     )

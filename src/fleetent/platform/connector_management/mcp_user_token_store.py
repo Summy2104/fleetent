@@ -22,12 +22,19 @@ PENDING_TTL_SECONDS = 600.0
 
 @dataclass(frozen=True)
 class StoredToken:
-    """A platform-stored per-user token (refresh_token stays internal to platform)."""
+    """A platform-stored per-user token (refresh_token stays internal to platform).
+
+    Carries the OAuth config needed to refresh itself (token_url/client_id/
+    client_secret_env) so refresh needs no registry round-trip.
+    """
 
     access_token: str
     refresh_token: str | None
     expires_at: float | None
     scope: str | None
+    token_url: str
+    client_id: str
+    client_secret_env: str
 
 
 @dataclass(frozen=True)
@@ -61,6 +68,9 @@ def put_token(
     refresh_token: str | None,
     expires_at: float | None,
     scope: str | None,
+    token_url: str = "",
+    client_id: str = "",
+    client_secret_env: str = "",
 ) -> None:
     now = _now_iso()
     with _database().transaction() as conn:
@@ -68,15 +78,20 @@ def put_token(
             """
             INSERT INTO mcp_user_tokens
                 (user_id, agent_id, server_id, access_token_ciphertext,
-                 refresh_token_ciphertext, expires_at, scope, created_at, updated_at)
+                 refresh_token_ciphertext, expires_at, scope,
+                 token_url, client_id, client_secret_env, created_at, updated_at)
             VALUES
                 (:user_id, :agent_id, :server_id, :access_ct,
-                 :refresh_ct, :expires_at, :scope, :created_at, :updated_at)
+                 :refresh_ct, :expires_at, :scope,
+                 :token_url, :client_id, :client_secret_env, :created_at, :updated_at)
             ON CONFLICT(user_id, agent_id, server_id) DO UPDATE SET
                 access_token_ciphertext = excluded.access_token_ciphertext,
                 refresh_token_ciphertext = excluded.refresh_token_ciphertext,
                 expires_at = excluded.expires_at,
                 scope = excluded.scope,
+                token_url = excluded.token_url,
+                client_id = excluded.client_id,
+                client_secret_env = excluded.client_secret_env,
                 updated_at = excluded.updated_at
             """,
             {
@@ -87,6 +102,9 @@ def put_token(
                 "refresh_ct": encrypt_text(refresh_token) if refresh_token is not None else None,
                 "expires_at": expires_at,
                 "scope": scope,
+                "token_url": token_url,
+                "client_id": client_id,
+                "client_secret_env": client_secret_env,
                 "created_at": now,
                 "updated_at": now,
             },
@@ -98,7 +116,8 @@ def get_token(user_id: str, agent_id: str, server_id: str) -> StoredToken | None
         _database()
         .execute(
             """
-            SELECT access_token_ciphertext, refresh_token_ciphertext, expires_at, scope
+            SELECT access_token_ciphertext, refresh_token_ciphertext, expires_at, scope,
+                   token_url, client_id, client_secret_env
             FROM mcp_user_tokens
             WHERE user_id = :user_id AND agent_id = :agent_id AND server_id = :server_id
             """,
@@ -115,6 +134,9 @@ def get_token(user_id: str, agent_id: str, server_id: str) -> StoredToken | None
         refresh_token=decrypt_text(str(refresh_ct)) if refresh_ct is not None else None,
         expires_at=float(expires_at) if expires_at is not None else None,
         scope=row["scope"],
+        token_url=str(row["token_url"] or ""),
+        client_id=str(row["client_id"] or ""),
+        client_secret_env=str(row["client_secret_env"] or ""),
     )
 
 
