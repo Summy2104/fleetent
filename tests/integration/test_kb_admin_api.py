@@ -320,8 +320,8 @@ def test_host_wired_import_writes_tenant_scoped_kb_files(tmp_path, monkeypatch):
     background.join(timeout=1)
     assert imported.status_code == 200
 
-    tenant_kb_db = tmp_path / "tenants" / "tenant-a" / "kb.db"
-    tenant_kb_vectors = tmp_path / "tenants" / "tenant-a" / "kb_vectors.db"
+    tenant_kb_db = tmp_path / "tenants" / "tenant-a" / "kb" / "kb.db"
+    tenant_kb_vectors = tmp_path / "tenants" / "tenant-a" / "kb" / "kb_vectors.db"
     assert tenant_kb_db.exists()
     assert tenant_kb_vectors.exists()
 
