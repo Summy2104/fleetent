@@ -253,6 +253,13 @@ class NodeMcpOAuthTokenBody(BaseModel):
     server_id: str
 
 
+class NodeMcpCredentialSetBody(BaseModel):
+    user_id: str
+    agent_id: str
+    server_id: str
+    key: str
+
+
 @router.post("/{node_id}/mcp/oauth-pending")
 def post_mcp_oauth_pending(
     node_id: str,
@@ -293,6 +300,20 @@ async def post_mcp_oauth_token(
     if access_token is None:
         raise HTTPException(status_code=404, detail="no token; authorization required")
     return {"access_token": access_token}
+
+
+@router.post("/{node_id}/mcp/credential-set")
+def post_mcp_credential_set(
+    node_id: str,
+    body: NodeMcpCredentialSetBody,
+    node: dict[str, Any] = Depends(_authenticate_node),  # noqa: B008
+) -> dict[str, Any]:
+    """Store a user-supplied static api-key on behalf of an agent (mode 2 tool, via node)."""
+    del node, node_id
+    from fleetent.platform.connector_management import mcp_oauth_service
+
+    mcp_oauth_service.store_static_credential(body.user_id, body.agent_id, body.server_id, body.key)
+    return {"ok": True}
 
 
 def _agent_secrets(agent: agent_store.Agent) -> dict[str, str]:

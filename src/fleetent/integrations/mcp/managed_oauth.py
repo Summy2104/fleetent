@@ -25,6 +25,7 @@ from fleetent.integrations.mcp import authorization as _authz
 from fleetent.integrations.mcp.oauth_authcode import AuthState
 from fleetent.integrations.mcp.per_user_tokens import (
     UserToken,
+    set_credential_writer,
     set_user_token_resolver,
 )
 from fleetent.structured_logging import get_logger
@@ -153,16 +154,59 @@ class ManagedStateStore:
         return None
 
 
+class ManagedCredentialWriter:
+    """Persist a user-supplied static api-key via the node loopback (mode 2 tool, managed).
+
+    Posts the (triple, key) to the node's ``credential-set`` loopback, which forwards to
+    platform holding the service key — the agent never imports/addresses platform. Returns
+    whether the write succeeded so the tool can report a clean failure. The form path uses a
+    one-shot state instead; this direct write is only for the in-DM tool, where the agent
+    already knows the calling user.
+    """
+
+    def __init__(
+        self,
+        loopback_url: str,
+        agent_name: str,
+        tui_token: str,
+        *,
+        http_post: Callable[..., httpx.Response] | None = None,
+    ) -> None:
+        self._base = loopback_url.rstrip("/")
+        self._agent_name = agent_name
+        self._tui_token = tui_token
+        self._post = http_post or (lambda url, **kw: httpx.post(url, **kw))
+
+    def __call__(self, server_id: str, user_id: str, agent_id: str | None, key: str) -> bool:
+        try:
+            resp = self._post(
+                f"{self._base}/agent/{self._agent_name}/mcp/credential-set",
+                json={
+                    "user_id": user_id,
+                    "agent_id": agent_id or "",
+                    "server_id": server_id,
+                    "key": key,
+                },
+                headers={"Authorization": f"Bearer {self._tui_token}"},
+                timeout=10.0,
+            )
+        except httpx.HTTPError as exc:
+            _logger.warn("managed_credential_set_failed", server_id=server_id, error=str(exc))
+            return False
+        return resp.status_code < 400
+
+
 def wire_managed_oauth(
     loopback_url: str,
     agent_name: str,
     tui_token: str,
     server_lookup: Callable[[str], Any | None],
 ) -> ManagedUserTokenResolver:
-    """Inject the managed token resolver + state store onto the slice-1 seams."""
+    """Inject the managed token resolver + state store + credential writer onto slice seams."""
     resolver = ManagedUserTokenResolver(loopback_url, agent_name, tui_token)
     set_user_token_resolver(resolver)
     _authz.set_oauth_state_store(
         ManagedStateStore(loopback_url, agent_name, tui_token, server_lookup)
     )
+    set_credential_writer(ManagedCredentialWriter(loopback_url, agent_name, tui_token))
     return resolver
