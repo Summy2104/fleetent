@@ -1,4 +1,4 @@
-> TDD 硬门禁：每个实现 task 先写测试见红 → 实现见绿。最窄命令：后端 `uv run pytest <file>::<test> -x -q`，前端 `yarn --cwd frontend vitest run <file>`。**测试任务在对应实现任务之前**。合并由主会话串行做。
+> TDD 硬门禁：每个实现 task 先写测试见红 → 实现见绿。最窄命令：后端 `uv run pytest <file>::<test> -x -q`，前端 `pnpm --dir frontend vitest run <file>`。**测试任务在对应实现任务之前**。合并由主会话串行做。
 
 ## 1. Store 层（identity.py，TDD）
 
