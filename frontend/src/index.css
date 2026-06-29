@@ -1,11 +1,5 @@
 @import 'tailwindcss';
 
-/* Tailwind v4 auto-detects sources from the CSS entry upward, but this project
-   keeps the CSS under src/ while components live alongside it — declare the
-   scan roots explicitly so the oxide scanner picks up every component file. */
-@source './';
-@source '../index.html';
-
 /* Dark control-plane theme: deep navy ground + mint/emerald accent.
    All tokens are HSL triplets (no hsl() wrapper) so alpha modifiers like
    bg-success/15 work. The variable names are the contract for runtime theme
