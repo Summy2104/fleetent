@@ -6,7 +6,7 @@
 
 企业文档知识的导入、索引与检索，让 agent 能够基于企业内部文档回答问题。
 
-**当前负责**：手动 text / markdown 内容导入，plain text / Markdown / lightweight HTML / PDF / DOCX / PPTX / XLSX 解析，local directory、Google Drive folder 与 Confluence Cloud 手动同步、Google Sheets / Google Slides export 后接入 parser registry、connector list/check/status/sync 操作入口、sync planner、deterministic chunking、向量索引构建、SQLite FTS5/BM25 关键词索引、vector / keyword / hybrid 检索模式、entity extraction schema + graph evidence、独立于 search 的 `graph_search` depth 0/1 graph evidence 检索、规则型 `plan_knowledge_search` / `execute_knowledge_search_plan` 检索策略 API、供 reflection 生成 `run_kb_reflection_report` 只读报告的 public signals、按 tenant + knowledge base 隔离召回相关文档片段，向 vector_store reindex 暴露当前可索引 chunks，以及手动运行的 deterministic retrieval evaluation / combined memory+KB embedding evaluation。
+**当前负责**：手动 text / markdown 内容导入，plain text / Markdown / lightweight HTML / PDF / DOCX / PPTX / XLSX 解析，local directory、Google Drive folder 与 Confluence Cloud 手动同步、Google Sheets / Google Slides export 后接入 parser registry、connector list/check/status/sync 操作入口、sync planner、deterministic chunking、手动同身份文档 re-ingest overwrite（`tenant_id + kb_id + source + filename` 只保留最新一份）、向量索引构建、SQLite FTS5/BM25 关键词索引、vector / keyword / hybrid 检索模式、entity extraction schema + graph evidence、独立于 search 的 `graph_search` depth 0/1 graph evidence 检索、规则型 `plan_knowledge_search` / `execute_knowledge_search_plan` 检索策略 API、供 reflection 生成 `run_kb_reflection_report` 只读报告的 public signals、按 tenant + knowledge base 隔离召回相关文档片段，向 vector_store reindex 暴露当前可索引 chunks，以及手动运行的 deterministic retrieval evaluation / combined memory+KB embedding evaluation。
 
 **后续负责**：第三方数据源接入与文档获取、更丰富的文档解析、实体与关系提取、图谱存储。
 
@@ -223,7 +223,7 @@ async def ingest_parsed(
     source: str = "manual",
     source_url: str | None = None,
 ) -> KnowledgeDocument:
-    """导入 parser 输出的 sections，并在 chunk metadata 中保留 section title/path/level。"""
+    """导入 parser 输出的 sections；同身份文档再次导入时覆盖旧版本。"""
 
 
 async def search(
@@ -237,7 +237,7 @@ async def search(
 
 
 async def delete(document_id: str) -> None:
-    """删除文档及其所有 chunk 和对应向量。"""
+    """硬删除文档及其 chunk、向量和该文档产生的 graph evidence。"""
 
 
 def iter_indexable_knowledge_chunks(tenant_id: str, kb_id: str) -> Iterator[IndexableItem]:
@@ -524,7 +524,12 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 **场景 4：文档删除**
 - Given：已导入并可检索的文档
 - When：调用 delete(document_id)
-- Then：该文档的所有 chunk 不再出现在检索结果中，对应 vector entries 被删除
+- Then：该文档的所有 chunk 不再出现在检索结果中，对应 vector entries 被删除，且该文档产生的 entity mention / relation evidence 不再出现在 `graph_search` 结果中
+
+**场景 5：同身份文档重新导入**
+- Given：同一 `tenant_id + kb_id + source + filename` 的文档已存在
+- When：调用 `ingest_text()` 或 `ingest_parsed()` 再次导入
+- Then：知识库中只保留最新版本的一份 document / chunk / graph evidence，旧版本内容不再被 `search()` 或 `graph_search()` 返回
 
 ## 测试边界
 
@@ -540,7 +545,8 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 - keyword search 可命中产品编号、错误码等精确词，并保持 tenant/kb 隔离
 - hybrid search 合并 vector 与 keyword candidates，同一 chunk 去重并通过 RRF 提升双命中结果
 - knowledge base 隔离：不同 `tenant_id + kb_id` 的检索结果互不干扰
-- delete 级联：删除文档后对应 chunk 和 vector entries 均被清理
+- delete 级联：删除文档后对应 chunk、vector entries 和该文档的 graph evidence 均被清理；孤儿 entity 会被回收，共享 entity 保留
+- re-ingest overwrite：同身份文档重复导入时只保留最新一份 document / chunk，旧版本 chunks、vectors 和 graph evidence 不再可见
 - long-term-ctx 在 Agent knowledge binding / policy 启用时调用内置 provider；disabled 或无结果时降级
 - local sync planner 为 new / changed / unchanged / missing source 生成确定性动作
 - execute_sync_plan 只在 item 成功后更新 source state，单 item 失败不阻断后续 item
@@ -564,7 +570,7 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 ## 待决问题
 
 - [ ] 分块策略：固定 token 大小（如 512 tokens，overlap 50）vs 语义分块（按段落/标题）？（负责人：待认领）
-- [ ] 文档更新机制：重新导入同名文档时覆盖旧 chunk 和图数据，还是版本化保留？（负责人：待认领）
+- [x] 文档更新机制：manual ingest 对同一 `tenant_id + kb_id + source + filename` 采用 overwrite；旧 chunk、向量和图数据被替换，不做版本化保留。
 - [ ] 默认作用域粒度：per-tenant 还是 per-agent？（负责人：待认领）
 - [ ] 实体类型预定义：实体类型（person / org / concept 等）由 LLM 自由生成，还是预定义枚举？自由生成灵活但类型不一致，预定义可控但覆盖不全。（负责人：待认领）
 - [x] graph_search 与 search 的调用决策：已提供独立规则型 planner API；默认不改变 `search()`，由调用方显式使用 `plan_knowledge_search()` / `execute_knowledge_search_plan()`。
