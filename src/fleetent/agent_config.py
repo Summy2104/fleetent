@@ -824,6 +824,7 @@ def default_models() -> AgentModels:
         routes={
             "default": [ModelRouteEntry(target="default")],
             "memory_extraction": [ModelRouteEntry(target="default")],
+            "kb_extraction": [ModelRouteEntry(target="default")],
             "vision": [ModelRouteEntry(target="vision")],
             "embedding": [ModelRouteEntry(target="embedding")],
         },

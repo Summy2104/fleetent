@@ -48,7 +48,14 @@ class KnowledgeReadable(Protocol):
 class KnowledgeWritable(Protocol):
     """Write-only mutations for knowledge-base stores."""
 
-    def ensure_knowledge_base(self, tenant_id: str, kb_id: str, description: str = "") -> None: ...
+    def ensure_knowledge_base(
+        self,
+        tenant_id: str,
+        kb_id: str,
+        description: str = "",
+        *,
+        extraction_enabled: bool = False,
+    ) -> None: ...
 
     def update_knowledge_base_description(
         self, tenant_id: str, kb_id: str, description: str

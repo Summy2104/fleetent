@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 from dataclasses import dataclass, field
@@ -45,6 +46,13 @@ _ENTITY_LABELS = {
     "concept": "concept",
     "term": "term",
 }
+_MODEL_POLICY_SYSTEM_PROMPT = """
+Extract knowledge-graph entities and relations from one document chunk.
+Return strict JSON with shape {"entities":[...],"relations":[...]}.
+Each entity item must include "entity_type" and "name".
+Each relation item must include "relation_type", "source", "target", and "evidence_text".
+Use only supported entity types and relation types.
+""".strip()
 
 
 @dataclass(frozen=True)
@@ -189,7 +197,7 @@ async def run_entity_extraction(
 ) -> KnowledgeExtractionRun:
     """Run explicit entity extraction for one document or a whole knowledge base."""
 
-    if extractor != "deterministic":
+    if extractor not in {"deterministic", "model_policy"}:
         raise ValueError(f"unsupported entity extractor: {extractor}")
 
     from fleetent.knowledge_base import runtime
@@ -233,10 +241,11 @@ async def run_entity_extraction(
             document_relations: list[ExtractedRelation] = []
             for chunk in chunks:
                 chunks_scanned += 1
-                result = deterministic_extract(
+                result = await _extract_chunk(
                     chunk.content,
                     document_id=current_document_id,
                     chunk_id=chunk.id,
+                    extractor=extractor,
                 )
                 document_entities.extend(result.entities)
                 document_relations.extend(result.relations)
@@ -271,6 +280,53 @@ async def run_entity_extraction(
         failed_count=failed_count,
         error_summary="; ".join(errors) if errors else None,
     )
+
+
+async def _extract_chunk(
+    text: str,
+    *,
+    document_id: str,
+    chunk_id: str,
+    extractor: str,
+) -> ExtractionResult:
+    if extractor == "deterministic":
+        return deterministic_extract(text, document_id=document_id, chunk_id=chunk_id)
+    return await _extract_chunk_with_model_policy(text, document_id=document_id, chunk_id=chunk_id)
+
+
+def _build_model_policy_client() -> object:
+    from openai import AsyncOpenAI
+
+    from fleetent import agent_config
+    from fleetent.model import ModelConfigError, ModelPolicySnapshot
+
+    policy = ModelPolicySnapshot.from_agent(agent_config.active_agent_or_default())
+    cfg = policy.resolve("kb_extraction")[0]
+    if cfg.protocol != "openai_chat" or not cfg.base_url or not cfg.model:
+        raise ModelConfigError("kb_extraction route must target an openai_chat model")
+    client = AsyncOpenAI(base_url=cfg.base_url, api_key=policy.require_api_key(cfg) or "fleetent")
+    client._fleetent_model = cfg.model  # type: ignore[attr-defined]
+    return client
+
+
+async def _extract_chunk_with_model_policy(
+    text: str,
+    *,
+    document_id: str,
+    chunk_id: str,
+) -> ExtractionResult:
+    client = _build_model_policy_client()
+    create_completion = client.chat.completions.create
+    response = await create_completion(
+        model=getattr(client, "_fleetent_model", "default"),
+        messages=[
+            {"role": "system", "content": _MODEL_POLICY_SYSTEM_PROMPT},
+            {"role": "user", "content": text},
+        ],
+        temperature=0,
+    )
+    content = response.choices[0].message.content or ""
+    return _parse_model_policy_result(content, document_id=document_id, chunk_id=chunk_id)
 
 
 def real_llm_extraction_smoke() -> ExtractionSmokeResult:
@@ -317,3 +373,55 @@ def _split_conflict(value: str) -> tuple[str, str]:
 
 def _sanitize_error(exc: Exception) -> str:
     return type(exc).__name__
+
+
+def _parse_model_policy_result(
+    content: str, *, document_id: str, chunk_id: str
+) -> ExtractionResult:
+    text = content.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.DOTALL).strip()
+    payload = json.loads(text)
+    if not isinstance(payload, dict):
+        raise ValueError("kb extraction response must be a JSON object")
+    raw_entities = payload.get("entities")
+    raw_relations = payload.get("relations")
+    if not isinstance(raw_entities, list) or not isinstance(raw_relations, list):
+        raise ValueError("kb extraction response missing entities/relations lists")
+
+    entities: list[ExtractedEntity] = []
+    entity_by_name: dict[str, ExtractedEntity] = {}
+    for entry in raw_entities:
+        if not isinstance(entry, dict):
+            raise ValueError("kb extraction entity must be an object")
+        entity = ExtractedEntity(
+            entity_type=str(entry["entity_type"]),
+            name=str(entry["name"]),
+            confidence=float(entry.get("confidence", 1.0)),
+            metadata={"document_id": document_id, "chunk_id": chunk_id},
+        )
+        entities.append(entity)
+        entity_by_name[entity.normalized_name] = entity
+
+    relations: list[ExtractedRelation] = []
+    for entry in raw_relations:
+        if not isinstance(entry, dict):
+            raise ValueError("kb extraction relation must be an object")
+        source_name = normalize_entity_name(str(entry["source"]))
+        target_name = normalize_entity_name(str(entry["target"]))
+        source = entity_by_name.get(source_name)
+        target = entity_by_name.get(target_name)
+        if source is None or target is None:
+            raise ValueError("kb extraction relation references unknown entity")
+        relations.append(
+            ExtractedRelation(
+                relation_type=str(entry["relation_type"]),
+                source=source,
+                target=target,
+                evidence_text=str(entry["evidence_text"]),
+                document_id=document_id,
+                chunk_id=chunk_id,
+                confidence=float(entry.get("confidence", 1.0)),
+            )
+        )
+    return ExtractionResult(entities=entities, relations=relations)

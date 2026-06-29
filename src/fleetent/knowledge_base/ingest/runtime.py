@@ -4,7 +4,7 @@ import uuid
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Protocol
 
-from fleetent import vector_store
+from fleetent import kb_ingest_jobs, vector_store
 from fleetent.config import KnowledgeBaseSettings, Settings
 from fleetent.db import SQLiteDatabase, create_database
 from fleetent.knowledge_base.core import KnowledgeChunk, KnowledgeDocument, KnowledgeStore
@@ -198,6 +198,7 @@ async def _ingest_chunks(
     namespace = vector_store.knowledge_namespace(document.tenant_id, document.kb_id)
     for chunk in resolved_chunks:
         await _upsert_chunk(namespace, chunk)
+    _enqueue_extraction_job_if_enabled(store, document)
     return document
 
 
@@ -294,6 +295,17 @@ def _database() -> SQLiteDatabase:
 
 def _database_or_default(database: SQLiteDatabase | None) -> SQLiteDatabase:
     return database if database is not None else _database()
+
+
+def _enqueue_extraction_job_if_enabled(store: KnowledgeStore, document: KnowledgeDocument) -> None:
+    if not store.is_extraction_enabled(document.tenant_id, document.kb_id):
+        return
+    kb_ingest_jobs.enqueue_job(
+        job_type="extraction",
+        tenant_id=document.tenant_id,
+        kb_id=document.kb_id,
+        connector_ref={"document_id": document.id},
+    )
 
 
 async def _upsert_chunk(namespace: str, chunk: KnowledgeChunk) -> None:

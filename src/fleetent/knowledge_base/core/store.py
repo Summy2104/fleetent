@@ -18,19 +18,27 @@ class KnowledgeStore:
     def __init__(self, database: SQLiteDatabase) -> None:
         self._database = database
 
-    def ensure_knowledge_base(self, tenant_id: str, kb_id: str, description: str = "") -> None:
+    def ensure_knowledge_base(
+        self,
+        tenant_id: str,
+        kb_id: str,
+        description: str = "",
+        *,
+        extraction_enabled: bool = False,
+    ) -> None:
         self._database.execute(
             """
             INSERT OR IGNORE INTO knowledge_bases (
-                tenant_id, kb_id, description, created_at, archived_at
+                tenant_id, kb_id, description, created_at, archived_at, extraction_enabled
             )
-            VALUES (:tenant_id, :kb_id, :description, :created_at, NULL)
+            VALUES (:tenant_id, :kb_id, :description, :created_at, NULL, :extraction_enabled)
             """,
             {
                 "tenant_id": tenant_id,
                 "kb_id": kb_id,
                 "description": description,
                 "created_at": _format_datetime(_now()),
+                "extraction_enabled": int(extraction_enabled),
             },
         )
 
@@ -78,6 +86,21 @@ class KnowledgeStore:
         ).fetchone()
         return row is not None
 
+    def is_extraction_enabled(self, tenant_id: str, kb_id: str) -> bool:
+        row = self._database.execute(
+            """
+            SELECT extraction_enabled
+            FROM knowledge_bases
+            WHERE tenant_id = :tenant_id
+              AND kb_id = :kb_id
+              AND archived_at IS NULL
+            """,
+            {"tenant_id": tenant_id, "kb_id": kb_id},
+        ).fetchone()
+        if row is None:
+            return False
+        return bool(int(row["extraction_enabled"]))
+
     def list_knowledge_bases(self, tenant_id: str) -> list[Row]:
         return self._database.execute(
             """
@@ -87,6 +110,7 @@ class KnowledgeStore:
                 kb.description,
                 kb.created_at,
                 kb.archived_at,
+                kb.extraction_enabled,
                 COUNT(DISTINCT document.id) AS doc_count,
                 COUNT(chunk.id) AS chunk_count,
                 MAX(document.created_at) AS last_import
@@ -98,7 +122,13 @@ class KnowledgeStore:
             LEFT JOIN knowledge_chunks AS chunk
               ON chunk.document_id = document.id
             WHERE kb.tenant_id = :tenant_id
-            GROUP BY kb.tenant_id, kb.kb_id, kb.description, kb.created_at, kb.archived_at
+            GROUP BY
+                kb.tenant_id,
+                kb.kb_id,
+                kb.description,
+                kb.created_at,
+                kb.archived_at,
+                kb.extraction_enabled
             ORDER BY kb.kb_id ASC
             """,
             {"tenant_id": tenant_id},

@@ -2,6 +2,7 @@
 
 import pytest
 
+from fleetent.agent_config import default_models
 from fleetent.knowledge_base.extraction import (
     ExtractedEntity,
     ExtractedRelation,
@@ -10,6 +11,7 @@ from fleetent.knowledge_base.extraction import (
     validate_entity_type,
     validate_relation_type,
 )
+from fleetent.model import ModelPolicySnapshot
 
 
 def _extract(text: str):
@@ -116,3 +118,13 @@ def test_extracted_relation_rejects_unsupported_type():
             chunk_id="c",
             document_id="d",
         )
+
+
+def test_default_model_policy_has_local_kb_extraction_route():
+    policy = ModelPolicySnapshot.from_models(agent_id="agent-a", models=default_models())
+
+    resolved = policy.resolve("kb_extraction")[0]
+
+    assert resolved.protocol == "openai_chat"
+    assert resolved.base_url == "http://localhost:11434/v1/"
+    assert resolved.model == "default"
