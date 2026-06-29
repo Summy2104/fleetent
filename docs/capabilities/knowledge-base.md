@@ -12,6 +12,14 @@
 
 **不负责**：注入 system prompt 的协调与 token 预算（→ long_term_ctx）、用户个人记忆（→ memory）。
 
+## Worker 运行语义
+
+- `fleetent kb-worker` 是 `kb_ingest_jobs` 队列的唯一消费者；admin 导入、目录同步和 connector sync 只负责入队并轮询结果，不会在控制面进程内同步执行 ingest。
+- 部署时必须把 `kb-worker` 作为独立常驻服务运行；Docker Compose 推荐路径下它与 `platform`、`node` 并列启动。
+- admin 导入或同步在轮询超时后：
+  - 返回 `in_progress`：最近仍有 job claim 推进，表示 worker 存活、队列在处理。
+  - 返回 `degraded`：当前无可观察到的活跃 worker，job 不会自行推进，operator 需要恢复 `kb-worker`。
+
 **调用关系**：
 - 依赖：vector_store（向量索引）、Platform Knowledge config / DB snapshot；agent 可用 KB 范围由 `agent_kbs`（管理库唯一真相源）materialize 进 `agent.yaml`，运行时读配置不查表
 - 被依赖：long_term_ctx（检索注入内容）、reflection（只读，观察召回质量）

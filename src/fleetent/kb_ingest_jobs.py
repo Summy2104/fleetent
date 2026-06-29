@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fleetent.config import Settings
@@ -41,6 +41,27 @@ def get_job(job_id: str) -> dict[str, Any] | None:
         .fetchone()
     )
     return _decode(row)
+
+
+def has_active_worker(*, stale_after_seconds: float) -> bool:
+    """Return whether unresolved jobs show recent claim activity."""
+    row = (
+        _database()
+        .execute(
+            """
+            SELECT MAX(claimed_at) AS latest_claimed_at
+            FROM kb_ingest_jobs
+            WHERE status IN ('pending', 'claimed')
+            """,
+        )
+        .fetchone()
+    )
+    latest_claimed_at = row["latest_claimed_at"] if row is not None else None
+    if latest_claimed_at is None:
+        return False
+    latest_claim = datetime.fromisoformat(str(latest_claimed_at))
+    cutoff = datetime.now(UTC) - timedelta(seconds=stale_after_seconds)
+    return latest_claim >= cutoff
 
 
 def get_job_payload(job: dict[str, Any]) -> dict[str, Any]:

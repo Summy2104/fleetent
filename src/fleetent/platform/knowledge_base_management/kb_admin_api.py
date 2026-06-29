@@ -83,6 +83,7 @@ _DEFAULT_TENANT = "default"
 _VALID_MODES = {"vector", "keyword", "hybrid"}
 _KB_INGEST_POLL_INTERVAL_SECONDS = 0.05
 _KB_INGEST_WAIT_TIMEOUT_SECONDS = 30.0
+_KB_INGEST_WORKER_STALE_AFTER_SECONDS = 90.0
 
 
 # --- injectable engine seams (knowledge-base / observability follow-ups) -------
@@ -496,7 +497,11 @@ def _wait_for_kb_ingest_job(job_id: str) -> dict[str, Any]:
         if status == "failed":
             return {"job_id": job_id, "status": status, "error": str(job.get("last_error") or "")}
         if time.monotonic() >= deadline:
-            return {"job_id": job_id, "status": status}
+            if kb_ingest_jobs.has_active_worker(
+                stale_after_seconds=_KB_INGEST_WORKER_STALE_AFTER_SECONDS
+            ):
+                return {"job_id": job_id, "status": "in_progress"}
+            return {"job_id": job_id, "status": "degraded"}
         time.sleep(_KB_INGEST_POLL_INTERVAL_SECONDS)
 
 
