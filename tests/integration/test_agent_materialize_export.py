@@ -63,8 +63,8 @@ def test_agent_file_from_store_exports_authored_runtime_config(db):
         "docs",
         transport="http",
         url="https://docs.acme.internal/mcp",
-        auth_type="bearer",
-        api_key_env="FLEETENT_AGENT_SUPPORT_DOCS",
+        auth_type="api_key",
+        auth_config={"key_env": "FLEETENT_AGENT_SUPPORT_DOCS"},
     )
     agent_store.bind_mcp_server(agent.id, "docs")
     agent_store.assign_user("u_alice", agent.id)
@@ -120,6 +120,48 @@ def test_agent_file_from_store_exports_mcp_headers(db):
     exported = materialize.agent_file_from_store(agent_store.get_by_name("support"))
 
     assert exported.mcp_servers[0].headers == {"X-API-Key": "env:DOCS_KEY"}
+
+
+def test_agent_file_from_store_translates_structured_mcp_auth(db):
+    agent = agent_store.create_agent("support", "p", [], mcp_server_ids=["docs", "oauth"])
+    agent_mcp_server_store.add_mcp_server(
+        None,
+        "docs",
+        transport="http",
+        url="https://docs.acme.internal/mcp",
+        auth_type="api_key",
+        auth_config={"key_env": "FLEETENT_AGENT_SUPPORT_DOCS"},
+    )
+    agent_mcp_server_store.add_mcp_server(
+        None,
+        "oauth",
+        transport="http",
+        url="https://oauth.acme.internal/mcp",
+        auth_type="oauth_client_credentials",
+        auth_config={
+            "token_url": "https://auth.acme.internal/token",
+            "client_id": "support-agent",
+            "client_secret_env": "FLEETENT_AGENT_SUPPORT_OAUTH_SECRET",
+            "scope": "tools:read",
+        },
+    )
+    agent_store.bind_mcp_server(agent.id, "docs")
+    agent_store.bind_mcp_server(agent.id, "oauth")
+
+    exported = materialize.agent_file_from_store(agent_store.get_by_name("support"))
+    servers = {server.id: server for server in exported.mcp_servers}
+
+    assert servers["docs"].auth_type == "api_key"
+    assert servers["docs"].api_key_env == "FLEETENT_AGENT_SUPPORT_DOCS"
+    assert servers["docs"].auth is None
+    assert servers["oauth"].auth_type == "oauth_client_credentials"
+    assert servers["oauth"].api_key_env == ""
+    assert servers["oauth"].auth is not None
+    assert servers["oauth"].auth.grant == "client_credentials"
+    assert servers["oauth"].auth.token_url == "https://auth.acme.internal/token"
+    assert servers["oauth"].auth.client_id == "support-agent"
+    assert servers["oauth"].auth.client_secret_env == "FLEETENT_AGENT_SUPPORT_OAUTH_SECRET"
+    assert servers["oauth"].auth.scope == "tools:read"
 
 
 def test_desired_state_payload_includes_mcp_headers(db):

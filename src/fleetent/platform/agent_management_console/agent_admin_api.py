@@ -17,8 +17,6 @@ from fleetent.platform.agent_lifecycle import credential_slots, secret_store
 from fleetent.platform.agent_lifecycle.materialize import agent_file_from_store
 from fleetent.platform.agent_management_console import agent_admin_store, agent_im_group_store
 from fleetent.platform.connector_management import (
-    agent_service_grant_store,
-    external_service_store,
     mcp_server_store,
 )
 from fleetent.platform.knowledge_base_management import agent_kbs_store
@@ -61,10 +59,6 @@ class AgentImGroupBindingBody(BaseModel):
 class AgentImCapabilitiesBody(BaseModel):
     supports_dm: bool
     supports_groups: bool
-
-
-class AgentOAuthBindingBody(BaseModel):
-    run_as: str = "user"
 
 
 def _session_user(authorization: str | None) -> user_store.User:
@@ -119,21 +113,6 @@ def _build_agent_yaml(agent: agent_store.Agent) -> str:
         mode="json", exclude_defaults=False
     )
 
-    servers: list[dict[str, Any]] = []
-    for sid in agent_store.list_mcp_servers_for_agent(agent.id):
-        row = mcp_server_store.get_mcp_server(agent.id, sid) or mcp_server_store.get_mcp_server(
-            None, sid
-        )
-        if row is None:
-            continue
-        entry: dict[str, Any] = {"id": sid, "transport": row["transport"]}
-        for key in ("url", "auth_type", "api_key_env", "command", "args", "env"):
-            if row.get(key):
-                entry[key] = row[key]
-        servers.append(entry)
-    if servers:
-        data["mcp_servers"] = servers
-
     bindings: dict[str, Any] = dict(data.get("bindings") or {})
     users = agent_store.list_users_for_agent(agent.id)
     if users:
@@ -175,7 +154,7 @@ def clear_default_agent(authorization: str | None = Header(None)) -> dict[str, A
     return {"cleared": True}
 
 
-@router.post("/agents/{name}/bindings/users/{user_id}")
+@router.post("/agents/{name}/users/{user_id}")
 def bind_user(name: str, user_id: str, authorization: str | None = Header(None)) -> dict[str, Any]:
     _require_admin(authorization)
     agent = _require_agent(name)
@@ -183,7 +162,7 @@ def bind_user(name: str, user_id: str, authorization: str | None = Header(None))
     return {"agent": name, "user_id": user_id, "bound": True}
 
 
-@router.delete("/agents/{name}/bindings/users/{user_id}")
+@router.delete("/agents/{name}/users/{user_id}")
 def unbind_user(
     name: str, user_id: str, authorization: str | None = Header(None)
 ) -> dict[str, Any]:
@@ -193,7 +172,7 @@ def unbind_user(
     return {"agent": name, "user_id": user_id, "bound": False}
 
 
-@router.post("/agents/{name}/bindings/groups", status_code=status.HTTP_201_CREATED)
+@router.post("/agents/{name}/groups", status_code=status.HTTP_201_CREATED)
 def bind_im_group(
     name: str,
     body: AgentImGroupBindingBody,
@@ -213,7 +192,7 @@ def bind_im_group(
 
 
 @router.delete(
-    "/agents/{name}/bindings/groups/{platform}/{group_id}", status_code=status.HTTP_204_NO_CONTENT
+    "/agents/{name}/groups/{platform}/{group_id}", status_code=status.HTTP_204_NO_CONTENT
 )
 def unbind_im_group(
     name: str,
@@ -264,18 +243,28 @@ def set_im_capabilities(
     }
 
 
-# --- aggregate bindings read --------------------------------------------------
+# --- per-type bindings read ---------------------------------------------------
 
 
-@router.get("/agents/{name}/bindings")
-def get_bindings(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+@router.get("/agents/{name}/users")
+def list_agent_users(name: str, authorization: str | None = Header(None)) -> list[str]:
     _current_user(authorization)
     agent = _require_agent(name)
-    return {
-        "users": agent_store.list_users_for_agent(agent.id),
-        "mcp_servers": agent_store.list_mcp_servers_for_agent(agent.id),
-        "groups": agent_im_group_store.list_groups_for_agent(agent.id),
-    }
+    return agent_store.list_users_for_agent(agent.id)
+
+
+@router.get("/agents/{name}/groups")
+def list_agent_groups(name: str, authorization: str | None = Header(None)) -> list[dict[str, Any]]:
+    _current_user(authorization)
+    agent = _require_agent(name)
+    return agent_im_group_store.list_groups_for_agent(agent.id)
+
+
+@router.get("/agents/{name}/mcp")
+def list_agent_mcp_servers(name: str, authorization: str | None = Header(None)) -> list[str]:
+    _current_user(authorization)
+    agent = _require_agent(name)
+    return agent_store.list_mcp_servers_for_agent(agent.id)
 
 
 # --- agent-side skill bindings ------------------------------------------------
@@ -317,7 +306,7 @@ def set_agent_skill(
 # --- agent MCP bindings -------------------------------------------------------
 
 
-@router.post("/agents/{name}/bindings/mcp/{server_id}")
+@router.post("/agents/{name}/mcp/{server_id}")
 def bind_mcp(name: str, server_id: str, authorization: str | None = Header(None)) -> dict[str, Any]:
     user = _require_admin(authorization)
     agent = _require_agent(name)
@@ -334,7 +323,7 @@ def bind_mcp(name: str, server_id: str, authorization: str | None = Header(None)
     return {"agent": name, "server_id": server_id, "bound": True}
 
 
-@router.delete("/agents/{name}/bindings/mcp/{server_id}")
+@router.delete("/agents/{name}/mcp/{server_id}")
 def unbind_mcp(
     name: str, server_id: str, authorization: str | None = Header(None)
 ) -> dict[str, Any]:
@@ -371,6 +360,7 @@ def bind_agent_kb(
     user = _require_admin(authorization)
     agent = _require_agent(name)
     agent_kbs_store.bind(agent.tenant_id, kb_id, agent.id, created_by=user.id)
+    agent_admin_store.touch(agent.id)
     audit_log.write_audit(
         user.id, "agent.kb.bind", target_type="agent", target_id=name, detail={"kb_id": kb_id}
     )
@@ -384,6 +374,7 @@ def unbind_agent_kb(
     user = _require_admin(authorization)
     agent = _require_agent(name)
     agent_kbs_store.unbind(agent.tenant_id, kb_id, agent.id)
+    agent_admin_store.touch(agent.id)
     audit_log.write_audit(
         user.id, "agent.kb.unbind", target_type="agent", target_id=name, detail={"kb_id": kb_id}
     )
@@ -501,60 +492,3 @@ def _required_env_items(agent: agent_store.Agent) -> list[dict[str, Any]]:
             }
         )
     return items
-
-
-# --- agent OAuth connector bindings ------------------------------------------
-
-
-@router.get("/agents/{name}/bindings/oauth")
-def list_agent_oauth(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
-    _current_user(authorization)
-    agent = _require_agent(name)
-    service_grants = agent_service_grant_store.list_services_for_agent(agent.id)
-    return {
-        "agent": name,
-        "service_grants": service_grants,
-        "connector_ids": [grant["service_id"] for grant in service_grants],
-    }
-
-
-@router.post("/agents/{name}/bindings/oauth/{connector_id}")
-def bind_oauth(
-    name: str,
-    connector_id: str,
-    body: AgentOAuthBindingBody | None = None,
-    authorization: str | None = Header(None),
-) -> dict[str, Any]:
-    user = _require_admin(authorization)
-    agent = _require_agent(name)
-    run_as = body.run_as if body is not None else "user"
-    if run_as not in {"user", "agent"}:
-        raise HTTPException(status_code=422, detail="invalid run_as")
-    if external_service_store.get_service(connector_id) is None:
-        raise HTTPException(status_code=404, detail=f"connector {connector_id!r} not found")
-    agent_service_grant_store.bind(agent.id, connector_id, run_as=run_as, created_by=user.id)
-    audit_log.write_audit(
-        user.id,
-        "agent.oauth.bind",
-        target_type="agent",
-        target_id=name,
-        detail={"connector_id": connector_id, "run_as": run_as},
-    )
-    return {"agent": name, "connector_id": connector_id, "run_as": run_as, "bound": True}
-
-
-@router.delete("/agents/{name}/bindings/oauth/{connector_id}")
-def unbind_oauth(
-    name: str, connector_id: str, authorization: str | None = Header(None)
-) -> dict[str, Any]:
-    user = _require_admin(authorization)
-    agent = _require_agent(name)
-    agent_service_grant_store.unbind(agent.id, connector_id)
-    audit_log.write_audit(
-        user.id,
-        "agent.oauth.unbind",
-        target_type="agent",
-        target_id=name,
-        detail={"connector_id": connector_id},
-    )
-    return {"agent": name, "connector_id": connector_id, "bound": False}

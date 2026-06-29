@@ -1,6 +1,7 @@
 """Management state for the Agent console: lifecycle status + default binding."""
 
 import datetime
+import sqlite3
 from typing import Any
 
 from fleetent.config import Settings
@@ -97,6 +98,15 @@ def clear_default() -> None:
     )
 
 
+def touch(agent_id: int) -> None:
+    """Advance an agent's management-plane updated_at without changing other state."""
+    try:
+        _upsert(agent_id, {})
+    except sqlite3.OperationalError as exc:
+        if "no such table: agent_admin_state" not in str(exc):
+            raise
+
+
 def is_default(agent_id: int) -> bool:
     return bool(get_state(agent_id).get("is_default", 0))
 
@@ -164,18 +174,6 @@ def references(agent_id: int) -> dict[str, Any]:
             {"aid": agent_id},
         ).fetchall()
     ]
-    service_grants = [
-        str(r["service_id"])
-        for r in db.execute(
-            """
-            SELECT service_id
-            FROM agent_service_grants
-            WHERE agent_id = :aid
-            ORDER BY service_id
-            """,
-            {"aid": agent_id},
-        ).fetchall()
-    ]
     placements = [
         str(r["node_id"])
         for r in db.execute(
@@ -194,7 +192,7 @@ def references(agent_id: int) -> dict[str, Any]:
         "im_groups": im_groups,
         "mcp_servers": mcp_servers,
         "kbs": kbs,
-        "service_grants": service_grants,
+        "service_grants": [],
         "placements": placements,
     }
 
@@ -241,6 +239,8 @@ def _agent_tenant(agent_id: int) -> str | None:
 def _upsert(agent_id: int, fields: dict[str, Any]) -> None:
     merged = {**_DEFAULTS, **{k: v for k, v in fields.items() if k in _FIELDS}}
     assignments = ", ".join(f"{k} = :{k}" for k in fields if k in _FIELDS)
+    if not assignments:
+        assignments = "agent_id = agent_id"
     params = {**merged, "agent_id": agent_id, "updated_at": _now()}
     with _database().transaction() as conn:
         conn.execute(

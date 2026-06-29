@@ -223,6 +223,29 @@ def run_job(job: dict[str, Any]) -> dict[str, Any]:
             "error": result.error,
         }
 
+    if job_type == "extraction":
+        _require_active_kb(tenant_id, kb_id)
+        with _use_kb_runtime(tenant_id):
+            summary = asyncio.run(
+                kb_runtime.run_entity_extraction(
+                    tenant_id,
+                    kb_id,
+                    document_id=str(payload["document_id"]),
+                    extractor="model_policy",
+                )
+            )
+        return {
+            "document_id": summary.document_id,
+            "status": summary.status,
+            "documents_scanned": summary.documents_scanned,
+            "chunks_scanned": summary.chunks_scanned,
+            "entities_upserted": summary.entities_upserted,
+            "mentions_written": summary.mentions_written,
+            "relations_written": summary.relations_written,
+            "failed_count": summary.failed_count,
+            "error_summary": summary.error_summary,
+        }
+
     raise ValueError(f"unknown kb ingest job type: {job_type}")
 
 

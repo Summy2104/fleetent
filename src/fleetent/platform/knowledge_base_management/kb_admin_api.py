@@ -66,6 +66,7 @@ from fleetent.knowledge_base.retrieval import evaluation as retrieval_evaluation
 from fleetent.knowledge_base.retrieval.search import SearchMode
 from fleetent.knowledge_base.retrieval.search import search as search_kb
 from fleetent.platform.agent_lifecycle import secret_store
+from fleetent.platform.agent_management_console import agent_admin_store
 from fleetent.platform.knowledge_base_management import (
     agent_kbs_store,
     kb_connector_store,
@@ -83,6 +84,7 @@ _DEFAULT_TENANT = "default"
 _VALID_MODES = {"vector", "keyword", "hybrid"}
 _KB_INGEST_POLL_INTERVAL_SECONDS = 0.05
 _KB_INGEST_WAIT_TIMEOUT_SECONDS = 30.0
+_KB_INGEST_WORKER_STALE_AFTER_SECONDS = 90.0
 
 
 # --- injectable engine seams (knowledge-base / observability follow-ups) -------
@@ -496,7 +498,11 @@ def _wait_for_kb_ingest_job(job_id: str) -> dict[str, Any]:
         if status == "failed":
             return {"job_id": job_id, "status": status, "error": str(job.get("last_error") or "")}
         if time.monotonic() >= deadline:
-            return {"job_id": job_id, "status": status}
+            if kb_ingest_jobs.has_active_worker(
+                stale_after_seconds=_KB_INGEST_WORKER_STALE_AFTER_SECONDS
+            ):
+                return {"job_id": job_id, "status": "in_progress"}
+            return {"job_id": job_id, "status": "degraded"}
         time.sleep(_KB_INGEST_POLL_INTERVAL_SECONDS)
 
 
@@ -731,6 +737,7 @@ def bind_agent(
     if any(kb["kb_id"] == kb_id and kb.get("archived") for kb in kb_engine_list(body.tenant_id)):
         raise HTTPException(status_code=409, detail="kb is archived")
     agent_kbs_store.bind(body.tenant_id, kb_id, body.agent_id, created_by=user.id)
+    agent_admin_store.touch(body.agent_id)
     audit_log.write_audit(user.id, "kb_bind_agent", "kb", kb_id, detail={"agent_id": body.agent_id})
     return {"kb_id": kb_id, "agent_id": body.agent_id, "bound": True}
 
@@ -744,6 +751,7 @@ def unbind_agent(
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
     agent_kbs_store.unbind(tenant_id, kb_id, agent_id)
+    agent_admin_store.touch(agent_id)
     audit_log.write_audit(user.id, "kb_unbind_agent", "kb", kb_id, detail={"agent_id": agent_id})
     return {"kb_id": kb_id, "agent_id": agent_id, "bound": False}
 
@@ -835,11 +843,8 @@ def _connector_out(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _connector_settings() -> Any:
-    """A settings-shaped object exposing .knowledge_base built from the DB store,
-    so the config-driven ingestion engine can run against DB-managed connectors."""
-    from types import SimpleNamespace
-
-    return SimpleNamespace(knowledge_base=kb_connector_store.as_knowledge_base_settings())
+    """Return store-sourced connector settings for operations.* entrypoints."""
+    return kb_connector_store.as_knowledge_base_settings()
 
 
 @router.get("/connectors")

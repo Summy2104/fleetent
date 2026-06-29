@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from pathlib import Path
 
@@ -532,14 +533,15 @@ def test_downgrade_recreates_kb_entity_unique_key(tmp_path):
     ] in indexed_columns.values()
 
 
-def test_external_services_head_schema_is_global_only(tmp_path):
+def test_tool_oauth_vault_tables_are_absent_in_head_schema(tmp_path):
     db = tmp_path / "test.db"
     apply_migrations(db)
     conn = sqlite3.connect(db)
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(external_services)")}
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     conn.close()
-    assert "agent_id" not in cols
-    assert cols >= {"service_id", "display_name", "protocol", "oauth_config", "enabled"}
+    assert "external_services" not in tables
+    assert "external_credentials" not in tables
+    assert "agent_service_grants" not in tables
 
 
 def test_agent_mcp_servers_table_and_columns(tmp_path):
@@ -557,15 +559,93 @@ def test_agent_mcp_servers_table_and_columns(tmp_path):
         "transport",
         "url",
         "auth_type",
-        "api_key_env",
+        "auth_config",
         "command",
         "args",
         "env",
+        "headers",
         "created_at",
     }
 
 
-def test_external_services_upgrade_preserves_existing_global_rows(tmp_path):
+def test_upgrade_109_folds_api_key_env_into_auth_config_and_preserves_auth_type(tmp_path):
+    db = tmp_path / "test.db"
+    _upgrade_to(db, "108")
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """
+        INSERT INTO mcp_servers (
+            agent_id, server_id, transport, url, auth_type, api_key_env,
+            command, args, env, headers, enabled, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            None,
+            "github",
+            "http",
+            "https://mcp.internal/github",
+            "api_key",
+            "FLEETENT_GITHUB_MCP_KEY",
+            "",
+            None,
+            None,
+            '{"X-Trace":"1"}',
+            1,
+            "2026-06-29T00:00:00+00:00",
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO mcp_servers (
+            agent_id, server_id, transport, url, auth_type, api_key_env,
+            command, args, env, headers, enabled, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            None,
+            "public",
+            "http",
+            "https://mcp.internal/public",
+            "none",
+            "",
+            "",
+            None,
+            None,
+            None,
+            1,
+            "2026-06-29T00:00:00+00:00",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    _upgrade_to(db, "head")
+
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(mcp_servers)")}
+    github = conn.execute(
+        "SELECT auth_type, auth_config, headers FROM mcp_servers WHERE server_id = ?",
+        ("github",),
+    ).fetchone()
+    public = conn.execute(
+        "SELECT auth_type, auth_config, headers FROM mcp_servers WHERE server_id = ?",
+        ("public",),
+    ).fetchone()
+    conn.close()
+
+    assert "auth_config" in cols
+    assert "api_key_env" not in cols
+    assert {"auth_type", "headers"} <= cols
+    assert github["auth_type"] == "api_key"
+    assert json.loads(github["auth_config"]) == {"key_env": "FLEETENT_GITHUB_MCP_KEY"}
+    assert json.loads(github["headers"]) == {"X-Trace": "1"}
+    assert public["auth_type"] == "none"
+    assert json.loads(public["auth_config"]) == {}
+    assert public["headers"] is None
+
+
+def test_external_services_upgrade_preserves_existing_global_rows_at_093(tmp_path):
     db = tmp_path / "test.db"
     _upgrade_to(db, "033")
     conn = sqlite3.connect(db)
@@ -587,7 +667,7 @@ def test_external_services_upgrade_preserves_existing_global_rows(tmp_path):
     conn.close()
     assert agent_id is None
 
-    _upgrade_to(db, "head")
+    _upgrade_to(db, "093")
     conn = sqlite3.connect(db)
     row = conn.execute(
         "SELECT service_id, display_name FROM external_services WHERE service_id='github'"
@@ -638,9 +718,9 @@ def test_knowledge_base_store_uses_database_boundary_and_named_parameters():
     assert ":tenant_id" in store_source
 
 
-def test_agent_service_grants_table_and_columns(tmp_path):
+def test_agent_service_grants_table_exists_at_093_only(tmp_path):
     db = tmp_path / "test.db"
-    apply_migrations(db)
+    _upgrade_to(db, "093")
     conn = sqlite3.connect(db)
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_service_grants)")}

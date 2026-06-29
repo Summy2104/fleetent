@@ -15,12 +15,14 @@ def create_knowledge_base(
     tenant_id: str,
     kb_id: str,
     description: str = "",
+    *,
+    extraction_enabled: bool = False,
     database: SQLiteDatabase | None = None,
 ) -> None:
     """Create a tenant-scoped knowledge base if absent."""
 
     KnowledgeStore(_database_or_default(database)).ensure_knowledge_base(
-        tenant_id, kb_id, description
+        tenant_id, kb_id, description, extraction_enabled=extraction_enabled
     )
 
 

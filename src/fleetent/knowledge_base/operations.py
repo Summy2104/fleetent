@@ -9,11 +9,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+from fleetent.config import KnowledgeBaseSettings
 from fleetent.db import SQLiteDatabase
 from fleetent.knowledge_base.config import (
     KnowledgeConfigSnapshot,
     KnowledgeSourceConfig,
-    load_knowledge_config,
 )
 from fleetent.knowledge_base.connectors.confluence import (
     ConfluenceAuthError,
@@ -34,6 +34,7 @@ from fleetent.knowledge_base.connectors.google_drive import (
 from fleetent.structured_logging import _redact_value
 
 ConnectorType = Literal["google_drive", "confluence"]
+ConnectorSettings = KnowledgeConfigSnapshot | KnowledgeBaseSettings | object
 _SECRET_WORD_RE = re.compile(
     r"\b(token|secret|password|api[_-]?key|authorization|credential)[\s:=_-]+([^\s,;]+)",
     re.IGNORECASE,
@@ -102,7 +103,7 @@ class RealConnectorSmokeStatus:
 
 
 def list_configured_connectors(
-    settings: KnowledgeConfigSnapshot | None = None,
+    settings: ConnectorSettings | None = None,
 ) -> list[ConnectorSummary]:
     """List configured knowledge-base connectors without exposing credential payloads."""
     return [_summary_for_definition(item) for item in _connector_definitions(_kb_config(settings))]
@@ -111,7 +112,7 @@ def list_configured_connectors(
 def get_connector_config(
     connector_id: str,
     *,
-    settings: KnowledgeConfigSnapshot | None = None,
+    settings: ConnectorSettings | None = None,
 ) -> ConnectorDefinition:
     """Return one configured connector definition."""
     for definition in _connector_definitions(_kb_config(settings)):
@@ -122,22 +123,20 @@ def get_connector_config(
 
 def _get_connector_definition(
     connector_id: str,
-    settings: KnowledgeConfigSnapshot | None,
+    settings: ConnectorSettings | None,
 ) -> ConnectorDefinition:
-    if settings is None:
-        try:
-            return get_connector_config(connector_id)
-        except TypeError:
-            # Backward compatibility for monkeypatched callables that still expose
-            # a legacy signature without keyword-only settings.
-            return get_connector_config(connector_id, settings=None)
-    return get_connector_config(connector_id, settings=settings)
+    try:
+        return get_connector_config(connector_id, settings=settings)
+    except TypeError:
+        # Backward compatibility for monkeypatched callables that still expose
+        # a legacy signature without keyword-only settings.
+        return get_connector_config(connector_id)
 
 
 async def check_connector(
     connector_id: str,
     *,
-    settings: KnowledgeConfigSnapshot | None = None,
+    settings: ConnectorSettings | None = None,
     google_drive_client: GoogleDriveClient | None = None,
     confluence_client: ConfluenceClient | None = None,
 ) -> ConnectorCheckResult:
@@ -179,7 +178,7 @@ async def check_connector(
 async def run_connector_sync(
     connector_id: str,
     *,
-    settings: KnowledgeConfigSnapshot | None = None,
+    settings: ConnectorSettings | None = None,
     dry_run: bool = False,
     google_drive_client: GoogleDriveClient | None = None,
     confluence_client: ConfluenceClient | None = None,
@@ -210,7 +209,7 @@ async def run_connector_sync(
 def get_connector_status(
     connector_id: str,
     *,
-    settings: KnowledgeConfigSnapshot | None = None,
+    settings: ConnectorSettings | None = None,
     database: SQLiteDatabase | None = None,
 ) -> ConnectorStatus:
     """Read the latest known connector operation status."""
@@ -755,11 +754,62 @@ def _database(database: SQLiteDatabase | None = None) -> SQLiteDatabase:
     return runtime._database()
 
 
-def _kb_config(settings: KnowledgeConfigSnapshot | None = None) -> KnowledgeConfigSnapshot:
-    """Knowledge service config from explicit snapshot or platform.yaml."""
-    if settings is not None:
+def _kb_config(settings: ConnectorSettings | None = None) -> KnowledgeConfigSnapshot:
+    """Normalize explicit connector settings into the snapshot shape operations expect."""
+    if settings is None:
+        raise ValueError("explicit connector settings are required")
+    if isinstance(settings, KnowledgeConfigSnapshot):
         return settings
-    try:
-        return load_knowledge_config()
-    except FileNotFoundError:
-        return KnowledgeConfigSnapshot()
+    if isinstance(settings, KnowledgeBaseSettings):
+        return _snapshot_from_knowledge_settings(settings)
+    knowledge_settings = getattr(settings, "knowledge_base", None)
+    if isinstance(knowledge_settings, KnowledgeBaseSettings):
+        return _snapshot_from_knowledge_settings(knowledge_settings)
+    raise TypeError("connector settings must be a KnowledgeConfigSnapshot or KnowledgeBaseSettings")
+
+
+def _snapshot_from_knowledge_settings(settings: KnowledgeBaseSettings) -> KnowledgeConfigSnapshot:
+    kb_sources: dict[tuple[str, str], list[dict[str, object]]] = {}
+    for connector in settings.google_drive.connectors:
+        key = (connector.tenant_id, connector.kb_id)
+        kb_sources.setdefault(key, []).append(
+            {
+                "id": connector.connector_id,
+                "type": "google_drive",
+                "enabled": connector.enabled,
+                "folder_id": connector.folder_id,
+                "recursive": connector.recursive,
+                "credential_ref": connector.credential_ref,
+                "access_token_env": connector.access_token_env,
+                "refresh_token_env": connector.refresh_token_env,
+                "client_id_env": connector.client_id_env,
+                "client_secret_env": connector.client_secret_env,
+                "token_uri_env": connector.token_uri_env,
+            }
+        )
+    for connector in settings.confluence.connectors:
+        key = (connector.tenant_id, connector.kb_id)
+        kb_sources.setdefault(key, []).append(
+            {
+                "id": connector.connector_id,
+                "type": "confluence",
+                "enabled": connector.enabled,
+                "base_url": connector.base_url,
+                "username": connector.username,
+                "username_env": connector.username_env,
+                "credential_ref": connector.credential_ref,
+                "api_token_env": connector.api_token_env,
+                "scope_type": connector.scope_type,
+                "space_key": connector.space_key,
+                "page_id": connector.page_id,
+                "include_children": connector.include_children,
+            }
+        )
+    return KnowledgeConfigSnapshot.model_validate(
+        {
+            "knowledge_bases": [
+                {"tenant_id": tenant_id, "id": kb_id, "sources": sources}
+                for (tenant_id, kb_id), sources in kb_sources.items()
+            ]
+        }
+    )

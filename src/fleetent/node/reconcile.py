@@ -24,12 +24,16 @@ class NodeReconciler:
         self._config = config
         self._backend = backend
         self._hash_path = config.home_dir / "node" / "applied-config-hashes.json"
+        self._knowledge_epoch_path = (
+            config.home_dir / "node" / "applied-knowledge-resync-epochs.json"
+        )
         self._skill_deployer = NodeSkillDeployer(config)
 
     def reconcile(self, desired_state: DesiredState) -> None:
         desired_by_name = {agent.name: agent for agent in desired_state.agents}
         known_names = set(desired_by_name) | set(self._local_agent_names())
         hashes = self._read_hashes()
+        knowledge_epochs = self._read_knowledge_epochs()
 
         for name in sorted(known_names):
             desired = desired_by_name.get(name)
@@ -39,6 +43,8 @@ class NodeReconciler:
                 if pid is not None:
                     self._backend.stop(name, tenant_id)
                 _erase_env(self._home_dir(name, tenant_id) / ".env")
+                hashes.pop(name, None)
+                knowledge_epochs.pop(name, None)
                 continue
 
             desired_hash = _config_hash(desired.config)
@@ -72,6 +78,7 @@ class NodeReconciler:
                 )
                 self._backend.spawn(name, desired.tenant_id)
                 hashes[name] = desired_hash
+                knowledge_epochs[name] = desired.knowledge_resync_epoch
                 continue
 
             current_hash = hashes.get(name) or self._current_home_hash(name, desired.tenant_id)
@@ -92,6 +99,17 @@ class NodeReconciler:
                 )
                 self._backend.spawn(name, desired.tenant_id)
                 hashes[name] = desired_hash
+                knowledge_epochs[name] = desired.knowledge_resync_epoch
+            elif knowledge_epochs.get(name, "") != desired.knowledge_resync_epoch:
+                self._write_home(
+                    name,
+                    desired.tenant_id,
+                    desired.config,
+                    skill_manifests=desired.skill_manifests,
+                    secrets=desired.secrets,
+                )
+                hashes[name] = desired_hash
+                knowledge_epochs[name] = desired.knowledge_resync_epoch
             else:
                 # Running with unchanged config: still reconcile skills every tick so new
                 # pool versions and post-backflow forced resyncs (resync_epoch) are applied
@@ -100,6 +118,7 @@ class NodeReconciler:
                 self._sync_skills(name, desired.tenant_id, desired.skill_manifests)
 
         self._write_hashes(hashes)
+        self._write_knowledge_epochs(knowledge_epochs)
         self._post_status(desired_state)
 
     def _post_status(self, desired_state: DesiredState) -> None:
@@ -162,7 +181,17 @@ class NodeReconciler:
         except Exception:
             _logger.warn("node_write_home_config_parse_error", agent_name=agent_name)
             env_names = []
-        ensure_env_scaffold(home, referenced_env_names=env_names, secrets=secrets)
+        # Managed signal + per-user OAuth broker address: written into the agent .env (the
+        # env-only contract; the process backend never injects env=). Its presence tells the
+        # agent to source per-user MCP tokens via the node loopback (mcp-per-user-oauth2-managed).
+        from fleetent.node.forwarder_contract import DEFAULT_FORWARDER_PORT
+
+        loopback_env = {"FLEETENT_NODE_LOOPBACK_URL": f"http://127.0.0.1:{DEFAULT_FORWARDER_PORT}"}
+        ensure_env_scaffold(
+            home,
+            referenced_env_names=[*env_names, "FLEETENT_NODE_LOOPBACK_URL"],
+            secrets={**(secrets or {}), **loopback_env},
+        )
         self._sync_skills(agent_name, tenant_id, skill_manifests)
 
     def _sync_skills(
@@ -236,6 +265,17 @@ class NodeReconciler:
         self._hash_path.parent.mkdir(parents=True, exist_ok=True)
         self._hash_path.write_text(json.dumps(hashes, sort_keys=True), encoding="utf-8")
 
+    def _read_knowledge_epochs(self) -> dict[str, str]:
+        if not self._knowledge_epoch_path.exists():
+            return {}
+        return dict(json.loads(self._knowledge_epoch_path.read_text(encoding="utf-8")))
+
+    def _write_knowledge_epochs(self, knowledge_epochs: dict[str, str]) -> None:
+        self._knowledge_epoch_path.parent.mkdir(parents=True, exist_ok=True)
+        self._knowledge_epoch_path.write_text(
+            json.dumps(knowledge_epochs, sort_keys=True), encoding="utf-8"
+        )
+
     def _observe_skills(
         self,
         agent_name: str,
@@ -257,7 +297,23 @@ def _erase_env(env_path: Path) -> None:
 
 
 def _config_hash(config: dict[str, Any]) -> str:
-    return sha256(yaml.safe_dump(config, sort_keys=True).encode("utf-8")).hexdigest()
+    return sha256(
+        yaml.safe_dump(_runtime_config(config), sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def _runtime_config(config: dict[str, Any]) -> dict[str, Any]:
+    runtime = dict(config)
+    knowledge = runtime.get("knowledge")
+    if isinstance(knowledge, dict):
+        normalized = dict(knowledge)
+        normalized.pop("bindings", None)
+        normalized.pop("enabled", None)
+        if normalized:
+            runtime["knowledge"] = normalized
+        else:
+            runtime.pop("knowledge", None)
+    return runtime
 
 
 def _status_payload(

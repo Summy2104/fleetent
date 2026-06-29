@@ -2,75 +2,32 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useAdminApi } from '@/lib/api-client';
 
-export type ConnectorRecord = {
-  id: string;
-  display_name: string;
-  protocol: 'oauth2' | 'apikey';
-  enabled: boolean;
-  oauth_config?: Record<string, unknown>;
+export type McpAuthType = 'none' | 'api_key' | 'oauth_client_credentials';
+
+export type McpApiKeyAuthConfig = {
+  key_env: string;
 };
 
-export type ConnectorEditInput = Partial<Pick<ConnectorRecord, 'display_name' | 'enabled' | 'protocol'>> & {
-  oauth_config?: Record<string, unknown>;
+export type McpOAuthClientCredentialsAuthConfig = {
+  token_url: string;
+  client_id: string;
+  client_secret_env: string;
+  scope: string;
 };
 
-export type ConnectorLifecycle = {
-  connector_id: string;
-  refresh_ok: number;
-  refresh_failed: number;
-  reauths: number;
-  active_grants?: number;
-  last_refresh_at?: string | null;
-  last_refresh_success?: boolean;
-};
+export type McpAuthConfig = Record<string, never> | McpApiKeyAuthConfig | McpOAuthClientCredentialsAuthConfig;
 
-export type ConnectorGrant = {
-  user_id: string;
-  connector_id: string;
-  status: string;
-  scopes?: string[];
-  agent_id?: number | null;
-};
-
-export type ConnectorGrantsResponse = {
-  grants: ConnectorGrant[];
-  consent_hint: string;
-};
-
-export type ConnectorBindingsResponse = {
-  service_id: string;
-  agent_ids: number[];
-};
-
-export type OffboardingResponse = {
-  user_id: string;
-  revoked: string[];
-  failed: string[];
-};
-
-export type ConnectorAuthorizeResponse = {
-  authorize_url: string;
-};
-
-export type ConnectorCredentialInput = {
-  api_key: string;
-};
-
-export type ConnectorTestResponse = {
-  success: boolean;
-  connector_id: string;
-  enabled?: boolean;
-  token_valid?: boolean;
-  active_grants?: number;
-  last_refresh?: string | null;
-  display_name?: string;
-  error?: string;
-};
+export const MCP_AUTH_FORM_FIELDS = {
+  api_key: ['key_env'],
+  oauth_client_credentials: ['token_url', 'client_id', 'client_secret_env', 'scope'],
+} as const;
 
 export type McpServerRecord = {
   id: string;
   transport: string;
   url?: string;
+  auth_type: McpAuthType;
+  auth_config: McpAuthConfig;
   command?: string;
   args?: string[];
   env?: Record<string, string>;
@@ -84,6 +41,8 @@ export type McpServerRecord = {
 export type McpServerInput = {
   id: string;
   transport: string;
+  auth_type: McpAuthType;
+  auth_config: McpAuthConfig;
   url?: string;
   command?: string;
   args?: string[];
@@ -120,157 +79,7 @@ export type McpTestResponse = {
   error?: string;
 };
 
-const CONNECTORS_QUERY_KEY = ['connectors'];
-const CONNECTOR_GRANTS_QUERY_KEY = ['connectors', 'grants'];
 const MCP_SERVERS_QUERY_KEY = ['mcp', 'servers'];
-
-async function invalidateConnectorLists(queryClient: ReturnType<typeof useQueryClient>): Promise<void> {
-  await Promise.all([
-    queryClient.invalidateQueries({ queryKey: CONNECTORS_QUERY_KEY }),
-    queryClient.invalidateQueries({ queryKey: CONNECTOR_GRANTS_QUERY_KEY }),
-  ]);
-}
-
-export function useConnectorsQuery() {
-  const api = useAdminApi();
-
-  return useQuery({
-    queryKey: CONNECTORS_QUERY_KEY,
-    queryFn: () => api.get<ConnectorRecord[]>('/admin/connectors'),
-  });
-}
-
-export function useCreateConnectorMutation() {
-  const api = useAdminApi();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (input: ConnectorRecord) => api.post<ConnectorRecord>('/admin/connectors', input),
-    onSuccess: async () => {
-      await invalidateConnectorLists(queryClient);
-    },
-  });
-}
-
-export function useUpdateConnectorMutation(connectorId: string) {
-  const api = useAdminApi();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (input: ConnectorEditInput) =>
-      api.put<ConnectorRecord>(`/admin/connectors/${connectorId}`, input),
-    onSuccess: async () => {
-      await invalidateConnectorLists(queryClient);
-      await queryClient.invalidateQueries({ queryKey: ['connectors', connectorId, 'lifecycle'] });
-      await queryClient.invalidateQueries({ queryKey: ['connectors', connectorId, 'bindings'] });
-    },
-  });
-}
-
-export function useDeleteConnectorMutation(connectorId: string) {
-  const api = useAdminApi();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: () => api.delete<{ success: boolean; connector_id: string }>(`/admin/connectors/${connectorId}`),
-    onSuccess: async () => {
-      await invalidateConnectorLists(queryClient);
-      queryClient.removeQueries({ queryKey: ['connectors', connectorId, 'lifecycle'] });
-      queryClient.removeQueries({ queryKey: ['connectors', connectorId, 'bindings'] });
-    },
-  });
-}
-
-export function useConnectorLifecycleQuery(connectorId: string | null) {
-  const api = useAdminApi();
-
-  return useQuery({
-    enabled: Boolean(connectorId),
-    queryKey: ['connectors', connectorId, 'lifecycle'],
-    queryFn: () => api.get<ConnectorLifecycle>(`/admin/connectors/${connectorId}/lifecycle`),
-  });
-}
-
-export function useConnectorAgentBindingsQuery(connectorId: string | null) {
-  const api = useAdminApi();
-
-  return useQuery({
-    enabled: Boolean(connectorId),
-    queryKey: ['connectors', connectorId, 'bindings'],
-    queryFn: () => api.get<ConnectorBindingsResponse>(`/admin/connectors/${connectorId}/bindings/agents`),
-  });
-}
-
-export function useConnectorGrantsQuery() {
-  const api = useAdminApi();
-
-  return useQuery({
-    queryKey: CONNECTOR_GRANTS_QUERY_KEY,
-    queryFn: () => api.get<ConnectorGrantsResponse>('/admin/connectors/grants'),
-  });
-}
-
-export function useOffboardingQuery(userId: string | null) {
-  const api = useAdminApi();
-
-  return useQuery({
-    enabled: Boolean(userId),
-    queryKey: ['connectors', 'offboarding', userId],
-    queryFn: () => api.get<OffboardingResponse>(`/admin/connectors/offboarding/${userId}`),
-  });
-}
-
-export function useConnectorAuthorizeQuery(connectorId: string | null) {
-  const api = useAdminApi();
-
-  return useQuery({
-    enabled: Boolean(connectorId),
-    queryKey: ['connectors', connectorId, 'authorize'],
-    queryFn: () => api.get<ConnectorAuthorizeResponse>(`/admin/connectors/authorize/${connectorId}`),
-  });
-}
-
-export function useConnectorCredentialsMutation(connectorId: string) {
-  const api = useAdminApi();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (input: ConnectorCredentialInput) =>
-      api.post<{ submitted: boolean; service_id: string }>(`/admin/connectors/${connectorId}/credentials`, input),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: CONNECTOR_GRANTS_QUERY_KEY });
-    },
-  });
-}
-
-export function useConnectorTestMutation(connectorId: string) {
-  const api = useAdminApi();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: () => api.post<ConnectorTestResponse>(`/admin/connectors/${connectorId}/test`),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['connectors', connectorId, 'lifecycle'] });
-    },
-  });
-}
-
-export function useRevokeConnectorGrantMutation(userId: string, connectorId: string) {
-  const api = useAdminApi();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: () =>
-      api.post<{ revoked: boolean; user_id: string; connector_id: string }>(
-        `/admin/connectors/grants/${userId}/${connectorId}/revoke`,
-        undefined,
-        { 'X-Confirm': 'true' }
-      ),
-    onSuccess: async () => {
-      await invalidateConnectorLists(queryClient);
-    },
-  });
-}
 
 export function useMcpServersQuery() {
   const api = useAdminApi();
@@ -286,7 +95,8 @@ export function useCreateMcpServerMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (input: McpServerInput) => api.post<{ success: boolean; server_id: string }>('/admin/mcp/servers', input),
+    mutationFn: (input: McpServerInput) =>
+      api.post<{ success: boolean; server_id: string }>('/admin/mcp/servers', input),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: MCP_SERVERS_QUERY_KEY });
     },
@@ -353,12 +163,8 @@ export function useMcpReconnectMutation(serverId: string) {
 
 export function useMcpServerTestMutation(serverId: string) {
   const api = useAdminApi();
-  const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: () => api.post<McpTestResponse>(`/admin/mcp/servers/${serverId}/test`),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['mcp', 'servers', serverId, 'tools'] });
-    },
   });
 }

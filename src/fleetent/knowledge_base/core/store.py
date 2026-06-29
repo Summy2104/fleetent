@@ -2,7 +2,7 @@ import json
 import re
 from datetime import UTC, datetime
 
-from fleetent.db import Row, SQLiteDatabase
+from fleetent.db import Row, SQLiteConnection, SQLiteDatabase
 from fleetent.knowledge_base.core.models import KnowledgeChunk, KnowledgeDocument
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+|[\u4e00-\u9fff]")
@@ -18,19 +18,27 @@ class KnowledgeStore:
     def __init__(self, database: SQLiteDatabase) -> None:
         self._database = database
 
-    def ensure_knowledge_base(self, tenant_id: str, kb_id: str, description: str = "") -> None:
+    def ensure_knowledge_base(
+        self,
+        tenant_id: str,
+        kb_id: str,
+        description: str = "",
+        *,
+        extraction_enabled: bool = False,
+    ) -> None:
         self._database.execute(
             """
             INSERT OR IGNORE INTO knowledge_bases (
-                tenant_id, kb_id, description, created_at, archived_at
+                tenant_id, kb_id, description, created_at, archived_at, extraction_enabled
             )
-            VALUES (:tenant_id, :kb_id, :description, :created_at, NULL)
+            VALUES (:tenant_id, :kb_id, :description, :created_at, NULL, :extraction_enabled)
             """,
             {
                 "tenant_id": tenant_id,
                 "kb_id": kb_id,
                 "description": description,
                 "created_at": _format_datetime(_now()),
+                "extraction_enabled": int(extraction_enabled),
             },
         )
 
@@ -78,6 +86,21 @@ class KnowledgeStore:
         ).fetchone()
         return row is not None
 
+    def is_extraction_enabled(self, tenant_id: str, kb_id: str) -> bool:
+        row = self._database.execute(
+            """
+            SELECT extraction_enabled
+            FROM knowledge_bases
+            WHERE tenant_id = :tenant_id
+              AND kb_id = :kb_id
+              AND archived_at IS NULL
+            """,
+            {"tenant_id": tenant_id, "kb_id": kb_id},
+        ).fetchone()
+        if row is None:
+            return False
+        return bool(int(row["extraction_enabled"]))
+
     def list_knowledge_bases(self, tenant_id: str) -> list[Row]:
         return self._database.execute(
             """
@@ -87,6 +110,7 @@ class KnowledgeStore:
                 kb.description,
                 kb.created_at,
                 kb.archived_at,
+                kb.extraction_enabled,
                 COUNT(DISTINCT document.id) AS doc_count,
                 COUNT(chunk.id) AS chunk_count,
                 MAX(document.created_at) AS last_import
@@ -98,70 +122,69 @@ class KnowledgeStore:
             LEFT JOIN knowledge_chunks AS chunk
               ON chunk.document_id = document.id
             WHERE kb.tenant_id = :tenant_id
-            GROUP BY kb.tenant_id, kb.kb_id, kb.description, kb.created_at, kb.archived_at
+            GROUP BY
+                kb.tenant_id,
+                kb.kb_id,
+                kb.description,
+                kb.created_at,
+                kb.archived_at,
+                kb.extraction_enabled
             ORDER BY kb.kb_id ASC
             """,
             {"tenant_id": tenant_id},
         ).fetchall()
 
     def insert_document(self, document: KnowledgeDocument) -> None:
-        self._database.execute(
-            """
-            INSERT INTO knowledge_documents (
-                id, tenant_id, kb_id, filename, source, source_url, created_at
-            )
-            VALUES (
-                :id, :tenant_id, :kb_id, :filename, :source, :source_url, :created_at
-            )
-            """,
-            {
-                "id": document.id,
-                "tenant_id": document.tenant_id,
-                "kb_id": document.kb_id,
-                "filename": document.filename,
-                "source": document.source,
-                "source_url": document.source_url,
-                "created_at": _format_datetime(_now()),
-            },
-        )
+        self._database.execute(_insert_document_sql(), _insert_document_params(document))
 
     def insert_chunks(self, chunks: list[KnowledgeChunk]) -> None:
         with self._database.transaction() as transaction:
-            for chunk in chunks:
-                transaction.execute(
-                    """
-                    INSERT INTO knowledge_chunks (
-                        id, document_id, tenant_id, kb_id, position, content,
-                        metadata_json, created_at
-                    )
-                    VALUES (
-                        :id, :document_id, :tenant_id, :kb_id, :position, :content,
-                        :metadata_json, :created_at
-                    )
-                    """,
-                    {
-                        "id": chunk.id,
-                        "document_id": chunk.document_id,
-                        "tenant_id": chunk.tenant_id,
-                        "kb_id": chunk.kb_id,
-                        "position": chunk.position,
-                        "content": chunk.content,
-                        "metadata_json": _dump_metadata(chunk.metadata),
-                        "created_at": _format_datetime(_now()),
-                    },
-                )
-                transaction.execute(
-                    """
-                    INSERT INTO knowledge_chunks_fts (chunk_id, tenant_id, kb_id, content)
-                    VALUES (:chunk_id, :tenant_id, :kb_id, :content)
-                    """,
-                    {
-                        "chunk_id": chunk.id,
-                        "tenant_id": chunk.tenant_id,
-                        "kb_id": chunk.kb_id,
-                        "content": chunk.content,
-                    },
-                )
+            _insert_chunks(transaction, chunks)
+
+    def list_active_documents_by_identity(
+        self, tenant_id: str, kb_id: str, source: str, filename: str
+    ) -> list[KnowledgeDocument]:
+        rows = self._database.execute(
+            """
+            SELECT
+                document.id,
+                document.tenant_id,
+                document.kb_id,
+                document.filename,
+                document.source,
+                document.source_url
+            FROM knowledge_documents AS document
+            JOIN knowledge_bases AS kb
+              ON kb.tenant_id = document.tenant_id
+             AND kb.kb_id = document.kb_id
+            WHERE document.tenant_id = :tenant_id
+              AND document.kb_id = :kb_id
+              AND document.source = :source
+              AND document.filename = :filename
+              AND document.archived_at IS NULL
+              AND kb.archived_at IS NULL
+            ORDER BY document.created_at ASC, document.id ASC
+            """,
+            {
+                "tenant_id": tenant_id,
+                "kb_id": kb_id,
+                "source": source,
+                "filename": filename,
+            },
+        ).fetchall()
+        return [_row_to_document(row) for row in rows]
+
+    def replace_document(
+        self,
+        document: KnowledgeDocument,
+        chunks: list[KnowledgeChunk],
+        replaced_document_ids: list[str],
+    ) -> None:
+        with self._database.transaction() as transaction:
+            for replaced_document_id in replaced_document_ids:
+                _delete_document_records(transaction, replaced_document_id)
+            transaction.execute(_insert_document_sql(), _insert_document_params(document))
+            _insert_chunks(transaction, chunks)
 
     def get_chunks_by_ids(self, tenant_id: str, chunk_ids: list[str]) -> list[KnowledgeChunk]:
         if not chunk_ids:
@@ -449,31 +472,7 @@ class KnowledgeStore:
 
     def delete_document(self, document_id: str) -> None:
         with self._database.transaction() as transaction:
-            transaction.execute(
-                """
-                DELETE FROM knowledge_chunks_fts
-                WHERE chunk_id IN (
-                    SELECT id
-                    FROM knowledge_chunks
-                    WHERE document_id = :document_id
-                )
-                """,
-                {"document_id": document_id},
-            )
-            transaction.execute(
-                """
-                DELETE FROM knowledge_chunks
-                WHERE document_id = :document_id
-                """,
-                {"document_id": document_id},
-            )
-            transaction.execute(
-                """
-                DELETE FROM knowledge_documents
-                WHERE id = :document_id
-                """,
-                {"document_id": document_id},
-            )
+            _delete_document_records(transaction, document_id)
 
     def delete_scoped_document(self, tenant_id: str, kb_id: str, document_id: str) -> bool:
         if not self.has_active_document(tenant_id, kb_id, document_id):
@@ -519,6 +518,174 @@ def _load_metadata(metadata_json: str | None) -> dict[str, str]:
     if not isinstance(raw_metadata, dict):
         return {}
     return {str(key): str(value) for key, value in raw_metadata.items()}
+
+
+def _row_to_document(row: Row) -> KnowledgeDocument:
+    return KnowledgeDocument(
+        id=str(row["id"]),
+        tenant_id=str(row["tenant_id"]),
+        kb_id=str(row["kb_id"]),
+        filename=str(row["filename"]),
+        source=str(row["source"]),
+        source_url=str(row["source_url"]) if row["source_url"] is not None else None,
+    )
+
+
+def _insert_document_sql() -> str:
+    return """
+        INSERT INTO knowledge_documents (
+            id, tenant_id, kb_id, filename, source, source_url, created_at
+        )
+        VALUES (
+            :id, :tenant_id, :kb_id, :filename, :source, :source_url, :created_at
+        )
+        """
+
+
+def _insert_document_params(document: KnowledgeDocument) -> dict[str, object]:
+    return {
+        "id": document.id,
+        "tenant_id": document.tenant_id,
+        "kb_id": document.kb_id,
+        "filename": document.filename,
+        "source": document.source,
+        "source_url": document.source_url,
+        "created_at": _format_datetime(_now()),
+    }
+
+
+def _insert_chunks(transaction: SQLiteConnection, chunks: list[KnowledgeChunk]) -> None:
+    for chunk in chunks:
+        transaction.execute(
+            """
+            INSERT INTO knowledge_chunks (
+                id, document_id, tenant_id, kb_id, position, content,
+                metadata_json, created_at
+            )
+            VALUES (
+                :id, :document_id, :tenant_id, :kb_id, :position, :content,
+                :metadata_json, :created_at
+            )
+            """,
+            {
+                "id": chunk.id,
+                "document_id": chunk.document_id,
+                "tenant_id": chunk.tenant_id,
+                "kb_id": chunk.kb_id,
+                "position": chunk.position,
+                "content": chunk.content,
+                "metadata_json": _dump_metadata(chunk.metadata),
+                "created_at": _format_datetime(_now()),
+            },
+        )
+        transaction.execute(
+            """
+            INSERT INTO knowledge_chunks_fts (chunk_id, tenant_id, kb_id, content)
+            VALUES (:chunk_id, :tenant_id, :kb_id, :content)
+            """,
+            {
+                "chunk_id": chunk.id,
+                "tenant_id": chunk.tenant_id,
+                "kb_id": chunk.kb_id,
+                "content": chunk.content,
+            },
+        )
+
+
+def _delete_document_records(transaction: SQLiteConnection, document_id: str) -> None:
+    scopes = transaction.execute(
+        """
+        SELECT tenant_id, kb_id
+        FROM knowledge_documents
+        WHERE id = :document_id
+        UNION
+        SELECT tenant_id, kb_id
+        FROM knowledge_chunks
+        WHERE document_id = :document_id
+        UNION
+        SELECT tenant_id, kb_id
+        FROM kb_entity_mentions
+        WHERE document_id = :document_id
+        UNION
+        SELECT tenant_id, kb_id
+        FROM kb_relations
+        WHERE evidence_document_id = :document_id
+        """,
+        {"document_id": document_id},
+    ).fetchall()
+    transaction.execute(
+        """
+        DELETE FROM knowledge_chunks_fts
+        WHERE chunk_id IN (
+            SELECT id
+            FROM knowledge_chunks
+            WHERE document_id = :document_id
+        )
+        """,
+        {"document_id": document_id},
+    )
+    transaction.execute(
+        """
+        DELETE FROM knowledge_chunks
+        WHERE document_id = :document_id
+        """,
+        {"document_id": document_id},
+    )
+    transaction.execute(
+        """
+        DELETE FROM kb_entity_mentions
+        WHERE document_id = :document_id
+        """,
+        {"document_id": document_id},
+    )
+    transaction.execute(
+        """
+        DELETE FROM kb_relations
+        WHERE evidence_document_id = :document_id
+        """,
+        {"document_id": document_id},
+    )
+    transaction.execute(
+        """
+        DELETE FROM knowledge_documents
+        WHERE id = :document_id
+        """,
+        {"document_id": document_id},
+    )
+    for scope in scopes:
+        _delete_orphan_entities(
+            transaction,
+            tenant_id=str(scope["tenant_id"]),
+            kb_id=str(scope["kb_id"]),
+        )
+
+
+def _delete_orphan_entities(transaction: SQLiteConnection, tenant_id: str, kb_id: str) -> None:
+    transaction.execute(
+        """
+        DELETE FROM kb_entities
+        WHERE tenant_id = :tenant_id
+          AND kb_id = :kb_id
+          AND NOT EXISTS (
+              SELECT 1
+              FROM kb_entity_mentions AS mention
+              WHERE mention.tenant_id = kb_entities.tenant_id
+                AND mention.kb_id = kb_entities.kb_id
+                AND mention.entity_id = kb_entities.id
+          )
+          AND NOT EXISTS (
+              SELECT 1
+              FROM kb_relations AS relation
+              WHERE relation.tenant_id = kb_entities.tenant_id
+                AND relation.kb_id = kb_entities.kb_id
+                AND (
+                    relation.source_entity_id = kb_entities.id
+                    OR relation.target_entity_id = kb_entities.id
+                )
+          )
+        """,
+        {"tenant_id": tenant_id, "kb_id": kb_id},
+    )
 
 
 def _fts_query(query: str) -> str:

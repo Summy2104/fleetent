@@ -11,6 +11,7 @@ STANDARD_ROUTE_KEYS = frozenset(
     {
         "default",
         "memory_extraction",
+        "kb_extraction",
         "vision",
         "embedding",
         "rerank",

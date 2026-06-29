@@ -39,8 +39,8 @@ def test_init_agent_db_schema_routes_by_tenant_id(tmp_path: Path) -> None:
     _init_agent_db_schema(data_dir, agent_id="bot", tenant_id="acme")
 
     # KB must be under tenants/<tenant>/
-    kb_path = tmp_path / "tenants" / "acme" / "kb.db"
-    assert kb_path.exists(), "KB must be at tenants/acme/kb.db, not default/"
+    kb_path = tmp_path / "tenants" / "acme" / "kb" / "kb.db"
+    assert kb_path.exists(), "KB must be at tenants/acme/kb/kb.db, not default/"
 
     # Agent state must be under tenants/<tenant>/agents/<agent_id>/data/
     state_path = tmp_path / "tenants" / "acme" / "agents" / "bot" / "data" / "agent_state.db"
@@ -62,8 +62,8 @@ def test_init_agent_db_schema_default_tenant_still_works(tmp_path: Path) -> None
     # default tenant — no tenant_id arg (backward compat)
     _init_agent_db_schema(data_dir, agent_id="bot")
 
-    kb_path = tmp_path / "tenants" / "default" / "kb.db"
-    assert kb_path.exists(), "Default tenant KB must be at tenants/default/kb.db"
+    kb_path = tmp_path / "tenants" / "default" / "kb" / "kb.db"
+    assert kb_path.exists(), "Default tenant KB must be at tenants/default/kb/kb.db"
     state_path = tmp_path / "tenants" / "default" / "agents" / "bot" / "data" / "agent_state.db"
     assert state_path.exists(), (
         "Default tenant state must be at tenants/default/agents/bot/data/agent_state.db"
@@ -74,7 +74,7 @@ def test_init_agent_db_schema_default_tenant_still_works(tmp_path: Path) -> None
 
 
 def test_kb_tables_land_in_tenant_scoped_db(tmp_path: Path) -> None:
-    """KB tables land in acme/kb.db, not in the main agent db."""
+    """KB tables land in acme/kb/kb.db, not in the main agent db."""
     from fleetent.runtime.agent_app import _init_agent_db_schema
 
     data_dir = tmp_path / "data"
@@ -82,7 +82,7 @@ def test_kb_tables_land_in_tenant_scoped_db(tmp_path: Path) -> None:
 
     _init_agent_db_schema(data_dir, agent_id="bot", tenant_id="acme")
 
-    kb_path = tmp_path / "tenants" / "acme" / "kb.db"
+    kb_path = tmp_path / "tenants" / "acme" / "kb" / "kb.db"
     tables = _tables_in(kb_path)
     assert "knowledge_bases" in tables
     assert "knowledge_chunks" in tables

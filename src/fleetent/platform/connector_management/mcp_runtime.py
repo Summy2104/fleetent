@@ -15,15 +15,43 @@ from fleetent.integrations.mcp import (
     unregister_server,
 )
 from fleetent.platform.connector_management import mcp_server_store
+from fleetent.platform.connector_management.mcp_auth import (
+    ApiKeyMcpAuthConfig,
+    OAuthClientCredentialsMcpAuthConfig,
+    parse_mcp_auth_config,
+)
 
 
 def _row_to_config(row: dict[str, Any]) -> McpServerConfig:
+    raw_auth_config = row.get("auth_config")
+    if raw_auth_config is None and row.get("api_key_env"):
+        raw_auth_config = {"key_env": row["api_key_env"]}
+    auth_config = parse_mcp_auth_config(row.get("auth_type"), raw_auth_config)
+    api_key_env = ""
+    token_url = ""
+    client_id = ""
+    client_secret_env = ""
+    scope = ""
+    auth_type = row.get("auth_type") or "none"
+    if isinstance(auth_config, ApiKeyMcpAuthConfig):
+        auth_type = "api_key"
+        api_key_env = auth_config.key_env
+    elif isinstance(auth_config, OAuthClientCredentialsMcpAuthConfig):
+        auth_type = "oauth2"
+        token_url = auth_config.token_url
+        client_id = auth_config.client_id
+        client_secret_env = auth_config.client_secret_env
+        scope = auth_config.scope
     return McpServerConfig(
         id=row["server_id"],
         transport=row["transport"] or "http",
         url=row.get("url") or "",
-        auth_type=row.get("auth_type") or "none",
-        api_key_env=row.get("api_key_env") or "",
+        auth_type=auth_type,
+        api_key_env=api_key_env,
+        token_url=token_url,
+        client_id=client_id,
+        client_secret_env=client_secret_env,
+        scope=scope,
         command=row.get("command") or "",
         args=list(row.get("args") or []),
         env=dict(row.get("env") or {}),

@@ -3,17 +3,19 @@
 Verifies:
 - tenant_scope(tenant) resolves to {kb_db, kb_vector_backend}
 - Both resolved from one tenant_scope call (same tenant binding)
-- SQLite backend maps default scope to <fleetent_home>/tenants/default/kb.db
+- SQLite backend maps default scope to <fleetent_home>/tenants/default/kb/kb.db
 - Backend is replaceable without changing call sites
 """
 
 from __future__ import annotations
 
 import inspect
+import sqlite3
 from pathlib import Path
 from typing import Any
 
 from fleetent.db import SQLiteDatabase
+from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
 from fleetent.tenant_router import (
     AgentScope,
     KbScope,
@@ -72,7 +74,10 @@ def test_sqlite_backend_maps_default_to_tenant_directory(tmp_path: Path) -> None
     scope = router.tenant_scope("default")
 
     assert isinstance(scope.kb_db, SQLiteDatabase)
-    assert scope.kb_db.path == tmp_path / "tenants" / "default" / "kb.db"
+    assert scope.kb_db.path == tmp_path / "tenants" / "default" / "kb" / "kb.db"
+    assert scope.kb_vector_backend.database_url == (
+        f"sqlite:///{tmp_path / 'tenants' / 'default' / 'kb' / 'kb_vectors.db'}"
+    )
 
 
 def test_sqlite_backend_different_tenants_use_different_directories(tmp_path: Path) -> None:
@@ -82,8 +87,8 @@ def test_sqlite_backend_different_tenants_use_different_directories(tmp_path: Pa
     scope_b = router.tenant_scope("tenant-b")
 
     assert scope_a.kb_db.path != scope_b.kb_db.path
-    assert "tenant-a" in str(scope_a.kb_db.path)
-    assert "tenant-b" in str(scope_b.kb_db.path)
+    assert scope_a.kb_db.path == tmp_path / "tenants" / "tenant-a" / "kb" / "kb.db"
+    assert scope_b.kb_db.path == tmp_path / "tenants" / "tenant-b" / "kb" / "kb.db"
 
 
 # ── 3.1-d: backend is replaceable (inject fake backend) ────────────────────
@@ -148,3 +153,54 @@ def test_sqlite_tenant_backend_uses_substrate_factory() -> None:
 
     assert "create_substrate(" in source
     assert "SQLiteDatabase(path=" not in source
+
+
+def _write_sqlite_marker(db_path: Path, table_name: str, value: str) -> None:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(f"CREATE TABLE {table_name} (value TEXT)")
+        conn.execute(f"INSERT INTO {table_name}(value) VALUES (?)", (value,))
+        conn.commit()
+
+
+def test_resolve_migrates_flat_tenant_kb_into_kb_directory_before_open(tmp_path: Path) -> None:
+    tenant_dir = tmp_path / "tenants" / "acme"
+    tenant_dir.mkdir(parents=True)
+    legacy_kb = tenant_dir / "kb.db"
+    legacy_vectors = tenant_dir / "kb_vectors.db"
+    _write_sqlite_marker(legacy_kb, "legacy_marker", "kb")
+    _write_sqlite_marker(legacy_vectors, "legacy_vector_marker", "vec")
+    for suffix in ("-wal", "-shm"):
+        (tenant_dir / f"kb.db{suffix}").write_text(f"kb{suffix}", encoding="utf-8")
+        (tenant_dir / f"kb_vectors.db{suffix}").write_text(f"vec{suffix}", encoding="utf-8")
+
+    router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path))
+
+    scope = router.tenant_scope("acme")
+
+    kb_dir = tmp_path / "tenants" / "acme" / "kb"
+    assert scope.kb_db.path == kb_dir / "kb.db"
+    assert kb_dir.is_dir()
+    assert not legacy_kb.exists()
+    assert not legacy_vectors.exists()
+    for filename in (
+        "kb.db",
+        "kb.db-wal",
+        "kb.db-shm",
+        "kb_vectors.db",
+        "kb_vectors.db-wal",
+        "kb_vectors.db-shm",
+    ):
+        assert (kb_dir / filename).exists()
+
+    scope.open_kb_db(KB_MIGRATIONS)
+    with sqlite3.connect(scope.kb_db.path) as conn:
+        assert conn.execute("SELECT value FROM legacy_marker").fetchone() == ("kb",)
+
+    with sqlite3.connect(kb_dir / "kb_vectors.db") as conn:
+        assert conn.execute("SELECT value FROM legacy_vector_marker").fetchone() == ("vec",)
+
+    scope_again = router.tenant_scope("acme")
+    assert scope_again.kb_db.path == scope.kb_db.path
+    assert not legacy_kb.exists()
+    assert not legacy_vectors.exists()

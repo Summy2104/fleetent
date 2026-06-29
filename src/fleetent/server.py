@@ -18,7 +18,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket
 from fastapi.responses import FileResponse, HTMLResponse, Response
 
-from fleetent import agent_config, agent_store, auth, connectors, cron_scheduler, user_store
+from fleetent import agent_config, agent_store, auth, cron_scheduler, user_store
 from fleetent.auth import seed_builtin_admin
 from fleetent.config import Settings, configure_logging
 from fleetent.governance.permission_gate import list_approvals
@@ -39,7 +39,7 @@ from fleetent.platform.agent_management_console import (
 )
 from fleetent.platform.agent_statistics import stats_admin_api
 from fleetent.platform.chat_management import chat_admin_api
-from fleetent.platform.connector_management import connector_admin_api, vault_provider
+from fleetent.platform.connector_management import connector_admin_api, mcp_oauth_callback_api
 from fleetent.platform.im_gateway_management import im_identity_admin_api
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import model_admin_api, provider_admin_api
@@ -187,18 +187,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Wire platform api_keys resolver so user_store.authenticate queries the api_keys
     # table (+ legacy fallback) without the module-level platform import removed by #4.
     user_store.set_api_key_resolver(_resolve_api_key)
-    connectors.set_provider(vault_provider.get_credential)
     set_im_identity_resolver(_resolve_im_identity)
     # Platform fire-time creator recheck for cron tasks (decouple-cron-principal-recheck):
     # standalone agents never run this lifespan, so they keep trusting the archived IM
     # identity without opening the management DB.
     cron_scheduler.set_principal_resolver(_cron_principal_recheck)
+    # Managed per-user MCP OAuth: resolve a client_secret env ref from agent_secrets at
+    # exchange/refresh time, injected here so connector_management stays off agent_lifecycle.
+    from fleetent.platform.agent_lifecycle import secret_store as _secret_store
+    from fleetent.platform.connector_management import mcp_oauth_service as _mcp_oauth_service
 
-    from fleetent.platform.connector_management import external_credential_store
-
-    agent_store.set_delete_agent_hook(
-        lambda aid: external_credential_store.delete_all_credentials_for_user(f"agent:{aid}")
-    )
+    _mcp_oauth_service.set_client_secret_resolver(_secret_store.get_decrypted)
 
     scan_skills()
     # backflow-pool-git: the shared skill pool must be a git repo before any write,
@@ -284,6 +283,7 @@ app.include_router(provider_admin_api.router)
 app.include_router(model_admin_api.router)
 app.include_router(kb_admin_api.router)
 app.include_router(connector_admin_api.router)
+app.include_router(mcp_oauth_callback_api.router)
 app.include_router(chat_admin_api.router)
 # agent_admin_api must precede agent_console_api: its literal DELETE
 # /agents/default route would otherwise be shadowed by the console's parametric

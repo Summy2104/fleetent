@@ -35,6 +35,7 @@ from fleetent.secret_scan import flatten, looks_inline_secret
 # Agents root directory. Module-level constant (injectable via monkeypatch per the
 # project's no-global-mutable-state rule); env override mirrors FLEETENT_SKILLS_DIR.
 AGENTS_DIR = paths.agents_dir()
+_active_home_dir: Path | None = None
 
 AGENT_FILE_NAME = "agent.yaml"
 _ENV_VAR_NAME_RE = re.compile(r"^(env:)?[A-Z_][A-Z0-9_]*$")
@@ -236,6 +237,7 @@ class AgentRetrievalPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mode: Literal["vector", "keyword", "hybrid"] = "hybrid"
+    use_planner: bool = False
     top_k: int = 10
     rerank: bool = False
     embedding_route: str = ""
@@ -248,15 +250,40 @@ class AgentKnowledgeRetrievalAudit(BaseModel):
     plaintext: bool = False
 
 
+class AgentKnowledgeProvider(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["local", "http"] = "local"
+    url: str | None = None
+    auth_ref: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_http_provider(self) -> "AgentKnowledgeProvider":
+        if self.type != "http":
+            return self
+        if not self.url:
+            raise ValueError("knowledge.provider.url is required when provider.type=http")
+        if not self.auth_ref:
+            raise ValueError("knowledge.provider.auth_ref is required when provider.type=http")
+        return self
+
+
 class AgentKnowledge(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
     bindings: list[AgentKnowledgeBinding] = Field(default_factory=list)
+    provider: AgentKnowledgeProvider = Field(default_factory=AgentKnowledgeProvider)
     retrieval_policy: AgentRetrievalPolicy = Field(default_factory=AgentRetrievalPolicy)
     retrieval_audit: AgentKnowledgeRetrievalAudit = Field(
         default_factory=AgentKnowledgeRetrievalAudit
     )
+
+    @property
+    def tenant_id(self) -> str | None:
+        if not self.bindings:
+            return None
+        return self.bindings[0].tenant_id
 
     @model_validator(mode="after")
     def _validate_bindings(self) -> "AgentKnowledge":
@@ -265,6 +292,9 @@ class AgentKnowledge(BaseModel):
         defaults = [binding for binding in self.bindings if binding.default]
         if len(defaults) > 1:
             raise ValueError("knowledge.bindings may mark at most one default binding")
+        tenant_ids = {binding.tenant_id for binding in self.bindings}
+        if len(tenant_ids) > 1:
+            raise ValueError("knowledge.bindings must all share the same tenant_id")
         return self
 
 
@@ -665,7 +695,7 @@ def _reject_inline_secrets(agent: AgentFile, path: Path) -> None:
 def _is_env_reference(key: str, value: str) -> bool:
     if key.endswith("_env"):
         return _ENV_VAR_NAME_RE.fullmatch(value) is not None
-    if key.endswith("credential_ref"):
+    if key.endswith("credential_ref") or key.endswith("auth_ref"):
         return _ENV_VAR_NAME_RE.fullmatch(value) is not None or value.startswith("file://")
     # Allow env:VAR_NAME syntax in any field (e.g. mcp_servers[*].env dict values) so
     # secrets can live in .env and be referenced without being flagged as inline secrets.
@@ -676,7 +706,7 @@ def _is_env_reference(key: str, value: str) -> bool:
 
 
 def _is_secret_reference_key(key: str) -> bool:
-    return key.endswith("_env") or key.endswith("credential_ref")
+    return key.endswith("_env") or key.endswith("credential_ref") or key.endswith("auth_ref")
 
 
 def load_agent_home_file(path: Path) -> AgentFile:
@@ -737,8 +767,9 @@ def build_index(agents_dir: str | Path | None = None) -> AgentConfigIndex:
 
 def scan(agents_dir: str | Path | None = None) -> None:
     """Rebuild and publish the current index. Server runs once at startup; CLI per call."""
-    global _index
+    global _index, _active_home_dir
     _index = build_index(agents_dir)
+    _active_home_dir = None
 
 
 def scan_home(agent_dir: str | Path) -> AgentFile:
@@ -748,10 +779,19 @@ def scan_home(agent_dir: str | Path) -> AgentFile:
     it as the sole, forced-default agent. Used by ``fleetent agent run`` so routing
     resolves only this one self-contained agent.
     """
-    global _index
-    agent = load_agent_file(Path(agent_dir))
+    global _index, _active_home_dir
+    resolved = Path(agent_dir)
+    agent = load_agent_file(resolved)
     _index = _single_agent_index(agent)
+    _active_home_dir = resolved
     return agent
+
+
+def refresh_active_home() -> AgentFile | None:
+    """Reload the standalone agent home, if this process was booted from one."""
+    if _active_home_dir is None:
+        return active_agent()
+    return scan_home(_active_home_dir)
 
 
 def current() -> AgentConfigIndex:
@@ -804,6 +844,7 @@ def default_models() -> AgentModels:
         routes={
             "default": [ModelRouteEntry(target="default")],
             "memory_extraction": [ModelRouteEntry(target="default")],
+            "kb_extraction": [ModelRouteEntry(target="default")],
             "vision": [ModelRouteEntry(target="vision")],
             "embedding": [ModelRouteEntry(target="embedding")],
         },

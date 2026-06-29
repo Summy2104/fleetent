@@ -60,8 +60,8 @@ def _create_agent_with_required_env() -> int:
         "docs",
         transport="http",
         url="https://docs.internal/mcp",
-        auth_type="bearer",
-        api_key_env="FLEETENT_AGENT_SUPPORT_DOCS",
+        auth_type="api_key",
+        auth_config={"key_env": "FLEETENT_AGENT_SUPPORT_DOCS"},
     )
     agent_store.bind_mcp_server(agent.id, "docs")
     return agent.id
@@ -87,8 +87,8 @@ def test_required_env_reflects_new_mcp_without_false_positives(client):
         "jira",
         transport="http",
         url="https://jira.internal/mcp",
-        auth_type="bearer",
-        api_key_env="FLEETENT_AGENT_SUPPORT_JIRA",
+        auth_type="api_key",
+        auth_config={"key_env": "FLEETENT_AGENT_SUPPORT_JIRA"},
     )
     agent_store.bind_mcp_server(agent_id, "jira")
     token, _ = _session_for("viewer")

@@ -69,7 +69,7 @@ and retrieval evaluation for agent long-term context.
 - **AND** migration 标明 owner module 是 knowledge-base
 
 ### Requirement: Manual text ingest and chunk indexing
-系统 SHALL 支持手动导入 text / markdown 内容，生成 deterministic chunks 并写入 vector_store。
+系统 SHALL 支持手动导入 text / markdown 内容，生成 deterministic chunks 并写入 vector_store。manual ingest 的文档身份 SHALL 为 `(tenant_id, kb_id, source, filename)`；对同一身份重复导入时，系统 SHALL 以覆盖（overwrite）语义替换旧文档，使该身份在库中始终只保留最新一份，不产生重复 document 或 chunk。
 
 #### Scenario: Ingest creates document and chunks
 - **WHEN** 调用 `ingest_text(filename, content, tenant_id, kb_id, source, source_url)`
@@ -87,6 +87,21 @@ and retrieval evaluation for agent long-term context.
 #### Scenario: Ingest is tenant and kb scoped
 - **WHEN** 同一 filename 被导入不同 tenant 或 kb
 - **THEN** records 与 vector namespace 相互隔离
+
+#### Scenario: Re-ingest same identity overwrites previous document
+- **WHEN** 以相同 `(tenant_id, kb_id, source, filename)` 再次调用 `ingest_text` 或 `ingest_parsed`
+- **THEN** 系统先删除旧 document 及其全部派生数据（chunks、chunks_fts、对应 `vector_store` 向量、该文档的 `kb_entity_mentions` 与 `kb_relations`，并 GC 由此产生的孤儿 `kb_entities`）
+- **AND** 系统写入新版本的 document 与 chunks
+- **AND** search 与 graph_search 只返回新版本内容，不返回旧版本残留
+
+#### Scenario: Re-ingest does not duplicate
+- **WHEN** 同一身份连续导入两次内容
+- **THEN** 该身份在库中只存在一份 document
+- **AND** 该 document 的 chunk 数量与单次导入一致，无重复 chunk
+
+#### Scenario: Differing identity does not overwrite
+- **WHEN** filename 相同但 `source` 不同（或 tenant/kb 不同）
+- **THEN** 视为不同文档，各自独立保留，互不覆盖
 
 ### Requirement: Vector-only knowledge search
 系统 SHALL 提供 vector-only `search(query, tenant_id, kb_ids, limit)`，返回相关 `KnowledgeChunk`。
@@ -109,7 +124,7 @@ and retrieval evaluation for agent long-term context.
 - **AND** 结果按 score DESC、chunk position ASC、chunk id ASC 稳定排序
 
 ### Requirement: Knowledge document deletion
-系统 SHALL 支持删除 document 及其 chunks 和 vector index entries。
+系统 SHALL 支持删除 document 及其 chunks 和 vector index entries，并 SHALL 级联清理该文档贡献的实体图证据。hard delete 后，系统 SHALL 删除该文档的 `kb_entity_mentions`（按 `document_id`）与 `kb_relations`（按 `evidence_document_id`），并垃圾回收满足“零剩余 mention 且不再被任何剩余 relation 作为 source 或 target 引用”的 canonical `kb_entities`；被其它文档仍在引用的共享 entity SHALL 保留。
 
 #### Scenario: Delete removes document chunks
 - **WHEN** 调用 `delete(document_id)`
@@ -118,6 +133,19 @@ and retrieval evaluation for agent long-term context.
 #### Scenario: Delete removes vector entries
 - **WHEN** 删除 document
 - **THEN** 系统为该 document 的每个 chunk 调用 `vector_store.delete(chunk_id, namespace)`
+
+#### Scenario: Delete removes the document's mentions and relations
+- **WHEN** 删除一个已抽取过实体的 document
+- **THEN** 系统删除该 document 的 `kb_entity_mentions` 与 `kb_relations`
+- **AND** graph_search 不再返回指向已删 document 的图证据
+
+#### Scenario: Orphan entities are garbage collected on delete
+- **WHEN** 删除文档后某 canonical entity 不再有任何 mention，且不再被任何剩余 relation 引用
+- **THEN** 系统删除该孤儿 `kb_entities` 行
+
+#### Scenario: Shared entities survive deletion
+- **WHEN** 删除文档后某 entity 仍被另一个未删文档的 mention 或 relation 引用
+- **THEN** 系统保留该 entity，不删除
 
 #### Scenario: Delete is idempotent
 - **WHEN** 删除不存在或已删除的 document
@@ -859,15 +887,16 @@ Confluence connector tests SHALL use fake clients by default and SHALL NOT conne
 - **THEN** real smoke test 被 skip
 
 ### Requirement: Connector configuration registry
-系统 SHALL 从非 secret 应用配置中加载 knowledge-base connector 定义，并以 `connector_id` 提供稳定查找入口。
+系统 SHALL 从**注入的、源自 platform `kb_connector_store`（`kb_connectors` 表）的** connector 定义中加载 knowledge-base connector，并以 `connector_id` 提供稳定查找入口。connector operations SHALL NOT 在缺省 settings 时隐式读取 YAML 应用配置来发现 connector;connector 定义的单一真相源为 `kb_connector_store`，由 platform 控制面读取并注入,单机无 platform 时由 ingest CLI 从本地来源显式注入。
 
-#### Scenario: Google Drive connectors load from Platform Knowledge config
-- **WHEN** Platform Knowledge config contains Google Drive connector definitions
-- **THEN** 系统可以把每条配置解析为 Google Drive connector config
+#### Scenario: Connectors load from injected store-sourced settings
+- **WHEN** platform 经 `kb_connector_store.as_knowledge_base_settings()` 注入 connector 定义
+- **THEN** 系统把每条配置解析为对应的 Google Drive / Confluence connector config
 
-#### Scenario: Confluence connectors load from Platform Knowledge config
-- **WHEN** Platform Knowledge config contains Confluence connector definitions
-- **THEN** 系统可以把每条配置解析为 Confluence connector config
+#### Scenario: No implicit YAML connector discovery
+- **WHEN** 调用 connector 列举 / 查找 operation 而未注入 settings
+- **THEN** 系统不回落到 `load_knowledge_config()` 从 YAML 发现 connector
+- **AND** 系统要求显式注入的 settings 来源
 
 #### Scenario: Connector ids are globally unique
 - **WHEN** 两个 connector 使用相同 `connector_id`
@@ -1157,7 +1186,7 @@ knowledge-base SHALL normalize entity names and upsert canonical entities within
 - **THEN** 系统创建不同 canonical entities
 
 ### Requirement: Explicit entity extraction runs
-knowledge-base SHALL run entity extraction only through an explicit extraction run, not as a default side effect of ingest or sync.
+knowledge-base SHALL 支持显式 extraction run;此外 SHALL 支持**按 KB opt-in 的 ingest 后自动入队 extraction**。默认(未开启的 KB)SHALL NOT 自动抽取,ingest/sync 不产生 extraction 副作用;仅当某 KB 的 `extraction_enabled` 为真时,ingest 后自动入队 per-document extraction。
 
 #### Scenario: Document extraction run
 - **WHEN** 调用方显式对一个 document 运行 extraction
@@ -1170,9 +1199,13 @@ knowledge-base SHALL run entity extraction only through an explicit extraction r
 - **AND** 单 document 失败不阻止后续 document
 - **AND** run summary 记录 failed count
 
-#### Scenario: Ingest does not auto-extract
-- **WHEN** KB ingest 或 connector sync 写入 document / chunks
-- **THEN** 系统不默认运行 entity extraction
+#### Scenario: Ingest does not auto-extract by default
+- **WHEN** KB ingest 或 connector sync 写入 document / chunks 且该 KB 未开启 `extraction_enabled`
+- **THEN** 系统不运行 entity extraction
+
+#### Scenario: Opt-in KB auto-enqueues extraction after ingest
+- **WHEN** KB ingest 写入 document / chunks 且该 KB `extraction_enabled` 为真
+- **THEN** 系统在 ingest 完成后异步入队该 document 的 extraction job,不阻塞 ingest
 
 ### Requirement: Document-level replacement semantics
 knowledge-base entity extraction SHALL replace active mentions and relations for a document only after that document extraction succeeds.
@@ -1249,17 +1282,17 @@ knowledge-base MAY provide a real LLM extractor smoke path, but it SHALL be expl
 - **AND** 不影响默认测试
 
 ### Requirement: Entity extraction exclusions
-knowledge-base entity extraction SHALL NOT implement graph search, automatic sync integration, scheduler, entity merge review or document ACL.
+knowledge-base entity extraction SHALL NOT implement graph search、periodic scheduler auto-discovery、entity merge review 或 document ACL。opt-in 的 ingest 后自动入队 extraction 经既有 `kb_ingest_jobs` 队列与 `fleetent kb-worker` 异步执行(事件驱动,非周期 scheduler),不属于本排除项。
 
 #### Scenario: Graph search remains out of scope
 - **WHEN** entity extraction change 完成
 - **THEN** `search()` 和 hybrid ranking 不因 entities / relations 改变
 - **AND** 不新增 graph traversal search
 
-#### Scenario: Scheduler remains out of scope
+#### Scenario: Periodic scheduler remains out of scope
 - **WHEN** entity extraction change 完成
-- **THEN** extraction 不自动进入 scheduler 或 worker
-- **AND** 只通过 explicit run 触发
+- **THEN** 不新增周期性 scheduler 去主动发现并抽取文档
+- **AND** 自动抽取仅由"opt-in KB 的 ingest 事件"驱动,经既有 ingest worker 执行,而非定时轮询
 
 ### Requirement: Knowledge-base graph search public API
 knowledge-base SHALL provide an independent graph search API that returns chunks with graph evidence without changing existing `search()` behavior.
@@ -1625,4 +1658,24 @@ explicit dependency injection.
 - **THEN** connector operations resolve the username from that environment variable
 - **AND** Confluence API token is resolved from `api_token_env`
 - **AND** Platform YAML config does not need to contain the account email
+
+### Requirement: Auto-enqueue entity extraction after ingest
+当 KB 的 `extraction_enabled` 为真时,knowledge-base SHALL 在 ingest 写入 document 后,经既有 `kb_ingest_jobs` 入队 seam 异步入队一个 per-document `extraction` job,由 `fleetent kb-worker` 消费执行;入队与执行 SHALL NOT 阻塞 ingest,且单 extraction 失败 SHALL NOT 影响该文档的可检索性。抽取所用模型经 model policy 的 `kb_extraction` task 以 HTTP route 访问,route 由部署配置,on-prem 默认 SHALL 可自托管,不硬编码云默认。
+
+#### Scenario: Worker runs enqueued extraction
+- **WHEN** 存在 `extraction` job 且 `fleetent kb-worker` 在跑
+- **THEN** worker claim 该 job、对目标 document 运行 `run_entity_extraction`、写 entities/mentions/relations、置 job done
+
+#### Scenario: Extraction failure is non-blocking
+- **WHEN** 某 document 的 extraction job 失败(达 retry 上限)
+- **THEN** 该 document 的 chunks 仍可被 search 检索
+- **AND** 图谱只是缺该 document 的实体证据,系统不报致命错误
+
+#### Scenario: Re-ingest re-enqueues extraction
+- **WHEN** 以相同身份 re-ingest 覆盖一个 document 且该 KB 开启 `extraction_enabled`
+- **THEN** 系统在删旧 document(连带清旧实体证据)、插新 document 后,为新版本重新入队 extraction
+
+#### Scenario: Default KB does not enqueue
+- **WHEN** 未开启 `extraction_enabled` 的 KB 完成 ingest
+- **THEN** 系统不入队任何 extraction job
 

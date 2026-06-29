@@ -11,7 +11,7 @@ from typing import Any
 
 from fleetent import paths
 from fleetent.agent_config import AgentFile
-from fleetent.config import DiagnosticsSettings, Settings
+from fleetent.config import DiagnosticsSettings, KnowledgeBaseSettings, Settings
 from fleetent.db import SQLiteDatabase, create_database
 from fleetent.observability.performance import PerformanceQuery, get_performance_summary
 from fleetent.observability.traces import TraceEvent, TraceQuery, query_trace_events
@@ -238,14 +238,15 @@ def _write_traces(archive: zipfile.ZipFile, start_ts: datetime, end_ts: datetime
 
 
 def _write_connector_status(archive: zipfile.ZipFile, settings: AgentFile) -> list[str]:
-    connectors = list_configured_connectors()
+    connector_settings = _connector_settings()
+    connectors = list_configured_connectors(settings=connector_settings)
     status_payload = []
     for connector in connectors:
         connector_id = getattr(connector, "connector_id", None)
         latest_status = None
         if connector_id:
             try:
-                latest_status = get_connector_status(str(connector_id))
+                latest_status = get_connector_status(str(connector_id), settings=connector_settings)
             except Exception as exc:
                 latest_status = {
                     "connector_id": str(connector_id),
@@ -267,20 +268,38 @@ def _write_connector_status(archive: zipfile.ZipFile, settings: AgentFile) -> li
     ]
 
 
-def list_configured_connectors(settings: AgentFile | None = None) -> list[object]:
+def list_configured_connectors(
+    settings: object | KnowledgeBaseSettings | None = None,
+) -> list[object]:
     from fleetent.knowledge_base.operations import (
         list_configured_connectors as list_kb_connectors,
     )
 
-    return list(list_kb_connectors())
+    return list(list_kb_connectors(settings=_connector_settings(settings)))
 
 
-def get_connector_status(connector_id: str, settings: AgentFile | None = None) -> object:
+def get_connector_status(
+    connector_id: str,
+    settings: object | KnowledgeBaseSettings | None = None,
+) -> object:
     from fleetent.knowledge_base.operations import (
         get_connector_status as get_kb_connector_status,
     )
 
-    return get_kb_connector_status(connector_id)
+    return get_kb_connector_status(connector_id, settings=_connector_settings(settings))
+
+
+def _connector_settings(
+    settings: object | KnowledgeBaseSettings | None = None,
+) -> object | KnowledgeBaseSettings:
+    if settings is not None:
+        return settings
+    from fleetent.knowledge_base.config import KnowledgeConfigSnapshot, load_knowledge_config
+
+    try:
+        return load_knowledge_config()
+    except FileNotFoundError:
+        return KnowledgeConfigSnapshot()
 
 
 def _event_json(event: TraceEvent) -> str:

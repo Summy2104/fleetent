@@ -185,6 +185,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table("external_credentials")
+    if _has_table("external_credentials"):
+        op.drop_table("external_credentials")
     _rebuild_agent_service_grants(downgrade=True)
     _rebuild_external_services(downgrade=True)

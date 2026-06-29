@@ -7,7 +7,7 @@ are preserved as seams for future RLS / per-tenant-DB backends.
 
 from __future__ import annotations
 
-MIGRATIONS: list[tuple[int, str]] = [
+_BASE_MIGRATIONS: list[tuple[int, str]] = [
     (
         1,
         """
@@ -207,5 +207,16 @@ MIGRATIONS: list[tuple[int, str]] = [
         18,
         "CREATE INDEX IF NOT EXISTS idx_connector_sync_history_connector"
         " ON knowledge_connector_sync_history (connector_id, finished_at)",
+    ),
+]
+
+MIGRATIONS: list[tuple[int, str]] = [
+    *_BASE_MIGRATIONS,
+    (
+        _BASE_MIGRATIONS[-1][0] + 1,
+        """
+        ALTER TABLE knowledge_bases
+        ADD COLUMN extraction_enabled INTEGER NOT NULL DEFAULT 0
+        """,
     ),
 ]

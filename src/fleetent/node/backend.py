@@ -11,6 +11,7 @@ from fleetent.db import create_substrate
 from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
 from fleetent.node.config import NodeConfig
 from fleetent.schema_migrations import migrate
+from fleetent.tenant_router import ensure_tenant_kb_dir
 
 
 class BaseProcessBackend(Protocol):
@@ -131,9 +132,9 @@ class ContainerBackend:
                 "--mount",
                 self._bind_mount(home_dir, read_only=False),
                 "--mount",
-                self._bind_mount(self._tenant_dir(tenant_id) / "kb.db", read_only=True),
-                "--mount",
-                self._bind_mount(self._tenant_dir(tenant_id) / "kb_vectors.db", read_only=True),
+                self._bind_mount(
+                    ensure_tenant_kb_dir(self._config.home_dir, tenant_id), read_only=True
+                ),
                 self._config.agent_image,
                 "fleetent",
                 "agent",
@@ -202,10 +203,9 @@ class ContainerBackend:
         return self._config.home_dir / relative
 
     def _prepare_tenant_kb(self, tenant_id: str) -> None:
-        tenant_dir = self._tenant_dir(tenant_id)
-        tenant_dir.mkdir(parents=True, exist_ok=True)
-        migrate(create_substrate(f"sqlite:///{tenant_dir / 'kb.db'}"), KB_MIGRATIONS)
-        (tenant_dir / "kb_vectors.db").touch(exist_ok=True)
+        kb_dir = ensure_tenant_kb_dir(self._config.home_dir, tenant_id)
+        migrate(create_substrate(f"sqlite:///{kb_dir / 'kb.db'}"), KB_MIGRATIONS)
+        (kb_dir / "kb_vectors.db").touch(exist_ok=True)
 
     def _home_dir(self, agent_name: str, tenant_id: str) -> Path:
         return self._tenant_dir(tenant_id) / "agents" / agent_name

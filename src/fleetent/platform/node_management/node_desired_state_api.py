@@ -121,6 +121,7 @@ def get_desired_state(
                 "agent_id": agent.id,
                 "name": agent.name,
                 "tenant_id": agent.tenant_id,
+                "knowledge_resync_epoch": str(state["updated_at"] or ""),
                 "config": materialize.desired_state_payload_from_agent_file(
                     materialize.agent_file_from_store(agent)
                 ),
@@ -232,6 +233,66 @@ def post_link_confirm(
         },
     )
     return NodeLinkConfirmResponse(user_id=user.id, tenant_id=user.tenant_id)
+
+
+class NodeMcpOAuthPendingBody(BaseModel):
+    state: str
+    code_verifier: str
+    user_id: str
+    agent_id: str
+    server_id: str
+    token_url: str
+    client_id: str
+    client_secret_env: str = ""
+    redirect_uri: str
+
+
+class NodeMcpOAuthTokenBody(BaseModel):
+    user_id: str
+    agent_id: str
+    server_id: str
+
+
+@router.post("/{node_id}/mcp/oauth-pending")
+def post_mcp_oauth_pending(
+    node_id: str,
+    body: NodeMcpOAuthPendingBody,
+    node: dict[str, Any] = Depends(_authenticate_node),  # noqa: B008
+) -> dict[str, Any]:
+    """Register a per-user OAuth pending-auth on behalf of an agent (via node)."""
+    del node, node_id
+    from fleetent.platform.connector_management import mcp_oauth_service
+
+    mcp_oauth_service.register_pending(
+        state=body.state,
+        code_verifier=body.code_verifier,
+        user_id=body.user_id,
+        agent_id=body.agent_id,
+        server_id=body.server_id,
+        token_url=body.token_url,
+        client_id=body.client_id,
+        client_secret_env=body.client_secret_env,
+        redirect_uri=body.redirect_uri,
+    )
+    return {"ok": True}
+
+
+@router.post("/{node_id}/mcp/oauth-token")
+async def post_mcp_oauth_token(
+    node_id: str,
+    body: NodeMcpOAuthTokenBody,
+    node: dict[str, Any] = Depends(_authenticate_node),  # noqa: B008
+) -> dict[str, Any]:
+    """Return a valid per-user access token (transparent refresh); never the refresh token."""
+    del node, node_id
+    from fleetent.platform.connector_management import mcp_oauth_service
+
+    access_token = await mcp_oauth_service.fetch_access_token(
+        body.user_id, body.agent_id, body.server_id
+    )
+    if access_token is None:
+        raise HTTPException(status_code=404, detail="no token; authorization required")
+    return {"access_token": access_token}
 
 
 def _agent_secrets(agent: agent_store.Agent) -> dict[str, str]:

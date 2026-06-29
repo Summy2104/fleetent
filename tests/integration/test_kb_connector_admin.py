@@ -150,7 +150,7 @@ def test_check_passthrough(client, monkeypatch):
 
     async def _fake_check(connector_id, *, settings=None, **kw):
         # the API must feed DB-derived settings carrying our connector
-        ids = [c.connector_id for c in settings.knowledge_base.google_drive.connectors]
+        ids = [c.connector_id for c in settings.google_drive.connectors]
         assert "pilot-drive" in ids
         return SimpleNamespace(connector_id=connector_id, status="ok", message="reachable")
 

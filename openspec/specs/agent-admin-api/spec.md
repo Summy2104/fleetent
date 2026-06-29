@@ -21,22 +21,22 @@ The new `/admin/agents/*` binding endpoints SHALL authenticate via the existing 
 - **THEN** the response is 201 and the binding is persisted
 
 ### Requirement: Binding endpoints
-The system SHALL expose endpoints to bind and unbind **users** to/from an agent, to bind and unbind **IM groups** (`platform` + `group_id`) for an agent, and to set the agent's **IM capability** flags (`supports_dm` / `supports_groups`), all requiring `admin`/`built_in_admin`. （Channel-routing 绑定已于阶段 1 移除；群白名单是访问控制、非路由——见 im-access-model。运行时强制属阶段 3。）
+The system SHALL expose endpoints to bind and unbind **users** to/from an agent, to bind and unbind **IM groups** (`platform` + `group_id`) for an agent, and to set the agent's **IM capability** flags (`supports_dm` / `supports_groups`), all requiring `admin`/`built_in_admin`. The user and group binding write routes SHALL be addressed per-type **without** a `/bindings/` prefix, matching the existing skill binding routes (`PUT /admin/agents/{name}/skills/{skill_name}`). （Channel-routing 绑定已于阶段 1 移除；群白名单是访问控制、非路由——见 im-access-model。运行时强制属阶段 3。）
 
 #### Scenario: Bind user
-- **WHEN** an admin sends `POST /admin/agents/{name}/bindings/users` with body `{"user_id":"u1"}`
+- **WHEN** an admin sends `POST /admin/agents/{name}/users` with body `{"user_id":"u1"}`
 - **THEN** a row is inserted into `user_agents` and the response is 201
 
 #### Scenario: Unbind user
-- **WHEN** an admin sends `DELETE /admin/agents/{name}/bindings/users/{user_id}`
+- **WHEN** an admin sends `DELETE /admin/agents/{name}/users/{user_id}`
 - **THEN** the matching `user_agents` row is removed and the response is 204
 
 #### Scenario: Bind IM group
-- **WHEN** an admin sends `POST /admin/agents/{name}/bindings/groups` with body `{"platform":"slack","group_id":"C0123"}`
+- **WHEN** an admin sends `POST /admin/agents/{name}/groups` with body `{"platform":"slack","group_id":"C0123"}`
 - **THEN** a row is inserted into `agent_im_groups` keyed `(agent_id, "slack", "C0123")` and the response is 201
 
 #### Scenario: Unbind IM group
-- **WHEN** an admin sends `DELETE /admin/agents/{name}/bindings/groups/{platform}/{group_id}`
+- **WHEN** an admin sends `DELETE /admin/agents/{name}/groups/{platform}/{group_id}`
 - **THEN** the matching `agent_im_groups` row is removed and the response is 204
 
 #### Scenario: Set IM capability
@@ -248,37 +248,20 @@ Every write SHALL emit an `audit_log` entry stamped with the acting user id.
 - **THEN** the response is 201
 - **AND** `GET /admin/agents/{name}` returns `template_id` equal to that template
 
-### Requirement: Agent binding read endpoint
-
-The agent admin API SHALL expose `GET /admin/agents/{name}/bindings` returning the
-agent's current bindings: bound user ids and bound MCP `server_id`s. Reads SHALL be
-allowed for viewer and admin roles.
-
-#### Scenario: Read an agent's bindings
-
-- **WHEN** an admin or viewer sends `GET /admin/agents/{name}/bindings`
-- **THEN** the response contains `users` and `mcp_servers` for that agent
-
-#### Scenario: Unknown agent
-
-- **WHEN** the agent name does not exist
-- **THEN** the endpoint responds 404
-
 ### Requirement: Agent MCP binding endpoints
-
-The agent admin API SHALL expose `POST /admin/agents/{name}/bindings/mcp/{server_id}`
-and `DELETE /admin/agents/{name}/bindings/mcp/{server_id}` to bind and unbind an MCP
-server for an agent. Writes SHALL require admin role and SHALL be audited. The POST
+The agent admin API SHALL expose `POST /admin/agents/{name}/mcp/{server_id}`
+and `DELETE /admin/agents/{name}/mcp/{server_id}` to bind and unbind an MCP
+server for an agent (per-type, no `/bindings/` prefix). Writes SHALL require admin role and SHALL be audited. The POST
 SHALL reject an unknown `server_id` (not present in `GET /admin/mcp/servers`) with 404.
 
 #### Scenario: Bind a known MCP server
 
-- **WHEN** an admin POSTs `/admin/agents/support-bot/bindings/mcp/github` and "github" is a known server
+- **WHEN** an admin POSTs `/admin/agents/support-bot/mcp/github` and "github" is a known server
 - **THEN** the binding is recorded and the action is audited
 
 #### Scenario: Bind an unknown MCP server
 
-- **WHEN** an admin POSTs `/admin/agents/support-bot/bindings/mcp/nope` and "nope" is not a known server
+- **WHEN** an admin POSTs `/admin/agents/support-bot/mcp/nope` and "nope" is not a known server
 - **THEN** the endpoint responds 404 and no binding is recorded
 
 #### Scenario: Viewer cannot bind
@@ -305,29 +288,6 @@ The agent admin API SHALL expose agent-side endpoints to manage an agent's knowl
 - **WHEN** a viewer calls the bind or unbind endpoint
 - **THEN** the request is rejected with 403
 
-### Requirement: Agent OAuth connector binding endpoints
-The agent admin API SHALL expose agent-side endpoints to manage which external services an agent may use, parallel to the MCP binding endpoints. Reads SHALL allow viewer or admin; writes SHALL require admin. Binding a service that does not exist in the external services registry SHALL be rejected. HTTP 端点路径与路径参数 token 保持不变（向后兼容）。
-
-#### Scenario: List an agent's OAuth connector bindings
-- **WHEN** a viewer or admin calls `GET /admin/agents/{name}/bindings/oauth`
-- **THEN** the response lists the service ids bound to that agent
-
-#### Scenario: Bind an OAuth connector to an agent
-- **WHEN** an admin calls `POST /admin/agents/{name}/bindings/oauth/{connector_id}` for an existing service
-- **THEN** the binding is created (idempotently) and the service id appears in the agent's bound list
-
-#### Scenario: Bind rejects unknown connector
-- **WHEN** an admin binds a connector_id that is not in the external services registry
-- **THEN** the request is rejected with 404
-
-#### Scenario: Unbind an OAuth connector from an agent
-- **WHEN** an admin calls `DELETE /admin/agents/{name}/bindings/oauth/{connector_id}`
-- **THEN** the binding is removed
-
-#### Scenario: Viewer cannot mutate OAuth bindings
-- **WHEN** a viewer calls the bind or unbind endpoint
-- **THEN** the request is rejected with 403
-
 ### Requirement: Agent list and detail surface runtime and placement state
 
 `GET /admin/agents`（列表）与 `GET /admin/agents/{name}`（详情）SHALL 在原有期望态字段（`status` 等）基础上,附带每个 agent 的**运行态**与**绑定**投影,且 SHALL NOT 破坏任何既有字段:
@@ -349,4 +309,23 @@ The agent admin API SHALL expose agent-side endpoints to manage which external s
 #### Scenario: 详情附带运行态与绑定
 - **WHEN** 管理员请求 `GET /admin/agents/{name}`
 - **THEN** 响应在既有 def 字段之外含 `runtime` 与 `placement`（按上述形态,无对应行为 `null`）
+
+### Requirement: Agent per-type binding read endpoints
+The agent admin API SHALL expose one read endpoint per outbound/inbound binding type, each returning that single type's bound items for the agent, replacing the former aggregate read. It SHALL expose `GET /admin/agents/{name}/users` (bound user ids), `GET /admin/agents/{name}/groups` (bound IM groups as `platform` + `group_id`), and `GET /admin/agents/{name}/mcp` (bound MCP `server_id`s). These join the existing per-type reads `GET /admin/agents/{name}/skills`, `GET /admin/agents/{name}/kbs`, and `GET /admin/agents/{name}/secrets`. Reads SHALL be allowed for viewer and admin roles, and SHALL respond 404 for an unknown agent name.
+
+#### Scenario: Read bound users
+- **WHEN** an admin or viewer sends `GET /admin/agents/{name}/users`
+- **THEN** the response lists the agent's bound user ids
+
+#### Scenario: Read bound IM groups
+- **WHEN** an admin or viewer sends `GET /admin/agents/{name}/groups`
+- **THEN** the response lists the agent's bound IM groups as `platform` + `group_id`
+
+#### Scenario: Read bound MCP servers
+- **WHEN** an admin or viewer sends `GET /admin/agents/{name}/mcp`
+- **THEN** the response lists the agent's bound MCP `server_id`s
+
+#### Scenario: Unknown agent on per-type read
+- **WHEN** any per-type read endpoint targets an agent name that does not exist
+- **THEN** the response is 404
 

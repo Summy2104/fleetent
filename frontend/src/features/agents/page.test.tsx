@@ -39,7 +39,6 @@ type AgentBindingState = {
   groups?: Array<{ group_id: string; platform: string }>;
   kbIds: string[];
   mcpServers: string[];
-  oauth: Array<{ run_as: string; service_id: string }>;
   secrets: Array<{ env_name: string; mode: string; status: string }>;
   skills: Array<{ enabled: boolean; skill_name: string }>;
   users: string[];
@@ -108,21 +107,15 @@ function installAgentBindingHandlers({
     http.get(`${API_BASE_URL}/admin/agents/:name/skills`, ({ params }) =>
       HttpResponse.json(bindingsByAgent[String(params.name)].skills)
     ),
-    http.get(`${API_BASE_URL}/admin/agents/:name/bindings`, ({ params }) =>
-      HttpResponse.json({
-        mcp_servers: bindingsByAgent[String(params.name)].mcpServers,
-        users: bindingsByAgent[String(params.name)].users,
-        groups: bindingsByAgent[String(params.name)].groups ?? [],
-      })
+    http.get(`${API_BASE_URL}/admin/agents/:name/users`, ({ params }) =>
+      HttpResponse.json(bindingsByAgent[String(params.name)].users)
     ),
-    http.get(`${API_BASE_URL}/admin/agents/:name/bindings/oauth`, ({ params }) => {
-      const oauth = bindingsByAgent[String(params.name)].oauth;
-      return HttpResponse.json({
-        agent: String(params.name),
-        connector_ids: oauth.map((item) => item.service_id),
-        service_grants: oauth,
-      });
-    }),
+    http.get(`${API_BASE_URL}/admin/agents/:name/groups`, ({ params }) =>
+      HttpResponse.json(bindingsByAgent[String(params.name)].groups ?? [])
+    ),
+    http.get(`${API_BASE_URL}/admin/agents/:name/mcp`, ({ params }) =>
+      HttpResponse.json(bindingsByAgent[String(params.name)].mcpServers)
+    ),
     http.get(`${API_BASE_URL}/admin/agents/:name/kbs`, ({ params }) =>
       HttpResponse.json({
         agent: String(params.name),
@@ -163,12 +156,6 @@ function installAgentBindingHandlers({
           tool_count: 8,
           transport: 'stdio',
         },
-      ])
-    ),
-    http.get(`${API_BASE_URL}/admin/connectors`, () =>
-      HttpResponse.json([
-        { display_name: 'GitHub', enabled: true, id: 'github', protocol: 'oauth2' },
-        { display_name: 'Slack', enabled: true, id: 'slack', protocol: 'oauth2' },
       ])
     ),
     http.get(`${API_BASE_URL}/admin/kb`, () =>
@@ -299,7 +286,6 @@ describe('agents list page lifecycle', () => {
       alpha: {
         kbIds: [],
         mcpServers: [],
-        oauth: [],
         secrets: [],
         skills: [],
         users: [],
@@ -307,7 +293,6 @@ describe('agents list page lifecycle', () => {
       beta: {
         kbIds: [],
         mcpServers: [],
-        oauth: [],
         secrets: [],
         skills: [],
         users: [],
@@ -476,7 +461,7 @@ describe('agents list page lifecycle', () => {
     ];
     installAgentBindingHandlers({
       agents,
-      bindingsByAgent: { alpha: { kbIds: [], mcpServers: [], oauth: [], secrets: [], skills: [], users: [] } },
+      bindingsByAgent: { alpha: { kbIds: [], mcpServers: [], secrets: [], skills: [], users: [] } },
       detailByAgent: {
         alpha: { agent: 'alpha', allowed_tools: [], status: 'enabled', system_prompt: 'p' },
       },
@@ -535,7 +520,6 @@ describe('agent configure page bindings', () => {
       alpha: {
         kbIds: ['support'],
         mcpServers: ['filesystem'],
-        oauth: [{ run_as: 'agent', service_id: 'github' }],
         secrets: [{ env_name: 'FLEETENT_ALPHA_API_KEY', mode: 'inject', status: 'unset' }],
         skills: [
           { enabled: true, skill_name: 'crm-ops' },
@@ -565,11 +549,11 @@ describe('agent configure page bindings', () => {
         );
         return HttpResponse.json({ agent: 'alpha', enabled: true, skill_name: 'incident-bridge' });
       }),
-      http.post(`${API_BASE_URL}/admin/agents/alpha/bindings/mcp/github`, () => {
+      http.post(`${API_BASE_URL}/admin/agents/alpha/mcp/github`, () => {
         bindingsByAgent.alpha.mcpServers = ['filesystem', 'github'];
         return HttpResponse.json({ agent: 'alpha', bound: true, server_id: 'github' });
       }),
-      http.delete(`${API_BASE_URL}/admin/agents/alpha/bindings/mcp/filesystem`, () => {
+      http.delete(`${API_BASE_URL}/admin/agents/alpha/mcp/filesystem`, () => {
         bindingsByAgent.alpha.mcpServers = ['github'];
         return HttpResponse.json({ agent: 'alpha', bound: false, server_id: 'filesystem' });
       }),
@@ -582,15 +566,15 @@ describe('agent configure page bindings', () => {
         bindingsByAgent.alpha.kbIds = ['sales'];
         return HttpResponse.json({ agent: 'alpha', bound: false, kb_id: 'support' });
       }),
-      http.post(`${API_BASE_URL}/admin/agents/alpha/bindings/users/u2`, () => {
+      http.post(`${API_BASE_URL}/admin/agents/alpha/users/u2`, () => {
         bindingsByAgent.alpha.users = ['u1', 'u2'];
         return HttpResponse.json({ agent: 'alpha', bound: true, user_id: 'u2' });
       }),
-      http.delete(`${API_BASE_URL}/admin/agents/alpha/bindings/users/u1`, () => {
+      http.delete(`${API_BASE_URL}/admin/agents/alpha/users/u1`, () => {
         bindingsByAgent.alpha.users = ['u2'];
         return HttpResponse.json({ agent: 'alpha', bound: false, user_id: 'u1' });
       }),
-      http.post(`${API_BASE_URL}/admin/agents/alpha/bindings/groups`, async ({ request }) => {
+      http.post(`${API_BASE_URL}/admin/agents/alpha/groups`, async ({ request }) => {
         expect(await request.json()).toEqual({ group_id: 'C0123', platform: 'slack' });
         bindingsByAgent.alpha.groups = [
           ...(bindingsByAgent.alpha.groups ?? []),
@@ -598,7 +582,7 @@ describe('agent configure page bindings', () => {
         ];
         return HttpResponse.json({ agent: 'alpha', bound: true, group_id: 'C0123', platform: 'slack' }, { status: 201 });
       }),
-      http.delete(`${API_BASE_URL}/admin/agents/alpha/bindings/groups/slack/C0123`, () => {
+      http.delete(`${API_BASE_URL}/admin/agents/alpha/groups/slack/C0123`, () => {
         bindingsByAgent.alpha.groups = (bindingsByAgent.alpha.groups ?? []).filter(
           (group) => !(group.platform === 'slack' && group.group_id === 'C0123')
         );
@@ -749,7 +733,6 @@ describe('agent configure page bindings', () => {
       alpha: {
         kbIds: ['support'],
         mcpServers: ['filesystem'],
-        oauth: [{ run_as: 'agent', service_id: 'github' }],
         secrets: [{ env_name: 'FLEETENT_ALPHA_API_KEY', mode: 'inject', status: 'set' }],
         skills: [{ enabled: true, skill_name: 'crm-ops' }],
         users: ['u1'],
@@ -797,7 +780,6 @@ describe('agents list page status display', () => {
   const emptyBindings = {
     kbIds: [],
     mcpServers: [],
-    oauth: [],
     secrets: [],
     skills: [],
     users: [],
@@ -884,7 +866,7 @@ describe('agents configure page model binding', () => {
 
     installAgentBindingHandlers({
       agents,
-      bindingsByAgent: { alpha: { kbIds: [], mcpServers: [], oauth: [], secrets: [], skills: [], users: [] } },
+      bindingsByAgent: { alpha: { kbIds: [], mcpServers: [], secrets: [], skills: [], users: [] } },
       detailByAgent,
     });
 
@@ -940,7 +922,6 @@ describe('agents configure page model binding', () => {
       alpha: {
         kbIds: [],
         mcpServers: [],
-        oauth: [],
         secrets: [{ env_name: 'FLEETENT_OPENAI_KEY', mode: 'inject', status: 'unset' }],
         skills: [],
         users: [],
@@ -1000,7 +981,6 @@ describe('agents configure page model binding', () => {
       alpha: {
         kbIds: [],
         mcpServers: [],
-        oauth: [],
         secrets: [{ env_name: 'FLEETENT_OPENAI_KEY', mode: 'inject', status: 'set' }],
         skills: [],
         users: [],
@@ -1060,7 +1040,7 @@ describe('agents configure page IM connector overrides', () => {
 
     installAgentBindingHandlers({
       agents,
-      bindingsByAgent: { alpha: { kbIds: [], mcpServers: [], oauth: [], secrets: [], skills: [], users: [] } },
+      bindingsByAgent: { alpha: { kbIds: [], mcpServers: [], secrets: [], skills: [], users: [] } },
       detailByAgent,
     });
 
@@ -1112,7 +1092,7 @@ describe('agents configure page IM connector overrides', () => {
 
     installAgentBindingHandlers({
       agents,
-      bindingsByAgent: { alpha: { kbIds: [], mcpServers: [], oauth: [], secrets: [], skills: [], users: [] } },
+      bindingsByAgent: { alpha: { kbIds: [], mcpServers: [], secrets: [], skills: [], users: [] } },
       detailByAgent,
       role: 'viewer',
     });

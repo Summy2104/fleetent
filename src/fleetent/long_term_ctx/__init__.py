@@ -7,10 +7,15 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any, Literal
 
+import httpx
+
 from fleetent import memory
 from fleetent.config import LongTermContextSettings, Settings
 from fleetent.db import SQLiteDatabase, create_database
+from fleetent.identity import INGRESS_PRINCIPAL_HEADER, Principal, encode_ingress_principal
 from fleetent.knowledge_base.core import KnowledgeStore
+from fleetent.knowledge_base.core.models import KnowledgeChunk
+from fleetent.knowledge_base.planner import KnowledgeSearchOptions, KnowledgeSearchPlan
 from fleetent.knowledge_base.retrieval.search import SearchMode
 from fleetent.knowledge_base.retrieval.search import search as kb_search
 from fleetent.memory import agent_memory
@@ -163,7 +168,10 @@ class _ContextCandidate:
     token_estimate: int
 
 
-KnowledgeProvider = Callable[[str, str, str, int], Awaitable[list[object]]]
+KnowledgeProvider = Callable[
+    [Principal, str, list[str], int, KBRetrievalAuditContext | None],
+    Awaitable[list[KnowledgeChunk]],
+]
 
 
 # Back-compat seam for existing monkeypatch-based unit and integration tests that
@@ -189,8 +197,167 @@ async def _kb_search_compat(
     )
 
 
-knowledge_base = SimpleNamespace(search=_kb_search_compat)
+def _plan_knowledge_search_compat(
+    query: str, options: KnowledgeSearchOptions
+) -> KnowledgeSearchPlan:
+    from fleetent.knowledge_base import plan_knowledge_search
 
+    return plan_knowledge_search(query, options)
+
+
+async def _execute_knowledge_search_plan_compat(plan: KnowledgeSearchPlan) -> list[object]:
+    from fleetent.knowledge_base import execute_knowledge_search_plan
+
+    return list(await execute_knowledge_search_plan(plan))
+
+
+knowledge_base = SimpleNamespace(
+    search=_kb_search_compat,
+    plan_knowledge_search=_plan_knowledge_search_compat,
+    execute_knowledge_search_plan=_execute_knowledge_search_plan_compat,
+)
+
+
+class LocalKnowledgeProvider:
+    """Default knowledge provider backed by the local knowledge base."""
+
+    async def __call__(
+        self,
+        principal: Principal,
+        query: str,
+        kb_ids: list[str],
+        limit: int,
+        audit_context: KBRetrievalAuditContext | None,
+    ) -> list[KnowledgeChunk]:
+        if not kb_ids:
+            return []
+
+        from fleetent import agent_config
+
+        agent = agent_config.active_agent_or_default()
+        policy = agent.knowledge.retrieval_policy
+        use_planner = bool(getattr(policy, "use_planner", False))
+        if use_planner:
+            plan = knowledge_base.plan_knowledge_search(
+                query,
+                KnowledgeSearchOptions(
+                    tenant_id=principal.tenant_id,
+                    kb_ids=kb_ids,
+                    limit=limit,
+                    rerank=bool(getattr(policy, "rerank", False)),
+                ),
+            )
+            return list(await knowledge_base.execute_knowledge_search_plan(plan))
+
+        return list(
+            await knowledge_base.search(
+                query,
+                tenant_id=principal.tenant_id,
+                kb_ids=kb_ids,
+                limit=limit,
+                mode=policy.mode,
+                audit_context=audit_context,
+            )
+        )
+
+
+def _knowledge_chunk_to_wire_dict(chunk: KnowledgeChunk) -> dict[str, object]:
+    return {
+        "id": chunk.id,
+        "document_id": chunk.document_id,
+        "tenant_id": chunk.tenant_id,
+        "kb_id": chunk.kb_id,
+        "filename": chunk.filename,
+        "content": chunk.content,
+        "position": chunk.position,
+        "score": chunk.score,
+        "source": chunk.source,
+        "source_url": chunk.source_url,
+        "metadata": dict(chunk.metadata),
+    }
+
+
+def _knowledge_chunk_from_wire_dict(payload: dict[str, object]) -> KnowledgeChunk:
+    raw_metadata = payload.get("metadata", {})
+    metadata = (
+        {str(key): str(value) for key, value in raw_metadata.items()}
+        if isinstance(raw_metadata, dict)
+        else {}
+    )
+    return KnowledgeChunk(
+        id=str(payload["id"]),
+        document_id=str(payload["document_id"]),
+        tenant_id=str(payload["tenant_id"]),
+        kb_id=str(payload["kb_id"]),
+        filename=str(payload["filename"]),
+        content=str(payload["content"]),
+        position=int(payload["position"]),
+        score=float(payload["score"]),
+        source=str(payload["source"]),
+        source_url=str(payload["source_url"]) if payload.get("source_url") is not None else None,
+        metadata=metadata,
+    )
+
+
+class HttpKnowledgeProvider:
+    """Knowledge provider backed by a remote HTTP retrieval endpoint."""
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        service_key: str,
+        timeout_seconds: float = 5.0,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._url = url
+        self._service_key = service_key
+        self._timeout_seconds = timeout_seconds
+        self._transport = transport
+
+    async def __call__(
+        self,
+        principal: Principal,
+        query: str,
+        kb_ids: list[str],
+        limit: int,
+        audit_context: KBRetrievalAuditContext | None,
+    ) -> list[KnowledgeChunk]:
+        del audit_context
+        headers = {
+            "Authorization": f"Bearer {self._service_key}",
+            INGRESS_PRINCIPAL_HEADER: encode_ingress_principal(principal),
+        }
+        payload = {
+            "principal": {"user_id": principal.user_id, "tenant_id": principal.tenant_id},
+            "query": query,
+            "kb_ids": kb_ids,
+            "limit": limit,
+        }
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._timeout_seconds,
+                transport=self._transport,
+            ) as client:
+                response = await client.post(self._url, json=payload, headers=headers)
+            response.raise_for_status()
+            body = response.json()
+            return [
+                _knowledge_chunk_from_wire_dict(item)
+                for item in body.get("chunks", [])
+                if isinstance(item, dict)
+            ]
+        except httpx.HTTPError as exc:
+            _logger.warn(
+                "http_knowledge_provider_failed",
+                url=self._url,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            return []
+
+
+_default_knowledge_provider = LocalKnowledgeProvider()
 _knowledge_provider: KnowledgeProvider | None = None
 
 
@@ -281,7 +448,12 @@ async def build_context(
             empty=[],
         ),
     )
-    if not always_candidates and not memories and not knowledge_results and not agent_memory_results:
+    if (
+        not always_candidates
+        and not memories
+        and not knowledge_results
+        and not agent_memory_results
+    ):
         return BuiltContext(
             text="",
             sources=[],
@@ -313,7 +485,8 @@ async def build_context(
 
     return BuiltContext(
         text=_render_context_with_always(always_candidates, selection.included),
-        sources=[candidate.source for candidate in always_candidates] + [candidate.source for candidate in selection.included],
+        sources=[candidate.source for candidate in always_candidates]
+        + [candidate.source for candidate in selection.included],
         budget_metadata=BudgetMetadata(
             effective_budget=policy.max_tokens,
             memory_used_tokens=selection.memory_used_tokens,
@@ -601,9 +774,7 @@ async def _search_knowledge(
     agent_id: str,
     limit: int,
     audit_context: KBRetrievalAuditContext | None = None,
-) -> list[object]:
-    if _knowledge_provider is not None:
-        return await _knowledge_provider(user_id, query, agent_id, limit)
+) -> list[KnowledgeChunk]:
 
     from fleetent import agent_config
 
@@ -615,16 +786,12 @@ async def _search_knowledge(
     kb_ids = [binding.kb_id for binding in bindings]
     if not kb_ids:
         return []
-    tenant_id = bindings[0].tenant_id
-    results = await knowledge_base.search(
-        query,
-        tenant_id=tenant_id,
-        kb_ids=kb_ids,
-        limit=limit,
-        mode=kb.retrieval_policy.mode,
-        audit_context=audit_context,
-    )
-    return list(results)
+    tenant_id = kb.tenant_id
+    if tenant_id is None:
+        raise ValueError("knowledge.bindings must all share the same tenant_id")
+    principal = Principal(user_id=user_id, tenant_id=tenant_id)
+    provider = _knowledge_provider or _default_knowledge_provider
+    return list(await provider(principal, query, kb_ids, limit, audit_context))
 
 
 def _knowledge_source(item: object) -> ContextSource:

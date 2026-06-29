@@ -79,3 +79,14 @@ TBD - created by archiving change connector-credential-injection. Update Purpose
 - **WHEN** 凭证注入或工具执行过程中抛出异常
 - **THEN** 异常文本中不包含凭证 secret
 
+### Requirement: seam 在 platform vault 退役后安全降级
+
+工具凭证的 platform 管理面退役后，`connectors.py` seam 与 `@tool(connector=)` 通道 SHALL 保留。若未注入任何 provider，`get_credential(...)` MUST 经默认 provider 返回 `NeedsConsent`，而不是抛错或中断 agent 运行。
+
+#### Scenario: 未注入 provider 时 connector 工具优雅短路
+- **WHEN** 一个声明 `@tool(connector="github")` 的工具被调度，且当前没有任何 provider 注入
+- **THEN** 调度返回 consent 提示，工具函数不执行，agent 运行不中断
+
+#### Scenario: 无 platform、无管理库表环境仍可完成对话
+- **WHEN** 在无 platform、管理库表不存在的环境执行 `fleetent agent run`
+- **THEN** connector seam 可正常 import，凭证类工具降级为 `NeedsConsent`，对话仍可完成

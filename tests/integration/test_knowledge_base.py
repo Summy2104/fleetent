@@ -106,6 +106,32 @@ async def test_ingest_text_creates_document_and_deterministic_chunks(monkeypatch
     assert [row["position"] for row in chunk_rows] == [0, 1, 2]
 
 
+def test_create_knowledge_base_persists_extraction_enabled(monkeypatch, tmp_path) -> None:
+    _patch_runtime_database(monkeypatch, tmp_path)
+
+    from fleetent.knowledge_base import runtime
+
+    runtime.create_knowledge_base(
+        "tenant-a",
+        "handbook",
+        "Support handbook",
+        extraction_enabled=True,
+    )
+
+    assert runtime.list_knowledge_bases("tenant-a") == [
+        {
+            "tenant_id": "tenant-a",
+            "kb_id": "handbook",
+            "description": "Support handbook",
+            "doc_count": 0,
+            "chunk_count": 0,
+            "last_import": None,
+            "archived": False,
+            "extraction_enabled": True,
+        }
+    ]
+
+
 @pytest.mark.parametrize("content", ["", "   \n\t  "])
 async def test_ingest_text_rejects_empty_content(monkeypatch, tmp_path, content):
     _patch_runtime_database(monkeypatch, tmp_path)

@@ -97,3 +97,40 @@ async def test_search_rejects_unsupported_mode_before_backend_access():
 
     with pytest.raises(ValueError, match="unsupported knowledge search mode: graph"):
         await search("query", mode="graph")
+
+
+def test_list_knowledge_bases_exposes_extraction_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleetent.knowledge_base import runtime
+
+    monkeypatch.setattr(
+        runtime,
+        "_list_knowledge_bases_impl",
+        lambda tenant_id, database=None: [
+            {
+                "tenant_id": tenant_id,
+                "kb_id": "support",
+                "description": "Support handbook",
+                "doc_count": 0,
+                "chunk_count": 0,
+                "last_import": None,
+                "archived_at": None,
+                "extraction_enabled": 1,
+            }
+        ],
+    )
+    monkeypatch.setattr(runtime, "_database", lambda: object())
+
+    rows = runtime.list_knowledge_bases("tenant-a")
+
+    assert rows == [
+        {
+            "tenant_id": "tenant-a",
+            "kb_id": "support",
+            "description": "Support handbook",
+            "doc_count": 0,
+            "chunk_count": 0,
+            "last_import": None,
+            "archived": False,
+            "extraction_enabled": True,
+        }
+    ]

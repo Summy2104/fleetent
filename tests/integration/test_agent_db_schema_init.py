@@ -7,6 +7,7 @@ These tests use real SQLiteDatabase files and verify actual schema state.
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 from fleetent.db import SQLiteDatabase
@@ -216,8 +217,8 @@ def test_init_agent_db_schema_creates_all_agent_tables(tmp_path: Path) -> None:
     try:
         _init_agent_db_schema(data_dir, agent_id="test-agent")
 
-        # KB tables land in tenants/default/kb.db via TenantRouter + migrate-on-open.
-        kb_db_path = tmp_path / "tenants" / "default" / "kb.db"
+        # KB tables land in tenants/default/kb/kb.db via TenantRouter + migrate-on-open.
+        kb_db_path = tmp_path / "tenants" / "default" / "kb" / "kb.db"
         assert kb_db_path.exists()
         kb_tables = _table_names(SQLiteDatabase(path=kb_db_path))
         assert "knowledge_bases" in kb_tables
@@ -320,5 +321,39 @@ def test_init_agent_db_schema_data_dir_no_fleetent_db(tmp_path: Path) -> None:
     try:
         _init_agent_db_schema(data_dir, agent_id="test-agent")
         assert not (data_dir / "fleetent.db").exists(), "fleetent.db must not be created"
+    finally:
+        ss._state_db = original_state_db
+
+
+def test_init_agent_db_schema_migrates_flat_kb_layout_for_standalone_agent(tmp_path: Path) -> None:
+    import fleetent.schedule_store as ss
+    from fleetent.runtime.agent_app import _init_agent_db_schema
+
+    tenant_dir = tmp_path / "tenants" / "default"
+    tenant_dir.mkdir(parents=True)
+    with sqlite3.connect(tenant_dir / "kb.db") as conn:
+        conn.execute("CREATE TABLE legacy_marker (value TEXT)")
+        conn.execute("INSERT INTO legacy_marker(value) VALUES ('kb')")
+        conn.commit()
+    with sqlite3.connect(tenant_dir / "kb_vectors.db") as conn:
+        conn.execute("CREATE TABLE legacy_vector_marker (value TEXT)")
+        conn.execute("INSERT INTO legacy_vector_marker(value) VALUES ('vec')")
+        conn.commit()
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    original_state_db = ss._state_db
+    try:
+        _init_agent_db_schema(data_dir, agent_id="test-agent")
+
+        kb_dir = tmp_path / "tenants" / "default" / "kb"
+        assert (kb_dir / "kb.db").exists()
+        assert (kb_dir / "kb_vectors.db").exists()
+        assert not (tmp_path / "tenants" / "default" / "kb.db").exists()
+        assert not (tmp_path / "tenants" / "default" / "kb_vectors.db").exists()
+        with sqlite3.connect(kb_dir / "kb.db") as conn:
+            assert conn.execute("SELECT value FROM legacy_marker").fetchone() == ("kb",)
+        with sqlite3.connect(kb_dir / "kb_vectors.db") as conn:
+            assert conn.execute("SELECT value FROM legacy_vector_marker").fetchone() == ("vec",)
     finally:
         ss._state_db = original_state_db

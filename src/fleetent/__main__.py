@@ -150,6 +150,12 @@ def main(argv: list[str] | None = None) -> None:
         kb_worker.main(argv[1:])
         return
 
+    if argv and argv[0] == "kb-serve":
+        from fleetent.knowledge_base import serve as kb_serve
+
+        kb_serve.main(argv[1:])
+        return
+
     user_input = " ".join(argv) if argv else sys.stdin.read().strip()
     if not user_input:
         print(

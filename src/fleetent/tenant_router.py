@@ -6,8 +6,8 @@ Two flat typed resolvers:
 
 SQLite backend layout under ``<fleetent_home>/``::
 
-  tenants/<tenant_id>/kb.db                                 — KB relation tables (Y-managed)
-  tenants/<tenant_id>/kb_vectors.db                         — KB vector store
+  tenants/<tenant_id>/kb/kb.db                              — KB relation tables (Y-managed)
+  tenants/<tenant_id>/kb/kb_vectors.db                      — KB vector store
   tenants/<tenant_id>/agents/<agent_id>/data/agent_state.db — state + agent_memory_items
   tenants/<tenant_id>/agents/<agent_id>/data/agent_vectors.db — mem:* + agentmem:* vector store
 
@@ -25,7 +25,11 @@ from pathlib import Path
 from typing import Protocol, cast
 
 from fleetent.db import ReadOnlySQLiteDatabase, SQLiteDatabase, create_substrate
+from fleetent.paths import base_dir, tenant_kb_dir
 from fleetent.vector_store.backend import SQLiteVectorBackend, VectorBackend
+
+_KB_FILENAMES = ("kb.db", "kb_vectors.db")
+_SQLITE_SIDECAR_SUFFIXES = ("", "-wal", "-shm")
 
 
 @dataclass(frozen=True)
@@ -110,9 +114,10 @@ class SQLiteTenantBackend:
     def resolve(self, tenant_id: str) -> KbScope:
         tenant_dir = self.data_dir / "tenants" / tenant_id
         tenant_dir.mkdir(parents=True, exist_ok=True)
-        kb_db = cast(SQLiteDatabase, create_substrate(f"sqlite:///{tenant_dir / 'kb.db'}"))
+        kb_dir = ensure_tenant_kb_dir(self.data_dir, tenant_id)
+        kb_db = cast(SQLiteDatabase, create_substrate(f"sqlite:///{kb_dir / 'kb.db'}"))
         kb_vector_backend = SQLiteVectorBackend(
-            database_url=f"sqlite:///{tenant_dir / 'kb_vectors.db'}"
+            database_url=f"sqlite:///{kb_dir / 'kb_vectors.db'}"
         )
         return KbScope(
             tenant_id=tenant_id,
@@ -153,3 +158,25 @@ class TenantRouter:
     def agent_scope(self, tenant_id: str, agent_id: str) -> AgentScope:
         """Resolve *(tenant_id, agent_id)* to the agent's private state DB and vector backend."""
         return self._backend.resolve_agent(tenant_id, agent_id)
+
+
+def ensure_tenant_kb_dir(data_dir: Path, tenant_id: str) -> Path:
+    """Provision ``tenants/<tenant>/kb`` and migrate any legacy flat KB files into it."""
+    tenant_root = data_dir / "tenants" / tenant_id
+    tenant_root.mkdir(parents=True, exist_ok=True)
+    kb_dir = data_dir / tenant_kb_dir(tenant_id).relative_to(base_dir())
+    if kb_dir.exists():
+        return kb_dir
+
+    legacy_kb = tenant_root / "kb.db"
+    if legacy_kb.exists():
+        kb_dir.mkdir(parents=True, exist_ok=True)
+        for filename in _KB_FILENAMES:
+            for suffix in _SQLITE_SIDECAR_SUFFIXES:
+                source = tenant_root / f"{filename}{suffix}"
+                if source.exists():
+                    source.replace(kb_dir / f"{filename}{suffix}")
+        return kb_dir
+
+    kb_dir.mkdir(parents=True, exist_ok=True)
+    return kb_dir

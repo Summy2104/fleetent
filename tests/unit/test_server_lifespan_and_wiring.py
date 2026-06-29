@@ -161,6 +161,8 @@ def test_wire_agent_store_seams_wires_dual_state_read_seams() -> None:
 def test_server_does_not_import_run_stream() -> None:
     source = Path(server.__file__).read_text(encoding="utf-8")
     assert "from fleetent.runtime import run_stream" not in source
+    assert "vault" + "_provider" not in source
+    assert "set_provider(" not in source
 
 
 async def test_no_playground_scheduler(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -170,13 +172,7 @@ async def test_no_playground_scheduler(monkeypatch: pytest.MonkeyPatch) -> None:
         server.user_store, "set_api_key_resolver", lambda fn: resolver_calls.append(("api", fn))
     )
     monkeypatch.setattr(
-        server.connectors, "set_provider", lambda fn: resolver_calls.append(("provider", fn))
-    )
-    monkeypatch.setattr(
         server, "set_im_identity_resolver", lambda fn: resolver_calls.append(("im", fn))
-    )
-    monkeypatch.setattr(
-        server.agent_store, "set_delete_agent_hook", lambda fn: resolver_calls.append(("hook", fn))
     )
     monkeypatch.setattr(server, "scan_skills", lambda: resolver_calls.append(("skills", None)))
     monkeypatch.setattr(
@@ -222,13 +218,7 @@ async def test_lifespan_wires_startup_and_shutdown(monkeypatch: pytest.MonkeyPat
         server.user_store, "set_api_key_resolver", lambda fn: resolver_calls.append(("api", fn))
     )
     monkeypatch.setattr(
-        server.connectors, "set_provider", lambda fn: resolver_calls.append(("provider", fn))
-    )
-    monkeypatch.setattr(
         server, "set_im_identity_resolver", lambda fn: resolver_calls.append(("im", fn))
-    )
-    monkeypatch.setattr(
-        server.agent_store, "set_delete_agent_hook", lambda fn: resolver_calls.append(("hook", fn))
     )
     monkeypatch.setattr(server, "scan_skills", lambda: resolver_calls.append(("skills", None)))
     monkeypatch.setattr(
@@ -257,7 +247,6 @@ async def test_lifespan_wires_startup_and_shutdown(monkeypatch: pytest.MonkeyPat
         lambda: (SimpleNamespace(name="admin"), "temp-pass"),
     )
     monkeypatch.setattr("fleetent.integrations.mcp.aclose_all", AsyncMock())
-
     async with server.lifespan(SimpleNamespace()):
         assert ("skills", None) in resolver_calls
         assert ("plugins", None) in resolver_calls
@@ -267,6 +256,7 @@ async def test_lifespan_wires_startup_and_shutdown(monkeypatch: pytest.MonkeyPat
         assert callable(server.chat_admin_api.reset_session)
 
     assert resolver_calls[-1] == ("im", None)
+    assert server.agent_store._delete_agent_hook is None
 
 
 async def test_server_helper_branches(monkeypatch: pytest.MonkeyPatch) -> None:

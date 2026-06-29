@@ -108,3 +108,43 @@ def test_mcp_server_lookup_uses_binding_table_only(monkeypatch) -> None:
     servers = materialize._mcp_servers_for_agent(agent)
 
     assert [server.id for server in servers] == ["github"]
+
+
+def test_authorization_code_auth_config_materializes_to_auth_block(monkeypatch) -> None:
+    monkeypatch.setattr(agent_store, "list_mcp_servers_for_agent", lambda _agent_id: ["crm"])
+    monkeypatch.setattr(
+        materialize.mcp_server_store,
+        "get_mcp_server",
+        lambda agent_id, server_id: {
+            "transport": "http",
+            "url": "https://crm/mcp",
+            "auth_type": "oauth_authorization_code",
+            "auth_config": {
+                "authorization_endpoint": "https://auth.internal/authorize",
+                "token_url": "https://auth.internal/token",
+                "client_id": "fleetent-crm",
+                "scope": "mcp.read",
+                "redirect_path": "/oauth/callback",
+                "client_secret_env": "CRM_OAUTH_SECRET",
+            },
+            "api_key_env": "",
+            "command": "",
+            "args": [],
+            "env": {},
+            "headers": {},
+        },
+    )
+    agent = SimpleNamespace(id=9, mcp_server_ids=[])
+
+    servers = materialize._mcp_servers_for_agent(agent)
+
+    assert len(servers) == 1
+    server = servers[0]
+    assert server.auth_type == "oauth_authorization_code"
+    assert server.auth is not None
+    assert server.auth.grant == "authorization_code"
+    assert server.auth.authorization_endpoint == "https://auth.internal/authorize"
+    assert server.auth.token_url == "https://auth.internal/token"
+    assert server.auth.client_id == "fleetent-crm"
+    assert server.auth.redirect_path == "/oauth/callback"
+    assert server.auth.client_secret_env == "CRM_OAUTH_SECRET"

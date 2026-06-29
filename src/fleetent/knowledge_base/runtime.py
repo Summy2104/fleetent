@@ -244,10 +244,22 @@ async def archive_knowledge_base(tenant_id: str, kb_id: str) -> bool:
     return await _archive_knowledge_base(tenant_id, kb_id)
 
 
-def create_knowledge_base(tenant_id: str, kb_id: str, description: str = "") -> None:
+def create_knowledge_base(
+    tenant_id: str,
+    kb_id: str,
+    description: str = "",
+    *,
+    extraction_enabled: bool = False,
+) -> None:
     """Create a KB entry if it does not already exist."""
 
-    return _create_knowledge_base(tenant_id, kb_id, description, database=_database())
+    return _create_knowledge_base(
+        tenant_id,
+        kb_id,
+        description,
+        extraction_enabled=extraction_enabled,
+        database=_database(),
+    )
 
 
 def update_knowledge_base_description(tenant_id: str, kb_id: str, description: str) -> bool:
@@ -291,7 +303,7 @@ def iter_indexable_knowledge_chunks(
 def list_knowledge_bases(tenant_id: str) -> list[dict[str, object]]:
     """List KB metadata rows for one tenant."""
 
-    rows = list(_list_knowledge_bases_impl(tenant_id))
+    rows = list(_list_knowledge_bases_impl(tenant_id, database=_database()))
     return [
         {
             "tenant_id": str(row["tenant_id"]),
@@ -301,6 +313,7 @@ def list_knowledge_bases(tenant_id: str) -> list[dict[str, object]]:
             "chunk_count": int(row["chunk_count"]),
             "last_import": row["last_import"],
             "archived": row["archived_at"] is not None,
+            "extraction_enabled": bool(int(row["extraction_enabled"])),
         }
         for row in rows
     ]
@@ -318,7 +331,7 @@ def list_documents(tenant_id: str, kb_id: str) -> list[dict[str, object]]:
             "chunks": int(row["chunks"]),
             "created_at": row["created_at"],
         }
-        for row in _list_documents_impl(tenant_id, kb_id)
+        for row in _list_documents_impl(tenant_id, kb_id, database=_database())
     ]
 
 

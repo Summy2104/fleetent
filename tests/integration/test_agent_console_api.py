@@ -13,7 +13,6 @@ import fleetent.platform.agent_management_console.agent_admin_store as store
 import fleetent.platform.agent_management_console.agent_console_api as api
 import fleetent.platform.agent_management_console.agent_im_group_store as agent_im_group_store
 import fleetent.user_store as user_store
-from fleetent.platform.connector_management import agent_service_grant_store
 from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.node_management import node_store, placement_store
 from tests.integration._migration_template import apply_migrations
@@ -278,7 +277,6 @@ def test_archive_blocked_when_only_non_user_references_exist(client, monkeypatch
     ops = agent_store.create_agent("ops", "Ops.", ["shell"])
     agent_store.bind_mcp_server(ops.id, "files", created_by="admin")
     agent_kbs_store.bind("default", "kb-1", ops.id, created_by="admin")
-    agent_service_grant_store.bind(ops.id, "github", run_as="agent", created_by="admin")
     agent_im_group_store.bind(ops.id, "slack", "C123", created_by="admin")
     placement_store.pin_agent(ops.id, node, pinned_by="admin")
     token, _ = _session_for("admin")
@@ -289,7 +287,7 @@ def test_archive_blocked_when_only_non_user_references_exist(client, monkeypatch
     detail = r.json()["detail"]
     assert detail["mcp_servers"] == ["files"]
     assert detail["kbs"] == ["kb-1"]
-    assert detail["service_grants"] == ["github"]
+    assert detail["service_grants"] == []
     assert detail["im_groups"] == [{"platform": "slack", "group_id": "C123"}]
     assert detail["placements"] == [node]
     assert detail["users"] == []

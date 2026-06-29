@@ -4,6 +4,10 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
+
+from fleetent import agent_config
+from fleetent.agent_config import AgentConfigIndex, AgentFile, default_models
 from fleetent.config import LongTermContextSettings
 from fleetent.memory.facts_models import Fact, SearchResult
 
@@ -52,6 +56,28 @@ def _knowledge(source_id: str, content: str, score: float = 1.0) -> SimpleNamesp
 
 def _ltc(**long_term_ctx_kwargs: object) -> LongTermContextSettings:
     return LongTermContextSettings(**long_term_ctx_kwargs)
+
+
+@pytest.fixture(autouse=True)
+def _publish_kb_enabled_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        agent_config,
+        "_index",
+        AgentConfigIndex(
+            agents={
+                "agent-1": AgentFile(
+                    name="agent-1",
+                    version=1,
+                    models=default_models(),
+                    knowledge={
+                        "enabled": True,
+                        "bindings": [{"tenant_id": "tenant-a", "kb_id": "global"}],
+                    },
+                )
+            },
+            default="agent-1",
+        ),
+    )
 
 
 def test_budget_policy_public_api_is_importable():

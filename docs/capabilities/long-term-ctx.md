@@ -203,9 +203,13 @@ memory / knowledge / observability 的接口，未来可以独立成 package，�
 
 **需要单元测试的行为**：
 - 可选调用：available_tokens 为 0 时不调用 provider；knowledge provider disabled 时不调用 KB
-- provider 调用：memory search 被调用；knowledge provider 启用时才调用 knowledge search
+- provider 调用：memory search 被调用；knowledge provider 启用且 `knowledge.bindings` 解析出有效范围时才调用 knowledge search
+- knowledge provider 契约：`set_knowledge_provider()` 注入的 provider 接收 `(principal, query, kb_ids, limit, audit_context)`，返回 `list[KnowledgeChunk]`
+- 默认 provider：未注入 override 时使用内置 `LocalKnowledgeProvider`，其 search / planner 两路行为与 `_search_knowledge()` 旧本地分支保持等价
+- HTTP provider：`HttpKnowledgeProvider` 通过 `POST {url}` 调中立 wire 协议，请求体为 `principal/query/kb_ids/limit`，响应体为 `{chunks:[KnowledgeChunk JSON]}`；请求头带 `Authorization: Bearer <service-key>` 与 `X-Fleetent-Principal`
 - token 预算截断：超出上限时正确截断，且 memory 条目先于 knowledge 条目保留
 - 单侧空结果：任意一侧返回空列表时不报错，正常合并另一侧结果
+- 失败降级：knowledge provider 超时或抛异常时记录 warning、该路径降级为空，不中断 memory / always-facts / agent_memory 其余路径
 - 格式化输出：memory 区段和 knowledge 区段分区正确，无结果或 disabled provider 的区段不出现在输出中
 - 来源摘要：返回 sources 仅包含被实际注入的结果，供 agent-runtime 交给 observability 记录
 
@@ -226,6 +230,6 @@ memory / knowledge / observability 的接口，未来可以独立成 package，�
 - [ ] memory 与 knowledge 的 token 分配：各自固定比例，还是完全按相关度动态分配？（负责人：待认领）
 - [ ] 格式化模板：memory 和 knowledge 区段的具体格式由谁定义，是否需要可配置？（负责人：待认领）
 - [x] knowledge provider 注入方式：通过 config 开关、依赖注入参数，还是模块级 provider registry？（负责人：待认领）
-  - 已实现：优先使用 `set_knowledge_provider()` 注入（测试/override 场景）；生产路径通过 `agent.yaml` 的 `knowledge.enabled + knowledge.bindings` 配置驱动（`_search_knowledge()` 中按优先级分支）。
+  - 已实现：`_search_knowledge()` 先解析 `agent.yaml` 的 `knowledge.enabled + knowledge.bindings` → `kb_ids` / `tenant_id`，在 long-term-ctx 内重建 `Principal(user_id, tenant_id)`，再统一调用当前 provider。未注入 override 时默认使用内置 `LocalKnowledgeProvider`；显式配置 `knowledge.provider.type=http` 时，agent boot 注入 `HttpKnowledgeProvider(url, auth_ref)`；override provider 仅在给定 `kb_ids` 范围内检索，不负责自行解析 binding / policy。
 - [x] graph_search 触发决策：等 knowledge-base graph search 进入实现前再定；本阶段不接入 graph_search。（负责人：待认领）
   - graph_search 技术实现已完成（knowledge-base-graph-search 已归档，depth 0/1 可用）；是否接入 `build_context()` 默认路径待 Pilot 反馈后决定（当前通过 `plan_knowledge_search()` 显式调用）。

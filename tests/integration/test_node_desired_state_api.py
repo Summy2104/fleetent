@@ -267,6 +267,61 @@ def test_get_desired_state_exports_knowledge_bindings_without_source_constructio
     assert "confluence" not in str(delivered["config"])
 
 
+def test_get_desired_state_marks_kb_binding_changes_for_resync(node_client: TestClient) -> None:
+    import fleetent.auth as auth
+    from fleetent import agent_store
+    from fleetent.platform.agent_management_console import agent_admin_api
+    from fleetent.platform.node_management import node_store, placement_store
+    from fleetent.platform.tenancy import store as tenancy_store
+
+    tenancy_store.create_tenant(id="acme", name="Acme")
+    node_key, _ = node_store.register_node("node-a")
+    agent = agent_store.create_agent("support", "Help users", ["shell"], tenant_id="acme")
+    placement_store.pin_agent(agent.id, "node-a")
+    admin_user, _ = user_store.create_user("admin-user")
+    user_store.set_role(admin_user.id, "admin")
+    admin_session = auth.create_session(admin_user.id)
+    app = FastAPI()
+    app.include_router(agent_admin_api.router)
+    app.include_router(node_client.app.router)
+    client = TestClient(app)
+
+    before = client.get(
+        "/nodes/node-a/desired-state",
+        headers={"Authorization": f"Bearer {node_key}"},
+    )
+    assert before.status_code == 200
+    initial_epoch = before.json()["agents"][0]["knowledge_resync_epoch"]
+
+    bind_resp = client.post(
+        "/admin/agents/support/kbs",
+        headers={"Authorization": f"Session {admin_session}"},
+        json={"kb_id": "support-kb"},
+    )
+    assert bind_resp.status_code == 200
+    after_bind = client.get(
+        "/nodes/node-a/desired-state",
+        headers={"Authorization": f"Bearer {node_key}"},
+    )
+    assert after_bind.status_code == 200
+    bind_epoch = after_bind.json()["agents"][0]["knowledge_resync_epoch"]
+
+    unbind_resp = client.delete(
+        "/admin/agents/support/kbs/support-kb",
+        headers={"Authorization": f"Session {admin_session}"},
+    )
+    assert unbind_resp.status_code == 200
+    after_unbind = client.get(
+        "/nodes/node-a/desired-state",
+        headers={"Authorization": f"Bearer {node_key}"},
+    )
+    assert after_unbind.status_code == 200
+    unbind_epoch = after_unbind.json()["agents"][0]["knowledge_resync_epoch"]
+
+    assert bind_epoch != initial_epoch
+    assert unbind_epoch != bind_epoch
+
+
 def test_get_desired_state_includes_skill_manifest_and_bundle_download_is_immutable(
     node_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
