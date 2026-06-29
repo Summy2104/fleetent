@@ -11,7 +11,7 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: 'bash -lc "yarn build && yarn preview"',
+    command: 'bash -lc "pnpm build && pnpm preview"',
     cwd: __dirname,
     url: 'http://127.0.0.1:4173',
     reuseExistingServer: !process.env.CI,

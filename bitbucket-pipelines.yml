@@ -3,7 +3,7 @@ image: python:3.12
 definitions:
   caches:
     uv: ~/.cache/uv
-    yarn: frontend/node_modules
+    pnpm: ~/.local/share/pnpm
   steps:
     - step: &unit-coverage
         name: unit tests + coverage
@@ -24,10 +24,10 @@ definitions:
         # so we skip the per-run apt/nodesource install the python:3.12 image needed.
         image: node:22
         caches:
-          - yarn
+          - pnpm
         script:
           - corepack enable
-          - yarn --version
+          - pnpm --version
           - make frontend-install
           - make frontend-build
           - make test-frontend

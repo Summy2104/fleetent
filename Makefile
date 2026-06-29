@@ -75,15 +75,15 @@ typecheck: ## Type-check with mypy
 check: lint typecheck ## Run lint + typecheck
 
 frontend-install: ## Install frontend dependencies
-	yarn --cwd frontend install --frozen-lockfile
+	pnpm --dir frontend install --frozen-lockfile
 
 frontend-build: ## Build frontend static assets
-	yarn --cwd frontend build
+	pnpm --dir frontend run build
 
 test-frontend: ## Run frontend tests, coverage, typecheck, and lint
-	yarn --cwd frontend vitest run --coverage
-	yarn --cwd frontend tsc --noEmit
-	yarn --cwd frontend eslint .
+	pnpm --dir frontend run test
+	pnpm --dir frontend run typecheck
+	pnpm --dir frontend run lint
 
 platform-help: ## Show platform CLI help
 	uv run fleetent platform --help

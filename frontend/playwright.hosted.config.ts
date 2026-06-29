@@ -15,7 +15,7 @@ mkdir -p "${smokeDir}"
 export FLEETENT_HOME="${smokeDir}/home"
 export DATABASE_URL="sqlite:///${smokeDir}/management.db"
 export ANTHROPIC_API_KEY="test-key"
-yarn --cwd frontend build >/dev/null
+pnpm --dir frontend build >/dev/null
 uv run alembic upgrade head >/dev/null
 uv run python - <<'"'"'PY'"'"'
 import fleetent.agent_store as agent_store
