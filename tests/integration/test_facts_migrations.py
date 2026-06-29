@@ -124,15 +124,18 @@ def _legacy_pre_rename_migrations() -> list[tuple[int, str]]:
 
     The pre-rename binary numbered ``mcp_user_tokens`` as v50 and never had the
     facts→memory_items rename steps.  We rebuild that exact list by dropping the
-    two rename steps (identified by their SQL bodies) and renumbering the
-    remainder contiguously, so applying it reproduces a real production DB left
-    at ``user_version = 50`` with a populated ``facts`` table and the legacy
-    free-text ``memory_items`` table still present.
+    two rename steps (identified by their SQL bodies) — plus any migrations appended
+    *after* them (e.g. the mcp-per-user-apikey ``credential_kind`` column), which the
+    v50-era binary never had — and renumbering the remainder contiguously, so applying
+    it reproduces a real production DB left at ``user_version = 50`` with a populated
+    ``facts`` table and the legacy free-text ``memory_items`` table still present.
     """
     kept = [
         sql
         for _v, sql in AGENT_STATE_MIGRATIONS
-        if "INSERT INTO memory_items SELECT" not in sql and "fact_edges_new" not in sql
+        if "INSERT INTO memory_items SELECT" not in sql
+        and "fact_edges_new" not in sql
+        and "ADD COLUMN credential_kind" not in sql
     ]
     return [(i + 1, sql) for i, sql in enumerate(kept)]
 

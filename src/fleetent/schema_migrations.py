@@ -15,10 +15,13 @@ Usage::
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from pathlib import Path
 
 from fleetent.db import SQLiteDatabase
+
+logger = logging.getLogger(__name__)
 
 
 class SchemaTooNewError(RuntimeError):
@@ -85,7 +88,7 @@ def _apply_step(db_path: Path, version: int, sql: str) -> None:
         conn.execute("BEGIN")
         try:
             for statement in _split_sql_statements(sql):
-                conn.execute(statement)
+                _execute_idempotent(conn, statement, version)
             conn.execute(f"PRAGMA user_version = {version}")
             conn.execute("COMMIT")
         except Exception as exc:
@@ -93,6 +96,30 @@ def _apply_step(db_path: Path, version: int, sql: str) -> None:
             raise MigrationError(f"Migration step v{version} failed: {exc}") from exc
     finally:
         conn.close()
+
+
+def _execute_idempotent(conn: sqlite3.Connection, statement: str, version: int) -> None:
+    """Execute one migration statement, tolerating a benign already-applied ADD COLUMN.
+
+    ``CREATE TABLE IF NOT EXISTS`` already lets a table another authority created (Alembic,
+    in mixed-schema test DBs / the dual-authority ``mcp_user_tokens``) be a no-op. SQLite has
+    no ``ADD COLUMN IF NOT EXISTS``, so an ``ALTER TABLE ... ADD COLUMN`` whose column is
+    already present raises ``duplicate column name``; treat that as already-applied (skip,
+    keep the transaction, advance the version). Every other failure propagates.
+    """
+    try:
+        conn.execute(statement)
+    except sqlite3.OperationalError as exc:
+        if _is_benign_duplicate_column(statement, exc):
+            logger.info("migration_add_column_already_present v=%d stmt=%r", version, statement)
+            return
+        raise
+
+
+def _is_benign_duplicate_column(statement: str, exc: sqlite3.OperationalError) -> bool:
+    """Whether *exc* is a 'duplicate column name' for an ``ADD COLUMN`` (already applied)."""
+    lowered = statement.lower()
+    return "duplicate column name" in str(exc).lower() and "add column" in lowered
 
 
 def _split_sql_statements(sql: str) -> list[str]:
