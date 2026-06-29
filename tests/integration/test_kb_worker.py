@@ -1,3 +1,5 @@
+import sqlite3
+
 import pytest
 
 from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
@@ -87,3 +89,49 @@ def test_run_once_retries_failed_job_until_max_attempts(tmp_path, monkeypatch: p
     assert failed["status"] == "failed"
     assert failed["attempts"] == 2
     assert "unknown kb ingest job type" in str(failed["last_error"])
+
+
+def test_has_active_worker_when_recent_claim_exists(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    _prepare_management_db(tmp_path, monkeypatch)
+
+    from fleetent import kb_ingest_jobs
+
+    job = kb_ingest_jobs.enqueue_job(
+        job_type="import_document",
+        tenant_id="tenant-a",
+        kb_id="handbook",
+        connector_ref={"source": "guide.md", "content": "hello", "document_format": "markdown"},
+    )
+    claimed = kb_ingest_jobs.claim_job(str(job["id"]))
+
+    assert claimed is not None
+    assert kb_ingest_jobs.has_active_worker(stale_after_seconds=60) is True
+
+
+def test_has_no_active_worker_when_pending_job_has_stale_claim_age(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    _prepare_management_db(tmp_path, monkeypatch)
+
+    from fleetent import kb_ingest_jobs
+
+    job = kb_ingest_jobs.enqueue_job(
+        job_type="import_document",
+        tenant_id="tenant-a",
+        kb_id="handbook",
+        connector_ref={"source": "guide.md", "content": "hello", "document_format": "markdown"},
+    )
+    db_path = tmp_path / "management.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE kb_ingest_jobs
+            SET claimed_at = '2000-01-01T00:00:00+00:00',
+                updated_at = '2000-01-01T00:00:00+00:00'
+            WHERE id = ?
+            """,
+            (str(job["id"]),),
+        )
+        conn.commit()
+
+    assert kb_ingest_jobs.has_active_worker(stale_after_seconds=60) is False

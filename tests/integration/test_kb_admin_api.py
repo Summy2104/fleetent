@@ -118,6 +118,12 @@ def _start_worker_once(timeout_seconds: float = 10.0, poll: float = 0.01) -> thr
     return background
 
 
+def _prepare_management_db(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = tmp_path / "management.db"
+    apply_migrations(db_path)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+
+
 # --- auth / role (场景 108) ---------------------------------------------------
 
 
@@ -399,6 +405,49 @@ def test_import_document_enqueues_and_waits_for_result(client, monkeypatch):
         "filename": "paste.md",
         "source": "paste.md",
         "wired": True,
+    }
+
+
+def test_wait_for_kb_ingest_job_returns_in_progress_when_worker_is_active(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    _prepare_management_db(tmp_path, monkeypatch)
+
+    from fleetent import kb_ingest_jobs
+
+    job = kb_ingest_jobs.enqueue_job(
+        job_type="import_document",
+        tenant_id="tenant-a",
+        kb_id="handbook",
+        connector_ref={"source": "guide.md", "content": "hello", "document_format": "markdown"},
+    )
+    kb_ingest_jobs.claim_job(str(job["id"]))
+    monkeypatch.setattr(api, "_KB_INGEST_WAIT_TIMEOUT_SECONDS", 0.0)
+
+    assert api._wait_for_kb_ingest_job(str(job["id"])) == {
+        "job_id": str(job["id"]),
+        "status": "in_progress",
+    }
+
+
+def test_wait_for_kb_ingest_job_returns_degraded_when_no_worker_is_active(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    _prepare_management_db(tmp_path, monkeypatch)
+
+    from fleetent import kb_ingest_jobs
+
+    job = kb_ingest_jobs.enqueue_job(
+        job_type="import_document",
+        tenant_id="tenant-a",
+        kb_id="handbook",
+        connector_ref={"source": "guide.md", "content": "hello", "document_format": "markdown"},
+    )
+    monkeypatch.setattr(api, "_KB_INGEST_WAIT_TIMEOUT_SECONDS", 0.0)
+
+    assert api._wait_for_kb_ingest_job(str(job["id"])) == {
+        "job_id": str(job["id"]),
+        "status": "degraded",
     }
 
 
