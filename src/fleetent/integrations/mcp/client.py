@@ -330,6 +330,18 @@ def project_schemas(schemas: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def get_registered_server(server_id: str) -> McpServerConfig | None:
+    """Public lookup of a registered server config by id (any agent scope), or None.
+
+    Used by managed per-user OAuth wiring to read a server's flattened OAuth fields when
+    registering pending-auth, without importing the internal registry across packages.
+    """
+    for (_scope, sid), server in _server_registry.items():
+        if sid == server_id:
+            return server
+    return None
+
+
 def is_server_available(server: McpServerConfig) -> bool:
     """Whether a server's tools may be exposed now: connection healthy AND, for
     oauth2, auth available (MCP4 D1). Pure read of per-server state, no side effects."""

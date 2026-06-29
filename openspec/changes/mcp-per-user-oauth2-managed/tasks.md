@@ -30,11 +30,11 @@
 
 ## 5. agent managed resolver + 缓存 + 重取 + redirect 落点
 
-- [ ] 5.1 写测试(红):managed 注入的 resolver 经 loopback 通道取 token,返回 `UserToken` 仅含 access_token(refresh_token=None)
-- [ ] 5.2 实现(绿):managed 启动注入 `set_user_token_resolver`(经 loopback 通道)
-- [ ] 5.3 写测试(红):进程内短 TTL 缓存命中不打 node;过期 / MCP 401 触发经通道重取;未注入 resolver 回落本地库(standalone 不变)
-- [ ] 5.4 实现(绿):agent 进程内短 TTL 缓存 + 过期/401 重取
-- [ ] 5.5 写测试(红)+ 实现(绿):managed 下授权发起 `redirect_uri` 指向 platform 回调,发链接前经通道登记 pending-auth(standalone 仍指向 agent 自身回调,逻辑同源)
+- [x] 5.1 写测试(红):managed 注入的 resolver 经 loopback 通道取 token,返回 `UserToken` 仅含 access_token(refresh_token=None)
+- [x] 5.2 实现(绿):managed 启动注入 `set_user_token_resolver`(经 loopback 通道)
+- [x] 5.3 写测试(红):进程内短 TTL 缓存命中不打 node;过期 / MCP 401 触发经通道重取;未注入 resolver 回落本地库(standalone 不变)
+- [x] 5.4 实现(绿):agent 进程内短 TTL 缓存 + 过期/401 重取
+- [x] 5.5 写测试(红)+ 实现(绿):managed 下授权发起 `redirect_uri` 指向 platform 回调,发链接前经通道登记 pending-auth(standalone 仍指向 agent 自身回调,逻辑同源)
 
 ## 6. 集成闭环 + 守护 + 收尾
 
