@@ -38,7 +38,7 @@
 
 ## 6. 集成闭环 + 守护 + 收尾
 
-- [ ] 6.1 写集成测试(红→绿):managed happy-path 端到端(无 token→需授权→回调换 token 入管理库→后续调用经 node 取 token→成功),mock 授权服务器 token 端点
-- [ ] 6.2 写测试(红→绿):无 platform 时 standalone per-user OAuth 仍跑通(注入缝不注入,回落本地);契约守护——agent 不 import platform、refresh_token/client_secret 不出 platform
+- [x] 6.1 写集成测试(红→绿):managed happy-path 端到端(无 token→需授权→回调换 token 入管理库→后续调用经 node 取 token→成功),mock 授权服务器 token 端点
+- [x] 6.2 写测试(红→绿):无 platform 时 standalone per-user OAuth 仍跑通(注入缝不注入,回落本地);契约守护——agent 不 import platform、refresh_token/client_secret 不出 platform
 - [ ] 6.3 跑 `make test-pr` + `make test-integration-ci`,对照 main 基线无新增失败;模块边界 + 层边界检查通过
 - [ ] 6.4 openspec validate 通过;归档前确认所有 checkbox 为 [x]
