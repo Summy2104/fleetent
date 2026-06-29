@@ -24,9 +24,9 @@
 
 ## 4. node agent→node 同步 loopback 通道
 
-- [ ] 4.1 写测试(红):node loopback 通道收 oauth-pending/oauth-token 请求 → 持 service key 转发对应 platform 端点 → 同步返回;缺/错凭据被拒;非这两类请求被拒
-- [ ] 4.2 实现(绿):node loopback 同步通道 + 转发到 platform 端点(node 持 service key)
-- [ ] 4.3 写测试(红)+ 实现(绿):node spawn agent 时经 env 注入 loopback 通道地址 + 短凭据
+- [x] 4.1 写测试(红):node loopback 通道收 oauth-pending/oauth-token 请求 → 持 service key 转发对应 platform 端点 → 同步返回;缺/错凭据被拒;非这两类请求被拒
+- [x] 4.2 实现(绿):node loopback 同步通道 + 转发到 platform 端点(node 持 service key)
+- [x] 4.3 写测试(红)+ 实现(绿):node spawn agent 时经 env 注入 loopback 通道地址 + 短凭据
 
 ## 5. agent managed resolver + 缓存 + 重取 + redirect 落点
 
