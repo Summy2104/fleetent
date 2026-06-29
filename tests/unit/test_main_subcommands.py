@@ -109,6 +109,25 @@ def test_kb_worker_subcommand_dispatches(monkeypatch: pytest.MonkeyPatch) -> Non
     assert calls == [["--poll-interval", "0.5"]]
 
 
+def test_kb_serve_subcommand_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
+    sys.modules.pop("fleetent.knowledge_base.serve", None)
+
+    def fake_main(argv: list[str] | None = None) -> None:
+        calls.append(argv or [])
+
+    serve_module = importlib.import_module("fleetent.knowledge_base.serve")
+    monkeypatch.setattr(serve_module, "main", fake_main)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["fleetent", "kb-serve", "--tenant", "tenant-a", "--service-key", "env:KB_SERVICE_KEY"],
+    )
+
+    cli.main()
+
+    assert calls == [["--tenant", "tenant-a", "--service-key", "env:KB_SERVICE_KEY"]]
+
+
 def test_tui_no_longer_dispatches_client(monkeypatch: pytest.MonkeyPatch) -> None:
     prompts: list[str] = []
     sys.modules.pop("fleetent.tui.app", None)
@@ -185,3 +204,23 @@ def test_agent_run_does_not_import_kb_worker(monkeypatch: pytest.MonkeyPatch) ->
     cli.main()
 
     assert "fleetent.knowledge_base.worker" not in sys.modules
+
+
+def test_agent_run_does_not_import_kb_serve(monkeypatch: pytest.MonkeyPatch) -> None:
+    sys.modules.pop("fleetent.knowledge_base.serve", None)
+
+    async def fake_serve(
+        agent_id: str,
+        *,
+        port: int | None = None,
+        home: str | None = None,
+        start_im: bool = True,
+    ) -> None:
+        return None
+
+    monkeypatch.setattr(agent_app, "serve", fake_serve)
+    monkeypatch.setattr("sys.argv", ["fleetent", "agent", "run", "support"])
+
+    cli.main()
+
+    assert "fleetent.knowledge_base.serve" not in sys.modules

@@ -107,6 +107,7 @@ node 状态（node/）                          →  [NODE] 自己（provision +
 3. **租户优先布局**：canonical home = `tenants/<tenant>/agents/<agent>/`。
 4. **agent data 拍平**：运行时 DB 与 sessions/logs/workspaces 都落 `<agent-home>/data/`。
 5. **KB 是 tenant 级**：`tenants/<tenant>/kb/kb.db` 与 `tenants/<tenant>/kb/kb_vectors.db`。
+6. **remote KB read 仍读同一租户子树**：`fleetent kb-serve`（Slice ②a）是每租户一进程的只读 server，boot 后固定读取 `tenants/<tenant>/kb/`；它解决 agent 远程读 KB，但不改变 ingest 仍由同机 `kb-worker` 写入该目录的事实。ingest 跨机搬迁属于后续 Slice ②b。
 
 ---
 
@@ -123,7 +124,7 @@ FLEETENT_HOME/
 ├── logs/ diagnostics/                       [PLAT]  宿主级日志与诊断导出
 ├── node/                                    [NODE]  节点身份 · 跨租户（.env + cache + hashes）
 └── tenants/<tenant>/                        ← 一个租户的完整足迹 = 一棵子树
-    ├── kb/                                  租户级共享：kb-worker 写 / 各 agent 读（node 整目录 RO 挂载，含 -wal/-shm）
+    ├── kb/                                  租户级共享：kb-worker 写 / 各 agent 读（node 整目录 RO 挂载，含 -wal/-shm；可选 colocated kb-serve 也只读这棵子树）
     │   ├── kb.db
     │   └── kb_vectors.db
     └── agents/<name>/                       name=不可变 handle（rename 已移除）；单一 owner
