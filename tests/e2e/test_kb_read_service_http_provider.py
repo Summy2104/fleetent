@@ -4,6 +4,17 @@ import httpx
 
 from fleetent import long_term_ctx
 from fleetent.identity import Principal
+from tests.e2e._entrypoint_smoke import wait_for_condition
+from tests.e2e._kb_helpers import (
+    KB_BEACON_KEYWORD,
+    ManagedKBStack,
+    clear_stub_requests,
+    find_system_messages_containing,
+    get_stub_requests,
+    managed_kb_http_stack,  # noqa: F401 - fixture import
+)
+
+__all__ = ["managed_kb_http_stack"]
 
 
 async def test_http_knowledge_provider_reads_from_kb_service(tmp_path, monkeypatch) -> None:
@@ -44,20 +55,52 @@ async def test_http_knowledge_provider_reads_from_kb_service(tmp_path, monkeypat
             service_key_ref="env:FLEETENT_KB_SERVICE_KEY",
         )
     )
-    provider = long_term_ctx.HttpKnowledgeProvider(
-        "http://testserver/search",
-        service_key="svc-test",
-        transport=httpx.ASGITransport(app=app),
-    )
+    async with app.router.lifespan_context(app):
+        provider = long_term_ctx.HttpKnowledgeProvider(
+            "http://testserver/search",
+            service_key="svc-test",
+            transport=httpx.ASGITransport(app=app),
+        )
 
-    chunks = await provider(
-        Principal(user_id="user-1", tenant_id=tenant_id),
-        keyword,
-        [kb_id],
-        5,
-        None,
-    )
+        chunks = await provider(
+            Principal(user_id="user-1", tenant_id=tenant_id),
+            keyword,
+            [kb_id],
+            5,
+            None,
+        )
 
     assert chunks
     assert any(keyword in chunk.content for chunk in chunks)
     assert {chunk.kb_id for chunk in chunks} == {kb_id}
+
+
+def test_managed_stack_agent_reads_kb_via_http_provider(
+    managed_kb_http_stack: ManagedKBStack,
+) -> None:
+    clear_stub_requests(managed_kb_http_stack.stub_v1_url)
+
+    with httpx.stream(
+        "POST",
+        f"{managed_kb_http_stack.platform_url}/admin/agents/{managed_kb_http_stack.agent_name}/chat",
+        headers=managed_kb_http_stack.admin_session_headers,
+        json={"message": f"What is {KB_BEACON_KEYWORD}?"},
+        timeout=20.0,
+    ) as response:
+        body = b"".join(response.iter_bytes())
+
+    assert response.status_code == 200, f"chat request failed:\n{body.decode()}"
+
+    def _check():
+        hits = find_system_messages_containing(
+            get_stub_requests(managed_kb_http_stack.stub_v1_url), KB_BEACON_KEYWORD
+        )
+        return hits if hits else None
+
+    hits = wait_for_condition(
+        _check,
+        timeout=10.0,
+        interval=0.3,
+        description=f"HTTP KB beacon '{KB_BEACON_KEYWORD}' in LLM stub system message",
+    )
+    assert hits

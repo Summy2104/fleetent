@@ -63,6 +63,19 @@ services:
     networks:
       - fleetent
 
+  kb-serve:
+    image: ${FLEETENT_IMAGE:-fleetent:${GIT_COMMIT:-latest}}
+    build: *fleetent-build
+    command: ["kb-serve", "--config", "${FLEETENT_HOME:?set FLEETENT_HOME}/kb-service.yaml"]
+    env_file:
+      - .env
+    environment:
+      FLEETENT_HOME: ${FLEETENT_HOME:?set FLEETENT_HOME}
+    volumes: *fleetent-home-volume
+    restart: unless-stopped
+    networks:
+      - fleetent
+
 networks:
   fleetent:
     name: fleetent
