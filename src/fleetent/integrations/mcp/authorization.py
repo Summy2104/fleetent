@@ -96,6 +96,15 @@ def _redirect_base() -> str:
     return os.environ.get(_REDIRECT_BASE_ENV, "").strip()
 
 
+def public_base() -> str:
+    """The agent's public base URL (override > env > empty), shared with sibling features.
+
+    The credential-submission form (mcp-per-user-apikey) is hosted on the *same* agent base
+    as the OAuth callback, so it reuses this resolution rather than reading the env twice.
+    """
+    return _redirect_base()
+
+
 def redirect_uri_for(server: Any) -> str:
     """Assemble the exact ``redirect_uri`` for a per-user oauth server.
 
