@@ -75,7 +75,8 @@ def test_token_columns_are_ciphertext_not_plaintext(db):
     )
     conn = sqlite3.connect(db)
     row = conn.execute(
-        "SELECT access_token_ciphertext, refresh_token_ciphertext FROM mcp_user_tokens WHERE user_id='u9'"
+        "SELECT access_token_ciphertext, refresh_token_ciphertext "
+        "FROM mcp_user_tokens WHERE user_id='u9'"
     ).fetchone()
     conn.close()
     assert "SECRET-ACCESS" not in row[0]

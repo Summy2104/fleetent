@@ -40,7 +40,7 @@ class OAuthClientCredentialsMcpAuthConfig(McpOAuthSettings):
     secret_env_fields: ClassVar[frozenset[str]] = frozenset({"client_secret_env"})
 
     @model_validator(mode="after")
-    def _require_client_credentials_fields(self) -> "OAuthClientCredentialsMcpAuthConfig":
+    def _require_client_credentials_fields(self) -> OAuthClientCredentialsMcpAuthConfig:
         missing = [
             name
             for name in ("token_url", "client_id", "client_secret_env")
