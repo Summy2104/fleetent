@@ -14,7 +14,6 @@ import httpx
 import respx
 from fastapi.testclient import TestClient
 
-from fleetent.node.backend import LocalProcessBackend
 from fleetent.node.config import NodeConfig
 from fleetent.node.forwarder import build_app
 
@@ -91,21 +90,15 @@ def test_loopback_rejects_wrong_agent_token(tmp_path):
     assert resp.status_code == 401
 
 
-def test_local_backend_spawn_injects_loopback_url(tmp_path, monkeypatch):
-    captured = {}
+def test_reconcile_writes_loopback_url_into_agent_env(tmp_path):
+    # Env-only contract: the process backend never injects env= (see test_backend); the
+    # loopback URL (managed signal) reaches the agent through its .env, written by reconcile.
+    from fleetent.node.reconcile import NodeReconciler
 
-    def fake_popen(args, **kwargs):
-        captured["args"] = args
-        captured["env"] = kwargs.get("env")
+    reconciler = NodeReconciler(_config(tmp_path), _StubBackend())
+    reconciler._write_home("alpha", "default", {"name": "alpha"}, secrets={})
 
-        class _P:
-            pass
-
-        return _P()
-
-    monkeypatch.setattr("fleetent.node.backend.subprocess.Popen", fake_popen)
-    backend = LocalProcessBackend(_config(tmp_path / "home"))
-    backend.spawn("alpha")
-
-    assert captured["env"] is not None
-    assert captured["env"]["FLEETENT_NODE_LOOPBACK_URL"] == "http://127.0.0.1:8786"
+    env_text = (tmp_path / "tenants" / "default" / "agents" / "alpha" / ".env").read_text(
+        encoding="utf-8"
+    )
+    assert "FLEETENT_NODE_LOOPBACK_URL=http://127.0.0.1:8786" in env_text

@@ -47,20 +47,7 @@ class LocalProcessBackend:
                 str(self._home_dir(agent_name, tenant_id)),
             ],
             cwd=str(self._config.home_dir),
-            env=self._spawn_env(),
         )
-
-    def _spawn_env(self) -> dict[str, str]:
-        # Tell the managed agent where its node's loopback OAuth broker lives. Its presence
-        # is the agent's "managed" signal (wire the node-sourced per-user token resolver);
-        # absent => standalone (local token store). 127.0.0.1 because the agent runs on the
-        # same host as the node forwarder.
-        from fleetent.node.forwarder_contract import DEFAULT_FORWARDER_PORT
-
-        return {
-            **os.environ,
-            "FLEETENT_NODE_LOOPBACK_URL": f"http://127.0.0.1:{DEFAULT_FORWARDER_PORT}",
-        }
 
     def stop(self, agent_name: str, tenant_id: str = "default") -> None:
         try:
