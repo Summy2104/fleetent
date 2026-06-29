@@ -137,11 +137,18 @@ def _reset_agent_config_index():  # type: ignore[no-untyped-def]
     # runtime config now reads via current()/active_agent(). Tests that publish an
     # index must not leak it into later tests (process-level governance/intelligence
     # resolution would otherwise pick up a stale single agent).
+    #
+    # scan_home() publishes BOTH _index AND _active_home_dir; route()'s fresh-session
+    # path reads _active_home_dir via refresh_active_home(). Restoring only _index let
+    # a leaked _active_home_dir make later tests re-scan a prior test's home, silently
+    # overriding their get_agent_for_context mock (order-dependent hook/im_gateway flakes).
     from fleetent import agent_config
 
-    original = agent_config._index
+    original_index = agent_config._index
+    original_home = agent_config._active_home_dir
     yield
-    agent_config._index = original
+    agent_config._index = original_index
+    agent_config._active_home_dir = original_home
 
 
 _UNSET = object()
