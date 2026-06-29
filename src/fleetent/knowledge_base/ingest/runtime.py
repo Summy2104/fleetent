@@ -177,8 +177,24 @@ async def _ingest_chunks(
     ]
     store = KnowledgeStore(_database_or_default(database))
     store.ensure_knowledge_base(document.tenant_id, document.kb_id)
-    store.insert_document(document)
-    store.insert_chunks(resolved_chunks)
+    existing_documents = store.list_active_documents_by_identity(
+        document.tenant_id,
+        document.kb_id,
+        document.source,
+        document.filename,
+    )
+    replaced_document_ids = [existing_document.id for existing_document in existing_documents]
+    replaced_chunks = [
+        chunk
+        for existing_document in existing_documents
+        for chunk in store.get_document_chunks(existing_document.id)
+    ]
+    store.replace_document(document, resolved_chunks, replaced_document_ids)
+    for chunk in replaced_chunks:
+        await _delete_chunk(
+            vector_store.knowledge_namespace(chunk.tenant_id, chunk.kb_id),
+            chunk.id,
+        )
     namespace = vector_store.knowledge_namespace(document.tenant_id, document.kb_id)
     for chunk in resolved_chunks:
         await _upsert_chunk(namespace, chunk)
