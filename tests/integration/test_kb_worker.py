@@ -1,4 +1,5 @@
 import sqlite3
+import json
 
 import pytest
 
@@ -135,3 +136,54 @@ def test_has_no_active_worker_when_pending_job_has_stale_claim_age(
         conn.commit()
 
     assert kb_ingest_jobs.has_active_worker(stale_after_seconds=60) is False
+
+
+def test_run_job_injects_connector_settings_for_standalone_sync(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    _prepare_management_db(tmp_path, monkeypatch)
+
+    from fleetent.knowledge_base import operations, worker
+
+    captured: dict[str, object] = {}
+
+    async def fake_run_connector_sync(connector_id, *, settings, dry_run):
+        captured["connector_id"] = connector_id
+        captured["settings"] = settings
+        captured["dry_run"] = dry_run
+        return operations.ConnectorSyncResult(
+            connector_id=connector_id,
+            status="sync_succeeded",
+            summary={"planned": 1},
+        )
+
+    monkeypatch.setattr(worker.knowledge_base, "run_connector_sync", fake_run_connector_sync)
+    job = {
+        "job_type": "connector_sync",
+        "tenant_id": "tenant-a",
+        "kb_id": "kb-a",
+        "cred_ref": "file:///secure/google.json",
+        "connector_ref": json.dumps(
+            {
+                "connector_id": "drive-sync",
+                "kind": "google_drive",
+                "config": {"folder_id": "folder-123"},
+            }
+        ),
+    }
+
+    result = worker.run_job(job)
+
+    assert result == {
+        "connector_id": "drive-sync",
+        "status": "sync_succeeded",
+        "summary": {"planned": 1},
+        "error": None,
+    }
+    settings = captured["settings"]
+    assert captured["connector_id"] == "drive-sync"
+    assert captured["dry_run"] is False
+    assert settings.google_drive.connectors[0].connector_id == "drive-sync"
+    assert settings.google_drive.connectors[0].credential_ref == "file:///secure/google.json"
+    assert settings.google_drive.connectors[0].tenant_id == "tenant-a"
+    assert settings.google_drive.connectors[0].kb_id == "kb-a"

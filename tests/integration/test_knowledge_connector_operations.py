@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from fleetent.db import SQLiteDatabase, create_database
 from fleetent.knowledge_base.config import KnowledgeConfigSnapshot
 from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
@@ -196,3 +198,68 @@ async def test_sync_records_success_status(monkeypatch, tmp_path):
     assert result.status == "sync_succeeded"
     status = database.execute("SELECT last_status FROM knowledge_connector_status").fetchone()
     assert status == {"last_status": "sync_succeeded"}
+
+
+def test_explicit_connector_settings_override_platform_yaml(monkeypatch, tmp_path):
+    from fleetent.knowledge_base import get_connector_config, list_configured_connectors
+
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+    (tmp_path / "platform.yaml").write_text(
+        """
+knowledge:
+  knowledge_bases:
+    - id: yaml-kb
+      tenant_id: default
+      sources:
+        - id: yaml-drive
+          type: google_drive
+          folder_id: yaml-folder
+          credential_ref: file:///secure/yaml.json
+""",
+        encoding="utf-8",
+    )
+    settings = _settings(
+        google_drive={
+            "connectors": [
+                {
+                    "connector_id": "db-drive",
+                    "tenant_id": "tenant-a",
+                    "kb_id": "db-kb",
+                    "folder_id": "db-folder",
+                    "credential_ref": "file:///secure/db.json",
+                }
+            ]
+        }
+    )
+
+    connectors = list_configured_connectors(settings=settings)
+    definition = get_connector_config("db-drive", settings=settings)
+
+    assert [(item.connector_id, item.kb_id) for item in connectors] == [("db-drive", "db-kb")]
+    assert definition.config.folder_id == "db-folder"
+
+
+def test_connector_operations_require_explicit_settings(monkeypatch, tmp_path):
+    from fleetent.knowledge_base import get_connector_config, list_configured_connectors
+
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+    (tmp_path / "platform.yaml").write_text(
+        """
+knowledge:
+  knowledge_bases:
+    - id: engineering
+      tenant_id: default
+      sources:
+        - id: yaml-drive
+          type: google_drive
+          folder_id: folder-1
+          credential_ref: file:///secure/google.json
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="explicit connector settings are required"):
+        list_configured_connectors()
+
+    with pytest.raises(ValueError, match="explicit connector settings are required"):
+        get_connector_config("yaml-drive")

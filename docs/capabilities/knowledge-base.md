@@ -21,12 +21,12 @@
   - 返回 `degraded`：当前无可观察到的活跃 worker，job 不会自行推进，operator 需要恢复 `kb-worker`。
 
 **调用关系**：
-- 依赖：vector_store（向量索引）、Platform Knowledge config / DB snapshot；agent 可用 KB 范围由 `agent_kbs`（管理库唯一真相源）materialize 进 `agent.yaml`，运行时读配置不查表
+- 依赖：vector_store（向量索引）、platform `kb_connectors` 投影出的 connector settings snapshot；agent 可用 KB 范围由 `agent_kbs`（管理库唯一真相源）materialize 进 `agent.yaml`，运行时读配置不查表
 - 被依赖：long_term_ctx（检索注入内容）、reflection（只读，观察召回质量）
 
 **模块归属**：
 - owning package：`fleetent.knowledge_base`
-- public API：`parse_text(filename, content)`、`parse_markdown(filename, content)`、`parse_html(filename, content)`、`parse_pdf(filename, content)`、`parse_docx(filename, content)`、`parse_pptx(filename, content)`、`parse_xlsx(filename, content)`、`parse_document(filename, content, mime_type)`、`ingest_text(filename, content, tenant_id, kb_id, source, source_url)`、`ingest_parsed(parsed, tenant_id, kb_id, source, source_url)`、`search(query, tenant_id, kb_ids, limit, mode)`、`KnowledgeSearchOptions`、`KnowledgeSearchPlan`、`KnowledgeSearchStep`、`plan_knowledge_search(query, options)`、`execute_knowledge_search_plan(plan)`、`delete(document_id)`、`archive(document_id)`、`iter_indexable_knowledge_chunks(tenant_id, kb_id)`、`ConnectorSummary`、`ConnectorCheckResult`、`ConnectorSyncResult`、`ConnectorStatus`、`list_configured_connectors()`、`check_connector(connector_id)`、`run_connector_sync(connector_id, dry_run)`、`get_connector_status(connector_id)`、`DocumentRef`、`DataSource`、`LocalDirectoryDataSource`、`LocalDirectorySourceConfig`、`GoogleDriveConnectorConfig`、`ConfluenceConnectorConfig`、`SyncAction`、`SyncPlan`、`SyncPlanItem`、`SyncPlanSummary`、`SyncExecutionSummary`、`plan_local_directory_sync(config, tenant_id, kb_id)`、`execute_sync_plan(plan)`、`sync_local_directory(config, tenant_id, kb_id)`、`plan_google_drive_sync(config, client)`、`sync_google_drive(config, client)`、`plan_confluence_sync(config, client)`、`sync_confluence(config, client)`（注：`bind_agent_to_kb()` / `unbind_agent_from_kb()` / `list_agent_kb_bindings()` / `resolve_agent_kb_ids()` 已由 `drop-dead-kb-binding-path` 删除；agent KB 范围通过 agent.yaml 的 `knowledge.bindings` 在运行时获取，不经过 KB 模块绑定函数）
+- public API：`parse_text(filename, content)`、`parse_markdown(filename, content)`、`parse_html(filename, content)`、`parse_pdf(filename, content)`、`parse_docx(filename, content)`、`parse_pptx(filename, content)`、`parse_xlsx(filename, content)`、`parse_document(filename, content, mime_type)`、`ingest_text(filename, content, tenant_id, kb_id, source, source_url)`、`ingest_parsed(parsed, tenant_id, kb_id, source, source_url)`、`search(query, tenant_id, kb_ids, limit, mode)`、`KnowledgeSearchOptions`、`KnowledgeSearchPlan`、`KnowledgeSearchStep`、`plan_knowledge_search(query, options)`、`execute_knowledge_search_plan(plan)`、`delete(document_id)`、`archive(document_id)`、`iter_indexable_knowledge_chunks(tenant_id, kb_id)`、`ConnectorSummary`、`ConnectorCheckResult`、`ConnectorSyncResult`、`ConnectorStatus`、`list_configured_connectors(settings)`、`check_connector(connector_id, settings)`、`run_connector_sync(connector_id, dry_run, settings)`、`get_connector_status(connector_id, settings)`、`DocumentRef`、`DataSource`、`LocalDirectoryDataSource`、`LocalDirectorySourceConfig`、`GoogleDriveConnectorConfig`、`ConfluenceConnectorConfig`、`SyncAction`、`SyncPlan`、`SyncPlanItem`、`SyncPlanSummary`、`SyncExecutionSummary`、`plan_local_directory_sync(config, tenant_id, kb_id)`、`execute_sync_plan(plan)`、`sync_local_directory(config, tenant_id, kb_id)`、`plan_google_drive_sync(config, client)`、`sync_google_drive(config, client)`、`plan_confluence_sync(config, client)`、`sync_confluence(config, client)`（注：`bind_agent_to_kb()` / `unbind_agent_from_kb()` / `list_agent_kb_bindings()` / `resolve_agent_kb_ids()` 已由 `drop-dead-kb-binding-path` 删除；agent KB 范围通过 agent.yaml 的 `knowledge.bindings` 在运行时获取，不经过 KB 模块绑定函数）
 - owned tables（per-tenant KB 关系库，嵌入式 Y 迁移）：`knowledge_bases`、`knowledge_documents`、`knowledge_chunks`、`knowledge_chunks_fts`、`knowledge_source_states`、`knowledge_connector_status`、`kb_entities`、`kb_entity_mentions`、`kb_relations`（agent↔KB 绑定不在此——唯一真相源是管理库的 `agent_kbs`，Alembic；`kb_extraction_runs` 已删除，extraction run 摘要同步返回，不持久化）
 - config namespace：Platform `knowledge.*` / Agent `knowledge_base.*` binding and retrieval policy
 
@@ -361,19 +361,24 @@ class AgentKnowledgeBaseBinding:
     created_at: datetime
 
 
-def list_configured_connectors() -> list[ConnectorSummary]:
-    """列出 Platform Knowledge config 中配置的 Google Drive / Confluence connector 安全摘要。"""
+def list_configured_connectors(settings: ConnectorSettings) -> list[ConnectorSummary]:
+    """列出显式注入 connector settings 中配置的 Google Drive / Confluence connector 安全摘要。"""
 
 
-async def check_connector(connector_id: str) -> ConnectorCheckResult:
+async def check_connector(connector_id: str, *, settings: ConnectorSettings) -> ConnectorCheckResult:
     """检查 connector credential_ref 和 remote scope，失败详情脱敏。"""
 
 
-async def run_connector_sync(connector_id: str, dry_run: bool = False) -> ConnectorSyncResult:
+async def run_connector_sync(
+    connector_id: str,
+    *,
+    settings: ConnectorSettings,
+    dry_run: bool = False,
+) -> ConnectorSyncResult:
     """手动执行 connector dry-run 或真实 sync，并写入最近一次 status。"""
 
 
-def get_connector_status(connector_id: str) -> ConnectorStatus:
+def get_connector_status(connector_id: str, *, settings: ConnectorSettings) -> ConnectorStatus:
     """读取 connector 最近一次 check / dry-run / sync 状态；未运行返回 never_run。"""
 ```
 
@@ -388,7 +393,7 @@ def get_connector_status(connector_id: str) -> ConnectorStatus:
 
 ## 现状
 
-**已完成 core + parser + hybrid + local connector + sync planner + Google Drive / Confluence connector + agent KB binding + connector operations 闭环**：`knowledge-base-core` 实现了 `fleetent.knowledge_base` runtime package、基础表、手动 text/markdown ingest、deterministic chunking、vector-only search、delete，以及 long-term-ctx built-in provider 接入；`knowledge-base-parsers-basic` 增加了无 AI 框架依赖的 plain text / Markdown / lightweight HTML parser，并提供 parsed ingest adapter；`knowledge-base-hybrid-search` 增加了 knowledge-base-owned SQLite FTS5 keyword index、keyword mode、hybrid mode 和 RRF 融合；`knowledge-base-connectors-local` 增加了 DataSource / DocumentRef 边界、显式 root allowlist 的 local directory source、`.txt` / `.md` / `.html` / `.htm` 格式映射、source path / mtime / content hash 状态记录，以及手动 `sync_local_directory`；`knowledge-base-sync-planner` 增加了 plan / execute 分离、`ingest_new` / `reingest_changed` / `skip_unchanged` / `delete_missing` 动作模型；`knowledge-base-connectors-google-drive` 增加指定 folder scope、OAuth `credential_ref`、fake-client default path、Google Docs HTML export、text / Markdown / HTML parser dispatch、`archive_missing` 和 opt-in smoke scaffold；`knowledge-base-connectors-confluence` 增加 Cloud API token `credential_ref`、space / page / page+children scope、storage HTML parser dispatch、bounded 429 retry、`archive_missing` 和 opt-in smoke scaffold；`knowledge-base-agent-kb-binding` 曾在 KB 库内建 agent↔KB 绑定表，**已被 `drop-dead-kb-binding-path` 移除**——唯一真相源改为管理库的 `agent_kbs`（Alembic），部署时 materialize 进 `agent.yaml`，retrieval 读配置不查表；`knowledge-base-connector-operations` 增加 `/admin/kb/connectors` HTTP 管理端点（list/check/status/sync）、credential_ref 检查、dry-run、最近一次 status 和失败摘要脱敏；`knowledge-base-query-planner` 增加规则型 `plan_knowledge_search` / `execute_knowledge_search_plan`，在 hybrid、graph fill 和 hybrid rerank 之间给出可解释 reason。
+**已完成 core + parser + hybrid + local connector + sync planner + Google Drive / Confluence connector + agent KB binding + connector operations 闭环**：`knowledge-base-core` 实现了 `fleetent.knowledge_base` runtime package、基础表、手动 text/markdown ingest、deterministic chunking、vector-only search、delete，以及 long-term-ctx built-in provider 接入；`knowledge-base-parsers-basic` 增加了无 AI 框架依赖的 plain text / Markdown / lightweight HTML parser，并提供 parsed ingest adapter；`knowledge-base-hybrid-search` 增加了 knowledge-base-owned SQLite FTS5 keyword index、keyword mode、hybrid mode 和 RRF 融合；`knowledge-base-connectors-local` 增加了 DataSource / DocumentRef 边界、显式 root allowlist 的 local directory source、`.txt` / `.md` / `.html` / `.htm` 格式映射、source path / mtime / content hash 状态记录，以及手动 `sync_local_directory`；`knowledge-base-sync-planner` 增加了 plan / execute 分离、`ingest_new` / `reingest_changed` / `skip_unchanged` / `delete_missing` 动作模型；`knowledge-base-connectors-google-drive` 增加指定 folder scope、OAuth `credential_ref`、fake-client default path、Google Docs HTML export、text / Markdown / HTML parser dispatch、`archive_missing` 和 opt-in smoke scaffold；`knowledge-base-connectors-confluence` 增加 Cloud API token `credential_ref`、space / page / page+children scope、storage HTML parser dispatch、bounded 429 retry、`archive_missing` 和 opt-in smoke scaffold；`knowledge-base-agent-kb-binding` 曾在 KB 库内建 agent↔KB 绑定表，**已被 `drop-dead-kb-binding-path` 移除**——唯一真相源改为管理库的 `agent_kbs`（Alembic），部署时 materialize 进 `agent.yaml`，retrieval 读配置不查表；`knowledge-base-connector-operations` 增加 `/admin/kb/connectors` HTTP 管理端点（list/check/status/sync）、credential_ref 检查、dry-run、最近一次 status 和失败摘要脱敏，connector 定义单一真相源为管理库 `kb_connectors`，由 platform/CLI 显式注入 settings；`knowledge-base-query-planner` 增加规则型 `plan_knowledge_search` / `execute_knowledge_search_plan`，在 hybrid、graph fill 和 hybrid rerank 之间给出可解释 reason。
 
 团队已有独立的 [knowledge-bridge](../../../knowledge-bridge) 项目，覆盖了大部分核心功能，但技术栈与 fleetent 约束不兼容，不能直接作为依赖引入。实施策略：**有选择地迁移设计资产和小块算法**，而非从零重写或整体搬运。
 
