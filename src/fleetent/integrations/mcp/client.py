@@ -142,6 +142,11 @@ class McpServerConfig:
     # Only consulted for a per-user oauth stdio server; every other server ignores it entirely
     # (no token var is ever injected), so plain stdio env stays byte-identical.
     token_env: str = ""
+    # per-user dynamic api-key/bearer (mcp-per-user-apikey): server-level method settings.
+    # header_style decides injection (Authorization: Bearer | X-API-Key); credential_input
+    # gates submission methods (form|tool|both). Only consulted for an api_key_per_user server.
+    header_style: str = "bearer"
+    credential_input: str = "form"
     # stdio fields
     command: str = ""  # e.g. "npx" or "python"
     args: list[str] = field(
@@ -234,6 +239,8 @@ class McpServerConfig:
             authorization_endpoint=authorization_endpoint,
             redirect_path=redirect_path,
             token_env=token_env,
+            header_style=getattr(s, "header_style", "bearer"),
+            credential_input=getattr(s, "credential_input", "form"),
             command=getattr(s, "command", ""),
             args=list(getattr(s, "args", []) or []),
             env=dict(getattr(s, "env", {}) or {}),
@@ -417,6 +424,26 @@ def _is_per_user_oauth(server: McpServerConfig) -> bool:
     return server.auth_type == "oauth2" and server.oauth_grant == "authorization_code"
 
 
+def _is_per_user_apikey(server: McpServerConfig) -> bool:
+    """Whether a server uses per-user dynamic api-key/bearer (mcp-per-user-apikey).
+
+    Like per-user oauth it isolates by (user, agent, server) and is injected per-request, but
+    the user supplies a static secret (no OAuth dance, no refresh); the header is chosen by
+    ``header_style`` (``Authorization: Bearer`` | ``X-API-Key``).
+    """
+    return server.auth_type == "api_key_per_user"
+
+
+def _is_per_user_credential(server: McpServerConfig) -> bool:
+    """Whether a server uses any per-user credential (oauth delegation OR dynamic api-key).
+
+    The single switch the shared per-user machinery branches on — session keying, stdio
+    per-user pool, call-window locks, token getter — so oauth and api-key per-user paths
+    never diverge by hand. OAuth-only concerns (refresh) keep using ``_is_per_user_oauth``.
+    """
+    return _is_per_user_oauth(server) or _is_per_user_apikey(server)
+
+
 def _session_key(server: McpServerConfig, scope: int | None, user_id: str | None) -> SessionKey:
     """Compute the live-session/host key for a server under (scope, user).
 
@@ -425,7 +452,7 @@ def _session_key(server: McpServerConfig, scope: int | None, user_id: str | None
     (byte-identical), a per-user oauth server uses ``(scope, server_id, user_id)`` so each
     user is isolated. The two shapes coexist in the same dicts by design.
     """
-    if _is_per_user_oauth(server):
+    if _is_per_user_credential(server):
         return (scope, server.id, user_id)
     return (scope, server.id)
 
@@ -448,7 +475,7 @@ def _is_per_user_stdio(server: McpServerConfig) -> bool:
     pool caps, idle reaping, expiry/401 restart, and orphan cleanup. Every other server
     (plain stdio, http per-user, http/sse machine-identity) is untouched by all of it.
     """
-    return server.transport == "stdio" and _is_per_user_oauth(server)
+    return server.transport == "stdio" and _is_per_user_credential(server)
 
 
 def _call_window_lock_for(server: McpServerConfig, user_id: str | None) -> asyncio.Lock:
@@ -459,7 +486,7 @@ def _call_window_lock_for(server: McpServerConfig, user_id: str | None) -> async
     single per-server ``_call_window_lock`` (behavior unchanged). Per-user locks are lazily
     created and held in a per-server map keyed by user_id.
     """
-    if not _is_per_user_oauth(server) or user_id is None:
+    if not _is_per_user_credential(server) or user_id is None:
         return server._call_window_lock
     return server._per_user_call_window_locks.setdefault(user_id, asyncio.Lock())
 
@@ -1122,13 +1149,19 @@ class _PerUserBearerAuth(httpx.Auth):
     resource end to answer 401 / drive the degrade path rather than sending a stale bearer.
     """
 
-    def __init__(self, token_getter: Callable[[], str | None]) -> None:
+    def __init__(
+        self, token_getter: Callable[[], str | None], header_style: str = "bearer"
+    ) -> None:
         self._token_getter = token_getter
+        self._header_style = header_style
 
     def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
         token = self._token_getter()
         if token:
-            request.headers["Authorization"] = f"Bearer {token}"
+            if self._header_style == "x_api_key":
+                request.headers["X-API-Key"] = token
+            else:
+                request.headers["Authorization"] = f"Bearer {token}"
         yield request
 
 
@@ -1159,10 +1192,14 @@ def _http_auth(
     calling user, injecting that user's current token per request. Every other server keeps
     the historical auth: the SDK client_credentials provider for oauth2, None otherwise.
     """
-    if _is_per_user_oauth(server):
+    if _is_per_user_credential(server):
         if user_id is None:
             return None  # unroutable; caller short-circuits before reaching here
-        return _PerUserBearerAuth(_per_user_token_getter(server.id, user_id, agent_id))
+        # per-user oauth always Bearer; per-user api-key follows the server's header_style.
+        header_style = server.header_style if _is_per_user_apikey(server) else "bearer"
+        return _PerUserBearerAuth(
+            _per_user_token_getter(server.id, user_id, agent_id), header_style=header_style
+        )
     return _oauth_auth(server)
 
 

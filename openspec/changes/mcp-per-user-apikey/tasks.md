@@ -8,8 +8,8 @@
 
 - [x] 2.1 写测试(红):两侧 `mcp_user_tokens` 加 `credential_kind`(agent 内嵌迁移 v-next + platform Alembic 111);migrate head 后列存在且既有行回填 `oauth`;down 可回滚
 - [x] 2.2 实现(绿):两侧迁移加 `credential_kind`(默认/回填 `oauth`);store put/get 带 kind(`static` 只存密钥密文、OAuth 列 NULL);platform `fetch_access_token`/refresh 路径 MUST 跳过 `static`(不刷新静态凭据)
-- [ ] 2.3 写测试(红):per-user api-key 经 `resolve_user_token` 统一入口取用;http 注入**按 server `header_style`** 走 `Authorization: Bearer` 或 `X-API-Key`;stdio env 注入;无 key→注入跳过(触发 degrade)
-- [ ] 2.4 实现(绿):client.py 识别 per-user api-key server(`_is_per_user_apikey`),按 `header_style` 注入(复用 `_PerUserBearerAuth` / 新增 X-API-Key per-user auth)+ stdio env;凭据以 `kind=static` 存三元组
+- [x] 2.3 写测试(红):per-user api-key 经 `resolve_user_token` 统一入口取用;http 注入**按 server `header_style`** 走 `Authorization: Bearer` 或 `X-API-Key`;stdio env 注入;无 key→注入跳过(触发 degrade)
+- [x] 2.4 实现(绿):client.py 识别 per-user api-key server(`_is_per_user_apikey`),按 `header_style` 注入(复用 `_PerUserBearerAuth` / 新增 X-API-Key per-user auth)+ stdio env;凭据以 `kind=static` 存三元组
 - [ ] 2.5 写测试(红)+ 实现(绿):无 key 调用返回明确「需凭据」degrade 结果(不抛错/不卡),按 credential_input 触发提交
 
 ## 3. 安全表单提交(模式1,默认):state + 端点 + standalone
