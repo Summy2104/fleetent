@@ -207,7 +207,7 @@ class McpServerConfig:
         if auth is not None:
             auth_type = getattr(auth, "type", "oauth2") or "oauth2"
             token_url = getattr(auth, "token_url", "")
-            client_id = getattr(auth, "client_id", "")
+            client_id = _resolve_env_ref(getattr(auth, "client_id", ""))
             client_secret_env = getattr(auth, "client_secret_env", "")
             scope = getattr(auth, "scope", "")
             oauth_grant = getattr(auth, "grant", "client_credentials") or "client_credentials"
@@ -328,6 +328,18 @@ def project_schemas(schemas: list[dict[str, Any]]) -> list[dict[str, Any]]:
         renamed["function"]["name"] = projected
         out.append(renamed)
     return out
+
+
+def get_registered_server(server_id: str) -> McpServerConfig | None:
+    """Public lookup of a registered server config by id (any agent scope), or None.
+
+    Used by managed per-user OAuth wiring to read a server's flattened OAuth fields when
+    registering pending-auth, without importing the internal registry across packages.
+    """
+    for (_scope, sid), server in _server_registry.items():
+        if sid == server_id:
+            return server
+    return None
 
 
 def is_server_available(server: McpServerConfig) -> bool:
