@@ -589,7 +589,60 @@ async def route(msg: NormalizedMessage, principal: Principal | None = None) -> N
 
     session_id = msg.session_id
 
-    governance = _governance_from_file(agent) if agent else None
+    def _resolve_turn_config(
+        current_agent: AgentFile | None,
+    ) -> tuple[Any, Any, Any, Any, Any, Any, str]:
+        current_governance = _governance_from_file(current_agent) if current_agent else None
+        current_allowed_tools = (
+            current_agent.allowed_tools
+            if current_agent is not None and current_agent.allowed_tools
+            else None
+        )
+        current_agent_features = current_agent.features if current_agent else None
+        current_model_policy = (
+            ModelPolicySnapshot.from_agent(current_agent) if current_agent else None
+        )
+        _maybe_refresh_skills(current_agent)
+        catalog = available_skills_prompt(
+            allowed_skills=current_agent.allowed_skills if current_agent else None,
+            user_id=msg.user_id,
+            chat_type=_chat_type(msg),
+            skill_user_access=current_agent.skill_user_access if current_agent else None,
+        )
+        disabled_trace = collect_disabled_trace() or None
+        user_md = user_instructions.load(current_agent.name) if current_agent else ""
+        user_block = f"[用户指令]\n{user_md}" if user_md else ""
+        system_content = "\n\n".join(
+            p
+            for p in [
+                current_agent.system_prompt if current_agent else _SYSTEM,
+                user_block,
+                catalog,
+            ]
+            if p
+        )
+        if msg.session_context is not None:
+            system_content = f"{system_content}\n\n{_session_frame_text(msg.session_context)}"
+        return (
+            current_agent,
+            current_governance,
+            current_allowed_tools,
+            current_agent_features,
+            current_model_policy,
+            disabled_trace,
+            system_content,
+        )
+
+    (
+        agent,
+        governance,
+        allowed_tools,
+        agent_features,
+        model_policy,
+        disabled_trace,
+        system_content,
+    ) = _resolve_turn_config(agent)
+
     # Build the user content once (images are analyzed here) — reused by both the
     # steering branch and the normal turn so analysis never runs twice.
     user_content = await _build_user_content(msg, session_id)
@@ -613,39 +666,29 @@ async def route(msg: NormalizedMessage, principal: Principal | None = None) -> N
             await msg.reply_func("⏳ 正在处理上一条，处理完接着这条。")
         # steer-but-run-just-ended (race) or queue → fall through to the locked path.
 
-    base_system = agent.system_prompt if agent else _SYSTEM
-    allowed_tools = agent.allowed_tools if agent is not None and agent.allowed_tools else None
-    agent_features = agent.features if agent else None
-    model_policy = ModelPolicySnapshot.from_agent(agent) if agent else None
     # SB3: gate run_code on the IM path too; mode is resolved once per process.
     sandbox_mode = await sandbox_enablement.get_effective_mode()
-    # skill-external-hot-reload: pick up externally-changed skill files before injecting
-    # the catalog, so this message reflects the current on-disk skill set (no restart).
-    _maybe_refresh_skills(agent)
-    # System message ordered stable→variable for prefix caching: base system + the
-    # <available_skills> catalog. Per-user long-term context is injected by run().
-    # skill-user-access: hide restricted skills from this requester (user_id + chat_type).
-    catalog = available_skills_prompt(
-        allowed_skills=agent.allowed_skills if agent else None,
-        user_id=msg.user_id,
-        chat_type=_chat_type(msg),
-        skill_user_access=agent.skill_user_access if agent else None,
-    )
-    disabled_trace = collect_disabled_trace() or None
-    # Fold the per-agent user.md directives into the stable prefix, between the base
-    # system prompt and the skills catalog (same ordering as runtime _assemble_prompt).
-    user_md = user_instructions.load(agent.name) if agent else ""
-    user_block = f"[用户指令]\n{user_md}" if user_md else ""
-    system_content = "\n\n".join(p for p in [base_system, user_block, catalog] if p)
-    # im-message-context: append the stable session frame (platform/scene/date+tz).
-    if msg.session_context is not None:
-        system_content = f"{system_content}\n\n{_session_frame_text(msg.session_context)}"
 
     token = CancelToken()
     max_pending = governance.steering_max_pending if governance else 8
 
     async with session_mgr.session_lock(session_id):
         history = await session_mgr.load(session_id)
+        if not history:
+            refreshed = agent_config.refresh_active_home()
+            if msg.agent_name:
+                agent = agent_config.current().get(msg.agent_name)
+            else:
+                agent = refreshed or get_agent_for_context()
+            (
+                agent,
+                governance,
+                allowed_tools,
+                agent_features,
+                model_policy,
+                disabled_trace,
+                system_content,
+            ) = _resolve_turn_config(agent)
 
         # Consume the restart-recovery flag (agent-side .resume marker): best-effort,
         # never block the turn.

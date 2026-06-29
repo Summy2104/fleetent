@@ -438,7 +438,8 @@ def get_connector_status(connector_id: str, *, settings: ConnectorSettings) -> C
   独立 `graph_search()` 和规则型 `plan_knowledge_search()` / `execute_knowledge_search_plan()`；不提供
   `search(mode="auto")`，不接 LLM planner / query rewrite。
 - 外部 SaaS 数据源已有 fake-client 默认路径和手动 opt-in smoke scaffold；真实 Google Drive / Confluence API client 不进入默认测试路径。
-- long-term-ctx 通过 agent.yaml 的 `knowledge.bindings` 获取 agent 有效 KB 范围；尚未实现 document-level ACL。
+- long-term-ctx 通过 agent.yaml 的 `knowledge.bindings` 获取 agent 有效 KB 范围；bind/unbind 改的是管理库 `agent_kbs`，需经 platform→node reconcile 重 materialize 回 agent.yaml，运行时不直接查询管理库；更新在 agent 的下一个 session 边界生效，不中途热改进行中的对话。
+- `knowledge.bindings` 是单租户快照：同一 agent 的所有 binding 必须共享该 agent 的 `tenant_id`，materialize 与加载都会显式校验；尚未实现 document-level ACL。
 - 后台 vector index rebuild job runtime 尚未实现；当前只提供同步 vector_store reindex public API。
 
 ## 下一批候选 specs

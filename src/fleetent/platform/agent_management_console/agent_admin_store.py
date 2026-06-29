@@ -1,6 +1,7 @@
 """Management state for the Agent console: lifecycle status + default binding."""
 
 import datetime
+import sqlite3
 from typing import Any
 
 from fleetent.config import Settings
@@ -95,6 +96,15 @@ def clear_default() -> None:
         "UPDATE agent_admin_state SET is_default = 0, updated_at = :updated_at",
         {"updated_at": _now()},
     )
+
+
+def touch(agent_id: int) -> None:
+    """Advance an agent's management-plane updated_at without changing other state."""
+    try:
+        _upsert(agent_id, {})
+    except sqlite3.OperationalError as exc:
+        if "no such table: agent_admin_state" not in str(exc):
+            raise
 
 
 def is_default(agent_id: int) -> bool:
@@ -229,6 +239,8 @@ def _agent_tenant(agent_id: int) -> str | None:
 def _upsert(agent_id: int, fields: dict[str, Any]) -> None:
     merged = {**_DEFAULTS, **{k: v for k, v in fields.items() if k in _FIELDS}}
     assignments = ", ".join(f"{k} = :{k}" for k in fields if k in _FIELDS)
+    if not assignments:
+        assignments = "agent_id = agent_id"
     params = {**merged, "agent_id": agent_id, "updated_at": _now()}
     with _database().transaction() as conn:
         conn.execute(

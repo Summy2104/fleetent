@@ -117,3 +117,47 @@ def test_reconcile_restarts_from_env_when_platform_down(tmp_path) -> None:
     assert backend.spawn_calls == ["support"], (
         "Expected reconcile to spawn agent from existing .env, but it was deferred"
     )
+
+
+@respx.mock
+def test_reconcile_rewrites_home_for_kb_resync_without_respawn(tmp_path) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    respx.post("https://platform.internal/nodes/node-a/status").mock(
+        return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
+    )
+
+    home = tmp_path / "tenants" / "default" / "agents" / "support"
+    home.mkdir(parents=True)
+    (home / "agent.yaml").write_text(
+        yaml.safe_dump(_agent_config(), sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+
+    backend = FakeBackend({"support": 12345})
+    desired_config = _agent_config() | {
+        "knowledge": {
+            "enabled": True,
+            "bindings": [{"tenant_id": "default", "kb_id": "support-kb", "default": True}],
+        }
+    }
+    desired = DesiredState(
+        node_id="node-a",
+        agents=[
+            DesiredAgent(
+                agent_id=101,
+                name="support",
+                config=desired_config,
+                secrets={},
+                tenant_id="default",
+                knowledge_resync_epoch="1",
+            )
+        ],
+    )
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(desired)
+
+    assert backend.stop_calls == []
+    assert backend.spawn_calls == []
+    updated = yaml.safe_load((home / "agent.yaml").read_text(encoding="utf-8"))
+    assert updated["knowledge"]["bindings"][0]["kb_id"] == "support-kb"

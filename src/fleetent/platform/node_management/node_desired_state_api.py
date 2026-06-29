@@ -121,6 +121,7 @@ def get_desired_state(
                 "agent_id": agent.id,
                 "name": agent.name,
                 "tenant_id": agent.tenant_id,
+                "knowledge_resync_epoch": str(state["updated_at"] or ""),
                 "config": materialize.desired_state_payload_from_agent_file(
                     materialize.agent_file_from_store(agent)
                 ),
