@@ -1,9 +1,9 @@
 ## 1. 鉴权 schema 提取到中立模块 + authorization_code 类型
 
-- [ ] 1.1 写测试(红):中立模块导出 `auth_type` 判别联合含 `oauth_authorization_code`;agent 侧 import 该 schema 不触发 platform import(模块边界守护);`client_id` env 引用解析;非法 auth_config 被拒
-- [ ] 1.2 实现(绿):把 `auth_type`+`auth_config` 判别联合从 `platform/connector_management/mcp_auth.py` 移到中立模块,新增 `OAuthAuthorizationCodeMcpAuthConfig`(authorization_endpoint/token_url/client_id/client_secret_env/scope/redirect_path,client_id 经 `_resolve_env_ref`)
-- [ ] 1.3 实现(绿):`platform/connector_management/mcp_auth.py` 改为 re-export shim;跑模块边界检查 `scripts/check_module_boundaries.py` 确认 agent 侧零 platform import
-- [ ] 1.4 写测试(红)+ 实现(绿):materialize 把 `oauth_authorization_code` 翻译为 agent.yaml authorization_code `auth` 块;api_key / client_credentials 翻译不回归
+- [x] 1.1 写测试(红):中立模块导出 `auth_type` 判别联合含 `oauth_authorization_code`;agent 侧 import 该 schema 不触发 platform import(模块边界守护);`client_id` env 引用解析;非法 auth_config 被拒
+- [x] 1.2 实现(绿):把 `auth_type`+`auth_config` 判别联合从 `platform/connector_management/mcp_auth.py` 移到中立模块,新增 `OAuthAuthorizationCodeMcpAuthConfig`(authorization_endpoint/token_url/client_id/client_secret_env/scope/redirect_path,client_id 经 `_resolve_env_ref`)
+- [x] 1.3 实现(绿):`platform/connector_management/mcp_auth.py` 改为 re-export shim;跑模块边界检查 `scripts/check_module_boundaries.py` 确认 agent 侧零 platform import
+- [x] 1.4 写测试(红)+ 实现(绿):materialize 把 `oauth_authorization_code` 翻译为 agent.yaml authorization_code `auth` 块;api_key / client_credentials 翻译不回归
 
 ## 2. 管理库 mcp_user_tokens + platform token store + pending-auth 存储
 
