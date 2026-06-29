@@ -7,11 +7,11 @@
 
 ## 2. 管理库 mcp_user_tokens + platform token store + pending-auth 存储
 
-- [ ] 2.1 写测试(红):Alembic 迁移(110+)建 `mcp_user_tokens`(三元组键),migrate head 后表存在;down 可回滚
-- [ ] 2.2 实现(绿):新增 Alembic 迁移建 `mcp_user_tokens` 表
-- [ ] 2.3 写测试(红):token store put/get/delete 按 `(user,agent,server)` 三元组隔离,access/refresh/expiry/scope 密文存,named parameters 经 store 边界;refresh_token 不经读接口外泄
-- [ ] 2.4 实现(绿):platform 侧 `mcp_user_tokens` store(手写 SQL、named params、密文)
-- [ ] 2.5 写测试(红)+ 实现(绿):pending-auth 短 TTL 一次性存储(state→code_verifier/三元组/token端点/client),过期或二次消费被拒
+- [x] 2.1 写测试(红):Alembic 迁移(110+)建 `mcp_user_tokens`(三元组键),migrate head 后表存在;down 可回滚
+- [x] 2.2 实现(绿):新增 Alembic 迁移建 `mcp_user_tokens` 表
+- [x] 2.3 写测试(红):token store put/get/delete 按 `(user,agent,server)` 三元组隔离,access/refresh/expiry/scope 密文存,named parameters 经 store 边界;refresh_token 不经读接口外泄
+- [x] 2.4 实现(绿):platform 侧 `mcp_user_tokens` store(手写 SQL、named params、密文)
+- [x] 2.5 写测试(红)+ 实现(绿):pending-auth 短 TTL 一次性存储(state→code_verifier/三元组/token端点/client),过期或二次消费被拒
 
 ## 3. platform 回调 + node↔platform 端点 + 透明刷新
 
