@@ -39,7 +39,7 @@ from fleetent.platform.agent_management_console import (
 )
 from fleetent.platform.agent_statistics import stats_admin_api
 from fleetent.platform.chat_management import chat_admin_api
-from fleetent.platform.connector_management import connector_admin_api
+from fleetent.platform.connector_management import connector_admin_api, mcp_oauth_callback_api
 from fleetent.platform.im_gateway_management import im_identity_admin_api
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import model_admin_api, provider_admin_api
@@ -192,6 +192,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # standalone agents never run this lifespan, so they keep trusting the archived IM
     # identity without opening the management DB.
     cron_scheduler.set_principal_resolver(_cron_principal_recheck)
+    # Managed per-user MCP OAuth: resolve a client_secret env ref from agent_secrets at
+    # exchange/refresh time, injected here so connector_management stays off agent_lifecycle.
+    from fleetent.platform.agent_lifecycle import secret_store as _secret_store
+    from fleetent.platform.connector_management import mcp_oauth_service as _mcp_oauth_service
+
+    _mcp_oauth_service.set_client_secret_resolver(_secret_store.get_decrypted)
 
     scan_skills()
     # backflow-pool-git: the shared skill pool must be a git repo before any write,
@@ -277,6 +283,7 @@ app.include_router(provider_admin_api.router)
 app.include_router(model_admin_api.router)
 app.include_router(kb_admin_api.router)
 app.include_router(connector_admin_api.router)
+app.include_router(mcp_oauth_callback_api.router)
 app.include_router(chat_admin_api.router)
 # agent_admin_api must precede agent_console_api: its literal DELETE
 # /agents/default route would otherwise be shadowed by the console's parametric

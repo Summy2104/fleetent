@@ -181,7 +181,17 @@ class NodeReconciler:
         except Exception:
             _logger.warn("node_write_home_config_parse_error", agent_name=agent_name)
             env_names = []
-        ensure_env_scaffold(home, referenced_env_names=env_names, secrets=secrets)
+        # Managed signal + per-user OAuth broker address: written into the agent .env (the
+        # env-only contract; the process backend never injects env=). Its presence tells the
+        # agent to source per-user MCP tokens via the node loopback (mcp-per-user-oauth2-managed).
+        from fleetent.node.forwarder_contract import DEFAULT_FORWARDER_PORT
+
+        loopback_env = {"FLEETENT_NODE_LOOPBACK_URL": f"http://127.0.0.1:{DEFAULT_FORWARDER_PORT}"}
+        ensure_env_scaffold(
+            home,
+            referenced_env_names=[*env_names, "FLEETENT_NODE_LOOPBACK_URL"],
+            secrets={**(secrets or {}), **loopback_env},
+        )
         self._sync_skills(agent_name, tenant_id, skill_manifests)
 
     def _sync_skills(

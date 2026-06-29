@@ -35,6 +35,7 @@ from fleetent.platform.agent_lifecycle import credential_slots, default_binding_
 from fleetent.platform.connector_management import mcp_server_store
 from fleetent.platform.connector_management.mcp_auth import (
     ApiKeyMcpAuthConfig,
+    OAuthAuthorizationCodeMcpAuthConfig,
     OAuthClientCredentialsMcpAuthConfig,
     parse_mcp_auth_config,
 )
@@ -365,6 +366,9 @@ def _mcp_servers_for_agent(agent: agent_store.Agent) -> list[McpServerSettings]:
             api_key_env = auth_config.key_env
         elif isinstance(auth_config, OAuthClientCredentialsMcpAuthConfig):
             auth_type = "oauth_client_credentials"
+            auth = auth_config
+        elif isinstance(auth_config, OAuthAuthorizationCodeMcpAuthConfig):
+            auth_type = "oauth_authorization_code"
             auth = auth_config
         servers.append(
             McpServerSettings(

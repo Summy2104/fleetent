@@ -408,6 +408,18 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
 
     wire_standalone_oauth(StandaloneUserTokenStore(agent_state_db))
 
+    # Managed (slice 2): when running under a node (loopback URL injected at spawn), source
+    # per-user tokens + register pending-auth through the node loopback instead of the local
+    # store. The injected resolver/state-store take precedence over the standalone wiring
+    # above; the agent's own TUI token authenticates the loopback. No platform import.
+    _loopback_url = os.environ.get("FLEETENT_NODE_LOOPBACK_URL", "").strip()
+    _tui_token = os.environ.get("FLEETENT_TUI_TOKEN", "").strip()
+    if _loopback_url and _tui_token:
+        from fleetent.integrations.mcp import client as _mcp_client
+        from fleetent.integrations.mcp.managed_oauth import wire_managed_oauth
+
+        wire_managed_oauth(_loopback_url, agent_id, _tui_token, _mcp_client.get_registered_server)
+
 
 async def _start_infra(
     agent: AgentFile, data_dir: Path, *, skills_root: Path | None = None

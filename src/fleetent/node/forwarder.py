@@ -171,4 +171,54 @@ def build_app(config: NodeConfig, backend: BaseProcessBackend) -> FastAPI:
             raise HTTPException(status_code=404, detail=f"skill {skill_name!r} not found")
         return Response(content=bundle_skill_directory(skill_dir), media_type="application/gzip")
 
+    # ── agent→node loopback: per-user MCP OAuth broker (managed slice 2) ──────────────
+    # The agent (same host) calls these to register a pending authorization and to fetch
+    # a per-user access token. It authenticates with its OWN TUI token (already in its
+    # .env) — never the node platform service key — so the agent never holds platform
+    # credentials. The node forwards to platform holding the service key (node→platform),
+    # keeping the agent off any direct platform import/address.
+    async def _forward_oauth(agent_name: str, tenant_id: str, suffix: str, body: bytes) -> Response:
+        url = f"{config.platform_url}/nodes/{config.node_id}/mcp/{suffix}"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            upstream = await client.post(
+                url,
+                content=body,
+                headers={
+                    "Authorization": f"Bearer {config.service_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+        return Response(
+            content=upstream.content,
+            status_code=upstream.status_code,
+            media_type=upstream.headers.get("content-type", "application/json"),
+        )
+
+    @app.post("/agent/{agent_name}/mcp/oauth-pending")
+    async def agent_oauth_pending(
+        agent_name: str,
+        request: Request,
+        authorization: str | None = Header(None),
+    ) -> Response:
+        _check_agent_token(authorization, agent_name)
+        tenant_id = request.headers.get("x-fleetent-tenant-id", "default")
+        return await _forward_oauth(agent_name, tenant_id, "oauth-pending", await request.body())
+
+    @app.post("/agent/{agent_name}/mcp/oauth-token")
+    async def agent_oauth_token(
+        agent_name: str,
+        request: Request,
+        authorization: str | None = Header(None),
+    ) -> Response:
+        _check_agent_token(authorization, agent_name)
+        tenant_id = request.headers.get("x-fleetent-tenant-id", "default")
+        return await _forward_oauth(agent_name, tenant_id, "oauth-token", await request.body())
+
+    def _check_agent_token(authorization: str | None, agent_name: str) -> None:
+        if authorization is None or not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Bearer token required")
+        presented = authorization.removeprefix("Bearer ").strip()
+        if presented != _agent_tui_token(agent_name):
+            raise HTTPException(status_code=401, detail="invalid agent token")
+
     return app
