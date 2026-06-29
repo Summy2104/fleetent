@@ -11,6 +11,7 @@ import asyncio
 import uuid
 from typing import Any, Literal, cast
 
+from fleetent import agent_config
 from fleetent.governance import approval_router
 from fleetent.identity import Principal
 from fleetent.runtime import CancelToken, commands, run_stream
@@ -141,6 +142,7 @@ async def dispatch(conn: Connection, request: dict[str, Any]) -> dict[str, Any] 
         return p.make_response(req_id, {"ok": found})
 
     if method == p.METHOD_SESSION_NEW:
+        agent_config.refresh_active_home()
         conn.session_id = _new_session_id(conn.user_id)
         return p.make_response(req_id, {"session_id": conn.session_id})
 

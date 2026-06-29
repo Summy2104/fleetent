@@ -360,6 +360,7 @@ def bind_agent_kb(
     user = _require_admin(authorization)
     agent = _require_agent(name)
     agent_kbs_store.bind(agent.tenant_id, kb_id, agent.id, created_by=user.id)
+    agent_admin_store.touch(agent.id)
     audit_log.write_audit(
         user.id, "agent.kb.bind", target_type="agent", target_id=name, detail={"kb_id": kb_id}
     )
@@ -373,6 +374,7 @@ def unbind_agent_kb(
     user = _require_admin(authorization)
     agent = _require_agent(name)
     agent_kbs_store.unbind(agent.tenant_id, kb_id, agent.id)
+    agent_admin_store.touch(agent.id)
     audit_log.write_audit(
         user.id, "agent.kb.unbind", target_type="agent", target_id=name, detail={"kb_id": kb_id}
     )

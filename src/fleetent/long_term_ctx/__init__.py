@@ -281,7 +281,12 @@ async def build_context(
             empty=[],
         ),
     )
-    if not always_candidates and not memories and not knowledge_results and not agent_memory_results:
+    if (
+        not always_candidates
+        and not memories
+        and not knowledge_results
+        and not agent_memory_results
+    ):
         return BuiltContext(
             text="",
             sources=[],
@@ -313,7 +318,8 @@ async def build_context(
 
     return BuiltContext(
         text=_render_context_with_always(always_candidates, selection.included),
-        sources=[candidate.source for candidate in always_candidates] + [candidate.source for candidate in selection.included],
+        sources=[candidate.source for candidate in always_candidates]
+        + [candidate.source for candidate in selection.included],
         budget_metadata=BudgetMetadata(
             effective_budget=policy.max_tokens,
             memory_used_tokens=selection.memory_used_tokens,
@@ -615,7 +621,9 @@ async def _search_knowledge(
     kb_ids = [binding.kb_id for binding in bindings]
     if not kb_ids:
         return []
-    tenant_id = bindings[0].tenant_id
+    tenant_id = kb.tenant_id
+    if tenant_id is None:
+        raise ValueError("knowledge.bindings must all share the same tenant_id")
     results = await knowledge_base.search(
         query,
         tenant_id=tenant_id,

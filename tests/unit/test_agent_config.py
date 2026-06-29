@@ -335,6 +335,43 @@ def test_agent_knowledge_rejects_duplicate_defaults() -> None:
         )
 
 
+def test_agent_knowledge_rejects_cross_tenant_bindings() -> None:
+    with pytest.raises(ValidationError, match="same tenant_id"):
+        agent_config.AgentFile.model_validate(
+            {
+                "name": "pilot",
+                "version": 1,
+                "models": _valid_models_doc(),
+                "knowledge": {
+                    "enabled": True,
+                    "bindings": [
+                        {"tenant_id": "tenant-a", "kb_id": "support", "default": True},
+                        {"tenant_id": "tenant-b", "kb_id": "billing"},
+                    ],
+                },
+            }
+        )
+
+
+def test_agent_knowledge_exposes_shared_tenant_id_for_valid_bindings() -> None:
+    agent = agent_config.AgentFile.model_validate(
+        {
+            "name": "pilot",
+            "version": 1,
+            "models": _valid_models_doc(),
+            "knowledge": {
+                "enabled": True,
+                "bindings": [
+                    {"tenant_id": "tenant-a", "kb_id": "support", "default": True},
+                    {"tenant_id": "tenant-a", "kb_id": "billing"},
+                ],
+            },
+        }
+    )
+
+    assert agent.knowledge.tenant_id == "tenant-a"
+
+
 @pytest.mark.parametrize("missing", ["tenant_id", "kb_id"])
 def test_agent_knowledge_binding_requires_tenant_and_kb(missing: str) -> None:
     binding = {"tenant_id": "tenant-a", "kb_id": "support"}

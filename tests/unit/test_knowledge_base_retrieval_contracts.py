@@ -86,6 +86,14 @@ def test_retrieval_modules_do_not_reference_writes() -> None:
         assert "delete_scoped_document(" not in source
 
 
+def test_long_term_ctx_does_not_reference_agent_kbs_management_store() -> None:
+    import fleetent.long_term_ctx as long_term_ctx
+
+    source = inspect.getsource(long_term_ctx)
+    assert "agent_kbs_store" not in source
+    assert "platform.knowledge_base_management" not in source
+
+
 @pytest.mark.parametrize(
     ("mode", "rerank", "expected_ids"),
     [
@@ -190,6 +198,61 @@ async def test_search_records_empty_retrieval(monkeypatch: pytest.MonkeyPatch) -
     assert results == []
     assert len(captured) == 1
     assert captured[0]["results"] == []
+
+
+async def test_long_term_ctx_search_knowledge_uses_single_validated_tenant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fleetent.agent_config as agent_config
+    from fleetent import long_term_ctx
+
+    captured: dict[str, object] = {}
+
+    async def _fake_search(query: str, **kwargs):
+        captured["query"] = query
+        captured.update(kwargs)
+        return []
+
+    class _Bindings:
+        def __iter__(self):
+            return iter(
+                [
+                    SimpleNamespace(
+                        tenant_id="tenant-a",
+                        kb_id="kb-1",
+                        permissions=SimpleNamespace(search=True),
+                    ),
+                    SimpleNamespace(
+                        tenant_id="tenant-b",
+                        kb_id="kb-2",
+                        permissions=SimpleNamespace(search=True),
+                    ),
+                ]
+            )
+
+    agent = SimpleNamespace(
+        knowledge=SimpleNamespace(
+            enabled=True,
+            tenant_id="tenant-z",
+            bindings=_Bindings(),
+            retrieval_policy=SimpleNamespace(mode="hybrid"),
+        )
+    )
+
+    monkeypatch.setattr(agent_config, "active_agent_or_default", lambda: agent)
+    monkeypatch.setattr(long_term_ctx.knowledge_base, "search", _fake_search)
+
+    results = await long_term_ctx._search_knowledge("u1", "reset password", "agent-1", 3)
+
+    assert results == []
+    assert captured == {
+        "query": "reset password",
+        "tenant_id": "tenant-z",
+        "kb_ids": ["kb-1", "kb-2"],
+        "limit": 3,
+        "mode": "hybrid",
+        "audit_context": None,
+    }
 
 
 async def test_search_swallows_audit_helper_failures(monkeypatch: pytest.MonkeyPatch) -> None:

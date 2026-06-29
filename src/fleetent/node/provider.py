@@ -18,6 +18,7 @@ class DesiredAgent:
     name: str
     tenant_id: str
     config: dict[str, Any]
+    knowledge_resync_epoch: str = ""
     skill_manifests: list[dict[str, str]] = field(default_factory=list)
     secrets: dict[str, str] = field(default_factory=dict)
 
@@ -104,6 +105,7 @@ def _desired_state_from_payload(payload: dict[str, Any], *, source: str) -> Desi
                     agent.get("tenant_id") or dict(agent["config"]).get("tenant_id") or "default"
                 ),
                 config=dict(agent["config"]),
+                knowledge_resync_epoch=str(agent.get("knowledge_resync_epoch") or ""),
                 skill_manifests=[
                     {str(key): str(value) for key, value in dict(item).items()}
                     for item in agent.get("skill_manifests", [])
@@ -139,6 +141,7 @@ def _overlay_last_live_secrets(
                 name=agent.name,
                 tenant_id=agent.tenant_id,
                 config=agent.config,
+                knowledge_resync_epoch=agent.knowledge_resync_epoch,
                 skill_manifests=list(agent.skill_manifests),
                 secrets=dict(last_live_secrets_by_agent.get(agent.name, agent.secrets)),
             )

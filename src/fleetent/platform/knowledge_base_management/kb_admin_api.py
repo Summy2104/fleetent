@@ -66,6 +66,7 @@ from fleetent.knowledge_base.retrieval import evaluation as retrieval_evaluation
 from fleetent.knowledge_base.retrieval.search import SearchMode
 from fleetent.knowledge_base.retrieval.search import search as search_kb
 from fleetent.platform.agent_lifecycle import secret_store
+from fleetent.platform.agent_management_console import agent_admin_store
 from fleetent.platform.knowledge_base_management import (
     agent_kbs_store,
     kb_connector_store,
@@ -731,6 +732,7 @@ def bind_agent(
     if any(kb["kb_id"] == kb_id and kb.get("archived") for kb in kb_engine_list(body.tenant_id)):
         raise HTTPException(status_code=409, detail="kb is archived")
     agent_kbs_store.bind(body.tenant_id, kb_id, body.agent_id, created_by=user.id)
+    agent_admin_store.touch(body.agent_id)
     audit_log.write_audit(user.id, "kb_bind_agent", "kb", kb_id, detail={"agent_id": body.agent_id})
     return {"kb_id": kb_id, "agent_id": body.agent_id, "bound": True}
 
@@ -744,6 +746,7 @@ def unbind_agent(
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
     agent_kbs_store.unbind(tenant_id, kb_id, agent_id)
+    agent_admin_store.touch(agent_id)
     audit_log.write_audit(user.id, "kb_unbind_agent", "kb", kb_id, detail={"agent_id": agent_id})
     return {"kb_id": kb_id, "agent_id": agent_id, "bound": False}
 
