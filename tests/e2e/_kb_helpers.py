@@ -6,6 +6,7 @@ import asyncio
 import base64
 import contextlib
 import json
+import re
 import socket
 import sqlite3
 import sys
@@ -27,7 +28,7 @@ from tests.e2e._entrypoint_smoke import (
     wait_for_http_ready,
 )
 from tests.e2e._path_helpers import agent_home_dir, agent_state_db_path
-from tests.e2e.conftest import _admin_session_headers, _agent_status, _register_node
+from tests.e2e.conftest import _admin_session_headers, _agent_status
 from tests.integration._migration_template import apply_migrations
 
 # Unique sentinel phrase used as KB content — easy to grep in LLM stub requests.
@@ -40,6 +41,7 @@ KB_BEACON_KEYWORD = "XKCD-4242"
 _TENANT_ID = "default"
 _KB_ID = "e2e-kb"
 _AGENT_NAME = "kb-support"
+_SERVICE_KEY_RE = re.compile(r"service_key:\s*(ma-[0-9a-f]+)")
 
 
 @dataclass(frozen=True)
@@ -55,6 +57,7 @@ class ManagedKBStack:
     tenant_id: str
     # The llm_stub /v1 base URL — append /requests to read recorded calls.
     stub_v1_url: str
+    kb_service_url: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +69,8 @@ def _seed_agent_with_kb(
     home_dir: Path,
     llm_stub_v1_url: str,
     node_id: str,
+    *,
+    config_overrides: dict[str, Any] | None = None,
 ) -> tuple[int, str]:
     """Create agent + KB record + KB-agent binding; materialize agent.yaml."""
     from fleetent import agent_store
@@ -88,6 +93,7 @@ def _seed_agent_with_kb(
         "You are a helpful knowledge base assistant.",
         [],
         model_overrides={"default": [{"provider_id": "kb-stub-provider"}]},
+        config_overrides=config_overrides,
     )
     credential_slots.ensure_slot(
         agent,
@@ -97,9 +103,8 @@ def _seed_agent_with_kb(
     )
     secret_store.set(agent.id, "FLEETENT_AGENT_KB_SUPPORT_MODEL", "sk-e2e-kb-stub", "e2e")
 
-    # Create the KB record in the per-tenant kb.db.
-    data_dir = agent_home_dir(home_dir, _AGENT_NAME, tenant_id=_TENANT_ID) / "data"
-    kb_scope = _open_kb_scope(data_dir)
+    # Create the KB record in the tenant-scoped kb.db under Fleetent home.
+    kb_scope = _open_kb_scope(home_dir)
     kb_create(_TENANT_ID, _KB_ID, "E2E test KB", database=kb_scope.kb_db)
 
     # Bind KB to agent (management DB).
@@ -111,23 +116,23 @@ def _seed_agent_with_kb(
     return agent.id, agent.name
 
 
-def _open_kb_scope(data_dir: Path):  # type: ignore[return]
-    """Open (and migrate) the per-tenant KB scope for data_dir."""
+def _open_kb_scope(home_dir: Path):  # type: ignore[return]
+    """Open (and migrate) the per-tenant KB scope under Fleetent home root."""
     from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
     from fleetent.tenant_router import SQLiteTenantBackend
 
-    scope = SQLiteTenantBackend(data_dir=data_dir).resolve(_TENANT_ID)
+    scope = SQLiteTenantBackend(data_dir=home_dir).resolve(_TENANT_ID)
     scope.open_kb_db(KB_MIGRATIONS)
     return scope
 
 
-async def _pre_ingest(data_dir: Path) -> None:
+async def _pre_ingest(home_dir: Path) -> None:
     """Ingest KB_BEACON_TEXT into the per-tenant KB before the stack starts."""
     from fleetent.config import KnowledgeBaseSettings
     from fleetent.knowledge_base import runtime as kb_runtime
     from fleetent.knowledge_base.ingest.runtime import ingest_text
 
-    scope = _open_kb_scope(data_dir)
+    scope = _open_kb_scope(home_dir)
     old_db = kb_runtime._kb_db
     old_backend = kb_runtime._kb_vector_backend
     try:
@@ -146,6 +151,59 @@ async def _pre_ingest(data_dir: Path) -> None:
     finally:
         kb_runtime.set_database(old_db)
         kb_runtime.set_vector_backend(old_backend)
+
+
+def _write_kb_service_config(path: Path, *, home_dir: Path, port: int) -> None:
+    import yaml
+
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "service": {
+                    "tenant_id": _TENANT_ID,
+                    "service_key_ref": "env:FLEENTENT_KB_SERVICE_KEY".replace(
+                        "FLEENTENT", "FLEETENT"
+                    ),
+                    "host": "127.0.0.1",
+                    "port": port,
+                },
+                "data": {"home": "."},
+                "retrieval": {"default_mode": "hybrid", "top_k": 10},
+                "embedding": {
+                    "endpoint": "http://embedder.invalid/v1/embeddings",
+                    "model": "kb-embed-stub",
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _register_node_platform_cli(*, env: dict[str, str], node_id: str) -> str:
+    result = run_command(
+        [
+            sys.executable,
+            "-m",
+            "fleetent",
+            "platform",
+            "node",
+            "register",
+            node_id,
+            "--name",
+            "KB E2E Node",
+        ],
+        env=env,
+        cwd=repo_root(),
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            f"node register failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+    match = _SERVICE_KEY_RE.search(result.stdout)
+    if match is None:
+        raise AssertionError(f"could not parse node service key:\n{result.stdout}")
+    return match.group(1)
 
 
 # ---------------------------------------------------------------------------
@@ -290,7 +348,7 @@ def managed_kb_stack(
         }
     )
 
-    node_service_key = _register_node(env=common_env, node_id=node_id)
+    node_service_key = _register_node_platform_cli(env=common_env, node_id=node_id)
     agent_id, agent_name = _seed_agent_with_kb(
         home_dir=home_dir,
         llm_stub_v1_url=llm_stub_base_url,
@@ -298,8 +356,7 @@ def managed_kb_stack(
     )
 
     # Pre-populate KB before node/agent start so the agent boots with data ready.
-    data_dir = agent_home_dir(home_dir, agent_name, tenant_id=_TENANT_ID) / "data"
-    asyncio.run(_pre_ingest(data_dir=data_dir))
+    asyncio.run(_pre_ingest(home_dir=home_dir))
 
     platform_port = reserve_port()
     platform_url = f"http://127.0.0.1:{platform_port}"
@@ -377,5 +434,151 @@ def managed_kb_stack(
                 if stop.returncode not in (0, 1):
                     raise AssertionError(
                         "kb-support agent stop failed\n"
+                        f"stdout:\n{stop.stdout}\nstderr:\n{stop.stderr}"
+                    )
+
+
+@pytest.fixture
+def managed_kb_http_stack(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    llm_stub_base_url: str,
+) -> Iterator[ManagedKBStack]:
+    """Managed stack + standalone kb-serve process + agent http provider override."""
+    home_dir = tmp_path / "fleetent-home"
+    home_dir.mkdir(parents=True, exist_ok=True)
+    db_path = tmp_path / "management.db"
+    apply_migrations(db_path)
+
+    secret_key = base64.urlsafe_b64encode(b"8" * 32).decode("ascii")
+    kb_service_key = "svc-e2e-kb-http"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("FLEETENT_HOME", str(home_dir))
+    monkeypatch.setenv("FLEETENT_SECRET_KEY", secret_key)
+    monkeypatch.setenv("FLEETENT_KB_SERVICE_KEY", kb_service_key)
+
+    node_id = "node-e2e-kb-http"
+    kb_service_port = reserve_port()
+    kb_service_url = f"http://127.0.0.1:{kb_service_port}/search"
+    common_env = child_env(
+        extra={
+            "DATABASE_URL": f"sqlite:///{db_path}",
+            "FLEETENT_HOME": str(home_dir),
+            "FLEETENT_SECRET_KEY": secret_key,
+            "FLEETENT_FORWARDER_HOST_OVERRIDE": "127.0.0.1",
+            "FLEETENT_KB_SERVICE_KEY": kb_service_key,
+        }
+    )
+
+    node_service_key = _register_node_platform_cli(env=common_env, node_id=node_id)
+    agent_id, agent_name = _seed_agent_with_kb(
+        home_dir=home_dir,
+        llm_stub_v1_url=llm_stub_base_url,
+        node_id=node_id,
+        config_overrides={
+            "knowledge": {
+                "provider": {
+                    "type": "http",
+                    "url": kb_service_url,
+                    "auth_ref": "env:FLEETENT_KB_SERVICE_KEY",
+                }
+            }
+        },
+    )
+
+    asyncio.run(_pre_ingest(home_dir=home_dir))
+
+    kb_service_config = home_dir / "kb-service.yaml"
+    _write_kb_service_config(kb_service_config, home_dir=home_dir, port=kb_service_port)
+
+    platform_port = reserve_port()
+    platform_url = f"http://127.0.0.1:{platform_port}"
+    platform_argv = [
+        sys.executable,
+        "-m",
+        "uvicorn",
+        "fleetent.server:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(platform_port),
+        "--log-level",
+        "warning",
+    ]
+    kb_serve_argv = [
+        sys.executable,
+        "-m",
+        "fleetent",
+        "kb-serve",
+        "--config",
+        str(kb_service_config),
+    ]
+    node_env = {
+        **common_env,
+        "FLEETENT_NODE_PLATFORM_URL": platform_url,
+        "FLEETENT_NODE_ID": node_id,
+        "FLEETENT_NODE_SERVICE_KEY": node_service_key,
+        "FLEETENT_NODE_INTERVAL_SECONDS": "1",
+    }
+    node_argv = [sys.executable, "-m", "fleetent", "node", "start"]
+
+    from fleetent.node.forwarder_contract import DEFAULT_FORWARDER_PORT
+
+    with contextlib.ExitStack() as stack:
+        platform_proc = stack.enter_context(
+            running_process(platform_argv, env=common_env, cwd=repo_root())
+        )
+        wait_for_http_ready(platform_proc, f"{platform_url}/health", timeout=20.0)
+        kb_serve_proc = stack.enter_context(
+            running_process(kb_serve_argv, env=common_env, cwd=repo_root())
+        )
+        wait_for_http_ready(
+            kb_serve_proc,
+            f"http://127.0.0.1:{kb_service_port}/healthz",
+            timeout=20.0,
+        )
+        _wait_for_port_free(DEFAULT_FORWARDER_PORT)
+        stack.enter_context(running_process(node_argv, env=node_env, cwd=repo_root()))
+        wait_for_condition(
+            lambda: _agent_status(agent_id=agent_id, node_id=node_id),
+            timeout=30.0,
+            interval=0.5,
+            description="kb-support http-provider agent healthy",
+        )
+        admin_headers = _admin_session_headers(platform_url)
+        try:
+            yield ManagedKBStack(
+                platform_url=platform_url,
+                node_id=node_id,
+                agent_id=agent_id,
+                agent_name=agent_name,
+                admin_session_headers=admin_headers,
+                home_dir=home_dir,
+                db_path=db_path,
+                kb_id=_KB_ID,
+                tenant_id=_TENANT_ID,
+                stub_v1_url=llm_stub_base_url,
+                kb_service_url=kb_service_url,
+            )
+        finally:
+            agent_home = agent_home_dir(home_dir, agent_name, tenant_id=_TENANT_ID)
+            if agent_home.exists():
+                stop = run_command(
+                    [
+                        sys.executable,
+                        "-m",
+                        "fleetent",
+                        "agent",
+                        "stop",
+                        agent_name,
+                        "--home",
+                        str(agent_home),
+                    ],
+                    env=common_env,
+                    cwd=repo_root(),
+                )
+                if stop.returncode not in (0, 1):
+                    raise AssertionError(
+                        "kb-support http-provider agent stop failed\n"
                         f"stdout:\n{stop.stdout}\nstderr:\n{stop.stderr}"
                     )
