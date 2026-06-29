@@ -97,6 +97,15 @@ def test_upgrade_drops_owner_level_im_table(tmp_path):
     assert _OWNER_TABLE not in _tables(db)
 
 
+def test_upgrade_head_drops_platform_kb_ingest_tables(tmp_path):
+    db = tmp_path / "t.db"
+    _apply(db)
+    tables = _tables(db)
+    assert "kb_connectors" not in tables
+    assert "kb_ingest_jobs" not in tables
+    assert "kb_connector_schedule_state" not in tables
+
+
 # ---------------------------------------------------------------------------
 # 2.3 idempotency: existing tables survive upgrade (no data loss)
 # ---------------------------------------------------------------------------

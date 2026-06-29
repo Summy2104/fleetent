@@ -1,9 +1,9 @@
 """FastAPI router for /admin/kb — the knowledge-base management face.
 
 Owns the management behaviour only: KB listing/create/edit/archive with binding
-protection, document import (paste/upload + local-directory sync), document list /
-chunk preview / single-document delete, the retrieval test playground, the KB↔Agent
-binding matrix, the evaluation entry, and the per-KB observation view.
+protection, document list / chunk preview / single-document delete, the retrieval
+test playground, the KB↔Agent binding matrix, the evaluation entry, and the per-KB
+observation view.
 
 Parsing / chunking / indexing / vector·keyword·hybrid retrieval / tenant-isolated
 recall live in the knowledge-base engine; recall injection + token budget live in
@@ -15,32 +15,19 @@ Auth mirrors user_admin_api: reads allow viewer+admin, writes require admin.
 """
 
 import asyncio
-import re
-import time
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Any, cast
 
-import yaml
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
-from fleetent import audit_log, auth, kb_ingest_jobs, user_store
+from fleetent import audit_log, auth, user_store
 from fleetent import knowledge_base as kb_runtime
-from fleetent.config import KnowledgeBaseSettings, Settings
+from fleetent.config import Settings
 from fleetent.db import SQLiteDatabase, create_database
-from fleetent.knowledge_base import operations as knowledge_base
-from fleetent.knowledge_base import parsers as legacy_parsers
 from fleetent.knowledge_base.core import KnowledgeChunk, KnowledgeStore
 from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
-from fleetent.knowledge_base.extraction import run_entity_extraction as _kb_run_entity_extraction
-from fleetent.knowledge_base.ingest.config import as_knowledge_base_settings
-from fleetent.knowledge_base.ingest.connectors.sync import (
-    LocalDirectorySourceConfig,
-    sync_local_directory,
-)
 from fleetent.knowledge_base.ingest.runtime import delete_document as _kb_delete_document
-from fleetent.knowledge_base.ingest.runtime import ingest_parsed as kb_ingest_parsed
 from fleetent.knowledge_base.management.runtime import (
     archive_knowledge_base as _kb_archive_knowledge_base,
 )
@@ -65,12 +52,8 @@ from fleetent.knowledge_base.management.runtime import (
 from fleetent.knowledge_base.retrieval import evaluation as retrieval_evaluation
 from fleetent.knowledge_base.retrieval.search import SearchMode
 from fleetent.knowledge_base.retrieval.search import search as search_kb
-from fleetent.platform.agent_lifecycle import secret_store
 from fleetent.platform.agent_management_console import agent_admin_store
-from fleetent.platform.knowledge_base_management import (
-    agent_kbs_store,
-    kb_connector_store,
-)
+from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.knowledge_base_management import (
     kb_observation as kb_observation_agg,
 )
@@ -82,11 +65,6 @@ IDLE_TIMEOUT_SECONDS = 1800
 _ADMIN_ROLES = {"admin"}
 _DEFAULT_TENANT = "default"
 _VALID_MODES = {"vector", "keyword", "hybrid"}
-_KB_INGEST_POLL_INTERVAL_SECONDS = 0.05
-_KB_INGEST_WAIT_TIMEOUT_SECONDS = 30.0
-_KB_INGEST_WORKER_STALE_AFTER_SECONDS = 90.0
-
-
 # --- injectable engine seams (knowledge-base / observability follow-ups) -------
 # Exact engine signatures are confirmed during host wiring (tasks 0.5); defaults
 # here are documented placeholders and are monkeypatched in tests.
@@ -138,68 +116,6 @@ def kb_engine_archive(tenant_id: str, kb_id: str) -> None:
         )
     if not archived:
         raise HTTPException(status_code=404, detail="kb not found or already archived")
-
-
-def kb_ingest_text(
-    tenant_id: str, kb_id: str, source: str, content: str, document_format: str
-) -> dict[str, Any]:
-    """Ingest pasted/uploaded content. Bridges knowledge_base.ingest_text on host."""
-    _require_active_kb(tenant_id, kb_id)
-    parsed = _parse_import_document(source, content, document_format)
-    with _use_kb_runtime(tenant_id):
-        document = asyncio.run(
-            kb_ingest_parsed(
-                parsed,
-                tenant_id=tenant_id,
-                kb_id=kb_id,
-                source=source,
-                source_url=None,
-                settings=_ingest_settings(),
-                database=_knowledge_database(tenant_id),
-            )
-        )
-    chunks = _kb_preview_document_chunks(
-        tenant_id,
-        kb_id,
-        document.id,
-        database=_knowledge_database(tenant_id),
-    )
-    return {
-        "document_id": document.id,
-        "chunks": len(chunks),
-        "filename": document.filename,
-        "source": document.source,
-        "source_url": document.source_url,
-        "wired": True,
-    }
-
-
-def kb_sync_directory(tenant_id: str, kb_id: str, path: str) -> dict[str, Any]:
-    """Sync a local directory source. Bridges connectors.sync_local_directory on host."""
-    _require_active_kb(tenant_id, kb_id)
-    try:
-        config = LocalDirectorySourceConfig(
-            source_id=f"admin-local:{tenant_id}:{kb_id}:{Path(path).expanduser().resolve()}",
-            root_path=path,
-            allowed_roots=[path],
-        )
-        with _use_kb_runtime(tenant_id):
-            summary = asyncio.run(sync_local_directory(config, tenant_id=tenant_id, kb_id=kb_id))
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {
-        "scanned": summary.scanned,
-        "ingested": summary.ingested,
-        "skipped": summary.skipped,
-        "failed": summary.failed,
-        "unsupported": summary.unsupported,
-        "unchanged": summary.unchanged,
-        "deleted": summary.deleted,
-        "archived": getattr(summary, "archived", 0),
-        "changed": getattr(summary, "changed", 0),
-        "auth_failed": getattr(summary, "auth_failed", 0),
-        "wired": True,
-    }
 
 
 def kb_list_documents(tenant_id: str, kb_id: str) -> list[dict[str, Any]]:
@@ -300,32 +216,6 @@ def kb_observation(tenant_id: str, kb_id: str) -> dict[str, Any]:
     )
 
 
-def kb_extract_entities(
-    tenant_id: str,
-    kb_id: str,
-    document_id: str | None = None,
-) -> dict[str, Any]:
-    """Run explicit KB entity extraction through the knowledge-base public API."""
-    _require_active_kb(tenant_id, kb_id)
-    with _use_kb_runtime(tenant_id):
-        summary = asyncio.run(_kb_run_entity_extraction(tenant_id, kb_id, document_id=document_id))
-    return {
-        "id": summary.id,
-        "tenant_id": summary.tenant_id,
-        "kb_id": summary.kb_id,
-        "document_id": summary.document_id,
-        "extractor": summary.extractor,
-        "status": summary.status,
-        "documents_scanned": summary.documents_scanned,
-        "chunks_scanned": summary.chunks_scanned,
-        "entities_upserted": summary.entities_upserted,
-        "mentions_written": summary.mentions_written,
-        "relations_written": summary.relations_written,
-        "failed_count": summary.failed_count,
-        "error_summary": summary.error_summary,
-    }
-
-
 # --- auth helpers -------------------------------------------------------------
 
 
@@ -397,18 +287,6 @@ class KbEditBody(BaseModel):
     description: str
 
 
-class ImportBody(BaseModel):
-    source: str
-    content: str
-    document_format: str = "text"
-    tenant_id: str = _DEFAULT_TENANT
-
-
-class SyncBody(BaseModel):
-    path: str
-    tenant_id: str = _DEFAULT_TENANT
-
-
 class SearchBody(BaseModel):
     query: str
     kb_ids: list[str]
@@ -427,83 +305,9 @@ class EvalBody(BaseModel):
     tenant_id: str = _DEFAULT_TENANT
 
 
-class ExtractEntitiesBody(BaseModel):
-    tenant_id: str = _DEFAULT_TENANT
-    document_id: str | None = None
-
-
-def _parse_import_document(
-    source: str, content: str, document_format: str
-) -> legacy_parsers.ParsedDocument:
-    normalized_format = document_format.lower()
-    if normalized_format in {"text", "txt"}:
-        return legacy_parsers.parse_text(source, content)
-    if normalized_format in {"markdown", "md"}:
-        return legacy_parsers.parse_markdown(source, content)
-    if normalized_format in {"html", "htm"}:
-        return legacy_parsers.parse_html(source, content)
-    raise HTTPException(status_code=422, detail=f"unsupported document_format: {document_format}")
-
-
-def _ingest_settings() -> KnowledgeBaseSettings:
-    """Return knowledge-base ingest settings derived from stored connector definitions."""
-
-    return as_knowledge_base_settings(connectors=kb_connector_store.list_connectors())
-
-
 def _require_active_kb(tenant_id: str, kb_id: str) -> None:
     if not _kb_is_active_knowledge_base(tenant_id, kb_id, database=_knowledge_database(tenant_id)):
         raise HTTPException(status_code=404, detail="kb not found or archived")
-
-
-def _enqueue_import_job(kb_id: str, body: ImportBody) -> dict[str, Any]:
-    return kb_ingest_jobs.enqueue_job(
-        job_type="import_document",
-        tenant_id=body.tenant_id,
-        kb_id=kb_id,
-        connector_ref={
-            "source": body.source,
-            "content": body.content,
-            "document_format": body.document_format,
-        },
-    )
-
-
-def _enqueue_sync_directory_job(kb_id: str, body: SyncBody) -> dict[str, Any]:
-    return kb_ingest_jobs.enqueue_job(
-        job_type="sync_directory",
-        tenant_id=body.tenant_id,
-        kb_id=kb_id,
-        connector_ref={"path": body.path},
-    )
-
-
-def _enqueue_connector_sync_job(connector_id: str) -> dict[str, Any]:
-    connector = kb_connector_store.get_connector(connector_id)
-    if connector is None:
-        raise HTTPException(status_code=404, detail="connector not found")
-    return kb_ingest_jobs.enqueue_connector_job(connector)
-
-
-def _wait_for_kb_ingest_job(job_id: str) -> dict[str, Any]:
-    deadline = time.monotonic() + _KB_INGEST_WAIT_TIMEOUT_SECONDS
-    while True:
-        job = kb_ingest_jobs.get_job(job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail="kb ingest job not found")
-        status = str(job["status"])
-        if status == "done":
-            result = kb_ingest_jobs.get_job_result(job) or {}
-            return {"job_id": job_id, "status": status, **result}
-        if status == "failed":
-            return {"job_id": job_id, "status": status, "error": str(job.get("last_error") or "")}
-        if time.monotonic() >= deadline:
-            if kb_ingest_jobs.has_active_worker(
-                stale_after_seconds=_KB_INGEST_WORKER_STALE_AFTER_SECONDS
-            ):
-                return {"job_id": job_id, "status": "in_progress"}
-            return {"job_id": job_id, "status": "degraded"}
-        time.sleep(_KB_INGEST_POLL_INTERVAL_SECONDS)
 
 
 def _chunk_to_search_result(chunk: KnowledgeChunk) -> dict[str, Any]:
@@ -647,41 +451,7 @@ def archive_kb(
     return {"kb_id": kb_id, "archived": True}
 
 
-# --- document import / list / preview / delete --------------------------------
-
-
-@router.post("/{kb_id}/documents")
-def import_document(
-    kb_id: str, body: ImportBody, authorization: str | None = Header(None)
-) -> dict[str, Any]:
-    user = _require_admin(authorization)
-    _require_active_kb(body.tenant_id, kb_id)
-    job = _enqueue_import_job(kb_id, body)
-    result = _wait_for_kb_ingest_job(str(job["id"]))
-    audit_log.write_audit(
-        user.id,
-        "doc_import",
-        "kb",
-        kb_id,
-        detail={"source": body.source, "format": body.document_format},
-    )
-    return result
-
-
-@router.post("/{kb_id}/sync")
-def sync_directory(
-    kb_id: str,
-    body: SyncBody,
-    authorization: str | None = Header(None),
-    x_confirm: str | None = Header(None),
-) -> dict[str, Any]:
-    user = _require_admin(authorization)
-    _require_confirm(x_confirm)  # full resync is high-risk
-    _require_active_kb(body.tenant_id, kb_id)
-    job = _enqueue_sync_directory_job(kb_id, body)
-    result = _wait_for_kb_ingest_job(str(job["id"]))
-    audit_log.write_audit(user.id, "doc_sync", "kb", kb_id, detail={"path": body.path})
-    return result
+# --- document list / preview / delete -----------------------------------------
 
 
 @router.get("/{kb_id}/documents")
@@ -765,264 +535,3 @@ def observation(
 ) -> dict[str, Any]:
     _current_user(authorization)
     return kb_observation(tenant_id, kb_id)
-
-
-# --- KB source connectors (Google Drive / Confluence) -------------------------
-#
-# DB-managed ingestion connectors. The stored config + credential env-references are
-# assembled into a KnowledgeBaseSettings and fed to the existing config-driven
-# ingestion engine (operations.*), so check/status/sync are reused unchanged. Real
-# ingestion sync stays gated to the CLI; the console exposes check + dry-run + status.
-
-
-class ConnectorBody(BaseModel):
-    connector_id: str
-    kind: str  # google_drive | confluence
-    tenant_id: str = _DEFAULT_TENANT
-    kb_id: str = "global"
-    enabled: bool = True
-    # A connector IS a knowledge base: this short description lives on the KB it targets
-    # and is shown when agents pick the KB.
-    description: str = ""
-    config: dict[str, Any] = {}
-    custom: dict[str, Any] = {}  # free-form metadata, not schema-filtered
-    # Console sends custom as YAML (friendlier to author); parsed server-side. When
-    # present it overrides `custom`. Stored as JSON either way.
-    custom_yaml: str | None = None
-
-
-class ConnectorEditBody(BaseModel):
-    tenant_id: str | None = None
-    kb_id: str | None = None
-    enabled: bool | None = None
-    description: str | None = None
-    config: dict[str, Any] | None = None
-    custom: dict[str, Any] | None = None
-    custom_yaml: str | None = None
-
-
-def _parse_custom_yaml(text: str) -> dict[str, Any]:
-    """Parse the YAML the user authored into a dict (empty/blank -> {})."""
-    if not text or not text.strip():
-        return {}
-    try:
-        parsed = yaml.safe_load(text)
-    except yaml.YAMLError as exc:
-        raise HTTPException(status_code=422, detail=f"invalid custom YAML: {exc}") from exc
-    if parsed is None:
-        return {}
-    if not isinstance(parsed, dict):
-        raise HTTPException(status_code=422, detail="custom must be a YAML mapping")
-    return parsed
-
-
-def _kb_description(tenant_id: str, kb_id: str) -> str:
-    """The description stored on the KB this connector targets (empty if none)."""
-    for kb in kb_engine_list(tenant_id):
-        if kb["kb_id"] == kb_id:
-            return str(kb.get("description") or "")
-    return ""
-
-
-def _apply_kb_description(tenant_id: str, kb_id: str, description: str) -> None:
-    """A connector IS a KB: ensure the KB row exists and set its description."""
-    database = _knowledge_database(tenant_id)
-    _kb_create_knowledge_base(tenant_id, kb_id, description, database=database)
-    _kb_update_knowledge_base_description(tenant_id, kb_id, description, database=database)
-
-
-def _connector_out(row: dict[str, Any]) -> dict[str, Any]:
-    """Augment a stored connector with custom_yaml + its KB description for display/editing."""
-    out = dict(row)
-    custom = out.get("custom") or {}
-    out["custom_yaml"] = (
-        yaml.safe_dump(custom, sort_keys=False, allow_unicode=True) if custom else ""
-    )
-    out["description"] = _kb_description(str(out.get("tenant_id", "")), str(out.get("kb_id", "")))
-    return out
-
-
-def _connector_settings() -> Any:
-    """Return store-sourced connector settings for operations.* entrypoints."""
-    return kb_connector_store.as_knowledge_base_settings()
-
-
-@router.get("/connectors")
-def list_kb_connectors(authorization: str | None = Header(None)) -> list[dict[str, Any]]:
-    _current_user(authorization)
-    return [_connector_out(r) for r in kb_connector_store.list_connectors()]
-
-
-def _resolve_inline_secrets(connector_id: str, config: dict[str, Any]) -> dict[str, Any]:
-    """Encrypt inline token values into the shared secret scope, leaving only env refs.
-
-    A ``<field>_env_value`` key carries a token typed inline (value mode). Store it encrypted
-    under a derived ``FLEETENT_KB_<id>_<slot>`` name and set ``<field>_env`` to that name — the
-    config blob, like agent.yaml, only ever holds ``*_env`` references, never a secret value.
-    """
-    resolved = dict(config)
-    for key in [k for k in resolved if k.endswith("_env_value")]:
-        value = resolved.pop(key)
-        if not value:
-            continue
-        field = key[: -len("_value")]  # access_token_env_value -> access_token_env
-        slot = re.sub(r"_env$", "", field)
-        cid = re.sub(r"[^0-9A-Za-z]+", "_", connector_id).strip("_").upper()
-        env_name = f"FLEETENT_KB_{cid}_{re.sub(r'[^0-9A-Za-z]+', '_', slot).strip('_').upper()}"
-        secret_store.set(None, env_name, str(value))
-        resolved[field] = env_name
-    return resolved
-
-
-@router.post("/connectors", status_code=201)
-def add_kb_connector(
-    body: ConnectorBody, authorization: str | None = Header(None)
-) -> dict[str, Any]:
-    user = _require_admin(authorization)
-    if body.kind not in kb_connector_store.KINDS:
-        raise HTTPException(status_code=422, detail=f"unknown kind: {body.kind}")
-    if kb_connector_store.get_connector(body.connector_id) is not None:
-        raise HTTPException(status_code=409, detail="connector id already exists")
-    custom = _parse_custom_yaml(body.custom_yaml) if body.custom_yaml is not None else body.custom
-    try:
-        config = _resolve_inline_secrets(body.connector_id, body.config)
-    except secret_store.SecretKeyError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    try:
-        kb_connector_store.add_connector(
-            body.connector_id,
-            body.kind,
-            body.tenant_id,
-            body.kb_id,
-            config,
-            body.enabled,
-            custom=custom,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    _apply_kb_description(body.tenant_id, body.kb_id, body.description)
-    audit_log.write_audit(user.id, "kb_connector.add", "kb_connector", body.connector_id)
-    created = kb_connector_store.get_connector(body.connector_id)
-    assert created is not None
-    return _connector_out(created)
-
-
-@router.patch("/connectors/{connector_id}")
-def edit_kb_connector(
-    connector_id: str, body: ConnectorEditBody, authorization: str | None = Header(None)
-) -> dict[str, Any]:
-    user = _require_admin(authorization)
-    fields = body.model_dump(exclude_unset=True)
-    if "custom_yaml" in fields:
-        fields["custom"] = _parse_custom_yaml(fields.pop("custom_yaml"))
-    # description lives on the KB, not the connector row — handle it separately.
-    description = fields.pop("description", None)
-    if "config" in fields:
-        try:
-            fields["config"] = _resolve_inline_secrets(connector_id, fields["config"])
-        except secret_store.SecretKeyError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-    try:
-        kb_connector_store.edit_connector(connector_id, **fields)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    edited = kb_connector_store.get_connector(connector_id)
-    if edited is None:
-        raise HTTPException(status_code=404, detail="connector not found")
-    if description is not None:
-        _apply_kb_description(edited["tenant_id"], edited["kb_id"], description)
-    audit_log.write_audit(user.id, "kb_connector.edit", "kb_connector", connector_id)
-    return _connector_out(edited)
-
-
-@router.delete("/connectors/{connector_id}", status_code=204)
-def delete_kb_connector(connector_id: str, authorization: str | None = Header(None)) -> None:
-    user = _require_admin(authorization)
-    if not kb_connector_store.delete_connector(connector_id):
-        raise HTTPException(status_code=404, detail="connector not found")
-    audit_log.write_audit(user.id, "kb_connector.delete", "kb_connector", connector_id)
-
-
-@router.post("/connectors/{connector_id}/check")
-async def check_kb_connector(
-    connector_id: str, authorization: str | None = Header(None)
-) -> dict[str, Any]:
-    _require_admin(authorization)
-    if kb_connector_store.get_connector(connector_id) is None:
-        raise HTTPException(status_code=404, detail="connector not found")
-    result = await knowledge_base.check_connector(connector_id, settings=_connector_settings())
-    return {"connector_id": result.connector_id, "status": result.status, "message": result.message}
-
-
-@router.get("/connectors/{connector_id}/status")
-def kb_connector_status(
-    connector_id: str, authorization: str | None = Header(None)
-) -> dict[str, Any]:
-    _current_user(authorization)
-    if kb_connector_store.get_connector(connector_id) is None:
-        raise HTTPException(status_code=404, detail="connector not found")
-    status = knowledge_base.get_connector_status(connector_id, settings=_connector_settings())
-    return {
-        "connector_id": status.connector_id,
-        "status": status.last_status,
-        "summary": status.last_summary,
-        "error": status.last_error,
-    }
-
-
-class ConnectorSyncBody(BaseModel):
-    dry_run: bool = True
-
-
-@router.post("/connectors/{connector_id}/sync")
-async def sync_kb_connector(
-    connector_id: str,
-    body: ConnectorSyncBody,
-    authorization: str | None = Header(None),
-    x_confirm: str | None = Header(None),
-) -> dict[str, Any]:
-    user = _require_admin(authorization)
-    if kb_connector_store.get_connector(connector_id) is None:
-        raise HTTPException(status_code=404, detail="connector not found")
-    if not body.dry_run:
-        _require_confirm(x_confirm)  # real ingestion is high-risk
-    if body.dry_run:
-        result = await knowledge_base.run_connector_sync(
-            connector_id, settings=_connector_settings(), dry_run=True
-        )
-        response = {
-            "connector_id": result.connector_id,
-            "status": result.status,
-            "summary": result.summary,
-            "error": result.error,
-        }
-    else:
-        job = _enqueue_connector_sync_job(connector_id)
-        response = _wait_for_kb_ingest_job(str(job["id"]))
-    audit_log.write_audit(
-        user.id,
-        "kb_connector.sync",
-        "kb_connector",
-        connector_id,
-        detail={"dry_run": body.dry_run, "status": response["status"]},
-    )
-    if body.dry_run:
-        return response
-    return {"connector_id": connector_id, **response}
-
-
-@router.post("/{kb_id}/extract-entities", status_code=202)
-def extract_entities(
-    kb_id: str,
-    body: ExtractEntitiesBody,
-    authorization: str | None = Header(None),
-) -> dict[str, Any]:
-    user = _require_admin(authorization)
-    try:
-        run = kb_extract_entities(body.tenant_id, kb_id, document_id=body.document_id)
-    except HTTPException:
-        raise
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    audit_log.write_audit(user.id, "kb_extract_entities", "kb", kb_id)
-    return {"status": "accepted", "run": run}

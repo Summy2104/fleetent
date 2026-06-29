@@ -5,12 +5,13 @@ TBD - created by archiving change kb-worker. Update Purpose after archive.
 ## Requirements
 ### Requirement: kb-worker 是 ingest 队列的唯一消费者
 
-系统 SHALL 提供长驻进程 `fleetent kb-worker`,作为 `kb_ingest_jobs` 队列的**唯一消费者**,处理 ingest 类 job(导入 / sync）以及 `extraction` job:循环 claim(原子)pending job → 按 job_type 调 `knowledge_base.ingest` 核执行摄取,或调 `run_entity_extraction` 执行抽取 → mark done;失败则 mark failed + retry(至上限)。KB 内容与图谱写入 SHALL 只发生在 worker 调核的路径(**单一写入方**)。worker SHALL 经 `db.py` 边界访问队列,SHALL NOT `import fleetent.platform.*`。
+系统 SHALL 提供长驻 worker(随 **standalone KB 服务**运行),作为 **KB 服务本地** ingest 队列的**唯一消费者**,处理 connector sync 与 `extraction` job:循环 claim(原子)pending job → 按 job_type 调 `knowledge_base.ingest` 核执行摄取,或调 `run_entity_extraction` 执行抽取 → mark done;失败则 mark failed + retry(至上限)。KB 内容与图谱写入 SHALL 只发生在 worker 调核的路径(**单一写入方**)。worker SHALL 经 `db.py` 边界访问**本地**队列,SHALL NOT `import fleetent.platform.*`。平台启动、drain management.db 队列的 kb-worker 接线**已退役**。
 
-#### Scenario: worker drain 队列并写 KB
+#### Scenario: worker drain 本地队列并写 KB
 
-- **WHEN** 队列有 pending ingest job 且 `fleetent kb-worker` 在跑
-- **THEN** worker claim 该 job、调 ingest 核完成摄取、写 KB、置 job done
+- **WHEN** KB 本地队列有 pending job 且 worker 在跑
+- **THEN** worker claim 该 job、调核完成摄取/抽取、写 KB、置 job done
+- **AND** 不读写 management.db
 
 #### Scenario: worker 消费 extraction job
 
@@ -105,4 +106,3 @@ admin ingest / sync 端点在返回非终态(未 done / failed)结果时 SHALL �
 #### Scenario: 不引入绕过队列的执行
 - **WHEN** 检视实现
 - **THEN** 仍只有 `fleetent kb-worker` 消费队列,未为可观测性新增任何在控制面进程内同步跑 ingest 的路径
-
