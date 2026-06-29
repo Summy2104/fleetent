@@ -574,6 +574,8 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 - delete 级联：删除文档后对应 chunk、vector entries 和该文档的 graph evidence 均被清理；孤儿 entity 会被回收，共享 entity 保留
 - re-ingest overwrite：同身份文档重复导入时只保留最新一份 document / chunk，旧版本 chunks、vectors 和 graph evidence 不再可见
 - long-term-ctx 在 Agent knowledge binding / policy 启用时，先解析 `knowledge.bindings` 为 `kb_ids` 和单一 `tenant_id`，再以 `(Principal, query, kb_ids, limit, audit_context)` 契约调用当前 knowledge provider；默认 `LocalKnowledgeProvider` 读取本地 KB。若 agent.yaml 显式配置 `knowledge.provider.type=http`，boot 时注入 `HttpKnowledgeProvider`，经 `POST {url}` + Bearer service key + `X-Fleetent-Principal` 调远端 `{principal,query,kb_ids,limit} -> {chunks:[KnowledgeChunk JSON]}` wire 协议；override provider 只在传入范围内检索；disabled、空范围、超时或 provider 抛错时都降级为空结果
+- 远程读路径现在有对应 server：`fleetent kb-serve --tenant <tenant> --service-key <env:VAR|file://...>` 启一个**每租户一进程**的只读 KB 服务，boot 时把 runtime 绑定到该租户的 `tenants/<tenant>/kb/`，并提供 `POST /search` wire 协议实现。服务要求 `Authorization: Bearer <service-key>` 与 `X-Fleetent-Principal` 同时存在，且 header/body 的 principal 必须落在该服务绑定的 tenant；检索调用显式走 `knowledge_base.search(..., mode=<service-default>, kb_ids, limit)`，默认 `mode=hybrid`，不依赖 active agent 决定 mode。
+- 当前 `kb-serve` 只解决 Slice ②a 的**远程读取**：它假定读服务与现有 `kb-worker` / 本地 `tenants/<tenant>/kb/` 同主机，不搬 ingest worker、队列归属或 connector secret。Slice ②b（ingest 搬迁 / compose 全栈接线 / 跨机 secret）仍待后续 change。
 - local sync planner 为 new / changed / unchanged / missing source 生成确定性动作
 - execute_sync_plan 只在 item 成功后更新 source state，单 item 失败不阻断后续 item
 - sync_local_directory 通过 planner + executor 执行；本地文件删除后对应 KB document 和 chunks 被删除
