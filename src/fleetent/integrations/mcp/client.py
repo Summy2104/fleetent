@@ -142,6 +142,11 @@ class McpServerConfig:
     # Only consulted for a per-user oauth stdio server; every other server ignores it entirely
     # (no token var is ever injected), so plain stdio env stays byte-identical.
     token_env: str = ""
+    # per-user dynamic api-key/bearer (mcp-per-user-apikey): server-level method settings.
+    # header_style decides injection (Authorization: Bearer | X-API-Key); credential_input
+    # gates submission methods (form|tool|both). Only consulted for an api_key_per_user server.
+    header_style: str = "bearer"
+    credential_input: str = "form"
     # stdio fields
     command: str = ""  # e.g. "npx" or "python"
     args: list[str] = field(
@@ -234,6 +239,8 @@ class McpServerConfig:
             authorization_endpoint=authorization_endpoint,
             redirect_path=redirect_path,
             token_env=token_env,
+            header_style=getattr(s, "header_style", "bearer"),
+            credential_input=getattr(s, "credential_input", "form"),
             command=getattr(s, "command", ""),
             args=list(getattr(s, "args", []) or []),
             env=dict(getattr(s, "env", {}) or {}),
@@ -417,6 +424,26 @@ def _is_per_user_oauth(server: McpServerConfig) -> bool:
     return server.auth_type == "oauth2" and server.oauth_grant == "authorization_code"
 
 
+def _is_per_user_apikey(server: McpServerConfig) -> bool:
+    """Whether a server uses per-user dynamic api-key/bearer (mcp-per-user-apikey).
+
+    Like per-user oauth it isolates by (user, agent, server) and is injected per-request, but
+    the user supplies a static secret (no OAuth dance, no refresh); the header is chosen by
+    ``header_style`` (``Authorization: Bearer`` | ``X-API-Key``).
+    """
+    return server.auth_type == "api_key_per_user"
+
+
+def _is_per_user_credential(server: McpServerConfig) -> bool:
+    """Whether a server uses any per-user credential (oauth delegation OR dynamic api-key).
+
+    The single switch the shared per-user machinery branches on — session keying, stdio
+    per-user pool, call-window locks, token getter — so oauth and api-key per-user paths
+    never diverge by hand. OAuth-only concerns (refresh) keep using ``_is_per_user_oauth``.
+    """
+    return _is_per_user_oauth(server) or _is_per_user_apikey(server)
+
+
 def _session_key(server: McpServerConfig, scope: int | None, user_id: str | None) -> SessionKey:
     """Compute the live-session/host key for a server under (scope, user).
 
@@ -425,7 +452,7 @@ def _session_key(server: McpServerConfig, scope: int | None, user_id: str | None
     (byte-identical), a per-user oauth server uses ``(scope, server_id, user_id)`` so each
     user is isolated. The two shapes coexist in the same dicts by design.
     """
-    if _is_per_user_oauth(server):
+    if _is_per_user_credential(server):
         return (scope, server.id, user_id)
     return (scope, server.id)
 
@@ -448,7 +475,7 @@ def _is_per_user_stdio(server: McpServerConfig) -> bool:
     pool caps, idle reaping, expiry/401 restart, and orphan cleanup. Every other server
     (plain stdio, http per-user, http/sse machine-identity) is untouched by all of it.
     """
-    return server.transport == "stdio" and _is_per_user_oauth(server)
+    return server.transport == "stdio" and _is_per_user_credential(server)
 
 
 def _call_window_lock_for(server: McpServerConfig, user_id: str | None) -> asyncio.Lock:
@@ -459,7 +486,7 @@ def _call_window_lock_for(server: McpServerConfig, user_id: str | None) -> async
     single per-server ``_call_window_lock`` (behavior unchanged). Per-user locks are lazily
     created and held in a per-server map keyed by user_id.
     """
-    if not _is_per_user_oauth(server) or user_id is None:
+    if not _is_per_user_credential(server) or user_id is None:
         return server._call_window_lock
     return server._per_user_call_window_locks.setdefault(user_id, asyncio.Lock())
 
@@ -565,6 +592,77 @@ async def _trigger_per_user_authorization(
         return _needs_authorization_result(server.id, delivered=False)
     delivered = await _emit_authorization_link(server, user_id, agent_id or "")
     return _needs_authorization_result(server.id, delivered=delivered)
+
+
+# === mcp-per-user-apikey (Group 2.5, D3): no-key degrade + credential-submission trigger ===
+# Unlike per-user oauth, a per-user api-key has no refresh: the only question is whether the
+# user's (user, agent, server) key is stored. A missing key returns a "needs credential"
+# result on the same degrade chain and triggers submission per the server's ``credential_input``
+# (secure form link for form/both; in-DM tool guidance for tool-only). The key never appears
+# in the result text (it may surface in a shared channel).
+
+
+def _has_user_credential(
+    server: McpServerConfig, user_id: str | None, agent_id: str | None
+) -> bool:
+    """Whether the calling user already has a stored key for this per-user api-key triple."""
+    if user_id is None:
+        return False
+    return resolve_user_token(server.id, user_id, agent_id) is not None
+
+
+def _needs_credential_result(server_id: str, *, delivered: bool, tool_only: bool = False) -> str:
+    """Tool-call result text when a per-user api-key call has no stored key (D3).
+
+    Returned on the degrade chain (never raised). The actual key is supplied out-of-band
+    (a DM'd secure form, or the in-DM ``set_mcp_credential`` tool) — never embedded here,
+    since the result may surface in a shared channel.
+    """
+    if tool_only:
+        return (
+            f"{_UNAVAILABLE_RESULT_PREFIX} '{server_id}' needs your api-key/credential. Send it "
+            f"privately (DM) using the set_mcp_credential tool, then try again."
+        )
+    if delivered:
+        return (
+            f"{_UNAVAILABLE_RESULT_PREFIX} '{server_id}' needs your api-key/credential. A secure "
+            f"submission link has been sent to you privately (DM) — open it to provide your key, "
+            f"then try again."
+        )
+    return (
+        f"{_UNAVAILABLE_RESULT_PREFIX} '{server_id}' needs your api-key/credential before it can "
+        f"act on your behalf. Please provide your key, then try again."
+    )
+
+
+async def _emit_credential_link(server: McpServerConfig, user_id: str, agent_id: str) -> bool:
+    """Build + deliver a per-user credential-submission (secure form) link for the triple.
+
+    Thin indirection over :func:`credential_submission.emit_credential_link` so call-tool
+    sites trigger submission without referencing the seam module directly (and so tests can
+    patch this one symbol). Returns True iff the link was delivered (e.g. DM'd).
+    """
+    from fleetent.integrations.mcp import credential_submission as _cred
+
+    return await _cred.emit_credential_link(server, user_id, agent_id)
+
+
+async def _trigger_per_user_credential(
+    server: McpServerConfig, user_id: str | None, agent_id: str | None
+) -> str:
+    """Trigger credential submission and return the "needs credential" degrade text (D3).
+
+    For ``credential_input`` form/both a secure-form link is built + DM'd (best-effort);
+    for tool-only no form link is emitted and the user is guided to ``set_mcp_credential``
+    in a DM. An unroutable caller (no user_id) gets only the generic notice.
+    """
+    if user_id is None:
+        logger.info("mcp_per_user_no_user_id server_id=%s", server.id)
+        return _needs_credential_result(server.id, delivered=False)
+    if server.credential_input == "tool":
+        return _needs_credential_result(server.id, delivered=False, tool_only=True)
+    delivered = await _emit_credential_link(server, user_id, agent_id or "")
+    return _needs_credential_result(server.id, delivered=delivered)
 
 
 def find_registered_server(server_id: str, scope: int | None = None) -> McpServerConfig | None:
@@ -1122,13 +1220,19 @@ class _PerUserBearerAuth(httpx.Auth):
     resource end to answer 401 / drive the degrade path rather than sending a stale bearer.
     """
 
-    def __init__(self, token_getter: Callable[[], str | None]) -> None:
+    def __init__(
+        self, token_getter: Callable[[], str | None], header_style: str = "bearer"
+    ) -> None:
         self._token_getter = token_getter
+        self._header_style = header_style
 
     def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
         token = self._token_getter()
         if token:
-            request.headers["Authorization"] = f"Bearer {token}"
+            if self._header_style == "x_api_key":
+                request.headers["X-API-Key"] = token
+            else:
+                request.headers["Authorization"] = f"Bearer {token}"
         yield request
 
 
@@ -1159,10 +1263,14 @@ def _http_auth(
     calling user, injecting that user's current token per request. Every other server keeps
     the historical auth: the SDK client_credentials provider for oauth2, None otherwise.
     """
-    if _is_per_user_oauth(server):
+    if _is_per_user_credential(server):
         if user_id is None:
             return None  # unroutable; caller short-circuits before reaching here
-        return _PerUserBearerAuth(_per_user_token_getter(server.id, user_id, agent_id))
+        # per-user oauth always Bearer; per-user api-key follows the server's header_style.
+        header_style = server.header_style if _is_per_user_apikey(server) else "bearer"
+        return _PerUserBearerAuth(
+            _per_user_token_getter(server.id, user_id, agent_id), header_style=header_style
+        )
     return _oauth_auth(server)
 
 
@@ -1216,9 +1324,10 @@ def _transport_cm(
         )
     # default: streamable http on the non-deprecated API. A plain server routes through the
     # legacy `streamablehttp_client` shim (preserves any external monkeypatch / behavior);
-    # a per-user oauth server builds its user-bound client and uses the new API directly so
-    # the per-user auth is attached without round-tripping the legacy headers/auth kwargs.
-    if _is_per_user_oauth(server):
+    # a per-user credential server (oauth OR dynamic api-key) builds its user-bound client and
+    # uses the new API directly so the per-user auth (Bearer / X-API-Key per header_style) is
+    # attached without round-tripping the legacy headers/auth kwargs.
+    if _is_per_user_credential(server):
         http_client = _build_http_client(server, headers, user_id, agent_id)
         return streamable_http_client(server.url, http_client=http_client)
     return streamablehttp_client(
@@ -2011,6 +2120,10 @@ async def _call_via_session_inner(
     # never crash, never open or reuse another user's session (D8).
     if _is_per_user_oauth(server) and not await _ensure_fresh_user_token(server, user_id, agent_id):
         return await _trigger_per_user_authorization(server, user_id, agent_id)
+    # per-user api-key: no refresh — a missing (user, agent, server) key returns "needs
+    # credential" and triggers submission (form link / in-DM tool) per credential_input.
+    if _is_per_user_apikey(server) and not _has_user_credential(server, user_id, agent_id):
+        return await _trigger_per_user_credential(server, user_id, agent_id)
     # Known-unavailable server: short-circuit without touching the connection.
     if server._health is not HealthState.healthy:
         return _unavailable_result(server_id)
@@ -2194,6 +2307,9 @@ async def _call_utility(
     # per-user oauth: refresh-if-expired then trigger authorization on a missing/dead token.
     if _is_per_user_oauth(server) and not await _ensure_fresh_user_token(server, user_id, agent_id):
         return await _trigger_per_user_authorization(server, user_id, agent_id)
+    # per-user api-key: a missing key triggers credential submission (no refresh).
+    if _is_per_user_apikey(server) and not _has_user_credential(server, user_id, agent_id):
+        return await _trigger_per_user_credential(server, user_id, agent_id)
     if server._health is not HealthState.healthy:
         return _unavailable_result(server_id)
 

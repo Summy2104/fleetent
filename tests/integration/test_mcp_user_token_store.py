@@ -33,6 +33,59 @@ def test_migration_creates_mcp_user_tokens_and_pending_tables(db):
     assert "mcp_oauth_pending" in tables
 
 
+def test_migration_adds_credential_kind_column(db):
+    import sqlite3
+
+    conn = sqlite3.connect(db)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(mcp_user_tokens)")}
+    conn.close()
+    assert "credential_kind" in cols
+
+
+def test_static_credential_kind_roundtrips(db):
+    from fleetent.platform.connector_management import mcp_user_token_store as store
+
+    store.put_token(
+        "u1",
+        "a1",
+        "s1",
+        access_token="my-api-key",
+        refresh_token=None,
+        expires_at=None,
+        scope=None,
+        credential_kind="static",
+    )
+    got = store.get_token("u1", "a1", "s1")
+    assert got is not None
+    assert got.access_token == "my-api-key"
+    assert got.credential_kind == "static"
+    # default kind for OAuth callers stays 'oauth'
+    store.put_token(
+        "u2", "a1", "s1", access_token="AT", refresh_token="RT", expires_at=1.0, scope=None
+    )
+    assert store.get_token("u2", "a1", "s1").credential_kind == "oauth"
+
+
+async def test_fetch_static_credential_is_not_refreshed_even_if_expired(db):
+    # A static api-key has no refresh; fetch must return it as-is regardless of expiry,
+    # never attempting a token-endpoint refresh (no http_client needed → would error if tried).
+    from fleetent.platform.connector_management import mcp_oauth_service as svc
+    from fleetent.platform.connector_management import mcp_user_token_store as store
+
+    store.put_token(
+        "u1",
+        "a1",
+        "s1",
+        access_token="my-api-key",
+        refresh_token=None,
+        expires_at=1000.0,
+        scope=None,
+        credential_kind="static",
+    )
+    token = await svc.fetch_access_token("u1", "a1", "s1", now=lambda: 9_999_999.0)
+    assert token == "my-api-key"
+
+
 def test_token_store_roundtrips_and_isolates_by_triple(db):
     from fleetent.platform.connector_management import mcp_user_token_store as store
 

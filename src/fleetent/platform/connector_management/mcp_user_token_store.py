@@ -35,6 +35,8 @@ class StoredToken:
     token_url: str
     client_id: str
     client_secret_env: str
+    # 'oauth' (refreshable access token) | 'static' (user-supplied api-key/bearer, no refresh)
+    credential_kind: str = "oauth"
 
 
 @dataclass(frozen=True)
@@ -71,6 +73,7 @@ def put_token(
     token_url: str = "",
     client_id: str = "",
     client_secret_env: str = "",
+    credential_kind: str = "oauth",
 ) -> None:
     now = _now_iso()
     with _database().transaction() as conn:
@@ -79,11 +82,13 @@ def put_token(
             INSERT INTO mcp_user_tokens
                 (user_id, agent_id, server_id, access_token_ciphertext,
                  refresh_token_ciphertext, expires_at, scope,
-                 token_url, client_id, client_secret_env, created_at, updated_at)
+                 token_url, client_id, client_secret_env, credential_kind,
+                 created_at, updated_at)
             VALUES
                 (:user_id, :agent_id, :server_id, :access_ct,
                  :refresh_ct, :expires_at, :scope,
-                 :token_url, :client_id, :client_secret_env, :created_at, :updated_at)
+                 :token_url, :client_id, :client_secret_env, :credential_kind,
+                 :created_at, :updated_at)
             ON CONFLICT(user_id, agent_id, server_id) DO UPDATE SET
                 access_token_ciphertext = excluded.access_token_ciphertext,
                 refresh_token_ciphertext = excluded.refresh_token_ciphertext,
@@ -92,6 +97,7 @@ def put_token(
                 token_url = excluded.token_url,
                 client_id = excluded.client_id,
                 client_secret_env = excluded.client_secret_env,
+                credential_kind = excluded.credential_kind,
                 updated_at = excluded.updated_at
             """,
             {
@@ -105,6 +111,7 @@ def put_token(
                 "token_url": token_url,
                 "client_id": client_id,
                 "client_secret_env": client_secret_env,
+                "credential_kind": credential_kind,
                 "created_at": now,
                 "updated_at": now,
             },
@@ -117,7 +124,7 @@ def get_token(user_id: str, agent_id: str, server_id: str) -> StoredToken | None
         .execute(
             """
             SELECT access_token_ciphertext, refresh_token_ciphertext, expires_at, scope,
-                   token_url, client_id, client_secret_env
+                   token_url, client_id, client_secret_env, credential_kind
             FROM mcp_user_tokens
             WHERE user_id = :user_id AND agent_id = :agent_id AND server_id = :server_id
             """,
@@ -137,6 +144,7 @@ def get_token(user_id: str, agent_id: str, server_id: str) -> StoredToken | None
         token_url=str(row["token_url"] or ""),
         client_id=str(row["client_id"] or ""),
         client_secret_env=str(row["client_secret_env"] or ""),
+        credential_kind=str(row["credential_kind"] or "oauth"),
     )
 
 

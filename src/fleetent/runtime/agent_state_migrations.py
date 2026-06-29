@@ -597,3 +597,14 @@ MIGRATIONS.append(
 # v50 and the migrate loop would skip the rename on every existing production DB.
 for _label, _sql in _facts_migrations.FACTS_RENAME_MIGRATIONS:
     MIGRATIONS.append((MIGRATIONS[-1][0] + 1, _sql))
+
+# ── credential_kind on mcp_user_tokens (mcp-per-user-apikey) ──────────────────
+# Make the per-user credential store type-aware: existing rows are OAuth tokens
+# (backfill 'oauth'); per-user api-key/bearer rows store 'static' (only the secret,
+# OAuth columns NULL). Appended last so it takes the next version on live DBs.
+MIGRATIONS.append(
+    (
+        MIGRATIONS[-1][0] + 1,
+        "ALTER TABLE mcp_user_tokens ADD COLUMN credential_kind TEXT NOT NULL DEFAULT 'oauth'",
+    )
+)

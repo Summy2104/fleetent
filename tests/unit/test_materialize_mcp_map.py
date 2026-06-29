@@ -148,3 +148,31 @@ def test_authorization_code_auth_config_materializes_to_auth_block(monkeypatch) 
     assert server.auth.client_id == "fleetent-crm"
     assert server.auth.redirect_path == "/oauth/callback"
     assert server.auth.client_secret_env == "CRM_OAUTH_SECRET"
+
+
+def test_api_key_per_user_auth_config_materializes(monkeypatch) -> None:
+    monkeypatch.setattr(agent_store, "list_mcp_servers_for_agent", lambda _agent_id: ["acme"])
+    monkeypatch.setattr(
+        materialize.mcp_server_store,
+        "get_mcp_server",
+        lambda agent_id, server_id: {
+            "transport": "http",
+            "url": "https://acme/mcp",
+            "auth_type": "api_key_per_user",
+            "auth_config": {"header_style": "x_api_key", "credential_input": "both"},
+            "api_key_env": "",
+            "command": "",
+            "args": [],
+            "env": {},
+            "headers": {},
+        },
+    )
+    agent = SimpleNamespace(id=11, mcp_server_ids=[])
+
+    server = materialize._mcp_servers_for_agent(agent)[0]
+
+    assert server.auth_type == "api_key_per_user"
+    assert server.header_style == "x_api_key"
+    assert server.credential_input == "both"
+    assert server.auth is None  # no oauth block; secret is per-user, not here
+    assert server.api_key_env == ""  # no static env key

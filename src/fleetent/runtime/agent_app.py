@@ -23,8 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi import Depends, FastAPI, Form, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 
 from fleetent import agent_config, paths
@@ -789,6 +789,37 @@ def build_app(agent_name: str) -> FastAPI:
         if not result.ok:
             raise HTTPException(status_code=400, detail=result.detail)
         return PlainTextResponse("Authorization successful — return to your conversation.")
+
+    @app.get("/mcp/credential")
+    async def credential_form(state: str | None = None) -> Any:
+        """Standalone self-hosted per-user api-key credential form (mcp-per-user-apikey 3.4).
+
+        Renders a minimal form carrying the one-shot ``state`` (delivered to the user via a
+        private DM link). The state is validated only on POST — the GET never consumes it.
+        """
+        if not state:
+            raise HTTPException(status_code=400, detail="missing state")
+        from fleetent.integrations.mcp.standalone_credential import render_credential_form
+
+        return HTMLResponse(render_credential_form(state))
+
+    @app.post("/mcp/credential")
+    async def credential_submit(state: str = Form(...), key: str = Form(...)) -> Any:
+        """Standalone per-user api-key credential submit (mcp-per-user-apikey 3.4).
+
+        Identity is reverse-resolved from the one-shot ``state`` alone (never any login state
+        on this request): an invalid / expired / already-used ``state`` is rejected with 400
+        and nothing is written. On success the key is stored encrypted under the user's
+        ``(user, agent, server)`` triple as ``credential_kind=static``; the key is never
+        echoed back.
+        """
+        from fleetent.integrations.mcp.per_user_tokens import get_local_user_token_store
+        from fleetent.integrations.mcp.standalone_credential import handle_credential_submit
+
+        result = handle_credential_submit(state=state, key=key, store=get_local_user_token_store())
+        if not result.ok:
+            raise HTTPException(status_code=400, detail=result.detail)
+        return PlainTextResponse("Credential saved — return to your conversation.")
 
     # Approval endpoints: allow medium/high-risk tool calls to be approved without
     # requiring the full platform server. Standalone agents need these so that IM

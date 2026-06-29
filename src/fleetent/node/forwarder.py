@@ -214,6 +214,17 @@ def build_app(config: NodeConfig, backend: BaseProcessBackend) -> FastAPI:
         tenant_id = request.headers.get("x-fleetent-tenant-id", "default")
         return await _forward_oauth(agent_name, tenant_id, "oauth-token", await request.body())
 
+    @app.post("/agent/{agent_name}/mcp/credential-set")
+    async def agent_credential_set(
+        agent_name: str,
+        request: Request,
+        authorization: str | None = Header(None),
+    ) -> Response:
+        # mode 2 (in-DM tool) write path: forward the user-supplied static key to platform.
+        _check_agent_token(authorization, agent_name)
+        tenant_id = request.headers.get("x-fleetent-tenant-id", "default")
+        return await _forward_oauth(agent_name, tenant_id, "credential-set", await request.body())
+
     def _check_agent_token(authorization: str | None, agent_name: str) -> None:
         if authorization is None or not authorization.startswith("Bearer "):
             raise HTTPException(status_code=401, detail="Bearer token required")

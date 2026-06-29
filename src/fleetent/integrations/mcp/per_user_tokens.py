@@ -19,9 +19,12 @@ violate the owner-task lifecycle rule and introduces no agent→platform import.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -54,8 +57,19 @@ class UserTokenStore(Protocol):
         """Return the token for the triple, or None when none is stored."""
         ...
 
-    def put(self, user_id: str, agent_id: str, server_id: str, token: UserToken) -> None:
-        """Store (insert or overwrite) the token for the triple."""
+    def put(
+        self,
+        user_id: str,
+        agent_id: str,
+        server_id: str,
+        token: UserToken,
+        credential_kind: str = "oauth",
+    ) -> None:
+        """Store (insert or overwrite) the token for the triple.
+
+        ``credential_kind`` is 'oauth' (refreshable access token) or 'static' (user-supplied
+        api-key/bearer; only ``access_token`` is meaningful, never refreshed).
+        """
         ...
 
     def delete(self, user_id: str, agent_id: str, server_id: str) -> None:
@@ -77,7 +91,16 @@ class InMemoryUserTokenStore:
     def get(self, user_id: str, agent_id: str, server_id: str) -> UserToken | None:
         return self._tokens.get((user_id, agent_id, server_id))
 
-    def put(self, user_id: str, agent_id: str, server_id: str, token: UserToken) -> None:
+    def put(
+        self,
+        user_id: str,
+        agent_id: str,
+        server_id: str,
+        token: UserToken,
+        credential_kind: str = "oauth",
+    ) -> None:
+        # The in-memory fallback keeps only the token; ``credential_kind`` matters solely to
+        # the persistent stores' refresh-skip path, and api-key calls never run refresh.
         self._tokens[(user_id, agent_id, server_id)] = token
 
     def delete(self, user_id: str, agent_id: str, server_id: str) -> None:
@@ -150,3 +173,52 @@ def resolve_user_token(
     if _resolver is not None:
         return _resolver(server_id, user_id, agent_id)
     return _local_store.get(user_id, agent_id or "", server_id)
+
+
+# Credential-writer seam (mcp-per-user-apikey Group 5): persists a user-supplied static
+# api-key/bearer for a triple. Standalone leaves it None → the write goes to the local
+# encrypted store. Managed injects a writer that posts through the node loopback so the key
+# lands in the management DB (the read path is the resolver above). A callable reference
+# only — no live resource held at module scope.
+CredentialWriter = Callable[[str, str, "str | None", str], bool]
+
+_credential_writer: CredentialWriter | None = None
+
+
+def set_credential_writer(writer: CredentialWriter | None) -> None:
+    """Wire (or clear) the injected static-credential writer (managed). None → local store."""
+    global _credential_writer
+    _credential_writer = writer
+
+
+def store_user_credential(server_id: str, user_id: str, agent_id: str | None, key: str) -> bool:
+    """Persist a user-supplied static api-key/bearer for the triple (mode 2 tool path).
+
+    When a writer is injected (managed) it is used (node loopback → platform); otherwise
+    (standalone) the key is written to the local encrypted store as ``credential_kind=
+    "static"``. Returns whether the write succeeded; a storage error is logged and reported
+    as False so the tool can degrade gracefully rather than crash the turn.
+
+    Args:
+        server_id: The MCP server id the key authenticates against.
+        user_id: The submitting user's principal user id.
+        agent_id: The agent id completing the isolation triple.
+        key: The user-supplied api-key/bearer secret.
+
+    Returns:
+        True iff the credential was stored.
+    """
+    if _credential_writer is not None:
+        return _credential_writer(server_id, user_id, agent_id, key)
+    try:
+        _local_store.put(
+            user_id,
+            agent_id or "",
+            server_id,
+            UserToken(access_token=key, refresh_token=None, expires_at=None, scope=None),
+            credential_kind="static",
+        )
+    except Exception as exc:  # noqa: BLE001 — surface as False; never crash the agent turn
+        logger.warning("mcp_credential_store_failed server_id=%s error=%s", server_id, exc)
+        return False
+    return True

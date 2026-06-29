@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from fleetent.mcp_auth_models import (
     ApiKeyMcpAuthConfig,
+    ApiKeyPerUserMcpAuthConfig,
     McpAuthConfig,
     NoMcpAuthConfig,
     OAuthAuthorizationCodeMcpAuthConfig,
@@ -21,6 +22,7 @@ __all__ = [
     "ApiKeyMcpAuthConfig",
     "OAuthClientCredentialsMcpAuthConfig",
     "OAuthAuthorizationCodeMcpAuthConfig",
+    "ApiKeyPerUserMcpAuthConfig",
     "McpAuthConfig",
     "parse_mcp_auth_config",
 ]

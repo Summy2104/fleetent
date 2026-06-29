@@ -39,7 +39,11 @@ from fleetent.platform.agent_management_console import (
 )
 from fleetent.platform.agent_statistics import stats_admin_api
 from fleetent.platform.chat_management import chat_admin_api
-from fleetent.platform.connector_management import connector_admin_api, mcp_oauth_callback_api
+from fleetent.platform.connector_management import (
+    connector_admin_api,
+    mcp_credential_api,
+    mcp_oauth_callback_api,
+)
 from fleetent.platform.im_gateway_management import im_identity_admin_api
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import model_admin_api, provider_admin_api
@@ -273,6 +277,7 @@ app.include_router(model_admin_api.router)
 app.include_router(kb_admin_api.router)
 app.include_router(connector_admin_api.router)
 app.include_router(mcp_oauth_callback_api.router)
+app.include_router(mcp_credential_api.router)
 app.include_router(chat_admin_api.router)
 # agent_admin_api must precede agent_console_api: its literal DELETE
 # /agents/default route would otherwise be shadowed by the console's parametric

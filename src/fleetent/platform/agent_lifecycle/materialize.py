@@ -35,6 +35,7 @@ from fleetent.platform.agent_lifecycle import credential_slots, default_binding_
 from fleetent.platform.connector_management import mcp_server_store
 from fleetent.platform.connector_management.mcp_auth import (
     ApiKeyMcpAuthConfig,
+    ApiKeyPerUserMcpAuthConfig,
     OAuthAuthorizationCodeMcpAuthConfig,
     OAuthClientCredentialsMcpAuthConfig,
     parse_mcp_auth_config,
@@ -361,6 +362,8 @@ def _mcp_servers_for_agent(agent: agent_store.Agent) -> list[McpServerSettings]:
         api_key_env = ""
         auth = None
         auth_type = "none"
+        header_style = "bearer"
+        credential_input = "form"
         if isinstance(auth_config, ApiKeyMcpAuthConfig):
             auth_type = "api_key"
             api_key_env = auth_config.key_env
@@ -370,6 +373,10 @@ def _mcp_servers_for_agent(agent: agent_store.Agent) -> list[McpServerSettings]:
         elif isinstance(auth_config, OAuthAuthorizationCodeMcpAuthConfig):
             auth_type = "oauth_authorization_code"
             auth = auth_config
+        elif isinstance(auth_config, ApiKeyPerUserMcpAuthConfig):
+            auth_type = "api_key_per_user"
+            header_style = auth_config.header_style
+            credential_input = auth_config.credential_input
         servers.append(
             McpServerSettings(
                 id=server_id,
@@ -382,6 +389,8 @@ def _mcp_servers_for_agent(agent: agent_store.Agent) -> list[McpServerSettings]:
                 env=row["env"] or {},
                 headers=row["headers"] or {},
                 auth=auth,
+                header_style=header_style,
+                credential_input=credential_input,
             )
         )
     return servers

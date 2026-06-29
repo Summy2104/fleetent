@@ -134,6 +134,59 @@ async def complete_callback(
     return CallbackOutcome(True, "ok", "authorized")
 
 
+def complete_credential_submit(
+    state: str | None, key: str | None, *, now: float | None = None
+) -> CallbackOutcome:
+    """Complete a managed per-user api-key credential submission (mcp-per-user-apikey 4.2).
+
+    Sibling to :func:`complete_callback` but with no code exchange: the one-shot ``state``
+    (registered by the agent through the node loopback, reusing the pending store) is
+    consumed to reverse-resolve ``(user, agent, server)`` — identity comes only from
+    ``state``, never a login session — and the submitted key is stored, encrypted, under that
+    triple as ``credential_kind="static"`` (no refresh/expiry/scope; OAuth config columns
+    empty). An unknown / expired / already-used ``state`` or a missing key is rejected with
+    no write. The plaintext key is never returned or logged.
+    """
+    if not state or not key:
+        # An incomplete submit does not consume the state — the user can retry the link.
+        return CallbackOutcome(False, "invalid_request", "missing state or key")
+    pending = store.consume_pending(state, now=now if now is not None else time.time())
+    if pending is None:
+        return CallbackOutcome(False, "invalid_state", "unknown, expired, or used state")
+    store.put_token(
+        pending.user_id,
+        pending.agent_id,
+        pending.server_id,
+        access_token=key,
+        refresh_token=None,
+        expires_at=None,
+        scope=None,
+        credential_kind="static",
+    )
+    return CallbackOutcome(True, "ok", "credential saved")
+
+
+def store_static_credential(user_id: str, agent_id: str, server_id: str, key: str) -> None:
+    """Store a user-supplied static api-key/bearer for the triple (mode 2 tool, managed 5.2).
+
+    The in-DM ``set_mcp_credential`` tool path: the agent forwards the key (via the node
+    loopback, service-key authenticated) and the platform persists it encrypted as
+    ``credential_kind="static"`` (no refresh/expiry/scope; OAuth columns empty). Distinct
+    from the form flow's :func:`complete_credential_submit` — here the triple is supplied
+    directly (the agent already knows the calling user), with no one-shot ``state``.
+    """
+    store.put_token(
+        user_id,
+        agent_id,
+        server_id,
+        access_token=key,
+        refresh_token=None,
+        expires_at=None,
+        scope=None,
+        credential_kind="static",
+    )
+
+
 async def fetch_access_token(
     user_id: str,
     agent_id: str,
@@ -150,6 +203,9 @@ async def fetch_access_token(
     token = store.get_token(user_id, agent_id, server_id)
     if token is None:
         return None
+    # static credentials (user-supplied api-key/bearer) are never refreshed — return as-is.
+    if token.credential_kind == "static":
+        return token.access_token
     if token.expires_at is None or token.expires_at - now() > _REFRESH_SKEW_SECONDS:
         return token.access_token
     if not token.refresh_token or not token.token_url:

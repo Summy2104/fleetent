@@ -84,6 +84,30 @@ def test_authorization_code_requires_core_fields() -> None:
         parse_mcp_auth_config("oauth_authorization_code", {"client_id": "x"})
 
 
+def test_parse_mcp_auth_config_supports_api_key_per_user() -> None:
+    # per-user dynamic api-key/bearer: NO static key/key_env; header_style + credential_input
+    # are server config (defaults bearer / form). bearer and api-key are the same kind here.
+    from fleetent.mcp_auth_models import ApiKeyPerUserMcpAuthConfig
+
+    auth = parse_mcp_auth_config("api_key_per_user", {"header_style": "x_api_key"})
+    assert isinstance(auth, ApiKeyPerUserMcpAuthConfig)
+    assert auth.auth_type == "api_key_per_user"
+    assert auth.header_style == "x_api_key"
+    assert auth.credential_input == "form"  # default = secure form only
+    assert auth.secret_env_fields == frozenset()  # never a static env key
+
+    # defaults
+    d = parse_mcp_auth_config("api_key_per_user", {})
+    assert d.header_style == "bearer" and d.credential_input == "form"
+
+
+def test_api_key_per_user_rejects_unknown_header_or_input() -> None:
+    with pytest.raises(ValidationError):
+        parse_mcp_auth_config("api_key_per_user", {"header_style": "bogus"})
+    with pytest.raises(ValidationError):
+        parse_mcp_auth_config("api_key_per_user", {"credential_input": "nope"})
+
+
 def test_auth_config_models_live_in_neutral_module_importable_by_both_planes() -> None:
     # The schema is the single source for validation/materialize/frontend; it MUST be
     # importable without crossing into platform internals so the agent runtime (banned from
