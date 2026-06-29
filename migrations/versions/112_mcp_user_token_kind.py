@@ -1,7 +1,7 @@
 """mcp_user_tokens credential_kind (per-user api-key/bearer)
 
-Revision ID: 111
-Revises: 110
+Revision ID: 112
+Revises: 111
 Create Date: 2026-06-29
 """
 
@@ -10,8 +10,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "111"
-down_revision = "110"
+revision = "112"
+down_revision = "111"
 branch_labels = None
 depends_on = None
 
