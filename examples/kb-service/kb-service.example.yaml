@@ -1,0 +1,46 @@
+service:
+  tenant_id: tenant-a
+  service_key_ref: env:FLEETENT_KB_SERVICE_KEY
+  host: 127.0.0.1
+  port: 8787
+
+data:
+  home: ./data/kb-service
+
+retrieval:
+  default_mode: hybrid
+  top_k: 10
+
+embedding:
+  endpoint: http://127.0.0.1:9000/v1/embeddings
+  model: bge-small
+  dimensions: 384
+
+extraction:
+  enabled: false
+  endpoint: ""
+  model: ""
+
+chunking:
+  chunk_size: 1000
+  chunk_overlap: 200
+
+connectors:
+  - id: drive-shared
+    type: google_drive
+    enabled: true
+    kb_id: kb-a
+    folder_id: folder-123
+    recursive: true
+    credential_ref: env:KB_SHARED_GOOGLE_DRIVE
+    sync_interval_seconds: 1800
+  - id: confluence-shared
+    type: confluence
+    enabled: true
+    kb_id: kb-a
+    base_url: https://example.atlassian.net/wiki
+    username_env: KB_CONFLUENCE_USERNAME
+    space_key: ENG
+    include_children: true
+    credential_ref: env:KB_SHARED_ATLASSIAN_TOKEN
+    sync_interval_seconds: 3600
