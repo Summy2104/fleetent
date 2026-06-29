@@ -150,6 +150,9 @@ async def fetch_access_token(
     token = store.get_token(user_id, agent_id, server_id)
     if token is None:
         return None
+    # static credentials (user-supplied api-key/bearer) are never refreshed — return as-is.
+    if token.credential_kind == "static":
+        return token.access_token
     if token.expires_at is None or token.expires_at - now() > _REFRESH_SKEW_SECONDS:
         return token.access_token
     if not token.refresh_token or not token.token_url:

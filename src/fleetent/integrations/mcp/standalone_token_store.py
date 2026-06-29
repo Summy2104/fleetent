@@ -58,22 +58,35 @@ class StandaloneUserTokenStore:
             scope=row["scope"],
         )
 
-    def put(self, user_id: str, agent_id: str, server_id: str, token: UserToken) -> None:
-        """Insert or overwrite the encrypted token for the triple."""
+    def put(
+        self,
+        user_id: str,
+        agent_id: str,
+        server_id: str,
+        token: UserToken,
+        credential_kind: str = "oauth",
+    ) -> None:
+        """Insert or overwrite the encrypted token for the triple.
+
+        ``credential_kind`` is 'oauth' (refreshable access token) or 'static' (user-supplied
+        api-key/bearer; only the access_token is meaningful, never refreshed).
+        """
         now = _now()
         self._db.execute(
             """
             INSERT INTO mcp_user_tokens
                 (user_id, agent_id, server_id, access_token_ciphertext,
-                 refresh_token_ciphertext, expires_at, scope, created_at, updated_at)
+                 refresh_token_ciphertext, expires_at, scope, credential_kind,
+                 created_at, updated_at)
             VALUES
                 (:user_id, :agent_id, :server_id, :access_ct,
-                 :refresh_ct, :expires_at, :scope, :created_at, :updated_at)
+                 :refresh_ct, :expires_at, :scope, :credential_kind, :created_at, :updated_at)
             ON CONFLICT(user_id, agent_id, server_id) DO UPDATE SET
                 access_token_ciphertext = excluded.access_token_ciphertext,
                 refresh_token_ciphertext = excluded.refresh_token_ciphertext,
                 expires_at = excluded.expires_at,
                 scope = excluded.scope,
+                credential_kind = excluded.credential_kind,
                 updated_at = excluded.updated_at
             """,
             {
@@ -86,6 +99,7 @@ class StandaloneUserTokenStore:
                 ),
                 "expires_at": token.expires_at,
                 "scope": token.scope,
+                "credential_kind": credential_kind,
                 "created_at": now,
                 "updated_at": now,
             },
