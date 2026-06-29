@@ -207,7 +207,7 @@ class McpServerConfig:
         if auth is not None:
             auth_type = getattr(auth, "type", "oauth2") or "oauth2"
             token_url = getattr(auth, "token_url", "")
-            client_id = getattr(auth, "client_id", "")
+            client_id = _resolve_env_ref(getattr(auth, "client_id", ""))
             client_secret_env = getattr(auth, "client_secret_env", "")
             scope = getattr(auth, "scope", "")
             oauth_grant = getattr(auth, "grant", "client_credentials") or "client_credentials"
