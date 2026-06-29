@@ -68,11 +68,29 @@ class OAuthAuthorizationCodeMcpAuthConfig(McpOAuthSettings):
     secret_env_fields: ClassVar[frozenset[str]] = frozenset({"client_secret_env"})
 
 
+class ApiKeyPerUserMcpAuthConfig(BaseModel):
+    """Per-user dynamic api-key / bearer (mcp-per-user-apikey).
+
+    Unlike static ``api_key`` (which references a shared machine key via ``key_env``), each
+    user supplies their own secret at runtime, isolated by the (user, agent, server) triple.
+    This config carries NO static key reference — only server-level *method* settings:
+    ``header_style`` (how to inject) and ``credential_input`` (which submission methods are
+    allowed). A bearer token and an api-key are the same kind here, differing only in
+    ``header_style``.
+    """
+
+    auth_type: Literal["api_key_per_user"] = "api_key_per_user"
+    header_style: Literal["bearer", "x_api_key"] = "bearer"
+    credential_input: Literal["form", "tool", "both"] = "form"
+    secret_env_fields: ClassVar[frozenset[str]] = frozenset()
+
+
 McpAuthConfig = Annotated[
     NoMcpAuthConfig
     | ApiKeyMcpAuthConfig
     | OAuthClientCredentialsMcpAuthConfig
-    | OAuthAuthorizationCodeMcpAuthConfig,
+    | OAuthAuthorizationCodeMcpAuthConfig
+    | ApiKeyPerUserMcpAuthConfig,
     Field(discriminator="auth_type"),
 ]
 

@@ -1,8 +1,8 @@
 ## 1. 鉴权 schema:per-user api-key variant + 配置
 
-- [ ] 1.1 写测试(红):`mcp_auth_models` 解析 `api_key_per_user`(header_style 默认 bearer、credential_input 默认 form);无静态 key/key_env;非法值被拒;静态 `api_key` 不回归
-- [ ] 1.2 实现(绿):中立 `mcp_auth_models` 新增 `ApiKeyPerUserMcpAuthConfig` variant(header_style / credential_input);shim re-export;判别联合纳入
-- [ ] 1.3 写测试(红)+ 实现(绿):materialize 把 `api_key_per_user` 翻译为 agent.yaml per-user api-key 表示(header_style/credential_input);api_key/oauth 翻译不回归
+- [x] 1.1 写测试(红):`mcp_auth_models` 解析 `api_key_per_user`(header_style 默认 bearer、credential_input 默认 form);无静态 key/key_env;非法值被拒;静态 `api_key` 不回归
+- [x] 1.2 实现(绿):中立 `mcp_auth_models` 新增 `ApiKeyPerUserMcpAuthConfig` variant(header_style / credential_input);shim re-export;判别联合纳入
+- [x] 1.3 写测试(红)+ 实现(绿):materialize 把 `api_key_per_user` 翻译为 agent.yaml per-user api-key 表示(header_style/credential_input);api_key/oauth 翻译不回归
 
 ## 2. 类型感知存储 + per-request 注入(复用三元组)
 
