@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -7,9 +8,11 @@ from unittest.mock import AsyncMock
 from fleetent import agent_config
 from fleetent.agent_config import AgentConfigIndex, AgentFile, default_models
 from fleetent.config import LongTermContextSettings
+from fleetent.identity import Principal
 from fleetent.knowledge_base import KnowledgeChunk
 from fleetent.knowledge_base.retrieval.graph_search import GraphSearchChunk, GraphSearchResult
 from fleetent.memory.facts_models import Fact, SearchResult
+from fleetent.observability import KBRetrievalAuditContext
 
 
 def _publish_agent(monkeypatch, agent: AgentFile) -> None:
@@ -252,6 +255,328 @@ async def test_builtin_knowledge_provider_uses_knowledge_base_search_when_enable
             token_estimate=len("- Fleetent can ingest markdown knowledge."),
         )
     ]
+
+
+async def test_local_knowledge_provider_keeps_search_path_equivalent_to_legacy_branch(monkeypatch):
+    from fleetent import long_term_ctx
+    from fleetent.identity import Principal
+
+    _publish_agent(
+        monkeypatch,
+        AgentFile(
+            name="agent-1",
+            version=1,
+            models=default_models(),
+            knowledge={
+                "enabled": True,
+                "bindings": [{"tenant_id": "tenant-a", "kb_id": "global"}],
+                "retrieval_policy": {"mode": "hybrid", "use_planner": False},
+            },
+        ),
+    )
+    legacy_chunk = _kb_chunk("legacy-search", "Legacy search result.")
+    knowledge_search = AsyncMock(return_value=[legacy_chunk])
+    monkeypatch.setattr(long_term_ctx.knowledge_base, "search", knowledge_search)
+    monkeypatch.setattr(
+        long_term_ctx.knowledge_base,
+        "plan_knowledge_search",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("planner must stay off")),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        long_term_ctx.knowledge_base,
+        "execute_knowledge_search_plan",
+        AsyncMock(
+            side_effect=AssertionError("planner execute must stay off when use_planner=false")
+        ),
+        raising=False,
+    )
+
+    provider = long_term_ctx.LocalKnowledgeProvider()
+    audit = KBRetrievalAuditContext(run_id="run-1", tenant_id="tenant-a")
+    results = await provider(
+        Principal(user_id="user-1", tenant_id="tenant-a"),
+        "markdown",
+        ["global"],
+        10,
+        audit,
+    )
+
+    knowledge_search.assert_awaited_once_with(
+        "markdown",
+        tenant_id="tenant-a",
+        kb_ids=["global"],
+        limit=10,
+        mode="hybrid",
+        audit_context=audit,
+    )
+    assert results == [legacy_chunk]
+
+
+async def test_local_knowledge_provider_keeps_planner_path_equivalent_to_legacy_branch(
+    monkeypatch,
+):
+    from fleetent import long_term_ctx
+    from fleetent.identity import Principal
+    from fleetent.knowledge_base import planner
+
+    _publish_agent(
+        monkeypatch,
+        AgentFile(
+            name="agent-1",
+            version=1,
+            models=default_models(),
+            knowledge={
+                "enabled": True,
+                "bindings": [{"tenant_id": "tenant-a", "kb_id": "global"}],
+                "retrieval_policy": {"mode": "hybrid", "use_planner": True},
+            },
+        ),
+    )
+    legacy_search = AsyncMock(return_value=[_kb_chunk("legacy-search", "legacy result")])
+    planner_graph = AsyncMock(
+        return_value=GraphSearchResult(
+            query="Which service depends on Billing API?",
+            tenant_id="tenant-a",
+            kb_ids=["global"],
+            depth=1,
+            chunks=[
+                GraphSearchChunk(
+                    chunk=_kb_chunk("graph-hit", "Billing API depends on Auth Service."),
+                    graph_score=1.0,
+                    reason="relation_evidence",
+                )
+            ],
+        )
+    )
+    planner_fill = AsyncMock(return_value=[])
+    monkeypatch.setattr(long_term_ctx.knowledge_base, "search", legacy_search)
+    monkeypatch.setattr(planner, "graph_search", planner_graph)
+    monkeypatch.setattr(planner, "search", planner_fill)
+
+    provider = long_term_ctx.LocalKnowledgeProvider()
+    results = await provider(
+        Principal(user_id="user-1", tenant_id="tenant-a"),
+        "Which service depends on Billing API?",
+        ["global"],
+        10,
+        None,
+    )
+
+    legacy_search.assert_not_awaited()
+    planner_graph.assert_awaited_once()
+    planner_fill.assert_awaited_once()
+    assert [chunk.id for chunk in results] == ["graph-hit"]
+
+
+async def test_search_knowledge_resolves_scope_and_short_circuits_empty_bindings(monkeypatch):
+    from fleetent import long_term_ctx
+    from fleetent.identity import Principal
+
+    provider = AsyncMock(return_value=[])
+    long_term_ctx.set_knowledge_provider(provider)
+    _publish_agent(
+        monkeypatch,
+        AgentFile(
+            name="agent-1",
+            version=1,
+            models=default_models(),
+            knowledge={
+                "enabled": True,
+                "bindings": [
+                    {"tenant_id": "tenant-a", "kb_id": "global", "permissions": {"search": True}},
+                    {"tenant_id": "tenant-a", "kb_id": "private", "permissions": {"search": False}},
+                ],
+            },
+        ),
+    )
+
+    await long_term_ctx._search_knowledge("user-1", "markdown", "agent-1", 3)
+
+    provider.assert_awaited_once_with(
+        Principal(user_id="user-1", tenant_id="tenant-a"),
+        "markdown",
+        ["global"],
+        3,
+        None,
+    )
+
+    provider.reset_mock()
+    _publish_agent(
+        monkeypatch,
+        AgentFile(
+            name="agent-1",
+            version=1,
+            models=default_models(),
+            knowledge={
+                "enabled": True,
+                "bindings": [
+                    {"tenant_id": "tenant-a", "kb_id": "private", "permissions": {"search": False}}
+                ],
+            },
+        ),
+    )
+
+    assert await long_term_ctx._search_knowledge("user-1", "markdown", "agent-1", 3) == []
+    provider.assert_not_awaited()
+
+
+async def test_search_knowledge_passes_principal_scope_and_audit_to_injected_provider(monkeypatch):
+    from fleetent import long_term_ctx
+    from fleetent.identity import Principal
+
+    provider = AsyncMock(return_value=[])
+    audit = KBRetrievalAuditContext(
+        run_id="run-2",
+        session_id="sess-2",
+        user_id="user-1",
+        agent_name="agent-1",
+        tenant_id="tenant-a",
+    )
+    long_term_ctx.set_knowledge_provider(provider)
+    _publish_agent(
+        monkeypatch,
+        AgentFile(
+            name="agent-1",
+            version=1,
+            models=default_models(),
+            knowledge={
+                "enabled": True,
+                "bindings": [{"tenant_id": "tenant-a", "kb_id": "global"}],
+            },
+        ),
+    )
+
+    await long_term_ctx._search_knowledge(
+        "user-1",
+        "deployment",
+        "agent-1",
+        5,
+        audit_context=audit,
+    )
+
+    provider.assert_awaited_once_with(
+        Principal(user_id="user-1", tenant_id="tenant-a"),
+        "deployment",
+        ["global"],
+        5,
+        audit,
+    )
+
+
+async def test_build_context_degrades_when_provider_raises_and_keeps_other_sources(monkeypatch):
+    from fleetent import long_term_ctx
+
+    warnings: list[tuple[str, dict[str, object]]] = []
+
+    class _FakeLogger:
+        def warn(self, message: str, **fields: object) -> None:
+            warnings.append((message, dict(fields)))
+
+        def info(self, _message: str, **_fields: object) -> None:
+            return None
+
+    async def _boom(*_args, **_kwargs):
+        raise RuntimeError("kb backend down")
+
+    monkeypatch.setattr(long_term_ctx, "_logger", _FakeLogger())
+    _publish_agent(
+        monkeypatch,
+        AgentFile(
+            name="agent-1",
+            version=1,
+            models=default_models(),
+            knowledge={
+                "enabled": True,
+                "bindings": [{"tenant_id": "tenant-a", "kb_id": "global"}],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        long_term_ctx.memory,
+        "search_facts",
+        AsyncMock(return_value=[_mem_result("User prefers concise answers.")]),
+    )
+    monkeypatch.setattr(
+        long_term_ctx.agent_memory,
+        "search_agent_memory",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(long_term_ctx, "_list_always_facts", lambda _user_id: [])
+    long_term_ctx.set_knowledge_provider(_boom)
+
+    result = await long_term_ctx.build_context(
+        user_id="user-1",
+        query="answer style",
+        agent_id="agent-1",
+        available_tokens=300,
+    )
+
+    assert "User prefers concise answers." in result.text
+    assert [source.source_type for source in result.sources] == ["memory"]
+    assert warnings[0][0] == "ltc_retrieval_failed"
+    assert warnings[0][1]["path"] == "knowledge"
+    assert warnings[0][1]["error_type"] == "RuntimeError"
+
+
+async def test_build_context_degrades_when_provider_times_out_and_keeps_other_sources(monkeypatch):
+    from fleetent import long_term_ctx
+
+    warnings: list[tuple[str, dict[str, object]]] = []
+
+    class _FakeLogger:
+        def warn(self, message: str, **fields: object) -> None:
+            warnings.append((message, dict(fields)))
+
+        def info(self, _message: str, **_fields: object) -> None:
+            return None
+
+    async def _slow(*_args, **_kwargs):
+        await asyncio.sleep(1.0)
+        return []
+
+    monkeypatch.setattr(long_term_ctx, "_logger", _FakeLogger())
+    _publish_agent(
+        monkeypatch,
+        AgentFile(
+            name="agent-1",
+            version=1,
+            models=default_models(),
+            knowledge={
+                "enabled": True,
+                "bindings": [{"tenant_id": "tenant-a", "kb_id": "global"}],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        long_term_ctx,
+        "_ltc_config",
+        lambda: LongTermContextSettings(retrieval_timeout_seconds=0.05),
+    )
+    monkeypatch.setattr(
+        long_term_ctx.memory,
+        "search_facts",
+        AsyncMock(return_value=[_mem_result("User prefers concise answers.")]),
+    )
+    monkeypatch.setattr(
+        long_term_ctx.agent_memory,
+        "search_agent_memory",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(long_term_ctx, "_list_always_facts", lambda _user_id: [])
+    long_term_ctx.set_knowledge_provider(_slow)
+
+    result = await long_term_ctx.build_context(
+        user_id="user-1",
+        query="answer style",
+        agent_id="agent-1",
+        available_tokens=300,
+    )
+
+    assert "User prefers concise answers." in result.text
+    assert [source.source_type for source in result.sources] == ["memory"]
+    assert warnings[0][0] == "ltc_retrieval_timeout"
+    assert warnings[0][1]["path"] == "knowledge"
 
 
 async def test_builtin_knowledge_provider_keeps_search_path_when_planner_opt_in_is_false(
@@ -515,6 +840,18 @@ async def test_build_context_keeps_budget_policy_path_for_memory_and_knowledge(m
 async def test_empty_knowledge_results_are_omitted(monkeypatch):
     from fleetent import long_term_ctx
 
+    _publish_agent(
+        monkeypatch,
+        AgentFile(
+            name="agent-1",
+            version=1,
+            models=default_models(),
+            knowledge={
+                "enabled": True,
+                "bindings": [{"tenant_id": "tenant-a", "kb_id": "global"}],
+            },
+        ),
+    )
     monkeypatch.setattr(long_term_ctx.memory, "search_facts", AsyncMock(return_value=[]))
     knowledge_search = AsyncMock(return_value=[])
     long_term_ctx.set_knowledge_provider(knowledge_search)
@@ -526,7 +863,13 @@ async def test_empty_knowledge_results_are_omitted(monkeypatch):
         available_tokens=200,
     )
 
-    knowledge_search.assert_awaited_once_with("user-1", "deployment", "agent-1", 10)
+    knowledge_search.assert_awaited_once_with(
+        Principal(user_id="user-1", tenant_id="tenant-a"),
+        "deployment",
+        ["global"],
+        10,
+        None,
+    )
     assert result.text == ""
     assert result.sources == []
     assert "[Knowledge" not in result.text
@@ -535,6 +878,18 @@ async def test_empty_knowledge_results_are_omitted(monkeypatch):
 async def test_memory_and_knowledge_results_are_included_with_sources(monkeypatch):
     from fleetent import long_term_ctx
 
+    _publish_agent(
+        monkeypatch,
+        AgentFile(
+            name="agent-1",
+            version=1,
+            models=default_models(),
+            knowledge={
+                "enabled": True,
+                "bindings": [{"tenant_id": "tenant-a", "kb_id": "global"}],
+            },
+        ),
+    )
     memory = _mem_result("User is deploying on-prem")
     knowledge = SimpleNamespace(
         id="doc-1",
@@ -563,6 +918,18 @@ async def test_memory_and_knowledge_results_are_included_with_sources(monkeypatc
 async def test_budget_pressure_keeps_memory_and_omits_low_priority_knowledge(monkeypatch):
     from fleetent import long_term_ctx
 
+    _publish_agent(
+        monkeypatch,
+        AgentFile(
+            name="agent-1",
+            version=1,
+            models=default_models(),
+            knowledge={
+                "enabled": True,
+                "bindings": [{"tenant_id": "tenant-a", "kb_id": "global"}],
+            },
+        ),
+    )
     memory = _mem_result("User prefers concise answers.")
     knowledge = SimpleNamespace(
         id="doc-1",

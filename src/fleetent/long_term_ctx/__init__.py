@@ -10,7 +10,9 @@ from typing import Any, Literal
 from fleetent import memory
 from fleetent.config import LongTermContextSettings, Settings
 from fleetent.db import SQLiteDatabase, create_database
+from fleetent.identity import Principal
 from fleetent.knowledge_base.core import KnowledgeStore
+from fleetent.knowledge_base.core.models import KnowledgeChunk
 from fleetent.knowledge_base.planner import KnowledgeSearchOptions, KnowledgeSearchPlan
 from fleetent.knowledge_base.retrieval.search import SearchMode
 from fleetent.knowledge_base.retrieval.search import search as kb_search
@@ -164,7 +166,10 @@ class _ContextCandidate:
     token_estimate: int
 
 
-KnowledgeProvider = Callable[[str, str, str, int], Awaitable[list[object]]]
+KnowledgeProvider = Callable[
+    [Principal, str, list[str], int, KBRetrievalAuditContext | None],
+    Awaitable[list[KnowledgeChunk]],
+]
 
 
 # Back-compat seam for existing monkeypatch-based unit and integration tests that
@@ -210,6 +215,51 @@ knowledge_base = SimpleNamespace(
     execute_knowledge_search_plan=_execute_knowledge_search_plan_compat,
 )
 
+
+class LocalKnowledgeProvider:
+    """Default knowledge provider backed by the local knowledge base."""
+
+    async def __call__(
+        self,
+        principal: Principal,
+        query: str,
+        kb_ids: list[str],
+        limit: int,
+        audit_context: KBRetrievalAuditContext | None,
+    ) -> list[KnowledgeChunk]:
+        if not kb_ids:
+            return []
+
+        from fleetent import agent_config
+
+        agent = agent_config.active_agent_or_default()
+        policy = agent.knowledge.retrieval_policy
+        use_planner = bool(getattr(policy, "use_planner", False))
+        if use_planner:
+            plan = knowledge_base.plan_knowledge_search(
+                query,
+                KnowledgeSearchOptions(
+                    tenant_id=principal.tenant_id,
+                    kb_ids=kb_ids,
+                    limit=limit,
+                    rerank=bool(getattr(policy, "rerank", False)),
+                ),
+            )
+            return list(await knowledge_base.execute_knowledge_search_plan(plan))
+
+        return list(
+            await knowledge_base.search(
+                query,
+                tenant_id=principal.tenant_id,
+                kb_ids=kb_ids,
+                limit=limit,
+                mode=policy.mode,
+                audit_context=audit_context,
+            )
+        )
+
+
+_default_knowledge_provider = LocalKnowledgeProvider()
 _knowledge_provider: KnowledgeProvider | None = None
 
 
@@ -626,9 +676,7 @@ async def _search_knowledge(
     agent_id: str,
     limit: int,
     audit_context: KBRetrievalAuditContext | None = None,
-) -> list[object]:
-    if _knowledge_provider is not None:
-        return await _knowledge_provider(user_id, query, agent_id, limit)
+) -> list[KnowledgeChunk]:
 
     from fleetent import agent_config
 
@@ -643,28 +691,9 @@ async def _search_knowledge(
     tenant_id = kb.tenant_id
     if tenant_id is None:
         raise ValueError("knowledge.bindings must all share the same tenant_id")
-    use_planner = bool(getattr(kb.retrieval_policy, "use_planner", False))
-    if use_planner:
-        plan = knowledge_base.plan_knowledge_search(
-            query,
-            KnowledgeSearchOptions(
-                tenant_id=tenant_id,
-                kb_ids=kb_ids,
-                limit=limit,
-                rerank=bool(getattr(kb.retrieval_policy, "rerank", False)),
-            ),
-        )
-        results = await knowledge_base.execute_knowledge_search_plan(plan)
-    else:
-        results = await knowledge_base.search(
-            query,
-            tenant_id=tenant_id,
-            kb_ids=kb_ids,
-            limit=limit,
-            mode=kb.retrieval_policy.mode,
-            audit_context=audit_context,
-        )
-    return list(results)
+    principal = Principal(user_id=user_id, tenant_id=tenant_id)
+    provider = _knowledge_provider or _default_knowledge_provider
+    return list(await provider(principal, query, kb_ids, limit, audit_context))
 
 
 def _knowledge_source(item: object) -> ContextSource:

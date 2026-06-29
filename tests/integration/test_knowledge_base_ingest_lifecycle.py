@@ -400,6 +400,7 @@ def _patch_knowledge_runtime(monkeypatch, tmp_path) -> tuple[SQLiteDatabase, _Ve
         lambda: KnowledgeBaseSettings(chunk_size=500, chunk_overlap=0),
     )
     monkeypatch.setattr(runtime, "_database", lambda: database)
+    monkeypatch.setattr(runtime, "_kb_vector_backend", None)
     monkeypatch.setattr(vector_store_module, "upsert", tracker.upsert)
     monkeypatch.setattr(vector_store_module, "delete", tracker.delete)
     monkeypatch.setattr(runtime.vector_store, "upsert", tracker.upsert)

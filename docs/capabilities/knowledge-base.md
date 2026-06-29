@@ -573,7 +573,7 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 - knowledge base 隔离：不同 `tenant_id + kb_id` 的检索结果互不干扰
 - delete 级联：删除文档后对应 chunk、vector entries 和该文档的 graph evidence 均被清理；孤儿 entity 会被回收，共享 entity 保留
 - re-ingest overwrite：同身份文档重复导入时只保留最新一份 document / chunk，旧版本 chunks、vectors 和 graph evidence 不再可见
-- long-term-ctx 在 Agent knowledge binding / policy 启用时调用内置 provider；disabled 或无结果时降级
+- long-term-ctx 在 Agent knowledge binding / policy 启用时，先解析 `knowledge.bindings` 为 `kb_ids` 和单一 `tenant_id`，再以 `(Principal, query, kb_ids, limit, audit_context)` 契约调用当前 knowledge provider；默认 `LocalKnowledgeProvider` 读取本地 KB，override provider 只在传入范围内检索；disabled、空范围、超时或 provider 抛错时都降级为空结果
 - local sync planner 为 new / changed / unchanged / missing source 生成确定性动作
 - execute_sync_plan 只在 item 成功后更新 source state，单 item 失败不阻断后续 item
 - sync_local_directory 通过 planner + executor 执行；本地文件删除后对应 KB document 和 chunks 被删除

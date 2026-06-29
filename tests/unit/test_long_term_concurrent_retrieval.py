@@ -5,6 +5,10 @@ from __future__ import annotations
 import asyncio
 import time
 
+import pytest
+
+from fleetent import agent_config
+from fleetent.agent_config import AgentConfigIndex, AgentFile, default_models
 from fleetent.config import LongTermContextSettings
 
 # ── Task 1: config ────────────────────────────────────────────────────────────
@@ -17,6 +21,28 @@ def test_retrieval_timeout_default_is_5s() -> None:
 def test_retrieval_timeout_is_configurable() -> None:
     s = LongTermContextSettings(retrieval_timeout_seconds=0.1)
     assert s.retrieval_timeout_seconds == 0.1
+
+
+@pytest.fixture(autouse=True)
+def _publish_kb_enabled_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        agent_config,
+        "_index",
+        AgentConfigIndex(
+            agents={
+                "agent-1": AgentFile(
+                    name="agent-1",
+                    version=1,
+                    models=default_models(),
+                    knowledge={
+                        "enabled": True,
+                        "bindings": [{"tenant_id": "tenant-a", "kb_id": "global"}],
+                    },
+                )
+            },
+            default="agent-1",
+        ),
+    )
 
 
 # ── Task 2: single-path timeout/degrade helper ────────────────────────────────
