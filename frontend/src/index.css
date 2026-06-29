@@ -1,10 +1,17 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
 
+/* Tailwind v4 auto-detects sources from the CSS entry upward, but this project
+   keeps the CSS under src/ while components live alongside it — declare the
+   scan roots explicitly so the oxide scanner picks up every component file. */
+@source './';
+@source '../index.html';
+
+/* Dark control-plane theme: deep navy ground + mint/emerald accent.
+   All tokens are HSL triplets (no hsl() wrapper) so alpha modifiers like
+   bg-success/15 work. The variable names are the contract for runtime theme
+   overrides (src/app/theme.tsx applies setProperty on these same keys). */
 @layer base {
   :root {
-    /* Dark control-plane theme: deep navy ground + mint/emerald accent. */
     --background: 216 33% 7%;
     --foreground: 213 31% 91%;
 
@@ -53,9 +60,97 @@
       'Microsoft YaHei',
       sans-serif;
   }
+}
 
-  * {
-    @apply border-border;
+/* Map the raw HSL variables into Tailwind v4 theme tokens so utilities like
+   bg-background, text-primary, border-sidebar-border resolve. */
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+
+  --color-success: hsl(var(--success));
+  --color-warning: hsl(var(--warning));
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  --shadow-soft: 0 18px 45px -24px rgba(0, 0, 0, 0.6);
+
+  --font-sans:
+    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei',
+    sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --animate-fade-in: fade-in 0.2s ease-out;
+  --animate-overlay-in: overlay-in 0.15s ease-out;
+  --animate-content-in: content-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes overlay-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes content-in {
+    from {
+      opacity: 0;
+      transform: translate(-50%, -48%) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
+  }
+}
+
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-border);
   }
 
   html,
