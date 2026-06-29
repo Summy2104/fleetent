@@ -237,6 +237,7 @@ class AgentRetrievalPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mode: Literal["vector", "keyword", "hybrid"] = "hybrid"
+    use_planner: bool = False
     top_k: int = 10
     rerank: bool = False
     embedding_route: str = ""

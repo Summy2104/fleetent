@@ -11,6 +11,7 @@ from fleetent import memory
 from fleetent.config import LongTermContextSettings, Settings
 from fleetent.db import SQLiteDatabase, create_database
 from fleetent.knowledge_base.core import KnowledgeStore
+from fleetent.knowledge_base.planner import KnowledgeSearchOptions, KnowledgeSearchPlan
 from fleetent.knowledge_base.retrieval.search import SearchMode
 from fleetent.knowledge_base.retrieval.search import search as kb_search
 from fleetent.memory import agent_memory
@@ -189,7 +190,25 @@ async def _kb_search_compat(
     )
 
 
-knowledge_base = SimpleNamespace(search=_kb_search_compat)
+def _plan_knowledge_search_compat(
+    query: str, options: KnowledgeSearchOptions
+) -> KnowledgeSearchPlan:
+    from fleetent.knowledge_base import plan_knowledge_search
+
+    return plan_knowledge_search(query, options)
+
+
+async def _execute_knowledge_search_plan_compat(plan: KnowledgeSearchPlan) -> list[object]:
+    from fleetent.knowledge_base import execute_knowledge_search_plan
+
+    return list(await execute_knowledge_search_plan(plan))
+
+
+knowledge_base = SimpleNamespace(
+    search=_kb_search_compat,
+    plan_knowledge_search=_plan_knowledge_search_compat,
+    execute_knowledge_search_plan=_execute_knowledge_search_plan_compat,
+)
 
 _knowledge_provider: KnowledgeProvider | None = None
 
@@ -624,14 +643,27 @@ async def _search_knowledge(
     tenant_id = kb.tenant_id
     if tenant_id is None:
         raise ValueError("knowledge.bindings must all share the same tenant_id")
-    results = await knowledge_base.search(
-        query,
-        tenant_id=tenant_id,
-        kb_ids=kb_ids,
-        limit=limit,
-        mode=kb.retrieval_policy.mode,
-        audit_context=audit_context,
-    )
+    use_planner = bool(getattr(kb.retrieval_policy, "use_planner", False))
+    if use_planner:
+        plan = knowledge_base.plan_knowledge_search(
+            query,
+            KnowledgeSearchOptions(
+                tenant_id=tenant_id,
+                kb_ids=kb_ids,
+                limit=limit,
+                rerank=bool(getattr(kb.retrieval_policy, "rerank", False)),
+            ),
+        )
+        results = await knowledge_base.execute_knowledge_search_plan(plan)
+    else:
+        results = await knowledge_base.search(
+            query,
+            tenant_id=tenant_id,
+            kb_ids=kb_ids,
+            limit=limit,
+            mode=kb.retrieval_policy.mode,
+            audit_context=audit_context,
+        )
     return list(results)
 
 
