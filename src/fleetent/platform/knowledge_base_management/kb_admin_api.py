@@ -835,11 +835,8 @@ def _connector_out(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _connector_settings() -> Any:
-    """A settings-shaped object exposing .knowledge_base built from the DB store,
-    so the config-driven ingestion engine can run against DB-managed connectors."""
-    from types import SimpleNamespace
-
-    return SimpleNamespace(knowledge_base=kb_connector_store.as_knowledge_base_settings())
+    """Return store-sourced connector settings for operations.* entrypoints."""
+    return kb_connector_store.as_knowledge_base_settings()
 
 
 @router.get("/connectors")

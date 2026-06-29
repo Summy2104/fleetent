@@ -16,6 +16,7 @@ import yaml
 from fleetent import memory, observability
 from fleetent.db import SQLiteDatabase
 from fleetent.governance import approval_request_store
+from fleetent.knowledge_base.config import load_knowledge_config
 from fleetent.structured_logging import get_logger
 
 FindingType = Literal["memory_candidate", "memory_conflict", "skill_opportunity"]
@@ -1426,7 +1427,11 @@ def _connector_findings() -> list[KnowledgeBaseReflectionFinding]:
     findings: list[KnowledgeBaseReflectionFinding] = []
     kb_api = cast(Any, knowledge_base)
     try:
-        connectors = kb_api.list_configured_connectors()
+        connector_settings = _connector_settings()
+        try:
+            connectors = kb_api.list_configured_connectors(settings=connector_settings)
+        except TypeError:
+            connectors = kb_api.list_configured_connectors()
     except Exception:
         return [
             _kb_finding(
@@ -1441,7 +1446,10 @@ def _connector_findings() -> list[KnowledgeBaseReflectionFinding]:
     for connector in connectors:
         connector_id = str(getattr(connector, "connector_id", "unknown"))
         try:
-            status = kb_api.get_connector_status(connector_id)
+            try:
+                status = kb_api.get_connector_status(connector_id, settings=connector_settings)
+            except TypeError:
+                status = kb_api.get_connector_status(connector_id)
         except Exception:
             findings.append(
                 _kb_finding(
@@ -1468,6 +1476,15 @@ def _connector_findings() -> list[KnowledgeBaseReflectionFinding]:
                 )
             )
     return findings
+
+
+def _connector_settings() -> Any:
+    try:
+        return load_knowledge_config()
+    except FileNotFoundError:
+        from fleetent.knowledge_base.config import KnowledgeConfigSnapshot
+
+        return KnowledgeConfigSnapshot()
 
 
 def _kb_finding(
@@ -2108,9 +2125,7 @@ def _parse_optional_datetime(value: object) -> datetime | None:
 _MEMORY_SIGNAL_QUERY_LIMIT = 512  # embedding models have short token limits
 
 
-async def _read_memory_signals(
-    scope: str, events: list[observability.TraceEvent]
-) -> list[Any]:
+async def _read_memory_signals(scope: str, events: list[observability.TraceEvent]) -> list[Any]:
     """Return facts SearchResults relevant to the reflected events (empty if none)."""
     query = _events_to_text(events)
     if not query:

@@ -93,6 +93,7 @@ def test_google_drive_connectors_load_explicit_env_fields_from_settings():
 
 def test_connectors_load_from_platform_yaml_knowledge_section(tmp_path, monkeypatch):
     from fleetent.knowledge_base import list_configured_connectors
+    from fleetent.knowledge_base.config import load_knowledge_config
 
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
     (tmp_path / "platform.yaml").write_text(
@@ -110,7 +111,7 @@ knowledge:
         encoding="utf-8",
     )
 
-    connectors = list_configured_connectors()
+    connectors = list_configured_connectors(settings=load_knowledge_config())
 
     assert [(item.connector_id, item.tenant_id, item.kb_id) for item in connectors] == [
         ("eng-drive", "default", "engineering")
