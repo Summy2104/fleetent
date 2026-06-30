@@ -25,7 +25,7 @@ def test_resolver_fetches_caches_and_returns_access_only() -> None:
 
     clock = {"t": 1000.0}
     resolver = managed_oauth.ManagedUserTokenResolver(
-        "http://127.0.0.1:8786", "alpha", "tui-tok", now=lambda: clock["t"], http_post=fake_post
+        "http://127.0.0.1:8767", "alpha", "tui-tok", now=lambda: clock["t"], http_post=fake_post
     )
 
     tok = resolver("crm", "u1", "alpha")
@@ -48,7 +48,7 @@ def test_resolver_fetches_caches_and_returns_access_only() -> None:
 
 def test_resolver_returns_none_on_404() -> None:
     resolver = managed_oauth.ManagedUserTokenResolver(
-        "http://127.0.0.1:8786", "alpha", "tui-tok", http_post=lambda url, **kw: _Resp(404)
+        "http://127.0.0.1:8767", "alpha", "tui-tok", http_post=lambda url, **kw: _Resp(404)
     )
     assert resolver("crm", "u1", "alpha") is None
 
@@ -71,7 +71,7 @@ def test_state_store_issue_registers_pending_and_returns_state() -> None:
         client_secret_env="CS",
     )
     store = managed_oauth.ManagedStateStore(
-        "http://127.0.0.1:8786", "alpha", "tui-tok", lambda sid: server, http_post=fake_post
+        "http://127.0.0.1:8767", "alpha", "tui-tok", lambda sid: server, http_post=fake_post
     )
 
     state = store.issue("u1", "alpha", "crm", "verifier-xyz")
@@ -90,7 +90,7 @@ def test_state_store_issue_registers_pending_and_returns_state() -> None:
 def test_wire_managed_oauth_injects_resolver_seam() -> None:
     try:
         managed_oauth.wire_managed_oauth(
-            "http://127.0.0.1:8786", "alpha", "tui-tok", lambda sid: None
+            "http://127.0.0.1:8767", "alpha", "tui-tok", lambda sid: None
         )
         # The injected resolver now takes precedence over the local store.
         assert per_user_tokens._resolver is not None

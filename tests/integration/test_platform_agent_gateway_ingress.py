@@ -100,7 +100,7 @@ def test_admin_chat_ingress_reaches_node_forwarder_and_agent(
     monkeypatch.setattr(server, "_agent_transport", DirectHttpAgentTransport())
     monkeypatch.setattr(
         "fleetent.platform.node_management.node_addressing.forwarder_base_url",
-        lambda node_id: "http://node-a.internal:8786",
+        lambda node_id: "http://node-a.internal:8767",
     )
     monkeypatch.setattr(
         "fleetent.platform.node_management.node_addressing.node_store.get_forward_host",

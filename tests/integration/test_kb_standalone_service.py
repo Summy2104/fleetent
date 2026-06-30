@@ -20,7 +20,7 @@ def _service_doc() -> dict[str, object]:
             "tenant_id": "tenant-a",
             "service_key_ref": "env:FLEETENT_KB_SERVICE_KEY",
             "host": "127.0.0.1",
-            "port": 8787,
+            "port": 8768,
         },
         "data": {
             "home": "./data",
@@ -30,7 +30,7 @@ def _service_doc() -> dict[str, object]:
             "top_k": 8,
         },
         "embedding": {
-            "endpoint": "http://127.0.0.1:9000/v1/embeddings",
+            "endpoint": "http://127.0.0.1:11434/v1/embeddings",
             "model": "bge-small",
             "dimensions": 384,
         },
@@ -104,7 +104,7 @@ def test_validate_kb_service_boot_requires_embedding_and_connector_secrets(
         validate_kb_service_boot(config)
 
     doc["embedding"] = {  # type: ignore[index]
-        "endpoint": "http://127.0.0.1:9000/v1/embeddings",
+        "endpoint": "http://127.0.0.1:11434/v1/embeddings",
         "model": "bge-small",
         "dimensions": 384,
     }
@@ -536,7 +536,7 @@ def test_worker_main_uses_shared_kb_service_directory(
 ) -> None:
     from fleetent.knowledge_base import worker
 
-    service_dir = tmp_path / "kb-service" / "tenant-a"
+    service_dir = tmp_path / "tenants" / "tenant-a" / "kb"
     service_dir.mkdir(parents=True)
     (service_dir / ".env").write_text("KB_SHARED_GOOGLE_DRIVE=shared-secret\n", encoding="utf-8")
     path = service_dir / "kb-service.yaml"
@@ -572,7 +572,7 @@ def test_serve_main_uses_shared_kb_service_directory(
 ) -> None:
     from fleetent.knowledge_base import serve
 
-    service_dir = tmp_path / "kb-service" / "tenant-a"
+    service_dir = tmp_path / "tenants" / "tenant-a" / "kb"
     service_dir.mkdir(parents=True)
     (service_dir / ".env").write_text("FLEETENT_KB_SERVICE_KEY=svc-test\n", encoding="utf-8")
     path = service_dir / "kb-service.yaml"
@@ -602,7 +602,7 @@ def test_serve_main_uses_shared_kb_service_directory(
         created_configs[0].queue_database_url
         == f"sqlite:///{expected_data_dir / 'kb_ingest_queue.db'}"
     )
-    assert uvicorn_calls == [({"config": created_configs[0]}, "127.0.0.1", 8787)]
+    assert uvicorn_calls == [({"config": created_configs[0]}, "127.0.0.1", 8768)]
 
 
 def test_worker_main_applies_standalone_agent_model_config(
@@ -610,8 +610,8 @@ def test_worker_main_applies_standalone_agent_model_config(
 ) -> None:
     from fleetent.knowledge_base import worker
 
-    service_dir = tmp_path / "kb-service"
-    service_dir.mkdir()
+    service_dir = tmp_path / "tenants" / "tenant-a" / "kb"
+    service_dir.mkdir(parents=True)
     path = service_dir / "kb-service.yaml"
     doc = _service_doc()
     doc["connectors"] = []  # type: ignore[index]
@@ -645,8 +645,8 @@ def test_serve_main_applies_standalone_agent_model_config(
 ) -> None:
     from fleetent.knowledge_base import serve
 
-    service_dir = tmp_path / "kb-service"
-    service_dir.mkdir()
+    service_dir = tmp_path / "tenants" / "tenant-a" / "kb"
+    service_dir.mkdir(parents=True)
     (service_dir / ".env").write_text("FLEETENT_KB_SERVICE_KEY=svc-test\n", encoding="utf-8")
     path = service_dir / "kb-service.yaml"
     doc = _service_doc()

@@ -200,15 +200,15 @@ def test_docker_compose_runs_managed_stack_with_path_parity_and_socket_boundary(
         'command: ["node"]',
         (
             'command: ["kb-worker", "--config", '
-            '"${FLEETENT_HOME:?set FLEETENT_HOME}/kb-service/default/kb-service.yaml"]'
+            '"${FLEETENT_HOME:?set FLEETENT_HOME}/tenants/default/kb/kb-service.yaml"]'
         ),
         (
             'command: ["kb-serve", "--config", '
-            '"${FLEETENT_HOME:?set FLEETENT_HOME}/kb-service/default/kb-service.yaml"]'
+            '"${FLEETENT_HOME:?set FLEETENT_HOME}/tenants/default/kb/kb-service.yaml"]'
         ),
-        "- ${FLEETENT_HOME:?set FLEETENT_HOME}/kb-service/default/.env",
+        "- ${FLEETENT_HOME:?set FLEETENT_HOME}/tenants/default/kb/.env",
         '"8765:8765"',
-        '"8786:8786"',
+        '"8767:8767"',
         "FLEETENT_AUTO_UPGRADE: ${FLEETENT_AUTO_UPGRADE:-false}",
         "FLEETENT_NODE_BACKEND: container",
         "FLEETENT_NODE_AGENT_NETWORK: fleetent",
@@ -270,7 +270,7 @@ def test_pilot_install_checklist_contains_required_commands():
         "curl -fsS http://127.0.0.1:8765/health",
         "平台托管 KB ingest 已退役",
         "kb-service.yaml",
-        "kb-worker --config $FLEETENT_HOME/kb-service/default/kb-service.yaml",
+        "kb-worker --config $FLEETENT_HOME/tenants/default/kb/kb-service.yaml",
         "GET /admin/stats/agents/<agent_id>/overview",
         "GET /admin/stats/agents/<agent_id>/tools",
         "GET /admin/stats/sessions/<session_id>/trace",
@@ -350,7 +350,7 @@ def test_pilot_runbook_contains_required_commands_and_failure_handling():
         "uv run pytest tests/evaluation/test_reflection_report_eval.py -q",
         "平台托管 KB ingest 已退役",
         "kb-service.yaml",
-        "kb-worker --config $FLEETENT_HOME/kb-service/default/kb-service.yaml",
+        "kb-worker --config $FLEETENT_HOME/tenants/default/kb/kb-service.yaml",
         "FLEETENT_EVAL_REAL_EMBEDDING=1",
         "skipped: credentials not configured",
     ]

@@ -21,7 +21,7 @@ class KBServiceSection(BaseModel):
     tenant_id: str
     service_key_ref: str
     host: str = "127.0.0.1"
-    port: int = 8787
+    port: int = 8768
 
 
 class KBDataSection(BaseModel):

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-DEFAULT_FORWARDER_PORT = 8786
+DEFAULT_FORWARDER_PORT = 8767
 DEFAULT_FORWARDER_DOMAIN = "internal"
 
 

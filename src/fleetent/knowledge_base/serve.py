@@ -26,7 +26,7 @@ class KBServeConfig:
     tenant_id: str
     service_key_ref: str
     host: str = "127.0.0.1"
-    port: int = 8787
+    port: int = 8768
     default_mode: str = "hybrid"
     data_dir: Path | None = None
     queue_database_url: str = ""
@@ -54,7 +54,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="standalone kb-service.yaml path; when set, service settings come from this file",
     )
     parser.add_argument("--host", default="127.0.0.1", help="bind host")
-    parser.add_argument("--port", type=int, default=8787, help="bind port")
+    parser.add_argument("--port", type=int, default=8768, help="bind port")
     parser.add_argument(
         "--mode",
         default="hybrid",

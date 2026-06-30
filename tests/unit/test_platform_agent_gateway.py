@@ -12,6 +12,10 @@ from fleetent.node.forwarder_contract import (
 )
 
 
+def test_default_forwarder_port_is_regularized() -> None:
+    assert DEFAULT_FORWARDER_PORT == 8767
+
+
 def test_forwarder_base_url_defaults_to_internal_dns(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("FLEETENT_FORWARDER_HOST_OVERRIDE", raising=False)
 
@@ -59,7 +63,7 @@ async def test_direct_http_transport_relays_chat_stream(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(
         "fleetent.platform.node_management.node_addressing.forwarder_base_url",
-        lambda node_id: "http://node-a.internal:8786",
+        lambda node_id: "http://node-a.internal:8767",
     )
     monkeypatch.setattr(
         "fleetent.platform.node_management.node_addressing.node_store.get_forward_host",
@@ -72,7 +76,7 @@ async def test_direct_http_transport_relays_chat_stream(monkeypatch: pytest.Monk
 
     async def fake_send(self, request: httpx.Request, *, stream: bool = False) -> httpx.Response:
         principal_header = '{"user_id":"u-edge","tenant_id":"tenant-1"}'
-        assert str(request.url) == "http://node-a.internal:8786/forward/agents/support/chat"
+        assert str(request.url) == "http://node-a.internal:8767/forward/agents/support/chat"
         assert request.headers["Authorization"] == "Bearer ma-node-key"
         assert request.headers["Content-Type"] == "application/json"
         assert request.headers["X-Fleetent-Principal"] == principal_header

@@ -61,13 +61,33 @@ def test_load_config_reads_container_backend_options_from_env(monkeypatch, tmp_p
     monkeypatch.setenv("FLEETENT_NODE_BACKEND", "container")
     monkeypatch.setenv("FLEETENT_NODE_AGENT_IMAGE", "fleetent:test")
     monkeypatch.setenv("FLEETENT_NODE_AGENT_NETWORK", "fleetent-net")
-    monkeypatch.setenv("FLEETENT_NODE_AGENT_INTERNAL_PORT", "18765")
+    monkeypatch.setenv("FLEETENT_NODE_AGENT_INTERNAL_PORT", "8766")
 
     loaded = config.load_config()
 
     assert loaded.agent_image == "fleetent:test"
     assert loaded.agent_network == "fleetent-net"
-    assert loaded.agent_internal_port == 18765
+    assert loaded.agent_internal_port == 8766
+
+
+def test_load_config_defaults_agent_internal_port_to_agent_service_port(
+    monkeypatch, tmp_path
+) -> None:
+    from fleetent.node import config
+
+    _set_required_env(
+        monkeypatch,
+        platform_url="https://platform.internal",
+        node_id="node-a",
+        service_key="ma-" + "1" * 64,
+    )
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+    monkeypatch.setenv("FLEETENT_NODE_BACKEND", "container")
+    monkeypatch.delenv("FLEETENT_NODE_AGENT_INTERNAL_PORT", raising=False)
+
+    loaded = config.load_config()
+
+    assert loaded.agent_internal_port == 8766
 
 
 def test_load_config_rejects_unknown_backend(monkeypatch, tmp_path) -> None:

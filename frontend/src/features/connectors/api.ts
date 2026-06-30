@@ -2,7 +2,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { useAdminApi } from '@/lib/api-client'
 
-export type McpAuthType = 'none' | 'api_key' | 'oauth_client_credentials' | 'api_key_per_user'
+export type McpAuthType =
+  | 'none'
+  | 'api_key'
+  | 'oauth_client_credentials'
+  | 'oauth_authorization_code'
+  | 'api_key_per_user'
 
 export type McpApiKeyAuthConfig = {
   key_env: string
@@ -13,6 +18,17 @@ export type McpOAuthClientCredentialsAuthConfig = {
   client_id: string
   client_secret_env: string
   scope: string
+}
+
+// per-user OAuth 2.1 authorization_code (动态授权): each user authorizes in their browser and
+// gets their own token. client_secret_env is OPTIONAL (PKCE public clients omit it).
+export type McpOAuthAuthorizationCodeAuthConfig = {
+  authorization_endpoint: string
+  token_url: string
+  client_id: string
+  client_secret_env: string
+  scope: string
+  redirect_path: string
 }
 
 // per-user dynamic api-key/bearer (mcp-per-user-apikey): no static key — only server-level
@@ -26,11 +42,20 @@ export type McpAuthConfig =
   | Record<string, never>
   | McpApiKeyAuthConfig
   | McpOAuthClientCredentialsAuthConfig
+  | McpOAuthAuthorizationCodeAuthConfig
   | McpApiKeyPerUserAuthConfig
 
 export const MCP_AUTH_FORM_FIELDS = {
   api_key: ['key_env'],
   oauth_client_credentials: ['token_url', 'client_id', 'client_secret_env', 'scope'],
+  oauth_authorization_code: [
+    'authorization_endpoint',
+    'token_url',
+    'client_id',
+    'client_secret_env',
+    'scope',
+    'redirect_path',
+  ],
   api_key_per_user: ['header_style', 'credential_input'],
 } as const
 

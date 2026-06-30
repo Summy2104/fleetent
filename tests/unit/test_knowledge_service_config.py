@@ -4,6 +4,15 @@ import pytest
 import yaml
 
 
+def test_kb_service_default_ports_are_regularized() -> None:
+    from fleetent.knowledge_base.serve import KBServeConfig, _parse_args
+    from fleetent.knowledge_base.service_config import KBServiceSection
+
+    assert KBServeConfig(tenant_id="tenant-a", service_key_ref="env:KB_KEY").port == 8768
+    assert _parse_args([]).port == 8768
+    assert KBServiceSection(tenant_id="tenant-a", service_key_ref="env:KB_KEY").port == 8768
+
+
 def _knowledge_doc() -> dict[str, object]:
     return {
         "knowledge_bases": [
@@ -159,3 +168,31 @@ def test_repo_does_not_ship_standalone_knowledge_service_examples() -> None:
     assert not (repo / "config" / "knowledge.yaml.example").exists()
     assert not (repo / "config" / "knowledge-service").exists()
     assert not (repo / "examples" / "knowledge-service").exists()
+
+
+def test_load_kb_service_config_resolves_data_home_relative_to_tenant_kb_root(tmp_path) -> None:
+    from fleetent.knowledge_base.service_config import load_kb_service_config
+
+    config_path = tmp_path / "tenants" / "tenant-a" / "kb" / "kb-service.yaml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "service": {
+                    "tenant_id": "tenant-a",
+                    "service_key_ref": "env:FLEETENT_KB_SERVICE_KEY",
+                },
+                "data": {"home": "./data"},
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_kb_service_config(config_path)
+
+    assert config.data_dir() == tmp_path / "tenants" / "tenant-a" / "kb" / "data"
+    assert (
+        config.queue_database_url()
+        == f"sqlite:///{tmp_path / 'tenants' / 'tenant-a' / 'kb' / 'data' / 'kb_ingest_queue.db'}"
+    )

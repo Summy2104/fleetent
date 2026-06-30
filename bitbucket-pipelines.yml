@@ -1,4 +1,7 @@
-image: python:3.12
+# uv ships preinstalled in this image (full bookworm keeps make/git that the
+# Makefile + alembic steps need), so the python steps skip the per-run
+# `pip install uv` download. The frontend step overrides this with node:22.
+image: ghcr.io/astral-sh/uv:python3.12-bookworm
 
 definitions:
   caches:
@@ -10,7 +13,6 @@ definitions:
         caches:
           - uv
         script:
-          - pip install uv
           - export ANTHROPIC_API_KEY=test-key
           - uv sync --frozen --group dev
           # Enforce the unit/integration layer boundary in CI (fast static scan,
@@ -33,24 +35,25 @@ definitions:
           - make test-frontend
     - step: &pr-integration
         name: integration tests
+        # 2x doubles the runner to 8GB / ~8 vCPU. Integration is the wall-clock
+        # pole — a broad tail of real-alembic migration round-trips that is purely
+        # throughput-bound on the 1x runner — so more cores (CI_WORKERS=8) halves
+        # it where the free wins (uv image, -n cap, install-script stub) could not.
+        size: 2x
         caches:
           - uv
         script:
-          - pip install uv
           - export ANTHROPIC_API_KEY=test-key
           - uv sync --frozen --group dev
           - uv run alembic upgrade head
-          # Parallel, no coverage instrumentation: ~1min vs ~13min for the daily
-          # coverage run. Gives integration a pre-merge signal it previously lacked
-          # (it only ran in the daily custom pipeline, so integration-only breakage
-          # passed PR + main and surfaced a day later).
-          - make test-integration-ci
+          # Parallel, no coverage instrumentation. CI_WORKERS=8 matches the 2x
+          # runner's vCPU allocation (the Makefile default 4 matches a 1x runner).
+          - make test-integration-ci CI_WORKERS=8
     - step: &daily-integration-coverage
         name: integration tests + combined coverage
         caches:
           - uv
         script:
-          - pip install uv
           - export ANTHROPIC_API_KEY=test-key
           - uv sync --frozen --group dev
           - uv run alembic upgrade head

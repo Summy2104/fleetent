@@ -21,7 +21,7 @@ class NodeConfig:
     backend: Literal["process", "container"] = "process"
     agent_image: str = "fleetent:latest"
     agent_network: str = "fleetent"
-    agent_internal_port: int = 18765
+    agent_internal_port: int = 8766
 
 
 def load_config() -> NodeConfig:
@@ -43,7 +43,7 @@ def load_config() -> NodeConfig:
         raise ConfigError("FLEETENT_NODE_BACKEND must be 'process' or 'container'")
     agent_image = os.environ.get("FLEETENT_NODE_AGENT_IMAGE", "fleetent:latest").strip()
     agent_network = os.environ.get("FLEETENT_NODE_AGENT_NETWORK", "fleetent").strip()
-    agent_internal_port = int(os.environ.get("FLEETENT_NODE_AGENT_INTERNAL_PORT", "18765"))
+    agent_internal_port = int(os.environ.get("FLEETENT_NODE_AGENT_INTERNAL_PORT", "8766"))
     return NodeConfig(
         platform_url=platform_url.rstrip("/"),
         node_id=node_id,

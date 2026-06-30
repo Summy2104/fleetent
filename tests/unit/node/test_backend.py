@@ -37,7 +37,7 @@ def _container_config(tmp_path) -> NodeConfig:
         backend="container",
         agent_image="fleetent:test",
         agent_network="fleetent-net",
-        agent_internal_port=18765,
+        agent_internal_port=8766,
     )
 
 
@@ -163,8 +163,8 @@ def test_container_backend_spawn_runs_agent_container_with_labels_network_and_mo
             f"type=bind,source={tmp_path / 'tenants/tenant-1/agents/support'},"
             f"target={tmp_path / 'tenants/tenant-1/agents/support'},readonly=false",
             "--mount",
-            f"type=bind,source={tmp_path / 'tenants/tenant-1/kb'},"
-            f"target={tmp_path / 'tenants/tenant-1/kb'},readonly=true",
+            f"type=bind,source={tmp_path / 'tenants/tenant-1/kb/data'},"
+            f"target={tmp_path / 'tenants/tenant-1/kb/data'},readonly=true",
             "fleetent:test",
             "fleetent",
             "agent",
@@ -172,7 +172,7 @@ def test_container_backend_spawn_runs_agent_container_with_labels_network_and_mo
             "support",
             "--no-im",
             "--port",
-            "18765",
+            "8766",
             "--home",
             str(tmp_path / "tenants/tenant-1/agents/support"),
         )
@@ -206,9 +206,9 @@ def test_container_backend_spawn_migrates_tenant_kb_before_readonly_mount(
     backend = ContainerBackend(_container_config(tmp_path))
     backend.spawn("support", "tenant-1")
 
-    assert substrates == [f"sqlite:///{tmp_path / 'tenants/tenant-1/kb/kb.db'}"]
+    assert substrates == [f"sqlite:///{tmp_path / 'tenants/tenant-1/kb/data/kb.db'}"]
     assert [migrations for _, migrations in migrated] == [KB_MIGRATIONS]
-    assert (tmp_path / "tenants/tenant-1/kb/kb_vectors.db").exists()
+    assert (tmp_path / "tenants/tenant-1/kb/data/kb_vectors.db").exists()
 
 
 def test_container_backend_is_alive_uses_label_filtered_running_container(
@@ -330,7 +330,7 @@ def test_container_backend_agent_endpoint_returns_container_name_and_internal_po
 
     assert backend.agent_endpoint("support", "tenant-1") == (
         "fleetent-agent-tenant-1-support",
-        18765,
+        8766,
     )
 
 

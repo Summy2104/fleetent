@@ -130,20 +130,16 @@ KB 表 SHALL 保留 `tenant_id`/`kb_id` 列。SQLite 文件路由忽略 `tenant_
 
 ### Requirement: KB per-tenant 文件分组于 kb/ 子目录
 
-per-tenant 的 KB 关系库与向量库 SHALL 归组于 `tenants/<tenant>/kb/` 子目录(`kb/kb.db`、`kb/kb_vectors.db`,连同 SQLite 的 `-wal`/`-shm`),而非松散置于租户根。该 `kb/` 目录 SHALL 可作为**单一单元**被搬迁或挂载;容器部署下 node SHALL 把整个 `kb/` 目录(而非单个文件)挂入 agent 容器,使 `-wal`/`-shm` 一并可见、agent 读到一致快照。遇到 legacy 扁平布局(`tenants/<tenant>/kb.db` 直接位于租户根)时,系统 SHALL 幂等迁移其至 `kb/` 下。
+per-tenant 的 KB 关系库与向量库 SHALL 归组于 `tenants/<tenant>/kb/data/` 子目录(`kb/data/kb.db`、`kb/data/kb_vectors.db`,连同 SQLite 的 `-wal`/`-shm`),而非松散置于租户根或 `kb/` 根。`kb/` 根 SHALL 只承载 standalone KB 服务的配置面(`kb-service.yaml`、`.env`),`kb/data/` 承载数据/读面,二者分层与 agent home 同构。该 `kb/data/` 目录 SHALL 可作为**单一单元**被搬迁或挂载;容器部署下 node SHALL 把整个 `kb/data/` 目录(而非整个 `kb/`、亦非单个文件)以只读挂入 agent 容器,使 `-wal`/`-shm` 一并可见、agent 读到一致快照,同时把 `kb/` 根的 `.env`(KB embedding / connector secret)挡在 agent 读面之外。
 
-#### Scenario: KB 文件位于 kb/ 子目录
+#### Scenario: KB 文件位于 kb/data/ 子目录
 - **WHEN** 解析某租户的 KB 关系库与向量库
-- **THEN** 物理文件位于 `tenants/<tenant>/kb/kb.db` 与 `tenants/<tenant>/kb/kb_vectors.db`
-- **AND** 租户根不再直接含 `kb.db` / `kb_vectors.db`
+- **THEN** 物理文件位于 `tenants/<tenant>/kb/data/kb.db` 与 `tenants/<tenant>/kb/data/kb_vectors.db`
+- **AND** 租户根与 `kb/` 根都不直接含 `kb.db` / `kb_vectors.db`
 
-#### Scenario: node 挂载 kb/ 整目录修复 WAL 一致性
+#### Scenario: node 只读挂载 kb/data/ 维持 WAL 一致并隔离 secret
 - **WHEN** node 容器为 agent 提供 KB 只读访问
-- **THEN** node 挂载整个 `tenants/<tenant>/kb/` 目录(含 `-wal`/`-shm`),而非单个 `kb.db` 文件
+- **THEN** node 只读挂载整个 `tenants/<tenant>/kb/data/` 目录(含 `-wal`/`-shm`),而非整个 `kb/`、亦非单个 `kb.db` 文件
 - **AND** agent 读到的 KB 快照不滞后于已提交写入
-
-#### Scenario: legacy 扁平布局幂等迁移
-- **WHEN** 存量环境的 `kb.db` / `kb_vectors.db` 直接位于 `tenants/<tenant>/` 根且 `kb/` 尚不存在
-- **THEN** 系统建立 `kb/` 并把这些文件(含 `-wal`/`-shm`)移入
-- **AND** 迁移幂等,重复执行不破坏已迁移布局
+- **AND** `kb/` 根的 `kb-service.yaml` / `.env` 不出现在 agent 容器的挂载读面内
 
