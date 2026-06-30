@@ -2,7 +2,7 @@
 
 .PHONY: help install test t test-pr test-unit test-unit-ci test-coverage-ci test-integration test-e2e test-evaluation test-layers lint fmt check typecheck platform-help \
 	up down logs deploy redeploy deploy-status upgrade \
-	frontend-install frontend-build test-frontend \
+	frontend-install frontend-build test-frontend test-frontend-vitest test-frontend-tsc test-frontend-lint \
 	dev-bootstrap dev-reset platform node-provision node kb-worker kb-serve agent chat dev-clean
 
 help:
@@ -80,9 +80,19 @@ frontend-install: ## Install frontend dependencies
 frontend-build: ## Build frontend static assets
 	yarn --cwd frontend build
 
-test-frontend: ## Run frontend tests, coverage, typecheck, and lint
+# The three checks are independent, so run them concurrently: wall-clock drops
+# to max(vitest, tsc, eslint) instead of their sum. Re-invoking make with -j3
+# keeps `make test-frontend` the single CI entrypoint while parallelizing.
+test-frontend: ## Run frontend tests, coverage, typecheck, and lint (parallel)
+	$(MAKE) -j3 test-frontend-vitest test-frontend-tsc test-frontend-lint
+
+test-frontend-vitest:
 	yarn --cwd frontend vitest run --coverage
+
+test-frontend-tsc:
 	yarn --cwd frontend tsc --noEmit
+
+test-frontend-lint:
 	yarn --cwd frontend eslint .
 
 platform-help: ## Show platform CLI help
