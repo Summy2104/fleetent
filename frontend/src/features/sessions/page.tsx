@@ -1,33 +1,9 @@
-import { useEffect, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import {
-  Ban,
-  Eraser,
-  LogIn,
-  LogOut,
-  MessageSquarePlus,
-  MoreVertical,
-  RotateCcw,
-  Search,
-} from 'lucide-react';
+import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { Ban, Eraser, LogIn, LogOut, MessageSquarePlus, MoreVertical, RotateCcw, Search } from 'lucide-react'
 
-import { useT } from '@/i18n';
-import { useAdminApi } from '@/lib/api-client';
-import { cn } from '@/lib/utils';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Separator } from '@/components/ui/separator';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { Badge } from '@/components/base/badge'
+import { SimpleSelect } from '@/components/base/simple-select'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,138 +13,153 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+} from '@/components/ui/alert-dialog'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Separator } from '@/components/ui/separator'
+import {
+  type SessionListItem,
+  type SessionsFilter,
   useBulkSessionMutation,
   useClearSessionMutation,
   useForceEndSessionMutation,
   useInjectSessionMutation,
+  useReleaseSessionMutation,
+  useResetSessionMutation,
   useSessionDetailQuery,
   useSessionsQuery,
-  useResetSessionMutation,
-  useReleaseSessionMutation,
   useTakeoverSessionMutation,
-  type SessionsFilter,
-  type SessionListItem,
-} from '@/features/sessions/api';
+} from '@/features/sessions/api'
+import { useT } from '@/i18n'
+import { useAdminApi } from '@/lib/api-client'
+import { cn } from '@/lib/utils'
 
 type AdminMe = {
-  id: string;
-  email: string;
-  role: string;
-  must_reset?: boolean;
-};
+  id: string
+  email: string
+  role: string
+  must_reset?: boolean
+}
 
 function useAdminMeQuery() {
-  const api = useAdminApi();
+  const api = useAdminApi()
 
   return useQuery({
     queryKey: ['admin-me'],
     queryFn: () => api.get<AdminMe>('/admin/me'),
-  });
+  })
 }
 
 function statusVariant(status: string): 'success' | 'warning' | 'secondary' | 'outline' {
-  if (status === 'active') return 'success';
-  if (status === 'idle') return 'warning';
-  if (status === 'ended') return 'secondary';
-  return 'outline';
+  if (status === 'active') return 'success'
+  if (status === 'idle') return 'warning'
+  if (status === 'ended') return 'secondary'
+  return 'outline'
 }
 
 // ─────────────────────────── Session actions ───────────────────────────
 
-function SessionActions({
-  canWrite,
-  session,
-}: {
-  canWrite: boolean;
-  session: SessionListItem;
-}): JSX.Element | null {
-  const t = useT();
-  const takeover = useTakeoverSessionMutation(session.session_id);
-  const release = useReleaseSessionMutation(session.session_id);
-  const inject = useInjectSessionMutation(session.session_id);
-  const reset = useResetSessionMutation(session.session_id);
-  const clear = useClearSessionMutation(session.session_id);
-  const forceEnd = useForceEndSessionMutation(session.session_id);
+function SessionActions({ canWrite, session }: { canWrite: boolean; session: SessionListItem }): JSX.Element | null {
+  const t = useT()
+  const takeover = useTakeoverSessionMutation(session.session_id)
+  const release = useReleaseSessionMutation(session.session_id)
+  const inject = useInjectSessionMutation(session.session_id)
+  const reset = useResetSessionMutation(session.session_id)
+  const clear = useClearSessionMutation(session.session_id)
+  const forceEnd = useForceEndSessionMutation(session.session_id)
 
-  const [confirmReset, setConfirmReset] = useState(false);
-  const [confirmClear, setConfirmClear] = useState(false);
-  const [confirmForceEnd, setConfirmForceEnd] = useState(false);
-  const [resetKeepTurns, setResetKeepTurns] = useState('2');
+  const [confirmReset, setConfirmReset] = useState(false)
+  const [confirmClear, setConfirmClear] = useState(false)
+  const [confirmForceEnd, setConfirmForceEnd] = useState(false)
+  const [resetKeepTurns, setResetKeepTurns] = useState('2')
 
   if (!canWrite) {
-    return null;
+    return null
   }
 
   const runInject = async (): Promise<void> => {
-    const content = window.prompt(t('sessions.injectPrompt'));
+    const content = window.prompt(t('sessions.injectPrompt'))
     if (!content) {
-      return;
+      return
     }
-    await inject.mutateAsync({ content, role: 'human_agent' });
-  };
+    await inject.mutateAsync({ content, role: 'human_agent' })
+  }
 
   const runReset = async (): Promise<void> => {
-    const keepTurns = Number.parseInt(resetKeepTurns, 10);
+    const keepTurns = Number.parseInt(resetKeepTurns, 10)
     if (Number.isNaN(keepTurns)) {
-      return;
+      return
     }
-    await reset.mutateAsync({ keepTurns });
-    setConfirmReset(false);
-  };
+    await reset.mutateAsync({ keepTurns })
+    setConfirmReset(false)
+  }
+
+  const runClear = async (): Promise<void> => {
+    await clear.mutateAsync()
+    setConfirmClear(false)
+  }
+
+  const runForceEnd = async (): Promise<void> => {
+    await forceEnd.mutateAsync()
+    setConfirmForceEnd(false)
+  }
 
   return (
     <>
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={t('sessions.actionsFor', { id: session.session_id })}
-          >
-            <MoreVertical className="size-4" />
-          </Button>
-        </DropdownMenuTrigger>
+        <DropdownMenuTrigger
+          render={
+            <Button aria-label={t('sessions.actionsFor', { id: session.session_id })} size="icon" variant="ghost">
+              <MoreVertical className="size-4" />
+            </Button>
+          }
+        />
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={() => void takeover.mutateAsync()}>
+          <DropdownMenuItem onClick={() => void takeover.mutateAsync()}>
             <LogIn /> {t('sessions.takeOver')}
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void release.mutateAsync()}>
+          <DropdownMenuItem onClick={() => void release.mutateAsync()}>
             <LogOut /> {t('sessions.release')}
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void runInject()}>
+          <DropdownMenuItem onClick={() => void runInject()}>
             <MessageSquarePlus /> {t('sessions.inject')}
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setConfirmReset(true)}>
+          <DropdownMenuItem onClick={() => setConfirmReset(true)}>
             <RotateCcw /> {t('sessions.reset')}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem destructive onSelect={() => setConfirmClear(true)}>
+          <DropdownMenuItem onClick={() => setConfirmClear(true)} variant="destructive">
             <Eraser /> {t('sessions.clearTranscript')}
           </DropdownMenuItem>
-          <DropdownMenuItem destructive onSelect={() => setConfirmForceEnd(true)}>
+          <DropdownMenuItem onClick={() => setConfirmForceEnd(true)} variant="destructive">
             <Ban /> {t('sessions.forceEnd')}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <AlertDialog open={confirmReset} onOpenChange={setConfirmReset}>
+      <AlertDialog onOpenChange={setConfirmReset} open={confirmReset}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t('sessions.resetTitle', { id: session.session_id })}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('sessions.resetDescription')}
-            </AlertDialogDescription>
+            <AlertDialogDescription>{t('sessions.resetDescription')}</AlertDialogDescription>
           </AlertDialogHeader>
           <div className="grid gap-2">
             <Label htmlFor={`keep-turns-${session.session_id}`}>{t('sessions.keepTurns')}</Label>
             <Input
               id={`keep-turns-${session.session_id}`}
-              type="number"
               min={0}
-              value={resetKeepTurns}
               onChange={(event) => setResetKeepTurns(event.target.value)}
+              type="number"
+              value={resetKeepTurns}
             />
           </div>
           <AlertDialogFooter>
@@ -178,37 +169,33 @@ function SessionActions({
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={confirmClear} onOpenChange={setConfirmClear}>
+      <AlertDialog onOpenChange={setConfirmClear} open={confirmClear}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t('sessions.clearTitle', { id: session.session_id })}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('sessions.clearDescription')}
-            </AlertDialogDescription>
+            <AlertDialogDescription>{t('sessions.clearDescription')}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t('sessions.cancel')}</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void clear.mutateAsync()}>{t('sessions.clear')}</AlertDialogAction>
+            <AlertDialogAction onClick={() => void runClear()}>{t('sessions.clear')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={confirmForceEnd} onOpenChange={setConfirmForceEnd}>
+      <AlertDialog onOpenChange={setConfirmForceEnd} open={confirmForceEnd}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t('sessions.forceEndTitle', { id: session.session_id })}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('sessions.forceEndDescription')}
-            </AlertDialogDescription>
+            <AlertDialogDescription>{t('sessions.forceEndDescription')}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t('sessions.cancel')}</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void forceEnd.mutateAsync()}>{t('sessions.forceEnd')}</AlertDialogAction>
+            <AlertDialogAction onClick={() => void runForceEnd()}>{t('sessions.forceEnd')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </>
-  );
+  )
 }
 
 // ─────────────────────────── Session row ───────────────────────────
@@ -218,17 +205,17 @@ function SessionRow({
   isAdmin,
   selected,
   picked,
-  onSelect,
+  onClick,
   onTogglePicked,
 }: {
-  session: SessionListItem;
-  isAdmin: boolean;
-  selected: boolean;
-  picked: boolean;
-  onSelect: () => void;
-  onTogglePicked: () => void;
+  session: SessionListItem
+  isAdmin: boolean
+  selected: boolean
+  picked: boolean
+  onClick: () => void
+  onTogglePicked: () => void
 }): JSX.Element {
-  const t = useT();
+  const t = useT()
   return (
     <div
       className={cn(
@@ -240,20 +227,18 @@ function SessionRow({
         <input
           aria-label={t('sessions.selectSession', { id: session.session_id })}
           checked={picked}
+          className="size-4 shrink-0 accent-primary"
           onChange={onTogglePicked}
           type="checkbox"
-          className="size-4 shrink-0 accent-primary"
         />
       ) : null}
 
-      <button type="button" className="flex min-w-0 flex-1 flex-col gap-1 text-left" onClick={onSelect}>
+      <button className="flex min-w-0 flex-1 flex-col gap-1 text-left" onClick={onClick} type="button">
         <span className="flex items-center gap-2">
-          <span className="truncate font-mono text-sm font-medium text-foreground">
-            {session.session_id}
-          </span>
+          <span className="truncate font-medium font-mono text-foreground text-sm">{session.session_id}</span>
           <Badge variant={statusVariant(session.status)}>{session.status}</Badge>
         </span>
-        <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+        <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-muted-foreground text-xs">
           <span>{session.origin}</span>
           <span>·</span>
           <span>{session.agent_name ?? '—'}</span>
@@ -268,15 +253,15 @@ function SessionRow({
 
       <SessionActions canWrite={isAdmin} session={session} />
     </div>
-  );
+  )
 }
 
 // ─────────────────────────── Detail panel ───────────────────────────
 
 function SessionDetailPanel({ sessionId }: { sessionId: string | null }): JSX.Element {
-  const t = useT();
-  const detail = useSessionDetailQuery(sessionId);
-  const meta = detail.data?.meta;
+  const t = useT()
+  const detail = useSessionDetailQuery(sessionId)
+  const meta = detail.data?.meta
 
   return (
     <Card className="lg:sticky lg:top-24">
@@ -288,21 +273,21 @@ function SessionDetailPanel({ sessionId }: { sessionId: string | null }): JSX.El
           <>
             <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
               <div>
-                <dt className="text-xs text-muted-foreground">{t('sessions.sessionId')}</dt>
+                <dt className="text-muted-foreground text-xs">{t('sessions.sessionId')}</dt>
                 <dd className="break-all font-mono text-foreground">{meta.session_id}</dd>
               </div>
               <div>
-                <dt className="text-xs text-muted-foreground">{t('sessions.statusLabel')}</dt>
+                <dt className="text-muted-foreground text-xs">{t('sessions.statusLabel')}</dt>
                 <dd>
                   <Badge variant={statusVariant(meta.status)}>{meta.status}</Badge>
                 </dd>
               </div>
               <div>
-                <dt className="text-xs text-muted-foreground">{t('sessions.origin')}</dt>
+                <dt className="text-muted-foreground text-xs">{t('sessions.origin')}</dt>
                 <dd className="text-foreground">{meta.origin}</dd>
               </div>
               <div>
-                <dt className="text-xs text-muted-foreground">{t('sessions.agent')}</dt>
+                <dt className="text-muted-foreground text-xs">{t('sessions.agent')}</dt>
                 <dd className="text-foreground">{meta.agent_name ?? '—'}</dd>
               </div>
             </dl>
@@ -310,113 +295,109 @@ function SessionDetailPanel({ sessionId }: { sessionId: string | null }): JSX.El
             <Separator />
 
             <div className="space-y-3">
-              <h3 className="text-sm font-semibold text-foreground">{t('sessions.transcript')}</h3>
+              <h3 className="font-semibold text-foreground text-sm">{t('sessions.transcript')}</h3>
               {detail.data?.transcript.length ? (
                 detail.data.transcript.map((entry, index) => (
                   <article
                     className="rounded-lg border border-border bg-secondary/30 p-4"
                     key={`${entry.role}-${index}`}
                   >
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                    <p className="font-semibold text-[10px] text-muted-foreground uppercase tracking-[0.2em]">
                       {entry.role}
                     </p>
-                    <p className="mt-2 whitespace-pre-wrap break-words text-sm text-foreground">
-                      {entry.content}
-                    </p>
+                    <p className="mt-2 whitespace-pre-wrap break-words text-foreground text-sm">{entry.content}</p>
                   </article>
                 ))
               ) : (
-                <p className="text-sm text-muted-foreground">{t('sessions.noTranscriptEntries')}</p>
+                <p className="text-muted-foreground text-sm">{t('sessions.noTranscriptEntries')}</p>
               )}
             </div>
           </>
         ) : (
-          <p className="text-sm text-muted-foreground">{t('sessions.selectSessionToInspect')}</p>
+          <p className="text-muted-foreground text-sm">{t('sessions.selectSessionToInspect')}</p>
         )}
       </CardContent>
     </Card>
-  );
+  )
 }
 
 // ─────────────────────────── Page ───────────────────────────
 
 export function SessionsPage(): JSX.Element {
-  const t = useT();
-  const me = useAdminMeQuery();
-  const [filters, setFilters] = useState<SessionsFilter>({});
-  const [draftStatus, setDraftStatus] = useState('');
-  const [draftUserId, setDraftUserId] = useState('');
-  const [draftAgentName, setDraftAgentName] = useState('');
-  const [search, setSearch] = useState('');
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [pickedSessionIds, setPickedSessionIds] = useState<string[]>([]);
-  const [confirmBulk, setConfirmBulk] = useState(false);
+  const t = useT()
+  const me = useAdminMeQuery()
+  const [filters, setFilters] = useState<SessionsFilter>({})
+  const [draftStatus, setDraftStatus] = useState('')
+  const [draftUserId, setDraftUserId] = useState('')
+  const [draftAgentName, setDraftAgentName] = useState('')
+  const [search, setSearch] = useState('')
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
+  const [pickedSessionIds, setPickedSessionIds] = useState<string[]>([])
+  const [confirmBulk, setConfirmBulk] = useState(false)
 
-  const sessions = useSessionsQuery(filters);
-  const bulk = useBulkSessionMutation();
+  const sessions = useSessionsQuery(filters)
+  const bulk = useBulkSessionMutation()
 
-  const isAdmin = me.data?.role !== 'viewer';
+  const isAdmin = me.data?.role !== 'viewer'
   const visibleSessions = (sessions.data ?? []).filter((session) => {
-    const query = search.trim().toLowerCase();
+    const query = search.trim().toLowerCase()
     if (!query) {
-      return true;
+      return true
     }
     return [session.session_id, session.agent_name, session.origin, session.user_id]
       .filter(Boolean)
-      .some((value) => String(value).toLowerCase().includes(query));
-  });
+      .some((value) => String(value).toLowerCase().includes(query))
+  })
 
   useEffect(() => {
     if (!sessions.data?.length) {
-      setSelectedSessionId(null);
-      setPickedSessionIds([]);
-      return;
+      setSelectedSessionId(null)
+      setPickedSessionIds([])
+      return
     }
 
-    const selectedStillExists = sessions.data.some((session) => session.session_id === selectedSessionId);
+    const selectedStillExists = sessions.data.some((session) => session.session_id === selectedSessionId)
     if (!selectedStillExists) {
-      setSelectedSessionId(sessions.data[0].session_id);
+      setSelectedSessionId(sessions.data[0].session_id)
     }
 
     setPickedSessionIds((current) =>
       current.filter((sessionId) => sessions.data?.some((session) => session.session_id === sessionId))
-    );
-  }, [selectedSessionId, sessions.data]);
+    )
+  }, [selectedSessionId, sessions.data])
 
   const togglePicked = (sessionId: string): void => {
     setPickedSessionIds((current) =>
-      current.includes(sessionId)
-        ? current.filter((item) => item !== sessionId)
-        : [...current, sessionId]
-    );
-  };
+      current.includes(sessionId) ? current.filter((item) => item !== sessionId) : [...current, sessionId]
+    )
+  }
 
   const applyFilters = (): void => {
     setFilters({
       agentName: draftAgentName || undefined,
       status: draftStatus || undefined,
       userId: draftUserId || undefined,
-    });
-  };
+    })
+  }
 
   const runBulkClear = async (): Promise<void> => {
     if (!pickedSessionIds.length) {
-      return;
+      return
     }
-    await bulk.mutateAsync({ action: 'clear', sessionIds: pickedSessionIds });
-    setConfirmBulk(false);
-  };
+    await bulk.mutateAsync({ action: 'clear', sessionIds: pickedSessionIds })
+    setConfirmBulk(false)
+  }
 
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-xl font-semibold tracking-tight">{t('sessions.title')}</h2>
+          <h2 className="font-semibold text-xl tracking-tight">{t('sessions.title')}</h2>
           <Badge variant="secondary">{sessions.data?.length ?? 0}</Badge>
           {!isAdmin ? <Badge variant="outline">{t('sessions.readOnly')}</Badge> : null}
         </div>
         {isAdmin && pickedSessionIds.length ? (
-          <Button variant="destructive" onClick={() => setConfirmBulk(true)}>
+          <Button onClick={() => setConfirmBulk(true)} variant="destructive">
             <Eraser className="size-4" /> {t('sessions.bulkClear', { count: pickedSessionIds.length })}
           </Button>
         ) : null}
@@ -432,41 +413,34 @@ export function SessionsPage(): JSX.Element {
             </CardHeader>
             <CardContent className="space-y-4">
               <Input
+                onChange={(event) => setSearch(event.target.value)}
                 placeholder={t('sessions.searchPlaceholder')}
                 value={search}
-                onChange={(event) => setSearch(event.target.value)}
               />
               <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <div className="grid gap-2">
-                  <Label className="text-xs text-muted-foreground">{t('sessions.statusLabel')}</Label>
-                  <Select
+                  <Label className="text-muted-foreground text-xs">{t('sessions.statusLabel')}</Label>
+                  <SimpleSelect
+                    onValueChange={(value) => setDraftStatus(!value || value === 'all' ? '' : value)}
+                    options={[
+                      { value: 'all', label: t('sessions.allStatuses') },
+                      { value: 'active', label: 'active' },
+                      { value: 'idle', label: 'idle' },
+                      { value: 'ended', label: 'ended' },
+                    ]}
                     value={draftStatus || 'all'}
-                    onValueChange={(value) => setDraftStatus(value === 'all' ? '' : value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">{t('sessions.allStatuses')}</SelectItem>
-                      <SelectItem value="active">active</SelectItem>
-                      <SelectItem value="idle">idle</SelectItem>
-                      <SelectItem value="ended">ended</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label className="text-xs text-muted-foreground">{t('sessions.userId')}</Label>
-                  <Input value={draftUserId} onChange={(event) => setDraftUserId(event.target.value)} />
-                </div>
-                <div className="grid gap-2">
-                  <Label className="text-xs text-muted-foreground">{t('sessions.agentName')}</Label>
-                  <Input
-                    value={draftAgentName}
-                    onChange={(event) => setDraftAgentName(event.target.value)}
                   />
                 </div>
+                <div className="grid gap-2">
+                  <Label className="text-muted-foreground text-xs">{t('sessions.userId')}</Label>
+                  <Input onChange={(event) => setDraftUserId(event.target.value)} value={draftUserId} />
+                </div>
+                <div className="grid gap-2">
+                  <Label className="text-muted-foreground text-xs">{t('sessions.agentName')}</Label>
+                  <Input onChange={(event) => setDraftAgentName(event.target.value)} value={draftAgentName} />
+                </div>
               </div>
-              <Button variant="outline" onClick={applyFilters}>
+              <Button onClick={applyFilters} variant="outline">
                 {t('sessions.applyFilters')}
               </Button>
             </CardContent>
@@ -475,17 +449,17 @@ export function SessionsPage(): JSX.Element {
           <div className="space-y-2">
             {visibleSessions.map((session) => (
               <SessionRow
-                key={session.session_id}
-                session={session}
                 isAdmin={isAdmin}
-                selected={selectedSessionId === session.session_id}
-                picked={pickedSessionIds.includes(session.session_id)}
-                onSelect={() => setSelectedSessionId(session.session_id)}
+                key={session.session_id}
+                onClick={() => setSelectedSessionId(session.session_id)}
                 onTogglePicked={() => togglePicked(session.session_id)}
+                picked={pickedSessionIds.includes(session.session_id)}
+                selected={selectedSessionId === session.session_id}
+                session={session}
               />
             ))}
             {visibleSessions.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-border py-12 text-center text-sm text-muted-foreground">
+              <div className="rounded-lg border border-border border-dashed py-12 text-center text-muted-foreground text-sm">
                 {t('sessions.noSessions')}
               </div>
             ) : null}
@@ -495,13 +469,11 @@ export function SessionsPage(): JSX.Element {
         <SessionDetailPanel sessionId={selectedSessionId} />
       </div>
 
-      <AlertDialog open={confirmBulk} onOpenChange={setConfirmBulk}>
+      <AlertDialog onOpenChange={setConfirmBulk} open={confirmBulk}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t('sessions.bulkClearTitle', { count: pickedSessionIds.length })}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('sessions.bulkClearDescription')}
-            </AlertDialogDescription>
+            <AlertDialogDescription>{t('sessions.bulkClearDescription')}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t('sessions.cancel')}</AlertDialogCancel>
@@ -510,5 +482,5 @@ export function SessionsPage(): JSX.Element {
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  );
+  )
 }
