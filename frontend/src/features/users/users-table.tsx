@@ -26,6 +26,7 @@ export function UsersTable({
       columns={columns}
       data={users.data ?? []}
       emptyState={<div className="py-12 text-center text-muted-foreground text-sm">{t('users.emptyUsers')}</div>}
+      enableColumnVisibility
       enableGlobalFilter
       getRowId={(row) => row.id}
       isLoading={users.isPending}

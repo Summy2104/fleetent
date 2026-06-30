@@ -15,6 +15,7 @@ export function ImIdentitiesTable({ canWrite, users }: { canWrite: boolean; user
       columns={columns}
       data={imUsers.data ?? []}
       emptyState={<div className="py-12 text-center text-muted-foreground text-sm">{t('users.emptyImIdentities')}</div>}
+      enableColumnVisibility
       enableGlobalFilter
       getRowId={(row) => String(row.id)}
       isLoading={imUsers.isPending}

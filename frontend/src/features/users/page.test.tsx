@@ -34,6 +34,17 @@ describe('UsersPage', () => {
     await waitFor(() => expect(screen.getByText(/no IM|暂无/i)).toBeInTheDocument())
   })
 
+  it('swaps the header primary action per active tab', async () => {
+    const user = userEvent.setup()
+    renderUsers(<UsersPage />)
+    await screen.findByText('Ann')
+    expect(screen.getByRole('button', { name: 'Create user' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: /IM|身份/ }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add mapping' })).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: 'Create user' })).not.toBeInTheDocument()
+  })
+
   it('opens the edit dialog with the row user prefilled', async () => {
     const user = userEvent.setup()
     renderUsers(<UsersPage />)

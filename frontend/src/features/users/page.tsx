@@ -28,6 +28,7 @@ export function UsersPage(): JSX.Element {
   const users = useUsersQuery()
   const canWrite = me.data?.role !== 'viewer'
 
+  const [tab, setTab] = useState<'users' | 'im'>('users')
   const [formMode, setFormMode] = useState<'create' | 'edit'>('create')
   const [formOpen, setFormOpen] = useState(false)
   const [editUser, setEditUser] = useState<UserListItem | null>(null)
@@ -76,25 +77,33 @@ export function UsersPage(): JSX.Element {
         </div>
         {canWrite ? (
           <div className="flex flex-wrap gap-2">
-            <Button onClick={() => setServicePrincipalOpen(true)} variant="secondary">
-              <KeyRound className="size-4" /> {t('users.createServicePrincipal')}
-            </Button>
-            <Button
-              onClick={() => {
-                setEditUser(null)
-                setFormMode('create')
-                setFormOpen(true)
-              }}
-            >
-              <UserPlus className="size-4" /> {t('users.createUser')}
-            </Button>
+            {tab === 'users' ? (
+              <>
+                <Button onClick={() => setServicePrincipalOpen(true)} variant="secondary">
+                  <KeyRound className="size-4" /> {t('users.createServicePrincipal')}
+                </Button>
+                <Button
+                  onClick={() => {
+                    setEditUser(null)
+                    setFormMode('create')
+                    setFormOpen(true)
+                  }}
+                >
+                  <UserPlus className="size-4" /> {t('users.createUser')}
+                </Button>
+              </>
+            ) : (
+              <Button onClick={() => setAddImMappingOpen(true)}>
+                <Plus className="size-4" /> {t('users.addImMapping')}
+              </Button>
+            )}
           </div>
         ) : null}
       </div>
 
       <p className="max-w-2xl text-muted-foreground text-sm">{t('users.pageDescription')}</p>
 
-      <Tabs defaultValue="users">
+      <Tabs onValueChange={(value) => setTab(value as 'users' | 'im')} value={tab}>
         <TabsList>
           <TabsTrigger value="users">{t('users.tabUsers')}</TabsTrigger>
           <TabsTrigger value="im">{t('users.tabImIdentities')}</TabsTrigger>
@@ -113,16 +122,7 @@ export function UsersPage(): JSX.Element {
         </TabsContent>
 
         <TabsContent value="im">
-          <div className="space-y-4">
-            {canWrite ? (
-              <div className="flex justify-end">
-                <Button onClick={() => setAddImMappingOpen(true)}>
-                  <Plus className="size-4" /> {t('users.addImMapping')}
-                </Button>
-              </div>
-            ) : null}
-            <ImIdentitiesTable canWrite={canWrite} users={users.data ?? []} />
-          </div>
+          <ImIdentitiesTable canWrite={canWrite} users={users.data ?? []} />
         </TabsContent>
       </Tabs>
 
