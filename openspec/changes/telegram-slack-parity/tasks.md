@@ -1,12 +1,12 @@
 ## 1. governance 去泄漏：gate 发中立审批意图，Slack 渲染下沉 outbound 边界（Slack 输出不变）
 
-- [ ] 1.1 写测试(红)：`permission_gate` 构建审批提示时产出平台无关的审批意图（approval_id + 动作集 approve/reject/approve_always + summary），且模块 MUST NOT import `approval_prompt_blocks`；outbound 边界对 Slack 渲染的输出与原 `approval_prompt_blocks(...)` 逐字节一致（回归基线）。unit。
-- [ ] 1.2 实现(绿)：定义中立 `ApprovalPrompt` 意图；`permission_gate` 改发意图（移除对 `approval_prompt_blocks` 的 import/调用）；outbound 发送边界（`send_to` 与平台 reply 渲染）按 `platform` 分发，Slack 分支调既有 `approval_prompt_blocks`（输出不变）。
+- [x] 1.1 写测试(红)：`permission_gate` 构建审批提示时产出平台无关的审批意图（approval_id + 动作集 approve/reject/approve_always + summary），且模块 MUST NOT import `approval_prompt_blocks`；outbound 边界对 Slack 渲染的输出与原 `approval_prompt_blocks(...)` 逐字节一致（回归基线）。unit。
+- [x] 1.2 实现(绿)：定义中立 `ApprovalPrompt` 意图；`permission_gate` 改发意图（移除对 `approval_prompt_blocks` 的 import/调用）；outbound 发送边界（`send_to` 与平台 reply 渲染）按 `platform` 分发，Slack 分支调既有 `approval_prompt_blocks`（输出不变）。
 
 ## 2. Telegram 审批按钮渲染 + callback_data 编解码
 
-- [ ] 2.1 写测试(红)：`render_approval_telegram(approval_id, summary)` 产 `InlineKeyboardMarkup`，三按钮 callback_data 经 `encode/decode` 往返得 (decision, approval_id)，且长度 ≤64 字节；非 `approval:` 前缀 decode 返回 None。unit。
-- [ ] 2.2 实现(绿)：`outbound.render_approval_telegram` + callback_data `encode/decode`（`approval:{decision}:{approval_id}`）。
+- [x] 2.1 写测试(红)：`render_approval_telegram(approval_id, summary)` 产 `InlineKeyboardMarkup`，三按钮 callback_data 经 `encode/decode` 往返得 (decision, approval_id)，且长度 ≤64 字节；非 `approval:` 前缀 decode 返回 None。unit。
+- [x] 2.2 实现(绿)：`outbound.render_approval_telegram` + callback_data `encode/decode`（`approval:{decision}:{approval_id}`）。
 
 ## 3. Telegram reply_func 支持可选交互动作 + _telegram_send keyboard
 

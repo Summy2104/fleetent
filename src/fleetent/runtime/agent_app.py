@@ -96,6 +96,9 @@ class ImRouteRequest(BaseModel):
 class ImReply(BaseModel):
     text: str
     blocks: list[dict[str, Any]] | None = None
+    # Platform-neutral approval intent (telegram-slack-parity): the node edge renders it per
+    # platform at delivery (Slack Block Kit / Telegram inline keyboard). None = plain reply.
+    approval: dict[str, Any] | None = None
 
 
 class ImRouteResponse(BaseModel):
@@ -904,8 +907,20 @@ def build_app(agent_name: str) -> FastAPI:
             raise HTTPException(status_code=403, detail="cross-tenant access denied")
         replies: list[ImReply] = []
 
-        async def _reply(text: str, blocks: list[dict[str, Any]] | None = None) -> None:
-            replies.append(ImReply(text=text, blocks=blocks))
+        async def _reply(
+            text: str, blocks: list[dict[str, Any]] | None = None, *, approval: Any = None
+        ) -> None:
+            approval_payload = (
+                {
+                    "approval_id": approval.approval_id,
+                    "tool_name": approval.tool_name,
+                    "risk_level": approval.risk_level,
+                    "summary": approval.summary,
+                }
+                if approval is not None
+                else None
+            )
+            replies.append(ImReply(text=text, blocks=blocks, approval=approval_payload))
 
         await normalizer.route(
             normalizer.NormalizedMessage(

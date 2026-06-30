@@ -260,6 +260,7 @@ class NodeIMEdgeHost:
                 target_type=target_type,
                 thread=thread,
                 blocks=blocks,
+                approval=_approval_from_payload(payload),
             )
         if not receipt.ok:
             outbound_queue_store.mark_failed_with_db(db, str(row["id"]))
@@ -299,13 +300,14 @@ class NodeIMEdgeHost:
             await self._mark_queue_sent(agent_name, row)
             return
 
+        approval = _approval_from_payload(payload)
         for binding in bindings:
             plat = str(binding.get("platform", ""))
             puid = str(binding.get("platform_user_id", ""))
             connector = connectors.get(plat)
             try:
                 await outbound.send_to(
-                    plat, connector, puid, text, target_type="user", blocks=blocks
+                    plat, connector, puid, text, target_type="user", blocks=blocks, approval=approval
                 )
             except Exception as exc:
                 _logger.warn(
@@ -490,8 +492,29 @@ def _serialize_attachment(att: Any) -> dict[str, Any]:
     raise TypeError(f"unsupported attachment: {type(att)!r}")
 
 
+def _approval_from_payload(payload: dict[str, Any]) -> Any:
+    """Reconstruct a platform-neutral ApprovalPrompt from a queue/reply payload, or None."""
+    data = payload.get("approval")
+    if not data:
+        return None
+    from fleetent.outbound import ApprovalPrompt
+
+    return ApprovalPrompt(
+        approval_id=str(data.get("approval_id", "")),
+        tool_name=str(data.get("tool_name", "")),
+        risk_level=str(data.get("risk_level", "")),
+        summary=str(data.get("summary", "")),
+    )
+
+
 async def _emit_reply(msg: NormalizedMessage, reply: dict[str, Any]) -> None:
     text = str(reply.get("text", ""))
+    approval = _approval_from_payload(reply)
+    if approval is not None:
+        # Node-side reply_func renders the neutral intent per platform (Slack Block Kit /
+        # Telegram inline keyboard), keeping managed approval buttons working on both.
+        await msg.reply_func(text, approval=approval)  # type: ignore[call-arg]
+        return
     blocks = reply.get("blocks")
     if msg.platform == "slack" and blocks is not None:
         await msg.reply_func(text, blocks)  # type: ignore[misc]
