@@ -32,10 +32,15 @@ def test_unit_ci_coverage_gate_keeps_required_scope_and_threshold():
 
     # Coverage runs in parallel (pytest-cov merges per-worker data; total is identical to
     # the old serial `coverage run`). The invariants the gate must keep: scope is
-    # src/fleetent and the 76% / 88% thresholds hold.
-    assert "uv run pytest tests/unit -q -n auto -p no:cacheprovider" in makefile
+    # src/fleetent and the 76% / 88% thresholds hold. Worker count is intentionally
+    # configurable (-n $(CI_WORKERS)) so the CI gate can match the runner's real vCPU
+    # allocation instead of over-subscribing via `-n auto`.
+    assert "uv run pytest tests/unit -q -n $(CI_WORKERS) -p no:cacheprovider" in makefile
     assert "--cov=src/fleetent --cov-report=term-missing --cov-fail-under=76" in makefile
-    assert "uv run pytest tests/unit tests/integration -q -n auto -p no:cacheprovider" in makefile
+    assert (
+        "uv run pytest tests/unit tests/integration -q -n $(CI_WORKERS) -p no:cacheprovider"
+        in makefile
+    )
     assert "--cov=src/fleetent --cov-report=term-missing --cov-fail-under=88" in makefile
     assert "make test-coverage-ci" in pipelines
     # Integration became a pre-merge gate (2026-06-27): the PR/main path now runs

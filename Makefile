@@ -61,7 +61,7 @@ test-integration: ## Run integration tests
 	uv run pytest tests/integration
 
 test-integration-ci: ## PR gate: integration tests in parallel, no coverage (~1min)
-	uv run pytest tests/integration -q -n $(CI_WORKERS) -p no:cacheprovider
+	uv run pytest tests/integration -q -n $(CI_WORKERS) -p no:cacheprovider --durations=15
 
 test-e2e: ## Run end-to-end tests
 	uv run pytest tests/e2e
