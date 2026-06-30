@@ -476,6 +476,7 @@ const en = {
   'audit.when': 'When',
   'audit.resource': 'Resource',
   'audit.empty': 'No audit logs match the current filters.',
+  'audit.searchPrompt': 'Run a search to view audit logs.',
 
   // Providers 页
   'providers.newProvider': 'New provider',
@@ -1106,6 +1107,7 @@ const zh: Messages = {
   'audit.when': '时间',
   'audit.resource': '资源',
   'audit.empty': '没有符合当前筛选条件的审计日志。',
+  'audit.searchPrompt': '运行搜索以查看审计日志。',
 
   // Providers 页
   'providers.newProvider': '新建提供商',
