@@ -642,6 +642,16 @@ const en = {
   'tenancy.colApprover': 'Approver',
   'tenancy.colUser': 'User',
   'tenancy.colTenant': 'Tenant',
+  'tenancy.actions': 'Actions',
+  'tenancy.tenantActionsFor': 'Tenant actions for {{id}}',
+  'tenancy.assignmentActionsFor': 'Assignment actions for {{name}}',
+  'tenancy.setApprover': 'Set approver',
+  'tenancy.assignTenant': 'Assign tenant',
+  'tenancy.selectApprover': 'Select an approver',
+  'tenancy.selectTenant': 'Select a tenant',
+  'tenancy.save': 'Save',
+  'tenancy.statusActive': 'active',
+  'tenancy.statusInactive': 'inactive',
 
   // Teams 页
   'teams.title': 'Teams',
@@ -1281,6 +1291,16 @@ const zh: Messages = {
   'tenancy.colApprover': '审批人',
   'tenancy.colUser': '用户',
   'tenancy.colTenant': '租户',
+  'tenancy.actions': '操作',
+  'tenancy.tenantActionsFor': '租户 {{id}} 操作',
+  'tenancy.assignmentActionsFor': '{{name}} 归属操作',
+  'tenancy.setApprover': '设置审批人',
+  'tenancy.assignTenant': '分配租户',
+  'tenancy.selectApprover': '选择审批人',
+  'tenancy.selectTenant': '选择租户',
+  'tenancy.save': '保存',
+  'tenancy.statusActive': 'active',
+  'tenancy.statusInactive': 'inactive',
 
   // Teams 页
   'teams.title': '团队',

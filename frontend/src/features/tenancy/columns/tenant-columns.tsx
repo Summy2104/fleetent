@@ -3,7 +3,7 @@ import { Building2 } from 'lucide-react'
 
 import { Badge } from '@/components/base/badge'
 import type { TenantListItem } from '@/features/tenancy/api'
-import { TenantApproverCell } from '@/features/tenancy/cells/tenant-approver-cell'
+import { TenantRowActions } from '@/features/tenancy/row-actions/tenant-row-actions'
 import type { TenancyUser } from '@/features/tenancy/shared'
 import type { useT } from '@/i18n'
 
@@ -38,7 +38,17 @@ export function buildTenantColumns({
     {
       accessorKey: 'status',
       header: t('tenancy.colStatus'),
-      meta: { title: t('tenancy.colStatus') },
+      filterFn: 'equals',
+      meta: {
+        title: t('tenancy.colStatus'),
+        filter: {
+          type: 'select',
+          options: [
+            { label: t('tenancy.statusActive'), value: 'active' },
+            { label: t('tenancy.statusInactive'), value: 'inactive' },
+          ],
+        },
+      },
       cell: ({ row }) => (
         <Badge variant={row.original.status === 'active' ? 'success' : 'secondary'}>{row.original.status}</Badge>
       ),
@@ -48,7 +58,18 @@ export function buildTenantColumns({
       header: t('tenancy.colApprover'),
       enableSorting: false,
       meta: { title: t('tenancy.colApprover') },
-      cell: ({ row }) => <TenantApproverCell canWrite={canWrite} tenant={row.original} users={users} />,
+      cell: ({ row }) => (
+        <span className="text-muted-foreground text-sm">
+          {t('tenancy.approverLine', { value: row.original.approver_user_id ?? t('tenancy.unassigned') })}
+        </span>
+      ),
+    },
+    {
+      id: 'actions',
+      header: '',
+      enableSorting: false,
+      enableHiding: false,
+      cell: ({ row }) => <TenantRowActions canWrite={canWrite} tenant={row.original} users={users} />,
     },
   ]
 }

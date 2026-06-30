@@ -118,18 +118,24 @@ describe('tenancy page', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Create tenant' }))
     expect(await screen.findByText('Tenant B')).toBeInTheDocument()
 
-    // Assignment tab: assign Alice to tenant-b.
+    // Assignment tab: assign Alice to tenant-b via the row actions menu.
     await user.click(screen.getByRole('tab', { name: 'User assignment' }))
-    await user.selectOptions(await screen.findByLabelText('Assign tenant for Alice'), 'tenant-b')
-    await user.click(screen.getByRole('button', { name: 'Assign tenant for Alice' }))
+    await user.click(await screen.findByRole('button', { name: 'Assignment actions for Alice' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Assign tenant' }))
+    await user.click(await screen.findByRole('combobox', { name: 'Assign tenant for Alice' }))
+    await user.click(await screen.findByRole('option', { name: 'Tenant B' }))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => {
       expect(screen.getByText('Alice -> tenant-b')).toBeInTheDocument()
     })
 
-    // Tenants tab: set tenant-b approver to user-2.
+    // Tenants tab: set tenant-b approver to user-2 via the row actions menu.
     await user.click(screen.getByRole('tab', { name: 'Tenants' }))
-    await user.selectOptions(await screen.findByLabelText('Tenant approver for tenant-b'), 'user-2')
-    await user.click(screen.getByRole('button', { name: 'Save tenant approver for tenant-b' }))
+    await user.click(await screen.findByRole('button', { name: 'Tenant actions for tenant-b' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Set approver' }))
+    await user.click(await screen.findByRole('combobox', { name: 'Tenant approver for tenant-b' }))
+    await user.click(await screen.findByRole('option', { name: 'Bob' }))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => {
       const row = screen.getByRole('row', { name: /Tenant B/ })
       expect(within(row).getByText('Approver: user-2')).toBeInTheDocument()
@@ -172,6 +178,6 @@ describe('tenancy page', () => {
     expect(await screen.findByRole('heading', { name: 'Tenancy' })).toBeInTheDocument()
     expect(await screen.findByText('Viewer access is read-only.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Create tenant' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Save tenant approver for tenant-a' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Tenant actions for tenant-a' })).not.toBeInTheDocument()
   })
 })

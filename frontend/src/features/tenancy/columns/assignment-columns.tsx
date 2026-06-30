@@ -1,7 +1,7 @@
 import type { ColumnDef } from '@tanstack/react-table'
 
 import type { TenantListItem } from '@/features/tenancy/api'
-import { UserAssignmentCell } from '@/features/tenancy/cells/user-assignment-cell'
+import { AssignmentRowActions } from '@/features/tenancy/row-actions/assignment-row-actions'
 import type { TenancyUser } from '@/features/tenancy/shared'
 import type { useT } from '@/i18n'
 
@@ -26,18 +26,22 @@ export function buildAssignmentColumns({
     {
       accessorKey: 'tenant_id',
       header: t('tenancy.colTenant'),
-      meta: { title: t('tenancy.colTenant') },
+      filterFn: 'equals',
+      meta: {
+        title: t('tenancy.colTenant'),
+        filter: { type: 'select', options: tenants.map((tenant) => ({ label: tenant.name, value: tenant.id })) },
+      },
       cell: ({ row }) =>
         row.original.tenant_id
           ? t('tenancy.assignmentLine', { name: row.original.name, tenant: row.original.tenant_id })
           : t('tenancy.unassigned'),
     },
     {
-      id: 'assign',
+      id: 'actions',
       header: '',
       enableSorting: false,
       enableHiding: false,
-      cell: ({ row }) => <UserAssignmentCell canWrite={canWrite} tenants={tenants} user={row.original} />,
+      cell: ({ row }) => <AssignmentRowActions canWrite={canWrite} tenants={tenants} user={row.original} />,
     },
   ]
 }
