@@ -30,7 +30,7 @@ chunking:
 connectors:
   - id: drive-shared
     type: google_drive
-    enabled: true
+    enabled: false
     kb_id: kb-a
     folder_id: folder-123
     recursive: true
@@ -42,7 +42,7 @@ connectors:
     sync_interval_seconds: 1800
   - id: confluence-shared
     type: confluence
-    enabled: true
+    enabled: false
     kb_id: kb-a
     base_url: https://example.atlassian.net/wiki
     username_env: FLEETENT_CONFLUENCE_USERNAME
