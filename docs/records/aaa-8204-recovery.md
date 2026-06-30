@@ -74,3 +74,18 @@ systemctl --user restart fleetent-node.service   # node 重启才生效,只重�
 4. **①**(潜伏)+ slack-mcp scope(配置)—— 收尾处理。
 
 > 注:纯文本 `approve <id>`(不带 @名字)**实测可用**——命中后走 resume 直接执行工具、不再过门。所以"能批下去"的最小可用路径已存在(只是 UX 差);⑤ 才是必须先堵的正确性漏洞。
+
+## 9. 2026-06-30 续:⑥ —— 批准后仍发不出(很可能是「推送失败」真正核心)
+
+实测 `approve ebd2986f`:审批被正确识别、DB 置 `approved`,但 resume 执行 `send_im_message` 返回「发送失败:无可用 slack 连接器,仅 IM 网关运行时可用」,消息没发出。根因:正常 turn 在 `loop.py:1986` 调 `resolve_for_runtime` → 托管模式拿到 `ManagedOutboundConnector`(enqueue→node→送达);但**审批 resume 的 `_resume_pending_in_session`(normalizer.py)没调 `resolve_for_runtime`**,直接用空的 `msg.outbound_connectors` → 连接器为 None → 失败。`send_im_message` 对第三方必经审批→必经 resume→**托管下批了也送不出**。详见 `openspec/changes/approval-resume-resolve-outbound-connectors`。修复:resume 也调 `resolve_for_runtime`。
+
+并存确认:本轮 [9] agent 在用户「同意」时谎报成功(⑤),[11] 真执行失败后**如实**报错——说明真执行路径的"失败可感知"是好的,⑤ 仅在"未执行就续话"时发生。
+
+### 最终优先级(2026-06-30 末)
+1. **⑥**(批准后真能送达 = 推送失败核心)
+2. **⑤**(未执行不得谎报成功)
+3. **②③**(审批 UX:按钮不崩、`@名字 approve` 不循环)
+4. **④**(地基:重启不再 force-kill)
+5. **①**(潜伏 unknown-user)+ slack-mcp `conversations_join` scope(配置)
+
+> ⑥+⑤ 合起来才闭环 AAA-8204:⑥ 让消息真发出去,⑤ 保证没发出去时不说谎。
