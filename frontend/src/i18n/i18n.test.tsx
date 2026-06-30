@@ -2,7 +2,8 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { I18nProvider, useI18n, useT } from '@/i18n'
+import { I18nProvider, type MessageKey, useI18n, useT } from '@/i18n'
+import i18n from '@/i18n/config'
 import { CATALOGS } from '@/i18n/messages'
 
 function Probe(): JSX.Element {
@@ -13,6 +14,7 @@ function Probe(): JSX.Element {
       <span data-testid="locale">{locale}</span>
       <span data-testid="title">{t('login.title')}</span>
       <span data-testid="interp">{t('shell.switchToLanguage', { lang: 'X' })}</span>
+      <span data-testid="missing">{t('no.such.key' as MessageKey)}</span>
       <button onClick={toggleLocale} type="button">
         toggle
       </button>
@@ -24,8 +26,10 @@ function Probe(): JSX.Element {
 }
 
 describe('i18n package', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     window.localStorage.clear()
+    // i18next 是单例，跨测试需复位语言，避免顺序依赖。
+    await i18n.changeLanguage('en')
   })
   afterEach(() => {
     window.localStorage.clear()
@@ -56,13 +60,33 @@ describe('i18n package', () => {
     expect(screen.getByTestId('title')).toHaveTextContent('管理员登录')
   })
 
-  it('{var} 占位符按 vars 插值', () => {
+  it('{{var}} 占位符按 vars 插值', () => {
     render(
       <I18nProvider>
         <Probe />
       </I18nProvider>
     )
     expect(screen.getByTestId('interp')).toHaveTextContent('Switch to X')
+  })
+
+  it('缺失 key 不抛错并回退显示 key 本身', () => {
+    render(
+      <I18nProvider>
+        <Probe />
+      </I18nProvider>
+    )
+    expect(screen.getByTestId('missing')).toHaveTextContent('no.such.key')
+  })
+
+  it('切换语言同步 <html lang>', async () => {
+    render(
+      <I18nProvider>
+        <Probe />
+      </I18nProvider>
+    )
+    expect(document.documentElement.lang).toBe('en')
+    await userEvent.click(screen.getByText('toggle'))
+    expect(document.documentElement.lang).toBe('zh')
   })
 
   it('选择持久化到 localStorage 并在重新挂载后恢复', async () => {
