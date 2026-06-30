@@ -269,8 +269,12 @@ def make_mcp_authz_deliverer(tool_context: Any) -> Any:
     ``state``. The DM address is the requester's own platform id taken from the inbound
     ``session_context`` (sender), falling back to the conversation address's ``user_id``.
 
-    Returns None when no live IM connector / requester address is available (e.g. a TUI or
-    HTTP run): the caller then degrades with a "needs authorization" notice but no DM.
+    Like :func:`make_mcp_credential_deliverer`, this has a node-managed fallback: a node-managed
+    agent has no live IM connector (the node hosts IM), so the link is enqueued through
+    directed-reach (``outbound_connectors.notify_user`` -> ``im_outbound_queue`` -> node drain ->
+    DM). In a standalone runtime the live connector DMs the requester directly. Always returns a
+    deliverer (never None): managed enqueues; standalone with a connector sends; otherwise it
+    reports undelivered so the call still degrades cleanly with a "needs authorization" notice.
     """
     connectors: dict[str, Any] = getattr(tool_context, "outbound_connectors", {}) or {}
     session_context = getattr(tool_context, "session_context", None)
@@ -280,20 +284,30 @@ def make_mcp_authz_deliverer(tool_context: Any) -> Any:
     # The DM recipient is the sender — the requester — not the (possibly channel) chat id.
     target = getattr(session_context, "sender_id", "") or getattr(address, "user_id", "")
     connector = connectors.get(platform) if platform else None
-    if not platform or not target or connector is None:
-        return None
 
     async def deliver(user_id: str, agent_id: str, server_id: str, url: str) -> bool:
         msg = (
             f"🔐 Authorize MCP server `{server_id}` to act on your behalf:\n{url}\n"
             "Open the link to grant access, then retry your request."
         )
-        receipt = await send_to(platform, connector, target, msg, target_type="user")
-        if not receipt.ok:
-            logger.warning(
-                "mcp_authz_dm_failed", server_id=server_id, platform=platform, error=receipt.error
-            )
-        return receipt.ok
+        if connector is not None and platform and target:
+            receipt = await send_to(platform, connector, target, msg, target_type="user")
+            if not receipt.ok:
+                logger.warning(
+                    "mcp_authz_dm_failed",
+                    server_id=server_id,
+                    platform=platform,
+                    error=receipt.error,
+                )
+            return receipt.ok
+        # node-managed (no live connector): enqueue a directed-reach DM to the requester.
+        from fleetent import outbound_connectors
+
+        if outbound_connectors.is_node_managed_runtime():
+            outbound_connectors.notify_user(user_id, msg)
+            return True
+        logger.info("mcp_authz_link_undeliverable server_id=%s user_id=%s", server_id, user_id)
+        return False
 
     return deliver
 
