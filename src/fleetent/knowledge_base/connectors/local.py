@@ -24,7 +24,8 @@ class LocalDirectoryDataSource:
         self._root_path = Path(root_path).expanduser().resolve()
         if not self._is_under_allowed_root(self._root_path):
             raise ValueError("local directory source root must be under an allowlisted root")
-        if not self._root_path.is_dir():
+        self._single_file_root = self._root_path.is_file()
+        if not self._single_file_root and not self._root_path.is_dir():
             raise ValueError("local directory source root must be an existing directory")
 
     def list_documents(self) -> list[DocumentRef]:
@@ -35,7 +36,7 @@ class LocalDirectoryDataSource:
             document_format = _FORMAT_BY_SUFFIX.get(path.suffix.lower())
             if document_format is None:
                 continue
-            relative_path = path.relative_to(self._root_path).as_posix()
+            relative_path = self._relative_path(path)
             refs.append(
                 DocumentRef(
                     id=f"local:{relative_path}",
@@ -65,6 +66,9 @@ class LocalDirectoryDataSource:
         return sum(1 for path in self._iter_files() if path.suffix.lower() not in _FORMAT_BY_SUFFIX)
 
     def _iter_files(self) -> list[Path]:
+        if self._single_file_root:
+            return [self._root_path]
+
         paths: list[Path] = []
         for path in self._root_path.rglob("*"):
             if not path.is_file():
@@ -74,11 +78,18 @@ class LocalDirectoryDataSource:
                 paths.append(resolved_path)
         return sorted(paths, key=lambda item: item.relative_to(self._root_path).as_posix())
 
+    def _relative_path(self, path: Path) -> str:
+        if self._single_file_root:
+            return path.name
+        return path.relative_to(self._root_path).as_posix()
+
     def _ensure_under_root(self, path: Path) -> None:
         if not self._is_under_root(path) or not self._is_under_allowed_root(path):
             raise ValueError("local document path must stay under an allowlisted root")
 
     def _is_under_root(self, path: Path) -> bool:
+        if self._single_file_root:
+            return path == self._root_path
         return path == self._root_path or path.is_relative_to(self._root_path)
 
     def _is_under_allowed_root(self, path: Path) -> bool:
