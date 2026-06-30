@@ -1,5 +1,7 @@
 """Unit tests for the file-driven agent config loader (file-agent-runtime)."""
 
+from pathlib import Path
+
 import pytest
 import yaml
 from pydantic import ValidationError
@@ -96,6 +98,21 @@ def test_agent_file_defaults() -> None:
 def test_agent_file_requires_models() -> None:
     with pytest.raises(ValidationError):
         agent_config.AgentFile.model_validate({"name": "bare", "version": 1})
+
+
+def test_default_embedding_route_matches_kb_service_example() -> None:
+    models = agent_config.default_models()
+    embedding_route = models.routes["embedding"][0]
+    target_by_id = {target.id: target for target in models.targets}
+    embedding_target = target_by_id[embedding_route.target]
+
+    example_path = Path(__file__).resolve().parents[2] / "kb-service.yaml.example"
+    example = yaml.safe_load(example_path.read_text(encoding="utf-8"))
+    embedding = example["embedding"]
+
+    assert embedding_target.endpoint == embedding["endpoint"]
+    assert embedding_target.model == embedding["model"]
+    assert embedding_target.params["dimensions"] == embedding["dimensions"]
 
 
 # --- sandbox-workspace-scope-split: per-agent image persistence schema ------

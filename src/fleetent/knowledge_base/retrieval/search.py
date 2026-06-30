@@ -7,6 +7,10 @@ from typing import Literal, Protocol
 from fleetent import agent_config, vector_store
 from fleetent.config import KnowledgeBaseSettings, RerankSettings
 from fleetent.knowledge_base.core import KnowledgeChunk, KnowledgeReadable
+from fleetent.knowledge_base.errors import (
+    KnowledgeBaseEmbeddingMismatchError,
+    embedding_mismatch_message,
+)
 from fleetent.observability import KBRetrievalAuditContext, record_kb_retrieval
 from fleetent.vector_store import rerank as rerank_runtime
 
@@ -119,6 +123,7 @@ async def _search_vector(
     limit: int,
     store: KnowledgeReadable,
 ) -> list[KnowledgeChunk]:
+    _validate_embedding_identity(store, tenant_id, kb_ids)
     query_vector = await vector_store.embed_text(query)
     backend = _vector_backend()
     score_by_id: dict[str, float] = {}
@@ -139,6 +144,30 @@ async def _search_vector(
         scored_chunks,
         key=lambda chunk: (-chunk.score, chunk.position, chunk.id),
     )[:limit]
+
+
+def _validate_embedding_identity(
+    store: KnowledgeReadable, tenant_id: str, kb_ids: list[str]
+) -> None:
+    current = vector_store.current_embedding_identity()
+    for kb_id in kb_ids:
+        existing = store.get_embedding_identity(tenant_id, kb_id)
+        if existing is None:
+            continue
+        expected_model, expected_dimensions = existing
+        if expected_model == current.model and expected_dimensions == current.dimensions:
+            continue
+        raise KnowledgeBaseEmbeddingMismatchError(
+            embedding_mismatch_message(
+                tenant_id=tenant_id,
+                kb_id=kb_id,
+                expected_model=expected_model,
+                expected_dimensions=expected_dimensions,
+                current_model=current.model,
+                current_dimensions=current.dimensions,
+                operation="retrieval",
+            )
+        )
 
 
 async def _search_hybrid(

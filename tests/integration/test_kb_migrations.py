@@ -79,6 +79,8 @@ def test_kb_migrations_create_expected_columns(tmp_path: Path) -> None:
         "description",
         "archived_at",
         "extraction_enabled",
+        "embedding_model",
+        "embedding_dimensions",
     }
     assert _col_names(migrated_db, "knowledge_documents") == {
         "id",
@@ -183,6 +185,43 @@ def test_kb_migrations_add_extraction_enabled_with_default_zero(tmp_path: Path) 
         conn.close()
 
     assert row == (0,)
+
+
+def test_kb_migrations_keep_preexisting_kb_embedding_identity_null(tmp_path: Path) -> None:
+    from fleetent.db import SQLiteDatabase
+
+    db_path = tmp_path / "migrated.db"
+    migrate(SQLiteDatabase(path=db_path), KB_MIGRATIONS[:-1])
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO knowledge_bases (
+                tenant_id, kb_id, created_at, description, archived_at, extraction_enabled
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("tenant-a", "support", "2026-06-29T00:00:00+00:00", "", None, 0),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    migrate(SQLiteDatabase(path=db_path), KB_MIGRATIONS)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            """
+            SELECT embedding_model, embedding_dimensions
+            FROM knowledge_bases
+            WHERE tenant_id = ? AND kb_id = ?
+            """,
+            ("tenant-a", "support"),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row == (None, None)
 
 
 def test_kb_migrations_create_expected_indices(tmp_path: Path) -> None:

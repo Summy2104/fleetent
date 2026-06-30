@@ -15,6 +15,7 @@ from fleetent.db import SQLiteDatabase, create_database
 from fleetent.identity import INGRESS_PRINCIPAL_HEADER, Principal, encode_ingress_principal
 from fleetent.knowledge_base.core import KnowledgeStore
 from fleetent.knowledge_base.core.models import KnowledgeChunk
+from fleetent.knowledge_base.errors import KnowledgeBaseEmbeddingMismatchError
 from fleetent.knowledge_base.planner import KnowledgeSearchOptions, KnowledgeSearchPlan
 from fleetent.knowledge_base.retrieval.search import SearchMode
 from fleetent.knowledge_base.retrieval.search import search as kb_search
@@ -91,6 +92,15 @@ async def _retrieve_with_timeout[T](
             timeout_s=timeout,
         )
         return empty
+    except KnowledgeBaseEmbeddingMismatchError as exc:
+        _logger.warn(
+            "ltc_retrieval_hard_failed",
+            path=name,
+            error_type=type(exc).__name__,
+            error=str(exc),
+            elapsed_ms=round((time.monotonic() - started) * 1000, 1),
+        )
+        raise
     except Exception as exc:  # noqa: BLE001 — one path's failure must not break the others
         _logger.warn(
             "ltc_retrieval_failed",

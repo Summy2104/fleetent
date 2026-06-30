@@ -143,6 +143,34 @@ async def test_deterministic_embedding_returns_stable_zero_vector_for_empty_text
     assert await embedding.embed("   ") == [0.0, 0.0, 0.0, 0.0]
 
 
+def test_current_embedding_identity_exposes_deterministic_provider() -> None:
+    from fleetent.vector_store import runtime
+    from fleetent.vector_store.embeddings import DeterministicEmbeddingProvider
+
+    runtime._embedding = DeterministicEmbeddingProvider(dimensions=96)
+
+    identity = runtime.current_embedding_identity()
+
+    assert identity.model == "deterministic/96"
+    assert identity.dimensions == 96
+
+
+def test_current_embedding_identity_exposes_http_provider() -> None:
+    from fleetent.vector_store import runtime
+    from fleetent.vector_store.embeddings import HttpEmbeddingProvider
+
+    runtime._embedding = HttpEmbeddingProvider(
+        endpoint="http://embed.local/v1/embeddings",
+        model="bge-small",
+        dimensions=384,
+    )
+
+    identity = runtime.current_embedding_identity()
+
+    assert identity.model == "bge-small"
+    assert identity.dimensions == 384
+
+
 async def test_upsert_then_search_returns_id_and_score():
     from dataclasses import fields
 
