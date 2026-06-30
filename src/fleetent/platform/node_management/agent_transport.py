@@ -95,6 +95,40 @@ class DirectHttpAgentTransport:
             media_type=upstream.headers.get("content-type", "text/event-stream"),
         )
 
+    async def webhook(
+        self,
+        node_id: str,
+        agent_name: str,
+        source_id: str,
+        body: bytes,
+        source_meta: str,
+        *,
+        content_type: str = "application/json",
+    ) -> Response:
+        """Forward a platform-verified webhook to the agent's own ``/webhook`` edge (live-webhooks).
+
+        The agent receives the resolved source (user_id / template / reply_target) in the trusted
+        ``X-Fleetent-Webhook-Source`` header — HMAC was already verified at the platform, so the
+        agent skips re-verification. The agent returns 202 immediately and runs in the background,
+        so this is a short non-streaming round-trip.
+        """
+        headers = {
+            "Authorization": f"Bearer {_node_service_key(node_id)}",
+            "Content-Type": content_type,
+            "X-Fleetent-Webhook-Source": source_meta,
+        }
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{_forwarder_base_url(node_id)}/forward/agents/{agent_name}/webhook/{source_id}",
+                content=body,
+                headers=headers,
+            )
+        return Response(
+            content=resp.content,
+            status_code=resp.status_code,
+            media_type=resp.headers.get("content-type"),
+        )
+
     async def ws(
         self,
         node_id: str,

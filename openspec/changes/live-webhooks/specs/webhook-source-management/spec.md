@@ -26,7 +26,7 @@ webhook source 的 `secret`（HMAC 校验用）MUST NOT 以明文持久化。man
 
 ### Requirement: managed webhook source 经 admin REST API 管理
 
-managed 下系统 SHALL 提供受管理员鉴权的 REST API 对 `webhook_sources` 做增删查改（CRUD）。创建/更新 MUST 校验必填字段（`id` / `user_id` / `agent_name`）；secret 提交后 MUST 以密文落库、响应 MUST NOT 回显明文 secret。
+managed 下系统 SHALL 提供受管理员鉴权的 REST API 对 `webhook_sources` 做增删查改（CRUD）。创建/更新 MUST 校验必填字段（`id` / `user_id`；`agent_name` 用于路由目标 agent，未配则入站投递时拒绝）；非管理员会话 MUST 被拒。secret 提交后 MUST 以密文落库、响应 MUST NOT 回显明文 secret。
 
 #### Scenario: 管理员创建 source
 - **WHEN** 管理员 POST 一个 webhook source（含 secret）到 admin API

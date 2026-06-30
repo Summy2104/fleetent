@@ -16,13 +16,13 @@
 
 ## Decisions
 
-- **D1 两态对称，模式判别沿用 `is_node_managed_runtime()`**：不引入 `mode` 配置。standalone：`agent_app` 挂 `POST /webhook/{source_id}`，source 读 `agent.yaml`，本进程后台 `normalizer.route()`。managed：platform 挂公开端点，source 读管理库，校验后经 `platform/node_management/agent_transport.py`（DirectHttpAgentTransport → node `/forward/agents/{name}/chat`）把消息投给目标 agent。**备选**：仅 platform 端点（否：standalone 用不了、违背两态对称）。
+- **D1 两态对称，模式判别沿用 `is_node_managed_runtime()`**：不引入 `mode` 配置。standalone：`agent_app` 挂 `POST /webhook/{source_id}`，source 读 `agent.yaml`，本进程后台 `normalizer.route()`。managed：platform 挂公开端点，source 读管理库，校验后经 `agent_transport.webhook()` → node **`/forward/agents/{name}/webhook/{source_id}`** 转发到 **agent 自身的 `/webhook` edge**（而非 `/chat`），由该 edge 构 `NormalizedMessage` 后台 route——两态因此共用同一 agent 侧处理器与回投接线。平台已校验 HMAC，故经可信 `X-Fleetent-Webhook-Source` 头把解析后的 source（user_id/template/reply_target）注入 agent，agent 跳过二次 HMAC（同 ingress principal 头的信任模型）。**备选**：managed 转发到 `/chat`（否：`/chat` 无法携带 reply_target/身份，回投做不成、破坏两态对称）。
 
 - **D2 source 存储两态 + secret 类型感知**：managed 新增 Alembic 表 `webhook_sources`，secret 用 Fernet 密文存行内（platform 入站端解密做 HMAC——secret 是平台校验用、非 agent env 凭据，故不走 `agent_secrets`）；standalone 走 `agent.yaml` `webhooks.sources`，secret 用 `secret_env` env 引用（同 MCP `key_env`）。两态都经 `webhook_router.WebhookSource` 统一模型。**备选**：secret 走 agent_secrets（否：语义错位——HMAC 在 platform 侧校验、不注入 agent env）。
 
 - **D3 端点逻辑收敛到中立纯函数 + 薄 face**：`webhook_router` 继续承载 HMAC/模板/模型（补 `reply_target` 字段）；standalone face（agent_app 路由）与 managed face（platform 端点）各自薄封装：查 source → enabled/body 闸 → `verify_signature` → `extract_message` → 构 `NormalizedMessage` → 202 + 后台 route/转发。两 face 共用 `webhook_router`，互不 import。
 
-- **D4 回投（A/B/C）**：`reply_func` 默认 no-op（A/C，结果进 trace；agent 也可自己用工具外发）；source 配 `reply_target`（本轮=内部 user_id）时投递 run 结果——managed 经 directed-reach `outbound_connectors.notify_user`（→ im_outbound_queue → node drain → DM），standalone 经 agent 连接器（`outbound.make_*`）。尽力而为、失败只记日志。
+- **D4 回投（A/B/C）**：两态共用同一 `reply_func`——`reply_func(text)` 在 source 配了 `reply_target`（本轮=内部 user_id）时调 `outbound_connectors.notify_user(reply_target, text)`，未配则 no-op（A/C，结果进 trace）。`notify_user` 自身在**非 node-managed 运行时即为 no-op**，故同一接线在 managed-agent 进程内投递（→ im_outbound_queue → node drain → DM）、在 standalone dev 进程内自然降级为 no-op，无需按模式分支。尽力而为、失败只记日志。
 
 - **D5 治理轻量**：以 source 的 `user_id` 身份跑，走和 IM 完全一致的 `permission_gate`/approval，无 webhook 专属审批/白名单/限速（YAGNI）。需审批的高风险动作在无人在环下按现有 `on_no_approver` 策略处理（默认 reject），不特殊化。
 

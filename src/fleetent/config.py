@@ -375,9 +375,29 @@ class SchedulingSettings(BaseModel):
     default_timezone: str = "UTC"
 
 
+class WebhookSourceSettings(BaseModel):
+    """A standalone webhook source declared in ``agent.yaml`` under ``webhooks.sources``.
+
+    The HMAC ``secret`` is supplied by env reference: ``secret_env`` names the env var
+    holding the shared secret (same pattern as MCP ``api_key_env``), keeping the secret
+    out of the config file. ``reply_target`` (optional) is an internal ``user_id`` to DM
+    the run result to; unset = no-op reply.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    user_id: str
+    agent_name: str | None = None
+    message_template: str | None = None
+    reply_target: str | None = None
+    secret_env: str | None = None
+
+
 class WebhooksSettings(BaseModel):
     enabled: bool = True
     max_body_bytes: int = 1_048_576
+    sources: list[WebhookSourceSettings] = Field(default_factory=list)
 
 
 class Settings(BaseSettings):

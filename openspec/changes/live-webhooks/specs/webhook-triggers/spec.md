@@ -32,7 +32,7 @@ Webhook source MUST 由运行时 source 管理提供（见 `webhook-source-manag
 
 ### Requirement: Webhook 回投默认 no-op，可选投递到 IM 目标
 
-传给 `normalizer.route()` 的 `reply_func`，当 source **未配置** `reply_target` 时 SHALL 为 no-op：run 结果只记入 eval trace，MUST NOT 发出任何出站消息。当 source **配置了** `reply_target` 时，系统 SHALL 把 run 的最终结果投递到该 IM 目标：managed 下 SHALL 经既有 directed-reach 出站（按内部 user_id `notify_user` → node drain → DM），standalone 下经 agent 自身连接器。投递为尽力而为，失败 SHALL 只记日志、MUST NOT 影响 run 本身。
+传给 `normalizer.route()` 的 `reply_func`，当 source **未配置** `reply_target` 时 SHALL 为 no-op：run 结果只记入 eval trace，MUST NOT 发出任何出站消息。当 source **配置了** `reply_target`（内部 user_id）时，系统 SHALL 经 directed-reach `outbound_connectors.notify_user(reply_target, result)` 把 run 最终结果投递为私信。该接线两态一致：node-managed agent 进程内 `notify_user` 入 im_outbound_queue → node drain → DM；非 managed（standalone dev）运行时 `notify_user` 自身即 no-op。投递为尽力而为，失败 SHALL 只记日志、MUST NOT 影响 run 本身。
 
 #### Scenario: 未配 reply_target 时 no-op
 - **WHEN** 某 webhook source 未配 `reply_target`，其触发的 run 完成
@@ -40,7 +40,7 @@ Webhook source MUST 由运行时 source 管理提供（见 `webhook-source-manag
 
 #### Scenario: 配了 reply_target 时回投 DM
 - **WHEN** 某 webhook source 配了 `reply_target`（内部 user_id），其触发的 run 完成
-- **THEN** run 结果以私信投递给该用户（managed 经 directed-reach，standalone 经 agent 连接器）
+- **THEN** run 结果经 directed-reach `notify_user` 以私信投递给该用户（managed 实投，standalone dev 降级 no-op）
 
 #### Scenario: 回投失败不影响 run
 - **WHEN** 回投目标投递失败
