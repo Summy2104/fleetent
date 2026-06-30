@@ -17,7 +17,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from openai import APIStatusError
+import httpx
+from openai import APIConnectionError, APIStatusError, APITimeoutError
 
 from fleetent.structured_logging import get_logger
 
@@ -43,6 +44,9 @@ class ErrorCategory(StrEnum):
     context_overflow = "context_overflow"
     auth_failed = "auth_failed"
     tool_crash = "tool_crash"
+    # LLM 请求层超时/连接错误（HTTP read timeout、连接失败）。区别于 tool_timeout
+    # （await 层工具超时）。判定为可重试且可切换模型。
+    llm_timeout = "llm_timeout"
     unknown = "unknown"
     # Reserved for wave-2 error sources: defined with flags so consumers know the
     # full vocabulary, but classify() never returns these until the corresponding
@@ -89,6 +93,9 @@ CLASSIFICATION_TABLE: dict[ErrorCategory, ErrorClassification] = {
     ),
     ErrorCategory.auth_failed: _entry(ErrorCategory.auth_failed),
     ErrorCategory.tool_crash: _entry(ErrorCategory.tool_crash),
+    ErrorCategory.llm_timeout: _entry(
+        ErrorCategory.llm_timeout, should_retry=True, should_switch_model=True
+    ),
     ErrorCategory.unknown: _entry(ErrorCategory.unknown),
     # Reserved (wave 2) — flags per design D3.
     ErrorCategory.tool_timeout: _entry(ErrorCategory.tool_timeout),
@@ -122,6 +129,12 @@ def _categorize(error: Exception) -> ErrorCategory:
     # subclass), so this maps only genuine await-layer tool timeouts.
     if isinstance(error, TimeoutError):
         return ErrorCategory.tool_timeout
+    # LLM 请求层超时/连接错误：httpx 读/超时（含流式 chunk 间读超时，SDK 不重试），
+    # 及 openai SDK 的 APITimeoutError / APIConnectionError（后者为前者基类）。
+    # 判定为 llm_timeout（可重试可切换），不再落 unknown。置于 APIStatusError 之前——
+    # 这些异常非 APIStatusError，互不重叠。
+    if isinstance(error, httpx.TimeoutException | APIConnectionError | APITimeoutError):
+        return ErrorCategory.llm_timeout
     if isinstance(error, APIStatusError):
         # Context overflow is identified by the error-body `code`, since it
         # surfaces as a generic 400 indistinguishable from other bad requests
