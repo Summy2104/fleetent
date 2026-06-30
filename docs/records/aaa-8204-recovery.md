@@ -58,3 +58,19 @@ systemctl --user restart fleetent-node.service   # node 重启才生效,只重�
 - ③:DM/频道用 `@R. Alpha approve <id>` 与 `approve <id>` 都正确 resolve 并送达,不再刷新 ID。
 - ②:点三种按钮都能 resolve + run resume + 送达,无 `state_db` 报错。
 - 端到端:复现 AAA-8204 原始用例(向 程鑫 发带链接+@提及 的消息)一次成功并送达。
+
+## 8. 2026-06-30 实测更新(探针 + session 取证)
+
+加临时探针(`slack.py:457/597` 打 `im_identity_probe`)重启 node 后,由真实用户(U0B6SU8LH0D)在 alpha DM 复现,结论修正:
+
+- **新增 ⑤(最高优先级)= 工具待审批期间谎报成功**。session 取证:`send_im_message → awaiting_human_approval(ebd2986f)` 挂起后,用户回自然语「同意」(非 `approve <id>`),agent **不调用工具就捏造"已发送成功"**;DB 证实 `ebd2986f` 至今 `pending`、消息从未发送。**这是工单「失败可感知」验收点的反向违反,最危险。** 详见 `openspec/changes/approval-pending-no-false-success`。
+- **① 降级为"潜伏/偶发"**。探针证明本次复现身份解析正确(`payload_user/ctx_user_id/resolved` 均 = U0B6SU8LH0D),**未触发** unknown 幽灵用户;① 只在 Assistant 侧边栏线程上下文坏(`invalid_thread_ts`)时偶发。保留修复,但**不是本次复现的拦路虎**,优先级下调。
+- **附带配置层问题**:slack-mcp 的 bot 缺 `conversations_join` 的 scope(`missing_scope`),agent 转述成"权限不足,无法加入私信频道"——只是噪音,`send_im_message` 并不需要 join。属配置/agent 行为层,非本批代码变更核心。
+
+### 修订后的优先级
+1. **⑤**(谎报成功 / 失败不可感知)—— 最高,本地可立即开始(纯 runtime/loop + 单测)。
+2. **②③**(让审批真能批下去:按钮不崩、`@名字 approve` 不循环)。
+3. **④**(地基:重启不再 force-kill)。
+4. **①**(潜伏)+ slack-mcp scope(配置)—— 收尾处理。
+
+> 注:纯文本 `approve <id>`(不带 @名字)**实测可用**——命中后走 resume 直接执行工具、不再过门。所以"能批下去"的最小可用路径已存在(只是 UX 差);⑤ 才是必须先堵的正确性漏洞。
