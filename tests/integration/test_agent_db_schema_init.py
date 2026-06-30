@@ -217,8 +217,8 @@ def test_init_agent_db_schema_creates_all_agent_tables(tmp_path: Path) -> None:
     try:
         _init_agent_db_schema(data_dir, agent_id="test-agent")
 
-        # KB tables land in tenants/default/kb/kb.db via TenantRouter + migrate-on-open.
-        kb_db_path = tmp_path / "tenants" / "default" / "kb" / "kb.db"
+        # KB tables land in tenants/default/kb/data/kb.db via TenantRouter + migrate-on-open.
+        kb_db_path = tmp_path / "tenants" / "default" / "kb" / "data" / "kb.db"
         assert kb_db_path.exists()
         kb_tables = _table_names(SQLiteDatabase(path=kb_db_path))
         assert "knowledge_bases" in kb_tables
@@ -346,7 +346,7 @@ def test_init_agent_db_schema_migrates_flat_kb_layout_for_standalone_agent(tmp_p
     try:
         _init_agent_db_schema(data_dir, agent_id="test-agent")
 
-        kb_dir = tmp_path / "tenants" / "default" / "kb"
+        kb_dir = tmp_path / "tenants" / "default" / "kb" / "data"
         assert (kb_dir / "kb.db").exists()
         assert (kb_dir / "kb_vectors.db").exists()
         assert not (tmp_path / "tenants" / "default" / "kb.db").exists()

@@ -3,7 +3,7 @@
 Verifies:
 - tenant_scope(tenant) resolves to {kb_db, kb_vector_backend}
 - Both resolved from one tenant_scope call (same tenant binding)
-- SQLite backend maps default scope to <fleetent_home>/tenants/default/kb/kb.db
+- SQLite backend maps default scope to <fleetent_home>/tenants/default/kb/data/kb.db
 - Backend is replaceable without changing call sites
 """
 
@@ -66,7 +66,7 @@ def test_scope_single_call_binds_both_backends(tmp_path: Path) -> None:
     assert scope.tenant_id == "default"
 
 
-# ── 3.1-c: SQLite backend maps default scope to <fleetent_home>/tenants/default/ files ──
+# ── 3.1-c: SQLite backend maps default scope to <fleetent_home>/tenants/default/kb/data/ files ──
 
 
 def test_sqlite_backend_maps_default_to_tenant_directory(tmp_path: Path) -> None:
@@ -74,9 +74,9 @@ def test_sqlite_backend_maps_default_to_tenant_directory(tmp_path: Path) -> None
     scope = router.tenant_scope("default")
 
     assert isinstance(scope.kb_db, SQLiteDatabase)
-    assert scope.kb_db.path == tmp_path / "tenants" / "default" / "kb" / "kb.db"
+    assert scope.kb_db.path == tmp_path / "tenants" / "default" / "kb" / "data" / "kb.db"
     assert scope.kb_vector_backend.database_url == (
-        f"sqlite:///{tmp_path / 'tenants' / 'default' / 'kb' / 'kb_vectors.db'}"
+        f"sqlite:///{tmp_path / 'tenants' / 'default' / 'kb' / 'data' / 'kb_vectors.db'}"
     )
 
 
@@ -87,8 +87,8 @@ def test_sqlite_backend_different_tenants_use_different_directories(tmp_path: Pa
     scope_b = router.tenant_scope("tenant-b")
 
     assert scope_a.kb_db.path != scope_b.kb_db.path
-    assert scope_a.kb_db.path == tmp_path / "tenants" / "tenant-a" / "kb" / "kb.db"
-    assert scope_b.kb_db.path == tmp_path / "tenants" / "tenant-b" / "kb" / "kb.db"
+    assert scope_a.kb_db.path == tmp_path / "tenants" / "tenant-a" / "kb" / "data" / "kb.db"
+    assert scope_b.kb_db.path == tmp_path / "tenants" / "tenant-b" / "kb" / "data" / "kb.db"
 
 
 # ── 3.1-d: backend is replaceable (inject fake backend) ────────────────────
@@ -178,7 +178,7 @@ def test_resolve_migrates_flat_tenant_kb_into_kb_directory_before_open(tmp_path:
 
     scope = router.tenant_scope("acme")
 
-    kb_dir = tmp_path / "tenants" / "acme" / "kb"
+    kb_dir = tmp_path / "tenants" / "acme" / "kb" / "data"
     assert scope.kb_db.path == kb_dir / "kb.db"
     assert kb_dir.is_dir()
     assert not legacy_kb.exists()

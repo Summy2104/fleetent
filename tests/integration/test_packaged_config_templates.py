@@ -80,3 +80,22 @@ def test_node_init_config_generates_files_outside_repo_cwd(tmp_path: Path) -> No
     assert result.returncode == 0, result.stdout + result.stderr
     assert "create node/.env" in result.stdout
     assert (home_dir / "node" / ".env").exists()
+
+
+def test_kb_service_init_config_generates_tenant_kb_home_outside_repo_cwd(tmp_path: Path) -> None:
+    home_dir = tmp_path / "kb-home"
+
+    result = _run_cli_outside_repo(
+        tmp_path,
+        "kb-service",
+        "init-config",
+        "--tenant",
+        "acme",
+        home_dir=home_dir,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "create tenants/acme/kb/kb-service.yaml" in result.stdout
+    assert "create tenants/acme/kb/.env" in result.stdout
+    assert (home_dir / "tenants" / "acme" / "kb" / "kb-service.yaml").exists()
+    assert (home_dir / "tenants" / "acme" / "kb" / ".env").exists()

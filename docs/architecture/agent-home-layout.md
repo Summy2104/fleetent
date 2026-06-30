@@ -44,9 +44,12 @@ FLEETENT_HOME/
 │   ├── desired-state-cache.json       [NODE]  reconcile/provider 缓存（剥除 secret，仅保留 manifest 元数据）
 │   └── applied-config-hashes.json     [NODE]  reconcile 的 config-hash 记账
 └── tenants/<tenant>/                  [PLAT/NODE/AGENT] 一个租户的完整足迹
-    ├── kb/                            [AGENT/NODE] tenant 级 KB（node 以整目录 RO 挂进 agent，含 -wal/-shm）
-    │   ├── kb.db
-    │   └── kb_vectors.db
+    ├── kb/                            [AGENT/NODE/OPER] tenant 级 KB 配置 home
+    │   ├── kb-service.yaml
+    │   ├── .env
+    │   └── data/                      [AGENT/NODE] node 只把这一层 RO 挂进 agent（含 -wal/-shm）
+    │       ├── kb.db
+    │       └── kb_vectors.db
     └── agents/<id>/                   per-agent home（详见下）
 ```
 
@@ -106,8 +109,8 @@ node 状态（node/）                          →  [NODE] 自己（provision +
 2. **管理库在根目录**：`FLEETENT_HOME/management.db`。
 3. **租户优先布局**：canonical home = `tenants/<tenant>/agents/<agent>/`。
 4. **agent data 拍平**：运行时 DB 与 sessions/logs/workspaces 都落 `<agent-home>/data/`。
-5. **KB 是 tenant 级**：`kb-service/<tenant>/data/kb.db` 与 `kb-service/<tenant>/data/kb_vectors.db`。
-6. **KB 服务可 standalone 运行且 service home 自包含**：`fleetent kb-serve --config kb-service/<tenant>/kb-service.yaml` 与 `fleetent kb-worker --config kb-service/<tenant>/kb-service.yaml` 都固定读写同一租户 service home 下的 `data/`；connector 配置、secret、sweep 和 ingest 队列也都落在同一 `kb-service/<tenant>/`。platform 托管 ingest 暂时并存，退役属于后续 `kb-retire-platform-ingest`。
+5. **KB 是 tenant 级**：配置 home 在 `tenants/<tenant>/kb/`，关系库/向量库/队列库在 `tenants/<tenant>/kb/data/`。
+6. **KB 服务可 standalone 运行且 service home 自包含**：`fleetent kb-serve --config tenants/<tenant>/kb/kb-service.yaml` 与 `fleetent kb-worker --config tenants/<tenant>/kb/kb-service.yaml` 都固定读写同一租户 service home；`kb-service.yaml` 与 `.env` 落 `kb/` 根，connector 配置、secret、sweep 和 ingest 队列共享这一棵 home。node 只把 `kb/data/` RO 挂进 agent，隔离 `kb/` 根的 secret。
 
 ---
 
@@ -124,9 +127,12 @@ FLEETENT_HOME/
 ├── logs/ diagnostics/                       [PLAT]  宿主级日志与诊断导出
 ├── node/                                    [NODE]  节点身份 · 跨租户（.env + cache + hashes）
 └── tenants/<tenant>/                        ← 一个租户的完整足迹 = 一棵子树
-    ├── kb/                                  租户级共享：kb-worker 写 / 各 agent 读（node 整目录 RO 挂载，含 -wal/-shm；可选 colocated kb-serve 也只读这棵子树）
-    │   ├── kb.db
-    │   └── kb_vectors.db
+    ├── kb/                                  租户级共享 KB home：配置在根，数据在 data/
+    │   ├── kb-service.yaml
+    │   ├── .env
+    │   └── data/                            kb-worker 写 / 各 agent 读（node 只 RO 挂这层，含 -wal/-shm；可选 colocated kb-serve 也读同一层）
+    │       ├── kb.db
+    │       └── kb_vectors.db
     └── agents/<name>/                       name=不可变 handle（rename 已移除）；单一 owner
         ├── agent.yaml  .env(0600)  .fleetent.pid  skills/
         └── data/                            [AGENT]  拍平，无 <tenant>/<id>/ 冗余嵌套

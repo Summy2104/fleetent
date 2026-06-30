@@ -536,7 +536,7 @@ def test_worker_main_uses_shared_kb_service_directory(
 ) -> None:
     from fleetent.knowledge_base import worker
 
-    service_dir = tmp_path / "kb-service" / "tenant-a"
+    service_dir = tmp_path / "tenants" / "tenant-a" / "kb"
     service_dir.mkdir(parents=True)
     (service_dir / ".env").write_text("KB_SHARED_GOOGLE_DRIVE=shared-secret\n", encoding="utf-8")
     path = service_dir / "kb-service.yaml"
@@ -572,7 +572,7 @@ def test_serve_main_uses_shared_kb_service_directory(
 ) -> None:
     from fleetent.knowledge_base import serve
 
-    service_dir = tmp_path / "kb-service" / "tenant-a"
+    service_dir = tmp_path / "tenants" / "tenant-a" / "kb"
     service_dir.mkdir(parents=True)
     (service_dir / ".env").write_text("FLEETENT_KB_SERVICE_KEY=svc-test\n", encoding="utf-8")
     path = service_dir / "kb-service.yaml"
@@ -610,8 +610,8 @@ def test_worker_main_applies_standalone_agent_model_config(
 ) -> None:
     from fleetent.knowledge_base import worker
 
-    service_dir = tmp_path / "kb-service"
-    service_dir.mkdir()
+    service_dir = tmp_path / "tenants" / "tenant-a" / "kb"
+    service_dir.mkdir(parents=True)
     path = service_dir / "kb-service.yaml"
     doc = _service_doc()
     doc["connectors"] = []  # type: ignore[index]
@@ -645,8 +645,8 @@ def test_serve_main_applies_standalone_agent_model_config(
 ) -> None:
     from fleetent.knowledge_base import serve
 
-    service_dir = tmp_path / "kb-service"
-    service_dir.mkdir()
+    service_dir = tmp_path / "tenants" / "tenant-a" / "kb"
+    service_dir.mkdir(parents=True)
     (service_dir / ".env").write_text("FLEETENT_KB_SERVICE_KEY=svc-test\n", encoding="utf-8")
     path = service_dir / "kb-service.yaml"
     doc = _service_doc()
