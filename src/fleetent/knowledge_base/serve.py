@@ -42,6 +42,9 @@ class SearchRequest(BaseModel):
     query: str
     kb_ids: list[str] = Field(default_factory=list)
     limit: int = 10
+    mode: str | None = None
+    rerank: bool = False
+    use_planner: bool = False
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -186,14 +189,29 @@ def create_app(config: KBServeConfig):  # type: ignore[no-untyped-def]
         principal_header: Annotated[str | None, Header(alias=INGRESS_PRINCIPAL_HEADER)] = None,
     ) -> dict[str, list[dict[str, object]]]:
         _require_authorized_principal(authorization, principal_header, request.principal)
-        chunks = await kb_runtime.search(
-            query=request.query,
-            tenant_id=config.tenant_id,
-            kb_ids=request.kb_ids,
-            limit=request.limit,
-            mode=config.default_mode,
-            rerank=False,
-        )
+        mode = request.mode or config.default_mode
+        if request.rerank and mode != "hybrid":
+            raise ValueError("rerank only supports hybrid knowledge search mode")
+        if request.use_planner:
+            plan = kb_runtime.plan_knowledge_search(
+                request.query,
+                kb_runtime.KnowledgeSearchOptions(
+                    tenant_id=config.tenant_id,
+                    kb_ids=request.kb_ids,
+                    limit=request.limit,
+                    rerank=request.rerank,
+                ),
+            )
+            chunks = await kb_runtime.execute_knowledge_search_plan(plan)
+        else:
+            chunks = await kb_runtime.search(
+                query=request.query,
+                tenant_id=config.tenant_id,
+                kb_ids=request.kb_ids,
+                limit=request.limit,
+                mode=mode,
+                rerank=request.rerank,
+            )
         return {"chunks": [_knowledge_chunk_to_wire_dict(chunk) for chunk in chunks]}
 
     return app

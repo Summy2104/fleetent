@@ -28,7 +28,7 @@ def _chunk() -> KnowledgeChunk:
     )
 
 
-async def test_http_knowledge_provider_posts_wire_payload_and_parses_chunks() -> None:
+async def test_http_knowledge_provider_posts_wire_payload_and_parses_chunks(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -47,6 +47,23 @@ async def test_http_knowledge_provider_posts_wire_payload_and_parses_chunks() ->
         "https://kb.example/search",
         service_key="svc-secret",
         transport=httpx.MockTransport(handler),
+    )
+    _publish_agent(
+        monkeypatch,
+        AgentFile(
+            name="agent-1",
+            version=1,
+            models=default_models(),
+            knowledge={
+                "enabled": True,
+                "bindings": [{"tenant_id": "tenant-a", "kb_id": "global"}],
+                "retrieval_policy": {
+                    "mode": "hybrid",
+                    "rerank": True,
+                    "use_planner": True,
+                },
+            },
+        ),
     )
 
     results = await provider(
@@ -69,6 +86,9 @@ async def test_http_knowledge_provider_posts_wire_payload_and_parses_chunks() ->
             "query": "deployment",
             "kb_ids": ["kb-1", "kb-2"],
             "limit": 7,
+            "mode": "hybrid",
+            "rerank": True,
+            "use_planner": True,
         },
     }
     assert results == [_chunk()]

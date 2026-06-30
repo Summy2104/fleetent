@@ -328,11 +328,17 @@ class HttpKnowledgeProvider:
             "Authorization": f"Bearer {self._service_key}",
             INGRESS_PRINCIPAL_HEADER: encode_ingress_principal(principal),
         }
+        from fleetent import agent_config
+
+        policy = agent_config.active_agent_or_default().knowledge.retrieval_policy
         payload = {
             "principal": {"user_id": principal.user_id, "tenant_id": principal.tenant_id},
             "query": query,
             "kb_ids": kb_ids,
             "limit": limit,
+            "mode": policy.mode,
+            "rerank": bool(getattr(policy, "rerank", False)),
+            "use_planner": bool(getattr(policy, "use_planner", False)),
         }
         try:
             async with httpx.AsyncClient(
