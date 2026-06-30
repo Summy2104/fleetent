@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -75,10 +74,15 @@ def _commit_skill(pool_dir: Path, name: str, content: str) -> str:
     return sha
 
 
-def _nominate(agent: agent_store.Agent, skill_name: str, pool_dir: Path) -> int:
+def _nominate(
+    agent: agent_store.Agent,
+    skill_name: str,
+    pool_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> int:
     from fleetent.platform.agent_lifecycle import materialize
 
-    os.environ["FLEETENT_SKILLS_DIR"] = str(pool_dir)
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(pool_dir))
     skill_admin_store.set_binding(agent.id, skill_name, True, updated_by="admin")
     materialize.write_home(materialize.agent_file_from_store(agent), source_agent=agent)
 
@@ -95,11 +99,11 @@ def _nominate(agent: agent_store.Agent, skill_name: str, pool_dir: Path) -> int:
     return backflow_store.nominate(agent_id=agent.id, skill_name=skill_name, pool_dir=pool_dir)
 
 
-def test_governance_requires_admin_auth(app, db, pool_dir):
+def test_governance_requires_admin_auth(app, db, pool_dir, monkeypatch):
     """Backflow decision endpoints require admin auth."""
     _commit_skill(pool_dir, "billing", "v1")
     agent = _create_agent()
-    pid = _nominate(agent, "billing", pool_dir)
+    pid = _nominate(agent, "billing", pool_dir, monkeypatch)
 
     client = TestClient(app, raise_server_exceptions=True)
     resp = client.post(f"/admin/skills/backflow/{pid}/accept")
@@ -131,7 +135,7 @@ def test_accept_writes_full_bundle_commits_and_rematerializes_other_agents(
     skill_admin_store.set_binding(peer_agent.id, "crm-ops", True, updated_by="admin")
     materialize.write_home(materialize.agent_file_from_store(peer_agent), source_agent=peer_agent)
 
-    pid = _nominate(source_agent, "crm-ops", pool_dir)
+    pid = _nominate(source_agent, "crm-ops", pool_dir, monkeypatch)
 
     client = TestClient(app, raise_server_exceptions=True)
     resp = client.post(
@@ -176,7 +180,7 @@ def test_reject_leaves_pool_unchanged_and_clears_drift(app, db, pool_dir, admin_
 
     _commit_skill(pool_dir, "search", "pool-v1")
     agent = _create_agent()
-    pid = _nominate(agent, "search", pool_dir)
+    pid = _nominate(agent, "search", pool_dir, monkeypatch)
 
     original_skill_md = (pool_dir / "search" / "SKILL.md").read_text(encoding="utf-8")
 
@@ -191,11 +195,13 @@ def test_reject_leaves_pool_unchanged_and_clears_drift(app, db, pool_dir, admin_
     assert backflow_store.get_proposal(pid)["status"] == "rejected"
 
 
-def test_list_backflow_returns_pending_metadata_without_bundle(app, db, pool_dir, admin_token):
+def test_list_backflow_returns_pending_metadata_without_bundle(
+    app, db, pool_dir, admin_token, monkeypatch
+):
     """GET /admin/skills/backflow lists pending proposals (admin-only, no bundle)."""
     _commit_skill(pool_dir, "billing", "v1")
     agent = _create_agent()
-    pid = _nominate(agent, "billing", pool_dir)
+    pid = _nominate(agent, "billing", pool_dir, monkeypatch)
 
     client = TestClient(app, raise_server_exceptions=True)
 
@@ -225,11 +231,13 @@ def test_list_backflow_returns_pending_metadata_without_bundle(app, db, pool_dir
     assert "proposed_bundle" not in item
 
 
-def test_backflow_diff_returns_dual_diff_and_404_for_missing(app, db, pool_dir, admin_token):
+def test_backflow_diff_returns_dual_diff_and_404_for_missing(
+    app, db, pool_dir, admin_token, monkeypatch
+):
     """GET /admin/skills/backflow/{id}/diff returns vs-base/vs-head/conflict; 404 if absent."""
     _commit_skill(pool_dir, "search", "v1")
     agent = _create_agent()
-    pid = _nominate(agent, "search", pool_dir)
+    pid = _nominate(agent, "search", pool_dir, monkeypatch)
 
     client = TestClient(app, raise_server_exceptions=True)
 
@@ -260,7 +268,7 @@ def test_fork_creates_full_bundle_and_rebinds_source_agent(
 
     _commit_skill(pool_dir, "crm-ops", "pool-v1")
     agent = _create_agent()
-    pid = _nominate(agent, "crm-ops", pool_dir)
+    pid = _nominate(agent, "crm-ops", pool_dir, monkeypatch)
 
     original_content = (pool_dir / "crm-ops" / "SKILL.md").read_text(encoding="utf-8")
 
@@ -305,7 +313,7 @@ def test_accept_bumps_resync_epoch_for_node_resync(app, db, pool_dir, admin_toke
     monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(pool_dir))
     _commit_skill(pool_dir, "crm-ops", "pool-v1")
     agent = _create_agent()
-    pid = _nominate(agent, "crm-ops", pool_dir)
+    pid = _nominate(agent, "crm-ops", pool_dir, monkeypatch)
     assert skill_admin_store.get_resync_epoch(agent.id, "crm-ops") == 0
 
     client = TestClient(app, raise_server_exceptions=True)
@@ -322,7 +330,7 @@ def test_reject_bumps_resync_epoch_to_revert_node(app, db, pool_dir, admin_token
     monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(pool_dir))
     _commit_skill(pool_dir, "crm-ops", "pool-v1")
     agent = _create_agent()
-    pid = _nominate(agent, "crm-ops", pool_dir)
+    pid = _nominate(agent, "crm-ops", pool_dir, monkeypatch)
 
     client = TestClient(app, raise_server_exceptions=True)
     resp = client.post(
