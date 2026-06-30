@@ -40,19 +40,28 @@ test-pr: ## PR gate (must be green): unit (minus quarantine) + layer boundaries 
 test-unit: ## Run unit tests
 	uv run pytest tests/unit -n auto -p no:cacheprovider
 
+# pytest-xdist worker count for the CI gates. `-n auto` reads os.cpu_count(),
+# which inside a cgroup-CPU-throttled CI container returns the HOST core count
+# (8-32), not the runner's real ~4 vCPU allocation. That over-subscribes the
+# 4GB/4vCPU runner: dozens of workers each import the full package, blow past
+# memory into swap, and thrash on context switches. Pin to the runner's real
+# size instead. Bump to match a larger runner: `make ... CI_WORKERS=8` on 2x.
+# Local dev targets keep `-n auto` (host core count is correct off-CI).
+CI_WORKERS ?= 4
+
 test-unit-ci: ## Run CI unit tests with 76% coverage gate (parallel; pytest-cov merges worker data)
-	uv run pytest tests/unit -q -n auto -p no:cacheprovider \
+	uv run pytest tests/unit -q -n $(CI_WORKERS) -p no:cacheprovider \
 		--cov=src/fleetent --cov-report=term-missing --cov-fail-under=76
 
 test-coverage-ci: ## Run daily unit+integration tests with 88% combined coverage gate (parallel)
-	uv run pytest tests/unit tests/integration -q -n auto -p no:cacheprovider \
+	uv run pytest tests/unit tests/integration -q -n $(CI_WORKERS) -p no:cacheprovider \
 		--cov=src/fleetent --cov-report=term-missing --cov-fail-under=88
 
 test-integration: ## Run integration tests
 	uv run pytest tests/integration
 
 test-integration-ci: ## PR gate: integration tests in parallel, no coverage (~1min)
-	uv run pytest tests/integration -q -n auto -p no:cacheprovider
+	uv run pytest tests/integration -q -n $(CI_WORKERS) -p no:cacheprovider
 
 test-e2e: ## Run end-to-end tests
 	uv run pytest tests/e2e
