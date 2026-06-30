@@ -34,6 +34,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { type AgentListItem, useAgentsQuery } from '@/features/agents/api';
 import {
+  type McpApiKeyPerUserAuthConfig,
   type McpAuthType,
   type McpOAuthClientCredentialsAuthConfig,
   type McpServerInput,
@@ -90,6 +91,8 @@ function ServerDialog({
   const [oauthClientId, setOauthClientId] = useState('');
   const [oauthClientSecretEnv, setOauthClientSecretEnv] = useState('');
   const [oauthScope, setOauthScope] = useState('');
+  const [headerStyle, setHeaderStyle] = useState<'bearer' | 'x_api_key'>('bearer');
+  const [credentialInput, setCredentialInput] = useState<'form' | 'tool' | 'both'>('form');
   const [env, setEnv] = useState<EnvPair[]>([]);
   const [args, setArgs] = useState<string[]>([]);
   const [headers, setHeaders] = useState<EnvPair[]>([]);
@@ -98,6 +101,7 @@ function ServerDialog({
     if (open) {
       const authConfig = editing?.auth_config ?? {};
       const oauthConfig = authConfig as Partial<McpOAuthClientCredentialsAuthConfig>;
+      const perUserConfig = authConfig as Partial<McpApiKeyPerUserAuthConfig>;
       setId(editing?.id ?? '');
       setTransport(editing?.transport ?? 'stdio');
       setCommand(editing?.command ?? '');
@@ -109,6 +113,8 @@ function ServerDialog({
       setOauthClientId(oauthConfig.client_id ?? '');
       setOauthClientSecretEnv(oauthConfig.client_secret_env ?? '');
       setOauthScope(oauthConfig.scope ?? '');
+      setHeaderStyle(perUserConfig.header_style ?? 'bearer');
+      setCredentialInput(perUserConfig.credential_input ?? 'form');
       setEnv(toPairs(editing?.env));
       setArgs(editing?.args ?? []);
       setHeaders(toPairs(editing?.headers));
@@ -131,7 +137,9 @@ function ServerDialog({
                 client_secret_env: oauthClientSecretEnv.trim(),
                 scope: oauthScope.trim(),
               }
-            : {},
+            : authType === 'api_key_per_user'
+              ? { header_style: headerStyle, credential_input: credentialInput }
+              : {},
     };
     if (!isEdit && agentScope !== GLOBAL_SCOPE) payload.agent_id = Number(agentScope);
     if (transport === 'stdio') {
@@ -165,6 +173,7 @@ function ServerDialog({
     id.trim().length > 0 &&
     (transport === 'stdio' ? command.trim().length > 0 : url.trim().length > 0) &&
     (authType === 'none' ||
+      authType === 'api_key_per_user' ||
       (authType === 'api_key' && apiKeyEnv.trim().length > 0) ||
       (authType === 'oauth_client_credentials' &&
         oauthTokenUrl.trim().length > 0 &&
@@ -235,6 +244,7 @@ function ServerDialog({
                 <SelectItem value="none">{t('mcp.authTypeNone')}</SelectItem>
                 <SelectItem value="api_key">{t('mcp.authTypeApiKey')}</SelectItem>
                 <SelectItem value="oauth_client_credentials">{t('mcp.authTypeOauthClientCredentials')}</SelectItem>
+                <SelectItem value="api_key_per_user">{t('mcp.authTypeApiKeyPerUser')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -276,6 +286,42 @@ function ServerDialog({
                 onChange={(event) => setApiKeyEnv(event.target.value)}
               />
             </div>
+          ) : null}
+
+          {authType === 'api_key_per_user' ? (
+            <>
+              <div className="grid gap-2">
+                <Label>{t('mcp.headerStyleLabel')}</Label>
+                <Select
+                  value={headerStyle}
+                  onValueChange={(value) => setHeaderStyle(value as 'bearer' | 'x_api_key')}
+                >
+                  <SelectTrigger aria-label={t('mcp.headerStyleLabel')}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="bearer">{t('mcp.headerStyleBearer')}</SelectItem>
+                    <SelectItem value="x_api_key">{t('mcp.headerStyleXApiKey')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label>{t('mcp.credentialInputLabel')}</Label>
+                <Select
+                  value={credentialInput}
+                  onValueChange={(value) => setCredentialInput(value as 'form' | 'tool' | 'both')}
+                >
+                  <SelectTrigger aria-label={t('mcp.credentialInputLabel')}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="form">{t('mcp.credentialInputForm')}</SelectItem>
+                    <SelectItem value="tool">{t('mcp.credentialInputTool')}</SelectItem>
+                    <SelectItem value="both">{t('mcp.credentialInputBoth')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </>
           ) : null}
 
           {authType === 'oauth_client_credentials' ? (
