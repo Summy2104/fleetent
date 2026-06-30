@@ -101,11 +101,34 @@ exit 0
 """
 
 
+# install-platform.sh provisions the Node toolchain and builds the admin frontend
+# by shelling out to system tooling: `apt-get install nodejs`, `curl` the nodesource
+# setup, then `make frontend-install` (yarn) + `make frontend-build` (vite). On the
+# Debian CI image those execute for real — reaching the network and adding 18-97s per
+# test (~75% of the whole integration suite). These tests only assert install.sh's
+# arg parsing / role delegation / uv logging, so stub the system commands to instant
+# no-ops: `command -v corepack` then short-circuits the toolchain branch and `make`
+# does nothing, keeping the tests hermetic and fast on every platform. (Locally on
+# macOS the `uname != Linux` guard already skipped this, hiding the cost.)
+_NOOP_BIN = "#!/bin/bash\nexit 0\n"
+_FAKE_SYSTEM_BINS = {
+    "apt-get": _NOOP_BIN,
+    "curl": _NOOP_BIN,
+    "make": _NOOP_BIN,
+    "corepack": _NOOP_BIN,
+    "node": "#!/bin/bash\necho v22.0.0\n",
+}
+
+
 def _fake_uv_env(home: Path, fake_bin: Path, uv_log: Path, **flags: str) -> dict[str, str]:
     fake_bin.mkdir(parents=True, exist_ok=True)
     uv = fake_bin / "uv"
     uv.write_text(_FAKE_UV)
     uv.chmod(0o755)
+    for name, body in _FAKE_SYSTEM_BINS.items():
+        stub = fake_bin / name
+        stub.write_text(body)
+        stub.chmod(0o755)
     # Minimal PATH: fake uv + system essentials only. Excludes ~/.local/bin so a
     # real installed `fleetent` can't leak into command -v checks.
     env = {
