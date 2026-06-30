@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from fleetent.im_gateway.normalizer import (
     _match_approval_command,
     _strip_leading_mention,
@@ -61,3 +63,44 @@ def test_prose_with_mention_not_matched() -> None:
 
 def test_plain_mention_message_not_matched() -> None:
     assert _match_approval_command("<@U123> 你好，帮我查个数据") is None
+
+
+def test_match_plain_text_mention_prefix() -> None:
+    # AAA-8204 ③：DM/Assistant 面板里用户打的 `@R. Alpha` 是纯文本（非 `<@id>`），
+    # 且 bot 显示名含空格。剥不掉就漏进主循环 → 审批死循环。须命中。
+    m = _match_approval_command("@R. Alpha approve 00b0691a")
+    assert m is not None
+    assert m.group(1).lower() == "approve"
+    assert m.group(3) == "00b0691a"
+
+
+# tasks.md ③ 回归矩阵：命中 = 三种写法 × approve/reject/always；
+# 不命中 = 散文（合法/非法 mention）、缺 id、id 非法。
+@pytest.mark.parametrize(
+    "text",
+    [
+        "approve 00b0691a",  # DM 裸命令
+        "<@U0B8MEKAM44> approve 00b0691a",  # 频道真实 mention
+        "@R. Alpha approve 00b0691a",  # DM 纯文本 @名字（含空格）
+        "reject 00b0691a",  # reject
+        "approve always 00b0691a",  # always 变体
+        "@R. Alpha reject 00b0691a",  # 纯文本 mention + reject
+        "@R. Alpha approve always 00b0691a",  # 纯文本 mention + always
+    ],
+)
+def test_approval_command_matrix_match(text: str) -> None:
+    assert _match_approval_command(text) is not None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "@bot approve the plan",  # 纯文本 mention + 散文，id 非法
+        "<@U123> approve the plan",  # 真实 mention + 散文，id 非法
+        "approve",  # 缺 id
+        "approve xyz",  # id 不满足 [a-f0-9-]{6,36}
+        "@R. Alpha 你好，帮我查个数据",  # 纯文本 mention 但无审批动词
+    ],
+)
+def test_approval_command_matrix_no_match(text: str) -> None:
+    assert _match_approval_command(text) is None
