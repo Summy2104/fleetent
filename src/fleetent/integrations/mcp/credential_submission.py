@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import html
 import logging
+from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from typing import Any
 from urllib.parse import urljoin
 
@@ -36,6 +38,40 @@ logger = logging.getLogger(__name__)
 
 # Path the standalone agent (and managed platform) mount the credential form at.
 CREDENTIAL_PATH = "/mcp/credential"
+
+# ── credential-link delivery seam (separate from OAuth's; different wording) ──────
+# A deliverer ``(user_id, agent_id, server_id, url) -> bool`` that DMs the secure-form link
+# to the requesting user. Unlike OAuth this carries credential-submission wording and, under
+# node-managed placement (where the agent has no live IM connector), routes through the node
+# outbound queue. Bound per-call by the dispatch site (which has the live tool_context); a
+# boot-level fallback may also be set. Held as injectable references only (no live resource).
+CredentialLinkDeliverer = Callable[[str, str, str, str], Awaitable[bool]]
+
+_deliverer: CredentialLinkDeliverer | None = None
+_call_deliverer: ContextVar[CredentialLinkDeliverer | None] = ContextVar(
+    "mcp_cred_call_deliverer", default=None
+)
+
+
+def set_credential_link_deliverer(deliverer: CredentialLinkDeliverer | None) -> None:
+    """Wire (or clear) the process-level credential-link deliverer (boot fallback)."""
+    global _deliverer
+    _deliverer = deliverer
+
+
+def get_credential_link_deliverer() -> CredentialLinkDeliverer | None:
+    """Return the effective deliverer for the current task (per-call > boot), or None."""
+    return _call_deliverer.get() or _deliverer
+
+
+def bind_call_deliverer(deliverer: CredentialLinkDeliverer | None) -> Any:
+    """Bind a per-call credential-link deliverer for the current task; returns a reset token."""
+    return _call_deliverer.set(deliverer)
+
+
+def reset_call_deliverer(token: Any) -> None:
+    """Reset the per-call credential-link deliverer using a :func:`bind_call_deliverer` token."""
+    _call_deliverer.reset(token)
 
 
 def render_credential_form(state: str) -> str:
@@ -125,7 +161,7 @@ async def emit_credential_link(server: Any, user_id: str, agent_id: str) -> bool
         True iff the link was delivered to the user (e.g. DM'd); False otherwise.
     """
     url = build_credential_link(server, user_id, agent_id)
-    deliverer = _authz.get_authorization_link_deliverer()
+    deliverer = get_credential_link_deliverer()
     if deliverer is None:
         logger.info("mcp_cred_link_no_deliverer server_id=%s user_id=%s", server.id, user_id)
         return False
