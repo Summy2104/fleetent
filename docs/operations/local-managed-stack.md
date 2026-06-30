@@ -99,7 +99,7 @@ curl -s -X POST http://127.0.0.1:8765/admin/agents/chatbot/enable -H "Authorizat
 make node                            # node 每 ~10s reconcile：拉 desired-state → 物化 agent home → spawn agent
 ```
 
-node 会把 chatbot 物化到 `tenants/default/agents/chatbot/`（agent.yaml + .env + data/），并 spawn agent 进程（随机 loopback 口）+ 起 forwarder（8786）。等到 `pgrep -f "fleetent agent run chatbot"` 命中即 OK。
+node 会把 chatbot 物化到 `tenants/default/agents/chatbot/`（agent.yaml + .env + data/），并 spawn agent 进程（随机 loopback 口）+ 起 forwarder（8767）。等到 `pgrep -f "fleetent agent run chatbot"` 命中即 OK。
 
 > agent 的 `FLEETENT_MODEL_PRIMARY_API_KEY`：node materialize 写的 `.env` 里该项为空占位（值在 vault 才会写实值），agent boot 时 `load_dotenv(override=False)` 不覆盖**从 node 进程继承**的真值——所以**起 node 的 shell 必须有 `FLEETENT_MODEL_PRIMARY_API_KEY`**。
 

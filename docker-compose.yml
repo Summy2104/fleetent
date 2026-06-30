@@ -42,7 +42,7 @@ services:
       <<: *fleetent-env
       FLEETENT_NODE_BACKEND: container
     ports:
-      - "8786:8786"
+      - "8767:8767"
     volumes:
       - ${FLEETENT_HOME:?set FLEETENT_HOME}:${FLEETENT_HOME:?set FLEETENT_HOME}
       - /var/run/docker.sock:/var/run/docker.sock

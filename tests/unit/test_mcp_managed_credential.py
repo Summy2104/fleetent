@@ -46,7 +46,7 @@ def test_build_credential_link_registers_pending_via_loopback():
         return SimpleNamespace(status_code=200, json=lambda: {})
 
     store = ManagedStateStore(
-        "http://127.0.0.1:8786",
+        "http://127.0.0.1:8767",
         "my-bot",
         "tui-token",
         lambda sid: _apikey_server(sid),
@@ -62,7 +62,7 @@ def test_build_credential_link_registers_pending_via_loopback():
     # Exactly one pending registration, forwarded through the node loopback (not platform).
     assert len(posted) == 1
     p = posted[0]
-    assert p["url"] == "http://127.0.0.1:8786/agent/my-bot/mcp/oauth-pending"
+    assert p["url"] == "http://127.0.0.1:8767/agent/my-bot/mcp/oauth-pending"
     assert p["headers"]["Authorization"] == "Bearer tui-token"
     body = p["json"]
     assert (body["user_id"], body["agent_id"], body["server_id"]) == ("uA", "ag1", "acme")
@@ -74,7 +74,7 @@ def test_build_credential_link_registers_pending_via_loopback():
 def test_managed_consume_is_platform_side_only():
     # The agent-side managed state store never consumes (platform's endpoint does).
     store = ManagedStateStore(
-        "http://127.0.0.1:8786",
+        "http://127.0.0.1:8767",
         "my-bot",
         "tui-token",
         lambda sid: _apikey_server(sid),
@@ -94,20 +94,20 @@ def test_managed_credential_writer_posts_to_loopback():
         return SimpleNamespace(status_code=200)
 
     writer = ManagedCredentialWriter(
-        "http://127.0.0.1:8786", "my-bot", "tui-token", http_post=_post
+        "http://127.0.0.1:8767", "my-bot", "tui-token", http_post=_post
     )
     ok = writer("acme", "uA", "ag1", "the-key")
     assert ok is True
     assert len(posted) == 1
     p = posted[0]
-    assert p["url"] == "http://127.0.0.1:8786/agent/my-bot/mcp/credential-set"
+    assert p["url"] == "http://127.0.0.1:8767/agent/my-bot/mcp/credential-set"
     assert p["headers"]["Authorization"] == "Bearer tui-token"
     assert p["json"] == {"user_id": "uA", "agent_id": "ag1", "server_id": "acme", "key": "the-key"}
 
 
 def test_managed_writer_reports_failure_on_error_status():
     writer = ManagedCredentialWriter(
-        "http://127.0.0.1:8786",
+        "http://127.0.0.1:8767",
         "my-bot",
         "t",
         http_post=lambda url, **kw: SimpleNamespace(status_code=500),

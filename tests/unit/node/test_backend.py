@@ -37,7 +37,7 @@ def _container_config(tmp_path) -> NodeConfig:
         backend="container",
         agent_image="fleetent:test",
         agent_network="fleetent-net",
-        agent_internal_port=18765,
+        agent_internal_port=8766,
     )
 
 
@@ -172,7 +172,7 @@ def test_container_backend_spawn_runs_agent_container_with_labels_network_and_mo
             "support",
             "--no-im",
             "--port",
-            "18765",
+            "8766",
             "--home",
             str(tmp_path / "tenants/tenant-1/agents/support"),
         )
@@ -330,7 +330,7 @@ def test_container_backend_agent_endpoint_returns_container_name_and_internal_po
 
     assert backend.agent_endpoint("support", "tenant-1") == (
         "fleetent-agent-tenant-1-support",
-        18765,
+        8766,
     )
 
 

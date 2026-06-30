@@ -174,7 +174,7 @@ def test_nominate_managed_skill_pulls_bundle_from_owning_node(db, pool_dir, monk
             archive.addfile(info, io.BytesIO(data))
 
     route = respx.get(
-        "http://forwarder.test:8786/forward/agents/support/skills/crm-ops/bundle"
+        "http://forwarder.test:8767/forward/agents/support/skills/crm-ops/bundle"
     ).mock(return_value=httpx.Response(200, content=bundle_bytes.getvalue()))
 
     proposal_id = backflow_store.nominate(

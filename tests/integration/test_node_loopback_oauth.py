@@ -101,4 +101,4 @@ def test_reconcile_writes_loopback_url_into_agent_env(tmp_path):
     env_text = (tmp_path / "tenants" / "default" / "agents" / "alpha" / ".env").read_text(
         encoding="utf-8"
     )
-    assert "FLEETENT_NODE_LOOPBACK_URL=http://127.0.0.1:8786" in env_text
+    assert "FLEETENT_NODE_LOOPBACK_URL=http://127.0.0.1:8767" in env_text

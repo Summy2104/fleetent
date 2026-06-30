@@ -2,7 +2,7 @@ service:
   tenant_id: default
   service_key_ref: env:FLEETENT_KB_SERVICE_KEY
   host: 127.0.0.1
-  port: 8787
+  port: 8768
 
 data:
   home: ./data
@@ -12,7 +12,7 @@ retrieval:
   top_k: 10
 
 embedding:
-  endpoint: http://127.0.0.1:9000/v1/embeddings
+  endpoint: http://127.0.0.1:11434/v1/embeddings
   model: bge-small
   dimensions: 384
   api_key_env: FLEETENT_KB_EMBEDDING_API_KEY
