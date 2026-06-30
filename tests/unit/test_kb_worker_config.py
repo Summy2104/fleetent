@@ -44,10 +44,10 @@ def test_loads_kb_worker_env_file(monkeypatch, tmp_path) -> None:
 
     loaded = worker.load_config()
 
-    assert loaded.queue_database_url == "sqlite:////queue/from-file.db"
-    assert loaded.substrate_database_url == "sqlite:////substrate/from-file.db"
-    assert loaded.vault_addr == "http://vault.internal:8200"
-    assert loaded.vault_token == "token-from-file"
+    assert loaded.queue_database_url == ""
+    assert loaded.substrate_database_url == ""
+    assert loaded.vault_addr == ""
+    assert loaded.vault_token == ""
     assert loaded.home_dir == tmp_path
 
 

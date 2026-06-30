@@ -96,8 +96,8 @@ curl -fsS http://127.0.0.1:8765/health
 ## Knowledge Base Connector 验证
 
 > 平台托管 KB ingest 已退役。`/admin/kb/connectors*`、`/admin/kb/{kb_id}/sync` 和 platform import / extraction 端点不再作为生产入口。
-> 升级前请把历史 platform connector 配置誊到 `$FLEETENT_HOME/kb-service/default/kb-service.yaml`，
-> 并用 `kb-worker --config $FLEETENT_HOME/kb-service/default/kb-service.yaml` 运行 standalone 队列。
+> 升级前请把历史 platform connector 配置誊到 `$FLEETENT_HOME/tenants/default/kb/kb-service.yaml`，
+> 并用 `kb-worker --config $FLEETENT_HOME/tenants/default/kb/kb-service.yaml` 运行 standalone 队列。
 
 查看 connector 配置摘要：
 

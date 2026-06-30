@@ -163,8 +163,8 @@ def test_container_backend_spawn_runs_agent_container_with_labels_network_and_mo
             f"type=bind,source={tmp_path / 'tenants/tenant-1/agents/support'},"
             f"target={tmp_path / 'tenants/tenant-1/agents/support'},readonly=false",
             "--mount",
-            f"type=bind,source={tmp_path / 'tenants/tenant-1/kb'},"
-            f"target={tmp_path / 'tenants/tenant-1/kb'},readonly=true",
+            f"type=bind,source={tmp_path / 'tenants/tenant-1/kb/data'},"
+            f"target={tmp_path / 'tenants/tenant-1/kb/data'},readonly=true",
             "fleetent:test",
             "fleetent",
             "agent",
@@ -206,9 +206,9 @@ def test_container_backend_spawn_migrates_tenant_kb_before_readonly_mount(
     backend = ContainerBackend(_container_config(tmp_path))
     backend.spawn("support", "tenant-1")
 
-    assert substrates == [f"sqlite:///{tmp_path / 'tenants/tenant-1/kb/kb.db'}"]
+    assert substrates == [f"sqlite:///{tmp_path / 'tenants/tenant-1/kb/data/kb.db'}"]
     assert [migrations for _, migrations in migrated] == [KB_MIGRATIONS]
-    assert (tmp_path / "tenants/tenant-1/kb/kb_vectors.db").exists()
+    assert (tmp_path / "tenants/tenant-1/kb/data/kb_vectors.db").exists()
 
 
 def test_container_backend_is_alive_uses_label_filtered_running_container(
