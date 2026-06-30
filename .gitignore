@@ -81,3 +81,6 @@ frontend/dist/
 frontend/coverage/
 frontend/test-results/
 frontend/*.tsbuildinfo
+
+.codegraph
+.understand-anything
