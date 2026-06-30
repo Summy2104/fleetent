@@ -529,12 +529,27 @@ async def is_reachable(platform: str, connector: Any, target: str) -> bool:
     return False
 
 
+def _slack_is_channel_id(target: str) -> bool:
+    """Whether ``target`` is a Slack channel-shaped id: DM (``D…``), public (``C…``), or
+    private/group (``G…``) — i.e. already an open conversation.
+
+    AAA-8204 #7: ``users_search`` returns a user's ``DMChannelID`` (``D…``) next to their
+    ``UserID`` (``U…``); an agent that fills the ``DMChannelID`` into a ``target_type=user``
+    send would otherwise hit ``conversations.open(users=[D…])`` → ``user_not_found``. A
+    channel-shaped id is already a conversation, so post to it directly.
+    """
+    return bool(target) and target[0] in ("C", "D", "G")
+
+
 async def _slack_send_dm(
     client: Any, user_id: str, text: str, blocks: list[dict[str, Any]] | None = None
 ) -> _Result:
     try:
-        result = await client.conversations_open(users=[user_id])
-        channel = result["channel"]["id"]
+        if _slack_is_channel_id(user_id):
+            channel = user_id  # already a conversation channel — post directly (AAA-8204 #7)
+        else:
+            result = await client.conversations_open(users=[user_id])
+            channel = result["channel"]["id"]
         kwargs: dict[str, Any] = {"channel": channel, "text": text}
         if blocks is not None:
             kwargs["blocks"] = blocks
@@ -568,8 +583,8 @@ async def _slack_send_file(
     swallowed so the caller's run continues.
     """
     try:
-        if target_type == "channel":
-            channel = target
+        if target_type == "channel" or _slack_is_channel_id(target):
+            channel = target  # channel-shaped id is already a conversation (AAA-8204 #7)
         else:
             result = await client.conversations_open(users=[target])
             channel = result["channel"]["id"]
