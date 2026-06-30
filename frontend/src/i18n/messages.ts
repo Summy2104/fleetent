@@ -210,6 +210,9 @@ const en = {
   'skills.restore': 'Restore',
   'skills.archive': 'Archive',
   'skills.forcePublish': 'Force publish',
+  'skills.forcePublishConfirmTitle': 'Force publish {{name}}?',
+  'skills.forcePublishConfirmDescription':
+    'This overrides the audit verdict / quarantine and publishes the skill immediately. Proceed with caution.',
   'skills.archiveConfirmTitle': 'Archive {{name}}?',
   'skills.archiveConfirmDescription': 'Archiving removes the skill from active rollout. You can restore it later.',
   'skills.cancel': 'Cancel',
@@ -272,6 +275,8 @@ const en = {
   // MCP 页
   'mcp.pageTitle': 'MCP Servers',
   'mcp.pageDescription': 'Inspect MCP servers, probe their tools, run connectivity tests, and trigger reconnects.',
+  'mcp.title': 'MCP Servers',
+  'mcp.emptyState': 'No MCP servers registered yet.',
   'mcp.searchPlaceholder': 'Search servers…',
   'mcp.addServer': 'Add MCP Server',
   'mcp.addTitle': 'Add MCP Server',
@@ -343,6 +348,9 @@ const en = {
   'mcp.columnStatus': 'Status',
   'mcp.columnTools': 'Tools',
   'mcp.columnActions': 'Actions',
+  'mcp.columnEnabled': 'Enabled',
+  'mcp.enabled': 'Enabled',
+  'mcp.disabled': 'Disabled',
   'mcp.noMatching': 'No matching servers.',
   'mcp.empty': 'No MCP servers',
 
@@ -863,6 +871,8 @@ const zh: Messages = {
   'skills.restore': '恢复',
   'skills.archive': '归档',
   'skills.forcePublish': '强制发布',
+  'skills.forcePublishConfirmTitle': '强制发布 {{name}}？',
+  'skills.forcePublishConfirmDescription': '此操作将忽略审计结论 / 隔离状态并立即发布该技能，请谨慎操作。',
   'skills.archiveConfirmTitle': '归档 {{name}}？',
   'skills.archiveConfirmDescription': '归档会将该技能移出生效范围，之后仍可恢复。',
   'skills.cancel': '取消',
@@ -925,6 +935,8 @@ const zh: Messages = {
   // MCP 页
   'mcp.pageTitle': 'MCP 服务器',
   'mcp.pageDescription': '查看 MCP 服务器、探测其工具、运行连通性测试并触发重连。',
+  'mcp.title': 'MCP 服务器',
+  'mcp.emptyState': '尚未注册任何 MCP 服务器。',
   'mcp.searchPlaceholder': '搜索服务器…',
   'mcp.addServer': '添加 MCP 服务器',
   'mcp.addTitle': '添加 MCP 服务器',
@@ -996,6 +1008,9 @@ const zh: Messages = {
   'mcp.columnStatus': '状态',
   'mcp.columnTools': '工具',
   'mcp.columnActions': '操作',
+  'mcp.columnEnabled': '启用',
+  'mcp.enabled': '已启用',
+  'mcp.disabled': '已禁用',
   'mcp.noMatching': '没有匹配的服务器。',
   'mcp.empty': '暂无 MCP 服务器',
 

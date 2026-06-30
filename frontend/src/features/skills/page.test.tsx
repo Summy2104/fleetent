@@ -1,16 +1,11 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { HttpResponse, http } from 'msw'
-import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
-import { AuthProvider } from '@/app/auth'
-import { AppQueryProvider } from '@/app/query-client'
 import { SkillsPage } from '@/features/skills/page'
-import { I18nProvider } from '@/i18n'
+import { API_BASE_URL, renderSkills } from '@/features/skills/test/render'
 import { server } from '@/test/msw/server'
-
-const API_BASE_URL = 'http://fleetent.test'
 
 type SkillRecord = {
   audit_verdict: string
@@ -30,17 +25,7 @@ type AgentBindingRecord = {
 }
 
 function renderSkillsPage(): void {
-  render(
-    <AuthProvider baseUrl={API_BASE_URL} initialToken="session-token">
-      <AppQueryProvider>
-        <I18nProvider>
-          <MemoryRouter>
-            <SkillsPage />
-          </MemoryRouter>
-        </I18nProvider>
-      </AppQueryProvider>
-    </AuthProvider>
-  )
+  renderSkills(<SkillsPage />)
 }
 
 describe('skills page parity baseline', () => {
@@ -180,8 +165,8 @@ describe('skills page parity baseline', () => {
 
     renderSkillsPage()
 
-    expect(await screen.findByRole('heading', { name: 'Skills' })).toBeInTheDocument()
-    // The current UI renders skills as table rows; each row exposes an "Actions for {name}" menu trigger.
+    expect(await screen.findByText('Skills')).toBeInTheDocument()
+    // The DataTable renders skills as rows; each row exposes an "Actions for {name}" menu trigger.
     expect(await screen.findByRole('button', { name: 'Actions for ops-guide' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Actions for welcome-pack' })).toBeInTheDocument()
     expect(screen.getByText('quarantined')).toBeInTheDocument()
@@ -237,6 +222,8 @@ describe('skills page parity baseline', () => {
     // Force publish (only offered for rejected/quarantined skills) clears quarantine.
     await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }))
     await user.click(await screen.findByText('Force publish'))
+    const forcePublishConfirm = await screen.findByRole('alertdialog')
+    await user.click(within(forcePublishConfirm).getByRole('button', { name: 'Force publish' }))
     await waitFor(() => {
       expect(screen.getByText('active')).toBeInTheDocument()
     })
@@ -420,7 +407,7 @@ describe('skills page content + search', () => {
     )
   }
 
-  it('filters skills by name via the search box', async () => {
+  it('filters skills by name via the global search box', async () => {
     const user = userEvent.setup({ delay: null })
     const skills: SkillRecord[] = [
       {
@@ -455,11 +442,55 @@ describe('skills page content + search', () => {
     expect(await screen.findByRole('button', { name: 'Actions for welcome-pack' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Actions for promo-helper' })).toBeInTheDocument()
 
-    await user.type(screen.getByPlaceholderText('Search skills…'), 'promo')
+    await user.type(screen.getByPlaceholderText('Search…'), 'promo')
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Actions for welcome-pack' })).not.toBeInTheDocument()
     })
     expect(screen.getByRole('button', { name: 'Actions for promo-helper' })).toBeInTheDocument()
+  })
+
+  it('filters skills by status via the column filter', async () => {
+    const user = userEvent.setup({ delay: null })
+    const skills: SkillRecord[] = [
+      {
+        audit_verdict: 'pass',
+        description: 'Active helper',
+        drifted_agents: [],
+        enabling_agents: [],
+        global_enabled: true,
+        name: 'active-skill',
+        source: 'adhoc',
+        status: 'active',
+      },
+      {
+        audit_verdict: 'pass',
+        description: 'Archived helper',
+        drifted_agents: [],
+        enabling_agents: [],
+        global_enabled: false,
+        name: 'archived-skill',
+        source: 'adhoc',
+        status: 'archived',
+      },
+    ]
+
+    stubReadEndpoints(
+      () => skills,
+      () => 'body'
+    )
+
+    renderSkillsPage()
+
+    expect(await screen.findByRole('button', { name: 'Actions for active-skill' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Actions for archived-skill' })).toBeInTheDocument()
+
+    // The status column exposes a select filter ("All Status" + per-status options).
+    await user.click(screen.getByRole('combobox', { name: 'Filter Status' }))
+    await user.click(await screen.findByRole('option', { name: 'archived' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Actions for active-skill' })).not.toBeInTheDocument()
+    })
+    expect(screen.getByRole('button', { name: 'Actions for archived-skill' })).toBeInTheDocument()
   })
 
   it('shows the published skill content in the content dialog', async () => {
