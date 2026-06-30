@@ -1,8 +1,8 @@
-import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useState, type ReactNode } from 'react';
+import { type ReactNode, useState } from 'react'
+import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
-import { ApiError, describeApiError } from '@/lib/api-client';
-import { toast } from '@/lib/toast';
+import { ApiError, describeApiError } from '@/lib/api-client'
+import { toast } from '@/lib/toast'
 
 export function AppQueryProvider({ children }: { children: ReactNode }): JSX.Element {
   const [queryClient] = useState(
@@ -19,16 +19,16 @@ export function AppQueryProvider({ children }: { children: ReactNode }): JSX.Ele
           onError: (error) => {
             // 401 is handled by the auth layer (redirect to login); don't double-toast.
             if (error instanceof ApiError && error.status === 401) {
-              return;
+              return
             }
-            toast.error('Action failed', describeApiError(error));
+            toast.error('Action failed', describeApiError(error))
           },
           onSuccess: () => {
-            toast.success('Done');
+            toast.success('Done')
           },
         }),
       })
-  );
+  )
 
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
 }
