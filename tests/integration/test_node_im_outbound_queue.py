@@ -130,6 +130,46 @@ async def test_node_im_edge_failed_send_increments_attempts_and_leaves_pending(
     assert dict(row) == {"status": "pending", "attempts": 1, "sent_at": None}
 
 
+async def test_node_im_edge_permanent_error_marks_failed_no_retry(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """AAA-8204 node robustness: a permanent Slack error (user_not_found / channel_not_found /
+    not_in_channel) must terminally fail the row (status='failed'), so the drain stops
+    re-sending every interval forever. Transient errors keep retrying (other test)."""
+    from fleetent.node.im_edge import NodeIMEdgeHost
+    from fleetent.outbound import DeliveryReceipt
+
+    db = _agent_state_db(tmp_path)
+    queue_id = _queue_text(db, dedup_key="approval:perm:slack:U_LEAD")
+
+    host = NodeIMEdgeHost(_config(tmp_path))
+    host.reconcile(_desired_state())
+    send_to = AsyncMock(
+        return_value=DeliveryReceipt(
+            ok=False,
+            platform="slack",
+            target="U_LEAD",
+            target_type="user",
+            kind="text",
+            error="The request to the Slack API failed: user_not_found",
+        )
+    )
+    monkeypatch.setattr("fleetent.outbound.send_to", send_to)
+    try:
+        await host._drain_outbound_once()
+        # A second drain must NOT re-attempt delivery (row no longer pending).
+        await host._drain_outbound_once()
+    finally:
+        host.close()
+
+    assert send_to.await_count == 1  # not retried
+    row = db.execute(
+        "SELECT status, attempts FROM im_outbound_queue WHERE id = :id", {"id": queue_id}
+    ).fetchone()
+    assert row["status"] == "failed"
+    assert row["attempts"] == 1
+
+
 async def test_node_im_edge_dedups_after_restart_before_mark_sent(
     tmp_path: Path, monkeypatch
 ) -> None:
