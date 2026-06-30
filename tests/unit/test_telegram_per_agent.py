@@ -18,7 +18,9 @@ def _capture_handler(monkeypatch, agent_name, config):
         mock_cls.builder.return_value = mock_builder
         telegram.create_app(agent_name, config)
 
-    return mock_app.add_handler.call_args[0][0]
+    # create_app registers a MessageHandler (inbound) and a CallbackQueryHandler (approval
+    # buttons). The first registration is the inbound MessageHandler used by these tests.
+    return mock_app.add_handler.call_args_list[0][0][0]
 
 
 def _private_update(chat_id, text="hi"):
@@ -37,6 +39,7 @@ def _private_update(chat_id, text="hi"):
     msg.caption = None
     msg.text = text
     msg.photo = None
+    msg.document = None
     msg.reply_text = AsyncMock()
     update.message = msg
     return update

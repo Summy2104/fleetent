@@ -255,7 +255,8 @@ async def test_telegram_create_app_returns_application_object(monkeypatch):
         result = tg_mod.create_app("support", {"bot_token": "tg-fake-token"})
 
     assert result is mock_app
-    mock_app.add_handler.assert_called_once()
+    # Registers the inbound MessageHandler and a CallbackQueryHandler (approval buttons).
+    assert mock_app.add_handler.call_count == 2
 
 
 async def test_route_blocked_user_gets_rejection_not_agent(

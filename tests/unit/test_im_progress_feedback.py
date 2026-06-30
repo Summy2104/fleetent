@@ -409,7 +409,8 @@ def _telegram_handler(monkeypatch, config=None):
         mock_cls.builder.return_value = mock_builder
         telegram.create_app("agent1", config)
 
-    handler = mock_app.add_handler.call_args[0][0]
+    # First registration is the inbound MessageHandler (CallbackQueryHandler follows).
+    handler = mock_app.add_handler.call_args_list[0][0][0]
     return handler, routed
 
 
@@ -429,6 +430,7 @@ def _make_tg_update(chat_id="-100", text="hi"):
     msg.caption = None
     msg.text = text
     msg.photo = None
+    msg.document = None
     msg.reply_text = AsyncMock()
     update.message = msg
     return update

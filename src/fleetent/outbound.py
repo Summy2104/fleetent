@@ -102,6 +102,7 @@ async def send_to(
     target_type: str = "user",
     thread: Any = None,
     blocks: list[dict[str, Any]] | None = None,
+    approval: ApprovalPrompt | None = None,
 ) -> DeliveryReceipt:
     """Send text to target on platform, returning a DeliveryReceipt (never raises).
 
@@ -109,8 +110,22 @@ async def send_to(
     ``thread`` optionally threads the message (Slack ``thread_ts`` / Telegram topic).
     ``blocks`` is an optional platform-specific rich payload (Slack Block Kit);
     platforms without rich rendering ignore it and send the text fallback.
+    ``approval`` is a platform-neutral approval-prompt intent rendered here at the boundary
+    (Slack Block Kit / Telegram inline keyboard), so callers (the gate) carry no platform
+    rendering format.
     """
     from fleetent.outbound_connectors import ManagedOutboundConnector
+
+    # Render the neutral approval intent per platform (Slack output identical to before).
+    if approval is not None and platform == "slack" and blocks is None:
+        blocks = approval_prompt_blocks(
+            approval.approval_id, approval.tool_name, approval.risk_level, summary=approval.summary
+        )
+    reply_markup = (
+        render_approval_telegram(approval)
+        if approval is not None and platform == "telegram"
+        else None
+    )
 
     if isinstance(connector, ManagedOutboundConnector):
         connector.enqueue_text(
@@ -119,6 +134,7 @@ async def send_to(
             target_type=target_type,
             thread=thread,
             blocks=blocks,
+            approval=approval,
         )
         return DeliveryReceipt(
             ok=True,
@@ -137,7 +153,7 @@ async def send_to(
         else:
             ref, err = await _slack_send_dm(connector, target, text, blocks)
     elif platform == "telegram":
-        ref, err = await _telegram_send(connector, target, text, thread)
+        ref, err = await _telegram_send(connector, target, text, thread, reply_markup=reply_markup)
     else:
         err = f"unsupported platform: {platform}"
         logger.warning("outbound_unsupported_platform", platform=platform)
@@ -217,7 +233,9 @@ def make_replier(connectors: dict[str, Any], address: ConversationAddress) -> An
     """
     connector = connectors.get(address.platform)
 
-    async def reply_func(text: str, blocks: list[dict[str, Any]] | None = None) -> None:
+    async def reply_func(
+        text: str, blocks: list[dict[str, Any]] | None = None, *, approval: Any = None
+    ) -> None:
         if connector is None:
             logger.warning("replier_no_connector", platform=address.platform)
             return
@@ -229,6 +247,7 @@ def make_replier(connectors: dict[str, Any], address: ConversationAddress) -> An
             target_type=address.target_type,
             thread=address.thread_id,
             blocks=blocks,
+            approval=approval,
         )
 
     return reply_func
@@ -356,6 +375,58 @@ def make_mcp_credential_deliverer(tool_context: Any) -> Any:
         return False
 
     return deliver
+
+
+@dataclass(frozen=True)
+class ApprovalPrompt:
+    """Platform-neutral approval-prompt intent (telegram-slack-parity, governance de-leak).
+
+    The permission gate emits this instead of a Slack-specific block payload; each delivery
+    platform renders it at the outbound boundary (Slack Block Kit / Telegram inline keyboard),
+    so governance carries no platform rendering format.
+    """
+
+    approval_id: str
+    tool_name: str
+    risk_level: str
+    summary: str = ""
+
+
+# Decision tokens shared by the Slack action_ids (``approval_<decision>``) and the Telegram
+# callback_data (``approval:<decision>:<id>``), so both platforms speak one decision vocabulary.
+_APPROVAL_DECISIONS = ("approve", "reject", "approve_always")
+_APPROVAL_CB_PREFIX = "approval"
+
+
+def approval_callback_data(decision: str, approval_id: str) -> str:
+    """Encode a Telegram inline-button callback as ``approval:<decision>:<id>`` (≤64 bytes)."""
+    return f"{_APPROVAL_CB_PREFIX}:{decision}:{approval_id}"
+
+
+def parse_approval_callback(data: str | None) -> tuple[str, str] | None:
+    """Decode approval callback_data → (decision, approval_id); None if not an approval callback."""
+    if not data:
+        return None
+    parts = data.split(":", 2)
+    if len(parts) != 3 or parts[0] != _APPROVAL_CB_PREFIX or parts[1] not in _APPROVAL_DECISIONS:
+        return None
+    return parts[1], parts[2]
+
+
+def render_approval_telegram(prompt: ApprovalPrompt) -> Any:
+    """Telegram ``InlineKeyboardMarkup`` for an approval prompt: three decision buttons.
+
+    Mirrors ``approval_prompt_blocks`` (Slack) at the Telegram boundary; callback_data encodes
+    the decision + approval_id consumed by the Telegram callback-query handler.
+    """
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    labels = {"approve": "✅ 批准", "reject": "❌ 拒绝", "approve_always": "✅ 始终允许"}
+    row = [
+        InlineKeyboardButton(labels[d], callback_data=approval_callback_data(d, prompt.approval_id))
+        for d in _APPROVAL_DECISIONS
+    ]
+    return InlineKeyboardMarkup([row])
 
 
 def approval_prompt_blocks(
@@ -559,11 +630,15 @@ async def _slack_send_dm(
         return None, str(exc)
 
 
-async def _telegram_send(bot: Any, chat_id: str, text: str, thread: Any = None) -> _Result:
+async def _telegram_send(
+    bot: Any, chat_id: str, text: str, thread: Any = None, reply_markup: Any = None
+) -> _Result:
     try:
         kwargs: dict[str, Any] = {"chat_id": chat_id, "text": text}
         if thread:
             kwargs["message_thread_id"] = thread
+        if reply_markup is not None:
+            kwargs["reply_markup"] = reply_markup
         await bot.send_message(**kwargs)
         return "", None  # telegram client returns no stable ref we record; "" = success-no-ref
     except Exception as exc:  # noqa: BLE001 — outbound failure must not abort the gate

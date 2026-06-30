@@ -135,6 +135,24 @@ def _has_postable_content(text: str, blocks: list[dict[str, Any]] | None) -> boo
     return bool((text or "").strip()) or bool(blocks)
 
 
+def _blocks_from_approval(
+    blocks: list[dict[str, Any]] | None, approval: Any
+) -> list[dict[str, Any]] | None:
+    """Render a platform-neutral ApprovalPrompt into Slack Block Kit (output unchanged).
+
+    The gate now passes a neutral ``approval`` intent instead of pre-built Slack blocks; Slack
+    delivery renders it here via the same ``approval_prompt_blocks`` as before. Explicit
+    ``blocks`` (if any) take precedence; absent an approval this is a no-op pass-through.
+    """
+    if approval is None:
+        return blocks
+    from fleetent.outbound import approval_prompt_blocks
+
+    return blocks or approval_prompt_blocks(
+        approval.approval_id, approval.tool_name, approval.risk_level, summary=approval.summary
+    )
+
+
 async def _make_status_funcs(
     client: Any,
     channel: str,
@@ -160,7 +178,10 @@ async def _make_status_funcs(
     except Exception as exc:  # noqa: BLE001 — feature may be disabled; degrade, don't abort
         logger.warning("slack_assistant_status_failed", channel=channel, error=str(exc))
 
-    async def reply_func(text: str, blocks: list[dict[str, Any]] | None = None) -> None:
+    async def reply_func(
+        text: str, blocks: list[dict[str, Any]] | None = None, *, approval: Any = None
+    ) -> None:
+        blocks = _blocks_from_approval(blocks, approval)
         if status_ok:
             with contextlib.suppress(Exception):
                 await client.assistant_threads_setStatus(
@@ -469,7 +490,10 @@ async def _route_assistant_message(
     with contextlib.suppress(Exception):
         await set_status(_THINKING_STATUS, loading_messages=[_THINKING_STATUS])
 
-    async def reply_func(text: str, blocks: list[dict[str, Any]] | None = None) -> None:
+    async def reply_func(
+        text: str, blocks: list[dict[str, Any]] | None = None, *, approval: Any = None
+    ) -> None:
+        blocks = _blocks_from_approval(blocks, approval)
         with contextlib.suppress(Exception):
             await set_status("")
         if not _has_postable_content(text, blocks):
