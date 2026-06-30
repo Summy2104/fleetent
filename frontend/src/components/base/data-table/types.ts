@@ -20,7 +20,6 @@ export type ColumnFilterConfig =
   | { type: 'multi-select'; options: ColumnFilterOption[] }
 
 declare module '@tanstack/react-table' {
-  // biome-ignore lint/correctness/noUnusedVariables: module augmentation must mirror the original generic arity
   interface ColumnMeta<TData extends RowData, TValue> {
     filter?: ColumnFilterConfig
     title?: string
