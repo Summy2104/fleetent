@@ -59,7 +59,8 @@ export interface DataTableProps<TData> {
   // 状态与插槽
   isLoading?: boolean
   emptyState?: React.ReactNode
-  toolbar?: React.ReactNode
+  toolbar?: React.ReactNode // 外部自定义筛选区（左侧，与列筛选并列）
+  actions?: React.ReactNode // 专用功能按钮插槽（toolbar 右侧，如「新增」/导出）；所有独立操作按钮统一放此处
   getRowId?: (row: TData) => string
   className?: string
 }

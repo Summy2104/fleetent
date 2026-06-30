@@ -39,7 +39,12 @@ function Harness() {
   const table = useDataTable<Row>({ columns: COLUMNS, data: DATA })
   return (
     <div>
-      <DataTableToolbar enableColumnVisibility enableGlobalFilter table={table}>
+      <DataTableToolbar
+        actions={<button type="button">New item</button>}
+        enableColumnVisibility
+        enableGlobalFilter
+        table={table}
+      >
         <span>external-slot</span>
       </DataTableToolbar>
       <span data-testid="global">{table.getState().globalFilter}</span>
@@ -59,6 +64,11 @@ describe('DataTableToolbar', () => {
   it('renders the external slot', () => {
     render(<Harness />)
     expect(screen.getByText('external-slot')).toBeInTheDocument()
+  })
+
+  it('renders the actions slot', () => {
+    render(<Harness />)
+    expect(screen.getByRole('button', { name: 'New item' })).toBeInTheDocument()
   })
 
   it('applies a select column filter', async () => {

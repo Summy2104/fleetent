@@ -79,6 +79,7 @@ export function DataTable<TData>(props: DataTableProps<TData>) {
     isLoading = false,
     emptyState,
     toolbar,
+    actions,
     className,
     ...rest
   } = props
@@ -93,13 +94,15 @@ export function DataTable<TData>(props: DataTableProps<TData>) {
     ...rest,
   })
 
-  const showToolbar = enableGlobalFilter || enableColumnVisibility || Boolean(toolbar) || hasColumnFilters(columns)
+  const showToolbar =
+    enableGlobalFilter || enableColumnVisibility || Boolean(toolbar) || Boolean(actions) || hasColumnFilters(columns)
   const columnCount = table.getVisibleLeafColumns().length
 
   return (
     <div className={cn('space-y-3', className)}>
       {showToolbar ? (
         <DataTableToolbar
+          actions={actions}
           enableColumnVisibility={enableColumnVisibility}
           enableGlobalFilter={enableGlobalFilter}
           table={table}

@@ -13,6 +13,7 @@ interface DataTableToolbarProps<TData> {
   enableGlobalFilter?: boolean
   enableColumnVisibility?: boolean
   children?: React.ReactNode
+  actions?: React.ReactNode
 }
 
 export function DataTableToolbar<TData>({
@@ -20,8 +21,10 @@ export function DataTableToolbar<TData>({
   enableGlobalFilter,
   enableColumnVisibility,
   children,
+  actions,
 }: DataTableToolbarProps<TData>) {
   const isFiltered = table.getState().columnFilters.length > 0 || Boolean(table.getState().globalFilter)
+  const hasRightCluster = enableColumnVisibility || Boolean(actions)
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -42,9 +45,10 @@ export function DataTableToolbar<TData>({
         </Button>
       ) : null}
       {children}
-      {enableColumnVisibility ? (
-        <div className="ml-auto">
-          <DataTableViewOptions table={table} />
+      {hasRightCluster ? (
+        <div className="ml-auto flex items-center gap-2">
+          {enableColumnVisibility ? <DataTableViewOptions table={table} /> : null}
+          {actions}
         </div>
       ) : null}
     </div>
