@@ -1,5 +1,4 @@
 import { useState } from 'react'
-
 import { KeyRound, RefreshCw, Trash2 } from 'lucide-react'
 
 import { Badge } from '@/components/base/badge'
@@ -16,8 +15,8 @@ import {
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { type UserListItem, useRevokeKeyMutation, useRotateKeyMutation, useUserKeysQuery } from '@/features/users/api'
-import { useT } from '@/i18n'
 import { IssueKeyDialog } from '@/features/users/dialogs/issue-key-dialog'
+import { useT } from '@/i18n'
 
 export function KeysDialog({
   user,

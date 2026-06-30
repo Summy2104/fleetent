@@ -1,7 +1,14 @@
 import { Copy } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { useT } from '@/i18n'
 
 export function SecretDialog({ secret, onDismiss }: { secret: string | null; onDismiss: () => void }): JSX.Element {

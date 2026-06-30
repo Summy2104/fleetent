@@ -2,11 +2,18 @@ import { useEffect, useState } from 'react'
 
 import { SimpleSelect } from '@/components/base/simple-select'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { type UserListItem } from '@/features/users/api'
+import type { UserListItem } from '@/features/users/api'
 import { ROLES } from '@/features/users/shared'
 import { useT } from '@/i18n'
 
