@@ -29,10 +29,10 @@ Compose 会启动：
 - `platform`：监听 `8765`，唯一可设置 `FLEETENT_AUTO_UPGRADE` 的服务。
 - `node`：监听 forwarder `8786`，挂载 `/var/run/docker.sock`，设置
   `FLEETENT_NODE_BACKEND=container`。
-- `kb-worker`：消费 KB ingest 队列，读取 `${FLEETENT_HOME}/kb-service/kb-service.yaml`
-  与 `${FLEETENT_HOME}/kb-service/.env`。
-- `kb-serve`：提供 KB 读 API，读取同一份 `${FLEETENT_HOME}/kb-service/kb-service.yaml`
-  与 `${FLEETENT_HOME}/kb-service/.env`，以及同一棵
+- `kb-worker`：消费 KB ingest 队列，读取 `${FLEETENT_HOME}/kb-service/default/kb-service.yaml`
+  与 `${FLEETENT_HOME}/kb-service/default/.env`。
+- `kb-serve`：提供 KB 读 API，读取同一份 `${FLEETENT_HOME}/kb-service/default/kb-service.yaml`
+  与 `${FLEETENT_HOME}/kb-service/default/.env`，以及同一棵
   `FLEETENT_HOME` 数据卷。
 
 agent 不在 compose 中静态声明。node 根据 desired state 拉起 agent 兄弟容器，并把
@@ -76,12 +76,18 @@ forward-only migration。
 
 ## KB 服务接线
 
-`kb-worker` 写 `${FLEETENT_HOME}/tenants/<tenant>/kb/`，`kb-serve` 从同一挂载卷读取；这条路径是
-同主机 WAL 一写多读，不是 agent 的只读文件挂载场景。
+默认单租户 compose 把 tenant 固定为 `default`：`kb-worker` 写
+`${FLEETENT_HOME}/kb-service/default/data/`，`kb-serve` 从同一挂载卷读取；该目录下固定有
+`kb.db`、`kb_vectors.db`、`kb_ingest_queue.db` 三个文件。这条路径是同主机 WAL 一写多读，
+不是 agent 的只读文件挂载场景。
 
-若宿主上还留有旧布局 `$FLEETENT_HOME/kb-worker/.env`，先执行 `fleetent kb-service init-config`，
-再把旧文件里的 secret 迁到 `$FLEETENT_HOME/kb-service/.env`，把 connector / service 配置迁到
-`$FLEETENT_HOME/kb-service/kb-service.yaml`，随后停用旧 `kb-worker/.env`。
+若宿主上还留有旧布局 `$FLEETENT_HOME/kb-worker/.env`，先执行
+`fleetent kb-service init-config --tenant default`，再把旧文件里的 secret 迁到
+`$FLEETENT_HOME/kb-service/default/.env`，把 connector / service 配置迁到
+`$FLEETENT_HOME/kb-service/default/kb-service.yaml`，随后停用旧 `kb-worker/.env`。若开发机已经按旧
+standalone 布局写入过 KB 文件，需要一次性手动把
+`$FLEETENT_HOME/kb-service/<tenant>/data/tenants/<tenant>/{kb.db,kb_vectors.db}` 或旧根队列文件
+迁到 `$FLEETENT_HOME/kb-service/<tenant>/data/{kb.db,kb_vectors.db,kb_ingest_queue.db}`。
 
 当前 platform materialize **不会自动**把 managed agent 改成 `knowledge.provider.type=http`。
 如果要让 compose 栈里的 agent 经 `kb-serve` 远程读 KB，需要在 agent authoring 的
@@ -95,8 +101,8 @@ knowledge:
     auth_ref: env:FLEETENT_KB_SERVICE_KEY
 ```
 
-同时让 `${FLEETENT_HOME}/kb-service/kb-service.yaml` 的 `service.service_key_ref` 指向
-`${FLEETENT_HOME}/kb-service/.env` 中的同一个变量：
+同时让 `${FLEETENT_HOME}/kb-service/default/kb-service.yaml` 的 `service.service_key_ref` 指向
+`${FLEETENT_HOME}/kb-service/default/.env` 中的同一个变量：
 
 ```yaml
 service:
@@ -110,7 +116,7 @@ service:
 FLEETENT_KB_SERVICE_KEY=replace-me
 ```
 
-`url` 里的端口取 `kb-service/kb-service.yaml` 的 `service.port`；compose 默认单租户起一个
+`url` 里的端口取 `kb-service/default/kb-service.yaml` 的 `service.port`；compose 默认单租户起一个
 `kb-serve`。
 如果要做多租户，需要为每个租户额外起一个 `kb-serve` 服务，使用不同服务名/端口，并把对应 agent
 的 `knowledge.provider.url` 指到那个服务。
@@ -121,14 +127,18 @@ FLEETENT_KB_SERVICE_KEY=replace-me
 
 ```text
 management.db
-tenants/<tenant>/kb.db
-tenants/<tenant>/kb_vectors.db
+kb-service/<tenant>/data/kb.db
+kb-service/<tenant>/data/kb_vectors.db
+kb-service/<tenant>/data/kb_ingest_queue.db
 tenants/<tenant>/agents/<agent_id>/data/
 ```
 
 长驻服务挂载整棵 `FLEETENT_HOME`。agent 容器由 node 的 container backend 精确挂载自身
-`tenants/<tenant>/agents/<agent_id>/` 为读写，并挂载租户 `kb.db` / `kb_vectors.db` 为只读；
-不得挂载 `management.db` 或其它 agent 子树。
+`tenants/<tenant>/agents/<agent_id>/` 为读写，并通过 HTTP provider 访问对应 tenant 的
+`kb-serve`；不再假设 agent 直接只读挂载 standalone 的 `kb.db` / `kb_vectors.db`；
+不得挂载 `management.db` 或其它 agent 子树。旧
+`FLEETENT_KB_WORKER_EMBEDDING_*` 环境变量已退役，embedding / extraction 统一从
+`kb-service.yaml` 的 `embedding` / `extraction` section 读取。
 
 ## 日志与停止
 

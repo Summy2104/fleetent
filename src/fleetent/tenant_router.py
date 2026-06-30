@@ -142,6 +142,28 @@ class SQLiteTenantBackend:
 
 
 @dataclass(frozen=True)
+class StandaloneKBTenantBackend:
+    """Standalone KB backend: flat KB files under one per-tenant service data dir."""
+
+    data_dir: Path
+
+    def resolve(self, tenant_id: str) -> KbScope:
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        kb_db = cast(SQLiteDatabase, create_substrate(f"sqlite:///{self.data_dir / 'kb.db'}"))
+        kb_vector_backend = SQLiteVectorBackend(
+            database_url=f"sqlite:///{self.data_dir / 'kb_vectors.db'}"
+        )
+        return KbScope(
+            tenant_id=tenant_id,
+            kb_db=kb_db,
+            kb_vector_backend=kb_vector_backend,
+        )
+
+    def resolve_agent(self, tenant_id: str, agent_id: str) -> AgentScope:
+        return SQLiteTenantBackend(data_dir=self.data_dir).resolve_agent(tenant_id, agent_id)
+
+
+@dataclass(frozen=True)
 class TenantRouter:
     """Single entry point for tenant-scoped and agent-scoped resource resolution.
 

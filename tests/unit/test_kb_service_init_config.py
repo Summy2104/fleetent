@@ -4,6 +4,8 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
+import yaml
+
 from fleetent import __main__ as cli
 
 
@@ -22,7 +24,7 @@ def _run_cli(*args: str) -> tuple[str, str, int]:
     return stdout.getvalue(), stderr.getvalue(), exit_code
 
 
-def test_kb_service_init_config_creates_home_files_outside_repo_cwd(
+def test_kb_service_init_config_defaults_to_default_tenant_home_outside_repo_cwd(
     monkeypatch, tmp_path: Path
 ) -> None:
     home_dir = tmp_path / "home"
@@ -35,17 +37,37 @@ def test_kb_service_init_config_creates_home_files_outside_repo_cwd(
 
     assert code == 0
     assert err == ""
-    assert "create kb-service/kb-service.yaml" in out
-    assert "create kb-service/.env" in out
-    assert (home_dir / "kb-service" / "kb-service.yaml").exists()
-    assert (home_dir / "kb-service" / ".env").exists()
+    assert "create kb-service/default/kb-service.yaml" in out
+    assert "create kb-service/default/.env" in out
+    config_path = home_dir / "kb-service" / "default" / "kb-service.yaml"
+    env_path = home_dir / "kb-service" / "default" / ".env"
+    assert config_path.exists()
+    assert env_path.exists()
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert config["service"]["tenant_id"] == "default"
+    assert config["data"]["home"] == "./data"
 
 
-def test_kb_service_init_config_skips_existing_and_force_overwrites(
+def test_kb_service_init_config_creates_requested_tenant_home(monkeypatch, tmp_path: Path) -> None:
+    home_dir = tmp_path / "home"
+    monkeypatch.setenv("FLEETENT_HOME", str(home_dir))
+
+    out, err, code = _run_cli("kb-service", "init-config", "--tenant", "acme")
+
+    assert code == 0
+    assert err == ""
+    assert "create kb-service/acme/kb-service.yaml" in out
+    assert "create kb-service/acme/.env" in out
+    config_path = home_dir / "kb-service" / "acme" / "kb-service.yaml"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert config["service"]["tenant_id"] == "acme"
+
+
+def test_kb_service_init_config_skips_existing_and_force_overwrites_within_tenant_home(
     monkeypatch, tmp_path: Path
 ) -> None:
     home_dir = tmp_path / "home"
-    service_dir = home_dir / "kb-service"
+    service_dir = home_dir / "kb-service" / "tenant-a"
     service_dir.mkdir(parents=True)
     yaml_path = service_dir / "kb-service.yaml"
     env_path = service_dir / ".env"
@@ -53,20 +75,20 @@ def test_kb_service_init_config_skips_existing_and_force_overwrites(
     env_path.write_text("KB_SERVICE_KEY=existing\n", encoding="utf-8")
     monkeypatch.setenv("FLEETENT_HOME", str(home_dir))
 
-    out, err, code = _run_cli("kb-service", "init-config")
+    out, err, code = _run_cli("kb-service", "init-config", "--tenant", "tenant-a")
 
     assert code == 0
     assert err == ""
-    assert "skip kb-service/kb-service.yaml" in out
-    assert "skip kb-service/.env" in out
+    assert "skip kb-service/tenant-a/kb-service.yaml" in out
+    assert "skip kb-service/tenant-a/.env" in out
     assert yaml_path.read_text(encoding="utf-8") == "tenant: existing\n"
     assert env_path.read_text(encoding="utf-8") == "KB_SERVICE_KEY=existing\n"
 
-    out, err, code = _run_cli("kb-service", "init-config", "--force")
+    out, err, code = _run_cli("kb-service", "init-config", "--tenant", "tenant-a", "--force")
 
     assert code == 0
     assert err == ""
-    assert "overwrite kb-service/kb-service.yaml" in out
-    assert "overwrite kb-service/.env" in out
+    assert "overwrite kb-service/tenant-a/kb-service.yaml" in out
+    assert "overwrite kb-service/tenant-a/.env" in out
     assert yaml_path.read_text(encoding="utf-8") != "tenant: existing\n"
     assert env_path.read_text(encoding="utf-8") != "KB_SERVICE_KEY=existing\n"

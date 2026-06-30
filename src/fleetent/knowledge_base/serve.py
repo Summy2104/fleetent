@@ -18,7 +18,7 @@ from fleetent.db import SQLiteDatabase, create_database
 from fleetent.identity import INGRESS_PRINCIPAL_HEADER, Principal, decode_ingress_principal
 from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
 from fleetent.knowledge_base.core.models import KnowledgeChunk
-from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
+from fleetent.tenant_router import StandaloneKBTenantBackend, TenantRouter
 
 
 @dataclass(frozen=True)
@@ -72,7 +72,7 @@ def _database() -> SQLiteDatabase:
 
 def _tenant_router(data_dir: Path | None = None) -> TenantRouter:
     resolved_data_dir = data_dir or _database().path.parent
-    return TenantRouter(SQLiteTenantBackend(data_dir=resolved_data_dir))
+    return TenantRouter(StandaloneKBTenantBackend(data_dir=resolved_data_dir))
 
 
 def _resolve_auth_ref(auth_ref: str) -> str:
@@ -214,6 +214,7 @@ def main(argv: list[str] | None = None) -> None:
         os.environ["FLEETENT_KB_SERVICE_CONFIG"] = str(Path(ns.config).expanduser())
         standalone_config = load_kb_service_config(Path(ns.config).expanduser())
         validate_kb_service_boot(standalone_config)
+        standalone_config.configure_process_runtime()
         config = KBServeConfig(
             tenant_id=standalone_config.service.tenant_id,
             service_key_ref=standalone_config.service.service_key_ref,

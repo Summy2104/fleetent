@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from fleetent.agent_config import AgentFile, ModelRouteEntry, ModelTarget, default_models
+from fleetent.config import EmbeddingSettings
 from fleetent.knowledge_base.config import KnowledgeConfigSnapshot
 from fleetent.secret_scan import flatten, looks_inline_secret
 
@@ -40,6 +43,7 @@ class KBEmbeddingSection(BaseModel):
     endpoint: str = ""
     model: str = ""
     dimensions: int = 0
+    api_key_env: str = ""
 
 
 class KBExtractionSection(BaseModel):
@@ -48,6 +52,7 @@ class KBExtractionSection(BaseModel):
     enabled: bool = False
     endpoint: str = ""
     model: str = ""
+    api_key_env: str = ""
 
 
 class KBChunkingSection(BaseModel):
@@ -99,6 +104,58 @@ class KBServiceConfig(BaseModel):
 
     def queue_database_url(self) -> str:
         return f"sqlite:///{self.data_dir() / 'kb_ingest_queue.db'}"
+
+    def embedding_settings(self) -> EmbeddingSettings:
+        if not self.embedding.endpoint.strip():
+            return EmbeddingSettings(
+                backend="deterministic", dimensions=max(self.embedding.dimensions, 64)
+            )
+        return EmbeddingSettings(
+            backend="http",
+            endpoint=self.embedding.endpoint,
+            model=self.embedding.model,
+            dimensions=self.embedding.dimensions,
+            api_key_env=self.embedding.api_key_env,
+        )
+
+    def standalone_agent(self) -> AgentFile:
+        models = default_models()
+        models.targets = [target for target in models.targets if target.id != "embedding"]
+        models.targets.append(
+            ModelTarget(
+                id="embedding",
+                provider="kb-service",
+                protocol="http_embedding",
+                endpoint=self.embedding.endpoint,
+                model=self.embedding.model,
+                api_key_env=self.embedding.api_key_env or None,
+                params={"dimensions": self.embedding.dimensions},
+            )
+        )
+        models.routes["embedding"] = [ModelRouteEntry(target="embedding")]
+        if (
+            self.extraction.enabled
+            and self.extraction.endpoint.strip()
+            and self.extraction.model.strip()
+        ):
+            models.targets.append(
+                ModelTarget(
+                    id="kb-extraction",
+                    provider="kb-service",
+                    protocol="openai_chat",
+                    base_url=self.extraction.endpoint,
+                    model=self.extraction.model,
+                    api_key_env=self.extraction.api_key_env or None,
+                )
+            )
+            models.routes["kb_extraction"] = [ModelRouteEntry(target="kb-extraction")]
+        return AgentFile(name="kb-service-standalone", version=1, models=models)
+
+    def configure_process_runtime(self) -> None:
+        from fleetent import agent_config, vector_store
+
+        agent_config.set_default_agent_for_process(self.standalone_agent())
+        vector_store.configure_from_active_agent()
 
     def connector_rows(self) -> list[dict[str, object]]:
         rows: list[dict[str, object]] = []
@@ -211,6 +268,12 @@ def validate_kb_service_boot(config: KBServiceConfig) -> None:
             continue
         if not payload.strip():
             missing.append(credential_ref)
+    for env_name in (
+        config.embedding.api_key_env.strip(),
+        config.extraction.api_key_env.strip(),
+    ):
+        if env_name and not os.environ.get(env_name):
+            missing.append(env_name)
     if missing:
         raise ValueError("missing standalone KB secrets: " + ", ".join(sorted(missing)))
 
