@@ -1,8 +1,9 @@
 import * as React from 'react'
 import type { Table } from '@tanstack/react-table'
-import { Search } from 'lucide-react'
+import { Search, X } from 'lucide-react'
 
 import { SimpleSelect } from '@/components/base/simple-select'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { MultiSelect } from '@/components/ui/multi-select'
 import { DataTableViewOptions } from './data-table-view-options'
@@ -20,10 +21,26 @@ export function DataTableToolbar<TData>({
   enableColumnVisibility,
   children,
 }: DataTableToolbarProps<TData>) {
+  const isFiltered = table.getState().columnFilters.length > 0 || Boolean(table.getState().globalFilter)
+
   return (
     <div className="flex flex-wrap items-center gap-2">
       {enableGlobalFilter ? <GlobalSearch table={table} /> : null}
       <ColumnFilters table={table} />
+      {isFiltered ? (
+        <Button
+          aria-label="Reset filters"
+          className="h-8 px-2 lg:px-3"
+          onClick={() => {
+            table.resetColumnFilters()
+            table.setGlobalFilter('')
+          }}
+          variant="ghost"
+        >
+          Reset
+          <X className="size-4" />
+        </Button>
+      ) : null}
       {children}
       {enableColumnVisibility ? (
         <div className="ml-auto">

@@ -69,4 +69,17 @@ describe('DataTableToolbar', () => {
     await user.click(await screen.findByRole('option', { name: 'Admin' }))
     await waitFor(() => expect(screen.getByTestId('filters')).toHaveTextContent('"id":"role","value":"admin"'))
   })
+
+  it('shows Reset only when filtered and clears all filters on click', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+    expect(screen.queryByRole('button', { name: 'Reset filters' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('combobox', { name: 'Filter Role' }))
+    await user.click(await screen.findByRole('option', { name: 'Admin' }))
+    await waitFor(() => expect(screen.getByTestId('filters')).toHaveTextContent('"value":"admin"'))
+
+    await user.click(screen.getByRole('button', { name: 'Reset filters' }))
+    await waitFor(() => expect(screen.getByTestId('filters')).toHaveTextContent('[]'))
+  })
 })
