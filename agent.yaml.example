@@ -123,6 +123,10 @@ allowed_tools:                     # fnmatch patterns; MCP tools are "<server>__
   - "read_file"
   - "docs__*"
   - "jira__*"
+hot_mcp_servers:                   # fnmatch patterns ({server}__{tool}); matching MCP tools
+  - "docs__*"                      # stay "hot" (full schema every turn). Unlisted MCP tools
+                                   # are deferred — listed by name in a catalog and fetched
+                                   # on demand via tool_search. Empty = all MCP deferred.
 plugins:
   - acme-docs
   - billing

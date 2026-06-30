@@ -446,6 +446,7 @@ async def _resume_pending_in_session(
             conversation_address=conversation_address,
             skill_authoring_enabled=agent.skill_authoring_enabled if agent else False,
             skill_user_access=agent.skill_user_access if agent else None,
+            hot_mcp_servers=agent.hot_mcp_servers if agent else None,
         )
 
     # upload_func is rebuilt for parity with the inbound path; the resumed run delivers
@@ -791,6 +792,7 @@ async def route(msg: NormalizedMessage, principal: Principal | None = None) -> N
                     conversation_address=msg.conversation_address,
                     skill_authoring_enabled=agent.skill_authoring_enabled if agent else False,
                     skill_user_access=agent.skill_user_access if agent else None,
+                    hot_mcp_servers=agent.hot_mcp_servers if agent else None,
                 )
         except Exception as exc:  # noqa: BLE001 — IM 边界兜底：log + 回帖，不冒泡
             logger.error(

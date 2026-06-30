@@ -305,6 +305,42 @@ def whoami(tool_context: ToolContext | None = None) -> str:
 
 
 @tool
+def tool_search(query: str, limit: int = 10, tool_context: ToolContext | None = None) -> str:
+    """Look up tools that are listed in the catalog but not yet callable, and load them.
+
+    Many tools (especially MCP server tools) appear in the deferred-tools catalog as a
+    name + one-line description but are NOT yet in your callable tool set. Use this to
+    fetch their full schemas. Pass a keyword query (e.g. "create jira issue") to get the
+    best matches, or "select:name1,name2" to fetch specific tools by exact name. Loaded
+    tools become callable from your NEXT turn onward (this turn only returns their
+    schemas). Never raises.
+    """
+    pool = getattr(tool_context, "deferred_pool", None) or {}
+    if not pool:
+        return "没有可检索的延迟加载工具：当前所有工具均已直接可用。"
+
+    from fleetent.tools import deferred
+
+    names = deferred.search_deferred(query, pool, limit=limit)
+    if tool_context is not None and names:
+        tool_context.activated_tools.update(names)
+
+    lines: list[str] = []
+    if names:
+        lines.append(f"已加载 {len(names)} 个工具，下一轮起可调用：")
+        lines.append(json.dumps([pool[n] for n in names], ensure_ascii=False, indent=2))
+    else:
+        lines.append(f"未匹配到工具：{query!r}。请换关键词，或查看 deferred-tools 目录。")
+
+    if query.startswith("select:"):
+        wanted = [n.strip() for n in query[len("select:") :].split(",") if n.strip()]
+        missing = [n for n in wanted if n not in pool]
+        if missing:
+            lines.append("未找到（不存在或无权限）：" + ", ".join(missing))
+    return "\n".join(lines)
+
+
+@tool
 async def recall_memory(subject: str | None = None, tool_context: ToolContext | None = None) -> str:
     """List the stored long-term memories about the current user, in full.
 

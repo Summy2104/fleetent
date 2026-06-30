@@ -873,6 +873,7 @@ def build_app(agent_name: str) -> FastAPI:
             kwargs["allowed_tools"] = (
                 agent.allowed_tools + expand_plugin_patterns(agent.plugins)
             ) or None
+            kwargs["hot_mcp_servers"] = agent.hot_mcp_servers
             kwargs["agent_features"] = agent.features
             kwargs["allowed_skills"] = agent.allowed_skills
             kwargs["skill_authoring_enabled"] = agent.skill_authoring_enabled

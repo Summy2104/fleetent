@@ -66,6 +66,13 @@ class ToolContext:
     # read_skill uses it (with principal.user_id + session_context.chat_type) to refuse
     # restricted skills for unauthorized requesters. Empty = no restrictions.
     skill_user_access: dict[str, list[str]] = field(default_factory=dict)
+    # deferred-tool-loading: run-scoped deferred tool state. ``deferred_pool`` maps a
+    # model-facing tool name to its full schema for every tool kept out of ``tools=``
+    # (shown only as a catalog row); ``tool_search`` searches it and records hits in
+    # ``activated_tools``, which the loop reads each turn to promote those schemas back
+    # into ``tools=``. Both empty when deferral is inactive (no MCP / all hot).
+    deferred_pool: dict[str, ToolSchema] = field(default_factory=dict)
+    activated_tools: set[str] = field(default_factory=set)
 
 
 _registry: dict[str, tuple[Callable[..., Any], ToolSchema]] = {}
