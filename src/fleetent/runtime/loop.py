@@ -990,7 +990,15 @@ async def _plan_run_slots(
                         tc_id=tc.id,
                         name=name,
                         tc_fp=tc_fp,
-                        placeholder=(f"awaiting_human_approval (id={approval_id})", False),
+                        # approval-pending-no-false-success (⑤): keep the machine-readable
+                        # marker, but make the tool_result a HARD constraint so a later turn
+                        # cannot read "pending" as "done" and fabricate success.
+                        placeholder=(
+                            f"awaiting_human_approval (id={approval_id}) — "
+                            "⚠️ 该工具调用尚未执行，正在等待人工审批；在系统返回审批结果前，"
+                            "严禁声称其已完成／已发送／已成功。",
+                            False,
+                        ),
                         counts_failure=False,
                     )
                 )
@@ -2043,8 +2051,15 @@ async def _run_inner(
                 _append_system_context(
                     messages,
                     system_prompt,
+                    # approval-pending-no-false-success (⑤): a verbal "同意/好的" is NOT an
+                    # approval — only `approve <id>` / the approval button executes the tool.
+                    # Forbid claiming success before the system returns the approval result.
                     f"当前有 {len(_pending)} 个工具调用正在等待人工审批（{_names}）。"
-                    "在用户批准前不要重复发起同一调用；其它请求可正常处理。",
+                    "在系统返回审批结果前，严禁声称其已完成／已发送／已成功；"
+                    "用户口头说「同意／好的」并不等于已批准——必须由其回复 `approve <审批id>` "
+                    "或点击审批按钮，系统才会真正执行该工具。在那之前不要重复发起同一调用，"
+                    "也不要假定它已执行；若用户表达同意，请告知其仍需 `approve <审批id>` "
+                    "或点审批按钮来正式批准。",
                 )
         except Exception as exc:  # noqa: BLE001 — awareness is auxiliary, never break the run
             _logger.debug("pending_approval_note_skipped", error=str(exc))
@@ -2381,8 +2396,12 @@ async def _run_inner(
     # awaited (same blocking profile as the prior inline extract_and_save).
     try:
         await run_pipeline_from_conversation(
-            user_id, messages, model_policy=policy, source_turn=session_id,
-            run_id=run_id, agent_name=agent_name,
+            user_id,
+            messages,
+            model_policy=policy,
+            source_turn=session_id,
+            run_id=run_id,
+            agent_name=agent_name,
         )
     except Exception as exc:  # noqa: BLE001 — memory extraction is auxiliary
         _logger.debug("memory_extraction_skipped", error=str(exc))
@@ -3181,8 +3200,12 @@ async def run_stream(
     # awaited (same blocking profile as the prior inline extract_and_save).
     try:
         await run_pipeline_from_conversation(
-            user_id, messages, model_policy=policy, source_turn=session_id,
-            run_id=run_id, agent_name=agent_name,
+            user_id,
+            messages,
+            model_policy=policy,
+            source_turn=session_id,
+            run_id=run_id,
+            agent_name=agent_name,
         )
     except Exception as exc:  # noqa: BLE001 — memory extraction is auxiliary
         _logger.debug("memory_extraction_skipped", error=str(exc))
