@@ -26,17 +26,17 @@ def _governance():
     return GovernanceConfig()
 
 
-def _tool_call_response(name: str, args: str = "{}"):
+def _tool_call_response(name: str, args: str = "{}", content: str | None = None):
     tc = MagicMock()
     tc.id = "tc_1"
     tc.function.name = name
     tc.function.arguments = args
     m = MagicMock()
-    m.content = None
+    m.content = content
     m.tool_calls = [tc]
     m.model_dump = lambda: {
         "role": "assistant",
-        "content": None,
+        "content": content,
         "tool_calls": [
             {"id": "tc_1", "type": "function", "function": {"name": name, "arguments": args}}
         ],
@@ -348,3 +348,37 @@ async def test_no_pending_note_after_approval_resolved(monkeypatch):
     content = next(m for m in messages if m["role"] == "system")["content"]
     assert "等待人工审批" not in content
     assert "严禁" not in content
+
+
+async def test_suspend_does_not_deliver_same_message_optimistic_success(_loop_env, monkeypatch):
+    """AAA-8204 ⑤补丁:模型常在调用挂起工具的**同一条** assistant 消息里预写
+    "结果:成功 / Message TS:…"(suspend 之前)。该假成功绝不能投递给用户——
+    awaiting_approval 时 run() 返回 ""(gate 已自行发审批提示),不回传同条消息里的乐观文案。
+    """
+    al, captured, _persisted = _loop_env
+    optimistic = "正在发送…\n结果:成功 ✅\nMessage TS: 1234567890.123"
+
+    async def fake_create(**kwargs):
+        return _tool_call_response(
+            "send_im_message", '{"target": "U2", "text": "hi"}', content=optimistic
+        )
+
+    client = AsyncMock()
+    client.chat = MagicMock()
+    client.chat.completions = MagicMock()
+    client.chat.completions.create = AsyncMock(side_effect=fake_create)
+    monkeypatch.setattr(al, "_build_async_client", lambda r, k: client)
+
+    reply = await al.run(
+        messages=[{"role": "user", "content": "发给 U2"}],
+        reply_func=AsyncMock(),
+        principal=Principal(user_id="U_REQ", tenant_id="default"),
+        session_id="slack:dm:U_REQ:1.1",
+        governance=_governance(),
+        approval_routing=_requester_routing(),
+        permission_gate_enabled=True,
+    )
+
+    assert captured["stop_reason"].name == "awaiting_approval"
+    assert reply == ""  # 乐观"成功/Message TS"不得作为 reply 投递
+    assert "成功" not in reply and "Message TS" not in reply

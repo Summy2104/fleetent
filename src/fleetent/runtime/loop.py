@@ -1240,6 +1240,12 @@ def _finalize_reply(reply: str, stop_reason: StopReason, messages: list[Any]) ->
     Keeps a non-empty reply unchanged; only an abnormal stop with a blank reply (which the
     empty-reply guard would otherwise drop, leaving the user with silence) is replaced.
     """
+    # approval-pending-no-false-success (⑤补丁): on suspend the gate already sent its own
+    # approval prompt, and the model frequently pre-writes an optimistic "结果:成功 / Message
+    # TS:…" in the SAME assistant message as the gated tool call. Delivering that reply is a
+    # false success before the tool ran — suppress it entirely; only the gate's prompt shows.
+    if stop_reason == StopReason.awaiting_approval:
+        return ""
     if (reply or "").strip():
         return reply
     return _terminal_status_reply(stop_reason, messages) or reply
