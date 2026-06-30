@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any
 
 from fleetent.db import SQLiteDatabase
-from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
 from fleetent.tenant_router import (
     AgentScope,
     KbScope,
@@ -163,16 +162,25 @@ def _write_sqlite_marker(db_path: Path, table_name: str, value: str) -> None:
         conn.commit()
 
 
-def test_resolve_migrates_flat_tenant_kb_into_kb_directory_before_open(tmp_path: Path) -> None:
+def test_resolve_keeps_legacy_kb_files_in_place_and_creates_kb_data_dir(tmp_path: Path) -> None:
     tenant_dir = tmp_path / "tenants" / "acme"
     tenant_dir.mkdir(parents=True)
-    legacy_kb = tenant_dir / "kb.db"
-    legacy_vectors = tenant_dir / "kb_vectors.db"
-    _write_sqlite_marker(legacy_kb, "legacy_marker", "kb")
-    _write_sqlite_marker(legacy_vectors, "legacy_vector_marker", "vec")
+    legacy_flat_kb = tenant_dir / "kb.db"
+    legacy_flat_vectors = tenant_dir / "kb_vectors.db"
+    legacy_kb_root = tenant_dir / "kb"
+    legacy_kb_root_kb = legacy_kb_root / "kb.db"
+    legacy_kb_root_vectors = legacy_kb_root / "kb_vectors.db"
+    _write_sqlite_marker(legacy_flat_kb, "legacy_flat_marker", "flat-kb")
+    _write_sqlite_marker(legacy_flat_vectors, "legacy_flat_vector_marker", "flat-vec")
+    _write_sqlite_marker(legacy_kb_root_kb, "legacy_root_marker", "root-kb")
+    _write_sqlite_marker(legacy_kb_root_vectors, "legacy_root_vector_marker", "root-vec")
     for suffix in ("-wal", "-shm"):
-        (tenant_dir / f"kb.db{suffix}").write_text(f"kb{suffix}", encoding="utf-8")
-        (tenant_dir / f"kb_vectors.db{suffix}").write_text(f"vec{suffix}", encoding="utf-8")
+        (tenant_dir / f"kb.db{suffix}").write_text(f"flat-kb{suffix}", encoding="utf-8")
+        (tenant_dir / f"kb_vectors.db{suffix}").write_text(f"flat-vec{suffix}", encoding="utf-8")
+        (legacy_kb_root / f"kb.db{suffix}").write_text(f"root-kb{suffix}", encoding="utf-8")
+        (legacy_kb_root / f"kb_vectors.db{suffix}").write_text(
+            f"root-vec{suffix}", encoding="utf-8"
+        )
 
     router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path))
 
@@ -181,8 +189,8 @@ def test_resolve_migrates_flat_tenant_kb_into_kb_directory_before_open(tmp_path:
     kb_dir = tmp_path / "tenants" / "acme" / "kb" / "data"
     assert scope.kb_db.path == kb_dir / "kb.db"
     assert kb_dir.is_dir()
-    assert not legacy_kb.exists()
-    assert not legacy_vectors.exists()
+    assert not (kb_dir / "kb.db").exists()
+    assert not (kb_dir / "kb_vectors.db").exists()
     for filename in (
         "kb.db",
         "kb.db-wal",
@@ -191,16 +199,26 @@ def test_resolve_migrates_flat_tenant_kb_into_kb_directory_before_open(tmp_path:
         "kb_vectors.db-wal",
         "kb_vectors.db-shm",
     ):
-        assert (kb_dir / filename).exists()
-
-    scope.open_kb_db(KB_MIGRATIONS)
-    with sqlite3.connect(scope.kb_db.path) as conn:
-        assert conn.execute("SELECT value FROM legacy_marker").fetchone() == ("kb",)
-
-    with sqlite3.connect(kb_dir / "kb_vectors.db") as conn:
-        assert conn.execute("SELECT value FROM legacy_vector_marker").fetchone() == ("vec",)
+        assert (tenant_dir / filename).exists()
+        assert (legacy_kb_root / filename).exists()
+        assert not (kb_dir / filename).exists()
 
     scope_again = router.tenant_scope("acme")
     assert scope_again.kb_db.path == scope.kb_db.path
-    assert not legacy_kb.exists()
-    assert not legacy_vectors.exists()
+    assert kb_dir.is_dir()
+
+    with sqlite3.connect(legacy_flat_kb) as conn:
+        assert conn.execute("SELECT value FROM legacy_flat_marker").fetchone() == ("flat-kb",)
+
+    with sqlite3.connect(legacy_flat_vectors) as conn:
+        assert conn.execute("SELECT value FROM legacy_flat_vector_marker").fetchone() == (
+            "flat-vec",
+        )
+
+    with sqlite3.connect(legacy_kb_root_kb) as conn:
+        assert conn.execute("SELECT value FROM legacy_root_marker").fetchone() == ("root-kb",)
+
+    with sqlite3.connect(legacy_kb_root_vectors) as conn:
+        assert conn.execute("SELECT value FROM legacy_root_vector_marker").fetchone() == (
+            "root-vec",
+        )
