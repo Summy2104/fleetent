@@ -63,6 +63,7 @@ def test_kb_service_init_config_creates_requested_tenant_home(monkeypatch, tmp_p
     config_path = home_dir / "tenants" / "acme" / "kb" / "kb-service.yaml"
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert config["service"]["tenant_id"] == "acme"
+    assert [connector["enabled"] for connector in config["connectors"]] == [False, False]
 
 
 def test_kb_service_init_config_skips_existing_and_force_overwrites_within_tenant_home(
