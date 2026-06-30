@@ -4,11 +4,11 @@
 
 standalone 模式下,ingest 队列 / worker / sweep SHALL 全在 KB 主机本地:worker 抽 **KB 本地**队列(非 management.db);sweep 由 KB 服务自己的调度器按配置文件 `sync_interval_seconds` 入队;**无需 platform 或 management.db**。
 
-standalone KB 服务的物理数据 SHALL 落在 `data.home/tenants/<tenant_id>/` 子树下,每个文件直接位于该子树:`kb.db`(关系)、`kb_vectors.db`(向量)、`kb_ingest_queue.db`(本地队列)。standalone 布局 SHALL NOT 复用 agent-home 的 `kb/` 中间层(standalone 无 agent,无需与 `agents/` 区分),队列 SHALL NOT 落在 `data.home` 根(避免多进程共抢)。嵌入式(agent-home)布局不受影响。
+standalone KB 服务 SHALL 以**每租户自包含 service home**部署:`<FLEETENT_HOME>/kb-service/<tenant_id>/` 下同时包含 `kb-service.yaml`、`.env` 与 `data/`。该 tenant home 下的 `data.home`(默认 `./data`) SHALL 只表示**当前 tenant 的 sqlite 本地文件后端存储根**,其内部 SHALL 纯平放置 `kb.db`(关系)、`kb_vectors.db`(向量)、`kb_ingest_queue.db`(本地队列),SHALL NOT 再出现 `tenants/<tenant_id>/` 或 `kb/` 中间层。多租户 SHALL 通过**不同 tenant home 零共享**实现;`tenant_id` 是逻辑身份键,物理由后端实现决定(sqlite=目录;未来 PG=schema、Qdrant=collection)。嵌入式(agent-home)布局不受影响。
 
 #### Scenario: 本地队列与 worker
 - **WHEN** standalone KB 服务运行 ingest
-- **THEN** job 入 KB 主机本地队列(`data.home/tenants/<tenant_id>/kb_ingest_queue.db`),由本地 worker 抽取执行,写本租户子树 `data.home/tenants/<tenant_id>/`
+- **THEN** job 入 KB 主机本地队列(`kb-service/<tenant_id>/data/kb_ingest_queue.db`),由本地 worker 抽取执行,写同一 tenant home 的 `data/`
 - **AND** 不读写 management.db
 
 #### Scenario: 服务自有 sweep
@@ -17,8 +17,8 @@ standalone KB 服务的物理数据 SHALL 落在 `data.home/tenants/<tenant_id>/
 
 #### Scenario: 单租户进程的扁平布局
 - **WHEN** 一个 kb-service 进程按 `kb-service.yaml`(单 `service.tenant_id`)启动
-- **THEN** 其 `kb.db` / `kb_vectors.db` / `kb_ingest_queue.db` 均位于 `data.home/tenants/<tenant_id>/` 下,无 `kb/` 中间层
-- **AND** 同一 data root 下另一租户进程使用 `data.home/tenants/<other_tenant_id>/`,各自独占其队列,互不干扰
+- **THEN** 其 `kb.db` / `kb_vectors.db` / `kb_ingest_queue.db` 均位于 `kb-service/<tenant_id>/data/` 下,无 `tenants/<tenant_id>/`、无 `kb/` 中间层
+- **AND** 另一租户进程使用 `kb-service/<other_tenant_id>/data/`,两者配置、secret 与 sqlite 文件零共享
 
 ### Requirement: Boot validation of config and credentials
 

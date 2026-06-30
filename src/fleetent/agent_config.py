@@ -863,6 +863,12 @@ def active_agent_or_default() -> AgentFile:
     return active_agent() or _DEFAULT_AGENT_FILE
 
 
+def set_default_agent_for_process(agent: AgentFile) -> None:
+    """Override the process-local fallback agent for non-managed runtimes."""
+    global _DEFAULT_AGENT_FILE
+    _DEFAULT_AGENT_FILE = agent
+
+
 def collect_env_var_names(agent: AgentFile) -> list[str]:
     """Return all env-var names referenced by the agent config (stable, deduplicated).
 

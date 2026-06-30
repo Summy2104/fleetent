@@ -30,8 +30,10 @@ def test_makefile_dev_targets_use_shared_kb_service_config() -> None:
     assert "kb-serve" in content.split("DEV_TARGETS :=", 1)[1]
     assert "make platform', 'make node', 'make kb-worker', 'make kb-serve'" in content
     assert (
-        "uv run fleetent kb-worker --config $(FLEETENT_HOME)/kb-service/kb-service.yaml" in content
+        "uv run fleetent kb-worker --config $(FLEETENT_HOME)/kb-service/default/kb-service.yaml"
+        in content
     )
     assert (
-        "uv run fleetent kb-serve --config $(FLEETENT_HOME)/kb-service/kb-service.yaml" in content
+        "uv run fleetent kb-serve --config $(FLEETENT_HOME)/kb-service/default/kb-service.yaml"
+        in content
     )

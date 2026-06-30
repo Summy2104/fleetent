@@ -29,23 +29,20 @@ from fleetent.knowledge_base.ingest.runtime import ingest_parsed
 from fleetent.knowledge_base.management.runtime import (
     is_active_knowledge_base as _kb_is_active_knowledge_base,
 )
-from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
+from fleetent.tenant_router import StandaloneKBTenantBackend, TenantRouter
 
 
 @dataclass(frozen=True)
 class KBWorkerConfig:
     queue_database_url: str = ""
     substrate_database_url: str = ""
-    embedding_backend: str = ""
-    embedding_endpoint: str = ""
-    embedding_model: str = ""
     vault_addr: str = ""
     vault_token: str = ""
     home_dir: Path = Path()
 
 
 def load_config() -> KBWorkerConfig:
-    """Load kb-worker config from process env plus ``$FLEETENT_HOME/kb-service/.env``."""
+    """Load legacy kb-worker config from process env plus ``$FLEETENT_HOME/kb-service/.env``."""
     home_dir = Path(os.environ.get("FLEETENT_HOME") or Path.home() / ".fleetent").expanduser()
     env_path = home_dir / "kb-service" / ".env"
     if env_path.exists():
@@ -57,9 +54,6 @@ def load_config() -> KBWorkerConfig:
         substrate_database_url=os.environ.get(
             "FLEETENT_KB_WORKER_SUBSTRATE_DATABASE_URL", ""
         ).strip(),
-        embedding_backend=os.environ.get("FLEETENT_KB_WORKER_EMBEDDING_BACKEND", "").strip(),
-        embedding_endpoint=os.environ.get("FLEETENT_KB_WORKER_EMBEDDING_ENDPOINT", "").strip(),
-        embedding_model=os.environ.get("FLEETENT_KB_WORKER_EMBEDDING_MODEL", "").strip(),
         vault_addr=os.environ.get("FLEETENT_KB_WORKER_VAULT_ADDR", "").strip(),
         vault_token=os.environ.get("FLEETENT_KB_WORKER_VAULT_TOKEN", "").strip(),
         home_dir=home_dir,
@@ -88,7 +82,7 @@ def _database() -> SQLiteDatabase:
 
 def _tenant_router(data_dir: Path | None = None) -> TenantRouter:
     resolved_data_dir = data_dir or _database().path.parent
-    return TenantRouter(SQLiteTenantBackend(data_dir=resolved_data_dir))
+    return TenantRouter(StandaloneKBTenantBackend(data_dir=resolved_data_dir))
 
 
 def _knowledge_database(
@@ -341,6 +335,7 @@ def main(argv: list[str] | None = None) -> None:
 
         standalone_config = load_kb_service_config(Path(ns.config).expanduser())
         validate_kb_service_boot(standalone_config)
+        standalone_config.configure_process_runtime()
         queue_database_url = standalone_config.queue_database_url()
         data_dir = standalone_config.data_dir()
     from fleetent.build_info import log_service_startup
