@@ -104,3 +104,23 @@ def test_approval_command_matrix_match(text: str) -> None:
 )
 def test_approval_command_matrix_no_match(text: str) -> None:
     assert _match_approval_command(text) is None
+
+
+# ③补丁:复制来的命令常带 markdown 代码/加粗格式(反引号/```/**），匹配前须剥掉，否则 id
+# 校验失败 → 命令漏进主循环 → 又循环成新审批（实测 approve `5a6decf1` 没命中）。
+@pytest.mark.parametrize(
+    "text",
+    [
+        "approve `5a6decf1`",  # 单反引号
+        "approve ```5a6decf1```",  # 三反引号
+        "approve **5a6decf1**",  # 加粗
+        "<@U123> approve `5a6decf1`",  # 真实 mention + 反引号
+        "@R. Alpha approve `5a6decf1`",  # 纯文本 mention + 反引号
+        "reject `5a6decf1`",
+        "approve always `5a6decf1`",
+    ],
+)
+def test_approval_command_strips_markdown_around_id(text: str) -> None:
+    m = _match_approval_command(text)
+    assert m is not None
+    assert m.group(3) == "5a6decf1"

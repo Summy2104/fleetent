@@ -26,6 +26,10 @@ _LEADING_MENTION_RE = re.compile(r"^\s*<@[^>]+>\s*")
 # is not one token. Strip from a leading "@" up to the approve/reject verb so a command
 # typed behind a name is recognized; `_APPROVAL_RE`'s id check still rejects prose.
 _TEXT_MENTION_PREFIX_RE = re.compile(r"^@\S.*?(?=\b(?:approve|reject)\b)", re.IGNORECASE)
+# Approval ids are often copied with their markdown formatting — `id` / ```id``` / **id** —
+# so strip code/emphasis markers before matching. The id charset (hex + hyphen) never
+# legitimately contains backtick/asterisk, so prose still fails `_APPROVAL_RE`.
+_MD_FORMAT_RE = re.compile(r"[`*]+")
 _REJECTION_MSG = "你还没有权限使用此 bot，请联系管理员审批。"
 # harden-im-llm-timeout-handling P0: agent run 失败（超时/异常）时回给用户的兜底提示。
 # 经 reply_func 投递，因而同时清除 Slack loading 状态（见 im-progress-feedback）。
@@ -48,9 +52,11 @@ def _match_approval_command(text: str) -> re.Match[str] | None:
       may contain spaces (``@R. Alpha approve <x>``) and is therefore not a single token.
 
     Either way the id-format check in ``_APPROVAL_RE`` is unchanged, so prose such as
-    ``@bot approve the plan`` (invalid id) stays unmatched.
+    ``@bot approve the plan`` (invalid id) stays unmatched. Markdown wrapping the id
+    (``approve `id` `` / ``approve **id**``) is stripped first so a copied-formatted command
+    still matches.
     """
-    stripped = _strip_leading_mention(text).strip()
+    stripped = _MD_FORMAT_RE.sub("", _strip_leading_mention(text)).strip()
     m = _APPROVAL_RE.match(stripped)
     if m is not None or not stripped.startswith("@"):
         return m
