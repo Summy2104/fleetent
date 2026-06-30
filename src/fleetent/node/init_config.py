@@ -6,6 +6,7 @@ import argparse
 import os
 import sys
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import Path
 
 
@@ -19,11 +20,21 @@ class InitConfigPlanItem:
 
 _TEMPLATE_NAME = "node.env.example"
 _TARGET_PATH = Path("node") / ".env"
+_RESOURCE_DIR = "resources"
 
 
 def _home_dir() -> Path:
     """Resolve the node home root from process environment."""
     return Path(os.environ.get("FLEETENT_HOME") or Path.home() / ".fleetent").expanduser()
+
+
+def _read_template(template_name: str) -> str:
+    resource_root = resources.files("fleetent.node").joinpath(_RESOURCE_DIR)
+    resource_path = resource_root.joinpath(template_name)
+    if resource_path.is_file():
+        return resource_path.read_text(encoding="utf-8")
+    project_root = Path(__file__).resolve().parents[3]
+    return (project_root / template_name).read_text(encoding="utf-8")
 
 
 def plan_init_config(home_dir: Path, *, force: bool = False) -> list[InitConfigPlanItem]:
@@ -40,12 +51,13 @@ def apply_init_config(home_dir: Path, *, force: bool = False) -> list[InitConfig
     plan = plan_init_config(home_dir, force=force)
     target_path = home_dir / _TARGET_PATH
     if not target_path.exists() or force:
-        source_path = Path.cwd() / _TEMPLATE_NAME
-        if not source_path.exists():
+        try:
+            content = _read_template(_TEMPLATE_NAME)
+        except FileNotFoundError:
             print(f"missing template: {_TEMPLATE_NAME}", file=sys.stderr)
-            raise SystemExit(1)
+            raise SystemExit(1) from None
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_text(source_path.read_text(encoding="utf-8"), encoding="utf-8")
+        target_path.write_text(content, encoding="utf-8")
     return plan
 
 
