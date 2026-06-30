@@ -49,9 +49,7 @@ async def _download_document_attachments(message: Any, context: Any) -> list[Any
     size = getattr(doc, "file_size", 0) or 0
     if size > _MAX_INBOUND_FILE_BYTES:
         return [
-            FileAttachment(
-                data=None, mime=mime, filename=filename, note="超过大小上限，未下载"
-            )
+            FileAttachment(data=None, mime=mime, filename=filename, note="超过大小上限，未下载")
         ]
     try:
         tg_file = await context.bot.get_file(doc.file_id)
@@ -62,9 +60,7 @@ async def _download_document_attachments(message: Any, context: Any) -> list[Any
     return [FileAttachment(data=bytes(data), mime=mime, filename=filename)]
 
 
-def _make_upload_func(
-    bot: Any, *, chat_id: str, target_type: str, thread: Any
-) -> Any:
+def _make_upload_func(bot: Any, *, chat_id: str, target_type: str, thread: Any) -> Any:
     """Return an async callable that uploads generated files to the Telegram conversation.
 
     Converges onto the unified ``outbound.send_file_to`` primitive (mirror Slack); a single
@@ -143,8 +139,6 @@ async def handle_approval_callback(update: Any, context: Any, agent_name: str) -
     if session_id:
         from fleetent.im_gateway import normalizer
         from fleetent.im_gateway.normalizer import NormalizedMessage, SessionContext
-
-        chat_id = str(cq.message.chat.id)
 
         async def _reply(text: str, approval: Any = None) -> None:
             await _send_reply(cq.message, text, approval=approval)

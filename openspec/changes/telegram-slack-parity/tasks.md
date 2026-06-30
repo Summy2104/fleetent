@@ -30,6 +30,6 @@
 
 ## 7. 闭环 + 守护 + 收尾
 
-- [ ] 7.1 写守护/契约测试(红→绿)：`im_gateway/telegram.py` 不 import platform；`permission_gate` 不再 import `approval_prompt_blocks`（去泄漏断言）；Slack 审批渲染输出回归基线不变。
-- [ ] 7.2 跑 `make test-pr` + `make test-integration-ci`（FLEETENT_HOME 隔离），对照 main 基线无新增失败；**特别确认全部 Slack 审批单测/集成全绿（Slack 行为零改动硬目标）**；模块/层/plane 守护通过。
-- [ ] 7.3 `openspec validate telegram-slack-parity` 通过；归档前确认所有 checkbox 为 [x]。
+- [x] 7.1 写守护/契约测试(红→绿)：`im_gateway/telegram.py` 不 import platform；`permission_gate` 不再 import `approval_prompt_blocks`（去泄漏断言）；Slack 审批渲染输出回归基线不变。
+- [x] 7.2 跑 `make test-pr` + `make test-integration-ci`（FLEETENT_HOME 隔离），对照 main 基线无新增失败；**特别确认全部 Slack 审批单测/集成全绿（Slack 行为零改动硬目标）**；模块/层/plane 守护通过。
+- [x] 7.3 `openspec validate telegram-slack-parity` 通过；归档前确认所有 checkbox 为 [x]。

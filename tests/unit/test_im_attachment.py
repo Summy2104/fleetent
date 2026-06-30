@@ -159,7 +159,9 @@ def _capture_telegram_handler(monkeypatch):
 
         tg_mod.create_app("support", {"bot_token": "tg-test-token"})
 
-    handler_obj = mock_app.add_handler.call_args[0][0]
+    # First registration is the inbound MessageHandler (a CallbackQueryHandler for approval
+    # buttons is registered after it).
+    handler_obj = mock_app.add_handler.call_args_list[0][0][0]
     return handler_obj
 
 
@@ -199,6 +201,7 @@ def _telegram_photo_update(*, caption=None, text=None):
     large = MagicMock()
     large.file_id = "large"
     msg.photo = [small, large]
+    msg.document = None
     return update
 
 

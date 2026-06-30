@@ -14,7 +14,6 @@ import pytest
 import fleetent.im_gateway.telegram as tg
 from fleetent.outbound import ApprovalPrompt, parse_approval_callback
 
-
 # ── Group 3: reply with optional approval keyboard ────────────────────────────
 
 
@@ -61,7 +60,9 @@ def _mock_neutral(monkeypatch):
     from fleetent.im_gateway import normalizer
     from fleetent.session import manager as session_mgr
 
-    monkeypatch.setattr(approval_store, "get_approval", MagicMock(return_value={"session_id": "s1"}))
+    monkeypatch.setattr(
+        approval_store, "get_approval", MagicMock(return_value={"session_id": "s1"})
+    )
     monkeypatch.setattr(
         session_mgr, "get_pending_approval", AsyncMock(return_value={"approver_ids": ["123"]})
     )
@@ -108,7 +109,9 @@ async def test_callback_resume_failure_does_not_raise(_mock_neutral):
 
 def _doc_message(file_size=1000, mime="application/pdf", filename="r.pdf"):
     message = MagicMock()
-    message.document = MagicMock(file_size=file_size, mime_type=mime, file_name=filename, file_id="f1")
+    message.document = MagicMock(
+        file_size=file_size, mime_type=mime, file_name=filename, file_id="f1"
+    )
     return message
 
 

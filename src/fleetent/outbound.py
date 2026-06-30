@@ -102,7 +102,7 @@ async def send_to(
     target_type: str = "user",
     thread: Any = None,
     blocks: list[dict[str, Any]] | None = None,
-    approval: "ApprovalPrompt | None" = None,
+    approval: ApprovalPrompt | None = None,
 ) -> DeliveryReceipt:
     """Send text to target on platform, returning a DeliveryReceipt (never raises).
 
@@ -423,9 +423,7 @@ def render_approval_telegram(prompt: ApprovalPrompt) -> Any:
 
     labels = {"approve": "✅ 批准", "reject": "❌ 拒绝", "approve_always": "✅ 始终允许"}
     row = [
-        InlineKeyboardButton(
-            labels[d], callback_data=approval_callback_data(d, prompt.approval_id)
-        )
+        InlineKeyboardButton(labels[d], callback_data=approval_callback_data(d, prompt.approval_id))
         for d in _APPROVAL_DECISIONS
     ]
     return InlineKeyboardMarkup([row])

@@ -307,7 +307,13 @@ class NodeIMEdgeHost:
             connector = connectors.get(plat)
             try:
                 await outbound.send_to(
-                    plat, connector, puid, text, target_type="user", blocks=blocks, approval=approval
+                    plat,
+                    connector,
+                    puid,
+                    text,
+                    target_type="user",
+                    blocks=blocks,
+                    approval=approval,
                 )
             except Exception as exc:
                 _logger.warn(
