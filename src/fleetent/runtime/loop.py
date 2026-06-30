@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any, Literal, cast
 
+import httpx
 from openai import APIStatusError, AsyncOpenAI, AsyncStream, RateLimitError
 from openai.types.chat import ChatCompletionChunk
 
@@ -1310,6 +1311,14 @@ def _active_model_policy() -> ModelPolicySnapshot:
     return ModelPolicySnapshot.from_agent(agent_config.active_agent_or_default())
 
 
+# harden-im-llm-timeout-handling P2: 给聊天 LLM client 设显式超时与有界重试，
+# 不依赖 SDK 默认（600s/无界）。read 为有限值，使流式调用 chunk 间停顿有确定边界
+# （超过即 ReadTimeout → 经 error_classifier 归 llm_timeout → 同 target 重发/切换）。
+# 模块级常量便于测试 monkeypatch 覆盖。
+_LLM_TIMEOUT = httpx.Timeout(connect=5.0, read=90.0, write=10.0, pool=5.0)
+_LLM_MAX_RETRIES = 2
+
+
 def _build_async_client(resolved: ResolvedModelConfig, api_key: str | None) -> AsyncOpenAI:
     if resolved.protocol != "openai_chat":
         raise ModelConfigError(
@@ -1320,7 +1329,12 @@ def _build_async_client(resolved: ResolvedModelConfig, api_key: str | None) -> A
         raise ModelConfigError(
             f"model route '{resolved.route_key}' target '{resolved.target_id}' missing base_url"
         )
-    return AsyncOpenAI(base_url=resolved.base_url, api_key=api_key or "fleetent")
+    return AsyncOpenAI(
+        base_url=resolved.base_url,
+        api_key=api_key or "fleetent",
+        timeout=_LLM_TIMEOUT,
+        max_retries=_LLM_MAX_RETRIES,
+    )
 
 
 def _model_name(resolved: ResolvedModelConfig) -> str:

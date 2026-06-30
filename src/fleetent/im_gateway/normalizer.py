@@ -22,6 +22,9 @@ _APPROVAL_RE = re.compile(r"^(approve|reject)(\s+always)?\s+([a-f0-9-]{6,36})\s*
 # Channels require @-mentioning the bot, so inbound text carries a leading `<@id>`.
 _LEADING_MENTION_RE = re.compile(r"^\s*<@[^>]+>\s*")
 _REJECTION_MSG = "你还没有权限使用此 bot，请联系管理员审批。"
+# harden-im-llm-timeout-handling P0: agent run 失败（超时/异常）时回给用户的兜底提示。
+# 经 reply_func 投递，因而同时清除 Slack loading 状态（见 im-progress-feedback）。
+_RUN_FAILURE_MSG = "⚠️ 处理时出错或超时了，请重试。"
 
 
 def _strip_leading_mention(text: str) -> str:
@@ -757,34 +760,51 @@ async def route(msg: NormalizedMessage, principal: Principal | None = None) -> N
         # into it (and interrupt it via the cancel token); the registration is removed
         # on exit so a finished session never looks "running".
         history_len_before = len(history)
-        async with steering.register_run(session_id, token, max_pending=max_pending):
-            response = await agent_loop.run(
-                messages=history,
-                principal=principal or Principal(user_id=msg.user_id, tenant_id="default"),
-                reply_func=msg.reply_func,
-                allowed_tools=allowed_tools,
-                disabled_skills_trace=disabled_trace,
-                sandbox_mode=sandbox_mode,
-                agent_features=agent_features,
+        # harden-im-llm-timeout-handling P0: agent run 失败（含 LLM 超时）时不让异常
+        # 静默冒泡到 IM 适配器——经 reply_func 回兜底提示（同时清 loading）、保存会话、
+        # 记 error 日志后返回，不再抛出。standalone 与 managed 共用此路径。
+        try:
+            async with steering.register_run(session_id, token, max_pending=max_pending):
+                response = await agent_loop.run(
+                    messages=history,
+                    principal=principal or Principal(user_id=msg.user_id, tenant_id="default"),
+                    reply_func=msg.reply_func,
+                    allowed_tools=allowed_tools,
+                    disabled_skills_trace=disabled_trace,
+                    sandbox_mode=sandbox_mode,
+                    agent_features=agent_features,
+                    session_id=session_id,
+                    governance=governance,
+                    model_policy=model_policy,
+                    cancel_token=token,
+                    permission_gate_enabled=agent.permission_gate_enabled if agent else True,
+                    permission_gate_medium_timeout=(
+                        agent.permission_gate_medium_timeout_seconds if agent else None
+                    ),
+                    permission_gate_high_timeout=(
+                        agent.permission_gate_high_timeout_seconds if agent else None
+                    ),
+                    approval_routing=agent.approval if agent else None,
+                    outbound_connectors=msg.outbound_connectors,
+                    progress_func=msg.progress_func,
+                    session_context=msg.session_context,
+                    conversation_address=msg.conversation_address,
+                    skill_authoring_enabled=agent.skill_authoring_enabled if agent else False,
+                    skill_user_access=agent.skill_user_access if agent else None,
+                )
+        except Exception as exc:  # noqa: BLE001 — IM 边界兜底：log + 回帖，不冒泡
+            logger.error(
+                "agent_run_failed",
                 session_id=session_id,
-                governance=governance,
-                model_policy=model_policy,
-                cancel_token=token,
-                permission_gate_enabled=agent.permission_gate_enabled if agent else True,
-                permission_gate_medium_timeout=(
-                    agent.permission_gate_medium_timeout_seconds if agent else None
-                ),
-                permission_gate_high_timeout=(
-                    agent.permission_gate_high_timeout_seconds if agent else None
-                ),
-                approval_routing=agent.approval if agent else None,
-                outbound_connectors=msg.outbound_connectors,
-                progress_func=msg.progress_func,
-                session_context=msg.session_context,
-                conversation_address=msg.conversation_address,
-                skill_authoring_enabled=agent.skill_authoring_enabled if agent else False,
-                skill_user_access=agent.skill_user_access if agent else None,
+                error_type=type(exc).__name__,
+                error=str(exc),
             )
+            try:
+                await msg.reply_func(_RUN_FAILURE_MSG)
+            except Exception as reply_exc:  # noqa: BLE001 — 兜底回帖失败仅记录，不再抛
+                logger.warning("run_failure_reply_failed", error=str(reply_exc))
+            await session_mgr.save(session_id, history)
+            return
 
         # P4: session_end hook — observe after run completes, before session save.
         if governance is not None and governance.hooks_enabled:

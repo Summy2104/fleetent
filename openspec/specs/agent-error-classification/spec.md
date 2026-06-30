@@ -5,7 +5,7 @@ TBD - created by archiving change error-classification. Update Purpose after arc
 ## Requirements
 ### Requirement: 运行时错误归一化为固定分类
 
-错误分类层 SHALL 提供 `classify()` 函数，将运行时异常归一化为一组固定分类码：`rate_limit` / `context_overflow` / `tool_timeout` / `tool_crash` / `mcp_disconnect` / `sandbox_oom` / `sandbox_timeout` / `auth_failed` / `unknown`。任何无法匹配已知分类的异常 MUST 归类为 `unknown`。
+错误分类层 SHALL 提供 `classify()` 函数，将运行时异常归一化为一组固定分类码：`rate_limit` / `context_overflow` / `tool_timeout` / `tool_crash` / `mcp_disconnect` / `sandbox_oom` / `sandbox_timeout` / `auth_failed` / `llm_timeout` / `unknown`。其中 `llm_timeout` 表示对 LLM 端点的 HTTP 请求层超时或连接错误（区别于 `tool_timeout` 这一 await 层工具超时）。任何无法匹配已知分类的异常 MUST 归类为 `unknown`。
 
 #### Scenario: 限流错误归类为 rate_limit
 - **WHEN** `classify()` 接收到限流异常（`RateLimitError` 或状态码 429/503）
@@ -14,6 +14,10 @@ TBD - created by archiving change error-classification. Update Purpose after arc
 #### Scenario: 认证错误归类为 auth_failed
 - **WHEN** `classify()` 接收到认证失败异常（状态码 401/403）
 - **THEN** 返回的分类码为 `auth_failed`
+
+#### Scenario: LLM 请求超时/连接错误归类为 llm_timeout
+- **WHEN** `classify()` 接收到 LLM 请求层超时或连接异常（`httpx.ReadTimeout` / `httpx.TimeoutException` / `openai.APITimeoutError` / `openai.APIConnectionError`）
+- **THEN** 返回的分类码为 `llm_timeout`，而非 `unknown`
 
 #### Scenario: 未知错误归类为 unknown
 - **WHEN** `classify()` 接收到不匹配任何已知分类的异常
@@ -26,6 +30,10 @@ TBD - created by archiving change error-classification. Update Purpose after arc
 #### Scenario: rate_limit 标志位指示切换模型并重试
 - **WHEN** 查询 `rate_limit` 分类的标志位
 - **THEN** `should_retry` 为真且 `should_switch_model` 为真
+
+#### Scenario: llm_timeout 标志位指示重试并可切换模型
+- **WHEN** 查询 `llm_timeout` 分类的标志位
+- **THEN** `should_retry` 为真且 `should_switch_model` 为真（`should_compress` 为假）
 
 #### Scenario: auth_failed 标志位指示不重试
 - **WHEN** 查询 `auth_failed` 分类的标志位
@@ -69,5 +77,5 @@ TBD - created by archiving change error-classification. Update Purpose after arc
 
 #### Scenario: 当前可达异常不产出预留分类码
 - **WHEN** `classify()` 接收当前主循环可能抛出的 LLM 调用异常
-- **THEN** 返回的分类码仅为本次可判定的分类（`rate_limit` / `context_overflow` / `auth_failed` / `tool_crash` / `unknown`），不为任何预留分类码
+- **THEN** 返回的分类码仅为本次可判定的分类（`rate_limit` / `context_overflow` / `auth_failed` / `tool_crash` / `llm_timeout` / `unknown`），不为任何预留分类码
 
