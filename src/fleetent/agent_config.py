@@ -250,11 +250,30 @@ class AgentKnowledgeRetrievalAudit(BaseModel):
     plaintext: bool = False
 
 
+class AgentKnowledgeProvider(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["local", "http"] = "local"
+    url: str | None = None
+    auth_ref: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_http_provider(self) -> "AgentKnowledgeProvider":
+        if self.type != "http":
+            return self
+        if not self.url:
+            raise ValueError("knowledge.provider.url is required when provider.type=http")
+        if not self.auth_ref:
+            raise ValueError("knowledge.provider.auth_ref is required when provider.type=http")
+        return self
+
+
 class AgentKnowledge(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
     bindings: list[AgentKnowledgeBinding] = Field(default_factory=list)
+    provider: AgentKnowledgeProvider = Field(default_factory=AgentKnowledgeProvider)
     retrieval_policy: AgentRetrievalPolicy = Field(default_factory=AgentRetrievalPolicy)
     retrieval_audit: AgentKnowledgeRetrievalAudit = Field(
         default_factory=AgentKnowledgeRetrievalAudit
@@ -676,7 +695,7 @@ def _reject_inline_secrets(agent: AgentFile, path: Path) -> None:
 def _is_env_reference(key: str, value: str) -> bool:
     if key.endswith("_env"):
         return _ENV_VAR_NAME_RE.fullmatch(value) is not None
-    if key.endswith("credential_ref"):
+    if key.endswith("credential_ref") or key.endswith("auth_ref"):
         return _ENV_VAR_NAME_RE.fullmatch(value) is not None or value.startswith("file://")
     # Allow env:VAR_NAME syntax in any field (e.g. mcp_servers[*].env dict values) so
     # secrets can live in .env and be referenced without being flagged as inline secrets.
@@ -687,7 +706,7 @@ def _is_env_reference(key: str, value: str) -> bool:
 
 
 def _is_secret_reference_key(key: str) -> bool:
-    return key.endswith("_env") or key.endswith("credential_ref")
+    return key.endswith("_env") or key.endswith("credential_ref") or key.endswith("auth_ref")
 
 
 def load_agent_home_file(path: Path) -> AgentFile:

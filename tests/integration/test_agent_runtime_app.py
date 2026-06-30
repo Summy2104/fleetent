@@ -223,3 +223,103 @@ async def test_boot_reconciles_expired_approvals_in_agent_state(tmp_path, monkey
     await agent_app.boot("support", home=home, supervisor=sup, with_infra=True, start_im=False)
 
     assert approval_store.get_approval("expired")["status"] == "timeout"
+
+
+async def test_start_infra_injects_http_knowledge_provider_from_env_ref(
+    tmp_path, monkeypatch
+) -> None:
+    from fleetent import long_term_ctx
+    from fleetent.integrations.sandbox import enablement as sandbox_enablement
+    from fleetent.session import manager as session_mgr
+
+    home = _write_home(
+        tmp_path,
+        knowledge={
+            "enabled": True,
+            "bindings": [{"tenant_id": "default", "kb_id": "kb-1"}],
+            "provider": {
+                "type": "http",
+                "url": "https://kb.example/search",
+                "auth_ref": "env:FLEETENT_KB_SERVICE_KEY",
+            },
+        },
+    )
+    agent = agent_config.load_agent_home_file(home / "agent.yaml")
+    monkeypatch.setenv("FLEETENT_KB_SERVICE_KEY", "svc-env-token")
+    monkeypatch.setattr(
+        sandbox_enablement,
+        "get_effective_mode",
+        AsyncMock(return_value=sandbox_enablement.Mode.OFF),
+    )
+    monkeypatch.setattr(session_mgr, "start_session_maintenance", lambda: None)
+
+    await agent_app._start_infra(agent, home / "data")
+
+    provider = long_term_ctx._knowledge_provider
+    assert isinstance(provider, long_term_ctx.HttpKnowledgeProvider)
+    assert provider._url == "https://kb.example/search"
+    assert provider._service_key == "svc-env-token"
+
+
+async def test_start_infra_keeps_default_local_knowledge_provider_when_unconfigured(
+    tmp_path, monkeypatch
+) -> None:
+    from fleetent import long_term_ctx
+    from fleetent.integrations.sandbox import enablement as sandbox_enablement
+    from fleetent.session import manager as session_mgr
+
+    home = _write_home(
+        tmp_path,
+        knowledge={
+            "enabled": True,
+            "bindings": [{"tenant_id": "default", "kb_id": "kb-1"}],
+        },
+    )
+    agent = agent_config.load_agent_home_file(home / "agent.yaml")
+    monkeypatch.setattr(
+        sandbox_enablement,
+        "get_effective_mode",
+        AsyncMock(return_value=sandbox_enablement.Mode.OFF),
+    )
+    monkeypatch.setattr(session_mgr, "start_session_maintenance", lambda: None)
+
+    await agent_app._start_infra(agent, home / "data")
+
+    assert long_term_ctx._knowledge_provider is None
+
+
+async def test_start_infra_injects_http_knowledge_provider_from_file_ref(
+    tmp_path, monkeypatch
+) -> None:
+    from fleetent import long_term_ctx
+    from fleetent.integrations.sandbox import enablement as sandbox_enablement
+    from fleetent.session import manager as session_mgr
+
+    secret_path = tmp_path / "secrets" / "kb-token.txt"
+    secret_path.parent.mkdir(parents=True)
+    secret_path.write_text("svc-file-token", encoding="utf-8")
+    home = _write_home(
+        tmp_path,
+        knowledge={
+            "enabled": True,
+            "bindings": [{"tenant_id": "default", "kb_id": "kb-1"}],
+            "provider": {
+                "type": "http",
+                "url": "https://kb.example/search",
+                "auth_ref": f"file://{secret_path}",
+            },
+        },
+    )
+    agent = agent_config.load_agent_home_file(home / "agent.yaml")
+    monkeypatch.setattr(
+        sandbox_enablement,
+        "get_effective_mode",
+        AsyncMock(return_value=sandbox_enablement.Mode.OFF),
+    )
+    monkeypatch.setattr(session_mgr, "start_session_maintenance", lambda: None)
+
+    await agent_app._start_infra(agent, home / "data")
+
+    provider = long_term_ctx._knowledge_provider
+    assert isinstance(provider, long_term_ctx.HttpKnowledgeProvider)
+    assert provider._service_key == "svc-file-token"

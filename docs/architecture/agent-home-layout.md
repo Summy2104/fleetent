@@ -21,6 +21,7 @@
 ```
 management_db_path()               = base/management.db
 tenant_dir(tenant)                 = base/tenants/<tenant>
+tenant_kb_dir(tenant)              = base/tenants/<tenant>/kb
 tenant_agent_home_dir(tenant, id)  = base/tenants/<tenant>/agents/<id>
 tenant_agent_data_dir(tenant, id)  = base/tenants/<tenant>/agents/<id>/data
 agent_home_dir(id)                 = base/tenants/default/agents/<id>   # standalone shim
@@ -43,7 +44,9 @@ FLEETENT_HOME/
 │   ├── desired-state-cache.json       [NODE]  reconcile/provider 缓存（剥除 secret，仅保留 manifest 元数据）
 │   └── applied-config-hashes.json     [NODE]  reconcile 的 config-hash 记账
 └── tenants/<tenant>/                  [PLAT/NODE/AGENT] 一个租户的完整足迹
-    ├── kb.db / kb_vectors.db          [AGENT] tenant 级 KB
+    ├── kb/                            [AGENT/NODE] tenant 级 KB（node 以整目录 RO 挂进 agent，含 -wal/-shm）
+    │   ├── kb.db
+    │   └── kb_vectors.db
     └── agents/<id>/                   per-agent home（详见下）
 ```
 
@@ -103,7 +106,8 @@ node 状态（node/）                          →  [NODE] 自己（provision +
 2. **管理库在根目录**：`FLEETENT_HOME/management.db`。
 3. **租户优先布局**：canonical home = `tenants/<tenant>/agents/<agent>/`。
 4. **agent data 拍平**：运行时 DB 与 sessions/logs/workspaces 都落 `<agent-home>/data/`。
-5. **KB 是 tenant 级**：`tenants/<tenant>/kb.db`。
+5. **KB 是 tenant 级**：`tenants/<tenant>/kb/kb.db` 与 `tenants/<tenant>/kb/kb_vectors.db`。
+6. **KB 服务可 standalone 运行但数据布局不变**：`fleetent kb-serve --config kb-service.yaml` 与 `fleetent kb-worker --config kb-service.yaml` 都固定读写同一租户子树 `tenants/<tenant>/kb/`；standalone 只把 connector 配置、secret、sweep 和 ingest 队列搬到 KB 主机本地，不改变 KB 物理布局。platform 托管 ingest 暂时并存，退役属于后续 `kb-retire-platform-ingest`。
 
 ---
 
@@ -120,7 +124,9 @@ FLEETENT_HOME/
 ├── logs/ diagnostics/                       [PLAT]  宿主级日志与诊断导出
 ├── node/                                    [NODE]  节点身份 · 跨租户（.env + cache + hashes）
 └── tenants/<tenant>/                        ← 一个租户的完整足迹 = 一棵子树
-    ├── kb.db (+kb_vectors)                  租户级共享：kb-worker 写 / 各 agent 读（并发只读安全）
+    ├── kb/                                  租户级共享：kb-worker 写 / 各 agent 读（node 整目录 RO 挂载，含 -wal/-shm；可选 colocated kb-serve 也只读这棵子树）
+    │   ├── kb.db
+    │   └── kb_vectors.db
     └── agents/<name>/                       name=不可变 handle（rename 已移除）；单一 owner
         ├── agent.yaml  .env(0600)  .fleetent.pid  skills/
         └── data/                            [AGENT]  拍平，无 <tenant>/<id>/ 冗余嵌套
@@ -144,7 +150,7 @@ tenants/<t>/  = 该租户的一切（KB + 它的 agents + 各 agent 的运行时
 | A | agent home 单一 owner = 跑 agent 的那方（managed=NODE / standalone=CLI）；**平台不再写 home**（`materialize_from_store` 退役；仅显式"同机也当 node"模式可保留） | #1 #6 |
 | B | `management.db` 独占根；**全局根零 agent 侧文件**（裸 CLI 默认 agent 也走一个 home） | #2 #3 |
 | C | per-agent `data/` **拍平**（home 已是 agent 作用域，去掉内层 `<tenant>/<id>/`）；命名统一 `agent_state.db` | #3 #4 |
-| D | KB → `tenants/<t>/kb.db`，**跨 agent 共享**（kb-worker 写、各 agent 只读） | #2 #4 |
+| D | KB → `tenants/<t>/kb/`，**跨 agent 共享**（kb-worker 写、各 agent 只读；node 整目录 RO 挂载） | #2 #4 |
 | E | shared memory → 正名 **agent memory**，**agent 级**，**删 team/tenant scope**，**并入 agent `agent_state.db`（v39，无独立库文件）**；跨租户共享靠 promote 到 KB | （新发现：原半成品） |
 | F | **租户优先**：`tenants/<t>/agents/<name>/`；name 不可变、作路径键（可读 + 稳定）；单租户接受 `tenants/default/` 一层 | #2 #4 |
 | G | dev 噪音：文档钉死 canonical 集合；`make` 等 dev 产物收进非 canonical 位置（如 `.dev/`） | #5 |

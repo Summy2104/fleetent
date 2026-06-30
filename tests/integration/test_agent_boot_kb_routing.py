@@ -19,7 +19,7 @@ def _tables_in(db_path) -> set[str]:
 
 
 def test_kb_schema_established_in_tenant_scoped_db(tmp_path) -> None:
-    """KB tables land in default/kb.db, not in the main agent db."""
+    """KB tables land in default/kb/kb.db, not in the main agent db."""
     from fleetent.runtime.agent_app import _init_agent_db_schema
 
     data_dir = tmp_path / "data"
@@ -27,8 +27,8 @@ def test_kb_schema_established_in_tenant_scoped_db(tmp_path) -> None:
 
     _init_agent_db_schema(data_dir, agent_id="test-agent")
 
-    kb_db_path = tmp_path / "tenants" / "default" / "kb.db"
-    assert kb_db_path.exists(), "router must create tenants/default/kb.db"
+    kb_db_path = tmp_path / "tenants" / "default" / "kb" / "kb.db"
+    assert kb_db_path.exists(), "router must create tenants/default/kb/kb.db"
 
     tables = _tables_in(kb_db_path)
     assert "knowledge_bases" in tables
@@ -38,7 +38,7 @@ def test_kb_schema_established_in_tenant_scoped_db(tmp_path) -> None:
 
 
 def test_kb_tables_absent_from_main_agent_db(tmp_path) -> None:
-    """KB tables must NOT be in agent_state.db; they land in the tenant kb.db."""
+    """KB tables must NOT be in agent_state.db; they land in the tenant kb/kb.db."""
     from fleetent.runtime.agent_app import _init_agent_db_schema
 
     data_dir = tmp_path / "data"
@@ -127,7 +127,7 @@ async def test_agent_boot_search_reads_only_boot_tenant_kb(tmp_path, monkeypatch
         limit=5,
     )
     assert [chunk.tenant_id for chunk in tenant_a_results] == ["tenant-a"]
-    assert (tmp_path / "tenants" / "tenant-a" / "kb_vectors.db").exists()
+    assert (tmp_path / "tenants" / "tenant-a" / "kb" / "kb_vectors.db").exists()
 
     router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path))
     tenant_b_scope = router.tenant_scope("tenant-b")

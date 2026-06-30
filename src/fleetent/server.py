@@ -39,7 +39,11 @@ from fleetent.platform.agent_management_console import (
 )
 from fleetent.platform.agent_statistics import stats_admin_api
 from fleetent.platform.chat_management import chat_admin_api
-from fleetent.platform.connector_management import connector_admin_api
+from fleetent.platform.connector_management import (
+    connector_admin_api,
+    mcp_credential_api,
+    mcp_oauth_callback_api,
+)
 from fleetent.platform.im_gateway_management import im_identity_admin_api
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import model_admin_api, provider_admin_api
@@ -149,19 +153,8 @@ def _build_platform_maintenance_scheduler(
     maintenance jobs.  Accepts an optional `_scheduler` for dependency injection in tests."""
     from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
 
-    from fleetent.config import SchedulingSettings
-    from fleetent.platform.knowledge_base_management.kb_connector_sweep import sweep
-
-    cfg: SchedulingSettings = scheduling if scheduling is not None else SchedulingSettings()
-    sched: Any = _scheduler if _scheduler is not None else AsyncIOScheduler()
-    sched.add_job(
-        sweep,
-        trigger="interval",
-        seconds=cfg.kb_connector_sweep_interval_seconds,
-        id="__kb_connector_sync_sweep__",
-        replace_existing=True,
-    )
-    return sched
+    del scheduling
+    return _scheduler if _scheduler is not None else AsyncIOScheduler()
 
 
 def _ensure_skill_pool_git() -> None:
@@ -192,6 +185,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # standalone agents never run this lifespan, so they keep trusting the archived IM
     # identity without opening the management DB.
     cron_scheduler.set_principal_resolver(_cron_principal_recheck)
+    # Managed per-user MCP OAuth: resolve a client_secret env ref from agent_secrets at
+    # exchange/refresh time, injected here so connector_management stays off agent_lifecycle.
+    from fleetent.platform.agent_lifecycle import secret_store as _secret_store
+    from fleetent.platform.connector_management import mcp_oauth_service as _mcp_oauth_service
+
+    _mcp_oauth_service.set_client_secret_resolver(_secret_store.get_decrypted)
 
     scan_skills()
     # backflow-pool-git: the shared skill pool must be a git repo before any write,
@@ -277,6 +276,8 @@ app.include_router(provider_admin_api.router)
 app.include_router(model_admin_api.router)
 app.include_router(kb_admin_api.router)
 app.include_router(connector_admin_api.router)
+app.include_router(mcp_oauth_callback_api.router)
+app.include_router(mcp_credential_api.router)
 app.include_router(chat_admin_api.router)
 # agent_admin_api must precede agent_console_api: its literal DELETE
 # /agents/default route would otherwise be shadowed by the console's parametric

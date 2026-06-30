@@ -44,6 +44,15 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/fleetent"]
 
+[tool.hatch.build.targets.wheel.force-include]
+".env.example" = "src/fleetent/platform/resources/.env.example"
+"platform.yaml.example" = "src/fleetent/platform/resources/platform.yaml.example"
+"agent.yaml.example" = "src/fleetent/runtime/resources/agent.yaml.example"
+"agent.env.example" = "src/fleetent/runtime/resources/agent.env.example"
+"node.env.example" = "src/fleetent/node/resources/node.env.example"
+"kb-service.yaml.example" = "src/fleetent/knowledge_base/resources/kb-service.yaml.example"
+"kb-service.env.example" = "src/fleetent/knowledge_base/resources/kb-service.env.example"
+
 [dependency-groups]
 dev = [
     "ruff>=0.6.0",

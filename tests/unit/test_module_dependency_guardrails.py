@@ -400,10 +400,6 @@ _KNOWN_PLANE_BOUNDARY_VIOLATIONS: set[tuple[str, str]] = {
     ("fleetent.platform.agent_lifecycle.materialize", "fleetent.platform.skill_management"),
     # ②控制 modules call ③编排 to trigger re-materialization after store changes
     (
-        "fleetent.platform.knowledge_base_management.kb_admin_api",
-        "fleetent.platform.agent_lifecycle",
-    ),
-    (
         "fleetent.platform.agent_management_console.agent_admin_api",
         "fleetent.platform.agent_lifecycle",
     ),

@@ -30,7 +30,7 @@ def _api_error(cls: type[APIStatusError], status: int, body: object | None) -> A
 # --- 2.1 enum + dataclass ---
 
 
-def test_error_category_has_all_nine_codes() -> None:
+def test_error_category_has_all_codes() -> None:
     expected = {
         "rate_limit",
         "context_overflow",
@@ -40,6 +40,7 @@ def test_error_category_has_all_nine_codes() -> None:
         "sandbox_oom",
         "sandbox_timeout",
         "auth_failed",
+        "llm_timeout",
         "unknown",
     }
     assert {c.value for c in ErrorCategory} == expected
@@ -225,3 +226,39 @@ def test_timeout_error_classified_as_tool_timeout():
     assert c.category is ErrorCategory.tool_timeout
     # Flags must match the AR5 table entry, not be redefined.
     assert c == CLASSIFICATION_TABLE[ErrorCategory.tool_timeout]
+
+
+# --- llm_timeout: LLM 请求层超时/连接错误（harden-im-llm-timeout-handling P1）---
+
+
+def test_llm_timeout_flags_retry_and_switch() -> None:
+    clf = CLASSIFICATION_TABLE[ErrorCategory.llm_timeout]
+    assert clf.should_retry is True
+    assert clf.should_switch_model is True
+    assert clf.should_compress is False
+
+
+def test_classify_httpx_read_timeout_is_llm_timeout() -> None:
+    assert classify(httpx.ReadTimeout("read timed out")).category is ErrorCategory.llm_timeout
+
+
+def test_classify_httpx_timeout_exception_is_llm_timeout() -> None:
+    assert classify(httpx.TimeoutException("timed out")).category is ErrorCategory.llm_timeout
+
+
+def test_classify_openai_api_timeout_is_llm_timeout() -> None:
+    from openai import APITimeoutError
+
+    assert classify(APITimeoutError(request=_REQ)).category is ErrorCategory.llm_timeout
+
+
+def test_classify_openai_api_connection_error_is_llm_timeout() -> None:
+    from openai import APIConnectionError
+
+    exc = APIConnectionError(message="conn refused", request=_REQ)
+    assert classify(exc).category is ErrorCategory.llm_timeout
+
+
+def test_classify_llm_timeout_not_unknown() -> None:
+    # 回归：超时此前误落 unknown（不重试不切换），现必须归 llm_timeout
+    assert classify(httpx.ReadTimeout("x")).category is not ErrorCategory.unknown

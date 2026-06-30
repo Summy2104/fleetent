@@ -3,9 +3,7 @@
 Provide real-time progress feedback to IM users during agent runs by propagating an optional
 `progress_func` callback through the agent pipeline to IM adapters, enabling platform-native
 indicators (e.g., Slack message updates, Telegram typing action) when tools are invoked.
-
 ## Requirements
-
 ### Requirement: NormalizedMessage 携带可选 progress_func 回调
 
 `NormalizedMessage` SHALL 携带可选字段 `progress_func: Callable[[dict], Awaitable[None]] | None`，
@@ -67,6 +65,10 @@ Slack 适配器 SHALL 遵循 Slack Agents & Assistants 协议处理 assistant �
 而非 Slack 内置默认占位。未启用 Agents & Assistants 的 App SHALL 平滑降级为纯 `say()` 回复。
 频道 `app_mention` 路径 SHALL 保留。
 
+状态清除 SHALL 覆盖 agent run 的**完成与失败两条路径**：无论 run 正常返回还是因异常（含 LLM 超时）
+失败，只要经 `reply_func` 投递回复（成功回复或失败兜底提示），均 SHALL 先清除 loading 状态，使
+会话不停留在永久「🤔 思考中...」。
+
 #### Scenario: 从 assistant 线程获取正确的 thread_ts
 
 - **WHEN** 用户在 Assistant 面板中向 bot 发消息
@@ -98,6 +100,12 @@ Slack 适配器 SHALL 遵循 Slack Agents & Assistants 协议处理 assistant �
 - **WHEN** agent run 完成，`reply_func` 被调用且状态可用
 - **THEN** 先调用 `set_status(status="")` 清除状态
 - **AND** 通过 `say()` 将最终回复发送到目标 thread
+
+#### Scenario: agent run 失败时也清除状态
+
+- **WHEN** agent run 因异常（含 LLM 超时）失败，IM 路由经 `reply_func` 投递失败兜底提示且状态可用
+- **THEN** 先调用 `set_status(status="")` 清除状态（不停留在永久「🤔 思考中...」）
+- **AND** 通过 `say()` 将失败兜底提示发送到目标 thread
 
 #### Scenario: 未启用 Assistants 功能时降级
 
@@ -196,3 +204,4 @@ Telegram 适配器 MUST 对 `heartbeat` 事件同样发出 `send_chat_action("ty
 
 - **WHEN** Telegram 适配器收到 `heartbeat` 事件
 - **THEN** 调用 `send_chat_action(action="typing")`，刷新 typing 指示器的 5 秒窗口
+

@@ -358,7 +358,12 @@ class NodeIMEdgeHost:
             raise RuntimeError(f"agent {msg.agent_name!r} is unavailable")
         token = _agent_tui_token(self._config, msg.agent_name, tenant_id)
         principal = Principal(user_id=msg.user_id, tenant_id=tenant_id)
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        # A full agent turn fans out several model calls (reply + memory extraction + …)
+        # and routinely exceeds 10s; keep the connect bound tight but give the read a wide
+        # budget so the agent's computed reply is never dropped mid-turn (Socket Mode acks
+        # the envelope separately, so a long listener does not trip Slack's 3s ack window).
+        forward_timeout = httpx.Timeout(180.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=forward_timeout) as client:
             response = await client.post(
                 f"http://127.0.0.1:{port}/im/route",
                 headers={

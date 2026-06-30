@@ -164,6 +164,32 @@ async def test_assistant_reply_clears_status_and_says(monkeypatch):
     say.assert_awaited_with("final answer")
 
 
+async def test_assistant_failure_fallback_reply_clears_status(monkeypatch):
+    # im-progress-feedback (harden P0/B): agent run 失败时经 reply_func 投递的兜底提示
+    # 同样先清除 loading 状态——失败路径与完成路径对称，不停留在永久"思考中…"。
+    from fleetent.im_gateway import slack as slack_mod
+    from fleetent.im_gateway.normalizer import _RUN_FAILURE_MSG
+
+    routed = _capture_routed(monkeypatch)
+    set_status = AsyncMock()
+    say = AsyncMock()
+
+    await slack_mod._route_assistant_message(
+        payload={"user": "U1", "text": "hi"},
+        context=_ctx(),
+        set_status=set_status,
+        say=say,
+        client=MagicMock(),
+        agent_name="a",
+        bot_token="b",
+    )
+    await routed["msg"].reply_func(_RUN_FAILURE_MSG)
+
+    cleared = [c for c in set_status.call_args_list if (c.args and c.args[0] == "")]
+    assert cleared, "失败兜底回帖也须清除 loading 状态"
+    say.assert_awaited_with(_RUN_FAILURE_MSG)
+
+
 async def test_assistant_degrade_setstatus_fails_still_says(monkeypatch):
     from fleetent.im_gateway import slack as slack_mod
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import Path
 
 from fleetent import paths
@@ -22,6 +23,7 @@ _GENERATED_FILES = (
     (".env.example", ".env"),
     ("platform.yaml.example", "platform.yaml"),
 )
+_RESOURCE_DIR = "resources"
 _GENERATED_DIRS = (
     "logs/",
     "diagnostics/",
@@ -31,6 +33,18 @@ _GENERATED_DIRS = (
 
 def _display_path(path: str, *, directory: bool = False) -> str:
     return f"{path}/" if directory and not path.endswith("/") else path
+
+
+def _read_template(template_name: str, *, template_root: Path | None = None) -> str:
+    if template_root is not None:
+        return (template_root / template_name).read_text(encoding="utf-8")
+
+    resource_root = resources.files("fleetent.platform").joinpath(_RESOURCE_DIR)
+    resource_path = resource_root.joinpath(template_name)
+    if resource_path.is_file():
+        return resource_path.read_text(encoding="utf-8")
+    project_root = Path(__file__).resolve().parents[4]
+    return (project_root / template_name).read_text(encoding="utf-8")
 
 
 def plan_init_config(root: Path, *, force: bool = False) -> list[InitConfigPlanItem]:
@@ -53,18 +67,18 @@ def apply_init_config(
     root: Path, *, force: bool = False, template_root: Path | None = None
 ) -> list[InitConfigPlanItem]:
     """Create local deployment config files and directories."""
-    source_root = template_root or Path.cwd()
     plan = plan_init_config(root, force=force)
     for source, target in _GENERATED_FILES:
         target_path = root / target
         if target_path.exists() and not force:
             continue
-        source_path = source_root / source
-        if not source_path.exists():
+        try:
+            content = _read_template(source, template_root=template_root)
+        except FileNotFoundError:
             print(f"missing template: {source}", file=sys.stderr)
             sys.exit(1)
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_text(source_path.read_text(encoding="utf-8"), encoding="utf-8")
+        target_path.write_text(content, encoding="utf-8")
 
     for directory in _GENERATED_DIRS:
         (root / directory.rstrip("/")).mkdir(parents=True, exist_ok=True)

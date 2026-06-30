@@ -476,6 +476,18 @@ def _required_env_items(agent: agent_store.Agent) -> list[dict[str, Any]]:
             for value in mapping.values():
                 if isinstance(value, str) and value.startswith("env:"):
                     sources.setdefault(value[4:], "MCP")
+        # per-server OAuth (x-fleetent.auth) credentials live on server.auth, not in
+        # env/headers, so they must be scanned explicitly or they never surface on the
+        # Secrets tab: client_secret_env is an env-var NAME; client_id may carry an
+        # ``env:`` reference. (token_env is runtime-injected, not operator-supplied.)
+        auth = getattr(server, "auth", None)
+        if auth is not None:
+            secret_env = getattr(auth, "client_secret_env", "")
+            if secret_env:
+                sources.setdefault(secret_env, "MCP")
+            client_id = getattr(auth, "client_id", "")
+            if isinstance(client_id, str) and client_id.startswith("env:"):
+                sources.setdefault(client_id[4:], "MCP")
     if agent_file.im.slack is not None:
         sources.setdefault(agent_file.im.slack.bot_token_env, "IM")
         sources.setdefault(agent_file.im.slack.app_token_env, "IM")

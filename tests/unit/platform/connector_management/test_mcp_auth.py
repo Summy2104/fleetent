@@ -51,3 +51,77 @@ def test_parse_mcp_auth_config_rejects_missing_or_unknown_values(
 ) -> None:
     with pytest.raises(ValidationError, match=message):
         parse_mcp_auth_config(auth_type, auth_config)
+
+
+def test_parse_mcp_auth_config_supports_authorization_code() -> None:
+    # Slice 2: the discriminated union gains a per-user authorization_code variant. PKCE
+    # public clients may omit client_secret_env, so it is NOT required (unlike client_credentials).
+    from fleetent.mcp_auth_models import OAuthAuthorizationCodeMcpAuthConfig
+
+    auth = parse_mcp_auth_config(
+        "oauth_authorization_code",
+        {
+            "authorization_endpoint": "https://auth.internal/authorize",
+            "token_url": "https://auth.internal/token",
+            "client_id": "fleetent-crm",
+            "scope": "mcp.read",
+            "redirect_path": "/oauth/callback",
+            "client_secret_env": "CRM_OAUTH_SECRET",
+        },
+    )
+
+    assert isinstance(auth, OAuthAuthorizationCodeMcpAuthConfig)
+    assert auth.auth_type == "oauth_authorization_code"
+    assert auth.grant == "authorization_code"
+    assert auth.authorization_endpoint == "https://auth.internal/authorize"
+    assert auth.redirect_path == "/oauth/callback"
+    assert auth.client_id == "fleetent-crm"
+    assert "client_secret_env" in OAuthAuthorizationCodeMcpAuthConfig.secret_env_fields
+
+
+def test_authorization_code_requires_core_fields() -> None:
+    with pytest.raises(ValidationError, match="authorization_endpoint|client_id|token_url"):
+        parse_mcp_auth_config("oauth_authorization_code", {"client_id": "x"})
+
+
+def test_parse_mcp_auth_config_supports_api_key_per_user() -> None:
+    # per-user dynamic api-key/bearer: NO static key/key_env; header_style + credential_input
+    # are server config (defaults bearer / form). bearer and api-key are the same kind here.
+    from fleetent.mcp_auth_models import ApiKeyPerUserMcpAuthConfig
+
+    auth = parse_mcp_auth_config("api_key_per_user", {"header_style": "x_api_key"})
+    assert isinstance(auth, ApiKeyPerUserMcpAuthConfig)
+    assert auth.auth_type == "api_key_per_user"
+    assert auth.header_style == "x_api_key"
+    assert auth.credential_input == "form"  # default = secure form only
+    assert auth.secret_env_fields == frozenset()  # never a static env key
+
+    # defaults
+    d = parse_mcp_auth_config("api_key_per_user", {})
+    assert d.header_style == "bearer" and d.credential_input == "form"
+
+
+def test_api_key_per_user_rejects_unknown_header_or_input() -> None:
+    with pytest.raises(ValidationError):
+        parse_mcp_auth_config("api_key_per_user", {"header_style": "bogus"})
+    with pytest.raises(ValidationError):
+        parse_mcp_auth_config("api_key_per_user", {"credential_input": "nope"})
+
+
+def test_auth_config_models_live_in_neutral_module_importable_by_both_planes() -> None:
+    # The schema is the single source for validation/materialize/frontend; it MUST be
+    # importable without crossing into platform internals so the agent runtime (banned from
+    # importing platform.*) can consume it. The platform path is a re-export shim.
+    import fleetent.mcp_auth_models as neutral
+    from fleetent.platform.connector_management import mcp_auth as shim
+
+    for name in (
+        "NoMcpAuthConfig",
+        "ApiKeyMcpAuthConfig",
+        "OAuthClientCredentialsMcpAuthConfig",
+        "OAuthAuthorizationCodeMcpAuthConfig",
+        "McpAuthConfig",
+        "parse_mcp_auth_config",
+    ):
+        assert hasattr(neutral, name), f"neutral module missing {name}"
+        assert getattr(shim, name) is getattr(neutral, name), f"shim {name} not re-export"

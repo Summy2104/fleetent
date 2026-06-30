@@ -45,9 +45,9 @@ class KBWorkerConfig:
 
 
 def load_config() -> KBWorkerConfig:
-    """Load kb-worker config from process env plus ``$FLEETENT_HOME/kb-worker/.env``."""
+    """Load kb-worker config from process env plus ``$FLEETENT_HOME/kb-service/.env``."""
     home_dir = Path(os.environ.get("FLEETENT_HOME") or Path.home() / ".fleetent").expanduser()
-    env_path = home_dir / "kb-worker" / ".env"
+    env_path = home_dir / "kb-service" / ".env"
     if env_path.exists():
         from dotenv import load_dotenv
 
@@ -69,6 +69,11 @@ def load_config() -> KBWorkerConfig:
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="fleetent kb-worker")
     parser.add_argument(
+        "--config",
+        default="",
+        help="standalone kb-service.yaml path; when set, queue/data paths come from this file",
+    )
+    parser.add_argument(
         "--poll-interval",
         type=float,
         default=1.0,
@@ -81,27 +86,40 @@ def _database() -> SQLiteDatabase:
     return create_database(Settings().database_url)
 
 
-def _tenant_router() -> TenantRouter:
-    data_dir = _database().path.parent
-    return TenantRouter(SQLiteTenantBackend(data_dir=data_dir))
+def _tenant_router(data_dir: Path | None = None) -> TenantRouter:
+    resolved_data_dir = data_dir or _database().path.parent
+    return TenantRouter(SQLiteTenantBackend(data_dir=resolved_data_dir))
 
 
-def _knowledge_database(tenant_id: str) -> SQLiteDatabase:
-    return _tenant_router().tenant_scope(tenant_id).open_kb_db(KB_MIGRATIONS)
+def _knowledge_database(
+    tenant_id: str,
+    *,
+    data_dir: Path | None = None,
+    migrations: list[tuple[int, str]] | None = None,
+) -> SQLiteDatabase:
+    return _tenant_router(data_dir).tenant_scope(tenant_id).open_kb_db(migrations or KB_MIGRATIONS)
 
 
 @contextmanager
-def _use_kb_runtime(tenant_id: str) -> Iterator[None]:
-    scope = _tenant_router().tenant_scope(tenant_id)
+def _use_kb_runtime(
+    tenant_id: str,
+    *,
+    data_dir: Path | None = None,
+    queue_database_url: str | None = None,
+) -> Iterator[None]:
+    scope = _tenant_router(data_dir).tenant_scope(tenant_id)
     previous_db = kb_runtime.runtime._kb_db
     previous_backend = kb_runtime.runtime._kb_vector_backend
+    previous_queue_database_url = kb_runtime.runtime._kb_queue_database_url
     kb_runtime.runtime.set_database(scope.open_kb_db(KB_MIGRATIONS))
     kb_runtime.runtime.set_vector_backend(scope.kb_vector_backend)
+    kb_runtime.runtime.set_queue_database_url(queue_database_url)
     try:
         yield
     finally:
         kb_runtime.runtime.set_database(previous_db)
         kb_runtime.runtime.set_vector_backend(previous_backend)
+        kb_runtime.runtime.set_queue_database_url(previous_queue_database_url)
 
 
 def _parse_import_document(
@@ -117,8 +135,10 @@ def _parse_import_document(
     raise ValueError(f"unsupported document_format: {document_format}")
 
 
-def _require_active_kb(tenant_id: str, kb_id: str) -> None:
-    if not _kb_is_active_knowledge_base(tenant_id, kb_id, database=_knowledge_database(tenant_id)):
+def _require_active_kb(tenant_id: str, kb_id: str, *, data_dir: Path | None = None) -> None:
+    if not _kb_is_active_knowledge_base(
+        tenant_id, kb_id, database=_knowledge_database(tenant_id, data_dir=data_dir)
+    ):
         raise ValueError("kb not found or archived")
 
 
@@ -149,20 +169,29 @@ def _connector_settings(job: dict[str, Any], payload: dict[str, Any]) -> Knowled
     )
 
 
-def run_job(job: dict[str, Any]) -> dict[str, Any]:
+def run_job(
+    job: dict[str, Any],
+    *,
+    data_dir: Path | None = None,
+    queue_database_url: str | None = None,
+) -> dict[str, Any]:
     payload = kb_ingest_jobs.get_job_payload(job)
     job_type = str(job["job_type"])
     tenant_id = str(job["tenant_id"])
     kb_id = str(job["kb_id"])
 
     if job_type == "import_document":
-        _require_active_kb(tenant_id, kb_id)
+        _require_active_kb(tenant_id, kb_id, data_dir=data_dir)
         parsed = _parse_import_document(
             str(payload["source"]),
             str(payload["content"]),
             str(payload["document_format"]),
         )
-        with _use_kb_runtime(tenant_id):
+        with _use_kb_runtime(
+            tenant_id,
+            data_dir=data_dir,
+            queue_database_url=queue_database_url,
+        ):
             document = asyncio.run(
                 ingest_parsed(
                     parsed,
@@ -171,10 +200,12 @@ def run_job(job: dict[str, Any]) -> dict[str, Any]:
                     source=str(payload["source"]),
                     source_url=None,
                     settings=_ingest_settings(job),
-                    database=_knowledge_database(tenant_id),
+                    database=_knowledge_database(tenant_id, data_dir=data_dir),
                 )
             )
-        chunks = KnowledgeStore(_knowledge_database(tenant_id)).get_document_chunks(document.id)
+        chunks = KnowledgeStore(
+            _knowledge_database(tenant_id, data_dir=data_dir)
+        ).get_document_chunks(document.id)
         return {
             "document_id": document.id,
             "chunks": len(chunks),
@@ -185,13 +216,17 @@ def run_job(job: dict[str, Any]) -> dict[str, Any]:
         }
 
     if job_type == "sync_directory":
-        _require_active_kb(tenant_id, kb_id)
+        _require_active_kb(tenant_id, kb_id, data_dir=data_dir)
         config = LocalDirectorySourceConfig(
             source_id=f"admin-local:{tenant_id}:{kb_id}:{Path(str(payload['path'])).expanduser().resolve()}",
             root_path=str(payload["path"]),
             allowed_roots=[str(payload["path"])],
         )
-        with _use_kb_runtime(tenant_id):
+        with _use_kb_runtime(
+            tenant_id,
+            data_dir=data_dir,
+            queue_database_url=queue_database_url,
+        ):
             summary = asyncio.run(sync_local_directory(config, tenant_id=tenant_id, kb_id=kb_id))
         return {
             "scanned": summary.scanned,
@@ -209,13 +244,18 @@ def run_job(job: dict[str, Any]) -> dict[str, Any]:
 
     if job_type == "connector_sync":
         connector_id = str(payload["connector_id"])
-        result = asyncio.run(
-            knowledge_base.run_connector_sync(
-                connector_id,
-                settings=_connector_settings(job, payload),
-                dry_run=False,
+        with _use_kb_runtime(
+            tenant_id,
+            data_dir=data_dir,
+            queue_database_url=queue_database_url,
+        ):
+            result = asyncio.run(
+                knowledge_base.run_connector_sync(
+                    connector_id,
+                    settings=_connector_settings(job, payload),
+                    dry_run=False,
+                )
             )
-        )
         return {
             "connector_id": result.connector_id,
             "status": result.status,
@@ -224,8 +264,12 @@ def run_job(job: dict[str, Any]) -> dict[str, Any]:
         }
 
     if job_type == "extraction":
-        _require_active_kb(tenant_id, kb_id)
-        with _use_kb_runtime(tenant_id):
+        _require_active_kb(tenant_id, kb_id, data_dir=data_dir)
+        with _use_kb_runtime(
+            tenant_id,
+            data_dir=data_dir,
+            queue_database_url=queue_database_url,
+        ):
             summary = asyncio.run(
                 kb_runtime.run_entity_extraction(
                     tenant_id,
@@ -249,32 +293,61 @@ def run_job(job: dict[str, Any]) -> dict[str, Any]:
     raise ValueError(f"unknown kb ingest job type: {job_type}")
 
 
-def run_once() -> dict[str, Any] | None:
-    job = kb_ingest_jobs.claim_next_job()
+def run_once(
+    *,
+    queue_database_url: str | None = None,
+    data_dir: Path | None = None,
+) -> dict[str, Any] | None:
+    job = kb_ingest_jobs.claim_next_job(database_url=queue_database_url)
     if job is None:
         return None
     try:
-        result = run_job(job)
+        result = run_job(job, data_dir=data_dir, queue_database_url=queue_database_url)
     except Exception as exc:
-        failed = kb_ingest_jobs.mark_failed(str(job["id"]), str(exc))
+        failed = kb_ingest_jobs.mark_failed(
+            str(job["id"]),
+            str(exc),
+            database_url=queue_database_url,
+        )
         if failed is None:
             return {"job_id": str(job["id"]), "status": "missing"}
         return {"job_id": str(job["id"]), "status": str(failed["status"])}
-    kb_ingest_jobs.mark_done(str(job["id"]), result=result)
+    kb_ingest_jobs.mark_done(str(job["id"]), result=result, database_url=queue_database_url)
     return {"job_id": str(job["id"]), "status": "done"}
 
 
-def run(*, poll_interval: float) -> None:
+def run(
+    *,
+    poll_interval: float,
+    queue_database_url: str | None = None,
+    data_dir: Path | None = None,
+) -> None:
     while True:
-        processed = run_once()
+        processed = run_once(queue_database_url=queue_database_url, data_dir=data_dir)
         if processed is None:
             time.sleep(poll_interval)
 
 
 def main(argv: list[str] | None = None) -> None:
-    load_config()
+    config = load_config()
     ns = _parse_args(argv or [])
+    queue_database_url = config.queue_database_url or None
+    data_dir: Path | None = None
+    if ns.config:
+        from fleetent.knowledge_base.service_config import (
+            load_kb_service_config,
+            validate_kb_service_boot,
+        )
+
+        standalone_config = load_kb_service_config(Path(ns.config).expanduser())
+        validate_kb_service_boot(standalone_config)
+        queue_database_url = standalone_config.queue_database_url()
+        data_dir = standalone_config.data_dir()
     from fleetent.build_info import log_service_startup
 
     log_service_startup("kb-worker")
-    run(poll_interval=ns.poll_interval)
+    run(
+        poll_interval=ns.poll_interval,
+        queue_database_url=queue_database_url,
+        data_dir=data_dir,
+    )

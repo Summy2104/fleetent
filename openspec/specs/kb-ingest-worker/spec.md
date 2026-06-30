@@ -5,12 +5,13 @@ TBD - created by archiving change kb-worker. Update Purpose after archive.
 ## Requirements
 ### Requirement: kb-worker 是 ingest 队列的唯一消费者
 
-系统 SHALL 提供长驻进程 `fleetent kb-worker`,作为 `kb_ingest_jobs` 队列的**唯一消费者**,处理 ingest 类 job(导入 / sync）以及 `extraction` job:循环 claim(原子)pending job → 按 job_type 调 `knowledge_base.ingest` 核执行摄取,或调 `run_entity_extraction` 执行抽取 → mark done;失败则 mark failed + retry(至上限)。KB 内容与图谱写入 SHALL 只发生在 worker 调核的路径(**单一写入方**)。worker SHALL 经 `db.py` 边界访问队列,SHALL NOT `import fleetent.platform.*`。
+系统 SHALL 提供长驻 worker(随 **standalone KB 服务**运行),作为 **KB 服务本地** ingest 队列的**唯一消费者**,处理 connector sync 与 `extraction` job:循环 claim(原子)pending job → 按 job_type 调 `knowledge_base.ingest` 核执行摄取,或调 `run_entity_extraction` 执行抽取 → mark done;失败则 mark failed + retry(至上限)。KB 内容与图谱写入 SHALL 只发生在 worker 调核的路径(**单一写入方**)。worker SHALL 经 `db.py` 边界访问**本地**队列,SHALL NOT `import fleetent.platform.*`。平台启动、drain management.db 队列的 kb-worker 接线**已退役**。
 
-#### Scenario: worker drain 队列并写 KB
+#### Scenario: worker drain 本地队列并写 KB
 
-- **WHEN** 队列有 pending ingest job 且 `fleetent kb-worker` 在跑
-- **THEN** worker claim 该 job、调 ingest 核完成摄取、写 KB、置 job done
+- **WHEN** KB 本地队列有 pending job 且 worker 在跑
+- **THEN** worker claim 该 job、调核完成摄取/抽取、写 KB、置 job done
+- **AND** 不读写 management.db
 
 #### Scenario: worker 消费 extraction job
 
@@ -43,31 +44,31 @@ TBD - created by archiving change kb-worker. Update Purpose after archive.
 
 ### Requirement: kb-worker 从专属 .env 加载自身配置
 
-`fleetent kb-worker` 启动 SHALL 从 `$FLEETENT_HOME/kb-worker/.env` 加载自身配置(经 `load_dotenv(override=False)`:文件不存在静默跳过;进程已有环境变量优先于文件值)。自身配置 SHALL 含:队列连接、数据底座连接、embedder 配置、Vault 接入。`FLEETENT_HOME` SHALL 经进程环境提供(定位该 `.env` 的前提,不可经该 `.env` 设置)。
+`fleetent kb-worker` 启动 SHALL 从 KB 服务共用的 `kb-service/` 目录加载配置:`--config $FLEETENT_HOME/kb-service/kb-service.yaml`(构造配置)+ 同目录 `.env`(secrets,经进程环境/`load_dotenv` 提供,connector `credential_ref` / `service_key_ref` 在本地解析)。worker 与 `kb-serve` 共用同一 `kb-service/`。旧的 `fleetent kb-worker init-config` 与 `kb-worker/.env` 模型(部署级 .env:队列/底座/embedder/Vault)**已退役**——由 `kb-service init-config` + `kb-service.yaml` 取代。
 
-#### Scenario: 从 .env 加载
+#### Scenario: worker 经 kb-service.yaml 启动
+- **WHEN** `fleetent kb-worker --config $FLEETENT_HOME/kb-service/kb-service.yaml` 启动
+- **THEN** worker 从该 yaml 取构造配置、同目录 `.env` 取 secrets,抽 KB 本地队列执行 ingest
 
-- **WHEN** `$FLEETENT_HOME/kb-worker/.env` 含队列/底座/embedder/Vault 接入配置,且未在进程环境设置
-- **THEN** worker 从该文件读取并成功启动
-
-#### Scenario: 进程环境优先
-
-- **WHEN** 某项同时存在于进程环境与该 `.env`
-- **THEN** 采用进程环境的值(override=False)
-
-#### Scenario: 文件缺失回退进程环境
-
-- **WHEN** 该 `.env` 不存在
-- **THEN** 加载步骤静默跳过,配置仅来自进程环境
+#### Scenario: 旧 kb-worker init-config 已退役
+- **WHEN** 查看 CLI
+- **THEN** 不再提供 `fleetent kb-worker init-config` / `kb-worker.env.example` / `kb-worker/.env`
+- **AND** KB 服务配置由 `fleetent kb-service init-config` 生成于 `kb-service/`
 
 ### Requirement: connector 配置不在 worker 自身配置内
 
-worker 自身配置 SHALL 只含部署级静态连接信息(队列/底座/embedder/Vault 接入)。connector 配置(源地址/参数/凭据)SHALL NOT 出现在 worker 自身配置文件中——它由 Platform 注册表 + Vault 持有,随 job 下发。
+本要求适用于**平台托管(platform-managed)**部署模式:此模式下 worker 自身配置 SHALL 只含部署级静态连接信息(队列/底座/embedder/Vault 接入);connector 配置(源地址/参数/凭据)SHALL NOT 出现在 worker 自身配置文件中——它由 Platform 注册表 + Vault 持有,随 job 下发。**standalone 部署模式**(见 `kb-standalone-ingest`)是另一形态:KB 服务从自己的 `kb-service.yaml` 持有 connector 配置、在本地解析凭据,不依赖 Platform 下发。
 
-#### Scenario: worker 配置不含 connector
+#### Scenario: 平台托管模式 worker 配置不含 connector
 
-- **WHEN** 检视 `kb-worker.env.example` 与 worker 配置加载
+- **WHEN** 平台托管模式下检视 `kb-worker.env.example` 与 worker 配置加载
 - **THEN** 不含任何具体 connector 的源地址/参数/凭据;这些经 job 下发
+
+#### Scenario: standalone 模式连接器配置在 KB 服务
+
+- **WHEN** standalone 模式下 KB 服务运行 ingest
+- **THEN** connector 配置来自 KB 服务的 `kb-service.yaml`,凭据在 KB 主机本地按 `credential_ref` 解析
+- **AND** 不依赖 Platform 注册表 / job 下发
 
 ### Requirement: Worker 存活可观测
 

@@ -36,9 +36,9 @@ def test_loads_kb_worker_env_file(monkeypatch, tmp_path) -> None:
     ):
         monkeypatch.delenv(name, raising=False)
 
-    worker_dir = tmp_path / "kb-worker"
-    worker_dir.mkdir()
-    (worker_dir / ".env").write_text(
+    service_dir = tmp_path / "kb-service"
+    service_dir.mkdir()
+    (service_dir / ".env").write_text(
         "\n".join(
             [
                 "FLEETENT_KB_WORKER_QUEUE_DATABASE_URL=sqlite:////queue/from-file.db",
@@ -80,9 +80,9 @@ def test_process_env_overrides(monkeypatch, tmp_path) -> None:
         vault_addr="http://vault.process:8200",
         vault_token="token-from-process",
     )
-    worker_dir = tmp_path / "kb-worker"
-    worker_dir.mkdir()
-    (worker_dir / ".env").write_text(
+    service_dir = tmp_path / "kb-service"
+    service_dir.mkdir()
+    (service_dir / ".env").write_text(
         "\n".join(
             [
                 "FLEETENT_KB_WORKER_QUEUE_DATABASE_URL=sqlite:////queue/from-file.db",

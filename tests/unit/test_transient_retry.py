@@ -74,3 +74,30 @@ async def test_context_overflow_not_retried_here():
     with pytest.raises(APIStatusError):
         await loop._create_with_transient_retry(do_call)
     assert calls["n"] == 1  # not retried (overflow handled elsewhere)
+
+
+async def test_llm_timeout_retried_then_succeeds():
+    # harden-im-llm-timeout-handling P1: LLM 超时(llm_timeout, should_retry=True)
+    # 须经同 target 重试，而非此前的 unknown→立即抛。
+    calls = {"n": 0}
+
+    async def do_call():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.ReadTimeout("read timed out")
+        return "ok"
+
+    assert await loop._create_with_transient_retry(do_call) == "ok"
+    assert calls["n"] == 2
+
+
+async def test_llm_timeout_retry_capped():
+    calls = {"n": 0}
+
+    async def do_call():
+        calls["n"] += 1
+        raise httpx.ReadTimeout("always")
+
+    with pytest.raises(httpx.ReadTimeout):
+        await loop._create_with_transient_retry(do_call)
+    assert calls["n"] == loop._MAX_TRANSIENT_RETRIES + 1

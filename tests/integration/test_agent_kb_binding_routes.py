@@ -43,14 +43,22 @@ def test_agent_and_kb_routes_materialize_same_integer_binding_set(tmp_path, monk
     agent = agent_store.create_agent("support", "Support.", ["shell"])
     token, _ = _session_for("admin")
 
-    agent_resp = client.post("/admin/agents/support/kbs", headers=_hdr(token), json={"kb_id": "kb1"})
+    agent_resp = client.post(
+        "/admin/agents/support/kbs", headers=_hdr(token), json={"kb_id": "kb1"}
+    )
     assert agent_resp.status_code == 200
 
-    kb_resp = client.post(
-        "/admin/kb/kb2/agents", headers=_hdr(token), json={"agent_id": agent.id}
-    )
+    kb_resp = client.post("/admin/kb/kb2/agents", headers=_hdr(token), json={"agent_id": agent.id})
     assert kb_resp.status_code == 200
 
     assert agent_kbs_store.list_kbs_for_agent("default", agent.id) == ["kb1", "kb2"]
+    assert client.get(f"/admin/kb/by-agent/{agent.id}", headers=_hdr(token)).json() == {
+        "agent_id": agent.id,
+        "kb_ids": ["kb1", "kb2"],
+    }
+    assert client.get("/admin/kb/kb2/agents", headers=_hdr(token)).json() == {
+        "kb_id": "kb2",
+        "agents": [agent.id],
+    }
     exported = materialize.agent_file_from_store(agent_store.get_by_name("support"))
     assert [binding.kb_id for binding in exported.knowledge.bindings] == ["kb1", "kb2"]

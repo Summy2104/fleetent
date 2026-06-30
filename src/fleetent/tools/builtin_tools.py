@@ -354,6 +354,44 @@ def github_connection_status(*, client: dict[str, Any]) -> str:
 
 
 @tool
+def set_mcp_credential(server_id: str, key: str, tool_context: ToolContext | None = None) -> str:
+    """Provide YOUR OWN api-key/bearer for a per-user MCP server (private DM only).
+
+    Use this only when a per-user api-key MCP server tells you it needs your credential AND
+    that server allows in-conversation submission. Pass the server id and your key. For your
+    security this is accepted ONLY in a private direct message (never a shared channel) — in
+    a channel, or when the server prefers its secure form, use the form link instead. The key
+    is stored encrypted, isolated to you, and is never shown back in the conversation. Most
+    servers default to the secure form and will reject this tool.
+    """
+    from fleetent.integrations.mcp import per_user_tokens
+    from fleetent.integrations.mcp.client import find_registered_server
+
+    server = find_registered_server(server_id)
+    if server is None or getattr(server, "auth_type", None) != "api_key_per_user":
+        return f"error: '{server_id}' is not a per-user api-key server"
+    if getattr(server, "credential_input", "form") not in ("tool", "both"):
+        return (
+            f"error: '{server_id}' only accepts your key via its secure form link "
+            f"(this tool is disabled for it)"
+        )
+    sc = getattr(tool_context, "session_context", None) if tool_context else None
+    if getattr(sc, "chat_type", None) != "dm":
+        return (
+            "error: for your security, provide your key in a private DM (or use the secure "
+            "form link) — never in a shared channel"
+        )
+    principal = getattr(tool_context, "principal", None) if tool_context else None
+    user_id = getattr(principal, "user_id", None) if principal else None
+    if not user_id:
+        return "error: cannot determine your identity; unable to store the credential"
+    agent_id = getattr(tool_context, "agent_name", None) if tool_context else None
+    if not per_user_tokens.store_user_credential(server_id, user_id, agent_id, key):
+        return f"error: failed to store your credential for '{server_id}'"
+    return f"Your credential for '{server_id}' was saved securely. Try your request again."
+
+
+@tool
 def read_skill(
     name: str,
     file_path: str | None = None,

@@ -3,7 +3,7 @@
 .PHONY: help install test t test-pr test-unit test-unit-ci test-coverage-ci test-integration test-e2e test-evaluation test-layers lint fmt check typecheck platform-help \
 	up down logs deploy redeploy deploy-status upgrade \
 	frontend-install frontend-build test-frontend \
-	dev-bootstrap dev-reset platform node-provision node kb-worker agent chat dev-clean
+	dev-bootstrap dev-reset platform node-provision node kb-worker kb-serve agent chat dev-clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -149,7 +149,7 @@ AGENT_PORT    ?= 8766
 NODE_ID       ?= local-node
 NODE_PLATFORM_URL ?= http://127.0.0.1:$(PLATFORM_PORT)
 
-DEV_TARGETS := dev-bootstrap dev-reset platform node-provision node kb-worker agent chat dev-clean
+DEV_TARGETS := dev-bootstrap dev-reset platform node-provision node kb-worker kb-serve agent chat dev-clean
 $(DEV_TARGETS): export FLEETENT_HOME := $(FLEETENT_HOME)
 $(DEV_TARGETS): export DATABASE_URL := $(DATABASE_URL)
 $(DEV_TARGETS): export NODE_ID := $(NODE_ID)
@@ -164,10 +164,10 @@ dev-bootstrap: ## Init dev home: migrate management DB + seed built-in admin + s
 	uv run fleetent platform seed-builtin-admin
 	uv run fleetent platform init-config --home "$(FLEETENT_HOME)"
 	uv run fleetent node init-config
-	uv run fleetent kb-worker init-config
+	uv run fleetent kb-service init-config
 
 dev-reset: dev-clean dev-bootstrap node-provision ## Wipe + re-init dev home from scratch (clean → bootstrap → provision node)
-	@echo "dev home reset: $(FLEETENT_HOME) — start services with 'make platform', 'make node', 'make kb-worker'"
+	@echo "dev home reset: $(FLEETENT_HOME) — start services with 'make platform', 'make node', 'make kb-worker', 'make kb-serve'"
 
 platform: ## Start platform control-plane (admin API/UI), default port 8765
 	uv run fleetent platform serve --host 127.0.0.1 --port $(PLATFORM_PORT)
@@ -179,7 +179,10 @@ node: node-provision ## Start node supervisor (auto-provisions node/.env first; 
 	uv run fleetent node start
 
 kb-worker: ## Start the KB ingest worker (single queue consumer)
-	uv run fleetent kb-worker
+	uv run fleetent kb-worker --config $(FLEETENT_HOME)/kb-service/kb-service.yaml
+
+kb-serve: ## Start the KB read service with the shared standalone KB config
+	uv run fleetent kb-serve --config $(FLEETENT_HOME)/kb-service/kb-service.yaml
 
 agent: ## Run one agent directly with HTTP /chat+/ws: make agent AGENT=<name> [AGENT_PORT=8766]
 	@test -n "$(AGENT)" || { echo "usage: make agent AGENT=<name> [AGENT_PORT=8766]"; exit 2; }

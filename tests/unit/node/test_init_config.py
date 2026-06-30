@@ -6,6 +6,8 @@ from unittest.mock import patch
 
 from fleetent import __main__ as cli
 
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
 
 def _run_cli(*args: str) -> tuple[str, str, int]:
     stdout, stderr = StringIO(), StringIO()
@@ -22,21 +24,13 @@ def _run_cli(*args: str) -> tuple[str, str, int]:
     return stdout.getvalue(), stderr.getvalue(), exit_code
 
 
-def _write_node_template(root: Path, content: str = "FLEETENT_NODE_ID=node-example\n") -> None:
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "node.env.example").write_text(content, encoding="utf-8")
+def _canonical_node_env() -> str:
+    return (_REPO_ROOT / "node.env.example").read_text(encoding="utf-8")
 
 
 def test_node_init_config_creates_home_env(monkeypatch, tmp_path) -> None:
-    template_root = tmp_path / "templates"
-    _write_node_template(
-        template_root,
-        content=(
-            "FLEETENT_NODE_PLATFORM_URL=http://127.0.0.1:8765\n"
-            "FLEETENT_NODE_ID=node-example\n"
-            "FLEETENT_NODE_SERVICE_KEY=\n"
-        ),
-    )
+    template_root = tmp_path / "outside-repo"
+    template_root.mkdir()
     home_dir = tmp_path / "home"
     monkeypatch.chdir(template_root)
     monkeypatch.setenv("FLEETENT_HOME", str(home_dir))
@@ -47,16 +41,12 @@ def test_node_init_config_creates_home_env(monkeypatch, tmp_path) -> None:
     assert err == ""
     assert "create node/.env" in out
     assert "service key" in out.lower()
-    assert (home_dir / "node" / ".env").read_text(encoding="utf-8") == (
-        "FLEETENT_NODE_PLATFORM_URL=http://127.0.0.1:8765\n"
-        "FLEETENT_NODE_ID=node-example\n"
-        "FLEETENT_NODE_SERVICE_KEY=\n"
-    )
+    assert (home_dir / "node" / ".env").read_text(encoding="utf-8") == _canonical_node_env()
 
 
 def test_node_init_config_skips_existing_and_force_overwrites(monkeypatch, tmp_path) -> None:
-    template_root = tmp_path / "templates"
-    _write_node_template(template_root, content="FLEETENT_NODE_ID=node-from-template\n")
+    template_root = tmp_path / "outside-repo"
+    template_root.mkdir()
     home_dir = tmp_path / "home"
     node_env = home_dir / "node" / ".env"
     node_env.parent.mkdir(parents=True, exist_ok=True)
@@ -76,4 +66,4 @@ def test_node_init_config_skips_existing_and_force_overwrites(monkeypatch, tmp_p
     assert code == 0
     assert err == ""
     assert "overwrite node/.env" in out
-    assert node_env.read_text(encoding="utf-8") == "FLEETENT_NODE_ID=node-from-template\n"
+    assert node_env.read_text(encoding="utf-8") == _canonical_node_env()

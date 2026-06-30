@@ -255,6 +255,11 @@ class McpServerSettings(BaseModel):
     file_isolation: str = "on"
     # Self-hosted OAuth2 (None = header/api-key auth or no auth).
     auth: McpOAuthSettings | None = None
+    # per-user dynamic api-key/bearer (mcp-per-user-apikey): server-level *method* settings;
+    # the secret is per-user (supplied at runtime), never here. header_style decides injection
+    # (Authorization: Bearer | X-API-Key); credential_input gates submission methods.
+    header_style: str = "bearer"
+    credential_input: str = "form"
     # Per-server approval rules (approval-boundary-redesign D4): which operations on this MCP
     # server require approval. Empty = all operations no-approval (the narrow-surface default).
     approval_rules: list[McpApprovalRule] = Field(default_factory=list)
@@ -364,7 +369,6 @@ class McpSettings(BaseModel):
 class SchedulingSettings(BaseModel):
     enabled: bool = True
     default_timezone: str = "UTC"
-    kb_connector_sweep_interval_seconds: int = 60
 
 
 class WebhooksSettings(BaseModel):

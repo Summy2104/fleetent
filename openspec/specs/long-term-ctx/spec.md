@@ -40,10 +40,8 @@ agent prompt 的长期上下文。
 ### Requirement: Optional knowledge provider
 系统 SHALL 将 KB 检索作为可替换的 knowledge provider,经一个正式契约访问:
 `(principal: Principal, query: str, kb_ids: list[str], limit: int, audit: KBRetrievalAuditContext | None) → list[KnowledgeChunk]`。
-系统 SHALL 提供默认 built-in `LocalKnowledgeProvider`(读本地 knowledge-base、按 agent retrieval_policy 跑检索),
-并 SHALL 允许经 `set_knowledge_provider` 注入替换 provider,注入的 provider SHALL 按同一契约接收 principal、
-fleetent 解析好的 kb_ids 与 audit。knowledge provider 未启用、未配置、返回空结果、超时或抛错时,
-long-term-ctx 仍正常返回可用上下文(失败降级为空结果)。
+系统 SHALL 提供两个 built-in provider 实现:默认 `LocalKnowledgeProvider`(读本地 knowledge-base、按 agent retrieval_policy 跑检索),以及 `HttpKnowledgeProvider`(经 HTTP 调一个远程 KB 检索端点)。`HttpKnowledgeProvider` SHALL 按一份中立 wire 协议工作——请求体 `{principal:{user_id, tenant_id}, query, kb_ids, limit}`,响应体 `{chunks: [KnowledgeChunk JSON]}`——并以 Bearer service key + `X-Fleetent-Principal` header 鉴权(复用 `identity.encode_ingress_principal`);自家 KB 服务与外部系统实现同一份协议,无特权内部路径。
+系统 SHALL 允许经 `set_knowledge_provider` 注入替换 provider,注入的 provider SHALL 按同一契约接收 principal、fleetent 解析好的 kb_ids 与 audit。knowledge provider 未启用、未配置、返回空结果、超时或抛错(含 HTTP 错误/网络故障)时,long-term-ctx 仍正常返回可用上下文(失败降级为空结果)。
 
 #### Scenario: Knowledge provider disabled
 - **WHEN** knowledge provider 未配置或被禁用
@@ -71,8 +69,13 @@ long-term-ctx 仍正常返回可用上下文(失败降级为空结果)。
 - **AND** principal 含 tenant_id 与 user_id、kb_ids 为 fleetent 按 agent 绑定解析后的范围、audit 被透传
 - **AND** 返回类型为 `list[KnowledgeChunk]`
 
+#### Scenario: HttpKnowledgeProvider retrieves over the wire protocol
+- **WHEN** 配置为 `HttpKnowledgeProvider` 且远程 KB 端点可用
+- **THEN** provider 以 `{principal, query, kb_ids, limit}` POST 到配置的 endpoint,带 Bearer service key 与 `X-Fleetent-Principal` header
+- **AND** 把响应 `{chunks: [...]}` 反序列化为 `list[KnowledgeChunk]` 返回给 long-term-ctx 预算管线
+
 #### Scenario: Provider failure degrades to empty
-- **WHEN** knowledge provider 超时或抛出异常
+- **WHEN** knowledge provider 超时或抛出异常(含 HttpKnowledgeProvider 的 HTTP 错误 / 网络故障)
 - **THEN** long-term-ctx 记日志并将该路径降级为空结果
 - **AND** `build_context()` 不抛出、不中断回复
 

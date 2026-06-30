@@ -19,7 +19,8 @@ make dev-clean                       # 清掉旧 home（验证全新流程时用
 make dev-bootstrap                   # 生成 dev secret key + alembic upgrade head + seed 内置 admin
 ```
 
-产物：`.fleetent-dev/{.dev_secret_key, .env, management.db, node/.env, kb-worker/.env}`（management.db 独占根，tenant-first 决策 B）。seed 出的内置 admin：`admin` / `admin`（首登 must_reset）。
+产物：`.fleetent-dev/{.dev_secret_key, .env, management.db, node/.env, kb-service/{kb-service.yaml,.env}}`
+（management.db 独占根，tenant-first 决策 B）。seed 出的内置 admin：`admin` / `admin`（首登 must_reset）。
 
 ### 2. 起 platform
 

@@ -195,9 +195,18 @@ def test_docker_compose_runs_managed_stack_with_path_parity_and_socket_boundary(
         "platform:",
         "node:",
         "kb-worker:",
+        "kb-serve:",
         'command: ["platform"]',
         'command: ["node"]',
-        'command: ["kb-worker"]',
+        (
+            'command: ["kb-worker", "--config", '
+            '"${FLEETENT_HOME:?set FLEETENT_HOME}/kb-service/kb-service.yaml"]'
+        ),
+        (
+            'command: ["kb-serve", "--config", '
+            '"${FLEETENT_HOME:?set FLEETENT_HOME}/kb-service/kb-service.yaml"]'
+        ),
+        "- ${FLEETENT_HOME:?set FLEETENT_HOME}/kb-service/.env",
         '"8765:8765"',
         '"8786:8786"',
         "FLEETENT_AUTO_UPGRADE: ${FLEETENT_AUTO_UPGRADE:-false}",
@@ -259,8 +268,9 @@ def test_pilot_install_checklist_contains_required_commands():
         "docker compose run --rm fleetent uv run fleetent platform upgrade",
         "docker compose up -d",
         "curl -fsS http://127.0.0.1:8765/health",
-        "GET /admin/kb/connectors",
-        "POST /admin/kb/connectors",
+        "平台托管 KB ingest 已退役",
+        "kb-service.yaml",
+        "kb-worker --config $FLEETENT_HOME/kb-service/kb-service.yaml",
         "GET /admin/stats/agents/<agent_id>/overview",
         "GET /admin/stats/agents/<agent_id>/tools",
         "GET /admin/stats/sessions/<session_id>/trace",
@@ -338,8 +348,9 @@ def test_pilot_runbook_contains_required_commands_and_failure_handling():
         "uv run pytest tests/evaluation/test_memory_extraction_eval.py -q",
         "uv run pytest tests/evaluation/test_long_term_context_eval.py -q",
         "uv run pytest tests/evaluation/test_reflection_report_eval.py -q",
-        "POST /admin/kb/connectors/<google_drive_connector_id>/check",
-        "POST /admin/kb/connectors/<confluence_connector_id>/check",
+        "平台托管 KB ingest 已退役",
+        "kb-service.yaml",
+        "kb-worker --config $FLEETENT_HOME/kb-service/kb-service.yaml",
         "FLEETENT_EVAL_REAL_EMBEDDING=1",
         "skipped: credentials not configured",
     ]
@@ -415,7 +426,7 @@ def test_compose_deployment_runbook_documents_operations_and_boundaries():
         "FLEETENT_HOME",
         "docker.sock 信任边界",
         "rootless Docker",
-        "platform / node / kb-worker",
+        "platform / node / kb-worker / kb-serve",
         "node.backend=container",
         "agent 兄弟容器",
         "build commit",
