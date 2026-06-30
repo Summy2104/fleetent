@@ -201,9 +201,18 @@ async def handle_approval_action(
     an ephemeral notice while the prompt keeps its buttons. On an accepted
     decision the prompt message is rewritten to a result state (buttons removed)
     to prevent double-clicks, then the suspended run is resumed (approval-suspend-resume).
+
+    managed-approval-button-wire-statedb (AAA-8204 #2): under node-managed placement the
+    slack edge runs in the node process, which never wired approval_store/state_db — so
+    resolving in place raises ``state_db not initialized`` and the run never resumes. When a
+    node injected its inbound dispatcher we instead synthesize the equivalent approve/reject
+    command and forward it through that dispatcher to the agent process (which owns
+    approval_store/session/connectors), reusing the text-command resume path. Standalone
+    (agent self-hosted, no dispatcher injected) keeps resolving + resuming in place.
     """
     from fleetent.governance import approval_store
     from fleetent.governance.approval_router import resolve_approval_request
+    from fleetent.im_gateway import inbound_dispatch
     from fleetent.session import manager as session_mgr
 
     await ack()
@@ -216,6 +225,21 @@ async def handle_approval_action(
 
     decision = "rejected" if action_id == "approval_reject" else "approved"
     always = action_id == "approval_approve_always"
+
+    forwarder = inbound_dispatch.get_inbound_dispatcher()
+    if forwarder is not None:
+        await _forward_approval_decision(
+            forwarder,
+            client,
+            channel=channel,
+            message_ts=message_ts,
+            agent_name=agent_name,
+            clicker=clicker,
+            approval_id=approval_id,
+            decision=decision,
+            always=always,
+        )
+        return
 
     # The run persisted the approval's session id; recover authorized actors from that
     # session's pending entry so authorization survives a restart.
@@ -288,6 +312,74 @@ async def handle_approval_action(
             )
         except Exception as exc:  # noqa: BLE001 — decision stands; resume is best-effort
             logger.warning("approval_button_resume_failed", approval_id=approval_id, error=str(exc))
+
+
+async def _forward_approval_decision(
+    forwarder: Any,
+    client: Any,
+    *,
+    channel: str,
+    message_ts: str,
+    agent_name: str | None,
+    clicker: str,
+    approval_id: str,
+    decision: str,
+    always: bool,
+) -> None:
+    """Managed mode (AAA-8204 #2): forward the button decision as a synthesized text command.
+
+    The node process can neither read the approval store nor resume the run (no state_db),
+    so the click becomes an ``approve/reject [always] <id>`` command dispatched to the agent
+    process via the injected inbound dispatcher — the same chain a typed approval takes. The
+    agent owns authorization + resume + (managed) connector resolution. The clicker's id is
+    the decision actor, so the agent's gate authorization still applies.
+    """
+    from fleetent.im_gateway.normalizer import NormalizedMessage, SessionContext
+
+    verb = "approve" if decision == "approved" else "reject"
+    command = (
+        f"{verb} always {approval_id}"
+        if always and decision == "approved"
+        else f"{verb} {approval_id}"
+    )
+
+    # Move the prompt to a result state (buttons removed) so a second click is impossible;
+    # the agent records the decision and delivers the run's outcome to its original address.
+    verdict = "✅ 已批准" if decision == "approved" else "❌ 已拒绝"
+    suffix = "（始终允许）" if always else ""
+    with contextlib.suppress(Exception):  # cosmetic; the agent owns the authoritative result
+        await client.chat_update(
+            channel=channel,
+            ts=message_ts,
+            text=f"{verdict}{suffix} `{approval_id}` — by <@{clicker}>",
+            blocks=[],
+        )
+
+    async def _reply(text: str, blocks: list[dict[str, Any]] | None = None) -> None:
+        # Used only for route()'s direct notices (e.g. unauthorized/expired); the resumed
+        # run's final reply is delivered to the persisted address by _resume_pending_in_session.
+        if not _has_postable_content(text, blocks):
+            return
+        kwargs: dict[str, Any] = {"channel": channel, "text": text}
+        if blocks is not None:
+            kwargs["blocks"] = blocks
+        await client.chat_postMessage(**kwargs)
+
+    msg = NormalizedMessage(
+        platform="slack",
+        # The agent resolves the run's real session from the approval row (like the text
+        # path); this is only a fallback id for that lookup.
+        session_id=f"slack:dm:{clicker}:approval-{approval_id}",
+        user_id=clicker,
+        text=command,
+        attachments=[],
+        reply_func=_reply,
+        channel_id=channel,
+        agent_name=agent_name or "",
+        session_context=SessionContext(platform="slack", sender_id=clicker),
+        outbound_connectors={"slack": client},
+    )
+    await forwarder(msg)
 
 
 def _make_upload_func(

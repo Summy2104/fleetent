@@ -160,3 +160,61 @@ async def test_approve_button_triggers_resume(monkeypatch):
     assert resume.await_args.args[1] == "slack:dm:U_REQ:1.1"  # session_id
     assert resume.await_args.args[2] == "appr-1"  # approval_id
     assert resume.await_args.args[3] == "approved"  # decision
+
+
+# ── managed mode: forward a synthesized command instead of resolving in node (AAA-8204 ②) ──
+
+
+async def test_managed_button_forwards_synthesized_command(monkeypatch):
+    """AAA-8204 ②: the slack edge runs in the node process under managed placement, and node
+    never wired approval_store/state_db — resolving in place raises 'state_db not initialized'.
+    Instead the button must synthesize the equivalent approve/reject command and forward it
+    through the injected inbound dispatcher to the agent process, reusing the text-command
+    resume path (③ matching + ⑥ connector resolution)."""
+    from fleetent.im_gateway import inbound_dispatch, slack
+
+    forwarded = []
+
+    async def _disp(msg):
+        forwarded.append(msg)
+
+    monkeypatch.setattr(inbound_dispatch, "_dispatcher", _disp)  # node injected a forwarder
+    resolve_spy = AsyncMock(return_value=True)
+    monkeypatch.setattr("fleetent.governance.approval_router.resolve_approval_request", resolve_spy)
+
+    ack = AsyncMock()
+    client = AsyncMock()
+    await slack.handle_approval_action(
+        ack, _body("approval_approve_always", approval_id="ebd2986f"), client, agent_name="my-bot"
+    )
+
+    ack.assert_called_once()
+    # In-place resolve is skipped — the decision is forwarded to the agent.
+    resolve_spy.assert_not_awaited()
+    assert len(forwarded) == 1
+    fwd = forwarded[0]
+    assert fwd.text == "approve always ebd2986f"
+    assert fwd.user_id == "U_CLICKER"
+    assert fwd.agent_name == "my-bot"
+    # Prompt moved to a result state (buttons removed) to prevent double-clicks.
+    assert client.chat_update.call_args.kwargs["blocks"] == []
+
+
+async def test_managed_button_forwards_reject_command(monkeypatch):
+    from fleetent.im_gateway import inbound_dispatch, slack
+
+    forwarded = []
+
+    async def _disp(msg):
+        forwarded.append(msg)
+
+    monkeypatch.setattr(inbound_dispatch, "_dispatcher", _disp)
+    await slack.handle_approval_action(
+        ack=AsyncMock(),
+        body=_body("approval_reject", approval_id="ebd2986f"),
+        client=AsyncMock(),
+        agent_name="my-bot",
+    )
+
+    assert len(forwarded) == 1
+    assert forwarded[0].text == "reject ebd2986f"
