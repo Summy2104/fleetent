@@ -300,6 +300,7 @@ const en = {
   "mcp.authTypeNone": "None",
   "mcp.authTypeApiKey": "API Key",
   "mcp.authTypeOauthClientCredentials": "OAuth Client Credentials",
+  "mcp.authTypeOauthAuthorizationCode": "OAuth Authorization Code (per-user)",
   "mcp.authTypeApiKeyPerUser": "API Key (per-user)",
   "mcp.headerStyleLabel": "Header style",
   "mcp.headerStyleBearer": "Authorization: Bearer",
@@ -313,6 +314,8 @@ const en = {
   "mcp.oauthClientIdLabel": "Client ID",
   "mcp.oauthClientSecretEnvLabel": "Client secret env name",
   "mcp.oauthScopeLabel": "OAuth scope",
+  "mcp.oauthAuthorizationEndpointLabel": "Authorization endpoint",
+  "mcp.oauthRedirectPathLabel": "Redirect path",
   "mcp.commandLabel": "Command",
   "mcp.commandPlaceholder":
     "e.g. npx -y @modelcontextprotocol/server-filesystem",
@@ -960,6 +963,7 @@ const zh: Messages = {
   "mcp.authTypeNone": "无",
   "mcp.authTypeApiKey": "API Key",
   "mcp.authTypeOauthClientCredentials": "OAuth Client Credentials",
+  "mcp.authTypeOauthAuthorizationCode": "OAuth 授权码（按用户动态授权）",
   "mcp.authTypeApiKeyPerUser": "API Key（按用户）",
   "mcp.headerStyleLabel": "Header 风格",
   "mcp.headerStyleBearer": "Authorization: Bearer",
@@ -973,6 +977,8 @@ const zh: Messages = {
   "mcp.oauthClientIdLabel": "Client ID",
   "mcp.oauthClientSecretEnvLabel": "Client secret 环境变量名",
   "mcp.oauthScopeLabel": "OAuth scope",
+  "mcp.oauthAuthorizationEndpointLabel": "授权端点 (authorization endpoint)",
+  "mcp.oauthRedirectPathLabel": "回调路径 (redirect path)",
   "mcp.commandLabel": "命令",
   "mcp.commandPlaceholder":
     "例如 npx -y @modelcontextprotocol/server-filesystem",
