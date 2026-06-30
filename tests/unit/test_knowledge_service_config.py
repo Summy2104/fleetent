@@ -4,6 +4,15 @@ import pytest
 import yaml
 
 
+def test_kb_service_default_ports_are_regularized() -> None:
+    from fleetent.knowledge_base.serve import KBServeConfig, _parse_args
+    from fleetent.knowledge_base.service_config import KBServiceSection
+
+    assert KBServeConfig(tenant_id="tenant-a", service_key_ref="env:KB_KEY").port == 8768
+    assert _parse_args([]).port == 8768
+    assert KBServiceSection(tenant_id="tenant-a", service_key_ref="env:KB_KEY").port == 8768
+
+
 def _knowledge_doc() -> dict[str, object]:
     return {
         "knowledge_bases": [

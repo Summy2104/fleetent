@@ -27,7 +27,7 @@ curl -fsS http://127.0.0.1:8765/health
 Compose 会启动：
 
 - `platform`：监听 `8765`，唯一可设置 `FLEETENT_AUTO_UPGRADE` 的服务。
-- `node`：监听 forwarder `8786`，挂载 `/var/run/docker.sock`，设置
+- `node`：监听 forwarder `8767`，挂载 `/var/run/docker.sock`，设置
   `FLEETENT_NODE_BACKEND=container`。
 - `kb-worker`：消费 KB ingest 队列，读取 `${FLEETENT_HOME}/kb-service/default/kb-service.yaml`
   与 `${FLEETENT_HOME}/kb-service/default/.env`。
@@ -97,7 +97,7 @@ standalone 布局写入过 KB 文件，需要一次性手动把
 knowledge:
   provider:
     type: http
-    url: http://kb-serve:8787/search
+    url: http://kb-serve:8768/search
     auth_ref: env:FLEETENT_KB_SERVICE_KEY
 ```
 
@@ -109,7 +109,7 @@ service:
   tenant_id: default
   service_key_ref: env:FLEETENT_KB_SERVICE_KEY
   host: 0.0.0.0
-  port: 8787
+  port: 8768
 ```
 
 ```dotenv

@@ -106,8 +106,8 @@ node 状态（node/）                          →  [NODE] 自己（provision +
 2. **管理库在根目录**：`FLEETENT_HOME/management.db`。
 3. **租户优先布局**：canonical home = `tenants/<tenant>/agents/<agent>/`。
 4. **agent data 拍平**：运行时 DB 与 sessions/logs/workspaces 都落 `<agent-home>/data/`。
-5. **KB 是 tenant 级**：`tenants/<tenant>/kb/kb.db` 与 `tenants/<tenant>/kb/kb_vectors.db`。
-6. **KB 服务可 standalone 运行但数据布局不变**：`fleetent kb-serve --config kb-service.yaml` 与 `fleetent kb-worker --config kb-service.yaml` 都固定读写同一租户子树 `tenants/<tenant>/kb/`；standalone 只把 connector 配置、secret、sweep 和 ingest 队列搬到 KB 主机本地，不改变 KB 物理布局。platform 托管 ingest 暂时并存，退役属于后续 `kb-retire-platform-ingest`。
+5. **KB 是 tenant 级**：`kb-service/<tenant>/data/kb.db` 与 `kb-service/<tenant>/data/kb_vectors.db`。
+6. **KB 服务可 standalone 运行且 service home 自包含**：`fleetent kb-serve --config kb-service/<tenant>/kb-service.yaml` 与 `fleetent kb-worker --config kb-service/<tenant>/kb-service.yaml` 都固定读写同一租户 service home 下的 `data/`；connector 配置、secret、sweep 和 ingest 队列也都落在同一 `kb-service/<tenant>/`。platform 托管 ingest 暂时并存，退役属于后续 `kb-retire-platform-ingest`。
 
 ---
 

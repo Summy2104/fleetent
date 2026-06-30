@@ -208,7 +208,7 @@ def test_docker_compose_runs_managed_stack_with_path_parity_and_socket_boundary(
         ),
         "- ${FLEETENT_HOME:?set FLEETENT_HOME}/kb-service/default/.env",
         '"8765:8765"',
-        '"8786:8786"',
+        '"8767:8767"',
         "FLEETENT_AUTO_UPGRADE: ${FLEETENT_AUTO_UPGRADE:-false}",
         "FLEETENT_NODE_BACKEND: container",
         "FLEETENT_NODE_AGENT_NETWORK: fleetent",

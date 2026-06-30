@@ -46,7 +46,7 @@ def test_capture_dials_reported_forward_host(monkeypatch) -> None:
     monkeypatch.delenv("FLEETENT_FORWARDER_HOST_OVERRIDE", raising=False)
 
     reported = respx.get(
-        f"http://127.0.0.1:8786/forward/agents/support/skills/{skill}/bundle"
+        f"http://127.0.0.1:8767/forward/agents/support/skills/{skill}/bundle"
     ).mock(
         return_value=httpx.Response(
             200, content=_bundle_bytes(skill, {"SKILL.md": "evolved by agent\n"})
@@ -54,7 +54,7 @@ def test_capture_dials_reported_forward_host(monkeypatch) -> None:
     )
     # The unresolvable convention host must NOT be dialed.
     convention = respx.get(
-        f"http://node-a.internal:8786/forward/agents/support/skills/{skill}/bundle"
+        f"http://node-a.internal:8767/forward/agents/support/skills/{skill}/bundle"
     ).mock(return_value=httpx.Response(500))
 
     bundle = backflow_store._capture_bundle_from_owning_node(agent_id=7, skill_name=skill)
