@@ -17,6 +17,7 @@ import contextlib
 import json
 import os
 import signal
+import threading
 import time
 from collections.abc import Awaitable
 from dataclasses import dataclass
@@ -155,6 +156,113 @@ async def _drain_and_close(rt: AgentRuntime, drain_timeout: float) -> None:
     # down every host (incl. per-user stdio subprocesses) on its own owner task (D4).
     await _stop_step("mcp_stdio_reaper", mcp.stop_stdio_reaper())
     await _stop_step("mcp_sessions", mcp.aclose_all())
+    # AAA-8204 #4: aclose_all only closes stdin; npm/node/chromium MCP subprocesses (+ their
+    # grandchildren) may not exit, leaving 8 waitpid reader threads blocked so the interpreter
+    # never exits and node SIGKILLs the agent every restart. Deterministically drive exit:
+    # force-kill the descendant process tree (freeing those threads) + arm an os._exit(0)
+    # watchdog. The graceful drain path MUST exit 0 (AGENTS.md owner-task contract).
+    _drive_exit_after_drain()
+
+
+# AAA-8204 #4 graceful-exit timings: SIGTERM→grace→SIGKILL for residual MCP subprocess trees,
+# then an os._exit(0) fallback if the interpreter still has not exited on its own.
+_SUBPROCESS_TERM_GRACE = 2.0
+_HARD_EXIT_DEADLINE = 5.0
+
+
+def _pid_alive(pid: int) -> bool:
+    """Whether ``pid`` is still alive (signal 0 probe). False on any OS error."""
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _list_descendant_pids(pid: int) -> list[int]:
+    """All descendant PIDs of ``pid`` (children, grandchildren, …), breadth-first.
+
+    Linux ``/proc`` PPID walk. On a host without a readable ``/proc`` (macOS dev, sandbox)
+    this returns ``[]`` — read-only and never raises — and the os._exit watchdog still
+    guarantees the process exits. Used at shutdown to reap stdio MCP subprocess trees.
+    """
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return []
+    children: dict[int, list[int]] = {}
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        try:
+            with open(f"/proc/{entry}/stat") as fh:
+                content = fh.read()
+            # stat is "pid (comm) state ppid ..."; comm may contain spaces/parens, so parse
+            # the fields after the LAST ')'. ppid is the second of those fields.
+            ppid = int(content[content.rfind(")") + 2 :].split()[1])
+        except (OSError, ValueError, IndexError):
+            continue
+        children.setdefault(ppid, []).append(int(entry))
+    out: list[int] = []
+    queue = list(children.get(pid, []))
+    while queue:
+        cur = queue.pop(0)
+        out.append(cur)
+        queue.extend(children.get(cur, []))
+    return out
+
+
+def _terminate_descendant_processes(grace: float) -> None:
+    """SIGTERM then (after ``grace``) SIGKILL the agent's whole descendant process tree.
+
+    Frees the waitpid reader threads blocked on stdio MCP subprocesses (and their npm/node/
+    chromium grandchildren), which otherwise keep the interpreter from exiting. Each signal
+    is contained per-PID so one unkillable/permission-denied process never blocks the rest
+    or changes the exit path. SIGTERM is sent deepest-first so a parent cannot respawn.
+    """
+    pids = _list_descendant_pids(os.getpid())
+    if not pids:
+        return
+    for pid in reversed(pids):
+        with contextlib.suppress(OSError):
+            os.kill(pid, signal.SIGTERM)
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline:
+        if not any(_pid_alive(pid) for pid in pids):
+            return
+        time.sleep(0.05)
+    for pid in reversed(pids):
+        with contextlib.suppress(OSError):
+            os.kill(pid, signal.SIGKILL)
+
+
+def _arm_hard_exit_watchdog(deadline: float) -> None:
+    """Arm a daemon timer that ``os._exit(0)`` if the process is still alive after ``deadline``.
+
+    Daemon so the timer itself never keeps the process up: if the interpreter exits cleanly
+    first, the timer is reaped with it. This is the last-resort guarantee that a graceful
+    drain exits 0 even when some teardown ignored cancellation (AAA-8204 #4).
+    """
+    timer = threading.Timer(deadline, lambda: os._exit(0))
+    timer.daemon = True
+    timer.start()
+
+
+def _drive_exit_after_drain(
+    grace: float = _SUBPROCESS_TERM_GRACE, hard_deadline: float = _HARD_EXIT_DEADLINE
+) -> None:
+    """Deterministically drive process exit after drain (AAA-8204 #4).
+
+    First force-kill the residual MCP subprocess tree (bulkheaded: a failure here is logged,
+    never raised, and never blocks the exit), then arm the os._exit(0) watchdog. Together
+    these cover both diagnosed causes — lingering non-daemon waitpid threads and a teardown
+    that ignored cancellation.
+    """
+    try:
+        _terminate_descendant_processes(grace)
+    except Exception as exc:  # noqa: BLE001 — contained: the watchdog still guarantees exit
+        _logger.warn("drive_exit_terminate_failed", error=str(exc))
+    _arm_hard_exit_watchdog(hard_deadline)
 
 
 def resolve_home(agent_id: str, home: str | Path | None = None) -> Path:
