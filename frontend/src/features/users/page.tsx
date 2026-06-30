@@ -28,7 +28,6 @@ export function UsersPage(): JSX.Element {
   const users = useUsersQuery()
   const canWrite = me.data?.role !== 'viewer'
 
-  const [tab, setTab] = useState<'users' | 'im'>('users')
   const [formMode, setFormMode] = useState<'create' | 'edit'>('create')
   const [formOpen, setFormOpen] = useState(false)
   const [editUser, setEditUser] = useState<UserListItem | null>(null)
@@ -68,42 +67,40 @@ export function UsersPage(): JSX.Element {
     setFormOpen(false)
   }
 
+  // 独立功能按钮统一走 DataTable 的 actions 插槽（toolbar 右侧），不再散落在页头。
+  const usersActions = canWrite ? (
+    <>
+      <Button onClick={() => setServicePrincipalOpen(true)} variant="secondary">
+        <KeyRound className="size-4" /> {t('users.createServicePrincipal')}
+      </Button>
+      <Button
+        onClick={() => {
+          setEditUser(null)
+          setFormMode('create')
+          setFormOpen(true)
+        }}
+      >
+        <UserPlus className="size-4" /> {t('users.createUser')}
+      </Button>
+    </>
+  ) : undefined
+
+  const imActions = canWrite ? (
+    <Button onClick={() => setAddImMappingOpen(true)}>
+      <Plus className="size-4" /> {t('users.addImMapping')}
+    </Button>
+  ) : undefined
+
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <h2 className="font-semibold text-xl tracking-tight">{t('users.title')}</h2>
-          <Badge variant="secondary">{users.data?.length ?? 0}</Badge>
-        </div>
-        {canWrite ? (
-          <div className="flex flex-wrap gap-2">
-            {tab === 'users' ? (
-              <>
-                <Button onClick={() => setServicePrincipalOpen(true)} variant="secondary">
-                  <KeyRound className="size-4" /> {t('users.createServicePrincipal')}
-                </Button>
-                <Button
-                  onClick={() => {
-                    setEditUser(null)
-                    setFormMode('create')
-                    setFormOpen(true)
-                  }}
-                >
-                  <UserPlus className="size-4" /> {t('users.createUser')}
-                </Button>
-              </>
-            ) : (
-              <Button onClick={() => setAddImMappingOpen(true)}>
-                <Plus className="size-4" /> {t('users.addImMapping')}
-              </Button>
-            )}
-          </div>
-        ) : null}
+      <div className="flex items-center gap-2">
+        <h2 className="font-semibold text-xl tracking-tight">{t('users.title')}</h2>
+        <Badge variant="secondary">{users.data?.length ?? 0}</Badge>
       </div>
 
       <p className="max-w-2xl text-muted-foreground text-sm">{t('users.pageDescription')}</p>
 
-      <Tabs onValueChange={(value) => setTab(value as 'users' | 'im')} value={tab}>
+      <Tabs defaultValue="users">
         <TabsList>
           <TabsTrigger value="users">{t('users.tabUsers')}</TabsTrigger>
           <TabsTrigger value="im">{t('users.tabImIdentities')}</TabsTrigger>
@@ -111,6 +108,7 @@ export function UsersPage(): JSX.Element {
 
         <TabsContent value="users">
           <UsersTable
+            actions={usersActions}
             canWrite={canWrite}
             onEdit={(user) => {
               setEditUser(user)
@@ -122,7 +120,7 @@ export function UsersPage(): JSX.Element {
         </TabsContent>
 
         <TabsContent value="im">
-          <ImIdentitiesTable canWrite={canWrite} users={users.data ?? []} />
+          <ImIdentitiesTable actions={imActions} canWrite={canWrite} users={users.data ?? []} />
         </TabsContent>
       </Tabs>
 

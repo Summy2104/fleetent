@@ -1,3 +1,4 @@
+import type * as React from 'react'
 import { useMemo } from 'react'
 
 import { DataTable } from '@/components/base/data-table'
@@ -9,10 +10,12 @@ export function UsersTable({
   canWrite,
   onEdit,
   onManageKeys,
+  actions,
 }: {
   canWrite: boolean
   onEdit: (user: UserListItem) => void
   onManageKeys: (user: UserListItem) => void
+  actions?: React.ReactNode
 }): JSX.Element {
   const t = useT()
   const users = useUsersQuery()
@@ -23,6 +26,7 @@ export function UsersTable({
 
   return (
     <DataTable
+      actions={actions}
       columns={columns}
       data={users.data ?? []}
       emptyState={<div className="py-12 text-center text-muted-foreground text-sm">{t('users.emptyUsers')}</div>}

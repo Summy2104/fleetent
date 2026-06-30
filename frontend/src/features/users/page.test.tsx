@@ -34,7 +34,7 @@ describe('UsersPage', () => {
     await waitFor(() => expect(screen.getByText(/no IM|暂无/i)).toBeInTheDocument())
   })
 
-  it('swaps the header primary action per active tab', async () => {
+  it('swaps the table action button per active tab', async () => {
     const user = userEvent.setup()
     renderUsers(<UsersPage />)
     await screen.findByText('Ann')
