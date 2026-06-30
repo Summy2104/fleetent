@@ -132,7 +132,12 @@ def test_serialize_desired_state_payload_keeps_env_pointer_fields() -> None:
     assert payload["im"]["slack"]["access"]["allow_users"] == ["u1"]
 
 
-def test_serialize_desired_state_payload_still_strips_secret_values() -> None:
+def test_serialize_desired_state_payload_keeps_env_strips_credential_ref() -> None:
+    """Delivery contract (change ``mcp-env-nonsecret-literals``): writing style declares
+    secrecy. A ``env:VAR`` value is a secret pointer and a plaintext value is operator-declared
+    non-secret config — BOTH survive in the delivered MCP ``env``. Only the dedicated
+    ``credential_ref`` secret-value field is stripped. Real secrets must use ``env:VAR`` refs,
+    never inline plaintext."""
     from fleetent.platform.agent_lifecycle import materialize
 
     agent_file = AgentFile.model_validate(
@@ -161,7 +166,7 @@ def test_serialize_desired_state_payload_still_strips_secret_values() -> None:
                     "url": "https://mcp.internal/docs",
                     "api_key_env": "DOCS_API_KEY",
                     "env": {
-                        "DOCS_TOKEN": "sk-inline-docs-secret",
+                        "DOCS_TOKEN": "plaintext-docs-config",
                         "DOCS_SHARED_TOKEN": "env:DOCS_SHARED_TOKEN",
                     },
                     "credential_ref": "env:DOCS_SHARED_SECRET",
@@ -172,10 +177,62 @@ def test_serialize_desired_state_payload_still_strips_secret_values() -> None:
 
     payload = materialize.desired_state_payload_from_agent_file(agent_file)
 
-    # env: reference survives (variable-name pointer); plaintext secret value is stripped
-    assert payload["mcpServers"]["docs"]["env"] == {"DOCS_SHARED_TOKEN": "env:DOCS_SHARED_TOKEN"}
+    # plaintext (operator non-secret config) and env: reference (secret pointer) both survive
+    assert payload["mcpServers"]["docs"]["env"] == {
+        "DOCS_TOKEN": "plaintext-docs-config",
+        "DOCS_SHARED_TOKEN": "env:DOCS_SHARED_TOKEN",
+    }
+    # the dedicated secret-value field is still stripped
     assert "credential_ref" not in payload["mcpServers"]["docs"]
-    assert "sk-inline-docs-secret" not in str(payload)
+
+
+def test_desired_state_payload_keeps_plaintext_mcp_env() -> None:
+    """A stdio MCP server's plaintext non-secret env (e.g. @aashari Atlassian's
+    ATLASSIAN_USER_EMAIL / ATLASSIAN_SITE_NAME for email:token Basic auth) must survive
+    desired-state delivery alongside the ``env:`` token pointer, so the materialized
+    agent.yaml carries them to the stdio child."""
+    from fleetent.platform.agent_lifecycle import materialize
+
+    agent_file = AgentFile.model_validate(
+        {
+            "name": "support",
+            "version": 1,
+            "system_prompt": "Help users",
+            "allowed_tools": ["shell"],
+            "models": {
+                "targets": [
+                    {
+                        "id": "default",
+                        "provider": "anthropic",
+                        "protocol": "openai_chat",
+                        "base_url": "https://api.anthropic.test/v1",
+                        "model": "claude-haiku",
+                    }
+                ],
+                "routes": {"default": [{"target": "default"}]},
+            },
+            "mcp_servers": [
+                {
+                    "id": "jira",
+                    "transport": "stdio",
+                    "command": "jira-mcp",
+                    "env": {
+                        "ATLASSIAN_API_TOKEN": "env:ATLASSIAN_API_TOKEN",
+                        "ATLASSIAN_USER_EMAIL": "r.intern.dev@example.test",
+                        "ATLASSIAN_SITE_NAME": "antalpha",
+                    },
+                }
+            ],
+        }
+    )
+
+    payload = materialize.desired_state_payload_from_agent_file(agent_file)
+
+    assert payload["mcpServers"]["jira"]["env"] == {
+        "ATLASSIAN_API_TOKEN": "env:ATLASSIAN_API_TOKEN",
+        "ATLASSIAN_USER_EMAIL": "r.intern.dev@example.test",
+        "ATLASSIAN_SITE_NAME": "antalpha",
+    }
 
 
 def test_desired_state_payload_env_ref_collected_by_node() -> None:
