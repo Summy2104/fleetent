@@ -43,6 +43,8 @@ def _normalized_auth_config(auth_type: str, auth_config: dict[str, Any]) -> dict
     if isinstance(parsed, OAuthAuthorizationCodeMcpAuthConfig):
         # per-user OAuth 2.1 authorization_code: structured non-secret fields + the
         # client_secret env reference (optional for PKCE public clients). Secret value never here.
+        # token_env: which env var the per-user access token is injected under for a stdio
+        # per-user OAuth subprocess (empty -> runtime default MCP_OAUTH_ACCESS_TOKEN).
         return {
             "authorization_endpoint": parsed.authorization_endpoint,
             "token_url": parsed.token_url,
@@ -50,6 +52,7 @@ def _normalized_auth_config(auth_type: str, auth_config: dict[str, Any]) -> dict
             "client_secret_env": parsed.client_secret_env,
             "scope": parsed.scope,
             "redirect_path": parsed.redirect_path,
+            "token_env": parsed.token_env,
         }
     if isinstance(parsed, ApiKeyPerUserMcpAuthConfig):
         # per-user dynamic api-key/bearer: server-level method settings only (no static key).

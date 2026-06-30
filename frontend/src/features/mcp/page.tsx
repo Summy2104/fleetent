@@ -94,6 +94,7 @@ function ServerDialog({
   const [oauthScope, setOauthScope] = useState('');
   const [oauthAuthorizationEndpoint, setOauthAuthorizationEndpoint] = useState('');
   const [oauthRedirectPath, setOauthRedirectPath] = useState('');
+  const [oauthTokenEnv, setOauthTokenEnv] = useState('');
   const [headerStyle, setHeaderStyle] = useState<'bearer' | 'x_api_key'>('bearer');
   const [credentialInput, setCredentialInput] = useState<'form' | 'tool' | 'both'>('form');
   const [env, setEnv] = useState<EnvPair[]>([]);
@@ -119,6 +120,7 @@ function ServerDialog({
       setOauthScope(oauthConfig.scope ?? '');
       setOauthAuthorizationEndpoint(authzCodeConfig.authorization_endpoint ?? '');
       setOauthRedirectPath(authzCodeConfig.redirect_path ?? '');
+      setOauthTokenEnv(authzCodeConfig.token_env ?? '');
       setHeaderStyle(perUserConfig.header_style ?? 'bearer');
       setCredentialInput(perUserConfig.credential_input ?? 'form');
       setEnv(toPairs(editing?.env));
@@ -151,6 +153,7 @@ function ServerDialog({
                   client_secret_env: oauthClientSecretEnv.trim(),
                   scope: oauthScope.trim(),
                   redirect_path: oauthRedirectPath.trim(),
+                  token_env: oauthTokenEnv.trim(),
                 }
               : authType === 'api_key_per_user'
                 ? { header_style: headerStyle, credential_input: credentialInput }
@@ -442,6 +445,15 @@ function ServerDialog({
                   id="mcp-authz-redirect-path"
                   value={oauthRedirectPath}
                   onChange={(event) => setOauthRedirectPath(event.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="mcp-authz-token-env">{t('mcp.oauthTokenEnvLabel')}</Label>
+                <Input
+                  id="mcp-authz-token-env"
+                  value={oauthTokenEnv}
+                  onChange={(event) => setOauthTokenEnv(event.target.value)}
+                  placeholder="MCP_OAUTH_ACCESS_TOKEN"
                 />
               </div>
             </>

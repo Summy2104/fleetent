@@ -47,6 +47,25 @@ def test_create_body_keeps_authorization_code_auth_config() -> None:
     assert body.auth_config["redirect_path"] == "/oauth/callback"
 
 
+def test_normalized_auth_config_persists_token_env() -> None:
+    # connector-oauth-token-env: stdio per-user OAuth 的 access-token 注入变量名 token_env
+    # MUST 被持久化(供任意 stdio per-user OAuth server 声明各自变量名)。
+    cfg = dict(_FULL)
+    cfg["token_env"] = "GOOGLE_DRIVE_MCP_ACCESS_TOKEN"
+    out = connector_admin_api._normalized_auth_config("oauth_authorization_code", cfg)
+
+    assert out["token_env"] == "GOOGLE_DRIVE_MCP_ACCESS_TOKEN"
+    # 其它字段不受影响
+    assert out["authorization_endpoint"] == "https://auth.internal/authorize"
+    assert out["client_id"] == "fleetent-crm"
+
+
+def test_normalized_auth_config_token_env_defaults_empty() -> None:
+    # 不填 token_env → 空字符串(运行时回落默认 MCP_OAUTH_ACCESS_TOKEN), 向后兼容。
+    out = connector_admin_api._normalized_auth_config("oauth_authorization_code", dict(_FULL))
+    assert out["token_env"] == ""
+
+
 def test_create_body_rejects_authorization_code_missing_required() -> None:
     # authorization_code 校验器要求 authorization_endpoint + token_url + client_id 非空
     with pytest.raises(ValidationError):
