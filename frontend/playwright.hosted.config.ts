@@ -1,12 +1,11 @@
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { defineConfig } from '@playwright/test'
 
-import { defineConfig } from '@playwright/test';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, '..');
-const smokePort = 8876;
-const smokeDir = path.join(repoRoot, '.playwright-admin');
+const Dirname = path.dirname(fileURLToPath(import.meta.url))
+const repoRoot = path.resolve(Dirname, '..')
+const smokePort = 8876
+const smokeDir = path.join(repoRoot, '.playwright-admin')
 
 const webServerCommand = `bash -lc '
 set -euo pipefail
@@ -37,7 +36,7 @@ agent_admin_store.set_provenance(agent.id, "adhoc")
 agent_admin_store.enable(agent.id)
 PY
 uv run python -m uvicorn fleetent.server:app --host 127.0.0.1 --port ${smokePort}
-'`;
+'`
 
 export default defineConfig({
   testDir: './e2e',
@@ -52,4 +51,4 @@ export default defineConfig({
     reuseExistingServer: false,
     url: `http://127.0.0.1:${smokePort}/health`,
   },
-});
+})

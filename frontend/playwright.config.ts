@@ -1,8 +1,8 @@
-import { defineConfig } from '@playwright/test';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { defineConfig } from '@playwright/test'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const Dirname = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
   testDir: './e2e',
@@ -12,8 +12,8 @@ export default defineConfig({
   },
   webServer: {
     command: 'bash -lc "pnpm build && pnpm preview"',
-    cwd: __dirname,
+    cwd: Dirname,
     url: 'http://127.0.0.1:4173',
     reuseExistingServer: !process.env.CI,
   },
-});
+})
