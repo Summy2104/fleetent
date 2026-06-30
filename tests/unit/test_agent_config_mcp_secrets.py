@@ -96,6 +96,48 @@ def test_secret_embedded_in_url_still_rejected():
         )
 
 
+def test_oauth_authorization_code_auth_type_not_rejected():
+    # auth_type is a discriminator enum, not a credential. Its value
+    # ("oauth_authorization_code") trips the length/entropy heuristic but must
+    # not be flagged — a per-user OAuth 2.1 connector agent has to load.
+    _scan(
+        [
+            {
+                "id": "google-drive",
+                "transport": "stdio",
+                "command": "npx",
+                "args": ["-y", "@piotr-agier/google-drive-mcp"],
+                "auth_type": "oauth_authorization_code",
+                "auth": {
+                    "grant": "authorization_code",
+                    "token_url": "https://oauth2.googleapis.com/token",
+                    "client_id": "env:GDRIVE_OAUTH_CLIENT_ID",
+                    "client_secret_env": "GDRIVE_OAUTH_CLIENT_SECRET",
+                    "token_env": "GOOGLE_DRIVE_MCP_ACCESS_TOKEN",
+                },
+            }
+        ]
+    )
+
+
+def test_inline_secret_alongside_auth_type_still_rejected():
+    # Exempting auth_type must not relax scanning of real secret-bearing fields
+    # on the same server.
+    with pytest.raises(ValueError, match="inline secret"):
+        _scan(
+            [
+                {
+                    "id": "google-drive",
+                    "transport": "stdio",
+                    "command": "npx",
+                    "args": ["-y", "pkg"],
+                    "auth_type": "oauth_authorization_code",
+                    "env": {"ATLASSIAN_API_TOKEN": _ATLASSIAN_TOKEN},
+                }
+            ]
+        )
+
+
 _USER_UUID = "5f5904ef-efcf-42bb-82fa-ad5a150b078c"
 
 

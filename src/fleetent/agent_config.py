@@ -651,6 +651,9 @@ _SKIP_SECRET_SCAN_SEGMENTS = (
     ".command",
     ".id",
     ".transport",
+    # auth_type is a discriminator enum (e.g. "oauth_authorization_code"), not a
+    # credential; its value would otherwise trip the length/entropy heuristic.
+    ".auth_type",
     ".access.allow_users.",
     ".access.allow_groups.",
 )
