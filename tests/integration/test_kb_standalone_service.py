@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 import yaml
@@ -491,3 +492,72 @@ def test_standalone_kb_service_runs_without_platform_management_db(
         assert response.status_code == 200
         assert response.json()["chunks"][0]["filename"] == "guide.md"
     assert not (tmp_path / "management.db").exists()
+
+
+def test_worker_main_uses_shared_kb_service_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent.knowledge_base import worker
+
+    service_dir = tmp_path / "kb-service"
+    service_dir.mkdir()
+    (service_dir / ".env").write_text("KB_SHARED_GOOGLE_DRIVE=shared-secret\n", encoding="utf-8")
+    path = service_dir / "kb-service.yaml"
+    doc = _service_doc()
+    doc["connectors"] = []  # type: ignore[index]
+    _write_yaml(path, doc)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    calls: list[tuple[float, str | None, Path | None]] = []
+
+    def fake_run(
+        *, poll_interval: float, queue_database_url: str | None, data_dir: Path | None
+    ) -> None:
+        calls.append((poll_interval, queue_database_url, data_dir))
+
+    monkeypatch.setattr(worker, "run", fake_run)
+    monkeypatch.setattr("fleetent.build_info.log_service_startup", lambda name: None)
+
+    worker.main(["--config", str(path), "--poll-interval", "0.25"])
+
+    expected_data_dir = (service_dir / "data/kb-service").resolve()
+    assert calls == [
+        (0.25, f"sqlite:///{expected_data_dir / 'kb_ingest_queue.db'}", expected_data_dir)
+    ]
+
+
+def test_serve_main_uses_shared_kb_service_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent.knowledge_base import serve
+
+    service_dir = tmp_path / "kb-service"
+    service_dir.mkdir()
+    (service_dir / ".env").write_text("KB_SERVICE_KEY=svc-test\n", encoding="utf-8")
+    path = service_dir / "kb-service.yaml"
+    doc = _service_doc()
+    doc["connectors"] = []  # type: ignore[index]
+    doc["service"]["service_key_ref"] = "env:KB_SERVICE_KEY"  # type: ignore[index]
+    _write_yaml(path, doc)
+
+    created_configs: list[serve.KBServeConfig] = []
+    uvicorn_calls: list[tuple[object, str, int]] = []
+
+    def fake_create_app(config: serve.KBServeConfig) -> object:
+        created_configs.append(config)
+        return {"config": config}
+
+    def fake_uvicorn_run(app: object, *, host: str, port: int) -> None:
+        uvicorn_calls.append((app, host, port))
+
+    monkeypatch.setattr(serve, "create_app", fake_create_app)
+    monkeypatch.setattr("uvicorn.run", fake_uvicorn_run)
+
+    serve.main(["--config", str(path)])
+
+    expected_data_dir = (service_dir / "data/kb-service").resolve()
+    assert created_configs[0].data_dir == expected_data_dir
+    assert created_configs[0].queue_database_url == (
+        f"sqlite:///{expected_data_dir / 'kb_ingest_queue.db'}"
+    )
+    assert uvicorn_calls == [({"config": created_configs[0]}, "127.0.0.1", 8787)]

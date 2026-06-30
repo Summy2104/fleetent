@@ -45,9 +45,9 @@ class KBWorkerConfig:
 
 
 def load_config() -> KBWorkerConfig:
-    """Load kb-worker config from process env plus ``$FLEETENT_HOME/kb-worker/.env``."""
+    """Load kb-worker config from process env plus ``$FLEETENT_HOME/kb-service/.env``."""
     home_dir = Path(os.environ.get("FLEETENT_HOME") or Path.home() / ".fleetent").expanduser()
-    env_path = home_dir / "kb-worker" / ".env"
+    env_path = home_dir / "kb-service" / ".env"
     if env_path.exists():
         from dotenv import load_dotenv
 

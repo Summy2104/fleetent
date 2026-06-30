@@ -29,8 +29,10 @@ Compose 会启动：
 - `platform`：监听 `8765`，唯一可设置 `FLEETENT_AUTO_UPGRADE` 的服务。
 - `node`：监听 forwarder `8786`，挂载 `/var/run/docker.sock`，设置
   `FLEETENT_NODE_BACKEND=container`。
-- `kb-worker`：消费 KB ingest 队列，读取 `${FLEETENT_HOME}/kb-service.yaml`。
-- `kb-serve`：提供 KB 读 API，读取同一份 `${FLEETENT_HOME}/kb-service.yaml` 与同一棵
+- `kb-worker`：消费 KB ingest 队列，读取 `${FLEETENT_HOME}/kb-service/kb-service.yaml`
+  与 `${FLEETENT_HOME}/kb-service/.env`。
+- `kb-serve`：提供 KB 读 API，读取同一份 `${FLEETENT_HOME}/kb-service/kb-service.yaml`
+  与 `${FLEETENT_HOME}/kb-service/.env`，以及同一棵
   `FLEETENT_HOME` 数据卷。
 
 agent 不在 compose 中静态声明。node 根据 desired state 拉起 agent 兄弟容器，并把
@@ -77,6 +79,10 @@ forward-only migration。
 `kb-worker` 写 `${FLEETENT_HOME}/tenants/<tenant>/kb/`，`kb-serve` 从同一挂载卷读取；这条路径是
 同主机 WAL 一写多读，不是 agent 的只读文件挂载场景。
 
+若宿主上还留有旧布局 `$FLEETENT_HOME/kb-worker/.env`，先执行 `fleetent kb-service init-config`，
+再把旧文件里的 secret 迁到 `$FLEETENT_HOME/kb-service/.env`，把 connector / service 配置迁到
+`$FLEETENT_HOME/kb-service/kb-service.yaml`，随后停用旧 `kb-worker/.env`。
+
 当前 platform materialize **不会自动**把 managed agent 改成 `knowledge.provider.type=http`。
 如果要让 compose 栈里的 agent 经 `kb-serve` 远程读 KB，需要在 agent authoring 的
 `config_overrides` 中显式写入 provider，例如：
@@ -89,8 +95,8 @@ knowledge:
     auth_ref: env:FLEETENT_KB_SERVICE_KEY
 ```
 
-同时让 `${FLEETENT_HOME}/kb-service.yaml` 的 `service.service_key_ref` 指向同一个 `.env`
-变量，并在 compose `.env` 中提供该值：
+同时让 `${FLEETENT_HOME}/kb-service/kb-service.yaml` 的 `service.service_key_ref` 指向
+`${FLEETENT_HOME}/kb-service/.env` 中的同一个变量：
 
 ```yaml
 service:
@@ -104,7 +110,8 @@ service:
 FLEETENT_KB_SERVICE_KEY=replace-me
 ```
 
-`url` 里的端口取 `kb-service.yaml` 的 `service.port`；compose 默认单租户起一个 `kb-serve`。
+`url` 里的端口取 `kb-service/kb-service.yaml` 的 `service.port`；compose 默认单租户起一个
+`kb-serve`。
 如果要做多租户，需要为每个租户额外起一个 `kb-serve` 服务，使用不同服务名/端口，并把对应 agent
 的 `knowledge.provider.url` 指到那个服务。
 

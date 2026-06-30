@@ -44,22 +44,16 @@ TBD - created by archiving change kb-worker. Update Purpose after archive.
 
 ### Requirement: kb-worker 从专属 .env 加载自身配置
 
-`fleetent kb-worker` 启动 SHALL 从 `$FLEETENT_HOME/kb-worker/.env` 加载自身配置(经 `load_dotenv(override=False)`:文件不存在静默跳过;进程已有环境变量优先于文件值)。自身配置 SHALL 含:队列连接、数据底座连接、embedder 配置、Vault 接入。`FLEETENT_HOME` SHALL 经进程环境提供(定位该 `.env` 的前提,不可经该 `.env` 设置)。
+`fleetent kb-worker` 启动 SHALL 从 KB 服务共用的 `kb-service/` 目录加载配置:`--config $FLEETENT_HOME/kb-service/kb-service.yaml`(构造配置)+ 同目录 `.env`(secrets,经进程环境/`load_dotenv` 提供,connector `credential_ref` / `service_key_ref` 在本地解析)。worker 与 `kb-serve` 共用同一 `kb-service/`。旧的 `fleetent kb-worker init-config` 与 `kb-worker/.env` 模型(部署级 .env:队列/底座/embedder/Vault)**已退役**——由 `kb-service init-config` + `kb-service.yaml` 取代。
 
-#### Scenario: 从 .env 加载
+#### Scenario: worker 经 kb-service.yaml 启动
+- **WHEN** `fleetent kb-worker --config $FLEETENT_HOME/kb-service/kb-service.yaml` 启动
+- **THEN** worker 从该 yaml 取构造配置、同目录 `.env` 取 secrets,抽 KB 本地队列执行 ingest
 
-- **WHEN** `$FLEETENT_HOME/kb-worker/.env` 含队列/底座/embedder/Vault 接入配置,且未在进程环境设置
-- **THEN** worker 从该文件读取并成功启动
-
-#### Scenario: 进程环境优先
-
-- **WHEN** 某项同时存在于进程环境与该 `.env`
-- **THEN** 采用进程环境的值(override=False)
-
-#### Scenario: 文件缺失回退进程环境
-
-- **WHEN** 该 `.env` 不存在
-- **THEN** 加载步骤静默跳过,配置仅来自进程环境
+#### Scenario: 旧 kb-worker init-config 已退役
+- **WHEN** 查看 CLI
+- **THEN** 不再提供 `fleetent kb-worker init-config` / `kb-worker.env.example` / `kb-worker/.env`
+- **AND** KB 服务配置由 `fleetent kb-service init-config` 生成于 `kb-service/`
 
 ### Requirement: connector 配置不在 worker 自身配置内
 
@@ -106,3 +100,4 @@ admin ingest / sync 端点在返回非终态(未 done / failed)结果时 SHALL �
 #### Scenario: 不引入绕过队列的执行
 - **WHEN** 检视实现
 - **THEN** 仍只有 `fleetent kb-worker` 消费队列,未为可观测性新增任何在控制面进程内同步跑 ingest 的路径
+

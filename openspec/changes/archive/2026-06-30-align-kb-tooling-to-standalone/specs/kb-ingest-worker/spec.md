@@ -1,6 +1,6 @@
 ## MODIFIED Requirements
 
-### Requirement: kb-worker 从 kb-service 目录加载配置
+### Requirement: kb-worker 从专属 .env 加载自身配置
 
 `fleetent kb-worker` 启动 SHALL 从 KB 服务共用的 `kb-service/` 目录加载配置:`--config $FLEETENT_HOME/kb-service/kb-service.yaml`(构造配置)+ 同目录 `.env`(secrets,经进程环境/`load_dotenv` 提供,connector `credential_ref` / `service_key_ref` 在本地解析)。worker 与 `kb-serve` 共用同一 `kb-service/`。旧的 `fleetent kb-worker init-config` 与 `kb-worker/.env` 模型(部署级 .env:队列/底座/embedder/Vault)**已退役**——由 `kb-service init-config` + `kb-service.yaml` 取代。
 

@@ -1,6 +1,6 @@
 service:
   tenant_id: tenant-a
-  service_key_ref: env:FLEETENT_KB_SERVICE_KEY
+  service_key_ref: env:KB_SERVICE_KEY
   host: 127.0.0.1
   port: 8787
 
