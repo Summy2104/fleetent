@@ -27,10 +27,12 @@ def _reset_seams():
     az.reset_oauth_state_store()
     az.set_authorization_link_deliverer(None)
     az.set_redirect_base(None)
+    cs.set_credential_link_deliverer(None)
     yield
     az.reset_oauth_state_store()
     az.set_authorization_link_deliverer(None)
     az.set_redirect_base(None)
+    cs.set_credential_link_deliverer(None)
 
 
 # ── form-URI assembly (shared base) ───────────────────────────────────────────────
@@ -107,7 +109,7 @@ async def test_emit_invokes_deliverer_with_form_url():
         return True
 
     az.set_redirect_base("https://agent.internal")
-    az.set_authorization_link_deliverer(_deliver)
+    cs.set_credential_link_deliverer(_deliver)
     ok = await cs.emit_credential_link(_server("srvY"), "uA", "ag1")
     assert ok is True
     assert captured["server_id"] == "srvY"
@@ -115,7 +117,7 @@ async def test_emit_invokes_deliverer_with_form_url():
 
 
 async def test_emit_no_deliverer_returns_false_no_raise():
-    az.set_authorization_link_deliverer(None)
+    cs.set_credential_link_deliverer(None)
     assert await cs.emit_credential_link(_server(), "uA", "ag1") is False
 
 
@@ -123,5 +125,5 @@ async def test_emit_swallows_deliverer_exception():
     async def _boom(*a, **k):
         raise RuntimeError("connector down")
 
-    az.set_authorization_link_deliverer(_boom)
+    cs.set_credential_link_deliverer(_boom)
     assert await cs.emit_credential_link(_server(), "uA", "ag1") is False

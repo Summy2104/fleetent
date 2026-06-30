@@ -275,10 +275,7 @@ describe('admin routes', () => {
   })
 
   it('renders knowledge base as a native route instead of a legacy deep link', async () => {
-    server.use(
-      http.get('http://fleetent.test/admin/kb', () => HttpResponse.json([])),
-      http.get('http://fleetent.test/admin/kb/connectors', () => HttpResponse.json([]))
-    )
+    server.use(http.get('http://fleetent.test/admin/kb', () => HttpResponse.json([])))
 
     renderRoutes('/kb', 'session-token')
 

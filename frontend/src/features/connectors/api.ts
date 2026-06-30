@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { useAdminApi } from '@/lib/api-client'
 
-export type McpAuthType = 'none' | 'api_key' | 'oauth_client_credentials'
+export type McpAuthType = 'none' | 'api_key' | 'oauth_client_credentials' | 'api_key_per_user'
 
 export type McpApiKeyAuthConfig = {
   key_env: string
@@ -15,11 +15,23 @@ export type McpOAuthClientCredentialsAuthConfig = {
   scope: string
 }
 
-export type McpAuthConfig = Record<string, never> | McpApiKeyAuthConfig | McpOAuthClientCredentialsAuthConfig
+// per-user dynamic api-key/bearer (mcp-per-user-apikey): no static key — only server-level
+// *method* settings. The user supplies their own key at runtime, isolated by triple.
+export type McpApiKeyPerUserAuthConfig = {
+  header_style: 'bearer' | 'x_api_key'
+  credential_input: 'form' | 'tool' | 'both'
+}
+
+export type McpAuthConfig =
+  | Record<string, never>
+  | McpApiKeyAuthConfig
+  | McpOAuthClientCredentialsAuthConfig
+  | McpApiKeyPerUserAuthConfig
 
 export const MCP_AUTH_FORM_FIELDS = {
   api_key: ['key_env'],
   oauth_client_credentials: ['token_url', 'client_id', 'client_secret_env', 'scope'],
+  api_key_per_user: ['header_style', 'credential_input'],
 } as const
 
 export type McpServerRecord = {

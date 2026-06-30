@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import httpx
 import pytest
+import respx
 import yaml
 from fastapi.testclient import TestClient
 
@@ -21,7 +23,7 @@ def _service_doc() -> dict[str, object]:
             "port": 8787,
         },
         "data": {
-            "home": "./data/kb-service",
+            "home": "./data",
         },
         "retrieval": {
             "default_mode": "hybrid",
@@ -120,6 +122,41 @@ def test_validate_kb_service_boot_requires_embedding_and_connector_secrets(
         validate_kb_service_boot(config)
 
     monkeypatch.setenv("KB_CONFLUENCE_TOKEN", "token-value")
+    validate_kb_service_boot(config)
+
+
+def test_validate_kb_service_boot_requires_embedding_and_extraction_api_keys(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent.knowledge_base.service_config import (
+        load_kb_service_config,
+        validate_kb_service_boot,
+    )
+
+    path = tmp_path / "kb-service.yaml"
+    doc = _service_doc()
+    doc["connectors"] = []  # type: ignore[index]
+    doc["embedding"]["api_key_env"] = "FLEETENT_KB_EMBEDDING_API_KEY"  # type: ignore[index]
+    doc["extraction"] = {  # type: ignore[index]
+        "enabled": True,
+        "endpoint": "http://llm.example/v1",
+        "model": "kb-extract",
+        "api_key_env": "FLEETENT_KB_EXTRACTION_API_KEY",
+    }
+    _write_yaml(path, doc)
+
+    config = load_kb_service_config(path)
+
+    monkeypatch.delenv("FLEETENT_KB_EMBEDDING_API_KEY", raising=False)
+    monkeypatch.delenv("FLEETENT_KB_EXTRACTION_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="FLEETENT_KB_EMBEDDING_API_KEY"):
+        validate_kb_service_boot(config)
+
+    monkeypatch.setenv("FLEETENT_KB_EMBEDDING_API_KEY", "embed-secret")
+    with pytest.raises(ValueError, match="FLEETENT_KB_EXTRACTION_API_KEY"):
+        validate_kb_service_boot(config)
+
+    monkeypatch.setenv("FLEETENT_KB_EXTRACTION_API_KEY", "extract-secret")
     validate_kb_service_boot(config)
 
 
@@ -499,8 +536,8 @@ def test_worker_main_uses_shared_kb_service_directory(
 ) -> None:
     from fleetent.knowledge_base import worker
 
-    service_dir = tmp_path / "kb-service"
-    service_dir.mkdir()
+    service_dir = tmp_path / "kb-service" / "tenant-a"
+    service_dir.mkdir(parents=True)
     (service_dir / ".env").write_text("KB_SHARED_GOOGLE_DRIVE=shared-secret\n", encoding="utf-8")
     path = service_dir / "kb-service.yaml"
     doc = _service_doc()
@@ -520,9 +557,13 @@ def test_worker_main_uses_shared_kb_service_directory(
 
     worker.main(["--config", str(path), "--poll-interval", "0.25"])
 
-    expected_data_dir = (service_dir / "data/kb-service").resolve()
+    expected_data_dir = (service_dir / "data").resolve()
     assert calls == [
-        (0.25, f"sqlite:///{expected_data_dir / 'kb_ingest_queue.db'}", expected_data_dir)
+        (
+            0.25,
+            f"sqlite:///{expected_data_dir / 'kb_ingest_queue.db'}",
+            expected_data_dir,
+        )
     ]
 
 
@@ -531,13 +572,13 @@ def test_serve_main_uses_shared_kb_service_directory(
 ) -> None:
     from fleetent.knowledge_base import serve
 
-    service_dir = tmp_path / "kb-service"
-    service_dir.mkdir()
-    (service_dir / ".env").write_text("KB_SERVICE_KEY=svc-test\n", encoding="utf-8")
+    service_dir = tmp_path / "kb-service" / "tenant-a"
+    service_dir.mkdir(parents=True)
+    (service_dir / ".env").write_text("FLEETENT_KB_SERVICE_KEY=svc-test\n", encoding="utf-8")
     path = service_dir / "kb-service.yaml"
     doc = _service_doc()
     doc["connectors"] = []  # type: ignore[index]
-    doc["service"]["service_key_ref"] = "env:KB_SERVICE_KEY"  # type: ignore[index]
+    doc["service"]["service_key_ref"] = "env:FLEETENT_KB_SERVICE_KEY"  # type: ignore[index]
     _write_yaml(path, doc)
 
     created_configs: list[serve.KBServeConfig] = []
@@ -555,9 +596,123 @@ def test_serve_main_uses_shared_kb_service_directory(
 
     serve.main(["--config", str(path)])
 
-    expected_data_dir = (service_dir / "data/kb-service").resolve()
+    expected_data_dir = (service_dir / "data").resolve()
     assert created_configs[0].data_dir == expected_data_dir
-    assert created_configs[0].queue_database_url == (
-        f"sqlite:///{expected_data_dir / 'kb_ingest_queue.db'}"
+    assert (
+        created_configs[0].queue_database_url
+        == f"sqlite:///{expected_data_dir / 'kb_ingest_queue.db'}"
     )
     assert uvicorn_calls == [({"config": created_configs[0]}, "127.0.0.1", 8787)]
+
+
+def test_worker_main_applies_standalone_agent_model_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent.knowledge_base import worker
+
+    service_dir = tmp_path / "kb-service"
+    service_dir.mkdir()
+    path = service_dir / "kb-service.yaml"
+    doc = _service_doc()
+    doc["connectors"] = []  # type: ignore[index]
+    doc["embedding"]["api_key_env"] = "FLEETENT_KB_EMBEDDING_API_KEY"  # type: ignore[index]
+    doc["extraction"] = {  # type: ignore[index]
+        "enabled": True,
+        "endpoint": "http://llm.example/v1",
+        "model": "kb-extract",
+        "api_key_env": "FLEETENT_KB_EXTRACTION_API_KEY",
+    }
+    _write_yaml(path, doc)
+    monkeypatch.setenv("FLEETENT_KB_EMBEDDING_API_KEY", "embed-secret")
+    monkeypatch.setenv("FLEETENT_KB_EXTRACTION_API_KEY", "extract-secret")
+    monkeypatch.setattr(worker, "run", lambda **_kwargs: None)
+    monkeypatch.setattr("fleetent.build_info.log_service_startup", lambda name: None)
+
+    configured_agents: list[object] = []
+    monkeypatch.setattr(
+        "fleetent.agent_config.set_default_agent_for_process",
+        lambda agent: configured_agents.append(agent),
+        raising=False,
+    )
+
+    worker.main(["--config", str(path)])
+
+    assert len(configured_agents) == 1
+
+
+def test_serve_main_applies_standalone_agent_model_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent.knowledge_base import serve
+
+    service_dir = tmp_path / "kb-service"
+    service_dir.mkdir()
+    (service_dir / ".env").write_text("FLEETENT_KB_SERVICE_KEY=svc-test\n", encoding="utf-8")
+    path = service_dir / "kb-service.yaml"
+    doc = _service_doc()
+    doc["connectors"] = []  # type: ignore[index]
+    doc["service"]["service_key_ref"] = "env:FLEETENT_KB_SERVICE_KEY"  # type: ignore[index]
+    doc["embedding"]["api_key_env"] = "FLEETENT_KB_EMBEDDING_API_KEY"  # type: ignore[index]
+    _write_yaml(path, doc)
+    monkeypatch.setenv("FLEETENT_KB_EMBEDDING_API_KEY", "embed-secret")
+
+    monkeypatch.setattr(serve, "create_app", lambda config: {"config": config})
+    monkeypatch.setattr("uvicorn.run", lambda *args, **kwargs: None)
+
+    configured_agents: list[object] = []
+    monkeypatch.setattr(
+        "fleetent.agent_config.set_default_agent_for_process",
+        lambda agent: configured_agents.append(agent),
+        raising=False,
+    )
+
+    serve.main(["--config", str(path)])
+
+    assert len(configured_agents) == 1
+
+
+async def test_standalone_embedding_runtime_uses_api_key_env_from_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleetent import agent_config, vector_store
+    from fleetent.agent_config import AgentFile, default_models
+    from fleetent.knowledge_base.service_config import KBServiceConfig
+
+    monkeypatch.setenv("FLEETENT_KB_EMBEDDING_API_KEY", "embed-secret")
+    config = KBServiceConfig.model_validate(
+        {
+            "service": {
+                "tenant_id": "tenant-a",
+                "service_key_ref": "env:FLEETENT_KB_SERVICE_KEY",
+            },
+            "data": {"home": "./data"},
+            "embedding": {
+                "endpoint": "http://embed.example/v1/embeddings",
+                "model": "kb-embed",
+                "dimensions": 3,
+                "api_key_env": "FLEETENT_KB_EMBEDDING_API_KEY",
+            },
+        }
+    )
+
+    captured: httpx.Request | None = None
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        nonlocal captured
+        captured = request
+        return httpx.Response(200, json={"data": [{"embedding": [0.1, 0.2, 0.3]}]})
+
+    try:
+        config.configure_process_runtime()
+        with respx.mock:
+            respx.post("http://embed.example/v1/embeddings").mock(side_effect=capture)
+            vector = await vector_store.embed_text("hello world")
+    finally:
+        agent_config.set_default_agent_for_process(
+            AgentFile(name="", version=0, models=default_models())
+        )
+        vector_store.configure_from_active_agent()
+
+    assert vector == [0.1, 0.2, 0.3]
+    assert captured is not None
+    assert captured.headers["authorization"] == "Bearer embed-secret"

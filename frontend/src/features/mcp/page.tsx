@@ -33,6 +33,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { type AgentListItem, useAgentsQuery } from '@/features/agents/api'
 import {
+  type McpApiKeyPerUserAuthConfig,
   type McpAuthType,
   type McpOAuthClientCredentialsAuthConfig,
   type McpServerInput,
@@ -90,6 +91,8 @@ function ServerDialog({
   const [oauthClientId, setOauthClientId] = useState('')
   const [oauthClientSecretEnv, setOauthClientSecretEnv] = useState('')
   const [oauthScope, setOauthScope] = useState('')
+  const [headerStyle, setHeaderStyle] = useState<'bearer' | 'x_api_key'>('bearer')
+  const [credentialInput, setCredentialInput] = useState<'form' | 'tool' | 'both'>('form')
   const [env, setEnv] = useState<EnvPair[]>([])
   const [args, setArgs] = useState<string[]>([])
   const [headers, setHeaders] = useState<EnvPair[]>([])
@@ -98,6 +101,7 @@ function ServerDialog({
     if (open) {
       const authConfig = editing?.auth_config ?? {}
       const oauthConfig = authConfig as Partial<McpOAuthClientCredentialsAuthConfig>
+      const perUserConfig = authConfig as Partial<McpApiKeyPerUserAuthConfig>
       setId(editing?.id ?? '')
       setTransport(editing?.transport ?? 'stdio')
       setCommand(editing?.command ?? '')
@@ -109,6 +113,8 @@ function ServerDialog({
       setOauthClientId(oauthConfig.client_id ?? '')
       setOauthClientSecretEnv(oauthConfig.client_secret_env ?? '')
       setOauthScope(oauthConfig.scope ?? '')
+      setHeaderStyle(perUserConfig.header_style ?? 'bearer')
+      setCredentialInput(perUserConfig.credential_input ?? 'form')
       setEnv(toPairs(editing?.env))
       setArgs(editing?.args ?? [])
       setHeaders(toPairs(editing?.headers))
@@ -131,7 +137,9 @@ function ServerDialog({
                 client_secret_env: oauthClientSecretEnv.trim(),
                 scope: oauthScope.trim(),
               }
-            : {},
+            : authType === 'api_key_per_user'
+              ? { header_style: headerStyle, credential_input: credentialInput }
+              : {},
     }
     if (!isEdit && agentScope !== GLOBAL_SCOPE) payload.agent_id = Number(agentScope)
     if (transport === 'stdio') {
@@ -165,6 +173,7 @@ function ServerDialog({
     id.trim().length > 0 &&
     (transport === 'stdio' ? command.trim().length > 0 : url.trim().length > 0) &&
     (authType === 'none' ||
+      authType === 'api_key_per_user' ||
       (authType === 'api_key' && apiKeyEnv.trim().length > 0) ||
       (authType === 'oauth_client_credentials' &&
         oauthTokenUrl.trim().length > 0 &&
@@ -227,6 +236,7 @@ function ServerDialog({
                 { value: 'none', label: t('mcp.authTypeNone') },
                 { value: 'api_key', label: t('mcp.authTypeApiKey') },
                 { value: 'oauth_client_credentials', label: t('mcp.authTypeOauthClientCredentials') },
+                { value: 'api_key_per_user', label: t('mcp.authTypeApiKeyPerUser') },
               ]}
               triggerAriaLabel={t('mcp.authTypeLabel')}
               value={authType}
@@ -266,6 +276,36 @@ function ServerDialog({
               </Label>
               <Input id="mcp-auth-key-env" onChange={(event) => setApiKeyEnv(event.target.value)} value={apiKeyEnv} />
             </div>
+          ) : null}
+
+          {authType === 'api_key_per_user' ? (
+            <>
+              <div className="grid gap-2">
+                <Label>{t('mcp.headerStyleLabel')}</Label>
+                <SimpleSelect
+                  onValueChange={(value) => setHeaderStyle((value ?? 'bearer') as 'bearer' | 'x_api_key')}
+                  options={[
+                    { value: 'bearer', label: t('mcp.headerStyleBearer') },
+                    { value: 'x_api_key', label: t('mcp.headerStyleXApiKey') },
+                  ]}
+                  triggerAriaLabel={t('mcp.headerStyleLabel')}
+                  value={headerStyle}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label>{t('mcp.credentialInputLabel')}</Label>
+                <SimpleSelect
+                  onValueChange={(value) => setCredentialInput((value ?? 'form') as 'form' | 'tool' | 'both')}
+                  options={[
+                    { value: 'form', label: t('mcp.credentialInputForm') },
+                    { value: 'tool', label: t('mcp.credentialInputTool') },
+                    { value: 'both', label: t('mcp.credentialInputBoth') },
+                  ]}
+                  triggerAriaLabel={t('mcp.credentialInputLabel')}
+                  value={credentialInput}
+                />
+              </div>
+            </>
           ) : null}
 
           {authType === 'oauth_client_credentials' ? (

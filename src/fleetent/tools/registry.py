@@ -399,10 +399,14 @@ async def _call_mcp_with_authz(
     The bind is task-local (ContextVar) and always reset, so concurrent calls never share a
     deliverer. A None deliverer (no IM path) leaves the boot-level fallback in effect.
     """
-    from fleetent.outbound import make_mcp_authz_deliverer
+    from fleetent.integrations.mcp import credential_submission as mcp_cred
+    from fleetent.outbound import make_mcp_authz_deliverer, make_mcp_credential_deliverer
 
-    deliverer = make_mcp_authz_deliverer(tool_context) if tool_context is not None else None
+    has_ctx = tool_context is not None
+    deliverer = make_mcp_authz_deliverer(tool_context) if has_ctx else None
+    cred_deliverer = make_mcp_credential_deliverer(tool_context) if has_ctx else None
     token = mcp_authz.bind_call_deliverer(deliverer)
+    cred_token = mcp_cred.bind_call_deliverer(cred_deliverer)
     try:
         result: str = await mcp_client.call_tool(
             server_id,
@@ -419,6 +423,7 @@ async def _call_mcp_with_authz(
         return result
     finally:
         mcp_authz.reset_call_deliverer(token)
+        mcp_cred.reset_call_deliverer(cred_token)
 
 
 async def _run_global_mcp_with_authz(
@@ -431,15 +436,19 @@ async def _run_global_mcp_with_authz(
     MCP client reads the deliverer through its seam, so it never imports outbound itself.
     """
     from fleetent.integrations.mcp import authorization as mcp_authz
-    from fleetent.outbound import make_mcp_authz_deliverer
+    from fleetent.integrations.mcp import credential_submission as mcp_cred
+    from fleetent.outbound import make_mcp_authz_deliverer, make_mcp_credential_deliverer
 
     deliverer = make_mcp_authz_deliverer(tool_context)
+    cred_deliverer = make_mcp_credential_deliverer(tool_context)
     token = mcp_authz.bind_call_deliverer(deliverer)
+    cred_token = mcp_cred.bind_call_deliverer(cred_deliverer)
     try:
         result: str = await fn(**kwargs)
         return result
     finally:
         mcp_authz.reset_call_deliverer(token)
+        mcp_cred.reset_call_deliverer(cred_token)
 
 
 def _build_schema(fn: Callable[..., Any]) -> ToolSchema:
