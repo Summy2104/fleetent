@@ -298,6 +298,52 @@ def make_mcp_authz_deliverer(tool_context: Any) -> Any:
     return deliver
 
 
+def make_mcp_credential_deliverer(tool_context: Any) -> Any:
+    """Build a per-call deliverer for the per-user api-key *secure-form* link (Form mode).
+
+    Sibling to :func:`make_mcp_authz_deliverer` with two differences: (1) credential-submission
+    wording (not OAuth "authorize"), and (2) a node-managed fallback. A node-managed agent has
+    no live IM connector (the node hosts IM), so the link is enqueued through directed-reach
+    (``outbound_connectors.notify_user`` -> ``im_outbound_queue`` -> node drain -> DM). In a
+    standalone runtime the live connector DMs the requester directly. Always returns a
+    deliverer (never None): managed enqueues; standalone with a connector sends; otherwise it
+    reports undelivered so the call still degrades cleanly.
+    """
+    connectors: dict[str, Any] = getattr(tool_context, "outbound_connectors", {}) or {}
+    session_context = getattr(tool_context, "session_context", None)
+    address = getattr(tool_context, "conversation_address", None)
+    platform = getattr(session_context, "platform", "") or getattr(address, "platform", "")
+    target = getattr(session_context, "sender_id", "") or getattr(address, "user_id", "")
+    connector = connectors.get(platform) if platform else None
+
+    async def deliver(user_id: str, agent_id: str, server_id: str, url: str) -> bool:
+        msg = (
+            f"🔑 MCP server `{server_id}` needs your API key. Open this secure form to submit "
+            f"it — your key goes straight to the server, encrypted, and is never shown in "
+            f"chat:\n{url}\nThen retry your request."
+        )
+        if connector is not None and platform and target:
+            receipt = await send_to(platform, connector, target, msg, target_type="user")
+            if not receipt.ok:
+                logger.warning(
+                    "mcp_cred_dm_failed",
+                    server_id=server_id,
+                    platform=platform,
+                    error=receipt.error,
+                )
+            return receipt.ok
+        # node-managed (no live connector): enqueue a directed-reach DM to the requester.
+        from fleetent import outbound_connectors
+
+        if outbound_connectors.is_node_managed_runtime():
+            outbound_connectors.notify_user(user_id, msg)
+            return True
+        logger.info("mcp_cred_link_undeliverable server_id=%s user_id=%s", server_id, user_id)
+        return False
+
+    return deliver
+
+
 def approval_prompt_blocks(
     approval_id: str, tool_name: str, risk_level: str, summary: str = ""
 ) -> list[dict[str, Any]]:

@@ -327,6 +327,10 @@ def parse_mcp_servers(raw: dict[str, Any], *, expand_env: bool = True) -> list[M
                 url=body.get("url", ""),
                 auth_type=body.get("auth_type", "none"),
                 api_key_env=body.get("api_key_env", ""),
+                # per-user dynamic api-key/bearer (mcp-per-user-apikey): server-level method
+                # settings carried top-level in the map (rendered by _mcp_payload_to_map).
+                header_style=body.get("header_style", "bearer"),
+                credential_input=body.get("credential_input", "form"),
                 command=body.get("command", ""),
                 args=list(body.get("args", []) or []),
                 env=dict(body.get("env", {}) or {}),

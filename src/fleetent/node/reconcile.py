@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -187,9 +188,23 @@ class NodeReconciler:
         from fleetent.node.forwarder_contract import DEFAULT_FORWARDER_PORT
 
         loopback_env = {"FLEETENT_NODE_LOOPBACK_URL": f"http://127.0.0.1:{DEFAULT_FORWARDER_PORT}"}
+        # Public base for per-user link forms/callbacks (mcp-per-user-apikey / oauth): under
+        # managed placement the credential form + OAuth callback are served by the platform, so
+        # the link the agent builds must point at the platform's browser-reachable URL. Node env
+        # ``FLEETENT_OAUTH_REDIRECT_BASE`` overrides (real public host); else the platform URL.
+        redirect_base = (
+            os.environ.get("FLEETENT_OAUTH_REDIRECT_BASE", "").strip()
+            or self._config.platform_url
+        )
+        if redirect_base:
+            loopback_env["FLEETENT_OAUTH_REDIRECT_BASE"] = redirect_base
         ensure_env_scaffold(
             home,
-            referenced_env_names=[*env_names, "FLEETENT_NODE_LOOPBACK_URL"],
+            referenced_env_names=[
+                *env_names,
+                "FLEETENT_NODE_LOOPBACK_URL",
+                "FLEETENT_OAUTH_REDIRECT_BASE",
+            ],
             secrets={**(secrets or {}), **loopback_env},
         )
         self._sync_skills(agent_name, tenant_id, skill_manifests)

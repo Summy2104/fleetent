@@ -29,6 +29,7 @@ from fastapi.testclient import TestClient
 
 import fleetent.integrations.mcp.authorization as az
 import fleetent.integrations.mcp.client as mc
+import fleetent.integrations.mcp.credential_submission as cs
 from fleetent.db import SQLiteDatabase
 from fleetent.integrations.mcp.client import McpServerConfig
 from fleetent.integrations.mcp.per_user_tokens import (
@@ -62,6 +63,7 @@ def _clean_seams(monkeypatch):
     az.reset_oauth_state_store()
     az.set_redirect_base(None)
     az.set_authorization_link_deliverer(None)
+    cs.set_credential_link_deliverer(None)
     set_local_user_token_store(InMemoryUserTokenStore())
 
 
@@ -143,7 +145,7 @@ async def test_standalone_per_user_apikey_http_end_to_end(monkeypatch, tmp_path)
     mc._server_registry[(None, SERVER_ID)] = _apikey_server()
 
     deliverer = _CapturingDeliverer()
-    az.set_authorization_link_deliverer(deliverer)
+    cs.set_credential_link_deliverer(deliverer)
 
     header_sink: list[dict[str, str]] = []
     _stub_sdk_transport(monkeypatch, header_sink)
