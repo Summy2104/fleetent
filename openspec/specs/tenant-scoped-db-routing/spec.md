@@ -32,11 +32,11 @@
 
 ### Requirement: 可换后端抽象
 
-路由后端 SHALL 可插拔：当下 SQLite 后端把 tenant 作用域映射到 `tenants/<tenant>/` 下的物理文件；后端实现 MUST 可替换为其它实现（如将来 PostgreSQL per-tenant database 或 RLS），而调用点不变。per-tenant KB 文件 SHALL 归组于 `tenants/<tenant>/kb/` 子目录。
+路由后端 SHALL 可插拔：当下 SQLite 后端把 tenant 作用域映射到 `tenants/<tenant>/` 下的物理文件；后端实现 MUST 可替换为其它实现（如将来 PostgreSQL per-tenant database 或 RLS），而调用点不变。per-tenant KB 文件 SHALL 归组于 `tenants/<tenant>/kb/data/` 子目录。
 
 #### Scenario: SQLite 后端映射到 tenant-first 主体目录文件
 - **WHEN** 在 SQLite 后端下解析 tenant `T` 的 KB 关系库
-- **THEN** 连接指向 `tenants/T/kb/kb.db`
+- **THEN** 连接指向 `tenants/T/kb/data/kb.db`
 - **AND** 物理上不触及其它主体的库
 
 #### Scenario: 切换后端不改调用点
@@ -48,7 +48,7 @@
 
 agent 侧 store（首批 = KB）SHALL 从路由获取连接；模块 MUST NOT 通过 `create_database(settings.database_url)` 等方式自连接全局库。系统 SHALL 提供护栏测试断言此约束。
 
-KB 的**关系连接**（`kb_db`）与**向量后端**（`kb_vector_backend`）SHALL 均经 `tenant_scope(tenant)` 的 `KbScope` 注入到 `knowledge_base.runtime`（提供 `set_database` 与向量后端注入口），由注入句柄读写本租户 `<tenant>/kb/kb.db` 与 `<tenant>/kb/kb_vectors.db`。`runtime._database()` MUST NOT 再 `create_database(Settings().database_url)` 自连默认库；KB 检索 MUST NOT 再用“全局 `vector_store` + `knowledge_namespace`”旁路，而经注入的 `kb_vector_backend`。注入 SHALL 在**两个上下文**完成：**agent 读路径**（`agent_app` boot，供 retrieval / graph_search）与**platform 写路径**（ingest / connector sync / 抽取，供写本租户 `kb/kb.db`）。
+KB 的**关系连接**（`kb_db`）与**向量后端**（`kb_vector_backend`）SHALL 均经 `tenant_scope(tenant)` 的 `KbScope` 注入到 `knowledge_base.runtime`（提供 `set_database` 与向量后端注入口），由注入句柄读写本租户 `<tenant>/kb/data/kb.db` 与 `<tenant>/kb/data/kb_vectors.db`。`runtime._database()` MUST NOT 再 `create_database(Settings().database_url)` 自连默认库；KB 检索 MUST NOT 再用“全局 `vector_store` + `knowledge_namespace`”旁路，而经注入的 `kb_vector_backend`。注入 SHALL 在**两个上下文**完成：**agent 读路径**（`agent_app` boot，供 retrieval / graph_search）与**platform 写路径**（ingest / connector sync / 抽取，供写本租户 `kb/data/kb.db`）。
 
 #### Scenario: KnowledgeStore 经构造注入路由连接
 
@@ -63,25 +63,25 @@ KB 的**关系连接**（`kb_db`）与**向量后端**（`kb_vector_backend`）S
 #### Scenario: KB runtime 经注入读本租户 kb.db
 
 - **WHEN** agent 检索或 platform ingest 访问 KB 关系数据
-- **THEN** 经注入的 `kb_db`（来自 `tenant_scope`）读写 `<tenant>/kb/kb.db`
+- **THEN** 经注入的 `kb_db`（来自 `tenant_scope`）读写 `<tenant>/kb/data/kb.db`
 - **AND** `runtime._database()` 不再自连 `Settings().database_url`
 
 #### Scenario: KB 向量经注入的 per-tenant 后端
 
 - **WHEN** KB 检索或 ingest 访问向量
-- **THEN** 经注入的 `kb_vector_backend`（本租户 `<tenant>/kb/kb_vectors.db`）访问向量
+- **THEN** 经注入的 `kb_vector_backend`（本租户 `<tenant>/kb/data/kb_vectors.db`）访问向量
 - **AND** 不再走全局 `vector_store` + namespace 旁路
 
 #### Scenario: 多租户物理隔离
 
 - **WHEN** 主体 `T1` 的 agent 进程检索 KB
-- **THEN** 只触及 `<T1>/kb/kb.db` 与 `<T1>/kb/kb_vectors.db`
+- **THEN** 只触及 `<T1>/kb/data/kb.db` 与 `<T1>/kb/data/kb_vectors.db`
 - **AND** 物理上够不到 `<T2>` 的 KB 关系库或向量库
 
 #### Scenario: agent 读与 platform 写两上下文都经路由
 
 - **WHEN** agent 检索（读）或 platform ingest/sync（写）各自访问某租户 KB
-- **THEN** 两者都经 `tenant_scope` 解析到同一 `<tenant>/kb/kb.db`
+- **THEN** 两者都经 `tenant_scope` 解析到同一 `<tenant>/kb/data/kb.db`
 - **AND** 无一方落默认库或管理库
 
 ### Requirement: agent 作用域与 per-agent 库布局
@@ -132,6 +132,8 @@ KB 表 SHALL 保留 `tenant_id`/`kb_id` 列。SQLite 文件路由忽略 `tenant_
 
 per-tenant 的 KB 关系库与向量库 SHALL 归组于 `tenants/<tenant>/kb/data/` 子目录(`kb/data/kb.db`、`kb/data/kb_vectors.db`,连同 SQLite 的 `-wal`/`-shm`),而非松散置于租户根或 `kb/` 根。`kb/` 根 SHALL 只承载 standalone KB 服务的配置面(`kb-service.yaml`、`.env`),`kb/data/` 承载数据/读面,二者分层与 agent home 同构。该 `kb/data/` 目录 SHALL 可作为**单一单元**被搬迁或挂载;容器部署下 node SHALL 把整个 `kb/data/` 目录(而非整个 `kb/`、亦非单个文件)以只读挂入 agent 容器,使 `-wal`/`-shm` 一并可见、agent 读到一致快照,同时把 `kb/` 根的 `.env`(KB embedding / connector secret)挡在 agent 读面之外。
 
+`ensure_tenant_kb_dir` 等 provision 路径 SHALL **仅幂等建立 `kb/data/` 目录**,SHALL NOT 自动搬迁任何 legacy 旧址布局(租户根扁平 `tenants/<tenant>/kb.db`、或 `kb/` 根旧址布局,即 `kb.db` / `kb_vectors.db` 直接位于 `kb/` 根)的数据——采 clean-break:存量旧址文件保持原地,如需保留由运维自行移入 `kb/data/` 或删除。
+
 #### Scenario: KB 文件位于 kb/data/ 子目录
 - **WHEN** 解析某租户的 KB 关系库与向量库
 - **THEN** 物理文件位于 `tenants/<tenant>/kb/data/kb.db` 与 `tenants/<tenant>/kb/data/kb_vectors.db`
@@ -142,4 +144,9 @@ per-tenant 的 KB 关系库与向量库 SHALL 归组于 `tenants/<tenant>/kb/dat
 - **THEN** node 只读挂载整个 `tenants/<tenant>/kb/data/` 目录(含 `-wal`/`-shm`),而非整个 `kb/`、亦非单个 `kb.db` 文件
 - **AND** agent 读到的 KB 快照不滞后于已提交写入
 - **AND** `kb/` 根的 `kb-service.yaml` / `.env` 不出现在 agent 容器的挂载读面内
+
+#### Scenario: legacy 旧址不自动迁移
+- **WHEN** 存量环境的 KB 文件位于 legacy 旧址(`tenants/<tenant>/kb.db` 租户根、或 `kb.db` / `kb_vectors.db` 直接位于 `tenants/<tenant>/kb/` 根)、而 `kb/data/` 不存在
+- **THEN** provision 仅幂等建立空的 `kb/data/`,旧址文件保持原地、不被自动搬迁
+- **AND** 该取舍为 clean-break:需保留的数据由运维自行移入 `kb/data/`
 

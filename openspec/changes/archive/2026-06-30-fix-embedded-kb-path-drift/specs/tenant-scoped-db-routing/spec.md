@@ -58,7 +58,7 @@ KB 的**关系连接**（`kb_db`）与**向量后端**（`kb_vector_backend`）S
 
 per-tenant 的 KB 关系库与向量库 SHALL 归组于 `tenants/<tenant>/kb/data/` 子目录(`kb/data/kb.db`、`kb/data/kb_vectors.db`,连同 SQLite 的 `-wal`/`-shm`),而非松散置于租户根或 `kb/` 根。`kb/` 根 SHALL 只承载 standalone KB 服务的配置面(`kb-service.yaml`、`.env`),`kb/data/` 承载数据/读面,二者分层与 agent home 同构。该 `kb/data/` 目录 SHALL 可作为**单一单元**被搬迁或挂载;容器部署下 node SHALL 把整个 `kb/data/` 目录(而非整个 `kb/`、亦非单个文件)以只读挂入 agent 容器,使 `-wal`/`-shm` 一并可见、agent 读到一致快照,同时把 `kb/` 根的 `.env`(KB embedding / connector secret)挡在 agent 读面之外。
 
-`ensure_tenant_kb_dir` 等 provision 路径 SHALL **仅幂等建立 `kb/data/` 目录**,SHALL NOT 自动搬迁任何 legacy 旧址布局(租户根扁平 `tenants/<tenant>/kb.db`、或 `kb/` 根 `tenants/<tenant>/kb/kb.db`)的数据——采 clean-break:存量旧址文件保持原地,如需保留由运维自行移入 `kb/data/` 或删除。
+`ensure_tenant_kb_dir` 等 provision 路径 SHALL **仅幂等建立 `kb/data/` 目录**,SHALL NOT 自动搬迁任何 legacy 旧址布局(租户根扁平 `tenants/<tenant>/kb.db`、或 `kb/` 根旧址布局,即 `kb.db` / `kb_vectors.db` 直接位于 `kb/` 根)的数据——采 clean-break:存量旧址文件保持原地,如需保留由运维自行移入 `kb/data/` 或删除。
 
 #### Scenario: KB 文件位于 kb/data/ 子目录
 - **WHEN** 解析某租户的 KB 关系库与向量库
@@ -72,6 +72,6 @@ per-tenant 的 KB 关系库与向量库 SHALL 归组于 `tenants/<tenant>/kb/dat
 - **AND** `kb/` 根的 `kb-service.yaml` / `.env` 不出现在 agent 容器的挂载读面内
 
 #### Scenario: legacy 旧址不自动迁移
-- **WHEN** 存量环境的 KB 文件位于 legacy 旧址(`tenants/<tenant>/kb.db` 租户根、或 `tenants/<tenant>/kb/kb.db` 的 `kb/` 根)、而 `kb/data/` 不存在
+- **WHEN** 存量环境的 KB 文件位于 legacy 旧址(`tenants/<tenant>/kb.db` 租户根、或 `kb.db` / `kb_vectors.db` 直接位于 `tenants/<tenant>/kb/` 根)、而 `kb/data/` 不存在
 - **THEN** provision 仅幂等建立空的 `kb/data/`,旧址文件保持原地、不被自动搬迁
 - **AND** 该取舍为 clean-break:需保留的数据由运维自行移入 `kb/data/`
