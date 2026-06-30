@@ -38,6 +38,26 @@ describe('admin routes', () => {
     expect(await screen.findByRole('heading', { name: 'Admin Login' })).toBeInTheDocument()
   })
 
+  it('submits the login form when the user presses Enter in a field', async () => {
+    let loginBody: { email: string; password: string } | null = null
+    server.use(
+      http.post('http://fleetent.test/admin/login', async ({ request }) => {
+        loginBody = (await request.json()) as { email: string; password: string }
+        return HttpResponse.json({ token: 'session-token', must_reset: false })
+      }),
+      http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([]))
+    )
+
+    renderRoutes('/login')
+
+    await userEvent.type(await screen.findByLabelText('Email'), 'admin@example.com')
+    // Trailing {Enter} submits the surrounding <form> without clicking the button.
+    await userEvent.type(screen.getByLabelText('Password'), 's3cret{Enter}')
+
+    expect((await screen.findAllByRole('heading', { name: 'Agents' }))[0]).toBeInTheDocument()
+    expect(loginBody).toEqual({ email: 'admin@example.com', password: 's3cret' })
+  })
+
   it('forces a password change when the session requires a reset', async () => {
     server.use(http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])))
 
