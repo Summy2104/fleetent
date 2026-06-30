@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Copy, KeyRound, MoreVertical, Plus, RefreshCw, Trash2, UserPlus } from 'lucide-react'
+import { MoreVertical, Plus, Trash2, UserPlus, KeyRound } from 'lucide-react'
 
 import { Badge } from '@/components/base/badge'
 import { SimpleSelect } from '@/components/base/simple-select'
@@ -31,7 +31,6 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -39,10 +38,7 @@ import {
   type UserListItem,
   useBindImUserMutation,
   useBlockImUserMutation,
-  useBlockUserMutation,
   useCreateImMappingMutation,
-  useCreateKeyMutation,
-  useCreateServicePrincipalMutation,
   useCreateUserMutation,
   useDeleteImUserMutation,
   useDeleteUserMutation,
@@ -51,312 +47,27 @@ import {
   useInitiateLinkMutation,
   useResetPasswordMutation,
   useRestoreImUserMutation,
-  useRevokeKeyMutation,
-  useRotateKeyMutation,
   useSetRoleMutation,
   useUnblockUserMutation,
   useUnlinkIdentityMutation,
   useUpdateImUserMutation,
   useUpdateUserMutation,
-  useUserKeysQuery,
   useUsersQuery,
 } from '@/features/users/api'
 import {
   IM_PLATFORMS,
   initials,
   metadataValueToString,
-  parseScopes,
-  ROLES,
   statusVariant,
   useAdminMeQuery,
 } from '@/features/users/shared'
 import { useT } from '@/i18n'
-import { describeApiError } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
-
-// ─────────────────────────── One-time secret dialog ───────────────────────────
-
-function SecretDialog({ secret, onDismiss }: { secret: string | null; onDismiss: () => void }): JSX.Element {
-  const t = useT()
-  return (
-    <Dialog onOpenChange={(open) => !open && onDismiss()} open={Boolean(secret)}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t('users.newApiKey')}</DialogTitle>
-          <DialogDescription>{t('users.newApiKeyDescription')}</DialogDescription>
-        </DialogHeader>
-        <div className="rounded-md border border-warning/40 bg-warning/10 p-4">
-          <p className="break-all font-mono text-foreground text-sm">{secret}</p>
-        </div>
-        <DialogFooter>
-          <Button onClick={() => secret && void navigator.clipboard?.writeText(secret)} variant="outline">
-            <Copy className="size-4" /> {t('users.copy')}
-          </Button>
-          <Button onClick={onDismiss}>{t('users.dismissNewSecret')}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-// ─────────────────────────── User form dialog ───────────────────────────
-
-type UserFormState = {
-  email: string
-  name: string
-  password: string
-  resetPassword: string
-  role: string
-  mustReset: boolean
-}
-
-function UserFormDialog({
-  mode,
-  open,
-  onOpenChange,
-  user,
-  busy,
-  onSubmit,
-}: {
-  mode: 'create' | 'edit'
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  user: UserListItem | null
-  busy: boolean
-  onSubmit: (state: UserFormState) => Promise<void>
-}): JSX.Element {
-  const t = useT()
-  const [state, setState] = useState<UserFormState>({
-    email: '',
-    name: '',
-    password: '',
-    resetPassword: '',
-    role: 'viewer',
-    mustReset: false,
-  })
-
-  useEffect(() => {
-    if (!open) return
-    if (mode === 'edit' && user) {
-      setState({
-        email: user.email ?? '',
-        name: user.name,
-        password: '',
-        resetPassword: '',
-        role: user.role,
-        mustReset: user.must_reset,
-      })
-    } else {
-      setState({ email: '', name: '', password: '', resetPassword: '', role: 'viewer', mustReset: false })
-    }
-  }, [open, mode, user])
-
-  return (
-    <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>
-            {mode === 'create'
-              ? t('users.createUser')
-              : t('users.editUser', { name: user?.name ?? t('users.userFallback') })}
-          </DialogTitle>
-          <DialogDescription>
-            {mode === 'create' ? t('users.createUserDescription') : t('users.editUserDescription')}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4">
-          <div className="grid gap-2">
-            <Label htmlFor="user-name">{t('users.userName')}</Label>
-            <Input
-              id="user-name"
-              onChange={(event) => setState((current) => ({ ...current, name: event.target.value }))}
-              value={state.name}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="user-email">{t('users.email')}</Label>
-            <Input
-              id="user-email"
-              onChange={(event) => setState((current) => ({ ...current, email: event.target.value }))}
-              value={state.email}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="user-role">{t('users.role')}</Label>
-            <SimpleSelect
-              onValueChange={(value) => setState((current) => ({ ...current, role: value ?? '' }))}
-              options={ROLES.map((role) => ({ value: role, label: role }))}
-              triggerAriaLabel={t('users.role')}
-              triggerId="user-role"
-              value={state.role}
-            />
-          </div>
-          <div className="flex items-center justify-between gap-3 font-medium text-sm">
-            <Label htmlFor="user-must-reset">{t('users.mustResetPassword')}</Label>
-            <Switch
-              checked={state.mustReset}
-              id="user-must-reset"
-              onCheckedChange={(checked) => setState((current) => ({ ...current, mustReset: checked }))}
-            />
-          </div>
-          {mode === 'create' ? (
-            <div className="grid gap-2">
-              <Label htmlFor="user-password">{t('users.password')}</Label>
-              <Input
-                id="user-password"
-                onChange={(event) => setState((current) => ({ ...current, password: event.target.value }))}
-                type="password"
-                value={state.password}
-              />
-            </div>
-          ) : (
-            <div className="grid gap-2">
-              <Label htmlFor="user-reset-password">{t('users.resetPassword')}</Label>
-              <Input
-                id="user-reset-password"
-                onChange={(event) => setState((current) => ({ ...current, resetPassword: event.target.value }))}
-                type="password"
-                value={state.resetPassword}
-              />
-            </div>
-          )}
-        </div>
-        <DialogFooter>
-          <Button onClick={() => onOpenChange(false)} variant="outline">
-            {t('users.cancel')}
-          </Button>
-          <Button
-            disabled={
-              busy ||
-              !state.name ||
-              // A platform user logs in by email + password; without both, the
-              // created account can never sign in. Edit mode keeps its own rules.
-              (mode === 'create' && (!state.email.trim() || !state.password))
-            }
-            onClick={() => void onSubmit(state)}
-          >
-            {mode === 'create' ? t('users.createUser') : t('users.saveChanges')}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-function CreateServicePrincipalDialog({
-  open,
-  onOpenChange,
-  onSecret,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onSecret: (secret: string) => void
-}): JSX.Element {
-  const t = useT()
-  const createServicePrincipal = useCreateServicePrincipalMutation()
-  const [name, setName] = useState('')
-  const [error, setError] = useState<string | null>(null)
-
-  const reset = (): void => {
-    setName('')
-    setError(null)
-  }
-
-  const submit = async (): Promise<void> => {
-    setError(null)
-    try {
-      const result = await createServicePrincipal.mutateAsync({ name: name.trim() })
-      onSecret(result.api_key_plaintext_once)
-      reset()
-      onOpenChange(false)
-    } catch (exc) {
-      setError(describeApiError(exc))
-    }
-  }
-
-  return (
-    <Dialog
-      onOpenChange={(next) => {
-        if (!next) reset()
-        onOpenChange(next)
-      }}
-      open={open}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t('users.createServicePrincipal')}</DialogTitle>
-          <DialogDescription>{t('users.createServicePrincipalDescription')}</DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-2">
-          <Label htmlFor="service-principal-name">{t('users.servicePrincipalName')}</Label>
-          <Input id="service-principal-name" onChange={(event) => setName(event.target.value)} value={name} />
-        </div>
-        {error ? <p className="text-destructive text-sm">{error}</p> : null}
-        <DialogFooter>
-          <Button onClick={() => onOpenChange(false)} variant="outline">
-            {t('users.cancel')}
-          </Button>
-          <Button disabled={!name.trim() || createServicePrincipal.isPending} onClick={() => void submit()}>
-            {t('users.createServicePrincipal')}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-// ─────────────────────────── Block user dialog ───────────────────────────
-
-function BlockUserDialog({
-  user,
-  open,
-  onOpenChange,
-}: {
-  user: UserListItem
-  open: boolean
-  onOpenChange: (open: boolean) => void
-}): JSX.Element {
-  const t = useT()
-  const blockUser = useBlockUserMutation(user.id)
-  const [reason, setReason] = useState('')
-
-  return (
-    <Dialog
-      onOpenChange={(next) => {
-        if (!next) setReason('')
-        onOpenChange(next)
-      }}
-      open={open}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t('users.blockUser', { name: user.name })}</DialogTitle>
-          <DialogDescription>{t('users.blockUserDescription')}</DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-2">
-          <Label htmlFor="block-reason">{t('users.blockReason')}</Label>
-          <Input id="block-reason" onChange={(event) => setReason(event.target.value)} value={reason} />
-        </div>
-        <DialogFooter>
-          <Button onClick={() => onOpenChange(false)} variant="outline">
-            {t('users.cancel')}
-          </Button>
-          <Button
-            onClick={() =>
-              void blockUser.mutateAsync({ reason }).then(() => {
-                setReason('')
-                onOpenChange(false)
-              })
-            }
-            variant="destructive"
-          >
-            {t('users.block')}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
+import { BlockUserDialog } from '@/features/users/dialogs/block-user-dialog'
+import { CreateServicePrincipalDialog } from '@/features/users/dialogs/create-service-principal-dialog'
+import { KeysDialog } from '@/features/users/dialogs/keys-dialog'
+import { SecretDialog } from '@/features/users/dialogs/secret-dialog'
+import { type UserFormState, UserFormDialog } from '@/features/users/dialogs/user-form-dialog'
 
 // ─────────────────────────── User row ───────────────────────────
 
@@ -538,190 +249,6 @@ function UserRow({
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  )
-}
-
-// ─────────────────────────── Issue key dialog ───────────────────────────
-
-function IssueKeyDialog({
-  userId,
-  userName,
-  open,
-  onOpenChange,
-  onSecret,
-}: {
-  userId: string
-  userName: string
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onSecret: (secret: string) => void
-}): JSX.Element {
-  const t = useT()
-  const createKey = useCreateKeyMutation(userId)
-  const [note, setNote] = useState('')
-  const [scope, setScope] = useState('*')
-
-  const reset = (): void => {
-    setNote('')
-    setScope('*')
-  }
-
-  const onIssue = async (): Promise<void> => {
-    const result = await createKey.mutateAsync({
-      note: note || undefined,
-      scope: parseScopes(scope),
-    })
-    onSecret(result.plaintext)
-    reset()
-    onOpenChange(false)
-  }
-
-  return (
-    <Dialog
-      onOpenChange={(next) => {
-        if (!next) reset()
-        onOpenChange(next)
-      }}
-      open={open}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t('users.issueKeyFor', { name: userName })}</DialogTitle>
-          <DialogDescription>{t('users.issueKeyDescription')}</DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4">
-          <div className="grid gap-2">
-            <Label htmlFor="key-note">{t('users.keyNote')}</Label>
-            <Input id="key-note" onChange={(event) => setNote(event.target.value)} value={note} />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="key-scope">{t('users.keyScope')}</Label>
-            <Input id="key-scope" onChange={(event) => setScope(event.target.value)} value={scope} />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button onClick={() => onOpenChange(false)} variant="outline">
-            {t('users.cancel')}
-          </Button>
-          <Button disabled={createKey.isPending} onClick={() => void onIssue()}>
-            {t('users.issueKey')}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-// ─────────────────────────── API keys dialog ───────────────────────────
-
-function KeysDialog({
-  user,
-  open,
-  onOpenChange,
-  canWrite,
-  onSecret,
-}: {
-  user: UserListItem
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  canWrite: boolean
-  onSecret: (secret: string) => void
-}): JSX.Element {
-  const t = useT()
-  const userKeys = useUserKeysQuery(user.id)
-  const rotateKey = useRotateKeyMutation(user.id)
-  const revokeKey = useRevokeKeyMutation(user.id)
-  const [issueOpen, setIssueOpen] = useState(false)
-  const [revokeTarget, setRevokeTarget] = useState<{ id: number; masked: string } | null>(null)
-
-  const onRotate = async (): Promise<void> => {
-    const result = await rotateKey.mutateAsync()
-    onSecret(result.api_key_plaintext_once)
-  }
-
-  return (
-    <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <KeyRound className="size-4 text-primary" /> {t('users.apiKeysFor', { name: user.name })}
-          </DialogTitle>
-          <DialogDescription>{t('users.apiKeysDescription')}</DialogDescription>
-        </DialogHeader>
-        {canWrite ? (
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => setIssueOpen(true)} size="sm">
-              <KeyRound className="size-4" /> {t('users.issueKey')}
-            </Button>
-            <Button onClick={() => void onRotate()} size="sm" variant="secondary">
-              <RefreshCw className="size-4" /> {t('users.rotateKey')}
-            </Button>
-          </div>
-        ) : null}
-
-        <div className="space-y-2">
-          {(userKeys.data ?? []).map((key) => (
-            <div
-              className="flex items-center justify-between gap-4 rounded-md border border-border bg-secondary/40 px-4 py-3"
-              key={key.id}
-            >
-              <div className="flex min-w-0 items-center gap-3">
-                <span className={`truncate font-mono text-sm ${key.revoked_at ? 'text-muted-foreground' : ''}`}>
-                  {key.masked}
-                </span>
-                <span className="shrink-0 font-mono text-muted-foreground text-xs">{key.prefix}</span>
-                {key.revoked_at ? <Badge variant="secondary">{t('users.revoked')}</Badge> : null}
-              </div>
-              {canWrite && !key.revoked_at ? (
-                <Button
-                  aria-label={t('users.revokeKeyAria', { id: key.id })}
-                  onClick={() => setRevokeTarget({ id: key.id, masked: key.masked })}
-                  size="sm"
-                  variant="ghost"
-                >
-                  <Trash2 className="size-4" /> {t('users.revoke')}
-                </Button>
-              ) : null}
-            </div>
-          ))}
-          {userKeys.data && userKeys.data.length === 0 ? (
-            <p className="text-muted-foreground text-sm">{t('users.noApiKeys')}</p>
-          ) : null}
-        </div>
-
-        {canWrite ? (
-          <IssueKeyDialog
-            onOpenChange={setIssueOpen}
-            onSecret={onSecret}
-            open={issueOpen}
-            userId={user.id}
-            userName={user.name}
-          />
-        ) : null}
-
-        <AlertDialog onOpenChange={(open) => !open && setRevokeTarget(null)} open={Boolean(revokeTarget)}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>
-                {t('users.revokeKeyConfirmTitle', { masked: revokeTarget?.masked ?? '' })}
-              </AlertDialogTitle>
-              <AlertDialogDescription>{t('users.revokeKeyConfirmDescription')}</AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>{t('users.cancel')}</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={() => {
-                  if (revokeTarget) void revokeKey.mutateAsync(revokeTarget.id)
-                  setRevokeTarget(null)
-                }}
-              >
-                {revokeTarget ? t('users.revokeKeyAria', { id: revokeTarget.id }) : t('users.revoke')}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </DialogContent>
-    </Dialog>
   )
 }
 
@@ -1061,14 +588,7 @@ export function UsersPage(): JSX.Element {
   const resetPassword = useResetPasswordMutation(selectedUserId ?? '')
   const createUser = useCreateUserMutation()
 
-  const submitForm = async (state: {
-    email: string
-    name: string
-    password: string
-    resetPassword: string
-    role: string
-    mustReset: boolean
-  }): Promise<void> => {
+  const submitForm = async (state: UserFormState): Promise<void> => {
     if (formMode === 'create') {
       await createUser.mutateAsync({
         email: state.email,
