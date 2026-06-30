@@ -45,7 +45,7 @@ export function SimpleSelect({
       onValueChange={(next) => onValueChange?.((next ?? '') as string)}
       value={value ?? ''}
     >
-      <SelectTrigger aria-label={triggerAriaLabel} className={cn(triggerClassName, 'w-full')} id={triggerId}>
+      <SelectTrigger aria-label={triggerAriaLabel} className={cn('w-full', triggerClassName)} id={triggerId}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
