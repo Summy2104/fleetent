@@ -26,16 +26,37 @@ agent prompt 的长期上下文。
 - **AND** 系统不调用 memory provider 或 knowledge provider
 
 ### Requirement: Memory context retrieval
-`build_context()` SHALL 调用 `fleetent.intelligence.memory` semantic search 并将结果格式化为 memory 区段。
 
-#### Scenario: Memory results are included
-- **WHEN** `fleetent.intelligence.memory` 返回相关 memory items
-- **THEN** `BuiltContext.text` 包含 memory 区段
+`build_context()` SHALL 先通过 `list_always_facts(user_id)` 无条件注入所有 `scope='always'` facts（独立 section，置于其他 memory 之前），再调用 `search_facts()` 语义检索 `scope='situational'` facts 并将结果格式化为 memory 区段。
+
+#### Scenario: Always facts injected unconditionally
+- **WHEN** 用户存在 `scope='always'` facts
+- **THEN** `BuiltContext.text` 包含 `[Behavioral directives]` 区段
+- **AND** 该区段出现在 `[Long-term memory]` 区段之前
+- **AND** 该区段内容与当前用户 query 语义无关也必须存在
+
+#### Scenario: Always facts injected even with zero situational hits
+- **WHEN** 向量检索无 `situational` facts 命中，但存在 `always` facts
+- **THEN** `BuiltContext.text` 包含 `[Behavioral directives]` 区段
 - **AND** `BuiltContext.sources` 包含 `source_type="memory"` 的来源摘要
 
-#### Scenario: Empty memory results are omitted
-- **WHEN** `fleetent.intelligence.memory` 返回空结果
-- **THEN** `BuiltContext.text` 不包含空的 memory 区段
+#### Scenario: Empty always facts omits directives section
+- **WHEN** 用户无 `scope='always'` facts
+- **THEN** `BuiltContext.text` 不包含空的 `[Behavioral directives]` 区段
+
+#### Scenario: Situational facts still retrieved by vector search
+- **WHEN** `build_context()` 被调用
+- **THEN** `search_facts()` 仍被调用以检索 `situational` facts
+- **AND** 两类 facts 分别渲染为独立区段
+
+#### Scenario: Memory results are included
+- **WHEN** `search_facts()` 返回相关 situational memory items
+- **THEN** `BuiltContext.text` 包含 `[Long-term memory]` 区段
+- **AND** `BuiltContext.sources` 包含 `source_type="memory"` 的来源摘要
+
+#### Scenario: Empty situational memory results are omitted
+- **WHEN** `search_facts()` 返回空结果
+- **THEN** `BuiltContext.text` 不包含空的 `[Long-term memory]` 区段
 
 ### Requirement: Optional knowledge provider
 系统 SHALL 将 KB 检索作为可替换的 knowledge provider,经一个正式契约访问:
@@ -276,4 +297,46 @@ long-term-ctx SHALL 从 agent 配置中**已 materialize 的 KB bindings**（`ag
 - **THEN** long-term-ctx 不调用 knowledge provider
 - **AND** `build_context()` 仍按现有规则返回 memory context 或空 context
 - **AND** agent-runtime 不因 KB 范围为空而失败
+
+### Requirement: 并发检索
+
+`build_context()` SHALL 并发执行 memory、knowledge、agent_memory 三路检索（而非顺序等待），整体检索延迟不超过最慢一路。各路返回结果后的合并、排序与预算控制语义不变。
+
+#### Scenario: 三路并发而非顺序
+
+- **WHEN** `build_context()` 触发三路检索，其中每路检索人为延迟 D
+- **THEN** 三路检索的总耗时约为 D（最慢一路），而非约 3×D（顺序之和）
+
+#### Scenario: 单路结果不依赖其他路完成
+
+- **WHEN** 某一路检索快速返回、另一路较慢
+- **THEN** 快路结果不被慢路阻塞，最终合并结果包含所有已成功返回路的结果
+
+### Requirement: 单路检索超时降级
+
+每路检索 SHALL 受单路超时约束（由配置 `retrieval_timeout_seconds` 控制，默认 5 秒）。某路超时 SHALL 降级为该路空结果、记一条 `warning` 级日志，并 MUST NOT 阻塞其余路或使 `build_context()` 抛出异常。超时路在后续合并中等价于该路返回空。
+
+#### Scenario: 单路超时降级为空结果
+
+- **WHEN** memory 检索耗时超过 `retrieval_timeout_seconds`
+- **THEN** memory 路被视为空结果，knowledge 与 agent_memory 路正常并入上下文，`build_context()` 正常返回，不抛异常
+
+#### Scenario: 超时记录可观测日志
+
+- **WHEN** 某路检索超时被降级
+- **THEN** 系统记录一条 `warning` 日志，标明超时的检索路名称
+
+#### Scenario: 全部超时返回空上下文
+
+- **WHEN** 三路检索均超时
+- **THEN** `build_context()` 返回空 `BuiltContext`（`text` 为空、`sources` 为空），与"三路均无结果"行为一致
+
+### Requirement: 检索分段计时可观测
+
+`build_context()` SHALL 为每路检索记录耗时与是否超时，使"哪一路慢"可从结构化日志/trace 直接判定，无需复现。
+
+#### Scenario: 每路记录耗时
+
+- **WHEN** `build_context()` 完成一次检索
+- **THEN** memory、knowledge、agent_memory 三路各自的耗时（毫秒/秒）与超时标志被记录到结构化日志或 trace
 
