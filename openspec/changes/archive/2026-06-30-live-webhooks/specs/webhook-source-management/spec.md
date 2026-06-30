@@ -2,7 +2,7 @@
 
 ### Requirement: webhook source 运行时存储两态
 
-webhook source 的存储 SHALL 两态对称。managed 下 source MUST 持久化在管理库表 `webhook_sources`（经 Alembic 迁移建立，手写 SQL 经 store 边界、named parameters、无 ORM），字段含 `id` / `agent_name` / `user_id` / `message_template` / `reply_target`（可空）/ `enabled` / secret 密文列。standalone 下 source SHALL 取自 `agent.yaml` 的 `webhooks.sources` 列表（每项含 `id` / `user_id` / `agent_name`（可省，默认本 agent）/ `message_template` / `reply_target` / `secret_env`）。两态的 source 都经中立 `webhook_router` 的同一 `WebhookSource` 模型表达。
+webhook source 的存储 SHALL 两态对称。managed 下 source MUST 持久化在管理库表 `webhook_sources`（经 Alembic 迁移建立，手写 SQL 经 store 边界、named parameters、无 ORM），字段含 `id` / `agent_id`(FK→agents.id) / `user_id` / `message_template` / `reply_target`（可空）/ `enabled` / secret 密文列。standalone 下 source SHALL 取自 `agent.yaml` 的 `webhooks.sources` 列表（每项含 `id` / `user_id` / `agent_name`（可省，默认本 agent）/ `message_template` / `reply_target` / `secret_env`）。两态的 source 都经中立 `webhook_router` 的同一 `WebhookSource` 模型表达。
 
 #### Scenario: managed source 落管理库
 - **WHEN** 在 managed 下登记一个 webhook source
@@ -26,7 +26,7 @@ webhook source 的 `secret`（HMAC 校验用）MUST NOT 以明文持久化。man
 
 ### Requirement: managed webhook source 经 admin REST API 管理
 
-managed 下系统 SHALL 提供受管理员鉴权的 REST API 对 `webhook_sources` 做增删查改（CRUD）。创建/更新 MUST 校验必填字段（`id` / `user_id`；`agent_name` 用于路由目标 agent，未配则入站投递时拒绝）；非管理员会话 MUST 被拒。secret 提交后 MUST 以密文落库、响应 MUST NOT 回显明文 secret。
+managed 下系统 SHALL 提供受管理员鉴权的 REST API 对 `webhook_sources` 做增删查改（CRUD）。创建/更新 MUST 校验必填字段（`id` / `user_id`；`agent_id` 用于路由目标 agent，未配则入站投递时拒绝）；非管理员会话 MUST 被拒。secret 提交后 MUST 以密文落库、响应 MUST NOT 回显明文 secret。
 
 #### Scenario: 管理员创建 source
 - **WHEN** 管理员 POST 一个 webhook source（含 secret）到 admin API
