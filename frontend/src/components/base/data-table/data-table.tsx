@@ -1,6 +1,8 @@
 import * as React from 'react'
 import { type ColumnDef, flexRender, type Row } from '@tanstack/react-table'
 
+import { Badge } from '@/components/base/badge'
+import { Card } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -8,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { cn } from '@/lib/utils'
 import { DataTablePagination } from './data-table-pagination'
 import { DataTableToolbar } from './data-table-toolbar'
+import { DataTableViewOptions } from './data-table-view-options'
 import type { DataTableProps } from './types'
 import { useDataTable } from './use-data-table'
 
@@ -78,6 +81,7 @@ export function DataTable<TData>(props: DataTableProps<TData>) {
     pageSizeOptions = [10, 20, 50],
     isLoading = false,
     emptyState,
+    title,
     toolbar,
     actions,
     className,
@@ -94,57 +98,72 @@ export function DataTable<TData>(props: DataTableProps<TData>) {
     ...rest,
   })
 
-  const showToolbar =
-    enableGlobalFilter || enableColumnVisibility || Boolean(toolbar) || Boolean(actions) || hasColumnFilters(columns)
+  // 筛选卡：有可筛选项时才渲染。表头带：有列显隐或 actions 时才渲染。
+  const hasFilters = enableGlobalFilter || hasColumnFilters(columns) || Boolean(toolbar)
+  const hasHeaderBand = title != null || enableColumnVisibility || Boolean(actions)
   const columnCount = table.getVisibleLeafColumns().length
+  const rowCount = table.getCoreRowModel().rows.length
 
   return (
     <div className={cn('space-y-3', className)}>
-      {showToolbar ? (
-        <DataTableToolbar
-          actions={actions}
-          enableColumnVisibility={enableColumnVisibility}
-          enableGlobalFilter={enableGlobalFilter}
-          table={table}
-        >
-          {toolbar}
-        </DataTableToolbar>
+      {hasFilters ? (
+        <Card className="px-4 py-3">
+          <DataTableToolbar enableGlobalFilter={enableGlobalFilter} table={table}>
+            {toolbar}
+          </DataTableToolbar>
+        </Card>
       ) : null}
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map((header) => (
-                  <TableHead key={header.id}>
-                    {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
-                  </TableHead>
-                ))}
-              </TableRow>
-            ))}
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
-              <SkeletonRows columns={columnCount} rows={table.getState().pagination.pageSize} />
-            ) : table.getRowModel().rows.length ? (
-              table.getRowModel().rows.map((row) => (
-                <TableRow data-state={row.getIsSelected() ? 'selected' : undefined} key={row.id}>
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
+      <Card className="gap-0 divide-y py-0">
+        {hasHeaderBand ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
+            <div className="flex items-center gap-2 font-medium text-base">
+              {title}
+              {title != null ? <Badge variant="secondary">{rowCount}</Badge> : null}
+            </div>
+            <div className="flex items-center gap-2">
+              {actions}
+              {enableColumnVisibility ? <DataTableViewOptions table={table} /> : null}
+            </div>
+          </div>
+        ) : null}
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              {table.getHeaderGroups().map((headerGroup) => (
+                <TableRow key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => (
+                    <TableHead key={header.id}>
+                      {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+                    </TableHead>
                   ))}
                 </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell className="h-32 p-0" colSpan={columnCount}>
-                  {emptyState ?? <DefaultEmpty />}
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-      <DataTablePagination pageSizeOptions={pageSizeOptions} table={table} />
+              ))}
+            </TableHeader>
+            <TableBody>
+              {isLoading ? (
+                <SkeletonRows columns={columnCount} rows={table.getState().pagination.pageSize} />
+              ) : table.getRowModel().rows.length ? (
+                table.getRowModel().rows.map((row) => (
+                  <TableRow data-state={row.getIsSelected() ? 'selected' : undefined} key={row.id}>
+                    {row.getVisibleCells().map((cell) => (
+                      <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell className="h-32 p-0" colSpan={columnCount}>
+                    {emptyState ?? <DefaultEmpty />}
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+        <div className="px-4 py-2.5">
+          <DataTablePagination pageSizeOptions={pageSizeOptions} table={table} />
+        </div>
+      </Card>
     </div>
   )
 }

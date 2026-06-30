@@ -11,11 +11,13 @@ export function UsersTable({
   onEdit,
   onManageKeys,
   actions,
+  title,
 }: {
   canWrite: boolean
   onEdit: (user: UserListItem) => void
   onManageKeys: (user: UserListItem) => void
   actions?: React.ReactNode
+  title?: React.ReactNode
 }): JSX.Element {
   const t = useT()
   const users = useUsersQuery()
@@ -34,6 +36,7 @@ export function UsersTable({
       enableGlobalFilter
       getRowId={(row) => row.id}
       isLoading={users.isPending}
+      title={title}
     />
   )
 }

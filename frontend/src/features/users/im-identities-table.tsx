@@ -10,10 +10,12 @@ export function ImIdentitiesTable({
   canWrite,
   users,
   actions,
+  title,
 }: {
   canWrite: boolean
   users: UserListItem[]
   actions?: React.ReactNode
+  title?: React.ReactNode
 }): JSX.Element {
   const t = useT()
   const imUsers = useImUsersQuery()
@@ -29,6 +31,7 @@ export function ImIdentitiesTable({
       enableGlobalFilter
       getRowId={(row) => String(row.id)}
       isLoading={imUsers.isPending}
+      title={title}
     />
   )
 }

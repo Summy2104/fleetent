@@ -50,6 +50,20 @@ describe('DataTable', () => {
     expect(screen.getByText('Row 1')).toBeInTheDocument()
   })
 
+  it('renders the actions slot and the column-visibility control in the header band', () => {
+    render(
+      <DataTable
+        actions={<button type="button">New item</button>}
+        columns={COLUMNS}
+        data={DATA}
+        enableColumnVisibility
+        getRowId={(row) => row.id}
+      />
+    )
+    expect(screen.getByRole('button', { name: 'New item' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Columns' })).toBeInTheDocument()
+  })
+
   it('renders a custom emptyState when provided and data is empty', () => {
     render(<DataTable columns={COLUMNS} data={[]} emptyState={<div>Nothing here yet</div>} />)
     expect(screen.getByText('Nothing here yet')).toBeInTheDocument()

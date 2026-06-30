@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { KeyRound, Plus, UserPlus } from 'lucide-react'
 
-import { Badge } from '@/components/base/badge'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
@@ -67,7 +66,7 @@ export function UsersPage(): JSX.Element {
     setFormOpen(false)
   }
 
-  // 独立功能按钮统一走 DataTable 的 actions 插槽（toolbar 右侧），不再散落在页头。
+  // 功能按钮统一走 DataTable 的 actions 动作栏（筛选 toolbar 之上、右对齐），位置全站一致。
   const usersActions = canWrite ? (
     <>
       <Button onClick={() => setServicePrincipalOpen(true)} variant="secondary">
@@ -93,12 +92,10 @@ export function UsersPage(): JSX.Element {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-2">
+      <div className="space-y-1">
         <h2 className="font-semibold text-xl tracking-tight">{t('users.title')}</h2>
-        <Badge variant="secondary">{users.data?.length ?? 0}</Badge>
+        <p className="max-w-2xl text-muted-foreground text-sm">{t('users.pageDescription')}</p>
       </div>
-
-      <p className="max-w-2xl text-muted-foreground text-sm">{t('users.pageDescription')}</p>
 
       <Tabs defaultValue="users">
         <TabsList>
@@ -116,11 +113,17 @@ export function UsersPage(): JSX.Element {
               setFormOpen(true)
             }}
             onManageKeys={setKeysUser}
+            title={t('users.tabUsers')}
           />
         </TabsContent>
 
         <TabsContent value="im">
-          <ImIdentitiesTable actions={imActions} canWrite={canWrite} users={users.data ?? []} />
+          <ImIdentitiesTable
+            actions={imActions}
+            canWrite={canWrite}
+            title={t('users.tabImIdentities')}
+            users={users.data ?? []}
+          />
         </TabsContent>
       </Tabs>
 

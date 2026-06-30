@@ -6,34 +6,29 @@ import { SimpleSelect } from '@/components/base/simple-select'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { MultiSelect } from '@/components/ui/multi-select'
-import { DataTableViewOptions } from './data-table-view-options'
 
 interface DataTableToolbarProps<TData> {
   table: Table<TData>
   enableGlobalFilter?: boolean
-  enableColumnVisibility?: boolean
   children?: React.ReactNode
-  actions?: React.ReactNode
 }
 
-export function DataTableToolbar<TData>({
-  table,
-  enableGlobalFilter,
-  enableColumnVisibility,
-  children,
-  actions,
-}: DataTableToolbarProps<TData>) {
+/**
+ * 筛选区内容：全局搜索 + 列级筛选 + 外部筛选 slot + Reset。
+ * 列显隐与功能按钮（actions）不在这里——它们在表格卡的表头带（见 data-table.tsx）。
+ */
+export function DataTableToolbar<TData>({ table, enableGlobalFilter, children }: DataTableToolbarProps<TData>) {
   const isFiltered = table.getState().columnFilters.length > 0 || Boolean(table.getState().globalFilter)
-  const hasRightCluster = enableColumnVisibility || Boolean(actions)
 
   return (
     <div className="flex flex-wrap items-center gap-2">
       {enableGlobalFilter ? <GlobalSearch table={table} /> : null}
       <ColumnFilters table={table} />
+      {children}
       {isFiltered ? (
         <Button
           aria-label="Reset filters"
-          className="h-8 px-2 lg:px-3"
+          className="ml-auto h-8 px-2 lg:px-3"
           onClick={() => {
             table.resetColumnFilters()
             table.setGlobalFilter('')
@@ -43,13 +38,6 @@ export function DataTableToolbar<TData>({
           Reset
           <X className="size-4" />
         </Button>
-      ) : null}
-      {children}
-      {hasRightCluster ? (
-        <div className="ml-auto flex items-center gap-2">
-          {enableColumnVisibility ? <DataTableViewOptions table={table} /> : null}
-          {actions}
-        </div>
       ) : null}
     </div>
   )
