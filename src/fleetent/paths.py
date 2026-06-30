@@ -85,6 +85,10 @@ def tenant_kb_dir(tenant_id: str) -> Path:
     return tenant_dir(tenant_id) / "kb"
 
 
+def tenant_kb_data_dir(tenant_id: str) -> Path:
+    return tenant_kb_dir(tenant_id) / "data"
+
+
 def tenant_agent_home_dir(tenant_id: str, agent_id: str) -> Path:
     return tenant_dir(tenant_id) / "agents" / agent_id
 

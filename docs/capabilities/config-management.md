@@ -65,7 +65,7 @@
 
 - ✅ **Standalone KB ingest 配置入口**：`kb-service.yaml` + `kb-worker --config ...`
   - platform 托管 KB ingest 已退役；`/admin/kb/connectors/*`、platform import/sync/extract 端点和管理库 KB ingest 队列不再是生产入口
-  - 升级前需要把历史 platform connector 配置誊到 `kb-service.yaml`
+  - 升级前需要把历史 platform connector 配置誊到 `tenants/<tenant>/kb/kb-service.yaml`
   - queue 落本地 `kb_ingest_queue.db`，不再落 `management.db`
   - `list` 列出 Platform Knowledge config / DB snapshot 中的 Google Drive / Confluence connector 安全摘要
   - `check <connector_id>` 检查 `credential_ref` 与 remote scope，返回 credential_missing / credential_invalid / auth_failed / scope_unreachable / ok

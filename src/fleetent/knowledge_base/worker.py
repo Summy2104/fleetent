@@ -42,13 +42,8 @@ class KBWorkerConfig:
 
 
 def load_config() -> KBWorkerConfig:
-    """Load legacy kb-worker config from process env plus ``$FLEETENT_HOME/kb-service/.env``."""
+    """Load legacy kb-worker config from process env."""
     home_dir = Path(os.environ.get("FLEETENT_HOME") or Path.home() / ".fleetent").expanduser()
-    env_path = home_dir / "kb-service" / ".env"
-    if env_path.exists():
-        from dotenv import load_dotenv
-
-        load_dotenv(env_path, override=False)
     return KBWorkerConfig(
         queue_database_url=os.environ.get("FLEETENT_KB_WORKER_QUEUE_DATABASE_URL", "").strip(),
         substrate_database_url=os.environ.get(
