@@ -26,12 +26,22 @@ class _FakeStore:
     def __init__(self, keyword_results=None) -> None:
         self.keyword_results = list(keyword_results or [])
         self.keyword_calls: list[tuple[str, str, list[str], int]] = []
+        self.embedding_identity: tuple[str, int] | None = None
+        self.chunks_by_id: dict[str, object] = {}
+
+    def get_embedding_identity(self, tenant_id: str, kb_id: str) -> tuple[str, int] | None:
+        return self.embedding_identity
 
     def search_keyword(
         self, query: str, tenant_id: str, kb_ids: list[str], limit: int
     ):  # pragma: no cover - exercised in async tests
         self.keyword_calls.append((query, tenant_id, kb_ids, limit))
         return list(self.keyword_results)
+
+    def get_chunks_by_ids(self, tenant_id: str, chunk_ids: list[str]):
+        return [
+            self.chunks_by_id[chunk_id] for chunk_id in chunk_ids if chunk_id in self.chunks_by_id
+        ]
 
 
 def _monotonic(values: list[float]):
@@ -318,3 +328,27 @@ async def test_search_uses_plaintext_audit_setting(monkeypatch: pytest.MonkeyPat
     )
 
     assert captured[0]["plaintext"] is True
+
+
+async def test_search_fails_when_current_embedding_identity_mismatches_kb(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleetent.knowledge_base.retrieval import search as search_module
+    from fleetent.vector_store import EmbeddingIdentity
+
+    store = _FakeStore()
+    store.embedding_identity = ("bge-small", 384)
+    monkeypatch.setattr(
+        search_module.vector_store,
+        "current_embedding_identity",
+        lambda: EmbeddingIdentity(model="nomic-embed", dimensions=768),
+    )
+
+    with pytest.raises(Exception, match="Knowledge base embedding mismatch"):
+        await search_module.search(
+            "query",
+            store=store,
+            tenant_id="tenant-a",
+            kb_ids=["kb-1"],
+            mode="vector",
+        )

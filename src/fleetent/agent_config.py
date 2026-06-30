@@ -839,9 +839,9 @@ def default_models() -> AgentModels:
                 id="embedding",
                 provider="local",
                 protocol="http_embedding",
-                endpoint="http://localhost:11434/v1/embeddings",
-                model="default-embedding",
-                params={"dimensions": 64},
+                endpoint="http://127.0.0.1:11434/v1/embeddings",
+                model="bge-small",
+                params={"dimensions": 384},
             ),
         ],
         routes={

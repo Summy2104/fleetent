@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 
 from fleetent.agent_config import AgentFile
 from fleetent.model import ModelPolicySnapshot
@@ -10,12 +11,19 @@ from fleetent.vector_store.backend import (
 from fleetent.vector_store.embeddings import (
     DeterministicEmbeddingProvider,
     EmbeddingProvider,
+    HttpEmbeddingProvider,
     create_embedding_provider_from_policy,
 )
 
 _embedding: EmbeddingProvider
 _backend: VectorBackend
 _logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class EmbeddingIdentity:
+    model: str
+    dimensions: int
 
 
 def _platform_database_url() -> str:
@@ -92,6 +100,17 @@ async def embed_text(text: str) -> list[float]:
     provider while storing in a backend other than the global _backend.
     """
     return await _embedding.embed(text)
+
+
+def current_embedding_identity() -> EmbeddingIdentity:
+    if isinstance(_embedding, HttpEmbeddingProvider):
+        return EmbeddingIdentity(model=_embedding.model, dimensions=_embedding.dimensions)
+    if isinstance(_embedding, DeterministicEmbeddingProvider):
+        return EmbeddingIdentity(
+            model=f"deterministic/{_embedding.dimensions}",
+            dimensions=_embedding.dimensions,
+        )
+    raise TypeError(f"unsupported embedding provider type: {type(_embedding).__name__}")
 
 
 def _validate_id(id: str) -> None:
