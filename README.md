@@ -140,7 +140,7 @@ observability traces, usage, diagnostics, session persistence
 
 | 变量 | 说明 |
 | --- | --- |
-| `ANTHROPIC_API_KEY` | 默认 Anthropic-compatible route 凭据。 |
+| `FLEETENT_MODEL_<PROVIDER>_API_KEY` | LLM route 凭据。变量名由 model 路由的 `api_key_env` 指定，默认按 provider 生成（如 `FLEETENT_MODEL_PRIMARY_API_KEY`），不用厂商固定名（详见 `docs/capabilities/model-router.md`）。 |
 
 常见可选变量：
 
