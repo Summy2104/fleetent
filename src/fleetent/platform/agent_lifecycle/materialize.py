@@ -118,17 +118,19 @@ def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
 def desired_state_payload_from_agent_file(agent_file: AgentFile) -> dict[str, Any]:
     """Serialize the non-secret subset of an AgentFile for node desired-state delivery."""
     dumped = agent_file.model_dump(mode="json", exclude_defaults=False)
-    # Capture each MCP server's ``env:`` references (variable-name pointers, like
-    # ``api_key_env``) before secret stripping removes every ``env`` block. Plaintext env
-    # values are NOT captured — they stay stripped so a secret is never delivered inline.
+    # Capture each MCP server's string ``env`` values (both ``env:`` references and plaintext
+    # literals like ATLASSIAN_USER_EMAIL/SITE_NAME) before secret stripping removes every
+    # ``env`` block, so non-secret literals survive to the materialized agent.yaml. Real
+    # secrets must still be passed as ``env:VAR`` refs + agent_secrets, never inline plaintext.
     mcp_env_refs = _mcp_env_refs_by_id(dumped)
     payload: dict[str, Any] = _strip_secret_plumbing(dumped)
     # Render MCP servers in the standard ``mcpServers`` map form the agent runtime accepts;
     # the legacy ``mcp_servers`` list is rejected by ``load_agent_file``. Done after secret
     # stripping so ``env``/``credential_ref`` are already removed from each server entry.
     _mcp_payload_to_map(payload)
-    # Re-attach the preserved ``env:`` references onto the rendered ``mcpServers`` map so the
-    # node collects their var names (``referenced_env_names``) and fills them from secrets.
+    # Re-attach the preserved ``env`` values onto the rendered ``mcpServers`` map: ``env:``
+    # references (node collects their var names via ``referenced_env_names`` and fills them from
+    # secrets) plus plaintext non-secret literals (written verbatim to agent.yaml).
     _restore_mcp_env_refs(payload, mcp_env_refs)
     return payload
 
@@ -147,11 +149,13 @@ def _strip_secret_plumbing(value: Any) -> Any:
 
 
 def _mcp_env_refs_by_id(dumped: dict[str, Any]) -> dict[str, dict[str, str]]:
-    """Per-server ``env:`` references from a dumped AgentFile, keyed by server id.
+    """Per-server string ``env`` values from a dumped AgentFile, keyed by server id.
 
-    Only ``env:VAR`` reference values are kept — they name a ``.env`` variable (a non-secret
-    pointer, like ``api_key_env``), so delivering them is safe. Plaintext or non-string
-    values are dropped here and left to ``_strip_secret_plumbing``.
+    All string values are kept — both ``env:VAR`` references (non-secret pointers, like
+    ``api_key_env``) and plaintext literals (non-secret identifiers like ATLASSIAN_USER_EMAIL/
+    SITE_NAME) — so they survive to the materialized agent.yaml. Non-string values are dropped
+    here and left to ``_strip_secret_plumbing``. Real secrets must use ``env:VAR`` refs, never
+    inline plaintext.
     """
     refs: dict[str, dict[str, str]] = {}
     for server in dumped.get("mcp_servers") or []:
@@ -160,7 +164,7 @@ def _mcp_env_refs_by_id(dumped: dict[str, Any]) -> dict[str, dict[str, str]]:
         env = server.get("env")
         if not isinstance(env, dict):
             continue
-        kept = {str(k): v for k, v in env.items() if isinstance(v, str) and v.startswith("env:")}
+        kept = {str(k): v for k, v in env.items() if isinstance(v, str)}
         if kept:
             refs[str(server["id"])] = kept
     return refs
