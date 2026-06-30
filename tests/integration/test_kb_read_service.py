@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pytest
 from fastapi.testclient import TestClient
 
 from fleetent.knowledge_base import KnowledgeChunk
@@ -138,8 +139,16 @@ def test_search_returns_wire_chunks(monkeypatch) -> None:
     }
 
 
-def test_search_passes_explicit_mode_and_request_scope(monkeypatch) -> None:
+def test_search_request_defaults_keep_backward_compatible_behavior(monkeypatch) -> None:
     serve, client = _make_client(monkeypatch)
+    request = serve.SearchRequest.model_validate(
+        {
+            "principal": {"user_id": "user-1", "tenant_id": "tenant-a"},
+            "query": "deploy",
+            "kb_ids": ["kb-1", "kb-2"],
+            "limit": 5,
+        }
+    )
     captured: dict[str, object] = {}
 
     async def fake_search(**kwargs) -> list[KnowledgeChunk]:
@@ -162,6 +171,9 @@ def test_search_passes_explicit_mode_and_request_scope(monkeypatch) -> None:
         },
     )
 
+    assert request.mode is None
+    assert request.rerank is False
+    assert request.use_planner is False
     assert response.status_code == 200
     assert captured == {
         "query": "deploy",
@@ -171,6 +183,155 @@ def test_search_passes_explicit_mode_and_request_scope(monkeypatch) -> None:
         "mode": "hybrid",
         "rerank": False,
     }
+
+
+def test_search_passes_explicit_mode_and_rerank_to_runtime(monkeypatch) -> None:
+    serve, client = _make_client(monkeypatch)
+    captured: dict[str, object] = {}
+
+    async def fake_search(**kwargs) -> list[KnowledgeChunk]:
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(serve.kb_runtime, "search", fake_search)
+
+    response = client.post(
+        "/search",
+        json={
+            "principal": {"user_id": "user-1", "tenant_id": "tenant-a"},
+            "query": "deploy",
+            "kb_ids": ["kb-1", "kb-2"],
+            "limit": 5,
+            "mode": "hybrid",
+            "rerank": True,
+        },
+        headers={
+            "Authorization": "Bearer svc-test",
+            "X-Fleetent-Principal": '{"user_id":"user-1","tenant_id":"tenant-a"}',
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured == {
+        "query": "deploy",
+        "tenant_id": "tenant-a",
+        "kb_ids": ["kb-1", "kb-2"],
+        "limit": 5,
+        "mode": "hybrid",
+        "rerank": True,
+    }
+
+
+def test_search_uses_planner_when_requested(monkeypatch) -> None:
+    serve, client = _make_client(monkeypatch)
+    captured: dict[str, object] = {}
+    planned_chunk = KnowledgeChunk(
+        id="planned-1",
+        document_id="doc-1",
+        tenant_id="tenant-a",
+        kb_id="kb-1",
+        filename="graph.md",
+        content="planned result",
+        position=1,
+        score=0.95,
+        source="manual",
+        source_url=None,
+        metadata={},
+    )
+
+    def fake_plan(query: str, options) -> object:
+        captured["query"] = query
+        captured["options"] = options
+        return "plan-token"
+
+    async def fake_execute(plan) -> list[KnowledgeChunk]:
+        captured["plan"] = plan
+        return [planned_chunk]
+
+    async def fail_search(**_kwargs) -> list[KnowledgeChunk]:
+        raise AssertionError("kb_runtime.search should not be called when use_planner=true")
+
+    monkeypatch.setattr(serve.kb_runtime, "plan_knowledge_search", fake_plan)
+    monkeypatch.setattr(serve.kb_runtime, "execute_knowledge_search_plan", fake_execute)
+    monkeypatch.setattr(serve.kb_runtime, "search", fail_search)
+
+    response = client.post(
+        "/search",
+        json={
+            "principal": {"user_id": "user-1", "tenant_id": "tenant-a"},
+            "query": "Which service depends on Billing API?",
+            "kb_ids": ["kb-1"],
+            "limit": 4,
+            "mode": "hybrid",
+            "rerank": True,
+            "use_planner": True,
+        },
+        headers={
+            "Authorization": "Bearer svc-test",
+            "X-Fleetent-Principal": '{"user_id":"user-1","tenant_id":"tenant-a"}',
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "chunks": [
+            {
+                "id": "planned-1",
+                "document_id": "doc-1",
+                "tenant_id": "tenant-a",
+                "kb_id": "kb-1",
+                "filename": "graph.md",
+                "content": "planned result",
+                "position": 1,
+                "score": 0.95,
+                "source": "manual",
+                "source_url": None,
+                "metadata": {},
+            }
+        ]
+    }
+    assert captured["query"] == "Which service depends on Billing API?"
+    options = captured["options"]
+    assert options.tenant_id == "tenant-a"
+    assert options.kb_ids == ["kb-1"]
+    assert options.limit == 4
+    assert options.rerank is True
+    assert captured["plan"] == "plan-token"
+
+
+def test_search_rejects_rerank_with_non_hybrid_mode_before_planner(monkeypatch) -> None:
+    serve, client = _make_client(monkeypatch)
+
+    async def fail_search(**_kwargs) -> list[KnowledgeChunk]:
+        raise AssertionError("search should not run for invalid rerank/mode combinations")
+
+    async def fail_execute(_plan) -> list[KnowledgeChunk]:
+        raise AssertionError("planner execute should not run for invalid rerank/mode combinations")
+
+    monkeypatch.setattr(serve.kb_runtime, "search", fail_search)
+    monkeypatch.setattr(
+        serve.kb_runtime,
+        "execute_knowledge_search_plan",
+        fail_execute,
+    )
+
+    with pytest.raises(ValueError, match="rerank only supports hybrid knowledge search mode"):
+        client.post(
+            "/search",
+            json={
+                "principal": {"user_id": "user-1", "tenant_id": "tenant-a"},
+                "query": "deploy",
+                "kb_ids": ["kb-1"],
+                "limit": 3,
+                "mode": "vector",
+                "rerank": True,
+                "use_planner": True,
+            },
+            headers={
+                "Authorization": "Bearer svc-test",
+                "X-Fleetent-Principal": '{"user_id":"user-1","tenant_id":"tenant-a"}',
+            },
+        )
 
 
 def test_search_rejects_missing_or_malformed_auth(monkeypatch) -> None:
