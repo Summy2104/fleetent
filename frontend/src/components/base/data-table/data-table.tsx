@@ -11,6 +11,11 @@ import { DataTableToolbar } from './data-table-toolbar'
 import type { DataTableProps } from './types'
 import { useDataTable } from './use-data-table'
 
+/**
+ * Custom filter for multi-select faceted filters. Coerces cell values via `String(...)`,
+ * so a `null`/`undefined` cell becomes `"null"`/`"undefined"` — a row with a missing value
+ * only matches an option whose value is literally that string.
+ */
 function multiSelectFilterFn<TData>(row: Row<TData>, columnId: string, value: unknown): boolean {
   if (!Array.isArray(value) || value.length === 0) return true
   return value.includes(String(row.getValue(columnId)))
@@ -59,6 +64,10 @@ function hasColumnFilters<TData>(columns: ColumnDef<TData, unknown>[]): boolean 
   return columns.some((column) => Boolean(column.meta?.filter))
 }
 
+/**
+ * Generic data table built on TanStack Table. Pass a **stable (memoized) `columns` reference** —
+ * a new array literal each render causes TanStack Table to rebuild its column model on every render.
+ */
 export function DataTable<TData>(props: DataTableProps<TData>) {
   const {
     columns,

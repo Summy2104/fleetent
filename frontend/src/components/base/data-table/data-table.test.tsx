@@ -50,6 +50,12 @@ describe('DataTable', () => {
     expect(screen.getByText('Row 1')).toBeInTheDocument()
   })
 
+  it('renders a custom emptyState when provided and data is empty', () => {
+    render(<DataTable columns={COLUMNS} data={[]} emptyState={<div>Nothing here yet</div>} />)
+    expect(screen.getByText('Nothing here yet')).toBeInTheDocument()
+    expect(screen.queryByText('No data')).not.toBeInTheDocument()
+  })
+
   it('sorts rows when a sortable header is clicked', async () => {
     const user = userEvent.setup()
     const data: Row[] = [

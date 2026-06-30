@@ -23,7 +23,7 @@ export function DataTableViewOptions<TData>({ table }: DataTableViewOptionsProps
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger render={<Button size="sm" variant="outline" />}>
+      <DropdownMenuTrigger render={<Button aria-label="Columns" size="sm" variant="outline" />}>
         <SlidersHorizontal data-icon="inline-start" />
         <span className="hidden sm:inline">Columns</span>
       </DropdownMenuTrigger>
