@@ -12,6 +12,8 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 
 def _user_version(db_path: Path) -> int:
     conn = sqlite3.connect(db_path)
@@ -239,6 +241,7 @@ def test_aggregate_approvals_across_agents_read_only(tmp_path: Path) -> None:
 
 def test_aggregate_trace_events_across_agents_resolves_platform_id_via_agent_name(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fleetent import agent_store
     from fleetent.observability.traces import TraceEvent, record_trace_event, set_state_db
@@ -251,9 +254,7 @@ def test_aggregate_trace_events_across_agents_resolves_platform_id_via_agent_nam
     management_db = tmp_path / "management.db"
     apply_migrations(management_db)
 
-    import os
-
-    os.environ["DATABASE_URL"] = f"sqlite:///{management_db}"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{management_db}")
     tenancy_store.create_tenant(id="tenant-1", name="Tenant 1")
     agent = agent_store.create_agent("support", "Support.", ["shell"], tenant_id="tenant-1")
 
