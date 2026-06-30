@@ -17,6 +17,7 @@ from fleetent.platform.connector_management import mcp_server_store
 from fleetent.platform.connector_management.mcp_auth import (
     ApiKeyMcpAuthConfig,
     ApiKeyPerUserMcpAuthConfig,
+    OAuthAuthorizationCodeMcpAuthConfig,
     OAuthClientCredentialsMcpAuthConfig,
     parse_mcp_auth_config,
 )
@@ -38,6 +39,17 @@ def _normalized_auth_config(auth_type: str, auth_config: dict[str, Any]) -> dict
             "client_id": parsed.client_id,
             "client_secret_env": parsed.client_secret_env,
             "scope": parsed.scope,
+        }
+    if isinstance(parsed, OAuthAuthorizationCodeMcpAuthConfig):
+        # per-user OAuth 2.1 authorization_code: structured non-secret fields + the
+        # client_secret env reference (optional for PKCE public clients). Secret value never here.
+        return {
+            "authorization_endpoint": parsed.authorization_endpoint,
+            "token_url": parsed.token_url,
+            "client_id": parsed.client_id,
+            "client_secret_env": parsed.client_secret_env,
+            "scope": parsed.scope,
+            "redirect_path": parsed.redirect_path,
         }
     if isinstance(parsed, ApiKeyPerUserMcpAuthConfig):
         # per-user dynamic api-key/bearer: server-level method settings only (no static key).

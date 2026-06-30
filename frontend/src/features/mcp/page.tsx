@@ -36,6 +36,7 @@ import { type AgentListItem, useAgentsQuery } from '@/features/agents/api';
 import {
   type McpApiKeyPerUserAuthConfig,
   type McpAuthType,
+  type McpOAuthAuthorizationCodeAuthConfig,
   type McpOAuthClientCredentialsAuthConfig,
   type McpServerInput,
   type McpServerRecord,
@@ -91,6 +92,8 @@ function ServerDialog({
   const [oauthClientId, setOauthClientId] = useState('');
   const [oauthClientSecretEnv, setOauthClientSecretEnv] = useState('');
   const [oauthScope, setOauthScope] = useState('');
+  const [oauthAuthorizationEndpoint, setOauthAuthorizationEndpoint] = useState('');
+  const [oauthRedirectPath, setOauthRedirectPath] = useState('');
   const [headerStyle, setHeaderStyle] = useState<'bearer' | 'x_api_key'>('bearer');
   const [credentialInput, setCredentialInput] = useState<'form' | 'tool' | 'both'>('form');
   const [env, setEnv] = useState<EnvPair[]>([]);
@@ -101,6 +104,7 @@ function ServerDialog({
     if (open) {
       const authConfig = editing?.auth_config ?? {};
       const oauthConfig = authConfig as Partial<McpOAuthClientCredentialsAuthConfig>;
+      const authzCodeConfig = authConfig as Partial<McpOAuthAuthorizationCodeAuthConfig>;
       const perUserConfig = authConfig as Partial<McpApiKeyPerUserAuthConfig>;
       setId(editing?.id ?? '');
       setTransport(editing?.transport ?? 'stdio');
@@ -113,6 +117,8 @@ function ServerDialog({
       setOauthClientId(oauthConfig.client_id ?? '');
       setOauthClientSecretEnv(oauthConfig.client_secret_env ?? '');
       setOauthScope(oauthConfig.scope ?? '');
+      setOauthAuthorizationEndpoint(authzCodeConfig.authorization_endpoint ?? '');
+      setOauthRedirectPath(authzCodeConfig.redirect_path ?? '');
       setHeaderStyle(perUserConfig.header_style ?? 'bearer');
       setCredentialInput(perUserConfig.credential_input ?? 'form');
       setEnv(toPairs(editing?.env));
@@ -137,9 +143,18 @@ function ServerDialog({
                 client_secret_env: oauthClientSecretEnv.trim(),
                 scope: oauthScope.trim(),
               }
-            : authType === 'api_key_per_user'
-              ? { header_style: headerStyle, credential_input: credentialInput }
-              : {},
+            : authType === 'oauth_authorization_code'
+              ? {
+                  authorization_endpoint: oauthAuthorizationEndpoint.trim(),
+                  token_url: oauthTokenUrl.trim(),
+                  client_id: oauthClientId.trim(),
+                  client_secret_env: oauthClientSecretEnv.trim(),
+                  scope: oauthScope.trim(),
+                  redirect_path: oauthRedirectPath.trim(),
+                }
+              : authType === 'api_key_per_user'
+                ? { header_style: headerStyle, credential_input: credentialInput }
+                : {},
     };
     if (!isEdit && agentScope !== GLOBAL_SCOPE) payload.agent_id = Number(agentScope);
     if (transport === 'stdio') {
@@ -178,7 +193,12 @@ function ServerDialog({
       (authType === 'oauth_client_credentials' &&
         oauthTokenUrl.trim().length > 0 &&
         oauthClientId.trim().length > 0 &&
-        oauthClientSecretEnv.trim().length > 0));
+        oauthClientSecretEnv.trim().length > 0) ||
+      // authorization_code: client_secret_env is optional (PKCE public clients).
+      (authType === 'oauth_authorization_code' &&
+        oauthAuthorizationEndpoint.trim().length > 0 &&
+        oauthTokenUrl.trim().length > 0 &&
+        oauthClientId.trim().length > 0));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -244,6 +264,7 @@ function ServerDialog({
                 <SelectItem value="none">{t('mcp.authTypeNone')}</SelectItem>
                 <SelectItem value="api_key">{t('mcp.authTypeApiKey')}</SelectItem>
                 <SelectItem value="oauth_client_credentials">{t('mcp.authTypeOauthClientCredentials')}</SelectItem>
+                <SelectItem value="oauth_authorization_code">{t('mcp.authTypeOauthAuthorizationCode')}</SelectItem>
                 <SelectItem value="api_key_per_user">{t('mcp.authTypeApiKeyPerUser')}</SelectItem>
               </SelectContent>
             </Select>
@@ -362,6 +383,65 @@ function ServerDialog({
                   id="mcp-auth-scope"
                   value={oauthScope}
                   onChange={(event) => setOauthScope(event.target.value)}
+                />
+              </div>
+            </>
+          ) : null}
+
+          {authType === 'oauth_authorization_code' ? (
+            <>
+              <div className="grid gap-2">
+                <Label htmlFor="mcp-auth-authorization-endpoint">
+                  {t('mcp.oauthAuthorizationEndpointLabel')} <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="mcp-auth-authorization-endpoint"
+                  value={oauthAuthorizationEndpoint}
+                  onChange={(event) => setOauthAuthorizationEndpoint(event.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="mcp-authz-token-url">
+                  {t('mcp.oauthTokenUrlLabel')} <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="mcp-authz-token-url"
+                  value={oauthTokenUrl}
+                  onChange={(event) => setOauthTokenUrl(event.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="mcp-authz-client-id">
+                  {t('mcp.oauthClientIdLabel')} <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="mcp-authz-client-id"
+                  value={oauthClientId}
+                  onChange={(event) => setOauthClientId(event.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="mcp-authz-client-secret-env">{t('mcp.oauthClientSecretEnvLabel')}</Label>
+                <Input
+                  id="mcp-authz-client-secret-env"
+                  value={oauthClientSecretEnv}
+                  onChange={(event) => setOauthClientSecretEnv(event.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="mcp-authz-scope">{t('mcp.oauthScopeLabel')}</Label>
+                <Input
+                  id="mcp-authz-scope"
+                  value={oauthScope}
+                  onChange={(event) => setOauthScope(event.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="mcp-authz-redirect-path">{t('mcp.oauthRedirectPathLabel')}</Label>
+                <Input
+                  id="mcp-authz-redirect-path"
+                  value={oauthRedirectPath}
+                  onChange={(event) => setOauthRedirectPath(event.target.value)}
                 />
               </div>
             </>
