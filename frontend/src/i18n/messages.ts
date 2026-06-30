@@ -315,6 +315,7 @@ const en = {
   "mcp.oauthScopeLabel": "OAuth scope",
   "mcp.oauthAuthorizationEndpointLabel": "Authorization endpoint",
   "mcp.oauthRedirectPathLabel": "Redirect path",
+  "mcp.oauthTokenEnvLabel": "Token env var (stdio per-user; blank = MCP_OAUTH_ACCESS_TOKEN)",
   "mcp.commandLabel": "Command",
   "mcp.commandPlaceholder":
     "e.g. npx -y @modelcontextprotocol/server-filesystem",
@@ -931,6 +932,7 @@ const zh: Messages = {
   "mcp.oauthScopeLabel": "OAuth scope",
   "mcp.oauthAuthorizationEndpointLabel": "授权端点 (authorization endpoint)",
   "mcp.oauthRedirectPathLabel": "回调路径 (redirect path)",
+  "mcp.oauthTokenEnvLabel": "Token 注入环境变量名 (stdio per-user; 留空=MCP_OAUTH_ACCESS_TOKEN)",
   "mcp.commandLabel": "命令",
   "mcp.commandPlaceholder":
     "例如 npx -y @modelcontextprotocol/server-filesystem",
