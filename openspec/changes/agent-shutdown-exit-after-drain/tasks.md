@@ -2,9 +2,10 @@
 
 标记:`[服务器]` 需真实数据/活体进程;`[本地]` 纯代码+mock/tmp_path 单测。
 
-## 诊断(先行)
-- [ ] [服务器] 对一个真 agent 进程发 `SIGUSR1`,观察 journal 确认 `agent_drain_completed` 后进程是否退出;用 faulthandler/py-spy dump 存活的 task/线程/打开的连接(MCP session host、IM 连接、uvicorn server、其它非 daemon task)。
-- [ ] [服务器] 产出"drain 后阻止退出的资源清单",回填本文与 proposal。
+## 诊断(先行)—— 已完成(2026-06-30,部署机,只读 /proc)
+- [x] [服务器] 只读检查运行中 alpha agent:8 个 stdio MCP 子进程 + 线程 wchan = `8×do_wait`(waitpid on 子进程)/`1×ep_poll`/`4×futex`。
+- [x] [服务器] 产出"卡住资源清单 + 修复方向" → 见 proposal.md「活体诊断结果」。结论:MCP stdio 子进程(及孙子进程)teardown 未强制终止 → waitpid 线程不返回 → 进程不 exit → SIGKILL。
+- [ ] [服务器,可选] 待本地写出修复后,catch 一次真实重启的 drain 窗口(py-spy)做最终确认。
 
 ## 实现(TDD,test 先于 impl)
 - [ ] [本地] 写测试:模拟 `_drain_and_close` 在 `active_runs=0` 完成后,关停编排会**驱动 event loop 停止 / 进程退出路径**被调用(见红)。

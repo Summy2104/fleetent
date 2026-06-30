@@ -34,6 +34,26 @@
 - **服务器(我)**:对一个真 agent 发 SIGUSR1,用 faulthandler / py-spy dump `agent_drain_completed` 之后仍存活的 task/线程/fd,给出"是谁不让它退"的具体清单;部署后验收。
 - **本地(你)**:按清单收口关停链 + 写单测(见 tasks.md),保证 drain 完成后进程 exit(0)。
 
+## 活体诊断结果(2026-06-30,部署机侧,纯只读 /proc,未发信号/未重启)
+
+对运行中 alpha agent(pid 1511923)做只读检查:
+
+- 它**直接拉起 8 个 stdio MCP 子进程**:`@aashari/...-bitbucket`、`...-confluence`、`...-jira`(均 `npm exec`)、`@piotr-agier/google-drive-mcp`(npm)、`slack-mcp-server`(node)、`mcp-image-recognition`(node)、`mcp-email-server`(uvx)、`@playwright/mcp --browser chromium --headless`。多数是 npm/node 包装,**还带孙子进程**(如 slack-mcp-server → `...-linux-amd64`,bitbucket → `mcp-atlassian-bitbucket`)。
+- 线程 `wchan` 分布:`1×ep_poll`(asyncio 事件循环)、**`8×do_wait`(= `waitpid` 阻塞在 8 个 MCP 子进程上)**、`4×futex`(锁/线程池)。
+- **8 个 `do_wait` 线程一一对应 8 个 MCP 子进程**。
+
+根因链:drain 后 `mcp.aclose_all()` 关 stdio 会话仅"关 stdin + 等子进程退";npm/node/chromium 系子进程收到 stdin 关闭/SIGTERM **不一定退**(尤其杀父不杀孙),`waitpid` 永久阻塞;且该阻塞**不响应 `asyncio.wait_for` 的取消**,使 `_stop_step` 的 10s 超时形同虚设 → `_drain_and_close` 卡住 → `serve()` 不返回 → 进程不 exit、扛过 SIGTERM、只能被 SIGKILL。
+
+### 卡住资源清单(本地按此收口)
+- 8 个 stdio MCP 子进程(及其孙子进程),teardown 时未被强制终止 → 8 个 `waitpid` 线程不返回。
+- 重点嫌疑:有孙子进程的 npm 包装类(bitbucket/confluence/jira/google-drive/slack)与 chromium(playwright)。
+
+### 修复方向(本地)
+1. MCP stdio 会话 teardown **有界 + 强制**:关 stdin 后限时等,超时则对子进程**进程组** SIGTERM→SIGKILL(杀整棵树含孙子进程),保证 `waitpid` 线程返回。
+2. 让 `_stop_step` 的取消能真正中断"等子进程退出"(把等待做成可取消/到点就杀)。
+3. 兜底:drain 后限定时间内仍未干净退出,`os._exit(0)`(优雅排水路径必须 exit 0)。
+4. 遵守 owner-task 契约:每个 session 的 transport/子进程由其 owner task enter/exit。
+
 ## 验收
 
 改一次配置触发重启,journal 出现 `agent_process_exited_gracefully`(而非 `agent_force_kill`);重启期间 `_forward_inbound` 不再 `RemoteProtocolError`;连续改配置不再制造 ~35s 下线窗口。
