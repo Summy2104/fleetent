@@ -154,6 +154,16 @@ def test_head_schema_excludes_retired_platform_kb_ingest_tables(tmp_path):
     assert {"kb_ingest_jobs", "kb_connectors", "kb_connector_schedule_state"}.isdisjoint(tables)
 
 
+def test_head_schema_excludes_session_meta_table(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    conn.close()
+
+    assert "session_meta" not in tables
+
+
 def test_head_onboards_existing_blocked_registrations_table_without_data_loss(tmp_path):
     db = tmp_path / "test.db"
     _upgrade_to(db, "077")

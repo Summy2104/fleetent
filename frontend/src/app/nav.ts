@@ -5,7 +5,6 @@ import {
   Building2,
   BookOpen,
   Cpu,
-  History,
   MessagesSquare,
   ScrollText,
   Server,
@@ -37,7 +36,6 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/agents', labelKey: 'nav.agents', icon: Bot },
       { to: '/chat', labelKey: 'nav.chat', icon: MessagesSquare },
-      { to: '/sessions', labelKey: 'nav.sessions', icon: History },
     ],
   },
   {
