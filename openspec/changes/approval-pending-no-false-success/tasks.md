@@ -8,6 +8,10 @@
 - [x] [本地] 写测试:pending 期间续轮输出应是"仍待审批 + 如何 approve"的指引,而非完成态(见红→绿)。
 - [x] [本地] 写测试(回归):真实 approve(命令路径)后,工具执行并拿到 receipt,才允许报成功。(护栏限定在 pending 期间——`test_no_pending_note_after_approval_resolved` 验证审批解决后不再压制;完整 resume→执行→receipt 路径由既有 `test_approval_resume.py` 在门禁中覆盖,本变更未触碰。)
 
+### ⑤补丁(真机验收发现:同条消息预写假成功)
+- [x] [本地] 写测试:模型在调用挂起工具的**同一条** assistant 消息里预写"结果:成功 / Message TS:…"时,`run()` 在 `awaiting_approval` 返回 ""、不投递该乐观文案(见红→绿)。
+- [x] [本地] 实现:`_finalize_reply` 对 `awaiting_approval` 直接返回 ""(gate 已自行发审批提示,绝不回传同条消息里的乐观成功文案)。
+
 ## 收尾
 - [x] [本地] `make test-pr` + `make test-integration-ci` 全绿。
 - [ ] [服务器] 真实 Slack 验收:发→挂起→回「同意」→ agent 必须说仍待审批(不报成功);approve 后才送达并报成功。
