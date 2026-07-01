@@ -124,16 +124,22 @@ function withRouteModel(
 // routes an agent commonly needs beyond chat. vision/kb_extraction/rerank keep resolving to their
 // platform default target when unset — they aren't exposed here.
 const ROUTE_BINDINGS = [
-  { labelKey: 'agents.modelProvider' as const, protocol: 'openai_chat', routeKey: 'default' },
-  { labelKey: 'agents.modelEmbedding' as const, protocol: 'http_embedding', routeKey: 'embedding' },
+  { labelKey: 'agents.modelProvider' as const, protocols: ['openai_chat'], routeKey: 'default' },
+  {
+    labelKey: 'agents.modelEmbedding' as const,
+    protocols: ['http_embedding'],
+    routeKey: 'embedding',
+  },
   {
     labelKey: 'agents.modelMemoryExtraction' as const,
-    protocol: 'openai_chat',
+    protocols: ['openai_chat'],
     routeKey: 'memory_extraction',
   },
   {
+    // Both image protocols share this route: the OpenAI Images API (openai_image_generation)
+    // and Chat-Completions image models (openai_image_chat, e.g. Gemini image preview via a gateway).
     labelKey: 'agents.modelImageGeneration' as const,
-    protocol: 'openai_image_generation',
+    protocols: ['openai_image_generation', 'openai_image_chat'],
     routeKey: 'image_generation',
   },
 ];
@@ -339,7 +345,9 @@ function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boo
       </div>
       {ROUTE_BINDINGS.map((binding) => {
         const bindingModelId = routeModelIds[binding.routeKey] ?? '';
-        const candidates = (allModels.data ?? []).filter((model) => model.protocol === binding.protocol);
+        const candidates = (allModels.data ?? []).filter((model) =>
+          binding.protocols.includes(model.protocol)
+        );
         const label = t(binding.labelKey);
         return (
           <section key={binding.routeKey} className="space-y-3">

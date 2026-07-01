@@ -1147,6 +1147,115 @@ describe('agents configure page model binding', () => {
     expect(routes.memory_extraction?.[0]?.model_id).toBe('openai-gpt4');
     expect(routes.image_generation?.[0]?.model_id).toBe('imagegen-1');
   });
+
+  it('offers openai_image_chat models for the image_generation binding and saves the selection', async () => {
+    const user = userEvent.setup({ delay: null });
+    const agents: AgentRecord[] = [
+      {
+        agent_name: 'alpha',
+        allowed_tools: [],
+        provenance: 'adhoc',
+        status: 'enabled',
+        system_prompt: 'Alpha prompt',
+      },
+    ];
+    const detailByAgent: Record<string, AgentDetailRecord> = {
+      alpha: {
+        agent: 'alpha',
+        allowed_tools: [],
+        model_overrides: { routes: {} },
+        status: 'enabled',
+        supports_dm: false,
+        supports_groups: false,
+        system_prompt: 'Alpha prompt',
+      },
+    };
+
+    installAgentBindingHandlers({
+      agents,
+      bindingsByAgent: { alpha: { kbIds: [], mcpServers: [], secrets: [], skills: [], users: [] } },
+      detailByAgent,
+    });
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/models`, () =>
+        HttpResponse.json([
+          {
+            base_url: 'https://api.openai.example/v1',
+            description: null,
+            endpoint: null,
+            id: 'gpt4o',
+            input_price_per_1k: null,
+            max_tokens: null,
+            model_name: 'gpt-4o',
+            output_price_per_1k: null,
+            params: null,
+            protocol: 'openai_chat',
+            provider_id: 'openai',
+          },
+          {
+            base_url: null,
+            description: null,
+            endpoint: 'https://api.openai.example/v1/images',
+            id: 'imagegen-1',
+            input_price_per_1k: null,
+            max_tokens: null,
+            model_name: 'gpt-image-1',
+            output_price_per_1k: null,
+            params: null,
+            protocol: 'openai_image_generation',
+            provider_id: 'openai',
+          },
+          {
+            base_url: 'https://newapi.example/v1',
+            description: null,
+            endpoint: null,
+            id: 'imagechat-1',
+            input_price_per_1k: null,
+            max_tokens: null,
+            model_name: 'gemini-3-pro-image-preview',
+            output_price_per_1k: null,
+            params: null,
+            protocol: 'openai_image_chat',
+            provider_id: 'newapi',
+          },
+        ])
+      )
+    );
+
+    type CapturedModelBody = {
+      model_overrides?: { routes?: Record<string, Array<{ model_id?: string }>> };
+    };
+    const captured: { patch?: CapturedModelBody } = {};
+    server.use(
+      http.patch(`${API_BASE_URL}/admin/agents/:name`, async ({ request }) => {
+        captured.patch = (await request.json()) as CapturedModelBody;
+        return HttpResponse.json({ ok: true });
+      })
+    );
+
+    renderAgentsRoute('/agents/alpha/configure');
+    expect(await screen.findByRole('heading', { name: 'Configure · alpha' })).toBeInTheDocument();
+
+    const imageGenTrigger = screen.getByRole('combobox', { name: 'Image generation model' });
+    // The selector stays disabled until the model list loads; wait for it before opening.
+    await waitFor(() => expect(imageGenTrigger).toBeEnabled());
+
+    // The image_generation binding must offer both image protocols: the OpenAI Images API
+    // (openai_image_generation) and Chat-Completions image models (openai_image_chat). Plain
+    // chat models must never leak into it.
+    await user.click(imageGenTrigger);
+    expect(await screen.findByRole('option', { name: /imagechat-1/ })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /imagegen-1/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /gpt4o/ })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole('option', { name: /imagechat-1/ }));
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(captured.patch).toBeTruthy());
+    const routes = captured.patch?.model_overrides?.routes ?? {};
+    expect(routes.image_generation?.[0]?.model_id).toBe('imagechat-1');
+  });
 });
 
 describe('agents configure page IM connector overrides', () => {
