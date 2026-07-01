@@ -30,7 +30,7 @@ from fleetent.agent_config import (
     collect_env_var_names,
     default_models,
 )
-from fleetent.config import McpServerSettings
+from fleetent.config import MCP_FLEETENT_EXT_DEFAULTS, McpServerSettings
 from fleetent.platform.agent_lifecycle import credential_slots, default_binding_store, secret_store
 from fleetent.platform.connector_management import mcp_server_store
 from fleetent.platform.connector_management.mcp_auth import (
@@ -400,17 +400,6 @@ def _mcp_servers_for_agent(agent: agent_store.Agent) -> list[McpServerSettings]:
     return servers
 
 
-# Fleetent extension fields and their defaults — dropped from the rendered map when default,
-# hoisted under `x-fleetent` when set (mcp-config-standardization).
-_FLEETENT_EXT_DEFAULTS: dict[str, Any] = {
-    "degrade_mode": "degrade",
-    "file_root": "",
-    "file_isolation": "on",
-    "auth": None,
-    "approval_rules": [],
-}
-
-
 def _mcp_payload_to_map(payload: dict[str, Any]) -> None:
     """Rewrite a dumped AgentFile payload's ``mcp_servers`` list into the standard
     ``mcpServers`` map (key = server id), hoisting non-default fleetent fields under each
@@ -423,7 +412,7 @@ def _mcp_payload_to_map(payload: dict[str, Any]) -> None:
         entry = dict(entry)
         sid = entry.pop("id")
         ext = {}
-        for key, default in _FLEETENT_EXT_DEFAULTS.items():
+        for key, default in MCP_FLEETENT_EXT_DEFAULTS.items():
             value = entry.pop(key, default)
             if value != default:
                 ext[key] = value

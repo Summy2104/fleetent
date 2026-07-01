@@ -13,6 +13,7 @@ from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from fleetent import audit_log, auth, user_store
+from fleetent.config import mcp_yaml_field_paths
 from fleetent.platform.connector_management import mcp_server_store
 from fleetent.platform.connector_management.mcp_auth import (
     ApiKeyMcpAuthConfig,
@@ -209,6 +210,13 @@ def _require_admin(authorization: str | None) -> user_store.User:
 def mcp_doctor_view(authorization: str | None = Header(None)) -> dict[str, Any]:
     _current_user(authorization)
     return _mask_dict(mcp_doctor())
+
+
+@router.get("/mcp/field-schema")
+def mcp_field_schema_view(authorization: str | None = Header(None)) -> dict[str, str]:
+    """Field name -> agent.yaml path template, for the admin form's per-field hints."""
+    _current_user(authorization)
+    return mcp_yaml_field_paths()
 
 
 @router.get("/mcp/servers")

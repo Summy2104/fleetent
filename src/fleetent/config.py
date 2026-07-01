@@ -265,6 +265,46 @@ class McpServerSettings(BaseModel):
     approval_rules: list[McpApprovalRule] = Field(default_factory=list)
 
 
+# Fleetent extension fields and their defaults — dropped from the rendered `agent.yaml` map
+# when default, hoisted under `x-fleetent` when set (mcp-config-standardization). Lives here
+# (not in platform/agent_lifecycle/materialize.py, the only place that actually applies this
+# hoisting) so both the ②控制 admin API face and the ③编排 materializer face can read it
+# without a face-to-face import (see tests/unit/test_module_dependency_guardrails.py).
+MCP_FLEETENT_EXT_DEFAULTS: dict[str, Any] = {
+    "degrade_mode": "degrade",
+    "file_root": "",
+    "file_isolation": "on",
+    "auth": None,
+    "approval_rules": [],
+}
+
+# Fields not surfaced by any admin-form input; excluded from mcp_yaml_field_paths() so the
+# path table only covers fields a user can actually fill in.
+_MCP_FIELD_PATH_SKIP = frozenset({"id", "connect_timeout", "call_timeout"})
+
+
+def mcp_yaml_field_paths() -> dict[str, str]:
+    """Map each ``McpServerSettings`` field to its ``agent.yaml`` path template.
+
+    Derived from ``MCP_FLEETENT_EXT_DEFAULTS`` (the same table
+    ``materialize._mcp_payload_to_map`` uses to decide what gets hoisted under
+    ``x-fleetent``), so this can never drift from the real write path. ``{id}`` is a
+    placeholder for the server's ``mcpServers`` map key.
+    """
+    paths: dict[str, str] = {}
+    for name in McpServerSettings.model_fields:
+        if name in _MCP_FIELD_PATH_SKIP:
+            continue
+        if name == "auth":
+            for sub in McpOAuthSettings.model_fields:
+                paths[f"auth.{sub}"] = f"mcpServers.{{id}}.x-fleetent.auth.{sub}"
+        elif name in MCP_FLEETENT_EXT_DEFAULTS:
+            paths[name] = f"mcpServers.{{id}}.x-fleetent.{name}"
+        else:
+            paths[name] = f"mcpServers.{{id}}.{name}"
+    return paths
+
+
 _ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
