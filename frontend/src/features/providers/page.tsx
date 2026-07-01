@@ -34,6 +34,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   type CreateModelInput,
   type CreateProviderInput,
@@ -65,18 +66,24 @@ type ProviderFormState = {
 
 type ModelFormState = {
   baseUrl: string;
+  endpoint: string;
   id: string;
   modelName: string;
   protocol: string;
   providerId: string;
 };
 
+// Mirrors the backend's `_ENDPOINT_PROTOCOLS`: these protocols require `endpoint` and forbid
+// `base_url`; every other protocol (openai_chat) requires `base_url`.
+const MODEL_PROTOCOLS = ['openai_chat', 'http_embedding', 'http_rerank', 'openai_image_generation'] as const;
+const ENDPOINT_PROTOCOLS = new Set<string>(['http_embedding', 'http_rerank', 'openai_image_generation']);
+
 function emptyProviderForm(): ProviderFormState {
   return { apiKey: '', baseUrl: '', description: '', id: '', provider: '' };
 }
 
 function emptyModelForm(providerId = ''): ModelFormState {
-  return { baseUrl: '', id: '', modelName: '', protocol: 'openai_chat', providerId };
+  return { baseUrl: '', endpoint: '', id: '', modelName: '', protocol: 'openai_chat', providerId };
 }
 
 function ProviderFormDialog({
@@ -164,16 +171,18 @@ function ModelFormDialog({
   busy: boolean;
   onSubmit: () => Promise<void>;
 }): JSX.Element {
+  const t = useT();
+  const requiresEndpoint = ENDPOINT_PROTOCOLS.has(form.protocol);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New model</DialogTitle>
-          <DialogDescription>Create a model under this provider.</DialogDescription>
+          <DialogTitle>{t('providers.newModelDialogTitle')}</DialogTitle>
+          <DialogDescription>{t('providers.newModelDialogDescription')}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
           <div className="grid gap-2">
-            <Label htmlFor="model-id">Model ID</Label>
+            <Label htmlFor="model-id">{t('providers.fieldModelId')}</Label>
             <Input
               id="model-id"
               value={form.id}
@@ -181,7 +190,7 @@ function ModelFormDialog({
             />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="model-name">Model name</Label>
+            <Label htmlFor="model-name">{t('providers.fieldModelName')}</Label>
             <Input
               id="model-name"
               value={form.modelName}
@@ -189,20 +198,49 @@ function ModelFormDialog({
             />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="model-base-url">Base URL</Label>
-            <Input
-              id="model-base-url"
-              value={form.baseUrl}
-              onChange={(event) => setForm((current) => ({ ...current, baseUrl: event.target.value }))}
-            />
+            <Label>{t('providers.fieldProtocol')}</Label>
+            <Select
+              value={form.protocol}
+              onValueChange={(value) => setForm((current) => ({ ...current, protocol: value }))}
+            >
+              <SelectTrigger aria-label={t('providers.fieldProtocol')}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MODEL_PROTOCOLS.map((protocol) => (
+                  <SelectItem key={protocol} value={protocol}>
+                    {protocol}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
+          {requiresEndpoint ? (
+            <div className="grid gap-2">
+              <Label htmlFor="model-endpoint">{t('providers.fieldEndpoint')}</Label>
+              <Input
+                id="model-endpoint"
+                value={form.endpoint}
+                onChange={(event) => setForm((current) => ({ ...current, endpoint: event.target.value }))}
+              />
+            </div>
+          ) : (
+            <div className="grid gap-2">
+              <Label htmlFor="model-base-url">{t('providers.fieldBaseUrl')}</Label>
+              <Input
+                id="model-base-url"
+                value={form.baseUrl}
+                onChange={(event) => setForm((current) => ({ ...current, baseUrl: event.target.value }))}
+              />
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button disabled={busy || !form.id || !form.modelName} onClick={() => void onSubmit()}>
-            Create model
+            {t('providers.createModelSubmit')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -254,7 +292,7 @@ function ProviderCard({
             {canWrite ? (
               <>
                 <Button size="sm" variant="secondary" onClick={onCreateModel}>
-                  <Plus className="size-4" /> New model
+                  <Plus className="size-4" /> {t('providers.newModel')}
                 </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -387,8 +425,10 @@ export function ProvidersPage(): JSX.Element {
   };
 
   const submitModel = async (): Promise<void> => {
+    const usesEndpoint = ENDPOINT_PROTOCOLS.has(modelForm.protocol);
     const payload: CreateModelInput = {
-      base_url: modelForm.baseUrl || undefined,
+      base_url: usesEndpoint ? undefined : modelForm.baseUrl || undefined,
+      endpoint: usesEndpoint ? modelForm.endpoint || undefined : undefined,
       id: modelForm.id,
       model_name: modelForm.modelName,
       protocol: modelForm.protocol,

@@ -885,7 +885,7 @@ describe('agents configure page model binding', () => {
     expect(await screen.findByRole('heading', { name: 'Configure · alpha' })).toBeInTheDocument();
 
     // Overview tab is the default. The existing provider is pre-selected on the trigger.
-    const trigger = screen.getByRole('combobox');
+    const trigger = screen.getByRole('combobox', { name: 'Model provider' });
     await waitFor(() => expect(trigger).toHaveTextContent('ollama-local'));
 
     // Switch to the openai provider and save.
@@ -1011,6 +1011,141 @@ describe('agents configure page model binding', () => {
     await waitFor(() => {
       expect(bindingsByAgent.alpha.secrets[0].status).toBe('unset');
     });
+  });
+
+  it('configures embedding/memory_extraction/image_generation routes independently and preserves them on save', async () => {
+    const user = userEvent.setup({ delay: null });
+    const agents: AgentRecord[] = [
+      {
+        agent_name: 'alpha',
+        allowed_tools: [],
+        provenance: 'adhoc',
+        status: 'enabled',
+        system_prompt: 'Alpha prompt',
+      },
+    ];
+    const detailByAgent: Record<string, AgentDetailRecord> = {
+      alpha: {
+        agent: 'alpha',
+        allowed_tools: [],
+        model_overrides: {
+          routes: {
+            default: [{ model_id: 'ollama-local' }],
+            embedding: [{ model_id: 'embed-1' }],
+            memory_extraction: [{ model_id: 'openai-gpt4' }],
+          },
+        },
+        status: 'enabled',
+        supports_dm: false,
+        supports_groups: false,
+        system_prompt: 'Alpha prompt',
+      },
+    };
+
+    installAgentBindingHandlers({
+      agents,
+      bindingsByAgent: { alpha: { kbIds: [], mcpServers: [], secrets: [], skills: [], users: [] } },
+      detailByAgent,
+    });
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/models`, () =>
+        HttpResponse.json([
+          {
+            base_url: 'https://api.openai.example/v1',
+            description: null,
+            endpoint: null,
+            id: 'openai-gpt4',
+            input_price_per_1k: null,
+            max_tokens: null,
+            model_name: 'gpt-4o',
+            output_price_per_1k: null,
+            params: null,
+            protocol: 'openai_chat',
+            provider_id: 'openai',
+          },
+          {
+            base_url: 'http://localhost:11434/v1',
+            description: null,
+            endpoint: null,
+            id: 'ollama-local',
+            input_price_per_1k: null,
+            max_tokens: null,
+            model_name: 'llama3',
+            output_price_per_1k: null,
+            params: null,
+            protocol: 'openai_chat',
+            provider_id: 'local',
+          },
+          {
+            base_url: null,
+            description: null,
+            endpoint: 'http://localhost:11434/v1/embeddings',
+            id: 'embed-1',
+            input_price_per_1k: null,
+            max_tokens: null,
+            model_name: 'bge-small',
+            output_price_per_1k: null,
+            params: null,
+            protocol: 'http_embedding',
+            provider_id: 'local',
+          },
+          {
+            base_url: null,
+            description: null,
+            endpoint: 'https://api.openai.example/v1/images',
+            id: 'imagegen-1',
+            input_price_per_1k: null,
+            max_tokens: null,
+            model_name: 'gpt-image-1',
+            output_price_per_1k: null,
+            params: null,
+            protocol: 'openai_image_generation',
+            provider_id: 'openai',
+          },
+        ])
+      )
+    );
+
+    type CapturedModelBody = {
+      model_overrides?: { routes?: Record<string, Array<{ model_id?: string }>> };
+    };
+    const captured: { patch?: CapturedModelBody } = {};
+    server.use(
+      http.patch(`${API_BASE_URL}/admin/agents/:name`, async ({ request }) => {
+        captured.patch = (await request.json()) as CapturedModelBody;
+        return HttpResponse.json({ ok: true });
+      })
+    );
+
+    renderAgentsRoute('/agents/alpha/configure');
+    expect(await screen.findByRole('heading', { name: 'Configure · alpha' })).toBeInTheDocument();
+
+    const defaultTrigger = screen.getByRole('combobox', { name: 'Model provider' });
+    const embeddingTrigger = screen.getByRole('combobox', { name: 'Embedding model' });
+    const memoryTrigger = screen.getByRole('combobox', { name: 'Memory extraction model' });
+    const imageGenTrigger = screen.getByRole('combobox', { name: 'Image generation model' });
+
+    await waitFor(() => expect(defaultTrigger).toHaveTextContent('ollama-local'));
+    expect(embeddingTrigger).toHaveTextContent('embed-1');
+    expect(memoryTrigger).toHaveTextContent('openai-gpt4');
+    expect(imageGenTrigger).toHaveTextContent('Select a model');
+
+    // The embedding selector only offers embedding-protocol models.
+    await user.click(embeddingTrigger);
+    expect(screen.queryByRole('option', { name: /openai-gpt4/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /ollama-local/ })).not.toBeInTheDocument();
+    await user.keyboard('{Escape}');
+
+    await selectOption(user, imageGenTrigger, /imagegen-1/);
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(captured.patch).toBeTruthy());
+    const routes = captured.patch?.model_overrides?.routes ?? {};
+    expect(routes.default?.[0]?.model_id).toBe('ollama-local');
+    expect(routes.embedding?.[0]?.model_id).toBe('embed-1');
+    expect(routes.memory_extraction?.[0]?.model_id).toBe('openai-gpt4');
+    expect(routes.image_generation?.[0]?.model_id).toBe('imagegen-1');
   });
 });
 

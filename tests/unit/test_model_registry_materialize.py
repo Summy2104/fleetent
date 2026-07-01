@@ -1,5 +1,6 @@
 """Unit tests for model-registry materialize join and fallback paths."""
 
+from fleetent.agent_config import default_models
 from fleetent.platform.agent_lifecycle import materialize
 
 
@@ -120,3 +121,89 @@ def test_models_from_overrides_preserves_route_order_and_entry_overrides(monkeyp
     assert models.routes["default"][1].params == {"temperature": 0.1}
     assert models.routes["embedding"][0].target == "embed-main"
     assert models.routes["embedding"][0].params == {"dimensions": 768}
+
+
+def test_models_from_overrides_keeps_unconfigured_routes_at_baseline(monkeypatch):
+    monkeypatch.setattr(
+        materialize.model_admin_store,
+        "get_model",
+        lambda model_id: {
+            "id": model_id,
+            "provider_id": "custom-provider",
+            "protocol": "openai_chat",
+            "model_name": "custom-chat-model",
+            "base_url": "https://chat.example/v1",
+            "endpoint": None,
+            "max_tokens": 4096,
+            "params": {},
+            "extra_params": None,
+        },
+    )
+    monkeypatch.setattr(
+        materialize.provider_admin_store,
+        "get_provider",
+        lambda provider_id: {
+            "id": provider_id,
+            "vendor": "custom",
+            "api_key_env": "CUSTOM_API_KEY",
+        },
+    )
+
+    models = materialize._models_from_overrides({"default": [{"model_id": "custom-chat"}]})
+    baseline = default_models()
+
+    assert [entry.target for entry in models.routes["default"]] == ["custom-chat"]
+    assert models.routes["memory_extraction"] == baseline.routes["memory_extraction"]
+    assert models.routes["kb_extraction"] == baseline.routes["kb_extraction"]
+    assert models.routes["vision"] == baseline.routes["vision"]
+    assert models.routes["embedding"] == baseline.routes["embedding"]
+    assert {target.id for target in models.targets} == {
+        "custom-chat",
+        "default",
+        "vision",
+        "embedding",
+    }
+
+
+def test_models_from_overrides_drops_baseline_target_once_all_its_routes_are_overridden(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        materialize.model_admin_store,
+        "get_model",
+        lambda model_id: {
+            "id": model_id,
+            "provider_id": "custom-provider",
+            "protocol": "openai_chat",
+            "model_name": "custom-chat-model",
+            "base_url": "https://chat.example/v1",
+            "endpoint": None,
+            "max_tokens": 4096,
+            "params": {},
+            "extra_params": None,
+        },
+    )
+    monkeypatch.setattr(
+        materialize.provider_admin_store,
+        "get_provider",
+        lambda provider_id: {
+            "id": provider_id,
+            "vendor": "custom",
+            "api_key_env": "CUSTOM_API_KEY",
+        },
+    )
+
+    models = materialize._models_from_overrides(
+        {
+            "default": [{"model_id": "custom-chat"}],
+            "memory_extraction": [{"model_id": "custom-chat"}],
+            "kb_extraction": [{"model_id": "custom-chat"}],
+        }
+    )
+
+    target_ids = {target.id for target in models.targets}
+    # The baseline "default" target is no longer referenced by any route (default/memory_extraction/
+    # kb_extraction were all overridden), so it must be dropped rather than lingering unused.
+    assert "default" not in target_ids
+    # vision/embedding routes were untouched, so their baseline targets stay.
+    assert {"vision", "embedding", "custom-chat"} <= target_ids

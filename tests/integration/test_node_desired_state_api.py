@@ -127,7 +127,12 @@ def test_get_desired_state_returns_only_enabled_agents_for_node(node_client: Tes
     config = payload["agents"][0]["config"]
     assert config["name"] == "enabled"
     assert config["system_prompt"] == "Help users"
-    assert config["models"]["targets"][0]["api_key_env"] == "FLEETENT_AGENT_ENABLED_MODEL"
+    # Overriding only the "default" route also keeps memory_extraction/kb_extraction/vision/
+    # embedding alive on their baseline targets, so look up the target the "default" route
+    # actually resolves to rather than assuming it is first in the (unordered) targets list.
+    default_target_id = config["models"]["routes"]["default"][0]["target"]
+    targets_by_id = {target["id"]: target for target in config["models"]["targets"]}
+    assert targets_by_id[default_target_id]["api_key_env"] == "FLEETENT_AGENT_ENABLED_MODEL"
     assert config["im"]["supports_dm"] is True
     assert config["im"]["slack"]["bot_token_env"] == "ENABLED_SLACK_BOT"
     assert config["im"]["slack"]["app_token_env"] == "ENABLED_SLACK_APP"
