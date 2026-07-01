@@ -42,7 +42,7 @@ export function ContentDialog({
   const content = useSkillContentQuery(skillName)
   return (
     <Dialog onOpenChange={onOpenChange} open={Boolean(skillName)}>
-      <DialogContent className="max-w-4xl">
+      <DialogContent className="sm:max-w-5xl">
         <DialogHeader>
           <DialogTitle>{t('skills.contentTitle', { name: skillName ?? '' })}</DialogTitle>
           <DialogDescription>{t('skills.contentDescription')}</DialogDescription>

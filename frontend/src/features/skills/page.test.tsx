@@ -231,9 +231,12 @@ describe('skills page parity baseline', () => {
     expect(screen.queryByText('Force publish')).not.toBeInTheDocument()
     await user.keyboard('{Escape}')
 
-    // Disable -> Enable toggle.
+    // Disable is destructive: it opens a confirm dialog before toggling. Then Enable.
     await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }))
     await user.click(await screen.findByText('Disable'))
+    const disableConfirm = await screen.findByRole('alertdialog')
+    await user.click(within(disableConfirm).getByRole('button', { name: 'Disable' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
     await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }))
     expect(await screen.findByText('Enable')).toBeInTheDocument()
     await user.keyboard('{Escape}')
