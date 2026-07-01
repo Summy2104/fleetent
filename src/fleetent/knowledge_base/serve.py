@@ -19,6 +19,9 @@ from fleetent.db import SQLiteDatabase, create_database
 from fleetent.identity import INGRESS_PRINCIPAL_HEADER, Principal, decode_ingress_principal
 from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
 from fleetent.knowledge_base.core.models import KnowledgeChunk
+from fleetent.knowledge_base.ingest import runtime as kb_ingest_runtime
+from fleetent.knowledge_base.management import runtime as kb_management_runtime
+from fleetent.knowledge_base.retrieval import evaluation as retrieval_evaluation
 from fleetent.tenant_router import StandaloneKBTenantBackend, TenantRouter
 
 
@@ -46,6 +49,21 @@ class SearchRequest(BaseModel):
     mode: str | None = None
     rerank: bool = False
     use_planner: bool = False
+
+
+class CreateKnowledgeBaseRequest(BaseModel):
+    kb_id: str
+    description: str = ""
+    extraction_enabled: bool = False
+
+
+class UpdateKnowledgeBaseRequest(BaseModel):
+    description: str | None = None
+    extraction_enabled: bool | None = None
+
+
+class EvaluationRequest(BaseModel):
+    kb_id: str
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -113,6 +131,22 @@ def _knowledge_chunk_to_wire_dict(chunk: KnowledgeChunk) -> dict[str, object]:
     }
 
 
+def _management_chunk_to_wire_dict(chunk: KnowledgeChunk) -> dict[str, object]:
+    return {
+        "chunk_id": chunk.id,
+        "document_id": chunk.document_id,
+        "kb_id": chunk.kb_id,
+        "filename": chunk.filename,
+        "content": chunk.content,
+        "position": chunk.position,
+        "score": chunk.score,
+        "source": chunk.source,
+        "source_url": chunk.source_url,
+        "section": chunk.metadata.get("section_title") or chunk.metadata.get("section_path", ""),
+        "section_path": chunk.metadata.get("section_path", ""),
+    }
+
+
 def _datetime_to_wire(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
@@ -149,6 +183,19 @@ def _job_status_to_wire(job: dict[str, object]) -> dict[str, object]:
     }
 
 
+def _retrieval_metrics_to_wire(
+    metrics: retrieval_evaluation.RetrievalMetrics,
+) -> dict[str, object]:
+    return {
+        "recall_at_k": metrics.recall_at_k,
+        "mrr": metrics.mrr,
+        "query_count": metrics.query_count,
+        "hit_count": metrics.hit_count,
+        "hit_rate": metrics.hit_rate,
+        "average_hit_rank": metrics.average_hit_rank,
+    }
+
+
 def create_app(config: KBServeConfig):  # type: ignore[no-untyped-def]
     previous_db = kb_runtime.runtime._kb_db
     previous_backend = kb_runtime.runtime._kb_vector_backend
@@ -165,6 +212,11 @@ def create_app(config: KBServeConfig):  # type: ignore[no-untyped-def]
     app.state.kb_serve_config = config
     app.state.kb_service_key = _resolve_auth_ref(config.service_key_ref)
     app.state.kb_principal_type = Principal
+
+    def _knowledge_database() -> SQLiteDatabase:
+        return (
+            _tenant_router(config.data_dir).tenant_scope(config.tenant_id).open_kb_db(KB_MIGRATIONS)
+        )
 
     def _require_authorized_principal(
         authorization: str | None,
@@ -191,9 +243,223 @@ def create_app(config: KBServeConfig):  # type: ignore[no-untyped-def]
             raise HTTPException(status_code=403, detail="tenant mismatch")
         return principal
 
+    def _knowledge_base_row_to_wire(row: dict[str, object]) -> dict[str, object]:
+        return {
+            "tenant_id": str(row["tenant_id"]),
+            "kb_id": str(row["kb_id"]),
+            "description": str(row["description"]),
+            "doc_count": _row_int(row["doc_count"]),
+            "chunk_count": _row_int(row["chunk_count"]),
+            "last_import": row["last_import"],
+            "archived": bool(row["archived_at"] is not None),
+        }
+
+    def _row_int(value: object) -> int:
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            return int(value)
+        raise TypeError(f"expected int-like value, got {type(value).__name__}")
+
+    def _current_knowledge_base(kb_id: str) -> dict[str, object]:
+        for row in kb_management_runtime.list_knowledge_bases(
+            config.tenant_id,
+            database=_knowledge_database(),
+        ):
+            data = dict(row)
+            if str(data["kb_id"]) == kb_id:
+                return data
+        raise HTTPException(status_code=404, detail="kb not found")
+
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
         return {"status": "ok", "tenant_id": config.tenant_id}
+
+    @app.get("/kb")
+    def list_knowledge_bases(
+        authorization: Annotated[str | None, Header(alias="Authorization")] = None,
+        principal_header: Annotated[str | None, Header(alias=INGRESS_PRINCIPAL_HEADER)] = None,
+    ) -> list[dict[str, object]]:
+        principal = _require_authorized_principal(authorization, principal_header)
+        rows = kb_management_runtime.list_knowledge_bases(
+            principal.tenant_id,
+            database=_knowledge_database(),
+        )
+        return [_knowledge_base_row_to_wire(dict(row)) for row in rows]
+
+    @app.post("/kb")
+    def create_knowledge_base(
+        request: Annotated[CreateKnowledgeBaseRequest, Body(...)],
+        authorization: Annotated[str | None, Header(alias="Authorization")] = None,
+        principal_header: Annotated[str | None, Header(alias=INGRESS_PRINCIPAL_HEADER)] = None,
+    ) -> dict[str, object]:
+        principal = _require_authorized_principal(authorization, principal_header)
+        kb_management_runtime.create_knowledge_base(
+            principal.tenant_id,
+            request.kb_id,
+            request.description,
+            extraction_enabled=request.extraction_enabled,
+            database=_knowledge_database(),
+        )
+        row = _current_knowledge_base(request.kb_id)
+        return {
+            "kb_id": str(row["kb_id"]),
+            "tenant_id": str(row["tenant_id"]),
+            "description": str(row["description"]),
+            "extraction_enabled": bool(_row_int(row["extraction_enabled"])),
+        }
+
+    @app.patch("/kb/{kb_id}")
+    def update_knowledge_base(
+        kb_id: str,
+        request: Annotated[UpdateKnowledgeBaseRequest, Body(...)],
+        authorization: Annotated[str | None, Header(alias="Authorization")] = None,
+        principal_header: Annotated[str | None, Header(alias=INGRESS_PRINCIPAL_HEADER)] = None,
+    ) -> dict[str, object]:
+        principal = _require_authorized_principal(authorization, principal_header)
+        if request.description is not None:
+            updated = kb_management_runtime.update_knowledge_base_description(
+                principal.tenant_id,
+                kb_id,
+                request.description,
+                database=_knowledge_database(),
+            )
+            if not updated:
+                raise HTTPException(status_code=404, detail="kb not found")
+        if request.extraction_enabled is not None:
+            updated = kb_management_runtime.set_extraction_enabled(
+                principal.tenant_id,
+                kb_id,
+                request.extraction_enabled,
+                database=_knowledge_database(),
+            )
+            if not updated:
+                raise HTTPException(status_code=404, detail="kb not found")
+        row = _current_knowledge_base(kb_id)
+        return {
+            "kb_id": str(row["kb_id"]),
+            "description": str(row["description"]),
+            "extraction_enabled": bool(_row_int(row["extraction_enabled"])),
+        }
+
+    @app.delete("/kb/{kb_id}")
+    async def archive_knowledge_base(
+        kb_id: str,
+        authorization: Annotated[str | None, Header(alias="Authorization")] = None,
+        principal_header: Annotated[str | None, Header(alias=INGRESS_PRINCIPAL_HEADER)] = None,
+    ) -> dict[str, object]:
+        principal = _require_authorized_principal(authorization, principal_header)
+        archived = await kb_management_runtime.archive_knowledge_base(
+            principal.tenant_id,
+            kb_id,
+            database=_knowledge_database(),
+        )
+        if not archived:
+            raise HTTPException(status_code=404, detail="kb not found or already archived")
+        return {"kb_id": kb_id, "archived": True}
+
+    @app.get("/kb/{kb_id}/documents")
+    def list_documents(
+        kb_id: str,
+        authorization: Annotated[str | None, Header(alias="Authorization")] = None,
+        principal_header: Annotated[str | None, Header(alias=INGRESS_PRINCIPAL_HEADER)] = None,
+    ) -> list[dict[str, object]]:
+        principal = _require_authorized_principal(authorization, principal_header)
+        rows = kb_management_runtime.list_documents(
+            principal.tenant_id,
+            kb_id,
+            database=_knowledge_database(),
+        )
+        return [
+            {
+                "document_id": str(row["document_id"]),
+                "filename": str(row["filename"]),
+                "source": str(row["source"]),
+                "source_url": row["source_url"],
+                "chunks": int(row["chunks"]),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    @app.get("/kb/{kb_id}/documents/{document_id}/chunks")
+    def preview_document_chunks(
+        kb_id: str,
+        document_id: str,
+        authorization: Annotated[str | None, Header(alias="Authorization")] = None,
+        principal_header: Annotated[str | None, Header(alias=INGRESS_PRINCIPAL_HEADER)] = None,
+    ) -> list[dict[str, object]]:
+        principal = _require_authorized_principal(authorization, principal_header)
+        chunks = kb_management_runtime.preview_document_chunks(
+            principal.tenant_id,
+            kb_id,
+            document_id,
+            database=_knowledge_database(),
+        )
+        return [_management_chunk_to_wire_dict(chunk) for chunk in chunks]
+
+    @app.delete("/kb/{kb_id}/documents/{document_id}")
+    async def delete_document(
+        kb_id: str,
+        document_id: str,
+        authorization: Annotated[str | None, Header(alias="Authorization")] = None,
+        principal_header: Annotated[str | None, Header(alias=INGRESS_PRINCIPAL_HEADER)] = None,
+    ) -> dict[str, object]:
+        principal = _require_authorized_principal(authorization, principal_header)
+        deleted = await kb_ingest_runtime.delete_document(
+            principal.tenant_id,
+            kb_id,
+            document_id,
+            database=_knowledge_database(),
+        )
+        if not deleted:
+            raise HTTPException(status_code=404, detail="document not found in kb")
+        return {"kb_id": kb_id, "document_id": document_id, "deleted": True}
+
+    @app.post("/evaluations")
+    async def run_evaluation(
+        request: Annotated[EvaluationRequest, Body(...)],
+        authorization: Annotated[str | None, Header(alias="Authorization")] = None,
+        principal_header: Annotated[str | None, Header(alias=INGRESS_PRINCIPAL_HEADER)] = None,
+    ) -> dict[str, object]:
+        _require_authorized_principal(authorization, principal_header)
+        result = await retrieval_evaluation.run_deterministic_fixture_suite()
+        return {
+            "kb_id": request.kb_id,
+            "metrics": _retrieval_metrics_to_wire(result.metrics),
+            "hit_ranking": list(result.hit_ranking),
+            "fixtures": [
+                {
+                    "name": fixture.fixture_name,
+                    "document_count": fixture.document_count,
+                    "metrics": _retrieval_metrics_to_wire(fixture.metrics),
+                    "queries": [
+                        {
+                            "query": query_result.query,
+                            "recall_at_k": query_result.recall_at_k,
+                            "forbidden_hits": list(query_result.forbidden_hits),
+                            "ranked_hit": (
+                                {
+                                    "rank": query_result.ranked_hit.rank,
+                                    "reciprocal_rank": query_result.ranked_hit.reciprocal_rank,
+                                    "matched_snippets": list(
+                                        query_result.ranked_hit.matched_snippets
+                                    ),
+                                }
+                                if query_result.ranked_hit is not None
+                                else None
+                            ),
+                        }
+                        for query_result in fixture.query_results
+                    ],
+                }
+                for fixture in result.fixtures
+            ],
+        }
 
     @app.get("/status")
     def status(
