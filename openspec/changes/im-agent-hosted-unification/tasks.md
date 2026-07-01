@@ -7,8 +7,8 @@
 
 ## 2. node loopback 身份/地址端点
 
-- [ ] 2.1 写测试：`node/forwarder.py` 的 `POST /agent/{name}/identity/resolve` 与 `/identity/addresses` 用 agent TUI token 鉴权、node 补 service key 转发 platform `/nodes/{id}/identity/*`，返回体透传
-- [ ] 2.2 实现：两个 forwarder 端点（复用 `_forward_oauth` 转发范式 + `_check_agent_token`）
+- [x] 2.1 写测试：`node/forwarder.py` 的 `POST /agent/{name}/identity/resolve` 与 `/identity/addresses` 用 agent TUI token 鉴权、node 补 service key 转发 platform `/nodes/{id}/identity/*`，返回体透传
+- [x] 2.2 实现：两个 forwarder 端点（复用 `_forward_oauth` 转发范式 + `_check_agent_token`）
 
 ## 3. agent 侧身份/地址 resolver 注入
 

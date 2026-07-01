@@ -226,6 +226,46 @@ def build_app(config: NodeConfig, backend: BaseProcessBackend) -> FastAPI:
             media_type=upstream.headers.get("content-type", "application/json"),
         )
 
+    # ── agent→node loopback: IM identity/address resolution (agent-hosted-im) ──────────
+    # Managed agents self-host their IM connection and resolve identities in-process. They
+    # reach the platform's im_users mapping ONLY via these loopback endpoints, authenticated
+    # with their OWN TUI token; node forwards holding the service key. Keeps the agent off any
+    # platform import/service-key while unifying managed onto the standalone direct path.
+    async def _forward_identity(suffix: str, body: bytes) -> Response:
+        url = f"{config.platform_url}/nodes/{config.node_id}/identity/{suffix}"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            upstream = await client.post(
+                url,
+                content=body,
+                headers={
+                    "Authorization": f"Bearer {config.service_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+        return Response(
+            content=upstream.content,
+            status_code=upstream.status_code,
+            media_type=upstream.headers.get("content-type", "application/json"),
+        )
+
+    @app.post("/agent/{agent_name}/identity/resolve")
+    async def agent_identity_resolve(
+        agent_name: str,
+        request: Request,
+        authorization: str | None = Header(None),
+    ) -> Response:
+        _check_agent_token(authorization, agent_name)
+        return await _forward_identity("resolve", await request.body())
+
+    @app.post("/agent/{agent_name}/identity/addresses")
+    async def agent_identity_addresses(
+        agent_name: str,
+        request: Request,
+        authorization: str | None = Header(None),
+    ) -> Response:
+        _check_agent_token(authorization, agent_name)
+        return await _forward_identity("addresses", await request.body())
+
     @app.post("/agent/{agent_name}/mcp/oauth-pending")
     async def agent_oauth_pending(
         agent_name: str,
