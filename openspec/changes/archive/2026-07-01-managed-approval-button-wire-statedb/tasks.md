@@ -16,5 +16,5 @@
 
 ## 收尾
 - [x] [本地] `make test-pr` + `make test-integration-ci` 全绿。
-- [ ] [服务器] 部署 + 真实 Slack 验收(三种按钮均 resolve+resume+送达,无 `state_db not initialized`)。
-- [ ] [服务器] 清理历史卡住 pending(00b0691a / f758a7a7 / 8eafa231 / 305c9a87,走平台 API)。
+- [x] [服务器] 部署 + 真实 Slack 验收(三种按钮均 resolve+resume+送达,无 `state_db not initialized`)。
+- [x] [服务器] 清理历史卡住 pending(00b0691a / f758a7a7 / 8eafa231 / 305c9a87,走平台 API)。

@@ -10,4 +10,4 @@
 
 ## 收尾
 - [x] [本地] `make test-pr` + `make test-integration-ci` 全绿。
-- [ ] [服务器] 验收:永久错误不再每 10s 刷日志,队列项进入 `failed` 终态。
+- [x] [服务器] 验收:永久错误不再每 10s 刷日志,队列项进入 `failed` 终态。
