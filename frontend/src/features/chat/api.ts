@@ -42,7 +42,7 @@ async function readIngressErrorDetail(response: Response): Promise<string | null
   }
 }
 
-function toIngressError(agentName: string, status: number, detail: string | null): string {
+export function toIngressError(agentName: string, status: number, detail: string | null): string {
   if (detail) {
     return `Agent "${agentName}": ${detail}`
   }
@@ -55,7 +55,7 @@ function toIngressError(agentName: string, status: number, detail: string | null
   return `Agent "${agentName}" request failed with status ${status}.`
 }
 
-function parseSseBuffer(buffer: string): { events: ChatStreamEvent[]; remainder: string } {
+export function parseSseBuffer(buffer: string): { events: ChatStreamEvent[]; remainder: string } {
   const normalized = buffer.replace(/\r\n/g, '\n')
   const parts = normalized.split('\n\n')
 
@@ -73,7 +73,7 @@ function parseSseBuffer(buffer: string): { events: ChatStreamEvent[]; remainder:
   }
 }
 
-function parseSseEventBlock(block: string): ChatStreamEvent[] {
+export function parseSseEventBlock(block: string): ChatStreamEvent[] {
   const dataLines = block
     .split('\n')
     .map((line) => line.trim())
@@ -92,7 +92,7 @@ function parseSseEventBlock(block: string): ChatStreamEvent[] {
   }
 }
 
-function updateMessage(
+export function updateMessage(
   messages: ChatMessage[],
   messageId: string,
   updater: (message: ChatMessage) => ChatMessage

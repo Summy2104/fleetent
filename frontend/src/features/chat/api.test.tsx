@@ -6,7 +6,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AuthProvider } from '@/app/auth'
 import { AppQueryProvider } from '@/app/query-client'
-import { useAgentChat, useAgentsQuery } from '@/features/chat/api'
+import {
+  parseSseBuffer,
+  parseSseEventBlock,
+  toIngressError,
+  updateMessage,
+  useAgentChat,
+  useAgentsQuery,
+} from '@/features/chat/api'
 import { server } from '@/test/msw/server'
 
 const API_BASE_URL = 'http://fleetent.test'
@@ -312,5 +319,57 @@ describe('chat api hooks', () => {
     })
     expect(screen.getByTestId('messages')).not.toHaveTextContent('second')
     expect(screen.getByTestId('streaming')).toHaveTextContent('no')
+  })
+})
+
+describe('toIngressError', () => {
+  it('prefers a provided detail message', () => {
+    expect(toIngressError('bot', 500, 'boom')).toBe('Agent "bot": boom')
+  })
+
+  it('maps 404 and 503 to friendly messages and otherwise reports the status', () => {
+    expect(toIngressError('bot', 404, null)).toBe('Agent "bot" was not found.')
+    expect(toIngressError('bot', 503, null)).toBe('Agent "bot" is currently unavailable.')
+    expect(toIngressError('bot', 500, null)).toBe('Agent "bot" request failed with status 500.')
+  })
+})
+
+describe('parseSseEventBlock', () => {
+  it('parses the JSON payload of a data line', () => {
+    expect(parseSseEventBlock('data: {"type":"text_delta","content":"hi"}')).toEqual([
+      { type: 'text_delta', content: 'hi' },
+    ])
+  })
+
+  it('returns nothing for a block with no data lines or invalid JSON', () => {
+    expect(parseSseEventBlock('event: ping')).toEqual([])
+    expect(parseSseEventBlock('data: not-json')).toEqual([])
+  })
+})
+
+describe('parseSseBuffer', () => {
+  it('emits complete events and keeps a trailing partial block as the remainder', () => {
+    const { events, remainder } = parseSseBuffer('data: {"type":"text_delta","content":"a"}\n\ndata: {"type":"do')
+    expect(events).toEqual([{ type: 'text_delta', content: 'a' }])
+    expect(remainder).toBe('data: {"type":"do')
+  })
+
+  it('leaves no remainder when the buffer ends on a block boundary', () => {
+    const { events, remainder } = parseSseBuffer('data: {"type":"done","content":""}\n\n')
+    expect(events).toEqual([{ type: 'done', content: '' }])
+    expect(remainder).toBe('')
+  })
+})
+
+describe('updateMessage', () => {
+  it('replaces only the matching message immutably', () => {
+    const messages = [
+      { id: 'a', role: 'user', content: 'hi', state: 'done' },
+      { id: 'b', role: 'assistant', content: '', state: 'streaming' },
+    ] as Parameters<typeof updateMessage>[0]
+    const next = updateMessage(messages, 'b', (m) => ({ ...m, content: 'yo' }))
+    expect(next[1].content).toBe('yo')
+    expect(next[0]).toBe(messages[0])
+    expect(next).not.toBe(messages)
   })
 })
