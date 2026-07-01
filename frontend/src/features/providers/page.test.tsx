@@ -271,6 +271,69 @@ describe('providers page', () => {
     expect(capturedBody?.base_url).toBeUndefined();
   });
 
+  it('creating an openai_image_chat model shows Base URL instead of Endpoint and sends base_url', async () => {
+    const user = userEvent.setup({ delay: null });
+    let capturedBody: Record<string, unknown> | null = null;
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () =>
+        HttpResponse.json({ email: 'admin@fleetent.test', id: 'admin-1', role: 'admin' })
+      ),
+      http.get(`${API_BASE_URL}/admin/providers`, () =>
+        HttpResponse.json([
+          {
+            api_key: null,
+            api_key_env: null,
+            api_key_set: false,
+            base_url: null,
+            description: null,
+            id: 'alpha',
+            model_count: 0,
+            provider: null,
+          },
+        ])
+      ),
+      http.get(`${API_BASE_URL}/admin/models`, () => HttpResponse.json([])),
+      http.post(`${API_BASE_URL}/admin/models`, async ({ request }) => {
+        capturedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(
+          {
+            base_url: capturedBody.base_url ?? null,
+            description: null,
+            endpoint: capturedBody.endpoint ?? null,
+            id: capturedBody.id,
+            input_price_per_1k: null,
+            max_tokens: null,
+            model_name: capturedBody.model_name,
+            output_price_per_1k: null,
+            params: null,
+            protocol: capturedBody.protocol,
+            provider_id: capturedBody.provider_id,
+          },
+          { status: 201 }
+        );
+      })
+    );
+
+    renderPage();
+    expect(await screen.findByText('alpha')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'New model' }));
+    await user.type(screen.getByLabelText('Model ID'), 'gemini-image');
+    await user.type(screen.getByLabelText('Model name'), 'gemini-3-pro-image-preview');
+    await user.click(screen.getByRole('combobox', { name: 'Protocol' }));
+    await user.click(await screen.findByRole('option', { name: 'openai_image_chat' }));
+
+    expect(screen.queryByLabelText('Endpoint')).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText('Base URL'), 'https://newapi.example/v1');
+    await user.click(screen.getByRole('button', { name: 'Create model' }));
+
+    await waitFor(() => expect(capturedBody).not.toBeNull());
+    expect(capturedBody?.protocol).toBe('openai_image_chat');
+    expect(capturedBody?.base_url).toBe('https://newapi.example/v1');
+    expect(capturedBody?.endpoint).toBeUndefined();
+  });
+
   it('renders the New model dialog in Chinese when the locale is zh', async () => {
     window.localStorage.setItem('fleetent.admin.locale', 'zh');
     const user = userEvent.setup({ delay: null });
