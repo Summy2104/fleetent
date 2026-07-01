@@ -62,14 +62,14 @@ describe('audit api', () => {
     server.use(
       http.get(`${API_BASE_URL}/admin/audit`, ({ request }) => {
         const url = new URL(request.url)
-        expect(url.searchParams.get('since')).toBe('2026-06-27T00:00:00')
-        expect(url.searchParams.get('until')).toBe('2026-06-28T23:59:59.999')
+        expect(url.searchParams.get('since')).toBe('2026-06-26T16:00:00.000Z')
+        expect(url.searchParams.get('until')).toBe('2026-06-28T15:59:59.999Z')
         return HttpResponse.json([])
       })
     )
 
     const query = renderHook(
-      () => useAuditLogsQuery({ since: '2026-06-27T00:00:00', until: '2026-06-28T23:59:59.999' }),
+      () => useAuditLogsQuery({ since: '2026-06-26T16:00:00.000Z', until: '2026-06-28T15:59:59.999Z' }),
       { wrapper: createWrapper() }
     )
 

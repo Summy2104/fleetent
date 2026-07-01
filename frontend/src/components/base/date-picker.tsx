@@ -24,26 +24,44 @@ export interface DateRangeValue {
   toTime?: string
 }
 
-/** Inclusive ISO bounds derived from a {@link DateRangeValue}, ready for a server query. */
+/** Inclusive UTC ISO bounds derived from a {@link DateRangeValue}, ready for a server query. */
 export interface DateRangeBounds {
   since?: string
   until?: string
 }
 
 /**
- * Expand the two ends to inclusive ISO bounds. A missing start time defaults to
- * the beginning of the day; a missing end time defaults to the last millisecond.
- * A provided end time is treated as minute-inclusive.
+ * Expand the two ends to inclusive UTC bounds (`...Z`). Each end is a local
+ * wall-clock instant: a missing start time defaults to the beginning of the day,
+ * a missing end time to the last millisecond, and a provided end time is
+ * minute-inclusive. The result is normalized to UTC so it compares correctly
+ * against UTC-stored `created_at` regardless of the viewer's timezone.
  */
 export function dateRangeBounds(value: DateRangeValue | undefined): DateRangeBounds {
   const bounds: DateRangeBounds = {}
   if (value?.from) {
-    bounds.since = `${value.from}T${value.fromTime ? `${value.fromTime}:00` : '00:00:00'}`
+    bounds.since = localWallClockToUtc(value.from, value.fromTime, 'start')
   }
   if (value?.to) {
-    bounds.until = `${value.to}T${value.toTime ? `${value.toTime}:59.999` : '23:59:59.999'}`
+    bounds.until = localWallClockToUtc(value.to, value.toTime, 'end')
   }
   return bounds
+}
+
+/**
+ * Convert a local `yyyy-MM-dd` (+ optional `HH:mm`) wall-clock time to a UTC ISO
+ * string. The `edge` fills the unspecified sub-fields: `start` with the low end
+ * (00:00:00.000) and `end` with the high end (23:59:59.999 for a bare date, or
+ * `:59.999` seconds for a minute-inclusive end time).
+ */
+function localWallClockToUtc(date: string, time: string | undefined, edge: 'start' | 'end'): string {
+  const [year, month, day] = date.split('-').map(Number)
+  const [hh, mm] = time ? time.split(':').map(Number) : [undefined, undefined]
+  const hours = time ? hh! : edge === 'end' ? 23 : 0
+  const minutes = time ? mm! : edge === 'end' ? 59 : 0
+  const seconds = edge === 'end' ? 59 : 0
+  const ms = edge === 'end' ? 999 : 0
+  return new Date(year, month - 1, day, hours, minutes, seconds, ms).toISOString()
 }
 
 function toIsoDate(date: Date): string {

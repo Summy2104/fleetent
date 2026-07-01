@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { HttpResponse, http } from 'msw'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AuthProvider } from '@/app/auth'
 import { AppQueryProvider } from '@/app/query-client'
@@ -10,6 +10,14 @@ import { I18nProvider } from '@/i18n'
 import { server } from '@/test/msw/server'
 
 const API_BASE_URL = 'http://fleetent.test'
+
+// Pin a non-UTC zone (团队在 UTC+8) so the local→UTC date-range bounds are deterministic.
+const ORIGINAL_TZ = process.env.TZ
+process.env.TZ = 'Asia/Shanghai'
+
+afterAll(() => {
+  process.env.TZ = ORIGINAL_TZ
+})
 
 function renderAuditPage(): void {
   render(
@@ -38,10 +46,10 @@ describe('auditFiltersFromColumns', () => {
     ).toEqual({ actor: 'admin-1', action: 'rotate_key', targetId: 'user-1' })
   })
 
-  it('expands the created_at date range into since/until bounds', () => {
+  it('expands the created_at date range into UTC since/until bounds', () => {
     expect(auditFiltersFromColumns([{ id: 'created_at', value: { from: '2026-06-27', to: '2026-06-28' } }])).toEqual({
-      since: '2026-06-27T00:00:00',
-      until: '2026-06-28T23:59:59.999',
+      since: '2026-06-26T16:00:00.000Z',
+      until: '2026-06-28T15:59:59.999Z',
     })
   })
 
