@@ -31,7 +31,7 @@ async def test_agent_runtime_calls_long_term_context_builder_with_existing_signa
     client = AsyncMock()
     client.chat.completions.create = AsyncMock(return_value=_text_response())
     policy = ModelPolicySnapshot.from_models(
-        agent_id="agent-1",
+        agent_name="agent-1",
         models=AgentModels(
             targets=[
                 ModelTarget(

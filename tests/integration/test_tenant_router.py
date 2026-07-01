@@ -109,7 +109,7 @@ class _FakeTenantBackend:
             kb_vector_backend=self._vector,
         )
 
-    def resolve_agent(self, tenant_id: str, agent_id: str) -> AgentScope:
+    def resolve_agent(self, tenant_id: str, agent_name: str) -> AgentScope:
         return AgentScope(
             state_db=SQLiteDatabase(path=self._db_path),
             vector_backend=self._vector,  # type: ignore[arg-type]

@@ -113,7 +113,7 @@ def test_get_desired_state_returns_only_enabled_agents_for_node(node_client: Tes
 
     agent_admin_store.disable(disabled.id)
     agent_admin_store.archive(archived.id)
-    agent_store.set_im_capabilities("enabled", supports_dm=True, supports_groups=False)
+    agent_store.set_im_capabilities(enabled.id, supports_dm=True, supports_groups=False)
 
     response = node_client.get(
         "/nodes/node-a/desired-state",

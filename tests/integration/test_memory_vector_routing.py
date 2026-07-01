@@ -76,7 +76,7 @@ async def test_agent_boot_routes_memory_vectors_to_agent_scoped_backend(
     monkeypatch.setattr(vector_store, "upsert", AsyncMock())
     monkeypatch.setattr(vector_store, "delete", AsyncMock())
 
-    _init_agent_db_schema(data_dir, agent_id="agent-a", tenant_id="default")
+    _init_agent_db_schema(data_dir, agent_name="agent-a", tenant_id="default")
     fact_a = _make_fact("mem-a", "alice", "alice", "name", "Agent A")
     facts_store.insert_fact(fact_a)
     await facts_commit.sync_vectors(
@@ -86,7 +86,7 @@ async def test_agent_boot_routes_memory_vectors_to_agent_scoped_backend(
         vector_backend=facts_store._facts_vector(),
     )
 
-    _init_agent_db_schema(data_dir, agent_id="agent-b", tenant_id="default")
+    _init_agent_db_schema(data_dir, agent_name="agent-b", tenant_id="default")
     fact_b = _make_fact("mem-b", "alice", "alice", "name", "Agent B")
     facts_store.insert_fact(fact_b)
     await facts_commit.sync_vectors(
@@ -128,7 +128,7 @@ async def test_shared_agent_vector_store_keeps_user_and_agent_memory_isolated(
     monkeypatch.setattr(vector_store, "upsert", AsyncMock())
     monkeypatch.setattr(vector_store, "delete", AsyncMock())
 
-    _init_agent_db_schema(data_dir, agent_id="agent-a", tenant_id="default")
+    _init_agent_db_schema(data_dir, agent_name="agent-a", tenant_id="default")
 
     agent_root = tmp_path / "tenants" / "default" / "agents" / "agent-a" / "data"
     fact = _make_fact("mem-a", "alice", "alice", "name", "User")

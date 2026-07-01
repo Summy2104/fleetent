@@ -220,9 +220,9 @@ def set_im_capabilities(
     authorization: str | None = Header(None),
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
-    _require_agent(name)
+    agent = _require_agent(name)
     agent_store.set_im_capabilities(
-        name,
+        agent.id,
         supports_dm=body.supports_dm,
         supports_groups=body.supports_groups,
     )

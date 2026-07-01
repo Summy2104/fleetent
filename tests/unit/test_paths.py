@@ -136,7 +136,9 @@ def test_agent_data_dir_injectable_via_monkeypatch(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(
-        paths, "tenant_agent_home_dir", lambda tenant_id, agent_id: tmp_path / tenant_id / agent_id
+        paths,
+        "tenant_agent_home_dir",
+        lambda tenant_id, agent_name: tmp_path / tenant_id / agent_name,
     )
 
     assert paths.tenant_agent_data_dir("tenant-a", "test-agent") == (

@@ -41,7 +41,7 @@ def test_agent_im_capabilities_default_off_and_update(store_db):
     assert created.supports_dm is False
     assert created.supports_groups is False
 
-    agent_store.set_im_capabilities("agent-a", supports_dm=True, supports_groups=True)
+    agent_store.set_im_capabilities(created.id, supports_dm=True, supports_groups=True)
 
     updated = agent_store.get_by_name("agent-a")
     assert updated is not None

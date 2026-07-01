@@ -39,7 +39,7 @@ def trace_db(tmp_path, monkeypatch):
 def agent_runtime(monkeypatch):
     client = AsyncMock()
     client.model_policy = ModelPolicySnapshot.from_models(
-        agent_id="agent-contract",
+        agent_name="agent-contract",
         models=AgentModels(
             targets=[
                 ModelTarget(

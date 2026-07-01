@@ -41,7 +41,7 @@ def test_init_agent_db_schema_state_db_has_agent_memory_items(
         patch("fleetent.knowledge_base.runtime.set_vector_backend"),
         patch("fleetent.memory.agent_memory.set_agent_memory_db"),
     ):
-        agent_app._init_agent_db_schema(data_dir, agent_id="myagent", tenant_id="tenant1")
+        agent_app._init_agent_db_schema(data_dir, agent_name="myagent", tenant_id="tenant1")
 
     agent_data_dir = tmp_path / "tenants" / "tenant1" / "agents" / "myagent" / "data"
     state_db = agent_data_dir / "agent_state.db"
@@ -78,7 +78,7 @@ def test_init_agent_db_schema_no_agent_memory_db(
         patch("fleetent.knowledge_base.runtime.set_vector_backend"),
         patch("fleetent.memory.agent_memory.set_agent_memory_db"),
     ):
-        agent_app._init_agent_db_schema(data_dir, agent_id="bot", tenant_id="acme")
+        agent_app._init_agent_db_schema(data_dir, agent_name="bot", tenant_id="acme")
 
     agent_data_dir = tmp_path / "tenants" / "acme" / "agents" / "bot" / "data"
     assert not (agent_data_dir / "agent_memory.db").exists(), (
@@ -113,7 +113,7 @@ def test_init_agent_db_schema_no_shared_memory_db_at_tenant_level(
         patch("fleetent.knowledge_base.runtime.set_vector_backend"),
         patch("fleetent.memory.agent_memory.set_agent_memory_db"),
     ):
-        agent_app._init_agent_db_schema(data_dir, agent_id="bot", tenant_id="acme")
+        agent_app._init_agent_db_schema(data_dir, agent_name="bot", tenant_id="acme")
 
     tenant_dir = tmp_path / "tenants" / "acme"
     for path in tenant_dir.rglob("shared_memory*.db"):
@@ -147,7 +147,7 @@ def test_init_agent_db_schema_boot_does_not_create_separate_agent_memory_vector_
         patch("fleetent.knowledge_base.runtime.set_vector_backend"),
         patch("fleetent.memory.agent_memory.set_agent_memory_db"),
     ):
-        agent_app._init_agent_db_schema(data_dir, agent_id="bot", tenant_id="acme")
+        agent_app._init_agent_db_schema(data_dir, agent_name="bot", tenant_id="acme")
 
     agent_data_dir = tmp_path / "tenants" / "acme" / "agents" / "bot" / "data"
     retired_vectors_db = agent_data_dir / ("agent_memory" + "_vectors.db")
