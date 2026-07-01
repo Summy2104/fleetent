@@ -21,6 +21,15 @@ _SYSTEM = "You are a helpful assistant with access to tools. Use them when neede
 _APPROVAL_RE = re.compile(r"^(approve|reject)(\s+always)?\s+([a-f0-9-]{6,36})\s*$", re.IGNORECASE)
 # Channels require @-mentioning the bot, so inbound text carries a leading `<@id>`.
 _LEADING_MENTION_RE = re.compile(r"^\s*<@[^>]+>\s*")
+# DM / Assistant-panel users type a plain-text "@Display Name" that is NOT a real Slack
+# mention (no `<@id>`), and the bot's display name may contain spaces ("@R. Alpha"), so it
+# is not one token. Strip from a leading "@" up to the approve/reject verb so a command
+# typed behind a name is recognized; `_APPROVAL_RE`'s id check still rejects prose.
+_TEXT_MENTION_PREFIX_RE = re.compile(r"^@\S.*?(?=\b(?:approve|reject)\b)", re.IGNORECASE)
+# Approval ids are often copied with their markdown formatting — `id` / ```id``` / **id** —
+# so strip code/emphasis markers before matching. The id charset (hex + hyphen) never
+# legitimately contains backtick/asterisk, so prose still fails `_APPROVAL_RE`.
+_MD_FORMAT_RE = re.compile(r"[`*]+")
 _REJECTION_MSG = "你还没有权限使用此 bot，请联系管理员审批。"
 # harden-im-llm-timeout-handling P0: agent run 失败（超时/异常）时回给用户的兜底提示。
 # 经 reply_func 投递，因而同时清除 Slack loading 状态（见 im-progress-feedback）。
@@ -33,13 +42,26 @@ def _strip_leading_mention(text: str) -> str:
 
 
 def _match_approval_command(text: str) -> re.Match[str] | None:
-    """Match an approve/reject command, tolerating a leading bot mention (channel case).
+    """Match an approve/reject command, tolerating a leading bot mention.
 
-    Channel messages must @-mention the bot, so the command arrives as `<@id> approve <x>`;
-    stripping the leading mention lets the same ``_APPROVAL_RE`` match channel and DM alike.
-    The id-format check is unchanged, so prose like ``<@bot> approve the plan`` stays unmatched.
+    Two mention shapes are tolerated before the command:
+
+    * a real Slack mention ``<@id>`` — channel messages must @-mention the bot, so the
+      command arrives as ``<@id> approve <x>``;
+    * a plain-text ``@Display Name`` typed in a DM / Assistant panel, whose display name
+      may contain spaces (``@R. Alpha approve <x>``) and is therefore not a single token.
+
+    Either way the id-format check in ``_APPROVAL_RE`` is unchanged, so prose such as
+    ``@bot approve the plan`` (invalid id) stays unmatched. Markdown wrapping the id
+    (``approve `id` `` / ``approve **id**``) is stripped first so a copied-formatted command
+    still matches.
     """
-    return _APPROVAL_RE.match(_strip_leading_mention(text).strip())
+    stripped = _MD_FORMAT_RE.sub("", _strip_leading_mention(text)).strip()
+    m = _APPROVAL_RE.match(stripped)
+    if m is not None or not stripped.startswith("@"):
+        return m
+    # Real-mention strip left a leading plain-text "@name" — drop it up to the verb, retry.
+    return _APPROVAL_RE.match(_TEXT_MENTION_PREFIX_RE.sub("", stripped, count=1).strip())
 
 
 def _current_date_tz() -> tuple[str, str]:
