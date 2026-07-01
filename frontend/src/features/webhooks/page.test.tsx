@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -148,8 +148,14 @@ describe('webhooks page', () => {
     expect(await screen.findByText('github-ci')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /actions for github-ci/i }));
-    await user.click(await screen.findByText(/delete/i));
-    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    await user.click(await screen.findByRole('menuitem', { name: /delete/i }));
+    // Wait for the AlertDialog to mount before clicking confirm: closing the
+    // DropdownMenu leaves `body { pointer-events: none }` in place until Radix
+    // finishes tearing it down, and the dialog opens a tick later (setTimeout in
+    // the row action). Querying the button synchronously races that window and
+    // trips userEvent's pointer-events check on CPU-starved CI runners.
+    const confirm = await screen.findByRole('alertdialog');
+    await user.click(within(confirm).getByRole('button', { name: 'Delete' }));
 
     await waitFor(() => {
       expect(screen.queryByText('github-ci')).not.toBeInTheDocument();
