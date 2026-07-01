@@ -35,7 +35,7 @@ standalone KB 服务的连接器凭据 SHALL 在 **KB 主机本地**经 `credent
 
 ### Requirement: KB-local ingest queue, worker and sweep
 
-standalone 模式下,ingest 队列 / worker / sweep SHALL 全在 KB 主机本地:worker 抽 **KB 本地**队列(非 management.db);sweep 由 KB 服务自己的调度器按配置文件 `sync_interval_seconds` 入队;**无需 platform 或 management.db**。
+standalone 模式下,ingest 队列 / worker / sweep SHALL 全在 KB 主机本地:worker 抽 **KB 本地**队列(非 management.db);sweep 由 **kb-worker** 在其抽取循环中按配置文件 `sync_interval_seconds` 到期入队(SHALL NOT 依赖 kb-serve 读服务进程承载调度);**无需 platform 或 management.db**。
 
 standalone KB 服务 SHALL 以**每租户 kb home**部署:`<FLEETENT_HOME>/tenants/<tenant_id>/kb/` 下,`kb-service.yaml` 与 `.env` SHALL 落 `kb/` 根(运维/secret 面);`data.home`(默认 `./data`)SHALL 解析为 `kb/data/`,只表示**当前 tenant 的 sqlite 本地文件后端存储根**,其内部 SHALL 纯平放置 `kb.db`(关系)、`kb_vectors.db`(向量)、`kb_ingest_queue.db`(本地队列),SHALL NOT 在 `data/` 内再嵌套 `tenants/` 或 `kb/` 层。该布局与 agent home(`agents/<id>/agent.yaml` + `.env` + `data/`)同构。多租户 SHALL 通过**不同 tenant kb home 零共享**实现;`tenant_id` 是逻辑身份键,物理由后端实现决定(sqlite=目录;未来 PG=schema、Qdrant=collection)。该 `kb/data/` 即 agent retrieval 读取的同一物理库——service 写的就是 agent 读的。
 
@@ -44,9 +44,13 @@ standalone KB 服务 SHALL 以**每租户 kb home**部署:`<FLEETENT_HOME>/tenan
 - **THEN** job 入 KB 主机本地队列(`tenants/<tenant_id>/kb/data/kb_ingest_queue.db`),由本地 worker 抽取执行,写同一 `kb/data/`
 - **AND** 不读写 management.db
 
-#### Scenario: 服务自有 sweep
+#### Scenario: kb-worker 承载 sweep
 - **WHEN** 某连接器配了 `sync_interval_seconds` 且到期
-- **THEN** KB 服务自己的调度器入队该连接器同步(不依赖 platform cron)
+- **THEN** kb-worker 在其抽取循环中入队该连接器同步(不依赖 platform cron,也不依赖 kb-serve 进程)
+
+#### Scenario: 只起 kb-worker 即有调度
+- **WHEN** 只启动 kb-worker(未启动 kb-serve)
+- **THEN** connector 仍按 `sync_interval_seconds` 被调度入队并抽取执行
 
 #### Scenario: 单租户进程的布局
 - **WHEN** 一个 kb-service 进程按 `kb-service.yaml`(单 `service.tenant_id`)启动
@@ -125,4 +129,3 @@ ingest SHALL 经**入队**完成:命令把 `sync_directory` job 入本租户本�
 #### Scenario: 启用 rerank 后真重排
 - **WHEN** `rerank.backend: http` + 有效 endpoint,且检索请求带 `rerank=true`
 - **THEN** 进程的 rerank provider 经该 endpoint 对候选重排
-
