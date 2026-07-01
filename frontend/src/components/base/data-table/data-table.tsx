@@ -109,7 +109,7 @@ export function DataTable<TData>(props: DataTableProps<TData>) {
     columns: tableColumns,
     data,
     enableRowSelection,
-    initialPageSize: pageSizeOptions[0],
+    initialPageSize: pageSizeOptions[2],
     ...rest,
   })
 
