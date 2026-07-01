@@ -23,7 +23,9 @@ export class ApiError extends Error {
   }
 }
 
-async function parseResponse<T>(response: Response): Promise<T> {
+// Exported for unit tests: turns a fetch Response into data, mapping non-2xx to
+// ApiError (parsing the JSON body when present) and 204 to undefined.
+export async function parseResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let body: unknown = null
     try {
