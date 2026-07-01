@@ -30,7 +30,7 @@ from fleetent.agent_config import (
     collect_env_var_names,
     default_models,
 )
-from fleetent.config import McpServerSettings
+from fleetent.config import McpOAuthSettings, McpServerSettings
 from fleetent.platform.agent_lifecycle import credential_slots, default_binding_store, secret_store
 from fleetent.platform.connector_management import mcp_server_store
 from fleetent.platform.connector_management.mcp_auth import (
@@ -409,6 +409,31 @@ _FLEETENT_EXT_DEFAULTS: dict[str, Any] = {
     "auth": None,
     "approval_rules": [],
 }
+
+# Fields not surfaced by any admin-form input; excluded from mcp_yaml_field_paths() so the
+# path table only covers fields a user can actually fill in.
+_FIELD_PATH_SKIP = frozenset({"id", "connect_timeout", "call_timeout"})
+
+
+def mcp_yaml_field_paths() -> dict[str, str]:
+    """Map each ``McpServerSettings`` field to its ``agent.yaml`` path template.
+
+    Derived from ``_FLEETENT_EXT_DEFAULTS`` (the same table ``_mcp_payload_to_map`` uses to
+    decide what gets hoisted under ``x-fleetent``), so this can never drift from the real
+    write path. ``{id}`` is a placeholder for the server's ``mcpServers`` map key.
+    """
+    paths: dict[str, str] = {}
+    for name in McpServerSettings.model_fields:
+        if name in _FIELD_PATH_SKIP:
+            continue
+        if name == "auth":
+            for sub in McpOAuthSettings.model_fields:
+                paths[f"auth.{sub}"] = f"mcpServers.{{id}}.x-fleetent.auth.{sub}"
+        elif name in _FLEETENT_EXT_DEFAULTS:
+            paths[name] = f"mcpServers.{{id}}.x-fleetent.{name}"
+        else:
+            paths[name] = f"mcpServers.{{id}}.{name}"
+    return paths
 
 
 def _mcp_payload_to_map(payload: dict[str, Any]) -> None:

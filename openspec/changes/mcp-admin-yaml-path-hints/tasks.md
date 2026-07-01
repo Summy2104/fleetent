@@ -2,12 +2,12 @@
 
 ## 1. 后端:路径表纯函数(unit,TDD)
 
-- [ ] 1.1 写测试 `tests/unit/platform/agent_lifecycle/test_materialize_mcp_field_paths.py`:覆盖 D1 表格里的关键路径断言——`auth_type`/`api_key_env`/`header_style`/`credential_input` **不**带 `x-fleetent` 前缀;`auth.client_id` 等 7 个 OAuth 子字段**带** `mcpServers.{id}.x-fleetent.auth.` 前缀;返回值不包含 `id`/`connect_timeout`/`call_timeout` 这 3 个 key。先见红(函数不存在)。
-- [ ] 1.2 在 `materialize.py` 实现 `mcp_yaml_field_paths()`(design.md D1 给出的实现),紧邻 `_FLEETENT_EXT_DEFAULTS` 定义处。跑 1.1 见绿。
+- [x] 1.1 写测试 `tests/unit/test_materialize_mcp_field_paths.py`(照既有 `tests/unit/test_materialize_mcp_map.py` 的扁平目录 + 直接 import `materialize` 惯例):覆盖 D1 表格里的关键路径断言——`auth_type`/`api_key_env`/`header_style`/`credential_input` **不**带 `x-fleetent` 前缀;`auth.client_id` 等 7 个 OAuth 子字段**带** `mcpServers.{id}.x-fleetent.auth.` 前缀;返回值不包含 `id`/`connect_timeout`/`call_timeout` 这 3 个 key。先见红(函数不存在)。
+- [x] 1.2 在 `materialize.py` 实现 `mcp_yaml_field_paths()`(design.md D1 给出的实现),紧邻 `_FLEETENT_EXT_DEFAULTS` 定义处。跑 1.1 见绿。
 
 ## 2. 后端:只读端点(integration,TDD)
 
-- [ ] 2.1 写测试(`tests/integration/platform/connector_management/...`,复用现有 `/admin/mcp/servers` 测试的 fixture 风格):已登录任意角色请求 `GET /admin/mcp/field-schema` 返回 200 且内容等于 `mcp_yaml_field_paths()`;未带登录会话返回 401。先见红。
+- [ ] 2.1 在 `tests/integration/test_connector_admin_api.py` 里写测试(复用该文件现有 `/admin/mcp/servers` 测试的 fixture 风格):已登录任意角色请求 `GET /admin/mcp/field-schema` 返回 200 且内容等于 `mcp_yaml_field_paths()`;未带登录会话返回 401。先见红。
 - [ ] 2.2 在 `connector_admin_api.py` 新增该端点(鉴权用 `_current_user`,不要求 admin 角色,对齐 `list_mcp_servers`)。跑 2.1 见绿。
 
 ## 3. 前端数据层(api.ts,TDD)
