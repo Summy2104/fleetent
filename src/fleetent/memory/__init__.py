@@ -37,12 +37,13 @@ def iter_indexable_memories(user_id: str) -> Iterator[Any]:
     facts-based triple store so the vector index stays in sync with memory_items.
     """
     from fleetent import vector_store
+    from fleetent.memory.facts_models import fact_index_text
     from fleetent.memory.facts_store import list_active_facts
     from fleetent.vector_store.namespaces import memory_namespace
 
     ns = memory_namespace(user_id)
     for fact in list_active_facts(user_id):
-        text = f"{fact.subject} {fact.relation} {fact.object}"
+        text = fact_index_text(fact)
         yield vector_store.IndexableItem(
             id=fact.fact_id,
             content=text,
