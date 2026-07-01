@@ -144,7 +144,12 @@ async def mcp_probe(server_id: str) -> dict[str, Any]:
 
 
 def _mask(value: Any) -> Any:
-    """Recursively mask sensitive values (secret/token/refresh/api_key/password)."""
+    """Recursively mask sensitive values (secret/token/refresh/api_key/password).
+
+    Only used for ``mcp_doctor()`` diagnostics, whose check output shape is unconstrained
+    (unlike ``auth_config``, which `mcp_auth_models.py` guarantees holds only env-var
+    references — see `list_mcp_servers`, which intentionally does not mask).
+    """
     if isinstance(value, dict):
         out = {}
         for k, v in value.items():
@@ -238,7 +243,7 @@ def list_mcp_servers(
     if agent_id is not None:
         for row in mcp_server_store.list_mcp_servers(agent_id):
             servers.append(_from_row(row))
-    return [_mask(s) for s in servers]
+    return servers
 
 
 @router.get("/mcp/servers/{server_id}/tools")
