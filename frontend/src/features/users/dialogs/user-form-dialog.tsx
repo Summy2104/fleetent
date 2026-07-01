@@ -14,17 +14,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import type { UserListItem } from '@/features/users/api'
+import { canSubmitUser, initialUserForm, type UserFormState } from '@/features/users/dialogs/user-form-dialog-logic'
 import { ROLES } from '@/features/users/shared'
 import { useT } from '@/i18n'
 
-export type UserFormState = {
-  email: string
-  name: string
-  password: string
-  resetPassword: string
-  role: string
-  mustReset: boolean
-}
+export type { UserFormState }
 
 export function UserFormDialog({
   mode,
@@ -42,29 +36,11 @@ export function UserFormDialog({
   onSubmit: (state: UserFormState) => Promise<void>
 }): JSX.Element {
   const t = useT()
-  const [state, setState] = useState<UserFormState>({
-    email: '',
-    name: '',
-    password: '',
-    resetPassword: '',
-    role: 'viewer',
-    mustReset: false,
-  })
+  const [state, setState] = useState<UserFormState>(() => initialUserForm(mode, user))
 
   useEffect(() => {
     if (!open) return
-    if (mode === 'edit' && user) {
-      setState({
-        email: user.email ?? '',
-        name: user.name,
-        password: '',
-        resetPassword: '',
-        role: user.role,
-        mustReset: user.must_reset,
-      })
-    } else {
-      setState({ email: '', name: '', password: '', resetPassword: '', role: 'viewer', mustReset: false })
-    }
+    setState(initialUserForm(mode, user))
   }, [open, mode, user])
 
   return (
@@ -141,16 +117,7 @@ export function UserFormDialog({
           <Button onClick={() => onOpenChange(false)} variant="outline">
             {t('users.cancel')}
           </Button>
-          <Button
-            disabled={
-              busy ||
-              !state.name ||
-              // A platform user logs in by email + password; without both, the
-              // created account can never sign in. Edit mode keeps its own rules.
-              (mode === 'create' && (!state.email.trim() || !state.password))
-            }
-            onClick={() => void onSubmit(state)}
-          >
+          <Button disabled={busy || !canSubmitUser(mode, state)} onClick={() => void onSubmit(state)}>
             {mode === 'create' ? t('users.createUser') : t('users.saveChanges')}
           </Button>
         </DialogFooter>
