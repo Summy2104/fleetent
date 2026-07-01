@@ -12,10 +12,10 @@
 
 ## 3. agent 侧身份/地址 resolver 注入
 
-- [ ] 3.1 写测试：`AgentIdentityResolver(owner, platform, platform_user_id)` 经 loopback（TUI token）返回 `user_id`；`AgentAddressResolver(user_id)` 返回地址列表
-- [ ] 3.2 实现：`im_gateway/access.py` 新增 `AgentIdentityResolver`/`AgentAddressResolver` + `set_im_address_resolver` seam（与既有 `set_im_identity_resolver` 并列）
-- [ ] 3.3 写测试：`agent_app.boot` 在 managed（有 loopback）注入两个 resolver；standalone（无 loopback）不注入 → 身份解析 passthrough
-- [ ] 3.4 实现：boot managed 分支接线两个 resolver（紧邻既有 managed-oauth 接线）
+- [x] 3.1 写测试：`AgentIdentityResolver(owner, platform, platform_user_id)` 经 loopback（TUI token）返回 `user_id`；`AgentAddressResolver(user_id)` 返回地址列表
+- [x] 3.2 实现：`im_gateway/access.py` 新增 `AgentIdentityResolver`/`AgentAddressResolver` + `set_im_address_resolver` seam（与既有 `set_im_identity_resolver` 并列）
+- [x] 3.3 写测试：`agent_app.boot` 在 managed（有 loopback）注入两个 resolver；standalone（无 loopback）不注入 → 身份解析 passthrough
+- [x] 3.4 实现：boot managed 分支接线两个 resolver（紧邻既有 managed-oauth 接线）
 
 ## 4. agent 自持 supervisor（managed）
 

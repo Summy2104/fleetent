@@ -31,9 +31,74 @@ APPROVALS_PATH = paths.data_dir() / "im_approvals.json"
 # preserves native channel-id passthrough semantics.
 _im_identity_resolver: Callable[[str, str, str], str] | None = None
 
+# Injectable hook for reverse-resolving an internal user_id to its bound IM addresses
+# (directed-reach). Standalone leaves it unset (no im_users) → resolves to empty. Managed
+# wires an AgentAddressResolver that queries platform via the node loopback.
+_im_address_resolver: Callable[[str], list[dict[str, str]]] | None = None
+
 
 class IMIdentityResolutionError(RuntimeError):
     """Injected platform-side identity resolution rejected an inbound IM identity."""
+
+
+class AgentIdentityResolver:
+    """Managed agent-side identity resolver: platform_user_id → internal user_id via node
+    loopback (agent-hosted-im). Authenticates to node with the agent's own TUI token; node
+    forwards to platform holding the service key. No platform import, no service key held.
+    """
+
+    def __init__(
+        self, *, loopback_url: str, tui_token: str, agent_name: str, tenant_id: str = "default"
+    ) -> None:
+        self._loopback_url = loopback_url.rstrip("/")
+        self._tui_token = tui_token
+        self._agent_name = agent_name
+        self._tenant_id = tenant_id
+
+    def __call__(self, owner_id: str, platform: str, platform_user_id: str) -> str:
+        import httpx
+
+        resp = httpx.post(
+            f"{self._loopback_url}/agent/{self._agent_name}/identity/resolve",
+            headers={"Authorization": f"Bearer {self._tui_token}"},
+            json={
+                "tenant_id": self._tenant_id,
+                "channel": platform,
+                "platform_user_id": platform_user_id,
+            },
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        user_id = dict(resp.json()).get("user_id")
+        if not isinstance(user_id, str) or not user_id:
+            raise IMIdentityResolutionError("loopback identity response missing user_id")
+        return user_id
+
+
+class AgentAddressResolver:
+    """Managed agent-side reverse address resolver: user_id → [(platform, platform_user_id)]
+    via node loopback (agent-hosted-im), for directed-reach fan-out."""
+
+    def __init__(self, *, loopback_url: str, tui_token: str, agent_name: str) -> None:
+        self._loopback_url = loopback_url.rstrip("/")
+        self._tui_token = tui_token
+        self._agent_name = agent_name
+
+    def resolve(self, user_id: str) -> list[dict[str, str]]:
+        import httpx
+
+        resp = httpx.post(
+            f"{self._loopback_url}/agent/{self._agent_name}/identity/addresses",
+            headers={"Authorization": f"Bearer {self._tui_token}"},
+            json={"user_id": user_id},
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        addresses = dict(resp.json()).get("addresses", [])
+        return [dict(a) for a in addresses if isinstance(a, dict)]
+
+    def __call__(self, user_id: str) -> list[dict[str, str]]:
+        return self.resolve(user_id)
 
 
 class LocalApprovalStore:
@@ -92,6 +157,23 @@ def set_im_identity_resolver(resolver: Callable[[str, str, str], str] | None) ->
     """
     global _im_identity_resolver
     _im_identity_resolver = resolver
+
+
+def set_im_address_resolver(resolver: Callable[[str], list[dict[str, str]]] | None) -> None:
+    """Wire the reverse address resolver (user_id → IM addresses) for directed-reach.
+
+    Managed wires an :class:`AgentAddressResolver` (node loopback); standalone leaves it
+    unset so :func:`resolve_addresses` returns empty (no im_users to reverse-lookup).
+    """
+    global _im_address_resolver
+    _im_address_resolver = resolver
+
+
+def resolve_addresses(user_id: str) -> list[dict[str, str]]:
+    """Reverse-resolve a user_id to its bound IM addresses, or [] when unresolvable."""
+    if _im_address_resolver is None:
+        return []
+    return _im_address_resolver(user_id)
 
 
 # AAA-8204 #1: non-real IM identities that must never be resolved/provisioned. A broken

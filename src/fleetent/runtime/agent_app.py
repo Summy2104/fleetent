@@ -541,6 +541,36 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
 
         wire_managed_oauth(_loopback_url, agent_id, _tui_token, _mcp_client.get_registered_server)
 
+    # agent-hosted-im: managed agents self-host their IM connection and resolve identities
+    # in-process via the node loopback (agent uses its own TUI token; node holds the service
+    # key). Standalone leaves these unset → native-id passthrough / empty address lookup.
+    _wire_managed_im_resolvers(agent_id, tenant_id)
+
+
+def _wire_managed_im_resolvers(agent_id: str, tenant_id: str) -> None:
+    """Inject the loopback-backed IM identity/address resolvers when node-managed.
+
+    No-op under standalone (no loopback signal) so ``resolve_identity`` keeps native-id
+    passthrough and ``resolve_addresses`` stays empty.
+    """
+    from fleetent import runtime_placement
+    from fleetent.im_gateway import access
+
+    if not runtime_placement.is_managed():
+        return
+    loopback = os.environ.get("FLEETENT_NODE_LOOPBACK_URL", "").strip()
+    tui = os.environ.get("FLEETENT_TUI_TOKEN", "").strip()
+    if not (loopback and tui):
+        return
+    access.set_im_identity_resolver(
+        access.AgentIdentityResolver(
+            loopback_url=loopback, tui_token=tui, agent_name=agent_id, tenant_id=tenant_id
+        )
+    )
+    access.set_im_address_resolver(
+        access.AgentAddressResolver(loopback_url=loopback, tui_token=tui, agent_name=agent_id)
+    )
+
 
 async def _start_infra(
     agent: AgentFile, data_dir: Path, *, skills_root: Path | None = None
