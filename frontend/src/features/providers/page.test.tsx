@@ -397,9 +397,10 @@ describe('providers page', () => {
     await user.click(screen.getByRole('button', { name: 'Create model' }))
 
     await waitFor(() => expect(capturedBody).not.toBeNull())
-    expect(capturedBody?.protocol).toBe('openai_image_chat')
-    expect(capturedBody?.base_url).toBe('https://newapi.example/v1')
-    expect(capturedBody?.endpoint).toBeUndefined()
+    const body = capturedBody as unknown as Record<string, unknown>
+    expect(body.protocol).toBe('openai_image_chat')
+    expect(body.base_url).toBe('https://newapi.example/v1')
+    expect(body.endpoint).toBeUndefined()
   })
 
   it('renders the New model dialog in Chinese when the locale is zh', async () => {
