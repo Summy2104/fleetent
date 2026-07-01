@@ -10,6 +10,10 @@
 - [x] [本地] 写测试:standalone(agent 自托管)审批按钮路径不回归(仍能就地 resolve)。(既有 6 个测试覆盖就地 resolve/chat_update/ephemeral/resume,全绿。)
 - [x] [本地] 写测试:点击后 `ack()` 仍先发、prompt 被更新为结果态(防重复点击)。(`test_managed_button_forwards_synthesized_command` 断言 `ack` 先发 + `chat_update(blocks=[])`。)
 
+### ②补丁(真机验收发现:授权用了 Slack id 而非 uuid + 乐观 UI 谎报)
+- [x] [本地] (a) 转发前经 `resolve_identity` 把 clicker 的 Slack id 解析成内部 uuid(与入站一致),合成 msg 用 uuid → agent 授权匹配 requester;解析失败(`IMIdentityResolutionError`)则不转发 + ephemeral 提示。测试 `test_managed_button_resolves_clicker_slack_id_to_uuid` / `..._unresolved_identity_not_forwarded`。
+- [x] [本地] (b) 去掉乐观"已批准":方案A 下授权在 agent 侧异步判定,node 改为中性"⏳ 已提交审批…(移除按钮防重复点)";真结果由 agent 投递(成功→resume 送达;失败→route() unauthorized 回执)。测试 `test_managed_button_ui_does_not_claim_approved_before_resolve`。
+
 ## 收尾
 - [x] [本地] `make test-pr` + `make test-integration-ci` 全绿。
 - [ ] [服务器] 部署 + 真实 Slack 验收(三种按钮均 resolve+resume+送达,无 `state_db not initialized`)。
