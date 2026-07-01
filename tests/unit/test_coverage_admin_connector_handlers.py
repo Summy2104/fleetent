@@ -381,7 +381,7 @@ async def test_connector_admin_mcp_handlers(monkeypatch):
 
     assert (
         connector_admin_api.mcp_doctor_view(authorization="Session token")["checks"][0]["api_key"]
-        == "secret"
+        == "****"
     )
     assert {
         server["id"]

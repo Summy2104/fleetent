@@ -26,6 +26,7 @@ router = APIRouter(prefix="/admin")
 
 IDLE_TIMEOUT_SECONDS = 1800
 _ADMIN_ROLES = {"admin"}
+_SENSITIVE = ("secret", "token", "refresh", "api_key", "password")
 
 
 def _normalized_auth_config(auth_type: str, auth_config: dict[str, Any]) -> dict[str, Any]:
@@ -142,6 +143,33 @@ async def mcp_probe(server_id: str) -> dict[str, Any]:
     return await mcp_runtime.probe_global_server(server_id)
 
 
+def _mask(value: Any) -> Any:
+    """Recursively mask sensitive values (secret/token/refresh/api_key/password).
+
+    Only used for ``mcp_doctor()`` diagnostics, whose check output shape is unconstrained
+    (unlike ``auth_config``, which `mcp_auth_models.py` guarantees holds only env-var
+    references — see `list_mcp_servers`, which intentionally does not mask).
+    """
+    if isinstance(value, dict):
+        out = {}
+        for k, v in value.items():
+            if isinstance(k, str) and any(s in k.lower() for s in _SENSITIVE) and v:
+                out[k] = "****"
+            else:
+                out[k] = _mask(v)
+        return out
+    if isinstance(value, list):
+        return [_mask(v) for v in value]
+    return value
+
+
+def _mask_dict(value: dict[str, Any] | None) -> dict[str, Any]:
+    """Mask a dict-or-None result, returning an empty dict when absent."""
+    if value is None:
+        return {}
+    return _mask(value)
+
+
 def _validate_body[T: BaseModel](model: type[T], body: T | dict[str, Any]) -> T:
     if isinstance(body, BaseModel):
         return body
@@ -180,7 +208,7 @@ def _require_admin(authorization: str | None) -> user_store.User:
 @router.get("/mcp/doctor")
 def mcp_doctor_view(authorization: str | None = Header(None)) -> dict[str, Any]:
     _current_user(authorization)
-    return mcp_doctor()
+    return _mask_dict(mcp_doctor())
 
 
 @router.get("/mcp/servers")
