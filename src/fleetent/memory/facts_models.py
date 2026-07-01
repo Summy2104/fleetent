@@ -45,6 +45,20 @@ class Fact:
     scope: FactScope = "situational"
 
 
+def fact_index_text(fact: Fact) -> str:
+    """Text embedded for semantic retrieval of a fact.
+
+    Prefer the LLM-written ``statement`` (a natural sentence) over the terse
+    ``subject relation object`` triple: the statement carries far more semantic
+    surface, which materially improves paraphrase/associative recall.  The triple
+    remains the storage/reasoning form and is the fallback for pre-statement rows
+    whose ``statement`` IS NULL.
+    """
+    if fact.statement:
+        return fact.statement
+    return f"{fact.subject} {fact.relation} {fact.object}"
+
+
 @dataclass(frozen=True)
 class FactEdge:
     """A directed supersedes relationship between two facts."""

@@ -84,8 +84,11 @@ def create(
     # message embeds a send instruction is the recurring footgun — deliver falls back to the
     # creation channel AND the model self-delivers (mis-routed/duplicate). Steer to an explicit
     # delivery target (notify_target) or `action`. Conservative: all three conditions required.
-    if task_type == "generate" and deliver is None and message and _SEND_IMPERATIVE_RE.search(
-        message
+    if (
+        task_type == "generate"
+        and deliver is None
+        and message
+        and _SEND_IMPERATIVE_RE.search(message)
     ):
         raise ValueError(
             "generate 任务的回复由调度器投递到 deliver/origin 目标，不要在 message 里写"
@@ -186,11 +189,100 @@ def update_run_state(
     )
 
 
+def claim_next_run(task_id: str, *, expected: str | None, new: str) -> bool:
+    """Atomically advance ``next_run_at`` only if it still equals ``expected``.
+
+    Used by the poll engine to claim a due recurring occurrence before executing it: the
+    conditional update makes the claim idempotent, so overlapping ticks (or a concurrent
+    ``run_now``) can never double-fire the same occurrence. Returns True iff this caller won
+    the claim (exactly one row updated).
+    """
+    if expected is None:
+        result = _database().execute(
+            "UPDATE scheduled_tasks SET next_run_at = :new WHERE id = :id AND next_run_at IS NULL",
+            {"id": task_id, "new": new},
+        )
+    else:
+        result = _database().execute(
+            "UPDATE scheduled_tasks SET next_run_at = :new "
+            "WHERE id = :id AND next_run_at = :expected",
+            {"id": task_id, "new": new, "expected": expected},
+        )
+    return result.rowcount == 1
+
+
 def delete(task_id: str) -> bool:
-    result = _database().execute(
-        "DELETE FROM scheduled_tasks WHERE id = :task_id", {"task_id": task_id}
+    with _database().transaction() as conn:
+        # Cascade run history so a deleted task leaves no orphaned rows.
+        conn.execute(
+            "DELETE FROM scheduled_task_runs WHERE task_id = :task_id", {"task_id": task_id}
+        )
+        result = conn.execute(
+            "DELETE FROM scheduled_tasks WHERE id = :task_id", {"task_id": task_id}
+        )
+        return result.rowcount > 0
+
+
+# Default per-task run-history rows retained; the engine passes an explicit value.
+_DEFAULT_RUN_RETENTION = 50
+
+
+def record_run(
+    task_id: str,
+    *,
+    status: str,
+    fired_at: str,
+    kind: str | None = None,
+    agent_error: str | None = None,
+    delivery_error: str | None = None,
+    duration_ms: int | None = None,
+    retention: int = _DEFAULT_RUN_RETENTION,
+) -> None:
+    """Append one run-history row and prune to the newest ``retention`` rows for the task.
+
+    ``status`` is one of ``ok`` / ``error`` / ``missed`` / ``skipped``. ``agent_error`` and
+    ``delivery_error`` are tracked separately (a run can produce output yet fail delivery).
+    """
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with _database().transaction() as conn:
+        conn.execute(
+            "INSERT INTO scheduled_task_runs ("
+            "task_id, fired_at, status, agent_error, delivery_error, duration_ms, kind, created_at"
+            ") VALUES ("
+            ":task_id, :fired_at, :status, :agent_error, :delivery_error, :duration_ms, :kind, "
+            ":created_at)",
+            {
+                "task_id": task_id,
+                "fired_at": fired_at,
+                "status": status,
+                "agent_error": agent_error,
+                "delivery_error": delivery_error,
+                "duration_ms": duration_ms,
+                "kind": kind,
+                "created_at": now,
+            },
+        )
+        if retention > 0:
+            conn.execute(
+                "DELETE FROM scheduled_task_runs WHERE task_id = :task_id AND id NOT IN ("
+                "SELECT id FROM scheduled_task_runs WHERE task_id = :task_id "
+                "ORDER BY id DESC LIMIT :retention)",
+                {"task_id": task_id, "retention": retention},
+            )
+
+
+def list_runs(task_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    """Return the most recent runs for a task, newest first."""
+    rows = (
+        _database()
+        .execute(
+            "SELECT * FROM scheduled_task_runs WHERE task_id = :task_id "
+            "ORDER BY id DESC LIMIT :limit",
+            {"task_id": task_id, "limit": limit},
+        )
+        .fetchall()
     )
-    return result.rowcount > 0
+    return [dict(row) for row in rows]
 
 
 def _decode(row: dict[str, Any]) -> dict[str, Any]:

@@ -216,6 +216,7 @@ async def test_start_uses_default_timezone_when_task_has_none(monkeypatch, isola
             {
                 "id": "job-default-tz",
                 "name": "t",
+                "schedule_kind": "cron",
                 "cron_expr": "0 9 * * *",
                 "timezone": None,
                 "user_id": "u-1",
@@ -223,6 +224,7 @@ async def test_start_uses_default_timezone_when_task_has_none(monkeypatch, isola
                 "message": "hi",
                 "enabled": 1,
                 "source": "dynamic",
+                "next_run_at": None,
             }
         ],
     )
@@ -232,7 +234,9 @@ async def test_start_uses_default_timezone_when_task_has_none(monkeypatch, isola
 
     job = scheduler.get_job("job-default-tz")
     assert job is not None
-    assert str(job.trigger.timezone) == "Asia/Shanghai"
+    # Next fire computed in the deployment default timezone (local wall-clock 09:00).
+    assert str(job.next_run_time.tzinfo) == "Asia/Shanghai"
+    assert job.next_run_time.hour == 9
 
     await scheduler.shutdown()
 
@@ -240,8 +244,9 @@ async def test_start_uses_default_timezone_when_task_has_none(monkeypatch, isola
 # ── schedule kinds: cron / once / interval (agent-owned-scheduled-tasks) ──────
 
 
-async def test_register_once_uses_date_trigger(isolated_schedule_db):
+async def test_register_once_sets_next_run_to_run_at(isolated_schedule_db):
     import fleetent.cron_scheduler as cs
+    import fleetent.schedule_store as store
 
     scheduler = cs.CronScheduler()
     await scheduler.start()
@@ -260,11 +265,12 @@ async def test_register_once_uses_date_trigger(isolated_schedule_db):
     )
     job = scheduler.get_job("once-1")
     assert job is not None
-    assert type(job.trigger).__name__ == "DateTrigger"
+    # once: next_run_at is the fixed run_at (no recurrence).
+    assert job.next_run_time is not None and job.next_run_time.year == 2099
     await scheduler.shutdown()
 
 
-async def test_register_interval_uses_interval_trigger(isolated_schedule_db):
+async def test_register_interval_sets_future_next_run(isolated_schedule_db):
     import fleetent.cron_scheduler as cs
 
     scheduler = cs.CronScheduler()
@@ -282,14 +288,18 @@ async def test_register_interval_uses_interval_trigger(isolated_schedule_db):
             "source": "tool",
         }
     )
+    from datetime import UTC, datetime
+
     job = scheduler.get_job("iv-1")
     assert job is not None
-    assert type(job.trigger).__name__ == "IntervalTrigger"
+    # interval: next fire is now + interval (a future time), persisted for the poll engine.
+    assert job.next_run_time is not None and job.next_run_time > datetime.now(UTC)
     await scheduler.shutdown()
 
 
-async def test_agent_task_job_has_misfire_params(isolated_schedule_db):
+async def test_agent_task_registration_persists_next_run(isolated_schedule_db):
     import fleetent.cron_scheduler as cs
+    import fleetent.schedule_store as store
 
     scheduler = cs.CronScheduler()
     await scheduler.start()
@@ -308,9 +318,8 @@ async def test_agent_task_job_has_misfire_params(isolated_schedule_db):
     )
     job = scheduler.get_job("mp-1")
     assert job is not None
-    assert job.coalesce is True
-    assert job.misfire_grace_time and job.misfire_grace_time > 0
-    assert job.max_instances == 1
+    # The poll engine tracks a persisted next_run_at instead of APScheduler misfire params.
+    assert job.next_run_time is not None
     await scheduler.shutdown()
 
 

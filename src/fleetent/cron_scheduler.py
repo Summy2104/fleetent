@@ -1,15 +1,23 @@
-"""APScheduler-backed cron scheduler for periodic agent runs."""
+"""Durable next_run_at poll scheduler for periodic agent runs.
+
+The engine drives firing from a persisted per-task ``next_run_at`` plus a lightweight
+in-process asyncio tick loop, not from an in-memory trigger registry. On each tick it
+selects due tasks (``next_run_at <= now``), advances a recurring task's ``next_run_at``
+BEFORE executing it (decoupling cadence from run duration; at-most-once), and dispatches
+the run under a bounded-concurrency semaphore. APScheduler's ``CronTrigger`` is reused only
+as pure cron math (see ``compute_next_run``); the scheduling engine itself is the poll loop.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
-from datetime import UTC, datetime, timedelta
-from typing import Any
-
-from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta, tzinfo
+from typing import Any, cast
 
 import fleetent.schedule_store as _store
 from fleetent import outbound
@@ -17,6 +25,12 @@ from fleetent.config import SchedulingSettings
 from fleetent.identity import SYSTEM_PRINCIPAL, Principal
 
 logger = logging.getLogger(__name__)
+
+# Poll-engine defaults (overridable via SchedulingSettings).
+_DEFAULT_TICK_INTERVAL_SECONDS = 10.0
+_DEFAULT_MAX_PARALLEL = 4
+_DEFAULT_HISTORY_RETENTION = 50
+_MAINTENANCE_SPILLOVER_ID = "__maintenance_spillover_cleanup__"
 
 # A fired task whose final reply is this sentinel runs successfully but delivers
 # nothing — for "alert only when something changed" tasks.
@@ -39,12 +53,6 @@ def _is_silent_reply(reply: str | None) -> bool:
     return stripped.splitlines()[0].strip() == _SILENT_SENTINEL
 
 
-# Missed runs after process downtime coalesce into a single fire within this window
-# (APScheduler misfire_grace_time + coalesce); a one-shot past it is skipped, not fired
-# late. max_instances=1 prevents a slow fire from overlapping its next trigger.
-_MISFIRE_GRACE_SECONDS = 3600
-_MAX_INSTANCES = 1
-
 _RELATIVE_RUN_AT = re.compile(r"\+?(\d+)([smhd])")
 _UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
@@ -64,6 +72,67 @@ def _parse_run_at(run_at: str) -> datetime:
     if spec.endswith(("Z", "z")):
         spec = spec[:-1] + "+00:00"
     return datetime.fromisoformat(spec)
+
+
+def _as_tzinfo(tz: str | None) -> tzinfo:
+    """Resolve a timezone name to a tzinfo (UTC fallback), for cron next-fire math."""
+    from zoneinfo import ZoneInfo
+
+    if not tz:
+        return UTC
+    try:
+        return ZoneInfo(tz)
+    except Exception:  # noqa: BLE001 — unknown tz name → safe UTC fallback
+        return UTC
+
+
+def compute_next_run(
+    kind: str,
+    *,
+    cron_expr: str | None = None,
+    interval_seconds: int | None = None,
+    run_at: Any = None,
+    base: datetime | None = None,
+    now: datetime | None = None,
+    tz: str = "UTC",
+) -> datetime | None:
+    """Compute a task's next fire time (engine-internal, no in-memory trigger registry).
+
+    - ``once``: returns the fixed ``run_at`` (parsed if a string); no advancement.
+    - ``interval``: ``base + interval``; if that is already at/behind ``now`` (a stale/slow
+      schedule) it is fast-forwarded in whole periods to the first FUTURE occurrence — at
+      most once for the missed window, never a burst. ``base=None`` → ``now + interval``.
+    - ``cron``: the next fire strictly after ``now`` (APScheduler ``CronTrigger`` is reused
+      purely for the cron math; the scheduler engine itself is the poll loop).
+    """
+    if now is None:
+        now = datetime.now(UTC)
+    if kind == "once":
+        if isinstance(run_at, str):
+            return _parse_run_at(run_at)
+        return cast("datetime | None", run_at)
+    if kind == "interval":
+        if not interval_seconds or int(interval_seconds) <= 0:
+            raise ValueError("interval task requires a positive interval_seconds")
+        step = timedelta(seconds=int(interval_seconds))
+        if base is None:
+            return now + step
+        nxt = base + step
+        if nxt <= now:
+            missed = (now - base) // step
+            nxt = base + step * (missed + 1)
+        return nxt
+    if kind == "cron":
+        if not cron_expr:
+            raise ValueError("cron task requires cron_expr")
+        from apscheduler.triggers.cron import CronTrigger  # type: ignore[import-untyped]
+
+        trigger = CronTrigger.from_crontab(cron_expr, timezone=_as_tzinfo(tz))
+        # get_next_fire_time floors on `previous`, not `now`; seed with max(base, now) so a
+        # stale base (process was down) fast-forwards to the first fire at/after now.
+        prev = now if base is None else max(base, now)
+        return cast("datetime | None", trigger.get_next_fire_time(prev, now))
+    raise ValueError(f"invalid schedule kind: {kind!r} (cron/once/interval)")
 
 
 # Fire-time creator recheck, injection-decoupled from the platform management DB
@@ -163,7 +232,11 @@ def _generate_delivery_statement(task: dict[str, Any]) -> str:
     )
 
 
-async def _fire(task: dict[str, Any], connectors: dict[str, Any] | None = None) -> None:
+async def _fire(
+    task: dict[str, Any],
+    connectors: dict[str, Any] | None = None,
+    history_retention: int = _DEFAULT_HISTORY_RETENTION,
+) -> None:
     """Construct messages, run the agent, and proactively deliver the reply (S3 + delivery).
 
     session_id binding:
@@ -174,13 +247,23 @@ async def _fire(task: dict[str, Any], connectors: dict[str, Any] | None = None) 
     Delivery: the agent's final reply is sent at fire time to the resolved target
     (explicit ``deliver`` or, by default, the creation ``origin``) via the agent's live
     connector for that platform. ``[SILENT]`` suppresses delivery. Best-effort: a
-    delivery failure is recorded on the task, never raised.
+    delivery failure is recorded on the task, never raised. Every fire outcome (including a
+    ``skipped`` occurrence whose principal cannot be verified) is appended to run history so
+    the recurring behavior is auditable and never silently dropped.
     """
     import uuid
 
     from fleetent.session import manager as session_mgr
 
-    # Recheck the archived identity in its own domain; skip when its domain rejects it.
+    started = datetime.now(UTC)
+    now = started.strftime("%Y-%m-%dT%H:%M:%SZ")
+    task_type = task.get("task_type") or "generate"
+
+    def _elapsed_ms() -> int:
+        return int((datetime.now(UTC) - started).total_seconds() * 1000)
+
+    # Recheck the archived identity in its own domain; skip when its domain rejects it. The
+    # skip is recorded (not silently dropped) so a due occurrence is always accounted for.
     principal = _resolve_cron_principal(task)
     if principal is None:
         logger.warning(
@@ -188,16 +271,32 @@ async def _fire(task: dict[str, Any], connectors: dict[str, Any] | None = None) 
             task.get("id"),
             task.get("user_id"),
         )
+        _record_history(
+            task,
+            now,
+            "skipped",
+            agent_error="principal unverified (blocked or missing)",
+            kind=task_type,
+            duration_ms=_elapsed_ms(),
+            retention=history_retention,
+        )
         return
-
-    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    task_type = task.get("task_type") or "generate"
 
     # notify: deterministic — the scheduler sends the frozen copy verbatim, no agent run.
     # Status reflects the delivery outcome (the task intent).
     if task_type == "notify":
         delivery_error = await _deliver(task, task.get("notify_text"), connectors or {})
-        _record_run(task, now, "error" if delivery_error else "ok", delivery_error)
+        status = "error" if delivery_error else "ok"
+        _record_run(task, now, status, delivery_error)
+        _record_history(
+            task,
+            now,
+            status,
+            delivery_error=delivery_error,
+            kind=task_type,
+            duration_ms=_elapsed_ms(),
+            retention=history_retention,
+        )
         return
 
     sid_spec = task.get("session_id")
@@ -225,6 +324,15 @@ async def _fire(task: dict[str, Any], connectors: dict[str, Any] | None = None) 
     except Exception as exc:  # noqa: BLE001 — record the failure, never crash the scheduler
         logger.warning("cron_fire_run_failed task=%s error=%s", task.get("id"), exc)
         _record_run(task, now, "error", str(exc))
+        _record_history(
+            task,
+            now,
+            "error",
+            agent_error=str(exc),
+            kind=task_type,
+            duration_ms=_elapsed_ms(),
+            retention=history_retention,
+        )
         return
 
     # agent_loop.run mutates `messages` in place into the full conversation; persist it
@@ -235,10 +343,23 @@ async def _fire(task: dict[str, Any], connectors: dict[str, Any] | None = None) 
     # broadcast its final reply (it is an operator-facing run report). Status = run outcome.
     if task_type == "action":
         _record_run(task, now, "ok", None)
+        _record_history(
+            task, now, "ok", kind=task_type, duration_ms=_elapsed_ms(), retention=history_retention
+        )
         return
 
     delivery_error = await _deliver(task, reply, connectors or {})
-    _record_run(task, now, "error" if delivery_error else "ok", delivery_error)
+    status = "error" if delivery_error else "ok"
+    _record_run(task, now, status, delivery_error)
+    _record_history(
+        task,
+        now,
+        status,
+        delivery_error=delivery_error,
+        kind=task_type,
+        duration_ms=_elapsed_ms(),
+        retention=history_retention,
+    )
 
 
 async def _deliver(
@@ -315,6 +436,37 @@ def _record_run(task: dict[str, Any], when: str, status: str, error: str | None)
         logger.warning("cron_run_state_writeback_failed task=%s error=%s", task.get("id"), exc)
 
 
+def _record_history(
+    task: dict[str, Any],
+    when: str,
+    status: str,
+    *,
+    agent_error: str | None = None,
+    delivery_error: str | None = None,
+    kind: str | None = None,
+    duration_ms: int | None = None,
+    retention: int = _DEFAULT_HISTORY_RETENTION,
+) -> None:
+    """Append one run-history row (agent vs delivery error separated); never raise.
+
+    Best-effort exactly like ``_record_run``: a history-write failure is logged and does not
+    change the fire outcome or crash the scheduler.
+    """
+    try:
+        _store.record_run(
+            task["id"],
+            status=status,
+            fired_at=when,
+            kind=kind,
+            agent_error=agent_error,
+            delivery_error=delivery_error,
+            duration_ms=duration_ms,
+            retention=retention,
+        )
+    except Exception as exc:  # noqa: BLE001 — history is a side channel, never break a fire
+        logger.warning("cron_run_history_writeback_failed task=%s error=%s", task.get("id"), exc)
+
+
 # Process-wide handle to the running scheduler (one agent per process). Set by
 # start(), cleared by shutdown(); the tool layer mutates tasks through it so the
 # store write and the live job registration cannot drift apart (single owner).
@@ -326,6 +478,33 @@ def current() -> CronScheduler | None:
     return _current
 
 
+@dataclass
+class _JobView:
+    """A registered job's live view: its fire callable and cached next fire time.
+
+    Kept so ``get_job(id)`` reflects registration/next-run without an in-memory trigger
+    engine. ``func`` performs the fire (store-revalidated) for scheduled tasks, or the
+    maintenance callable for internal periodic jobs.
+    """
+
+    func: Callable[[], Awaitable[None]] | Callable[[], Any]
+    next_run_time: datetime | None = None
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+
+
+def _iso(dt: datetime) -> str:
+    return dt.astimezone(UTC).isoformat()
+
+
 class CronScheduler:
     def __init__(
         self,
@@ -333,28 +512,41 @@ class CronScheduler:
         connectors_resolver: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self._settings = settings or SchedulingSettings()
-        self._scheduler = AsyncIOScheduler()
         # Resolved at fire time so a connector that connects after a job is registered
         # (or reconnects) is still reachable; None → no proactive delivery.
         self._connectors_resolver = connectors_resolver
+        self._jobs: dict[str, _JobView] = {}
+        self._running = False
+        self._tick_task: asyncio.Task[None] | None = None
+        self._inflight: set[str] = set()
+        # Internal fixed-interval periodic jobs (maintenance, monitoring): job_id → period.
+        self._periodic_intervals: dict[str, timedelta] = {}
+        self._tick_interval = float(
+            getattr(self._settings, "tick_interval_seconds", _DEFAULT_TICK_INTERVAL_SECONDS)
+            or _DEFAULT_TICK_INTERVAL_SECONDS
+        )
+        self._max_parallel = int(
+            getattr(self._settings, "max_parallel", _DEFAULT_MAX_PARALLEL) or _DEFAULT_MAX_PARALLEL
+        )
+        self._history_retention = int(
+            getattr(self._settings, "history_retention", _DEFAULT_HISTORY_RETENTION)
+            or _DEFAULT_HISTORY_RETENTION
+        )
+        self._sem = asyncio.Semaphore(self._max_parallel)
 
     @property
     def running(self) -> bool:
-        return bool(self._scheduler.running)
+        return self._running
 
-    def get_job(self, job_id: str) -> Any:
-        return self._scheduler.get_job(job_id)
+    def get_job(self, job_id: str) -> _JobView | None:
+        return self._jobs.get(job_id)
 
     async def start(self) -> None:
-        """Load persisted tasks from SQLite and start the scheduler."""
-
+        """Register persisted tasks (backfilling next_run_at) and start the tick loop."""
         if not self._settings.enabled:
             return
-
-        db_jobs = _store.list_tasks()
-
-        for task in db_jobs:
-            # Bulkhead (cron-runat-hardening): a single malformed task (e.g. an unparseable
+        for task in _store.list_tasks():
+            # Bulkhead (cron-runat-hardening): one malformed task (e.g. an unparseable
             # run_at) must never crash agent boot. Log it, disable it so it is not re-loaded
             # next boot, and continue registering the rest.
             try:
@@ -365,50 +557,148 @@ class CronScheduler:
                 if task_id:
                     with suppress(Exception):
                         _store.set_enabled(task_id, False)
-
         self._register_maintenance_jobs()
-        self._scheduler.start()
+        self._running = True
+        self._tick_task = asyncio.create_task(self._run_tick_loop())
         global _current
         _current = self
 
     def _register_maintenance_jobs(self) -> None:
         from fleetent.tools.result_truncation import cleanup_spillover
 
-        self._scheduler.add_job(
-            cleanup_spillover,
-            trigger="cron",
-            hour=3,
-            minute=0,
-            id="__maintenance_spillover_cleanup__",
-            replace_existing=True,
-        )
+        now = datetime.now(UTC)
+        nxt = now.replace(hour=3, minute=0, second=0, microsecond=0)
+        if nxt <= now:
+            nxt += timedelta(days=1)
+        self._jobs[_MAINTENANCE_SPILLOVER_ID] = _JobView(func=cleanup_spillover, next_run_time=nxt)
+        self._periodic_intervals[_MAINTENANCE_SPILLOVER_ID] = timedelta(days=1)
 
     def add_job(self, task: dict[str, Any]) -> None:
         self._register(task)
 
-    def add_interval_job(self, func: Any, seconds: int, job_id: str) -> None:
-        """Register a fixed-interval background job (e.g. monitoring collection)."""
-        self._scheduler.add_job(
-            func,
-            trigger="interval",
-            seconds=seconds,
-            id=job_id,
-            replace_existing=True,
+    def add_interval_job(self, func: Callable[[], Any], seconds: int, job_id: str) -> None:
+        """Register a fixed-interval internal periodic job (e.g. monitoring collection)."""
+        self._jobs[job_id] = _JobView(
+            func=func, next_run_time=datetime.now(UTC) + timedelta(seconds=seconds)
         )
+        self._periodic_intervals[job_id] = timedelta(seconds=seconds)
 
     def remove_job(self, task_id: str) -> None:
-        with suppress(Exception):
-            self._scheduler.remove_job(task_id)
+        self._jobs.pop(task_id, None)
+        self._periodic_intervals.pop(task_id, None)
 
     async def shutdown(self) -> None:
-        import asyncio
-
         global _current
         if _current is self:
             _current = None
-        if self._scheduler.running:
-            self._scheduler.shutdown(wait=False)
-            await asyncio.sleep(0)
+        self._running = False
+        if self._tick_task is not None:
+            self._tick_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._tick_task
+            self._tick_task = None
+
+    # ── poll loop ────────────────────────────────────────────────────────────
+
+    async def _run_tick_loop(self) -> None:
+        while self._running:
+            try:
+                await self._tick()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 — a bad tick must not kill the loop
+                logger.warning("cron_tick_failed error=%s", exc)
+            try:
+                await asyncio.sleep(self._tick_interval)
+            except asyncio.CancelledError:
+                raise
+
+    async def _tick(self, now: datetime | None = None) -> list[asyncio.Task[None]]:
+        """Run one poll iteration: fire all due tasks, advancing recurring ones first.
+
+        Returns the dispatched run tasks (so tests can await them deterministically).
+        """
+        now = now or datetime.now(UTC)
+        dispatched: list[asyncio.Task[None]] = []
+        for task in _store.list_tasks():
+            tid = task["id"]
+            if tid in self._inflight:
+                continue
+            kind = task.get("schedule_kind") or "cron"
+            tz = task.get("timezone") or self._settings.default_timezone
+            nr = task.get("next_run_at")
+            if not nr:
+                # No next_run_at yet (freshly created, legacy row): schedule a future
+                # occurrence; never fire immediately on backfill.
+                with suppress(Exception):
+                    self._register(task)
+                continue
+            nrt = _parse_iso(nr)
+            if nrt is None or nrt > now:
+                continue
+            view = self._jobs.get(tid)
+            if view is None:
+                with suppress(Exception):
+                    self._register(task)
+                view = self._jobs.get(tid)
+                if view is None:
+                    continue
+            if kind == "once":
+                # One-shot is not advanced (completion, not advancement, governs it).
+                dispatched.append(self._dispatch(tid, view))
+                continue
+            nxt = compute_next_run(
+                kind,
+                cron_expr=task.get("cron_expr"),
+                interval_seconds=task.get("interval_seconds"),
+                base=nrt,
+                now=now,
+                tz=tz,
+            )
+            if nxt is None:
+                continue
+            # Advance BEFORE executing, atomically: only the caller that wins the
+            # conditional update fires this occurrence (at-most-once under overlap).
+            if _store.claim_next_run(tid, expected=nr, new=_iso(nxt)):
+                view.next_run_time = nxt
+                dispatched.append(self._dispatch(tid, view))
+        self._run_periodic_due(now)
+        return dispatched
+
+    def _run_periodic_due(self, now: datetime) -> None:
+        for job_id, interval in list(self._periodic_intervals.items()):
+            view = self._jobs.get(job_id)
+            if view is None or view.next_run_time is None or view.next_run_time > now:
+                continue
+            # Re-arm before running (fast-forward whole periods if very stale), so a slow
+            # or downtime-delayed periodic job does not burst.
+            nxt = view.next_run_time + interval
+            while nxt <= now:
+                nxt += interval
+            view.next_run_time = nxt
+            try:
+                result = view.func()
+                if asyncio.iscoroutine(result):
+                    asyncio.create_task(result)
+            except Exception as exc:  # noqa: BLE001 — periodic failure is bulkheaded
+                logger.warning("cron_periodic_failed id=%s error=%s", job_id, exc)
+
+    def _dispatch(self, task_id: str, view: _JobView) -> asyncio.Task[None]:
+        """Fire a due task's run under the concurrency bound, off the tick's critical path."""
+        self._inflight.add(task_id)
+
+        async def _run() -> None:
+            try:
+                async with self._sem:
+                    result = view.func()
+                    if asyncio.iscoroutine(result):
+                        await result
+            except Exception as exc:  # noqa: BLE001 — record via _fire; never crash the loop
+                logger.warning("cron_dispatch_failed task=%s error=%s", task_id, exc)
+            finally:
+                self._inflight.discard(task_id)
+
+        return asyncio.create_task(_run())
 
     # ── Single mutation owner: store write + live job registration in one place ──
 
@@ -452,19 +742,18 @@ class CronScheduler:
         return task
 
     def _backfill_next_run(self, task: dict[str, Any]) -> None:
-        """Persist the registered job's next fire time to ``next_run_at`` and attach a
-        human-readable hint (task timezone + UTC) to ``task`` for the create result.
+        """Attach a human-readable next-fire hint to ``task`` for the create result.
 
-        Best-effort: a failure here (no job yet, paused once-task, ...) never breaks create.
+        The next_run_at itself is computed and persisted by ``_register``; this only builds
+        the echo hint. Best-effort: a failure never breaks create.
         """
         try:
-            job = self._scheduler.get_job(task["id"])
-            nrt = getattr(job, "next_run_time", None) if job is not None else None
+            view = self._jobs.get(task["id"])
+            nrt = view.next_run_time if view is not None else None
             if nrt is None:
                 return
             resolved_tz = task.get("timezone") or self._settings.default_timezone
-            _store.update_run_state(task["id"], next_run_at=nrt.isoformat())
-            task["next_run_at"] = nrt.isoformat()
+            task["next_run_at"] = _iso(nrt)
             local = nrt.strftime("%Y-%m-%d %H:%M")
             utc = nrt.astimezone(UTC).strftime("%Y-%m-%d %H:%M")
             task["next_fire_hint"] = f" 下次触发 {local} ({resolved_tz}) / {utc} UTC"
@@ -494,12 +783,13 @@ class CronScheduler:
         """Mark a fired one-shot done so it never looks alive in the store again.
 
         Only a successful run (last_status == "ok") flips to "completed"; a failed run
-        keeps its error state and stays enabled so boot-time misfire policy governs it.
+        keeps its error state and stays enabled so the recovery policy governs it.
         """
         row = _store.get(task_id)
         if row is None or row.get("last_status") != "ok":
             return
         _store.set_enabled(task_id, False)
+        self.remove_job(task_id)
         with suppress(Exception):
             _store.update_run_state(
                 task_id,
@@ -514,47 +804,46 @@ class CronScheduler:
         if task is None:
             return False
         connectors = self._connectors_resolver() if self._connectors_resolver else None
-        await _fire(task, connectors=connectors)
+        await _fire(task, connectors=connectors, history_retention=self._history_retention)
         return True
 
     def _register(self, task: dict[str, Any]) -> None:
+        task_id = task["id"]
+        tz = task.get("timezone") or self._settings.default_timezone
+        kind = task.get("schedule_kind") or "cron"
+        history_retention = self._history_retention
 
-        async def _task_fire(task_id: str = task["id"]) -> None:
-            # Revalidate against the store at fire time: a row deleted or disabled by
-            # a writer that bypassed the facade must never execute. The fresh row (not
-            # the dict captured at registration) is the execution payload.
-            row = _store.get(task_id)
+        async def _task_fire(tid: str = task_id) -> None:
+            # Revalidate against the store at fire time: a row deleted or disabled by a
+            # writer that bypassed the facade must never execute. The fresh row (not the
+            # dict captured at registration) is the execution payload.
+            row = _store.get(tid)
             if row is None or not row.get("enabled"):
-                logger.warning("cron_fire_skipped task=%s reason=missing_or_disabled", task_id)
-                self.remove_job(task_id)
+                logger.warning("cron_fire_skipped task=%s reason=missing_or_disabled", tid)
+                self.remove_job(tid)
                 return
             connectors = self._connectors_resolver() if self._connectors_resolver else None
-            await _fire(row, connectors=connectors)
+            await _fire(row, connectors=connectors, history_retention=history_retention)
             if (row.get("schedule_kind") or "cron") == "once":
-                self._complete_once(task_id)
+                self._complete_once(tid)
 
-        tz = task.get("timezone") or self._settings.default_timezone
-        common: dict[str, Any] = {
-            "id": task["id"],
-            "timezone": tz,
-            "replace_existing": True,
-            "misfire_grace_time": _MISFIRE_GRACE_SECONDS,
-            "coalesce": True,
-            "max_instances": _MAX_INSTANCES,
-        }
-        kind = task.get("schedule_kind") or "cron"
-        if kind == "once":
-            self._scheduler.add_job(
-                _task_fire, trigger="date", run_date=_parse_run_at(task["run_at"]), **common
+        # Compute + persist next_run_at when the row does not carry one yet (backfill).
+        nr = task.get("next_run_at")
+        nrt = _parse_iso(nr) if nr else None
+        if nrt is None:
+            nrt = compute_next_run(
+                kind,
+                cron_expr=task.get("cron_expr"),
+                interval_seconds=task.get("interval_seconds"),
+                run_at=task.get("run_at"),
+                base=None,
+                now=datetime.now(UTC),
+                tz=tz,
             )
-        elif kind == "interval":
-            self._scheduler.add_job(
-                _task_fire, trigger="interval", seconds=int(task["interval_seconds"]), **common
-            )
-        else:
-            self._scheduler.add_job(
-                _task_fire, trigger="cron", **_parse_cron(task["cron_expr"]), **common
-            )
+            if nrt is not None:
+                with suppress(Exception):
+                    _store.update_run_state(task_id, next_run_at=_iso(nrt))
+        self._jobs[task_id] = _JobView(func=_task_fire, next_run_time=nrt)
 
 
 # ── Module-level facade: the mutation API for callers without an instance handle ──
@@ -633,6 +922,11 @@ def set_task_enabled(task_id: str, enabled: bool) -> bool:
 def list_tasks(include_disabled: bool = False) -> list[dict[str, Any]]:
     """Read-only passthrough for the tool layer."""
     return _store.list_tasks(include_disabled=include_disabled)
+
+
+def list_runs(task_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    """Read-only passthrough of a task's recent run history for the tool layer."""
+    return _store.list_runs(task_id, limit=limit)
 
 
 async def run_task_now(task_id: str) -> bool:
