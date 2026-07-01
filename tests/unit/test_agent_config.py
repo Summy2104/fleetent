@@ -115,6 +115,18 @@ def test_default_embedding_route_matches_kb_service_example() -> None:
     assert embedding_target.params["dimensions"] == embedding["dimensions"]
 
 
+def test_kb_service_example_includes_disabled_rerank_section() -> None:
+    example_path = Path(__file__).resolve().parents[2] / "kb-service.yaml.example"
+    example = yaml.safe_load(example_path.read_text(encoding="utf-8"))
+
+    assert example["rerank"] == {
+        "backend": "disabled",
+        "endpoint": "",
+        "model": "your-reranker-model",
+        "api_key_env": "FLEETENT_KB_RERANK_API_KEY",
+    }
+
+
 # --- sandbox-workspace-scope-split: per-agent image persistence schema ------
 
 

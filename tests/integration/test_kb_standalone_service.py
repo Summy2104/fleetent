@@ -122,6 +122,55 @@ def test_validate_kb_service_boot_requires_embedding_and_connector_secrets(
         validate_kb_service_boot(config)
 
     monkeypatch.setenv("KB_CONFLUENCE_TOKEN", "token-value")
+    monkeypatch.setenv("KB_CONFLUENCE_USERNAME", "bot@example.com")
+    validate_kb_service_boot(config)
+
+
+def test_validate_kb_service_boot_requires_granular_connector_env_credentials(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent.knowledge_base.service_config import (
+        load_kb_service_config,
+        validate_kb_service_boot,
+    )
+
+    path = tmp_path / "kb-service.yaml"
+    doc = _service_doc()
+    doc["connectors"] = [  # type: ignore[index]
+        {
+            "id": "drive-a",
+            "type": "google_drive",
+            "enabled": True,
+            "kb_id": "kb-a",
+            "folder_id": "folder-1",
+            "recursive": True,
+            "access_token_env": "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN",
+            "refresh_token_env": "FLEETENT_GOOGLE_DRIVE_REFRESH_TOKEN",
+            "client_id_env": "FLEETENT_GOOGLE_DRIVE_CLIENT_ID",
+            "client_secret_env": "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET",
+            "token_uri_env": "FLEETENT_GOOGLE_DRIVE_TOKEN_URI",
+        }
+    ]
+    _write_yaml(path, doc)
+    config = load_kb_service_config(path)
+
+    for env_name in (
+        "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN",
+        "FLEETENT_GOOGLE_DRIVE_REFRESH_TOKEN",
+        "FLEETENT_GOOGLE_DRIVE_CLIENT_ID",
+        "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET",
+        "FLEETENT_GOOGLE_DRIVE_TOKEN_URI",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+
+    with pytest.raises(ValueError, match="FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN"):
+        validate_kb_service_boot(config)
+
+    monkeypatch.setenv("FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN", "access-token")
+    monkeypatch.setenv("FLEETENT_GOOGLE_DRIVE_REFRESH_TOKEN", "refresh-token")
+    monkeypatch.setenv("FLEETENT_GOOGLE_DRIVE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("FLEETENT_GOOGLE_DRIVE_TOKEN_URI", "https://oauth.example/token")
     validate_kb_service_boot(config)
 
 
@@ -157,6 +206,82 @@ def test_validate_kb_service_boot_requires_embedding_and_extraction_api_keys(
         validate_kb_service_boot(config)
 
     monkeypatch.setenv("FLEETENT_KB_EXTRACTION_API_KEY", "extract-secret")
+    validate_kb_service_boot(config)
+
+
+def test_kb_service_config_parses_optional_rerank_section() -> None:
+    from fleetent.knowledge_base.service_config import KBServiceConfig
+
+    config = KBServiceConfig.model_validate(
+        {
+            "service": {
+                "tenant_id": "tenant-a",
+                "service_key_ref": "env:FLEETENT_KB_SERVICE_KEY",
+            },
+            "data": {"home": "./data"},
+            "embedding": {
+                "endpoint": "http://embed.example/v1/embeddings",
+                "model": "kb-embed",
+                "dimensions": 384,
+            },
+            "rerank": {
+                "backend": "http",
+                "endpoint": "http://rerank.example/v1/rerank",
+                "model": "bge-reranker",
+                "api_key_env": "FLEETENT_KB_RERANK_API_KEY",
+            },
+        }
+    )
+
+    assert config.rerank.backend == "http"
+    assert config.rerank.endpoint == "http://rerank.example/v1/rerank"
+    assert config.rerank.model == "bge-reranker"
+    assert config.rerank.api_key_env == "FLEETENT_KB_RERANK_API_KEY"
+
+    defaulted = KBServiceConfig.model_validate(
+        {
+            "service": {
+                "tenant_id": "tenant-a",
+                "service_key_ref": "env:FLEETENT_KB_SERVICE_KEY",
+            },
+            "data": {"home": "./data"},
+            "embedding": {
+                "endpoint": "http://embed.example/v1/embeddings",
+                "model": "kb-embed",
+                "dimensions": 384,
+            },
+        }
+    )
+
+    assert defaulted.rerank.backend == "disabled"
+
+
+def test_validate_kb_service_boot_requires_rerank_api_key_when_enabled(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent.knowledge_base.service_config import (
+        load_kb_service_config,
+        validate_kb_service_boot,
+    )
+
+    path = tmp_path / "kb-service.yaml"
+    doc = _service_doc()
+    doc["connectors"] = []  # type: ignore[index]
+    doc["rerank"] = {  # type: ignore[index]
+        "backend": "http",
+        "endpoint": "http://rerank.example/v1/rerank",
+        "model": "bge-reranker",
+        "api_key_env": "FLEETENT_KB_RERANK_API_KEY",
+    }
+    _write_yaml(path, doc)
+
+    config = load_kb_service_config(path)
+
+    monkeypatch.delenv("FLEETENT_KB_RERANK_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="FLEETENT_KB_RERANK_API_KEY"):
+        validate_kb_service_boot(config)
+
+    monkeypatch.setenv("FLEETENT_KB_RERANK_API_KEY", "rerank-secret")
     validate_kb_service_boot(config)
 
 
@@ -716,3 +841,73 @@ async def test_standalone_embedding_runtime_uses_api_key_env_from_config(
     assert vector == [0.1, 0.2, 0.3]
     assert captured is not None
     assert captured.headers["authorization"] == "Bearer embed-secret"
+
+
+def test_configure_process_runtime_sets_rerank_settings_from_config() -> None:
+    from fleetent import agent_config
+    from fleetent.agent_config import AgentFile, default_models
+    from fleetent.knowledge_base import runtime as kb_runtime
+    from fleetent.knowledge_base.service_config import KBServiceConfig
+
+    config = KBServiceConfig.model_validate(
+        {
+            "service": {
+                "tenant_id": "tenant-a",
+                "service_key_ref": "env:FLEETENT_KB_SERVICE_KEY",
+            },
+            "data": {"home": "./data"},
+            "embedding": {
+                "endpoint": "http://embed.example/v1/embeddings",
+                "model": "kb-embed",
+                "dimensions": 3,
+            },
+            "rerank": {
+                "backend": "http",
+                "endpoint": "http://rerank.example/v1/rerank",
+                "model": "bge-reranker",
+                "api_key_env": "FLEETENT_KB_RERANK_API_KEY",
+            },
+        }
+    )
+
+    try:
+        config.configure_process_runtime()
+        rerank_settings = kb_runtime._rerank_settings()
+        assert rerank_settings.backend == "http"
+        assert rerank_settings.endpoint == "http://rerank.example/v1/rerank"
+        assert rerank_settings.model == "bge-reranker"
+        assert rerank_settings.api_key_env == "FLEETENT_KB_RERANK_API_KEY"
+    finally:
+        agent_config.set_default_agent_for_process(
+            AgentFile(name="", version=0, models=default_models())
+        )
+
+
+def test_configure_process_runtime_leaves_rerank_disabled_by_default() -> None:
+    from fleetent import agent_config
+    from fleetent.agent_config import AgentFile, default_models
+    from fleetent.knowledge_base import runtime as kb_runtime
+    from fleetent.knowledge_base.service_config import KBServiceConfig
+
+    config = KBServiceConfig.model_validate(
+        {
+            "service": {
+                "tenant_id": "tenant-a",
+                "service_key_ref": "env:FLEETENT_KB_SERVICE_KEY",
+            },
+            "data": {"home": "./data"},
+            "embedding": {
+                "endpoint": "http://embed.example/v1/embeddings",
+                "model": "kb-embed",
+                "dimensions": 3,
+            },
+        }
+    )
+
+    try:
+        config.configure_process_runtime()
+        assert kb_runtime._rerank_settings().backend == "disabled"
+    finally:
+        agent_config.set_default_agent_for_process(
+            AgentFile(name="", version=0, models=default_models())
+        )
