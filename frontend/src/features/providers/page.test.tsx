@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AuthProvider } from '@/app/auth'
 import { AppQueryProvider } from '@/app/query-client'
+import { ThemeProvider } from '@/app/theme'
+import { Toaster } from '@/components/ui/sonner'
 import { ProvidersPage } from '@/features/providers/page'
 import { I18nProvider } from '@/i18n'
 import i18n from '@/i18n/config'
@@ -42,7 +44,10 @@ function renderPage(): void {
     <AuthProvider baseUrl={API_BASE_URL} initialToken="session-token">
       <AppQueryProvider>
         <I18nProvider>
-          <ProvidersPage />
+          <ThemeProvider>
+            <ProvidersPage />
+            <Toaster />
+          </ThemeProvider>
         </I18nProvider>
       </AppQueryProvider>
     </AuthProvider>
@@ -211,6 +216,63 @@ describe('providers page', () => {
 
     await user.click(card.getByRole('button', { name: 'Test alpha-chat connectivity' }))
     expect(await screen.findByText('Reachable in 42ms using gpt-5')).toBeInTheDocument()
+    // a clean success still gets the generic "Done" toast
+    expect(await screen.findByText('Done')).toBeInTheDocument()
+  })
+
+  it('surfaces a connectivity failure carried in a 200 response as an error, not a "Done" toast', async () => {
+    const user = userEvent.setup({ delay: null })
+    server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () =>
+        HttpResponse.json({ email: 'admin@fleetent.test', id: 'admin-1', role: 'admin' })
+      ),
+      http.get(`${API_BASE_URL}/admin/providers`, () =>
+        HttpResponse.json([
+          {
+            api_key: 'alph…9999',
+            api_key_env: 'FLEETENT_MODEL_ALPHA_API_KEY',
+            api_key_set: true,
+            base_url: 'https://alpha.initial',
+            description: null,
+            id: 'alpha',
+            model_count: 1,
+            provider: 'openai',
+          },
+        ])
+      ),
+      http.get(`${API_BASE_URL}/admin/models`, () =>
+        HttpResponse.json([
+          {
+            base_url: 'https://alpha.initial',
+            description: null,
+            endpoint: null,
+            id: 'alpha-chat',
+            input_price_per_1k: null,
+            max_tokens: null,
+            model_name: 'gpt-5',
+            output_price_per_1k: null,
+            params: null,
+            protocol: 'openai_chat',
+            provider_id: 'alpha',
+          },
+        ])
+      ),
+      // HTTP 200, but the payload describes a logical failure.
+      http.post(`${API_BASE_URL}/admin/models/alpha-chat/connectivity-test`, () =>
+        HttpResponse.json({ reachable: false, error: 'API error: Connection error.' })
+      )
+    )
+
+    renderPage()
+    await screen.findByText('alpha')
+    await user.click(screen.getByRole('button', { name: 'Test alpha-chat connectivity' }))
+
+    // error toast with the backend message — not the generic success toast
+    expect(await screen.findAllByText('API error: Connection error.')).not.toHaveLength(0)
+    expect(screen.getByText('Action failed')).toBeInTheDocument()
+    expect(screen.queryByText('Done')).not.toBeInTheDocument()
+    // no misleading green "Reachable" line
+    expect(screen.queryByText(/Reachable in/)).not.toBeInTheDocument()
   })
 
   it('creating an embedding model shows Endpoint instead of Base URL and omits base_url from the payload', async () => {
@@ -276,6 +338,69 @@ describe('providers page', () => {
     expect(captured.body?.endpoint).toBe('http://localhost:11434/v1/embeddings')
     expect(captured.body?.base_url).toBeUndefined()
   })
+
+  it('creating an openai_image_chat model shows Base URL instead of Endpoint and sends base_url', async () => {
+    const user = userEvent.setup({ delay: null });
+    let capturedBody: Record<string, unknown> | null = null;
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () =>
+        HttpResponse.json({ email: 'admin@fleetent.test', id: 'admin-1', role: 'admin' })
+      ),
+      http.get(`${API_BASE_URL}/admin/providers`, () =>
+        HttpResponse.json([
+          {
+            api_key: null,
+            api_key_env: null,
+            api_key_set: false,
+            base_url: null,
+            description: null,
+            id: 'alpha',
+            model_count: 0,
+            provider: null,
+          },
+        ])
+      ),
+      http.get(`${API_BASE_URL}/admin/models`, () => HttpResponse.json([])),
+      http.post(`${API_BASE_URL}/admin/models`, async ({ request }) => {
+        capturedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(
+          {
+            base_url: capturedBody.base_url ?? null,
+            description: null,
+            endpoint: capturedBody.endpoint ?? null,
+            id: capturedBody.id,
+            input_price_per_1k: null,
+            max_tokens: null,
+            model_name: capturedBody.model_name,
+            output_price_per_1k: null,
+            params: null,
+            protocol: capturedBody.protocol,
+            provider_id: capturedBody.provider_id,
+          },
+          { status: 201 }
+        );
+      })
+    );
+
+    renderPage();
+    expect(await screen.findByText('alpha')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'New model' }));
+    await user.type(screen.getByLabelText('Model ID'), 'gemini-image');
+    await user.type(screen.getByLabelText('Model name'), 'gemini-3-pro-image-preview');
+    await user.click(screen.getByRole('combobox', { name: 'Protocol' }));
+    await user.click(await screen.findByRole('option', { name: 'openai_image_chat' }));
+
+    expect(screen.queryByLabelText('Endpoint')).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText('Base URL'), 'https://newapi.example/v1');
+    await user.click(screen.getByRole('button', { name: 'Create model' }));
+
+    await waitFor(() => expect(capturedBody).not.toBeNull());
+    expect(capturedBody?.protocol).toBe('openai_image_chat');
+    expect(capturedBody?.base_url).toBe('https://newapi.example/v1');
+    expect(capturedBody?.endpoint).toBeUndefined();
+  });
 
   it('renders the New model dialog in Chinese when the locale is zh', async () => {
     // i18n is an i18next singleton whose language is detected once at import, so switching

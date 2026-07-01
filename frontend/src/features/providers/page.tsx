@@ -308,10 +308,18 @@ function ProviderCard({
         </div>
         {provider.description ? <p className="text-sm">{provider.description}</p> : null}
         {connectivity.data ? (
-          <p className="text-sm text-success">
-            Reachable in {connectivity.data.latency_ms ?? '?'}ms using{' '}
-            {connectivity.data.model ?? models[0]?.model_name}
-          </p>
+          connectivity.data.reachable ? (
+            <p className="text-sm text-success">
+              {t('providers.connectivityReachable', {
+                latency: connectivity.data.latency_ms ?? '?',
+                model: connectivity.data.model ?? models[0]?.model_name ?? '',
+              })}
+            </p>
+          ) : (
+            <p className="text-sm text-destructive">
+              {connectivity.data.error ?? connectivity.data.details ?? t('providers.connectivityFailed')}
+            </p>
+          )
         ) : null}
         <div className="space-y-2">
           {models.map((model) => (

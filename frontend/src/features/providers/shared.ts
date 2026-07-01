@@ -23,8 +23,14 @@ export type ModelFormState = {
 }
 
 // Mirrors the backend's `_ENDPOINT_PROTOCOLS`: these protocols require `endpoint` and forbid
-// `base_url`; every other protocol (openai_chat) requires `base_url`.
-export const MODEL_PROTOCOLS = ['openai_chat', 'http_embedding', 'http_rerank', 'openai_image_generation'] as const
+// `base_url`; every other protocol (openai_chat, openai_image_chat) requires `base_url`.
+export const MODEL_PROTOCOLS = [
+  'openai_chat',
+  'http_embedding',
+  'http_rerank',
+  'openai_image_generation',
+  'openai_image_chat',
+] as const
 export const ENDPOINT_PROTOCOLS = new Set<string>(['http_embedding', 'http_rerank', 'openai_image_generation'])
 
 export function emptyProviderForm(): ProviderFormState {

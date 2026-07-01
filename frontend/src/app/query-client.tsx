@@ -2,6 +2,7 @@ import { type ReactNode, useState } from 'react'
 import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import { ApiError, describeApiError } from '@/lib/api-client'
+import { extractPayloadError } from '@/lib/mutation-feedback'
 import { toast } from '@/lib/toast'
 
 export function AppQueryProvider({ children }: { children: ReactNode }): JSX.Element {
@@ -27,8 +28,16 @@ export function AppQueryProvider({ children }: { children: ReactNode }): JSX.Ele
             }
             toast.error('Action failed', describeApiError(error))
           },
-          onSuccess: (_data, _vars, _ctx, mutation) => {
+          onSuccess: (data, _vars, _ctx, mutation) => {
             if (mutation.meta?.silent) {
+              return
+            }
+            // A 2xx response can still carry a logical error (connectivity / test
+            // endpoints return HTTP 200 with an `error` field): surface it as a
+            // failure rather than a bogus success toast.
+            const payloadError = extractPayloadError(data)
+            if (payloadError) {
+              toast.error('Action failed', payloadError)
               return
             }
             toast.success('Done')
