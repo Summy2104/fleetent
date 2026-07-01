@@ -541,10 +541,11 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
 
         wire_managed_oauth(_loopback_url, agent_id, _tui_token, _mcp_client.get_registered_server)
 
-    # agent-hosted-im: managed agents self-host their IM connection and resolve identities
-    # in-process via the node loopback (agent uses its own TUI token; node holds the service
-    # key). Standalone leaves these unset → native-id passthrough / empty address lookup.
-    _wire_managed_im_resolvers(agent_id, tenant_id)
+    # agent-hosted-im (scaffolding): _wire_managed_im_resolvers is defined below and unit-tested,
+    # but NOT called here yet — it activates only when agents self-host their IM connection
+    # (the full cutover). Wiring it now would be a no-op under the current node-hosted inbound
+    # path (the agent receives an already-resolved user_id), so it is left dormant to keep this
+    # increment non-breaking.
 
 
 def _wire_managed_im_resolvers(agent_id: str, tenant_id: str) -> None:

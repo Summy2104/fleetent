@@ -1,3 +1,5 @@
+> **本 PR 实施范围（phase 1，非破坏增量）**：Group 1（单一 managed 信号，已从根上修复 AAA-8208/8253/8262-交付）+ Group 2（node loopback 身份端点，休眠）+ Group 3.1-3.3（agent 侧 resolver 类与 seam，休眠；`_wire_managed_im_resolvers` 已定义并单测，但**未在 boot 接线**，避免改动现管路行为）。Group 4-8（去 `--no-im` 激活自持、移除 node IM 数据面 / `/im/route` / 队列 / ManagedOutboundConnector、directed-reach 迁移、契约测试）为**完整 cutover 的后续 phase**，因其为高破坏面大改、无法在单次自动跑安全做到全绿，故未纳入本 PR。
+
 ## 1. 硬化：单一 managed 信号 + fail-fast
 
 - [x] 1.1 写测试：`runtime_placement.is_managed()` 仅依据 `FLEETENT_NODE_LOOPBACK_URL` 是否存在判定；三件套（NODE_ID/PLATFORM_URL/SERVICE_KEY）存在但无 loopback → 非 managed
@@ -15,7 +17,7 @@
 - [x] 3.1 写测试：`AgentIdentityResolver(owner, platform, platform_user_id)` 经 loopback（TUI token）返回 `user_id`；`AgentAddressResolver(user_id)` 返回地址列表
 - [x] 3.2 实现：`im_gateway/access.py` 新增 `AgentIdentityResolver`/`AgentAddressResolver` + `set_im_address_resolver` seam（与既有 `set_im_identity_resolver` 并列）
 - [x] 3.3 写测试：`agent_app.boot` 在 managed（有 loopback）注入两个 resolver；standalone（无 loopback）不注入 → 身份解析 passthrough
-- [x] 3.4 实现：boot managed 分支接线两个 resolver（紧邻既有 managed-oauth 接线）
+- [ ] 3.4 实现：boot managed 分支接线两个 resolver（紧邻既有 managed-oauth 接线）
 
 ## 4. agent 自持 supervisor（managed）
 
