@@ -8,7 +8,6 @@ import { SimpleSelect } from '@/components/base/simple-select'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { MultiSelect, type MultiSelectOption } from '@/components/ui/multi-select'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
@@ -22,13 +21,10 @@ import {
   useAgentDetailQuery,
   useAgentGroupsQuery,
   useAgentKbsQuery,
-  useAgentMcpQuery,
   useAgentRequiredEnvQuery,
   useAgentSecretsQuery,
-  useAgentSkillsQuery,
   useAgentUsersQuery,
   useBindAgentKbMutation,
-  useBindAgentMcpMutation,
   useBindAgentUserMutation,
   useDeleteAgentSecretMutation,
   useDeleteAgentSecretValueMutation,
@@ -37,13 +33,12 @@ import {
   useRemoveAgentImGroupMutation,
   useSetAgentImCapabilitiesMutation,
   useSetAgentSecretValueMutation,
-  useSetAgentSkillMutation,
   useUnbindAgentKbMutation,
-  useUnbindAgentMcpMutation,
   useUnbindAgentUserMutation,
   useUpdateAgentMutation,
 } from '@/features/agents/api'
-import { useMcpServersQuery } from '@/features/connectors/api'
+import { McpServersTab } from '@/features/agents/mcp-servers-tab'
+import { SkillsTab } from '@/features/agents/skills-tab'
 import { useKbsQuery } from '@/features/kb/api'
 import { useModelsQuery, useProvidersQuery } from '@/features/providers/api'
 import { useUsersQuery } from '@/features/users/api'
@@ -363,33 +358,6 @@ function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boo
   )
 }
 
-function McpServersTab({ agentName, canWrite }: { agentName: string; canWrite: boolean }): JSX.Element {
-  const t = useT()
-  const mcpBindings = useAgentMcpQuery(agentName)
-  const allServers = useMcpServersQuery()
-  const bindMcp = useBindAgentMcpMutation(agentName)
-  const unbindMcp = useUnbindAgentMcpMutation(agentName)
-
-  const serverOptions = useMemo<BindOption[]>(
-    () => (allServers.data ?? []).map((server) => ({ value: server.id, label: server.id })),
-    [allServers.data]
-  )
-
-  return (
-    <BindSelectEditor
-      canWrite={canWrite}
-      emptyLabel={t('agents.noMcpServers')}
-      items={mcpBindings.data ?? []}
-      loading={allServers.isLoading}
-      onBind={(value) => void bindMcp.mutateAsync(value)}
-      onUnbind={(value) => void unbindMcp.mutateAsync(value)}
-      options={serverOptions}
-      placeholder={t('agents.selectMcpServer')}
-      title={t('agents.mcpServers')}
-    />
-  )
-}
-
 function KnowledgeBasesTab({ agentName, canWrite }: { agentName: string; canWrite: boolean }): JSX.Element {
   const t = useT()
   const kbs = useAgentKbsQuery(agentName)
@@ -417,64 +385,6 @@ function KnowledgeBasesTab({ agentName, canWrite }: { agentName: string; canWrit
       placeholder={t('agents.selectKnowledgeBase')}
       title={t('agents.knowledgeBases')}
     />
-  )
-}
-
-function SkillsTab({ agentName, canWrite }: { agentName: string; canWrite: boolean }): JSX.Element {
-  const t = useT()
-  const skills = useAgentSkillsQuery(agentName)
-  const setSkill = useSetAgentSkillMutation(agentName)
-
-  const options = useMemo<MultiSelectOption[]>(
-    () => (skills.data ?? []).map((binding) => ({ value: binding.skill_name, label: binding.skill_name })),
-    [skills.data]
-  )
-  const selected = useMemo(
-    () => (skills.data ?? []).filter((binding) => binding.enabled).map((binding) => binding.skill_name),
-    [skills.data]
-  )
-
-  if (skills.data && skills.data.length === 0) {
-    return <EmptyState label={t('agents.noSkillsAvailable')} />
-  }
-
-  if (!canWrite) {
-    return (
-      <section className="space-y-3">
-        <TabHeading>{t('agents.skillsTitle')}</TabHeading>
-        {selected.length === 0 ? (
-          <EmptyState label={t('agents.noSkillsBound')} />
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {selected.map((name) => (
-              <span
-                className="inline-flex items-center rounded-full border border-border bg-secondary/60 px-3 py-1 text-sm"
-                key={name}
-              >
-                {name}
-              </span>
-            ))}
-          </div>
-        )}
-      </section>
-    )
-  }
-
-  return (
-    <section className="space-y-3">
-      <TabHeading>{t('agents.skillsTitle')}</TabHeading>
-      <MultiSelect
-        className="max-w-xl"
-        noMatchLabel={t('agents.noSkillsMatch')}
-        onToggle={(value, enabled) => void setSkill.mutateAsync({ skill_name: value, enabled })}
-        options={options}
-        placeholder={t('agents.selectSkills')}
-        removeLabel={(name) => t('agents.remove', { name })}
-        searchPlaceholder={t('agents.searchSkills')}
-        selected={selected}
-        triggerLabel={t('agents.skillsTitle')}
-      />
-    </section>
   )
 }
 
@@ -889,8 +799,8 @@ export function AgentConfigurePage(): JSX.Element {
         <TabsList className="flex w-full flex-wrap justify-start">
           <TabsTrigger value="overview">{t('agents.tabOverview')}</TabsTrigger>
           <TabsTrigger value="mcp">{t('agents.mcpServers')}</TabsTrigger>
+          <TabsTrigger value="skills">{t('agents.skillsTitle')}</TabsTrigger>
           <TabsTrigger value="kb">{t('agents.knowledgeBases')}</TabsTrigger>
-          <TabsTrigger value="skills">{t('agents.tabSkills')}</TabsTrigger>
           <TabsTrigger value="secrets">{t('agents.secrets')}</TabsTrigger>
           <TabsTrigger value="deploy">{t('agents.tabDeploy')}</TabsTrigger>
           <TabsTrigger value="im">{t('agents.tabImCapabilities')}</TabsTrigger>
@@ -902,11 +812,11 @@ export function AgentConfigurePage(): JSX.Element {
         <TabsContent value="mcp">
           <McpServersTab agentName={agentName} canWrite={canWrite} />
         </TabsContent>
-        <TabsContent value="kb">
-          <KnowledgeBasesTab agentName={agentName} canWrite={canWrite} />
-        </TabsContent>
         <TabsContent value="skills">
           <SkillsTab agentName={agentName} canWrite={canWrite} />
+        </TabsContent>
+        <TabsContent value="kb">
+          <KnowledgeBasesTab agentName={agentName} canWrite={canWrite} />
         </TabsContent>
         <TabsContent value="secrets">
           <SecretsTab agentName={agentName} canWrite={canWrite} />

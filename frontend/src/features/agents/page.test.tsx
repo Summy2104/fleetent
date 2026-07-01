@@ -615,23 +615,24 @@ describe('agent configure page bindings', () => {
     expect(screen.queryByText('adhoc')).not.toBeInTheDocument()
     expect(screen.queryByText('Version History')).not.toBeInTheDocument()
 
-    // Skills tab: enable incident-bridge from the searchable multi-select.
+    // Skills tab: each row a trailing toggle; incident-bridge starts disabled → toggle it on.
     await user.click(screen.getByRole('tab', { name: 'Skills' }))
     expect(await screen.findByText('crm-ops')).toBeInTheDocument()
-    await user.click(screen.getByRole('combobox', { name: 'Skills' }))
-    await user.click(await screen.findByRole('option', { name: 'incident-bridge' }))
+    await user.click(screen.getByRole('switch', { name: 'Enable incident-bridge' }))
     await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'incident-bridge' })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByRole('switch', { name: 'Disable incident-bridge' })).toBeInTheDocument()
     })
 
-    // MCP Servers tab: bind github via the select, then unbind filesystem chip.
+    // MCP Servers tab: bind github (unbound), then unbind filesystem (bound).
     await user.click(screen.getByRole('tab', { name: 'MCP Servers' }))
     expect(await screen.findByText('filesystem')).toBeInTheDocument()
-    await selectOption(user, screen.getByRole('combobox'), 'github')
-    expect(await screen.findByText('github')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Remove filesystem' }))
+    await user.click(screen.getByRole('switch', { name: 'Bind github' }))
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: 'Remove filesystem' })).not.toBeInTheDocument()
+      expect(screen.getByRole('switch', { name: 'Unbind github' })).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole('switch', { name: 'Unbind filesystem' }))
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Bind filesystem' })).toBeInTheDocument()
     })
 
     // Knowledge Bases tab: bind sales, unbind support.
@@ -748,16 +749,15 @@ describe('agent configure page bindings', () => {
     renderAgentsRoute('/agents/alpha/configure')
     expect(await screen.findByRole('heading', { name: 'Configure · alpha' })).toBeInTheDocument()
 
-    // MCP tab: read-only — chip shows, but no add-select and no remove buttons.
+    // MCP Servers tab: read-only — servers show, but every toggle is disabled.
     await user.click(screen.getByRole('tab', { name: 'MCP Servers' }))
     expect(await screen.findByText('filesystem')).toBeInTheDocument()
-    expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Remove / })).not.toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: 'Unbind filesystem' })).toHaveAttribute('aria-disabled', 'true')
 
-    // Skills tab: the editor is hidden; bound skills show as read-only chips.
+    // Skills tab: read-only — skills show, but every toggle is disabled.
     await user.click(screen.getByRole('tab', { name: 'Skills' }))
     expect(await screen.findByText('crm-ops')).toBeInTheDocument()
-    expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: 'Disable crm-ops' })).toHaveAttribute('aria-disabled', 'true')
 
     // Secrets tab: no set form, no clear buttons.
     await user.click(screen.getByRole('tab', { name: 'Secrets' }))
