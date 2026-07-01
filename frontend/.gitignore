@@ -1,1 +1,7 @@
 docs
+
+# Local OpenAPI type oracle (personal, regenerate via `pnpm gen:api`)
+.openapi/
+
+# Personal local Claude Code settings
+.claude/settings.local.json
