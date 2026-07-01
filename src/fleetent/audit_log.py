@@ -57,13 +57,15 @@ def search_audit(
         ("target_type", target_type),
         ("target_id", target_id),
     ):
-        if value is not None:
+        # Blank values (e.g. the frontend sending `actor=`) mean "no filter", not an
+        # exact match on the empty string — treat them the same as an absent param.
+        if value:
             clauses.append(f"{column} = :{column}")
             params[column] = value
-    if since is not None:
+    if since:
         clauses.append("created_at >= :since")
         params["since"] = since
-    if until is not None:
+    if until:
         clauses.append("created_at <= :until")
         params["until"] = until
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
