@@ -93,9 +93,7 @@ def mark_sent(queue_id: str, *, sent_at: str | None = None) -> None:
 def mark_sent_with_db(db: SQLiteDatabase, queue_id: str, *, sent_at: str | None = None) -> None:
     """Mark a queued outbound row as sent on an explicit writable DB handle."""
     db.execute(
-        "UPDATE im_outbound_queue "
-        "SET status = 'sent', sent_at = :sent_at "
-        "WHERE id = :id",
+        "UPDATE im_outbound_queue SET status = 'sent', sent_at = :sent_at WHERE id = :id",
         {"id": queue_id, "sent_at": sent_at or datetime.now(UTC).isoformat()},
     )
 
@@ -108,8 +106,21 @@ def mark_failed(queue_id: str) -> None:
 def mark_failed_with_db(db: SQLiteDatabase, queue_id: str) -> None:
     """Increment attempts and keep the row pending for retry on an explicit DB handle."""
     db.execute(
-        "UPDATE im_outbound_queue "
-        "SET attempts = attempts + 1, status = 'pending' "
-        "WHERE id = :id",
+        "UPDATE im_outbound_queue SET attempts = attempts + 1, status = 'pending' WHERE id = :id",
+        {"id": queue_id},
+    )
+
+
+def mark_dead_with_db(db: SQLiteDatabase, queue_id: str) -> None:
+    """Terminally fail a row (``status='failed'``) so the drain never retries it.
+
+    Unlike ``mark_failed_with_db`` (which keeps the row ``pending`` for retry), this is for
+    permanent delivery errors (user_not_found / channel_not_found / not_in_channel): a retry
+    can never succeed, so leaving it pending only burns a delivery attempt every interval
+    forever (AAA-8204). ``list_pending_with_db`` filters on ``status='pending'``, so a
+    ``failed`` row is excluded from future drains.
+    """
+    db.execute(
+        "UPDATE im_outbound_queue SET attempts = attempts + 1, status = 'failed' WHERE id = :id",
         {"id": queue_id},
     )

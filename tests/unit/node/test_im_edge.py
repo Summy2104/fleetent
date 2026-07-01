@@ -290,3 +290,28 @@ async def test_node_im_edge_host_intercepts_link_command_before_forwarding(tmp_p
     assert replies == ["Linked telegram account to your web identity."]
     assert len(requests) == 1
     assert requests[0].url.path == "/nodes/node-a/link-confirm"
+
+
+# ---------------------------------------------------------------------------
+# node robustness — permanent vs transient outbound delivery errors (AAA-8204)
+# ---------------------------------------------------------------------------
+
+
+def test_is_permanent_delivery_error_classifies_known_permanents() -> None:
+    from fleetent.node.im_edge import _is_permanent_delivery_error
+
+    for err in (
+        "The request to the Slack API failed: user_not_found",
+        "channel_not_found",
+        "not_in_channel",
+        "is_archived",
+    ):
+        assert _is_permanent_delivery_error(err) is True, err
+
+
+def test_is_permanent_delivery_error_treats_unknown_as_transient() -> None:
+    from fleetent.node.im_edge import _is_permanent_delivery_error
+
+    # Network / rate-limit / unknown → retry (not permanent).
+    for err in ("boom", "ratelimited", "Server disconnected", "", None):
+        assert _is_permanent_delivery_error(err) is False, err

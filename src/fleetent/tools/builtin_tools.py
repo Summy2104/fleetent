@@ -1152,10 +1152,13 @@ async def send_im_message(
     Use this for proactive outreach **beyond the current conversation**: notifying or messaging
     a different user, or posting to a different channel. To reply to the person you are talking
     with, do NOT use this tool — reply with plain text, or use `send_file` for a file (both land
-    in the current conversation automatically). `target` is the platform-native id (Slack
-    `U…`/`C…`, Telegram chat id); `target_type` is "user" for a DM (default) or "channel" for a
-    channel post. `platform` defaults to the current conversation's platform. `files` is an
-    optional list of workspace-relative or `/exchange/<server_id>/...` paths to attach.
+    in the current conversation automatically). `target_type` is "user" for a DM (default) or
+    "channel" for a channel post. With `target_type="user"`, `target` MUST be a user id (Slack
+    `U…`, Telegram chat id) — NOT a DM channel id: Slack's `users_search` returns both a
+    `UserID` (`U…`) and a `DMChannelID` (`D…`); pass the `U…`. With `target_type="channel"`,
+    `target` is the channel id (Slack `C…`/`G…`). `platform` defaults to the current
+    conversation's platform. `files` is an optional list of workspace-relative or
+    `/exchange/<server_id>/...` paths to attach.
     Outreach to a third party is approval-gated, and the approval authorizes cross-scope
     artifacts; a send to the current conversation sender from within a channel is delivered to
     that channel thread (not a private DM).

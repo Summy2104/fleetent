@@ -2,6 +2,8 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 import fleetent.im_gateway.slack as slack
 from fleetent.im_gateway.access import resolve_identity
 
@@ -260,3 +262,72 @@ async def test_telegram_handler_passes_agent_name_as_owner_id(monkeypatch):
 
     assert calls == [("telegram", "424242", "support")]
     assert routed["msg"].user_id == "mapped:support:424242"
+
+
+# ── AAA-8204 ①: reject non-real IM identities instead of provisioning a ghost user ──
+
+
+def test_resolve_identity_rejects_unknown_and_empty_passthrough():
+    """A broken Slack assistant-thread context yields no user; resolve_identity must reject
+    empty / 'unknown' rather than return it (which would seed a slack:unknown ghost user)."""
+    from fleetent.im_gateway.access import IMIdentityResolutionError, resolve_identity
+
+    for bad in ("unknown", "UNKNOWN", "", "   "):
+        with pytest.raises(IMIdentityResolutionError):
+            resolve_identity("slack", bad)
+
+
+def test_resolve_identity_rejects_unknown_before_provisioning():
+    """The reject happens BEFORE the injected resolver, so no ghost user is ever created;
+    a real id still provisions normally."""
+    from fleetent.im_gateway import access
+    from fleetent.im_gateway.access import IMIdentityResolutionError
+
+    calls: list[tuple[str, str, str]] = []
+    access.set_im_identity_resolver(
+        lambda owner, platform, puid: calls.append((owner, platform, puid)) or "provisioned"
+    )
+    try:
+        with pytest.raises(IMIdentityResolutionError):
+            access.resolve_identity("slack", "unknown", "support")
+        assert calls == []  # provisioning resolver never reached for a non-real id
+        # A real id is unaffected — first-time provisioning still works.
+        assert access.resolve_identity("slack", "U_real", "support") == "provisioned"
+        assert calls == [("support", "slack", "U_real")]
+    finally:
+        access.set_im_identity_resolver(None)
+
+
+async def test_assistant_route_discards_event_without_user(monkeypatch):
+    """AAA-8204 ①: an assistant event whose context is broken (no payload user, context
+    user_id None) must be discarded — not turned into a fabricated 'unknown' identity that
+    provisions a ghost user and then gets blocked by the access gate. route() is not called."""
+    import fleetent.im_gateway.slack as slack_mod
+
+    routed: dict = {}
+
+    async def _route(msg):
+        routed["msg"] = msg
+
+    async def _noop(*a, **k):
+        return None
+
+    monkeypatch.setattr("fleetent.im_gateway.normalizer.route", _route)
+    monkeypatch.setattr(slack_mod, "_download_attachments", AsyncMock(return_value=[]))
+
+    class _Context:
+        channel_id = "D1"
+        thread_ts = None
+        user_id = None  # broken assistant-thread context → no user
+
+    await slack_mod._route_assistant_message(
+        payload={"text": "hi", "ts": "171.5"},  # no "user"
+        context=_Context(),
+        set_status=_noop,
+        say=_noop,
+        client=MagicMock(),
+        agent_name="support",
+        bot_token="xoxb-test",
+    )
+
+    assert "msg" not in routed  # discarded (no dispatch, no ghost user)

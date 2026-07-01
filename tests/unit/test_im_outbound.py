@@ -38,6 +38,36 @@ async def test_send_to_slack_returns_false_on_failure() -> None:
     assert result.ok is False
 
 
+async def test_send_to_slack_dm_channel_id_posts_directly() -> None:
+    """AAA-8204 ⑦: users_search returns a DMChannelID (D…) alongside the UserID; an agent that
+    fills the D-id into a target_type=user send must still deliver. A channel-shaped id is
+    already a conversation → post directly, not conversations.open(users=[D…]) → user_not_found."""
+    from fleetent.im_gateway.outbound import send_to
+
+    client = AsyncMock()
+    client.chat_postMessage = AsyncMock(return_value={"ok": True})
+
+    result = await send_to("slack", client, "D0B4VQKHFEU", "hi", target_type="user")
+
+    assert result.ok is True
+    client.conversations_open.assert_not_called()
+    client.chat_postMessage.assert_called_once_with(channel="D0B4VQKHFEU", text="hi")
+
+
+async def test_send_to_slack_public_channel_id_posts_directly() -> None:
+    """A C…/G… channel-shaped target posts directly regardless of target_type."""
+    from fleetent.im_gateway.outbound import send_to
+
+    client = AsyncMock()
+    client.chat_postMessage = AsyncMock(return_value={"ok": True})
+
+    result = await send_to("slack", client, "C12345678", "hi", target_type="user")
+
+    assert result.ok is True
+    client.conversations_open.assert_not_called()
+    client.chat_postMessage.assert_called_once_with(channel="C12345678", text="hi")
+
+
 # ── send_to: Telegram ──────────────────────────────────────────────────────────
 
 
