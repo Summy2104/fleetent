@@ -124,6 +124,10 @@ const en = {
   "agents.modelProviderHint":
     "Provider for this agent's default chat route. Set its API key under the Secrets tab.",
   "agents.selectProvider": "Select a provider",
+  "agents.selectModel": "Select a model",
+  "agents.modelEmbedding": "Embedding model",
+  "agents.modelMemoryExtraction": "Memory extraction model",
+  "agents.modelImageGeneration": "Image generation model",
   "agents.mcpServers": "MCP Servers",
   "agents.selectMcpServer": "Select an MCP server",
   "agents.noMcpServers": "No MCP servers",
@@ -590,6 +594,13 @@ const en = {
   "providers.deleteTitle": "Delete {id}?",
   "providers.deleteDescription":
     "This permanently removes the provider configuration and its stored secret.",
+  "providers.newModel": "New model",
+  "providers.newModelDialogTitle": "New model",
+  "providers.newModelDialogDescription": "Create a model under this provider.",
+  "providers.fieldModelId": "Model ID",
+  "providers.fieldModelName": "Model name",
+  "providers.fieldEndpoint": "Endpoint",
+  "providers.createModelSubmit": "Create model",
 
   // Chat 页
   "chat.title": "Chat Console",
@@ -794,6 +805,10 @@ const zh: Messages = {
   "agents.modelProviderHint":
     "该智能体默认对话路由所用的提供商。请在「密钥」标签页设置其 API 密钥。",
   "agents.selectProvider": "选择提供商",
+  "agents.selectModel": "选择模型",
+  "agents.modelEmbedding": "Embedding 模型",
+  "agents.modelMemoryExtraction": "记忆抽取模型",
+  "agents.modelImageGeneration": "图片生成模型",
   "agents.mcpServers": "MCP 服务器",
   "agents.selectMcpServer": "选择 MCP 服务器",
   "agents.noMcpServers": "暂无 MCP 服务器",
@@ -1236,6 +1251,13 @@ const zh: Messages = {
   "providers.savePricingLabel": "保存 {id} 价格",
   "providers.deleteTitle": "删除 {id}？",
   "providers.deleteDescription": "这将永久删除该提供商配置及其存储的机密。",
+  "providers.newModel": "新建模型",
+  "providers.newModelDialogTitle": "新建模型",
+  "providers.newModelDialogDescription": "在此供应商下创建一个模型。",
+  "providers.fieldModelId": "模型 ID",
+  "providers.fieldModelName": "模型名称",
+  "providers.fieldEndpoint": "端点",
+  "providers.createModelSubmit": "创建模型",
 
   // Chat 页
   "chat.title": "对话控制台",

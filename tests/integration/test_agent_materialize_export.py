@@ -84,7 +84,10 @@ def test_agent_file_from_store_exports_authored_runtime_config(db):
     assert exported.knowledge.bindings[0].default is True
 
     targets = {target.id: target for target in exported.models.targets}
-    assert set(targets) == {"claude-fast", "embed"}
+    # Overriding "default" and "embedding" leaves "memory_extraction"/"kb_extraction" (still
+    # pointing at the baseline "default" target) and "vision" (untouched route) alive rather than
+    # dropping them — the platform default targets they reference must survive too.
+    assert set(targets) == {"claude-fast", "embed", "default", "vision"}
     assert targets["claude-fast"].provider == "anthropic"
     assert targets["claude-fast"].protocol == "openai_chat"
     assert targets["claude-fast"].base_url == "https://api.anthropic.com/v1/"
@@ -98,10 +101,19 @@ def test_agent_file_from_store_exports_authored_runtime_config(db):
     assert exported.models.routes["default"][0].target == "claude-fast"
     assert exported.models.routes["embedding"][0].target == "embed"
     assert exported.models.routes["embedding"][0].params == {"dimensions": 768}
+
+    baseline = default_models()
+    assert exported.models.routes["memory_extraction"] == baseline.routes["memory_extraction"]
+    assert exported.models.routes["kb_extraction"] == baseline.routes["kb_extraction"]
+    assert exported.models.routes["vision"] == baseline.routes["vision"]
+    # The authored targets (claude-fast/embed) must never point at the local dev placeholder;
+    # memory_extraction/kb_extraction/vision fall back to it precisely because this agent never
+    # authored those routes, which is the documented, intentional default (agent-scoped-model-
+    # routing's "Platform materializes model config" merge semantics), not a leak.
     assert not any(
-        (target.base_url or "").startswith("http://localhost")
-        or (target.endpoint or "").startswith("http://localhost")
-        for target in exported.models.targets
+        (targets[target_id].base_url or "").startswith("http://localhost")
+        or (targets[target_id].endpoint or "").startswith("http://localhost")
+        for target_id in ("claude-fast", "embed")
     )
 
 

@@ -273,8 +273,12 @@ def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
     if not route_overrides:
         return default_models()
 
-    targets: dict[str, ModelTarget] = {}
-    routes: dict[str, list[ModelRouteEntry]] = {}
+    # Merge onto the baseline one route at a time: a route absent from the override must keep
+    # its default target rather than disappearing just because some other route was overridden.
+    baseline = default_models()
+    baseline_targets = {target.id: target for target in baseline.targets}
+    routes: dict[str, list[ModelRouteEntry]] = dict(baseline.routes)
+    override_targets: dict[str, ModelTarget] = {}
     for route_key, raw_entries in route_overrides.items():
         entries = raw_entries if isinstance(raw_entries, list) else [raw_entries]
         route_entries: list[ModelRouteEntry] = []
@@ -282,7 +286,7 @@ def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
             if not isinstance(raw_entry, dict):
                 continue
             target = _target_from_model_override(route_key, index, raw_entry)
-            targets.setdefault(target.id, target)
+            override_targets[target.id] = target
             route_entries.append(
                 ModelRouteEntry(
                     target=target.id,
@@ -293,8 +297,16 @@ def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
         if route_entries:
             routes[str(route_key)] = route_entries
 
-    if not targets or not routes:
-        return default_models()
+    # Drop baseline targets no route still references (e.g. the default local target once the
+    # default route itself is overridden), but keep those a still-untouched route relies on
+    # (e.g. memory_extraction/kb_extraction still pointing at the baseline "default" target).
+    referenced_ids = {entry.target for entries in routes.values() for entry in entries}
+    targets = {
+        target_id: target
+        for target_id, target in baseline_targets.items()
+        if target_id in referenced_ids
+    }
+    targets.update(override_targets)
     return AgentModels(targets=list(targets.values()), routes=routes)
 
 
