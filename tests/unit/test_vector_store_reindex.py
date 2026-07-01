@@ -324,6 +324,60 @@ def test_reindex_knowledge_base_rebuild_clears_namespace_before_upserts(monkeypa
     assert summary.failed == 0
 
 
+def test_reindex_knowledge_base_uses_injected_kb_vector_backend_when_available(monkeypatch):
+    from fleetent.vector_store import IndexableItem, ReindexRequest, reindex
+
+    reindex_module = importlib.import_module("fleetent.vector_store.reindex")
+    calls: list[tuple[str, object, object]] = []
+
+    class FakeKBVectorBackend:
+        async def upsert(self, item_id: str, vector: list[float], namespace: str) -> None:
+            calls.append(("upsert", item_id, namespace))
+
+        async def clear_namespace(self, namespace: str) -> None:
+            calls.append(("clear", namespace, None))
+
+    monkeypatch.setattr(
+        reindex_module.knowledge_base,
+        "iter_indexable_knowledge_chunks",
+        lambda tenant_id, kb_id: [
+            IndexableItem(id="chunk-1", content="one", namespace=f"kb:{tenant_id}:{kb_id}"),
+        ],
+    )
+    monkeypatch.setattr(
+        reindex_module.knowledge_base.runtime,  # type: ignore[attr-defined]
+        "_vector_backend",
+        lambda: FakeKBVectorBackend(),
+    )
+
+    async def fake_embed_text(content: str) -> list[float]:
+        assert content == "one"
+        return [1.0, 0.0]
+
+    monkeypatch.setattr(reindex_module.runtime, "embed_text", fake_embed_text)
+    monkeypatch.setattr(
+        reindex_module.runtime,
+        "clear_namespace",
+        lambda namespace: (_ for _ in ()).throw(AssertionError("must use injected backend")),
+    )
+    monkeypatch.setattr(
+        reindex_module.runtime,
+        "upsert",
+        lambda item_id, content, namespace: (_ for _ in ()).throw(
+            AssertionError("must use injected backend")
+        ),
+    )
+
+    summary = reindex(ReindexRequest(owner="knowledge_base", tenant_id="tenant-a", kb_id="global"))
+
+    assert calls == [
+        ("clear", "kb:tenant-a:global", None),
+        ("upsert", "chunk-1", "kb:tenant-a:global"),
+    ]
+    assert summary.reindexed == 1
+    assert summary.failed == 0
+
+
 def test_reindex_knowledge_base_rebuild_upserts_each_chunk_content_and_namespace(monkeypatch):
     from fleetent.vector_store import IndexableItem, ReindexRequest, reindex
 

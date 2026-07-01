@@ -160,12 +160,25 @@ def main(argv: list[str] | None = None) -> None:
 
             ingest_cli.main(argv[2:])
             return
+        if argv[1:2] == ["create"]:
+            from fleetent.knowledge_base import create_cli
+
+            create_cli.main(argv[2:])
+            return
+        if argv[1:2] == ["reindex"]:
+            from fleetent.knowledge_base import reindex_cli
+
+            reindex_cli.main(argv[2:])
+            return
         if argv[1:2] == ["extract"]:
             from fleetent.knowledge_base import extract_cli
 
             extract_cli.main(argv[2:])
             return
-        print("Usage: fleetent kb serve|worker|ingest|extract|init-config", file=sys.stderr)
+        print(
+            "Usage: fleetent kb serve|worker|ingest|create|reindex|extract|init-config",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     if argv and argv[0] in {
@@ -173,9 +186,14 @@ def main(argv: list[str] | None = None) -> None:
         "kb-service",
         "kb-serve",
         "kb-ingest",
+        "kb-create",
+        "kb-reindex",
         "kb-extract",
     }:
-        print("Usage: fleetent kb serve|worker|ingest|extract|init-config", file=sys.stderr)
+        print(
+            "Usage: fleetent kb serve|worker|ingest|create|reindex|extract|init-config",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     user_input = " ".join(argv) if argv else sys.stdin.read().strip()
