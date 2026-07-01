@@ -8,9 +8,22 @@ import os
 import signal
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 import fleetent.__main__ as cli
 import fleetent.agent_config as agent_config
 from fleetent.runtime import agent_app
+
+
+@pytest.fixture(autouse=True)
+def _no_real_process_exit(monkeypatch):
+    """Neutralize the post-drain exit driver (AAA-8204 #4) for every test here.
+
+    serve()'s finally runs _drain_and_close → _drive_exit_after_drain, which force-kills this
+    process's descendant tree and arms an os._exit(0) watchdog — fatal to the test runner.
+    These tests assert serve()/_stop_running orchestration only, not the real exit.
+    """
+    monkeypatch.setattr(agent_app, "_drive_exit_after_drain", lambda *a, **k: None)
 
 
 def test_parse_agent_run_defaults():
