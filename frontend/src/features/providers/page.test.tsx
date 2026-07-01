@@ -340,8 +340,8 @@ describe('providers page', () => {
   })
 
   it('creating an openai_image_chat model shows Base URL instead of Endpoint and sends base_url', async () => {
-    const user = userEvent.setup({ delay: null });
-    let capturedBody: Record<string, unknown> | null = null;
+    const user = userEvent.setup({ delay: null })
+    let capturedBody: Record<string, unknown> | null = null
 
     server.use(
       http.get(`${API_BASE_URL}/admin/me`, () =>
@@ -363,7 +363,7 @@ describe('providers page', () => {
       ),
       http.get(`${API_BASE_URL}/admin/models`, () => HttpResponse.json([])),
       http.post(`${API_BASE_URL}/admin/models`, async ({ request }) => {
-        capturedBody = (await request.json()) as Record<string, unknown>;
+        capturedBody = (await request.json()) as Record<string, unknown>
         return HttpResponse.json(
           {
             base_url: capturedBody.base_url ?? null,
@@ -379,28 +379,28 @@ describe('providers page', () => {
             provider_id: capturedBody.provider_id,
           },
           { status: 201 }
-        );
+        )
       })
-    );
+    )
 
-    renderPage();
-    expect(await screen.findByText('alpha')).toBeInTheDocument();
+    renderPage()
+    expect(await screen.findByText('alpha')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'New model' }));
-    await user.type(screen.getByLabelText('Model ID'), 'gemini-image');
-    await user.type(screen.getByLabelText('Model name'), 'gemini-3-pro-image-preview');
-    await user.click(screen.getByRole('combobox', { name: 'Protocol' }));
-    await user.click(await screen.findByRole('option', { name: 'openai_image_chat' }));
+    await user.click(screen.getByRole('button', { name: 'New model' }))
+    await user.type(screen.getByLabelText('Model ID'), 'gemini-image')
+    await user.type(screen.getByLabelText('Model name'), 'gemini-3-pro-image-preview')
+    await user.click(screen.getByRole('combobox', { name: 'Protocol' }))
+    await user.click(await screen.findByRole('option', { name: 'openai_image_chat' }))
 
-    expect(screen.queryByLabelText('Endpoint')).not.toBeInTheDocument();
-    await user.type(screen.getByLabelText('Base URL'), 'https://newapi.example/v1');
-    await user.click(screen.getByRole('button', { name: 'Create model' }));
+    expect(screen.queryByLabelText('Endpoint')).not.toBeInTheDocument()
+    await user.type(screen.getByLabelText('Base URL'), 'https://newapi.example/v1')
+    await user.click(screen.getByRole('button', { name: 'Create model' }))
 
-    await waitFor(() => expect(capturedBody).not.toBeNull());
-    expect(capturedBody?.protocol).toBe('openai_image_chat');
-    expect(capturedBody?.base_url).toBe('https://newapi.example/v1');
-    expect(capturedBody?.endpoint).toBeUndefined();
-  });
+    await waitFor(() => expect(capturedBody).not.toBeNull())
+    expect(capturedBody?.protocol).toBe('openai_image_chat')
+    expect(capturedBody?.base_url).toBe('https://newapi.example/v1')
+    expect(capturedBody?.endpoint).toBeUndefined()
+  })
 
   it('renders the New model dialog in Chinese when the locale is zh', async () => {
     // i18n is an i18next singleton whose language is detected once at import, so switching

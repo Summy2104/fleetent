@@ -339,9 +339,7 @@ function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boo
       </div>
       {ROUTE_BINDINGS.map((binding) => {
         const bindingModelId = routeModelIds[binding.routeKey] ?? ''
-        const candidates = (allModels.data ?? []).filter((model) =>
-          binding.protocols.includes(model.protocol),
-        )
+        const candidates = (allModels.data ?? []).filter((model) => binding.protocols.includes(model.protocol))
         const label = t(binding.labelKey)
         return (
           <section className="space-y-3" key={binding.routeKey}>

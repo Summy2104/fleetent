@@ -316,7 +316,7 @@ function ProviderCard({
               })}
             </p>
           ) : (
-            <p className="text-sm text-destructive">
+            <p className="text-destructive text-sm">
               {connectivity.data.error ?? connectivity.data.details ?? t('providers.connectivityFailed')}
             </p>
           )
