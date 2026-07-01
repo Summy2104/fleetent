@@ -79,7 +79,7 @@ export function MultiSelect({
         aria-expanded={open}
         aria-label={triggerLabel}
         className={cn(
-          'flex min-h-9 w-full cursor-pointer flex-wrap items-center gap-1.5 rounded-md border border-input bg-background/60 px-2 py-1.5 text-sm shadow-sm',
+          'flex min-h-8 w-full cursor-pointer flex-wrap items-center gap-1.5 rounded-md border border-input bg-background/60 px-2 py-1 text-sm shadow-sm',
           'focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring',
           disabled && 'pointer-events-none opacity-50'
         )}
