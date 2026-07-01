@@ -40,8 +40,8 @@ export type SetApproverInput = {
   entity_type: 'tenant' | 'team'
 }
 
-function invalidateTenancyLists(queryClient: ReturnType<typeof useQueryClient>): Promise<void[]> {
-  return Promise.all([
+async function invalidateTenancyLists(queryClient: ReturnType<typeof useQueryClient>): Promise<void> {
+  await Promise.all([
     queryClient.invalidateQueries({ queryKey: ['tenants'] }),
     queryClient.invalidateQueries({ queryKey: ['teams'] }),
     queryClient.invalidateQueries({ queryKey: ['users'] }),

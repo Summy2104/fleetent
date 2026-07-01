@@ -111,7 +111,7 @@ function LoginPage(): JSX.Element {
       return
     }
     auth.setToken(callbackToken)
-    navigate('/agents', { replace: true })
+    void navigate('/agents', { replace: true })
   }, [auth, callbackToken, navigate])
 
   if (callbackToken) {

@@ -31,7 +31,9 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'html'],
       include: ['src/**/*.{ts,tsx}'],
-      exclude: ['src/main.tsx'],
+      // shadcn-generated primitives are vendored, not hand-authored; exclude them
+      // from coverage so the threshold reflects our own code, not the UI kit.
+      exclude: ['src/main.tsx', 'src/components/ui/**'],
       thresholds: {
         lines: 76,
         functions: 76,

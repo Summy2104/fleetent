@@ -63,6 +63,7 @@ function EventList({
           events.map((event, index) => (
             <p
               className="rounded-md border border-border bg-secondary/40 px-3 py-2 font-mono text-foreground text-xs"
+              // biome-ignore lint/suspicious/noArrayIndexKey: read-only append-only log; events carry no stable id
               key={`${title}-${index}`}
             >
               {describeValue(event.text ?? event.kind ?? event)}

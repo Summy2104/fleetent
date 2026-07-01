@@ -190,7 +190,14 @@
                   "kind": "objectLiteralMember",
                   "scope": "any"
                 },
-                "formats": ["camelCase", "PascalCase", "CONSTANT_CASE"]
+                "formats": ["camelCase", "PascalCase", "CONSTANT_CASE", "snake_case"]
+              },
+              {
+                "selector": {
+                  "kind": "typeMember",
+                  "scope": "any"
+                },
+                "formats": ["camelCase", "PascalCase", "CONSTANT_CASE", "snake_case"]
               },
               {
                 "selector": {
@@ -218,5 +225,34 @@
         "noReactSpecificProps": "off"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["src/components/ui/**"],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "noLabelWithoutControl": "off",
+            "useAriaPropsForRole": "off",
+            "useFocusableInteractive": "off",
+            "useSemanticElements": "off"
+          },
+          "correctness": {
+            "noUnusedImports": "off"
+          },
+          "security": {
+            "noDangerouslySetInnerHtml": "off"
+          },
+          "style": {
+            "useImportType": "off",
+            "useNamingConvention": "off"
+          },
+          "suspicious": {
+            "noArrayIndexKey": "off",
+            "noDocumentCookie": "off"
+          }
+        }
+      }
+    }
+  ]
 }

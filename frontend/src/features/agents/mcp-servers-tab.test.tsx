@@ -10,8 +10,24 @@ import { server } from '@/test/msw/server'
 const AGENT = 'alpha'
 
 const MCP_SERVERS = [
-  { id: 'github', transport: 'stdio', auth_type: 'none', auth_config: {}, status: 'connected', tool_count: 4, agent_id: null },
-  { id: 'jira', transport: 'http', auth_type: 'none', auth_config: {}, status: 'disconnected', tool_count: 0, agent_id: null },
+  {
+    id: 'github',
+    transport: 'stdio',
+    auth_type: 'none',
+    auth_config: {},
+    status: 'connected',
+    tool_count: 4,
+    agent_id: null,
+  },
+  {
+    id: 'jira',
+    transport: 'http',
+    auth_type: 'none',
+    auth_config: {},
+    status: 'disconnected',
+    tool_count: 0,
+    agent_id: null,
+  },
 ]
 
 function mockCatalog(): void {

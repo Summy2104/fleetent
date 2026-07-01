@@ -561,7 +561,6 @@ const en = {
   'chat.stop': 'Stop',
   'chat.send': 'Send',
 
-
   // Stats 页
   'stats.selectRecordToInspect': 'Select a record to inspect its event stream.',
   'stats.agentOverview': 'Agent overview',
@@ -1191,7 +1190,6 @@ const zh: Messages = {
   'chat.readyToSend': '可以发送。',
   'chat.stop': '停止',
   'chat.send': '发送',
-
 
   // Stats 页
   'stats.selectRecordToInspect': '选择一条记录以查看其事件流。',

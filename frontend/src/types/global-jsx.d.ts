@@ -10,6 +10,7 @@
 import type * as React from 'react'
 
 declare global {
+  // biome-ignore lint/style/useNamingConvention: "JSX" is a TypeScript-mandated global namespace name
   namespace JSX {
     type ElementType = React.JSX.ElementType
     type Element = React.JSX.Element

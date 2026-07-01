@@ -2,13 +2,7 @@ import { type ReactNode, useEffect } from 'react'
 import { I18nextProvider, useTranslation } from 'react-i18next'
 
 import i18n from '@/i18n/config'
-import {
-  DEFAULT_LOCALE,
-  type Locale,
-  LOCALE_LIST,
-  type LocaleMeta,
-  type MessageKey,
-} from '@/i18n/messages'
+import { DEFAULT_LOCALE, LOCALE_LIST, type Locale, type LocaleMeta, type MessageKey } from '@/i18n/messages'
 
 /**
  * i18n 运行时 —— 兼容层，对外契约与历史自研版保持一致（`useT()` / `useI18n()` /

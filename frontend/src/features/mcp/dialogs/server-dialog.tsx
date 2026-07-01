@@ -406,6 +406,7 @@ export function ServerDialog({
               <Label>{t('mcp.argsLabel')}</Label>
               <div className="space-y-2">
                 {args.map((arg, index) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: controlled inputs with no stable id; rows are added/removed and value is bound to state
                   <div className="flex items-center gap-2" key={index}>
                     <Input
                       className="flex-1"
@@ -439,6 +440,7 @@ export function ServerDialog({
               <Label>{t('mcp.headersLabel')}</Label>
               <div className="space-y-2">
                 {headers.map((pair, index) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: controlled inputs with no stable id; rows are added/removed and value is bound to state
                   <div className="flex items-center gap-2" key={index}>
                     <Input
                       className="flex-1"
@@ -485,6 +487,7 @@ export function ServerDialog({
             <Label>{t('mcp.envLabel')}</Label>
             <div className="space-y-2">
               {env.map((pair, index) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: controlled inputs with no stable id; rows are added/removed and value is bound to state
                 <div className="flex items-center gap-2" key={index}>
                   <Input
                     className="flex-1"

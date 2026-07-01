@@ -1,5 +1,5 @@
 if (import.meta.env.DEV) {
-  import("react-grab");
+  void import('react-grab')
 }
 
 import React from 'react'
