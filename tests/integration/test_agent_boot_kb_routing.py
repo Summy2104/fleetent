@@ -25,7 +25,7 @@ def test_kb_schema_established_in_tenant_scoped_db(tmp_path) -> None:
     data_dir = tmp_path / "data"
     data_dir.mkdir()
 
-    _init_agent_db_schema(data_dir, agent_id="test-agent")
+    _init_agent_db_schema(data_dir, agent_name="test-agent")
 
     kb_db_path = tmp_path / "tenants" / "default" / "kb" / "data" / "kb.db"
     assert kb_db_path.exists(), "router must create tenants/default/kb/data/kb.db"
@@ -44,7 +44,7 @@ def test_kb_tables_absent_from_main_agent_db(tmp_path) -> None:
     data_dir = tmp_path / "data"
     data_dir.mkdir()
 
-    _init_agent_db_schema(data_dir, agent_id="test-agent")
+    _init_agent_db_schema(data_dir, agent_name="test-agent")
 
     agent_state_path = (
         tmp_path / "tenants" / "default" / "agents" / "test-agent" / "data" / "agent_state.db"
@@ -64,7 +64,7 @@ def test_memory_items_is_y_managed_in_agent_state_db(tmp_path) -> None:
     data_dir = tmp_path / "data"
     data_dir.mkdir()
 
-    _init_agent_db_schema(data_dir, agent_id="test-agent")
+    _init_agent_db_schema(data_dir, agent_name="test-agent")
 
     agent_state_path = (
         tmp_path / "tenants" / "default" / "agents" / "test-agent" / "data" / "agent_state.db"
@@ -85,7 +85,7 @@ def test_traces_and_reflection_land_in_agent_state_db(tmp_path) -> None:
     data_dir = tmp_path / "data"
     data_dir.mkdir()
 
-    _init_agent_db_schema(data_dir, agent_id="test-agent")
+    _init_agent_db_schema(data_dir, agent_name="test-agent")
 
     agent_state_path = (
         tmp_path / "tenants" / "default" / "agents" / "test-agent" / "data" / "agent_state.db"
@@ -111,7 +111,7 @@ async def test_agent_boot_search_reads_only_boot_tenant_kb(tmp_path, monkeypatch
 
     monkeypatch.setattr(runtime.vector_store, "embed_text", embed_text)
 
-    _init_agent_db_schema(data_dir, agent_id="test-agent", tenant_id="tenant-a")
+    _init_agent_db_schema(data_dir, agent_name="test-agent", tenant_id="tenant-a")
 
     await runtime.ingest_text(
         filename="guide.txt",

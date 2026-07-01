@@ -29,6 +29,7 @@ describe('empty form factories', () => {
     expect(emptyProviderForm()).toEqual({ apiKey: '', baseUrl: '', description: '', id: '', provider: '' })
     expect(emptyModelForm('openai')).toEqual({
       baseUrl: '',
+      endpoint: '',
       id: '',
       modelName: '',
       protocol: 'openai_chat',
@@ -88,11 +89,32 @@ describe('buildCreateModelPayload', () => {
     expect(
       buildCreateModelPayload({
         baseUrl: '',
+        endpoint: '',
         id: 'gpt',
         modelName: 'gpt-4',
         protocol: 'openai_chat',
         providerId: 'openai',
       })
     ).toEqual({ base_url: undefined, id: 'gpt', model_name: 'gpt-4', protocol: 'openai_chat', provider_id: 'openai' })
+  })
+
+  it('sends endpoint (not base_url) for endpoint-only protocols', () => {
+    expect(
+      buildCreateModelPayload({
+        baseUrl: 'ignored',
+        endpoint: 'http://localhost:11434/v1/embeddings',
+        id: 'embed',
+        modelName: 'bge',
+        protocol: 'http_embedding',
+        providerId: 'local',
+      })
+    ).toEqual({
+      base_url: undefined,
+      endpoint: 'http://localhost:11434/v1/embeddings',
+      id: 'embed',
+      model_name: 'bge',
+      protocol: 'http_embedding',
+      provider_id: 'local',
+    })
   })
 })

@@ -16,8 +16,10 @@ import { Label } from '@/components/ui/label'
 import type { AgentListItem } from '@/features/agents/api'
 import {
   type McpAuthType,
+  type McpFieldSchema,
   type McpServerRecord,
   useCreateMcpServerMutation,
+  useMcpFieldSchemaQuery,
   useUpdateMcpServerMutation,
 } from '@/features/connectors/api'
 import {
@@ -28,6 +30,24 @@ import {
 } from '@/features/mcp/dialogs/server-dialog-logic'
 import { type EnvPair, GLOBAL_SCOPE, TRANSPORTS } from '@/features/mcp/shared'
 import { useT } from '@/i18n'
+
+// Small print under a field showing where it lands in agent.yaml, e.g.
+// "mcpServers.filesystem.x-fleetent.auth.client_id". `schema` comes from
+// GET /admin/mcp/field-schema (mcp_yaml_field_paths() — the same table materialize.py
+// uses to shape the real file, so this can't drift from actual write behavior).
+function FieldPathHint({
+  schema,
+  fieldKey,
+  id,
+}: {
+  schema: McpFieldSchema | undefined
+  fieldKey: string
+  id: string
+}): JSX.Element | null {
+  const template = schema?.[fieldKey]
+  if (!template) return null
+  return <p className="font-mono text-muted-foreground text-xs">{template.replace('{id}', id.trim() || '<id>')}</p>
+}
 
 export function ServerDialog({
   open,
@@ -43,6 +63,7 @@ export function ServerDialog({
   const t = useT()
   const create = useCreateMcpServerMutation()
   const update = useUpdateMcpServerMutation(editing?.id ?? '')
+  const fieldSchema = useMcpFieldSchemaQuery()
   const isEdit = editing !== null
 
   const [id, setId] = useState('')
@@ -144,6 +165,7 @@ export function ServerDialog({
               placeholder={t('mcp.idPlaceholder')}
               value={id}
             />
+            <p className="text-muted-foreground text-xs">{t('mcp.idYamlHint')}</p>
           </div>
 
           <div className="grid gap-2">
@@ -161,6 +183,7 @@ export function ServerDialog({
               triggerAriaLabel={t('mcp.scopeLabel')}
               value={agentScope}
             />
+            <p className="text-muted-foreground text-xs">{t('mcp.scopeYamlHint')}</p>
           </div>
 
           <div className="grid gap-2">
@@ -171,6 +194,7 @@ export function ServerDialog({
               triggerAriaLabel={t('mcp.transportLabel')}
               value={transport}
             />
+            <FieldPathHint fieldKey="transport" id={id} schema={fieldSchema.data} />
           </div>
 
           <div className="grid gap-2">
@@ -187,6 +211,7 @@ export function ServerDialog({
               triggerAriaLabel={t('mcp.authTypeLabel')}
               value={authType}
             />
+            <FieldPathHint fieldKey="auth_type" id={id} schema={fieldSchema.data} />
           </div>
 
           {transport === 'stdio' ? (
@@ -200,6 +225,7 @@ export function ServerDialog({
                 placeholder={t('mcp.commandPlaceholder')}
                 value={command}
               />
+              <FieldPathHint fieldKey="command" id={id} schema={fieldSchema.data} />
             </div>
           ) : (
             <div className="grid gap-2">
@@ -212,6 +238,7 @@ export function ServerDialog({
                 placeholder="https://mcp-server.example.com/mcp"
                 value={url}
               />
+              <FieldPathHint fieldKey="url" id={id} schema={fieldSchema.data} />
             </div>
           )}
 
@@ -221,6 +248,7 @@ export function ServerDialog({
                 {t('mcp.apiKeyEnvLabel')} <span className="text-destructive">*</span>
               </Label>
               <Input id="mcp-auth-key-env" onChange={(event) => setApiKeyEnv(event.target.value)} value={apiKeyEnv} />
+              <FieldPathHint fieldKey="api_key_env" id={id} schema={fieldSchema.data} />
             </div>
           ) : null}
 
@@ -237,6 +265,7 @@ export function ServerDialog({
                   triggerAriaLabel={t('mcp.headerStyleLabel')}
                   value={headerStyle}
                 />
+                <FieldPathHint fieldKey="header_style" id={id} schema={fieldSchema.data} />
               </div>
               <div className="grid gap-2">
                 <Label>{t('mcp.credentialInputLabel')}</Label>
@@ -250,6 +279,7 @@ export function ServerDialog({
                   triggerAriaLabel={t('mcp.credentialInputLabel')}
                   value={credentialInput}
                 />
+                <FieldPathHint fieldKey="credential_input" id={id} schema={fieldSchema.data} />
               </div>
             </>
           ) : null}
@@ -265,6 +295,7 @@ export function ServerDialog({
                   onChange={(event) => setOauthTokenUrl(event.target.value)}
                   value={oauthTokenUrl}
                 />
+                <FieldPathHint fieldKey="auth.token_url" id={id} schema={fieldSchema.data} />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="mcp-auth-client-id">
@@ -275,6 +306,7 @@ export function ServerDialog({
                   onChange={(event) => setOauthClientId(event.target.value)}
                   value={oauthClientId}
                 />
+                <FieldPathHint fieldKey="auth.client_id" id={id} schema={fieldSchema.data} />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="mcp-auth-client-secret-env">
@@ -285,10 +317,12 @@ export function ServerDialog({
                   onChange={(event) => setOauthClientSecretEnv(event.target.value)}
                   value={oauthClientSecretEnv}
                 />
+                <FieldPathHint fieldKey="auth.client_secret_env" id={id} schema={fieldSchema.data} />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="mcp-auth-scope">{t('mcp.oauthScopeLabel')}</Label>
                 <Input id="mcp-auth-scope" onChange={(event) => setOauthScope(event.target.value)} value={oauthScope} />
+                <FieldPathHint fieldKey="auth.scope" id={id} schema={fieldSchema.data} />
               </div>
             </>
           ) : null}
@@ -304,6 +338,7 @@ export function ServerDialog({
                   onChange={(event) => setOauthAuthorizationEndpoint(event.target.value)}
                   value={oauthAuthorizationEndpoint}
                 />
+                <FieldPathHint fieldKey="auth.authorization_endpoint" id={id} schema={fieldSchema.data} />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="mcp-authz-token-url">
@@ -314,6 +349,7 @@ export function ServerDialog({
                   onChange={(event) => setOauthTokenUrl(event.target.value)}
                   value={oauthTokenUrl}
                 />
+                <FieldPathHint fieldKey="auth.token_url" id={id} schema={fieldSchema.data} />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="mcp-authz-client-id">
@@ -324,6 +360,7 @@ export function ServerDialog({
                   onChange={(event) => setOauthClientId(event.target.value)}
                   value={oauthClientId}
                 />
+                <FieldPathHint fieldKey="auth.client_id" id={id} schema={fieldSchema.data} />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="mcp-authz-client-secret-env">{t('mcp.oauthClientSecretEnvLabel')}</Label>
@@ -332,6 +369,7 @@ export function ServerDialog({
                   onChange={(event) => setOauthClientSecretEnv(event.target.value)}
                   value={oauthClientSecretEnv}
                 />
+                <FieldPathHint fieldKey="auth.client_secret_env" id={id} schema={fieldSchema.data} />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="mcp-authz-scope">{t('mcp.oauthScopeLabel')}</Label>
@@ -340,6 +378,7 @@ export function ServerDialog({
                   onChange={(event) => setOauthScope(event.target.value)}
                   value={oauthScope}
                 />
+                <FieldPathHint fieldKey="auth.scope" id={id} schema={fieldSchema.data} />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="mcp-authz-redirect-path">{t('mcp.oauthRedirectPathLabel')}</Label>
@@ -348,6 +387,7 @@ export function ServerDialog({
                   onChange={(event) => setOauthRedirectPath(event.target.value)}
                   value={oauthRedirectPath}
                 />
+                <FieldPathHint fieldKey="auth.redirect_path" id={id} schema={fieldSchema.data} />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="mcp-authz-token-env">{t('mcp.oauthTokenEnvLabel')}</Label>
@@ -357,6 +397,7 @@ export function ServerDialog({
                   placeholder="MCP_OAUTH_ACCESS_TOKEN"
                   value={oauthTokenEnv}
                 />
+                <FieldPathHint fieldKey="auth.token_env" id={id} schema={fieldSchema.data} />
               </div>
             </>
           ) : null}
@@ -364,6 +405,7 @@ export function ServerDialog({
           {transport === 'stdio' ? (
             <div className="grid gap-2">
               <Label>{t('mcp.argsLabel')}</Label>
+              <FieldPathHint fieldKey="args" id={id} schema={fieldSchema.data} />
               <div className="space-y-2">
                 {args.map((arg, index) => (
                   // biome-ignore lint/suspicious/noArrayIndexKey: controlled inputs with no stable id; rows are added/removed and value is bound to state
@@ -398,6 +440,7 @@ export function ServerDialog({
           ) : (
             <div className="grid gap-2">
               <Label>{t('mcp.headersLabel')}</Label>
+              <FieldPathHint fieldKey="headers" id={id} schema={fieldSchema.data} />
               <div className="space-y-2">
                 {headers.map((pair, index) => (
                   // biome-ignore lint/suspicious/noArrayIndexKey: controlled inputs with no stable id; rows are added/removed and value is bound to state
@@ -445,6 +488,7 @@ export function ServerDialog({
 
           <div className="grid gap-2">
             <Label>{t('mcp.envLabel')}</Label>
+            <FieldPathHint fieldKey="env" id={id} schema={fieldSchema.data} />
             <div className="space-y-2">
               {env.map((pair, index) => (
                 // biome-ignore lint/suspicious/noArrayIndexKey: controlled inputs with no stable id; rows are added/removed and value is bound to state

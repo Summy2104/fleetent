@@ -186,7 +186,7 @@ def _has_real_llm_provider_credentials() -> bool:
 
 def _memory_policy(*, api_key_env: str | None, model: str = "memory-eval") -> ModelPolicySnapshot:
     return ModelPolicySnapshot.from_models(
-        agent_id="memory-eval",
+        agent_name="memory-eval",
         models=AgentModels(
             targets=[
                 ModelTarget(

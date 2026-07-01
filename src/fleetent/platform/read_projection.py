@@ -121,7 +121,7 @@ def aggregate_trace_events_across_agents(
         agent_name = agent_store.get_agent_name_by_id(agent_id)
         if agent_name is None:
             continue
-        scope = router.agent_scope(tenant_id, agent_name)
+        scope = router.agent_scope(tenant_id, agent_name=agent_name)
         try:
             ro_db = scope.open_state_db_ro()
             rows = ro_db.execute(

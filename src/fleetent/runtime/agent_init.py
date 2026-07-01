@@ -1,7 +1,7 @@
 """Scaffold a runnable agent home from a built-in template (`fleetent agent init`).
 
 Pure local scaffolding: no platform service and no database. Writes a self-contained
-``<home>/agent.yaml`` (its ``name`` set to the agent id, so ``fleetent agent run <id>``'s
+``<home>/agent.yaml`` (its ``name`` set to the agent name, so ``fleetent agent run <name>``'s
 directory-name check passes) plus a ``.env`` listing the env-var names the agent
 references (empty values, never real secrets). The template is embedded here — the
 installed global command has no repo working tree to read repository example templates.
@@ -25,10 +25,10 @@ from fleetent.agent_config import (
 from fleetent.runtime.agent_app import resolve_home
 
 
-def _template_agent(agent_id: str) -> AgentFile:
+def _template_agent(agent_name: str) -> AgentFile:
     """A minimal, valid starter agent definition (core fields only; no intelligence)."""
     return AgentFile(
-        name=agent_id,
+        name=agent_name,
         version=1,
         system_prompt="You are a helpful assistant.\n",
         models=AgentModels(

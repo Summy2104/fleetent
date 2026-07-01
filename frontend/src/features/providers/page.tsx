@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   type ModelListItem,
   type ProviderListItem,
@@ -47,8 +48,10 @@ import {
   buildCreateModelPayload,
   buildCreateProviderPayload,
   buildUpdateProviderPayload,
+  ENDPOINT_PROTOCOLS,
   emptyModelForm,
   emptyProviderForm,
+  MODEL_PROTOCOLS,
   type ModelFormState,
   type ProviderFormState,
   providerFormFromProvider,
@@ -148,16 +151,18 @@ function ModelFormDialog({
   busy: boolean
   onSubmit: () => Promise<void>
 }): JSX.Element {
+  const t = useT()
+  const requiresEndpoint = ENDPOINT_PROTOCOLS.has(form.protocol)
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New model</DialogTitle>
-          <DialogDescription>Create a model under this provider.</DialogDescription>
+          <DialogTitle>{t('providers.newModelDialogTitle')}</DialogTitle>
+          <DialogDescription>{t('providers.newModelDialogDescription')}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
           <div className="grid gap-2">
-            <Label htmlFor="model-id">Model ID</Label>
+            <Label htmlFor="model-id">{t('providers.fieldModelId')}</Label>
             <Input
               id="model-id"
               onChange={(event) => setForm((current) => ({ ...current, id: event.target.value }))}
@@ -165,7 +170,7 @@ function ModelFormDialog({
             />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="model-name">Model name</Label>
+            <Label htmlFor="model-name">{t('providers.fieldModelName')}</Label>
             <Input
               id="model-name"
               onChange={(event) => setForm((current) => ({ ...current, modelName: event.target.value }))}
@@ -173,20 +178,49 @@ function ModelFormDialog({
             />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="model-base-url">Base URL</Label>
-            <Input
-              id="model-base-url"
-              onChange={(event) => setForm((current) => ({ ...current, baseUrl: event.target.value }))}
-              value={form.baseUrl}
-            />
+            <Label>{t('providers.fieldProtocol')}</Label>
+            <Select
+              onValueChange={(value) => setForm((current) => ({ ...current, protocol: value ?? current.protocol }))}
+              value={form.protocol}
+            >
+              <SelectTrigger aria-label={t('providers.fieldProtocol')}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MODEL_PROTOCOLS.map((protocol) => (
+                  <SelectItem key={protocol} value={protocol}>
+                    {protocol}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
+          {requiresEndpoint ? (
+            <div className="grid gap-2">
+              <Label htmlFor="model-endpoint">{t('providers.fieldEndpoint')}</Label>
+              <Input
+                id="model-endpoint"
+                onChange={(event) => setForm((current) => ({ ...current, endpoint: event.target.value }))}
+                value={form.endpoint}
+              />
+            </div>
+          ) : (
+            <div className="grid gap-2">
+              <Label htmlFor="model-base-url">{t('providers.fieldBaseUrl')}</Label>
+              <Input
+                id="model-base-url"
+                onChange={(event) => setForm((current) => ({ ...current, baseUrl: event.target.value }))}
+                value={form.baseUrl}
+              />
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button onClick={() => onOpenChange(false)} variant="outline">
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button disabled={busy || !form.id || !form.modelName} onClick={() => void onSubmit()}>
-            Create model
+            {t('providers.createModelSubmit')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -238,7 +272,7 @@ function ProviderCard({
             {canWrite ? (
               <>
                 <Button onClick={onCreateModel} size="sm" variant="secondary">
-                  <Plus className="size-4" /> New model
+                  <Plus className="size-4" /> {t('providers.newModel')}
                 </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger

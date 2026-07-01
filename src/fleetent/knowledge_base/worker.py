@@ -92,6 +92,12 @@ def _knowledge_database(
     return _tenant_router(data_dir).tenant_scope(tenant_id).open_kb_db(migrations or KB_MIGRATIONS)
 
 
+def _require_queue_database_url(queue_database_url: str | None) -> str:
+    if not queue_database_url:
+        raise ValueError("queue database_url is required")
+    return queue_database_url
+
+
 @contextmanager
 def _use_kb_runtime(
     tenant_id: str,
@@ -290,21 +296,24 @@ def run_once(
     queue_database_url: str | None = None,
     data_dir: Path | None = None,
 ) -> dict[str, Any] | None:
-    job = kb_ingest_jobs.claim_next_job(database_url=queue_database_url)
+    resolved_queue_database_url = _require_queue_database_url(queue_database_url)
+    job = kb_ingest_jobs.claim_next_job(database_url=resolved_queue_database_url)
     if job is None:
         return None
     try:
-        result = run_job(job, data_dir=data_dir, queue_database_url=queue_database_url)
+        result = run_job(job, data_dir=data_dir, queue_database_url=resolved_queue_database_url)
     except Exception as exc:
         failed = kb_ingest_jobs.mark_failed(
             str(job["id"]),
             str(exc),
-            database_url=queue_database_url,
+            database_url=resolved_queue_database_url,
         )
         if failed is None:
             return {"job_id": str(job["id"]), "status": "missing"}
         return {"job_id": str(job["id"]), "status": str(failed["status"])}
-    kb_ingest_jobs.mark_done(str(job["id"]), result=result, database_url=queue_database_url)
+    kb_ingest_jobs.mark_done(
+        str(job["id"]), result=result, database_url=resolved_queue_database_url
+    )
     return {"job_id": str(job["id"]), "status": "done"}
 
 

@@ -7,6 +7,7 @@ import { AuthProvider } from '@/app/auth'
 import { AppQueryProvider } from '@/app/query-client'
 import { ProvidersPage } from '@/features/providers/page'
 import { I18nProvider } from '@/i18n'
+import i18n from '@/i18n/config'
 import { server } from '@/test/msw/server'
 
 const API_BASE_URL = 'http://fleetent.test'
@@ -210,5 +211,112 @@ describe('providers page', () => {
 
     await user.click(card.getByRole('button', { name: 'Test alpha-chat connectivity' }))
     expect(await screen.findByText('Reachable in 42ms using gpt-5')).toBeInTheDocument()
+  })
+
+  it('creating an embedding model shows Endpoint instead of Base URL and omits base_url from the payload', async () => {
+    const user = userEvent.setup({ delay: null })
+    const captured: { body?: Record<string, unknown> } = {}
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () =>
+        HttpResponse.json({ email: 'admin@fleetent.test', id: 'admin-1', role: 'admin' })
+      ),
+      http.get(`${API_BASE_URL}/admin/providers`, () =>
+        HttpResponse.json([
+          {
+            api_key: null,
+            api_key_env: null,
+            api_key_set: false,
+            base_url: null,
+            description: null,
+            id: 'alpha',
+            model_count: 0,
+            provider: null,
+          },
+        ])
+      ),
+      http.get(`${API_BASE_URL}/admin/models`, () => HttpResponse.json([])),
+      http.post(`${API_BASE_URL}/admin/models`, async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>
+        captured.body = body
+        return HttpResponse.json(
+          {
+            base_url: body.base_url ?? null,
+            description: null,
+            endpoint: body.endpoint ?? null,
+            id: body.id,
+            input_price_per_1k: null,
+            max_tokens: null,
+            model_name: body.model_name,
+            output_price_per_1k: null,
+            params: null,
+            protocol: body.protocol,
+            provider_id: body.provider_id,
+          },
+          { status: 201 }
+        )
+      })
+    )
+
+    renderPage()
+    expect(await screen.findByText('alpha')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'New model' }))
+    await user.type(screen.getByLabelText('Model ID'), 'embed-1')
+    await user.type(screen.getByLabelText('Model name'), 'bge-large')
+    await user.click(screen.getByRole('combobox', { name: 'Protocol' }))
+    await user.click(await screen.findByRole('option', { name: 'http_embedding' }))
+
+    expect(screen.queryByLabelText('Base URL')).not.toBeInTheDocument()
+    await user.type(screen.getByLabelText('Endpoint'), 'http://localhost:11434/v1/embeddings')
+    await user.click(screen.getByRole('button', { name: 'Create model' }))
+
+    await waitFor(() => expect(captured.body).toBeTruthy())
+    expect(captured.body?.protocol).toBe('http_embedding')
+    expect(captured.body?.endpoint).toBe('http://localhost:11434/v1/embeddings')
+    expect(captured.body?.base_url).toBeUndefined()
+  })
+
+  it('renders the New model dialog in Chinese when the locale is zh', async () => {
+    // i18n is an i18next singleton whose language is detected once at import, so switching
+    // locale mid-suite means driving the instance directly (localStorage alone is too late).
+    await i18n.changeLanguage('zh')
+    const user = userEvent.setup({ delay: null })
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () =>
+        HttpResponse.json({ email: 'admin@fleetent.test', id: 'admin-1', role: 'admin' })
+      ),
+      http.get(`${API_BASE_URL}/admin/providers`, () =>
+        HttpResponse.json([
+          {
+            api_key: null,
+            api_key_env: null,
+            api_key_set: false,
+            base_url: null,
+            description: null,
+            id: 'alpha',
+            model_count: 0,
+            provider: null,
+          },
+        ])
+      ),
+      http.get(`${API_BASE_URL}/admin/models`, () => HttpResponse.json([]))
+    )
+
+    try {
+      renderPage()
+      expect(await screen.findByText('alpha')).toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: '新建模型' }))
+      const dialog = screen.getByRole('dialog')
+      expect(within(dialog).getByText('新建模型')).toBeInTheDocument()
+      expect(within(dialog).getByLabelText('模型 ID')).toBeInTheDocument()
+      expect(within(dialog).getByLabelText('模型名称')).toBeInTheDocument()
+      expect(within(dialog).getByRole('button', { name: '创建模型' })).toBeInTheDocument()
+    } finally {
+      await i18n.changeLanguage('en')
+      window.localStorage.removeItem('fleetent.admin.locale')
+    }
   })
 })

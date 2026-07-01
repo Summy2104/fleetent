@@ -381,7 +381,7 @@ def managed_agent_route_server(managed_stack: ManagedStack) -> Iterator[str]:
 
 def configure_agent_for_im_approval(managed_stack: ManagedStack) -> dict[str, Any]:
     agent_store.set_im_capabilities(
-        managed_stack.agent_name, supports_dm=True, supports_groups=False
+        managed_stack.agent_id, supports_dm=True, supports_groups=False
     )
     agent_store.set_config_overrides(
         managed_stack.agent_name,

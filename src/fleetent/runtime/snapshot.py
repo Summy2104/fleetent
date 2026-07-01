@@ -90,9 +90,8 @@ def _governance_from_file(agent: AgentFile) -> GovernanceConfig:
 class AgentSnapshot:
     """Immutable, fully-resolved agent configuration the agent loop consumes."""
 
-    # Identity is the agent name (string). Authoring DB rows still carry an int id,
-    # rendered as its string form on the DB-backed version loaders.
-    agent_id: str
+    # Identity is the agent name (string) on both file- and DB-backed snapshots.
+    agent_name: str
     name: str
     version: int
     version_id: int
@@ -108,7 +107,7 @@ class AgentSnapshot:
 def _snapshot_from_file(agent: AgentFile) -> AgentSnapshot:
     server_ids = [server.id for server in agent.mcp_servers]
     return AgentSnapshot(
-        agent_id=agent.name,
+        agent_name=agent.name,
         name=agent.name,
         version=agent.version,
         version_id=agent.version,
@@ -124,7 +123,7 @@ def _snapshot_from_file(agent: AgentFile) -> AgentSnapshot:
 
 def _snapshot_from_agent(name: str, agent: Agent) -> AgentSnapshot:
     return AgentSnapshot(
-        agent_id=str(agent.id),
+        agent_name=name,
         name=name,
         version=agent.version,
         version_id=agent.version,
@@ -132,7 +131,7 @@ def _snapshot_from_agent(name: str, agent: Agent) -> AgentSnapshot:
         allowed_tools=agent.allowed_tools,
         skills_dir=agent.skills_dir,
         mcp_server_ids=agent.mcp_server_ids,
-        model_policy=ModelPolicySnapshot.from_models(agent_id=name, models=default_models()),
+        model_policy=ModelPolicySnapshot.from_models(agent_name=name, models=default_models()),
         memory_namespace=agent.memory_namespace,
     )
 
@@ -176,7 +175,7 @@ def _is_mcp_tool(name: str) -> bool:
 
 def connector_scope(snapshot: AgentSnapshot) -> str:
     """The agent name used to resolve OAuth connectors for this snapshot."""
-    return snapshot.agent_id
+    return snapshot.agent_name
 
 
 def resolve_mcp_servers(

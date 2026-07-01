@@ -159,10 +159,7 @@ def create_app(config: KBServeConfig):  # type: ignore[no-untyped-def]
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         _bootstrap_runtime(config.tenant_id, data_dir=config.data_dir)
-        try:
-            yield
-        finally:
-            return
+        yield
 
     app = FastAPI(title="fleetent kb-read-service", lifespan=lifespan)
     app.state.kb_serve_config = config
@@ -207,7 +204,7 @@ def create_app(config: KBServeConfig):  # type: ignore[no-untyped-def]
         connector_rows = kb_runtime.operations.list_connector_statuses(principal.tenant_id)
         job_rows = kb_ingest_jobs.list_jobs(
             tenant_id=principal.tenant_id,
-            database_url=config.queue_database_url or None,
+            database_url=config.queue_database_url,
         )
         return {
             "tenant_id": principal.tenant_id,

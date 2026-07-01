@@ -13,6 +13,7 @@ import pytest
 from fastapi import HTTPException
 
 from fleetent import server, user_store
+from fleetent.platform.agent_management_console import agent_admin_api
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import model_admin_api, provider_admin_api
 from fleetent.platform.skill_management import skill_admin_api
@@ -706,6 +707,24 @@ def test_kb_admin_route_handlers_cover_management_and_documents(
     monkeypatch.setattr(
         kb_admin_api.audit_log, "write_audit", lambda *args, **kwargs: audits.append(args)
     )
+    monkeypatch.setattr(
+        agent_admin_api, "_current_user", lambda _authorization: _user(role="viewer")
+    )
+    monkeypatch.setattr(
+        agent_admin_api,
+        "_require_agent",
+        lambda _name: SimpleNamespace(id=8, name="agent-8", tenant_id="default"),
+    )
+    monkeypatch.setattr(agent_admin_api, "kb_engine_list", lambda tenant_id: list(kbs.values()))
+    monkeypatch.setattr(
+        agent_admin_api.agent_kbs_store,
+        "list_kbs_for_agent",
+        lambda tenant_id, agent_id: [
+            kb_id
+            for (tenant, kb_id), agents in bindings.items()
+            if tenant == tenant_id and agent_id in agents
+        ],
+    )
 
     auth_header = "Session token"
     assert kb_admin_api.list_kbs(authorization=auth_header)[0]["bound_agents"] == [7]
@@ -752,7 +771,13 @@ def test_kb_admin_route_handlers_cover_management_and_documents(
         is True
     )
     assert kb_admin_api.agents_for_kb("kb2", authorization=auth_header)["agents"] == [8]
-    assert kb_admin_api.kbs_for_agent(8, authorization=auth_header)["kb_ids"] == ["kb2"]
+    assert agent_admin_api.list_agent_kbs("agent-8", authorization=auth_header) == {
+        "agent": "agent-8",
+        "kb_ids": ["kb2"],
+    }
+    kbs["kb2"]["archived"] = True
+    assert agent_admin_api.list_agent_kbs("agent-8", authorization=auth_header)["kb_ids"] == []
+    kbs["kb2"]["archived"] = False
     assert kb_admin_api.unbind_agent("kb2", 8, authorization=auth_header)["bound"] is False
     assert kb_admin_api.observation("kb2", authorization=auth_header)["query_count"] == 7
     with pytest.raises(HTTPException) as still_bound:

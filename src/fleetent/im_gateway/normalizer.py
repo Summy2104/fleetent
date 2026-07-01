@@ -606,7 +606,11 @@ async def route(msg: NormalizedMessage, principal: Principal | None = None) -> N
         from fleetent.runtime.commands import CommandContext, handle_command
 
         cmd_reply = await handle_command(
-            CommandContext(agent_id=agent.name, session_id=msg.session_id, user_id=msg.user_id),
+            CommandContext(
+                agent_name=agent.name,
+                session_id=msg.session_id,
+                user_id=msg.user_id,
+            ),
             _strip_leading_mention(msg.text).strip(),
         )
         if cmd_reply is not None:

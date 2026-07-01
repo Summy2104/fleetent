@@ -187,7 +187,7 @@ def main(argv: list[str] | None = None) -> None:
 
     agent_config.scan()
     agent_id = agent_config.current().default_agent()
-    ctx = CommandContext(agent_id=agent_id, session_id=None, user_id="default")
+    ctx = CommandContext(agent_name=agent_id, session_id=None, user_id="default")
     cmd_reply = asyncio.run(handle_command(ctx, user_input))
     if cmd_reply is not None:
         print(cmd_reply)

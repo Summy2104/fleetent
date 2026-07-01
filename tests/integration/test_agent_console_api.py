@@ -604,8 +604,8 @@ def test_get_full_definition(client, monkeypatch):
 
 def test_get_surfaces_im_capabilities(client, monkeypatch):
     _wire_real_store(monkeypatch)
-    agent_store.create_agent("ops", "Ops prompt", ["read_*"])
-    agent_store.set_im_capabilities("ops", supports_dm=True, supports_groups=True)
+    agent = agent_store.create_agent("ops", "Ops prompt", ["read_*"])
+    agent_store.set_im_capabilities(agent.id, supports_dm=True, supports_groups=True)
     token, _ = _session_for("viewer")
     r = client.get("/admin/agents/ops", headers=_hdr(token))
     assert r.status_code == 200

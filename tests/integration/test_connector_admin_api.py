@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import fleetent.agent_store as agent_store
+from fleetent.config import mcp_yaml_field_paths
 from fleetent.platform.connector_management import connector_admin_api, mcp_server_store
 from tests.integration._migration_template import apply_migrations
 
@@ -180,3 +181,26 @@ def test_mcp_admin_api_list_does_not_mask_auth_config_and_edit_round_trips_it(
         "client_secret_env": "FLEETENT_DOCS_MCP_SECRET",
         "scope": "tools:read tools:write",
     }
+
+
+def test_field_schema_returns_yaml_field_paths_for_any_logged_in_user(monkeypatch) -> None:
+    monkeypatch.setattr(connector_admin_api, "_current_user", lambda _authorization: _User())
+
+    app = FastAPI()
+    app.include_router(connector_admin_api.router)
+    client = TestClient(app, raise_server_exceptions=True)
+
+    response = client.get("/admin/mcp/field-schema", headers={"Authorization": "Session ignored"})
+
+    assert response.status_code == 200
+    assert response.json() == mcp_yaml_field_paths()
+
+
+def test_field_schema_rejects_unauthenticated_request() -> None:
+    app = FastAPI()
+    app.include_router(connector_admin_api.router)
+    client = TestClient(app, raise_server_exceptions=True)
+
+    response = client.get("/admin/mcp/field-schema")
+
+    assert response.status_code == 401

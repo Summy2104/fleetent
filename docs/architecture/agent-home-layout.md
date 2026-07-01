@@ -22,10 +22,10 @@
 management_db_path()               = base/management.db
 tenant_dir(tenant)                 = base/tenants/<tenant>
 tenant_kb_dir(tenant)              = base/tenants/<tenant>/kb
-tenant_agent_home_dir(tenant, id)  = base/tenants/<tenant>/agents/<id>
-tenant_agent_data_dir(tenant, id)  = base/tenants/<tenant>/agents/<id>/data
-agent_home_dir(id)                 = base/tenants/default/agents/<id>   # standalone shim
-agent_data_dir(id)                 = base/tenants/default/agents/<id>/data
+tenant_agent_home_dir(tenant, name)= base/tenants/<tenant>/agents/<name>
+tenant_agent_data_dir(tenant, name)= base/tenants/<tenant>/agents/<name>/data
+agent_home_dir(name)               = base/tenants/default/agents/<name>   # standalone shim
+agent_data_dir(name)               = base/tenants/default/agents/<name>/data
 platform_yaml                      = base/platform.yaml
 platform_env                       = base/.env
 ```

@@ -16,6 +16,7 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   type AgentImCapabilitiesInput,
   type AgentImGroupInput,
+  type AgentModelOverrides,
   useAddAgentImGroupMutation,
   useAgentDetailQuery,
   useAgentGroupsQuery,
@@ -35,11 +36,7 @@ import {
   useUnbindAgentUserMutation,
   useUpdateAgentMutation,
 } from '@/features/agents/api'
-import {
-  buildAgentConfigUpdate,
-  defaultRouteModelId,
-  resolveProviderKeyAction,
-} from '@/features/agents/configure-logic'
+import { parseAllowedTools, resolveProviderKeyAction } from '@/features/agents/configure-logic'
 import { McpServersTab } from '@/features/agents/mcp-servers-tab'
 import { SkillsTab } from '@/features/agents/skills-tab'
 import { useKbsQuery } from '@/features/kb/api'
@@ -85,6 +82,55 @@ function Th({ children, className }: { children: ReactNode; className?: string }
 }
 
 type BindOption = { value: string; label: string }
+
+// A model route maps to a single model id; the platform expands it into the full model policy.
+// Read it from model_overrides, taking the first string key any authoring style may have used.
+function routeModelId(overrides: AgentModelOverrides | undefined, routeKey: string): string {
+  const routes = (overrides?.routes ?? {}) as Record<string, Array<Record<string, unknown>>>
+  const entry = routes[routeKey]?.[0]
+  if (!entry) return ''
+  for (const value of [entry.model_id, entry.provider_id, entry.provider, entry.target]) {
+    if (typeof value === 'string' && value) return value
+  }
+  return ''
+}
+
+// Set (or clear) one route's model while preserving every sibling key the platform stores
+// alongside it (other routes, credential slots), so an edit never drops that state.
+function withRouteModel(
+  overrides: AgentModelOverrides | undefined,
+  routeKey: string,
+  modelId: string
+): AgentModelOverrides {
+  const next: AgentModelOverrides = { ...(overrides ?? {}) }
+  const routes = { ...((next.routes as Record<string, unknown>) ?? {}) }
+  if (modelId) {
+    routes[routeKey] = [{ model_id: modelId }]
+  } else {
+    delete routes[routeKey]
+  }
+  next.routes = routes
+  return next
+}
+
+// Standard routes exposed as independent bindings on the overview tab. `default` stays required
+// and prominent; the other three (embedding/memory_extraction/image_generation) round out the
+// routes an agent commonly needs beyond chat. vision/kb_extraction/rerank keep resolving to their
+// platform default target when unset — they aren't exposed here.
+const ROUTE_BINDINGS = [
+  { labelKey: 'agents.modelProvider' as const, protocol: 'openai_chat', routeKey: 'default' },
+  { labelKey: 'agents.modelEmbedding' as const, protocol: 'http_embedding', routeKey: 'embedding' },
+  {
+    labelKey: 'agents.modelMemoryExtraction' as const,
+    protocol: 'openai_chat',
+    routeKey: 'memory_extraction',
+  },
+  {
+    labelKey: 'agents.modelImageGeneration' as const,
+    protocol: 'openai_image_generation',
+    routeKey: 'image_generation',
+  },
+]
 
 function BindSelectEditor({
   title,
@@ -182,10 +228,11 @@ function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boo
   const [systemPrompt, setSystemPrompt] = useState('')
   const [allowedTools, setAllowedTools] = useState('')
   const [memoryNamespace, setMemoryNamespace] = useState('')
-  const [modelId, setModelId] = useState<string | null>('')
+  const [routeModelIds, setRouteModelIds] = useState<Record<string, string>>({})
   const [providerKeyOverride, setProviderKeyOverride] = useState('')
   const [providerKeyDirty, setProviderKeyDirty] = useState(false)
 
+  const modelId = routeModelIds.default ?? ''
   const selectedModel = useMemo(
     () => (allModels.data ?? []).find((model) => model.id === modelId) ?? null,
     [allModels.data, modelId]
@@ -211,7 +258,14 @@ function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boo
       setSystemPrompt(detail.data.system_prompt)
       setAllowedTools(detail.data.allowed_tools.join(', '))
       setMemoryNamespace(detail.data.memory_namespace ?? 'default')
-      setModelId(defaultRouteModelId(detail.data.model_overrides))
+      setRouteModelIds(
+        Object.fromEntries(
+          ROUTE_BINDINGS.map((binding) => [
+            binding.routeKey,
+            routeModelId(detail.data.model_overrides, binding.routeKey),
+          ])
+        )
+      )
       setProviderKeyOverride('')
       setProviderKeyDirty(false)
     }
@@ -219,15 +273,16 @@ function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boo
 
   const onSave = (): void => {
     void (async () => {
-      await update.mutateAsync(
-        buildAgentConfigUpdate({
-          systemPrompt,
-          allowedTools,
-          memoryNamespace,
-          modelId,
-          currentOverrides: detail.data?.model_overrides,
-        })
+      const modelOverrides = ROUTE_BINDINGS.reduce(
+        (overrides, binding) => withRouteModel(overrides, binding.routeKey, routeModelIds[binding.routeKey] ?? ''),
+        detail.data?.model_overrides
       )
+      await update.mutateAsync({
+        system_prompt: systemPrompt,
+        allowed_tools: parseAllowedTools(allowedTools),
+        memory_namespace: memoryNamespace.trim() || 'default',
+        model_overrides: modelOverrides,
+      })
       if (providerKeyDirty && selectedProviderEnv) {
         const keyAction = resolveProviderKeyAction(providerKeyOverride, selectedProviderSecretStatus)
         if (keyAction === 'set') {
@@ -276,25 +331,37 @@ function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boo
           value={memoryNamespace}
         />
       </div>
-      <section className="space-y-3">
-        <TabHeading>{t('agents.modelProvider')}</TabHeading>
-        <p className="text-muted-foreground text-sm">{t('agents.modelProviderHint')}</p>
-        {canWrite ? (
-          <SimpleSelect
-            disabled={allModels.isLoading || update.isPending}
-            onValueChange={setModelId}
-            options={(allModels.data ?? []).map((model) => ({
-              value: model.id,
-              label: model.model_name ? `${model.id} · ${model.model_name}` : model.id,
-            }))}
-            placeholder={t('agents.selectProvider')}
-            triggerClassName="max-w-xs"
-            value={modelId}
-          />
-        ) : (
-          <p className="text-foreground text-sm">{modelId || '—'}</p>
-        )}
-      </section>
+      {ROUTE_BINDINGS.map((binding) => {
+        const bindingModelId = routeModelIds[binding.routeKey] ?? ''
+        const candidates = (allModels.data ?? []).filter((model) => model.protocol === binding.protocol)
+        const label = t(binding.labelKey)
+        return (
+          <section className="space-y-3" key={binding.routeKey}>
+            <TabHeading>{label}</TabHeading>
+            {binding.routeKey === 'default' ? (
+              <p className="text-muted-foreground text-sm">{t('agents.modelProviderHint')}</p>
+            ) : null}
+            {canWrite ? (
+              <SimpleSelect
+                disabled={allModels.isLoading || update.isPending}
+                onValueChange={(value) =>
+                  setRouteModelIds((current) => ({ ...current, [binding.routeKey]: value ?? '' }))
+                }
+                options={candidates.map((model) => ({
+                  value: model.id,
+                  label: model.model_name ? `${model.id} · ${model.model_name}` : model.id,
+                }))}
+                placeholder={binding.routeKey === 'default' ? t('agents.selectProvider') : t('agents.selectModel')}
+                triggerAriaLabel={label}
+                triggerClassName="max-w-xs"
+                value={bindingModelId}
+              />
+            ) : (
+              <p className="text-foreground text-sm">{bindingModelId || '—'}</p>
+            )}
+          </section>
+        )
+      })}
 
       {selectedProviderEnv ? (
         <section className="space-y-3">

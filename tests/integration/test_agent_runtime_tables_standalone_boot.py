@@ -61,7 +61,7 @@ def test_standalone_boot_lands_runtime_tables_in_agent_state_db(
     data_dir.mkdir(parents=True)
 
     # Boot the agent's DB schema exactly as `fleetent agent run` does, without any platform.
-    agent_app._init_agent_db_schema(data_dir, agent_id="solo-bot", tenant_id="default")
+    agent_app._init_agent_db_schema(data_dir, agent_name="solo-bot", tenant_id="default")
 
     agent_state_db = (
         tmp_path / "tenants" / "default" / "agents" / "solo-bot" / "data" / "agent_state.db"

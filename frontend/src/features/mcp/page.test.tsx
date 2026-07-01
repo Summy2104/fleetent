@@ -44,6 +44,29 @@ function mockBase(role: 'admin' | 'viewer' = 'admin', servers: McpServerRecord[]
   )
 }
 
+// Mirrors the shape of `mcp_yaml_field_paths()` (src/fleetent/platform/agent_lifecycle/materialize.py).
+const FIELD_SCHEMA = {
+  transport: 'mcpServers.{id}.transport',
+  command: 'mcpServers.{id}.command',
+  url: 'mcpServers.{id}.url',
+  args: 'mcpServers.{id}.args',
+  env: 'mcpServers.{id}.env',
+  headers: 'mcpServers.{id}.headers',
+  auth_type: 'mcpServers.{id}.auth_type',
+  api_key_env: 'mcpServers.{id}.api_key_env',
+  header_style: 'mcpServers.{id}.header_style',
+  credential_input: 'mcpServers.{id}.credential_input',
+  'auth.token_url': 'mcpServers.{id}.x-fleetent.auth.token_url',
+  'auth.client_id': 'mcpServers.{id}.x-fleetent.auth.client_id',
+  'auth.client_secret_env': 'mcpServers.{id}.x-fleetent.auth.client_secret_env',
+  'auth.scope': 'mcpServers.{id}.x-fleetent.auth.scope',
+  'auth.authorization_endpoint': 'mcpServers.{id}.x-fleetent.auth.authorization_endpoint',
+  'auth.redirect_path': 'mcpServers.{id}.x-fleetent.auth.redirect_path',
+  'auth.token_env': 'mcpServers.{id}.x-fleetent.auth.token_env',
+}
+
+const fieldSchemaHandler = http.get(`${API_BASE_URL}/admin/mcp/field-schema`, () => HttpResponse.json(FIELD_SCHEMA))
+
 function renderPage(): void {
   renderMcp(<McpPage />)
 }
@@ -212,6 +235,7 @@ describe('mcp page form', () => {
     const user = userEvent.setup({ delay: null })
     let captured: Record<string, unknown> | null = null
     server.use(
+      fieldSchemaHandler,
       http.post(`${API_BASE_URL}/admin/mcp/servers`, async ({ request }) => {
         captured = (await request.json()) as Record<string, unknown>
         return HttpResponse.json({ server_id: 'docs', success: true }, { status: 201 })
@@ -249,6 +273,7 @@ describe('mcp page form', () => {
     const user = userEvent.setup({ delay: null })
     let captured: Record<string, unknown> | null = null
     server.use(
+      fieldSchemaHandler,
       http.post(`${API_BASE_URL}/admin/mcp/servers`, async ({ request }) => {
         captured = (await request.json()) as Record<string, unknown>
         return HttpResponse.json({ server_id: 'oauth-docs', success: true }, { status: 201 })
@@ -291,6 +316,7 @@ describe('mcp page form', () => {
     const user = userEvent.setup({ delay: null })
     let captured: Record<string, unknown> | null = null
     server.use(
+      fieldSchemaHandler,
       http.post(`${API_BASE_URL}/admin/mcp/servers`, async ({ request }) => {
         captured = (await request.json()) as Record<string, unknown>
         return HttpResponse.json({ server_id: 'crm', success: true }, { status: 201 })
@@ -343,6 +369,7 @@ describe('mcp page form', () => {
     const user = userEvent.setup({ delay: null })
     let captured: Record<string, unknown> | null = null
     server.use(
+      fieldSchemaHandler,
       http.post(`${API_BASE_URL}/admin/mcp/servers`, async ({ request }) => {
         captured = (await request.json()) as Record<string, unknown>
         return HttpResponse.json({ server_id: 'crm2', success: true }, { status: 201 })
@@ -368,5 +395,48 @@ describe('mcp page form', () => {
     await waitFor(() => {
       expect((captured?.auth_config as Record<string, unknown>)?.token_env).toBe('')
     })
+  })
+})
+
+describe('mcp page field path hints', () => {
+  it("shows each field's agent.yaml path, live-substituting the entered id", async () => {
+    mockBase('admin', [])
+    const user = userEvent.setup({ delay: null })
+    server.use(fieldSchemaHandler)
+
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: 'Add MCP Server' }))
+
+    // before typing an id, the placeholder <id> is used
+    expect(await screen.findByText('mcpServers.<id>.transport')).toBeInTheDocument()
+    // id / scope fields carry static hand-written explanations, not schema-derived paths
+    expect(screen.getByText(/key under mcpServers/i)).toBeInTheDocument()
+    expect(screen.getByText(/which agent's agent\.yaml/i)).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText(/^ID/), 'demo')
+    expect(await screen.findByText('mcpServers.demo.transport')).toBeInTheDocument()
+    // stdio is the default transport -> command field visible with its own path
+    expect(screen.getByText('mcpServers.demo.command')).toBeInTheDocument()
+    expect(screen.getByText('mcpServers.demo.auth_type')).toBeInTheDocument()
+  })
+
+  it('updates auth-field hints when auth type changes, hoisting oauth fields under x-fleetent.auth', async () => {
+    mockBase('admin', [])
+    const user = userEvent.setup({ delay: null })
+    server.use(fieldSchemaHandler)
+
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: 'Add MCP Server' }))
+    await user.type(screen.getByLabelText(/^ID/), 'demo')
+
+    await user.click(screen.getByRole('combobox', { name: 'Auth type' }))
+    await user.click(await screen.findByRole('option', { name: 'API Key' }))
+    expect(await screen.findByText('mcpServers.demo.api_key_env')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('combobox', { name: 'Auth type' }))
+    await user.click(await screen.findByRole('option', { name: 'OAuth Client Credentials' }))
+    expect(await screen.findByText('mcpServers.demo.x-fleetent.auth.token_url')).toBeInTheDocument()
+    expect(screen.getByText('mcpServers.demo.x-fleetent.auth.client_id')).toBeInTheDocument()
+    expect(screen.queryByText('mcpServers.demo.api_key_env')).not.toBeInTheDocument()
   })
 })
