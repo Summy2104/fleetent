@@ -23,6 +23,14 @@ extraction:
   model: ""
   api_key_env: FLEETENT_KB_EXTRACTION_API_KEY
 
+rerank:
+  backend: disabled
+  # Enable and point at your self-hosted rerank service, e.g. Infinity:
+  # http://127.0.0.1:7997/rerank
+  endpoint: ""
+  model: your-reranker-model
+  api_key_env: FLEETENT_KB_RERANK_API_KEY
+
 chunking:
   chunk_size: 1000
   chunk_overlap: 200
