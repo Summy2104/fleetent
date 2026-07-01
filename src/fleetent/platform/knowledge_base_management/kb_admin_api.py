@@ -363,22 +363,6 @@ def run_evaluation(body: EvalBody, authorization: str | None = Header(None)) -> 
     return result
 
 
-@router.get("/by-agent/{agent_id}")
-def kbs_for_agent(
-    agent_id: int, tenant_id: str = _DEFAULT_TENANT, authorization: str | None = Header(None)
-) -> dict[str, Any]:
-    _current_user(authorization)
-    # Archive state lives in the KB engine, not the binding store: drop bindings
-    # whose KB has been archived so callers only see live KBs for the agent.
-    archived = {kb["kb_id"] for kb in kb_engine_list(tenant_id) if kb.get("archived")}
-    kb_ids = [
-        kb_id
-        for kb_id in agent_kbs_store.list_kbs_for_agent(tenant_id, agent_id)
-        if kb_id not in archived
-    ]
-    return {"agent_id": agent_id, "kb_ids": kb_ids}
-
-
 # --- KB list / create / edit / archive ----------------------------------------
 
 

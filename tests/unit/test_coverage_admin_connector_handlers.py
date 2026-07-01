@@ -136,6 +136,11 @@ def test_agent_admin_binding_skill_kb_and_mcp_handlers(monkeypatch):
         lambda tenant_id, agent_id: ["kb1"],
     )
     monkeypatch.setattr(
+        agent_admin_api,
+        "kb_engine_list",
+        lambda tenant_id: [{"kb_id": "kb1"}],
+    )
+    monkeypatch.setattr(
         agent_admin_api.agent_kbs_store,
         "bind",
         lambda *args, **kwargs: calls.append(("kb_bind", args, kwargs)),
