@@ -26,6 +26,7 @@ import {
   useMcpServerTestMutation,
 } from '@/features/connectors/api'
 import { useT } from '@/i18n'
+import { toast } from '@/lib/toast'
 
 export function McpRowActions({
   server,
@@ -44,15 +45,27 @@ export function McpRowActions({
   const remove = useDeleteMcpServerMutation(server.id)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
+  const runTest = async (): Promise<void> => {
+    try {
+      const result = await test.mutateAsync()
+      if (result.connected) {
+        toast.success(
+          t('mcp.testSuccessTitle', { name: server.id }),
+          t('mcp.connectedTools', { count: result.tools_count ?? 0 })
+        )
+      } else {
+        toast.error(t('mcp.testFailedTitle', { name: server.id }), result.error ?? t('mcp.testFailed'))
+      }
+    } catch (error) {
+      toast.error(
+        t('mcp.testFailedTitle', { name: server.id }),
+        error instanceof Error ? error.message : t('mcp.testFailed')
+      )
+    }
+  }
+
   return (
     <div className="flex items-center justify-end gap-2">
-      {test.data ? (
-        <span className="text-muted-foreground text-xs">
-          {test.data.connected
-            ? t('mcp.connectedTools', { count: test.data.tools_count ?? 0 })
-            : (test.data.error ?? t('mcp.testFailed'))}
-        </span>
-      ) : null}
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
@@ -65,7 +78,7 @@ export function McpRowActions({
           <DropdownMenuItem onClick={() => setTimeout(() => onViewTools(server), 0)}>
             {t('mcp.viewTools')}
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => void test.mutateAsync()}>{t('mcp.testConnection')}</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => void runTest()}>{t('mcp.testConnection')}</DropdownMenuItem>
           {canWrite ? (
             <>
               <DropdownMenuItem onClick={() => void reconnect.mutateAsync()}>{t('mcp.reconnect')}</DropdownMenuItem>

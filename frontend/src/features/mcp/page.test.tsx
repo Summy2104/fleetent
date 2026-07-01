@@ -104,7 +104,33 @@ describe('mcp page table', () => {
     await user.click(screen.getByRole('button', { name: 'Actions for filesystem' }))
     await user.click(await screen.findByRole('menuitem', { name: 'Test connection' }))
     await waitFor(() => expect(tested).toBe(true))
-    expect(await screen.findByText('connected · 3 tools')).toBeInTheDocument()
+    expect(await screen.findByText('filesystem connected')).toBeInTheDocument()
+    expect(screen.getByText('connected · 3 tools')).toBeInTheDocument()
+    // the test mutation owns its feedback; the global "Done" toast must not also fire
+    expect(screen.queryByText('Done')).not.toBeInTheDocument()
+  })
+
+  it('shows a failure toast with the backend error when the connectivity test fails', async () => {
+    mockBase()
+    server.use(
+      http.post(`${API_BASE_URL}/admin/mcp/servers/filesystem/test`, () =>
+        HttpResponse.json({
+          success: true,
+          server_id: 'filesystem',
+          connected: false,
+          error: "[Errno 2] No such file or directory: 'npx -y asdfasdf'",
+        })
+      )
+    )
+    const user = userEvent.setup({ delay: null })
+    renderPage()
+    await screen.findByText('filesystem')
+    await user.click(screen.getByRole('button', { name: 'Actions for filesystem' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Test connection' }))
+    expect(await screen.findByText('filesystem connection failed')).toBeInTheDocument()
+    expect(screen.getByText("[Errno 2] No such file or directory: 'npx -y asdfasdf'")).toBeInTheDocument()
+    // a connected:false result is a logical failure over an HTTP 200 — no global success toast
+    expect(screen.queryByText('Done')).not.toBeInTheDocument()
   })
 
   it('reconnects via the row actions menu', async () => {

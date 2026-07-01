@@ -207,5 +207,9 @@ export function useMcpServerTestMutation(serverId: string) {
 
   return useMutation({
     mutationFn: () => api.post<McpTestResponse>(`/admin/mcp/servers/${serverId}/test`),
+    // The row action surfaces its own success/failure toast (connected vs. error),
+    // so suppress the global "Done" toast — a connected:false result is a logical
+    // failure even though the request succeeds.
+    meta: { silent: true },
   })
 }
