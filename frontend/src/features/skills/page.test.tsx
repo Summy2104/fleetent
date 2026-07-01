@@ -29,8 +29,11 @@ function renderSkillsPage(): void {
 }
 
 describe('skills page parity baseline', () => {
-  it('supports native skills admin flows and keeps proposals read-only', async () => {
-    const user = userEvent.setup({ delay: null })
+  // Shared read/write stubs for the skills admin surface. Each test calls this to
+  // get its own fresh mutable state, then drives a single flow — splitting what was
+  // one long 7-dialog test keeps each case short so it stays well inside the timeout
+  // even on a CPU-starved CI runner (the old mega-test was the suite's flake source).
+  function stubSkillsAdmin(): { getReloadCount: () => number } {
     let reloadCount = 0
     const activeVersion = 'sha-1'
     let skills: SkillRecord[] = [
@@ -163,6 +166,11 @@ describe('skills page parity baseline', () => {
       http.get(`${API_BASE_URL}/admin/skills/backflow`, () => HttpResponse.json([]))
     )
 
+    return { getReloadCount: () => reloadCount }
+  }
+
+  it('renders the skill rows with their status', async () => {
+    stubSkillsAdmin()
     renderSkillsPage()
 
     expect(await screen.findByText('Skills')).toBeInTheDocument()
@@ -170,18 +178,29 @@ describe('skills page parity baseline', () => {
     expect(await screen.findByRole('button', { name: 'Actions for ops-guide' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Actions for welcome-pack' })).toBeInTheDocument()
     expect(screen.getByText('quarantined')).toBeInTheDocument()
+  })
 
-    // View the published skill content via the row's Actions menu.
-    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }))
+  it('views the published skill content', async () => {
+    const user = userEvent.setup({ delay: null })
+    stubSkillsAdmin()
+    renderSkillsPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Actions for ops-guide' }))
     await user.click(await screen.findByText('View content'))
     expect(await screen.findByText(/ops-guide body/)).toBeInTheDocument()
+    // Closing exercises the table's onOpenChange(false) reset path.
     await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
 
-    // Agent bindings: open the dialog, confirm bound state, toggle a binding.
-    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }))
+  it('lists agent bindings and toggles one', async () => {
+    const user = userEvent.setup({ delay: null })
+    stubSkillsAdmin()
+    renderSkillsPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Actions for ops-guide' }))
     await user.click(await screen.findByText('Agent bindings'))
-    const bindingsDialog = await screen.findByRole('dialog')
-    const bindingControls = within(bindingsDialog)
+    const bindingControls = within(await screen.findByRole('dialog'))
     // Bindings load async after the dialog mounts; await the controls. Query by
     // the switch role: Base UI's Switch renders both a hidden <input> and the
     // role="switch" element sharing one label, so getByLabelText is ambiguous.
@@ -191,9 +210,15 @@ describe('skills page parity baseline', () => {
       expect(bindingControls.getByRole('switch', { name: 'agent-b' })).toBeChecked()
     })
     await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
 
-    // Versions dialog: pick the second revision and view its diff.
-    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }))
+  it('shows a revision diff in the versions dialog', async () => {
+    const user = userEvent.setup({ delay: null })
+    stubSkillsAdmin()
+    renderSkillsPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Actions for ops-guide' }))
     await user.click(await screen.findByText('Versions'))
     const versionsDialog = await screen.findByRole('dialog')
     // Two revisions, each with its own "Diff" button; the second row is sha-2.
@@ -201,12 +226,18 @@ describe('skills page parity baseline', () => {
     await user.click(diffButtons[1])
     expect(await within(versionsDialog).findByText('diff ops-guide sha-2')).toBeInTheDocument()
     await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('keeps the proposals dialog read-only', async () => {
+    const user = userEvent.setup({ delay: null })
+    stubSkillsAdmin()
+    renderSkillsPage()
 
     // Proposals dialog is read-only: shows reasons + diff, never approve/reject.
-    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }))
+    await user.click(await screen.findByRole('button', { name: 'Actions for ops-guide' }))
     await user.click(await screen.findByText(/^Proposals/))
-    const proposalsDialog = await screen.findByRole('dialog')
-    const proposals = within(proposalsDialog)
+    const proposals = within(await screen.findByRole('dialog'))
     expect(proposals.getByText('Tighten escalation wording')).toBeInTheDocument()
     expect(proposals.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument()
     expect(proposals.queryByRole('button', { name: /reject/i })).not.toBeInTheDocument()
@@ -215,12 +246,16 @@ describe('skills page parity baseline', () => {
     // Close the proposal-diff dialog, then the proposals dialog.
     await user.keyboard('{Escape}')
     await user.keyboard('{Escape}')
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('force-publishes a quarantined skill and drops the option afterward', async () => {
+    const user = userEvent.setup({ delay: null })
+    stubSkillsAdmin()
+    renderSkillsPage()
 
     // Force publish (only offered for rejected/quarantined skills) clears quarantine.
-    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }))
+    await user.click(await screen.findByRole('button', { name: 'Actions for ops-guide' }))
     await user.click(await screen.findByText('Force publish'))
     const forcePublishConfirm = await screen.findByRole('alertdialog')
     await user.click(within(forcePublishConfirm).getByRole('button', { name: 'Force publish' }))
@@ -229,20 +264,29 @@ describe('skills page parity baseline', () => {
     })
     await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }))
     expect(screen.queryByText('Force publish')).not.toBeInTheDocument()
-    await user.keyboard('{Escape}')
+  })
 
-    // Disable is destructive: it opens a confirm dialog before toggling. Then Enable.
-    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }))
+  it('disables a skill and then surfaces the enable action', async () => {
+    const user = userEvent.setup({ delay: null })
+    stubSkillsAdmin()
+    renderSkillsPage()
+
+    // Disable is destructive: it opens a confirm dialog before toggling.
+    await user.click(await screen.findByRole('button', { name: 'Actions for ops-guide' }))
     await user.click(await screen.findByText('Disable'))
     const disableConfirm = await screen.findByRole('alertdialog')
     await user.click(within(disableConfirm).getByRole('button', { name: 'Disable' }))
     await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
     await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }))
     expect(await screen.findByText('Enable')).toBeInTheDocument()
-    await user.keyboard('{Escape}')
+  })
 
-    // Archive ops-guide via confirm dialog.
-    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }))
+  it('archives a skill and restores an archived one', async () => {
+    const user = userEvent.setup({ delay: null })
+    const { getReloadCount } = stubSkillsAdmin()
+    renderSkillsPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Actions for ops-guide' }))
     await user.click(await screen.findByText('Archive'))
     const archiveConfirm = await screen.findByRole('alertdialog')
     await user.click(within(archiveConfirm).getByRole('button', { name: 'Archive' }))
@@ -253,18 +297,22 @@ describe('skills page parity baseline', () => {
     // background `aria-hidden`, so the row's action button isn't yet queryable.
     await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
 
-    // welcome-pack is archived -> its menu offers Restore.
+    // welcome-pack starts archived -> its menu offers Restore (which does not reload).
     await user.click(screen.getByRole('button', { name: 'Actions for welcome-pack' }))
     await user.click(await screen.findByText('Restore'))
     await waitFor(() => {
-      expect(reloadCount).toBe(0)
+      expect(getReloadCount()).toBe(0)
     })
-    await user.keyboard('{Escape}')
+  })
 
-    // Reload skill index button on the header.
-    await user.click(screen.getByRole('button', { name: 'Reload index' }))
+  it('reloads the skill index from the header', async () => {
+    const user = userEvent.setup({ delay: null })
+    const { getReloadCount } = stubSkillsAdmin()
+    renderSkillsPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Reload index' }))
     await waitFor(() => {
-      expect(reloadCount).toBe(1)
+      expect(getReloadCount()).toBe(1)
     })
   })
 })
