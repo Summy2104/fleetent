@@ -33,8 +33,6 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
-  type CreateModelInput,
-  type CreateProviderInput,
   type ModelListItem,
   type ProviderListItem,
   useConnectivityTestMutation,
@@ -45,6 +43,16 @@ import {
   useProvidersQuery,
   useUpdateProviderMutation,
 } from '@/features/providers/api'
+import {
+  buildCreateModelPayload,
+  buildCreateProviderPayload,
+  buildUpdateProviderPayload,
+  emptyModelForm,
+  emptyProviderForm,
+  type ModelFormState,
+  type ProviderFormState,
+  providerFormFromProvider,
+} from '@/features/providers/shared'
 import { useT } from '@/i18n'
 import { useAdminApi } from '@/lib/api-client'
 
@@ -53,30 +61,6 @@ type AdminMe = { email: string; id: string; role: string }
 function useAdminMeQuery() {
   const api = useAdminApi()
   return useQuery({ queryKey: ['admin-me'], queryFn: () => api.get<AdminMe>('/admin/me') })
-}
-
-type ProviderFormState = {
-  apiKey: string
-  baseUrl: string
-  description: string
-  id: string
-  provider: string
-}
-
-type ModelFormState = {
-  baseUrl: string
-  id: string
-  modelName: string
-  protocol: string
-  providerId: string
-}
-
-function emptyProviderForm(): ProviderFormState {
-  return { apiKey: '', baseUrl: '', description: '', id: '', provider: '' }
-}
-
-function emptyModelForm(providerId = ''): ModelFormState {
-  return { baseUrl: '', id: '', modelName: '', protocol: 'openai_chat', providerId }
 }
 
 function ProviderFormDialog({
@@ -360,46 +344,21 @@ export function ProvidersPage(): JSX.Element {
   const openEditProvider = (provider: ProviderListItem): void => {
     setProviderMode('edit')
     setEditingProviderId(provider.id)
-    setProviderForm({
-      apiKey: '',
-      baseUrl: provider.base_url ?? '',
-      description: provider.description ?? '',
-      id: provider.id,
-      provider: provider.provider ?? '',
-    })
+    setProviderForm(providerFormFromProvider(provider))
     setProviderFormOpen(true)
   }
 
   const submitProvider = async (): Promise<void> => {
     if (providerMode === 'create') {
-      const payload: CreateProviderInput = {
-        api_key: providerForm.apiKey || undefined,
-        base_url: providerForm.baseUrl || undefined,
-        description: providerForm.description || undefined,
-        id: providerForm.id,
-        provider: providerForm.provider || undefined,
-      }
-      await createProvider.mutateAsync(payload)
+      await createProvider.mutateAsync(buildCreateProviderPayload(providerForm))
     } else {
-      await updateProvider.mutateAsync({
-        api_key: providerForm.apiKey || undefined,
-        base_url: providerForm.baseUrl || undefined,
-        description: providerForm.description || undefined,
-        provider: providerForm.provider || undefined,
-      })
+      await updateProvider.mutateAsync(buildUpdateProviderPayload(providerForm))
     }
     setProviderFormOpen(false)
   }
 
   const submitModel = async (): Promise<void> => {
-    const payload: CreateModelInput = {
-      base_url: modelForm.baseUrl || undefined,
-      id: modelForm.id,
-      model_name: modelForm.modelName,
-      protocol: modelForm.protocol,
-      provider_id: modelForm.providerId,
-    }
-    await createModel.mutateAsync(payload)
+    await createModel.mutateAsync(buildCreateModelPayload(modelForm))
     setModelFormOpen(false)
   }
 

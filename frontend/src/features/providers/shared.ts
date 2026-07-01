@@ -1,8 +1,9 @@
-import { useQuery } from '@tanstack/react-query'
-
-import { useAdminApi } from '@/lib/api-client'
-
-export type AdminMe = { email: string; id: string; role: string }
+import type {
+  CreateModelInput,
+  CreateProviderInput,
+  ProviderListItem,
+  UpdateProviderInput,
+} from '@/features/providers/api'
 
 export type ProviderFormState = {
   apiKey: string
@@ -28,7 +29,45 @@ export function emptyModelForm(providerId = ''): ModelFormState {
   return { baseUrl: '', id: '', modelName: '', protocol: 'openai_chat', providerId }
 }
 
-export function useAdminMeQuery() {
-  const api = useAdminApi()
-  return useQuery({ queryKey: ['admin-me'], queryFn: () => api.get<AdminMe>('/admin/me') })
+// Populate the provider form from an existing record for edit; the api key is never
+// prefilled (write-only secret), so a blank submit leaves the stored key untouched.
+export function providerFormFromProvider(provider: ProviderListItem): ProviderFormState {
+  return {
+    apiKey: '',
+    baseUrl: provider.base_url ?? '',
+    description: provider.description ?? '',
+    id: provider.id,
+    provider: provider.provider ?? '',
+  }
+}
+
+// Optional string fields collapse to undefined when blank so the API omits them
+// (rather than persisting empty strings / clearing the stored api key).
+export function buildCreateProviderPayload(form: ProviderFormState): CreateProviderInput {
+  return {
+    api_key: form.apiKey || undefined,
+    base_url: form.baseUrl || undefined,
+    description: form.description || undefined,
+    id: form.id,
+    provider: form.provider || undefined,
+  }
+}
+
+export function buildUpdateProviderPayload(form: ProviderFormState): UpdateProviderInput {
+  return {
+    api_key: form.apiKey || undefined,
+    base_url: form.baseUrl || undefined,
+    description: form.description || undefined,
+    provider: form.provider || undefined,
+  }
+}
+
+export function buildCreateModelPayload(form: ModelFormState): CreateModelInput {
+  return {
+    base_url: form.baseUrl || undefined,
+    id: form.id,
+    model_name: form.modelName,
+    protocol: form.protocol,
+    provider_id: form.providerId,
+  }
 }
