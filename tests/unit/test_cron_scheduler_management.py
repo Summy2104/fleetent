@@ -10,39 +10,6 @@ from fleetent import cron_scheduler
 from fleetent.config import SchedulingSettings
 
 
-class _FakeScheduler:
-    def __init__(self) -> None:
-        self.running = False
-        self.jobs: dict[str, dict[str, object]] = {}
-        self.add_calls: list[tuple[object, dict[str, object]]] = []
-        self.removed: list[str] = []
-
-    def add_job(self, func, **kwargs) -> None:
-        self.add_calls.append((func, kwargs))
-        self.jobs[str(kwargs["id"])] = {"func": func, **kwargs}
-
-    def get_job(self, job_id: str):
-        return self.jobs.get(job_id)
-
-    def remove_job(self, job_id: str) -> None:
-        self.removed.append(job_id)
-        self.jobs.pop(job_id, None)
-
-    def start(self) -> None:
-        self.running = True
-
-    def shutdown(self, wait: bool = False) -> None:
-        self.running = False
-
-
-@pytest.fixture
-def fake_scheduler(monkeypatch: pytest.MonkeyPatch) -> _FakeScheduler:
-    fake = _FakeScheduler()
-    monkeypatch.setattr(cron_scheduler, "AsyncIOScheduler", lambda: fake)
-    monkeypatch.setattr(cron_scheduler, "_current", None)
-    return fake
-
-
 def test_record_run_swallow_store_write_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         cron_scheduler._store,
@@ -51,6 +18,19 @@ def test_record_run_swallow_store_write_failure(monkeypatch: pytest.MonkeyPatch)
     )
 
     cron_scheduler._record_run({"id": "task-1"}, "2026-06-15T00:00:00Z", "ok", None)  # noqa: SLF001
+
+
+def test_record_history_swallow_store_write_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A run-history write failure must never break a fire (best-effort side channel).
+    monkeypatch.setattr(
+        cron_scheduler._store,
+        "record_run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    cron_scheduler._record_history(  # noqa: SLF001
+        {"id": "task-1"}, "2026-06-15T00:00:00Z", "ok", kind="generate"
+    )
 
 
 async def test_scheduler_start_skips_disabled_settings(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -63,10 +43,11 @@ async def test_scheduler_start_skips_disabled_settings(monkeypatch: pytest.Monke
 
     assert scheduler.running is False
     assert cron_scheduler.current() is None
+    await scheduler.shutdown()
 
 
 async def test_scheduler_start_bulkheads_bad_rows_and_sets_current(
-    monkeypatch: pytest.MonkeyPatch, fake_scheduler: _FakeScheduler
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     tasks = [{"id": "good"}, {"id": "bad"}]
     disabled: list[tuple[str, bool]] = []
@@ -98,58 +79,41 @@ async def test_scheduler_start_bulkheads_bad_rows_and_sets_current(
     assert disabled == [("bad", False)]
     assert scheduler.running is True
     assert cron_scheduler.current() is scheduler
+    await scheduler.shutdown()
 
 
-def test_register_maintenance_jobs_adds_cleanup_job(fake_scheduler: _FakeScheduler) -> None:
+def test_register_maintenance_jobs_adds_cleanup_job() -> None:
     scheduler = cron_scheduler.CronScheduler()
 
     scheduler._register_maintenance_jobs()  # noqa: SLF001
 
-    assert fake_scheduler.get_job("__maintenance_spillover_cleanup__") is not None
+    view = scheduler.get_job("__maintenance_spillover_cleanup__")
+    assert view is not None
+    assert view.next_run_time is not None  # scheduled for the next 03:00
 
 
 @pytest.mark.parametrize(
-    ("task", "trigger", "extra_key"),
+    "task",
     [
-        (
-            {"id": "once-1", "schedule_kind": "once", "run_at": "2026-06-15T08:00:00+00:00"},
-            "date",
-            "run_date",
-        ),
-        (
-            {"id": "int-1", "schedule_kind": "interval", "interval_seconds": 30},
-            "interval",
-            "seconds",
-        ),
-        ({"id": "cron-1", "schedule_kind": "cron", "cron_expr": "0 9 * * *"}, "cron", "minute"),
+        {"id": "once-1", "schedule_kind": "once", "run_at": "2099-06-15T08:00:00+00:00"},
+        {"id": "int-1", "schedule_kind": "interval", "interval_seconds": 30},
+        {"id": "cron-1", "schedule_kind": "cron", "cron_expr": "0 9 * * *"},
     ],
 )
-def test_register_adds_expected_trigger_jobs(
-    monkeypatch: pytest.MonkeyPatch,
-    fake_scheduler: _FakeScheduler,
-    task: dict[str, object],
-    trigger: str,
-    extra_key: str,
-) -> None:
-    monkeypatch.setattr(
-        cron_scheduler, "_parse_run_at", lambda value: datetime(2026, 6, 15, tzinfo=UTC)
-    )
-    monkeypatch.setattr(
-        cron_scheduler,
-        "_parse_cron",
-        lambda expr: {"minute": "0", "hour": "9", "day": "*", "month": "*", "day_of_week": "*"},
-    )
+def test_register_sets_next_run_for_each_kind(task: dict[str, object]) -> None:
+    # The poll engine registers a job view with a computed next_run_time (no APScheduler
+    # trigger). The store write is best-effort and suppressed when no state DB is present.
     scheduler = cron_scheduler.CronScheduler()
 
     scheduler._register(task)  # noqa: SLF001
 
-    job = fake_scheduler.get_job(str(task["id"]))
-    assert job is not None and job["trigger"] == trigger
-    assert extra_key in job
+    view = scheduler.get_job(str(task["id"]))
+    assert view is not None
+    assert view.next_run_time is not None
 
 
 def test_create_remove_and_toggle_task_delegate_to_store_and_scheduler(
-    monkeypatch: pytest.MonkeyPatch, fake_scheduler: _FakeScheduler
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     scheduler = cron_scheduler.CronScheduler()
     task = {"id": "task-1", "schedule_kind": "cron", "cron_expr": "0 9 * * *"}
@@ -160,21 +124,25 @@ def test_create_remove_and_toggle_task_delegate_to_store_and_scheduler(
         cron_scheduler._store, "get", lambda task_id: task if task_id == "task-1" else None
     )
     registered: list[str] = []
+    removed: list[str] = []
     monkeypatch.setattr(
         cron_scheduler.CronScheduler, "_register", lambda self, row: registered.append(row["id"])
     )
+    monkeypatch.setattr(
+        cron_scheduler.CronScheduler, "remove_job", lambda self, tid: removed.append(tid)
+    )
 
     created = scheduler.create_task(name="n", cron_expr="0 9 * * *")
-    removed = scheduler.remove_task("task-1")
+    removed_ok = scheduler.remove_task("task-1")
     enabled = scheduler.set_task_enabled("task-1", True)
     disabled = scheduler.set_task_enabled("task-1", False)
 
     assert created == task
-    assert removed is True
+    assert removed_ok is True
     assert enabled is True
     assert disabled is True
-    assert registered == ["task-1", "task-1"]
-    assert fake_scheduler.removed == ["task-1", "task-1"]
+    assert registered == ["task-1", "task-1"]  # create + resume re-register
+    assert removed == ["task-1", "task-1"]  # remove_task + disable deregister
 
 
 def test_complete_once_only_marks_successful_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -207,7 +175,7 @@ def test_complete_once_only_marks_successful_tasks(monkeypatch: pytest.MonkeyPat
 
 
 async def test_run_now_and_module_run_task_now_cover_scheduler_and_store_paths(
-    monkeypatch: pytest.MonkeyPatch, fake_scheduler: _FakeScheduler
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     scheduler = cron_scheduler.CronScheduler(connectors_resolver=lambda: {"slack": object()})
     fire = AsyncMock()

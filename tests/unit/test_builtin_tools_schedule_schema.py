@@ -36,6 +36,7 @@ def test_schedule_schema_exposes_action_enum() -> None:
         "run_now",
         "pause",
         "resume",
+        "history",
     }
 
 
