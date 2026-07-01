@@ -1,0 +1,9 @@
+# pnpm 11+ 读取配置的宿主文件（pnpm 不再读 package.json 的 "pnpm" 字段）。
+# 本项目是单包工程，无 packages/* 工作区，此文件仅承载构建脚本白名单。
+#
+# pnpm v10+ 默认不执行依赖的 lifecycle 脚本（安全特性）；以下包需要显式放行：
+#   - esbuild：vite 与 vitest 依赖其安装平台原生二进制（@esbuild/<platform>）
+#   - msw：写入 mock service worker（无害，官方建议允许）
+allowBuilds:
+  esbuild: true
+  msw: true

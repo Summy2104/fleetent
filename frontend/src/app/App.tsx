@@ -1,11 +1,11 @@
-import { BrowserRouter } from 'react-router-dom';
+import { BrowserRouter } from 'react-router-dom'
 
-import { AuthProvider } from '@/app/auth';
-import { AppQueryProvider } from '@/app/query-client';
-import { AdminRoutes } from '@/app/routes';
-import { ThemeProvider } from '@/app/theme';
-import { Toaster } from '@/components/ui/toaster';
-import { I18nProvider } from '@/i18n';
+import { AuthProvider } from '@/app/auth'
+import { AppQueryProvider } from '@/app/query-client'
+import { AdminRoutes } from '@/app/routes'
+import { ThemeProvider } from '@/app/theme'
+import { Toaster } from '@/components/ui/sonner'
+import { I18nProvider } from '@/i18n'
 
 export function App(): JSX.Element {
   return (
@@ -21,5 +21,5 @@ export function App(): JSX.Element {
         </AuthProvider>
       </ThemeProvider>
     </I18nProvider>
-  );
+  )
 }

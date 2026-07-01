@@ -1,56 +1,41 @@
-import { MemoryRouter } from 'react-router-dom';
-import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { HttpResponse, http } from 'msw';
-import { describe, expect, it, vi } from 'vitest';
+import { screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { HttpResponse, http } from 'msw'
+import { describe, expect, it, vi } from 'vitest'
 
-import { AuthProvider } from '@/app/auth';
-import { AppQueryProvider } from '@/app/query-client';
-import { I18nProvider } from '@/i18n';
-import { SkillsPage } from '@/features/skills/page';
-import { server } from '@/test/msw/server';
-
-const API_BASE_URL = 'http://fleetent.test';
+import { SkillsPage } from '@/features/skills/page'
+import { API_BASE_URL, renderSkills } from '@/features/skills/test/render'
+import { server } from '@/test/msw/server'
 
 type SkillRecord = {
-  audit_verdict: string;
-  description: string;
-  drifted_agents: string[];
-  enabling_agents: string[];
-  global_enabled: boolean;
-  name: string;
-  source: string;
-  status: string;
-};
+  audit_verdict: string
+  description: string
+  drifted_agents: string[]
+  enabling_agents: string[]
+  global_enabled: boolean
+  name: string
+  source: string
+  status: string
+}
 
 type AgentBindingRecord = {
-  agent_id: number;
-  enabled: boolean;
-  name: string;
-};
+  agent_id: number
+  enabled: boolean
+  name: string
+}
 
 function renderSkillsPage(): void {
-  render(
-    <AuthProvider
-      baseUrl={API_BASE_URL}
-      initialToken="session-token"
-    >
-      <AppQueryProvider>
-        <I18nProvider>
-          <MemoryRouter>
-            <SkillsPage />
-          </MemoryRouter>
-        </I18nProvider>
-      </AppQueryProvider>
-    </AuthProvider>
-  );
+  renderSkills(<SkillsPage />)
 }
 
 describe('skills page parity baseline', () => {
-  it('supports native skills admin flows and keeps proposals read-only', async () => {
-    const user = userEvent.setup({ delay: null });
-    let reloadCount = 0;
-    const activeVersion = 'sha-1';
+  // Shared read/write stubs for the skills admin surface. Each test calls this to
+  // get its own fresh mutable state, then drives a single flow — splitting what was
+  // one long 7-dialog test keeps each case short so it stays well inside the timeout
+  // even on a CPU-starved CI runner (the old mega-test was the suite's flake source).
+  function stubSkillsAdmin(): { getReloadCount: () => number } {
+    let reloadCount = 0
+    const activeVersion = 'sha-1'
     let skills: SkillRecord[] = [
       {
         audit_verdict: 'rejected',
@@ -72,11 +57,11 @@ describe('skills page parity baseline', () => {
         source: 'marketplace',
         status: 'archived',
       },
-    ];
+    ]
     let bindings: AgentBindingRecord[] = [
       { agent_id: 7, enabled: true, name: 'agent-a' },
       { agent_id: 8, enabled: false, name: 'agent-b' },
-    ];
+    ]
 
     server.use(
       http.get(`${API_BASE_URL}/admin/me`, () =>
@@ -92,51 +77,45 @@ describe('skills page parity baseline', () => {
       http.post(`${API_BASE_URL}/admin/skills/:name/disable`, ({ params }) => {
         skills = skills.map((skill) =>
           skill.name === params.name ? { ...skill, global_enabled: false, status: 'active' } : skill
-        );
-        return HttpResponse.json({ global_enabled: 0, name: params.name });
+        )
+        return HttpResponse.json({ global_enabled: 0, name: params.name })
       }),
       http.post(`${API_BASE_URL}/admin/skills/:name/enable`, ({ params }) => {
         skills = skills.map((skill) =>
           skill.name === params.name ? { ...skill, global_enabled: true, status: 'active' } : skill
-        );
-        return HttpResponse.json({ global_enabled: 1, name: params.name });
+        )
+        return HttpResponse.json({ global_enabled: 1, name: params.name })
       }),
       http.delete(`${API_BASE_URL}/admin/skills/:name`, ({ params, request }) => {
-        expect(request.headers.get('x-confirm')).toBe('true');
-        skills = skills.map((skill) =>
-          skill.name === params.name ? { ...skill, status: 'archived' } : skill
-        );
-        return HttpResponse.json({ name: params.name, status: 'archived' });
+        expect(request.headers.get('x-confirm')).toBe('true')
+        skills = skills.map((skill) => (skill.name === params.name ? { ...skill, status: 'archived' } : skill))
+        return HttpResponse.json({ name: params.name, status: 'archived' })
       }),
       http.post(`${API_BASE_URL}/admin/skills/:name/restore`, ({ params }) => {
-        skills = skills.map((skill) =>
-          skill.name === params.name ? { ...skill, status: 'active' } : skill
-        );
-        return HttpResponse.json({ name: params.name, status: 'active' });
+        skills = skills.map((skill) => (skill.name === params.name ? { ...skill, status: 'active' } : skill))
+        return HttpResponse.json({ name: params.name, status: 'active' })
       }),
       http.post(`${API_BASE_URL}/admin/skills/:name/force-publish`, ({ params, request }) => {
-        expect(request.headers.get('x-confirm')).toBe('true');
+        expect(request.headers.get('x-confirm')).toBe('true')
         skills = skills.map((skill) =>
           skill.name === params.name ? { ...skill, audit_verdict: 'pass', status: 'active' } : skill
-        );
-        return HttpResponse.json({ forced: 1, name: params.name, status: 'active' });
+        )
+        return HttpResponse.json({ forced: 1, name: params.name, status: 'active' })
       }),
       http.post(`${API_BASE_URL}/admin/skills/reload`, () => {
-        reloadCount += 1;
-        return HttpResponse.json({ ok: true });
+        reloadCount += 1
+        return HttpResponse.json({ ok: true })
       }),
       http.get(`${API_BASE_URL}/admin/skills/:name/agents`, ({ params }) =>
         HttpResponse.json(
-          String(params.name ?? '') === 'ops-guide'
-            ? bindings
-            : [{ agent_id: 9, enabled: false, name: 'agent-c' }]
+          String(params.name ?? '') === 'ops-guide' ? bindings : [{ agent_id: 9, enabled: false, name: 'agent-c' }]
         )
       ),
       http.put(`${API_BASE_URL}/admin/skills/:name/agents/:agentId`, async ({ params, request }) => {
-        const body = (await request.json()) as { enabled: boolean };
+        const body = (await request.json()) as { enabled: boolean }
         bindings = bindings.map((binding) =>
           binding.agent_id === Number(params.agentId) ? { ...binding, enabled: body.enabled } : binding
-        );
+        )
         skills = skills.map((skill) =>
           skill.name === String(params.name ?? '')
             ? {
@@ -144,12 +123,12 @@ describe('skills page parity baseline', () => {
                 enabling_agents: bindings.filter((binding) => binding.enabled).map((binding) => binding.name),
               }
             : skill
-        );
+        )
         return HttpResponse.json({
           agent_id: Number(params.agentId),
           enabled: body.enabled,
           name: String(params.name ?? ''),
-        });
+        })
       }),
       http.get(`${API_BASE_URL}/admin/skills/:name/versions`, ({ params }) =>
         HttpResponse.json([
@@ -185,102 +164,158 @@ describe('skills page parity baseline', () => {
         HttpResponse.json({ diff: `proposal diff ${String(params.id ?? '')}` })
       ),
       http.get(`${API_BASE_URL}/admin/skills/backflow`, () => HttpResponse.json([]))
-    );
+    )
 
-    renderSkillsPage();
+    return { getReloadCount: () => reloadCount }
+  }
 
-    expect(await screen.findByRole('heading', { name: 'Skills' })).toBeInTheDocument();
-    // The current UI renders skills as table rows; each row exposes an "Actions for {name}" menu trigger.
-    expect(await screen.findByRole('button', { name: 'Actions for ops-guide' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Actions for welcome-pack' })).toBeInTheDocument();
-    expect(screen.getByText('quarantined')).toBeInTheDocument();
+  it('renders the skill rows with their status', async () => {
+    stubSkillsAdmin()
+    renderSkillsPage()
 
-    // View the published skill content via the row's Actions menu.
-    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }));
-    await user.click(await screen.findByText('View content'));
-    expect(await screen.findByText(/ops-guide body/)).toBeInTheDocument();
-    await user.keyboard('{Escape}');
+    expect(await screen.findByText('Skills')).toBeInTheDocument()
+    // The DataTable renders skills as rows; each row exposes an "Actions for {name}" menu trigger.
+    expect(await screen.findByRole('button', { name: 'Actions for ops-guide' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Actions for welcome-pack' })).toBeInTheDocument()
+    expect(screen.getByText('quarantined')).toBeInTheDocument()
+  })
 
-    // Agent bindings: open the dialog, confirm bound state, toggle a binding.
-    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }));
-    await user.click(await screen.findByText('Agent bindings'));
-    const bindingsDialog = await screen.findByRole('dialog');
-    const bindingControls = within(bindingsDialog);
-    expect(bindingControls.getByLabelText('agent-a')).toBeChecked();
-    await user.click(bindingControls.getByLabelText('agent-b'));
+  it('views the published skill content', async () => {
+    const user = userEvent.setup({ delay: null })
+    stubSkillsAdmin()
+    renderSkillsPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Actions for ops-guide' }))
+    await user.click(await screen.findByText('View content'))
+    expect(await screen.findByText(/ops-guide body/)).toBeInTheDocument()
+    // Closing exercises the table's onOpenChange(false) reset path.
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('lists agent bindings and toggles one', async () => {
+    const user = userEvent.setup({ delay: null })
+    stubSkillsAdmin()
+    renderSkillsPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Actions for ops-guide' }))
+    await user.click(await screen.findByText('Agent bindings'))
+    const bindingControls = within(await screen.findByRole('dialog'))
+    // Bindings load async after the dialog mounts; await the controls. Query by
+    // the switch role: Base UI's Switch renders both a hidden <input> and the
+    // role="switch" element sharing one label, so getByLabelText is ambiguous.
+    expect(await bindingControls.findByRole('switch', { name: 'agent-a' })).toBeChecked()
+    await user.click(await bindingControls.findByRole('switch', { name: 'agent-b' }))
     await waitFor(() => {
-      expect(bindingControls.getByLabelText('agent-b')).toBeChecked();
-    });
-    await user.keyboard('{Escape}');
+      expect(bindingControls.getByRole('switch', { name: 'agent-b' })).toBeChecked()
+    })
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
 
-    // Versions dialog: pick the second revision and view its diff.
-    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }));
-    await user.click(await screen.findByText('Versions'));
-    const versionsDialog = await screen.findByRole('dialog');
+  it('shows a revision diff in the versions dialog', async () => {
+    const user = userEvent.setup({ delay: null })
+    stubSkillsAdmin()
+    renderSkillsPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Actions for ops-guide' }))
+    await user.click(await screen.findByText('Versions'))
+    const versionsDialog = await screen.findByRole('dialog')
     // Two revisions, each with its own "Diff" button; the second row is sha-2.
-    const diffButtons = await within(versionsDialog).findAllByRole('button', { name: 'Diff' });
-    await user.click(diffButtons[1]);
-    expect(await within(versionsDialog).findByText('diff ops-guide sha-2')).toBeInTheDocument();
-    await user.keyboard('{Escape}');
+    const diffButtons = await within(versionsDialog).findAllByRole('button', { name: 'Diff' })
+    await user.click(diffButtons[1])
+    expect(await within(versionsDialog).findByText('diff ops-guide sha-2')).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('keeps the proposals dialog read-only', async () => {
+    const user = userEvent.setup({ delay: null })
+    stubSkillsAdmin()
+    renderSkillsPage()
 
     // Proposals dialog is read-only: shows reasons + diff, never approve/reject.
-    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }));
-    await user.click(await screen.findByText(/^Proposals/));
-    const proposalsDialog = await screen.findByRole('dialog');
-    const proposals = within(proposalsDialog);
-    expect(proposals.getByText('Tighten escalation wording')).toBeInTheDocument();
-    expect(proposals.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument();
-    expect(proposals.queryByRole('button', { name: /reject/i })).not.toBeInTheDocument();
-    await user.click(proposals.getByRole('button', { name: 'Diff' }));
-    expect(await screen.findByText('proposal diff prop-1')).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: 'Actions for ops-guide' }))
+    await user.click(await screen.findByText(/^Proposals/))
+    const proposals = within(await screen.findByRole('dialog'))
+    expect(proposals.getByText('Tighten escalation wording')).toBeInTheDocument()
+    expect(proposals.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument()
+    expect(proposals.queryByRole('button', { name: /reject/i })).not.toBeInTheDocument()
+    await user.click(proposals.getByRole('button', { name: 'Diff' }))
+    expect(await screen.findByText('proposal diff prop-1')).toBeInTheDocument()
     // Close the proposal-diff dialog, then the proposals dialog.
-    await user.keyboard('{Escape}');
-    await user.keyboard('{Escape}');
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    });
+    await user.keyboard('{Escape}')
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('force-publishes a quarantined skill and drops the option afterward', async () => {
+    const user = userEvent.setup({ delay: null })
+    stubSkillsAdmin()
+    renderSkillsPage()
 
     // Force publish (only offered for rejected/quarantined skills) clears quarantine.
-    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }));
-    await user.click(await screen.findByText('Force publish'));
+    await user.click(await screen.findByRole('button', { name: 'Actions for ops-guide' }))
+    await user.click(await screen.findByText('Force publish'))
+    const forcePublishConfirm = await screen.findByRole('alertdialog')
+    await user.click(within(forcePublishConfirm).getByRole('button', { name: 'Force publish' }))
     await waitFor(() => {
-      expect(screen.getByText('active')).toBeInTheDocument();
-    });
-    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }));
-    expect(screen.queryByText('Force publish')).not.toBeInTheDocument();
-    await user.keyboard('{Escape}');
+      expect(screen.getByText('active')).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }))
+    expect(screen.queryByText('Force publish')).not.toBeInTheDocument()
+  })
 
-    // Disable -> Enable toggle.
-    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }));
-    await user.click(await screen.findByText('Disable'));
-    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }));
-    expect(await screen.findByText('Enable')).toBeInTheDocument();
-    await user.keyboard('{Escape}');
+  it('disables a skill and then surfaces the enable action', async () => {
+    const user = userEvent.setup({ delay: null })
+    stubSkillsAdmin()
+    renderSkillsPage()
 
-    // Archive ops-guide via confirm dialog.
-    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }));
-    await user.click(await screen.findByText('Archive'));
-    const archiveConfirm = await screen.findByRole('alertdialog');
-    await user.click(within(archiveConfirm).getByRole('button', { name: 'Archive' }));
+    // Disable is destructive: it opens a confirm dialog before toggling.
+    await user.click(await screen.findByRole('button', { name: 'Actions for ops-guide' }))
+    await user.click(await screen.findByText('Disable'))
+    const disableConfirm = await screen.findByRole('alertdialog')
+    await user.click(within(disableConfirm).getByRole('button', { name: 'Disable' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: 'Actions for ops-guide' }))
+    expect(await screen.findByText('Enable')).toBeInTheDocument()
+  })
+
+  it('archives a skill and restores an archived one', async () => {
+    const user = userEvent.setup({ delay: null })
+    const { getReloadCount } = stubSkillsAdmin()
+    renderSkillsPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Actions for ops-guide' }))
+    await user.click(await screen.findByText('Archive'))
+    const archiveConfirm = await screen.findByRole('alertdialog')
+    await user.click(within(archiveConfirm).getByRole('button', { name: 'Archive' }))
     await waitFor(() => {
-      expect(screen.getAllByText('archived').length).toBeGreaterThan(0);
-    });
+      expect(screen.getAllByText('archived').length).toBeGreaterThan(0)
+    })
+    // Wait for the confirm dialog to unmount: until it does, Base UI keeps the
+    // background `aria-hidden`, so the row's action button isn't yet queryable.
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
 
-    // welcome-pack is archived -> its menu offers Restore.
-    await user.click(screen.getByRole('button', { name: 'Actions for welcome-pack' }));
-    await user.click(await screen.findByText('Restore'));
+    // welcome-pack starts archived -> its menu offers Restore (which does not reload).
+    await user.click(screen.getByRole('button', { name: 'Actions for welcome-pack' }))
+    await user.click(await screen.findByText('Restore'))
     await waitFor(() => {
-      expect(reloadCount).toBe(0);
-    });
-    await user.keyboard('{Escape}');
+      expect(getReloadCount()).toBe(0)
+    })
+  })
 
-    // Reload skill index button on the header.
-    await user.click(screen.getByRole('button', { name: 'Reload index' }));
+  it('reloads the skill index from the header', async () => {
+    const user = userEvent.setup({ delay: null })
+    const { getReloadCount } = stubSkillsAdmin()
+    renderSkillsPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Reload index' }))
     await waitFor(() => {
-      expect(reloadCount).toBe(1);
-    });
-  });
-});
+      expect(getReloadCount()).toBe(1)
+    })
+  })
+})
 
 describe('skills page backflow approval', () => {
   const baseSkills: SkillRecord[] = [
@@ -294,7 +329,7 @@ describe('skills page backflow approval', () => {
       source: 'adhoc',
       status: 'active',
     },
-  ];
+  ]
 
   function stubBaseReads(): void {
     server.use(
@@ -327,85 +362,85 @@ describe('skills page backflow approval', () => {
           diff_vs_head: `bf head ${String(params.id ?? '')}`,
         })
       )
-    );
+    )
   }
 
   it('lists proposals, shows diff, and posts accept/reject/fork decisions', async () => {
-    const user = userEvent.setup({ delay: null });
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('crm-ops-fork');
-    const acceptHeaders: (string | null)[] = [];
-    let rejected = false;
-    let forkedWith: { fork_name: string } | null = null;
+    const user = userEvent.setup({ delay: null })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('crm-ops-fork')
+    const acceptHeaders: (string | null)[] = []
+    let rejected = false
+    let forkedWith: { fork_name: string } | null = null
 
-    stubBaseReads();
+    stubBaseReads()
     server.use(
       http.post(`${API_BASE_URL}/admin/skills/backflow/:id/accept`, ({ request }) => {
-        acceptHeaders.push(request.headers.get('x-confirm'));
-        return HttpResponse.json({ new_version: 'sha', ok: true, proposal_id: 1, user: 'admin' });
+        acceptHeaders.push(request.headers.get('x-confirm'))
+        return HttpResponse.json({ new_version: 'sha', ok: true, proposal_id: 1, user: 'admin' })
       }),
       http.post(`${API_BASE_URL}/admin/skills/backflow/:id/reject`, () => {
-        rejected = true;
-        return HttpResponse.json({ ok: true, proposal_id: 1, user: 'admin' });
+        rejected = true
+        return HttpResponse.json({ ok: true, proposal_id: 1, user: 'admin' })
       }),
       http.post(`${API_BASE_URL}/admin/skills/backflow/:id/fork`, async ({ request }) => {
-        forkedWith = (await request.json()) as { fork_name: string };
-        return HttpResponse.json({ forked_as: forkedWith.fork_name, ok: true, proposal_id: 1, user: 'admin' });
+        forkedWith = (await request.json()) as { fork_name: string }
+        return HttpResponse.json({ forked_as: forkedWith.fork_name, ok: true, proposal_id: 1, user: 'admin' })
       })
-    );
+    )
 
-    renderSkillsPage();
+    renderSkillsPage()
 
-    await user.click(await screen.findByRole('button', { name: 'Actions for crm-ops' }));
-    await user.click(await screen.findByRole('menuitem', { name: /Backflow/ }));
-    const backflow = within(await screen.findByRole('dialog'));
-    expect(await backflow.findByRole('button', { name: 'Accept backflow 1' })).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: 'Actions for crm-ops' }))
+    await user.click(await screen.findByRole('menuitem', { name: /Backflow/ }))
+    const backflow = within(await screen.findByRole('dialog'))
+    expect(await backflow.findByRole('button', { name: 'Accept backflow 1' })).toBeInTheDocument()
 
-    await user.click(backflow.getByRole('button', { name: 'View backflow diff for 1' }));
-    expect(await backflow.findByText('bf head 1')).toBeInTheDocument();
+    await user.click(backflow.getByRole('button', { name: 'View backflow diff for 1' }))
+    expect(await backflow.findByText('bf head 1')).toBeInTheDocument()
 
-    await user.click(backflow.getByRole('button', { name: 'Accept backflow 1' }));
-    await waitFor(() => expect(acceptHeaders).toHaveLength(1));
-    expect(confirmSpy).toHaveBeenCalled();
-    expect(acceptHeaders[0]).toBe('true');
+    await user.click(backflow.getByRole('button', { name: 'Accept backflow 1' }))
+    await waitFor(() => expect(acceptHeaders).toHaveLength(1))
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(acceptHeaders[0]).toBe('true')
 
-    await user.click(backflow.getByRole('button', { name: 'Reject backflow 1' }));
-    await waitFor(() => expect(rejected).toBe(true));
+    await user.click(backflow.getByRole('button', { name: 'Reject backflow 1' }))
+    await waitFor(() => expect(rejected).toBe(true))
 
-    await user.click(backflow.getByRole('button', { name: 'Fork backflow 1' }));
-    await waitFor(() => expect(forkedWith).toEqual({ fork_name: 'crm-ops-fork' }));
-    expect(promptSpy).toHaveBeenCalled();
+    await user.click(backflow.getByRole('button', { name: 'Fork backflow 1' }))
+    await waitFor(() => expect(forkedWith).toEqual({ fork_name: 'crm-ops-fork' }))
+    expect(promptSpy).toHaveBeenCalled()
 
-    confirmSpy.mockRestore();
-    promptSpy.mockRestore();
-  });
+    confirmSpy.mockRestore()
+    promptSpy.mockRestore()
+  })
 
   it('does not accept a conflict proposal when confirmation is cancelled', async () => {
-    const user = userEvent.setup({ delay: null });
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
-    const acceptHeaders: (string | null)[] = [];
+    const user = userEvent.setup({ delay: null })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const acceptHeaders: (string | null)[] = []
 
-    stubBaseReads();
+    stubBaseReads()
     server.use(
       http.post(`${API_BASE_URL}/admin/skills/backflow/:id/accept`, ({ request }) => {
-        acceptHeaders.push(request.headers.get('x-confirm'));
-        return HttpResponse.json({ ok: true, proposal_id: 1, user: 'admin' });
+        acceptHeaders.push(request.headers.get('x-confirm'))
+        return HttpResponse.json({ ok: true, proposal_id: 1, user: 'admin' })
       })
-    );
+    )
 
-    renderSkillsPage();
+    renderSkillsPage()
 
-    await user.click(await screen.findByRole('button', { name: 'Actions for crm-ops' }));
-    await user.click(await screen.findByRole('menuitem', { name: /Backflow/ }));
-    const backflow = within(await screen.findByRole('dialog'));
+    await user.click(await screen.findByRole('button', { name: 'Actions for crm-ops' }))
+    await user.click(await screen.findByRole('menuitem', { name: /Backflow/ }))
+    const backflow = within(await screen.findByRole('dialog'))
 
-    await user.click(await backflow.findByRole('button', { name: 'Accept backflow 1' }));
-    expect(confirmSpy).toHaveBeenCalled();
-    expect(acceptHeaders).toHaveLength(0);
+    await user.click(await backflow.findByRole('button', { name: 'Accept backflow 1' }))
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(acceptHeaders).toHaveLength(0)
 
-    confirmSpy.mockRestore();
-  });
-});
+    confirmSpy.mockRestore()
+  })
+})
 
 describe('skills page content + search', () => {
   function stubReadEndpoints(getSkills: () => SkillRecord[], getContent: () => string): void {
@@ -420,11 +455,11 @@ describe('skills page content + search', () => {
       http.get(`${API_BASE_URL}/admin/skills/:name/agents`, () => HttpResponse.json([])),
       http.get(`${API_BASE_URL}/admin/skills/proposals`, () => HttpResponse.json([])),
       http.get(`${API_BASE_URL}/admin/skills/backflow`, () => HttpResponse.json([]))
-    );
+    )
   }
 
-  it('filters skills by name via the search box', async () => {
-    const user = userEvent.setup({ delay: null });
+  it('filters skills by name via the global search box', async () => {
+    const user = userEvent.setup({ delay: null })
     const skills: SkillRecord[] = [
       {
         audit_verdict: 'pass',
@@ -446,27 +481,71 @@ describe('skills page content + search', () => {
         source: 'adhoc',
         status: 'active',
       },
-    ];
+    ]
 
     stubReadEndpoints(
       () => skills,
       () => 'welcome body'
-    );
+    )
 
-    renderSkillsPage();
+    renderSkillsPage()
 
-    expect(await screen.findByRole('button', { name: 'Actions for welcome-pack' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Actions for promo-helper' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Actions for welcome-pack' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Actions for promo-helper' })).toBeInTheDocument()
 
-    await user.type(screen.getByPlaceholderText('Search skills…'), 'promo');
+    await user.type(screen.getByPlaceholderText('Search…'), 'promo')
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: 'Actions for welcome-pack' })).not.toBeInTheDocument();
-    });
-    expect(screen.getByRole('button', { name: 'Actions for promo-helper' })).toBeInTheDocument();
-  });
+      expect(screen.queryByRole('button', { name: 'Actions for welcome-pack' })).not.toBeInTheDocument()
+    })
+    expect(screen.getByRole('button', { name: 'Actions for promo-helper' })).toBeInTheDocument()
+  })
+
+  it('filters skills by status via the column filter', async () => {
+    const user = userEvent.setup({ delay: null })
+    const skills: SkillRecord[] = [
+      {
+        audit_verdict: 'pass',
+        description: 'Active helper',
+        drifted_agents: [],
+        enabling_agents: [],
+        global_enabled: true,
+        name: 'active-skill',
+        source: 'adhoc',
+        status: 'active',
+      },
+      {
+        audit_verdict: 'pass',
+        description: 'Archived helper',
+        drifted_agents: [],
+        enabling_agents: [],
+        global_enabled: false,
+        name: 'archived-skill',
+        source: 'adhoc',
+        status: 'archived',
+      },
+    ]
+
+    stubReadEndpoints(
+      () => skills,
+      () => 'body'
+    )
+
+    renderSkillsPage()
+
+    expect(await screen.findByRole('button', { name: 'Actions for active-skill' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Actions for archived-skill' })).toBeInTheDocument()
+
+    // The status column exposes a select filter ("All Status" + per-status options).
+    await user.click(screen.getByRole('combobox', { name: 'Filter Status' }))
+    await user.click(await screen.findByRole('option', { name: 'archived' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Actions for active-skill' })).not.toBeInTheDocument()
+    })
+    expect(screen.getByRole('button', { name: 'Actions for archived-skill' })).toBeInTheDocument()
+  })
 
   it('shows the published skill content in the content dialog', async () => {
-    const user = userEvent.setup({ delay: null });
+    const user = userEvent.setup({ delay: null })
     const skills: SkillRecord[] = [
       {
         audit_verdict: 'pass',
@@ -478,20 +557,21 @@ describe('skills page content + search', () => {
         source: 'marketplace',
         status: 'active',
       },
-    ];
-    const content = '---\nname: welcome-pack\ndescription: helper\n---\noriginal body';
+    ]
+    const content = '---\nname: welcome-pack\ndescription: helper\n---\noriginal body'
 
     stubReadEndpoints(
       () => skills,
       () => content
-    );
+    )
 
-    renderSkillsPage();
+    renderSkillsPage()
 
-    await user.click(await screen.findByRole('button', { name: 'Actions for welcome-pack' }));
-    await user.click(await screen.findByText('View content'));
-    const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByText(/original body/)).toBeInTheDocument();
-    expect(within(dialog).getByText('Content · welcome-pack')).toBeInTheDocument();
-  });
-});
+    await user.click(await screen.findByRole('button', { name: 'Actions for welcome-pack' }))
+    await user.click(await screen.findByText('View content'))
+    const dialog = await screen.findByRole('dialog')
+    // Content is fetched async after the dialog mounts; await it.
+    expect(await within(dialog).findByText(/original body/)).toBeInTheDocument()
+    expect(within(dialog).getByText('Content · welcome-pack')).toBeInTheDocument()
+  })
+})

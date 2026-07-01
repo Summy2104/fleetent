@@ -1,0 +1,7 @@
+{
+  "name": "fleetent-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "comment": "仅用于 corepack 版本锚定：从仓库任意目录进入时 corepack 都能读到 packageManager 字段，避免退回 lastKnownGood 默认 pnpm。真正的工程在 frontend/。",
+  "packageManager": "pnpm@11.9.0+sha512.bd682d5d03fe525ef7c9fd6780c6884d1e756ac4c9c9fe00c538782824310dcf90e3ddc4f53835f06dfaebd5085e41855e0bcbb3b60de2ac5bbab89e5036f03b"
+}

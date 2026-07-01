@@ -84,25 +84,27 @@ typecheck: ## Type-check with mypy
 check: lint typecheck ## Run lint + typecheck
 
 frontend-install: ## Install frontend dependencies
-	yarn --cwd frontend install --frozen-lockfile
+	@command -v pnpm >/dev/null 2>&1 || corepack enable || { \
+		echo "pnpm not found. Run 'corepack enable' (bundled with Node 18+) or install pnpm@11.9.0."; exit 1; }
+	pnpm --dir frontend install --frozen-lockfile
 
 frontend-build: ## Build frontend static assets
-	yarn --cwd frontend build
+	pnpm --dir frontend run build
 
 # The three checks are independent, so run them concurrently: wall-clock drops
-# to max(vitest, tsc, eslint) instead of their sum. Re-invoking make with -j3
+# to max(vitest, tsc, biome) instead of their sum. Re-invoking make with -j3
 # keeps `make test-frontend` the single CI entrypoint while parallelizing.
 test-frontend: ## Run frontend tests, coverage, typecheck, and lint (parallel)
 	$(MAKE) -j3 test-frontend-vitest test-frontend-tsc test-frontend-lint
 
 test-frontend-vitest:
-	yarn --cwd frontend vitest run --coverage
+	pnpm --dir frontend run test
 
 test-frontend-tsc:
-	yarn --cwd frontend tsc --noEmit
+	pnpm --dir frontend run typecheck
 
 test-frontend-lint:
-	yarn --cwd frontend eslint .
+	pnpm --dir frontend run lint
 
 platform-help: ## Show platform CLI help
 	uv run fleetent platform --help

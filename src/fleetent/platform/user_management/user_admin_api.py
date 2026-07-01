@@ -567,7 +567,11 @@ def search_audit(
     action: str | None = None,
     actor: str | None = None,
     target_id: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
     authorization: str | None = Header(None),
 ) -> list[dict[str, Any]]:
     _current_user(authorization)
-    return audit_log.search_audit(action=action, actor=actor, target_id=target_id)
+    return audit_log.search_audit(
+        action=action, actor=actor, target_id=target_id, since=since, until=until
+    )

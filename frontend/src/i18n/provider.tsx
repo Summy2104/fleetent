@@ -1,116 +1,66 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { type ReactNode, useEffect } from 'react'
+import { I18nextProvider, useTranslation } from 'react-i18next'
 
-import {
-  CATALOGS,
-  DEFAULT_LOCALE,
-  LOCALES,
-  LOCALE_LIST,
-  type Locale,
-  type LocaleMeta,
-  type MessageKey,
-} from '@/i18n/messages';
+import i18n from '@/i18n/config'
+import { DEFAULT_LOCALE, LOCALE_LIST, type Locale, type LocaleMeta, type MessageKey } from '@/i18n/messages'
 
 /**
- * i18n 运行时 —— 与 `app/theme.tsx` 同构的 context 方案：localStorage 持久化用户选择，
- * 首次访问无存储时按浏览器语言探测（`zh-*` → 中文，其余 → 英文）。
+ * i18n 运行时 —— 兼容层，对外契约与历史自研版保持一致（`useT()` / `useI18n()` /
+ * `I18nProvider`），内部由 react-i18next 承载。
  *
- * 暴露 `useT()` 取翻译函数 `t(key, vars?)`，`{name}` 形式占位符按 `vars` 插值；
- * 缺失 key 在开发期 `console.warn` 并回退显示 key 本身，绝不抛错中断渲染。
+ * 语言探测与持久化交由 `config.ts` 的 LanguageDetector（localStorage key
+ * `fleetent.admin.locale`，`zh-*` 归一到 `zh`，未命中回退 `en`）。`<html lang>`
+ * 经 `languageChanged` 监听同步。缺失 key 不抛错、回退显示 key（见 `config.ts`）。
  */
 
-const STORAGE_KEY = 'fleetent.admin.locale';
+export type TranslateVars = Record<string, string | number>
+export type Translate = (key: MessageKey, vars?: TranslateVars) => string
 
-export type TranslateVars = Record<string, string | number>;
-export type Translate = (key: MessageKey, vars?: TranslateVars) => string;
-
-function detectLocale(): Locale {
-  try {
-    const stored = window.localStorage.getItem(STORAGE_KEY) as Locale | null;
-    if (stored && stored in LOCALES) {
-      return stored;
-    }
-  } catch {
-    /* localStorage 不可用（隐私模式等），退回探测 */
-  }
-  try {
-    if (window.navigator.language.toLowerCase().startsWith('zh')) {
-      return 'zh';
-    }
-  } catch {
-    /* 无 navigator（SSR/测试）时退回默认 */
-  }
-  return DEFAULT_LOCALE;
-}
-
-function interpolate(template: string, vars?: TranslateVars): string {
-  if (!vars) {
-    return template;
-  }
-  return template.replace(/\{(\w+)\}/g, (match, name: string) =>
-    name in vars ? String(vars[name]) : match
-  );
+/** 把 i18next 的语言码（可能是 `zh-CN`）折叠回受支持的 `Locale`。 */
+function normalize(language: string): Locale {
+  return language.toLowerCase().startsWith('zh') ? 'zh' : DEFAULT_LOCALE
 }
 
 type I18nContextValue = {
-  locale: Locale;
-  setLocale: (locale: Locale) => void;
-  toggleLocale: () => void;
-  t: Translate;
-  locales: LocaleMeta[];
-};
-
-const I18nContext = createContext<I18nContextValue | null>(null);
+  locale: Locale
+  setLocale: (locale: Locale) => void
+  toggleLocale: () => void
+  t: Translate
+  locales: LocaleMeta[]
+}
 
 export function I18nProvider({ children }: { children: ReactNode }): JSX.Element {
-  const [locale, setLocaleState] = useState<Locale>(() => detectLocale());
-
   useEffect(() => {
-    document.documentElement.lang = locale;
-    try {
-      window.localStorage.setItem(STORAGE_KEY, locale);
-    } catch {
-      /* 持久化失败可忽略 */
+    const sync = (language: string): void => {
+      document.documentElement.lang = normalize(language)
     }
-  }, [locale]);
+    sync(i18n.language)
+    i18n.on('languageChanged', sync)
+    return () => {
+      i18n.off('languageChanged', sync)
+    }
+  }, [])
 
-  const t = useCallback<Translate>(
-    (key, vars) => {
-      const catalog = CATALOGS[locale] ?? CATALOGS[DEFAULT_LOCALE];
-      const template = catalog[key] ?? CATALOGS[DEFAULT_LOCALE][key];
-      if (template === undefined) {
-        if (import.meta.env?.DEV) {
-          console.warn(`[i18n] missing message key: ${key}`);
-        }
-        return key;
-      }
-      return interpolate(template, vars);
-    },
-    [locale]
-  );
-
-  const value = useMemo<I18nContextValue>(
-    () => ({
-      locale,
-      setLocale: setLocaleState,
-      toggleLocale: () => setLocaleState((current) => (current === 'en' ? 'zh' : 'en')),
-      t,
-      locales: LOCALE_LIST,
-    }),
-    [locale, t]
-  );
-
-  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+  return <I18nextProvider i18n={i18n}>{children}</I18nextProvider>
 }
 
 export function useI18n(): I18nContextValue {
-  const context = useContext(I18nContext);
-  if (!context) {
-    throw new Error('useI18n must be used within an I18nProvider');
+  const { t, i18n: instance } = useTranslation()
+  const locale = normalize(instance.language)
+  return {
+    locale,
+    setLocale: (next: Locale) => {
+      void instance.changeLanguage(next)
+    },
+    toggleLocale: () => {
+      void instance.changeLanguage(locale === 'en' ? 'zh' : 'en')
+    },
+    t: t as Translate,
+    locales: LOCALE_LIST,
   }
-  return context;
 }
 
 /** 便捷钩子：只取翻译函数，覆盖绝大多数组件的使用场景。 */
 export function useT(): Translate {
-  return useI18n().t;
+  return useI18n().t
 }

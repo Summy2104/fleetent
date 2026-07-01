@@ -1,11 +1,11 @@
-import type { ReactNode } from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { HttpResponse, http } from 'msw';
-import { describe, expect, it } from 'vitest';
+import type { ReactNode } from 'react'
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { HttpResponse, http } from 'msw'
+import { describe, expect, it } from 'vitest'
 
-import { AuthProvider } from '@/app/auth';
-import { AppQueryProvider } from '@/app/query-client';
+import { AuthProvider } from '@/app/auth'
+import { AppQueryProvider } from '@/app/query-client'
 import {
   useConnectivityTestMutation,
   useCreateModelMutation,
@@ -16,60 +16,59 @@ import {
   useProvidersQuery,
   useUpdateModelMutation,
   useUpdateProviderMutation,
-} from '@/features/providers/api';
-import { server } from '@/test/msw/server';
+} from '@/features/providers/api'
+import { server } from '@/test/msw/server'
 
-const API_BASE_URL = 'http://fleetent.test';
+const API_BASE_URL = 'http://fleetent.test'
 
 type ProviderRecord = {
-  api_key: string | null;
-  api_key_env: string | null;
-  api_key_set: boolean;
-  base_url: string | null;
-  description: string | null;
-  id: string;
-  model_count: number;
-  provider: string | null;
-  vendor?: string | null;
-};
+  api_key: string | null
+  api_key_env: string | null
+  api_key_set: boolean
+  base_url: string | null
+  description: string | null
+  id: string
+  model_count: number
+  provider: string | null
+  vendor?: string | null
+}
 
 type ModelRecord = {
-  base_url: string | null;
-  description: string | null;
-  endpoint: string | null;
-  id: string;
-  input_price_per_1k: number | null;
-  max_tokens: number | null;
-  model_name: string;
-  output_price_per_1k: number | null;
-  params: Record<string, unknown> | null;
-  protocol: string;
-  provider_id: string;
-};
+  base_url: string | null
+  description: string | null
+  endpoint: string | null
+  id: string
+  input_price_per_1k: number | null
+  max_tokens: number | null
+  model_name: string
+  output_price_per_1k: number | null
+  params: Record<string, unknown> | null
+  protocol: string
+  provider_id: string
+}
 
 function renderWithProviders(ui: ReactNode): void {
   render(
     <AuthProvider baseUrl={API_BASE_URL} initialToken="session-token">
       <AppQueryProvider>{ui}</AppQueryProvider>
     </AuthProvider>
-  );
+  )
 }
 
 function ProvidersProbe(): JSX.Element {
-  const providers = useProvidersQuery();
-  const models = useModelsQuery();
-  const createProvider = useCreateProviderMutation();
-  const updateProvider = useUpdateProviderMutation('alpha');
-  const deleteProvider = useDeleteProviderMutation('alpha');
-  const createModel = useCreateModelMutation();
-  const updateModel = useUpdateModelMutation('alpha-chat');
-  const deleteModel = useDeleteModelMutation('alpha-chat');
-  const connectivityTest = useConnectivityTestMutation('alpha-chat');
+  const providers = useProvidersQuery()
+  const models = useModelsQuery()
+  const createProvider = useCreateProviderMutation()
+  const updateProvider = useUpdateProviderMutation('alpha')
+  const deleteProvider = useDeleteProviderMutation('alpha')
+  const createModel = useCreateModelMutation()
+  const updateModel = useUpdateModelMutation('alpha-chat')
+  const deleteModel = useDeleteModelMutation('alpha-chat')
+  const connectivityTest = useConnectivityTestMutation('alpha-chat')
 
   return (
     <section>
       <button
-        type="button"
         onClick={() =>
           createProvider.mutate({
             api_key: 'sk-new-secret',
@@ -78,25 +77,25 @@ function ProvidersProbe(): JSX.Element {
             provider: 'anthropic',
           })
         }
+        type="button"
       >
         create-provider
       </button>
       <button
-        type="button"
         onClick={() =>
           updateProvider.mutate({
             base_url: 'https://alpha.edited',
             description: 'Edited provider',
           })
         }
+        type="button"
       >
         update-provider
       </button>
-      <button type="button" onClick={() => deleteProvider.mutate()}>
+      <button onClick={() => deleteProvider.mutate()} type="button">
         delete-provider
       </button>
       <button
-        type="button"
         onClick={() =>
           createModel.mutate({
             base_url: 'https://beta.provider/v1',
@@ -106,24 +105,25 @@ function ProvidersProbe(): JSX.Element {
             provider_id: 'beta',
           })
         }
+        type="button"
       >
         create-model
       </button>
       <button
-        type="button"
         onClick={() =>
           updateModel.mutate({
             base_url: 'https://alpha.chat.edited',
             model_name: 'gpt-5-mini',
           })
         }
+        type="button"
       >
         update-model
       </button>
-      <button type="button" onClick={() => deleteModel.mutate()}>
+      <button onClick={() => deleteModel.mutate()} type="button">
         delete-model
       </button>
-      <button type="button" onClick={() => connectivityTest.mutate()}>
+      <button onClick={() => connectivityTest.mutate()} type="button">
         connectivity
       </button>
       <ul>
@@ -140,12 +140,12 @@ function ProvidersProbe(): JSX.Element {
       </ul>
       <p>{connectivityTest.data ? `${connectivityTest.data.reachable}:${connectivityTest.data.latency_ms}` : 'idle'}</p>
     </section>
-  );
+  )
 }
 
 describe('providers api', () => {
   it('loads and refreshes provider and model lists after CRUD mutations', async () => {
-    const user = userEvent.setup({ delay: null });
+    const user = userEvent.setup({ delay: null })
     let providers: ProviderRecord[] = [
       {
         api_key: '****',
@@ -157,7 +157,7 @@ describe('providers api', () => {
         model_count: 1,
         provider: 'openai',
       },
-    ];
+    ]
     let models: ModelRecord[] = [
       {
         base_url: 'https://alpha.initial',
@@ -172,21 +172,21 @@ describe('providers api', () => {
         protocol: 'openai_chat',
         provider_id: 'alpha',
       },
-    ];
+    ]
 
     server.use(
       http.get(`${API_BASE_URL}/admin/providers`, ({ request }) => {
-        expect(request.headers.get('authorization')).toBe('Session session-token');
-        return HttpResponse.json(providers);
+        expect(request.headers.get('authorization')).toBe('Session session-token')
+        return HttpResponse.json(providers)
       }),
       http.get(`${API_BASE_URL}/admin/models`, () => HttpResponse.json(models)),
       http.post(`${API_BASE_URL}/admin/providers`, async ({ request }) => {
         const body = (await request.json()) as {
-          api_key: string;
-          base_url: string;
-          id: string;
-          provider: string;
-        };
+          api_key: string
+          base_url: string
+          id: string
+          provider: string
+        }
         providers = [
           ...providers,
           {
@@ -199,24 +199,28 @@ describe('providers api', () => {
             model_count: 0,
             provider: body.provider,
           },
-        ];
-        return HttpResponse.json(providers[1], { status: 201 });
+        ]
+        return HttpResponse.json(providers[1], { status: 201 })
       }),
       http.put(`${API_BASE_URL}/admin/providers/alpha`, async ({ request }) => {
-        const body = (await request.json()) as { base_url?: string; description?: string };
+        const body = (await request.json()) as { base_url?: string; description?: string }
         providers = providers.map((provider) =>
           provider.id === 'alpha'
-            ? { ...provider, base_url: body.base_url ?? provider.base_url, description: body.description ?? provider.description }
+            ? {
+                ...provider,
+                base_url: body.base_url ?? provider.base_url,
+                description: body.description ?? provider.description,
+              }
             : provider
-        );
-        return HttpResponse.json(providers[0]);
+        )
+        return HttpResponse.json(providers[0])
       }),
       http.delete(`${API_BASE_URL}/admin/providers/alpha`, () => {
-        providers = providers.filter((provider) => provider.id !== 'alpha');
-        return HttpResponse.json({ deleted: true, id: 'alpha' });
+        providers = providers.filter((provider) => provider.id !== 'alpha')
+        return HttpResponse.json({ deleted: true, id: 'alpha' })
       }),
       http.post(`${API_BASE_URL}/admin/models`, async ({ request }) => {
-        const body = (await request.json()) as ModelRecord;
+        const body = (await request.json()) as ModelRecord
         models = [
           ...models,
           {
@@ -232,58 +236,58 @@ describe('providers api', () => {
             protocol: body.protocol,
             provider_id: body.provider_id,
           },
-        ];
+        ]
         providers = providers.map((provider) =>
           provider.id === body.provider_id ? { ...provider, model_count: provider.model_count + 1 } : provider
-        );
-        return HttpResponse.json(models[models.length - 1], { status: 201 });
+        )
+        return HttpResponse.json(models[models.length - 1], { status: 201 })
       }),
       http.put(`${API_BASE_URL}/admin/models/alpha-chat`, async ({ request }) => {
-        const body = (await request.json()) as { base_url?: string; model_name?: string };
+        const body = (await request.json()) as { base_url?: string; model_name?: string }
         models = models.map((model) =>
           model.id === 'alpha-chat'
             ? { ...model, base_url: body.base_url ?? model.base_url, model_name: body.model_name ?? model.model_name }
             : model
-        );
-        return HttpResponse.json(models[0]);
+        )
+        return HttpResponse.json(models[0])
       }),
       http.delete(`${API_BASE_URL}/admin/models/alpha-chat`, () => {
-        models = models.filter((model) => model.id !== 'alpha-chat');
+        models = models.filter((model) => model.id !== 'alpha-chat')
         providers = providers.map((provider) =>
           provider.id === 'alpha' ? { ...provider, model_count: provider.model_count - 1 } : provider
-        );
-        return HttpResponse.json({ deleted: true, id: 'alpha-chat' });
+        )
+        return HttpResponse.json({ deleted: true, id: 'alpha-chat' })
       })
-    );
+    )
 
-    renderWithProviders(<ProvidersProbe />);
-    expect(await screen.findByText('provider:alpha:https://alpha.initial')).toBeInTheDocument();
-    expect(await screen.findByText('model:alpha-chat:gpt-5')).toBeInTheDocument();
+    renderWithProviders(<ProvidersProbe />)
+    expect(await screen.findByText('provider:alpha:https://alpha.initial')).toBeInTheDocument()
+    expect(await screen.findByText('model:alpha-chat:gpt-5')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'create-provider' }));
-    expect(await screen.findByText('provider:beta:https://beta.provider')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'create-provider' }))
+    expect(await screen.findByText('provider:beta:https://beta.provider')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'update-provider' }));
+    await user.click(screen.getByRole('button', { name: 'update-provider' }))
     await waitFor(() => {
-      expect(screen.getByText('provider:alpha:https://alpha.edited')).toBeInTheDocument();
-    });
+      expect(screen.getByText('provider:alpha:https://alpha.edited')).toBeInTheDocument()
+    })
 
-    await user.click(screen.getByRole('button', { name: 'create-model' }));
-    expect(await screen.findByText('model:beta-chat:claude-3-7-sonnet')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'create-model' }))
+    expect(await screen.findByText('model:beta-chat:claude-3-7-sonnet')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'update-model' }));
+    await user.click(screen.getByRole('button', { name: 'update-model' }))
     await waitFor(() => {
-      expect(screen.getByText('model:alpha-chat:gpt-5-mini')).toBeInTheDocument();
-    });
+      expect(screen.getByText('model:alpha-chat:gpt-5-mini')).toBeInTheDocument()
+    })
 
-    await user.click(screen.getByRole('button', { name: 'delete-model' }));
+    await user.click(screen.getByRole('button', { name: 'delete-model' }))
     await waitFor(() => {
-      expect(screen.queryByText('model:alpha-chat:gpt-5-mini')).not.toBeInTheDocument();
-    });
-  });
+      expect(screen.queryByText('model:alpha-chat:gpt-5-mini')).not.toBeInTheDocument()
+    })
+  })
 
   it('posts connectivity tests through the model admin endpoint', async () => {
-    const user = userEvent.setup({ delay: null });
+    const user = userEvent.setup({ delay: null })
 
     server.use(
       http.get(`${API_BASE_URL}/admin/providers`, () =>
@@ -320,14 +324,14 @@ describe('providers api', () => {
       http.post(`${API_BASE_URL}/admin/models/alpha-chat/connectivity-test`, () =>
         HttpResponse.json({ latency_ms: 42, model: 'gpt-5', reachable: true })
       )
-    );
+    )
 
-    renderWithProviders(<ProvidersProbe />);
-    expect(await screen.findByText('provider:alpha:https://alpha.initial')).toBeInTheDocument();
+    renderWithProviders(<ProvidersProbe />)
+    expect(await screen.findByText('provider:alpha:https://alpha.initial')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'connectivity' }));
+    await user.click(screen.getByRole('button', { name: 'connectivity' }))
     await waitFor(() => {
-      expect(screen.getByText('true:42')).toBeInTheDocument();
-    });
-  });
-});
+      expect(screen.getByText('true:42')).toBeInTheDocument()
+    })
+  })
+})

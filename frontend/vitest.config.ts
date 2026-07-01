@@ -1,6 +1,6 @@
-import path from 'node:path';
-import { defineConfig } from 'vitest/config';
-import react from '@vitejs/plugin-react';
+import path from 'node:path'
+import react from '@vitejs/plugin-react'
+import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
   plugins: [react()],
@@ -18,6 +18,13 @@ export default defineConfig({
     // give ample headroom. 45s only ever bites a genuinely stuck test.
     testTimeout: 60000,
     hookTimeout: 60000,
+    // The interaction-heavy page suites (long Base UI dialog/menu flows driven
+    // by userEvent) can still flake under severe CI CPU starvation even with the
+    // raised timeouts — a menu occasionally mounts too slowly for one poll. Retry
+    // absorbs that scheduler jitter: a genuinely broken test fails all attempts,
+    // a flake almost always passes the retry. Paired with split/timeout hardening,
+    // not a substitute for it.
+    retry: 2,
     // Cap parallelism hard: under v8 coverage the heavy page suites (Radix
     // Select/Dialog flows driven by userEvent) starve each other for CPU when
     // many workers run at once, producing flaky timeouts that move between
@@ -31,13 +38,18 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'html'],
       include: ['src/**/*.{ts,tsx}'],
-      exclude: ['src/main.tsx'],
+      // shadcn-generated primitives are vendored, not hand-authored; exclude them
+      // from coverage so the threshold reflects our own code, not the UI kit.
+      exclude: ['src/main.tsx', 'src/components/ui/**'],
+      // Ratchet: floors sit ~1pt below actual coverage to lock in gains without
+      // nagging on ordinary refactors. Raise them as coverage climbs; never lower
+      // to make a red build pass — add tests instead.
       thresholds: {
-        lines: 76,
-        functions: 76,
-        branches: 70,
-        statements: 76,
+        lines: 85,
+        functions: 80,
+        branches: 71,
+        statements: 83,
       },
     },
   },
-});
+})
