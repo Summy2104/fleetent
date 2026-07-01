@@ -128,7 +128,7 @@ export function DataTable<TData>(props: DataTableProps<TData>) {
         ) : null}
         <div className="overflow-x-auto">
           <Table>
-            <TableHeader>
+            <TableHeader className="bg-muted/50">
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id}>
                   {headerGroup.headers.map((header) => (
