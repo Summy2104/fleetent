@@ -10,4 +10,4 @@
 
 ## 收尾
 - [x] [本地] `make test-pr` + `make test-integration-ci` 全绿。
-- [ ] [服务器] 真实 Slack 验收:发 → 审批 → 批准后程鑫**真的收到**;检查 node `im_outbound_queue` 出队投递记录。
+- [x] [服务器] 真实 Slack 验收:发 → 审批 → 批准后程鑫**真的收到**;检查 node `im_outbound_queue` 出队投递记录。

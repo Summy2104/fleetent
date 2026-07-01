@@ -14,4 +14,4 @@
 
 ## 收尾
 - [x] [本地] `make test-pr` + `make test-integration-ci` 全绿。
-- [ ] [服务器] 真实 Slack 验收:发→挂起→回「同意」→ agent 必须说仍待审批(不报成功);approve 后才送达并报成功。
+- [x] [服务器] 真实 Slack 验收:发→挂起→回「同意」→ agent 必须说仍待审批(不报成功);approve 后才送达并报成功。

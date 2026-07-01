@@ -19,4 +19,4 @@
 
 - [x] 4.1 `make test-pr`：4019 passed，2 failed（`test_config.py::test_observability_logging_defaults`、`test_admin_entrypoint_cleanup.py::test_legacy_admin_cli_package_is_not_importable`）——二者均为既有失败，已在干净 origin/main（stash 本改动）复现，本改动新增失败数 = 0
 - [x] 4.2 `make test-integration-ci`：2113 passed，1 failed（`test_pilot_readiness_admin.py::test_validate_config_cli_json_outputs_deterministic_summary`）——同为既有失败，已在干净 origin/main 复现，本改动新增失败数 = 0；本 change 新增的 `test_plaintext_mcp_env_written_to_agent_yaml` 在该轮通过
-- [ ] 4.3 archive 时按 `specs/node-desired-state-api` 的 MODIFIED delta 同步主 spec
+- [x] 4.3 archive 时按 `specs/node-desired-state-api` 的 MODIFIED delta 同步主 spec
