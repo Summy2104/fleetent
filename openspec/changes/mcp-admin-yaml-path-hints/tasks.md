@@ -26,4 +26,4 @@
 
 - [x] 4.1 `make test-pr` + `make test-integration-ci` 全绿(无新增失败)。首次跑 `make test-pr` 时 `test_no_new_plane_boundary_violations` 见红,已按上述修正(迁到 `config.py`)后复跑全绿(4125 passed);`make test-integration-ci` 2120 passed, 23 skipped(既有 skip,与本次改动无关)。
 - [x] 4.2 `make test-frontend` 全绿(vitest + 覆盖率阈值 + tsc --noEmit + lint,108/108 通过)。
-- [ ] 4.3 手动核对:本地起 platform + vite dev server,实际打开 MCP 新建表单,切换传输方式/鉴权类型、填写 ID,确认每个字段下方的路径提示符合预期且随输入实时更新。
+- [x] 4.3 手动核对:本地起 platform(`make dev-bootstrap` + `make platform`,隔离 `.fleetent-dev`)+ vite dev server,用 Playwright 实际登录走完新建表单流程。确认:ID/作用域下方展示手写说明;传输方式/鉴权类型/命令/参数/环境变量下方展示 `mcpServers.<id>.*`;填入 ID `demo` 后全部提示实时替换为 `mcpServers.demo.*`;切到 OAuth Client Credentials 后 Token URL/Client ID/Client secret/Scope 下方正确展示 `mcpServers.demo.x-fleetent.auth.*`,原 `api_key_env` 提示消失。均符合预期。(端口 8765 被另一 worktree 遗留进程占用,验证时临时用 8790 + 改本地 vite 代理目标,验证完已还原、未提交。)
