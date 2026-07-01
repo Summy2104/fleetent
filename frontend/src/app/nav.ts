@@ -12,6 +12,7 @@ import {
   Sparkles,
   Users,
   UsersRound,
+  Webhook,
 } from 'lucide-react'
 
 import type { MessageKey } from '@/i18n'
@@ -50,6 +51,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/providers', labelKey: 'nav.providers', icon: Cpu },
       { to: '/mcp', labelKey: 'nav.mcp', icon: Boxes },
+      { to: '/webhooks', labelKey: 'nav.webhooks', icon: Webhook },
       { to: '/nodes', labelKey: 'nav.nodes', icon: Server },
     ],
   },

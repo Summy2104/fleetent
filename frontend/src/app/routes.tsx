@@ -25,6 +25,7 @@ import { StatsPage } from '@/features/stats/page'
 import { TeamsPage } from '@/features/teams/page'
 import { TenancyPage } from '@/features/tenancy/page'
 import { UsersPage } from '@/features/users/page'
+import { WebhooksPage } from '@/features/webhooks/page'
 import { useT } from '@/i18n'
 import { useAdminApi } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
@@ -380,6 +381,7 @@ function AppLayout(): JSX.Element {
             <Route element={<ProvidersPage />} path="/providers" />
             <Route element={<KnowledgeBasePage />} path="/kb" />
             <Route element={<McpPage />} path="/mcp" />
+            <Route element={<WebhooksPage />} path="/webhooks" />
             <Route element={<NodesPage />} path="/nodes" />
             <Route element={<UsersPage />} path="/users" />
             <Route element={<StatsPage />} path="/stats" />
