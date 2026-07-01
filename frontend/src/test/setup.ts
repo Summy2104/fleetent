@@ -1,7 +1,25 @@
+import { focusManager } from '@tanstack/react-query'
 import '@testing-library/jest-dom/vitest'
+import { configure } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll } from 'vitest'
 
 import { server } from '@/test/msw/server'
+
+// React Query refetches all active queries when the window regains focus
+// (`refetchOnWindowFocus` defaults to true). `userEvent` dispatches real focus
+// events while driving dialogs/menus, so those background refetches fire at
+// unpredictable moments; under CPU contention they can land outside a test's
+// expected request window and trip MSW's `onUnhandledRequest: 'error'`. Replace
+// the focus listener with a no-op so interactions never trigger stray refetches.
+focusManager.setEventListener(() => () => {})
+
+// vitest.config raises the whole-test timeout to 60s for the heavy Base UI
+// dialog/menu flows, but Testing Library's findBy*/waitFor still default to
+// 1000ms — far too tight when CI is CPU-starved and a menu/dialog needs >1s to
+// mount (observed: a full run stretched to ~6x its usual wall-clock). Raise the
+// async-util timeout so interaction polls tolerate slow hosts; the 60s test
+// timeout still bounds a genuinely stuck test.
+configure({ asyncUtilTimeout: 5000 })
 
 // Node 26 ships an experimental native `globalThis.localStorage` getter that
 // returns `undefined` unless `--localstorage-file` is passed; in vitest's jsdom
