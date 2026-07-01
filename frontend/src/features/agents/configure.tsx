@@ -16,7 +16,6 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   type AgentImCapabilitiesInput,
   type AgentImGroupInput,
-  type AgentModelOverrides,
   useAddAgentImGroupMutation,
   useAgentDetailQuery,
   useAgentGroupsQuery,
@@ -37,6 +36,11 @@ import {
   useUnbindAgentUserMutation,
   useUpdateAgentMutation,
 } from '@/features/agents/api'
+import {
+  buildAgentConfigUpdate,
+  defaultRouteModelId,
+  resolveProviderKeyAction,
+} from '@/features/agents/configure-logic'
 import { McpServersTab } from '@/features/agents/mcp-servers-tab'
 import { SkillsTab } from '@/features/agents/skills-tab'
 import { useKbsQuery } from '@/features/kb/api'
@@ -51,13 +55,6 @@ type AdminMe = { email: string; id: string; role: string }
 function useAdminMeQuery() {
   const api = useAdminApi()
   return useQuery({ queryKey: ['admin-me'], queryFn: () => api.get<AdminMe>('/admin/me') })
-}
-
-function parseAllowedTools(value: string): string[] {
-  return value
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean)
 }
 
 // ─────────────────────────── shared bits ───────────────────────────
@@ -89,33 +86,6 @@ function Th({ children, className }: { children: ReactNode; className?: string }
 }
 
 type BindOption = { value: string; label: string }
-
-// The agent's default model route maps to a single provider id; the platform expands it
-// into the full model policy. Read it from model_overrides, taking the first string key any
-// authoring style may have used.
-function defaultRouteModelId(overrides: AgentModelOverrides | undefined): string {
-  const routes = (overrides?.routes ?? {}) as Record<string, Array<Record<string, unknown>>>
-  const entry = routes.default?.[0]
-  if (!entry) return ''
-  for (const value of [entry.model_id, entry.provider_id, entry.provider, entry.target]) {
-    if (typeof value === 'string' && value) return value
-  }
-  return ''
-}
-
-// Set (or clear) the default-route provider while preserving every sibling key the platform
-// stores alongside it (other routes, credential slots), so an edit never drops that state.
-function withDefaultRouteModel(overrides: AgentModelOverrides | undefined, modelId: string): AgentModelOverrides {
-  const next: AgentModelOverrides = { ...(overrides ?? {}) }
-  const routes = { ...((next.routes as Record<string, unknown>) ?? {}) }
-  if (modelId) {
-    routes.default = [{ model_id: modelId }]
-  } else {
-    delete routes.default
-  }
-  next.routes = routes
-  return next
-}
 
 function BindSelectEditor({
   title,
@@ -250,16 +220,20 @@ function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boo
 
   const onSave = (): void => {
     void (async () => {
-      await update.mutateAsync({
-        system_prompt: systemPrompt,
-        allowed_tools: parseAllowedTools(allowedTools),
-        memory_namespace: memoryNamespace.trim() || 'default',
-        model_overrides: withDefaultRouteModel(detail.data?.model_overrides, modelId ?? ''),
-      })
+      await update.mutateAsync(
+        buildAgentConfigUpdate({
+          systemPrompt,
+          allowedTools,
+          memoryNamespace,
+          modelId,
+          currentOverrides: detail.data?.model_overrides,
+        })
+      )
       if (providerKeyDirty && selectedProviderEnv) {
-        if (providerKeyOverride) {
+        const keyAction = resolveProviderKeyAction(providerKeyOverride, selectedProviderSecretStatus)
+        if (keyAction === 'set') {
           await setSecret.mutateAsync({ envName: selectedProviderEnv, value: providerKeyOverride })
-        } else if (selectedProviderSecretStatus === 'set') {
+        } else if (keyAction === 'delete') {
           await deleteSecretValue.mutateAsync(selectedProviderEnv)
         }
         setProviderKeyDirty(false)
