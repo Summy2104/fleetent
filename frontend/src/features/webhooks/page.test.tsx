@@ -127,7 +127,9 @@ describe('webhooks page', () => {
   })
 
   it('deletes a webhook source after confirmation', async () => {
-    const user = userEvent.setup({ delay: null })
+    // pointerEventsCheck disabled: as the dropdown closes into the confirm dialog,
+    // jsdom (no transition end) transiently leaves pointer-events:none on the button.
+    const user = userEvent.setup({ delay: null, pointerEventsCheck: 0 })
     let deleted = false
     server.use(
       http.get(`${API_BASE_URL}/admin/webhooks/sources`, () =>
