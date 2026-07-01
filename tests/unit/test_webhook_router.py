@@ -98,3 +98,20 @@ def test_verify_signature_uses_compare_digest(monkeypatch):
     sig = _make_sig("s", body)
     wr.verify_signature("s", body, sig)
     assert len(calls) == 1
+
+
+# ── WebhookSource model: reply_target (live-webhooks) ─────────────────────────
+
+
+def test_source_reply_target_defaults_none():
+    from fleetent.webhook_router import WebhookSource
+
+    s = WebhookSource(id="github-ci", user_id="u1")
+    assert s.reply_target is None
+
+
+def test_source_reply_target_set():
+    from fleetent.webhook_router import WebhookSource
+
+    s = WebhookSource(id="github-ci", user_id="u1", reply_target="u-internal-42")
+    assert s.reply_target == "u-internal-42"

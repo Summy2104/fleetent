@@ -42,7 +42,7 @@ def _read_template(template_name: str) -> str:
 
 
 def _tenant_home_dir(home_dir: Path, tenant_id: str) -> Path:
-    return home_dir / "kb-service" / tenant_id
+    return home_dir / "tenants" / tenant_id / "kb"
 
 
 def _render_template(template_name: str, *, tenant_id: str) -> str:
@@ -70,7 +70,7 @@ def plan_init_config(
         plan.append(
             InitConfigPlanItem(
                 action=action,
-                path=(Path("kb-service") / tenant_id / relative_target).as_posix(),
+                path=(Path("tenants") / tenant_id / "kb" / relative_target).as_posix(),
             )
         )
     return plan
@@ -113,6 +113,6 @@ def main(argv: list[str] | None = None) -> None:
         print(f"{item.action} {item.path}")
     print(
         "next: review "
-        f"kb-service/{args.tenant}/kb-service.yaml and kb-service/{args.tenant}/.env "
+        f"tenants/{args.tenant}/kb/kb-service.yaml and tenants/{args.tenant}/kb/.env "
         "before starting KB services"
     )

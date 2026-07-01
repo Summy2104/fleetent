@@ -126,3 +126,22 @@ def test_local_directory_source_fetch_rejects_path_traversal_outside_root(tmp_pa
         assert "allowlisted root" in str(exc)
     else:
         raise AssertionError("path traversal outside local source root was accepted")
+
+
+def test_local_directory_source_supports_single_file_root_path(tmp_path):
+    from fleetent.knowledge_base.connectors import LocalDirectoryDataSource
+
+    root = tmp_path / "docs"
+    root.mkdir()
+    document_path = root / "runbook.md"
+    document_path.write_text("# Runbook", encoding="utf-8")
+    (root / "ignore.txt").write_text("ignored", encoding="utf-8")
+
+    source = LocalDirectoryDataSource(root_path=document_path, allowed_roots=[root])
+
+    refs = source.list_documents()
+
+    assert [ref.filename for ref in refs] == ["runbook.md"]
+    assert refs[0].path == str(document_path.resolve())
+    assert refs[0].metadata["relative_path"] == "runbook.md"
+    assert source.fetch(refs[0]) == b"# Runbook"

@@ -68,19 +68,39 @@ async def test_deliver_dms_sender_in_dm_context(_patch_send):
     assert _patch_send[0]["target"] == "U999"
 
 
-def test_no_deliverer_without_connector():
-    ctx = SimpleNamespace(
+def _no_connector_ctx():
+    return SimpleNamespace(
         outbound_connectors={},
         session_context=SimpleNamespace(platform="slack", sender_id="U1", chat_type="dm"),
         conversation_address=None,
     )
-    assert make_mcp_authz_deliverer(ctx) is None
 
 
-def test_no_deliverer_without_sender():
-    ctx = SimpleNamespace(
-        outbound_connectors={"slack": _RecordingConnector()},
-        session_context=SimpleNamespace(platform="slack", sender_id="", chat_type="dm"),
-        conversation_address=None,
-    )
-    assert make_mcp_authz_deliverer(ctx) is None
+async def test_managed_fallback_enqueues_when_no_connector(monkeypatch):
+    """node-managed runtime has no live connector: the authz link is enqueued via directed-reach
+    (notify_user), symmetric with the credential-link deliverer — never silently dropped."""
+    import fleetent.outbound_connectors as oc
+
+    enqueued: list[tuple[str, str]] = []
+    monkeypatch.setattr(oc, "is_node_managed_runtime", lambda: True)
+    monkeypatch.setattr(oc, "notify_user", lambda user_id, msg: enqueued.append((user_id, msg)))
+
+    deliverer = make_mcp_authz_deliverer(_no_connector_ctx())
+    assert deliverer is not None  # always returns a deliverer (never None)
+    ok = await deliverer("U1", "ag1", "srv", "https://as/authorize?state=z")
+    assert ok is True
+    assert len(enqueued) == 1
+    assert enqueued[0][0] == "U1"
+    assert "https://as/authorize?state=z" in enqueued[0][1]
+
+
+async def test_undeliverable_when_no_connector_and_not_managed(monkeypatch):
+    """Neither a live connector nor node-managed (e.g. TUI/HTTP run): report undelivered,
+    do not raise — the caller still degrades with a 'needs authorization' notice."""
+    import fleetent.outbound_connectors as oc
+
+    monkeypatch.setattr(oc, "is_node_managed_runtime", lambda: False)
+
+    deliverer = make_mcp_authz_deliverer(_no_connector_ctx())
+    assert deliverer is not None
+    assert await deliverer("U1", "ag1", "srv", "https://as/x") is False

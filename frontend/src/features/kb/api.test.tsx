@@ -5,12 +5,12 @@ import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 
 import { AuthProvider } from '@/app/auth';
+import * as kbApi from '@/features/kb/api';
 import {
   useCreateKbMutation,
   useDeleteDocumentMutation,
   useDeleteKbMutation,
   useDocumentsQuery,
-  useKbAgentsQuery,
   useKbsQuery,
   useUpdateKbMutation,
 } from '@/features/kb/api';
@@ -57,7 +57,7 @@ function createWrapper(): ({ children }: { children: ReactNode }) => JSX.Element
 }
 
 describe('kb api', () => {
-  it('loads kb lists and refreshes kb, documents, and agents after surviving mutations', async () => {
+  it('loads kb lists and refreshes kb and documents after surviving mutations', async () => {
     let kbListRequests = 0;
     let documentListRequests = 0;
     let knowledgeBases: KnowledgeBaseRecord[] = [
@@ -129,21 +129,17 @@ describe('kb api', () => {
           kb.kb_id === 'support' ? { ...kb, doc_count: documents.length } : kb
         );
         return HttpResponse.json({ deleted: true, document_id: 'doc-1', kb_id: 'support' });
-      }),
-      http.get(`${API_BASE_URL}/admin/kb/support/agents`, () =>
-        HttpResponse.json({ agents: [7], kb_id: 'support' })
-      )
+      })
     );
 
     const wrapper = createWrapper();
     renderHook(() => useKbsQuery(), { wrapper });
     renderHook(() => useDocumentsQuery('support'), { wrapper });
-    const agents = renderHook(() => useKbAgentsQuery('support'), { wrapper });
 
     await waitFor(() => {
       expect(kbListRequests).toBe(1);
       expect(documentListRequests).toBe(1);
-      expect(agents.result.current.data?.agents).toEqual([7]);
+      expect('useKbAgentsQuery' in kbApi).toBe(false);
     });
 
     const createKb = renderHook(() => useCreateKbMutation(), { wrapper });

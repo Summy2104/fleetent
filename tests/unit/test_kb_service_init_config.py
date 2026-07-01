@@ -37,10 +37,11 @@ def test_kb_service_init_config_defaults_to_default_tenant_home_outside_repo_cwd
 
     assert code == 0
     assert err == ""
-    assert "create kb-service/default/kb-service.yaml" in out
-    assert "create kb-service/default/.env" in out
-    config_path = home_dir / "kb-service" / "default" / "kb-service.yaml"
-    env_path = home_dir / "kb-service" / "default" / ".env"
+    assert "create tenants/default/kb/kb-service.yaml" in out
+    assert "create tenants/default/kb/.env" in out
+    assert "next: review tenants/default/kb/kb-service.yaml and tenants/default/kb/.env" in out
+    config_path = home_dir / "tenants" / "default" / "kb" / "kb-service.yaml"
+    env_path = home_dir / "tenants" / "default" / "kb" / ".env"
     assert config_path.exists()
     assert env_path.exists()
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
@@ -56,18 +57,20 @@ def test_kb_service_init_config_creates_requested_tenant_home(monkeypatch, tmp_p
 
     assert code == 0
     assert err == ""
-    assert "create kb-service/acme/kb-service.yaml" in out
-    assert "create kb-service/acme/.env" in out
-    config_path = home_dir / "kb-service" / "acme" / "kb-service.yaml"
+    assert "create tenants/acme/kb/kb-service.yaml" in out
+    assert "create tenants/acme/kb/.env" in out
+    assert "next: review tenants/acme/kb/kb-service.yaml and tenants/acme/kb/.env" in out
+    config_path = home_dir / "tenants" / "acme" / "kb" / "kb-service.yaml"
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert config["service"]["tenant_id"] == "acme"
+    assert [connector["enabled"] for connector in config["connectors"]] == [False, False]
 
 
 def test_kb_service_init_config_skips_existing_and_force_overwrites_within_tenant_home(
     monkeypatch, tmp_path: Path
 ) -> None:
     home_dir = tmp_path / "home"
-    service_dir = home_dir / "kb-service" / "tenant-a"
+    service_dir = home_dir / "tenants" / "tenant-a" / "kb"
     service_dir.mkdir(parents=True)
     yaml_path = service_dir / "kb-service.yaml"
     env_path = service_dir / ".env"
@@ -79,8 +82,8 @@ def test_kb_service_init_config_skips_existing_and_force_overwrites_within_tenan
 
     assert code == 0
     assert err == ""
-    assert "skip kb-service/tenant-a/kb-service.yaml" in out
-    assert "skip kb-service/tenant-a/.env" in out
+    assert "skip tenants/tenant-a/kb/kb-service.yaml" in out
+    assert "skip tenants/tenant-a/kb/.env" in out
     assert yaml_path.read_text(encoding="utf-8") == "tenant: existing\n"
     assert env_path.read_text(encoding="utf-8") == "KB_SERVICE_KEY=existing\n"
 
@@ -88,7 +91,7 @@ def test_kb_service_init_config_skips_existing_and_force_overwrites_within_tenan
 
     assert code == 0
     assert err == ""
-    assert "overwrite kb-service/tenant-a/kb-service.yaml" in out
-    assert "overwrite kb-service/tenant-a/.env" in out
+    assert "overwrite tenants/tenant-a/kb/kb-service.yaml" in out
+    assert "overwrite tenants/tenant-a/kb/.env" in out
     assert yaml_path.read_text(encoding="utf-8") != "tenant: existing\n"
     assert env_path.read_text(encoding="utf-8") != "KB_SERVICE_KEY=existing\n"

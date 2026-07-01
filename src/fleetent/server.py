@@ -6,7 +6,6 @@ runtime (`fleetent agent run`); this app starts agent-free with no IM, loop, or 
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import sys
@@ -38,7 +37,6 @@ from fleetent.platform.agent_management_console import (
     agent_console_api,
 )
 from fleetent.platform.agent_statistics import stats_admin_api
-from fleetent.platform.chat_management import chat_admin_api
 from fleetent.platform.connector_management import (
     connector_admin_api,
     mcp_credential_api,
@@ -59,7 +57,7 @@ from fleetent.platform.tenancy import admin_api as tenancy_admin_api
 from fleetent.platform.user_management import user_admin_api
 from fleetent.platform.user_management.api_key_store import resolve as _resolve_api_key
 from fleetent.platform.user_management.platform_bearer_adapter import PlatformBearerAdapter
-from fleetent.session import manager as session_mgr
+from fleetent.platform.webhook_management import webhook_admin_api, webhook_inbound_api
 from fleetent.skills import scan as scan_skills
 from fleetent.tools.plugin_loader import load_plugins
 
@@ -227,23 +225,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     logger.info("admin_login_url url=%s", _admin_login_url(user_admin_api.router.prefix))
 
-    # The running event loop backs the session governance seams injected below.
-    loop = asyncio.get_running_loop()
-
-    def _pg_transcript(session_id: str) -> list[dict[str, Any]]:
-        return asyncio.run_coroutine_threadsafe(session_mgr.load(session_id), loop).result()
-
-    chat_admin_api.load_transcript = _pg_transcript
-    chat_admin_api.clear_session = lambda session_id: asyncio.run_coroutine_threadsafe(
-        session_mgr.clear(session_id), loop
-    ).result()
-    chat_admin_api.inject = lambda session_id, role, content: asyncio.run_coroutine_threadsafe(
-        session_mgr.inject_message(session_id, role, content), loop
-    ).result()
-    chat_admin_api.reset_session = lambda session_id, keep_turns: asyncio.run_coroutine_threadsafe(
-        session_mgr.reset(session_id, keep_turns), loop
-    ).result()
-
     # Platform-side maintenance scheduler: runs sweep jobs in the platform process so
     # agent-runtime cron_scheduler stays free of platform imports (boundary contract).
     from fleetent.config import SchedulingSettings
@@ -278,7 +259,8 @@ app.include_router(kb_admin_api.router)
 app.include_router(connector_admin_api.router)
 app.include_router(mcp_oauth_callback_api.router)
 app.include_router(mcp_credential_api.router)
-app.include_router(chat_admin_api.router)
+app.include_router(webhook_admin_api.router)
+app.include_router(webhook_inbound_api.router)
 # agent_admin_api must precede agent_console_api: its literal DELETE
 # /agents/default route would otherwise be shadowed by the console's parametric
 # DELETE /agents/{name}, breaking clear-default with a 404.
@@ -500,6 +482,23 @@ def _resolve_agent_node_id(agent_name: str) -> str:
     if placement is None:
         raise HTTPException(status_code=503, detail=f"agent {agent_name!r} has no node placement")
     return str(placement["node_id"])
+
+
+async def _forward_webhook_to_agent(
+    *, agent_name: str, source_id: str, body: bytes, source_meta: str
+) -> None:
+    """Forward a platform-verified webhook to its target agent via the node channel."""
+    await _agent_transport.webhook(
+        _resolve_agent_node_id(agent_name),
+        agent_name,
+        source_id,
+        body,
+        source_meta,
+    )
+
+
+# live-webhooks: replace the inbound edge's default (unwired) forward seam.
+webhook_inbound_api._forward = _forward_webhook_to_agent
 
 
 def _slack_adapter_configured() -> bool:

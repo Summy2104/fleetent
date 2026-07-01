@@ -1,5 +1,7 @@
 """Unit tests for the file-driven agent config loader (file-agent-runtime)."""
 
+from pathlib import Path
+
 import pytest
 import yaml
 from pydantic import ValidationError
@@ -96,6 +98,45 @@ def test_agent_file_defaults() -> None:
 def test_agent_file_requires_models() -> None:
     with pytest.raises(ValidationError):
         agent_config.AgentFile.model_validate({"name": "bare", "version": 1})
+
+
+def test_default_embedding_route_matches_kb_service_example() -> None:
+    models = agent_config.default_models()
+    embedding_route = models.routes["embedding"][0]
+    target_by_id = {target.id: target for target in models.targets}
+    embedding_target = target_by_id[embedding_route.target]
+
+    example_path = Path(__file__).resolve().parents[2] / "kb-service.yaml.example"
+    example = yaml.safe_load(example_path.read_text(encoding="utf-8"))
+    embedding = example["embedding"]
+
+    assert embedding_target.endpoint == embedding["endpoint"]
+    assert embedding_target.model == embedding["model"]
+    assert embedding_target.params["dimensions"] == embedding["dimensions"]
+
+
+def test_kb_service_example_includes_disabled_rerank_section() -> None:
+    example_path = Path(__file__).resolve().parents[2] / "kb-service.yaml.example"
+    example = yaml.safe_load(example_path.read_text(encoding="utf-8"))
+
+    assert example["rerank"] == {
+        "backend": "disabled",
+        "endpoint": "",
+        "model": "your-reranker-model",
+        "api_key_env": "FLEETENT_KB_RERANK_API_KEY",
+    }
+
+
+def test_kb_service_example_includes_disabled_local_extraction_section() -> None:
+    example_path = Path(__file__).resolve().parents[2] / "kb-service.yaml.example"
+    example = yaml.safe_load(example_path.read_text(encoding="utf-8"))
+
+    assert example["extraction"] == {
+        "enabled": False,
+        "endpoint": "http://127.0.0.1:11434/v1/",
+        "model": "qwen3:8b",
+        "api_key_env": "FLEETENT_KB_EXTRACTION_API_KEY",
+    }
 
 
 # --- sandbox-workspace-scope-split: per-agent image persistence schema ------

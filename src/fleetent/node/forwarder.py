@@ -109,6 +109,38 @@ def build_app(config: NodeConfig, backend: BaseProcessBackend) -> FastAPI:
             media_type=upstream.headers.get("content-type", "text/event-stream"),
         )
 
+    @app.post("/forward/agents/{agent_name}/webhook/{source_id}")
+    async def forward_webhook(
+        agent_name: str,
+        source_id: str,
+        request: Request,
+        authorization: str | None = Header(None),
+    ) -> Response:
+        # live-webhooks: proxy a platform-verified webhook to the agent's own /webhook edge.
+        # The trusted X-Fleetent-Webhook-Source header (resolved source) is forwarded so the
+        # agent skips HMAC (already verified at the platform) and runs as the source's user.
+        _check_node_key(authorization)
+        tenant_id = request.headers.get("x-fleetent-tenant-id", "default")
+        host, port = _agent_endpoint(agent_name, tenant_id)
+        token = _agent_tui_token(agent_name, tenant_id)
+        body = await request.body()
+        headers = {"Authorization": f"Bearer {token}"}
+        if request.headers.get("content-type"):
+            headers["Content-Type"] = request.headers["content-type"]
+        if request.headers.get("x-fleetent-webhook-source"):
+            headers["X-Fleetent-Webhook-Source"] = request.headers["x-fleetent-webhook-source"]
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            upstream = await client.post(
+                f"http://{host}:{port}/webhook/{source_id}",
+                content=body,
+                headers=headers,
+            )
+        return Response(
+            content=upstream.content,
+            status_code=upstream.status_code,
+            media_type=upstream.headers.get("content-type"),
+        )
+
     @app.websocket("/forward/agents/{agent_name}/ws")
     async def forward_ws(websocket: WebSocket, agent_name: str) -> None:
         try:

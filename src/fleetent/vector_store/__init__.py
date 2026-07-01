@@ -17,8 +17,10 @@ from fleetent.vector_store.rerank import (
     create_rerank_provider,
 )
 from fleetent.vector_store.runtime import (
+    EmbeddingIdentity,
     clear_namespace,
     configure_from_active_agent,
+    current_embedding_identity,
     delete,
     embed_text,
     search,
@@ -33,8 +35,10 @@ __all__ = [
     "RerankProviderError",
     "RerankResult",
     "SearchResult",
+    "EmbeddingIdentity",
     "clear_namespace",
     "configure_from_active_agent",
+    "current_embedding_identity",
     "create_rerank_provider",
     "delete",
     "embed_text",

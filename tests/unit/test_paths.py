@@ -129,6 +129,7 @@ def test_agent_data_dir_derives_from_agents_dir(
         == home / "tenants" / "default" / "agents" / "my-bot" / "data"
     )
     assert paths.tenant_kb_dir("acme") == home / "tenants" / "acme" / "kb"
+    assert paths.tenant_kb_data_dir("acme") == home / "tenants" / "acme" / "kb" / "data"
 
 
 def test_agent_data_dir_injectable_via_monkeypatch(

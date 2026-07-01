@@ -19,9 +19,17 @@ embedding:
 
 extraction:
   enabled: false
-  endpoint: ""
-  model: ""
+  endpoint: http://127.0.0.1:11434/v1/
+  model: qwen3:8b
   api_key_env: FLEETENT_KB_EXTRACTION_API_KEY
+
+rerank:
+  backend: disabled
+  # Enable and point at your self-hosted rerank service, e.g. Infinity:
+  # http://127.0.0.1:7997/rerank
+  endpoint: ""
+  model: your-reranker-model
+  api_key_env: FLEETENT_KB_RERANK_API_KEY
 
 chunking:
   chunk_size: 1000
@@ -30,7 +38,7 @@ chunking:
 connectors:
   - id: drive-shared
     type: google_drive
-    enabled: true
+    enabled: false
     kb_id: kb-a
     folder_id: folder-123
     recursive: true
@@ -42,7 +50,7 @@ connectors:
     sync_interval_seconds: 1800
   - id: confluence-shared
     type: confluence
-    enabled: true
+    enabled: false
     kb_id: kb-a
     base_url: https://example.atlassian.net/wiki
     username_env: FLEETENT_CONFLUENCE_USERNAME

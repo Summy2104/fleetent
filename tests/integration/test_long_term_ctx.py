@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
+
 from fleetent import agent_config
 from fleetent.agent_config import AgentConfigIndex, AgentFile, default_models
 from fleetent.config import LongTermContextSettings
@@ -577,6 +579,52 @@ async def test_build_context_degrades_when_provider_times_out_and_keeps_other_so
     assert [source.source_type for source in result.sources] == ["memory"]
     assert warnings[0][0] == "ltc_retrieval_timeout"
     assert warnings[0][1]["path"] == "knowledge"
+
+
+async def test_build_context_propagates_kb_embedding_mismatch(monkeypatch):
+    from fleetent import long_term_ctx
+    from fleetent.knowledge_base.errors import KnowledgeBaseEmbeddingMismatchError
+
+    _publish_agent(
+        monkeypatch,
+        AgentFile(
+            name="agent-1",
+            version=1,
+            models=default_models(),
+            knowledge={
+                "enabled": True,
+                "bindings": [{"tenant_id": "tenant-a", "kb_id": "global"}],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        long_term_ctx.memory,
+        "search_facts",
+        AsyncMock(return_value=[_mem_result("User prefers concise answers.")]),
+    )
+    monkeypatch.setattr(
+        long_term_ctx.agent_memory,
+        "search_agent_memory",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(long_term_ctx, "_list_always_facts", lambda _user_id: [])
+
+    async def _mismatch(*_args, **_kwargs):
+        raise KnowledgeBaseEmbeddingMismatchError(
+            "Knowledge base embedding mismatch for tenant-a/global"
+        )
+
+    long_term_ctx.set_knowledge_provider(_mismatch)
+
+    with pytest.raises(
+        KnowledgeBaseEmbeddingMismatchError, match="Knowledge base embedding mismatch"
+    ):
+        await long_term_ctx.build_context(
+            user_id="user-1",
+            query="answer style",
+            agent_id="agent-1",
+            available_tokens=300,
+        )
 
 
 async def test_builtin_knowledge_provider_keeps_search_path_when_planner_opt_in_is_false(

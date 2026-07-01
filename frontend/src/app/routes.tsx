@@ -19,7 +19,6 @@ import { AgentConfigurePage } from '@/features/agents/configure';
 import { SkillsPage } from '@/features/skills/page';
 import { KnowledgeBasePage } from '@/features/kb/page';
 import { McpPage } from '@/features/mcp/page';
-import { SessionsPage } from '@/features/sessions/page';
 import { ProvidersPage } from '@/features/providers/page';
 import { NodesPage } from '@/features/nodes/page';
 import { UsersPage } from '@/features/users/page';
@@ -321,7 +320,6 @@ function AppLayout(): JSX.Element {
             <Route element={<AgentsPage />} path="/agents" />
             <Route element={<AgentConfigurePage />} path="/agents/:name/configure" />
             <Route element={<SkillsPage />} path="/skills" />
-            <Route element={<SessionsPage />} path="/sessions" />
             <Route element={<ProvidersPage />} path="/providers" />
             <Route element={<KnowledgeBasePage />} path="/kb" />
             <Route element={<McpPage />} path="/mcp" />

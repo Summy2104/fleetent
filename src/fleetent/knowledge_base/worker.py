@@ -31,6 +31,9 @@ from fleetent.knowledge_base.management.runtime import (
 )
 from fleetent.tenant_router import StandaloneKBTenantBackend, TenantRouter
 
+if False:  # pragma: no cover
+    from fleetent.knowledge_base.service_config import KBServiceConfig
+
 
 @dataclass(frozen=True)
 class KBWorkerConfig:
@@ -42,13 +45,8 @@ class KBWorkerConfig:
 
 
 def load_config() -> KBWorkerConfig:
-    """Load legacy kb-worker config from process env plus ``$FLEETENT_HOME/kb-service/.env``."""
+    """Load legacy kb-worker config from process env."""
     home_dir = Path(os.environ.get("FLEETENT_HOME") or Path.home() / ".fleetent").expanduser()
-    env_path = home_dir / "kb-service" / ".env"
-    if env_path.exists():
-        from dotenv import load_dotenv
-
-        load_dotenv(env_path, override=False)
     return KBWorkerConfig(
         queue_database_url=os.environ.get("FLEETENT_KB_WORKER_QUEUE_DATABASE_URL", "").strip(),
         substrate_database_url=os.environ.get(
@@ -315,8 +313,13 @@ def run(
     poll_interval: float,
     queue_database_url: str | None = None,
     data_dir: Path | None = None,
+    standalone_config: KBServiceConfig | None = None,
 ) -> None:
     while True:
+        if standalone_config is not None:
+            from fleetent.knowledge_base.standalone_sweep import sweep
+
+            sweep(standalone_config, queue_database_url=queue_database_url)
         processed = run_once(queue_database_url=queue_database_url, data_dir=data_dir)
         if processed is None:
             time.sleep(poll_interval)
@@ -327,6 +330,7 @@ def main(argv: list[str] | None = None) -> None:
     ns = _parse_args(argv or [])
     queue_database_url = config.queue_database_url or None
     data_dir: Path | None = None
+    standalone_config = None
     if ns.config:
         from fleetent.knowledge_base.service_config import (
             load_kb_service_config,
@@ -345,4 +349,5 @@ def main(argv: list[str] | None = None) -> None:
         poll_interval=ns.poll_interval,
         queue_database_url=queue_database_url,
         data_dir=data_dir,
+        standalone_config=standalone_config,
     )

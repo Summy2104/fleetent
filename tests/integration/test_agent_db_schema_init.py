@@ -217,8 +217,8 @@ def test_init_agent_db_schema_creates_all_agent_tables(tmp_path: Path) -> None:
     try:
         _init_agent_db_schema(data_dir, agent_id="test-agent")
 
-        # KB tables land in tenants/default/kb/kb.db via TenantRouter + migrate-on-open.
-        kb_db_path = tmp_path / "tenants" / "default" / "kb" / "kb.db"
+        # KB tables land in tenants/default/kb/data/kb.db via TenantRouter + migrate-on-open.
+        kb_db_path = tmp_path / "tenants" / "default" / "kb" / "data" / "kb.db"
         assert kb_db_path.exists()
         kb_tables = _table_names(SQLiteDatabase(path=kb_db_path))
         assert "knowledge_bases" in kb_tables
@@ -325,7 +325,7 @@ def test_init_agent_db_schema_data_dir_no_fleetent_db(tmp_path: Path) -> None:
         ss._state_db = original_state_db
 
 
-def test_init_agent_db_schema_migrates_flat_kb_layout_for_standalone_agent(tmp_path: Path) -> None:
+def test_init_agent_db_schema_keeps_legacy_kb_layout_for_standalone_agent(tmp_path: Path) -> None:
     import fleetent.schedule_store as ss
     from fleetent.runtime.agent_app import _init_agent_db_schema
 
@@ -346,14 +346,22 @@ def test_init_agent_db_schema_migrates_flat_kb_layout_for_standalone_agent(tmp_p
     try:
         _init_agent_db_schema(data_dir, agent_id="test-agent")
 
-        kb_dir = tmp_path / "tenants" / "default" / "kb"
+        kb_dir = tmp_path / "tenants" / "default" / "kb" / "data"
+        assert kb_dir.is_dir()
         assert (kb_dir / "kb.db").exists()
-        assert (kb_dir / "kb_vectors.db").exists()
-        assert not (tmp_path / "tenants" / "default" / "kb.db").exists()
-        assert not (tmp_path / "tenants" / "default" / "kb_vectors.db").exists()
+        assert not (kb_dir / "kb_vectors.db").exists()
+        assert (tmp_path / "tenants" / "default" / "kb.db").exists()
+        assert (tmp_path / "tenants" / "default" / "kb_vectors.db").exists()
         with sqlite3.connect(kb_dir / "kb.db") as conn:
+            assert (
+                conn.execute(
+                    "SELECT name FROM sqlite_master WHERE name = 'legacy_marker'"
+                ).fetchone()
+                is None
+            )
+        with sqlite3.connect(tmp_path / "tenants" / "default" / "kb.db") as conn:
             assert conn.execute("SELECT value FROM legacy_marker").fetchone() == ("kb",)
-        with sqlite3.connect(kb_dir / "kb_vectors.db") as conn:
+        with sqlite3.connect(tmp_path / "tenants" / "default" / "kb_vectors.db") as conn:
             assert conn.execute("SELECT value FROM legacy_vector_marker").fetchone() == ("vec",)
     finally:
         ss._state_db = original_state_db

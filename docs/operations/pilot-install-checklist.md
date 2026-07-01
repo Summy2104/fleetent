@@ -96,8 +96,9 @@ curl -fsS http://127.0.0.1:8765/health
 ## Knowledge Base Connector 验证
 
 > 平台托管 KB ingest 已退役。`/admin/kb/connectors*`、`/admin/kb/{kb_id}/sync` 和 platform import / extraction 端点不再作为生产入口。
-> 升级前请把历史 platform connector 配置誊到 `$FLEETENT_HOME/kb-service/default/kb-service.yaml`，
-> 并用 `kb-worker --config $FLEETENT_HOME/kb-service/default/kb-service.yaml` 运行 standalone 队列。
+> 升级前请把历史 platform connector 配置誊到 `$FLEETENT_HOME/tenants/default/kb/kb-service.yaml`，
+> 并用 `kb-worker --config $FLEETENT_HOME/tenants/default/kb/kb-service.yaml` 运行 standalone 队列。
+> 需要手动补跑实体抽取时，使用 `fleetent kb-extract --config $FLEETENT_HOME/tenants/default/kb/kb-service.yaml --kb <kb_id> [--wait]`。
 
 查看 connector 配置摘要：
 
@@ -130,6 +131,12 @@ FLEETENT_GOOGLE_DRIVE_EXECUTE_SYNC=1 \
 GET /admin/kb/connectors/eng-drive/status
 ```
 
+手动补跑实体抽取：
+
+```bash
+uv run fleetent kb-extract --config $FLEETENT_HOME/tenants/default/kb/kb-service.yaml --kb <kb_id> --wait
+```
+
 验收点：
 
 - `list` 输出 connector id、type、tenant、KB 和 scope，不输出 credential payload。
@@ -137,6 +144,7 @@ GET /admin/kb/connectors/eng-drive/status
   `scope_unreachable`。
 - `sync --dry-run` 不写 KB、source state 或 vector index。
 - `status` 输出最近一次 sync 结果和脱敏失败摘要。
+- `kb-extract --wait` 通过队列 + `kb-worker` 完成实体抽取，不再依赖 platform CLI。
 
 ## Observability 查询
 

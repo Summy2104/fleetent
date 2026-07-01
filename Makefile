@@ -198,10 +198,10 @@ node: node-provision ## Start node supervisor (auto-provisions node/.env first; 
 	uv run fleetent node start
 
 kb-worker: ## Start the KB ingest worker (single queue consumer)
-	uv run fleetent kb-worker --config $(FLEETENT_HOME)/kb-service/default/kb-service.yaml
+	uv run fleetent kb-worker --config $(FLEETENT_HOME)/tenants/default/kb/kb-service.yaml
 
 kb-serve: ## Start the KB read service with the shared standalone KB config
-	uv run fleetent kb-serve --config $(FLEETENT_HOME)/kb-service/default/kb-service.yaml
+	uv run fleetent kb-serve --config $(FLEETENT_HOME)/tenants/default/kb/kb-service.yaml
 
 agent: ## Run one agent directly with HTTP /chat+/ws: make agent AGENT=<name> [AGENT_PORT=8766]
 	@test -n "$(AGENT)" || { echo "usage: make agent AGENT=<name> [AGENT_PORT=8766]"; exit 2; }

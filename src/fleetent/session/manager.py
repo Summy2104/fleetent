@@ -691,18 +691,6 @@ async def reset(session_id: str, keep_turns: int) -> None:
         await save(session_id, messages[:keep_turns])
 
 
-async def inject_message(session_id: str, role: str, content: str) -> None:
-    """Append a single message to a session's transcript atomically under the lock.
-
-    Used by the admin console (chat_admin_api) to inject a human-agent reply during a
-    takeover. Grafted from main's session_mgr during the architecture merge.
-    """
-    async with session_lock(session_id):
-        messages = await load(session_id)
-        messages.append({"role": role, "content": content})
-        await save(session_id, messages)
-
-
 async def _release_sandboxes(session_ids: list[str]) -> None:
     """Reclaim session-scope sandbox containers for maintenance-removed sessions.
 

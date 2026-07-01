@@ -56,15 +56,20 @@ def test_chat_endpoint_absent(tmp_path, monkeypatch, isolated_schedule_db):
     assert client.post("/chat", json={"message": "hi"}).status_code == 404
 
 
-def test_webhook_endpoint_absent(tmp_path, monkeypatch, isolated_schedule_db):
+def test_webhook_unknown_source_404(tmp_path, monkeypatch, isolated_schedule_db):
+    # live-webhooks: the platform now hosts the managed inbound webhook edge, but an
+    # unregistered source_id is rejected with 404 (route present, source-gated).
     srv = _server(tmp_path, monkeypatch)
     client = TestClient(srv.app)
     assert client.post("/webhook/some-source", json={}).status_code == 404
 
 
 def test_ws_route_absent(tmp_path, monkeypatch, isolated_schedule_db):
+    # The platform control plane does not host agent-runtime /ws or /chat directly (those
+    # are forwarded via /admin/agents/{name}/...). The managed inbound /webhook edge is a
+    # platform responsibility (live-webhooks), so it is intentionally present here.
     srv = _server(tmp_path, monkeypatch)
     paths = {getattr(r, "path", None) for r in srv.app.routes}
     assert "/ws" not in paths
     assert "/chat" not in paths
-    assert not any(p and p.startswith("/webhook") for p in paths)
+    assert "/webhook/{source_id}" in paths

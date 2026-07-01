@@ -219,4 +219,18 @@ MIGRATIONS: list[tuple[int, str]] = [
         ADD COLUMN extraction_enabled INTEGER NOT NULL DEFAULT 0
         """,
     ),
+    (
+        _BASE_MIGRATIONS[-1][0] + 2,
+        """
+        ALTER TABLE knowledge_bases
+        ADD COLUMN embedding_model TEXT
+        """,
+    ),
+    (
+        _BASE_MIGRATIONS[-1][0] + 3,
+        """
+        ALTER TABLE knowledge_bases
+        ADD COLUMN embedding_dimensions INTEGER
+        """,
+    ),
 ]

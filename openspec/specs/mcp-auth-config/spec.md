@@ -82,3 +82,62 @@ managed 模式 SHALL 能为 MCP server 配置 `oauth_client_credentials` 静态�
 - **WHEN** 一个既有 api_key 型 MCP server 经迁移折叠进 auth_config 后被 materialize
 - **THEN** 渲染的 agent.yaml 鉴权与迁移前等价,api-key 连接照常工作
 
+### Requirement: connector 落库与前端表单 MUST 覆盖 oauth_authorization_code
+
+判别联合 schema 既是 validation / materialize / 前端表单渲染的单一真相源，则其 `oauth_authorization_code` 类型的两个尚未落实的消费方 SHALL 与既有 `oauth_client_credentials` / `api_key_per_user` 一致地覆盖：
+
+- **connector 落库归一化**：connector 注册表写入路径（create / edit）SHALL 持久化 `oauth_authorization_code` 的结构化非密字段 `authorization_endpoint` / `token_url` / `client_id` / `scope` / `redirect_path` 与 secret 的 env 引用名 `client_secret_env`，MUST NOT 丢成空对象。secret 的**值** MUST NOT 入表。
+- **前端表单渲染**：管理「添加 MCP 服务器」表单 SHALL 把 `oauth_authorization_code` 列为可选鉴权类型，并在选中时渲染上述字段集；提交前 SHALL 校验 `authorization_endpoint` + `token_url` + `client_id` 非空（与后端 authorization_code 校验器一致），`client_secret_env` 可留空（OAuth 2.1 公共客户端 + PKCE）。
+
+#### Scenario: connector 落库保留 authorization_code 结构化字段
+
+- **WHEN** 管理员经 connector 注册表以 `auth_type=oauth_authorization_code` 提交 `authorization_endpoint` / `token_url` / `client_id` / `scope` / `redirect_path` 与 client_secret 的 env 名
+- **THEN** 注册表 `auth_config` 持久化以上非密字段与 `client_secret_env`，不为空对象，且 client_secret 值不入表
+
+#### Scenario: 前端表单暴露 oauth_authorization_code 并校验必填
+
+- **WHEN** 管理员在「添加 MCP 服务器」表单选择 `oauth_authorization_code`
+- **THEN** 表单渲染 `authorization_endpoint` / `token_url` / `client_id` / `client_secret_env`(可选) / `scope` / `redirect_path` 字段，且在 `authorization_endpoint`、`token_url`、`client_id` 任一为空时禁止提交
+
+#### Scenario: 提交 payload 携带结构化 auth_config
+
+- **WHEN** 管理员填齐必填字段并提交
+- **THEN** 前端发往 connector admin REST 的请求体 `auth_type=oauth_authorization_code`，`auth_config` 含已填的 authorization_endpoint / token_url / client_id / client_secret_env / scope / redirect_path
+
+### Requirement: oauth_authorization_code 连接器 MUST 支持可选 token_env
+
+`oauth_authorization_code` 类型用于 stdio per-user OAuth 时，运行时按该 server 的 `token_env` 环境变量名把每个用户的短时 access token 注入其专属子进程（留空回落默认 `MCP_OAUTH_ACCESS_TOKEN`）。为让任意 stdio per-user OAuth server 可声明各自的注入变量名，连接器配置面 SHALL 覆盖可选字段 `token_env`：
+
+- **connector 落库归一化**：connector 注册表的 create / edit 路径 SHALL 持久化 `oauth_authorization_code` 的可选非密字段 `token_env`（默认空字符串），与既有 `authorization_endpoint` / `token_url` / `client_id` / `client_secret_env` / `scope` / `redirect_path` 并列，MUST NOT 丢弃。
+- **前端表单**：管理「添加/编辑 MCP 服务器」表单在 `oauth_authorization_code` 字段组 SHALL 提供一个**可选** `token_env` 输入（标注用于 stdio per-user OAuth、留空=默认 `MCP_OAUTH_ACCESS_TOKEN`），并随提交 payload 与编辑回填。`token_env` MUST NOT 成为可创建必填项（必填仍为 `authorization_endpoint` + `token_url` + `client_id`）。
+- 留空时行为 MUST 与现状一致（向后兼容；已有 oauth_authz 连接器不受影响）。
+
+#### Scenario: connector 落库保留 token_env
+
+- **WHEN** 管理员以 `auth_type=oauth_authorization_code` 提交并填写 `token_env`（如 `GOOGLE_DRIVE_MCP_ACCESS_TOKEN`）
+- **THEN** 注册表 `auth_config` 持久化 `token_env`，与其它 oauth 字段并存，不被丢弃
+
+#### Scenario: token_env 可留空且向后兼容
+
+- **WHEN** 管理员提交 `oauth_authorization_code` 但不填 `token_env`
+- **THEN** 归一化得到 `token_env` 为空字符串，连接器可正常创建，运行时回落默认注入变量名
+
+#### Scenario: 前端表单暴露可选 token_env 并随 payload 提交
+
+- **WHEN** 管理员在表单选择 `oauth_authorization_code` 并填写 token_env 后提交
+- **THEN** 表单渲染该可选输入，发往 connector admin REST 的 `auth_config` 含所填 `token_env`；且 token_env 为空不影响提交（不计入必填校验）
+
+### Requirement: auth_type 判别枚举不被 inline-secret 守卫误报
+
+`auth_type` 是 MCP server 鉴权配置的**判别枚举（discriminator）**，取值受约束（`none` / `api_key` / `oauth_client_credentials` / `oauth_authorization_code` / `api_key_per_user`），**永不承载 secret**。agent.yaml 加载时的 inline-secret 守卫（拒绝内联明文密钥）SHALL NOT 将 `auth_type` 的值当作候选 inline secret 扫描/报错——即使该枚举值被通用"像密钥"启发式误判。由此，经连接器物化出顶层 `auth_type`（如 `oauth_authorization_code` / `oauth_client_credentials`）的 agent SHALL 能正常加载并启动，不因判别枚举被 boot 守卫拦截。对真正承载 secret 的字段（secret 的 `*_env` 引用名以外的内联明文）扫描行为 MUST 保持不变。
+
+#### Scenario: 连接器物化的 oauth_authorization_code agent 正常加载
+
+- **WHEN** 一个 MCP server 经连接器物化出顶层 `auth_type: oauth_authorization_code` 进 agent.yaml，agent 加载该配置
+- **THEN** inline-secret 守卫不因 `auth_type` 的枚举值报错，agent 正常加载/启动
+
+#### Scenario: 真正的内联明文 secret 仍被拦截
+
+- **WHEN** agent.yaml 的某 MCP server 字段（非 `*_env` 引用、非结构判别字段）内联了像密钥的明文值
+- **THEN** inline-secret 守卫仍报错，要求改用环境变量引用（扫描行为不被本豁免削弱）
+

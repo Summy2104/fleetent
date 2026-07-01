@@ -162,7 +162,7 @@ async def test_telegram_handler_resolves_identity_without_platform_db(monkeypatc
 
     class FakeApp:
         def add_handler(self, handler):
-            captured["handler"] = handler
+            captured.setdefault("handler", handler)  # first = inbound MessageHandler
 
     class FakeBuilder:
         def token(self, t):
@@ -189,6 +189,7 @@ async def test_telegram_handler_resolves_identity_without_platform_db(monkeypatc
     msg_text.chat.type = "private"
     msg_text.chat.id = 999
     msg_text.photo = None
+    msg_text.document = None
 
     update = MagicMock()
     update.message = msg_text
@@ -221,7 +222,7 @@ async def test_telegram_handler_passes_agent_name_as_owner_id(monkeypatch):
 
     class FakeApp:
         def add_handler(self, handler):
-            captured["handler"] = handler
+            captured.setdefault("handler", handler)  # first = inbound MessageHandler
 
     class FakeBuilder:
         def token(self, t):
@@ -247,6 +248,7 @@ async def test_telegram_handler_passes_agent_name_as_owner_id(monkeypatch):
     msg_text.chat.type = "private"
     msg_text.chat.id = 999
     msg_text.photo = None
+    msg_text.document = None
 
     update = MagicMock()
     update.message = msg_text

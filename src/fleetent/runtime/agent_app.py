@@ -23,7 +23,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fastapi import Depends, FastAPI, Form, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    Form,
+    Header,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -86,6 +96,9 @@ class ImRouteRequest(BaseModel):
 class ImReply(BaseModel):
     text: str
     blocks: list[dict[str, Any]] | None = None
+    # Platform-neutral approval intent (telegram-slack-parity): the node edge renders it per
+    # platform at delivery (Slack Block Kit / Telegram inline keyboard). None = plain reply.
+    approval: dict[str, Any] | None = None
 
 
 class ImRouteResponse(BaseModel):
@@ -894,8 +907,20 @@ def build_app(agent_name: str) -> FastAPI:
             raise HTTPException(status_code=403, detail="cross-tenant access denied")
         replies: list[ImReply] = []
 
-        async def _reply(text: str, blocks: list[dict[str, Any]] | None = None) -> None:
-            replies.append(ImReply(text=text, blocks=blocks))
+        async def _reply(
+            text: str, blocks: list[dict[str, Any]] | None = None, *, approval: Any = None
+        ) -> None:
+            approval_payload = (
+                {
+                    "approval_id": approval.approval_id,
+                    "tool_name": approval.tool_name,
+                    "risk_level": approval.risk_level,
+                    "summary": approval.summary,
+                }
+                if approval is not None
+                else None
+            )
+            replies.append(ImReply(text=text, blocks=blocks, approval=approval_payload))
 
         await normalizer.route(
             normalizer.NormalizedMessage(
@@ -917,6 +942,88 @@ def build_app(agent_name: str) -> FastAPI:
             principal=principal,
         )
         return ImRouteResponse(replies=replies)
+
+    @app.post("/webhook/{source_id}", status_code=202)
+    async def webhook(
+        source_id: str,
+        request: Request,
+        background: BackgroundTasks,
+        x_hub_signature_256: str | None = Header(default=None),  # noqa: B008
+        x_fleetent_webhook_source: str | None = Header(default=None),  # noqa: B008
+    ) -> dict[str, str]:
+        """Inbound webhook → run the target agent once as the source's user (live-webhooks).
+
+        Two-state symmetric edge:
+
+        * **standalone** — public, unauthenticated: HMAC over the raw body authenticates the
+          caller; the source is resolved from this agent's ``agent.yaml`` ``webhooks.sources``.
+        * **managed** — the platform has already verified HMAC against the management-DB
+          secret and forwards through the node, supplying the resolved source in the trusted
+          ``X-Fleetent-Webhook-Source`` header (same trust model as the ingress principal
+          header). HMAC / agent.yaml lookup are then skipped.
+
+        On success the run is scheduled in the background and 202 returns immediately. When the
+        source carries a ``reply_target`` the run result is DM'd to that user via directed-reach
+        (a no-op in non-managed runtimes); otherwise the reply is a no-op.
+        """
+        from fleetent import outbound_connectors, webhook_router
+        from fleetent.im_gateway import normalizer
+
+        body = await request.body()
+
+        if x_fleetent_webhook_source is not None:
+            # Managed: trusted source injected by the platform via the node channel.
+            try:
+                meta = json.loads(x_fleetent_webhook_source)
+            except json.JSONDecodeError as exc:
+                raise HTTPException(status_code=400, detail="bad webhook source header") from exc
+            source = webhook_router.WebhookSource(
+                id=source_id,
+                user_id=str(meta.get("user_id", "")),
+                agent_name=meta.get("agent_name"),
+                message_template=meta.get("message_template"),
+                reply_target=meta.get("reply_target"),
+            )
+        else:
+            agent = agent_config.current().get(agent_name)
+            webhooks = agent.webhooks if agent is not None else None
+            sources = webhook_router.sources_from_settings(webhooks.sources if webhooks else [])
+            candidate = sources.get(source_id)
+            if candidate is None:
+                raise HTTPException(status_code=404, detail="unknown webhook source")
+            if webhooks is None or not webhooks.enabled:
+                raise HTTPException(status_code=403, detail="webhooks disabled")
+            if len(body) > webhooks.max_body_bytes:
+                raise HTTPException(status_code=413, detail="payload too large")
+            if not webhook_router.verify_signature(candidate.secret, body, x_hub_signature_256):
+                raise HTTPException(status_code=403, detail="invalid signature")
+            source = candidate
+
+        try:
+            payload = json.loads(body) if body else {}
+        except json.JSONDecodeError:
+            payload = {}
+        text = webhook_router.extract_message(source.message_template, payload)
+
+        reply_target = source.reply_target
+
+        async def _reply(reply_text: str, blocks: list[dict[str, Any]] | None = None) -> None:
+            # Directed-reach DM to reply_target; notify_user is itself a no-op in non-managed
+            # runtimes, so this collapses to no-op there. No reply_target = no delivery.
+            if reply_target:
+                outbound_connectors.notify_user(reply_target, reply_text, blocks=blocks)
+
+        msg = normalizer.NormalizedMessage(
+            platform="webhook",
+            session_id=f"webhook-{source_id}",
+            user_id=source.user_id,
+            text=text,
+            attachments=[],
+            reply_func=_reply,
+            agent_name=source.agent_name or agent_name,
+        )
+        background.add_task(normalizer.route, msg)
+        return {"status": "accepted", "source_id": source_id}
 
     @app.websocket("/ws")
     async def ws_gateway(websocket: WebSocket) -> None:

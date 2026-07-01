@@ -189,8 +189,8 @@ async def test_requester_prompt_via_reply_func_without_outbound() -> None:
     connectors = _make_connectors()
     captured: list[dict] = []
 
-    async def reply(text: str, blocks=None) -> None:
-        captured.append({"text": text, "blocks": blocks})
+    async def reply(text: str, blocks=None, *, approval=None) -> None:
+        captured.append({"text": text, "blocks": blocks, "approval": approval})
 
     result = await gate.request_approval(
         approval_id="req1",
@@ -206,14 +206,13 @@ async def test_requester_prompt_via_reply_func_without_outbound() -> None:
 
     assert result == "pending"
     connectors["slack"].conversations_open.assert_not_called()
+    # Governance de-leak: the gate passes a platform-neutral ApprovalPrompt intent (not Slack
+    # blocks); the reply channel renders it at the boundary.
+    from fleetent.outbound import ApprovalPrompt
+
     prompt = next(c for c in captured if "approve req1" in c["text"])
-    action_ids = {
-        e["action_id"]
-        for b in (prompt["blocks"] or [])
-        if b.get("type") == "actions"
-        for e in b["elements"]
-    }
-    assert "approval_approve" in action_ids
+    assert isinstance(prompt["approval"], ApprovalPrompt)
+    assert prompt["approval"].approval_id == "req1"
 
 
 async def test_requester_prompt_degrades_when_reply_func_rejects_blocks() -> None:
