@@ -386,6 +386,37 @@ def test_standalone_sweep_enqueues_due_connectors_without_platform_cron(tmp_path
     assert payload["connector_id"] == "drive-a"
 
 
+def test_worker_run_sweeps_due_connectors_without_kb_serve(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent import kb_ingest_jobs
+    from fleetent.knowledge_base import worker
+    from fleetent.knowledge_base.service_config import load_kb_service_config
+
+    path = tmp_path / "kb-service.yaml"
+    _write_yaml(path, _service_doc())
+    config = load_kb_service_config(path)
+    queue_url = config.queue_database_url()
+
+    def fake_run_once(*, queue_database_url=None, data_dir=None):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(worker, "run_once", fake_run_once)
+
+    with pytest.raises(KeyboardInterrupt):
+        worker.run(
+            poll_interval=0.01,
+            queue_database_url=queue_url,
+            data_dir=config.data_dir(),
+            standalone_config=config,
+        )
+
+    job = kb_ingest_jobs.claim_next_job(database_url=queue_url)
+    assert job is not None
+    payload = json.loads(str(job["connector_ref"]))
+    assert payload["connector_id"] == "drive-a"
+
+
 def test_standalone_sweep_is_best_effort_when_one_connector_enqueue_fails(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -545,12 +576,16 @@ def test_worker_main_uses_shared_kb_service_directory(
     _write_yaml(path, doc)
     monkeypatch.delenv("DATABASE_URL", raising=False)
 
-    calls: list[tuple[float, str | None, Path | None]] = []
+    calls: list[tuple[float, str | None, Path | None, object | None]] = []
 
     def fake_run(
-        *, poll_interval: float, queue_database_url: str | None, data_dir: Path | None
+        *,
+        poll_interval: float,
+        queue_database_url: str | None,
+        data_dir: Path | None,
+        standalone_config=None,
     ) -> None:
-        calls.append((poll_interval, queue_database_url, data_dir))
+        calls.append((poll_interval, queue_database_url, data_dir, standalone_config))
 
     monkeypatch.setattr(worker, "run", fake_run)
     monkeypatch.setattr("fleetent.build_info.log_service_startup", lambda name: None)
@@ -558,13 +593,13 @@ def test_worker_main_uses_shared_kb_service_directory(
     worker.main(["--config", str(path), "--poll-interval", "0.25"])
 
     expected_data_dir = (service_dir / "data").resolve()
-    assert calls == [
-        (
-            0.25,
-            f"sqlite:///{expected_data_dir / 'kb_ingest_queue.db'}",
-            expected_data_dir,
-        )
-    ]
+    assert len(calls) == 1
+    assert calls[0][:3] == (
+        0.25,
+        f"sqlite:///{expected_data_dir / 'kb_ingest_queue.db'}",
+        expected_data_dir,
+    )
+    assert calls[0][3] is not None
 
 
 def test_serve_main_uses_shared_kb_service_directory(

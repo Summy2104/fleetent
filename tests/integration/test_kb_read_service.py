@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from dataclasses import dataclass
 
 import pytest
@@ -136,6 +137,92 @@ def test_search_returns_wire_chunks(monkeypatch) -> None:
                 "metadata": {"section": "deploy"},
             }
         ]
+    }
+
+
+def test_status_returns_connector_and_job_state(monkeypatch) -> None:
+    serve, client = _make_client(monkeypatch)
+
+    monkeypatch.setattr(
+        serve.kb_runtime.operations,
+        "list_connector_statuses",
+        lambda tenant_id, kb_id=None: [
+            serve.kb_runtime.ConnectorStatus(
+                connector_id="drive-a",
+                connector_type="google_drive",
+                tenant_id=tenant_id,
+                kb_id="kb-a",
+                last_status="sync_succeeded",
+                last_started_at=datetime(2026, 6, 30, 10, 0, tzinfo=UTC),
+                last_finished_at=datetime(2026, 6, 30, 10, 5, tzinfo=UTC),
+                last_summary={"ingested": 3},
+                last_error=None,
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        serve.kb_ingest_jobs,
+        "list_jobs",
+        lambda tenant_id, kb_id=None, database_url=None: [
+            {
+                "id": "job-1",
+                "job_type": "connector_sync",
+                "tenant_id": tenant_id,
+                "kb_id": "kb-a",
+                "status": "done",
+                "attempts": 0,
+                "max_attempts": 3,
+                "last_error": None,
+                "created_at": "2026-06-30T10:00:00+00:00",
+                "updated_at": "2026-06-30T10:05:00+00:00",
+                "claimed_at": "2026-06-30T10:00:10+00:00",
+                "finished_at": "2026-06-30T10:05:00+00:00",
+                "result": {"status": "sync_succeeded", "summary": {"ingested": 3}},
+            }
+        ],
+    )
+
+    response = client.get(
+        "/status",
+        headers={
+            "Authorization": "Bearer svc-test",
+            "X-Fleetent-Principal": '{"user_id":"user-1","tenant_id":"tenant-a"}',
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "tenant_id": "tenant-a",
+        "connectors": [
+            {
+                "connector_id": "drive-a",
+                "connector_type": "google_drive",
+                "tenant_id": "tenant-a",
+                "kb_id": "kb-a",
+                "last_status": "sync_succeeded",
+                "last_started_at": "2026-06-30T10:00:00+00:00",
+                "last_finished_at": "2026-06-30T10:05:00+00:00",
+                "last_summary": {"ingested": 3},
+                "last_error": None,
+            }
+        ],
+        "jobs": [
+            {
+                "id": "job-1",
+                "job_type": "connector_sync",
+                "tenant_id": "tenant-a",
+                "kb_id": "kb-a",
+                "status": "done",
+                "attempts": 0,
+                "max_attempts": 3,
+                "last_error": None,
+                "created_at": "2026-06-30T10:00:00+00:00",
+                "updated_at": "2026-06-30T10:05:00+00:00",
+                "claimed_at": "2026-06-30T10:00:10+00:00",
+                "finished_at": "2026-06-30T10:05:00+00:00",
+                "result": {"status": "sync_succeeded", "summary": {"ingested": 3}},
+            }
+        ],
     }
 
 
@@ -379,3 +466,35 @@ def test_search_rejects_cross_tenant_principal(monkeypatch) -> None:
     )
 
     assert response.status_code == 403
+
+
+def test_status_rejects_cross_tenant_principal(monkeypatch) -> None:
+    _serve, client = _make_client(monkeypatch)
+
+    response = client.get(
+        "/status",
+        headers={
+            "Authorization": "Bearer svc-test",
+            "X-Fleetent-Principal": '{"user_id":"user-1","tenant_id":"tenant-b"}',
+        },
+    )
+
+    assert response.status_code == 403
+
+
+def test_kb_serve_with_queue_config_does_not_start_sweep_task(monkeypatch, tmp_path) -> None:
+    from fleetent.knowledge_base import serve
+
+    path = tmp_path / "service-key.txt"
+    path.write_text("svc-test", encoding="utf-8")
+    app = serve.create_app(
+        serve.KBServeConfig(
+            tenant_id="tenant-a",
+            service_key_ref=f"file://{path}",
+            queue_database_url="sqlite:////tmp/kb-queue.db",
+        )
+    )
+    monkeypatch.delenv("FLEETENT_KB_SERVICE_CONFIG", raising=False)
+
+    with TestClient(app, raise_server_exceptions=True):
+        pass

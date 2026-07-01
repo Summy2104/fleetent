@@ -80,6 +80,38 @@ def get_job(job_id: str, *, database_url: str | None = None) -> dict[str, Any] |
     return _decode(row)
 
 
+def list_jobs(
+    *,
+    tenant_id: str,
+    kb_id: str | None = None,
+    limit: int = 20,
+    database_url: str | None = None,
+) -> list[dict[str, Any]]:
+    rows = (
+        _database(database_url)
+        .execute(
+            """
+            SELECT *
+            FROM kb_ingest_jobs
+            WHERE tenant_id = :tenant_id
+              AND (:kb_id IS NULL OR kb_id = :kb_id)
+            ORDER BY updated_at DESC, id DESC
+            LIMIT :limit
+            """,
+            {"tenant_id": tenant_id, "kb_id": kb_id, "limit": limit},
+        )
+        .fetchall()
+    )
+    jobs: list[dict[str, Any]] = []
+    for row in rows:
+        job = _decode(row)
+        if job is None:
+            continue
+        job["result"] = get_job_result(job)
+        jobs.append(job)
+    return jobs
+
+
 def has_active_worker(*, stale_after_seconds: float, database_url: str | None = None) -> bool:
     """Return whether unresolved jobs show recent claim activity."""
     row = (

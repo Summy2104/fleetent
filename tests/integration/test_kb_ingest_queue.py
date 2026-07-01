@@ -101,3 +101,59 @@ def test_enqueue_connector_job_uses_refs_not_plaintext(queue_module, queue_datab
     }
     assert "credential_ref" not in payload["config"]
     assert "google.json" not in job["connector_ref"]
+
+
+def test_list_jobs_filters_by_tenant_and_kb_and_decodes_result(queue_module, queue_database_url):
+    target = queue_module.enqueue_job(
+        job_type="import_document",
+        tenant_id="tenant-a",
+        kb_id="kb-a",
+        connector_ref={"source": "runbook.md", "document_format": "markdown", "content": "# H1"},
+        database_url=queue_database_url,
+    )
+    other_kb = queue_module.enqueue_job(
+        job_type="import_document",
+        tenant_id="tenant-a",
+        kb_id="kb-b",
+        connector_ref={"source": "other.md", "document_format": "markdown", "content": "# H2"},
+        database_url=queue_database_url,
+    )
+    other_tenant = queue_module.enqueue_job(
+        job_type="sync_directory",
+        tenant_id="tenant-b",
+        kb_id="kb-a",
+        connector_ref={"path": "/srv/docs"},
+        database_url=queue_database_url,
+    )
+
+    done = queue_module.mark_done(
+        target["id"],
+        result={"document_id": "doc-1", "chunks": 4},
+        database_url=queue_database_url,
+    )
+    assert done is not None
+    failed = queue_module.mark_failed(other_kb["id"], "boom", database_url=queue_database_url)
+    assert failed is not None
+    assert other_tenant["id"]
+
+    jobs = queue_module.list_jobs(tenant_id="tenant-a", kb_id="kb-a", database_url=queue_database_url)
+
+    assert jobs == [
+        {
+            "id": target["id"],
+            "job_type": "import_document",
+            "tenant_id": "tenant-a",
+            "kb_id": "kb-a",
+            "connector_ref": done["connector_ref"],
+            "cred_ref": "",
+            "status": "done",
+            "attempts": 0,
+            "max_attempts": 3,
+            "last_error": None,
+            "created_at": done["created_at"],
+            "updated_at": done["updated_at"],
+            "claimed_at": None,
+            "finished_at": done["finished_at"],
+            "result": {"document_id": "doc-1", "chunks": 4},
+        }
+    ]

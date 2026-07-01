@@ -236,8 +236,36 @@ def get_connector_status(
             last_finished_at=None,
             last_summary={},
             last_error=None,
-        )
+    )
     return _row_to_status(row)
+
+
+def list_connector_statuses(
+    tenant_id: str,
+    *,
+    kb_id: str | None = None,
+    limit: int = 20,
+    database: SQLiteDatabase | None = None,
+) -> list[ConnectorStatus]:
+    """List latest connector statuses for one tenant, newest first."""
+    rows = (
+        _database(database)
+        .execute(
+            """
+        SELECT
+            connector_id, connector_type, tenant_id, kb_id, last_status,
+            last_started_at, last_finished_at, last_summary_json, last_error
+        FROM knowledge_connector_status
+        WHERE tenant_id = :tenant_id
+          AND (:kb_id IS NULL OR kb_id = :kb_id)
+        ORDER BY updated_at DESC, connector_id ASC
+        LIMIT :limit
+        """,
+            {"tenant_id": tenant_id, "kb_id": kb_id, "limit": limit},
+        )
+        .fetchall()
+    )
+    return [_row_to_status(row) for row in rows]
 
 
 def record_connector_status(
