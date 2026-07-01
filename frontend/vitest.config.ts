@@ -25,13 +25,15 @@ export default defineConfig({
     // a flake almost always passes the retry. Paired with split/timeout hardening,
     // not a substitute for it.
     retry: 2,
-    // Cap parallelism hard: under v8 coverage the heavy page suites (Radix
+    // Cap parallelism: under v8 coverage the heavy page suites (Radix
     // Select/Dialog flows driven by userEvent) starve each other for CPU when
-    // many workers run at once, producing flaky timeouts that move between
-    // files run to run. Two workers keeps each suite on enough cores to finish
-    // well within the timeout; we trade wall-clock for deterministic runs.
-    maxWorkers: 2,
-    minWorkers: 1,
+    // too many workers share too few cores, producing flaky timeouts that move
+    // between files run to run. CI runs this on a 2x runner (~8 vCPU), so 4
+    // workers keep ~2 vCPU each — enough headroom to stay deterministic while
+    // roughly halving wall-clock versus the old 2-worker cap. Do not raise this
+    // beyond the runner's vCPU/2 or the starvation flake returns.
+    maxWorkers: 4,
+    minWorkers: 2,
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
     setupFiles: ['./src/test/setup.ts'],
     coverage: {
