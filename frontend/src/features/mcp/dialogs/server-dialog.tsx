@@ -15,16 +15,18 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import type { AgentListItem } from '@/features/agents/api'
 import {
-  type McpApiKeyPerUserAuthConfig,
   type McpAuthType,
-  type McpOAuthAuthorizationCodeAuthConfig,
-  type McpOAuthClientCredentialsAuthConfig,
-  type McpServerInput,
   type McpServerRecord,
   useCreateMcpServerMutation,
   useUpdateMcpServerMutation,
 } from '@/features/connectors/api'
-import { type EnvPair, GLOBAL_SCOPE, TRANSPORTS, toPairs } from '@/features/mcp/shared'
+import {
+  buildServerPayload,
+  canSubmitServer,
+  type ServerFormFields,
+  serverFormFromEditing,
+} from '@/features/mcp/dialogs/server-dialog-logic'
+import { type EnvPair, GLOBAL_SCOPE, TRANSPORTS } from '@/features/mcp/shared'
 import { useT } from '@/i18n'
 
 export function ServerDialog({
@@ -65,81 +67,53 @@ export function ServerDialog({
 
   useEffect(() => {
     if (open) {
-      const authConfig = editing?.auth_config ?? {}
-      const oauthConfig = authConfig as Partial<McpOAuthClientCredentialsAuthConfig>
-      const authzCodeConfig = authConfig as Partial<McpOAuthAuthorizationCodeAuthConfig>
-      const perUserConfig = authConfig as Partial<McpApiKeyPerUserAuthConfig>
-      setId(editing?.id ?? '')
-      setTransport(editing?.transport ?? 'stdio')
-      setCommand(editing?.command ?? '')
-      setUrl(editing?.url ?? '')
-      setAgentScope(editing?.agent_id == null ? GLOBAL_SCOPE : String(editing.agent_id))
-      setAuthType(editing?.auth_type ?? 'none')
-      setApiKeyEnv('key_env' in authConfig && typeof authConfig.key_env === 'string' ? authConfig.key_env : '')
-      setOauthTokenUrl(oauthConfig.token_url ?? '')
-      setOauthClientId(oauthConfig.client_id ?? '')
-      setOauthClientSecretEnv(oauthConfig.client_secret_env ?? '')
-      setOauthScope(oauthConfig.scope ?? '')
-      setOauthAuthorizationEndpoint(authzCodeConfig.authorization_endpoint ?? '')
-      setOauthRedirectPath(authzCodeConfig.redirect_path ?? '')
-      setOauthTokenEnv(authzCodeConfig.token_env ?? '')
-      setHeaderStyle(perUserConfig.header_style ?? 'bearer')
-      setCredentialInput(perUserConfig.credential_input ?? 'form')
-      setEnv(toPairs(editing?.env))
-      setArgs(editing?.args ?? [])
-      setHeaders(toPairs(editing?.headers))
+      const f = serverFormFromEditing(editing)
+      setId(f.id)
+      setTransport(f.transport)
+      setCommand(f.command)
+      setUrl(f.url)
+      setAgentScope(f.agentScope)
+      setAuthType(f.authType)
+      setApiKeyEnv(f.apiKeyEnv)
+      setOauthTokenUrl(f.oauthTokenUrl)
+      setOauthClientId(f.oauthClientId)
+      setOauthClientSecretEnv(f.oauthClientSecretEnv)
+      setOauthScope(f.oauthScope)
+      setOauthAuthorizationEndpoint(f.oauthAuthorizationEndpoint)
+      setOauthRedirectPath(f.oauthRedirectPath)
+      setOauthTokenEnv(f.oauthTokenEnv)
+      setHeaderStyle(f.headerStyle)
+      setCredentialInput(f.credentialInput)
+      setEnv(f.env)
+      setArgs(f.args)
+      setHeaders(f.headers)
     }
   }, [open, editing])
 
-  const submit = async (): Promise<void> => {
-    const payload: McpServerInput = {
-      id: id.trim(),
-      transport: transport ?? '',
-      enabled: editing?.enabled ?? true,
-      auth_type: authType,
-      auth_config:
-        authType === 'api_key'
-          ? { key_env: apiKeyEnv.trim() }
-          : authType === 'oauth_client_credentials'
-            ? {
-                token_url: oauthTokenUrl.trim(),
-                client_id: oauthClientId.trim(),
-                client_secret_env: oauthClientSecretEnv.trim(),
-                scope: oauthScope.trim(),
-              }
-            : authType === 'oauth_authorization_code'
-              ? {
-                  authorization_endpoint: oauthAuthorizationEndpoint.trim(),
-                  token_url: oauthTokenUrl.trim(),
-                  client_id: oauthClientId.trim(),
-                  client_secret_env: oauthClientSecretEnv.trim(),
-                  scope: oauthScope.trim(),
-                  redirect_path: oauthRedirectPath.trim(),
-                  token_env: oauthTokenEnv.trim(),
-                }
-              : authType === 'api_key_per_user'
-                ? { header_style: headerStyle, credential_input: credentialInput }
-                : {},
-    }
-    if (!isEdit && agentScope !== GLOBAL_SCOPE) payload.agent_id = Number(agentScope)
-    if (transport === 'stdio') {
-      payload.command = command.trim() || undefined
-      const cleanArgs = args.map((arg) => arg.trim()).filter(Boolean)
-      if (cleanArgs.length > 0) payload.args = cleanArgs
-    } else {
-      payload.url = url.trim() || undefined
-      const headerMap: Record<string, string> = {}
-      headers.forEach((pair) => {
-        if (pair.key.trim()) headerMap[pair.key.trim()] = pair.value
-      })
-      if (Object.keys(headerMap).length > 0) payload.headers = headerMap
-    }
-    const envMap: Record<string, string> = {}
-    env.forEach((pair) => {
-      if (pair.key.trim()) envMap[pair.key.trim()] = pair.value
-    })
-    if (Object.keys(envMap).length > 0) payload.env = envMap
+  const fields: ServerFormFields = {
+    id,
+    transport,
+    command,
+    url,
+    agentScope,
+    authType,
+    apiKeyEnv,
+    oauthTokenUrl,
+    oauthClientId,
+    oauthClientSecretEnv,
+    oauthScope,
+    oauthAuthorizationEndpoint,
+    oauthRedirectPath,
+    oauthTokenEnv,
+    headerStyle,
+    credentialInput,
+    env,
+    args,
+    headers,
+  }
 
+  const submit = async (): Promise<void> => {
+    const payload = buildServerPayload(fields, { isEdit, editingEnabled: editing?.enabled })
     if (isEdit) {
       const { id: _omit, ...editPayload } = payload
       await update.mutateAsync(editPayload)
@@ -149,21 +123,7 @@ export function ServerDialog({
     onOpenChange(false)
   }
 
-  const canSubmit =
-    id.trim().length > 0 &&
-    (transport === 'stdio' ? command.trim().length > 0 : url.trim().length > 0) &&
-    (authType === 'none' ||
-      authType === 'api_key_per_user' ||
-      (authType === 'api_key' && apiKeyEnv.trim().length > 0) ||
-      (authType === 'oauth_client_credentials' &&
-        oauthTokenUrl.trim().length > 0 &&
-        oauthClientId.trim().length > 0 &&
-        oauthClientSecretEnv.trim().length > 0) ||
-      // authorization_code: client_secret_env is optional (PKCE public clients).
-      (authType === 'oauth_authorization_code' &&
-        oauthAuthorizationEndpoint.trim().length > 0 &&
-        oauthTokenUrl.trim().length > 0 &&
-        oauthClientId.trim().length > 0))
+  const canSubmit = canSubmitServer(fields)
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
