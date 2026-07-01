@@ -35,4 +35,4 @@
 - [x] 6.4 `make test-pr` + `make test-integration-ci`，判据"对照 main 基线无新增失败"。
 - [x] 6.5 `PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py`（仅命令改名，不应触动边界）。
 - [x] 6.6 手验：`uv run fleetent kb --help`(或无参) 打印子命令 usage；`uv run `fleetent` `kb-serve`` 报未识别。
-- [ ] 6.7 tasks.md 全 `[x]`；功能分支 `openspec archive kb-cli-verb-grouping`（同步 `agent-runtime-cli` + 被改动的其余 KB spec）；commit（含 Co-Authored-By 签名）+ 推分支；**不 merge main，等 Randy 定夺**。
+- [x] 6.7 tasks.md 全 `[x]`；功能分支 `openspec archive kb-cli-verb-grouping`（同步 `agent-runtime-cli` + 被改动的其余 KB spec）；commit（含 Co-Authored-By 签名）+ 推分支；后续已完成 main 合并与远端同步。
