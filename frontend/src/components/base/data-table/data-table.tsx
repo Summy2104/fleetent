@@ -2,6 +2,7 @@ import * as React from 'react'
 import { type ColumnDef, flexRender, type Row } from '@tanstack/react-table'
 
 import { Badge } from '@/components/base/badge'
+import { type DateRangeValue, dateRangeBounds } from '@/components/base/date-picker'
 import { Card } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
@@ -22,6 +23,19 @@ import { useDataTable } from './use-data-table'
 function multiSelectFilterFn<TData>(row: Row<TData>, columnId: string, value: unknown): boolean {
   if (!Array.isArray(value) || value.length === 0) return true
   return value.includes(String(row.getValue(columnId)))
+}
+
+/**
+ * Client-side date-range filter. Compares the cell's ISO date string against the
+ * inclusive day bounds of the selected range; a missing/empty range matches all.
+ */
+function dateRangeFilterFn<TData>(row: Row<TData>, columnId: string, value: unknown): boolean {
+  const { since, until } = dateRangeBounds(value as DateRangeValue | undefined)
+  if (!since && !until) return true
+  const cell = String(row.getValue(columnId))
+  if (since && cell < since) return false
+  if (until && cell > until) return false
+  return true
 }
 
 function selectionColumn<TData>(): ColumnDef<TData, unknown> {
@@ -57,6 +71,7 @@ function useTableColumns<TData>(
       if (!filter || column.filterFn) return column
       if (filter.type === 'select') return { ...column, filterFn: 'equalsString' as const }
       if (filter.type === 'multi-select') return { ...column, filterFn: multiSelectFilterFn }
+      if (filter.type === 'date-range') return { ...column, filterFn: dateRangeFilterFn }
       return { ...column, filterFn: 'includesString' as const }
     })
     return enableRowSelection ? [selectionColumn<TData>(), ...withFilterFns] : withFilterFns

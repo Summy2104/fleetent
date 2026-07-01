@@ -18,6 +18,7 @@ export type ColumnFilterConfig =
   | { type: 'text'; placeholder?: string }
   | { type: 'select'; options: ColumnFilterOption[] }
   | { type: 'multi-select'; options: ColumnFilterOption[] }
+  | { type: 'date-range'; placeholder?: string }
 
 declare module '@tanstack/react-table' {
   interface ColumnMeta<TData extends RowData, TValue> {

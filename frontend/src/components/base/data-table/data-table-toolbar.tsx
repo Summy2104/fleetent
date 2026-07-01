@@ -2,6 +2,7 @@ import * as React from 'react'
 import type { Table } from '@tanstack/react-table'
 import { Search, X } from 'lucide-react'
 
+import { DatePicker, type DateRangeValue } from '@/components/base/date-picker'
 import { SimpleSelect } from '@/components/base/simple-select'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -24,20 +25,26 @@ export function DataTableToolbar<TData>({ table, enableGlobalFilter, children }:
     <div className="flex flex-wrap items-center gap-2">
       {enableGlobalFilter ? <GlobalSearch table={table} /> : null}
       <ColumnFilters table={table} />
-      {children}
-      {isFiltered ? (
-        <Button
-          aria-label="Reset filters"
-          className="ml-auto h-8 px-2 lg:px-3"
-          onClick={() => {
-            table.resetColumnFilters()
-            table.setGlobalFilter('')
-          }}
-          variant="ghost"
-        >
-          Reset
-          <X className="size-4" />
-        </Button>
+      {/* External actions (e.g. Search) + Reset stay grouped at the far right,
+          with Reset last — robust to wrapping regardless of filter count. */}
+      {children || isFiltered ? (
+        <div className="ml-auto flex items-center gap-2">
+          {children}
+          {isFiltered ? (
+            <Button
+              aria-label="Reset filters"
+              className="h-8 px-2 lg:px-3"
+              onClick={() => {
+                table.resetColumnFilters()
+                table.setGlobalFilter('')
+              }}
+              variant="ghost"
+            >
+              Reset
+              <X className="size-4" />
+            </Button>
+          ) : null}
+        </div>
       ) : null}
     </div>
   )
@@ -94,6 +101,31 @@ function ColumnFilters<TData>({ table }: { table: Table<TData> }) {
               placeholder={config.placeholder ?? title}
               value={(column.getFilterValue() as string) ?? ''}
             />
+          )
+        }
+
+        if (config.type === 'date-range') {
+          const range = (column.getFilterValue() as DateRangeValue) ?? {}
+          const update = (next: DateRangeValue): void => {
+            const hasAny = next.from || next.to || next.fromTime || next.toTime
+            column.setFilterValue(hasAny ? next : undefined)
+          }
+          return (
+            // Two independent single-date pickers (start / end), each optional.
+            <React.Fragment key={column.id}>
+              <DatePicker
+                onChange={(field) => update({ ...range, from: field?.date, fromTime: field?.time })}
+                placeholder={`${title} from`}
+                triggerAriaLabel={`Filter ${title} start`}
+                value={{ date: range.from, time: range.fromTime }}
+              />
+              <DatePicker
+                onChange={(field) => update({ ...range, to: field?.date, toTime: field?.time })}
+                placeholder={`${title} to`}
+                triggerAriaLabel={`Filter ${title} end`}
+                value={{ date: range.to, time: range.toTime }}
+              />
+            </React.Fragment>
           )
         }
 

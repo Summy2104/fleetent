@@ -58,6 +58,26 @@ describe('audit api', () => {
     })
   })
 
+  it('serializes the date range as since/until query params', async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/admin/audit`, ({ request }) => {
+        const url = new URL(request.url)
+        expect(url.searchParams.get('since')).toBe('2026-06-27T00:00:00')
+        expect(url.searchParams.get('until')).toBe('2026-06-28T23:59:59.999')
+        return HttpResponse.json([])
+      })
+    )
+
+    const query = renderHook(
+      () => useAuditLogsQuery({ since: '2026-06-27T00:00:00', until: '2026-06-28T23:59:59.999' }),
+      { wrapper: createWrapper() }
+    )
+
+    await waitFor(() => {
+      expect(query.result.current.isSuccess).toBe(true)
+    })
+  })
+
   it('serializes the current audit rows as CSV', () => {
     const csv = auditRowsToCsv([
       {

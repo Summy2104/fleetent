@@ -1,35 +1,35 @@
 import { useMemo, useState } from 'react'
+import type { ColumnFiltersState } from '@tanstack/react-table'
 import { Download, Search } from 'lucide-react'
 
 import { DataTable } from '@/components/base/data-table'
+import { type DateRangeValue, dateRangeBounds } from '@/components/base/date-picker'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { type AuditLogFilters, type AuditLogRow, auditRowsToCsv, useAuditLogsQuery } from '@/features/audit/api'
 import { buildAuditColumns } from '@/features/audit/columns/audit-columns'
 import { useT } from '@/i18n'
 
-type FormState = {
-  action: string
-  actor: string
-  endTime: string
-  startTime: string
-  target: string
-}
-
-const EMPTY_FORM: FormState = {
-  action: '',
-  actor: '',
-  endTime: '',
-  startTime: '',
-  target: '',
-}
-
-function withinTimeRange(row: AuditLogRow, form: FormState): boolean {
-  if (form.startTime && row.created_at < form.startTime) return false
-  if (form.endTime && row.created_at > form.endTime) return false
-  return true
+/**
+ * Map the DataTable column-filter state onto the backend audit query. Text
+ * columns become exact-ish filters; the `created_at` date-range expands to
+ * inclusive `since`/`until` bounds.
+ */
+export function auditFiltersFromColumns(columnFilters: ColumnFiltersState): AuditLogFilters {
+  const filters: AuditLogFilters = {}
+  for (const { id, value } of columnFilters) {
+    if (id === 'created_at') {
+      const { since, until } = dateRangeBounds(value as DateRangeValue | undefined)
+      if (since) filters.since = since
+      if (until) filters.until = until
+      continue
+    }
+    const text = typeof value === 'string' ? value.trim() : ''
+    if (!text) continue
+    if (id === 'actor_user_id') filters.actor = text
+    else if (id === 'action') filters.action = text
+    else if (id === 'resource') filters.targetId = text
+  }
+  return filters
 }
 
 function downloadCsv(rows: AuditLogRow[]): void {
@@ -44,96 +44,52 @@ function downloadCsv(rows: AuditLogRow[]): void {
 
 export function AuditPage(): JSX.Element {
   const t = useT()
-  const [form, setForm] = useState<FormState>(EMPTY_FORM)
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
   const [filters, setFilters] = useState<AuditLogFilters>({})
   const [searched, setSearched] = useState(false)
   const auditLogs = useAuditLogsQuery(filters, searched)
   const columns = useMemo(() => buildAuditColumns({ t }), [t])
+  const rows = auditLogs.data ?? []
 
-  const visibleRows = useMemo(
-    () => (auditLogs.data ?? []).filter((row) => withinTimeRange(row, form)),
-    [auditLogs.data, form]
-  )
-
+  // Commit the current column filters to the backend query on demand — audit
+  // logs can be large, so we never auto-fetch on filter change.
   const search = (): void => {
-    setFilters({
-      action: form.action.trim() || undefined,
-      actor: form.actor.trim() || undefined,
-      targetId: form.target.trim() || undefined,
-    })
+    setFilters(auditFiltersFromColumns(columnFilters))
     setSearched(true)
   }
 
+  // The toolbar right-aligns external actions and pins Reset last, so Search
+  // renders at the far right, just left of Reset.
+  const searchAction = (
+    <Button className="h-8" onClick={search} size="sm">
+      <Search className="size-4" /> {t('audit.search')}
+    </Button>
+  )
+
   const exportAction = (
-    <Button disabled={visibleRows.length === 0} onClick={() => downloadCsv(visibleRows)} variant="secondary">
+    <Button disabled={rows.length === 0} onClick={() => downloadCsv(rows)} variant="secondary">
       <Download className="size-4" /> {t('audit.exportCsv')}
     </Button>
   )
 
   return (
-    <div className="space-y-3">
-      <Card className="space-y-3 px-4 py-3">
-        <div className="grid gap-3 md:grid-cols-5">
-          <div className="grid gap-2">
-            <Label htmlFor="audit-actor">{t('audit.actor')}</Label>
-            <Input
-              id="audit-actor"
-              onChange={(event) => setForm((current) => ({ ...current, actor: event.target.value }))}
-              value={form.actor}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="audit-action">{t('audit.action')}</Label>
-            <Input
-              id="audit-action"
-              onChange={(event) => setForm((current) => ({ ...current, action: event.target.value }))}
-              value={form.action}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="audit-target">{t('audit.target')}</Label>
-            <Input
-              id="audit-target"
-              onChange={(event) => setForm((current) => ({ ...current, target: event.target.value }))}
-              value={form.target}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="audit-start">{t('audit.startTime')}</Label>
-            <Input
-              id="audit-start"
-              onChange={(event) => setForm((current) => ({ ...current, startTime: event.target.value }))}
-              value={form.startTime}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="audit-end">{t('audit.endTime')}</Label>
-            <Input
-              id="audit-end"
-              onChange={(event) => setForm((current) => ({ ...current, endTime: event.target.value }))}
-              value={form.endTime}
-            />
-          </div>
+    <DataTable
+      actions={exportAction}
+      columnFilters={columnFilters}
+      columns={columns}
+      data={rows}
+      emptyState={
+        <div className="py-12 text-center text-muted-foreground text-sm">
+          {searched ? t('audit.empty') : t('audit.searchPrompt')}
         </div>
-        <Button onClick={search}>
-          <Search className="size-4" /> {t('audit.search')}
-        </Button>
-      </Card>
-
-      <DataTable
-        actions={exportAction}
-        columns={columns}
-        data={visibleRows}
-        emptyState={
-          <div className="py-12 text-center text-muted-foreground text-sm">
-            {searched ? t('audit.empty') : t('audit.searchPrompt')}
-          </div>
-        }
-        enableColumnVisibility
-        getRowId={(row) => String(row.id)}
-        isLoading={searched && auditLogs.isPending}
-        title={t('audit.title')}
-      />
-    </div>
+      }
+      enableColumnVisibility
+      getRowId={(row) => String(row.id)}
+      isLoading={searched && auditLogs.isPending}
+      manualFiltering
+      onColumnFiltersChange={setColumnFilters}
+      title={t('audit.title')}
+      toolbar={searchAction}
+    />
   )
 }

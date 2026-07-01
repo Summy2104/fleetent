@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AuthProvider } from '@/app/auth'
 import { AppQueryProvider } from '@/app/query-client'
-import { AuditPage } from '@/features/audit/page'
+import { AuditPage, auditFiltersFromColumns } from '@/features/audit/page'
 import { I18nProvider } from '@/i18n'
 import { server } from '@/test/msw/server'
 
@@ -25,6 +25,29 @@ function renderAuditPage(): void {
 
 afterEach(() => {
   vi.restoreAllMocks()
+})
+
+describe('auditFiltersFromColumns', () => {
+  it('maps text column filters onto the backend query shape', () => {
+    expect(
+      auditFiltersFromColumns([
+        { id: 'actor_user_id', value: 'admin-1' },
+        { id: 'action', value: 'rotate_key' },
+        { id: 'resource', value: 'user-1' },
+      ])
+    ).toEqual({ actor: 'admin-1', action: 'rotate_key', targetId: 'user-1' })
+  })
+
+  it('expands the created_at date range into since/until bounds', () => {
+    expect(auditFiltersFromColumns([{ id: 'created_at', value: { from: '2026-06-27', to: '2026-06-28' } }])).toEqual({
+      since: '2026-06-27T00:00:00',
+      until: '2026-06-28T23:59:59.999',
+    })
+  })
+
+  it('drops blank text filters', () => {
+    expect(auditFiltersFromColumns([{ id: 'actor_user_id', value: '   ' }])).toEqual({})
+  })
 })
 
 describe('audit page', () => {
@@ -66,10 +89,12 @@ describe('audit page', () => {
 
     renderAuditPage()
 
-    await user.type(screen.getByLabelText('Actor'), 'admin-1')
-    await user.type(screen.getByLabelText('Action'), 'rotate_key')
-    await user.type(screen.getByLabelText('Target'), 'user-1')
-    await user.type(screen.getByLabelText('Start time'), '2026-06-27T00:00:00+00:00')
+    // Before searching, the prompt is shown and no request has been made.
+    expect(screen.getByText('Run a search to view audit logs.')).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText('Filter Actor'), 'admin-1')
+    await user.type(screen.getByLabelText('Filter Action'), 'rotate_key')
+    await user.type(screen.getByLabelText('Filter Resource'), 'user-1')
     await user.click(screen.getByRole('button', { name: 'Search audit logs' }))
 
     const row = await screen.findByRole('row', { name: /rotate_key/ })
@@ -83,12 +108,30 @@ describe('audit page', () => {
     expect(exported?.type).toBe('text/csv;charset=utf-8')
     expect(exported?.size).toBeGreaterThan(0)
 
-    await user.clear(screen.getByLabelText('Action'))
-    await user.type(screen.getByLabelText('Action'), 'missing')
+    await user.clear(screen.getByLabelText('Filter Action'))
+    await user.type(screen.getByLabelText('Filter Action'), 'missing')
     await user.click(screen.getByRole('button', { name: 'Search audit logs' }))
 
     await waitFor(() => {
       expect(screen.getByText('No audit logs match the current filters.')).toBeInTheDocument()
     })
+  })
+
+  it('resets all filters via the built-in Reset button', async () => {
+    const user = userEvent.setup({ delay: null })
+    renderAuditPage()
+
+    const actorFilter = screen.getByLabelText('Filter Actor')
+    await user.type(actorFilter, 'admin-1')
+    expect(actorFilter).toHaveValue('admin-1')
+
+    // Search sits at the far right, just left of Reset.
+    const searchButton = screen.getByRole('button', { name: 'Search audit logs' })
+    const resetButton = screen.getByRole('button', { name: 'Reset filters' })
+    expect(searchButton.compareDocumentPosition(resetButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(searchButton.parentElement).toBe(resetButton.parentElement)
+
+    await user.click(resetButton)
+    expect(screen.getByLabelText('Filter Actor')).toHaveValue('')
   })
 })

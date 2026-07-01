@@ -17,6 +17,8 @@ export type AuditLogFilters = {
   action?: string
   actor?: string
   targetId?: string
+  since?: string
+  until?: string
 }
 
 function buildQuery(filters: AuditLogFilters): string {
@@ -24,6 +26,8 @@ function buildQuery(filters: AuditLogFilters): string {
   if (filters.actor) params.set('actor', filters.actor)
   if (filters.action) params.set('action', filters.action)
   if (filters.targetId) params.set('target_id', filters.targetId)
+  if (filters.since) params.set('since', filters.since)
+  if (filters.until) params.set('until', filters.until)
   const query = params.toString()
   return query ? `?${query}` : ''
 }
