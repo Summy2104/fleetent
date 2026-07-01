@@ -18,6 +18,13 @@ export default defineConfig({
     // give ample headroom. 45s only ever bites a genuinely stuck test.
     testTimeout: 60000,
     hookTimeout: 60000,
+    // The interaction-heavy page suites (long Base UI dialog/menu flows driven
+    // by userEvent) can still flake under severe CI CPU starvation even with the
+    // raised timeouts — a menu occasionally mounts too slowly for one poll. Retry
+    // absorbs that scheduler jitter: a genuinely broken test fails all attempts,
+    // a flake almost always passes the retry. Paired with split/timeout hardening,
+    // not a substitute for it.
+    retry: 2,
     // Cap parallelism hard: under v8 coverage the heavy page suites (Radix
     // Select/Dialog flows driven by userEvent) starve each other for CPU when
     // many workers run at once, producing flaky timeouts that move between
