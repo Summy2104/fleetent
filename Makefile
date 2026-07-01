@@ -84,6 +84,8 @@ typecheck: ## Type-check with mypy
 check: lint typecheck ## Run lint + typecheck
 
 frontend-install: ## Install frontend dependencies
+	@command -v pnpm >/dev/null 2>&1 || corepack enable || { \
+		echo "pnpm not found. Run 'corepack enable' (bundled with Node 18+) or install pnpm@11.9.0."; exit 1; }
 	pnpm --dir frontend install --frozen-lockfile
 
 frontend-build: ## Build frontend static assets
