@@ -49,7 +49,7 @@ class SearchRequest(BaseModel):
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="fleetent kb-serve")
+    parser = argparse.ArgumentParser(prog="fleetent kb serve")
     parser.add_argument("--tenant", default="", help="tenant id served by this process")
     parser.add_argument("--service-key", default="", help="service key ref: env:VAR or file://path")
     parser.add_argument(

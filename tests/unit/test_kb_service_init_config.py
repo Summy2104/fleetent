@@ -33,7 +33,7 @@ def test_kb_service_init_config_defaults_to_default_tenant_home_outside_repo_cwd
     monkeypatch.chdir(outside_repo)
     monkeypatch.setenv("FLEETENT_HOME", str(home_dir))
 
-    out, err, code = _run_cli("kb-service", "init-config")
+    out, err, code = _run_cli("kb", "init-config")
 
     assert code == 0
     assert err == ""
@@ -53,7 +53,7 @@ def test_kb_service_init_config_creates_requested_tenant_home(monkeypatch, tmp_p
     home_dir = tmp_path / "home"
     monkeypatch.setenv("FLEETENT_HOME", str(home_dir))
 
-    out, err, code = _run_cli("kb-service", "init-config", "--tenant", "acme")
+    out, err, code = _run_cli("kb", "init-config", "--tenant", "acme")
 
     assert code == 0
     assert err == ""
@@ -78,7 +78,7 @@ def test_kb_service_init_config_skips_existing_and_force_overwrites_within_tenan
     env_path.write_text("KB_SERVICE_KEY=existing\n", encoding="utf-8")
     monkeypatch.setenv("FLEETENT_HOME", str(home_dir))
 
-    out, err, code = _run_cli("kb-service", "init-config", "--tenant", "tenant-a")
+    out, err, code = _run_cli("kb", "init-config", "--tenant", "tenant-a")
 
     assert code == 0
     assert err == ""
@@ -87,7 +87,7 @@ def test_kb_service_init_config_skips_existing_and_force_overwrites_within_tenan
     assert yaml_path.read_text(encoding="utf-8") == "tenant: existing\n"
     assert env_path.read_text(encoding="utf-8") == "KB_SERVICE_KEY=existing\n"
 
-    out, err, code = _run_cli("kb-service", "init-config", "--tenant", "tenant-a", "--force")
+    out, err, code = _run_cli("kb", "init-config", "--tenant", "tenant-a", "--force")
 
     assert code == 0
     assert err == ""

@@ -51,19 +51,19 @@
 
 ---
 
-### Requirement: fleetent kb-worker init-config 命令
+### Requirement: `fleetent` `kb-worker` init-config 命令
 
-系统 SHALL 提供 `fleetent kb-worker init-config` 命令，在 `$FLEETENT_HOME/kb-worker/` 下创建 `.env` scaffold（从 `kb-worker.env.example` 复制）。
+系统 SHALL 提供 ``fleetent` `kb-worker` init-config` 命令，在 `$FLEETENT_HOME/kb-worker/` 下创建 `.env` scaffold（从 `kb-worker.env.example` 复制）。
 
 命令 SHALL 幂等，文件已存在时跳过（`--force` 覆盖）。
 
 #### Scenario: 首次初始化 kb-worker env
 
-- **WHEN** `$FLEETENT_HOME/kb-worker/.env` 不存在，operator 运行 `fleetent kb-worker init-config`
+- **WHEN** `$FLEETENT_HOME/kb-worker/.env` 不存在，operator 运行 ``fleetent` `kb-worker` init-config`
 - **THEN** `$FLEETENT_HOME/kb-worker/` 目录被创建（若不存在），`.env` 从模板创建
 - **AND** 文件内含 `FLEETENT_KB_WORKER_QUEUE_DATABASE_URL` 等占位
 
 #### Scenario: 已存在时跳过
 
-- **WHEN** `$FLEETENT_HOME/kb-worker/.env` 已存在，运行 `fleetent kb-worker init-config`
+- **WHEN** `$FLEETENT_HOME/kb-worker/.env` 已存在，运行 ``fleetent` `kb-worker` init-config`
 - **THEN** 命令输出 `skip kb-worker/.env`，文件内容不变

@@ -5,7 +5,7 @@
 
 ## 2. kb-extract CLI（TDD）
 
-- [x] 2.1 测试先行：`kb-extract --config <yaml> --kb <id>` → 置 extraction_enabled=true + 对每个存量 doc(`list_documents`)入队一个 `extraction` job(`connector_ref={"document_id": id}`)到本租户队列;KB 不存在 → 报错不入队。见红
+- [x] 2.1 测试先行：`kb extract --config <yaml> --kb <id>` → 置 extraction_enabled=true + 对每个存量 doc(`list_documents`)入队一个 `extraction` job(`connector_ref={"document_id": id}`)到本租户队列;KB 不存在 → 报错不入队。见红
 - [x] 2.2 实现 CLI(`knowledge_base/extract_cli.py` 或复用 ingest_cli 模式)：`load_kb_service_config` 取 tenant/queue;`_require_active_kb`;`set_extraction_enabled(true)`;遍历 `list_documents` → `kb_ingest_jobs.enqueue_job(job_type="extraction", tenant_id, kb_id, connector_ref={"document_id": id}, database_url=queue)`。见绿
 - [x] 2.3 `__main__.py` 顶层加 `kb-extract` 分发（与 kb-ingest/kb-worker/kb-serve 同级）
 - [x] 2.4 `--wait`：轮询 extraction job 至终态,打印 documents/entities/relations 计数;超时提示查 kb-worker

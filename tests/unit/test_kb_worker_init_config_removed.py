@@ -18,6 +18,6 @@ def test_kb_worker_init_config_is_no_longer_supported() -> None:
     ):
         cli.main()
 
-    assert exc_info.value.code == 2
+    assert exc_info.value.code == 1
     assert stdout.getvalue() == ""
-    assert "unrecognized arguments: init-config" in stderr.getvalue()
+    assert "Usage: fleetent kb serve|worker|ingest|extract|init-config" in stderr.getvalue()

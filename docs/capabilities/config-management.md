@@ -63,7 +63,7 @@
   - migration 失败时不会自动 rollback；已创建 backup 会保留，命令返回非 0
   - 备份语义假定 upgrade 运行在停服 / 静默窗口（与既有 upgrade 语义一致），非在线一致性快照
 
-- ✅ **Standalone KB ingest 配置入口**：`kb-service.yaml` + `kb-worker --config ...`
+- ✅ **Standalone KB ingest 配置入口**：`kb-service.yaml` + `kb worker --config ...`
   - platform 托管 KB ingest 已退役；`/admin/kb/connectors/*`、platform import/sync/extract 端点和管理库 KB ingest 队列不再是生产入口
   - 升级前需要把历史 platform connector 配置誊到 `tenants/<tenant>/kb/kb-service.yaml`
   - queue 落本地 `kb_ingest_queue.db`，不再落 `management.db`

@@ -2,7 +2,7 @@
 
 ### Requirement: kb-worker 从专属 .env 加载自身配置
 
-`fleetent kb-worker` 启动 SHALL 从 `$FLEETENT_HOME/kb-worker/.env` 加载自身配置(经 `load_dotenv(override=False)`:文件不存在静默跳过;进程已有环境变量优先于文件值)。自身配置 SHALL 含:队列连接、数据底座连接、embedder 配置、Vault 接入。`FLEETENT_HOME` SHALL 经进程环境提供(定位该 `.env` 的前提,不可经该 `.env` 设置)。
+`fleetent kb worker` 启动 SHALL 从 `$FLEETENT_HOME/kb-worker/.env` 加载自身配置(经 `load_dotenv(override=False)`:文件不存在静默跳过;进程已有环境变量优先于文件值)。自身配置 SHALL 含:队列连接、数据底座连接、embedder 配置、Vault 接入。`FLEETENT_HOME` SHALL 经进程环境提供(定位该 `.env` 的前提,不可经该 `.env` 设置)。
 
 #### Scenario: 从 .env 加载
 

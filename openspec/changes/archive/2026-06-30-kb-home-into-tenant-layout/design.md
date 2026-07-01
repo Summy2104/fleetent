@@ -1,6 +1,6 @@
 ## Context
 
-standalone KB 服务(`kb-serve` / `kb-worker` / `kb-service init-config`)当前把自己的 home 开在 `<FLEETENT_HOME>/kb-service/<tenant>/`(`service_init_config._tenant_home_dir`),内部 `data.home` 默认 `./data` 落 `kb-service/<tenant>/data/{kb.db,kb_vectors.db,kb_ingest_queue.db}`。而 agent 运行时经 `tenant_router` 读的是 tenant-first 布局 `tenants/<tenant>/kb/{kb.db,kb_vectors.db}`(`paths.tenant_kb_dir`)。单机部署下两者是不同物理文件——service 灌的库不是 agent 读的库。
+standalone KB 服务(`kb-serve` / `kb-worker` / ``kb-service` `init-config``)当前把自己的 home 开在 `<FLEETENT_HOME>/kb-service/<tenant>/`(`service_init_config._tenant_home_dir`),内部 `data.home` 默认 `./data` 落 `kb-service/<tenant>/data/{kb.db,kb_vectors.db,kb_ingest_queue.db}`。而 agent 运行时经 `tenant_router` 读的是 tenant-first 布局 `tenants/<tenant>/kb/{kb.db,kb_vectors.db}`(`paths.tenant_kb_dir`)。单机部署下两者是不同物理文件——service 灌的库不是 agent 读的库。
 
 `docs/architecture/agent-home-layout.md` 的目标态本就把 KB 归 `tenants/<tenant>/kb/`,但 standalone service 那条线在 `kb-standalone-ingest` spec 里被显式钉成独立的 `kb-service/<tenant>/` 且 "SHALL NOT 出现 tenants/kb 中间层"。本变更收口这条毛刺:把 service home 收进 tenant 足迹,并让 service 写入即 agent 读取。
 
@@ -62,7 +62,7 @@ standalone KB 服务(`kb-serve` / `kb-worker` / `kb-service init-config`)当前�
 
 ## Migration Plan
 
-greenfield,无数据迁移。部署侧:`fleetent kb-service init-config --tenant <t>` 直接在新位置 `tenants/<t>/kb/` 生成;dev 起栈(Makefile / `.fleetent-dev`)随 init-config 锚点位移自动落新位置。回滚=还原本变更 commit(无持久化副作用)。
+greenfield,无数据迁移。部署侧:`fleetent kb init-config --tenant <t>` 直接在新位置 `tenants/<t>/kb/` 生成;dev 起栈(Makefile / `.fleetent-dev`)随 init-config 锚点位移自动落新位置。回滚=还原本变更 commit(无持久化副作用)。
 
 ## Open Questions
 

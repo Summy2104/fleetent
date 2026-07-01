@@ -102,7 +102,7 @@ def test_kb_worker_subcommand_dispatches(monkeypatch: pytest.MonkeyPatch) -> Non
 
     worker_module = importlib.import_module("fleetent.knowledge_base.worker")
     monkeypatch.setattr(worker_module, "main", fake_main)
-    monkeypatch.setattr("sys.argv", ["fleetent", "kb-worker", "--poll-interval", "0.5"])
+    monkeypatch.setattr("sys.argv", ["fleetent", "kb", "worker", "--poll-interval", "0.5"])
 
     cli.main()
 
@@ -120,7 +120,7 @@ def test_kb_serve_subcommand_dispatches(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(serve_module, "main", fake_main)
     monkeypatch.setattr(
         "sys.argv",
-        ["fleetent", "kb-serve", "--tenant", "tenant-a", "--service-key", "env:KB_SERVICE_KEY"],
+        ["fleetent", "kb", "serve", "--tenant", "tenant-a", "--service-key", "env:KB_SERVICE_KEY"],
     )
 
     cli.main()
@@ -139,7 +139,16 @@ def test_kb_ingest_subcommand_dispatches(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(ingest_module, "main", fake_main)
     monkeypatch.setattr(
         "sys.argv",
-        ["fleetent", "kb-ingest", "--config", "/tmp/kb-service.yaml", "--kb", "kb-a", "/tmp/docs"],
+        [
+            "fleetent",
+            "kb",
+            "ingest",
+            "--config",
+            "/tmp/kb-service.yaml",
+            "--kb",
+            "kb-a",
+            "/tmp/docs",
+        ],
     )
 
     cli.main()
@@ -158,12 +167,52 @@ def test_kb_extract_subcommand_dispatches(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(extract_module, "main", fake_main)
     monkeypatch.setattr(
         "sys.argv",
-        ["fleetent", "kb-extract", "--config", "/tmp/kb-service.yaml", "--kb", "kb-a"],
+        ["fleetent", "kb", "extract", "--config", "/tmp/kb-service.yaml", "--kb", "kb-a"],
     )
 
     cli.main()
 
     assert calls == [["--config", "/tmp/kb-service.yaml", "--kb", "kb-a"]]
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["fleetent", "kb", "init-config", "--tenant", "default"], None),
+        (["fleetent", "kb-worker"], "Usage: fleetent"),
+        (["fleetent", "kb-serve"], "Usage: fleetent"),
+        (["fleetent", "kb-ingest"], "Usage: fleetent"),
+        (["fleetent", "kb-extract"], "Usage: fleetent"),
+        (["fleetent", "kb-service", "init-config"], "Usage: fleetent"),
+    ],
+)
+def test_kb_subcommand_dispatch_and_legacy_names(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    argv: list[str],
+    message: str | None,
+) -> None:
+    if argv[:3] == ["fleetent", "kb", "init-config"]:
+        calls: list[list[str]] = []
+        service_init_module = importlib.import_module("fleetent.knowledge_base.service_init_config")
+
+        def fake_main(init_argv: list[str] | None = None) -> None:
+            calls.append(init_argv or [])
+
+        monkeypatch.setattr(service_init_module, "main", fake_main)
+        monkeypatch.setattr("sys.argv", argv)
+
+        cli.main()
+
+        assert calls == [["--tenant", "default"]]
+        return
+
+    monkeypatch.setattr("sys.argv", argv)
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main()
+
+    assert exc_info.value.code == 1
+    assert message in capsys.readouterr().err
 
 
 def test_tui_no_longer_dispatches_client(monkeypatch: pytest.MonkeyPatch) -> None:

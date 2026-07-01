@@ -5,19 +5,19 @@
 ## Requirements
 ### Requirement: Standalone KB service config contract
 
-KB 服务 standalone 部署 SHALL 从自己的配置文件(`$FLEETENT_HOME/tenants/<tenant_id>/kb/kb-service.yaml`)读取 ingest 与检索构造配置:service(tenant_id/host/port)、data(home)、retrieval(default_mode/rerank/top_k)、embedding(endpoint/model/dimensions)、extraction(enabled/endpoint/model)、chunking(chunk_size/chunk_overlap)、connectors(各源 type/kb_id/scope/`sync_interval_seconds`/`credential_ref`)。仓库 SHALL 提供根模板 `kb-service.yaml.example` 与 `kb-service.env.example`;系统 SHALL 提供 `fleetent kb-service init-config`,从这些 canonical example(经打包资源读取,不依赖 cwd)scaffold `$FLEETENT_HOME/tenants/<tenant_id>/kb/` 下的 `kb-service.yaml` 与 `.env`。
+KB 服务 standalone 部署 SHALL 从自己的配置文件(`$FLEETENT_HOME/tenants/<tenant_id>/kb/kb-service.yaml`)读取 ingest 与检索构造配置:service(tenant_id/host/port)、data(home)、retrieval(default_mode/rerank/top_k)、embedding(endpoint/model/dimensions)、extraction(enabled/endpoint/model)、chunking(chunk_size/chunk_overlap)、connectors(各源 type/kb_id/scope/`sync_interval_seconds`/`credential_ref`)。仓库 SHALL 提供根模板 `kb-service.yaml.example` 与 `kb-service.env.example`;系统 SHALL 提供 `fleetent kb init-config`,从这些 canonical example(经打包资源读取,不依赖 cwd)scaffold `$FLEETENT_HOME/tenants/<tenant_id>/kb/` 下的 `kb-service.yaml` 与 `.env`。
 
 #### Scenario: 配置文件驱动连接器
 - **WHEN** KB 服务以 standalone 模式启动并加载 `$FLEETENT_HOME/tenants/<tenant_id>/kb/kb-service.yaml`
 - **THEN** 连接器定义来自该文件,经注入的 settings 提供给 `operations`(不来自 management.db)
 
 #### Scenario: 提供 example 模板与 init-config
-- **WHEN** 查看仓库并运行 `fleetent kb-service init-config --tenant <tenant_id>`
+- **WHEN** 查看仓库并运行 `fleetent kb init-config --tenant <tenant_id>`
 - **THEN** 存在根 `kb-service.yaml.example` 与 `kb-service.env.example`
 - **AND** 命令在 `$FLEETENT_HOME/tenants/<tenant_id>/kb/` 生成 `kb-service.yaml` 与 `.env`
 
 #### Scenario: worker 与 serve 共用 tenant kb home
-- **WHEN** `fleetent kb-worker --config $FLEETENT_HOME/tenants/<tenant_id>/kb/kb-service.yaml` 与 `fleetent kb-serve --config $FLEETENT_HOME/tenants/<tenant_id>/kb/kb-service.yaml` 启动
+- **WHEN** `fleetent kb worker --config $FLEETENT_HOME/tenants/<tenant_id>/kb/kb-service.yaml` 与 `fleetent kb serve --config $FLEETENT_HOME/tenants/<tenant_id>/kb/kb-service.yaml` 启动
 - **THEN** 二者共用同一 `kb-service.yaml` 与同目录 `.env`
 
 ### Requirement: Local credential resolution
@@ -90,14 +90,14 @@ standalone KB 服务的 ingest 与检索 SHALL 能在**无 platform、management
 
 ### Requirement: 手动本地 ingest 命令
 
-KB 服务 SHALL 提供一个**命令式本地 ingest 入口** `fleetent kb-ingest`,把本地目录或单文件推进指定 KB,**纯 KB 服务侧、不依赖 platform**。该命令 SHALL 复用 `--config <kb-service.yaml>` 解析 tenant_id、队列路径与 embedding 配置(与 `kb-worker`/`kb-serve` 同源)。
+KB 服务 SHALL 提供一个**命令式本地 ingest 入口** `fleetent kb ingest`,把本地目录或单文件推进指定 KB,**纯 KB 服务侧、不依赖 platform**。该命令 SHALL 复用 `--config <kb-service.yaml>` 解析 tenant_id、队列路径与 embedding 配置(与 `kb-worker`/`kb-serve` 同源)。
 
 ingest SHALL 经**入队**完成:命令把 `sync_directory` job 入本租户本地队列(`kb_ingest_queue.db`),由运行中的 kb-worker 作为**唯一消费者**抽取执行(切块 → 向量化 → 写本租户 `kb/data/kb.db`);命令 SHALL NOT 在自身进程内直写 `kb.db`(守单写者纪律)。入队前 SHALL 校验目标 KB 存在,不存在则报清晰错误(指引经平台创建 KB)。ingest SHALL 幂等(再次对同一路径运行按内容指纹增量)。
 
 `<path>` SHALL 支持目录(递归)与单文件;支持格式与 `LocalDirectoryDataSource` 一致(txt/md/html/pdf/docx/pptx/xlsx)。
 
 #### Scenario: CLI 把本地目录灌进 KB
-- **WHEN** 运维运行 `fleetent kb-ingest --config <kb-service.yaml> --kb <kb_id> <dir>`
+- **WHEN** 运维运行 `fleetent kb ingest --config <kb-service.yaml> --kb <kb_id> <dir>`
 - **THEN** 命令将 `sync_directory` job(payload 含该路径)入本租户 `kb_ingest_queue.db`
 - **AND** 运行中的 kb-worker 抽取该 job,递归扫描目录、切块、向量化并写入本租户 `kb/data/kb.db`
 - **AND** 全程不依赖 platform 或 management.db
@@ -117,7 +117,7 @@ ingest SHALL 经**入队**完成:命令把 `sync_directory` job 入本租户本�
 
 ### Requirement: 样例连接器默认禁用
 
-`kb-service.yaml.example` 提供的样例连接器 SHALL 默认 `enabled: false`,使 `kb-service init-config` scaffold 出的配置在未填真实凭据时 `kb-worker` 启动后**不会**立即尝试外部同步并运行时失败。
+`kb-service.yaml.example` 提供的样例连接器 SHALL 默认 `enabled: false`,使 ``kb-service` `init-config`` scaffold 出的配置在未填真实凭据时 `kb-worker` 启动后**不会**立即尝试外部同步并运行时失败。
 
 #### Scenario: 开箱不触发失败同步
 - **WHEN** 运维以未修改的 scaffolded 配置启动 `kb-worker`
@@ -138,7 +138,7 @@ ingest SHALL 经**入队**完成:命令把 `sync_directory` job 入本租户本�
 
 ### Requirement: 手动 extraction 命令
 
-KB 服务 SHALL 提供命令式 extraction 入口 `fleetent kb-extract`,对指定 KB **开启实体/关系抽取并回填存量文档**,**纯 KB 服务侧、不依赖 platform**。命令 SHALL 复用 `--config <kb-service.yaml>` 解析 tenant_id/队列/抽取模型配置。
+KB 服务 SHALL 提供命令式 extraction 入口 `fleetent kb extract`,对指定 KB **开启实体/关系抽取并回填存量文档**,**纯 KB 服务侧、不依赖 platform**。命令 SHALL 复用 `--config <kb-service.yaml>` 解析 tenant_id/队列/抽取模型配置。
 
 - 命令 SHALL 置该 KB `extraction_enabled=true`(对存量 KB 亦可开启)。
 - 回填 SHALL 经**入队**完成:遍历该 KB 存量文档,每文档入队一个 `extraction` job(与 ingest 侧 auto-enqueue 同形),由 kb-worker 作为**唯一消费者**抽取执行并写 `kb_entities`/`kb_entity_mentions`/`kb_relations`;命令 SHALL NOT 在自身进程内直写 kb.db。
@@ -146,7 +146,7 @@ KB 服务 SHALL 提供命令式 extraction 入口 `fleetent kb-extract`,对指�
 - 抽取模型 SHALL 取自 `kb-service.yaml` 的 `extraction` 段(`kb_extraction` route);仓库 example SHALL 预置该段(默认 `enabled: false`,endpoint 指向自托管抽取模型),运维填模型并开启即用。
 
 #### Scenario: 开启并回填存量文档
-- **WHEN** 运维运行 `fleetent kb-extract --config <kb-service.yaml> --kb <kb_id>`
+- **WHEN** 运维运行 `fleetent kb extract --config <kb-service.yaml> --kb <kb_id>`
 - **THEN** 该 KB `extraction_enabled` 置真,其存量文档各入队一个 `extraction` job
 - **AND** kb-worker 抽取执行,写 `kb_entities`/`kb_entity_mentions`/`kb_relations`,全程不依赖 platform
 

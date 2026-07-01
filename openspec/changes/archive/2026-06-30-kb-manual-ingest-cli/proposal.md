@@ -8,7 +8,7 @@ KB 缺口审计的**头号硬阻断**:平台侧文档 import 退役后,把一批
 
 ## What Changes
 
-- **新 CLI** `fleetent kb-ingest --config <kb-service.yaml> --kb <kb_id> <path> [--wait]`(顶层,与 `kb-worker`/`kb-serve` 同级):
+- **新 CLI** `fleetent kb ingest --config <kb-service.yaml> --kb <kb_id> <path> [--wait]`(顶层,与 `kb-worker`/`kb-serve` 同级):
   - 从 `--config` 读 tenant_id + 队列路径(复用 `load_kb_service_config`),**纯 KB 服务侧、零 platform 依赖**。
   - `<path>` 支持**目录(递归)或单文件**;格式覆盖 `LocalDirectoryDataSource` 现有集合(txt/md/html/pdf/docx/pptx/xlsx)。
   - 校验 KB 存在(`_require_active_kb`),不存在 → 清晰报错(提示经平台 `POST /admin/kb` 先建 KB;`--create-kb` 便利项留待后议)。
@@ -27,7 +27,7 @@ KB 缺口审计的**头号硬阻断**:平台侧文档 import 退役后,把一批
 ## Impact
 
 - **owning area**:`knowledge_base/`(新 CLI 入口 + `worker.py` sync_directory 去孤儿 + `connectors/local.py` 支持单文件)、`__main__.py`(顶层 `kb-ingest` 分发)、`kb-service.yaml.example`。**不碰 platform、不碰 connector SourceType 框架、不碰检索**。
-- **public surface**:新增 CLI `fleetent kb-ingest`;无 HTTP/API 变更。
+- **public surface**:新增 CLI `fleetent kb ingest`;无 HTTP/API 变更。
 - **owned tables**:无新增;写既有 `kb_ingest_queue.db`(入队)+ 由 worker 写 `kb.db`。
 - **config namespace**:复用 `kb-service.yaml`(`--config`);example 默认值改 `enabled: false`。
 - **cross-module 依赖**:不新增;解耦基线不变(纯 KB 服务侧,无 platform)。

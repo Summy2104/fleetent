@@ -199,11 +199,11 @@ def test_docker_compose_runs_managed_stack_with_path_parity_and_socket_boundary(
         'command: ["platform"]',
         'command: ["node"]',
         (
-            'command: ["kb-worker", "--config", '
+            'command: ["kb", "worker", "--config", '
             '"${FLEETENT_HOME:?set FLEETENT_HOME}/tenants/default/kb/kb-service.yaml"]'
         ),
         (
-            'command: ["kb-serve", "--config", '
+            'command: ["kb", "serve", "--config", '
             '"${FLEETENT_HOME:?set FLEETENT_HOME}/tenants/default/kb/kb-service.yaml"]'
         ),
         "- ${FLEETENT_HOME:?set FLEETENT_HOME}/tenants/default/kb/.env",
@@ -270,9 +270,9 @@ def test_pilot_install_checklist_contains_required_commands():
         "curl -fsS http://127.0.0.1:8765/health",
         "平台托管 KB ingest 已退役",
         "kb-service.yaml",
-        "kb-worker --config $FLEETENT_HOME/tenants/default/kb/kb-service.yaml",
+        "kb worker --config $FLEETENT_HOME/tenants/default/kb/kb-service.yaml",
         (
-            "uv run fleetent kb-extract --config "
+            "uv run fleetent kb extract --config "
             "$FLEETENT_HOME/tenants/default/kb/kb-service.yaml --kb <kb_id> --wait"
         ),
         "GET /admin/stats/agents/<agent_id>/overview",
@@ -354,9 +354,9 @@ def test_pilot_runbook_contains_required_commands_and_failure_handling():
         "uv run pytest tests/evaluation/test_reflection_report_eval.py -q",
         "平台托管 KB ingest 已退役",
         "kb-service.yaml",
-        "kb-worker --config $FLEETENT_HOME/tenants/default/kb/kb-service.yaml",
+        "kb worker --config $FLEETENT_HOME/tenants/default/kb/kb-service.yaml",
         (
-            "uv run fleetent kb-extract --config "
+            "uv run fleetent kb extract --config "
             "$FLEETENT_HOME/tenants/default/kb/kb-service.yaml --kb <kb_id> --wait"
         ),
         "FLEETENT_EVAL_REAL_EMBEDDING=1",

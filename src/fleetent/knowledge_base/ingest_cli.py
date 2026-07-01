@@ -14,7 +14,7 @@ _WAIT_TIMEOUT_SECONDS = 30.0
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="fleetent kb-ingest")
+    parser = argparse.ArgumentParser(prog="fleetent kb ingest")
     parser.add_argument("--config", required=True, help="standalone kb-service.yaml path")
     parser.add_argument("--kb", required=True, help="target knowledge base id")
     parser.add_argument("--wait", action="store_true", help="wait for the queued job to finish")

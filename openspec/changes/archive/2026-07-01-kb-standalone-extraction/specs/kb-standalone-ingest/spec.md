@@ -2,7 +2,7 @@
 
 ### Requirement: 手动 extraction 命令
 
-KB 服务 SHALL 提供命令式 extraction 入口 `fleetent kb-extract`,对指定 KB **开启实体/关系抽取并回填存量文档**,**纯 KB 服务侧、不依赖 platform**。命令 SHALL 复用 `--config <kb-service.yaml>` 解析 tenant_id/队列/抽取模型配置。
+KB 服务 SHALL 提供命令式 extraction 入口 `fleetent kb extract`,对指定 KB **开启实体/关系抽取并回填存量文档**,**纯 KB 服务侧、不依赖 platform**。命令 SHALL 复用 `--config <kb-service.yaml>` 解析 tenant_id/队列/抽取模型配置。
 
 - 命令 SHALL 置该 KB `extraction_enabled=true`(对存量 KB 亦可开启)。
 - 回填 SHALL 经**入队**完成:遍历该 KB 存量文档,每文档入队一个 `extraction` job(与 ingest 侧 auto-enqueue 同形),由 kb-worker 作为**唯一消费者**抽取执行并写 `kb_entities`/`kb_entity_mentions`/`kb_relations`;命令 SHALL NOT 在自身进程内直写 kb.db。
@@ -10,7 +10,7 @@ KB 服务 SHALL 提供命令式 extraction 入口 `fleetent kb-extract`,对指�
 - 抽取模型 SHALL 取自 `kb-service.yaml` 的 `extraction` 段(`kb_extraction` route);仓库 example SHALL 预置该段(默认 `enabled: false`,endpoint 指向自托管抽取模型),运维填模型并开启即用。
 
 #### Scenario: 开启并回填存量文档
-- **WHEN** 运维运行 `fleetent kb-extract --config <kb-service.yaml> --kb <kb_id>`
+- **WHEN** 运维运行 `fleetent kb extract --config <kb-service.yaml> --kb <kb_id>`
 - **THEN** 该 KB `extraction_enabled` 置真,其存量文档各入队一个 `extraction` job
 - **AND** kb-worker 抽取执行,写 `kb_entities`/`kb_entity_mentions`/`kb_relations`,全程不依赖 platform
 

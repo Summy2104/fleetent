@@ -59,7 +59,7 @@ def load_config() -> KBWorkerConfig:
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="fleetent kb-worker")
+    parser = argparse.ArgumentParser(prog="fleetent kb worker")
     parser.add_argument(
         "--config",
         default="",

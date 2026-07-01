@@ -139,38 +139,44 @@ def main(argv: list[str] | None = None) -> None:
         tui_app.main(argv[1:])
         return
 
-    if argv and argv[0] == "kb-worker":
-        from fleetent.knowledge_base import worker as kb_worker
+    if argv and argv[0] == "kb":
+        if argv[1:2] == ["worker"]:
+            from fleetent.knowledge_base import worker as kb_worker
 
-        kb_worker.main(argv[1:])
-        return
-
-    if argv and argv[0] == "kb-service":
+            kb_worker.main(argv[2:])
+            return
         if argv[1:2] == ["init-config"]:
             from fleetent.knowledge_base import service_init_config
 
             service_init_config.main(argv[2:])
             return
-        print("Usage: fleetent kb-service init-config", file=sys.stderr)
+        if argv[1:2] == ["serve"]:
+            from fleetent.knowledge_base import serve as kb_serve
+
+            kb_serve.main(argv[2:])
+            return
+        if argv[1:2] == ["ingest"]:
+            from fleetent.knowledge_base import ingest_cli
+
+            ingest_cli.main(argv[2:])
+            return
+        if argv[1:2] == ["extract"]:
+            from fleetent.knowledge_base import extract_cli
+
+            extract_cli.main(argv[2:])
+            return
+        print("Usage: fleetent kb serve|worker|ingest|extract|init-config", file=sys.stderr)
         sys.exit(1)
 
-    if argv and argv[0] == "kb-serve":
-        from fleetent.knowledge_base import serve as kb_serve
-
-        kb_serve.main(argv[1:])
-        return
-
-    if argv and argv[0] == "kb-ingest":
-        from fleetent.knowledge_base import ingest_cli
-
-        ingest_cli.main(argv[1:])
-        return
-
-    if argv and argv[0] == "kb-extract":
-        from fleetent.knowledge_base import extract_cli
-
-        extract_cli.main(argv[1:])
-        return
+    if argv and argv[0] in {
+        "kb-worker",
+        "kb-service",
+        "kb-serve",
+        "kb-ingest",
+        "kb-extract",
+    }:
+        print("Usage: fleetent kb serve|worker|ingest|extract|init-config", file=sys.stderr)
+        sys.exit(1)
 
     user_input = " ".join(argv) if argv else sys.stdin.read().strip()
     if not user_input:

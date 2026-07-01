@@ -11,15 +11,16 @@ def _fake_fleetent(tmp_path: Path) -> Path:
     bin_dir.mkdir()
     script = bin_dir / "fleetent"
     script.write_text(
-        "#!/usr/bin/env bash\n"
-        "printf '%s\\n' \"$*\" >> \"$FLEETENT_ENTRYPOINT_LOG\"\n",
+        '#!/usr/bin/env bash\nprintf \'%s\\n\' "$*" >> "$FLEETENT_ENTRYPOINT_LOG"\n',
         encoding="utf-8",
     )
     script.chmod(script.stat().st_mode | stat.S_IXUSR)
     return bin_dir
 
 
-def _run_entrypoint(tmp_path: Path, *args: str, auto_upgrade: bool = False) -> subprocess.CompletedProcess[str]:
+def _run_entrypoint(
+    tmp_path: Path, *args: str, auto_upgrade: bool = False
+) -> subprocess.CompletedProcess[str]:
     log_path = tmp_path / "entrypoint.log"
     env = os.environ.copy()
     env["PATH"] = f"{_fake_fleetent(tmp_path)}:{env['PATH']}"
@@ -53,7 +54,7 @@ def test_entrypoint_dispatches_supported_roles(tmp_path: Path) -> None:
     expected = {
         "platform": "platform serve --host 0.0.0.0 --port 8765",
         "node": "node start",
-        "kb-worker": "kb-worker",
+        "kb-worker": "kb worker",
         "agent": "agent run support",
     }
 

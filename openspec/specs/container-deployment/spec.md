@@ -10,7 +10,7 @@
 - **THEN** 容器启动 platform 控制面并监听 8765
 - **WHEN** 以 `node start` 命令运行同一镜像
 - **THEN** 容器启动 node supervisor
-- **WHEN** 以 `kb-serve --config <kb-service.yaml>` 命令运行同一镜像
+- **WHEN** 以 `kb serve --config <kb-service.yaml>` 命令运行同一镜像
 - **THEN** 容器启动 KB 读 API 服务
 - **WHEN** 以 `agent run <name>` 命令运行同一镜像
 - **THEN** 容器以 agent 运行时启动（node 经此拉起 agent 兄弟容器）

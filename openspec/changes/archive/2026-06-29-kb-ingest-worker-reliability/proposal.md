@@ -1,12 +1,12 @@
 ## Why
 
-`kb-ingest-worker` spec 已定 `fleetent kb-worker` 为 `kb_ingest_jobs` 队列的唯一消费者,admin sync/导入端点"入队 + 轮询,超时返回 job id + 当前状态"。但当**没有任何 worker 在运行**时,job 永远停在 `pending`,而 admin 端点的"超时返回 pending"与"job 正在被处理"在外部完全无法区分——导入/同步看起来已受理、实则永不推进,是一个**静默失败**(看着成功,什么都没干)。
+`kb-ingest-worker` spec 已定 `fleetent kb worker` 为 `kb_ingest_jobs` 队列的唯一消费者,admin sync/导入端点"入队 + 轮询,超时返回 job id + 当前状态"。但当**没有任何 worker 在运行**时,job 永远停在 `pending`,而 admin 端点的"超时返回 pending"与"job 正在被处理"在外部完全无法区分——导入/同步看起来已受理、实则永不推进,是一个**静默失败**(看着成功,什么都没干)。
 
 根因:worker 存活状态不可观测,系统无法把"无 worker(降级)"与"job 正常排队/处理中"区分开。
 
 ## What Changes
 
-- **worker 存活可观测**:`fleetent kb-worker` SHALL 定期写入存活信号(heartbeat:last-seen 时间戳);控制面 SHALL 能据此判定当前是否有活跃 worker。
+- **worker 存活可观测**:`fleetent kb worker` SHALL 定期写入存活信号(heartbeat:last-seen 时间戳);控制面 SHALL 能据此判定当前是否有活跃 worker。
 - **非终态状态区分降级**:admin ingest/sync 端点在返回非终态(未 done/failed)结果时,SHALL 区分:
   - `in_progress` / `queued`——有活跃 worker,job 正常排队或处理中;
   - `degraded`(或等价的明确标记)——**无活跃 worker**(heartbeat 过期),job 不会推进。

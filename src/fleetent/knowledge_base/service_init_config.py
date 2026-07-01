@@ -13,7 +13,7 @@ import yaml
 
 @dataclass(frozen=True)
 class InitConfigPlanItem:
-    """One planned kb-service init-config filesystem operation."""
+    """One planned KB init-config filesystem operation."""
 
     action: str
     path: str
@@ -94,8 +94,8 @@ def apply_init_config(
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Run ``fleetent kb-service init-config``."""
-    parser = argparse.ArgumentParser(prog="fleetent kb-service init-config")
+    """Run ``fleetent kb init-config``."""
+    parser = argparse.ArgumentParser(prog="fleetent kb init-config")
     parser.add_argument(
         "--tenant", default="default", help="tenant id for the generated service home"
     )

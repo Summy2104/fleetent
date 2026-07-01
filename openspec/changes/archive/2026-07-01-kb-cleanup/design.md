@@ -1,6 +1,6 @@
 ## Context
 
-`kb-retire-platform-ingest`（2026-06-29）退掉 platform 侧 KB ingest，但实体抽取入口 `fleetent platform kb extract-entities`（`platform/platform_cli/kb_connectors.py`）漏网。`#4 kb-standalone-extraction`（2026-07-01）已落地架构正确的独立抽取命令 `fleetent kb-extract`（入队 → kb-worker 单写者消费、`--config kb-service.yaml`、零 platform 依赖）。本 change 是纯清理：退旧入口 + 删一处前端死代码 + 补 docstring。无迁移、无 schema、无端点变更。
+`kb-retire-platform-ingest`（2026-06-29）退掉 platform 侧 KB ingest，但实体抽取入口 `fleetent platform kb extract-entities`（`platform/platform_cli/kb_connectors.py`）漏网。`#4 kb-standalone-extraction`（2026-07-01）已落地架构正确的独立抽取命令 `fleetent kb extract`（入队 → kb-worker 单写者消费、`--config kb-service.yaml`、零 platform 依赖）。本 change 是纯清理：退旧入口 + 删一处前端死代码 + 补 docstring。无迁移、无 schema、无端点变更。
 
 ## Goals / Non-Goals
 
@@ -33,7 +33,7 @@ hook 仅被测试消费，UI 走列表查询的 `bound_agents`。`kbAgentsKey` �
 
 ## Migration Plan
 
-纯删除，无数据迁移。部署方若有脚本调用 `fleetent platform kb extract-entities`，改用 `fleetent kb-extract --config <kb-service.yaml> --kb <kb_id> [--wait]`。回滚 = revert commit。
+纯删除，无数据迁移。部署方若有脚本调用 `fleetent platform kb extract-entities`，改用 `fleetent kb extract --config <kb-service.yaml> --kb <kb_id> [--wait]`。回滚 = revert commit。
 
 ## Open Questions
 

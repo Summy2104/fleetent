@@ -83,7 +83,7 @@ forward-only migration。
  不是 agent 的只读文件挂载场景。
 
 若宿主上还留有旧布局 `$FLEETENT_HOME/kb-worker/.env`，先执行
-`fleetent kb-service init-config --tenant default`，再把旧文件里的 secret 迁到
+`fleetent kb init-config --tenant default`，再把旧文件里的 secret 迁到
 `$FLEETENT_HOME/tenants/default/kb/.env`，把 connector / service 配置迁到
 `$FLEETENT_HOME/tenants/default/kb/kb-service.yaml`，随后停用旧 `kb-worker/.env`。若开发机已经按旧
 standalone 布局写入过 KB 文件，需要一次性手动把

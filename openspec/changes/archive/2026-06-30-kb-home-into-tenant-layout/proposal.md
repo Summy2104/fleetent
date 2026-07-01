@@ -9,7 +9,7 @@ standalone KB 服务当前自己开了一棵 `<FLEETENT_HOME>/kb-service/<tenant
 - **BREAKING(内部路径契约)** agent-read KB 文件从 `tenants/<tenant>/kb/kb.db` 下沉到 `tenants/<tenant>/kb/data/kb.db`(`kb_vectors.db` 同)。`tenant_router` 与 KB read service 的读点随之改。
 - **BREAKING(node 挂载面收窄)** 容器化部署下 node 从"整目录 RO 挂 `tenants/<tenant>/kb/`"改为"只 RO 挂 `tenants/<tenant>/kb/data/`"。`.env`(KB embedding / connector secret)留在未被挂载的 `kb/` 根,**杜绝 secret 经 RO 挂载泄漏进 agent 容器**;`-wal`/`-shm` 与 `kb.db` 同在 `data/`,整挂 `data/` 仍带得上,一致快照不回归。
 - **删除 `kb-worker` 的 legacy `load_config()` 兜底**(`worker.py` 读 tenant-less 的 `$FLEETENT_HOME/kb-service/.env`)。迁移后该路径指向不存在的位置;canonical 入口是 per-tenant `--config tenants/<tenant>/kb/kb-service.yaml`。
-- **不变(刻意保留)**:配置文件名 `kb-service.yaml` / 模板 `kb-service.yaml.example`、CLI 命令 `fleetent kb-service init-config` / `kb-serve` / `kb-worker`、provider id `provider="kb-service"` 与 agent 名 `kb-service-standalone`——这些命名的是"KB 服务"这个东西,不是被废弃的 `kb-service/` 目录。
+- **不变(刻意保留)**:配置文件名 `kb-service.yaml` / 模板 `kb-service.yaml.example`、CLI 命令 `fleetent kb init-config` / `kb-serve` / `kb-worker`、provider id `provider="kb-service"` 与 agent 名 `kb-service-standalone`——这些命名的是"KB 服务"这个东西,不是被废弃的 `kb-service/` 目录。
 - **无存量迁移 shim**:KB 尚未接通真实数据,greenfield 改路径约定即可。
 
 ## Capabilities

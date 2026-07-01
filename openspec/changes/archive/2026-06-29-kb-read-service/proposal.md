@@ -10,7 +10,7 @@ scope 严格限定为**读**:服务读本地 `tenants/<t>/kb/`(由现有 ingest 
 - **boot 时按租户绑定**:服务启动参数/配置带 `tenant_id`;boot 时 `tenant_scope(tenant)` → `kb_runtime.set_database` / `set_vector_backend` 一次(per-tenant 进程,并发请求同租户、无 race)。
 - **请求处理**:decode `X-Fleetent-Principal` → 校验 `principal.tenant_id` == 服务租户(不符拒绝)→ 调 `knowledge_base.search`(显式 `mode`,服务级默认 `hybrid`;`kb_ids`/`limit` 来自请求)→ 返回 chunks。`plan_knowledge_search`/`graph_search` 同理可选。
 - **鉴权**:Bearer service key + `X-Fleetent-Principal`(复用 `identity.decode_ingress_principal`)。
-- **入口**:`fleetent kb-serve`(`main()` + uvicorn,照 `kb-worker` 范式)。
+- **入口**:`fleetent kb serve`(`main()` + uvicorn,照 `kb-worker` 范式)。
 
 不改变:`knowledge_base` 检索核(只显式调其 public API);现有 ingest(worker/队列/secret 一字不动);LocalKnowledgeProvider 与单机嵌入式路径;Slice ① 的 client 与协议。
 
@@ -25,7 +25,7 @@ scope 严格限定为**读**:服务读本地 `tenants/<t>/kb/`(由现有 ingest 
 ## Impact
 
 - **owning package**:`fleetent.knowledge_base`(新增服务入口模块,如 `knowledge_base/serve.py`;FastAPI 在入口内 lazy import,不污染 agent 运行时对 knowledge_base 的轻量 import)。依赖 FastAPI/uvicorn + `tenant_router` + `identity` + `knowledge_base` public。
-- **public API surface**:新增 `fleetent kb-serve` 入口 + wire 协议 server 端;无对现有 API 的破坏。
+- **public API surface**:新增 `fleetent kb serve` 入口 + wire 协议 server 端;无对现有 API 的破坏。
 - **owned tables**:无(只读 `kb/`)。
 - **config namespace**:服务级 `tenant_id`、监听地址、service key 引用(`env:`/`file://`)、默认 `mode`。
 - **cross-module 依赖**:**保持 `knowledge_base` ✗→ `platform`**(服务只用 tenant_router/identity/knowledge_base,不 import platform);跑 module-boundaries 护栏确认。

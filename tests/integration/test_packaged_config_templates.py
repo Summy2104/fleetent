@@ -87,7 +87,7 @@ def test_kb_service_init_config_generates_tenant_kb_home_outside_repo_cwd(tmp_pa
 
     result = _run_cli_outside_repo(
         tmp_path,
-        "kb-service",
+        "kb",
         "init-config",
         "--tenant",
         "acme",

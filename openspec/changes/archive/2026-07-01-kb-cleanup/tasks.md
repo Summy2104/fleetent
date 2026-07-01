@@ -17,7 +17,7 @@
 ## 3. docstring 与文档
 
 - [x] 3.1 [impl] 给 `src/fleetent/knowledge_base/extract_cli.py` 缺 docstring 的私有辅助函数（`_wait_for_jobs`、`_parse_args`、`_require_known_kb`、`_print_summary`）补一行 Google 风格 docstring（只写"为什么/做什么"要点，勿冗余）。
-- [x] 3.2 [impl] 更新部署/运维文档：`grep -rn "platform kb extract-entities" docs` 找到引用处，改为引导使用 `fleetent kb-extract --config <kb-service.yaml> --kb <kb_id> [--wait]`（与 `deployment` spec delta 一致）。
+- [x] 3.2 [impl] 更新部署/运维文档：`grep -rn "platform kb extract-entities" docs` 找到引用处，改为引导使用 `fleetent kb extract --config <kb-service.yaml> --kb <kb_id> [--wait]`（与 `deployment` spec delta 一致）。
 
 ## 4. 收尾门禁（全绿才算完）
 
