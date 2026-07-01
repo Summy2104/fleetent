@@ -331,10 +331,25 @@ async def _forward_approval_decision(
     The node process can neither read the approval store nor resume the run (no state_db),
     so the click becomes an ``approve/reject [always] <id>`` command dispatched to the agent
     process via the injected inbound dispatcher — the same chain a typed approval takes. The
-    agent owns authorization + resume + (managed) connector resolution. The clicker's id is
-    the decision actor, so the agent's gate authorization still applies.
+    agent owns authorization + resume + (managed) connector resolution.
+
+    AAA-8204 #2 patch: the requester is stored as an internal identity (uuid); the click
+    carries the raw Slack user id. Resolve it via ``resolve_identity`` first — exactly like
+    the inbound path (slack.py) — so the agent's authorization compares like ids (a raw Slack
+    id would never match the resolved requester → ``approval_unauthorized_actor``).
     """
+    from fleetent.im_gateway.access import IMIdentityResolutionError, resolve_identity
     from fleetent.im_gateway.normalizer import NormalizedMessage, SessionContext
+
+    try:
+        clicker_identity = resolve_identity("slack", clicker, agent_name or "default")
+    except IMIdentityResolutionError as exc:
+        logger.warning("approval_button_identity_unresolved", clicker=clicker, error=str(exc))
+        with contextlib.suppress(Exception):
+            await client.chat_postEphemeral(
+                channel=channel, user=clicker, text="⚠️ 无法识别你的身份，请重试。"
+            )
+        return
 
     verb = "approve" if decision == "approved" else "reject"
     command = (
@@ -343,15 +358,16 @@ async def _forward_approval_decision(
         else f"{verb} {approval_id}"
     )
 
-    # Move the prompt to a result state (buttons removed) so a second click is impossible;
-    # the agent records the decision and delivers the run's outcome to its original address.
-    verdict = "✅ 已批准" if decision == "approved" else "❌ 已拒绝"
-    suffix = "（始终允许）" if always else ""
+    # AAA-8204 #2 patch (b): authorization is decided asynchronously in the agent (method A),
+    # so node cannot know yet whether the decision took effect — it must NOT optimistically
+    # claim "已批准" (that contradicts a later unauthorized notice). Move the prompt off its
+    # buttons (no double-click) to a neutral in-progress state; the agent delivers the real
+    # outcome — the resumed run's result on success, an unauthorized/expired notice on failure.
     with contextlib.suppress(Exception):  # cosmetic; the agent owns the authoritative result
         await client.chat_update(
             channel=channel,
             ts=message_ts,
-            text=f"{verdict}{suffix} `{approval_id}` — by <@{clicker}>",
+            text=f"⏳ 已提交审批 `{approval_id}` — by <@{clicker}>，正在处理…",
             blocks=[],
         )
 
@@ -370,7 +386,7 @@ async def _forward_approval_decision(
         # The agent resolves the run's real session from the approval row (like the text
         # path); this is only a fallback id for that lookup.
         session_id=f"slack:dm:{clicker}:approval-{approval_id}",
-        user_id=clicker,
+        user_id=clicker_identity,
         text=command,
         attachments=[],
         reply_func=_reply,

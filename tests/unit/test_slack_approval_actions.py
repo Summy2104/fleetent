@@ -218,3 +218,80 @@ async def test_managed_button_forwards_reject_command(monkeypatch):
 
     assert len(forwarded) == 1
     assert forwarded[0].text == "reject ebd2986f"
+
+
+async def test_managed_button_resolves_clicker_slack_id_to_uuid(monkeypatch):
+    """AAA-8204 ②补丁:审批 requester 存内部 uuid,按钮 clicker 是原始 Slack id。转发前须像
+    入站一样经 resolve_identity 把 Slack id 解析成 uuid,否则 agent 授权失败(unauthorized)。"""
+    from fleetent.im_gateway import access, inbound_dispatch, slack
+
+    monkeypatch.setattr(
+        access,
+        "_im_identity_resolver",
+        lambda owner, platform, puid: "26989e37-uuid" if puid == "U0B6SU8LH0D" else puid,
+    )
+    forwarded = []
+
+    async def _disp(msg):
+        forwarded.append(msg)
+
+    monkeypatch.setattr(inbound_dispatch, "_dispatcher", _disp)
+    await slack.handle_approval_action(
+        ack=AsyncMock(),
+        body=_body("approval_approve", approval_id="ebd2986f", user="U0B6SU8LH0D"),
+        client=AsyncMock(),
+        agent_name="my-bot",
+    )
+
+    assert len(forwarded) == 1
+    assert forwarded[0].user_id == "26989e37-uuid"  # resolved, not the raw Slack id
+    assert forwarded[0].text == "approve ebd2986f"
+
+
+async def test_managed_button_ui_does_not_claim_approved_before_resolve(monkeypatch):
+    """②补丁(b):方案A 下授权在 agent 侧异步判定,node 不得乐观 chat_update '已批准'
+    (会与随后的 unauthorized 矛盾)。"""
+    from fleetent.im_gateway import inbound_dispatch, slack
+
+    async def _disp(msg):
+        return None
+
+    monkeypatch.setattr(inbound_dispatch, "_dispatcher", _disp)
+    client = AsyncMock()
+    await slack.handle_approval_action(
+        ack=AsyncMock(),
+        body=_body("approval_approve", approval_id="ebd2986f"),
+        client=client,
+        agent_name="my-bot",
+    )
+
+    # Prompt is moved off the buttons (no double-click) but must NOT falsely claim approval.
+    update_text = client.chat_update.call_args.kwargs["text"]
+    assert "已批准" not in update_text
+    assert client.chat_update.call_args.kwargs["blocks"] == []
+
+
+async def test_managed_button_unresolved_identity_not_forwarded(monkeypatch):
+    """②补丁(a):clicker 身份解析失败(IMIdentityResolutionError)→ 不转发、不谎报,提示重试。"""
+    from fleetent.im_gateway import access, inbound_dispatch, slack
+
+    def _boom(owner, platform, puid):
+        raise access.IMIdentityResolutionError("unresolved")
+
+    monkeypatch.setattr(access, "_im_identity_resolver", _boom)
+    forwarded = []
+
+    async def _disp(msg):
+        forwarded.append(msg)
+
+    monkeypatch.setattr(inbound_dispatch, "_dispatcher", _disp)
+    client = AsyncMock()
+    await slack.handle_approval_action(
+        ack=AsyncMock(),
+        body=_body("approval_approve", approval_id="ebd2986f"),
+        client=client,
+        agent_name="my-bot",
+    )
+
+    assert forwarded == []  # not forwarded
+    client.chat_postEphemeral.assert_called_once()
