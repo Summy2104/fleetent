@@ -10,23 +10,20 @@
 - [x] 2.1 在 `tests/integration/test_connector_admin_api.py` 里写测试(复用该文件现有 `/admin/mcp/servers` 测试的 fixture 风格):已登录任意角色请求 `GET /admin/mcp/field-schema` 返回 200 且内容等于 `mcp_yaml_field_paths()`;未带登录会话返回 401。先见红。
 - [x] 2.2 在 `connector_admin_api.py` 新增该端点(鉴权用 `_current_user`,不要求 admin 角色,对齐 `list_mcp_servers`)。跑 2.1 见绿。
 
-## 3. 前端数据层(api.ts,TDD)
+## 3. 前端:api.ts hook + page.tsx 渲染(TDD,合并在 page.test.tsx 一个红绿周期里)
 
-- [ ] 3.1 写测试(Vitest + MSW):`useMcpFieldSchemaQuery` 命中 `GET /admin/mcp/field-schema`,返回体原样透出。先见红。
-- [ ] 3.2 在 `features/connectors/api.ts` 实现该 hook(`staleTime: Infinity`,风格照现有 `useMcpServersQuery`)。跑 3.1 见绿。
+`features/connectors/api.ts` 里现有的 `useMcpServersQuery`/`useMcpDoctorQuery` 等 hook 都没有独立单测文件,只经由 `mcp/page.test.tsx` 的 MSW mock 间接覆盖——本 task 照此惯例,不新开 `api.test.ts`。
 
-## 4. 前端表单渲染(page.tsx,TDD)
-
-- [ ] 4.1 写测试(`page.test.tsx`,mock `useMcpFieldSchemaQuery` 返回值):
+- [x] 3.1 在 `page.test.tsx` 里写测试(MSW mock `GET /admin/mcp/field-schema`):
   - `transport`/`command`/`url`/`args`/`env`/`headers` 等常规字段下方渲染 `mcpServers.<当前id>.<字段>`
   - 切换 `authType` 为 `oauth_client_credentials` 后,Token URL/Client ID 等字段下方渲染 `mcpServers.<id>.x-fleetent.auth.<子字段>`,且鉴权类型下拉本身对应字段(`auth_type`,不带 `x-fleetent`)与其他鉴权类型字段的提示不冲突
   - ID 输入框填入 `demo` 后,其余提示的占位符替换为 `demo`;清空后回退显示 `<id>`
   - `id` 输入框和"作用域"选择器下方展示手写说明文案(不依赖 mock 的 schema 返回值)
-  先见红。
-- [ ] 4.2 在 `mcp/page.tsx` 实现:引入 `useMcpFieldSchemaQuery()`、`fieldPath(schema, key, id)` helper、每个字段块下方补 `<p className="text-xs text-muted-foreground font-mono">`;`i18n/messages.ts` 补 `mcp.idYamlHint` / `mcp.scopeYamlHint` 的 en + zh 词条(en 权威源,zh 类型强制对齐)。跑 4.1 见绿。
+  先见红(新增 2 个测试失败,原有 4 个测试仍绿)。
+- [x] 3.2 实现:`features/connectors/api.ts` 新增 `useMcpFieldSchemaQuery()`(`staleTime: Infinity`,风格照 `useMcpServersQuery`);`mcp/page.tsx` 引入该 hook、加 `FieldPathHint` 组件、每个字段块下方补 `<p className="text-xs text-muted-foreground font-mono">`;`i18n/messages.ts` 补 `mcp.idYamlHint` / `mcp.scopeYamlHint` 的 en + zh 词条。跑 3.1 见绿(6/6)。
 
-## 5. Change 收尾验证
+## 4. Change 收尾验证
 
-- [ ] 5.1 `make test-pr` + `make test-integration-ci` 全绿(无新增失败)。
-- [ ] 5.2 `make test-frontend` 全绿(vitest + 覆盖率阈值 + tsc --noEmit + lint)。
-- [ ] 5.3 手动核对:本地起 platform + vite dev server,实际打开 MCP 新建表单,切换传输方式/鉴权类型、填写 ID,确认每个字段下方的路径提示符合预期且随输入实时更新。
+- [ ] 4.1 `make test-pr` + `make test-integration-ci` 全绿(无新增失败)。
+- [x] 4.2 `make test-frontend` 全绿(vitest + 覆盖率阈值 + tsc --noEmit + lint,108/108 通过)。
+- [ ] 4.3 手动核对:本地起 platform + vite dev server,实际打开 MCP 新建表单,切换传输方式/鉴权类型、填写 ID,确认每个字段下方的路径提示符合预期且随输入实时更新。

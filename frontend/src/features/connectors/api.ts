@@ -190,6 +190,21 @@ export function useMcpDoctorQuery() {
   });
 }
 
+// Field name -> agent.yaml path template (e.g. "mcpServers.{id}.x-fleetent.auth.client_id").
+// Purely code-derived on the backend (mcp_yaml_field_paths()); static for the deployment's
+// lifetime, so it never needs to be refetched.
+export type McpFieldSchema = Record<string, string>;
+
+export function useMcpFieldSchemaQuery() {
+  const api = useAdminApi();
+
+  return useQuery({
+    queryKey: ['mcp', 'field-schema'],
+    queryFn: () => api.get<McpFieldSchema>('/admin/mcp/field-schema'),
+    staleTime: Infinity,
+  });
+}
+
 export function useMcpReconnectMutation(serverId: string) {
   const api = useAdminApi();
   const queryClient = useQueryClient();
