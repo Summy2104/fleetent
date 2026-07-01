@@ -37,5 +37,5 @@
 ## 收尾
 
 - [x] 3.1 层边界：`uv run python scripts/check_test_layers.py` 与 `PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py` 通过（P2 未引入 agent→platform 反向依赖；P1 映射只在 server.py）。
-- [ ] 3.2 门禁：`make test-pr` 与 `make test-integration-ci` 全绿（判据=无新增失败）。
-- [ ] 3.3 mypy：`uv run mypy src`（对改动文件无新增报错，对照 baseline）。
+- [x] 3.2 门禁：`make test-pr` 与 `make test-integration-ci` 全绿（判据=无新增失败）。
+- [x] 3.3 mypy：`uv run mypy src`（对改动文件无新增报错，对照 baseline）。
