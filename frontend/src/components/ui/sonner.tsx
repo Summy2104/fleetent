@@ -1,15 +1,19 @@
 "use client"
 
-import { useTheme } from "next-themes"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
 
+import { useTheme } from "@/app/theme"
+
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme()
+  const { theme } = useTheme()
 
   return (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
+      theme={theme}
+      position="bottom-right"
+      closeButton
+      richColors
       className="toaster group"
       icons={{
         success: (
@@ -34,6 +38,21 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--normal-text": "var(--popover-foreground)",
           "--normal-border": "var(--border)",
           "--border-radius": "var(--radius)",
+          // Rich-color variants mapped onto the project's theme tokens (these
+          // shift automatically between light/dark). Tinted background + solid
+          // token border and text/icon color.
+          "--success-bg": "color-mix(in oklab, var(--success) 12%, var(--popover))",
+          "--success-border": "var(--success)",
+          "--success-text": "var(--success)",
+          "--error-bg": "color-mix(in oklab, var(--destructive) 12%, var(--popover))",
+          "--error-border": "var(--destructive)",
+          "--error-text": "var(--destructive)",
+          "--warning-bg": "color-mix(in oklab, var(--warning) 12%, var(--popover))",
+          "--warning-border": "var(--warning)",
+          "--warning-text": "var(--warning)",
+          "--info-bg": "color-mix(in oklab, var(--primary) 12%, var(--popover))",
+          "--info-border": "var(--primary)",
+          "--info-text": "var(--primary)",
         } as React.CSSProperties
       }
       toastOptions={{

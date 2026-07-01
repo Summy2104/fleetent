@@ -1,8 +1,10 @@
 /**
- * Toast bus built on a window CustomEvent. Using the window as the channel
- * (instead of a module-level singleton store) keeps it robust across Vite HMR
- * module re-instantiation: emitter and listener always meet on the one window.
+ * Toast public API — thin wrapper over `sonner` so call sites stay decoupled
+ * from the underlying toast library. The visual host is `<Toaster />` from
+ * `@/components/ui/sonner`, mounted once at the app root.
  */
+
+import { toast as sonnerToast } from 'sonner'
 
 export type ToastVariant = 'success' | 'error' | 'info'
 
@@ -13,17 +15,13 @@ export type ToastInput = {
   duration?: number
 }
 
-export const TOAST_EVENT = 'fleetent:toast'
-
 export function pushToast(input: ToastInput): void {
-  if (typeof window === 'undefined') {
-    return
-  }
-  window.dispatchEvent(new CustomEvent<ToastInput>(TOAST_EVENT, { detail: input }))
+  const { title, description, variant = 'info', duration } = input
+  sonnerToast[variant](title, { description, duration })
 }
 
 export const toast = {
-  success: (title: string, description?: string) => pushToast({ title, description, variant: 'success' }),
-  error: (title: string, description?: string) => pushToast({ title, description, variant: 'error' }),
-  info: (title: string, description?: string) => pushToast({ title, description, variant: 'info' }),
+  success: (title: string, description?: string) => sonnerToast.success(title, { description }),
+  error: (title: string, description?: string) => sonnerToast.error(title, { description }),
+  info: (title: string, description?: string) => sonnerToast.info(title, { description }),
 }
