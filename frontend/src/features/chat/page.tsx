@@ -36,7 +36,7 @@ function MessageBubble({
   return (
     <article className={cn('max-w-[85%] rounded-2xl px-4 py-3 text-sm shadow-sm', bubbleClass)}>
       <p className="mb-1 font-semibold text-[10px] text-muted-foreground uppercase tracking-[0.2em]">{author}</p>
-      <p className="whitespace-pre-wrap break-words">{content}</p>
+      <p className="wrap-break-word whitespace-pre-wrap">{content}</p>
     </article>
   )
 }
@@ -63,6 +63,7 @@ export function ChatPage(): JSX.Element {
     previousAgentRef.current = selectedAgent || null
   }, [abort, selectedAgent])
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: need
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])

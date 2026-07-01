@@ -5,8 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AuthProvider } from '@/app/auth'
 import { AppQueryProvider } from '@/app/query-client'
-import { I18nProvider } from '@/i18n'
 import { WebhooksPage } from '@/features/webhooks/page'
+import { I18nProvider } from '@/i18n'
 import { server } from '@/test/msw/server'
 
 const API_BASE_URL = 'http://fleetent.test'
