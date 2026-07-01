@@ -202,7 +202,7 @@ async def test_boot_reconciles_expired_approvals_in_agent_state(tmp_path, monkey
 
     home = _write_home(tmp_path)
     agent_app._redirect_agent_data_paths(home)
-    agent_app._init_agent_db_schema(home / "data", agent_id="support", tenant_id="default")
+    agent_app._init_agent_db_schema(home / "data", agent_name="support", tenant_id="default")
     approval_store.insert_approval(
         id="expired",
         session_id="slack:dm:U_REQ:1.1",

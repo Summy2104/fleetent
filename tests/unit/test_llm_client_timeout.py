@@ -10,7 +10,7 @@ from fleetent.model.resolver import ResolvedModelConfig
 
 def _resolved() -> ResolvedModelConfig:
     return ResolvedModelConfig(
-        agent_id="a",
+        agent_name="a",
         route_key="default",
         target_id="primary",
         provider="openai_compatible",

@@ -249,15 +249,15 @@ def set_config_overrides(name: str, config_overrides: dict[str, Any]) -> None:
     update_agent_config(name, config_overrides=config_overrides)
 
 
-def set_im_capabilities(name: str, *, supports_dm: bool, supports_groups: bool) -> None:
+def set_im_capabilities(agent_id: int, *, supports_dm: bool, supports_groups: bool) -> None:
     """Replace an agent's IM chat-type capability switches."""
     _db().execute(
         "UPDATE agents SET supports_dm = :supports_dm, supports_groups = :supports_groups "
-        "WHERE name = :name",
+        "WHERE id = :agent_id",
         {
             "supports_dm": int(supports_dm),
             "supports_groups": int(supports_groups),
-            "name": name,
+            "agent_id": agent_id,
         },
     )
 

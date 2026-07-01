@@ -36,7 +36,7 @@ def test_init_agent_db_schema_routes_by_tenant_id(tmp_path: Path) -> None:
     data_dir = tmp_path / "data"
     data_dir.mkdir()
 
-    _init_agent_db_schema(data_dir, agent_id="bot", tenant_id="acme")
+    _init_agent_db_schema(data_dir, agent_name="bot", tenant_id="acme")
 
     # KB must be under tenants/<tenant>/
     kb_path = tmp_path / "tenants" / "acme" / "kb" / "data" / "kb.db"
@@ -60,7 +60,7 @@ def test_init_agent_db_schema_default_tenant_still_works(tmp_path: Path) -> None
     data_dir.mkdir()
 
     # default tenant — no tenant_id arg (backward compat)
-    _init_agent_db_schema(data_dir, agent_id="bot")
+    _init_agent_db_schema(data_dir, agent_name="bot")
 
     kb_path = tmp_path / "tenants" / "default" / "kb" / "data" / "kb.db"
     assert kb_path.exists(), "Default tenant KB must be at tenants/default/kb/data/kb.db"
@@ -80,7 +80,7 @@ def test_kb_tables_land_in_tenant_scoped_db(tmp_path: Path) -> None:
     data_dir = tmp_path / "data"
     data_dir.mkdir()
 
-    _init_agent_db_schema(data_dir, agent_id="bot", tenant_id="acme")
+    _init_agent_db_schema(data_dir, agent_name="bot", tenant_id="acme")
 
     kb_path = tmp_path / "tenants" / "acme" / "kb" / "data" / "kb.db"
     tables = _tables_in(kb_path)
@@ -136,10 +136,10 @@ def test_two_agent_boots_different_tenants_no_cross_contamination(tmp_path: Path
     data_dir.mkdir()
 
     # Boot T1/bot
-    _init_agent_db_schema(data_dir, agent_id="bot", tenant_id="tenant-1")
+    _init_agent_db_schema(data_dir, agent_name="bot", tenant_id="tenant-1")
 
     # Boot T2/bot (same agent name, different tenant)
-    _init_agent_db_schema(data_dir, agent_id="bot", tenant_id="tenant-2")
+    _init_agent_db_schema(data_dir, agent_name="bot", tenant_id="tenant-2")
 
     t1_state = tmp_path / "tenants" / "tenant-1" / "agents" / "bot" / "data" / "agent_state.db"
     t2_state = tmp_path / "tenants" / "tenant-2" / "agents" / "bot" / "data" / "agent_state.db"

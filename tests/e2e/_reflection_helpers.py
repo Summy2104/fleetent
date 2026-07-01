@@ -214,7 +214,7 @@ agent_home = (
     / "{stack.agent_name}"
 )
 agent = agent_config.scan_home(agent_home)
-_init_agent_db_schema(agent_home / "data", agent_id=agent.name, tenant_id=agent.tenant_id)
+_init_agent_db_schema(agent_home / "data", agent_name=agent.name, tenant_id=agent.tenant_id)
 now = datetime.now(UTC).replace(microsecond=0)
 memory_id = str(uuid.uuid4())
 memory_store.insert_memory(
@@ -302,7 +302,7 @@ agent_home = (
     / "{stack.agent_name}"
 )
 agent = agent_config.scan_home(agent_home)
-_init_agent_db_schema(agent_home / "data", agent_id=agent.name, tenant_id=agent.tenant_id)
+_init_agent_db_schema(agent_home / "data", agent_name=agent.name, tenant_id=agent.tenant_id)
 
 for suffix in ("1", "2"):
     observability.record_trace_event(

@@ -229,7 +229,7 @@ def test_agent_file_from_store_materializes_im_access_without_clobbering_credent
     )
     agent_store.assign_user("u_alice", agent.id)
     agent_store.assign_user("u_bob", agent.id)
-    agent_store.set_im_capabilities("support", supports_dm=True, supports_groups=True)
+    agent_store.set_im_capabilities(agent.id, supports_dm=True, supports_groups=True)
     agent_im_group_store.bind(agent.id, "slack", "C_ops", created_by="admin")
     agent_im_group_store.bind(agent.id, "slack", "C_eng", created_by="admin")
 

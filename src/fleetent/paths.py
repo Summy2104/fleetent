@@ -89,21 +89,21 @@ def tenant_kb_data_dir(tenant_id: str) -> Path:
     return tenant_kb_dir(tenant_id) / "data"
 
 
-def tenant_agent_home_dir(tenant_id: str, agent_id: str) -> Path:
-    return tenant_dir(tenant_id) / "agents" / agent_id
+def tenant_agent_home_dir(tenant_id: str, agent_name: str) -> Path:
+    return tenant_dir(tenant_id) / "agents" / agent_name
 
 
-def tenant_agent_data_dir(tenant_id: str, agent_id: str) -> Path:
-    return tenant_agent_home_dir(tenant_id, agent_id) / "data"
+def tenant_agent_data_dir(tenant_id: str, agent_name: str) -> Path:
+    return tenant_agent_home_dir(tenant_id, agent_name) / "data"
 
 
-def agent_home_dir(agent_id: str) -> Path:
-    return tenant_agent_home_dir("default", agent_id)
+def agent_home_dir(agent_name: str) -> Path:
+    return tenant_agent_home_dir("default", agent_name)
 
 
-def agent_data_dir(agent_id: str) -> Path:
+def agent_data_dir(agent_name: str) -> Path:
     """Per-agent runtime data root default-tenant compatibility shim."""
-    return tenant_agent_data_dir("default", agent_id)
+    return tenant_agent_data_dir("default", agent_name)
 
 
 def agent_file() -> Path:

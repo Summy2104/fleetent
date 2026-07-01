@@ -65,8 +65,8 @@ def test_init_agent_db_schema_wires_router_and_sinks(
             captures.append(("tenant_scope", tenant_id))
             return tenant_scope
 
-        def agent_scope(self, tenant_id: str, agent_id: str) -> Any:
-            captures.append(("agent_scope", (tenant_id, agent_id)))
+        def agent_scope(self, tenant_id: str, agent_name: str) -> Any:
+            captures.append(("agent_scope", (tenant_id, agent_name)))
             return agent_scope
 
     monkeypatch.setattr(
@@ -107,7 +107,7 @@ def test_init_agent_db_schema_wires_router_and_sinks(
         lambda root: captures.append(("views_root", root)),
     )
 
-    agent_app._init_agent_db_schema(tmp_path / "data", agent_id="ops", tenant_id="tenant-1")
+    agent_app._init_agent_db_schema(tmp_path / "data", agent_name="ops", tenant_id="tenant-1")
 
     assert ("tenant_scope", "tenant-1") in captures
     assert ("agent_scope", ("tenant-1", "ops")) in captures
