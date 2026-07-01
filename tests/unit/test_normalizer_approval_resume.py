@@ -196,3 +196,50 @@ async def test_text_approve_uses_run_session_not_message_session(monkeypatch):
     # Resume must target the RUN's session, not the approve message's session.
     assert resume.await_args is not None, "resume was not triggered (looked up wrong session)"
     assert resume.await_args.kwargs["session_id"] == run_session
+
+
+def _approve_msg(connectors: dict) -> NormalizedMessage:
+    return NormalizedMessage(
+        platform="slack",
+        session_id="slack:dm:U_REQ:1.1",
+        user_id="U_REQ",
+        text="approve abcd1234",
+        attachments=[],
+        reply_func=AsyncMock(),
+        agent_name="my-bot",
+        session_context=SessionContext(platform="slack", sender_id="U_REQ"),
+        outbound_connectors=connectors,
+    )
+
+
+async def test_resume_managed_runtime_resolves_managed_connectors(_resume_env, monkeypatch):
+    """AAA-8204 ⑥：托管模式下 approve 经 /im/route 进来，msg.outbound_connectors 为空。
+
+    resume 必须 resolve_for_runtime 注入 ManagedOutboundConnector（与 loop.py:1986 一致），
+    否则被批准的 send_im_message 因 connectors.get('slack') 为 None 命中"无可用连接器"分支、
+    消息从不送达——这正是 AAA-8204「推送失败」的核心。
+    """
+    from fleetent import outbound_connectors as oc
+    from fleetent.outbound_connectors import ManagedOutboundConnector
+
+    monkeypatch.setattr(oc, "is_node_managed_runtime", lambda: True)
+    _resolve, resume, _entry = _resume_env
+
+    await normalizer.route(_approve_msg({}))  # managed: 无 live 连接器
+
+    tc = resume.await_args.kwargs["tool_context"]
+    assert "slack" in tc.outbound_connectors
+    assert isinstance(tc.outbound_connectors["slack"], ManagedOutboundConnector)
+    assert tc.outbound_connectors["slack"].agent_name == "my-bot"
+
+
+async def test_resume_standalone_keeps_live_connectors(_resume_env):
+    """回归：standalone（msg.outbound_connectors 非空）下 resolve 原样返回 live 连接器。"""
+    _resolve, resume, _entry = _resume_env
+    sentinel = object()
+
+    await normalizer.route(_approve_msg({"slack": sentinel}))
+
+    tc = resume.await_args.kwargs["tool_context"]
+    assert tc.outbound_connectors == {"slack": sentinel}
+    assert tc.outbound_connectors["slack"] is sentinel

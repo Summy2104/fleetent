@@ -26,6 +26,28 @@ from fleetent.structured_logging import get_logger
 
 _logger = get_logger("node.im_edge")
 
+# Outbound delivery errors that can NEVER succeed on retry (AAA-8204): the recipient/channel
+# does not exist or is unreachable for this connector. Matched as substrings of the receipt
+# error (Slack/Telegram SDK error strings embed the code). Everything else (network, rate
+# limit, transient) stays retryable so a blip does not drop a message.
+_PERMANENT_DELIVERY_ERRORS = (
+    "user_not_found",
+    "users_not_found",
+    "channel_not_found",
+    "not_in_channel",
+    "is_archived",
+    "account_inactive",
+    "cannot_dm_bot",
+)
+
+
+def _is_permanent_delivery_error(error: str | None) -> bool:
+    """Whether ``error`` is a permanent (non-retryable) outbound delivery failure."""
+    if not error:
+        return False
+    low = error.lower()
+    return any(marker in low for marker in _PERMANENT_DELIVERY_ERRORS)
+
 
 def _extract_link_code(text: str) -> str | None:
     stripped = text.strip()
@@ -263,7 +285,19 @@ class NodeIMEdgeHost:
                 approval=_approval_from_payload(payload),
             )
         if not receipt.ok:
-            outbound_queue_store.mark_failed_with_db(db, str(row["id"]))
+            if _is_permanent_delivery_error(receipt.error):
+                # No retry can succeed (recipient/channel gone) — terminally fail so the drain
+                # stops re-sending every interval forever (AAA-8204 node robustness).
+                _logger.warn(
+                    "outbound_delivery_permanent_failure",
+                    id=str(row["id"]),
+                    platform=platform,
+                    target=target,
+                    error=receipt.error,
+                )
+                outbound_queue_store.mark_dead_with_db(db, str(row["id"]))
+            else:
+                outbound_queue_store.mark_failed_with_db(db, str(row["id"]))
             return
 
         if dedup_key:

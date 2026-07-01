@@ -94,13 +94,26 @@ def set_im_identity_resolver(resolver: Callable[[str, str, str], str] | None) ->
     _im_identity_resolver = resolver
 
 
+# AAA-8204 #1: non-real IM identities that must never be resolved/provisioned. A broken
+# Slack assistant-thread context yields no user; a caller that fabricates one of these would
+# otherwise make the injected resolver auto-create a ghost user (e.g. ``slack:unknown``) that
+# then fails the access gate and blocks the real, authorized user at random.
+_NON_REAL_IM_IDENTITIES = frozenset({"", "unknown"})
+
+
 def resolve_identity(platform: str, platform_user_id: str, owner_id: str = "default") -> str:
     """Resolve a stable per-agent identity for an incoming IM message — no platform DB.
 
     The agent runtime uses the platform-native IM user id directly as the identity, so
     it never reads the platform ``user_store``. Author-facing ``allow_users`` entries in
     the binding's access block are matched against this same native id.
+
+    Raises ``IMIdentityResolutionError`` for a non-real id (empty / ``unknown``) BEFORE the
+    injected resolver runs, so no ghost user is ever provisioned; the caller must discard the
+    event with a warning rather than fabricate an identity (AAA-8204 #1).
     """
+    if (platform_user_id or "").strip().lower() in _NON_REAL_IM_IDENTITIES:
+        raise IMIdentityResolutionError(f"non-real IM identity: {platform_user_id!r}")
     if _im_identity_resolver is not None:
         return _im_identity_resolver(owner_id, platform, platform_user_id)
     return platform_user_id
