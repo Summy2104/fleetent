@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import fleetent.agent_store as agent_store
-from fleetent.platform.agent_lifecycle.materialize import mcp_yaml_field_paths
+from fleetent.config import mcp_yaml_field_paths
 from fleetent.platform.connector_management import connector_admin_api, mcp_server_store
 from tests.integration._migration_template import apply_migrations
 

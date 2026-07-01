@@ -13,7 +13,7 @@ from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from fleetent import audit_log, auth, user_store
-from fleetent.platform.agent_lifecycle.materialize import mcp_yaml_field_paths
+from fleetent.config import mcp_yaml_field_paths
 from fleetent.platform.connector_management import mcp_server_store
 from fleetent.platform.connector_management.mcp_auth import (
     ApiKeyMcpAuthConfig,

@@ -1,6 +1,6 @@
 ## Context
 
-`materialize.py` 的 `_mcp_payload_to_map()` + `_FLEETENT_EXT_DEFAULTS` 是 `McpServerSettings` → `agent.yaml` 的 `mcpServers.<id>` 结构唯一整形逻辑,被 `desired_state_payload_from_agent_file()` 调用——这条路径同时服务 standalone 物化(`materialize_agent_home`)和 node 托管同步(`node_desired_state_api.py` 调 `materialize.desired_state_payload_from_agent_file`),没有第二份拷贝。前端 `features/mcp/page.tsx` 的表单字段和这份整形逻辑是手工对应的(字段名基本一致),但表单上完全不展示这层映射关系。
+`platform/agent_lifecycle/materialize.py` 的 `_mcp_payload_to_map()` + `MCP_FLEETENT_EXT_DEFAULTS`(原名 `_FLEETENT_EXT_DEFAULTS`,实现过程中挪到了 `config.py`,见 D1 末尾说明)是 `McpServerSettings` → `agent.yaml` 的 `mcpServers.<id>` 结构唯一整形逻辑,被 `desired_state_payload_from_agent_file()` 调用——这条路径同时服务 standalone 物化(`materialize_agent_home`)和 node 托管同步(`node_desired_state_api.py` 调 `materialize.desired_state_payload_from_agent_file`),没有第二份拷贝。前端 `features/mcp/page.tsx` 的表单字段和这份整形逻辑是手工对应的(字段名基本一致),但表单上完全不展示这层映射关系。
 
 ## Goals / Non-Goals
 
@@ -10,7 +10,7 @@
 
 ## Decisions
 
-**D1 · 路径表从 `materialize.py` 派生,不在前端手写。**
+**D1 · 路径表从既有整形逻辑派生,不在前端手写;实现中发现 `materialize.py` 会触发跨面依赖护栏,改落地在 `config.py`。**
 新增 `mcp_yaml_field_paths() -> dict[str, str]`,逻辑:
 
 ```python
@@ -22,7 +22,7 @@ def mcp_yaml_field_paths() -> dict[str, str]:
         if name == "auth":
             for sub in McpOAuthSettings.model_fields:
                 paths[f"auth.{sub}"] = f"mcpServers.{{id}}.x-fleetent.auth.{sub}"
-        elif name in _FLEETENT_EXT_DEFAULTS:
+        elif name in MCP_FLEETENT_EXT_DEFAULTS:
             paths[name] = f"mcpServers.{{id}}.x-fleetent.{name}"
         else:
             paths[name] = f"mcpServers.{{id}}.{name}"
@@ -31,7 +31,9 @@ def mcp_yaml_field_paths() -> dict[str, str]:
 
 跳过 `id`(是 map key,不是字段值)和 `connect_timeout`/`call_timeout`(表单没有对应输入框,产出了也用不上,保留最小输出)。`auth` 字段本身不产出 `x-fleetent.auth` 这一条,只展开子字段——因为表单里没有"整个 auth 对象"这个输入框,只有 `token_url`/`client_id` 等子字段输入框。
 
-理由:这份表和 `_mcp_payload_to_map` 读的是同一个 `_FLEETENT_EXT_DEFAULTS`,任何人改了哪些字段该提到 `x-fleetent` 下,这份路径表会跟着变,不会漂移。
+理由:这份表和 `_mcp_payload_to_map` 读的是同一份哈希表,任何人改了哪些字段该提到 `x-fleetent` 下,这份路径表会跟着变,不会漂移。
+
+**落地位置修正(实现中发现,非最初设计)**:最初设计打算把 `mcp_yaml_field_paths()` 和 `_FLEETENT_EXT_DEFAULTS` 一起放在 `materialize.py`(② `connector_admin_api.py` 的新端点直接 import 它)。但 `tests/unit/test_module_dependency_guardrails.py::test_no_new_plane_boundary_violations` 判定这是新的跨面依赖:`connector_management`(②控制 face)MUST NOT import `agent_lifecycle`(③编排 face),该方向没有既有豁免。修正方案:把 `_FLEETENT_EXT_DEFAULTS`(改名 `MCP_FLEETENT_EXT_DEFAULTS`)和 `mcp_yaml_field_paths()` 整体挪到 `config.py`(不属于任何 face 的中立核心模块,`McpServerSettings`/`McpOAuthSettings` 本来就定义在这里)。`materialize.py` 的 `_mcp_payload_to_map()` 改为从 `config` import 这个常量,行为完全不变;`connector_admin_api.py` 改为从 `config` import `mcp_yaml_field_paths`,不再触碰 `agent_lifecycle`。
 
 验证过的关键路径(与当前代码行为核对一致):
 | 字段名 | 路径 |

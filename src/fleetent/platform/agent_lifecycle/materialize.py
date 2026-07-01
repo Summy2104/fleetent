@@ -30,7 +30,7 @@ from fleetent.agent_config import (
     collect_env_var_names,
     default_models,
 )
-from fleetent.config import McpOAuthSettings, McpServerSettings
+from fleetent.config import MCP_FLEETENT_EXT_DEFAULTS, McpServerSettings
 from fleetent.platform.agent_lifecycle import credential_slots, default_binding_store, secret_store
 from fleetent.platform.connector_management import mcp_server_store
 from fleetent.platform.connector_management.mcp_auth import (
@@ -400,42 +400,6 @@ def _mcp_servers_for_agent(agent: agent_store.Agent) -> list[McpServerSettings]:
     return servers
 
 
-# Fleetent extension fields and their defaults — dropped from the rendered map when default,
-# hoisted under `x-fleetent` when set (mcp-config-standardization).
-_FLEETENT_EXT_DEFAULTS: dict[str, Any] = {
-    "degrade_mode": "degrade",
-    "file_root": "",
-    "file_isolation": "on",
-    "auth": None,
-    "approval_rules": [],
-}
-
-# Fields not surfaced by any admin-form input; excluded from mcp_yaml_field_paths() so the
-# path table only covers fields a user can actually fill in.
-_FIELD_PATH_SKIP = frozenset({"id", "connect_timeout", "call_timeout"})
-
-
-def mcp_yaml_field_paths() -> dict[str, str]:
-    """Map each ``McpServerSettings`` field to its ``agent.yaml`` path template.
-
-    Derived from ``_FLEETENT_EXT_DEFAULTS`` (the same table ``_mcp_payload_to_map`` uses to
-    decide what gets hoisted under ``x-fleetent``), so this can never drift from the real
-    write path. ``{id}`` is a placeholder for the server's ``mcpServers`` map key.
-    """
-    paths: dict[str, str] = {}
-    for name in McpServerSettings.model_fields:
-        if name in _FIELD_PATH_SKIP:
-            continue
-        if name == "auth":
-            for sub in McpOAuthSettings.model_fields:
-                paths[f"auth.{sub}"] = f"mcpServers.{{id}}.x-fleetent.auth.{sub}"
-        elif name in _FLEETENT_EXT_DEFAULTS:
-            paths[name] = f"mcpServers.{{id}}.x-fleetent.{name}"
-        else:
-            paths[name] = f"mcpServers.{{id}}.{name}"
-    return paths
-
-
 def _mcp_payload_to_map(payload: dict[str, Any]) -> None:
     """Rewrite a dumped AgentFile payload's ``mcp_servers`` list into the standard
     ``mcpServers`` map (key = server id), hoisting non-default fleetent fields under each
@@ -448,7 +412,7 @@ def _mcp_payload_to_map(payload: dict[str, Any]) -> None:
         entry = dict(entry)
         sid = entry.pop("id")
         ext = {}
-        for key, default in _FLEETENT_EXT_DEFAULTS.items():
+        for key, default in MCP_FLEETENT_EXT_DEFAULTS.items():
             value = entry.pop(key, default)
             if value != default:
                 ext[key] = value

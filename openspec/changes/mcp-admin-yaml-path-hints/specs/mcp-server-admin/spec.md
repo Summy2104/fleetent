@@ -2,7 +2,7 @@
 
 ### Requirement: MCP server 表单字段展示对应的 agent.yaml 路径
 
-React 管理 SPA 的 MCP server 新建/编辑表单 SHALL 在每个字段输入框下方常驻展示该字段最终落在 `agent.yaml` 的路径(如 `mcpServers.filesystem.x-fleetent.auth.client_id`),路径数据 SHALL 从后端 `GET /admin/mcp/field-schema` 获取,该端点返回的路径表 MUST 直接派生自 `materialize.py` 的 `_FLEETENT_EXT_DEFAULTS` 整形逻辑(与 `_mcp_payload_to_map` 的真实写盘行为保持一致),不得在前端另外手写一份独立的映射表。路径模板中的 `{id}` 占位符 SHALL 替换为表单当前 ID 输入框的实际值,未填写时回退显示 `<id>`。`id` 输入框本身(对应 `mcpServers` 的 map key)和"作用域"选择器(对应 `agent_id` 路由列,不进入某份 `agent.yaml` 内容)SHALL 展示单独手写的说明文案,不依赖 `field-schema` 返回值。
+React 管理 SPA 的 MCP server 新建/编辑表单 SHALL 在每个字段输入框下方常驻展示该字段最终落在 `agent.yaml` 的路径(如 `mcpServers.filesystem.x-fleetent.auth.client_id`),路径数据 SHALL 从后端 `GET /admin/mcp/field-schema` 获取,该端点返回的路径表 MUST 直接派生自 `config.py` 的 `MCP_FLEETENT_EXT_DEFAULTS` 整形规则(与 `materialize._mcp_payload_to_map` 的真实写盘行为保持一致),不得在前端另外手写一份独立的映射表。路径模板中的 `{id}` 占位符 SHALL 替换为表单当前 ID 输入框的实际值,未填写时回退显示 `<id>`。`id` 输入框本身(对应 `mcpServers` 的 map key)和"作用域"选择器(对应 `agent_id` 路由列,不进入某份 `agent.yaml` 内容)SHALL 展示单独手写的说明文案,不依赖 `field-schema` 返回值。
 
 #### Scenario: 切换鉴权类型时提示随之更新
 

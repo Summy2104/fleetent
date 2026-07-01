@@ -3,12 +3,12 @@
 ## 1. 后端:路径表纯函数(unit,TDD)
 
 - [x] 1.1 写测试 `tests/unit/test_materialize_mcp_field_paths.py`(照既有 `tests/unit/test_materialize_mcp_map.py` 的扁平目录 + 直接 import `materialize` 惯例):覆盖 D1 表格里的关键路径断言——`auth_type`/`api_key_env`/`header_style`/`credential_input` **不**带 `x-fleetent` 前缀;`auth.client_id` 等 7 个 OAuth 子字段**带** `mcpServers.{id}.x-fleetent.auth.` 前缀;返回值不包含 `id`/`connect_timeout`/`call_timeout` 这 3 个 key。先见红(函数不存在)。
-- [x] 1.2 在 `materialize.py` 实现 `mcp_yaml_field_paths()`(design.md D1 给出的实现),紧邻 `_FLEETENT_EXT_DEFAULTS` 定义处。跑 1.1 见绿。
+- [x] 1.2 在 `materialize.py` 实现 `mcp_yaml_field_paths()`(design.md D1 给出的实现),紧邻 `_FLEETENT_EXT_DEFAULTS` 定义处。跑 1.1 见绿。**后于 task 2 因跨面依赖护栏整体迁到 `config.py`**(见下方 task 2.2 备注 + design.md D1 落地位置修正),测试文件同步改名为 `tests/unit/test_config_mcp_field_paths.py`、import 改指 `fleetent.config`。
 
 ## 2. 后端:只读端点(integration,TDD)
 
 - [x] 2.1 在 `tests/integration/test_connector_admin_api.py` 里写测试(复用该文件现有 `/admin/mcp/servers` 测试的 fixture 风格):已登录任意角色请求 `GET /admin/mcp/field-schema` 返回 200 且内容等于 `mcp_yaml_field_paths()`;未带登录会话返回 401。先见红。
-- [x] 2.2 在 `connector_admin_api.py` 新增该端点(鉴权用 `_current_user`,不要求 admin 角色,对齐 `list_mcp_servers`)。跑 2.1 见绿。
+- [x] 2.2 在 `connector_admin_api.py` 新增该端点(鉴权用 `_current_user`,不要求 admin 角色,对齐 `list_mcp_servers`)。跑 2.1 见绿。**收尾验证(task 4.1)时 `test_no_new_plane_boundary_violations` 报错**:`connector_admin_api.py`(②控制 face)import `materialize.py`(③编排 face)是新的跨面依赖,没有既有豁免。修正:把 `mcp_yaml_field_paths()` + `_FLEETENT_EXT_DEFAULTS`(改名 `MCP_FLEETENT_EXT_DEFAULTS`)整体迁到中立的 `config.py`,`materialize.py`/`connector_admin_api.py` 都从 `config` import,不再互相跨面依赖;`_mcp_payload_to_map` 行为不变。
 
 ## 3. 前端:api.ts hook + page.tsx 渲染(TDD,合并在 page.test.tsx 一个红绿周期里)
 
@@ -24,6 +24,6 @@
 
 ## 4. Change 收尾验证
 
-- [ ] 4.1 `make test-pr` + `make test-integration-ci` 全绿(无新增失败)。
+- [x] 4.1 `make test-pr` + `make test-integration-ci` 全绿(无新增失败)。首次跑 `make test-pr` 时 `test_no_new_plane_boundary_violations` 见红,已按上述修正(迁到 `config.py`)后复跑全绿(4125 passed);`make test-integration-ci` 2120 passed, 23 skipped(既有 skip,与本次改动无关)。
 - [x] 4.2 `make test-frontend` 全绿(vitest + 覆盖率阈值 + tsc --noEmit + lint,108/108 通过)。
 - [ ] 4.3 手动核对:本地起 platform + vite dev server,实际打开 MCP 新建表单,切换传输方式/鉴权类型、填写 ID,确认每个字段下方的路径提示符合预期且随输入实时更新。

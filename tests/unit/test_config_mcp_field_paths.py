@@ -1,10 +1,10 @@
 """Unit: mcp_yaml_field_paths() derives McpServerSettings field -> agent.yaml path
-templates from the same _FLEETENT_EXT_DEFAULTS hoisting rule _mcp_payload_to_map uses,
-so the two can never drift apart."""
+templates from the same MCP_FLEETENT_EXT_DEFAULTS hoisting rule materialize's
+_mcp_payload_to_map uses, so the two can never drift apart."""
 
 from __future__ import annotations
 
-from fleetent.platform.agent_lifecycle.materialize import mcp_yaml_field_paths
+from fleetent.config import mcp_yaml_field_paths
 
 
 def test_top_level_fields_are_not_hoisted_under_x_fleetent() -> None:
