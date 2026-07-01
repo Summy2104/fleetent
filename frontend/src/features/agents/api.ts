@@ -516,19 +516,6 @@ export function useAgentRequiredEnvQuery(name: string | null) {
   })
 }
 
-// POST /admin/agents/{name}/deploy → materialize the active version to the agent home.
-export function useDeployAgentMutation(name: string) {
-  const api = useAdminApi()
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: () => api.post<{ agent: string; path: string; deployed: boolean }>(`/admin/agents/${name}/deploy`),
-    onSuccess: async () => {
-      await invalidateAgentCoreQueries(queryClient, name)
-    },
-  })
-}
-
 // GET /admin/agents/{name}/agent-yaml → rendered agent.yaml for export. Modeled as
 // a mutation since it is triggered on demand by a button, not auto-fetched.
 export function useExportAgentYamlMutation(name: string) {

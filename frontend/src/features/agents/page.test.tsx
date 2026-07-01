@@ -698,8 +698,12 @@ describe('agent configure page bindings', () => {
       expect(screen.getByText('unset')).toBeInTheDocument()
     })
 
-    // Deploy tab: version history is retired; deploy and yaml export remain.
-    await user.click(screen.getByRole('tab', { name: 'Deploy' }))
+    // Deploy tab is retired: deployment is automatic via node reconcile, so the
+    // platform exposes no deploy trigger. Version history is gone too; YAML export
+    // now lives on the Overview tab.
+    expect(screen.queryByRole('tab', { name: 'Deploy' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'Overview' }))
+    expect(await screen.findByRole('button', { name: 'Export YAML' })).toBeInTheDocument()
     expect(screen.queryByText('Version History')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Activate' })).not.toBeInTheDocument()
     expect(versionRequests).toBe(0)

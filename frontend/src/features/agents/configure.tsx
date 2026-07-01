@@ -27,7 +27,6 @@ import {
   useBindAgentUserMutation,
   useDeleteAgentSecretMutation,
   useDeleteAgentSecretValueMutation,
-  useDeployAgentMutation,
   useExportAgentYamlMutation,
   useRemoveAgentImGroupMutation,
   useSetAgentImCapabilitiesMutation,
@@ -328,6 +327,8 @@ function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boo
           </Button>
         </div>
       ) : null}
+
+      <AgentYamlExport agentName={agentName} />
     </div>
   )
 }
@@ -514,9 +515,10 @@ function SecretsTab({ agentName, canWrite }: { agentName: string; canWrite: bool
   )
 }
 
-function DeployTab({ agentName, canWrite }: { agentName: string; canWrite: boolean }): JSX.Element {
+// Deployment is automatic: the platform never writes agent homes — node reconcile
+// materializes desired state. So this is a read-only export, not a deploy trigger.
+function AgentYamlExport({ agentName }: { agentName: string }): JSX.Element {
   const t = useT()
-  const deploy = useDeployAgentMutation(agentName)
   const exportYaml = useExportAgentYamlMutation(agentName)
 
   const downloadYaml = async (): Promise<void> => {
@@ -531,20 +533,12 @@ function DeployTab({ agentName, canWrite }: { agentName: string; canWrite: boole
   }
 
   return (
-    <div className="space-y-6">
-      {canWrite ? (
-        <Button disabled={deploy.isPending} onClick={() => void deploy.mutateAsync()}>
-          {t('agents.deployCurrentVersion')}
-        </Button>
-      ) : null}
-
-      <section className="space-y-3">
-        <TabHeading>{t('agents.yamlExport')}</TabHeading>
-        <Button disabled={exportYaml.isPending} onClick={() => void downloadYaml()} variant="outline">
-          <Download className="size-4" /> {t('agents.exportYaml')}
-        </Button>
-      </section>
-    </div>
+    <section className="space-y-3">
+      <TabHeading>{t('agents.yamlExport')}</TabHeading>
+      <Button disabled={exportYaml.isPending} onClick={() => void downloadYaml()} variant="outline">
+        <Download className="size-4" /> {t('agents.exportYaml')}
+      </Button>
+    </section>
   )
 }
 
@@ -776,7 +770,6 @@ export function AgentConfigurePage(): JSX.Element {
           <TabsTrigger value="skills">{t('agents.skillsTitle')}</TabsTrigger>
           <TabsTrigger value="kb">{t('agents.knowledgeBases')}</TabsTrigger>
           <TabsTrigger value="secrets">{t('agents.secrets')}</TabsTrigger>
-          <TabsTrigger value="deploy">{t('agents.tabDeploy')}</TabsTrigger>
           <TabsTrigger value="im">{t('agents.tabImCapabilities')}</TabsTrigger>
         </TabsList>
 
@@ -794,9 +787,6 @@ export function AgentConfigurePage(): JSX.Element {
         </TabsContent>
         <TabsContent value="secrets">
           <SecretsTab agentName={agentName} canWrite={canWrite} />
-        </TabsContent>
-        <TabsContent value="deploy">
-          <DeployTab agentName={agentName} canWrite={canWrite} />
         </TabsContent>
         <TabsContent value="im">
           <ImCapabilitiesTab agentName={agentName} canWrite={canWrite} />
