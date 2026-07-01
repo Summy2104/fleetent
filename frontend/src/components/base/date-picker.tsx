@@ -64,21 +64,21 @@ function localWallClockToUtc(date: string, time: string | undefined, edge: 'star
   return new Date(year, month - 1, day, hours, minutes, seconds, ms).toISOString()
 }
 
-function toIsoDate(date: Date): string {
+export function toIsoDate(date: Date): string {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
 }
 
-function fromIsoDate(value: string | undefined): Date | undefined {
+export function fromIsoDate(value: string | undefined): Date | undefined {
   if (!value) return undefined
   const [year, month, day] = value.split('-').map(Number)
   if (!year || !month || !day) return undefined
   return new Date(year, month - 1, day)
 }
 
-function formatLabel(value: DateFieldValue | undefined): string | null {
+export function formatLabel(value: DateFieldValue | undefined): string | null {
   if (!value?.date && !value?.time) return null
   if (value.date && value.time) return `${value.date} ${value.time}`
   return value.date ?? value.time ?? null

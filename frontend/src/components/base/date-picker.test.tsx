@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 
-import { DatePicker, dateRangeBounds } from '@/components/base/date-picker'
+import { DatePicker, dateRangeBounds, formatLabel, fromIsoDate, toIsoDate } from '@/components/base/date-picker'
 
 // Pin the runner to a non-UTC zone (团队在 UTC+8) so the local→UTC normalization is
 // observable and the expected bounds are deterministic regardless of the host machine.
@@ -63,5 +63,36 @@ describe('DatePicker', () => {
 
     await user.click(screen.getByRole('button', { name: 'Clear date' }))
     expect(onChange).toHaveBeenCalledWith(undefined)
+  })
+})
+
+describe('toIsoDate / fromIsoDate', () => {
+  it('formats a local date as yyyy-MM-dd', () => {
+    expect(toIsoDate(new Date(2026, 5, 9))).toBe('2026-06-09')
+  })
+
+  it('parses yyyy-MM-dd back to a local date and round-trips', () => {
+    const parsed = fromIsoDate('2026-06-09')
+    expect(parsed).toBeInstanceOf(Date)
+    expect(toIsoDate(parsed as Date)).toBe('2026-06-09')
+  })
+
+  it('returns undefined for empty or malformed input', () => {
+    expect(fromIsoDate(undefined)).toBeUndefined()
+    expect(fromIsoDate('')).toBeUndefined()
+    expect(fromIsoDate('not-a-date')).toBeUndefined()
+  })
+})
+
+describe('formatLabel', () => {
+  it('joins date and time, or shows whichever is present', () => {
+    expect(formatLabel({ date: '2026-06-09', time: '08:30' })).toBe('2026-06-09 08:30')
+    expect(formatLabel({ date: '2026-06-09' })).toBe('2026-06-09')
+    expect(formatLabel({ time: '08:30' })).toBe('08:30')
+  })
+
+  it('returns null when neither date nor time is set', () => {
+    expect(formatLabel(undefined)).toBeNull()
+    expect(formatLabel({})).toBeNull()
   })
 })
