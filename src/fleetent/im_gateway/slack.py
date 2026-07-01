@@ -583,7 +583,10 @@ async def _route_assistant_message(
 
     channel = getattr(context, "channel_id", None) or payload.get("channel") or ""
     thread_ts = getattr(context, "thread_ts", None)
-    slack_user_id = payload.get("user") or getattr(context, "user_id", None) or "unknown"
+    # AAA-8204 #1: do NOT fabricate a literal "unknown" when the assistant-thread context is
+    # broken and carries no user — resolve_identity rejects the empty id (below) so the event
+    # is discarded with a warning instead of provisioning a slack:unknown ghost user.
+    slack_user_id = payload.get("user") or getattr(context, "user_id", None) or ""
     try:
         identity = resolve_identity("slack", slack_user_id, agent_name)
     except IMIdentityResolutionError as exc:
@@ -726,7 +729,9 @@ def create_app(agent_name: str, config: dict[str, Any]) -> object:
         from fleetent.outbound import ConversationAddress
 
         channel = event.get("channel") or ""
-        slack_user_id = event.get("user") or "unknown"
+        # AAA-8204 #1: no user on the event → empty (rejected below), never a fabricated
+        # "unknown" that would provision a ghost user.
+        slack_user_id = event.get("user") or ""
         # Identity is the platform-native id, resolved locally — no platform user_store.
         try:
             identity = resolve_identity("slack", slack_user_id, agent_name)
