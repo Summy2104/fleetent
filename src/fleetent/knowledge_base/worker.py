@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from fleetent import kb_ingest_jobs
+from fleetent import kb_ingest_jobs, vector_store
 from fleetent import knowledge_base as kb_runtime
 from fleetent.config import KnowledgeBaseSettings, Settings
 from fleetent.db import SQLiteDatabase, create_database
@@ -247,7 +247,7 @@ def run_job(
             data_dir=data_dir,
             queue_database_url=queue_database_url,
         ):
-            result = asyncio.run(
+            connector_result = asyncio.run(
                 knowledge_base.run_connector_sync(
                     connector_id,
                     settings=_connector_settings(job, payload),
@@ -255,10 +255,10 @@ def run_job(
                 )
             )
         return {
-            "connector_id": result.connector_id,
-            "status": result.status,
-            "summary": result.summary,
-            "error": result.error,
+            "connector_id": connector_result.connector_id,
+            "status": connector_result.status,
+            "summary": connector_result.summary,
+            "error": connector_result.error,
         }
 
     if job_type == "extraction":
@@ -268,7 +268,7 @@ def run_job(
             data_dir=data_dir,
             queue_database_url=queue_database_url,
         ):
-            summary = asyncio.run(
+            extraction_summary = asyncio.run(
                 kb_runtime.run_entity_extraction(
                     tenant_id,
                     kb_id,
@@ -277,15 +277,39 @@ def run_job(
                 )
             )
         return {
-            "document_id": summary.document_id,
-            "status": summary.status,
-            "documents_scanned": summary.documents_scanned,
-            "chunks_scanned": summary.chunks_scanned,
-            "entities_upserted": summary.entities_upserted,
-            "mentions_written": summary.mentions_written,
-            "relations_written": summary.relations_written,
-            "failed_count": summary.failed_count,
-            "error_summary": summary.error_summary,
+            "document_id": extraction_summary.document_id,
+            "status": extraction_summary.status,
+            "documents_scanned": extraction_summary.documents_scanned,
+            "chunks_scanned": extraction_summary.chunks_scanned,
+            "entities_upserted": extraction_summary.entities_upserted,
+            "mentions_written": extraction_summary.mentions_written,
+            "relations_written": extraction_summary.relations_written,
+            "failed_count": extraction_summary.failed_count,
+            "error_summary": extraction_summary.error_summary,
+        }
+
+    if job_type == "reindex":
+        _require_active_kb(tenant_id, kb_id, data_dir=data_dir)
+        with _use_kb_runtime(
+            tenant_id,
+            data_dir=data_dir,
+            queue_database_url=queue_database_url,
+        ):
+            reindex_summary = vector_store.reindex(
+                vector_store.ReindexRequest(
+                    owner="knowledge_base",
+                    tenant_id=tenant_id,
+                    kb_id=kb_id,
+                )
+            )
+        return {
+            "owner": reindex_summary.owner,
+            "namespace": reindex_summary.namespace,
+            "dry_run": reindex_summary.dry_run,
+            "scanned": reindex_summary.scanned,
+            "reindexed": reindex_summary.reindexed,
+            "skipped": reindex_summary.skipped,
+            "failed": reindex_summary.failed,
         }
 
     raise ValueError(f"unknown kb ingest job type: {job_type}")

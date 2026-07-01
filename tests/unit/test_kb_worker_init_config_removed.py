@@ -20,4 +20,6 @@ def test_kb_worker_init_config_is_no_longer_supported() -> None:
 
     assert exc_info.value.code == 1
     assert stdout.getvalue() == ""
-    assert "Usage: fleetent kb serve|worker|ingest|extract|init-config" in stderr.getvalue()
+    assert "Usage: fleetent kb serve|worker|ingest|create|reindex|extract|init-config" in (
+        stderr.getvalue()
+    )

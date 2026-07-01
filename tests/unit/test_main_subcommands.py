@@ -156,6 +156,56 @@ def test_kb_ingest_subcommand_dispatches(monkeypatch: pytest.MonkeyPatch) -> Non
     assert calls == [["--config", "/tmp/kb-service.yaml", "--kb", "kb-a", "/tmp/docs"]]
 
 
+def test_kb_create_subcommand_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
+    sys.modules.pop("fleetent.knowledge_base.create_cli", None)
+
+    def fake_main(argv: list[str] | None = None) -> None:
+        calls.append(argv or [])
+
+    create_module = importlib.import_module("fleetent.knowledge_base.create_cli")
+    monkeypatch.setattr(create_module, "main", fake_main)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "fleetent",
+            "kb",
+            "create",
+            "--config",
+            "/tmp/kb-service.yaml",
+            "--kb",
+            "kb-a",
+            "--description",
+            "Standalone KB",
+        ],
+    )
+
+    cli.main()
+
+    assert calls == [
+        ["--config", "/tmp/kb-service.yaml", "--kb", "kb-a", "--description", "Standalone KB"]
+    ]
+
+
+def test_kb_reindex_subcommand_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
+    sys.modules.pop("fleetent.knowledge_base.reindex_cli", None)
+
+    def fake_main(argv: list[str] | None = None) -> None:
+        calls.append(argv or [])
+
+    reindex_module = importlib.import_module("fleetent.knowledge_base.reindex_cli")
+    monkeypatch.setattr(reindex_module, "main", fake_main)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["fleetent", "kb", "reindex", "--config", "/tmp/kb-service.yaml", "--kb", "kb-a"],
+    )
+
+    cli.main()
+
+    assert calls == [["--config", "/tmp/kb-service.yaml", "--kb", "kb-a"]]
+
+
 def test_kb_extract_subcommand_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[list[str]] = []
     sys.modules.pop("fleetent.knowledge_base.extract_cli", None)
@@ -182,6 +232,8 @@ def test_kb_extract_subcommand_dispatches(monkeypatch: pytest.MonkeyPatch) -> No
         (["fleetent", "kb-worker"], "Usage: fleetent"),
         (["fleetent", "kb-serve"], "Usage: fleetent"),
         (["fleetent", "kb-ingest"], "Usage: fleetent"),
+        (["fleetent", "kb-create"], "Usage: fleetent"),
+        (["fleetent", "kb-reindex"], "Usage: fleetent"),
         (["fleetent", "kb-extract"], "Usage: fleetent"),
         (["fleetent", "kb-service", "init-config"], "Usage: fleetent"),
     ],
