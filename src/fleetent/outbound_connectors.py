@@ -77,13 +77,16 @@ class ManagedOutboundConnector:
 
 
 def is_node_managed_runtime() -> bool:
-    """Whether this agent process is running under node-managed placement."""
-    required = (
-        os.environ.get("FLEETENT_NODE_ID", "").strip(),
-        os.environ.get("FLEETENT_NODE_PLATFORM_URL", "").strip(),
-        os.environ.get("FLEETENT_NODE_SERVICE_KEY", "").strip(),
-    )
-    return all(required)
+    """Whether this agent process is running under node-managed placement.
+
+    Converged onto the single delivered signal (agent-hosted-im): see
+    :func:`fleetent.runtime_placement.is_managed`. The old NODE_ID/PLATFORM_URL/
+    SERVICE_KEY trio is no longer consulted (it was never delivered to container
+    agent .env — the AAA-8208 root cause).
+    """
+    from fleetent import runtime_placement
+
+    return runtime_placement.is_managed()
 
 
 def notify_user(

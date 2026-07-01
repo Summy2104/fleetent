@@ -1,7 +1,7 @@
 ## 1. 硬化：单一 managed 信号 + fail-fast
 
-- [ ] 1.1 写测试：`runtime_placement.is_managed()` 仅依据 `FLEETENT_NODE_LOOPBACK_URL` 是否存在判定；三件套（NODE_ID/PLATFORM_URL/SERVICE_KEY）存在但无 loopback → 非 managed
-- [ ] 1.2 实现：新增 `runtime_placement.is_managed()`；`outbound_connectors.is_node_managed_runtime()` 收敛到它、废弃三件套判定
+- [x] 1.1 写测试：`runtime_placement.is_managed()` 仅依据 `FLEETENT_NODE_LOOPBACK_URL` 是否存在判定；三件套（NODE_ID/PLATFORM_URL/SERVICE_KEY）存在但无 loopback → 非 managed
+- [x] 1.2 实现：新增 `runtime_placement.is_managed()`；`outbound_connectors.is_node_managed_runtime()` 收敛到它、废弃三件套判定
 - [ ] 1.3 写测试：`resolve_for_runtime` 在"is_managed 为真但拿不到目标平台连接器"时不返回静默 `{}`，而是记 error 并使调用方得到明确失败信号
 - [ ] 1.4 实现：`resolve_for_runtime` fail-fast（error 日志含 platform/agent/信号）；`send_file` 无连接器分支文案带诊断（platform、是否 managed）
 

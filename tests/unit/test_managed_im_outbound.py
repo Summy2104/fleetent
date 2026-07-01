@@ -8,9 +8,8 @@ import fleetent.runtime.loop as loop_mod
 
 
 def _enable_node_managed_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FLEETENT_NODE_ID", "node-a")
-    monkeypatch.setenv("FLEETENT_NODE_PLATFORM_URL", "https://platform.internal")
-    monkeypatch.setenv("FLEETENT_NODE_SERVICE_KEY", "ma-" + "1" * 64)
+    # agent-hosted-im: managed is signalled by the single delivered loopback URL.
+    monkeypatch.setenv("FLEETENT_NODE_LOOPBACK_URL", "http://127.0.0.1:8790")
 
 
 def _agent(enabled: bool = True, name: str = "support") -> MagicMock:
