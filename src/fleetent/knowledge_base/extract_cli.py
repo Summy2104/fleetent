@@ -15,6 +15,7 @@ _WAIT_TIMEOUT_SECONDS = 30.0
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
+    """Parse the standalone extraction CLI arguments."""
     parser = argparse.ArgumentParser(prog="fleetent kb-extract")
     parser.add_argument("--config", required=True, help="standalone kb-service.yaml path")
     parser.add_argument("--kb", required=True, help="target knowledge base id")
@@ -23,6 +24,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def _require_known_kb(tenant_id: str, kb_id: str, *, data_dir: Path) -> None:
+    """Fail fast when the requested KB has not been provisioned."""
     try:
         _require_active_kb(tenant_id, kb_id, data_dir=data_dir)
     except ValueError as exc:
@@ -33,6 +35,7 @@ def _require_known_kb(tenant_id: str, kb_id: str, *, data_dir: Path) -> None:
 
 
 def _print_summary(*, documents: int, entities: int, relations: int) -> None:
+    """Emit the extraction totals in a stable operator-facing format."""
     print(f"documents={documents} entities={entities} relations={relations}")
 
 
@@ -42,6 +45,7 @@ def _wait_for_jobs(
     database_url: str,
     timeout_seconds: float = _WAIT_TIMEOUT_SECONDS,
 ) -> None:
+    """Wait for queued extraction jobs so operators can use `--wait` deterministically."""
     started_at = time.monotonic()
     pending_job_ids = set(job_ids)
     documents = 0

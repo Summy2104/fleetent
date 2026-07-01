@@ -182,9 +182,8 @@ provider 的增删改查、连通性测试、定价配置。`api_key` 始终掩�
 | `useIngestDocumentMutation` | `POST /admin/kb/{kbId}/documents` | `{source, content, document_format(默认 text), tenant_id?}` | 走异步 job,响应含 `job_id/status/...result`;格式非 text/markdown/html 返回 422;KB 须 active |
 | `useDeleteDocumentMutation` | `DELETE /admin/kb/{kbId}/documents/{documentId}` | `?tenant_id=` + `X-Confirm: true` | `{deleted, document_id, kb_id}`;级联删 chunks/vectors |
 | `useSyncDocumentsMutation` | `POST /admin/kb/{kbId}/sync` | `{path, tenant_id?}` + `X-Confirm: true` | 走 job,响应 `{job_id, scanned, ingested, skipped, failed, ...}`;全量 resync 高危 |
-| `useKbAgentsQuery` | `GET /admin/kb/{kbId}/agents` | — | `{kb_id, agents:number[]}` |
 
-> 后端未封装:`POST /admin/kb/search`(检索 playground)、`POST /admin/kb/evaluations`、`GET /admin/kb/by-agent/{agent_id}`、`GET .../documents/{id}/chunks`、`POST/DELETE .../agents`(绑定)、`GET .../observation`、`POST .../extract-entities`。
+> 后端未封装:`POST /admin/kb/search`(检索 playground)、`POST /admin/kb/evaluations`、`GET /admin/kb/by-agent/{agent_id}`、`GET .../documents/{id}/chunks`、`POST/DELETE .../agents`(绑定)、`GET .../observation`。
 
 ### 6b. KB Connectors
 | Hook | 方法 路径 | 参数/请求体 | 响应/备注 |

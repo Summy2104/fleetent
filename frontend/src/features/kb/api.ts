@@ -41,11 +41,6 @@ export type DeleteDocumentInput = {
   tenant_id?: string;
 };
 
-export type KbAgentsResult = {
-  agents: number[];
-  kb_id: string;
-};
-
 const kbListKey = ['kb'] as const;
 
 function kbDocumentsKey(kbId: string) {
@@ -153,15 +148,5 @@ export function useDeleteDocumentMutation(kbId: string, defaultDocumentId?: stri
     onSuccess: async () => {
       await invalidateKbDetailQueries(queryClient, kbId);
     },
-  });
-}
-
-export function useKbAgentsQuery(kbId: string | null) {
-  const api = useAdminApi();
-
-  return useQuery({
-    enabled: Boolean(kbId),
-    queryKey: kbId ? kbAgentsKey(kbId) : ['kb', 'agents', 'idle'],
-    queryFn: () => api.get<KbAgentsResult>(`/admin/kb/${kbId}/agents`),
   });
 }

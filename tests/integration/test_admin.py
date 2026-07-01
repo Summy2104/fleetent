@@ -53,7 +53,7 @@ def test_seed_builtin_admin():
         (("update-agent", "--agent-name", "ops"), "update-agent"),
         (("assign-user", "--user-id", "u1", "--agent-name", "ops"), "assign-user"),
         (("set-default-agent", "--agent-name", "ops"), "set-default-agent"),
-        (("kb", "connectors", "list"), "connectors"),
+        (("kb", "connectors", "list"), "kb"),
         (("observability", "traces"), "observability"),
     ],
 )
