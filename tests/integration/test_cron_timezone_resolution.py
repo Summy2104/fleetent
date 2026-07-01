@@ -30,7 +30,9 @@ async def test_tool_create_without_timezone_uses_deployment_default(isolated_sch
         )
         job = scheduler.get_job(_only_task_id())
         assert job is not None
-        assert str(job.trigger.timezone) == "Asia/Shanghai"
+        # Next fire computed in the deployment-default timezone: local wall-clock 18:00.
+        assert str(job.next_run_time.tzinfo) == "Asia/Shanghai"
+        assert job.next_run_time.hour == 18
     finally:
         await scheduler.shutdown()
 
@@ -50,7 +52,7 @@ async def test_tool_create_cron_is_local_wall_clock(isolated_schedule_db):
         )
         job = scheduler.get_job(_only_task_id())
         assert job is not None
-        assert str(job.trigger.timezone) == "Asia/Shanghai"
+        assert str(job.next_run_time.tzinfo) == "Asia/Shanghai"
         assert job.next_run_time.hour == 18  # local wall-clock, not pre-converted to UTC
     finally:
         await scheduler.shutdown()
@@ -71,6 +73,7 @@ async def test_tool_create_explicit_timezone_overrides_default(isolated_schedule
         )
         job = scheduler.get_job(_only_task_id())
         assert job is not None
-        assert str(job.trigger.timezone) == "America/New_York"
+        assert str(job.next_run_time.tzinfo) == "America/New_York"
+        assert job.next_run_time.hour == 9
     finally:
         await scheduler.shutdown()

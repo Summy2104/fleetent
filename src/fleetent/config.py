@@ -373,6 +373,11 @@ class McpSettings(BaseModel):
 class SchedulingSettings(BaseModel):
     enabled: bool = True
     default_timezone: str = "UTC"
+    # Durable poll engine (cron-durable-poll-engine): the tick cadence, the bounded
+    # concurrency for firing due tasks, and how many run-history rows to keep per task.
+    tick_interval_seconds: float = 10.0
+    max_parallel: int = 4
+    history_retention: int = 50
 
 
 class WebhookSourceSettings(BaseModel):

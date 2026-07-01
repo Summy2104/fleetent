@@ -20,6 +20,7 @@ from fleetent.memory.facts_models import (
     RENAME_RELATION,
     ClassifiedFact,
     Fact,
+    fact_index_text,
 )
 from fleetent.memory.facts_temporal import temporal_boundary
 from fleetent.memory._datetime_utils import format_datetime
@@ -276,8 +277,8 @@ async def sync_vectors(
 
 
 def _fact_text(fact: Fact) -> str:
-    """Render a fact triple as the text indexed for semantic retrieval."""
-    return f"{fact.subject} {fact.relation} {fact.object}"
+    """Text indexed for semantic retrieval — statement-preferring (see fact_index_text)."""
+    return fact_index_text(fact)
 
 
 # ── in-transaction SQL (operate on the transaction's connection) ──────────────

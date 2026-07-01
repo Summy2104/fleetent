@@ -608,3 +608,33 @@ MIGRATIONS.append(
         "ALTER TABLE mcp_user_tokens ADD COLUMN credential_kind TEXT NOT NULL DEFAULT 'oauth'",
     )
 )
+
+# ── scheduled_task_runs: per-fire run history (cron-durable-poll-engine, #3) ───
+# One row per fire occurrence so the recurring behavior of a task is auditable
+# (which the single-row last_* columns cannot express). agent_error and
+# delivery_error are separate: a run can produce output yet fail delivery.
+MIGRATIONS.append(
+    (
+        MIGRATIONS[-1][0] + 1,
+        """
+        CREATE TABLE IF NOT EXISTS scheduled_task_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT NOT NULL,
+            fired_at TEXT NOT NULL,
+            status TEXT NOT NULL,
+            agent_error TEXT,
+            delivery_error TEXT,
+            duration_ms INTEGER,
+            kind TEXT,
+            created_at TEXT NOT NULL
+        )
+        """,
+    )
+)
+MIGRATIONS.append(
+    (
+        MIGRATIONS[-1][0] + 1,
+        "CREATE INDEX IF NOT EXISTS idx_scheduled_task_runs_task "
+        "ON scheduled_task_runs (task_id, id)",
+    )
+)
