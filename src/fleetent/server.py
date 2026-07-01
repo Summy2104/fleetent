@@ -143,6 +143,31 @@ def _cron_principal_recheck(task: dict[str, Any]) -> Principal | None:
     return None
 
 
+def _resolve_agent_client_secret(agent_ref: str | None, env_name: str) -> str | None:
+    """Resolve a managed OAuth client_secret env ref from `agent_secrets`, by agent scope.
+
+    Injected into `mcp_oauth_service` at startup (managed-oauth-agent-identity). The runtime
+    triple carries the agent identity as a *name* (e.g. `"bi-intern"`) — or a numeric
+    registry id, or None. A name is mapped to its numeric registry id via `agent_store`
+    before looking up the per-agent secret; a per-agent miss falls back to the global
+    (`agent_id IS NULL`) scope. Keeping this mapping here (composition root) lets
+    `connector_management` stay off `agent_store`/`agent_lifecycle`.
+    """
+    from fleetent.platform.agent_lifecycle import secret_store
+
+    agent_id: int | None = None
+    if agent_ref:
+        if agent_ref.isdigit():
+            agent_id = int(agent_ref)
+        else:
+            agent = agent_store.get_by_name(agent_ref)
+            agent_id = agent.id if agent is not None else None
+    value = secret_store.get_decrypted(agent_id, env_name)
+    if value is None and agent_id is not None:
+        value = secret_store.get_decrypted(None, env_name)
+    return value
+
+
 def _build_platform_maintenance_scheduler(
     scheduling: Any = None,
     _scheduler: Any = None,
@@ -185,10 +210,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     cron_scheduler.set_principal_resolver(_cron_principal_recheck)
     # Managed per-user MCP OAuth: resolve a client_secret env ref from agent_secrets at
     # exchange/refresh time, injected here so connector_management stays off agent_lifecycle.
-    from fleetent.platform.agent_lifecycle import secret_store as _secret_store
     from fleetent.platform.connector_management import mcp_oauth_service as _mcp_oauth_service
 
-    _mcp_oauth_service.set_client_secret_resolver(_secret_store.get_decrypted)
+    _mcp_oauth_service.set_client_secret_resolver(_resolve_agent_client_secret)
 
     scan_skills()
     # backflow-pool-git: the shared skill pool must be a git repo before any write,
