@@ -75,7 +75,6 @@ def test_local_backend_spawn_uses_agent_run(monkeypatch, tmp_path) -> None:
         "agent",
         "run",
         "support",
-        "--no-im",
         "--port",
         str(assigned_port),
         "--home",
@@ -109,7 +108,9 @@ def test_local_backend_agent_endpoint_returns_loopback_and_gateway_port(tmp_path
     assert backend.agent_endpoint("support", "tenant-1") == ("127.0.0.1", 9011)
 
 
-def test_local_backend_spawn_disables_agent_local_im(monkeypatch, tmp_path) -> None:
+def test_local_backend_spawn_self_hosts_im(monkeypatch, tmp_path) -> None:
+    """agent-hosted-im: agents self-host their IM connection, so node no longer passes
+    --no-im."""
     from fleetent.node.backend import LocalProcessBackend
 
     calls: list[tuple[str, ...]] = []
@@ -123,7 +124,7 @@ def test_local_backend_spawn_disables_agent_local_im(monkeypatch, tmp_path) -> N
     backend = LocalProcessBackend(_config(tmp_path))
     backend.spawn("support")
 
-    assert "--no-im" in calls[0]
+    assert "--no-im" not in calls[0]
 
 
 def test_container_backend_spawn_runs_agent_container_with_labels_network_and_mounts(
@@ -170,7 +171,6 @@ def test_container_backend_spawn_runs_agent_container_with_labels_network_and_mo
             "agent",
             "run",
             "support",
-            "--no-im",
             "--port",
             "8766",
             "--home",

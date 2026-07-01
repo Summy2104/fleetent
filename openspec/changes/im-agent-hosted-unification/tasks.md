@@ -19,8 +19,8 @@
 
 ## 4. agent 自持 supervisor（managed）
 
-- [ ] 4.1 写测试：managed 启动路径不再强制 `--no-im`；agent boot 在有 IM token 时启动自己的 supervisor，并把活连接器注入 `NormalizedMessage.outbound_connectors`；无 token 则跳过不报错
-- [ ] 4.2 实现：`node/backend.py` spawn（LocalProcess + Container）去掉 `--no-im`；确认 boot `start_im` 在 managed 下生效、supervisor 从 agent `.env` 读 token
+- [x] 4.1 写测试：managed 启动路径不再强制 `--no-im`；agent boot 在有 IM token 时启动自己的 supervisor，并把活连接器注入 `NormalizedMessage.outbound_connectors`；无 token 则跳过不报错
+- [x] 4.2 实现：`node/backend.py` spawn（LocalProcess + Container）去掉 `--no-im`；确认 boot `start_im` 在 managed 下生效、supervisor 从 agent `.env` 读 token
 
 ## 5. node 退出 IM 数据面
 
