@@ -147,6 +147,25 @@ def test_kb_ingest_subcommand_dispatches(monkeypatch: pytest.MonkeyPatch) -> Non
     assert calls == [["--config", "/tmp/kb-service.yaml", "--kb", "kb-a", "/tmp/docs"]]
 
 
+def test_kb_extract_subcommand_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
+    sys.modules.pop("fleetent.knowledge_base.extract_cli", None)
+
+    def fake_main(argv: list[str] | None = None) -> None:
+        calls.append(argv or [])
+
+    extract_module = importlib.import_module("fleetent.knowledge_base.extract_cli")
+    monkeypatch.setattr(extract_module, "main", fake_main)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["fleetent", "kb-extract", "--config", "/tmp/kb-service.yaml", "--kb", "kb-a"],
+    )
+
+    cli.main()
+
+    assert calls == [["--config", "/tmp/kb-service.yaml", "--kb", "kb-a"]]
+
+
 def test_tui_no_longer_dispatches_client(monkeypatch: pytest.MonkeyPatch) -> None:
     prompts: list[str] = []
     sys.modules.pop("fleetent.tui.app", None)

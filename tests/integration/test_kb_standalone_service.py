@@ -493,6 +493,155 @@ def test_standalone_import_triggers_local_extraction_and_writes_graph(
     assert kb_db.execute("SELECT COUNT(*) AS count FROM kb_relations").fetchone()["count"] == 1
 
 
+def test_standalone_extract_cli_backfills_graph_and_planner_search_hits_chunk(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent import kb_ingest_jobs, vector_store
+    from fleetent.knowledge_base import extract_cli, extraction, serve, worker
+    from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
+    from fleetent.knowledge_base.management.runtime import create_knowledge_base
+    from fleetent.knowledge_base.service_config import load_kb_service_config
+
+    path = tmp_path / "kb-service.yaml"
+    doc = _service_doc()
+    doc["extraction"] = {"enabled": True, "endpoint": "inline://test", "model": "deterministic"}
+    _write_yaml(path, doc)
+    config = load_kb_service_config(path)
+    queue_url = config.queue_database_url()
+    data_dir = config.data_dir()
+
+    async def embed_text(text: str) -> list[float]:
+        return [float(len(text)), 0.0]
+
+    async def fake_run_entity_extraction(
+        tenant_id: str,
+        kb_id: str,
+        document_id: str | None = None,
+        extractor: str = "deterministic",
+    ):
+        assert extractor == "model_policy"
+        return await extraction.run_entity_extraction(
+            tenant_id,
+            kb_id,
+            document_id=document_id,
+            extractor="deterministic",
+        )
+
+    monkeypatch.setattr(vector_store, "embed_text", embed_text)
+    monkeypatch.setattr(worker.kb_runtime, "run_entity_extraction", fake_run_entity_extraction)
+    create_knowledge_base(
+        "tenant-a",
+        "kb-a",
+        "Standalone KB",
+        extraction_enabled=False,
+        database=worker._knowledge_database(
+            "tenant-a", data_dir=data_dir, migrations=KB_MIGRATIONS
+        ),
+    )
+
+    kb_db = worker._knowledge_database("tenant-a", data_dir=data_dir, migrations=KB_MIGRATIONS)
+    import_job = kb_ingest_jobs.enqueue_job(
+        job_type="import_document",
+        tenant_id="tenant-a",
+        kb_id="kb-a",
+        connector_ref={
+            "source": "graph.md",
+            "content": (
+                "Customer: Acme\nSystem: Billing API\nDepends on: Billing API -> Data Warehouse"
+            ),
+            "document_format": "markdown",
+        },
+        database_url=queue_url,
+    )
+
+    ingest_result = worker.run_once(queue_database_url=queue_url, data_dir=data_dir)
+
+    assert ingest_result == {"job_id": import_job["id"], "status": "done"}
+    assert kb_db.execute("SELECT COUNT(*) AS count FROM kb_entities").fetchone()["count"] == 0
+
+    extract_cli.main(["--config", str(path), "--kb", "kb-a"])
+
+    extraction_jobs = kb_ingest_jobs.list_jobs(
+        tenant_id="tenant-a",
+        kb_id="kb-a",
+        database_url=queue_url,
+    )
+    extraction_job = next(job for job in extraction_jobs if job["job_type"] == "extraction")
+    extraction_result = worker.run_once(queue_database_url=queue_url, data_dir=data_dir)
+    document_id = kb_db.execute(
+        """
+        SELECT id
+        FROM knowledge_documents
+        WHERE tenant_id = :tenant_id AND kb_id = :kb_id
+        """,
+        {"tenant_id": "tenant-a", "kb_id": "kb-a"},
+    ).fetchone()["id"]
+
+    assert extraction_result == {"job_id": extraction_job["id"], "status": "done"}
+    assert (
+        kb_db.execute(
+            """
+            SELECT extraction_enabled
+            FROM knowledge_bases
+            WHERE tenant_id = :tenant_id AND kb_id = :kb_id
+            """,
+            {"tenant_id": "tenant-a", "kb_id": "kb-a"},
+        ).fetchone()["extraction_enabled"]
+        == 1
+    )
+    assert kb_db.execute("SELECT COUNT(*) AS count FROM kb_entities").fetchone()["count"] >= 3
+    assert kb_db.execute("SELECT COUNT(*) AS count FROM kb_relations").fetchone()["count"] == 1
+
+    monkeypatch.setenv("FLEETENT_KB_SERVICE_KEY", "svc-test")
+    app = serve.create_app(
+        serve.KBServeConfig(
+            tenant_id="tenant-a",
+            service_key_ref="env:FLEETENT_KB_SERVICE_KEY",
+            data_dir=data_dir,
+            queue_database_url=queue_url,
+        )
+    )
+    with TestClient(app, raise_server_exceptions=True) as client:
+        response = client.post(
+            "/search",
+            json={
+                "principal": {"user_id": "user-1", "tenant_id": "tenant-a"},
+                "query": "Billing API dependency",
+                "kb_ids": ["kb-a"],
+                "limit": 1,
+                "use_planner": True,
+            },
+            headers={
+                "Authorization": "Bearer svc-test",
+                "X-Fleetent-Principal": '{"user_id":"user-1","tenant_id":"tenant-a"}',
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["chunks"] == [
+            {
+                "id": f"{document_id}:chunk:0",
+                "document_id": document_id,
+                "tenant_id": "tenant-a",
+                "kb_id": "kb-a",
+                "filename": "graph.md",
+                "content": (
+                    "Customer: Acme\nSystem: Billing API\nDepends on: Billing API -> Data Warehouse"
+                ),
+                "position": 0,
+                "score": 0.0,
+                "source": "graph.md",
+                "source_url": None,
+                "metadata": {
+                    "document_format": "markdown",
+                    "section_level": "0",
+                    "section_path": "body",
+                    "section_title": "body",
+                },
+            }
+        ]
+
+
 def test_standalone_sweep_enqueues_due_connectors_without_platform_cron(tmp_path) -> None:
     from fleetent import kb_ingest_jobs
     from fleetent.knowledge_base.service_config import load_kb_service_config

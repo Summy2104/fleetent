@@ -147,6 +147,23 @@ class KnowledgeStore:
             return False
         return bool(int(row["extraction_enabled"]))
 
+    def set_extraction_enabled(self, tenant_id: str, kb_id: str, enabled: bool) -> bool:
+        result = self._database.execute(
+            """
+            UPDATE knowledge_bases
+            SET extraction_enabled = :extraction_enabled
+            WHERE tenant_id = :tenant_id
+              AND kb_id = :kb_id
+              AND archived_at IS NULL
+            """,
+            {
+                "tenant_id": tenant_id,
+                "kb_id": kb_id,
+                "extraction_enabled": int(enabled),
+            },
+        )
+        return result.rowcount > 0
+
     def list_knowledge_bases(self, tenant_id: str) -> list[Row]:
         return self._database.execute(
             """

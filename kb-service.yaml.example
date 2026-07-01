@@ -19,8 +19,8 @@ embedding:
 
 extraction:
   enabled: false
-  endpoint: ""
-  model: ""
+  endpoint: http://127.0.0.1:11434/v1/
+  model: qwen3:8b
   api_key_env: FLEETENT_KB_EXTRACTION_API_KEY
 
 rerank:

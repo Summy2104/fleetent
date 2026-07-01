@@ -145,6 +145,19 @@ def test_knowledge_store_reads_and_writes_embedding_identity(monkeypatch, tmp_pa
     assert store.get_embedding_identity("tenant-a", "handbook") == ("bge-small", 384)
 
 
+def test_knowledge_store_sets_extraction_enabled_for_existing_kb(monkeypatch, tmp_path) -> None:
+    database = _patch_runtime_database(monkeypatch, tmp_path)
+
+    from fleetent.knowledge_base.core import KnowledgeStore
+
+    store = KnowledgeStore(database)
+    store.ensure_knowledge_base("tenant-a", "handbook", extraction_enabled=False)
+
+    assert store.is_extraction_enabled("tenant-a", "handbook") is False
+    assert store.set_extraction_enabled("tenant-a", "handbook", True) is True
+    assert store.is_extraction_enabled("tenant-a", "handbook") is True
+
+
 @pytest.mark.parametrize("content", ["", "   \n\t  "])
 async def test_ingest_text_rejects_empty_content(monkeypatch, tmp_path, content):
     _patch_runtime_database(monkeypatch, tmp_path)

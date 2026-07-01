@@ -127,6 +127,18 @@ def test_kb_service_example_includes_disabled_rerank_section() -> None:
     }
 
 
+def test_kb_service_example_includes_disabled_local_extraction_section() -> None:
+    example_path = Path(__file__).resolve().parents[2] / "kb-service.yaml.example"
+    example = yaml.safe_load(example_path.read_text(encoding="utf-8"))
+
+    assert example["extraction"] == {
+        "enabled": False,
+        "endpoint": "http://127.0.0.1:11434/v1/",
+        "model": "qwen3:8b",
+        "api_key_env": "FLEETENT_KB_EXTRACTION_API_KEY",
+    }
+
+
 # --- sandbox-workspace-scope-split: per-agent image persistence schema ------
 
 

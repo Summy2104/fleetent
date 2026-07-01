@@ -166,6 +166,12 @@ def main(argv: list[str] | None = None) -> None:
         ingest_cli.main(argv[1:])
         return
 
+    if argv and argv[0] == "kb-extract":
+        from fleetent.knowledge_base import extract_cli
+
+        extract_cli.main(argv[1:])
+        return
+
     user_input = " ".join(argv) if argv else sys.stdin.read().strip()
     if not user_input:
         print(
