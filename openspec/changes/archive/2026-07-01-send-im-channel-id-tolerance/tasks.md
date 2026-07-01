@@ -10,4 +10,4 @@
 
 ## 收尾
 - [x] [本地] `make test-pr` + `make test-integration-ci` 全绿。
-- [ ] [服务器] 真机验收:批准后程鑫**真的收到**,无 `user_not_found` 重试。
+- [x] [服务器] 真机验收:批准后程鑫**真的收到**,无 `user_not_found` 重试。
