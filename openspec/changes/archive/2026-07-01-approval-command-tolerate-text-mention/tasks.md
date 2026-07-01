@@ -13,4 +13,4 @@
 
 ## 收尾
 - [x] [本地] `make test-pr` 全绿(并跑 `make test-integration-ci` 全绿)。
-- [ ] [服务器] 部署 + 真实 Slack 验收(三种写法 + 带反引号的 `approve `<id>`` 都 resolve 并送达,不再刷新 ID)。
+- [x] [服务器] 部署 + 真实 Slack 验收(三种写法 + 带反引号的 `approve `<id>`` 都 resolve 并送达,不再刷新 ID)。
