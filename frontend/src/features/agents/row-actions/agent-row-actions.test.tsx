@@ -96,7 +96,12 @@ describe('AgentRowActions', () => {
   it('confirms before setting an agent as default', async () => {
     const user = userEvent.setup()
     let hits = 0
-    server.use(http.put(`${API_BASE_URL}/admin/agents/alpha/default`, () => ((hits += 1), HttpResponse.json({}))))
+    server.use(
+      http.put(`${API_BASE_URL}/admin/agents/alpha/default`, () => {
+        hits += 1
+        return HttpResponse.json({})
+      })
+    )
     renderAgents(<AgentRowActions agent={AGENT} canWrite onConfigure={() => {}} />)
 
     await user.click(screen.getByRole('button', { name: 'Actions for alpha' }))

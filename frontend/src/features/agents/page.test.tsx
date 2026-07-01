@@ -65,6 +65,19 @@ async function openActions(user: ReturnType<typeof userEvent.setup>, name: strin
   await user.click(await screen.findByRole('button', { name: `Actions for ${name}` }))
 }
 
+// Pick a state-changing row action: open the menu, click the item, then confirm in
+// the AlertDialog. The confirm button carries the same label as the menu item.
+async function runConfirmedAction(
+  user: ReturnType<typeof userEvent.setup>,
+  name: string,
+  label: string
+): Promise<void> {
+  await openActions(user, name)
+  await user.click(await screen.findByRole('menuitem', { name: label }))
+  const confirm = await screen.findByRole('alertdialog')
+  await user.click(within(confirm).getByRole('button', { name: label }))
+}
+
 // Drive a Radix <Select>: open the trigger (a combobox) and click the option text.
 async function selectOption(
   user: ReturnType<typeof userEvent.setup>,
@@ -406,26 +419,22 @@ describe('agents list page lifecycle', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Create agent' }))
     expect(await screen.findByText('beta')).toBeInTheDocument()
 
-    // Disable alpha via its row action menu.
-    await openActions(user, 'alpha')
-    await user.click(await screen.findByRole('menuitem', { name: 'Disable' }))
+    // Disable alpha via its row action menu (confirmed).
+    await runConfirmedAction(user, 'alpha', 'Disable')
     expect(await screen.findByText('disabled')).toBeInTheDocument()
 
-    // Enable alpha again.
-    await openActions(user, 'alpha')
-    await user.click(await screen.findByRole('menuitem', { name: 'Enable' }))
+    // Enable alpha again (confirmed).
+    await runConfirmedAction(user, 'alpha', 'Enable')
     await waitFor(() => {
       expect(screen.getAllByText('enabled').length).toBeGreaterThan(0)
     })
 
-    // Archive alpha (sends X-Confirm header).
-    await openActions(user, 'alpha')
-    await user.click(await screen.findByRole('menuitem', { name: 'Archive' }))
+    // Archive alpha (confirmed; sends X-Confirm header).
+    await runConfirmedAction(user, 'alpha', 'Archive')
     expect(await screen.findByText('archived')).toBeInTheDocument()
 
-    // Restore alpha.
-    await openActions(user, 'alpha')
-    await user.click(await screen.findByRole('menuitem', { name: 'Restore' }))
+    // Restore alpha (confirmed).
+    await runConfirmedAction(user, 'alpha', 'Restore')
     await waitFor(() => {
       expect(screen.getAllByText('enabled').length).toBeGreaterThan(0)
     })
@@ -479,12 +488,10 @@ describe('agents list page lifecycle', () => {
     expect(await screen.findByText('alpha')).toBeInTheDocument()
     expect(screen.queryByText('adhoc')).not.toBeInTheDocument()
 
-    await openActions(user, 'alpha')
-    await user.click(await screen.findByRole('menuitem', { name: 'Set as default' }))
+    await runConfirmedAction(user, 'alpha', 'Set as default')
     expect(await screen.findByText('default')).toBeInTheDocument()
 
-    await openActions(user, 'alpha')
-    await user.click(await screen.findByRole('menuitem', { name: 'Clear default' }))
+    await runConfirmedAction(user, 'alpha', 'Clear default')
     await waitFor(() => {
       expect(screen.queryByText('default')).not.toBeInTheDocument()
     })

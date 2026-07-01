@@ -156,7 +156,14 @@ export function AgentRowActions({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction onClick={() => pending?.run()}>{pending?.confirmLabel}</AlertDialogAction>
+            <AlertDialogAction
+              onClick={() => {
+                pending?.run()
+                setPending(null)
+              }}
+            >
+              {pending?.confirmLabel}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
