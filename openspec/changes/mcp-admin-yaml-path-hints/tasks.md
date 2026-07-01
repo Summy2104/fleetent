@@ -7,8 +7,8 @@
 
 ## 2. 后端:只读端点(integration,TDD)
 
-- [ ] 2.1 在 `tests/integration/test_connector_admin_api.py` 里写测试(复用该文件现有 `/admin/mcp/servers` 测试的 fixture 风格):已登录任意角色请求 `GET /admin/mcp/field-schema` 返回 200 且内容等于 `mcp_yaml_field_paths()`;未带登录会话返回 401。先见红。
-- [ ] 2.2 在 `connector_admin_api.py` 新增该端点(鉴权用 `_current_user`,不要求 admin 角色,对齐 `list_mcp_servers`)。跑 2.1 见绿。
+- [x] 2.1 在 `tests/integration/test_connector_admin_api.py` 里写测试(复用该文件现有 `/admin/mcp/servers` 测试的 fixture 风格):已登录任意角色请求 `GET /admin/mcp/field-schema` 返回 200 且内容等于 `mcp_yaml_field_paths()`;未带登录会话返回 401。先见红。
+- [x] 2.2 在 `connector_admin_api.py` 新增该端点(鉴权用 `_current_user`,不要求 admin 角色,对齐 `list_mcp_servers`)。跑 2.1 见绿。
 
 ## 3. 前端数据层(api.ts,TDD)
 
