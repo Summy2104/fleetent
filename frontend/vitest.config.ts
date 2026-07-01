@@ -41,11 +41,14 @@ export default defineConfig({
       // shadcn-generated primitives are vendored, not hand-authored; exclude them
       // from coverage so the threshold reflects our own code, not the UI kit.
       exclude: ['src/main.tsx', 'src/components/ui/**'],
+      // Ratchet: floors sit ~1pt below actual coverage to lock in gains without
+      // nagging on ordinary refactors. Raise them as coverage climbs; never lower
+      // to make a red build pass — add tests instead.
       thresholds: {
-        lines: 76,
-        functions: 76,
-        branches: 70,
-        statements: 76,
+        lines: 85,
+        functions: 80,
+        branches: 71,
+        statements: 83,
       },
     },
   },
