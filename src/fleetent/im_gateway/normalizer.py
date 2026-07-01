@@ -358,6 +358,7 @@ async def _resume_pending_in_session(
     from fleetent import outbound
     from fleetent.integrations.sandbox import enablement as sandbox_enablement
     from fleetent.model import ModelPolicySnapshot
+    from fleetent.outbound_connectors import resolve_for_runtime
     from fleetent.runtime import loop as agent_loop
     from fleetent.runtime.snapshot import _governance_from_file
     from fleetent.session import manager as session_mgr
@@ -367,6 +368,15 @@ async def _resume_pending_in_session(
         agent = agent_config.current().get(msg.agent_name)
     else:
         agent = get_agent_for_context()
+
+    # approval-resume-resolve-outbound-connectors (⑥): the approve command arrives via
+    # /im/route with msg.outbound_connectors empty; resolve them exactly like a normal turn
+    # (loop.py:1986) so a node-managed runtime injects ManagedOutboundConnector and the
+    # approved send/file actually delivers (enqueue → node drain) instead of failing with
+    # "no connector". Standalone (live connectors present) is returned unchanged.
+    resolved_connectors = resolve_for_runtime(
+        agent.name if agent else None, msg.outbound_connectors
+    )
 
     governance = _governance_from_file(agent) if agent else None
     allowed_tools = agent.allowed_tools if agent is not None and agent.allowed_tools else None
@@ -382,8 +392,8 @@ async def _resume_pending_in_session(
     address_dict = pending.get("address") if isinstance(pending, dict) else None
     if isinstance(address_dict, dict):
         addr = outbound.ConversationAddress.from_dict(address_dict)
-        reply_func = outbound.make_replier(msg.outbound_connectors, addr)
-        upload_func = outbound.make_uploader(msg.outbound_connectors, addr)
+        reply_func = outbound.make_replier(resolved_connectors, addr)
+        upload_func = outbound.make_uploader(resolved_connectors, addr)
         session_context: SessionContext | None = SessionContext(
             platform=addr.platform,
             sender_id=addr.user_id,
@@ -415,7 +425,7 @@ async def _resume_pending_in_session(
         # /exchange attribution apply to the resumed (approved) tool, not just live turns.
         scope_key=agent_loop.resolve_scope_key(session_id, agent.name if agent else None),
         session_context=session_context,
-        outbound_connectors=msg.outbound_connectors,
+        outbound_connectors=resolved_connectors,
         run_id=str(uuid.uuid4()),
         delivery_ledger=shared_ledger,
     )
@@ -440,7 +450,7 @@ async def _resume_pending_in_session(
                 agent.permission_gate_high_timeout_seconds if agent else None
             ),
             approval_routing=agent.approval if agent else None,
-            outbound_connectors=msg.outbound_connectors,
+            outbound_connectors=resolved_connectors,
             progress_func=progress_func,
             session_context=session_context,
             conversation_address=conversation_address,
