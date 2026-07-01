@@ -286,7 +286,9 @@ async def test_build_app_im_route_carries_principal_and_returns_sync_replies(
         Principal(user_id="u-real", tenant_id="tenant-1"),
     )
 
-    assert response.model_dump() == {"replies": [{"text": "node-managed reply", "blocks": None}]}
+    assert response.model_dump() == {
+        "replies": [{"text": "node-managed reply", "blocks": None, "approval": None}]
+    }
     assert captured["principal"] == Principal(user_id="u-real", tenant_id="tenant-1")
     assert captured["msg"].user_id == "u-real"
     assert captured["msg"].agent_name == "ops"

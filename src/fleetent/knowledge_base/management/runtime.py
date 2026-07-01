@@ -38,6 +38,18 @@ def update_knowledge_base_description(
     )
 
 
+def set_extraction_enabled(
+    tenant_id: str, kb_id: str, enabled: bool, database: SQLiteDatabase | None = None
+) -> bool:
+    """Update extraction_enabled for an existing KB."""
+
+    return KnowledgeStore(_database_or_default(database)).set_extraction_enabled(
+        tenant_id,
+        kb_id,
+        enabled,
+    )
+
+
 def is_active_knowledge_base(
     tenant_id: str, kb_id: str, database: SQLiteDatabase | None = None
 ) -> bool:

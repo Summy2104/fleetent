@@ -104,7 +104,8 @@ function ColumnFilters<TData>({ table }: { table: Table<TData> }) {
               onValueChange={(value) => column.setFilterValue(value || undefined)}
               options={[{ label: `All ${title}`, value: '' }, ...config.options]}
               triggerAriaLabel={`Filter ${title}`}
-              triggerClassName="h-8 w-[160px]"
+              triggerClassName="w-[160px]"
+              triggerSize="sm"
               value={(column.getFilterValue() as string) ?? ''}
             />
           )

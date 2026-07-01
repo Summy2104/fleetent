@@ -5,12 +5,16 @@
 ## Requirements
 ### Requirement: KB read service implements the knowledge wire protocol
 
-系统 SHALL 提供一个 HTTP KB 读服务,实现 `kb-http-provider` 定义的中立 wire 协议:`POST /search` 接收 `{principal:{user_id, tenant_id}, query, kb_ids, limit}`,返回 `{chunks: [KnowledgeChunk JSON]}`。服务 SHALL 经 `knowledge_base` public API(`search` / `plan_knowledge_search`+`execute` / `graph_search`)产出结果,SHALL NOT 复制检索逻辑。
+系统 SHALL 提供一个 HTTP KB 读服务,实现 `kb-http-provider` 定义的中立 wire 协议:`POST /search` 接收 `{principal:{user_id, tenant_id}, query, kb_ids, limit}`,并 MAY 接收可选检索策略 `mode` / `rerank` / `use_planner`,返回 `{chunks: [KnowledgeChunk JSON]}`。服务 SHALL 经 `knowledge_base` public API(`search` / `plan_knowledge_search`+`execute` / `graph_search`)产出结果,SHALL NOT 复制检索逻辑。
 
 #### Scenario: Search request returns chunks
 - **WHEN** 收到合法 `POST /search` 请求
 - **THEN** 服务调用 `knowledge_base` 检索,返回 `{chunks: [...]}`,每个 chunk 含 KnowledgeChunk 字段(id/document_id/tenant_id/kb_id/filename/content/position/score/source/source_url/metadata)
 - **AND** 响应可被 `HttpKnowledgeProvider` 反序列化为 `list[KnowledgeChunk]`
+
+#### Scenario: 缺省策略向后兼容
+- **WHEN** 请求未带 `mode`/`rerank`/`use_planner`
+- **THEN** 服务以服务级默认 `mode`、`rerank=False`、`use_planner=False` 检索(与扩展前行为一致)
 
 ### Requirement: Per-tenant scoping bound at boot
 
@@ -26,12 +30,20 @@
 
 ### Requirement: Service-level retrieval policy
 
-服务 SHALL 以显式 `mode`(服务级默认 `hybrid`)调用 `knowledge_base.search`,`kb_ids` 与 `limit` 取自请求。服务 SHALL NOT 依赖某个 "active agent" 全局来决定核心检索 mode。
+服务 SHALL 按**请求携带的检索策略**执行,而非把质量钉在裸 hybrid:`mode` 取自请求(缺省为服务级默认 `hybrid`);`rerank` 取自请求(缺省 `False`),SHALL NOT 硬编码为 `False`;`use_planner` 取自请求(缺省 `False`),为真时 SHALL 经 `plan_knowledge_search` + `execute_knowledge_search_plan` 执行(与 Local provider 的 planner 路径一致),否则以 `mode` + `rerank` 调用 `knowledge_base.search`。`kb_ids` 与 `limit` 取自请求。服务 SHALL NOT 依赖某个 "active agent" 全局来决定核心检索策略。
 
-#### Scenario: Explicit mode drives retrieval
-- **WHEN** 服务处理检索请求
-- **THEN** 以显式 `mode`(默认 hybrid)、请求的 `kb_ids`/`limit` 调用 `knowledge_base.search`
-- **AND** 不依赖 `agent_config.active_agent_or_default()` 决定 mode
+#### Scenario: 请求的 mode/rerank 被执行
+- **WHEN** 请求带 `mode=hybrid` 且 `rerank=true`
+- **THEN** 服务以 hybrid + rerank 调用 `knowledge_base.search`(不再硬编码 `rerank=False`)
+
+#### Scenario: 请求开启 planner
+- **WHEN** 请求带 `use_planner=true`
+- **THEN** 服务经 `plan_knowledge_search` + `execute_knowledge_search_plan` 执行(可含 graph 升级),返回融合结果
+- **AND** 不依赖 `agent_config.active_agent_or_default()` 决定策略
+
+#### Scenario: rerank 仅 hybrid
+- **WHEN** 请求 `rerank=true` 但 `mode` 非 hybrid
+- **THEN** 沿用 `knowledge_base.search` 既有约束(rerank 仅支持 hybrid),以一致方式报错或忽略,不静默产出错误结果
 
 ### Requirement: Service authentication
 
@@ -53,4 +65,17 @@
 - **WHEN** 检视服务实现
 - **THEN** 服务只读 `tenants/<tenant>/kb/data/` 下的库,不写入,也不改 ingest 队列/worker/connector secret
 - **AND** 服务进程不 `import fleetent.platform.*`
+
+### Requirement: KB 服务状态只读端点
+
+kb-serve SHALL 提供只读 `GET /status`,暴露本租户的 connector 同步状态与近期 ingest job 状态(含 status / 结果摘要),供运维观测 ingest 进度与失败原因。鉴权 SHALL 与 `/search` 一致(Bearer service key + ingress principal,principal.tenant_id 须与服务绑定租户一致)。kb-serve SHALL 为纯读服务,SHALL NOT 承载 connector sweep 调度(调度归 kb-worker,见 `kb-standalone-ingest`)。
+
+#### Scenario: 查询连接器与 job 状态
+- **WHEN** 运维以合法 Bearer + principal 请求 `GET /status`
+- **THEN** 返回本租户 connector 状态(来自 `knowledge_connector_status`)与近期 ingest job(来自 `kb_ingest_jobs`,含 status 与结果摘要)
+- **AND** 跨租户(principal.tenant_id ≠ 绑定租户)被拒绝
+
+#### Scenario: kb-serve 不承载 sweep
+- **WHEN** 只启动 kb-serve(未启动 kb-worker)
+- **THEN** kb-serve 提供检索与状态读取,但不运行 connector sweep 调度
 

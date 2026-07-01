@@ -103,7 +103,6 @@ def test_head_schema_sets_expected_fk_delete_actions_and_preserves_agent_shape(
             "agent_secrets",
             "agent_skills",
             "mcp_servers",
-            "session_meta",
             "user_agents",
         ]
         child_delete_actions = {

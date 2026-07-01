@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import os
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import Body, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from fleetent import kb_ingest_jobs
 from fleetent import knowledge_base as kb_runtime
 from fleetent.db import SQLiteDatabase, create_database
 from fleetent.identity import INGRESS_PRINCIPAL_HEADER, Principal, decode_ingress_principal
@@ -42,6 +43,9 @@ class SearchRequest(BaseModel):
     query: str
     kb_ids: list[str] = Field(default_factory=list)
     limit: int = 10
+    mode: str | None = None
+    rerank: bool = False
+    use_planner: bool = False
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -109,6 +113,42 @@ def _knowledge_chunk_to_wire_dict(chunk: KnowledgeChunk) -> dict[str, object]:
     }
 
 
+def _datetime_to_wire(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _connector_status_to_wire(status: kb_runtime.ConnectorStatus) -> dict[str, object]:
+    return {
+        "connector_id": status.connector_id,
+        "connector_type": status.connector_type,
+        "tenant_id": status.tenant_id,
+        "kb_id": status.kb_id,
+        "last_status": status.last_status,
+        "last_started_at": _datetime_to_wire(status.last_started_at),
+        "last_finished_at": _datetime_to_wire(status.last_finished_at),
+        "last_summary": status.last_summary,
+        "last_error": status.last_error,
+    }
+
+
+def _job_status_to_wire(job: dict[str, object]) -> dict[str, object]:
+    return {
+        "id": job["id"],
+        "job_type": job["job_type"],
+        "tenant_id": job["tenant_id"],
+        "kb_id": job["kb_id"],
+        "status": job["status"],
+        "attempts": job["attempts"],
+        "max_attempts": job["max_attempts"],
+        "last_error": job["last_error"],
+        "created_at": job["created_at"],
+        "updated_at": job["updated_at"],
+        "claimed_at": job["claimed_at"],
+        "finished_at": job["finished_at"],
+        "result": job.get("result"),
+    }
+
+
 def create_app(config: KBServeConfig):  # type: ignore[no-untyped-def]
     previous_db = kb_runtime.runtime._kb_db
     previous_backend = kb_runtime.runtime._kb_vector_backend
@@ -119,31 +159,10 @@ def create_app(config: KBServeConfig):  # type: ignore[no-untyped-def]
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         _bootstrap_runtime(config.tenant_id, data_dir=config.data_dir)
-        task: asyncio.Task[None] | None = None
-        if config.queue_database_url:
-            from fleetent.knowledge_base.service_config import (
-                load_kb_service_config,
-                validate_kb_service_boot,
-            )
-            from fleetent.knowledge_base.standalone_sweep import sweep
-
-            standalone_path = Path(os.environ["FLEETENT_KB_SERVICE_CONFIG"]).expanduser()
-            standalone_config = load_kb_service_config(standalone_path)
-            validate_kb_service_boot(standalone_config)
-
-            async def _sweep_loop() -> None:
-                while True:
-                    sweep(standalone_config, queue_database_url=config.queue_database_url)
-                    await asyncio.sleep(30.0)
-
-            task = asyncio.create_task(_sweep_loop())
         try:
             yield
         finally:
-            if task is not None:
-                task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await task
+            return
 
     app = FastAPI(title="fleetent kb-read-service", lifespan=lifespan)
     app.state.kb_serve_config = config
@@ -153,7 +172,7 @@ def create_app(config: KBServeConfig):  # type: ignore[no-untyped-def]
     def _require_authorized_principal(
         authorization: str | None,
         principal_header: str | None,
-        body_principal: PrincipalPayload,
+        body_principal: PrincipalPayload | None = None,
     ) -> Principal:
         if not authorization or not authorization.startswith("Bearer "):
             raise HTTPException(status_code=401, detail="missing bearer token")
@@ -166,7 +185,7 @@ def create_app(config: KBServeConfig):  # type: ignore[no-untyped-def]
             raise HTTPException(status_code=401, detail=str(exc)) from exc
         if principal is None:
             raise HTTPException(status_code=401, detail="missing principal header")
-        if (
+        if body_principal is not None and (
             principal.user_id != body_principal.user_id
             or principal.tenant_id != body_principal.tenant_id
         ):
@@ -179,6 +198,23 @@ def create_app(config: KBServeConfig):  # type: ignore[no-untyped-def]
     def healthz() -> dict[str, str]:
         return {"status": "ok", "tenant_id": config.tenant_id}
 
+    @app.get("/status")
+    def status(
+        authorization: Annotated[str | None, Header(alias="Authorization")] = None,
+        principal_header: Annotated[str | None, Header(alias=INGRESS_PRINCIPAL_HEADER)] = None,
+    ) -> dict[str, object]:
+        principal = _require_authorized_principal(authorization, principal_header)
+        connector_rows = kb_runtime.operations.list_connector_statuses(principal.tenant_id)
+        job_rows = kb_ingest_jobs.list_jobs(
+            tenant_id=principal.tenant_id,
+            database_url=config.queue_database_url or None,
+        )
+        return {
+            "tenant_id": principal.tenant_id,
+            "connectors": [_connector_status_to_wire(row) for row in connector_rows],
+            "jobs": [_job_status_to_wire(row) for row in job_rows],
+        }
+
     @app.post("/search")
     async def search_chunks(
         request: Annotated[SearchRequest, Body(...)],
@@ -186,14 +222,29 @@ def create_app(config: KBServeConfig):  # type: ignore[no-untyped-def]
         principal_header: Annotated[str | None, Header(alias=INGRESS_PRINCIPAL_HEADER)] = None,
     ) -> dict[str, list[dict[str, object]]]:
         _require_authorized_principal(authorization, principal_header, request.principal)
-        chunks = await kb_runtime.search(
-            query=request.query,
-            tenant_id=config.tenant_id,
-            kb_ids=request.kb_ids,
-            limit=request.limit,
-            mode=config.default_mode,
-            rerank=False,
-        )
+        mode = request.mode or config.default_mode
+        if request.rerank and mode != "hybrid":
+            raise ValueError("rerank only supports hybrid knowledge search mode")
+        if request.use_planner:
+            plan = kb_runtime.plan_knowledge_search(
+                request.query,
+                kb_runtime.KnowledgeSearchOptions(
+                    tenant_id=config.tenant_id,
+                    kb_ids=request.kb_ids,
+                    limit=request.limit,
+                    rerank=request.rerank,
+                ),
+            )
+            chunks = await kb_runtime.execute_knowledge_search_plan(plan)
+        else:
+            chunks = await kb_runtime.search(
+                query=request.query,
+                tenant_id=config.tenant_id,
+                kb_ids=request.kb_ids,
+                limit=request.limit,
+                mode=mode,
+                rerank=request.rerank,
+            )
         return {"chunks": [_knowledge_chunk_to_wire_dict(chunk) for chunk in chunks]}
 
     return app

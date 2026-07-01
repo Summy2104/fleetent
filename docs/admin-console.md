@@ -150,25 +150,7 @@
 
 ---
 
-## 4. Sessions — 会话治理
-
-实时会话列表/回放、人工接管(takeover/release)、注入消息、强制结束/清空/重置、批量处置。读 viewer+,写 admin。后端 `chat_admin_api.py`(prefix `/admin`)。
-
-| Hook | 方法 路径 | 参数/请求体 | 响应/备注 |
-|------|-----------|-------------|-----------|
-| `useSessionsQuery` | `GET /admin/sessions` | `?status=`、`?user_id=`、`?agent_name=`(空值不带) | `SessionListItem[]`:`session_id`、`origin`、`status`、`takeover_actor?`、`takeover_at?`、`agent_name?`、`user_id?`、`channel?`、`updated_at?`、`turns?`、`message_count?`(+`total_tokens/rounds/pending_approvals` 占位 0);agent_name 不存在 404 |
-| `useSessionDetailQuery` | `GET /admin/sessions/{sessionId}` | — | `{meta:SessionListItem, transcript:[{role, content}]}` |
-| `useTakeoverSessionMutation` | `POST /admin/sessions/{id}/takeover` | — | `{session_id, taken_over:true}` |
-| `useReleaseSessionMutation` | `POST /admin/sessions/{id}/release` | — | `{session_id, taken_over:false}` |
-| `useInjectSessionMutation` | `POST /admin/sessions/{id}/inject` | `{role, content}`(role 默认 `human_agent`) | `{injected:true}`;origin=im 时经 im-gateway 投递 |
-| `useForceEndSessionMutation` | `POST /admin/sessions/{id}/force-end` | `X-Confirm: true` | `{status:"ended"}` |
-| `useClearSessionMutation` | `POST /admin/sessions/{id}/clear` | `X-Confirm: true` | `{cleared:true}` |
-| `useResetSessionMutation` | `POST /admin/sessions/{id}/reset` | `{keep_turns}`(前端 `keepTurns`)+ `X-Confirm: true` | `{keep_turns}`;截断仅保留前 N 条 |
-| `useBulkSessionMutation` | `POST /admin/sessions/bulk` | `{action:'end'\|'clear', session_ids[]}`(前端 `sessionIds`)+ `X-Confirm: true` | `{batch_id, count, action}`;非法 action 422 |
-
----
-
-## 5. Providers — 模型提供商管理
+## 4. Providers — 模型提供商管理
 
 provider 的增删改查、连通性测试、定价配置。`api_key` 始终掩码。读 viewer+,写 admin。后端 `provider_admin_api.py`。
 
@@ -200,9 +182,8 @@ provider 的增删改查、连通性测试、定价配置。`api_key` 始终掩�
 | `useIngestDocumentMutation` | `POST /admin/kb/{kbId}/documents` | `{source, content, document_format(默认 text), tenant_id?}` | 走异步 job,响应含 `job_id/status/...result`;格式非 text/markdown/html 返回 422;KB 须 active |
 | `useDeleteDocumentMutation` | `DELETE /admin/kb/{kbId}/documents/{documentId}` | `?tenant_id=` + `X-Confirm: true` | `{deleted, document_id, kb_id}`;级联删 chunks/vectors |
 | `useSyncDocumentsMutation` | `POST /admin/kb/{kbId}/sync` | `{path, tenant_id?}` + `X-Confirm: true` | 走 job,响应 `{job_id, scanned, ingested, skipped, failed, ...}`;全量 resync 高危 |
-| `useKbAgentsQuery` | `GET /admin/kb/{kbId}/agents` | — | `{kb_id, agents:number[]}` |
 
-> 后端未封装:`POST /admin/kb/search`(检索 playground)、`POST /admin/kb/evaluations`、`GET /admin/kb/by-agent/{agent_id}`、`GET .../documents/{id}/chunks`、`POST/DELETE .../agents`(绑定)、`GET .../observation`、`POST .../extract-entities`。
+> 后端未封装:`POST /admin/kb/search`(检索 playground)、`POST /admin/kb/evaluations`、`GET /admin/kb/by-agent/{agent_id}`、`GET .../documents/{id}/chunks`、`POST/DELETE .../agents`(绑定)、`GET .../observation`。
 
 ### 6b. KB Connectors
 | Hook | 方法 路径 | 参数/请求体 | 响应/备注 |

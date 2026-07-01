@@ -168,7 +168,6 @@ describe('admin routes', () => {
     expect((await screen.findAllByRole('heading', { name: 'Agents' }))[0]).toBeInTheDocument()
     const nav = within(screen.getByRole('navigation'))
     expect(nav.getByRole('link', { name: 'Agents' })).toHaveAttribute('href', '/agents')
-    expect(nav.getByRole('link', { name: 'Sessions' })).toHaveAttribute('href', '/sessions')
     expect(nav.getByRole('link', { name: 'Users' })).toHaveAttribute('href', '/users')
     expect(nav.getByRole('link', { name: 'Providers' })).toHaveAttribute('href', '/providers')
     expect(nav.getAllByRole('link', { name: 'Skills' })[0]).toHaveAttribute('href', '/skills')
@@ -277,21 +276,6 @@ describe('admin routes', () => {
     expect((await screen.findAllByRole('heading', { name: 'Skills' }))[0]).toBeInTheDocument()
     const nav = within(screen.getByRole('navigation'))
     expect(nav.getAllByRole('link', { name: 'Skills' })[0]).toHaveAttribute('href', '/skills')
-  })
-
-  it('renders sessions as a native route in the SPA', async () => {
-    server.use(
-      http.get('http://fleetent.test/admin/me', () =>
-        HttpResponse.json({ email: 'admin@fleetent.test', id: 'admin-1', role: 'admin' })
-      ),
-      http.get('http://fleetent.test/admin/sessions', () => HttpResponse.json([]))
-    )
-
-    renderRoutes('/sessions', 'session-token')
-
-    expect((await screen.findAllByRole('heading', { name: 'Sessions' }))[0]).toBeInTheDocument()
-    const nav = within(screen.getByRole('navigation'))
-    expect(nav.getByRole('link', { name: 'Sessions' })).toHaveAttribute('href', '/sessions')
   })
 
   it('renders knowledge base as a native route instead of a legacy deep link', async () => {

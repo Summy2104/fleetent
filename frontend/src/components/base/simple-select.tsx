@@ -17,6 +17,7 @@ export interface SimpleSelectProps {
   triggerId?: string
   triggerClassName?: string
   triggerAriaLabel?: string
+  triggerSize?: 'sm' | 'default'
 }
 
 /**
@@ -32,6 +33,7 @@ export function SimpleSelect({
   triggerId,
   triggerClassName,
   triggerAriaLabel,
+  triggerSize,
 }: SimpleSelectProps) {
   const items = React.useMemo(
     () => Object.fromEntries(options.map((option) => [option.value, option.label])),
@@ -45,7 +47,12 @@ export function SimpleSelect({
       onValueChange={(next) => onValueChange?.((next ?? '') as string)}
       value={value ?? ''}
     >
-      <SelectTrigger aria-label={triggerAriaLabel} className={cn('w-full', triggerClassName)} id={triggerId}>
+      <SelectTrigger
+        aria-label={triggerAriaLabel}
+        className={cn('w-full', triggerClassName)}
+        id={triggerId}
+        size={triggerSize}
+      >
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>

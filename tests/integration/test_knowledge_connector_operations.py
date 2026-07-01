@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 
 import pytest
 
@@ -119,6 +120,66 @@ def test_connector_status_redacts_summary_and_error(monkeypatch, tmp_path):
     assert row is not None
     assert "secret-token" not in row["last_summary_json"]
     assert "secret-token" not in row["last_error"]
+
+
+def test_list_connector_statuses_filters_by_tenant_and_kb(monkeypatch, tmp_path):
+    _patch_operations_database(monkeypatch, tmp_path)
+    from fleetent.knowledge_base import operations
+
+    operations.record_connector_status(
+        connector_id="tenant-a-kb-a",
+        connector_type="google_drive",
+        tenant_id="tenant-a",
+        kb_id="kb-a",
+        status="sync_succeeded",
+        summary={"ingested": 2},
+        error=None,
+        started_at=datetime(2026, 6, 1, tzinfo=UTC),
+        finished_at=datetime(2026, 6, 1, 0, 5, tzinfo=UTC),
+    )
+    operations.record_connector_status(
+        connector_id="tenant-a-kb-b",
+        connector_type="google_drive",
+        tenant_id="tenant-a",
+        kb_id="kb-b",
+        status="sync_failed",
+        summary={"failed": 1},
+        error="boom",
+        started_at=datetime(2026, 6, 2, tzinfo=UTC),
+        finished_at=datetime(2026, 6, 2, 0, 5, tzinfo=UTC),
+    )
+    operations.record_connector_status(
+        connector_id="tenant-b-kb-a",
+        connector_type="confluence",
+        tenant_id="tenant-b",
+        kb_id="kb-a",
+        status="dry_run_ok",
+        summary={"planned": 3},
+        error=None,
+        started_at=datetime(2026, 6, 3, tzinfo=UTC),
+        finished_at=datetime(2026, 6, 3, 0, 5, tzinfo=UTC),
+    )
+
+    tenant_rows = operations.list_connector_statuses(tenant_id="tenant-a")
+    kb_rows = operations.list_connector_statuses(tenant_id="tenant-a", kb_id="kb-b")
+
+    assert [(row.connector_id, row.kb_id, row.last_status) for row in tenant_rows] == [
+        ("tenant-a-kb-b", "kb-b", "sync_failed"),
+        ("tenant-a-kb-a", "kb-a", "sync_succeeded"),
+    ]
+    assert kb_rows == [
+        operations.ConnectorStatus(
+            connector_id="tenant-a-kb-b",
+            connector_type="google_drive",
+            tenant_id="tenant-a",
+            kb_id="kb-b",
+            last_status="sync_failed",
+            last_started_at=datetime(2026, 6, 2, tzinfo=UTC),
+            last_finished_at=datetime(2026, 6, 2, 0, 5, tzinfo=UTC),
+            last_summary={"failed": 1},
+            last_error="boom",
+        )
+    ]
 
 
 async def test_dry_run_records_status_without_mutating_knowledge(monkeypatch, tmp_path):

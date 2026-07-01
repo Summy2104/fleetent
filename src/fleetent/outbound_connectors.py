@@ -31,11 +31,29 @@ class ManagedOutboundConnector:
         target_type: str = "user",
         thread: Any = None,
         blocks: list[dict[str, Any]] | None = None,
+        approval: Any = None,
     ) -> dict[str, Any]:
+        # Carry a platform-neutral approval intent so the node drain renders it per platform
+        # (Slack Block Kit / Telegram inline keyboard) at delivery — governance stays neutral.
+        approval_payload = (
+            {
+                "approval_id": approval.approval_id,
+                "tool_name": approval.tool_name,
+                "risk_level": approval.risk_level,
+                "summary": approval.summary,
+            }
+            if approval is not None
+            else None
+        )
         return outbound_queue_store.enqueue(
             platform=self.platform,
             address={"target": target, "target_type": target_type, "thread": thread},
-            payload={"kind": "text", "text": text, "blocks": blocks or []},
+            payload={
+                "kind": "text",
+                "text": text,
+                "blocks": blocks or [],
+                "approval": approval_payload,
+            },
             dedup_key=self._dedup_key("text"),
         )
 

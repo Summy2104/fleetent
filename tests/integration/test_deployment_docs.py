@@ -271,6 +271,10 @@ def test_pilot_install_checklist_contains_required_commands():
         "平台托管 KB ingest 已退役",
         "kb-service.yaml",
         "kb-worker --config $FLEETENT_HOME/tenants/default/kb/kb-service.yaml",
+        (
+            "uv run fleetent kb-extract --config "
+            "$FLEETENT_HOME/tenants/default/kb/kb-service.yaml --kb <kb_id> --wait"
+        ),
         "GET /admin/stats/agents/<agent_id>/overview",
         "GET /admin/stats/agents/<agent_id>/tools",
         "GET /admin/stats/sessions/<session_id>/trace",
@@ -351,6 +355,10 @@ def test_pilot_runbook_contains_required_commands_and_failure_handling():
         "平台托管 KB ingest 已退役",
         "kb-service.yaml",
         "kb-worker --config $FLEETENT_HOME/tenants/default/kb/kb-service.yaml",
+        (
+            "uv run fleetent kb-extract --config "
+            "$FLEETENT_HOME/tenants/default/kb/kb-service.yaml --kb <kb_id> --wait"
+        ),
         "FLEETENT_EVAL_REAL_EMBEDDING=1",
         "skipped: credentials not configured",
     ]

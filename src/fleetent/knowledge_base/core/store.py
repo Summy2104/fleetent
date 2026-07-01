@@ -1,5 +1,6 @@
 import json
 import re
+import sqlite3
 from datetime import UTC, datetime
 
 from fleetent.db import Row, SQLiteConnection, SQLiteDatabase
@@ -86,6 +87,51 @@ class KnowledgeStore:
         ).fetchone()
         return row is not None
 
+    def get_embedding_identity(self, tenant_id: str, kb_id: str) -> tuple[str, int] | None:
+        try:
+            row = self._database.execute(
+                """
+                SELECT embedding_model, embedding_dimensions
+                FROM knowledge_bases
+                WHERE tenant_id = :tenant_id
+                  AND kb_id = :kb_id
+                  AND archived_at IS NULL
+                """,
+                {"tenant_id": tenant_id, "kb_id": kb_id},
+            ).fetchone()
+        except sqlite3.OperationalError as exc:
+            if "no such table: knowledge_bases" not in str(exc):
+                raise
+            return None
+        if row is None:
+            return None
+        model = row["embedding_model"]
+        dimensions = row["embedding_dimensions"]
+        if model is None or dimensions is None:
+            return None
+        return str(model), int(dimensions)
+
+    def set_embedding_identity(
+        self, tenant_id: str, kb_id: str, model: str, dimensions: int
+    ) -> bool:
+        result = self._database.execute(
+            """
+            UPDATE knowledge_bases
+            SET embedding_model = :model,
+                embedding_dimensions = :dimensions
+            WHERE tenant_id = :tenant_id
+              AND kb_id = :kb_id
+              AND archived_at IS NULL
+            """,
+            {
+                "tenant_id": tenant_id,
+                "kb_id": kb_id,
+                "model": model,
+                "dimensions": dimensions,
+            },
+        )
+        return result.rowcount > 0
+
     def is_extraction_enabled(self, tenant_id: str, kb_id: str) -> bool:
         row = self._database.execute(
             """
@@ -100,6 +146,23 @@ class KnowledgeStore:
         if row is None:
             return False
         return bool(int(row["extraction_enabled"]))
+
+    def set_extraction_enabled(self, tenant_id: str, kb_id: str, enabled: bool) -> bool:
+        result = self._database.execute(
+            """
+            UPDATE knowledge_bases
+            SET extraction_enabled = :extraction_enabled
+            WHERE tenant_id = :tenant_id
+              AND kb_id = :kb_id
+              AND archived_at IS NULL
+            """,
+            {
+                "tenant_id": tenant_id,
+                "kb_id": kb_id,
+                "extraction_enabled": int(enabled),
+            },
+        )
+        return result.rowcount > 0
 
     def list_knowledge_bases(self, tenant_id: str) -> list[Row]:
         return self._database.execute(

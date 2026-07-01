@@ -29,6 +29,9 @@ export type McpOAuthAuthorizationCodeAuthConfig = {
   client_secret_env: string
   scope: string
   redirect_path: string
+  // stdio per-user OAuth: env var the per-user access token is injected under (empty -> default
+  // MCP_OAUTH_ACCESS_TOKEN). Lets any stdio per-user OAuth server declare its own var name.
+  token_env: string
 }
 
 // per-user dynamic api-key/bearer (mcp-per-user-apikey): no static key — only server-level
@@ -55,6 +58,7 @@ export const MCP_AUTH_FORM_FIELDS = {
     'client_secret_env',
     'scope',
     'redirect_path',
+    'token_env',
   ],
   api_key_per_user: ['header_style', 'credential_input'],
 } as const

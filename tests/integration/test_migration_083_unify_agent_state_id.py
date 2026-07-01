@@ -1,4 +1,4 @@
-"""Integration tests for migration 083: unify agent_admin_state/session_meta agent ids."""
+"""Integration tests for migration 083 and the later session_meta retirement."""
 
 from __future__ import annotations
 
@@ -30,36 +30,33 @@ def _fk_rows(conn: sqlite3.Connection, table: str) -> list[tuple[object, ...]]:
     return conn.execute(f"PRAGMA foreign_key_list({table})").fetchall()
 
 
-def test_head_schema_unifies_agent_admin_state_and_session_meta_to_agent_ids(tmp_path: Path) -> None:
+def test_head_schema_keeps_agent_admin_state_fk_and_drops_session_meta(tmp_path: Path) -> None:
     db = tmp_path / "mgmt.db"
     apply_migrations(db)
 
     conn = sqlite3.connect(db)
     try:
         admin_state = _table_info(conn, "agent_admin_state")
-        session_meta = _table_info(conn, "session_meta")
+        tables = {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
         admin_state_fks = _fk_rows(conn, "agent_admin_state")
-        session_meta_fks = _fk_rows(conn, "session_meta")
     finally:
         conn.close()
 
     assert admin_state["agent_id"] == ("INTEGER", 1)
     assert "agent_name" not in admin_state
-    assert session_meta["agent_id"] == ("INTEGER", 0)
-    assert "agent_name" not in session_meta
-    assert session_meta["user_id"] == ("TEXT", 0)
+    assert "session_meta" not in tables
 
     assert any(
         row[2] == "agents" and row[3] == "agent_id" and row[4] == "id" and row[6] == "CASCADE"
         for row in admin_state_fks
     )
-    assert any(
-        row[2] == "agents" and row[3] == "agent_id" and row[4] == "id" and row[6] == "CASCADE"
-        for row in session_meta_fks
-    )
 
 
-def test_upgrade_migrates_agent_name_keyed_admin_and_session_rows(tmp_path: Path, monkeypatch) -> None:
+def test_upgrade_migrates_agent_name_keyed_admin_rows_and_then_drops_session_meta(
+    tmp_path: Path, monkeypatch
+) -> None:
     db = tmp_path / "mgmt.db"
     _upgrade_to(db, "082")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
@@ -130,16 +127,12 @@ def test_upgrade_migrates_agent_name_keyed_admin_and_session_rows(tmp_path: Path
             ORDER BY agent_id
             """
         ).fetchall()
-        session_rows = conn.execute(
-            """
-            SELECT session_id, agent_id, user_id, channel
-            FROM session_meta
-            ORDER BY session_id
-            """
-        ).fetchall()
+        tables = {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
     finally:
         conn.close()
 
     assert admin_rows == [(support.id, "disabled")]
-    assert session_rows == [("sess-support", support.id, "user-1", "slack:C1")]
+    assert "session_meta" not in tables
     assert ops.id not in {row[0] for row in admin_rows}

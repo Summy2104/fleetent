@@ -8,11 +8,20 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from fleetent.agent_config import AgentFile, ModelRouteEntry, ModelTarget, default_models
-from fleetent.config import EmbeddingSettings
+from fleetent.config import EmbeddingSettings, RerankSettings
 from fleetent.knowledge_base.config import KnowledgeConfigSnapshot
 from fleetent.secret_scan import flatten, looks_inline_secret
 
 _SECRET_KEY_PARTS = ("token", "secret", "password", "api_key", "credential")
+_CONNECTOR_SECRET_ENV_FIELDS = (
+    "access_token_env",
+    "refresh_token_env",
+    "client_id_env",
+    "client_secret_env",
+    "token_uri_env",
+    "username_env",
+    "api_token_env",
+)
 
 
 class KBServiceSection(BaseModel):
@@ -50,6 +59,15 @@ class KBExtractionSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
+    endpoint: str = ""
+    model: str = ""
+    api_key_env: str = ""
+
+
+class KBRerankSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    backend: str = "disabled"
     endpoint: str = ""
     model: str = ""
     api_key_env: str = ""
@@ -96,6 +114,7 @@ class KBServiceConfig(BaseModel):
     retrieval: KBRetrievalSection = Field(default_factory=KBRetrievalSection)
     embedding: KBEmbeddingSection = Field(default_factory=KBEmbeddingSection)
     extraction: KBExtractionSection = Field(default_factory=KBExtractionSection)
+    rerank: KBRerankSection = Field(default_factory=KBRerankSection)
     chunking: KBChunkingSection = Field(default_factory=KBChunkingSection)
     connectors: list[KBConnectorSection] = Field(default_factory=list)
 
@@ -116,6 +135,14 @@ class KBServiceConfig(BaseModel):
             model=self.embedding.model,
             dimensions=self.embedding.dimensions,
             api_key_env=self.embedding.api_key_env,
+        )
+
+    def rerank_settings(self) -> RerankSettings:
+        return RerankSettings(
+            backend=self.rerank.backend,
+            endpoint=self.rerank.endpoint,
+            model=self.rerank.model,
+            api_key_env=self.rerank.api_key_env,
         )
 
     def standalone_agent(self) -> AgentFile:
@@ -149,7 +176,12 @@ class KBServiceConfig(BaseModel):
                 )
             )
             models.routes["kb_extraction"] = [ModelRouteEntry(target="kb-extraction")]
-        return AgentFile(name="kb-service-standalone", version=1, models=models)
+        return AgentFile(
+            name="kb-service-standalone",
+            version=1,
+            models=models,
+            rerank=self.rerank_settings(),
+        )
 
     def configure_process_runtime(self) -> None:
         from fleetent import agent_config, vector_store
@@ -259,6 +291,10 @@ def validate_kb_service_boot(config: KBServiceConfig) -> None:
     missing: list[str] = []
     for connector in config.connectors:
         credential_ref = connector.credential_ref.strip()
+        for field_name in _CONNECTOR_SECRET_ENV_FIELDS:
+            env_name = str(getattr(connector, field_name, "")).strip()
+            if env_name and not os.environ.get(env_name):
+                missing.append(env_name)
         if not credential_ref:
             continue
         try:
@@ -274,6 +310,13 @@ def validate_kb_service_boot(config: KBServiceConfig) -> None:
     ):
         if env_name and not os.environ.get(env_name):
             missing.append(env_name)
+    rerank_api_key_env = config.rerank.api_key_env.strip()
+    if (
+        config.rerank.backend != "disabled"
+        and rerank_api_key_env
+        and not os.environ.get(rerank_api_key_env)
+    ):
+        missing.append(rerank_api_key_env)
     if missing:
         raise ValueError("missing standalone KB secrets: " + ", ".join(sorted(missing)))
 

@@ -651,6 +651,9 @@ _SKIP_SECRET_SCAN_SEGMENTS = (
     ".command",
     ".id",
     ".transport",
+    # auth_type is a discriminator enum (e.g. "oauth_authorization_code"), not a
+    # credential; its value would otherwise trip the length/entropy heuristic.
+    ".auth_type",
     ".access.allow_users.",
     ".access.allow_groups.",
 )
@@ -836,9 +839,9 @@ def default_models() -> AgentModels:
                 id="embedding",
                 provider="local",
                 protocol="http_embedding",
-                endpoint="http://localhost:11434/v1/embeddings",
-                model="default-embedding",
-                params={"dimensions": 64},
+                endpoint="http://127.0.0.1:11434/v1/embeddings",
+                model="bge-small",
+                params={"dimensions": 384},
             ),
         ],
         routes={

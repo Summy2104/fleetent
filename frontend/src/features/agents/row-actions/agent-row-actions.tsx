@@ -29,6 +29,15 @@ import {
 } from '@/features/agents/api'
 import { useT } from '@/i18n'
 
+// A pending confirmation captured when a state-changing action is picked from the
+// menu. Rendered by a single AlertDialog so every toggle shares one confirm surface.
+type PendingConfirm = {
+  title: string
+  description: string
+  confirmLabel: string
+  run: () => void
+}
+
 export function AgentRowActions({
   agent,
   canWrite,
@@ -47,7 +56,54 @@ export function AgentRowActions({
   const remove = useDeleteAgentMutation(agent.agent_name)
   const setDefault = useSetDefaultAgentMutation(agent.agent_name)
   const clearDefault = useClearDefaultAgentMutation()
-  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [pending, setPending] = useState<PendingConfirm | null>(null)
+
+  // Defer opening the dialog to the next tick so the dropdown finishes closing
+  // and does not fight the dialog for focus.
+  const askConfirm = (confirm: PendingConfirm) => setTimeout(() => setPending(confirm), 0)
+
+  const name = agent.agent_name
+  const enableToggle: PendingConfirm =
+    agent.status === 'disabled'
+      ? {
+          title: t('agents.enableTitle', { name }),
+          description: t('agents.enableDescription'),
+          confirmLabel: t('agents.enable'),
+          run: () => void enable.mutateAsync(),
+        }
+      : {
+          title: t('agents.disableTitle', { name }),
+          description: t('agents.disableDescription'),
+          confirmLabel: t('agents.disable'),
+          run: () => void disable.mutateAsync(),
+        }
+  const archiveToggle: PendingConfirm =
+    agent.status === 'archived'
+      ? {
+          title: t('agents.restoreTitle', { name }),
+          description: t('agents.restoreDescription'),
+          confirmLabel: t('agents.restore'),
+          run: () => void restore.mutateAsync(),
+        }
+      : {
+          title: t('agents.archiveTitle', { name }),
+          description: t('agents.archiveDescription'),
+          confirmLabel: t('agents.archive'),
+          run: () => void archive.mutateAsync(),
+        }
+  const defaultToggle: PendingConfirm = agent.is_default
+    ? {
+        title: t('agents.clearDefaultTitle'),
+        description: t('agents.clearDefaultDescription'),
+        confirmLabel: t('agents.clearDefault'),
+        run: () => void clearDefault.mutateAsync(),
+      }
+    : {
+        title: t('agents.setDefaultTitle', { name }),
+        description: t('agents.setDefaultDescription'),
+        confirmLabel: t('agents.setAsDefault'),
+        run: () => void setDefault.mutateAsync(),
+      }
 
   return (
     <div className="flex justify-end">
@@ -63,26 +119,28 @@ export function AgentRowActions({
           <DropdownMenuItem onClick={() => onConfigure(agent)}>{t('agents.configure')}</DropdownMenuItem>
           {canWrite ? (
             <>
-              <DropdownMenuItem
-                onClick={() => (agent.status === 'disabled' ? void enable.mutateAsync() : void disable.mutateAsync())}
-              >
-                {agent.status === 'disabled' ? t('agents.enable') : t('agents.disable')}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => (agent.status === 'archived' ? void restore.mutateAsync() : void archive.mutateAsync())}
-              >
-                {agent.status === 'archived' ? t('agents.restore') : t('agents.archive')}
+              <DropdownMenuItem onClick={() => askConfirm(enableToggle)}>{enableToggle.confirmLabel}</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => askConfirm(archiveToggle)}>
+                {archiveToggle.confirmLabel}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => void clone.mutateAsync(`${agent.agent_name}-copy`)}>
                 {t('agents.clone')}
               </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => (agent.is_default ? void clearDefault.mutateAsync() : void setDefault.mutateAsync())}
-              >
-                {agent.is_default ? t('agents.clearDefault') : t('agents.setAsDefault')}
+              <DropdownMenuItem onClick={() => askConfirm(defaultToggle)}>
+                {defaultToggle.confirmLabel}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => setTimeout(() => setConfirmDelete(true), 0)} variant="destructive">
+              <DropdownMenuItem
+                onClick={() =>
+                  askConfirm({
+                    title: t('agents.deleteTitle', { name }),
+                    description: t('agents.deleteDescription'),
+                    confirmLabel: t('agents.delete'),
+                    run: () => void remove.mutateAsync(),
+                  })
+                }
+                variant="destructive"
+              >
                 <Trash2 /> {t('agents.delete')}
               </DropdownMenuItem>
             </>
@@ -90,15 +148,15 @@ export function AgentRowActions({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <AlertDialog onOpenChange={setConfirmDelete} open={confirmDelete}>
+      <AlertDialog onOpenChange={(open) => (open ? undefined : setPending(null))} open={pending !== null}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t('agents.deleteTitle', { name: agent.agent_name })}</AlertDialogTitle>
-            <AlertDialogDescription>{t('agents.deleteDescription')}</AlertDialogDescription>
+            <AlertDialogTitle>{pending?.title}</AlertDialogTitle>
+            <AlertDialogDescription>{pending?.description}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void remove.mutateAsync()}>{t('agents.delete')}</AlertDialogAction>
+            <AlertDialogAction onClick={() => pending?.run()}>{pending?.confirmLabel}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

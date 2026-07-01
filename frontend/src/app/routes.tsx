@@ -20,7 +20,6 @@ import { McpPage } from '@/features/mcp/page'
 import { NodesPage } from '@/features/nodes/page'
 import { ChangePasswordFields, ProfilePage } from '@/features/profile/page'
 import { ProvidersPage } from '@/features/providers/page'
-import { SessionsPage } from '@/features/sessions/page'
 import { SkillsPage } from '@/features/skills/page'
 import { StatsPage } from '@/features/stats/page'
 import { TeamsPage } from '@/features/teams/page'
@@ -378,7 +377,6 @@ function AppLayout(): JSX.Element {
             <Route element={<AgentsPage />} path="/agents" />
             <Route element={<AgentConfigurePage />} path="/agents/:name/configure" />
             <Route element={<SkillsPage />} path="/skills" />
-            <Route element={<SessionsPage />} path="/sessions" />
             <Route element={<ProvidersPage />} path="/providers" />
             <Route element={<KnowledgeBasePage />} path="/kb" />
             <Route element={<McpPage />} path="/mcp" />
