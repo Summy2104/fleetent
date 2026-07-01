@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 import fleetent.agent_store as agent_store
 import fleetent.auth as auth
 import fleetent.governance.audit_log as audit
+import fleetent.platform.agent_management_console.agent_admin_api as agent_admin_api
 import fleetent.platform.knowledge_base_management.agent_kbs_store as kbs_store
 import fleetent.platform.knowledge_base_management.kb_admin_api as api
 import fleetent.user_store as user_store
@@ -35,6 +36,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "kb_engine_create", lambda t, k, d: None)
     monkeypatch.setattr(api, "kb_engine_archive", lambda t, k: None)
     app = FastAPI()
+    app.include_router(agent_admin_api.router)
     app.include_router(api.router)
     return TestClient(app, raise_server_exceptions=True)
 
@@ -73,6 +75,7 @@ def host_wired_client(tmp_path, monkeypatch):
     monkeypatch.setattr(vector_store, "search", search)
     monkeypatch.setattr(vector_store, "delete", delete)
     app = FastAPI()
+    app.include_router(agent_admin_api.router)
     app.include_router(api.router)
     return TestClient(app, raise_server_exceptions=True)
 
@@ -389,9 +392,11 @@ def test_host_wired_archive_updates_visibility_search_and_binding(host_wired_cli
 
     stale_agent = agent_store.create_agent("agent-stale", "Prompt.", ["shell"])
     kbs_store.bind("default", "support", stale_agent.id)
-    reverse = host_wired_client.get(f"/admin/kb/by-agent/{stale_agent.id}", headers=_hdr(token))
+    retired = host_wired_client.get(f"/admin/kb/by-agent/{stale_agent.id}", headers=_hdr(token))
+    assert retired.status_code == 404
+    reverse = host_wired_client.get("/admin/agents/agent-stale/kbs", headers=_hdr(token))
     assert reverse.status_code == 200
-    assert reverse.json()["kb_ids"] == []
+    assert reverse.json() == {"agent": "agent-stale", "kb_ids": []}
 
 
 # --- single document delete cascade (场景 107) -------------------------------
@@ -461,8 +466,9 @@ def test_bind_and_reverse_lookup_consistent(client):
     token, _ = _session_for("admin")
     client.post("/admin/kb/sales/agents", headers=_hdr(token), json={"agent_id": agent.id})
     fwd = client.get("/admin/kb/sales/agents", headers=_hdr(token)).json()
-    rev = client.get(f"/admin/kb/by-agent/{agent.id}", headers=_hdr(token)).json()
+    rev = client.get("/admin/agents/agent-a/kbs", headers=_hdr(token)).json()
     assert fwd["agents"] == [agent.id]
+    assert rev["agent"] == "agent-a"
     assert rev["kb_ids"] == ["sales"]
 
 
@@ -482,18 +488,29 @@ def test_eval_entry_read_only_for_viewer(client):
 # --- reverse lookup excludes archived KBs (任务 2.3/2.4) ----------------------
 
 
-def test_kbs_for_agent_filters_archived(client, monkeypatch):
+def test_by_agent_route_is_retired(client):
+    token, _ = _session_for("admin")
+    assert client.get("/admin/kb/by-agent/1", headers=_hdr(token)).status_code == 404
+
+
+def test_agent_reverse_lookup_filters_archived(client, monkeypatch):
     agent = agent_store.create_agent("agent-a", "Prompt.", ["shell"])
     monkeypatch.setattr(
         api,
         "kb_engine_list",
         lambda tenant_id: [{"kb_id": "live"}, {"kb_id": "old", "archived": True}],
     )
+    monkeypatch.setattr(
+        agent_admin_api,
+        "kb_engine_list",
+        lambda tenant_id: [{"kb_id": "live"}, {"kb_id": "old", "archived": True}],
+        raising=False,
+    )
     kbs_store.bind("default", "live", agent.id)
     kbs_store.bind("default", "old", agent.id)
     token, _ = _session_for("admin")
-    rev = client.get(f"/admin/kb/by-agent/{agent.id}", headers=_hdr(token)).json()
-    assert rev["kb_ids"] == ["live"]  # archived "old" filtered out
+    rev = client.get("/admin/agents/agent-a/kbs", headers=_hdr(token)).json()
+    assert rev == {"agent": "agent-a", "kb_ids": ["live"]}
 
 
 # --- document list + chunk preview (任务 5.1) --------------------------------

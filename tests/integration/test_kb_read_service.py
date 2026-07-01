@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -142,6 +142,7 @@ def test_search_returns_wire_chunks(monkeypatch) -> None:
 
 def test_status_returns_connector_and_job_state(monkeypatch) -> None:
     serve, client = _make_client(monkeypatch)
+    captured: dict[str, object] = {}
 
     monkeypatch.setattr(
         serve.kb_runtime.operations,
@@ -163,23 +164,26 @@ def test_status_returns_connector_and_job_state(monkeypatch) -> None:
     monkeypatch.setattr(
         serve.kb_ingest_jobs,
         "list_jobs",
-        lambda tenant_id, kb_id=None, database_url=None: [
-            {
-                "id": "job-1",
-                "job_type": "connector_sync",
-                "tenant_id": tenant_id,
-                "kb_id": "kb-a",
-                "status": "done",
-                "attempts": 0,
-                "max_attempts": 3,
-                "last_error": None,
-                "created_at": "2026-06-30T10:00:00+00:00",
-                "updated_at": "2026-06-30T10:05:00+00:00",
-                "claimed_at": "2026-06-30T10:00:10+00:00",
-                "finished_at": "2026-06-30T10:05:00+00:00",
-                "result": {"status": "sync_succeeded", "summary": {"ingested": 3}},
-            }
-        ],
+        lambda tenant_id, kb_id=None, database_url=None: (
+            captured.update({"tenant_id": tenant_id, "kb_id": kb_id, "database_url": database_url})
+            or [
+                {
+                    "id": "job-1",
+                    "job_type": "connector_sync",
+                    "tenant_id": tenant_id,
+                    "kb_id": "kb-a",
+                    "status": "done",
+                    "attempts": 0,
+                    "max_attempts": 3,
+                    "last_error": None,
+                    "created_at": "2026-06-30T10:00:00+00:00",
+                    "updated_at": "2026-06-30T10:05:00+00:00",
+                    "claimed_at": "2026-06-30T10:00:10+00:00",
+                    "finished_at": "2026-06-30T10:05:00+00:00",
+                    "result": {"status": "sync_succeeded", "summary": {"ingested": 3}},
+                }
+            ]
+        ),
     )
 
     response = client.get(
@@ -191,6 +195,11 @@ def test_status_returns_connector_and_job_state(monkeypatch) -> None:
     )
 
     assert response.status_code == 200
+    assert captured == {
+        "tenant_id": "tenant-a",
+        "kb_id": None,
+        "database_url": "",
+    }
     assert response.json() == {
         "tenant_id": "tenant-a",
         "connectors": [

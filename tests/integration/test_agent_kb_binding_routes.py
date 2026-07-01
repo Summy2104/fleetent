@@ -34,6 +34,7 @@ def test_agent_and_kb_routes_materialize_same_integer_binding_set(tmp_path, monk
     apply_migrations(db_path)
     _patch_stores(monkeypatch, db_path)
     monkeypatch.setattr(kb_admin_api, "kb_engine_list", lambda tenant_id: [])
+    monkeypatch.setattr(agent_admin_api, "kb_engine_list", lambda tenant_id: [], raising=False)
 
     app = FastAPI()
     app.include_router(agent_admin_api.router)
@@ -52,8 +53,10 @@ def test_agent_and_kb_routes_materialize_same_integer_binding_set(tmp_path, monk
     assert kb_resp.status_code == 200
 
     assert agent_kbs_store.list_kbs_for_agent("default", agent.id) == ["kb1", "kb2"]
-    assert client.get(f"/admin/kb/by-agent/{agent.id}", headers=_hdr(token)).json() == {
-        "agent_id": agent.id,
+    retired = client.get(f"/admin/kb/by-agent/{agent.id}", headers=_hdr(token))
+    assert retired.status_code == 404
+    assert client.get("/admin/agents/support/kbs", headers=_hdr(token)).json() == {
+        "agent": "support",
         "kb_ids": ["kb1", "kb2"],
     }
     assert client.get("/admin/kb/kb2/agents", headers=_hdr(token)).json() == {
@@ -62,3 +65,40 @@ def test_agent_and_kb_routes_materialize_same_integer_binding_set(tmp_path, monk
     }
     exported = materialize.agent_file_from_store(agent_store.get_by_name("support"))
     assert [binding.kb_id for binding in exported.knowledge.bindings] == ["kb1", "kb2"]
+
+
+def test_agent_reverse_lookup_filters_archived_kbs(tmp_path, monkeypatch):
+    db_path = tmp_path / "users.db"
+    apply_migrations(db_path)
+    _patch_stores(monkeypatch, db_path)
+    monkeypatch.setattr(
+        agent_admin_api,
+        "kb_engine_list",
+        lambda tenant_id: [{"kb_id": "kb1"}, {"kb_id": "kb2", "archived": True}],
+        raising=False,
+    )
+
+    app = FastAPI()
+    app.include_router(agent_admin_api.router)
+    client = TestClient(app, raise_server_exceptions=True)
+
+    agent_store.create_agent("support", "Support.", ["shell"])
+    token, _ = _session_for("admin")
+
+    assert (
+        client.post(
+            "/admin/agents/support/kbs", headers=_hdr(token), json={"kb_id": "kb1"}
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            "/admin/agents/support/kbs", headers=_hdr(token), json={"kb_id": "kb2"}
+        ).status_code
+        == 200
+    )
+
+    response = client.get("/admin/agents/support/kbs", headers=_hdr(token))
+
+    assert response.status_code == 200
+    assert response.json() == {"agent": "support", "kb_ids": ["kb1"]}
