@@ -473,6 +473,14 @@ class Settings(BaseSettings):
     oidc: OidcSettings = Field(default_factory=OidcSettings)
     kb_serve: KBServeSettings = Field(default_factory=KBServeSettings)
 
+    @field_validator("database_url")
+    @classmethod
+    def _empty_database_url_means_default(cls, value: str) -> str:
+        # The scaffolded home .env (copied from .env.example by init-config) ships a blank
+        # `DATABASE_URL=` line; dotenv delivers that as an explicit empty string, which
+        # would otherwise override the default and leave every store unable to open a DB.
+        return value or f"sqlite:///{paths.management_db_path()}"
+
     @classmethod
     def settings_customise_sources(
         cls,
