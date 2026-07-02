@@ -323,3 +323,106 @@ async def test_start_infra_injects_http_knowledge_provider_from_file_ref(
     provider = long_term_ctx._knowledge_provider
     assert isinstance(provider, long_term_ctx.HttpKnowledgeProvider)
     assert provider._service_key == "svc-file-token"
+
+
+async def test_managed_home_defaults_to_http_knowledge_provider_from_kb_host_config(
+    tmp_path, monkeypatch
+) -> None:
+    from fleetent import long_term_ctx
+    from fleetent.integrations.sandbox import enablement as sandbox_enablement
+    from fleetent.node.config import NodeConfig
+    from fleetent.node.provider import DesiredAgent, DesiredState
+    from fleetent.node.reconcile import NodeReconciler
+    from fleetent.session import manager as session_mgr
+
+    class _Backend:
+        def spawn(self, agent_name: str, tenant_id: str = "default") -> None:
+            del agent_name, tenant_id
+
+        def stop(self, agent_name: str, tenant_id: str = "default") -> None:
+            del agent_name, tenant_id
+
+        def is_alive(self, agent_name: str, tenant_id: str = "default") -> int | None:
+            del agent_name, tenant_id
+            return None
+
+        def gateway_port(self, agent_name: str, tenant_id: str = "default") -> int | None:
+            del agent_name, tenant_id
+            return None
+
+    (tmp_path / "kb-service.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "service": {
+                    "service_key_ref": "env:FLEETENT_KB_SERVICE_KEY",
+                    "host": "127.0.0.1",
+                    "port": 9876,
+                }
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FLEETENT_KB_SERVICE_KEY", "svc-managed-kb")
+    monkeypatch.setattr(
+        sandbox_enablement,
+        "get_effective_mode",
+        AsyncMock(return_value=sandbox_enablement.Mode.OFF),
+    )
+    monkeypatch.setattr(session_mgr, "start_session_maintenance", lambda: None)
+
+    reconciler = NodeReconciler(
+        NodeConfig(
+            platform_url="https://platform.internal",
+            node_id="node-a",
+            service_key="ma-" + "1" * 64,
+            home_dir=tmp_path,
+            interval_seconds=10,
+        ),
+        _Backend(),
+    )
+    reconciler.reconcile(
+        DesiredState(
+            node_id="node-a",
+            agents=[
+                DesiredAgent(
+                    agent_id=101,
+                    name="support",
+                    tenant_id="tenant-1",
+                    config={
+                        "name": "support",
+                        "version": 1,
+                        "tenant_id": "tenant-1",
+                        "models": {
+                            "targets": [
+                                {
+                                    "id": "default",
+                                    "provider": "anthropic",
+                                    "protocol": "openai_chat",
+                                    "base_url": "https://api.anthropic.test/v1",
+                                    "model": "claude-haiku",
+                                    "api_key_env": "SUPPORT_MODEL_KEY",
+                                }
+                            ],
+                            "routes": {"default": [{"target": "default"}]},
+                        },
+                        "knowledge": {
+                            "enabled": True,
+                            "bindings": [{"tenant_id": "tenant-1", "kb_id": "support-kb"}],
+                        },
+                    },
+                    secrets={},
+                )
+            ],
+        )
+    )
+
+    home = tmp_path / "tenants" / "tenant-1" / "agents" / "support"
+    agent = agent_config.load_agent_home_file(home / "agent.yaml")
+
+    await agent_app._start_infra(agent, home / "data")
+
+    provider = long_term_ctx._knowledge_provider
+    assert isinstance(provider, long_term_ctx.HttpKnowledgeProvider)
+    assert provider._url == "http://127.0.0.1:9876/search"
+    assert provider._service_key == "svc-managed-kb"

@@ -892,6 +892,12 @@ def collect_env_var_names(agent: AgentFile) -> list[str]:
     for key, value in flatten(agent.model_dump(mode="json")):
         if key.endswith("_env") and isinstance(value, str):
             add_name(value)
+        elif (
+            key.endswith(("credential_ref", "auth_ref"))
+            and isinstance(value, str)
+            and value.startswith("env:")
+        ):
+            add_name(value.removeprefix("env:"))
 
     for server in agent.model_dump(mode="json").get("mcp_servers", []):
         if not isinstance(server, dict):
