@@ -843,7 +843,7 @@ describe('agents list page status display', () => {
 })
 
 describe('agents configure page model binding', () => {
-  it('round-trips the model provider selection on the overview tab', async () => {
+  it('round-trips the primary tier model on the models tab', async () => {
     const user = userEvent.setup({ delay: null })
     const agents: AgentRecord[] = [
       {
@@ -858,7 +858,10 @@ describe('agents configure page model binding', () => {
       alpha: {
         agent: 'alpha',
         allowed_tools: [],
-        model_overrides: { routes: { default: [{ model_id: 'ollama-local' }] } },
+        model_overrides: {
+          targets: { primary: { model_id: 'ollama-local' } },
+          routes: { default: [{ target: 'primary' }] },
+        },
         status: 'enabled',
         supports_dm: false,
         supports_groups: false,
@@ -873,7 +876,7 @@ describe('agents configure page model binding', () => {
     })
 
     type CapturedModelBody = {
-      model_overrides?: { routes?: Record<string, Array<{ model_id?: string }>> }
+      model_overrides?: { targets?: Record<string, { model_id?: string }> }
     }
     const captured: { patch?: CapturedModelBody } = {}
     server.use(
@@ -886,19 +889,20 @@ describe('agents configure page model binding', () => {
     renderAgentsRoute('/agents/alpha/configure')
     expect(await screen.findByRole('heading', { name: 'Configure · alpha' })).toBeInTheDocument()
 
-    // Overview tab is the default. The existing provider is pre-selected on the trigger.
-    const trigger = screen.getByRole('combobox', { name: 'Model provider' })
+    // Model tiers live on the Models tab; the primary tier is pre-selected.
+    await user.click(await screen.findByRole('tab', { name: 'Models' }))
+    const trigger = screen.getByRole('combobox', { name: 'primary' })
     await waitFor(() => expect(trigger).toHaveTextContent('ollama-local'))
 
-    // Switch to the openai provider and save.
+    // Reassign the primary tier and save.
     await selectOption(user, trigger, /openai-gpt4/)
     await user.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(captured.patch).toBeTruthy())
-    expect(captured.patch?.model_overrides?.routes?.default?.[0]?.model_id).toBe('openai-gpt4')
+    expect(captured.patch?.model_overrides?.targets?.primary?.model_id).toBe('openai-gpt4')
   })
 
-  it('configures embedding/memory_extraction/image_generation routes independently and preserves them on save', async () => {
+  it('configures specialized routes independently with protocol filtering and preserves them on save', async () => {
     const user = userEvent.setup({ delay: null })
     const agents: AgentRecord[] = [
       {
@@ -915,9 +919,7 @@ describe('agents configure page model binding', () => {
         allowed_tools: [],
         model_overrides: {
           routes: {
-            default: [{ model_id: 'ollama-local' }],
             embedding: [{ model_id: 'embed-1' }],
-            memory_extraction: [{ model_id: 'openai-gpt4' }],
           },
         },
         status: 'enabled',
@@ -1006,17 +1008,14 @@ describe('agents configure page model binding', () => {
     renderAgentsRoute('/agents/alpha/configure')
     expect(await screen.findByRole('heading', { name: 'Configure · alpha' })).toBeInTheDocument()
 
-    const defaultTrigger = screen.getByRole('combobox', { name: 'Model provider' })
+    await user.click(await screen.findByRole('tab', { name: 'Models' }))
     const embeddingTrigger = screen.getByRole('combobox', { name: 'Embedding model' })
-    const memoryTrigger = screen.getByRole('combobox', { name: 'Memory extraction model' })
     const imageGenTrigger = screen.getByRole('combobox', { name: 'Image generation model' })
 
-    await waitFor(() => expect(defaultTrigger).toHaveTextContent('ollama-local'))
-    expect(embeddingTrigger).toHaveTextContent('embed-1')
-    expect(memoryTrigger).toHaveTextContent('openai-gpt4')
+    await waitFor(() => expect(embeddingTrigger).toHaveTextContent('embed-1'))
     expect(imageGenTrigger).toHaveTextContent('Select a model')
 
-    // The embedding selector only offers embedding-protocol models.
+    // The embedding selector only offers embedding-protocol models (chat models excluded).
     await user.click(embeddingTrigger)
     expect(screen.queryByRole('option', { name: /openai-gpt4/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('option', { name: /ollama-local/ })).not.toBeInTheDocument()
@@ -1027,9 +1026,7 @@ describe('agents configure page model binding', () => {
 
     await waitFor(() => expect(captured.patch).toBeTruthy())
     const routes = captured.patch?.model_overrides?.routes ?? {}
-    expect(routes.default?.[0]?.model_id).toBe('ollama-local')
     expect(routes.embedding?.[0]?.model_id).toBe('embed-1')
-    expect(routes.memory_extraction?.[0]?.model_id).toBe('openai-gpt4')
     expect(routes.image_generation?.[0]?.model_id).toBe('imagegen-1')
   })
 
@@ -1122,6 +1119,7 @@ describe('agents configure page model binding', () => {
     renderAgentsRoute('/agents/alpha/configure')
     expect(await screen.findByRole('heading', { name: 'Configure · alpha' })).toBeInTheDocument()
 
+    await user.click(await screen.findByRole('tab', { name: 'Models' }))
     const imageGenTrigger = screen.getByRole('combobox', { name: 'Image generation model' })
     // The selector stays disabled until the model list loads; wait for it before opening.
     await waitFor(() => expect(imageGenTrigger).toBeEnabled())

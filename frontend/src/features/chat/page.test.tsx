@@ -163,4 +163,60 @@ describe('chat page', () => {
     expect(await screen.findByText('No agents available.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
   })
+
+  it('sends the message when pressing Enter', async () => {
+    const user = userEvent.setup({ delay: null })
+    const encoder = new TextEncoder()
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/agents`, () =>
+        HttpResponse.json([{ agent_name: 'alpha', provenance: 'adhoc', status: 'enabled' }])
+      ),
+      http.post(`${API_BASE_URL}/admin/agents/alpha/chat`, () => {
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoder.encode('data: {"type":"text_delta","content":"pong"}\n\n'))
+            controller.enqueue(encoder.encode('data: {"type":"done","content":""}\n\n'))
+            controller.close()
+          },
+        })
+        return new Response(stream, { headers: { 'content-type': 'text/event-stream' }, status: 200 })
+      })
+    )
+
+    renderChatPage()
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'Agent' })).toHaveTextContent('alpha')
+    })
+
+    await user.type(screen.getByLabelText('Message'), 'ping')
+    await user.keyboard('{Enter}')
+
+    await waitFor(() => {
+      expect(within(screen.getByTestId('chat-transcript')).getByText('pong')).toBeInTheDocument()
+    })
+  })
+
+  it('inserts a newline on ctrl+enter without sending', async () => {
+    const user = userEvent.setup({ delay: null })
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/agents`, () =>
+        HttpResponse.json([{ agent_name: 'alpha', provenance: 'adhoc', status: 'enabled' }])
+      )
+    )
+
+    renderChatPage()
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'Agent' })).toHaveTextContent('alpha')
+    })
+
+    const textarea = screen.getByLabelText('Message') as HTMLTextAreaElement
+    await user.type(textarea, 'first')
+    await user.keyboard('{Control>}{Enter}{/Control}')
+    await user.type(textarea, 'second')
+
+    expect(textarea.value).toBe('first\nsecond')
+    expect(within(screen.getByTestId('chat-transcript')).queryByText('first')).not.toBeInTheDocument()
+  })
 })
