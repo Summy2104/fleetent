@@ -93,6 +93,19 @@ def sync_external_git(*, trigger: str = "scheduled") -> dict[str, Any]:
         return {"error": str(exc)}
 
 
+def _finish_unchanged(sha: str, trigger: str) -> dict[str, Any]:
+    """Record a no-change sync. A manual trigger still re-aligns catalog status (the
+    operator's lever to recover drift like a skill left archived); scheduled/webhook
+    ticks are a cheap no-op. Neither fetches or resets — the pool already holds this sha."""
+    if trigger == "manual":
+        _realign_status_only(_pool_dir())
+        skill_registry.reload(str(_pool_dir()))
+        git_source_store.record_sync(commit=sha, at=_now(), error=None)
+        return {"changed": False, "reconciled": True, "commit": sha}
+    git_source_store.record_sync(commit=sha, at=_now(), error=None)
+    return {"changed": False, "commit": sha}
+
+
 def _do_sync(config: dict[str, Any], trigger: str) -> dict[str, Any]:
     remote_url = str(config["remote_url"])
     branch = str(config.get("branch") or "main")
@@ -104,22 +117,32 @@ def _do_sync(config: dict[str, Any], trigger: str) -> dict[str, Any]:
     subdir = str(config.get("skills_subdir") or "")
 
     pool_git.init_pool_with_remote(git_root, remote_url)
+
+    last_synced = config.get("last_synced_commit")
+
+    # Cheap refs-only probe before the expensive full fetch: fetching a large mirror
+    # (hundreds of branches, tens of thousands of objects) with pure-Python dulwich takes
+    # minutes, and the common case — a manual "sync now" or a scheduled tick with no new
+    # upstream commit — needs none of it. ls-remote transfers only the ref advertisement,
+    # so when the branch tip already matches last_synced we skip the fetch entirely. A
+    # probe failure (None) falls through to a real fetch, preserving correctness.
+    probed_head: str | None = None
+    try:
+        probed_head = pool_git.get_remote_head(
+            remote_url, branch, username=username, password=password
+        )
+    except Exception as exc:  # noqa: BLE001 — probe is best-effort; fall back to full fetch
+        logger.info("skill_git_ls_remote_probe_failed error=%s (falling back to fetch)", exc)
+
+    if probed_head is not None and probed_head == last_synced:
+        return _finish_unchanged(probed_head, trigger)
+
     remote_sha = pool_git.fetch_remote(
         git_root, remote_url=remote_url, branch=branch, username=username, password=password
     )
-    if remote_sha == config.get("last_synced_commit"):
-        # A manual "sync now" is also a "reconcile now": the operator may be recovering
-        # catalog state that drifted (e.g. a skill left archived) even when the remote has
-        # no new commit. Skip the heavy fetch/reset (the pool is already at this sha and
-        # still carries its re-seeded builtins) but re-run the catalog reconcile + index
-        # reload. Scheduled/webhook syncs keep the cheap no-op short-circuit.
-        if trigger == "manual":
-            _realign_status_only(_pool_dir())
-            skill_registry.reload(str(_pool_dir()))
-            git_source_store.record_sync(commit=remote_sha, at=_now(), error=None)
-            return {"changed": False, "reconciled": True, "commit": remote_sha}
-        git_source_store.record_sync(commit=remote_sha, at=_now(), error=None)
-        return {"changed": False, "commit": remote_sha}
+    if remote_sha == last_synced:
+        # Safety net: the probe failed/skipped but the fetch confirms nothing changed.
+        return _finish_unchanged(remote_sha, trigger)
 
     pool_git.reset_pool_to(git_root, remote_sha)
     # Reconcile while HEAD == the fetched commit so per-skill versions resolve to the mirrored

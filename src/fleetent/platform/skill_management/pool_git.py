@@ -527,6 +527,34 @@ def init_pool_with_remote(pool_dir: Path, remote_url: str) -> None:
         repo.close()
 
 
+def get_remote_head(
+    remote_url: str,
+    branch: str,
+    *,
+    username: str | None = None,
+    password: str | None = None,
+) -> str | None:
+    """Return the remote branch tip sha via a refs-only ls-remote (no object transfer).
+
+    A cheap probe (transfers only the ref advertisement, not objects) used to skip the
+    full ``fetch_remote`` of a large mirror when the branch tip is unchanged. Returns None
+    if the branch is absent or the probe fails, so the caller falls back to a real fetch.
+    Credentials apply to http(s) remotes; ssh remotes authenticate via the agent's key.
+    """
+    from dulwich import porcelain
+
+    ref = b"refs/heads/" + branch.encode()
+    try:
+        refs: Any = porcelain.ls_remote(remote_url)
+    except TypeError:
+        # Older/newer dulwich signatures may reject positional-only; retry via keyword.
+        refs = porcelain.ls_remote(remote=remote_url)
+    sha = refs.get(ref) if refs else None
+    if sha is None:
+        return None
+    return sha.decode() if isinstance(sha, bytes) else str(sha)
+
+
 def fetch_remote(
     pool_dir: Path,
     *,

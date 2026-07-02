@@ -69,6 +69,8 @@ def test_sync_bulkheads_fetch_failure(monkeypatch) -> None:
     monkeypatch.setattr(pool_sync, "_pool_dir", lambda: Path("/tmp/pool"))
     monkeypatch.setattr(pool_sync, "_secret", lambda env: None)
     monkeypatch.setattr(pool_sync.pool_git, "init_pool_with_remote", lambda *a, **k: None)
+    # Probe returns a differing tip so the flow proceeds to the (failing) fetch.
+    monkeypatch.setattr(pool_sync.pool_git, "get_remote_head", lambda *a, **k: "newsha")
 
     def _raise(*a, **k):
         raise RuntimeError("net down")
@@ -84,7 +86,8 @@ def test_sync_bulkheads_fetch_failure(monkeypatch) -> None:
     assert rec.call_args.kwargs["error"] == "net down"
 
 
-def test_sync_short_circuits_when_sha_unchanged(monkeypatch) -> None:
+def test_sync_skips_fetch_when_remote_tip_unchanged(monkeypatch) -> None:
+    """The refs-only probe short-circuits a full fetch when the branch tip is unchanged."""
     cfg = {
         "enabled": 1,
         "remote_url": "https://git/x",
@@ -95,15 +98,75 @@ def test_sync_short_circuits_when_sha_unchanged(monkeypatch) -> None:
     monkeypatch.setattr(pool_sync, "_pool_dir", lambda: Path("/tmp/pool"))
     monkeypatch.setattr(pool_sync, "_secret", lambda env: None)
     monkeypatch.setattr(pool_sync.pool_git, "init_pool_with_remote", lambda *a, **k: None)
-    monkeypatch.setattr(pool_sync.pool_git, "fetch_remote", lambda *a, **k: "abc")
+    monkeypatch.setattr(pool_sync.pool_git, "get_remote_head", lambda *a, **k: "abc")
+    fetch = mock.Mock()
     reset = mock.Mock()
+    monkeypatch.setattr(pool_sync.pool_git, "fetch_remote", fetch)
     monkeypatch.setattr(pool_sync.pool_git, "reset_pool_to", reset)
     monkeypatch.setattr(pool_sync.git_source_store, "record_sync", mock.Mock())
 
-    result = pool_sync.sync_external_git()
+    result = pool_sync.sync_external_git(trigger="scheduled")
 
     assert result.get("changed") is False
+    fetch.assert_not_called()  # the whole point: no expensive fetch when tip is unchanged
     reset.assert_not_called()
+
+
+def test_manual_sync_skips_fetch_but_realigns_when_tip_unchanged(monkeypatch) -> None:
+    """A manual trigger with an unchanged tip still re-aligns status (drift recovery) but
+    must not fetch — the fetch is the slow part we are avoiding."""
+    cfg = {
+        "enabled": 1,
+        "remote_url": "https://git/x",
+        "branch": "main",
+        "last_synced_commit": "abc",
+    }
+    monkeypatch.setattr(pool_sync.git_source_store, "get_config", lambda: cfg)
+    monkeypatch.setattr(pool_sync, "_pool_dir", lambda: Path("/tmp/pool"))
+    monkeypatch.setattr(pool_sync, "_secret", lambda env: None)
+    monkeypatch.setattr(pool_sync.pool_git, "init_pool_with_remote", lambda *a, **k: None)
+    monkeypatch.setattr(pool_sync.pool_git, "get_remote_head", lambda *a, **k: "abc")
+    fetch = mock.Mock()
+    realign = mock.Mock()
+    monkeypatch.setattr(pool_sync.pool_git, "fetch_remote", fetch)
+    monkeypatch.setattr(pool_sync, "_realign_status_only", realign)
+    monkeypatch.setattr(pool_sync.skill_registry, "reload", mock.Mock())
+    monkeypatch.setattr(pool_sync.git_source_store, "record_sync", mock.Mock())
+
+    result = pool_sync.sync_external_git(trigger="manual")
+
+    assert result.get("changed") is False
+    assert result.get("reconciled") is True
+    fetch.assert_not_called()
+    realign.assert_called_once()
+
+
+def test_probe_failure_falls_back_to_full_fetch(monkeypatch) -> None:
+    """If the ls-remote probe raises, sync must still fall through to a real fetch."""
+    cfg = {
+        "enabled": 1,
+        "remote_url": "https://git/x",
+        "branch": "main",
+        "last_synced_commit": "abc",
+    }
+    monkeypatch.setattr(pool_sync.git_source_store, "get_config", lambda: cfg)
+    monkeypatch.setattr(pool_sync, "_pool_dir", lambda: Path("/tmp/pool"))
+    monkeypatch.setattr(pool_sync, "_secret", lambda env: None)
+    monkeypatch.setattr(pool_sync.pool_git, "init_pool_with_remote", lambda *a, **k: None)
+
+    def _probe_boom(*a, **k):
+        raise RuntimeError("ls-remote unreachable")
+
+    monkeypatch.setattr(pool_sync.pool_git, "get_remote_head", _probe_boom)
+    fetch = mock.Mock(return_value="abc")  # fetch confirms unchanged
+    monkeypatch.setattr(pool_sync.pool_git, "fetch_remote", fetch)
+    monkeypatch.setattr(pool_sync.pool_git, "reset_pool_to", mock.Mock())
+    monkeypatch.setattr(pool_sync.git_source_store, "record_sync", mock.Mock())
+
+    result = pool_sync.sync_external_git(trigger="scheduled")
+
+    assert result.get("changed") is False
+    fetch.assert_called_once()  # probe failed -> real fetch happened
 
 
 # --- git-root / scan-root split (R1) ------------------------------------------
@@ -120,7 +183,9 @@ def _stub_do_sync_collaborators(monkeypatch, cfg: dict) -> dict[str, mock.Mock]:
         "reset_pool_to": mock.Mock(),
         "commit_pool": mock.Mock(return_value=None),
         "list_pool_skills": mock.Mock(return_value=[]),
-        # remote sha differs from last_synced_commit -> take the "changed" path.
+        # Probe returns None (unavailable) so the flow falls through to a real fetch;
+        # fetch's sha differs from last_synced_commit -> the "changed" path.
+        "get_remote_head": mock.Mock(return_value=None),
         "fetch_remote": mock.Mock(return_value="newsha"),
     }
     for name, m in mocks.items():
