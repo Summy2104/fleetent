@@ -120,19 +120,19 @@ def _has_staged_changes(pool_dir: Path) -> bool:
     from dulwich.diff_tree import tree_changes
     from dulwich.repo import Repo
 
-    r = Repo(str(pool_dir))
-    index = r.open_index()
-    index_tree_id = index.commit(r.object_store)
+    with Repo(str(pool_dir)) as r:
+        index = r.open_index()
+        index_tree_id = index.commit(r.object_store)
 
-    try:
-        head_commit: Any = r[r.head()]
-        head_tree = head_commit.tree
-    except Exception:
-        # No HEAD yet — any staged content counts as a change
-        return True
+        try:
+            head_commit: Any = r[r.head()]
+            head_tree = head_commit.tree
+        except Exception:
+            # No HEAD yet — any staged content counts as a change
+            return True
 
-    changes = list(tree_changes(r.object_store, head_tree, index_tree_id))
-    return len(changes) > 0
+        changes = list(tree_changes(r.object_store, head_tree, index_tree_id))
+        return len(changes) > 0
 
 
 def _stage_paths(pool_dir: Path, skill_name: str | None = None, *, subdir: str = "") -> None:
@@ -166,15 +166,15 @@ def _stage_paths(pool_dir: Path, skill_name: str | None = None, *, subdir: str =
         from dulwich.repo import Repo
 
         try:
-            r = Repo(str(pool_dir))
-            index = r.open_index()
-            prefix = (tree_path + "/").encode()
-            for tracked in list(index):
-                if tracked.startswith(prefix):
-                    full = pool_dir / tracked.decode()
-                    if not full.exists():
-                        del index[tracked]
-            index.write()
+            with Repo(str(pool_dir)) as r:
+                index = r.open_index()
+                prefix = (tree_path + "/").encode()
+                for tracked in list(index):
+                    if tracked.startswith(prefix):
+                        full = pool_dir / tracked.decode()
+                        if not full.exists():
+                            del index[tracked]
+                index.write()
         except Exception:
             pass
     elif subdir:
@@ -265,16 +265,17 @@ def pool_version_for_skill(pool_dir: Path, skill_name: str, *, subdir: str = "")
     from dulwich.repo import Repo
 
     try:
-        r = Repo(str(pool_dir))
+        repo = Repo(str(pool_dir))
     except Exception:
         return None
 
-    tree_path = _skill_tree_path(subdir, skill_name)
-    try:
-        for entry in r.get_walker(paths=[tree_path.encode()]):
-            return entry.commit.id.decode()
-    except Exception:
-        pass
+    with repo as r:
+        tree_path = _skill_tree_path(subdir, skill_name)
+        try:
+            for entry in r.get_walker(paths=[tree_path.encode()]):
+                return entry.commit.id.decode()
+        except Exception:
+            pass
     return None
 
 
@@ -289,25 +290,26 @@ def pool_skill_history(
     from dulwich.repo import Repo
 
     try:
-        r = Repo(str(pool_dir))
+        repo = Repo(str(pool_dir))
     except Exception:
         return []
 
-    tree_path = _skill_tree_path(subdir, skill_name)
-    result: list[dict[str, Any]] = []
-    try:
-        for entry in r.get_walker(paths=[tree_path.encode()], max_entries=max_entries):
-            result.append(
-                {
-                    "sha": entry.commit.id.decode(),
-                    "message": entry.commit.message.decode(errors="replace").strip(),
-                    "author": entry.commit.author.decode(errors="replace"),
-                    "timestamp": entry.commit.author_time,
-                }
-            )
-    except Exception:
-        pass
-    return result
+    with repo as r:
+        tree_path = _skill_tree_path(subdir, skill_name)
+        result: list[dict[str, Any]] = []
+        try:
+            for entry in r.get_walker(paths=[tree_path.encode()], max_entries=max_entries):
+                result.append(
+                    {
+                        "sha": entry.commit.id.decode(),
+                        "message": entry.commit.message.decode(errors="replace").strip(),
+                        "author": entry.commit.author.decode(errors="replace"),
+                        "timestamp": entry.commit.author_time,
+                    }
+                )
+        except Exception:
+            pass
+        return result
 
 
 def pool_diff_for_commit(
@@ -327,65 +329,66 @@ def pool_diff_for_commit(
     from dulwich.repo import Repo
 
     try:
-        r = Repo(str(pool_dir))
+        repo = Repo(str(pool_dir))
     except Exception:
         return {"diff": "", "truncated": False, "changed_files": [], "error": "no repo"}
 
-    try:
-        commit: Any = r[ref.encode()]
-    except Exception:
-        return {
-            "diff": "",
-            "truncated": False,
-            "changed_files": [],
-            "error": f"ref {ref!r} not found",
-        }
-
-    parent_tree = None
-    if commit.parents:
+    with repo as r:
         try:
-            parent: Any = r[commit.parents[0]]
-            parent_tree = parent.tree
+            commit: Any = r[ref.encode()]
+        except Exception:
+            return {
+                "diff": "",
+                "truncated": False,
+                "changed_files": [],
+                "error": f"ref {ref!r} not found",
+            }
+
+        parent_tree = None
+        if commit.parents:
+            try:
+                parent: Any = r[commit.parents[0]]
+                parent_tree = parent.tree
+            except Exception:
+                pass
+
+        out = io.BytesIO()
+        try:
+            write_tree_diff(out, r.object_store, parent_tree, commit.tree)
+        except Exception as exc:
+            return {"diff": "", "truncated": False, "changed_files": [], "error": str(exc)}
+
+        raw = out.getvalue()
+
+        # Collect changed files scoped to the skill subtree
+        tree_path = _skill_tree_path(subdir, skill_name)
+        skill_prefix = tree_path + "/"
+        changed_files: list[str] = []
+        try:
+            for change in tree_changes(r.object_store, parent_tree, commit.tree):
+                new_path = change.new.path if change.new is not None else None
+                old_path = change.old.path if change.old is not None else None
+                path = (new_path or old_path or b"").decode(errors="replace")
+                if path.startswith(skill_prefix) or path == tree_path:
+                    changed_files.append(path)
         except Exception:
             pass
 
-    out = io.BytesIO()
-    try:
-        write_tree_diff(out, r.object_store, parent_tree, commit.tree)
-    except Exception as exc:
-        return {"diff": "", "truncated": False, "changed_files": [], "error": str(exc)}
+        if len(raw) > _DIFF_SIZE_LIMIT:
+            return {
+                "diff": "",
+                "truncated": True,
+                "changed_files": changed_files,
+                "warning": (
+                    f"diff exceeds {_DIFF_SIZE_LIMIT // 1024} KiB; showing changed file names only"
+                ),
+            }
 
-    raw = out.getvalue()
-
-    # Collect changed files scoped to the skill subtree
-    tree_path = _skill_tree_path(subdir, skill_name)
-    skill_prefix = tree_path + "/"
-    changed_files: list[str] = []
-    try:
-        for change in tree_changes(r.object_store, parent_tree, commit.tree):
-            new_path = change.new.path if change.new is not None else None
-            old_path = change.old.path if change.old is not None else None
-            path = (new_path or old_path or b"").decode(errors="replace")
-            if path.startswith(skill_prefix) or path == tree_path:
-                changed_files.append(path)
-    except Exception:
-        pass
-
-    if len(raw) > _DIFF_SIZE_LIMIT:
         return {
-            "diff": "",
-            "truncated": True,
+            "diff": raw.decode(errors="replace"),
+            "truncated": False,
             "changed_files": changed_files,
-            "warning": (
-                f"diff exceeds {_DIFF_SIZE_LIMIT // 1024} KiB; showing changed file names only"
-            ),
         }
-
-    return {
-        "diff": raw.decode(errors="replace"),
-        "truncated": False,
-        "changed_files": changed_files,
-    }
 
 
 def _descend_to_tree(object_store: Any, root_tree: Any, tree_path: str) -> Any | None:
@@ -418,19 +421,24 @@ def pool_content_at(pool_dir: Path, skill_name: str, ref: str, *, subdir: str = 
     from dulwich.repo import Repo
 
     try:
-        r = Repo(str(pool_dir))
-        commit: Any = r[ref.encode()]
-        tree: Any = r.object_store[commit.tree]
-        tree_path = _skill_tree_path(subdir, skill_name)
-        subtree = _descend_to_tree(r.object_store, tree, tree_path)
-        if subtree is None:
-            return None
-        for subitem in subtree.items():
-            if subitem.path.decode() == "SKILL.md":
-                blob: Any = r.object_store[subitem.sha]
-                return str(blob.data.decode(errors="replace"))
+        repo = Repo(str(pool_dir))
     except Exception:
-        pass
+        return None
+
+    with repo as r:
+        try:
+            commit: Any = r[ref.encode()]
+            tree: Any = r.object_store[commit.tree]
+            tree_path = _skill_tree_path(subdir, skill_name)
+            subtree = _descend_to_tree(r.object_store, tree, tree_path)
+            if subtree is None:
+                return None
+            for subitem in subtree.items():
+                if subitem.path.decode() == "SKILL.md":
+                    blob: Any = r.object_store[subitem.sha]
+                    return str(blob.data.decode(errors="replace"))
+        except Exception:
+            pass
     return None
 
 
@@ -446,30 +454,35 @@ def pool_bundle_at(
     from dulwich.repo import Repo
 
     try:
-        r = Repo(str(pool_dir))
-        commit: Any = r[ref.encode()]
-        tree: Any = r.object_store[commit.tree]
-        tree_path = _skill_tree_path(subdir, skill_name)
-        subtree = _descend_to_tree(r.object_store, tree, tree_path)
-        if subtree is None:
-            return None
-        bundle: dict[str, str] = {}
-
-        def _walk(prefix: str, node: Any, out: dict[str, str]) -> None:
-            for subitem in node.items():
-                name = subitem.path.decode()
-                child = r.object_store[subitem.sha]
-                relpath = f"{prefix}{name}"
-                if hasattr(child, "items"):
-                    _walk(relpath + "/", child, out)
-                else:
-                    blob_data = getattr(child, "data", b"")
-                    out[relpath] = str(blob_data.decode(errors="replace"))
-
-        _walk("", subtree, bundle)
-        return bundle
+        repo = Repo(str(pool_dir))
     except Exception:
-        pass
+        return None
+
+    with repo as r:
+        try:
+            commit: Any = r[ref.encode()]
+            tree: Any = r.object_store[commit.tree]
+            tree_path = _skill_tree_path(subdir, skill_name)
+            subtree = _descend_to_tree(r.object_store, tree, tree_path)
+            if subtree is None:
+                return None
+            bundle: dict[str, str] = {}
+
+            def _walk(prefix: str, node: Any, out: dict[str, str]) -> None:
+                for subitem in node.items():
+                    name = subitem.path.decode()
+                    child = r.object_store[subitem.sha]
+                    relpath = f"{prefix}{name}"
+                    if hasattr(child, "items"):
+                        _walk(relpath + "/", child, out)
+                    else:
+                        blob_data = getattr(child, "data", b"")
+                        out[relpath] = str(blob_data.decode(errors="replace"))
+
+            _walk("", subtree, bundle)
+            return bundle
+        except Exception:
+            pass
     return None
 
 

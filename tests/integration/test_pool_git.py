@@ -391,3 +391,53 @@ def test_subdir_default_matches_flat_layout(tmp_path):
     diff_empty = pool_git.pool_diff_for_commit(tmp_path, "alpha", sha, subdir="")
     assert diff_default["changed_files"] == diff_empty["changed_files"]
     assert diff_default["changed_files"] == ["alpha/SKILL.md"]
+
+
+# --- regression: read ops must not leak dulwich Repo file descriptors --------
+
+
+def test_read_ops_close_every_repo_they_open(tmp_path, monkeypatch):
+    """Every dulwich Repo the read/stage helpers open must be closed.
+
+    A reconcile pass calls these once per skill; leaking one Repo (its packfile
+    descriptors) per call exhausts the process fd limit on a large mirror and
+    surfaces as OSError: Too many open files. Spy the Repo class to assert opens
+    and closes stay balanced.
+    """
+    import dulwich.repo as dulwich_repo
+
+    pool_git.init_pool(tmp_path)
+    _make_skill(tmp_path, "alpha", "v1")
+    sha = pool_git.commit_pool(
+        tmp_path, message="edit: alpha", author="admin <a@a.com>", skill_name="alpha"
+    )
+    assert sha is not None
+
+    real_repo = dulwich_repo.Repo
+    counts = {"opened": 0, "closed": 0}
+
+    class _SpyRepo(real_repo):  # type: ignore[misc, valid-type]
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            counts["opened"] += 1
+
+        def close(self) -> None:
+            counts["closed"] += 1
+            super().close()
+
+    monkeypatch.setattr(dulwich_repo, "Repo", _SpyRepo)
+
+    # Exercise every read/stage helper that opens a Repo directly.
+    pool_git.pool_version_for_skill(tmp_path, "alpha")
+    pool_git.pool_skill_history(tmp_path, "alpha")
+    pool_git.pool_content_at(tmp_path, "alpha", "HEAD")
+    pool_git.pool_bundle_at(tmp_path, "alpha", "HEAD")
+    pool_git.pool_diff_for_commit(tmp_path, "alpha", sha)
+    pool_git.commit_pool(
+        tmp_path, message="edit: alpha again", author="admin <a@a.com>", skill_name="alpha"
+    )
+
+    assert counts["opened"] > 0
+    assert counts["closed"] == counts["opened"], (
+        f"leaked {counts['opened'] - counts['closed']} Repo handle(s)"
+    )
