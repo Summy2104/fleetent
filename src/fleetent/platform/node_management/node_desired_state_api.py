@@ -17,8 +17,8 @@ from fleetent.platform.agent_lifecycle import credential_slots, materialize, sec
 from fleetent.platform.agent_management_console import agent_admin_store
 from fleetent.platform.model_provider_management import provider_admin_store
 from fleetent.platform.node_management import node_store, placement_store
-from fleetent.platform.skill_management import bundle_cache, skill_admin_store
-from fleetent.platform.skill_management.pool_git import pool_version_for_skill
+from fleetent.platform.skill_management import bundle_cache, git_source_store, skill_admin_store
+from fleetent.platform.skill_management.pool_git import pool_version_for_skill, resolve_git_root
 from fleetent.platform.user_management import user_admin_api
 from fleetent.skills import registry as skill_registry
 
@@ -366,6 +366,8 @@ def _project_skill_status(report: NodeAgentStatusReport) -> None:
 
 def _skill_manifests_for(node_id: str, agent: agent_store.Agent) -> list[dict[str, str]]:
     pool_dir = _skill_pool_dir()
+    subdir = _skills_subdir()
+    git_root = resolve_git_root(pool_dir, subdir)
     manifests: list[dict[str, str]] = []
     for skill_name in materialize.agent_file_from_store(agent).allowed_skills:
         skill_dir = pool_dir / skill_name
@@ -382,7 +384,7 @@ def _skill_manifests_for(node_id: str, agent: agent_store.Agent) -> list[dict[st
             {
                 "name": skill_name,
                 "base_version": base_version,
-                "base_commit": pool_version_for_skill(pool_dir, skill_name) or "",
+                "base_commit": pool_version_for_skill(git_root, skill_name, subdir=subdir) or "",
                 "bundle_url": (
                     f"/nodes/{node_id}/skills/{skill_name}/bundles/{base_version}.tar.gz"
                 ),
@@ -395,6 +397,12 @@ def _skill_manifests_for(node_id: str, agent: agent_store.Agent) -> list[dict[st
 
 def _skill_pool_dir() -> Path:
     return Path(skill_registry._resolve_skills_dir(None))
+
+
+def _skills_subdir() -> str:
+    """Return the configured ``skills_subdir`` (``""`` when unconfigured)."""
+    config = git_source_store.get_config()
+    return (config.get("skills_subdir") or "") if config is not None else ""
 
 
 def _bundle_cache_dir() -> Path:

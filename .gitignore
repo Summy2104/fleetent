@@ -42,6 +42,9 @@ secrets/
 # Scratch / local dev logs
 scratchpad/
 
+# subagent-driven-development scratch (task briefs, reports, review packages)
+.superpowers/
+
 # Browser self-test artifacts (Playwright MCP)
 .playwright-mcp/
 

@@ -418,6 +418,10 @@ class SchedulingSettings(BaseModel):
     tick_interval_seconds: float = 10.0
     max_parallel: int = 4
     history_retention: int = 50
+    skill_git_sync_interval_seconds: int = 300
+    # Backflow PR sweep runs more often than inbound sync: backing up an agent's edit to a
+    # branch is safety-critical, so prefer a short interval.
+    skill_backflow_pr_sweep_interval_seconds: int = 120
 
 
 class WebhookSourceSettings(BaseModel):
