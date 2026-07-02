@@ -148,12 +148,12 @@ export function ServerDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent>
+      <DialogContent className="grid max-h-[90vh] grid-rows-[auto_minmax(0,1fr)_auto]">
         <DialogHeader>
           <DialogTitle>{isEdit ? t('mcp.editTitle', { name: editing?.id ?? '' }) : t('mcp.addTitle')}</DialogTitle>
           <DialogDescription>{t('mcp.dialogDescription')}</DialogDescription>
         </DialogHeader>
-        <div className="grid gap-4">
+        <div className="grid min-h-0 gap-4 overflow-y-auto pr-1">
           <div className="grid gap-2">
             <Label htmlFor="mcp-id">
               {t('mcp.idLabel')} <span className="text-destructive">*</span>

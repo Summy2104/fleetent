@@ -82,11 +82,25 @@ export function ChatPage(): JSX.Element {
   }
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+    if (event.key !== 'Enter') {
+      return
+    }
+    // Ctrl/Cmd+Enter (or Shift+Enter) inserts a newline at the caret; a bare Enter sends.
+    if (event.metaKey || event.ctrlKey || event.shiftKey) {
       event.preventDefault()
-      if (canSend) {
-        void onSubmit()
-      }
+      const target = event.currentTarget
+      const start = target.selectionStart ?? draft.length
+      const end = target.selectionEnd ?? draft.length
+      const caret = start + 1
+      setDraft(`${draft.slice(0, start)}\n${draft.slice(end)}`)
+      window.requestAnimationFrame(() => {
+        target.setSelectionRange(caret, caret)
+      })
+      return
+    }
+    event.preventDefault()
+    if (canSend) {
+      void onSubmit()
     }
   }
 

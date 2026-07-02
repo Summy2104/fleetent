@@ -117,6 +117,179 @@ def test_agent_file_from_store_exports_authored_runtime_config(db):
     )
 
 
+def test_agent_file_from_store_expands_vision_kb_extraction_rerank_routes(db):
+    """Newly UI-exposed routes (vision/kb_extraction/rerank) expand with the right protocol."""
+    provider_admin_store.add_provider(
+        "chat-model",
+        "https://api.anthropic.com/v1/",
+        "claude-sonnet-4-5",
+        provider="anthropic",
+        protocol="openai_chat",
+        api_key_env="FLEETENT_AGENT_R_CHAT",
+        max_tokens=4096,
+    )
+    provider_admin_store.add_provider(
+        "rerank-model",
+        "https://rerank.acme.internal/rerank",
+        "bge-reranker-large",
+        provider="acme",
+        protocol="http_rerank",
+        api_key_env="FLEETENT_AGENT_R_RERANK",
+    )
+    agent_store.create_agent(
+        "router",
+        "You are router.",
+        ["search_*"],
+        model_overrides={
+            "vision": [{"provider_id": "chat-model"}],
+            "kb_extraction": [{"provider_id": "chat-model"}],
+            "rerank": [{"provider_id": "rerank-model"}],
+        },
+    )
+
+    exported = materialize.agent_file_from_store(agent_store.get_by_name("router"))
+    targets = {target.id: target for target in exported.models.targets}
+
+    assert exported.models.routes["vision"][0].target == "chat-model"
+    assert exported.models.routes["kb_extraction"][0].target == "chat-model"
+    assert exported.models.routes["rerank"][0].target == "rerank-model"
+    assert targets["chat-model"].protocol == "openai_chat"
+    assert targets["rerank-model"].protocol == "http_rerank"
+    assert targets["rerank-model"].endpoint == "https://rerank.acme.internal/rerank"
+
+
+def test_agent_file_from_store_expands_fallback_chain_with_per_entry_params(db):
+    """A route authored with 2 entries + per-entry overrides materializes into an ordered
+    fallback chain, and resolve() merges each entry's params/max_tokens over its target."""
+    from fleetent.model import ModelPolicySnapshot
+
+    provider_admin_store.add_provider(
+        "primary-chat",
+        "https://api.anthropic.com/v1/",
+        "claude-sonnet-4-5",
+        provider="anthropic",
+        protocol="openai_chat",
+        api_key_env="FLEETENT_AGENT_C_PRIMARY",
+        max_tokens=4096,
+        params={"temperature": 0.2},
+    )
+    provider_admin_store.add_provider(
+        "backup-chat",
+        "https://vllm.acme.internal/v1/",
+        "qwen3-32b",
+        provider="acme",
+        protocol="openai_chat",
+        api_key_env="FLEETENT_AGENT_C_BACKUP",
+        max_tokens=2048,
+    )
+    agent_store.create_agent(
+        "chained",
+        "You are chained.",
+        ["search_*"],
+        model_overrides={
+            "default": [
+                {"model_id": "primary-chat", "params": {"temperature": 0.7}},
+                {"model_id": "backup-chat", "max_tokens": 1024, "params": {"temperature": 0.5}},
+            ]
+        },
+    )
+
+    exported = materialize.agent_file_from_store(agent_store.get_by_name("chained"))
+    chain = exported.models.routes["default"]
+    assert [entry.target for entry in chain] == ["primary-chat", "backup-chat"]
+
+    resolved = ModelPolicySnapshot.from_agent(exported).resolve("default")
+    assert [r.target_id for r in resolved] == ["primary-chat", "backup-chat"]
+    # Entry params override the target's registered params; entry max_tokens wins when set.
+    assert resolved[0].params["temperature"] == 0.7
+    assert resolved[1].params["temperature"] == 0.5
+    assert resolved[1].max_tokens == 1024
+
+
+def test_agent_file_from_store_expands_named_tiers_referenced_by_routes(db):
+    """Named tier targets (primary/backup) are built from the `targets` block and routes
+    reference them by name, with two-level param merge (tier default + per-route override)."""
+    from fleetent.model import ModelPolicySnapshot
+
+    provider_admin_store.add_provider(
+        "gpt4o",
+        "https://api.openai.example/v1/",
+        "gpt-4o",
+        provider="openai",
+        protocol="openai_chat",
+        api_key_env="FLEETENT_AGENT_T_GPT",
+        max_tokens=4096,
+        params={"temperature": 0.5},
+    )
+    provider_admin_store.add_provider(
+        "qwen",
+        "https://vllm.acme.internal/v1/",
+        "qwen3-32b",
+        provider="acme",
+        protocol="openai_chat",
+        api_key_env="FLEETENT_AGENT_T_QWEN",
+    )
+    agent_store.create_agent(
+        "tiered",
+        "You are tiered.",
+        ["search_*"],
+        model_overrides={
+            "targets": {
+                "primary": {"model_id": "gpt4o"},
+                "backup": {"model_id": "qwen"},
+            },
+            "routes": {
+                "default": [
+                    {"target": "primary", "params": {"temperature": 0.7}},
+                    {"target": "backup"},
+                ],
+                "vision": [{"target": "primary", "params": {"temperature": 0.2}}],
+            },
+        },
+    )
+
+    exported = materialize.agent_file_from_store(agent_store.get_by_name("tiered"))
+    targets = {target.id: target for target in exported.models.targets}
+    assert "primary" in targets and "backup" in targets
+    assert targets["primary"].model == "gpt-4o"
+    assert targets["backup"].model == "qwen3-32b"
+    assert [entry.target for entry in exported.models.routes["default"]] == ["primary", "backup"]
+    assert [entry.target for entry in exported.models.routes["vision"]] == ["primary"]
+
+    policy = ModelPolicySnapshot.from_agent(exported)
+    default_chain = policy.resolve("default")
+    assert [r.target_id for r in default_chain] == ["primary", "backup"]
+    assert default_chain[0].params["temperature"] == 0.7  # route override beats tier default
+    # vision reuses the SAME primary tier at a different per-route temperature.
+    assert policy.resolve("vision")[0].params["temperature"] == 0.2
+
+
+def test_named_tier_route_entry_dropped_when_tier_undefined(db):
+    """A route entry referencing an undefined tier is dropped rather than materializing a bogus
+    target (no `backup` tier defined -> that entry disappears, no phantom target)."""
+    provider_admin_store.add_provider(
+        "gpt4o",
+        "https://api.openai.example/v1/",
+        "gpt-4o",
+        provider="openai",
+        protocol="openai_chat",
+        api_key_env="FLEETENT_AGENT_U_GPT",
+    )
+    agent_store.create_agent(
+        "partial",
+        "p",
+        ["search_*"],
+        model_overrides={
+            "targets": {"primary": {"model_id": "gpt4o"}},
+            "routes": {"default": [{"target": "primary"}, {"target": "backup"}]},
+        },
+    )
+
+    exported = materialize.agent_file_from_store(agent_store.get_by_name("partial"))
+    assert [entry.target for entry in exported.models.routes["default"]] == ["primary"]
+    assert "backup" not in {target.id for target in exported.models.targets}
+
+
 def test_agent_file_from_store_exports_mcp_headers(db):
     """MCP 自定义 headers 必须随 materialize 导出（mcp-headers-managed-sync）。"""
     agent = agent_store.create_agent("support", "p", [], mcp_server_ids=["docs"])
