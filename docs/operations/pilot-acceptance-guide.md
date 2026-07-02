@@ -348,7 +348,7 @@ FLEETENT_GOOGLE_DRIVE_EXECUTE_SYNC=1 \
 需要补跑实体抽取时：
 
 ```bash
-uv run fleetent kb extract --config $FLEETENT_HOME/tenants/default/kb/kb-service.yaml --kb <kb_id> --wait
+uv run fleetent kb extract --config $FLEETENT_HOME/kb-service.yaml --kb <kb_id> --wait
 ```
 
 执行规则：

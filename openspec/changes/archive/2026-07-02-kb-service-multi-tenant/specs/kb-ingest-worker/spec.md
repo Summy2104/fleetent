@@ -1,6 +1,6 @@
 ## MODIFIED Requirements
 
-### Requirement: kb-worker 从本机 config 加载自身配置
+### Requirement: kb-worker 从专属 .env 加载自身配置
 
 `fleetent kb worker` 默认**单机多租户**,启动 SHALL 从**本机服务级 config** `$FLEETENT_HOME/kb-service.yaml` 加载构造配置(队列/底座/embedding/extraction/共享 service key)。worker SHALL **轮询本机所有在册租户**的 per-tenant 队列(`tenants/<t>/kb/data/kb_ingest_queue.db`,租户经扫 `tenants/*/kb/data/` 发现),认领 job 后按 job.tenant_id 经 `TenantRouter` 写该租户 KB,并**按需加载该租户** connector 配置与 secret(`tenants/<t>/kb/connectors.yaml` + `.env`,connector `credential_ref` 本地解析——仅 connector_sync 类 job 需要)。worker MAY 经 `--tenant <id>` 锁单租户(只从该租户 kb home 加载并只 drain 其队列)。旧的 tenant-less legacy 兜底与 `kb worker init-config` / `kb-worker/.env` 模型仍**已退役**。
 

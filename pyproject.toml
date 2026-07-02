@@ -51,6 +51,7 @@ packages = ["src/fleetent"]
 "agent.env.example" = "src/fleetent/runtime/resources/agent.env.example"
 "node.env.example" = "src/fleetent/node/resources/node.env.example"
 "kb-service.yaml.example" = "src/fleetent/knowledge_base/resources/kb-service.yaml.example"
+"connectors.yaml.example" = "src/fleetent/knowledge_base/resources/connectors.yaml.example"
 "kb-service.env.example" = "src/fleetent/knowledge_base/resources/kb-service.env.example"
 
 [dependency-groups]

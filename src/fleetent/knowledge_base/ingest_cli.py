@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 from fleetent import kb_ingest_jobs
-from fleetent.knowledge_base.service_config import load_kb_service_config
+from fleetent.knowledge_base.service_config import resolve_kb_command_scope
 from fleetent.knowledge_base.worker import _require_active_kb
 
 _POLL_INTERVAL_SECONDS = 0.25
@@ -16,15 +16,25 @@ _WAIT_TIMEOUT_SECONDS = 30.0
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="fleetent kb ingest")
     parser.add_argument("--config", required=True, help="standalone kb-service.yaml path")
+    parser.add_argument(
+        "--tenant", default="", help="target tenant when using host kb-service.yaml"
+    )
     parser.add_argument("--kb", required=True, help="target knowledge base id")
     parser.add_argument("--wait", action="store_true", help="wait for the queued job to finish")
     parser.add_argument("path", help="local directory or single file to ingest")
     return parser.parse_args(argv)
 
 
-def _require_known_kb(tenant_id: str, kb_id: str, *, data_dir: Path) -> None:
+def _require_known_kb(
+    tenant_id: str, kb_id: str, *, data_dir: Path, multi_tenant_root: bool = False
+) -> None:
     try:
-        _require_active_kb(tenant_id, kb_id, data_dir=data_dir)
+        _require_active_kb(
+            tenant_id,
+            kb_id,
+            data_dir=data_dir,
+            multi_tenant_root=multi_tenant_root,
+        )
     except ValueError as exc:
         raise ValueError(
             f"KB {kb_id!r} does not exist for tenant {tenant_id!r}. "
@@ -81,13 +91,18 @@ def _wait_for_job(
 def main(argv: list[str] | None = None) -> None:
     try:
         ns = _parse_args(argv or [])
-        config = load_kb_service_config(Path(ns.config).expanduser())
-        tenant_id = config.service.tenant_id
+        scope = resolve_kb_command_scope(Path(ns.config).expanduser(), tenant_id=str(ns.tenant))
+        tenant_id = scope.tenant_id
         kb_id = str(ns.kb)
         target_path = Path(ns.path).expanduser().resolve()
-        database_url = config.queue_database_url()
+        database_url = scope.queue_database_url
 
-        _require_known_kb(tenant_id, kb_id, data_dir=config.data_dir())
+        _require_known_kb(
+            tenant_id,
+            kb_id,
+            data_dir=scope.data_dir,
+            multi_tenant_root=scope.multi_tenant_root,
+        )
         job = kb_ingest_jobs.enqueue_job(
             job_type="sync_directory",
             tenant_id=tenant_id,
