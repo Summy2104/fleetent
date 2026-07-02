@@ -87,16 +87,25 @@ def test_main_enables_extraction_and_enqueues_existing_documents(
     from fleetent.knowledge_base import extract_cli
 
     config = SimpleNamespace(
-        service=SimpleNamespace(tenant_id="tenant-a"),
-        data_dir=lambda: SimpleNamespace(),
-        queue_database_url=lambda: "sqlite:////tmp/kb-ingest-queue.db",
+        tenant_id="tenant-a",
+        data_dir=SimpleNamespace(),
+        queue_database_url="sqlite:////tmp/kb-ingest-queue.db",
+        multi_tenant_root=False,
     )
     enqueued: list[dict[str, object]] = []
     enabled: list[tuple[str, str, bool]] = []
 
-    monkeypatch.setattr(extract_cli, "load_kb_service_config", lambda path: config)
-    monkeypatch.setattr(extract_cli, "_require_known_kb", lambda tenant_id, kb_id, data_dir: None)
-    monkeypatch.setattr(extract_cli, "_knowledge_database", lambda tenant_id, data_dir: object())
+    monkeypatch.setattr(extract_cli, "resolve_kb_command_scope", lambda path, tenant_id="": config)
+    monkeypatch.setattr(
+        extract_cli,
+        "_require_known_kb",
+        lambda tenant_id, kb_id, data_dir, multi_tenant_root=False: None,
+    )
+    monkeypatch.setattr(
+        extract_cli,
+        "_knowledge_database",
+        lambda tenant_id, data_dir, multi_tenant_root=False: object(),
+    )
     monkeypatch.setattr(
         extract_cli,
         "list_documents",
@@ -145,18 +154,22 @@ def test_main_reports_missing_kb_without_enqueuing(
     from fleetent.knowledge_base import extract_cli
 
     config = SimpleNamespace(
-        service=SimpleNamespace(tenant_id="tenant-a"),
-        data_dir=lambda: SimpleNamespace(),
-        queue_database_url=lambda: "sqlite:////tmp/kb-ingest-queue.db",
+        tenant_id="tenant-a",
+        data_dir=SimpleNamespace(),
+        queue_database_url="sqlite:////tmp/kb-ingest-queue.db",
+        multi_tenant_root=False,
     )
     enqueued: list[dict[str, object]] = []
 
-    monkeypatch.setattr(extract_cli, "load_kb_service_config", lambda path: config)
+    monkeypatch.setattr(extract_cli, "resolve_kb_command_scope", lambda path, tenant_id="": config)
     monkeypatch.setattr(
         extract_cli,
         "_require_known_kb",
-        lambda tenant_id, kb_id, data_dir: (_ for _ in ()).throw(
-            ValueError("KB 'kb-missing' does not exist for tenant 'tenant-a'. Create it first via POST /admin/kb.")
+        lambda tenant_id, kb_id, data_dir, multi_tenant_root=False: (_ for _ in ()).throw(
+            ValueError(
+                "KB 'kb-missing' does not exist for tenant 'tenant-a'. "
+                "Create it first via POST /admin/kb."
+            )
         ),
     )
     monkeypatch.setattr(

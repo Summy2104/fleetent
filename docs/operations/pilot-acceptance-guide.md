@@ -348,7 +348,7 @@ FLEETENT_GOOGLE_DRIVE_EXECUTE_SYNC=1 \
 需要补跑实体抽取时：
 
 ```bash
-uv run fleetent kb-extract --config $FLEETENT_HOME/tenants/default/kb/kb-service.yaml --kb <kb_id> --wait
+uv run fleetent kb extract --config $FLEETENT_HOME/kb-service.yaml --kb <kb_id> --wait
 ```
 
 执行规则：
@@ -357,7 +357,7 @@ uv run fleetent kb-extract --config $FLEETENT_HOME/tenants/default/kb/kb-service
   `FLEETENT_GOOGLE_DRIVE_EXECUTE_SYNC=1`，并带 `--yes --pilot-fixture`。
 - 只有 `credential_ref`、folder id 和网络权限完整时才允许真实 sync 成功。
 - 未配置时记录 `skipped: credentials not configured`。
-- 手动实体抽取入口固定为 `fleetent kb-extract`，不再使用 platform CLI。
+- 手动实体抽取入口固定为 `fleetent kb extract`，不再使用 platform CLI。
 - `check` 返回 `credential_missing`、`credential_invalid`、`auth_failed` 或 `scope_unreachable` 时，记录为 failed 或 Conditional Go 候选，不能静默跳过。
 
 ### 10.3 Confluence

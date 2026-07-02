@@ -310,7 +310,7 @@ def _enqueue_extraction_job_if_enabled(store: KnowledgeStore, document: Knowledg
         tenant_id=document.tenant_id,
         kb_id=document.kb_id,
         connector_ref={"document_id": document.id},
-        database_url=_queue_database_url(),
+        database_url=_require_queue_database_url(),
     )
 
 
@@ -365,3 +365,10 @@ def _queue_database_url() -> str | None:
     from fleetent.knowledge_base import runtime
 
     return runtime._kb_queue_database_url
+
+
+def _require_queue_database_url() -> str:
+    database_url = _queue_database_url()
+    if not database_url:
+        raise ValueError("queue database_url is required")
+    return database_url

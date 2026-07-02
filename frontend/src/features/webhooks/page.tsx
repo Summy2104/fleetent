@@ -1,17 +1,7 @@
-import { useMemo, useState } from 'react';
-import { Copy, Inbox, Plus, Trash2 } from 'lucide-react';
+import { useMemo, useState } from 'react'
+import { Copy, Inbox, Plus, Trash2 } from 'lucide-react'
 
-import { useT } from '@/i18n';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Badge } from '@/components/base/badge'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,33 +11,38 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+} from '@/components/ui/alert-dialog'
+import { Button } from '@/components/ui/button'
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
-import { type AgentListItem, useAgentsQuery } from '@/features/agents/api';
-import { type UserListItem, useUsersQuery } from '@/features/users/api';
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
+import { type AgentListItem, useAgentsQuery } from '@/features/agents/api'
+import { type UserListItem, useUsersQuery } from '@/features/users/api'
 import {
-  type WebhookSourceInput,
-  type WebhookSourceRecord,
   useCreateWebhookSourceMutation,
   useDeleteWebhookSourceMutation,
   useWebhookSourcesQuery,
-} from '@/features/webhooks/api';
+  type WebhookSourceInput,
+  type WebhookSourceRecord,
+} from '@/features/webhooks/api'
+import { useT } from '@/i18n'
 
-const NO_REPLY_TARGET = 'none';
+const NO_REPLY_TARGET = 'none'
 
 function generateSecret(): string {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  const bytes = new Uint8Array(32)
+  crypto.getRandomValues(bytes)
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 // ─────────────────────────── Add dialog ───────────────────────────
@@ -58,40 +53,40 @@ function CreateWebhookDialog({
   users,
   onOpenChange,
 }: {
-  open: boolean;
-  agents: AgentListItem[];
-  users: UserListItem[];
-  onOpenChange: (open: boolean) => void;
+  open: boolean
+  agents: AgentListItem[]
+  users: UserListItem[]
+  onOpenChange: (open: boolean) => void
 }): JSX.Element {
-  const t = useT();
-  const create = useCreateWebhookSourceMutation();
+  const t = useT()
+  const create = useCreateWebhookSourceMutation()
 
-  const [id, setId] = useState('');
-  const [agentId, setAgentId] = useState('');
-  const [userId, setUserId] = useState('');
-  const [replyTarget, setReplyTarget] = useState(NO_REPLY_TARGET);
-  const [messageTemplate, setMessageTemplate] = useState('');
-  const [enabled, setEnabled] = useState(true);
-  const [secret, setSecret] = useState('');
-  const [createdUrl, setCreatedUrl] = useState<string | null>(null);
+  const [id, setId] = useState('')
+  const [agentId, setAgentId] = useState('')
+  const [userId, setUserId] = useState('')
+  const [replyTarget, setReplyTarget] = useState(NO_REPLY_TARGET)
+  const [messageTemplate, setMessageTemplate] = useState('')
+  const [enabled, setEnabled] = useState(true)
+  const [secret, setSecret] = useState('')
+  const [createdUrl, setCreatedUrl] = useState<string | null>(null)
 
   const reset = (): void => {
-    setId('');
-    setAgentId('');
-    setUserId('');
-    setReplyTarget(NO_REPLY_TARGET);
-    setMessageTemplate('');
-    setEnabled(true);
-    setSecret('');
-  };
+    setId('')
+    setAgentId('')
+    setUserId('')
+    setReplyTarget(NO_REPLY_TARGET)
+    setMessageTemplate('')
+    setEnabled(true)
+    setSecret('')
+  }
 
   const handleOpenChange = (next: boolean): void => {
     if (!next) {
-      setCreatedUrl(null);
-      reset();
+      setCreatedUrl(null)
+      reset()
     }
-    onOpenChange(next);
-  };
+    onOpenChange(next)
+  }
 
   const submit = async (): Promise<void> => {
     const payload: WebhookSourceInput = {
@@ -102,15 +97,15 @@ function CreateWebhookDialog({
       reply_target: replyTarget === NO_REPLY_TARGET ? null : replyTarget,
       enabled,
       secret: secret.trim() || null,
-    };
-    await create.mutateAsync(payload);
-    setCreatedUrl(`${window.location.origin}/webhook/${payload.id}`);
-  };
+    }
+    await create.mutateAsync(payload)
+    setCreatedUrl(`${window.location.origin}/webhook/${payload.id}`)
+  }
 
-  const canSubmit = id.trim().length > 0 && agentId.length > 0 && userId.length > 0;
+  const canSubmit = id.trim().length > 0 && agentId.length > 0 && userId.length > 0
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog onOpenChange={handleOpenChange} open={open}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{createdUrl ? t('webhooks.urlShownTitle') : t('webhooks.addTitle')}</DialogTitle>
@@ -119,15 +114,15 @@ function CreateWebhookDialog({
 
         {createdUrl ? (
           <div className="space-y-3 rounded-md border border-warning/40 bg-warning/10 p-4">
-            <code className="block max-h-40 overflow-y-auto break-all rounded-md border border-border bg-background/60 p-3 font-mono text-xs text-foreground">
+            <code className="block max-h-40 overflow-y-auto break-all rounded-md border border-border bg-background/60 p-3 font-mono text-foreground text-xs">
               {createdUrl}
             </code>
-            <p className="text-xs text-muted-foreground">{t('webhooks.urlCopyHint')}</p>
+            <p className="text-muted-foreground text-xs">{t('webhooks.urlCopyHint')}</p>
             <div className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={() => void navigator.clipboard?.writeText(createdUrl)}>
+              <Button onClick={() => void navigator.clipboard?.writeText(createdUrl)} size="sm" variant="outline">
                 <Copy className="size-4" /> {t('webhooks.copyUrl')}
               </Button>
-              <Button size="sm" variant="secondary" onClick={() => handleOpenChange(false)}>
+              <Button onClick={() => handleOpenChange(false)} size="sm" variant="secondary">
                 {t('webhooks.done')}
               </Button>
             </div>
@@ -141,9 +136,9 @@ function CreateWebhookDialog({
                 </Label>
                 <Input
                   id="webhook-id"
+                  onChange={(event) => setId(event.target.value)}
                   placeholder={t('webhooks.idPlaceholder')}
                   value={id}
-                  onChange={(event) => setId(event.target.value)}
                 />
               </div>
 
@@ -151,7 +146,7 @@ function CreateWebhookDialog({
                 <Label>
                   {t('webhooks.agentLabel')} <span className="text-destructive">*</span>
                 </Label>
-                <Select value={agentId} onValueChange={setAgentId}>
+                <Select onValueChange={(value) => setAgentId(value ?? '')} value={agentId}>
                   <SelectTrigger aria-label={t('webhooks.agentLabel')}>
                     <SelectValue placeholder={t('webhooks.agentPlaceholder')} />
                   </SelectTrigger>
@@ -169,7 +164,7 @@ function CreateWebhookDialog({
                 <Label>
                   {t('webhooks.userLabel')} <span className="text-destructive">*</span>
                 </Label>
-                <Select value={userId} onValueChange={setUserId}>
+                <Select onValueChange={(value) => setUserId(value ?? '')} value={userId}>
                   <SelectTrigger aria-label={t('webhooks.userLabel')}>
                     <SelectValue placeholder={t('webhooks.userPlaceholder')} />
                   </SelectTrigger>
@@ -185,7 +180,7 @@ function CreateWebhookDialog({
 
               <div className="grid gap-2">
                 <Label>{t('webhooks.replyTargetLabel')}</Label>
-                <Select value={replyTarget} onValueChange={setReplyTarget}>
+                <Select onValueChange={(value) => setReplyTarget(value ?? NO_REPLY_TARGET)} value={replyTarget}>
                   <SelectTrigger aria-label={t('webhooks.replyTargetLabel')}>
                     <SelectValue />
                   </SelectTrigger>
@@ -204,34 +199,34 @@ function CreateWebhookDialog({
                 <Label htmlFor="webhook-message-template">{t('webhooks.messageTemplateLabel')}</Label>
                 <Input
                   id="webhook-message-template"
-                  value={messageTemplate}
                   onChange={(event) => setMessageTemplate(event.target.value)}
+                  value={messageTemplate}
                 />
-                <p className="text-xs text-muted-foreground">{t('webhooks.messageTemplateHint')}</p>
+                <p className="text-muted-foreground text-xs">{t('webhooks.messageTemplateHint')}</p>
               </div>
 
               <div className="flex items-center justify-between">
                 <Label htmlFor="webhook-enabled">{t('webhooks.enabledLabel')}</Label>
-                <Switch id="webhook-enabled" checked={enabled} onCheckedChange={setEnabled} />
+                <Switch checked={enabled} id="webhook-enabled" onCheckedChange={setEnabled} />
               </div>
 
               <div className="grid gap-2">
                 <Label htmlFor="webhook-secret">{t('webhooks.secretLabel')}</Label>
                 <div className="flex items-center gap-2">
                   <Input
-                    id="webhook-secret"
                     className="flex-1"
-                    value={secret}
+                    id="webhook-secret"
                     onChange={(event) => setSecret(event.target.value)}
+                    value={secret}
                   />
-                  <Button type="button" variant="outline" onClick={() => setSecret(generateSecret())}>
+                  <Button onClick={() => setSecret(generateSecret())} type="button" variant="outline">
                     {t('webhooks.generateSecret')}
                   </Button>
                 </div>
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => handleOpenChange(false)}>
+              <Button onClick={() => handleOpenChange(false)} variant="outline">
                 {t('webhooks.cancel')}
               </Button>
               <Button disabled={!canSubmit || create.isPending} onClick={() => void submit()}>
@@ -242,7 +237,7 @@ function CreateWebhookDialog({
         )}
       </DialogContent>
     </Dialog>
-  );
+  )
 }
 
 // ─────────────────────────── Source row ───────────────────────────
@@ -252,19 +247,19 @@ function SourceRow({
   agentName,
   onDelete,
 }: {
-  source: WebhookSourceRecord;
-  agentName: string;
-  onDelete: () => void;
+  source: WebhookSourceRecord
+  agentName: string
+  onDelete: () => void
 }): JSX.Element {
-  const t = useT();
-  const remove = useDeleteWebhookSourceMutation(source.id);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const t = useT()
+  const remove = useDeleteWebhookSourceMutation(source.id)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   return (
-    <tr className="border-b border-border last:border-0 hover:bg-accent/30">
-      <td className="px-4 py-3 font-mono text-sm text-foreground">{source.id}</td>
-      <td className="px-4 py-3 text-sm text-muted-foreground">{agentName}</td>
-      <td className="px-4 py-3 text-sm text-muted-foreground">{source.user_id}</td>
+    <tr className="border-border border-b last:border-0 hover:bg-accent/30">
+      <td className="px-4 py-3 font-mono text-foreground text-sm">{source.id}</td>
+      <td className="px-4 py-3 text-muted-foreground text-sm">{agentName}</td>
+      <td className="px-4 py-3 text-muted-foreground text-sm">{source.user_id}</td>
       <td className="px-4 py-3">
         <Badge variant={source.enabled ? 'success' : 'secondary'}>
           {source.enabled ? t('webhooks.statusEnabled') : t('webhooks.statusDisabled')}
@@ -272,19 +267,21 @@ function SourceRow({
       </td>
       <td className="px-4 py-3 text-right">
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="secondary" size="sm" aria-label={t('webhooks.actionsFor', { name: source.id })}>
-              {t('webhooks.columnActions')}
-            </Button>
-          </DropdownMenuTrigger>
+          <DropdownMenuTrigger
+            render={
+              <Button aria-label={t('webhooks.actionsFor', { name: source.id })} size="sm" variant="secondary">
+                {t('webhooks.columnActions')}
+              </Button>
+            }
+          />
           <DropdownMenuContent align="end">
-            <DropdownMenuItem destructive onSelect={() => setTimeout(() => setConfirmDelete(true), 0)}>
+            <DropdownMenuItem onClick={() => setTimeout(() => setConfirmDelete(true), 0)} variant="destructive">
               <Trash2 /> {t('webhooks.delete')}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <AlertDialog onOpenChange={setConfirmDelete} open={confirmDelete}>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>{t('webhooks.deleteConfirmTitle', { name: source.id })}</AlertDialogTitle>
@@ -294,7 +291,7 @@ function SourceRow({
               <AlertDialogCancel>{t('webhooks.cancel')}</AlertDialogCancel>
               <AlertDialogAction
                 onClick={() => {
-                  void remove.mutateAsync().then(onDelete);
+                  void remove.mutateAsync().then(onDelete)
                 }}
               >
                 {t('webhooks.delete')}
@@ -304,17 +301,17 @@ function SourceRow({
         </AlertDialog>
       </td>
     </tr>
-  );
+  )
 }
 
 // ─────────────────────────── Page ───────────────────────────
 
 export function WebhooksPage(): JSX.Element {
-  const t = useT();
-  const sources = useWebhookSourcesQuery();
-  const agents = useAgentsQuery();
-  const users = useUsersQuery();
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const t = useT()
+  const sources = useWebhookSourcesQuery()
+  const agents = useAgentsQuery()
+  const users = useUsersQuery()
+  const [dialogOpen, setDialogOpen] = useState(false)
 
   const agentNameById = useMemo(
     () =>
@@ -322,13 +319,13 @@ export function WebhooksPage(): JSX.Element {
         (agents.data ?? []).flatMap((agent) => (agent.agent_id == null ? [] : [[agent.agent_id, agent.agent_name]]))
       ),
     [agents.data]
-  );
+  )
 
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-xl font-semibold tracking-tight">{t('webhooks.pageTitle')}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{t('webhooks.pageDescription')}</p>
+        <h2 className="font-semibold text-xl tracking-tight">{t('webhooks.pageTitle')}</h2>
+        <p className="mt-1 text-muted-foreground text-sm">{t('webhooks.pageDescription')}</p>
       </div>
 
       <div className="flex items-center justify-end">
@@ -341,20 +338,30 @@ export function WebhooksPage(): JSX.Element {
         <table className="w-full">
           <thead className="bg-secondary/50">
             <tr>
-              <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('webhooks.columnId')}</th>
-              <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('webhooks.columnAgent')}</th>
-              <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('webhooks.columnUser')}</th>
-              <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('webhooks.columnStatus')}</th>
-              <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('webhooks.columnActions')}</th>
+              <th className="px-4 py-2.5 text-left font-semibold text-muted-foreground text-xs uppercase tracking-wide">
+                {t('webhooks.columnId')}
+              </th>
+              <th className="px-4 py-2.5 text-left font-semibold text-muted-foreground text-xs uppercase tracking-wide">
+                {t('webhooks.columnAgent')}
+              </th>
+              <th className="px-4 py-2.5 text-left font-semibold text-muted-foreground text-xs uppercase tracking-wide">
+                {t('webhooks.columnUser')}
+              </th>
+              <th className="px-4 py-2.5 text-left font-semibold text-muted-foreground text-xs uppercase tracking-wide">
+                {t('webhooks.columnStatus')}
+              </th>
+              <th className="px-4 py-2.5 text-right font-semibold text-muted-foreground text-xs uppercase tracking-wide">
+                {t('webhooks.columnActions')}
+              </th>
             </tr>
           </thead>
           <tbody>
             {(sources.data ?? []).map((source) => (
               <SourceRow
-                key={source.id}
-                source={source}
                 agentName={source.agent_id == null ? '' : (agentNameById[source.agent_id] ?? String(source.agent_id))}
+                key={source.id}
                 onDelete={() => void sources.refetch()}
+                source={source}
               />
             ))}
             {sources.data && sources.data.length === 0 ? (
@@ -372,11 +379,11 @@ export function WebhooksPage(): JSX.Element {
       </div>
 
       <CreateWebhookDialog
-        open={dialogOpen}
         agents={agents.data ?? []}
-        users={users.data ?? []}
         onOpenChange={setDialogOpen}
+        open={dialogOpen}
+        users={users.data ?? []}
       />
     </div>
-  );
+  )
 }

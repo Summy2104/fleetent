@@ -55,4 +55,4 @@
 ## Open Questions
 
 - 本地队列用独立 SQLite 文件还是并入 `kb/` 下某库:实现时定(倾向 KB 主机本地独立文件,生命周期随 KB 服务)。
-- standalone 与 ②a(kb-read-service)是否合进同一 `fleetent kb-serve` 进程(读+sweep 同进程)还是 kb-serve + kb-worker 两进程:倾向沿用两进程(读/写负载隔离,见之前讨论),实现时确认。
+- standalone 与 ②a(kb-read-service)是否合进同一 `fleetent kb serve` 进程(读+sweep 同进程)还是 kb-serve + kb-worker 两进程:倾向沿用两进程(读/写负载隔离,见之前讨论),实现时确认。

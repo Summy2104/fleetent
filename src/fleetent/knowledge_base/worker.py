@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from fleetent import kb_ingest_jobs
+from fleetent import kb_ingest_jobs, vector_store
 from fleetent import knowledge_base as kb_runtime
 from fleetent.config import KnowledgeBaseSettings, Settings
 from fleetent.db import SQLiteDatabase, create_database
@@ -29,10 +29,10 @@ from fleetent.knowledge_base.ingest.runtime import ingest_parsed
 from fleetent.knowledge_base.management.runtime import (
     is_active_knowledge_base as _kb_is_active_knowledge_base,
 )
-from fleetent.tenant_router import StandaloneKBTenantBackend, TenantRouter
+from fleetent.tenant_router import SQLiteTenantBackend, StandaloneKBTenantBackend, TenantRouter
 
 if False:  # pragma: no cover
-    from fleetent.knowledge_base.service_config import KBServiceConfig
+    from fleetent.knowledge_base.service_config import KBHostServiceConfig, KBServiceConfig
 
 
 @dataclass(frozen=True)
@@ -59,12 +59,13 @@ def load_config() -> KBWorkerConfig:
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="fleetent kb-worker")
+    parser = argparse.ArgumentParser(prog="fleetent kb worker")
     parser.add_argument(
         "--config",
         default="",
         help="standalone kb-service.yaml path; when set, queue/data paths come from this file",
     )
+    parser.add_argument("--tenant", default="", help="lock worker to one tenant")
     parser.add_argument(
         "--poll-interval",
         type=float,
@@ -78,8 +79,12 @@ def _database() -> SQLiteDatabase:
     return create_database(Settings().database_url)
 
 
-def _tenant_router(data_dir: Path | None = None) -> TenantRouter:
+def _tenant_router(
+    data_dir: Path | None = None, *, multi_tenant_root: bool = False
+) -> TenantRouter:
     resolved_data_dir = data_dir or _database().path.parent
+    if multi_tenant_root:
+        return TenantRouter(SQLiteTenantBackend(data_dir=resolved_data_dir))
     return TenantRouter(StandaloneKBTenantBackend(data_dir=resolved_data_dir))
 
 
@@ -88,8 +93,19 @@ def _knowledge_database(
     *,
     data_dir: Path | None = None,
     migrations: list[tuple[int, str]] | None = None,
+    multi_tenant_root: bool = False,
 ) -> SQLiteDatabase:
-    return _tenant_router(data_dir).tenant_scope(tenant_id).open_kb_db(migrations or KB_MIGRATIONS)
+    return (
+        _tenant_router(data_dir, multi_tenant_root=multi_tenant_root)
+        .tenant_scope(tenant_id)
+        .open_kb_db(migrations or KB_MIGRATIONS)
+    )
+
+
+def _require_queue_database_url(queue_database_url: str | None) -> str:
+    if not queue_database_url:
+        raise ValueError("queue database_url is required")
+    return queue_database_url
 
 
 @contextmanager
@@ -98,8 +114,9 @@ def _use_kb_runtime(
     *,
     data_dir: Path | None = None,
     queue_database_url: str | None = None,
+    multi_tenant_root: bool = False,
 ) -> Iterator[None]:
-    scope = _tenant_router(data_dir).tenant_scope(tenant_id)
+    scope = _tenant_router(data_dir, multi_tenant_root=multi_tenant_root).tenant_scope(tenant_id)
     previous_db = kb_runtime.runtime._kb_db
     previous_backend = kb_runtime.runtime._kb_vector_backend
     previous_queue_database_url = kb_runtime.runtime._kb_queue_database_url
@@ -127,9 +144,19 @@ def _parse_import_document(
     raise ValueError(f"unsupported document_format: {document_format}")
 
 
-def _require_active_kb(tenant_id: str, kb_id: str, *, data_dir: Path | None = None) -> None:
+def _require_active_kb(
+    tenant_id: str,
+    kb_id: str,
+    *,
+    data_dir: Path | None = None,
+    multi_tenant_root: bool = False,
+) -> None:
     if not _kb_is_active_knowledge_base(
-        tenant_id, kb_id, database=_knowledge_database(tenant_id, data_dir=data_dir)
+        tenant_id,
+        kb_id,
+        database=_knowledge_database(
+            tenant_id, data_dir=data_dir, multi_tenant_root=multi_tenant_root
+        ),
     ):
         raise ValueError("kb not found or archived")
 
@@ -166,6 +193,8 @@ def run_job(
     *,
     data_dir: Path | None = None,
     queue_database_url: str | None = None,
+    multi_tenant_root: bool = False,
+    home_dir: Path | None = None,
 ) -> dict[str, Any]:
     payload = kb_ingest_jobs.get_job_payload(job)
     job_type = str(job["job_type"])
@@ -173,7 +202,7 @@ def run_job(
     kb_id = str(job["kb_id"])
 
     if job_type == "import_document":
-        _require_active_kb(tenant_id, kb_id, data_dir=data_dir)
+        _require_active_kb(tenant_id, kb_id, data_dir=data_dir, multi_tenant_root=multi_tenant_root)
         parsed = _parse_import_document(
             str(payload["source"]),
             str(payload["content"]),
@@ -183,6 +212,7 @@ def run_job(
             tenant_id,
             data_dir=data_dir,
             queue_database_url=queue_database_url,
+            multi_tenant_root=multi_tenant_root,
         ):
             document = asyncio.run(
                 ingest_parsed(
@@ -192,11 +222,15 @@ def run_job(
                     source=str(payload["source"]),
                     source_url=None,
                     settings=_ingest_settings(job),
-                    database=_knowledge_database(tenant_id, data_dir=data_dir),
+                    database=_knowledge_database(
+                        tenant_id,
+                        data_dir=data_dir,
+                        multi_tenant_root=multi_tenant_root,
+                    ),
                 )
             )
         chunks = KnowledgeStore(
-            _knowledge_database(tenant_id, data_dir=data_dir)
+            _knowledge_database(tenant_id, data_dir=data_dir, multi_tenant_root=multi_tenant_root)
         ).get_document_chunks(document.id)
         return {
             "document_id": document.id,
@@ -208,7 +242,7 @@ def run_job(
         }
 
     if job_type == "sync_directory":
-        _require_active_kb(tenant_id, kb_id, data_dir=data_dir)
+        _require_active_kb(tenant_id, kb_id, data_dir=data_dir, multi_tenant_root=multi_tenant_root)
         config = LocalDirectorySourceConfig(
             source_id=f"admin-local:{tenant_id}:{kb_id}:{Path(str(payload['path'])).expanduser().resolve()}",
             root_path=str(payload["path"]),
@@ -218,6 +252,7 @@ def run_job(
             tenant_id,
             data_dir=data_dir,
             queue_database_url=queue_database_url,
+            multi_tenant_root=multi_tenant_root,
         ):
             summary = asyncio.run(sync_local_directory(config, tenant_id=tenant_id, kb_id=kb_id))
         return {
@@ -236,12 +271,17 @@ def run_job(
 
     if job_type == "connector_sync":
         connector_id = str(payload["connector_id"])
+        if home_dir is not None:
+            from fleetent.knowledge_base.service_config import load_tenant_connectors
+
+            load_tenant_connectors(home_dir, tenant_id)
         with _use_kb_runtime(
             tenant_id,
             data_dir=data_dir,
             queue_database_url=queue_database_url,
+            multi_tenant_root=multi_tenant_root,
         ):
-            result = asyncio.run(
+            connector_result = asyncio.run(
                 knowledge_base.run_connector_sync(
                     connector_id,
                     settings=_connector_settings(job, payload),
@@ -249,20 +289,21 @@ def run_job(
                 )
             )
         return {
-            "connector_id": result.connector_id,
-            "status": result.status,
-            "summary": result.summary,
-            "error": result.error,
+            "connector_id": connector_result.connector_id,
+            "status": connector_result.status,
+            "summary": connector_result.summary,
+            "error": connector_result.error,
         }
 
     if job_type == "extraction":
-        _require_active_kb(tenant_id, kb_id, data_dir=data_dir)
+        _require_active_kb(tenant_id, kb_id, data_dir=data_dir, multi_tenant_root=multi_tenant_root)
         with _use_kb_runtime(
             tenant_id,
             data_dir=data_dir,
             queue_database_url=queue_database_url,
+            multi_tenant_root=multi_tenant_root,
         ):
-            summary = asyncio.run(
+            extraction_summary = asyncio.run(
                 kb_runtime.run_entity_extraction(
                     tenant_id,
                     kb_id,
@@ -271,40 +312,105 @@ def run_job(
                 )
             )
         return {
-            "document_id": summary.document_id,
-            "status": summary.status,
-            "documents_scanned": summary.documents_scanned,
-            "chunks_scanned": summary.chunks_scanned,
-            "entities_upserted": summary.entities_upserted,
-            "mentions_written": summary.mentions_written,
-            "relations_written": summary.relations_written,
-            "failed_count": summary.failed_count,
-            "error_summary": summary.error_summary,
+            "document_id": extraction_summary.document_id,
+            "status": extraction_summary.status,
+            "documents_scanned": extraction_summary.documents_scanned,
+            "chunks_scanned": extraction_summary.chunks_scanned,
+            "entities_upserted": extraction_summary.entities_upserted,
+            "mentions_written": extraction_summary.mentions_written,
+            "relations_written": extraction_summary.relations_written,
+            "failed_count": extraction_summary.failed_count,
+            "error_summary": extraction_summary.error_summary,
+        }
+
+    if job_type == "reindex":
+        _require_active_kb(tenant_id, kb_id, data_dir=data_dir, multi_tenant_root=multi_tenant_root)
+        with _use_kb_runtime(
+            tenant_id,
+            data_dir=data_dir,
+            queue_database_url=queue_database_url,
+            multi_tenant_root=multi_tenant_root,
+        ):
+            reindex_summary = vector_store.reindex(
+                vector_store.ReindexRequest(
+                    owner="knowledge_base",
+                    tenant_id=tenant_id,
+                    kb_id=kb_id,
+                )
+            )
+        return {
+            "owner": reindex_summary.owner,
+            "namespace": reindex_summary.namespace,
+            "dry_run": reindex_summary.dry_run,
+            "scanned": reindex_summary.scanned,
+            "reindexed": reindex_summary.reindexed,
+            "skipped": reindex_summary.skipped,
+            "failed": reindex_summary.failed,
         }
 
     raise ValueError(f"unknown kb ingest job type: {job_type}")
+
+
+def _tenant_queue_database_url(home_dir: Path, tenant_id: str) -> str:
+    return f"sqlite:///{home_dir / 'tenants' / tenant_id / 'kb' / 'data' / 'kb_ingest_queue.db'}"
+
+
+def _claim_next_multi_tenant_job(
+    *,
+    home_dir: Path,
+    tenant_id: str = "",
+) -> tuple[dict[str, Any], str] | None:
+    from fleetent.knowledge_base.service_config import discover_tenants
+
+    tenant_ids = [tenant_id] if tenant_id else discover_tenants(home_dir)
+    for current_tenant_id in tenant_ids:
+        queue_database_url = _tenant_queue_database_url(home_dir, current_tenant_id)
+        job = kb_ingest_jobs.claim_next_job(database_url=queue_database_url)
+        if job is not None:
+            return job, queue_database_url
+    return None
 
 
 def run_once(
     *,
     queue_database_url: str | None = None,
     data_dir: Path | None = None,
+    home_dir: Path | None = None,
+    tenant_id: str = "",
 ) -> dict[str, Any] | None:
-    job = kb_ingest_jobs.claim_next_job(database_url=queue_database_url)
-    if job is None:
-        return None
+    multi_tenant_root = home_dir is not None
+    if multi_tenant_root:
+        claimed = _claim_next_multi_tenant_job(home_dir=home_dir, tenant_id=tenant_id)
+        if claimed is None:
+            return None
+        job, resolved_queue_database_url = claimed
+        resolved_data_dir = home_dir
+    else:
+        resolved_queue_database_url = _require_queue_database_url(queue_database_url)
+        job = kb_ingest_jobs.claim_next_job(database_url=resolved_queue_database_url)
+        if job is None:
+            return None
+        resolved_data_dir = data_dir
     try:
-        result = run_job(job, data_dir=data_dir, queue_database_url=queue_database_url)
+        result = run_job(
+            job,
+            data_dir=resolved_data_dir,
+            queue_database_url=resolved_queue_database_url,
+            multi_tenant_root=multi_tenant_root,
+            home_dir=home_dir,
+        )
     except Exception as exc:
         failed = kb_ingest_jobs.mark_failed(
             str(job["id"]),
             str(exc),
-            database_url=queue_database_url,
+            database_url=resolved_queue_database_url,
         )
         if failed is None:
             return {"job_id": str(job["id"]), "status": "missing"}
         return {"job_id": str(job["id"]), "status": str(failed["status"])}
-    kb_ingest_jobs.mark_done(str(job["id"]), result=result, database_url=queue_database_url)
+    kb_ingest_jobs.mark_done(
+        str(job["id"]), result=result, database_url=resolved_queue_database_url
+    )
     return {"job_id": str(job["id"]), "status": "done"}
 
 
@@ -313,14 +419,25 @@ def run(
     poll_interval: float,
     queue_database_url: str | None = None,
     data_dir: Path | None = None,
+    home_dir: Path | None = None,
+    tenant_id: str = "",
     standalone_config: KBServiceConfig | None = None,
+    host_config: KBHostServiceConfig | None = None,
 ) -> None:
     while True:
         if standalone_config is not None:
             from fleetent.knowledge_base.standalone_sweep import sweep
 
             sweep(standalone_config, queue_database_url=queue_database_url)
-        processed = run_once(queue_database_url=queue_database_url, data_dir=data_dir)
+        run_once_kwargs: dict[str, object] = {
+            "queue_database_url": queue_database_url,
+            "data_dir": data_dir,
+        }
+        if home_dir is not None:
+            run_once_kwargs["home_dir"] = home_dir
+        if tenant_id:
+            run_once_kwargs["tenant_id"] = tenant_id
+        processed = run_once(**run_once_kwargs)
         if processed is None:
             time.sleep(poll_interval)
 
@@ -331,23 +448,42 @@ def main(argv: list[str] | None = None) -> None:
     queue_database_url = config.queue_database_url or None
     data_dir: Path | None = None
     standalone_config = None
+    host_config = None
+    home_dir: Path | None = None
     if ns.config:
+        from pydantic import ValidationError
+
         from fleetent.knowledge_base.service_config import (
+            load_host_service_config,
             load_kb_service_config,
             validate_kb_service_boot,
         )
 
-        standalone_config = load_kb_service_config(Path(ns.config).expanduser())
-        validate_kb_service_boot(standalone_config)
-        standalone_config.configure_process_runtime()
-        queue_database_url = standalone_config.queue_database_url()
-        data_dir = standalone_config.data_dir()
+        config_path = Path(ns.config).expanduser()
+        try:
+            host_config = load_host_service_config(config_path)
+        except ValidationError:
+            standalone_config = load_kb_service_config(config_path)
+            validate_kb_service_boot(standalone_config)
+            standalone_config.configure_process_runtime()
+            queue_database_url = standalone_config.queue_database_url()
+            data_dir = standalone_config.data_dir()
+        else:
+            host_config.configure_process_runtime()
+            home_dir = config_path.parent
     from fleetent.build_info import log_service_startup
 
     log_service_startup("kb-worker")
-    run(
-        poll_interval=ns.poll_interval,
-        queue_database_url=queue_database_url,
-        data_dir=data_dir,
-        standalone_config=standalone_config,
-    )
+    run_kwargs: dict[str, object] = {
+        "poll_interval": ns.poll_interval,
+        "queue_database_url": queue_database_url,
+        "data_dir": data_dir,
+        "standalone_config": standalone_config,
+    }
+    if home_dir is not None:
+        run_kwargs["home_dir"] = home_dir
+    if ns.tenant:
+        run_kwargs["tenant_id"] = ns.tenant
+    if host_config is not None:
+        run_kwargs["host_config"] = host_config
+    run(**run_kwargs)

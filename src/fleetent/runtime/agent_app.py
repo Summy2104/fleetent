@@ -278,11 +278,11 @@ def _drive_exit_after_drain(
     _arm_hard_exit_watchdog(hard_deadline)
 
 
-def resolve_home(agent_id: str, home: str | Path | None = None) -> Path:
+def resolve_home(agent_name: str, home: str | Path | None = None) -> Path:
     """Resolve the agent home: explicit ``home`` wins, else default-tenant home."""
     if home is not None:
         return Path(home)
-    return paths.agent_home_dir(agent_id)
+    return paths.agent_home_dir(agent_name)
 
 
 def _validate_tui_token(authorization_header: str) -> Principal | None:
@@ -411,7 +411,7 @@ def _configure_logging_from_agent(agent: AgentFile, home_dir: Path) -> None:
 
 
 def _tenant_router_root_for_agent_data_dir(
-    data_dir: Path, *, agent_id: str, tenant_id: str
+    data_dir: Path, *, agent_name: str, tenant_id: str
 ) -> Path:
     """Return Fleetent home root for a tenant-first agent ``data/`` directory.
 
@@ -421,7 +421,7 @@ def _tenant_router_root_for_agent_data_dir(
     agent_home = data_dir.parent
     if (
         data_dir.name == "data"
-        and agent_home.name == agent_id
+        and agent_home.name == agent_name
         and agent_home.parent.name == "agents"
         and agent_home.parent.parent.name == tenant_id
         and agent_home.parent.parent.parent.name == "tenants"
@@ -458,7 +458,7 @@ def _configure_knowledge_provider(agent: AgentFile, *, long_term_ctx: Any) -> No
     )
 
 
-def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "default") -> None:
+def _init_agent_db_schema(data_dir: Path, *, agent_name: str, tenant_id: str = "default") -> None:
     """Bootstrap all agent-side DB tables anchored on data_dir.
 
     All per-agent tables land in agent_state.db via the unified AGENT_STATE_MIGRATIONS;
@@ -487,7 +487,7 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     router = TenantRouter(
         SQLiteTenantBackend(
             data_dir=_tenant_router_root_for_agent_data_dir(
-                data_dir, agent_id=agent_id, tenant_id=tenant_id
+                data_dir, agent_name=agent_name, tenant_id=tenant_id
             )
         )
     )
@@ -495,7 +495,7 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     kb_db = tenant_scope.open_kb_db(KB_MIGRATIONS)
     kb_runtime.set_database(kb_db)
     kb_runtime.set_vector_backend(tenant_scope.kb_vector_backend)
-    agent_scope = router.agent_scope(tenant_id, agent_id)
+    agent_scope = router.agent_scope(tenant_id, agent_name)
     agent_state_db = agent_scope.open_state_db(AGENT_STATE_MIGRATIONS)
     # agent_memory_items now live in agent_state.db (wire-agent-memory D3).
     agent_memory_module.set_agent_memory_db(
@@ -539,7 +539,12 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
         from fleetent.integrations.mcp import client as _mcp_client
         from fleetent.integrations.mcp.managed_oauth import wire_managed_oauth
 
-        wire_managed_oauth(_loopback_url, agent_id, _tui_token, _mcp_client.get_registered_server)
+        wire_managed_oauth(
+            _loopback_url,
+            agent_name,
+            _tui_token,
+            _mcp_client.get_registered_server,
+        )
 
     # agent-hosted-im (scaffolding): _wire_managed_im_resolvers is defined below and unit-tested,
     # but NOT called here yet — it activates only when agents self-host their IM connection
@@ -587,7 +592,7 @@ async def _start_infra(
     (sandbox-skill-mount-per-agent-root). None derives it from `data_dir.parent`
     (== home_dir, mirroring the MCP `agent_home` derivation below).
     """
-    _init_agent_db_schema(data_dir, agent_id=agent.name, tenant_id=agent.tenant_id)
+    _init_agent_db_schema(data_dir, agent_name=agent.name, tenant_id=agent.tenant_id)
     from fleetent.runtime.approval_resume import reconcile_expired_approvals
 
     await reconcile_expired_approvals()
@@ -696,7 +701,7 @@ async def _start_scheduler(agent: AgentFile) -> Any:
 
 
 async def boot(
-    agent_id: str,
+    agent_name: str,
     *,
     home: str | Path | None = None,
     port: int | None = None,
@@ -714,7 +719,7 @@ async def boot(
     from fleetent.skills import scan as scan_skills
     from fleetent.tools.plugin_loader import load_plugins
 
-    home_dir = resolve_home(agent_id, home)
+    home_dir = resolve_home(agent_name, home)
     env_path = home_dir / ".env"
     if env_path.exists():
         from dotenv import load_dotenv
@@ -835,7 +840,7 @@ def _stop_running(home_dir: Path, *, drain_timeout: float = 30.0) -> None:
 
 
 async def serve(
-    agent_id: str,
+    agent_name: str,
     *,
     port: int | None = None,
     home: str | Path | None = None,
@@ -848,7 +853,7 @@ async def serve(
     process runs IM-only with no HTTP listener. On SIGUSR1 the process drains in-flight
     requests (up to drain_timeout) then exits.
     """
-    home_dir = resolve_home(agent_id, home)
+    home_dir = resolve_home(agent_name, home)
     home_dir.mkdir(parents=True, exist_ok=True)
     pid_file = home_dir / ".fleetent.pid"
     pid_file.write_text(str(os.getpid()))
@@ -858,7 +863,7 @@ async def serve(
     loop.add_signal_handler(signal.SIGUSR1, drain_event.set)
 
     try:
-        rt = await boot(agent_id, home=home, port=port, start_im=start_im)
+        rt = await boot(agent_name, home=home, port=port, start_im=start_im)
         try:
             if port is not None:
                 import uvicorn

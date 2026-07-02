@@ -61,7 +61,7 @@ platform ...` 与 `fleetent admin ...` 并存会制造两套心智模型。应�
 
 **cross-module dependencies**：Platform CLI 可 import `fleetent.platform.*`、`server`
 启动入口和 upgrade helper；`fleetent agent run`、`fleetent node start`、
-`fleetent kb-worker` 仍必须懒加载，不因新增 platform CLI 破坏 agent/platform 解耦。
+`fleetent kb worker` 仍必须懒加载，不因新增 platform CLI 破坏 agent/platform 解耦。
 
 **migration / shim plan**：不保留 `fleetent admin` alias；这是显式 breaking change。
 HTTP `/admin/*` 不迁移；代码内部角色名与权限语义不迁移。

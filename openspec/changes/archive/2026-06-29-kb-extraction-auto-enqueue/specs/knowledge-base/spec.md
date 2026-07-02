@@ -23,7 +23,7 @@ knowledge-base SHALL 支持显式 extraction run;此外 SHALL 支持**按 KB opt
 - **THEN** 系统在 ingest 完成后异步入队该 document 的 extraction job,不阻塞 ingest
 
 ### Requirement: Entity extraction exclusions
-knowledge-base entity extraction SHALL NOT implement graph search、periodic scheduler auto-discovery、entity merge review 或 document ACL。opt-in 的 ingest 后自动入队 extraction 经既有 `kb_ingest_jobs` 队列与 `fleetent kb-worker` 异步执行(事件驱动,非周期 scheduler),不属于本排除项。
+knowledge-base entity extraction SHALL NOT implement graph search、periodic scheduler auto-discovery、entity merge review 或 document ACL。opt-in 的 ingest 后自动入队 extraction 经既有 `kb_ingest_jobs` 队列与 `fleetent kb worker` 异步执行(事件驱动,非周期 scheduler),不属于本排除项。
 
 #### Scenario: Graph search remains out of scope
 - **WHEN** entity extraction change 完成
@@ -38,10 +38,10 @@ knowledge-base entity extraction SHALL NOT implement graph search、periodic sch
 ## ADDED Requirements
 
 ### Requirement: Auto-enqueue entity extraction after ingest
-当 KB 的 `extraction_enabled` 为真时,knowledge-base SHALL 在 ingest 写入 document 后,经既有 `kb_ingest_jobs` 入队 seam 异步入队一个 per-document `extraction` job,由 `fleetent kb-worker` 消费执行;入队与执行 SHALL NOT 阻塞 ingest,且单 extraction 失败 SHALL NOT 影响该文档的可检索性。抽取所用模型经 model policy 的 `kb_extraction` task 以 HTTP route 访问,route 由部署配置,on-prem 默认 SHALL 可自托管,不硬编码云默认。
+当 KB 的 `extraction_enabled` 为真时,knowledge-base SHALL 在 ingest 写入 document 后,经既有 `kb_ingest_jobs` 入队 seam 异步入队一个 per-document `extraction` job,由 `fleetent kb worker` 消费执行;入队与执行 SHALL NOT 阻塞 ingest,且单 extraction 失败 SHALL NOT 影响该文档的可检索性。抽取所用模型经 model policy 的 `kb_extraction` task 以 HTTP route 访问,route 由部署配置,on-prem 默认 SHALL 可自托管,不硬编码云默认。
 
 #### Scenario: Worker runs enqueued extraction
-- **WHEN** 存在 `extraction` job 且 `fleetent kb-worker` 在跑
+- **WHEN** 存在 `extraction` job 且 `fleetent kb worker` 在跑
 - **THEN** worker claim 该 job、对目标 document 运行 `run_entity_extraction`、写 entities/mentions/relations、置 job done
 
 #### Scenario: Extraction failure is non-blocking

@@ -124,7 +124,7 @@ def test_service_routes_resolve_from_same_agent_policy(route_key: str) -> None:
     resolved = policy.resolve(route_key)[0]
 
     assert resolved.route_key == route_key
-    assert resolved.agent_id == "support"
+    assert resolved.agent_name == "support"
     assert resolved.endpoint is not None
 
 

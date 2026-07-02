@@ -1,7 +1,7 @@
 """Tests for per-agent scope in TenantRouter (3b-1).
 
 Verifies:
-- agent_scope(tenant, agent_id) returns AgentScope{state_db, vector_backend}
+- agent_scope(tenant, agent_name) returns AgentScope{state_db, vector_backend}
 - SQLite backend maps to tenants/<tenant>/agents/<agent_id>/data/agent_state.db + agent_vectors.db
 - tenant_scope and agent_scope are flat peers (not nested)
 - Backend replaceable: injecting a fake backend leaves call sites unchanged
@@ -160,8 +160,8 @@ class _FakeAgentBackend:
             kb_vector_backend=self._vector,  # type: ignore[arg-type]
         )
 
-    def resolve_agent(self, tenant_id: str, agent_id: str) -> AgentScope:
-        self.resolve_agent_calls.append((tenant_id, agent_id))
+    def resolve_agent(self, tenant_id: str, agent_name: str) -> AgentScope:
+        self.resolve_agent_calls.append((tenant_id, agent_name))
         return AgentScope(
             state_db=SQLiteDatabase(path=self._db_path),
             vector_backend=self._vector,  # type: ignore[arg-type]
@@ -182,10 +182,10 @@ def test_agent_backend_is_replaceable(tmp_path: Path) -> None:
 
 
 def test_replacing_backend_does_not_change_agent_call_sites(tmp_path: Path) -> None:
-    """Call site only calls router.agent_scope(tenant, agent_id); backend swap is invisible."""
+    """Call site only calls router.agent_scope(tenant, agent_name); backend swap is invisible."""
 
-    def call_site(router: TenantRouter, tenant: str, agent_id: str) -> AgentScope:
-        return router.agent_scope(tenant, agent_id)
+    def call_site(router: TenantRouter, tenant: str, agent_name: str) -> AgentScope:
+        return router.agent_scope(tenant, agent_name)
 
     # Real backend
     real_router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path))

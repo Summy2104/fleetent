@@ -34,8 +34,8 @@ def _wire_session(monkeypatch, msgs):
     return saved
 
 
-def _ctx(agent_id="default", session_id="s1", user_id="u1") -> commands.CommandContext:
-    return commands.CommandContext(agent_id=agent_id, session_id=session_id, user_id=user_id)
+def _ctx(agent_name="default", session_id="s1", user_id="u1") -> commands.CommandContext:
+    return commands.CommandContext(agent_name=agent_name, session_id=session_id, user_id=user_id)
 
 
 async def test_non_command_returns_none() -> None:

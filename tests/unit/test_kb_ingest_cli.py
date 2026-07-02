@@ -52,7 +52,9 @@ def test_wait_for_job_times_out_with_worker_hint(
     )
 
     with pytest.raises(SystemExit) as exc_info:
-        ingest_cli._wait_for_job("job-1", database_url="sqlite:////tmp/kb_ingest_queue.db", timeout_seconds=2)
+        ingest_cli._wait_for_job(
+            "job-1", database_url="sqlite:////tmp/kb_ingest_queue.db", timeout_seconds=2
+        )
 
     assert exc_info.value.code == 1
     assert "kb-worker" in capsys.readouterr().err
@@ -64,18 +66,22 @@ def test_main_reports_missing_kb_without_enqueuing(
     from fleetent.knowledge_base import ingest_cli
 
     config = SimpleNamespace(
-        service=SimpleNamespace(tenant_id="tenant-a"),
-        data_dir=lambda: SimpleNamespace(),
-        queue_database_url=lambda: "sqlite:////tmp/kb-ingest-queue.db",
+        tenant_id="tenant-a",
+        data_dir=SimpleNamespace(),
+        queue_database_url="sqlite:////tmp/kb-ingest-queue.db",
+        multi_tenant_root=False,
     )
     enqueued: list[dict[str, object]] = []
 
-    monkeypatch.setattr(ingest_cli, "load_kb_service_config", lambda path: config)
+    monkeypatch.setattr(ingest_cli, "resolve_kb_command_scope", lambda path, tenant_id="": config)
     monkeypatch.setattr(
         ingest_cli,
         "_require_known_kb",
-        lambda tenant_id, kb_id, data_dir: (_ for _ in ()).throw(
-            ValueError("KB 'kb-missing' does not exist for tenant 'tenant-a'. Create it first via POST /admin/kb.")
+        lambda tenant_id, kb_id, data_dir, multi_tenant_root=False: (_ for _ in ()).throw(
+            ValueError(
+                "KB 'kb-missing' does not exist for tenant 'tenant-a'. "
+                "Create it first via POST /admin/kb."
+            )
         ),
     )
     monkeypatch.setattr(

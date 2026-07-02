@@ -28,7 +28,7 @@
 | change | 状态 | 内容 | 前置 |
 | --- | --- | --- | --- |
 | `kb-ingest-queue` | ✅ landed (`e1997237`) | DB 背 `kb_ingest_jobs`(管理库 Alembic,迁移 099)+ 入队 + 原子 claim/done/retry;触发器停止控制面内联跑 ingest;worker 落地前留过渡 drain | — |
-| `kb-worker` | ✅ landed (`f24ae882`) | `fleetent kb-worker` 唯一消费者/单一写入方;移除过渡 drain;admin sync = 入队+轮询(`_wait_for_kb_ingest_job`) | kb-ingest-queue |
+| `kb-worker` | ✅ landed (`f24ae882`) | `fleetent kb worker` 唯一消费者/单一写入方;移除过渡 drain;admin sync = 入队+轮询(`_wait_for_kb_ingest_job`) | kb-ingest-queue |
 | `kb-worker-config-file` | ✅ landed (`b8db5197`) | `$FLEETENT_HOME/kb-worker/.env`(队列/底座/embedder/Vault 接入),平行 node-config-file;connector 配置不进 worker | kb-worker |
 
 落地形态:多触发器 → DB 队列 → 唯一 kb-worker → ingest 核;队列经 `db.py` 边界、worker 不 import platform;明文凭据不入队(只写 `cred_ref`,运行时按 ref 解析留 Phase B)。**单机 ingest worker 链已齐**(target-architecture §12 的单机形态)。

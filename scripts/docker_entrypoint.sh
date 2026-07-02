@@ -20,7 +20,7 @@ case "$role" in
     exec fleetent node start "$@"
     ;;
   kb-worker)
-    exec fleetent kb-worker "$@"
+    exec fleetent kb worker "$@"
     ;;
   agent)
     exec fleetent agent run "$@"

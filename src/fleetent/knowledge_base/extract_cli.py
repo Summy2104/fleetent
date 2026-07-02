@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fleetent import kb_ingest_jobs
 from fleetent.knowledge_base.management.runtime import list_documents, set_extraction_enabled
-from fleetent.knowledge_base.service_config import load_kb_service_config
+from fleetent.knowledge_base.service_config import resolve_kb_command_scope
 from fleetent.knowledge_base.worker import _knowledge_database, _require_active_kb
 
 _POLL_INTERVAL_SECONDS = 0.25
@@ -16,17 +16,27 @@ _WAIT_TIMEOUT_SECONDS = 30.0
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     """Parse the standalone extraction CLI arguments."""
-    parser = argparse.ArgumentParser(prog="fleetent kb-extract")
+    parser = argparse.ArgumentParser(prog="fleetent kb extract")
     parser.add_argument("--config", required=True, help="standalone kb-service.yaml path")
+    parser.add_argument(
+        "--tenant", default="", help="target tenant when using host kb-service.yaml"
+    )
     parser.add_argument("--kb", required=True, help="target knowledge base id")
     parser.add_argument("--wait", action="store_true", help="wait for the queued jobs to finish")
     return parser.parse_args(argv)
 
 
-def _require_known_kb(tenant_id: str, kb_id: str, *, data_dir: Path) -> None:
+def _require_known_kb(
+    tenant_id: str, kb_id: str, *, data_dir: Path, multi_tenant_root: bool = False
+) -> None:
     """Fail fast when the requested KB has not been provisioned."""
     try:
-        _require_active_kb(tenant_id, kb_id, data_dir=data_dir)
+        _require_active_kb(
+            tenant_id,
+            kb_id,
+            data_dir=data_dir,
+            multi_tenant_root=multi_tenant_root,
+        )
     except ValueError as exc:
         raise ValueError(
             f"KB {kb_id!r} does not exist for tenant {tenant_id!r}. "
@@ -91,14 +101,23 @@ def _wait_for_jobs(
 def main(argv: list[str] | None = None) -> None:
     try:
         ns = _parse_args(argv or [])
-        config = load_kb_service_config(Path(ns.config).expanduser())
-        tenant_id = config.service.tenant_id
+        scope = resolve_kb_command_scope(Path(ns.config).expanduser(), tenant_id=str(ns.tenant))
+        tenant_id = scope.tenant_id
         kb_id = str(ns.kb)
-        data_dir = config.data_dir()
-        database_url = config.queue_database_url()
+        data_dir = scope.data_dir
+        database_url = scope.queue_database_url
 
-        _require_known_kb(tenant_id, kb_id, data_dir=data_dir)
-        kb_database = _knowledge_database(tenant_id, data_dir=data_dir)
+        _require_known_kb(
+            tenant_id,
+            kb_id,
+            data_dir=data_dir,
+            multi_tenant_root=scope.multi_tenant_root,
+        )
+        kb_database = _knowledge_database(
+            tenant_id,
+            data_dir=data_dir,
+            multi_tenant_root=scope.multi_tenant_root,
+        )
         set_extraction_enabled(tenant_id, kb_id, True, database=kb_database)
 
         document_rows = list_documents(tenant_id, kb_id, database=kb_database)

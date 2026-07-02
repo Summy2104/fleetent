@@ -153,7 +153,7 @@ async def dispatch(conn: Connection, request: dict[str, Any]) -> dict[str, Any] 
     if method in (p.METHOD_COMMAND, p.METHOD_USER):
         # Both route through the shared dispatcher; METHOD_USER kept for compat.
         ctx = commands.CommandContext(
-            agent_id=conn.agent_name, session_id=conn.session_id, user_id=conn.user_id
+            agent_name=conn.agent_name, session_id=conn.session_id, user_id=conn.user_id
         )
         reply = await commands.handle_command(ctx, str(params.get("text", "")))
         return p.make_response(req_id, {"reply": reply or "（不是命令)"})

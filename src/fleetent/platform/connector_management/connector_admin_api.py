@@ -13,6 +13,7 @@ from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from fleetent import audit_log, auth, user_store
+from fleetent.config import mcp_yaml_field_paths
 from fleetent.platform.connector_management import mcp_server_store
 from fleetent.platform.connector_management.mcp_auth import (
     ApiKeyMcpAuthConfig,
@@ -144,7 +145,12 @@ async def mcp_probe(server_id: str) -> dict[str, Any]:
 
 
 def _mask(value: Any) -> Any:
-    """Recursively mask sensitive values (secret/token/refresh/api_key/password)."""
+    """Recursively mask sensitive values (secret/token/refresh/api_key/password).
+
+    Only used for ``mcp_doctor()`` diagnostics, whose check output shape is unconstrained
+    (unlike ``auth_config``, which `mcp_auth_models.py` guarantees holds only env-var
+    references — see `list_mcp_servers`, which intentionally does not mask).
+    """
     if isinstance(value, dict):
         out = {}
         for k, v in value.items():
@@ -206,6 +212,13 @@ def mcp_doctor_view(authorization: str | None = Header(None)) -> dict[str, Any]:
     return _mask_dict(mcp_doctor())
 
 
+@router.get("/mcp/field-schema")
+def mcp_field_schema_view(authorization: str | None = Header(None)) -> dict[str, str]:
+    """Field name -> agent.yaml path template, for the admin form's per-field hints."""
+    _current_user(authorization)
+    return mcp_yaml_field_paths()
+
+
 @router.get("/mcp/servers")
 def list_mcp_servers(
     authorization: str | None = Header(None), agent_id: int | None = None
@@ -238,7 +251,7 @@ def list_mcp_servers(
     if agent_id is not None:
         for row in mcp_server_store.list_mcp_servers(agent_id):
             servers.append(_from_row(row))
-    return [_mask(s) for s in servers]
+    return servers
 
 
 @router.get("/mcp/servers/{server_id}/tools")

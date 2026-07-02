@@ -65,7 +65,7 @@ class ResolvedModelConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    agent_id: str
+    agent_name: str
     route_key: str
     target_id: str
     provider: str
@@ -83,20 +83,20 @@ class ModelPolicySnapshot(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    agent_id: str
+    agent_name: str
     targets: dict[str, ModelTargetSnapshot]
     routes: dict[str, tuple[ModelRouteEntrySnapshot, ...]]
 
     @classmethod
     def from_agent(cls, agent: AgentFile) -> "ModelPolicySnapshot":
         """Build a service-readable policy snapshot from an Agent file."""
-        return cls.from_models(agent_id=agent.name, models=agent.models)
+        return cls.from_models(agent_name=agent.name, models=agent.models)
 
     @classmethod
-    def from_models(cls, *, agent_id: str, models: AgentModels) -> "ModelPolicySnapshot":
+    def from_models(cls, *, agent_name: str, models: AgentModels) -> "ModelPolicySnapshot":
         """Build a snapshot from the parsed ``agent.yaml.models`` section."""
         return cls(
-            agent_id=agent_id,
+            agent_name=agent_name,
             targets={
                 target.id: ModelTargetSnapshot(
                     id=target.id,
@@ -136,7 +136,7 @@ class ModelPolicySnapshot(BaseModel):
                 raise ModelConfigError(
                     f"model route '{route_key}' references unknown target '{entry.target}'"
                 )
-            resolved.append(_merge(self.agent_id, route_key, target, entry))
+            resolved.append(_merge(self.agent_name, route_key, target, entry))
         return tuple(resolved)
 
     def require_api_key(self, resolved: ResolvedModelConfig) -> str | None:
@@ -153,14 +153,14 @@ class ModelPolicySnapshot(BaseModel):
 
 
 def _merge(
-    agent_id: str,
+    agent_name: str,
     route_key: str,
     target: ModelTargetSnapshot,
     entry: ModelRouteEntrySnapshot,
 ) -> ResolvedModelConfig:
     params = {**target.params, **entry.params}
     return ResolvedModelConfig(
-        agent_id=agent_id,
+        agent_name=agent_name,
         route_key=route_key,
         target_id=target.id,
         provider=target.provider,

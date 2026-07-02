@@ -10,7 +10,7 @@ extraction/graph 管线**已建但默认关 + 有 standalone 缺口**:实体/关
 
 ## What Changes
 
-- **standalone CLI**(镜像 A 的 `kb-ingest`):`fleetent kb-extract --config <kb-service.yaml> --kb <id> [--wait]`:
+- **standalone CLI**(镜像 A 的 `kb-ingest`):`fleetent kb extract --config <kb-service.yaml> --kb <id> [--wait]`:
   - **开启**:置该 KB `extraction_enabled=true`(补 `KnowledgeStore` setter——现仅 create 时可设)。
   - **回填**:遍历该 KB 存量文档(`list_documents`),**每 doc 入队一个 `extraction` job**(`connector_ref={"document_id": id}`,与 ingest 侧 auto-enqueue 同形),由 **kb-worker 单写者**抽取(不进程内直写 kb.db,守单写者纪律)。
   - `--wait`:阻塞轮询,打印 documents/entities/relations 计数;超时提示查 kb-worker。
@@ -29,7 +29,7 @@ extraction/graph 管线**已建但默认关 + 有 standalone 缺口**:实体/关
 ## Impact
 
 - **owning area**:`knowledge_base/`(`core/store.py` setter、新 `kb-extract` CLI、回填入队逻辑)、`__main__.py`(顶层 `kb-extract` 分发)、`kb-service.yaml.example`(extraction 段)。**不碰 platform**。
-- **public surface**:新增 CLI `fleetent kb-extract`;`kb-service.yaml` extraction 段 example 预置(默认关,向后兼容)。
+- **public surface**:新增 CLI `fleetent kb extract`;`kb-service.yaml` extraction 段 example 预置(默认关,向后兼容)。
 - **owned tables**:无新增;写既有 `knowledge_bases.extraction_enabled` + 由 worker 写 `kb_entities`/`kb_entity_mentions`/`kb_relations`。
 - **行为变更**:extraction 仍默认关、per-KB opt-in;开启后新 ingest 自动抽、存量经 `kb-extract` 回填。
 - **cross-module / 解耦**:不新增依赖;回填走既有 `extraction` job + worker,不复制抽取逻辑;不碰 platform。

@@ -2,7 +2,7 @@
 
 KB 独立部署线已收敛成单一模型:`kb-serve`(读 API)+ `kb-worker`(本地队列 ingest)。`kb-worker` 已在 `docker-compose.yml`,但 **`kb-serve` 还没进 compose**——意味着 managed 栈起来后,agent 无法经 HTTP 读 KB 服务(provider=http 指向的端点不存在)。本 change(#3,折进 container-deployment / dockerize 线)把 `kb-serve` 补成 compose 的第四个长驻服务,让"agent 经 HttpKnowledgeProvider 远程读 KB"在 compose 栈里端到端可达。
 
-`fleetent kb-serve` CLI 入口已存在(`__main__.py`),无需新代码;本 change 是**部署接线 + spec**,不碰 KB 业务代码。
+`fleetent kb serve` CLI 入口已存在(`__main__.py`),无需新代码;本 change 是**部署接线 + spec**,不碰 KB 业务代码。
 
 ## What Changes
 

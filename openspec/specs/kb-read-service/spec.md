@@ -18,15 +18,16 @@
 
 ### Requirement: Per-tenant scoping bound at boot
 
-服务 SHALL 是 per-tenant 进程:启动时绑定一个 `tenant_id`,经 `tenant_scope(tenant_id)` 注入 `kb_db` 与 `kb_vector_backend` 一次。服务 SHALL 只读该租户的 `tenants/<tenant>/kb/data/`,物理上够不到其它租户的库。
+服务 SHALL 默认为**单机多租户**:启动读本机服务级 config(不绑单一 `tenant_id`),按**每请求的 `principal.tenant_id`** 经 `tenant_scope(principal.tenant_id)` 解析该租户的 `kb_db` 与 `kb_vector_backend`(`TenantRouter` 缓存,廉价),只作用于 `tenants/<principal.tenant_id>/kb/data/`——请求间物理隔离,一个请求够不到别的租户库。服务 MAY 经 `--tenant <id>` 锁**单租户**(强隔离/调试):锁定时只受理该租户 principal,其它租户 principal 被拒(即旧的单租户行为)。
 
-#### Scenario: Boot binds tenant scope once
-- **WHEN** 服务以 `tenant_id=T` 启动
-- **THEN** 经 `tenant_scope(T)` 注入 KB 关系库与向量后端,只读 `tenants/T/kb/data/`
+#### Scenario: 多租户按 principal 路由
+- **WHEN** 服务默认(未锁 `--tenant`)启动,收到 `principal.tenant_id=T` 的请求
+- **THEN** 经 `tenant_scope(T)` 解析并只作用于 `tenants/T/kb/data/`;同一进程可依次服务不同租户的请求,各自隔离
+- **AND** 不存在"启动绑定单一租户"的硬 pin
 
-#### Scenario: Mismatched tenant is rejected
-- **WHEN** 请求的 `principal.tenant_id` 与服务绑定的租户不一致
-- **THEN** 服务拒绝该请求(不跨租户检索)
+#### Scenario: --tenant 锁单租户
+- **WHEN** 服务以 `--tenant T` 启动,收到 `principal.tenant_id=T'`(T'≠T)的请求
+- **THEN** 服务拒绝该请求(锁定模式回到单租户隔离语义)
 
 ### Requirement: Service-level retrieval policy
 
@@ -47,11 +48,11 @@
 
 ### Requirement: Service authentication
 
-服务 SHALL 用 Bearer service key 鉴权,并经 `X-Fleetent-Principal`(`identity.decode_ingress_principal`)解析请求主体。缺失或非法鉴权 SHALL 被拒绝。
+服务 SHALL 用**本机共享 Bearer service key** 鉴权(传输层),并经 `X-Fleetent-Principal`(`identity.decode_ingress_principal`)解析请求主体;`principal.tenant_id` 为**路由/授权键**(决定作用于哪个租户 KB)。缺失或非法鉴权(无 service key / principal 不可解析)SHALL 被拒绝。service key 为本机服务级(落本机 config),不再 per-tenant。
 
 #### Scenario: Valid service key and principal pass
-- **WHEN** 请求带合法 Bearer service key 与可解析的 `X-Fleetent-Principal`
-- **THEN** 服务受理并按解析出的 principal/tenant 处理
+- **WHEN** 请求带合法本机 Bearer service key 与可解析的 `X-Fleetent-Principal`
+- **THEN** 服务受理并按 `principal.tenant_id` 路由到对应租户 KB 处理
 
 #### Scenario: Missing auth is rejected
 - **WHEN** 请求缺 Bearer key 或 `X-Fleetent-Principal` 不可解析
@@ -59,11 +60,12 @@
 
 ### Requirement: Read service does not own ingest
 
-本服务 SHALL 只读 `kb/data/`,SHALL NOT 改变现有 ingest(worker / 队列 / connector secret)。KB 数据由现有 ingest 写入,服务读取同主机的 `tenants/<tenant>/kb/data/`。服务进程 SHALL NOT `import fleetent.platform.*`。
+本服务 SHALL NOT 拥有 **ingest 管线**:切块 / embedding / 向量入库等**内容与向量写**唯一经 kb-worker(队列消费),本服务 SHALL NOT 改变 ingest(worker / 队列 / connector secret)、SHALL NOT 承载 connector sweep 调度(归 kb-worker)。本服务 MAY 承载 KB **元数据 / 生命周期管理**(建库 / 归档 / 改描述 / 切换 extraction / 删文档)与只读管理 / 评估端点——这些经 `knowledge_base` 模块公共函数直接作用于本租户 `tenants/<tenant>/kb/data/`,与 `fleetent kb create` CLI 及平台 `/admin/kb` 的既有直接写同类,不触碰 ingest 管线。服务进程 SHALL NOT `import fleetent.platform.*`。
 
-#### Scenario: Service is read-only over kb/data/
+#### Scenario: 不拥有 ingest 管线,但可管理元数据
 - **WHEN** 检视服务实现
-- **THEN** 服务只读 `tenants/<tenant>/kb/data/` 下的库,不写入,也不改 ingest 队列/worker/connector secret
+- **THEN** 内容 / 向量写(切块 / embedding / 向量入库)不在本服务内发生,仍唯一经 kb-worker;本服务不改 ingest 队列 / worker / connector secret、不承载 sweep
+- **AND** 本服务可经 `knowledge_base` 公共函数执行 KB 元数据 / 生命周期管理与只读管理 / 评估
 - **AND** 服务进程不 `import fleetent.platform.*`
 
 ### Requirement: KB 服务状态只读端点
@@ -78,4 +80,34 @@ kb-serve SHALL 提供只读 `GET /status`,暴露本租户的 connector 同步状
 #### Scenario: kb-serve 不承载 sweep
 - **WHEN** 只启动 kb-serve(未启动 kb-worker)
 - **THEN** kb-serve 提供检索与状态读取,但不运行 connector sweep 调度
+
+### Requirement: KB 管理端点
+
+kb-serve SHALL 暴露本租户 KB 的管理端点,全复用 `knowledge_base` 模块公共函数、单租户(绑 `config.tenant_id`),鉴权与 `/search` 一致(Bearer service key + ingress principal,principal.tenant_id 须等于绑定租户,跨租户拒绝):
+
+- `POST /kb`(建库)、`GET /kb`(列 KB)、`PATCH /kb/{kb_id}`(改描述 / 切换 extraction)、`DELETE /kb/{kb_id}`(归档)。
+- `GET /kb/{kb_id}/documents`(列文档)、`GET /kb/{kb_id}/documents/{document_id}/chunks`(预览 chunk)、`DELETE /kb/{kb_id}/documents/{document_id}`(删文档)。
+
+绑定(KB↔agent)SHALL NOT 由 kb-serve 承载(依赖 management.db 与 agent 身份,归平台)。per-KB observation 指标 SHALL NOT 由 kb-serve 承载(依赖绑定 agent 集与跨 agent 检索 trace,归平台)。
+
+#### Scenario: 建库并管理文档(无 platform)
+- **WHEN** 以合法 Bearer + principal 请求 `POST /kb` 建库,再 `GET /kb`、`GET /kb/{kb_id}/documents`
+- **THEN** KB 在本租户 `kb.db` 创建,列表 / 文档端点返回本租户对应数据
+- **AND** 全程不依赖 platform 或 management.db、服务不 import platform
+
+#### Scenario: 删文档
+- **WHEN** `DELETE /kb/{kb_id}/documents/{document_id}`
+- **THEN** 经 `knowledge_base` 公共删除函数移除该文档及其 chunk(元数据 / 生命周期写,不经 ingest 管线)
+
+#### Scenario: 跨租户拒绝
+- **WHEN** principal.tenant_id ≠ 服务绑定租户
+- **THEN** 管理端点返回 403(与 /search、/status 一致)
+
+### Requirement: 离线评估端点
+
+kb-serve SHALL 暴露 `POST /evaluations`,经 `knowledge_base` 检索评估公共 API 对本租户 KB 运行离线检索评估并返回结果,单租户、鉴权与 /search 一致。评估 SHALL NOT 依赖 platform 或 agent 绑定(纯 KB 侧检索质量度量)。
+
+#### Scenario: 运行离线评估
+- **WHEN** 以合法 Bearer + principal 请求 `POST /evaluations`(含评估用例)
+- **THEN** 服务经 `knowledge_base` 评估 API 运行并返回评分结果,不依赖 platform
 

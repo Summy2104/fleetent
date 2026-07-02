@@ -117,6 +117,8 @@ _REEXPORTS = {
     "store": "fleetent.knowledge_base.store",
     "serve": "fleetent.knowledge_base.serve",
     "ingest_cli": "fleetent.knowledge_base.ingest_cli",
+    "create_cli": "fleetent.knowledge_base.create_cli",
+    "reindex_cli": "fleetent.knowledge_base.reindex_cli",
     "extract_cli": "fleetent.knowledge_base.extract_cli",
 }
 

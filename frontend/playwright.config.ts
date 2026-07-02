@@ -1,8 +1,8 @@
-import { defineConfig } from '@playwright/test';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { defineConfig } from '@playwright/test'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const Dirname = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
   testDir: './e2e',
@@ -11,9 +11,9 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: 'bash -lc "yarn build && yarn preview"',
-    cwd: __dirname,
+    command: 'bash -lc "pnpm build && pnpm preview"',
+    cwd: Dirname,
     url: 'http://127.0.0.1:4173',
     reuseExistingServer: !process.env.CI,
   },
-});
+})

@@ -22,10 +22,10 @@
 management_db_path()               = base/management.db
 tenant_dir(tenant)                 = base/tenants/<tenant>
 tenant_kb_dir(tenant)              = base/tenants/<tenant>/kb
-tenant_agent_home_dir(tenant, id)  = base/tenants/<tenant>/agents/<id>
-tenant_agent_data_dir(tenant, id)  = base/tenants/<tenant>/agents/<id>/data
-agent_home_dir(id)                 = base/tenants/default/agents/<id>   # standalone shim
-agent_data_dir(id)                 = base/tenants/default/agents/<id>/data
+tenant_agent_home_dir(tenant, name)= base/tenants/<tenant>/agents/<name>
+tenant_agent_data_dir(tenant, name)= base/tenants/<tenant>/agents/<name>/data
+agent_home_dir(name)               = base/tenants/default/agents/<name>   # standalone shim
+agent_data_dir(name)               = base/tenants/default/agents/<name>/data
 platform_yaml                      = base/platform.yaml
 platform_env                       = base/.env
 ```
@@ -110,7 +110,7 @@ node 状态（node/）                          →  [NODE] 自己（provision +
 3. **租户优先布局**：canonical home = `tenants/<tenant>/agents/<agent>/`。
 4. **agent data 拍平**：运行时 DB 与 sessions/logs/workspaces 都落 `<agent-home>/data/`。
 5. **KB 是 tenant 级**：配置 home 在 `tenants/<tenant>/kb/`，关系库/向量库/队列库在 `tenants/<tenant>/kb/data/`。
-6. **KB 服务可 standalone 运行且 service home 自包含**：`fleetent kb-serve --config tenants/<tenant>/kb/kb-service.yaml` 与 `fleetent kb-worker --config tenants/<tenant>/kb/kb-service.yaml` 都固定读写同一租户 service home；`kb-service.yaml` 与 `.env` 落 `kb/` 根，connector 配置、secret、sweep 和 ingest 队列共享这一棵 home。node 只把 `kb/data/` RO 挂进 agent，隔离 `kb/` 根的 secret。
+6. **KB 服务可 standalone 运行且 host config / tenant config 分层**：`fleetent kb serve --config kb-service.yaml` 与 `fleetent kb worker --config kb-service.yaml` 共用根 `kb-service.yaml`；每租户只在 `tenants/<tenant>/kb/` 保留 `connectors.yaml` 与 `.env`，而关系库/向量库/队列库继续落 `kb/data/`。node 只把 `kb/data/` RO 挂进 agent，隔离 `kb/` 根与 tenant `.env` 的 secret。
 
 ---
 

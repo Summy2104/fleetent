@@ -6,7 +6,7 @@ env 文件初始化逻辑散落在 Makefile 中，`dev-bootstrap` 缺少创建�
 
 - **新增** `fleetent platform init-config --home <path>` 支持 `--home` 参数（当前固定用 `cwd`），使 `dev-bootstrap` 可正确初始化 `.fleetent-dev/.env`
 - **新增** `fleetent node init-config` 命令：在 `$FLEETENT_HOME/node/` 下创建 `.env` scaffold（仅含空占位，不含 service key）
-- **新增** `fleetent kb-worker init-config` 命令：在 `$FLEETENT_HOME/kb-worker/` 下创建 `.env` scaffold
+- **新增** ``fleetent` `kb-worker` init-config` 命令：在 `$FLEETENT_HOME/kb-worker/` 下创建 `.env` scaffold
 - **修改** `make dev-bootstrap`：调用上述三个命令替代现有缺失步骤
 - **修复** `collect_env_var_names`：扫描 MCP stdio `env:` dict 中 `"env:VAR_NAME"` 格式的值，提取实际变量名
 - **修正** `.env.example`（平台）：删除死变量 `FLEETENT_AUTO_UPGRADE`、`MICROSANDBOX_URL`；区分平台服务端与 TUI 客户端注释区块

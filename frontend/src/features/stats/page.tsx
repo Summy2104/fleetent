@@ -1,8 +1,11 @@
-import { useEffect, useState } from 'react';
-import { Download } from 'lucide-react';
+import { useEffect, useState } from 'react'
+import { Download } from 'lucide-react'
 
-import { useT } from '@/i18n';
-import { useAgentsQuery } from '@/features/agents/api';
+import { Badge } from '@/components/base/badge'
+import { SimpleSelect } from '@/components/base/simple-select'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { useAgentsQuery } from '@/features/agents/api'
 import {
   useAgentOverviewQuery,
   useAgentToolsQuery,
@@ -12,47 +15,44 @@ import {
   useSessionTraceQuery,
   useStatsExportMutation,
   useUserRequestsQuery,
-} from '@/features/stats/api';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+} from '@/features/stats/api'
+import { useT } from '@/i18n'
 
-const WINDOWS = ['1h', '24h', '7d', '30d'] as const;
+const WINDOWS = ['1h', '24h', '7d', '30d'] as const
 
 function describeValue(value: unknown): string {
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
+    return String(value)
   }
   if (value === null || value === undefined) {
-    return '';
+    return ''
   }
-  return JSON.stringify(value);
+  return JSON.stringify(value)
 }
 
 function MetricList({ value }: { value: Record<string, unknown> | undefined }): JSX.Element | null {
   if (!value) {
-    return null;
+    return null
   }
   return (
     <div className="grid gap-1.5">
       {Object.entries(value).map(([key, item]) => (
-        <p className="font-mono text-sm text-foreground" key={key}>
+        <p className="font-mono text-foreground text-sm" key={key}>
           {`${key}: ${String(item)}`}
         </p>
       ))}
     </div>
-  );
+  )
 }
 
 function EventList({
   events,
   title,
 }: {
-  events: Array<Record<string, unknown>> | undefined;
-  title: string;
+  events: Array<Record<string, unknown>> | undefined
+  title: string
 }): JSX.Element {
-  const t = useT();
+  const t = useT()
   return (
     <Card aria-label={title}>
       <CardHeader>
@@ -62,18 +62,19 @@ function EventList({
         {events?.length ? (
           events.map((event, index) => (
             <p
-              className="rounded-md border border-border bg-secondary/40 px-3 py-2 font-mono text-xs text-foreground"
+              className="rounded-md border border-border bg-secondary/40 px-3 py-2 font-mono text-foreground text-xs"
+              // biome-ignore lint/suspicious/noArrayIndexKey: read-only append-only log; events carry no stable id
               key={`${title}-${index}`}
             >
               {describeValue(event.text ?? event.kind ?? event)}
             </p>
           ))
         ) : (
-          <p className="text-sm text-muted-foreground">{t('stats.selectRecordToInspect')}</p>
+          <p className="text-muted-foreground text-sm">{t('stats.selectRecordToInspect')}</p>
         )}
       </CardContent>
     </Card>
-  );
+  )
 }
 
 // ─────────────────────────── Dashboard (mounted after Load) ───────────────────────────
@@ -83,21 +84,21 @@ function StatsDashboard({
   agentNames,
   window,
 }: {
-  agentName: string;
-  agentNames: string[];
-  window: string;
+  agentName: string
+  agentNames: string[]
+  window: string
 }): JSX.Element {
-  const t = useT();
-  const overview = useAgentOverviewQuery(agentName, window);
-  const compare = useCompareAgentsQuery(agentNames, 'calls');
-  const tools = useAgentToolsQuery(agentName);
-  const perUser = usePerUserStatsQuery(agentName, 'calls');
-  const [selectedUser, setSelectedUser] = useState<string | null>(null);
-  const [selectedRequest, setSelectedRequest] = useState<string | null>(null);
-  const [selectedSession, setSelectedSession] = useState<string | null>(null);
-  const userRequests = useUserRequestsQuery(selectedUser);
-  const requestDetail = useRequestDetailQuery(selectedRequest);
-  const sessionTrace = useSessionTraceQuery(selectedSession, selectedUser);
+  const t = useT()
+  const overview = useAgentOverviewQuery(agentName, window)
+  const compare = useCompareAgentsQuery(agentNames, 'calls')
+  const tools = useAgentToolsQuery(agentName)
+  const perUser = usePerUserStatsQuery(agentName, 'calls')
+  const [selectedUser, setSelectedUser] = useState<string | null>(null)
+  const [selectedRequest, setSelectedRequest] = useState<string | null>(null)
+  const [selectedSession, setSelectedSession] = useState<string | null>(null)
+  const userRequests = useUserRequestsQuery(selectedUser)
+  const requestDetail = useRequestDetailQuery(selectedRequest)
+  const sessionTrace = useSessionTraceQuery(selectedSession, selectedUser)
 
   return (
     <div className="space-y-6">
@@ -129,7 +130,7 @@ function StatsDashboard({
                 </thead>
                 <tbody>
                   {compare.data?.map((row) => (
-                    <tr className="border-t border-border" key={row.agent_id}>
+                    <tr className="border-border border-t" key={row.agent_id}>
                       <td className="px-3 py-2 font-mono text-foreground">{row.agent_id}</td>
                       <td className="px-3 py-2 text-right font-mono text-muted-foreground">{row.value}</td>
                     </tr>
@@ -151,23 +152,23 @@ function StatsDashboard({
               <div className="rounded-lg border border-border bg-card p-4" key={row.user_id}>
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0 space-y-1">
-                    <p className="font-mono text-sm font-semibold text-foreground">{row.user_id}</p>
+                    <p className="font-mono font-semibold text-foreground text-sm">{row.user_id}</p>
                     {Object.entries(row)
                       .filter(([key]) => key !== 'user_id')
                       .map(([key, value]) => (
-                        <p className="text-sm text-muted-foreground" key={key}>
+                        <p className="text-muted-foreground text-sm" key={key}>
                           {`${key}: ${describeValue(value)}`}
                         </p>
                       ))}
                   </div>
                   <Button
-                    variant="secondary"
-                    size="sm"
                     onClick={() => {
-                      setSelectedUser(row.user_id);
-                      setSelectedRequest(null);
-                      setSelectedSession(null);
+                      setSelectedUser(row.user_id)
+                      setSelectedRequest(null)
+                      setSelectedSession(null)
                     }}
+                    size="sm"
+                    variant="secondary"
                   >
                     {t('stats.viewRequests')}
                   </Button>
@@ -175,7 +176,7 @@ function StatsDashboard({
               </div>
             ))}
             {perUser.data && perUser.data.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{t('stats.noPerUserUsage')}</p>
+              <p className="text-muted-foreground text-sm">{t('stats.noPerUserUsage')}</p>
             ) : null}
           </CardContent>
         </Card>
@@ -206,26 +207,26 @@ function StatsDashboard({
           <CardContent className="space-y-3">
             {userRequests.data?.length ? (
               userRequests.data.map((request) => {
-                const sessionId = request.session_id;
+                const sessionId = request.session_id
                 return (
                   <div className="space-y-2 rounded-lg border border-border bg-card p-4" key={request.request_id}>
-                    <p className="font-mono text-sm font-medium text-foreground">{request.request_id}</p>
-                    <p className="text-xs text-muted-foreground">{`session_id: ${sessionId ?? 'n/a'}`}</p>
+                    <p className="font-medium font-mono text-foreground text-sm">{request.request_id}</p>
+                    <p className="text-muted-foreground text-xs">{`session_id: ${sessionId ?? 'n/a'}`}</p>
                     <div className="flex flex-wrap gap-2 pt-1">
-                      <Button variant="outline" size="sm" onClick={() => setSelectedRequest(request.request_id)}>
+                      <Button onClick={() => setSelectedRequest(request.request_id)} size="sm" variant="outline">
                         {t('stats.openRequest')}
                       </Button>
                       {sessionId ? (
-                        <Button variant="outline" size="sm" onClick={() => setSelectedSession(sessionId)}>
+                        <Button onClick={() => setSelectedSession(sessionId)} size="sm" variant="outline">
                           {t('stats.openSessionTrace')}
                         </Button>
                       ) : null}
                     </div>
                   </div>
-                );
+                )
               })
             ) : (
-              <p className="text-sm text-muted-foreground">{t('stats.pickUserToInspect')}</p>
+              <p className="text-muted-foreground text-sm">{t('stats.pickUserToInspect')}</p>
             )}
           </CardContent>
         </Card>
@@ -234,87 +235,77 @@ function StatsDashboard({
         <EventList events={sessionTrace.data?.events} title={t('stats.sessionTrace')} />
       </div>
     </div>
-  );
+  )
 }
 
 // ─────────────────────────── Page ───────────────────────────
 
 export function StatsPage(): JSX.Element {
-  const t = useT();
-  const agents = useAgentsQuery();
-  const exportMutation = useStatsExportMutation();
+  const t = useT()
+  const agents = useAgentsQuery()
+  const exportMutation = useStatsExportMutation()
 
-  const [pickedAgent, setPickedAgent] = useState('');
-  const [pickedWindow, setPickedWindow] = useState('7d');
-  const [loaded, setLoaded] = useState<{ agent: string; window: string } | null>(null);
+  const [pickedAgent, setPickedAgent] = useState<string | null>('')
+  const [pickedWindow, setPickedWindow] = useState<string | null>('7d')
+  const [loaded, setLoaded] = useState<{ agent: string; window: string } | null>(null)
 
   useEffect(() => {
     if (!pickedAgent && agents.data?.length) {
-      setPickedAgent(agents.data[0].agent_name);
+      setPickedAgent(agents.data[0].agent_name)
     }
-  }, [agents.data, pickedAgent]);
+  }, [agents.data, pickedAgent])
 
-  const agentNames = (agents.data ?? []).map((agent) => agent.agent_name);
+  const agentNames = (agents.data ?? []).map((agent) => agent.agent_name)
 
   const runExport = async (view: 'per-user' | 'tools'): Promise<void> => {
-    const result = await exportMutation.mutateAsync({ agentId: pickedAgent || undefined, view });
-    const url = URL.createObjectURL(result.blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = result.fileName;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
+    const result = await exportMutation.mutateAsync({ agentId: pickedAgent || undefined, view })
+    const url = URL.createObjectURL(result.blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = result.fileName
+    link.click()
+    URL.revokeObjectURL(url)
+  }
 
   return (
     <div className="space-y-6">
-      <h2 className="text-xl font-semibold tracking-tight">{t('stats.title')}</h2>
+      <h2 className="font-semibold text-xl tracking-tight">{t('stats.title')}</h2>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Select value={pickedAgent} onValueChange={setPickedAgent} disabled={!agents.data?.length}>
-          <SelectTrigger className="w-56">
-            <SelectValue placeholder={t('stats.pickAnAgent')} />
-          </SelectTrigger>
-          <SelectContent>
-            {agentNames.map((name) => (
-              <SelectItem key={name} value={name}>
-                {name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <SimpleSelect
+          disabled={!agents.data?.length}
+          onValueChange={setPickedAgent}
+          options={agentNames.map((name) => ({ value: name, label: name }))}
+          placeholder={t('stats.pickAnAgent')}
+          triggerClassName="w-56"
+          value={pickedAgent}
+        />
 
-        <Select value={pickedWindow} onValueChange={setPickedWindow}>
-          <SelectTrigger className="w-28">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {WINDOWS.map((option) => (
-              <SelectItem key={option} value={option}>
-                {option}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <SimpleSelect
+          onValueChange={setPickedWindow}
+          options={WINDOWS.map((option) => ({ value: option, label: option }))}
+          triggerClassName="w-28"
+          value={pickedWindow}
+        />
 
         <Button
           disabled={!pickedAgent}
-          onClick={() => setLoaded({ agent: pickedAgent, window: pickedWindow })}
+          onClick={() => setLoaded({ agent: pickedAgent ?? '', window: pickedWindow ?? '' })}
         >
           {t('stats.load')}
         </Button>
 
         <Button
-          variant="outline"
           disabled={!pickedAgent || exportMutation.isPending}
           onClick={() => void runExport('per-user')}
+          variant="outline"
         >
           <Download className="size-4" /> {t('stats.exportPerUserCsv')}
         </Button>
         <Button
-          variant="outline"
           disabled={!pickedAgent || exportMutation.isPending}
           onClick={() => void runExport('tools')}
+          variant="outline"
         >
           <Download className="size-4" /> {t('stats.exportToolsCsv')}
         </Button>
@@ -323,8 +314,8 @@ export function StatsPage(): JSX.Element {
       {loaded ? (
         <StatsDashboard agentName={loaded.agent} agentNames={agentNames} window={loaded.window} />
       ) : (
-        <p className="text-sm text-muted-foreground">{t('stats.pickAgentAndLoad')}</p>
+        <p className="text-muted-foreground text-sm">{t('stats.pickAgentAndLoad')}</p>
       )}
     </div>
-  );
+  )
 }

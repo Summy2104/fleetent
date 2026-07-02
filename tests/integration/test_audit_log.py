@@ -60,6 +60,17 @@ def test_batch_id_shared(db):
     assert len(rows) == 2
 
 
+def test_empty_string_filters_are_ignored(db):
+    # A blank filter value (e.g. the frontend sending actor=) must be treated as
+    # "no filter", not as an exact match on the empty string (which matches nothing).
+    audit.write_audit("admin1", "rotate_key", target_type="user", target_id="u1")
+    audit.write_audit("admin2", "block_user", target_type="user", target_id="u2")
+    assert len(audit.search_audit(actor="", action="", target_type="", target_id="")) == 2
+    assert len(audit.search_audit(since="", until="")) == 2
+    # A real value still filters.
+    assert len(audit.search_audit(actor="admin1")) == 1
+
+
 def test_audit_log_uses_named_sql_params():
     source = Path(top_level_audit.__file__).read_text()
     assert "VALUES (?, ?, ?, ?, ?, ?, ?)" not in source

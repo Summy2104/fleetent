@@ -30,7 +30,7 @@ from fleetent.agent_config import (
     collect_env_var_names,
     default_models,
 )
-from fleetent.config import McpServerSettings
+from fleetent.config import MCP_FLEETENT_EXT_DEFAULTS, McpServerSettings
 from fleetent.platform.agent_lifecycle import credential_slots, default_binding_store, secret_store
 from fleetent.platform.connector_management import mcp_server_store
 from fleetent.platform.connector_management.mcp_auth import (
@@ -273,8 +273,12 @@ def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
     if not route_overrides:
         return default_models()
 
-    targets: dict[str, ModelTarget] = {}
-    routes: dict[str, list[ModelRouteEntry]] = {}
+    # Merge onto the baseline one route at a time: a route absent from the override must keep
+    # its default target rather than disappearing just because some other route was overridden.
+    baseline = default_models()
+    baseline_targets = {target.id: target for target in baseline.targets}
+    routes: dict[str, list[ModelRouteEntry]] = dict(baseline.routes)
+    override_targets: dict[str, ModelTarget] = {}
     for route_key, raw_entries in route_overrides.items():
         entries = raw_entries if isinstance(raw_entries, list) else [raw_entries]
         route_entries: list[ModelRouteEntry] = []
@@ -282,7 +286,7 @@ def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
             if not isinstance(raw_entry, dict):
                 continue
             target = _target_from_model_override(route_key, index, raw_entry)
-            targets.setdefault(target.id, target)
+            override_targets[target.id] = target
             route_entries.append(
                 ModelRouteEntry(
                     target=target.id,
@@ -293,8 +297,16 @@ def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
         if route_entries:
             routes[str(route_key)] = route_entries
 
-    if not targets or not routes:
-        return default_models()
+    # Drop baseline targets no route still references (e.g. the default local target once the
+    # default route itself is overridden), but keep those a still-untouched route relies on
+    # (e.g. memory_extraction/kb_extraction still pointing at the baseline "default" target).
+    referenced_ids = {entry.target for entries in routes.values() for entry in entries}
+    targets = {
+        target_id: target
+        for target_id, target in baseline_targets.items()
+        if target_id in referenced_ids
+    }
+    targets.update(override_targets)
     return AgentModels(targets=list(targets.values()), routes=routes)
 
 
@@ -400,17 +412,6 @@ def _mcp_servers_for_agent(agent: agent_store.Agent) -> list[McpServerSettings]:
     return servers
 
 
-# Fleetent extension fields and their defaults — dropped from the rendered map when default,
-# hoisted under `x-fleetent` when set (mcp-config-standardization).
-_FLEETENT_EXT_DEFAULTS: dict[str, Any] = {
-    "degrade_mode": "degrade",
-    "file_root": "",
-    "file_isolation": "on",
-    "auth": None,
-    "approval_rules": [],
-}
-
-
 def _mcp_payload_to_map(payload: dict[str, Any]) -> None:
     """Rewrite a dumped AgentFile payload's ``mcp_servers`` list into the standard
     ``mcpServers`` map (key = server id), hoisting non-default fleetent fields under each
@@ -423,7 +424,7 @@ def _mcp_payload_to_map(payload: dict[str, Any]) -> None:
         entry = dict(entry)
         sid = entry.pop("id")
         ext = {}
-        for key, default in _FLEETENT_EXT_DEFAULTS.items():
+        for key, default in MCP_FLEETENT_EXT_DEFAULTS.items():
             value = entry.pop(key, default)
             if value != default:
                 ext[key] = value

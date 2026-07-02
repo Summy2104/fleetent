@@ -509,7 +509,8 @@ def managed_kb_http_stack(
         sys.executable,
         "-m",
         "fleetent",
-        "kb-serve",
+        "kb",
+        "serve",
         "--config",
         str(kb_service_config),
     ]

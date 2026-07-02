@@ -11,7 +11,7 @@ KB 独立部署线刚落地(`kb-read-service` / `kb-standalone-ingest` / `kb-ret
 **目标接缝**:
 - standalone 用**独立的 flat 解析**(不走共享 `SQLiteTenantBackend`),但 flat 的根直接就是**当前 tenant home 的 `data/`**:`data_dir/{kb.db,kb_vectors.db}`。`tenant_id` 只留在 `KbScope.tenant_id` 元数据,**不参与路径**。
 - `queue_database_url()` 直接落 `data_dir/kb_ingest_queue.db`。
-- `fleetent kb-service init-config` 改为**每租户 home**脚手架:`kb-service/<tenant>/kb-service.yaml` + `.env`;支持 `--tenant <id>`(默认 `default`)。
+- `fleetent kb init-config` 改为**每租户 home**脚手架:`kb-service/<tenant>/kb-service.yaml` + `.env`;支持 `--tenant <id>`(默认 `default`)。
 - `kb-service.yaml.example` 默认 `service.tenant_id: default`;`data.home: ./data` 保持不变。
 
 **为何不碰嵌入式**:嵌入式 KB 文件由 agent 进程 in-process(LocalKnowledgeProvider)读,路径来自 `paths.tenant_kb_dir` + `SQLiteTenantBackend`,与 standalone(HttpKnowledgeProvider 经网络)是两条独立物理路径,互不影响。

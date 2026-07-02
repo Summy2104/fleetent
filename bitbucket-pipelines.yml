@@ -6,7 +6,7 @@ image: ghcr.io/astral-sh/uv:python3.12-bookworm
 definitions:
   caches:
     uv: ~/.cache/uv
-    yarn: frontend/node_modules
+    pnpm: ~/.local/share/pnpm
   steps:
     - step: &unit-coverage
         name: unit tests + coverage
@@ -25,11 +25,17 @@ definitions:
         # Node + make ship in the default node:22 image (Debian buildpack-deps base),
         # so we skip the per-run apt/nodesource install the python:3.12 image needed.
         image: node:22
+        # 2x doubles the runner to 8GB / ~8 vCPU. The gate's wall-clock pole is the
+        # vitest suite (288 CPU-bound component tests under v8 coverage); it was
+        # pinned to maxWorkers:2 to dodge CPU-starvation flake on the 1x runner. On
+        # 2x each of the (now 4) workers gets ~2 vCPU, so it runs ~halved AND with
+        # more headroom — fewer starvation flakes, so the vitest retry rarely fires.
+        size: 2x
         caches:
-          - yarn
+          - pnpm
         script:
           - corepack enable
-          - yarn --version
+          - pnpm --version
           - make frontend-install
           - make frontend-build
           - make test-frontend

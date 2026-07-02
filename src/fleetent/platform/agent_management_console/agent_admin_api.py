@@ -20,6 +20,7 @@ from fleetent.platform.connector_management import (
     mcp_server_store,
 )
 from fleetent.platform.knowledge_base_management import agent_kbs_store
+from fleetent.platform.knowledge_base_management.kb_admin_api import kb_engine_list
 from fleetent.platform.skill_management import skill_admin_store
 from fleetent.skills import registry as skill_registry
 
@@ -220,9 +221,9 @@ def set_im_capabilities(
     authorization: str | None = Header(None),
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
-    _require_agent(name)
+    agent = _require_agent(name)
     agent_store.set_im_capabilities(
-        name,
+        agent.id,
         supports_dm=body.supports_dm,
         supports_groups=body.supports_groups,
     )
@@ -347,7 +348,12 @@ def unbind_mcp(
 def list_agent_kbs(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
     _current_user(authorization)
     agent = _require_agent(name)
-    kb_ids = agent_kbs_store.list_kbs_for_agent(agent.tenant_id, agent.id)
+    archived = {kb["kb_id"] for kb in kb_engine_list(agent.tenant_id) if kb.get("archived")}
+    kb_ids = [
+        kb_id
+        for kb_id in agent_kbs_store.list_kbs_for_agent(agent.tenant_id, agent.id)
+        if kb_id not in archived
+    ]
     return {"agent": name, "kb_ids": kb_ids}
 
 

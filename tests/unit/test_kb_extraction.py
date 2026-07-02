@@ -121,7 +121,7 @@ def test_extracted_relation_rejects_unsupported_type():
 
 
 def test_default_model_policy_has_local_kb_extraction_route():
-    policy = ModelPolicySnapshot.from_models(agent_id="agent-a", models=default_models())
+    policy = ModelPolicySnapshot.from_models(agent_name="agent-a", models=default_models())
 
     resolved = policy.resolve("kb_extraction")[0]
 

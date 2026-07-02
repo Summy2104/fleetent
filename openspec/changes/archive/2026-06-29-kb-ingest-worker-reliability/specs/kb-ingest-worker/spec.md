@@ -2,14 +2,14 @@
 
 ### Requirement: Worker 存活可观测
 
-`fleetent kb-worker` SHALL 周期性写入存活信号(heartbeat),使控制面能判定当前是否存在活跃 worker。存活判定 SHALL 基于一个可配置的过期阈值:在阈值内有 heartbeat(或近期 job claim)记为活跃,否则记为无活跃 worker。该信号经 `db.py` 边界持久化,worker SHALL NOT 为此 `import fleetent.platform.*`。
+`fleetent kb worker` SHALL 周期性写入存活信号(heartbeat),使控制面能判定当前是否存在活跃 worker。存活判定 SHALL 基于一个可配置的过期阈值:在阈值内有 heartbeat(或近期 job claim)记为活跃,否则记为无活跃 worker。该信号经 `db.py` 边界持久化,worker SHALL NOT 为此 `import fleetent.platform.*`。
 
 #### Scenario: worker 运行时写入存活信号
-- **WHEN** `fleetent kb-worker` 在跑
+- **WHEN** `fleetent kb worker` 在跑
 - **THEN** 系统在过期阈值内可观测到该 worker 的存活信号
 
 #### Scenario: 无 worker 时存活信号过期
-- **WHEN** 没有任何 `fleetent kb-worker` 在跑且超过过期阈值
+- **WHEN** 没有任何 `fleetent kb worker` 在跑且超过过期阈值
 - **THEN** 控制面判定为"无活跃 worker"
 
 ### Requirement: 非终态 ingest 状态区分降级与处理中
@@ -29,4 +29,4 @@ admin ingest / sync 端点在返回非终态(未 done / failed)结果时 SHALL �
 
 #### Scenario: 不引入绕过队列的执行
 - **WHEN** 检视实现
-- **THEN** 仍只有 `fleetent kb-worker` 消费队列,未为可观测性新增任何在控制面进程内同步跑 ingest 的路径
+- **THEN** 仍只有 `fleetent kb worker` 消费队列,未为可观测性新增任何在控制面进程内同步跑 ingest 的路径
