@@ -113,7 +113,8 @@ export function SkillsTable({
       />
       <ProposalDiffDialog onOpenChange={(open) => !open && setProposalDiffId(null)} proposalId={proposalDiffId} />
       <BackflowDialog
-        diffText={backflowDiff.data?.diff_vs_head ?? null}
+        diff={backflowDiff.data ?? null}
+        diffLoading={selectedBackflowId !== null && backflowDiff.isPending}
         gitopsEnabled={gitopsEnabled}
         onOpenChange={(open) => {
           if (!open) {

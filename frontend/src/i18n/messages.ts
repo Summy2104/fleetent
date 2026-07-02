@@ -270,6 +270,11 @@ const en = {
   'skills.backflowSyncNow': 'Sync backflow',
   'skills.backflowSyncing': 'Pushing…',
   'skills.backflowSynced': 'Pushed ✓',
+  'skills.diffLoading': 'Loading diff…',
+  'skills.diffVsBase': 'Change vs. the base the agent started from',
+  'skills.diffVsHead': 'Change vs. the current pool',
+  'skills.diffNone': 'No difference from the current pool.',
+  'skills.backflowConflict': 'The pool has advanced since this edit — review for conflicts before accepting.',
 
   // Knowledge Base 页
   'kb.title': 'Knowledge Base',
@@ -997,6 +1002,11 @@ const zh: Messages = {
   'skills.backflowSyncNow': '立即推送',
   'skills.backflowSyncing': '推送中…',
   'skills.backflowSynced': '推送成功 ✓',
+  'skills.diffLoading': '正在加载差异…',
+  'skills.diffVsBase': '相对 Agent 起始基线的改动',
+  'skills.diffVsHead': '相对当前技能池的改动',
+  'skills.diffNone': '与当前技能池无差异。',
+  'skills.backflowConflict': '技能池在此改动之后已更新——接受前请检查是否冲突。',
 
   // Knowledge Base 页
   'kb.title': '知识库',

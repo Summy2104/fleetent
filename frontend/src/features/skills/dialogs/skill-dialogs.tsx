@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import {
+  type BackflowDiff,
   type BackflowProposal,
   type SkillProposal,
   useBackflowAcceptMutation,
@@ -368,18 +369,24 @@ function BackflowProposalCard({
   )
 }
 
+function DiffPre({ children }: { children: string }): JSX.Element {
+  return <pre className="mt-2 max-h-72 overflow-auto rounded-xl bg-slate-950 p-4 text-slate-50 text-sm">{children}</pre>
+}
+
 export function BackflowDialog({
   skillName,
   proposals,
   onViewDiff,
-  diffText,
+  diff,
+  diffLoading = false,
   onOpenChange,
   gitopsEnabled = false,
 }: {
   skillName: string | null
   proposals: BackflowProposal[]
   onViewDiff: (id: number) => void
-  diffText: string | null
+  diff: BackflowDiff | null
+  diffLoading?: boolean
   onOpenChange: (open: boolean) => void
   gitopsEnabled?: boolean
 }): JSX.Element {
@@ -420,10 +427,33 @@ export function BackflowDialog({
             />
           ))}
           {proposals.length === 0 ? <p className="text-muted-foreground text-sm">{t('skills.noBackflow')}</p> : null}
-          {diffText ? (
-            <pre className="mt-2 max-h-72 overflow-auto rounded-xl bg-slate-950 p-4 text-slate-50 text-sm">
-              {diffText}
-            </pre>
+          {diffLoading ? <p className="mt-2 text-muted-foreground text-sm">{t('skills.diffLoading')}</p> : null}
+          {diff ? (
+            <div className="mt-2 space-y-2">
+              {diff.conflict ? (
+                <p className="rounded-md bg-amber-50 px-3 py-2 text-amber-900 text-sm dark:bg-amber-950/30 dark:text-amber-200">
+                  {t('skills.backflowConflict')}
+                </p>
+              ) : null}
+              {/* The edit relative to the base the agent started from — the actual change to
+                  review. diff_vs_head can be empty (pool already matches the edit), so this
+                  is what usually carries content. */}
+              {diff.diff_vs_base ? (
+                <div>
+                  <p className="font-medium text-muted-foreground text-xs">{t('skills.diffVsBase')}</p>
+                  <DiffPre>{diff.diff_vs_base}</DiffPre>
+                </div>
+              ) : null}
+              {diff.diff_vs_head ? (
+                <div>
+                  <p className="font-medium text-muted-foreground text-xs">{t('skills.diffVsHead')}</p>
+                  <DiffPre>{diff.diff_vs_head}</DiffPre>
+                </div>
+              ) : null}
+              {!diff.diff_vs_base && !diff.diff_vs_head ? (
+                <p className="text-muted-foreground text-sm">{t('skills.diffNone')}</p>
+              ) : null}
+            </div>
           ) : null}
         </div>
       </DialogContent>

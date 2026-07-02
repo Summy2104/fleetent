@@ -442,6 +442,27 @@ describe('skills page backflow approval', () => {
 
     confirmSpy.mockRestore()
   })
+
+  it('shows the base diff when the vs-head diff is empty', async () => {
+    const user = userEvent.setup({ delay: null })
+    stubBaseReads()
+    // The real-world case that rendered nothing: pool already matches the edit, so
+    // diff_vs_head is empty but diff_vs_base carries the change.
+    server.use(
+      http.get(`${API_BASE_URL}/admin/skills/backflow/:id/diff`, () =>
+        HttpResponse.json({ conflict: true, diff_vs_base: 'base-only change', diff_vs_head: '' })
+      )
+    )
+
+    renderSkillsPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Actions for crm-ops' }))
+    await user.click(await screen.findByRole('menuitem', { name: /Backflow/ }))
+    const backflow = within(await screen.findByRole('dialog'))
+    await user.click(await backflow.findByRole('button', { name: 'View backflow diff for 1' }))
+
+    expect(await backflow.findByText('base-only change')).toBeInTheDocument()
+  })
 })
 
 describe('skills page content + search', () => {
