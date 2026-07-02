@@ -4,7 +4,6 @@ import {
   buildAgentConfigUpdate,
   defaultRouteModelId,
   parseAllowedTools,
-  resolveProviderKeyAction,
   withDefaultRouteModel,
 } from '@/features/agents/configure-logic'
 
@@ -84,19 +83,5 @@ describe('buildAgentConfigUpdate', () => {
     expect(patch.memory_namespace).toBe('team-a')
     expect(patch.allowed_tools).toEqual([])
     expect(patch.model_overrides).toEqual({ routes: {} })
-  })
-})
-
-describe('resolveProviderKeyAction', () => {
-  it('writes a non-empty override', () => {
-    expect(resolveProviderKeyAction('sk-new', 'unset')).toBe('set')
-  })
-
-  it('deletes an existing secret when the override is cleared', () => {
-    expect(resolveProviderKeyAction('', 'set')).toBe('delete')
-  })
-
-  it('does nothing when cleared and no secret exists', () => {
-    expect(resolveProviderKeyAction('', 'unset')).toBe('none')
   })
 })

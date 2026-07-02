@@ -27,7 +27,6 @@ import {
   useBindAgentKbMutation,
   useBindAgentUserMutation,
   useDeleteAgentSecretMutation,
-  useDeleteAgentSecretValueMutation,
   useExportAgentYamlMutation,
   useRemoveAgentImGroupMutation,
   useSetAgentImCapabilitiesMutation,
@@ -36,11 +35,11 @@ import {
   useUnbindAgentUserMutation,
   useUpdateAgentMutation,
 } from '@/features/agents/api'
-import { parseAllowedTools, resolveProviderKeyAction } from '@/features/agents/configure-logic'
+import { parseAllowedTools } from '@/features/agents/configure-logic'
 import { McpServersTab } from '@/features/agents/mcp-servers-tab'
 import { SkillsTab } from '@/features/agents/skills-tab'
 import { useKbsQuery } from '@/features/kb/api'
-import { useModelsQuery, useProvidersQuery } from '@/features/providers/api'
+import { useModelsQuery } from '@/features/providers/api'
 import { useUsersQuery } from '@/features/users/api'
 import { useT } from '@/i18n'
 import { useAdminApi } from '@/lib/api-client'
@@ -226,38 +225,11 @@ function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boo
   const detail = useAgentDetailQuery(agentName)
   const update = useUpdateAgentMutation(agentName)
   const allModels = useModelsQuery()
-  const allProviders = useProvidersQuery()
-  const secrets = useAgentSecretsQuery(agentName)
-  const setSecret = useSetAgentSecretValueMutation(agentName)
-  const deleteSecretValue = useDeleteAgentSecretValueMutation(agentName)
 
   const [systemPrompt, setSystemPrompt] = useState('')
   const [allowedTools, setAllowedTools] = useState('')
   const [memoryNamespace, setMemoryNamespace] = useState('')
   const [routeModelIds, setRouteModelIds] = useState<Record<string, string>>({})
-  const [providerKeyOverride, setProviderKeyOverride] = useState('')
-  const [providerKeyDirty, setProviderKeyDirty] = useState(false)
-
-  const modelId = routeModelIds.default ?? ''
-  const selectedModel = useMemo(
-    () => (allModels.data ?? []).find((model) => model.id === modelId) ?? null,
-    [allModels.data, modelId]
-  )
-  const selectedProvider = useMemo(
-    () =>
-      selectedModel
-        ? ((allProviders.data ?? []).find((provider) => provider.id === selectedModel.provider_id) ?? null)
-        : null,
-    [allProviders.data, selectedModel]
-  )
-  const selectedProviderEnv = selectedProvider?.api_key_env ?? ''
-  const selectedProviderSecretStatus = useMemo(
-    () =>
-      selectedProviderEnv
-        ? ((secrets.data?.secrets ?? []).find((secret) => secret.env_name === selectedProviderEnv)?.status ?? 'unset')
-        : 'unset',
-    [secrets.data, selectedProviderEnv]
-  )
 
   useEffect(() => {
     if (detail.data) {
@@ -272,8 +244,6 @@ function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boo
           ])
         )
       )
-      setProviderKeyOverride('')
-      setProviderKeyDirty(false)
     }
   }, [detail.data])
 
@@ -289,16 +259,6 @@ function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boo
         memory_namespace: memoryNamespace.trim() || 'default',
         model_overrides: modelOverrides,
       })
-      if (providerKeyDirty && selectedProviderEnv) {
-        const keyAction = resolveProviderKeyAction(providerKeyOverride, selectedProviderSecretStatus)
-        if (keyAction === 'set') {
-          await setSecret.mutateAsync({ envName: selectedProviderEnv, value: providerKeyOverride })
-        } else if (keyAction === 'delete') {
-          await deleteSecretValue.mutateAsync(selectedProviderEnv)
-        }
-        setProviderKeyDirty(false)
-        setProviderKeyOverride('')
-      }
     })()
   }
 
@@ -368,30 +328,6 @@ function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boo
           </section>
         )
       })}
-
-      {selectedProviderEnv ? (
-        <section className="space-y-3">
-          <TabHeading>Provider key override</TabHeading>
-          <p className="text-muted-foreground text-sm">
-            {selectedProviderEnv} · {selectedProviderSecretStatus}
-          </p>
-          {canWrite ? (
-            <div className="grid gap-2">
-              <Label htmlFor="cfg-provider-key">Provider API Key Override</Label>
-              <Input
-                id="cfg-provider-key"
-                onChange={(event) => {
-                  setProviderKeyOverride(event.target.value)
-                  setProviderKeyDirty(true)
-                }}
-                placeholder="Leave empty to use the shared provider key"
-                type="password"
-                value={providerKeyOverride}
-              />
-            </div>
-          ) : null}
-        </section>
-      ) : null}
 
       {canWrite ? (
         <div>
