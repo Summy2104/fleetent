@@ -53,18 +53,26 @@ class NodeReconciler:
 
             desired_hash = _config_hash(desired.config)
             if desired_state.source == "cache" and not desired.secrets:
-                if pid is None:
-                    if not self._env_has_values(name, desired.tenant_id):
-                        _logger.warn(
-                            "node_secret_start_deferred",
-                            agent_name=name,
-                            secret_env_names=[],
-                            secret_count=0,
-                        )
-                        continue
-                    # .env has values from prior materialization — boot from disk
-                else:
+                if pid is not None:
+                    # Already running with no fresh secrets — leave it be.
                     continue
+                if not self._env_has_values(name, desired.tenant_id):
+                    _logger.warn(
+                        "node_secret_start_deferred",
+                        agent_name=name,
+                        secret_env_names=[],
+                        secret_count=0,
+                    )
+                    continue
+                # .env has values from prior materialization — boot from disk WITHOUT
+                # rewriting it. We hold no authoritative secrets here, so calling
+                # _write_home() would scaffold every referenced env name with an empty
+                # value and blank the good on-disk credentials. Spawn from the .env as-is.
+                _logger.info("node_agent_spawn_from_disk", agent_name=name)
+                self._backend.spawn(name, desired.tenant_id)
+                hashes[name] = desired_hash
+                knowledge_epochs[name] = desired.knowledge_resync_epoch
+                continue
 
             if pid is None:
                 self._write_home(
@@ -112,6 +120,31 @@ class NodeReconciler:
                     skill_manifests=desired.skill_manifests,
                     secrets=desired.secrets,
                 )
+                hashes[name] = desired_hash
+                knowledge_epochs[name] = desired.knowledge_resync_epoch
+            elif desired_state.source == "remote" and not self._env_has_secret_values(
+                name, desired.tenant_id, desired.secrets
+            ):
+                # Self-heal a blanked .env: the platform is reachable and returned real
+                # secrets, but the on-disk .env is missing them (e.g. a prior restart-race
+                # blanked it). Config-hash is unchanged, so no respawn would otherwise fire
+                # and the agent would run with empty credentials forever. The agent reads
+                # its env at process start, so we must rewrite AND respawn.
+                self._backend.stop(name, desired.tenant_id)
+                self._write_home(
+                    name,
+                    desired.tenant_id,
+                    desired.config,
+                    skill_manifests=desired.skill_manifests,
+                    secrets=desired.secrets,
+                )
+                _logger.info(
+                    "node_agent_env_self_heal",
+                    agent_name=name,
+                    secret_env_names=sorted(desired.secrets),
+                    secret_count=len(desired.secrets),
+                )
+                self._backend.spawn(name, desired.tenant_id)
                 hashes[name] = desired_hash
                 knowledge_epochs[name] = desired.knowledge_resync_epoch
             else:
@@ -246,6 +279,30 @@ class NodeReconciler:
             if key.strip() != "FLEETENT_TUI_TOKEN" and value.strip():
                 return True
         return False
+
+    def _env_has_secret_values(
+        self, agent_name: str, tenant_id: str, secrets: dict[str, str]
+    ) -> bool:
+        """Return True if the on-disk .env carries every non-empty authoritative secret.
+
+        Only names whose authoritative value is non-empty are required to be present on
+        disk, so an operator-blank secret can never trigger an endless respawn loop.
+        Used to detect a blanked .env that must be re-materialized while the platform is
+        reachable.
+        """
+        required = [name for name, value in secrets.items() if value]
+        if not required:
+            return True
+        env_path = self._home_dir(agent_name, tenant_id) / ".env"
+        if not env_path.exists():
+            return False
+        on_disk: dict[str, str] = {}
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            if "=" not in line or line.startswith("#"):
+                continue
+            key, _, value = line.partition("=")
+            on_disk[key.strip()] = value.strip()
+        return all(on_disk.get(name) for name in required)
 
     def _home_dir(self, agent_name: str, tenant_id: str) -> Path:
         return self._config.home_dir / "tenants" / tenant_id / "agents" / agent_name
