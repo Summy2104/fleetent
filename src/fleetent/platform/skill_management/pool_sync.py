@@ -125,6 +125,12 @@ def _do_sync(config: dict[str, Any], trigger: str) -> dict[str, Any]:
     pool_git.commit_pool(
         git_root, message="seed: re-materialize builtin skills", author=_SYNC_AUTHOR, subdir=subdir
     )
+    # Refresh the in-memory index so registry-backed reads (admin content/description,
+    # runtime skill lookup) see the mirrored skills. Without this the server keeps the
+    # empty index it scanned at boot (before the first sync populated the pool): the list
+    # endpoint still shows names via the DB catalog, but `registry.load` KeyErrors and the
+    # admin UI renders blank content.
+    skill_registry.reload(str(_pool_dir()))
     git_source_store.record_sync(commit=remote_sha, at=_now(), error=None)
     return {"changed": True, "commit": remote_sha}
 
