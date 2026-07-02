@@ -98,3 +98,116 @@ def test_create_list_delete(client):
     assert d.status_code in (200, 204)
     again = c.get("/admin/webhooks/sources", headers=_hdr(token))
     assert "github-ci" not in {s["id"] for s in again.json()}
+
+
+def _create_source(c, token, **overrides):
+    body = {"id": "s1", "user_id": "u1", "agent_id": None, "secret": "orig"}
+    body.update(overrides)
+    r = c.post("/admin/webhooks/sources", json=body, headers=_hdr(token))
+    assert r.status_code in (200, 201)
+    return r
+
+
+def test_update_regular_fields_default_keeps_secret(client):
+    c, _ = client
+    token = _session_for("admin")
+    _create_source(c, token, message_template="old", enabled=True)
+
+    # secret_action omitted → defaults to keep
+    r = c.put(
+        "/admin/webhooks/sources/s1",
+        json={
+            "user_id": "u2",
+            "agent_id": None,
+            "message_template": "new {ref}",
+            "reply_target": "u-9",
+            "enabled": False,
+        },
+        headers=_hdr(token),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert "orig" not in r.text  # secret never echoed
+    assert body["user_id"] == "u2"
+    assert body["message_template"] == "new {ref}"
+    assert body["reply_target"] == "u-9"
+    assert body["enabled"] is False
+    assert body["has_secret"] is True  # keep preserved it
+
+    # audit written
+    from fleetent import audit_log
+
+    assert audit_log.search_audit(action="webhook.update", target_id="s1")
+
+
+def test_update_secret_set_then_clear(client):
+    c, db_path = client
+    token = _session_for("admin")
+    _create_source(c, token)
+
+    # set: rotate secret
+    r = c.put(
+        "/admin/webhooks/sources/s1",
+        json={"user_id": "u1", "agent_id": None, "secret_action": "set", "secret": "rotated"},
+        headers=_hdr(token),
+    )
+    assert r.status_code == 200
+    assert r.json()["has_secret"] is True
+    assert "rotated" not in r.text
+    conn = sqlite3.connect(db_path)
+    raw = conn.execute("SELECT secret_ciphertext FROM webhook_sources WHERE id='s1'").fetchone()[0]
+    conn.close()
+    assert raw is not None and "rotated" not in raw
+
+    # clear: drop secret
+    r = c.put(
+        "/admin/webhooks/sources/s1",
+        json={"user_id": "u1", "agent_id": None, "secret_action": "clear"},
+        headers=_hdr(token),
+    )
+    assert r.status_code == 200
+    assert r.json()["has_secret"] is False
+
+
+def test_update_set_without_secret_400(client):
+    c, _ = client
+    token = _session_for("admin")
+    _create_source(c, token)
+    r = c.put(
+        "/admin/webhooks/sources/s1",
+        json={"user_id": "u1", "agent_id": None, "secret_action": "set"},
+        headers=_hdr(token),
+    )
+    assert r.status_code == 400
+
+
+def test_update_unknown_id_404(client):
+    c, _ = client
+    token = _session_for("admin")
+    r = c.put(
+        "/admin/webhooks/sources/ghost",
+        json={"user_id": "u1", "agent_id": None},
+        headers=_hdr(token),
+    )
+    assert r.status_code == 404
+
+
+def test_update_requires_admin(client):
+    c, _ = client
+    admin = _session_for("admin")
+    _create_source(c, admin)
+    # no auth
+    assert (
+        c.put("/admin/webhooks/sources/s1", json={"user_id": "u1", "agent_id": None}).status_code
+        == 401
+    )
+    # non-admin
+    viewer = _session_for("viewer")
+    assert (
+        c.put(
+            "/admin/webhooks/sources/s1",
+            json={"user_id": "u1", "agent_id": None},
+            headers=_hdr(viewer),
+        ).status_code
+        == 403
+    )

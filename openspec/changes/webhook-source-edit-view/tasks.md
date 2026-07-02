@@ -2,23 +2,23 @@
 
 ## 1. store 层：`update_source`（integration，真实 DB）
 
-- [ ] 1.1 在 `tests/integration/test_webhook_source_store.py` 写测试并见红：
+- [x] 1.1 在 `tests/integration/test_webhook_source_store.py` 写测试并见红：
   - `update_source` 更新常规字段（user_id/agent_id/message_template/reply_target/enabled）后 `get_source` 反映新值；
   - `secret_action="keep"` 时已有密钥保持不变；
   - `secret_action="set"` 时密钥被新值覆盖（`get_source().secret` == 新值，且库内为密文）；
   - `secret_action="clear"` 时密钥变 None；
   - `update_source` 对不存在的 id 不新建行（区别于 upsert 的 `put_source`）。
-- [ ] 1.2 实现 `webhook_source_store.update_source(*, id, user_id, agent_id, message_template, reply_target, enabled, secret_action, secret=None)`：`UPDATE`（非 upsert），`keep` 不进 SET 子句、`set`/`clear` 才写 `secret_ciphertext`，刷新 `updated_at`。跑 1.1 见绿。
+- [x] 1.2 实现 `webhook_source_store.update_source(*, id, user_id, agent_id, message_template, reply_target, enabled, secret_action, secret=None)`：`UPDATE`（非 upsert），`keep` 不进 SET 子句、`set`/`clear` 才写 `secret_ciphertext`，刷新 `updated_at`。跑 1.1 见绿。
 
 ## 2. admin API：`PUT /admin/webhooks/sources/{id}`（integration，FastAPI + 真实 DB）
 
-- [ ] 2.1 在 `tests/integration/test_webhook_admin_api.py` 写测试并见红：
+- [x] 2.1 在 `tests/integration/test_webhook_admin_api.py` 写测试并见红：
   - PUT 更新常规字段成功、响应是 `_public_view`（无明文 secret、含 `has_secret`）；
   - `secret_action` 三态：`keep` 保持、`set` 更换（`set` 缺 `secret` → 400）、`clear` 清空后 `has_secret=false`；
   - 不存在的 id → 404；
   - 非管理员会话 → 401/403；
   - 写入 `webhook.update` 审计。
-- [ ] 2.2 实现：`WebhookSourceUpdateBody`（含 `secret_action: Literal["keep","set","clear"]`，默认 `keep`）+ `PUT` 端点（先 `get_source` 判 404 → `set` 校验 secret → `update_source` → 审计 → 返回 `_public_view`）。跑 2.1 见绿。
+- [x] 2.2 实现：`WebhookSourceUpdateBody`（含 `secret_action: Literal["keep","set","clear"]`，默认 `keep`）+ `PUT` 端点（先 `get_source` 判 404 → `set` 校验 secret → `update_source` → 审计 → 返回 `_public_view`）。跑 2.1 见绿。
 
 ## 3. 前端数据层（api.ts，Vitest + MSW）
 

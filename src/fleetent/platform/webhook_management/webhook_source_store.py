@@ -94,6 +94,61 @@ def put_source(
         )
 
 
+def update_source(
+    *,
+    id: str,
+    user_id: str,
+    agent_id: int | None,
+    message_template: str | None,
+    reply_target: str | None,
+    enabled: bool,
+    secret_action: str,
+    secret: str | None = None,
+) -> None:
+    """Update an existing webhook source's regular fields.
+
+    Never an upsert: a non-existent ``id`` updates zero rows and inserts nothing. ``secret_action``
+    governs the secret column so a caller that omits a secret cannot silently wipe it:
+
+    - ``keep``: the secret column is left untouched (not part of the SET clause).
+    - ``set``: the secret column is overwritten with the ciphertext of ``secret``.
+    - ``clear``: the secret column is set to NULL.
+    """
+    now = _now_iso()
+    params: dict[str, object] = {
+        "id": id,
+        "agent_id": agent_id,
+        "user_id": user_id,
+        "message_template": message_template,
+        "reply_target": reply_target,
+        "enabled": 1 if enabled else 0,
+        "updated_at": now,
+    }
+    secret_assignment = ""
+    if secret_action == "set":
+        secret_assignment = ", secret_ciphertext = :secret_ct"
+        params["secret_ct"] = encrypt_text(secret) if secret is not None else None
+    elif secret_action == "clear":
+        secret_assignment = ", secret_ciphertext = NULL"
+    elif secret_action != "keep":
+        raise ValueError(f"unknown secret_action: {secret_action!r}")
+
+    with _database().transaction() as conn:
+        conn.execute(
+            f"""
+            UPDATE webhook_sources SET
+                agent_id = :agent_id,
+                user_id = :user_id,
+                message_template = :message_template,
+                reply_target = :reply_target,
+                enabled = :enabled,
+                updated_at = :updated_at{secret_assignment}
+            WHERE id = :id
+            """,
+            params,
+        )
+
+
 def get_source(id: str) -> StoredWebhookSource | None:
     row = (
         _database()
