@@ -289,16 +289,23 @@ def load_host_service_config(path: Path) -> KBHostServiceConfig:
     return KBHostServiceConfig.model_validate(raw)
 
 
-def load_tenant_connectors(home: Path, tenant_id: str) -> list[KBConnectorSection]:
+def load_tenant_connectors(
+    home: Path, tenant_id: str
+) -> tuple[list[KBConnectorSection], dict[str, str]]:
     tenant_root = home / "tenants" / tenant_id / "kb"
     env_path = tenant_root / ".env"
+    tenant_env: dict[str, str] = {}
     if env_path.exists():
-        from dotenv import load_dotenv
+        from dotenv import dotenv_values
 
-        load_dotenv(env_path, override=False)
+        tenant_env = {
+            key: value
+            for key, value in dotenv_values(env_path).items()
+            if isinstance(key, str) and isinstance(value, str)
+        }
     config_path = tenant_root / "connectors.yaml"
     if not config_path.exists():
-        return []
+        return [], tenant_env
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, dict):
         raise ValueError(f"{config_path} must contain a mapping")
@@ -306,7 +313,7 @@ def load_tenant_connectors(home: Path, tenant_id: str) -> list[KBConnectorSectio
     connectors = raw.get("connectors", [])
     if not isinstance(connectors, list):
         raise ValueError(f"{config_path} field 'connectors' must be a list")
-    return [KBConnectorSection.model_validate(item) for item in connectors]
+    return [KBConnectorSection.model_validate(item) for item in connectors], tenant_env
 
 
 def discover_tenants(home: Path) -> list[str]:

@@ -77,6 +77,19 @@ def test_google_drive_credential_ref_resolver_supports_flat_env_prefix(monkeypat
     }
 
 
+def test_google_drive_credential_ref_resolver_prefers_explicit_env_mapping(monkeypatch):
+    from fleetent.knowledge_base.connectors.google_drive import CredentialRefResolver
+
+    monkeypatch.setenv("FLEETENT_GOOGLE_DRIVE_TOKEN_JSON", '{"access_token":"global-token"}')
+
+    credential = CredentialRefResolver().resolve(
+        "env:FLEETENT_GOOGLE_DRIVE_TOKEN_JSON",
+        env={"FLEETENT_GOOGLE_DRIVE_TOKEN_JSON": '{"access_token":"tenant-token"}'},
+    )
+
+    assert credential.payload == '{"access_token":"tenant-token"}'
+
+
 async def test_auth_failure_marks_summary_auth_failed():
     from fleetent.knowledge_base import GoogleDriveConnectorConfig
     from fleetent.knowledge_base.connectors.google_drive import (

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -136,12 +137,15 @@ class GoogleDriveClient(Protocol):
 class CredentialRefResolver:
     """Resolve env: and file/path credential_ref values for OAuth token payloads."""
 
-    def resolve(self, credential_ref: str) -> GoogleDriveCredential:
+    def resolve(
+        self, credential_ref: str, env: Mapping[str, str] | None = None
+    ) -> GoogleDriveCredential:
+        source_env = env if env is not None else os.environ
         if credential_ref.startswith("env:"):
             env_name = credential_ref.removeprefix("env:")
-            value = os.getenv(env_name)
-            if value is None and _has_flat_env_credential(env_name):
-                value = _flat_env_credential_payload(env_name)
+            value = source_env.get(env_name)
+            if value is None and _has_flat_env_credential(env_name, env=source_env):
+                value = _flat_env_credential_payload(env_name, env=source_env)
             if value is None:
                 raise GoogleDriveAuthError(f"missing credential env var: {env_name}")
             return GoogleDriveCredential(credential_ref=credential_ref, payload=value)
@@ -165,6 +169,7 @@ class HttpGoogleDriveClient:
     client_id_env: str = ""
     client_secret_env: str = ""
     token_uri_env: str = ""
+    env: Mapping[str, str] | None = None
     timeout_seconds: float = 20.0
     api_base_url: str = GOOGLE_DRIVE_API_BASE
 
@@ -261,9 +266,10 @@ class HttpGoogleDriveClient:
             client_id_env=self.client_id_env,
             client_secret_env=self.client_secret_env,
             token_uri_env=self.token_uri_env,
+            env=self.env,
         )
         if raw is None:
-            raw = CredentialRefResolver().resolve(self.credential_ref).payload
+            raw = CredentialRefResolver().resolve(self.credential_ref, env=self.env).payload
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError as exc:
@@ -664,9 +670,10 @@ def _can_refresh(payload: dict[object, object]) -> bool:
     )
 
 
-def _has_flat_env_credential(prefix: str) -> bool:
+def _has_flat_env_credential(prefix: str, *, env: Mapping[str, str] | None = None) -> bool:
+    source_env = env if env is not None else os.environ
     return any(
-        os.getenv(f"{prefix}_{suffix}")
+        source_env.get(f"{prefix}_{suffix}")
         for suffix in (
             "ACCESS_TOKEN",
             "REFRESH_TOKEN",
@@ -684,7 +691,9 @@ def _explicit_env_payload(
     client_id_env: str,
     client_secret_env: str,
     token_uri_env: str,
+    env: Mapping[str, str] | None = None,
 ) -> str | None:
+    source_env = env if env is not None else os.environ
     env_names = {
         "access_token": access_token_env,
         "refresh_token": refresh_token_env,
@@ -695,22 +704,23 @@ def _explicit_env_payload(
     if not any(env_names.values()):
         return None
     payload = {
-        field: os.getenv(env_name, "")
+        field: source_env.get(env_name, "")
         for field, env_name in env_names.items()
-        if env_name and os.getenv(env_name)
+        if env_name and source_env.get(env_name)
     }
     if token_uri_env and "token_uri" not in payload:
         payload["token_uri"] = GOOGLE_TOKEN_URI
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
 
-def _flat_env_credential_payload(prefix: str) -> str:
+def _flat_env_credential_payload(prefix: str, *, env: Mapping[str, str] | None = None) -> str:
+    source_env = env if env is not None else os.environ
     mapping = {
-        "access_token": os.getenv(f"{prefix}_ACCESS_TOKEN", ""),
-        "refresh_token": os.getenv(f"{prefix}_REFRESH_TOKEN", ""),
-        "client_id": os.getenv(f"{prefix}_CLIENT_ID", ""),
-        "client_secret": os.getenv(f"{prefix}_CLIENT_SECRET", ""),
-        "token_uri": os.getenv(f"{prefix}_TOKEN_URI", GOOGLE_TOKEN_URI),
+        "access_token": source_env.get(f"{prefix}_ACCESS_TOKEN", ""),
+        "refresh_token": source_env.get(f"{prefix}_REFRESH_TOKEN", ""),
+        "client_id": source_env.get(f"{prefix}_CLIENT_ID", ""),
+        "client_secret": source_env.get(f"{prefix}_CLIENT_SECRET", ""),
+        "token_uri": source_env.get(f"{prefix}_TOKEN_URI", GOOGLE_TOKEN_URI),
     }
     return json.dumps(
         {key: value for key, value in mapping.items() if value},

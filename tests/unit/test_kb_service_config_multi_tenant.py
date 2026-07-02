@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import yaml
@@ -63,9 +64,7 @@ def test_load_host_service_config_parses_shared_host_settings(tmp_path: Path) ->
     assert config.chunking.chunk_size == 600
 
 
-def test_load_tenant_connectors_reads_connectors_yaml_and_env(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_load_tenant_connectors_reads_connectors_yaml_and_env(tmp_path: Path, monkeypatch) -> None:
     from fleetent.knowledge_base.service_config import load_tenant_connectors
 
     home_dir = tmp_path
@@ -93,13 +92,19 @@ def test_load_tenant_connectors_reads_connectors_yaml_and_env(
     monkeypatch.delenv("GOOGLE_DRIVE_ACCESS_TOKEN", raising=False)
     monkeypatch.delenv("GOOGLE_DRIVE_REFRESH_TOKEN", raising=False)
 
-    connectors = load_tenant_connectors(home_dir, "acme")
+    connectors, tenant_env = load_tenant_connectors(home_dir, "acme")
 
     assert [connector.id for connector in connectors] == ["drive-docs"]
     assert connectors[0].kb_id == "support-kb"
     assert connectors[0].folder_id == "folder-123"
     assert connectors[0].access_token_env == "GOOGLE_DRIVE_ACCESS_TOKEN"
     assert connectors[0].refresh_token_env == "GOOGLE_DRIVE_REFRESH_TOKEN"
+    assert tenant_env == {
+        "GOOGLE_DRIVE_ACCESS_TOKEN": "token-a",
+        "GOOGLE_DRIVE_REFRESH_TOKEN": "refresh-a",
+    }
+    assert "GOOGLE_DRIVE_ACCESS_TOKEN" not in os.environ
+    assert "GOOGLE_DRIVE_REFRESH_TOKEN" not in os.environ
 
 
 def test_discover_tenants_scans_tenant_kb_databases(tmp_path: Path) -> None:
