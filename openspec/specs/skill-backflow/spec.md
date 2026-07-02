@@ -40,49 +40,49 @@
 - **WHEN** 试图经 agent-owned DM 路径审批一个 `backflow` 提案
 - **THEN** 该路径不处理回流提案（回流仅经平台治理审批）
 
-### Requirement: accept 更新池并清 drift
+### Requirement: accept 采纳（GitOps 禁用，legacy 直写）
 
-审批 accept 时平台 SHALL 经 git PR 落地进化副本，而非直写池：先 `merge_pull_request` 合并该提案的 PR 到权威分支，再**复用入站 `pool_sync.align_pool_to_remote`**（fetch + reset --hard）把本地池对齐主线，使该 skill 的 `current_version` 前移到合并后的 commit；随后清除来源 `(agent, skill)` 的 drift 并 `bump_resync_epoch`，其余绑定该 skill 的 agent 在常规重新物化时拿到新版本。SHALL NOT 再 `_write_bundle_atomic` + `commit_pool` 直写池（与入站「外部 git 为权威、reset 会丢弃直写」冲突）。合并或对齐失败 SHALL 幂等重试（merge 对已合并 PR 幂等）：对齐失败时 SHALL NOT bump epoch、保留 pending + hint。未配置外部 git 源时回退既有直写路径。
+平台 SHALL NOT 代替人往权威分支写入。启用外部 git 源（GitOps）时，accept SHALL 返回 409、SHALL NOT 改动池 / drift / status，并提示运营在 git host 对已推的备份分支开 PR 合并（合并后经入站同步 `skill-git-sync` 自然拉回池）。未配置外部 git 源（legacy 直写）时，accept SHALL `_write_bundle_atomic` + `commit_pool` 直写池、set `current_version`、清除来源 `(agent, skill)` 的 drift 并 `bump_resync_epoch`，其余绑定该 skill 的 agent 在常规重新物化时拿到新版本。
 
-#### Scenario: accept 合并 PR 后对齐池
-- **WHEN** 运营 accept 一条已开 PR 的回流提案（无冲突）
-- **THEN** 平台合并该 PR，经 `align_pool_to_remote` 把池对齐主线，"crm-ops" 的 `current_version` 前移、来源 agent 的 drift 被清、`resync_epoch` 前移，且**不**经直写池产生本地 commit
+#### Scenario: GitOps 下 accept 返 409
+- **WHEN** 外部 git 源启用，运营 accept 一条回流提案
+- **THEN** 平台返回 409（不写池、不改 drift/status），提示去 git host 对备份分支开 PR
 
-#### Scenario: accept 后他 agent 拿到新版本
-- **WHEN** accept 后另一个未漂移地绑定 "crm-ops" 的 agent 重新物化
-- **THEN** 该 agent 拿到合并 + 对齐后的新池版本
+#### Scenario: legacy 下 accept 直写池
+- **WHEN** 未配置外部 git 源，运营 accept 一条无冲突提案
+- **THEN** 平台直写池 + commit，"crm-ops" 的 `current_version` 前移、来源 agent 的 drift 被清、`resync_epoch` 前移
 
-#### Scenario: 合并成功但对齐失败不误清状态
-- **WHEN** PR 已合并但 `align_pool_to_remote` 失败
-- **THEN** 不 bump epoch、提案留 pending + hint、可幂等重试，SHALL NOT 误报成功
+### Requirement: reject 丢弃回流（纯本地，不碰 git）
 
-### Requirement: reject 丢弃回流
+reject 时平台 SHALL 清除来源 `(agent, skill)` 的 drift（使该副本下次物化被池版本覆盖）+ `bump_resync_epoch`，池不变；两种模式行为一致。平台 SHALL NOT 关闭或操作任何 PR（平台不往 git 写）。已推的备份分支 SHALL 保留留痕，SHALL NOT 强制删除（agent 改动可追溯）。动作 SHALL 被审计。
 
-审批 reject 时平台 SHALL `close_pull_request` 关闭该提案的 PR（若已开），池不变；并清除来源 `(agent, skill)` 的 drift（使该副本下次物化被池版本覆盖）+ `bump_resync_epoch`；动作 SHALL 被审计。备份分支（若已推）SHALL 保留留痕，SHALL NOT 强制删除（agent 改动可追溯）。
-
-#### Scenario: reject 关 PR 后副本将被覆盖
+#### Scenario: reject 后副本将被覆盖
 - **WHEN** 运营 reject skill "crm-ops" 的回流
-- **THEN** 该提案的 PR 被关闭、池不变、该 agent 的 drift 被清、`resync_epoch` 前移，下次物化其 "crm-ops" 副本被池版本覆盖；备份分支保留
+- **THEN** 池不变、该 agent 的 drift 被清、`resync_epoch` 前移，下次物化其 "crm-ops" 副本被池版本覆盖；备份分支保留；平台不操作任何 PR
 
-### Requirement: fork 落新命名 skill 不覆盖权威
+### Requirement: fork 落新命名 skill（GitOps 禁用，legacy 直写）
 
-审批 fork 时平台 SHALL 把进化副本的**完整 bundle** 作为**新命名 skill** 推一个 fork 分支并经 PR 合并到权威分支（合并后复用 `align_pool_to_remote` 对齐池），将来源 agent 的绑定指向该 fork skill，原 skill resync；SHALL NOT 覆盖原权威 skill。
+启用外部 git 源（GitOps）时 fork SHALL 返回 409（新命名 skill 同样经人 PR 进入权威）。未配置外部 git 源时，fork SHALL 把进化副本的**完整 bundle** 作为**新命名 skill** 直写池 + commit，将来源 agent 的绑定指向该 fork skill、原 skill resync；SHALL NOT 覆盖原权威 skill。
 
-#### Scenario: fork 经分支 + PR 落新命名 skill
-- **WHEN** 运营对多文件 skill "crm-ops" 的回流选择 fork
-- **THEN** 平台推一个新命名 skill（如 "crm-ops-support-bot"）的分支并合并、经对齐落入池，原 "crm-ops" 权威版不变，来源 agent 绑定指向 fork、原 skill resync
+#### Scenario: GitOps 下 fork 返 409
+- **WHEN** 外部 git 源启用，运营对某回流选择 fork
+- **THEN** 平台返回 409，提示经人 PR 落地
+
+#### Scenario: legacy 下 fork 直写新命名 skill
+- **WHEN** 未配置外部 git 源，运营对多文件 skill "crm-ops" 的回流选择 fork
+- **THEN** 平台直写一个新命名 skill（如 "crm-ops-support-bot"）+ commit，原 "crm-ops" 权威版不变，来源 agent 绑定指向 fork、原 skill resync
 
 ### Requirement: 冲突显式暴露不自动 merge
 
-当回流提案的 `base_version` ≠ 池当前 head（部署后池已被推进），平台 SHALL 在 review 时显式标记冲突态并展示进化副本相对 head 的 diff，由人裁决（基于新 head 重导 / 带确认地覆盖 head / fork）。平台 SHALL NOT 自动 merge。
+当回流提案的 `base_version` ≠ 池当前 head（部署后池已被推进），平台 SHALL 在 review 时显式标记冲突态并展示进化副本相对 head 的 diff。legacy 直写模式下 accept 覆盖 head SHALL 需 `X-Confirm: true` 显式确认；GitOps 模式下 accept 已禁用（返 409），冲突提案同样返 409、由人在 git host 裁决。平台 SHALL NOT 自动 merge。
 
 #### Scenario: 过期基准触发冲突态
 - **WHEN** 一个回流提案的 `base_version` 落后于池 head
 - **THEN** review 显式标记「基于过期版本」并展示相对 head 的 diff，不自动合并
 
-#### Scenario: 覆盖 head 需确认
-- **WHEN** 冲突态下运营选择覆盖 head
-- **THEN** 需显式确认，accept 记录被覆盖的 head 版本以便经 git 历史回溯
+#### Scenario: legacy 覆盖 head 需确认
+- **WHEN** legacy 模式下冲突态运营选择覆盖 head
+- **THEN** 需 `X-Confirm: true`，accept 记录被覆盖的 head 版本以便经 git 历史回溯
 
 ### Requirement: drift 观测自动触发回流提名
 
@@ -136,7 +136,7 @@
 
 启用外部 git 源时，平台 SHALL 经一个独立定时任务（`backflow_pr_sweep`，类比 KB connector sweep）扫描 pending 且未备份的回流提案，把其进化副本经 `push_branch` 推到一个**备份分支** `<branch_prefix>/<agent_id>/<skill>`（**非权威主分支**），并标记 `pr_state="backed_up"`。备份是即时保命动作：即使后续 PR 被拒/关，备份分支仍留痕、agent 改动不丢。提名（`backflow_store.nominate`）与 node 上报路径 SHALL 只存 bundle、**零 git 依赖**（SHALL NOT 在 node 上报/reconcile 路径触发任何 git 操作）。分支名 SHALL 按 `(agent, skill)` 稳定，配合去重压制短命分支。
 
-若外部源额外配置了 `skills_subdir`（见 `skill-git-sync`），`push_branch` 推送内容在备份分支中的树路径 SHALL 为 `<skills_subdir>/<name>` 而非 `<name>`，使备份分支与权威仓库的目录布局一致（人工合并到 main 时 skill 落在正确子目录下）。未配置 `skills_subdir` 时，树路径退化为 `<name>`，与本 change 之前完全一致。fork 场景（`backflow_api._fork_via_pr`）的 fork 分支同样按此规则加前缀。
+若外部源额外配置了 `skills_subdir`（见 `skill-git-sync`），`push_branch` 推送内容在备份分支中的树路径 SHALL 为 `<skills_subdir>/<name>` 而非 `<name>`，使备份分支与权威仓库的目录布局一致（人工合并到 main 时 skill 落在正确子目录下）。未配置 `skills_subdir` 时，树路径退化为 `<name>`。
 
 #### Scenario: 提名后推备份分支
 - **WHEN** sweep 扫到一条 pending 未备份的回流提案
@@ -154,26 +154,26 @@
 - **WHEN** 外部源未配置 `skills_subdir`
 - **THEN** 备份分支/fork 分支上内容的树路径仍为 `<name>`，行为与本 change 之前一致
 
-### Requirement: 定时或手动开 PR
+### Requirement: 采纳靠人对备份分支开 PR（平台不开 / 不合 PR）
 
-对已备份且配置 `auto_open_pr` 开启的提案，sweep SHALL 经 `open_pull_request` 从备份分支开 PR 到权威分支并标 `pr_state="pr_open"`（记录 pr_id/url）。平台 SHALL 另暴露 `POST /admin/skills/backflow/{id}/open-pr`（admin 手动对单提案开 PR）与 `POST /admin/skills/backflow/sync-backflow`（admin 手动触发整轮 sweep）。
+平台 SHALL NOT 开或合并任何 PR，SHALL NOT 以任何方式往权威分支写入。采纳一条回流一律靠人在 git host 对已推的备份分支 `<branch_prefix>/<agent_id>/<skill>` 开 PR 合并到权威分支，合并后经入站同步（`skill-git-sync`）自然拉回池。平台 SHALL 暴露 `POST /admin/skills/backflow/sync-backflow`（admin 手动触发一轮 sweep，只推备份分支、不开 PR）。SHALL NOT 提供平台开 PR 的端点（如 `open-pr`）。历史 `auto_open_pr` 配置列 SHALL 保留但无行为（sweep 忽略之，永不自动开 PR）。
 
-#### Scenario: auto 开 PR
-- **WHEN** sweep 扫到一条已备份、`auto_open_pr` 开启的提案
-- **THEN** 从备份分支开 PR、提案标 `pr_state="pr_open"`、记录 pr_id/url
+#### Scenario: 手动同步只推备份分支
+- **WHEN** admin 调 `POST /admin/skills/backflow/sync-backflow`
+- **THEN** 立即触发一轮 sweep，把 pending 未备份提案推备份分支、标 `pr_state="backed_up"`，不开任何 PR
 
-#### Scenario: 手动开 PR 与手动同步
-- **WHEN** admin 调 `POST /admin/skills/backflow/{id}/open-pr` 或 `POST /admin/skills/backflow/sync-backflow`
-- **THEN** 前者对该提案立即开 PR，后者立即触发一轮 sweep
+#### Scenario: sweep 即使 auto_open_pr 开启也不开 PR
+- **WHEN** 历史配置残留 `auto_open_pr=1`，sweep 扫到一条已备份提案
+- **THEN** sweep 只备份、不开 PR（`auto_open_pr` 无行为）
+
+#### Scenario: 平台不提供开 PR 端点
+- **WHEN** 客户端访问 `POST /admin/skills/backflow/{id}/open-pr`
+- **THEN** 该端点不存在（路由不存在）
 
 ### Requirement: git 不可达降级不误改治理状态
 
-回流 sweep 与治理端点的所有 git 操作 SHALL 舱壁化：git 不可达（`GitPlatformUnavailableError`）时 SHALL 标 `pr_state="deferred"` 下轮/手动重试，治理端点 SHALL 返回 503，且 SHALL NOT 改动 drift / resync_epoch（避免「以为成功实则未落地」）。单次 git 失败 SHALL NOT 崩溃定时任务、webhook 线程或服务启动。
+回流 sweep 推备份分支的 git 操作 SHALL 舱壁化：git 不可达（`GitPlatformUnavailableError`）时 SHALL 标 `pr_state="deferred"` 下轮/手动重试。单次 git 失败 SHALL NOT 崩溃定时任务、webhook 线程或服务启动。
 
 #### Scenario: sweep 遇 git 不可达降级
-- **WHEN** sweep 推分支/开 PR 时远端不可达
+- **WHEN** sweep 推备份分支时远端不可达
 - **THEN** 提案标 `pr_state="deferred"`、不抛、下轮重试，其它提案与维护任务不受影响
-
-#### Scenario: accept 时 git 不可达不误清 drift
-- **WHEN** accept 调用 merge 时远端不可达
-- **THEN** 端点返回 503、提案标 deferred、drift 与 resync_epoch 不变，可重试

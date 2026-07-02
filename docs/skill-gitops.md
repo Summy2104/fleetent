@@ -83,6 +83,22 @@ pipelines:
             - python validate_skills.py .
 ```
 
+## 回流（出站：只推备份分支，采纳靠人 PR）
+
+单向原则：**git → 平台**是唯一的权威写入方向，平台**从不**往 git 权威分支写。agent 在自己 home 改了 skill 后：
+
+```
+agent 改 skill → node 上报漂移 → 平台记录 pending 回流提案（存进化副本 bundle）
+   → backflow_pr_sweep 把副本推成备份分支 backflow/<agent>/<skill>（定时 + 手动 sync-backflow）
+   → 人在 git host 对备份分支开 PR 合并到权威分支   ← 平台不代劳
+   → 合并后入站同步（fetch + reset）自然把新内容拉回池 → 下发 agent
+```
+
+- 平台**只**推备份分支（非权威主分支），**从不**开 / 合并 PR。备份分支名按 `(agent, skill)` 稳定。
+- 后台定时 sweep（`__skill_backflow_pr_sweep__`）自动推备份分支；后台 UI 的「Sync backflow」手动触发一轮 sweep（同样只推备份分支）。
+- GitOps 模式下 backflow 提案的处置：**accept / fork 禁用（409）**——采纳一律靠人对备份分支开 PR；**reject 保留**（清 drift + bump epoch，让 agent home 回退到池版本，撤销这次改动，备份分支保留留痕）。查看 diff 始终可用。
+- 未配置外部 git 源（legacy）时，accept / fork 直写本地池、reject 清 drift，行为不变。
+
 ## 行为变化
 
 - 启用外部源后，后台 UI 的 skill 内容写端点（create / edit / upload / archive / restore / force-publish）返 **409**——改 skill 去 git 提 PR。
