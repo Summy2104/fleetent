@@ -117,7 +117,10 @@ export function DataTable<TData>(props: DataTableProps<TData>) {
   const hasFilters = enableGlobalFilter || hasColumnFilters(columns) || Boolean(toolbar)
   const hasHeaderBand = title != null || enableColumnVisibility || Boolean(actions)
   const columnCount = table.getVisibleLeafColumns().length
-  const rowCount = table.getCoreRowModel().rows.length
+  // Count the rows actually shown (after search / column filters), so the title badge
+  // tracks the current filter — e.g. filtering skills to "active" shows that subset's
+  // count, not the unfiltered total.
+  const rowCount = table.getFilteredRowModel().rows.length
 
   return (
     <div className={cn('space-y-3', className)}>

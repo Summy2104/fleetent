@@ -50,6 +50,18 @@ describe('DataTable', () => {
     expect(screen.getByText('Row 1')).toBeInTheDocument()
   })
 
+  it('title count badge reflects the filtered row count, not the full set', async () => {
+    const user = userEvent.setup()
+    render(<DataTable columns={COLUMNS} data={DATA} enableGlobalFilter getRowId={(row) => row.id} title="Rows" />)
+    // Badge starts at the full count.
+    expect(screen.getByText('3')).toBeInTheDocument()
+    await user.type(screen.getByRole('textbox', { name: 'Search' }), 'Row 1')
+    await waitFor(() => expect(screen.queryByText('Row 0')).not.toBeInTheDocument())
+    // Badge must follow the filter down to 1, not stay at 3.
+    expect(screen.getByText('1')).toBeInTheDocument()
+    expect(screen.queryByText('3')).not.toBeInTheDocument()
+  })
+
   it('renders the actions slot and the column-visibility control in the header band', () => {
     render(
       <DataTable
