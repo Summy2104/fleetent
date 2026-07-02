@@ -173,14 +173,3 @@ function firstString(...values: unknown[]): string {
   }
   return ''
 }
-
-export type ProviderKeyAction = 'set' | 'delete' | 'none'
-
-// Decide what to do with the provider api-key override on save: a non-empty value is written,
-// an emptied value clears an existing secret, and anything else is a no-op. (Only consulted
-// once the field is dirty and a provider env is selected.)
-export function resolveProviderKeyAction(override: string, secretStatus: string): ProviderKeyAction {
-  if (override) return 'set'
-  if (secretStatus === 'set') return 'delete'
-  return 'none'
-}

@@ -82,7 +82,12 @@ def _apply_overrides(base: AgentFile, overrides: dict[str, Any]) -> AgentFile:
     try:
         merged = _deep_merge(base.model_dump(mode="json", exclude_defaults=False), overrides)
         return AgentFile.model_validate(merged)
-    except Exception:  # noqa: BLE001 — invalid override must not break materialize
+    except Exception as exc:  # noqa: BLE001 — invalid override must not break materialize
+        # Fall back to base so deploy/preview never breaks, but surface the drop: an invalid
+        # field (e.g. a dangling model route) silently discards the WHOLE override — including
+        # unrelated valid bindings like im.slack credentials — so this must be diagnosable
+        # rather than silent (AAA-8267).
+        _logger.error("agent_override_validation_failed", agent=base.name, error=str(exc))
         return base
 
 

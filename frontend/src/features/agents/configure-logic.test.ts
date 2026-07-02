@@ -5,7 +5,6 @@ import {
   defaultRouteModelId,
   parseAllowedTools,
   readTiers,
-  resolveProviderKeyAction,
   routeEntries,
   withDefaultRouteModel,
   withRouteEntries,
@@ -203,19 +202,5 @@ describe('tier and target-ref helpers', () => {
     expect(
       withRouteEntries(undefined, 'default', [{ modelId: 'primary', temperature: 0.7 }, { modelId: 'backup' }], 'target')
     ).toEqual({ routes: { default: [{ target: 'primary', params: { temperature: 0.7 } }, { target: 'backup' }] } })
-  })
-})
-
-describe('resolveProviderKeyAction', () => {
-  it('writes a non-empty override', () => {
-    expect(resolveProviderKeyAction('sk-new', 'unset')).toBe('set')
-  })
-
-  it('deletes an existing secret when the override is cleared', () => {
-    expect(resolveProviderKeyAction('', 'set')).toBe('delete')
-  })
-
-  it('does nothing when cleared and no secret exists', () => {
-    expect(resolveProviderKeyAction('', 'unset')).toBe('none')
   })
 })

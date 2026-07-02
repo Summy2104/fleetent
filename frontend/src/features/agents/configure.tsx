@@ -27,7 +27,6 @@ import {
   useBindAgentKbMutation,
   useBindAgentUserMutation,
   useDeleteAgentSecretMutation,
-  useDeleteAgentSecretValueMutation,
   useExportAgentYamlMutation,
   useRemoveAgentImGroupMutation,
   useSetAgentImCapabilitiesMutation,
@@ -43,7 +42,6 @@ import {
   type TierKey,
   parseAllowedTools,
   readTiers,
-  resolveProviderKeyAction,
   routeEntries,
   withRouteEntries,
   withTiers,
@@ -51,7 +49,7 @@ import {
 import { McpServersTab } from '@/features/agents/mcp-servers-tab'
 import { SkillsTab } from '@/features/agents/skills-tab'
 import { useKbsQuery } from '@/features/kb/api'
-import { type ModelListItem, useModelsQuery, useProvidersQuery } from '@/features/providers/api'
+import { useModelsQuery } from '@/features/providers/api'
 import { useUsersQuery } from '@/features/users/api'
 import { useT } from '@/i18n'
 import { useAdminApi } from '@/lib/api-client'
@@ -647,15 +645,9 @@ export function ModelsTab({ agentName, canWrite }: { agentName: string; canWrite
   const detail = useAgentDetailQuery(agentName)
   const update = useUpdateAgentMutation(agentName)
   const allModels = useModelsQuery()
-  const allProviders = useProvidersQuery()
-  const secrets = useAgentSecretsQuery(agentName)
-  const setSecret = useSetAgentSecretValueMutation(agentName)
-  const deleteSecretValue = useDeleteAgentSecretValueMutation(agentName)
 
   const [tiers, setTiers] = useState<Record<TierKey, UiEntry>>(emptyTiers)
   const [routeChains, setRouteChains] = useState<Record<string, UiEntry[]>>({})
-  const [providerKeyOverride, setProviderKeyOverride] = useState('')
-  const [providerKeyDirty, setProviderKeyDirty] = useState(false)
 
   const chatModelOptions = useMemo<BindOption[]>(
     () =>
@@ -677,28 +669,6 @@ export function ModelsTab({ agentName, canWrite }: { agentName: string; canWrite
     })
   }, [allModels.data, tiers])
 
-  // The provider-key override tracks the `primary` tier's model; other tiers use their own keys.
-  const modelId = tiers.primary?.modelId ?? ''
-  const selectedModel = useMemo(
-    () => (allModels.data ?? []).find((model) => model.id === modelId) ?? null,
-    [allModels.data, modelId]
-  )
-  const selectedProvider = useMemo(
-    () =>
-      selectedModel
-        ? ((allProviders.data ?? []).find((provider) => provider.id === selectedModel.provider_id) ?? null)
-        : null,
-    [allProviders.data, selectedModel]
-  )
-  const selectedProviderEnv = selectedProvider?.api_key_env ?? ''
-  const selectedProviderSecretStatus = useMemo(
-    () =>
-      selectedProviderEnv
-        ? ((secrets.data?.secrets ?? []).find((secret) => secret.env_name === selectedProviderEnv)?.status ?? 'unset')
-        : 'unset',
-    [secrets.data, selectedProviderEnv]
-  )
-
   useEffect(() => {
     if (detail.data) {
       setTiers(
@@ -718,8 +688,6 @@ export function ModelsTab({ agentName, canWrite }: { agentName: string; canWrite
           ])
         )
       )
-      setProviderKeyOverride('')
-      setProviderKeyDirty(false)
     }
   }, [detail.data])
 
@@ -741,16 +709,6 @@ export function ModelsTab({ agentName, canWrite }: { agentName: string; canWrite
         withTierDefs
       )
       await update.mutateAsync({ model_overrides: modelOverrides })
-      if (providerKeyDirty && selectedProviderEnv) {
-        const keyAction = resolveProviderKeyAction(providerKeyOverride, selectedProviderSecretStatus)
-        if (keyAction === 'set') {
-          await setSecret.mutateAsync({ envName: selectedProviderEnv, value: providerKeyOverride })
-        } else if (keyAction === 'delete') {
-          await deleteSecretValue.mutateAsync(selectedProviderEnv)
-        }
-        setProviderKeyDirty(false)
-        setProviderKeyOverride('')
-      }
     })()
   }
 
@@ -791,30 +749,6 @@ export function ModelsTab({ agentName, canWrite }: { agentName: string; canWrite
           }
         />
       ))}
-
-      {selectedProviderEnv ? (
-        <section className="space-y-3">
-          <TabHeading>Provider key override</TabHeading>
-          <p className="text-muted-foreground text-sm">
-            {selectedProviderEnv} · {selectedProviderSecretStatus}
-          </p>
-          {canWrite ? (
-            <div className="grid gap-2">
-              <Label htmlFor="cfg-provider-key">Provider API Key Override</Label>
-              <Input
-                id="cfg-provider-key"
-                onChange={(event) => {
-                  setProviderKeyOverride(event.target.value)
-                  setProviderKeyDirty(true)
-                }}
-                placeholder="Leave empty to use the shared provider key"
-                type="password"
-                value={providerKeyOverride}
-              />
-            </div>
-          ) : null}
-        </section>
-      ) : null}
 
       {canWrite ? (
         <div>
