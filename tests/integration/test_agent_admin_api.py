@@ -56,6 +56,7 @@ def client(tmp_path_factory):
     db_path = tmp_path / "users.db"
     apply_migrations(db_path)
     _patch_all_stores(mp, db_path)
+    mp.setattr(api, "kb_engine_list", lambda tenant_id: [{"kb_id": "kb1", "archived": False}])
     app = FastAPI()
     app.include_router(api.router)
     app.include_router(skill_api.router)
@@ -69,6 +70,9 @@ def fresh_client(tmp_path, monkeypatch):
     db_path = tmp_path / "users.db"
     apply_migrations(db_path)
     _patch_all_stores(monkeypatch, db_path)
+    monkeypatch.setattr(
+        api, "kb_engine_list", lambda tenant_id: [{"kb_id": "kb1", "archived": False}]
+    )
     app = FastAPI()
     app.include_router(api.router)
     app.include_router(skill_api.router)
