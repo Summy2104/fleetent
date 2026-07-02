@@ -129,45 +129,24 @@ def _back_up(backend: BaseGitPlatformBackend, config: dict[str, Any]) -> int:
     return backed
 
 
-def _open_prs(backend: BaseGitPlatformBackend, config: dict[str, Any]) -> int:
-    """Open PRs from backup branches to the authority branch. Returns count opened."""
-    target = str(config.get("branch", "main"))
-    opened = 0
-    for proposal in backflow_store.list_by_pr_state("backed_up"):
-        pid = int(proposal["id"])
-        source = proposal.get("pr_branch") or _branch_name(config, proposal)
-        try:
-            ref = backend.open_pull_request(
-                source_branch=source,
-                target_branch=target,
-                title=f"Backflow: {proposal['skill_name']} from agent {proposal['agent_id']}",
-            )
-        except GitPlatformUnavailableError as exc:
-            _logger.warn("backflow_open_pr_deferred", proposal_id=pid, error=str(exc))
-            backflow_store.defer_pr_state(pid)
-            continue
-        except Exception as exc:  # bulkhead
-            _logger.error("backflow_open_pr_failed", proposal_id=pid, error=str(exc))
-            continue
-        backflow_store.set_pr_link(pid, pr_id=ref.pr_id, pr_url=ref.url, pr_target_branch=target)
-        backflow_store.set_pr_state(pid, "pr_open")
-        opened += 1
-    return opened
-
-
 def sweep() -> dict[str, Any]:
-    """Run one backflow sweep round (bulkheaded; never raises)."""
+    """Run one backflow sweep round (bulkheaded; never raises).
+
+    Only pushes backup branches (``<prefix>/<agent>/<skill>``) for safekeeping. Opening a
+    pull request from a backup branch to the authority branch — and thus any write to the
+    authority branch — is deliberately the human's job (done in the git host UI); the
+    platform never opens or merges PRs.
+    """
     try:
         config = git_source_store.get_config()
         if not config or not config.get("enabled"):
-            return {"backed_up": 0, "prs_opened": 0, "skipped": "disabled"}
+            return {"backed_up": 0, "skipped": "disabled"}
         backend = _build_backend(config)
         backed_up = _back_up(backend, config)
-        prs_opened = _open_prs(backend, config) if config.get("auto_open_pr") else 0
-        return {"backed_up": backed_up, "prs_opened": prs_opened}
+        return {"backed_up": backed_up}
     except Exception as exc:  # outermost bulkhead: a sweep failure must not crash the scheduler
         _logger.error("backflow_pr_sweep_failed", error=str(exc))
-        return {"backed_up": 0, "prs_opened": 0, "error": str(exc)}
+        return {"backed_up": 0, "error": str(exc)}
 
 
 def run_now() -> dict[str, Any]:

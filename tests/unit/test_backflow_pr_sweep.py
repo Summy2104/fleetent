@@ -29,6 +29,7 @@ def _stub_agent(monkeypatch, agent_id: int, name: str) -> None:
         lambda aid: SimpleNamespace(name=name) if aid == agent_id else None,
     )
 
+
 _CONFIG = {
     "enabled": 1,
     "provider": "fake",
@@ -139,7 +140,10 @@ def test_branch_name_sanitizes_unsafe_agent_name(monkeypatch) -> None:
     assert branch == "backflow/Ops-Team-1-weird/crm-ops"
 
 
-def test_opens_pr_for_backed_up_when_auto_open(monkeypatch) -> None:
+def test_sweep_never_opens_pr_even_with_auto_open(monkeypatch) -> None:
+    """The platform only pushes backup branches; opening a PR to the authority branch is
+    the human's job. The sweep must never open a PR, even if a legacy auto_open_pr=1 config
+    lingers."""
     fake = _FakeBackend()
     config = {**_CONFIG, "auto_open_pr": 1}
     proposals = {
@@ -152,18 +156,13 @@ def test_opens_pr_for_backed_up_when_auto_open(monkeypatch) -> None:
     monkeypatch.setattr(git_source_store, "get_config", lambda: config)
     monkeypatch.setattr(backflow_pr_sweep, "_backend_factory", lambda _c: fake)
     monkeypatch.setattr(backflow_store, "list_by_pr_state", lambda state, **_: proposals[state])
-    set_link = MagicMock()
-    set_state = MagicMock()
-    monkeypatch.setattr(backflow_store, "set_pr_link", set_link)
-    monkeypatch.setattr(backflow_store, "set_pr_state", set_state)
+    monkeypatch.setattr(backflow_store, "set_pr_link", MagicMock())
+    monkeypatch.setattr(backflow_store, "set_pr_state", MagicMock())
 
-    backflow_pr_sweep.sweep()
+    result = backflow_pr_sweep.sweep()
 
-    assert fake.opened == [{"source": "backflow/7/crm-ops", "target": "main"}]
-    set_state.assert_any_call(2, "pr_open")
-    # PR id/url/target recorded
-    link_kwargs = set_link.call_args_list[-1].kwargs
-    assert link_kwargs.get("pr_id") == "99"
+    assert fake.opened == []  # never opens a PR
+    assert "prs_opened" not in result or result["prs_opened"] == 0
 
 
 def test_git_unreachable_defers_without_raising(monkeypatch) -> None:
@@ -187,32 +186,6 @@ def test_git_unreachable_defers_without_raising(monkeypatch) -> None:
     backflow_pr_sweep.sweep()
 
     defer_state.assert_any_call(3)
-
-
-def test_open_pr_unreachable_defers_via_guarded_downgrade(monkeypatch) -> None:
-    """The _open_prs deferral must also use the guarded downgrade, not a raw set_pr_state.
-
-    A raw ``set_pr_state(pid, "deferred")`` here would let a losing concurrent sweep
-    clobber a "pr_open" state a winning concurrent call already recorded.
-    """
-    fake = _FakeBackend(unavailable=True)
-    config = {**_CONFIG, "auto_open_pr": 1}
-    proposals = {
-        None: [],
-        "deferred": [],
-        "backed_up": [
-            {"id": 4, "agent_id": 7, "skill_name": "crm-ops", "pr_branch": "backflow/7/crm-ops"}
-        ],
-    }
-    monkeypatch.setattr(git_source_store, "get_config", lambda: config)
-    monkeypatch.setattr(backflow_pr_sweep, "_backend_factory", lambda _c: fake)
-    monkeypatch.setattr(backflow_store, "list_by_pr_state", lambda state, **_: proposals[state])
-    defer_state = MagicMock()
-    monkeypatch.setattr(backflow_store, "defer_pr_state", defer_state)
-
-    backflow_pr_sweep.sweep()
-
-    defer_state.assert_any_call(4)
 
 
 def test_disabled_source_is_a_noop(monkeypatch) -> None:
