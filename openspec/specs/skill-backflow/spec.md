@@ -40,49 +40,23 @@
 - **WHEN** 试图经 agent-owned DM 路径审批一个 `backflow` 提案
 - **THEN** 该路径不处理回流提案（回流仅经平台治理审批）
 
-### Requirement: accept 采纳（GitOps 禁用，legacy 直写）
+### Requirement: 平台不审核回流（只读查看 + 人工 git 采纳）
 
-平台 SHALL NOT 代替人往权威分支写入。启用外部 git 源（GitOps）时，accept SHALL 返回 409、SHALL NOT 改动池 / drift / status，并提示运营在 git host 对已推的备份分支开 PR 合并（合并后经入站同步 `skill-git-sync` 自然拉回池）。未配置外部 git 源（legacy 直写）时，accept SHALL `_write_bundle_atomic` + `commit_pool` 直写池、set `current_version`、清除来源 `(agent, skill)` 的 drift 并 `bump_resync_epoch`，其余绑定该 skill 的 agent 在常规重新物化时拿到新版本。
+平台 SHALL NOT 对回流提案做 accept / reject / fork 治理决策，SHALL NOT 因回流往池或权威分支写入。agent 的进化副本经提名记录 + `backflow_pr_sweep` 推备份分支后，采纳与否**完全是人在 git host 的动作**：对备份分支开 PR 合并到权威分支 → 经入站同步（`skill-git-sync`）自然回到池 → 下发 agent。平台仅提供**只读视图**（提案列表 + 双向 diff）供运营查看 agent 改了什么、备份到哪个分支。SHALL NOT 暴露 accept / reject / fork / open-pr 端点。冲突态（`base_version` ≠ 池 head）仍在只读 diff 中如实展示（相对 base / 相对 head），供人在 git host 裁决；平台 SHALL NOT 自动 merge、SHALL NOT 覆盖池。
 
-#### Scenario: GitOps 下 accept 返 409
-- **WHEN** 外部 git 源启用，运营 accept 一条回流提案
-- **THEN** 平台返回 409（不写池、不改 drift/status），提示去 git host 对备份分支开 PR
+> 权衡记录：早期版本平台侧提供 accept（合 PR / 直写池）、reject（清 drift）、fork（另存新 skill）治理动作。因「先自动推备份分支、后人工审」会产生矛盾（reject 只撤 agent 运行时副本，管不到已推的备份分支，若该分支被合并则改动复活），且与「git 为唯一权威写入方向、平台只读」的原则冲突，故移除全部平台侧治理，采纳统一收敛为人在 git host 的 PR。
 
-#### Scenario: legacy 下 accept 直写池
-- **WHEN** 未配置外部 git 源，运营 accept 一条无冲突提案
-- **THEN** 平台直写池 + commit，"crm-ops" 的 `current_version` 前移、来源 agent 的 drift 被清、`resync_epoch` 前移
+#### Scenario: 无治理端点
+- **WHEN** 客户端访问 `/admin/skills/backflow/{id}/accept`、`/reject`、`/fork` 或 `/open-pr`
+- **THEN** 这些端点不存在（路由不存在）
 
-### Requirement: reject 丢弃回流（纯本地，不碰 git）
+#### Scenario: 只读列表 + diff 可用
+- **WHEN** admin 请求回流列表 / 单提案 diff
+- **THEN** 返回提案元数据（来源 agent、skill、备份分支、状态）与双向 diff（相对 base / 相对 head、含 conflict 标记），不含任何治理动作
 
-reject 时平台 SHALL 清除来源 `(agent, skill)` 的 drift（使该副本下次物化被池版本覆盖）+ `bump_resync_epoch`，池不变；两种模式行为一致。平台 SHALL NOT 关闭或操作任何 PR（平台不往 git 写）。已推的备份分支 SHALL 保留留痕，SHALL NOT 强制删除（agent 改动可追溯）。动作 SHALL 被审计。
-
-#### Scenario: reject 后副本将被覆盖
-- **WHEN** 运营 reject skill "crm-ops" 的回流
-- **THEN** 池不变、该 agent 的 drift 被清、`resync_epoch` 前移，下次物化其 "crm-ops" 副本被池版本覆盖；备份分支保留；平台不操作任何 PR
-
-### Requirement: fork 落新命名 skill（GitOps 禁用，legacy 直写）
-
-启用外部 git 源（GitOps）时 fork SHALL 返回 409（新命名 skill 同样经人 PR 进入权威）。未配置外部 git 源时，fork SHALL 把进化副本的**完整 bundle** 作为**新命名 skill** 直写池 + commit，将来源 agent 的绑定指向该 fork skill、原 skill resync；SHALL NOT 覆盖原权威 skill。
-
-#### Scenario: GitOps 下 fork 返 409
-- **WHEN** 外部 git 源启用，运营对某回流选择 fork
-- **THEN** 平台返回 409，提示经人 PR 落地
-
-#### Scenario: legacy 下 fork 直写新命名 skill
-- **WHEN** 未配置外部 git 源，运营对多文件 skill "crm-ops" 的回流选择 fork
-- **THEN** 平台直写一个新命名 skill（如 "crm-ops-support-bot"）+ commit，原 "crm-ops" 权威版不变，来源 agent 绑定指向 fork、原 skill resync
-
-### Requirement: 冲突显式暴露不自动 merge
-
-当回流提案的 `base_version` ≠ 池当前 head（部署后池已被推进），平台 SHALL 在 review 时显式标记冲突态并展示进化副本相对 head 的 diff。legacy 直写模式下 accept 覆盖 head SHALL 需 `X-Confirm: true` 显式确认；GitOps 模式下 accept 已禁用（返 409），冲突提案同样返 409、由人在 git host 裁决。平台 SHALL NOT 自动 merge。
-
-#### Scenario: 过期基准触发冲突态
-- **WHEN** 一个回流提案的 `base_version` 落后于池 head
-- **THEN** review 显式标记「基于过期版本」并展示相对 head 的 diff，不自动合并
-
-#### Scenario: legacy 覆盖 head 需确认
-- **WHEN** legacy 模式下冲突态运营选择覆盖 head
-- **THEN** 需 `X-Confirm: true`，accept 记录被覆盖的 head 版本以便经 git 历史回溯
+#### Scenario: 采纳靠人 git PR
+- **WHEN** 运营想采纳某回流
+- **THEN** 在 git host 对该提案的备份分支开 PR 合并到权威分支；合并后入站同步把改动带回池、下发 agent；平台全程不写 git、不写池
 
 ### Requirement: drift 观测自动触发回流提名
 
@@ -126,7 +100,7 @@ reject 时平台 SHALL 清除来源 `(agent, skill)` 的 drift（使该副本下
 
 ### Requirement: 回流治理 router 挂载到平台应用
 
-回流治理 router（list / diff / accept / reject / fork）SHALL 挂载到平台 FastAPI 应用，使所有回流端点经平台 admin 入口可达；未挂载（端点对客户端 404 不可达）SHALL 视为缺陷。
+回流 router（只读 list / diff + 手动 sync-backflow）SHALL 挂载到平台 FastAPI 应用，使这些端点经平台 admin 入口可达；未挂载（端点对客户端 404 不可达）SHALL 视为缺陷。router SHALL NOT 含 accept / reject / fork / open-pr 治理端点。
 
 #### Scenario: 回流端点经平台应用可达
 - **WHEN** 客户端访问平台应用上的回流端点（如未鉴权访问待审列表）

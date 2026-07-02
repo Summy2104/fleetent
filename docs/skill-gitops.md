@@ -96,8 +96,8 @@ agent 改 skill → node 上报漂移 → 平台记录 pending 回流提案（�
 
 - 平台**只**推备份分支（非权威主分支），**从不**开 / 合并 PR。备份分支名按 `(agent, skill)` 稳定。
 - 后台定时 sweep（`__skill_backflow_pr_sweep__`）自动推备份分支；后台 UI 的「Sync backflow」手动触发一轮 sweep（同样只推备份分支）。
-- GitOps 模式下 backflow 提案的处置：**accept / fork 禁用（409）**——采纳一律靠人对备份分支开 PR；**reject 保留**（清 drift + bump epoch，让 agent home 回退到池版本，撤销这次改动，备份分支保留留痕）。查看 diff 始终可用。
-- 未配置外部 git 源（legacy）时，accept / fork 直写本地池、reject 清 drift，行为不变。
+- **平台不审核回流**：不提供 accept / reject / fork / open-pr——采纳与否完全是你在 git host 的动作（对备份分支开 PR 合并）。平台侧回流 UI 是**只读**的：看有哪些回流、备份到哪个分支、diff（相对 base / 相对 head，含冲突标记）。
+- 为什么去掉审核：「先自动推备份、后人工审」有矛盾——reject 只撤 agent 运行时副本，管不到已推的备份分支，若该分支被合并则改动复活；且与「git 唯一权威、平台只读」冲突。故采纳统一收敛为人在 git host 的 PR。
 
 ## 行为变化
 
