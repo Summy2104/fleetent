@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, Download, Eye, EyeOff, Inbox, Trash2, X } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronUp, Download, Eye, EyeOff, Inbox, Plus, Trash2, X } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 
 import { Badge } from '@/components/base/badge'
@@ -36,11 +36,22 @@ import {
   useUnbindAgentUserMutation,
   useUpdateAgentMutation,
 } from '@/features/agents/api'
-import { parseAllowedTools, resolveProviderKeyAction } from '@/features/agents/configure-logic'
+import {
+  type RouteEntry,
+  type RouteRefKey,
+  TIER_KEYS,
+  type TierKey,
+  parseAllowedTools,
+  readTiers,
+  resolveProviderKeyAction,
+  routeEntries,
+  withRouteEntries,
+  withTiers,
+} from '@/features/agents/configure-logic'
 import { McpServersTab } from '@/features/agents/mcp-servers-tab'
 import { SkillsTab } from '@/features/agents/skills-tab'
 import { useKbsQuery } from '@/features/kb/api'
-import { useModelsQuery, useProvidersQuery } from '@/features/providers/api'
+import { type ModelListItem, useModelsQuery, useProvidersQuery } from '@/features/providers/api'
 import { useUsersQuery } from '@/features/users/api'
 import { useT } from '@/i18n'
 import { useAdminApi } from '@/lib/api-client'
@@ -83,42 +94,66 @@ function Th({ children, className }: { children: ReactNode; className?: string }
 
 type BindOption = { value: string; label: string }
 
-// A model route maps to a single model id; the platform expands it into the full model policy.
-// Read it from model_overrides, taking the first string key any authoring style may have used.
-function routeModelId(overrides: AgentModelOverrides | undefined, routeKey: string): string {
-  const routes = (overrides?.routes ?? {}) as Record<string, Array<Record<string, unknown>>>
-  const entry = routes[routeKey]?.[0]
-  if (!entry) return ''
-  for (const value of [entry.model_id, entry.provider_id, entry.provider, entry.target]) {
-    if (typeof value === 'string' && value) return value
+// UI-side entry for one model in a route's fallback chain. temperature/max_tokens are kept as raw
+// strings while editing (so decimals type cleanly) and parsed to numbers only at save via toRouteEntry.
+type UiEntry = { modelId: string; temperature: string; maxTokens: string }
+
+const EMPTY_UI_ENTRY: UiEntry = { modelId: '', temperature: '', maxTokens: '' }
+
+function uiFromRouteEntry(entry: RouteEntry): UiEntry {
+  return {
+    modelId: entry.modelId,
+    temperature: entry.temperature?.toString() ?? '',
+    maxTokens: entry.maxTokens?.toString() ?? '',
   }
-  return ''
 }
 
-// Set (or clear) one route's model while preserving every sibling key the platform stores
-// alongside it (other routes, credential slots), so an edit never drops that state.
-function withRouteModel(
+function emptyTiers(): Record<TierKey, UiEntry> {
+  return Object.fromEntries(TIER_KEYS.map((key) => [key, { ...EMPTY_UI_ENTRY }])) as Record<
+    TierKey,
+    UiEntry
+  >
+}
+
+// Load a stored route into UI entries (always at least one row so there's a primary picker).
+// refKey selects how entries reference their model: `target` (tier name) for chat routes.
+function uiEntriesForRoute(
   overrides: AgentModelOverrides | undefined,
   routeKey: string,
-  modelId: string
-): AgentModelOverrides {
-  const next: AgentModelOverrides = { ...(overrides ?? {}) }
-  const routes = { ...((next.routes as Record<string, unknown>) ?? {}) }
-  if (modelId) {
-    routes[routeKey] = [{ model_id: modelId }]
-  } else {
-    delete routes[routeKey]
-  }
-  next.routes = routes
-  return next
+  refKey: RouteRefKey = 'model_id'
+): UiEntry[] {
+  const entries = routeEntries(overrides, routeKey, refKey).map(uiFromRouteEntry)
+  return entries.length > 0 ? entries : [{ ...EMPTY_UI_ENTRY }]
 }
 
-// Standard routes exposed as independent bindings on the overview tab. `default` stays required
-// and prominent; the other three (embedding/memory_extraction/image_generation) round out the
-// routes an agent commonly needs beyond chat. vision/kb_extraction/rerank keep resolving to their
-// platform default target when unset — they aren't exposed here.
+// Parse a UI entry into a RouteEntry, dropping blank/invalid overrides (tolerant, never throws).
+function toRouteEntry(entry: UiEntry): RouteEntry {
+  const out: RouteEntry = { modelId: entry.modelId }
+  const temperature = Number(entry.temperature)
+  if (entry.temperature.trim() !== '' && !Number.isNaN(temperature)) out.temperature = temperature
+  const maxTokens = Number(entry.maxTokens)
+  if (entry.maxTokens.trim() !== '' && Number.isInteger(maxTokens) && maxTokens > 0) {
+    out.maxTokens = maxTokens
+  }
+  return out
+}
+
+// Standard routes exposed as independent bindings on the overview tab, covering every
+// route key the runtime resolves (fleetent.model.resolver.STANDARD_ROUTE_KEYS). `default`
+// stays required and prominent. `protocols` filters the candidate models per route; a route
+// left unset keeps resolving to its platform default target. The two audio routes are reserved
+// — no provider protocol supports them yet, so their candidate list is empty and the UI shows
+// an explicit no-candidates hint instead of a silently empty picker.
+// `usesTiers` routes are chat routes: their chain entries reference a named tier (primary/fast/
+// backup) rather than a model directly. The other (specialized) routes pick a registry model by
+// protocol. `protocols` is the candidate filter for the tier pickers (chat) / the route (specialized).
 const ROUTE_BINDINGS = [
-  { labelKey: 'agents.modelProvider' as const, protocols: ['openai_chat'], routeKey: 'default' },
+  {
+    labelKey: 'agents.modelProvider' as const,
+    protocols: ['openai_chat'],
+    routeKey: 'default',
+    usesTiers: true,
+  },
   {
     labelKey: 'agents.modelEmbedding' as const,
     protocols: ['http_embedding'],
@@ -128,6 +163,26 @@ const ROUTE_BINDINGS = [
     labelKey: 'agents.modelMemoryExtraction' as const,
     protocols: ['openai_chat'],
     routeKey: 'memory_extraction',
+    usesTiers: true,
+  },
+  {
+    // Multimodal chat input; references a chat tier, like the default route.
+    labelKey: 'agents.modelVision' as const,
+    protocols: ['openai_chat'],
+    routeKey: 'vision',
+    usesTiers: true,
+  },
+  {
+    // Internal KB extraction; references a chat tier (typically the cheaper `fast` one).
+    labelKey: 'agents.modelKbExtraction' as const,
+    protocols: ['openai_chat'],
+    routeKey: 'kb_extraction',
+    usesTiers: true,
+  },
+  {
+    labelKey: 'agents.modelRerank' as const,
+    protocols: ['http_rerank'],
+    routeKey: 'rerank',
   },
   {
     // Both image protocols share this route: the OpenAI Images API (openai_image_generation)
@@ -135,6 +190,19 @@ const ROUTE_BINDINGS = [
     labelKey: 'agents.modelImageGeneration' as const,
     protocols: ['openai_image_generation', 'openai_image_chat'],
     routeKey: 'image_generation',
+  },
+  {
+    // Reserved: no audio-transcription provider protocol exists yet, so this picker has no
+    // candidates today and renders the no-candidates hint.
+    labelKey: 'agents.modelAudioTranscription' as const,
+    protocols: ['openai_audio_transcription'],
+    routeKey: 'audio_transcription',
+  },
+  {
+    // Reserved: no audio-generation provider protocol exists yet (see above).
+    labelKey: 'agents.modelAudioGeneration' as const,
+    protocols: ['openai_audio_generation'],
+    routeKey: 'audio_generation',
   },
 ]
 
@@ -221,85 +289,29 @@ function BindSelectEditor({
 
 // ─────────────────────────── tabs ───────────────────────────
 
-function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boolean }): JSX.Element {
+export function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boolean }): JSX.Element {
   const t = useT()
   const detail = useAgentDetailQuery(agentName)
   const update = useUpdateAgentMutation(agentName)
-  const allModels = useModelsQuery()
-  const allProviders = useProvidersQuery()
-  const secrets = useAgentSecretsQuery(agentName)
-  const setSecret = useSetAgentSecretValueMutation(agentName)
-  const deleteSecretValue = useDeleteAgentSecretValueMutation(agentName)
 
   const [systemPrompt, setSystemPrompt] = useState('')
   const [allowedTools, setAllowedTools] = useState('')
   const [memoryNamespace, setMemoryNamespace] = useState('')
-  const [routeModelIds, setRouteModelIds] = useState<Record<string, string>>({})
-  const [providerKeyOverride, setProviderKeyOverride] = useState('')
-  const [providerKeyDirty, setProviderKeyDirty] = useState(false)
-
-  const modelId = routeModelIds.default ?? ''
-  const selectedModel = useMemo(
-    () => (allModels.data ?? []).find((model) => model.id === modelId) ?? null,
-    [allModels.data, modelId]
-  )
-  const selectedProvider = useMemo(
-    () =>
-      selectedModel
-        ? ((allProviders.data ?? []).find((provider) => provider.id === selectedModel.provider_id) ?? null)
-        : null,
-    [allProviders.data, selectedModel]
-  )
-  const selectedProviderEnv = selectedProvider?.api_key_env ?? ''
-  const selectedProviderSecretStatus = useMemo(
-    () =>
-      selectedProviderEnv
-        ? ((secrets.data?.secrets ?? []).find((secret) => secret.env_name === selectedProviderEnv)?.status ?? 'unset')
-        : 'unset',
-    [secrets.data, selectedProviderEnv]
-  )
 
   useEffect(() => {
     if (detail.data) {
       setSystemPrompt(detail.data.system_prompt)
       setAllowedTools(detail.data.allowed_tools.join(', '))
       setMemoryNamespace(detail.data.memory_namespace ?? 'default')
-      setRouteModelIds(
-        Object.fromEntries(
-          ROUTE_BINDINGS.map((binding) => [
-            binding.routeKey,
-            routeModelId(detail.data.model_overrides, binding.routeKey),
-          ])
-        )
-      )
-      setProviderKeyOverride('')
-      setProviderKeyDirty(false)
     }
   }, [detail.data])
 
   const onSave = (): void => {
-    void (async () => {
-      const modelOverrides = ROUTE_BINDINGS.reduce(
-        (overrides, binding) => withRouteModel(overrides, binding.routeKey, routeModelIds[binding.routeKey] ?? ''),
-        detail.data?.model_overrides
-      )
-      await update.mutateAsync({
-        system_prompt: systemPrompt,
-        allowed_tools: parseAllowedTools(allowedTools),
-        memory_namespace: memoryNamespace.trim() || 'default',
-        model_overrides: modelOverrides,
-      })
-      if (providerKeyDirty && selectedProviderEnv) {
-        const keyAction = resolveProviderKeyAction(providerKeyOverride, selectedProviderSecretStatus)
-        if (keyAction === 'set') {
-          await setSecret.mutateAsync({ envName: selectedProviderEnv, value: providerKeyOverride })
-        } else if (keyAction === 'delete') {
-          await deleteSecretValue.mutateAsync(selectedProviderEnv)
-        }
-        setProviderKeyDirty(false)
-        setProviderKeyOverride('')
-      }
-    })()
+    void update.mutateAsync({
+      system_prompt: systemPrompt,
+      allowed_tools: parseAllowedTools(allowedTools),
+      memory_namespace: memoryNamespace.trim() || 'default',
+    })
   }
 
   return (
@@ -337,37 +349,448 @@ function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boo
           value={memoryNamespace}
         />
       </div>
-      {ROUTE_BINDINGS.map((binding) => {
-        const bindingModelId = routeModelIds[binding.routeKey] ?? ''
-        const candidates = (allModels.data ?? []).filter((model) => binding.protocols.includes(model.protocol))
-        const label = t(binding.labelKey)
-        return (
-          <section className="space-y-3" key={binding.routeKey}>
-            <TabHeading>{label}</TabHeading>
-            {binding.routeKey === 'default' ? (
-              <p className="text-muted-foreground text-sm">{t('agents.modelProviderHint')}</p>
-            ) : null}
-            {canWrite ? (
-              <SimpleSelect
-                disabled={allModels.isLoading || update.isPending}
-                onValueChange={(value) =>
-                  setRouteModelIds((current) => ({ ...current, [binding.routeKey]: value ?? '' }))
-                }
-                options={candidates.map((model) => ({
-                  value: model.id,
-                  label: model.model_name ? `${model.id} · ${model.model_name}` : model.id,
-                }))}
-                placeholder={binding.routeKey === 'default' ? t('agents.selectProvider') : t('agents.selectModel')}
-                triggerAriaLabel={label}
-                triggerClassName="max-w-xs"
-                value={bindingModelId}
-              />
-            ) : (
-              <p className="text-foreground text-sm">{bindingModelId || '—'}</p>
-            )}
-          </section>
+
+      {canWrite ? (
+        <div>
+          <Button disabled={update.isPending} onClick={onSave}>
+            {t('common.save')}
+          </Button>
+        </div>
+      ) : null}
+
+      <AgentYamlExport agentName={agentName} />
+    </div>
+  )
+}
+
+// One editable model in a route's fallback chain: model picker + reorder/remove (only when the
+// chain has ≥2 entries) + a collapsible temperature/max_tokens override.
+function RouteEntryRow({
+  ariaLabel,
+  options,
+  entry,
+  index,
+  isDefault,
+  isLast,
+  canReorder,
+  disabled,
+  onUpdate,
+  onRemove,
+  onMove,
+}: {
+  ariaLabel: string
+  options: BindOption[]
+  entry: UiEntry
+  index: number
+  isDefault: boolean
+  isLast: boolean
+  canReorder: boolean
+  disabled: boolean
+  onUpdate: (patch: Partial<UiEntry>) => void
+  onRemove: () => void
+  onMove: (delta: number) => void
+}): JSX.Element {
+  const t = useT()
+  const [showParams, setShowParams] = useState(Boolean(entry.temperature || entry.maxTokens))
+  const iconBtn =
+    'grid size-5 place-items-center rounded text-muted-foreground hover:text-foreground disabled:opacity-40'
+  return (
+    <div aria-label={ariaLabel} className="space-y-2 rounded-md border border-border p-2" role="group">
+      <div className="flex items-center gap-1.5">
+        {canReorder ? (
+          <div className="flex flex-col">
+            <button
+              aria-label={t('agents.moveModelUp')}
+              className={iconBtn}
+              disabled={disabled || index === 0}
+              onClick={() => onMove(-1)}
+              type="button"
+            >
+              <ChevronUp className="size-3.5" />
+            </button>
+            <button
+              aria-label={t('agents.moveModelDown')}
+              className={iconBtn}
+              disabled={disabled || isLast}
+              onClick={() => onMove(1)}
+              type="button"
+            >
+              <ChevronDown className="size-3.5" />
+            </button>
+          </div>
+        ) : null}
+        <SimpleSelect
+          disabled={disabled}
+          onValueChange={(value) => onUpdate({ modelId: value ?? '' })}
+          options={options}
+          placeholder={isDefault && index === 0 ? t('agents.selectProvider') : t('agents.selectModel')}
+          triggerAriaLabel={ariaLabel}
+          triggerClassName="max-w-xs"
+          value={entry.modelId}
+        />
+        {canReorder ? (
+          <button aria-label={t('agents.removeModelEntry')} className={iconBtn} onClick={onRemove} type="button">
+            <X className="size-3.5" />
+          </button>
+        ) : null}
+      </div>
+      <button
+        className="text-muted-foreground text-xs hover:text-foreground"
+        onClick={() => setShowParams((current) => !current)}
+        type="button"
+      >
+        {t('agents.overrideParams')}
+      </button>
+      {showParams ? (
+        <div className="flex flex-wrap gap-3 pl-1">
+          <div className="grid gap-1">
+            <span className="text-muted-foreground text-xs">{t('agents.temperatureLabel')}</span>
+            <Input
+              aria-label={t('agents.temperatureLabel')}
+              className="w-28"
+              disabled={disabled}
+              inputMode="decimal"
+              onChange={(event) => onUpdate({ temperature: event.target.value })}
+              placeholder="—"
+              value={entry.temperature}
+            />
+          </div>
+          <div className="grid gap-1">
+            <span className="text-muted-foreground text-xs">{t('agents.maxTokensLabel')}</span>
+            <Input
+              aria-label={t('agents.maxTokensLabel')}
+              className="w-28"
+              disabled={disabled}
+              inputMode="numeric"
+              onChange={(event) => onUpdate({ maxTokens: event.target.value })}
+              placeholder="—"
+              value={entry.maxTokens}
+            />
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+// One route's ordered fallback chain: a primary model picker + `add fallback` for extra entries.
+// Progressive disclosure — a single-model route with no overrides reads like a plain picker.
+function RouteChainEditor({
+  label,
+  isDefault,
+  options,
+  emptyHint,
+  entries,
+  canWrite,
+  loading,
+  disabled,
+  onChange,
+}: {
+  label: string
+  isDefault: boolean
+  // All selectable options for this route: registry models (specialized routes) or named tiers
+  // (chat routes). The editor is agnostic to which — it edits a chain of option values.
+  options: BindOption[]
+  emptyHint: string
+  entries: UiEntry[]
+  canWrite: boolean
+  loading: boolean
+  disabled: boolean
+  onChange: (entries: UiEntry[]) => void
+}): JSX.Element {
+  const t = useT()
+  const hasSelection = entries.some((entry) => entry.modelId)
+
+  // Exclude options already chosen in the chain's OTHER entries — no point retrying the same target.
+  const optionsExcluding = (index: number): BindOption[] => {
+    const chosen = new Set(
+      entries.filter((_, i) => i !== index).map((entry) => entry.modelId).filter(Boolean)
+    )
+    return options.filter((option) => !chosen.has(option.value))
+  }
+
+  const updateEntry = (index: number, patch: Partial<UiEntry>): void =>
+    onChange(entries.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)))
+  const removeEntry = (index: number): void => {
+    const next = entries.filter((_, i) => i !== index)
+    onChange(next.length > 0 ? next : [{ ...EMPTY_UI_ENTRY }])
+  }
+  const moveEntry = (index: number, delta: number): void => {
+    const target = index + delta
+    if (target < 0 || target >= entries.length) return
+    const next = [...entries]
+    ;[next[index], next[target]] = [next[target], next[index]]
+    onChange(next)
+  }
+
+  const lastHasModel = Boolean(entries[entries.length - 1]?.modelId)
+  const remaining = options.length - entries.filter((entry) => entry.modelId).length
+  const canAdd = lastHasModel && remaining > 0
+
+  return (
+    <section className="space-y-3">
+      <TabHeading>{label}</TabHeading>
+      {isDefault ? <p className="text-muted-foreground text-sm">{t('agents.modelProviderHint')}</p> : null}
+
+      {canWrite && !loading && options.length === 0 && !hasSelection ? (
+        // Reserved audio routes, chat routes with no tiers defined, or any route lacking a
+        // selectable option explain the gap instead of showing a dead picker.
+        <p className="text-muted-foreground text-sm">{emptyHint}</p>
+      ) : canWrite ? (
+        <div className="space-y-2">
+          {entries.map((entry, index) => (
+            <RouteEntryRow
+              ariaLabel={index === 0 ? label : `${label} · ${t('agents.modelFallbackTag', { n: String(index) })}`}
+              canReorder={entries.length >= 2}
+              disabled={disabled || loading}
+              entry={entry}
+              index={index}
+              isDefault={isDefault}
+              isLast={index === entries.length - 1}
+              // biome-ignore lint/suspicious/noArrayIndexKey: entries are positional (fallback order) with no stable id
+              key={index}
+              onMove={(delta) => moveEntry(index, delta)}
+              onRemove={() => removeEntry(index)}
+              onUpdate={(patch) => updateEntry(index, patch)}
+              options={optionsExcluding(index)}
+            />
+          ))}
+          {canAdd ? (
+            <Button
+              aria-label={t('agents.addFallbackTo', { route: label })}
+              onClick={() => onChange([...entries, { ...EMPTY_UI_ENTRY }])}
+              size="sm"
+              variant="outline"
+            >
+              <Plus className="size-3.5" /> {t('agents.addFallback')}
+            </Button>
+          ) : null}
+        </div>
+      ) : (
+        <div className="space-y-1">
+          {hasSelection ? (
+            entries
+              .filter((entry) => entry.modelId)
+              .map((entry, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: read-only positional summary
+                <p className="text-foreground text-sm" key={i}>
+                  {entry.modelId}
+                  {entry.temperature || entry.maxTokens
+                    ? ` · ${[entry.temperature && `temp ${entry.temperature}`, entry.maxTokens && `max ${entry.maxTokens}`]
+                        .filter(Boolean)
+                        .join(' / ')}`
+                    : ''}
+                </p>
+              ))
+          ) : (
+            <p className="text-foreground text-sm">—</p>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+// The agent-local named model tiers (primary / fast / backup) — a reusable pool of chat models the
+// chat routes below reference by name. Slot names are fixed; the user only assigns a model + params.
+function ModelTiersEditor({
+  tiers,
+  options,
+  canWrite,
+  loading,
+  disabled,
+  onChange,
+}: {
+  tiers: Record<TierKey, UiEntry>
+  options: BindOption[]
+  canWrite: boolean
+  loading: boolean
+  disabled: boolean
+  onChange: (updater: (current: Record<TierKey, UiEntry>) => Record<TierKey, UiEntry>) => void
+}): JSX.Element {
+  const t = useT()
+  return (
+    <section className="space-y-3">
+      <TabHeading>{t('agents.modelTiers')}</TabHeading>
+      <p className="text-muted-foreground text-sm">{t('agents.modelTiersHint')}</p>
+      {TIER_KEYS.map((key) => (
+        <div className="space-y-1" key={key}>
+          <span className="font-medium text-foreground text-sm">{key}</span>
+          {canWrite ? (
+            <RouteEntryRow
+              ariaLabel={key}
+              canReorder={false}
+              disabled={disabled || loading}
+              entry={tiers[key]}
+              index={0}
+              isDefault={false}
+              isLast
+              onMove={() => undefined}
+              onRemove={() => undefined}
+              onUpdate={(patch) => onChange((current) => ({ ...current, [key]: { ...current[key], ...patch } }))}
+              options={options}
+            />
+          ) : (
+            <p className="text-foreground text-sm">{tiers[key]?.modelId || '—'}</p>
+          )}
+        </div>
+      ))}
+    </section>
+  )
+}
+
+// Model routing lives on its own tab: the named tiers pool + a fallback-chain editor per route
+// (chat routes reference tiers; specialized routes pick a model) plus the primary tier's
+// provider-key override. Kept separate from the overview so the pickers don't crowd the basics.
+export function ModelsTab({ agentName, canWrite }: { agentName: string; canWrite: boolean }): JSX.Element {
+  const t = useT()
+  const detail = useAgentDetailQuery(agentName)
+  const update = useUpdateAgentMutation(agentName)
+  const allModels = useModelsQuery()
+  const allProviders = useProvidersQuery()
+  const secrets = useAgentSecretsQuery(agentName)
+  const setSecret = useSetAgentSecretValueMutation(agentName)
+  const deleteSecretValue = useDeleteAgentSecretValueMutation(agentName)
+
+  const [tiers, setTiers] = useState<Record<TierKey, UiEntry>>(emptyTiers)
+  const [routeChains, setRouteChains] = useState<Record<string, UiEntry[]>>({})
+  const [providerKeyOverride, setProviderKeyOverride] = useState('')
+  const [providerKeyDirty, setProviderKeyDirty] = useState(false)
+
+  const chatModelOptions = useMemo<BindOption[]>(
+    () =>
+      (allModels.data ?? [])
+        .filter((model) => model.protocol === 'openai_chat')
+        .map((model) => ({
+          value: model.id,
+          label: model.model_name ? `${model.id} · ${model.model_name}` : model.id,
+        })),
+    [allModels.data]
+  )
+  // Options a chat route can reference: the tiers that have a model assigned, labeled with the
+  // model so the role→model mapping is visible in the picker.
+  const tierOptions = useMemo<BindOption[]>(() => {
+    const modelName = (id: string) => (allModels.data ?? []).find((model) => model.id === id)?.model_name
+    return TIER_KEYS.filter((key) => tiers[key]?.modelId).map((key) => {
+      const name = modelName(tiers[key].modelId)
+      return { value: key, label: name ? `${key} · ${name}` : key }
+    })
+  }, [allModels.data, tiers])
+
+  // The provider-key override tracks the `primary` tier's model; other tiers use their own keys.
+  const modelId = tiers.primary?.modelId ?? ''
+  const selectedModel = useMemo(
+    () => (allModels.data ?? []).find((model) => model.id === modelId) ?? null,
+    [allModels.data, modelId]
+  )
+  const selectedProvider = useMemo(
+    () =>
+      selectedModel
+        ? ((allProviders.data ?? []).find((provider) => provider.id === selectedModel.provider_id) ?? null)
+        : null,
+    [allProviders.data, selectedModel]
+  )
+  const selectedProviderEnv = selectedProvider?.api_key_env ?? ''
+  const selectedProviderSecretStatus = useMemo(
+    () =>
+      selectedProviderEnv
+        ? ((secrets.data?.secrets ?? []).find((secret) => secret.env_name === selectedProviderEnv)?.status ?? 'unset')
+        : 'unset',
+    [secrets.data, selectedProviderEnv]
+  )
+
+  useEffect(() => {
+    if (detail.data) {
+      setTiers(
+        Object.fromEntries(
+          TIER_KEYS.map((key) => [key, uiFromRouteEntry(readTiers(detail.data.model_overrides)[key])])
+        ) as Record<TierKey, UiEntry>
+      )
+      setRouteChains(
+        Object.fromEntries(
+          ROUTE_BINDINGS.map((binding) => [
+            binding.routeKey,
+            uiEntriesForRoute(
+              detail.data.model_overrides,
+              binding.routeKey,
+              binding.usesTiers ? 'target' : 'model_id'
+            ),
+          ])
         )
-      })}
+      )
+      setProviderKeyOverride('')
+      setProviderKeyDirty(false)
+    }
+  }, [detail.data])
+
+  const onSave = (): void => {
+    void (async () => {
+      // Write the tier definitions first, then each route (chat routes reference tiers by name).
+      const withTierDefs = withTiers(
+        detail.data?.model_overrides,
+        Object.fromEntries(TIER_KEYS.map((key) => [key, toRouteEntry(tiers[key])])) as Record<TierKey, RouteEntry>
+      )
+      const modelOverrides = ROUTE_BINDINGS.reduce(
+        (overrides, binding) =>
+          withRouteEntries(
+            overrides,
+            binding.routeKey,
+            (routeChains[binding.routeKey] ?? []).map(toRouteEntry),
+            binding.usesTiers ? 'target' : 'model_id'
+          ),
+        withTierDefs
+      )
+      await update.mutateAsync({ model_overrides: modelOverrides })
+      if (providerKeyDirty && selectedProviderEnv) {
+        const keyAction = resolveProviderKeyAction(providerKeyOverride, selectedProviderSecretStatus)
+        if (keyAction === 'set') {
+          await setSecret.mutateAsync({ envName: selectedProviderEnv, value: providerKeyOverride })
+        } else if (keyAction === 'delete') {
+          await deleteSecretValue.mutateAsync(selectedProviderEnv)
+        }
+        setProviderKeyDirty(false)
+        setProviderKeyOverride('')
+      }
+    })()
+  }
+
+  return (
+    <div className="grid max-w-2xl gap-5">
+      <ModelTiersEditor
+        canWrite={canWrite}
+        disabled={update.isPending}
+        loading={allModels.isLoading}
+        onChange={setTiers}
+        options={chatModelOptions}
+        tiers={tiers}
+      />
+
+      <Separator />
+
+      <p className="text-muted-foreground text-sm">{t('agents.modelTargetsHint')}</p>
+      {ROUTE_BINDINGS.map((binding) => (
+        <RouteChainEditor
+          canWrite={canWrite}
+          disabled={update.isPending}
+          emptyHint={binding.usesTiers ? t('agents.defineTiersFirst') : t('agents.modelRouteNoCandidates')}
+          entries={routeChains[binding.routeKey] ?? [{ ...EMPTY_UI_ENTRY }]}
+          isDefault={binding.routeKey === 'default'}
+          key={binding.routeKey}
+          label={t(binding.labelKey)}
+          loading={allModels.isLoading}
+          onChange={(next) => setRouteChains((current) => ({ ...current, [binding.routeKey]: next }))}
+          options={
+            binding.usesTiers
+              ? tierOptions
+              : (allModels.data ?? [])
+                  .filter((model) => binding.protocols.includes(model.protocol))
+                  .map((model) => ({
+                    value: model.id,
+                    label: model.model_name ? `${model.id} · ${model.model_name}` : model.id,
+                  }))
+          }
+        />
+      ))}
 
       {selectedProviderEnv ? (
         <section className="space-y-3">
@@ -400,8 +823,6 @@ function OverviewTab({ agentName, canWrite }: { agentName: string; canWrite: boo
           </Button>
         </div>
       ) : null}
-
-      <AgentYamlExport agentName={agentName} />
     </div>
   )
 }
@@ -839,6 +1260,7 @@ export function AgentConfigurePage(): JSX.Element {
       <Tabs defaultValue="overview">
         <TabsList className="flex w-full flex-wrap justify-start">
           <TabsTrigger value="overview">{t('agents.tabOverview')}</TabsTrigger>
+          <TabsTrigger value="models">{t('agents.tabModels')}</TabsTrigger>
           <TabsTrigger value="mcp">{t('agents.mcpServers')}</TabsTrigger>
           <TabsTrigger value="skills">{t('agents.skillsTitle')}</TabsTrigger>
           <TabsTrigger value="kb">{t('agents.knowledgeBases')}</TabsTrigger>
@@ -848,6 +1270,9 @@ export function AgentConfigurePage(): JSX.Element {
 
         <TabsContent value="overview">
           <OverviewTab agentName={agentName} canWrite={canWrite} />
+        </TabsContent>
+        <TabsContent value="models">
+          <ModelsTab agentName={agentName} canWrite={canWrite} />
         </TabsContent>
         <TabsContent value="mcp">
           <McpServersTab agentName={agentName} canWrite={canWrite} />

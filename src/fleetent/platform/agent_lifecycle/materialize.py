@@ -261,16 +261,26 @@ def _allowed_skills_for(agent: agent_store.Agent) -> list[str]:
 
 
 def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
-    """Expand DB-authored provider selections into the runtime model policy."""
-    route_overrides = {
-        k: v for k, v in model_overrides.items() if k != credential_slots.RESERVED_KEY
-    }
-    # Backward-compat: the console's two-part picker stored {targets:[...], routes:{name:[...]}}.
-    # The route map lives under "routes"; the flat "targets" list is informational only.
-    routes_block = route_overrides.get("routes")
+    """Expand DB-authored provider selections into the runtime model policy.
+
+    Two authoring shapes are supported and may coexist:
+    - Named tiers: a ``targets`` block ({tier_name: {model_id, params?, max_tokens?}}) defines
+      agent-local reusable targets (e.g. primary/fast/backup); a route entry references one via
+      ``{"target": tier_name}``. This mirrors ``agent.example.yaml``.
+    - Direct model: a route entry ``{"model_id": id}`` builds its own target from the registry
+      (used by the specialized routes — embedding/rerank/image/…).
+    """
+    filtered = {k: v for k, v in model_overrides.items() if k != credential_slots.RESERVED_KEY}
+    targets_block = filtered.get("targets") if isinstance(filtered.get("targets"), dict) else None
+    routes_block = filtered.get("routes")
     if isinstance(routes_block, dict):
         route_overrides = routes_block
-    if not route_overrides:
+    elif targets_block is not None:
+        route_overrides = {}
+    else:
+        # Legacy: the whole dict is the route map.
+        route_overrides = filtered
+    if not route_overrides and targets_block is None:
         return default_models()
 
     # Merge onto the baseline one route at a time: a route absent from the override must keep
@@ -279,11 +289,41 @@ def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
     baseline_targets = {target.id: target for target in baseline.targets}
     routes: dict[str, list[ModelRouteEntry]] = dict(baseline.routes)
     override_targets: dict[str, ModelTarget] = {}
+
+    # Build named tier targets first (target id = tier name) so routes can reference them.
+    tier_targets: dict[str, ModelTarget] = {}
+    for tier_name, tier_def in (targets_block or {}).items():
+        if not isinstance(tier_def, dict):
+            continue
+        target = _tier_target(str(tier_name), tier_def)
+        if target is not None:
+            tier_targets[str(tier_name)] = target
+            override_targets[str(tier_name)] = target
+
     for route_key, raw_entries in route_overrides.items():
         entries = raw_entries if isinstance(raw_entries, list) else [raw_entries]
         route_entries: list[ModelRouteEntry] = []
         for index, raw_entry in enumerate(entries):
             if not isinstance(raw_entry, dict):
+                continue
+            ref = raw_entry.get("target")
+            # A `target` referencing a defined tier reuses that tier target.
+            if isinstance(ref, str) and ref in tier_targets:
+                route_entries.append(
+                    ModelRouteEntry(
+                        target=ref,
+                        max_tokens=raw_entry.get("max_tokens"),
+                        params=raw_entry.get("params") or {},
+                    )
+                )
+                continue
+            # A `target` that is neither a defined tier nor a registered model is dropped rather
+            # than materializing a phantom target (e.g. a route pointing at an unfilled tier slot).
+            if (
+                isinstance(ref, str)
+                and not any(raw_entry.get(k) for k in ("model_id", "provider_id", "provider"))
+                and model_admin_store.get_model(ref) is None
+            ):
                 continue
             target = _target_from_model_override(route_key, index, raw_entry)
             override_targets[target.id] = target
@@ -297,17 +337,41 @@ def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
         if route_entries:
             routes[str(route_key)] = route_entries
 
-    # Drop baseline targets no route still references (e.g. the default local target once the
-    # default route itself is overridden), but keep those a still-untouched route relies on
-    # (e.g. memory_extraction/kb_extraction still pointing at the baseline "default" target).
+    # Keep only targets some route still references (drops unfilled/unused tiers and baseline
+    # targets whose route was overridden), while preserving those untouched baseline routes rely on.
     referenced_ids = {entry.target for entries in routes.values() for entry in entries}
     targets = {
         target_id: target
-        for target_id, target in baseline_targets.items()
+        for target_id, target in {**baseline_targets, **override_targets}.items()
         if target_id in referenced_ids
     }
-    targets.update(override_targets)
     return AgentModels(targets=list(targets.values()), routes=routes)
+
+
+def _tier_target(tier_name: str, tier_def: dict[str, Any]) -> ModelTarget | None:
+    """Build a named tier target (id = tier name) from a registered model, or None if the slot is
+    empty / unresolvable so routes referencing it are dropped rather than pointing at a phantom."""
+    candidate = tier_def.get("model_id") or tier_def.get("provider_id") or tier_def.get("model")
+    if not candidate:
+        return None
+    model = model_admin_store.get_model(str(candidate))
+    if model is None:
+        return None
+    provider = provider_admin_store.get_provider(str(model["provider_id"]))
+    if provider is None:
+        return None
+    params = _deep_merge(model.get("params") or {}, tier_def.get("params") or {})
+    return ModelTarget(
+        id=tier_name,
+        provider=str(provider.get("vendor") or provider["id"]),
+        protocol=str(model.get("protocol") or "openai_chat"),
+        base_url=model.get("base_url"),
+        endpoint=model.get("endpoint"),
+        model=model.get("model_name"),
+        api_key_env=provider.get("api_key_env"),
+        max_tokens=tier_def.get("max_tokens") or model.get("max_tokens"),
+        params=params,
+    )
 
 
 def _target_from_model_override(route_key: str, index: int, entry: dict[str, Any]) -> ModelTarget:
