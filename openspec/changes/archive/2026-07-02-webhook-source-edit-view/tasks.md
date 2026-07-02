@@ -42,4 +42,4 @@
 
 - [x] 6.1 后端：`uv run pytest tests/integration/test_webhook_admin_api.py tests/integration/test_webhook_source_store.py -q` 全绿（24 passed）；`make test-pr`（4169 passed）+ `make test-integration-ci`（2157 passed）均 exit 0，无新增失败。路由已确认挂进 `server.py`。
 - [x] 6.2 前端：`make test-frontend` 全绿（vitest + 覆盖率 + tsc --noEmit + lint，exit 0）。
-- [ ] 6.3 手动核对：`/admin/ui` webhooks 页可打开某条查看到全部字段、编辑常规字段生效、密钥「保持/更换/清除」行为正确、`id` 不可改。
+- [x] 6.3 真机核对（本地 platform:8765 + vite:4173，Playwright 登录 admin）：查看弹窗只读展示全部字段（agent/用户/回复目标显示为名称、密钥仅显示「已设置/未设置」）；`id` 编辑态 disabled；密钥三态实测——`keep`：改 message_template 保存后 `has_secret` 仍 true；`set`：填新值保存后直接解密库内密文 == 新值（真更换）；`clear`：保存后 `has_secret=false`、UI 显示「未设置密钥」。审计留下 3 条 `webhook.update`。
