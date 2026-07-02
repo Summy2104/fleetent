@@ -104,7 +104,13 @@ async def handle_approval_callback(update: Any, context: Any, agent_name: str) -
 
     from fleetent.governance import approval_store
     from fleetent.governance.approval_router import resolve_approval_request
+    from fleetent.im_gateway.access import resolve_decision_actor
     from fleetent.session import manager as session_mgr
+
+    # Resolve the clicking user into the same identity space as the recorded authorized
+    # actors (AAA-8266): managed identity resolution → internal user id; standalone → raw id;
+    # non-real id → None (fail closed).
+    actor = resolve_decision_actor("telegram", clicker, agent_name)
 
     row = approval_store.get_approval(approval_id)
     session_id = str(row.get("session_id")) if row and row.get("session_id") else None
@@ -114,10 +120,10 @@ async def handle_approval_callback(update: Any, context: Any, agent_name: str) -
         if pending and pending.get("approver_ids"):
             authorized = {str(a) for a in pending["approver_ids"]}
 
-    found = await resolve_approval_request(
+    found = actor is not None and await resolve_approval_request(
         approval_id=approval_id,
         decision=decision,  # type: ignore[arg-type]
-        approver_user_id=clicker,
+        approver_user_id=actor,
         always=always,
         authorized_actors=authorized,
     )

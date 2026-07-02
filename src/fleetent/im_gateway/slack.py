@@ -229,6 +229,7 @@ async def handle_approval_action(
     """
     from fleetent.governance import approval_store
     from fleetent.governance.approval_router import resolve_approval_request
+    from fleetent.im_gateway.access import resolve_decision_actor
     from fleetent.session import manager as session_mgr
 
     await ack()
@@ -242,6 +243,13 @@ async def handle_approval_action(
     decision = "rejected" if action_id == "approval_reject" else "approved"
     always = action_id == "approval_approve_always"
 
+    # Resolve the clicking user into the same identity space as the recorded authorized
+    # actors (AAA-8266): the gate holds the run principal's id — internal user id under
+    # managed identity resolution — so the raw Slack id must go through the same seam as
+    # inbound messages. Standalone (no resolver) returns it unchanged; a non-real id → None
+    # (fail closed, treated as unauthorized below).
+    actor = resolve_decision_actor("slack", clicker, agent_name or "default")
+
     # The run persisted the approval's session id; recover authorized actors from that
     # session's pending entry so authorization survives a restart.
     row = approval_store.get_approval(approval_id)
@@ -252,10 +260,10 @@ async def handle_approval_action(
         if pending and pending.get("approver_ids"):
             authorized = {str(a) for a in pending["approver_ids"]}
 
-    found = await resolve_approval_request(
+    found = actor is not None and await resolve_approval_request(
         approval_id=approval_id,
         decision=decision,  # type: ignore[arg-type]
-        approver_user_id=clicker,
+        approver_user_id=actor,
         always=always,
         authorized_actors=authorized,
     )
