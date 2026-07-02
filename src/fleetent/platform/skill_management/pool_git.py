@@ -1,8 +1,12 @@
 """Pool git versioning: dulwich-backed git-on-disk for the shared skill pool.
 
-The pool directory is a single git repository. Every write path (create / edit /
+The pool directory is a single git repository. Every local write path (create / edit /
 upload / archive / builtin seed) calls ``commit_pool`` after writing files.
 ``init_pool`` is idempotent; calling it on an already-initialized repo is a no-op.
+
+The pool MAY also be bound to an external git remote and driven as its local mirror
+(``init_pool_with_remote`` + ``fetch_remote`` + ``reset_pool_to``): the external repo is
+authoritative and the pool is reset --hard onto the fetched commit (GitOps inbound).
 
 All writes are serialized via a cross-process file lock (``<pool>/.git/fleetent.lock``)
 so concurrent admin operations and server workers do not corrupt the repo. Reads
@@ -13,10 +17,13 @@ from __future__ import annotations
 
 import contextlib
 import io
+import logging
 import os
 import time
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 _SYSTEM_AUTHOR = b"system <system@fleetent>"
 _DIFF_SIZE_LIMIT = 256 * 1024  # 256 KiB before degrading to file list
@@ -29,6 +36,54 @@ _DIFF_SIZE_LIMIT = 256 * 1024  # 256 KiB before degrading to file list
 
 def _is_git_repo(pool_dir: Path) -> bool:
     return (pool_dir / ".git").is_dir()
+
+
+def _skill_tree_path(subdir: str, name: str) -> str:
+    """Map a clean skill name to its git tree path under the optional scan subdir.
+
+    Empty ``subdir`` returns ``name`` unchanged (flat layout, git root == scan
+    root); a non-empty ``subdir`` prefixes it as ``<subdir>/<name>``.
+    """
+    if not subdir:
+        return name
+    return f"{subdir}/{name}"
+
+
+def resolve_git_root(scan_dir: Path, subdir: str) -> Path:
+    """Invert scan root → git root by stripping the ``skills_subdir`` suffix.
+
+    The pool's git root (where ``.git`` lives and ``reset --hard`` operates) is the
+    external repo root, while the skill *scan* root may be a subdirectory of it
+    (``<repo>/<subdir>``). This is the single canonical implementation of that
+    inversion; all platform-side callers reuse it rather than re-deriving the git
+    root with ad-hoc string surgery.
+
+    Args:
+        scan_dir: The skill scan root (``FLEETENT_SKILLS_DIR``).
+        subdir: The configured ``skills_subdir`` (``""`` when scan root == git root).
+
+    Returns:
+        The git repository root. When ``subdir`` is empty, ``scan_dir`` unchanged.
+        When ``scan_dir`` ends with ``/<subdir>``, the parent obtained by stripping
+        that suffix. On mismatch (misconfiguration) this degrades safely: it logs a
+        warning and returns ``scan_dir`` itself rather than raising — never letting a
+        bad config silently point ``reset --hard`` at the wrong directory.
+    """
+    if not subdir:
+        return scan_dir
+
+    subdir_parts = Path(subdir).parts
+    scan_parts = scan_dir.parts
+    if len(scan_parts) >= len(subdir_parts) and scan_parts[-len(subdir_parts) :] == subdir_parts:
+        return Path(*scan_parts[: -len(subdir_parts)])
+
+    logger.warning(
+        "skills scan root %s does not end with configured skills_subdir %r; "
+        "falling back to treating the scan root as the git root",
+        scan_dir,
+        subdir,
+    )
+    return scan_dir
 
 
 def _lock_path(pool_dir: Path) -> Path:
@@ -80,16 +135,26 @@ def _has_staged_changes(pool_dir: Path) -> bool:
     return len(changes) > 0
 
 
-def _stage_paths(pool_dir: Path, skill_name: str | None = None) -> None:
+def _stage_paths(pool_dir: Path, skill_name: str | None = None, *, subdir: str = "") -> None:
     """Stage files under pool_dir for commit.
 
     If ``skill_name`` is given, stage only that skill's subtree so concurrent
-    writes to different skills each produce their own commit. Otherwise stage all.
+    writes to different skills each produce their own commit. Otherwise stage all
+    content under ``subdir`` (or the whole ``pool_dir`` when ``subdir`` is empty).
+    ``subdir`` prefixes the skill's git tree path when the scan root lives under a
+    subdirectory of the git root — both the filesystem walk and the deletion-prefix
+    check operate on ``<subdir>/<name>`` so the staged range matches the committed
+    subtree exactly (R3). Scoping the "stage all" branch to ``subdir`` matters
+    whenever the git root is a real repo checkout that is also FLEETENT_HOME itself
+    (skills_subdir configurations commonly resolve the git root that way): staging
+    the unscoped ``pool_dir`` would sweep up the platform's own runtime files
+    (management.db, .env, node/, logs/, tenants/) into the pool repo.
     """
     from dulwich import porcelain
 
     if skill_name is not None:
-        skill_dir = pool_dir / skill_name
+        tree_path = _skill_tree_path(subdir, skill_name)
+        skill_dir = pool_dir / tree_path
         paths: list[str] = []
         if skill_dir.is_dir():
             for p in skill_dir.rglob("*"):
@@ -103,7 +168,7 @@ def _stage_paths(pool_dir: Path, skill_name: str | None = None) -> None:
         try:
             r = Repo(str(pool_dir))
             index = r.open_index()
-            prefix = (skill_name + "/").encode()
+            prefix = (tree_path + "/").encode()
             for tracked in list(index):
                 if tracked.startswith(prefix):
                     full = pool_dir / tracked.decode()
@@ -112,6 +177,8 @@ def _stage_paths(pool_dir: Path, skill_name: str | None = None) -> None:
             index.write()
         except Exception:
             pass
+    elif subdir:
+        porcelain.add(str(pool_dir), [subdir])
     else:
         porcelain.add(str(pool_dir))
 
@@ -157,19 +224,26 @@ def init_pool(pool_dir: Path) -> None:
 
 
 def commit_pool(
-    pool_dir: Path, *, message: str, author: str, skill_name: str | None = None
+    pool_dir: Path,
+    *,
+    message: str,
+    author: str,
+    skill_name: str | None = None,
+    subdir: str = "",
 ) -> str | None:
     """Stage changes and commit to the pool repo.
 
     If ``skill_name`` is given, stage only that skill's subtree so concurrent
     writes to different skills each produce their own commit. Otherwise stages all.
+    ``subdir`` prefixes the skill's git tree path when the scan root lives under a
+    subdirectory of the git root (``pool_dir``); empty ``subdir`` is the flat layout.
     Returns the new commit sha hex string, or None if nothing to commit.
     Serialized by cross-process file lock to prevent concurrent write corruption.
     """
     from dulwich import porcelain
 
     with _FileLock(_lock_path(pool_dir)):
-        _stage_paths(pool_dir, skill_name)
+        _stage_paths(pool_dir, skill_name, subdir=subdir)
         if not _has_staged_changes(pool_dir):
             return None
         sha = porcelain.commit(
@@ -181,10 +255,12 @@ def commit_pool(
         return sha.decode() if isinstance(sha, bytes) else sha
 
 
-def pool_version_for_skill(pool_dir: Path, skill_name: str) -> str | None:
-    """Return the last commit sha (hex) that touched ``<pool_dir>/<skill_name>/``.
+def pool_version_for_skill(pool_dir: Path, skill_name: str, *, subdir: str = "") -> str | None:
+    """Return the last commit sha (hex) that touched the skill's subtree.
 
-    Returns None if no commits exist for this skill yet.
+    The subtree is ``<pool_dir>/<subdir>/<skill_name>/`` (or ``<pool_dir>/<skill_name>/``
+    when ``subdir`` is empty). ``pool_dir`` is the git root. Returns None if no commits
+    exist for this skill yet.
     """
     from dulwich.repo import Repo
 
@@ -193,8 +269,9 @@ def pool_version_for_skill(pool_dir: Path, skill_name: str) -> str | None:
     except Exception:
         return None
 
+    tree_path = _skill_tree_path(subdir, skill_name)
     try:
-        for entry in r.get_walker(paths=[skill_name.encode()]):
+        for entry in r.get_walker(paths=[tree_path.encode()]):
             return entry.commit.id.decode()
     except Exception:
         pass
@@ -202,10 +279,11 @@ def pool_version_for_skill(pool_dir: Path, skill_name: str) -> str | None:
 
 
 def pool_skill_history(
-    pool_dir: Path, skill_name: str, max_entries: int = 50
+    pool_dir: Path, skill_name: str, max_entries: int = 50, *, subdir: str = ""
 ) -> list[dict[str, Any]]:
     """Return commit history for ``skill_name`` in reverse chronological order.
 
+    ``pool_dir`` is the git root; ``subdir`` prefixes the skill's git tree path.
     Each entry: ``{"sha", "message", "author", "timestamp"}``.
     """
     from dulwich.repo import Repo
@@ -215,9 +293,10 @@ def pool_skill_history(
     except Exception:
         return []
 
+    tree_path = _skill_tree_path(subdir, skill_name)
     result: list[dict[str, Any]] = []
     try:
-        for entry in r.get_walker(paths=[skill_name.encode()], max_entries=max_entries):
+        for entry in r.get_walker(paths=[tree_path.encode()], max_entries=max_entries):
             result.append(
                 {
                     "sha": entry.commit.id.decode(),
@@ -231,11 +310,15 @@ def pool_skill_history(
     return result
 
 
-def pool_diff_for_commit(pool_dir: Path, skill_name: str, ref: str) -> dict[str, Any]:
+def pool_diff_for_commit(
+    pool_dir: Path, skill_name: str, ref: str, *, subdir: str = ""
+) -> dict[str, Any]:
     """Return the unified diff for ``ref`` relative to its parent commit.
 
-    If diff exceeds ``_DIFF_SIZE_LIMIT`` bytes, degrades to a list of changed
-    file names with ``truncated=True`` — never silently truncates.
+    ``pool_dir`` is the git root; ``subdir`` prefixes the skill's git tree path so
+    ``changed_files`` is scoped to that subtree. If diff exceeds ``_DIFF_SIZE_LIMIT``
+    bytes, degrades to a list of changed file names with ``truncated=True`` — never
+    silently truncates.
 
     Returns ``{"diff": str, "truncated": bool, "changed_files": list[str]}``.
     """
@@ -275,14 +358,15 @@ def pool_diff_for_commit(pool_dir: Path, skill_name: str, ref: str) -> dict[str,
     raw = out.getvalue()
 
     # Collect changed files scoped to the skill subtree
-    skill_prefix = skill_name + "/"
+    tree_path = _skill_tree_path(subdir, skill_name)
+    skill_prefix = tree_path + "/"
     changed_files: list[str] = []
     try:
         for change in tree_changes(r.object_store, parent_tree, commit.tree):
             new_path = change.new.path if change.new is not None else None
             old_path = change.old.path if change.old is not None else None
             path = (new_path or old_path or b"").decode(errors="replace")
-            if path.startswith(skill_prefix) or path == skill_name:
+            if path.startswith(skill_prefix) or path == tree_path:
                 changed_files.append(path)
     except Exception:
         pass
@@ -304,9 +388,31 @@ def pool_diff_for_commit(pool_dir: Path, skill_name: str, ref: str) -> dict[str,
     }
 
 
-def pool_content_at(pool_dir: Path, skill_name: str, ref: str) -> str | None:
+def _descend_to_tree(object_store: Any, root_tree: Any, tree_path: str) -> Any | None:
+    """Walk one tree level per ``/``-separated segment of ``tree_path``.
+
+    Returns the tree object for the final segment, or None if any segment is
+    missing or resolves to a non-tree entry. This lets ``skills/foo`` reach the
+    ``foo`` subtree by descending root → ``skills`` → ``foo`` instead of matching
+    a single top-level entry name.
+    """
+    node = root_tree
+    for segment in tree_path.split("/"):
+        found = None
+        for item in node.items():
+            if item.path.decode() == segment:
+                found = object_store[item.sha]
+                break
+        if found is None or not hasattr(found, "items"):
+            return None
+        node = found
+    return node
+
+
+def pool_content_at(pool_dir: Path, skill_name: str, ref: str, *, subdir: str = "") -> str | None:
     """Return the SKILL.md content for ``skill_name`` at git ref ``ref``.
 
+    ``pool_dir`` is the git root; ``subdir`` prefixes the skill's git tree path.
     Returns None if not found at that ref.
     """
     from dulwich.repo import Repo
@@ -315,45 +421,53 @@ def pool_content_at(pool_dir: Path, skill_name: str, ref: str) -> str | None:
         r = Repo(str(pool_dir))
         commit: Any = r[ref.encode()]
         tree: Any = r.object_store[commit.tree]
-        for item in tree.items():
-            if item.path.decode() == skill_name:
-                subtree: Any = r.object_store[item.sha]
-                for subitem in subtree.items():
-                    if subitem.path.decode() == "SKILL.md":
-                        blob: Any = r.object_store[subitem.sha]
-                        return str(blob.data.decode(errors="replace"))
+        tree_path = _skill_tree_path(subdir, skill_name)
+        subtree = _descend_to_tree(r.object_store, tree, tree_path)
+        if subtree is None:
+            return None
+        for subitem in subtree.items():
+            if subitem.path.decode() == "SKILL.md":
+                blob: Any = r.object_store[subitem.sha]
+                return str(blob.data.decode(errors="replace"))
     except Exception:
         pass
     return None
 
 
-def pool_bundle_at(pool_dir: Path, skill_name: str, ref: str) -> dict[str, str] | None:
-    """Return the full skill bundle for ``skill_name`` at git ref ``ref``."""
+def pool_bundle_at(
+    pool_dir: Path, skill_name: str, ref: str, *, subdir: str = ""
+) -> dict[str, str] | None:
+    """Return the full skill bundle for ``skill_name`` at git ref ``ref``.
+
+    ``pool_dir`` is the git root; ``subdir`` prefixes the skill's git tree path.
+    Bundle keys are relative to the skill directory (no subdir prefix) so the
+    returned names stay clean regardless of the on-disk layout.
+    """
     from dulwich.repo import Repo
 
     try:
         r = Repo(str(pool_dir))
         commit: Any = r[ref.encode()]
         tree: Any = r.object_store[commit.tree]
-        for item in tree.items():
-            if item.path.decode() != skill_name:
-                continue
-            subtree: Any = r.object_store[item.sha]
-            bundle: dict[str, str] = {}
+        tree_path = _skill_tree_path(subdir, skill_name)
+        subtree = _descend_to_tree(r.object_store, tree, tree_path)
+        if subtree is None:
+            return None
+        bundle: dict[str, str] = {}
 
-            def _walk(prefix: str, node: Any, out: dict[str, str]) -> None:
-                for subitem in node.items():
-                    name = subitem.path.decode()
-                    child = r.object_store[subitem.sha]
-                    relpath = f"{prefix}{name}"
-                    if hasattr(child, "items"):
-                        _walk(relpath + "/", child, out)
-                    else:
-                        blob_data = getattr(child, "data", b"")
-                        out[relpath] = str(blob_data.decode(errors="replace"))
+        def _walk(prefix: str, node: Any, out: dict[str, str]) -> None:
+            for subitem in node.items():
+                name = subitem.path.decode()
+                child = r.object_store[subitem.sha]
+                relpath = f"{prefix}{name}"
+                if hasattr(child, "items"):
+                    _walk(relpath + "/", child, out)
+                else:
+                    blob_data = getattr(child, "data", b"")
+                    out[relpath] = str(blob_data.decode(errors="replace"))
 
-            _walk("", subtree, bundle)
-            return bundle
+        _walk("", subtree, bundle)
+        return bundle
     except Exception:
         pass
     return None
@@ -371,3 +485,96 @@ def backfill_current_versions(pool_dir: Path, update_fn: Any) -> None:
         version = pool_version_for_skill(pool_dir, skill_dir.name)
         if version is not None:
             update_fn(skill_dir.name, version)
+
+
+# ---------------------------------------------------------------------------
+# Remote mirror sync (GitOps inbound)
+# ---------------------------------------------------------------------------
+
+
+def init_pool_with_remote(pool_dir: Path, remote_url: str) -> None:
+    """Init the pool as a git repo if needed and configure ``origin`` → ``remote_url``.
+
+    Idempotent: re-running updates the configured origin url. Credentials are NOT stored
+    here; they are passed per-fetch (see ``fetch_remote``).
+    """
+    from dulwich import porcelain
+    from dulwich.repo import Repo
+
+    if not _is_git_repo(pool_dir):
+        pool_dir.mkdir(parents=True, exist_ok=True)
+        porcelain.init(str(pool_dir))
+    repo = Repo(str(pool_dir))
+    try:
+        config = repo.get_config()
+        config.set((b"remote", b"origin"), b"url", remote_url.encode())
+        config.set((b"remote", b"origin"), b"fetch", b"+refs/heads/*:refs/remotes/origin/*")
+        config.write_to_path()
+    finally:
+        repo.close()
+
+
+def fetch_remote(
+    pool_dir: Path,
+    *,
+    remote_url: str,
+    branch: str,
+    username: str | None = None,
+    password: str | None = None,
+) -> str:
+    """Fetch ``branch`` from ``remote_url`` and return its commit sha (hex).
+
+    Fetches objects into the pool's object store and reads the target branch sha from the
+    fetch result; does NOT touch the working tree (use ``reset_pool_to``). Serialized by the
+    pool write lock so a concurrent ``commit_pool`` cannot interleave.
+
+    Raises:
+        ValueError: if ``branch`` does not exist on the remote.
+    """
+    from dulwich import porcelain
+
+    ref = b"refs/heads/" + branch.encode()
+    with _FileLock(_lock_path(pool_dir)):
+        result = porcelain.fetch(
+            str(pool_dir),
+            remote_url,
+            username=username or None,
+            password=password or None,
+        )
+        refs_map: Any = result.refs
+        sha = refs_map.get(ref)
+    if sha is None:
+        raise ValueError(f"branch {branch!r} not found on remote {remote_url!r}")
+    return sha.decode() if isinstance(sha, bytes) else str(sha)
+
+
+def reset_pool_to(pool_dir: Path, sha: str) -> None:
+    """Hard-reset the pool's working tree and current branch to commit ``sha``.
+
+    Moves the current branch ref to ``sha`` (so per-skill version reads resolve against the
+    mirrored commit) then ``reset --hard`` to align the working tree. The commit must already
+    be in the object store (fetched via ``fetch_remote``). Serialized by the pool write lock.
+    """
+    from dulwich import porcelain
+    from dulwich.repo import Repo
+
+    sha_b = sha.encode()
+    with _FileLock(_lock_path(pool_dir)):
+        repo = Repo(str(pool_dir))
+        try:
+            refs: Any = repo.refs
+            head = refs.read_ref(b"HEAD")
+            if head is not None and head.startswith(b"ref: "):
+                refs[head[len(b"ref: ") :]] = sha_b
+            else:
+                refs[b"HEAD"] = sha_b
+        finally:
+            repo.close()
+        porcelain.reset(str(pool_dir), "hard", sha_b)
+
+
+def list_pool_skills(pool_dir: Path) -> list[str]:
+    """Return the skill directory names present in the pool (excludes ``.git``)."""
+    if not pool_dir.is_dir():
+        return []
+    return sorted(p.name for p in pool_dir.iterdir() if p.is_dir() and p.name != ".git")

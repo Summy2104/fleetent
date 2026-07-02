@@ -145,7 +145,8 @@ def get_proposal(proposal_id: int) -> dict[str, Any] | None:
         .execute(
             """
             SELECT id, status, agent_id, skill_name, base_version, base_commit, proposed_bundle,
-                   conflict, overridden_head, forked_as, created_at, updated_at
+                   conflict, overridden_head, forked_as, created_at, updated_at,
+                   pr_id, pr_branch, pr_url, pr_state, pr_target_branch, pr_merge_commit
             FROM backflow_proposals
             WHERE id = :proposal_id
             """,
@@ -180,7 +181,8 @@ def list_proposals(
         .execute(
             f"""
             SELECT id, status, agent_id, skill_name, base_version, base_commit, proposed_bundle,
-                   conflict, overridden_head, forked_as, created_at, updated_at
+                   conflict, overridden_head, forked_as, created_at, updated_at,
+                   pr_id, pr_branch, pr_url, pr_state, pr_target_branch, pr_merge_commit
             FROM backflow_proposals
             {where}
             ORDER BY created_at DESC
@@ -268,13 +270,30 @@ def _capture_bundle_from_owning_node(*, agent_id: int, skill_name: str) -> dict[
     return bundle or None
 
 
-def get_proposal_diff(proposal_id: int, *, pool_dir: Path) -> dict[str, Any]:
+def get_proposal_diff(
+    proposal_id: int, *, pool_dir: Path, git_root: Path | None = None, subdir: str = ""
+) -> dict[str, Any]:
     """Return unified diffs for a backflow proposal.
 
-    Returns a dict with:
-    - ``diff_vs_base``: evolved copy vs what was materialized (base_version content)
-    - ``diff_vs_head``: evolved copy vs current pool head content
-    - ``conflict``: True if pool has advanced past base_version
+    ``pool_dir`` is the skill *scan* root (where the real current files live) and is
+    used for the on-disk reads (current-head bundle walk and conflict content hash).
+    ``git_root`` is the git repository root (where ``.git`` lives) used to reconstruct
+    the base bundle from the git tree via ``pool_bundle_at``; when a ``skills_subdir``
+    is configured these two roots differ (``pool_dir == git_root / subdir``). When
+    ``git_root`` is omitted it defaults to ``pool_dir`` (flat layout, git root == scan
+    root), preserving the pre-subdir behaviour for existing callers.
+
+    Args:
+        proposal_id: The backflow proposal to diff.
+        pool_dir: The skill scan root (real on-disk current files).
+        git_root: The git repository root; defaults to ``pool_dir`` when unset.
+        subdir: The configured ``skills_subdir`` prefixing the skill's git tree path.
+
+    Returns:
+        A dict with:
+        - ``diff_vs_base``: evolved copy vs what was materialized (base_commit content)
+        - ``diff_vs_head``: evolved copy vs current pool head content
+        - ``conflict``: True if pool has advanced past base_version
     """
     import difflib
 
@@ -286,8 +305,9 @@ def get_proposal_diff(proposal_id: int, *, pool_dir: Path) -> dict[str, Any]:
     skill_name = row["skill_name"]
     base_version: str | None = row["base_version"]
     base_commit: str | None = row["base_commit"]
+    effective_git_root = git_root if git_root is not None else pool_dir
 
-    # Current pool head bundle
+    # Current pool head bundle — real on-disk files, always the scan root (pool_dir).
     pool_skill_dir = pool_dir / skill_name
     head_bundle: dict[str, str] | None = None
     if pool_skill_dir.exists():
@@ -298,14 +318,14 @@ def get_proposal_diff(proposal_id: int, *, pool_dir: Path) -> dict[str, Any]:
             relpath = path.relative_to(pool_skill_dir).as_posix()
             head_bundle[relpath] = path.read_text(encoding="utf-8")
 
-    # base bundle: reconstruct from pool git at base_commit
+    # base bundle: reconstruct from pool git at base_commit — git tree lookup, git root.
     base_bundle: dict[str, str] | None = None
     if base_commit is not None:
         from fleetent.platform.skill_management.pool_git import pool_bundle_at
 
-        base_bundle = pool_bundle_at(pool_dir, skill_name, base_commit)
+        base_bundle = pool_bundle_at(effective_git_root, skill_name, base_commit, subdir=subdir)
 
-    # Conflict: pool head differs from what was materialized
+    # Conflict: pool head differs from what was materialized — real on-disk files, scan root.
     conflict = _detect_conflict(pool_dir, skill_name, base_version)
 
     def _bundle_diff(
@@ -387,3 +407,115 @@ def set_status(
                 "updated_at": _now(),
             },
         )
+
+
+_PR_STATES = {"backed_up", "pr_open", "merged", "closed", "deferred"}
+
+
+def set_pr_link(
+    proposal_id: int,
+    *,
+    branch: str | None = None,
+    pr_id: str | None = None,
+    pr_url: str | None = None,
+    pr_target_branch: str | None = None,
+    pr_merge_commit: str | None = None,
+) -> None:
+    """Record git-PR linkage on a proposal (partial update; unset args left unchanged).
+
+    Each field is COALESCE-merged so the sweep can set the backup branch first and the
+    PR id/url later without clobbering earlier values.
+    """
+    with _database().transaction() as conn:
+        conn.execute(
+            """
+            UPDATE backflow_proposals
+            SET pr_branch = COALESCE(:branch, pr_branch),
+                pr_id = COALESCE(:pr_id, pr_id),
+                pr_url = COALESCE(:pr_url, pr_url),
+                pr_target_branch = COALESCE(:pr_target_branch, pr_target_branch),
+                pr_merge_commit = COALESCE(:pr_merge_commit, pr_merge_commit),
+                updated_at = :updated_at
+            WHERE id = :proposal_id
+            """,
+            {
+                "proposal_id": proposal_id,
+                "branch": branch,
+                "pr_id": pr_id,
+                "pr_url": pr_url,
+                "pr_target_branch": pr_target_branch,
+                "pr_merge_commit": pr_merge_commit,
+                "updated_at": _now(),
+            },
+        )
+
+
+def set_pr_state(proposal_id: int, pr_state: str) -> None:
+    """Update the PR lifecycle state of a proposal."""
+    if pr_state not in _PR_STATES:
+        raise ValueError(f"unknown pr_state: {pr_state!r}")
+    with _database().transaction() as conn:
+        conn.execute(
+            """
+            UPDATE backflow_proposals
+            SET pr_state = :pr_state, updated_at = :updated_at
+            WHERE id = :proposal_id
+            """,
+            {"proposal_id": proposal_id, "pr_state": pr_state, "updated_at": _now()},
+        )
+
+
+def defer_pr_state(proposal_id: int) -> None:
+    """Downgrade to "deferred" only if the proposal has not already advanced.
+
+    Two overlapping sweep calls (the periodic scheduler and an admin-triggered
+    run-now) can both push the same backup branch name; the winner sets
+    "backed_up"/"pr_open" first, and the loser's push then genuinely fails
+    (non-fast-forward). Without this guard the loser's exception handler would
+    unconditionally overwrite pr_state back to "deferred", erasing the winner's
+    recorded progress even though the backup branch itself was pushed
+    successfully. The WHERE clause makes the downgrade a no-op once a
+    concurrent call has already moved the state past "deferred"/unset.
+    """
+    with _database().transaction() as conn:
+        conn.execute(
+            """
+            UPDATE backflow_proposals
+            SET pr_state = 'deferred', updated_at = :updated_at
+            WHERE id = :proposal_id AND (pr_state IS NULL OR pr_state = 'deferred')
+            """,
+            {"proposal_id": proposal_id, "updated_at": _now()},
+        )
+
+
+def list_by_pr_state(
+    pr_state: str | None, *, status: str | None = "pending"
+) -> list[dict[str, Any]]:
+    """List proposals by PR state for the sweep (``pr_state=None`` matches NULL = unbacked)."""
+    conditions = ["pr_state IS NULL"] if pr_state is None else ["pr_state = :pr_state"]
+    params: dict[str, Any] = {} if pr_state is None else {"pr_state": pr_state}
+    if status is not None:
+        conditions.append("status = :status")
+        params["status"] = status
+    where = " AND ".join(conditions)
+    rows = (
+        _database()
+        .execute(
+            f"""
+            SELECT id, status, agent_id, skill_name, base_version, base_commit, proposed_bundle,
+                   conflict, overridden_head, forked_as, created_at, updated_at,
+                   pr_id, pr_branch, pr_url, pr_state, pr_target_branch, pr_merge_commit
+            FROM backflow_proposals
+            WHERE {where}
+            ORDER BY created_at ASC
+            """,
+            params,
+        )
+        .fetchall()
+    )
+    proposals: list[dict[str, Any]] = []
+    for row in rows:
+        proposal = _row_to_proposal(row)
+        if proposal is not None:
+            proposals.append(proposal)
+    return proposals

@@ -547,3 +547,75 @@ def test_import_upload_bad_frontmatter_skipped(client, tmp_path, monkeypatch):
     body = r.json()
     assert [i["name"] for i in body["imported"]] == ["good"]
     assert body["skipped"][0]["dir"] == "bad"
+
+
+# --- version history / diff with skills_subdir (skill-backflow-git-pr task 7) --
+
+
+def _commit_skill_at(git_root, name: str, subdir: str, content: str) -> str:
+    """Commit a skill under ``<git_root>/<subdir>/<name>`` and return the commit sha."""
+    from fleetent.platform.skill_management.pool_git import commit_pool
+
+    tree_dir = git_root / subdir / name if subdir else git_root / name
+    tree_dir.mkdir(parents=True, exist_ok=True)
+    (tree_dir / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: test\n---\n{content}", encoding="utf-8"
+    )
+    sha = commit_pool(
+        git_root, message=f"add {name}", author="admin <a@a>", skill_name=name, subdir=subdir
+    )
+    assert sha is not None
+    return sha
+
+
+def test_versions_and_diff_with_skills_subdir(client, tmp_path, monkeypatch):
+    """With skills_subdir set the scan root has no .git of its own (it lives at the git
+    root one level up). _pool_dir() must check the git root so version history and diffs
+    resolve instead of returning empty/404 (skill-backflow-git-pr task 7)."""
+    from fleetent.platform.skill_management import git_source_store
+    from fleetent.platform.skill_management.pool_git import init_pool
+
+    git_root = tmp_path / "repo"
+    git_root.mkdir()
+    init_pool(git_root)
+    scan_root = git_root / "skills"  # the real scan root, has no .git of its own
+    scan_root.mkdir()
+
+    sha = _commit_skill_at(git_root, "crm-ops", "skills", "v1 body")
+    _commit_skill_at(git_root, "crm-ops", "skills", "v2 body edited")
+
+    monkeypatch.setattr(api, "engine_skills_dir", lambda: str(scan_root))
+    git_source_store.set_config(enabled=1, provider="fake", skills_subdir="skills")
+
+    token, _ = _session_for("viewer")
+    versions = client.get("/admin/skills/crm-ops/versions", headers=_hdr(token))
+    assert versions.status_code == 200
+    entries = versions.json()
+    assert len(entries) == 2  # both commits are attributed to the skill via the subdir tree
+    assert all("sha" in e for e in entries)
+
+    diff = client.get(f"/admin/skills/crm-ops/versions/{sha}/diff", headers=_hdr(token))
+    assert diff.status_code == 200
+    body = diff.json()
+    assert "crm-ops" in body["diff"] or any("crm-ops" in f for f in body["changed_files"])
+
+
+def test_versions_and_diff_without_subdir_unchanged(client, tmp_path, monkeypatch):
+    """Baseline: with no skills_subdir configured the scan root IS the git root and
+    version history/diff resolve exactly as before (regression guard)."""
+    from fleetent.platform.skill_management.pool_git import init_pool
+
+    pool = tmp_path / "pool"
+    pool.mkdir()
+    init_pool(pool)
+    sha = _commit_skill_at(pool, "billing", "", "b1")
+
+    monkeypatch.setattr(api, "engine_skills_dir", lambda: str(pool))
+
+    token, _ = _session_for("viewer")
+    versions = client.get("/admin/skills/billing/versions", headers=_hdr(token))
+    assert versions.status_code == 200
+    assert len(versions.json()) == 1
+
+    diff = client.get(f"/admin/skills/billing/versions/{sha}/diff", headers=_hdr(token))
+    assert diff.status_code == 200
