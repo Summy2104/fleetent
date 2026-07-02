@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 from fleetent import agent_store, auth, user_store
 from fleetent.platform.skill_management import backflow_store, skill_admin_store
@@ -125,62 +124,5 @@ def test_diff_vs_head_non_empty_on_conflict(db, pool_dir):
     assert isinstance(diff["diff_vs_head"], str)
 
 
-def test_accept_conflict_without_confirm_is_rejected(app, db, pool_dir, admin_token):
-    """Accepting a conflicting proposal without X-Confirm: true returns 428."""
-    _commit_skill(pool_dir, "hr-ops", "v1-content")
-    agent = _create_agent()
-    evolved = "---\nname: hr-ops\ndescription: test\n---\nevolved hr-ops"
-    pid = _nominate_with_conflict(agent, "hr-ops", pool_dir, evolved)
-
-    client = TestClient(app, raise_server_exceptions=True)
-    resp = client.post(
-        f"/admin/skills/backflow/{pid}/accept",
-        headers={"Authorization": f"Session {admin_token}"},
-        json={"author": "alice <alice@example.com>"},
-    )
-    # Should require confirmation for conflict proposals
-    assert resp.status_code == 428
-
-
-# ---------------------------------------------------------------------------
-# 4.2: conflict accept with explicit confirm
-# ---------------------------------------------------------------------------
-
-
-def test_accept_conflict_with_confirm_records_overridden_head(
-    app, db, pool_dir, admin_token, monkeypatch
-):
-    """Accepting a conflicting proposal with X-Confirm: true records overridden_head."""
-    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(pool_dir))
-
-    _commit_skill(pool_dir, "payroll", "v1-content")
-    agent = _create_agent()
-    evolved = "---\nname: payroll\ndescription: test\n---\nevolved payroll"
-    pid = _nominate_with_conflict(agent, "payroll", pool_dir, evolved)
-
-    # Get current pool head sha for verification
-    from fleetent.platform.skill_management.pool_git import pool_version_for_skill
-
-    head_sha = pool_version_for_skill(pool_dir, "payroll")
-
-    client = TestClient(app, raise_server_exceptions=True)
-    resp = client.post(
-        f"/admin/skills/backflow/{pid}/accept",
-        headers={
-            "Authorization": f"Session {admin_token}",
-            "X-Confirm": "true",
-        },
-        json={"author": "alice <alice@example.com>"},
-    )
-    assert resp.status_code == 200
-
-    # overridden_head should be recorded
-    row = backflow_store.get_proposal(pid)
-    assert row is not None
-    assert row["status"] == "accepted"
-    assert row["overridden_head"] is not None, "overridden_head must be recorded on conflict accept"
-    assert row["overridden_head"] == head_sha
-
-    # pool file should be updated with evolved content
-    pool_content = (pool_dir / "payroll" / "SKILL.md").read_text(encoding="utf-8")
-    assert "evolved payroll" in pool_content
+# Accept-on-conflict tests were removed with the accept endpoint: the platform no longer
+# adopts backflow (conflict is surfaced read-only in the diff; adoption is a human git PR).

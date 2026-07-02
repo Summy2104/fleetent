@@ -70,9 +70,11 @@ def test_backflow_router_mounted(client):
     paths = {getattr(r, "path", None) for r in app.routes}
     assert "/admin/skills/backflow" in paths
     assert "/admin/skills/backflow/{proposal_id}/diff" in paths
-    assert "/admin/skills/backflow/{proposal_id}/accept" in paths
-    assert "/admin/skills/backflow/{proposal_id}/reject" in paths
-    assert "/admin/skills/backflow/{proposal_id}/fork" in paths
+    assert "/admin/skills/backflow/sync-backflow" in paths
+    # Governance endpoints are gone — the platform does not accept/reject/fork backflow.
+    assert "/admin/skills/backflow/{proposal_id}/accept" not in paths
+    assert "/admin/skills/backflow/{proposal_id}/reject" not in paths
+    assert "/admin/skills/backflow/{proposal_id}/fork" not in paths
     # Mounted and reachable: unauthenticated list returns 401 (auth), not 404 (no route).
     assert client.get("/admin/skills/backflow").status_code == 401
 
