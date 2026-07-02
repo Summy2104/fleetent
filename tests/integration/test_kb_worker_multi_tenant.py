@@ -20,7 +20,9 @@ def _tenant_queue_url(home_dir: Path, tenant_id: str) -> str:
 
 
 def _seed_kb(home_dir: Path, tenant_id: str, kb_id: str) -> None:
-    create_knowledge_base(tenant_id, kb_id, f"{tenant_id} KB", database=_tenant_db(home_dir, tenant_id))
+    create_knowledge_base(
+        tenant_id, kb_id, f"{tenant_id} KB", database=_tenant_db(home_dir, tenant_id)
+    )
 
 
 def test_worker_run_once_discovers_and_drains_multiple_tenant_queues(
@@ -58,12 +60,18 @@ def test_worker_run_once_discovers_and_drains_multiple_tenant_queues(
 
     assert first == {"job_id": first["job_id"], "status": "done"}
     assert second == {"job_id": second["job_id"], "status": "done"}
-    assert KnowledgeStore(_tenant_db(tmp_path, "tenant-a")).list_documents("tenant-a", "kb-a")[0][
-        "filename"
-    ] == "a.md"
-    assert KnowledgeStore(_tenant_db(tmp_path, "tenant-b")).list_documents("tenant-b", "kb-b")[0][
-        "filename"
-    ] == "b.md"
+    assert (
+        KnowledgeStore(_tenant_db(tmp_path, "tenant-a")).list_documents("tenant-a", "kb-a")[0][
+            "filename"
+        ]
+        == "a.md"
+    )
+    assert (
+        KnowledgeStore(_tenant_db(tmp_path, "tenant-b")).list_documents("tenant-b", "kb-b")[0][
+            "filename"
+        ]
+        == "b.md"
+    )
 
     _seed_kb(tmp_path, "tenant-c", "kb-c")
     kb_ingest_jobs.enqueue_job(
@@ -81,15 +89,18 @@ def test_worker_run_once_discovers_and_drains_multiple_tenant_queues(
     third = worker.run_once(home_dir=tmp_path)
 
     assert third == {"job_id": third["job_id"], "status": "done"}
-    assert KnowledgeStore(_tenant_db(tmp_path, "tenant-c")).list_documents("tenant-c", "kb-c")[0][
-        "filename"
-    ] == "c.md"
+    assert (
+        KnowledgeStore(_tenant_db(tmp_path, "tenant-c")).list_documents("tenant-c", "kb-c")[0][
+            "filename"
+        ]
+        == "c.md"
+    )
 
 
-def test_worker_connector_sync_uses_job_tenant_env_and_tenant_lock(
-    tmp_path: Path, monkeypatch
-) -> None:
-    from fleetent.knowledge_base import worker
+def test_worker_connector_sync_uses_scoped_env_per_tenant_job(tmp_path: Path, monkeypatch) -> None:
+    from fleetent.knowledge_base import operations, worker
+    from fleetent.knowledge_base.connectors.google_drive import FakeGoogleDriveClient
+    from fleetent.knowledge_base.connectors.google_drive import GoogleDriveSyncSummary
 
     for tenant_id, secret in (("tenant-a", "secret-a"), ("tenant-b", "secret-b")):
         tenant_dir = tmp_path / "tenants" / tenant_id / "kb"
@@ -101,6 +112,7 @@ connectors:
     type: google_drive
     enabled: true
     kb_id: kb-sync
+    folder_id: folder-1
     access_token_env: SHARED_SYNC_TOKEN
 """.strip()
             + "\n",
@@ -122,7 +134,10 @@ connectors:
         connector_ref={
             "connector_id": "drive-sync",
             "kind": "google_drive",
-            "config": {"access_token_env": "SHARED_SYNC_TOKEN"},
+            "config": {
+                "folder_id": "folder-1",
+                "access_token_env": "SHARED_SYNC_TOKEN",
+            },
         },
         database_url=queue_a,
     )
@@ -133,28 +148,33 @@ connectors:
         connector_ref={
             "connector_id": "drive-sync",
             "kind": "google_drive",
-            "config": {"access_token_env": "SHARED_SYNC_TOKEN"},
+            "config": {
+                "folder_id": "folder-1",
+                "access_token_env": "SHARED_SYNC_TOKEN",
+            },
         },
         database_url=queue_b,
     )
 
     seen_tokens: list[str] = []
 
-    async def fake_run_connector_sync(*args, **kwargs):
-        seen_tokens.append(os.environ["SHARED_SYNC_TOKEN"])
+    def fake_create_google_drive_client(config, env=None):
+        del config
+        source_env = env if env is not None else os.environ
+        seen_tokens.append(source_env["SHARED_SYNC_TOKEN"])
+        return FakeGoogleDriveClient(files_by_folder={"folder-1": []})
 
-        class Result:
-            connector_id = "drive-sync"
-            status = "done"
-            summary = "ok"
-            error = ""
+    monkeypatch.setattr(operations, "_create_google_drive_client", fake_create_google_drive_client)
 
-        return Result()
+    async def fake_sync_google_drive(config, *, client):
+        del config, client
+        return GoogleDriveSyncSummary(scanned=0, planned=0)
 
-    monkeypatch.setattr(worker.knowledge_base, "run_connector_sync", fake_run_connector_sync)
+    monkeypatch.setattr(operations, "sync_google_drive", fake_sync_google_drive)
 
-    result = worker.run_once(home_dir=tmp_path, tenant_id="tenant-a")
+    first = worker.run_once(home_dir=tmp_path)
+    second = worker.run_once(home_dir=tmp_path)
 
-    assert result == {"job_id": job_a["id"], "status": "done"}
-    assert seen_tokens == ["secret-a"]
-    assert kb_ingest_jobs.get_job(job_b["id"], database_url=queue_b)["status"] == "pending"
+    assert first == {"job_id": job_a["id"], "status": "done"}
+    assert second == {"job_id": job_b["id"], "status": "done"}
+    assert seen_tokens == ["secret-a", "secret-b"]

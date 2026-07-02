@@ -6,7 +6,7 @@ import argparse
 import asyncio
 import os
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -271,10 +271,11 @@ def run_job(
 
     if job_type == "connector_sync":
         connector_id = str(payload["connector_id"])
+        connector_env: Mapping[str, str] | None = None
         if home_dir is not None:
             from fleetent.knowledge_base.service_config import load_tenant_connectors
 
-            load_tenant_connectors(home_dir, tenant_id)
+            _, connector_env = load_tenant_connectors(home_dir, tenant_id)
         with _use_kb_runtime(
             tenant_id,
             data_dir=data_dir,
@@ -286,6 +287,7 @@ def run_job(
                     connector_id,
                     settings=_connector_settings(job, payload),
                     dry_run=False,
+                    env=connector_env,
                 )
             )
         return {

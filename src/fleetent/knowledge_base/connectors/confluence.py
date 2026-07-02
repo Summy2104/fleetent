@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
+from collections.abc import Mapping
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -122,10 +123,13 @@ class ConfluenceClient(Protocol):
 class CredentialRefResolver:
     """Resolve env: and file credential_ref values."""
 
-    def resolve(self, credential_ref: str) -> ConfluenceCredential:
+    def resolve(
+        self, credential_ref: str, env: Mapping[str, str] | None = None
+    ) -> ConfluenceCredential:
+        source_env = env if env is not None else os.environ
         if credential_ref.startswith("env:"):
             env_name = credential_ref.removeprefix("env:")
-            value = os.getenv(env_name)
+            value = source_env.get(env_name)
             if value is None:
                 raise ConfluenceAuthError(f"missing credential env var: {env_name}")
             return ConfluenceCredential(credential_ref=credential_ref, payload=value)
@@ -143,6 +147,7 @@ class HttpConfluenceClient:
     base_url: str
     username: str
     credential_ref: str
+    env: Mapping[str, str] | None = None
     timeout_seconds: float = 20.0
 
     def list_space_pages(self, space_key: str) -> list[list[ConfluencePage]]:
@@ -204,7 +209,7 @@ class HttpConfluenceClient:
         params: dict[str, str] | None = None,
     ) -> httpx.Response:
         url = _confluence_url(self.base_url, path_or_url)
-        token = CredentialRefResolver().resolve(self.credential_ref).payload
+        token = CredentialRefResolver().resolve(self.credential_ref, env=self.env).payload
         try:
             with httpx.Client(timeout=self.timeout_seconds) as client:
                 response = client.request(
