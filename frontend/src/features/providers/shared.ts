@@ -1,7 +1,9 @@
 import type {
   CreateModelInput,
   CreateProviderInput,
+  ModelListItem,
   ProviderListItem,
+  UpdateModelInput,
   UpdateProviderInput,
 } from '@/features/providers/api'
 
@@ -74,6 +76,19 @@ export function buildUpdateProviderPayload(form: ProviderFormState): UpdateProvi
   }
 }
 
+// Populate the model form from an existing record for edit. Legacy rows migrated
+// before the protocol column carry NULL/empty, so fall back to a valid select value.
+export function modelFormFromModel(model: ModelListItem): ModelFormState {
+  return {
+    baseUrl: model.base_url ?? '',
+    endpoint: model.endpoint ?? '',
+    id: model.id,
+    modelName: model.model_name,
+    protocol: model.protocol || 'openai_chat',
+    providerId: model.provider_id,
+  }
+}
+
 export function buildCreateModelPayload(form: ModelFormState): CreateModelInput {
   const usesEndpoint = ENDPOINT_PROTOCOLS.has(form.protocol)
   return {
@@ -83,5 +98,17 @@ export function buildCreateModelPayload(form: ModelFormState): CreateModelInput 
     model_name: form.modelName,
     protocol: form.protocol,
     provider_id: form.providerId,
+  }
+}
+
+// Unlike create, blanks map to explicit null: the backend edit keeps omitted fields
+// (exclude_unset), so a protocol switch must actively clear the field it no longer uses.
+export function buildUpdateModelPayload(form: ModelFormState): UpdateModelInput {
+  const usesEndpoint = ENDPOINT_PROTOCOLS.has(form.protocol)
+  return {
+    base_url: usesEndpoint ? null : form.baseUrl || null,
+    endpoint: usesEndpoint ? form.endpoint || null : null,
+    model_name: form.modelName,
+    protocol: form.protocol,
   }
 }
