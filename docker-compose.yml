@@ -54,8 +54,6 @@ services:
     image: ${FLEETENT_IMAGE:-fleetent:${GIT_COMMIT:-latest}}
     build: *fleetent-build
     command: ["kb", "worker", "--config", "${FLEETENT_HOME:?set FLEETENT_HOME}/kb-service.yaml"]
-    env_file:
-      - ${FLEETENT_HOME:?set FLEETENT_HOME}/tenants/default/kb/.env
     environment:
       FLEETENT_HOME: ${FLEETENT_HOME:?set FLEETENT_HOME}
     volumes: *fleetent-home-volume
@@ -67,8 +65,6 @@ services:
     image: ${FLEETENT_IMAGE:-fleetent:${GIT_COMMIT:-latest}}
     build: *fleetent-build
     command: ["kb", "serve", "--config", "${FLEETENT_HOME:?set FLEETENT_HOME}/kb-service.yaml"]
-    env_file:
-      - ${FLEETENT_HOME:?set FLEETENT_HOME}/tenants/default/kb/.env
     environment:
       FLEETENT_HOME: ${FLEETENT_HOME:?set FLEETENT_HOME}
     volumes: *fleetent-home-volume

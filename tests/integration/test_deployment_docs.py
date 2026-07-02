@@ -206,7 +206,6 @@ def test_docker_compose_runs_managed_stack_with_path_parity_and_socket_boundary(
             'command: ["kb", "serve", "--config", '
             '"${FLEETENT_HOME:?set FLEETENT_HOME}/kb-service.yaml"]'
         ),
-        "- ${FLEETENT_HOME:?set FLEETENT_HOME}/tenants/default/kb/.env",
         '"8765:8765"',
         '"8767:8767"',
         "FLEETENT_AUTO_UPGRADE: ${FLEETENT_AUTO_UPGRADE:-false}",
@@ -218,6 +217,9 @@ def test_docker_compose_runs_managed_stack_with_path_parity_and_socket_boundary(
     ]
     for phrase in required_phrases:
         assert phrase in content
+    assert "env_file:" not in content.partition("  kb-worker:")[2].partition("  kb-serve:")[0]
+    assert "env_file:" not in content.partition("  kb-serve:")[2]
+    assert "tenants/default/kb/.env" not in content
     assert content.count("/var/run/docker.sock:/var/run/docker.sock") == 1
     auto_upgrade_lines = [
         line for line in content.splitlines() if line.lstrip().startswith("FLEETENT_AUTO_UPGRADE:")
