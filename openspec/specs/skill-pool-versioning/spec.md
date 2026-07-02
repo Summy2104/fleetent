@@ -60,3 +60,27 @@
 #### Scenario: 超大 diff 降级不静默
 - **WHEN** 某版本 diff 超出合理大小
 - **THEN** 响应降级为变更文件名清单并带告警标记，而非被静默截断
+
+### Requirement: 池可作为外部 git 的本地镜像
+
+当配置外部 git 源（见 `skill-git-sync`）时，公共 skill 池 SHALL 作为该外部仓库指定分支的本地只读镜像：池内容经 fetch + reset --hard 与外部分支对齐，外部仓库为权威。此模式下 per-skill 版本仍 = 子树最后 commit，但 commit 来自外部同步（及内置 seed 恢复），而非平台 UI 写入——平台 UI 的内容写路径在此模式下关闭（见 `skill-admin-api`）。
+
+若外部源额外配置了 `skills_subdir`（子目录作为 skill 扫描根，见 `skill-git-sync`），per-skill 版本解析的 git 树路径 SHALL 为 `<skills_subdir>/<name>` 而非 `<name>`：查询版本历史、diff、bundle 内容时 SHALL 以 git 仓根打开仓库、以 `<skills_subdir>/<name>` 定位子树，对外暴露的仍是干净的 skill 名（不带 `skills_subdir` 前缀）。未配置 `skills_subdir` 时，树路径退化为 `<name>`，与本 change 之前完全一致。
+
+未配置外部源时，既有「平台内部自管 git 池」语义（创建/编辑/上传/归档各产生归因 commit）不变。
+
+#### Scenario: 外部源启用时池为镜像
+- **WHEN** 配置并启用了外部 git 源
+- **THEN** 池内容与外部分支对齐，skill 版本取自外部同步的 commit，平台 UI 不再写入池内容
+
+#### Scenario: 配置 skills_subdir 时版本按子目录树路径解析
+- **WHEN** 外部源配置了 `skills_subdir="skills"`，查询 skill "clean" 的版本或 diff
+- **THEN** 平台以 git 仓根打开仓库、以树路径 `skills/clean` 定位子树取得版本/diff，响应中的 skill 名仍为干净的 "clean"
+
+#### Scenario: 未配置 skills_subdir 时树路径不变
+- **WHEN** 外部源未配置 `skills_subdir`
+- **THEN** per-skill 版本解析的树路径仍为 `<name>`，行为与本 change 之前一致
+
+#### Scenario: 未配置外部源时保持自管
+- **WHEN** 未配置外部 git 源
+- **THEN** 池仍为平台内部自管 git，既有写路径与版本语义不变
