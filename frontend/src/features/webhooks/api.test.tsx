@@ -8,6 +8,7 @@ import { AuthProvider } from '@/app/auth'
 import {
   useCreateWebhookSourceMutation,
   useDeleteWebhookSourceMutation,
+  useUpdateWebhookSourceMutation,
   useWebhookSourcesQuery,
 } from '@/features/webhooks/api'
 import { server } from '@/test/msw/server'
@@ -111,6 +112,63 @@ describe('webhooks api', () => {
     await waitFor(() => {
       expect(listRequests).toBeGreaterThan(beforeDelete)
       expect(sourcesQuery.result.current.data?.map((source) => source.id)).toEqual(['github-ci'])
+    })
+  })
+
+  it('updates a webhook source via PUT and refreshes the list', async () => {
+    let listRequests = 0
+    let putBody: unknown = null
+    const sources = [
+      {
+        agent_id: 1,
+        enabled: true,
+        has_secret: true,
+        id: 'github-ci',
+        message_template: null,
+        reply_target: null,
+        user_id: 'user-a',
+      },
+    ]
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/webhooks/sources`, () => {
+        listRequests += 1
+        return HttpResponse.json(sources)
+      }),
+      http.put(`${API_BASE_URL}/admin/webhooks/sources/:sourceId`, async ({ request, params }) => {
+        expect(params.sourceId).toBe('github-ci')
+        putBody = await request.json()
+        return HttpResponse.json({ ...sources[0], user_id: 'user-b' })
+      })
+    )
+
+    const wrapper = createWrapper()
+    const sourcesQuery = renderHook(() => useWebhookSourcesQuery(), { wrapper })
+    await waitFor(() => {
+      expect(sourcesQuery.result.current.data?.[0]?.id).toBe('github-ci')
+    })
+
+    const update = renderHook(() => useUpdateWebhookSourceMutation('github-ci'), { wrapper })
+    const before = listRequests
+    await update.result.current.mutateAsync({
+      agent_id: 1,
+      enabled: true,
+      message_template: null,
+      reply_target: null,
+      secret_action: 'keep',
+      user_id: 'user-b',
+    })
+
+    expect(putBody).toEqual({
+      agent_id: 1,
+      enabled: true,
+      message_template: null,
+      reply_target: null,
+      secret_action: 'keep',
+      user_id: 'user-b',
+    })
+    await waitFor(() => {
+      expect(listRequests).toBeGreaterThan(before)
     })
   })
 })

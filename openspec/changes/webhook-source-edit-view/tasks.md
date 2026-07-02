@@ -22,21 +22,21 @@
 
 ## 3. 前端数据层（api.ts，Vitest + MSW）
 
-- [ ] 3.1 在 `frontend/src/features/webhooks/api.test.tsx` 写测试并见红：`useUpdateWebhookSourceMutation(id)` 调 `PUT /admin/webhooks/sources/{id}`，mutation 后失效列表查询；请求体含 `secret_action`。
-- [ ] 3.2 实现 `WebhookSourceUpdateInput` 类型 + `useUpdateWebhookSourceMutation`。跑 3.1 见绿。
+- [x] 3.1 在 `frontend/src/features/webhooks/api.test.tsx` 写测试并见红：`useUpdateWebhookSourceMutation(id)` 调 `PUT /admin/webhooks/sources/{id}`，mutation 后失效列表查询；请求体含 `secret_action`。
+- [x] 3.2 实现 `WebhookSourceUpdateInput` 类型 + `useUpdateWebhookSourceMutation`。跑 3.1 见绿。
 
 ## 4. 前端弹窗（page.tsx，Vitest + MSW）
 
-- [ ] 4.1 在 `frontend/src/features/webhooks/page.test.tsx` 写测试并见红：
+- [x] 4.1 在 `frontend/src/features/webhooks/page.test.tsx` 写测试并见红：
   - 行操作菜单有「查看/编辑」入口，打开弹窗默认只读展示全部字段（含 message_template、reply_target 名称、密钥「已设置/未设置」）；
   - 点「编辑」进入可改态，`id` 只读；
   - 保存触发 `PUT`，请求体 `secret_action` 默认 `keep`；点「更换密钥」填值后 body 为 `set` + secret；点「清除密钥」后 body 为 `clear`；
   - 保存成功后回只读态、列表刷新。
-- [ ] 4.2 实现查看/编辑弹窗（复用新建弹窗控件，只读↔编辑切换、密钥三态动作）。跑 4.1 见绿。
+- [x] 4.2 实现查看/编辑弹窗（复用新建弹窗控件，只读↔编辑切换、密钥三态动作）。跑 4.1 见绿。
 
 ## 5. i18n
 
-- [ ] 5.1 `frontend/src/i18n/messages.ts` 补 `webhooks.*` 新词条（查看/编辑/保存/取消/更换密钥/清除密钥/密钥已设置/未设置等）的 en + zh（en 权威源，zh 类型强制对齐，两边都写）。
+- [x] 5.1 `frontend/src/i18n/messages.ts` 补 `webhooks.*` 新词条（查看/编辑/保存/取消/更换密钥/清除密钥/密钥已设置/未设置等）的 en + zh（en 权威源，zh 类型强制对齐，两边都写）。
 
 ## 6. Change 收尾验证
 
