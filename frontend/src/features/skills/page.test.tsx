@@ -645,6 +645,8 @@ describe('skills page gitops mode', () => {
     // on the status card owns refresh (it reloads the index as part of the sync).
     expect(screen.queryByRole('button', { name: 'Reload index' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Sync now/ })).toBeInTheDocument()
+    // Last-synced time is localized, not the raw UTC ISO string the server returns.
+    expect(screen.queryByText('2026-07-02T08:00:00Z')).not.toBeInTheDocument()
   })
 
   it('triggers a manual git sync from the status card', async () => {

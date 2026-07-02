@@ -28,6 +28,13 @@ function GitopsBanner(): JSX.Element {
   )
 }
 
+/** Render a server ISO timestamp (UTC) in the viewer's local time; fall back to the raw
+ * string if it doesn't parse, so a bad value is still shown rather than silently dropped. */
+function formatLocalTime(iso: string): string {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
+}
+
 function SyncField({ label, mono, children }: { label: string; mono?: boolean; children: ReactNode }): JSX.Element {
   return (
     <div className="flex flex-col gap-0.5">
@@ -66,7 +73,9 @@ function GitSyncStatusCard({ status, canWrite }: { status: SkillGitStatus; canWr
         <SyncField label={t('skills.gitSyncLastCommit')} mono>
           {status.last_synced_commit ? status.last_synced_commit.slice(0, 10) : t('skills.gitSyncNever')}
         </SyncField>
-        {status.last_sync_at ? <SyncField label={t('skills.gitSyncLastAt')}>{status.last_sync_at}</SyncField> : null}
+        {status.last_sync_at ? (
+          <SyncField label={t('skills.gitSyncLastAt')}>{formatLocalTime(status.last_sync_at)}</SyncField>
+        ) : null}
       </dl>
       {status.last_sync_error ? (
         <p className="rounded-md bg-destructive/10 px-3 py-2 text-destructive text-sm">

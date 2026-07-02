@@ -114,7 +114,7 @@ def _do_sync(config: dict[str, Any], trigger: str) -> dict[str, Any]:
         # still carries its re-seeded builtins) but re-run the catalog reconcile + index
         # reload. Scheduled/webhook syncs keep the cheap no-op short-circuit.
         if trigger == "manual":
-            _reconcile_catalog_after_sync(_pool_dir(), git_root, subdir)
+            _realign_status_only(_pool_dir())
             skill_registry.reload(str(_pool_dir()))
             git_source_store.record_sync(commit=remote_sha, at=_now(), error=None)
             return {"changed": False, "reconciled": True, "commit": remote_sha}
@@ -174,6 +174,29 @@ def _reconcile_catalog_after_sync(scan_dir: Path, git_root: Path, subdir: str) -
         skill_admin_store.set_source(name, "managed")
 
     pool_set = set(pool_skills)
+    for state in skill_admin_store.list_states(include_archived=False):
+        sname = str(state["skill_name"])
+        if sname not in pool_set and state.get("status") == "active":
+            skill_admin_store.set_status(sname, "archived")
+
+
+def _realign_status_only(scan_dir: Path) -> None:
+    """Cheap active/archived re-alignment for a manual sync when the remote sha is unchanged.
+
+    The pool content is identical to the last full sync (same sha), so audit verdicts and
+    per-skill versions cannot have changed — only local catalog *status* may have drifted
+    (e.g. a skill manually archived). Revive archived skills the pool still carries and
+    soft-delete active skills the pool no longer has, skipping the per-skill git blob reads
+    and version walks a full reconcile does (those dominate the cost on a large mirror and
+    made "sync now" hang for minutes). Quarantined skills are left untouched: a severe-audit
+    verdict from the last full sync stands until the content actually changes.
+    """
+    pool_skills = pool_git.list_pool_skills(scan_dir)
+    skill_admin_store.ensure_catalog_entries(pool_skills)
+    pool_set = set(pool_skills)
+    for name in pool_skills:
+        if skill_admin_store.get_state(name)["status"] == "archived":
+            skill_admin_store.set_status(name, "active")
     for state in skill_admin_store.list_states(include_archived=False):
         sname = str(state["skill_name"])
         if sname not in pool_set and state.get("status") == "active":
