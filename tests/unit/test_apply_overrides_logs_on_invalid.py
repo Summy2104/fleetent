@@ -23,9 +23,7 @@ class _RecordingLogger:
 def test_invalid_override_returns_base_and_logs_error(monkeypatch):
     base = AgentFile(name="bi-intern", version=1, models=default_models())
     # Dangling model route: 'vision' references a target not present in targets → validation fails.
-    bad_override = {
-        "models": {"targets": [], "routes": {"vision": [{"target": "vision-model"}]}}
-    }
+    bad_override = {"models": {"targets": [], "routes": {"vision": [{"target": "vision-model"}]}}}
 
     fake = _RecordingLogger()
     monkeypatch.setattr(materialize, "_logger", fake)
