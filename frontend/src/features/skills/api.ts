@@ -353,18 +353,6 @@ export function useBackflowForkMutation(proposalId: number) {
   })
 }
 
-export function useOpenBackflowPrMutation(proposalId: number) {
-  const api = useAdminApi()
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: () => api.post(`/admin/skills/backflow/${proposalId}/open-pr`),
-    onSuccess: async () => {
-      await invalidateBackflow(queryClient)
-    },
-  })
-}
-
 export function useSyncBackflowMutation() {
   const api = useAdminApi()
   const queryClient = useQueryClient()

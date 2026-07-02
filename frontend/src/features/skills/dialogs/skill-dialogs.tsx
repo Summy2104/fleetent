@@ -13,7 +13,6 @@ import {
   useBackflowAcceptMutation,
   useBackflowForkMutation,
   useBackflowRejectMutation,
-  useOpenBackflowPrMutation,
   useSetSkillAgentBindingMutation,
   useSkillAgentBindingsQuery,
   useSkillContentQuery,
@@ -279,10 +278,6 @@ function BackflowProposalCard({
   const accept = useBackflowAcceptMutation(proposal.id)
   const reject = useBackflowRejectMutation(proposal.id)
   const fork = useBackflowForkMutation(proposal.id)
-  const openPr = useOpenBackflowPrMutation(proposal.id)
-  // A PR can still be opened while the proposal is only backed up (or a prior attempt
-  // deferred); once it is open/merged there is nothing to open.
-  const canOpenPr = gitopsEnabled && (!proposal.pr_state || ['backed_up', 'deferred'].includes(proposal.pr_state))
 
   const onAccept = async (): Promise<void> => {
     if (proposal.conflict) {
@@ -312,16 +307,10 @@ function BackflowProposalCard({
           <p className="text-muted-foreground text-sm">
             {`from ${proposal.agent_name ?? `agent ${proposal.agent_id}`}${proposal.conflict ? ' · conflict' : ''}`}
           </p>
-          {proposal.pr_state ? (
+          {proposal.pr_branch ? (
             <span className="mt-1 flex items-center gap-2">
-              <Badge variant="secondary">{proposal.pr_state}</Badge>
-              {proposal.pr_url ? (
-                <a className="text-primary text-sm underline" href={proposal.pr_url} rel="noreferrer" target="_blank">
-                  {proposal.pr_branch ?? 'PR'}
-                </a>
-              ) : proposal.pr_branch ? (
-                <span className="font-mono text-muted-foreground text-xs">{proposal.pr_branch}</span>
-              ) : null}
+              {proposal.pr_state ? <Badge variant="secondary">{proposal.pr_state}</Badge> : null}
+              <span className="font-mono text-muted-foreground text-xs">{proposal.pr_branch}</span>
             </span>
           ) : null}
         </div>
@@ -333,22 +322,17 @@ function BackflowProposalCard({
           >
             {`View backflow diff for ${proposal.id}`}
           </button>
-          {canOpenPr ? (
+          {/* GitOps: accept/fork are the human's job (open a PR from the backup branch);
+              only reject (revert the agent's edit) is a platform action. */}
+          {gitopsEnabled ? null : (
             <button
-              className="rounded-md bg-secondary px-3 py-2 font-medium text-sm"
-              onClick={() => void openPr.mutateAsync()}
+              className="rounded-md bg-primary px-3 py-2 font-medium text-primary-foreground text-sm"
+              onClick={() => void onAccept()}
               type="button"
             >
-              {`Open PR ${proposal.id}`}
+              {`Accept backflow ${proposal.id}`}
             </button>
-          ) : null}
-          <button
-            className="rounded-md bg-primary px-3 py-2 font-medium text-primary-foreground text-sm"
-            onClick={() => void onAccept()}
-            type="button"
-          >
-            {`Accept backflow ${proposal.id}`}
-          </button>
+          )}
           <button
             className="rounded-md bg-secondary px-3 py-2 font-medium text-sm"
             onClick={() => void reject.mutateAsync()}
@@ -356,13 +340,15 @@ function BackflowProposalCard({
           >
             {`Reject backflow ${proposal.id}`}
           </button>
-          <button
-            className="rounded-md bg-secondary px-3 py-2 font-medium text-sm"
-            onClick={() => void onFork()}
-            type="button"
-          >
-            {`Fork backflow ${proposal.id}`}
-          </button>
+          {gitopsEnabled ? null : (
+            <button
+              className="rounded-md bg-secondary px-3 py-2 font-medium text-sm"
+              onClick={() => void onFork()}
+              type="button"
+            >
+              {`Fork backflow ${proposal.id}`}
+            </button>
+          )}
         </div>
       </div>
     </article>

@@ -706,9 +706,8 @@ describe('skills page gitops mode', () => {
     expect(screen.queryByText('Restore')).not.toBeInTheDocument()
   })
 
-  it('shows backflow PR state, opens a PR, and syncs backflow', async () => {
+  it('shows the backup branch + state, hides accept/fork, and syncs backflow', async () => {
     const user = userEvent.setup({ delay: null })
-    let prOpened = 0
     let backflowSynced = 0
 
     stubGitopsReads([
@@ -729,10 +728,6 @@ describe('skills page gitops mode', () => {
       },
     ])
     server.use(
-      http.post(`${API_BASE_URL}/admin/skills/backflow/:id/open-pr`, () => {
-        prOpened += 1
-        return HttpResponse.json({ ok: true, proposal_id: 1 })
-      }),
       http.post(`${API_BASE_URL}/admin/skills/backflow/sync-backflow`, () => {
         backflowSynced += 1
         return HttpResponse.json({ ok: true })
@@ -745,11 +740,15 @@ describe('skills page gitops mode', () => {
     await user.click(await screen.findByRole('menuitem', { name: /Backflow/ }))
     const backflow = within(await screen.findByRole('dialog'))
 
+    // Backup branch + state shown so the operator knows where to open a PR themselves.
     expect(await backflow.findByText('backed_up')).toBeInTheDocument()
     expect(backflow.getByText('backflow/7/crm-ops')).toBeInTheDocument()
-
-    await user.click(backflow.getByRole('button', { name: 'Open PR 1' }))
-    await waitFor(() => expect(prOpened).toBe(1))
+    // GitOps: platform never writes to the authority branch — no Open PR / Accept / Fork.
+    expect(backflow.queryByRole('button', { name: /Open PR/ })).not.toBeInTheDocument()
+    expect(backflow.queryByRole('button', { name: /Accept backflow/ })).not.toBeInTheDocument()
+    expect(backflow.queryByRole('button', { name: /Fork backflow/ })).not.toBeInTheDocument()
+    // Reject (revert the agent's edit) stays available.
+    expect(backflow.getByRole('button', { name: 'Reject backflow 1' })).toBeInTheDocument()
 
     await user.click(backflow.getByRole('button', { name: 'Sync backflow' }))
     await waitFor(() => expect(backflowSynced).toBe(1))
