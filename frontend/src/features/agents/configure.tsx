@@ -393,7 +393,7 @@ function RouteEntryRow({
   const iconBtn =
     'grid size-5 place-items-center rounded text-muted-foreground hover:text-foreground disabled:opacity-40'
   return (
-    <div aria-label={ariaLabel} className="space-y-2 rounded-md border border-border p-2" role="group">
+    <fieldset aria-label={ariaLabel} className="space-y-2 rounded-md border border-border p-2">
       <div className="flex items-center gap-1.5">
         {canReorder ? (
           <div className="flex flex-col">
@@ -467,7 +467,7 @@ function RouteEntryRow({
           </div>
         </div>
       ) : null}
-    </div>
+    </fieldset>
   )
 }
 
