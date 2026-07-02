@@ -271,6 +271,24 @@ def resolve_identity(platform: str, platform_user_id: str, owner_id: str = "defa
     return platform_user_id
 
 
+def resolve_decision_actor(platform: str, platform_user_id: str, agent_name: str) -> str | None:
+    """Resolve an IM approval decision actor into the run principal's identity space.
+
+    The permission gate records authorized decision actors as the run's ``principal.user_id`` —
+    under managed identity resolution that is the internal user id, not the raw platform id.
+    Approval button-click / text-command handlers must resolve the acting user through the same
+    ``resolve_identity`` seam used for inbound messages, so the gate's authorization check
+    compares like-for-like. Standalone (no injected resolver) returns the raw platform id
+    unchanged, so single-identity-space deployments are unaffected. A non-real / unresolvable
+    id returns ``None`` (fail closed — the caller rejects the decision, never authorizing a
+    fabricated actor).
+    """
+    try:
+        return resolve_identity(platform, platform_user_id, agent_name or "default")
+    except IMIdentityResolutionError:
+        return None
+
+
 def resolve_principal(
     platform: str,
     platform_user_id: str,
