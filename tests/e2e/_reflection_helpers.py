@@ -10,9 +10,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-import httpx
-
-from fleetent.identity import Principal, encode_ingress_principal
 from tests.e2e._entrypoint_smoke import (
     child_env,
     repo_root,
@@ -22,7 +19,6 @@ from tests.e2e._entrypoint_smoke import (
     wait_for_condition,
     wait_for_http_ready,
 )
-from tests.e2e._im_helpers import managed_agent_route_server
 from tests.e2e._path_helpers import agent_home_dir, agent_state_db_path
 from tests.e2e.conftest import _admin_session_headers, _agent_status, _register_node
 from tests.integration._migration_template import apply_migrations
@@ -248,26 +244,50 @@ def approve_reflection_proposal_via_im(
     proposal_id: str,
     user_id: str,
 ) -> None:
-    token = _agent_tui_token(stack.agent_home)
-    with managed_agent_route_server(stack) as base_url:  # type: ignore[arg-type]
-        response = httpx.post(
-            f"{base_url}/im/route",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "X-Fleetent-Principal": encode_ingress_principal(
-                    Principal(user_id=user_id, tenant_id="default")
-                ),
-            },
-            json={
-                "platform": "slack",
-                "session_id": f"approval-{proposal_id}",
-                "user_id": user_id,
-                "text": f"approve {proposal_id}",
-                "agent_name": stack.agent_name,
-            },
-            timeout=10.0,
-        )
-        response.raise_for_status()
+    """Approve a pending proposal by driving the agent-side inbound approval path in-process.
+
+    agent-hosted-im: the agent self-hosts its IM connection, so an inbound ``approve <id>`` is
+    handled locally by ``normalizer.route`` (no node ``/im/route`` hop). This runs that same
+    path in an agent-side script so the e2e exercises the unified inbound approval flow.
+    """
+    script = f"""
+import asyncio
+import os
+from pathlib import Path
+
+from fleetent import agent_config
+from fleetent.identity import Principal
+from fleetent.im_gateway import normalizer
+from fleetent.im_gateway.normalizer import NormalizedMessage, SessionContext
+from fleetent.runtime.agent_app import _init_agent_db_schema
+
+agent_home = (
+    Path(os.environ["FLEETENT_HOME"]) / "tenants" / "default" / "agents" / "{stack.agent_name}"
+)
+agent = agent_config.scan_home(agent_home)
+_init_agent_db_schema(agent_home / "data", agent_name=agent.name, tenant_id=agent.tenant_id)
+
+
+async def _noop_reply(text, blocks=None, *, approval=None):
+    return None
+
+
+msg = NormalizedMessage(
+    platform="slack",
+    session_id="approval-{proposal_id}",
+    user_id="{user_id}",
+    text="approve {proposal_id}",
+    attachments=[],
+    reply_func=_noop_reply,
+    agent_name="{stack.agent_name}",
+    session_context=SessionContext(platform="slack", sender_id="{user_id}"),
+)
+asyncio.run(
+    normalizer.route(msg, principal=Principal(user_id="{user_id}", tenant_id="default"))
+)
+print("{{}}")
+"""
+    _run_agent_side_script_no_output(stack, script)
 
 
 def wait_for_memory_proposal_applied(
@@ -489,14 +509,6 @@ def _run_agent_side_script_no_output(stack: ReflectionManagedStack, script: str)
         raise AssertionError(
             f"agent-side helper script failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
-
-
-def _agent_tui_token(agent_home: Path) -> str:
-    env_path = agent_home / ".env"
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        if line.startswith("FLEETENT_TUI_TOKEN="):
-            return line.split("=", 1)[1].strip()
-    raise AssertionError(f"FLEETENT_TUI_TOKEN not found in {env_path}")
 
 
 def _restore_env(previous_env: dict[str, str | None]) -> None:
