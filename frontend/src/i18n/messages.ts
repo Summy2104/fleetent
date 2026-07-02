@@ -253,6 +253,18 @@ const en = {
   'skills.backflowTitle': 'Skill backflow · {{name}}',
   'skills.backflowDescription': 'Agent-side edits proposed back to this skill. Accept, reject, or fork them.',
   'skills.noBackflow': 'No backflow proposals for this skill.',
+  'skills.gitopsBannerTitle': 'Managed via external git',
+  'skills.gitopsBannerBody':
+    'Skill content is read-only here. Edit skills in the external git repository and open a pull request; changes sync back automatically.',
+  'skills.gitSyncTitle': 'Git sync status',
+  'skills.gitSyncProvider': 'Provider',
+  'skills.gitSyncRemote': 'Remote',
+  'skills.gitSyncBranch': 'Branch',
+  'skills.gitSyncLastCommit': 'Last synced commit',
+  'skills.gitSyncLastAt': 'Last synced at',
+  'skills.gitSyncError': 'Last sync error',
+  'skills.gitSyncNever': 'Never synced',
+  'skills.gitSyncNow': 'Sync now',
 
   // Knowledge Base 页
   'kb.title': 'Knowledge Base',
@@ -964,6 +976,17 @@ const zh: Messages = {
   'skills.backflowTitle': '技能回流 · {{name}}',
   'skills.backflowDescription': '由 Agent 侧改动回流到该技能的提案。可接受、拒绝或派生。',
   'skills.noBackflow': '该技能暂无回流提案。',
+  'skills.gitopsBannerTitle': '由外部 git 管理',
+  'skills.gitopsBannerBody': '此处技能内容为只读。请在外部 git 仓库中编辑技能并发起 Pull Request，变更会自动同步回来。',
+  'skills.gitSyncTitle': 'Git 同步状态',
+  'skills.gitSyncProvider': '提供方',
+  'skills.gitSyncRemote': '远端',
+  'skills.gitSyncBranch': '分支',
+  'skills.gitSyncLastCommit': '最近同步提交',
+  'skills.gitSyncLastAt': '最近同步时间',
+  'skills.gitSyncError': '上次同步错误',
+  'skills.gitSyncNever': '尚未同步',
+  'skills.gitSyncNow': '立即同步',
 
   // Knowledge Base 页
   'kb.title': '知识库',

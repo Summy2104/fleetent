@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { GitCompare } from 'lucide-react'
+import { GitCompare, RefreshCw } from 'lucide-react'
 
 import { Badge } from '@/components/base/badge'
 import { Button } from '@/components/ui/button'
@@ -12,12 +12,14 @@ import {
   useBackflowAcceptMutation,
   useBackflowForkMutation,
   useBackflowRejectMutation,
+  useOpenBackflowPrMutation,
   useSetSkillAgentBindingMutation,
   useSkillAgentBindingsQuery,
   useSkillContentQuery,
   useSkillDiffQuery,
   useSkillProposalDiffQuery,
   useSkillVersionsQuery,
+  useSyncBackflowMutation,
 } from '@/features/skills/api'
 import { useT } from '@/i18n'
 
@@ -265,13 +267,19 @@ export function ProposalsDialog({
 function BackflowProposalCard({
   onViewDiff,
   proposal,
+  gitopsEnabled = false,
 }: {
   onViewDiff: (id: number) => void
   proposal: BackflowProposal
+  gitopsEnabled?: boolean
 }): JSX.Element {
   const accept = useBackflowAcceptMutation(proposal.id)
   const reject = useBackflowRejectMutation(proposal.id)
   const fork = useBackflowForkMutation(proposal.id)
+  const openPr = useOpenBackflowPrMutation(proposal.id)
+  // A PR can still be opened while the proposal is only backed up (or a prior attempt
+  // deferred); once it is open/merged there is nothing to open.
+  const canOpenPr = gitopsEnabled && (!proposal.pr_state || ['backed_up', 'deferred'].includes(proposal.pr_state))
 
   const onAccept = async (): Promise<void> => {
     if (proposal.conflict) {
@@ -301,6 +309,18 @@ function BackflowProposalCard({
           <p className="text-muted-foreground text-sm">
             {`from ${proposal.agent_name ?? `agent ${proposal.agent_id}`}${proposal.conflict ? ' · conflict' : ''}`}
           </p>
+          {proposal.pr_state ? (
+            <span className="mt-1 flex items-center gap-2">
+              <Badge variant="secondary">{proposal.pr_state}</Badge>
+              {proposal.pr_url ? (
+                <a className="text-primary text-sm underline" href={proposal.pr_url} rel="noreferrer" target="_blank">
+                  {proposal.pr_branch ?? 'PR'}
+                </a>
+              ) : proposal.pr_branch ? (
+                <span className="font-mono text-muted-foreground text-xs">{proposal.pr_branch}</span>
+              ) : null}
+            </span>
+          ) : null}
         </div>
         <div className="flex flex-wrap justify-end gap-2">
           <button
@@ -310,6 +330,15 @@ function BackflowProposalCard({
           >
             {`View backflow diff for ${proposal.id}`}
           </button>
+          {canOpenPr ? (
+            <button
+              className="rounded-md bg-secondary px-3 py-2 font-medium text-sm"
+              onClick={() => void openPr.mutateAsync()}
+              type="button"
+            >
+              {`Open PR ${proposal.id}`}
+            </button>
+          ) : null}
           <button
             className="rounded-md bg-primary px-3 py-2 font-medium text-primary-foreground text-sm"
             onClick={() => void onAccept()}
@@ -343,14 +372,17 @@ export function BackflowDialog({
   onViewDiff,
   diffText,
   onOpenChange,
+  gitopsEnabled = false,
 }: {
   skillName: string | null
   proposals: BackflowProposal[]
   onViewDiff: (id: number) => void
   diffText: string | null
   onOpenChange: (open: boolean) => void
+  gitopsEnabled?: boolean
 }): JSX.Element {
   const t = useT()
+  const syncBackflow = useSyncBackflowMutation()
   return (
     <Dialog onOpenChange={onOpenChange} open={Boolean(skillName)}>
       <DialogContent>
@@ -359,8 +391,25 @@ export function BackflowDialog({
           <DialogDescription>{t('skills.backflowDescription')}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
+          {gitopsEnabled ? (
+            <div className="flex justify-end">
+              <Button
+                disabled={syncBackflow.isPending}
+                onClick={() => void syncBackflow.mutateAsync()}
+                size="sm"
+                variant="outline"
+              >
+                <RefreshCw className="size-4" /> Sync backflow
+              </Button>
+            </div>
+          ) : null}
           {proposals.map((proposal) => (
-            <BackflowProposalCard key={proposal.id} onViewDiff={onViewDiff} proposal={proposal} />
+            <BackflowProposalCard
+              gitopsEnabled={gitopsEnabled}
+              key={proposal.id}
+              onViewDiff={onViewDiff}
+              proposal={proposal}
+            />
           ))}
           {proposals.length === 0 ? <p className="text-muted-foreground text-sm">{t('skills.noBackflow')}</p> : null}
           {diffText ? (

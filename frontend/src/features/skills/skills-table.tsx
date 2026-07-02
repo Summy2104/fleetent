@@ -25,10 +25,12 @@ export function SkillsTable({
   canWrite,
   actions,
   title,
+  gitopsEnabled = false,
 }: {
   canWrite: boolean
   actions?: React.ReactNode
   title?: React.ReactNode
+  gitopsEnabled?: boolean
 }): JSX.Element {
   const t = useT()
   const skills = useSkillsQuery()
@@ -70,6 +72,7 @@ export function SkillsTable({
       buildSkillColumns({
         backflowCountFor: (name) => backflowBySkill.get(name)?.length ?? 0,
         canWrite,
+        gitopsEnabled,
         onBackflow: setBackflowFor,
         onBindings: setBindingsFor,
         onProposals: setProposalsFor,
@@ -78,7 +81,7 @@ export function SkillsTable({
         proposalCountFor: (name) => proposalsBySkill.get(name)?.length ?? 0,
         t,
       }),
-    [canWrite, t, proposalsBySkill, backflowBySkill]
+    [canWrite, gitopsEnabled, t, proposalsBySkill, backflowBySkill]
   )
 
   return (
@@ -111,6 +114,7 @@ export function SkillsTable({
       <ProposalDiffDialog onOpenChange={(open) => !open && setProposalDiffId(null)} proposalId={proposalDiffId} />
       <BackflowDialog
         diffText={backflowDiff.data?.diff_vs_head ?? null}
+        gitopsEnabled={gitopsEnabled}
         onOpenChange={(open) => {
           if (!open) {
             setBackflowFor(null)

@@ -67,6 +67,7 @@ describe('skills page parity baseline', () => {
       http.get(`${API_BASE_URL}/admin/me`, () =>
         HttpResponse.json({ email: 'admin@fleetent.test', id: 'admin-1', role: 'admin' })
       ),
+      http.get(`${API_BASE_URL}/admin/skills/git/status`, () => HttpResponse.json({ enabled: false })),
       http.get(`${API_BASE_URL}/admin/skills`, () => HttpResponse.json(skills)),
       http.get(`${API_BASE_URL}/admin/skills/:name/content`, ({ params }) =>
         HttpResponse.json({
@@ -333,6 +334,7 @@ describe('skills page backflow approval', () => {
 
   function stubBaseReads(): void {
     server.use(
+      http.get(`${API_BASE_URL}/admin/skills/git/status`, () => HttpResponse.json({ enabled: false })),
       http.get(`${API_BASE_URL}/admin/skills`, () => HttpResponse.json(baseSkills)),
       http.get(`${API_BASE_URL}/admin/skills/:name/content`, ({ params }) =>
         HttpResponse.json({ content: `${String(params.name ?? '')} body`, name: String(params.name ?? '') })
@@ -448,6 +450,7 @@ describe('skills page content + search', () => {
       http.get(`${API_BASE_URL}/admin/me`, () =>
         HttpResponse.json({ email: 'admin@fleetent.test', id: 'admin-1', role: 'admin' })
       ),
+      http.get(`${API_BASE_URL}/admin/skills/git/status`, () => HttpResponse.json({ enabled: false })),
       http.get(`${API_BASE_URL}/admin/skills`, () => HttpResponse.json(getSkills())),
       http.get(`${API_BASE_URL}/admin/skills/:name/content`, ({ params }) =>
         HttpResponse.json({ content: getContent(), name: String(params.name ?? '') })
@@ -573,5 +576,155 @@ describe('skills page content + search', () => {
     // Content is fetched async after the dialog mounts; await it.
     expect(await within(dialog).findByText(/original body/)).toBeInTheDocument()
     expect(within(dialog).getByText('Content · welcome-pack')).toBeInTheDocument()
+  })
+})
+
+describe('skills page gitops mode', () => {
+  const gitStatus = {
+    branch: 'main',
+    enabled: true,
+    last_sync_at: '2026-07-02T08:00:00Z',
+    last_sync_error: null,
+    last_synced_commit: 'abc1234def5678',
+    provider: 'bitbucket',
+    remote_url: 'git@bitbucket.org:acme/skills.git',
+    sync_interval_seconds: 300,
+  }
+  const gitopsSkills: SkillRecord[] = [
+    {
+      audit_verdict: 'rejected',
+      description: 'CRM ops helper',
+      drifted_agents: [],
+      enabling_agents: [],
+      global_enabled: true,
+      name: 'crm-ops',
+      source: 'adhoc',
+      status: 'quarantined',
+    },
+    {
+      audit_verdict: 'pass',
+      description: 'Onboarding helper',
+      drifted_agents: [],
+      enabling_agents: [],
+      global_enabled: false,
+      name: 'welcome-pack',
+      source: 'marketplace',
+      status: 'archived',
+    },
+  ]
+
+  function stubGitopsReads(backflow: unknown[] = []): void {
+    server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () =>
+        HttpResponse.json({ email: 'admin@fleetent.test', id: 'admin-1', role: 'admin' })
+      ),
+      http.get(`${API_BASE_URL}/admin/skills/git/status`, () => HttpResponse.json(gitStatus)),
+      http.get(`${API_BASE_URL}/admin/skills`, () => HttpResponse.json(gitopsSkills)),
+      http.get(`${API_BASE_URL}/admin/skills/proposals`, () => HttpResponse.json([])),
+      http.get(`${API_BASE_URL}/admin/skills/backflow`, () => HttpResponse.json(backflow)),
+      http.get(`${API_BASE_URL}/admin/skills/backflow/:id/diff`, ({ params }) =>
+        HttpResponse.json({
+          conflict: false,
+          diff_vs_base: `bf base ${String(params.id ?? '')}`,
+          diff_vs_head: `bf head ${String(params.id ?? '')}`,
+        })
+      )
+    )
+  }
+
+  it('shows the read-only banner and git sync status card', async () => {
+    stubGitopsReads()
+    renderSkillsPage()
+
+    expect(await screen.findByText('Managed via external git')).toBeInTheDocument()
+    expect(screen.getByText('Git sync status')).toBeInTheDocument()
+    expect(screen.getByText('bitbucket')).toBeInTheDocument()
+    // Commit shas render truncated to 10 chars.
+    expect(screen.getByText('abc1234def')).toBeInTheDocument()
+  })
+
+  it('triggers a manual git sync from the status card', async () => {
+    const user = userEvent.setup({ delay: null })
+    let synced = 0
+
+    stubGitopsReads()
+    server.use(
+      http.post(`${API_BASE_URL}/admin/skills/git/sync`, () => {
+        synced += 1
+        return HttpResponse.json({ ok: true })
+      })
+    )
+
+    renderSkillsPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Sync now' }))
+    await waitFor(() => expect(synced).toBe(1))
+  })
+
+  it('hides content-write row actions while keeping enable/disable', async () => {
+    const user = userEvent.setup({ delay: null })
+    stubGitopsReads()
+    renderSkillsPage()
+
+    // Quarantined + rejected skill: outside gitops it would offer Archive + Force publish.
+    await user.click(await screen.findByRole('button', { name: 'Actions for crm-ops' }))
+    expect(await screen.findByText('Disable')).toBeInTheDocument()
+    expect(screen.queryByText('Archive')).not.toBeInTheDocument()
+    expect(screen.queryByText('Force publish')).not.toBeInTheDocument()
+    await user.keyboard('{Escape}')
+
+    // Archived skill: outside gitops it would offer Restore.
+    await user.click(screen.getByRole('button', { name: 'Actions for welcome-pack' }))
+    expect(await screen.findByText('Enable')).toBeInTheDocument()
+    expect(screen.queryByText('Restore')).not.toBeInTheDocument()
+  })
+
+  it('shows backflow PR state, opens a PR, and syncs backflow', async () => {
+    const user = userEvent.setup({ delay: null })
+    let prOpened = 0
+    let backflowSynced = 0
+
+    stubGitopsReads([
+      {
+        agent_id: 7,
+        agent_name: 'support',
+        base_commit: 'c1',
+        base_version: 'v1',
+        conflict: 0,
+        created_at: '2026-07-01T00:00:00Z',
+        forked_as: null,
+        id: 1,
+        pr_branch: 'backflow/7/crm-ops',
+        pr_state: 'backed_up',
+        pr_url: null,
+        skill_name: 'crm-ops',
+        status: 'pending',
+      },
+    ])
+    server.use(
+      http.post(`${API_BASE_URL}/admin/skills/backflow/:id/open-pr`, () => {
+        prOpened += 1
+        return HttpResponse.json({ ok: true, proposal_id: 1 })
+      }),
+      http.post(`${API_BASE_URL}/admin/skills/backflow/sync-backflow`, () => {
+        backflowSynced += 1
+        return HttpResponse.json({ ok: true })
+      })
+    )
+
+    renderSkillsPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Actions for crm-ops' }))
+    await user.click(await screen.findByRole('menuitem', { name: /Backflow/ }))
+    const backflow = within(await screen.findByRole('dialog'))
+
+    expect(await backflow.findByText('backed_up')).toBeInTheDocument()
+    expect(backflow.getByText('backflow/7/crm-ops')).toBeInTheDocument()
+
+    await user.click(backflow.getByRole('button', { name: 'Open PR 1' }))
+    await waitFor(() => expect(prOpened).toBe(1))
+
+    await user.click(backflow.getByRole('button', { name: 'Sync backflow' }))
+    await waitFor(() => expect(backflowSynced).toBe(1))
   })
 })

@@ -11,6 +11,7 @@ type Translate = ReturnType<typeof useT>
 export function buildSkillColumns({
   t,
   canWrite,
+  gitopsEnabled = false,
   proposalCountFor,
   backflowCountFor,
   onViewContent,
@@ -21,6 +22,7 @@ export function buildSkillColumns({
 }: {
   t: Translate
   canWrite: boolean
+  gitopsEnabled?: boolean
   proposalCountFor: (name: string) => number
   backflowCountFor: (name: string) => number
   onViewContent: (name: string) => void
@@ -95,6 +97,7 @@ export function buildSkillColumns({
         <SkillRowActions
           backflowCount={backflowCountFor(row.original.name)}
           canWrite={canWrite}
+          gitopsEnabled={gitopsEnabled}
           onBackflow={() => onBackflow(row.original.name)}
           onBindings={() => onBindings(row.original.name)}
           onProposals={() => onProposals(row.original.name)}
