@@ -12,7 +12,6 @@ are served only when a port is given.
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
 import json
 import os
@@ -62,48 +61,6 @@ class ChatRequest(BaseModel):
 class ApprovalRequest(BaseModel):
     decision: str  # "approved" | "rejected"
     approver_user_id: str = "anonymous"
-
-
-class ImAttachmentRequest(BaseModel):
-    kind: str
-    data_b64: str | None = None
-    mime: str
-    filename: str = ""
-    note: str = ""
-
-
-class ImSessionContextRequest(BaseModel):
-    platform: str
-    sender_id: str
-    sender_name: str = ""
-    chat_type: str = "dm"
-    channel_name: str = ""
-    was_mentioned: bool = False
-    thread_root: str = ""
-
-
-class ImRouteRequest(BaseModel):
-    platform: str
-    session_id: str
-    user_id: str
-    text: str
-    channel_id: str = ""
-    workspace_id: str = ""
-    agent_name: str = ""
-    session_context: ImSessionContextRequest | None = None
-    attachments: list[ImAttachmentRequest] = []
-
-
-class ImReply(BaseModel):
-    text: str
-    blocks: list[dict[str, Any]] | None = None
-    # Platform-neutral approval intent (telegram-slack-parity): the node edge renders it per
-    # platform at delivery (Slack Block Kit / Telegram inline keyboard). None = plain reply.
-    approval: dict[str, Any] | None = None
-
-
-class ImRouteResponse(BaseModel):
-    replies: list[ImReply]
 
 
 @dataclass
@@ -468,7 +425,6 @@ def _init_agent_db_schema(data_dir: Path, *, agent_name: str, tenant_id: str = "
     from fleetent import reflection, schedule_store
     from fleetent.governance import approval_request_store, approval_store
     from fleetent.governance import tool_auto_approvals_store as allowlist_store
-    from fleetent.im_gateway import outbound_queue_store
     from fleetent.knowledge_base import runtime as kb_runtime
     from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
     from fleetent.memory import agent_memory as agent_memory_module
@@ -514,7 +470,6 @@ def _init_agent_db_schema(data_dir: Path, *, agent_name: str, tenant_id: str = "
     runtime_context.set_state_db(agent_state_db)
     sub_agent_lifecycle.set_state_db(agent_state_db)
     schedule_store.set_state_db(agent_state_db)
-    outbound_queue_store.set_state_db(agent_state_db)
     # unified-file-exchange: wire the artifact ledger + per-scope hard-link views root
     # (data_dir is <agent_home>/data, so the exchange tree lives under data_dir.parent).
     from fleetent import artifact_exchange
@@ -546,11 +501,10 @@ def _init_agent_db_schema(data_dir: Path, *, agent_name: str, tenant_id: str = "
             _mcp_client.get_registered_server,
         )
 
-    # agent-hosted-im (scaffolding): _wire_managed_im_resolvers is defined below and unit-tested,
-    # but NOT called here yet — it activates only when agents self-host their IM connection
-    # (the full cutover). Wiring it now would be a no-op under the current node-hosted inbound
-    # path (the agent receives an already-resolved user_id), so it is left dormant to keep this
-    # increment non-breaking.
+    # agent-hosted-im (Group 3.4): the agent self-hosts its IM connection in all modes, so it
+    # resolves inbound IM identities in-process. Under managed placement this wires the loopback-
+    # backed identity/address resolvers (no-op under standalone → native-id passthrough).
+    _wire_managed_im_resolvers(agent_name, tenant_id)
 
 
 def _wire_managed_im_resolvers(agent_id: str, tenant_id: str) -> None:
@@ -575,6 +529,9 @@ def _wire_managed_im_resolvers(agent_id: str, tenant_id: str) -> None:
     )
     access.set_im_address_resolver(
         access.AgentAddressResolver(loopback_url=loopback, tui_token=tui, agent_name=agent_id)
+    )
+    access.set_im_link_confirmer(
+        access.AgentLinkConfirmer(loopback_url=loopback, tui_token=tui, agent_name=agent_id)
     )
 
 
@@ -1038,55 +995,6 @@ def build_app(agent_name: str) -> FastAPI:
 
         return StreamingResponse(_stream(), media_type="text/event-stream")
 
-    @app.post("/im/route")
-    async def im_route(
-        req: ImRouteRequest,
-        principal: Principal = Depends(_authenticate),  # noqa: B008
-    ) -> ImRouteResponse:
-        from fleetent.im_gateway import normalizer
-
-        agent = agent_config.current().get(agent_name)
-        agent_tenant = agent.tenant_id if agent is not None else "default"
-        if not _check_tenant(principal, agent_tenant):
-            raise HTTPException(status_code=403, detail="cross-tenant access denied")
-        replies: list[ImReply] = []
-
-        async def _reply(
-            text: str, blocks: list[dict[str, Any]] | None = None, *, approval: Any = None
-        ) -> None:
-            approval_payload = (
-                {
-                    "approval_id": approval.approval_id,
-                    "tool_name": approval.tool_name,
-                    "risk_level": approval.risk_level,
-                    "summary": approval.summary,
-                }
-                if approval is not None
-                else None
-            )
-            replies.append(ImReply(text=text, blocks=blocks, approval=approval_payload))
-
-        await normalizer.route(
-            normalizer.NormalizedMessage(
-                platform=req.platform,
-                session_id=req.session_id,
-                user_id=req.user_id,
-                text=req.text,
-                attachments=_deserialize_im_attachments(req.attachments),
-                reply_func=_reply,
-                channel_id=req.channel_id,
-                workspace_id=req.workspace_id,
-                agent_name=req.agent_name or agent_name,
-                session_context=(
-                    normalizer.SessionContext(**req.session_context.model_dump())
-                    if req.session_context is not None
-                    else None
-                ),
-            ),
-            principal=principal,
-        )
-        return ImRouteResponse(replies=replies)
-
     @app.post("/webhook/{source_id}", status_code=202)
     async def webhook(
         source_id: str,
@@ -1228,24 +1136,3 @@ def build_app(agent_name: str) -> FastAPI:
     return app
 
 
-def _deserialize_im_attachments(attachments: list[ImAttachmentRequest]) -> list[Any]:
-    from fleetent.im_gateway.normalizer import FileAttachment
-
-    decoded: list[Any] = []
-    for attachment in attachments:
-        if attachment.kind == "image":
-            if attachment.data_b64 is None:
-                continue
-            decoded.append((base64.b64decode(attachment.data_b64), attachment.mime))
-            continue
-        if attachment.kind == "file":
-            payload = base64.b64decode(attachment.data_b64) if attachment.data_b64 else None
-            decoded.append(
-                FileAttachment(
-                    data=payload,
-                    mime=attachment.mime,
-                    filename=attachment.filename,
-                    note=attachment.note,
-                )
-            )
-    return decoded

@@ -121,6 +121,67 @@ def test_init_agent_db_schema_wires_router_and_sinks(
     assert ("views_root", tmp_path / "exchange" / ".views") in captures
 
 
+def test_init_agent_db_schema_activates_managed_im_resolver_wiring(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """agent-hosted-im (Group 3.4): boot wires the managed IM identity/address resolvers.
+
+    The wiring itself is no-op under standalone; this asserts _init_agent_db_schema actually
+    invokes it (previously dormant) so the managed inbound identity path is live at boot.
+    """
+    tenant_scope = SimpleNamespace(
+        kb_vector_backend="kb-vector",
+        open_kb_db=lambda migrations: ("kb-db", migrations),
+    )
+    agent_scope = SimpleNamespace(
+        vector_backend="agent-vector",
+        open_state_db=lambda migrations: ("state-db", migrations),
+    )
+    router_cls = type(
+        "_R",
+        (),
+        {
+            "tenant_scope": lambda self, t: tenant_scope,
+            "agent_scope": lambda self, t, a: agent_scope,
+        },
+    )
+    monkeypatch.setattr(
+        "fleetent.tenant_router.SQLiteTenantBackend", lambda data_dir: ("backend", data_dir)
+    )
+    monkeypatch.setattr("fleetent.tenant_router.TenantRouter", lambda backend: router_cls())
+    for target in (
+        "fleetent.knowledge_base.runtime.set_database",
+        "fleetent.knowledge_base.runtime.set_vector_backend",
+        "fleetent.session.index.set_state_db",
+        "fleetent.observability.traces.set_state_db",
+        "fleetent.reflection.set_state_db",
+        "fleetent.memory.proposal_store.set_state_db",
+        "fleetent.governance.approval_request_store.set_state_db",
+        "fleetent.governance.approval_store.set_state_db",
+        "fleetent.governance.tool_auto_approvals_store.set_state_db",
+        "fleetent.runtime.context.set_state_db",
+        "fleetent.runtime.sub_agent_lifecycle.set_state_db",
+        "fleetent.schedule_store.set_state_db",
+        "fleetent.artifact_exchange.set_state_db",
+        "fleetent.artifact_exchange.set_views_root",
+    ):
+        monkeypatch.setattr(target, lambda *a, **k: None)
+    monkeypatch.setattr("fleetent.memory.agent_memory.set_agent_memory_db", lambda *a, **k: None)
+    monkeypatch.setattr("fleetent.memory.facts_store.set_facts_db", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "fleetent.integrations.mcp.standalone_callback.wire_standalone_oauth", lambda *a, **k: None
+    )
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        agent_app, "_wire_managed_im_resolvers", lambda aid, tid: calls.append((aid, tid))
+    )
+
+    agent_app._init_agent_db_schema(tmp_path / "data", agent_name="ops", tenant_id="tenant-1")
+
+    assert calls == [("ops", "tenant-1")]
+
+
 async def test_start_infra_registers_mcp_and_resume_markers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -249,60 +310,17 @@ async def test_build_app_chat_approvals_and_stream_error(monkeypatch: pytest.Mon
         )
 
 
-async def test_build_app_im_route_carries_principal_and_returns_sync_replies(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, Any] = {}
+def test_build_app_has_no_im_route_endpoint() -> None:
+    """agent-hosted-im (Group 5): managed inbound no longer flows through node /im/route.
 
-    async def fake_route(msg: Any, principal: Principal | None = None) -> None:
-        captured["msg"] = msg
-        captured["principal"] = principal
-        await msg.reply_func("node-managed reply")
-
-    monkeypatch.setattr(
-        agent_app.agent_config,
-        "current",
-        lambda: SimpleNamespace(get=lambda name: _agent_file()),
-    )
-    monkeypatch.setattr("fleetent.im_gateway.normalizer.route", fake_route)
-
+    The agent self-hosts its IM connection and routes inbound in-process
+    (supervisor → normalizer.route), so the /im/route ingress endpoint is removed."""
     app = agent_app.build_app("ops")
-    response = await _route(app, "/im/route").endpoint(
-        agent_app.ImRouteRequest(
-            platform="slack",
-            session_id="session-1",
-            user_id="u-real",
-            text="hello",
-            channel_id="C1",
-            agent_name="ops",
-            session_context=agent_app.ImSessionContextRequest(
-                platform="slack",
-                sender_id="U123",
-                sender_name="Alice",
-                chat_type="dm",
-                channel_name="C1",
-            ),
-        ),
-        Principal(user_id="u-real", tenant_id="tenant-1"),
-    )
-
-    assert response.model_dump() == {
-        "replies": [{"text": "node-managed reply", "blocks": None, "approval": None}]
-    }
-    assert captured["principal"] == Principal(user_id="u-real", tenant_id="tenant-1")
-    assert captured["msg"].user_id == "u-real"
-    assert captured["msg"].agent_name == "ops"
-
-    with pytest.raises(HTTPException, match="cross-tenant"):
-        await _route(app, "/im/route").endpoint(
-            agent_app.ImRouteRequest(
-                platform="slack",
-                session_id="session-1",
-                user_id="u-real",
-                text="hello",
-            ),
-            Principal(user_id="u-real", tenant_id="other"),
-        )
+    paths = {getattr(r, "path", None) for r in app.routes}
+    assert "/im/route" not in paths
+    # And the request/response models are gone with it.
+    assert not hasattr(agent_app, "ImRouteRequest")
+    assert not hasattr(agent_app, "ImRouteResponse")
 
 
 class _FakeWebSocket:

@@ -58,6 +58,42 @@ def test_main_loops_fetch_reconcile_and_report(monkeypatch, tmp_path) -> None:
     assert calls == ["fetch", "reconcile"]
 
 
+def test_node_app_does_not_host_im_edge(monkeypatch, tmp_path) -> None:
+    """agent-hosted-im (Group 5): node exits the IM data plane — no NodeIMEdgeHost, no
+    IM supervisor, no outbound drain. The agent self-hosts its own IM connection."""
+    from fleetent.node import app
+
+    # The module must no longer reference a node-hosted IM edge host at all.
+    assert not hasattr(app, "NodeIMEdgeHost")
+
+    desired = DesiredState(node_id="node-a", agents=[])
+
+    class FakeProvider:
+        def fetch(self) -> DesiredState:
+            return desired
+
+    class FakeReconciler:
+        def reconcile(self, received: DesiredState) -> None:
+            pass
+
+    monkeypatch.setattr(app, "load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr(app, "PlatformApiDesiredStateProvider", lambda config: FakeProvider())
+    monkeypatch.setattr(app, "create_process_backend", lambda config: object())
+    monkeypatch.setattr(app, "NodeReconciler", lambda config, backend: FakeReconciler())
+    monkeypatch.setattr(
+        app,
+        "_start_forwarder",
+        lambda config, backend: (
+            SimpleNamespace(should_exit=False),
+            SimpleNamespace(join=lambda timeout=0: None),
+        ),
+    )
+    monkeypatch.setattr(app.time, "sleep", lambda s: (_ for _ in ()).throw(KeyboardInterrupt))
+
+    # Must run the reconcile loop with no IM-edge host in the picture (no exception).
+    app.main()
+
+
 def test_main_exits_on_invalid_config(monkeypatch) -> None:
     from fleetent.node import app
 

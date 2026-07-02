@@ -93,6 +93,43 @@ def test_identity_addresses_forwards_with_service_key(tmp_path, monkeypatch) -> 
     assert captured["auth"] == "Bearer ma-" + "1" * 64
 
 
+def test_link_confirm_forwards_with_service_key(tmp_path, monkeypatch) -> None:
+    """agent-hosted-im (Group 5): /link is handled agent-side; the agent proxies the confirm
+    through the node loopback (own TUI token), node forwards to platform with the service key."""
+    _seed_agent_env(tmp_path)
+    captured: dict[str, object] = {}
+
+    async def fake_send(self, request: httpx.Request, **kwargs) -> httpx.Response:  # noqa: ANN003
+        captured["url"] = str(request.url)
+        captured["auth"] = request.headers.get("Authorization")
+        captured["body"] = request.content
+        return httpx.Response(200, json={"status": "linked"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "send", fake_send)
+    client = TestClient(build_app(_config(tmp_path), _Backend()))
+    resp = client.post(
+        "/agent/support/link-confirm",
+        json={"platform": "slack", "platform_user_id": "U1", "code": "abc123"},
+        headers={"Authorization": "Bearer ma-agent-token"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "linked"
+    assert captured["url"] == "https://platform.internal/nodes/node-a/link-confirm"
+    assert captured["auth"] == "Bearer ma-" + "1" * 64  # node service key, not agent token
+    assert json.loads(captured["body"])["code"] == "abc123"
+
+
+def test_link_confirm_rejects_wrong_agent_token(tmp_path, monkeypatch) -> None:
+    _seed_agent_env(tmp_path)
+    client = TestClient(build_app(_config(tmp_path), _Backend()))
+    resp = client.post(
+        "/agent/support/link-confirm",
+        json={"platform": "slack", "platform_user_id": "U1", "code": "abc123"},
+        headers={"Authorization": "Bearer wrong-token"},
+    )
+    assert resp.status_code == 401
+
+
 def test_identity_resolve_rejects_wrong_agent_token(tmp_path, monkeypatch) -> None:
     _seed_agent_env(tmp_path)
     client = TestClient(build_app(_config(tmp_path), _Backend()))

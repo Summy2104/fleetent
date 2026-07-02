@@ -229,6 +229,36 @@ def run_alembic_upgrade() -> subprocess.CompletedProcess[str]:
     )
 
 
+def drop_im_outbound_queue_tables(data_dir: Path) -> list[Path]:
+    """Drop the retired ``im_outbound_queue`` table from every agent-side DB (agent-hosted-im).
+
+    The unified agent-hosted IM path removes the outbound queue + node drain entirely (full
+    cutover, no production data). This best-effort sweep drops the leftover table from each
+    physical library so an upgraded deployment does not carry a dead table; DBs without it are
+    untouched. Returns the DB files from which the table was actually dropped.
+    """
+    dropped: list[Path] = []
+    for db_path in discover_database_files(data_dir):
+        try:
+            conn = sqlite3.connect(db_path)
+        except sqlite3.Error:
+            continue
+        try:
+            row = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='im_outbound_queue'"
+            ).fetchone()
+            if row is None:
+                continue
+            conn.execute("DROP TABLE im_outbound_queue")
+            conn.commit()
+            dropped.append(db_path)
+        except sqlite3.Error:
+            continue
+        finally:
+            conn.close()
+    return dropped
+
+
 def main(
     argv: list[str] | None = None,
     stdout: TextIO | None = None,
@@ -306,6 +336,10 @@ def main(
         return result.returncode
 
     _write(stdout, result.stdout)
+    # agent-hosted-im: drop the retired per-agent im_outbound_queue table (full cutover).
+    dropped = drop_im_outbound_queue_tables(data_dir)
+    if dropped:
+        _write(stdout, f"Dropped retired im_outbound_queue from {len(dropped)} agent database(s)\n")
     agents_dir = Path(os.environ.get("FLEETENT_AGENTS_DIR", str(data_dir.parent / "agents")))
     backfilled = backfill_default_agents(database_path, agents_dir)
     if backfilled:

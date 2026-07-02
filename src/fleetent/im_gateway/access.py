@@ -36,6 +36,11 @@ _im_identity_resolver: Callable[[str, str, str], str] | None = None
 # wires an AgentAddressResolver that queries platform via the node loopback.
 _im_address_resolver: Callable[[str], list[dict[str, str]]] | None = None
 
+# Injectable hook for confirming an inbound ``/link <code>`` command (agent-hosted-im). Managed
+# wires an AgentLinkConfirmer (node loopback → platform link-confirm); standalone leaves it unset
+# so ``/link`` is not applicable (no node/platform to confirm against) → confirm_link returns None.
+_im_link_confirmer: Callable[[str, str, str], tuple[bool, str]] | None = None
+
 
 class IMIdentityResolutionError(RuntimeError):
     """Injected platform-side identity resolution rejected an inbound IM identity."""
@@ -99,6 +104,46 @@ class AgentAddressResolver:
 
     def __call__(self, user_id: str) -> list[dict[str, str]]:
         return self.resolve(user_id)
+
+
+class AgentLinkConfirmer:
+    """Managed agent-side ``/link`` confirmer: confirm an IM account linkage via node loopback
+    (agent-hosted-im). The agent self-hosts its IM connection and handles the inbound
+    ``/link <code>`` command in-process, proxying the confirmation through the node loopback with
+    its own TUI token; node forwards to platform holding the service key. No platform import.
+    """
+
+    def __init__(self, *, loopback_url: str, tui_token: str, agent_name: str) -> None:
+        self._loopback_url = loopback_url.rstrip("/")
+        self._tui_token = tui_token
+        self._agent_name = agent_name
+
+    def confirm(self, platform: str, platform_user_id: str, code: str) -> tuple[bool, str]:
+        """Confirm the link code, returning ``(ok, detail)``; never raises (best-effort)."""
+        import httpx
+
+        try:
+            resp = httpx.post(
+                f"{self._loopback_url}/agent/{self._agent_name}/link-confirm",
+                headers={"Authorization": f"Bearer {self._tui_token}"},
+                json={"platform": platform, "platform_user_id": platform_user_id, "code": code},
+                timeout=10.0,
+            )
+        except Exception as exc:  # noqa: BLE001 — surface a clean failure detail, never raise
+            return (False, str(exc))
+        if resp.status_code == 200:
+            return (True, "")
+        detail = "Link failed."
+        try:
+            raw = dict(resp.json()).get("detail")
+            if isinstance(raw, str) and raw:
+                detail = f"Link failed: {raw}"
+        except Exception:  # noqa: BLE001 — non-JSON error body → generic detail
+            pass
+        return (False, detail)
+
+    def __call__(self, platform: str, platform_user_id: str, code: str) -> tuple[bool, str]:
+        return self.confirm(platform, platform_user_id, code)
 
 
 class LocalApprovalStore:
@@ -174,6 +219,31 @@ def resolve_addresses(user_id: str) -> list[dict[str, str]]:
     if _im_address_resolver is None:
         return []
     return _im_address_resolver(user_id)
+
+
+def set_im_link_confirmer(
+    confirmer: Callable[[str, str, str], tuple[bool, str]] | None,
+) -> None:
+    """Wire the ``/link`` confirmer (agent-hosted-im). Managed wires an
+    :class:`AgentLinkConfirmer` (node loopback); standalone leaves it unset."""
+    global _im_link_confirmer
+    _im_link_confirmer = confirmer
+
+
+def confirm_link_available() -> bool:
+    """Whether a ``/link`` confirmer is wired (managed). Standalone → False (not applicable)."""
+    return _im_link_confirmer is not None
+
+
+def confirm_link(platform: str, platform_user_id: str, code: str) -> tuple[bool, str] | None:
+    """Confirm an inbound ``/link <code>`` linkage, or ``None`` when not applicable (standalone).
+
+    Returns ``(ok, detail)`` when a confirmer is wired (managed): ``ok`` is whether the linkage
+    succeeded and ``detail`` a human-readable failure reason (empty on success).
+    """
+    if _im_link_confirmer is None:
+        return None
+    return _im_link_confirmer(platform, platform_user_id, code)
 
 
 # AAA-8204 #1: non-real IM identities that must never be resolved/provisioned. A broken

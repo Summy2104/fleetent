@@ -504,7 +504,49 @@ async def _resume_pending_in_session(
     return reply
 
 
+def _extract_link_code(text: str) -> str | None:
+    """Parse an inbound ``/link <code>`` command → the code, or None if not a link command."""
+    stripped = text.strip()
+    if not stripped.startswith("/link"):
+        return None
+    parts = stripped.split(maxsplit=1)
+    if len(parts) != 2 or not parts[1].strip():
+        return None
+    return parts[1].strip()
+
+
+async def _handle_link_command(msg: NormalizedMessage, code: str) -> None:
+    """Confirm an IM ``/link <code>`` via the injected confirmer (node loopback under managed).
+
+    agent-hosted-im (Group 5): after node exits the IM data plane, ``/link`` is handled in the
+    agent inbound path. The reverse-link maps the sender's platform id to their web identity, so
+    the sender id must come from the trusted ``session_context`` (never the free-text command).
+    """
+    sender_id = msg.session_context.sender_id if msg.session_context is not None else ""
+    if not sender_id:
+        await msg.reply_func("Link failed: missing sender identity.")
+        return
+    result = access.confirm_link(msg.platform, sender_id, code)
+    if result is None:
+        # No confirmer wired (standalone / dev) — /link is not applicable here.
+        await msg.reply_func("Linking is not available in this runtime.")
+        return
+    ok, detail = result
+    if ok:
+        await msg.reply_func(f"Linked {msg.platform} account to your web identity.")
+        return
+    await msg.reply_func(detail or "Link failed.")
+
+
 async def route(msg: NormalizedMessage, principal: Principal | None = None) -> None:
+    # /link <code> is a pre-loop command handled in the agent inbound path (agent-hosted-im).
+    # Only intercepted when a link confirmer is wired (managed); standalone falls through so a
+    # bare "/link ..." is treated as a normal message.
+    link_code = _extract_link_code(msg.text)
+    if link_code is not None and access.confirm_link_available():
+        await _handle_link_command(msg, link_code)
+        return
+
     # Approval commands bypass the agent loop entirely (tolerate a leading @mention, so
     # channel approvals — where the bot must be @-mentioned — are recognized too).
     m = _match_approval_command(msg.text)
