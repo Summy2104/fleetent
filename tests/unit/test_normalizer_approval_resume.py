@@ -212,25 +212,37 @@ def _approve_msg(connectors: dict) -> NormalizedMessage:
     )
 
 
-async def test_resume_managed_runtime_resolves_managed_connectors(_resume_env, monkeypatch):
-    """AAA-8204 ⑥：托管模式下 approve 经 /im/route 进来，msg.outbound_connectors 为空。
+async def test_resume_managed_empty_connectors_is_failfast_not_proxy(_resume_env, monkeypatch):
+    """agent-hosted-im：统一后 managed 与 standalone 同路径，无 ManagedOutboundConnector 代理。
 
-    resume 必须 resolve_for_runtime 注入 ManagedOutboundConnector（与 loop.py:1986 一致），
-    否则被批准的 send_im_message 因 connectors.get('slack') 为 None 命中"无可用连接器"分支、
-    消息从不送达——这正是 AAA-8204「推送失败」的核心。
+    实际的 managed approve 会由 agent 自持的 slack adapter 注入 live 连接器
+    （见 test_resume_managed_runtime_keeps_live_connectors）。若因故连接器缺失，resolve_for_runtime
+    fail-fast 返回 {}（记 error、不再伪造队列代理）。
     """
     from fleetent import outbound_connectors as oc
-    from fleetent.outbound_connectors import ManagedOutboundConnector
 
     monkeypatch.setattr(oc, "is_node_managed_runtime", lambda: True)
     _resolve, resume, _entry = _resume_env
 
-    await normalizer.route(_approve_msg({}))  # managed: 无 live 连接器
+    await normalizer.route(_approve_msg({}))  # 无 live 连接器（异常态）
 
     tc = resume.await_args.kwargs["tool_context"]
-    assert "slack" in tc.outbound_connectors
-    assert isinstance(tc.outbound_connectors["slack"], ManagedOutboundConnector)
-    assert tc.outbound_connectors["slack"].agent_name == "my-bot"
+    # No fabricated proxy — the miss is surfaced as an empty connector set (fail-fast).
+    assert tc.outbound_connectors == {}
+
+
+async def test_resume_managed_runtime_keeps_live_connectors(_resume_env, monkeypatch):
+    """agent-hosted-im：managed 下 agent 自持连接，approve 携带 live 连接器 → 原样直发。"""
+    from fleetent import outbound_connectors as oc
+
+    monkeypatch.setattr(oc, "is_node_managed_runtime", lambda: True)
+    _resolve, resume, _entry = _resume_env
+    sentinel = object()
+
+    await normalizer.route(_approve_msg({"slack": sentinel}))
+
+    tc = resume.await_args.kwargs["tool_context"]
+    assert tc.outbound_connectors == {"slack": sentinel}
 
 
 async def test_resume_standalone_keeps_live_connectors(_resume_env):

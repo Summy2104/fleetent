@@ -1,3 +1,11 @@
+"""Managed == standalone outbound: agent self-hosts its IM connection (agent-hosted-im).
+
+After the unification there is no queue-backed ManagedOutboundConnector: a healthy managed
+runtime has a live process-local connector exactly like standalone, and every outbound path
+(reply / send_im_message / approval) sends directly. These tests assert the direct-send path
+is taken and that no legacy enqueue seam is consulted.
+"""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
@@ -28,12 +36,23 @@ def test_resolve_for_runtime_prefers_live_connector() -> None:
     assert resolved == {"slack": live}
 
 
-async def test_start_scheduler_resolver_returns_managed_queue_connectors(
+def test_managed_outbound_connector_is_removed() -> None:
+    """The queue-backed proxy is gone (agent-hosted-im full cutover)."""
+    import fleetent.outbound_connectors as oc
+
+    assert not hasattr(oc, "ManagedOutboundConnector")
+
+
+async def test_start_scheduler_resolver_uses_live_connectors_from_registry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from fleetent.im_gateway import connector_registry
     from fleetent.runtime import agent_app
 
     _enable_node_managed_env(monkeypatch)
+
+    live = object()
+    monkeypatch.setattr(connector_registry, "snapshot", lambda name: {"slack": live})
 
     captured: dict[str, object] = {}
 
@@ -48,8 +67,8 @@ async def test_start_scheduler_resolver_returns_managed_queue_connectors(
     await agent_app._start_scheduler(_agent(enabled=True, name="support"))
 
     resolved = captured["resolver"]()
-    assert set(resolved) == {"slack", "telegram"}
-    assert all(type(conn).__name__ == "ManagedOutboundConnector" for conn in resolved.values())
+    # Live connector registered by the agent's own supervisor is used directly — no proxy.
+    assert resolved == {"slack": live}
 
 
 @pytest.fixture(autouse=True)
@@ -61,72 +80,7 @@ def _mock_approval_store(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tool_auto_approvals_store, "is_allowed", MagicMock(return_value=False))
 
 
-async def test_permission_gate_queues_managed_approval_dm(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from fleetent.agent_config import ApprovalRouting
-    from fleetent.governance.permission_gate import PermissionGate
-    from fleetent.outbound_connectors import resolve_for_runtime
-
-    _enable_node_managed_env(monkeypatch)
-
-    queued: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        "fleetent.im_gateway.outbound_queue_store.enqueue",
-        lambda **kwargs: queued.append(kwargs) or {"id": "q1"},
-    )
-
-    gate = PermissionGate(high_timeout=1.0)
-    routing = ApprovalRouting(by_risk={"high": {"approvers": ["slack:U_LEAD"], "policy": "any"}})
-
-    result = await gate.request_approval(
-        approval_id="approval-1",
-        risk_level="high",
-        tool_name="send_im_message",
-        tool_args={"target": "U_TARGET", "text": "hello"},
-        requester_user_id="u1",
-        reply_func=AsyncMock(),
-        session_id="session-1",
-        approval_routing=routing,
-        outbound_connectors=resolve_for_runtime("support", {}),
-    )
-
-    assert result == "pending"
-    assert len(queued) == 1
-    assert queued[0]["platform"] == "slack"
-
-
-async def test_send_im_message_queues_when_node_managed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from fleetent.im_gateway.normalizer import SessionContext
-    from fleetent.outbound_connectors import resolve_for_runtime
-    from fleetent.tools.builtin_tools import send_im_message
-    from fleetent.tools.registry import ToolContext
-
-    _enable_node_managed_env(monkeypatch)
-
-    queued: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        "fleetent.im_gateway.outbound_queue_store.enqueue",
-        lambda **kwargs: queued.append(kwargs) or {"id": "q1"},
-    )
-
-    ctx = ToolContext(
-        agent_name="support",
-        run_id="run-1",
-        session_context=SessionContext(platform="slack", sender_id="U_SENDER"),
-        outbound_connectors=resolve_for_runtime("support", {}),
-    )
-
-    result = await send_im_message(target="U_OTHER", text="hello", tool_context=ctx)
-
-    assert "U_OTHER" in result
-    assert len(queued) == 1
-    assert queued[0]["platform"] == "slack"
-
-
-async def test_send_im_message_with_live_connector_does_not_enqueue(
+async def test_send_im_message_with_live_connector_sends_directly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fleetent.im_gateway.normalizer import SessionContext
@@ -134,11 +88,10 @@ async def test_send_im_message_with_live_connector_does_not_enqueue(
     from fleetent.tools.builtin_tools import send_im_message
     from fleetent.tools.registry import ToolContext
 
+    # Managed or standalone: with a live connector present the send is direct.
+    _enable_node_managed_env(monkeypatch)
+
     connector = object()
-    monkeypatch.setattr(
-        "fleetent.im_gateway.outbound_queue_store.enqueue",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("standalone must not enqueue")),
-    )
     send_to = AsyncMock(
         return_value=DeliveryReceipt(
             ok=True,
@@ -231,32 +184,35 @@ def _tool_response(tool_name: str, arguments: str) -> AsyncMock:
     return _create
 
 
-async def test_loop_send_im_message_queues_when_node_managed(
+async def test_loop_send_im_message_sends_directly_when_managed_with_live_connector(
     monkeypatch: pytest.MonkeyPatch, _mock_loop_env: MagicMock
 ) -> None:
     import fleetent.tools  # noqa: F401
     from fleetent.im_gateway.normalizer import SessionContext
+    from fleetent.outbound import DeliveryReceipt
 
     _enable_node_managed_env(monkeypatch)
 
-    queued: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        "fleetent.im_gateway.outbound_queue_store.enqueue",
-        lambda **kwargs: queued.append(kwargs) or {"id": "q1"},
+    send_to = AsyncMock(
+        return_value=DeliveryReceipt(
+            ok=True, platform="slack", target="U_OTHER", target_type="user", kind="text"
+        )
     )
+    monkeypatch.setattr("fleetent.outbound.send_to", send_to)
+    monkeypatch.setattr("fleetent.outbound.is_reachable", AsyncMock(return_value=True))
     monkeypatch.setattr(loop_mod, "evaluate_risk_level", lambda name, args, ctx: "none")
     _mock_loop_env.chat.completions.create = _tool_response(
         "send_im_message", '{"target":"U_OTHER","text":"hello"}'
     )
 
+    connector = object()
     await loop_mod.run(
         messages=[{"role": "user", "content": "ping U_OTHER"}],
         principal=MagicMock(user_id="u1", tenant_id="default"),
         reply_func=AsyncMock(),
         agent_name="support",
-        outbound_connectors={},
+        outbound_connectors={"slack": connector},
         session_context=SessionContext(platform="slack", sender_id="U_SENDER"),
     )
 
-    assert len(queued) == 1
-    assert queued[0]["platform"] == "slack"
+    assert send_to.await_count == 1

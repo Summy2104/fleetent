@@ -391,11 +391,10 @@ async def _resume_pending_in_session(
     else:
         agent = get_agent_for_context()
 
-    # approval-resume-resolve-outbound-connectors (⑥): the approve command arrives via
-    # /im/route with msg.outbound_connectors empty; resolve them exactly like a normal turn
-    # (loop.py:1986) so a node-managed runtime injects ManagedOutboundConnector and the
-    # approved send/file actually delivers (enqueue → node drain) instead of failing with
-    # "no connector". Standalone (live connectors present) is returned unchanged.
+    # approval-resume-resolve-outbound-connectors (⑥): resolve connectors exactly like a
+    # normal turn (loop.py). agent-hosted-im: the agent self-hosts its IM connection in all
+    # modes, so the approve command carries the live connector (adapter-injected) and this
+    # returns it unchanged. A managed miss fails fast to {} (logged), never a queue proxy.
     resolved_connectors = resolve_for_runtime(
         agent.name if agent else None, msg.outbound_connectors
     )

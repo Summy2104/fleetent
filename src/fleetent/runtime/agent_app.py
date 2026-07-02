@@ -1155,7 +1155,7 @@ def build_app(agent_name: str) -> FastAPI:
             # Directed-reach DM to reply_target; notify_user is itself a no-op in non-managed
             # runtimes, so this collapses to no-op there. No reply_target = no delivery.
             if reply_target:
-                outbound_connectors.notify_user(reply_target, reply_text, blocks=blocks)
+                await outbound_connectors.notify_user(reply_target, reply_text, blocks=blocks)
 
         msg = normalizer.NormalizedMessage(
             platform="webhook",
