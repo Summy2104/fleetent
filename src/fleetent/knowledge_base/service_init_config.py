@@ -20,8 +20,9 @@ class InitConfigPlanItem:
 
 
 _RESOURCE_DIR = "resources"
-_TEMPLATES = (
-    ("kb-service.yaml.example", Path("kb-service.yaml")),
+_HOST_TEMPLATE = ("kb-service.yaml.example", Path("kb-service.yaml"))
+_TENANT_TEMPLATES = (
+    ("connectors.yaml.example", Path("connectors.yaml")),
     ("kb-service.env.example", Path(".env")),
 )
 
@@ -46,13 +47,11 @@ def _tenant_home_dir(home_dir: Path, tenant_id: str) -> Path:
 
 
 def _render_template(template_name: str, *, tenant_id: str) -> str:
+    del tenant_id
     content = _read_template(template_name)
-    if template_name != "kb-service.yaml.example":
+    raw = yaml.safe_load(content)
+    if raw is None:
         return content
-    raw = yaml.safe_load(content) or {}
-    service = raw.setdefault("service", {})
-    if isinstance(service, dict):
-        service["tenant_id"] = tenant_id
     return yaml.safe_dump(raw, sort_keys=False)
 
 
@@ -62,7 +61,19 @@ def plan_init_config(
     """Plan kb-service scaffold file operations without mutating the filesystem."""
     plan: list[InitConfigPlanItem] = []
     tenant_home_dir = _tenant_home_dir(home_dir, tenant_id)
-    for _, relative_target in _TEMPLATES:
+    host_template_name, host_relative_target = _HOST_TEMPLATE
+    del host_template_name
+    host_target_path = home_dir / host_relative_target
+    host_action = "create"
+    if host_target_path.exists():
+        host_action = "overwrite" if force else "skip"
+    plan.append(
+        InitConfigPlanItem(
+            action=host_action,
+            path=host_relative_target.as_posix(),
+        )
+    )
+    for _, relative_target in _TENANT_TEMPLATES:
         target_path = tenant_home_dir / relative_target
         action = "create"
         if target_path.exists():
@@ -82,7 +93,15 @@ def apply_init_config(
     """Create or update the kb-service scaffold under ``home_dir``."""
     plan = plan_init_config(home_dir, tenant_id=tenant_id, force=force)
     tenant_home_dir = _tenant_home_dir(home_dir, tenant_id)
-    for item, (template_name, relative_target) in zip(plan, _TEMPLATES, strict=True):
+    host_item = plan[0]
+    host_template_name, host_relative_target = _HOST_TEMPLATE
+    host_target_path = home_dir / host_relative_target
+    if host_item.action != "skip":
+        host_target_path.parent.mkdir(parents=True, exist_ok=True)
+        host_target_path.write_text(
+            _render_template(host_template_name, tenant_id=tenant_id), encoding="utf-8"
+        )
+    for item, (template_name, relative_target) in zip(plan[1:], _TENANT_TEMPLATES, strict=True):
         target_path = tenant_home_dir / relative_target
         if item.action == "skip":
             continue
@@ -113,6 +132,6 @@ def main(argv: list[str] | None = None) -> None:
         print(f"{item.action} {item.path}")
     print(
         "next: review "
-        f"tenants/{args.tenant}/kb/kb-service.yaml and tenants/{args.tenant}/kb/.env "
+        f"kb-service.yaml and tenants/{args.tenant}/kb/connectors.yaml "
         "before starting KB services"
     )

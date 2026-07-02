@@ -26,7 +26,7 @@ FLEETENT_HOME/
   tenants/
     <tenant>/
       kb/
-        kb-service.yaml / .env                    # KB standalone 配置面（per-tenant）
+        connectors.yaml / .env                    # KB tenant connector 配置面（per-tenant）
         data/kb.db / data/kb_vectors.db           # KB 关系 / 向量（per-tenant）
       agents/
         <agent_name>/

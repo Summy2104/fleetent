@@ -29,11 +29,10 @@ Compose 会启动：
 - `platform`：监听 `8765`，唯一可设置 `FLEETENT_AUTO_UPGRADE` 的服务。
 - `node`：监听 forwarder `8767`，挂载 `/var/run/docker.sock`，设置
   `FLEETENT_NODE_BACKEND=container`。
-- `kb-worker`：消费 KB ingest 队列，读取 `${FLEETENT_HOME}/tenants/default/kb/kb-service.yaml`
-  与 `${FLEETENT_HOME}/tenants/default/kb/.env`。
-- `kb-serve`：提供 KB 读 API，读取同一份 `${FLEETENT_HOME}/tenants/default/kb/kb-service.yaml`
-  与 `${FLEETENT_HOME}/tenants/default/kb/.env`，以及同一棵
-  `FLEETENT_HOME` 数据卷。
+- `kb-worker`：消费所有租户的 KB ingest 队列，读取 `${FLEETENT_HOME}/kb-service.yaml`
+  与 `${FLEETENT_HOME}/tenants/<tenant>/kb/.env`。
+- `kb-serve`：提供 KB 读 API，读取同一份 `${FLEETENT_HOME}/kb-service.yaml`
+  与 `${FLEETENT_HOME}/tenants/<tenant>/kb/.env`，以及同一棵 `FLEETENT_HOME` 数据卷。
 
 agent 不在 compose 中静态声明。node 根据 desired state 拉起 agent 兄弟容器，并把
 agent 接入 `fleetent` compose 网络；agent 内部端口由 container backend 管理，不对宿主发布。
@@ -76,16 +75,16 @@ forward-only migration。
 
 ## KB 服务接线
 
-默认单租户 compose 把 tenant 固定为 `default`：`kb-worker` 写
-`${FLEETENT_HOME}/tenants/default/kb/data/`，`kb-serve` 从同一挂载卷读取；该目录下固定有
-`kb.db`、`kb_vectors.db`、`kb_ingest_queue.db` 三个文件，而 `kb-service.yaml` 与 `.env` 留在
-`${FLEETENT_HOME}/tenants/default/kb/` 根。这条路径是同主机 WAL 一写多读，
- 不是 agent 的只读文件挂载场景。
+默认 compose 启一套多租户 KB 进程：`kb-worker` 轮询 `${FLEETENT_HOME}/tenants/*/kb/data/`
+下各租户队列，`kb-serve` 也从同一挂载卷按 `principal.tenant_id` 路由到对应租户 KB。每个租户
+的数据仍各自落在 `tenants/<tenant>/kb/data/{kb.db,kb_vectors.db,kb_ingest_queue.db}`；共享的是
+进程，不是数据库文件。
 
 若宿主上还留有旧布局 `$FLEETENT_HOME/kb-worker/.env`，先执行
-`fleetent kb init-config --tenant default`，再把旧文件里的 secret 迁到
-`$FLEETENT_HOME/tenants/default/kb/.env`，把 connector / service 配置迁到
-`$FLEETENT_HOME/tenants/default/kb/kb-service.yaml`，随后停用旧 `kb-worker/.env`。若开发机已经按旧
+`fleetent kb init-config --tenant default`，再把旧文件里的 connector secret 迁到
+`$FLEETENT_HOME/tenants/default/kb/.env`，把 connector 配置迁到
+`$FLEETENT_HOME/tenants/default/kb/connectors.yaml`，把共享 service / model 配置迁到
+`$FLEETENT_HOME/kb-service.yaml`，随后停用旧 `kb-worker/.env`。若开发机已经按旧
 standalone 布局写入过 KB 文件，需要一次性手动把
 旧的 `kb-service/<tenant>/data/tenants/<tenant>/{kb.db,kb_vectors.db}` 或旧根队列文件
 迁到 `$FLEETENT_HOME/tenants/<tenant>/kb/data/{kb.db,kb_vectors.db,kb_ingest_queue.db}`。
@@ -102,12 +101,10 @@ knowledge:
     auth_ref: env:FLEETENT_KB_SERVICE_KEY
 ```
 
-同时让 `${FLEETENT_HOME}/tenants/default/kb/kb-service.yaml` 的 `service.service_key_ref` 指向
-`${FLEETENT_HOME}/tenants/default/kb/.env` 中的同一个变量：
+同时让 `${FLEETENT_HOME}/kb-service.yaml` 的 `service.service_key_ref` 指向进程环境中的同一个变量：
 
 ```yaml
 service:
-  tenant_id: default
   service_key_ref: env:FLEETENT_KB_SERVICE_KEY
   host: 0.0.0.0
   port: 8768
@@ -117,10 +114,8 @@ service:
 FLEETENT_KB_SERVICE_KEY=replace-me
 ```
 
-`url` 里的端口取 `tenants/default/kb/kb-service.yaml` 的 `service.port`；compose 默认单租户起一个
-`kb-serve`。
-如果要做多租户，需要为每个租户额外起一个 `kb-serve` 服务，使用不同服务名/端口，并把对应 agent
-的 `knowledge.provider.url` 指到那个服务。
+`url` 里的端口取 `${FLEETENT_HOME}/kb-service.yaml` 的 `service.port`；compose 默认就是一套多租户
+`kb-serve`，不再为每个租户额外起独立服务。
 
 ## 数据布局
 
@@ -128,7 +123,8 @@ FLEETENT_KB_SERVICE_KEY=replace-me
 
 ```text
 management.db
-tenants/<tenant>/kb/kb-service.yaml
+kb-service.yaml
+tenants/<tenant>/kb/connectors.yaml
 tenants/<tenant>/kb/.env
 tenants/<tenant>/kb/data/kb.db
 tenants/<tenant>/kb/data/kb_vectors.db

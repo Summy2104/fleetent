@@ -30,6 +30,7 @@ def test_wheel_includes_all_canonical_init_config_templates(tmp_path: Path) -> N
     assert "fleetent/runtime/resources/agent.yaml.example" in names
     assert "fleetent/runtime/resources/agent.env.example" in names
     assert "fleetent/knowledge_base/resources/kb-service.yaml.example" in names
+    assert "fleetent/knowledge_base/resources/connectors.yaml.example" in names
     assert "fleetent/knowledge_base/resources/kb-service.env.example" in names
 
 
@@ -95,7 +96,9 @@ def test_kb_service_init_config_generates_tenant_kb_home_outside_repo_cwd(tmp_pa
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "create tenants/acme/kb/kb-service.yaml" in result.stdout
+    assert "create kb-service.yaml" in result.stdout
+    assert "create tenants/acme/kb/connectors.yaml" in result.stdout
     assert "create tenants/acme/kb/.env" in result.stdout
-    assert (home_dir / "tenants" / "acme" / "kb" / "kb-service.yaml").exists()
+    assert (home_dir / "kb-service.yaml").exists()
+    assert (home_dir / "tenants" / "acme" / "kb" / "connectors.yaml").exists()
     assert (home_dir / "tenants" / "acme" / "kb" / ".env").exists()
