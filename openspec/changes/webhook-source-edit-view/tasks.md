@@ -40,6 +40,6 @@
 
 ## 6. Change 收尾验证
 
-- [ ] 6.1 后端：`uv run pytest tests/integration/test_webhook_admin_api.py tests/integration/test_webhook_source_store.py -q` 全绿；`make test-pr` 无新增失败。
-- [ ] 6.2 前端：`make test-frontend` 全绿（vitest + 覆盖率 + tsc --noEmit + lint）。
+- [x] 6.1 后端：`uv run pytest tests/integration/test_webhook_admin_api.py tests/integration/test_webhook_source_store.py -q` 全绿（24 passed）；`make test-pr`（4169 passed）+ `make test-integration-ci`（2157 passed）均 exit 0，无新增失败。路由已确认挂进 `server.py`。
+- [x] 6.2 前端：`make test-frontend` 全绿（vitest + 覆盖率 + tsc --noEmit + lint，exit 0）。
 - [ ] 6.3 手动核对：`/admin/ui` webhooks 页可打开某条查看到全部字段、编辑常规字段生效、密钥「保持/更换/清除」行为正确、`id` 不可改。
