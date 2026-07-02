@@ -142,3 +142,44 @@ def test_sync_reloads_registry_index_so_content_is_readable(tmp_path, monkeypatc
     assert "clean-skill" in listed
     assert listed["clean-skill"]["description"] == "a clean skill"
     assert "# Clean body" in skill_registry.load("clean-skill")
+
+
+def test_manual_sync_reconciles_catalog_even_when_remote_unchanged(tmp_path, monkeypatch) -> None:
+    """A manual "sync now" must re-align the catalog even if the remote has no new commit.
+
+    A scheduled sync short-circuits when the remote sha is unchanged (nothing to fetch).
+    But an operator clicking "sync now" is trying to recover catalog state that drifted —
+    e.g. a skill left ``archived`` — so a manual trigger must still reconcile (revive skills
+    present in the pool) instead of no-op'ing on the unchanged sha.
+    """
+    db = tmp_path / "mgmt.db"
+    pool = tmp_path / "pool"
+    pool.mkdir()
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
+    monkeypatch.delenv("FLEETENT_HOME", raising=False)
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(pool))
+    _run_migrations(db)
+
+    source = tmp_path / "source"
+    source.mkdir()
+    porcelain.init(str(source))
+    _write(source, "clean-skill", "---\nname: clean-skill\ndescription: d\n---\n# body\n")
+    _commit_all(source, b"init")
+    branch = _branch(source)
+    git_source_store.set_config(enabled=1, remote_url=str(source), branch=branch)
+
+    assert pool_sync.sync_external_git(trigger="manual").get("changed") is True
+    assert skill_admin_store.get_state("clean-skill")["status"] == "active"
+
+    # Local state drifts to archived; remote has no new commit.
+    skill_admin_store.set_status("clean-skill", "archived")
+
+    # A scheduled sync short-circuits (nothing fetched) and leaves the drift in place.
+    scheduled = pool_sync.sync_external_git(trigger="scheduled")
+    assert scheduled.get("changed") is False
+    assert skill_admin_store.get_state("clean-skill")["status"] == "archived"
+
+    # A manual sync re-reconciles despite the unchanged sha and revives the skill.
+    manual = pool_sync.sync_external_git(trigger="manual")
+    assert manual.get("changed") is False
+    assert skill_admin_store.get_state("clean-skill")["status"] == "active"

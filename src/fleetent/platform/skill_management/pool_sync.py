@@ -108,6 +108,16 @@ def _do_sync(config: dict[str, Any], trigger: str) -> dict[str, Any]:
         git_root, remote_url=remote_url, branch=branch, username=username, password=password
     )
     if remote_sha == config.get("last_synced_commit"):
+        # A manual "sync now" is also a "reconcile now": the operator may be recovering
+        # catalog state that drifted (e.g. a skill left archived) even when the remote has
+        # no new commit. Skip the heavy fetch/reset (the pool is already at this sha and
+        # still carries its re-seeded builtins) but re-run the catalog reconcile + index
+        # reload. Scheduled/webhook syncs keep the cheap no-op short-circuit.
+        if trigger == "manual":
+            _reconcile_catalog_after_sync(_pool_dir(), git_root, subdir)
+            skill_registry.reload(str(_pool_dir()))
+            git_source_store.record_sync(commit=remote_sha, at=_now(), error=None)
+            return {"changed": False, "reconciled": True, "commit": remote_sha}
         git_source_store.record_sync(commit=remote_sha, at=_now(), error=None)
         return {"changed": False, "commit": remote_sha}
 
