@@ -144,3 +144,84 @@ def test_diff_vs_head_and_conflict_still_reflect_pool_head(db, pool_dir, monkeyp
     diff = backflow_store.get_proposal_diff(proposal_id, pool_dir=pool_dir)
     assert diff["conflict"] is True
     assert "pool-v2" in diff["diff_vs_head"]
+
+
+def test_diff_with_subdir_reads_base_from_git_root_head_from_scan_root(db, tmp_path, monkeypatch):
+    """With skills_subdir configured, git_root and scan root are different directories.
+
+    diff_vs_base must reconstruct base content from the git tree at ``skills/<name>``
+    (git root + subdir), while diff_vs_head / conflict must keep reading the real current
+    files under the scan root (``<git_root>/skills/<name>``). A mix-up that routed the
+    filesystem reads to the git root would fail here because ``<git_root>/<name>`` does not
+    exist (real files live one level deeper under ``skills/``).
+    """
+    from fleetent.platform.skill_management.pool_git import commit_pool, init_pool
+
+    git_root = tmp_path / "repo"
+    git_root.mkdir()
+    init_pool(git_root)
+    scan_root = git_root / "skills"  # genuinely different directory from git_root
+    scan_root.mkdir()
+
+    # Commit the base content under the subdir tree path (skills/crm-ops).
+    skill_dir = scan_root / "crm-ops"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: crm-ops\ndescription: test\n---\nline one\nline two old\nline three",
+        encoding="utf-8",
+    )
+    base_commit = commit_pool(
+        git_root,
+        message="add crm-ops",
+        author="admin <a@a>",
+        skill_name="crm-ops",
+        subdir="skills",
+    )
+    assert base_commit is not None
+
+    # Compute base_version as the scan-root content hash so conflict detection is meaningful.
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(scan_root))
+    agent = _create_agent()
+    from fleetent.platform.skill_management import bundle_cache
+
+    base_version = bundle_cache.skill_directory_version(skill_dir)
+    skill_admin_store.set_binding(agent.id, "crm-ops", True, updated_by="admin")
+    skill_admin_store.set_base_version(agent.id, "crm-ops", base_version)
+    skill_admin_store.set_base_commit(agent.id, "crm-ops", base_commit)
+    skill_admin_store.set_drift(agent.id, "crm-ops", drifted=True)
+
+    proposal_id = backflow_store.nominate(
+        agent_id=agent.id,
+        skill_name="crm-ops",
+        proposed_content=(
+            "---\nname: crm-ops\ndescription: test\n---\n"
+            "line one\nline two new\nline three\nline four added"
+        ),
+        pool_dir=scan_root,
+    )
+
+    # Advance the pool head under the scan root so conflict detection has something to see.
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: crm-ops\ndescription: test\n---\nline one\nline two old\nline three\npool-v2",
+        encoding="utf-8",
+    )
+    commit_pool(
+        git_root,
+        message="edit crm-ops v2",
+        author="admin <a@a>",
+        skill_name="crm-ops",
+        subdir="skills",
+    )
+
+    diff = backflow_store.get_proposal_diff(
+        proposal_id, pool_dir=scan_root, git_root=git_root, subdir="skills"
+    )
+
+    # diff_vs_base proves pool_bundle_at found base content via the subdir git tree path.
+    assert diff["diff_vs_base"]
+    assert "-line two old" in diff["diff_vs_base"]
+    assert "+line two new" in diff["diff_vs_base"]
+    assert "+line four added" in diff["diff_vs_base"]
+    # diff_vs_head / conflict prove the filesystem reads stayed on the scan root.
+    assert diff["conflict"] is True
+    assert "pool-v2" in diff["diff_vs_head"]

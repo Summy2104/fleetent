@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { HttpResponse, http } from 'msw'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import { SkillsPage } from '@/features/skills/page'
 import { API_BASE_URL, renderSkills } from '@/features/skills/test/render'
@@ -67,6 +67,7 @@ describe('skills page parity baseline', () => {
       http.get(`${API_BASE_URL}/admin/me`, () =>
         HttpResponse.json({ email: 'admin@fleetent.test', id: 'admin-1', role: 'admin' })
       ),
+      http.get(`${API_BASE_URL}/admin/skills/git/status`, () => HttpResponse.json({ enabled: false })),
       http.get(`${API_BASE_URL}/admin/skills`, () => HttpResponse.json(skills)),
       http.get(`${API_BASE_URL}/admin/skills/:name/content`, ({ params }) =>
         HttpResponse.json({
@@ -333,6 +334,7 @@ describe('skills page backflow approval', () => {
 
   function stubBaseReads(): void {
     server.use(
+      http.get(`${API_BASE_URL}/admin/skills/git/status`, () => HttpResponse.json({ enabled: false })),
       http.get(`${API_BASE_URL}/admin/skills`, () => HttpResponse.json(baseSkills)),
       http.get(`${API_BASE_URL}/admin/skills/:name/content`, ({ params }) =>
         HttpResponse.json({ content: `${String(params.name ?? '')} body`, name: String(params.name ?? '') })
@@ -365,67 +367,32 @@ describe('skills page backflow approval', () => {
     )
   }
 
-  it('lists proposals, shows diff, and posts accept/reject/fork decisions', async () => {
+  it('lists proposals read-only — no accept/reject/fork buttons', async () => {
     const user = userEvent.setup({ delay: null })
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('crm-ops-fork')
-    const acceptHeaders: (string | null)[] = []
-    let rejected = false
-    let forkedWith: { fork_name: string } | null = null
-
     stubBaseReads()
-    server.use(
-      http.post(`${API_BASE_URL}/admin/skills/backflow/:id/accept`, ({ request }) => {
-        acceptHeaders.push(request.headers.get('x-confirm'))
-        return HttpResponse.json({ new_version: 'sha', ok: true, proposal_id: 1, user: 'admin' })
-      }),
-      http.post(`${API_BASE_URL}/admin/skills/backflow/:id/reject`, () => {
-        rejected = true
-        return HttpResponse.json({ ok: true, proposal_id: 1, user: 'admin' })
-      }),
-      http.post(`${API_BASE_URL}/admin/skills/backflow/:id/fork`, async ({ request }) => {
-        forkedWith = (await request.json()) as { fork_name: string }
-        return HttpResponse.json({ forked_as: forkedWith.fork_name, ok: true, proposal_id: 1, user: 'admin' })
-      })
-    )
-
     renderSkillsPage()
 
     await user.click(await screen.findByRole('button', { name: 'Actions for crm-ops' }))
     await user.click(await screen.findByRole('menuitem', { name: /Backflow/ }))
     const backflow = within(await screen.findByRole('dialog'))
-    expect(await backflow.findByRole('button', { name: 'Accept backflow 1' })).toBeInTheDocument()
 
-    await user.click(backflow.getByRole('button', { name: 'View backflow diff for 1' }))
-    expect(await backflow.findByText('bf head 1')).toBeInTheDocument()
-
-    await user.click(backflow.getByRole('button', { name: 'Accept backflow 1' }))
-    await waitFor(() => expect(acceptHeaders).toHaveLength(1))
-    expect(confirmSpy).toHaveBeenCalled()
-    expect(acceptHeaders[0]).toBe('true')
-
-    await user.click(backflow.getByRole('button', { name: 'Reject backflow 1' }))
-    await waitFor(() => expect(rejected).toBe(true))
-
-    await user.click(backflow.getByRole('button', { name: 'Fork backflow 1' }))
-    await waitFor(() => expect(forkedWith).toEqual({ fork_name: 'crm-ops-fork' }))
-    expect(promptSpy).toHaveBeenCalled()
-
-    confirmSpy.mockRestore()
-    promptSpy.mockRestore()
+    // The proposal is listed with a diff view, but the platform offers no governance
+    // actions — adoption is a human PR in the git host.
+    expect(await backflow.findByRole('button', { name: 'View backflow diff for 1' })).toBeInTheDocument()
+    expect(backflow.queryByRole('button', { name: /Accept backflow/ })).not.toBeInTheDocument()
+    expect(backflow.queryByRole('button', { name: /Reject backflow/ })).not.toBeInTheDocument()
+    expect(backflow.queryByRole('button', { name: /Fork backflow/ })).not.toBeInTheDocument()
   })
 
-  it('does not accept a conflict proposal when confirmation is cancelled', async () => {
+  it('shows the base diff when the vs-head diff is empty', async () => {
     const user = userEvent.setup({ delay: null })
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
-    const acceptHeaders: (string | null)[] = []
-
     stubBaseReads()
+    // The real-world case that rendered nothing: pool already matches the edit, so
+    // diff_vs_head is empty but diff_vs_base carries the change.
     server.use(
-      http.post(`${API_BASE_URL}/admin/skills/backflow/:id/accept`, ({ request }) => {
-        acceptHeaders.push(request.headers.get('x-confirm'))
-        return HttpResponse.json({ ok: true, proposal_id: 1, user: 'admin' })
-      })
+      http.get(`${API_BASE_URL}/admin/skills/backflow/:id/diff`, () =>
+        HttpResponse.json({ conflict: true, diff_vs_base: 'base-only change', diff_vs_head: '' })
+      )
     )
 
     renderSkillsPage()
@@ -433,12 +400,9 @@ describe('skills page backflow approval', () => {
     await user.click(await screen.findByRole('button', { name: 'Actions for crm-ops' }))
     await user.click(await screen.findByRole('menuitem', { name: /Backflow/ }))
     const backflow = within(await screen.findByRole('dialog'))
+    await user.click(await backflow.findByRole('button', { name: 'View backflow diff for 1' }))
 
-    await user.click(await backflow.findByRole('button', { name: 'Accept backflow 1' }))
-    expect(confirmSpy).toHaveBeenCalled()
-    expect(acceptHeaders).toHaveLength(0)
-
-    confirmSpy.mockRestore()
+    expect(await backflow.findByText('base-only change')).toBeInTheDocument()
   })
 })
 
@@ -448,6 +412,7 @@ describe('skills page content + search', () => {
       http.get(`${API_BASE_URL}/admin/me`, () =>
         HttpResponse.json({ email: 'admin@fleetent.test', id: 'admin-1', role: 'admin' })
       ),
+      http.get(`${API_BASE_URL}/admin/skills/git/status`, () => HttpResponse.json({ enabled: false })),
       http.get(`${API_BASE_URL}/admin/skills`, () => HttpResponse.json(getSkills())),
       http.get(`${API_BASE_URL}/admin/skills/:name/content`, ({ params }) =>
         HttpResponse.json({ content: getContent(), name: String(params.name ?? '') })
@@ -573,5 +538,161 @@ describe('skills page content + search', () => {
     // Content is fetched async after the dialog mounts; await it.
     expect(await within(dialog).findByText(/original body/)).toBeInTheDocument()
     expect(within(dialog).getByText('Content · welcome-pack')).toBeInTheDocument()
+  })
+})
+
+describe('skills page gitops mode', () => {
+  const gitStatus = {
+    branch: 'main',
+    enabled: true,
+    last_sync_at: '2026-07-02T08:00:00Z',
+    last_sync_error: null,
+    last_synced_commit: 'abc1234def5678',
+    provider: 'bitbucket',
+    remote_url: 'git@bitbucket.org:acme/skills.git',
+    sync_interval_seconds: 300,
+  }
+  const gitopsSkills: SkillRecord[] = [
+    {
+      audit_verdict: 'rejected',
+      description: 'CRM ops helper',
+      drifted_agents: [],
+      enabling_agents: [],
+      global_enabled: true,
+      name: 'crm-ops',
+      source: 'adhoc',
+      status: 'quarantined',
+    },
+    {
+      audit_verdict: 'pass',
+      description: 'Onboarding helper',
+      drifted_agents: [],
+      enabling_agents: [],
+      global_enabled: false,
+      name: 'welcome-pack',
+      source: 'marketplace',
+      status: 'archived',
+    },
+  ]
+
+  function stubGitopsReads(backflow: unknown[] = []): void {
+    server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () =>
+        HttpResponse.json({ email: 'admin@fleetent.test', id: 'admin-1', role: 'admin' })
+      ),
+      http.get(`${API_BASE_URL}/admin/skills/git/status`, () => HttpResponse.json(gitStatus)),
+      http.get(`${API_BASE_URL}/admin/skills`, () => HttpResponse.json(gitopsSkills)),
+      http.get(`${API_BASE_URL}/admin/skills/proposals`, () => HttpResponse.json([])),
+      http.get(`${API_BASE_URL}/admin/skills/backflow`, () => HttpResponse.json(backflow)),
+      http.get(`${API_BASE_URL}/admin/skills/backflow/:id/diff`, ({ params }) =>
+        HttpResponse.json({
+          conflict: false,
+          diff_vs_base: `bf base ${String(params.id ?? '')}`,
+          diff_vs_head: `bf head ${String(params.id ?? '')}`,
+        })
+      )
+    )
+  }
+
+  it('shows the read-only banner and git sync status card', async () => {
+    stubGitopsReads()
+    renderSkillsPage()
+
+    expect(await screen.findByText('Managed via external git')).toBeInTheDocument()
+    expect(screen.getByText('Git sync status')).toBeInTheDocument()
+    expect(screen.getByText('bitbucket')).toBeInTheDocument()
+    // Commit shas render truncated to 10 chars.
+    expect(screen.getByText('abc1234def')).toBeInTheDocument()
+    // #4: the standalone "Reload index" header action is hidden in gitops mode; "Sync now"
+    // on the status card owns refresh (it reloads the index as part of the sync).
+    expect(screen.queryByRole('button', { name: 'Reload index' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Sync now/ })).toBeInTheDocument()
+    // Last-synced time is localized, not the raw UTC ISO string the server returns.
+    expect(screen.queryByText('2026-07-02T08:00:00Z')).not.toBeInTheDocument()
+  })
+
+  it('triggers a manual git sync from the status card', async () => {
+    const user = userEvent.setup({ delay: null })
+    let synced = 0
+
+    stubGitopsReads()
+    server.use(
+      http.post(`${API_BASE_URL}/admin/skills/git/sync`, () => {
+        synced += 1
+        return HttpResponse.json({ ok: true })
+      })
+    )
+
+    renderSkillsPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Sync now' }))
+    await waitFor(() => expect(synced).toBe(1))
+  })
+
+  it('hides content-write row actions while keeping enable/disable', async () => {
+    const user = userEvent.setup({ delay: null })
+    stubGitopsReads()
+    renderSkillsPage()
+
+    // Quarantined + rejected skill: outside gitops it would offer Archive + Force publish.
+    await user.click(await screen.findByRole('button', { name: 'Actions for crm-ops' }))
+    expect(await screen.findByText('Disable')).toBeInTheDocument()
+    expect(screen.queryByText('Archive')).not.toBeInTheDocument()
+    expect(screen.queryByText('Force publish')).not.toBeInTheDocument()
+    await user.keyboard('{Escape}')
+
+    // Archived skill: outside gitops it would offer Restore.
+    await user.click(screen.getByRole('button', { name: 'Actions for welcome-pack' }))
+    expect(await screen.findByText('Enable')).toBeInTheDocument()
+    expect(screen.queryByText('Restore')).not.toBeInTheDocument()
+  })
+
+  it('shows the backup branch + state, hides accept/fork, and syncs backflow', async () => {
+    const user = userEvent.setup({ delay: null })
+    let backflowSynced = 0
+
+    stubGitopsReads([
+      {
+        agent_id: 7,
+        agent_name: 'support',
+        base_commit: 'c1',
+        base_version: 'v1',
+        conflict: 0,
+        created_at: '2026-07-01T00:00:00Z',
+        forked_as: null,
+        id: 1,
+        pr_branch: 'backflow/7/crm-ops',
+        pr_state: 'backed_up',
+        pr_url: null,
+        skill_name: 'crm-ops',
+        status: 'pending',
+      },
+    ])
+    server.use(
+      http.post(`${API_BASE_URL}/admin/skills/backflow/sync-backflow`, () => {
+        backflowSynced += 1
+        return HttpResponse.json({ ok: true })
+      })
+    )
+
+    renderSkillsPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Actions for crm-ops' }))
+    await user.click(await screen.findByRole('menuitem', { name: /Backflow/ }))
+    const backflow = within(await screen.findByRole('dialog'))
+
+    // Backup branch + state shown so the operator knows where to open a PR themselves.
+    expect(await backflow.findByText('backed_up')).toBeInTheDocument()
+    expect(backflow.getByText('backflow/7/crm-ops')).toBeInTheDocument()
+    // Platform is hands-off: no governance actions at all (no Open PR / Accept / Reject / Fork).
+    expect(backflow.queryByRole('button', { name: /Open PR/ })).not.toBeInTheDocument()
+    expect(backflow.queryByRole('button', { name: /Accept backflow/ })).not.toBeInTheDocument()
+    expect(backflow.queryByRole('button', { name: /Reject backflow/ })).not.toBeInTheDocument()
+    expect(backflow.queryByRole('button', { name: /Fork backflow/ })).not.toBeInTheDocument()
+    // Only the read-only diff view remains per proposal.
+    expect(backflow.getByRole('button', { name: 'View backflow diff for 1' })).toBeInTheDocument()
+
+    await user.click(backflow.getByRole('button', { name: 'Sync backflow' }))
+    await waitFor(() => expect(backflowSynced).toBe(1))
   })
 })

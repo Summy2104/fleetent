@@ -418,6 +418,10 @@ class SchedulingSettings(BaseModel):
     tick_interval_seconds: float = 10.0
     max_parallel: int = 4
     history_retention: int = 50
+    skill_git_sync_interval_seconds: int = 300
+    # Backflow PR sweep runs more often than inbound sync: backing up an agent's edit to a
+    # branch is safety-critical, so prefer a short interval.
+    skill_backflow_pr_sweep_interval_seconds: int = 120
 
 
 class WebhookSourceSettings(BaseModel):
@@ -468,6 +472,14 @@ class Settings(BaseSettings):
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     oidc: OidcSettings = Field(default_factory=OidcSettings)
     kb_serve: KBServeSettings = Field(default_factory=KBServeSettings)
+
+    @field_validator("database_url")
+    @classmethod
+    def _empty_database_url_means_default(cls, value: str) -> str:
+        # The scaffolded home .env (copied from .env.example by init-config) ships a blank
+        # `DATABASE_URL=` line; dotenv delivers that as an explicit empty string, which
+        # would otherwise override the default and leave every store unable to open a DB.
+        return value or f"sqlite:///{paths.management_db_path()}"
 
     @classmethod
     def settings_customise_sources(

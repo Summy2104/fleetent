@@ -402,6 +402,65 @@ def test_get_desired_state_includes_skill_manifest_and_bundle_download_is_immuta
     assert second.content == first.content
 
 
+def test_get_desired_state_skill_manifest_resolves_base_commit_via_git_root_when_subdir_configured(
+    node_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """R5: with an external-git ``skills_subdir`` configured, the scan root has no ``.git``.
+
+    Only its parent (the git root) does. The manifest's ``base_commit`` must be resolved
+    against the git root + subdir, while ``name`` and ``bundle_url`` must stay clean (no
+    ``skills/`` prefix leaking into the node/agent contract).
+    """
+    from fleetent import agent_store
+    from fleetent.platform.node_management import node_store, placement_store
+    from fleetent.platform.skill_management import git_source_store, pool_git, skill_admin_store
+    from fleetent.platform.tenancy import store as tenancy_store
+
+    git_root = tmp_path / "ai-skills-library"
+    scan_root = git_root / "skills"
+    skill_dir = scan_root / "incident-review"
+    (skill_dir / "scripts").mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: incident-review\ndescription: Review incidents\n---\nbody\n",
+        encoding="utf-8",
+    )
+    (skill_dir / "scripts" / "helper.py").write_text("print('ok')\n", encoding="utf-8")
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(scan_root))
+    # Whole repo (including the skills/ subdir) is mirrored at the git root -- there is
+    # no .git at the scan root itself, matching production subdir-mirrored layout.
+    pool_git.init_pool(git_root)
+    git_source_store.set_config(
+        enabled=1, remote_url="https://example.test/repo.git", branch="main", skills_subdir="skills"
+    )
+
+    node_key, _ = node_store.register_node("node-a")
+    tenancy_store.create_tenant(id="acme", name="Acme")
+    agent = agent_store.create_agent("support", "Help users", ["shell"], tenant_id="acme")
+    skill_admin_store.set_binding(agent.id, "incident-review", True, updated_by="admin")
+    placement_store.pin_agent(agent.id, "node-a")
+
+    response = node_client.get(
+        "/nodes/node-a/desired-state",
+        headers={"Authorization": f"Bearer {node_key}"},
+    )
+
+    assert response.status_code == 200
+    manifest = response.json()["agents"][0]["skill_manifests"][0]
+    expected_commit = pool_git.pool_version_for_skill(git_root, "incident-review", subdir="skills")
+    assert expected_commit
+    assert manifest["base_commit"] == expected_commit
+    # R5: node/agent-facing fields must stay clean -- no "skills/" subdir prefix.
+    assert manifest["name"] == "incident-review"
+    assert "skills/" not in manifest["name"]
+    # The route's own static "/skills/" segment is expected; what must NOT appear is the
+    # configured skills_subdir leaking in as an extra prefix on the skill name itself.
+    assert manifest["bundle_url"] == (
+        f"/nodes/node-a/skills/incident-review/bundles/{manifest['base_version']}.tar.gz"
+    )
+
+
 def test_post_status_updates_last_seen_and_agent_projection(node_client: TestClient) -> None:
     from fleetent import agent_store
     from fleetent.platform.node_management import node_store

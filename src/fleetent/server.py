@@ -52,7 +52,7 @@ from fleetent.platform.node_management import (
     placement_store,
 )
 from fleetent.platform.node_management.agent_transport import DirectHttpAgentTransport
-from fleetent.platform.skill_management import backflow_api, skill_admin_api
+from fleetent.platform.skill_management import backflow_api, skill_admin_api, skill_git_webhook_api
 from fleetent.platform.tenancy import admin_api as tenancy_admin_api
 from fleetent.platform.user_management import user_admin_api
 from fleetent.platform.user_management.api_key_store import resolve as _resolve_api_key
@@ -176,8 +176,28 @@ def _build_platform_maintenance_scheduler(
     maintenance jobs.  Accepts an optional `_scheduler` for dependency injection in tests."""
     from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
 
-    del scheduling
-    return _scheduler if _scheduler is not None else AsyncIOScheduler()
+    from fleetent.platform.skill_management import backflow_pr_sweep, pool_sync
+
+    sched = _scheduler if _scheduler is not None else AsyncIOScheduler()
+    interval = getattr(scheduling, "skill_git_sync_interval_seconds", 300) if scheduling else 300
+    sched.add_job(
+        pool_sync.scheduled_sweep,
+        trigger="interval",
+        seconds=interval,
+        id="__skill_git_sync_sweep__",
+        replace_existing=True,
+    )
+    backflow_interval = (
+        getattr(scheduling, "skill_backflow_pr_sweep_interval_seconds", 120) if scheduling else 120
+    )
+    sched.add_job(
+        backflow_pr_sweep.sweep,
+        trigger="interval",
+        seconds=backflow_interval,
+        id="__skill_backflow_pr_sweep__",
+        replace_existing=True,
+    )
+    return sched
 
 
 def _ensure_skill_pool_git() -> None:
@@ -213,6 +233,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from fleetent.platform.connector_management import mcp_oauth_service as _mcp_oauth_service
 
     _mcp_oauth_service.set_client_secret_resolver(_resolve_agent_client_secret)
+    # skill GitOps inbound sync resolves git credentials via the same secret_store seam,
+    # injected here so pool_sync / webhook stay off the agent_lifecycle face (plane boundary).
+    from fleetent.platform.agent_lifecycle import secret_store as _skill_git_secret_store
+    from fleetent.platform.skill_management import backflow_pr_sweep as _backflow_pr_sweep
+    from fleetent.platform.skill_management import pool_sync as _pool_sync
+
+    _pool_sync.set_secret_resolver(_skill_git_secret_store.get_decrypted)
+    _backflow_pr_sweep.set_secret_resolver(_skill_git_secret_store.get_decrypted)
 
     scan_skills()
     # backflow-pool-git: the shared skill pool must be a git repo before any write,
@@ -277,6 +305,7 @@ app.include_router(user_admin_api.router)
 app.include_router(im_identity_admin_api.router)
 app.include_router(skill_admin_api.router)
 app.include_router(backflow_api.router)
+app.include_router(skill_git_webhook_api.router)
 app.include_router(provider_admin_api.router)
 app.include_router(model_admin_api.router)
 app.include_router(kb_admin_api.router)

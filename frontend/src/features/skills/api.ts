@@ -203,6 +203,46 @@ export function useReloadSkillsMutation() {
   })
 }
 
+// --- skill gitops (external git authoritative source) ------------------------
+
+export type SkillGitStatus = {
+  branch?: string | null
+  enabled: boolean
+  last_sync_at?: string | null
+  last_sync_error?: string | null
+  last_synced_commit?: string | null
+  provider?: string | null
+  remote_url?: string | null
+  sync_interval_seconds?: number | null
+  token_env?: string | null
+  username_env?: string | null
+  webhook_secret_env?: string | null
+}
+
+export function useSkillGitStatusQuery() {
+  const api = useAdminApi()
+
+  return useQuery({
+    queryKey: ['skill-git-status'],
+    queryFn: () => api.get<SkillGitStatus>('/admin/skills/git/status'),
+  })
+}
+
+export function useTriggerSkillGitSyncMutation() {
+  const api = useAdminApi()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: () => api.post('/admin/skills/git/sync'),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['skill-git-status'] }),
+        invalidateSkillList(queryClient),
+      ])
+    },
+  })
+}
+
 export function useSetSkillAgentBindingMutation(name: string, agentId: number) {
   const api = useAdminApi()
   const queryClient = useQueryClient()
@@ -229,6 +269,9 @@ export type BackflowProposal = {
   created_at: string
   forked_as: string | null
   id: number
+  pr_branch?: string | null
+  pr_state?: string | null
+  pr_url?: string | null
   skill_name: string
   status: string
 }
@@ -237,13 +280,6 @@ export type BackflowDiff = {
   conflict: boolean
   diff_vs_base: string
   diff_vs_head: string
-}
-
-type BackflowAcceptInput = {
-  confirm?: boolean
-}
-type BackflowForkInput = {
-  fork_name: string
 }
 
 function invalidateBackflow(queryClient: ReturnType<typeof useQueryClient>): Promise<void> {
@@ -269,41 +305,12 @@ export function useBackflowDiffQuery(proposalId: number | null, enabled: boolean
   })
 }
 
-export function useBackflowAcceptMutation(proposalId: number) {
+export function useSyncBackflowMutation() {
   const api = useAdminApi()
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (input?: BackflowAcceptInput) =>
-      api.post(
-        `/admin/skills/backflow/${proposalId}/accept`,
-        undefined,
-        input?.confirm ? { 'X-Confirm': 'true' } : undefined
-      ),
-    onSuccess: async () => {
-      await invalidateBackflow(queryClient)
-    },
-  })
-}
-
-export function useBackflowRejectMutation(proposalId: number) {
-  const api = useAdminApi()
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: () => api.post(`/admin/skills/backflow/${proposalId}/reject`),
-    onSuccess: async () => {
-      await invalidateBackflow(queryClient)
-    },
-  })
-}
-
-export function useBackflowForkMutation(proposalId: number) {
-  const api = useAdminApi()
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: (input: BackflowForkInput) => api.post(`/admin/skills/backflow/${proposalId}/fork`, input),
+    mutationFn: () => api.post('/admin/skills/backflow/sync-backflow'),
     onSuccess: async () => {
       await invalidateBackflow(queryClient)
     },

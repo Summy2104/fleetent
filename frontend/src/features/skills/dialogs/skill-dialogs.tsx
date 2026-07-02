@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { GitCompare } from 'lucide-react'
+import { GitCompare, RefreshCw } from 'lucide-react'
 
 import { Badge } from '@/components/base/badge'
 import { Button } from '@/components/ui/button'
@@ -7,19 +7,20 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import {
+  type BackflowDiff,
   type BackflowProposal,
   type SkillProposal,
-  useBackflowAcceptMutation,
-  useBackflowForkMutation,
-  useBackflowRejectMutation,
   useSetSkillAgentBindingMutation,
   useSkillAgentBindingsQuery,
   useSkillContentQuery,
   useSkillDiffQuery,
   useSkillProposalDiffQuery,
   useSkillVersionsQuery,
+  useSyncBackflowMutation,
 } from '@/features/skills/api'
+import { useTransientFlag } from '@/features/skills/shared'
 import { useT } from '@/i18n'
+import { cn } from '@/lib/utils'
 
 export function CodeBlock({ children }: { children: string }): JSX.Element {
   return (
@@ -262,6 +263,8 @@ export function ProposalsDialog({
 
 // ─────────────────────────── Backflow proposal card + dialog ───────────────────────────
 
+// Read-only: the platform does not accept/reject/fork backflow. It records the agent's edit,
+// pushes it to a backup branch, and shows the diff; adoption is a human PR in the git host.
 function BackflowProposalCard({
   onViewDiff,
   proposal,
@@ -269,30 +272,6 @@ function BackflowProposalCard({
   onViewDiff: (id: number) => void
   proposal: BackflowProposal
 }): JSX.Element {
-  const accept = useBackflowAcceptMutation(proposal.id)
-  const reject = useBackflowRejectMutation(proposal.id)
-  const fork = useBackflowForkMutation(proposal.id)
-
-  const onAccept = async (): Promise<void> => {
-    if (proposal.conflict) {
-      // Pool advanced past the proposal's base — require an explicit override decision.
-      if (!window.confirm(`Pool advanced for ${proposal.skill_name}. Override pool head?`)) {
-        return
-      }
-      await accept.mutateAsync({ confirm: true })
-      return
-    }
-    await accept.mutateAsync({})
-  }
-
-  const onFork = async (): Promise<void> => {
-    const forkName = window.prompt(`New skill name to fork ${proposal.skill_name} as`, `${proposal.skill_name}-fork`)
-    if (!forkName) {
-      return
-    }
-    await fork.mutateAsync({ fork_name: forkName })
-  }
-
   return (
     <article className="rounded-xl border bg-white p-4" key={proposal.id}>
       <div className="flex items-start justify-between gap-4">
@@ -301,6 +280,12 @@ function BackflowProposalCard({
           <p className="text-muted-foreground text-sm">
             {`from ${proposal.agent_name ?? `agent ${proposal.agent_id}`}${proposal.conflict ? ' · conflict' : ''}`}
           </p>
+          {proposal.pr_branch ? (
+            <span className="mt-1 flex items-center gap-2">
+              {proposal.pr_state ? <Badge variant="secondary">{proposal.pr_state}</Badge> : null}
+              <span className="font-mono text-muted-foreground text-xs">{proposal.pr_branch}</span>
+            </span>
+          ) : null}
         </div>
         <div className="flex flex-wrap justify-end gap-2">
           <button
@@ -310,47 +295,36 @@ function BackflowProposalCard({
           >
             {`View backflow diff for ${proposal.id}`}
           </button>
-          <button
-            className="rounded-md bg-primary px-3 py-2 font-medium text-primary-foreground text-sm"
-            onClick={() => void onAccept()}
-            type="button"
-          >
-            {`Accept backflow ${proposal.id}`}
-          </button>
-          <button
-            className="rounded-md bg-secondary px-3 py-2 font-medium text-sm"
-            onClick={() => void reject.mutateAsync()}
-            type="button"
-          >
-            {`Reject backflow ${proposal.id}`}
-          </button>
-          <button
-            className="rounded-md bg-secondary px-3 py-2 font-medium text-sm"
-            onClick={() => void onFork()}
-            type="button"
-          >
-            {`Fork backflow ${proposal.id}`}
-          </button>
         </div>
       </div>
     </article>
   )
 }
 
+function DiffPre({ children }: { children: string }): JSX.Element {
+  return <pre className="mt-2 max-h-72 overflow-auto rounded-xl bg-slate-950 p-4 text-slate-50 text-sm">{children}</pre>
+}
+
 export function BackflowDialog({
   skillName,
   proposals,
   onViewDiff,
-  diffText,
+  diff,
+  diffLoading = false,
   onOpenChange,
+  gitopsEnabled = false,
 }: {
   skillName: string | null
   proposals: BackflowProposal[]
   onViewDiff: (id: number) => void
-  diffText: string | null
+  diff: BackflowDiff | null
+  diffLoading?: boolean
   onOpenChange: (open: boolean) => void
+  gitopsEnabled?: boolean
 }): JSX.Element {
   const t = useT()
+  const syncBackflow = useSyncBackflowMutation()
+  const pushed = useTransientFlag(syncBackflow.isSuccess)
   return (
     <Dialog onOpenChange={onOpenChange} open={Boolean(skillName)}>
       <DialogContent>
@@ -359,14 +333,54 @@ export function BackflowDialog({
           <DialogDescription>{t('skills.backflowDescription')}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
+          {gitopsEnabled ? (
+            <div className="flex justify-end">
+              <Button
+                disabled={syncBackflow.isPending}
+                onClick={() => void syncBackflow.mutateAsync()}
+                size="sm"
+                variant="outline"
+              >
+                <RefreshCw className={cn('size-4', syncBackflow.isPending && 'animate-spin')} />
+                {syncBackflow.isPending
+                  ? t('skills.backflowSyncing')
+                  : pushed
+                    ? t('skills.backflowSynced')
+                    : t('skills.backflowSyncNow')}
+              </Button>
+            </div>
+          ) : null}
           {proposals.map((proposal) => (
             <BackflowProposalCard key={proposal.id} onViewDiff={onViewDiff} proposal={proposal} />
           ))}
           {proposals.length === 0 ? <p className="text-muted-foreground text-sm">{t('skills.noBackflow')}</p> : null}
-          {diffText ? (
-            <pre className="mt-2 max-h-72 overflow-auto rounded-xl bg-slate-950 p-4 text-slate-50 text-sm">
-              {diffText}
-            </pre>
+          {diffLoading ? <p className="mt-2 text-muted-foreground text-sm">{t('skills.diffLoading')}</p> : null}
+          {diff ? (
+            <div className="mt-2 space-y-2">
+              {diff.conflict ? (
+                <p className="rounded-md bg-amber-50 px-3 py-2 text-amber-900 text-sm dark:bg-amber-950/30 dark:text-amber-200">
+                  {t('skills.backflowConflict')}
+                </p>
+              ) : null}
+              {/* The edit relative to the base the agent started from — the actual change to
+                  review. diff_vs_head can be empty (pool already matches the edit), so this
+                  is what usually carries content. */}
+              {diff.diff_vs_base ? (
+                <div>
+                  <p className="font-medium text-muted-foreground text-xs">{t('skills.diffVsBase')}</p>
+                  <DiffPre>{diff.diff_vs_base}</DiffPre>
+                </div>
+              ) : null}
+              {diff.diff_vs_head ? (
+                <div>
+                  <p className="font-medium text-muted-foreground text-xs">{t('skills.diffVsHead')}</p>
+                  <DiffPre>{diff.diff_vs_head}</DiffPre>
+                </div>
+              ) : null}
+              {!diff.diff_vs_base && !diff.diff_vs_head ? (
+                <p className="text-muted-foreground text-sm">{t('skills.diffNone')}</p>
+              ) : null}
+            </div>
           ) : null}
         </div>
       </DialogContent>

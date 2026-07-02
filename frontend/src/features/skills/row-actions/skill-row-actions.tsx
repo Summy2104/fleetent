@@ -25,6 +25,7 @@ import { useT } from '@/i18n'
 export function SkillRowActions({
   skill,
   canWrite,
+  gitopsEnabled = false,
   proposalCount,
   backflowCount,
   onViewContent,
@@ -35,6 +36,7 @@ export function SkillRowActions({
 }: {
   skill: SkillListItem
   canWrite: boolean
+  gitopsEnabled?: boolean
   proposalCount: number
   backflowCount: number
   onViewContent: () => void
@@ -100,14 +102,16 @@ export function SkillRowActions({
               ) : (
                 <DropdownMenuItem onClick={() => void toggle.mutateAsync()}>{t('skills.enable')}</DropdownMenuItem>
               )}
-              {skill.status === 'archived' ? (
+              {/* Content-write actions are gitops-gated: with an external git source the
+                  backend answers 409 for archive/restore/force-publish, so hide them. */}
+              {gitopsEnabled ? null : skill.status === 'archived' ? (
                 <DropdownMenuItem onClick={() => void restore.mutateAsync()}>{t('skills.restore')}</DropdownMenuItem>
               ) : (
                 <DropdownMenuItem onClick={() => setTimeout(() => setConfirmArchive(true), 0)} variant="destructive">
                   <Trash2 /> {t('skills.archive')}
                 </DropdownMenuItem>
               )}
-              {canForcePublish ? (
+              {!gitopsEnabled && canForcePublish ? (
                 <DropdownMenuItem
                   onClick={() => setTimeout(() => setConfirmForcePublish(true), 0)}
                   variant="destructive"
