@@ -9,8 +9,10 @@ patched. Also guards that the nominate / node-ingestion path stays git-free.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from fleetent import agent_store
 from fleetent.integrations.git_platform import (
     BaseGitPlatformBackend,
     GitPlatformCapabilities,
@@ -18,6 +20,14 @@ from fleetent.integrations.git_platform import (
     PullRequestRef,
 )
 from fleetent.platform.skill_management import backflow_pr_sweep, backflow_store, git_source_store
+
+
+def _stub_agent(monkeypatch, agent_id: int, name: str) -> None:
+    monkeypatch.setattr(
+        agent_store,
+        "get_by_id",
+        lambda aid: SimpleNamespace(name=name) if aid == agent_id else None,
+    )
 
 _CONFIG = {
     "enabled": 1,
@@ -72,6 +82,8 @@ def test_backs_up_unbacked_proposal_on_a_non_main_branch(monkeypatch) -> None:
     monkeypatch.setattr(git_source_store, "get_config", lambda: _CONFIG)
     monkeypatch.setattr(backflow_pr_sweep, "_backend_factory", lambda _c: fake)
     monkeypatch.setattr(backflow_store, "list_by_pr_state", lambda state, **_: proposals[state])
+    # Branch names use the agent's (human) name, sanitized to a legal ref component.
+    _stub_agent(monkeypatch, 7, "Sales Bot")
     set_link = MagicMock()
     set_state = MagicMock()
     monkeypatch.setattr(backflow_store, "set_pr_link", set_link)
@@ -80,9 +92,9 @@ def test_backs_up_unbacked_proposal_on_a_non_main_branch(monkeypatch) -> None:
     backflow_pr_sweep.sweep()
 
     assert fake.pushed == [
-        {"branch": "backflow/7/crm-ops", "subdir": "crm-ops", "base_ref": "main"}
+        {"branch": "backflow/Sales-Bot/crm-ops", "subdir": "crm-ops", "base_ref": "main"}
     ]
-    set_link.assert_any_call(1, branch="backflow/7/crm-ops")
+    set_link.assert_any_call(1, branch="backflow/Sales-Bot/crm-ops")
     set_state.assert_any_call(1, "backed_up")
 
 
@@ -99,14 +111,32 @@ def test_backs_up_with_skills_subdir_prefixes_tree_path(monkeypatch) -> None:
     monkeypatch.setattr(git_source_store, "get_config", lambda: config)
     monkeypatch.setattr(backflow_pr_sweep, "_backend_factory", lambda _c: fake)
     monkeypatch.setattr(backflow_store, "list_by_pr_state", lambda state, **_: proposals[state])
+    _stub_agent(monkeypatch, 7, "Sales Bot")
     monkeypatch.setattr(backflow_store, "set_pr_link", MagicMock())
     monkeypatch.setattr(backflow_store, "set_pr_state", MagicMock())
 
     backflow_pr_sweep.sweep()
 
     assert fake.pushed == [
-        {"branch": "backflow/7/crm-ops", "subdir": "skills/crm-ops", "base_ref": "main"}
+        {"branch": "backflow/Sales-Bot/crm-ops", "subdir": "skills/crm-ops", "base_ref": "main"}
     ]
+
+
+def test_branch_name_falls_back_to_agent_id_when_agent_missing(monkeypatch) -> None:
+    monkeypatch.setattr(agent_store, "get_by_id", lambda _aid: None)
+    branch = backflow_pr_sweep._branch_name(
+        {"branch_prefix": "backflow"}, {"agent_id": 7, "skill_name": "crm-ops"}
+    )
+    assert branch == "backflow/7/crm-ops"
+
+
+def test_branch_name_sanitizes_unsafe_agent_name(monkeypatch) -> None:
+    _stub_agent(monkeypatch, 7, "Ops/Team #1 ~weird")
+    branch = backflow_pr_sweep._branch_name(
+        {"branch_prefix": "backflow"}, {"agent_id": 7, "skill_name": "crm-ops"}
+    )
+    # Illegal ref characters collapse to '-'; no '/', '~', '#', or spaces leak through.
+    assert branch == "backflow/Ops-Team-1-weird/crm-ops"
 
 
 def test_opens_pr_for_backed_up_when_auto_open(monkeypatch) -> None:
@@ -148,6 +178,7 @@ def test_git_unreachable_defers_without_raising(monkeypatch) -> None:
     monkeypatch.setattr(git_source_store, "get_config", lambda: _CONFIG)
     monkeypatch.setattr(backflow_pr_sweep, "_backend_factory", lambda _c: fake)
     monkeypatch.setattr(backflow_store, "list_by_pr_state", lambda state, **_: proposals[state])
+    _stub_agent(monkeypatch, 7, "Sales Bot")
     monkeypatch.setattr(backflow_store, "set_pr_link", MagicMock())
     defer_state = MagicMock()
     monkeypatch.setattr(backflow_store, "defer_pr_state", defer_state)

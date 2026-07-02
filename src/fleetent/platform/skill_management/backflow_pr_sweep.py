@@ -16,9 +16,11 @@ stays git-free -- git lives only here and in the governance endpoints.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from typing import Any
 
+from fleetent import agent_store
 from fleetent.integrations.git_platform import (
     BaseGitPlatformBackend,
     GitPlatformConfig,
@@ -74,9 +76,25 @@ def _build_backend(config: dict[str, Any]) -> BaseGitPlatformBackend:
     return create_git_platform(config=gp_config)
 
 
+def _safe_ref_component(text: str) -> str:
+    """Sanitize a string into one legal git ref path component.
+
+    Collapses every run of characters git forbids in a ref (space, ``~^:?*[\\``, ``/``,
+    ``#`` …) to a single ``-`` and strips leading/trailing ``.``/``-``. Returns ``""`` if
+    nothing legal remains, so callers can fall back to a stable id.
+    """
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", text).strip("-.")
+
+
 def _branch_name(config: dict[str, Any], proposal: dict[str, Any]) -> str:
     prefix = str(config.get("branch_prefix", "backflow"))
-    return f"{prefix}/{proposal['agent_id']}/{proposal['skill_name']}"
+    # Prefer the agent's human name (sanitized) for a readable branch; fall back to the
+    # numeric id when the agent is gone or its name has no legal ref characters left.
+    agent = agent_store.get_by_id(int(proposal["agent_id"]))
+    component = _safe_ref_component(agent.name) if agent is not None else ""
+    if not component:
+        component = str(proposal["agent_id"])
+    return f"{prefix}/{component}/{proposal['skill_name']}"
 
 
 def _back_up(backend: BaseGitPlatformBackend, config: dict[str, Any]) -> int:
