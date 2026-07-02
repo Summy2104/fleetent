@@ -1309,7 +1309,7 @@ async def _notify_pending_proposal(
     if tool_name == "reflection_user_memory_proposal" and user_id is not None:
         from fleetent.outbound_connectors import notify_user
 
-        notify_user(
+        await notify_user(
             user_id,
             f"Memory maintenance proposal pending your review. "
             f"Reply 'approve {proposal_id}' to approve or 'reject {proposal_id}' to reject.",

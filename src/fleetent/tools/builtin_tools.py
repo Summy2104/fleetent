@@ -1377,6 +1377,19 @@ async def send_file(path: str, tool_context: ToolContext | None = None) -> str:
     connectors = tool_context.outbound_connectors if tool_context else {}
     connector = connectors.get(platform)
     if connector is None:
+        from fleetent import outbound_connectors as _oc
+
+        managed = _oc.is_node_managed_runtime()
+        if managed:
+            # agent-hosted-im (D5): under managed placement a live connector is expected — its
+            # absence is a real fault (supervisor未起/IM token 缺失), surfaced with diagnostics.
+            logger.error(
+                "send_file_no_connector_under_managed platform=%s managed=%s", platform, managed
+            )
+            return (
+                f"外发失败：托管运行时无可用 {platform or '?'} 连接器（agent 自持 IM supervisor "
+                "未注册连接，可能缺少/无效的 IM token）。已记录诊断，请检查 agent IM 配置。"
+            )
         return (
             f"当前通道不支持主动外发文件（无可用 {platform or '?'} 连接器）。"
             "该功能仅在 IM 网关运行时可用。"

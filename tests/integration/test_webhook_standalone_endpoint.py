@@ -147,7 +147,11 @@ def test_reply_is_noop_when_no_reply_target(monkeypatch):
     from fleetent import outbound_connectors
 
     calls: list = []
-    monkeypatch.setattr(outbound_connectors, "notify_user", lambda *a, **k: calls.append((a, k)))
+
+    async def _notify(*a, **k):
+        calls.append((a, k))
+
+    monkeypatch.setattr(outbound_connectors, "notify_user", _notify)
     _install_agent(monkeypatch, sources=[WebhookSourceSettings(id="gh", user_id="u1")])
     client, captured = _client(monkeypatch)
     resp = client.post("/webhook/gh", json={"x": 1})
@@ -163,7 +167,11 @@ def test_reply_target_delivers_via_notify_user(monkeypatch):
     from fleetent import outbound_connectors
 
     calls: list = []
-    monkeypatch.setattr(outbound_connectors, "notify_user", lambda *a, **k: calls.append((a, k)))
+
+    async def _notify(*a, **k):
+        calls.append((a, k))
+
+    monkeypatch.setattr(outbound_connectors, "notify_user", _notify)
     _install_agent(
         monkeypatch,
         sources=[WebhookSourceSettings(id="gh", user_id="u1", reply_target="u-internal-9")],

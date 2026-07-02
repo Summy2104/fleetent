@@ -4,7 +4,7 @@ from fleetent.im_gateway import inbound_dispatch
 from fleetent.im_gateway.normalizer import NormalizedMessage
 
 
-async def test_default_inbound_dispatch_uses_local_normalizer_route(monkeypatch) -> None:
+async def test_inbound_dispatch_routes_to_local_normalizer(monkeypatch) -> None:
     captured = {}
 
     async def fake_route(msg: NormalizedMessage) -> None:
@@ -17,7 +17,6 @@ async def test_default_inbound_dispatch_uses_local_normalizer_route(monkeypatch)
         replies.append(text)
 
     monkeypatch.setattr("fleetent.im_gateway.normalizer.route", fake_route)
-    inbound_dispatch.set_inbound_dispatcher(None)
     msg = NormalizedMessage(
         platform="telegram",
         session_id="session-1",

@@ -114,8 +114,6 @@ async def send_to(
     (Slack Block Kit / Telegram inline keyboard), so callers (the gate) carry no platform
     rendering format.
     """
-    from fleetent.outbound_connectors import ManagedOutboundConnector
-
     # Render the neutral approval intent per platform (Slack output identical to before).
     if approval is not None and platform == "slack" and blocks is None:
         blocks = approval_prompt_blocks(
@@ -126,24 +124,6 @@ async def send_to(
         if approval is not None and platform == "telegram"
         else None
     )
-
-    if isinstance(connector, ManagedOutboundConnector):
-        connector.enqueue_text(
-            target=target,
-            text=text,
-            target_type=target_type,
-            thread=thread,
-            blocks=blocks,
-            approval=approval,
-        )
-        return DeliveryReceipt(
-            ok=True,
-            platform=platform,
-            target=target,
-            target_type=target_type,
-            kind="text",
-            thread=thread,
-        )
 
     ref: str | None = None
     err: str | None = None
@@ -184,24 +164,6 @@ async def send_file_to(
     optionally threads the delivery (Slack ``thread_ts``). This is the single outbound file
     delivery point shared by the ``send_file`` tool and the IM adapters' upload path.
     """
-    from fleetent.outbound_connectors import ManagedOutboundConnector
-
-    if isinstance(connector, ManagedOutboundConnector):
-        connector.enqueue_file(
-            target=target,
-            path=path,
-            target_type=target_type,
-            thread=thread,
-        )
-        return DeliveryReceipt(
-            ok=True,
-            platform=platform,
-            target=target,
-            target_type=target_type,
-            kind="file",
-            thread=thread,
-        )
-
     ref: str | None = None
     err: str | None = None
     if platform == "slack":
@@ -288,12 +250,12 @@ def make_mcp_authz_deliverer(tool_context: Any) -> Any:
     ``state``. The DM address is the requester's own platform id taken from the inbound
     ``session_context`` (sender), falling back to the conversation address's ``user_id``.
 
-    Like :func:`make_mcp_credential_deliverer`, this has a node-managed fallback: a node-managed
-    agent has no live IM connector (the node hosts IM), so the link is enqueued through
-    directed-reach (``outbound_connectors.notify_user`` -> ``im_outbound_queue`` -> node drain ->
-    DM). In a standalone runtime the live connector DMs the requester directly. Always returns a
-    deliverer (never None): managed enqueues; standalone with a connector sends; otherwise it
-    reports undelivered so the call still degrades cleanly with a "needs authorization" notice.
+    Like :func:`make_mcp_credential_deliverer`, this has a directed-reach fallback when the
+    conversation platform has no live connector in this run: it fans out via
+    ``outbound_connectors.notify_user`` (managed reverse-resolves the user's IM addresses over
+    the node loopback and DMs the requester; standalone is a no-op). With a live connector it
+    DMs the requester directly. Always returns a deliverer (never None); otherwise it reports
+    undelivered so the call still degrades cleanly with a "needs authorization" notice.
     """
     connectors: dict[str, Any] = getattr(tool_context, "outbound_connectors", {}) or {}
     session_context = getattr(tool_context, "session_context", None)
@@ -319,11 +281,12 @@ def make_mcp_authz_deliverer(tool_context: Any) -> Any:
                     error=receipt.error,
                 )
             return receipt.ok
-        # node-managed (no live connector): enqueue a directed-reach DM to the requester.
+        # No live connector for this platform: fall back to directed-reach fan-out
+        # (managed reverse-resolves + DMs; standalone is a no-op).
         from fleetent import outbound_connectors
 
         if outbound_connectors.is_node_managed_runtime():
-            outbound_connectors.notify_user(user_id, msg)
+            await outbound_connectors.notify_user(user_id, msg)
             return True
         logger.info("mcp_authz_link_undeliverable server_id=%s user_id=%s", server_id, user_id)
         return False
@@ -335,10 +298,10 @@ def make_mcp_credential_deliverer(tool_context: Any) -> Any:
     """Build a per-call deliverer for the per-user api-key *secure-form* link (Form mode).
 
     Sibling to :func:`make_mcp_authz_deliverer` with two differences: (1) credential-submission
-    wording (not OAuth "authorize"), and (2) a node-managed fallback. A node-managed agent has
-    no live IM connector (the node hosts IM), so the link is enqueued through directed-reach
-    (``outbound_connectors.notify_user`` -> ``im_outbound_queue`` -> node drain -> DM). In a
-    standalone runtime the live connector DMs the requester directly. Always returns a
+    wording (not OAuth "authorize"), and (2) a directed-reach fallback when the conversation
+    platform has no live connector in this run: it fans out via
+    ``outbound_connectors.notify_user`` (managed reverse-resolves + DMs; standalone is a no-op).
+    With a live connector the requester is DMed directly. Always returns a
     deliverer (never None): managed enqueues; standalone with a connector sends; otherwise it
     reports undelivered so the call still degrades cleanly.
     """
@@ -365,11 +328,12 @@ def make_mcp_credential_deliverer(tool_context: Any) -> Any:
                     error=receipt.error,
                 )
             return receipt.ok
-        # node-managed (no live connector): enqueue a directed-reach DM to the requester.
+        # No live connector for this platform: fall back to directed-reach fan-out
+        # (managed reverse-resolves + DMs; standalone is a no-op).
         from fleetent import outbound_connectors
 
         if outbound_connectors.is_node_managed_runtime():
-            outbound_connectors.notify_user(user_id, msg)
+            await outbound_connectors.notify_user(user_id, msg)
             return True
         logger.info("mcp_cred_link_undeliverable server_id=%s user_id=%s", server_id, user_id)
         return False
@@ -603,10 +567,6 @@ async def is_reachable(platform: str, connector: Any, target: str) -> bool:
     - Telegram: only users who have previously /started the bot are reachable
       (bot must be able to get their chat info).
     """
-    from fleetent.outbound_connectors import ManagedOutboundConnector
-
-    if isinstance(connector, ManagedOutboundConnector):
-        return True
     if platform == "slack":
         return True  # Slack workspace users are always reachable via conversations.open
     if platform == "telegram":

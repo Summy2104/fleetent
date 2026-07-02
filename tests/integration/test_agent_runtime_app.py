@@ -59,6 +59,23 @@ async def test_boot_starts_agent_slack_connector(tmp_path):
     assert sup.started == ["support"]
 
 
+async def test_boot_managed_self_hosts_im_supervisor(tmp_path, monkeypatch):
+    """agent-hosted-im (Group 4): under managed placement (loopback signal) the agent boots
+    its OWN IM supervisor — node no longer suppresses it via --no-im."""
+    monkeypatch.setenv("FLEETENT_NODE_LOOPBACK_URL", "http://127.0.0.1:8790")
+    monkeypatch.setenv("FLEETENT_TUI_TOKEN", "ma-agent-token")
+    home = _write_home(tmp_path)
+    sup, tg = _FakeSupervisor(), _FakeSupervisor()
+
+    await agent_app.boot(
+        "support", home=home, supervisor=sup, telegram_supervisor=tg, with_infra=False
+    )
+
+    # start_im defaults True and is honored in managed too (single unified path).
+    assert sup.started == ["support"]
+    assert tg.started == ["support"]
+
+
 async def test_boot_skips_im_when_disabled(tmp_path):
     home = _write_home(tmp_path)
     sup = _FakeSupervisor()
