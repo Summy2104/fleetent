@@ -52,6 +52,11 @@ webhooks:
   enabled: true
   max_body_bytes: 1048576
 
+kb_serve:
+  # Central multi-tenant kb-serve URL used by /admin/kb data-plane operations.
+  url: http://127.0.0.1:8768
+  service_key_ref: env:FLEETENT_PLATFORM_KB_SERVICE_KEY
+
 knowledge:
   mode: embedded
   knowledge_bases:

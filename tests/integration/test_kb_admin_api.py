@@ -4,8 +4,12 @@ Engine seams are monkeypatched so the tests exercise the management behaviour
 (uniqueness, binding protection, role guards, audit, seam pass-through).
 """
 
+import asyncio
+from contextlib import contextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -17,13 +21,23 @@ import fleetent.platform.agent_management_console.agent_admin_api as agent_admin
 import fleetent.platform.knowledge_base_management.agent_kbs_store as kbs_store
 import fleetent.platform.knowledge_base_management.kb_admin_api as api
 import fleetent.user_store as user_store
+from fleetent import knowledge_base as kb_runtime
 from fleetent import vector_store
 from fleetent.knowledge_base import parsers as kb_parsers
+from fleetent.knowledge_base import serve as kb_serve
+from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
 from fleetent.knowledge_base.ingest.config import as_knowledge_base_settings
 from fleetent.knowledge_base.ingest.runtime import ingest_parsed
 from fleetent.observability.traces import TraceEvent
+from fleetent.platform.knowledge_base_management.kb_serve_client import (
+    KBServeClient,
+    KBServeSettings,
+)
+from fleetent.tenant_router import StandaloneKBTenantBackend, TenantRouter
 from fleetent.vector_store import SearchResult
 from tests.integration._migration_template import apply_migrations
+
+_HOST_WIRED_KB_HOME: Path | None = None
 
 
 @pytest.fixture
@@ -43,13 +57,17 @@ def client(tmp_path, monkeypatch):
 
 @pytest.fixture
 def host_wired_client(tmp_path, monkeypatch):
+    global _HOST_WIRED_KB_HOME
     db_path = tmp_path / "fleetent.db"
     apply_migrations(db_path)
     database_url = f"sqlite:///{db_path}"
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.setenv("FLEETENT_KB_SERVICE_KEY", "svc-test")
+    monkeypatch.setenv("FLEETENT_PLATFORM_KB_SERVICE_KEY", "svc-test")
     monkeypatch.setenv("KNOWLEDGE_BASE__CHUNK_SIZE", "200")
     monkeypatch.setenv("KNOWLEDGE_BASE__CHUNK_OVERLAP", "0")
+    _HOST_WIRED_KB_HOME = tmp_path
 
     indexed_chunks: dict[str, dict[str, str]] = {}
 
@@ -74,6 +92,39 @@ def host_wired_client(tmp_path, monkeypatch):
     monkeypatch.setattr(vector_store, "upsert", upsert)
     monkeypatch.setattr(vector_store, "search", search)
     monkeypatch.setattr(vector_store, "delete", delete)
+    kb_app = kb_serve.create_app(
+        kb_serve.KBServeConfig(
+            tenant_id="default",
+            service_key_ref="env:FLEETENT_KB_SERVICE_KEY",
+            data_dir=tmp_path,
+        )
+    )
+    kb_client = TestClient(kb_app, raise_server_exceptions=True)
+
+    def _kb_transport(request: httpx.Request) -> httpx.Response:
+        response = kb_client.request(
+            request.method,
+            request.url.raw_path.decode("ascii"),
+            headers=dict(request.headers),
+            content=request.content,
+        )
+        return httpx.Response(
+            response.status_code,
+            headers=dict(response.headers),
+            content=response.content,
+        )
+
+    monkeypatch.setattr(
+        api,
+        "get_kb_serve_client",
+        lambda: KBServeClient(
+            KBServeSettings(
+                url="http://kb-serve.test",
+                service_key_ref="env:FLEETENT_PLATFORM_KB_SERVICE_KEY",
+            ),
+            transport=httpx.MockTransport(_kb_transport),
+        ),
+    )
     app = FastAPI()
     app.include_router(agent_admin_api.router)
     app.include_router(api.router)
@@ -101,13 +152,15 @@ def _seed_document(
     content: str,
     document_format: str = "markdown",
 ):
+    if _HOST_WIRED_KB_HOME is None:
+        raise AssertionError("host wired kb home is not initialized")
     parser = {
         "markdown": kb_parsers.parse_markdown,
         "text": kb_parsers.parse_text,
         "html": kb_parsers.parse_html,
     }[document_format]
-    with api._use_kb_runtime(tenant_id):
-        return api.asyncio.run(
+    with _kb_runtime(_HOST_WIRED_KB_HOME, tenant_id) as scope:
+        return asyncio.run(
             ingest_parsed(
                 parser(source, content),
                 tenant_id=tenant_id,
@@ -118,9 +171,23 @@ def _seed_document(
                     default_tenant_id=tenant_id,
                     default_kb_id=kb_id,
                 ),
-                database=api._knowledge_database(tenant_id),
+                database=scope.open_kb_db(KB_MIGRATIONS),
             )
         )
+
+
+@contextmanager
+def _kb_runtime(home_dir: Path, tenant_id: str):
+    scope = TenantRouter(StandaloneKBTenantBackend(data_dir=home_dir)).tenant_scope(tenant_id)
+    previous_db = kb_runtime.runtime._kb_db
+    previous_backend = kb_runtime.runtime._kb_vector_backend
+    kb_runtime.runtime.set_database(scope.open_kb_db(KB_MIGRATIONS))
+    kb_runtime.runtime.set_vector_backend(scope.kb_vector_backend)
+    try:
+        yield scope
+    finally:
+        kb_runtime.runtime.set_database(previous_db)
+        kb_runtime.runtime.set_vector_backend(previous_backend)
 
 
 # --- auth / role (场景 108) ---------------------------------------------------
@@ -281,7 +348,7 @@ def test_retrieval_playground(client, monkeypatch):
     monkeypatch.setattr(
         api,
         "kb_search",
-        lambda query, tenant_id, kb_ids, mode, limit: [
+        lambda query, tenant_id, kb_ids, mode, limit, **kwargs: [
             {"score": 0.9, "document_id": "d1", "position": 0, "section": "intro"}
         ][:limit],
     )
@@ -296,6 +363,101 @@ def test_retrieval_playground(client, monkeypatch):
     assert r.json()["kb_ids"] == ["sales", "support"]
 
 
+def test_retrieval_playground_uses_kb_serve_client_contract(client, monkeypatch):
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def search(
+            self,
+            *,
+            tenant_id: str,
+            query: str,
+            kb_ids: list[str],
+            limit: int,
+            mode: str,
+            rerank: bool,
+            use_planner: bool,
+        ) -> dict[str, object]:
+            self.calls.append(
+                {
+                    "tenant_id": tenant_id,
+                    "query": query,
+                    "kb_ids": kb_ids,
+                    "limit": limit,
+                    "mode": mode,
+                    "rerank": rerank,
+                    "use_planner": use_planner,
+                }
+            )
+            return {
+                "chunks": [
+                    {
+                        "id": "chunk-1",
+                        "document_id": "doc-1",
+                        "kb_id": "sales",
+                        "filename": "sales.md",
+                        "content": "hello",
+                        "position": 0,
+                        "score": 0.9,
+                        "source": "sales.md",
+                        "source_url": None,
+                        "section": "intro",
+                        "section_path": "intro",
+                    }
+                ]
+            }
+
+    fake = FakeClient()
+    monkeypatch.setattr(api, "get_kb_serve_client", lambda: fake, raising=False)
+
+    token, _ = _session_for("viewer")
+    r = client.post(
+        "/admin/kb/search",
+        headers=_hdr(token),
+        json={
+            "query": "q",
+            "kb_ids": ["sales", "support"],
+            "mode": "hybrid",
+            "top_k": 5,
+            "rerank": True,
+            "use_planner": True,
+        },
+    )
+    assert r.status_code == 200
+    assert r.json() == {
+        "query": "q",
+        "mode": "hybrid",
+        "kb_ids": ["sales", "support"],
+        "results": [
+            {
+                "id": "chunk-1",
+                "document_id": "doc-1",
+                "kb_id": "sales",
+                "filename": "sales.md",
+                "content": "hello",
+                "position": 0,
+                "score": 0.9,
+                "source": "sales.md",
+                "source_url": None,
+                "section": "intro",
+                "section_path": "intro",
+            }
+        ],
+    }
+    assert fake.calls == [
+        {
+            "tenant_id": "default",
+            "query": "q",
+            "kb_ids": ["sales", "support"],
+            "limit": 5,
+            "mode": "hybrid",
+            "rerank": True,
+            "use_planner": True,
+        }
+    ]
+
+
 def test_retrieval_unknown_mode_422(client):
     token, _ = _session_for("admin")
     r = client.post(
@@ -307,7 +469,7 @@ def test_retrieval_unknown_mode_422(client):
 
 
 def test_retrieval_empty_kb_ids_422(client, monkeypatch):
-    def fail_search(query, tenant_id, kb_ids, mode, limit):
+    def fail_search(query, tenant_id, kb_ids, mode, limit, **kwargs):
         raise AssertionError("empty kb_ids must be rejected before search")
 
     monkeypatch.setattr(api, "kb_search", fail_search)
@@ -461,8 +623,10 @@ def test_delete_document_viewer_forbidden(client):
 # --- binding matrix both directions -------------------------------------------
 
 
-def test_bind_and_reverse_lookup_consistent(client):
+def test_bind_and_reverse_lookup_consistent(client, monkeypatch):
     agent = agent_store.create_agent("agent-a", "Prompt.", ["shell"])
+    monkeypatch.setattr(api, "kb_engine_list", lambda tenant_id: [{"kb_id": "sales"}])
+    monkeypatch.setattr(agent_admin_api, "kb_engine_list", lambda tenant_id: [{"kb_id": "sales"}])
     token, _ = _session_for("admin")
     client.post("/admin/kb/sales/agents", headers=_hdr(token), json={"agent_id": agent.id})
     fwd = client.get("/admin/kb/sales/agents", headers=_hdr(token)).json()
@@ -472,7 +636,48 @@ def test_bind_and_reverse_lookup_consistent(client):
     assert rev["kb_ids"] == ["sales"]
 
 
-def test_eval_entry_read_only_for_viewer(client):
+def test_binding_and_observation_remain_in_process(client, monkeypatch):
+    monkeypatch.setattr(
+        api,
+        "get_kb_serve_client",
+        lambda: (_ for _ in ()).throw(AssertionError("binding/observation must stay in-process")),
+        raising=False,
+    )
+    monkeypatch.setattr(api.agent_kbs_store, "list_agents_for_kb", lambda tenant_id, kb_id: [7, 8])
+    monkeypatch.setattr(
+        api.kb_observation_agg,
+        "aggregate",
+        lambda tenant_id, kb_id, agent_ids: {
+            "kb_id": kb_id,
+            "query_count": 1,
+            "hit_count": 1,
+            "agent_ids": list(agent_ids),
+        },
+    )
+
+    token, _ = _session_for("viewer")
+    assert client.get("/admin/kb/sales/agents", headers=_hdr(token)).json() == {
+        "kb_id": "sales",
+        "agents": [7, 8],
+    }
+    assert client.get("/admin/kb/sales/observation", headers=_hdr(token)).json() == {
+        "kb_id": "sales",
+        "query_count": 1,
+        "hit_count": 1,
+        "agent_ids": [7, 8],
+    }
+
+
+def test_eval_entry_read_only_for_viewer(client, monkeypatch):
+    monkeypatch.setattr(
+        api,
+        "kb_evaluation",
+        lambda tenant_id, kb_id: {
+            "kb_id": kb_id,
+            "metrics": {"recall_at_k": 1.0, "mrr": 1.0, "query_count": 1},
+            "hit_ranking": [{"rank": 1}],
+        },
+    )
     token, _ = _session_for("viewer")
     r = client.post("/admin/kb/evaluations", headers=_hdr(token), json={"kb_id": "sales"})
     assert r.status_code == 200
@@ -483,6 +688,110 @@ def test_eval_entry_read_only_for_viewer(client):
     assert body["metrics"]["query_count"] >= 1
     assert body["hit_ranking"][0]["rank"] == 1
     assert "wired" not in body
+
+
+def test_kb_data_plane_routes_through_kb_serve_client(host_wired_client, monkeypatch):
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+            self.created = False
+
+        def list_knowledge_bases(self, tenant_id: str):
+            self.calls.append(("list_knowledge_bases", (tenant_id,), {}))
+            if not self.created:
+                return []
+            return [{"kb_id": "sales", "description": "Sales", "archived": False}]
+
+        def create_knowledge_base(self, tenant_id: str, kb_id: str, description: str):
+            self.calls.append(("create_knowledge_base", (tenant_id, kb_id, description), {}))
+            self.created = True
+            return {"kb_id": kb_id, "tenant_id": tenant_id, "description": description}
+
+        def update_knowledge_base(self, tenant_id: str, kb_id: str, **kwargs):
+            self.calls.append(("update_knowledge_base", (tenant_id, kb_id), kwargs))
+            return {"kb_id": kb_id, "description": str(kwargs["description"])}
+
+        def archive_knowledge_base(self, tenant_id: str, kb_id: str):
+            self.calls.append(("archive_knowledge_base", (tenant_id, kb_id), {}))
+            return {"kb_id": kb_id, "archived": True}
+
+        def list_documents(self, tenant_id: str, kb_id: str):
+            self.calls.append(("list_documents", (tenant_id, kb_id), {}))
+            return [{"document_id": "doc-1", "filename": "sales.md", "chunks": 1}]
+
+        def preview_document_chunks(self, tenant_id: str, kb_id: str, document_id: str):
+            self.calls.append(("preview_document_chunks", (tenant_id, kb_id, document_id), {}))
+            return [{"id": "chunk-1", "content": "hello", "section": "intro"}]
+
+        def delete_document(self, tenant_id: str, kb_id: str, document_id: str):
+            self.calls.append(("delete_document", (tenant_id, kb_id, document_id), {}))
+            return {"kb_id": kb_id, "document_id": document_id, "deleted": True}
+
+        def run_evaluation(self, tenant_id: str, kb_id: str):
+            self.calls.append(("run_evaluation", (tenant_id, kb_id), {}))
+            return {"kb_id": kb_id, "metrics": {"mrr": 1.0}, "hit_ranking": [{"rank": 1}]}
+
+    fake = FakeClient()
+    monkeypatch.setattr(api, "get_kb_serve_client", lambda: fake, raising=False)
+
+    token, _ = _session_for("admin")
+    assert host_wired_client.get("/admin/kb", headers=_hdr(token)).status_code == 200
+    assert (
+        host_wired_client.post(
+            "/admin/kb",
+            headers=_hdr(token),
+            json={"kb_id": "sales", "description": "Sales"},
+        ).status_code
+        == 200
+    )
+    assert (
+        host_wired_client.patch(
+            "/admin/kb/sales",
+            headers=_hdr(token),
+            json={"description": "Updated"},
+        ).status_code
+        == 200
+    )
+    assert (
+        host_wired_client.get("/admin/kb/sales/documents", headers=_hdr(token)).status_code == 200
+    )
+    assert (
+        host_wired_client.get(
+            "/admin/kb/sales/documents/doc-1/chunks", headers=_hdr(token)
+        ).status_code
+        == 200
+    )
+    assert (
+        host_wired_client.delete(
+            "/admin/kb/sales/documents/doc-1",
+            headers=_hdr(token, confirm=True),
+        ).status_code
+        == 200
+    )
+    assert (
+        host_wired_client.post(
+            "/admin/kb/evaluations",
+            headers=_hdr(token),
+            json={"kb_id": "sales"},
+        ).status_code
+        == 200
+    )
+    assert (
+        host_wired_client.delete("/admin/kb/sales", headers=_hdr(token, confirm=True)).status_code
+        == 200
+    )
+
+    assert [call[0] for call in fake.calls] == [
+        "list_knowledge_bases",
+        "list_knowledge_bases",
+        "create_knowledge_base",
+        "update_knowledge_base",
+        "list_documents",
+        "preview_document_chunks",
+        "delete_document",
+        "run_evaluation",
+        "archive_knowledge_base",
+    ]
 
 
 # --- reverse lookup excludes archived KBs (任务 2.3/2.4) ----------------------

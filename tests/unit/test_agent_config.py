@@ -967,6 +967,42 @@ def test_collect_env_var_names_includes_mcp_env_and_headers_env_refs() -> None:
     assert names.count("MY_DATABASE_URL") == 1
 
 
+def test_collect_env_var_names_includes_knowledge_provider_auth_ref() -> None:
+    agent = agent_config.AgentFile.model_validate(
+        {
+            "name": "kb-http-agent",
+            "version": 1,
+            "system_prompt": "test",
+            "models": {
+                "targets": [
+                    {
+                        "id": "primary",
+                        "provider": "anthropic",
+                        "protocol": "openai_chat",
+                        "base_url": "https://api.anthropic.com/v1/",
+                        "model": "claude-opus-4-8",
+                        "api_key_env": "MODEL_API_KEY",
+                    }
+                ],
+                "routes": {"default": [{"target": "primary"}]},
+            },
+            "knowledge": {
+                "enabled": True,
+                "bindings": [{"tenant_id": "default", "kb_id": "kb-1"}],
+                "provider": {
+                    "type": "http",
+                    "url": "http://kb-serve:8768/search",
+                    "auth_ref": "env:FLEETENT_KB_SERVICE_KEY",
+                },
+            },
+        }
+    )
+
+    names = agent_config.collect_env_var_names(agent)
+
+    assert "FLEETENT_KB_SERVICE_KEY" in names
+
+
 # --- task 6.1: platform and node alignment ---
 
 

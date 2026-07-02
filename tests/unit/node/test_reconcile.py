@@ -74,6 +74,23 @@ def _post_body(route: respx.Route) -> dict[str, object]:
     return json.loads(route.calls[0].request.content)
 
 
+def _write_kb_host_config(tmp_path, *, host: str = "127.0.0.1", port: int = 8768) -> None:
+    kb_config = tmp_path / "kb-service.yaml"
+    kb_config.write_text(
+        yaml.safe_dump(
+            {
+                "service": {
+                    "service_key_ref": "env:FLEETENT_KB_SERVICE_KEY",
+                    "host": host,
+                    "port": port,
+                }
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+
 @respx.mock
 def test_reconcile_spawns_missing_desired_agent_after_writing_home(tmp_path) -> None:
     from fleetent.node.reconcile import NodeReconciler
@@ -91,6 +108,62 @@ def test_reconcile_spawns_missing_desired_agent_after_writing_home(tmp_path) -> 
         "name": "support",
         "tenant_id": "tenant-1",
     }
+    assert route.called
+
+
+@respx.mock
+def test_reconcile_injects_managed_kb_http_provider_from_host_service_config(
+    tmp_path, monkeypatch
+) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    _write_kb_host_config(tmp_path, host="127.0.0.1", port=9876)
+    monkeypatch.setenv("FLEETENT_KB_SERVICE_KEY", "svc-kb-shared")
+    backend = FakeBackend({"support": None})
+    route = respx.post("https://platform.internal/nodes/node-a/status").mock(
+        return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
+    )
+
+    desired = _desired(
+        config={
+            "name": "support",
+            "version": 1,
+            "tenant_id": "tenant-1",
+            "models": {
+                "targets": [
+                    {
+                        "id": "default",
+                        "provider": "anthropic",
+                        "protocol": "openai_chat",
+                        "base_url": "https://api.anthropic.test/v1",
+                        "model": "claude-haiku",
+                        "api_key_env": "SUPPORT_MODEL_KEY",
+                    }
+                ],
+                "routes": {"default": [{"target": "default"}]},
+            },
+            "knowledge": {
+                "enabled": True,
+                "bindings": [{"tenant_id": "tenant-1", "kb_id": "support-kb"}],
+            },
+        }
+    )
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(desired)
+
+    home = _home(tmp_path)
+    config = yaml.safe_load((home / "agent.yaml").read_text(encoding="utf-8"))
+    assert config["knowledge"]["provider"] == {
+        "type": "http",
+        "url": "http://127.0.0.1:9876/search",
+        "auth_ref": "env:FLEETENT_KB_SERVICE_KEY",
+    }
+    env_lines = dict(
+        line.split("=", 1)
+        for line in (home / ".env").read_text(encoding="utf-8").strip().splitlines()
+        if "=" in line
+    )
+    assert env_lines["FLEETENT_KB_SERVICE_KEY"] == "svc-kb-shared"
     assert route.called
 
 

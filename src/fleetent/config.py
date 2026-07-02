@@ -445,6 +445,12 @@ class WebhooksSettings(BaseModel):
     sources: list[WebhookSourceSettings] = Field(default_factory=list)
 
 
+class KBServeSettings(BaseModel):
+    url: str = ""
+    service_key_ref: str = ""
+    timeout_seconds: float = 30.0
+
+
 class Settings(BaseSettings):
     """Slim platform control-plane settings.
 
@@ -461,6 +467,7 @@ class Settings(BaseSettings):
     database_url: str = Field(default_factory=lambda: f"sqlite:///{paths.management_db_path()}")
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     oidc: OidcSettings = Field(default_factory=OidcSettings)
+    kb_serve: KBServeSettings = Field(default_factory=KBServeSettings)
 
     @classmethod
     def settings_customise_sources(
