@@ -6,6 +6,8 @@ create, stored as ciphertext (via the store), and never echoed back in any respo
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, ConfigDict
 
@@ -42,6 +44,25 @@ class WebhookSourceCreateBody(BaseModel):
     reply_target: str | None = None
     enabled: bool = True
     secret: str | None = None  # write-only; stored as ciphertext, never echoed
+
+
+class WebhookSourceUpdateBody(BaseModel):
+    """Update payload. ``id`` is immutable (path param) and thus absent here.
+
+    The secret is governed by ``secret_action`` so an omitted secret cannot silently wipe an
+    existing one: ``keep`` (default) leaves it, ``set`` overwrites with ``secret``, ``clear`` drops
+    it. ``set`` without a ``secret`` value is a 400.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: str
+    agent_id: int | None = None
+    message_template: str | None = None
+    reply_target: str | None = None
+    enabled: bool = True
+    secret_action: Literal["keep", "set", "clear"] = "keep"
+    secret: str | None = None  # write-only; required when secret_action == "set"
 
 
 def _public_view(src: store.StoredWebhookSource) -> dict[str, object]:
@@ -81,6 +102,31 @@ def create_webhook_source(
     created = store.get_source(body.id)
     assert created is not None
     return _public_view(created)
+
+
+@router.put("/webhooks/sources/{source_id}")
+def update_webhook_source(
+    source_id: str, body: WebhookSourceUpdateBody, authorization: str | None = Header(None)
+) -> dict[str, object]:
+    user = _require_admin(authorization)
+    if store.get_source(source_id) is None:
+        raise HTTPException(status_code=404, detail="webhook source not found")
+    if body.secret_action == "set" and body.secret is None:
+        raise HTTPException(status_code=400, detail="secret required when secret_action is 'set'")
+    store.update_source(
+        id=source_id,
+        user_id=body.user_id,
+        agent_id=body.agent_id,
+        message_template=body.message_template,
+        reply_target=body.reply_target,
+        enabled=body.enabled,
+        secret_action=body.secret_action,
+        secret=body.secret,
+    )
+    audit_log.write_audit(user.id, "webhook.update", "webhook_source", source_id)
+    updated = store.get_source(source_id)
+    assert updated is not None
+    return _public_view(updated)
 
 
 @router.delete("/webhooks/sources/{source_id}", status_code=204)

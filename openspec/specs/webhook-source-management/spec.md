@@ -33,6 +33,14 @@ webhook source 的 `secret`（HMAC 校验用）MUST NOT 以明文持久化。man
 
 managed 下系统 SHALL 提供受管理员鉴权的 REST API 对 `webhook_sources` 做增删查改（CRUD）。创建/更新 MUST 校验必填字段（`id` / `user_id`；`agent_id` 用于路由目标 agent，未配则入站投递时拒绝）；非管理员会话 MUST 被拒。secret 提交后 MUST 以密文落库、响应 MUST NOT 回显明文 secret。
 
+更新 SHALL 经 `PUT /admin/webhooks/sources/{id}` 实现，且 `id` 不可变更（`id` 即公开 URL `/webhook/{id}`）。更新的密钥处理 MUST 由显式判别字段 `secret_action` 决定，MUST NOT 因请求体缺省 secret 而清空已有密钥：
+
+- `keep`（默认）→ 保持已有密钥不变（物理上不触碰 secret 密文列）；
+- `set` → 用请求体 `secret` 新值加密覆盖（`set` 时 `secret` 缺失 MUST 返回 400）；
+- `clear` → 将密钥置空。
+
+对不存在的 `id` 更新 MUST 返回 404。
+
 #### Scenario: 管理员创建 source
 - **WHEN** 管理员 POST 一个 webhook source（含 secret）到 admin API
 - **THEN** source 落管理库、secret 密文存储，响应不含明文 secret
@@ -41,18 +49,38 @@ managed 下系统 SHALL 提供受管理员鉴权的 REST API 对 `webhook_source
 - **WHEN** 管理员 GET 列表或 DELETE 某 `source_id`
 - **THEN** 返回不含明文 secret 的 source 列表 / 删除该 source 后 `POST /webhook/{id}` 返回 404
 
+#### Scenario: 管理员更新 source 常规字段，默认保留密钥
+- **WHEN** 管理员 PUT 一个已有 `source_id`，改动 user_id / agent_id / message_template / reply_target / enabled，且 `secret_action` 缺省（keep）
+- **THEN** 常规字段更新落库，已有密钥保持不变，响应不含明文 secret 但 `has_secret` 仍为 true
+
+#### Scenario: 管理员更换或清除密钥
+- **WHEN** 管理员 PUT 时 `secret_action="set"` 并带新 `secret` / 或 `secret_action="clear"`
+- **THEN** 密钥被新值密文覆盖 / 被置空（`has_secret` 变 false）；`set` 缺 secret 返回 400
+
+#### Scenario: 更新不存在的 source
+- **WHEN** 管理员 PUT 一个不存在的 `source_id`
+- **THEN** 返回 404，不新建行
+
 ### Requirement: managed webhook source 在 React SPA 中原生管理
 
-React 管理 SPA SHALL 提供托管 webhook source 的原生管理界面，覆盖既有 admin API 的能力子集：列表、新建、删除。创建表单 MUST 要求 `id` / `user_id` / `agent_id` 必填（`agent_id` 前端强制必填，即使后端模型允许 null——入站请求在 `agent_id` 为空时会 409）。SPA SHALL NOT 提供编辑能力（后端 upsert 语义会清空未传的 secret，改配置以删除重建代替）。
+React 管理 SPA SHALL 提供托管 webhook source 的原生管理界面：列表、新建、**查看全部字段**、**编辑**、删除。创建/编辑表单 MUST 要求 `id` / `user_id` / `agent_id` 必填（`agent_id` 前端强制必填，即使后端模型允许 null——入站请求在 `agent_id` 为空时会 409）；`id` 在编辑态 MUST 只读。查看/编辑 SHALL 经同一弹窗，默认只读展示除密钥外的全部字段（`reply_target` / `agent` 显示名称、密钥仅显示「已设置/未设置」），点「编辑」切到可改态。编辑保存的密钥处理 MUST 提供「保持（默认）/ 更换 / 清除」三种显式动作，映射到后端 `secret_action`，SPA MUST NOT 回显明文 secret。
 
 #### Scenario: 管理员新建 webhook source
 - **WHEN** 管理员在 SPA 中填写 id / user_id / agent_id 等字段并提交新建
 - **THEN** SPA 调用 `POST /admin/webhooks/sources`，成功后列表刷新，并展示可复制的完整 webhook URL
 
+#### Scenario: 管理员查看 webhook source 全部字段
+- **WHEN** 管理员对某条 webhook source 打开「查看/编辑」弹窗
+- **THEN** 弹窗只读展示 id / agent 名 / user / reply_target 名 / message_template / 启用状态 / 密钥「已设置或未设置」，不回显明文 secret
+
+#### Scenario: 管理员编辑 webhook source
+- **WHEN** 管理员在弹窗点「编辑」，改动常规字段并保存，密钥保持默认不动
+- **THEN** SPA 调用 `PUT /admin/webhooks/sources/{id}`（`secret_action=keep`），成功后列表刷新、弹窗回只读态，已有密钥不受影响
+
+#### Scenario: 管理员更换或清除密钥（SPA）
+- **WHEN** 管理员在编辑态选「更换密钥」填新值 / 或选「清除密钥」并保存
+- **THEN** SPA 分别以 `secret_action=set`（带新 secret）/ `secret_action=clear` 调 PUT，密钥被更换 / 清除
+
 #### Scenario: 管理员删除 webhook source
 - **WHEN** 管理员对某条 webhook source 发起删除并确认
 - **THEN** SPA 调用 `DELETE /admin/webhooks/sources/{id}`，成功后该行从列表消失
-
-#### Scenario: 不提供编辑入口
-- **WHEN** 管理员想修改已有 webhook source 的配置
-- **THEN** SPA 不提供编辑表单，只能删除后重新新建

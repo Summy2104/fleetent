@@ -34,9 +34,8 @@ def test_migration_creates_webhook_sources_table(db):
 
 
 def test_put_get_roundtrip_and_secret_is_ciphertext(db):
-    from fleetent.platform.webhook_management import webhook_source_store as store
-
     from fleetent import agent_store
+    from fleetent.platform.webhook_management import webhook_source_store as store
 
     agent = agent_store.create_agent("bot", "You are a bot.", [])
     store.put_source(
@@ -91,3 +90,100 @@ def test_put_without_secret_stores_null(db):
     src = store.get_source("nosec")
     assert src is not None
     assert src.secret is None
+
+
+def test_update_source_replaces_regular_fields(db):
+    from fleetent.platform.webhook_management import webhook_source_store as store
+
+    store.put_source(id="s1", agent_id=None, user_id="u1", enabled=True)
+    store.update_source(
+        id="s1",
+        user_id="u2",
+        agent_id=None,
+        message_template="hi {ref}",
+        reply_target="u-9",
+        enabled=False,
+        secret_action="keep",
+    )
+    src = store.get_source("s1")
+    assert src is not None
+    assert src.user_id == "u2"
+    assert src.message_template == "hi {ref}"
+    assert src.reply_target == "u-9"
+    assert src.enabled is False
+
+
+def test_update_source_keep_preserves_secret(db):
+    from fleetent.platform.webhook_management import webhook_source_store as store
+
+    store.put_source(id="s1", agent_id=None, user_id="u1", secret="orig")
+    store.update_source(
+        id="s1",
+        user_id="u1",
+        agent_id=None,
+        message_template=None,
+        reply_target=None,
+        enabled=True,
+        secret_action="keep",
+    )
+    src = store.get_source("s1")
+    assert src is not None
+    assert src.secret == "orig"
+
+
+def test_update_source_set_replaces_secret_as_ciphertext(db):
+    from fleetent.platform.webhook_management import webhook_source_store as store
+
+    store.put_source(id="s1", agent_id=None, user_id="u1", secret="orig")
+    store.update_source(
+        id="s1",
+        user_id="u1",
+        agent_id=None,
+        message_template=None,
+        reply_target=None,
+        enabled=True,
+        secret_action="set",
+        secret="rotated",
+    )
+    src = store.get_source("s1")
+    assert src is not None
+    assert src.secret == "rotated"
+
+    conn = sqlite3.connect(db)
+    raw = conn.execute("SELECT secret_ciphertext FROM webhook_sources WHERE id='s1'").fetchone()[0]
+    conn.close()
+    assert raw is not None
+    assert "rotated" not in raw
+
+
+def test_update_source_clear_nulls_secret(db):
+    from fleetent.platform.webhook_management import webhook_source_store as store
+
+    store.put_source(id="s1", agent_id=None, user_id="u1", secret="orig")
+    store.update_source(
+        id="s1",
+        user_id="u1",
+        agent_id=None,
+        message_template=None,
+        reply_target=None,
+        enabled=True,
+        secret_action="clear",
+    )
+    src = store.get_source("s1")
+    assert src is not None
+    assert src.secret is None
+
+
+def test_update_source_unknown_id_does_not_insert(db):
+    from fleetent.platform.webhook_management import webhook_source_store as store
+
+    store.update_source(
+        id="ghost",
+        user_id="u1",
+        agent_id=None,
+        message_template=None,
+        reply_target=None,
+        enabled=True,
+        secret_action="keep",
+    )
+    assert store.get_source("ghost") is None
