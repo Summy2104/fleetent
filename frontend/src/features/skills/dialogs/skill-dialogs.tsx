@@ -10,9 +10,6 @@ import {
   type BackflowDiff,
   type BackflowProposal,
   type SkillProposal,
-  useBackflowAcceptMutation,
-  useBackflowForkMutation,
-  useBackflowRejectMutation,
   useSetSkillAgentBindingMutation,
   useSkillAgentBindingsQuery,
   useSkillContentQuery,
@@ -266,39 +263,15 @@ export function ProposalsDialog({
 
 // ─────────────────────────── Backflow proposal card + dialog ───────────────────────────
 
+// Read-only: the platform does not accept/reject/fork backflow. It records the agent's edit,
+// pushes it to a backup branch, and shows the diff; adoption is a human PR in the git host.
 function BackflowProposalCard({
   onViewDiff,
   proposal,
-  gitopsEnabled = false,
 }: {
   onViewDiff: (id: number) => void
   proposal: BackflowProposal
-  gitopsEnabled?: boolean
 }): JSX.Element {
-  const accept = useBackflowAcceptMutation(proposal.id)
-  const reject = useBackflowRejectMutation(proposal.id)
-  const fork = useBackflowForkMutation(proposal.id)
-
-  const onAccept = async (): Promise<void> => {
-    if (proposal.conflict) {
-      // Pool advanced past the proposal's base — require an explicit override decision.
-      if (!window.confirm(`Pool advanced for ${proposal.skill_name}. Override pool head?`)) {
-        return
-      }
-      await accept.mutateAsync({ confirm: true })
-      return
-    }
-    await accept.mutateAsync({})
-  }
-
-  const onFork = async (): Promise<void> => {
-    const forkName = window.prompt(`New skill name to fork ${proposal.skill_name} as`, `${proposal.skill_name}-fork`)
-    if (!forkName) {
-      return
-    }
-    await fork.mutateAsync({ fork_name: forkName })
-  }
-
   return (
     <article className="rounded-xl border bg-white p-4" key={proposal.id}>
       <div className="flex items-start justify-between gap-4">
@@ -322,33 +295,6 @@ function BackflowProposalCard({
           >
             {`View backflow diff for ${proposal.id}`}
           </button>
-          {/* GitOps: accept/fork are the human's job (open a PR from the backup branch);
-              only reject (revert the agent's edit) is a platform action. */}
-          {gitopsEnabled ? null : (
-            <button
-              className="rounded-md bg-primary px-3 py-2 font-medium text-primary-foreground text-sm"
-              onClick={() => void onAccept()}
-              type="button"
-            >
-              {`Accept backflow ${proposal.id}`}
-            </button>
-          )}
-          <button
-            className="rounded-md bg-secondary px-3 py-2 font-medium text-sm"
-            onClick={() => void reject.mutateAsync()}
-            type="button"
-          >
-            {`Reject backflow ${proposal.id}`}
-          </button>
-          {gitopsEnabled ? null : (
-            <button
-              className="rounded-md bg-secondary px-3 py-2 font-medium text-sm"
-              onClick={() => void onFork()}
-              type="button"
-            >
-              {`Fork backflow ${proposal.id}`}
-            </button>
-          )}
         </div>
       </div>
     </article>
@@ -405,12 +351,7 @@ export function BackflowDialog({
             </div>
           ) : null}
           {proposals.map((proposal) => (
-            <BackflowProposalCard
-              gitopsEnabled={gitopsEnabled}
-              key={proposal.id}
-              onViewDiff={onViewDiff}
-              proposal={proposal}
-            />
+            <BackflowProposalCard key={proposal.id} onViewDiff={onViewDiff} proposal={proposal} />
           ))}
           {proposals.length === 0 ? <p className="text-muted-foreground text-sm">{t('skills.noBackflow')}</p> : null}
           {diffLoading ? <p className="mt-2 text-muted-foreground text-sm">{t('skills.diffLoading')}</p> : null}
