@@ -53,7 +53,11 @@ export type CreateModelInput = {
   provider_id: string
 }
 
-export type UpdateModelInput = Omit<CreateModelInput, 'id' | 'provider_id' | 'protocol'> & {
+// base_url/endpoint accept explicit null: the backend edit keeps omitted fields
+// (exclude_unset), so clearing a stored value requires actively sending null.
+export type UpdateModelInput = Omit<CreateModelInput, 'id' | 'provider_id' | 'protocol' | 'base_url' | 'endpoint'> & {
+  base_url?: string | null
+  endpoint?: string | null
   provider_id?: string
   protocol?: string
 }

@@ -35,7 +35,9 @@ type ModelRecord = {
   model_name: string
   output_price_per_1k: number | null
   params: Record<string, unknown> | null
-  protocol: string
+  // Legacy rows migrated before protocol existed carry NULL — the exact state the
+  // edit dialog exists to repair.
+  protocol: string | null
   provider_id: string
 }
 
@@ -401,6 +403,147 @@ describe('providers page', () => {
     expect(body.protocol).toBe('openai_image_chat')
     expect(body.base_url).toBe('https://newapi.example/v1')
     expect(body.endpoint).toBeUndefined()
+  })
+
+  it('edits a legacy model: backfills protocol/endpoint via the edit dialog with a read-only id', async () => {
+    const user = userEvent.setup({ delay: null })
+    let capturedPut: Record<string, unknown> | null = null
+    let models: ModelRecord[] = [
+      {
+        base_url: 'https://alpha.initial',
+        description: null,
+        endpoint: null,
+        id: 'alpha-chat',
+        input_price_per_1k: null,
+        max_tokens: null,
+        model_name: 'gpt-5',
+        output_price_per_1k: null,
+        params: null,
+        protocol: null,
+        provider_id: 'alpha',
+      },
+    ]
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () =>
+        HttpResponse.json({ email: 'admin@fleetent.test', id: 'admin-1', role: 'admin' })
+      ),
+      http.get(`${API_BASE_URL}/admin/providers`, () =>
+        HttpResponse.json([
+          {
+            api_key: null,
+            api_key_env: null,
+            api_key_set: false,
+            base_url: 'https://alpha.initial',
+            description: null,
+            id: 'alpha',
+            model_count: 1,
+            provider: null,
+          },
+        ])
+      ),
+      http.get(`${API_BASE_URL}/admin/models`, () => HttpResponse.json(models)),
+      http.put(`${API_BASE_URL}/admin/models/alpha-chat`, async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>
+        capturedPut = body
+        models = models.map((model) =>
+          model.id === 'alpha-chat'
+            ? {
+                ...model,
+                base_url: (body.base_url as string | null) ?? null,
+                endpoint: (body.endpoint as string | null) ?? null,
+                model_name: (body.model_name as string) ?? model.model_name,
+                protocol: (body.protocol as string) ?? model.protocol,
+              }
+            : model
+        )
+        return HttpResponse.json(models[0])
+      })
+    )
+
+    renderPage()
+    expect(await screen.findByText('gpt-5')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Edit model alpha-chat' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('Edit model alpha-chat')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Model ID')).toBeDisabled()
+    expect(within(dialog).getByLabelText('Model ID')).toHaveValue('alpha-chat')
+    expect(within(dialog).getByLabelText('Model name')).toHaveValue('gpt-5')
+
+    await user.click(within(dialog).getByRole('combobox', { name: 'Protocol' }))
+    await user.click(await screen.findByRole('option', { name: 'http_embedding' }))
+    expect(within(dialog).queryByLabelText('Base URL')).not.toBeInTheDocument()
+    await user.type(within(dialog).getByLabelText('Endpoint'), 'http://localhost:11434/v1/embeddings')
+    await user.click(within(dialog).getByRole('button', { name: 'Save changes' }))
+
+    await waitFor(() => expect(capturedPut).not.toBeNull())
+    const body = capturedPut as unknown as Record<string, unknown>
+    expect(body.protocol).toBe('http_embedding')
+    expect(body.endpoint).toBe('http://localhost:11434/v1/embeddings')
+    // Explicit null: exclude_unset on the backend keeps omitted fields, so the stale
+    // base_url must be actively cleared when the protocol family switches.
+    expect(body.base_url).toBeNull()
+    expect(body.model_name).toBe('gpt-5')
+    expect(body.id).toBeUndefined()
+    expect(body.provider_id).toBeUndefined()
+  })
+
+  it('deletes a model after confirmation', async () => {
+    const user = userEvent.setup({ delay: null })
+    let models: ModelRecord[] = [
+      {
+        base_url: 'https://alpha.initial',
+        description: null,
+        endpoint: null,
+        id: 'alpha-chat',
+        input_price_per_1k: null,
+        max_tokens: null,
+        model_name: 'gpt-5',
+        output_price_per_1k: null,
+        params: null,
+        protocol: 'openai_chat',
+        provider_id: 'alpha',
+      },
+    ]
+
+    server.use(
+      http.get(`${API_BASE_URL}/admin/me`, () =>
+        HttpResponse.json({ email: 'admin@fleetent.test', id: 'admin-1', role: 'admin' })
+      ),
+      http.get(`${API_BASE_URL}/admin/providers`, () =>
+        HttpResponse.json([
+          {
+            api_key: null,
+            api_key_env: null,
+            api_key_set: false,
+            base_url: 'https://alpha.initial',
+            description: null,
+            id: 'alpha',
+            model_count: 1,
+            provider: null,
+          },
+        ])
+      ),
+      http.get(`${API_BASE_URL}/admin/models`, () => HttpResponse.json(models)),
+      http.delete(`${API_BASE_URL}/admin/models/alpha-chat`, () => {
+        models = models.filter((model) => model.id !== 'alpha-chat')
+        return HttpResponse.json({ deleted: true, id: 'alpha-chat' })
+      })
+    )
+
+    renderPage()
+    expect(await screen.findByText('gpt-5')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Delete model alpha-chat' }))
+    // Wait for the confirm dialog to be interactive before clicking (pointer-events race).
+    const confirm = await screen.findByRole('alertdialog')
+    expect(within(confirm).getByText('Delete model alpha-chat?')).toBeInTheDocument()
+    await user.click(within(confirm).getByRole('button', { name: 'Delete' }))
+
+    await waitFor(() => {
+      expect(screen.queryByText('gpt-5')).not.toBeInTheDocument()
+    })
   })
 
   it('renders the New model dialog in Chinese when the locale is zh', async () => {

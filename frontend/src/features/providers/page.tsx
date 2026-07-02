@@ -39,20 +39,24 @@ import {
   useConnectivityTestMutation,
   useCreateModelMutation,
   useCreateProviderMutation,
+  useDeleteModelMutation,
   useDeleteProviderMutation,
   useModelsQuery,
   useProvidersQuery,
+  useUpdateModelMutation,
   useUpdateProviderMutation,
 } from '@/features/providers/api'
 import {
   buildCreateModelPayload,
   buildCreateProviderPayload,
+  buildUpdateModelPayload,
   buildUpdateProviderPayload,
   ENDPOINT_PROTOCOLS,
   emptyModelForm,
   emptyProviderForm,
   MODEL_PROTOCOLS,
   type ModelFormState,
+  modelFormFromModel,
   type ProviderFormState,
   providerFormFromProvider,
 } from '@/features/providers/shared'
@@ -137,6 +141,7 @@ function ProviderFormDialog({
 }
 
 function ModelFormDialog({
+  mode,
   open,
   onOpenChange,
   form,
@@ -144,6 +149,7 @@ function ModelFormDialog({
   busy,
   onSubmit,
 }: {
+  mode: 'create' | 'edit'
   open: boolean
   onOpenChange: (open: boolean) => void
   form: ModelFormState
@@ -157,13 +163,20 @@ function ModelFormDialog({
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t('providers.newModelDialogTitle')}</DialogTitle>
-          <DialogDescription>{t('providers.newModelDialogDescription')}</DialogDescription>
+          <DialogTitle>
+            {mode === 'create'
+              ? t('providers.newModelDialogTitle')
+              : t('providers.editModelDialogTitle', { id: form.id })}
+          </DialogTitle>
+          <DialogDescription>
+            {mode === 'create' ? t('providers.newModelDialogDescription') : t('providers.editModelDialogDescription')}
+          </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
           <div className="grid gap-2">
             <Label htmlFor="model-id">{t('providers.fieldModelId')}</Label>
             <Input
+              disabled={mode === 'edit'}
               id="model-id"
               onChange={(event) => setForm((current) => ({ ...current, id: event.target.value }))}
               value={form.id}
@@ -220,11 +233,70 @@ function ModelFormDialog({
             {t('common.cancel')}
           </Button>
           <Button disabled={busy || !form.id || !form.modelName} onClick={() => void onSubmit()}>
-            {t('providers.createModelSubmit')}
+            {mode === 'create' ? t('providers.createModelSubmit') : t('providers.editSubmit')}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// Own component so each row can hold its delete mutation + confirm state (hooks
+// cannot live inside the models `.map`).
+function ModelRow({
+  model,
+  canWrite,
+  onEdit,
+}: {
+  model: ModelListItem
+  canWrite: boolean
+  onEdit: () => void
+}): JSX.Element {
+  const t = useT()
+  const deleteModel = useDeleteModelMutation(model.id)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  return (
+    <div className="rounded-lg border border-border p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <div className="font-medium">{model.model_name}</div>
+          <div className="text-muted-foreground text-sm">{model.id}</div>
+        </div>
+        {canWrite ? (
+          <div className="flex items-center gap-1">
+            <Button
+              aria-label={t('providers.editModelLabel', { id: model.id })}
+              onClick={onEdit}
+              size="icon"
+              variant="ghost"
+            >
+              <Pencil className="size-4" />
+            </Button>
+            <Button
+              aria-label={t('providers.deleteModelLabel', { id: model.id })}
+              onClick={() => setConfirmDelete(true)}
+              size="icon"
+              variant="ghost"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          </div>
+        ) : null}
+      </div>
+      <AlertDialog onOpenChange={setConfirmDelete} open={confirmDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('providers.deleteModelTitle', { id: model.id })}</AlertDialogTitle>
+            <AlertDialogDescription>{t('providers.deleteModelDescription')}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void deleteModel.mutateAsync()}>{t('common.delete')}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
   )
 }
 
@@ -234,12 +306,14 @@ function ProviderCard({
   canWrite,
   onEdit,
   onCreateModel,
+  onEditModel,
 }: {
   provider: ProviderListItem
   models: ModelListItem[]
   canWrite: boolean
   onEdit: () => void
   onCreateModel: () => void
+  onEditModel: (model: ModelListItem) => void
 }): JSX.Element {
   const t = useT()
   const deleteProvider = useDeleteProviderMutation(provider.id)
@@ -323,10 +397,7 @@ function ProviderCard({
         ) : null}
         <div className="space-y-2">
           {models.map((model) => (
-            <div className="rounded-lg border border-border p-3" key={model.id}>
-              <div className="font-medium">{model.model_name}</div>
-              <div className="text-muted-foreground text-sm">{model.id}</div>
-            </div>
+            <ModelRow canWrite={canWrite} key={model.id} model={model} onEdit={() => onEditModel(model)} />
           ))}
         </div>
       </CardContent>
@@ -363,7 +434,10 @@ export function ProvidersPage(): JSX.Element {
   const updateProvider = useUpdateProviderMutation(editingProviderId)
 
   const [modelFormOpen, setModelFormOpen] = useState(false)
+  const [modelMode, setModelMode] = useState<'create' | 'edit'>('create')
   const [modelForm, setModelForm] = useState<ModelFormState>(emptyModelForm())
+  const [editingModelId, setEditingModelId] = useState('')
+  const updateModel = useUpdateModelMutation(editingModelId)
 
   const canWrite = me.data?.role !== 'viewer'
   const modelsByProvider = useMemo(() => {
@@ -399,8 +473,26 @@ export function ProvidersPage(): JSX.Element {
     setProviderFormOpen(false)
   }
 
+  const openCreateModel = (providerId: string): void => {
+    setModelMode('create')
+    setEditingModelId('')
+    setModelForm(emptyModelForm(providerId))
+    setModelFormOpen(true)
+  }
+
+  const openEditModel = (model: ModelListItem): void => {
+    setModelMode('edit')
+    setEditingModelId(model.id)
+    setModelForm(modelFormFromModel(model))
+    setModelFormOpen(true)
+  }
+
   const submitModel = async (): Promise<void> => {
-    await createModel.mutateAsync(buildCreateModelPayload(modelForm))
+    if (modelMode === 'create') {
+      await createModel.mutateAsync(buildCreateModelPayload(modelForm))
+    } else {
+      await updateModel.mutateAsync(buildUpdateModelPayload(modelForm))
+    }
     setModelFormOpen(false)
   }
 
@@ -424,11 +516,9 @@ export function ProvidersPage(): JSX.Element {
             canWrite={canWrite}
             key={provider.id}
             models={modelsByProvider.get(provider.id) ?? []}
-            onCreateModel={() => {
-              setModelForm(emptyModelForm(provider.id))
-              setModelFormOpen(true)
-            }}
+            onCreateModel={() => openCreateModel(provider.id)}
             onEdit={() => openEditProvider(provider)}
+            onEditModel={openEditModel}
             provider={provider}
           />
         ))}
@@ -445,8 +535,9 @@ export function ProvidersPage(): JSX.Element {
       />
 
       <ModelFormDialog
-        busy={createModel.isPending}
+        busy={createModel.isPending || updateModel.isPending}
         form={modelForm}
+        mode={modelMode}
         onOpenChange={setModelFormOpen}
         onSubmit={submitModel}
         open={modelFormOpen}
