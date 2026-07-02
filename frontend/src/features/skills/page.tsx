@@ -8,7 +8,7 @@ import {
   useSkillGitStatusQuery,
   useTriggerSkillGitSyncMutation,
 } from '@/features/skills/api'
-import { useAdminMeQuery } from '@/features/skills/shared'
+import { useAdminMeQuery, useTransientFlag } from '@/features/skills/shared'
 import { SkillsTable } from '@/features/skills/skills-table'
 import { useT } from '@/i18n'
 import { cn } from '@/lib/utils'
@@ -40,6 +40,7 @@ function SyncField({ label, mono, children }: { label: string; mono?: boolean; c
 function GitSyncStatusCard({ status, canWrite }: { status: SkillGitStatus; canWrite: boolean }): JSX.Element {
   const t = useT()
   const sync = useTriggerSkillGitSyncMutation()
+  const synced = useTransientFlag(sync.isSuccess)
   return (
     <div className="space-y-3 rounded-lg border border-border p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -49,7 +50,8 @@ function GitSyncStatusCard({ status, canWrite }: { status: SkillGitStatus; canWr
         </div>
         {canWrite ? (
           <Button disabled={sync.isPending} onClick={() => void sync.mutateAsync()} size="sm" variant="outline">
-            <RefreshCw className="size-4" /> {t('skills.gitSyncNow')}
+            <RefreshCw className={cn('size-4', sync.isPending && 'animate-spin')} />
+            {sync.isPending ? t('skills.gitSyncing') : synced ? t('skills.gitSynced') : t('skills.gitSyncNow')}
           </Button>
         ) : null}
       </div>
@@ -84,11 +86,14 @@ export function SkillsPage(): JSX.Element {
 
   const canWrite = me.data?.role !== 'viewer'
 
-  const actions = canWrite ? (
-    <Button onClick={() => void reload.mutateAsync()} variant="outline">
-      <RefreshCw className="size-4" /> {t('skills.reloadIndex')}
-    </Button>
-  ) : undefined
+  // In gitops mode the git sync status card owns refresh ("Sync now" reloads the index as
+  // part of the sync), so the standalone "Reload index" action is redundant — hide it.
+  const actions =
+    canWrite && !gitopsEnabled ? (
+      <Button onClick={() => void reload.mutateAsync()} variant="outline">
+        <RefreshCw className="size-4" /> {t('skills.reloadIndex')}
+      </Button>
+    ) : undefined
 
   return (
     <div className="space-y-6">

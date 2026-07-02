@@ -1,8 +1,22 @@
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { useAdminApi } from '@/lib/api-client'
 
 export const SKILL_STATUSES = ['active', 'archived', 'quarantined', 'disabled']
+
+/** Latch `active` on for `ms` then clear — used to flash a transient "done" state on a
+ * button after a mutation resolves (React Query's `isSuccess` stays true indefinitely). */
+export function useTransientFlag(active: boolean, ms = 2500): boolean {
+  const [on, setOn] = useState(false)
+  useEffect(() => {
+    if (!active) return
+    setOn(true)
+    const id = setTimeout(() => setOn(false), ms)
+    return () => clearTimeout(id)
+  }, [active, ms])
+  return on
+}
 
 export type AdminMe = { email: string; id: string; role: string }
 

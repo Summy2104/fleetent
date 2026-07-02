@@ -641,6 +641,10 @@ describe('skills page gitops mode', () => {
     expect(screen.getByText('bitbucket')).toBeInTheDocument()
     // Commit shas render truncated to 10 chars.
     expect(screen.getByText('abc1234def')).toBeInTheDocument()
+    // #4: the standalone "Reload index" header action is hidden in gitops mode; "Sync now"
+    // on the status card owns refresh (it reloads the index as part of the sync).
+    expect(screen.queryByRole('button', { name: 'Reload index' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Sync now/ })).toBeInTheDocument()
   })
 
   it('triggers a manual git sync from the status card', async () => {

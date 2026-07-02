@@ -21,7 +21,9 @@ import {
   useSkillVersionsQuery,
   useSyncBackflowMutation,
 } from '@/features/skills/api'
+import { useTransientFlag } from '@/features/skills/shared'
 import { useT } from '@/i18n'
+import { cn } from '@/lib/utils'
 
 export function CodeBlock({ children }: { children: string }): JSX.Element {
   return (
@@ -383,6 +385,7 @@ export function BackflowDialog({
 }): JSX.Element {
   const t = useT()
   const syncBackflow = useSyncBackflowMutation()
+  const pushed = useTransientFlag(syncBackflow.isSuccess)
   return (
     <Dialog onOpenChange={onOpenChange} open={Boolean(skillName)}>
       <DialogContent>
@@ -399,7 +402,12 @@ export function BackflowDialog({
                 size="sm"
                 variant="outline"
               >
-                <RefreshCw className="size-4" /> Sync backflow
+                <RefreshCw className={cn('size-4', syncBackflow.isPending && 'animate-spin')} />
+                {syncBackflow.isPending
+                  ? t('skills.backflowSyncing')
+                  : pushed
+                    ? t('skills.backflowSynced')
+                    : t('skills.backflowSyncNow')}
               </Button>
             </div>
           ) : null}

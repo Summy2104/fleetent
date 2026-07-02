@@ -265,6 +265,11 @@ const en = {
   'skills.gitSyncError': 'Last sync error',
   'skills.gitSyncNever': 'Never synced',
   'skills.gitSyncNow': 'Sync now',
+  'skills.gitSyncing': 'Syncing…',
+  'skills.gitSynced': 'Synced ✓',
+  'skills.backflowSyncNow': 'Sync backflow',
+  'skills.backflowSyncing': 'Pushing…',
+  'skills.backflowSynced': 'Pushed ✓',
 
   // Knowledge Base 页
   'kb.title': 'Knowledge Base',
@@ -987,6 +992,11 @@ const zh: Messages = {
   'skills.gitSyncError': '上次同步错误',
   'skills.gitSyncNever': '尚未同步',
   'skills.gitSyncNow': '立即同步',
+  'skills.gitSyncing': '同步中…',
+  'skills.gitSynced': '同步成功 ✓',
+  'skills.backflowSyncNow': '立即推送',
+  'skills.backflowSyncing': '推送中…',
+  'skills.backflowSynced': '推送成功 ✓',
 
   // Knowledge Base 页
   'kb.title': '知识库',
