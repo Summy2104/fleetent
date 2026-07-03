@@ -1256,6 +1256,15 @@ def set_state_db(db: SQLiteDatabase) -> None:
     approval_request_store.set_state_db(db)
 
 
+def state_db_initialized() -> bool:
+    """Whether a per-agent state DB has been injected.
+
+    False in any process that never boots an agent (e.g. the platform control plane), letting
+    read-only platform callers degrade gracefully instead of hitting ``_database``'s RuntimeError.
+    """
+    return _state_db is not None
+
+
 def _database() -> SQLiteDatabase:
     """Return the per-agent state DB injected at boot.
 

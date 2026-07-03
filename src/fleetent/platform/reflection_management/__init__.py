@@ -16,7 +16,11 @@ from fleetent.reflection import (
     get_reflection_trend_summary,
     get_skill_proposal,
     list_skill_proposals,
+    state_db_initialized,
 )
+from fleetent.structured_logging import get_logger
+
+_logger = get_logger("reflection_management")
 
 __all__ = [
     "ReflectionTrendQuery",
@@ -48,12 +52,23 @@ def _proposal_dict(p: Any) -> dict[str, Any]:
 
 
 def reflection_list_proposals() -> list[dict[str, Any]]:
-    """Pending Skill proposals from the agent reflection store (newest first)."""
+    """Pending Skill proposals from the agent reflection store (newest first).
+
+    Reflection proposals live in each agent's per-agent state DB, wired only inside the agent
+    process. The platform control plane injects no state DB, so degrade to an empty inbox rather
+    than surfacing ``_database``'s boot-time RuntimeError as a 500.
+    """
+    if not state_db_initialized():
+        _logger.warn("reflection_proposals_unavailable_no_state_db")
+        return []
     return [_proposal_dict(p) for p in list_skill_proposals("pending")]
 
 
 def reflection_proposal_diff(proposal_id: str) -> dict[str, Any]:
     """Full proposal payload incl. suggested diff/draft, for the review viewer."""
+    if not state_db_initialized():
+        _logger.warn("reflection_proposal_diff_unavailable_no_state_db")
+        return {"proposal_id": proposal_id, "diff": "", "draft": ""}
     try:
         p = get_skill_proposal(proposal_id)
     except ValueError:
