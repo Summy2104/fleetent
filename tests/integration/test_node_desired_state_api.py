@@ -168,6 +168,56 @@ def test_get_desired_state_parses_agent_file_once_per_agent(node_client, monkeyp
     assert calls["n"] == 1, f"agent.yaml parsed {calls['n']}x for one agent (expected 1)"
 
 
+def test_get_desired_state_batches_per_skill_and_per_secret_reads(
+    node_client, monkeypatch, tmp_path
+) -> None:
+    # The handler must not re-open Settings()/DB once per allowed skill or per secret slot
+    # (that per-item churn — not the git walk — dominated the handler under load). It batches
+    # the catalog reads and secret decryption, so the per-item readers must never be called.
+    from fleetent import agent_store
+    from fleetent.platform.agent_lifecycle import secret_store
+    from fleetent.platform.node_management import node_store, placement_store
+    from fleetent.platform.skill_management import pool_git, skill_admin_store
+    from fleetent.platform.tenancy import store as tenancy_store
+
+    pool_dir = tmp_path / "pool"
+    for name in ("alpha", "beta", "gamma"):
+        sd = pool_dir / name
+        sd.mkdir(parents=True)
+        (sd / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: d\n---\nbody\n", encoding="utf-8"
+        )
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(pool_dir))
+    pool_git.init_pool(pool_dir)
+
+    node_key, _ = node_store.register_node("node-a")
+    tenancy_store.create_tenant(id="acme", name="Acme")
+    agent = agent_store.create_agent("support", "Help", ["shell"], tenant_id="acme")
+    for name in ("alpha", "beta", "gamma"):
+        skill_admin_store.set_binding(agent.id, name, True, updated_by="admin")
+    skill_admin_store.ensure_catalog_entries(["alpha", "beta", "gamma"])
+    placement_store.pin_agent(agent.id, "node-a")
+
+    def _tripwire(label):
+        def _boom(*_a, **_k):  # pragma: no cover - tripwire
+            raise AssertionError(f"desired-state must batch, not call {label} per item")
+
+        return _boom
+
+    monkeypatch.setattr(skill_admin_store, "get_source", _tripwire("get_source"))
+    monkeypatch.setattr(skill_admin_store, "get_resync_epoch", _tripwire("get_resync_epoch"))
+    monkeypatch.setattr(secret_store, "get_decrypted", _tripwire("get_decrypted"))
+    monkeypatch.setattr(secret_store, "status", _tripwire("secret_store.status"))
+
+    resp = node_client.get(
+        "/nodes/node-a/desired-state", headers={"Authorization": f"Bearer {node_key}"}
+    )
+
+    assert resp.status_code == 200
+    names = {m["name"] for m in resp.json()["agents"][0]["skill_manifests"]}
+    assert names == {"alpha", "beta", "gamma"}
+
+
 def test_get_desired_state_returns_empty_agent_set_when_node_has_no_enabled_placements(
     node_client: TestClient,
 ) -> None:

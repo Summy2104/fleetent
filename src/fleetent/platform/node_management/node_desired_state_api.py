@@ -317,18 +317,13 @@ def post_mcp_credential_set(
     return {"ok": True}
 
 
-def _agent_secrets(
-    agent: agent_store.Agent, agent_file: AgentFile | None = None
-) -> dict[str, str]:
-    secrets: dict[str, str] = {}
-    for slot in credential_slots.list_slots(agent):
-        if slot.mode != "inject":
-            continue
-        if secret_store.status(agent.id, slot.env_name) != "set":
-            continue
-        value = secret_store.get_decrypted(agent.id, slot.env_name)
-        if value is not None:
-            secrets[slot.env_name] = value
+def _agent_secrets(agent: agent_store.Agent, agent_file: AgentFile | None = None) -> dict[str, str]:
+    # Resolve all inject slots in one batched query + cipher setup rather than a
+    # status()+get_decrypted() pair per slot (each of which re-opened Settings()/DB).
+    inject_env_names = [
+        slot.env_name for slot in credential_slots.list_slots(agent) if slot.mode == "inject"
+    ]
+    secrets: dict[str, str] = dict(secret_store.get_decrypted_bulk(agent.id, inject_env_names))
     # Seed model env from the provider row (shared source of truth) for any referenced env
     # name not already supplied by a per-agent inject slot, mirroring materialize._seed_env so
     # node-managed agents resolve the same model key as platform-direct materialize.
@@ -362,8 +357,16 @@ def _skill_manifests_for(
     pool_dir = _skill_pool_dir()
     if agent_file is None:
         agent_file = materialize.agent_file_from_store(agent)
+    allowed = list(agent_file.allowed_skills)
+    # Batch the two per-skill catalog reads into one query each (they used to re-open
+    # Settings()/DB for every allowed skill on every node reconcile). base_commit reads the
+    # catalog current_version (recorded once at sync time), NOT a per-request git-history walk
+    # (pool_version_for_skill is O(history) and on a large pack took seconds each — on this hot
+    # path it saturated the thread pool and hung all HTTP incl. /admin/ui/login).
+    current_versions = skill_admin_store.get_current_versions(allowed)
+    resync_epochs = skill_admin_store.get_resync_epochs(agent.id, allowed)
     manifests: list[dict[str, str]] = []
-    for skill_name in agent_file.allowed_skills:
+    for skill_name in allowed:
         skill_dir = pool_dir / skill_name
         if not skill_dir.is_dir():
             continue
@@ -378,20 +381,12 @@ def _skill_manifests_for(
             {
                 "name": skill_name,
                 "base_version": base_version,
-                # Read the version from the catalog (recorded at sync time), NOT via a
-                # per-skill git walk. That walk (pool_version_for_skill) is O(history) and on
-                # a large pack takes seconds each; on the desired-state hot path — recomputed
-                # for every allowed skill on every node reconcile — it saturated the thread
-                # pool and hung all HTTP requests (incl. /admin/ui/login). current_version is
-                # the same sha, computed once at inbound sync.
-                "base_commit": (
-                    skill_admin_store.get_source(skill_name).get("current_version") or ""
-                ),
+                "base_commit": current_versions.get(skill_name) or "",
                 "bundle_url": (
                     f"/nodes/{node_id}/skills/{skill_name}/bundles/{base_version}.tar.gz"
                 ),
                 "bundle_sha256": artifact.bundle_sha256,
-                "resync_epoch": str(skill_admin_store.get_resync_epoch(agent.id, skill_name)),
+                "resync_epoch": str(resync_epochs.get(skill_name, 0)),
             }
         )
     return manifests
