@@ -276,7 +276,7 @@ function BackflowProposalCard({
   proposal: BackflowProposal
 }): JSX.Element {
   return (
-    <article className="rounded-xl border bg-white p-4" key={proposal.id}>
+    <article className="rounded-lg border border-border p-4" key={proposal.id}>
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="font-semibold text-sm">{proposal.skill_name}</p>
@@ -305,7 +305,11 @@ function BackflowProposalCard({
 }
 
 function DiffPre({ children }: { children: string }): JSX.Element {
-  return <pre className="mt-2 max-h-72 overflow-auto rounded-xl bg-slate-950 p-4 text-slate-50 text-sm">{children}</pre>
+  return (
+    <pre className="mt-2 max-h-72 overflow-auto rounded-md border border-border bg-secondary/50 p-4 font-mono text-foreground text-sm">
+      {children}
+    </pre>
+  )
 }
 
 export function BackflowDialog({
@@ -445,10 +449,10 @@ export function BackflowWorklist({
   const dest = gitStatus?.branch ?? 'main'
 
   return (
-    <section className="mb-4 rounded-xl border bg-white p-4">
+    <section className="mb-4 space-y-3 rounded-lg border border-border p-4">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h3 className="font-semibold text-sm">{t('skills.backflowWorklistTitle')}</h3>
+          <h3 className="font-semibold text-foreground text-sm">{t('skills.backflowWorklistTitle')}</h3>
           <p className="text-muted-foreground text-sm">{t('skills.backflowWorklistDescription')}</p>
         </div>
         <Button
@@ -465,13 +469,13 @@ export function BackflowWorklist({
               : t('skills.backflowSyncNow')}
         </Button>
       </div>
-      <div className="mt-3 space-y-3">
+      <div className="space-y-3">
         {[...groups.entries()].map(([agentId, group]) => {
           const prUrl = group.branch ? bitbucketPrCreateUrl(gitStatus?.remote_url, group.branch, dest) : null
           return (
-            <div className="rounded-lg border p-3" key={agentId}>
+            <div className="rounded-md border border-border p-3" key={agentId}>
               <div className="flex items-center justify-between gap-3">
-                <span className="font-medium text-sm">{group.name}</span>
+                <span className="font-medium text-foreground text-sm">{group.name}</span>
                 {prUrl ? (
                   <a className="text-primary text-sm underline" href={prUrl} rel="noreferrer" target="_blank">
                     {t('skills.backflowCreatePr')}
@@ -485,7 +489,9 @@ export function BackflowWorklist({
                   <li className="flex items-center gap-2 text-sm" key={proposal.id}>
                     <span>{proposal.skill_name}</span>
                     <Badge variant="secondary">{proposal.pr_state ?? 'pending'}</Badge>
-                    {proposal.conflict ? <span className="text-amber-700 text-xs">conflict</span> : null}
+                    {proposal.conflict ? (
+                      <span className="text-amber-600 text-xs dark:text-amber-400">conflict</span>
+                    ) : null}
                     <button
                       className="ml-auto text-muted-foreground text-xs underline"
                       onClick={() => setSelectedId(proposal.id)}
