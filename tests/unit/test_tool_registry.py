@@ -54,6 +54,20 @@ def test_dispatch_unknown_tool_returns_error():
     assert "unknown tool" in result
 
 
+def test_dispatch_malformed_json_arguments_raises_actionable_error():
+    # AAA-8272: a model-emitted truncated-JSON arguments string must fail with an
+    # actionable message (tool name + "resend valid JSON") so the loop feeds the
+    # model a self-correction hint, not a cryptic "Unterminated string" parser error.
+    @tool_registry.tool
+    def fetch(channel_id: str, limit: str) -> str:
+        """Fetch history."""
+        return "ok"
+
+    with pytest.raises(ValueError, match="valid JSON") as exc_info:
+        tool_registry.dispatch("fetch", '{"channel_id": "C0AM68DAGP3", "limit": "{}')
+    assert "fetch" in str(exc_info.value)
+
+
 def test_schema_required_params():
     @tool_registry.tool
     def required_fn(required: str, optional: str = "default") -> str:

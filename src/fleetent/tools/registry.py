@@ -318,9 +318,20 @@ def dispatch(
         if server_id not in mcp_server_ids:
             raise PermissionError(f"MCP server '{server_id}' not in agent scope")
 
-    kwargs: dict[str, Any] = (
-        dict(arguments_json) if isinstance(arguments_json, dict) else json.loads(arguments_json)
-    )
+    # AAA-8272: a model may emit truncated/illegal JSON arguments. Surface an
+    # actionable error (tool name + "resend valid JSON") instead of a cryptic parser
+    # message, so `_safe_dispatch` feeds the model a self-correction hint this turn.
+    try:
+        kwargs: dict[str, Any] = (
+            dict(arguments_json)
+            if isinstance(arguments_json, dict)
+            else json.loads(arguments_json)
+        )
+    except (ValueError, TypeError) as exc:
+        raise ValueError(
+            f"invalid JSON arguments for tool '{name}': {exc}. "
+            "Re-send this tool call with valid JSON arguments."
+        ) from exc
     # Agent-scoped MCP: route through the scope-keyed session, not the global closure.
     if is_mcp and mcp_scope is not None:
         from fleetent.integrations.mcp import authorization as mcp_authz
