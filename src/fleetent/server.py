@@ -6,6 +6,7 @@ runtime (`fleetent agent run`); this app starts agent-free with no IM, loop, or 
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import sys
@@ -174,18 +175,34 @@ def _build_platform_maintenance_scheduler(
 ) -> Any:
     """Build and return a configured (but not yet started) APScheduler for platform-only
     maintenance jobs.  Accepts an optional `_scheduler` for dependency injection in tests."""
+    from apscheduler.executors.pool import (  # type: ignore[import-untyped]
+        ThreadPoolExecutor as APThreadPoolExecutor,
+    )
     from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
 
     from fleetent.platform.skill_management import backflow_pr_sweep, pool_sync
 
     sched = _scheduler if _scheduler is not None else AsyncIOScheduler()
+    # Run the sweeps on a DEDICATED thread pool, never the web-request workers (the anyio
+    # default pool serving /admin/* and node polling): a slow/hung git fetch or backup push
+    # must not starve HTTP. max_instances=1 + coalesce stop a slow round from piling up
+    # behind itself (the "maximum number of running instances reached" spiral).
+    with contextlib.suppress(ValueError):  # ValueError = already registered (idempotent rebuild)
+        sched.add_executor(APThreadPoolExecutor(max_workers=2), "maintenance")
+    job_opts: dict[str, Any] = {
+        "executor": "maintenance",
+        "max_instances": 1,
+        "coalesce": True,
+        "misfire_grace_time": 30,
+        "replace_existing": True,
+    }
     interval = getattr(scheduling, "skill_git_sync_interval_seconds", 300) if scheduling else 300
     sched.add_job(
         pool_sync.scheduled_sweep,
         trigger="interval",
         seconds=interval,
         id="__skill_git_sync_sweep__",
-        replace_existing=True,
+        **job_opts,
     )
     backflow_interval = (
         getattr(scheduling, "skill_backflow_pr_sweep_interval_seconds", 120) if scheduling else 120
@@ -195,7 +212,7 @@ def _build_platform_maintenance_scheduler(
         trigger="interval",
         seconds=backflow_interval,
         id="__skill_backflow_pr_sweep__",
-        replace_existing=True,
+        **job_opts,
     )
     return sched
 

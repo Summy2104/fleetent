@@ -41,10 +41,11 @@ _logger = get_logger("skill_management.backflow_pr_sweep")
 
 _PUSH_AUTHOR = "fleetent <backflow@fleetent>"
 
-# Cap auto-nominations per sweep round: each nomination pulls the evolved bundle from the
-# owning node over HTTP; a bound keeps one round's wall-clock predictable (the rest are
-# picked up next round).
+# Per-round budgets keep one sweep's wall-clock bounded (the rest are picked up next round),
+# so a huge backlog can't make a single round run for many minutes. Nomination pulls a bundle
+# over HTTP; backup pushes a branch — both are network-bound.
 _NOMINATE_BUDGET_PER_ROUND = 50
+_BACKUP_BUDGET_PER_ROUND = 50
 
 # Injection seams (mirroring pool_sync): the secret resolver decrypts credential env-name
 # references; the backend factory is overridable in tests. Both default to production wiring.
@@ -115,6 +116,9 @@ def _back_up(backend: BaseGitPlatformBackend, config: dict[str, Any]) -> int:
     base_ref = str(config.get("branch", "main"))
     backed = 0
     for proposal in candidates:
+        if backed >= _BACKUP_BUDGET_PER_ROUND:
+            _logger.info("backflow_backup_budget_reached", budget=_BACKUP_BUDGET_PER_ROUND)
+            break
         pid = int(proposal["id"])
         branch = _branch_name(config, proposal)
         try:
