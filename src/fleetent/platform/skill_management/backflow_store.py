@@ -19,7 +19,7 @@ from typing import Any
 
 import httpx
 
-from fleetent import agent_store, paths
+from fleetent import agent_store, paths, skill_bundle_codec
 from fleetent.config import Settings
 from fleetent.db import SQLiteDatabase, create_database
 
@@ -221,7 +221,9 @@ def _capture_proposed_bundle(
             for path in sorted(
                 p for p in skill_dir.rglob("*") if p.is_file() and ".git" not in p.parts
             ):
-                bundle[path.relative_to(skill_dir).as_posix()] = path.read_text(encoding="utf-8")
+                bundle[path.relative_to(skill_dir).as_posix()] = skill_bundle_codec.encode(
+                    path.read_bytes()
+                )
             if bundle:
                 return bundle
     if proposed_content is None:
@@ -266,7 +268,7 @@ def _capture_bundle_from_owning_node(*, agent_id: int, skill_name: str) -> dict[
             if extracted is None:
                 raise ValueError(f"unable to extract node bundle member: {member.name}")
             relpath = Path(*member_path.parts[1:]).as_posix()
-            bundle[relpath] = extracted.read().decode("utf-8")
+            bundle[relpath] = skill_bundle_codec.encode(extracted.read())
     return bundle or None
 
 
@@ -316,7 +318,7 @@ def get_proposal_diff(
             p for p in pool_skill_dir.rglob("*") if p.is_file() and ".git" not in p.parts
         ):
             relpath = path.relative_to(pool_skill_dir).as_posix()
-            head_bundle[relpath] = path.read_text(encoding="utf-8")
+            head_bundle[relpath] = skill_bundle_codec.encode(path.read_bytes())
 
     # base bundle: reconstruct from pool git at base_commit — git tree lookup, git root.
     base_bundle: dict[str, str] | None = None
@@ -339,16 +341,23 @@ def get_proposal_diff(
         skill_md_left = left.get("SKILL.md")
         skill_md_right = right.get("SKILL.md")
         if skill_md_left is not None or skill_md_right is not None:
-            parts.append(
-                "".join(
-                    difflib.unified_diff(
-                        (skill_md_left or "").splitlines(keepends=True),
-                        (skill_md_right or "").splitlines(keepends=True),
-                        fromfile=f"{from_label}/SKILL.md",
-                        tofile=f"{to_label}/SKILL.md",
+            if skill_bundle_codec.is_binary(skill_md_left or "") or skill_bundle_codec.is_binary(
+                skill_md_right or ""
+            ):
+                # SKILL.md is markdown in practice, but never text-diff a binary value.
+                if skill_md_left != skill_md_right:
+                    parts.append("Binary SKILL.md changed\n")
+            else:
+                parts.append(
+                    "".join(
+                        difflib.unified_diff(
+                            (skill_md_left or "").splitlines(keepends=True),
+                            (skill_md_right or "").splitlines(keepends=True),
+                            fromfile=f"{from_label}/SKILL.md",
+                            tofile=f"{to_label}/SKILL.md",
+                        )
                     )
                 )
-            )
         changed_paths: list[str] = []
         for relpath in sorted(set(left) | set(right)):
             if relpath == "SKILL.md":

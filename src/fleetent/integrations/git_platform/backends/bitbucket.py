@@ -18,6 +18,7 @@ from urllib.parse import quote, urlsplit
 import httpx
 from dulwich import porcelain
 
+from fleetent import skill_bundle_codec
 from fleetent.integrations.git_platform.backend import (
     BaseGitPlatformBackend,
     GitPlatformCapabilities,
@@ -99,7 +100,9 @@ class BitbucketBackend(BaseGitPlatformBackend):
             for rel, content in bundle.items():
                 dest = target / rel
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_text(content)
+                # Bundle values are codec-encoded (text as-is, binary as tagged base64);
+                # decode back to the real bytes so binary skill files round-trip intact.
+                dest.write_bytes(skill_bundle_codec.decode(content))
                 written.append(str(dest))
 
             porcelain.add(tmp, paths=written)
