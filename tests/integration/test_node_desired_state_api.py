@@ -356,6 +356,18 @@ def test_get_desired_state_includes_skill_manifest_and_bundle_download_is_immuta
     skill_admin_store.set_binding(agent.id, "incident-review", True, updated_by="admin")
     placement_store.pin_agent(agent.id, "node-a")
 
+    # base_commit comes from the catalog (recorded at sync/publish time) — the desired-state
+    # hot path must NEVER walk git history (a per-skill walk on a large mirror saturated the
+    # thread pool in production and hung every HTTP request). Plant a tripwire: any walk here
+    # is a regression.
+    skill_admin_store.ensure_catalog_entries(["incident-review"])
+    skill_admin_store.set_current_version("incident-review", "catalog-sha-123")
+
+    def _walk_bomb(*_a, **_k):  # pragma: no cover - tripwire
+        raise AssertionError("desired-state must not walk git history (pool_version_for_skill)")
+
+    monkeypatch.setattr(pool_git, "pool_version_for_skill", _walk_bomb)
+
     response = node_client.get(
         "/nodes/node-a/desired-state",
         headers={"Authorization": f"Bearer {node_key}"},
@@ -365,7 +377,7 @@ def test_get_desired_state_includes_skill_manifest_and_bundle_download_is_immuta
     manifest = response.json()["agents"][0]["skill_manifests"][0]
     assert manifest["name"] == "incident-review"
     assert manifest["base_version"]
-    assert manifest["base_commit"]
+    assert manifest["base_commit"] == "catalog-sha-123"
     assert manifest["bundle_url"].endswith(
         f"/nodes/node-a/skills/incident-review/bundles/{manifest['base_version']}.tar.gz"
     )
@@ -402,16 +414,16 @@ def test_get_desired_state_includes_skill_manifest_and_bundle_download_is_immuta
     assert second.content == first.content
 
 
-def test_get_desired_state_skill_manifest_resolves_base_commit_via_git_root_when_subdir_configured(
+def test_get_desired_state_skill_manifest_stays_git_free_when_subdir_configured(
     node_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    """R5: with an external-git ``skills_subdir`` configured, the scan root has no ``.git``.
+    """Under an external-git ``skills_subdir`` layout the manifest still never touches git.
 
-    Only its parent (the git root) does. The manifest's ``base_commit`` must be resolved
-    against the git root + subdir, while ``name`` and ``bundle_url`` must stay clean (no
-    ``skills/`` prefix leaking into the node/agent contract).
+    ``base_commit`` is read from the catalog (recorded at sync time) — no git-root
+    resolution, no history walk — while ``name`` and ``bundle_url`` stay clean (no
+    ``skills/`` prefix leaking into the node/agent contract, R5).
     """
     from fleetent import agent_store
     from fleetent.platform.node_management import node_store, placement_store
@@ -441,6 +453,15 @@ def test_get_desired_state_skill_manifest_resolves_base_commit_via_git_root_when
     skill_admin_store.set_binding(agent.id, "incident-review", True, updated_by="admin")
     placement_store.pin_agent(agent.id, "node-a")
 
+    # The inbound sync records the mirrored commit in the catalog; the manifest reads it.
+    skill_admin_store.ensure_catalog_entries(["incident-review"])
+    skill_admin_store.set_current_version("incident-review", "synced-sha-456")
+
+    def _walk_bomb(*_a, **_k):  # pragma: no cover - tripwire
+        raise AssertionError("desired-state must not walk git history (pool_version_for_skill)")
+
+    monkeypatch.setattr(pool_git, "pool_version_for_skill", _walk_bomb)
+
     response = node_client.get(
         "/nodes/node-a/desired-state",
         headers={"Authorization": f"Bearer {node_key}"},
@@ -448,9 +469,7 @@ def test_get_desired_state_skill_manifest_resolves_base_commit_via_git_root_when
 
     assert response.status_code == 200
     manifest = response.json()["agents"][0]["skill_manifests"][0]
-    expected_commit = pool_git.pool_version_for_skill(git_root, "incident-review", subdir="skills")
-    assert expected_commit
-    assert manifest["base_commit"] == expected_commit
+    assert manifest["base_commit"] == "synced-sha-456"
     # R5: node/agent-facing fields must stay clean -- no "skills/" subdir prefix.
     assert manifest["name"] == "incident-review"
     assert "skills/" not in manifest["name"]
