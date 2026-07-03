@@ -242,6 +242,62 @@ def test_reconcile_self_heals_blanked_env_when_platform_recovers(tmp_path) -> No
 
 
 @respx.mock
+def test_reconcile_ignores_orphan_secret_not_referenced_by_config(tmp_path) -> None:
+    """A non-empty secret whose env name no config field references must NOT self-heal.
+
+    Regression for the orphan-secret restart loop: setting a secret for an env name the
+    agent config never references creates a credential slot that the platform ships in
+    ``desired.secrets``, yet the scaffold only ever writes referenced env names — so the
+    orphan never lands on disk. If the self-heal gate required it, reconcile would loop
+    stop → rewrite → respawn every tick forever. The gate must key on referenced names.
+    """
+    from fleetent.node.reconcile import NodeReconciler
+
+    respx.post("https://platform.internal/nodes/node-a/status").mock(
+        return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
+    )
+
+    home = tmp_path / "tenants" / "default" / "agents" / "support"
+    home.mkdir(parents=True)
+    home.chmod(0o700)
+    (home / "agent.yaml").write_text(
+        yaml.safe_dump(_agent_config(), sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    env_path = home / ".env"
+    # Every referenced secret is present and correct; the orphan simply isn't on disk
+    # (the scaffold never writes it because no config field references it).
+    env_path.write_text(
+        "ANTHROPIC_API_KEY=sk-live-secret\nFLEETENT_TUI_TOKEN=ma-" + "a" * 64 + "\n",
+        encoding="utf-8",
+    )
+    env_path.chmod(0o600)
+
+    backend = FakeBackend({"support": 12345})
+    desired = DesiredState(
+        node_id="node-a",
+        agents=[
+            DesiredAgent(
+                agent_id=101,
+                name="support",
+                config=_agent_config(),
+                secrets={
+                    "ANTHROPIC_API_KEY": "sk-live-secret",
+                    "FLEETENT_MODEL_DEEPSEEK_FLASH_API_KEY": "orphan-not-referenced",
+                },
+                tenant_id="default",
+            )
+        ],
+        source="remote",
+    )
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(desired)
+
+    assert backend.stop_calls == [], "orphan secret must not trigger a self-heal stop"
+    assert backend.spawn_calls == [], "orphan secret must not trigger a respawn"
+
+
+@respx.mock
 def test_reconcile_rewrites_home_for_kb_resync_without_respawn(tmp_path) -> None:
     from fleetent.node.reconcile import NodeReconciler
 
