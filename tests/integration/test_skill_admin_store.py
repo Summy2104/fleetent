@@ -22,6 +22,25 @@ def store_db(tmp_path, monkeypatch):
     return db_path
 
 
+def test_bulk_current_versions_and_resync_epochs(store_db):
+    agent = agent_store.create_agent("support", "p", [])
+    skill_admin_store.ensure_catalog_entries(["alpha", "beta"])
+    skill_admin_store.set_current_version("alpha", "sha-a")
+    # beta left without a current_version; gamma has no catalog row at all.
+    for name in ("alpha", "beta"):
+        skill_admin_store.set_binding(agent.id, name, True, updated_by="admin")
+    skill_admin_store.bump_resync_epoch(agent.id, "alpha")
+
+    versions = skill_admin_store.get_current_versions(["alpha", "beta", "gamma"])
+    assert versions == {"alpha": "sha-a", "beta": None, "gamma": None}
+
+    epochs = skill_admin_store.get_resync_epochs(agent.id, ["alpha", "beta", "gamma"])
+    # alpha bumped to 1; beta bound but never bumped -> 0; gamma unbound -> 0.
+    assert epochs == {"alpha": 1, "beta": 0, "gamma": 0}
+    assert skill_admin_store.get_current_versions([]) == {}
+    assert skill_admin_store.get_resync_epochs(agent.id, []) == {}
+
+
 # --- 2. tables exist + named params + binding ---
 
 

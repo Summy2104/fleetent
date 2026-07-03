@@ -2,7 +2,7 @@
 
 ### Requirement: 回流提名
 
-平台 SHALL 允许把某 `(agent, skill)` 的已漂移副本提名回流到公共池。提案 SHALL 携带 agent 进化副本的**完整 bundle**（该 skill 目录下全部文件的 relpath→content，排除 `.git`，非仅 SKILL.md）、其 `base_version`（内容 hash，用于冲突检测）与 `base_commit`（部署时池 git commit，用于重建 base），并以 `backflow` 类别进入待审 inbox。
+平台 SHALL 允许把某 `(agent, skill)` 的已漂移副本提名回流到公共池。提案 SHALL 携带 agent 进化副本的**完整 bundle**（该 skill 目录下全部文件的 relpath→content，排除 `.git`，非仅 SKILL.md；文本原样存、二进制文件经编码无损保留，推备份分支时按原字节还原）、其 `base_version`（内容 hash，用于冲突检测）与 `base_commit`（同步时记录于目录并从池 git commit 重建 base），并以 `backflow` 类别进入待审 inbox。
 
 #### Scenario: 提名捕获完整 bundle 与 base_commit
 - **WHEN** 运营对 agent "support-bot" 已漂移的多文件 skill "crm-ops"（含 SKILL.md + scripts/）发起回流提名
@@ -60,23 +60,27 @@
 
 ### Requirement: drift 观测自动触发回流提名
 
-平台在消费 node 上报的 skill drift 观测、把某 `(agent, skill)` 标记为 drifted 时，SHALL 自动为该 `(agent, skill)` 创建一条 pending backflow 提案；同一 `(agent, skill)` 已存在 pending 提案时 SHALL 跳过（去重，不重复生成）。上报 `drift=false` SHALL NOT 创建提案。自动提名 SHALL 为 best-effort：提名失败（如 owning node 不可达、无可捕获 bundle）SHALL NOT 令 node 状态上报失败，亦 SHALL NOT 影响同批其它 agent/skill 的 drift 落库——失败 SHALL 记日志。
+平台在消费 node 上报的 skill drift 观测时，SHALL 只把某 `(agent, skill)` 标记为 drifted，**SHALL NOT 在该请求路径（`POST /nodes/{id}/status`）上创建提案**——提名需从 owning node 拉取进化副本 bundle（网络操作），不得阻塞状态上报。自动提名改由后台定时任务 `backflow_pr_sweep` 承担：sweep SHALL 扫描已标记 drifted 且无 pending 提案的 `(agent, skill)`，为其创建一条 pending backflow 提案；已存在 pending 时 SHALL 跳过（去重）。上报 `drift=false` SHALL NOT 触发提名。自动提名 SHALL 为 best-effort：单条提名失败（如 owning node 不可达、无可捕获 bundle）SHALL NOT 崩溃 sweep，亦 SHALL NOT 影响同轮其它 `(agent, skill)`——失败 SHALL 记日志，下一轮可重试。每轮提名 SHALL 有预算上限（bounded per round），超额部分留待下一轮，使单轮 wall-clock 有界。
 
-#### Scenario: drift 转为 true 自动生成 pending 提案
-- **WHEN** node status 上报某 managed agent 的 skill `crm-ops` `drift=true`，且该 `(agent, crm-ops)` 当前无 pending backflow 提案
-- **THEN** 平台落 `agent_skills.drift=1`，并自动新增 1 条 `(agent, crm-ops)` 的 pending backflow 提案（携带进化副本 bundle）
+#### Scenario: 上报 drift=true 只落 drift、请求路径不提名
+- **WHEN** node status 上报某 managed agent 的 skill `crm-ops` `drift=true`
+- **THEN** 平台落 `agent_skills.drift=1`、`POST /nodes/{id}/status` 成功返回，且该请求路径 SHALL NOT 创建提案、SHALL NOT 从 owning node 拉 bundle
 
-#### Scenario: 已有 pending 不重复提名
-- **WHEN** 上述 skill 在已存在 pending 提案的情况下再次被上报 `drift=true`
+#### Scenario: sweep 为已漂移 skill 自动生成 pending 提案
+- **WHEN** 存在 `drift=1` 且无 pending 提案的 `(agent, crm-ops)`，`backflow_pr_sweep` 运行一轮
+- **THEN** 自动新增 1 条 `(agent, crm-ops)` 的 pending backflow 提案（携带进化副本 bundle）
+
+#### Scenario: sweep 提名去重
+- **WHEN** 上述 skill 已存在 pending 提案，sweep 再运行一轮
 - **THEN** 不新增第二条提案（仍为 1 条 pending）
 
 #### Scenario: drift=false 不提名
 - **WHEN** node status 上报某 skill `drift=false`
 - **THEN** 平台不为该 `(agent, skill)` 创建 backflow 提案
 
-#### Scenario: 提名失败不阻断状态上报
-- **WHEN** 自动提名过程抛出异常（如无法从 owning node 捕获 bundle）
-- **THEN** `POST /nodes/{id}/status` 仍成功返回、该 skill 的 drift 仍正确落库，失败被记日志而不传播
+#### Scenario: sweep 提名失败被舱壁化
+- **WHEN** sweep 提名过程中某条抛出异常（如无法从 owning node 捕获 bundle）
+- **THEN** sweep SHALL NOT 崩溃、继续处理同轮其它 `(agent, skill)`，失败被记日志而不传播；该 skill 的 drift 仍正确保留，下一轮可重试
 
 ### Requirement: 回流待审经 admin 端点可列出与查看 diff
 
@@ -108,7 +112,7 @@
 
 ### Requirement: 回流提名先推备份分支保命
 
-启用外部 git 源时，平台 SHALL 经一个独立定时任务（`backflow_pr_sweep`，类比 KB connector sweep）扫描 pending 且未备份的回流提案，把其进化副本经 `push_branch` 推到一个**备份分支** `<branch_prefix>/<agent_id>/<skill>`（**非权威主分支**），并标记 `pr_state="backed_up"`。备份是即时保命动作：即使后续 PR 被拒/关，备份分支仍留痕、agent 改动不丢。提名（`backflow_store.nominate`）与 node 上报路径 SHALL 只存 bundle、**零 git 依赖**（SHALL NOT 在 node 上报/reconcile 路径触发任何 git 操作）。分支名 SHALL 按 `(agent, skill)` 稳定，配合去重压制短命分支。
+启用外部 git 源时，平台 SHALL 经一个独立定时任务（`backflow_pr_sweep`，类比 KB connector sweep）扫描 pending 且未备份的回流提案，把其进化副本经 `push_branch` 推到一个**备份分支** `<branch_prefix>/<agent_id>/<skill>`（**非权威主分支**），并标记 `pr_state="backed_up"`。备份是即时保命动作：即使后续 PR 被拒/关，备份分支仍留痕、agent 改动不丢。node 上报/reconcile 路径 SHALL **零 git 依赖**且 SHALL NOT 触发提名；提名（`backflow_store.nominate`）只存 bundle、亦零 git，且与推备份分支同在 sweep 内进行。`push_branch` 推备份分支 SHALL 只浅取 `base_ref` 的 tip（`depth=1`，不整仓克隆），使一次备份不因仓库历史体积而变慢。分支名 SHALL 按 `(agent, skill)` 稳定，配合去重压制短命分支。
 
 若外部源额外配置了 `skills_subdir`（见 `skill-git-sync`），`push_branch` 推送内容在备份分支中的树路径 SHALL 为 `<skills_subdir>/<name>` 而非 `<name>`，使备份分支与权威仓库的目录布局一致（人工合并到 main 时 skill 落在正确子目录下）。未配置 `skills_subdir` 时，树路径退化为 `<name>`。
 
@@ -116,9 +120,9 @@
 - **WHEN** sweep 扫到一条 pending 未备份的回流提案
 - **THEN** 经 `push_branch` 推一个非主分支的备份分支，提案标 `pr_state="backed_up"`，记录分支名
 
-#### Scenario: 提名与 node 上报零 git
-- **WHEN** node 上报某 agent 的 skill 漂移触发自动提名
-- **THEN** 提名只存 bundle，node 上报/reconcile 路径不触发任何 git_platform / push 调用
+#### Scenario: node 上报与提名零 git
+- **WHEN** node 上报某 agent 的 skill 漂移，随后 sweep 为其提名
+- **THEN** node 上报/reconcile 路径不触发任何 git_platform / push 调用（只落 drift）；sweep 内的提名只存 bundle，同样不触发 git 操作（git 只发生在其后的 `push_branch`）
 
 #### Scenario: 配置 skills_subdir 时备份分支内容落在子目录
 - **WHEN** 外部源配置了 `skills_subdir="skills"`，sweep 把 skill "crm-ops" 的进化副本推备份分支
