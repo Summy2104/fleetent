@@ -7,7 +7,7 @@
 
 ### Requirement: 外部 git 源镜像同步（fetch + reset）
 
-平台 SHALL 支持把一个外部 git 仓库配置为 skill 内容权威源。启用后，平台 SHALL 经 dulwich `fetch`（支持 http(s) basic auth）取配置分支的远端 commit，再 `reset --hard` 到该 commit，使本地 pool 工作树与外部分支完全一致（镜像语义：外部权威、本地只读）。远端 commit 未变化时 SHALL 短路（不 reset、不重算）。同步 SHALL 经纯 Python（dulwich），不依赖宿主 git 二进制。所有 git 交互 SHALL 只发生在 platform 侧，node 与 agent SHALL NOT 接触外部 git。
+平台 SHALL 支持把一个外部 git 仓库配置为 skill 内容权威源。启用后，平台 SHALL 经 dulwich `fetch`（支持 http(s) basic auth）取配置分支的远端 commit，再 `reset --hard` 到该 commit，使本地 pool 工作树与外部分支完全一致（镜像语义：外部权威、本地只读）。fetch SHALL 为**浅取**（`depth=1`，仅拉 tip commit 与其树，不拉全部历史）：池只 `reset --hard` 到 tip、任何读路径都不依赖历史，故大仓（数千 commit / 上百 MB）的全量历史 SHALL NOT 被拉入，避免首同步被历史体积拖慢。远端 commit 未变化时 SHALL 短路（经只传 ref 的 ls-remote 探测，不 fetch、不 reset、不重算）。同步 SHALL 经纯 Python（dulwich），不依赖宿主 git 二进制。所有 git 交互 SHALL 只发生在 platform 侧，node 与 agent SHALL NOT 接触外部 git。
 
 #### Scenario: 首次同步把外部主分支镜像进 pool
 - **WHEN** 配置并启用外部 git 源后首次同步
@@ -43,7 +43,11 @@
 
 ### Requirement: 同步触发（定时 + webhook + 手动）
 
-平台 SHALL 经 platform 维护调度器按可配间隔定时触发同步；SHALL 暴露 `POST /admin/skills/git/webhook` 供外部 git 平台推送钩子触发，仅经 HMAC 校验（强制配置 secret，否则拒收），且 SHALL NOT 信任 payload 内容（仅作触发信号，内容一律以 fetch 结果为准）；SHALL 暴露 `POST /admin/skills/git/sync`（admin 手动）与 `GET /admin/skills/git/status`（同步状态，凭证脱敏）。
+平台 SHALL 经 platform 维护调度器按可配间隔定时触发同步；SHALL 暴露 `POST /admin/skills/git/webhook` 供外部 git 平台推送钩子触发，仅经 HMAC 校验（强制配置 secret，否则拒收），且 SHALL NOT 信任 payload 内容（仅作触发信号，内容一律以 fetch 结果为准）；SHALL 暴露 `POST /admin/skills/git/sync`（admin 手动）与 `GET /admin/skills/git/status`（同步状态，凭证脱敏）。per-source `sync_interval_seconds` 未配置（NULL）时 SHALL 回落到调度器节拍（每轮 sweep 视为到期，靠上文 ls-remote 短路兜住无变化的空转），SHALL NOT 因未配间隔而静默停止定时同步；显式配 `0` 才表示「不做定时同步」。
+
+#### Scenario: 未配 per-source 间隔仍随调度器定时同步
+- **WHEN** 外部 git 源已启用但未设 `sync_interval_seconds`（NULL），维护调度器触发一轮 sweep
+- **THEN** 该源被视为到期并尝试同步（远端未变时经 ls-remote 短路），SHALL NOT 因 NULL 间隔被跳过；若显式设为 `0` 则不做定时同步
 
 #### Scenario: webhook 经 HMAC 触发同步
 - **WHEN** 外部 git 平台以正确 HMAC 签名推送 push 钩子

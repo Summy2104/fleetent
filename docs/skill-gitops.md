@@ -42,7 +42,7 @@ git 交互**只在 platform 侧**（`pool_sync` / `skill_git_webhook_api`）；n
 | `remote_url` / `branch` | git 协议地址 + 权威分支（默认 `main`） |
 | `skills_subdir` | 可选。monorepo 场景下 skill 所在的子目录（如 `"skills"`）；留空 = 仓库根即 skill 目录 |
 | `username_env` / `token_env` / `webhook_secret_env` | 凭证的 **env 变量名**（值经 `secret_store`/`agent_secrets` 注入，不入库明文、不进 git/yaml/日志） |
-| `sync_interval_seconds` | 覆盖默认 `scheduling.skill_git_sync_interval_seconds`（300） |
+| `sync_interval_seconds` | 该源的定时同步间隔（秒）。**留空（NULL）= 跟随维护调度器节拍**（默认 `scheduling.skill_git_sync_interval_seconds`=300；远端未变时 ls-remote 探测短路，不会空转做重活），不会因未配而静默停同步；显式设 `0` = 不做定时同步（仅 webhook / 手动） |
 
 凭证注入：`secret_store.set(None, <env_name>, <value>)`（shared scope）。
 
@@ -88,14 +88,16 @@ pipelines:
 单向原则：**git → 平台**是唯一的权威写入方向，平台**从不**往 git 权威分支写。agent 在自己 home 改了 skill 后：
 
 ```
-agent 改 skill → node 上报漂移 → 平台记录 pending 回流提案（存进化副本 bundle）
-   → backflow_pr_sweep 把副本推成备份分支 backflow/<agent>/<skill>（定时 + 手动 sync-backflow）
+agent 改 skill → node 上报漂移 → 平台只标记 drifted（上报请求路径零 git、不提名、不拉 bundle）
+   → backflow_pr_sweep 定时轮询：为已漂移且无 pending 提案的 skill 创建提案（此刻才从 owning node 拉进化副本 bundle）
+      → 再把副本推成备份分支 backflow/<agent>/<skill>（定时 + 手动 sync-backflow）
    → 人在 git host 对备份分支开 PR 合并到权威分支   ← 平台不代劳
    → 合并后入站同步（fetch + reset）自然把新内容拉回池 → 下发 agent
 ```
 
-- 平台**只**推备份分支（非权威主分支），**从不**开 / 合并 PR。备份分支名按 `(agent, skill)` 稳定。
-- 后台定时 sweep（`__skill_backflow_pr_sweep__`）自动推备份分支；后台 UI 的「Sync backflow」手动触发一轮 sweep（同样只推备份分支）。
+- **提名不在上报请求路径上**：node 上报只落 `drift` 标记（零 git、不拉 bundle，避免阻塞 `POST /nodes/{id}/status`）；提名（拉 bundle）与推备份分支都在后台 `backflow_pr_sweep` 里做，每轮有预算上限，故漂移后提案会在下一轮 sweep 才出现（非上报即刻）。
+- 平台**只**推备份分支（非权威主分支），**从不**开 / 合并 PR。备份分支名按 `(agent, skill)` 稳定。推备份分支只浅取权威分支 tip（`depth=1`），不整仓克隆，故大仓下一次备份也很快。
+- 后台定时 sweep（`__skill_backflow_pr_sweep__`）自动提名 + 推备份分支；后台 UI 的「Sync backflow」手动触发一轮 sweep（同样只提名 + 推备份分支）。
 - **平台不审核回流**：不提供 accept / reject / fork / open-pr——采纳与否完全是你在 git host 的动作（对备份分支开 PR 合并）。平台侧回流 UI 是**只读**的：看有哪些回流、备份到哪个分支、diff（相对 base / 相对 head，含冲突标记）。
 - 为什么去掉审核：「先自动推备份、后人工审」有矛盾——reject 只撤 agent 运行时副本，管不到已推的备份分支，若该分支被合并则改动复活；且与「git 唯一权威、平台只读」冲突。故采纳统一收敛为人在 git host 的 PR。
 
@@ -105,6 +107,14 @@ agent 改 skill → node 上报漂移 → 平台记录 pending 回流提案（�
 - 保留：绑定矩阵、全局启停、版本 / diff 查看、reload、git 同步状态卡片。
 - 入站审计兜底：severe 注入的 skill 被 quarantine（不分发）；外部删除的 skill 软删 archived。
 - 内置 skill 随安装包；`reset --hard` 后自动 re-materialize（不在外部仓库里）。
+
+## 大仓 / 性能
+
+生产的镜像常是从 bitbucket 复制来的大 monorepo（数千 commit、上百 MB），比本地小仓深得多。为此：
+
+- **池镜像浅取**（`fetch depth=1`）：只拉权威分支 tip，不拉全部历史——池只 `reset --hard` 到 tip，任何读路径都不看历史。首次同步不再被历史体积拖慢，`.git` 也不随历史膨胀。
+- **下发热路径零 git 历史遍历**：node 持续轮询的 desired-state 只查目录：manifest 的 `base_commit` 来自同步时算好、写入 catalog 的 `current_version`，**不在每次请求里走 git 历史**。（此前按请求算版本号会在大仓上把共享线程池占满、拖死含后台 UI 在内的所有请求。）
+- **备份分支推送浅取**（`depth=1`）、**回流提名移出上报路径**、**同步/回流 sweep 跑在独立 executor 且每轮有预算**：任一后台重活都不会阻塞正常请求。
 
 ## 回滚
 
