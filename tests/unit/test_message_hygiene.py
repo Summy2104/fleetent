@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 
 import pytest
 
@@ -21,6 +22,7 @@ def test_repair_kind_values_exist() -> None:
     assert RepairKind.inserted_placeholder
     assert RepairKind.filled_missing_tool_result
     assert RepairKind.removed_orphan_tool_result
+    assert RepairKind.repaired_tool_call_arguments
 
 
 def test_repair_kind_is_str_enum() -> None:
@@ -171,6 +173,71 @@ def test_sanitize_fills_each_missing_call_in_multi_call_assistant() -> None:
     assert report.repairs.get(RepairKind.filled_missing_tool_result) == 1
     ids = {m["tool_call_id"] for m in clean if m.get("role") == "tool"}
     assert ids == {"c1", "c2"}
+
+
+# ── repair malformed tool_call arguments (AAA-8272) ──────────────────────────
+
+
+def _assistant_tool_call_with_args(call_id: str, arguments: str, name: str = "f") -> dict:
+    return {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {"id": call_id, "type": "function", "function": {"name": name, "arguments": arguments}}
+        ],
+    }
+
+
+def test_sanitize_repairs_malformed_tool_call_arguments() -> None:
+    # A model-emitted truncated-JSON tool_call, persisted verbatim, poisons the
+    # session: replayed to an OpenAI-compatible backend it triggers a 400 that the
+    # loop classifies unrecoverable, permanently wedging the thread (AAA-8272).
+    malformed = '{"channel_id": "C0AM68DAGP3", "limit": "{}'
+    messages = [
+        {"role": "user", "content": "拉一下频道历史"},
+        _assistant_tool_call_with_args("c1", malformed),
+        {"role": "tool", "tool_call_id": "c1", "content": "tool execution error: ..."},
+        {"role": "user", "content": "换个无关请求"},
+    ]
+    clean, report = sanitize(messages)
+    assert report.repairs.get(RepairKind.repaired_tool_call_arguments) == 1
+    repaired_args = clean[1]["tool_calls"][0]["function"]["arguments"]
+    json.loads(repaired_args)  # must not raise — the sequence is now replayable
+
+
+def test_sanitize_leaves_valid_tool_call_arguments_unchanged() -> None:
+    messages = [
+        _assistant_tool_call_with_args("c1", '{"channel_id": "C0AM68DAGP3", "limit": 10}'),
+        {"role": "tool", "tool_call_id": "c1", "content": "ok"},
+    ]
+    clean, report = sanitize(messages)
+    assert RepairKind.repaired_tool_call_arguments not in report.repairs
+    assert clean[0]["tool_calls"][0]["function"]["arguments"] == (
+        '{"channel_id": "C0AM68DAGP3", "limit": 10}'
+    )
+
+
+def test_sanitize_repairs_empty_string_arguments() -> None:
+    # Some weak models emit an empty-string arguments, which is also invalid JSON.
+    messages = [
+        _assistant_tool_call_with_args("c1", ""),
+        {"role": "tool", "tool_call_id": "c1", "content": "ok"},
+    ]
+    clean, report = sanitize(messages)
+    assert report.repairs.get(RepairKind.repaired_tool_call_arguments) == 1
+    json.loads(clean[0]["tool_calls"][0]["function"]["arguments"])
+
+
+def test_sanitize_repair_malformed_arguments_is_idempotent() -> None:
+    malformed = '{"channel_id": "C0AM68DAGP3", "limit": "{}'
+    messages = [
+        _assistant_tool_call_with_args("c1", malformed),
+        {"role": "tool", "tool_call_id": "c1", "content": "err"},
+    ]
+    once, _ = sanitize(messages)
+    twice, report = sanitize(once)
+    assert report.changed is False
+    assert twice == once
 
 
 # ── consecutive same-role ────────────────────────────────────────────────────
