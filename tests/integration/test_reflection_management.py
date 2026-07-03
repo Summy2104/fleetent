@@ -37,6 +37,24 @@ def test_reflection_management_lists_skill_proposals_from_agent_store(monkeypatc
     assert diff["proposal_id"] == proposal.id
 
 
+def test_reflection_management_degrades_when_state_db_uninitialized(monkeypatch):
+    """The per-agent reflection state_db is only wired in the agent process, never on the
+    platform. Listing/diffing proposals from the platform console must therefore degrade to an
+    empty inbox (so the frontend proposals tab renders) instead of raising the boot-time
+    RuntimeError as a 500."""
+    from fleetent import reflection
+    from fleetent.platform import reflection_management
+
+    monkeypatch.setattr(reflection, "_state_db", None)
+
+    assert reflection_management.reflection_list_proposals() == []
+    assert reflection_management.reflection_proposal_diff("any-id") == {
+        "proposal_id": "any-id",
+        "diff": "",
+        "draft": "",
+    }
+
+
 def test_reflection_management_serializes_report_id(monkeypatch, tmp_path):
     from fleetent import reflection
     from fleetent.platform import reflection_management
