@@ -18,6 +18,7 @@ from urllib.parse import quote, urlsplit
 import httpx
 from dulwich import porcelain
 
+from fleetent import skill_bundle_codec
 from fleetent.integrations.git_platform.backend import (
     BaseGitPlatformBackend,
     GitPlatformCapabilities,
@@ -80,7 +81,13 @@ class BitbucketBackend(BaseGitPlatformBackend):
         url = self._auth_url()
         with tempfile.TemporaryDirectory() as tmp:
             try:
-                porcelain.clone(url, tmp, branch=base_ref.encode())
+                # Shallow clone (depth=1): fetch only the base_ref tip, not full history. A
+                # full clone of a large monorepo mirror (~100MB) took minutes per proposal;
+                # depth=1 pulls just the tip tree (seconds). The new backup commit's parent is
+                # the shallow tip — which the remote already has — so the push stays incremental.
+                self._shallow_clone(url, tmp, base_ref)
+            except GitPlatformUnavailableError:
+                raise
             except Exception as exc:  # dulwich raises a wide range on transport failure
                 raise GitPlatformUnavailableError(
                     f"clone {self._redact(self.config.remote_url)} failed: {self._redact(str(exc))}"
@@ -93,7 +100,9 @@ class BitbucketBackend(BaseGitPlatformBackend):
             for rel, content in bundle.items():
                 dest = target / rel
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_text(content)
+                # Bundle values are codec-encoded (text as-is, binary as tagged base64);
+                # decode back to the real bytes so binary skill files round-trip intact.
+                dest.write_bytes(skill_bundle_codec.decode(content))
                 written.append(str(dest))
 
             porcelain.add(tmp, paths=written)
@@ -111,6 +120,16 @@ class BitbucketBackend(BaseGitPlatformBackend):
                     f"push {branch} failed: {self._redact(str(exc))}"
                 ) from exc
             return commit_sha.decode()
+
+    @staticmethod
+    def _shallow_clone(url: str, target: str, base_ref: str) -> None:
+        """Clone only ``base_ref``'s tip (depth=1). Falls back to a full clone if the
+        transport/dulwich build doesn't support shallow (e.g. some local file:// paths)."""
+        try:
+            porcelain.clone(url, target, branch=base_ref.encode(), depth=1)
+        except TypeError:
+            # Older dulwich without a ``depth`` kwarg — fall back to a full clone.
+            porcelain.clone(url, target, branch=base_ref.encode())
 
     # -- reachability -------------------------------------------------------
 

@@ -69,6 +69,29 @@ def test_push_branch_creates_branch_with_bundle(tmp_path: Path) -> None:
     assert (check / "crm-ops" / "scripts" / "run.sh").read_text() == "echo hi\n"
 
 
+def test_push_branch_round_trips_binary_bundle_files(tmp_path: Path) -> None:
+    # A skill may ship binary files (images, PDFs). They arrive codec-encoded in the bundle
+    # (tagged base64) and must land on the branch byte-identical, not utf-8-mangled.
+    from fleetent import skill_bundle_codec
+
+    url = _seed_remote(tmp_path)
+    backend = BitbucketBackend(config=_cfg(url))
+    blob = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\xff\xfe\x00"
+
+    backend.push_branch(
+        branch="backflow/support-bot/crm-ops",
+        bundle={"SKILL.md": "body\n", "assets/logo.png": skill_bundle_codec.encode(blob)},
+        subdir="crm-ops",
+        base_ref="main",
+        message="backflow with a binary asset",
+        author="fleetent <bot@fleetent>",
+    )
+
+    check = tmp_path / "check"
+    porcelain.clone(url, str(check), branch=b"backflow/support-bot/crm-ops")
+    assert (check / "crm-ops" / "assets" / "logo.png").read_bytes() == blob
+
+
 @respx.mock
 def test_open_get_merge_close_pull_request() -> None:
     backend = BitbucketBackend(config=_cfg("https://git.example.com/scm/PROJ/skills.git"))

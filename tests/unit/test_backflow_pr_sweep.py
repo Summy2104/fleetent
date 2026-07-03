@@ -12,6 +12,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 from fleetent import agent_store
 from fleetent.integrations.git_platform import (
     BaseGitPlatformBackend,
@@ -28,6 +30,13 @@ def _stub_agent(monkeypatch, agent_id: int, name: str) -> None:
         "get_by_id",
         lambda aid: SimpleNamespace(name=name) if aid == agent_id else None,
     )
+
+
+@pytest.fixture(autouse=True)
+def _no_drift_by_default(monkeypatch):
+    """The sweep's nominate pass calls skill_admin_store.list_drifted() (a real DB read).
+    Default it to empty for the backup/PR-focused tests; the nomination test overrides it."""
+    monkeypatch.setattr(backflow_pr_sweep.skill_admin_store, "list_drifted", lambda: [])
 
 
 _CONFIG = {
@@ -197,6 +206,43 @@ def test_disabled_source_is_a_noop(monkeypatch) -> None:
 
     assert fake.pushed == []
     assert result.get("backed_up") == 0
+
+
+def test_sweep_nominates_drifted_skills_off_the_request_path(monkeypatch) -> None:
+    """The sweep (not status ingestion) nominates drifted skills, bounded per round."""
+    fake = _FakeBackend()
+    monkeypatch.setattr(git_source_store, "get_config", lambda: _CONFIG)
+    monkeypatch.setattr(backflow_pr_sweep, "_backend_factory", lambda _c: fake)
+    monkeypatch.setattr(backflow_store, "list_by_pr_state", lambda state, **_: [])
+    monkeypatch.setattr(
+        backflow_pr_sweep.skill_admin_store,
+        "list_drifted",
+        lambda: [(7, "crm-ops"), (8, "billing")],
+    )
+    calls: list[tuple[int, str]] = []
+
+    def _nominate(*, agent_id, skill_name, pool_dir):
+        calls.append((agent_id, skill_name))
+        return 100 + agent_id  # truthy proposal id
+
+    monkeypatch.setattr(backflow_store, "nominate_if_absent", _nominate)
+
+    result = backflow_pr_sweep.sweep()
+
+    assert calls == [(7, "crm-ops"), (8, "billing")]
+    assert result["nominated"] == 2
+
+
+def test_sweep_nominate_budget_caps_per_round(monkeypatch) -> None:
+    """One round nominates at most _NOMINATE_BUDGET_PER_ROUND skills (rest picked up next)."""
+    monkeypatch.setattr(git_source_store, "get_config", lambda: {"enabled": 0})
+    over = [(i, f"skill-{i}") for i in range(backflow_pr_sweep._NOMINATE_BUDGET_PER_ROUND + 10)]
+    monkeypatch.setattr(backflow_pr_sweep.skill_admin_store, "list_drifted", lambda: over)
+    monkeypatch.setattr(backflow_store, "nominate_if_absent", lambda **_: 1)
+
+    result = backflow_pr_sweep.sweep()
+
+    assert result["nominated"] == backflow_pr_sweep._NOMINATE_BUDGET_PER_ROUND
 
 
 def test_nominate_and_node_ingestion_path_are_git_free() -> None:

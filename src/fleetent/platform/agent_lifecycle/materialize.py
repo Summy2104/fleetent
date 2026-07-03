@@ -42,7 +42,7 @@ from fleetent.platform.connector_management.mcp_auth import (
 )
 from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.model_provider_management import model_admin_store, provider_admin_store
-from fleetent.platform.skill_management import git_source_store, skill_admin_store
+from fleetent.platform.skill_management import skill_admin_store
 from fleetent.secret_scan import flatten
 from fleetent.skills import registry as skill_registry
 from fleetent.structured_logging import get_logger
@@ -773,18 +773,6 @@ def _copy_skills(home: Path, *, source_agent: agent_store.Agent | None = None) -
     dest_root = home / "skills"
     dest_root.mkdir(parents=True, exist_ok=True)
 
-    # Resolved once per call (not per skill): the git root + subdir needed to open the
-    # pool's dulwich Repo for base_commit lookups. `src` (the scan root) is never a git
-    # repo on its own when an external-git skills_subdir is configured (R2/R4).
-    from fleetent.platform.skill_management.pool_git import (
-        pool_version_for_skill,
-        resolve_git_root,
-    )
-
-    config = git_source_store.get_config()
-    skills_subdir = (config.get("skills_subdir") or "") if config is not None else ""
-    git_root = resolve_git_root(src, skills_subdir)
-
     # Skip .git — it belongs to the pool repo, not to individual skill dirs
     for skill_dir in sorted(p for p in src.iterdir() if p.is_dir() and p.name != ".git"):
         dest_skill_dir = dest_root / skill_dir.name
@@ -812,10 +800,12 @@ def _copy_skills(home: Path, *, source_agent: agent_store.Agent | None = None) -
 
             if source_agent is not None:
                 # Always store content hash as base_version for drift detection.
-                # Pool git sha is tracked separately in current_version (catalog).
+                # Pool git sha is read from the catalog's current_version (recorded once at
+                # sync/publish time) — never walk git history per skill here (a large-mirror
+                # walk is what saturated the desired-state hot path in production).
                 new_base = _skill_dir_version(skill_dir)
-                new_base_commit = pool_version_for_skill(
-                    git_root, skill_dir.name, subdir=skills_subdir
+                new_base_commit = skill_admin_store.get_source(skill_dir.name).get(
+                    "current_version"
                 )
                 skill_admin_store.set_base_version(source_agent.id, skill_dir.name, new_base)
                 skill_admin_store.set_base_commit(source_agent.id, skill_dir.name, new_base_commit)

@@ -81,6 +81,27 @@ def test_fetch_branch_not_found_raises(tmp_path) -> None:
         )
 
 
+def test_fetch_is_shallow_only_pulls_the_tip(tmp_path) -> None:
+    # Build a source with several commits of history behind the tip.
+    source, _sha, branch = _make_source(tmp_path)
+    for i in range(2, 6):
+        _write_skill(source, "demo-skill", f"Demo v{i}")
+        _commit_all(source, f"update {i}".encode())
+    pool = _init_pool(tmp_path, source)
+
+    tip = pool_git.fetch_remote(
+        pool, remote_url=str(source), branch=branch, username=None, password=None
+    )
+    # A shallow (depth=1) fetch records a .git/shallow boundary and pulls only the tip
+    # commit -- not the whole history. This is the point of not cloning a huge mirror.
+    assert (pool / ".git" / "shallow").exists()
+    reachable = list(Repo(str(pool)).get_walker(include=[tip.encode()]))
+    assert len(reachable) == 1  # only the tip commit is present, not its ancestors
+
+    pool_git.reset_pool_to(pool, tip)
+    assert "Demo v5" in (pool / "demo-skill" / "SKILL.md").read_text(encoding="utf-8")
+
+
 def test_fetch_incremental_picks_up_new_commit(tmp_path) -> None:
     source, first_sha, branch = _make_source(tmp_path)
     pool = _init_pool(tmp_path, source)

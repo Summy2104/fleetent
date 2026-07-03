@@ -46,6 +46,10 @@ def _commit_skill(pool_dir: Path, name: str, content: str) -> str:
     )
     sha = commit_pool(pool_dir, message=f"add {name}", author="admin <a@a>", skill_name=name)
     assert sha is not None
+    # Mirror production's commit -> reconcile: current_version (read as base_commit on the
+    # materialize hot path, and the ref diff_vs_base reconstructs from) is set by the
+    # post-sync reconcile, not commit_pool. Seed it so the diff has a base to reconstruct.
+    skill_admin_store.set_current_version(name, sha)
     return sha
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+from collections.abc import Sequence
 from typing import Literal
 
 from fleetent.config import Settings
@@ -71,6 +72,34 @@ def get_decrypted(agent_id: int | None, env_name: str) -> str | None:
     if row is None:
         return None
     return decrypt_text(str(row["ciphertext"]))
+
+
+def get_decrypted_bulk(agent_id: int | None, env_names: Sequence[str]) -> dict[str, str]:
+    """Return ``{env_name: plaintext}`` for the set slots among ``env_names``, in one query.
+
+    Equivalent to calling ``get_decrypted`` for each name (unset names are omitted), but does
+    a single ``_database()`` open + one cipher setup instead of one per name. The desired-state
+    hot path resolves every agent's inject slots on every node reconcile, so the per-slot
+    ``Settings()``/DB churn of a status+get_decrypted loop dominated the handler. Does not cache
+    plaintext — it is decrypted fresh per call, just batched.
+    """
+    names = list(dict.fromkeys(env_names))  # dedupe, preserve order
+    if not names:
+        return {}
+    _fernet()  # surface a missing/invalid key once, up front (mirrors get_decrypted)
+    placeholders = ", ".join(f":n{i}" for i in range(len(names)))
+    params: dict[str, object] = {"agent_id": agent_id}
+    params.update({f"n{i}": name for i, name in enumerate(names)})
+    rows = (
+        _database()
+        .execute(
+            f"SELECT env_name, ciphertext FROM agent_secrets "
+            f"WHERE agent_id IS :agent_id AND env_name IN ({placeholders})",
+            params,
+        )
+        .fetchall()
+    )
+    return {str(row["env_name"]): decrypt_text(str(row["ciphertext"])) for row in rows}
 
 
 def get_resolved(agent_id: int, env_name: str) -> str | None:
