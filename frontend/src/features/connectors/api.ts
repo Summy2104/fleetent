@@ -63,6 +63,22 @@ export const MCP_AUTH_FORM_FIELDS = {
   api_key_per_user: ['header_style', 'credential_input'],
 } as const
 
+// A per-server approval rule (agent.yaml `x-fleetent.approval_rules`). `when: null`/absent
+// means every call to `tool` needs approval; a `when` map narrows it to calls whose args
+// match (each listed arg's value must be in its allowed list).
+export type McpApprovalRule = {
+  tool: string
+  when?: Record<string, string[]> | null
+}
+
+// fleetent extension fields carried under each server's `x-fleetent` block in agent.yaml.
+export type McpFleetentExtensions = {
+  degrade_mode?: string
+  file_root?: string
+  file_isolation?: string
+  approval_rules?: McpApprovalRule[]
+}
+
 export type McpServerRecord = {
   id: string
   transport: string
@@ -77,7 +93,7 @@ export type McpServerRecord = {
   status: string
   tool_count: number
   agent_id: number | null
-}
+} & McpFleetentExtensions
 
 export type McpServerInput = {
   id: string
@@ -91,7 +107,7 @@ export type McpServerInput = {
   enabled?: boolean
   env?: Record<string, string>
   headers?: Record<string, string>
-}
+} & McpFleetentExtensions
 
 export type McpServerEditInput = Partial<McpServerInput>
 

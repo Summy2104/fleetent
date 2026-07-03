@@ -13,7 +13,7 @@ from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from fleetent import audit_log, auth, user_store
-from fleetent.config import mcp_yaml_field_paths
+from fleetent.config import McpApprovalRule, mcp_yaml_field_paths
 from fleetent.platform.connector_management import mcp_server_store
 from fleetent.platform.connector_management.mcp_auth import (
     ApiKeyMcpAuthConfig,
@@ -28,6 +28,20 @@ router = APIRouter(prefix="/admin")
 IDLE_TIMEOUT_SECONDS = 1800
 _ADMIN_ROLES = {"admin"}
 _SENSITIVE = ("secret", "token", "refresh", "api_key", "password")
+
+
+_DEGRADE_MODES = {"degrade", "strict", "silent"}
+_FILE_ISOLATION = {"on", "off"}
+
+
+def _validated_approval_rules(approval_rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Validate each raw rule against ``McpApprovalRule`` and re-dump it, so a missing
+    ``when`` normalizes to ``None`` (whole-tool rule) and a malformed rule is rejected as a
+    422. Raised ``ValueError`` is wrapped into the body model's validation error upstream."""
+    try:
+        return [McpApprovalRule.model_validate(rule).model_dump() for rule in approval_rules]
+    except (ValidationError, TypeError) as exc:
+        raise ValueError(f"invalid approval_rules: {exc}") from exc
 
 
 def _normalized_auth_config(auth_type: str, auth_config: dict[str, Any]) -> dict[str, Any]:
@@ -78,10 +92,23 @@ class McpServerCreateBody(BaseModel):
     env: dict[str, str] | None = None
     headers: dict[str, str] | None = None
     enabled: bool = True
+    degrade_mode: str = "degrade"
+    file_root: str = ""
+    file_isolation: str = "on"
+    approval_rules: list[dict[str, Any]] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _validate_auth(self) -> McpServerCreateBody:
         self.auth_config = _normalized_auth_config(self.auth_type, self.auth_config)
+        return self
+
+    @model_validator(mode="after")
+    def _validate_xfleetent(self) -> McpServerCreateBody:
+        if self.degrade_mode not in _DEGRADE_MODES:
+            raise ValueError(f"invalid degrade_mode: {self.degrade_mode!r}")
+        if self.file_isolation not in _FILE_ISOLATION:
+            raise ValueError(f"invalid file_isolation: {self.file_isolation!r}")
+        self.approval_rules = _validated_approval_rules(self.approval_rules)
         return self
 
 
@@ -97,6 +124,10 @@ class McpServerEditBody(BaseModel):
     env: dict[str, str] | None = None
     headers: dict[str, str] | None = None
     enabled: bool | None = None
+    degrade_mode: str | None = None
+    file_root: str | None = None
+    file_isolation: str | None = None
+    approval_rules: list[dict[str, Any]] | None = None
 
     @model_validator(mode="after")
     def _validate_auth(self) -> McpServerEditBody:
@@ -105,6 +136,16 @@ class McpServerEditBody(BaseModel):
         if self.auth_type is None or self.auth_config is None:
             raise ValueError("auth_type and auth_config must be updated together")
         self.auth_config = _normalized_auth_config(self.auth_type, self.auth_config)
+        return self
+
+    @model_validator(mode="after")
+    def _validate_xfleetent(self) -> McpServerEditBody:
+        if self.degrade_mode is not None and self.degrade_mode not in _DEGRADE_MODES:
+            raise ValueError(f"invalid degrade_mode: {self.degrade_mode!r}")
+        if self.file_isolation is not None and self.file_isolation not in _FILE_ISOLATION:
+            raise ValueError(f"invalid file_isolation: {self.file_isolation!r}")
+        if self.approval_rules is not None:
+            self.approval_rules = _validated_approval_rules(self.approval_rules)
         return self
 
 
@@ -239,6 +280,10 @@ def list_mcp_servers(
             "env": row["env"],
             "headers": row["headers"],
             "enabled": row["enabled"],
+            "degrade_mode": row.get("degrade_mode") or "degrade",
+            "file_root": row.get("file_root") or "",
+            "file_isolation": row.get("file_isolation") or "on",
+            "approval_rules": row.get("approval_rules") or [],
             "status": "configured" if row["enabled"] else "disabled",
             "tool_count": 0,
             "agent_id": row["agent_id"],
@@ -333,6 +378,10 @@ async def create_mcp_server(
         env=payload.env,
         headers=payload.headers,
         enabled=payload.enabled,
+        degrade_mode=payload.degrade_mode,
+        file_root=payload.file_root,
+        file_isolation=payload.file_isolation,
+        approval_rules=payload.approval_rules,
     )
 
     audit_log.write_audit(user.id, "mcp.create", "mcp_server", server_id)

@@ -204,3 +204,94 @@ def test_field_schema_rejects_unauthenticated_request() -> None:
     response = client.get("/admin/mcp/field-schema")
 
     assert response.status_code == 401
+
+
+def _xfleetent_client(tmp_path, monkeypatch) -> TestClient:
+    db_path = tmp_path / "users.db"
+    apply_migrations(db_path)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setattr(connector_admin_api, "_current_user", lambda _authorization: _User())
+    monkeypatch.setattr(connector_admin_api, "_require_admin", lambda _authorization: _User())
+    monkeypatch.setattr(connector_admin_api.audit_log, "write_audit", lambda *a, **k: None)
+
+    async def _noop_sync(server_id: str, agent_id: int | None) -> None:
+        return None
+
+    monkeypatch.setattr(connector_admin_api, "mcp_sync_server", _noop_sync)
+    app = FastAPI()
+    app.include_router(connector_admin_api.router)
+    return TestClient(app, raise_server_exceptions=True)
+
+
+def test_mcp_admin_api_round_trips_xfleetent_fields(tmp_path, monkeypatch) -> None:
+    client = _xfleetent_client(tmp_path, monkeypatch)
+    headers = {"Authorization": "Session ignored"}
+
+    create = client.post(
+        "/admin/mcp/servers",
+        headers=headers,
+        json={
+            "id": "billing",
+            "transport": "stdio",
+            "command": "npx",
+            "degrade_mode": "strict",
+            "file_root": "/exchange/billing",
+            "file_isolation": "off",
+            "approval_rules": [{"tool": "manage_email", "when": {"operation": ["send", "reply"]}}],
+        },
+    )
+    assert create.status_code == 200
+    row = mcp_server_store.get_mcp_server(None, "billing")
+    assert row is not None
+    assert row["degrade_mode"] == "strict"
+    assert row["file_root"] == "/exchange/billing"
+    assert row["file_isolation"] == "off"
+    assert row["approval_rules"] == [
+        {"tool": "manage_email", "when": {"operation": ["send", "reply"]}}
+    ]
+
+    listed = client.get("/admin/mcp/servers", headers=headers).json()
+    server = next(s for s in listed if s["id"] == "billing")
+    assert server["degrade_mode"] == "strict"
+    assert server["file_root"] == "/exchange/billing"
+    assert server["file_isolation"] == "off"
+    assert server["approval_rules"] == [
+        {"tool": "manage_email", "when": {"operation": ["send", "reply"]}}
+    ]
+
+    # A whole-tool rule (no when) round-trips as when=None.
+    edit = client.put(
+        "/admin/mcp/servers/billing",
+        headers=headers,
+        json={"degrade_mode": "silent", "approval_rules": [{"tool": "delete_file"}]},
+    )
+    assert edit.status_code == 200
+    updated = mcp_server_store.get_mcp_server(None, "billing")
+    assert updated is not None
+    assert updated["degrade_mode"] == "silent"
+    assert updated["approval_rules"] == [{"tool": "delete_file", "when": None}]
+    assert updated["file_isolation"] == "off"
+
+
+def test_mcp_admin_api_rejects_invalid_xfleetent_values(tmp_path, monkeypatch) -> None:
+    client = _xfleetent_client(tmp_path, monkeypatch)
+    headers = {"Authorization": "Session ignored"}
+
+    bad_degrade = client.post(
+        "/admin/mcp/servers",
+        headers=headers,
+        json={"id": "x1", "transport": "stdio", "command": "e", "degrade_mode": "loud"},
+    )
+    assert bad_degrade.status_code == 422
+
+    bad_rule = client.post(
+        "/admin/mcp/servers",
+        headers=headers,
+        json={
+            "id": "x2",
+            "transport": "stdio",
+            "command": "e",
+            "approval_rules": [{"when": {"operation": ["send"]}}],
+        },
+    )
+    assert bad_rule.status_code == 422

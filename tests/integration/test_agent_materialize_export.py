@@ -803,3 +803,41 @@ def test_rematerialize_all_writes_every_agent_home(db):
 def test_rematerialize_all_empty_when_no_agents(db):
     """No agents → empty result, no error."""
     assert materialize.rematerialize_all() == []
+
+
+def test_agent_file_from_store_exports_xfleetent_extension_fields(db):
+    """degrade_mode / file_root / file_isolation / approval_rules 随 materialize 落到每个
+    server 的 x-fleetent 块下；全默认 server 不产出 x-fleetent（mcp-admin-xfleetent-fields）。"""
+    agent = agent_store.create_agent("support", "p", [], mcp_server_ids=["docs", "plain"])
+    agent_mcp_server_store.add_mcp_server(
+        None,
+        "docs",
+        transport="http",
+        url="https://docs.acme.internal/mcp",
+        degrade_mode="strict",
+        file_root="/exchange/docs",
+        file_isolation="off",
+        approval_rules=[{"tool": "manage_email", "when": {"operation": ["send"]}}],
+    )
+    agent_mcp_server_store.add_mcp_server(
+        None, "plain", transport="http", url="https://plain.acme.internal/mcp"
+    )
+    agent_store.bind_mcp_server(agent.id, "docs")
+    agent_store.bind_mcp_server(agent.id, "plain")
+
+    exported = materialize.agent_file_from_store(agent_store.get_by_name("support"))
+    servers = {server.id: server for server in exported.mcp_servers}
+    assert servers["docs"].degrade_mode == "strict"
+    assert servers["docs"].file_root == "/exchange/docs"
+    assert servers["docs"].file_isolation == "off"
+    assert [rule.model_dump() for rule in servers["docs"].approval_rules] == [
+        {"tool": "manage_email", "when": {"operation": ["send"]}}
+    ]
+
+    payload = materialize.desired_state_payload_from_agent_file(exported)
+    docs_ext = payload["mcpServers"]["docs"]["x-fleetent"]
+    assert docs_ext["degrade_mode"] == "strict"
+    assert docs_ext["file_root"] == "/exchange/docs"
+    assert docs_ext["file_isolation"] == "off"
+    assert docs_ext["approval_rules"] == [{"tool": "manage_email", "when": {"operation": ["send"]}}]
+    assert "x-fleetent" not in payload["mcpServers"]["plain"]

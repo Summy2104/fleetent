@@ -63,6 +63,20 @@ const FIELD_SCHEMA = {
   'auth.authorization_endpoint': 'mcpServers.{id}.x-fleetent.auth.authorization_endpoint',
   'auth.redirect_path': 'mcpServers.{id}.x-fleetent.auth.redirect_path',
   'auth.token_env': 'mcpServers.{id}.x-fleetent.auth.token_env',
+  degrade_mode: 'mcpServers.{id}.x-fleetent.degrade_mode',
+  file_root: 'mcpServers.{id}.x-fleetent.file_root',
+  file_isolation: 'mcpServers.{id}.x-fleetent.file_isolation',
+  approval_rules: 'mcpServers.{id}.x-fleetent.approval_rules',
+}
+
+// Every create/edit payload now carries the four x-fleetent extension fields at their
+// defaults (like auth_config, the form always submits them). Spread into the existing
+// exact-match expectations so they stay honest without re-listing the defaults each time.
+const XFLEETENT_DEFAULTS = {
+  degrade_mode: 'degrade',
+  file_root: '',
+  file_isolation: 'on',
+  approval_rules: [],
 }
 
 const fieldSchemaHandler = http.get(`${API_BASE_URL}/admin/mcp/field-schema`, () => HttpResponse.json(FIELD_SCHEMA))
@@ -264,6 +278,7 @@ describe('mcp page form', () => {
         url: 'https://docs.internal/mcp',
         auth_type: 'api_key',
         auth_config: { key_env: 'FLEETENT_DOCS_MCP_KEY' },
+        ...XFLEETENT_DEFAULTS,
       })
     })
   })
@@ -307,6 +322,7 @@ describe('mcp page form', () => {
           client_secret_env: 'FLEETENT_DOCS_MCP_SECRET',
           scope: 'tools:read',
         },
+        ...XFLEETENT_DEFAULTS,
       })
     })
   })
@@ -360,6 +376,7 @@ describe('mcp page form', () => {
           redirect_path: '/oauth/callback',
           token_env: 'GOOGLE_DRIVE_MCP_ACCESS_TOKEN',
         },
+        ...XFLEETENT_DEFAULTS,
       })
     })
   })
@@ -394,6 +411,95 @@ describe('mcp page form', () => {
 
     await waitFor(() => {
       expect((captured?.auth_config as Record<string, unknown>)?.token_env).toBe('')
+    })
+  })
+
+  it('submits x-fleetent extension fields including a nested approval rule', async () => {
+    mockBase('admin', [])
+    const user = userEvent.setup({ delay: null })
+    let captured: Record<string, unknown> | null = null
+    server.use(
+      fieldSchemaHandler,
+      http.post(`${API_BASE_URL}/admin/mcp/servers`, async ({ request }) => {
+        captured = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ server_id: 'billing', success: true }, { status: 201 })
+      })
+    )
+
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: 'Add MCP Server' }))
+    await user.type(screen.getByLabelText(/^ID/), 'billing')
+    await user.type(screen.getByLabelText(/Command/), 'npx server')
+
+    // the extension fields carry their schema-derived x-fleetent path hints
+    expect(await screen.findByText('mcpServers.billing.x-fleetent.degrade_mode')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('combobox', { name: 'Degradation mode' }))
+    await user.click(await screen.findByRole('option', { name: 'Strict' }))
+    await user.click(screen.getByRole('combobox', { name: 'File isolation' }))
+    await user.click(await screen.findByRole('option', { name: 'Off' }))
+    await user.type(screen.getByLabelText(/File root/), '/exchange/billing')
+
+    // nested approval rule: add a rule, name the tool, add one when-condition (arg + value)
+    await user.click(screen.getByRole('button', { name: 'Add approval rule' }))
+    await user.type(screen.getByLabelText('Approval rule tool name'), 'manage_email')
+    await user.click(screen.getByRole('button', { name: 'Add condition' }))
+    await user.type(screen.getByLabelText('Condition argument name'), 'operation')
+    await user.type(screen.getByLabelText('Allowed value'), 'send')
+
+    await user.click(screen.getByRole('button', { name: 'Create' }))
+
+    await waitFor(() => {
+      expect(captured).toMatchObject({
+        id: 'billing',
+        transport: 'stdio',
+        command: 'npx server',
+        degrade_mode: 'strict',
+        file_root: '/exchange/billing',
+        file_isolation: 'off',
+        approval_rules: [{ tool: 'manage_email', when: { operation: ['send'] } }],
+      })
+    })
+  })
+
+  it('edits a server, round-tripping an existing approval rule back into the form', async () => {
+    const withRule: McpServerRecord = {
+      id: 'mailer',
+      transport: 'stdio',
+      auth_type: 'none',
+      auth_config: {},
+      command: 'npx mailer',
+      status: 'configured',
+      tool_count: 0,
+      agent_id: null,
+      degrade_mode: 'strict',
+      approval_rules: [{ tool: 'manage_email', when: { operation: ['send'] } }],
+    }
+    mockBase('admin', [withRule])
+    const user = userEvent.setup({ delay: null })
+    let captured: Record<string, unknown> | null = null
+    server.use(
+      fieldSchemaHandler,
+      http.put(`${API_BASE_URL}/admin/mcp/servers/mailer`, async ({ request }) => {
+        captured = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ server_id: 'mailer', success: true })
+      })
+    )
+
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: 'Actions for mailer' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit' }))
+    // the stored rule is rehydrated into the editor
+    expect(await screen.findByDisplayValue('manage_email')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('operation')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('send')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => {
+      expect(captured).toMatchObject({
+        degrade_mode: 'strict',
+        approval_rules: [{ tool: 'manage_email', when: { operation: ['send'] } }],
+      })
     })
   })
 })

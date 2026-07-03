@@ -30,7 +30,7 @@ from fleetent.agent_config import (
     collect_env_var_names,
     default_models,
 )
-from fleetent.config import MCP_FLEETENT_EXT_DEFAULTS, McpServerSettings
+from fleetent.config import MCP_FLEETENT_EXT_DEFAULTS, McpApprovalRule, McpServerSettings
 from fleetent.platform.agent_lifecycle import credential_slots, default_binding_store, secret_store
 from fleetent.platform.connector_management import mcp_server_store
 from fleetent.platform.connector_management.mcp_auth import (
@@ -476,6 +476,12 @@ def _mcp_servers_for_agent(agent: agent_store.Agent) -> list[McpServerSettings]:
                 auth=auth,
                 header_style=header_style,
                 credential_input=credential_input,
+                degrade_mode=row.get("degrade_mode") or "degrade",
+                file_root=row.get("file_root") or "",
+                file_isolation=row.get("file_isolation") or "on",
+                approval_rules=[
+                    McpApprovalRule(**rule) for rule in (row.get("approval_rules") or [])
+                ],
             )
         )
     return servers
