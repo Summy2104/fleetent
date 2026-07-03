@@ -3,7 +3,7 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { Badge } from '@/components/base/badge'
 import type { SkillListItem } from '@/features/skills/api'
 import { SkillRowActions } from '@/features/skills/row-actions/skill-row-actions'
-import { auditVariant, SKILL_STATUSES, statusVariant } from '@/features/skills/shared'
+import { AUDIT_VERDICTS, auditVariant, SKILL_STATUSES, statusVariant } from '@/features/skills/shared'
 import type { useT } from '@/i18n'
 
 type Translate = ReturnType<typeof useT>
@@ -81,6 +81,11 @@ export function buildSkillColumns({
     {
       accessorKey: 'audit_verdict',
       header: t('skills.colAudit'),
+      filterFn: 'equals',
+      meta: {
+        title: t('skills.colAudit'),
+        filter: { type: 'select', options: AUDIT_VERDICTS.map((verdict) => ({ label: verdict, value: verdict })) },
+      },
       cell: ({ row }) =>
         row.original.audit_verdict ? (
           <Badge variant={auditVariant(row.original.audit_verdict)}>{row.original.audit_verdict}</Badge>
