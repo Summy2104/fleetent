@@ -90,15 +90,15 @@ pipelines:
 ```
 agent 改 skill → node 上报漂移 → 平台只标记 drifted（上报请求路径零 git、不提名、不拉 bundle）
    → backflow_pr_sweep 定时轮询：为已漂移且无 pending 提案的 skill 创建提案（此刻才从 owning node 拉进化副本 bundle）
-      → 再把副本推成备份分支 backflow/<agent>/<skill>（定时 + 手动 sync-backflow）
-   → 人在 git host 对备份分支开 PR 合并到权威分支   ← 平台不代劳
+      → 把该 agent 全部漂移 skill 聚合推成 **一个** 备份分支 backflow/<agent>（快照重建、定时 + 手动 sync-backflow）
+   → 人在 git host 对该分支开 **一个** PR 合并到权威分支（一次采纳该 agent 整批 skill）   ← 平台不代劳
    → 合并后入站同步（fetch + reset）自然把新内容拉回池 → 下发 agent
 ```
 
-- **提名不在上报请求路径上**：node 上报只落 `drift` 标记（零 git、不拉 bundle，避免阻塞 `POST /nodes/{id}/status`）；提名（拉 bundle）与推备份分支都在后台 `backflow_pr_sweep` 里做，每轮有预算上限，故漂移后提案会在下一轮 sweep 才出现（非上报即刻）。
-- 平台**只**推备份分支（非权威主分支），**从不**开 / 合并 PR。备份分支名按 `(agent, skill)` 稳定。推备份分支只浅取权威分支 tip（`depth=1`），不整仓克隆，故大仓下一次备份也很快。
-- 后台定时 sweep（`__skill_backflow_pr_sweep__`）自动提名 + 推备份分支；后台 UI 的「Sync backflow」手动触发一轮 sweep（同样只提名 + 推备份分支）。
-- **平台不审核回流**：不提供 accept / reject / fork / open-pr——采纳与否完全是你在 git host 的动作（对备份分支开 PR 合并）。平台侧回流 UI 是**只读**的：看有哪些回流、备份到哪个分支、diff（相对 base / 相对 head，含冲突标记）。
+- **一个 agent 一个聚合分支**：该 agent 所有漂移 skill 都落在 `backflow/<agent>`（每个 skill 一个 `<skills_subdir>/<skill>/` 目录），所以一次 PR 采纳整批，不用逐 skill 开 PR。分支按 agent 稳定；**快照重建**——每轮 sweep 从权威分支 tip 浅取（`depth=1`，不整仓克隆）叠上当前漂移集后强制更新，故分支始终反映当前漂移；漂移集没变则不重推（不 churn 已开的 PR）。
+- **提名不在上报请求路径上**：node 上报只落 `drift` 标记（零 git、不拉 bundle，避免阻塞 `POST /nodes/{id}/status`）；提名（拉 bundle）与推分支都在后台 `backflow_pr_sweep` 里做，每轮有预算上限，故漂移后提案会在下一轮 sweep 才出现（非上报即刻）。
+- **待合并清单 + 一键建 PR**：skill 管理页有一块「待合并回流」清单，按 agent 分组列出待采纳的回流（agent · skill · 分支 · 状态 · diff），每个 agent 给一个**预填的建 PR 链接**（跳到 bitbucket 建 PR 页，`source=backflow/<agent>` → `dest=权威分支`）。你点链接、review、合并即可。**已落地**（你已合并且同步回池）的会自动从清单消失（平台不盯 PR 状态，按内容比对判定）。后台 UI 的「Sync backflow」手动触发一轮 sweep。
+- **平台不审核回流**：不提供 accept / reject / fork / open-pr——采纳完全是你在 git host 的动作。平台侧回流 UI 是**只读**的：看有哪些回流、备份到哪个分支、diff（相对 base / 相对 head，含冲突标记）。
 - 为什么去掉审核：「先自动推备份、后人工审」有矛盾——reject 只撤 agent 运行时副本，管不到已推的备份分支，若该分支被合并则改动复活；且与「git 唯一权威、平台只读」冲突。故采纳统一收敛为人在 git host 的 PR。
 
 ## 行为变化

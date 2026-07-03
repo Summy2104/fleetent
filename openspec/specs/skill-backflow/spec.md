@@ -112,29 +112,41 @@
 
 ### Requirement: 回流提名先推备份分支保命
 
-启用外部 git 源时，平台 SHALL 经一个独立定时任务（`backflow_pr_sweep`，类比 KB connector sweep）扫描 pending 且未备份的回流提案，把其进化副本经 `push_branch` 推到一个**备份分支** `<branch_prefix>/<agent_id>/<skill>`（**非权威主分支**），并标记 `pr_state="backed_up"`。备份是即时保命动作：即使后续 PR 被拒/关，备份分支仍留痕、agent 改动不丢。node 上报/reconcile 路径 SHALL **零 git 依赖**且 SHALL NOT 触发提名；提名（`backflow_store.nominate`）只存 bundle、亦零 git，且与推备份分支同在 sweep 内进行。`push_branch` 推备份分支 SHALL 只浅取 `base_ref` 的 tip（`depth=1`，不整仓克隆），使一次备份不因仓库历史体积而变慢。分支名 SHALL 按 `(agent, skill)` 稳定，配合去重压制短命分支。
+启用外部 git 源时，平台 SHALL 经一个独立定时任务（`backflow_pr_sweep`，类比 KB connector sweep）为每个有漂移的 agent 推**一个聚合备份分支** `<branch_prefix>/<agent>`（**非权威主分支**），该分支携带该 agent **当前全部未落地的漂移 skill**，并把这些提案标记 `pr_state="backed_up"`。一个 agent 一个分支 → 一次人工 PR 采纳其整批改动。备份是即时保命动作：即使后续未合并，备份分支仍留痕、agent 改动不丢。node 上报/reconcile 路径 SHALL **零 git 依赖**且 SHALL NOT 触发提名；提名（`backflow_store.nominate`）只存 bundle、亦零 git，且与推备份分支同在 sweep 内进行。
 
-若外部源额外配置了 `skills_subdir`（见 `skill-git-sync`），`push_branch` 推送内容在备份分支中的树路径 SHALL 为 `<skills_subdir>/<name>` 而非 `<name>`，使备份分支与权威仓库的目录布局一致（人工合并到 main 时 skill 落在正确子目录下）。未配置 `skills_subdir` 时，树路径退化为 `<name>`。
+分支采用**快照重建**：每轮 sweep 从权威分支 tip 浅取（`push_branch` 用 `depth=1`，不整仓克隆），叠上该 agent 全部未落地漂移 skill 后**强制更新**分支（因新快照非旧 tip 的后代），使分支与其人工 PR 始终反映当前漂移。为避免徒增 PR 噪声，SHALL 仅在 agent 的漂移集**发生变化**时才重推（出现新增/deferred 提案，或某 skill 刚落地使集合缩小）。分支名 SHALL 按 `agent` 稳定。
 
-#### Scenario: 提名后推备份分支
-- **WHEN** sweep 扫到一条 pending 未备份的回流提案
-- **THEN** 经 `push_branch` 推一个非主分支的备份分支，提案标 `pr_state="backed_up"`，记录分支名
+聚合分支上，替换 SHALL **按 skill 目录整体替换**（进化副本删掉的文件在分支上也删除），其它未漂移 skill（已在 `base_ref` 上）SHALL 原样保留。若外部源配置了 `skills_subdir`（见 `skill-git-sync`），每个 skill 内容的树路径 SHALL 为 `<skills_subdir>/<skill>`；未配置时退化为 `<skill>`。
+
+**已落地**（agent 进化副本内容已等于池当前副本，即人已合并该分支并经入站同步拉回）的提案 SHALL 标 `pr_state="merged"` 并从备份分支与待合并清单中移除——平台不盯 git PR 状态，以内容比对判定「已采纳」。
+
+#### Scenario: 一个 agent 的多 skill 聚合到一个分支
+- **WHEN** sweep 扫到同一 agent 的多条 pending 未备份提案（如 skill `crm-ops` 与 `billing`）
+- **THEN** 经一次 `push_branch` 推一个非主分支 `<branch_prefix>/<agent>`，其上同时含 `<skill>/…` 两个 skill 目录，两条提案都标 `pr_state="backed_up"`、记录同一分支名
+
+#### Scenario: 漂移集未变化不重推（不churn PR）
+- **WHEN** 某 agent 的漂移 skill 全部已 `backed_up` 且无新增、无落地
+- **THEN** 本轮 sweep SHALL NOT 重推该 agent 的分支（避免用相同快照 churn 已开的 PR）
+
+#### Scenario: 已落地提案移出清单
+- **WHEN** 某回流提案的进化副本内容已等于池当前该 skill 内容（PR 已合并且同步回池）
+- **THEN** 该提案标 `pr_state="merged"`、不再推分支、从待合并清单消失
 
 #### Scenario: node 上报与提名零 git
 - **WHEN** node 上报某 agent 的 skill 漂移，随后 sweep 为其提名
 - **THEN** node 上报/reconcile 路径不触发任何 git_platform / push 调用（只落 drift）；sweep 内的提名只存 bundle，同样不触发 git 操作（git 只发生在其后的 `push_branch`）
 
-#### Scenario: 配置 skills_subdir 时备份分支内容落在子目录
-- **WHEN** 外部源配置了 `skills_subdir="skills"`，sweep 把 skill "crm-ops" 的进化副本推备份分支
-- **THEN** 备份分支上该内容的树路径为 `skills/crm-ops`，而非仓库根的 `crm-ops`
-
-#### Scenario: 未配置 skills_subdir 时树路径不变
-- **WHEN** 外部源未配置 `skills_subdir`
-- **THEN** 备份分支/fork 分支上内容的树路径仍为 `<name>`，行为与本 change 之前一致
+#### Scenario: 配置 skills_subdir 时内容落在子目录
+- **WHEN** 外部源配置了 `skills_subdir="skills"`，sweep 把 agent 的 skill "crm-ops" 推聚合分支
+- **THEN** 分支上该内容的树路径为 `skills/crm-ops`，而非仓库根的 `crm-ops`
 
 ### Requirement: 采纳靠人对备份分支开 PR（平台不开 / 不合 PR）
 
-平台 SHALL NOT 开或合并任何 PR，SHALL NOT 以任何方式往权威分支写入。采纳一条回流一律靠人在 git host 对已推的备份分支 `<branch_prefix>/<agent_id>/<skill>` 开 PR 合并到权威分支，合并后经入站同步（`skill-git-sync`）自然拉回池。平台 SHALL 暴露 `POST /admin/skills/backflow/sync-backflow`（admin 手动触发一轮 sweep，只推备份分支、不开 PR）。SHALL NOT 提供平台开 PR 的端点（如 `open-pr`）。历史 `auto_open_pr` 配置列 SHALL 保留但无行为（sweep 忽略之，永不自动开 PR）。
+平台 SHALL NOT 开或合并任何 PR，SHALL NOT 以任何方式往权威分支写入。采纳一律靠人在 git host 对已推的聚合备份分支 `<branch_prefix>/<agent>` 开 PR 合并到权威分支（一个 PR 采纳该 agent 的整批 skill），合并后经入站同步（`skill-git-sync`）自然拉回池。平台 SHALL 暴露 `POST /admin/skills/backflow/sync-backflow`（admin 手动触发一轮 sweep，只推备份分支、不开 PR）。SHALL NOT 提供平台开 PR 的端点（如 `open-pr`）。为降低人工摩擦，管理 UI SHALL 提供**按 agent 聚合的「待合并回流」清单**（列 agent · skill · 分支 · 状态 · diff）并对每个 agent 给出一键**预填的建 PR 链接**（bitbucket.org：`source=<branch_prefix>/<agent>` → `dest=<权威分支>`，从配置的远端仓地址推导；非 bitbucket.org 远端则仅显示分支名）——链接只是跳转到 git host 的建 PR 页，平台仍不代开/代合。历史 `auto_open_pr` 配置列 SHALL 保留但无行为（sweep 忽略之，永不自动开 PR）。
+
+#### Scenario: 按 agent 聚合的待合并清单 + 建 PR 链接
+- **WHEN** 存在同一 agent 多个 skill 的 `backed_up` 回流提案，运营打开 skill 管理页
+- **THEN** 「待合并回流」清单按 agent 分组列出这些 skill，并给出一个指向 git host 建 PR 页（预填 `source`→`dest`）的链接；已落地（`merged`）提案不出现在清单中
 
 #### Scenario: 手动同步只推备份分支
 - **WHEN** admin 调 `POST /admin/skills/backflow/sync-backflow`

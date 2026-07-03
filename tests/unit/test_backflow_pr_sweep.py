@@ -1,9 +1,9 @@
 """Unit tests for the outbound backflow PR sweep (skill-backflow-git-pr).
 
-The sweep pushes a backup branch for unbacked proposals, then opens a PR for backed-up
-ones when auto_open_pr is set, degrading to ``deferred`` (never raising) when git is
-unreachable. A FakeGitPlatformBackend is injected; git_source_store / backflow_store are
-patched. Also guards that the nominate / node-ingestion path stays git-free.
+The sweep pushes ONE aggregate backup branch per agent (all its drifted skills), degrading
+to ``deferred`` (never raising) when git is unreachable, and never opening PRs. A
+FakeGitPlatformBackend is injected; git_source_store / backflow_store are patched. Also
+guards that the nominate / node-ingestion path stays git-free.
 """
 
 from __future__ import annotations
@@ -33,10 +33,11 @@ def _stub_agent(monkeypatch, agent_id: int, name: str) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _no_drift_by_default(monkeypatch):
-    """The sweep's nominate pass calls skill_admin_store.list_drifted() (a real DB read).
-    Default it to empty for the backup/PR-focused tests; the nomination test overrides it."""
+def _sweep_defaults(monkeypatch):
+    """Defaults for the backup/PR-focused tests: no drift to nominate, and nothing already
+    landed (so an empty temp pool dir doesn't accidentally mark proposals merged)."""
     monkeypatch.setattr(backflow_pr_sweep.skill_admin_store, "list_drifted", lambda: [])
+    monkeypatch.setattr(backflow_store, "is_landed", lambda *_a, **_k: False)
 
 
 _CONFIG = {
@@ -66,7 +67,9 @@ class _FakeBackend(BaseGitPlatformBackend):
     def push_branch(self, *, branch, bundle, subdir, base_ref, message, author) -> str:
         if self.unavailable:
             raise GitPlatformUnavailableError("remote down")
-        self.pushed.append({"branch": branch, "subdir": subdir, "base_ref": base_ref})
+        self.pushed.append(
+            {"branch": branch, "subdir": subdir, "base_ref": base_ref, "bundle": bundle}
+        )
         return f"sha-{branch}"
 
     def open_pull_request(
@@ -80,19 +83,21 @@ class _FakeBackend(BaseGitPlatformBackend):
         )
 
 
-def test_backs_up_unbacked_proposal_on_a_non_main_branch(monkeypatch) -> None:
+def _patch_states(monkeypatch, *, unbacked=(), deferred=(), backed_up=()) -> None:
+    proposals = {None: list(unbacked), "deferred": list(deferred), "backed_up": list(backed_up)}
+    monkeypatch.setattr(backflow_store, "list_by_pr_state", lambda state, **_: proposals[state])
+
+
+def test_backs_up_agent_aggregate_branch(monkeypatch) -> None:
     fake = _FakeBackend()
-    proposals = {
-        None: [
-            {"id": 1, "agent_id": 7, "skill_name": "crm-ops", "proposed_bundle": {"SKILL.md": "x"}}
-        ],
-        "deferred": [],
-        "backed_up": [],
-    }
     monkeypatch.setattr(git_source_store, "get_config", lambda: _CONFIG)
     monkeypatch.setattr(backflow_pr_sweep, "_backend_factory", lambda _c: fake)
-    monkeypatch.setattr(backflow_store, "list_by_pr_state", lambda state, **_: proposals[state])
-    # Branch names use the agent's (human) name, sanitized to a legal ref component.
+    _patch_states(
+        monkeypatch,
+        unbacked=[
+            {"id": 1, "agent_id": 7, "skill_name": "crm-ops", "proposed_bundle": {"SKILL.md": "x"}}
+        ],
+    )
     _stub_agent(monkeypatch, 7, "Sales Bot")
     set_link = MagicMock()
     set_state = MagicMock()
@@ -101,26 +106,57 @@ def test_backs_up_unbacked_proposal_on_a_non_main_branch(monkeypatch) -> None:
 
     backflow_pr_sweep.sweep()
 
+    # One aggregate branch per agent (no skill in the name); bundle keys are "<skill>/<relpath>".
     assert fake.pushed == [
-        {"branch": "backflow/Sales-Bot/crm-ops", "subdir": "crm-ops", "base_ref": "main"}
+        {
+            "branch": "backflow/Sales-Bot",
+            "subdir": "",
+            "base_ref": "main",
+            "bundle": {"crm-ops/SKILL.md": "x"},
+        }
     ]
-    set_link.assert_any_call(1, branch="backflow/Sales-Bot/crm-ops")
+    set_link.assert_any_call(1, branch="backflow/Sales-Bot")
     set_state.assert_any_call(1, "backed_up")
+
+
+def test_aggregates_multiple_skills_from_one_agent_into_one_branch(monkeypatch) -> None:
+    fake = _FakeBackend()
+    monkeypatch.setattr(git_source_store, "get_config", lambda: _CONFIG)
+    monkeypatch.setattr(backflow_pr_sweep, "_backend_factory", lambda _c: fake)
+    _patch_states(
+        monkeypatch,
+        unbacked=[
+            {"id": 1, "agent_id": 7, "skill_name": "crm-ops", "proposed_bundle": {"SKILL.md": "a"}},
+            {"id": 2, "agent_id": 7, "skill_name": "billing", "proposed_bundle": {"SKILL.md": "b"}},
+        ],
+    )
+    _stub_agent(monkeypatch, 7, "Sales Bot")
+    set_state = MagicMock()
+    monkeypatch.setattr(backflow_store, "set_pr_link", MagicMock())
+    monkeypatch.setattr(backflow_store, "set_pr_state", set_state)
+
+    backflow_pr_sweep.sweep()
+
+    # Both skills land on the SAME branch, each under its own "<skill>/..." path.
+    assert len(fake.pushed) == 1
+    push = fake.pushed[0]
+    assert push["branch"] == "backflow/Sales-Bot"
+    assert push["bundle"] == {"crm-ops/SKILL.md": "a", "billing/SKILL.md": "b"}
+    set_state.assert_any_call(1, "backed_up")
+    set_state.assert_any_call(2, "backed_up")
 
 
 def test_backs_up_with_skills_subdir_prefixes_tree_path(monkeypatch) -> None:
     fake = _FakeBackend()
     config = {**_CONFIG, "skills_subdir": "skills"}
-    proposals = {
-        None: [
-            {"id": 1, "agent_id": 7, "skill_name": "crm-ops", "proposed_bundle": {"SKILL.md": "x"}}
-        ],
-        "deferred": [],
-        "backed_up": [],
-    }
     monkeypatch.setattr(git_source_store, "get_config", lambda: config)
     monkeypatch.setattr(backflow_pr_sweep, "_backend_factory", lambda _c: fake)
-    monkeypatch.setattr(backflow_store, "list_by_pr_state", lambda state, **_: proposals[state])
+    _patch_states(
+        monkeypatch,
+        unbacked=[
+            {"id": 1, "agent_id": 7, "skill_name": "crm-ops", "proposed_bundle": {"SKILL.md": "x"}}
+        ],
+    )
     _stub_agent(monkeypatch, 7, "Sales Bot")
     monkeypatch.setattr(backflow_store, "set_pr_link", MagicMock())
     monkeypatch.setattr(backflow_store, "set_pr_state", MagicMock())
@@ -128,43 +164,100 @@ def test_backs_up_with_skills_subdir_prefixes_tree_path(monkeypatch) -> None:
     backflow_pr_sweep.sweep()
 
     assert fake.pushed == [
-        {"branch": "backflow/Sales-Bot/crm-ops", "subdir": "skills/crm-ops", "base_ref": "main"}
+        {
+            "branch": "backflow/Sales-Bot",
+            "subdir": "skills",
+            "base_ref": "main",
+            "bundle": {"crm-ops/SKILL.md": "x"},
+        }
     ]
 
 
 def test_branch_name_falls_back_to_agent_id_when_agent_missing(monkeypatch) -> None:
     monkeypatch.setattr(agent_store, "get_by_id", lambda _aid: None)
-    branch = backflow_pr_sweep._branch_name(
-        {"branch_prefix": "backflow"}, {"agent_id": 7, "skill_name": "crm-ops"}
-    )
-    assert branch == "backflow/7/crm-ops"
+    assert backflow_pr_sweep._branch_name({"branch_prefix": "backflow"}, 7) == "backflow/7"
 
 
 def test_branch_name_sanitizes_unsafe_agent_name(monkeypatch) -> None:
     _stub_agent(monkeypatch, 7, "Ops/Team #1 ~weird")
-    branch = backflow_pr_sweep._branch_name(
-        {"branch_prefix": "backflow"}, {"agent_id": 7, "skill_name": "crm-ops"}
-    )
     # Illegal ref characters collapse to '-'; no '/', '~', '#', or spaces leak through.
-    assert branch == "backflow/Ops-Team-1-weird/crm-ops"
+    assert (
+        backflow_pr_sweep._branch_name({"branch_prefix": "backflow"}, 7)
+        == "backflow/Ops-Team-1-weird"
+    )
+
+
+def test_skips_repush_when_agent_set_unchanged(monkeypatch) -> None:
+    """An agent whose skills are all already backed_up (and none landed) is not re-pushed —
+    a fresh identical snapshot would only churn the open PR."""
+    fake = _FakeBackend()
+    monkeypatch.setattr(git_source_store, "get_config", lambda: _CONFIG)
+    monkeypatch.setattr(backflow_pr_sweep, "_backend_factory", lambda _c: fake)
+    _patch_states(
+        monkeypatch,
+        backed_up=[
+            {
+                "id": 2,
+                "agent_id": 7,
+                "skill_name": "crm-ops",
+                "proposed_bundle": {"SKILL.md": "x"},
+                "pr_state": "backed_up",
+            }
+        ],
+    )
+    _stub_agent(monkeypatch, 7, "Sales Bot")
+    monkeypatch.setattr(backflow_store, "set_pr_link", MagicMock())
+    monkeypatch.setattr(backflow_store, "set_pr_state", MagicMock())
+
+    backflow_pr_sweep.sweep()
+
+    assert fake.pushed == []  # nothing changed -> no re-push
+
+
+def test_landed_proposal_marked_merged_and_dropped(monkeypatch) -> None:
+    """A proposal whose evolved copy already equals the pool (merged + synced back) is marked
+    ``merged`` and not pushed."""
+    fake = _FakeBackend()
+    monkeypatch.setattr(git_source_store, "get_config", lambda: _CONFIG)
+    monkeypatch.setattr(backflow_pr_sweep, "_backend_factory", lambda _c: fake)
+    monkeypatch.setattr(backflow_store, "is_landed", lambda *_a, **_k: True)
+    _patch_states(
+        monkeypatch,
+        backed_up=[
+            {
+                "id": 2,
+                "agent_id": 7,
+                "skill_name": "crm-ops",
+                "proposed_bundle": {"SKILL.md": "x"},
+                "pr_state": "backed_up",
+            }
+        ],
+    )
+    _stub_agent(monkeypatch, 7, "Sales Bot")
+    monkeypatch.setattr(backflow_store, "set_pr_link", MagicMock())
+    set_state = MagicMock()
+    monkeypatch.setattr(backflow_store, "set_pr_state", set_state)
+
+    backflow_pr_sweep.sweep()
+
+    set_state.assert_any_call(2, "merged")
+    assert fake.pushed == []
 
 
 def test_sweep_never_opens_pr_even_with_auto_open(monkeypatch) -> None:
-    """The platform only pushes backup branches; opening a PR to the authority branch is
-    the human's job. The sweep must never open a PR, even if a legacy auto_open_pr=1 config
-    lingers."""
+    """The platform only pushes backup branches; opening a PR to the authority branch is the
+    human's job. The sweep must never open a PR, even if a legacy auto_open_pr=1 lingers."""
     fake = _FakeBackend()
     config = {**_CONFIG, "auto_open_pr": 1}
-    proposals = {
-        None: [],
-        "deferred": [],
-        "backed_up": [
-            {"id": 2, "agent_id": 7, "skill_name": "crm-ops", "pr_branch": "backflow/7/crm-ops"}
-        ],
-    }
     monkeypatch.setattr(git_source_store, "get_config", lambda: config)
     monkeypatch.setattr(backflow_pr_sweep, "_backend_factory", lambda _c: fake)
-    monkeypatch.setattr(backflow_store, "list_by_pr_state", lambda state, **_: proposals[state])
+    _patch_states(
+        monkeypatch,
+        unbacked=[
+            {"id": 1, "agent_id": 7, "skill_name": "crm-ops", "proposed_bundle": {"SKILL.md": "x"}}
+        ],
+    )
+    _stub_agent(monkeypatch, 7, "Sales Bot")
     monkeypatch.setattr(backflow_store, "set_pr_link", MagicMock())
     monkeypatch.setattr(backflow_store, "set_pr_state", MagicMock())
 
@@ -176,23 +269,20 @@ def test_sweep_never_opens_pr_even_with_auto_open(monkeypatch) -> None:
 
 def test_git_unreachable_defers_without_raising(monkeypatch) -> None:
     fake = _FakeBackend(unavailable=True)
-    proposals = {
-        None: [
-            {"id": 3, "agent_id": 7, "skill_name": "crm-ops", "proposed_bundle": {"SKILL.md": "x"}}
-        ],
-        "deferred": [],
-        "backed_up": [],
-    }
     monkeypatch.setattr(git_source_store, "get_config", lambda: _CONFIG)
     monkeypatch.setattr(backflow_pr_sweep, "_backend_factory", lambda _c: fake)
-    monkeypatch.setattr(backflow_store, "list_by_pr_state", lambda state, **_: proposals[state])
+    _patch_states(
+        monkeypatch,
+        unbacked=[
+            {"id": 3, "agent_id": 7, "skill_name": "crm-ops", "proposed_bundle": {"SKILL.md": "x"}}
+        ],
+    )
     _stub_agent(monkeypatch, 7, "Sales Bot")
     monkeypatch.setattr(backflow_store, "set_pr_link", MagicMock())
     defer_state = MagicMock()
     monkeypatch.setattr(backflow_store, "defer_pr_state", defer_state)
 
-    # Must not raise.
-    backflow_pr_sweep.sweep()
+    backflow_pr_sweep.sweep()  # must not raise
 
     defer_state.assert_any_call(3)
 

@@ -9,7 +9,10 @@ import { Switch } from '@/components/ui/switch'
 import {
   type BackflowDiff,
   type BackflowProposal,
+  bitbucketPrCreateUrl,
+  type SkillGitStatus,
   type SkillProposal,
+  useBackflowDiffQuery,
   useSetSkillAgentBindingMutation,
   useSkillAgentBindingsQuery,
   useSkillContentQuery,
@@ -354,36 +357,150 @@ export function BackflowDialog({
             <BackflowProposalCard key={proposal.id} onViewDiff={onViewDiff} proposal={proposal} />
           ))}
           {proposals.length === 0 ? <p className="text-muted-foreground text-sm">{t('skills.noBackflow')}</p> : null}
-          {diffLoading ? <p className="mt-2 text-muted-foreground text-sm">{t('skills.diffLoading')}</p> : null}
-          {diff ? (
-            <div className="mt-2 space-y-2">
-              {diff.conflict ? (
-                <p className="rounded-md bg-amber-50 px-3 py-2 text-amber-900 text-sm dark:bg-amber-950/30 dark:text-amber-200">
-                  {t('skills.backflowConflict')}
-                </p>
-              ) : null}
-              {/* The edit relative to the base the agent started from — the actual change to
-                  review. diff_vs_head can be empty (pool already matches the edit), so this
-                  is what usually carries content. */}
-              {diff.diff_vs_base ? (
-                <div>
-                  <p className="font-medium text-muted-foreground text-xs">{t('skills.diffVsBase')}</p>
-                  <DiffPre>{diff.diff_vs_base}</DiffPre>
-                </div>
-              ) : null}
-              {diff.diff_vs_head ? (
-                <div>
-                  <p className="font-medium text-muted-foreground text-xs">{t('skills.diffVsHead')}</p>
-                  <DiffPre>{diff.diff_vs_head}</DiffPre>
-                </div>
-              ) : null}
-              {!diff.diff_vs_base && !diff.diff_vs_head ? (
-                <p className="text-muted-foreground text-sm">{t('skills.diffNone')}</p>
-              ) : null}
-            </div>
-          ) : null}
+          <BackflowDiffView diff={diff} loading={diffLoading} />
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// Dual diff (vs the base the agent started from / vs the current pool). diff_vs_head can be
+// empty when the pool already matches the edit, so diff_vs_base usually carries the content.
+export function BackflowDiffView({
+  diff,
+  loading = false,
+}: {
+  diff: BackflowDiff | null
+  loading?: boolean
+}): JSX.Element | null {
+  const t = useT()
+  if (loading) {
+    return <p className="mt-2 text-muted-foreground text-sm">{t('skills.diffLoading')}</p>
+  }
+  if (!diff) {
+    return null
+  }
+  return (
+    <div className="mt-2 space-y-2">
+      {diff.conflict ? (
+        <p className="rounded-md bg-amber-50 px-3 py-2 text-amber-900 text-sm dark:bg-amber-950/30 dark:text-amber-200">
+          {t('skills.backflowConflict')}
+        </p>
+      ) : null}
+      {diff.diff_vs_base ? (
+        <div>
+          <p className="font-medium text-muted-foreground text-xs">{t('skills.diffVsBase')}</p>
+          <DiffPre>{diff.diff_vs_base}</DiffPre>
+        </div>
+      ) : null}
+      {diff.diff_vs_head ? (
+        <div>
+          <p className="font-medium text-muted-foreground text-xs">{t('skills.diffVsHead')}</p>
+          <DiffPre>{diff.diff_vs_head}</DiffPre>
+        </div>
+      ) : null}
+      {!diff.diff_vs_base && !diff.diff_vs_head ? (
+        <p className="text-muted-foreground text-sm">{t('skills.diffNone')}</p>
+      ) : null}
+    </div>
+  )
+}
+
+// ─────────────────────────── Aggregate backflow worklist ───────────────────────────
+
+// One row per (agent, skill), grouped by agent, with a one-click "create PR" link per agent
+// (source = that agent's aggregate backup branch -> the authority branch). Read-only: adoption
+// is a human PR in the git host. Landed proposals (already merged + synced back) are hidden.
+export function BackflowWorklist({
+  proposals,
+  gitStatus,
+}: {
+  proposals: BackflowProposal[]
+  gitStatus: SkillGitStatus | undefined
+}): JSX.Element | null {
+  const t = useT()
+  const syncBackflow = useSyncBackflowMutation()
+  const pushed = useTransientFlag(syncBackflow.isSuccess)
+  const [selectedId, setSelectedId] = useState<number | null>(null)
+  const diff = useBackflowDiffQuery(selectedId, selectedId !== null)
+
+  const active = proposals.filter((p) => p.pr_state !== 'merged' && p.pr_state !== 'closed')
+  if (active.length === 0) {
+    return null
+  }
+
+  const groups = new Map<number, { branch: string | null; items: BackflowProposal[]; name: string }>()
+  for (const proposal of active) {
+    const group = groups.get(proposal.agent_id) ?? {
+      branch: null,
+      items: [],
+      name: proposal.agent_name ?? `agent ${proposal.agent_id}`,
+    }
+    group.items.push(proposal)
+    if (proposal.pr_branch) {
+      group.branch = proposal.pr_branch
+    }
+    groups.set(proposal.agent_id, group)
+  }
+  const dest = gitStatus?.branch ?? 'main'
+
+  return (
+    <section className="mb-4 rounded-xl border bg-white p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h3 className="font-semibold text-sm">{t('skills.backflowWorklistTitle')}</h3>
+          <p className="text-muted-foreground text-sm">{t('skills.backflowWorklistDescription')}</p>
+        </div>
+        <Button
+          disabled={syncBackflow.isPending}
+          onClick={() => void syncBackflow.mutateAsync()}
+          size="sm"
+          variant="outline"
+        >
+          <RefreshCw className={cn('size-4', syncBackflow.isPending && 'animate-spin')} />
+          {syncBackflow.isPending
+            ? t('skills.backflowSyncing')
+            : pushed
+              ? t('skills.backflowSynced')
+              : t('skills.backflowSyncNow')}
+        </Button>
+      </div>
+      <div className="mt-3 space-y-3">
+        {[...groups.entries()].map(([agentId, group]) => {
+          const prUrl = group.branch ? bitbucketPrCreateUrl(gitStatus?.remote_url, group.branch, dest) : null
+          return (
+            <div className="rounded-lg border p-3" key={agentId}>
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-medium text-sm">{group.name}</span>
+                {prUrl ? (
+                  <a className="text-primary text-sm underline" href={prUrl} rel="noreferrer" target="_blank">
+                    {t('skills.backflowCreatePr')}
+                  </a>
+                ) : group.branch ? (
+                  <span className="font-mono text-muted-foreground text-xs">{group.branch}</span>
+                ) : null}
+              </div>
+              <ul className="mt-2 space-y-1">
+                {group.items.map((proposal) => (
+                  <li className="flex items-center gap-2 text-sm" key={proposal.id}>
+                    <span>{proposal.skill_name}</span>
+                    <Badge variant="secondary">{proposal.pr_state ?? 'pending'}</Badge>
+                    {proposal.conflict ? <span className="text-amber-700 text-xs">conflict</span> : null}
+                    <button
+                      className="ml-auto text-muted-foreground text-xs underline"
+                      onClick={() => setSelectedId(proposal.id)}
+                      type="button"
+                    >
+                      {t('skills.diff')}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )
+        })}
+      </div>
+      {selectedId === null ? null : <BackflowDiffView diff={diff.data ?? null} loading={diff.isPending} />}
+    </section>
   )
 }
