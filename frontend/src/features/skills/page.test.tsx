@@ -739,4 +739,42 @@ describe('skills page gitops mode', () => {
     await user.click(backflow.getByRole('button', { name: 'Sync backflow' }))
     await waitFor(() => expect(backflowSynced).toBe(1))
   })
+
+  it('shows the aggregate worklist grouped by agent with a prefilled create-PR link', async () => {
+    const bf = (id: number, agent: number, name: string, skill: string, branch: string, state: string) => ({
+      agent_id: agent,
+      agent_name: name,
+      base_commit: 'c1',
+      base_version: 'v1',
+      conflict: 0,
+      created_at: '2026-07-01T00:00:00Z',
+      forked_as: null,
+      id,
+      pr_branch: branch,
+      pr_state: state,
+      pr_url: null,
+      skill_name: skill,
+      status: 'pending',
+    })
+    stubGitopsReads([
+      bf(1, 7, 'support', 'crm-ops', 'backflow/support', 'backed_up'),
+      bf(2, 7, 'support', 'billing', 'backflow/support', 'backed_up'),
+      // A landed (merged) proposal must be hidden from the worklist.
+      bf(3, 8, 'ops', 'gone', 'backflow/ops', 'merged'),
+    ])
+    renderSkillsPage()
+
+    const worklist = within((await screen.findByText('Backflow to merge')).closest('section') as HTMLElement)
+    // One agent group carrying both its skills.
+    expect(worklist.getByText('support')).toBeInTheDocument()
+    expect(worklist.getByText('crm-ops')).toBeInTheDocument()
+    expect(worklist.getByText('billing')).toBeInTheDocument()
+    // One prefilled "Create PR" link per agent (source = the agent's aggregate branch -> dest).
+    expect(worklist.getByRole('link', { name: 'Create PR' })).toHaveAttribute(
+      'href',
+      'https://bitbucket.org/acme/skills/pull-requests/new?source=backflow%2Fsupport&dest=main'
+    )
+    // Landed proposals drop off the worklist.
+    expect(worklist.queryByText('gone')).not.toBeInTheDocument()
+  })
 })

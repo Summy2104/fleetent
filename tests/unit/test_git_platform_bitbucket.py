@@ -35,38 +35,110 @@ def _cfg(remote_url: str) -> GitPlatformConfig:
     )
 
 
-def _seed_remote(tmp_path: Path) -> str:
-    """Build a bare 'remote' repo with one commit on `main`; return its file:// URL."""
+def _seed_remote_with_skills(tmp_path: Path, skills: dict[str, dict[str, str]]) -> str:
+    """Bare remote whose ``main`` carries ``skills/<name>/<relpath>`` for each entry.
+
+    Mirrors the real monorepo layout so aggregate push_branch tests can assert that named
+    skill dirs are replaced while others are left intact.
+    """
     bare = tmp_path / "remote.git"
     porcelain.init(str(bare), bare=True)
     seed = tmp_path / "seed"
     porcelain.clone(str(bare), str(seed))
-    (seed / "README.md").write_text("seed\n")
-    porcelain.add(str(seed), paths=[str(seed / "README.md")])
-    porcelain.commit(str(seed), message=b"init", author=b"t <t@t>", committer=b"t <t@t>")
+    paths: list[str] = []
+    for name, files in skills.items():
+        for rel, body in files.items():
+            p = seed / "skills" / name / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(body)
+            paths.append(str(p))
+    porcelain.add(str(seed), paths=paths)
+    porcelain.commit(str(seed), message=b"seed", author=b"t <t@t>", committer=b"t <t@t>")
     porcelain.push(str(seed), str(bare), "refs/heads/master:refs/heads/main")
     return f"file://{bare}"
 
 
-def test_push_branch_creates_branch_with_bundle(tmp_path: Path) -> None:
-    url = _seed_remote(tmp_path)
+def test_push_branch_replaces_named_skills_and_leaves_others(tmp_path: Path) -> None:
+    # Aggregate branch: bundle keys are "<skill>/<relpath>" under subdir=skills-root. Only the
+    # named skills are replaced; other skills already on base_ref stay intact.
+    url = _seed_remote_with_skills(
+        tmp_path, {"crm-ops": {"SKILL.md": "old crm\n"}, "keep-me": {"SKILL.md": "keep\n"}}
+    )
     backend = BitbucketBackend(config=_cfg(url))
 
     sha = backend.push_branch(
-        branch="backflow/support-bot/crm-ops",
-        bundle={"SKILL.md": "---\nname: crm-ops\n---\nbody\n", "scripts/run.sh": "echo hi\n"},
-        subdir="crm-ops",
+        branch="backflow/support-bot",
+        bundle={"crm-ops/SKILL.md": "new crm\n", "crm-ops/scripts/run.sh": "echo hi\n"},
+        subdir="skills",
         base_ref="main",
-        message="backflow crm-ops from support-bot",
+        message="backflow from support-bot",
         author="fleetent <bot@fleetent>",
     )
     assert isinstance(sha, str) and sha
 
-    # Re-clone the remote branch and assert the bundle landed under the subdir.
     check = tmp_path / "check"
-    porcelain.clone(url, str(check), branch=b"backflow/support-bot/crm-ops")
-    assert (check / "crm-ops" / "SKILL.md").read_text().endswith("body\n")
-    assert (check / "crm-ops" / "scripts" / "run.sh").read_text() == "echo hi\n"
+    porcelain.clone(url, str(check), branch=b"backflow/support-bot")
+    assert (check / "skills" / "crm-ops" / "SKILL.md").read_text() == "new crm\n"
+    assert (check / "skills" / "crm-ops" / "scripts" / "run.sh").read_text() == "echo hi\n"
+    assert (check / "skills" / "keep-me" / "SKILL.md").read_text() == "keep\n"
+
+
+def test_push_branch_drops_files_removed_in_the_evolved_copy(tmp_path: Path) -> None:
+    # crm-ops on base has an extra file the agent's evolved copy no longer has: replacing the
+    # skill dir wholesale must drop it (backflow fidelity — deletions propagate).
+    url = _seed_remote_with_skills(
+        tmp_path,
+        {
+            "crm-ops": {"SKILL.md": "old\n", "legacy.py": "old\n"},
+            "billing": {"SKILL.md": "old b\n"},
+            "keep-me": {"SKILL.md": "keep\n"},
+        },
+    )
+    backend = BitbucketBackend(config=_cfg(url))
+
+    backend.push_branch(
+        branch="backflow/support-bot",
+        bundle={"crm-ops/SKILL.md": "new\n", "billing/SKILL.md": "new b\n"},
+        subdir="skills",
+        base_ref="main",
+        message="backflow",
+        author="fleetent <bot@fleetent>",
+    )
+
+    check = tmp_path / "check"
+    porcelain.clone(url, str(check), branch=b"backflow/support-bot")
+    assert (check / "skills" / "crm-ops" / "SKILL.md").read_text() == "new\n"
+    assert not (check / "skills" / "crm-ops" / "legacy.py").exists()  # deletion propagated
+    assert (check / "skills" / "billing" / "SKILL.md").read_text() == "new b\n"
+    assert (check / "skills" / "keep-me" / "SKILL.md").read_text() == "keep\n"  # untouched
+
+
+def test_push_branch_force_updates_existing_branch(tmp_path: Path) -> None:
+    # Snapshot-rebuild model: each sweep re-pushes the agent's branch off base_ref. Pushing a
+    # fresh snapshot to an already-existing branch must force-update, not fail non-fast-forward.
+    url = _seed_remote_with_skills(tmp_path, {"crm-ops": {"SKILL.md": "base\n"}})
+    backend = BitbucketBackend(config=_cfg(url))
+
+    backend.push_branch(
+        branch="backflow/x",
+        bundle={"crm-ops/SKILL.md": "v1\n"},
+        subdir="skills",
+        base_ref="main",
+        message="v1",
+        author="fleetent <bot@fleetent>",
+    )
+    backend.push_branch(
+        branch="backflow/x",
+        bundle={"crm-ops/SKILL.md": "v2\n"},
+        subdir="skills",
+        base_ref="main",
+        message="v2",
+        author="fleetent <bot@fleetent>",
+    )
+
+    check = tmp_path / "check"
+    porcelain.clone(url, str(check), branch=b"backflow/x")
+    assert (check / "skills" / "crm-ops" / "SKILL.md").read_text() == "v2\n"
 
 
 def test_push_branch_round_trips_binary_bundle_files(tmp_path: Path) -> None:
@@ -74,22 +146,25 @@ def test_push_branch_round_trips_binary_bundle_files(tmp_path: Path) -> None:
     # (tagged base64) and must land on the branch byte-identical, not utf-8-mangled.
     from fleetent import skill_bundle_codec
 
-    url = _seed_remote(tmp_path)
+    url = _seed_remote_with_skills(tmp_path, {"crm-ops": {"SKILL.md": "base\n"}})
     backend = BitbucketBackend(config=_cfg(url))
     blob = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\xff\xfe\x00"
 
     backend.push_branch(
-        branch="backflow/support-bot/crm-ops",
-        bundle={"SKILL.md": "body\n", "assets/logo.png": skill_bundle_codec.encode(blob)},
-        subdir="crm-ops",
+        branch="backflow/support-bot",
+        bundle={
+            "crm-ops/SKILL.md": "body\n",
+            "crm-ops/assets/logo.png": skill_bundle_codec.encode(blob),
+        },
+        subdir="skills",
         base_ref="main",
         message="backflow with a binary asset",
         author="fleetent <bot@fleetent>",
     )
 
     check = tmp_path / "check"
-    porcelain.clone(url, str(check), branch=b"backflow/support-bot/crm-ops")
-    assert (check / "crm-ops" / "assets" / "logo.png").read_bytes() == blob
+    porcelain.clone(url, str(check), branch=b"backflow/support-bot")
+    assert (check / "skills" / "crm-ops" / "assets" / "logo.png").read_bytes() == blob
 
 
 @respx.mock

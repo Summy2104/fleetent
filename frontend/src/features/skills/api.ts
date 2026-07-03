@@ -219,6 +219,29 @@ export type SkillGitStatus = {
   webhook_secret_env?: string | null
 }
 
+/**
+ * Deep-link to Bitbucket Cloud's "create pull request" page, prefilled source -> dest.
+ *
+ * Built from the configured remote (SSH or HTTPS bitbucket.org form) so the platform never
+ * has to open the PR itself — the human clicks through to a prefilled form and merges. Returns
+ * null for non-bitbucket.org remotes (no known deep-link) so callers can fall back to showing
+ * the branch name.
+ */
+export function bitbucketPrCreateUrl(
+  remoteUrl: string | null | undefined,
+  sourceBranch: string,
+  destBranch: string
+): string | null {
+  if (!remoteUrl) return null
+  const cleaned = remoteUrl.replace(/\.git$/, '')
+  const ssh = cleaned.match(/^git@bitbucket\.org:(.+)$/)
+  const https = cleaned.match(/^https?:\/\/(?:[^@/]+@)?bitbucket\.org\/(.+)$/)
+  const path = ssh?.[1] ?? https?.[1] ?? null
+  if (!path) return null
+  const q = `source=${encodeURIComponent(sourceBranch)}&dest=${encodeURIComponent(destBranch)}`
+  return `https://bitbucket.org/${path}/pull-requests/new?${q}`
+}
+
 export function useSkillGitStatusQuery() {
   const api = useAdminApi()
 
