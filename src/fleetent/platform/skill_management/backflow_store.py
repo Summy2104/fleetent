@@ -119,12 +119,27 @@ def nominate_if_absent(*, agent_id: int, skill_name: str, pool_dir: Path) -> int
     return nominate(agent_id=agent_id, skill_name=skill_name, pool_dir=pool_dir)
 
 
+# Machine-generated churn excluded from every skill bundle and content hash: VCS metadata and
+# Python bytecode caches. They bloat proposals, pollute the backup branch with binaries, and
+# ``.pyc`` files change across interpreter versions — manufacturing phantom drift.
+_BUNDLE_IGNORE_DIRS = frozenset({".git", "__pycache__"})
+_BUNDLE_IGNORE_SUFFIXES = frozenset({".pyc", ".pyo"})
+
+
+def _is_ignored_bundle_path(path: Path) -> bool:
+    return (
+        bool(_BUNDLE_IGNORE_DIRS.intersection(path.parts)) or path.suffix in _BUNDLE_IGNORE_SUFFIXES
+    )
+
+
 def _dir_content_hash(skill_dir: Path) -> str:
-    """Content hash of a skill dir on disk (relpath + bytes, sorted, excluding ``.git``)."""
+    """Content hash of a skill dir on disk (relpath + bytes, sorted, excluding bundle churn)."""
     from hashlib import sha256
 
     digest = sha256()
-    for path in sorted(p for p in skill_dir.rglob("*") if p.is_file() and ".git" not in p.parts):
+    for path in sorted(
+        p for p in skill_dir.rglob("*") if p.is_file() and not _is_ignored_bundle_path(p)
+    ):
         digest.update(path.relative_to(skill_dir).as_posix().encode("utf-8"))
         digest.update(b"\0")
         digest.update(path.read_bytes())
@@ -255,7 +270,7 @@ def _capture_proposed_bundle(
         if skill_dir.is_dir():
             bundle: dict[str, str] = {}
             for path in sorted(
-                p for p in skill_dir.rglob("*") if p.is_file() and ".git" not in p.parts
+                p for p in skill_dir.rglob("*") if p.is_file() and not _is_ignored_bundle_path(p)
             ):
                 bundle[path.relative_to(skill_dir).as_posix()] = skill_bundle_codec.encode(
                     path.read_bytes()
@@ -300,6 +315,8 @@ def _capture_bundle_from_owning_node(*, agent_id: int, skill_name: str) -> dict[
                 raise ValueError(f"unsafe node bundle member path: {member.name}")
             if any(part == ".git" for part in member_path.parts):
                 raise ValueError(f"unsafe node bundle member path: {member.name}")
+            if _is_ignored_bundle_path(member_path):
+                continue
             extracted = archive.extractfile(member)
             if extracted is None:
                 raise ValueError(f"unable to extract node bundle member: {member.name}")
@@ -351,7 +368,7 @@ def get_proposal_diff(
     if pool_skill_dir.exists():
         head_bundle = {}
         for path in sorted(
-            p for p in pool_skill_dir.rglob("*") if p.is_file() and ".git" not in p.parts
+            p for p in pool_skill_dir.rglob("*") if p.is_file() and not _is_ignored_bundle_path(p)
         ):
             relpath = path.relative_to(pool_skill_dir).as_posix()
             head_bundle[relpath] = skill_bundle_codec.encode(path.read_bytes())
