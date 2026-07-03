@@ -403,9 +403,7 @@ def list_drifted() -> list[tuple[int, str]]:
     """
     rows = (
         _database()
-        .execute(
-            "SELECT agent_id, skill_name FROM agent_skills WHERE drift = 1 ORDER BY agent_id"
-        )
+        .execute("SELECT agent_id, skill_name FROM agent_skills WHERE drift = 1 ORDER BY agent_id")
         .fetchall()
     )
     return [(int(row["agent_id"]), str(row["skill_name"])) for row in rows]
