@@ -147,6 +147,28 @@ def test_structured_logging_infra_boundary() -> None:
     )
 
 
+def test_logging_setup_infra_boundary() -> None:
+    import importlib
+
+    module = importlib.import_module("fleetent.logging_setup")
+    assert module.__file__ is not None
+    located = Path(module.__file__)
+    assert located.name == "logging_setup.py"
+    assert located.parent.name == "fleetent"
+
+    tree = ast.parse(located.read_text(encoding="utf-8"), filename=str(located))
+    imported_modules = set(_iter_imported_modules(tree))
+
+    assert not _is_imported_from(_BUSINESS_CAPABILITY_PREFIXES, imported_modules), (
+        "fleetent.logging_setup imports a business capability module, "
+        "violating its infrastructure-only boundary"
+    )
+    assert not _is_imported_from(["fleetent.platform"], imported_modules), (
+        "fleetent.logging_setup imports fleetent.platform, "
+        "violating its infrastructure-only boundary"
+    )
+
+
 def test_cron_scheduler_does_not_depend_on_user_store() -> None:
     """Fire-time principal resolution is injection-decoupled (decouple-cron-principal-recheck).
 

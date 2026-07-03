@@ -234,7 +234,7 @@ def _record_graph_search_audit(
         _logger.warn(
             "kb_graph_retrieval_audit_failed",
             run_id=audit_context.run_id,
-            error=str(exc),
+            exception=exc,
         )
 
 

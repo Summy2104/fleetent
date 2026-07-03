@@ -23,7 +23,7 @@ async def _reflection_loop(
         try:
             await run_reflection(scope, auto_policy=auto_policy)
         except Exception as exc:  # noqa: BLE001 - best-effort resident loop
-            _logger.warn("reflection_cycle_failed", scope=scope, error=str(exc))
+            _logger.warn("reflection_cycle_failed", scope=scope, exception=exc)
 
 
 def start_reflection_scheduler(

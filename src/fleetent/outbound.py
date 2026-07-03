@@ -13,9 +13,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-import structlog
+from fleetent.structured_logging import get_logger
 
-logger = structlog.get_logger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -136,7 +136,7 @@ async def send_to(
         ref, err = await _telegram_send(connector, target, text, thread, reply_markup=reply_markup)
     else:
         err = f"unsupported platform: {platform}"
-        logger.warning("outbound_unsupported_platform", platform=platform)
+        logger.warn("outbound_unsupported_platform", platform=platform)
     return DeliveryReceipt(
         ok=err is None,
         platform=platform,
@@ -172,7 +172,7 @@ async def send_file_to(
         ref, err = await _telegram_send_file(connector, target, path)
     else:
         err = f"unsupported platform: {platform}"
-        logger.warning("outbound_file_unsupported_platform", platform=platform)
+        logger.warn("outbound_file_unsupported_platform", platform=platform)
     return DeliveryReceipt(
         ok=err is None,
         platform=platform,
@@ -199,7 +199,7 @@ def make_replier(connectors: dict[str, Any], address: ConversationAddress) -> An
         text: str, blocks: list[dict[str, Any]] | None = None, *, approval: Any = None
     ) -> None:
         if connector is None:
-            logger.warning("replier_no_connector", platform=address.platform)
+            logger.warn("replier_no_connector", platform=address.platform)
             return
         await send_to(
             address.platform,
@@ -225,7 +225,7 @@ def make_uploader(connectors: dict[str, Any], address: ConversationAddress) -> A
 
     async def upload_func(paths: list[str]) -> None:
         if connector is None:
-            logger.warning("uploader_no_connector", platform=address.platform)
+            logger.warn("uploader_no_connector", platform=address.platform)
             return
         for path in paths:
             await send_file_to(
@@ -274,7 +274,7 @@ def make_mcp_authz_deliverer(tool_context: Any) -> Any:
         if connector is not None and platform and target:
             receipt = await send_to(platform, connector, target, msg, target_type="user")
             if not receipt.ok:
-                logger.warning(
+                logger.warn(
                     "mcp_authz_dm_failed",
                     server_id=server_id,
                     platform=platform,
@@ -288,7 +288,7 @@ def make_mcp_authz_deliverer(tool_context: Any) -> Any:
         if outbound_connectors.is_node_managed_runtime():
             await outbound_connectors.notify_user(user_id, msg)
             return True
-        logger.info("mcp_authz_link_undeliverable server_id=%s user_id=%s", server_id, user_id)
+        logger.info("mcp_authz_link_undeliverable", server_id=server_id, user_id=user_id)
         return False
 
     return deliver
@@ -321,7 +321,7 @@ def make_mcp_credential_deliverer(tool_context: Any) -> Any:
         if connector is not None and platform and target:
             receipt = await send_to(platform, connector, target, msg, target_type="user")
             if not receipt.ok:
-                logger.warning(
+                logger.warn(
                     "mcp_cred_dm_failed",
                     server_id=server_id,
                     platform=platform,
@@ -335,7 +335,7 @@ def make_mcp_credential_deliverer(tool_context: Any) -> Any:
         if outbound_connectors.is_node_managed_runtime():
             await outbound_connectors.notify_user(user_id, msg)
             return True
-        logger.info("mcp_cred_link_undeliverable server_id=%s user_id=%s", server_id, user_id)
+        logger.info("mcp_cred_link_undeliverable", server_id=server_id, user_id=user_id)
         return False
 
     return deliver
@@ -470,7 +470,7 @@ async def resolve_recipient_label(
             name = profile.get("display_name") or profile.get("real_name") or user.get("name")
             return f"@{name}" if name else target
     except Exception as exc:  # noqa: BLE001 — name resolution is best-effort, never blocks
-        logger.warning("recipient_label_resolve_failed", target=target, error=str(exc))
+        logger.warn("recipient_label_resolve_failed", target=target, exception=exc)
         return target
 
 
@@ -508,7 +508,7 @@ async def summarize_gated_call(
         rendered = ", ".join(f"{k}={_preview(str(v), 40)}" for k, v in args.items())
         return f"参数：{_preview(rendered, 200)}" if rendered else ""
     except Exception as exc:  # noqa: BLE001 — summary is auxiliary, never blocks the prompt
-        logger.warning("gated_call_summary_failed", tool=tool_name, error=str(exc))
+        logger.warn("gated_call_summary_failed", tool=tool_name, exception=exc)
         return ""
 
 
@@ -555,7 +555,7 @@ async def _slack_send_channel(
         resp = await client.chat_postMessage(**kwargs)
         return _slack_ref(resp, "ts"), None
     except Exception as exc:  # noqa: BLE001 — outbound failure must not abort the caller
-        logger.warning("slack_send_channel_failed", channel=channel, error=str(exc))
+        logger.warn("slack_send_channel_failed", channel=channel, exception=exc)
         return None, str(exc)
 
 
@@ -601,7 +601,7 @@ async def _slack_send_dm(
         resp = await client.chat_postMessage(**kwargs)
         return _slack_ref(resp, "ts"), None
     except Exception as exc:  # noqa: BLE001 — outbound failure must not abort the gate
-        logger.warning("slack_send_dm_failed", user_id=user_id, error=str(exc))
+        logger.warn("slack_send_dm_failed", user_id=user_id, exception=exc)
         return None, str(exc)
 
 
@@ -617,7 +617,7 @@ async def _telegram_send(
         await bot.send_message(**kwargs)
         return "", None  # telegram client returns no stable ref we record; "" = success-no-ref
     except Exception as exc:  # noqa: BLE001 — outbound failure must not abort the gate
-        logger.warning("telegram_send_message_failed", chat_id=chat_id, error=str(exc))
+        logger.warn("telegram_send_message_failed", chat_id=chat_id, exception=exc)
         return None, str(exc)
 
 
@@ -640,7 +640,7 @@ async def _slack_send_file(
         resp = await client.files_upload_v2(channel=channel, thread_ts=thread, file=path)
         return _slack_file_ref(resp), None
     except Exception as exc:  # noqa: BLE001 — outbound file failure must not abort the caller
-        logger.warning("slack_send_file_failed", target=target, path=path, error=str(exc))
+        logger.warn("slack_send_file_failed", target=target, path=path, exception=exc)
         return None, str(exc)
 
 
@@ -650,7 +650,7 @@ async def _telegram_send_file(bot: Any, chat_id: str, path: str) -> _Result:
         await bot.send_document(chat_id=chat_id, document=path)
         return "", None
     except Exception as exc:  # noqa: BLE001 — outbound file failure must not abort the caller
-        logger.warning("telegram_send_file_failed", chat_id=chat_id, path=path, error=str(exc))
+        logger.warn("telegram_send_file_failed", chat_id=chat_id, path=path, exception=exc)
         return None, str(exc)
 
 

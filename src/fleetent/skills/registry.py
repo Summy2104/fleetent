@@ -8,12 +8,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import structlog
 import yaml
 
 from fleetent.skills import audit as skill_audit
+from fleetent.structured_logging import get_logger
 
-logger = structlog.get_logger(__name__)
+logger = get_logger(__name__)
 
 
 # Platform-shipped builtin skills live inside the package so a fresh deployment
@@ -138,7 +138,7 @@ def materialize_builtin_skills(skills_dir: str | None = None) -> None:
         try:
             shutil.copytree(src, dest)
         except OSError as exc:
-            logger.warning("skill_materialize_failed", name=src.name, error=str(exc))
+            logger.warn("skill_materialize_failed", name=src.name, exception=exc)
 
 
 def _build_index(
@@ -220,7 +220,7 @@ def scan(skills_dir: str | None = None) -> None:
     # common startup path), and the actionable "N skills failed to load" line is the
     # only one logged. Counts also available structured via load_errors().
     if _load_errors:
-        logger.warning("skill_scan_complete", loaded=len(_index), failed=len(_load_errors))
+        logger.warn("skill_scan_complete", loaded=len(_index), failed=len(_load_errors))
 
 
 def refresh_if_changed(skills_dir: str | None = None) -> bool:
@@ -267,7 +267,7 @@ def reload(skills_dir: str | None = None) -> dict[str, Any]:
     try:
         new_index = _build_index(resolved, new_errors)
     except Exception as exc:
-        logger.warning("skill_reload_failed", skills_dir=resolved, reason=str(exc))
+        logger.warn("skill_reload_failed", skills_dir=resolved, reason=str(exc))
         return {"status": "failed", "skills_dir": resolved, "reason": str(exc)}
     # Atomic publication: a single name rebind, visible at once to every reader
     # (all access `_index` through the module, none capture it at def time).
@@ -277,7 +277,7 @@ def reload(skills_dir: str | None = None) -> dict[str, Any]:
     # Refresh the hot-reload fingerprint to match the freshly built index.
     _manifest = _build_manifest(resolved)
     if new_errors:
-        logger.warning("skill_reload_complete", loaded=len(new_index), failed=len(new_errors))
+        logger.warn("skill_reload_complete", loaded=len(new_index), failed=len(new_errors))
     return {"status": "ok", "loaded": len(new_index), "failed": len(new_errors)}
 
 
@@ -360,7 +360,7 @@ def _scan_dir(
         if frontmatter is None:
             reason = "missing --- boundary, invalid YAML, or non-mapping top level"
             source = "builtin" if builtin else "user"
-            logger.warning(
+            logger.warn(
                 "skill_frontmatter_parse_failed",
                 path=str(skill_md),
                 reason=reason,
@@ -384,7 +384,7 @@ def _scan_dir(
             keep_existing = builtin if tier_override else existing.path <= path
             kept_path = existing.path if keep_existing else path
             dropped_path = path if keep_existing else existing.path
-            logger.warning(
+            logger.warn(
                 "skill_name_conflict",
                 name=name,
                 kept_path=kept_path,
@@ -504,7 +504,7 @@ def _audit_skill(path: str, body: str, description: str) -> bool:
     blocked = skill_audit.has_severe(hits)
     for hit in hits:
         disposition = "blocked" if hit.severity == skill_audit.SEVERE else "allowed"
-        logger.warning(
+        logger.warn(
             "skill_audit_hit",
             path=path,
             rule_id=hit.rule_id,

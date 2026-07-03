@@ -44,7 +44,7 @@ def _read_raw(agent_name: str) -> str:
     except FileNotFoundError:
         return ""
     except OSError as exc:
-        _logger.warn("user_md_read_failed", agent_name=agent_name, error=str(exc))
+        _logger.warn("user_md_read_failed", agent_name=agent_name, exception=exc)
         return ""
 
 

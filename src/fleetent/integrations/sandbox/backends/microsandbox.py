@@ -69,7 +69,7 @@ class MicrosandboxBackend(BaseSandboxBackend):
 
             return bool(microsandbox.is_installed())
         except Exception as exc:  # noqa: BLE001 — probe must never raise (degrade to OFF)
-            _logger.warn("microsandbox_probe_failed", error=str(exc))
+            _logger.warn("microsandbox_probe_failed", exception=exc)
             return False
 
     @staticmethod
@@ -197,7 +197,7 @@ class MicrosandboxBackend(BaseSandboxBackend):
             handle = await self._handle_for(workspace_id)
             await handle.stop()
         except Exception as exc:  # noqa: BLE001 — best-effort termination
-            _logger.warn("microsandbox_stop_failed", name=workspace_id, error=str(exc))
+            _logger.warn("microsandbox_stop_failed", name=workspace_id, exception=exc)
 
     async def list_workspaces(self, name_prefix: str) -> list[str]:
         """Enumerate sandbox names matching `name_prefix` via `Sandbox.list`; [] on error."""
@@ -206,6 +206,6 @@ class MicrosandboxBackend(BaseSandboxBackend):
         try:
             sandboxes = await microsandbox.Sandbox.list()
         except Exception as exc:  # noqa: BLE001 — enumeration failure -> empty
-            _logger.warn("microsandbox_list_failed", prefix=name_prefix, error=str(exc))
+            _logger.warn("microsandbox_list_failed", prefix=name_prefix, exception=exc)
             return []
         return [sb.name for sb in sandboxes if str(getattr(sb, "name", "")).startswith(name_prefix)]

@@ -87,7 +87,7 @@ async def _stream_run(
             if event_type in (p.EVENT_DONE, p.EVENT_ERROR):
                 saw_terminal = True
     except Exception as exc:  # noqa: BLE001 — surface as an error event, never crash the conn
-        _logger.warn("tui_run_failed", run_id=run_id, error=str(exc))
+        _logger.warn("tui_run_failed", run_id=run_id, exception=exc)
         await conn.transport.write(
             p.make_event(p.EVENT_ERROR, {"content": str(exc)}, run_id=run_id)
         )

@@ -58,7 +58,7 @@ async def notify_user(
     try:
         bindings = access.resolve_addresses(user_id)
     except Exception as exc:  # noqa: BLE001 — directed-reach lookup is best-effort
-        _logger.warn("directed_reach_address_lookup_failed", user_id=user_id, error=str(exc))
+        _logger.warn("directed_reach_address_lookup_failed", user_id=user_id, exception=exc)
         return
     if not bindings:
         _logger.info("directed_reach_no_bindings", user_id=user_id)
@@ -86,7 +86,7 @@ async def notify_user(
                 "directed_reach_channel_delivery_failed",
                 user_id=user_id,
                 platform=platform,
-                error=str(exc),
+                exception=exc,
             )
 
 

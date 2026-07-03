@@ -135,6 +135,6 @@ class GatewayBackend:
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 — connection dropped; surface via hook
-            _logger.warn("backend_recv_ended", error=str(exc))
+            _logger.warn("backend_recv_ended", exception=exc)
         if self.on_disconnect is not None:
             await self.on_disconnect()

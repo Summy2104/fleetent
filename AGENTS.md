@@ -208,6 +208,7 @@ CI 门禁：PR 和 main push 路径并行跑三格——unit+coverage（`make te
 ```
 DATABASE_URL           # 可选，默认 sqlite:///<data_dir>/management.db
 LOG_FORMAT             # console | json，默认 console
+LOG_LEVEL              # console 日志级别覆盖：silent|fatal|error|warn|info|debug|trace
 FLEETENT_HOME          # 覆盖 config/data 家目录（未设时：仓库内→./；仓库外→~/.fleetent）
 FLEETENT_AGENTS_DIR    # 覆盖 agents 目录（默认 <config_dir>/agents）
 FLEETENT_SKILLS_DIR    # 覆盖 skills/ 目录（默认 ./skills）
@@ -225,6 +226,7 @@ FLEETENT_TOKEN         # Bearer token（--token 参数优先）
 > 多数条目对应 `docs/architecture/*.md` 权威设计文档，这里只记触发陷阱的关键点。
 
 - **工具注册**：`tools/builtin_tools.py` 经 import 副作用注册工具；`tools/__init__.py` 顶部 `from fleetent.tools import builtin_tools` 承载此副作用，`runtime/loop.py` 顶部 `import fleetent.tools` 触发注册，否则 `get_schemas()` 返回空
+- **日志初始化统一入口**：进程级日志初始化统一走 `fleetent.logging_setup.setup_process_logging`；`config.configure_logging` 与 `runtime/agent_app._configure_logging_from_agent` 只保留参数解包/目录解析薄封装，新增入口不要再手写 `structlog.configure` / `logging.basicConfig`
 - **Skill 扫描**：`skills/registry.scan()` 服务启动时跑（FastAPI lifespan）；CLI `run()` 每次调用时扫描
 - **Context identity check**：`runtime/context.py` 的 `_keep_tail()` 用 identity check（`m is tail[0]`），不用 `==`；patch 目标须指 `fleetent.runtime.context`，patch 旧 shim `fleetent.context_mgr` 不生效
 - **Runtime shim**：旧扁平路径（`agent_loop`/`context_mgr`/`agent_runtime`/`sub_agent`/`cancellation` 等 13 个）仅留 re-export shim；`monkeypatch.setattr` 须指真实子模块（如 `fleetent.runtime.loop`），patch shim 不生效

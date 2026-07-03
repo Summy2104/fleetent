@@ -28,8 +28,12 @@ def _run_platform(*args: str) -> tuple[str, str, int]:
 def test_serve_calls_uvicorn_with_host_and_port(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict] = []
 
-    def fake_run(app: str, *, host: str, port: int, reload: bool = False) -> None:
-        calls.append({"app": app, "host": host, "port": port, "reload": reload})
+    def fake_run(
+        app: str, *, host: str, port: int, reload: bool = False, log_level: str = "info"
+    ) -> None:
+        calls.append(
+            {"app": app, "host": host, "port": port, "reload": reload, "log_level": log_level}
+        )
 
     import fleetent.platform.platform_cli.serve as serve_module
 
@@ -40,15 +44,25 @@ def test_serve_calls_uvicorn_with_host_and_port(monkeypatch: pytest.MonkeyPatch)
     assert code == 0
     assert err == ""
     assert calls == [
-        {"app": "fleetent.server:app", "host": "127.0.0.1", "port": 8767, "reload": False}
+        {
+            "app": "fleetent.server:app",
+            "host": "127.0.0.1",
+            "port": 8767,
+            "reload": False,
+            "log_level": "info",
+        }
     ]
 
 
 def test_serve_default_host_and_port(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict] = []
 
-    def fake_run(app: str, *, host: str, port: int, reload: bool = False) -> None:
-        calls.append({"app": app, "host": host, "port": port, "reload": reload})
+    def fake_run(
+        app: str, *, host: str, port: int, reload: bool = False, log_level: str = "info"
+    ) -> None:
+        calls.append(
+            {"app": app, "host": host, "port": port, "reload": reload, "log_level": log_level}
+        )
 
     import fleetent.platform.platform_cli.serve as serve_module
 
@@ -61,13 +75,18 @@ def test_serve_default_host_and_port(monkeypatch: pytest.MonkeyPatch) -> None:
     assert calls[0]["host"] == "127.0.0.1"
     assert calls[0]["port"] == 8765
     assert calls[0]["reload"] is False
+    assert calls[0]["log_level"] == "info"
 
 
 def test_serve_reload_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict] = []
 
-    def fake_run(app: str, *, host: str, port: int, reload: bool = False) -> None:
-        calls.append({"app": app, "host": host, "port": port, "reload": reload})
+    def fake_run(
+        app: str, *, host: str, port: int, reload: bool = False, log_level: str = "info"
+    ) -> None:
+        calls.append(
+            {"app": app, "host": host, "port": port, "reload": reload, "log_level": log_level}
+        )
 
     import fleetent.platform.platform_cli.serve as serve_module
 
@@ -76,3 +95,4 @@ def test_serve_reload_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     _run_platform("serve", "--reload")
 
     assert calls[0]["reload"] is True
+    assert calls[0]["log_level"] == "info"

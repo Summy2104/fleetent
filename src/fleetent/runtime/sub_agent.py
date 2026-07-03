@@ -106,7 +106,7 @@ class SubAgentExecutor:
                 cancel_token=child,
             )
         except Exception as exc:
-            _logger.warn("sub_agent_task_failed", task=name, error=str(exc))
+            _logger.warn("sub_agent_task_failed", task=name, exception=exc)
             self._transition(lc, SubAgentState.failed, error=str(exc))
             return SubAgentResult(
                 name=name, result=None, error=str(exc), parent_session_id=parent_session_id

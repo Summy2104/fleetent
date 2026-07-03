@@ -97,7 +97,7 @@ async def _retrieve_with_timeout[T](
             "ltc_retrieval_hard_failed",
             path=name,
             error_type=type(exc).__name__,
-            error=str(exc),
+            exception=exc,
             elapsed_ms=round((time.monotonic() - started) * 1000, 1),
         )
         raise
@@ -106,7 +106,7 @@ async def _retrieve_with_timeout[T](
             "ltc_retrieval_failed",
             path=name,
             error_type=type(exc).__name__,
-            error=str(exc),
+            exception=exc,
             elapsed_ms=round((time.monotonic() - started) * 1000, 1),
         )
         return empty
@@ -368,7 +368,7 @@ class HttpKnowledgeProvider:
                 "http_knowledge_provider_failed",
                 url=self._url,
                 error_type=type(exc).__name__,
-                error=str(exc),
+                exception=exc,
             )
             return []
 

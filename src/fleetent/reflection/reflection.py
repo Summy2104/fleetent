@@ -343,7 +343,7 @@ async def run_reflection(
                 scope=scope,
                 proposal_id=memory_proposal.id,
                 action=memory_proposal.action,
-                error=str(exc),
+                exception=exc,
             )
     for skill_proposal in generate_skill_proposals(findings=findings, report_id=report.id):
         _persist_skill_proposal(skill_proposal)
