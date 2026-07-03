@@ -4,9 +4,9 @@ import contextlib
 import re
 from typing import Any
 
-import structlog
+from fleetent.structured_logging import get_logger
 
-logger = structlog.get_logger(__name__)
+logger = get_logger(__name__)
 
 _IMAGE_MIME_PREFIX = "image/"
 
@@ -176,7 +176,7 @@ async def _make_status_funcs(
         )
         status_ok = True
     except Exception as exc:  # noqa: BLE001 — feature may be disabled; degrade, don't abort
-        logger.warning("slack_assistant_status_failed", channel=channel, error=str(exc))
+        logger.warn("slack_assistant_status_failed", channel=channel, error=str(exc))
 
     async def reply_func(
         text: str, blocks: list[dict[str, Any]] | None = None, *, approval: Any = None
@@ -207,7 +207,7 @@ async def _make_status_funcs(
                 loading_messages=loading,
             )
         except Exception as exc:  # noqa: BLE001 — status update failure must not break the run
-            logger.warning("slack_progress_status_failed", error=str(exc))
+            logger.warn("slack_progress_status_failed", error=str(exc))
 
     return reply_func, progress_func
 
@@ -320,7 +320,7 @@ async def handle_approval_action(
                 resume_msg, session_id, approval_id, decision
             )
         except Exception as exc:  # noqa: BLE001 — decision stands; resume is best-effort
-            logger.warning("approval_button_resume_failed", approval_id=approval_id, error=str(exc))
+            logger.warn("approval_button_resume_failed", approval_id=approval_id, error=str(exc))
 
 
 def _make_upload_func(
@@ -395,10 +395,10 @@ async def _download_attachments(files: list[dict[str, Any]], bot_token: str) -> 
                     resp = await client.get(url, headers=headers)
                     resp.raise_for_status()
                 except httpx.HTTPError as exc:
-                    logger.warning("slack_image_download_failed", url=url, error=str(exc))
+                    logger.warn("slack_image_download_failed", url=url, error=str(exc))
                     continue
                 if _is_html_response(resp):
-                    logger.warning(
+                    logger.warn(
                         "slack_image_download_failed",
                         url=url,
                         error="content-type=text/html (check bot token scopes / file access)",
@@ -409,7 +409,7 @@ async def _download_attachments(files: list[dict[str, Any]], bot_token: str) -> 
             filename = f.get("name") or f.get("title") or "file"
             size = f.get("size")
             if isinstance(size, int) and size > _MAX_FILE_BYTES:
-                logger.warning("slack_file_too_large", filename=filename, size=size)
+                logger.warn("slack_file_too_large", filename=filename, size=size)
                 out.append(
                     FileAttachment(data=None, mime=mime, filename=filename, note=over_cap_note)
                 )
@@ -418,7 +418,7 @@ async def _download_attachments(files: list[dict[str, Any]], bot_token: str) -> 
                 resp = await client.get(url, headers=headers)
                 resp.raise_for_status()
             except httpx.HTTPError as exc:
-                logger.warning(
+                logger.warn(
                     "slack_file_download_failed", url=url, filename=filename, error=str(exc)
                 )
                 out.append(
@@ -426,7 +426,7 @@ async def _download_attachments(files: list[dict[str, Any]], bot_token: str) -> 
                 )
                 continue
             if _is_html_response(resp):
-                logger.warning(
+                logger.warn(
                     "slack_file_download_failed",
                     url=url,
                     filename=filename,
@@ -438,7 +438,7 @@ async def _download_attachments(files: list[dict[str, Any]], bot_token: str) -> 
                 continue
             content = resp.content
             if len(content) > _MAX_FILE_BYTES:
-                logger.warning("slack_file_too_large", filename=filename, size=len(content))
+                logger.warn("slack_file_too_large", filename=filename, size=len(content))
                 out.append(
                     FileAttachment(data=None, mime=mime, filename=filename, note=over_cap_note)
                 )
@@ -494,7 +494,7 @@ async def _route_assistant_message(
     try:
         identity = resolve_identity("slack", slack_user_id, agent_name)
     except IMIdentityResolutionError as exc:
-        logger.warning(
+        logger.warn(
             "slack_identity_resolution_rejected",
             agent=agent_name,
             platform_user_id=slack_user_id,
@@ -525,7 +525,7 @@ async def _route_assistant_message(
         try:
             await set_status(status, loading_messages=loading)
         except Exception as exc:  # noqa: BLE001 — status update failure must not break the run
-            logger.warning("slack_progress_status_failed", error=str(exc))
+            logger.warn("slack_progress_status_failed", error=str(exc))
 
     files = payload.get("files") or []
     attachments = await _download_attachments(list(files), bot_token)
@@ -640,7 +640,7 @@ def create_app(agent_name: str, config: dict[str, Any]) -> object:
         try:
             identity = resolve_identity("slack", slack_user_id, agent_name)
         except IMIdentityResolutionError as exc:
-            logger.warning(
+            logger.warn(
                 "slack_identity_resolution_rejected",
                 agent=agent_name,
                 platform_user_id=slack_user_id,
