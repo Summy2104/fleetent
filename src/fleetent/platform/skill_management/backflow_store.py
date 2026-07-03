@@ -119,13 +119,8 @@ def nominate_if_absent(*, agent_id: int, skill_name: str, pool_dir: Path) -> int
     return nominate(agent_id=agent_id, skill_name=skill_name, pool_dir=pool_dir)
 
 
-def _detect_conflict(pool_dir: Path, skill_name: str, base_version: str | None) -> bool:
-    """Return True if the pool skill has changed since base_version was captured."""
-    if base_version is None:
-        return False
-    skill_dir = pool_dir / skill_name
-    if not skill_dir.exists():
-        return False
+def _dir_content_hash(skill_dir: Path) -> str:
+    """Content hash of a skill dir on disk (relpath + bytes, sorted, excluding ``.git``)."""
     from hashlib import sha256
 
     digest = sha256()
@@ -134,8 +129,49 @@ def _detect_conflict(pool_dir: Path, skill_name: str, base_version: str | None) 
         digest.update(b"\0")
         digest.update(path.read_bytes())
         digest.update(b"\0")
-    current_hash = digest.hexdigest()
-    return current_hash != base_version
+    return digest.hexdigest()
+
+
+def _bundle_content_hash(bundle: dict[str, str]) -> str:
+    """Hash a proposed bundle the same way ``_dir_content_hash`` hashes a dir on disk.
+
+    Bundle keys are skill-dir-relative (matching the on-disk relpaths) and values are
+    codec-encoded, so decoding to bytes makes a bundle whose content already equals the pool
+    copy hash equal — the basis for ``is_landed``.
+    """
+    from hashlib import sha256
+
+    digest = sha256()
+    for relpath in sorted(bundle):
+        digest.update(relpath.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(skill_bundle_codec.decode(bundle[relpath]))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _detect_conflict(pool_dir: Path, skill_name: str, base_version: str | None) -> bool:
+    """Return True if the pool skill has changed since base_version was captured."""
+    if base_version is None:
+        return False
+    skill_dir = pool_dir / skill_name
+    if not skill_dir.exists():
+        return False
+    return _dir_content_hash(skill_dir) != base_version
+
+
+def is_landed(proposal: dict[str, Any], pool_dir: Path) -> bool:
+    """Whether the agent's evolved copy already equals the pool's current copy of the skill.
+
+    Becomes true once a human merges the backflow branch and the pool syncs it back: the
+    proposal is effectively adopted and should drop off the to-merge worklist and the backup
+    pass (the platform doesn't watch git PR state, so this content check is how "done" is
+    detected). False when the pool has no copy of the skill.
+    """
+    skill_dir = pool_dir / str(proposal["skill_name"])
+    if not skill_dir.exists():
+        return False
+    return _dir_content_hash(skill_dir) == _bundle_content_hash(proposal["proposed_bundle"])
 
 
 def get_proposal(proposal_id: int) -> dict[str, Any] | None:

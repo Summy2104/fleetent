@@ -8,7 +8,6 @@ in the clone/push URL, redacted in logs). All git interaction stays platform-sid
 
 from __future__ import annotations
 
-import shutil
 import socket
 import tempfile
 from pathlib import Path
@@ -93,10 +92,21 @@ class BitbucketBackend(BaseGitPlatformBackend):
                     f"clone {self._redact(self.config.remote_url)} failed: {self._redact(str(exc))}"
                 ) from exc
 
-            target = Path(tmp) / subdir
-            if target.exists():
-                shutil.rmtree(target)
+            root = Path(tmp)
+            target = root / subdir if subdir else root
+            # Aggregate branch: bundle keys are "<skill>/<relpath>". Replace each named skill
+            # dir wholesale (so intra-skill deletions propagate), leaving other skills already
+            # on base_ref intact.
+            skill_dirs = {rel.split("/", 1)[0] for rel in bundle}
+            pre_existing: dict[str, Path] = {}
+            for skill in skill_dirs:
+                d = target / skill
+                if d.is_dir():
+                    for path in d.rglob("*"):
+                        if path.is_file():
+                            pre_existing[path.relative_to(root).as_posix()] = path
             written: list[str] = []
+            new_relpaths: set[str] = set()
             for rel, content in bundle.items():
                 dest = target / rel
                 dest.parent.mkdir(parents=True, exist_ok=True)
@@ -104,7 +114,13 @@ class BitbucketBackend(BaseGitPlatformBackend):
                 # decode back to the real bytes so binary skill files round-trip intact.
                 dest.write_bytes(skill_bundle_codec.decode(content))
                 written.append(str(dest))
+                new_relpaths.add(dest.relative_to(root).as_posix())
 
+            # Files the evolved copy dropped (present on base_ref, absent from the bundle) are
+            # still on disk untouched — git-rm them so the deletion lands on the branch.
+            dropped = [str(p) for rel, p in pre_existing.items() if rel not in new_relpaths]
+            if dropped:
+                porcelain.remove(tmp, paths=dropped)
             porcelain.add(tmp, paths=written)
             commit_sha = porcelain.commit(
                 tmp,
@@ -114,7 +130,9 @@ class BitbucketBackend(BaseGitPlatformBackend):
             )
             try:
                 porcelain.branch_create(tmp, branch)
-                porcelain.push(tmp, url, f"refs/heads/{branch}:refs/heads/{branch}")
+                # force: each sweep re-pushes a fresh snapshot off base_ref, which is not a
+                # descendant of the previous branch tip, so a plain push would be rejected.
+                porcelain.push(tmp, url, f"refs/heads/{branch}:refs/heads/{branch}", force=True)
             except Exception as exc:
                 raise GitPlatformUnavailableError(
                     f"push {branch} failed: {self._redact(str(exc))}"

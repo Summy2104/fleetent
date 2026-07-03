@@ -106,6 +106,22 @@ def test_nominate_drifted_skill_creates_pending_proposal(db, pool_dir, monkeypat
     assert row["base_commit"] == base_commit
 
 
+def test_is_landed_true_when_pool_matches_proposed(db, pool_dir):
+    # A proposal is "landed" once the pool's copy of the skill equals the agent's proposed copy
+    # (i.e. the human merged the backflow branch and it synced back) — then it drops off the
+    # worklist. _setup_pool_skill writes SKILL.md + scripts/sync.py for the skill.
+    _setup_pool_skill(pool_dir, "crm-ops", "body-v1")
+    pool_match = {
+        "SKILL.md": "---\nname: crm-ops\ndescription: test\n---\nbody-v1",
+        "scripts/sync.py": "print('pool script')\n",
+    }
+    assert backflow_store.is_landed({"skill_name": "crm-ops", "proposed_bundle": pool_match}, pool_dir)
+    evolved = {**pool_match, "SKILL.md": pool_match["SKILL.md"] + "\nevolved"}
+    assert not backflow_store.is_landed({"skill_name": "crm-ops", "proposed_bundle": evolved}, pool_dir)
+    # pool has no copy of the skill -> not landed
+    assert not backflow_store.is_landed({"skill_name": "ghost", "proposed_bundle": pool_match}, pool_dir)
+
+
 def test_nominate_non_drifted_skill_raises(db, pool_dir, monkeypatch):
     """Nominating a non-drifted skill raises ValueError."""
     monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(pool_dir))
