@@ -115,11 +115,17 @@ def test_is_landed_true_when_pool_matches_proposed(db, pool_dir):
         "SKILL.md": "---\nname: crm-ops\ndescription: test\n---\nbody-v1",
         "scripts/sync.py": "print('pool script')\n",
     }
-    assert backflow_store.is_landed({"skill_name": "crm-ops", "proposed_bundle": pool_match}, pool_dir)
+    assert backflow_store.is_landed(
+        {"skill_name": "crm-ops", "proposed_bundle": pool_match}, pool_dir
+    )
     evolved = {**pool_match, "SKILL.md": pool_match["SKILL.md"] + "\nevolved"}
-    assert not backflow_store.is_landed({"skill_name": "crm-ops", "proposed_bundle": evolved}, pool_dir)
+    assert not backflow_store.is_landed(
+        {"skill_name": "crm-ops", "proposed_bundle": evolved}, pool_dir
+    )
     # pool has no copy of the skill -> not landed
-    assert not backflow_store.is_landed({"skill_name": "ghost", "proposed_bundle": pool_match}, pool_dir)
+    assert not backflow_store.is_landed(
+        {"skill_name": "ghost", "proposed_bundle": pool_match}, pool_dir
+    )
 
 
 def test_nominate_non_drifted_skill_raises(db, pool_dir, monkeypatch):
