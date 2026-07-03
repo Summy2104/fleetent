@@ -151,11 +151,12 @@ async def test_resume_missing_address_degrades_with_warning(_resume_env, monkeyp
     await _seed_pending("legacy-session", None)  # upgrade-era entry, no address
 
     warnings: list[str] = []
-    monkeypatch.setattr(
-        normalizer.logger,
-        "warning",
-        lambda event, **kw: warnings.append(event),
-    )
+
+    class _FakeLogger:
+        def warn(self, event, **kw):
+            warnings.append(event)
+
+    monkeypatch.setattr(normalizer, "logger", _FakeLogger())
 
     msg = _wrong_context_msg()
     await normalizer._resume_pending_in_session(msg, "legacy-session", "a1", "approved")

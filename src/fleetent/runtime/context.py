@@ -181,7 +181,7 @@ def _write_compaction_checkpoint(session_id: str | None, messages: list[Any]) ->
 
         session_mgr.write_compaction_checkpoint(session_id, messages)
     except Exception as exc:  # noqa: BLE001
-        _logger.warn("compaction_checkpoint_write_failed", session_id=session_id, error=str(exc))
+        _logger.warn("compaction_checkpoint_write_failed", session_id=session_id, exception=exc)
 
 
 def _summary_fingerprint(text: str) -> str:
@@ -196,7 +196,7 @@ def _resolve_summary_model() -> str | None:
     try:
         return str(_summary_route()[1].model)
     except Exception as exc:  # observability only — never propagate
-        _logger.warn("compression_summary_model_resolve_failed", error=str(exc))
+        _logger.warn("compression_summary_model_resolve_failed", exception=exc)
         return None
 
 
@@ -215,7 +215,7 @@ def _log_compression_safe(**kwargs: Any) -> None:
     try:
         eval_logger.log_compression(**kwargs)
     except Exception as exc:  # observability must not become a failure point
-        _logger.warn("compression_trace_failed", error=str(exc))
+        _logger.warn("compression_trace_failed", exception=exc)
 
 
 def _compress(
@@ -444,7 +444,7 @@ def _summarize(
             return None
         return cast(str, summary)
     except Exception as exc:
-        _logger.warn("compression_summary_failed", error=str(exc))
+        _logger.warn("compression_summary_failed", exception=exc)
         return None
 
 
@@ -497,7 +497,7 @@ def _active_task_block(session_id: str | None) -> dict[str, str] | None:
 
         todos = session_mgr.read_todo(session_id)
     except Exception as exc:  # noqa: BLE001 — todo is auxiliary, never break compression
-        _logger.warn("active_task_block_read_failed", session_id=session_id, error=str(exc))
+        _logger.warn("active_task_block_read_failed", session_id=session_id, exception=exc)
         return None
     unfinished = [t for t in todos if isinstance(t, dict) and t.get("status") != "completed"]
     if not unfinished:

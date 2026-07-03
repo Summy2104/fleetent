@@ -84,12 +84,12 @@ def test_record_kb_retrieval_swallows_write_failures(monkeypatch) -> None:
         kb_ids=["kb-1"],
     )
 
-    assert warnings == [
-        (
-            "kb_retrieval_trace_record_failed",
-            {"run_id": "run-2", "error": "db down"},
-        )
-    ]
+    assert len(warnings) == 1
+    message, fields = warnings[0]
+    assert message == "kb_retrieval_trace_record_failed"
+    assert fields["run_id"] == "run-2"
+    assert isinstance(fields["exception"], RuntimeError)
+    assert str(fields["exception"]) == "db down"
 
 
 def test_record_kb_retrieval_includes_plaintext_when_enabled(monkeypatch) -> None:

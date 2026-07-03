@@ -98,7 +98,7 @@ async def _session_maintenance_loop(interval: float) -> None:
             # without this, periodically-cleaned sessions would leak their containers.
             await _release_sandboxes(removed)
         except Exception as exc:  # noqa: BLE001 — a single failure must not kill the loop
-            _logger.warn("session_maintenance_loop_iteration_failed", error=str(exc))
+            _logger.warn("session_maintenance_loop_iteration_failed", exception=exc)
 
 
 def start_session_maintenance(*, interval: float | None = None) -> asyncio.Task[None]:
@@ -178,7 +178,7 @@ def cleanup_expired(
         try:
             path.unlink()
         except OSError as exc:
-            _logger.warn("session_cleanup_delete_failed", session_id=session_id, error=str(exc))
+            _logger.warn("session_cleanup_delete_failed", session_id=session_id, exception=exc)
             continue
         removed.append(session_id)
         _logger.info("session_cleanup_deleted", session_id=session_id)
@@ -206,7 +206,7 @@ def cleanup_expired(
         try:
             session_index.delete_batch(removed)
         except Exception as exc:  # noqa: BLE001 — index sync must not break file cleanup
-            _logger.warn("session_cleanup_index_sync_failed", count=len(removed), error=str(exc))
+            _logger.warn("session_cleanup_index_sync_failed", count=len(removed), exception=exc)
     return removed
 
 
@@ -304,7 +304,7 @@ def enforce_capacity(
         try:
             path.unlink()
         except OSError as exc:
-            _logger.warn("session_capacity_delete_failed", session_id=session_id, error=str(exc))
+            _logger.warn("session_capacity_delete_failed", session_id=session_id, exception=exc)
             continue
         removed.append(session_id)
         _logger.info("session_capacity_evicted", session_id=session_id)
@@ -322,7 +322,7 @@ def enforce_capacity(
         try:
             session_index.delete_batch(removed)
         except Exception as exc:  # noqa: BLE001 — index sync must not break capacity eviction
-            _logger.warn("session_capacity_index_sync_failed", count=len(removed), error=str(exc))
+            _logger.warn("session_capacity_index_sync_failed", count=len(removed), exception=exc)
     return removed
 
 
@@ -415,7 +415,7 @@ def read_todo(session_id: str) -> list[dict[str, str]]:
     try:
         data = json.loads(path.read_text())
     except (OSError, ValueError) as exc:
-        _logger.warn("session_todo_read_failed", session_id=session_id, error=str(exc))
+        _logger.warn("session_todo_read_failed", session_id=session_id, exception=exc)
         return []
     return list(data) if isinstance(data, list) else []
 
@@ -665,7 +665,7 @@ async def save(
             message_count=len(messages),
         )
     except Exception as exc:  # noqa: BLE001 — auxiliary index must not break persistence
-        _logger.warn("session_index_update_failed", session_id=session_id, error=str(exc))
+        _logger.warn("session_index_update_failed", session_id=session_id, exception=exc)
 
     # Internal maintenance trigger (no external cron): opportunistically prune
     # expired sessions and enforce disk capacity as a side effect of activity,
@@ -675,7 +675,7 @@ async def save(
         removed = maybe_run_maintenance()
         await _release_sandboxes(removed)
     except Exception as exc:  # noqa: BLE001 — maintenance must not break persistence
-        _logger.warn("session_maintenance_trigger_failed", session_id=session_id, error=str(exc))
+        _logger.warn("session_maintenance_trigger_failed", session_id=session_id, exception=exc)
 
 
 async def clear(session_id: str) -> None:
@@ -715,4 +715,4 @@ async def _release_sandboxes(session_ids: list[str]) -> None:
             await manager.release_session(session_id)
             gc_session_workspace(session_id)
         except Exception as exc:  # noqa: BLE001 — sandbox reclaim must not break persistence
-            _logger.warn("sandbox_release_failed", session_id=session_id, error=str(exc))
+            _logger.warn("sandbox_release_failed", session_id=session_id, exception=exc)

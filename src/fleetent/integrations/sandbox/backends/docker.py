@@ -68,7 +68,7 @@ class DockerBackend(BaseSandboxBackend):
             )
             await proc.communicate()
         except (FileNotFoundError, OSError) as exc:
-            _logger.warn("docker_probe_failed", error=str(exc))
+            _logger.warn("docker_probe_failed", exception=exc)
             return False
         if proc.returncode != 0:
             _logger.warn("docker_probe_nonzero", returncode=proc.returncode)
@@ -353,7 +353,7 @@ class DockerBackend(BaseSandboxBackend):
             )
             stdout, stderr = await proc.communicate()
         except (FileNotFoundError, OSError) as exc:
-            _logger.warn("docker_list_containers_failed", prefix=name_prefix, error=str(exc))
+            _logger.warn("docker_list_containers_failed", prefix=name_prefix, exception=exc)
             return []
         if proc.returncode != 0:
             _logger.warn(
@@ -433,7 +433,7 @@ class DockerBackend(BaseSandboxBackend):
             )
             await proc.communicate()
         except (FileNotFoundError, OSError) as exc:
-            _logger.warn("docker_image_inspect_failed", tag=image_tag, error=str(exc))
+            _logger.warn("docker_image_inspect_failed", tag=image_tag, exception=exc)
             return False
         return proc.returncode == 0
 

@@ -98,7 +98,7 @@ async def _stop_step(name: str, coro: Awaitable[None], timeout: float = 10.0) ->
     try:
         await asyncio.wait_for(coro, timeout)
     except Exception as exc:  # noqa: BLE001 — containment: a teardown error never propagates
-        _logger.warn("shutdown_step_failed", step=name, error=str(exc))
+        _logger.warn("shutdown_step_failed", step=name, exception=exc)
 
 
 async def _drain_and_close(rt: AgentRuntime, drain_timeout: float) -> None:
@@ -231,7 +231,7 @@ def _drive_exit_after_drain(
     try:
         _terminate_descendant_processes(grace)
     except Exception as exc:  # noqa: BLE001 — contained: the watchdog still guarantees exit
-        _logger.warn("drive_exit_terminate_failed", error=str(exc))
+        _logger.warn("drive_exit_terminate_failed", exception=exc)
     _arm_hard_exit_watchdog(hard_deadline)
 
 
@@ -326,11 +326,7 @@ def _configure_logging_from_agent(agent: AgentFile, home_dir: Path) -> None:
     resolves against ``home_dir`` (anchored like agent.yaml/.env, never the process CWD);
     an absolute ``directory`` is used as-is.
     """
-    import logging
-
-    import structlog
-
-    from fleetent.structured_logging import configure_structured_logging
+    from fleetent.logging_setup import setup_process_logging
 
     log = agent.observability.logging
     if log.directory:
@@ -338,32 +334,11 @@ def _configure_logging_from_agent(agent: AgentFile, home_dir: Path) -> None:
         resolved_dir = configured if configured.is_absolute() else home_dir / configured
     else:
         resolved_dir = home_dir / "data" / "logs"
-    configure_structured_logging(
+    setup_process_logging(
         console_level=log.console_level,
         file_level=log.file_level,
         directory=resolved_dir,
-    )
-    shared_processors: list[structlog.types.Processor] = [
-        structlog.contextvars.merge_contextvars,
-        structlog.stdlib.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-    ]
-    if agent.log_format == "json":
-        renderer: structlog.types.Processor = structlog.processors.JSONRenderer()
-    else:
-        renderer = structlog.dev.ConsoleRenderer()
-    structlog.configure(
-        processors=shared_processors + [renderer],
-        wrapper_class=structlog.make_filtering_bound_logger(logging.DEBUG),
-        context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
-    logging.basicConfig(
-        format="%(message)s",
-        level=logging.INFO,
-        handlers=[logging.StreamHandler()],
+        log_format=agent.log_format,
     )
 
 
@@ -578,7 +553,7 @@ async def _start_infra(
         try:
             await cleanup_orphans(backend)
         except Exception as exc:  # noqa: BLE001 — orphan cleanup must not abort boot
-            _logger.warn("agent_runtime_sandbox_cleanup_failed", error=str(exc))
+            _logger.warn("agent_runtime_sandbox_cleanup_failed", exception=exc)
         start_idle_sweep()
     if agent.mcp_servers:
         from fleetent.integrations import mcp as mcp_client
@@ -595,7 +570,7 @@ async def _start_infra(
             # subprocess pool (no-op unless a per-user oauth stdio server is configured).
             mcp_client.start_stdio_reaper()
         except Exception as exc:  # noqa: BLE001 — MCP unavailable must not abort boot
-            _logger.warn("agent_runtime_mcp_register_failed", error=str(exc))
+            _logger.warn("agent_runtime_mcp_register_failed", exception=exc)
     session_mgr.start_session_maintenance()
     # user-memory-v2: start the short-term facts archive sweep. Best-effort — a
     # failure here is logged and never aborts boot (the DB/backend were wired in
@@ -607,7 +582,7 @@ async def _start_infra(
             facts_store._facts_database(), facts_store._facts_vector_backend
         )
     except Exception as exc:  # noqa: BLE001 — facts sweep must not abort boot
-        _logger.warn("agent_runtime_facts_sweep_start_failed", error=str(exc))
+        _logger.warn("agent_runtime_facts_sweep_start_failed", exception=exc)
     reflection_settings = getattr(agent, "reflection", None)
     if reflection_settings is not None and getattr(reflection_settings, "enabled", False) is True:
         from fleetent.reflection import scheduler as reflection_scheduler
@@ -630,7 +605,7 @@ async def _start_infra(
         if marked:
             _logger.info("session_resume_pending_marked", count=len(marked))
     except Exception as exc:  # noqa: BLE001 — recovery scan must not abort boot
-        _logger.warn("session_resume_scan_failed", error=str(exc))
+        _logger.warn("session_resume_scan_failed", exception=exc)
 
 
 async def _start_scheduler(agent: AgentFile) -> Any:
@@ -1134,5 +1109,3 @@ def build_app(agent_name: str) -> FastAPI:
             await transport.close()
 
     return app
-
-

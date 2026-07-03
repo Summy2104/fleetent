@@ -101,3 +101,54 @@ def test_main_exits_on_invalid_config(monkeypatch) -> None:
 
     with pytest.raises(SystemExit, match="1"):
         app.main()
+
+
+@pytest.mark.parametrize(
+    ("env", "expected"),
+    [
+        ({}, {"log_format": "console"}),
+        ({"LOG_FORMAT": "json", "LOG_LEVEL": "debug"}, {"log_format": "json"}),
+    ],
+)
+def test_main_configures_process_logging_from_env(monkeypatch, tmp_path, env, expected) -> None:
+    from fleetent.node import app
+
+    desired = DesiredState(node_id="node-a", agents=[])
+
+    class FakeProvider:
+        def fetch(self) -> DesiredState:
+            return desired
+
+    class FakeReconciler:
+        def reconcile(self, received: DesiredState) -> None:
+            assert received is desired
+
+    for key in ("LOG_FORMAT", "LOG_LEVEL"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+
+    logging_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(app, "load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr(app, "PlatformApiDesiredStateProvider", lambda config: FakeProvider())
+    monkeypatch.setattr(app, "create_process_backend", lambda config: object())
+    monkeypatch.setattr(app, "NodeReconciler", lambda config, backend: FakeReconciler())
+    monkeypatch.setattr(
+        app,
+        "_start_forwarder",
+        lambda config, backend: (
+            SimpleNamespace(should_exit=False),
+            SimpleNamespace(join=lambda timeout=0: None),
+        ),
+    )
+    monkeypatch.setattr(
+        "fleetent.logging_setup.setup_process_logging",
+        lambda **kwargs: logging_calls.append(kwargs),
+    )
+    monkeypatch.setattr(app.time, "sleep", lambda s: (_ for _ in ()).throw(KeyboardInterrupt))
+    monkeypatch.setattr("fleetent.build_info.log_service_startup", lambda name: None)
+
+    app.main()
+
+    assert len(logging_calls) == 1
+    assert logging_calls[0]["log_format"] == expected["log_format"]

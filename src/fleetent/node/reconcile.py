@@ -264,7 +264,7 @@ class NodeReconciler:
             _logger.warn(
                 "node_skill_deploy_failed",
                 agent_name=agent_name,
-                error=str(exc),
+                exception=exc,
             )
 
     def _env_has_values(self, agent_name: str, tenant_id: str) -> bool:

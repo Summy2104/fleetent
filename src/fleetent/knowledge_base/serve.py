@@ -629,7 +629,10 @@ def main(argv: list[str] | None = None) -> None:
             port=ns.port,
             default_mode=ns.mode,
         )
+    from fleetent.logging_setup import setup_process_logging
+
+    setup_process_logging(log_format=os.getenv("LOG_FORMAT", "console"))
     app = create_app(config)
     from uvicorn import run as uvicorn_run
 
-    uvicorn_run(app, host=config.host, port=config.port)
+    uvicorn_run(app, host=config.host, port=config.port, log_level="info")

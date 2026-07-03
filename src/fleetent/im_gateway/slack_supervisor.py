@@ -71,7 +71,7 @@ class SlackSupervisor:
             raise
         except Exception as exc:  # connection crashed — reflect status, isolate failure
             self._status[agent_name] = "error"
-            _logger.warn("slack_connector_error", agent=agent_name, error=str(exc))
+            _logger.warn("slack_connector_error", agent=agent_name, exception=exc)
 
     async def stop(self, agent_name: str) -> None:
         task = self._tasks.pop(agent_name, None)

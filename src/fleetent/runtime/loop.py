@@ -198,7 +198,7 @@ async def _progress_heartbeat(progress_func: ProgressFunc, interval: float | Non
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 — heartbeat is a side channel; never break the run
-            _logger.warn("progress_heartbeat_failed", error=str(exc))
+            _logger.warn("progress_heartbeat_failed", exception=exc)
 
 
 @contextlib.asynccontextmanager
@@ -387,7 +387,7 @@ def _append_delivery_trailer(reply: str, tool_context: Any, *, emit: bool = True
         if trailer:
             return f"{reply}\n\n{trailer}" if reply else trailer
     except Exception as exc:  # noqa: BLE001 — trailer is auxiliary, never break the reply
-        _logger.warn("delivery_trailer_failed", error=str(exc))
+        _logger.warn("delivery_trailer_failed", exception=exc)
     return reply
 
 
@@ -474,7 +474,7 @@ def _load_flap_state(session_id: str | None) -> AntiFlapState | None:
     try:
         return load_anti_flap_state(session_id)
     except Exception as exc:  # observability/governance must not break the run
-        _logger.warn("anti_flap_load_failed", session_id=session_id, error=str(exc))
+        _logger.warn("anti_flap_load_failed", session_id=session_id, exception=exc)
         return None
 
 
@@ -484,7 +484,7 @@ def _save_flap_state(session_id: str | None, state: AntiFlapState | None) -> Non
     try:
         save_anti_flap_state(session_id, state)
     except Exception as exc:
-        _logger.warn("anti_flap_save_failed", session_id=session_id, error=str(exc))
+        _logger.warn("anti_flap_save_failed", session_id=session_id, exception=exc)
 
 
 def _gated_compress(
@@ -1284,7 +1284,7 @@ async def _grace_call(
             return partial_reply
         return summary
     except Exception as exc:  # degrade to partial result; not swallowed silently
-        _logger.warn("grace_call_failed_fallback_partial", error=str(exc))
+        _logger.warn("grace_call_failed_fallback_partial", exception=exc)
         return partial_reply
 
 
@@ -1513,7 +1513,7 @@ async def _create_with_transient_retry(
                 "model_transient_retry",
                 attempt=attempt + 1,
                 delay=round(delay, 2),
-                error=str(exc),
+                exception=exc,
             )
             await asyncio.sleep(delay)
             attempt += 1
@@ -3134,10 +3134,10 @@ async def run_stream(
             reply = "".join(grace_parts) or partial_reply
         except Exception as exc:  # degrade, never crash the stream (D7)
             if any_delta:
-                _logger.warn("grace_stream_failed_after_partial", error=str(exc))
+                _logger.warn("grace_stream_failed_after_partial", exception=exc)
                 reply = "".join(grace_parts)
             else:
-                _logger.warn("grace_stream_failed_before_delta", error=str(exc))
+                _logger.warn("grace_stream_failed_before_delta", exception=exc)
                 reply = partial_reply
                 if partial_reply:
                     yield {"type": "text_delta", "content": partial_reply}

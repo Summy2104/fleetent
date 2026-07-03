@@ -67,7 +67,7 @@ def _mock_supervisor() -> MagicMock:
 async def test_boot_configures_logging_json(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """boot() with log_format: json calls configure_structured_logging with agent's settings."""
+    """boot() with log_format: json delegates to setup_process_logging with agent settings."""
     home = tmp_path / "myagent"
     home.mkdir()
     _write_agent_yaml(home, log_format="json")
@@ -75,10 +75,7 @@ async def test_boot_configures_logging_json(
 
     with contextlib.ExitStack() as stack:
         _make_stack(stack)
-        mock_csl = stack.enter_context(
-            patch("fleetent.structured_logging.configure_structured_logging")
-        )
-        mock_structlog = stack.enter_context(patch("structlog.configure"))
+        mock_setup = stack.enter_context(patch("fleetent.logging_setup.setup_process_logging"))
 
         from fleetent.runtime import agent_app
 
@@ -91,21 +88,17 @@ async def test_boot_configures_logging_json(
             telegram_supervisor=_mock_supervisor(),
         )
 
-    mock_csl.assert_called_once()
-    call_kwargs = mock_csl.call_args.kwargs
+    mock_setup.assert_called_once()
+    call_kwargs = mock_setup.call_args.kwargs
     assert call_kwargs["console_level"] == "warning"
     assert call_kwargs["file_level"] == "info"
-    mock_structlog.assert_called_once()
-    structlog_kwargs = mock_structlog.call_args.kwargs
-    import structlog as sl
-
-    assert isinstance(structlog_kwargs["processors"][-1], sl.processors.JSONRenderer)
+    assert call_kwargs["log_format"] == "json"
 
 
 async def test_boot_configures_logging_console(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """boot() with log_format: console should use ConsoleRenderer."""
+    """boot() with log_format: console delegates to setup_process_logging."""
     home = tmp_path / "consoleagent"
     home.mkdir()
     _write_agent_yaml(home, log_format="console")
@@ -113,10 +106,7 @@ async def test_boot_configures_logging_console(
 
     with contextlib.ExitStack() as stack:
         _make_stack(stack)
-        mock_csl = stack.enter_context(
-            patch("fleetent.structured_logging.configure_structured_logging")
-        )
-        mock_structlog = stack.enter_context(patch("structlog.configure"))
+        mock_setup = stack.enter_context(patch("fleetent.logging_setup.setup_process_logging"))
 
         from fleetent.runtime import agent_app
 
@@ -129,12 +119,8 @@ async def test_boot_configures_logging_console(
             telegram_supervisor=_mock_supervisor(),
         )
 
-    mock_csl.assert_called_once()
-    mock_structlog.assert_called_once()
-    structlog_kwargs = mock_structlog.call_args.kwargs
-    import structlog as sl
-
-    assert isinstance(structlog_kwargs["processors"][-1], sl.dev.ConsoleRenderer)
+    mock_setup.assert_called_once()
+    assert mock_setup.call_args.kwargs["log_format"] == "console"
 
 
 def _write_agent_yaml_blank_log_dir(home: Path) -> None:
@@ -169,10 +155,7 @@ async def test_blank_log_directory_resolves_to_agent_home_data_logs(
 
     with contextlib.ExitStack() as stack:
         _make_stack(stack)
-        mock_csl = stack.enter_context(
-            patch("fleetent.structured_logging.configure_structured_logging")
-        )
-        stack.enter_context(patch("structlog.configure"))
+        mock_setup = stack.enter_context(patch("fleetent.logging_setup.setup_process_logging"))
 
         from fleetent.runtime import agent_app
 
@@ -185,8 +168,8 @@ async def test_blank_log_directory_resolves_to_agent_home_data_logs(
             telegram_supervisor=_mock_supervisor(),
         )
 
-    mock_csl.assert_called_once()
-    assert mock_csl.call_args.kwargs["directory"] == home / "data" / "logs"
+    mock_setup.assert_called_once()
+    assert mock_setup.call_args.kwargs["directory"] == home / "data" / "logs"
 
 
 async def test_relative_log_directory_resolves_against_home(
@@ -201,10 +184,7 @@ async def test_relative_log_directory_resolves_against_home(
 
     with contextlib.ExitStack() as stack:
         _make_stack(stack)
-        mock_csl = stack.enter_context(
-            patch("fleetent.structured_logging.configure_structured_logging")
-        )
-        stack.enter_context(patch("structlog.configure"))
+        mock_setup = stack.enter_context(patch("fleetent.logging_setup.setup_process_logging"))
 
         from fleetent.runtime import agent_app
 
@@ -217,8 +197,8 @@ async def test_relative_log_directory_resolves_against_home(
             telegram_supervisor=_mock_supervisor(),
         )
 
-    mock_csl.assert_called_once()
-    assert mock_csl.call_args.kwargs["directory"] == home / "data" / "logs"
+    mock_setup.assert_called_once()
+    assert mock_setup.call_args.kwargs["directory"] == home / "data" / "logs"
 
 
 def _write_agent_yaml_abs_log_dir(home: Path, directory: str) -> None:
@@ -254,10 +234,7 @@ async def test_absolute_log_directory_used_as_is(
 
     with contextlib.ExitStack() as stack:
         _make_stack(stack)
-        mock_csl = stack.enter_context(
-            patch("fleetent.structured_logging.configure_structured_logging")
-        )
-        stack.enter_context(patch("structlog.configure"))
+        mock_setup = stack.enter_context(patch("fleetent.logging_setup.setup_process_logging"))
 
         from fleetent.runtime import agent_app
 
@@ -270,5 +247,5 @@ async def test_absolute_log_directory_used_as_is(
             telegram_supervisor=_mock_supervisor(),
         )
 
-    mock_csl.assert_called_once()
-    assert mock_csl.call_args.kwargs["directory"] == Path(abs_dir)
+    mock_setup.assert_called_once()
+    assert mock_setup.call_args.kwargs["directory"] == Path(abs_dir)

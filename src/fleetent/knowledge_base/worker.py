@@ -473,6 +473,9 @@ def main(argv: list[str] | None = None) -> None:
         else:
             host_config.configure_process_runtime()
             home_dir = config_path.parent
+    from fleetent.logging_setup import setup_process_logging
+
+    setup_process_logging(log_format=os.getenv("LOG_FORMAT", "console"))
     from fleetent.build_info import log_service_startup
 
     log_service_startup("kb-worker")

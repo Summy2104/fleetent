@@ -128,7 +128,7 @@ def gc_agent_workspace(
         try:
             age = now - entry.stat().st_mtime
         except OSError as exc:
-            _logger.warn("workspace_gc_stat_failed", path=str(entry), error=str(exc))
+            _logger.warn("workspace_gc_stat_failed", path=str(entry), exception=exc)
             continue
         if age <= retention_seconds:
             continue
@@ -140,7 +140,7 @@ def gc_agent_workspace(
             else:
                 entry.unlink()
         except OSError as exc:
-            _logger.warn("workspace_gc_entry_delete_failed", path=str(entry), error=str(exc))
+            _logger.warn("workspace_gc_entry_delete_failed", path=str(entry), exception=exc)
             continue
         removed += 1
     if removed:

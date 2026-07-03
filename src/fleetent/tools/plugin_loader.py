@@ -16,12 +16,12 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-import structlog
 import yaml
 
+from fleetent.structured_logging import get_logger
 from fleetent.tools import registry as tool_registry
 
-logger = structlog.get_logger(__name__)
+logger = get_logger(__name__)
 
 
 # Module-level path constant, injectable via monkeypatch (no-global-mutable-state
@@ -103,7 +103,7 @@ def _namespace_new_keys(plugin_name: str, before: set[str], package: str) -> Non
             continue
         namespaced = f"{plugin_name}__{key}"
         if namespaced in registry:
-            logger.warning(
+            logger.warn(
                 "plugin_tool_name_conflict",
                 plugin=plugin_name,
                 tool=namespaced,
@@ -144,7 +144,7 @@ def _load_one(plugin_dir: Path, taken: set[str]) -> PluginMeta | None:
     manifest_path = plugin_dir / _MANIFEST_NAME
     parsed = _parse_manifest(manifest_path)
     if parsed is None:
-        logger.warning(
+        logger.warn(
             "plugin_manifest_invalid",
             path=str(plugin_dir),
             reason="missing/invalid YAML, non-mapping, or missing name",
@@ -164,7 +164,7 @@ def _load_one(plugin_dir: Path, taken: set[str]) -> PluginMeta | None:
         return meta
 
     if name in taken:
-        logger.warning(
+        logger.warn(
             "plugin_namespace_conflict",
             plugin=name,
             reason="name collides with an MCP server, builtin namespace, or another plugin",
@@ -175,7 +175,7 @@ def _load_one(plugin_dir: Path, taken: set[str]) -> PluginMeta | None:
     try:
         importlib.import_module(plugin_dir.name)
     except Exception as exc:  # noqa: BLE001 — logged then skipped, not swallowed (D4)
-        logger.warning("plugin_import_failed", name=name, error=str(exc))
+        logger.warn("plugin_import_failed", name=name, exception=exc)
         return None
 
     _namespace_new_keys(name, before, plugin_dir.name)

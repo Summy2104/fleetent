@@ -8,10 +8,12 @@ _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 8765
 
 
-def _uvicorn_run(app: str, *, host: str, port: int, reload: bool = False) -> None:
+def _uvicorn_run(
+    app: str, *, host: str, port: int, reload: bool = False, log_level: str = "info"
+) -> None:
     import uvicorn
 
-    uvicorn.run(app, host=host, port=port, reload=reload)
+    uvicorn.run(app, host=host, port=port, reload=reload, log_level=log_level)
 
 
 def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -29,5 +31,11 @@ def handle(args: argparse.Namespace) -> bool:
     from fleetent.build_info import log_service_startup
 
     log_service_startup("platform")
-    _uvicorn_run("fleetent.server:app", host=args.host, port=args.port, reload=args.reload)
+    _uvicorn_run(
+        "fleetent.server:app",
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
+        log_level="info",
+    )
     return True

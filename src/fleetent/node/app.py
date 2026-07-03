@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import time
 from threading import Thread
@@ -35,6 +36,10 @@ def main() -> None:
     except ConfigError as exc:
         print(str(exc), file=sys.stderr)
         raise SystemExit(1) from exc
+
+    from fleetent.logging_setup import setup_process_logging
+
+    setup_process_logging(log_format=os.getenv("LOG_FORMAT", "console"))
 
     from fleetent.build_info import log_service_startup
 
