@@ -394,6 +394,23 @@ def drifted_agents(skill_name: str) -> list[int]:
     return [int(row["agent_id"]) for row in rows]
 
 
+def list_drifted() -> list[tuple[int, str]]:
+    """Return all drifted ``(agent_id, skill_name)`` pairs.
+
+    Drives backflow auto-nomination from the (background) sweep instead of the node
+    status-ingestion request path — capturing an evolved bundle is a network round-trip
+    to the owning node and must not block ``POST /nodes/{id}/status``.
+    """
+    rows = (
+        _database()
+        .execute(
+            "SELECT agent_id, skill_name FROM agent_skills WHERE drift = 1 ORDER BY agent_id"
+        )
+        .fetchall()
+    )
+    return [(int(row["agent_id"]), str(row["skill_name"])) for row in rows]
+
+
 # --- Management state (status / global enablement / audit verdict / forced) ---
 
 

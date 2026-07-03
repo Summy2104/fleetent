@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from fleetent import agent_store
@@ -27,12 +28,23 @@ from fleetent.integrations.git_platform import (
     GitPlatformUnavailableError,
     create_git_platform,
 )
-from fleetent.platform.skill_management import backflow_store, git_source_store, pool_git
+from fleetent.platform.skill_management import (
+    backflow_store,
+    git_source_store,
+    pool_git,
+    skill_admin_store,
+)
+from fleetent.skills import registry as skill_registry
 from fleetent.structured_logging import get_logger
 
 _logger = get_logger("skill_management.backflow_pr_sweep")
 
 _PUSH_AUTHOR = "fleetent <backflow@fleetent>"
+
+# Cap auto-nominations per sweep round: each nomination pulls the evolved bundle from the
+# owning node over HTTP; a bound keeps one round's wall-clock predictable (the rest are
+# picked up next round).
+_NOMINATE_BUDGET_PER_ROUND = 50
 
 # Injection seams (mirroring pool_sync): the secret resolver decrypts credential env-name
 # references; the backend factory is overridable in tests. Both default to production wiring.
@@ -129,21 +141,53 @@ def _back_up(backend: BaseGitPlatformBackend, config: dict[str, Any]) -> int:
     return backed
 
 
+def _nominate_drifted() -> int:
+    """Nominate backflow proposals for drifted skills that don't have one yet.
+
+    Runs in the (background) sweep rather than the node status-ingestion request path:
+    each nomination pulls the evolved bundle from the owning node over HTTP, which must not
+    block ``POST /nodes/{id}/status``. Bounded per round; bulkheaded per skill.
+    """
+    pool_dir = Path(skill_registry._resolve_skills_dir(None))
+    nominated = 0
+    for agent_id, skill_name in skill_admin_store.list_drifted():
+        if nominated >= _NOMINATE_BUDGET_PER_ROUND:
+            _logger.info("backflow_nominate_budget_reached", budget=_NOMINATE_BUDGET_PER_ROUND)
+            break
+        try:
+            if backflow_store.nominate_if_absent(
+                agent_id=agent_id, skill_name=skill_name, pool_dir=pool_dir
+            ):
+                nominated += 1
+        except Exception as exc:  # bulkhead: one skill's capture failure never stops the rest
+            _logger.warn(
+                "backflow_auto_nominate_failed",
+                agent_id=agent_id,
+                skill=skill_name,
+                error=str(exc),
+            )
+    return nominated
+
+
 def sweep() -> dict[str, Any]:
     """Run one backflow sweep round (bulkheaded; never raises).
 
-    Only pushes backup branches (``<prefix>/<agent>/<skill>``) for safekeeping. Opening a
-    pull request from a backup branch to the authority branch — and thus any write to the
-    authority branch — is deliberately the human's job (done in the git host UI); the
-    platform never opens or merges PRs.
+    Two passes: (1) nominate proposals for drifted skills (captures the evolved bundle off
+    the request path); (2) push backup branches (``<prefix>/<agent>/<skill>``) for
+    safekeeping. Opening a PR from a backup branch to the authority branch — any write to
+    the authority branch — is deliberately the human's job in the git host; the platform
+    never opens or merges PRs.
     """
     try:
+        # Nomination records proposals + captures bundles; it does NOT touch git, so it runs
+        # regardless of whether an external git source is enabled.
+        nominated = _nominate_drifted()
         config = git_source_store.get_config()
         if not config or not config.get("enabled"):
-            return {"backed_up": 0, "skipped": "disabled"}
+            return {"nominated": nominated, "backed_up": 0, "skipped": "disabled"}
         backend = _build_backend(config)
         backed_up = _back_up(backend, config)
-        return {"backed_up": backed_up}
+        return {"nominated": nominated, "backed_up": backed_up}
     except Exception as exc:  # outermost bulkhead: a sweep failure must not crash the scheduler
         _logger.error("backflow_pr_sweep_failed", error=str(exc))
         return {"backed_up": 0, "error": str(exc)}

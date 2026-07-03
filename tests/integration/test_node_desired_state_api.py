@@ -567,7 +567,10 @@ def test_post_status_projects_skill_drift_to_agent_skills(
     assert drift["base_version"] == "abc123"
     assert drift["base_commit"] == "def456"
     assert drift["drift"] == 1
-    assert nominations == [(agent.id, "incident-review")]
+    # Status ingestion records drift only. Nomination pulls the evolved bundle from the
+    # owning node over HTTP, so it is deferred to the background sweep and must NOT run on
+    # this request path (doing it inline is what could block POST /nodes/{id}/status).
+    assert nominations == []
 
 
 def test_post_identity_resolve_returns_resolve_or_provision_principal(

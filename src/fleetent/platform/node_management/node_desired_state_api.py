@@ -339,28 +339,16 @@ def _agent_secrets(agent: agent_store.Agent) -> dict[str, str]:
 
 
 def _project_skill_status(report: NodeAgentStatusReport) -> None:
-    from fleetent.platform.skill_management import backflow_store, skill_admin_store
+    # Status ingestion only records drift (pure DB writes) — it never captures an evolved
+    # bundle here. Auto-nomination pulls the bundle from the owning node over HTTP, so it
+    # runs in the background backflow sweep (which scans skill_admin_store.list_drifted());
+    # doing it inline would block POST /nodes/{id}/status on a per-skill network round-trip.
+    from fleetent.platform.skill_management import skill_admin_store
 
     for skill in report.skills:
         skill_admin_store.set_base_version(report.agent_id, skill.skill_name, skill.base_version)
         skill_admin_store.set_base_commit(report.agent_id, skill.skill_name, skill.base_commit)
         skill_admin_store.set_drift(report.agent_id, skill.skill_name, drifted=skill.drift)
-        if skill.drift:
-            # Best-effort auto-nomination: a failed bundle capture (e.g. the owning
-            # node is briefly unreachable) must not fail status ingestion.
-            try:
-                backflow_store.nominate_if_absent(
-                    agent_id=report.agent_id,
-                    skill_name=skill.skill_name,
-                    pool_dir=_skill_pool_dir(),
-                )
-            except Exception:
-                _logger.warning(
-                    "auto-nominate backflow failed for agent=%s skill=%s",
-                    report.agent_id,
-                    skill.skill_name,
-                    exc_info=True,
-                )
 
 
 def _skill_manifests_for(node_id: str, agent: agent_store.Agent) -> list[dict[str, str]]:
