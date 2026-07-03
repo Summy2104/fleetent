@@ -39,6 +39,11 @@ const en = {
   'common.email': 'Email',
   'common.password': 'Password',
 
+  // 通用下拉选择器（SimpleSelect 默认文案）
+  'select.searchPlaceholder': 'Search…',
+  'select.noOptions': 'No options',
+  'select.noMatch': 'No results',
+
   // 品牌 / 外壳
   'shell.brand': 'fleetent',
   'shell.openMenu': 'Open menu',
@@ -821,6 +826,11 @@ const zh: Messages = {
   'common.admin': '管理',
   'common.email': '邮箱',
   'common.password': '密码',
+
+  // 通用下拉选择器（SimpleSelect 默认文案）
+  'select.searchPlaceholder': '搜索…',
+  'select.noOptions': '暂无选项',
+  'select.noMatch': '无匹配结果',
 
   // 品牌 / 外壳
   'shell.brand': 'fleetent',
