@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from fleetent import agent_store, audit_log
-from fleetent.agent_config import collect_env_var_names
+from fleetent.agent_config import AgentFile, collect_env_var_names
 from fleetent.platform import im_gateway_management
 from fleetent.platform.agent_lifecycle import credential_slots, materialize, secret_store
 from fleetent.platform.agent_management_console import agent_admin_store
@@ -115,17 +115,19 @@ def get_desired_state(
         agent = agent_store.get_by_id(agent_id)
         if agent is None:
             continue
+        # Parse agent.yaml exactly once per agent and thread it through: composing the file
+        # (YAML load + compose + settings) dominates this handler's CPU, and it used to run
+        # three times (config + secrets + skill manifests) for every agent on every reconcile.
+        agent_file = materialize.agent_file_from_store(agent)
         agents.append(
             {
                 "agent_id": agent.id,
                 "name": agent.name,
                 "tenant_id": agent.tenant_id,
                 "knowledge_resync_epoch": str(state["updated_at"] or ""),
-                "config": materialize.desired_state_payload_from_agent_file(
-                    materialize.agent_file_from_store(agent)
-                ),
-                "skill_manifests": _skill_manifests_for(node_id, agent),
-                "secrets": _agent_secrets(agent),
+                "config": materialize.desired_state_payload_from_agent_file(agent_file),
+                "skill_manifests": _skill_manifests_for(node_id, agent, agent_file),
+                "secrets": _agent_secrets(agent, agent_file),
             }
         )
     return {"node_id": node_id, "agents": agents}
@@ -315,7 +317,9 @@ def post_mcp_credential_set(
     return {"ok": True}
 
 
-def _agent_secrets(agent: agent_store.Agent) -> dict[str, str]:
+def _agent_secrets(
+    agent: agent_store.Agent, agent_file: AgentFile | None = None
+) -> dict[str, str]:
     secrets: dict[str, str] = {}
     for slot in credential_slots.list_slots(agent):
         if slot.mode != "inject":
@@ -328,7 +332,8 @@ def _agent_secrets(agent: agent_store.Agent) -> dict[str, str]:
     # Seed model env from the provider row (shared source of truth) for any referenced env
     # name not already supplied by a per-agent inject slot, mirroring materialize._seed_env so
     # node-managed agents resolve the same model key as platform-direct materialize.
-    agent_file = materialize.agent_file_from_store(agent)
+    if agent_file is None:
+        agent_file = materialize.agent_file_from_store(agent)
     for env_name in collect_env_var_names(agent_file):
         if env_name in secrets:
             continue
@@ -351,10 +356,14 @@ def _project_skill_status(report: NodeAgentStatusReport) -> None:
         skill_admin_store.set_drift(report.agent_id, skill.skill_name, drifted=skill.drift)
 
 
-def _skill_manifests_for(node_id: str, agent: agent_store.Agent) -> list[dict[str, str]]:
+def _skill_manifests_for(
+    node_id: str, agent: agent_store.Agent, agent_file: AgentFile | None = None
+) -> list[dict[str, str]]:
     pool_dir = _skill_pool_dir()
+    if agent_file is None:
+        agent_file = materialize.agent_file_from_store(agent)
     manifests: list[dict[str, str]] = []
-    for skill_name in materialize.agent_file_from_store(agent).allowed_skills:
+    for skill_name in agent_file.allowed_skills:
         skill_dir = pool_dir / skill_name
         if not skill_dir.is_dir():
             continue

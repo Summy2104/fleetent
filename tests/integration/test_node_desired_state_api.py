@@ -139,6 +139,35 @@ def test_get_desired_state_returns_only_enabled_agents_for_node(node_client: Tes
     assert "sk-inline-secret" not in str(config)
 
 
+def test_get_desired_state_parses_agent_file_once_per_agent(node_client, monkeypatch) -> None:
+    # The desired-state handler previously parsed agent.yaml three times per agent (config +
+    # secrets + skill manifests). Parsing (YAML load + compose + settings) dominates the
+    # handler's CPU, so it must be parsed once per agent and threaded through.
+    from fleetent import agent_store
+    from fleetent.platform.agent_lifecycle import materialize
+    from fleetent.platform.node_management import node_store, placement_store
+
+    node_key, _ = node_store.register_node("node-a")
+    agent = agent_store.create_agent("solo", "Help users", ["shell"])
+    placement_store.pin_agent(agent.id, "node-a")
+
+    calls = {"n": 0}
+    real = materialize.agent_file_from_store
+
+    def _counting(a):
+        calls["n"] += 1
+        return real(a)
+
+    monkeypatch.setattr(materialize, "agent_file_from_store", _counting)
+
+    resp = node_client.get(
+        "/nodes/node-a/desired-state", headers={"Authorization": f"Bearer {node_key}"}
+    )
+
+    assert resp.status_code == 200
+    assert calls["n"] == 1, f"agent.yaml parsed {calls['n']}x for one agent (expected 1)"
+
+
 def test_get_desired_state_returns_empty_agent_set_when_node_has_no_enabled_placements(
     node_client: TestClient,
 ) -> None:
