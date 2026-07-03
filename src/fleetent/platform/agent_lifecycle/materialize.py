@@ -87,7 +87,7 @@ def _apply_overrides(base: AgentFile, overrides: dict[str, Any]) -> AgentFile:
         # field (e.g. a dangling model route) silently discards the WHOLE override — including
         # unrelated valid bindings like im.slack credentials — so this must be diagnosable
         # rather than silent (AAA-8267).
-        _logger.error("agent_override_validation_failed", agent=base.name, error=str(exc))
+        _logger.error("agent_override_validation_failed", agent=base.name, exception=exc)
         return base
 
 
@@ -684,7 +684,7 @@ def rematerialize_all() -> list[str]:
             if materialize_from_store(name) is not None:
                 done.append(name)
         except Exception as exc:  # noqa: BLE001 — one agent's failure must not block others
-            _logger.warn("rematerialize_failed", agent=name, error=str(exc))
+            _logger.warn("rematerialize_failed", agent=name, exception=exc)
     return done
 
 
@@ -817,4 +817,4 @@ def _copy_skills(home: Path, *, source_agent: agent_store.Agent | None = None) -
                 skill_admin_store.set_base_commit(source_agent.id, skill_dir.name, new_base_commit)
                 skill_admin_store.set_drift(source_agent.id, skill_dir.name, drifted=False)
         except OSError as exc:
-            _logger.warn("agent_home_skill_copy_failed", path=str(skill_dir), error=str(exc))
+            _logger.warn("agent_home_skill_copy_failed", path=str(skill_dir), exception=exc)

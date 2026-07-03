@@ -145,7 +145,7 @@ def record_tool_call(run_id: str, session_id: str | None, payload: dict[str, Any
             )
         )
     except Exception as exc:  # noqa: BLE001 — side channel; never break the run
-        _logger.warn("tool_call_trace_record_failed", run_id=run_id, error=str(exc))
+        _logger.warn("tool_call_trace_record_failed", run_id=run_id, exception=exc)
 
 
 def record_kb_retrieval(
@@ -191,7 +191,7 @@ def record_kb_retrieval(
             )
         )
     except Exception as exc:  # noqa: BLE001 — side channel; never break the run
-        _logger.warn("kb_retrieval_trace_record_failed", run_id=context.run_id, error=str(exc))
+        _logger.warn("kb_retrieval_trace_record_failed", run_id=context.run_id, exception=exc)
 
 
 def mask_target(target: str | None) -> str:
@@ -253,7 +253,7 @@ def record_delivery(run_id: str, session_id: str | None, payload: dict[str, Any]
             )
         )
     except Exception as exc:  # noqa: BLE001 — side channel; never break the run
-        _logger.warn("delivery_trace_record_failed", run_id=run_id, error=str(exc))
+        _logger.warn("delivery_trace_record_failed", run_id=run_id, exception=exc)
 
 
 def build_tool_args_summary(tool_args: dict[str, Any] | str) -> str:

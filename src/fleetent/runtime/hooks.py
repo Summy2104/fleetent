@@ -107,7 +107,7 @@ async def dispatch(
         try:
             result = await _run_one(fn, ctx, timeout)
         except Exception as exc:  # noqa: BLE001 — a hook must never break the run
-            _logger.warn("hook_failed", event=event, error=str(exc))
+            _logger.warn("hook_failed", event=event, exception=exc)
             if strict:
                 return HookResult(decision="deny", reason=f"hook error: {exc}")
             continue

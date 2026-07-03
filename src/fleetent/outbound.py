@@ -470,7 +470,7 @@ async def resolve_recipient_label(
             name = profile.get("display_name") or profile.get("real_name") or user.get("name")
             return f"@{name}" if name else target
     except Exception as exc:  # noqa: BLE001 — name resolution is best-effort, never blocks
-        logger.warn("recipient_label_resolve_failed", target=target, error=str(exc))
+        logger.warn("recipient_label_resolve_failed", target=target, exception=exc)
         return target
 
 
@@ -508,7 +508,7 @@ async def summarize_gated_call(
         rendered = ", ".join(f"{k}={_preview(str(v), 40)}" for k, v in args.items())
         return f"参数：{_preview(rendered, 200)}" if rendered else ""
     except Exception as exc:  # noqa: BLE001 — summary is auxiliary, never blocks the prompt
-        logger.warn("gated_call_summary_failed", tool=tool_name, error=str(exc))
+        logger.warn("gated_call_summary_failed", tool=tool_name, exception=exc)
         return ""
 
 
@@ -555,7 +555,7 @@ async def _slack_send_channel(
         resp = await client.chat_postMessage(**kwargs)
         return _slack_ref(resp, "ts"), None
     except Exception as exc:  # noqa: BLE001 — outbound failure must not abort the caller
-        logger.warn("slack_send_channel_failed", channel=channel, error=str(exc))
+        logger.warn("slack_send_channel_failed", channel=channel, exception=exc)
         return None, str(exc)
 
 
@@ -601,7 +601,7 @@ async def _slack_send_dm(
         resp = await client.chat_postMessage(**kwargs)
         return _slack_ref(resp, "ts"), None
     except Exception as exc:  # noqa: BLE001 — outbound failure must not abort the gate
-        logger.warn("slack_send_dm_failed", user_id=user_id, error=str(exc))
+        logger.warn("slack_send_dm_failed", user_id=user_id, exception=exc)
         return None, str(exc)
 
 
@@ -617,7 +617,7 @@ async def _telegram_send(
         await bot.send_message(**kwargs)
         return "", None  # telegram client returns no stable ref we record; "" = success-no-ref
     except Exception as exc:  # noqa: BLE001 — outbound failure must not abort the gate
-        logger.warn("telegram_send_message_failed", chat_id=chat_id, error=str(exc))
+        logger.warn("telegram_send_message_failed", chat_id=chat_id, exception=exc)
         return None, str(exc)
 
 
@@ -640,7 +640,7 @@ async def _slack_send_file(
         resp = await client.files_upload_v2(channel=channel, thread_ts=thread, file=path)
         return _slack_file_ref(resp), None
     except Exception as exc:  # noqa: BLE001 — outbound file failure must not abort the caller
-        logger.warn("slack_send_file_failed", target=target, path=path, error=str(exc))
+        logger.warn("slack_send_file_failed", target=target, path=path, exception=exc)
         return None, str(exc)
 
 
@@ -650,7 +650,7 @@ async def _telegram_send_file(bot: Any, chat_id: str, path: str) -> _Result:
         await bot.send_document(chat_id=chat_id, document=path)
         return "", None
     except Exception as exc:  # noqa: BLE001 — outbound file failure must not abort the caller
-        logger.warn("telegram_send_file_failed", chat_id=chat_id, path=path, error=str(exc))
+        logger.warn("telegram_send_file_failed", chat_id=chat_id, path=path, exception=exc)
         return None, str(exc)
 
 

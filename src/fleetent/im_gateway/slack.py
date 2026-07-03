@@ -176,7 +176,7 @@ async def _make_status_funcs(
         )
         status_ok = True
     except Exception as exc:  # noqa: BLE001 — feature may be disabled; degrade, don't abort
-        logger.warn("slack_assistant_status_failed", channel=channel, error=str(exc))
+        logger.warn("slack_assistant_status_failed", channel=channel, exception=exc)
 
     async def reply_func(
         text: str, blocks: list[dict[str, Any]] | None = None, *, approval: Any = None
@@ -207,7 +207,7 @@ async def _make_status_funcs(
                 loading_messages=loading,
             )
         except Exception as exc:  # noqa: BLE001 — status update failure must not break the run
-            logger.warn("slack_progress_status_failed", error=str(exc))
+            logger.warn("slack_progress_status_failed", exception=exc)
 
     return reply_func, progress_func
 
@@ -320,7 +320,7 @@ async def handle_approval_action(
                 resume_msg, session_id, approval_id, decision
             )
         except Exception as exc:  # noqa: BLE001 — decision stands; resume is best-effort
-            logger.warn("approval_button_resume_failed", approval_id=approval_id, error=str(exc))
+            logger.warn("approval_button_resume_failed", approval_id=approval_id, exception=exc)
 
 
 def _make_upload_func(
@@ -395,7 +395,7 @@ async def _download_attachments(files: list[dict[str, Any]], bot_token: str) -> 
                     resp = await client.get(url, headers=headers)
                     resp.raise_for_status()
                 except httpx.HTTPError as exc:
-                    logger.warn("slack_image_download_failed", url=url, error=str(exc))
+                    logger.warn("slack_image_download_failed", url=url, exception=exc)
                     continue
                 if _is_html_response(resp):
                     logger.warn(
@@ -419,7 +419,7 @@ async def _download_attachments(files: list[dict[str, Any]], bot_token: str) -> 
                 resp.raise_for_status()
             except httpx.HTTPError as exc:
                 logger.warn(
-                    "slack_file_download_failed", url=url, filename=filename, error=str(exc)
+                    "slack_file_download_failed", url=url, filename=filename, exception=exc
                 )
                 out.append(
                     FileAttachment(data=None, mime=mime, filename=filename, note="文件下载失败")
@@ -498,7 +498,7 @@ async def _route_assistant_message(
             "slack_identity_resolution_rejected",
             agent=agent_name,
             platform_user_id=slack_user_id,
-            error=str(exc),
+            exception=exc,
         )
         return
 
@@ -525,7 +525,7 @@ async def _route_assistant_message(
         try:
             await set_status(status, loading_messages=loading)
         except Exception as exc:  # noqa: BLE001 — status update failure must not break the run
-            logger.warn("slack_progress_status_failed", error=str(exc))
+            logger.warn("slack_progress_status_failed", exception=exc)
 
     files = payload.get("files") or []
     attachments = await _download_attachments(list(files), bot_token)
@@ -644,7 +644,7 @@ def create_app(agent_name: str, config: dict[str, Any]) -> object:
                 "slack_identity_resolution_rejected",
                 agent=agent_name,
                 platform_user_id=slack_user_id,
-                error=str(exc),
+                exception=exc,
             )
             return
         thread_ts = event.get("thread_ts")

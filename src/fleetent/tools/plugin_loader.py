@@ -175,7 +175,7 @@ def _load_one(plugin_dir: Path, taken: set[str]) -> PluginMeta | None:
     try:
         importlib.import_module(plugin_dir.name)
     except Exception as exc:  # noqa: BLE001 — logged then skipped, not swallowed (D4)
-        logger.warn("plugin_import_failed", name=name, error=str(exc))
+        logger.warn("plugin_import_failed", name=name, exception=exc)
         return None
 
     _namespace_new_keys(name, before, plugin_dir.name)

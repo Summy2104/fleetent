@@ -138,7 +138,7 @@ def materialize_builtin_skills(skills_dir: str | None = None) -> None:
         try:
             shutil.copytree(src, dest)
         except OSError as exc:
-            logger.warn("skill_materialize_failed", name=src.name, error=str(exc))
+            logger.warn("skill_materialize_failed", name=src.name, exception=exc)
 
 
 def _build_index(

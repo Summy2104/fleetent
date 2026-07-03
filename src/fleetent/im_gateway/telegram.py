@@ -55,7 +55,7 @@ async def _download_document_attachments(message: Any, context: Any) -> list[Any
         tg_file = await context.bot.get_file(doc.file_id)
         data = await tg_file.download_as_bytearray()
     except Exception as exc:  # noqa: BLE001 — best-effort; degrade to placeholder, never abort
-        logger.warn("telegram_document_download_failed", filename=filename, error=str(exc))
+        logger.warn("telegram_document_download_failed", filename=filename, exception=exc)
         return [FileAttachment(data=None, mime=mime, filename=filename, note="文件接收失败")]
     return [FileAttachment(data=bytes(data), mime=mime, filename=filename)]
 
@@ -76,7 +76,7 @@ def _make_upload_func(bot: Any, *, chat_id: str, target_type: str, thread: Any) 
                     "telegram", bot, chat_id, path, target_type=target_type, thread=thread
                 )
             except Exception as exc:  # noqa: BLE001 — best-effort, per-file isolation
-                logger.warn("telegram_generated_upload_failed", path=path, error=str(exc))
+                logger.warn("telegram_generated_upload_failed", path=path, exception=exc)
 
     return upload_func
 
@@ -166,7 +166,7 @@ async def handle_approval_callback(update: Any, context: Any, agent_name: str) -
             )
         except Exception as exc:  # noqa: BLE001 — decision stands; resume is best-effort
             logger.warn(
-                "telegram_approval_button_resume_failed", approval_id=approval_id, error=str(exc)
+                "telegram_approval_button_resume_failed", approval_id=approval_id, exception=exc
             )
 
 
@@ -199,7 +199,7 @@ async def _download_photo_attachments(message: Any, context: Any) -> list[tuple[
         tg_file = await context.bot.get_file(largest.file_id)
         data = await tg_file.download_as_bytearray()
     except Exception as exc:  # noqa: BLE001 — best-effort download, must not abort handler
-        logger.warn("telegram_photo_download_failed", error=str(exc))
+        logger.warn("telegram_photo_download_failed", exception=exc)
         return []
     return [(bytes(data), _TELEGRAM_PHOTO_MIME)]
 
@@ -258,7 +258,7 @@ def create_app(agent_name: str, config: dict[str, Any]) -> object:
                 "telegram_identity_resolution_rejected",
                 agent=agent_name,
                 platform_user_id=str(tg_user_id),
-                error=str(exc),
+                exception=exc,
             )
             return
 

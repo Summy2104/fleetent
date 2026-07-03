@@ -136,7 +136,7 @@ def _back_up(backend: BaseGitPlatformBackend, config: dict[str, Any]) -> int:
             landed = backflow_store.is_landed(proposal, pool_dir)
         except Exception as exc:  # best-effort: a failed check must not block backing up
             _logger.warn(
-                "backflow_landed_check_failed", proposal_id=int(proposal["id"]), error=str(exc)
+                "backflow_landed_check_failed", proposal_id=int(proposal["id"]), exception=exc
             )
             landed = False
         if landed:
@@ -175,12 +175,12 @@ def _back_up(backend: BaseGitPlatformBackend, config: dict[str, Any]) -> int:
                 author=_PUSH_AUTHOR,
             )
         except GitPlatformUnavailableError as exc:
-            _logger.warn("backflow_backup_deferred", agent_id=agent_id, error=str(exc))
+            _logger.warn("backflow_backup_deferred", agent_id=agent_id, exception=exc)
             for pid in ids:
                 backflow_store.defer_pr_state(pid)
             continue
         except Exception as exc:  # bulkhead: one agent's failure never stops the rest
-            _logger.error("backflow_backup_failed", agent_id=agent_id, error=str(exc))
+            _logger.error("backflow_backup_failed", agent_id=agent_id, exception=exc)
             continue
         for pid in ids:
             backflow_store.set_pr_link(pid, branch=branch)
@@ -212,7 +212,7 @@ def _nominate_drifted() -> int:
                 "backflow_auto_nominate_failed",
                 agent_id=agent_id,
                 skill=skill_name,
-                error=str(exc),
+                exception=exc,
             )
     return nominated
 
@@ -237,7 +237,7 @@ def sweep() -> dict[str, Any]:
         backed_up = _back_up(backend, config)
         return {"nominated": nominated, "backed_up": backed_up}
     except Exception as exc:  # outermost bulkhead: a sweep failure must not crash the scheduler
-        _logger.error("backflow_pr_sweep_failed", error=str(exc))
+        _logger.error("backflow_pr_sweep_failed", exception=exc)
         return {"backed_up": 0, "error": str(exc)}
 
 

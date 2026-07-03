@@ -64,11 +64,11 @@ def _cleanup_expired() -> None:
     try:
         entries = list(SANDBOX_OUTPUT_DIR.glob("*.txt"))
     except OSError as exc:
-        _logger.warn("sandbox_spill_cleanup_scan_failed", error=str(exc))
+        _logger.warn("sandbox_spill_cleanup_scan_failed", exception=exc)
         return
     for entry in entries:
         try:
             if entry.stat().st_mtime < cutoff:
                 entry.unlink(missing_ok=True)
         except OSError as exc:
-            _logger.warn("sandbox_spill_cleanup_unlink_failed", path=str(entry), error=str(exc))
+            _logger.warn("sandbox_spill_cleanup_unlink_failed", path=str(entry), exception=exc)

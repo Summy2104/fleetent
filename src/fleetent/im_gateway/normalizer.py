@@ -569,7 +569,7 @@ async def route(msg: NormalizedMessage, principal: Principal | None = None) -> N
         try:
             row = approval_store.get_approval(approval_id)
         except Exception as exc:  # noqa: BLE001 — fall back to this message's session
-            logger.warn("approval_row_lookup_failed", approval_id=approval_id, error=str(exc))
+            logger.warn("approval_row_lookup_failed", approval_id=approval_id, exception=exc)
         session_id = str(row["session_id"]) if row and row.get("session_id") else msg.session_id
 
         # Recover authorized decision actors from the persisted pending entry so the
@@ -776,7 +776,7 @@ async def route(msg: NormalizedMessage, principal: Principal | None = None) -> N
                 logger.info("session_resumed", session_id=session_id)
                 session_mgr.clear_resume_pending(session_id)
         except Exception as exc:  # noqa: BLE001 — resume consume must not block the turn
-            logger.warn("session_resume_consume_failed", session_id=session_id, error=str(exc))
+            logger.warn("session_resume_consume_failed", session_id=session_id, exception=exc)
 
         # Replace existing system message or insert at position 0
         if history and isinstance(history[0], dict) and history[0].get("role") == "system":
@@ -873,12 +873,12 @@ async def route(msg: NormalizedMessage, principal: Principal | None = None) -> N
                 "agent_run_failed",
                 session_id=session_id,
                 error_type=type(exc).__name__,
-                error=str(exc),
+                exception=exc,
             )
             try:
                 await msg.reply_func(_RUN_FAILURE_MSG)
             except Exception as reply_exc:  # noqa: BLE001 — 兜底回帖失败仅记录，不再抛
-                logger.warn("run_failure_reply_failed", error=str(reply_exc))
+                logger.warn("run_failure_reply_failed", exception=reply_exc)
             await session_mgr.save(session_id, history)
             return
 

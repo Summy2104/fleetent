@@ -68,4 +68,4 @@ class WSTransport:
             await self._ws.close()
         except Exception as exc:  # noqa: BLE001 — closing an already-gone socket is fine
             if not _is_peer_gone(exc):
-                _logger.warn("ws_close_error", error=str(exc))
+                _logger.warn("ws_close_error", exception=exc)

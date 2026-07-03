@@ -80,7 +80,7 @@ class ManagedUserTokenResolver:
                 timeout=10.0,
             )
         except httpx.HTTPError as exc:
-            _logger.warn("managed_token_fetch_failed", server_id=server_id, error=str(exc))
+            _logger.warn("managed_token_fetch_failed", server_id=server_id, exception=exc)
             return UserToken(cached[0], None, cached[1], None) if cached is not None else None
         if resp.status_code == 404:
             self._cache.pop(key, None)
@@ -191,7 +191,7 @@ class ManagedCredentialWriter:
                 timeout=10.0,
             )
         except httpx.HTTPError as exc:
-            _logger.warn("managed_credential_set_failed", server_id=server_id, error=str(exc))
+            _logger.warn("managed_credential_set_failed", server_id=server_id, exception=exc)
             return False
         return resp.status_code < 400
 
