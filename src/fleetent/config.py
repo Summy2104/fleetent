@@ -1,10 +1,8 @@
-import logging
 import os
 import re
 from pathlib import Path
 from typing import Any, Literal
 
-import structlog
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_settings import (
@@ -15,6 +13,7 @@ from pydantic_settings import (
     YamlConfigSettingsSource,
 )
 
+from fleetent.logging_setup import setup_process_logging
 from fleetent import paths
 from fleetent.oidc_config import OidcSettings
 
@@ -44,7 +43,6 @@ class LoggingSettings(BaseModel):
     file_level: str = "debug"
     # Blank means "resolve to agent home data/logs/"; explicit path used as-is.
     directory: str = ""
-    json_file: bool = True
 
 
 class ObservabilitySettings(BaseModel):
@@ -508,42 +506,11 @@ class Settings(BaseSettings):
 
 
 def configure_logging(settings: Settings) -> None:
-    from fleetent.structured_logging import configure_structured_logging
-
-    configure_structured_logging(
+    setup_process_logging(
         console_level=settings.observability.logging.console_level,
         file_level=settings.observability.logging.file_level,
         directory=settings.observability.logging.directory,
-    )
-
-    shared_processors: list[structlog.types.Processor] = [
-        structlog.contextvars.merge_contextvars,
-        # NOTE (from feature/zhangyang Wave-1 fix): structlog.stdlib.add_logger_name
-        # reads `logger.name`, which only exists on stdlib loggers — the PrintLogger
-        # from PrintLoggerFactory below has none, so including it crashed every log
-        # call at emit time. It is intentionally omitted.
-        structlog.stdlib.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-    ]
-
-    if settings.log_format == "json":
-        renderer: structlog.types.Processor = structlog.processors.JSONRenderer()
-    else:
-        renderer = structlog.dev.ConsoleRenderer()
-
-    structlog.configure(
-        processors=shared_processors + [renderer],
-        wrapper_class=structlog.make_filtering_bound_logger(logging.DEBUG),
-        context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
-
-    logging.basicConfig(
-        format="%(message)s",
-        level=logging.INFO,
-        handlers=[logging.StreamHandler()],
+        log_format=settings.log_format,
     )
 
 

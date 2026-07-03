@@ -891,14 +891,14 @@ def test_serve_main_uses_shared_kb_service_directory(
     _write_yaml(path, doc)
 
     created_configs: list[serve.KBServeConfig] = []
-    uvicorn_calls: list[tuple[object, str, int]] = []
+    uvicorn_calls: list[tuple[object, str, int, str]] = []
 
     def fake_create_app(config: serve.KBServeConfig) -> object:
         created_configs.append(config)
         return {"config": config}
 
-    def fake_uvicorn_run(app: object, *, host: str, port: int) -> None:
-        uvicorn_calls.append((app, host, port))
+    def fake_uvicorn_run(app: object, *, host: str, port: int, log_level: str) -> None:
+        uvicorn_calls.append((app, host, port, log_level))
 
     monkeypatch.setattr(serve, "create_app", fake_create_app)
     monkeypatch.setattr("uvicorn.run", fake_uvicorn_run)
@@ -911,7 +911,7 @@ def test_serve_main_uses_shared_kb_service_directory(
         created_configs[0].queue_database_url
         == f"sqlite:///{expected_data_dir / 'kb_ingest_queue.db'}"
     )
-    assert uvicorn_calls == [({"config": created_configs[0]}, "127.0.0.1", 8768)]
+    assert uvicorn_calls == [({"config": created_configs[0]}, "127.0.0.1", 8768, "info")]
 
 
 def test_worker_main_applies_standalone_agent_model_config(

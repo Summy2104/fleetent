@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import time
+import os
 from threading import Thread
 
 from fleetent.node.backend import create_process_backend
@@ -35,6 +36,10 @@ def main() -> None:
     except ConfigError as exc:
         print(str(exc), file=sys.stderr)
         raise SystemExit(1) from exc
+
+    from fleetent.logging_setup import setup_process_logging
+
+    setup_process_logging(log_format=os.getenv("LOG_FORMAT", "console"))
 
     from fleetent.build_info import log_service_startup
 
