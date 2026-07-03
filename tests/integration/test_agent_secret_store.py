@@ -32,6 +32,17 @@ def _ciphertext(db_path: Path, agent_id: int, env_name: str) -> str | None:
     return None if row is None else str(row[0])
 
 
+def test_get_decrypted_bulk_matches_per_slot_and_omits_unset(db):
+    agent = agent_store.create_agent("support", "p", [])
+    secret_store.set(agent.id, "A_KEY", "value-a", "admin")
+    secret_store.set(agent.id, "B_KEY", "value-b", "admin")
+
+    # One batched read equals the per-slot values; unset names are omitted (not None entries).
+    got = secret_store.get_decrypted_bulk(agent.id, ["A_KEY", "B_KEY", "MISSING", "A_KEY"])
+    assert got == {"A_KEY": "value-a", "B_KEY": "value-b"}
+    assert secret_store.get_decrypted_bulk(agent.id, []) == {}
+
+
 def test_set_encrypts_and_get_decrypted_round_trips(db):
     agent = agent_store.create_agent("support", "p", [])
 

@@ -29,8 +29,17 @@ def test_is_sync_due_disabled() -> None:
     assert pool_sync.is_sync_due(cfg, now_iso=_NOW) is False
 
 
-def test_is_sync_due_no_interval() -> None:
-    cfg = {"enabled": 1, "sync_interval_seconds": None, "last_sync_at": None}
+def test_is_sync_due_null_interval_follows_scheduler_tick() -> None:
+    # NULL = operator never set a per-source interval. It must NOT silently disable scheduled
+    # sync; instead every sweep is "due" (the cheap ls-remote probe short-circuits an unchanged
+    # tip), so the pool still tracks the remote at the scheduler's cadence.
+    cfg = {"enabled": 1, "sync_interval_seconds": None, "last_sync_at": _NOW}
+    assert pool_sync.is_sync_due(cfg, now_iso=_NOW) is True
+
+
+def test_is_sync_due_explicit_zero_disables() -> None:
+    # Explicit 0 is a deliberate "never on a timer" (distinct from NULL/unset).
+    cfg = {"enabled": 1, "sync_interval_seconds": 0, "last_sync_at": None}
     assert pool_sync.is_sync_due(cfg, now_iso=_NOW) is False
 
 

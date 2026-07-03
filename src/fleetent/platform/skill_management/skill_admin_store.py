@@ -10,6 +10,7 @@ Schema lifecycle is owned by Alembic; this module never creates tables.
 
 import datetime
 import json
+from collections.abc import Sequence
 from typing import Any
 
 from fleetent.config import Settings
@@ -241,6 +242,55 @@ def get_source(skill_name: str) -> dict[str, Any]:
     return row
 
 
+def get_current_versions(skill_names: Sequence[str]) -> dict[str, str | None]:
+    """Return ``{skill_name: current_version}`` for the given skills, in one query.
+
+    Batched counterpart of ``get_source(...)['current_version']`` for the desired-state hot
+    path, which reads a base_commit per allowed skill per node reconcile; a per-skill
+    ``get_source`` re-opened ``Settings()``/DB for each. Missing skills map to ``None``.
+    """
+    names = list(dict.fromkeys(skill_names))
+    if not names:
+        return {}
+    placeholders = ", ".join(f":n{i}" for i in range(len(names)))
+    params = {f"n{i}": name for i, name in enumerate(names)}
+    rows = (
+        _database()
+        .execute(
+            f"SELECT name, current_version FROM skills WHERE name IN ({placeholders})",
+            params,
+        )
+        .fetchall()
+    )
+    found = {str(row["name"]): row["current_version"] for row in rows}
+    return {name: found.get(name) for name in names}
+
+
+def get_resync_epochs(agent_id: int, skill_names: Sequence[str]) -> dict[str, int]:
+    """Return ``{skill_name: resync_epoch}`` for one agent's bindings, in one query.
+
+    Batched counterpart of ``get_resync_epoch`` for the desired-state hot path. Skills with
+    no row (or a NULL epoch) map to ``0``, matching ``get_resync_epoch``.
+    """
+    names = list(dict.fromkeys(skill_names))
+    if not names:
+        return {}
+    placeholders = ", ".join(f":n{i}" for i in range(len(names)))
+    params: dict[str, object] = {"agent_id": agent_id}
+    params.update({f"n{i}": name for i, name in enumerate(names)})
+    rows = (
+        _database()
+        .execute(
+            f"SELECT skill_name, resync_epoch FROM agent_skills "
+            f"WHERE agent_id = :agent_id AND skill_name IN ({placeholders})",
+            params,
+        )
+        .fetchall()
+    )
+    found = {str(row["skill_name"]): row["resync_epoch"] for row in rows}
+    return {name: int(found[name]) if found.get(name) is not None else 0 for name in names}
+
+
 def ensure_catalog_entries(skill_names: list[str]) -> None:
     """Ensure the skills catalog has rows for every listed skill."""
     with _database().transaction() as conn:
@@ -392,6 +442,21 @@ def drifted_agents(skill_name: str) -> list[int]:
         .fetchall()
     )
     return [int(row["agent_id"]) for row in rows]
+
+
+def list_drifted() -> list[tuple[int, str]]:
+    """Return all drifted ``(agent_id, skill_name)`` pairs.
+
+    Drives backflow auto-nomination from the (background) sweep instead of the node
+    status-ingestion request path — capturing an evolved bundle is a network round-trip
+    to the owning node and must not block ``POST /nodes/{id}/status``.
+    """
+    rows = (
+        _database()
+        .execute("SELECT agent_id, skill_name FROM agent_skills WHERE drift = 1 ORDER BY agent_id")
+        .fetchall()
+    )
+    return [(int(row["agent_id"]), str(row["skill_name"])) for row in rows]
 
 
 # --- Management state (status / global enablement / audit verdict / forced) ---

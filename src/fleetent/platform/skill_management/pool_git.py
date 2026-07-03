@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 _SYSTEM_AUTHOR = b"system <system@fleetent>"
 _DIFF_SIZE_LIMIT = 256 * 1024  # 256 KiB before degrading to file list
+_MIRROR_FETCH_DEPTH = 1  # the pool only mirrors the branch tip; history is never needed
 
 
 # ---------------------------------------------------------------------------
@@ -545,10 +546,13 @@ def get_remote_head(
 
     ref = b"refs/heads/" + branch.encode()
     try:
-        refs: Any = porcelain.ls_remote(remote_url)
+        result: Any = porcelain.ls_remote(remote_url)
     except TypeError:
         # Older/newer dulwich signatures may reject positional-only; retry via keyword.
-        refs = porcelain.ls_remote(remote=remote_url)
+        result = porcelain.ls_remote(remote=remote_url)
+    # dulwich 1.2+ returns an LsRemoteResult; treating it as a dict is deprecated. Prefer
+    # ``.refs``, falling back to the object itself for older builds that returned a mapping.
+    refs = getattr(result, "refs", result)
     sha = refs.get(ref) if refs else None
     if sha is None:
         return None
@@ -576,12 +580,26 @@ def fetch_remote(
 
     ref = b"refs/heads/" + branch.encode()
     with _FileLock(_lock_path(pool_dir)):
-        result = porcelain.fetch(
-            str(pool_dir),
-            remote_url,
-            username=username or None,
-            password=password or None,
-        )
+        try:
+            # Shallow: the pool only ever resets to the branch tip, so history is dead weight.
+            # A full fetch of a large mirror (5000+ commits, 100MB+ pack) is what made the
+            # first sync crawl; depth=1 pulls just the tip commit + trees. An incremental
+            # depth=1 fetch advances the shallow boundary to the new tip.
+            result = porcelain.fetch(
+                str(pool_dir),
+                remote_url,
+                username=username or None,
+                password=password or None,
+                depth=_MIRROR_FETCH_DEPTH,
+            )
+        except TypeError:
+            # dulwich build without a ``depth`` kwarg — fall back to a full fetch.
+            result = porcelain.fetch(
+                str(pool_dir),
+                remote_url,
+                username=username or None,
+                password=password or None,
+            )
         refs_map: Any = result.refs
         sha = refs_map.get(ref)
     if sha is None:

@@ -60,6 +60,10 @@ def _setup_pool_skill(pool_dir: Path, name: str, content: str) -> str:
     (scripts_dir / "sync.py").write_text("print('pool script')\n", encoding="utf-8")
     sha = commit_pool(pool_dir, message=f"add {name}", author="admin <a@a>", skill_name=name)
     assert sha is not None
+    # Mirror production's commit -> reconcile: the catalog's current_version (read on the
+    # materialize/nominate hot path as base_commit) is populated by the post-sync reconcile,
+    # not by commit_pool itself. Seed it here so the test reflects that invariant.
+    skill_admin_store.set_current_version(name, sha)
     return sha
 
 

@@ -65,6 +65,12 @@ def is_sync_due(config: dict[str, Any] | None, *, now_iso: str) -> bool:
     if config is None or not config.get("enabled"):
         return False
     interval = config.get("sync_interval_seconds")
+    if interval is None:
+        # Operator never set a per-source interval. Don't silently disable scheduled sync:
+        # follow the scheduler's own cadence (every sweep is due). The cheap ls-remote probe
+        # in sync_external_git short-circuits when the remote tip is unchanged, so this stays
+        # near-free. An explicit 0 (below) is a deliberate "never on a timer".
+        return True
     if not interval:
         return False
     last = config.get("last_sync_at")

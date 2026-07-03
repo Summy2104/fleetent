@@ -95,12 +95,16 @@ TBD - created by archiving change node-desired-state-api. Update Purpose after a
 
 ### Requirement: Desired-state includes skill manifests
 
-desired-state SHALL include a skill manifest for each skill that node must deploy for the agent. The manifest SHALL include `name`, `base_version`, `base_commit`, `bundle_url`, and `bundle_sha256`; it SHALL NOT inline arbitrary file contents.
+desired-state SHALL include a skill manifest for each skill that node must deploy for the agent. The manifest SHALL include `name`, `base_version`, `base_commit`, `bundle_url`, and `bundle_sha256`; it SHALL NOT inline arbitrary file contents. Building a manifest SHALL be a catalog read only: `base_commit` SHALL be read from the pre-computed catalog `current_version` (populated once at sync/reconcile time), and the request path SHALL NOT walk git history (`pool_version_for_skill`) or open the pool repo. Serving desired-state to a node is a hot path polled continuously by every node; a per-request git-history walk over a large mirror would saturate the shared thread pool and stall unrelated requests (e.g. the admin UI).
 
 #### Scenario: Enabled skill appears as manifest entry
 - **WHEN** agent `support` has enabled skill `foo`
 - **THEN** desired-state for `support` includes a manifest entry for `foo`
 - **AND** the entry contains version and bundle verification metadata
+
+#### Scenario: Manifest build does not walk git history
+- **WHEN** desired-state is served for an agent with enabled skills, against a pool mirror with deep history
+- **THEN** `base_commit` comes from the catalog `current_version` and no `pool_version_for_skill` / git-history walk is performed on the request path
 
 #### Scenario: Disabled skill does not require bundle deployment
 - **WHEN** a globally disabled skill is present in the public pool

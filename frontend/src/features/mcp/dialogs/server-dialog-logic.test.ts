@@ -30,6 +30,10 @@ function baseFields(over: Partial<ServerFormFields> = {}): ServerFormFields {
     env: [],
     args: [],
     headers: [],
+    degradeMode: 'degrade',
+    fileRoot: '',
+    fileIsolation: 'on',
+    approvalRules: [],
     ...over,
   }
 }
@@ -276,5 +280,79 @@ describe('canSubmitServer', () => {
         })
       )
     ).toBe(true)
+  })
+
+  it('rejects an approval rule whose tool name is blank', () => {
+    expect(canSubmitServer(baseFields({ approvalRules: [{ tool: '  ', conditions: [] }] }))).toBe(false)
+    expect(canSubmitServer(baseFields({ approvalRules: [{ tool: 'send', conditions: [] }] }))).toBe(true)
+  })
+})
+
+describe('x-fleetent fields', () => {
+  it('serverFormFromEditing reads degrade_mode / file_root / file_isolation with defaults', () => {
+    expect(serverFormFromEditing(null)).toMatchObject({
+      degradeMode: 'degrade',
+      fileRoot: '',
+      fileIsolation: 'on',
+      approvalRules: [],
+    })
+    const f = serverFormFromEditing(
+      record({ degrade_mode: 'strict', file_root: '/exchange', file_isolation: 'off' })
+    )
+    expect(f).toMatchObject({ degradeMode: 'strict', fileRoot: '/exchange', fileIsolation: 'off' })
+  })
+
+  it('serverFormFromEditing expands approval_rules when-dict into ordered conditions', () => {
+    const f = serverFormFromEditing(
+      record({
+        approval_rules: [
+          { tool: 'manage_email', when: { operation: ['send', 'reply'] } },
+          { tool: 'delete_file', when: null },
+        ],
+      })
+    )
+    expect(f.approvalRules).toEqual([
+      { tool: 'manage_email', conditions: [{ arg: 'operation', values: ['send', 'reply'] }] },
+      { tool: 'delete_file', conditions: [] },
+    ])
+  })
+
+  it('buildServerPayload always carries the three simple fields', () => {
+    const payload = buildServerPayload(
+      baseFields({ degradeMode: 'silent', fileRoot: ' /v ', fileIsolation: 'off' }),
+      { isEdit: false, editingEnabled: undefined }
+    )
+    expect(payload).toMatchObject({ degrade_mode: 'silent', file_root: '/v', file_isolation: 'off' })
+  })
+
+  it('buildServerPayload maps empty conditions to when:null and drops blank args/values', () => {
+    const payload = buildServerPayload(
+      baseFields({
+        approvalRules: [
+          { tool: 'delete_file', conditions: [] },
+          {
+            tool: 'manage_email',
+            conditions: [
+              { arg: 'operation', values: ['send', ' ', 'reply'] },
+              { arg: '  ', values: ['x'] },
+              { arg: 'mode', values: [' '] },
+            ],
+          },
+        ],
+      }),
+      { isEdit: false, editingEnabled: undefined }
+    )
+    expect(payload.approval_rules).toEqual([
+      { tool: 'delete_file', when: null },
+      { tool: 'manage_email', when: { operation: ['send', 'reply'] } },
+    ])
+  })
+
+  it('buildServerPayload drops rules whose tool name is blank', () => {
+    const payload = buildServerPayload(
+      baseFields({ approvalRules: [{ tool: '  ', conditions: [{ arg: 'a', values: ['b'] }] }] }),
+      { isEdit: false, editingEnabled: undefined }
+    )
+    expect(payload.approval_rules).toEqual([])
   })
 })

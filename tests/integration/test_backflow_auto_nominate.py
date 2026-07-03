@@ -100,16 +100,26 @@ def _post_status(client: TestClient, node_key: str, agent_id: int, *, drift: boo
     )
 
 
-def test_status_drift_auto_creates_pending_proposal(node_client, db, pool_dir):
+def test_sweep_nominates_drifted_skill_after_status_report(node_client, db, pool_dir):
     from fleetent.platform.node_management import node_store
+    from fleetent.platform.skill_management import backflow_pr_sweep
 
     agent = _setup_drifted_agent(pool_dir)
     node_key, _ = node_store.register_node("node-a")
 
+    # Status ingestion only records drift; it must NOT nominate (nomination pulls the evolved
+    # bundle over HTTP and must stay off the request path -- moved to the background sweep).
     resp = _post_status(node_client, node_key, agent.id, drift=True)
-
     assert resp.status_code == 200
     assert skill_admin_store.get_drift(agent.id, "crm-ops")["drift"] == 1
+    assert (
+        backflow_store.list_proposals(agent_id=agent.id, skill_name="crm-ops", status="pending")
+        == []
+    )
+
+    # The sweep is what turns recorded drift into a pending proposal.
+    backflow_pr_sweep.sweep()
+
     pending = backflow_store.list_proposals(
         agent_id=agent.id, skill_name="crm-ops", status="pending"
     )
@@ -117,14 +127,17 @@ def test_status_drift_auto_creates_pending_proposal(node_client, db, pool_dir):
     assert pending[0]["proposed_bundle"]
 
 
-def test_status_drift_is_deduped(node_client, db, pool_dir):
+def test_sweep_nomination_is_deduped(node_client, db, pool_dir):
     from fleetent.platform.node_management import node_store
+    from fleetent.platform.skill_management import backflow_pr_sweep
 
     agent = _setup_drifted_agent(pool_dir)
     node_key, _ = node_store.register_node("node-a")
+    assert _post_status(node_client, node_key, agent.id, drift=True).status_code == 200
 
-    assert _post_status(node_client, node_key, agent.id, drift=True).status_code == 200
-    assert _post_status(node_client, node_key, agent.id, drift=True).status_code == 200
+    # Two sweep rounds must not double-nominate the same still-pending drift.
+    backflow_pr_sweep.sweep()
+    backflow_pr_sweep.sweep()
 
     pending = backflow_store.list_proposals(
         agent_id=agent.id, skill_name="crm-ops", status="pending"
@@ -147,7 +160,8 @@ def test_status_no_drift_creates_no_proposal(node_client, db, pool_dir):
     assert pending == []
 
 
-def test_nomination_failure_does_not_break_status(node_client, db, pool_dir, monkeypatch):
+def test_status_ingestion_never_nominates(node_client, db, pool_dir, monkeypatch):
+    """The status request path is nomination-free: a broken nominate can't break status."""
     from fleetent.platform.node_management import node_store
 
     agent = _setup_drifted_agent(pool_dir)
@@ -164,5 +178,5 @@ def test_nomination_failure_does_not_break_status(node_client, db, pool_dir, mon
     resp = _post_status(node_client, node_key, agent.id, drift=True)
 
     assert resp.status_code == 200
-    assert called  # auto-nominate must have been attempted
+    assert called == []  # nomination is NOT attempted on the request path (moved to the sweep)
     assert skill_admin_store.get_drift(agent.id, "crm-ops")["drift"] == 1

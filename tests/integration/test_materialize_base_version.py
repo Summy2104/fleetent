@@ -237,6 +237,9 @@ def test_materialize_refreshes_base_commit_for_clean_home_and_preserves_it_on_dr
         skill_name="billing",
     )
     assert sha_v2 is not None
+    # base_commit is read from the catalog current_version (recorded at sync time), not
+    # recomputed by a per-skill git walk; the inbound sync updates it when the pool advances.
+    skill_admin_store.set_current_version("billing", sha_v2)
 
     materialize.write_home(
         materialize.agent_file_from_store(agent),
@@ -263,6 +266,7 @@ def test_materialize_refreshes_base_commit_for_clean_home_and_preserves_it_on_dr
         skill_name="billing",
     )
     assert sha_v3 is not None
+    skill_admin_store.set_current_version("billing", sha_v3)
 
     materialize.write_home(
         materialize.agent_file_from_store(agent),
