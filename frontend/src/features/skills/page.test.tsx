@@ -509,6 +509,50 @@ describe('skills page content + search', () => {
     expect(screen.getByRole('button', { name: 'Actions for archived-skill' })).toBeInTheDocument()
   })
 
+  it('filters skills by audit verdict via the column filter', async () => {
+    const user = userEvent.setup({ delay: null })
+    const skills: SkillRecord[] = [
+      {
+        audit_verdict: 'pass',
+        description: 'Clean helper',
+        drifted_agents: [],
+        enabling_agents: [],
+        global_enabled: true,
+        name: 'clean-skill',
+        source: 'adhoc',
+        status: 'active',
+      },
+      {
+        audit_verdict: 'rejected',
+        description: 'Flagged helper',
+        drifted_agents: [],
+        enabling_agents: [],
+        global_enabled: false,
+        name: 'flagged-skill',
+        source: 'adhoc',
+        status: 'quarantined',
+      },
+    ]
+
+    stubReadEndpoints(
+      () => skills,
+      () => 'body'
+    )
+
+    renderSkillsPage()
+
+    expect(await screen.findByRole('button', { name: 'Actions for clean-skill' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Actions for flagged-skill' })).toBeInTheDocument()
+
+    // The audit column exposes a select filter ("All Audit" + per-verdict options).
+    await user.click(screen.getByRole('combobox', { name: 'Filter Audit' }))
+    await user.click(await screen.findByRole('option', { name: 'rejected' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Actions for clean-skill' })).not.toBeInTheDocument()
+    })
+    expect(screen.getByRole('button', { name: 'Actions for flagged-skill' })).toBeInTheDocument()
+  })
+
   it('shows the published skill content in the content dialog', async () => {
     const user = userEvent.setup({ delay: null })
     const skills: SkillRecord[] = [
