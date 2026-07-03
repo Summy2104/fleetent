@@ -22,7 +22,9 @@ import {
   useMcpFieldSchemaQuery,
   useUpdateMcpServerMutation,
 } from '@/features/connectors/api'
+import { ApprovalRulesEditor } from '@/features/mcp/dialogs/approval-rules-editor'
 import {
+  type ApprovalRuleForm,
   buildServerPayload,
   canSubmitServer,
   type ServerFormFields,
@@ -85,6 +87,10 @@ export function ServerDialog({
   const [env, setEnv] = useState<EnvPair[]>([])
   const [args, setArgs] = useState<string[]>([])
   const [headers, setHeaders] = useState<EnvPair[]>([])
+  const [degradeMode, setDegradeMode] = useState('degrade')
+  const [fileRoot, setFileRoot] = useState('')
+  const [fileIsolation, setFileIsolation] = useState('on')
+  const [approvalRules, setApprovalRules] = useState<ApprovalRuleForm[]>([])
 
   useEffect(() => {
     if (open) {
@@ -108,6 +114,10 @@ export function ServerDialog({
       setEnv(f.env)
       setArgs(f.args)
       setHeaders(f.headers)
+      setDegradeMode(f.degradeMode)
+      setFileRoot(f.fileRoot)
+      setFileIsolation(f.fileIsolation)
+      setApprovalRules(f.approvalRules)
     }
   }, [open, editing])
 
@@ -131,6 +141,10 @@ export function ServerDialog({
     env,
     args,
     headers,
+    degradeMode,
+    fileRoot,
+    fileIsolation,
+    approvalRules,
   }
 
   const submit = async (): Promise<void> => {
@@ -401,6 +415,54 @@ export function ServerDialog({
               </div>
             </>
           ) : null}
+
+          <p className="border-t pt-4 font-medium text-sm">{t('mcp.extensionsHeading')}</p>
+
+          <div className="grid gap-2">
+            <Label>{t('mcp.degradeModeLabel')}</Label>
+            <SimpleSelect
+              onValueChange={(value) => setDegradeMode(value ?? 'degrade')}
+              options={[
+                { value: 'degrade', label: t('mcp.degradeModeDegrade') },
+                { value: 'strict', label: t('mcp.degradeModeStrict') },
+                { value: 'silent', label: t('mcp.degradeModeSilent') },
+              ]}
+              triggerAriaLabel={t('mcp.degradeModeLabel')}
+              value={degradeMode}
+            />
+            <FieldPathHint fieldKey="degrade_mode" id={id} schema={fieldSchema.data} />
+          </div>
+
+          <div className="grid gap-2">
+            <Label>{t('mcp.fileIsolationLabel')}</Label>
+            <SimpleSelect
+              onValueChange={(value) => setFileIsolation(value ?? 'on')}
+              options={[
+                { value: 'on', label: t('mcp.fileIsolationOn') },
+                { value: 'off', label: t('mcp.fileIsolationOff') },
+              ]}
+              triggerAriaLabel={t('mcp.fileIsolationLabel')}
+              value={fileIsolation}
+            />
+            <FieldPathHint fieldKey="file_isolation" id={id} schema={fieldSchema.data} />
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="mcp-file-root">{t('mcp.fileRootLabel')}</Label>
+            <Input
+              id="mcp-file-root"
+              onChange={(event) => setFileRoot(event.target.value)}
+              placeholder={t('mcp.fileRootPlaceholder')}
+              value={fileRoot}
+            />
+            <FieldPathHint fieldKey="file_root" id={id} schema={fieldSchema.data} />
+          </div>
+
+          <div className="grid gap-2">
+            <Label>{t('mcp.approvalRulesLabel')}</Label>
+            <FieldPathHint fieldKey="approval_rules" id={id} schema={fieldSchema.data} />
+            <ApprovalRulesEditor onChange={setApprovalRules} value={approvalRules} />
+          </div>
 
           {transport === 'stdio' ? (
             <div className="grid gap-2">
