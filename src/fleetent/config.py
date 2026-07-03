@@ -13,8 +13,8 @@ from pydantic_settings import (
     YamlConfigSettingsSource,
 )
 
-from fleetent.logging_setup import setup_process_logging
 from fleetent import paths
+from fleetent.logging_setup import setup_process_logging
 from fleetent.oidc_config import OidcSettings
 
 PLATFORM_YAML_PATH = paths.platform_yaml_path()

@@ -418,9 +418,7 @@ async def _download_attachments(files: list[dict[str, Any]], bot_token: str) -> 
                 resp = await client.get(url, headers=headers)
                 resp.raise_for_status()
             except httpx.HTTPError as exc:
-                logger.warn(
-                    "slack_file_download_failed", url=url, filename=filename, exception=exc
-                )
+                logger.warn("slack_file_download_failed", url=url, filename=filename, exception=exc)
                 out.append(
                     FileAttachment(data=None, mime=mime, filename=filename, note="文件下载失败")
                 )

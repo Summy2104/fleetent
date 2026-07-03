@@ -1109,4 +1109,3 @@ def build_app(agent_name: str) -> FastAPI:
             await transport.close()
 
     return app
-

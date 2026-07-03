@@ -75,9 +75,7 @@ async def test_boot_configures_logging_json(
 
     with contextlib.ExitStack() as stack:
         _make_stack(stack)
-        mock_setup = stack.enter_context(
-            patch("fleetent.logging_setup.setup_process_logging")
-        )
+        mock_setup = stack.enter_context(patch("fleetent.logging_setup.setup_process_logging"))
 
         from fleetent.runtime import agent_app
 
@@ -108,9 +106,7 @@ async def test_boot_configures_logging_console(
 
     with contextlib.ExitStack() as stack:
         _make_stack(stack)
-        mock_setup = stack.enter_context(
-            patch("fleetent.logging_setup.setup_process_logging")
-        )
+        mock_setup = stack.enter_context(patch("fleetent.logging_setup.setup_process_logging"))
 
         from fleetent.runtime import agent_app
 
@@ -159,9 +155,7 @@ async def test_blank_log_directory_resolves_to_agent_home_data_logs(
 
     with contextlib.ExitStack() as stack:
         _make_stack(stack)
-        mock_setup = stack.enter_context(
-            patch("fleetent.logging_setup.setup_process_logging")
-        )
+        mock_setup = stack.enter_context(patch("fleetent.logging_setup.setup_process_logging"))
 
         from fleetent.runtime import agent_app
 
@@ -190,9 +184,7 @@ async def test_relative_log_directory_resolves_against_home(
 
     with contextlib.ExitStack() as stack:
         _make_stack(stack)
-        mock_setup = stack.enter_context(
-            patch("fleetent.logging_setup.setup_process_logging")
-        )
+        mock_setup = stack.enter_context(patch("fleetent.logging_setup.setup_process_logging"))
 
         from fleetent.runtime import agent_app
 
@@ -242,9 +234,7 @@ async def test_absolute_log_directory_used_as_is(
 
     with contextlib.ExitStack() as stack:
         _make_stack(stack)
-        mock_setup = stack.enter_context(
-            patch("fleetent.logging_setup.setup_process_logging")
-        )
+        mock_setup = stack.enter_context(patch("fleetent.logging_setup.setup_process_logging"))
 
         from fleetent.runtime import agent_app
 

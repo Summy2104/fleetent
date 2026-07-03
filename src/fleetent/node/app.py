@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import os
 import sys
 import time
-import os
 from threading import Thread
 
 from fleetent.node.backend import create_process_backend
