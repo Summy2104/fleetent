@@ -99,7 +99,7 @@ function SelectItem({ className, children, ...props }: SelectPrimitive.Item.Prop
       data-slot="select-item"
       {...props}
     >
-      <SelectPrimitive.ItemText className="flex flex-1 shrink-0 gap-2 whitespace-nowrap">
+      <SelectPrimitive.ItemText className="flex flex-1 gap-2 whitespace-normal break-words text-left">
         {children}
       </SelectPrimitive.ItemText>
       <SelectPrimitive.ItemIndicator
