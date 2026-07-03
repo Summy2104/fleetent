@@ -273,7 +273,12 @@ const en = {
   'skills.noProposals': 'No proposals for this skill.',
   'skills.backflow': 'Backflow',
   'skills.backflowTitle': 'Skill backflow · {{name}}',
-  'skills.backflowDescription': 'Agent-side edits proposed back to this skill. Accept, reject, or fork them.',
+  'skills.backflowDescription':
+    'Agent-side edits to this skill, backed up to a branch. Adoption is a PR you open in git.',
+  'skills.backflowWorklistTitle': 'Backflow to merge',
+  'skills.backflowWorklistDescription':
+    'Agent edits backed up to branches, grouped by agent. Open a PR in git to adopt each.',
+  'skills.backflowCreatePr': 'Create PR',
   'skills.noBackflow': 'No backflow proposals for this skill.',
   'skills.gitopsBannerTitle': 'Managed via external git',
   'skills.gitopsBannerBody':
@@ -296,7 +301,7 @@ const en = {
   'skills.diffVsBase': 'Change vs. the base the agent started from',
   'skills.diffVsHead': 'Change vs. the current pool',
   'skills.diffNone': 'No difference from the current pool.',
-  'skills.backflowConflict': 'The pool has advanced since this edit — review for conflicts before accepting.',
+  'skills.backflowConflict': 'The pool has advanced since this edit — review for conflicts before merging.',
 
   // Knowledge Base 页
   'kb.title': 'Knowledge Base',
@@ -1053,7 +1058,10 @@ const zh: Messages = {
   'skills.noProposals': '该技能暂无提案。',
   'skills.backflow': '回流',
   'skills.backflowTitle': '技能回流 · {{name}}',
-  'skills.backflowDescription': '由 Agent 侧改动回流到该技能的提案。可接受、拒绝或派生。',
+  'skills.backflowDescription': 'Agent 侧对该技能的改动，已备份到分支。采纳需你在 git 里开 PR。',
+  'skills.backflowWorklistTitle': '待合并回流',
+  'skills.backflowWorklistDescription': 'Agent 改动已备份到分支，按 agent 分组。开 PR 到 git 即可采纳。',
+  'skills.backflowCreatePr': '新建 PR',
   'skills.noBackflow': '该技能暂无回流提案。',
   'skills.gitopsBannerTitle': '由外部 git 管理',
   'skills.gitopsBannerBody': '此处技能内容为只读。请在外部 git 仓库中编辑技能并发起 Pull Request，变更会自动同步回来。',
@@ -1075,7 +1083,7 @@ const zh: Messages = {
   'skills.diffVsBase': '相对 Agent 起始基线的改动',
   'skills.diffVsHead': '相对当前技能池的改动',
   'skills.diffNone': '与当前技能池无差异。',
-  'skills.backflowConflict': '技能池在此改动之后已更新——接受前请检查是否冲突。',
+  'skills.backflowConflict': '技能池在此改动之后已更新——合并前请检查是否冲突。',
 
   // Knowledge Base 页
   'kb.title': '知识库',

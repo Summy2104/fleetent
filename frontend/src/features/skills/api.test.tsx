@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { AuthProvider } from '@/app/auth'
 import { AppQueryProvider } from '@/app/query-client'
 import {
+  bitbucketPrCreateUrl,
   useBackflowDiffQuery,
   useBackflowProposalsQuery,
   useCreateSkillMutation,
@@ -26,6 +27,28 @@ import {
 import { server } from '@/test/msw/server'
 
 const API_BASE_URL = 'http://fleetent.test'
+
+describe('bitbucketPrCreateUrl', () => {
+  it('builds a prefilled create-PR link from an SSH remote', () => {
+    expect(
+      bitbucketPrCreateUrl('git@bitbucket.org:antalphadev/ai-skills-library.git', 'backflow/sales-bot', 'main-fleetent')
+    ).toBe(
+      'https://bitbucket.org/antalphadev/ai-skills-library/pull-requests/new?source=backflow%2Fsales-bot&dest=main-fleetent'
+    )
+  })
+
+  it('builds the same link from an HTTPS remote', () => {
+    expect(bitbucketPrCreateUrl('https://bitbucket.org/antalphadev/ai-skills-library', 'backflow/x', 'main')).toBe(
+      'https://bitbucket.org/antalphadev/ai-skills-library/pull-requests/new?source=backflow%2Fx&dest=main'
+    )
+  })
+
+  it('returns null for non-bitbucket.org or missing remotes', () => {
+    expect(bitbucketPrCreateUrl('git@gitlab.com:acme/skills.git', 'b', 'main')).toBeNull()
+    expect(bitbucketPrCreateUrl(null, 'b', 'main')).toBeNull()
+    expect(bitbucketPrCreateUrl(undefined, 'b', 'main')).toBeNull()
+  })
+})
 
 type SkillRecord = {
   audit_verdict: string
