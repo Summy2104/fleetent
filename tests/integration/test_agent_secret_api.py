@@ -199,6 +199,31 @@ def test_secret_api_is_write_only_and_delete_clears_value(client):
     assert deleted.json() == {"env_name": "FLEETENT_AGENT_SUPPORT_MODEL", "status": "unset"}
 
 
+def test_secret_api_warns_on_unreferenced_env_name(client):
+    """PUT a secret for an env name no config field references → 200 + warning.
+
+    The value is still stored (provisioning-first: an operator may set a key before wiring
+    the config that references it), but the response flags that the name will not be
+    materialized into the agent .env — the signal that would have prevented the orphan
+    -secret restart loop. The referenced case (no warning) is covered by the write-only test.
+    """
+    _create_agent_with_required_env()
+    token, _ = _session_for("admin")
+
+    put = client.put(
+        "/admin/agents/support/secrets/FLEETENT_MODEL_DEEPSEEK_FLASH_API_KEY",
+        headers=_hdr(token),
+        json={"value": "sk-orphan"},
+    )
+
+    assert put.status_code == 200, put.text
+    body = put.json()
+    assert body["status"] == "set"  # value is still stored
+    assert "warning" in body, "unreferenced env name must return a warning"
+    assert "FLEETENT_MODEL_DEEPSEEK_FLASH_API_KEY" in body["warning"]
+    assert "sk-orphan" not in put.text  # never echoes the secret value
+
+
 def test_secret_api_rejects_empty_values(client):
     _create_agent_with_required_env()
     token, _ = _session_for("admin")

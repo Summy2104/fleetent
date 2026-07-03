@@ -13,6 +13,7 @@ from fastapi import APIRouter, Body, Header, HTTPException, Response, status
 from pydantic import BaseModel
 
 from fleetent import agent_store, audit_log, auth, user_store
+from fleetent.agent_config import collect_env_var_names
 from fleetent.platform.agent_lifecycle import credential_slots, secret_store
 from fleetent.platform.agent_lifecycle.materialize import agent_file_from_store
 from fleetent.platform.agent_management_console import agent_admin_store, agent_im_group_store
@@ -444,7 +445,21 @@ def set_agent_secret(
         target_id=name,
         detail={"env_name": env_name},
     )
-    return {"env_name": env_name, "status": secret_store.status(agent.id, env_name)}
+    result: dict[str, Any] = {
+        "env_name": env_name,
+        "status": secret_store.status(agent.id, env_name),
+    }
+    # The value is stored, but an env name no config field references will never be
+    # materialized into the agent .env (the node scaffold only writes referenced names).
+    # Flag it so the operator wires a provider/config that references it — an orphan
+    # inject slot would otherwise ride uselessly in every desired-state push.
+    if env_name not in collect_env_var_names(agent_file_from_store(agent)):
+        result["warning"] = (
+            f"env var {env_name!r} is not referenced by the agent config; the value is "
+            "stored but will not be injected into the agent until a provider or config "
+            "field references this name"
+        )
+    return result
 
 
 @router.delete("/agents/{name}/secrets/{env_name}")

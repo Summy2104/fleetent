@@ -123,7 +123,7 @@ class NodeReconciler:
                 hashes[name] = desired_hash
                 knowledge_epochs[name] = desired.knowledge_resync_epoch
             elif desired_state.source == "remote" and not self._env_has_secret_values(
-                name, desired.tenant_id, desired.secrets
+                name, desired.tenant_id, desired.secrets, desired.config
             ):
                 # Self-heal a blanked .env: the platform is reachable and returned real
                 # secrets, but the on-disk .env is missing them (e.g. a prior restart-race
@@ -281,16 +281,25 @@ class NodeReconciler:
         return False
 
     def _env_has_secret_values(
-        self, agent_name: str, tenant_id: str, secrets: dict[str, str]
+        self, agent_name: str, tenant_id: str, secrets: dict[str, str], config: dict[str, Any]
     ) -> bool:
-        """Return True if the on-disk .env carries every non-empty authoritative secret.
+        """Return True if the on-disk .env carries every required authoritative secret.
 
-        Only names whose authoritative value is non-empty are required to be present on
-        disk, so an operator-blank secret can never trigger an endless respawn loop.
-        Used to detect a blanked .env that must be re-materialized while the platform is
-        reachable.
+        A secret is required only when it is both non-empty AND referenced by the agent
+        config, because the scaffold (``ensure_env_scaffold``) only ever writes referenced
+        env names. Requiring an orphan secret — one whose env name no config field
+        references — would loop stop → rewrite → respawn forever, since the scaffold never
+        materializes it. Restricting to referenced names keeps this gate aligned with the
+        scaffold and preserves the blanked-.env self-heal for real credentials. Operator
+        -blank secrets are likewise excluded so clearing a value never respawns endlessly.
         """
-        required = [name for name, value in secrets.items() if value]
+        try:
+            referenced = set(referenced_env_names(AgentFile.model_validate(config)))
+        except Exception:
+            # Config unparsable → the scaffold writes no referenced names either, so nothing
+            # is required on disk; never self-heal into an unwinnable loop.
+            referenced = set()
+        required = [name for name, value in secrets.items() if value and name in referenced]
         if not required:
             return True
         env_path = self._home_dir(agent_name, tenant_id) / ".env"
