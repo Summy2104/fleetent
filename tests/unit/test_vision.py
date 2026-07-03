@@ -45,6 +45,30 @@ def _vision_agent() -> AgentFile:
     )
 
 
+def _vision_image_chat_agent() -> AgentFile:
+    """Vision route bound to an ``openai_image_chat`` target (e.g. a multimodal
+    image model shared with image_generation). It speaks OpenAI chat-completions
+    just like ``openai_chat``, so analyze() must accept it too."""
+    return AgentFile.model_validate(
+        {
+            "name": "t",
+            "version": 1,
+            "models": {
+                "targets": [
+                    {
+                        "id": "backup",
+                        "provider": "local",
+                        "protocol": "openai_image_chat",
+                        "base_url": "http://localhost:9001/v1/",
+                        "model": "gemini-image-preview",
+                    }
+                ],
+                "routes": {"vision": [{"target": "backup"}]},
+            },
+        }
+    )
+
+
 def _no_vision_agent() -> AgentFile:
     return AgentFile.model_validate(
         {
@@ -102,6 +126,19 @@ def test_analyze_sends_image_and_instruction_returns_text(monkeypatch):
     b64 = base64.b64encode(PNG_BYTES).decode("ascii")
     assert b64 in image_block["image_url"]["url"]
     assert kwargs["model"] == "qwen-vl"
+
+
+def test_analyze_accepts_openai_image_chat_protocol(monkeypatch):
+    import fleetent.tools.vision_client as vc
+
+    client = _mock_async_openai("a red circle on white")
+    monkeypatch.setattr(vc, "_build_client", lambda *args, **kwargs: client)
+
+    result = asyncio_run(vc.analyze(PNG_BYTES, "what is this?", config=_vision_image_chat_agent()))
+
+    assert result == "a red circle on white"
+    _, kwargs = client.chat.completions.create.call_args
+    assert kwargs["model"] == "gemini-image-preview"
 
 
 def test_analyze_requires_configured_url():

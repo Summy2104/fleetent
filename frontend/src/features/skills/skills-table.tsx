@@ -7,12 +7,14 @@ import {
   type SkillProposal,
   useBackflowDiffQuery,
   useBackflowProposalsQuery,
+  useSkillGitStatusQuery,
   useSkillProposalsQuery,
   useSkillsQuery,
 } from '@/features/skills/api'
 import { buildSkillColumns } from '@/features/skills/columns/skill-columns'
 import {
   BackflowDialog,
+  BackflowWorklist,
   BindingsDialog,
   ContentDialog,
   ProposalDiffDialog,
@@ -36,6 +38,7 @@ export function SkillsTable({
   const skills = useSkillsQuery()
   const proposals = useSkillProposalsQuery()
   const backflow = useBackflowProposalsQuery()
+  const gitStatus = useSkillGitStatusQuery()
 
   const [contentFor, setContentFor] = useState<string | null>(null)
   const [versionsFor, setVersionsFor] = useState<string | null>(null)
@@ -86,6 +89,7 @@ export function SkillsTable({
 
   return (
     <>
+      {gitopsEnabled ? <BackflowWorklist gitStatus={gitStatus.data} proposals={backflow.data ?? []} /> : null}
       <DataTable
         actions={actions}
         columns={columns}

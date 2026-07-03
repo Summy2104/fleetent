@@ -57,8 +57,17 @@ async def analyze(
     try:
         policy = ModelPolicySnapshot.from_agent(src)
         resolved = policy.resolve("vision")[0]
-        if resolved.protocol != "openai_chat" or not resolved.base_url or not resolved.model:
-            raise ModelConfigError("vision route must target an openai_chat model")
+        # Both protocols speak OpenAI chat-completions over base_url+model, which is all
+        # analyze() drives; openai_image_chat is accepted so a multimodal image model
+        # shared with the image_generation route can also serve vision analysis.
+        if (
+            resolved.protocol not in ("openai_chat", "openai_image_chat")
+            or not resolved.base_url
+            or not resolved.model
+        ):
+            raise ModelConfigError(
+                "vision route must target an openai_chat or openai_image_chat model"
+            )
         api_key = policy.require_api_key(resolved)
     except Exception as exc:
         raise VisionError(f"vision route not configured: {exc}") from exc
