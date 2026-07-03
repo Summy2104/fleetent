@@ -18,6 +18,7 @@ caller writes to the trace. Violations that no rule can safely fix raise
 from __future__ import annotations
 
 import copy
+import json
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -35,6 +36,12 @@ _MISSING_TOOL_RESULT_TEXT = "工具执行失败（缺失结果，已自动补全
 # text-merged (e.g. two tool_call carriers).
 _PLACEHOLDER_SEPARATOR_TEXT = "（占位消息，自动插入以保持消息序列合法）"
 
+# Legal-but-empty arguments a malformed/truncated tool_call is normalized to. The
+# tool_call already ran (its paired tool_result records the outcome) and history
+# tool_calls are never re-dispatched, so the concrete arguments no longer matter —
+# only that the persisted assistant message stays JSON-valid and thus replayable.
+_REPAIRED_TOOL_CALL_ARGUMENTS = "{}"
+
 # Roles whose adjacent same-role text bodies may be merged. tool messages are
 # never merged (they are keyed by tool_call_id); system is left untouched.
 _MERGEABLE_ROLES = frozenset({"user", "assistant"})
@@ -47,6 +54,7 @@ class RepairKind(StrEnum):
     inserted_placeholder = "inserted_placeholder"
     filled_missing_tool_result = "filled_missing_tool_result"
     removed_orphan_tool_result = "removed_orphan_tool_result"
+    repaired_tool_call_arguments = "repaired_tool_call_arguments"
 
 
 @dataclass
@@ -76,16 +84,17 @@ class MessageContractError(Exception):
 def sanitize(messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], HygieneReport]:
     """Validate and repair a message sequence; return (clean_copy, report).
 
-    Never mutates the input. Repairs run in a fixed order (design D2): remove
-    orphan tool_results → fill missing tool_results → fix consecutive same-role
-    messages. Structural damage that cannot be safely repaired raises
-    `MessageContractError`.
+    Never mutates the input. Repairs run in a fixed order (design D2): normalize
+    malformed tool_call arguments → remove orphan tool_results → fill missing
+    tool_results → fix consecutive same-role messages. Structural damage that
+    cannot be safely repaired raises `MessageContractError`.
     """
     _validate_structure(messages)
 
     report = HygieneReport()
     work = copy.deepcopy(messages)
 
+    work = _repair_tool_call_arguments(work, report)
     work = _remove_orphan_tool_results(work, report)
     work = _fill_missing_tool_results(work, report)
     work = _fix_consecutive_same_role(work, report)
@@ -119,6 +128,41 @@ def _tool_call_ids(msg: dict[str, Any]) -> list[str]:
         if tc_id:
             ids.append(tc_id)
     return ids
+
+
+def _repair_tool_call_arguments(
+    messages: list[dict[str, Any]], report: HygieneReport
+) -> list[dict[str, Any]]:
+    """Normalize any assistant tool_call whose `arguments` is not valid JSON (AAA-8272).
+
+    A model occasionally emits a truncated/illegal JSON arguments string (long-context
+    weak models); it is persisted verbatim on the assistant message. Replayed to an
+    OpenAI-compatible backend it is rejected as a contract-violating 400 that the loop
+    classifies unrecoverable — permanently wedging the thread. The tool_call already
+    ran (its paired tool_result records the outcome) and history tool_calls are never
+    re-dispatched, so the malformed arguments carry no live meaning; rewriting them to a
+    legal empty object restores a replayable sequence and lets the session self-heal.
+    Only string arguments that fail `json.loads` are touched; valid or non-string
+    arguments are left untouched.
+    """
+    for msg in messages:
+        if msg.get("role") != "assistant":
+            continue
+        for tc in msg.get("tool_calls") or []:
+            if not isinstance(tc, dict):
+                continue
+            fn = tc.get("function")
+            if not isinstance(fn, dict):
+                continue
+            args = fn.get("arguments")
+            if not isinstance(args, str):
+                continue
+            try:
+                json.loads(args)
+            except (ValueError, TypeError):
+                fn["arguments"] = _REPAIRED_TOOL_CALL_ARGUMENTS
+                report._bump(RepairKind.repaired_tool_call_arguments)
+    return messages
 
 
 def _remove_orphan_tool_results(
