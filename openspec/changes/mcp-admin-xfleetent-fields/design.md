@@ -40,8 +40,8 @@ type ApprovalRuleForm = { tool: string; conditions: Array<{ arg: string; values:
 - `serverFormFromEditing` 反向:`when` 为 `null`/缺省 → `conditions: []`;`when` 为字典 → 摊平成 `conditions` 数组
 `canSubmitServer` 要求每条规则 `tool` 非空;条件里 `arg` 非空时其 `values` 至少一个非空(否则该条件视为未完成,阻止提交或在 build 丢弃——采用"build 丢弃 + 无有效内容的空规则阻止提交"策略,细节在 tasks 里定测试)。路径提示 `approval_rules` 指向整个列表 `mcpServers.<id>.x-fleetent.approval_rules`(field-schema 已产出)。
 
-**D6 · 表单分组为可折叠「fleetent 扩展」小节。**
-表单已很长(鉴权类型最多展开 7 个字段)。这 4 个字段归入一个 `<details>`/折叠区,默认折叠,降低视觉噪音;`approval_rules` 编辑器在该区内。纯 UI 归组,不影响数据流。
+**D6 · 表单分组为「fleetent 扩展」小节(不折叠)。**
+这 4 个字段归入一个带 `border-t` 分隔的小标题分节,和鉴权区/args 视觉区隔;`approval_rules` 编辑器在该区内。**实现中放弃了折叠**(最初设想 `<details>`):折叠在 jsdom 下不真正隐藏内容、给组件测试引入 open/close 时序脆弱性,收益(仅视觉降噪)不抵成本,YAGNI。分节纯 UI 归组,不影响数据流。`approval_rules` 编辑器抽成独立组件 `dialogs/approval-rules-editor.tsx`(受控,value/onChange),避免把三层嵌套 UI 堆进已 500+ 行的 `server-dialog.tsx`。
 
 ## Risks / Trade-offs
 
