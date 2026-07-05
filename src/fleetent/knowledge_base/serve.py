@@ -662,6 +662,7 @@ def main(argv: list[str] | None = None) -> None:
                 default_mode=standalone_config.retrieval.default_mode,
                 data_dir=standalone_config.data_dir(),
                 queue_database_url=standalone_config.queue_database_url(),
+                max_upload_bytes=standalone_config.service.max_upload_bytes,
             )
         else:
             host_config.configure_process_runtime()
@@ -673,6 +674,7 @@ def main(argv: list[str] | None = None) -> None:
                 default_mode=host_config.retrieval.default_mode,
                 data_dir=config_path.parent,
                 multi_tenant_root=True,
+                max_upload_bytes=host_config.service.max_upload_bytes,
             )
     else:
         if not ns.tenant or not ns.service_key:

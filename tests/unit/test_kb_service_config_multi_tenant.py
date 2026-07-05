@@ -118,3 +118,70 @@ def test_discover_tenants_scans_tenant_kb_databases(tmp_path: Path) -> None:
     ignored.mkdir(parents=True, exist_ok=True)
 
     assert discover_tenants(tmp_path) == ["tenant-a", "tenant-b"]
+
+
+def test_host_service_section_accepts_upload_cap(tmp_path: Path) -> None:
+    from fleetent.knowledge_base.service_config import load_host_service_config
+
+    config_path = tmp_path / "kb-service.yaml"
+    _write_yaml(
+        config_path,
+        {
+            "service": {
+                "service_key_ref": "env:FLEETENT_KB_SERVICE_KEY",
+                "max_upload_bytes": 1234,
+            },
+            "embedding": {
+                "endpoint": "http://127.0.0.1:9100/v1/embeddings",
+                "model": "bge-m3",
+                "dimensions": 1024,
+            },
+        },
+    )
+
+    config = load_host_service_config(config_path)
+
+    assert config.service.max_upload_bytes == 1234
+
+
+def test_repo_template_parses_in_host_mode() -> None:
+    """kb-service.yaml.example is what `kb init-config` scaffolds and what
+    `make kb-serve`/compose consume in host mode — template↔model drift here
+    means neither KB service can boot."""
+    from fleetent.knowledge_base.service_config import load_host_service_config
+
+    template = Path(__file__).resolve().parents[2] / "kb-service.yaml.example"
+
+    config = load_host_service_config(template)
+
+    assert config.service.service_key_ref.startswith("env:")
+
+
+def test_serve_main_passes_upload_cap_from_yaml(tmp_path: Path, monkeypatch) -> None:
+    import uvicorn
+
+    from fleetent.knowledge_base import serve
+
+    config_path = tmp_path / "kb-service.yaml"
+    _write_yaml(
+        config_path,
+        {
+            "service": {
+                "service_key_ref": "env:FLEETENT_KB_SERVICE_KEY",
+                "max_upload_bytes": 1234,
+            },
+            "embedding": {
+                "endpoint": "http://127.0.0.1:9100/v1/embeddings",
+                "model": "bge-m3",
+                "dimensions": 1024,
+            },
+        },
+    )
+
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(serve, "create_app", lambda cfg: captured.setdefault("config", cfg))
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: None)
+
+    serve.main(["--config", str(config_path)])
+
+    assert captured["config"].max_upload_bytes == 1234
