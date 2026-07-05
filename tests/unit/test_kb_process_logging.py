@@ -18,7 +18,9 @@ def test_serve_main_configures_process_logging_from_env(
 
     logging_calls: list[dict[str, object]] = []
     host_config = SimpleNamespace(
-        service=SimpleNamespace(service_key_ref="svc", host="127.0.0.1", port=8768),
+        service=SimpleNamespace(
+            service_key_ref="svc", host="127.0.0.1", port=8768, max_upload_bytes=1024
+        ),
         retrieval=SimpleNamespace(default_mode="hybrid"),
         configure_process_runtime=lambda: None,
     )
