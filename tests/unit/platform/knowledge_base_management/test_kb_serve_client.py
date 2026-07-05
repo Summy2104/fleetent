@@ -234,3 +234,36 @@ def test_upload_document_sends_multipart_and_preserves_serve_errors(monkeypatch)
             content_type="text/markdown",
         )
     assert too_large_exc.value.response.status_code == 413
+
+
+def test_get_kb_serve_client_returns_503_when_key_unresolvable(monkeypatch):
+    """An unset key env must surface as a clear 503 (like missing url/ref), not a
+    500 from _resolve_auth_ref deep inside a request — this is the exact failure
+    when the platform process started before the dev key file existed."""
+    import pytest
+    from fastapi import HTTPException
+
+    from fleetent.config import KBServeSettings
+    from fleetent.platform.knowledge_base_management import kb_admin_api
+
+    monkeypatch.delenv("MISSING_KB_KEY_ENV", raising=False)
+    monkeypatch.setattr(
+        kb_admin_api,
+        "Settings",
+        lambda: type(
+            "S",
+            (),
+            {
+                "kb_serve": KBServeSettings(
+                    url="http://127.0.0.1:8768",
+                    service_key_ref="env:MISSING_KB_KEY_ENV",
+                )
+            },
+        )(),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        kb_admin_api.get_kb_serve_client()
+
+    assert exc.value.status_code == 503
+    assert "key" in exc.value.detail.lower()

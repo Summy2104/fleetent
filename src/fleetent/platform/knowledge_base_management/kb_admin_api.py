@@ -28,6 +28,7 @@ from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.knowledge_base_management import (
     kb_observation as kb_observation_agg,
 )
+from fleetent.platform.knowledge_base_management.auth import resolve_service_key_ref
 from fleetent.platform.knowledge_base_management.kb_serve_client import KBServeClient
 
 router = APIRouter(prefix="/admin/kb")
@@ -149,6 +150,14 @@ def get_kb_serve_client() -> KBServeClient:
         raise HTTPException(status_code=503, detail="kb serve url is not configured")
     if not settings.service_key_ref.strip():
         raise HTTPException(status_code=503, detail="kb serve service key is not configured")
+    try:
+        resolve_service_key_ref(settings.service_key_ref)
+    except (ValueError, OSError) as exc:
+        # Fail here with a clear 503 instead of a 500 from deep inside a request
+        # (e.g. the ref points at an env var the platform process started without).
+        raise HTTPException(
+            status_code=503, detail="kb serve service key cannot be resolved"
+        ) from exc
     return KBServeClient(settings)
 
 
