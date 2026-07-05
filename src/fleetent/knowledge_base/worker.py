@@ -340,6 +340,18 @@ def run_job(
                     kb_id=kb_id,
                 )
             )
+            if not reindex_summary.dry_run and reindex_summary.failed == 0:
+                # Reindex is the sanctioned embedding-model migration path: move the
+                # KB's recorded identity to the rebuilt vectors' identity, or the
+                # retrieval mismatch guard stays locked after a model switch. A
+                # partial rebuild (failed > 0) keeps the old identity — flipping it
+                # would bless a namespace that still mixes embedding spaces.
+                current = vector_store.current_embedding_identity()
+                KnowledgeStore(
+                    _knowledge_database(
+                        tenant_id, data_dir=data_dir, multi_tenant_root=multi_tenant_root
+                    )
+                ).set_embedding_identity(tenant_id, kb_id, current.model, current.dimensions)
         return {
             "owner": reindex_summary.owner,
             "namespace": reindex_summary.namespace,
