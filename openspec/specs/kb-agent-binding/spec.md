@@ -57,11 +57,11 @@ The `agent_kbs` binding relation SHALL serve as the authoritative source for lon
 - **THEN** 以整数 `agents.id` 查询 `agent_kbs`，返回该 agent 的 kb_ids（行为与改前一致，仅键类型规整）
 
 ### Requirement: 绑定物化产出可用的 http provider
-当 agent 存在至少一条 KB 绑定，且平台已配置 `Settings().kb_serve`（`url` 与 `service_key_ref` 均非空）时，agent 物化（materialize）SHALL 在 agent.yaml 的 `knowledge` 段产出 `provider: {type: "http", url: <kb_serve.url>, auth_ref: "env:FLEETENT_KB_SERVICE_KEY"}`。平台未配置 kb_serve（任一字段为空）时，物化 SHALL 保持既有行为（provider 缺省 local），且 MUST NOT 因此失败。agent 无任何 KB 绑定时，`knowledge` 段行为不变（不启用、不写 provider）。
+当 agent 存在至少一条 KB 绑定，且平台已配置 `Settings().kb_serve`（`url` 与 `service_key_ref` 均非空）时，agent 物化（materialize）SHALL 在 agent.yaml 的 `knowledge` 段产出 `provider: {type: "http", url: <kb_serve.url 派生的 /search 检索端点>, auth_ref: "env:FLEETENT_KB_SERVICE_KEY"}`。平台未配置 kb_serve（任一字段为空）时，物化 SHALL 保持既有行为（provider 缺省 local），且 MUST NOT 因此失败。agent 无任何 KB 绑定时，`knowledge` 段行为不变（不启用、不写 provider）。
 
 #### Scenario: 绑定且 kb_serve 已配置时物化 http provider
 - **WHEN** agent 在 `agent_kbs` 有绑定，且平台 `Settings().kb_serve.url` 与 `service_key_ref` 均已配置，触发物化
-- **THEN** 物化产物 agent.yaml 的 `knowledge.provider` 为 `type: http`、`url` 等于 `kb_serve.url`、`auth_ref` 为 `env:FLEETENT_KB_SERVICE_KEY`，且 `enabled: true`、bindings 与绑定表一致
+- **THEN** 物化产物 agent.yaml 的 `knowledge.provider` 为 `type: http`、`url` 为 `kb_serve.url` 追加 `/search` 的检索端点（HttpKnowledgeProvider 对 url 按完整端点语义原样 POST）、`auth_ref` 为 `env:FLEETENT_KB_SERVICE_KEY`，且 `enabled: true`、bindings 与绑定表一致
 
 #### Scenario: kb_serve 未配置时保持 local 且不失败
 - **WHEN** agent 在 `agent_kbs` 有绑定，但平台未配置 `kb_serve.url`（或 `service_key_ref` 为空），触发物化

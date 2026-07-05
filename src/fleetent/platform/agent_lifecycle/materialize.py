@@ -528,9 +528,12 @@ def _knowledge_for_agent(agent: agent_store.Agent) -> AgentKnowledge:
     kb_serve = Settings().kb_serve
     provider = AgentKnowledgeProvider()
     if kb_serve.url and kb_serve.service_key_ref:
+        # kb_serve.url is the service BASE (the platform's KBServeClient appends
+        # per-call paths); the agent's HttpKnowledgeProvider POSTs its url verbatim,
+        # so materialize must hand it the full /search endpoint.
         provider = AgentKnowledgeProvider(
             type="http",
-            url=kb_serve.url,
+            url=f"{kb_serve.url.rstrip('/')}/search",
             auth_ref=f"env:{KB_SERVICE_KEY_ENV}",
         )
     return AgentKnowledge(

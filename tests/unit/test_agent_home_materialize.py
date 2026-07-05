@@ -232,7 +232,7 @@ def test_knowledge_for_agent_materializes_http_provider_when_kb_serve_is_configu
         "Settings",
         lambda: SimpleNamespace(
             kb_serve=KBServeSettings(
-                url="http://kb-serve.test/search",
+                url="http://kb-serve.test",
                 service_key_ref="env:FLEETENT_PLATFORM_KB_SERVICE_KEY",
             )
         ),
