@@ -27,5 +27,5 @@
 
 ## 5. 文档与收尾
 
-- [ ] 5.1 docs：`docs/capabilities/knowledge-base.md` 补"平台绑定使用 KB 的部署前提"一段（kb_serve.url 必须 agent 网络可达、禁 loopback（单机除外）、embedding 为 KB 服务启动硬前提）；人工确认后提交
-- [ ] 5.2 change/PR 收尾：`make test-pr` + `make test-integration-ci` 全绿（无新增失败）
+- [x] 5.1 docs：`docs/capabilities/knowledge-base.md` 补"平台绑定使用 KB 的部署前提"一段（kb_serve.url 必须 agent 网络可达、禁 loopback（单机除外）、embedding 为 KB 服务启动硬前提）；人工确认后提交
+- [x] 5.2 change/PR 收尾：`make test-pr` + `make test-integration-ci` 全绿（无新增失败）
