@@ -1,5 +1,9 @@
 service:
   service_key_ref: env:FLEETENT_KB_SERVICE_KEY
+  # Bind address. 127.0.0.1 suits same-host dev; in containers (docker-compose
+  # kb-serve) it must be 0.0.0.0 or the platform/agent containers cannot reach
+  # the service. Note: with --config, the CLI --host flag is ignored — this
+  # field is authoritative.
   host: 127.0.0.1
   port: 8768
   # Optional per-file upload cap for POST /kb/{kb_id}/documents and
