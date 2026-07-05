@@ -95,6 +95,25 @@ class KBServeClient:
             ).json(),
         )
 
+    def upload_document(
+        self,
+        tenant_id: str,
+        kb_id: str,
+        *,
+        filename: str,
+        content: bytes,
+        content_type: str,
+    ) -> dict[str, Any]:
+        return cast(
+            dict[str, Any],
+            self._request(
+                "POST",
+                f"/kb/{kb_id}/documents",
+                tenant_id=tenant_id,
+                files={"file": (filename, content, content_type)},
+            ).json(),
+        )
+
     def run_evaluation(self, tenant_id: str, kb_id: str) -> dict[str, Any]:
         return cast(
             dict[str, Any],
@@ -140,6 +159,7 @@ class KBServeClient:
         *,
         tenant_id: str,
         json: dict[str, Any] | None = None,
+        files: dict[str, tuple[str, bytes, str]] | None = None,
     ) -> httpx.Response:
         with httpx.Client(
             base_url=self._settings.url.rstrip("/"),
@@ -147,7 +167,7 @@ class KBServeClient:
             timeout=self._settings.timeout_seconds,
             transport=self._transport,
         ) as client:
-            response = client.request(method, path, json=json)
+            response = client.request(method, path, json=json, files=files)
         response.raise_for_status()
         return response
 

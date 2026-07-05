@@ -417,7 +417,7 @@ Agent 被动检索默认仍走 `search(mode=...)`。只有当 agent.yaml 的 `kn
 历史迁移评估见 [knowledge-bridge 迁移计划](../archive/knowledge-bridge-migration-plan.md)。knowledge-base 按拆分 specs 渐进实现：已完成 `knowledge-base-core` 的手动导入、分块、向量索引和基础 search 闭环，并完成 `knowledge-base-parsers-basic` 的基础解析器、`knowledge-base-hybrid-search` 的 SQLite FTS5 / BM25 与 RRF 融合、`knowledge-base-connectors-local` 的 local directory 手动同步、sync planner、Google Drive connector、Confluence connector、advanced parsers、entity extraction、graph search、hybrid rerank 和规则型 query planner。后续重点转向真实 SaaS smoke、生产凭据管理、scheduler / full sync history、ACL 和更重的解析能力。
 
 当前未实现内容：
-- 无 admin UI、REST upload API；vector rebuild 目前通过 vector_store 同步 public API 触发
+- admin UI 上传框尚未完成；当前已提供 platform `POST /admin/kb/{kb_id}/documents` → kb-serve `POST /kb/{kb_id}/documents` 的单文件 multipart 上传通路，vector rebuild 仍通过 vector_store 同步 public API 触发
 - 无 LLM planner / query rewrite / `search(mode="auto")`
 - 已有 entity extraction schema、`kb_entities`、mentions / relations evidence、explicit run，以及 KB 级 opt-in 的 ingest 后自动 extraction 入队；extraction run 摘要同步返回调用方，不持久化到 kb.db。
 - 已有 `graph_search` 第一版：独立于 search，支持 depth 0/1、direct entity mention、relation evidence、related entity mention 和 graph evidence；该 API 本身不接 query planner / rerank，不改变 `search()` / hybrid ranking。
@@ -451,6 +451,7 @@ Agent 被动检索默认仍走 `search(mode=...)`。只有当 agent.yaml 的 `kn
 - parser 已支持 text / Markdown / lightweight HTML / PDF / DOCX / PPTX / XLSX；local directory 和 Google Drive uploaded Office/PDF 通过 parser registry 解析，Google Sheets / Google Slides 通过 export 后解析。
 - OCR、VLM、扫描 PDF、图片语义理解和结构化 table QA 不支持。
 - local directory、Google Drive 与 Confluence 已支持 plan + execute 手动 sync，并可通过 admin CLI 列出、检查、dry-run、同步和查看最近一次 status；后台消费统一走既有 `kb-worker`，不引入第二个 extraction consumer。
+- 已支持单文件 REST upload：`POST /admin/kb/{kb_id}/documents`（admin）代理到 `POST /kb/{kb_id}/documents`（service key + principal），serve 侧按 `service.max_upload_bytes`（默认 50 MiB）做流式限流并入 `sync_directory` 队列；上传受理后返回 job id，最终 ingest 结果经既有 documents 列表、`/search` 与 `/status` 观测。
 - 检索已支持 SQLite FTS5/BM25 keyword mode、RRF hybrid mode、显式 hybrid rerank、
   独立 `graph_search()` 和规则型 `plan_knowledge_search()` / `execute_knowledge_search_plan()`；不提供
   `search(mode="auto")`，不接 LLM planner / query rewrite。
@@ -495,7 +496,7 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
   - ✅ **Google Drive**：已支持指定 folder scope、OAuth `credential_ref`、Google Docs HTML export、Google Sheets `.xlsx` export、Google Slides `.pptx` export、uploaded PDF / Office download、parser registry dispatch、fake-client 默认测试和手动 opt-in smoke；不做 service account / domain-wide delegation、最终用户 Drive ACL
   - ✅ **Confluence Cloud**：已支持 Cloud API token `credential_ref`、space / page / page+children scope、storage HTML parser dispatch、bounded 429 retry、fake-client 默认测试和手动 opt-in smoke；不做 Server / Data Center、最终用户 page ACL、attachments / comments
   - remote source missing / 不可见默认 archive KB document，不物理删除 `knowledge_documents` 行
-  - **文件直传 / REST upload**、后台调度、sync history、文档级 ACL 和更多格式解析后置
+  - ✅ **文件直传 / REST upload**：已支持 platform admin 单文件 multipart 上传，经 kb-serve 暂存并复用 `sync_directory` 队列异步 ingest；批量上传、上传后清理策略、sync history 与文档级 ACL 后置
 
 - [x] **基础与高级文档解析**：将原始 text / Markdown / lightweight HTML / PDF / DOCX / PPTX / XLSX 转换为 parsed sections，再进入分块流程
   - Markdown / 纯文本：直接处理，无需额外依赖
@@ -582,6 +583,7 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 - long-term-ctx 在 Agent knowledge binding / policy 启用时，先解析 `knowledge.bindings` 为 `kb_ids` 和单一 `tenant_id`，再以 `(Principal, query, kb_ids, limit, audit_context)` 契约调用当前 knowledge provider；默认 `LocalKnowledgeProvider` 读取本地 KB。若 agent.yaml 显式配置 `knowledge.provider.type=http`，boot 时注入 `HttpKnowledgeProvider`，经 `POST {url}` + Bearer service key + `X-Fleetent-Principal` 调远端 `{principal,query,kb_ids,limit} -> {chunks:[KnowledgeChunk JSON]}` wire 协议；override provider 只在传入范围内检索；disabled、空范围、超时或 provider 抛错时都降级为空结果
 - 远程读路径现在有对应 server：`fleetent kb serve` 仍支持旧的 `--tenant --service-key` 启动方式；standalone 部署新增 `--config <kb-service.yaml>`，从根 `kb-service.yaml` 读取 service/retrieval/embedding/extraction/rerank/chunking 配置，并按 `principal.tenant_id` 路由到对应租户的 `kb/data/`。推荐布局是 `$FLEETENT_HOME/kb-service.yaml` + `$FLEETENT_HOME/tenants/<tenant>/kb/{connectors.yaml,.env,data/}`；服务要求 `Authorization: Bearer <service-key>` 与 `X-Fleetent-Principal` 同时存在，默认多租户，传 `--tenant <id>` 时锁单租户。
 - standalone KB 服务现在自包含 ingest：每租户 `connectors.yaml` 中的 connector 配置经注入 settings 提供给 `operations`，连接器 secret 在 `tenants/<tenant>/kb/.env` 本地解析；`kb worker --config` 轮询所有租户的本地 SQLite 队列，`kb serve --config` 用同一套 host config 服务所有租户。agent/container 侧只需要只读 `kb/data/`，不会拿到 `kb/` 根或 tenant `.env` 的 secret。该路径在无 platform、无 `management.db` 环境下可完成 connector sync / ingest / 检索。旧 `FLEETENT_KB_WORKER_EMBEDDING_*` 已退役，embedding / extraction 统一改从根 `kb-service.yaml` 的 `api_key_env` 引用读取。
+- 管理员现在可经 platform `POST /admin/kb/{kb_id}/documents` 上传单个文档；platform 只做 admin 鉴权、multipart 透传和 `doc_upload` 审计，真实写盘与入队仍归 kb-serve。kb-serve 收到上传后会把字节流式暂存到 `tenants/<tenant>/kb/uploads/<kb_id>/`（单租户 standalone 时是 `<kb-home>/uploads/<kb_id>/`），文件名净化去路径分隔符并加 uuid 前缀，然后复用 `job_type="sync_directory"`、`connector_ref.path=<staged file>` 入本地 `kb_ingest_queue.db`；切块 / embedding / vector 写仍只在 `kb worker` 消费时发生。
 - 仓库提供 standalone 模板：根目录 `kb-service.yaml.example`、`connectors.yaml.example` 与 `kb-service.env.example`。
   `fleetent kb init-config` 会生成 `$FLEETENT_HOME/kb-service.yaml`，并为目标租户脚手架 `$FLEETENT_HOME/tenants/<tenant>/kb/{connectors.yaml,.env}`；
   根目录 `.env.example` 仍只保留 platform control-plane 模板，不混入 standalone secret。

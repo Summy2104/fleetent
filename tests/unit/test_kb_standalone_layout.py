@@ -130,3 +130,40 @@ def test_standalone_service_config_builds_runtime_model_routes() -> None:
     assert extraction_target.base_url == "http://llm.example/v1"
     assert extraction_target.model == "kb-extract"
     assert extraction_target.api_key_env == "FLEETENT_KB_EXTRACTION_API_KEY"
+
+
+def test_standalone_service_config_parses_max_upload_bytes() -> None:
+    from fleetent.knowledge_base.service_config import KBServiceConfig
+
+    defaulted = KBServiceConfig.model_validate(
+        {
+            "service": {
+                "tenant_id": "tenant-a",
+                "service_key_ref": "env:FLEETENT_KB_SERVICE_KEY",
+            },
+            "data": {"home": "./data"},
+            "embedding": {
+                "endpoint": "http://embed.example/v1/embeddings",
+                "model": "kb-embed",
+                "dimensions": 384,
+            },
+        }
+    )
+    configured = KBServiceConfig.model_validate(
+        {
+            "service": {
+                "tenant_id": "tenant-a",
+                "service_key_ref": "env:FLEETENT_KB_SERVICE_KEY",
+                "max_upload_bytes": 1234,
+            },
+            "data": {"home": "./data"},
+            "embedding": {
+                "endpoint": "http://embed.example/v1/embeddings",
+                "model": "kb-embed",
+                "dimensions": 384,
+            },
+        }
+    )
+
+    assert defaulted.service.max_upload_bytes == 50 * 1024 * 1024
+    assert configured.service.max_upload_bytes == 1234

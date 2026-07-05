@@ -2,6 +2,9 @@ service:
   service_key_ref: env:FLEETENT_KB_SERVICE_KEY
   host: 127.0.0.1
   port: 8768
+  # Optional per-file upload cap for POST /kb/{kb_id}/documents and
+  # platform /admin/kb/{kb_id}/documents proxy uploads. Default: 50 MiB.
+  max_upload_bytes: 52428800
 
 retrieval:
   default_mode: hybrid

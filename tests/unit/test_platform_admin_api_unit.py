@@ -6,11 +6,13 @@ seam behavior in unit scope. Database/Alembic behavior stays in integration test
 
 from __future__ import annotations
 
+import io
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from fastapi import HTTPException
+from starlette.datastructures import Headers, UploadFile
 
 from fleetent import server, user_store
 from fleetent.platform.agent_management_console import agent_admin_api
@@ -803,6 +805,75 @@ def test_kb_admin_route_error_branches(monkeypatch: pytest.MonkeyPatch) -> None:
         )
     assert invalid_mode.value.status_code == 422
     monkeypatch.setattr(kb_admin_api.agent_kbs_store, "is_kb_bound", lambda tenant_id, kb_id: False)
+
+
+async def test_kb_admin_upload_document_route_covers_success_and_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actor = _user()
+    audits: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    class FakeClient:
+        def upload_document(
+            self,
+            tenant_id: str,
+            kb_id: str,
+            *,
+            filename: str,
+            content: bytes,
+            content_type: str,
+        ) -> dict[str, object]:
+            if kb_id == "too-large":
+                request = kb_admin_api.httpx.Request("POST", "http://kb-serve.test")
+                response = kb_admin_api.httpx.Response(
+                    413,
+                    json={"detail": "upload exceeds max_upload_bytes"},
+                    request=request,
+                )
+                raise kb_admin_api.httpx.HTTPStatusError(
+                    "kb serve error", request=request, response=response
+                )
+            assert tenant_id == "default"
+            assert filename == "guide.md"
+            assert content == b"hello world"
+            assert content_type == "text/markdown"
+            return {"job_id": "job-1"}
+
+    monkeypatch.setattr(kb_admin_api, "_require_admin", lambda authorization: actor)
+    monkeypatch.setattr(kb_admin_api, "get_kb_serve_client", lambda: FakeClient())
+    monkeypatch.setattr(
+        kb_admin_api.audit_log,
+        "write_audit",
+        lambda *args, **kwargs: audits.append((args, kwargs)),
+    )
+
+    upload = UploadFile(
+        file=io.BytesIO(b"hello world"),
+        filename="guide.md",
+        headers=Headers({"content-type": "text/markdown"}),
+    )
+    assert await kb_admin_api.upload_document("kb1", upload, authorization="Session token") == {
+        "job_id": "job-1"
+    }
+    assert audits == [
+        (
+            (actor.id, "doc_upload", "kb", "kb1"),
+            {"detail": {"filename": "guide.md"}},
+        )
+    ]
+
+    with pytest.raises(HTTPException) as too_large:
+        await kb_admin_api.upload_document(
+            "too-large",
+            UploadFile(
+                file=io.BytesIO(b"hello world"),
+                filename="guide.md",
+                headers=Headers({"content-type": "text/markdown"}),
+            ),
+            authorization="Session token",
+        )
+    assert too_large.value.status_code == 413
+    assert too_large.value.detail == "upload exceeds max_upload_bytes"
 
 
 def test_server_helpers_cover_admin_url_jobs_and_auth(

@@ -660,6 +660,212 @@ def test_standalone_sweep_enqueues_due_connectors_without_platform_cron(tmp_path
     assert payload["connector_id"] == "drive-a"
 
 
+def test_kb_serve_upload_requires_auth_valid_kb_and_respects_max_upload_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent.knowledge_base import serve
+    from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
+    from fleetent.knowledge_base.management.runtime import create_knowledge_base
+    from fleetent.knowledge_base.worker import _knowledge_database
+
+    monkeypatch.setenv("FLEETENT_KB_SERVICE_KEY", "svc-test")
+    data_dir = tmp_path / "data"
+    queue_url = f"sqlite:///{data_dir / 'kb_ingest_queue.db'}"
+    create_knowledge_base(
+        "tenant-a",
+        "kb-a",
+        "Standalone KB",
+        database=_knowledge_database("tenant-a", data_dir=data_dir, migrations=KB_MIGRATIONS),
+    )
+
+    app = serve.create_app(
+        serve.KBServeConfig(
+            tenant_id="tenant-a",
+            service_key_ref="env:FLEETENT_KB_SERVICE_KEY",
+            data_dir=data_dir,
+            queue_database_url=queue_url,
+            max_upload_bytes=5,
+        )
+    )
+    with TestClient(app, raise_server_exceptions=True) as client:
+        no_auth = client.post(
+            "/kb/kb-a/documents",
+            files={"file": ("guide.md", b"hello", "text/markdown")},
+        )
+        assert no_auth.status_code == 401
+        assert no_auth.json()["detail"] == "missing bearer token"
+
+        bad_bearer = client.post(
+            "/kb/kb-a/documents",
+            files={"file": ("guide.md", b"hello", "text/markdown")},
+            headers={
+                "Authorization": "Bearer wrong",
+                "X-Fleetent-Principal": '{"user_id":"user-1","tenant_id":"tenant-a"}',
+            },
+        )
+        assert bad_bearer.status_code == 401
+        assert bad_bearer.json()["detail"] == "invalid bearer token"
+
+        wrong_tenant = client.post(
+            "/kb/kb-a/documents",
+            files={"file": ("guide.md", b"hello", "text/markdown")},
+            headers={
+                "Authorization": "Bearer svc-test",
+                "X-Fleetent-Principal": '{"user_id":"user-1","tenant_id":"tenant-b"}',
+            },
+        )
+        assert wrong_tenant.status_code == 403
+        assert wrong_tenant.json()["detail"] == "tenant mismatch"
+
+        missing_kb = client.post(
+            "/kb/missing/documents",
+            files={"file": ("guide.md", b"hello", "text/markdown")},
+            headers={
+                "Authorization": "Bearer svc-test",
+                "X-Fleetent-Principal": '{"user_id":"user-1","tenant_id":"tenant-a"}',
+            },
+        )
+        assert missing_kb.status_code == 404
+        assert missing_kb.json()["detail"] == "kb not found"
+
+        too_large = client.post(
+            "/kb/kb-a/documents",
+            files={"file": ("guide.md", b"hello!", "text/markdown")},
+            headers={
+                "Authorization": "Bearer svc-test",
+                "X-Fleetent-Principal": '{"user_id":"user-1","tenant_id":"tenant-a"}',
+            },
+        )
+        assert too_large.status_code == 413
+        assert too_large.json()["detail"] == "upload exceeds max_upload_bytes"
+
+
+def test_kb_serve_upload_stages_sanitized_file_and_enqueues_sync_directory_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent import kb_ingest_jobs
+    from fleetent.knowledge_base import serve
+    from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
+    from fleetent.knowledge_base.management.runtime import create_knowledge_base
+    from fleetent.knowledge_base.worker import _knowledge_database
+
+    monkeypatch.setenv("FLEETENT_KB_SERVICE_KEY", "svc-test")
+    data_dir = tmp_path / "data"
+    queue_url = f"sqlite:///{data_dir / 'kb_ingest_queue.db'}"
+    create_knowledge_base(
+        "tenant-a",
+        "kb-a",
+        "Standalone KB",
+        database=_knowledge_database("tenant-a", data_dir=data_dir, migrations=KB_MIGRATIONS),
+    )
+
+    app = serve.create_app(
+        serve.KBServeConfig(
+            tenant_id="tenant-a",
+            service_key_ref="env:FLEETENT_KB_SERVICE_KEY",
+            data_dir=data_dir,
+            queue_database_url=queue_url,
+        )
+    )
+    with TestClient(app, raise_server_exceptions=True) as client:
+        response = client.post(
+            "/kb/kb-a/documents",
+            files={"file": ("../guide.md", b"# Intro\nRunbook", "text/markdown")},
+            headers={
+                "Authorization": "Bearer svc-test",
+                "X-Fleetent-Principal": '{"user_id":"user-1","tenant_id":"tenant-a"}',
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["job_id"]
+
+    upload_dir = tmp_path / "uploads" / "kb-a"
+    staged_files = list(upload_dir.iterdir())
+    assert len(staged_files) == 1
+    assert staged_files[0].parent == upload_dir
+    assert staged_files[0].name.endswith("-guide.md")
+    assert "../" not in staged_files[0].name
+    assert staged_files[0].read_bytes() == b"# Intro\nRunbook"
+
+    jobs = kb_ingest_jobs.list_jobs(tenant_id="tenant-a", kb_id="kb-a", database_url=queue_url)
+    assert [job["job_type"] for job in jobs] == ["sync_directory"]
+    assert jobs[0]["id"] == payload["job_id"]
+    assert kb_ingest_jobs.get_job_payload(jobs[0]) == {"path": str(staged_files[0])}
+
+
+def test_kb_serve_upload_can_be_consumed_by_worker_and_searched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent import vector_store
+    from fleetent.knowledge_base import serve, worker
+    from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
+    from fleetent.knowledge_base.management.runtime import create_knowledge_base
+
+    monkeypatch.setenv("FLEETENT_KB_SERVICE_KEY", "svc-test")
+    data_dir = tmp_path / "data"
+    queue_url = f"sqlite:///{data_dir / 'kb_ingest_queue.db'}"
+
+    async def embed_text(text: str) -> list[float]:
+        return [float(len(text)), 0.0]
+
+    monkeypatch.setattr(vector_store, "embed_text", embed_text)
+    create_knowledge_base(
+        "tenant-a",
+        "kb-a",
+        "Standalone KB",
+        database=worker._knowledge_database(
+            "tenant-a", data_dir=data_dir, migrations=KB_MIGRATIONS
+        ),
+    )
+
+    app = serve.create_app(
+        serve.KBServeConfig(
+            tenant_id="tenant-a",
+            service_key_ref="env:FLEETENT_KB_SERVICE_KEY",
+            data_dir=data_dir,
+            queue_database_url=queue_url,
+        )
+    )
+    headers = {
+        "Authorization": "Bearer svc-test",
+        "X-Fleetent-Principal": '{"user_id":"user-1","tenant_id":"tenant-a"}',
+    }
+    with TestClient(app, raise_server_exceptions=True) as client:
+        upload = client.post(
+            "/kb/kb-a/documents",
+            files={"file": ("../guide.md", b"# Intro\nReset ERR42 safely.", "text/markdown")},
+            headers=headers,
+        )
+        assert upload.status_code == 200
+
+        job_id = upload.json()["job_id"]
+        worker_result = worker.run_once(queue_database_url=queue_url, data_dir=data_dir)
+        assert worker_result == {"job_id": job_id, "status": "done"}
+
+        documents = client.get("/kb/kb-a/documents", headers=headers)
+        assert documents.status_code == 200
+        assert len(documents.json()) == 1
+        assert documents.json()[0]["filename"].endswith("-guide.md")
+
+        search = client.post(
+            "/search",
+            json={
+                "principal": {"user_id": "user-1", "tenant_id": "tenant-a"},
+                "query": "ERR42",
+                "kb_ids": ["kb-a"],
+                "limit": 3,
+            },
+            headers=headers,
+        )
+
+        assert search.status_code == 200
+        assert len(search.json()["chunks"]) == 1
+        assert search.json()["chunks"][0]["content"] == "Reset ERR42 safely."
+        assert search.json()["chunks"][0]["filename"].endswith("-guide.md")
+
+
 def test_worker_run_sweeps_due_connectors_without_kb_serve(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

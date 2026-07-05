@@ -17,7 +17,7 @@ Auth mirrors user_admin_api: reads allow viewer+admin, writes require admin.
 from typing import Any, NoReturn, cast
 
 import httpx
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from fleetent import audit_log, auth, user_store
@@ -353,6 +353,34 @@ def list_documents(
         return kb_list_documents(tenant_id, kb_id)
     except httpx.HTTPStatusError as exc:
         _raise_as_http_exception(exc)
+
+
+@router.post("/{kb_id}/documents")
+async def upload_document(
+    kb_id: str,
+    file: UploadFile = File(...),
+    tenant_id: str = _DEFAULT_TENANT,
+    authorization: str | None = Header(None),
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    try:
+        result = get_kb_serve_client().upload_document(
+            tenant_id,
+            kb_id,
+            filename=file.filename or "upload.bin",
+            content=await file.read(),
+            content_type=file.content_type or "application/octet-stream",
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_as_http_exception(exc)
+    audit_log.write_audit(
+        user.id,
+        "doc_upload",
+        "kb",
+        kb_id,
+        detail={"filename": file.filename or "upload.bin"},
+    )
+    return result
 
 
 @router.get("/{kb_id}/documents/{document_id}/chunks")

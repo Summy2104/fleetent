@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import argparse
 import os
+import uuid
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Body, FastAPI, Header, HTTPException
+from fastapi import Body, FastAPI, File, Header, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from fleetent import kb_ingest_jobs
@@ -31,6 +32,7 @@ class KBServeConfig:
     service_key_ref: str
     host: str = "127.0.0.1"
     port: int = 8768
+    max_upload_bytes: int = 50 * 1024 * 1024
     default_mode: str = "hybrid"
     data_dir: Path | None = None
     queue_database_url: str = ""
@@ -334,6 +336,40 @@ def create_app(config: KBServeConfig):  # type: ignore[no-untyped-def]
                 return data
         raise HTTPException(status_code=404, detail="kb not found")
 
+    def _upload_root(tenant_id: str, kb_id: str) -> Path:
+        if config.multi_tenant_root:
+            base_dir = (config.data_dir or _database().path.parent) / "tenants" / tenant_id / "kb"
+        else:
+            base_dir = (config.data_dir or _database().path.parent).parent
+        return base_dir / "uploads" / kb_id
+
+    def _sanitize_upload_filename(filename: str) -> str:
+        sanitized = filename.replace("\\", "/").split("/")[-1].strip()
+        return sanitized or "upload.bin"
+
+    async def _stage_upload(file: UploadFile, *, tenant_id: str, kb_id: str) -> Path:
+        upload_dir = _upload_root(tenant_id, kb_id)
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        staged_path = (
+            upload_dir / f"{uuid.uuid4()}-{_sanitize_upload_filename(file.filename or '')}"
+        )
+        seen = 0
+        try:
+            with staged_path.open("wb") as handle:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        return staged_path
+                    seen += len(chunk)
+                    if seen > config.max_upload_bytes:
+                        raise HTTPException(
+                            status_code=413, detail="upload exceeds max_upload_bytes"
+                        )
+                    handle.write(chunk)
+        except Exception:
+            staged_path.unlink(missing_ok=True)
+            raise
+
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
         return {"status": "ok", "tenant_id": config.tenant_id}
@@ -444,6 +480,25 @@ def create_app(config: KBServeConfig):  # type: ignore[no-untyped-def]
             }
             for row in rows
         ]
+
+    @app.post("/kb/{kb_id}/documents")
+    async def upload_document(
+        kb_id: str,
+        file: Annotated[UploadFile, File(...)],
+        authorization: Annotated[str | None, Header(alias="Authorization")] = None,
+        principal_header: Annotated[str | None, Header(alias=INGRESS_PRINCIPAL_HEADER)] = None,
+    ) -> dict[str, object]:
+        principal = _require_authorized_principal(authorization, principal_header)
+        _current_knowledge_base(principal.tenant_id, kb_id)
+        staged_path = await _stage_upload(file, tenant_id=principal.tenant_id, kb_id=kb_id)
+        job = kb_ingest_jobs.enqueue_job(
+            job_type="sync_directory",
+            tenant_id=principal.tenant_id,
+            kb_id=kb_id,
+            connector_ref={"path": str(staged_path)},
+            database_url=_queue_database_url(principal.tenant_id),
+        )
+        return {"job_id": str(job["id"])}
 
     @app.get("/kb/{kb_id}/documents/{document_id}/chunks")
     def preview_document_chunks(

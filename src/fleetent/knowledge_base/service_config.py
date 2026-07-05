@@ -32,6 +32,7 @@ class KBServiceSection(BaseModel):
     service_key_ref: str
     host: str = "127.0.0.1"
     port: int = 8768
+    max_upload_bytes: int = 50 * 1024 * 1024
 
 
 class KBHostServiceSection(BaseModel):
