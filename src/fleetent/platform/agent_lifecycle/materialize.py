@@ -24,13 +24,19 @@ from fleetent.agent_config import (
     AgentFile,
     AgentKnowledge,
     AgentKnowledgeBinding,
+    AgentKnowledgeProvider,
     AgentModels,
     ModelRouteEntry,
     ModelTarget,
     collect_env_var_names,
     default_models,
 )
-from fleetent.config import MCP_FLEETENT_EXT_DEFAULTS, McpApprovalRule, McpServerSettings
+from fleetent.config import (
+    MCP_FLEETENT_EXT_DEFAULTS,
+    McpApprovalRule,
+    McpServerSettings,
+    Settings,
+)
 from fleetent.platform.agent_lifecycle import credential_slots, default_binding_store, secret_store
 from fleetent.platform.connector_management import mcp_server_store
 from fleetent.platform.connector_management.mcp_auth import (
@@ -41,6 +47,7 @@ from fleetent.platform.connector_management.mcp_auth import (
     parse_mcp_auth_config,
 )
 from fleetent.platform.knowledge_base_management import agent_kbs_store
+from fleetent.platform.knowledge_base_management.auth import KB_SERVICE_KEY_ENV
 from fleetent.platform.model_provider_management import model_admin_store, provider_admin_store
 from fleetent.platform.skill_management import skill_admin_store
 from fleetent.secret_scan import flatten
@@ -518,8 +525,17 @@ def _knowledge_for_agent(agent: agent_store.Agent) -> AgentKnowledge:
         kb_ids = []
     if not kb_ids:
         return AgentKnowledge()
+    kb_serve = Settings().kb_serve
+    provider = AgentKnowledgeProvider()
+    if kb_serve.url and kb_serve.service_key_ref:
+        provider = AgentKnowledgeProvider(
+            type="http",
+            url=kb_serve.url,
+            auth_ref=f"env:{KB_SERVICE_KEY_ENV}",
+        )
     return AgentKnowledge(
         enabled=True,
+        provider=provider,
         bindings=[
             AgentKnowledgeBinding(
                 tenant_id=agent.tenant_id,

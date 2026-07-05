@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import httpx
+import pytest
 
 from fleetent.config import Settings
+from fleetent.platform.knowledge_base_management.auth import resolve_service_key_ref
 from fleetent.platform.knowledge_base_management.kb_serve_client import (
     KBServeClient,
     KBServeSettings,
@@ -19,6 +21,22 @@ def test_settings_load_kb_serve_config_from_env(monkeypatch) -> None:
         url="http://kb-serve.test",
         service_key_ref="env:FLEETENT_PLATFORM_KB_SERVICE_KEY",
     )
+
+
+def test_resolve_auth_ref_supports_env_and_file_refs(tmp_path, monkeypatch) -> None:
+    key_path = tmp_path / "kb-service-key"
+    key_path.write_text("svc-from-file", encoding="utf-8")
+    monkeypatch.setenv("FLEETENT_PLATFORM_KB_SERVICE_KEY", "svc-from-env")
+
+    assert resolve_service_key_ref("env:FLEETENT_PLATFORM_KB_SERVICE_KEY") == "svc-from-env"
+    assert resolve_service_key_ref(f"file://{key_path}") == "svc-from-file"
+
+
+def test_resolve_auth_ref_raises_for_missing_env(monkeypatch) -> None:
+    monkeypatch.delenv("FLEETENT_PLATFORM_KB_SERVICE_KEY", raising=False)
+
+    with pytest.raises(ValueError, match="kb service key env var is missing"):
+        resolve_service_key_ref("env:FLEETENT_PLATFORM_KB_SERVICE_KEY")
 
 
 def test_search_sends_shared_key_and_principal_headers(monkeypatch) -> None:

@@ -1,26 +1,14 @@
 from __future__ import annotations
 
-import os
-from pathlib import Path
 from typing import Any, cast
 
 import httpx
 
 from fleetent.config import KBServeSettings
 from fleetent.identity import INGRESS_PRINCIPAL_HEADER, Principal, encode_ingress_principal
+from fleetent.platform.knowledge_base_management.auth import resolve_service_key_ref
 
 _PLATFORM_KB_USER_ID = "platform"
-
-
-def _resolve_auth_ref(auth_ref: str) -> str:
-    if auth_ref.startswith("env:"):
-        env_name = auth_ref.removeprefix("env:")
-        value = os.getenv(env_name)
-        if value:
-            return value
-        raise ValueError(f"kb service key env var is missing: {env_name}")
-    path = Path(auth_ref.removeprefix("file://")).expanduser()
-    return path.read_text(encoding="utf-8")
 
 
 class KBServeClient:
@@ -165,7 +153,7 @@ class KBServeClient:
 
     def _headers(self, tenant_id: str) -> dict[str, str]:
         return {
-            "Authorization": f"Bearer {_resolve_auth_ref(self._settings.service_key_ref)}",
+            "Authorization": f"Bearer {resolve_service_key_ref(self._settings.service_key_ref)}",
             INGRESS_PRINCIPAL_HEADER: encode_ingress_principal(self._principal(tenant_id)),
         }
 

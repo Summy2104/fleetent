@@ -20,6 +20,12 @@
   - 返回 `in_progress`：最近仍有 job claim 推进，表示 worker 存活、队列在处理。
   - 返回 `degraded`：当前无可观察到的活跃 worker，job 不会自行推进，operator 需要恢复 `kb-worker`。
 
+## 平台绑定部署前提
+
+- 通过平台把 KB 绑定到 agent 之后，platform 只会在 `kb_serve.url` 和 `kb_serve.service_key_ref` 都已配置时，把 agent 物化为 HTTP KB provider；任一缺失时保持本地 provider，不会因为缺配置而物化失败。
+- `kb_serve.url` 必须是 agent 所在 node 可达的地址。多机部署禁止使用 loopback（`127.0.0.1` / `localhost`）；只有 platform、node、kb-service 同机时才允许 loopback。
+- KB service 启动前提之一是 embedding endpoint 可用；embedding 不可用时 `kb serve` 不会成功启动，因此平台绑定要生效，除了配置 `kb_serve` 之外还必须先满足 embedding 服务可达。
+
 **调用关系**：
 - 依赖：vector_store（向量索引）、platform `kb_connectors` 投影出的 connector settings snapshot；agent 可用 KB 范围由 `agent_kbs`（管理库唯一真相源）materialize 进 `agent.yaml`，运行时读配置不查表
 - 被依赖：long_term_ctx（检索注入内容）、reflection（只读，观察召回质量）

@@ -7,6 +7,7 @@ import io
 import tarfile
 
 import pytest
+import yaml
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
@@ -349,6 +350,56 @@ def test_get_desired_state_exports_knowledge_bindings_without_source_constructio
     assert binding["default"] is True
     assert "google_drive" not in str(delivered["config"])
     assert "confluence" not in str(delivered["config"])
+
+
+def test_materialize_and_desired_state_wire_kb_http_provider_and_secret(
+    node_client: TestClient, tmp_path, monkeypatch
+) -> None:
+    from fleetent import agent_store
+    from fleetent.platform.agent_lifecycle import materialize
+    from fleetent.platform.knowledge_base_management import agent_kbs_store
+    from fleetent.platform.node_management import node_store, placement_store
+    from fleetent.platform.tenancy import store as tenancy_store
+
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+    monkeypatch.setenv("KB_SERVE__URL", "http://kb-serve.test/search")
+    monkeypatch.setenv("KB_SERVE__SERVICE_KEY_REF", "env:FLEETENT_PLATFORM_KB_SERVICE_KEY")
+    monkeypatch.setenv("FLEETENT_PLATFORM_KB_SERVICE_KEY", "svc-platform")
+
+    tenancy_store.create_tenant(id="acme", name="Acme")
+    node_key, _ = node_store.register_node("node-a")
+    agent = agent_store.create_agent("support", "Help users", ["shell"], tenant_id="acme")
+    agent_kbs_store.bind("acme", "support-kb", agent.id, created_by="admin")
+    placement_store.pin_agent(agent.id, "node-a")
+
+    home = materialize.write_home(materialize.agent_file_from_store(agent), source_agent=agent)
+
+    agent_yaml = yaml.safe_load((home / "agent.yaml").read_text(encoding="utf-8"))
+    assert agent_yaml["knowledge"]["provider"] == {
+        "type": "http",
+        "url": "http://kb-serve.test/search",
+        "auth_ref": "env:FLEETENT_KB_SERVICE_KEY",
+    }
+    env_lines = dict(
+        line.split("=", 1)
+        for line in (home / ".env").read_text(encoding="utf-8").strip().splitlines()
+        if "=" in line
+    )
+    assert env_lines["FLEETENT_KB_SERVICE_KEY"] == ""
+
+    response = node_client.get(
+        "/nodes/node-a/desired-state",
+        headers={"Authorization": f"Bearer {node_key}"},
+    )
+
+    assert response.status_code == 200
+    delivered = response.json()["agents"][0]
+    assert delivered["config"]["knowledge"]["provider"] == {
+        "type": "http",
+        "url": "http://kb-serve.test/search",
+        "auth_ref": "env:FLEETENT_KB_SERVICE_KEY",
+    }
+    assert delivered["secrets"]["FLEETENT_KB_SERVICE_KEY"] == "svc-platform"
 
 
 def test_get_desired_state_marks_kb_binding_changes_for_resync(node_client: TestClient) -> None:

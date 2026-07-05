@@ -12,9 +12,14 @@ from pydantic import BaseModel, Field
 
 from fleetent import agent_store, audit_log
 from fleetent.agent_config import AgentFile, collect_env_var_names
+from fleetent.config import Settings
 from fleetent.platform import im_gateway_management
 from fleetent.platform.agent_lifecycle import credential_slots, materialize, secret_store
 from fleetent.platform.agent_management_console import agent_admin_store
+from fleetent.platform.knowledge_base_management.auth import (
+    KB_SERVICE_KEY_ENV,
+    resolve_service_key_ref,
+)
 from fleetent.platform.model_provider_management import provider_admin_store
 from fleetent.platform.node_management import node_store, placement_store
 from fleetent.platform.skill_management import bundle_cache, skill_admin_store
@@ -329,12 +334,27 @@ def _agent_secrets(agent: agent_store.Agent, agent_file: AgentFile | None = None
     # node-managed agents resolve the same model key as platform-direct materialize.
     if agent_file is None:
         agent_file = materialize.agent_file_from_store(agent)
+    kb_serve = Settings().kb_serve
     for env_name in collect_env_var_names(agent_file):
         if env_name in secrets:
             continue
         provider_key = provider_admin_store.provider_key_for_env(env_name)
         if provider_key:
             secrets[env_name] = provider_key
+            continue
+        if env_name != KB_SERVICE_KEY_ENV or not kb_serve.url or not kb_serve.service_key_ref:
+            continue
+        try:
+            secrets[env_name] = resolve_service_key_ref(kb_serve.service_key_ref)
+        except Exception as exc:  # noqa: BLE001 - desired-state assembly must stay best-effort
+            _logger.warning(
+                "desired_state_kb_service_key_backfill_failed",
+                extra={
+                    "agent": agent.name,
+                    "env_name": env_name,
+                    "exception": exc,
+                },
+            )
     return secrets
 
 
