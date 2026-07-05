@@ -50,5 +50,7 @@ def ensure_dev_kb_service_key(home: str | Path) -> str:
 if __name__ == "__main__":
     import os
 
-    home = os.environ.get("FLEETENT_HOME", os.path.join(os.getcwd(), ".fleetent-dev"))
+    # `or` (not a get() default): an empty FLEETENT_HOME must fall back too,
+    # otherwise the key lands in the current directory.
+    home = os.environ.get("FLEETENT_HOME") or os.path.join(os.getcwd(), ".fleetent-dev")
     print(ensure_dev_kb_service_key(home))
