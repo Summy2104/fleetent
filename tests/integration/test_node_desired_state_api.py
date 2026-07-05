@@ -362,7 +362,7 @@ def test_materialize_and_desired_state_wire_kb_http_provider_and_secret(
     from fleetent.platform.tenancy import store as tenancy_store
 
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
-    monkeypatch.setenv("KB_SERVE__URL", "http://kb-serve.test/search")
+    monkeypatch.setenv("KB_SERVE__URL", "http://kb-serve.test")
     monkeypatch.setenv("KB_SERVE__SERVICE_KEY_REF", "env:FLEETENT_PLATFORM_KB_SERVICE_KEY")
     monkeypatch.setenv("FLEETENT_PLATFORM_KB_SERVICE_KEY", "svc-platform")
 
