@@ -406,18 +406,18 @@ describe('kb api', () => {
       uploadTooLarge.result.current.mutateAsync({
         file: new File(['hello world'], 'guide.md', { type: 'text/markdown' }),
       })
-    ).rejects.toMatchObject<ApiError>({
+    ).rejects.toMatchObject({
       status: 413,
       body: { detail: 'upload exceeds max_upload_bytes' },
-    })
+    } satisfies Partial<ApiError>)
 
     await expect(
       uploadMissing.result.current.mutateAsync({
         file: new File(['hello world'], 'guide.md', { type: 'text/markdown' }),
       })
-    ).rejects.toMatchObject<ApiError>({
+    ).rejects.toMatchObject({
       status: 404,
       body: { detail: 'kb not found' },
-    })
+    } satisfies Partial<ApiError>)
   })
 })

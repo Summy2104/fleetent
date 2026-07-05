@@ -191,14 +191,20 @@ describe('knowledge base page', () => {
       expect(docs.queryByText('support.md')).not.toBeInTheDocument()
     })
 
-    // Retired sync action is no longer present in the actions menu.
+    // Retired sync action is no longer present in the actions menu. Wait for the
+    // menu to actually open (and fully close again) so the assertions are not
+    // vacuous and the reopen below cannot race the closing menu on slow CI.
     await user.click(screen.getByRole('button', { name: 'Actions for support' }))
-    expect(screen.queryByText('Sync')).not.toBeInTheDocument()
+    const actionsMenu = await screen.findByRole('menu')
+    expect(within(actionsMenu).queryByText('Sync')).not.toBeInTheDocument()
     await user.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    })
 
     // Delete the support kb via the confirm dialog.
     await user.click(screen.getByRole('button', { name: 'Actions for support' }))
-    await user.click(await screen.findByText('Delete'))
+    await user.click(await screen.findByRole('menuitem', { name: 'Delete' }))
     const confirm = await screen.findByRole('alertdialog')
     await user.click(within(confirm).getByRole('button', { name: 'Delete' }))
     await waitFor(() => {
