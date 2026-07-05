@@ -1,7 +1,8 @@
-import { type ReactNode, useEffect, useState } from 'react'
-import { Inbox, Plus, Trash2 } from 'lucide-react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { ChevronDown, ChevronUp, Inbox, Plus, RefreshCcw, Trash2 } from 'lucide-react'
 
 import { Badge } from '@/components/base/badge'
+import { SimpleSelect } from '@/components/base/simple-select'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,16 +31,27 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
+  type DocumentChunk,
   type KnowledgeBase,
   useCreateKbMutation,
+  useBindAgentMutation,
   useDeleteDocumentMutation,
   useDeleteKbMutation,
+  useDocumentChunksQuery,
   useDocumentsQuery,
+  useKbAgentsQuery,
   useKbsQuery,
+  useSearchKbMutation,
+  useUnbindAgentMutation,
+  useUploadDocumentMutation,
   useUpdateKbMutation,
 } from '@/features/kb/api'
+import { useAgentsQuery } from '@/features/agents/api'
 import { useT } from '@/i18n'
+import { describeApiError } from '@/lib/api-client'
+import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 
 const TENANT = 'default'
@@ -137,64 +149,336 @@ function KbDialog({
   )
 }
 
-function DocumentsDialog({
-  kbId,
-  onOpenChange,
-}: {
-  kbId: string | null
-  onOpenChange: (open: boolean) => void
-}): JSX.Element {
+function ChunkPreview({ chunk }: { chunk: DocumentChunk }): JSX.Element {
   const t = useT()
-  const documents = useDocumentsQuery(kbId)
-  const deleteDocument = useDeleteDocumentMutation(kbId ?? '')
 
   return (
-    <Dialog onOpenChange={onOpenChange} open={Boolean(kbId)}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>{t('kb.documentsTitle', { name: kbId ?? '' })}</DialogTitle>
-          <DialogDescription>{t('kb.documentsDescription')}</DialogDescription>
-        </DialogHeader>
+    <div className="space-y-2 rounded-md border border-border border-dashed bg-muted/20 p-3">
+      <div className="grid gap-1 text-sm">
+        <span className="font-medium text-foreground">{t('kb.chunkSection')}</span>
+        <span className="text-muted-foreground">{chunk.section || '-'}</span>
+      </div>
+      <div className="grid gap-1 text-sm">
+        <span className="font-medium text-foreground">{t('kb.chunkContent')}</span>
+        <p className="whitespace-pre-wrap text-foreground">{chunk.content}</p>
+      </div>
+    </div>
+  )
+}
 
-        <div className="max-h-60 space-y-2 overflow-y-auto">
-          {(documents.data ?? []).map((document) => (
-            <div
-              className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
-              key={document.document_id}
-            >
-              <div className="min-w-0">
-                <p className="truncate font-medium text-foreground text-sm">{document.filename}</p>
-                <p className="text-muted-foreground text-xs">{t('kb.chunksCount', { count: document.chunks })}</p>
-              </div>
-              <Button
-                aria-label={t('kb.deleteDocument', { name: document.filename })}
-                onClick={() =>
-                  void deleteDocument.mutateAsync({ document_id: document.document_id, tenant_id: TENANT })
-                }
-                size="icon"
-                variant="ghost"
-              >
-                <Trash2 className="size-4" />
-              </Button>
-            </div>
-          ))}
-          {documents.data && documents.data.length === 0 ? (
-            <p className="text-muted-foreground text-sm">{t('kb.noDocuments')}</p>
-          ) : null}
+function DocumentsSection({ kbId }: { kbId: string }): JSX.Element {
+  const t = useT()
+  const documents = useDocumentsQuery(kbId)
+  const deleteDocument = useDeleteDocumentMutation(kbId)
+  const uploadDocument = useUploadDocumentMutation(kbId)
+  const [expandedDocumentId, setExpandedDocumentId] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const chunks = useDocumentChunksQuery(kbId, expandedDocumentId)
+
+  useEffect(() => {
+    if (expandedDocumentId && !(documents.data ?? []).some((document) => document.document_id === expandedDocumentId)) {
+      setExpandedDocumentId(null)
+    }
+  }, [documents.data, expandedDocumentId])
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h3 className="font-semibold text-lg">{t('kb.documentsTitle', { name: kbId })}</h3>
+          <p className="text-muted-foreground text-sm">{t('kb.documentsDescription')}</p>
         </div>
-      </DialogContent>
-    </Dialog>
+        <Button onClick={() => void documents.refetch()} size="sm" variant="outline">
+          <RefreshCcw className="size-4" /> {t('kb.refresh')}
+        </Button>
+      </div>
+
+      <div className="grid gap-3 rounded-lg border border-border p-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+        <div className="grid gap-2">
+          <Label htmlFor="kb-upload-file">{t('kb.uploadDocument')}</Label>
+          <input
+            accept="*/*"
+            className="h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-2.5 py-1 text-base shadow-xs outline-none transition-[color,box-shadow] file:inline-flex file:h-7 file:border-0 file:bg-transparent file:font-medium file:text-foreground file:text-sm placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 md:text-sm dark:bg-input/30 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40"
+            id="kb-upload-file"
+            ref={fileInputRef}
+            type="file"
+          />
+        </div>
+        <Button
+          disabled={uploadDocument.isPending}
+          onClick={() => {
+            const file = fileInputRef.current?.files?.[0]
+            if (!file) {
+              return
+            }
+
+            void uploadDocument
+              .mutateAsync({ file })
+              .then((result) => {
+                toast.success(`已入队（job ${result.job_id}）`)
+                if (fileInputRef.current) {
+                  fileInputRef.current.value = ''
+                }
+              })
+              .catch((error) => {
+                toast.error(describeApiError(error))
+              })
+          }}
+        >
+          {t('kb.uploadDocument')}
+        </Button>
+      </div>
+
+      <div className="space-y-3">
+        {(documents.data ?? []).map((document) => {
+          const expanded = expandedDocumentId === document.document_id
+          return (
+            <div className="space-y-3 rounded-lg border border-border p-4" key={document.document_id}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 space-y-1">
+                  <p className="truncate font-medium text-foreground text-sm">{document.filename}</p>
+                  <p className="text-muted-foreground text-xs">{t('kb.chunksCount', { count: document.chunks })}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    aria-label={
+                      expanded ? t('kb.hideChunksFor', { name: document.filename }) : t('kb.previewChunksFor', { name: document.filename })
+                    }
+                    onClick={() =>
+                      setExpandedDocumentId((current) => (current === document.document_id ? null : document.document_id))
+                    }
+                    size="sm"
+                    variant="outline"
+                  >
+                    {expanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+                    {expanded ? t('kb.hideChunks') : t('kb.previewChunks')}
+                  </Button>
+                  <Button
+                    aria-label={t('kb.deleteDocument', { name: document.filename })}
+                    onClick={() =>
+                      void deleteDocument.mutateAsync({ document_id: document.document_id, tenant_id: TENANT })
+                    }
+                    size="icon"
+                    variant="ghost"
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
+                </div>
+              </div>
+
+              {expanded ? (
+                <div className="space-y-3">
+                  {chunks.isPending ? <p className="text-muted-foreground text-sm">{t('kb.loadingChunks')}</p> : null}
+                  {(chunks.data ?? []).map((chunk) => (
+                    <ChunkPreview chunk={chunk} key={chunk.chunk_id} />
+                  ))}
+                  {chunks.data && chunks.data.length === 0 ? (
+                    <p className="text-muted-foreground text-sm">{t('kb.noChunks')}</p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          )
+        })}
+        {documents.data && documents.data.length === 0 ? <p className="text-muted-foreground text-sm">{t('kb.noDocuments')}</p> : null}
+      </div>
+    </div>
+  )
+}
+
+function AgentsSection({ kbId }: { kbId: string }): JSX.Element {
+  const t = useT()
+  const agents = useAgentsQuery()
+  const bindings = useKbAgentsQuery(kbId)
+  const bindAgent = useBindAgentMutation(kbId)
+  const unbindAgent = useUnbindAgentMutation(kbId)
+  const [selectedAgentId, setSelectedAgentId] = useState('')
+
+  const boundAgentIds = bindings.data?.agents ?? []
+  const candidateOptions = (agents.data ?? [])
+    .filter((agent) => agent.agent_id !== undefined && !boundAgentIds.includes(agent.agent_id))
+    .map((agent) => ({
+      label: agent.agent_name,
+      value: String(agent.agent_id),
+    }))
+
+  useEffect(() => {
+    if (selectedAgentId && !candidateOptions.some((option) => option.value === selectedAgentId)) {
+      setSelectedAgentId('')
+    }
+  }, [candidateOptions, selectedAgentId])
+
+  const agentNameById = new Map(
+    (agents.data ?? [])
+      .filter((agent) => agent.agent_id !== undefined)
+      .map((agent) => [agent.agent_id as number, agent.agent_name])
+  )
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+        <div className="grid gap-2">
+          <Label htmlFor="kb-agent-select">{t('kb.agentLabel')}</Label>
+          <SimpleSelect
+            options={candidateOptions}
+            onValueChange={setSelectedAgentId}
+            placeholder={t('kb.agentPlaceholder')}
+            triggerAriaLabel={t('kb.agentLabel')}
+            triggerId="kb-agent-select"
+            value={selectedAgentId}
+          />
+        </div>
+        <Button
+          disabled={!selectedAgentId || bindAgent.isPending}
+          onClick={() =>
+            void bindAgent.mutateAsync({ agent_id: Number(selectedAgentId), tenant_id: TENANT }).then(() => {
+              setSelectedAgentId('')
+            })
+          }
+        >
+          {t('kb.bindAgent')}
+        </Button>
+      </div>
+
+      <div className="space-y-3">
+        {boundAgentIds.map((agentId) => (
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-border p-3" key={agentId}>
+            <div>
+              <p className="font-medium text-foreground text-sm">{agentNameById.get(agentId) ?? agentId}</p>
+              <p className="text-muted-foreground text-xs">{agentId}</p>
+            </div>
+            <Button
+              aria-label={t('kb.unbindAgentFor', { id: agentId })}
+              onClick={() => void unbindAgent.mutateAsync({ agent_id: agentId, tenant_id: TENANT })}
+              size="sm"
+              variant="outline"
+            >
+              {t('kb.unbindAgent')}
+            </Button>
+          </div>
+        ))}
+        {bindings.data && bindings.data.agents.length === 0 ? (
+          <p className="text-muted-foreground text-sm">{t('kb.noBoundAgents')}</p>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function PlaygroundSection({ kbId }: { kbId: string }): JSX.Element {
+  const t = useT()
+  const searchKb = useSearchKbMutation()
+  const [query, setQuery] = useState('')
+  const [topK, setTopK] = useState('5')
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  const results = searchKb.data?.results ?? []
+
+  const submit = async (): Promise<void> => {
+    setErrorMessage(null)
+    try {
+      await searchKb.mutateAsync({
+        kb_id: kbId,
+        query,
+        tenant_id: TENANT,
+        top_k: topK.trim() === '' ? undefined : Number(topK),
+      })
+    } catch (error) {
+      setErrorMessage(describeApiError(error))
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_140px_auto] md:items-end">
+        <div className="grid gap-2">
+          <Label htmlFor="kb-playground-query">{t('kb.playgroundQueryLabel')}</Label>
+          <Input id="kb-playground-query" onChange={(event) => setQuery(event.target.value)} value={query} />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="kb-playground-topk">{t('kb.playgroundTopKLabel')}</Label>
+          <Input id="kb-playground-topk" onChange={(event) => setTopK(event.target.value)} value={topK} />
+        </div>
+        <Button disabled={!query.trim() || searchKb.isPending} onClick={() => void submit()}>
+          {t('kb.runSearch')}
+        </Button>
+      </div>
+
+      {errorMessage ? <p className="text-destructive text-sm">{errorMessage}</p> : null}
+      {!errorMessage && searchKb.data && results.length === 0 ? (
+        <p className="text-muted-foreground text-sm">{t('kb.noSearchResults')}</p>
+      ) : null}
+
+      <div className="space-y-3">
+        {results.map((result) => (
+          <div className="space-y-2 rounded-lg border border-border p-4" key={result.chunk_id}>
+            <div className="flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
+              <span>{result.filename}</span>
+              <span>{result.score?.toFixed(2) ?? '-'}</span>
+            </div>
+            <p className="font-medium text-foreground text-sm">{result.section || '-'}</p>
+            <p className="whitespace-pre-wrap text-foreground text-sm">{result.content}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function KbDetailPanel({
+  activeTab,
+  kb,
+  onTabChange,
+}: {
+  activeTab: 'documents' | 'agents' | 'playground'
+  kb: KnowledgeBase | null
+  onTabChange: (value: 'documents' | 'agents' | 'playground') => void
+}): JSX.Element {
+  const t = useT()
+
+  if (!kb) {
+    return (
+      <div className="rounded-xl border border-border border-dashed bg-muted/10 p-6 text-muted-foreground text-sm">
+        {t('kb.selectKbPrompt')}
+      </div>
+    )
+  }
+
+  return (
+    <section className="space-y-4 rounded-xl border border-border bg-card p-5">
+      <div className="space-y-1">
+        <h3 className="font-semibold text-lg">{t('kb.detailTitle', { name: kb.kb_id })}</h3>
+        <p className="text-muted-foreground text-sm">{t('kb.detailDescription')}</p>
+      </div>
+
+      <Tabs onValueChange={(value) => onTabChange(value as 'documents' | 'agents' | 'playground')} value={activeTab}>
+        <TabsList>
+          <TabsTrigger value="documents">{t('kb.documents')}</TabsTrigger>
+          <TabsTrigger value="agents">{t('kb.tabAgents')}</TabsTrigger>
+          <TabsTrigger value="playground">{t('kb.tabPlayground')}</TabsTrigger>
+        </TabsList>
+        <TabsContent value="documents">
+          <DocumentsSection kbId={kb.kb_id} />
+        </TabsContent>
+        <TabsContent value="agents">
+          <AgentsSection kbId={kb.kb_id} />
+        </TabsContent>
+        <TabsContent value="playground">
+          <PlaygroundSection kbId={kb.kb_id} />
+        </TabsContent>
+      </Tabs>
+    </section>
   )
 }
 
 function KbRow({
   kb,
   onEdit,
-  onDocuments,
+  onOpenDetails,
 }: {
   kb: KnowledgeBase
   onEdit: () => void
-  onDocuments: () => void
+  onOpenDetails: (tab: 'documents' | 'agents' | 'playground') => void
 }): JSX.Element {
   const t = useT()
   const remove = useDeleteKbMutation(kb.kb_id)
@@ -203,8 +487,10 @@ function KbRow({
   return (
     <tr className="border-border border-b last:border-0 hover:bg-accent/30">
       <td className="px-4 py-3">
-        <p className="font-semibold text-foreground text-sm">{kb.kb_id}</p>
-        {kb.description ? <p className="line-clamp-1 text-muted-foreground text-sm">{kb.description}</p> : null}
+        <button className="text-left" onClick={() => onOpenDetails('documents')} type="button">
+          <p className="font-semibold text-foreground text-sm">{kb.kb_id}</p>
+          {kb.description ? <p className="line-clamp-1 text-muted-foreground text-sm">{kb.description}</p> : null}
+        </button>
       </td>
       <td className="px-4 py-3 text-muted-foreground text-sm">{kb.doc_count}</td>
       <td className="px-4 py-3 text-muted-foreground text-sm">{kb.chunk_count}</td>
@@ -225,7 +511,9 @@ function KbRow({
           />
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => setTimeout(onEdit, 0)}>{t('kb.edit')}</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setTimeout(onDocuments, 0)}>{t('kb.documents')}</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setTimeout(() => onOpenDetails('documents'), 0)}>
+              {t('kb.documents')}
+            </DropdownMenuItem>
             {!kb.archived ? (
               <>
                 <DropdownMenuSeparator />
@@ -262,7 +550,21 @@ export function KnowledgeBasePage(): JSX.Element {
 
   const [kbDialogOpen, setKbDialogOpen] = useState(false)
   const [editingKb, setEditingKb] = useState<KnowledgeBase | null>(null)
-  const [documentsFor, setDocumentsFor] = useState<string | null>(null)
+  const [selectedKbId, setSelectedKbId] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<'documents' | 'agents' | 'playground'>('documents')
+
+  useEffect(() => {
+    if (selectedKbId && !(kbs.data ?? []).some((kb) => kb.kb_id === selectedKbId)) {
+      setSelectedKbId(null)
+    }
+  }, [kbs.data, selectedKbId])
+
+  const selectedKb = (kbs.data ?? []).find((kb) => kb.kb_id === selectedKbId) ?? null
+
+  const openDetails = (kbId: string, tab: 'documents' | 'agents' | 'playground'): void => {
+    setSelectedKbId(kbId)
+    setActiveTab(tab)
+  }
 
   return (
     <div className="space-y-5">
@@ -300,11 +602,11 @@ export function KnowledgeBasePage(): JSX.Element {
                 <KbRow
                   kb={kb}
                   key={kb.kb_id}
-                  onDocuments={() => setDocumentsFor(kb.kb_id)}
                   onEdit={() => {
                     setEditingKb(kb)
                     setKbDialogOpen(true)
                   }}
+                  onOpenDetails={(tab) => openDetails(kb.kb_id, tab)}
                 />
               ))}
               {kbs.data && kbs.data.length === 0 ? <EmptyRow colSpan={6} label={t('kb.noKbs')} /> : null}
@@ -313,8 +615,8 @@ export function KnowledgeBasePage(): JSX.Element {
         </div>
       </div>
 
+      <KbDetailPanel activeTab={activeTab} kb={selectedKb} onTabChange={setActiveTab} />
       <KbDialog editing={editingKb} onOpenChange={setKbDialogOpen} open={kbDialogOpen} />
-      <DocumentsDialog kbId={documentsFor} onOpenChange={(open) => !open && setDocumentsFor(null)} />
     </div>
   )
 }
