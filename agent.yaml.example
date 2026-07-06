@@ -357,6 +357,12 @@ webhooks:
   enabled: true                   # set false to reject all inbound webhook calls
   max_body_bytes: 1048576         # max webhook request body size (bytes); default 1 MiB
 
+workflow:
+  enabled: false                  # set true to enable declarative workflow.yaml orchestration
+                                  # (run_workflow/workflow_status tools + `fleetent workflow` CLI);
+                                  # definitions live in FLEETENT_WORKFLOWS_DIR (default <home>/workflows)
+  max_parallel: 4                 # max steps executed concurrently per run
+
 # ── sandbox backend (code execution) ──
 sandbox:
   backend: null                   # null = inherit platform.yaml sandbox.backend (default docker);

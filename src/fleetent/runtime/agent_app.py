@@ -73,6 +73,7 @@ class AgentRuntime:
     app: FastAPI | None = None
     port: int | None = None
     scheduler: Any = None
+    workflow_engine: Any = None
 
     async def stop(self) -> None:
         # Input shutdown only (stop accepting new work). MCP sessions are released later,
@@ -83,6 +84,8 @@ class AgentRuntime:
             await _stop_step("telegram_supervisor", self.telegram_supervisor.stop_all())
         if self.scheduler is not None:
             await _stop_step("scheduler", self.scheduler.shutdown())
+        if self.workflow_engine is not None:
+            await _stop_step("workflow_engine", self.workflow_engine.stop())
         from fleetent.reflection import scheduler as reflection_scheduler
 
         await _stop_step("reflection_scheduler", reflection_scheduler.stop_reflection_scheduler())
@@ -445,6 +448,9 @@ def _init_agent_db_schema(data_dir: Path, *, agent_name: str, tenant_id: str = "
     runtime_context.set_state_db(agent_state_db)
     sub_agent_lifecycle.set_state_db(agent_state_db)
     schedule_store.set_state_db(agent_state_db)
+    from fleetent.workflow import store as workflow_store
+
+    workflow_store.set_state_db(agent_state_db)
     # unified-file-exchange: wire the artifact ledger + per-scope hard-link views root
     # (data_dir is <agent_home>/data, so the exchange tree lives under data_dir.parent).
     from fleetent import artifact_exchange
@@ -632,6 +638,37 @@ async def _start_scheduler(agent: AgentFile) -> Any:
     return scheduler
 
 
+async def _start_workflow_engine(agent: AgentFile) -> Any:
+    """Create + start the per-agent workflow engine, or None when disabled.
+
+    Wires the process-scoped engine + enabled flag the trigger tools read, and starts
+    the cold-sweep owner task. Connectors are resolved at delivery time from the live
+    registry (like the cron scheduler) so a run started before a connector connects
+    still delivers.
+    """
+    from fleetent import workflow
+    from fleetent.workflow.engine import WorkflowEngine
+
+    workflow.set_enabled(agent.workflow.enabled)
+    if not agent.workflow.enabled:
+        workflow.set_engine(None)
+        return None
+    from fleetent.im_gateway import connector_registry
+    from fleetent.outbound_connectors import resolve_for_runtime
+
+    agent_name = agent.name
+    engine = WorkflowEngine(
+        agent_name=agent_name,
+        max_parallel=agent.workflow.max_parallel,
+        connectors_provider=lambda: resolve_for_runtime(
+            agent_name, connector_registry.snapshot(agent_name)
+        ),
+    )
+    workflow.set_engine(engine)
+    await engine.start()
+    return engine
+
+
 async def boot(
     agent_name: str,
     *,
@@ -690,6 +727,7 @@ async def boot(
         await telegram_supervisor.start(agent.name)
 
     scheduler = await _start_scheduler(agent) if with_infra else None
+    workflow_engine = await _start_workflow_engine(agent) if with_infra else None
 
     app = build_app(agent.name) if port is not None else None
     _logger.info("agent_runtime_booted", agent=agent.name, http_port=port, im=start_im)
@@ -697,6 +735,7 @@ async def boot(
         agent=agent,
         supervisor=supervisor,
         telegram_supervisor=telegram_supervisor,
+        workflow_engine=workflow_engine,
         app=app,
         port=port,
         scheduler=scheduler,

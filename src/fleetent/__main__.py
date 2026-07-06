@@ -139,6 +139,12 @@ def main(argv: list[str] | None = None) -> None:
         tui_app.main(argv[1:])
         return
 
+    if argv and argv[0] == "workflow":
+        from fleetent.workflow import cli as workflow_cli
+
+        workflow_cli.main(argv[1:])
+        return
+
     if argv and argv[0] == "kb":
         if argv[1:2] == ["worker"]:
             from fleetent.knowledge_base import worker as kb_worker

@@ -1,0 +1,22 @@
+name: demo
+description: 示例工作流——分析一段输入并把摘要通知回发起会话
+inputs:
+  topic:
+    type: string
+    default: "本周进展"
+
+steps:
+  - id: analyze
+    type: agent
+    prompt: |
+      针对主题「${inputs.topic}」写一句话摘要。只输出一个 JSON 对象。
+    output_schema:
+      type: object
+      required: [summary]
+      properties:
+        summary:
+          type: string
+
+  - id: notify
+    type: notify
+    text: "📋 ${inputs.topic} 摘要：${steps.analyze.output.summary}"

@@ -429,6 +429,15 @@ class ReflectionAutoApplySettings(BaseModel):
     allow_low_risk: bool = False
 
 
+class WorkflowSettings(BaseModel):
+    """Per-agent declarative workflow engine settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    max_parallel: int = 4
+
+
 class AgentFile(BaseModel):
     """Schema for a self-contained ``agent.yaml``."""
 
@@ -544,6 +553,7 @@ class AgentFile(BaseModel):
     mcp: McpSettings = Field(default_factory=McpSettings)
     scheduling: SchedulingSettings = Field(default_factory=SchedulingSettings)
     webhooks: WebhooksSettings = Field(default_factory=WebhooksSettings)
+    workflow: WorkflowSettings = Field(default_factory=WorkflowSettings)
     im: ImBinding = Field(default_factory=ImBinding)
     bindings: AgentBindings = Field(default_factory=AgentBindings)
     approval: ApprovalRouting | None = None

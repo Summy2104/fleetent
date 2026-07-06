@@ -23,6 +23,7 @@ _COMPONENTS = {
     "session",
     "tools",
     "vector_store",
+    "workflow",
 }
 
 _ALLOWED_VECTOR_STORE_EXTERNAL_IMPORTS = {

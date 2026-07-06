@@ -638,3 +638,62 @@ MIGRATIONS.append(
         "ON scheduled_task_runs (task_id, id)",
     )
 )
+
+# ── workflow_runs / workflow_step_runs (add-workflow-engine, M1) ───────────────
+# Declarative workflow orchestration state, agent-side. workflow_runs freezes the
+# definition + principal per run (reproducible, auditable); workflow_step_runs is
+# the per-step attempt ledger driving the DAG engine (claim + resume + retry).
+MIGRATIONS.append(
+    (
+        MIGRATIONS[-1][0] + 1,
+        """
+        CREATE TABLE IF NOT EXISTS workflow_runs (
+            id TEXT PRIMARY KEY,
+            workflow_name TEXT NOT NULL,
+            definition_json TEXT NOT NULL,
+            status TEXT NOT NULL,
+            inputs_json TEXT,
+            principal_json TEXT,
+            origin_json TEXT,
+            deliver_json TEXT,
+            error TEXT,
+            created_at TEXT NOT NULL,
+            started_at TEXT,
+            ended_at TEXT
+        )
+        """,
+    )
+)
+MIGRATIONS.append(
+    (
+        MIGRATIONS[-1][0] + 1,
+        """
+        CREATE TABLE IF NOT EXISTS workflow_step_runs (
+            run_id TEXT NOT NULL,
+            step_id TEXT NOT NULL,
+            attempt INTEGER NOT NULL DEFAULT 1,
+            status TEXT NOT NULL,
+            output_json TEXT,
+            error TEXT,
+            claimed_at TEXT,
+            started_at TEXT,
+            ended_at TEXT,
+            PRIMARY KEY (run_id, step_id, attempt)
+        )
+        """,
+    )
+)
+MIGRATIONS.append(
+    (
+        MIGRATIONS[-1][0] + 1,
+        "CREATE INDEX IF NOT EXISTS idx_workflow_runs_name "
+        "ON workflow_runs (workflow_name, created_at)",
+    )
+)
+MIGRATIONS.append(
+    (
+        MIGRATIONS[-1][0] + 1,
+        "CREATE INDEX IF NOT EXISTS idx_workflow_step_runs_run "
+        "ON workflow_step_runs (run_id)",
+    )
+)

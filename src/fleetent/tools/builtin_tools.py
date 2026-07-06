@@ -1172,6 +1172,70 @@ async def invoke_agent(
     )
 
 
+def _workflow_available() -> bool:
+    from fleetent import workflow
+
+    return workflow.is_enabled() and workflow.get_engine() is not None
+
+
+@tool(availability=_workflow_available)
+async def run_workflow(
+    name: str, inputs: str = "{}", tool_context: ToolContext | None = None
+) -> str:
+    """Start a declarative workflow by name. inputs is a JSON object of start params."""
+    from fleetent import workflow
+
+    engine = workflow.get_engine()
+    if engine is None:
+        return "workflow engine is not available"
+    try:
+        wf = workflow.load_definition(name)
+    except workflow.WorkflowNotFoundError as exc:
+        return str(exc)
+    except workflow.WorkflowDefinitionError as exc:
+        return f"workflow {name!r} is invalid: {exc}"
+
+    try:
+        parsed_inputs = json.loads(inputs) if inputs else {}
+    except (ValueError, TypeError) as exc:
+        return f"invalid inputs JSON: {exc}"
+    if not isinstance(parsed_inputs, dict):
+        return "inputs must be a JSON object"
+
+    principal = getattr(tool_context, "principal", None) if tool_context else None
+    principal_dict = (
+        {"user_id": principal.user_id, "tenant_id": principal.tenant_id}
+        if principal is not None
+        else None
+    )
+    address = getattr(tool_context, "conversation_address", None) if tool_context else None
+    origin = address.to_dict() if address is not None else None
+
+    try:
+        run_id = engine.start_run(
+            wf, inputs=parsed_inputs, principal=principal_dict, origin=origin
+        )
+    except workflow.WorkflowInputError as exc:
+        return f"cannot start workflow {name!r}: {exc}"
+    engine.spawn(run_id)
+    return f"started workflow {name!r} as run {run_id} (use workflow_status to check)"
+
+
+@tool(availability=_workflow_available)
+def workflow_status(run_id: str) -> str:
+    """Return a workflow run's status and per-step status summary."""
+    from fleetent.workflow import store
+
+    run = store.get_run(run_id)
+    if run is None:
+        return f"run {run_id!r} not found"
+    lines = [f"run {run_id} [{run['status']}] workflow={run['workflow_name']}"]
+    for step in store.list_steps(run_id):
+        suffix = f" — {step['error']}" if step.get("error") else ""
+        lines.append(f"  {step['step_id']} [{step['status']}]{suffix}")
+    return "\n".join(lines)
+
+
 def _resolve_self_dm_redirect(
     target: str, target_type: str, address: Any, sender_id: str
 ) -> dict[str, Any] | None:

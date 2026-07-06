@@ -147,6 +147,22 @@ def tool(
     return _register
 
 
+def get_schema(name: str) -> ToolSchema | None:
+    """Return a single tool's OpenAI-format schema by name, or None if unregistered.
+
+    Unlike ``get_schemas()`` this does not apply visibility/availability filtering — it
+    is for offline inspection (e.g. workflow load-time arg validation) that must see a
+    tool's parameter contract regardless of current runtime availability.
+    """
+    entry = _registry.get(name)
+    return entry[1] if entry is not None else None
+
+
+def is_registered(name: str) -> bool:
+    """Whether a tool with this exact name is in the registry."""
+    return name in _registry
+
+
 def get_risk_level(name: str) -> str:
     """Return a tool's static risk level, defaulting to 'none'.
 

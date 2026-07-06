@@ -119,6 +119,18 @@ def platform_env_path() -> Path:
     return base_dir() / ".env"
 
 
+def workflows_dir() -> Path:
+    """Directory holding workflow.yaml definitions.
+
+    Precedence: ``FLEETENT_WORKFLOWS_DIR`` env override, else ``<config_dir>/workflows``.
+    Mirrors the agents/skills directory convention.
+    """
+    explicit = os.environ.get("FLEETENT_WORKFLOWS_DIR")
+    if explicit:
+        return Path(explicit).expanduser()
+    return base_dir() / "workflows"
+
+
 def sessions_dir() -> Path:
     return data_dir() / "sessions"
 
