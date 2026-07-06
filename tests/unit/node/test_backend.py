@@ -108,6 +108,19 @@ def test_local_backend_agent_endpoint_returns_loopback_and_gateway_port(tmp_path
     assert backend.agent_endpoint("support", "tenant-1") == ("127.0.0.1", 9011)
 
 
+def test_local_backend_agent_endpoint_raises_when_gateway_port_missing(tmp_path) -> None:
+    from fleetent.node.backend import LocalProcessBackend
+
+    backend = LocalProcessBackend(_config(tmp_path))
+
+    try:
+        backend.agent_endpoint("support", "tenant-1")
+    except KeyError as exc:
+        assert exc.args == ("support",)
+    else:
+        raise AssertionError("expected KeyError for missing gateway port")
+
+
 def test_local_backend_spawn_enables_agent_self_hosted_im(monkeypatch, tmp_path) -> None:
     """agent-hosted-im: node no longer passes --no-im; the agent self-hosts its IM connection."""
     from fleetent.node.backend import LocalProcessBackend
@@ -162,9 +175,6 @@ def test_container_backend_spawn_runs_agent_container_with_labels_network_and_mo
             "--mount",
             f"type=bind,source={tmp_path / 'tenants/tenant-1/agents/support'},"
             f"target={tmp_path / 'tenants/tenant-1/agents/support'},readonly=false",
-            "--mount",
-            f"type=bind,source={tmp_path / 'tenants/tenant-1/kb/data'},"
-            f"target={tmp_path / 'tenants/tenant-1/kb/data'},readonly=true",
             "fleetent:test",
             "fleetent",
             "agent",
@@ -178,36 +188,18 @@ def test_container_backend_spawn_runs_agent_container_with_labels_network_and_mo
     ]
 
 
-def test_container_backend_spawn_migrates_tenant_kb_before_readonly_mount(
-    monkeypatch, tmp_path
-) -> None:
-    from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
-    from fleetent.node import backend as backend_module
+def test_container_backend_spawn_does_not_touch_tenant_kb(monkeypatch, tmp_path) -> None:
     from fleetent.node.backend import ContainerBackend
 
     def fake_run(cmd: list[str], **kwargs):
         return subprocess.CompletedProcess(cmd, 0, stdout="container-id\n", stderr="")
 
-    migrated: list[tuple[object, list[tuple[int, str]]]] = []
-    substrates: list[str] = []
-
-    def fake_create_substrate(database_url: str) -> object:
-        substrates.append(database_url)
-        return object()
-
-    def fake_migrate(database: object, migrations: list[tuple[int, str]]) -> None:
-        migrated.append((database, migrations))
-
     monkeypatch.setattr(subprocess, "run", fake_run)
-    monkeypatch.setattr(backend_module, "create_substrate", fake_create_substrate)
-    monkeypatch.setattr(backend_module, "migrate", fake_migrate)
 
     backend = ContainerBackend(_container_config(tmp_path))
     backend.spawn("support", "tenant-1")
 
-    assert substrates == [f"sqlite:///{tmp_path / 'tenants/tenant-1/kb/data/kb.db'}"]
-    assert [migrations for _, migrations in migrated] == [KB_MIGRATIONS]
-    assert (tmp_path / "tenants/tenant-1/kb/data/kb_vectors.db").exists()
+    assert not (tmp_path / "tenants/tenant-1/kb").exists()
 
 
 def test_container_backend_is_alive_uses_label_filtered_running_container(
@@ -331,6 +323,7 @@ def test_container_backend_agent_endpoint_returns_container_name_and_internal_po
         "fleetent-agent-tenant-1-support",
         8766,
     )
+    assert backend.gateway_port("support", "tenant-1") == 8766
 
 
 def test_local_backend_stop_uses_agent_stop(monkeypatch, tmp_path) -> None:
@@ -390,6 +383,14 @@ def test_local_backend_is_alive_reads_pid_file_and_checks_process(monkeypatch, t
 
     assert backend.is_alive("support") == 12345
     assert kills == [(12345, 0)]
+
+
+def test_local_backend_is_alive_returns_none_without_pid_file(tmp_path) -> None:
+    from fleetent.node.backend import LocalProcessBackend
+
+    backend = LocalProcessBackend(_config(tmp_path))
+
+    assert backend.is_alive("support") is None
 
 
 def test_local_backend_is_alive_returns_none_for_stale_pid(monkeypatch, tmp_path) -> None:

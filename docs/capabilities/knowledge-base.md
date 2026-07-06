@@ -22,8 +22,10 @@
 
 ## 平台绑定部署前提
 
-- 通过平台把 KB 绑定到 agent 之后，platform 只会在 `kb_serve.url` 和 `kb_serve.service_key_ref` 都已配置时，把 agent 物化为 HTTP KB provider；任一缺失时保持本地 provider，不会因为缺配置而物化失败。
+- managed agent 的 KB 接线唯一来自 platform 物化：只有在 `kb_serve.url` 和 `kb_serve.service_key_ref` 都已配置时，platform 才会把 agent 物化为 HTTP KB provider；node 不再读取 `kb-service.yaml`、不再注入 provider 或 secret 兜底。
+- 若 `kb_serve` 缺配置，platform 不会物化可用的 managed KB provider；这种 agent 在 managed 部署下不会自动获得检索能力。本地 provider 仅对与 KB 同机的 standalone / dev 形态有效。
 - `kb_serve.url` 必须是 agent 所在 node 可达的地址。多机部署禁止使用 loopback（`127.0.0.1` / `localhost`）；只有 platform、node、kb-service 同机时才允许 loopback。
+- managed agent 容器不再挂载任何 tenant KB 文件目录；KB 数据面只由 `kb-serve` / `kb-worker` 访问，agent 通过 HTTP provider 检索。
 - KB service 启动前提之一是 embedding endpoint 可用；embedding 不可用时 `kb serve` 不会成功启动，因此平台绑定要生效，除了配置 `kb_serve` 之外还必须先满足 embedding 服务可达。
 
 **调用关系**：
