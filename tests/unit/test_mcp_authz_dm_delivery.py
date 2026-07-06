@@ -83,7 +83,11 @@ async def test_managed_fallback_enqueues_when_no_connector(monkeypatch):
 
     enqueued: list[tuple[str, str]] = []
     monkeypatch.setattr(oc, "is_node_managed_runtime", lambda: True)
-    monkeypatch.setattr(oc, "notify_user", lambda user_id, msg: enqueued.append((user_id, msg)))
+
+    async def _notify(user_id, msg, **kwargs):
+        enqueued.append((user_id, msg))
+
+    monkeypatch.setattr(oc, "notify_user", _notify)
 
     deliverer = make_mcp_authz_deliverer(_no_connector_ctx())
     assert deliverer is not None  # always returns a deliverer (never None)

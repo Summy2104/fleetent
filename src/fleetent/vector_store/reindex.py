@@ -5,6 +5,7 @@ import time
 from collections.abc import Awaitable
 from dataclasses import dataclass, field
 from types import ModuleType
+from typing import Protocol, cast
 
 from fleetent.vector_store import namespaces, runtime
 
@@ -45,6 +46,12 @@ knowledge_base: ModuleType | None = _knowledge_base_module()
 
 _BACKOFF_SECONDS = (1.0, 2.0, 4.0)
 _PACING_SECONDS = 0.2
+
+
+class _VectorBackendLike(Protocol):
+    async def upsert(self, item_id: str, vector: list[float], namespace: str) -> None: ...
+
+    async def clear_namespace(self, namespace: str) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -134,11 +141,11 @@ def _items_for_request(request: ReindexRequest) -> list[IndexableItem]:
 
 
 def _rebuild(request: ReindexRequest, namespace: str, items: list[IndexableItem]) -> ReindexSummary:
-    _run_sync(runtime.clear_namespace(namespace))
+    _clear_namespace(request, namespace)
     reindexed = 0
     failed = 0
     for item in items:
-        if _upsert_with_retry(item):
+        if _upsert_with_retry(request, item):
             reindexed += 1
         else:
             failed += 1
@@ -154,16 +161,46 @@ def _rebuild(request: ReindexRequest, namespace: str, items: list[IndexableItem]
     )
 
 
-def _upsert_with_retry(item: IndexableItem) -> bool:
+def _clear_namespace(request: ReindexRequest, namespace: str) -> None:
+    backend = _injected_backend(request)
+    if backend is None:
+        _run_sync(runtime.clear_namespace(namespace))
+        return
+    _run_sync(backend.clear_namespace(namespace))
+
+
+def _upsert_with_retry(request: ReindexRequest, item: IndexableItem) -> bool:
     for attempt in range(len(_BACKOFF_SECONDS) + 1):
         try:
-            _run_sync(runtime.upsert(item.id, item.content, item.namespace))
+            _upsert_item(request, item)
             return True
         except Exception:
             if attempt == len(_BACKOFF_SECONDS):
                 return False
             _sleep(_BACKOFF_SECONDS[attempt])
     return False
+
+
+def _upsert_item(request: ReindexRequest, item: IndexableItem) -> None:
+    backend = _injected_backend(request)
+    if backend is None:
+        _run_sync(runtime.upsert(item.id, item.content, item.namespace))
+        return
+    vector = asyncio.run(_embed_for_reindex(item.content))
+    _run_sync(backend.upsert(item.id, vector, item.namespace))
+
+
+def _injected_backend(request: ReindexRequest) -> _VectorBackendLike | None:
+    if request.owner != "knowledge_base":
+        return None
+    module = knowledge_base if knowledge_base is not None else _knowledge_base_module()
+    runtime_module = getattr(module, "runtime", None)
+    if runtime_module is None:
+        return None
+    try:
+        return cast(_VectorBackendLike, runtime_module._vector_backend())
+    except RuntimeError:
+        return None
 
 
 def _sleep(seconds: float) -> None:
@@ -178,3 +215,7 @@ def _run_sync(result: object) -> None:
 
 async def _await_result(result: Awaitable[object]) -> None:
     await result
+
+
+async def _embed_for_reindex(content: str) -> list[float]:
+    return await runtime.embed_text(content)

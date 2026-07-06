@@ -7,6 +7,7 @@ import io
 import tarfile
 
 import pytest
+import yaml
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
@@ -113,7 +114,7 @@ def test_get_desired_state_returns_only_enabled_agents_for_node(node_client: Tes
 
     agent_admin_store.disable(disabled.id)
     agent_admin_store.archive(archived.id)
-    agent_store.set_im_capabilities("enabled", supports_dm=True, supports_groups=False)
+    agent_store.set_im_capabilities(enabled.id, supports_dm=True, supports_groups=False)
 
     response = node_client.get(
         "/nodes/node-a/desired-state",
@@ -127,11 +128,95 @@ def test_get_desired_state_returns_only_enabled_agents_for_node(node_client: Tes
     config = payload["agents"][0]["config"]
     assert config["name"] == "enabled"
     assert config["system_prompt"] == "Help users"
-    assert config["models"]["targets"][0]["api_key_env"] == "FLEETENT_AGENT_ENABLED_MODEL"
+    # Overriding only the "default" route also keeps memory_extraction/kb_extraction/vision/
+    # embedding alive on their baseline targets, so look up the target the "default" route
+    # actually resolves to rather than assuming it is first in the (unordered) targets list.
+    default_target_id = config["models"]["routes"]["default"][0]["target"]
+    targets_by_id = {target["id"]: target for target in config["models"]["targets"]}
+    assert targets_by_id[default_target_id]["api_key_env"] == "FLEETENT_AGENT_ENABLED_MODEL"
     assert config["im"]["supports_dm"] is True
     assert config["im"]["slack"]["bot_token_env"] == "ENABLED_SLACK_BOT"
     assert config["im"]["slack"]["app_token_env"] == "ENABLED_SLACK_APP"
     assert "sk-inline-secret" not in str(config)
+
+
+def test_get_desired_state_parses_agent_file_once_per_agent(node_client, monkeypatch) -> None:
+    # The desired-state handler previously parsed agent.yaml three times per agent (config +
+    # secrets + skill manifests). Parsing (YAML load + compose + settings) dominates the
+    # handler's CPU, so it must be parsed once per agent and threaded through.
+    from fleetent import agent_store
+    from fleetent.platform.agent_lifecycle import materialize
+    from fleetent.platform.node_management import node_store, placement_store
+
+    node_key, _ = node_store.register_node("node-a")
+    agent = agent_store.create_agent("solo", "Help users", ["shell"])
+    placement_store.pin_agent(agent.id, "node-a")
+
+    calls = {"n": 0}
+    real = materialize.agent_file_from_store
+
+    def _counting(a):
+        calls["n"] += 1
+        return real(a)
+
+    monkeypatch.setattr(materialize, "agent_file_from_store", _counting)
+
+    resp = node_client.get(
+        "/nodes/node-a/desired-state", headers={"Authorization": f"Bearer {node_key}"}
+    )
+
+    assert resp.status_code == 200
+    assert calls["n"] == 1, f"agent.yaml parsed {calls['n']}x for one agent (expected 1)"
+
+
+def test_get_desired_state_batches_per_skill_and_per_secret_reads(
+    node_client, monkeypatch, tmp_path
+) -> None:
+    # The handler must not re-open Settings()/DB once per allowed skill or per secret slot
+    # (that per-item churn — not the git walk — dominated the handler under load). It batches
+    # the catalog reads and secret decryption, so the per-item readers must never be called.
+    from fleetent import agent_store
+    from fleetent.platform.agent_lifecycle import secret_store
+    from fleetent.platform.node_management import node_store, placement_store
+    from fleetent.platform.skill_management import pool_git, skill_admin_store
+    from fleetent.platform.tenancy import store as tenancy_store
+
+    pool_dir = tmp_path / "pool"
+    for name in ("alpha", "beta", "gamma"):
+        sd = pool_dir / name
+        sd.mkdir(parents=True)
+        (sd / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: d\n---\nbody\n", encoding="utf-8"
+        )
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(pool_dir))
+    pool_git.init_pool(pool_dir)
+
+    node_key, _ = node_store.register_node("node-a")
+    tenancy_store.create_tenant(id="acme", name="Acme")
+    agent = agent_store.create_agent("support", "Help", ["shell"], tenant_id="acme")
+    for name in ("alpha", "beta", "gamma"):
+        skill_admin_store.set_binding(agent.id, name, True, updated_by="admin")
+    skill_admin_store.ensure_catalog_entries(["alpha", "beta", "gamma"])
+    placement_store.pin_agent(agent.id, "node-a")
+
+    def _tripwire(label):
+        def _boom(*_a, **_k):  # pragma: no cover - tripwire
+            raise AssertionError(f"desired-state must batch, not call {label} per item")
+
+        return _boom
+
+    monkeypatch.setattr(skill_admin_store, "get_source", _tripwire("get_source"))
+    monkeypatch.setattr(skill_admin_store, "get_resync_epoch", _tripwire("get_resync_epoch"))
+    monkeypatch.setattr(secret_store, "get_decrypted", _tripwire("get_decrypted"))
+    monkeypatch.setattr(secret_store, "status", _tripwire("secret_store.status"))
+
+    resp = node_client.get(
+        "/nodes/node-a/desired-state", headers={"Authorization": f"Bearer {node_key}"}
+    )
+
+    assert resp.status_code == 200
+    names = {m["name"] for m in resp.json()["agents"][0]["skill_manifests"]}
+    assert names == {"alpha", "beta", "gamma"}
 
 
 def test_get_desired_state_returns_empty_agent_set_when_node_has_no_enabled_placements(
@@ -267,6 +352,56 @@ def test_get_desired_state_exports_knowledge_bindings_without_source_constructio
     assert "confluence" not in str(delivered["config"])
 
 
+def test_materialize_and_desired_state_wire_kb_http_provider_and_secret(
+    node_client: TestClient, tmp_path, monkeypatch
+) -> None:
+    from fleetent import agent_store
+    from fleetent.platform.agent_lifecycle import materialize
+    from fleetent.platform.knowledge_base_management import agent_kbs_store
+    from fleetent.platform.node_management import node_store, placement_store
+    from fleetent.platform.tenancy import store as tenancy_store
+
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+    monkeypatch.setenv("KB_SERVE__URL", "http://kb-serve.test")
+    monkeypatch.setenv("KB_SERVE__SERVICE_KEY_REF", "env:FLEETENT_PLATFORM_KB_SERVICE_KEY")
+    monkeypatch.setenv("FLEETENT_PLATFORM_KB_SERVICE_KEY", "svc-platform")
+
+    tenancy_store.create_tenant(id="acme", name="Acme")
+    node_key, _ = node_store.register_node("node-a")
+    agent = agent_store.create_agent("support", "Help users", ["shell"], tenant_id="acme")
+    agent_kbs_store.bind("acme", "support-kb", agent.id, created_by="admin")
+    placement_store.pin_agent(agent.id, "node-a")
+
+    home = materialize.write_home(materialize.agent_file_from_store(agent), source_agent=agent)
+
+    agent_yaml = yaml.safe_load((home / "agent.yaml").read_text(encoding="utf-8"))
+    assert agent_yaml["knowledge"]["provider"] == {
+        "type": "http",
+        "url": "http://kb-serve.test/search",
+        "auth_ref": "env:FLEETENT_KB_SERVICE_KEY",
+    }
+    env_lines = dict(
+        line.split("=", 1)
+        for line in (home / ".env").read_text(encoding="utf-8").strip().splitlines()
+        if "=" in line
+    )
+    assert env_lines["FLEETENT_KB_SERVICE_KEY"] == ""
+
+    response = node_client.get(
+        "/nodes/node-a/desired-state",
+        headers={"Authorization": f"Bearer {node_key}"},
+    )
+
+    assert response.status_code == 200
+    delivered = response.json()["agents"][0]
+    assert delivered["config"]["knowledge"]["provider"] == {
+        "type": "http",
+        "url": "http://kb-serve.test/search",
+        "auth_ref": "env:FLEETENT_KB_SERVICE_KEY",
+    }
+    assert delivered["secrets"]["FLEETENT_KB_SERVICE_KEY"] == "svc-platform"
+
+
 def test_get_desired_state_marks_kb_binding_changes_for_resync(node_client: TestClient) -> None:
     import fleetent.auth as auth
     from fleetent import agent_store
@@ -351,6 +486,18 @@ def test_get_desired_state_includes_skill_manifest_and_bundle_download_is_immuta
     skill_admin_store.set_binding(agent.id, "incident-review", True, updated_by="admin")
     placement_store.pin_agent(agent.id, "node-a")
 
+    # base_commit comes from the catalog (recorded at sync/publish time) — the desired-state
+    # hot path must NEVER walk git history (a per-skill walk on a large mirror saturated the
+    # thread pool in production and hung every HTTP request). Plant a tripwire: any walk here
+    # is a regression.
+    skill_admin_store.ensure_catalog_entries(["incident-review"])
+    skill_admin_store.set_current_version("incident-review", "catalog-sha-123")
+
+    def _walk_bomb(*_a, **_k):  # pragma: no cover - tripwire
+        raise AssertionError("desired-state must not walk git history (pool_version_for_skill)")
+
+    monkeypatch.setattr(pool_git, "pool_version_for_skill", _walk_bomb)
+
     response = node_client.get(
         "/nodes/node-a/desired-state",
         headers={"Authorization": f"Bearer {node_key}"},
@@ -360,7 +507,7 @@ def test_get_desired_state_includes_skill_manifest_and_bundle_download_is_immuta
     manifest = response.json()["agents"][0]["skill_manifests"][0]
     assert manifest["name"] == "incident-review"
     assert manifest["base_version"]
-    assert manifest["base_commit"]
+    assert manifest["base_commit"] == "catalog-sha-123"
     assert manifest["bundle_url"].endswith(
         f"/nodes/node-a/skills/incident-review/bundles/{manifest['base_version']}.tar.gz"
     )
@@ -395,6 +542,72 @@ def test_get_desired_state_includes_skill_manifest_and_bundle_download_is_immuta
     )
     assert second.status_code == 200
     assert second.content == first.content
+
+
+def test_get_desired_state_skill_manifest_stays_git_free_when_subdir_configured(
+    node_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Under an external-git ``skills_subdir`` layout the manifest still never touches git.
+
+    ``base_commit`` is read from the catalog (recorded at sync time) — no git-root
+    resolution, no history walk — while ``name`` and ``bundle_url`` stay clean (no
+    ``skills/`` prefix leaking into the node/agent contract, R5).
+    """
+    from fleetent import agent_store
+    from fleetent.platform.node_management import node_store, placement_store
+    from fleetent.platform.skill_management import git_source_store, pool_git, skill_admin_store
+    from fleetent.platform.tenancy import store as tenancy_store
+
+    git_root = tmp_path / "ai-skills-library"
+    scan_root = git_root / "skills"
+    skill_dir = scan_root / "incident-review"
+    (skill_dir / "scripts").mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: incident-review\ndescription: Review incidents\n---\nbody\n",
+        encoding="utf-8",
+    )
+    (skill_dir / "scripts" / "helper.py").write_text("print('ok')\n", encoding="utf-8")
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(scan_root))
+    # Whole repo (including the skills/ subdir) is mirrored at the git root -- there is
+    # no .git at the scan root itself, matching production subdir-mirrored layout.
+    pool_git.init_pool(git_root)
+    git_source_store.set_config(
+        enabled=1, remote_url="https://example.test/repo.git", branch="main", skills_subdir="skills"
+    )
+
+    node_key, _ = node_store.register_node("node-a")
+    tenancy_store.create_tenant(id="acme", name="Acme")
+    agent = agent_store.create_agent("support", "Help users", ["shell"], tenant_id="acme")
+    skill_admin_store.set_binding(agent.id, "incident-review", True, updated_by="admin")
+    placement_store.pin_agent(agent.id, "node-a")
+
+    # The inbound sync records the mirrored commit in the catalog; the manifest reads it.
+    skill_admin_store.ensure_catalog_entries(["incident-review"])
+    skill_admin_store.set_current_version("incident-review", "synced-sha-456")
+
+    def _walk_bomb(*_a, **_k):  # pragma: no cover - tripwire
+        raise AssertionError("desired-state must not walk git history (pool_version_for_skill)")
+
+    monkeypatch.setattr(pool_git, "pool_version_for_skill", _walk_bomb)
+
+    response = node_client.get(
+        "/nodes/node-a/desired-state",
+        headers={"Authorization": f"Bearer {node_key}"},
+    )
+
+    assert response.status_code == 200
+    manifest = response.json()["agents"][0]["skill_manifests"][0]
+    assert manifest["base_commit"] == "synced-sha-456"
+    # R5: node/agent-facing fields must stay clean -- no "skills/" subdir prefix.
+    assert manifest["name"] == "incident-review"
+    assert "skills/" not in manifest["name"]
+    # The route's own static "/skills/" segment is expected; what must NOT appear is the
+    # configured skills_subdir leaking in as an extra prefix on the skill name itself.
+    assert manifest["bundle_url"] == (
+        f"/nodes/node-a/skills/incident-review/bundles/{manifest['base_version']}.tar.gz"
+    )
 
 
 def test_post_status_updates_last_seen_and_agent_projection(node_client: TestClient) -> None:
@@ -484,7 +697,10 @@ def test_post_status_projects_skill_drift_to_agent_skills(
     assert drift["base_version"] == "abc123"
     assert drift["base_commit"] == "def456"
     assert drift["drift"] == 1
-    assert nominations == [(agent.id, "incident-review")]
+    # Status ingestion records drift only. Nomination pulls the evolved bundle from the
+    # owning node over HTTP, so it is deferred to the background sweep and must NOT run on
+    # this request path (doing it inline is what could block POST /nodes/{id}/status).
+    assert nominations == []
 
 
 def test_post_identity_resolve_returns_resolve_or_provision_principal(

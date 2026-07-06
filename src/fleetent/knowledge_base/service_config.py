@@ -1,18 +1,28 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from fleetent.agent_config import AgentFile, ModelRouteEntry, ModelTarget, default_models
-from fleetent.config import EmbeddingSettings
+from fleetent.config import EmbeddingSettings, RerankSettings
 from fleetent.knowledge_base.config import KnowledgeConfigSnapshot
 from fleetent.secret_scan import flatten, looks_inline_secret
 
 _SECRET_KEY_PARTS = ("token", "secret", "password", "api_key", "credential")
+_CONNECTOR_SECRET_ENV_FIELDS = (
+    "access_token_env",
+    "refresh_token_env",
+    "client_id_env",
+    "client_secret_env",
+    "token_uri_env",
+    "username_env",
+    "api_token_env",
+)
 
 
 class KBServiceSection(BaseModel):
@@ -22,6 +32,16 @@ class KBServiceSection(BaseModel):
     service_key_ref: str
     host: str = "127.0.0.1"
     port: int = 8768
+    max_upload_bytes: int = 50 * 1024 * 1024
+
+
+class KBHostServiceSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    service_key_ref: str
+    host: str = "127.0.0.1"
+    port: int = 8768
+    max_upload_bytes: int = 50 * 1024 * 1024
 
 
 class KBDataSection(BaseModel):
@@ -50,6 +70,15 @@ class KBExtractionSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
+    endpoint: str = ""
+    model: str = ""
+    api_key_env: str = ""
+
+
+class KBRerankSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    backend: str = "disabled"
     endpoint: str = ""
     model: str = ""
     api_key_env: str = ""
@@ -96,6 +125,7 @@ class KBServiceConfig(BaseModel):
     retrieval: KBRetrievalSection = Field(default_factory=KBRetrievalSection)
     embedding: KBEmbeddingSection = Field(default_factory=KBEmbeddingSection)
     extraction: KBExtractionSection = Field(default_factory=KBExtractionSection)
+    rerank: KBRerankSection = Field(default_factory=KBRerankSection)
     chunking: KBChunkingSection = Field(default_factory=KBChunkingSection)
     connectors: list[KBConnectorSection] = Field(default_factory=list)
 
@@ -118,38 +148,20 @@ class KBServiceConfig(BaseModel):
             api_key_env=self.embedding.api_key_env,
         )
 
-    def standalone_agent(self) -> AgentFile:
-        models = default_models()
-        models.targets = [target for target in models.targets if target.id != "embedding"]
-        models.targets.append(
-            ModelTarget(
-                id="embedding",
-                provider="kb-service",
-                protocol="http_embedding",
-                endpoint=self.embedding.endpoint,
-                model=self.embedding.model,
-                api_key_env=self.embedding.api_key_env or None,
-                params={"dimensions": self.embedding.dimensions},
-            )
+    def rerank_settings(self) -> RerankSettings:
+        return RerankSettings(
+            backend=self.rerank.backend,
+            endpoint=self.rerank.endpoint,
+            model=self.rerank.model,
+            api_key_env=self.rerank.api_key_env,
         )
-        models.routes["embedding"] = [ModelRouteEntry(target="embedding")]
-        if (
-            self.extraction.enabled
-            and self.extraction.endpoint.strip()
-            and self.extraction.model.strip()
-        ):
-            models.targets.append(
-                ModelTarget(
-                    id="kb-extraction",
-                    provider="kb-service",
-                    protocol="openai_chat",
-                    base_url=self.extraction.endpoint,
-                    model=self.extraction.model,
-                    api_key_env=self.extraction.api_key_env or None,
-                )
-            )
-            models.routes["kb_extraction"] = [ModelRouteEntry(target="kb-extraction")]
-        return AgentFile(name="kb-service-standalone", version=1, models=models)
+
+    def standalone_agent(self) -> AgentFile:
+        return _build_standalone_agent(
+            embedding=self.embedding,
+            extraction=self.extraction,
+            rerank=self.rerank,
+        )
 
     def configure_process_runtime(self) -> None:
         from fleetent import agent_config, vector_store
@@ -234,6 +246,112 @@ class KBServiceConfig(BaseModel):
         )
 
 
+class KBHostServiceConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    service: KBHostServiceSection
+    retrieval: KBRetrievalSection = Field(default_factory=KBRetrievalSection)
+    embedding: KBEmbeddingSection = Field(default_factory=KBEmbeddingSection)
+    extraction: KBExtractionSection = Field(default_factory=KBExtractionSection)
+    rerank: KBRerankSection = Field(default_factory=KBRerankSection)
+    chunking: KBChunkingSection = Field(default_factory=KBChunkingSection)
+
+    def standalone_agent(self) -> AgentFile:
+        return _build_standalone_agent(
+            embedding=self.embedding,
+            extraction=self.extraction,
+            rerank=self.rerank,
+        )
+
+    def configure_process_runtime(self) -> None:
+        from fleetent import agent_config, vector_store
+
+        agent_config.set_default_agent_for_process(self.standalone_agent())
+        vector_store.configure_from_active_agent()
+
+
+@dataclass(frozen=True)
+class KBCommandScope:
+    tenant_id: str
+    data_dir: Path
+    queue_database_url: str
+    multi_tenant_root: bool = False
+
+
+def load_host_service_config(path: Path) -> KBHostServiceConfig:
+    env_path = path.parent / ".env"
+    if env_path.exists():
+        from dotenv import load_dotenv
+
+        load_dotenv(env_path, override=True)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path} must contain a mapping")
+    _reject_inline_secrets(raw, path)
+    return KBHostServiceConfig.model_validate(raw)
+
+
+def load_tenant_connectors(
+    home: Path, tenant_id: str
+) -> tuple[list[KBConnectorSection], dict[str, str]]:
+    tenant_root = home / "tenants" / tenant_id / "kb"
+    env_path = tenant_root / ".env"
+    tenant_env: dict[str, str] = {}
+    if env_path.exists():
+        from dotenv import dotenv_values
+
+        tenant_env = {
+            key: value
+            for key, value in dotenv_values(env_path).items()
+            if isinstance(key, str) and isinstance(value, str)
+        }
+    config_path = tenant_root / "connectors.yaml"
+    if not config_path.exists():
+        return [], tenant_env
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{config_path} must contain a mapping")
+    _reject_inline_secrets(raw, config_path)
+    connectors = raw.get("connectors", [])
+    if not isinstance(connectors, list):
+        raise ValueError(f"{config_path} field 'connectors' must be a list")
+    return [KBConnectorSection.model_validate(item) for item in connectors], tenant_env
+
+
+def discover_tenants(home: Path) -> list[str]:
+    tenant_ids: list[str] = []
+    tenants_root = home / "tenants"
+    if not tenants_root.exists():
+        return tenant_ids
+    for tenant_dir in tenants_root.iterdir():
+        kb_db = tenant_dir / "kb" / "data" / "kb.db"
+        if kb_db.exists():
+            tenant_ids.append(tenant_dir.name)
+    return sorted(tenant_ids)
+
+
+def resolve_kb_command_scope(path: Path, *, tenant_id: str = "") -> KBCommandScope:
+    try:
+        load_host_service_config(path)
+    except ValidationError:
+        config = load_kb_service_config(path)
+        return KBCommandScope(
+            tenant_id=config.service.tenant_id,
+            data_dir=config.data_dir(),
+            queue_database_url=config.queue_database_url(),
+        )
+    if not tenant_id:
+        raise ValueError("--tenant is required when using host kb-service.yaml")
+    home_dir = path.parent
+    tenant_data_dir = home_dir / "tenants" / tenant_id / "kb" / "data"
+    return KBCommandScope(
+        tenant_id=tenant_id,
+        data_dir=home_dir,
+        queue_database_url=f"sqlite:///{tenant_data_dir / 'kb_ingest_queue.db'}",
+        multi_tenant_root=True,
+    )
+
+
 def load_kb_service_config(path: Path) -> KBServiceConfig:
     env_path = path.parent / ".env"
     if env_path.exists():
@@ -259,6 +377,10 @@ def validate_kb_service_boot(config: KBServiceConfig) -> None:
     missing: list[str] = []
     for connector in config.connectors:
         credential_ref = connector.credential_ref.strip()
+        for field_name in _CONNECTOR_SECRET_ENV_FIELDS:
+            env_name = str(getattr(connector, field_name, "")).strip()
+            if env_name and not os.environ.get(env_name):
+                missing.append(env_name)
         if not credential_ref:
             continue
         try:
@@ -274,8 +396,60 @@ def validate_kb_service_boot(config: KBServiceConfig) -> None:
     ):
         if env_name and not os.environ.get(env_name):
             missing.append(env_name)
+    rerank_api_key_env = config.rerank.api_key_env.strip()
+    if (
+        config.rerank.backend != "disabled"
+        and rerank_api_key_env
+        and not os.environ.get(rerank_api_key_env)
+    ):
+        missing.append(rerank_api_key_env)
     if missing:
         raise ValueError("missing standalone KB secrets: " + ", ".join(sorted(missing)))
+
+
+def _build_standalone_agent(
+    *,
+    embedding: KBEmbeddingSection,
+    extraction: KBExtractionSection,
+    rerank: KBRerankSection,
+) -> AgentFile:
+    models = default_models()
+    models.targets = [target for target in models.targets if target.id != "embedding"]
+    models.targets.append(
+        ModelTarget(
+            id="embedding",
+            provider="kb-service",
+            protocol="http_embedding",
+            endpoint=embedding.endpoint,
+            model=embedding.model,
+            api_key_env=embedding.api_key_env or None,
+            params={"dimensions": embedding.dimensions},
+        )
+    )
+    models.routes["embedding"] = [ModelRouteEntry(target="embedding")]
+    if extraction.enabled and extraction.endpoint.strip() and extraction.model.strip():
+        models.targets.append(
+            ModelTarget(
+                id="kb-extraction",
+                provider="kb-service",
+                protocol="openai_chat",
+                base_url=extraction.endpoint,
+                model=extraction.model,
+                api_key_env=extraction.api_key_env or None,
+            )
+        )
+        models.routes["kb_extraction"] = [ModelRouteEntry(target="kb-extraction")]
+    return AgentFile(
+        name="kb-service-standalone",
+        version=1,
+        models=models,
+        rerank=RerankSettings(
+            backend=rerank.backend,
+            endpoint=rerank.endpoint,
+            model=rerank.model,
+            api_key_env=rerank.api_key_env,
+        ),
+    )
 
 
 def _reject_inline_secrets(raw: dict[str, object], path: Path) -> None:

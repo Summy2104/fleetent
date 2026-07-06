@@ -215,7 +215,7 @@ def test_init_agent_db_schema_creates_all_agent_tables(tmp_path: Path) -> None:
     data_dir.mkdir()
     original_state_db = ss._state_db
     try:
-        _init_agent_db_schema(data_dir, agent_id="test-agent")
+        _init_agent_db_schema(data_dir, agent_name="test-agent")
 
         # KB tables land in tenants/default/kb/data/kb.db via TenantRouter + migrate-on-open.
         kb_db_path = tmp_path / "tenants" / "default" / "kb" / "data" / "kb.db"
@@ -253,7 +253,7 @@ def test_init_agent_db_schema_with_tenant_agent_home_data_dir_stays_flat(
     data_dir.mkdir(parents=True)
     original_state_db = ss._state_db
     try:
-        _init_agent_db_schema(data_dir, agent_id="support", tenant_id="default")
+        _init_agent_db_schema(data_dir, agent_name="support", tenant_id="default")
 
         assert (data_dir / "agent_state.db").exists()
         assert not (data_dir / "agent_memory.db").exists(), (
@@ -272,8 +272,8 @@ def test_init_agent_db_schema_idempotent(tmp_path: Path) -> None:
     data_dir.mkdir()
     original_state_db = ss._state_db
     try:
-        _init_agent_db_schema(data_dir, agent_id="test-agent")
-        _init_agent_db_schema(data_dir, agent_id="test-agent")
+        _init_agent_db_schema(data_dir, agent_name="test-agent")
+        _init_agent_db_schema(data_dir, agent_name="test-agent")
         agent_state_db_path = (
             tmp_path / "tenants" / "default" / "agents" / "test-agent" / "data" / "agent_state.db"
         )
@@ -299,7 +299,7 @@ def test_init_agent_db_schema_data_dir_creates_scheduled_tasks(tmp_path: Path) -
     data_dir.mkdir()
     original_state_db = ss._state_db
     try:
-        _init_agent_db_schema(data_dir, agent_id="test-agent")
+        _init_agent_db_schema(data_dir, agent_name="test-agent")
         agent_state_db_path = (
             tmp_path / "tenants" / "default" / "agents" / "test-agent" / "data" / "agent_state.db"
         )
@@ -319,13 +319,13 @@ def test_init_agent_db_schema_data_dir_no_fleetent_db(tmp_path: Path) -> None:
     data_dir.mkdir()
     original_state_db = ss._state_db
     try:
-        _init_agent_db_schema(data_dir, agent_id="test-agent")
+        _init_agent_db_schema(data_dir, agent_name="test-agent")
         assert not (data_dir / "fleetent.db").exists(), "fleetent.db must not be created"
     finally:
         ss._state_db = original_state_db
 
 
-def test_init_agent_db_schema_migrates_flat_kb_layout_for_standalone_agent(tmp_path: Path) -> None:
+def test_init_agent_db_schema_keeps_legacy_kb_layout_for_standalone_agent(tmp_path: Path) -> None:
     import fleetent.schedule_store as ss
     from fleetent.runtime.agent_app import _init_agent_db_schema
 
@@ -344,16 +344,24 @@ def test_init_agent_db_schema_migrates_flat_kb_layout_for_standalone_agent(tmp_p
     data_dir.mkdir()
     original_state_db = ss._state_db
     try:
-        _init_agent_db_schema(data_dir, agent_id="test-agent")
+        _init_agent_db_schema(data_dir, agent_name="test-agent")
 
         kb_dir = tmp_path / "tenants" / "default" / "kb" / "data"
+        assert kb_dir.is_dir()
         assert (kb_dir / "kb.db").exists()
-        assert (kb_dir / "kb_vectors.db").exists()
-        assert not (tmp_path / "tenants" / "default" / "kb.db").exists()
-        assert not (tmp_path / "tenants" / "default" / "kb_vectors.db").exists()
+        assert not (kb_dir / "kb_vectors.db").exists()
+        assert (tmp_path / "tenants" / "default" / "kb.db").exists()
+        assert (tmp_path / "tenants" / "default" / "kb_vectors.db").exists()
         with sqlite3.connect(kb_dir / "kb.db") as conn:
+            assert (
+                conn.execute(
+                    "SELECT name FROM sqlite_master WHERE name = 'legacy_marker'"
+                ).fetchone()
+                is None
+            )
+        with sqlite3.connect(tmp_path / "tenants" / "default" / "kb.db") as conn:
             assert conn.execute("SELECT value FROM legacy_marker").fetchone() == ("kb",)
-        with sqlite3.connect(kb_dir / "kb_vectors.db") as conn:
+        with sqlite3.connect(tmp_path / "tenants" / "default" / "kb_vectors.db") as conn:
             assert conn.execute("SELECT value FROM legacy_vector_marker").fetchone() == ("vec",)
     finally:
         ss._state_db = original_state_db

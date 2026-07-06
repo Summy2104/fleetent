@@ -604,8 +604,8 @@ def test_get_full_definition(client, monkeypatch):
 
 def test_get_surfaces_im_capabilities(client, monkeypatch):
     _wire_real_store(monkeypatch)
-    agent_store.create_agent("ops", "Ops prompt", ["read_*"])
-    agent_store.set_im_capabilities("ops", supports_dm=True, supports_groups=True)
+    agent = agent_store.create_agent("ops", "Ops prompt", ["read_*"])
+    agent_store.set_im_capabilities(agent.id, supports_dm=True, supports_groups=True)
     token, _ = _session_for("viewer")
     r = client.get("/admin/agents/ops", headers=_hdr(token))
     assert r.status_code == 200
@@ -749,6 +749,29 @@ def test_patch_overrides_only_provided_field(client, monkeypatch):
     a = agent_store.get_by_name("cfgbot")
     assert a.memory_namespace == "team"
     assert a.skills_dir == "/s"  # inherited from prior version
+
+
+def test_patch_round_trips_newly_exposed_model_routes(client, monkeypatch):
+    """vision/kb_extraction/rerank route overrides survive PATCH -> GET unchanged."""
+    _wire_real_store(monkeypatch)
+    agent_store.create_agent("routebot", "v1", ["shell"])
+    token, _ = _session_for("admin")
+    routes = {
+        "routes": {
+            "vision": [{"model_id": "chat-x"}],
+            "kb_extraction": [{"model_id": "chat-x"}],
+            "rerank": [{"model_id": "rerank-x"}],
+        }
+    }
+    r = client.patch(
+        "/admin/agents/routebot", headers=_hdr(token), json={"model_overrides": routes}
+    )
+    assert r.status_code == 200
+    body = client.get("/admin/agents/routebot", headers=_hdr(token)).json()
+    stored = body["model_overrides"]["routes"]
+    assert stored["vision"] == [{"model_id": "chat-x"}]
+    assert stored["kb_extraction"] == [{"model_id": "chat-x"}]
+    assert stored["rerank"] == [{"model_id": "rerank-x"}]
 
 
 def test_clone_copies_version_config_fields(client, monkeypatch):

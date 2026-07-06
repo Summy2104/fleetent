@@ -10,9 +10,11 @@ from typing import Any
 
 import yaml
 from fastapi import APIRouter, Body, Header, HTTPException, Response, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from fleetent import agent_store, audit_log, auth, user_store
+from fleetent.agent_config import collect_env_var_names
+from fleetent.config import McpApprovalRule
 from fleetent.platform.agent_lifecycle import credential_slots, secret_store
 from fleetent.platform.agent_lifecycle.materialize import agent_file_from_store
 from fleetent.platform.agent_management_console import agent_admin_store, agent_im_group_store
@@ -20,6 +22,7 @@ from fleetent.platform.connector_management import (
     mcp_server_store,
 )
 from fleetent.platform.knowledge_base_management import agent_kbs_store
+from fleetent.platform.knowledge_base_management.kb_admin_api import kb_engine_list
 from fleetent.platform.skill_management import skill_admin_store
 from fleetent.skills import registry as skill_registry
 
@@ -220,9 +223,9 @@ def set_im_capabilities(
     authorization: str | None = Header(None),
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
-    _require_agent(name)
+    agent = _require_agent(name)
     agent_store.set_im_capabilities(
-        name,
+        agent.id,
         supports_dm=body.supports_dm,
         supports_groups=body.supports_groups,
     )
@@ -340,6 +343,49 @@ def unbind_mcp(
     return {"agent": name, "server_id": server_id, "bound": False}
 
 
+def _require_bound_mcp_server(agent_id: int, name: str, server_id: str) -> None:
+    """404 unless ``server_id`` is bound to the agent — approval rules attach to a binding."""
+    if server_id not in agent_store.list_mcp_servers_for_agent(agent_id):
+        raise HTTPException(
+            status_code=404, detail=f"mcp server {server_id!r} not bound to agent {name!r}"
+        )
+
+
+@router.get("/agents/{name}/mcp/{server_id}/approval-rules")
+def get_agent_mcp_approval_rules(
+    name: str, server_id: str, authorization: str | None = Header(None)
+) -> list[dict[str, Any]]:
+    _current_user(authorization)
+    agent = _require_agent(name)
+    _require_bound_mcp_server(agent.id, name, server_id)
+    return agent_store.get_agent_mcp_approval_rules(agent.id, server_id)
+
+
+@router.put("/agents/{name}/mcp/{server_id}/approval-rules")
+def set_agent_mcp_approval_rules(
+    name: str,
+    server_id: str,
+    approval_rules: list[dict[str, Any]] = Body(..., embed=True),  # noqa: B008
+    authorization: str | None = Header(None),
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    agent = _require_agent(name)
+    _require_bound_mcp_server(agent.id, name, server_id)
+    try:
+        normalized = [McpApprovalRule.model_validate(rule).model_dump() for rule in approval_rules]
+    except (ValidationError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=f"invalid approval_rules: {exc}") from exc
+    agent_store.set_agent_mcp_approval_rules(agent.id, server_id, normalized)
+    audit_log.write_audit(
+        user.id,
+        "agent.mcp.approval_rules.set",
+        target_type="agent",
+        target_id=name,
+        detail={"server_id": server_id, "rule_count": len(normalized)},
+    )
+    return {"agent": name, "server_id": server_id, "approval_rules": normalized}
+
+
 # --- agent knowledge-base bindings -------------------------------------------
 
 
@@ -347,7 +393,12 @@ def unbind_mcp(
 def list_agent_kbs(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
     _current_user(authorization)
     agent = _require_agent(name)
-    kb_ids = agent_kbs_store.list_kbs_for_agent(agent.tenant_id, agent.id)
+    archived = {kb["kb_id"] for kb in kb_engine_list(agent.tenant_id) if kb.get("archived")}
+    kb_ids = [
+        kb_id
+        for kb_id in agent_kbs_store.list_kbs_for_agent(agent.tenant_id, agent.id)
+        if kb_id not in archived
+    ]
     return {"agent": name, "kb_ids": kb_ids}
 
 
@@ -438,7 +489,21 @@ def set_agent_secret(
         target_id=name,
         detail={"env_name": env_name},
     )
-    return {"env_name": env_name, "status": secret_store.status(agent.id, env_name)}
+    result: dict[str, Any] = {
+        "env_name": env_name,
+        "status": secret_store.status(agent.id, env_name),
+    }
+    # The value is stored, but an env name no config field references will never be
+    # materialized into the agent .env (the node scaffold only writes referenced names).
+    # Flag it so the operator wires a provider/config that references it — an orphan
+    # inject slot would otherwise ride uselessly in every desired-state push.
+    if env_name not in collect_env_var_names(agent_file_from_store(agent)):
+        result["warning"] = (
+            f"env var {env_name!r} is not referenced by the agent config; the value is "
+            "stored but will not be injected into the agent until a provider or config "
+            "field references this name"
+        )
+    return result
 
 
 @router.delete("/agents/{name}/secrets/{env_name}")

@@ -24,13 +24,19 @@ from fleetent.agent_config import (
     AgentFile,
     AgentKnowledge,
     AgentKnowledgeBinding,
+    AgentKnowledgeProvider,
     AgentModels,
     ModelRouteEntry,
     ModelTarget,
     collect_env_var_names,
     default_models,
 )
-from fleetent.config import McpServerSettings
+from fleetent.config import (
+    MCP_FLEETENT_EXT_DEFAULTS,
+    McpApprovalRule,
+    McpServerSettings,
+    Settings,
+)
 from fleetent.platform.agent_lifecycle import credential_slots, default_binding_store, secret_store
 from fleetent.platform.connector_management import mcp_server_store
 from fleetent.platform.connector_management.mcp_auth import (
@@ -41,6 +47,7 @@ from fleetent.platform.connector_management.mcp_auth import (
     parse_mcp_auth_config,
 )
 from fleetent.platform.knowledge_base_management import agent_kbs_store
+from fleetent.platform.knowledge_base_management.auth import KB_SERVICE_KEY_ENV
 from fleetent.platform.model_provider_management import model_admin_store, provider_admin_store
 from fleetent.platform.skill_management import skill_admin_store
 from fleetent.secret_scan import flatten
@@ -82,7 +89,12 @@ def _apply_overrides(base: AgentFile, overrides: dict[str, Any]) -> AgentFile:
     try:
         merged = _deep_merge(base.model_dump(mode="json", exclude_defaults=False), overrides)
         return AgentFile.model_validate(merged)
-    except Exception:  # noqa: BLE001 — invalid override must not break materialize
+    except Exception as exc:  # noqa: BLE001 — invalid override must not break materialize
+        # Fall back to base so deploy/preview never breaks, but surface the drop: an invalid
+        # field (e.g. a dangling model route) silently discards the WHOLE override — including
+        # unrelated valid bindings like im.slack credentials — so this must be diagnosable
+        # rather than silent (AAA-8267).
+        _logger.error("agent_override_validation_failed", agent=base.name, exception=exc)
         return base
 
 
@@ -261,28 +273,72 @@ def _allowed_skills_for(agent: agent_store.Agent) -> list[str]:
 
 
 def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
-    """Expand DB-authored provider selections into the runtime model policy."""
-    route_overrides = {
-        k: v for k, v in model_overrides.items() if k != credential_slots.RESERVED_KEY
-    }
-    # Backward-compat: the console's two-part picker stored {targets:[...], routes:{name:[...]}}.
-    # The route map lives under "routes"; the flat "targets" list is informational only.
-    routes_block = route_overrides.get("routes")
+    """Expand DB-authored provider selections into the runtime model policy.
+
+    Two authoring shapes are supported and may coexist:
+    - Named tiers: a ``targets`` block ({tier_name: {model_id, params?, max_tokens?}}) defines
+      agent-local reusable targets (e.g. primary/fast/backup); a route entry references one via
+      ``{"target": tier_name}``. This mirrors ``agent.example.yaml``.
+    - Direct model: a route entry ``{"model_id": id}`` builds its own target from the registry
+      (used by the specialized routes — embedding/rerank/image/…).
+    """
+    filtered = {k: v for k, v in model_overrides.items() if k != credential_slots.RESERVED_KEY}
+    targets_block = filtered.get("targets") if isinstance(filtered.get("targets"), dict) else None
+    routes_block = filtered.get("routes")
     if isinstance(routes_block, dict):
         route_overrides = routes_block
-    if not route_overrides:
+    elif targets_block is not None:
+        route_overrides = {}
+    else:
+        # Legacy: the whole dict is the route map.
+        route_overrides = filtered
+    if not route_overrides and targets_block is None:
         return default_models()
 
-    targets: dict[str, ModelTarget] = {}
-    routes: dict[str, list[ModelRouteEntry]] = {}
+    # Merge onto the baseline one route at a time: a route absent from the override must keep
+    # its default target rather than disappearing just because some other route was overridden.
+    baseline = default_models()
+    baseline_targets = {target.id: target for target in baseline.targets}
+    routes: dict[str, list[ModelRouteEntry]] = dict(baseline.routes)
+    override_targets: dict[str, ModelTarget] = {}
+
+    # Build named tier targets first (target id = tier name) so routes can reference them.
+    tier_targets: dict[str, ModelTarget] = {}
+    for tier_name, tier_def in (targets_block or {}).items():
+        if not isinstance(tier_def, dict):
+            continue
+        target = _tier_target(str(tier_name), tier_def)
+        if target is not None:
+            tier_targets[str(tier_name)] = target
+            override_targets[str(tier_name)] = target
+
     for route_key, raw_entries in route_overrides.items():
         entries = raw_entries if isinstance(raw_entries, list) else [raw_entries]
         route_entries: list[ModelRouteEntry] = []
         for index, raw_entry in enumerate(entries):
             if not isinstance(raw_entry, dict):
                 continue
+            ref = raw_entry.get("target")
+            # A `target` referencing a defined tier reuses that tier target.
+            if isinstance(ref, str) and ref in tier_targets:
+                route_entries.append(
+                    ModelRouteEntry(
+                        target=ref,
+                        max_tokens=raw_entry.get("max_tokens"),
+                        params=raw_entry.get("params") or {},
+                    )
+                )
+                continue
+            # A `target` that is neither a defined tier nor a registered model is dropped rather
+            # than materializing a phantom target (e.g. a route pointing at an unfilled tier slot).
+            if (
+                isinstance(ref, str)
+                and not any(raw_entry.get(k) for k in ("model_id", "provider_id", "provider"))
+                and model_admin_store.get_model(ref) is None
+            ):
+                continue
             target = _target_from_model_override(route_key, index, raw_entry)
-            targets.setdefault(target.id, target)
+            override_targets[target.id] = target
             route_entries.append(
                 ModelRouteEntry(
                     target=target.id,
@@ -293,9 +349,41 @@ def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
         if route_entries:
             routes[str(route_key)] = route_entries
 
-    if not targets or not routes:
-        return default_models()
+    # Keep only targets some route still references (drops unfilled/unused tiers and baseline
+    # targets whose route was overridden), while preserving those untouched baseline routes rely on.
+    referenced_ids = {entry.target for entries in routes.values() for entry in entries}
+    targets = {
+        target_id: target
+        for target_id, target in {**baseline_targets, **override_targets}.items()
+        if target_id in referenced_ids
+    }
     return AgentModels(targets=list(targets.values()), routes=routes)
+
+
+def _tier_target(tier_name: str, tier_def: dict[str, Any]) -> ModelTarget | None:
+    """Build a named tier target (id = tier name) from a registered model, or None if the slot is
+    empty / unresolvable so routes referencing it are dropped rather than pointing at a phantom."""
+    candidate = tier_def.get("model_id") or tier_def.get("provider_id") or tier_def.get("model")
+    if not candidate:
+        return None
+    model = model_admin_store.get_model(str(candidate))
+    if model is None:
+        return None
+    provider = provider_admin_store.get_provider(str(model["provider_id"]))
+    if provider is None:
+        return None
+    params = _deep_merge(model.get("params") or {}, tier_def.get("params") or {})
+    return ModelTarget(
+        id=tier_name,
+        provider=str(provider.get("vendor") or provider["id"]),
+        protocol=str(model.get("protocol") or "openai_chat"),
+        base_url=model.get("base_url"),
+        endpoint=model.get("endpoint"),
+        model=model.get("model_name"),
+        api_key_env=provider.get("api_key_env"),
+        max_tokens=tier_def.get("max_tokens") or model.get("max_tokens"),
+        params=params,
+    )
 
 
 def _target_from_model_override(route_key: str, index: int, entry: dict[str, Any]) -> ModelTarget:
@@ -395,20 +483,17 @@ def _mcp_servers_for_agent(agent: agent_store.Agent) -> list[McpServerSettings]:
                 auth=auth,
                 header_style=header_style,
                 credential_input=credential_input,
+                degrade_mode=row.get("degrade_mode") or "degrade",
+                file_root=row.get("file_root") or "",
+                file_isolation=row.get("file_isolation") or "on",
+                # approval_rules are per-agent binding config, not server-definition config.
+                approval_rules=[
+                    McpApprovalRule(**rule)
+                    for rule in agent_store.get_agent_mcp_approval_rules(agent.id, server_id)
+                ],
             )
         )
     return servers
-
-
-# Fleetent extension fields and their defaults — dropped from the rendered map when default,
-# hoisted under `x-fleetent` when set (mcp-config-standardization).
-_FLEETENT_EXT_DEFAULTS: dict[str, Any] = {
-    "degrade_mode": "degrade",
-    "file_root": "",
-    "file_isolation": "on",
-    "auth": None,
-    "approval_rules": [],
-}
 
 
 def _mcp_payload_to_map(payload: dict[str, Any]) -> None:
@@ -423,7 +508,7 @@ def _mcp_payload_to_map(payload: dict[str, Any]) -> None:
         entry = dict(entry)
         sid = entry.pop("id")
         ext = {}
-        for key, default in _FLEETENT_EXT_DEFAULTS.items():
+        for key, default in MCP_FLEETENT_EXT_DEFAULTS.items():
             value = entry.pop(key, default)
             if value != default:
                 ext[key] = value
@@ -442,8 +527,20 @@ def _knowledge_for_agent(agent: agent_store.Agent) -> AgentKnowledge:
         kb_ids = []
     if not kb_ids:
         return AgentKnowledge()
+    kb_serve = Settings().kb_serve
+    provider = AgentKnowledgeProvider()
+    if kb_serve.url and kb_serve.service_key_ref:
+        # kb_serve.url is the service BASE (the platform's KBServeClient appends
+        # per-call paths); the agent's HttpKnowledgeProvider POSTs its url verbatim,
+        # so materialize must hand it the full /search endpoint.
+        provider = AgentKnowledgeProvider(
+            type="http",
+            url=f"{kb_serve.url.rstrip('/')}/search",
+            auth_ref=f"env:{KB_SERVICE_KEY_ENV}",
+        )
     return AgentKnowledge(
         enabled=True,
+        provider=provider,
         bindings=[
             AgentKnowledgeBinding(
                 tenant_id=agent.tenant_id,
@@ -608,7 +705,7 @@ def rematerialize_all() -> list[str]:
             if materialize_from_store(name) is not None:
                 done.append(name)
         except Exception as exc:  # noqa: BLE001 — one agent's failure must not block others
-            _logger.warn("rematerialize_failed", agent=name, error=str(exc))
+            _logger.warn("rematerialize_failed", agent=name, exception=exc)
     return done
 
 
@@ -702,6 +799,7 @@ def _copy_skills(home: Path, *, source_agent: agent_store.Agent | None = None) -
         return
     dest_root = home / "skills"
     dest_root.mkdir(parents=True, exist_ok=True)
+
     # Skip .git — it belongs to the pool repo, not to individual skill dirs
     for skill_dir in sorted(p for p in src.iterdir() if p.is_dir() and p.name != ".git"):
         dest_skill_dir = dest_root / skill_dir.name
@@ -729,13 +827,15 @@ def _copy_skills(home: Path, *, source_agent: agent_store.Agent | None = None) -
 
             if source_agent is not None:
                 # Always store content hash as base_version for drift detection.
-                # Pool git sha is tracked separately in current_version (catalog).
+                # Pool git sha is read from the catalog's current_version (recorded once at
+                # sync/publish time) — never walk git history per skill here (a large-mirror
+                # walk is what saturated the desired-state hot path in production).
                 new_base = _skill_dir_version(skill_dir)
-                from fleetent.platform.skill_management.pool_git import pool_version_for_skill
-
-                new_base_commit = pool_version_for_skill(src, skill_dir.name)
+                new_base_commit = skill_admin_store.get_source(skill_dir.name).get(
+                    "current_version"
+                )
                 skill_admin_store.set_base_version(source_agent.id, skill_dir.name, new_base)
                 skill_admin_store.set_base_commit(source_agent.id, skill_dir.name, new_base_commit)
                 skill_admin_store.set_drift(source_agent.id, skill_dir.name, drifted=False)
         except OSError as exc:
-            _logger.warn("agent_home_skill_copy_failed", path=str(skill_dir), error=str(exc))
+            _logger.warn("agent_home_skill_copy_failed", path=str(skill_dir), exception=exc)

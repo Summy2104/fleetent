@@ -16,7 +16,7 @@ def test_init_schema_injects_facts_db(tmp_path: Path) -> None:
     data_dir = tmp_path / "data"
     data_dir.mkdir()
 
-    _init_agent_db_schema(data_dir, agent_id="agent-a", tenant_id="default")
+    _init_agent_db_schema(data_dir, agent_name="agent-a", tenant_id="default")
 
     # facts_store must be usable after boot wiring (no RuntimeError).
     assert facts_store._facts_database() is not None

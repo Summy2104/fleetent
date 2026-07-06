@@ -136,6 +136,9 @@ def _legacy_pre_rename_migrations() -> list[tuple[int, str]]:
         if "INSERT INTO memory_items SELECT" not in sql
         and "fact_edges_new" not in sql
         and "ADD COLUMN credential_kind" not in sql
+        # cron-durable-poll-engine appended the run-history table/index after the
+        # rename; the v50-era binary never had them either.
+        and "scheduled_task_runs" not in sql
     ]
     return [(i + 1, sql) for i, sql in enumerate(kept)]
 

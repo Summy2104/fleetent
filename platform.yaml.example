@@ -52,6 +52,14 @@ webhooks:
   enabled: true
   max_body_bytes: 1048576
 
+kb_serve:
+  # Central multi-tenant kb-serve URL used by /admin/kb data-plane operations
+  # AND materialized into bound agents' http knowledge provider — so it must be
+  # reachable from agents too, not only from the platform. In docker-compose use
+  # the service DNS name (http://kb-serve:8768); 127.0.0.1 is single-host only.
+  url: http://127.0.0.1:8768
+  service_key_ref: env:FLEETENT_PLATFORM_KB_SERVICE_KEY
+
 knowledge:
   mode: embedded
   knowledge_bases:

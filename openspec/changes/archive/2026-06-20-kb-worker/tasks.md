@@ -2,7 +2,7 @@
 
 **`kb-ingest-queue` 已落地 main**(队列表 + 入队 + claim/done/retry + 过渡 drain)。apply 前确认。
 
-## 1. `fleetent kb-worker` 子命令
+## 1. `fleetent kb worker` 子命令
 
 - [x] 1.1 [测试] `tests/unit/test_main_subcommands.py`:`test_kb_worker_subcommand_dispatches`(argv=["kb-worker"] 懒加载并进消费循环入口,mock 掉实际循环)+ `test_agent_run_does_not_import_kb_worker`(agent run 不 import worker 模块)→ 红
 - [x] 1.2 [实现] `__main__.py` 加 `kb-worker` 分支懒加载 worker 入口

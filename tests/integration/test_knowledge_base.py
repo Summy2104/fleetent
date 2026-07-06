@@ -132,6 +132,32 @@ def test_create_knowledge_base_persists_extraction_enabled(monkeypatch, tmp_path
     ]
 
 
+def test_knowledge_store_reads_and_writes_embedding_identity(monkeypatch, tmp_path) -> None:
+    database = _patch_runtime_database(monkeypatch, tmp_path)
+
+    from fleetent.knowledge_base.core import KnowledgeStore
+
+    store = KnowledgeStore(database)
+    store.ensure_knowledge_base("tenant-a", "handbook")
+
+    assert store.get_embedding_identity("tenant-a", "handbook") is None
+    assert store.set_embedding_identity("tenant-a", "handbook", "bge-small", 384) is True
+    assert store.get_embedding_identity("tenant-a", "handbook") == ("bge-small", 384)
+
+
+def test_knowledge_store_sets_extraction_enabled_for_existing_kb(monkeypatch, tmp_path) -> None:
+    database = _patch_runtime_database(monkeypatch, tmp_path)
+
+    from fleetent.knowledge_base.core import KnowledgeStore
+
+    store = KnowledgeStore(database)
+    store.ensure_knowledge_base("tenant-a", "handbook", extraction_enabled=False)
+
+    assert store.is_extraction_enabled("tenant-a", "handbook") is False
+    assert store.set_extraction_enabled("tenant-a", "handbook", True) is True
+    assert store.is_extraction_enabled("tenant-a", "handbook") is True
+
+
 @pytest.mark.parametrize("content", ["", "   \n\t  "])
 async def test_ingest_text_rejects_empty_content(monkeypatch, tmp_path, content):
     _patch_runtime_database(monkeypatch, tmp_path)
@@ -148,13 +174,29 @@ async def test_ingest_text_indexes_each_chunk_in_vector_store(monkeypatch, tmp_p
     _patch_runtime_settings(monkeypatch, chunk_size=5, chunk_overlap=1)
 
     from fleetent.knowledge_base import runtime
+    from fleetent.vector_store import runtime as vector_store_runtime
 
-    upserts: list[tuple[str, str, str]] = []
+    upserts: list[tuple[str, list[float], str]] = []
 
-    async def upsert(chunk_id: str, content: str, namespace: str) -> None:
-        upserts.append((chunk_id, content, namespace))
+    class FakeVectorBackend:
+        async def upsert(self, chunk_id: str, vector: list[float], namespace: str) -> None:
+            upserts.append((chunk_id, vector, namespace))
 
-    monkeypatch.setattr(runtime.vector_store, "upsert", upsert)
+        async def search(self, vector: list[float], namespace: str, limit: int = 10):
+            del vector, namespace, limit
+            return []
+
+        async def delete(self, chunk_id: str, namespace: str) -> None:
+            del chunk_id, namespace
+
+        async def clear_namespace(self, namespace: str) -> None:
+            del namespace
+
+    async def embed_text(text: str) -> list[float]:
+        return [float(len(text)), float(ord(text[0]))]
+
+    monkeypatch.setattr(vector_store_runtime, "_backend", FakeVectorBackend())
+    monkeypatch.setattr(runtime.vector_store, "embed_text", embed_text)
 
     document = await runtime.ingest_text(
         filename="guide.txt",
@@ -164,10 +206,80 @@ async def test_ingest_text_indexes_each_chunk_in_vector_store(monkeypatch, tmp_p
     )
 
     assert upserts == [
-        (f"{document.id}:chunk:0", "abcde", "kb:tenant-a:global"),
-        (f"{document.id}:chunk:1", "efghi", "kb:tenant-a:global"),
-        (f"{document.id}:chunk:2", "ijkl", "kb:tenant-a:global"),
+        (f"{document.id}:chunk:0", [5.0, 97.0], "kb:tenant-a:global"),
+        (f"{document.id}:chunk:1", [5.0, 101.0], "kb:tenant-a:global"),
+        (f"{document.id}:chunk:2", [4.0, 105.0], "kb:tenant-a:global"),
     ]
+
+
+async def test_ingest_text_stamps_kb_embedding_identity(monkeypatch, tmp_path):
+    database = _patch_runtime_database(monkeypatch, tmp_path)
+    _patch_runtime_settings(monkeypatch, chunk_size=100, chunk_overlap=0)
+
+    from fleetent.knowledge_base import runtime
+    from fleetent.vector_store import EmbeddingIdentity
+
+    monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
+    monkeypatch.setattr(
+        runtime.vector_store,
+        "current_embedding_identity",
+        lambda: EmbeddingIdentity(model="bge-small", dimensions=384),
+    )
+
+    await runtime.ingest_text(
+        filename="guide.txt",
+        content="hello world",
+        tenant_id="tenant-a",
+        kb_id="global",
+    )
+
+    row = database.execute(
+        """
+        SELECT embedding_model, embedding_dimensions
+        FROM knowledge_bases
+        WHERE tenant_id = :tenant_id AND kb_id = :kb_id
+        """,
+        {"tenant_id": "tenant-a", "kb_id": "global"},
+    ).fetchone()
+
+    assert row == {"embedding_model": "bge-small", "embedding_dimensions": 384}
+
+
+async def test_ingest_text_rejects_embedding_identity_mismatch(monkeypatch, tmp_path):
+    _patch_runtime_database(monkeypatch, tmp_path)
+    _patch_runtime_settings(monkeypatch, chunk_size=100, chunk_overlap=0)
+
+    from fleetent.knowledge_base import runtime
+    from fleetent.knowledge_base.errors import KnowledgeBaseEmbeddingMismatchError
+    from fleetent.vector_store import EmbeddingIdentity
+
+    monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
+    identities = iter(
+        [
+            EmbeddingIdentity(model="bge-small", dimensions=384),
+            EmbeddingIdentity(model="nomic-embed", dimensions=768),
+        ]
+    )
+    monkeypatch.setattr(
+        runtime.vector_store, "current_embedding_identity", lambda: next(identities)
+    )
+
+    await runtime.ingest_text(
+        filename="guide.txt",
+        content="hello world",
+        tenant_id="tenant-a",
+        kb_id="global",
+    )
+
+    with pytest.raises(
+        KnowledgeBaseEmbeddingMismatchError, match="Knowledge base embedding mismatch"
+    ):
+        await runtime.ingest_text(
+            filename="guide-v2.txt",
+            content="hello again",
+            tenant_id="tenant-a",
+            kb_id="global",
+        )
 
 
 async def test_ingest_parsed_creates_chunks_from_sections(monkeypatch, tmp_path):

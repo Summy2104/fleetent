@@ -39,7 +39,8 @@ def _capture_telegram_handler(agent_name: str):
 
     class FakeApp:
         def add_handler(self, handler):
-            captured["handler"] = handler
+            # First registration is the inbound MessageHandler (CallbackQueryHandler follows).
+            captured.setdefault("handler", handler)
 
     class FakeBuilder:
         def token(self, _token):
@@ -66,6 +67,7 @@ def _make_update(user_id: int, text: str = "hi") -> MagicMock:
     message.chat.type = "private"
     message.chat.id = 999
     message.photo = None
+    message.document = None
 
     update = MagicMock()
     update.message = message

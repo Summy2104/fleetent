@@ -89,3 +89,50 @@ The React admin SPA SHALL render MCP servers natively (within the Connectors dom
 - **WHEN** 管理员在 create 选择 scope=全局(不选 agent)或 scope=某 agent
 - **THEN** SPA 在 create 请求带 `agent_id`(全局为空 / 私有为该 agent id),注册表据此建全局默认行或 agent 私有行
 
+### Requirement: MCP server 表单字段展示对应的 agent.yaml 路径
+
+React 管理 SPA 的 MCP server 新建/编辑表单 SHALL 在每个字段输入框下方常驻展示该字段最终落在 `agent.yaml` 的路径(如 `mcpServers.filesystem.x-fleetent.auth.client_id`),路径数据 SHALL 从后端 `GET /admin/mcp/field-schema` 获取,该端点返回的路径表 MUST 直接派生自 `config.py` 的 `MCP_FLEETENT_EXT_DEFAULTS` 整形规则(与 `materialize._mcp_payload_to_map` 的真实写盘行为保持一致),不得在前端另外手写一份独立的映射表。路径模板中的 `{id}` 占位符 SHALL 替换为表单当前 ID 输入框的实际值,未填写时回退显示 `<id>`。`id` 输入框本身(对应 `mcpServers` 的 map key)和"作用域"选择器(对应 `agent_id` 路由列,不进入某份 `agent.yaml` 内容)SHALL 展示单独手写的说明文案,不依赖 `field-schema` 返回值。
+
+#### Scenario: 切换鉴权类型时提示随之更新
+
+- **WHEN** 管理员在新建/编辑表单把鉴权类型从 `api_key` 切换到 `oauth_client_credentials`
+- **THEN** 新出现的 Token URL / Client ID / Client secret 环境变量名等字段下方分别展示 `mcpServers.{id}.x-fleetent.auth.token_url`、`mcpServers.{id}.x-fleetent.auth.client_id`、`mcpServers.{id}.x-fleetent.auth.client_secret_env`,原 `api_key` 相关的提示(`mcpServers.{id}.api_key_env`)随字段一起消失
+
+#### Scenario: 路径提示随 ID 输入实时更新
+
+- **WHEN** 管理员在 ID 输入框填入 `filesystem`
+- **THEN** 其余字段下方的提示把占位符替换为实际值,例如"传输方式"字段下方显示 `mcpServers.filesystem.transport`
+
+#### Scenario: 未登录请求被拒绝
+
+- **WHEN** 一个不带有效登录会话的请求访问 `GET /admin/mcp/field-schema`
+- **THEN** 响应为 401
+
+### Requirement: MCP server 表单可查看/编辑全部 x-fleetent 扩展字段
+
+React 管理 SPA 的 MCP server 新建/编辑表单 SHALL 提供 `agent.yaml` 每个 MCP server `x-fleetent` 块下**服务级** fleetent 扩展字段的查看与编辑入口:`degrade_mode`(降级策略,枚举 degrade/strict/silent)、`file_isolation`(文件隔离,枚举 on/off)、`file_root`(文件根目录,字符串)。这些字段 SHALL 一直显示,不按 transport 类型隐藏,并归入一个独立分组(带分隔的小标题)。每个字段下方 SHALL 沿用既有 `field-schema` 机制展示其 `agent.yaml` 路径(`mcpServers.{id}.x-fleetent.<字段>`),不新写一份映射表。
+
+这些字段 SHALL 经 `POST/PUT /admin/mcp/servers` 存入平台管理库 `mcp_servers`,`GET /admin/mcp/servers` SHALL 在每条 server 记录里回显它们。写入前 SHALL 校验:非法的 `degrade_mode`/`file_isolation` 枚举值 SHALL 被拒绝(422)。materialize 物化托管 agent 的 `agent.yaml` 时 SHALL 把这些字段的非默认值经既有 `_mcp_payload_to_map` 提到该 server 的 `x-fleetent` 块下;全默认值时该 server SHALL NOT 出现这些键,保持既有整形不变量。
+
+`approval_rules` **不再是服务级字段**,不在 MCP 服务表单出现,也不由 `POST/PUT/GET /admin/mcp/servers` 承载——它改为 per-agent 绑定级配置(见 `agent-mcp-binding` capability)。
+
+#### Scenario: 新建时配置服务级 x-fleetent 字段并落库
+
+- **WHEN** 管理员在新建表单展开「fleetent 扩展」分组,设 `degrade_mode=strict`、`file_isolation=off`、`file_root=/data` 后保存
+- **THEN** SPA 调 `POST /admin/mcp/servers` 带这 3 个字段,`GET /admin/mcp/servers` 该 server 记录回显它们
+
+#### Scenario: 物化服务级字段到托管 agent 的 agent.yaml
+
+- **WHEN** 一个配了非默认 `degrade_mode`/`file_isolation`/`file_root` 的 MCP server 被物化进某托管 agent 的 `agent.yaml`
+- **THEN** 该 server 的 `mcpServers.<id>.x-fleetent` 下出现这些非默认字段,全默认字段不出现
+
+#### Scenario: 非法枚举值被拒绝
+
+- **WHEN** 请求体携带不在枚举内的 `degrade_mode` 或 `file_isolation`
+- **THEN** 响应为 422,不写入 store
+
+#### Scenario: 服务表单不含审批规则
+
+- **WHEN** 管理员打开 MCP server 新建/编辑表单
+- **THEN** 表单不出现审批规则(`approval_rules`)编辑器,`POST/PUT /admin/mcp/servers` 也不接受 `approval_rules` 字段(审批规则改在 agent 绑定处配置)
+

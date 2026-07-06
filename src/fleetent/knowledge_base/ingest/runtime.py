@@ -8,6 +8,11 @@ from fleetent import kb_ingest_jobs, vector_store
 from fleetent.config import KnowledgeBaseSettings, Settings
 from fleetent.db import SQLiteDatabase, create_database
 from fleetent.knowledge_base.core import KnowledgeChunk, KnowledgeDocument, KnowledgeStore
+from fleetent.knowledge_base.errors import (
+    KnowledgeBaseEmbeddingMismatchError,
+    embedding_mismatch_message,
+)
+from fleetent.vector_store import runtime as vector_store_runtime
 from fleetent.vector_store.backend import VectorBackend
 
 
@@ -177,6 +182,7 @@ async def _ingest_chunks(
     ]
     store = KnowledgeStore(_database_or_default(database))
     store.ensure_knowledge_base(document.tenant_id, document.kb_id)
+    _ensure_kb_embedding_identity(store, document.tenant_id, document.kb_id)
     existing_documents = store.list_active_documents_by_identity(
         document.tenant_id,
         document.kb_id,
@@ -189,6 +195,9 @@ async def _ingest_chunks(
         for existing_document in existing_documents
         for chunk in store.get_document_chunks(existing_document.id)
     ]
+    embedded_chunks = [
+        (chunk, await vector_store.embed_text(chunk.content)) for chunk in resolved_chunks
+    ]
     store.replace_document(document, resolved_chunks, replaced_document_ids)
     for chunk in replaced_chunks:
         await _delete_chunk(
@@ -196,8 +205,8 @@ async def _ingest_chunks(
             chunk.id,
         )
     namespace = vector_store.knowledge_namespace(document.tenant_id, document.kb_id)
-    for chunk in resolved_chunks:
-        await _upsert_chunk(namespace, chunk)
+    for chunk, vector in embedded_chunks:
+        await _upsert_chunk(namespace, chunk, vector)
     _enqueue_extraction_job_if_enabled(store, document)
     return document
 
@@ -305,16 +314,38 @@ def _enqueue_extraction_job_if_enabled(store: KnowledgeStore, document: Knowledg
         tenant_id=document.tenant_id,
         kb_id=document.kb_id,
         connector_ref={"document_id": document.id},
-        database_url=_queue_database_url(),
+        database_url=_require_queue_database_url(),
     )
 
 
-async def _upsert_chunk(namespace: str, chunk: KnowledgeChunk) -> None:
+def _ensure_kb_embedding_identity(store: KnowledgeStore, tenant_id: str, kb_id: str) -> None:
+    current = vector_store.current_embedding_identity()
+    existing = store.get_embedding_identity(tenant_id, kb_id)
+    if existing is None:
+        store.set_embedding_identity(tenant_id, kb_id, current.model, current.dimensions)
+        return
+    existing_model, existing_dimensions = existing
+    if existing_model == current.model and existing_dimensions == current.dimensions:
+        return
+    raise KnowledgeBaseEmbeddingMismatchError(
+        embedding_mismatch_message(
+            tenant_id=tenant_id,
+            kb_id=kb_id,
+            expected_model=existing_model,
+            expected_dimensions=existing_dimensions,
+            current_model=current.model,
+            current_dimensions=current.dimensions,
+            operation="ingest",
+        )
+    )
+
+
+async def _upsert_chunk(namespace: str, chunk: KnowledgeChunk, vector: list[float]) -> None:
     backend = _injected_vector_backend()
     if backend is None:
-        await vector_store.upsert(chunk.id, chunk.content, namespace)
+        await vector_store_runtime._backend.upsert(chunk.id, vector, namespace)
         return
-    await backend.upsert(chunk.id, await vector_store.embed_text(chunk.content), namespace)
+    await backend.upsert(chunk.id, vector, namespace)
 
 
 async def _delete_chunk(namespace: str, chunk_id: str) -> None:
@@ -338,3 +369,10 @@ def _queue_database_url() -> str | None:
     from fleetent.knowledge_base import runtime
 
     return runtime._kb_queue_database_url
+
+
+def _require_queue_database_url() -> str:
+    database_url = _queue_database_url()
+    if not database_url:
+        raise ValueError("queue database_url is required")
+    return database_url

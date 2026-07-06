@@ -150,7 +150,7 @@ def _read_sandbox_section(path: Path) -> dict[str, object] | None:
     try:
         raw = yaml.safe_load(path.read_text())
     except yaml.YAMLError as exc:
-        _logger.warn("settings_yaml_parse_failed", path=str(path), error=str(exc))
+        _logger.warn("settings_yaml_parse_failed", path=str(path), exception=exc)
         return None
     if not isinstance(raw, dict):
         return None

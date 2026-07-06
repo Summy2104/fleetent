@@ -52,6 +52,9 @@ def test_agent_admin_yaml_bindings_and_versions(monkeypatch):
         lambda _agent_id: ["global", "missing"],
     )
     monkeypatch.setattr(
+        agent_admin_api.agent_store, "get_agent_mcp_approval_rules", lambda _a, _s: []
+    )
+    monkeypatch.setattr(
         agent_admin_api.mcp_server_store,
         "get_mcp_server",
         lambda agent_id, sid: (
@@ -134,6 +137,11 @@ def test_agent_admin_binding_skill_kb_and_mcp_handlers(monkeypatch):
         agent_admin_api.agent_kbs_store,
         "list_kbs_for_agent",
         lambda tenant_id, agent_id: ["kb1"],
+    )
+    monkeypatch.setattr(
+        agent_admin_api,
+        "kb_engine_list",
+        lambda tenant_id: [{"kb_id": "kb1"}],
     )
     monkeypatch.setattr(
         agent_admin_api.agent_kbs_store,

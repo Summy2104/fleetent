@@ -2208,6 +2208,26 @@ async def _call_via_session_inner(
 # Public API. `scope` keys the (scope, server_id) registry: None = global (startup)
 # servers; an int = an agent-scoped registration. A scope with no matching server_id
 # raises rather than silently falling back to the global server (agent isolation).
+def _effective_agent_id(agent_id: str | None) -> str | None:
+    """Fill the per-user triple's agent identity from the process's single active agent.
+
+    The runtime triple keys per-user oauth/api-key credentials on ``(user, agent, server)``.
+    managed IM turns don't thread ``agent_name`` into ``loop.run()`` (kept out for workspace
+    scope consistency), so the caller's ``agent_id`` arrives empty — which would key the
+    pending/token records on an empty agent and defeat per-agent isolation and per-agent
+    client_secret resolution. When the caller supplies no identity we adopt the process's
+    single active agent (``fleetent agent run <name>`` publishes exactly one); an explicit
+    identity is never overridden, and a multi-agent index (no single active agent) keeps the
+    caller's value. This decides only the credential triple — not workspace/exchange scope.
+    """
+    if agent_id:
+        return agent_id
+    from fleetent import agent_config
+
+    active = agent_config.active_agent()
+    return active.name if active is not None else None
+
+
 async def call_tool(
     server_id: str,
     tool_name: str,
@@ -2222,6 +2242,7 @@ async def call_tool(
     server = _server_registry.get((scope, server_id))
     if server is None:
         raise KeyError(f"Unknown MCP server: {server_id}")
+    agent_id = _effective_agent_id(agent_id)
     return await _call_via_session(
         server_id,
         tool_name,

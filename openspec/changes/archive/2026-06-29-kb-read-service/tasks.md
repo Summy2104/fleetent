@@ -1,7 +1,7 @@
 ## 1. 服务骨架 + per-tenant boot 绑定
 
-- [x] 1.1 写 integration 测试:`fleetent kb-serve --tenant T` 启动后,boot 经 `tenant_scope(T)` 注入 kb_db/vector_backend(只读 tenants/T/kb/)(见红),tmp_path 隔离绝不碰 data/
-- [x] 1.2 新增 `knowledge_base/serve.py`:FastAPI app + `main()`+argparse(`fleetent kb-serve --tenant --host --port`,FastAPI 入口内 import);boot 绑定租户 set_database 一次;跑 1.1 见绿
+- [x] 1.1 写 integration 测试:`fleetent kb serve --tenant T` 启动后,boot 经 `tenant_scope(T)` 注入 kb_db/vector_backend(只读 tenants/T/kb/)(见红),tmp_path 隔离绝不碰 data/
+- [x] 1.2 新增 `knowledge_base/serve.py`:FastAPI app + `main()`+argparse(`fleetent kb serve --tenant --host --port`,FastAPI 入口内 import);boot 绑定租户 set_database 一次;跑 1.1 见绿
 - [x] 1.3 确认 `knowledge_base` ✗→ import platform(module-boundaries 护栏);FastAPI 不进 knowledge_base 顶层 import 链
 
 ## 2. wire 协议 server + 检索

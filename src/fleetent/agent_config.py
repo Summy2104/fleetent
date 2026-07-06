@@ -656,6 +656,9 @@ _SKIP_SECRET_SCAN_SEGMENTS = (
     ".command",
     ".id",
     ".transport",
+    # auth_type is a discriminator enum (e.g. "oauth_authorization_code"), not a
+    # credential; its value would otherwise trip the length/entropy heuristic.
+    ".auth_type",
     ".access.allow_users.",
     ".access.allow_groups.",
 )
@@ -841,9 +844,9 @@ def default_models() -> AgentModels:
                 id="embedding",
                 provider="local",
                 protocol="http_embedding",
-                endpoint="http://localhost:11434/v1/embeddings",
-                model="default-embedding",
-                params={"dimensions": 64},
+                endpoint="http://127.0.0.1:11434/v1/embeddings",
+                model="bge-small",
+                params={"dimensions": 384},
             ),
         ],
         routes={
@@ -894,6 +897,12 @@ def collect_env_var_names(agent: AgentFile) -> list[str]:
     for key, value in flatten(agent.model_dump(mode="json")):
         if key.endswith("_env") and isinstance(value, str):
             add_name(value)
+        elif (
+            key.endswith(("credential_ref", "auth_ref"))
+            and isinstance(value, str)
+            and value.startswith("env:")
+        ):
+            add_name(value.removeprefix("env:"))
 
     for server in agent.model_dump(mode="json").get("mcp_servers", []):
         if not isinstance(server, dict):

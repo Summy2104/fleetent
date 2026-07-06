@@ -64,7 +64,7 @@ def _index(**overrides: Any) -> AgentConfigIndex:
 def test_snapshot_from_file_maps_fields_and_mcp() -> None:
     agent = _agent_file(mcp_servers=[McpServerSettings(id="github"), McpServerSettings(id="slack")])
     snap = snapshot._snapshot_from_file(agent)
-    assert snap.agent_id == "support"
+    assert snap.agent_name == "support"
     assert snap.name == "support"
     assert snap.version == 3
     assert snap.version_id == 3
@@ -73,7 +73,7 @@ def test_snapshot_from_file_maps_fields_and_mcp() -> None:
     assert snap.skills_dir == "skills"
     assert snap.mcp_server_ids == ["github", "slack"]
     assert snap.memory_namespace == "support-ns"
-    assert snap.model_policy.agent_id == "support"
+    assert snap.model_policy.agent_name == "support"
     assert snap.model_policy.resolve("default")[0].target_id == "primary"
     assert not hasattr(snap, "model_overrides")
 
@@ -101,7 +101,7 @@ def test_load_active_missing_returns_none(monkeypatch: Any) -> None:
 
 def test_snapshot_from_agent_maps_fields() -> None:
     snap = snapshot._snapshot_from_agent("support", _agent())
-    assert snap.agent_id == "7"
+    assert snap.agent_name == "support"
     assert snap.name == "support"
     assert snap.version == 5
     assert snap.version_id == 5
@@ -180,7 +180,7 @@ def test_resolve_mcp_servers_unknown_agent_returns_defaults(monkeypatch: Any) ->
     assert [s["id"] for s in merged] == ["jira"]
 
 
-def test_connector_scope_is_agent_id() -> None:
+def test_connector_scope_is_agent_name() -> None:
     snap = snapshot._snapshot_from_file(_agent_file(name="support"))
     assert snapshot.connector_scope(snap) == "support"
 

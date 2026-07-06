@@ -1,4 +1,4 @@
-"""Management-DB backed KB ingest job queue."""
+"""KB-local ingest job queue backed by the tenant queue database."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fleetent.config import Settings
 from fleetent.db import SQLiteDatabase, create_database
 from fleetent.schema_migrations import migrate
 
@@ -48,10 +47,10 @@ _LOCAL_QUEUE_MIGRATIONS: list[tuple[int, str]] = [
 
 
 def _database(database_url: str | None = None) -> SQLiteDatabase:
-    url = database_url or Settings().database_url
-    database = create_database(url)
-    if database_url:
-        migrate(database, _LOCAL_QUEUE_MIGRATIONS)
+    if not database_url:
+        raise ValueError("queue database_url is required")
+    database = create_database(database_url)
+    migrate(database, _LOCAL_QUEUE_MIGRATIONS)
     return database
 
 
@@ -68,7 +67,7 @@ def _decode(row: dict[str, Any] | None) -> dict[str, Any] | None:
     return job
 
 
-def get_job(job_id: str, *, database_url: str | None = None) -> dict[str, Any] | None:
+def get_job(job_id: str, *, database_url: str) -> dict[str, Any] | None:
     row = (
         _database(database_url)
         .execute(
@@ -80,7 +79,39 @@ def get_job(job_id: str, *, database_url: str | None = None) -> dict[str, Any] |
     return _decode(row)
 
 
-def has_active_worker(*, stale_after_seconds: float, database_url: str | None = None) -> bool:
+def list_jobs(
+    *,
+    tenant_id: str,
+    kb_id: str | None = None,
+    limit: int = 20,
+    database_url: str,
+) -> list[dict[str, Any]]:
+    rows = (
+        _database(database_url)
+        .execute(
+            """
+            SELECT *
+            FROM kb_ingest_jobs
+            WHERE tenant_id = :tenant_id
+              AND (:kb_id IS NULL OR kb_id = :kb_id)
+            ORDER BY updated_at DESC, id DESC
+            LIMIT :limit
+            """,
+            {"tenant_id": tenant_id, "kb_id": kb_id, "limit": limit},
+        )
+        .fetchall()
+    )
+    jobs: list[dict[str, Any]] = []
+    for row in rows:
+        job = _decode(row)
+        if job is None:
+            continue
+        job["result"] = get_job_result(job)
+        jobs.append(job)
+    return jobs
+
+
+def has_active_worker(*, stale_after_seconds: float, database_url: str) -> bool:
     """Return whether unresolved jobs show recent claim activity."""
     row = (
         _database(database_url)
@@ -124,7 +155,7 @@ def enqueue_job(
     connector_ref: dict[str, Any],
     cred_ref: str = "",
     max_attempts: int = 3,
-    database_url: str | None = None,
+    database_url: str,
 ) -> dict[str, Any]:
     job_id = str(uuid.uuid4())
     now = _now()
@@ -165,7 +196,7 @@ def enqueue_connector_job(
     connector_row: dict[str, Any],
     *,
     max_attempts: int = 3,
-    database_url: str | None = None,
+    database_url: str,
 ) -> dict[str, Any]:
     config = dict(connector_row.get("config") or {})
     cred_ref = str(config.pop("credential_ref", "") or "")
@@ -189,7 +220,7 @@ def enqueue_connector_job(
     )
 
 
-def claim_job(job_id: str, *, database_url: str | None = None) -> dict[str, Any] | None:
+def claim_job(job_id: str, *, database_url: str) -> dict[str, Any] | None:
     now = _now()
     with _database(database_url).transaction() as conn:
         row = conn.execute(
@@ -204,7 +235,7 @@ def claim_job(job_id: str, *, database_url: str | None = None) -> dict[str, Any]
     return _decode(row)
 
 
-def claim_next_job(*, database_url: str | None = None) -> dict[str, Any] | None:
+def claim_next_job(*, database_url: str) -> dict[str, Any] | None:
     now = _now()
     with _database(database_url).transaction() as conn:
         row = conn.execute(
@@ -229,7 +260,8 @@ def mark_done(
     job_id: str,
     *,
     result: dict[str, Any] | None = None,
-    database_url: str | None = None,
+    error: str | None = None,
+    database_url: str,
 ) -> dict[str, Any] | None:
     now = _now()
     with _database(database_url).transaction() as conn:
@@ -252,12 +284,13 @@ def mark_done(
             UPDATE kb_ingest_jobs
             SET status = 'done',
                 connector_ref = :connector_ref,
+                last_error = :error,
                 updated_at = :now,
                 finished_at = :now
             WHERE id = :id
             RETURNING *
             """,
-            {"id": job_id, "connector_ref": connector_ref, "now": now},
+            {"id": job_id, "connector_ref": connector_ref, "error": error, "now": now},
         ).fetchone()
     return _decode(row)
 
@@ -266,7 +299,7 @@ def mark_failed(
     job_id: str,
     error: str,
     *,
-    database_url: str | None = None,
+    database_url: str,
 ) -> dict[str, Any] | None:
     with _database(database_url).transaction() as conn:
         current = conn.execute(

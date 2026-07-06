@@ -4,9 +4,9 @@ import contextlib
 import re
 from typing import Any
 
-import structlog
+from fleetent.structured_logging import get_logger
 
-logger = structlog.get_logger(__name__)
+logger = get_logger(__name__)
 
 _IMAGE_MIME_PREFIX = "image/"
 
@@ -135,6 +135,24 @@ def _has_postable_content(text: str, blocks: list[dict[str, Any]] | None) -> boo
     return bool((text or "").strip()) or bool(blocks)
 
 
+def _blocks_from_approval(
+    blocks: list[dict[str, Any]] | None, approval: Any
+) -> list[dict[str, Any]] | None:
+    """Render a platform-neutral ApprovalPrompt into Slack Block Kit (output unchanged).
+
+    The gate now passes a neutral ``approval`` intent instead of pre-built Slack blocks; Slack
+    delivery renders it here via the same ``approval_prompt_blocks`` as before. Explicit
+    ``blocks`` (if any) take precedence; absent an approval this is a no-op pass-through.
+    """
+    if approval is None:
+        return blocks
+    from fleetent.outbound import approval_prompt_blocks
+
+    return blocks or approval_prompt_blocks(
+        approval.approval_id, approval.tool_name, approval.risk_level, summary=approval.summary
+    )
+
+
 async def _make_status_funcs(
     client: Any,
     channel: str,
@@ -158,9 +176,12 @@ async def _make_status_funcs(
         )
         status_ok = True
     except Exception as exc:  # noqa: BLE001 — feature may be disabled; degrade, don't abort
-        logger.warning("slack_assistant_status_failed", channel=channel, error=str(exc))
+        logger.warn("slack_assistant_status_failed", channel=channel, exception=exc)
 
-    async def reply_func(text: str, blocks: list[dict[str, Any]] | None = None) -> None:
+    async def reply_func(
+        text: str, blocks: list[dict[str, Any]] | None = None, *, approval: Any = None
+    ) -> None:
+        blocks = _blocks_from_approval(blocks, approval)
         if status_ok:
             with contextlib.suppress(Exception):
                 await client.assistant_threads_setStatus(
@@ -186,7 +207,7 @@ async def _make_status_funcs(
                 loading_messages=loading,
             )
         except Exception as exc:  # noqa: BLE001 — status update failure must not break the run
-            logger.warning("slack_progress_status_failed", error=str(exc))
+            logger.warn("slack_progress_status_failed", exception=exc)
 
     return reply_func, progress_func
 
@@ -201,9 +222,14 @@ async def handle_approval_action(
     an ephemeral notice while the prompt keeps its buttons. On an accepted
     decision the prompt message is rewritten to a result state (buttons removed)
     to prevent double-clicks, then the suspended run is resumed (approval-suspend-resume).
+
+    agent-hosted-im: the agent self-hosts its Slack connection, so this handler runs in the
+    agent process which owns approval_store/session/connectors — the decision is resolved and
+    the run resumed in place, carrying the live Slack connector so the approved action delivers.
     """
     from fleetent.governance import approval_store
     from fleetent.governance.approval_router import resolve_approval_request
+    from fleetent.im_gateway.access import resolve_decision_actor
     from fleetent.session import manager as session_mgr
 
     await ack()
@@ -217,6 +243,13 @@ async def handle_approval_action(
     decision = "rejected" if action_id == "approval_reject" else "approved"
     always = action_id == "approval_approve_always"
 
+    # Resolve the clicking user into the same identity space as the recorded authorized
+    # actors (AAA-8266): the gate holds the run principal's id — internal user id under
+    # managed identity resolution — so the raw Slack id must go through the same seam as
+    # inbound messages. Standalone (no resolver) returns it unchanged; a non-real id → None
+    # (fail closed, treated as unauthorized below).
+    actor = resolve_decision_actor("slack", clicker, agent_name or "default")
+
     # The run persisted the approval's session id; recover authorized actors from that
     # session's pending entry so authorization survives a restart.
     row = approval_store.get_approval(approval_id)
@@ -227,10 +260,10 @@ async def handle_approval_action(
         if pending and pending.get("approver_ids"):
             authorized = {str(a) for a in pending["approver_ids"]}
 
-    found = await resolve_approval_request(
+    found = actor is not None and await resolve_approval_request(
         approval_id=approval_id,
         decision=decision,  # type: ignore[arg-type]
-        approver_user_id=clicker,
+        approver_user_id=actor,
         always=always,
         authorized_actors=authorized,
     )
@@ -287,7 +320,7 @@ async def handle_approval_action(
                 resume_msg, session_id, approval_id, decision
             )
         except Exception as exc:  # noqa: BLE001 — decision stands; resume is best-effort
-            logger.warning("approval_button_resume_failed", approval_id=approval_id, error=str(exc))
+            logger.warn("approval_button_resume_failed", approval_id=approval_id, exception=exc)
 
 
 def _make_upload_func(
@@ -362,10 +395,10 @@ async def _download_attachments(files: list[dict[str, Any]], bot_token: str) -> 
                     resp = await client.get(url, headers=headers)
                     resp.raise_for_status()
                 except httpx.HTTPError as exc:
-                    logger.warning("slack_image_download_failed", url=url, error=str(exc))
+                    logger.warn("slack_image_download_failed", url=url, exception=exc)
                     continue
                 if _is_html_response(resp):
-                    logger.warning(
+                    logger.warn(
                         "slack_image_download_failed",
                         url=url,
                         error="content-type=text/html (check bot token scopes / file access)",
@@ -376,7 +409,7 @@ async def _download_attachments(files: list[dict[str, Any]], bot_token: str) -> 
             filename = f.get("name") or f.get("title") or "file"
             size = f.get("size")
             if isinstance(size, int) and size > _MAX_FILE_BYTES:
-                logger.warning("slack_file_too_large", filename=filename, size=size)
+                logger.warn("slack_file_too_large", filename=filename, size=size)
                 out.append(
                     FileAttachment(data=None, mime=mime, filename=filename, note=over_cap_note)
                 )
@@ -385,15 +418,13 @@ async def _download_attachments(files: list[dict[str, Any]], bot_token: str) -> 
                 resp = await client.get(url, headers=headers)
                 resp.raise_for_status()
             except httpx.HTTPError as exc:
-                logger.warning(
-                    "slack_file_download_failed", url=url, filename=filename, error=str(exc)
-                )
+                logger.warn("slack_file_download_failed", url=url, filename=filename, exception=exc)
                 out.append(
                     FileAttachment(data=None, mime=mime, filename=filename, note="文件下载失败")
                 )
                 continue
             if _is_html_response(resp):
-                logger.warning(
+                logger.warn(
                     "slack_file_download_failed",
                     url=url,
                     filename=filename,
@@ -405,7 +436,7 @@ async def _download_attachments(files: list[dict[str, Any]], bot_token: str) -> 
                 continue
             content = resp.content
             if len(content) > _MAX_FILE_BYTES:
-                logger.warning("slack_file_too_large", filename=filename, size=len(content))
+                logger.warn("slack_file_too_large", filename=filename, size=len(content))
                 out.append(
                     FileAttachment(data=None, mime=mime, filename=filename, note=over_cap_note)
                 )
@@ -454,22 +485,28 @@ async def _route_assistant_message(
 
     channel = getattr(context, "channel_id", None) or payload.get("channel") or ""
     thread_ts = getattr(context, "thread_ts", None)
-    slack_user_id = payload.get("user") or getattr(context, "user_id", None) or "unknown"
+    # AAA-8204 #1: do NOT fabricate a literal "unknown" when the assistant-thread context is
+    # broken and carries no user — resolve_identity rejects the empty id (below) so the event
+    # is discarded with a warning instead of provisioning a slack:unknown ghost user.
+    slack_user_id = payload.get("user") or getattr(context, "user_id", None) or ""
     try:
         identity = resolve_identity("slack", slack_user_id, agent_name)
     except IMIdentityResolutionError as exc:
-        logger.warning(
+        logger.warn(
             "slack_identity_resolution_rejected",
             agent=agent_name,
             platform_user_id=slack_user_id,
-            error=str(exc),
+            exception=exc,
         )
         return
 
     with contextlib.suppress(Exception):
         await set_status(_THINKING_STATUS, loading_messages=[_THINKING_STATUS])
 
-    async def reply_func(text: str, blocks: list[dict[str, Any]] | None = None) -> None:
+    async def reply_func(
+        text: str, blocks: list[dict[str, Any]] | None = None, *, approval: Any = None
+    ) -> None:
+        blocks = _blocks_from_approval(blocks, approval)
         with contextlib.suppress(Exception):
             await set_status("")
         if not _has_postable_content(text, blocks):
@@ -486,7 +523,7 @@ async def _route_assistant_message(
         try:
             await set_status(status, loading_messages=loading)
         except Exception as exc:  # noqa: BLE001 — status update failure must not break the run
-            logger.warning("slack_progress_status_failed", error=str(exc))
+            logger.warn("slack_progress_status_failed", exception=exc)
 
     files = payload.get("files") or []
     attachments = await _download_attachments(list(files), bot_token)
@@ -594,16 +631,18 @@ def create_app(agent_name: str, config: dict[str, Any]) -> object:
         from fleetent.outbound import ConversationAddress
 
         channel = event.get("channel") or ""
-        slack_user_id = event.get("user") or "unknown"
+        # AAA-8204 #1: no user on the event → empty (rejected below), never a fabricated
+        # "unknown" that would provision a ghost user.
+        slack_user_id = event.get("user") or ""
         # Identity is the platform-native id, resolved locally — no platform user_store.
         try:
             identity = resolve_identity("slack", slack_user_id, agent_name)
         except IMIdentityResolutionError as exc:
-            logger.warning(
+            logger.warn(
                 "slack_identity_resolution_rejected",
                 agent=agent_name,
                 platform_user_id=slack_user_id,
-                error=str(exc),
+                exception=exc,
             )
             return
         thread_ts = event.get("thread_ts")

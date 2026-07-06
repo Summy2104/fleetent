@@ -508,4 +508,4 @@ class SandboxManager:
             try:
                 workspace_gc.gc_agent_workspace(key)
             except OSError as exc:
-                _logger.warn("sandbox_agent_workspace_gc_failed", key=key, error=str(exc))
+                _logger.warn("sandbox_agent_workspace_gc_failed", key=key, exception=exc)

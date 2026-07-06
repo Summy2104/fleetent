@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -23,10 +23,13 @@ from fleetent.knowledge_base.sync_planner import (
     SyncPlanItem,
     SyncPlanSummary,
 )
+from fleetent.structured_logging import get_logger, redact_text
 
 ConfluenceScopeType = Literal["space", "page"]
 SleepFn = Callable[[float], Awaitable[None]]
 _CONFLUENCE_EXPAND = "body.storage,version,space,ancestors,history.lastUpdated"
+_MAX_RECORDED_ERRORS = 10
+_logger = get_logger("knowledge_base")
 
 
 @dataclass(frozen=True)
@@ -92,6 +95,7 @@ class ConfluenceSyncSummary:
     archived: int = 0
     failed: int = 0
     auth_failed: int = 0
+    errors: list[str] = field(default_factory=list)
 
 
 class ConfluenceAuthError(RuntimeError):
@@ -122,10 +126,13 @@ class ConfluenceClient(Protocol):
 class CredentialRefResolver:
     """Resolve env: and file credential_ref values."""
 
-    def resolve(self, credential_ref: str) -> ConfluenceCredential:
+    def resolve(
+        self, credential_ref: str, env: Mapping[str, str] | None = None
+    ) -> ConfluenceCredential:
+        source_env = env if env is not None else os.environ
         if credential_ref.startswith("env:"):
             env_name = credential_ref.removeprefix("env:")
-            value = os.getenv(env_name)
+            value = source_env.get(env_name)
             if value is None:
                 raise ConfluenceAuthError(f"missing credential env var: {env_name}")
             return ConfluenceCredential(credential_ref=credential_ref, payload=value)
@@ -143,6 +150,7 @@ class HttpConfluenceClient:
     base_url: str
     username: str
     credential_ref: str
+    env: Mapping[str, str] | None = None
     timeout_seconds: float = 20.0
 
     def list_space_pages(self, space_key: str) -> list[list[ConfluencePage]]:
@@ -204,7 +212,7 @@ class HttpConfluenceClient:
         params: dict[str, str] | None = None,
     ) -> httpx.Response:
         url = _confluence_url(self.base_url, path_or_url)
-        token = CredentialRefResolver().resolve(self.credential_ref).payload
+        token = CredentialRefResolver().resolve(self.credential_ref, env=self.env).payload
         try:
             with httpx.Client(timeout=self.timeout_seconds) as client:
                 response = client.request(
@@ -385,6 +393,7 @@ async def execute_confluence_sync_plan(
     archived = 0
     failed = plan.summary.failed
     auth_failed = plan.summary.auth_failed
+    errors: list[str] = []
 
     for item in plan.items:
         try:
@@ -430,8 +439,11 @@ async def execute_confluence_sync_plan(
                     )
                 )
             ingested += 1
-        except Exception:
+        except Exception as exc:
             failed += 1
+            _logger.error("kb_sync_file_failed", source_path=item.source_path, exception=exc)
+            if len(errors) < _MAX_RECORDED_ERRORS:
+                errors.append(f"{item.source_path}: {redact_text(str(exc))}")
 
     return ConfluenceSyncSummary(
         scanned=plan.summary.scanned,
@@ -442,6 +454,7 @@ async def execute_confluence_sync_plan(
         archived=archived,
         failed=failed,
         auth_failed=auth_failed,
+        errors=errors,
     )
 
 

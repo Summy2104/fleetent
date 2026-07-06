@@ -4,7 +4,7 @@
 
 ## What Changes
 
-- **ingest 后按 KB opt-in 自动入队 extraction**:KB 级新增 `extraction_enabled` 开关(默认关)。当某 KB 开启时,ingest 写入 document/chunks 后 SHALL **异步入队**一个 per-document extraction job(复用既有 `kb_ingest_jobs` 队列 + `fleetent kb-worker`,新增 `extraction` job_type),**不阻塞** ingest 完成。
+- **ingest 后按 KB opt-in 自动入队 extraction**:KB 级新增 `extraction_enabled` 开关(默认关)。当某 KB 开启时,ingest 写入 document/chunks 后 SHALL **异步入队**一个 per-document extraction job(复用既有 `kb_ingest_jobs` 队列 + `fleetent kb worker`,新增 `extraction` job_type),**不阻塞** ingest 完成。
 - **worker 消费 extraction job**:worker SHALL 认 `extraction` job_type,运行 `run_entity_extraction` 写 entities/mentions/relations;单 job 失败非阻塞(图谱缺该文档证据,检索优雅降级),按既有 retry 上限重试。
 - **re-ingest 重新入队**:同身份覆盖(已落地的 overwrite)删旧 document 时连带清旧实体(已落地的 delete 级联),插新 document 后 SHALL 为新版本重新入队 extraction(KB 开启时)。
 - **抽取模型经 HTTP route**:extraction 走 model_router 的 `kb_extraction` task(HTTP),route 按部署配置;**on-prem 默认必须可自托管,不硬编码云默认**;云 API 仅为"该部署明确接受其 KB 内容外发"时的 opt-in(数据主权约束,与 embedding 姿态对称)。

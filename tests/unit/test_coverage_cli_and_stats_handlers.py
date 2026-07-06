@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from fleetent.platform.agent_statistics import stats_admin_api
-from fleetent.platform.platform_cli import kb_connectors, users
+from fleetent.platform.platform_cli import users
 
 
 def _ns(**values: Any) -> argparse.Namespace:
@@ -26,36 +26,6 @@ def test_user_cli_only_keeps_seed_builtin_admin(monkeypatch, capsys) -> None:
 
     output = capsys.readouterr().out
     assert "Built-in admin created." in output
-
-
-def test_kb_connector_cli_only_keeps_extract_entities(monkeypatch, capsys) -> None:
-    async def run_entity_extraction(*args: Any, **kwargs: Any) -> SimpleNamespace:
-        return SimpleNamespace(
-            status="ok",
-            tenant_id="tenant",
-            kb_id="kb",
-            document_id="doc",
-            documents_scanned=1,
-            chunks_scanned=2,
-            entities_upserted=3,
-            mentions_written=4,
-            relations_written=5,
-            failed_count=0,
-            error_summary="",
-        )
-
-    monkeypatch.setattr(kb_connectors, "run_entity_extraction", run_entity_extraction)
-
-    assert not kb_connectors.handle(_ns(cmd="not-kb"))
-    assert not kb_connectors.handle(_ns(cmd="kb", kb_cmd="connectors", connector_cmd="list"))
-    assert kb_connectors.handle(
-        _ns(cmd="kb", kb_cmd="extract-entities", tenant_id="tenant", kb_id="kb", document_id="doc")
-    )
-
-    output = capsys.readouterr().out
-    assert "entities_upserted=3" in output
-    assert not hasattr(kb_connectors, "_handle_connectors")
-    assert not hasattr(kb_connectors, "_execute_sync_env_flag")
 
 
 def test_stats_admin_api_handlers_with_mocked_auth_and_data(monkeypatch):

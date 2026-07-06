@@ -1,10 +1,8 @@
-import logging
 import os
 import re
 from pathlib import Path
 from typing import Any, Literal
 
-import structlog
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_settings import (
@@ -16,6 +14,7 @@ from pydantic_settings import (
 )
 
 from fleetent import paths
+from fleetent.logging_setup import setup_process_logging
 from fleetent.oidc_config import OidcSettings
 
 PLATFORM_YAML_PATH = paths.platform_yaml_path()
@@ -44,7 +43,6 @@ class LoggingSettings(BaseModel):
     file_level: str = "debug"
     # Blank means "resolve to agent home data/logs/"; explicit path used as-is.
     directory: str = ""
-    json_file: bool = True
 
 
 class ObservabilitySettings(BaseModel):
@@ -265,6 +263,46 @@ class McpServerSettings(BaseModel):
     approval_rules: list[McpApprovalRule] = Field(default_factory=list)
 
 
+# Fleetent extension fields and their defaults — dropped from the rendered `agent.yaml` map
+# when default, hoisted under `x-fleetent` when set (mcp-config-standardization). Lives here
+# (not in platform/agent_lifecycle/materialize.py, the only place that actually applies this
+# hoisting) so both the ②控制 admin API face and the ③编排 materializer face can read it
+# without a face-to-face import (see tests/unit/test_module_dependency_guardrails.py).
+MCP_FLEETENT_EXT_DEFAULTS: dict[str, Any] = {
+    "degrade_mode": "degrade",
+    "file_root": "",
+    "file_isolation": "on",
+    "auth": None,
+    "approval_rules": [],
+}
+
+# Fields not surfaced by any admin-form input; excluded from mcp_yaml_field_paths() so the
+# path table only covers fields a user can actually fill in.
+_MCP_FIELD_PATH_SKIP = frozenset({"id", "connect_timeout", "call_timeout"})
+
+
+def mcp_yaml_field_paths() -> dict[str, str]:
+    """Map each ``McpServerSettings`` field to its ``agent.yaml`` path template.
+
+    Derived from ``MCP_FLEETENT_EXT_DEFAULTS`` (the same table
+    ``materialize._mcp_payload_to_map`` uses to decide what gets hoisted under
+    ``x-fleetent``), so this can never drift from the real write path. ``{id}`` is a
+    placeholder for the server's ``mcpServers`` map key.
+    """
+    paths: dict[str, str] = {}
+    for name in McpServerSettings.model_fields:
+        if name in _MCP_FIELD_PATH_SKIP:
+            continue
+        if name == "auth":
+            for sub in McpOAuthSettings.model_fields:
+                paths[f"auth.{sub}"] = f"mcpServers.{{id}}.x-fleetent.auth.{sub}"
+        elif name in MCP_FLEETENT_EXT_DEFAULTS:
+            paths[name] = f"mcpServers.{{id}}.x-fleetent.{name}"
+        else:
+            paths[name] = f"mcpServers.{{id}}.{name}"
+    return paths
+
+
 _ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
@@ -373,6 +411,15 @@ class McpSettings(BaseModel):
 class SchedulingSettings(BaseModel):
     enabled: bool = True
     default_timezone: str = "UTC"
+    # Durable poll engine (cron-durable-poll-engine): the tick cadence, the bounded
+    # concurrency for firing due tasks, and how many run-history rows to keep per task.
+    tick_interval_seconds: float = 10.0
+    max_parallel: int = 4
+    history_retention: int = 50
+    skill_git_sync_interval_seconds: int = 300
+    # Backflow PR sweep runs more often than inbound sync: backing up an agent's edit to a
+    # branch is safety-critical, so prefer a short interval.
+    skill_backflow_pr_sweep_interval_seconds: int = 120
 
 
 class WebhookSourceSettings(BaseModel):
@@ -400,6 +447,12 @@ class WebhooksSettings(BaseModel):
     sources: list[WebhookSourceSettings] = Field(default_factory=list)
 
 
+class KBServeSettings(BaseModel):
+    url: str = ""
+    service_key_ref: str = ""
+    timeout_seconds: float = 30.0
+
+
 class Settings(BaseSettings):
     """Slim platform control-plane settings.
 
@@ -416,6 +469,15 @@ class Settings(BaseSettings):
     database_url: str = Field(default_factory=lambda: f"sqlite:///{paths.management_db_path()}")
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     oidc: OidcSettings = Field(default_factory=OidcSettings)
+    kb_serve: KBServeSettings = Field(default_factory=KBServeSettings)
+
+    @field_validator("database_url")
+    @classmethod
+    def _empty_database_url_means_default(cls, value: str) -> str:
+        # The scaffolded home .env (copied from .env.example by init-config) ships a blank
+        # `DATABASE_URL=` line; dotenv delivers that as an explicit empty string, which
+        # would otherwise override the default and leave every store unable to open a DB.
+        return value or f"sqlite:///{paths.management_db_path()}"
 
     @classmethod
     def settings_customise_sources(
@@ -444,42 +506,11 @@ class Settings(BaseSettings):
 
 
 def configure_logging(settings: Settings) -> None:
-    from fleetent.structured_logging import configure_structured_logging
-
-    configure_structured_logging(
+    setup_process_logging(
         console_level=settings.observability.logging.console_level,
         file_level=settings.observability.logging.file_level,
         directory=settings.observability.logging.directory,
-    )
-
-    shared_processors: list[structlog.types.Processor] = [
-        structlog.contextvars.merge_contextvars,
-        # NOTE (from feature/zhangyang Wave-1 fix): structlog.stdlib.add_logger_name
-        # reads `logger.name`, which only exists on stdlib loggers — the PrintLogger
-        # from PrintLoggerFactory below has none, so including it crashed every log
-        # call at emit time. It is intentionally omitted.
-        structlog.stdlib.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-    ]
-
-    if settings.log_format == "json":
-        renderer: structlog.types.Processor = structlog.processors.JSONRenderer()
-    else:
-        renderer = structlog.dev.ConsoleRenderer()
-
-    structlog.configure(
-        processors=shared_processors + [renderer],
-        wrapper_class=structlog.make_filtering_bound_logger(logging.DEBUG),
-        context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
-
-    logging.basicConfig(
-        format="%(message)s",
-        level=logging.INFO,
-        handlers=[logging.StreamHandler()],
+        log_format=settings.log_format,
     )
 
 

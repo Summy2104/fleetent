@@ -7,7 +7,7 @@ The project SHALL gate the `frontend/` workspace in the same PR pipeline as the 
 #### Scenario: PR runs frontend checks
 
 - **WHEN** a pull request touches the repository
-- **THEN** the CI pipeline installs the frontend dependencies from the checked-in `yarn.lock`
+- **THEN** the CI pipeline installs the frontend dependencies from the checked-in `pnpm-lock.yaml`
 - **AND** runs `make test-frontend` (Vitest with coverage threshold + `tsc --noEmit` + lint)
 - **AND** fails the build if any frontend test, the type check, lint, or the coverage threshold fails
 

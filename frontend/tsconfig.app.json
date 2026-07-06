@@ -13,11 +13,10 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "strict": true,
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     },
     "types": ["vite/client", "vitest/globals"]
   },
-  "include": ["src", "e2e", "playwright.config.ts"]
+  "include": ["src", "e2e"]
 }

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+
 from fleetent.config import KnowledgeBaseSettings
 from fleetent.db import SQLiteDatabase, create_database
 from fleetent.knowledge_base.core import KnowledgeChunk, KnowledgeDocument, KnowledgeStore
@@ -370,6 +372,105 @@ async def test_reingest_collapses_existing_duplicate_identity_rows(monkeypatch, 
     assert tracker.deleted_chunk_ids == ["duplicate-1:chunk:0", "duplicate-2:chunk:0"]
 
 
+async def test_ingest_embedding_failure_leaves_no_document_chunk_fts_or_vector_residue(
+    monkeypatch, tmp_path
+):
+    database, tracker = _patch_knowledge_runtime(monkeypatch, tmp_path)
+
+    from fleetent.knowledge_base import runtime
+    from fleetent.knowledge_base.ingest import runtime as ingest_runtime
+
+    monkeypatch.setattr(runtime, "_kb_vector_backend", tracker)
+
+    async def fail_embed_text(text: str) -> list[float]:
+        raise RuntimeError(f"embedding offline for {text}")
+
+    monkeypatch.setattr(ingest_runtime.vector_store, "embed_text", fail_embed_text)
+
+    with pytest.raises(RuntimeError, match="embedding offline"):
+        await runtime.ingest_text(
+            filename="broken.md",
+            content="this should never persist",
+            tenant_id="tenant-a",
+            kb_id="support",
+            source="manual",
+        )
+
+    assert _count(database, "SELECT COUNT(*) FROM knowledge_documents") == 0
+    assert _count(database, "SELECT COUNT(*) FROM knowledge_chunks") == 0
+    assert _count(database, "SELECT COUNT(*) FROM knowledge_chunks_fts") == 0
+    assert tracker.upsert_calls == []
+    assert tracker.deleted_chunk_ids == []
+
+
+async def test_reingest_embedding_failure_keeps_existing_document_searchable(monkeypatch, tmp_path):
+    database, tracker = _patch_knowledge_runtime(monkeypatch, tmp_path)
+
+    from fleetent.knowledge_base import runtime
+    from fleetent.knowledge_base.ingest import runtime as ingest_runtime
+
+    monkeypatch.setattr(runtime, "_kb_vector_backend", tracker)
+
+    existing = await runtime.ingest_text(
+        filename="guide.md",
+        content="stable baseline content",
+        tenant_id="tenant-a",
+        kb_id="support",
+        source="manual",
+    )
+    before_search = await runtime.search(
+        "stable",
+        tenant_id="tenant-a",
+        kb_ids=["support"],
+        mode="keyword",
+    )
+
+    async def fail_embed_text(text: str) -> list[float]:
+        raise RuntimeError(f"embedding offline for {text}")
+
+    monkeypatch.setattr(ingest_runtime.vector_store, "embed_text", fail_embed_text)
+
+    with pytest.raises(RuntimeError, match="embedding offline"):
+        await runtime.ingest_text(
+            filename="guide.md",
+            content="replacement that must not win",
+            tenant_id="tenant-a",
+            kb_id="support",
+            source="manual",
+        )
+
+    documents = database.execute(
+        """
+        SELECT id, filename, source
+        FROM knowledge_documents
+        WHERE tenant_id = :tenant_id AND kb_id = :kb_id
+        ORDER BY created_at ASC, id ASC
+        """,
+        {"tenant_id": "tenant-a", "kb_id": "support"},
+    ).fetchall()
+    chunks = database.execute(
+        """
+        SELECT document_id, position, content
+        FROM knowledge_chunks
+        WHERE tenant_id = :tenant_id AND kb_id = :kb_id
+        ORDER BY position ASC
+        """,
+        {"tenant_id": "tenant-a", "kb_id": "support"},
+    ).fetchall()
+    after_search = await runtime.search(
+        "stable",
+        tenant_id="tenant-a",
+        kb_ids=["support"],
+        mode="keyword",
+    )
+
+    assert [row["id"] for row in documents] == [existing.id]
+    assert [row["content"] for row in chunks] == ["stable baseline content"]
+    assert [chunk.document_id for chunk in before_search] == [existing.id]
+    assert [chunk.document_id for chunk in after_search] == [existing.id]
+    assert tracker.deleted_chunk_ids == []
+
+
 async def _ingest_fixture_document(filename: str, content: str):
     from fleetent.knowledge_base import runtime
 
@@ -413,9 +514,10 @@ def _patch_knowledge_runtime(monkeypatch, tmp_path) -> tuple[SQLiteDatabase, _Ve
 class _VectorTracker:
     def __init__(self) -> None:
         self.deleted_chunk_ids: list[str] = []
+        self.upsert_calls: list[tuple[str, str, str]] = []
 
     async def upsert(self, chunk_id: str, content: str, namespace: str) -> None:
-        return None
+        self.upsert_calls.append((chunk_id, content, namespace))
 
     async def delete(self, chunk_id: str, namespace: str) -> None:
         self.deleted_chunk_ids.append(chunk_id)

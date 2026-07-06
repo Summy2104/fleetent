@@ -49,30 +49,6 @@ def compact_memory(*, dry_run: bool, actor: str) -> MaintenanceSummary:
     )
 
 
-def run_kb_sync(*, connector_id: str, dry_run: bool, actor: str) -> MaintenanceSummary:
-    command = "kb sync"
-    return MaintenanceSummary(
-        command=command,
-        dry_run=dry_run,
-        affected_counts={"connectors": 1 if connector_id else 0},
-        audit_ref=None
-        if dry_run
-        else _record_maintenance_trace(command, actor, {"connector_id": connector_id}),
-    )
-
-
-def reindex_vector(*, namespace: str, dry_run: bool, actor: str) -> MaintenanceSummary:
-    command = "vector reindex"
-    return MaintenanceSummary(
-        command=command,
-        dry_run=dry_run,
-        affected_counts={"namespaces": 1 if namespace else 0},
-        audit_ref=None
-        if dry_run
-        else _record_maintenance_trace(command, actor, {"namespace": namespace}),
-    )
-
-
 def run_reflection(*, scope: str, dry_run: bool, actor: str) -> MaintenanceSummary:
     command = "reflection run"
     return MaintenanceSummary(

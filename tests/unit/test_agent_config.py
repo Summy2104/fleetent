@@ -1,5 +1,7 @@
 """Unit tests for the file-driven agent config loader (file-agent-runtime)."""
 
+from pathlib import Path
+
 import pytest
 import yaml
 from pydantic import ValidationError
@@ -112,6 +114,45 @@ def test_hot_mcp_servers_parsed() -> None:
     doc["hot_mcp_servers"] = ["crm__*", "jira__create_*"]
     af = agent_config.AgentFile.model_validate(doc)
     assert af.hot_mcp_servers == ["crm__*", "jira__create_*"]
+
+
+def test_default_embedding_route_matches_kb_service_example() -> None:
+    models = agent_config.default_models()
+    embedding_route = models.routes["embedding"][0]
+    target_by_id = {target.id: target for target in models.targets}
+    embedding_target = target_by_id[embedding_route.target]
+
+    example_path = Path(__file__).resolve().parents[2] / "kb-service.yaml.example"
+    example = yaml.safe_load(example_path.read_text(encoding="utf-8"))
+    embedding = example["embedding"]
+
+    assert embedding_target.endpoint == embedding["endpoint"]
+    assert embedding_target.model == embedding["model"]
+    assert embedding_target.params["dimensions"] == embedding["dimensions"]
+
+
+def test_kb_service_example_includes_disabled_rerank_section() -> None:
+    example_path = Path(__file__).resolve().parents[2] / "kb-service.yaml.example"
+    example = yaml.safe_load(example_path.read_text(encoding="utf-8"))
+
+    assert example["rerank"] == {
+        "backend": "disabled",
+        "endpoint": "",
+        "model": "your-reranker-model",
+        "api_key_env": "FLEETENT_KB_RERANK_API_KEY",
+    }
+
+
+def test_kb_service_example_includes_disabled_local_extraction_section() -> None:
+    example_path = Path(__file__).resolve().parents[2] / "kb-service.yaml.example"
+    example = yaml.safe_load(example_path.read_text(encoding="utf-8"))
+
+    assert example["extraction"] == {
+        "enabled": False,
+        "endpoint": "http://127.0.0.1:11434/v1/",
+        "model": "qwen3:8b",
+        "api_key_env": "FLEETENT_KB_EXTRACTION_API_KEY",
+    }
 
 
 # --- sandbox-workspace-scope-split: per-agent image persistence schema ------
@@ -940,6 +981,42 @@ def test_collect_env_var_names_includes_mcp_env_and_headers_env_refs() -> None:
     assert "MY_TOKEN" in names
     assert "literal" not in names
     assert names.count("MY_DATABASE_URL") == 1
+
+
+def test_collect_env_var_names_includes_knowledge_provider_auth_ref() -> None:
+    agent = agent_config.AgentFile.model_validate(
+        {
+            "name": "kb-http-agent",
+            "version": 1,
+            "system_prompt": "test",
+            "models": {
+                "targets": [
+                    {
+                        "id": "primary",
+                        "provider": "anthropic",
+                        "protocol": "openai_chat",
+                        "base_url": "https://api.anthropic.com/v1/",
+                        "model": "claude-opus-4-8",
+                        "api_key_env": "MODEL_API_KEY",
+                    }
+                ],
+                "routes": {"default": [{"target": "primary"}]},
+            },
+            "knowledge": {
+                "enabled": True,
+                "bindings": [{"tenant_id": "default", "kb_id": "kb-1"}],
+                "provider": {
+                    "type": "http",
+                    "url": "http://kb-serve:8768/search",
+                    "auth_ref": "env:FLEETENT_KB_SERVICE_KEY",
+                },
+            },
+        }
+    )
+
+    names = agent_config.collect_env_var_names(agent)
+
+    assert "FLEETENT_KB_SERVICE_KEY" in names
 
 
 # --- task 6.1: platform and node alignment ---

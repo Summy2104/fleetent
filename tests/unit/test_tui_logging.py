@@ -32,7 +32,7 @@ async def test_transport_warns_on_close_error() -> None:
 
     mock_log.warn.assert_called_once()
     kw = mock_log.warn.call_args.kwargs
-    assert "error" in kw
+    assert isinstance(kw["exception"], RuntimeError)
 
 
 # ── tui.backend ───────────────────────────────────────────────────────────────

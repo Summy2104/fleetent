@@ -48,3 +48,34 @@ def test_delete_nonexistent_returns_false(isolated_schedule_db):
 
 def test_list_tasks_empty_db(isolated_schedule_db):
     assert ss.list_tasks() == []
+
+
+def test_update_run_state_writing_status_preserves_next_run_at(isolated_schedule_db):
+    """update_run_state is field-selective (PATCH): writing status columns must not
+    clear next_run_at (fix-cron-store-and-once F1 — AAA-8288)."""
+    task = ss.create("a", "* * * * *", "UTC", "u-1", "msg", "dynamic")
+    ss.update_run_state(task["id"], next_run_at="2026-07-01T12:00:00+00:00")
+
+    ss.update_run_state(task["id"], last_run_at="2026-07-01T12:00:01Z", last_status="ok")
+
+    row = ss.get(task["id"])
+    assert row["next_run_at"] == "2026-07-01T12:00:00+00:00"
+    assert row["last_status"] == "ok"
+    assert row["last_run_at"] == "2026-07-01T12:00:01Z"
+
+
+def test_update_run_state_writing_next_run_at_preserves_status(isolated_schedule_db):
+    """The reverse direction: advancing next_run_at must not clear a previously
+    recorded status/error."""
+    task = ss.create("a", "* * * * *", "UTC", "u-1", "msg", "dynamic")
+    ss.update_run_state(
+        task["id"], last_run_at="2026-07-01T12:00:00Z", last_status="error", last_error="boom"
+    )
+
+    ss.update_run_state(task["id"], next_run_at="2026-07-01T12:01:00+00:00")
+
+    row = ss.get(task["id"])
+    assert row["next_run_at"] == "2026-07-01T12:01:00+00:00"
+    assert row["last_status"] == "error"
+    assert row["last_error"] == "boom"
+    assert row["last_run_at"] == "2026-07-01T12:00:00Z"

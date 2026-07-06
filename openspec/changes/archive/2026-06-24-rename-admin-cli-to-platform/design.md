@@ -4,7 +4,7 @@ Fleetent 已形成清晰的运行面边界：
 
 - `fleetent agent run`：agent runtime 原语，node 拉起 agent 时使用。
 - `fleetent node start`：agent host supervisor。
-- `fleetent kb-worker`：KB ingest worker。
+- `fleetent kb worker`：KB ingest worker。
 - `fleetent chat`：终端客户端。
 
 缺口是 Platform/control-plane：CLI namespace 仍叫 `admin`，启动仍靠 uvicorn 裸命令，

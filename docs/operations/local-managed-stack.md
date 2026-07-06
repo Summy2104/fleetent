@@ -119,7 +119,7 @@ curl -sN -X POST http://127.0.0.1:8765/admin/agents/chatbot/chat \
 ## 停止
 
 ```bash
-pkill -f "platform serve"; pkill -f "fleetent node start"; pkill -f "fleetent agent run"; pkill -f "fleetent kb-worker"
+pkill -f "platform serve"; pkill -f "fleetent node start"; pkill -f "fleetent agent run"; pkill -f "fleetent kb worker"
 ```
 
 ## 踩坑速查

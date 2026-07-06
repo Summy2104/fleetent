@@ -13,9 +13,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-import structlog
+from fleetent.structured_logging import get_logger
 
-logger = structlog.get_logger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -102,6 +102,7 @@ async def send_to(
     target_type: str = "user",
     thread: Any = None,
     blocks: list[dict[str, Any]] | None = None,
+    approval: ApprovalPrompt | None = None,
 ) -> DeliveryReceipt:
     """Send text to target on platform, returning a DeliveryReceipt (never raises).
 
@@ -109,25 +110,20 @@ async def send_to(
     ``thread`` optionally threads the message (Slack ``thread_ts`` / Telegram topic).
     ``blocks`` is an optional platform-specific rich payload (Slack Block Kit);
     platforms without rich rendering ignore it and send the text fallback.
+    ``approval`` is a platform-neutral approval-prompt intent rendered here at the boundary
+    (Slack Block Kit / Telegram inline keyboard), so callers (the gate) carry no platform
+    rendering format.
     """
-    from fleetent.outbound_connectors import ManagedOutboundConnector
-
-    if isinstance(connector, ManagedOutboundConnector):
-        connector.enqueue_text(
-            target=target,
-            text=text,
-            target_type=target_type,
-            thread=thread,
-            blocks=blocks,
+    # Render the neutral approval intent per platform (Slack output identical to before).
+    if approval is not None and platform == "slack" and blocks is None:
+        blocks = approval_prompt_blocks(
+            approval.approval_id, approval.tool_name, approval.risk_level, summary=approval.summary
         )
-        return DeliveryReceipt(
-            ok=True,
-            platform=platform,
-            target=target,
-            target_type=target_type,
-            kind="text",
-            thread=thread,
-        )
+    reply_markup = (
+        render_approval_telegram(approval)
+        if approval is not None and platform == "telegram"
+        else None
+    )
 
     ref: str | None = None
     err: str | None = None
@@ -137,10 +133,10 @@ async def send_to(
         else:
             ref, err = await _slack_send_dm(connector, target, text, blocks)
     elif platform == "telegram":
-        ref, err = await _telegram_send(connector, target, text, thread)
+        ref, err = await _telegram_send(connector, target, text, thread, reply_markup=reply_markup)
     else:
         err = f"unsupported platform: {platform}"
-        logger.warning("outbound_unsupported_platform", platform=platform)
+        logger.warn("outbound_unsupported_platform", platform=platform)
     return DeliveryReceipt(
         ok=err is None,
         platform=platform,
@@ -168,24 +164,6 @@ async def send_file_to(
     optionally threads the delivery (Slack ``thread_ts``). This is the single outbound file
     delivery point shared by the ``send_file`` tool and the IM adapters' upload path.
     """
-    from fleetent.outbound_connectors import ManagedOutboundConnector
-
-    if isinstance(connector, ManagedOutboundConnector):
-        connector.enqueue_file(
-            target=target,
-            path=path,
-            target_type=target_type,
-            thread=thread,
-        )
-        return DeliveryReceipt(
-            ok=True,
-            platform=platform,
-            target=target,
-            target_type=target_type,
-            kind="file",
-            thread=thread,
-        )
-
     ref: str | None = None
     err: str | None = None
     if platform == "slack":
@@ -194,7 +172,7 @@ async def send_file_to(
         ref, err = await _telegram_send_file(connector, target, path)
     else:
         err = f"unsupported platform: {platform}"
-        logger.warning("outbound_file_unsupported_platform", platform=platform)
+        logger.warn("outbound_file_unsupported_platform", platform=platform)
     return DeliveryReceipt(
         ok=err is None,
         platform=platform,
@@ -217,9 +195,11 @@ def make_replier(connectors: dict[str, Any], address: ConversationAddress) -> An
     """
     connector = connectors.get(address.platform)
 
-    async def reply_func(text: str, blocks: list[dict[str, Any]] | None = None) -> None:
+    async def reply_func(
+        text: str, blocks: list[dict[str, Any]] | None = None, *, approval: Any = None
+    ) -> None:
         if connector is None:
-            logger.warning("replier_no_connector", platform=address.platform)
+            logger.warn("replier_no_connector", platform=address.platform)
             return
         await send_to(
             address.platform,
@@ -229,6 +209,7 @@ def make_replier(connectors: dict[str, Any], address: ConversationAddress) -> An
             target_type=address.target_type,
             thread=address.thread_id,
             blocks=blocks,
+            approval=approval,
         )
 
     return reply_func
@@ -244,7 +225,7 @@ def make_uploader(connectors: dict[str, Any], address: ConversationAddress) -> A
 
     async def upload_func(paths: list[str]) -> None:
         if connector is None:
-            logger.warning("uploader_no_connector", platform=address.platform)
+            logger.warn("uploader_no_connector", platform=address.platform)
             return
         for path in paths:
             await send_file_to(
@@ -269,12 +250,12 @@ def make_mcp_authz_deliverer(tool_context: Any) -> Any:
     ``state``. The DM address is the requester's own platform id taken from the inbound
     ``session_context`` (sender), falling back to the conversation address's ``user_id``.
 
-    Like :func:`make_mcp_credential_deliverer`, this has a node-managed fallback: a node-managed
-    agent has no live IM connector (the node hosts IM), so the link is enqueued through
-    directed-reach (``outbound_connectors.notify_user`` -> ``im_outbound_queue`` -> node drain ->
-    DM). In a standalone runtime the live connector DMs the requester directly. Always returns a
-    deliverer (never None): managed enqueues; standalone with a connector sends; otherwise it
-    reports undelivered so the call still degrades cleanly with a "needs authorization" notice.
+    Like :func:`make_mcp_credential_deliverer`, this has a directed-reach fallback when the
+    conversation platform has no live connector in this run: it fans out via
+    ``outbound_connectors.notify_user`` (managed reverse-resolves the user's IM addresses over
+    the node loopback and DMs the requester; standalone is a no-op). With a live connector it
+    DMs the requester directly. Always returns a deliverer (never None); otherwise it reports
+    undelivered so the call still degrades cleanly with a "needs authorization" notice.
     """
     connectors: dict[str, Any] = getattr(tool_context, "outbound_connectors", {}) or {}
     session_context = getattr(tool_context, "session_context", None)
@@ -293,20 +274,21 @@ def make_mcp_authz_deliverer(tool_context: Any) -> Any:
         if connector is not None and platform and target:
             receipt = await send_to(platform, connector, target, msg, target_type="user")
             if not receipt.ok:
-                logger.warning(
+                logger.warn(
                     "mcp_authz_dm_failed",
                     server_id=server_id,
                     platform=platform,
                     error=receipt.error,
                 )
             return receipt.ok
-        # node-managed (no live connector): enqueue a directed-reach DM to the requester.
+        # No live connector for this platform: fall back to directed-reach fan-out
+        # (managed reverse-resolves + DMs; standalone is a no-op).
         from fleetent import outbound_connectors
 
         if outbound_connectors.is_node_managed_runtime():
-            outbound_connectors.notify_user(user_id, msg)
+            await outbound_connectors.notify_user(user_id, msg)
             return True
-        logger.info("mcp_authz_link_undeliverable server_id=%s user_id=%s", server_id, user_id)
+        logger.info("mcp_authz_link_undeliverable", server_id=server_id, user_id=user_id)
         return False
 
     return deliver
@@ -316,10 +298,10 @@ def make_mcp_credential_deliverer(tool_context: Any) -> Any:
     """Build a per-call deliverer for the per-user api-key *secure-form* link (Form mode).
 
     Sibling to :func:`make_mcp_authz_deliverer` with two differences: (1) credential-submission
-    wording (not OAuth "authorize"), and (2) a node-managed fallback. A node-managed agent has
-    no live IM connector (the node hosts IM), so the link is enqueued through directed-reach
-    (``outbound_connectors.notify_user`` -> ``im_outbound_queue`` -> node drain -> DM). In a
-    standalone runtime the live connector DMs the requester directly. Always returns a
+    wording (not OAuth "authorize"), and (2) a directed-reach fallback when the conversation
+    platform has no live connector in this run: it fans out via
+    ``outbound_connectors.notify_user`` (managed reverse-resolves + DMs; standalone is a no-op).
+    With a live connector the requester is DMed directly. Always returns a
     deliverer (never None): managed enqueues; standalone with a connector sends; otherwise it
     reports undelivered so the call still degrades cleanly.
     """
@@ -339,23 +321,76 @@ def make_mcp_credential_deliverer(tool_context: Any) -> Any:
         if connector is not None and platform and target:
             receipt = await send_to(platform, connector, target, msg, target_type="user")
             if not receipt.ok:
-                logger.warning(
+                logger.warn(
                     "mcp_cred_dm_failed",
                     server_id=server_id,
                     platform=platform,
                     error=receipt.error,
                 )
             return receipt.ok
-        # node-managed (no live connector): enqueue a directed-reach DM to the requester.
+        # No live connector for this platform: fall back to directed-reach fan-out
+        # (managed reverse-resolves + DMs; standalone is a no-op).
         from fleetent import outbound_connectors
 
         if outbound_connectors.is_node_managed_runtime():
-            outbound_connectors.notify_user(user_id, msg)
+            await outbound_connectors.notify_user(user_id, msg)
             return True
-        logger.info("mcp_cred_link_undeliverable server_id=%s user_id=%s", server_id, user_id)
+        logger.info("mcp_cred_link_undeliverable", server_id=server_id, user_id=user_id)
         return False
 
     return deliver
+
+
+@dataclass(frozen=True)
+class ApprovalPrompt:
+    """Platform-neutral approval-prompt intent (telegram-slack-parity, governance de-leak).
+
+    The permission gate emits this instead of a Slack-specific block payload; each delivery
+    platform renders it at the outbound boundary (Slack Block Kit / Telegram inline keyboard),
+    so governance carries no platform rendering format.
+    """
+
+    approval_id: str
+    tool_name: str
+    risk_level: str
+    summary: str = ""
+
+
+# Decision tokens shared by the Slack action_ids (``approval_<decision>``) and the Telegram
+# callback_data (``approval:<decision>:<id>``), so both platforms speak one decision vocabulary.
+_APPROVAL_DECISIONS = ("approve", "reject", "approve_always")
+_APPROVAL_CB_PREFIX = "approval"
+
+
+def approval_callback_data(decision: str, approval_id: str) -> str:
+    """Encode a Telegram inline-button callback as ``approval:<decision>:<id>`` (≤64 bytes)."""
+    return f"{_APPROVAL_CB_PREFIX}:{decision}:{approval_id}"
+
+
+def parse_approval_callback(data: str | None) -> tuple[str, str] | None:
+    """Decode approval callback_data → (decision, approval_id); None if not an approval callback."""
+    if not data:
+        return None
+    parts = data.split(":", 2)
+    if len(parts) != 3 or parts[0] != _APPROVAL_CB_PREFIX or parts[1] not in _APPROVAL_DECISIONS:
+        return None
+    return parts[1], parts[2]
+
+
+def render_approval_telegram(prompt: ApprovalPrompt) -> Any:
+    """Telegram ``InlineKeyboardMarkup`` for an approval prompt: three decision buttons.
+
+    Mirrors ``approval_prompt_blocks`` (Slack) at the Telegram boundary; callback_data encodes
+    the decision + approval_id consumed by the Telegram callback-query handler.
+    """
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    labels = {"approve": "✅ 批准", "reject": "❌ 拒绝", "approve_always": "✅ 始终允许"}
+    row = [
+        InlineKeyboardButton(labels[d], callback_data=approval_callback_data(d, prompt.approval_id))
+        for d in _APPROVAL_DECISIONS
+    ]
+    return InlineKeyboardMarkup([row])
 
 
 def approval_prompt_blocks(
@@ -435,7 +470,7 @@ async def resolve_recipient_label(
             name = profile.get("display_name") or profile.get("real_name") or user.get("name")
             return f"@{name}" if name else target
     except Exception as exc:  # noqa: BLE001 — name resolution is best-effort, never blocks
-        logger.warning("recipient_label_resolve_failed", target=target, error=str(exc))
+        logger.warn("recipient_label_resolve_failed", target=target, exception=exc)
         return target
 
 
@@ -473,7 +508,7 @@ async def summarize_gated_call(
         rendered = ", ".join(f"{k}={_preview(str(v), 40)}" for k, v in args.items())
         return f"参数：{_preview(rendered, 200)}" if rendered else ""
     except Exception as exc:  # noqa: BLE001 — summary is auxiliary, never blocks the prompt
-        logger.warning("gated_call_summary_failed", tool=tool_name, error=str(exc))
+        logger.warn("gated_call_summary_failed", tool=tool_name, exception=exc)
         return ""
 
 
@@ -520,7 +555,7 @@ async def _slack_send_channel(
         resp = await client.chat_postMessage(**kwargs)
         return _slack_ref(resp, "ts"), None
     except Exception as exc:  # noqa: BLE001 — outbound failure must not abort the caller
-        logger.warning("slack_send_channel_failed", channel=channel, error=str(exc))
+        logger.warn("slack_send_channel_failed", channel=channel, exception=exc)
         return None, str(exc)
 
 
@@ -532,10 +567,6 @@ async def is_reachable(platform: str, connector: Any, target: str) -> bool:
     - Telegram: only users who have previously /started the bot are reachable
       (bot must be able to get their chat info).
     """
-    from fleetent.outbound_connectors import ManagedOutboundConnector
-
-    if isinstance(connector, ManagedOutboundConnector):
-        return True
     if platform == "slack":
         return True  # Slack workspace users are always reachable via conversations.open
     if platform == "telegram":
@@ -543,31 +574,50 @@ async def is_reachable(platform: str, connector: Any, target: str) -> bool:
     return False
 
 
+def _slack_is_channel_id(target: str) -> bool:
+    """Whether ``target`` is a Slack channel-shaped id: DM (``D…``), public (``C…``), or
+    private/group (``G…``) — i.e. already an open conversation.
+
+    AAA-8204 #7: ``users_search`` returns a user's ``DMChannelID`` (``D…``) next to their
+    ``UserID`` (``U…``); an agent that fills the ``DMChannelID`` into a ``target_type=user``
+    send would otherwise hit ``conversations.open(users=[D…])`` → ``user_not_found``. A
+    channel-shaped id is already a conversation, so post to it directly.
+    """
+    return bool(target) and target[0] in ("C", "D", "G")
+
+
 async def _slack_send_dm(
     client: Any, user_id: str, text: str, blocks: list[dict[str, Any]] | None = None
 ) -> _Result:
     try:
-        result = await client.conversations_open(users=[user_id])
-        channel = result["channel"]["id"]
+        if _slack_is_channel_id(user_id):
+            channel = user_id  # already a conversation channel — post directly (AAA-8204 #7)
+        else:
+            result = await client.conversations_open(users=[user_id])
+            channel = result["channel"]["id"]
         kwargs: dict[str, Any] = {"channel": channel, "text": text}
         if blocks is not None:
             kwargs["blocks"] = blocks
         resp = await client.chat_postMessage(**kwargs)
         return _slack_ref(resp, "ts"), None
     except Exception as exc:  # noqa: BLE001 — outbound failure must not abort the gate
-        logger.warning("slack_send_dm_failed", user_id=user_id, error=str(exc))
+        logger.warn("slack_send_dm_failed", user_id=user_id, exception=exc)
         return None, str(exc)
 
 
-async def _telegram_send(bot: Any, chat_id: str, text: str, thread: Any = None) -> _Result:
+async def _telegram_send(
+    bot: Any, chat_id: str, text: str, thread: Any = None, reply_markup: Any = None
+) -> _Result:
     try:
         kwargs: dict[str, Any] = {"chat_id": chat_id, "text": text}
         if thread:
             kwargs["message_thread_id"] = thread
+        if reply_markup is not None:
+            kwargs["reply_markup"] = reply_markup
         await bot.send_message(**kwargs)
         return "", None  # telegram client returns no stable ref we record; "" = success-no-ref
     except Exception as exc:  # noqa: BLE001 — outbound failure must not abort the gate
-        logger.warning("telegram_send_message_failed", chat_id=chat_id, error=str(exc))
+        logger.warn("telegram_send_message_failed", chat_id=chat_id, exception=exc)
         return None, str(exc)
 
 
@@ -582,15 +632,15 @@ async def _slack_send_file(
     swallowed so the caller's run continues.
     """
     try:
-        if target_type == "channel":
-            channel = target
+        if target_type == "channel" or _slack_is_channel_id(target):
+            channel = target  # channel-shaped id is already a conversation (AAA-8204 #7)
         else:
             result = await client.conversations_open(users=[target])
             channel = result["channel"]["id"]
         resp = await client.files_upload_v2(channel=channel, thread_ts=thread, file=path)
         return _slack_file_ref(resp), None
     except Exception as exc:  # noqa: BLE001 — outbound file failure must not abort the caller
-        logger.warning("slack_send_file_failed", target=target, path=path, error=str(exc))
+        logger.warn("slack_send_file_failed", target=target, path=path, exception=exc)
         return None, str(exc)
 
 
@@ -600,7 +650,7 @@ async def _telegram_send_file(bot: Any, chat_id: str, path: str) -> _Result:
         await bot.send_document(chat_id=chat_id, document=path)
         return "", None
     except Exception as exc:  # noqa: BLE001 — outbound file failure must not abort the caller
-        logger.warning("telegram_send_file_failed", chat_id=chat_id, path=path, error=str(exc))
+        logger.warn("telegram_send_file_failed", chat_id=chat_id, path=path, exception=exc)
         return None, str(exc)
 
 

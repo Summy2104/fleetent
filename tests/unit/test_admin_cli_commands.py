@@ -34,12 +34,9 @@ def test_removed_commands_absent() -> None:
         "assign-user",
         "unassign-user",
         "set-default-agent",
+        "kb",
     ):
         assert removed not in top_level
-
-    kb_choices = top_level["kb"]._subparsers._group_actions[0].choices
-    assert "connectors" not in kb_choices
-    assert "extract-entities" in kb_choices
 
 
 def test_command_modules_has_no_empty_module() -> None:

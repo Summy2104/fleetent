@@ -249,15 +249,15 @@ def set_config_overrides(name: str, config_overrides: dict[str, Any]) -> None:
     update_agent_config(name, config_overrides=config_overrides)
 
 
-def set_im_capabilities(name: str, *, supports_dm: bool, supports_groups: bool) -> None:
+def set_im_capabilities(agent_id: int, *, supports_dm: bool, supports_groups: bool) -> None:
     """Replace an agent's IM chat-type capability switches."""
     _db().execute(
         "UPDATE agents SET supports_dm = :supports_dm, supports_groups = :supports_groups "
-        "WHERE name = :name",
+        "WHERE id = :agent_id",
         {
             "supports_dm": int(supports_dm),
             "supports_groups": int(supports_groups),
-            "name": name,
+            "agent_id": agent_id,
         },
     )
 
@@ -514,6 +514,41 @@ def list_mcp_servers_for_agent(agent_id: int) -> list[str]:
         .fetchall()
     )
     return [str(row["server_id"]) for row in rows]
+
+
+def get_agent_mcp_approval_rules(agent_id: int, server_id: str) -> list[dict[str, Any]]:
+    """Per-binding MCP approval rules for one agent<->server pair.
+
+    Returns ``[]`` when the server is not bound to the agent or has no rules configured.
+    """
+    row = (
+        _db()
+        .execute(
+            "SELECT approval_rules FROM agent_mcp_servers "
+            "WHERE agent_id = :agent_id AND server_id = :server_id",
+            {"agent_id": agent_id, "server_id": server_id},
+        )
+        .fetchone()
+    )
+    if row is None:
+        return []
+    raw = row["approval_rules"]
+    return json.loads(raw) if raw else []
+
+
+def set_agent_mcp_approval_rules(
+    agent_id: int, server_id: str, rules: list[dict[str, Any]]
+) -> None:
+    """Replace the approval rules on an existing agent<->server binding.
+
+    A no-op when the pair is not bound (no row to update); callers gate on binding
+    existence and surface a 404 before reaching here.
+    """
+    _db().execute(
+        "UPDATE agent_mcp_servers SET approval_rules = :rules "
+        "WHERE agent_id = :agent_id AND server_id = :server_id",
+        {"rules": json.dumps(rules or []), "agent_id": agent_id, "server_id": server_id},
+    )
 
 
 def _get_default_agent_name() -> str | None:

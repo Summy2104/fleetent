@@ -114,11 +114,13 @@ API, scheduler, or worker behavior.
 - **AND** 不新增 Admin API、HTTP endpoint、dashboard、scheduler 或 worker
 
 ### Requirement: Pilot connector operation guidance
-部署文档 SHALL 说明 Pilot 环境中如何配置、检查、手动同步和排查 knowledge-base connectors。
+部署文档 SHALL 说明 Pilot 环境中如何配置、检查、手动同步和排查 knowledge-base connectors。实体抽取的手动入口 SHALL 指向独立命令 `fleetent kb extract`（纯 KB 服务侧、入队经 kb-worker 消费），文档 SHALL NOT 再引用已退役的 `fleetent platform kb extract-entities`。
 
 #### Scenario: Connector CLI commands are documented
 - **WHEN** operator 阅读部署或运维文档
-- **THEN** 文档列出 `/admin/kb/connectors/*` 与 `fleetent platform kb extract-entities` 的用途
+- **THEN** 文档列出 `/admin/kb/connectors/*` 的用途
+- **AND** 文档以 `fleetent kb extract` 说明手动实体抽取入口
+- **AND** 文档不引用 `fleetent platform kb extract-entities`
 
 #### Scenario: Credential boundary is documented
 - **WHEN** operator 阅读部署或运维文档
@@ -334,7 +336,6 @@ agent **永远由 node 拉起**(经 `fleetent agent run` 原语);agent 配置由
 - **WHEN** 对比单机与分布式
 - **THEN** agent 启动(node 拉起)、ingest(worker)、数据(substrate)机制相同,只在 co-location 与后端选择上不同
 
-
 ### Requirement: 运行中部署的 build commit 可见
 运行中的服务 SHALL 暴露其所基于的源码 build commit（短 SHA），使 operator 能确认线上实际运行的代码版本。该信息 SHALL 在服务启动时记录到结构化日志，并 MAY 经只读入口（如 `--version` 或健康字段）查询。
 
@@ -384,3 +385,4 @@ agent **永远由 node 拉起**(经 `fleetent agent run` 原语);agent 配置由
 #### Scenario: 显式 --port 仍优先
 - **WHEN** operator 运行 `fleetent platform serve --port <P>`
 - **THEN** platform 绑定 `<P>`（显式参数优先于默认）
+

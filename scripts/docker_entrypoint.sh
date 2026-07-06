@@ -19,8 +19,12 @@ case "$role" in
   node)
     exec fleetent node start "$@"
     ;;
+  kb)
+    # Compose runs KB services as `command: ["kb", "worker"|"serve", --config ...]`.
+    exec fleetent kb "$@"
+    ;;
   kb-worker)
-    exec fleetent kb-worker "$@"
+    exec fleetent kb worker "$@"
     ;;
   agent)
     exec fleetent agent run "$@"
@@ -29,7 +33,7 @@ case "$role" in
     exec fleetent "$@"
     ;;
   *)
-    echo "unsupported role: $role (expected: platform, node, kb-worker, agent)" >&2
+    echo "unsupported role: $role (expected: platform, node, kb, kb-worker, agent)" >&2
     exit 64
     ;;
 esac

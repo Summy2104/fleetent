@@ -19,7 +19,7 @@ from typing import Any
 
 import httpx
 
-from fleetent import agent_store, paths
+from fleetent import agent_store, paths, skill_bundle_codec
 from fleetent.config import Settings
 from fleetent.db import SQLiteDatabase, create_database
 
@@ -119,6 +119,52 @@ def nominate_if_absent(*, agent_id: int, skill_name: str, pool_dir: Path) -> int
     return nominate(agent_id=agent_id, skill_name=skill_name, pool_dir=pool_dir)
 
 
+# Machine-generated churn excluded from every skill bundle and content hash: VCS metadata and
+# Python bytecode caches. They bloat proposals, pollute the backup branch with binaries, and
+# ``.pyc`` files change across interpreter versions — manufacturing phantom drift.
+_BUNDLE_IGNORE_DIRS = frozenset({".git", "__pycache__"})
+_BUNDLE_IGNORE_SUFFIXES = frozenset({".pyc", ".pyo"})
+
+
+def _is_ignored_bundle_path(path: Path) -> bool:
+    return (
+        bool(_BUNDLE_IGNORE_DIRS.intersection(path.parts)) or path.suffix in _BUNDLE_IGNORE_SUFFIXES
+    )
+
+
+def _dir_content_hash(skill_dir: Path) -> str:
+    """Content hash of a skill dir on disk (relpath + bytes, sorted, excluding bundle churn)."""
+    from hashlib import sha256
+
+    digest = sha256()
+    for path in sorted(
+        p for p in skill_dir.rglob("*") if p.is_file() and not _is_ignored_bundle_path(p)
+    ):
+        digest.update(path.relative_to(skill_dir).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _bundle_content_hash(bundle: dict[str, str]) -> str:
+    """Hash a proposed bundle the same way ``_dir_content_hash`` hashes a dir on disk.
+
+    Bundle keys are skill-dir-relative (matching the on-disk relpaths) and values are
+    codec-encoded, so decoding to bytes makes a bundle whose content already equals the pool
+    copy hash equal — the basis for ``is_landed``.
+    """
+    from hashlib import sha256
+
+    digest = sha256()
+    for relpath in sorted(bundle):
+        digest.update(relpath.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(skill_bundle_codec.decode(bundle[relpath]))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def _detect_conflict(pool_dir: Path, skill_name: str, base_version: str | None) -> bool:
     """Return True if the pool skill has changed since base_version was captured."""
     if base_version is None:
@@ -126,16 +172,21 @@ def _detect_conflict(pool_dir: Path, skill_name: str, base_version: str | None) 
     skill_dir = pool_dir / skill_name
     if not skill_dir.exists():
         return False
-    from hashlib import sha256
+    return _dir_content_hash(skill_dir) != base_version
 
-    digest = sha256()
-    for path in sorted(p for p in skill_dir.rglob("*") if p.is_file() and ".git" not in p.parts):
-        digest.update(path.relative_to(skill_dir).as_posix().encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(path.read_bytes())
-        digest.update(b"\0")
-    current_hash = digest.hexdigest()
-    return current_hash != base_version
+
+def is_landed(proposal: dict[str, Any], pool_dir: Path) -> bool:
+    """Whether the agent's evolved copy already equals the pool's current copy of the skill.
+
+    Becomes true once a human merges the backflow branch and the pool syncs it back: the
+    proposal is effectively adopted and should drop off the to-merge worklist and the backup
+    pass (the platform doesn't watch git PR state, so this content check is how "done" is
+    detected). False when the pool has no copy of the skill.
+    """
+    skill_dir = pool_dir / str(proposal["skill_name"])
+    if not skill_dir.exists():
+        return False
+    return _dir_content_hash(skill_dir) == _bundle_content_hash(proposal["proposed_bundle"])
 
 
 def get_proposal(proposal_id: int) -> dict[str, Any] | None:
@@ -145,7 +196,8 @@ def get_proposal(proposal_id: int) -> dict[str, Any] | None:
         .execute(
             """
             SELECT id, status, agent_id, skill_name, base_version, base_commit, proposed_bundle,
-                   conflict, overridden_head, forked_as, created_at, updated_at
+                   conflict, overridden_head, forked_as, created_at, updated_at,
+                   pr_id, pr_branch, pr_url, pr_state, pr_target_branch, pr_merge_commit
             FROM backflow_proposals
             WHERE id = :proposal_id
             """,
@@ -180,7 +232,8 @@ def list_proposals(
         .execute(
             f"""
             SELECT id, status, agent_id, skill_name, base_version, base_commit, proposed_bundle,
-                   conflict, overridden_head, forked_as, created_at, updated_at
+                   conflict, overridden_head, forked_as, created_at, updated_at,
+                   pr_id, pr_branch, pr_url, pr_state, pr_target_branch, pr_merge_commit
             FROM backflow_proposals
             {where}
             ORDER BY created_at DESC
@@ -217,9 +270,11 @@ def _capture_proposed_bundle(
         if skill_dir.is_dir():
             bundle: dict[str, str] = {}
             for path in sorted(
-                p for p in skill_dir.rglob("*") if p.is_file() and ".git" not in p.parts
+                p for p in skill_dir.rglob("*") if p.is_file() and not _is_ignored_bundle_path(p)
             ):
-                bundle[path.relative_to(skill_dir).as_posix()] = path.read_text(encoding="utf-8")
+                bundle[path.relative_to(skill_dir).as_posix()] = skill_bundle_codec.encode(
+                    path.read_bytes()
+                )
             if bundle:
                 return bundle
     if proposed_content is None:
@@ -260,21 +315,40 @@ def _capture_bundle_from_owning_node(*, agent_id: int, skill_name: str) -> dict[
                 raise ValueError(f"unsafe node bundle member path: {member.name}")
             if any(part == ".git" for part in member_path.parts):
                 raise ValueError(f"unsafe node bundle member path: {member.name}")
+            if _is_ignored_bundle_path(member_path):
+                continue
             extracted = archive.extractfile(member)
             if extracted is None:
                 raise ValueError(f"unable to extract node bundle member: {member.name}")
             relpath = Path(*member_path.parts[1:]).as_posix()
-            bundle[relpath] = extracted.read().decode("utf-8")
+            bundle[relpath] = skill_bundle_codec.encode(extracted.read())
     return bundle or None
 
 
-def get_proposal_diff(proposal_id: int, *, pool_dir: Path) -> dict[str, Any]:
+def get_proposal_diff(
+    proposal_id: int, *, pool_dir: Path, git_root: Path | None = None, subdir: str = ""
+) -> dict[str, Any]:
     """Return unified diffs for a backflow proposal.
 
-    Returns a dict with:
-    - ``diff_vs_base``: evolved copy vs what was materialized (base_version content)
-    - ``diff_vs_head``: evolved copy vs current pool head content
-    - ``conflict``: True if pool has advanced past base_version
+    ``pool_dir`` is the skill *scan* root (where the real current files live) and is
+    used for the on-disk reads (current-head bundle walk and conflict content hash).
+    ``git_root`` is the git repository root (where ``.git`` lives) used to reconstruct
+    the base bundle from the git tree via ``pool_bundle_at``; when a ``skills_subdir``
+    is configured these two roots differ (``pool_dir == git_root / subdir``). When
+    ``git_root`` is omitted it defaults to ``pool_dir`` (flat layout, git root == scan
+    root), preserving the pre-subdir behaviour for existing callers.
+
+    Args:
+        proposal_id: The backflow proposal to diff.
+        pool_dir: The skill scan root (real on-disk current files).
+        git_root: The git repository root; defaults to ``pool_dir`` when unset.
+        subdir: The configured ``skills_subdir`` prefixing the skill's git tree path.
+
+    Returns:
+        A dict with:
+        - ``diff_vs_base``: evolved copy vs what was materialized (base_commit content)
+        - ``diff_vs_head``: evolved copy vs current pool head content
+        - ``conflict``: True if pool has advanced past base_version
     """
     import difflib
 
@@ -286,26 +360,27 @@ def get_proposal_diff(proposal_id: int, *, pool_dir: Path) -> dict[str, Any]:
     skill_name = row["skill_name"]
     base_version: str | None = row["base_version"]
     base_commit: str | None = row["base_commit"]
+    effective_git_root = git_root if git_root is not None else pool_dir
 
-    # Current pool head bundle
+    # Current pool head bundle — real on-disk files, always the scan root (pool_dir).
     pool_skill_dir = pool_dir / skill_name
     head_bundle: dict[str, str] | None = None
     if pool_skill_dir.exists():
         head_bundle = {}
         for path in sorted(
-            p for p in pool_skill_dir.rglob("*") if p.is_file() and ".git" not in p.parts
+            p for p in pool_skill_dir.rglob("*") if p.is_file() and not _is_ignored_bundle_path(p)
         ):
             relpath = path.relative_to(pool_skill_dir).as_posix()
-            head_bundle[relpath] = path.read_text(encoding="utf-8")
+            head_bundle[relpath] = skill_bundle_codec.encode(path.read_bytes())
 
-    # base bundle: reconstruct from pool git at base_commit
+    # base bundle: reconstruct from pool git at base_commit — git tree lookup, git root.
     base_bundle: dict[str, str] | None = None
     if base_commit is not None:
         from fleetent.platform.skill_management.pool_git import pool_bundle_at
 
-        base_bundle = pool_bundle_at(pool_dir, skill_name, base_commit)
+        base_bundle = pool_bundle_at(effective_git_root, skill_name, base_commit, subdir=subdir)
 
-    # Conflict: pool head differs from what was materialized
+    # Conflict: pool head differs from what was materialized — real on-disk files, scan root.
     conflict = _detect_conflict(pool_dir, skill_name, base_version)
 
     def _bundle_diff(
@@ -319,16 +394,23 @@ def get_proposal_diff(proposal_id: int, *, pool_dir: Path) -> dict[str, Any]:
         skill_md_left = left.get("SKILL.md")
         skill_md_right = right.get("SKILL.md")
         if skill_md_left is not None or skill_md_right is not None:
-            parts.append(
-                "".join(
-                    difflib.unified_diff(
-                        (skill_md_left or "").splitlines(keepends=True),
-                        (skill_md_right or "").splitlines(keepends=True),
-                        fromfile=f"{from_label}/SKILL.md",
-                        tofile=f"{to_label}/SKILL.md",
+            if skill_bundle_codec.is_binary(skill_md_left or "") or skill_bundle_codec.is_binary(
+                skill_md_right or ""
+            ):
+                # SKILL.md is markdown in practice, but never text-diff a binary value.
+                if skill_md_left != skill_md_right:
+                    parts.append("Binary SKILL.md changed\n")
+            else:
+                parts.append(
+                    "".join(
+                        difflib.unified_diff(
+                            (skill_md_left or "").splitlines(keepends=True),
+                            (skill_md_right or "").splitlines(keepends=True),
+                            fromfile=f"{from_label}/SKILL.md",
+                            tofile=f"{to_label}/SKILL.md",
+                        )
                     )
                 )
-            )
         changed_paths: list[str] = []
         for relpath in sorted(set(left) | set(right)):
             if relpath == "SKILL.md":
@@ -387,3 +469,115 @@ def set_status(
                 "updated_at": _now(),
             },
         )
+
+
+_PR_STATES = {"backed_up", "pr_open", "merged", "closed", "deferred"}
+
+
+def set_pr_link(
+    proposal_id: int,
+    *,
+    branch: str | None = None,
+    pr_id: str | None = None,
+    pr_url: str | None = None,
+    pr_target_branch: str | None = None,
+    pr_merge_commit: str | None = None,
+) -> None:
+    """Record git-PR linkage on a proposal (partial update; unset args left unchanged).
+
+    Each field is COALESCE-merged so the sweep can set the backup branch first and the
+    PR id/url later without clobbering earlier values.
+    """
+    with _database().transaction() as conn:
+        conn.execute(
+            """
+            UPDATE backflow_proposals
+            SET pr_branch = COALESCE(:branch, pr_branch),
+                pr_id = COALESCE(:pr_id, pr_id),
+                pr_url = COALESCE(:pr_url, pr_url),
+                pr_target_branch = COALESCE(:pr_target_branch, pr_target_branch),
+                pr_merge_commit = COALESCE(:pr_merge_commit, pr_merge_commit),
+                updated_at = :updated_at
+            WHERE id = :proposal_id
+            """,
+            {
+                "proposal_id": proposal_id,
+                "branch": branch,
+                "pr_id": pr_id,
+                "pr_url": pr_url,
+                "pr_target_branch": pr_target_branch,
+                "pr_merge_commit": pr_merge_commit,
+                "updated_at": _now(),
+            },
+        )
+
+
+def set_pr_state(proposal_id: int, pr_state: str) -> None:
+    """Update the PR lifecycle state of a proposal."""
+    if pr_state not in _PR_STATES:
+        raise ValueError(f"unknown pr_state: {pr_state!r}")
+    with _database().transaction() as conn:
+        conn.execute(
+            """
+            UPDATE backflow_proposals
+            SET pr_state = :pr_state, updated_at = :updated_at
+            WHERE id = :proposal_id
+            """,
+            {"proposal_id": proposal_id, "pr_state": pr_state, "updated_at": _now()},
+        )
+
+
+def defer_pr_state(proposal_id: int) -> None:
+    """Downgrade to "deferred" only if the proposal has not already advanced.
+
+    Two overlapping sweep calls (the periodic scheduler and an admin-triggered
+    run-now) can both push the same backup branch name; the winner sets
+    "backed_up"/"pr_open" first, and the loser's push then genuinely fails
+    (non-fast-forward). Without this guard the loser's exception handler would
+    unconditionally overwrite pr_state back to "deferred", erasing the winner's
+    recorded progress even though the backup branch itself was pushed
+    successfully. The WHERE clause makes the downgrade a no-op once a
+    concurrent call has already moved the state past "deferred"/unset.
+    """
+    with _database().transaction() as conn:
+        conn.execute(
+            """
+            UPDATE backflow_proposals
+            SET pr_state = 'deferred', updated_at = :updated_at
+            WHERE id = :proposal_id AND (pr_state IS NULL OR pr_state = 'deferred')
+            """,
+            {"proposal_id": proposal_id, "updated_at": _now()},
+        )
+
+
+def list_by_pr_state(
+    pr_state: str | None, *, status: str | None = "pending"
+) -> list[dict[str, Any]]:
+    """List proposals by PR state for the sweep (``pr_state=None`` matches NULL = unbacked)."""
+    conditions = ["pr_state IS NULL"] if pr_state is None else ["pr_state = :pr_state"]
+    params: dict[str, Any] = {} if pr_state is None else {"pr_state": pr_state}
+    if status is not None:
+        conditions.append("status = :status")
+        params["status"] = status
+    where = " AND ".join(conditions)
+    rows = (
+        _database()
+        .execute(
+            f"""
+            SELECT id, status, agent_id, skill_name, base_version, base_commit, proposed_bundle,
+                   conflict, overridden_head, forked_as, created_at, updated_at,
+                   pr_id, pr_branch, pr_url, pr_state, pr_target_branch, pr_merge_commit
+            FROM backflow_proposals
+            WHERE {where}
+            ORDER BY created_at ASC
+            """,
+            params,
+        )
+        .fetchall()
+    )
+    proposals: list[dict[str, Any]] = []
+    for row in rows:
+        proposal = _row_to_proposal(row)
+        if proposal is not None:
+            proposals.append(proposal)
+    return proposals

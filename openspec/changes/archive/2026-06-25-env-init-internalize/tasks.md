@@ -16,9 +16,9 @@
 - [x] 3.2 实现：`src/fleetent/node/init_config.py` 新建，逻辑参考 `platform/platform_cli/init_config.py`；源模板为仓库根 `node.env.example`；在 `node` CLI 入口（`__main__.py` 或 `main.py`）注册 `init-config` 子命令
 - [x] 3.3 测试：已存在时跳过，`--force` 时覆盖（绿）
 
-## 4. fleetent kb-worker init-config 命令
+## 4. `fleetent` `kb-worker` init-config 命令
 
-- [x] 4.1 测试：`fleetent kb-worker init-config` 在 `FLEETENT_HOME/kb-worker/.env` 不存在时创建文件（红）
+- [x] 4.1 测试：``fleetent` `kb-worker` init-config` 在 `FLEETENT_HOME/kb-worker/.env` 不存在时创建文件（红）
 - [x] 4.2 实现：`src/fleetent/knowledge_base/worker_init_config.py` 新建；源模板为仓库根 `kb-worker.env.example`；在 kb-worker CLI 入口注册 `init-config` 子命令
 - [x] 4.3 测试：幂等行为（绿）
 
@@ -40,7 +40,7 @@
 ## 7. Makefile 端口对齐与 dev-bootstrap 改造
 
 - [x] 7.1 Makefile：`PLATFORM_PORT` 8770 → 8765；`AGENT_PORT` 8765 → 8766
-- [x] 7.2 Makefile `dev-bootstrap`：在 `seed-builtin-admin` 后增加三行调用：`fleetent platform init-config --home $(FLEETENT_HOME)`、`fleetent node init-config`（使用 `FLEETENT_HOME`）、`fleetent kb-worker init-config`（使用 `FLEETENT_HOME`）
+- [x] 7.2 Makefile `dev-bootstrap`：在 `seed-builtin-admin` 后增加三行调用：`fleetent platform init-config --home $(FLEETENT_HOME)`、`fleetent node init-config`（使用 `FLEETENT_HOME`）、``fleetent` `kb-worker` init-config`（使用 `FLEETENT_HOME`）
 - [x] 7.3 更新 `docs/operations/local-managed-stack.md`：将 8770/8771 的端口说明统一更新为 8765；`NODE_PLATFORM_URL` 默认值更新
 
 ## 8. 集成验证

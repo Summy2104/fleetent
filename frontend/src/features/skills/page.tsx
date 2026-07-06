@@ -1,706 +1,114 @@
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { GitCompare, Inbox, RefreshCw } from 'lucide-react';
+import type { ReactNode } from 'react'
+import { GitBranch, Lock, RefreshCw } from 'lucide-react'
 
-import { useT } from '@/i18n';
-import { useAdminApi } from '@/lib/api-client';
-import { cn } from '@/lib/utils';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ui/button'
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Input } from '@/components/ui/input';
-import { Switch } from '@/components/ui/switch';
-import {
-  type BackflowProposal,
-  type SkillListItem,
-  type SkillProposal,
-  useBackflowAcceptMutation,
-  useBackflowDiffQuery,
-  useBackflowForkMutation,
-  useBackflowProposalsQuery,
-  useBackflowRejectMutation,
-  useForcePublishSkillMutation,
+  type SkillGitStatus,
   useReloadSkillsMutation,
-  useSetSkillAgentBindingMutation,
-  useSkillAgentBindingsQuery,
-  useSkillContentQuery,
-  useSkillDiffQuery,
-  useSkillLifecycleMutation,
-  useSkillProposalDiffQuery,
-  useSkillProposalsQuery,
-  useSkillVersionsQuery,
-  useSkillsQuery,
-} from '@/features/skills/api';
+  useSkillGitStatusQuery,
+  useTriggerSkillGitSyncMutation,
+} from '@/features/skills/api'
+import { useAdminMeQuery, useTransientFlag } from '@/features/skills/shared'
+import { SkillsTable } from '@/features/skills/skills-table'
+import { useT } from '@/i18n'
+import { cn } from '@/lib/utils'
 
-type AdminMe = { email: string; id: string; role: string };
+// ─────────────────────────── GitOps read-only banner + sync status ───────────────────────────
 
-function useAdminMeQuery() {
-  const api = useAdminApi();
-  return useQuery({ queryKey: ['admin-me'], queryFn: () => api.get<AdminMe>('/admin/me') });
-}
-
-function auditVariant(verdict: string): 'success' | 'warning' | 'destructive' | 'secondary' {
-  if (verdict === 'approved' || verdict === 'passed') return 'success';
-  if (verdict === 'rejected') return 'destructive';
-  if (verdict === 'pending') return 'warning';
-  return 'secondary';
-}
-
-function statusVariant(status: string): 'success' | 'warning' | 'secondary' {
-  if (status === 'archived' || status === 'quarantined') return 'warning';
-  if (status === 'disabled') return 'secondary';
-  return 'success';
-}
-
-function Th({ children, className }: { children: ReactNode; className?: string }): JSX.Element {
+function GitopsBanner(): JSX.Element {
+  const t = useT()
   return (
-    <th className={cn('px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground', className)}>
-      {children}
-    </th>
-  );
-}
-
-function CodeBlock({ children }: { children: string }): JSX.Element {
-  return (
-    <pre className="max-h-80 overflow-auto rounded-md border border-border bg-secondary/50 p-4 font-mono text-sm text-foreground">
-      {children}
-    </pre>
-  );
-}
-
-// ─────────────────────────── Content dialog ───────────────────────────
-
-function ContentDialog({
-  skillName,
-  onOpenChange,
-}: {
-  skillName: string | null;
-  onOpenChange: (open: boolean) => void;
-}): JSX.Element {
-  const t = useT();
-  const content = useSkillContentQuery(skillName);
-  return (
-    <Dialog open={Boolean(skillName)} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl">
-        <DialogHeader>
-          <DialogTitle>{t('skills.contentTitle', { name: skillName ?? '' })}</DialogTitle>
-          <DialogDescription>{t('skills.contentDescription')}</DialogDescription>
-        </DialogHeader>
-        <div className="max-h-[70vh] overflow-auto">
-          <CodeBlock>{content.data?.content ?? ''}</CodeBlock>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ─────────────────────────── Versions dialog ───────────────────────────
-
-function VersionsDialog({
-  skillName,
-  onOpenChange,
-}: {
-  skillName: string | null;
-  onOpenChange: (open: boolean) => void;
-}): JSX.Element {
-  const t = useT();
-  const [selectedRef, setSelectedRef] = useState<string | null>(null);
-  const versions = useSkillVersionsQuery(skillName, Boolean(skillName));
-  const diff = useSkillDiffQuery(skillName, selectedRef, Boolean(selectedRef));
-
-  useEffect(() => {
-    if (!skillName) setSelectedRef(null);
-  }, [skillName]);
-
-  return (
-    <Dialog open={Boolean(skillName)} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>{t('skills.versionsTitle', { name: skillName ?? '' })}</DialogTitle>
-          <DialogDescription>{t('skills.versionsDescription')}</DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-2">
-          {(versions.data ?? []).map((version) => (
-            <div
-              key={version.sha}
-              className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
-            >
-              <div className="min-w-0">
-                <p className="font-mono text-sm text-foreground">{version.sha.slice(0, 10)}</p>
-                <p className="truncate text-sm text-muted-foreground">{version.message}</p>
-              </div>
-              <Button
-                size="sm"
-                variant={selectedRef === version.sha ? 'secondary' : 'outline'}
-                onClick={() => setSelectedRef(version.sha)}
-              >
-                <GitCompare className="size-4" /> {t('skills.diff')}
-              </Button>
-            </div>
-          ))}
-          {versions.data && versions.data.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t('skills.noVersionHistory')}</p>
-          ) : null}
-        </div>
-        {diff.data?.diff ? <CodeBlock>{diff.data.diff}</CodeBlock> : null}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ─────────────────────────── Agent bindings dialog ───────────────────────────
-
-function BindingToggle({
-  agentId,
-  label,
-  enabled,
-  skillName,
-  canWrite,
-}: {
-  agentId: number;
-  label: string;
-  enabled: boolean;
-  skillName: string;
-  canWrite: boolean;
-}): JSX.Element {
-  const t = useT();
-  const update = useSetSkillAgentBindingMutation(skillName, agentId);
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2">
-      <span className="text-sm font-medium text-foreground">{label}</span>
-      {canWrite ? (
-        <Switch aria-label={label} checked={enabled} onCheckedChange={(checked) => update.mutate({ enabled: checked })} />
-      ) : (
-        <span className="text-xs text-muted-foreground">
-          {enabled ? t('skills.enabled') : t('skills.disabled')}
-        </span>
-      )}
-    </div>
-  );
-}
-
-function BindingsDialog({
-  skillName,
-  canWrite,
-  onOpenChange,
-}: {
-  skillName: string | null;
-  canWrite: boolean;
-  onOpenChange: (open: boolean) => void;
-}): JSX.Element {
-  const t = useT();
-  const bindings = useSkillAgentBindingsQuery(skillName);
-  return (
-    <Dialog open={Boolean(skillName)} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t('skills.bindingsTitle', { name: skillName ?? '' })}</DialogTitle>
-          <DialogDescription>{t('skills.bindingsDescription')}</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-2">
-          {(bindings.data ?? []).map((binding) => (
-            <BindingToggle
-              key={binding.agent_id}
-              agentId={binding.agent_id}
-              label={binding.name ?? String(binding.agent_id)}
-              enabled={binding.enabled}
-              skillName={skillName ?? ''}
-              canWrite={canWrite}
-            />
-          ))}
-          {bindings.data && bindings.data.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t('skills.noAgentsBound')}</p>
-          ) : null}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ─────────────────────────── Proposal diff dialog ───────────────────────────
-
-function ProposalDiffDialog({
-  proposalId,
-  onOpenChange,
-}: {
-  proposalId: string | null;
-  onOpenChange: (open: boolean) => void;
-}): JSX.Element {
-  const t = useT();
-  const diff = useSkillProposalDiffQuery(proposalId, Boolean(proposalId));
-  return (
-    <Dialog open={Boolean(proposalId)} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>{t('skills.proposalDiffTitle')}</DialogTitle>
-          <DialogDescription>{t('skills.proposalDiffDescription')}</DialogDescription>
-        </DialogHeader>
-        {diff.data?.diff ? (
-          <CodeBlock>{diff.data.diff}</CodeBlock>
-        ) : (
-          <p className="text-sm text-muted-foreground">{t('skills.noProposalDiff')}</p>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ─────────────────────────── Proposals dialog (per skill) ───────────────────────────
-
-function ProposalsDialog({
-  skillName,
-  proposals,
-  onDiff,
-  onOpenChange,
-}: {
-  skillName: string | null;
-  proposals: SkillProposal[];
-  onDiff: (id: string) => void;
-  onOpenChange: (open: boolean) => void;
-}): JSX.Element {
-  const t = useT();
-  return (
-    <Dialog open={Boolean(skillName)} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t('skills.proposalsTitle', { name: skillName ?? '' })}</DialogTitle>
-          <DialogDescription>{t('skills.proposalsDescription')}</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-2">
-          {proposals.map((proposal) => (
-            <div
-              key={proposal.id}
-              className="flex items-start justify-between gap-3 rounded-md border border-border px-3 py-2"
-            >
-              <div className="min-w-0 space-y-1">
-                <span className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-semibold text-foreground">{proposal.type}</span>
-                  <Badge variant={proposal.risk_level === 'high' ? 'destructive' : 'outline'}>
-                    {proposal.risk_level}
-                  </Badge>
-                </span>
-                <p className="text-sm text-muted-foreground">{proposal.reason}</p>
-              </div>
-              {proposal.has_diff ? (
-                <Button size="sm" variant="outline" onClick={() => onDiff(proposal.id)}>
-                  <GitCompare className="size-4" /> {t('skills.diff')}
-                </Button>
-              ) : null}
-            </div>
-          ))}
-          {proposals.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t('skills.noProposals')}</p>
-          ) : null}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function BackflowDialog({
-  skillName,
-  proposals,
-  onViewDiff,
-  diffText,
-  onOpenChange,
-}: {
-  skillName: string | null;
-  proposals: BackflowProposal[];
-  onViewDiff: (id: number) => void;
-  diffText: string | null;
-  onOpenChange: (open: boolean) => void;
-}): JSX.Element {
-  const t = useT();
-  return (
-    <Dialog open={Boolean(skillName)} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t('skills.backflowTitle', { name: skillName ?? '' })}</DialogTitle>
-          <DialogDescription>{t('skills.backflowDescription')}</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3">
-          {proposals.map((proposal) => (
-            <BackflowProposalCard key={proposal.id} onViewDiff={onViewDiff} proposal={proposal} />
-          ))}
-          {proposals.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t('skills.noBackflow')}</p>
-          ) : null}
-          {diffText ? (
-            <pre className="mt-2 max-h-72 overflow-auto rounded-xl bg-slate-950 p-4 text-sm text-slate-50">
-              {diffText}
-            </pre>
-          ) : null}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ─────────────────────────── Skill row ───────────────────────────
-
-function SkillRow({
-  skill,
-  canWrite,
-  proposalCount,
-  backflowCount,
-  onViewContent,
-  onVersions,
-  onBindings,
-  onProposals,
-  onBackflow,
-}: {
-  skill: SkillListItem;
-  canWrite: boolean;
-  proposalCount: number;
-  backflowCount: number;
-  onViewContent: () => void;
-  onVersions: () => void;
-  onBindings: () => void;
-  onProposals: () => void;
-  onBackflow: () => void;
-}): JSX.Element {
-  const t = useT();
-  const toggle = useSkillLifecycleMutation(skill.name, skill.global_enabled ? 'disable' : 'enable');
-  const restore = useSkillLifecycleMutation(skill.name, 'restore');
-  const archive = useSkillLifecycleMutation(skill.name, 'delete');
-  const forcePublish = useForcePublishSkillMutation(skill.name);
-  const [confirmArchive, setConfirmArchive] = useState(false);
-  const canForcePublish = skill.audit_verdict === 'rejected' || skill.status === 'quarantined';
-
-  return (
-    <tr className="border-b border-border last:border-0 hover:bg-accent/30">
-      <td className="px-4 py-3">
-        <span className="text-sm font-semibold text-foreground">{skill.name}</span>
-        {skill.description ? (
-          <span className="mt-0.5 line-clamp-1 block text-sm text-muted-foreground">{skill.description}</span>
-        ) : null}
-      </td>
-      <td className="px-4 py-3">
-        <Badge variant={statusVariant(skill.status)}>{skill.status}</Badge>
-      </td>
-      <td className="px-4 py-3">
-        <Badge variant={skill.global_enabled ? 'success' : 'secondary'}>
-          {skill.global_enabled ? t('skills.enabled') : t('skills.disabled')}
-        </Badge>
-      </td>
-      <td className="px-4 py-3">
-        {skill.audit_verdict ? (
-          <Badge variant={auditVariant(skill.audit_verdict)}>{skill.audit_verdict}</Badge>
-        ) : (
-          <span className="text-sm text-muted-foreground">-</span>
-        )}
-      </td>
-      <td className="px-4 py-3 text-right">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="secondary" size="sm" aria-label={t('skills.actionsFor', { name: skill.name })}>
-              {t('skills.actions')}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => setTimeout(onViewContent, 0)}>
-              {t('skills.viewContent')}
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setTimeout(onVersions, 0)}>{t('skills.versions')}</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setTimeout(onBindings, 0)}>
-              {t('skills.agentBindings')}
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setTimeout(onProposals, 0)}>
-              {t('skills.proposals')}
-              {proposalCount > 0 ? ` (${proposalCount})` : ''}
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setTimeout(onBackflow, 0)}>
-              {t('skills.backflow')}
-              {backflowCount > 0 ? ` (${backflowCount})` : ''}
-            </DropdownMenuItem>
-            {canWrite ? (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => void toggle.mutateAsync()}>
-                  {skill.global_enabled ? t('skills.disable') : t('skills.enable')}
-                </DropdownMenuItem>
-                {skill.status === 'archived' ? (
-                  <DropdownMenuItem onSelect={() => void restore.mutateAsync()}>
-                    {t('skills.restore')}
-                  </DropdownMenuItem>
-                ) : (
-                  <DropdownMenuItem onSelect={() => setTimeout(() => setConfirmArchive(true), 0)}>
-                    {t('skills.archive')}
-                  </DropdownMenuItem>
-                )}
-                {canForcePublish ? (
-                  <DropdownMenuItem onSelect={() => void forcePublish.mutateAsync()}>
-                    {t('skills.forcePublish')}
-                  </DropdownMenuItem>
-                ) : null}
-              </>
-            ) : null}
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <AlertDialog open={confirmArchive} onOpenChange={setConfirmArchive}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>{t('skills.archiveConfirmTitle', { name: skill.name })}</AlertDialogTitle>
-              <AlertDialogDescription>{t('skills.archiveConfirmDescription')}</AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>{t('skills.cancel')}</AlertDialogCancel>
-              <AlertDialogAction onClick={() => void archive.mutateAsync()}>{t('skills.archive')}</AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </td>
-    </tr>
-  );
-}
-
-function BackflowProposalCard({
-  onViewDiff,
-  proposal,
-}: {
-  onViewDiff: (id: number) => void;
-  proposal: BackflowProposal;
-}): JSX.Element {
-  const accept = useBackflowAcceptMutation(proposal.id);
-  const reject = useBackflowRejectMutation(proposal.id);
-  const fork = useBackflowForkMutation(proposal.id);
-
-  const onAccept = async (): Promise<void> => {
-    if (proposal.conflict) {
-      // Pool advanced past the proposal's base — require an explicit override decision.
-      if (!window.confirm(`Pool advanced for ${proposal.skill_name}. Override pool head?`)) {
-        return;
-      }
-      await accept.mutateAsync({ confirm: true });
-      return;
-    }
-    await accept.mutateAsync({});
-  };
-
-  const onFork = async (): Promise<void> => {
-    const forkName = window.prompt(
-      `New skill name to fork ${proposal.skill_name} as`,
-      `${proposal.skill_name}-fork`
-    );
-    if (!forkName) {
-      return;
-    }
-    await fork.mutateAsync({ fork_name: forkName });
-  };
-
-  return (
-    <article
-      className="rounded-xl border bg-white p-4"
-      key={proposal.id}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-sm font-semibold">{proposal.skill_name}</p>
-          <p className="text-sm text-muted-foreground">
-            {`from ${proposal.agent_name ?? `agent ${proposal.agent_id}`}${
-              proposal.conflict ? ' · conflict' : ''
-            }`}
-          </p>
-        </div>
-        <div className="flex flex-wrap justify-end gap-2">
-          <button
-            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-            onClick={() => onViewDiff(proposal.id)}
-            type="button"
-          >
-            {`View backflow diff for ${proposal.id}`}
-          </button>
-          <button
-            className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground"
-            onClick={() => void onAccept()}
-            type="button"
-          >
-            {`Accept backflow ${proposal.id}`}
-          </button>
-          <button
-            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-            onClick={() => void reject.mutateAsync()}
-            type="button"
-          >
-            {`Reject backflow ${proposal.id}`}
-          </button>
-          <button
-            className="rounded-md bg-secondary px-3 py-2 text-sm font-medium"
-            onClick={() => void onFork()}
-            type="button"
-          >
-            {`Fork backflow ${proposal.id}`}
-          </button>
-        </div>
+    <div className="flex items-start gap-3 rounded-lg border border-amber-300/60 bg-amber-50 px-4 py-3 text-amber-900 dark:border-amber-500/30 dark:bg-amber-950/30 dark:text-amber-200">
+      <Lock className="mt-0.5 size-4 shrink-0" />
+      <div className="space-y-0.5">
+        <p className="font-semibold text-sm">{t('skills.gitopsBannerTitle')}</p>
+        <p className="text-sm">{t('skills.gitopsBannerBody')}</p>
       </div>
-    </article>
-  );
+    </div>
+  )
 }
-// ─────────────────────────── Page ───────────────────────────
 
-export function SkillsPage(): JSX.Element {
-  const t = useT();
-  const me = useAdminMeQuery();
-  const skills = useSkillsQuery();
-  const proposals = useSkillProposalsQuery();
-  const backflow = useBackflowProposalsQuery();
-  const reload = useReloadSkillsMutation();
+/** Render a server ISO timestamp (UTC) in the viewer's local time; fall back to the raw
+ * string if it doesn't parse, so a bad value is still shown rather than silently dropped. */
+function formatLocalTime(iso: string): string {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
+}
 
-  const [query, setQuery] = useState('');
-  const [contentFor, setContentFor] = useState<string | null>(null);
-  const [versionsFor, setVersionsFor] = useState<string | null>(null);
-  const [bindingsFor, setBindingsFor] = useState<string | null>(null);
-  const [proposalsFor, setProposalsFor] = useState<string | null>(null);
-  const [proposalDiffId, setProposalDiffId] = useState<string | null>(null);
-  const [backflowFor, setBackflowFor] = useState<string | null>(null);
-  const [selectedBackflowId, setSelectedBackflowId] = useState<number | null>(null);
-
-  const canWrite = me.data?.role !== 'viewer';
-  const backflowDiff = useBackflowDiffQuery(selectedBackflowId, selectedBackflowId !== null);
-
-  const filtered = useMemo(() => {
-    const term = query.trim().toLowerCase();
-    const list = skills.data ?? [];
-    if (!term) return list;
-    return list.filter((skill) => skill.name.toLowerCase().includes(term));
-  }, [skills.data, query]);
-
-  const proposalsBySkill = useMemo(() => {
-    const map = new Map<string, SkillProposal[]>();
-    (proposals.data ?? []).forEach((proposal) => {
-      const list = map.get(proposal.target_skill) ?? [];
-      list.push(proposal);
-      map.set(proposal.target_skill, list);
-    });
-    return map;
-  }, [proposals.data]);
-
-  const backflowBySkill = useMemo(() => {
-    const map = new Map<string, BackflowProposal[]>();
-    (backflow.data ?? []).forEach((proposal) => {
-      const list = map.get(proposal.skill_name) ?? [];
-      list.push(proposal);
-      map.set(proposal.skill_name, list);
-    });
-    return map;
-  }, [backflow.data]);
-
+function SyncField({ label, mono, children }: { label: string; mono?: boolean; children: ReactNode }): JSX.Element {
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-0.5">
+      <dt className="text-muted-foreground text-xs uppercase tracking-wide">{label}</dt>
+      <dd className={cn('truncate text-foreground', mono && 'font-mono text-xs')}>{children}</dd>
+    </div>
+  )
+}
+
+function GitSyncStatusCard({ status, canWrite }: { status: SkillGitStatus; canWrite: boolean }): JSX.Element {
+  const t = useT()
+  const sync = useTriggerSkillGitSyncMutation()
+  const synced = useTransientFlag(sync.isSuccess)
+  return (
+    <div className="space-y-3 rounded-lg border border-border p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-xl font-semibold tracking-tight">{t('skills.title')}</h2>
-          <Badge variant="secondary">{skills.data?.length ?? 0}</Badge>
+          <GitBranch className="size-4 text-muted-foreground" />
+          <h3 className="font-semibold text-foreground text-sm">{t('skills.gitSyncTitle')}</h3>
         </div>
         {canWrite ? (
-          <Button variant="outline" onClick={() => void reload.mutateAsync()}>
-            <RefreshCw className="size-4" /> {t('skills.reloadIndex')}
+          <Button disabled={sync.isPending} onClick={() => void sync.mutateAsync()} size="sm" variant="outline">
+            <RefreshCw className={cn('size-4', sync.isPending && 'animate-spin')} />
+            {sync.isPending ? t('skills.gitSyncing') : synced ? t('skills.gitSynced') : t('skills.gitSyncNow')}
           </Button>
         ) : null}
       </div>
-
-      <Input
-        className="max-w-xs"
-        placeholder={t('skills.searchPlaceholder')}
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-      />
-
-      <div className="overflow-x-auto rounded-lg border border-border">
-        <table className="w-full">
-          <thead className="bg-secondary/50">
-            <tr>
-              <Th>{t('skills.colSkill')}</Th>
-              <Th>{t('skills.colStatus')}</Th>
-              <Th>{t('skills.colEnabled')}</Th>
-              <Th>{t('skills.colAudit')}</Th>
-              <Th className="text-right">{t('skills.colActions')}</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((skill) => (
-              <SkillRow
-                key={skill.name}
-                skill={skill}
-                canWrite={canWrite}
-                proposalCount={proposalsBySkill.get(skill.name)?.length ?? 0}
-                backflowCount={backflowBySkill.get(skill.name)?.length ?? 0}
-                onViewContent={() => setContentFor(skill.name)}
-                onVersions={() => setVersionsFor(skill.name)}
-                onBindings={() => setBindingsFor(skill.name)}
-                onProposals={() => setProposalsFor(skill.name)}
-                onBackflow={() => setBackflowFor(skill.name)}
-              />
-            ))}
-            {skills.data && filtered.length === 0 ? (
-              <tr>
-                <td colSpan={5}>
-                  <div className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
-                    <Inbox className="size-6 opacity-50" />
-                    <span className="text-sm">
-                      {query ? t('skills.noMatching') : t('skills.empty')}
-                    </span>
-                  </div>
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
-
-      <ContentDialog
-        skillName={contentFor}
-        onOpenChange={(open) => !open && setContentFor(null)}
-      />
-      <VersionsDialog skillName={versionsFor} onOpenChange={(open) => !open && setVersionsFor(null)} />
-      <BindingsDialog
-        skillName={bindingsFor}
-        canWrite={canWrite}
-        onOpenChange={(open) => !open && setBindingsFor(null)}
-      />
-      <ProposalsDialog
-        skillName={proposalsFor}
-        proposals={proposalsFor ? proposalsBySkill.get(proposalsFor) ?? [] : []}
-        onDiff={(id) => setProposalDiffId(id)}
-        onOpenChange={(open) => !open && setProposalsFor(null)}
-      />
-      <ProposalDiffDialog proposalId={proposalDiffId} onOpenChange={(open) => !open && setProposalDiffId(null)} />
-      <BackflowDialog
-        skillName={backflowFor}
-        proposals={backflowFor ? backflowBySkill.get(backflowFor) ?? [] : []}
-        onViewDiff={setSelectedBackflowId}
-        diffText={backflowDiff.data?.diff_vs_head ?? null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setBackflowFor(null);
-            setSelectedBackflowId(null);
-          }
-        }}
-      />
+      <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+        {status.provider ? <SyncField label={t('skills.gitSyncProvider')}>{status.provider}</SyncField> : null}
+        {status.remote_url ? (
+          <SyncField label={t('skills.gitSyncRemote')} mono>
+            {status.remote_url}
+          </SyncField>
+        ) : null}
+        {status.branch ? <SyncField label={t('skills.gitSyncBranch')}>{status.branch}</SyncField> : null}
+        <SyncField label={t('skills.gitSyncLastCommit')} mono>
+          {status.last_synced_commit ? status.last_synced_commit.slice(0, 10) : t('skills.gitSyncNever')}
+        </SyncField>
+        {status.last_sync_at ? (
+          <SyncField label={t('skills.gitSyncLastAt')}>{formatLocalTime(status.last_sync_at)}</SyncField>
+        ) : null}
+      </dl>
+      {status.last_sync_error ? (
+        <p className="rounded-md bg-destructive/10 px-3 py-2 text-destructive text-sm">
+          {t('skills.gitSyncError')}: {status.last_sync_error}
+        </p>
+      ) : null}
     </div>
-  );
+  )
+}
+
+export function SkillsPage(): JSX.Element {
+  const t = useT()
+  const me = useAdminMeQuery()
+  const reload = useReloadSkillsMutation()
+  const gitStatus = useSkillGitStatusQuery()
+  const gitopsEnabled = gitStatus.data?.enabled ?? false
+
+  const canWrite = me.data?.role !== 'viewer'
+
+  // In gitops mode the git sync status card owns refresh ("Sync now" reloads the index as
+  // part of the sync), so the standalone "Reload index" action is redundant — hide it.
+  const actions =
+    canWrite && !gitopsEnabled ? (
+      <Button onClick={() => void reload.mutateAsync()} variant="outline">
+        <RefreshCw className="size-4" /> {t('skills.reloadIndex')}
+      </Button>
+    ) : undefined
+
+  return (
+    <div className="space-y-6">
+      {gitopsEnabled ? <GitopsBanner /> : null}
+      {gitopsEnabled && gitStatus.data ? <GitSyncStatusCard canWrite={canWrite} status={gitStatus.data} /> : null}
+      <SkillsTable actions={actions} canWrite={canWrite} gitopsEnabled={gitopsEnabled} title={t('skills.title')} />
+    </div>
+  )
 }

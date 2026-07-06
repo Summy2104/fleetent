@@ -271,7 +271,7 @@ def test_update_delete_and_lookup_helpers(monkeypatch: pytest.MonkeyPatch) -> No
 
     agent_store.set_icon("ops", "🤖")
     agent_store.set_config_overrides("ops", {"g": True})
-    agent_store.set_im_capabilities("ops", supports_dm=True, supports_groups=False)
+    agent_store.set_im_capabilities(7, supports_dm=True, supports_groups=False)
     assert agent_store.get_agent_name_by_id(7) == "ops"
     assert agent_store.list_all_names() == ["alpha", "ops"]
     assert agent_store.delete_agent("ops") is True
@@ -316,3 +316,23 @@ def test_assignment_binding_and_default_agent_helpers(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(agent_store, "_get_default_agent_name", lambda: None)
     assert agent_store.get_default_agent() is None
+
+
+def test_set_im_capabilities_updates_agent_by_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def execute(sql: str, params: dict[str, Any]) -> _Result:
+        calls.append((sql, params))
+        return _Result()
+
+    monkeypatch.setattr(agent_store, "_db", lambda: _Db(execute))
+
+    agent_store.set_im_capabilities(7, supports_dm=True, supports_groups=False)
+
+    assert calls == [
+        (
+            "UPDATE agents SET supports_dm = :supports_dm, supports_groups = :supports_groups "
+            "WHERE id = :agent_id",
+            {"supports_dm": 1, "supports_groups": 0, "agent_id": 7},
+        )
+    ]

@@ -160,3 +160,8 @@ async def test_approve_button_triggers_resume(monkeypatch):
     assert resume.await_args.args[1] == "slack:dm:U_REQ:1.1"  # session_id
     assert resume.await_args.args[2] == "appr-1"  # approval_id
     assert resume.await_args.args[3] == "approved"  # decision
+    # agent-hosted-im (Group 7): with no dispatcher injected (agent self-hosts its connection),
+    # the button resolves + resumes in-process carrying the LIVE Slack connector so the approved
+    # action actually delivers.
+    resume_msg = resume.await_args.args[0]
+    assert resume_msg.outbound_connectors == {"slack": client}

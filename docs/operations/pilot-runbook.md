@@ -542,7 +542,10 @@ uv run pytest tests/evaluation -x -q
 - 企业将某个 Google Drive folder 作为部门知识库来源。
 - operator 需要确认 connector 能访问该 folder，能 dry-run，同步后能查询，且不会泄漏 OAuth token。
 - 平台托管 KB ingest 已退役；本场景的真实入口是
-  `$FLEETENT_HOME/tenants/default/kb/kb-service.yaml` + `kb-worker --config $FLEETENT_HOME/tenants/default/kb/kb-service.yaml`。
+  `$FLEETENT_HOME/kb-service.yaml` + `tenants/default/kb/connectors.yaml`
+  + `kb worker --config $FLEETENT_HOME/kb-service.yaml`。
+- 如需手动补跑实体抽取，入口是
+  `uv run fleetent kb extract --config $FLEETENT_HOME/kb-service.yaml --kb <kb_id> [--wait]`。
 
 准备数据：
 
@@ -567,12 +570,19 @@ FLEETENT_GOOGLE_DRIVE_EXECUTE_SYNC=1 \
   POST /admin/kb/connectors/<google_drive_connector_id>/sync  # body: {"dry_run": false}
 ```
 
+如需补跑实体抽取：
+
+```bash
+uv run fleetent kb extract --config $FLEETENT_HOME/kb-service.yaml --kb <kb_id> --wait
+```
+
 应该看到什么：
 
 - list 输出 connector id、type、tenant、KB 和 scope，不输出 credential payload。
 - check 返回 `ok`，或明确的 `credential_missing`、`credential_invalid`、`auth_failed`、`scope_unreachable`。
 - dry-run 不写 KB、source state 或 vector index。
 - 真实 sync 成功后，status 显示最近一次同步结果和脱敏摘要。
+- `kb extract --wait` 输出 documents / entities / relations 汇总，并通过 `kb-worker` 消费队列。
 - 同步后的测试文档可通过 KB search 或 Agent 查询命中。
 
 通过标准：
@@ -601,7 +611,8 @@ FLEETENT_GOOGLE_DRIVE_EXECUTE_SYNC=1 \
 
 - 企业将某个 Confluence space 或 page tree 作为知识库来源。
 - operator 需要确认 connector 能访问 scope，dry-run 不写数据，真实 sync 后可查询测试页面。
-- 升级前需把历史 platform connector 配置誊到 `$FLEETENT_HOME/tenants/default/kb/kb-service.yaml`，
+- 升级前需把历史 platform connector 配置誊到 `$FLEETENT_HOME/tenants/default/kb/connectors.yaml`，
+  并把共享 service / model 配置写入 `$FLEETENT_HOME/kb-service.yaml`；
   不再使用 `/admin/kb/connectors*` 作为生产入口。
 
 准备数据：

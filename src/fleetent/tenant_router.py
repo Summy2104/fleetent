@@ -2,14 +2,14 @@
 
 Two flat typed resolvers:
   ``tenant_scope(tenant)`` → KbScope{kb_db, kb_vector_backend}
-  ``agent_scope(tenant, agent_id)`` → AgentScope{state_db, vector_backend}
+  ``agent_scope(tenant, agent_name)`` → AgentScope{state_db, vector_backend}
 
 SQLite backend layout under ``<fleetent_home>/``::
 
   tenants/<tenant_id>/kb/data/kb.db                         — KB relation tables (Y-managed)
   tenants/<tenant_id>/kb/data/kb_vectors.db                 — KB vector store
-  tenants/<tenant_id>/agents/<agent_id>/data/agent_state.db — state + agent_memory_items
-  tenants/<tenant_id>/agents/<agent_id>/data/agent_vectors.db — mem:* + agentmem:* vector store
+  tenants/<tenant_id>/agents/<agent_name>/data/agent_state.db — state + agent_memory_items
+  tenants/<tenant_id>/agents/<agent_name>/data/agent_vectors.db — mem:* + agentmem:* vector store
 
 Directory structure is private to SQLiteTenantBackend; call sites only
 express scope and get typed handles — they never see file paths.
@@ -25,11 +25,7 @@ from pathlib import Path
 from typing import Protocol, cast
 
 from fleetent.db import ReadOnlySQLiteDatabase, SQLiteDatabase, create_substrate
-from fleetent.paths import base_dir, tenant_kb_data_dir
 from fleetent.vector_store.backend import SQLiteVectorBackend, VectorBackend
-
-_KB_FILENAMES = ("kb.db", "kb_vectors.db")
-_SQLITE_SIDECAR_SUFFIXES = ("", "-wal", "-shm")
 
 
 @dataclass(frozen=True)
@@ -102,7 +98,7 @@ class TenantBackend(Protocol):
 
     def resolve(self, tenant_id: str) -> KbScope: ...
 
-    def resolve_agent(self, tenant_id: str, agent_id: str) -> AgentScope: ...
+    def resolve_agent(self, tenant_id: str, agent_name: str) -> AgentScope: ...
 
 
 @dataclass(frozen=True)
@@ -125,8 +121,8 @@ class SQLiteTenantBackend:
             kb_vector_backend=kb_vector_backend,
         )
 
-    def resolve_agent(self, tenant_id: str, agent_id: str) -> AgentScope:
-        agent_dir = self.data_dir / "tenants" / tenant_id / "agents" / agent_id / "data"
+    def resolve_agent(self, tenant_id: str, agent_name: str) -> AgentScope:
+        agent_dir = self.data_dir / "tenants" / tenant_id / "agents" / agent_name / "data"
         agent_dir.mkdir(parents=True, exist_ok=True)
         state_db = cast(
             SQLiteDatabase,
@@ -159,8 +155,8 @@ class StandaloneKBTenantBackend:
             kb_vector_backend=kb_vector_backend,
         )
 
-    def resolve_agent(self, tenant_id: str, agent_id: str) -> AgentScope:
-        return SQLiteTenantBackend(data_dir=self.data_dir).resolve_agent(tenant_id, agent_id)
+    def resolve_agent(self, tenant_id: str, agent_name: str) -> AgentScope:
+        return SQLiteTenantBackend(data_dir=self.data_dir).resolve_agent(tenant_id, agent_name)
 
 
 @dataclass(frozen=True)
@@ -177,28 +173,15 @@ class TenantRouter:
         """Resolve *tenant_id* to its KB relation DB and vector backend."""
         return self._backend.resolve(tenant_id)
 
-    def agent_scope(self, tenant_id: str, agent_id: str) -> AgentScope:
-        """Resolve *(tenant_id, agent_id)* to the agent's private state DB and vector backend."""
-        return self._backend.resolve_agent(tenant_id, agent_id)
+    def agent_scope(self, tenant_id: str, agent_name: str) -> AgentScope:
+        """Resolve *(tenant_id, agent_name)* to the agent's private state DB and vector backend."""
+        return self._backend.resolve_agent(tenant_id, agent_name)
 
 
 def ensure_tenant_kb_dir(data_dir: Path, tenant_id: str) -> Path:
-    """Provision ``tenants/<tenant>/kb/data`` and migrate any legacy flat KB files into it."""
+    """Provision ``tenants/<tenant>/kb/data`` without migrating legacy KB files."""
     tenant_root = data_dir / "tenants" / tenant_id
     tenant_root.mkdir(parents=True, exist_ok=True)
-    kb_dir = data_dir / tenant_kb_data_dir(tenant_id).relative_to(base_dir())
-    if kb_dir.exists():
-        return kb_dir
-
-    legacy_kb = tenant_root / "kb.db"
-    if legacy_kb.exists():
-        kb_dir.mkdir(parents=True, exist_ok=True)
-        for filename in _KB_FILENAMES:
-            for suffix in _SQLITE_SIDECAR_SUFFIXES:
-                source = tenant_root / f"{filename}{suffix}"
-                if source.exists():
-                    source.replace(kb_dir / f"{filename}{suffix}")
-        return kb_dir
-
+    kb_dir = tenant_root / "kb" / "data"
     kb_dir.mkdir(parents=True, exist_ok=True)
     return kb_dir

@@ -1,33 +1,25 @@
-import { MemoryRouter } from 'react-router-dom';
-import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { HttpResponse, delay, http } from 'msw';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { delay, HttpResponse, http } from 'msw'
+import { MemoryRouter } from 'react-router-dom'
+import { beforeEach, describe, expect, it } from 'vitest'
 
-import { AuthProvider } from '@/app/auth';
-import { AppQueryProvider } from '@/app/query-client';
-import { AdminRoutes } from '@/app/routes';
-import { ThemeProvider } from '@/app/theme';
-import { I18nProvider } from '@/i18n';
-import { server } from '@/test/msw/server';
+import { AuthProvider } from '@/app/auth'
+import { AppQueryProvider } from '@/app/query-client'
+import { AdminRoutes } from '@/app/routes'
+import { ThemeProvider } from '@/app/theme'
+import { I18nProvider } from '@/i18n'
+import { server } from '@/test/msw/server'
 
 beforeEach(() => {
-  server.use(
-    http.get('http://fleetent.test/admin/oidc/config', () =>
-      HttpResponse.json({ enabled: false, label: '' })
-    )
-  );
-});
+  server.use(http.get('http://fleetent.test/admin/oidc/config', () => HttpResponse.json({ enabled: false, label: '' })))
+})
 
 function renderRoutes(route: string, token?: string, mustReset?: boolean): void {
   render(
     <I18nProvider>
       <ThemeProvider>
-        <AuthProvider
-          baseUrl="http://fleetent.test"
-          initialToken={token ?? null}
-          initialMustReset={mustReset ?? false}
-        >
+        <AuthProvider baseUrl="http://fleetent.test" initialMustReset={mustReset ?? false} initialToken={token ?? null}>
           <AppQueryProvider>
             <MemoryRouter initialEntries={[route]}>
               <AdminRoutes />
@@ -36,174 +28,216 @@ function renderRoutes(route: string, token?: string, mustReset?: boolean): void 
         </AuthProvider>
       </ThemeProvider>
     </I18nProvider>
-  );
+  )
 }
 
 describe('admin routes', () => {
   it('redirects unauthenticated users to the login page', async () => {
-    renderRoutes('/agents');
+    renderRoutes('/agents')
 
-    expect(await screen.findByRole('heading', { name: 'Admin Login' })).toBeInTheDocument();
-  });
+    expect(await screen.findByRole('heading', { name: 'Admin Login' })).toBeInTheDocument()
+  })
+
+  it('submits the login form when the user presses Enter in a field', async () => {
+    let loginBody: { email: string; password: string } | null = null
+    server.use(
+      http.post('http://fleetent.test/admin/login', async ({ request }) => {
+        loginBody = (await request.json()) as { email: string; password: string }
+        return HttpResponse.json({ token: 'session-token', must_reset: false })
+      }),
+      http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([]))
+    )
+
+    renderRoutes('/login')
+
+    await userEvent.type(await screen.findByLabelText('Email'), 'admin@example.com')
+    // Trailing {Enter} submits the surrounding <form> without clicking the button.
+    await userEvent.type(screen.getByLabelText('Password'), 's3cret{Enter}')
+
+    expect((await screen.findAllByRole('heading', { name: 'Agents' }))[0]).toBeInTheDocument()
+    expect(loginBody).toEqual({ email: 'admin@example.com', password: 's3cret' })
+  })
+
+  it('reveals the password in plain text when the show-password toggle is clicked', async () => {
+    renderRoutes('/login')
+
+    const password = await screen.findByLabelText('Password')
+    expect(password).toHaveAttribute('type', 'password')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Show password' }))
+    expect(password).toHaveAttribute('type', 'text')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Hide password' }))
+    expect(password).toHaveAttribute('type', 'password')
+  })
 
   it('forces a password change when the session requires a reset', async () => {
-    server.use(http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])));
+    server.use(http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])))
 
-    renderRoutes('/agents', 'session-token', true);
+    renderRoutes('/agents', 'session-token', true)
 
-    expect(await screen.findByRole('heading', { name: 'Set a new password' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Agents' })).not.toBeInTheDocument();
-  });
+    expect(await screen.findByRole('heading', { name: 'Set a new password' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Agents' })).not.toBeInTheDocument()
+  })
 
   it('lets the admin complete the forced password change and enter the app', async () => {
     server.use(
       http.post('http://fleetent.test/admin/change-password', async ({ request }) => {
-        const body = (await request.json()) as { new_password: string };
-        expect(body.new_password).toBe('s3cret-new');
-        return HttpResponse.json({ status: 'password_changed' });
+        const body = (await request.json()) as { new_password: string }
+        expect(body.new_password).toBe('s3cret-new')
+        return HttpResponse.json({ status: 'password_changed' })
       }),
       http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([]))
-    );
+    )
 
-    renderRoutes('/agents', 'session-token', true);
+    renderRoutes('/agents', 'session-token', true)
 
-    const field = await screen.findByLabelText('New password');
-    await userEvent.type(field, 's3cret-new');
+    const field = await screen.findByLabelText('New password')
+    await userEvent.type(field, 's3cret-new')
     // The gate now also requires a matching confirmation before the submit enables.
-    await userEvent.type(screen.getByLabelText('Confirm new password'), 's3cret-new');
-    await userEvent.click(screen.getByRole('button', { name: 'Set password & continue' }));
+    await userEvent.type(screen.getByLabelText('Confirm new password'), 's3cret-new')
+    await userEvent.click(screen.getByRole('button', { name: 'Set password & continue' }))
 
-    expect((await screen.findAllByRole('heading', { name: 'Agents' }))[0]).toBeInTheDocument();
-  });
+    expect((await screen.findAllByRole('heading', { name: 'Agents' }))[0]).toBeInTheDocument()
+  })
+
+  it('lets the admin submit the forced password change by pressing Enter', async () => {
+    server.use(
+      http.post('http://fleetent.test/admin/change-password', async ({ request }) => {
+        const body = (await request.json()) as { new_password: string }
+        expect(body.new_password).toBe('s3cret-new')
+        return HttpResponse.json({ status: 'password_changed' })
+      }),
+      http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([]))
+    )
+
+    renderRoutes('/agents', 'session-token', true)
+
+    await userEvent.type(await screen.findByLabelText('New password'), 's3cret-new')
+    // Trailing {Enter} submits the surrounding <form> without clicking the button.
+    await userEvent.type(screen.getByLabelText('Confirm new password'), 's3cret-new{Enter}')
+
+    expect((await screen.findAllByRole('heading', { name: 'Agents' }))[0]).toBeInTheDocument()
+  })
 
   it('hides the SSO entry point when OIDC is disabled', async () => {
     server.use(
-      http.get('http://fleetent.test/admin/oidc/config', () =>
-        HttpResponse.json({ enabled: false, label: '' })
-      )
-    );
+      http.get('http://fleetent.test/admin/oidc/config', () => HttpResponse.json({ enabled: false, label: '' }))
+    )
 
-    renderRoutes('/login');
+    renderRoutes('/login')
 
-    expect(await screen.findByRole('heading', { name: 'Admin Login' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Admin Login' })).toBeInTheDocument()
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: 'Sign in with SSO' })).not.toBeInTheDocument();
-    });
-  });
+      expect(screen.queryByRole('button', { name: 'Sign in with SSO' })).not.toBeInTheDocument()
+    })
+  })
 
   it('hides the SSO entry point while config is loading or failed', async () => {
     server.use(
       http.get('http://fleetent.test/admin/oidc/config', async () => {
-        await delay('infinite');
-        return HttpResponse.json({ enabled: true, label: 'Sign in with Google' });
+        await delay('infinite')
+        return HttpResponse.json({ enabled: true, label: 'Sign in with Google' })
       })
-    );
+    )
 
-    renderRoutes('/login');
+    renderRoutes('/login')
 
-    expect(await screen.findByRole('heading', { name: 'Admin Login' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Sign in with Google' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Sign in with SSO' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Admin Login' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Sign in with Google' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Sign in with SSO' })).not.toBeInTheDocument()
 
-    server.resetHandlers(
-      http.get('http://fleetent.test/admin/oidc/config', () => HttpResponse.error())
-    );
-    renderRoutes('/login');
+    server.resetHandlers(http.get('http://fleetent.test/admin/oidc/config', () => HttpResponse.error()))
+    renderRoutes('/login')
 
-    expect(await screen.findAllByRole('heading', { name: 'Admin Login' })).toHaveLength(2);
+    expect(await screen.findAllByRole('heading', { name: 'Admin Login' })).toHaveLength(2)
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: 'Sign in with Google' })).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: 'Sign in with SSO' })).not.toBeInTheDocument();
-    });
-  });
+      expect(screen.queryByRole('button', { name: 'Sign in with Google' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Sign in with SSO' })).not.toBeInTheDocument()
+    })
+  })
 
   it('shows the configured SSO label when OIDC is enabled', async () => {
     server.use(
       http.get('http://fleetent.test/admin/oidc/config', () =>
         HttpResponse.json({ enabled: true, label: 'Sign in with Google' })
       )
-    );
+    )
 
-    renderRoutes('/login');
+    renderRoutes('/login')
 
-    expect(await screen.findByRole('button', { name: 'Sign in with Google' })).toBeInTheDocument();
-  });
+    expect(await screen.findByRole('button', { name: 'Sign in with Google' })).toBeInTheDocument()
+  })
 
   it('falls back to the default SSO label when OIDC is enabled without a label', async () => {
     server.use(
-      http.get('http://fleetent.test/admin/oidc/config', () =>
-        HttpResponse.json({ enabled: true, label: '' })
-      )
-    );
+      http.get('http://fleetent.test/admin/oidc/config', () => HttpResponse.json({ enabled: true, label: '' }))
+    )
 
-    renderRoutes('/login');
+    renderRoutes('/login')
 
-    expect(await screen.findByRole('button', { name: 'Sign in with SSO' })).toBeInTheDocument();
-  });
+    expect(await screen.findByRole('button', { name: 'Sign in with SSO' })).toBeInTheDocument()
+  })
 
   it('consumes an OIDC callback token from the login route query string', async () => {
     server.use(
       http.get('http://fleetent.test/admin/agents', ({ request }) => {
-        expect(request.headers.get('authorization')).toBe('Session oidc-session');
-        return HttpResponse.json([]);
+        expect(request.headers.get('authorization')).toBe('Session oidc-session')
+        return HttpResponse.json([])
       })
-    );
+    )
 
-    renderRoutes('/login?token=oidc-session');
+    renderRoutes('/login?token=oidc-session')
 
-    expect((await screen.findAllByRole('heading', { name: 'Agents' }))[0]).toBeInTheDocument();
-  });
+    expect((await screen.findAllByRole('heading', { name: 'Agents' }))[0]).toBeInTheDocument()
+  })
 
   it('renders the agents page with native navigation links', async () => {
-    server.use(http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])));
+    server.use(http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])))
 
-    renderRoutes('/agents', 'session-token');
+    renderRoutes('/agents', 'session-token')
 
-    expect((await screen.findAllByRole('heading', { name: 'Agents' }))[0]).toBeInTheDocument();
-    const nav = within(screen.getByRole('navigation'));
-    expect(nav.getByRole('link', { name: 'Agents' })).toHaveAttribute('href', '/agents');
-    expect(nav.getByRole('link', { name: 'Sessions' })).toHaveAttribute('href', '/sessions');
-    expect(nav.getByRole('link', { name: 'Users' })).toHaveAttribute('href', '/users');
-    expect(nav.getByRole('link', { name: 'Providers' })).toHaveAttribute(
-      'href',
-      '/providers'
-    );
-    expect(nav.getAllByRole('link', { name: 'Skills' })[0]).toHaveAttribute('href', '/skills');
-    expect(nav.getAllByRole('link', { name: 'Knowledge Base' })[0]).toHaveAttribute('href', '/kb');
-  });
+    expect((await screen.findAllByRole('heading', { name: 'Agents' }))[0]).toBeInTheDocument()
+    const nav = within(screen.getByRole('navigation'))
+    expect(nav.getByRole('link', { name: 'Agents' })).toHaveAttribute('href', '/agents')
+    expect(nav.getByRole('link', { name: 'Users' })).toHaveAttribute('href', '/users')
+    expect(nav.getByRole('link', { name: 'Providers' })).toHaveAttribute('href', '/providers')
+    expect(nav.getAllByRole('link', { name: 'Skills' })[0]).toHaveAttribute('href', '/skills')
+    expect(nav.getAllByRole('link', { name: 'Knowledge Base' })[0]).toHaveAttribute('href', '/kb')
+  })
 
   it('signs out by notifying the backend and returning to the login page', async () => {
-    let logoutAuth: string | null = 'never-called';
+    let logoutAuth: string | null = 'never-called'
     server.use(
       http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])),
       http.post('http://fleetent.test/admin/logout', ({ request }) => {
-        logoutAuth = request.headers.get('authorization');
-        return HttpResponse.json({ status: 'logged_out' });
+        logoutAuth = request.headers.get('authorization')
+        return HttpResponse.json({ status: 'logged_out' })
       })
-    );
+    )
 
-    renderRoutes('/agents', 'session-token');
-    await screen.findAllByRole('heading', { name: 'Agents' });
+    renderRoutes('/agents', 'session-token')
+    await screen.findAllByRole('heading', { name: 'Agents' })
 
-    await userEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Sign out' }))
 
     // The backend session is torn down with the current token, then the UI
     // drops the local session and redirects to the login page.
-    expect(await screen.findByRole('heading', { name: 'Admin Login' })).toBeInTheDocument();
-    expect(logoutAuth).toBe('Session session-token');
-  });
+    expect(await screen.findByRole('heading', { name: 'Admin Login' })).toBeInTheDocument()
+    expect(logoutAuth).toBe('Session session-token')
+  })
 
   it('keeps migrated domains on native routes without duplicate legacy deep links', async () => {
-    server.use(http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])));
+    server.use(http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])))
 
-    renderRoutes('/agents', 'session-token');
+    renderRoutes('/agents', 'session-token')
 
-    await screen.findAllByRole('heading', { name: 'Agents' });
-    const nav = within(screen.getByRole('navigation'));
-    expect(nav.getAllByRole('link', { name: 'Skills' })).toHaveLength(1);
-    expect(nav.getAllByRole('link', { name: 'Knowledge Base' })).toHaveLength(1);
-    expect(nav.getAllByRole('link', { name: 'Statistics' })).toHaveLength(1);
-  });
+    await screen.findAllByRole('heading', { name: 'Agents' })
+    const nav = within(screen.getByRole('navigation'))
+    expect(nav.getAllByRole('link', { name: 'Skills' })).toHaveLength(1)
+    expect(nav.getAllByRole('link', { name: 'Knowledge Base' })).toHaveLength(1)
+    expect(nav.getAllByRole('link', { name: 'Statistics' })).toHaveLength(1)
+  })
 
   it('renders statistics as a native route instead of a legacy deep link', async () => {
     server.use(
@@ -226,9 +260,7 @@ describe('admin routes', () => {
           usage: { calls: 9, total_tokens: 600 },
         })
       ),
-      http.get('http://fleetent.test/admin/stats/compare', () =>
-        HttpResponse.json([{ agent_id: 'alpha', value: 9 }])
-      ),
+      http.get('http://fleetent.test/admin/stats/compare', () => HttpResponse.json([{ agent_id: 'alpha', value: 9 }])),
       http.get('http://fleetent.test/admin/stats/agents/alpha/tools', () =>
         HttpResponse.json({
           coverage: { allowed: 2, used: 1 },
@@ -238,98 +270,80 @@ describe('admin routes', () => {
       http.get('http://fleetent.test/admin/stats/per-user', () =>
         HttpResponse.json([{ user_id: 'u1', calls: 9, total_tokens: 600 }])
       )
-    );
+    )
 
-    renderRoutes('/stats', 'session-token');
+    renderRoutes('/stats', 'session-token')
 
-    expect((await screen.findAllByRole('heading', { name: 'Statistics' }))[0]).toBeInTheDocument();
-    const nav = within(screen.getByRole('navigation'));
-    expect(nav.getByRole('link', { name: 'Statistics' })).toHaveAttribute('href', '/stats');
-  });
+    expect((await screen.findAllByRole('heading', { name: 'Statistics' }))[0]).toBeInTheDocument()
+    const nav = within(screen.getByRole('navigation'))
+    expect(nav.getByRole('link', { name: 'Statistics' })).toHaveAttribute('href', '/stats')
+  })
 
   it('renders audit as a native route in the SPA', async () => {
-    renderRoutes('/audit', 'session-token');
+    renderRoutes('/audit', 'session-token')
 
-    expect((await screen.findAllByRole('heading', { name: 'Audit' }))[0]).toBeInTheDocument();
-    const nav = within(screen.getByRole('navigation'));
-    expect(nav.getByRole('link', { name: 'Audit' })).toHaveAttribute('href', '/audit');
-  });
+    expect((await screen.findAllByRole('heading', { name: 'Audit' }))[0]).toBeInTheDocument()
+    const nav = within(screen.getByRole('navigation'))
+    expect(nav.getByRole('link', { name: 'Audit' })).toHaveAttribute('href', '/audit')
+  })
 
   it('renders providers as a native route instead of a legacy deep link', async () => {
-    server.use(http.get('http://fleetent.test/admin/providers', () => HttpResponse.json([])));
+    server.use(http.get('http://fleetent.test/admin/providers', () => HttpResponse.json([])))
 
-    renderRoutes('/providers', 'session-token');
+    renderRoutes('/providers', 'session-token')
 
-    expect((await screen.findAllByRole('heading', { name: 'Providers' }))[0]).toBeInTheDocument();
-    const nav = within(screen.getByRole('navigation'));
-    expect(nav.getByRole('link', { name: 'Providers' })).toHaveAttribute('href', '/providers');
-  });
+    expect((await screen.findAllByRole('heading', { name: 'Providers' }))[0]).toBeInTheDocument()
+    const nav = within(screen.getByRole('navigation'))
+    expect(nav.getByRole('link', { name: 'Providers' })).toHaveAttribute('href', '/providers')
+  })
 
   it('renders skills as a native route instead of a legacy deep link', async () => {
     server.use(
       http.get('http://fleetent.test/admin/skills', () => HttpResponse.json([])),
       http.get('http://fleetent.test/admin/skills/proposals', () => HttpResponse.json([]))
-    );
+    )
 
-    renderRoutes('/skills', 'session-token');
+    renderRoutes('/skills', 'session-token')
 
-    expect((await screen.findAllByRole('heading', { name: 'Skills' }))[0]).toBeInTheDocument();
-    const nav = within(screen.getByRole('navigation'));
-    expect(nav.getAllByRole('link', { name: 'Skills' })[0]).toHaveAttribute('href', '/skills');
-  });
-
-  it('renders sessions as a native route in the SPA', async () => {
-    server.use(
-      http.get('http://fleetent.test/admin/me', () =>
-        HttpResponse.json({ email: 'admin@fleetent.test', id: 'admin-1', role: 'admin' })
-      ),
-      http.get('http://fleetent.test/admin/sessions', () => HttpResponse.json([]))
-    );
-
-    renderRoutes('/sessions', 'session-token');
-
-    expect((await screen.findAllByRole('heading', { name: 'Sessions' }))[0]).toBeInTheDocument();
-    const nav = within(screen.getByRole('navigation'));
-    expect(nav.getByRole('link', { name: 'Sessions' })).toHaveAttribute('href', '/sessions');
-  });
+    expect((await screen.findAllByRole('heading', { name: 'Skills' }))[0]).toBeInTheDocument()
+    const nav = within(screen.getByRole('navigation'))
+    expect(nav.getAllByRole('link', { name: 'Skills' })[0]).toHaveAttribute('href', '/skills')
+  })
 
   it('renders knowledge base as a native route instead of a legacy deep link', async () => {
-    server.use(
-      http.get('http://fleetent.test/admin/kb', () => HttpResponse.json([])),
-      http.get('http://fleetent.test/admin/kb/connectors', () => HttpResponse.json([]))
-    );
+    server.use(http.get('http://fleetent.test/admin/kb', () => HttpResponse.json([])))
 
-    renderRoutes('/kb', 'session-token');
+    renderRoutes('/kb', 'session-token')
 
-    expect((await screen.findAllByRole('heading', { name: 'Knowledge Base' }))[0]).toBeInTheDocument();
-    const nav = within(screen.getByRole('navigation'));
-    const knowledgeBaseLinks = nav.getAllByRole('link', { name: 'Knowledge Base' });
-    expect(knowledgeBaseLinks[0]).toHaveAttribute('href', '/kb');
-  });
+    expect((await screen.findAllByRole('heading', { name: 'Knowledge Base' }))[0]).toBeInTheDocument()
+    const nav = within(screen.getByRole('navigation'))
+    const knowledgeBaseLinks = nav.getAllByRole('link', { name: 'Knowledge Base' })
+    expect(knowledgeBaseLinks[0]).toHaveAttribute('href', '/kb')
+  })
 
   it('renders the users page as a native route', async () => {
     server.use(
       http.get('http://fleetent.test/admin/users', () => HttpResponse.json([])),
       http.get('http://fleetent.test/admin/im-users', () => HttpResponse.json([])),
       http.get('http://fleetent.test/admin/users/u1/keys', () => HttpResponse.json([]))
-    );
+    )
 
-    renderRoutes('/users', 'session-token');
+    renderRoutes('/users', 'session-token')
 
-    expect((await screen.findAllByRole('heading', { name: 'Users' }))[0]).toBeInTheDocument();
-    const nav = within(screen.getByRole('navigation'));
-    expect(nav.getByRole('link', { name: 'Users' })).toHaveAttribute('href', '/users');
-  });
+    expect((await screen.findAllByRole('heading', { name: 'Users' }))[0]).toBeInTheDocument()
+    const nav = within(screen.getByRole('navigation'))
+    expect(nav.getByRole('link', { name: 'Users' })).toHaveAttribute('href', '/users')
+  })
 
   it('renders chat as a native route in the SPA', async () => {
-    server.use(http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])));
+    server.use(http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])))
 
-    renderRoutes('/chat', 'session-token');
+    renderRoutes('/chat', 'session-token')
 
-    expect(await screen.findByRole('heading', { name: 'Chat Console' })).toBeInTheDocument();
-    const nav = within(screen.getByRole('navigation'));
-    expect(nav.getByRole('link', { name: 'Chat' })).toHaveAttribute('href', '/chat');
-  });
+    expect(await screen.findByRole('heading', { name: 'Chat Console' })).toBeInTheDocument()
+    const nav = within(screen.getByRole('navigation'))
+    expect(nav.getByRole('link', { name: 'Chat' })).toHaveAttribute('href', '/chat')
+  })
 
   it('renders tenancy as a native route in the SPA', async () => {
     server.use(
@@ -339,38 +353,38 @@ describe('admin routes', () => {
       http.get('http://fleetent.test/admin/tenancy/tenants', () => HttpResponse.json([])),
       http.get('http://fleetent.test/admin/tenancy/teams', () => HttpResponse.json([])),
       http.get('http://fleetent.test/admin/users', () => HttpResponse.json([]))
-    );
+    )
 
-    renderRoutes('/tenancy', 'session-token');
+    renderRoutes('/tenancy', 'session-token')
 
-    expect((await screen.findAllByRole('heading', { name: 'Tenancy' }))[0]).toBeInTheDocument();
-    const nav = within(screen.getByRole('navigation'));
-    expect(nav.getByRole('link', { name: 'Tenancy' })).toHaveAttribute('href', '/tenancy');
-  });
+    expect((await screen.findAllByRole('heading', { name: 'Tenancy' }))[0]).toBeInTheDocument()
+    const nav = within(screen.getByRole('navigation'))
+    expect(nav.getByRole('link', { name: 'Tenancy' })).toHaveAttribute('href', '/tenancy')
+  })
 
   it('renders nodes as a native route in the SPA', async () => {
     server.use(
       http.get('http://fleetent.test/admin/nodes', () => HttpResponse.json([])),
       http.get('http://fleetent.test/admin/agents', ({ request }) => {
-        expect(new URL(request.url).searchParams.get('include_archived')).toBe('true');
-        return HttpResponse.json([]);
+        expect(new URL(request.url).searchParams.get('include_archived')).toBe('true')
+        return HttpResponse.json([])
       })
-    );
+    )
 
-    renderRoutes('/nodes', 'session-token');
+    renderRoutes('/nodes', 'session-token')
 
-    expect((await screen.findAllByRole('heading', { name: 'Nodes' }))[0]).toBeInTheDocument();
-    const nav = within(screen.getByRole('navigation'));
-    expect(nav.getByRole('link', { name: 'Nodes' })).toHaveAttribute('href', '/nodes');
-  });
+    expect((await screen.findAllByRole('heading', { name: 'Nodes' }))[0]).toBeInTheDocument()
+    const nav = within(screen.getByRole('navigation'))
+    expect(nav.getByRole('link', { name: 'Nodes' })).toHaveAttribute('href', '/nodes')
+  })
 
   it('removes the standalone user-IM identities route and navigation item', async () => {
-    server.use(http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])));
+    server.use(http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])))
 
-    renderRoutes('/im-identities', 'session-token');
+    renderRoutes('/im-identities', 'session-token')
 
-    expect((await screen.findAllByRole('heading', { name: 'Agents' }))[0]).toBeInTheDocument();
-    const nav = within(screen.getByRole('navigation'));
-    expect(nav.queryByRole('link', { name: 'IM Identities' })).not.toBeInTheDocument();
-  });
-});
+    expect((await screen.findAllByRole('heading', { name: 'Agents' }))[0]).toBeInTheDocument()
+    const nav = within(screen.getByRole('navigation'))
+    expect(nav.queryByRole('link', { name: 'IM Identities' })).not.toBeInTheDocument()
+  })
+})

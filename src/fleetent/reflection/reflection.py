@@ -343,7 +343,7 @@ async def run_reflection(
                 scope=scope,
                 proposal_id=memory_proposal.id,
                 action=memory_proposal.action,
-                error=str(exc),
+                exception=exc,
             )
     for skill_proposal in generate_skill_proposals(findings=findings, report_id=report.id):
         _persist_skill_proposal(skill_proposal)
@@ -1256,6 +1256,15 @@ def set_state_db(db: SQLiteDatabase) -> None:
     approval_request_store.set_state_db(db)
 
 
+def state_db_initialized() -> bool:
+    """Whether a per-agent state DB has been injected.
+
+    False in any process that never boots an agent (e.g. the platform control plane), letting
+    read-only platform callers degrade gracefully instead of hitting ``_database``'s RuntimeError.
+    """
+    return _state_db is not None
+
+
 def _database() -> SQLiteDatabase:
     """Return the per-agent state DB injected at boot.
 
@@ -1309,7 +1318,7 @@ async def _notify_pending_proposal(
     if tool_name == "reflection_user_memory_proposal" and user_id is not None:
         from fleetent.outbound_connectors import notify_user
 
-        notify_user(
+        await notify_user(
             user_id,
             f"Memory maintenance proposal pending your review. "
             f"Reply 'approve {proposal_id}' to approve or 'reject {proposal_id}' to reject.",

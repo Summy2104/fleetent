@@ -1,61 +1,204 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/inter";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Light is the default `:root`; `.dark` overrides it. Values are full CSS
+   colors so `@theme inline` can map them straight through with `var(--x)` —
+   no `hsl()` wrapper — letting Tailwind utilities resolve and alpha modifiers
+   (`bg-success/15`) go through `color-mix`. The control-plane design is
+   dark-first: src/app/theme.tsx defaults to dark and a head script in
+   index.html adds `.dark` before first paint to avoid a light flash.
+   Switching a theme toggles the `.dark` class; these variable names are the
+   contract both this file and theme.tsx share. */
+:root {
+  --background: hsl(210 20% 98%);
+  --foreground: hsl(222 47% 11%);
+
+  --card: hsl(0 0% 100%);
+  --card-foreground: hsl(222 47% 11%);
+
+  --popover: hsl(0 0% 100%);
+  --popover-foreground: hsl(222 47% 11%);
+
+  --primary: hsl(158 64% 38%);
+  --primary-foreground: hsl(0 0% 100%);
+
+  --secondary: hsl(210 40% 96%);
+  --secondary-foreground: hsl(222 47% 11%);
+
+  --muted: hsl(210 40% 96%);
+  --muted-foreground: hsl(215 16% 45%);
+
+  --accent: hsl(210 40% 93%);
+  --accent-foreground: hsl(222 47% 11%);
+
+  --destructive: hsl(0 72% 51%);
+  --destructive-foreground: hsl(0 0% 100%);
+
+  --border: hsl(214 32% 88%);
+  --input: hsl(214 32% 88%);
+  --ring: hsl(158 64% 38%);
+
+  --sidebar: hsl(210 24% 96%);
+  --sidebar-foreground: hsl(215 16% 40%);
+  --sidebar-accent: hsl(210 40% 90%);
+  --sidebar-border: hsl(214 32% 88%);
+
+  --success: hsl(158 64% 38%);
+  --warning: hsl(38 92% 42%);
+
+  --radius: 0.65rem;
+
+  color-scheme: light;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+/* Dark control-plane theme: deep navy ground + mint/emerald accent. */
+.dark {
+  --background: hsl(216 33% 7%);
+  --foreground: hsl(213 31% 91%);
+
+  --card: hsl(215 28% 10%);
+  --card-foreground: hsl(213 31% 91%);
+
+  --popover: hsl(215 30% 9%);
+  --popover-foreground: hsl(213 31% 91%);
+
+  --primary: hsl(158 64% 52%);
+  --primary-foreground: hsl(216 40% 8%);
+
+  --secondary: hsl(214 22% 14%);
+  --secondary-foreground: hsl(213 31% 91%);
+
+  --muted: hsl(214 22% 14%);
+  --muted-foreground: hsl(214 14% 58%);
+
+  --accent: hsl(214 22% 16%);
+  --accent-foreground: hsl(213 31% 95%);
+
+  --destructive: hsl(0 72% 60%);
+  --destructive-foreground: hsl(213 31% 96%);
+
+  --border: hsl(214 20% 17%);
+  --input: hsl(214 20% 17%);
+  --ring: hsl(158 64% 52%);
+
+  --sidebar: hsl(218 35% 6%);
+  --sidebar-foreground: hsl(213 20% 72%);
+  --sidebar-accent: hsl(214 24% 14%);
+  --sidebar-border: hsl(214 22% 13%);
+
+  --success: hsl(158 64% 52%);
+  --warning: hsl(38 92% 60%);
+
+  color-scheme: dark;
+}
+
+/* Map the theme variables into Tailwind tokens so utilities (`bg-background`,
+   `text-primary`, `bg-success/15`, …) exist. `inline` is required because each
+   token references another variable (`var(--background)`): it inlines that
+   reference into the utility so the `.dark` override resolves at use-site. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-border: var(--sidebar-border);
+
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+
+  --shadow-soft: 0 18px 45px -24px rgba(0, 0, 0, 0.6);
+
+  --font-sans: "Inter Variable", sans-serif;
+  --font-heading: var(--font-sans);
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --animate-fade-in: fade-in 0.2s ease-out;
+  --animate-overlay-in: overlay-in 0.15s ease-out;
+  --animate-content-in: content-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes overlay-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes content-in {
+    from {
+      opacity: 0;
+      transform: translate(-50%, -48%) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
+  }
+}
 
 @layer base {
-  :root {
-    /* Dark control-plane theme: deep navy ground + mint/emerald accent. */
-    --background: 216 33% 7%;
-    --foreground: 213 31% 91%;
-
-    --card: 215 28% 10%;
-    --card-foreground: 213 31% 91%;
-
-    --popover: 215 30% 9%;
-    --popover-foreground: 213 31% 91%;
-
-    --primary: 158 64% 52%;
-    --primary-foreground: 216 40% 8%;
-
-    --secondary: 214 22% 14%;
-    --secondary-foreground: 213 31% 91%;
-
-    --muted: 214 22% 14%;
-    --muted-foreground: 214 14% 58%;
-
-    --accent: 214 22% 16%;
-    --accent-foreground: 213 31% 95%;
-
-    --destructive: 0 72% 60%;
-    --destructive-foreground: 213 31% 96%;
-
-    --border: 214 20% 17%;
-    --input: 214 20% 17%;
-    --ring: 158 64% 52%;
-
-    --sidebar: 218 35% 6%;
-    --sidebar-foreground: 213 20% 72%;
-    --sidebar-accent: 214 24% 14%;
-    --sidebar-border: 214 22% 13%;
-
-    --success: 158 64% 52%;
-    --warning: 38 92% 60%;
-
-    --radius: 0.65rem;
-
-    color-scheme: dark;
-    font-family:
-      'Inter',
-      -apple-system,
-      BlinkMacSystemFont,
-      'Segoe UI',
-      'PingFang SC',
-      'Microsoft YaHei',
-      sans-serif;
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-border);
   }
 
   * {
-    @apply border-border;
+    @apply outline-ring/50;
+  }
+
+  html {
+    @apply font-sans;
   }
 
   html,
@@ -66,8 +209,7 @@
   body {
     background:
       radial-gradient(60% 50% at 100% 0%, hsl(158 64% 40% / 0.06), transparent 60%),
-      radial-gradient(50% 40% at 0% 0%, hsl(200 80% 40% / 0.05), transparent 55%),
-      hsl(var(--background));
+      radial-gradient(50% 40% at 0% 0%, hsl(200 80% 40% / 0.05), transparent 55%), var(--background);
   }
 
   /* Components own their own :focus-visible styles. A global ring here would
@@ -79,15 +221,15 @@
     @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
   }
 
-  /* Slim dark scrollbars to match the surface. */
+  /* Slim scrollbars to match the surface. */
   *::-webkit-scrollbar {
     width: 10px;
     height: 10px;
   }
   *::-webkit-scrollbar-thumb {
-    background: hsl(var(--border));
+    background: var(--border);
     border-radius: 999px;
-    border: 2px solid hsl(var(--background));
+    border: 2px solid var(--background);
   }
   *::-webkit-scrollbar-track {
     background: transparent;

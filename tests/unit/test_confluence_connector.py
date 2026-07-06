@@ -62,6 +62,19 @@ def test_confluence_credential_ref_resolver_supports_env_and_file(tmp_path, monk
     assert resolver.resolve(str(token_path)).payload == "file-token"
 
 
+def test_confluence_credential_ref_resolver_prefers_explicit_env_mapping(monkeypatch):
+    from fleetent.knowledge_base.connectors.confluence import CredentialRefResolver
+
+    monkeypatch.setenv("CONFLUENCE_TOKEN", "global-token")
+
+    credential = CredentialRefResolver().resolve(
+        "env:CONFLUENCE_TOKEN",
+        env={"CONFLUENCE_TOKEN": "tenant-token"},
+    )
+
+    assert credential.payload == "tenant-token"
+
+
 @respx.mock
 def test_http_confluence_client_lists_space_pages_with_pagination(monkeypatch):
     from fleetent.knowledge_base.connectors.confluence import HttpConfluenceClient

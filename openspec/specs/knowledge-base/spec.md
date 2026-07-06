@@ -71,6 +71,8 @@ and retrieval evaluation for agent long-term context.
 ### Requirement: Manual text ingest and chunk indexing
 系统 SHALL 支持手动导入 text / markdown 内容，生成 deterministic chunks 并写入 vector_store。manual ingest 的文档身份 SHALL 为 `(tenant_id, kb_id, source, filename)`；对同一身份重复导入时，系统 SHALL 以覆盖（overwrite）语义替换旧文档，使该身份在库中始终只保留最新一份，不产生重复 document 或 chunk。
 
+文档写入 SHALL **fail-closed**：全部 chunk 的向量化 SHALL 在任何持久化写（document / chunk / FTS / 向量删旧）之前于内存完成；embedding 失败时 SHALL 使整文档导入失败，库中 MUST NOT 留下该文档的任何残留（document、chunk、FTS、向量均无），overwrite 场景下旧文档 SHALL 保持原样不被破坏。
+
 #### Scenario: Ingest creates document and chunks
 - **WHEN** 调用 `ingest_text(filename, content, tenant_id, kb_id, source, source_url)`
 - **THEN** 系统创建 document record
@@ -83,6 +85,12 @@ and retrieval evaluation for agent long-term context.
 #### Scenario: Chunks are indexed in vector store
 - **WHEN** ingest 创建 chunk
 - **THEN** 系统调用 `vector_store.upsert(chunk_id, chunk_content, knowledge_namespace(tenant_id, kb_id))`
+
+#### Scenario: embedding 故障时整文档干净失败
+- **WHEN** 导入过程中 embedding 调用失败（如 embedding 服务不可达 / 模型不存在）
+- **THEN** 导入以异常失败，错误上抛（不静默）
+- **AND** 库中不存在该文档的任何残留：document 列表无此文档、无 chunk、无 FTS 条目、无向量
+- **AND** 若为同身份重复导入，此前已存在的旧文档及其全部派生数据保持原样可检索
 
 #### Scenario: Ingest is tenant and kb scoped
 - **WHEN** 同一 filename 被导入不同 tenant 或 kb
@@ -1282,7 +1290,7 @@ knowledge-base MAY provide a real LLM extractor smoke path, but it SHALL be expl
 - **AND** 不影响默认测试
 
 ### Requirement: Entity extraction exclusions
-knowledge-base entity extraction SHALL NOT implement graph search、periodic scheduler auto-discovery、entity merge review 或 document ACL。opt-in 的 ingest 后自动入队 extraction 经既有 `kb_ingest_jobs` 队列与 `fleetent kb-worker` 异步执行(事件驱动,非周期 scheduler),不属于本排除项。
+knowledge-base entity extraction SHALL NOT implement graph search、periodic scheduler auto-discovery、entity merge review 或 document ACL。opt-in 的 ingest 后自动入队 extraction 经既有 `kb_ingest_jobs` 队列与 `fleetent kb worker` 异步执行(事件驱动,非周期 scheduler),不属于本排除项。
 
 #### Scenario: Graph search remains out of scope
 - **WHEN** entity extraction change 完成
@@ -1660,10 +1668,10 @@ explicit dependency injection.
 - **AND** Platform YAML config does not need to contain the account email
 
 ### Requirement: Auto-enqueue entity extraction after ingest
-当 KB 的 `extraction_enabled` 为真时,knowledge-base SHALL 在 ingest 写入 document 后,经既有 `kb_ingest_jobs` 入队 seam 异步入队一个 per-document `extraction` job,由 `fleetent kb-worker` 消费执行;入队与执行 SHALL NOT 阻塞 ingest,且单 extraction 失败 SHALL NOT 影响该文档的可检索性。抽取所用模型经 model policy 的 `kb_extraction` task 以 HTTP route 访问,route 由部署配置,on-prem 默认 SHALL 可自托管,不硬编码云默认。
+当 KB 的 `extraction_enabled` 为真时,knowledge-base SHALL 在 ingest 写入 document 后,经既有 `kb_ingest_jobs` 入队 seam 异步入队一个 per-document `extraction` job,由 `fleetent kb worker` 消费执行;入队与执行 SHALL NOT 阻塞 ingest,且单 extraction 失败 SHALL NOT 影响该文档的可检索性。抽取所用模型经 model policy 的 `kb_extraction` task 以 HTTP route 访问,route 由部署配置,on-prem 默认 SHALL 可自托管,不硬编码云默认。
 
 #### Scenario: Worker runs enqueued extraction
-- **WHEN** 存在 `extraction` job 且 `fleetent kb-worker` 在跑
+- **WHEN** 存在 `extraction` job 且 `fleetent kb worker` 在跑
 - **THEN** worker claim 该 job、对目标 document 运行 `run_entity_extraction`、写 entities/mentions/relations、置 job done
 
 #### Scenario: Extraction failure is non-blocking
@@ -1678,4 +1686,38 @@ explicit dependency injection.
 #### Scenario: Default KB does not enqueue
 - **WHEN** 未开启 `extraction_enabled` 的 KB 完成 ingest
 - **THEN** 系统不入队任何 extraction job
+
+### Requirement: KB 自描述并强制 embedding 身份一致
+
+每个 KB SHALL 记录其向量建库时所用的 **embedding 身份**(model 名 + dimensions),并在 ingest 与检索两端**强制一致**,使"用 A 模型建库、用 B 模型检索"这类不一致以**显式错误**暴露,而非静默返回空或噪声。
+
+- KB SHALL 在**首次向量写入**(首次 ingest)时 stamp 当前 embedding 的 `model` 与 `dimensions` 到自身记录(`knowledge_bases`);此后该身份代表该 KB 的向量空间。
+- **ingest** SHALL 校验:写入向量的 embedding 身份须与 KB 已记录的一致;不一致 SHALL 拒绝写入并报清晰错误(避免单个 KB 内混入不可比向量)。
+- **检索** SHALL 校验:query 向量化所用 embedding 身份须与目标 KB 记录的一致;不一致 SHALL **硬失败并报清晰错误**(指出 KB 建库 embedding 与当前检索 embedding),SHALL NOT 静默返回空结果或不可比向量的噪声召回。
+- deterministic(离线/测试)embedding 无真实 model 名时,SHALL 以约定身份(如 `deterministic/<dimensions>`)参与记录与比对。
+
+#### Scenario: 首次 ingest stamp embedding 身份
+- **WHEN** 一个尚无向量的 KB 首次被 ingest
+- **THEN** 该 KB 记录下当次 embedding 的 model 与 dimensions
+
+#### Scenario: ingest 模型不一致被拒绝
+- **WHEN** 对已记录 embedding 身份的 KB 用不同 model/dimensions 再次 ingest
+- **THEN** ingest 被拒绝并报清晰错误,KB 内不混入不可比向量
+
+#### Scenario: 检索 embedding 不匹配硬失败
+- **WHEN** agent 检索某 KB,而当前检索 embedding 的 model/dimensions ≠ 该 KB 记录的身份
+- **THEN** 检索硬失败并报清晰错误,指出建库 embedding 与当前检索 embedding 的差异
+- **AND** 不返回静默空结果,也不返回不可比向量的噪声召回
+
+#### Scenario: 一致则正常检索
+- **WHEN** 检索 embedding 身份与 KB 记录一致
+- **THEN** 检索照常进行,无额外报错
+
+### Requirement: 默认 embedding 配置两端对齐
+
+仓库默认配置 SHALL 使 agent 检索侧 embedding 路由与 standalone KB ingest 侧(`kb-service.yaml`)embedding **指向同一 model + dimensions + endpoint**,使开箱常见场景两端 embedding 天然一致、不触发上面的不匹配错误。
+
+#### Scenario: example 默认两端一致
+- **WHEN** 查看仓库默认 example(agent 模板的 embedding 路由 与 `kb-service.yaml.example` 的 embedding 段)
+- **THEN** 二者的 model 与 dimensions 一致(endpoint 指向同一约定地址)
 

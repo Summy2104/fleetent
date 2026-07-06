@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import io
 import json
 from types import SimpleNamespace
@@ -11,6 +12,7 @@ from fleetent import structured_logging
 from fleetent.config import VectorStoreSettings
 from fleetent.observability import startup_diagnostics
 from fleetent.platform import maintenance as platform_maintenance
+from fleetent.platform.platform_cli import maintenance as platform_maintenance_cli
 from fleetent.vector_store import backend
 
 
@@ -134,12 +136,8 @@ def test_platform_maintenance_summaries_and_confirmation(monkeypatch):
     assert (
         platform_maintenance.compact_memory(dry_run=False, actor="admin").audit_ref == "trace:fixed"
     )
-    assert platform_maintenance.run_kb_sync(
-        connector_id="gdrive", dry_run=False, actor="admin"
-    ).affected_counts == {"connectors": 1}
-    assert platform_maintenance.reindex_vector(
-        namespace="memory", dry_run=False, actor="admin"
-    ).affected_counts == {"namespaces": 1}
+    assert not hasattr(platform_maintenance, "run_kb_sync")
+    assert not hasattr(platform_maintenance, "reindex_vector")
     assert platform_maintenance.run_reflection(
         scope="tenant", dry_run=False, actor="admin"
     ).affected_counts == {"scopes": 1}
@@ -148,6 +146,17 @@ def test_platform_maintenance_summaries_and_confirmation(monkeypatch):
         "command": "reflection run",
         "scope": "tenant",
     }
+
+    parser = argparse.ArgumentParser(prog="fleetent platform")
+    subparsers = parser.add_subparsers(dest="cmd", required=True)
+    platform_maintenance_cli.register(subparsers)
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["maintenance", "kb", "sync", "dry-run", "--connector-id", "gdrive"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            ["maintenance", "vector", "reindex", "--namespace", "memory", "--dry-run"]
+        )
 
 
 async def test_vector_backend_memory_backend_and_pure_helpers(tmp_path):

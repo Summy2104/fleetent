@@ -56,6 +56,7 @@ def client(tmp_path_factory):
     db_path = tmp_path / "users.db"
     apply_migrations(db_path)
     _patch_all_stores(mp, db_path)
+    mp.setattr(api, "kb_engine_list", lambda tenant_id: [{"kb_id": "kb1", "archived": False}])
     app = FastAPI()
     app.include_router(api.router)
     app.include_router(skill_api.router)
@@ -69,6 +70,9 @@ def fresh_client(tmp_path, monkeypatch):
     db_path = tmp_path / "users.db"
     apply_migrations(db_path)
     _patch_all_stores(monkeypatch, db_path)
+    monkeypatch.setattr(
+        api, "kb_engine_list", lambda tenant_id: [{"kb_id": "kb1", "archived": False}]
+    )
     app = FastAPI()
     app.include_router(api.router)
     app.include_router(skill_api.router)
@@ -248,6 +252,64 @@ def test_get_agent_mcp_servers(fresh_client, role):
     resp = fresh_client.get("/admin/agents/ops/mcp", headers=_hdr(token))
     assert resp.status_code == 200
     assert resp.json() == ["github"]
+
+
+def test_agent_mcp_approval_rules_put_get_round_trip(fresh_client):
+    agent = agent_store.create_agent("ops", "Ops v1.", ["shell"])
+    agent_store.bind_mcp_server(agent.id, "github")
+    token, _ = _session_for("admin")
+
+    rules = [
+        {"tool": "create_issue", "when": {"repo": ["acme/app"]}},
+        {"tool": "delete_repo", "when": None},
+    ]
+    put = fresh_client.put(
+        "/admin/agents/ops/mcp/github/approval-rules",
+        headers=_hdr(token),
+        json={"approval_rules": rules},
+    )
+    assert put.status_code == 200
+
+    get = fresh_client.get("/admin/agents/ops/mcp/github/approval-rules", headers=_hdr(token))
+    assert get.status_code == 200
+    assert get.json() == rules
+
+
+def test_agent_mcp_approval_rules_missing_tool_rejected(fresh_client):
+    agent = agent_store.create_agent("ops", "Ops v1.", ["shell"])
+    agent_store.bind_mcp_server(agent.id, "github")
+    token, _ = _session_for("admin")
+    resp = fresh_client.put(
+        "/admin/agents/ops/mcp/github/approval-rules",
+        headers=_hdr(token),
+        json={"approval_rules": [{"when": {"repo": ["acme/app"]}}]},
+    )
+    assert resp.status_code == 422
+
+
+def test_agent_mcp_approval_rules_unbound_server_404(fresh_client):
+    agent_store.create_agent("ops", "Ops v1.", ["shell"])  # github not bound
+    token, _ = _session_for("admin")
+    put = fresh_client.put(
+        "/admin/agents/ops/mcp/github/approval-rules",
+        headers=_hdr(token),
+        json={"approval_rules": []},
+    )
+    assert put.status_code == 404
+    get = fresh_client.get("/admin/agents/ops/mcp/github/approval-rules", headers=_hdr(token))
+    assert get.status_code == 404
+
+
+def test_agent_mcp_approval_rules_viewer_forbidden(fresh_client):
+    agent = agent_store.create_agent("ops", "Ops v1.", ["shell"])
+    agent_store.bind_mcp_server(agent.id, "github")
+    token, _ = _session_for("viewer")
+    resp = fresh_client.put(
+        "/admin/agents/ops/mcp/github/approval-rules",
+        headers=_hdr(token),
+        json={"approval_rules": []},
+    )
+    assert resp.status_code == 403
 
 
 @pytest.mark.parametrize("path", ["users", "groups", "mcp"])

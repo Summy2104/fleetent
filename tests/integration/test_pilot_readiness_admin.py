@@ -50,11 +50,11 @@ def test_maintenance_memory_compact_apply_outputs_audit_reference(monkeypatch):
     assert "audit_ref=trace-memory-1" in out
 
 
-def test_kb_sync_execute_requires_yes():
+def test_kb_sync_command_is_no_longer_supported():
     _, err, code = run_admin("maintenance", "kb", "sync", "execute", "--connector-id", "gdrive")
 
     assert code != 0
-    assert "requires --yes" in err
+    assert "invalid choice" in err
 
 
 def test_kb_connector_execute_sync_command_removed(monkeypatch):

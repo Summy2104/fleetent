@@ -62,7 +62,7 @@ def test_load_active_unpacks_file_fields(agents):
     snap = agent_runtime.load_active("analyst")
     assert snap is not None
     assert snap.name == "analyst"
-    assert snap.agent_id == "analyst"  # identity is the name (string)
+    assert snap.agent_name == "analyst"  # identity is the name (string)
     assert snap.version == 3
     assert snap.system_prompt == "You analyze."
     assert snap.allowed_tools == ["shell", "github__*"]

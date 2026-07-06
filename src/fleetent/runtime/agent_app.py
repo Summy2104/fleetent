@@ -12,11 +12,11 @@ are served only when a port is given.
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
 import json
 import os
 import signal
+import threading
 import time
 from collections.abc import Awaitable
 from dataclasses import dataclass
@@ -63,45 +63,6 @@ class ApprovalRequest(BaseModel):
     approver_user_id: str = "anonymous"
 
 
-class ImAttachmentRequest(BaseModel):
-    kind: str
-    data_b64: str | None = None
-    mime: str
-    filename: str = ""
-    note: str = ""
-
-
-class ImSessionContextRequest(BaseModel):
-    platform: str
-    sender_id: str
-    sender_name: str = ""
-    chat_type: str = "dm"
-    channel_name: str = ""
-    was_mentioned: bool = False
-    thread_root: str = ""
-
-
-class ImRouteRequest(BaseModel):
-    platform: str
-    session_id: str
-    user_id: str
-    text: str
-    channel_id: str = ""
-    workspace_id: str = ""
-    agent_name: str = ""
-    session_context: ImSessionContextRequest | None = None
-    attachments: list[ImAttachmentRequest] = []
-
-
-class ImReply(BaseModel):
-    text: str
-    blocks: list[dict[str, Any]] | None = None
-
-
-class ImRouteResponse(BaseModel):
-    replies: list[ImReply]
-
-
 @dataclass
 class AgentRuntime:
     """Handle for one running agent process: its definition, IM supervisor, app."""
@@ -137,7 +98,7 @@ async def _stop_step(name: str, coro: Awaitable[None], timeout: float = 10.0) ->
     try:
         await asyncio.wait_for(coro, timeout)
     except Exception as exc:  # noqa: BLE001 — containment: a teardown error never propagates
-        _logger.warn("shutdown_step_failed", step=name, error=str(exc))
+        _logger.warn("shutdown_step_failed", step=name, exception=exc)
 
 
 async def _drain_and_close(rt: AgentRuntime, drain_timeout: float) -> None:
@@ -165,13 +126,120 @@ async def _drain_and_close(rt: AgentRuntime, drain_timeout: float) -> None:
     # down every host (incl. per-user stdio subprocesses) on its own owner task (D4).
     await _stop_step("mcp_stdio_reaper", mcp.stop_stdio_reaper())
     await _stop_step("mcp_sessions", mcp.aclose_all())
+    # AAA-8204 #4: aclose_all only closes stdin; npm/node/chromium MCP subprocesses (+ their
+    # grandchildren) may not exit, leaving 8 waitpid reader threads blocked so the interpreter
+    # never exits and node SIGKILLs the agent every restart. Deterministically drive exit:
+    # force-kill the descendant process tree (freeing those threads) + arm an os._exit(0)
+    # watchdog. The graceful drain path MUST exit 0 (AGENTS.md owner-task contract).
+    _drive_exit_after_drain()
 
 
-def resolve_home(agent_id: str, home: str | Path | None = None) -> Path:
+# AAA-8204 #4 graceful-exit timings: SIGTERM→grace→SIGKILL for residual MCP subprocess trees,
+# then an os._exit(0) fallback if the interpreter still has not exited on its own.
+_SUBPROCESS_TERM_GRACE = 2.0
+_HARD_EXIT_DEADLINE = 5.0
+
+
+def _pid_alive(pid: int) -> bool:
+    """Whether ``pid`` is still alive (signal 0 probe). False on any OS error."""
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _list_descendant_pids(pid: int) -> list[int]:
+    """All descendant PIDs of ``pid`` (children, grandchildren, …), breadth-first.
+
+    Linux ``/proc`` PPID walk. On a host without a readable ``/proc`` (macOS dev, sandbox)
+    this returns ``[]`` — read-only and never raises — and the os._exit watchdog still
+    guarantees the process exits. Used at shutdown to reap stdio MCP subprocess trees.
+    """
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return []
+    children: dict[int, list[int]] = {}
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        try:
+            with open(f"/proc/{entry}/stat") as fh:
+                content = fh.read()
+            # stat is "pid (comm) state ppid ..."; comm may contain spaces/parens, so parse
+            # the fields after the LAST ')'. ppid is the second of those fields.
+            ppid = int(content[content.rfind(")") + 2 :].split()[1])
+        except (OSError, ValueError, IndexError):
+            continue
+        children.setdefault(ppid, []).append(int(entry))
+    out: list[int] = []
+    queue = list(children.get(pid, []))
+    while queue:
+        cur = queue.pop(0)
+        out.append(cur)
+        queue.extend(children.get(cur, []))
+    return out
+
+
+def _terminate_descendant_processes(grace: float) -> None:
+    """SIGTERM then (after ``grace``) SIGKILL the agent's whole descendant process tree.
+
+    Frees the waitpid reader threads blocked on stdio MCP subprocesses (and their npm/node/
+    chromium grandchildren), which otherwise keep the interpreter from exiting. Each signal
+    is contained per-PID so one unkillable/permission-denied process never blocks the rest
+    or changes the exit path. SIGTERM is sent deepest-first so a parent cannot respawn.
+    """
+    pids = _list_descendant_pids(os.getpid())
+    if not pids:
+        return
+    for pid in reversed(pids):
+        with contextlib.suppress(OSError):
+            os.kill(pid, signal.SIGTERM)
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline:
+        if not any(_pid_alive(pid) for pid in pids):
+            return
+        time.sleep(0.05)
+    for pid in reversed(pids):
+        with contextlib.suppress(OSError):
+            os.kill(pid, signal.SIGKILL)
+
+
+def _arm_hard_exit_watchdog(deadline: float) -> None:
+    """Arm a daemon timer that ``os._exit(0)`` if the process is still alive after ``deadline``.
+
+    Daemon so the timer itself never keeps the process up: if the interpreter exits cleanly
+    first, the timer is reaped with it. This is the last-resort guarantee that a graceful
+    drain exits 0 even when some teardown ignored cancellation (AAA-8204 #4).
+    """
+    timer = threading.Timer(deadline, lambda: os._exit(0))
+    timer.daemon = True
+    timer.start()
+
+
+def _drive_exit_after_drain(
+    grace: float = _SUBPROCESS_TERM_GRACE, hard_deadline: float = _HARD_EXIT_DEADLINE
+) -> None:
+    """Deterministically drive process exit after drain (AAA-8204 #4).
+
+    First force-kill the residual MCP subprocess tree (bulkheaded: a failure here is logged,
+    never raised, and never blocks the exit), then arm the os._exit(0) watchdog. Together
+    these cover both diagnosed causes — lingering non-daemon waitpid threads and a teardown
+    that ignored cancellation.
+    """
+    try:
+        _terminate_descendant_processes(grace)
+    except Exception as exc:  # noqa: BLE001 — contained: the watchdog still guarantees exit
+        _logger.warn("drive_exit_terminate_failed", exception=exc)
+    _arm_hard_exit_watchdog(hard_deadline)
+
+
+def resolve_home(agent_name: str, home: str | Path | None = None) -> Path:
     """Resolve the agent home: explicit ``home`` wins, else default-tenant home."""
     if home is not None:
         return Path(home)
-    return paths.agent_home_dir(agent_id)
+    return paths.agent_home_dir(agent_name)
 
 
 def _validate_tui_token(authorization_header: str) -> Principal | None:
@@ -258,11 +326,7 @@ def _configure_logging_from_agent(agent: AgentFile, home_dir: Path) -> None:
     resolves against ``home_dir`` (anchored like agent.yaml/.env, never the process CWD);
     an absolute ``directory`` is used as-is.
     """
-    import logging
-
-    import structlog
-
-    from fleetent.structured_logging import configure_structured_logging
+    from fleetent.logging_setup import setup_process_logging
 
     log = agent.observability.logging
     if log.directory:
@@ -270,37 +334,16 @@ def _configure_logging_from_agent(agent: AgentFile, home_dir: Path) -> None:
         resolved_dir = configured if configured.is_absolute() else home_dir / configured
     else:
         resolved_dir = home_dir / "data" / "logs"
-    configure_structured_logging(
+    setup_process_logging(
         console_level=log.console_level,
         file_level=log.file_level,
         directory=resolved_dir,
-    )
-    shared_processors: list[structlog.types.Processor] = [
-        structlog.contextvars.merge_contextvars,
-        structlog.stdlib.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-    ]
-    if agent.log_format == "json":
-        renderer: structlog.types.Processor = structlog.processors.JSONRenderer()
-    else:
-        renderer = structlog.dev.ConsoleRenderer()
-    structlog.configure(
-        processors=shared_processors + [renderer],
-        wrapper_class=structlog.make_filtering_bound_logger(logging.DEBUG),
-        context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
-    logging.basicConfig(
-        format="%(message)s",
-        level=logging.INFO,
-        handlers=[logging.StreamHandler()],
+        log_format=agent.log_format,
     )
 
 
 def _tenant_router_root_for_agent_data_dir(
-    data_dir: Path, *, agent_id: str, tenant_id: str
+    data_dir: Path, *, agent_name: str, tenant_id: str
 ) -> Path:
     """Return Fleetent home root for a tenant-first agent ``data/`` directory.
 
@@ -310,7 +353,7 @@ def _tenant_router_root_for_agent_data_dir(
     agent_home = data_dir.parent
     if (
         data_dir.name == "data"
-        and agent_home.name == agent_id
+        and agent_home.name == agent_name
         and agent_home.parent.name == "agents"
         and agent_home.parent.parent.name == tenant_id
         and agent_home.parent.parent.parent.name == "tenants"
@@ -347,7 +390,7 @@ def _configure_knowledge_provider(agent: AgentFile, *, long_term_ctx: Any) -> No
     )
 
 
-def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "default") -> None:
+def _init_agent_db_schema(data_dir: Path, *, agent_name: str, tenant_id: str = "default") -> None:
     """Bootstrap all agent-side DB tables anchored on data_dir.
 
     All per-agent tables land in agent_state.db via the unified AGENT_STATE_MIGRATIONS;
@@ -357,7 +400,6 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     from fleetent import reflection, schedule_store
     from fleetent.governance import approval_request_store, approval_store
     from fleetent.governance import tool_auto_approvals_store as allowlist_store
-    from fleetent.im_gateway import outbound_queue_store
     from fleetent.knowledge_base import runtime as kb_runtime
     from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
     from fleetent.memory import agent_memory as agent_memory_module
@@ -376,7 +418,7 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     router = TenantRouter(
         SQLiteTenantBackend(
             data_dir=_tenant_router_root_for_agent_data_dir(
-                data_dir, agent_id=agent_id, tenant_id=tenant_id
+                data_dir, agent_name=agent_name, tenant_id=tenant_id
             )
         )
     )
@@ -384,7 +426,7 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     kb_db = tenant_scope.open_kb_db(KB_MIGRATIONS)
     kb_runtime.set_database(kb_db)
     kb_runtime.set_vector_backend(tenant_scope.kb_vector_backend)
-    agent_scope = router.agent_scope(tenant_id, agent_id)
+    agent_scope = router.agent_scope(tenant_id, agent_name)
     agent_state_db = agent_scope.open_state_db(AGENT_STATE_MIGRATIONS)
     # agent_memory_items now live in agent_state.db (wire-agent-memory D3).
     agent_memory_module.set_agent_memory_db(
@@ -403,7 +445,6 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
     runtime_context.set_state_db(agent_state_db)
     sub_agent_lifecycle.set_state_db(agent_state_db)
     schedule_store.set_state_db(agent_state_db)
-    outbound_queue_store.set_state_db(agent_state_db)
     # unified-file-exchange: wire the artifact ledger + per-scope hard-link views root
     # (data_dir is <agent_home>/data, so the exchange tree lives under data_dir.parent).
     from fleetent import artifact_exchange
@@ -428,7 +469,45 @@ def _init_agent_db_schema(data_dir: Path, *, agent_id: str, tenant_id: str = "de
         from fleetent.integrations.mcp import client as _mcp_client
         from fleetent.integrations.mcp.managed_oauth import wire_managed_oauth
 
-        wire_managed_oauth(_loopback_url, agent_id, _tui_token, _mcp_client.get_registered_server)
+        wire_managed_oauth(
+            _loopback_url,
+            agent_name,
+            _tui_token,
+            _mcp_client.get_registered_server,
+        )
+
+    # agent-hosted-im (Group 3.4): the agent self-hosts its IM connection in all modes, so it
+    # resolves inbound IM identities in-process. Under managed placement this wires the loopback-
+    # backed identity/address resolvers (no-op under standalone → native-id passthrough).
+    _wire_managed_im_resolvers(agent_name, tenant_id)
+
+
+def _wire_managed_im_resolvers(agent_id: str, tenant_id: str) -> None:
+    """Inject the loopback-backed IM identity/address resolvers when node-managed.
+
+    No-op under standalone (no loopback signal) so ``resolve_identity`` keeps native-id
+    passthrough and ``resolve_addresses`` stays empty.
+    """
+    from fleetent import runtime_placement
+    from fleetent.im_gateway import access
+
+    if not runtime_placement.is_managed():
+        return
+    loopback = os.environ.get("FLEETENT_NODE_LOOPBACK_URL", "").strip()
+    tui = os.environ.get("FLEETENT_TUI_TOKEN", "").strip()
+    if not (loopback and tui):
+        return
+    access.set_im_identity_resolver(
+        access.AgentIdentityResolver(
+            loopback_url=loopback, tui_token=tui, agent_name=agent_id, tenant_id=tenant_id
+        )
+    )
+    access.set_im_address_resolver(
+        access.AgentAddressResolver(loopback_url=loopback, tui_token=tui, agent_name=agent_id)
+    )
+    access.set_im_link_confirmer(
+        access.AgentLinkConfirmer(loopback_url=loopback, tui_token=tui, agent_name=agent_id)
+    )
 
 
 async def _start_infra(
@@ -445,7 +524,7 @@ async def _start_infra(
     (sandbox-skill-mount-per-agent-root). None derives it from `data_dir.parent`
     (== home_dir, mirroring the MCP `agent_home` derivation below).
     """
-    _init_agent_db_schema(data_dir, agent_id=agent.name, tenant_id=agent.tenant_id)
+    _init_agent_db_schema(data_dir, agent_name=agent.name, tenant_id=agent.tenant_id)
     from fleetent.runtime.approval_resume import reconcile_expired_approvals
 
     await reconcile_expired_approvals()
@@ -474,7 +553,7 @@ async def _start_infra(
         try:
             await cleanup_orphans(backend)
         except Exception as exc:  # noqa: BLE001 — orphan cleanup must not abort boot
-            _logger.warn("agent_runtime_sandbox_cleanup_failed", error=str(exc))
+            _logger.warn("agent_runtime_sandbox_cleanup_failed", exception=exc)
         start_idle_sweep()
     if agent.mcp_servers:
         from fleetent.integrations import mcp as mcp_client
@@ -491,7 +570,7 @@ async def _start_infra(
             # subprocess pool (no-op unless a per-user oauth stdio server is configured).
             mcp_client.start_stdio_reaper()
         except Exception as exc:  # noqa: BLE001 — MCP unavailable must not abort boot
-            _logger.warn("agent_runtime_mcp_register_failed", error=str(exc))
+            _logger.warn("agent_runtime_mcp_register_failed", exception=exc)
     session_mgr.start_session_maintenance()
     # user-memory-v2: start the short-term facts archive sweep. Best-effort — a
     # failure here is logged and never aborts boot (the DB/backend were wired in
@@ -503,7 +582,7 @@ async def _start_infra(
             facts_store._facts_database(), facts_store._facts_vector_backend
         )
     except Exception as exc:  # noqa: BLE001 — facts sweep must not abort boot
-        _logger.warn("agent_runtime_facts_sweep_start_failed", error=str(exc))
+        _logger.warn("agent_runtime_facts_sweep_start_failed", exception=exc)
     reflection_settings = getattr(agent, "reflection", None)
     if reflection_settings is not None and getattr(reflection_settings, "enabled", False) is True:
         from fleetent.reflection import scheduler as reflection_scheduler
@@ -526,7 +605,7 @@ async def _start_infra(
         if marked:
             _logger.info("session_resume_pending_marked", count=len(marked))
     except Exception as exc:  # noqa: BLE001 — recovery scan must not abort boot
-        _logger.warn("session_resume_scan_failed", error=str(exc))
+        _logger.warn("session_resume_scan_failed", exception=exc)
 
 
 async def _start_scheduler(agent: AgentFile) -> Any:
@@ -554,7 +633,7 @@ async def _start_scheduler(agent: AgentFile) -> Any:
 
 
 async def boot(
-    agent_id: str,
+    agent_name: str,
     *,
     home: str | Path | None = None,
     port: int | None = None,
@@ -572,7 +651,7 @@ async def boot(
     from fleetent.skills import scan as scan_skills
     from fleetent.tools.plugin_loader import load_plugins
 
-    home_dir = resolve_home(agent_id, home)
+    home_dir = resolve_home(agent_name, home)
     env_path = home_dir / ".env"
     if env_path.exists():
         from dotenv import load_dotenv
@@ -693,7 +772,7 @@ def _stop_running(home_dir: Path, *, drain_timeout: float = 30.0) -> None:
 
 
 async def serve(
-    agent_id: str,
+    agent_name: str,
     *,
     port: int | None = None,
     home: str | Path | None = None,
@@ -706,7 +785,7 @@ async def serve(
     process runs IM-only with no HTTP listener. On SIGUSR1 the process drains in-flight
     requests (up to drain_timeout) then exits.
     """
-    home_dir = resolve_home(agent_id, home)
+    home_dir = resolve_home(agent_name, home)
     home_dir.mkdir(parents=True, exist_ok=True)
     pid_file = home_dir / ".fleetent.pid"
     pid_file.write_text(str(os.getpid()))
@@ -716,7 +795,7 @@ async def serve(
     loop.add_signal_handler(signal.SIGUSR1, drain_event.set)
 
     try:
-        rt = await boot(agent_id, home=home, port=port, start_im=start_im)
+        rt = await boot(agent_name, home=home, port=port, start_im=start_im)
         try:
             if port is not None:
                 import uvicorn
@@ -892,43 +971,6 @@ def build_app(agent_name: str) -> FastAPI:
 
         return StreamingResponse(_stream(), media_type="text/event-stream")
 
-    @app.post("/im/route")
-    async def im_route(
-        req: ImRouteRequest,
-        principal: Principal = Depends(_authenticate),  # noqa: B008
-    ) -> ImRouteResponse:
-        from fleetent.im_gateway import normalizer
-
-        agent = agent_config.current().get(agent_name)
-        agent_tenant = agent.tenant_id if agent is not None else "default"
-        if not _check_tenant(principal, agent_tenant):
-            raise HTTPException(status_code=403, detail="cross-tenant access denied")
-        replies: list[ImReply] = []
-
-        async def _reply(text: str, blocks: list[dict[str, Any]] | None = None) -> None:
-            replies.append(ImReply(text=text, blocks=blocks))
-
-        await normalizer.route(
-            normalizer.NormalizedMessage(
-                platform=req.platform,
-                session_id=req.session_id,
-                user_id=req.user_id,
-                text=req.text,
-                attachments=_deserialize_im_attachments(req.attachments),
-                reply_func=_reply,
-                channel_id=req.channel_id,
-                workspace_id=req.workspace_id,
-                agent_name=req.agent_name or agent_name,
-                session_context=(
-                    normalizer.SessionContext(**req.session_context.model_dump())
-                    if req.session_context is not None
-                    else None
-                ),
-            ),
-            principal=principal,
-        )
-        return ImRouteResponse(replies=replies)
-
     @app.post("/webhook/{source_id}", status_code=202)
     async def webhook(
         source_id: str,
@@ -997,7 +1039,7 @@ def build_app(agent_name: str) -> FastAPI:
             # Directed-reach DM to reply_target; notify_user is itself a no-op in non-managed
             # runtimes, so this collapses to no-op there. No reply_target = no delivery.
             if reply_target:
-                outbound_connectors.notify_user(reply_target, reply_text, blocks=blocks)
+                await outbound_connectors.notify_user(reply_target, reply_text, blocks=blocks)
 
         msg = normalizer.NormalizedMessage(
             platform="webhook",
@@ -1068,26 +1110,3 @@ def build_app(agent_name: str) -> FastAPI:
             await transport.close()
 
     return app
-
-
-def _deserialize_im_attachments(attachments: list[ImAttachmentRequest]) -> list[Any]:
-    from fleetent.im_gateway.normalizer import FileAttachment
-
-    decoded: list[Any] = []
-    for attachment in attachments:
-        if attachment.kind == "image":
-            if attachment.data_b64 is None:
-                continue
-            decoded.append((base64.b64decode(attachment.data_b64), attachment.mime))
-            continue
-        if attachment.kind == "file":
-            payload = base64.b64decode(attachment.data_b64) if attachment.data_b64 else None
-            decoded.append(
-                FileAttachment(
-                    data=payload,
-                    mime=attachment.mime,
-                    filename=attachment.filename,
-                    note=attachment.note,
-                )
-            )
-    return decoded

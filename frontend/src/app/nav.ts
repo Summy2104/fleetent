@@ -1,34 +1,34 @@
 import {
   BarChart3,
+  BookOpen,
   Bot,
   Boxes,
   Building2,
-  BookOpen,
   Cpu,
-  History,
+  type LucideIcon,
   MessagesSquare,
   ScrollText,
   Server,
   Sparkles,
   Users,
   UsersRound,
-  type LucideIcon,
-} from 'lucide-react';
+  Webhook,
+} from 'lucide-react'
 
-import type { MessageKey } from '@/i18n';
+import type { MessageKey } from '@/i18n'
 
 export type NavItem = {
-  to: string;
+  to: string
   /** i18n key resolved at render time（见 `src/i18n/messages.ts`）。 */
-  labelKey: MessageKey;
-  icon: LucideIcon;
-};
+  labelKey: MessageKey
+  icon: LucideIcon
+}
 
 export type NavGroup = {
   /** 分组标题的 i18n key；无标题分组为 null。 */
-  labelKey: MessageKey | null;
-  items: NavItem[];
-};
+  labelKey: MessageKey | null
+  items: NavItem[]
+}
 
 /** Keep the existing 11 features; only regroup them for the new visual shell. */
 export const NAV_GROUPS: NavGroup[] = [
@@ -37,7 +37,6 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/agents', labelKey: 'nav.agents', icon: Bot },
       { to: '/chat', labelKey: 'nav.chat', icon: MessagesSquare },
-      { to: '/sessions', labelKey: 'nav.sessions', icon: History },
     ],
   },
   {
@@ -52,6 +51,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/providers', labelKey: 'nav.providers', icon: Cpu },
       { to: '/mcp', labelKey: 'nav.mcp', icon: Boxes },
+      { to: '/webhooks', labelKey: 'nav.webhooks', icon: Webhook },
       { to: '/nodes', labelKey: 'nav.nodes', icon: Server },
     ],
   },
@@ -65,9 +65,9 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: '/audit', labelKey: 'nav.audit', icon: ScrollText },
     ],
   },
-];
+]
 
 /** 路由路径 → 页面标题 i18n key（Topbar 标题复用导航词条）。 */
 export const NAV_TITLE_KEYS: Record<string, MessageKey> = Object.fromEntries(
   NAV_GROUPS.flatMap((group) => group.items).map((item) => [item.to, item.labelKey])
-);
+)

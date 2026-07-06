@@ -122,6 +122,55 @@ def test_validate_kb_service_boot_requires_embedding_and_connector_secrets(
         validate_kb_service_boot(config)
 
     monkeypatch.setenv("KB_CONFLUENCE_TOKEN", "token-value")
+    monkeypatch.setenv("KB_CONFLUENCE_USERNAME", "bot@example.com")
+    validate_kb_service_boot(config)
+
+
+def test_validate_kb_service_boot_requires_granular_connector_env_credentials(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent.knowledge_base.service_config import (
+        load_kb_service_config,
+        validate_kb_service_boot,
+    )
+
+    path = tmp_path / "kb-service.yaml"
+    doc = _service_doc()
+    doc["connectors"] = [  # type: ignore[index]
+        {
+            "id": "drive-a",
+            "type": "google_drive",
+            "enabled": True,
+            "kb_id": "kb-a",
+            "folder_id": "folder-1",
+            "recursive": True,
+            "access_token_env": "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN",
+            "refresh_token_env": "FLEETENT_GOOGLE_DRIVE_REFRESH_TOKEN",
+            "client_id_env": "FLEETENT_GOOGLE_DRIVE_CLIENT_ID",
+            "client_secret_env": "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET",
+            "token_uri_env": "FLEETENT_GOOGLE_DRIVE_TOKEN_URI",
+        }
+    ]
+    _write_yaml(path, doc)
+    config = load_kb_service_config(path)
+
+    for env_name in (
+        "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN",
+        "FLEETENT_GOOGLE_DRIVE_REFRESH_TOKEN",
+        "FLEETENT_GOOGLE_DRIVE_CLIENT_ID",
+        "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET",
+        "FLEETENT_GOOGLE_DRIVE_TOKEN_URI",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+
+    with pytest.raises(ValueError, match="FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN"):
+        validate_kb_service_boot(config)
+
+    monkeypatch.setenv("FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN", "access-token")
+    monkeypatch.setenv("FLEETENT_GOOGLE_DRIVE_REFRESH_TOKEN", "refresh-token")
+    monkeypatch.setenv("FLEETENT_GOOGLE_DRIVE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("FLEETENT_GOOGLE_DRIVE_TOKEN_URI", "https://oauth.example/token")
     validate_kb_service_boot(config)
 
 
@@ -157,6 +206,82 @@ def test_validate_kb_service_boot_requires_embedding_and_extraction_api_keys(
         validate_kb_service_boot(config)
 
     monkeypatch.setenv("FLEETENT_KB_EXTRACTION_API_KEY", "extract-secret")
+    validate_kb_service_boot(config)
+
+
+def test_kb_service_config_parses_optional_rerank_section() -> None:
+    from fleetent.knowledge_base.service_config import KBServiceConfig
+
+    config = KBServiceConfig.model_validate(
+        {
+            "service": {
+                "tenant_id": "tenant-a",
+                "service_key_ref": "env:FLEETENT_KB_SERVICE_KEY",
+            },
+            "data": {"home": "./data"},
+            "embedding": {
+                "endpoint": "http://embed.example/v1/embeddings",
+                "model": "kb-embed",
+                "dimensions": 384,
+            },
+            "rerank": {
+                "backend": "http",
+                "endpoint": "http://rerank.example/v1/rerank",
+                "model": "bge-reranker",
+                "api_key_env": "FLEETENT_KB_RERANK_API_KEY",
+            },
+        }
+    )
+
+    assert config.rerank.backend == "http"
+    assert config.rerank.endpoint == "http://rerank.example/v1/rerank"
+    assert config.rerank.model == "bge-reranker"
+    assert config.rerank.api_key_env == "FLEETENT_KB_RERANK_API_KEY"
+
+    defaulted = KBServiceConfig.model_validate(
+        {
+            "service": {
+                "tenant_id": "tenant-a",
+                "service_key_ref": "env:FLEETENT_KB_SERVICE_KEY",
+            },
+            "data": {"home": "./data"},
+            "embedding": {
+                "endpoint": "http://embed.example/v1/embeddings",
+                "model": "kb-embed",
+                "dimensions": 384,
+            },
+        }
+    )
+
+    assert defaulted.rerank.backend == "disabled"
+
+
+def test_validate_kb_service_boot_requires_rerank_api_key_when_enabled(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent.knowledge_base.service_config import (
+        load_kb_service_config,
+        validate_kb_service_boot,
+    )
+
+    path = tmp_path / "kb-service.yaml"
+    doc = _service_doc()
+    doc["connectors"] = []  # type: ignore[index]
+    doc["rerank"] = {  # type: ignore[index]
+        "backend": "http",
+        "endpoint": "http://rerank.example/v1/rerank",
+        "model": "bge-reranker",
+        "api_key_env": "FLEETENT_KB_RERANK_API_KEY",
+    }
+    _write_yaml(path, doc)
+
+    config = load_kb_service_config(path)
+
+    monkeypatch.delenv("FLEETENT_KB_RERANK_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="FLEETENT_KB_RERANK_API_KEY"):
+        validate_kb_service_boot(config)
+
+    monkeypatch.setenv("FLEETENT_KB_RERANK_API_KEY", "rerank-secret")
     validate_kb_service_boot(config)
 
 
@@ -368,6 +493,155 @@ def test_standalone_import_triggers_local_extraction_and_writes_graph(
     assert kb_db.execute("SELECT COUNT(*) AS count FROM kb_relations").fetchone()["count"] == 1
 
 
+def test_standalone_extract_cli_backfills_graph_and_planner_search_hits_chunk(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent import kb_ingest_jobs, vector_store
+    from fleetent.knowledge_base import extract_cli, extraction, serve, worker
+    from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
+    from fleetent.knowledge_base.management.runtime import create_knowledge_base
+    from fleetent.knowledge_base.service_config import load_kb_service_config
+
+    path = tmp_path / "kb-service.yaml"
+    doc = _service_doc()
+    doc["extraction"] = {"enabled": True, "endpoint": "inline://test", "model": "deterministic"}
+    _write_yaml(path, doc)
+    config = load_kb_service_config(path)
+    queue_url = config.queue_database_url()
+    data_dir = config.data_dir()
+
+    async def embed_text(text: str) -> list[float]:
+        return [float(len(text)), 0.0]
+
+    async def fake_run_entity_extraction(
+        tenant_id: str,
+        kb_id: str,
+        document_id: str | None = None,
+        extractor: str = "deterministic",
+    ):
+        assert extractor == "model_policy"
+        return await extraction.run_entity_extraction(
+            tenant_id,
+            kb_id,
+            document_id=document_id,
+            extractor="deterministic",
+        )
+
+    monkeypatch.setattr(vector_store, "embed_text", embed_text)
+    monkeypatch.setattr(worker.kb_runtime, "run_entity_extraction", fake_run_entity_extraction)
+    create_knowledge_base(
+        "tenant-a",
+        "kb-a",
+        "Standalone KB",
+        extraction_enabled=False,
+        database=worker._knowledge_database(
+            "tenant-a", data_dir=data_dir, migrations=KB_MIGRATIONS
+        ),
+    )
+
+    kb_db = worker._knowledge_database("tenant-a", data_dir=data_dir, migrations=KB_MIGRATIONS)
+    import_job = kb_ingest_jobs.enqueue_job(
+        job_type="import_document",
+        tenant_id="tenant-a",
+        kb_id="kb-a",
+        connector_ref={
+            "source": "graph.md",
+            "content": (
+                "Customer: Acme\nSystem: Billing API\nDepends on: Billing API -> Data Warehouse"
+            ),
+            "document_format": "markdown",
+        },
+        database_url=queue_url,
+    )
+
+    ingest_result = worker.run_once(queue_database_url=queue_url, data_dir=data_dir)
+
+    assert ingest_result == {"job_id": import_job["id"], "status": "done"}
+    assert kb_db.execute("SELECT COUNT(*) AS count FROM kb_entities").fetchone()["count"] == 0
+
+    extract_cli.main(["--config", str(path), "--kb", "kb-a"])
+
+    extraction_jobs = kb_ingest_jobs.list_jobs(
+        tenant_id="tenant-a",
+        kb_id="kb-a",
+        database_url=queue_url,
+    )
+    extraction_job = next(job for job in extraction_jobs if job["job_type"] == "extraction")
+    extraction_result = worker.run_once(queue_database_url=queue_url, data_dir=data_dir)
+    document_id = kb_db.execute(
+        """
+        SELECT id
+        FROM knowledge_documents
+        WHERE tenant_id = :tenant_id AND kb_id = :kb_id
+        """,
+        {"tenant_id": "tenant-a", "kb_id": "kb-a"},
+    ).fetchone()["id"]
+
+    assert extraction_result == {"job_id": extraction_job["id"], "status": "done"}
+    assert (
+        kb_db.execute(
+            """
+            SELECT extraction_enabled
+            FROM knowledge_bases
+            WHERE tenant_id = :tenant_id AND kb_id = :kb_id
+            """,
+            {"tenant_id": "tenant-a", "kb_id": "kb-a"},
+        ).fetchone()["extraction_enabled"]
+        == 1
+    )
+    assert kb_db.execute("SELECT COUNT(*) AS count FROM kb_entities").fetchone()["count"] >= 3
+    assert kb_db.execute("SELECT COUNT(*) AS count FROM kb_relations").fetchone()["count"] == 1
+
+    monkeypatch.setenv("FLEETENT_KB_SERVICE_KEY", "svc-test")
+    app = serve.create_app(
+        serve.KBServeConfig(
+            tenant_id="tenant-a",
+            service_key_ref="env:FLEETENT_KB_SERVICE_KEY",
+            data_dir=data_dir,
+            queue_database_url=queue_url,
+        )
+    )
+    with TestClient(app, raise_server_exceptions=True) as client:
+        response = client.post(
+            "/search",
+            json={
+                "principal": {"user_id": "user-1", "tenant_id": "tenant-a"},
+                "query": "Billing API dependency",
+                "kb_ids": ["kb-a"],
+                "limit": 1,
+                "use_planner": True,
+            },
+            headers={
+                "Authorization": "Bearer svc-test",
+                "X-Fleetent-Principal": '{"user_id":"user-1","tenant_id":"tenant-a"}',
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["chunks"] == [
+            {
+                "id": f"{document_id}:chunk:0",
+                "document_id": document_id,
+                "tenant_id": "tenant-a",
+                "kb_id": "kb-a",
+                "filename": "graph.md",
+                "content": (
+                    "Customer: Acme\nSystem: Billing API\nDepends on: Billing API -> Data Warehouse"
+                ),
+                "position": 0,
+                "score": 0.0,
+                "source": "graph.md",
+                "source_url": None,
+                "metadata": {
+                    "document_format": "markdown",
+                    "section_level": "0",
+                    "section_path": "body",
+                    "section_title": "body",
+                },
+            }
+        ]
+
+
 def test_standalone_sweep_enqueues_due_connectors_without_platform_cron(tmp_path) -> None:
     from fleetent import kb_ingest_jobs
     from fleetent.knowledge_base.service_config import load_kb_service_config
@@ -379,6 +653,243 @@ def test_standalone_sweep_enqueues_due_connectors_without_platform_cron(tmp_path
     queue_url = config.queue_database_url()
 
     sweep(config, queue_database_url=queue_url)
+
+    job = kb_ingest_jobs.claim_next_job(database_url=queue_url)
+    assert job is not None
+    payload = json.loads(str(job["connector_ref"]))
+    assert payload["connector_id"] == "drive-a"
+
+
+def test_kb_serve_upload_requires_auth_valid_kb_and_respects_max_upload_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent.knowledge_base import serve
+    from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
+    from fleetent.knowledge_base.management.runtime import create_knowledge_base
+    from fleetent.knowledge_base.worker import _knowledge_database
+
+    monkeypatch.setenv("FLEETENT_KB_SERVICE_KEY", "svc-test")
+    data_dir = tmp_path / "data"
+    queue_url = f"sqlite:///{data_dir / 'kb_ingest_queue.db'}"
+    create_knowledge_base(
+        "tenant-a",
+        "kb-a",
+        "Standalone KB",
+        database=_knowledge_database("tenant-a", data_dir=data_dir, migrations=KB_MIGRATIONS),
+    )
+
+    app = serve.create_app(
+        serve.KBServeConfig(
+            tenant_id="tenant-a",
+            service_key_ref="env:FLEETENT_KB_SERVICE_KEY",
+            data_dir=data_dir,
+            queue_database_url=queue_url,
+            max_upload_bytes=5,
+        )
+    )
+    with TestClient(app, raise_server_exceptions=True) as client:
+        no_auth = client.post(
+            "/kb/kb-a/documents",
+            files={"file": ("guide.md", b"hello", "text/markdown")},
+        )
+        assert no_auth.status_code == 401
+        assert no_auth.json()["detail"] == "missing bearer token"
+
+        bad_bearer = client.post(
+            "/kb/kb-a/documents",
+            files={"file": ("guide.md", b"hello", "text/markdown")},
+            headers={
+                "Authorization": "Bearer wrong",
+                "X-Fleetent-Principal": '{"user_id":"user-1","tenant_id":"tenant-a"}',
+            },
+        )
+        assert bad_bearer.status_code == 401
+        assert bad_bearer.json()["detail"] == "invalid bearer token"
+
+        wrong_tenant = client.post(
+            "/kb/kb-a/documents",
+            files={"file": ("guide.md", b"hello", "text/markdown")},
+            headers={
+                "Authorization": "Bearer svc-test",
+                "X-Fleetent-Principal": '{"user_id":"user-1","tenant_id":"tenant-b"}',
+            },
+        )
+        assert wrong_tenant.status_code == 403
+        assert wrong_tenant.json()["detail"] == "tenant mismatch"
+
+        missing_kb = client.post(
+            "/kb/missing/documents",
+            files={"file": ("guide.md", b"hello", "text/markdown")},
+            headers={
+                "Authorization": "Bearer svc-test",
+                "X-Fleetent-Principal": '{"user_id":"user-1","tenant_id":"tenant-a"}',
+            },
+        )
+        assert missing_kb.status_code == 404
+        assert missing_kb.json()["detail"] == "kb not found"
+
+        too_large = client.post(
+            "/kb/kb-a/documents",
+            files={"file": ("guide.md", b"hello!", "text/markdown")},
+            headers={
+                "Authorization": "Bearer svc-test",
+                "X-Fleetent-Principal": '{"user_id":"user-1","tenant_id":"tenant-a"}',
+            },
+        )
+        assert too_large.status_code == 413
+        assert too_large.json()["detail"] == "upload exceeds max_upload_bytes"
+
+
+def test_kb_serve_upload_stages_sanitized_file_and_enqueues_sync_directory_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent import kb_ingest_jobs
+    from fleetent.knowledge_base import serve
+    from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
+    from fleetent.knowledge_base.management.runtime import create_knowledge_base
+    from fleetent.knowledge_base.worker import _knowledge_database
+
+    monkeypatch.setenv("FLEETENT_KB_SERVICE_KEY", "svc-test")
+    data_dir = tmp_path / "data"
+    queue_url = f"sqlite:///{data_dir / 'kb_ingest_queue.db'}"
+    create_knowledge_base(
+        "tenant-a",
+        "kb-a",
+        "Standalone KB",
+        database=_knowledge_database("tenant-a", data_dir=data_dir, migrations=KB_MIGRATIONS),
+    )
+
+    app = serve.create_app(
+        serve.KBServeConfig(
+            tenant_id="tenant-a",
+            service_key_ref="env:FLEETENT_KB_SERVICE_KEY",
+            data_dir=data_dir,
+            queue_database_url=queue_url,
+        )
+    )
+    with TestClient(app, raise_server_exceptions=True) as client:
+        response = client.post(
+            "/kb/kb-a/documents",
+            files={"file": ("../guide.md", b"# Intro\nRunbook", "text/markdown")},
+            headers={
+                "Authorization": "Bearer svc-test",
+                "X-Fleetent-Principal": '{"user_id":"user-1","tenant_id":"tenant-a"}',
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["job_id"]
+
+    upload_dir = tmp_path / "uploads" / "kb-a"
+    staged_files = list(upload_dir.iterdir())
+    assert len(staged_files) == 1
+    assert staged_files[0].parent == upload_dir
+    assert staged_files[0].name.endswith("-guide.md")
+    assert "../" not in staged_files[0].name
+    assert staged_files[0].read_bytes() == b"# Intro\nRunbook"
+
+    jobs = kb_ingest_jobs.list_jobs(tenant_id="tenant-a", kb_id="kb-a", database_url=queue_url)
+    assert [job["job_type"] for job in jobs] == ["sync_directory"]
+    assert jobs[0]["id"] == payload["job_id"]
+    assert kb_ingest_jobs.get_job_payload(jobs[0]) == {"path": str(staged_files[0])}
+
+
+def test_kb_serve_upload_can_be_consumed_by_worker_and_searched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent import vector_store
+    from fleetent.knowledge_base import serve, worker
+    from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
+    from fleetent.knowledge_base.management.runtime import create_knowledge_base
+
+    monkeypatch.setenv("FLEETENT_KB_SERVICE_KEY", "svc-test")
+    data_dir = tmp_path / "data"
+    queue_url = f"sqlite:///{data_dir / 'kb_ingest_queue.db'}"
+
+    async def embed_text(text: str) -> list[float]:
+        return [float(len(text)), 0.0]
+
+    monkeypatch.setattr(vector_store, "embed_text", embed_text)
+    create_knowledge_base(
+        "tenant-a",
+        "kb-a",
+        "Standalone KB",
+        database=worker._knowledge_database(
+            "tenant-a", data_dir=data_dir, migrations=KB_MIGRATIONS
+        ),
+    )
+
+    app = serve.create_app(
+        serve.KBServeConfig(
+            tenant_id="tenant-a",
+            service_key_ref="env:FLEETENT_KB_SERVICE_KEY",
+            data_dir=data_dir,
+            queue_database_url=queue_url,
+        )
+    )
+    headers = {
+        "Authorization": "Bearer svc-test",
+        "X-Fleetent-Principal": '{"user_id":"user-1","tenant_id":"tenant-a"}',
+    }
+    with TestClient(app, raise_server_exceptions=True) as client:
+        upload = client.post(
+            "/kb/kb-a/documents",
+            files={"file": ("../guide.md", b"# Intro\nReset ERR42 safely.", "text/markdown")},
+            headers=headers,
+        )
+        assert upload.status_code == 200
+
+        job_id = upload.json()["job_id"]
+        worker_result = worker.run_once(queue_database_url=queue_url, data_dir=data_dir)
+        assert worker_result == {"job_id": job_id, "status": "done"}
+
+        documents = client.get("/kb/kb-a/documents", headers=headers)
+        assert documents.status_code == 200
+        assert len(documents.json()) == 1
+        assert documents.json()[0]["filename"].endswith("-guide.md")
+
+        search = client.post(
+            "/search",
+            json={
+                "principal": {"user_id": "user-1", "tenant_id": "tenant-a"},
+                "query": "ERR42",
+                "kb_ids": ["kb-a"],
+                "limit": 3,
+            },
+            headers=headers,
+        )
+
+        assert search.status_code == 200
+        assert len(search.json()["chunks"]) == 1
+        assert search.json()["chunks"][0]["content"] == "Reset ERR42 safely."
+        assert search.json()["chunks"][0]["filename"].endswith("-guide.md")
+
+
+def test_worker_run_sweeps_due_connectors_without_kb_serve(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent import kb_ingest_jobs
+    from fleetent.knowledge_base import worker
+    from fleetent.knowledge_base.service_config import load_kb_service_config
+
+    path = tmp_path / "kb-service.yaml"
+    _write_yaml(path, _service_doc())
+    config = load_kb_service_config(path)
+    queue_url = config.queue_database_url()
+
+    def fake_run_once(*, queue_database_url=None, data_dir=None):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(worker, "run_once", fake_run_once)
+
+    with pytest.raises(KeyboardInterrupt):
+        worker.run(
+            poll_interval=0.01,
+            queue_database_url=queue_url,
+            data_dir=config.data_dir(),
+            standalone_config=config,
+        )
 
     job = kb_ingest_jobs.claim_next_job(database_url=queue_url)
     assert job is not None
@@ -531,6 +1042,61 @@ def test_standalone_kb_service_runs_without_platform_management_db(
     assert not (tmp_path / "management.db").exists()
 
 
+def test_connector_sync_partial_failure_marks_done_with_last_error(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent import kb_ingest_jobs, vector_store
+    from fleetent.knowledge_base import worker
+    from fleetent.knowledge_base.connectors.google_drive import GoogleDriveSyncSummary
+    from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
+    from fleetent.knowledge_base.management.runtime import create_knowledge_base
+    from fleetent.knowledge_base.service_config import load_kb_service_config
+    from fleetent.knowledge_base.standalone_sweep import sweep
+
+    monkeypatch.setenv("KB_SHARED_GOOGLE_DRIVE", '{"access_token":"shared"}')
+    path = tmp_path / "kb-service.yaml"
+    doc = _service_doc()
+    doc["connectors"] = [doc["connectors"][0]]  # type: ignore[index]
+    _write_yaml(path, doc)
+    config = load_kb_service_config(path)
+    queue_url = config.queue_database_url()
+    data_dir = config.data_dir()
+
+    async def embed_text(text: str) -> list[float]:
+        return [float(len(text)), 0.0]
+
+    async def fake_sync_google_drive(connector_config, *, client):
+        del connector_config, client
+        return GoogleDriveSyncSummary(
+            scanned=2,
+            planned=2,
+            ingested=1,
+            failed=1,
+            errors=["drive://bad-doc: token [REDACTED]"],
+        )
+
+    monkeypatch.setattr(vector_store, "embed_text", embed_text)
+    monkeypatch.setattr(worker.knowledge_base, "sync_google_drive", fake_sync_google_drive)
+    create_knowledge_base(
+        "tenant-a",
+        "kb-a",
+        "Standalone KB",
+        database=worker._knowledge_database(
+            "tenant-a", data_dir=data_dir, migrations=KB_MIGRATIONS
+        ),
+    )
+
+    sweep(config, queue_database_url=queue_url)
+    worker_result = worker.run_once(queue_database_url=queue_url, data_dir=data_dir)
+
+    assert worker_result is not None
+    assert worker_result["status"] == "done"
+    job = kb_ingest_jobs.get_job(worker_result["job_id"], database_url=queue_url)
+    assert job is not None
+    assert job["status"] == "done"
+    assert job["last_error"] == "drive://bad-doc: token [REDACTED]"
+
+
 def test_worker_main_uses_shared_kb_service_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -545,12 +1111,16 @@ def test_worker_main_uses_shared_kb_service_directory(
     _write_yaml(path, doc)
     monkeypatch.delenv("DATABASE_URL", raising=False)
 
-    calls: list[tuple[float, str | None, Path | None]] = []
+    calls: list[tuple[float, str | None, Path | None, object | None]] = []
 
     def fake_run(
-        *, poll_interval: float, queue_database_url: str | None, data_dir: Path | None
+        *,
+        poll_interval: float,
+        queue_database_url: str | None,
+        data_dir: Path | None,
+        standalone_config=None,
     ) -> None:
-        calls.append((poll_interval, queue_database_url, data_dir))
+        calls.append((poll_interval, queue_database_url, data_dir, standalone_config))
 
     monkeypatch.setattr(worker, "run", fake_run)
     monkeypatch.setattr("fleetent.build_info.log_service_startup", lambda name: None)
@@ -558,13 +1128,13 @@ def test_worker_main_uses_shared_kb_service_directory(
     worker.main(["--config", str(path), "--poll-interval", "0.25"])
 
     expected_data_dir = (service_dir / "data").resolve()
-    assert calls == [
-        (
-            0.25,
-            f"sqlite:///{expected_data_dir / 'kb_ingest_queue.db'}",
-            expected_data_dir,
-        )
-    ]
+    assert len(calls) == 1
+    assert calls[0][:3] == (
+        0.25,
+        f"sqlite:///{expected_data_dir / 'kb_ingest_queue.db'}",
+        expected_data_dir,
+    )
+    assert calls[0][3] is not None
 
 
 def test_serve_main_uses_shared_kb_service_directory(
@@ -582,14 +1152,14 @@ def test_serve_main_uses_shared_kb_service_directory(
     _write_yaml(path, doc)
 
     created_configs: list[serve.KBServeConfig] = []
-    uvicorn_calls: list[tuple[object, str, int]] = []
+    uvicorn_calls: list[tuple[object, str, int, str]] = []
 
     def fake_create_app(config: serve.KBServeConfig) -> object:
         created_configs.append(config)
         return {"config": config}
 
-    def fake_uvicorn_run(app: object, *, host: str, port: int) -> None:
-        uvicorn_calls.append((app, host, port))
+    def fake_uvicorn_run(app: object, *, host: str, port: int, log_level: str) -> None:
+        uvicorn_calls.append((app, host, port, log_level))
 
     monkeypatch.setattr(serve, "create_app", fake_create_app)
     monkeypatch.setattr("uvicorn.run", fake_uvicorn_run)
@@ -602,7 +1172,7 @@ def test_serve_main_uses_shared_kb_service_directory(
         created_configs[0].queue_database_url
         == f"sqlite:///{expected_data_dir / 'kb_ingest_queue.db'}"
     )
-    assert uvicorn_calls == [({"config": created_configs[0]}, "127.0.0.1", 8768)]
+    assert uvicorn_calls == [({"config": created_configs[0]}, "127.0.0.1", 8768, "info")]
 
 
 def test_worker_main_applies_standalone_agent_model_config(
@@ -716,3 +1286,73 @@ async def test_standalone_embedding_runtime_uses_api_key_env_from_config(
     assert vector == [0.1, 0.2, 0.3]
     assert captured is not None
     assert captured.headers["authorization"] == "Bearer embed-secret"
+
+
+def test_configure_process_runtime_sets_rerank_settings_from_config() -> None:
+    from fleetent import agent_config
+    from fleetent.agent_config import AgentFile, default_models
+    from fleetent.knowledge_base import runtime as kb_runtime
+    from fleetent.knowledge_base.service_config import KBServiceConfig
+
+    config = KBServiceConfig.model_validate(
+        {
+            "service": {
+                "tenant_id": "tenant-a",
+                "service_key_ref": "env:FLEETENT_KB_SERVICE_KEY",
+            },
+            "data": {"home": "./data"},
+            "embedding": {
+                "endpoint": "http://embed.example/v1/embeddings",
+                "model": "kb-embed",
+                "dimensions": 3,
+            },
+            "rerank": {
+                "backend": "http",
+                "endpoint": "http://rerank.example/v1/rerank",
+                "model": "bge-reranker",
+                "api_key_env": "FLEETENT_KB_RERANK_API_KEY",
+            },
+        }
+    )
+
+    try:
+        config.configure_process_runtime()
+        rerank_settings = kb_runtime._rerank_settings()
+        assert rerank_settings.backend == "http"
+        assert rerank_settings.endpoint == "http://rerank.example/v1/rerank"
+        assert rerank_settings.model == "bge-reranker"
+        assert rerank_settings.api_key_env == "FLEETENT_KB_RERANK_API_KEY"
+    finally:
+        agent_config.set_default_agent_for_process(
+            AgentFile(name="", version=0, models=default_models())
+        )
+
+
+def test_configure_process_runtime_leaves_rerank_disabled_by_default() -> None:
+    from fleetent import agent_config
+    from fleetent.agent_config import AgentFile, default_models
+    from fleetent.knowledge_base import runtime as kb_runtime
+    from fleetent.knowledge_base.service_config import KBServiceConfig
+
+    config = KBServiceConfig.model_validate(
+        {
+            "service": {
+                "tenant_id": "tenant-a",
+                "service_key_ref": "env:FLEETENT_KB_SERVICE_KEY",
+            },
+            "data": {"home": "./data"},
+            "embedding": {
+                "endpoint": "http://embed.example/v1/embeddings",
+                "model": "kb-embed",
+                "dimensions": 3,
+            },
+        }
+    )
+
+    try:
+        config.configure_process_runtime()
+        assert kb_runtime._rerank_settings().backend == "disabled"
+    finally:
+        agent_config.set_default_agent_for_process(
+            AgentFile(name="", version=0, models=default_models())
+        )

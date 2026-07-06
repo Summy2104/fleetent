@@ -6,7 +6,7 @@
 
 ## What Changes
 
-- **修 cwd 模板 bug(全部 init-config)**:`platform init-config` / `node init-config` 改从**打包进 wheel 的 package data**(`importlib.resources`)读根 canonical example,不依赖 cwd。(`kb-service init-config` 在 align-kb 已这么做;本 change 把 platform/node 也对齐到同一打包读取机制。)
+- **修 cwd 模板 bug(全部 init-config)**:`platform init-config` / `node init-config` 改从**打包进 wheel 的 package data**(`importlib.resources`)读根 canonical example,不依赖 cwd。(``kb-service` `init-config`` 在 align-kb 已这么做;本 change 把 platform/node 也对齐到同一打包读取机制。)
 - **根 example 纳入 wheel package data**:`.env.example` / `platform.yaml.example` / `agent.yaml.example` / `agent.env.example` / `node.env.example`(+ align-kb 的 `kb-service.*.example`)纳入 hatch wheel artifacts,使装好的环境 init-config 可读。
 - **更新 `configuration` spec**:"Canonical templates" 的集合从"exactly these 4"修正为真实集合(加 `node.env.example`、`kb-service.yaml.example`/`kb-service.env.example`),**维持 flat-at-root**;"Local configuration initialization" 明确 init-config 从打包资源读模板、不依赖 cwd。
 

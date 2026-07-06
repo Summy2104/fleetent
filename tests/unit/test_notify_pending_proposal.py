@@ -24,10 +24,10 @@ async def test_notify_pending_proposal_user_memory_calls_notify_user(
     """user-memory domain → notify_user(user_id, message with approval_id)."""
     notify_calls: list[tuple[str, str]] = []
 
-    monkeypatch.setattr(
-        "fleetent.outbound_connectors.notify_user",
-        lambda user_id, msg, **kwargs: notify_calls.append((user_id, msg)),
-    )
+    async def _notify(user_id, msg, **kwargs):
+        notify_calls.append((user_id, msg))
+
+    monkeypatch.setattr("fleetent.outbound_connectors.notify_user", _notify)
 
     # Ensure the existing approval-routing path is NOT called
     gate_notify = AsyncMock()

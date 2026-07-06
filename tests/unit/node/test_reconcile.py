@@ -50,6 +50,7 @@ def _desired(
     secrets: dict[str, str] | None = None,
     source: str = "remote",
     tenant_id: str = "tenant-1",
+    knowledge_resync_epoch: str = "",
 ) -> DesiredState:
     return DesiredState(
         node_id="node-a",
@@ -60,6 +61,7 @@ def _desired(
                 tenant_id=tenant_id,
                 config=config or {"name": "support", "tenant_id": tenant_id},
                 secrets=secrets or {},
+                knowledge_resync_epoch=knowledge_resync_epoch,
             )
         ],
         source=source,
@@ -72,6 +74,23 @@ def _home(tmp_path, agent_name: str = "support", tenant_id: str = "tenant-1"):
 
 def _post_body(route: respx.Route) -> dict[str, object]:
     return json.loads(route.calls[0].request.content)
+
+
+def _write_kb_host_config(tmp_path, *, host: str = "127.0.0.1", port: int = 8768) -> None:
+    kb_config = tmp_path / "kb-service.yaml"
+    kb_config.write_text(
+        yaml.safe_dump(
+            {
+                "service": {
+                    "service_key_ref": "env:FLEETENT_KB_SERVICE_KEY",
+                    "host": host,
+                    "port": port,
+                }
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
 
 
 @respx.mock
@@ -91,6 +110,56 @@ def test_reconcile_spawns_missing_desired_agent_after_writing_home(tmp_path) -> 
         "name": "support",
         "tenant_id": "tenant-1",
     }
+    assert route.called
+
+
+@respx.mock
+def test_write_home_does_not_inject_knowledge_provider(tmp_path, monkeypatch) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    _write_kb_host_config(tmp_path, host="127.0.0.1", port=9876)
+    monkeypatch.setenv("FLEETENT_KB_SERVICE_KEY", "svc-kb-shared")
+    backend = FakeBackend({"support": None})
+    route = respx.post("https://platform.internal/nodes/node-a/status").mock(
+        return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
+    )
+
+    desired = _desired(
+        config={
+            "name": "support",
+            "version": 1,
+            "tenant_id": "tenant-1",
+            "models": {
+                "targets": [
+                    {
+                        "id": "default",
+                        "provider": "anthropic",
+                        "protocol": "openai_chat",
+                        "base_url": "https://api.anthropic.test/v1",
+                        "model": "claude-haiku",
+                        "api_key_env": "SUPPORT_MODEL_KEY",
+                    }
+                ],
+                "routes": {"default": [{"target": "default"}]},
+            },
+            "knowledge": {
+                "enabled": True,
+                "bindings": [{"tenant_id": "tenant-1", "kb_id": "support-kb"}],
+            },
+        }
+    )
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(desired)
+
+    home = _home(tmp_path)
+    config = yaml.safe_load((home / "agent.yaml").read_text(encoding="utf-8"))
+    assert config["knowledge"] == desired.agents[0].config["knowledge"]
+    env_lines = dict(
+        line.split("=", 1)
+        for line in (home / ".env").read_text(encoding="utf-8").strip().splitlines()
+        if "=" in line
+    )
+    assert "FLEETENT_KB_SERVICE_KEY" not in env_lines
     assert route.called
 
 
@@ -146,6 +215,25 @@ def test_reconcile_respawns_crashed_agent(tmp_path) -> None:
     NodeReconciler(_config(tmp_path), backend).reconcile(_desired())
 
     assert backend.spawn_calls == ["support"]
+    assert route.called
+
+
+@respx.mock
+def test_reconcile_spawns_from_disk_for_cached_state_with_existing_env(tmp_path) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    home = _home(tmp_path)
+    home.mkdir(parents=True)
+    (home / ".env").write_text("MODEL_KEY=present\nFLEETENT_TUI_TOKEN=\n", encoding="utf-8")
+    route = respx.post("https://platform.internal/nodes/node-a/status").mock(
+        return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
+    )
+    backend = FakeBackend({"support": None})
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(_desired(source="cache"))
+
+    assert backend.spawn_calls == ["support"]
+    assert not (home / "agent.yaml").exists()
     assert route.called
 
 
@@ -211,6 +299,83 @@ def test_reconcile_keeps_running_agent_when_config_hash_matches(tmp_path) -> Non
 
     assert backend.stop_calls == []
     assert backend.spawn_calls == []
+    assert route.called
+
+
+@respx.mock
+def test_reconcile_rewrites_home_when_knowledge_resync_epoch_changes(tmp_path) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    desired_config = {"name": "support", "tenant_id": "tenant-1", "system_prompt": "same"}
+    desired_hash = hashlib.sha256(
+        yaml.safe_dump(desired_config, sort_keys=True).encode()
+    ).hexdigest()
+    home = _home(tmp_path)
+    home.mkdir(parents=True)
+    (home / "agent.yaml").write_text(yaml.safe_dump({"name": "support", "tenant_id": "tenant-1"}))
+    state_dir = tmp_path / "node"
+    state_dir.mkdir(parents=True)
+    (state_dir / "applied-config-hashes.json").write_text(
+        '{"support": "' + desired_hash + '"}',
+        encoding="utf-8",
+    )
+    (state_dir / "applied-knowledge-resync-epochs.json").write_text(
+        '{"support": "old-epoch"}',
+        encoding="utf-8",
+    )
+    route = respx.post("https://platform.internal/nodes/node-a/status").mock(
+        return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
+    )
+    backend = FakeBackend({"support": 12345})
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(
+        _desired(desired_config, knowledge_resync_epoch="new-epoch")
+    )
+
+    assert backend.stop_calls == []
+    assert backend.spawn_calls == []
+    assert yaml.safe_load((home / "agent.yaml").read_text(encoding="utf-8")) == desired_config
+    assert json.loads(
+        (state_dir / "applied-knowledge-resync-epochs.json").read_text(encoding="utf-8")
+    ) == {"support": "new-epoch"}
+    assert route.called
+
+
+@respx.mock
+def test_reconcile_self_heals_blanked_env_without_config_hash_change(tmp_path) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    desired_config = _agent_config_with_api_key()
+    desired_hash = hashlib.sha256(
+        yaml.safe_dump(desired_config, sort_keys=True).encode()
+    ).hexdigest()
+    home = _home(tmp_path)
+    home.mkdir(parents=True)
+    (home / "agent.yaml").write_text(yaml.safe_dump(desired_config), encoding="utf-8")
+    (home / ".env").write_text("ANTHROPIC_API_KEY=\n", encoding="utf-8")
+    state_dir = tmp_path / "node"
+    state_dir.mkdir(parents=True)
+    (state_dir / "applied-config-hashes.json").write_text(
+        '{"support": "' + desired_hash + '"}',
+        encoding="utf-8",
+    )
+    route = respx.post("https://platform.internal/nodes/node-a/status").mock(
+        return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
+    )
+    backend = FakeBackend({"support": 12345})
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(
+        _desired(config=desired_config, secrets={"ANTHROPIC_API_KEY": "sk-healed"})
+    )
+
+    assert backend.stop_calls == ["support"]
+    assert backend.spawn_calls == ["support"]
+    env_lines = dict(
+        line.split("=", 1)
+        for line in (home / ".env").read_text(encoding="utf-8").strip().splitlines()
+        if "=" in line
+    )
+    assert env_lines["ANTHROPIC_API_KEY"] == "sk-healed"
     assert route.called
 
 
@@ -504,6 +669,78 @@ def test_reconcile_defers_cached_start_without_secrets_but_keeps_running_agent(
         )
     ]
     assert route.called
+
+
+def test_env_has_secret_values_ignores_orphan_and_unparsable_config(tmp_path) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    reconciler = NodeReconciler(_config(tmp_path), FakeBackend({}))
+    home = _home(tmp_path)
+    home.mkdir(parents=True)
+    (home / ".env").write_text("MODEL_KEY=present\n", encoding="utf-8")
+
+    assert (
+        reconciler._env_has_secret_values(  # noqa: SLF001
+            "support",
+            "tenant-1",
+            {"ORPHAN_SECRET": "value"},
+            {"name": "support", "tenant_id": "tenant-1"},
+        )
+        is True
+    )
+
+
+def test_env_has_secret_values_requires_referenced_secret_on_disk(tmp_path) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    reconciler = NodeReconciler(_config(tmp_path), FakeBackend({}))
+    config = _agent_config_with_api_key()
+
+    assert (
+        reconciler._env_has_secret_values(  # noqa: SLF001
+            "support",
+            "tenant-1",
+            {"ANTHROPIC_API_KEY": "required"},
+            config,
+        )
+        is False
+    )
+
+    home = _home(tmp_path)
+    home.mkdir(parents=True)
+    (home / ".env").write_text("ANTHROPIC_API_KEY=\n", encoding="utf-8")
+
+    assert (
+        reconciler._env_has_secret_values(  # noqa: SLF001
+            "support",
+            "tenant-1",
+            {"ANTHROPIC_API_KEY": "required"},
+            config,
+        )
+        is False
+    )
+    assert (
+        reconciler._env_has_secret_values(  # noqa: SLF001
+            "support",
+            "tenant-1",
+            {"BROKEN_SECRET": "value"},
+            {"name": object()},
+        )
+        is True
+    )
+
+
+def test_reconcile_local_agent_helpers_scan_tenant_homes(tmp_path) -> None:
+    from fleetent.node.reconcile import NodeReconciler
+
+    (tmp_path / "tenants" / "tenant-1" / "agents" / "support").mkdir(parents=True)
+    (tmp_path / "tenants" / "tenant-2").mkdir(parents=True)
+    (tmp_path / "tenants" / "tenant-3" / "agents" / "ops").mkdir(parents=True)
+    reconciler = NodeReconciler(_config(tmp_path), FakeBackend({}))
+
+    assert sorted(reconciler._local_agent_names()) == ["ops", "support"]  # noqa: SLF001
+    assert reconciler._local_tenant_id("ops") == "tenant-3"  # noqa: SLF001
+    assert reconciler._local_tenant_id("missing") == "default"  # noqa: SLF001
 
 
 @respx.mock

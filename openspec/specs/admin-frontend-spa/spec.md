@@ -5,11 +5,11 @@
 ## Requirements
 ### Requirement: SPA 工程与构建产物
 
-平台管理控制台 SHALL 由仓库根 `frontend/` 下的 React + TypeScript + Vite 工程构建。构建 MUST 产出**纯静态资源**(`frontend/dist/`),运行时 MUST NOT 依赖 Node 进程。`dist/` MUST 被 gitignore 并在 CI/打包期由 `yarn build` 生成。包管理 MUST 用 yarn(锁文件入库)。
+平台管理控制台 SHALL 由仓库根 `frontend/` 下的 React + TypeScript + Vite 工程构建。构建 MUST 产出**纯静态资源**(`frontend/dist/`),运行时 MUST NOT 依赖 Node 进程。`dist/` MUST 被 gitignore 并在 CI/打包期由 `pnpm build` 生成。包管理 MUST 用 pnpm(经 corepack 钉版,锁文件 `pnpm-lock.yaml` 入库)。
 
 #### Scenario: 构建产出静态资源
 
-- **WHEN** 在 `frontend/` 运行 `yarn install --frozen-lockfile && yarn build`
+- **WHEN** 在 `frontend/` 运行 `pnpm install --frozen-lockfile && pnpm build`
 - **THEN** 生成 `frontend/dist/`,内含 `index.html` 与打包后的 JS/CSS 静态资源
 - **AND** 资源不引用任何外部 CDN / 运行时外链
 

@@ -196,3 +196,62 @@ async def test_text_approve_uses_run_session_not_message_session(monkeypatch):
     # Resume must target the RUN's session, not the approve message's session.
     assert resume.await_args is not None, "resume was not triggered (looked up wrong session)"
     assert resume.await_args.kwargs["session_id"] == run_session
+
+
+def _approve_msg(connectors: dict) -> NormalizedMessage:
+    return NormalizedMessage(
+        platform="slack",
+        session_id="slack:dm:U_REQ:1.1",
+        user_id="U_REQ",
+        text="approve abcd1234",
+        attachments=[],
+        reply_func=AsyncMock(),
+        agent_name="my-bot",
+        session_context=SessionContext(platform="slack", sender_id="U_REQ"),
+        outbound_connectors=connectors,
+    )
+
+
+async def test_resume_managed_empty_connectors_is_failfast_not_proxy(_resume_env, monkeypatch):
+    """agent-hosted-im：统一后 managed 与 standalone 同路径，无 ManagedOutboundConnector 代理。
+
+    实际的 managed approve 会由 agent 自持的 slack adapter 注入 live 连接器
+    （见 test_resume_managed_runtime_keeps_live_connectors）。若因故连接器缺失，resolve_for_runtime
+    fail-fast 返回 {}（记 error、不再伪造队列代理）。
+    """
+    from fleetent import outbound_connectors as oc
+
+    monkeypatch.setattr(oc, "is_node_managed_runtime", lambda: True)
+    _resolve, resume, _entry = _resume_env
+
+    await normalizer.route(_approve_msg({}))  # 无 live 连接器（异常态）
+
+    tc = resume.await_args.kwargs["tool_context"]
+    # No fabricated proxy — the miss is surfaced as an empty connector set (fail-fast).
+    assert tc.outbound_connectors == {}
+
+
+async def test_resume_managed_runtime_keeps_live_connectors(_resume_env, monkeypatch):
+    """agent-hosted-im：managed 下 agent 自持连接，approve 携带 live 连接器 → 原样直发。"""
+    from fleetent import outbound_connectors as oc
+
+    monkeypatch.setattr(oc, "is_node_managed_runtime", lambda: True)
+    _resolve, resume, _entry = _resume_env
+    sentinel = object()
+
+    await normalizer.route(_approve_msg({"slack": sentinel}))
+
+    tc = resume.await_args.kwargs["tool_context"]
+    assert tc.outbound_connectors == {"slack": sentinel}
+
+
+async def test_resume_standalone_keeps_live_connectors(_resume_env):
+    """回归：standalone（msg.outbound_connectors 非空）下 resolve 原样返回 live 连接器。"""
+    _resolve, resume, _entry = _resume_env
+    sentinel = object()
+
+    await normalizer.route(_approve_msg({"slack": sentinel}))
+
+    tc = resume.await_args.kwargs["tool_context"]
+    assert tc.outbound_connectors == {"slack": sentinel}
+    assert tc.outbound_connectors["slack"] is sentinel

@@ -45,7 +45,7 @@ async def _idle_sweep_loop(interval: float) -> None:
 
             await _get_manager().sweep_idle()
         except Exception as exc:  # noqa: BLE001 — a single failure must not kill the loop
-            _logger.warn("sandbox_idle_sweep_iteration_failed", error=str(exc))
+            _logger.warn("sandbox_idle_sweep_iteration_failed", exception=exc)
 
 
 def start_idle_sweep(*, interval: float | None = None) -> asyncio.Task[None]:

@@ -6,14 +6,16 @@ seam behavior in unit scope. Database/Alembic behavior stays in integration test
 
 from __future__ import annotations
 
+import io
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from fastapi import HTTPException
+from starlette.datastructures import Headers, UploadFile
 
 from fleetent import server, user_store
-from fleetent.platform.chat_management import chat_admin_api
+from fleetent.platform.agent_management_console import agent_admin_api
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import model_admin_api, provider_admin_api
 from fleetent.platform.skill_management import skill_admin_api
@@ -452,156 +454,6 @@ def test_user_admin_route_error_branches(monkeypatch: pytest.MonkeyPatch) -> Non
     assert missing.value.status_code == 404
 
 
-def test_chat_admin_route_handlers_cover_governance(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    actor = _user()
-    _patch_auth(monkeypatch, chat_admin_api, actor)
-    metas: dict[str, dict[str, Any]] = {}
-    audits: list[tuple[Any, ...]] = []
-    cleared: list[str] = []
-    injected: list[tuple[str, str, str]] = []
-    delivered: list[tuple[str, str]] = []
-    resets: list[tuple[str, int]] = []
-
-    def upsert_meta(session_id: str, **kwargs: Any) -> None:
-        metas.setdefault(
-            session_id,
-            {"session_id": session_id, "origin": kwargs.get("origin", "web"), "status": "active"},
-        )
-        metas[session_id].update(kwargs)
-        if "agent_id" in kwargs and "agent_name" not in metas[session_id]:
-            metas[session_id]["agent_name"] = "ops"
-
-    monkeypatch.setattr(
-        chat_admin_api.audit_log, "write_audit", lambda *args, **kwargs: audits.append(args)
-    )
-    monkeypatch.setattr(
-        chat_admin_api, "get_agent_by_name", lambda name: SimpleNamespace(id=7, name=name)
-    )
-    monkeypatch.setattr(chat_admin_api.session_admin_store, "upsert_meta", upsert_meta)
-    monkeypatch.setattr(
-        chat_admin_api.session_admin_store,
-        "get_meta",
-        lambda session_id: metas.setdefault(
-            session_id,
-            {"session_id": session_id, "origin": "web", "agent_name": "ops", "status": "active"},
-        ),
-    )
-    monkeypatch.setattr(
-        chat_admin_api.session_admin_store,
-        "delete_meta",
-        lambda session_id: metas.pop(session_id, None),
-    )
-    monkeypatch.setattr(
-        chat_admin_api.session_admin_store,
-        "set_status",
-        lambda session_id, status: metas.setdefault(
-            session_id, {"session_id": session_id, "origin": "web"}
-        ).__setitem__("status", status),
-    )
-    monkeypatch.setattr(
-        chat_admin_api.session_admin_store, "list_meta", lambda **kwargs: list(metas.values())
-    )
-    monkeypatch.setattr(
-        chat_admin_api.session_admin_store,
-        "set_takeover",
-        lambda session_id, user_id: metas.setdefault(
-            session_id, {"session_id": session_id}
-        ).__setitem__("takeover_by", user_id),
-    )
-    monkeypatch.setattr(
-        chat_admin_api.session_admin_store,
-        "clear_takeover",
-        lambda session_id: metas.setdefault(session_id, {"session_id": session_id}).pop(
-            "takeover_by", None
-        ),
-    )
-    monkeypatch.setattr(
-        chat_admin_api,
-        "session_stats",
-        lambda session_id: {"total_tokens": 10, "rounds": 2, "pending_approvals": 0},
-    )
-    monkeypatch.setattr(
-        chat_admin_api, "load_transcript", lambda session_id: [{"role": "user", "content": "hi"}]
-    )
-    monkeypatch.setattr(
-        chat_admin_api, "clear_session", lambda session_id: cleared.append(session_id)
-    )
-    monkeypatch.setattr(
-        chat_admin_api,
-        "inject",
-        lambda session_id, role, content: injected.append((session_id, role, content)),
-    )
-    monkeypatch.setattr(
-        chat_admin_api,
-        "im_deliver",
-        lambda session_id, content: delivered.append((session_id, content)),
-    )
-    monkeypatch.setattr(
-        chat_admin_api,
-        "reset_session",
-        lambda session_id, keep_turns: resets.append((session_id, keep_turns)),
-    )
-
-    auth_header = "Session token"
-    metas["im-1"] = {
-        "session_id": "im-1",
-        "origin": "im",
-        "status": "active",
-        "agent_id": 7,
-        "agent_name": "ops",
-    }
-    assert (
-        chat_admin_api.list_sessions(agent_name="ops", authorization=auth_header)[0]["total_tokens"]
-        == 10
-    )
-    assert chat_admin_api.session_detail("im-1", auth_header)["transcript"][0]["role"] == "user"
-    assert chat_admin_api.takeover("im-1", auth_header)["taken_over"] is True
-    assert (
-        chat_admin_api.inject_message(
-            "im-1", chat_admin_api.InjectBody(content="human"), auth_header
-        )["injected"]
-        is True
-    )
-    assert delivered == [("im-1", "human")]
-    assert chat_admin_api.release("im-1", auth_header)["taken_over"] is False
-    assert (
-        chat_admin_api.bulk_dispose(
-            chat_admin_api.BulkBody(session_ids=["a", "b"], action="end"), auth_header, "true"
-        )["count"]
-        == 2
-    )
-    assert chat_admin_api.force_end("im-1", auth_header, "true")["status"] == "ended"
-    assert chat_admin_api.clear("im-1", auth_header, "true")["cleared"] is True
-    assert (
-        chat_admin_api.reset("im-1", chat_admin_api.ResetBody(keep_turns=1), auth_header, "true")[
-            "keep_turns"
-        ]
-        == 1
-    )
-    assert cleared == ["im-1"]
-    assert injected == [("im-1", "human_agent", "human")]
-    assert resets == [("im-1", 1)]
-    assert audits
-
-
-def test_chat_admin_route_error_branches(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_auth(monkeypatch, chat_admin_api, _user())
-    monkeypatch.setattr(chat_admin_api, "get_agent_by_name", lambda name: None)
-    with pytest.raises(HTTPException) as missing_agent:
-        chat_admin_api.list_sessions(agent_name="missing", authorization="Session token")
-    assert missing_agent.value.status_code == 404
-    with pytest.raises(HTTPException) as missing_confirm:
-        chat_admin_api.force_end("web-1", "Session token")
-    assert missing_confirm.value.status_code == 428
-    with pytest.raises(HTTPException) as invalid_bulk:
-        chat_admin_api.bulk_dispose(
-            chat_admin_api.BulkBody(session_ids=["s"], action="delete"), "Session token", "true"
-        )
-    assert invalid_bulk.value.status_code == 422
-
-
 def test_provider_and_model_admin_handlers_cover_crud(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -795,7 +647,7 @@ def test_kb_admin_route_handlers_cover_management_and_documents(
         kb_admin_api, "kb_list_documents", lambda tenant_id, kb_id: [{"document_id": "doc-1"}]
     )
     monkeypatch.setattr(
-        kb_admin_api, "kb_chunk_preview", lambda tenant_id, kb_id, document_id: [{"chunk_id": "c1"}]
+        kb_admin_api, "kb_chunk_preview", lambda tenant_id, kb_id, document_id: [{"id": "c1"}]
     )
     monkeypatch.setattr(
         kb_admin_api,
@@ -805,7 +657,9 @@ def test_kb_admin_route_handlers_cover_management_and_documents(
     monkeypatch.setattr(
         kb_admin_api,
         "kb_search",
-        lambda query, tenant_id, kb_ids, mode, limit: [{"document_id": "doc-1", "score": 0.9}],
+        lambda query, tenant_id, kb_ids, mode, limit, **kwargs: [
+            {"document_id": "doc-1", "score": 0.9}
+        ],
     )
     monkeypatch.setattr(
         kb_admin_api,
@@ -857,6 +711,24 @@ def test_kb_admin_route_handlers_cover_management_and_documents(
     monkeypatch.setattr(
         kb_admin_api.audit_log, "write_audit", lambda *args, **kwargs: audits.append(args)
     )
+    monkeypatch.setattr(
+        agent_admin_api, "_current_user", lambda _authorization: _user(role="viewer")
+    )
+    monkeypatch.setattr(
+        agent_admin_api,
+        "_require_agent",
+        lambda _name: SimpleNamespace(id=8, name="agent-8", tenant_id="default"),
+    )
+    monkeypatch.setattr(agent_admin_api, "kb_engine_list", lambda tenant_id: list(kbs.values()))
+    monkeypatch.setattr(
+        agent_admin_api.agent_kbs_store,
+        "list_kbs_for_agent",
+        lambda tenant_id, agent_id: [
+            kb_id
+            for (tenant, kb_id), agents in bindings.items()
+            if tenant == tenant_id and agent_id in agents
+        ],
+    )
 
     auth_header = "Session token"
     assert kb_admin_api.list_kbs(authorization=auth_header)[0]["bound_agents"] == [7]
@@ -875,10 +747,7 @@ def test_kb_admin_route_handlers_cover_management_and_documents(
     assert (
         kb_admin_api.list_documents("kb2", authorization=auth_header)[0]["document_id"] == "doc-1"
     )
-    assert (
-        kb_admin_api.preview_chunks("kb2", "doc-1", authorization=auth_header)[0]["chunk_id"]
-        == "c1"
-    )
+    assert kb_admin_api.preview_chunks("kb2", "doc-1", authorization=auth_header)[0]["id"] == "c1"
     assert (
         kb_admin_api.delete_document("kb2", "doc-1", authorization=auth_header, x_confirm="true")[
             "deleted"
@@ -903,7 +772,13 @@ def test_kb_admin_route_handlers_cover_management_and_documents(
         is True
     )
     assert kb_admin_api.agents_for_kb("kb2", authorization=auth_header)["agents"] == [8]
-    assert kb_admin_api.kbs_for_agent(8, authorization=auth_header)["kb_ids"] == ["kb2"]
+    assert agent_admin_api.list_agent_kbs("agent-8", authorization=auth_header) == {
+        "agent": "agent-8",
+        "kb_ids": ["kb2"],
+    }
+    kbs["kb2"]["archived"] = True
+    assert agent_admin_api.list_agent_kbs("agent-8", authorization=auth_header)["kb_ids"] == []
+    kbs["kb2"]["archived"] = False
     assert kb_admin_api.unbind_agent("kb2", 8, authorization=auth_header)["bound"] is False
     assert kb_admin_api.observation("kb2", authorization=auth_header)["query_count"] == 7
     with pytest.raises(HTTPException) as still_bound:
@@ -930,6 +805,75 @@ def test_kb_admin_route_error_branches(monkeypatch: pytest.MonkeyPatch) -> None:
         )
     assert invalid_mode.value.status_code == 422
     monkeypatch.setattr(kb_admin_api.agent_kbs_store, "is_kb_bound", lambda tenant_id, kb_id: False)
+
+
+async def test_kb_admin_upload_document_route_covers_success_and_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actor = _user()
+    audits: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    class FakeClient:
+        def upload_document(
+            self,
+            tenant_id: str,
+            kb_id: str,
+            *,
+            filename: str,
+            content: bytes,
+            content_type: str,
+        ) -> dict[str, object]:
+            if kb_id == "too-large":
+                request = kb_admin_api.httpx.Request("POST", "http://kb-serve.test")
+                response = kb_admin_api.httpx.Response(
+                    413,
+                    json={"detail": "upload exceeds max_upload_bytes"},
+                    request=request,
+                )
+                raise kb_admin_api.httpx.HTTPStatusError(
+                    "kb serve error", request=request, response=response
+                )
+            assert tenant_id == "default"
+            assert filename == "guide.md"
+            assert content == b"hello world"
+            assert content_type == "text/markdown"
+            return {"job_id": "job-1"}
+
+    monkeypatch.setattr(kb_admin_api, "_require_admin", lambda authorization: actor)
+    monkeypatch.setattr(kb_admin_api, "get_kb_serve_client", lambda: FakeClient())
+    monkeypatch.setattr(
+        kb_admin_api.audit_log,
+        "write_audit",
+        lambda *args, **kwargs: audits.append((args, kwargs)),
+    )
+
+    upload = UploadFile(
+        file=io.BytesIO(b"hello world"),
+        filename="guide.md",
+        headers=Headers({"content-type": "text/markdown"}),
+    )
+    assert await kb_admin_api.upload_document("kb1", upload, authorization="Session token") == {
+        "job_id": "job-1"
+    }
+    assert audits == [
+        (
+            (actor.id, "doc_upload", "kb", "kb1"),
+            {"detail": {"filename": "guide.md"}},
+        )
+    ]
+
+    with pytest.raises(HTTPException) as too_large:
+        await kb_admin_api.upload_document(
+            "too-large",
+            UploadFile(
+                file=io.BytesIO(b"hello world"),
+                filename="guide.md",
+                headers=Headers({"content-type": "text/markdown"}),
+            ),
+            authorization="Session token",
+        )
+    assert too_large.value.status_code == 413
+    assert too_large.value.detail == "upload exceeds max_upload_bytes"
 
 
 def test_server_helpers_cover_admin_url_jobs_and_auth(

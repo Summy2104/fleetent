@@ -2,11 +2,11 @@
 
 ### Requirement: kb-worker 是 ingest 队列的唯一消费者
 
-系统 SHALL 提供长驻进程 `fleetent kb-worker`,作为 `kb_ingest_jobs` 队列的**唯一消费者**:循环 claim(原子)pending job → 调 `knowledge_base.ingest` 核执行摄取 → mark done;失败则 mark failed + retry(至上限)。KB 内容写入 SHALL 只发生在 worker 调核的路径(**单一写入方**)。worker SHALL 经 `db.py` 边界访问队列,SHALL NOT `import fleetent.platform.*`。
+系统 SHALL 提供长驻进程 `fleetent kb worker`,作为 `kb_ingest_jobs` 队列的**唯一消费者**:循环 claim(原子)pending job → 调 `knowledge_base.ingest` 核执行摄取 → mark done;失败则 mark failed + retry(至上限)。KB 内容写入 SHALL 只发生在 worker 调核的路径(**单一写入方**)。worker SHALL 经 `db.py` 边界访问队列,SHALL NOT `import fleetent.platform.*`。
 
 #### Scenario: worker drain 队列并写 KB
 
-- **WHEN** 队列有 pending job 且 `fleetent kb-worker` 在跑
+- **WHEN** 队列有 pending job 且 `fleetent kb worker` 在跑
 - **THEN** worker claim 该 job、调 ingest 核完成摄取、写 KB、置 job done
 
 #### Scenario: 失败重试
@@ -26,7 +26,7 @@
 #### Scenario: 过渡 drain 已移除
 
 - **WHEN** 检视代码
-- **THEN** 不存在 `kb-ingest-queue` 阶段的临时内联 drain;消费只经 `fleetent kb-worker`
+- **THEN** 不存在 `kb-ingest-queue` 阶段的临时内联 drain;消费只经 `fleetent kb worker`
 
 #### Scenario: admin sync 入队 + 轮询
 

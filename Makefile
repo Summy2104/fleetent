@@ -3,7 +3,7 @@
 .PHONY: help install test t test-pr test-unit test-unit-ci test-coverage-ci test-integration test-e2e test-evaluation test-layers lint fmt check typecheck platform-help \
 	up down logs deploy redeploy deploy-status upgrade \
 	frontend-install frontend-build test-frontend test-frontend-vitest test-frontend-tsc test-frontend-lint \
-	dev-bootstrap dev-reset platform node-provision node kb-worker kb-serve agent chat dev-clean
+	dev-bootstrap dev-reset platform node-provision node kb-worker kb-serve kb-create agent chat dev-clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -84,25 +84,27 @@ typecheck: ## Type-check with mypy
 check: lint typecheck ## Run lint + typecheck
 
 frontend-install: ## Install frontend dependencies
-	yarn --cwd frontend install --frozen-lockfile
+	@command -v pnpm >/dev/null 2>&1 || corepack enable || { \
+		echo "pnpm not found. Run 'corepack enable' (bundled with Node 18+) or install pnpm@11.9.0."; exit 1; }
+	pnpm --dir frontend install --frozen-lockfile
 
 frontend-build: ## Build frontend static assets
-	yarn --cwd frontend build
+	pnpm --dir frontend run build
 
 # The three checks are independent, so run them concurrently: wall-clock drops
-# to max(vitest, tsc, eslint) instead of their sum. Re-invoking make with -j3
+# to max(vitest, tsc, biome) instead of their sum. Re-invoking make with -j3
 # keeps `make test-frontend` the single CI entrypoint while parallelizing.
 test-frontend: ## Run frontend tests, coverage, typecheck, and lint (parallel)
 	$(MAKE) -j3 test-frontend-vitest test-frontend-tsc test-frontend-lint
 
 test-frontend-vitest:
-	yarn --cwd frontend vitest run --coverage
+	pnpm --dir frontend run test
 
 test-frontend-tsc:
-	yarn --cwd frontend tsc --noEmit
+	pnpm --dir frontend run typecheck
 
 test-frontend-lint:
-	yarn --cwd frontend eslint .
+	pnpm --dir frontend run lint
 
 platform-help: ## Show platform CLI help
 	uv run fleetent platform --help
@@ -167,14 +169,22 @@ PLATFORM_PORT ?= 8765
 AGENT_PORT    ?= 8766
 NODE_ID       ?= local-node
 NODE_PLATFORM_URL ?= http://127.0.0.1:$(PLATFORM_PORT)
+KB_SERVE_PORT ?= 8768
 
-DEV_TARGETS := dev-bootstrap dev-reset platform node-provision node kb-worker kb-serve agent chat dev-clean
+DEV_TARGETS := dev-bootstrap dev-reset platform node-provision node kb-worker kb-serve kb-create agent chat dev-clean dev-kb-key
 $(DEV_TARGETS): export FLEETENT_HOME := $(FLEETENT_HOME)
 $(DEV_TARGETS): export DATABASE_URL := $(DATABASE_URL)
 $(DEV_TARGETS): export NODE_ID := $(NODE_ID)
 $(DEV_TARGETS): export NODE_PLATFORM_URL := $(NODE_PLATFORM_URL)
 $(DEV_TARGETS): export FLEETENT_SECRET_KEY = $(shell cat "$(FLEETENT_HOME)/.dev_secret_key" 2>/dev/null || true)
 $(DEV_TARGETS): export FLEETENT_FORWARDER_HOST_OVERRIDE := 127.0.0.1
+# KB serve wiring: the platform reads KB_SERVE__* (Settings nested env) to proxy
+# /admin/kb and to materialize agents' http knowledge provider; the key value is
+# shared with kb-serve via <home>/.env (dev_kb_service_key.py keeps them in sync).
+# Deferred `=` for the key: dev-reset regenerates it mid-invocation (see above).
+$(DEV_TARGETS): export KB_SERVE__URL := http://127.0.0.1:$(KB_SERVE_PORT)
+$(DEV_TARGETS): export KB_SERVE__SERVICE_KEY_REF := env:FLEETENT_KB_SERVICE_KEY
+$(DEV_TARGETS): export FLEETENT_KB_SERVICE_KEY = $(shell cat "$(FLEETENT_HOME)/.dev_kb_service_key" 2>/dev/null || true)
 
 dev-bootstrap: ## Init dev home: migrate management DB + seed built-in admin + scaffold env files
 	mkdir -p "$(FLEETENT_HOME)"
@@ -183,25 +193,37 @@ dev-bootstrap: ## Init dev home: migrate management DB + seed built-in admin + s
 	uv run fleetent platform seed-builtin-admin
 	uv run fleetent platform init-config --home "$(FLEETENT_HOME)"
 	uv run fleetent node init-config
-	uv run fleetent kb-service init-config
+	uv run fleetent kb init-config
+	uv run python scripts/dev_kb_service_key.py
 
 dev-reset: dev-clean dev-bootstrap node-provision ## Wipe + re-init dev home from scratch (clean → bootstrap → provision node)
-	@echo "dev home reset: $(FLEETENT_HOME) — start services with 'make platform', 'make node', 'make kb-worker', 'make kb-serve'"
+	@echo "dev home reset: $(FLEETENT_HOME) — start services with 'make platform', 'make node', 'make kb-worker', 'make kb-serve' ; create a KB with 'make kb-create KB=<id>'"
 
-platform: ## Start platform control-plane (admin API/UI), default port 8765
+# Ensures the KB service key exists BEFORE a service recipe's deferred
+# FLEETENT_KB_SERVICE_KEY export is evaluated. Starting a service without it
+# exports an EMPTY value, which children inherit and which then shadows the
+# good value in agent/.env (dotenv override=False) — boot loops ensue.
+dev-kb-key:
+	@uv run python scripts/dev_kb_service_key.py >/dev/null
+
+platform: dev-kb-key ## Start platform control-plane (admin API/UI), default port 8765
 	uv run fleetent platform serve --host 127.0.0.1 --port $(PLATFORM_PORT)
 
 node-provision: ## Register the dev node + write node/.env (idempotent; FORCE=1 to re-key)
 	uv run python scripts/dev_node_provision.py $(if $(FORCE),--force,)
 
-node: node-provision ## Start node supervisor (auto-provisions node/.env first; idempotent)
+node: node-provision dev-kb-key ## Start node supervisor (auto-provisions node/.env first; idempotent)
 	uv run fleetent node start
 
-kb-worker: ## Start the KB ingest worker (single queue consumer)
-	uv run fleetent kb-worker --config $(FLEETENT_HOME)/tenants/default/kb/kb-service.yaml
+kb-worker: dev-kb-key ## Start the multi-tenant KB ingest worker (polls all tenant queues)
+	uv run fleetent kb worker --config $(FLEETENT_HOME)/kb-service.yaml
 
-kb-serve: ## Start the KB read service with the shared standalone KB config
-	uv run fleetent kb-serve --config $(FLEETENT_HOME)/tenants/default/kb/kb-service.yaml
+kb-serve: dev-kb-key ## Start the multi-tenant KB read/API service (host kb-service.yaml)
+	uv run fleetent kb serve --config $(FLEETENT_HOME)/kb-service.yaml
+
+kb-create: ## Create a KB in the dev home: make kb-create KB=<id> [TENANT=default]
+	@test -n "$(KB)" || { echo "usage: make kb-create KB=<id> [TENANT=default]"; exit 2; }
+	uv run fleetent kb create --config $(FLEETENT_HOME)/kb-service.yaml --tenant $(or $(TENANT),default) --kb $(KB)
 
 agent: ## Run one agent directly with HTTP /chat+/ws: make agent AGENT=<name> [AGENT_PORT=8766]
 	@test -n "$(AGENT)" || { echo "usage: make agent AGENT=<name> [AGENT_PORT=8766]"; exit 2; }

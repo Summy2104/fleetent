@@ -120,6 +120,184 @@ def test_reconcile_restarts_from_env_when_platform_down(tmp_path) -> None:
 
 
 @respx.mock
+def test_reconcile_preserves_env_when_platform_down(tmp_path) -> None:
+    """Boot-from-disk must NOT blank the existing secrets in .env.
+
+    Regression for the node-restart race: when the platform is unreachable the cache
+    carries no secrets ({}), but a previously materialized .env holds the real values.
+    Reconcile must spawn from that .env verbatim — never rewrite it with empty secrets.
+    """
+    from fleetent.node.reconcile import NodeReconciler
+
+    respx.post("https://platform.internal/nodes/node-a/status").mock(
+        side_effect=httpx.ConnectError("status-down")
+    )
+
+    home = tmp_path / "tenants" / "default" / "agents" / "support"
+    home.mkdir(parents=True)
+    home.chmod(0o700)
+    (home / "agent.yaml").write_text(
+        yaml.safe_dump(_agent_config(), sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    env_path = home / ".env"
+    env_path.write_text(
+        "ANTHROPIC_API_KEY=sk-live-secret\nFLEETENT_TUI_TOKEN=ma-" + "a" * 64 + "\n",
+        encoding="utf-8",
+    )
+    env_path.chmod(0o600)
+
+    cached_state = DesiredState(
+        node_id="node-a",
+        agents=[
+            DesiredAgent(
+                agent_id=101,
+                name="support",
+                config=_agent_config(),
+                secrets={},  # cache has no secrets
+                tenant_id="default",
+            )
+        ],
+        source="cache",
+    )
+    backend = FakeBackend({"support": None})
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(cached_state)
+
+    assert backend.spawn_calls == ["support"]
+    env_after = dict(
+        line.partition("=")[::2]
+        for line in env_path.read_text(encoding="utf-8").splitlines()
+        if "=" in line
+    )
+    assert env_after.get("ANTHROPIC_API_KEY") == "sk-live-secret", (
+        "boot-from-disk wiped the real secret in .env instead of preserving it"
+    )
+
+
+@respx.mock
+def test_reconcile_self_heals_blanked_env_when_platform_recovers(tmp_path) -> None:
+    """A running agent whose .env was blanked must be healed once secrets return.
+
+    After the restart race blanked an agent's .env, config-hash never changes, so the
+    stale reconcile path would only sync skills and leave the agent running with empty
+    credentials forever. When the platform is reachable again and hands back real
+    secrets, reconcile must rewrite the .env and respawn so the values take effect.
+    """
+    from fleetent.node.reconcile import NodeReconciler
+
+    respx.get("https://platform.internal/nodes/node-a/desired-state").mock(
+        return_value=httpx.Response(200, json={"node_id": "node-a", "agents": []})
+    )
+    respx.post("https://platform.internal/nodes/node-a/status").mock(
+        return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
+    )
+
+    home = tmp_path / "tenants" / "default" / "agents" / "support"
+    home.mkdir(parents=True)
+    home.chmod(0o700)
+    (home / "agent.yaml").write_text(
+        yaml.safe_dump(_agent_config(), sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    env_path = home / ".env"
+    # Blanked .env: business secret empty, only node-injected infra vars survive.
+    env_path.write_text(
+        "ANTHROPIC_API_KEY=\n"
+        "FLEETENT_NODE_LOOPBACK_URL=http://127.0.0.1:8767\n"
+        "FLEETENT_OAUTH_REDIRECT_BASE=https://platform.internal\n"
+        "FLEETENT_TUI_TOKEN=ma-" + "a" * 64 + "\n",
+        encoding="utf-8",
+    )
+    env_path.chmod(0o600)
+
+    # Agent is alive; config unchanged (on-disk agent.yaml == desired config).
+    backend = FakeBackend({"support": 12345})
+    desired = DesiredState(
+        node_id="node-a",
+        agents=[
+            DesiredAgent(
+                agent_id=101,
+                name="support",
+                config=_agent_config(),
+                secrets={"ANTHROPIC_API_KEY": "sk-live-secret"},
+                tenant_id="default",
+            )
+        ],
+        source="remote",
+    )
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(desired)
+
+    assert backend.stop_calls == ["support"], "expected the blanked agent to be stopped"
+    assert backend.spawn_calls == ["support"], "expected the agent to be respawned after heal"
+    env_after = dict(
+        line.partition("=")[::2]
+        for line in env_path.read_text(encoding="utf-8").splitlines()
+        if "=" in line
+    )
+    assert env_after.get("ANTHROPIC_API_KEY") == "sk-live-secret", (
+        "self-heal did not restore the real secret into .env"
+    )
+
+
+@respx.mock
+def test_reconcile_ignores_orphan_secret_not_referenced_by_config(tmp_path) -> None:
+    """A non-empty secret whose env name no config field references must NOT self-heal.
+
+    Regression for the orphan-secret restart loop: setting a secret for an env name the
+    agent config never references creates a credential slot that the platform ships in
+    ``desired.secrets``, yet the scaffold only ever writes referenced env names — so the
+    orphan never lands on disk. If the self-heal gate required it, reconcile would loop
+    stop → rewrite → respawn every tick forever. The gate must key on referenced names.
+    """
+    from fleetent.node.reconcile import NodeReconciler
+
+    respx.post("https://platform.internal/nodes/node-a/status").mock(
+        return_value=httpx.Response(200, json={"node_id": "node-a", "updated": 1})
+    )
+
+    home = tmp_path / "tenants" / "default" / "agents" / "support"
+    home.mkdir(parents=True)
+    home.chmod(0o700)
+    (home / "agent.yaml").write_text(
+        yaml.safe_dump(_agent_config(), sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    env_path = home / ".env"
+    # Every referenced secret is present and correct; the orphan simply isn't on disk
+    # (the scaffold never writes it because no config field references it).
+    env_path.write_text(
+        "ANTHROPIC_API_KEY=sk-live-secret\nFLEETENT_TUI_TOKEN=ma-" + "a" * 64 + "\n",
+        encoding="utf-8",
+    )
+    env_path.chmod(0o600)
+
+    backend = FakeBackend({"support": 12345})
+    desired = DesiredState(
+        node_id="node-a",
+        agents=[
+            DesiredAgent(
+                agent_id=101,
+                name="support",
+                config=_agent_config(),
+                secrets={
+                    "ANTHROPIC_API_KEY": "sk-live-secret",
+                    "FLEETENT_MODEL_DEEPSEEK_FLASH_API_KEY": "orphan-not-referenced",
+                },
+                tenant_id="default",
+            )
+        ],
+        source="remote",
+    )
+
+    NodeReconciler(_config(tmp_path), backend).reconcile(desired)
+
+    assert backend.stop_calls == [], "orphan secret must not trigger a self-heal stop"
+    assert backend.spawn_calls == [], "orphan secret must not trigger a respawn"
+
+
+@respx.mock
 def test_reconcile_rewrites_home_for_kb_resync_without_respawn(tmp_path) -> None:
     from fleetent.node.reconcile import NodeReconciler
 

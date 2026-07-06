@@ -172,6 +172,20 @@ def test_settings_loads_platform_dotenv_from_fleetent_home_not_cwd(tmp_path, mon
     assert s.log_format == "json"
 
 
+def test_empty_database_url_falls_back_to_management_default(tmp_path, monkeypatch):
+    """A blank `DATABASE_URL=` line (init-config scaffolds .env from .env.example, which
+    ships one) must mean "unset" and fall back to the management-db default — not become
+    an empty URL that every store then fails to open."""
+    import fleetent.config as cfg
+
+    (tmp_path / ".env").write_text("DATABASE_URL=\n")
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setattr(cfg, "PLATFORM_YAML_PATH", tmp_path / "missing.yaml")
+
+    assert Settings().database_url == f"sqlite:///{paths.management_db_path()}"
+
+
 def test_process_env_overrides_platform_dotenv(tmp_path, monkeypatch):
     import fleetent.config as cfg
 

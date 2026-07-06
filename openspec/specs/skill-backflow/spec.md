@@ -2,7 +2,7 @@
 
 ### Requirement: 回流提名
 
-平台 SHALL 允许把某 `(agent, skill)` 的已漂移副本提名回流到公共池。提案 SHALL 携带 agent 进化副本的**完整 bundle**（该 skill 目录下全部文件的 relpath→content，排除 `.git`，非仅 SKILL.md）、其 `base_version`（内容 hash，用于冲突检测）与 `base_commit`（部署时池 git commit，用于重建 base），并以 `backflow` 类别进入待审 inbox。
+平台 SHALL 允许把某 `(agent, skill)` 的已漂移副本提名回流到公共池。提案 SHALL 携带 agent 进化副本的**完整 bundle**（该 skill 目录下全部文件的 relpath→content，排除 `.git`，非仅 SKILL.md；文本原样存、二进制文件经编码无损保留，推备份分支时按原字节还原）、其 `base_version`（内容 hash，用于冲突检测）与 `base_commit`（同步时记录于目录并从池 git commit 重建 base），并以 `backflow` 类别进入待审 inbox。
 
 #### Scenario: 提名捕获完整 bundle 与 base_commit
 - **WHEN** 运营对 agent "support-bot" 已漂移的多文件 skill "crm-ops"（含 SKILL.md + scripts/）发起回流提名
@@ -40,66 +40,47 @@
 - **WHEN** 试图经 agent-owned DM 路径审批一个 `backflow` 提案
 - **THEN** 该路径不处理回流提案（回流仅经平台治理审批）
 
-### Requirement: accept 更新池并清 drift
+### Requirement: 平台不审核回流（只读查看 + 人工 git 采纳）
 
-审批 accept 时平台 SHALL 把进化副本的**完整 bundle** 写入公共池该 skill（先清该 skill 目录再原子落盘，使被删文件不残留），并经池 git 提交一次新 commit（含来源归因），使该 skill 的 `current_version` 前移；SHALL 清除来源 `(agent, skill)` 的 drift；其余绑定该 skill 的 agent SHALL 在常规重新物化时拿到新版本。
+平台 SHALL NOT 对回流提案做 accept / reject / fork 治理决策，SHALL NOT 因回流往池或权威分支写入。agent 的进化副本经提名记录 + `backflow_pr_sweep` 推备份分支后，采纳与否**完全是人在 git host 的动作**：对备份分支开 PR 合并到权威分支 → 经入站同步（`skill-git-sync`）自然回到池 → 下发 agent。平台仅提供**只读视图**（提案列表 + 双向 diff）供运营查看 agent 改了什么、备份到哪个分支。SHALL NOT 暴露 accept / reject / fork / open-pr 端点。冲突态（`base_version` ≠ 池 head）仍在只读 diff 中如实展示（相对 base / 相对 head），供人在 git host 裁决；平台 SHALL NOT 自动 merge、SHALL NOT 覆盖池。
 
-#### Scenario: accept 写回完整 bundle
-- **WHEN** 运营 accept 多文件 skill "crm-ops" 的回流（无冲突）
-- **THEN** 池中 "crm-ops" 的 SKILL.md 与 scripts/ 等全部文件更新为进化 bundle 并产生一个新 commit、`current_version` 前移
-- **AND** 来源 agent 的该 skill drift 被清除
+> 权衡记录：早期版本平台侧提供 accept（合 PR / 直写池）、reject（清 drift）、fork（另存新 skill）治理动作。因「先自动推备份分支、后人工审」会产生矛盾（reject 只撤 agent 运行时副本，管不到已推的备份分支，若该分支被合并则改动复活），且与「git 为唯一权威写入方向、平台只读」的原则冲突，故移除全部平台侧治理，采纳统一收敛为人在 git host 的 PR。
 
-#### Scenario: accept 后他 agent 拿到新版本
-- **WHEN** accept 后另一个未漂移地绑定 "crm-ops" 的 agent 重新物化
-- **THEN** 该 agent 拿到回流后的新池版本（含全部 bundle 文件）
+#### Scenario: 无治理端点
+- **WHEN** 客户端访问 `/admin/skills/backflow/{id}/accept`、`/reject`、`/fork` 或 `/open-pr`
+- **THEN** 这些端点不存在（路由不存在）
 
-### Requirement: reject 丢弃回流
+#### Scenario: 只读列表 + diff 可用
+- **WHEN** admin 请求回流列表 / 单提案 diff
+- **THEN** 返回提案元数据（来源 agent、skill、备份分支、状态）与双向 diff（相对 base / 相对 head、含 conflict 标记），不含任何治理动作
 
-审批 reject 时平台 SHALL 关闭提案且不改动池，并清除来源 `(agent, skill)` 的 drift（使该副本在下次物化被池版本覆盖）；动作 SHALL 被审计。
-
-#### Scenario: reject 后副本将被覆盖
-- **WHEN** 运营 reject skill "crm-ops" 的回流
-- **THEN** 池不变、提案关闭、该 agent 的 drift 被清，下次物化其 "crm-ops" 副本被池版本覆盖
-
-### Requirement: fork 落新命名 skill 不覆盖权威
-
-审批 fork 时平台 SHALL 把进化副本的**完整 bundle** 作为**新命名 skill** 落入公共池（经池 git 提交）并将来源 agent 的绑定指向该 fork skill，SHALL NOT 覆盖原权威 skill。
-
-#### Scenario: fork 落完整 bundle 不动权威
-- **WHEN** 运营对多文件 skill "crm-ops" 的回流选择 fork
-- **THEN** 池新增一个新命名 skill（如 "crm-ops-support-bot"）含完整 bundle 并提交，原 "crm-ops" 权威版不变，来源 agent 绑定指向 fork
-
-### Requirement: 冲突显式暴露不自动 merge
-
-当回流提案的 `base_version` ≠ 池当前 head（部署后池已被推进），平台 SHALL 在 review 时显式标记冲突态并展示进化副本相对 head 的 diff，由人裁决（基于新 head 重导 / 带确认地覆盖 head / fork）。平台 SHALL NOT 自动 merge。
-
-#### Scenario: 过期基准触发冲突态
-- **WHEN** 一个回流提案的 `base_version` 落后于池 head
-- **THEN** review 显式标记「基于过期版本」并展示相对 head 的 diff，不自动合并
-
-#### Scenario: 覆盖 head 需确认
-- **WHEN** 冲突态下运营选择覆盖 head
-- **THEN** 需显式确认，accept 记录被覆盖的 head 版本以便经 git 历史回溯
+#### Scenario: 采纳靠人 git PR
+- **WHEN** 运营想采纳某回流
+- **THEN** 在 git host 对该提案的备份分支开 PR 合并到权威分支；合并后入站同步把改动带回池、下发 agent；平台全程不写 git、不写池
 
 ### Requirement: drift 观测自动触发回流提名
 
-平台在消费 node 上报的 skill drift 观测、把某 `(agent, skill)` 标记为 drifted 时，SHALL 自动为该 `(agent, skill)` 创建一条 pending backflow 提案；同一 `(agent, skill)` 已存在 pending 提案时 SHALL 跳过（去重，不重复生成）。上报 `drift=false` SHALL NOT 创建提案。自动提名 SHALL 为 best-effort：提名失败（如 owning node 不可达、无可捕获 bundle）SHALL NOT 令 node 状态上报失败，亦 SHALL NOT 影响同批其它 agent/skill 的 drift 落库——失败 SHALL 记日志。
+平台在消费 node 上报的 skill drift 观测时，SHALL 只把某 `(agent, skill)` 标记为 drifted，**SHALL NOT 在该请求路径（`POST /nodes/{id}/status`）上创建提案**——提名需从 owning node 拉取进化副本 bundle（网络操作），不得阻塞状态上报。自动提名改由后台定时任务 `backflow_pr_sweep` 承担：sweep SHALL 扫描已标记 drifted 且无 pending 提案的 `(agent, skill)`，为其创建一条 pending backflow 提案；已存在 pending 时 SHALL 跳过（去重）。上报 `drift=false` SHALL NOT 触发提名。自动提名 SHALL 为 best-effort：单条提名失败（如 owning node 不可达、无可捕获 bundle）SHALL NOT 崩溃 sweep，亦 SHALL NOT 影响同轮其它 `(agent, skill)`——失败 SHALL 记日志，下一轮可重试。每轮提名 SHALL 有预算上限（bounded per round），超额部分留待下一轮，使单轮 wall-clock 有界。
 
-#### Scenario: drift 转为 true 自动生成 pending 提案
-- **WHEN** node status 上报某 managed agent 的 skill `crm-ops` `drift=true`，且该 `(agent, crm-ops)` 当前无 pending backflow 提案
-- **THEN** 平台落 `agent_skills.drift=1`，并自动新增 1 条 `(agent, crm-ops)` 的 pending backflow 提案（携带进化副本 bundle）
+#### Scenario: 上报 drift=true 只落 drift、请求路径不提名
+- **WHEN** node status 上报某 managed agent 的 skill `crm-ops` `drift=true`
+- **THEN** 平台落 `agent_skills.drift=1`、`POST /nodes/{id}/status` 成功返回，且该请求路径 SHALL NOT 创建提案、SHALL NOT 从 owning node 拉 bundle
 
-#### Scenario: 已有 pending 不重复提名
-- **WHEN** 上述 skill 在已存在 pending 提案的情况下再次被上报 `drift=true`
+#### Scenario: sweep 为已漂移 skill 自动生成 pending 提案
+- **WHEN** 存在 `drift=1` 且无 pending 提案的 `(agent, crm-ops)`，`backflow_pr_sweep` 运行一轮
+- **THEN** 自动新增 1 条 `(agent, crm-ops)` 的 pending backflow 提案（携带进化副本 bundle）
+
+#### Scenario: sweep 提名去重
+- **WHEN** 上述 skill 已存在 pending 提案，sweep 再运行一轮
 - **THEN** 不新增第二条提案（仍为 1 条 pending）
 
 #### Scenario: drift=false 不提名
 - **WHEN** node status 上报某 skill `drift=false`
 - **THEN** 平台不为该 `(agent, skill)` 创建 backflow 提案
 
-#### Scenario: 提名失败不阻断状态上报
-- **WHEN** 自动提名过程抛出异常（如无法从 owning node 捕获 bundle）
-- **THEN** `POST /nodes/{id}/status` 仍成功返回、该 skill 的 drift 仍正确落库，失败被记日志而不传播
+#### Scenario: sweep 提名失败被舱壁化
+- **WHEN** sweep 提名过程中某条抛出异常（如无法从 owning node 捕获 bundle）
+- **THEN** sweep SHALL NOT 崩溃、继续处理同轮其它 `(agent, skill)`，失败被记日志而不传播；该 skill 的 drift 仍正确保留，下一轮可重试
 
 ### Requirement: 回流待审经 admin 端点可列出与查看 diff
 
@@ -123,8 +104,66 @@
 
 ### Requirement: 回流治理 router 挂载到平台应用
 
-回流治理 router（list / diff / accept / reject / fork）SHALL 挂载到平台 FastAPI 应用，使所有回流端点经平台 admin 入口可达；未挂载（端点对客户端 404 不可达）SHALL 视为缺陷。
+回流 router（只读 list / diff + 手动 sync-backflow）SHALL 挂载到平台 FastAPI 应用，使这些端点经平台 admin 入口可达；未挂载（端点对客户端 404 不可达）SHALL 视为缺陷。router SHALL NOT 含 accept / reject / fork / open-pr 治理端点。
 
 #### Scenario: 回流端点经平台应用可达
 - **WHEN** 客户端访问平台应用上的回流端点（如未鉴权访问待审列表）
 - **THEN** 端点已挂载、可路由（返回鉴权相关的 401/403 而非「路由不存在」的 404）
+
+### Requirement: 回流提名先推备份分支保命
+
+启用外部 git 源时，平台 SHALL 经一个独立定时任务（`backflow_pr_sweep`，类比 KB connector sweep）为每个有漂移的 agent 推**一个聚合备份分支** `<branch_prefix>/<agent>`（**非权威主分支**），该分支携带该 agent **当前全部未落地的漂移 skill**，并把这些提案标记 `pr_state="backed_up"`。一个 agent 一个分支 → 一次人工 PR 采纳其整批改动。备份是即时保命动作：即使后续未合并，备份分支仍留痕、agent 改动不丢。node 上报/reconcile 路径 SHALL **零 git 依赖**且 SHALL NOT 触发提名；提名（`backflow_store.nominate`）只存 bundle、亦零 git，且与推备份分支同在 sweep 内进行。
+
+分支采用**快照重建**：每轮 sweep 从权威分支 tip 浅取（`push_branch` 用 `depth=1`，不整仓克隆），叠上该 agent 全部未落地漂移 skill 后**强制更新**分支（因新快照非旧 tip 的后代），使分支与其人工 PR 始终反映当前漂移。为避免徒增 PR 噪声，SHALL 仅在 agent 的漂移集**发生变化**时才重推（出现新增/deferred 提案，或某 skill 刚落地使集合缩小）。分支名 SHALL 按 `agent` 稳定。
+
+聚合分支上，替换 SHALL **按 skill 目录整体替换**（进化副本删掉的文件在分支上也删除），其它未漂移 skill（已在 `base_ref` 上）SHALL 原样保留。若外部源配置了 `skills_subdir`（见 `skill-git-sync`），每个 skill 内容的树路径 SHALL 为 `<skills_subdir>/<skill>`；未配置时退化为 `<skill>`。
+
+**已落地**（agent 进化副本内容已等于池当前副本，即人已合并该分支并经入站同步拉回）的提案 SHALL 标 `pr_state="merged"` 并从备份分支与待合并清单中移除——平台不盯 git PR 状态，以内容比对判定「已采纳」。
+
+#### Scenario: 一个 agent 的多 skill 聚合到一个分支
+- **WHEN** sweep 扫到同一 agent 的多条 pending 未备份提案（如 skill `crm-ops` 与 `billing`）
+- **THEN** 经一次 `push_branch` 推一个非主分支 `<branch_prefix>/<agent>`，其上同时含 `<skill>/…` 两个 skill 目录，两条提案都标 `pr_state="backed_up"`、记录同一分支名
+
+#### Scenario: 漂移集未变化不重推（不churn PR）
+- **WHEN** 某 agent 的漂移 skill 全部已 `backed_up` 且无新增、无落地
+- **THEN** 本轮 sweep SHALL NOT 重推该 agent 的分支（避免用相同快照 churn 已开的 PR）
+
+#### Scenario: 已落地提案移出清单
+- **WHEN** 某回流提案的进化副本内容已等于池当前该 skill 内容（PR 已合并且同步回池）
+- **THEN** 该提案标 `pr_state="merged"`、不再推分支、从待合并清单消失
+
+#### Scenario: node 上报与提名零 git
+- **WHEN** node 上报某 agent 的 skill 漂移，随后 sweep 为其提名
+- **THEN** node 上报/reconcile 路径不触发任何 git_platform / push 调用（只落 drift）；sweep 内的提名只存 bundle，同样不触发 git 操作（git 只发生在其后的 `push_branch`）
+
+#### Scenario: 配置 skills_subdir 时内容落在子目录
+- **WHEN** 外部源配置了 `skills_subdir="skills"`，sweep 把 agent 的 skill "crm-ops" 推聚合分支
+- **THEN** 分支上该内容的树路径为 `skills/crm-ops`，而非仓库根的 `crm-ops`
+
+### Requirement: 采纳靠人对备份分支开 PR（平台不开 / 不合 PR）
+
+平台 SHALL NOT 开或合并任何 PR，SHALL NOT 以任何方式往权威分支写入。采纳一律靠人在 git host 对已推的聚合备份分支 `<branch_prefix>/<agent>` 开 PR 合并到权威分支（一个 PR 采纳该 agent 的整批 skill），合并后经入站同步（`skill-git-sync`）自然拉回池。平台 SHALL 暴露 `POST /admin/skills/backflow/sync-backflow`（admin 手动触发一轮 sweep，只推备份分支、不开 PR）。SHALL NOT 提供平台开 PR 的端点（如 `open-pr`）。为降低人工摩擦，管理 UI SHALL 提供**按 agent 聚合的「待合并回流」清单**（列 agent · skill · 分支 · 状态 · diff）并对每个 agent 给出一键**预填的建 PR 链接**（bitbucket.org：`source=<branch_prefix>/<agent>` → `dest=<权威分支>`，从配置的远端仓地址推导；非 bitbucket.org 远端则仅显示分支名）——链接只是跳转到 git host 的建 PR 页，平台仍不代开/代合。历史 `auto_open_pr` 配置列 SHALL 保留但无行为（sweep 忽略之，永不自动开 PR）。
+
+#### Scenario: 按 agent 聚合的待合并清单 + 建 PR 链接
+- **WHEN** 存在同一 agent 多个 skill 的 `backed_up` 回流提案，运营打开 skill 管理页
+- **THEN** 「待合并回流」清单按 agent 分组列出这些 skill，并给出一个指向 git host 建 PR 页（预填 `source`→`dest`）的链接；已落地（`merged`）提案不出现在清单中
+
+#### Scenario: 手动同步只推备份分支
+- **WHEN** admin 调 `POST /admin/skills/backflow/sync-backflow`
+- **THEN** 立即触发一轮 sweep，把 pending 未备份提案推备份分支、标 `pr_state="backed_up"`，不开任何 PR
+
+#### Scenario: sweep 即使 auto_open_pr 开启也不开 PR
+- **WHEN** 历史配置残留 `auto_open_pr=1`，sweep 扫到一条已备份提案
+- **THEN** sweep 只备份、不开 PR（`auto_open_pr` 无行为）
+
+#### Scenario: 平台不提供开 PR 端点
+- **WHEN** 客户端访问 `POST /admin/skills/backflow/{id}/open-pr`
+- **THEN** 该端点不存在（路由不存在）
+
+### Requirement: git 不可达降级不误改治理状态
+
+回流 sweep 推备份分支的 git 操作 SHALL 舱壁化：git 不可达（`GitPlatformUnavailableError`）时 SHALL 标 `pr_state="deferred"` 下轮/手动重试。单次 git 失败 SHALL NOT 崩溃定时任务、webhook 线程或服务启动。
+
+#### Scenario: sweep 遇 git 不可达降级
+- **WHEN** sweep 推备份分支时远端不可达
+- **THEN** 提案标 `pr_state="deferred"`、不抛、下轮重试，其它提案与维护任务不受影响

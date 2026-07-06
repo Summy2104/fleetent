@@ -58,6 +58,32 @@ def _setup_pool_skill(pool_dir: Path, name: str, content: str = "hello") -> str:
     return sha
 
 
+def _setup_subdir_pool_skill(git_root: Path, subdir: str, name: str, content: str = "hello") -> str:
+    """Init a git repo at ``git_root``, commit a skill under ``<git_root>/<subdir>/<name>``.
+
+    Mirrors ``_setup_pool_skill`` but for the subdir-mirrored production layout where the
+    git root (``.git``) and the skill scan root (``<git_root>/<subdir>``) are different
+    directories. Returns the commit sha.
+    """
+    from fleetent.platform.skill_management import pool_git
+
+    pool_git.init_pool(git_root)
+    skill_dir = git_root / subdir / name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: test\n---\n{content}", encoding="utf-8"
+    )
+    sha = pool_git.commit_pool(
+        pool_dir=git_root,
+        message=f"seed: {name}",
+        author="system <system@f>",
+        skill_name=name,
+        subdir=subdir,
+    )
+    assert sha is not None, f"commit_pool returned None for skill {name!r}"
+    return sha
+
+
 def _create_agent(db, name: str = "support") -> agent_store.Agent:
     tenancy_store.create_tenant(id="acme", name="Acme")
     return agent_store.create_agent(name, "You are support.", [], tenant_id="acme")
@@ -211,6 +237,9 @@ def test_materialize_refreshes_base_commit_for_clean_home_and_preserves_it_on_dr
         skill_name="billing",
     )
     assert sha_v2 is not None
+    # base_commit is read from the catalog current_version (recorded at sync time), not
+    # recomputed by a per-skill git walk; the inbound sync updates it when the pool advances.
+    skill_admin_store.set_current_version("billing", sha_v2)
 
     materialize.write_home(
         materialize.agent_file_from_store(agent),
@@ -237,6 +266,7 @@ def test_materialize_refreshes_base_commit_for_clean_home_and_preserves_it_on_dr
         skill_name="billing",
     )
     assert sha_v3 is not None
+    skill_admin_store.set_current_version("billing", sha_v3)
 
     materialize.write_home(
         materialize.agent_file_from_store(agent),
@@ -277,3 +307,88 @@ def test_copytree_excludes_git_directory(db, pool_dir, tmp_path, monkeypatch):
     assert not (skills_home / ".git").exists(), ".git must not appear in agent home skills"
     # The skill itself must be present
     assert (skills_home / "billing").is_dir()
+
+
+# ---------------------------------------------------------------------------
+# Task 6 (skill-gitops-subdir): _copy_skills resolves base_commit via git root
+# + subdir when an external-git skills_subdir is configured (R2/R4).
+# ---------------------------------------------------------------------------
+
+
+def test_copy_skills_resolves_base_commit_via_git_root_when_subdir_configured(
+    db, tmp_path, monkeypatch
+):
+    """R4: the scan root (no ``.git`` of its own) stays the copytree source; only the
+    ``pool_version_for_skill`` lookup must be redirected to the git root + subdir.
+    """
+    from fleetent.platform.skill_management import git_source_store, pool_git
+
+    git_root = tmp_path / "ai-skills-library"
+    scan_root = git_root / "skills"
+    sha = _setup_subdir_pool_skill(git_root, "skills", "incident-review", "body v1")
+
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(scan_root))
+    git_source_store.set_config(
+        enabled=1,
+        remote_url="https://example.test/repo.git",
+        branch="main",
+        skills_subdir="skills",
+    )
+    skill_admin_store.set_current_version("incident-review", sha)
+
+    agent = _create_agent(db)
+    skill_admin_store.set_binding(agent.id, "incident-review", True, updated_by="admin")
+
+    materialize.write_home(
+        materialize.agent_file_from_store(agent),
+        source_agent=agent,
+    )
+
+    home = materialize.home_dir(agent.name)
+    skills_home = home / "skills"
+
+    # R4: only the real skill dir is copied — no .git, no sibling monorepo dirs.
+    assert (skills_home / "incident-review").is_dir()
+    assert not (skills_home / ".git").exists()
+    assert sorted(p.name for p in skills_home.iterdir()) == ["incident-review"]
+
+    drift_row = skill_admin_store.get_drift(agent.id, "incident-review")
+    base_commit = drift_row["base_commit"]
+
+    # Independent oracle: compute the expected sha directly against the git root,
+    # bypassing the production code path under test.
+    expected = pool_git.pool_version_for_skill(git_root, "incident-review", subdir="skills")
+    assert expected == sha
+    assert base_commit == expected
+
+    # R2 cross-check: simulate what node_desired_state_api._skill_manifests_for computes
+    # for the same skill under the same config — the two call sites must agree exactly.
+    node_side_git_root = pool_git.resolve_git_root(scan_root, "skills")
+    node_side_commit = pool_git.pool_version_for_skill(
+        node_side_git_root, "incident-review", subdir="skills"
+    )
+    assert node_side_git_root == git_root
+    assert node_side_commit == base_commit
+
+
+def test_copy_skills_base_commit_unchanged_when_no_external_git_source_configured(
+    db, pool_dir, tmp_path, monkeypatch
+):
+    """Backward compatibility: with no external git source configured, base_commit
+    resolution is unaffected — byte-for-byte identical to the pre-existing behavior.
+    """
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(pool_dir))
+
+    sha = _setup_pool_skill(pool_dir, "billing", "billing skill content")
+    skill_admin_store.set_current_version("billing", sha)
+
+    agent = _create_agent(db)
+    skill_admin_store.set_binding(agent.id, "billing", True, updated_by="admin")
+
+    materialize.write_home(
+        materialize.agent_file_from_store(agent),
+        source_agent=agent,
+    )
+
+    drift_row = skill_admin_store.get_drift(agent.id, "billing")
+    assert drift_row["base_commit"] == sha

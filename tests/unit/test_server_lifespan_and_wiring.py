@@ -167,7 +167,7 @@ def test_server_does_not_import_run_stream() -> None:
 
 async def test_no_playground_scheduler(monkeypatch: pytest.MonkeyPatch) -> None:
     resolver_calls: list[tuple[str, Any]] = []
-    assert not hasattr(server.chat_admin_api, "run_playground")
+    assert not hasattr(server, "chat_admin_api")
     monkeypatch.setattr(
         server.user_store, "set_api_key_resolver", lambda fn: resolver_calls.append(("api", fn))
     )
@@ -205,11 +205,7 @@ async def test_no_playground_scheduler(monkeypatch: pytest.MonkeyPatch) -> None:
     async with server.lifespan(SimpleNamespace()):
         assert ("skills", None) in resolver_calls
         assert ("plugins", None) in resolver_calls
-        assert not hasattr(server.chat_admin_api, "run_playground")
-        assert callable(server.chat_admin_api.load_transcript)
-        assert callable(server.chat_admin_api.clear_session)
-        assert callable(server.chat_admin_api.inject)
-        assert callable(server.chat_admin_api.reset_session)
+        assert not hasattr(server, "chat_admin_api")
 
 
 async def test_lifespan_wires_startup_and_shutdown(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -250,10 +246,6 @@ async def test_lifespan_wires_startup_and_shutdown(monkeypatch: pytest.MonkeyPat
     async with server.lifespan(SimpleNamespace()):
         assert ("skills", None) in resolver_calls
         assert ("plugins", None) in resolver_calls
-        assert callable(server.chat_admin_api.load_transcript)
-        assert callable(server.chat_admin_api.clear_session)
-        assert callable(server.chat_admin_api.inject)
-        assert callable(server.chat_admin_api.reset_session)
 
     assert resolver_calls[-1] == ("im", None)
     assert server.agent_store._delete_agent_hook is None

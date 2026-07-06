@@ -1,168 +1,97 @@
-import { useMemo, useState } from 'react';
-import { Download, Search } from 'lucide-react';
+import { useMemo, useState } from 'react'
+import type { ColumnFiltersState } from '@tanstack/react-table'
+import { Download, Search } from 'lucide-react'
 
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { useT } from '@/i18n';
-import { auditRowsToCsv, type AuditLogFilters, type AuditLogRow, useAuditLogsQuery } from '@/features/audit/api';
+import { DataTable } from '@/components/base/data-table'
+import { type DateRangeValue, dateRangeBounds } from '@/components/base/date-picker'
+import { Button } from '@/components/ui/button'
+import { type AuditLogFilters, type AuditLogRow, auditRowsToCsv, useAuditLogsQuery } from '@/features/audit/api'
+import { buildAuditColumns } from '@/features/audit/columns/audit-columns'
+import { useUsersQuery } from '@/features/users/api'
+import { useT } from '@/i18n'
 
-type FormState = {
-  action: string;
-  actor: string;
-  endTime: string;
-  startTime: string;
-  target: string;
-};
-
-const EMPTY_FORM: FormState = {
-  action: '',
-  actor: '',
-  endTime: '',
-  startTime: '',
-  target: '',
-};
-
-function withinTimeRange(row: AuditLogRow, form: FormState): boolean {
-  if (form.startTime && row.created_at < form.startTime) return false;
-  if (form.endTime && row.created_at > form.endTime) return false;
-  return true;
+/**
+ * Map the DataTable column-filter state onto the backend audit query. Text
+ * columns become exact-ish filters; the `created_at` date-range expands to
+ * inclusive `since`/`until` bounds.
+ */
+export function auditFiltersFromColumns(columnFilters: ColumnFiltersState): AuditLogFilters {
+  const filters: AuditLogFilters = {}
+  for (const { id, value } of columnFilters) {
+    if (id === 'created_at') {
+      const { since, until } = dateRangeBounds(value as DateRangeValue | undefined)
+      if (since) filters.since = since
+      if (until) filters.until = until
+      continue
+    }
+    const text = typeof value === 'string' ? value.trim() : ''
+    if (!text) continue
+    if (id === 'actor_user_id') filters.actor = text
+    else if (id === 'action') filters.action = text
+    else if (id === 'resource') filters.targetId = text
+  }
+  return filters
 }
 
 function downloadCsv(rows: AuditLogRow[]): void {
-  const blob = new Blob([auditRowsToCsv(rows)], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = 'audit-logs.csv';
-  anchor.click();
-  URL.revokeObjectURL(url);
+  const blob = new Blob([auditRowsToCsv(rows)], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = 'audit-logs.csv'
+  anchor.click()
+  URL.revokeObjectURL(url)
 }
 
 export function AuditPage(): JSX.Element {
-  const t = useT();
-  const [form, setForm] = useState<FormState>(EMPTY_FORM);
-  const [filters, setFilters] = useState<AuditLogFilters>({});
-  const [searched, setSearched] = useState(false);
-  const auditLogs = useAuditLogsQuery(filters, searched);
+  const t = useT()
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
+  const [filters, setFilters] = useState<AuditLogFilters>({})
+  const [searched, setSearched] = useState(false)
+  const auditLogs = useAuditLogsQuery(filters, searched)
+  const users = useUsersQuery()
+  const columns = useMemo(() => buildAuditColumns({ t, users: users.data ?? [] }), [t, users.data])
+  const rows = auditLogs.data ?? []
 
-  const visibleRows = useMemo(
-    () => (auditLogs.data ?? []).filter((row) => withinTimeRange(row, form)),
-    [auditLogs.data, form]
-  );
-
+  // Commit the current column filters to the backend query on demand — audit
+  // logs can be large, so we never auto-fetch on filter change.
   const search = (): void => {
-    setFilters({
-      action: form.action.trim() || undefined,
-      actor: form.actor.trim() || undefined,
-      targetId: form.target.trim() || undefined,
-    });
-    setSearched(true);
-  };
+    setFilters(auditFiltersFromColumns(columnFilters))
+    setSearched(true)
+  }
+
+  // The toolbar right-aligns external actions and pins Reset last, so Search
+  // renders at the far right, just left of Reset.
+  const searchAction = (
+    <Button className="h-8" onClick={search} size="sm">
+      <Search className="size-4" /> {t('audit.search')}
+    </Button>
+  )
+
+  const exportAction = (
+    <Button disabled={rows.length === 0} onClick={() => downloadCsv(rows)} variant="secondary">
+      <Download className="size-4" /> {t('audit.exportCsv')}
+    </Button>
+  )
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <h2 className="text-xl font-semibold tracking-tight">{t('audit.title')}</h2>
-          <Badge variant="secondary">{visibleRows.length}</Badge>
+    <DataTable
+      actions={exportAction}
+      columnFilters={columnFilters}
+      columns={columns}
+      data={rows}
+      emptyState={
+        <div className="py-12 text-center text-muted-foreground text-sm">
+          {searched ? t('audit.empty') : t('audit.searchPrompt')}
         </div>
-        <Button
-          variant="secondary"
-          disabled={visibleRows.length === 0}
-          onClick={() => downloadCsv(visibleRows)}
-        >
-          <Download className="size-4" /> {t('audit.exportCsv')}
-        </Button>
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-5">
-        <div className="grid gap-2">
-          <Label htmlFor="audit-actor">{t('audit.actor')}</Label>
-          <Input
-            id="audit-actor"
-            value={form.actor}
-            onChange={(event) => setForm((current) => ({ ...current, actor: event.target.value }))}
-          />
-        </div>
-        <div className="grid gap-2">
-          <Label htmlFor="audit-action">{t('audit.action')}</Label>
-          <Input
-            id="audit-action"
-            value={form.action}
-            onChange={(event) => setForm((current) => ({ ...current, action: event.target.value }))}
-          />
-        </div>
-        <div className="grid gap-2">
-          <Label htmlFor="audit-target">{t('audit.target')}</Label>
-          <Input
-            id="audit-target"
-            value={form.target}
-            onChange={(event) => setForm((current) => ({ ...current, target: event.target.value }))}
-          />
-        </div>
-        <div className="grid gap-2">
-          <Label htmlFor="audit-start">{t('audit.startTime')}</Label>
-          <Input
-            id="audit-start"
-            value={form.startTime}
-            onChange={(event) => setForm((current) => ({ ...current, startTime: event.target.value }))}
-          />
-        </div>
-        <div className="grid gap-2">
-          <Label htmlFor="audit-end">{t('audit.endTime')}</Label>
-          <Input
-            id="audit-end"
-            value={form.endTime}
-            onChange={(event) => setForm((current) => ({ ...current, endTime: event.target.value }))}
-          />
-        </div>
-      </div>
-
-      <Button onClick={search}>
-        <Search className="size-4" /> {t('audit.search')}
-      </Button>
-
-      <div className="overflow-x-auto rounded-lg border border-border">
-        <table className="w-full">
-          <thead className="bg-secondary/50">
-            <tr>
-              <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase text-muted-foreground">
-                {t('audit.when')}
-              </th>
-              <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase text-muted-foreground">
-                {t('audit.actor')}
-              </th>
-              <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase text-muted-foreground">
-                {t('audit.action')}
-              </th>
-              <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase text-muted-foreground">
-                {t('audit.resource')}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {visibleRows.map((row) => (
-              <tr key={row.id} className="border-b border-border last:border-0">
-                <td className="px-4 py-3 font-mono text-sm">{row.created_at}</td>
-                <td className="px-4 py-3 text-sm">{row.actor_user_id ?? '-'}</td>
-                <td className="px-4 py-3 text-sm">{row.action}</td>
-                <td className="px-4 py-3 text-sm">
-                  {row.target_type ?? '-'}:{row.target_id ?? '-'}
-                </td>
-              </tr>
-            ))}
-            {searched && !auditLogs.isPending && visibleRows.length === 0 ? (
-              <tr>
-                <td colSpan={4} className="px-4 py-12 text-center text-sm text-muted-foreground">
-                  {t('audit.empty')}
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
+      }
+      enableColumnVisibility
+      getRowId={(row) => String(row.id)}
+      isLoading={searched && auditLogs.isPending}
+      manualFiltering
+      onColumnFiltersChange={setColumnFilters}
+      title={t('audit.title')}
+      toolbar={searchAction}
+    />
+  )
 }

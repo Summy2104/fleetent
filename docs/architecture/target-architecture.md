@@ -361,7 +361,7 @@ platform 经"共享 store 读函数"读 = 依赖 agent 侧库的**读 schema**�
 
 **KB = 派生视图（非真相源）**：没人直接写 KB 内容。人改**数据源**、AI 只读 KB + 产 reflection report，问题靠"改源→重摄"修；KB 是数据源经 ingest 的纯派生、可重摄。对比 memory=真相源（agent 经审批门直写）。KB **不走 agent 审批门**（共享派生资源，remediation 归平台/人）。
 
-**Ingest = 一个核 + 多触发器 + DB 队列 + 唯一 worker**：核 `knowledge_base.ingest` 一份；触发器（上传/webhook/cron/admin sync）**全只入队**；`fleetent kb-worker` 是**唯一消费者/唯一写入方**（KB 单一写入方，保串行/重试/隔离）；admin sync = 入队+等完成；直接调核仅测试。**单机也拆 worker**（为消模式/隔离，非扩容），前提 DB 背队列（零 broker）+ 同 binary。
+**Ingest = 一个核 + 多触发器 + DB 队列 + 唯一 worker**：核 `knowledge_base.ingest` 一份；触发器（上传/webhook/cron/admin sync）**全只入队**；`fleetent kb worker` 是**唯一消费者/唯一写入方**（KB 单一写入方，保串行/重试/隔离）；admin sync = 入队+等完成；直接调核仅测试。**单机也拆 worker**（为消模式/隔离，非扩容），前提 DB 背队列（零 broker）+ 同 binary。
 
 **connector 配置归属（三层，job 是唯一桥）**：
 - **kb-worker 自身配置**（队列/底座/embedder/Vault 接入）= 部署级静态，放专属配置文件（平行 node-config-file）。

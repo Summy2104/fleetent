@@ -882,7 +882,7 @@ def _origin_from_context(tool_context: ToolContext | None) -> dict[str, str | No
 @tool(risk_level="low")
 async def schedule(
     action: Annotated[
-        Literal["create", "list", "remove", "run_now", "pause", "resume"],
+        Literal["create", "list", "remove", "run_now", "pause", "resume", "history"],
         "要执行的操作",
     ],
     name: Annotated[str, "任务名称（create 时建议提供，便于 list 辨识）"] = "",
@@ -952,7 +952,8 @@ async def schedule(
       put the instruction in ``message``; you act via your own tools and the scheduler does
       NOT broadcast your reply.
 
-    pause/resume toggle a task; remove deletes it; run_now fires it immediately; list shows all.
+    pause/resume toggle a task; remove deletes it; run_now fires it immediately; list shows all;
+    history shows a task's recent run outcomes (time/status/error/duration) for the given task_id.
     """
     from fleetent import cron_scheduler
 
@@ -1033,7 +1034,25 @@ async def schedule(
             return f"error: task {task_id!r} not found"
         return f"Scheduled task {task_id!r} fired"
 
-    return f"error: unknown action {action!r} (use create/list/remove/run_now/pause/resume)"
+    if action == "history":
+        runs = cron_scheduler.list_runs(task_id, limit=20)
+        if not runs:
+            known = any(
+                t["id"] == task_id for t in cron_scheduler.list_tasks(include_disabled=True)
+            )
+            if not known:
+                return f"error: task {task_id!r} not found"
+            return f"No runs yet for task {task_id!r}"
+        lines = []
+        for r in runs:
+            err = r.get("agent_error") or r.get("delivery_error") or ""
+            dur = r.get("duration_ms")
+            dur_txt = f" {dur}ms" if dur is not None else ""
+            suffix = f" — {err}" if err else ""
+            lines.append(f"{r.get('fired_at')} | {r.get('status')}{dur_txt}{suffix}")
+        return "\n".join(lines)
+
+    return f"error: unknown action {action!r} (use create/list/remove/run_now/pause/resume/history)"
 
 
 @tool(risk_level="low")
@@ -1169,10 +1188,13 @@ async def send_im_message(
     Use this for proactive outreach **beyond the current conversation**: notifying or messaging
     a different user, or posting to a different channel. To reply to the person you are talking
     with, do NOT use this tool — reply with plain text, or use `send_file` for a file (both land
-    in the current conversation automatically). `target` is the platform-native id (Slack
-    `U…`/`C…`, Telegram chat id); `target_type` is "user" for a DM (default) or "channel" for a
-    channel post. `platform` defaults to the current conversation's platform. `files` is an
-    optional list of workspace-relative or `/exchange/<server_id>/...` paths to attach.
+    in the current conversation automatically). `target_type` is "user" for a DM (default) or
+    "channel" for a channel post. With `target_type="user"`, `target` MUST be a user id (Slack
+    `U…`, Telegram chat id) — NOT a DM channel id: Slack's `users_search` returns both a
+    `UserID` (`U…`) and a `DMChannelID` (`D…`); pass the `U…`. With `target_type="channel"`,
+    `target` is the channel id (Slack `C…`/`G…`). `platform` defaults to the current
+    conversation's platform. `files` is an optional list of workspace-relative or
+    `/exchange/<server_id>/...` paths to attach.
     Outreach to a third party is approval-gated, and the approval authorizes cross-scope
     artifacts; a send to the current conversation sender from within a channel is delivered to
     that channel thread (not a private DM).
@@ -1391,6 +1413,19 @@ async def send_file(path: str, tool_context: ToolContext | None = None) -> str:
     connectors = tool_context.outbound_connectors if tool_context else {}
     connector = connectors.get(platform)
     if connector is None:
+        from fleetent import outbound_connectors as _oc
+
+        managed = _oc.is_node_managed_runtime()
+        if managed:
+            # agent-hosted-im (D5): under managed placement a live connector is expected — its
+            # absence is a real fault (supervisor未起/IM token 缺失), surfaced with diagnostics.
+            logger.error(
+                "send_file_no_connector_under_managed platform=%s managed=%s", platform, managed
+            )
+            return (
+                f"外发失败：托管运行时无可用 {platform or '?'} 连接器（agent 自持 IM supervisor "
+                "未注册连接，可能缺少/无效的 IM token）。已记录诊断，请检查 agent IM 配置。"
+            )
         return (
             f"当前通道不支持主动外发文件（无可用 {platform or '?'} 连接器）。"
             "该功能仅在 IM 网关运行时可用。"

@@ -1,10 +1,10 @@
 ## Context
 
-`kb-ingest-queue` 落地后,触发只入队,消费是临时内联 drain。本 change 用 `fleetent kb-worker` 作唯一消费者替换它。ingest 核 `knowledge_base.ingest` 已是干净组件(护栏不 import platform);worker 是它的异步调用壳。
+`kb-ingest-queue` 落地后,触发只入队,消费是临时内联 drain。本 change 用 `fleetent kb worker` 作唯一消费者替换它。ingest 核 `knowledge_base.ingest` 已是干净组件(护栏不 import platform);worker 是它的异步调用壳。
 
 ## Goals / Non-Goals
 
-**Goals:** `fleetent kb-worker` 单一消费者进程;移除过渡 drain;admin sync 改入队+轮询;单一写入方。
+**Goals:** `fleetent kb worker` 单一消费者进程;移除过渡 drain;admin sync 改入队+轮询;单一写入方。
 
 **Non-Goals:** 不做 worker 配置文件(后续 `kb-worker-config-file`,本 change 用 env/默认);不做凭据 ref 运行时解析(后续 `connector-cred-job-ref`);不做分布式部署编排(worker 进程怎么被 supervise 是部署事,单机作 platform 旁兄弟进程即可)。
 
@@ -12,7 +12,7 @@
 
 ### D1:worker 是 `fleetent` 子命令,懒加载,经 db.py 读队列
 
-`fleetent kb-worker`(对齐 `node start`/`chat` 的子命令模式):`__main__.py` 加 `kb-worker` 分支懒加载。worker 循环:claim(原子)→ 调 `knowledge_base.ingest` 核 → mark done/failed(retry)。worker 经 `db.py` 边界访问 `kb_ingest_jobs`,**不 import platform**(护栏强制)。
+`fleetent kb worker`(对齐 `node start`/`chat` 的子命令模式):`__main__.py` 加 `kb-worker` 分支懒加载。worker 循环:claim(原子)→ 调 `knowledge_base.ingest` 核 → mark done/failed(retry)。worker 经 `db.py` 边界访问 `kb_ingest_jobs`,**不 import platform**(护栏强制)。
 
 ### D2:唯一消费者 / 单一写入方
 

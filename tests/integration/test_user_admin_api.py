@@ -271,6 +271,27 @@ def test_admin_block_user_and_audit(client):
     assert any(row["target_id"] == uid for row in audit_rows)
 
 
+def test_admin_audit_filters_by_time_range(client):
+    token, _ = _session_for("admin")
+    uid = client.post(
+        "/admin/users", headers=_hdr(token), json={"email": "tr@x.com", "name": "Tr"}
+    ).json()["id"]
+    client.post(f"/admin/users/{uid}/block", headers=_hdr(token), json={"reason": "abuse"})
+
+    # An `until` in the far past excludes the just-written row.
+    past = client.get(
+        "/admin/audit?action=block_user&until=2000-01-01T00:00:00", headers=_hdr(token)
+    ).json()
+    assert past == []
+
+    # A wide since/until window includes it.
+    ranged = client.get(
+        "/admin/audit?action=block_user&since=2000-01-01T00:00:00&until=2999-01-01T00:00:00",
+        headers=_hdr(token),
+    ).json()
+    assert any(row["target_id"] == uid for row in ranged)
+
+
 def test_last_active_admin_role_block_and_delete_are_rejected(client):
     token, admin_id = _session_for("admin")
 

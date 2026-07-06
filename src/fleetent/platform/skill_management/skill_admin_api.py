@@ -30,7 +30,7 @@ from fleetent.platform.reflection_management import (
     reflection_list_proposals,
     reflection_proposal_diff,
 )
-from fleetent.platform.skill_management import skill_admin_store
+from fleetent.platform.skill_management import git_source_store, skill_admin_store
 from fleetent.skills import audit as skill_audit
 from fleetent.skills import registry as skill_registry
 
@@ -241,9 +241,20 @@ def skill_content(name: str, authorization: str | None = Header(None)) -> dict[s
 # --- upload / create / edit ---------------------------------------------------
 
 
+def _reject_if_gitops() -> None:
+    """In GitOps mode (external git source enabled), skill content is read-only here."""
+    config = git_source_store.get_config()
+    if config and config.get("enabled"):
+        raise HTTPException(
+            status_code=409,
+            detail="skill content is managed via external git; edit it in the git repo (open a PR)",
+        )
+
+
 @router.post("")
 def create_skill(body: SkillBody, authorization: str | None = Header(None)) -> dict[str, Any]:
     user = _require_admin(authorization)
+    _reject_if_gitops()
     if not _validate_frontmatter(body.content):
         raise HTTPException(
             status_code=422, detail="invalid frontmatter (name/description required)"
@@ -345,6 +356,7 @@ async def import_skills_upload(
     means one skill; otherwise every immediate subdir with a SKILL.md is imported.
     """
     user = _require_admin(authorization)
+    _reject_if_gitops()
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         tops: set[str] = set()
@@ -385,6 +397,7 @@ def edit_skill(
     name: str, body: EditBody, authorization: str | None = Header(None)
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
+    _reject_if_gitops()
     if not _validate_frontmatter(body.content):
         raise HTTPException(
             status_code=422, detail="invalid frontmatter (name/description required)"
@@ -443,6 +456,7 @@ def archive_skill(
     x_confirm: str | None = Header(None),
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
+    _reject_if_gitops()
     occupants = skill_admin_store.agents_enabling(name)
     if occupants:
         raise HTTPException(
@@ -458,6 +472,7 @@ def archive_skill(
 @router.post("/{name}/restore")
 def restore_skill(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
     user = _require_admin(authorization)
+    _reject_if_gitops()
     skill_admin_store.set_status(name, "active")
     audit_log.write_audit(user.id, "skill.restore", "skill", name)
     return {"name": name, "status": "active"}
@@ -493,6 +508,7 @@ def force_publish(
     x_confirm: str | None = Header(None),
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
+    _reject_if_gitops()
     _require_confirm(x_confirm)
     skill_admin_store.set_forced(name, True)
     skill_admin_store.set_status(name, "active")
@@ -513,14 +529,27 @@ def skill_observability(name: str, authorization: str | None = Header(None)) -> 
 # --- version history / diff (read-only) --------------------------------------
 
 
-def _pool_dir() -> "Path | None":
-    """Return the pool directory if it has a git repo, otherwise None."""
+def _pool_dir() -> "tuple[Path, str] | None":
+    """Return ``(git_root, skills_subdir)`` if the pool has a git repo, else None.
+
+    ``engine_skills_dir()`` is the skill *scan* root; when ``skills_subdir`` is
+    configured the git repo (``.git``) lives at the git root one level up, so the
+    ``_is_git_repo`` check MUST run against the git root, not the scan root. Both callers
+    read version history/diff only (no filesystem listing of skill dirs), so returning
+    the git root uniformly is safe here. ``skills_subdir`` is returned alongside so the
+    callers can thread it into ``pool_git`` without re-fetching the config per request.
+    """
     from pathlib import Path
 
-    from fleetent.platform.skill_management.pool_git import _is_git_repo
+    from fleetent.platform.skill_management import pool_git
 
-    d = Path(engine_skills_dir())
-    return d if d.exists() and _is_git_repo(d) else None
+    scan_dir = Path(engine_skills_dir())
+    config = git_source_store.get_config()
+    subdir = (config.get("skills_subdir") or "") if config is not None else ""
+    git_root = pool_git.resolve_git_root(scan_dir, subdir)
+    if git_root.exists() and pool_git._is_git_repo(git_root):
+        return git_root, subdir
+    return None
 
 
 @router.get("/{name}/versions")
@@ -530,12 +559,13 @@ def skill_versions(name: str, authorization: str | None = Header(None)) -> list[
     Entries are sorted newest-first, each containing sha, message, author, timestamp.
     """
     _current_user(authorization)
-    pool = _pool_dir()
-    if pool is None:
+    resolved = _pool_dir()
+    if resolved is None:
         return []
+    git_root, subdir = resolved
     from fleetent.platform.skill_management.pool_git import pool_skill_history
 
-    return pool_skill_history(pool, name)
+    return pool_skill_history(git_root, name, subdir=subdir)
 
 
 @router.get("/{name}/versions/{ref}/diff")
@@ -548,12 +578,13 @@ def skill_version_diff(
     Never silently truncates.
     """
     _current_user(authorization)
-    pool = _pool_dir()
-    if pool is None:
+    resolved = _pool_dir()
+    if resolved is None:
         raise HTTPException(status_code=404, detail="pool has no version history")
+    git_root, subdir = resolved
     from fleetent.platform.skill_management.pool_git import pool_diff_for_commit
 
-    result = pool_diff_for_commit(pool, name, ref)
+    result = pool_diff_for_commit(git_root, name, ref, subdir=subdir)
     if result.get("error"):
         raise HTTPException(status_code=404, detail=result["error"])
     return result

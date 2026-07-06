@@ -1,0 +1,117 @@
+from __future__ import annotations
+
+import argparse
+import sys
+import time
+from pathlib import Path
+
+from fleetent import kb_ingest_jobs
+from fleetent.knowledge_base.service_config import resolve_kb_command_scope
+from fleetent.knowledge_base.worker import _require_active_kb
+
+_POLL_INTERVAL_SECONDS = 0.25
+_WAIT_TIMEOUT_SECONDS = 30.0
+
+
+def _parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="fleetent kb ingest")
+    parser.add_argument("--config", required=True, help="standalone kb-service.yaml path")
+    parser.add_argument(
+        "--tenant", default="", help="target tenant when using host kb-service.yaml"
+    )
+    parser.add_argument("--kb", required=True, help="target knowledge base id")
+    parser.add_argument("--wait", action="store_true", help="wait for the queued job to finish")
+    parser.add_argument("path", help="local directory or single file to ingest")
+    return parser.parse_args(argv)
+
+
+def _require_known_kb(
+    tenant_id: str, kb_id: str, *, data_dir: Path, multi_tenant_root: bool = False
+) -> None:
+    try:
+        _require_active_kb(
+            tenant_id,
+            kb_id,
+            data_dir=data_dir,
+            multi_tenant_root=multi_tenant_root,
+        )
+    except ValueError as exc:
+        raise ValueError(
+            f"KB {kb_id!r} does not exist for tenant {tenant_id!r}. "
+            "Create it first via POST /admin/kb."
+        ) from exc
+
+
+def _print_summary(job: dict[str, object]) -> None:
+    result = kb_ingest_jobs.get_job_result(job) or {}
+    print(
+        " ".join(
+            [
+                f"scanned={int(result.get('scanned', 0))}",
+                f"ingested={int(result.get('ingested', 0))}",
+                f"skipped={int(result.get('skipped', 0))}",
+                f"failed={int(result.get('failed', 0))}",
+            ]
+        )
+    )
+
+
+def _wait_for_job(
+    job_id: str,
+    *,
+    database_url: str,
+    timeout_seconds: float = _WAIT_TIMEOUT_SECONDS,
+) -> None:
+    started_at = time.monotonic()
+    while True:
+        job = kb_ingest_jobs.get_job(job_id, database_url=database_url)
+        if job is None:
+            print(f"job {job_id} disappeared from queue", file=sys.stderr)
+            raise SystemExit(1)
+
+        status = str(job["status"])
+        if status == "done":
+            _print_summary(job)
+            return
+        if status == "failed":
+            _print_summary(job)
+            last_error = str(job.get("last_error") or "unknown job failure")
+            print(f"job failed: {last_error}", file=sys.stderr)
+            raise SystemExit(1)
+
+        if time.monotonic() - started_at >= timeout_seconds:
+            print(
+                f"timed out waiting for ingest job {job_id}; check whether kb-worker is running",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        time.sleep(_POLL_INTERVAL_SECONDS)
+
+
+def main(argv: list[str] | None = None) -> None:
+    try:
+        ns = _parse_args(argv or [])
+        scope = resolve_kb_command_scope(Path(ns.config).expanduser(), tenant_id=str(ns.tenant))
+        tenant_id = scope.tenant_id
+        kb_id = str(ns.kb)
+        target_path = Path(ns.path).expanduser().resolve()
+        database_url = scope.queue_database_url
+
+        _require_known_kb(
+            tenant_id,
+            kb_id,
+            data_dir=scope.data_dir,
+            multi_tenant_root=scope.multi_tenant_root,
+        )
+        job = kb_ingest_jobs.enqueue_job(
+            job_type="sync_directory",
+            tenant_id=tenant_id,
+            kb_id=kb_id,
+            connector_ref={"path": str(target_path)},
+            database_url=database_url,
+        )
+        if ns.wait:
+            _wait_for_job(str(job["id"]), database_url=database_url)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1) from exc

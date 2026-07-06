@@ -33,36 +33,45 @@ def test_kb_service_init_config_defaults_to_default_tenant_home_outside_repo_cwd
     monkeypatch.chdir(outside_repo)
     monkeypatch.setenv("FLEETENT_HOME", str(home_dir))
 
-    out, err, code = _run_cli("kb-service", "init-config")
+    out, err, code = _run_cli("kb", "init-config")
 
     assert code == 0
     assert err == ""
-    assert "create tenants/default/kb/kb-service.yaml" in out
+    assert "create kb-service.yaml" in out
+    assert "create tenants/default/kb/connectors.yaml" in out
     assert "create tenants/default/kb/.env" in out
-    assert "next: review tenants/default/kb/kb-service.yaml and tenants/default/kb/.env" in out
-    config_path = home_dir / "tenants" / "default" / "kb" / "kb-service.yaml"
+    assert "next: review kb-service.yaml and tenants/default/kb/connectors.yaml" in out
+    config_path = home_dir / "kb-service.yaml"
+    connectors_path = home_dir / "tenants" / "default" / "kb" / "connectors.yaml"
     env_path = home_dir / "tenants" / "default" / "kb" / ".env"
     assert config_path.exists()
+    assert connectors_path.exists()
     assert env_path.exists()
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert config["service"]["tenant_id"] == "default"
-    assert config["data"]["home"] == "./data"
+    assert "tenant_id" not in config["service"]
+    assert "connectors" not in config
+    connectors = yaml.safe_load(connectors_path.read_text(encoding="utf-8"))
+    assert [connector["enabled"] for connector in connectors["connectors"]] == [False, False]
 
 
 def test_kb_service_init_config_creates_requested_tenant_home(monkeypatch, tmp_path: Path) -> None:
     home_dir = tmp_path / "home"
     monkeypatch.setenv("FLEETENT_HOME", str(home_dir))
 
-    out, err, code = _run_cli("kb-service", "init-config", "--tenant", "acme")
+    out, err, code = _run_cli("kb", "init-config", "--tenant", "acme")
 
     assert code == 0
     assert err == ""
-    assert "create tenants/acme/kb/kb-service.yaml" in out
+    assert "create kb-service.yaml" in out
+    assert "create tenants/acme/kb/connectors.yaml" in out
     assert "create tenants/acme/kb/.env" in out
-    assert "next: review tenants/acme/kb/kb-service.yaml and tenants/acme/kb/.env" in out
-    config_path = home_dir / "tenants" / "acme" / "kb" / "kb-service.yaml"
+    assert "next: review kb-service.yaml and tenants/acme/kb/connectors.yaml" in out
+    config_path = home_dir / "kb-service.yaml"
+    connectors_path = home_dir / "tenants" / "acme" / "kb" / "connectors.yaml"
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert config["service"]["tenant_id"] == "acme"
+    connectors = yaml.safe_load(connectors_path.read_text(encoding="utf-8"))
+    assert "tenant_id" not in config["service"]
+    assert [connector["enabled"] for connector in connectors["connectors"]] == [False, False]
 
 
 def test_kb_service_init_config_skips_existing_and_force_overwrites_within_tenant_home(
@@ -71,26 +80,32 @@ def test_kb_service_init_config_skips_existing_and_force_overwrites_within_tenan
     home_dir = tmp_path / "home"
     service_dir = home_dir / "tenants" / "tenant-a" / "kb"
     service_dir.mkdir(parents=True)
-    yaml_path = service_dir / "kb-service.yaml"
+    yaml_path = home_dir / "kb-service.yaml"
+    connectors_path = service_dir / "connectors.yaml"
     env_path = service_dir / ".env"
     yaml_path.write_text("tenant: existing\n", encoding="utf-8")
+    connectors_path.write_text("connectors: []\n", encoding="utf-8")
     env_path.write_text("KB_SERVICE_KEY=existing\n", encoding="utf-8")
     monkeypatch.setenv("FLEETENT_HOME", str(home_dir))
 
-    out, err, code = _run_cli("kb-service", "init-config", "--tenant", "tenant-a")
+    out, err, code = _run_cli("kb", "init-config", "--tenant", "tenant-a")
 
     assert code == 0
     assert err == ""
-    assert "skip tenants/tenant-a/kb/kb-service.yaml" in out
+    assert "skip kb-service.yaml" in out
+    assert "skip tenants/tenant-a/kb/connectors.yaml" in out
     assert "skip tenants/tenant-a/kb/.env" in out
     assert yaml_path.read_text(encoding="utf-8") == "tenant: existing\n"
+    assert connectors_path.read_text(encoding="utf-8") == "connectors: []\n"
     assert env_path.read_text(encoding="utf-8") == "KB_SERVICE_KEY=existing\n"
 
-    out, err, code = _run_cli("kb-service", "init-config", "--tenant", "tenant-a", "--force")
+    out, err, code = _run_cli("kb", "init-config", "--tenant", "tenant-a", "--force")
 
     assert code == 0
     assert err == ""
-    assert "overwrite tenants/tenant-a/kb/kb-service.yaml" in out
+    assert "overwrite kb-service.yaml" in out
+    assert "overwrite tenants/tenant-a/kb/connectors.yaml" in out
     assert "overwrite tenants/tenant-a/kb/.env" in out
     assert yaml_path.read_text(encoding="utf-8") != "tenant: existing\n"
+    assert connectors_path.read_text(encoding="utf-8") != "connectors: []\n"
     assert env_path.read_text(encoding="utf-8") != "KB_SERVICE_KEY=existing\n"

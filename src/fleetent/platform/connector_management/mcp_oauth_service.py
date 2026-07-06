@@ -27,10 +27,16 @@ _REFRESH_SKEW_SECONDS = 30.0
 # from agent_secrets, mirroring user_store.set_api_key_resolver. Kept as a seam so this
 # ②控制-face module does not import the ③编排-face agent_lifecycle (plane boundary). When
 # unset (no platform wiring / PKCE public clients), there is no client secret.
-_client_secret_resolver: Callable[[int | None, str], str | None] | None = None
+#
+# The resolver receives the runtime triple's agent identity verbatim — a *name* in the
+# managed path (or a numeric id, or None). Mapping that identity to the agent_secrets
+# scope (name→registry id) and the global-scope fallback both live in the injected
+# resolver at the composition root, which may import agent_store; this module stays off
+# agent_lifecycle/agent_store.
+_client_secret_resolver: Callable[[str | None, str], str | None] | None = None
 
 
-def set_client_secret_resolver(resolver: Callable[[int | None, str], str | None] | None) -> None:
+def set_client_secret_resolver(resolver: Callable[[str | None, str], str | None] | None) -> None:
     global _client_secret_resolver
     _client_secret_resolver = resolver
 
@@ -43,19 +49,16 @@ class CallbackOutcome:
 
 
 def _resolve_client_secret(agent_id: str, client_secret_env: str) -> str:
-    """Resolve a client_secret env reference via agent_secrets, best-effort by scope.
+    """Resolve a client_secret env reference via the injected resolver.
 
     PKCE public clients have no secret (empty env ref -> empty secret). When a ref is set,
-    look it up under the agent's scope (agent_id is a string in the runtime triple; numeric
-    ids map to the registry agent scope), falling back to the global (None) scope.
+    the runtime triple's agent identity (a *name* in the managed path, a numeric id, or an
+    empty string) is handed to the injected resolver verbatim; the resolver owns the
+    name→registry-id scope mapping and the global-scope fallback (see server.py wiring).
     """
     if not client_secret_env or _client_secret_resolver is None:
         return ""
-    scoped = int(agent_id) if agent_id.isdigit() else None
-    value = _client_secret_resolver(scoped, client_secret_env)
-    if value is None and scoped is not None:
-        value = _client_secret_resolver(None, client_secret_env)
-    return value or ""
+    return _client_secret_resolver(agent_id or None, client_secret_env) or ""
 
 
 def register_pending(

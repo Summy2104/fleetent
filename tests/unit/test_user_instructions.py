@@ -12,8 +12,8 @@ from fleetent import paths
 from fleetent.runtime import user_instructions as ui
 
 
-def _user_md(agent_id: str) -> Path:
-    return paths.agent_home_dir(agent_id) / ui.USER_MD_FILENAME
+def _user_md(agent_name: str) -> Path:
+    return paths.agent_home_dir(agent_name) / ui.USER_MD_FILENAME
 
 
 # --- load -------------------------------------------------------------------

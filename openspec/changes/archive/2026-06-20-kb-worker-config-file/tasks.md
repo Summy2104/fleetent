@@ -1,6 +1,6 @@
 ## 前置条件
 
-**`kb-worker` 已落地 main**(`fleetent kb-worker` 进程 + 消费循环)。apply 前确认。
+**`kb-worker` 已落地 main**(`fleetent kb worker` 进程 + 消费循环)。apply 前确认。
 
 ## 1. worker 从 .env 加载自身配置
 

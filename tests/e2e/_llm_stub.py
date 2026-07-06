@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import threading
 from collections.abc import AsyncIterator
@@ -32,6 +33,11 @@ class ChatRequest(BaseModel):
     stream: bool = False
 
 
+class EmbeddingRequest(BaseModel):
+    model: str
+    input: str | list[str]
+
+
 def _has_tool_result(messages: list[ChatMessage]) -> bool:
     return any(m.role == "tool" for m in messages)
 
@@ -51,6 +57,12 @@ def _reply_text(messages: list[ChatMessage]) -> str:
     user_parts = [message.content or "" for message in messages if message.role == "user"]
     prompt = " ".join(part.strip() for part in user_parts if part.strip()) or "empty prompt"
     return f"stub: {prompt}"
+
+
+def _embedding_for(text: str, *, dimensions: int = 64) -> list[float]:
+    digest = hashlib.sha256(text.encode("utf-8")).digest()
+    values = [digest[index % len(digest)] / 255.0 for index in range(dimensions)]
+    return values
 
 
 def _sse_chunk(payload: dict[str, Any]) -> bytes:
@@ -237,5 +249,21 @@ async def chat_completions(body: ChatRequest):
                     "finish_reason": "stop",
                 }
             ],
+        }
+    )
+
+
+@app.post("/v1/embeddings")
+async def embeddings(body: EmbeddingRequest):
+    inputs = body.input if isinstance(body.input, list) else [body.input]
+    data = [
+        {"object": "embedding", "index": index, "embedding": _embedding_for(text)}
+        for index, text in enumerate(inputs)
+    ]
+    return JSONResponse(
+        {
+            "object": "list",
+            "data": data,
+            "model": body.model,
         }
     )

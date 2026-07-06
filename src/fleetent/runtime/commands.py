@@ -29,7 +29,7 @@ _logger = get_logger("runtime.commands")
 class CommandContext:
     """Per-invocation identity threaded from each entrypoint into a command."""
 
-    agent_id: str | None
+    agent_name: str | None
     session_id: str | None
     user_id: str | None
 
@@ -78,9 +78,9 @@ async def handle_command(ctx: CommandContext, text: str) -> str | None:
 
 @_register("user", requires_session=False)
 async def _cmd_user(ctx: CommandContext, text: str) -> str:
-    if not ctx.agent_id:
+    if not ctx.agent_name:
         return "未绑定 agent,无法管理用户指令。"
-    return user_instructions.handle_user_command(ctx.agent_id, text) or "用法:/user [内容|clear]"
+    return user_instructions.handle_user_command(ctx.agent_name, text) or "用法:/user [内容|clear]"
 
 
 @_register("clear", requires_session=True)
@@ -97,7 +97,7 @@ async def _cmd_compact(ctx: CommandContext, text: str) -> str:
         msgs = await session_mgr.load(sid)
         before, before_tok = len(msgs), context.estimate_tokens(msgs)
         new = context.maybe_compress(
-            msgs, force=True, session_id=sid, user_id=ctx.user_id, agent_name=ctx.agent_id
+            msgs, force=True, session_id=sid, user_id=ctx.user_id, agent_name=ctx.agent_name
         )
         await session_mgr.save(sid, new)
     after, after_tok = len(new), context.estimate_tokens(new)
@@ -110,7 +110,7 @@ async def _cmd_context(ctx: CommandContext, text: str) -> str:
 
     msgs = await session_mgr.load(str(ctx.session_id))
     tok = context.estimate_tokens(msgs)
-    agent = agent_config.current().get(ctx.agent_id) if ctx.agent_id else None
+    agent = agent_config.current().get(ctx.agent_name) if ctx.agent_name else None
     pct = ""
     if agent is not None and agent.context_max_tokens:
         pct = f",约占上限 {agent.context_max_tokens} 的 {tok * 100 // agent.context_max_tokens}%"
@@ -121,7 +121,7 @@ async def _cmd_context(ctx: CommandContext, text: str) -> str:
 async def _cmd_usage(ctx: CommandContext, text: str) -> str:
     from fleetent.observability.usage import UsageQuery, get_usage_summary
 
-    s = get_usage_summary(UsageQuery(session_id=ctx.session_id, agent_name=ctx.agent_id))
+    s = get_usage_summary(UsageQuery(session_id=ctx.session_id, agent_name=ctx.agent_name))
     return (
         f"📊 本会话用量:{s.run_count} 次运行,"
         f"{s.prompt_tokens} prompt + {s.completion_tokens} completion = {s.total_tokens} tokens。"
@@ -133,8 +133,8 @@ async def _cmd_cost(ctx: CommandContext, text: str) -> str:
     from fleetent import agent_config
     from fleetent.observability.usage import UsageQuery, get_usage_summary
 
-    s = get_usage_summary(UsageQuery(session_id=ctx.session_id, agent_name=ctx.agent_id))
-    agent = agent_config.current().get(ctx.agent_id) if ctx.agent_id else None
+    s = get_usage_summary(UsageQuery(session_id=ctx.session_id, agent_name=ctx.agent_name))
+    agent = agent_config.current().get(ctx.agent_name) if ctx.agent_name else None
     cap = agent.agent_max_tokens if agent and agent.agent_max_tokens > 0 else None
     cap_txt = f",每轮 token 上限 {cap}" if cap else ""
     # fleetent has no USD pricing model — report a token/budget view, not dollars.

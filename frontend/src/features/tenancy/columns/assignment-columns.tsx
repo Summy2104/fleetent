@@ -1,0 +1,54 @@
+import type { ColumnDef } from '@tanstack/react-table'
+
+import type { TenantListItem } from '@/features/tenancy/api'
+import { AssignmentRowActions } from '@/features/tenancy/row-actions/assignment-row-actions'
+import type { TenancyUser } from '@/features/tenancy/shared'
+import type { useT } from '@/i18n'
+import { labelWithId } from '@/lib/labels'
+
+type Translate = ReturnType<typeof useT>
+
+export function buildAssignmentColumns({
+  t,
+  canWrite,
+  tenants,
+}: {
+  t: Translate
+  canWrite: boolean
+  tenants: TenantListItem[]
+}): ColumnDef<TenancyUser, unknown>[] {
+  return [
+    {
+      accessorKey: 'name',
+      header: t('tenancy.colUser'),
+      meta: { title: t('tenancy.colUser') },
+      cell: ({ row }) => <span className="font-medium text-foreground text-sm">{row.original.name}</span>,
+    },
+    {
+      accessorKey: 'tenant_id',
+      header: t('tenancy.colTenant'),
+      filterFn: 'equals',
+      meta: {
+        title: t('tenancy.colTenant'),
+        filter: { type: 'select', options: tenants.map((tenant) => ({ label: tenant.name, value: tenant.id })) },
+      },
+      cell: ({ row }) =>
+        row.original.tenant_id
+          ? t('tenancy.assignmentLine', {
+              name: row.original.name,
+              tenant: labelWithId(
+                tenants.find((tenant) => tenant.id === row.original.tenant_id)?.name,
+                row.original.tenant_id
+              ),
+            })
+          : t('tenancy.unassigned'),
+    },
+    {
+      id: 'actions',
+      header: '',
+      enableSorting: false,
+      enableHiding: false,
+      cell: ({ row }) => <AssignmentRowActions canWrite={canWrite} tenants={tenants} user={row.original} />,
+    },
+  ]
+}

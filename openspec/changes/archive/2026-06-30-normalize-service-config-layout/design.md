@@ -17,7 +17,7 @@ pyproject 用 hatch(`[tool.hatch.build.targets.wheel] packages=["src/fleetent"]`
 - 不动 flat-at-root 标准、不引入 `examples/<role>/`/`config/`。
 - 不改 platform 生成布局(扁平,management.db 在根)。
 - 不拆根 `.env` grab-bag(单独 backlog)。
-- 不改 KB(align-kb 已处理 kb-service init-config + example 搬根)。
+- 不改 KB(align-kb 已处理 `kb-service` `init-config` + example 搬根)。
 
 ## Decisions
 
@@ -26,7 +26,7 @@ pyproject 用 hatch(`[tool.hatch.build.targets.wheel] packages=["src/fleetent"]`
 - **为什么**:wheel `packages=["src/fleetent"]` 只打 src;根模板需显式 force-include 才进 wheel。读取统一走包资源,装好/源码两种环境都成立。
 
 ### 决策:与 align-kb 共用同一打包读取机制
-- align-kb 已为 `kb-service init-config` 建打包读取 + 把 kb-service example 搬根。本 change **复用同一机制**,把 `platform`/`node` init-config 也切过去,并把其余根 `*.example` 一并纳入 package data。故**须在 align-kb 之后执行**。
+- align-kb 已为 ``kb-service` `init-config`` 建打包读取 + 把 kb-service example 搬根。本 change **复用同一机制**,把 `platform`/`node` init-config 也切过去,并把其余根 `*.example` 一并纳入 package data。故**须在 align-kb 之后执行**。
 
 ### 决策:spec canonical 集合修正,维持 flat-at-root
 - "exactly these 4" → 真实集合(+node/kb,全平铺在根)。明确"不存在 `examples/kb-service/`""不用 `config/`/`examples/<role>/` namespace""example 纳入 package data"。

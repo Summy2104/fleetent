@@ -31,9 +31,119 @@ APPROVALS_PATH = paths.data_dir() / "im_approvals.json"
 # preserves native channel-id passthrough semantics.
 _im_identity_resolver: Callable[[str, str, str], str] | None = None
 
+# Injectable hook for reverse-resolving an internal user_id to its bound IM addresses
+# (directed-reach). Standalone leaves it unset (no im_users) → resolves to empty. Managed
+# wires an AgentAddressResolver that queries platform via the node loopback.
+_im_address_resolver: Callable[[str], list[dict[str, str]]] | None = None
+
+# Injectable hook for confirming an inbound ``/link <code>`` command (agent-hosted-im). Managed
+# wires an AgentLinkConfirmer (node loopback → platform link-confirm); standalone leaves it unset
+# so ``/link`` is not applicable (no node/platform to confirm against) → confirm_link returns None.
+_im_link_confirmer: Callable[[str, str, str], tuple[bool, str]] | None = None
+
 
 class IMIdentityResolutionError(RuntimeError):
     """Injected platform-side identity resolution rejected an inbound IM identity."""
+
+
+class AgentIdentityResolver:
+    """Managed agent-side identity resolver: platform_user_id → internal user_id via node
+    loopback (agent-hosted-im). Authenticates to node with the agent's own TUI token; node
+    forwards to platform holding the service key. No platform import, no service key held.
+    """
+
+    def __init__(
+        self, *, loopback_url: str, tui_token: str, agent_name: str, tenant_id: str = "default"
+    ) -> None:
+        self._loopback_url = loopback_url.rstrip("/")
+        self._tui_token = tui_token
+        self._agent_name = agent_name
+        self._tenant_id = tenant_id
+
+    def __call__(self, owner_id: str, platform: str, platform_user_id: str) -> str:
+        import httpx
+
+        resp = httpx.post(
+            f"{self._loopback_url}/agent/{self._agent_name}/identity/resolve",
+            headers={"Authorization": f"Bearer {self._tui_token}"},
+            json={
+                "tenant_id": self._tenant_id,
+                "channel": platform,
+                "platform_user_id": platform_user_id,
+            },
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        user_id = dict(resp.json()).get("user_id")
+        if not isinstance(user_id, str) or not user_id:
+            raise IMIdentityResolutionError("loopback identity response missing user_id")
+        return user_id
+
+
+class AgentAddressResolver:
+    """Managed agent-side reverse address resolver: user_id → [(platform, platform_user_id)]
+    via node loopback (agent-hosted-im), for directed-reach fan-out."""
+
+    def __init__(self, *, loopback_url: str, tui_token: str, agent_name: str) -> None:
+        self._loopback_url = loopback_url.rstrip("/")
+        self._tui_token = tui_token
+        self._agent_name = agent_name
+
+    def resolve(self, user_id: str) -> list[dict[str, str]]:
+        import httpx
+
+        resp = httpx.post(
+            f"{self._loopback_url}/agent/{self._agent_name}/identity/addresses",
+            headers={"Authorization": f"Bearer {self._tui_token}"},
+            json={"user_id": user_id},
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        addresses = dict(resp.json()).get("addresses", [])
+        return [dict(a) for a in addresses if isinstance(a, dict)]
+
+    def __call__(self, user_id: str) -> list[dict[str, str]]:
+        return self.resolve(user_id)
+
+
+class AgentLinkConfirmer:
+    """Managed agent-side ``/link`` confirmer: confirm an IM account linkage via node loopback
+    (agent-hosted-im). The agent self-hosts its IM connection and handles the inbound
+    ``/link <code>`` command in-process, proxying the confirmation through the node loopback with
+    its own TUI token; node forwards to platform holding the service key. No platform import.
+    """
+
+    def __init__(self, *, loopback_url: str, tui_token: str, agent_name: str) -> None:
+        self._loopback_url = loopback_url.rstrip("/")
+        self._tui_token = tui_token
+        self._agent_name = agent_name
+
+    def confirm(self, platform: str, platform_user_id: str, code: str) -> tuple[bool, str]:
+        """Confirm the link code, returning ``(ok, detail)``; never raises (best-effort)."""
+        import httpx
+
+        try:
+            resp = httpx.post(
+                f"{self._loopback_url}/agent/{self._agent_name}/link-confirm",
+                headers={"Authorization": f"Bearer {self._tui_token}"},
+                json={"platform": platform, "platform_user_id": platform_user_id, "code": code},
+                timeout=10.0,
+            )
+        except Exception as exc:  # noqa: BLE001 — surface a clean failure detail, never raise
+            return (False, str(exc))
+        if resp.status_code == 200:
+            return (True, "")
+        detail = "Link failed."
+        try:
+            raw = dict(resp.json()).get("detail")
+            if isinstance(raw, str) and raw:
+                detail = f"Link failed: {raw}"
+        except Exception:  # noqa: BLE001 — non-JSON error body → generic detail
+            pass
+        return (False, detail)
+
+    def __call__(self, platform: str, platform_user_id: str, code: str) -> tuple[bool, str]:
+        return self.confirm(platform, platform_user_id, code)
 
 
 class LocalApprovalStore:
@@ -94,16 +204,89 @@ def set_im_identity_resolver(resolver: Callable[[str, str, str], str] | None) ->
     _im_identity_resolver = resolver
 
 
+def set_im_address_resolver(resolver: Callable[[str], list[dict[str, str]]] | None) -> None:
+    """Wire the reverse address resolver (user_id → IM addresses) for directed-reach.
+
+    Managed wires an :class:`AgentAddressResolver` (node loopback); standalone leaves it
+    unset so :func:`resolve_addresses` returns empty (no im_users to reverse-lookup).
+    """
+    global _im_address_resolver
+    _im_address_resolver = resolver
+
+
+def resolve_addresses(user_id: str) -> list[dict[str, str]]:
+    """Reverse-resolve a user_id to its bound IM addresses, or [] when unresolvable."""
+    if _im_address_resolver is None:
+        return []
+    return _im_address_resolver(user_id)
+
+
+def set_im_link_confirmer(
+    confirmer: Callable[[str, str, str], tuple[bool, str]] | None,
+) -> None:
+    """Wire the ``/link`` confirmer (agent-hosted-im). Managed wires an
+    :class:`AgentLinkConfirmer` (node loopback); standalone leaves it unset."""
+    global _im_link_confirmer
+    _im_link_confirmer = confirmer
+
+
+def confirm_link_available() -> bool:
+    """Whether a ``/link`` confirmer is wired (managed). Standalone → False (not applicable)."""
+    return _im_link_confirmer is not None
+
+
+def confirm_link(platform: str, platform_user_id: str, code: str) -> tuple[bool, str] | None:
+    """Confirm an inbound ``/link <code>`` linkage, or ``None`` when not applicable (standalone).
+
+    Returns ``(ok, detail)`` when a confirmer is wired (managed): ``ok`` is whether the linkage
+    succeeded and ``detail`` a human-readable failure reason (empty on success).
+    """
+    if _im_link_confirmer is None:
+        return None
+    return _im_link_confirmer(platform, platform_user_id, code)
+
+
+# AAA-8204 #1: non-real IM identities that must never be resolved/provisioned. A broken
+# Slack assistant-thread context yields no user; a caller that fabricates one of these would
+# otherwise make the injected resolver auto-create a ghost user (e.g. ``slack:unknown``) that
+# then fails the access gate and blocks the real, authorized user at random.
+_NON_REAL_IM_IDENTITIES = frozenset({"", "unknown"})
+
+
 def resolve_identity(platform: str, platform_user_id: str, owner_id: str = "default") -> str:
     """Resolve a stable per-agent identity for an incoming IM message — no platform DB.
 
     The agent runtime uses the platform-native IM user id directly as the identity, so
     it never reads the platform ``user_store``. Author-facing ``allow_users`` entries in
     the binding's access block are matched against this same native id.
+
+    Raises ``IMIdentityResolutionError`` for a non-real id (empty / ``unknown``) BEFORE the
+    injected resolver runs, so no ghost user is ever provisioned; the caller must discard the
+    event with a warning rather than fabricate an identity (AAA-8204 #1).
     """
+    if (platform_user_id or "").strip().lower() in _NON_REAL_IM_IDENTITIES:
+        raise IMIdentityResolutionError(f"non-real IM identity: {platform_user_id!r}")
     if _im_identity_resolver is not None:
         return _im_identity_resolver(owner_id, platform, platform_user_id)
     return platform_user_id
+
+
+def resolve_decision_actor(platform: str, platform_user_id: str, agent_name: str) -> str | None:
+    """Resolve an IM approval decision actor into the run principal's identity space.
+
+    The permission gate records authorized decision actors as the run's ``principal.user_id`` —
+    under managed identity resolution that is the internal user id, not the raw platform id.
+    Approval button-click / text-command handlers must resolve the acting user through the same
+    ``resolve_identity`` seam used for inbound messages, so the gate's authorization check
+    compares like-for-like. Standalone (no injected resolver) returns the raw platform id
+    unchanged, so single-identity-space deployments are unaffected. A non-real / unresolvable
+    id returns ``None`` (fail closed — the caller rejects the decision, never authorizing a
+    fabricated actor).
+    """
+    try:
+        return resolve_identity(platform, platform_user_id, agent_name or "default")
+    except IMIdentityResolutionError:
+        return None
 
 
 def resolve_principal(

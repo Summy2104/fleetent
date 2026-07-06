@@ -6,21 +6,29 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import structlog
-
 from fleetent import agent_config
 from fleetent.agent_config import AgentFile, ImAccess
 from fleetent.identity import Principal
 from fleetent.im_gateway import access
 from fleetent.runtime import user_instructions
 from fleetent.runtime.approval_resume import resume_pending_approval
+from fleetent.structured_logging import get_logger
 
-logger = structlog.get_logger(__name__)
+logger = get_logger(__name__)
 
 _SYSTEM = "You are a helpful assistant with access to tools. Use them when needed."
 _APPROVAL_RE = re.compile(r"^(approve|reject)(\s+always)?\s+([a-f0-9-]{6,36})\s*$", re.IGNORECASE)
 # Channels require @-mentioning the bot, so inbound text carries a leading `<@id>`.
 _LEADING_MENTION_RE = re.compile(r"^\s*<@[^>]+>\s*")
+# DM / Assistant-panel users type a plain-text "@Display Name" that is NOT a real Slack
+# mention (no `<@id>`), and the bot's display name may contain spaces ("@R. Alpha"), so it
+# is not one token. Strip from a leading "@" up to the approve/reject verb so a command
+# typed behind a name is recognized; `_APPROVAL_RE`'s id check still rejects prose.
+_TEXT_MENTION_PREFIX_RE = re.compile(r"^@\S.*?(?=\b(?:approve|reject)\b)", re.IGNORECASE)
+# Approval ids are often copied with their markdown formatting — `id` / ```id``` / **id** —
+# so strip code/emphasis markers before matching. The id charset (hex + hyphen) never
+# legitimately contains backtick/asterisk, so prose still fails `_APPROVAL_RE`.
+_MD_FORMAT_RE = re.compile(r"[`*]+")
 _REJECTION_MSG = "你还没有权限使用此 bot，请联系管理员审批。"
 # harden-im-llm-timeout-handling P0: agent run 失败（超时/异常）时回给用户的兜底提示。
 # 经 reply_func 投递，因而同时清除 Slack loading 状态（见 im-progress-feedback）。
@@ -33,13 +41,26 @@ def _strip_leading_mention(text: str) -> str:
 
 
 def _match_approval_command(text: str) -> re.Match[str] | None:
-    """Match an approve/reject command, tolerating a leading bot mention (channel case).
+    """Match an approve/reject command, tolerating a leading bot mention.
 
-    Channel messages must @-mention the bot, so the command arrives as `<@id> approve <x>`;
-    stripping the leading mention lets the same ``_APPROVAL_RE`` match channel and DM alike.
-    The id-format check is unchanged, so prose like ``<@bot> approve the plan`` stays unmatched.
+    Two mention shapes are tolerated before the command:
+
+    * a real Slack mention ``<@id>`` — channel messages must @-mention the bot, so the
+      command arrives as ``<@id> approve <x>``;
+    * a plain-text ``@Display Name`` typed in a DM / Assistant panel, whose display name
+      may contain spaces (``@R. Alpha approve <x>``) and is therefore not a single token.
+
+    Either way the id-format check in ``_APPROVAL_RE`` is unchanged, so prose such as
+    ``@bot approve the plan`` (invalid id) stays unmatched. Markdown wrapping the id
+    (``approve `id` `` / ``approve **id**``) is stripped first so a copied-formatted command
+    still matches.
     """
-    return _APPROVAL_RE.match(_strip_leading_mention(text).strip())
+    stripped = _MD_FORMAT_RE.sub("", _strip_leading_mention(text)).strip()
+    m = _APPROVAL_RE.match(stripped)
+    if m is not None or not stripped.startswith("@"):
+        return m
+    # Real-mention strip left a leading plain-text "@name" — drop it up to the verb, retry.
+    return _APPROVAL_RE.match(_TEXT_MENTION_PREFIX_RE.sub("", stripped, count=1).strip())
 
 
 def _current_date_tz() -> tuple[str, str]:
@@ -358,6 +379,7 @@ async def _resume_pending_in_session(
     from fleetent import outbound
     from fleetent.integrations.sandbox import enablement as sandbox_enablement
     from fleetent.model import ModelPolicySnapshot
+    from fleetent.outbound_connectors import resolve_for_runtime
     from fleetent.runtime import loop as agent_loop
     from fleetent.runtime.snapshot import _governance_from_file
     from fleetent.session import manager as session_mgr
@@ -367,6 +389,14 @@ async def _resume_pending_in_session(
         agent = agent_config.current().get(msg.agent_name)
     else:
         agent = get_agent_for_context()
+
+    # approval-resume-resolve-outbound-connectors (⑥): resolve connectors exactly like a
+    # normal turn (loop.py). agent-hosted-im: the agent self-hosts its IM connection in all
+    # modes, so the approve command carries the live connector (adapter-injected) and this
+    # returns it unchanged. A managed miss fails fast to {} (logged), never a queue proxy.
+    resolved_connectors = resolve_for_runtime(
+        agent.name if agent else None, msg.outbound_connectors
+    )
 
     governance = _governance_from_file(agent) if agent else None
     allowed_tools = agent.allowed_tools if agent is not None and agent.allowed_tools else None
@@ -382,8 +412,8 @@ async def _resume_pending_in_session(
     address_dict = pending.get("address") if isinstance(pending, dict) else None
     if isinstance(address_dict, dict):
         addr = outbound.ConversationAddress.from_dict(address_dict)
-        reply_func = outbound.make_replier(msg.outbound_connectors, addr)
-        upload_func = outbound.make_uploader(msg.outbound_connectors, addr)
+        reply_func = outbound.make_replier(resolved_connectors, addr)
+        upload_func = outbound.make_uploader(resolved_connectors, addr)
         session_context: SessionContext | None = SessionContext(
             platform=addr.platform,
             sender_id=addr.user_id,
@@ -392,7 +422,7 @@ async def _resume_pending_in_session(
         )
         conversation_address: outbound.ConversationAddress | None = addr
     else:
-        logger.warning(
+        logger.warn(
             "approval_resume_missing_address", session_id=session_id, approval_id=approval_id
         )
         reply_func = msg.reply_func
@@ -415,7 +445,7 @@ async def _resume_pending_in_session(
         # /exchange attribution apply to the resumed (approved) tool, not just live turns.
         scope_key=agent_loop.resolve_scope_key(session_id, agent.name if agent else None),
         session_context=session_context,
-        outbound_connectors=msg.outbound_connectors,
+        outbound_connectors=resolved_connectors,
         run_id=str(uuid.uuid4()),
         delivery_ledger=shared_ledger,
     )
@@ -440,7 +470,7 @@ async def _resume_pending_in_session(
                 agent.permission_gate_high_timeout_seconds if agent else None
             ),
             approval_routing=agent.approval if agent else None,
-            outbound_connectors=msg.outbound_connectors,
+            outbound_connectors=resolved_connectors,
             progress_func=progress_func,
             session_context=session_context,
             conversation_address=conversation_address,
@@ -474,7 +504,49 @@ async def _resume_pending_in_session(
     return reply
 
 
+def _extract_link_code(text: str) -> str | None:
+    """Parse an inbound ``/link <code>`` command → the code, or None if not a link command."""
+    stripped = text.strip()
+    if not stripped.startswith("/link"):
+        return None
+    parts = stripped.split(maxsplit=1)
+    if len(parts) != 2 or not parts[1].strip():
+        return None
+    return parts[1].strip()
+
+
+async def _handle_link_command(msg: NormalizedMessage, code: str) -> None:
+    """Confirm an IM ``/link <code>`` via the injected confirmer (node loopback under managed).
+
+    agent-hosted-im (Group 5): after node exits the IM data plane, ``/link`` is handled in the
+    agent inbound path. The reverse-link maps the sender's platform id to their web identity, so
+    the sender id must come from the trusted ``session_context`` (never the free-text command).
+    """
+    sender_id = msg.session_context.sender_id if msg.session_context is not None else ""
+    if not sender_id:
+        await msg.reply_func("Link failed: missing sender identity.")
+        return
+    result = access.confirm_link(msg.platform, sender_id, code)
+    if result is None:
+        # No confirmer wired (standalone / dev) — /link is not applicable here.
+        await msg.reply_func("Linking is not available in this runtime.")
+        return
+    ok, detail = result
+    if ok:
+        await msg.reply_func(f"Linked {msg.platform} account to your web identity.")
+        return
+    await msg.reply_func(detail or "Link failed.")
+
+
 async def route(msg: NormalizedMessage, principal: Principal | None = None) -> None:
+    # /link <code> is a pre-loop command handled in the agent inbound path (agent-hosted-im).
+    # Only intercepted when a link confirmer is wired (managed); standalone falls through so a
+    # bare "/link ..." is treated as a normal message.
+    link_code = _extract_link_code(msg.text)
+    if link_code is not None and access.confirm_link_available():
+        await _handle_link_command(msg, link_code)
+        return
+
     # Approval commands bypass the agent loop entirely (tolerate a leading @mention, so
     # channel approvals — where the bot must be @-mentioned — are recognized too).
     m = _match_approval_command(msg.text)
@@ -498,7 +570,7 @@ async def route(msg: NormalizedMessage, principal: Principal | None = None) -> N
         try:
             row = approval_store.get_approval(approval_id)
         except Exception as exc:  # noqa: BLE001 — fall back to this message's session
-            logger.warning("approval_row_lookup_failed", approval_id=approval_id, error=str(exc))
+            logger.warn("approval_row_lookup_failed", approval_id=approval_id, exception=exc)
         session_id = str(row["session_id"]) if row and row.get("session_id") else msg.session_id
 
         # Recover authorized decision actors from the persisted pending entry so the
@@ -575,7 +647,11 @@ async def route(msg: NormalizedMessage, principal: Principal | None = None) -> N
         from fleetent.runtime.commands import CommandContext, handle_command
 
         cmd_reply = await handle_command(
-            CommandContext(agent_id=agent.name, session_id=msg.session_id, user_id=msg.user_id),
+            CommandContext(
+                agent_name=agent.name,
+                session_id=msg.session_id,
+                user_id=msg.user_id,
+            ),
             _strip_leading_mention(msg.text).strip(),
         )
         if cmd_reply is not None:
@@ -701,7 +777,7 @@ async def route(msg: NormalizedMessage, principal: Principal | None = None) -> N
                 logger.info("session_resumed", session_id=session_id)
                 session_mgr.clear_resume_pending(session_id)
         except Exception as exc:  # noqa: BLE001 — resume consume must not block the turn
-            logger.warning("session_resume_consume_failed", session_id=session_id, error=str(exc))
+            logger.warn("session_resume_consume_failed", session_id=session_id, exception=exc)
 
         # Replace existing system message or insert at position 0
         if history and isinstance(history[0], dict) and history[0].get("role") == "system":
@@ -799,12 +875,12 @@ async def route(msg: NormalizedMessage, principal: Principal | None = None) -> N
                 "agent_run_failed",
                 session_id=session_id,
                 error_type=type(exc).__name__,
-                error=str(exc),
+                exception=exc,
             )
             try:
                 await msg.reply_func(_RUN_FAILURE_MSG)
             except Exception as reply_exc:  # noqa: BLE001 — 兜底回帖失败仅记录，不再抛
-                logger.warning("run_failure_reply_failed", error=str(reply_exc))
+                logger.warn("run_failure_reply_failed", exception=reply_exc)
             await session_mgr.save(session_id, history)
             return
 

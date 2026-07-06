@@ -11,8 +11,9 @@
 `scripts/install-platform.sh` SHALL install fleetent, run Platform DB migrations on
 `$FLEETENT_HOME/management.db`, seed the built-in admin via `fleetent platform
 seed-builtin-admin`, and build the admin SPA (`make frontend-install && make
-frontend-build`) so the deployed platform can serve `/admin/ui`. If node/yarn is
-unavailable, the script SHALL install it (or fail with a clear, actionable message)
+frontend-build`) so the deployed platform can serve `/admin/ui`. If node is
+unavailable (corepack is bundled with Node and supplies the pinned pnpm version),
+the script SHALL install it (or fail with a clear, actionable message)
 rather than silently skip the build. It SHALL NOT create any agent home directories.
 The post-install start instruction SHALL use `fleetent platform serve`, not a bare
 uvicorn command.
@@ -30,7 +31,7 @@ uvicorn command.
 
 #### Scenario: missing node tooling is explicit
 
-- **WHEN** node/yarn is not available on the install host
+- **WHEN** node is not available on the install host (corepack, bundled with Node, supplies the pinned pnpm)
 - **THEN** the script installs it or aborts with a clear message and remediation, and SHALL NOT leave the platform with an unbuilt frontend silently
 
 #### Scenario: install prints platform serve command

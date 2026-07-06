@@ -87,7 +87,7 @@ async def _stream_run(
             if event_type in (p.EVENT_DONE, p.EVENT_ERROR):
                 saw_terminal = True
     except Exception as exc:  # noqa: BLE001 — surface as an error event, never crash the conn
-        _logger.warn("tui_run_failed", run_id=run_id, error=str(exc))
+        _logger.warn("tui_run_failed", run_id=run_id, exception=exc)
         await conn.transport.write(
             p.make_event(p.EVENT_ERROR, {"content": str(exc)}, run_id=run_id)
         )
@@ -153,7 +153,7 @@ async def dispatch(conn: Connection, request: dict[str, Any]) -> dict[str, Any] 
     if method in (p.METHOD_COMMAND, p.METHOD_USER):
         # Both route through the shared dispatcher; METHOD_USER kept for compat.
         ctx = commands.CommandContext(
-            agent_id=conn.agent_name, session_id=conn.session_id, user_id=conn.user_id
+            agent_name=conn.agent_name, session_id=conn.session_id, user_id=conn.user_id
         )
         reply = await commands.handle_command(ctx, str(params.get("text", "")))
         return p.make_response(req_id, {"reply": reply or "（不是命令)"})

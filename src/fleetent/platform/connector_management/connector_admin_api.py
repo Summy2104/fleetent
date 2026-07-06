@@ -13,6 +13,7 @@ from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from fleetent import audit_log, auth, user_store
+from fleetent.config import mcp_yaml_field_paths
 from fleetent.platform.connector_management import mcp_server_store
 from fleetent.platform.connector_management.mcp_auth import (
     ApiKeyMcpAuthConfig,
@@ -29,6 +30,10 @@ _ADMIN_ROLES = {"admin"}
 _SENSITIVE = ("secret", "token", "refresh", "api_key", "password")
 
 
+_DEGRADE_MODES = {"degrade", "strict", "silent"}
+_FILE_ISOLATION = {"on", "off"}
+
+
 def _normalized_auth_config(auth_type: str, auth_config: dict[str, Any]) -> dict[str, Any]:
     parsed = parse_mcp_auth_config(auth_type, auth_config)
     if isinstance(parsed, ApiKeyMcpAuthConfig):
@@ -43,6 +48,8 @@ def _normalized_auth_config(auth_type: str, auth_config: dict[str, Any]) -> dict
     if isinstance(parsed, OAuthAuthorizationCodeMcpAuthConfig):
         # per-user OAuth 2.1 authorization_code: structured non-secret fields + the
         # client_secret env reference (optional for PKCE public clients). Secret value never here.
+        # token_env: which env var the per-user access token is injected under for a stdio
+        # per-user OAuth subprocess (empty -> runtime default MCP_OAUTH_ACCESS_TOKEN).
         return {
             "authorization_endpoint": parsed.authorization_endpoint,
             "token_url": parsed.token_url,
@@ -50,6 +57,7 @@ def _normalized_auth_config(auth_type: str, auth_config: dict[str, Any]) -> dict
             "client_secret_env": parsed.client_secret_env,
             "scope": parsed.scope,
             "redirect_path": parsed.redirect_path,
+            "token_env": parsed.token_env,
         }
     if isinstance(parsed, ApiKeyPerUserMcpAuthConfig):
         # per-user dynamic api-key/bearer: server-level method settings only (no static key).
@@ -74,10 +82,21 @@ class McpServerCreateBody(BaseModel):
     env: dict[str, str] | None = None
     headers: dict[str, str] | None = None
     enabled: bool = True
+    degrade_mode: str = "degrade"
+    file_root: str = ""
+    file_isolation: str = "on"
 
     @model_validator(mode="after")
     def _validate_auth(self) -> McpServerCreateBody:
         self.auth_config = _normalized_auth_config(self.auth_type, self.auth_config)
+        return self
+
+    @model_validator(mode="after")
+    def _validate_xfleetent(self) -> McpServerCreateBody:
+        if self.degrade_mode not in _DEGRADE_MODES:
+            raise ValueError(f"invalid degrade_mode: {self.degrade_mode!r}")
+        if self.file_isolation not in _FILE_ISOLATION:
+            raise ValueError(f"invalid file_isolation: {self.file_isolation!r}")
         return self
 
 
@@ -93,6 +112,9 @@ class McpServerEditBody(BaseModel):
     env: dict[str, str] | None = None
     headers: dict[str, str] | None = None
     enabled: bool | None = None
+    degrade_mode: str | None = None
+    file_root: str | None = None
+    file_isolation: str | None = None
 
     @model_validator(mode="after")
     def _validate_auth(self) -> McpServerEditBody:
@@ -101,6 +123,14 @@ class McpServerEditBody(BaseModel):
         if self.auth_type is None or self.auth_config is None:
             raise ValueError("auth_type and auth_config must be updated together")
         self.auth_config = _normalized_auth_config(self.auth_type, self.auth_config)
+        return self
+
+    @model_validator(mode="after")
+    def _validate_xfleetent(self) -> McpServerEditBody:
+        if self.degrade_mode is not None and self.degrade_mode not in _DEGRADE_MODES:
+            raise ValueError(f"invalid degrade_mode: {self.degrade_mode!r}")
+        if self.file_isolation is not None and self.file_isolation not in _FILE_ISOLATION:
+            raise ValueError(f"invalid file_isolation: {self.file_isolation!r}")
         return self
 
 
@@ -141,7 +171,12 @@ async def mcp_probe(server_id: str) -> dict[str, Any]:
 
 
 def _mask(value: Any) -> Any:
-    """Recursively mask sensitive values (secret/token/refresh/api_key/password)."""
+    """Recursively mask sensitive values (secret/token/refresh/api_key/password).
+
+    Only used for ``mcp_doctor()`` diagnostics, whose check output shape is unconstrained
+    (unlike ``auth_config``, which `mcp_auth_models.py` guarantees holds only env-var
+    references — see `list_mcp_servers`, which intentionally does not mask).
+    """
     if isinstance(value, dict):
         out = {}
         for k, v in value.items():
@@ -203,6 +238,13 @@ def mcp_doctor_view(authorization: str | None = Header(None)) -> dict[str, Any]:
     return _mask_dict(mcp_doctor())
 
 
+@router.get("/mcp/field-schema")
+def mcp_field_schema_view(authorization: str | None = Header(None)) -> dict[str, str]:
+    """Field name -> agent.yaml path template, for the admin form's per-field hints."""
+    _current_user(authorization)
+    return mcp_yaml_field_paths()
+
+
 @router.get("/mcp/servers")
 def list_mcp_servers(
     authorization: str | None = Header(None), agent_id: int | None = None
@@ -223,6 +265,9 @@ def list_mcp_servers(
             "env": row["env"],
             "headers": row["headers"],
             "enabled": row["enabled"],
+            "degrade_mode": row.get("degrade_mode") or "degrade",
+            "file_root": row.get("file_root") or "",
+            "file_isolation": row.get("file_isolation") or "on",
             "status": "configured" if row["enabled"] else "disabled",
             "tool_count": 0,
             "agent_id": row["agent_id"],
@@ -235,7 +280,7 @@ def list_mcp_servers(
     if agent_id is not None:
         for row in mcp_server_store.list_mcp_servers(agent_id):
             servers.append(_from_row(row))
-    return [_mask(s) for s in servers]
+    return servers
 
 
 @router.get("/mcp/servers/{server_id}/tools")
@@ -317,6 +362,9 @@ async def create_mcp_server(
         env=payload.env,
         headers=payload.headers,
         enabled=payload.enabled,
+        degrade_mode=payload.degrade_mode,
+        file_root=payload.file_root,
+        file_isolation=payload.file_isolation,
     )
 
     audit_log.write_audit(user.id, "mcp.create", "mcp_server", server_id)

@@ -153,25 +153,27 @@ async def _pre_ingest(home_dir: Path) -> None:
         kb_runtime.set_vector_backend(old_backend)
 
 
-def _write_kb_service_config(path: Path, *, home_dir: Path, port: int) -> None:
+def _write_kb_service_config(
+    path: Path, *, embedding_endpoint: str, home_dir: Path, port: int
+) -> None:
     import yaml
 
+    del home_dir
     path.write_text(
         yaml.safe_dump(
             {
                 "service": {
-                    "tenant_id": _TENANT_ID,
                     "service_key_ref": "env:FLEENTENT_KB_SERVICE_KEY".replace(
                         "FLEENTENT", "FLEETENT"
                     ),
                     "host": "127.0.0.1",
                     "port": port,
                 },
-                "data": {"home": "."},
                 "retrieval": {"default_mode": "hybrid", "top_k": 10},
                 "embedding": {
-                    "endpoint": "http://embedder.invalid/v1/embeddings",
-                    "model": "kb-embed-stub",
+                    "endpoint": embedding_endpoint,
+                    "model": "deterministic/64",
+                    "dimensions": 64,
                 },
             },
             sort_keys=False,
@@ -444,7 +446,7 @@ def managed_kb_http_stack(
     monkeypatch: pytest.MonkeyPatch,
     llm_stub_base_url: str,
 ) -> Iterator[ManagedKBStack]:
-    """Managed stack + standalone kb-serve process + agent http provider override."""
+    """Managed stack + host kb-serve config; agent defaults to http provider injection."""
     home_dir = tmp_path / "fleetent-home"
     home_dir.mkdir(parents=True, exist_ok=True)
     db_path = tmp_path / "management.db"
@@ -475,21 +477,17 @@ def managed_kb_http_stack(
         home_dir=home_dir,
         llm_stub_v1_url=llm_stub_base_url,
         node_id=node_id,
-        config_overrides={
-            "knowledge": {
-                "provider": {
-                    "type": "http",
-                    "url": kb_service_url,
-                    "auth_ref": "env:FLEETENT_KB_SERVICE_KEY",
-                }
-            }
-        },
     )
 
     asyncio.run(_pre_ingest(home_dir=home_dir))
 
     kb_service_config = home_dir / "kb-service.yaml"
-    _write_kb_service_config(kb_service_config, home_dir=home_dir, port=kb_service_port)
+    _write_kb_service_config(
+        kb_service_config,
+        embedding_endpoint=f"{llm_stub_base_url}/embeddings",
+        home_dir=home_dir,
+        port=kb_service_port,
+    )
 
     platform_port = reserve_port()
     platform_url = f"http://127.0.0.1:{platform_port}"
@@ -509,7 +507,8 @@ def managed_kb_http_stack(
         sys.executable,
         "-m",
         "fleetent",
-        "kb-serve",
+        "kb",
+        "serve",
         "--config",
         str(kb_service_config),
     ]

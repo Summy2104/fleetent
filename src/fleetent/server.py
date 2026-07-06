@@ -6,7 +6,7 @@ runtime (`fleetent agent run`); this app starts agent-free with no IM, loop, or 
 
 from __future__ import annotations
 
-import asyncio
+import contextlib
 import logging
 import os
 import sys
@@ -38,7 +38,6 @@ from fleetent.platform.agent_management_console import (
     agent_console_api,
 )
 from fleetent.platform.agent_statistics import stats_admin_api
-from fleetent.platform.chat_management import chat_admin_api
 from fleetent.platform.connector_management import (
     connector_admin_api,
     mcp_credential_api,
@@ -54,13 +53,12 @@ from fleetent.platform.node_management import (
     placement_store,
 )
 from fleetent.platform.node_management.agent_transport import DirectHttpAgentTransport
-from fleetent.platform.skill_management import backflow_api, skill_admin_api
+from fleetent.platform.skill_management import backflow_api, skill_admin_api, skill_git_webhook_api
 from fleetent.platform.tenancy import admin_api as tenancy_admin_api
 from fleetent.platform.user_management import user_admin_api
 from fleetent.platform.user_management.api_key_store import resolve as _resolve_api_key
 from fleetent.platform.user_management.platform_bearer_adapter import PlatformBearerAdapter
 from fleetent.platform.webhook_management import webhook_admin_api, webhook_inbound_api
-from fleetent.session import manager as session_mgr
 from fleetent.skills import scan as scan_skills
 from fleetent.tools.plugin_loader import load_plugins
 
@@ -146,16 +144,77 @@ def _cron_principal_recheck(task: dict[str, Any]) -> Principal | None:
     return None
 
 
+def _resolve_agent_client_secret(agent_ref: str | None, env_name: str) -> str | None:
+    """Resolve a managed OAuth client_secret env ref from `agent_secrets`, by agent scope.
+
+    Injected into `mcp_oauth_service` at startup (managed-oauth-agent-identity). The runtime
+    triple carries the agent identity as a *name* (e.g. `"bi-intern"`) — or a numeric
+    registry id, or None. A name is mapped to its numeric registry id via `agent_store`
+    before looking up the per-agent secret; a per-agent miss falls back to the global
+    (`agent_id IS NULL`) scope. Keeping this mapping here (composition root) lets
+    `connector_management` stay off `agent_store`/`agent_lifecycle`.
+    """
+    from fleetent.platform.agent_lifecycle import secret_store
+
+    agent_id: int | None = None
+    if agent_ref:
+        if agent_ref.isdigit():
+            agent_id = int(agent_ref)
+        else:
+            agent = agent_store.get_by_name(agent_ref)
+            agent_id = agent.id if agent is not None else None
+    value = secret_store.get_decrypted(agent_id, env_name)
+    if value is None and agent_id is not None:
+        value = secret_store.get_decrypted(None, env_name)
+    return value
+
+
 def _build_platform_maintenance_scheduler(
     scheduling: Any = None,
     _scheduler: Any = None,
 ) -> Any:
     """Build and return a configured (but not yet started) APScheduler for platform-only
     maintenance jobs.  Accepts an optional `_scheduler` for dependency injection in tests."""
+    from apscheduler.executors.pool import (  # type: ignore[import-untyped]
+        ThreadPoolExecutor as APThreadPoolExecutor,
+    )
     from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
 
-    del scheduling
-    return _scheduler if _scheduler is not None else AsyncIOScheduler()
+    from fleetent.platform.skill_management import backflow_pr_sweep, pool_sync
+
+    sched = _scheduler if _scheduler is not None else AsyncIOScheduler()
+    # Run the sweeps on a DEDICATED thread pool, never the web-request workers (the anyio
+    # default pool serving /admin/* and node polling): a slow/hung git fetch or backup push
+    # must not starve HTTP. max_instances=1 + coalesce stop a slow round from piling up
+    # behind itself (the "maximum number of running instances reached" spiral).
+    with contextlib.suppress(ValueError):  # ValueError = already registered (idempotent rebuild)
+        sched.add_executor(APThreadPoolExecutor(max_workers=2), "maintenance")
+    job_opts: dict[str, Any] = {
+        "executor": "maintenance",
+        "max_instances": 1,
+        "coalesce": True,
+        "misfire_grace_time": 30,
+        "replace_existing": True,
+    }
+    interval = getattr(scheduling, "skill_git_sync_interval_seconds", 300) if scheduling else 300
+    sched.add_job(
+        pool_sync.scheduled_sweep,
+        trigger="interval",
+        seconds=interval,
+        id="__skill_git_sync_sweep__",
+        **job_opts,
+    )
+    backflow_interval = (
+        getattr(scheduling, "skill_backflow_pr_sweep_interval_seconds", 120) if scheduling else 120
+    )
+    sched.add_job(
+        backflow_pr_sweep.sweep,
+        trigger="interval",
+        seconds=backflow_interval,
+        id="__skill_backflow_pr_sweep__",
+        **job_opts,
+    )
+    return sched
 
 
 def _ensure_skill_pool_git() -> None:
@@ -188,10 +247,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     cron_scheduler.set_principal_resolver(_cron_principal_recheck)
     # Managed per-user MCP OAuth: resolve a client_secret env ref from agent_secrets at
     # exchange/refresh time, injected here so connector_management stays off agent_lifecycle.
-    from fleetent.platform.agent_lifecycle import secret_store as _secret_store
     from fleetent.platform.connector_management import mcp_oauth_service as _mcp_oauth_service
 
-    _mcp_oauth_service.set_client_secret_resolver(_secret_store.get_decrypted)
+    _mcp_oauth_service.set_client_secret_resolver(_resolve_agent_client_secret)
+    # skill GitOps inbound sync resolves git credentials via the same secret_store seam,
+    # injected here so pool_sync / webhook stay off the agent_lifecycle face (plane boundary).
+    from fleetent.platform.agent_lifecycle import secret_store as _skill_git_secret_store
+    from fleetent.platform.skill_management import backflow_pr_sweep as _backflow_pr_sweep
+    from fleetent.platform.skill_management import pool_sync as _pool_sync
+
+    _pool_sync.set_secret_resolver(_skill_git_secret_store.get_decrypted)
+    _backflow_pr_sweep.set_secret_resolver(_skill_git_secret_store.get_decrypted)
 
     scan_skills()
     # backflow-pool-git: the shared skill pool must be a git repo before any write,
@@ -228,23 +294,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     logger.info("admin_login_url url=%s", _admin_login_url(user_admin_api.router.prefix))
 
-    # The running event loop backs the session governance seams injected below.
-    loop = asyncio.get_running_loop()
-
-    def _pg_transcript(session_id: str) -> list[dict[str, Any]]:
-        return asyncio.run_coroutine_threadsafe(session_mgr.load(session_id), loop).result()
-
-    chat_admin_api.load_transcript = _pg_transcript
-    chat_admin_api.clear_session = lambda session_id: asyncio.run_coroutine_threadsafe(
-        session_mgr.clear(session_id), loop
-    ).result()
-    chat_admin_api.inject = lambda session_id, role, content: asyncio.run_coroutine_threadsafe(
-        session_mgr.inject_message(session_id, role, content), loop
-    ).result()
-    chat_admin_api.reset_session = lambda session_id, keep_turns: asyncio.run_coroutine_threadsafe(
-        session_mgr.reset(session_id, keep_turns), loop
-    ).result()
-
     # Platform-side maintenance scheduler: runs sweep jobs in the platform process so
     # agent-runtime cron_scheduler stays free of platform imports (boundary contract).
     from fleetent.config import SchedulingSettings
@@ -273,13 +322,13 @@ app.include_router(user_admin_api.router)
 app.include_router(im_identity_admin_api.router)
 app.include_router(skill_admin_api.router)
 app.include_router(backflow_api.router)
+app.include_router(skill_git_webhook_api.router)
 app.include_router(provider_admin_api.router)
 app.include_router(model_admin_api.router)
 app.include_router(kb_admin_api.router)
 app.include_router(connector_admin_api.router)
 app.include_router(mcp_oauth_callback_api.router)
 app.include_router(mcp_credential_api.router)
-app.include_router(chat_admin_api.router)
 app.include_router(webhook_admin_api.router)
 app.include_router(webhook_inbound_api.router)
 # agent_admin_api must precede agent_console_api: its literal DELETE
