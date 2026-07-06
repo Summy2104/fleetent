@@ -147,6 +147,34 @@ def compute_next_run(
     raise ValueError(f"invalid schedule kind: {kind!r} (cron/once/interval)")
 
 
+_MISFIRE_GRACE_MIN = timedelta(minutes=2)
+_MISFIRE_GRACE_MAX = timedelta(hours=2)
+
+
+def cron_misfire_grace(cron_expr: str, tz: str) -> timedelta:
+    """Bound how late a ``cron`` occurrence may fire before it is treated as missed
+    (cron-hardening F5) — half the schedule's period, clamped to [2min, 2h].
+
+    Only `cron` tasks get an upper bound: a fast-forwarded `interval` occurrence's
+    content is inherently current (a status check, a poll), while a stale `cron`
+    digest re-anchored after a multi-day outage would broadcast day-old content as
+    if it were fresh — vixie-cron's timeDiff classification and hermes-agent's
+    `_compute_grace_seconds` draw the same distinction.
+    """
+    from apscheduler.triggers.cron import CronTrigger  # type: ignore[import-untyped]
+
+    trigger = CronTrigger.from_crontab(cron_expr, timezone=_as_tzinfo(tz))
+    now = datetime.now(UTC)
+    first = trigger.get_next_fire_time(None, now)
+    if first is None:
+        return _MISFIRE_GRACE_MIN
+    second = trigger.get_next_fire_time(first, first)
+    if second is None:
+        return _MISFIRE_GRACE_MIN
+    half_period = (second - first) / 2
+    return max(_MISFIRE_GRACE_MIN, min(half_period, _MISFIRE_GRACE_MAX))
+
+
 # Fire-time creator recheck, injection-decoupled from the platform management DB
 # (decouple-cron-principal-recheck). The platform installs a resolver at startup
 # (server.py lifespan, mirroring user_store.set_api_key_resolver); standalone never
@@ -718,6 +746,21 @@ class CronScheduler:
                 tz=tz,
             )
             if nxt is None:
+                continue
+            # Misfire grace (cron-hardening F5): a cron occurrence stale beyond half its
+            # period (clamped [2min, 2h]) is not fired — its content would be a day-old
+            # digest masquerading as fresh. Only cron gets an upper bound; interval's
+            # single catch-up fire is always current-value content (unchanged below).
+            if kind == "cron" and (now - nrt) > cron_misfire_grace(task.get("cron_expr") or "", tz):
+                if _store.claim_next_run(tid, expected=nr, new=_iso(nxt)):
+                    view.next_run_time = nxt
+                    _record_history(
+                        task,
+                        _iso(now),
+                        "missed",
+                        kind=task.get("task_type") or "generate",
+                        retention=self._history_retention,
+                    )
                 continue
             # Advance BEFORE executing, atomically: only the caller that wins the
             # conditional update fires this occurrence (at-most-once under overlap).

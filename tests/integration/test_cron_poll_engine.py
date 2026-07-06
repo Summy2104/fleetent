@@ -31,6 +31,21 @@ def _mk_interval_task(seconds: int = 60, next_run: datetime | None = None) -> di
     return store.get(task["id"])
 
 
+def _mk_cron_task(cron_expr: str = "0 12 * * *", next_run: datetime | None = None) -> dict:
+    task = store.create(
+        name="t",
+        timezone="UTC",
+        user_id="u-1",
+        message="hi",
+        source="tool",
+        schedule_kind="cron",
+        cron_expr=cron_expr,
+    )
+    if next_run is not None:
+        store.update_run_state(task["id"], next_run_at=_iso(next_run))
+    return store.get(task["id"])
+
+
 # ── 3.1 due selection ────────────────────────────────────────────────────────
 
 
@@ -145,6 +160,78 @@ async def test_stale_interval_fast_forwards_single_fire(isolated_schedule_db, mo
     # fired at most once (not once per missed slot) and fast-forwarded to the future
     assert fired == [task["id"]]
     assert datetime.fromisoformat(store.get(task["id"])["next_run_at"]) > _NOW
+
+
+# ── 3.5 misfire grace: cron gets an upper bound, interval never does (cron-hardening F5) ──
+
+
+async def test_cron_within_grace_still_fires(isolated_schedule_db, monkeypatch):
+    """A daily cron (24h period, grace = min(12h, 2h) = 2h) that is only 40 minutes
+    late still fires — well within its misfire grace window."""
+    fired: list[str] = []
+
+    async def _fake_fire(row, connectors=None, history_retention=None):
+        fired.append(row["id"])
+
+    monkeypatch.setattr(cs, "_fire", _fake_fire)
+
+    task = _mk_cron_task("0 12 * * *", next_run=_NOW - timedelta(minutes=40))
+
+    sched = cs.CronScheduler(settings=SchedulingSettings())
+    for t in store.list_tasks():
+        sched._register(t)
+    dispatched = await sched._tick(now=_NOW)
+    await asyncio.gather(*dispatched)
+
+    assert fired == [task["id"]]
+    assert store.list_runs(task["id"]) == []  # no "missed" row — this is a normal fire
+
+
+async def test_cron_beyond_grace_is_missed_not_fired(isolated_schedule_db, monkeypatch):
+    """A daily cron missed by 3 days (>> its 2h grace cap) must NOT fire a stale
+    occurrence — it fast-forwards and records a `missed` history row instead."""
+    fired: list[str] = []
+
+    async def _fake_fire(row, connectors=None, history_retention=None):
+        fired.append(row["id"])
+
+    monkeypatch.setattr(cs, "_fire", _fake_fire)
+
+    task = _mk_cron_task("0 12 * * *", next_run=_NOW - timedelta(days=3))
+
+    sched = cs.CronScheduler(settings=SchedulingSettings())
+    for t in store.list_tasks():
+        sched._register(t)
+    dispatched = await sched._tick(now=_NOW)
+    await asyncio.gather(*dispatched)
+
+    assert fired == []  # not dispatched
+    assert datetime.fromisoformat(store.get(task["id"])["next_run_at"]) > _NOW  # fast-forwarded
+
+    runs = store.list_runs(task["id"])
+    assert len(runs) == 1
+    assert runs[0]["status"] == "missed"
+
+
+async def test_interval_beyond_2h_still_fires_no_grace_cap(isolated_schedule_db, monkeypatch):
+    """Interval tasks have no staleness upper bound — a fixed-period task's single
+    catch-up fire is always current-value content, unlike a stale cron digest."""
+    fired: list[str] = []
+
+    async def _fake_fire(row, connectors=None, history_retention=None):
+        fired.append(row["id"])
+
+    monkeypatch.setattr(cs, "_fire", _fake_fire)
+
+    task = _mk_interval_task(60, next_run=_NOW - timedelta(days=3))
+
+    sched = cs.CronScheduler(settings=SchedulingSettings())
+    for t in store.list_tasks():
+        sched._register(t)
+    dispatched = await sched._tick(now=_NOW)
+    await asyncio.gather(*dispatched)
+
+    assert fired == [task["id"]]
 
 
 # ── 4.1 bounded parallel execution ───────────────────────────────────────────

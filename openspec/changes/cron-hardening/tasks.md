@@ -4,8 +4,8 @@
 
 ## 1. misfire 宽限分级（F5）
 
-- [ ] 1.1 写测试：每日 cron 迟到 40min → 补跑一次；迟到 3 天 → 不 dispatch、记 `missed` history 行、next_run_at fast-forward；interval 迟到 3 天 → 仍补跑一次（`tests/integration/test_cron_poll_engine.py` 新用例）→ 见红
-- [ ] 1.2 实现：`_tick` due 判定加 cron 型宽限 `min(半周期, 2h)`（design D1），超限走 claim+missed 路径 → 见绿
+- [x] 1.1 写测试：每日 cron 迟到 40min → 补跑一次；迟到 3 天 → 不 dispatch、记 `missed` history 行、next_run_at fast-forward；interval 迟到 3 天 → 仍补跑一次（`tests/integration/test_cron_poll_engine.py` 新用例）→ 见红
+- [x] 1.2 实现：`_tick` due 判定加 cron 型宽限 `min(半周期, 2h)`（design D1，新增 `cron_misfire_grace` 辅助函数），超限走 claim+missed 路径 → 见绿
 
 ## 2. tick per-row 容错（F6.1）
 
