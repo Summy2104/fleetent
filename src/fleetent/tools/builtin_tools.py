@@ -305,6 +305,42 @@ def whoami(tool_context: ToolContext | None = None) -> str:
 
 
 @tool
+def tool_search(query: str, limit: int = 10, tool_context: ToolContext | None = None) -> str:
+    """Look up tools that are listed in the catalog but not yet callable, and load them.
+
+    Many tools (especially MCP server tools) appear in the deferred-tools catalog as a
+    name + one-line description but are NOT yet in your callable tool set. Use this to
+    fetch their full schemas. Pass a keyword query (e.g. "create jira issue") to get the
+    best matches, or "select:name1,name2" to fetch specific tools by exact name. Loaded
+    tools become callable from your NEXT turn onward (this turn only returns their
+    schemas). Never raises.
+    """
+    pool = getattr(tool_context, "deferred_pool", None) or {}
+    if not pool:
+        return "没有可检索的延迟加载工具：当前所有工具均已直接可用。"
+
+    from fleetent.tools import deferred
+
+    names = deferred.search_deferred(query, pool, limit=limit)
+    if tool_context is not None and names:
+        tool_context.activated_tools.update(names)
+
+    lines: list[str] = []
+    if names:
+        lines.append(f"已加载 {len(names)} 个工具，下一轮起可调用：")
+        lines.append(json.dumps([pool[n] for n in names], ensure_ascii=False, indent=2))
+    else:
+        lines.append(f"未匹配到工具：{query!r}。请换关键词，或查看 deferred-tools 目录。")
+
+    if query.startswith("select:"):
+        wanted = [n.strip() for n in query[len("select:") :].split(",") if n.strip()]
+        missing = [n for n in wanted if n not in pool]
+        if missing:
+            lines.append("未找到（不存在或无权限）：" + ", ".join(missing))
+    return "\n".join(lines)
+
+
+@tool
 async def recall_memory(subject: str | None = None, tool_context: ToolContext | None = None) -> str:
     """List the stored long-term memories about the current user, in full.
 
@@ -843,6 +879,29 @@ def _origin_from_context(tool_context: ToolContext | None) -> dict[str, str | No
     }
 
 
+def _delivery_target_note(
+    task_type: str, deliver: dict[str, str] | None, origin: dict[str, str | None] | None
+) -> str:
+    """Describe (or warn about) the resolved delivery target for the create echo.
+
+    Makes a delivery-target mismatch visible at creation time (cron-delivery-governance,
+    AAA-8279): explicit targets and origin fallback are named outright; a `generate` task
+    with neither is a warning (not a rejection — the fire-time `no_delivery_target` error
+    and failure alert from fix-cron-store-and-once are the actual safety net). `action`
+    tasks deliver via their own tools and never need a scheduler-resolved target.
+    """
+    if deliver is not None:
+        return f"投递目标: {deliver['platform']}:{deliver['target']}({deliver['target_type']})"
+    if origin is not None:
+        return "投递目标: 创建会话（origin）"
+    if task_type == "generate":
+        return (
+            "⚠️ 未配置投递目标且无法从当前上下文捕获创建会话——本任务触发产出的内容将无法送达"
+            "（可用 notify_target 指定，或改用 task_type=action）。"
+        )
+    return ""
+
+
 @tool(risk_level="low")
 async def schedule(
     action: Annotated[
@@ -922,6 +981,13 @@ async def schedule(
     from fleetent import cron_scheduler
 
     if action == "create":
+        # half-set rejection (cron-delivery-governance F4.1): notify_platform and
+        # notify_target must be provided together or not at all — silently ignoring
+        # a half-set previously fell back to origin, which reads as "wrong channel"
+        # to the user (AAA-8279).
+        if bool(notify_platform) != bool(notify_target):
+            missing = "notify_platform" if notify_target else "notify_target"
+            return f"error: notify_platform 和 notify_target 须成对提供（缺少 {missing}）"
         deliver = None
         if notify_platform and notify_target:
             deliver = {
@@ -955,18 +1021,19 @@ async def schedule(
             # Per-type validation (e.g. notify without notify_text/target) → clean text,
             # never a raised exception the agent loop would have to recover from.
             return f"error: {exc}"
+        target_note = _delivery_target_note(task_type, deliver, origin)
         if cron_scheduler.current() is None:
             # No live scheduler in this process — be truthful so the AI does not
             # promise the user a fire time that will never come.
             return (
                 f"Scheduled task saved: id={task['id']!r} name={name!r} "
                 f"kind={schedule_kind!r} — takes effect when the agent service is running "
-                "(no scheduler in this process)"
+                f"(no scheduler in this process). {target_note}"
             )
         hint = str(task.get("next_fire_hint") or "")
         return (
             f"Scheduled task created and registered: id={task['id']!r} "
-            f"name={name!r} kind={schedule_kind!r}.{hint}"
+            f"name={name!r} kind={schedule_kind!r}.{hint} {target_note}"
         )
 
     if action == "list":

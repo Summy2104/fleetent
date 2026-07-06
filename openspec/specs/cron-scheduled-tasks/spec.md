@@ -50,7 +50,7 @@ Tasks created via the `schedule` tool SHALL be persisted to the agent-side SQLit
 
 ### Requirement: Cron trigger fires agent run asynchronously
 
-When a scheduled task becomes due (its persisted `next_run_at <= now` on a tick), the scheduler SHALL fire **according to the task's `task_type`**: `notify` sends `notify_text` verbatim via the fire-time connector snapshot **without invoking `agent_loop.run`**; `generate` and `action` call `agent_loop.run()` with the task's `message`, `user_id`, resolved agent context, and the fire-time `outbound_connectors` snapshot. For `generate`, the run additionally receives the scheduled-run delivery statement AND is invoked with outbound-tool suppression (`suppress_outbound_tools=True`) so the run produces only the notification body and the scheduler performs the sole delivery (`send_im_message`/`send_file` are absent from a generate run's tool schema). For `action`, the run retains the outbound tools (so the agent delivers via its own tools and the scheduler does not broadcast). The fire SHALL NOT block the tick loop (the run is dispatched so the loop keeps selecting and advancing other due tasks), and the run result SHALL be recorded in the observability trace AND as a run-history row (see capability `cron-run-history`). `last_status` SHALL reflect the **task intent** outcome per type — notify: delivery outcome; generate: run + delivery outcome; action: run outcome — never merely "the delivery API call succeeded". A due occurrence SHALL NOT be silently dropped: an occurrence that cannot run (e.g. its owner is skipped/unverified) SHALL be recorded as a `skipped` run rather than vanishing without a trace.
+When a scheduled task becomes due (its persisted `next_run_at <= now` on a tick), the scheduler SHALL fire **according to the task's `task_type`**: `notify` sends `notify_text` verbatim via the fire-time connector snapshot **without invoking `agent_loop.run`**; `generate` and `action` call `agent_loop.run()` with the task's `message`, `user_id`, resolved agent context, and the fire-time `outbound_connectors` snapshot. For `generate`, the run additionally receives the scheduled-run delivery statement AND is invoked with outbound-tool suppression (`suppress_outbound_tools=True`) so the run produces only the notification body and the scheduler performs the sole delivery (`send_im_message`/`send_file` are absent from a generate run's tool schema). For `action`, the run retains the outbound tools (so the agent delivers via its own tools and the scheduler does not broadcast). **无论 `generate` 还是 `action`，fired run 的工具 schema SHALL 排除 `schedule` 工具**——定时触发的运行 MUST NOT 能创建、修改或删除定时任务（防自我增殖；任务管理属交互式会话）。The fire SHALL NOT block the tick loop (the run is dispatched so the loop keeps selecting and advancing other due tasks), and the run result SHALL be recorded in the observability trace AND as a run-history row (see capability `cron-run-history`). `last_status` SHALL reflect the **task intent** outcome per type — notify: delivery outcome; generate: run + delivery outcome; action: run outcome — never merely "the delivery API call succeeded". A due occurrence SHALL NOT be silently dropped: an occurrence that cannot run (e.g. its owner is skipped/unverified) SHALL be recorded as a `skipped` run rather than vanishing without a trace.
 
 #### Scenario: Notify fire bypasses the agent
 - **WHEN** a `notify` task becomes due
@@ -67,6 +67,10 @@ When a scheduled task becomes due (its persisted `next_run_at <= now` on a tick)
 #### Scenario: Generate fire produces content but does not self-deliver
 - **WHEN** a `generate` task fires
 - **THEN** `agent_loop.run()` is invoked with `suppress_outbound_tools=True` so `send_im_message`/`send_file` are absent from the run's schema, and the final reply is delivered solely by the scheduler's broadcast
+
+#### Scenario: fired run 不能再造定时任务
+- **WHEN** 一个 `action`（或 `generate`）任务 fire，其 message 诱导 agent 调用 `schedule(action="create", ...)`
+- **THEN** fired run 的工具 schema 中不存在 `schedule` 工具，无法创建新定时任务；交互式会话中的 `schedule` 工具不受影响
 
 #### Scenario: No connectors available degrades cleanly
 - **WHEN** a task fires while no IM connector is registered for the agent
@@ -134,7 +138,7 @@ The scheduler's fire-time principal resolution SHALL use an injection seam, mirr
 
 ### Requirement: Schedule kinds cron, one-shot, and interval
 
-The system SHALL support three schedule kinds, each defining how the task's next occurrence (`next_run_at`) is computed: `cron` (5-field expression; the next occurrence after the current base time), `once` (an absolute timestamp or relative duration; a single occurrence), and `interval` (a fixed period; the next occurrence is the previous run time plus the period, or now-plus-period when there is no previous run). `schedule_kind` MUST be validated at task creation: a value outside `{cron, once, interval}` MUST be rejected with a clear `ValueError` (e.g. `invalid schedule_kind: 'run_at' (cron/once/interval)`) and MUST NOT be persisted. As a forgiving normalization for the common model confusion of passing the parameter name as the kind, `schedule_kind="run_at"` MUST be treated as `"once"` at creation (then the one-shot `run_at` normalization applies). Next-occurrence computation SHALL be engine-internal (no dependency on an external in-memory trigger registry).
+The system SHALL support three schedule kinds, each defining how the task's next occurrence (`next_run_at`) is computed: `cron` (5-field expression; the next occurrence after the current base time), `once` (an absolute timestamp or relative duration; a single occurrence), and `interval` (a fixed period; the next occurrence is the **previous scheduled occurrence — the persisted `next_run_at` grid — plus the period**, fast-forwarded in whole periods to the first future occurrence when stale, or now-plus-period when there is no prior occurrence). Interval cadence SHALL be **fixed-rate on the schedule grid**: a fire MUST NOT re-anchor the next occurrence to the run's completion time or to the tick time. `schedule_kind` MUST be validated at task creation: a value outside `{cron, once, interval}` MUST be rejected with a clear `ValueError` (e.g. `invalid schedule_kind: 'run_at' (cron/once/interval)`) and MUST NOT be persisted. As a forgiving normalization for the common model confusion of passing the parameter name as the kind, `schedule_kind="run_at"` MUST be treated as `"once"` at creation (then the one-shot `run_at` normalization applies). Next-occurrence computation SHALL be engine-internal (no dependency on an external in-memory trigger registry).
 
 #### Scenario: Cron schedule
 - **WHEN** a task with `schedule_kind="cron"` and `cron_expr="0 9 * * 1-5"` is registered
@@ -147,6 +151,10 @@ The system SHALL support three schedule kinds, each defining how the task's next
 #### Scenario: Interval schedule
 - **WHEN** a task with `schedule_kind="interval"` and `interval_seconds=5400` (90 minutes) is registered
 - **THEN** its `next_run_at` advances by 90 minutes each occurrence and it fires roughly every 90 minutes
+
+#### Scenario: Interval 节奏不被 fire 重锚（无累积漂移）
+- **WHEN** 一个 60 秒 interval 任务连续多次真实触发（含运行耗时与 tick 延迟）
+- **THEN** 每次 fire 后 `next_run_at` 均等于「前一计划时刻 + 60s」的网格值（过期则整周期快进），相邻触发间隔不随触发次数累积增长（AAA-8288 判据：连续 10 次触发间隔 ∈ [60, 60+tick) 秒）
 
 #### Scenario: run_at is aliased to once
 - **WHEN** a one-shot task is created with `schedule_kind="run_at"` and a valid `run_at` time
@@ -172,7 +180,9 @@ The scheduler SHALL avoid burst-firing missed runs after the agent process was d
 
 A single `schedule` built-in tool SHALL let an agent manage scheduled tasks via an `action` parameter (`create`, `list`, `remove`, `run_now`, `pause`, `resume`). It SHALL have `risk_level="low"` and SHALL NOT require human approval. The tool SHALL perform all mutations through the running `CronScheduler` instance obtained via `cron_scheduler.current()` — never by writing `schedule_store` directly. `create` SHALL accept `task_type` (default `generate`) and `notify_text`, enforcing the per-type validation (notify requires `notify_text` + delivery target; generate/action require `message`) and returning a clean error string rather than raising on a validation failure; its tool description SHALL carry the type-deciding question ("does the message content need information only known at send time?") plus the creation-time finalize-and-confirm flow for notify copy. `create` SHALL stamp the task's owner from the execution principal (`tool_context.principal.user_id`) when available, falling back to the `user_id` parameter only when no principal is present — the model-supplied parameter MUST NOT override an available principal. `create` SHALL return the new task's id; `pause`/`resume` SHALL toggle the task's `enabled` flag and deregister/register the APScheduler job accordingly; `run_now` SHALL fire the task immediately via a public scheduler method. When no scheduler is running (one-shot CLI run, or `scheduling.enabled=false`), mutations SHALL still persist to the store and the tool result SHALL state truthfully that the task takes effect when the agent service is running — the tool MUST NOT report the task as active.
 
-The `schedule` tool's parameter contract SHALL be carried in the **tool schema delivered to the model** (the model receives the schema, not the Python function's docstring body): `action`, `schedule_kind`, `task_type`, and `notify_target_type` SHALL be declared as enumerated parameters (via `Literal`) so the model receives their allowed values, and every parameter SHALL carry a description (via `Annotated`) so per-parameter guidance reaches the model. Because `schedule_kind` is enumerated, the model cannot emit a non-member value such as `run_at` (the forgiving normalization underneath remains for non-model callers). The `task_type` parameter description SHALL convey the notify/generate/action selection rule and the default `generate`.
+**投递目标参数 SHALL 成对提供**：`notify_platform` 与 `notify_target` 只提供其一时，`create` SHALL 返回明确的 error 文本（指出缺失的参数），MUST NOT 静默忽略并回落 origin。**create 成功回执 SHALL 明示最终投递目标**：显式目标写成 `platform:target(target_type)` 形式；无显式目标但有 `origin` 时写明「投递回创建会话（origin）」；**既无显式目标又无 `origin`（且非 `deliver.mode="none"`）时，回执 SHALL 追加一条警示**，说明触发产出的内容将无法送达——这是可见性提示，MUST NOT 阻断创建（该 generate 任务仍会被创建；其 fire 时的失败与告警语义由 `scheduled-task-delivery` 能力的 `no_delivery_target` 与失败告警要求兜底）。使目标错配或缺失在创建当下即对用户可见。
+
+The `schedule` tool's parameter contract SHALL be carried in the **tool schema delivered to the model** (the model receives the schema, not the Python function's docstring body): `action`, `schedule_kind`, `task_type`, and `notify_target_type` SHALL be declared as enumerated parameters (via `Literal`) so the model receives their allowed values, and every parameter SHALL carry a description (via `Annotated`) so per-parameter guidance reaches the model. Because `schedule_kind` is enumerated, the model cannot emit a non-member value such as `run_at` (the forgiving normalization underneath remains for non-model callers). The `task_type` parameter description SHALL convey the notify/generate/action selection rule and the default `generate`. **`notify_platform`/`notify_target` 的参数描述 SHALL 说明二者须成对提供。**
 
 The `timezone` parameter SHALL default to unspecified (empty), NOT to a hardcoded `"UTC"`; when the model does not supply a timezone, `create` SHALL pass it through as absent (`None`) so the deployment-default resolution applies (see "Timezone resolution is local-clock and DST-safe"). The `timezone` and `cron_expr` parameter descriptions SHALL state that cron fields are the **local wall-clock time of the task timezone** and MUST NOT be pre-converted to UTC, and that an unspecified timezone uses the deployment default while an explicit timezone is set only when the user names one. On a successful `create`, the tool result SHALL state the task's next fire time in **both the task timezone and UTC**.
 
@@ -183,6 +193,26 @@ The `timezone` parameter SHALL default to unspecified (empty), NOT to a hardcode
 #### Scenario: Notify creation without copy is rejected
 - **WHEN** an agent calls `schedule(action="create", task_type="notify")` without `notify_text`
 - **THEN** the tool returns a validation error string without raising
+
+#### Scenario: half-set 投递参数被拒
+- **WHEN** an agent calls `schedule(action="create", notify_target="C123", ...)`（提供了 `notify_target` 但缺 `notify_platform`，或反之）
+- **THEN** the tool returns 明确 error 文本指出须成对提供，不创建任务、不静默回落 origin
+
+#### Scenario: 回执明示显式投递目标
+- **WHEN** a task is created with `notify_platform="slack"`, `notify_target="C123"`, `notify_target_type="channel"`
+- **THEN** the create 回执含 `slack:C123(channel)` 字样，用户可当场发现目标错配
+
+#### Scenario: 回执明示 origin 回落
+- **WHEN** a task is created from an IM conversation with no explicit target
+- **THEN** the create 回执写明投递将回到创建会话（origin）
+
+#### Scenario: 无可解析目标时回执警示但不阻断创建
+- **WHEN** a `generate` task is created with no `notify_platform`/`notify_target` and no IM session context to auto-capture `origin`
+- **THEN** the task is created successfully (not rejected), and the create 回执 includes a warning that the fired output will have nowhere to be delivered
+
+#### Scenario: action 任务不触发目标警示
+- **WHEN** an `action` task is created with no `notify_platform`/`notify_target` and no `origin`
+- **THEN** the create 回执 does not include the no-target warning（`action` 经自身工具投递，不依赖调度器解析的目标）
 
 #### Scenario: Agent creates a schedule without approval
 - **WHEN** an agent calls `schedule(action="create", schedule_kind="cron", cron_expr=..., message=...)` while the scheduler is running
@@ -254,7 +284,7 @@ All scheduled-task mutations (create / remove / enable-disable / run-now) SHALL 
 
 ### Requirement: Fire-time revalidation against the store
 
-Before executing, a fired job SHALL re-read its task row from the store by id. If the row is missing or `enabled=0`, the fire SHALL be skipped with a warning log and the stale job deregistered. The re-read row SHALL be used as the execution payload (not the dict captured at registration time). A `once` task that fires successfully SHALL be marked completed (`enabled=0`, `last_status="completed"`).
+Before executing, a fired job SHALL re-read its task row from the store by id. If the row is missing or `enabled=0`, the fire SHALL be skipped with a warning log and the stale job deregistered. The re-read row SHALL be used as the execution payload (not the dict captured at registration time). A `once` task that fires successfully SHALL be marked completed (`enabled=0`, `last_status="completed"`). A `once` task whose fire **fails**（agent error 或 delivery error）SHALL be **terminally closed**: `enabled=0`、`last_status="error"`、`last_error` 保留失败原因——它 MUST NOT 停留在过去的 `next_run_at` 上被后续 tick 自动重试（禁止无退避热重试）。手动 `run_now` 仍可用于人工重试（不改变 enabled/schedule）。
 
 #### Scenario: Deleted task never fires
 - **WHEN** a job fires whose store row was deleted by a writer that bypassed the facade
@@ -267,6 +297,14 @@ Before executing, a fired job SHALL re-read its task row from the store by id. I
 #### Scenario: Once task marked completed after firing
 - **WHEN** a `once` task fires successfully
 - **THEN** its row is updated to `enabled=0` and `last_status="completed"`, and it is not re-registered on next boot
+
+#### Scenario: 失败的 once 任务被终结而非热重试
+- **WHEN** 一个 `once` 任务 fire 失败（如 agent run 抛错或投递失败）
+- **THEN** 其行被更新为 `enabled=0`、`last_status="error"`（`last_error` 含失败原因），后续 tick 不再触发它；run history 中保留该次 error 记录
+
+#### Scenario: 失败 once 在后续 tick 不重复烧钱
+- **WHEN** 一个 `generate` 型 once 任务因 LLM 网关持续故障 fire 失败，随后调度器继续运行多个 tick
+- **THEN** 该任务在首次失败后不再产生任何新的 agent run（对比修复前：每 ~2 tick 重跑一次直至故障恢复）
 
 ### Requirement: Delivery contract — only designated content is ever broadcast
 
@@ -304,7 +342,7 @@ For `notify` tasks the notification copy SHALL be produced **once, at creation t
 
 ### Requirement: Robust run_at parsing and write-time normalization
 
-The one-shot `run_at` parser SHALL tolerate common non-strict ISO forms in addition to strict ISO-8601 and relative durations (`+30m`/`2h`): a trailing timezone-name suffix (` UTC`/` GMT`) MUST be normalized to a numeric offset before parsing, and a trailing `Z` MUST be accepted. When a `once` task is created via the `schedule` tool, the system SHALL normalize `run_at` through that same parser and persist the canonical ISO form (with explicit offset); an unparseable `run_at` MUST be rejected at create time with an explanatory error and MUST NOT be stored.
+The one-shot `run_at` parser SHALL tolerate common non-strict ISO forms in addition to strict ISO-8601 and relative durations (`+30m`/`2h`): a trailing timezone-name suffix (` UTC`/` GMT`) MUST be normalized to a numeric offset before parsing, and a trailing `Z` MUST be accepted. **A naive ISO form（无 offset）SHALL 按任务的 resolved timezone（显式 per-task `timezone` > `agent.scheduling.default_timezone` > `UTC`）解释为 aware 时间——MUST NOT 按宿主机系统时区解释；解析器 SHALL 接收任务时区作为参数。** When a `once` task is created via the `schedule` tool, the system SHALL normalize `run_at` through that same parser（携带任务时区）and persist the canonical ISO form (with explicit offset); an unparseable `run_at` MUST be rejected at create time with an explanatory error and MUST NOT be stored. 存储层 MUST NOT 出现 naive（无 offset）的 `run_at`/`next_run_at` 时间值。
 
 #### Scenario: run_at with UTC suffix parses
 - **WHEN** `_parse_run_at("2026-06-14 08:07:19 UTC")` is evaluated
@@ -313,6 +351,10 @@ The one-shot `run_at` parser SHALL tolerate common non-strict ISO forms in addit
 #### Scenario: strict ISO and relative durations still work
 - **WHEN** `_parse_run_at("2026-06-14T08:07:19Z")` and `_parse_run_at("+30m")` are evaluated
 - **THEN** both resolve correctly (absolute UTC; now + 30 minutes)
+
+#### Scenario: naive run_at 按任务时区解释
+- **WHEN** 一个 `once` 任务以 `run_at="2026-07-08 09:00"`（无 offset）、`timezone="Asia/Shanghai"` 创建，宿主机系统时区为 UTC
+- **THEN** 持久化的 `run_at` 为 `2026-07-08T09:00:00+08:00`（等价 01:00 UTC），任务在北京时间 09:00 触发——不是 09:00 UTC
 
 #### Scenario: create normalizes run_at to canonical ISO
 - **WHEN** a `once` task is created via the `schedule` tool with `run_at="2026-06-14 08:07:19 UTC"`
@@ -324,11 +366,15 @@ The one-shot `run_at` parser SHALL tolerate common non-strict ISO forms in addit
 
 ### Requirement: Timezone resolution is local-clock and DST-safe
 
-The system SHALL resolve a scheduled task's effective timezone with the precedence **explicit per-task `timezone` > `agent.scheduling.default_timezone` > `UTC`**. Cron fields SHALL be interpreted in the resolved timezone (APScheduler `CronTrigger` timezone) as **local wall-clock time**. The system SHALL persist the cron expression and the timezone **as given** and SHALL NOT normalize a recurring schedule to a fixed UTC offset at creation time, so a recurring task fires at the same local wall-clock time across daylight-saving transitions. Neither the model nor the tool layer SHALL perform timezone arithmetic when constructing a task — the model supplies the user's stated wall-clock time plus (optionally) a timezone name, and conversion is the scheduler's concern at fire time.
+The system SHALL resolve a scheduled task's effective timezone with the precedence **explicit per-task `timezone` > `agent.scheduling.default_timezone` > `UTC`**. Cron fields SHALL be interpreted in the resolved timezone (APScheduler `CronTrigger` timezone) as **local wall-clock time**; **a one-shot task's naive `run_at` SHALL likewise be interpreted in the resolved timezone as local wall-clock time**（见「Robust run_at parsing and write-time normalization」）. The system SHALL persist the cron expression and the timezone **as given** and SHALL NOT normalize a recurring schedule to a fixed UTC offset at creation time, so a recurring task fires at the same local wall-clock time across daylight-saving transitions. Neither the model nor the tool layer SHALL perform timezone arithmetic when constructing a task — the model supplies the user's stated wall-clock time plus (optionally) a timezone name, and conversion is the scheduler's concern at fire time.
 
 #### Scenario: Cron is interpreted in the task timezone
 - **WHEN** a task is registered with `cron_expr="0 18 * * *"` and `timezone="Asia/Shanghai"`
 - **THEN** it fires at 18:00 Asia/Shanghai — not 18:00 UTC, and not 10:00 Asia/Shanghai
+
+#### Scenario: one-shot 钟面时间按任务时区解释
+- **WHEN** 用户说「明早 9 点提醒我」（Asia/Shanghai 语境），任务以 naive `run_at` + `timezone="Asia/Shanghai"` 创建，部署宿主机时区任意
+- **THEN** 任务在 Asia/Shanghai 的 09:00 触发；宿主机系统时区不参与解释
 
 #### Scenario: Empty timezone resolves to the deployment default
 - **WHEN** a task is created with no timezone while `agent.scheduling.default_timezone="Asia/Shanghai"`
@@ -403,9 +449,25 @@ The scheduler SHALL drive firing from a **persisted `next_run_at` per task** plu
 - **WHEN** the agent boots with scheduling enabled
 - **THEN** a background tick loop starts; on agent shutdown the loop stops cleanly without leaking a task
 
+### Requirement: Run-state writeback is field-selective
+
+`schedule_store.update_run_state` SHALL update **only the columns the caller explicitly passes**（PATCH 语义）：未传入的列 MUST 保持原值不变。写 `last_run_at`/`last_status`/`last_error` MUST NOT 清除或改写 `next_run_at`，写 `next_run_at`（如注册时 backfill）MUST NOT 清除运行状态列。「显式置空」与「未传」SHALL 用 sentinel 区分（传 `None` 即显式置 NULL 的旧用法不复存在——现有调用方均按部分更新意图书写）。
+
+#### Scenario: 写状态列不影响 next_run_at
+- **WHEN** 一个任务已有 `next_run_at`，随后 `update_run_state(task_id, last_run_at=..., last_status="ok")` 被调用（未传 `next_run_at`）
+- **THEN** `last_run_at`/`last_status` 更新，`next_run_at` 保持原值不变
+
+#### Scenario: 写 next_run_at 不影响状态列
+- **WHEN** 一个任务已有 `last_status="error"` 与 `last_error`，随后 `update_run_state(task_id, next_run_at=...)` 被调用
+- **THEN** `next_run_at` 更新，`last_status`/`last_error`/`last_run_at` 保持原值不变
+
+#### Scenario: 贯通接缝——真实 fire 后状态与网格并存
+- **WHEN** 一个 interval 任务经真实 `_fire` 路径（仅 stub agent run）完成一次触发，且下一个 tick 已运行
+- **THEN** store 中该任务同时持有：claim 时推进的 `next_run_at` 网格值、本次 fire 的 `last_run_at`/`last_status`——二者互不抹除
+
 ### Requirement: Advance-before-execute decouples cadence from run duration
 
-For a recurring (`cron`/`interval`) due task, the scheduler SHALL **advance `next_run_at` to the next occurrence BEFORE executing the run**, inside the same concurrency-protected claim. Firing SHALL NOT block the tick loop (each run is dispatched so the tick can continue selecting/advancing other due tasks). Consequently a single run whose duration exceeds the task's interval SHALL NOT cause the following occurrence to be dropped or coalesced: the next occurrence's `next_run_at` is already set and will be picked up on a subsequent tick. Advancing before execution gives **at-most-once** semantics for recurring tasks (a crash mid-run does not re-fire the same occurrence). One-shot (`once`) tasks SHALL NOT be advanced (so they may still retry on restart until completed).
+For a recurring (`cron`/`interval`) due task, the scheduler SHALL **advance `next_run_at` to the next occurrence BEFORE executing the run**, inside the same concurrency-protected claim. Firing SHALL NOT block the tick loop (each run is dispatched so the tick can continue selecting/advancing other due tasks). Consequently a single run whose duration exceeds the task's interval SHALL NOT cause the following occurrence to be dropped or coalesced: the next occurrence's `next_run_at` is already set and will be picked up on a subsequent tick. Advancing before execution gives **at-most-once** semantics for recurring tasks (a crash mid-run does not re-fire the same occurrence). **The post-fire run-state writeback SHALL preserve the claimed `next_run_at`**（见「Run-state writeback is field-selective」）——fire 完成后的下一个 tick MUST NOT 依赖 backfill 分支重算调度时刻。One-shot (`once`) tasks SHALL NOT be advanced; their outcome (success or failure) is governed by the one-shot terminal-outcome policy in "Fire-time revalidation against the store" — a failed `once` fire terminates the task and MUST NOT leave it due for repeated automatic retries.
 
 #### Scenario: Slow run does not drop the next occurrence
 - **WHEN** an `interval` task whose single run takes longer than its `interval_seconds` fires
@@ -414,6 +476,10 @@ For a recurring (`cron`/`interval`) due task, the scheduler SHALL **advance `nex
 #### Scenario: Recurring task is not double-fired for one occurrence
 - **WHEN** a recurring task is claimed and its `next_run_at` advanced, then the process crashes during the run
 - **THEN** on restart the same occurrence is not re-fired (at-most-once); scheduling resumes from the already-advanced `next_run_at`
+
+#### Scenario: fire 完成后的写回保留已推进的 next_run_at
+- **WHEN** 一个 recurring 任务被 claim（`next_run_at` 已推进到未来）且其 run 经真实 `_fire` 路径完成、运行状态写回发生
+- **THEN** store 中 `next_run_at` 仍等于 claim 时推进的值（非 NULL、未被重算），下一次触发按该网格值发生
 
 #### Scenario: One-shot is not advanced
 - **WHEN** a `once` task is claimed to fire

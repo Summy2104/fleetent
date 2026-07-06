@@ -475,6 +475,11 @@ class AgentFile(BaseModel):
     # absent from this map are public (default empty = every skill public, unchanged).
     skill_user_access: dict[str, list[str]] = Field(default_factory=dict)
     allowed_tools: list[str] = Field(default_factory=list)
+    # deferred-tool-loading: fnmatch patterns (matched against canonical MCP tool names
+    # `{server_id}__{tool}`) promoting matching MCP tools to "hot" — their full schema stays
+    # resident in `tools=` every turn instead of being deferred to the tool_search catalog.
+    # Empty (default) = all MCP tools deferred. Builtin tools are always hot regardless.
+    hot_mcp_servers: list[str] = Field(default_factory=list)
     plugins: list[str] = Field(default_factory=list)
     features: dict[str, Any] = Field(default_factory=dict)
     mcp_servers: list[McpServerSettings] = Field(default_factory=list)
