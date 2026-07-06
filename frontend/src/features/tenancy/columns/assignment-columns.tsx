@@ -4,6 +4,7 @@ import type { TenantListItem } from '@/features/tenancy/api'
 import { AssignmentRowActions } from '@/features/tenancy/row-actions/assignment-row-actions'
 import type { TenancyUser } from '@/features/tenancy/shared'
 import type { useT } from '@/i18n'
+import { labelWithId } from '@/lib/labels'
 
 type Translate = ReturnType<typeof useT>
 
@@ -33,7 +34,13 @@ export function buildAssignmentColumns({
       },
       cell: ({ row }) =>
         row.original.tenant_id
-          ? t('tenancy.assignmentLine', { name: row.original.name, tenant: row.original.tenant_id })
+          ? t('tenancy.assignmentLine', {
+              name: row.original.name,
+              tenant: labelWithId(
+                tenants.find((tenant) => tenant.id === row.original.tenant_id)?.name,
+                row.original.tenant_id
+              ),
+            })
           : t('tenancy.unassigned'),
     },
     {

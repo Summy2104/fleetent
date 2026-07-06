@@ -1,11 +1,19 @@
 import type { ColumnDef } from '@tanstack/react-table'
 
 import type { AuditLogRow } from '@/features/audit/api'
+import type { UserListItem } from '@/features/users/api'
 import type { useT } from '@/i18n'
+import { labelWithId } from '@/lib/labels'
 
 type Translate = ReturnType<typeof useT>
 
-export function buildAuditColumns({ t }: { t: Translate }): ColumnDef<AuditLogRow, unknown>[] {
+export function buildAuditColumns({
+  t,
+  users,
+}: {
+  t: Translate
+  users: UserListItem[]
+}): ColumnDef<AuditLogRow, unknown>[] {
   return [
     {
       accessorKey: 'created_at',
@@ -17,7 +25,11 @@ export function buildAuditColumns({ t }: { t: Translate }): ColumnDef<AuditLogRo
       accessorKey: 'actor_user_id',
       header: t('audit.actor'),
       meta: { title: t('audit.actor'), filter: { type: 'text', placeholder: t('audit.actor') } },
-      cell: ({ row }) => <span className="text-sm">{row.original.actor_user_id ?? '-'}</span>,
+      cell: ({ row }) => {
+        const actorId = row.original.actor_user_id
+        if (!actorId) return <span className="text-sm">-</span>
+        return <span className="text-sm">{labelWithId(users.find((user) => user.id === actorId)?.name, actorId)}</span>
+      },
     },
     {
       accessorKey: 'action',

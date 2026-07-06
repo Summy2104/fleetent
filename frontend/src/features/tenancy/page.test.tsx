@@ -126,7 +126,7 @@ describe('tenancy page', () => {
     await user.click(await screen.findByRole('option', { name: 'Tenant B' }))
     await user.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => {
-      expect(screen.getByText('Alice -> tenant-b')).toBeInTheDocument()
+      expect(screen.getByText('Alice -> Tenant B (tenant-b)')).toBeInTheDocument()
     })
 
     // Tenants tab: set tenant-b approver to user-2 via the row actions menu.
@@ -138,7 +138,7 @@ describe('tenancy page', () => {
     await user.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => {
       const row = screen.getByRole('row', { name: /Tenant B/ })
-      expect(within(row).getByText('Approver: user-2')).toBeInTheDocument()
+      expect(within(row).getByText('Approver: Bob (user-2)')).toBeInTheDocument()
     })
   })
 

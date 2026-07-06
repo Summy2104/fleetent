@@ -7,6 +7,7 @@ import { type DateRangeValue, dateRangeBounds } from '@/components/base/date-pic
 import { Button } from '@/components/ui/button'
 import { type AuditLogFilters, type AuditLogRow, auditRowsToCsv, useAuditLogsQuery } from '@/features/audit/api'
 import { buildAuditColumns } from '@/features/audit/columns/audit-columns'
+import { useUsersQuery } from '@/features/users/api'
 import { useT } from '@/i18n'
 
 /**
@@ -48,7 +49,8 @@ export function AuditPage(): JSX.Element {
   const [filters, setFilters] = useState<AuditLogFilters>({})
   const [searched, setSearched] = useState(false)
   const auditLogs = useAuditLogsQuery(filters, searched)
-  const columns = useMemo(() => buildAuditColumns({ t }), [t])
+  const users = useUsersQuery()
+  const columns = useMemo(() => buildAuditColumns({ t, users: users.data ?? [] }), [t, users.data])
   const rows = auditLogs.data ?? []
 
   // Commit the current column filters to the backend query on demand — audit
