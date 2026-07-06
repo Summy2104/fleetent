@@ -65,16 +65,18 @@ def test_seed_builtin_admin_recreates_bootstrap_when_no_active_admin_exists(db):
     assert auth.verify_password(temp_password, user_store.get_by_id(user.id).password_hash)
 
 
-def test_seed_reasserts_must_reset_while_default_password(db):
-    # Insecure default admin/admin must stay gated: if must_reset got cleared but the
-    # password is still the bootstrap default, a later seed re-forces the reset.
+def test_seed_does_not_reassert_must_reset_once_cleared(db):
+    # The forced reset is asserted only at first seed. A later startup must NOT re-force
+    # must_reset, even if the password is still the bootstrap default: re-forcing on every
+    # restart trapped operators in a reset-every-restart loop (change-password accepts the
+    # default value, which immediately re-armed the guard).
     user, _ = auth.seed_builtin_admin()
     user_store.set_password(
         user.id, auth.hash_password(auth.BUILTIN_ADMIN_PASSWORD), must_reset=False
     )
     assert user_store.get_by_id(user.id).must_reset == 0
     assert auth.seed_builtin_admin() is None  # still a no-op return
-    assert user_store.get_by_id(user.id).must_reset == 1  # gate re-asserted
+    assert user_store.get_by_id(user.id).must_reset == 0  # not re-asserted
 
 
 def test_seed_leaves_must_reset_when_password_changed(db):

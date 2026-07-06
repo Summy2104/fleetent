@@ -164,14 +164,19 @@ def test_seed_builtin_admin_noop_when_reset_already_required(monkeypatch: Any) -
     assert set_reset_called["n"] == 0
 
 
-def test_seed_builtin_admin_reasserts_reset_on_default_password(monkeypatch: Any) -> None:
+def test_seed_builtin_admin_does_not_reassert_reset_when_admin_exists(monkeypatch: Any) -> None:
+    # Once an active admin exists, a later seed is a pure no-op: it must not re-force
+    # must_reset, even when the password is still the bootstrap default. Re-forcing on
+    # every startup trapped operators in a reset-every-restart loop.
     default_hash = auth.hash_password(auth.BUILTIN_ADMIN_PASSWORD)
     existing = _user(id="admin-id", must_reset=0, password_hash=default_hash)
-    reasserted: dict[str, Any] = {}
+    set_reset_called = {"n": 0}
     monkeypatch.setattr(user_store, "count_active_admins", lambda: 1)
     monkeypatch.setattr(user_store, "get_builtin_admin", lambda: existing)
     monkeypatch.setattr(
-        user_store, "set_must_reset", lambda uid, flag: reasserted.update({uid: flag})
+        user_store,
+        "set_must_reset",
+        lambda uid, flag: set_reset_called.update({"n": set_reset_called["n"] + 1}),
     )
     assert auth.seed_builtin_admin() is None
-    assert reasserted == {"admin-id": True}
+    assert set_reset_called["n"] == 0

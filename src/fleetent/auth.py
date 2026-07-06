@@ -55,15 +55,10 @@ def seed_builtin_admin() -> tuple[user_store.User, str] | None:
     Returns (user, temp_password) when seeded, otherwise None.
     """
     if user_store.count_active_admins() > 0:
-        # Insecure default admin/admin must stay gated: if the reset flag was cleared but the
-        # password is still the bootstrap default, re-assert the forced reset on next startup.
-        existing = user_store.get_builtin_admin()
-        if (
-            existing is not None
-            and not existing.must_reset
-            and verify_password(BUILTIN_ADMIN_PASSWORD, existing.password_hash)
-        ):
-            user_store.set_must_reset(existing.id, True)
+        # The forced reset is asserted once, at first seed below. We deliberately do NOT
+        # re-assert it on later startups: re-forcing whenever the password was still the
+        # bootstrap default trapped operators in a reset-every-restart loop, because
+        # change-password accepts the default value and immediately re-armed the guard.
         return None
     temp_password = BUILTIN_ADMIN_PASSWORD
     user, _ = user_store.create_user(name=BUILTIN_ADMIN_NAME, email=None)
