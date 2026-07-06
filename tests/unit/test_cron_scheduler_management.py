@@ -145,7 +145,13 @@ def test_create_remove_and_toggle_task_delegate_to_store_and_scheduler(
     assert removed == ["task-1", "task-1"]  # remove_task + disable deregister
 
 
-def test_complete_once_only_marks_successful_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_complete_once_closes_both_outcomes_but_only_writes_completed_on_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """fix-cron-store-and-once F2a: a failed once is terminally closed (enabled=0)
+    same as a successful one — it must never stay due for automatic hot retry — but
+    only the success path overwrites last_status to "completed"; a failure keeps its
+    recorded error state as-is (no update_run_state call for it)."""
     scheduler = cron_scheduler.CronScheduler()
     updates: list[tuple[str, dict[str, object]]] = []
     states = {
@@ -169,6 +175,7 @@ def test_complete_once_only_marks_successful_tasks(monkeypatch: pytest.MonkeyPat
     scheduler._complete_once("ok")  # noqa: SLF001
 
     assert updates == [
+        ("fail", {"enabled": False}),
         ("ok", {"enabled": False}),
         ("ok", {"last_run_at": "now", "last_status": "completed", "last_error": None}),
     ]
@@ -208,7 +215,9 @@ def test_module_facade_functions_cover_scheduler_and_store_paths(
     )
     monkeypatch.setattr(cron_scheduler, "_current", scheduler)
     monkeypatch.setattr(
-        cron_scheduler, "_parse_run_at", lambda value: datetime(2026, 6, 15, tzinfo=UTC)
+        cron_scheduler,
+        "_parse_run_at",
+        lambda value, tz=None: datetime(2026, 6, 15, tzinfo=UTC),
     )
 
     created = cron_scheduler.create_task(

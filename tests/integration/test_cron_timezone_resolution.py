@@ -4,6 +4,10 @@ local wall-clock (no UTC pre-conversion)."""
 
 from __future__ import annotations
 
+import os
+import time
+from datetime import UTC, timedelta
+
 import fleetent.cron_scheduler as cs
 import fleetent.schedule_store as store
 from fleetent.config import SchedulingSettings
@@ -77,3 +81,50 @@ async def test_tool_create_explicit_timezone_overrides_default(isolated_schedule
         assert job.next_run_time.hour == 9
     finally:
         await scheduler.shutdown()
+
+
+# ── once run_at: naive input is local wall-clock in the task timezone (F3) ──────
+
+
+async def test_tool_create_once_naive_run_at_uses_task_timezone(isolated_schedule_db):
+    """A naive once run_at is interpreted in the task's timezone, never the host
+    process's system timezone (fix-cron-store-and-once F3 — AAA-8288/8279 class).
+
+    Host TZ is forced to UTC for the duration of this test to make the pre-fix
+    failure (implicit host-timezone interpretation) deterministic on any machine,
+    then restored regardless of outcome.
+    """
+    original_tz = os.environ.get("TZ")
+    os.environ["TZ"] = "UTC"
+    if hasattr(time, "tzset"):
+        time.tzset()
+    try:
+        scheduler = cs.CronScheduler(settings=SchedulingSettings(default_timezone="UTC"))
+        await scheduler.start()
+        try:
+            await builtin_tools.schedule(
+                action="create",
+                name="reminder",
+                schedule_kind="once",
+                run_at="2026-07-08 09:00",
+                message="x",
+                timezone="Asia/Shanghai",
+            )
+            task_id = _only_task_id()
+            row = store.get(task_id)
+            assert "+08:00" in row["run_at"], row["run_at"]
+
+            job = scheduler.get_job(task_id)
+            assert job is not None
+            assert job.next_run_time.utcoffset() == timedelta(hours=8)
+            # 09:00 Asia/Shanghai == 01:00 UTC — not 09:00 UTC (the pre-fix bug).
+            assert job.next_run_time.astimezone(UTC).hour == 1
+        finally:
+            await scheduler.shutdown()
+    finally:
+        if original_tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = original_tz
+        if hasattr(time, "tzset"):
+            time.tzset()
