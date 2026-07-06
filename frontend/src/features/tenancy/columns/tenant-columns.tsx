@@ -6,6 +6,7 @@ import type { TenantListItem } from '@/features/tenancy/api'
 import { TenantRowActions } from '@/features/tenancy/row-actions/tenant-row-actions'
 import type { TenancyUser } from '@/features/tenancy/shared'
 import type { useT } from '@/i18n'
+import { labelWithId } from '@/lib/labels'
 
 type Translate = ReturnType<typeof useT>
 
@@ -58,11 +59,13 @@ export function buildTenantColumns({
       header: t('tenancy.colApprover'),
       enableSorting: false,
       meta: { title: t('tenancy.colApprover') },
-      cell: ({ row }) => (
-        <span className="text-muted-foreground text-sm">
-          {t('tenancy.approverLine', { value: row.original.approver_user_id ?? t('tenancy.unassigned') })}
-        </span>
-      ),
+      cell: ({ row }) => {
+        const approverId = row.original.approver_user_id
+        const value = approverId
+          ? labelWithId(users.find((user) => user.id === approverId)?.name, approverId)
+          : t('tenancy.unassigned')
+        return <span className="text-muted-foreground text-sm">{t('tenancy.approverLine', { value })}</span>
+      },
     },
     {
       id: 'actions',

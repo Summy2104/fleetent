@@ -39,8 +39,14 @@ import {
   type WebhookSourceUpdateInput,
 } from '@/features/webhooks/api'
 import { useT } from '@/i18n'
+import { labelWithId } from '@/lib/labels'
 
 const NO_REPLY_TARGET = 'none'
+
+// Resolve a bound user_id to "name (id)" for read-back, falling back to the id.
+function userLabel(users: UserListItem[], id: string): string {
+  return labelWithId(users.find((u) => u.id === id)?.name, id)
+}
 
 function generateSecret(): string {
   const bytes = new Uint8Array(32)
@@ -281,7 +287,7 @@ function ViewEditWebhookDialog({
   const [secretMode, setSecretMode] = useState<WebhookSecretAction>('keep')
   const [secret, setSecret] = useState('')
 
-  const userName = (id: string): string => users.find((u) => u.id === id)?.name ?? id
+  const userName = (id: string): string => userLabel(users, id)
 
   const enterEdit = (): void => {
     setAgentId(source.agent_id == null ? '' : String(source.agent_id))
@@ -313,8 +319,7 @@ function ViewEditWebhookDialog({
     setEditing(false)
   }
 
-  const canSave =
-    agentId.length > 0 && userId.length > 0 && (secretMode !== 'set' || secret.trim().length > 0)
+  const canSave = agentId.length > 0 && userId.length > 0 && (secretMode !== 'set' || secret.trim().length > 0)
 
   return (
     <Dialog onOpenChange={handleOpenChange} open={open}>
@@ -410,12 +415,7 @@ function ViewEditWebhookDialog({
                       {source.has_secret ? t('webhooks.replaceSecret') : t('webhooks.setSecret')}
                     </Button>
                     {source.has_secret ? (
-                      <Button
-                        onClick={() => setSecretMode('clear')}
-                        size="sm"
-                        type="button"
-                        variant="outline"
-                      >
+                      <Button onClick={() => setSecretMode('clear')} size="sm" type="button" variant="outline">
                         {t('webhooks.clearSecret')}
                       </Button>
                     ) : null}
@@ -531,7 +531,7 @@ function SourceRow({
     <tr className="border-border border-b last:border-0 hover:bg-accent/30">
       <td className="px-4 py-3 font-mono text-foreground text-sm">{source.id}</td>
       <td className="px-4 py-3 text-muted-foreground text-sm">{agentName}</td>
-      <td className="px-4 py-3 text-muted-foreground text-sm">{source.user_id}</td>
+      <td className="px-4 py-3 text-muted-foreground text-sm">{userLabel(users, source.user_id)}</td>
       <td className="px-4 py-3">
         <Badge variant={source.enabled ? 'success' : 'secondary'}>
           {source.enabled ? t('webhooks.statusEnabled') : t('webhooks.statusDisabled')}

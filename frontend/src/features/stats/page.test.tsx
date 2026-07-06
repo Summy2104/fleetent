@@ -116,6 +116,12 @@ describe('stats page', () => {
           { user_id: 'u2', calls: 5, total_tokens: 320 },
         ])
       ),
+      http.get(`${API_BASE_URL}/admin/users`, () =>
+        HttpResponse.json([
+          { email: 'ursula@x.com', id: 'u1', must_reset: false, name: 'Ursula', role: 'user', status: 'active' },
+          { email: 'ulric@x.com', id: 'u2', must_reset: false, name: 'Ulric', role: 'user', status: 'active' },
+        ])
+      ),
       http.get(`${API_BASE_URL}/admin/stats/users/u1/requests`, () =>
         HttpResponse.json([
           { request_id: 'req-1', session_id: 'sess-1', turns: 3 },
@@ -166,7 +172,8 @@ describe('stats page', () => {
     await user.click(loadButton)
 
     await waitFor(() => {
-      expect(screen.getByText('u1')).toBeInTheDocument()
+      // The per-user card resolves user_id to "name (id)".
+      expect(screen.getByText('Ursula (u1)')).toBeInTheDocument()
       // calls: 12 appears in both overview usage and the per-user row.
       expect(screen.getAllByText('calls: 12').length).toBeGreaterThan(0)
       expect(screen.getByText('p95_ms: 750')).toBeInTheDocument()
@@ -181,7 +188,7 @@ describe('stats page', () => {
     expect(compareSection.getByText('9')).toBeInTheDocument()
 
     // Inspect u1's request history. Each per-user row has its own "View requests".
-    const u1Row = screen.getByText('u1').closest('div.rounded-lg') as HTMLElement
+    const u1Row = screen.getByText('Ursula (u1)').closest('div.rounded-lg') as HTMLElement
     await user.click(within(u1Row).getByRole('button', { name: 'View requests' }))
     expect(await screen.findByText('req-1')).toBeInTheDocument()
 
