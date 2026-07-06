@@ -1141,6 +1141,68 @@ async def test_start_bulkheads_malformed_task(isolated_schedule_db):
         await scheduler.shutdown()
 
 
+async def test_start_alerts_origin_when_disabling_malformed_task(isolated_schedule_db, monkeypatch):
+    """cron-hardening F6.2: boot-time auto-disable must not be purely silent — the
+    task's owner is told via its resolvable origin, best-effort."""
+    import fleetent.cron_scheduler as cs
+    import fleetent.schedule_store as ss
+    from fleetent.outbound import DeliveryReceipt
+
+    bad = ss.create(
+        name="bad",
+        schedule_kind="once",
+        run_at="2026-06-14T08:07:19Z",
+        message="x",
+        origin={"platform": "slack", "chat_id": "U1"},
+    )
+    isolated_schedule_db.execute(
+        "UPDATE scheduled_tasks SET run_at = :r WHERE id = :i",
+        {"r": "garbage-not-a-date", "i": bad["id"]},
+    )
+    send = AsyncMock(
+        return_value=DeliveryReceipt(
+            ok=True, platform="slack", target="U1", target_type="user", kind="text"
+        )
+    )
+    monkeypatch.setattr(cs.outbound, "send_to", send)
+
+    scheduler = cs.CronScheduler(connectors_resolver=lambda: {"slack": object()})
+    await scheduler.start()
+    try:
+        send.assert_awaited_once()
+        args, _ = send.call_args
+        assert args[0] == "slack" and args[2] == "U1"
+        assert "bad" in args[3]
+    finally:
+        await scheduler.shutdown()
+
+
+async def test_start_disable_alert_failure_does_not_block_boot(isolated_schedule_db, monkeypatch):
+    import fleetent.cron_scheduler as cs
+    import fleetent.schedule_store as ss
+
+    bad = ss.create(
+        name="bad",
+        schedule_kind="once",
+        run_at="2026-06-14T08:07:19Z",
+        message="x",
+        origin={"platform": "slack", "chat_id": "U1"},
+    )
+    isolated_schedule_db.execute(
+        "UPDATE scheduled_tasks SET run_at = :r WHERE id = :i",
+        {"r": "garbage-not-a-date", "i": bad["id"]},
+    )
+    monkeypatch.setattr(cs.outbound, "send_to", AsyncMock(side_effect=RuntimeError("down")))
+
+    scheduler = cs.CronScheduler(connectors_resolver=lambda: {"slack": object()})
+    await scheduler.start()  # must not raise even though the alert delivery fails
+    try:
+        assert scheduler.running
+        assert not ss.get(bad["id"])["enabled"]
+    finally:
+        await scheduler.shutdown()
+
+
 # ── write-time run_at normalization (cron-runat-hardening) ──
 
 

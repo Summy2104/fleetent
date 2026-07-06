@@ -4,7 +4,7 @@
 
 评审发现的健壮性弱点集（详见 proposal），参照两套成熟实现收敛策略：vixie-cron 对时间跳变的五档分类（wild 任务不逐槽补跑、定点任务有界补跑、超 3h 放弃追赶）与 hermes-agent 的 inactivity 看门狗（600s）、grace 公式（半周期 clamp [120s, 2h]）、绝不静默禁用 recurring（#16265）。
 
-**依赖**：F6.2 禁用告警复用 change-1（fix-cron-store-and-once）落地的失败告警助手——本 change 须在 change-1 合并后 apply。
+**依赖**：F6.2 禁用告警复用 change-1（fix-cron-store-and-once）落地的 `_deliver` 冻结文案投递路径——本 change 须在 change-1 合并后 apply。实现时发现禁用告警不应直接调用 change-1 的 `_maybe_alert_failure`（那个助手内建了「fire 失败 streak」抑制语义——同一任务连续失败只告警一次）：boot 禁用是**一次性终结事件**（该任务从此不会再被注册，没有「下一次失败」的概念），套用 streak 抑制反而可能因任务历史的 `last_status` 巧合等于 `"error"` 而被误吞。改为直接复用 `_deliver` 本身（同样的目标解析 + 连接器发送 + best-effort 语义），跳过 streak 判定。
 
 ### 模块边界影响声明
 

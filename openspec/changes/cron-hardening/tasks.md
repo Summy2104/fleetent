@@ -14,8 +14,8 @@
 
 ## 3. 禁用必告警（F6.2）
 
-- [ ] 3.1 写测试：boot 注册遇坏行禁用时，origin 可解析 → 假 connector 收到禁用告警；告警失败不影响 boot → 见红
-- [ ] 3.2 实现：`start()` 禁用分支接 change-1 告警助手（design 依赖声明）→ 见绿
+- [x] 3.1 写测试：boot 注册遇坏行禁用时，origin 可解析 → 假 connector 收到禁用告警；告警失败不影响 boot → 见红
+- [x] 3.2 实现：`start()` 禁用分支直接复用 `_deliver` 冻结文案投递（未走 `_maybe_alert_failure`——禁用是一次性终结事件，不适用其失败 streak 抑制语义）→ 见绿
 
 ## 4. fire 看门狗（F6.3）
 

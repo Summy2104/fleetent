@@ -650,6 +650,20 @@ class CronScheduler:
                 if task_id:
                     with suppress(Exception):
                         _store.set_enabled(task_id, False)
+                    # Disabling must not be purely silent (cron-hardening F6.2): best-effort
+                    # tell the owner via the task's resolvable target — never blocks boot.
+                    name = task.get("name") or task_id
+                    connectors = self._connectors_resolver() if self._connectors_resolver else None
+                    try:
+                        await _deliver(
+                            task,
+                            f"⚠️ 定时任务 {name} 已因数据问题被停用: {exc}",
+                            connectors or {},
+                        )
+                    except Exception as alert_exc:  # noqa: BLE001 — alerting is best-effort
+                        logger.warning(
+                            "cron_disable_alert_failed task=%s error=%s", task_id, alert_exc
+                        )
         self._register_maintenance_jobs()
         self._running = True
         self._tick_task = asyncio.create_task(self._run_tick_loop())
