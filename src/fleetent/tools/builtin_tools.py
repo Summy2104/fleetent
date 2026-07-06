@@ -843,6 +843,26 @@ def _origin_from_context(tool_context: ToolContext | None) -> dict[str, str | No
     }
 
 
+def _delivery_target_note(
+    task_type: str, deliver: dict[str, str] | None, origin: dict[str, str | None] | None
+) -> str:
+    """Describe (or warn about) the resolved delivery target for the create echo.
+
+    Makes a delivery-target mismatch visible at creation time (cron-delivery-governance,
+    AAA-8279): explicit targets and origin fallback are named outright; a `generate` task
+    with neither is a warning (not a rejection — the fire-time `no_delivery_target` error
+    and failure alert from fix-cron-store-and-once are the actual safety net). `action`
+    tasks deliver via their own tools and never need a scheduler-resolved target.
+    """
+    if deliver is not None:
+        return f"投递目标: {deliver['platform']}:{deliver['target']}({deliver['target_type']})"
+    if origin is not None:
+        return "投递目标: 创建会话（origin）"
+    if task_type == "generate":
+        return "⚠️ 未配置投递目标且无法从当前上下文捕获创建会话——本任务触发产出的内容将无法送达（可用 notify_target 指定，或改用 task_type=action）。"
+    return ""
+
+
 @tool(risk_level="low")
 async def schedule(
     action: Annotated[
@@ -922,6 +942,13 @@ async def schedule(
     from fleetent import cron_scheduler
 
     if action == "create":
+        # half-set rejection (cron-delivery-governance F4.1): notify_platform and
+        # notify_target must be provided together or not at all — silently ignoring
+        # a half-set previously fell back to origin, which reads as "wrong channel"
+        # to the user (AAA-8279).
+        if bool(notify_platform) != bool(notify_target):
+            missing = "notify_platform" if notify_target else "notify_target"
+            return f"error: notify_platform 和 notify_target 须成对提供（缺少 {missing}）"
         deliver = None
         if notify_platform and notify_target:
             deliver = {
@@ -955,18 +982,19 @@ async def schedule(
             # Per-type validation (e.g. notify without notify_text/target) → clean text,
             # never a raised exception the agent loop would have to recover from.
             return f"error: {exc}"
+        target_note = _delivery_target_note(task_type, deliver, origin)
         if cron_scheduler.current() is None:
             # No live scheduler in this process — be truthful so the AI does not
             # promise the user a fire time that will never come.
             return (
                 f"Scheduled task saved: id={task['id']!r} name={name!r} "
                 f"kind={schedule_kind!r} — takes effect when the agent service is running "
-                "(no scheduler in this process)"
+                f"(no scheduler in this process). {target_note}"
             )
         hint = str(task.get("next_fire_hint") or "")
         return (
             f"Scheduled task created and registered: id={task['id']!r} "
-            f"name={name!r} kind={schedule_kind!r}.{hint}"
+            f"name={name!r} kind={schedule_kind!r}.{hint} {target_note}"
         )
 
     if action == "list":

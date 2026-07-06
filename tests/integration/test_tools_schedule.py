@@ -88,6 +88,115 @@ async def test_schedule_unknown_action_returns_error():
     assert "unknown action" in result.lower()
 
 
+# ── half-set notify_platform/notify_target rejection (cron-delivery-governance F4.1) ──
+
+
+async def test_schedule_create_only_notify_target_is_rejected():
+    """notify_target without notify_platform must error, not silently fall back to origin
+    (AAA-8279 root cause: the half-set was previously ignored and delivery fell back to
+    the creation channel, which reads as "wrong channel" to the user)."""
+    import fleetent.schedule_store as ss
+
+    with patch.object(ss, "create") as mock_create:
+        payload = (
+            '{"action":"create","name":"rep","cron_expr":"0 9 * * *",'
+            '"message":"report","notify_target":"C9"}'
+        )
+        result = await dispatch("schedule", payload)
+
+    mock_create.assert_not_called()
+    assert "error" in result.lower()
+    assert "notify_platform" in result
+
+
+async def test_schedule_create_only_notify_platform_is_rejected():
+    import fleetent.schedule_store as ss
+
+    with patch.object(ss, "create") as mock_create:
+        payload = (
+            '{"action":"create","name":"rep","cron_expr":"0 9 * * *",'
+            '"message":"report","notify_platform":"slack"}'
+        )
+        result = await dispatch("schedule", payload)
+
+    mock_create.assert_not_called()
+    assert "error" in result.lower()
+    assert "notify_target" in result
+
+
+async def test_schedule_create_neither_notify_param_is_fine():
+    """Omitting both is the normal "deliver to origin" path — not a half-set."""
+    import fleetent.schedule_store as ss
+
+    with patch.object(ss, "create", return_value={"id": "x"}) as mock_create:
+        payload = (
+            '{"action":"create","name":"rep","cron_expr":"0 9 * * *","message":"report"}'
+        )
+        result = await dispatch("schedule", payload)
+
+    mock_create.assert_called_once()
+    assert "error" not in result.lower()
+
+
+# ── create echo明示/警示投递目标 (cron-delivery-governance F4.3) ──────────────
+
+
+async def test_schedule_create_echoes_explicit_target():
+    import fleetent.schedule_store as ss
+
+    with patch.object(ss, "create", return_value={"id": "x"}):
+        payload = (
+            '{"action":"create","name":"rep","cron_expr":"0 9 * * *","message":"report",'
+            '"notify_platform":"slack","notify_target":"C123","notify_target_type":"channel"}'
+        )
+        result = await dispatch("schedule", payload)
+
+    assert "slack:C123(channel)" in result
+
+
+async def test_schedule_create_echoes_origin_fallback():
+    import fleetent.schedule_store as ss
+    from fleetent.im_gateway.normalizer import SessionContext
+    from fleetent.tools.registry import ToolContext
+
+    sc = SessionContext(platform="slack", sender_id="U1", chat_type="dm", channel_name="D5")
+    with patch.object(ss, "create", return_value={"id": "x"}):
+        payload = '{"action":"create","name":"rep","cron_expr":"0 9 * * *","message":"report"}'
+        result = await dispatch("schedule", payload, tool_context=ToolContext(session_context=sc))
+
+    assert "创建会话" in result
+
+
+async def test_schedule_create_generate_no_target_echoes_warning():
+    """No explicit target and no capturable origin: create still succeeds (this is a
+    visibility warning, not a rejection — the fire-time no_delivery_target + alert from
+    fix-cron-store-and-once is the actual safety net)."""
+    import fleetent.schedule_store as ss
+
+    with patch.object(ss, "create", return_value={"id": "x"}) as mock_create:
+        payload = '{"action":"create","name":"rep","cron_expr":"0 9 * * *","message":"report"}'
+        result = await dispatch("schedule", payload)
+
+    mock_create.assert_called_once()  # not rejected
+    assert "⚠️" in result
+    assert "无法送达" in result or "无处可去" in result
+
+
+async def test_schedule_create_action_no_target_no_warning():
+    """An action task delivers via its own tools — the scheduler-target warning does
+    not apply to it."""
+    import fleetent.schedule_store as ss
+
+    with patch.object(ss, "create", return_value={"id": "x"}):
+        payload = (
+            '{"action":"create","name":"rep","cron_expr":"0 9 * * *",'
+            '"message":"do it","task_type":"action"}'
+        )
+        result = await dispatch("schedule", payload)
+
+    assert "⚠️" not in result
+
+
 def test_legacy_schedule_task_and_cancel_task_removed():
     from fleetent.tools.registry import get_schemas
 

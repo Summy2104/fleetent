@@ -1,34 +1,12 @@
 # cron-scheduled-tasks Delta
 
-## ADDED Requirements
-
-### Requirement: Create-time delivery-target resolvability for broadcast tasks
-
-`schedule_store.create` SHALL reject（`ValueError`）一个 `generate` 任务，当其**既无显式 `deliver` 又无 `origin`**——广播型任务的产出必须有处可去；唯一例外是显式 `deliver.mode="none"`（有意不投递）。该校验镜像既有 notify 校验（notify 已要求 deliver 或 origin 之一）。`action` 任务不受此校验（其投递经自身工具完成）。`schedule` 工具 SHALL 将该 `ValueError` 转为干净的 `error:` 文本并附配置指引（提供 `notify_platform`+`notify_target`，或改用 `task_type="action"`），不向 agent loop 抛未处理异常。
-
-#### Scenario: 无目标 generate 在创建时被拒
-- **WHEN** `schedule_store.create(task_type="generate", deliver=None, origin=None, message="每日汇总")` 被调用
-- **THEN** 抛出 `ValueError`（指引配置 notify_target 或改用 action），不落任何行
-
-#### Scenario: 显式 mode="none" 放行
-- **WHEN** 一个 `generate` 任务以 `deliver={"mode": "none"}`、无 `origin` 创建
-- **THEN** 创建成功（有意不投递是合法配置）
-
-#### Scenario: 有 origin 的 generate 照常创建
-- **WHEN** 一个 `generate` 任务从 IM 会话创建（origin 自动捕获）、无显式 deliver
-- **THEN** 创建成功，投递回落 origin（既有行为不变）
-
-#### Scenario: action 不受目标校验
-- **WHEN** 一个 `action` 任务以无 deliver、无 origin 创建
-- **THEN** 创建成功（action 经自身工具投递，不需要调度器目标）
-
 ## MODIFIED Requirements
 
 ### Requirement: schedule tool for managing scheduled tasks
 
 A single `schedule` built-in tool SHALL let an agent manage scheduled tasks via an `action` parameter (`create`, `list`, `remove`, `run_now`, `pause`, `resume`). It SHALL have `risk_level="low"` and SHALL NOT require human approval. The tool SHALL perform all mutations through the running `CronScheduler` instance obtained via `cron_scheduler.current()` — never by writing `schedule_store` directly. `create` SHALL accept `task_type` (default `generate`) and `notify_text`, enforcing the per-type validation (notify requires `notify_text` + delivery target; generate/action require `message`) and returning a clean error string rather than raising on a validation failure; its tool description SHALL carry the type-deciding question ("does the message content need information only known at send time?") plus the creation-time finalize-and-confirm flow for notify copy. `create` SHALL stamp the task's owner from the execution principal (`tool_context.principal.user_id`) when available, falling back to the `user_id` parameter only when no principal is present — the model-supplied parameter MUST NOT override an available principal. `create` SHALL return the new task's id; `pause`/`resume` SHALL toggle the task's `enabled` flag and deregister/register the APScheduler job accordingly; `run_now` SHALL fire the task immediately via a public scheduler method. When no scheduler is running (one-shot CLI run, or `scheduling.enabled=false`), mutations SHALL still persist to the store and the tool result SHALL state truthfully that the task takes effect when the agent service is running — the tool MUST NOT report the task as active.
 
-**投递目标参数 SHALL 成对提供**：`notify_platform` 与 `notify_target` 只提供其一时，`create` SHALL 返回明确的 error 文本（指出缺失的参数），MUST NOT 静默忽略并回落 origin。**create 成功回执 SHALL 明示最终投递目标**：显式目标写成 `platform:target(target_type)` 形式；无显式目标时写明「投递回创建会话（origin）」——使目标错配在创建当下即对用户可见。
+**投递目标参数 SHALL 成对提供**：`notify_platform` 与 `notify_target` 只提供其一时，`create` SHALL 返回明确的 error 文本（指出缺失的参数），MUST NOT 静默忽略并回落 origin。**create 成功回执 SHALL 明示最终投递目标**：显式目标写成 `platform:target(target_type)` 形式；无显式目标但有 `origin` 时写明「投递回创建会话（origin）」；**既无显式目标又无 `origin`（且非 `deliver.mode="none"`）时，回执 SHALL 追加一条警示**，说明触发产出的内容将无法送达——这是可见性提示，MUST NOT 阻断创建（该 generate 任务仍会被创建；其 fire 时的失败与告警语义由 `scheduled-task-delivery` 能力的 `no_delivery_target` 与失败告警要求兜底）。使目标错配或缺失在创建当下即对用户可见。
 
 The `schedule` tool's parameter contract SHALL be carried in the **tool schema delivered to the model** (the model receives the schema, not the Python function's docstring body): `action`, `schedule_kind`, `task_type`, and `notify_target_type` SHALL be declared as enumerated parameters (via `Literal`) so the model receives their allowed values, and every parameter SHALL carry a description (via `Annotated`) so per-parameter guidance reaches the model. Because `schedule_kind` is enumerated, the model cannot emit a non-member value such as `run_at` (the forgiving normalization underneath remains for non-model callers). The `task_type` parameter description SHALL convey the notify/generate/action selection rule and the default `generate`. **`notify_platform`/`notify_target` 的参数描述 SHALL 说明二者须成对提供。**
 
@@ -53,6 +31,14 @@ The `timezone` parameter SHALL default to unspecified (empty), NOT to a hardcode
 #### Scenario: 回执明示 origin 回落
 - **WHEN** a task is created from an IM conversation with no explicit target
 - **THEN** the create 回执写明投递将回到创建会话（origin）
+
+#### Scenario: 无可解析目标时回执警示但不阻断创建
+- **WHEN** a `generate` task is created with no `notify_platform`/`notify_target` and no IM session context to auto-capture `origin`
+- **THEN** the task is created successfully (not rejected), and the create 回执 includes a warning that the fired output will have nowhere to be delivered
+
+#### Scenario: action 任务不触发目标警示
+- **WHEN** an `action` task is created with no `notify_platform`/`notify_target` and no `origin`
+- **THEN** the create 回执 does not include the no-target warning（`action` 经自身工具投递，不依赖调度器解析的目标）
 
 #### Scenario: Agent creates a schedule without approval
 - **WHEN** an agent calls `schedule(action="create", schedule_kind="cron", cron_expr=..., message=...)` while the scheduler is running
