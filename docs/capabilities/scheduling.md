@@ -147,9 +147,12 @@ def extract_message(template: str | None, payload: Any) -> str:
   - 按型校验：如 `notify` 缺 `notify_text`/目标时创建被拒并给出可改正的提示
 
 - ✅ **主动投递**（generate 型）：触发后的回复经 `outbound` 主动投递
-  - 显式目标：创建时给 `notify_platform` + `notify_target`（`target_type` user=DM / channel=频道）
+  - 显式目标：创建时给 `notify_platform` + `notify_target`（`target_type` user=DM / channel=频道）——**二者须成对提供**，只给一个会被 create 拒绝并提示缺失的参数（不再静默忽略回落 origin）
   - 未指定：回落创建任务时的会话上下文（`origin`，含原平台/频道/线程）
   - 静默模式：`deliver.mode=none` 或回复恰为 `[SILENT]` 哨兵时成功但不投递（适合「只在有变化时报警」的巡检任务）
+  - **create 回执明示/警示最终投递目标**：显式目标写成 `platform:target(target_type)`；回落 origin 写明「投递回创建会话」；**既无显式目标又无 origin**（generate 型）时回执追加 ⚠️ 警示——不阻断创建，只做可见性提示（该场景的 fire 期兜底见下）
+
+- ✅ **fired run 不含 `schedule` 工具**：定时触发的运行（无论 `generate` 还是 `action`）工具集中不出现 `schedule`——被 prompt 注入或误操作也无法在触发的这次运行里创建/修改/删除定时任务，任务管理仍是交互式会话的能力
 
 - ✅ **触发期校验**：到点时从 store 重读任务行——已删除或已禁用的行绝不执行（绕过 facade 的写入者也拦得住）；owner 被拉黑或不存在时跳过执行
 
@@ -260,6 +263,21 @@ def extract_message(template: str | None, payload: Any) -> str:
 - Given：agent 停机 30 分钟，期间错过一次 cron 触发
 - When：agent 重启
 - Then：错过的触发在宽限窗口内合并补发一次；超过 3600s 的一次性任务跳过不补发
+
+**场景 11：half-set 投递参数被拒**
+- Given：用户只说了"发到 C123"（只给 `notify_target`，未给 `notify_platform`）
+- When：agent 尝试创建任务
+- Then：创建被拒，工具返回明确指出缺失 `notify_platform` 的错误，不静默回落到创建频道
+
+**场景 12：无目标 generate 任务的创建期警示**
+- Given：一个 `generate` 任务从非 IM 上下文创建（无法捕获 `origin`）、也未指定 `notify_platform`/`notify_target`
+- When：创建完成
+- Then：任务仍创建成功，但回执含 ⚠️ 警示——说明触发产出的内容将无法送达；该任务真正触发时会记 `error`（`no_delivery_target`）并触发失败告警
+
+**场景 13：fired run 无法自我增殖**
+- Given：一个 `action` 任务的 message 诱导 agent 在触发时再创建一个新的定时任务
+- When：任务触发
+- Then：该次运行的工具集中没有 `schedule` 工具，无法创建新任务；用户在交互式会话中创建/管理任务不受影响
 
 ### 规划中（v1.0）
 
