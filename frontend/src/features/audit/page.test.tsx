@@ -2,7 +2,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { HttpResponse, http } from 'msw'
-import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AuthProvider } from '@/app/auth'
 import { AppQueryProvider } from '@/app/query-client'
@@ -60,6 +60,24 @@ describe('auditFiltersFromColumns', () => {
 })
 
 describe('audit page', () => {
+  // The page resolves actor_user_id to a name; every render fetches the user list.
+  beforeEach(() => {
+    server.use(
+      http.get(`${API_BASE_URL}/admin/users`, () =>
+        HttpResponse.json([
+          {
+            email: 'admin@x.com',
+            id: 'admin-1',
+            must_reset: false,
+            name: 'Admin One',
+            role: 'admin',
+            status: 'active',
+          },
+        ])
+      )
+    )
+  })
+
   it('searches audit logs, renders results, shows empty state, and exports current rows', async () => {
     const user = userEvent.setup({ delay: null })
     let exportedBlob: Blob | null = null
@@ -107,7 +125,7 @@ describe('audit page', () => {
     await user.click(screen.getByRole('button', { name: 'Search audit logs' }))
 
     const row = await screen.findByRole('row', { name: /rotate_key/ })
-    expect(within(row).getByText('admin-1')).toBeInTheDocument()
+    expect(within(row).getByText('Admin One (admin-1)')).toBeInTheDocument()
     expect(within(row).getByText('2026-06-27T09:00:00+00:00')).toBeInTheDocument()
     expect(within(row).getByText('user:user-1')).toBeInTheDocument()
 

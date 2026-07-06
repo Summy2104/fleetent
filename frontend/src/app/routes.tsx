@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useForm } from '@tanstack/react-form'
 import { useQuery } from '@tanstack/react-query'
-import { LogOut, Menu, X } from 'lucide-react'
+import { Eye, EyeOff, LogOut, Menu, X } from 'lucide-react'
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { useAuthSession } from '@/app/auth'
@@ -82,6 +82,7 @@ function LoginPage(): JSX.Element {
   // Server-side login failures (bad credentials, network) are surfaced here;
   // field-level "required" checks are handled by the form's own validators.
   const [error, setError] = useState<string | null>(null)
+  const [showPassword, setShowPassword] = useState(false)
   const oidcConfig = useOidcConfigQuery(auth.baseUrl)
   const showOidcLogin = oidcConfig.data?.enabled === true
   const oidcLoginLabel = oidcConfig.data?.label || t('login.signInWithSso')
@@ -179,17 +180,28 @@ function LoginPage(): JSX.Element {
                 return (
                   <Field data-invalid={invalid}>
                     <FieldLabel htmlFor={field.name}>{t('common.password')}</FieldLabel>
-                    <Input
-                      aria-invalid={invalid}
-                      autoComplete="current-password"
-                      id={field.name}
-                      name={field.name}
-                      onBlur={field.handleBlur}
-                      onChange={(event) => field.handleChange(event.target.value)}
-                      placeholder={t('login.passwordPlaceholder')}
-                      type="password"
-                      value={field.state.value}
-                    />
+                    <div className="relative">
+                      <Input
+                        aria-invalid={invalid}
+                        autoComplete="current-password"
+                        className="pr-9"
+                        id={field.name}
+                        name={field.name}
+                        onBlur={field.handleBlur}
+                        onChange={(event) => field.handleChange(event.target.value)}
+                        placeholder={t('login.passwordPlaceholder')}
+                        type={showPassword ? 'text' : 'password'}
+                        value={field.state.value}
+                      />
+                      <button
+                        aria-label={showPassword ? t('common.hidePassword') : t('common.showPassword')}
+                        className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        onClick={() => setShowPassword((current) => !current)}
+                        type="button"
+                      >
+                        {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                      </button>
+                    </div>
                     {invalid ? (
                       <FieldError errors={field.state.meta.errors.map((message) => ({ message: String(message) }))} />
                     ) : null}
