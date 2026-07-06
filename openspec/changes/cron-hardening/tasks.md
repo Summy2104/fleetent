@@ -29,8 +29,8 @@
 
 ## 6. session 参数暴露（F6.4）
 
-- [ ] 6.1 写测试：`schedule(action="create", session="cron/counter", ...)` → 行持久化 `session_id`；省略 → NULL；schema 含两态语义描述（`tests/integration/test_tools_schedule.py` + schema 测试）→ 见红
-- [ ] 6.2 实现：工具 `session` 参数直通 facade（design D5）→ 见绿
+- [x] 6.1 写测试：`schedule(action="create", session="cron/counter", ...)` → 传入 `session_id`；省略 → None；schema 含「独立/累积」两态语义描述（`tests/integration/test_tools_schedule.py` 新用例）→ 见红
+- [x] 6.2 实现：工具新增 `session` 参数，`session or None` 直通 `create_task`（design D5）→ 见绿
 
 ## 7. 死代码与收尾
 

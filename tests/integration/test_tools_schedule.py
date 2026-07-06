@@ -204,6 +204,44 @@ def test_legacy_schedule_task_and_cancel_task_removed():
     assert "cancel_task" not in names
 
 
+# ── session binding exposed through the schedule tool (cron-hardening F6.4) ──
+
+
+async def test_schedule_create_passes_session_through():
+    import fleetent.schedule_store as ss
+
+    with patch.object(ss, "create", return_value={"id": "x"}) as mock_create:
+        payload = (
+            '{"action":"create","name":"counter","cron_expr":"0 9 * * *",'
+            '"message":"count and report","session":"cron/counter"}'
+        )
+        await dispatch("schedule", payload)
+
+    assert mock_create.call_args.kwargs["session_id"] == "cron/counter"
+
+
+async def test_schedule_create_without_session_defaults_to_none():
+    import fleetent.schedule_store as ss
+
+    with patch.object(ss, "create", return_value={"id": "x"}) as mock_create:
+        payload = (
+            '{"action":"create","name":"rep","cron_expr":"0 9 * * *","message":"report"}'
+        )
+        await dispatch("schedule", payload)
+
+    assert mock_create.call_args.kwargs["session_id"] is None
+
+
+def test_schedule_session_param_schema_describes_both_states():
+    from fleetent.tools.registry import get_schemas
+
+    schedule_schema = next(s for s in get_schemas() if s["function"]["name"] == "schedule")
+    session_param = schedule_schema["function"]["parameters"]["properties"]["session"]
+    desc = session_param.get("description", "")
+    assert "独立" in desc
+    assert "累积" in desc
+
+
 async def test_schedule_create_autocaptures_origin_from_session_context():
     # 5.4: create auto-fills `origin` from the inbound IM context so the reminder
     # defaults back to the originating chat/thread without an explicit notify_*.
