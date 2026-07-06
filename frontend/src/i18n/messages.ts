@@ -38,6 +38,8 @@ const en = {
   'common.admin': 'Admin',
   'common.email': 'Email',
   'common.password': 'Password',
+  'common.showPassword': 'Show password',
+  'common.hidePassword': 'Hide password',
 
   // 通用下拉选择器（SimpleSelect 默认文案）
   'select.searchPlaceholder': 'Search…',
@@ -831,6 +833,8 @@ const zh: Messages = {
   'common.admin': '管理',
   'common.email': '邮箱',
   'common.password': '密码',
+  'common.showPassword': '显示密码',
+  'common.hidePassword': '隐藏密码',
 
   // 通用下拉选择器（SimpleSelect 默认文案）
   'select.searchPlaceholder': '搜索…',

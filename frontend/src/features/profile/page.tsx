@@ -61,7 +61,13 @@ export function ChangePasswordFields({
   }
 
   return (
-    <div className="grid gap-4">
+    <form
+      className="grid gap-4"
+      onSubmit={(event) => {
+        event.preventDefault()
+        void submit()
+      }}
+    >
       <div className="grid gap-2">
         <Label htmlFor="cp-new">{t('profile.newPassword')}</Label>
         <Input
@@ -83,14 +89,10 @@ export function ChangePasswordFields({
         />
       </div>
       {error ? <p className="text-destructive text-sm">{error}</p> : null}
-      <Button
-        className="justify-self-start"
-        disabled={!password || !confirm || change.isPending}
-        onClick={() => void submit()}
-      >
+      <Button className="justify-self-start" disabled={!password || !confirm || change.isPending} type="submit">
         {submitLabel}
       </Button>
-    </div>
+    </form>
   )
 }
 
