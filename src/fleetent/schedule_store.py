@@ -7,15 +7,15 @@ traces, reflection, memory, and approvals. No platform imports.
 """
 
 import json
-import logging
 import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
 from fleetent.db import SQLiteDatabase
+from fleetent.structured_logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("schedule_store")
 
 _state_db: SQLiteDatabase | None = None
 
@@ -158,7 +158,7 @@ def list_tasks(include_disabled: bool = False) -> list[dict[str, Any]]:
         try:
             tasks.append(_decode(dict(row)))
         except Exception as exc:  # noqa: BLE001 — one corrupt row must not break the table
-            logger.warning("schedule_store_row_decode_failed id=%s error=%s", row["id"], exc)
+            logger.warn("schedule_store_row_decode_failed", id=row["id"], exception=exc)
     return tasks
 
 
