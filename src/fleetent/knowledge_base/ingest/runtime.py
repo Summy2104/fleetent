@@ -12,6 +12,7 @@ from fleetent.knowledge_base.errors import (
     KnowledgeBaseEmbeddingMismatchError,
     embedding_mismatch_message,
 )
+from fleetent.vector_store import runtime as vector_store_runtime
 from fleetent.vector_store.backend import VectorBackend
 
 
@@ -194,6 +195,9 @@ async def _ingest_chunks(
         for existing_document in existing_documents
         for chunk in store.get_document_chunks(existing_document.id)
     ]
+    embedded_chunks = [
+        (chunk, await vector_store.embed_text(chunk.content)) for chunk in resolved_chunks
+    ]
     store.replace_document(document, resolved_chunks, replaced_document_ids)
     for chunk in replaced_chunks:
         await _delete_chunk(
@@ -201,8 +205,8 @@ async def _ingest_chunks(
             chunk.id,
         )
     namespace = vector_store.knowledge_namespace(document.tenant_id, document.kb_id)
-    for chunk in resolved_chunks:
-        await _upsert_chunk(namespace, chunk)
+    for chunk, vector in embedded_chunks:
+        await _upsert_chunk(namespace, chunk, vector)
     _enqueue_extraction_job_if_enabled(store, document)
     return document
 
@@ -336,12 +340,12 @@ def _ensure_kb_embedding_identity(store: KnowledgeStore, tenant_id: str, kb_id: 
     )
 
 
-async def _upsert_chunk(namespace: str, chunk: KnowledgeChunk) -> None:
+async def _upsert_chunk(namespace: str, chunk: KnowledgeChunk, vector: list[float]) -> None:
     backend = _injected_vector_backend()
     if backend is None:
-        await vector_store.upsert(chunk.id, chunk.content, namespace)
+        await vector_store_runtime._backend.upsert(chunk.id, vector, namespace)
         return
-    await backend.upsert(chunk.id, await vector_store.embed_text(chunk.content), namespace)
+    await backend.upsert(chunk.id, vector, namespace)
 
 
 async def _delete_chunk(namespace: str, chunk_id: str) -> None:

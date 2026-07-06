@@ -1042,6 +1042,61 @@ def test_standalone_kb_service_runs_without_platform_management_db(
     assert not (tmp_path / "management.db").exists()
 
 
+def test_connector_sync_partial_failure_marks_done_with_last_error(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent import kb_ingest_jobs, vector_store
+    from fleetent.knowledge_base import worker
+    from fleetent.knowledge_base.connectors.google_drive import GoogleDriveSyncSummary
+    from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
+    from fleetent.knowledge_base.management.runtime import create_knowledge_base
+    from fleetent.knowledge_base.service_config import load_kb_service_config
+    from fleetent.knowledge_base.standalone_sweep import sweep
+
+    monkeypatch.setenv("KB_SHARED_GOOGLE_DRIVE", '{"access_token":"shared"}')
+    path = tmp_path / "kb-service.yaml"
+    doc = _service_doc()
+    doc["connectors"] = [doc["connectors"][0]]  # type: ignore[index]
+    _write_yaml(path, doc)
+    config = load_kb_service_config(path)
+    queue_url = config.queue_database_url()
+    data_dir = config.data_dir()
+
+    async def embed_text(text: str) -> list[float]:
+        return [float(len(text)), 0.0]
+
+    async def fake_sync_google_drive(connector_config, *, client):
+        del connector_config, client
+        return GoogleDriveSyncSummary(
+            scanned=2,
+            planned=2,
+            ingested=1,
+            failed=1,
+            errors=["drive://bad-doc: token [REDACTED]"],
+        )
+
+    monkeypatch.setattr(vector_store, "embed_text", embed_text)
+    monkeypatch.setattr(worker.knowledge_base, "sync_google_drive", fake_sync_google_drive)
+    create_knowledge_base(
+        "tenant-a",
+        "kb-a",
+        "Standalone KB",
+        database=worker._knowledge_database(
+            "tenant-a", data_dir=data_dir, migrations=KB_MIGRATIONS
+        ),
+    )
+
+    sweep(config, queue_database_url=queue_url)
+    worker_result = worker.run_once(queue_database_url=queue_url, data_dir=data_dir)
+
+    assert worker_result is not None
+    assert worker_result["status"] == "done"
+    job = kb_ingest_jobs.get_job(worker_result["job_id"], database_url=queue_url)
+    assert job is not None
+    assert job["status"] == "done"
+    assert job["last_error"] == "drive://bad-doc: token [REDACTED]"
+
+
 def test_worker_main_uses_shared_kb_service_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

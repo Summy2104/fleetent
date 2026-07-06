@@ -43,12 +43,12 @@
 7. **向量落盘核查**（重要，job=done 不足为凭）：
    ```bash
    sqlite3 .fleetent-dev/tenants/default/kb/data/kb_vectors.db "SELECT count(*) FROM vector_items;"
-   # 期望 > 0；文件不存在或 0 = 向量静默丢失（已知开放 bug：ingest 对 embedding 故障 fail-open）
+   # 期望 > 0；文件不存在或 0 = 向量写入链路异常，需要立即排查 worker / embedding
    ```
 
 ✅ 通过标准：上传→worker 消费→列表出现→chunk 可读→**向量落盘**，全程不需要碰 CLI。
 ⚠️ 已知设计：上传后列表不会自动刷新（不做轮询），手动刷新是预期行为。
-⚠️ 已知开放 bug（2026-07-06）：embedding 不可用时 ingest 照样报 done、文档看似导入成功，实为 keyword-only 残缺态——所以第 7 步必查。
+⚠️ 2026-07-06 修复后，embedding 不可用时 job 应落 failed（或部分失败时 done + `last_error` 非空），且文档不得残留；所以第 7 步继续保留为常规验收。
 
 ---
 
@@ -120,7 +120,7 @@
 | 症状 | 先看哪里 | 常见原因 |
 |---|---|---|
 | 上传后文档一直不出现 | kb-worker 终端 | embedding 连不上（ollama 没跑/模型名不对）；job 失败会留在日志里 |
-| 文档"导入成功"但向量为 0 | `kb_vectors.db` 行数（§2 第 7 步） | 已知开放 bug：ingest 对 embedding 故障 fail-open，job 照报 done |
+| 文档未出现或 `/status` 里 job failed / done+last_error | kb-worker 终端 + `/status` | embedding 连不上；查看 `last_error` 首条摘要并回到 §2 第 7 步核查向量 |
 | UI KB 页全部报错 | platform 终端 | `KB_SERVE__*` 未注入/为空 → 503（"key cannot be resolved" = 服务先于 bootstrap 启动，重启即可）；key 不匹配 → 401 |
 | playground 500 | kb-serve 终端 traceback | embedding 模型名不存在（404）；或换模型后 identity mismatch → reindex |
 | 绑定后 agent.yaml 没变化 | node 终端 | reconcile 未触发（重启 agent）；platform 未配 kb_serve 则物化保持 local（设计如此）；改了物化代码要先重启 platform |

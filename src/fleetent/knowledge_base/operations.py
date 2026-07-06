@@ -775,12 +775,14 @@ def _confluence_config(definition: ConnectorDefinition) -> ConfluenceConnectorCo
     return definition.config
 
 
-def _summary_dict(summary: Any) -> dict[str, int]:
-    return {
-        str(key): int(value)
-        for key, value in asdict(summary).items()
-        if isinstance(value, int) and value != 0
-    }
+def _summary_dict(summary: Any) -> dict[str, object]:
+    payload: dict[str, object] = {}
+    for key, value in asdict(summary).items():
+        if isinstance(value, int) and value != 0:
+            payload[str(key)] = int(value)
+        elif key == "errors" and isinstance(value, list) and value:
+            payload[str(key)] = [str(item) for item in value]
+    return payload
 
 
 def _row_to_status(row: dict[str, object]) -> ConnectorStatus:

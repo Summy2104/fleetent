@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from fastapi.testclient import TestClient
 
 
 def _write_yaml(path: Path, doc: dict[str, object]) -> None:
@@ -60,14 +61,18 @@ def test_kb_ingest_cli_enqueues_sync_directory_job(tmp_path: Path) -> None:
         "tenant-a",
         "kb-a",
         "Standalone KB",
-        database=_knowledge_database("tenant-a", data_dir=tmp_path / "data", migrations=KB_MIGRATIONS),
+        database=_knowledge_database(
+            "tenant-a", data_dir=tmp_path / "data", migrations=KB_MIGRATIONS
+        ),
     )
 
     from fleetent.knowledge_base import ingest_cli
 
     ingest_cli.main(["--config", str(path), "--kb", "kb-a", str(docs_dir)])
 
-    job = kb_ingest_jobs.claim_next_job(database_url=f"sqlite:///{tmp_path / 'data' / 'kb_ingest_queue.db'}")
+    job = kb_ingest_jobs.claim_next_job(
+        database_url=f"sqlite:///{tmp_path / 'data' / 'kb_ingest_queue.db'}"
+    )
     assert job is not None
     assert job["job_type"] == "sync_directory"
     assert job["tenant_id"] == "tenant-a"
@@ -75,12 +80,14 @@ def test_kb_ingest_cli_enqueues_sync_directory_job(tmp_path: Path) -> None:
     assert json.loads(str(job["connector_ref"])) == {"path": str(docs_dir.resolve())}
 
 
-def test_kb_ingest_cli_directory_runs_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_kb_ingest_cli_directory_runs_end_to_end(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from fleetent import vector_store
+    from fleetent.knowledge_base import ingest_cli, worker
     from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
     from fleetent.knowledge_base.management.runtime import create_knowledge_base
     from fleetent.knowledge_base.worker import _knowledge_database
-    from fleetent.knowledge_base import ingest_cli, worker
 
     path = tmp_path / "kb-service.yaml"
     _write_yaml(path, _service_doc())
@@ -97,7 +104,9 @@ def test_kb_ingest_cli_directory_runs_end_to_end(tmp_path: Path, monkeypatch: py
         "tenant-a",
         "kb-a",
         "Standalone KB",
-        database=_knowledge_database("tenant-a", data_dir=tmp_path / "data", migrations=KB_MIGRATIONS),
+        database=_knowledge_database(
+            "tenant-a", data_dir=tmp_path / "data", migrations=KB_MIGRATIONS
+        ),
     )
 
     ingest_cli.main(["--config", str(path), "--kb", "kb-a", str(docs_dir)])
@@ -109,6 +118,11 @@ def test_kb_ingest_cli_directory_runs_end_to_end(tmp_path: Path, monkeypatch: py
 
     assert result is not None
     assert result["status"] == "done"
+    job = worker.kb_ingest_jobs.get_job(
+        result["job_id"], database_url=f"sqlite:///{tmp_path / 'data' / 'kb_ingest_queue.db'}"
+    )
+    assert job is not None
+    assert job["last_error"] is None
     kb_db = _knowledge_database("tenant-a", data_dir=tmp_path / "data", migrations=KB_MIGRATIONS)
     document_count = kb_db.execute("SELECT COUNT(*) AS count FROM knowledge_documents").fetchone()
     chunk_count = kb_db.execute("SELECT COUNT(*) AS count FROM knowledge_chunks").fetchone()
@@ -117,12 +131,14 @@ def test_kb_ingest_cli_directory_runs_end_to_end(tmp_path: Path, monkeypatch: py
     assert chunk_count["count"] >= 2
 
 
-def test_kb_ingest_cli_single_file_runs_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_kb_ingest_cli_single_file_runs_end_to_end(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from fleetent import vector_store
+    from fleetent.knowledge_base import ingest_cli, worker
     from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
     from fleetent.knowledge_base.management.runtime import create_knowledge_base
     from fleetent.knowledge_base.worker import _knowledge_database
-    from fleetent.knowledge_base import ingest_cli, worker
 
     path = tmp_path / "kb-service.yaml"
     _write_yaml(path, _service_doc())
@@ -139,7 +155,9 @@ def test_kb_ingest_cli_single_file_runs_end_to_end(tmp_path: Path, monkeypatch: 
         "tenant-a",
         "kb-a",
         "Standalone KB",
-        database=_knowledge_database("tenant-a", data_dir=tmp_path / "data", migrations=KB_MIGRATIONS),
+        database=_knowledge_database(
+            "tenant-a", data_dir=tmp_path / "data", migrations=KB_MIGRATIONS
+        ),
     )
 
     ingest_cli.main(["--config", str(path), "--kb", "kb-a", str(guide_path)])
@@ -152,8 +170,152 @@ def test_kb_ingest_cli_single_file_runs_end_to_end(tmp_path: Path, monkeypatch: 
     assert result is not None
     assert result["status"] == "done"
     kb_db = _knowledge_database("tenant-a", data_dir=tmp_path / "data", migrations=KB_MIGRATIONS)
-    rows = kb_db.execute("SELECT filename FROM knowledge_documents ORDER BY created_at ASC").fetchall()
+    rows = kb_db.execute(
+        "SELECT filename FROM knowledge_documents ORDER BY created_at ASC"
+    ).fetchall()
     assert rows == [{"filename": "guide.md"}]
+
+
+def test_kb_ingest_cli_directory_partial_failure_marks_done_with_last_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent import vector_store
+    from fleetent.knowledge_base import ingest_cli, worker
+    from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
+    from fleetent.knowledge_base.management.runtime import create_knowledge_base
+    from fleetent.knowledge_base.worker import _knowledge_database
+
+    path = tmp_path / "kb-service.yaml"
+    _write_yaml(path, _service_doc())
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "good.md").write_text("# Good\nhealthy", encoding="utf-8")
+    bad_path = docs_dir / "bad.md"
+    bad_path.write_text("# Bad\ntoken: partial-secret", encoding="utf-8")
+
+    async def embed_text(text: str) -> list[float]:
+        if "partial-secret" in text:
+            raise RuntimeError("token: partial-secret")
+        return [float(len(text)), 0.0]
+
+    monkeypatch.setattr(vector_store, "embed_text", embed_text)
+    create_knowledge_base(
+        "tenant-a",
+        "kb-a",
+        "Standalone KB",
+        database=_knowledge_database(
+            "tenant-a", data_dir=tmp_path / "data", migrations=KB_MIGRATIONS
+        ),
+    )
+
+    ingest_cli.main(["--config", str(path), "--kb", "kb-a", str(docs_dir)])
+
+    result = worker.run_once(
+        queue_database_url=f"sqlite:///{tmp_path / 'data' / 'kb_ingest_queue.db'}",
+        data_dir=tmp_path / "data",
+    )
+
+    assert result is not None
+    assert result["status"] == "done"
+    job = worker.kb_ingest_jobs.get_job(
+        result["job_id"], database_url=f"sqlite:///{tmp_path / 'data' / 'kb_ingest_queue.db'}"
+    )
+    assert job is not None
+    assert job["status"] == "done"
+    assert str(job["last_error"]).startswith(str(bad_path.resolve()))
+    assert "partial-secret" not in str(job["last_error"])
+    assert "[REDACTED]" in str(job["last_error"])
+
+
+def test_kb_ingest_cli_directory_embedding_failure_marks_failed_and_status_surfaces_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent import vector_store
+    from fleetent.knowledge_base import ingest_cli, serve, worker
+    from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
+    from fleetent.knowledge_base.management.runtime import create_knowledge_base
+    from fleetent.knowledge_base.worker import _knowledge_database
+
+    monkeypatch.setenv("FLEETENT_KB_SERVICE_KEY", "svc-test")
+
+    path = tmp_path / "kb-service.yaml"
+    _write_yaml(path, _service_doc())
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    bad_path = docs_dir / "bad.md"
+    bad_path.write_text("# Bad\ntoken: total-secret", encoding="utf-8")
+
+    async def embed_text(text: str) -> list[float]:
+        raise RuntimeError(f"token: total-secret for {text}")
+
+    monkeypatch.setattr(vector_store, "embed_text", embed_text)
+    create_knowledge_base(
+        "tenant-a",
+        "kb-a",
+        "Standalone KB",
+        database=_knowledge_database(
+            "tenant-a", data_dir=tmp_path / "data", migrations=KB_MIGRATIONS
+        ),
+    )
+
+    ingest_cli.main(["--config", str(path), "--kb", "kb-a", str(docs_dir)])
+
+    first = worker.run_once(
+        queue_database_url=f"sqlite:///{tmp_path / 'data' / 'kb_ingest_queue.db'}",
+        data_dir=tmp_path / "data",
+    )
+    second = worker.run_once(
+        queue_database_url=f"sqlite:///{tmp_path / 'data' / 'kb_ingest_queue.db'}",
+        data_dir=tmp_path / "data",
+    )
+    result = worker.run_once(
+        queue_database_url=f"sqlite:///{tmp_path / 'data' / 'kb_ingest_queue.db'}",
+        data_dir=tmp_path / "data",
+    )
+
+    assert first is not None
+    assert second is not None
+    assert result is not None
+    assert first["status"] == "pending"
+    assert second["status"] == "pending"
+    assert result["status"] == "failed"
+    job = worker.kb_ingest_jobs.get_job(
+        result["job_id"], database_url=f"sqlite:///{tmp_path / 'data' / 'kb_ingest_queue.db'}"
+    )
+    assert job is not None
+    assert job["status"] == "failed"
+    assert str(job["last_error"]).startswith(str(bad_path.resolve()))
+    assert "total-secret" not in str(job["last_error"])
+    assert "[REDACTED]" in str(job["last_error"])
+
+    kb_db = _knowledge_database("tenant-a", data_dir=tmp_path / "data", migrations=KB_MIGRATIONS)
+    rows = kb_db.execute(
+        "SELECT filename FROM knowledge_documents ORDER BY created_at ASC"
+    ).fetchall()
+    assert rows == []
+
+    app = serve.create_app(
+        serve.KBServeConfig(
+            tenant_id="tenant-a",
+            service_key_ref="env:FLEETENT_KB_SERVICE_KEY",
+            data_dir=tmp_path / "data",
+            queue_database_url=f"sqlite:///{tmp_path / 'data' / 'kb_ingest_queue.db'}",
+        )
+    )
+    with TestClient(app, raise_server_exceptions=True) as client:
+        response = client.get(
+            "/status",
+            headers={
+                "Authorization": "Bearer svc-test",
+                "X-Fleetent-Principal": '{"user_id":"user-1","tenant_id":"tenant-a"}',
+            },
+        )
+
+    assert response.status_code == 200
+    status_jobs = response.json()["jobs"]
+    assert len(status_jobs) == 1
+    assert status_jobs[0]["status"] == "failed"
+    assert status_jobs[0]["last_error"] == job["last_error"]
 
 
 def test_kb_ingest_cli_rejects_missing_kb_without_enqueuing(

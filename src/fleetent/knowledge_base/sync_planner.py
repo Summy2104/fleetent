@@ -1,5 +1,5 @@
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
@@ -15,8 +15,11 @@ from fleetent.knowledge_base.parsers import (
     ParsedDocument,
     parse_document,
 )
+from fleetent.structured_logging import get_logger, redact_text
 
 _SUPPORTED_LOCAL_FORMATS = {"text", "markdown", "html", "pdf", "docx", "pptx", "xlsx"}
+_MAX_RECORDED_ERRORS = 10
+_logger = get_logger("knowledge_base")
 
 
 class SyncAction(StrEnum):
@@ -62,6 +65,7 @@ class SyncExecutionSummary:
     archived: int = 0
     changed: int = 0
     auth_failed: int = 0
+    errors: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -189,6 +193,7 @@ async def execute_sync_plan(plan: SyncPlan) -> SyncExecutionSummary:
     failed = 0
     unchanged = 0
     deleted = 0
+    errors: list[str] = []
 
     for item in plan.items:
         try:
@@ -232,8 +237,11 @@ async def execute_sync_plan(plan: SyncPlan) -> SyncExecutionSummary:
                 )
             )
             ingested += 1
-        except Exception:
+        except Exception as exc:
             failed += 1
+            _logger.error("kb_sync_file_failed", source_path=item.source_path, exception=exc)
+            if len(errors) < _MAX_RECORDED_ERRORS:
+                errors.append(f"{item.source_path}: {redact_text(str(exc))}")
 
     return SyncExecutionSummary(
         scanned=plan.summary.scanned,
@@ -243,6 +251,7 @@ async def execute_sync_plan(plan: SyncPlan) -> SyncExecutionSummary:
         unsupported=plan.summary.unsupported,
         unchanged=unchanged,
         deleted=deleted,
+        errors=errors,
     )
 
 

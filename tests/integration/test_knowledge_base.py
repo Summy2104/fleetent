@@ -174,13 +174,29 @@ async def test_ingest_text_indexes_each_chunk_in_vector_store(monkeypatch, tmp_p
     _patch_runtime_settings(monkeypatch, chunk_size=5, chunk_overlap=1)
 
     from fleetent.knowledge_base import runtime
+    from fleetent.vector_store import runtime as vector_store_runtime
 
-    upserts: list[tuple[str, str, str]] = []
+    upserts: list[tuple[str, list[float], str]] = []
 
-    async def upsert(chunk_id: str, content: str, namespace: str) -> None:
-        upserts.append((chunk_id, content, namespace))
+    class FakeVectorBackend:
+        async def upsert(self, chunk_id: str, vector: list[float], namespace: str) -> None:
+            upserts.append((chunk_id, vector, namespace))
 
-    monkeypatch.setattr(runtime.vector_store, "upsert", upsert)
+        async def search(self, vector: list[float], namespace: str, limit: int = 10):
+            del vector, namespace, limit
+            return []
+
+        async def delete(self, chunk_id: str, namespace: str) -> None:
+            del chunk_id, namespace
+
+        async def clear_namespace(self, namespace: str) -> None:
+            del namespace
+
+    async def embed_text(text: str) -> list[float]:
+        return [float(len(text)), float(ord(text[0]))]
+
+    monkeypatch.setattr(vector_store_runtime, "_backend", FakeVectorBackend())
+    monkeypatch.setattr(runtime.vector_store, "embed_text", embed_text)
 
     document = await runtime.ingest_text(
         filename="guide.txt",
@@ -190,9 +206,9 @@ async def test_ingest_text_indexes_each_chunk_in_vector_store(monkeypatch, tmp_p
     )
 
     assert upserts == [
-        (f"{document.id}:chunk:0", "abcde", "kb:tenant-a:global"),
-        (f"{document.id}:chunk:1", "efghi", "kb:tenant-a:global"),
-        (f"{document.id}:chunk:2", "ijkl", "kb:tenant-a:global"),
+        (f"{document.id}:chunk:0", [5.0, 97.0], "kb:tenant-a:global"),
+        (f"{document.id}:chunk:1", [5.0, 101.0], "kb:tenant-a:global"),
+        (f"{document.id}:chunk:2", [4.0, 105.0], "kb:tenant-a:global"),
     ]
 
 

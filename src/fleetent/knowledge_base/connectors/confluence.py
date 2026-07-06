@@ -3,8 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
-from collections.abc import Mapping
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -24,10 +23,13 @@ from fleetent.knowledge_base.sync_planner import (
     SyncPlanItem,
     SyncPlanSummary,
 )
+from fleetent.structured_logging import get_logger, redact_text
 
 ConfluenceScopeType = Literal["space", "page"]
 SleepFn = Callable[[float], Awaitable[None]]
 _CONFLUENCE_EXPAND = "body.storage,version,space,ancestors,history.lastUpdated"
+_MAX_RECORDED_ERRORS = 10
+_logger = get_logger("knowledge_base")
 
 
 @dataclass(frozen=True)
@@ -93,6 +95,7 @@ class ConfluenceSyncSummary:
     archived: int = 0
     failed: int = 0
     auth_failed: int = 0
+    errors: list[str] = field(default_factory=list)
 
 
 class ConfluenceAuthError(RuntimeError):
@@ -390,6 +393,7 @@ async def execute_confluence_sync_plan(
     archived = 0
     failed = plan.summary.failed
     auth_failed = plan.summary.auth_failed
+    errors: list[str] = []
 
     for item in plan.items:
         try:
@@ -435,8 +439,11 @@ async def execute_confluence_sync_plan(
                     )
                 )
             ingested += 1
-        except Exception:
+        except Exception as exc:
             failed += 1
+            _logger.error("kb_sync_file_failed", source_path=item.source_path, exception=exc)
+            if len(errors) < _MAX_RECORDED_ERRORS:
+                errors.append(f"{item.source_path}: {redact_text(str(exc))}")
 
     return ConfluenceSyncSummary(
         scanned=plan.summary.scanned,
@@ -447,6 +454,7 @@ async def execute_confluence_sync_plan(
         archived=archived,
         failed=failed,
         auth_failed=auth_failed,
+        errors=errors,
     )
 
 
