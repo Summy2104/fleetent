@@ -85,6 +85,7 @@ def test_no_mcp_servers_is_noop() -> None:
 
 def test_mcp_server_lookup_uses_binding_table_only(monkeypatch) -> None:
     monkeypatch.setattr(agent_store, "list_mcp_servers_for_agent", lambda _agent_id: ["github"])
+    monkeypatch.setattr(agent_store, "get_agent_mcp_approval_rules", lambda _a, _s: [])
     monkeypatch.setattr(
         materialize.mcp_server_store,
         "get_mcp_server",
@@ -112,6 +113,7 @@ def test_mcp_server_lookup_uses_binding_table_only(monkeypatch) -> None:
 
 def test_authorization_code_auth_config_materializes_to_auth_block(monkeypatch) -> None:
     monkeypatch.setattr(agent_store, "list_mcp_servers_for_agent", lambda _agent_id: ["crm"])
+    monkeypatch.setattr(agent_store, "get_agent_mcp_approval_rules", lambda _a, _s: [])
     monkeypatch.setattr(
         materialize.mcp_server_store,
         "get_mcp_server",
@@ -152,6 +154,7 @@ def test_authorization_code_auth_config_materializes_to_auth_block(monkeypatch) 
 
 def test_api_key_per_user_auth_config_materializes(monkeypatch) -> None:
     monkeypatch.setattr(agent_store, "list_mcp_servers_for_agent", lambda _agent_id: ["acme"])
+    monkeypatch.setattr(agent_store, "get_agent_mcp_approval_rules", lambda _a, _s: [])
     monkeypatch.setattr(
         materialize.mcp_server_store,
         "get_mcp_server",

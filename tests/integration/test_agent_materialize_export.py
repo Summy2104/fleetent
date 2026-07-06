@@ -806,8 +806,8 @@ def test_rematerialize_all_empty_when_no_agents(db):
 
 
 def test_agent_file_from_store_exports_xfleetent_extension_fields(db):
-    """degrade_mode / file_root / file_isolation / approval_rules 随 materialize 落到每个
-    server 的 x-fleetent 块下；全默认 server 不产出 x-fleetent（mcp-admin-xfleetent-fields）。"""
+    """服务级 degrade_mode/file_root/file_isolation 来自服务定义,approval_rules 来自该 agent
+    的绑定;全默认(服务无非默认字段 + 绑定无规则)不产出 x-fleetent。"""
     agent = agent_store.create_agent("support", "p", [], mcp_server_ids=["docs", "plain"])
     agent_mcp_server_store.add_mcp_server(
         None,
@@ -817,13 +817,16 @@ def test_agent_file_from_store_exports_xfleetent_extension_fields(db):
         degrade_mode="strict",
         file_root="/exchange/docs",
         file_isolation="off",
-        approval_rules=[{"tool": "manage_email", "when": {"operation": ["send"]}}],
     )
     agent_mcp_server_store.add_mcp_server(
         None, "plain", transport="http", url="https://plain.acme.internal/mcp"
     )
     agent_store.bind_mcp_server(agent.id, "docs")
     agent_store.bind_mcp_server(agent.id, "plain")
+    # approval_rules is configured on the binding, not the server definition.
+    agent_store.set_agent_mcp_approval_rules(
+        agent.id, "docs", [{"tool": "manage_email", "when": {"operation": ["send"]}}]
+    )
 
     exported = materialize.agent_file_from_store(agent_store.get_by_name("support"))
     servers = {server.id: server for server in exported.mcp_servers}
@@ -841,3 +844,27 @@ def test_agent_file_from_store_exports_xfleetent_extension_fields(db):
     assert docs_ext["file_isolation"] == "off"
     assert docs_ext["approval_rules"] == [{"tool": "manage_email", "when": {"operation": ["send"]}}]
     assert "x-fleetent" not in payload["mcpServers"]["plain"]
+
+
+def test_approval_rules_are_per_agent_binding(db):
+    """同一 server 被两个 agent 绑定,各自 agent.yaml 只反映自己绑定的 approval_rules。"""
+    a = agent_store.create_agent("agent-a", "p", [], mcp_server_ids=["mailer"])
+    b = agent_store.create_agent("agent-b", "p", [], mcp_server_ids=["mailer"])
+    agent_mcp_server_store.add_mcp_server(
+        None, "mailer", transport="http", url="https://mailer.internal/mcp"
+    )
+    agent_store.bind_mcp_server(a.id, "mailer")
+    agent_store.bind_mcp_server(b.id, "mailer")
+    agent_store.set_agent_mcp_approval_rules(a.id, "mailer", [{"tool": "send_email", "when": None}])
+
+    payload_a = materialize.desired_state_payload_from_agent_file(
+        materialize.agent_file_from_store(agent_store.get_by_name("agent-a"))
+    )
+    payload_b = materialize.desired_state_payload_from_agent_file(
+        materialize.agent_file_from_store(agent_store.get_by_name("agent-b"))
+    )
+    assert payload_a["mcpServers"]["mailer"]["x-fleetent"]["approval_rules"] == [
+        {"tool": "send_email", "when": None}
+    ]
+    # agent-b never configured rules -> its mailer has no x-fleetent block at all.
+    assert "x-fleetent" not in payload_b["mcpServers"]["mailer"]

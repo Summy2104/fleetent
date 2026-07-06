@@ -237,7 +237,6 @@ def test_mcp_admin_api_round_trips_xfleetent_fields(tmp_path, monkeypatch) -> No
             "degrade_mode": "strict",
             "file_root": "/exchange/billing",
             "file_isolation": "off",
-            "approval_rules": [{"tool": "manage_email", "when": {"operation": ["send", "reply"]}}],
         },
     )
     assert create.status_code == 200
@@ -246,30 +245,25 @@ def test_mcp_admin_api_round_trips_xfleetent_fields(tmp_path, monkeypatch) -> No
     assert row["degrade_mode"] == "strict"
     assert row["file_root"] == "/exchange/billing"
     assert row["file_isolation"] == "off"
-    assert row["approval_rules"] == [
-        {"tool": "manage_email", "when": {"operation": ["send", "reply"]}}
-    ]
+    # approval_rules is no longer server-level (moved to per-agent binding).
+    assert "approval_rules" not in row
 
     listed = client.get("/admin/mcp/servers", headers=headers).json()
     server = next(s for s in listed if s["id"] == "billing")
     assert server["degrade_mode"] == "strict"
     assert server["file_root"] == "/exchange/billing"
     assert server["file_isolation"] == "off"
-    assert server["approval_rules"] == [
-        {"tool": "manage_email", "when": {"operation": ["send", "reply"]}}
-    ]
+    assert "approval_rules" not in server
 
-    # A whole-tool rule (no when) round-trips as when=None.
     edit = client.put(
         "/admin/mcp/servers/billing",
         headers=headers,
-        json={"degrade_mode": "silent", "approval_rules": [{"tool": "delete_file"}]},
+        json={"degrade_mode": "silent"},
     )
     assert edit.status_code == 200
     updated = mcp_server_store.get_mcp_server(None, "billing")
     assert updated is not None
     assert updated["degrade_mode"] == "silent"
-    assert updated["approval_rules"] == [{"tool": "delete_file", "when": None}]
     assert updated["file_isolation"] == "off"
 
 
@@ -284,14 +278,15 @@ def test_mcp_admin_api_rejects_invalid_xfleetent_values(tmp_path, monkeypatch) -
     )
     assert bad_degrade.status_code == 422
 
-    bad_rule = client.post(
+    # approval_rules is rejected as an unknown field on the server body (extra="forbid").
+    rejected = client.post(
         "/admin/mcp/servers",
         headers=headers,
         json={
             "id": "x2",
             "transport": "stdio",
             "command": "e",
-            "approval_rules": [{"when": {"operation": ["send"]}}],
+            "approval_rules": [{"tool": "t"}],
         },
     )
-    assert bad_rule.status_code == 422
+    assert rejected.status_code == 422

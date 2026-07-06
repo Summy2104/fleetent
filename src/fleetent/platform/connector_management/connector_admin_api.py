@@ -13,7 +13,7 @@ from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from fleetent import audit_log, auth, user_store
-from fleetent.config import McpApprovalRule, mcp_yaml_field_paths
+from fleetent.config import mcp_yaml_field_paths
 from fleetent.platform.connector_management import mcp_server_store
 from fleetent.platform.connector_management.mcp_auth import (
     ApiKeyMcpAuthConfig,
@@ -32,16 +32,6 @@ _SENSITIVE = ("secret", "token", "refresh", "api_key", "password")
 
 _DEGRADE_MODES = {"degrade", "strict", "silent"}
 _FILE_ISOLATION = {"on", "off"}
-
-
-def _validated_approval_rules(approval_rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Validate each raw rule against ``McpApprovalRule`` and re-dump it, so a missing
-    ``when`` normalizes to ``None`` (whole-tool rule) and a malformed rule is rejected as a
-    422. Raised ``ValueError`` is wrapped into the body model's validation error upstream."""
-    try:
-        return [McpApprovalRule.model_validate(rule).model_dump() for rule in approval_rules]
-    except (ValidationError, TypeError) as exc:
-        raise ValueError(f"invalid approval_rules: {exc}") from exc
 
 
 def _normalized_auth_config(auth_type: str, auth_config: dict[str, Any]) -> dict[str, Any]:
@@ -95,7 +85,6 @@ class McpServerCreateBody(BaseModel):
     degrade_mode: str = "degrade"
     file_root: str = ""
     file_isolation: str = "on"
-    approval_rules: list[dict[str, Any]] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _validate_auth(self) -> McpServerCreateBody:
@@ -108,7 +97,6 @@ class McpServerCreateBody(BaseModel):
             raise ValueError(f"invalid degrade_mode: {self.degrade_mode!r}")
         if self.file_isolation not in _FILE_ISOLATION:
             raise ValueError(f"invalid file_isolation: {self.file_isolation!r}")
-        self.approval_rules = _validated_approval_rules(self.approval_rules)
         return self
 
 
@@ -127,7 +115,6 @@ class McpServerEditBody(BaseModel):
     degrade_mode: str | None = None
     file_root: str | None = None
     file_isolation: str | None = None
-    approval_rules: list[dict[str, Any]] | None = None
 
     @model_validator(mode="after")
     def _validate_auth(self) -> McpServerEditBody:
@@ -144,8 +131,6 @@ class McpServerEditBody(BaseModel):
             raise ValueError(f"invalid degrade_mode: {self.degrade_mode!r}")
         if self.file_isolation is not None and self.file_isolation not in _FILE_ISOLATION:
             raise ValueError(f"invalid file_isolation: {self.file_isolation!r}")
-        if self.approval_rules is not None:
-            self.approval_rules = _validated_approval_rules(self.approval_rules)
         return self
 
 
@@ -283,7 +268,6 @@ def list_mcp_servers(
             "degrade_mode": row.get("degrade_mode") or "degrade",
             "file_root": row.get("file_root") or "",
             "file_isolation": row.get("file_isolation") or "on",
-            "approval_rules": row.get("approval_rules") or [],
             "status": "configured" if row["enabled"] else "disabled",
             "tool_count": 0,
             "agent_id": row["agent_id"],
@@ -381,7 +365,6 @@ async def create_mcp_server(
         degrade_mode=payload.degrade_mode,
         file_root=payload.file_root,
         file_isolation=payload.file_isolation,
-        approval_rules=payload.approval_rules,
     )
 
     audit_log.write_audit(user.id, "mcp.create", "mcp_server", server_id)
