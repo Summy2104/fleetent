@@ -196,3 +196,54 @@ async def test_disabled_scheduling_does_not_start_tick(isolated_schedule_db):
     sched = cs.CronScheduler(settings=SchedulingSettings(enabled=False))
     await sched.start()
     assert not sched.running
+
+
+# ── 5. through-path: real store + real _fire, only _agent_run stubbed ────────
+# (fix-cron-store-and-once F1 — AAA-8288: the mock boundary that previously hid
+# the update_run_state clobber bug. Only the LLM call is stubbed; store, _fire,
+# _record_run, _record_history, claim_next_run, and session persistence are real.)
+
+
+async def test_real_fire_preserves_grid_across_repeated_fires(
+    isolated_schedule_db, monkeypatch, tmp_path
+):
+    """An interval task fired repeatedly through the real _fire path must not drift:
+    each fire's post-run writeback must preserve the next_run_at the tick already
+    claimed, not clobber it back to NULL (which forced a stale re-anchor and
+    cumulative drift ~= run duration + tick interval per occurrence)."""
+    from unittest.mock import AsyncMock
+
+    import fleetent.session.manager as session_mgr
+
+    monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(cs, "_agent_run", AsyncMock(return_value="[SILENT]"))
+
+    task = store.create(
+        name="t",
+        timezone="UTC",
+        user_id="default",
+        message="hi",
+        source="tool",
+        schedule_kind="interval",
+        interval_seconds=60,
+    )
+    store.update_run_state(task["id"], next_run_at=_iso(_NOW))
+
+    sched = cs.CronScheduler(settings=SchedulingSettings())
+    sched._register(store.get(task["id"]))
+
+    now = _NOW
+    expected_next = _NOW
+    for _ in range(5):
+        expected_next = expected_next + timedelta(seconds=60)
+        dispatched = await sched._tick(now=now)
+        await asyncio.gather(*dispatched)
+
+        row = store.get(task["id"])
+        assert row["next_run_at"] == _iso(expected_next), (
+            "next_run_at drifted off the fixed grid after a real fire — "
+            "the post-fire writeback clobbered the claimed value"
+        )
+        assert row["last_status"] == "ok", "last_status did not survive the writeback"
+
+        now = now + timedelta(seconds=60)

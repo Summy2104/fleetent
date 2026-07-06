@@ -57,9 +57,18 @@ _RELATIVE_RUN_AT = re.compile(r"\+?(\d+)([smhd])")
 _UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
 
-def _parse_run_at(run_at: str) -> datetime:
+def _parse_run_at(run_at: str, tz: str | None = None) -> datetime:
     """Resolve a one-shot ``run_at`` to a datetime: ISO-8601 absolute, or relative
-    duration like ``+30m`` / ``2h`` (offset from now)."""
+    duration like ``+30m`` / ``2h`` (offset from now).
+
+    A genuinely naive input (no explicit offset, and no ``Z``/``UTC``/``GMT`` suffix)
+    is interpreted as **local wall-clock time in ``tz``** (fix-cron-store-and-once F3)
+    — never the host process's system timezone, which the tool's own contract
+    explicitly disclaims ("run_at 按 timezone 的本地时间解释"). ``tz=None`` resolves to
+    UTC (``_as_tzinfo``'s fallback), preserving prior behavior for UTC-deployed hosts.
+    An input that already carries an explicit offset/Z/UTC/GMT suffix is unaffected —
+    ``tz`` never re-interprets an already-aware value.
+    """
     spec = run_at.strip()
     match = _RELATIVE_RUN_AT.fullmatch(spec)
     if match:
@@ -71,7 +80,10 @@ def _parse_run_at(run_at: str) -> datetime:
     spec = re.sub(r"\s+(?:UTC|GMT)\s*$", "+00:00", spec, flags=re.IGNORECASE)
     if spec.endswith(("Z", "z")):
         spec = spec[:-1] + "+00:00"
-    return datetime.fromisoformat(spec)
+    dt = datetime.fromisoformat(spec)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_as_tzinfo(tz))
+    return dt
 
 
 def _as_tzinfo(tz: str | None) -> tzinfo:
@@ -109,7 +121,7 @@ def compute_next_run(
         now = datetime.now(UTC)
     if kind == "once":
         if isinstance(run_at, str):
-            return _parse_run_at(run_at)
+            return _parse_run_at(run_at, tz=tz)
         return cast("datetime | None", run_at)
     if kind == "interval":
         if not interval_seconds or int(interval_seconds) <= 0:
@@ -232,6 +244,31 @@ def _generate_delivery_statement(task: dict[str, Any]) -> str:
     )
 
 
+async def _maybe_alert_failure(
+    task: dict[str, Any], error_text: str, connectors: dict[str, Any] | None
+) -> None:
+    """Best-effort failure alert to the task's resolvable delivery target.
+
+    Reuses the frozen-text ``_deliver`` path (no agent run) — same target resolution,
+    same live-connector send, same delivery trace. When the target cannot be resolved
+    (or is explicitly ``deliver.mode="none"``), ``_deliver`` degrades to a no-op and no
+    alert is attempted — there is nowhere to send it.
+
+    Suppressed when the task's `last_status` — as read from the row at the START of
+    this fire, i.e. the PREVIOUS fire's outcome — was already ``"error"``: a recurring
+    task in a failure streak alerts only once, not on every tick. A `once` task (whose
+    `last_status` is `None` the one time it can fail) always alerts.
+    """
+    if task.get("last_status") == "error":
+        return
+    name = task.get("name") or task.get("id")
+    alert_text = f"⚠️ 定时任务 {name} 执行失败: {error_text}"
+    try:
+        await _deliver(task, alert_text, connectors or {})
+    except Exception as exc:  # noqa: BLE001 — alerting is best-effort, never break a fire
+        logger.warning("cron_fire_alert_failed task=%s error=%s", task.get("id"), exc)
+
+
 async def _fire(
     task: dict[str, Any],
     connectors: dict[str, Any] | None = None,
@@ -297,6 +334,8 @@ async def _fire(
             duration_ms=_elapsed_ms(),
             retention=history_retention,
         )
+        if status == "error":
+            await _maybe_alert_failure(task, delivery_error or "delivery failed", connectors)
         return
 
     sid_spec = task.get("session_id")
@@ -333,6 +372,7 @@ async def _fire(
             duration_ms=_elapsed_ms(),
             retention=history_retention,
         )
+        await _maybe_alert_failure(task, str(exc), connectors)
         return
 
     # agent_loop.run mutates `messages` in place into the full conversation; persist it
@@ -349,6 +389,16 @@ async def _fire(
         return
 
     delivery_error = await _deliver(task, reply, connectors or {})
+    if (
+        delivery_error is None
+        and not _is_silent_reply(reply)
+        and _resolve_delivery(task) is None
+        and not _is_explicit_no_delivery(task)
+    ):
+        # A broadcast task's output has nowhere to go — origin missing and no explicit
+        # deliver — is a failure, not a success (fix-cron-store-and-once F2c). The lone
+        # exception is a deliberate deliver.mode="none" (checked above), which stays ok.
+        delivery_error = "no_delivery_target"
     status = "error" if delivery_error else "ok"
     _record_run(task, now, status, delivery_error)
     _record_history(
@@ -360,6 +410,8 @@ async def _fire(
         duration_ms=_elapsed_ms(),
         retention=history_retention,
     )
+    if status == "error":
+        await _maybe_alert_failure(task, delivery_error or "delivery failed", connectors)
 
 
 async def _deliver(
@@ -406,6 +458,16 @@ async def _deliver(
         },
     )
     return None if receipt.ok else (receipt.error or "delivery returned false")
+
+
+def _is_explicit_no_delivery(task: dict[str, Any]) -> bool:
+    """Whether the task deliberately opts out of delivery (``deliver.mode="none"``).
+
+    Distinguishes "intentionally silent" from "target unresolvable" — only the latter
+    is a failure for a broadcast (`generate`) task (fix-cron-store-and-once F2c).
+    """
+    deliver = task.get("deliver")
+    return isinstance(deliver, dict) and deliver.get("mode") == "none"
 
 
 def _resolve_delivery(task: dict[str, Any]) -> tuple[str, str, str, Any] | None:
@@ -780,23 +842,29 @@ class CronScheduler:
         return True
 
     def _complete_once(self, task_id: str) -> None:
-        """Mark a fired one-shot done so it never looks alive in the store again.
+        """Terminally close a fired one-shot so it never fires again, on any outcome.
 
-        Only a successful run (last_status == "ok") flips to "completed"; a failed run
-        keeps its error state and stays enabled so the recovery policy governs it.
+        Success (``last_status == "ok"``) flips to ``"completed"``. Failure closes
+        as-is (``enabled=0``, its ``last_status``/``last_error`` preserved) — a
+        failed ``once`` MUST NOT stay due for repeated automatic retries
+        (fix-cron-store-and-once F2a: without this, a `once` task is never advanced,
+        so its stale `next_run_at` re-fires it on every subsequent tick — an
+        unbounded, un-backed-off hot retry). Manual retry remains available via
+        ``run_now``.
         """
         row = _store.get(task_id)
-        if row is None or row.get("last_status") != "ok":
+        if row is None:
             return
         _store.set_enabled(task_id, False)
         self.remove_job(task_id)
-        with suppress(Exception):
-            _store.update_run_state(
-                task_id,
-                last_run_at=row.get("last_run_at"),
-                last_status="completed",
-                last_error=None,
-            )
+        if row.get("last_status") == "ok":
+            with suppress(Exception):
+                _store.update_run_state(
+                    task_id,
+                    last_run_at=row.get("last_run_at"),
+                    last_status="completed",
+                    last_error=None,
+                )
 
     async def run_now(self, task_id: str) -> bool:
         """Fire the task immediately without altering its schedule. False if unknown."""
@@ -879,8 +947,18 @@ def create_task(
     # Normalize a one-shot run_at to canonical ISO at write time (cron-runat-hardening) so the
     # store never holds a form the parser later chokes on. Reuses the single parser; an
     # unparseable run_at raises ValueError here (the schedule tool surfaces it as clean text).
+    # A naive run_at is interpreted in the task's resolved timezone (explicit > live
+    # scheduler's deployment default > static UTC fallback) — never the host process's
+    # system timezone (fix-cron-store-and-once F3).
     if schedule_kind == "once" and run_at:
-        run_at = _parse_run_at(run_at).isoformat()
+        sched = current()
+        sched_settings = getattr(sched, "_settings", None)  # noqa: SLF001
+        resolved_tz = (
+            timezone
+            or getattr(sched_settings, "default_timezone", None)
+            or SchedulingSettings().default_timezone
+        )
+        run_at = _parse_run_at(run_at, tz=resolved_tz).isoformat()
     kwargs: dict[str, Any] = {
         "name": name,
         "schedule_kind": schedule_kind,

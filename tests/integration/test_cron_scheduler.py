@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from unittest.mock import AsyncMock
 
@@ -246,7 +247,6 @@ async def test_start_uses_default_timezone_when_task_has_none(monkeypatch, isola
 
 async def test_register_once_sets_next_run_to_run_at(isolated_schedule_db):
     import fleetent.cron_scheduler as cs
-    import fleetent.schedule_store as store
 
     scheduler = cs.CronScheduler()
     await scheduler.start()
@@ -299,7 +299,6 @@ async def test_register_interval_sets_future_next_run(isolated_schedule_db):
 
 async def test_agent_task_registration_persists_next_run(isolated_schedule_db):
     import fleetent.cron_scheduler as cs
-    import fleetent.schedule_store as store
 
     scheduler = cs.CronScheduler()
     await scheduler.start()
@@ -471,6 +470,268 @@ async def test_fire_missing_connector_records_error(tmp_path, monkeypatch):
     assert "connector" in (captured.get("last_error") or "")
 
 
+# ── Fire failure is proactively reported (fix-cron-store-and-once F2b) ───────
+
+
+async def test_fire_agent_run_failure_sends_alert_to_origin(tmp_path, monkeypatch):
+    import fleetent.cron_scheduler as cs
+    import fleetent.session.manager as session_mgr
+    from fleetent.outbound import DeliveryReceipt
+
+    monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(cs, "_resolve_cron_principal", lambda uid: _STUB_PRINCIPAL)
+    monkeypatch.setattr(cs, "_agent_run", AsyncMock(side_effect=RuntimeError("llm down")))
+    captured = {}
+    monkeypatch.setattr(cs._store, "update_run_state", lambda tid, **k: captured.update(k))
+    send = AsyncMock(
+        return_value=DeliveryReceipt(
+            ok=True, platform="slack", target="U1", target_type="user", kind="text"
+        )
+    )
+    monkeypatch.setattr(cs.outbound, "send_to", send)
+
+    task = {
+        "id": "alert-1",
+        "name": "daily-report",
+        "message": "run report",
+        "user_id": "u-1",
+        "session_id": None,
+        "origin": {"platform": "slack", "chat_id": "U1"},
+        "deliver": None,
+        "last_status": None,
+    }
+    await cs._fire(task, connectors={"slack": object()})
+
+    assert captured.get("last_status") == "error"
+    send.assert_awaited_once()
+    args, _ = send.call_args
+    assert args[0] == "slack" and args[2] == "U1"
+    assert "daily-report" in args[3]
+    assert "llm down" in args[3]
+
+
+async def test_fire_alert_delivery_failure_does_not_change_fire_outcome(tmp_path, monkeypatch):
+    import fleetent.cron_scheduler as cs
+    import fleetent.session.manager as session_mgr
+
+    monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(cs, "_resolve_cron_principal", lambda uid: _STUB_PRINCIPAL)
+    monkeypatch.setattr(cs, "_agent_run", AsyncMock(side_effect=RuntimeError("llm down")))
+    captured = {}
+    monkeypatch.setattr(cs._store, "update_run_state", lambda tid, **k: captured.update(k))
+    send = AsyncMock(side_effect=RuntimeError("slack api down"))
+    monkeypatch.setattr(cs.outbound, "send_to", send)
+
+    task = {
+        "id": "alert-2",
+        "name": "daily-report",
+        "message": "run report",
+        "user_id": "u-1",
+        "session_id": None,
+        "origin": {"platform": "slack", "chat_id": "U1"},
+        "deliver": None,
+        "last_status": None,
+    }
+    # A failing alert delivery must not raise or change the recorded fire outcome.
+    await cs._fire(task, connectors={"slack": object()})
+
+    send.assert_awaited_once()  # the alert was attempted despite the eventual failure
+    assert captured.get("last_status") == "error"
+    assert captured.get("last_error") == "llm down"
+
+
+async def test_fire_consecutive_failures_alert_only_on_first(tmp_path, monkeypatch):
+    import fleetent.cron_scheduler as cs
+    import fleetent.session.manager as session_mgr
+    from fleetent.outbound import DeliveryReceipt
+
+    monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(cs, "_resolve_cron_principal", lambda uid: _STUB_PRINCIPAL)
+    monkeypatch.setattr(cs, "_agent_run", AsyncMock(side_effect=RuntimeError("llm down")))
+    monkeypatch.setattr(cs._store, "update_run_state", lambda tid, **k: None)
+    send = AsyncMock(
+        return_value=DeliveryReceipt(
+            ok=True, platform="slack", target="U1", target_type="user", kind="text"
+        )
+    )
+    monkeypatch.setattr(cs.outbound, "send_to", send)
+
+    base_task = {
+        "id": "alert-3",
+        "name": "daily-report",
+        "message": "run report",
+        "user_id": "u-1",
+        "session_id": None,
+        "origin": {"platform": "slack", "chat_id": "U1"},
+        "deliver": None,
+    }
+    # First fire: no prior failure recorded (last_status=None) → alerts.
+    await cs._fire({**base_task, "last_status": None}, connectors={"slack": object()})
+    assert send.await_count == 1
+
+    # Second fire: the re-read row now carries last_status="error" from the previous
+    # fire (as _task_fire would supply it) → the streak is suppressed, no 2nd alert.
+    await cs._fire({**base_task, "last_status": "error"}, connectors={"slack": object()})
+    assert send.await_count == 1
+
+
+async def test_fire_generate_delivery_failure_sends_alert(tmp_path, monkeypatch):
+    import fleetent.cron_scheduler as cs
+    import fleetent.session.manager as session_mgr
+    from fleetent.outbound import DeliveryReceipt
+
+    monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(cs, "_resolve_cron_principal", lambda uid: _STUB_PRINCIPAL)
+    monkeypatch.setattr(cs, "_agent_run", AsyncMock(return_value="the daily numbers"))
+    captured = {}
+    monkeypatch.setattr(cs._store, "update_run_state", lambda tid, **k: captured.update(k))
+
+    calls: list[str] = []
+
+    async def _send_to(platform, connector, to, text, **kwargs):
+        calls.append(text)
+        if len(calls) == 1:
+            raise RuntimeError("slack rate limited")
+        return DeliveryReceipt(
+            ok=True, platform=platform, target=to, target_type="user", kind="text"
+        )
+
+    monkeypatch.setattr(cs.outbound, "send_to", _send_to)
+
+    task = {
+        "id": "alert-4",
+        "name": "daily-report",
+        "message": "run report",
+        "task_type": "generate",
+        "user_id": "u-1",
+        "session_id": None,
+        "origin": {"platform": "slack", "chat_id": "U1"},
+        "deliver": None,
+        "last_status": None,
+    }
+    await cs._fire(task, connectors={"slack": object()})
+
+    assert captured.get("last_status") == "error"
+    # First send_to call: the real reply delivery (fails). Second: the alert.
+    assert len(calls) == 2
+    assert calls[0] == "the daily numbers"
+    assert "daily-report" in calls[1]
+
+
+# ── No resolvable delivery target for a broadcast reply (fix-cron-store-and-once F2c) ──
+
+
+async def test_fire_generate_no_target_records_error(tmp_path, monkeypatch):
+    import fleetent.cron_scheduler as cs
+    import fleetent.session.manager as session_mgr
+
+    monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(cs, "_resolve_cron_principal", lambda uid: _STUB_PRINCIPAL)
+    monkeypatch.setattr(cs, "_agent_run", AsyncMock(return_value="the daily numbers"))
+    captured = {}
+    monkeypatch.setattr(cs._store, "update_run_state", lambda tid, **k: captured.update(k))
+
+    task = {
+        "id": "notgt-1",
+        "name": "daily-report",
+        "message": "run report",
+        "task_type": "generate",
+        "user_id": "u-1",
+        "session_id": None,
+        "origin": None,
+        "deliver": None,
+    }
+    await cs._fire(task, connectors={})
+
+    assert captured.get("last_status") == "error"
+    assert "no_delivery_target" in (captured.get("last_error") or "")
+
+
+async def test_fire_generate_explicit_none_target_is_ok(tmp_path, monkeypatch):
+    import fleetent.cron_scheduler as cs
+    import fleetent.session.manager as session_mgr
+
+    monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(cs, "_resolve_cron_principal", lambda uid: _STUB_PRINCIPAL)
+    monkeypatch.setattr(cs, "_agent_run", AsyncMock(return_value="the daily numbers"))
+    captured = {}
+    monkeypatch.setattr(cs._store, "update_run_state", lambda tid, **k: captured.update(k))
+
+    task = {
+        "id": "notgt-2",
+        "name": "daily-report",
+        "message": "run report",
+        "task_type": "generate",
+        "user_id": "u-1",
+        "session_id": None,
+        "origin": None,
+        "deliver": {"mode": "none"},
+    }
+    await cs._fire(task, connectors={})
+
+    assert captured.get("last_status") == "ok"
+    assert captured.get("last_error") is None
+
+
+async def test_fire_generate_silent_reply_no_target_is_ok(tmp_path, monkeypatch):
+    import fleetent.cron_scheduler as cs
+    import fleetent.session.manager as session_mgr
+
+    monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(cs, "_resolve_cron_principal", lambda uid: _STUB_PRINCIPAL)
+    monkeypatch.setattr(cs, "_agent_run", AsyncMock(return_value="[SILENT]"))
+    captured = {}
+    monkeypatch.setattr(cs._store, "update_run_state", lambda tid, **k: captured.update(k))
+
+    task = {
+        "id": "notgt-3",
+        "name": "daily-report",
+        "message": "run report",
+        "task_type": "generate",
+        "user_id": "u-1",
+        "session_id": None,
+        "origin": None,
+        "deliver": None,
+    }
+    await cs._fire(task, connectors={})
+
+    assert captured.get("last_status") == "ok"
+
+
+async def test_fire_generate_with_origin_still_ok(tmp_path, monkeypatch):
+    """A resolvable origin still delivers and records ok (no regression)."""
+    import fleetent.cron_scheduler as cs
+    import fleetent.session.manager as session_mgr
+    from fleetent.outbound import DeliveryReceipt
+
+    monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(cs, "_resolve_cron_principal", lambda uid: _STUB_PRINCIPAL)
+    monkeypatch.setattr(cs, "_agent_run", AsyncMock(return_value="the daily numbers"))
+    captured = {}
+    monkeypatch.setattr(cs._store, "update_run_state", lambda tid, **k: captured.update(k))
+    send = AsyncMock(
+        return_value=DeliveryReceipt(
+            ok=True, platform="slack", target="U1", target_type="user", kind="text"
+        )
+    )
+    monkeypatch.setattr(cs.outbound, "send_to", send)
+
+    task = {
+        "id": "notgt-4",
+        "name": "daily-report",
+        "message": "run report",
+        "task_type": "generate",
+        "user_id": "u-1",
+        "session_id": None,
+        "origin": {"platform": "slack", "chat_id": "U1"},
+        "deliver": None,
+    }
+    await cs._fire(task, connectors={"slack": object()})
+
+    assert captured.get("last_status") == "ok"
+    send.assert_awaited_once()
+
+
 # ── Live mutation through a single owner (schedule-live-registration) ────────
 
 
@@ -594,6 +855,49 @@ async def test_fired_job_skips_disabled_task(tmp_path, monkeypatch, isolated_sch
         await scheduler.shutdown()
 
 
+async def test_once_task_failure_terminally_closed_not_hot_retried(
+    tmp_path, monkeypatch, isolated_schedule_db
+):
+    """A failed once fire must close terminally (enabled=0, last_status="error") —
+    not sit due for repeated automatic retries (fix-cron-store-and-once F2a).
+
+    Regression for the pre-fix behavior: since ``once`` is never advanced, a failed
+    fire left ``next_run_at`` in the past, so every subsequent tick re-fired it
+    (unbounded hot retry, one full LLM run per tick)."""
+    import fleetent.cron_scheduler as cs
+    import fleetent.schedule_store as store
+    import fleetent.session.manager as session_mgr
+
+    monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(cs, "_resolve_cron_principal", lambda uid: _STUB_PRINCIPAL)
+    monkeypatch.setattr(cs, "_agent_run", AsyncMock(side_effect=RuntimeError("llm down")))
+
+    scheduler = cs.CronScheduler()
+    await scheduler.start()
+    try:
+        task = scheduler.create_task(
+            name="t", schedule_kind="once", run_at="+1h", user_id="u-1", message="x"
+        )
+        job = scheduler.get_job(task["id"])
+        await job.func()
+
+        row = store.get(task["id"])
+        assert row["enabled"] in (0, False)
+        assert row["last_status"] == "error"
+        assert row["last_error"] == "llm down"
+        # The job must be deregistered — a second manual fire attempt via the same
+        # job handle must not be reachable through the scheduler anymore.
+        assert scheduler.get_job(task["id"]) is None
+
+        # A subsequent tick must not re-fire it (it is disabled and deregistered).
+        cs._agent_run.reset_mock()
+        dispatched = await scheduler._tick()
+        await asyncio.gather(*dispatched)
+        cs._agent_run.assert_not_called()
+    finally:
+        await scheduler.shutdown()
+
+
 async def test_once_task_marked_completed_after_fire(tmp_path, monkeypatch, isolated_schedule_db):
     import fleetent.cron_scheduler as cs
     import fleetent.schedule_store as store
@@ -601,7 +905,11 @@ async def test_once_task_marked_completed_after_fire(tmp_path, monkeypatch, isol
 
     monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
     monkeypatch.setattr(cs, "_resolve_cron_principal", lambda uid: _STUB_PRINCIPAL)
-    monkeypatch.setattr(cs, "_agent_run", AsyncMock(return_value="done"))
+    # [SILENT] — this test targets the once-completion transition, not delivery; a
+    # generate task with no delivery target and a non-silent reply now correctly
+    # records "error" (fix-cron-store-and-once F2c), so use the silent sentinel to
+    # isolate the success path under test.
+    monkeypatch.setattr(cs, "_agent_run", AsyncMock(return_value="[SILENT]"))
 
     scheduler = cs.CronScheduler()
     await scheduler.start()
