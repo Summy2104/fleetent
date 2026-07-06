@@ -1973,7 +1973,9 @@ async def _run_inner(
     # cron fire), drop the builtin outbound tools so the model cannot self-deliver.
     # cron-delivery-governance: exclude_tools additionally drops named tools (e.g. `schedule`
     # for any fired run) regardless of the outbound-suppression toggle.
-    schemas = _filter_outbound_tools(schemas, suppress=suppress_outbound_tools, exclude=exclude_tools)
+    schemas = _filter_outbound_tools(
+        schemas, suppress=suppress_outbound_tools, exclude=exclude_tools
+    )
 
     # SB3 D1: the single code-execution enablement point — drop run_code from this
     # agent's schema when the (mode, features) pair disables it (alongside the

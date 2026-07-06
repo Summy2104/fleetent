@@ -859,7 +859,10 @@ def _delivery_target_note(
     if origin is not None:
         return "投递目标: 创建会话（origin）"
     if task_type == "generate":
-        return "⚠️ 未配置投递目标且无法从当前上下文捕获创建会话——本任务触发产出的内容将无法送达（可用 notify_target 指定，或改用 task_type=action）。"
+        return (
+            "⚠️ 未配置投递目标且无法从当前上下文捕获创建会话——本任务触发产出的内容将无法送达"
+            "（可用 notify_target 指定，或改用 task_type=action）。"
+        )
     return ""
 
 

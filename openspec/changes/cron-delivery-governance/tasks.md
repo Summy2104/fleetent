@@ -25,5 +25,5 @@
 ## 5. 文档与收尾
 
 - [x] 5.1 更新 `docs/capabilities/scheduling.md`：目标成对配置、回执明示/警示、fired run 无 schedule 工具三节 + 场景 11-13（注：本 change 分支尚未同步已合并的 change-1 main，场景编号在同步 main 时需与 change-1 新增的场景 11/12 重排，避免重复编号）
-- [ ] 5.2 change 收尾：`make test-pr` + `make test-integration-ci` 全绿（无新增失败）
-- [ ] 5.3 （人工）Slack 实测：half-set 创建被拒的用户体验、回执目标显示（对照 AAA-8279 报告场景）
+- [x] 5.2 change 收尾：`make test-pr`（unit 4303 passed + 层边界检查 + 改动文件 ruff format/check 全绿）+ `make test-integration-ci`（2291 passed, 1 skipped）无新增失败——各命中同一个与本改动无关的预置基线失败（`test_observability_logging_defaults`、`test_validate_config_cli_json_outputs_deterministic_summary`，与 change-1 观测到的完全一致，已确认为本机环境相关）
+- [ ] 5.3 （人工，待用户在 PR 合并后执行）Slack 实测：half-set 创建被拒的用户体验、回执目标显示（对照 AAA-8279 报告场景）

@@ -129,9 +129,7 @@ async def test_schedule_create_neither_notify_param_is_fine():
     import fleetent.schedule_store as ss
 
     with patch.object(ss, "create", return_value={"id": "x"}) as mock_create:
-        payload = (
-            '{"action":"create","name":"rep","cron_expr":"0 9 * * *","message":"report"}'
-        )
+        payload = '{"action":"create","name":"rep","cron_expr":"0 9 * * *","message":"report"}'
         result = await dispatch("schedule", payload)
 
     mock_create.assert_called_once()

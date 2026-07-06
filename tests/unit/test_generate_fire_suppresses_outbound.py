@@ -51,8 +51,13 @@ def _make_user(user_id: str, tenant_id: str = "default"):
 
 def _task(**over):
     base = {
-        "id": "t1", "user_id": "u1", "message": "做点事",
-        "session_id": None, "agent_name": None, "deliver": None, "origin": None,
+        "id": "t1",
+        "user_id": "u1",
+        "message": "做点事",
+        "session_id": None,
+        "agent_name": None,
+        "deliver": None,
+        "origin": None,
     }
     base.update(over)
     return base
