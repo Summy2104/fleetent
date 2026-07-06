@@ -253,6 +253,9 @@ async def _agent_run(
         # scheduler, so its run must not expose outbound tools (else the model self-delivers and
         # duplicates the broadcast). `action` fires keep them (they deliver via their own tools).
         suppress_outbound_tools=suppress_outbound,
+        # cron-delivery-governance: a fired run (generate or action) must never be able to
+        # create/modify scheduled tasks — the schedule tool is excluded regardless of type.
+        exclude_tools=frozenset({"schedule"}),
     )
 
 

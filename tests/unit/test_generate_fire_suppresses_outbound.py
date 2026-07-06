@@ -51,8 +51,13 @@ def _make_user(user_id: str, tenant_id: str = "default"):
 
 def _task(**over):
     base = {
-        "id": "t1", "user_id": "u1", "message": "做点事",
-        "session_id": None, "agent_name": None, "deliver": None, "origin": None,
+        "id": "t1",
+        "user_id": "u1",
+        "message": "做点事",
+        "session_id": None,
+        "agent_name": None,
+        "deliver": None,
+        "origin": None,
     }
     base.update(over)
     return base
@@ -86,3 +91,40 @@ async def test_generate_fire_suppresses_outbound(monkeypatch):
 async def test_action_fire_keeps_outbound(monkeypatch):
     captured = await _capture_fire(monkeypatch, _task(task_type="action"))
     assert captured.get("suppress_outbound_tools") is False
+
+
+# ── fired runs exclude the schedule tool (cron-delivery-governance F4.4) ─────────
+# Both generate and action fires must drop `schedule` from their tool schema so a
+# fired run cannot create/modify scheduled tasks (self-replication guard).
+
+
+def test_filter_excludes_named_tools_regardless_of_suppress():
+    from fleetent.runtime.loop import _filter_outbound_tools
+
+    out = _filter_outbound_tools(
+        _schemas("read_file", "send_im_message", "schedule", "run_code"),
+        suppress=False,
+        exclude=frozenset({"schedule"}),
+    )
+    assert _names(out) == ["read_file", "send_im_message", "run_code"]
+
+
+def test_filter_combines_suppress_and_exclude():
+    from fleetent.runtime.loop import _filter_outbound_tools
+
+    out = _filter_outbound_tools(
+        _schemas("read_file", "send_im_message", "send_file", "schedule", "run_code"),
+        suppress=True,
+        exclude=frozenset({"schedule"}),
+    )
+    assert _names(out) == ["read_file", "run_code"]
+
+
+async def test_generate_fire_excludes_schedule_tool(monkeypatch):
+    captured = await _capture_fire(monkeypatch, _task(task_type="generate"))
+    assert captured.get("exclude_tools") == frozenset({"schedule"})
+
+
+async def test_action_fire_excludes_schedule_tool(monkeypatch):
+    captured = await _capture_fire(monkeypatch, _task(task_type="action"))
+    assert captured.get("exclude_tools") == frozenset({"schedule"})
