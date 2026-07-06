@@ -722,9 +722,24 @@ class CronScheduler:
             except Exception as exc:  # noqa: BLE001 — a bad tick must not kill the loop
                 logger.warning("cron_tick_failed error=%s", exc)
             try:
-                await asyncio.sleep(self._tick_interval)
+                await asyncio.sleep(self._next_sleep_duration(datetime.now(UTC)))
             except asyncio.CancelledError:
                 raise
+
+    def _next_sleep_duration(self, now: datetime) -> float:
+        """Sleep just long enough to reach the earliest known due time (cron-hardening
+        F7), instead of always waiting a full `tick_interval` — clamped to
+        `[0.5s, tick_interval]` so a due (or overdue) task fires within ~0.5s rather
+        than up to a full tick late, without busy-looping when something is overdue.
+        """
+        earliest = min(
+            (v.next_run_time for v in self._jobs.values() if v.next_run_time is not None),
+            default=None,
+        )
+        if earliest is None:
+            return self._tick_interval
+        remaining = (earliest - now).total_seconds()
+        return max(0.5, min(self._tick_interval, remaining))
 
     async def _tick(self, now: datetime | None = None) -> list[asyncio.Task[None]]:
         """Run one poll iteration: fire all due tasks, advancing recurring ones first.

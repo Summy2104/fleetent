@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 import fleetent.cron_scheduler as cs
 import fleetent.schedule_store as store
 from fleetent.config import SchedulingSettings
@@ -403,6 +405,39 @@ async def test_disabled_scheduling_does_not_start_tick(isolated_schedule_db):
     sched = cs.CronScheduler(settings=SchedulingSettings(enabled=False))
     await sched.start()
     assert not sched.running
+
+
+# ── 4.3 tick-aligned sleep (cron-hardening F7) ────────────────────────────────
+
+
+def test_next_sleep_duration_aligns_to_earliest_due_task(isolated_schedule_db):
+    sched = cs.CronScheduler(settings=SchedulingSettings(tick_interval_seconds=10))
+    task = _mk_interval_task(60, next_run=_NOW + timedelta(seconds=3))
+    sched._register(store.get(task["id"]))
+
+    assert sched._next_sleep_duration(_NOW) == pytest.approx(3.0, abs=0.01)
+
+
+def test_next_sleep_duration_falls_back_to_tick_interval_with_no_jobs(isolated_schedule_db):
+    sched = cs.CronScheduler(settings=SchedulingSettings(tick_interval_seconds=10))
+
+    assert sched._next_sleep_duration(_NOW) == 10.0
+
+
+def test_next_sleep_duration_never_below_half_second(isolated_schedule_db):
+    sched = cs.CronScheduler(settings=SchedulingSettings(tick_interval_seconds=10))
+    task = _mk_interval_task(60, next_run=_NOW - timedelta(seconds=5))  # already overdue
+    sched._register(store.get(task["id"]))
+
+    assert sched._next_sleep_duration(_NOW) == 0.5
+
+
+def test_next_sleep_duration_never_exceeds_tick_interval(isolated_schedule_db):
+    sched = cs.CronScheduler(settings=SchedulingSettings(tick_interval_seconds=10))
+    task = _mk_interval_task(60, next_run=_NOW + timedelta(minutes=5))
+    sched._register(store.get(task["id"]))
+
+    assert sched._next_sleep_duration(_NOW) == 10.0
 
 
 # ── 5. through-path: real store + real _fire, only _agent_run stubbed ────────

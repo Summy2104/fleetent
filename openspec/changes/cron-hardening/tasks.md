@@ -24,8 +24,8 @@
 
 ## 5. tick 对齐睡眠（F7）
 
-- [ ] 5.1 写测试：任务 3s 后到期、tick_interval=10 → 触发迟到 <1s；无任务时睡眠回落 tick_interval（可注入时钟/睡眠断言）→ 见红
-- [ ] 5.2 实现：`_run_tick_loop` 睡眠 = `min(tick_interval, 距最早到期)`、下界 0.5s（design D4）→ 见绿
+- [x] 5.1 写测试：`_next_sleep_duration` 纯函数单测——对齐最早到期、无任务回落 tick_interval、下界 0.5s、上界 tick_interval 四用例 → 见红
+- [x] 5.2 实现：新增 `_next_sleep_duration` 方法，`_run_tick_loop` 改用其结果替代固定 `tick_interval`（design D4）→ 见绿
 
 ## 6. session 参数暴露（F6.4）
 
