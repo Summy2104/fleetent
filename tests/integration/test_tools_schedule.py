@@ -224,9 +224,7 @@ async def test_schedule_create_without_session_defaults_to_none():
     import fleetent.schedule_store as ss
 
     with patch.object(ss, "create", return_value={"id": "x"}) as mock_create:
-        payload = (
-            '{"action":"create","name":"rep","cron_expr":"0 9 * * *","message":"report"}'
-        )
+        payload = '{"action":"create","name":"rep","cron_expr":"0 9 * * *","message":"report"}'
         await dispatch("schedule", payload)
 
     assert mock_create.call_args.kwargs["session_id"] is None

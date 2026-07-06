@@ -36,4 +36,4 @@
 
 - [x] 7.1 删除 `_parse_cron` 及其孤儿测试断言；`anchor` 参数加行内注释标注 vestigial（design D6）
 - [x] 7.2 更新 `docs/capabilities/scheduling.md`：misfire 宽限分级（顺带修正沿用已久的「3600s coalesce」旧描述）、tick 逐行容错、禁用告警、看门狗、tick 对齐睡眠、session 参数六个现状小节 + 场景 16-19
-- [ ] 7.3 change 收尾：`make test-pr` + `make test-integration-ci` 全绿（无新增失败）
+- [x] 7.3 change 收尾：`make test-pr`（4335 passed，改动文件 ruff format/check 全绿）+ `make test-integration-ci`（2308 passed, 1 skipped）无新增失败——各命中同一个与 change-1/2 观测到的完全一致的预置基线失败。收尾期间发现并修复一处真实问题：新代码用 stdlib `logging.getLogger` 违反 `test_logging_stack_guardrails` 护栏，已改用 `fleetent.structured_logging.get_logger` + `exception=` 关键字约定

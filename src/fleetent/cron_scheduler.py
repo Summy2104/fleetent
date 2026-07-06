@@ -854,9 +854,7 @@ class CronScheduler:
                         timeout = self._fire_timeout if self._fire_timeout > 0 else None
                         await asyncio.wait_for(result, timeout=timeout)
             except TimeoutError:
-                logger.warning(
-                    "cron_fire_timeout task=%s timeout=%ss", task_id, self._fire_timeout
-                )
+                logger.warning("cron_fire_timeout task=%s timeout=%ss", task_id, self._fire_timeout)
                 error = f"fire timed out after {self._fire_timeout}s"
                 with suppress(Exception):
                     _record_run(task, _iso(datetime.now(UTC)), "error", error)
