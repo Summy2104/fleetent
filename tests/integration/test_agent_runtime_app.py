@@ -342,7 +342,7 @@ async def test_start_infra_injects_http_knowledge_provider_from_file_ref(
     assert provider._service_key == "svc-file-token"
 
 
-async def test_managed_home_defaults_to_http_knowledge_provider_from_kb_host_config(
+async def test_managed_home_without_materialized_provider_does_not_inject_kb_provider(
     tmp_path, monkeypatch
 ) -> None:
     from fleetent import long_term_ctx
@@ -367,19 +367,6 @@ async def test_managed_home_defaults_to_http_knowledge_provider_from_kb_host_con
             del agent_name, tenant_id
             return None
 
-    (tmp_path / "kb-service.yaml").write_text(
-        yaml.safe_dump(
-            {
-                "service": {
-                    "service_key_ref": "env:FLEETENT_KB_SERVICE_KEY",
-                    "host": "127.0.0.1",
-                    "port": 9876,
-                }
-            },
-            sort_keys=False,
-        ),
-        encoding="utf-8",
-    )
     monkeypatch.setenv("FLEETENT_KB_SERVICE_KEY", "svc-managed-kb")
     monkeypatch.setattr(
         sandbox_enablement,
@@ -435,11 +422,14 @@ async def test_managed_home_defaults_to_http_knowledge_provider_from_kb_host_con
     )
 
     home = tmp_path / "tenants" / "tenant-1" / "agents" / "support"
+    env_lines = dict(
+        line.split("=", 1)
+        for line in (home / ".env").read_text(encoding="utf-8").strip().splitlines()
+        if "=" in line
+    )
+    assert "FLEETENT_KB_SERVICE_KEY" not in env_lines
     agent = agent_config.load_agent_home_file(home / "agent.yaml")
 
     await agent_app._start_infra(agent, home / "data")
 
-    provider = long_term_ctx._knowledge_provider
-    assert isinstance(provider, long_term_ctx.HttpKnowledgeProvider)
-    assert provider._url == "http://127.0.0.1:9876/search"
-    assert provider._service_key == "svc-managed-kb"
+    assert long_term_ctx._knowledge_provider is None

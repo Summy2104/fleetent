@@ -1,7 +1,10 @@
 """Platform materializes a runnable agent home (agent.yaml + .env scaffold)."""
 
+from types import SimpleNamespace
+
 import yaml
 
+from fleetent import agent_store
 from fleetent.agent_config import (
     AgentFile,
     AgentKnowledge,
@@ -10,9 +13,11 @@ from fleetent.agent_config import (
     ImAccess,
     ImBinding,
     SlackBinding,
+    collect_env_var_names,
     default_models,
     load_agent_file,
 )
+from fleetent.config import KBServeSettings
 from fleetent.knowledge_base.config import KnowledgeConfigSnapshot
 from fleetent.platform.agent_lifecycle import materialize
 
@@ -211,3 +216,100 @@ def test_materialize_preserves_kb_source_credential_env_values(tmp_path, monkeyp
     assert "FLEETENT_CONFLUENCE_TOKEN=" not in env_text
     assert "FLEETENT_CONFLUENCE_USERNAME=" not in env_text
     assert "SUP_BOT=xoxb-real" in env_text
+
+
+def test_knowledge_for_agent_materializes_http_provider_when_kb_serve_is_configured(
+    monkeypatch,
+) -> None:
+    agent = agent_store.Agent(id=1, name="support", system_prompt="Help", allowed_tools=["shell"])
+    monkeypatch.setattr(
+        materialize.agent_kbs_store,
+        "list_kbs_for_agent",
+        lambda tenant_id, agent_id: ["support-kb"],
+    )
+    monkeypatch.setattr(
+        materialize,
+        "Settings",
+        lambda: SimpleNamespace(
+            kb_serve=KBServeSettings(
+                url="http://kb-serve.test",
+                service_key_ref="env:FLEETENT_PLATFORM_KB_SERVICE_KEY",
+            )
+        ),
+        raising=False,
+    )
+
+    knowledge = materialize._knowledge_for_agent(agent)
+
+    assert knowledge.enabled is True
+    assert knowledge.bindings == [
+        AgentKnowledgeBinding(tenant_id="default", kb_id="support-kb", default=True)
+    ]
+    assert knowledge.provider.model_dump(mode="json") == {
+        "type": "http",
+        "url": "http://kb-serve.test/search",
+        "auth_ref": "env:FLEETENT_KB_SERVICE_KEY",
+    }
+
+
+def test_knowledge_for_agent_keeps_local_provider_without_kb_serve(monkeypatch) -> None:
+    agent = agent_store.Agent(id=1, name="support", system_prompt="Help", allowed_tools=["shell"])
+    monkeypatch.setattr(
+        materialize.agent_kbs_store,
+        "list_kbs_for_agent",
+        lambda tenant_id, agent_id: ["support-kb"],
+    )
+    monkeypatch.setattr(
+        materialize,
+        "Settings",
+        lambda: SimpleNamespace(kb_serve=KBServeSettings()),
+        raising=False,
+    )
+
+    knowledge = materialize._knowledge_for_agent(agent)
+
+    assert knowledge.enabled is True
+    assert knowledge.provider.type == "local"
+    assert knowledge.provider.url is None
+    assert knowledge.provider.auth_ref is None
+
+
+def test_knowledge_for_agent_stays_disabled_without_bindings(monkeypatch) -> None:
+    agent = agent_store.Agent(id=1, name="support", system_prompt="Help", allowed_tools=["shell"])
+    monkeypatch.setattr(
+        materialize.agent_kbs_store,
+        "list_kbs_for_agent",
+        lambda tenant_id, agent_id: [],
+    )
+
+    assert materialize._knowledge_for_agent(agent) == AgentKnowledge()
+
+
+def test_materialized_kb_http_provider_round_trips_and_collects_auth_ref_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+    home = materialize.write_home(
+        _agent(
+            knowledge=AgentKnowledge(
+                enabled=True,
+                bindings=[
+                    AgentKnowledgeBinding(
+                        tenant_id="acme",
+                        kb_id="support-kb",
+                        default=True,
+                    )
+                ],
+                provider={
+                    "type": "http",
+                    "url": "http://kb-serve.test/search",
+                    "auth_ref": "env:FLEETENT_KB_SERVICE_KEY",
+                },
+            )
+        )
+    )
+
+    loaded = load_agent_file(home)
+
+    assert loaded.knowledge.provider.type == "http"
+    assert loaded.knowledge.provider.url == "http://kb-serve.test/search"
+    assert loaded.knowledge.provider.auth_ref == "env:FLEETENT_KB_SERVICE_KEY"
+    assert "FLEETENT_KB_SERVICE_KEY" in collect_env_var_names(loaded)

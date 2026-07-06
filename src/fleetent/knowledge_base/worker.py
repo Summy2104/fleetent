@@ -266,6 +266,7 @@ def run_job(
             "archived": getattr(summary, "archived", 0),
             "changed": getattr(summary, "changed", 0),
             "auth_failed": getattr(summary, "auth_failed", 0),
+            "errors": list(getattr(summary, "errors", [])),
             "wired": True,
         }
 
@@ -340,6 +341,18 @@ def run_job(
                     kb_id=kb_id,
                 )
             )
+            if not reindex_summary.dry_run and reindex_summary.failed == 0:
+                # Reindex is the sanctioned embedding-model migration path: move the
+                # KB's recorded identity to the rebuilt vectors' identity, or the
+                # retrieval mismatch guard stays locked after a model switch. A
+                # partial rebuild (failed > 0) keeps the old identity — flipping it
+                # would bless a namespace that still mixes embedding spaces.
+                current = vector_store.current_embedding_identity()
+                KnowledgeStore(
+                    _knowledge_database(
+                        tenant_id, data_dir=data_dir, multi_tenant_root=multi_tenant_root
+                    )
+                ).set_embedding_identity(tenant_id, kb_id, current.model, current.dimensions)
         return {
             "owner": reindex_summary.owner,
             "namespace": reindex_summary.namespace,
@@ -373,6 +386,50 @@ def _claim_next_multi_tenant_job(
     return None
 
 
+def _sync_job_summary(job_type: str, result: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    if job_type == "sync_directory":
+        return result
+    if job_type == "connector_sync":
+        summary = result.get("summary")
+        if isinstance(summary, Mapping):
+            return summary
+    return None
+
+
+def _sync_job_errors(summary: Mapping[str, Any]) -> list[str]:
+    raw_errors = summary.get("errors")
+    if not isinstance(raw_errors, list):
+        return []
+    return [str(item) for item in raw_errors if str(item)]
+
+
+def _sync_terminal_failure(summary: Mapping[str, Any]) -> str | None:
+    failed = int(summary.get("failed", 0) or 0)
+    ingested = int(summary.get("ingested", 0) or 0)
+    scanned = int(summary.get("scanned", 0) or 0)
+    if failed <= 0 or ingested != 0 or scanned <= 0:
+        return None
+    errors = _sync_job_errors(summary)
+    if errors:
+        return errors[0]
+    return f"sync failed: {failed} of {scanned} items failed"
+
+
+def _sync_completion_error(summary: Mapping[str, Any]) -> str | None:
+    failed = int(summary.get("failed", 0) or 0)
+    if failed <= 0:
+        return None
+    errors = _sync_job_errors(summary)
+    if not errors:
+        scanned = int(summary.get("scanned", 0) or 0)
+        return f"sync completed with {failed} failed item(s) out of {scanned}"
+    limit = 3
+    rendered = "; ".join(errors[:limit])
+    if len(errors) > limit:
+        rendered = f"{rendered} (+{len(errors) - limit} more)"
+    return rendered
+
+
 def run_once(
     *,
     queue_database_url: str | None = None,
@@ -393,6 +450,7 @@ def run_once(
         if job is None:
             return None
         resolved_data_dir = data_dir
+    completion_error: str | None = None
     try:
         result = run_job(
             job,
@@ -401,6 +459,12 @@ def run_once(
             multi_tenant_root=multi_tenant_root,
             home_dir=home_dir,
         )
+        summary = _sync_job_summary(str(job["job_type"]), result)
+        if summary is not None:
+            terminal_failure = _sync_terminal_failure(summary)
+            if terminal_failure is not None:
+                raise RuntimeError(terminal_failure)
+            completion_error = _sync_completion_error(summary)
     except Exception as exc:
         failed = kb_ingest_jobs.mark_failed(
             str(job["id"]),
@@ -411,7 +475,10 @@ def run_once(
             return {"job_id": str(job["id"]), "status": "missing"}
         return {"job_id": str(job["id"]), "status": str(failed["status"])}
     kb_ingest_jobs.mark_done(
-        str(job["id"]), result=result, database_url=resolved_queue_database_url
+        str(job["id"]),
+        result=result,
+        error=completion_error,
+        database_url=resolved_queue_database_url,
     )
     return {"job_id": str(job["id"]), "status": "done"}
 

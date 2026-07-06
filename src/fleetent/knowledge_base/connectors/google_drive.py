@@ -28,6 +28,7 @@ from fleetent.knowledge_base.sync_planner import (
     SyncPlanItem,
     SyncPlanSummary,
 )
+from fleetent.structured_logging import get_logger, redact_text
 
 GOOGLE_DOC_MIME = "application/vnd.google-apps.document"
 GOOGLE_SHEET_MIME = "application/vnd.google-apps.spreadsheet"
@@ -38,6 +39,8 @@ PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presen
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 GOOGLE_DRIVE_API_BASE = "https://www.googleapis.com/drive/v3"
 GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token"
+_MAX_RECORDED_ERRORS = 10
+_logger = get_logger("knowledge_base")
 
 
 @dataclass(frozen=True)
@@ -115,6 +118,7 @@ class GoogleDriveSyncSummary:
     archived: int = 0
     failed: int = 0
     auth_failed: int = 0
+    errors: list[str] = field(default_factory=list)
 
 
 class GoogleDriveAuthError(RuntimeError):
@@ -446,6 +450,7 @@ async def execute_google_drive_sync_plan(
     archived = 0
     failed = plan.summary.failed
     auth_failed = plan.summary.auth_failed
+    errors: list[str] = []
 
     for item in plan.items:
         try:
@@ -495,8 +500,11 @@ async def execute_google_drive_sync_plan(
                     )
                 )
             ingested += 1
-        except Exception:
+        except Exception as exc:
             failed += 1
+            _logger.error("kb_sync_file_failed", source_path=item.source_path, exception=exc)
+            if len(errors) < _MAX_RECORDED_ERRORS:
+                errors.append(f"{item.source_path}: {redact_text(str(exc))}")
 
     return GoogleDriveSyncSummary(
         scanned=plan.summary.scanned,
@@ -508,6 +516,7 @@ async def execute_google_drive_sync_plan(
         archived=archived,
         failed=failed,
         auth_failed=auth_failed,
+        errors=errors,
     )
 
 

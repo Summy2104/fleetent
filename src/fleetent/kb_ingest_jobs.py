@@ -260,6 +260,7 @@ def mark_done(
     job_id: str,
     *,
     result: dict[str, Any] | None = None,
+    error: str | None = None,
     database_url: str,
 ) -> dict[str, Any] | None:
     now = _now()
@@ -283,12 +284,13 @@ def mark_done(
             UPDATE kb_ingest_jobs
             SET status = 'done',
                 connector_ref = :connector_ref,
+                last_error = :error,
                 updated_at = :now,
                 finished_at = :now
             WHERE id = :id
             RETURNING *
             """,
-            {"id": job_id, "connector_ref": connector_ref, "now": now},
+            {"id": job_id, "connector_ref": connector_ref, "error": error, "now": now},
         ).fetchone()
     return _decode(row)
 

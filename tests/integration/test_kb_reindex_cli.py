@@ -50,9 +50,9 @@ def test_worker_reindex_job_rebuilds_kb_namespace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from fleetent import kb_ingest_jobs, vector_store
+    from fleetent.knowledge_base import worker
     from fleetent.knowledge_base.management.runtime import create_knowledge_base
     from fleetent.knowledge_base.worker import _knowledge_database
-    from fleetent.knowledge_base import worker
 
     path = tmp_path / "kb-service.yaml"
     _write_yaml(path, _service_doc())
@@ -111,9 +111,9 @@ def test_worker_reindex_job_rebuilds_kb_namespace(
 
 def test_kb_reindex_cli_enqueues_reindex_job(tmp_path: Path) -> None:
     from fleetent import kb_ingest_jobs
+    from fleetent.knowledge_base import reindex_cli
     from fleetent.knowledge_base.management.runtime import create_knowledge_base
     from fleetent.knowledge_base.worker import _knowledge_database
-    from fleetent.knowledge_base import reindex_cli
 
     path = tmp_path / "kb-service.yaml"
     _write_yaml(path, _service_doc())
@@ -154,14 +154,13 @@ def test_kb_reindex_cli_waits_for_terminal_summary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from fleetent import kb_ingest_jobs
+    from fleetent.knowledge_base import reindex_cli
     from fleetent.knowledge_base.management.runtime import create_knowledge_base
     from fleetent.knowledge_base.worker import _knowledge_database
-    from fleetent.knowledge_base import reindex_cli
 
     path = tmp_path / "kb-service.yaml"
     _write_yaml(path, _service_doc())
     data_dir = tmp_path / "data"
-    queue_url = f"sqlite:///{data_dir / 'kb_ingest_queue.db'}"
     create_knowledge_base(
         "tenant-a",
         "kb-a",
@@ -269,3 +268,100 @@ def test_kb_reindex_cli_rebuilds_vectors_for_existing_chunks(tmp_path: Path) -> 
 
     assert processed == [{"job_id": processed[0]["job_id"], "status": "done"}]
     assert [chunk.filename for chunk in vector_search()] == ["guide.md"]
+
+
+def test_worker_reindex_job_updates_kb_embedding_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A successful reindex is the sanctioned embedding-model migration path — it
+    must move the KB's recorded identity to the current runtime identity, or the
+    retrieval mismatch guard stays locked forever after a model switch."""
+    from fleetent import kb_ingest_jobs, vector_store
+    from fleetent.knowledge_base import worker
+    from fleetent.knowledge_base.core import KnowledgeStore
+    from fleetent.knowledge_base.management.runtime import create_knowledge_base
+    from fleetent.knowledge_base.worker import _knowledge_database
+
+    path = tmp_path / "kb-service.yaml"
+    _write_yaml(path, _service_doc())
+    data_dir = tmp_path / "data"
+    queue_url = f"sqlite:///{data_dir / 'kb_ingest_queue.db'}"
+    database = _knowledge_database("tenant-a", data_dir=data_dir)
+    create_knowledge_base("tenant-a", "kb-a", "Standalone KB", database=database)
+    store = KnowledgeStore(database)
+    store.set_embedding_identity("tenant-a", "kb-a", "old-model", 111)
+
+    def fake_reindex(request: vector_store.ReindexRequest) -> vector_store.ReindexSummary:
+        return vector_store.ReindexSummary(
+            owner=request.owner,
+            namespace=vector_store.knowledge_namespace(request.tenant_id, request.kb_id or ""),
+            dry_run=request.dry_run,
+            scanned=3,
+            reindexed=3,
+            skipped=0,
+            failed=0,
+        )
+
+    monkeypatch.setattr(vector_store, "reindex", fake_reindex)
+    kb_ingest_jobs.enqueue_job(
+        job_type="reindex",
+        tenant_id="tenant-a",
+        kb_id="kb-a",
+        connector_ref={},
+        database_url=queue_url,
+    )
+    claimed = kb_ingest_jobs.claim_next_job(database_url=queue_url)
+    assert claimed is not None
+
+    worker.run_job(claimed, data_dir=data_dir, queue_database_url=queue_url)
+
+    current = vector_store.current_embedding_identity()
+    assert store.get_embedding_identity("tenant-a", "kb-a") == (
+        current.model,
+        current.dimensions,
+    )
+
+
+def test_worker_reindex_job_keeps_identity_when_rebuild_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent import kb_ingest_jobs, vector_store
+    from fleetent.knowledge_base import worker
+    from fleetent.knowledge_base.core import KnowledgeStore
+    from fleetent.knowledge_base.management.runtime import create_knowledge_base
+    from fleetent.knowledge_base.worker import _knowledge_database
+
+    path = tmp_path / "kb-service.yaml"
+    _write_yaml(path, _service_doc())
+    data_dir = tmp_path / "data"
+    queue_url = f"sqlite:///{data_dir / 'kb_ingest_queue.db'}"
+    database = _knowledge_database("tenant-a", data_dir=data_dir)
+    create_knowledge_base("tenant-a", "kb-a", "Standalone KB", database=database)
+    store = KnowledgeStore(database)
+    store.set_embedding_identity("tenant-a", "kb-a", "old-model", 111)
+
+    def fake_reindex(request: vector_store.ReindexRequest) -> vector_store.ReindexSummary:
+        return vector_store.ReindexSummary(
+            owner=request.owner,
+            namespace=vector_store.knowledge_namespace(request.tenant_id, request.kb_id or ""),
+            dry_run=request.dry_run,
+            scanned=3,
+            reindexed=1,
+            skipped=0,
+            failed=2,
+        )
+
+    monkeypatch.setattr(vector_store, "reindex", fake_reindex)
+    kb_ingest_jobs.enqueue_job(
+        job_type="reindex",
+        tenant_id="tenant-a",
+        kb_id="kb-a",
+        connector_ref={},
+        database_url=queue_url,
+    )
+    claimed = kb_ingest_jobs.claim_next_job(database_url=queue_url)
+    assert claimed is not None
+
+    worker.run_job(claimed, data_dir=data_dir, queue_database_url=queue_url)
+
+    assert store.get_embedding_identity("tenant-a", "kb-a") == ("old-model", 111)

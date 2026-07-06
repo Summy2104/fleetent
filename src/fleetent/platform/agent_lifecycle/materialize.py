@@ -24,13 +24,19 @@ from fleetent.agent_config import (
     AgentFile,
     AgentKnowledge,
     AgentKnowledgeBinding,
+    AgentKnowledgeProvider,
     AgentModels,
     ModelRouteEntry,
     ModelTarget,
     collect_env_var_names,
     default_models,
 )
-from fleetent.config import MCP_FLEETENT_EXT_DEFAULTS, McpApprovalRule, McpServerSettings
+from fleetent.config import (
+    MCP_FLEETENT_EXT_DEFAULTS,
+    McpApprovalRule,
+    McpServerSettings,
+    Settings,
+)
 from fleetent.platform.agent_lifecycle import credential_slots, default_binding_store, secret_store
 from fleetent.platform.connector_management import mcp_server_store
 from fleetent.platform.connector_management.mcp_auth import (
@@ -41,6 +47,7 @@ from fleetent.platform.connector_management.mcp_auth import (
     parse_mcp_auth_config,
 )
 from fleetent.platform.knowledge_base_management import agent_kbs_store
+from fleetent.platform.knowledge_base_management.auth import KB_SERVICE_KEY_ENV
 from fleetent.platform.model_provider_management import model_admin_store, provider_admin_store
 from fleetent.platform.skill_management import skill_admin_store
 from fleetent.secret_scan import flatten
@@ -479,8 +486,10 @@ def _mcp_servers_for_agent(agent: agent_store.Agent) -> list[McpServerSettings]:
                 degrade_mode=row.get("degrade_mode") or "degrade",
                 file_root=row.get("file_root") or "",
                 file_isolation=row.get("file_isolation") or "on",
+                # approval_rules are per-agent binding config, not server-definition config.
                 approval_rules=[
-                    McpApprovalRule(**rule) for rule in (row.get("approval_rules") or [])
+                    McpApprovalRule(**rule)
+                    for rule in agent_store.get_agent_mcp_approval_rules(agent.id, server_id)
                 ],
             )
         )
@@ -518,8 +527,20 @@ def _knowledge_for_agent(agent: agent_store.Agent) -> AgentKnowledge:
         kb_ids = []
     if not kb_ids:
         return AgentKnowledge()
+    kb_serve = Settings().kb_serve
+    provider = AgentKnowledgeProvider()
+    if kb_serve.url and kb_serve.service_key_ref:
+        # kb_serve.url is the service BASE (the platform's KBServeClient appends
+        # per-call paths); the agent's HttpKnowledgeProvider POSTs its url verbatim,
+        # so materialize must hand it the full /search endpoint.
+        provider = AgentKnowledgeProvider(
+            type="http",
+            url=f"{kb_serve.url.rstrip('/')}/search",
+            auth_ref=f"env:{KB_SERVICE_KEY_ENV}",
+        )
     return AgentKnowledge(
         enabled=True,
+        provider=provider,
         bindings=[
             AgentKnowledgeBinding(
                 tenant_id=agent.tenant_id,

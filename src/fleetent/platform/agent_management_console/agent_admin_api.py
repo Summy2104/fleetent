@@ -10,10 +10,11 @@ from typing import Any
 
 import yaml
 from fastapi import APIRouter, Body, Header, HTTPException, Response, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from fleetent import agent_store, audit_log, auth, user_store
 from fleetent.agent_config import collect_env_var_names
+from fleetent.config import McpApprovalRule
 from fleetent.platform.agent_lifecycle import credential_slots, secret_store
 from fleetent.platform.agent_lifecycle.materialize import agent_file_from_store
 from fleetent.platform.agent_management_console import agent_admin_store, agent_im_group_store
@@ -340,6 +341,49 @@ def unbind_mcp(
         detail={"server_id": server_id},
     )
     return {"agent": name, "server_id": server_id, "bound": False}
+
+
+def _require_bound_mcp_server(agent_id: int, name: str, server_id: str) -> None:
+    """404 unless ``server_id`` is bound to the agent — approval rules attach to a binding."""
+    if server_id not in agent_store.list_mcp_servers_for_agent(agent_id):
+        raise HTTPException(
+            status_code=404, detail=f"mcp server {server_id!r} not bound to agent {name!r}"
+        )
+
+
+@router.get("/agents/{name}/mcp/{server_id}/approval-rules")
+def get_agent_mcp_approval_rules(
+    name: str, server_id: str, authorization: str | None = Header(None)
+) -> list[dict[str, Any]]:
+    _current_user(authorization)
+    agent = _require_agent(name)
+    _require_bound_mcp_server(agent.id, name, server_id)
+    return agent_store.get_agent_mcp_approval_rules(agent.id, server_id)
+
+
+@router.put("/agents/{name}/mcp/{server_id}/approval-rules")
+def set_agent_mcp_approval_rules(
+    name: str,
+    server_id: str,
+    approval_rules: list[dict[str, Any]] = Body(..., embed=True),  # noqa: B008
+    authorization: str | None = Header(None),
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    agent = _require_agent(name)
+    _require_bound_mcp_server(agent.id, name, server_id)
+    try:
+        normalized = [McpApprovalRule.model_validate(rule).model_dump() for rule in approval_rules]
+    except (ValidationError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=f"invalid approval_rules: {exc}") from exc
+    agent_store.set_agent_mcp_approval_rules(agent.id, server_id, normalized)
+    audit_log.write_audit(
+        user.id,
+        "agent.mcp.approval_rules.set",
+        target_type="agent",
+        target_id=name,
+        detail={"server_id": server_id, "rule_count": len(normalized)},
+    )
+    return {"agent": name, "server_id": server_id, "approval_rules": normalized}
 
 
 # --- agent knowledge-base bindings -------------------------------------------

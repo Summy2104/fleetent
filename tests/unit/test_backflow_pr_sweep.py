@@ -214,6 +214,48 @@ def test_skips_repush_when_agent_set_unchanged(monkeypatch) -> None:
     assert fake.pushed == []  # nothing changed -> no re-push
 
 
+def test_repushes_when_recorded_branch_predates_current_scheme(monkeypatch) -> None:
+    """A proposal backed up under the OLD per-skill scheme ("<prefix>/<agent>/<skill>") records a
+    pr_branch that no longer matches the current aggregate name ("<prefix>/<agent>"). Nothing
+    landed and no fresh proposal appeared, but the aggregate branch was never created for this
+    agent, so an unchanged-set skip would strand it forever — the sweep must re-push it under the
+    current name (migration path from per-skill to per-agent branches)."""
+    fake = _FakeBackend()
+    monkeypatch.setattr(git_source_store, "get_config", lambda: _CONFIG)
+    monkeypatch.setattr(backflow_pr_sweep, "_backend_factory", lambda _c: fake)
+    _patch_states(
+        monkeypatch,
+        backed_up=[
+            {
+                "id": 2,
+                "agent_id": 7,
+                "skill_name": "crm-ops",
+                "proposed_bundle": {"SKILL.md": "x"},
+                "pr_state": "backed_up",
+                "pr_branch": "backflow/Sales-Bot/crm-ops",  # legacy per-skill branch name
+            }
+        ],
+    )
+    _stub_agent(monkeypatch, 7, "Sales Bot")
+    set_link = MagicMock()
+    set_state = MagicMock()
+    monkeypatch.setattr(backflow_store, "set_pr_link", set_link)
+    monkeypatch.setattr(backflow_store, "set_pr_state", set_state)
+
+    backflow_pr_sweep.sweep()
+
+    assert fake.pushed == [
+        {
+            "branch": "backflow/Sales-Bot",
+            "subdir": "",
+            "base_ref": "main",
+            "bundle": {"crm-ops/SKILL.md": "x"},
+        }
+    ]
+    set_link.assert_any_call(2, branch="backflow/Sales-Bot")
+    set_state.assert_any_call(2, "backed_up")
+
+
 def test_landed_proposal_marked_merged_and_dropped(monkeypatch) -> None:
     """A proposal whose evolved copy already equals the pool (merged + synced back) is marked
     ``merged`` and not pushed."""

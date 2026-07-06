@@ -40,6 +40,12 @@ _BEARER_RE = re.compile(r"Authorization:\s*Bearer\s+\S+", re.IGNORECASE)
 _API_KEY_RE = re.compile(r"\b(?:sk-[A-Za-z0-9._-]+|ma-[0-9a-fA-F]{64})\b")
 _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 _CN_PHONE_RE = re.compile(r"\b1[3-9]\d{9}\b")
+# "word: value" credential shapes in free-form error text (connector exceptions may
+# embed tokens after a labelled prefix that the value-shape regexes above miss).
+_SECRET_WORD_RE = re.compile(
+    r"\b(token|secret|password|api[_-]?key|authorization|credential)[\s:=_-]+([^\s,;]+)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -186,6 +192,22 @@ def _redact_text(value: str) -> str:
     redacted = _API_KEY_RE.sub("[REDACTED:token]", redacted)
     redacted = _EMAIL_RE.sub("[REDACTED:email]", redacted)
     return _CN_PHONE_RE.sub("[REDACTED:phone]", redacted)
+
+
+def redact_text(value: str) -> str:
+    """Public: scrub secrets from free-form text before persisting or displaying it.
+
+    Covers labelled "token: value" shapes on top of the value-shape redactions
+    (bearer headers, api keys, emails, phones) applied to structured log fields.
+    Value-shape first: the word pattern would otherwise consume the "Bearer"
+    label of an Authorization header and leave the actual token exposed.
+    """
+    return _SECRET_WORD_RE.sub(r"\1 [REDACTED]", _redact_text(value))
+
+
+def redact_value(value: Any) -> Any:
+    """Public: recursively redact a value (sensitive keys masked, strings scrubbed)."""
+    return _redact_value(value)
 
 
 def _exception_fields(exception: BaseException) -> dict[str, Any]:

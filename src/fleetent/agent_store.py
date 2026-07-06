@@ -516,6 +516,41 @@ def list_mcp_servers_for_agent(agent_id: int) -> list[str]:
     return [str(row["server_id"]) for row in rows]
 
 
+def get_agent_mcp_approval_rules(agent_id: int, server_id: str) -> list[dict[str, Any]]:
+    """Per-binding MCP approval rules for one agent<->server pair.
+
+    Returns ``[]`` when the server is not bound to the agent or has no rules configured.
+    """
+    row = (
+        _db()
+        .execute(
+            "SELECT approval_rules FROM agent_mcp_servers "
+            "WHERE agent_id = :agent_id AND server_id = :server_id",
+            {"agent_id": agent_id, "server_id": server_id},
+        )
+        .fetchone()
+    )
+    if row is None:
+        return []
+    raw = row["approval_rules"]
+    return json.loads(raw) if raw else []
+
+
+def set_agent_mcp_approval_rules(
+    agent_id: int, server_id: str, rules: list[dict[str, Any]]
+) -> None:
+    """Replace the approval rules on an existing agent<->server binding.
+
+    A no-op when the pair is not bound (no row to update); callers gate on binding
+    existence and surface a 404 before reaching here.
+    """
+    _db().execute(
+        "UPDATE agent_mcp_servers SET approval_rules = :rules "
+        "WHERE agent_id = :agent_id AND server_id = :server_id",
+        {"rules": json.dumps(rules or []), "agent_id": agent_id, "server_id": server_id},
+    )
+
+
 def _get_default_agent_name() -> str | None:
     # The default agent is the file index's `bindings.default` winner (zero-DB),
     # not a global Settings field (dissolved in config consolidation).

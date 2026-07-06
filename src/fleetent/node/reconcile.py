@@ -8,10 +8,8 @@ from typing import Any
 
 import httpx
 import yaml
-from pydantic import ValidationError
 
 from fleetent.agent_config import AgentFile
-from fleetent.knowledge_base.service_config import load_host_service_config
 from fleetent.node.backend import BaseProcessBackend
 from fleetent.node.config import NodeConfig
 from fleetent.node.provider import DesiredState
@@ -20,7 +18,6 @@ from fleetent.runtime.agent_init import ensure_env_scaffold, referenced_env_name
 from fleetent.structured_logging import get_logger
 
 _logger = get_logger("node.reconcile")
-_KB_SERVICE_KEY_ENV = "FLEETENT_KB_SERVICE_KEY"
 
 
 class NodeReconciler:
@@ -209,10 +206,6 @@ class NodeReconciler:
     ) -> None:
         home = self._home_dir(agent_name, tenant_id)
         home.mkdir(parents=True, exist_ok=True)
-        config, knowledge_secrets = _inject_managed_knowledge_provider(
-            config,
-            home_dir=self._config.home_dir,
-        )
         (home / "agent.yaml").write_text(
             yaml.safe_dump(config, sort_keys=False, allow_unicode=True),
             encoding="utf-8",
@@ -244,7 +237,7 @@ class NodeReconciler:
                 "FLEETENT_NODE_LOOPBACK_URL",
                 "FLEETENT_OAUTH_REDIRECT_BASE",
             ],
-            secrets={**(secrets or {}), **knowledge_secrets, **loopback_env},
+            secrets={**(secrets or {}), **loopback_env},
         )
         self._sync_skills(agent_name, tenant_id, skill_manifests)
 
@@ -381,66 +374,6 @@ def _erase_env(env_path: Path) -> None:
         env_path.unlink(missing_ok=True)
     except OSError:
         _logger.warn("node_agent_env_wipe_failed", path=str(env_path))
-
-
-def _inject_managed_knowledge_provider(
-    config: dict[str, Any],
-    *,
-    home_dir: Path,
-) -> tuple[dict[str, Any], dict[str, str]]:
-    knowledge = config.get("knowledge")
-    if not isinstance(knowledge, dict):
-        return config, {}
-    if not knowledge.get("enabled"):
-        return config, {}
-    bindings = knowledge.get("bindings")
-    if not isinstance(bindings, list) or not bindings:
-        return config, {}
-    provider = knowledge.get("provider")
-    if isinstance(provider, dict) and provider.get("type") == "http":
-        return config, {}
-
-    kb_config_path = home_dir / "kb-service.yaml"
-    if not kb_config_path.exists():
-        return config, {}
-    try:
-        host_config = load_host_service_config(kb_config_path)
-    except (OSError, ValidationError, ValueError):
-        _logger.warn("node_kb_host_config_unavailable", path=str(kb_config_path))
-        return config, {}
-
-    auth_ref, secret_values = _managed_kb_auth_ref(host_config.service.service_key_ref)
-    materialized = dict(config)
-    materialized_knowledge = dict(knowledge)
-    materialized_knowledge["provider"] = {
-        "type": "http",
-        "url": _managed_kb_url(
-            host=host_config.service.host,
-            port=host_config.service.port,
-        ),
-        "auth_ref": auth_ref,
-    }
-    materialized["knowledge"] = materialized_knowledge
-    return materialized, secret_values
-
-
-def _managed_kb_auth_ref(service_key_ref: str) -> tuple[str, dict[str, str]]:
-    if service_key_ref.startswith("env:"):
-        env_name = service_key_ref.removeprefix("env:")
-        value = os.environ.get(env_name, "")
-        if not value:
-            raise ValueError(f"missing kb service key env var: {env_name}")
-        return service_key_ref, {env_name: value}
-    path = Path(service_key_ref.removeprefix("file://")).expanduser()
-    value = path.read_text(encoding="utf-8").strip()
-    if not value:
-        raise ValueError(f"empty kb service key file: {path}")
-    return f"env:{_KB_SERVICE_KEY_ENV}", {_KB_SERVICE_KEY_ENV: value}
-
-
-def _managed_kb_url(*, host: str, port: int) -> str:
-    dial_host = "127.0.0.1" if host in {"0.0.0.0", "::", ""} else host
-    return f"http://{dial_host}:{port}/search"
 
 
 def _config_hash(config: dict[str, Any]) -> str:

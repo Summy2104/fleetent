@@ -150,14 +150,24 @@ def _back_up(backend: BaseGitPlatformBackend, config: dict[str, Any]) -> int:
         if backed >= _BACKUP_BUDGET_PER_ROUND:
             _logger.info("backflow_backup_budget_reached", budget=_BACKUP_BUDGET_PER_ROUND)
             break
-        # Skip agents whose set is unchanged (all already backed_up, nothing landed): the branch
-        # is already current and a re-push would churn the open PR with an identical snapshot.
-        needs_push = agent_id in shrank or any(
-            p.get("pr_state") in (None, "deferred") for p in group
+        branch = _branch_name(config, agent_id)
+        # Re-push when the agent's skill set changed (a new/deferred proposal, or an included
+        # skill just landed) OR when a recorded backup branch predates the current naming scheme
+        # (legacy per-skill "<prefix>/<agent>/<skill>" left over before the aggregate
+        # "<prefix>/<agent>" migration): the aggregate branch was never created for such an agent,
+        # so an unchanged-set skip would strand it forever. Skipping is only safe when the set is
+        # unchanged AND every recorded branch already equals `branch` — otherwise a re-push would
+        # merely churn an existing identical snapshot.
+        stale_branch = any(
+            p.get("pr_branch") is not None and p.get("pr_branch") != branch for p in group
+        )
+        needs_push = (
+            agent_id in shrank
+            or any(p.get("pr_state") in (None, "deferred") for p in group)
+            or stale_branch
         )
         if not needs_push:
             continue
-        branch = _branch_name(config, agent_id)
         # Combined bundle across the agent's drifted skills, keyed "<skill>/<relpath>".
         bundle: dict[str, str] = {}
         for proposal in group:

@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -22,6 +22,7 @@ class LocalSyncSummary:
     unsupported: int = 0
     unchanged: int = 0
     deleted: int = 0
+    errors: list[str] = field(default_factory=list)
 
 
 async def sync_local_directory(
@@ -46,4 +47,5 @@ async def sync_local_directory(
         unsupported=summary.unsupported,
         unchanged=summary.unchanged,
         deleted=summary.deleted,
+        errors=list(summary.errors),
     )

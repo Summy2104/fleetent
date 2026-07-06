@@ -66,17 +66,15 @@ const FIELD_SCHEMA = {
   degrade_mode: 'mcpServers.{id}.x-fleetent.degrade_mode',
   file_root: 'mcpServers.{id}.x-fleetent.file_root',
   file_isolation: 'mcpServers.{id}.x-fleetent.file_isolation',
-  approval_rules: 'mcpServers.{id}.x-fleetent.approval_rules',
 }
 
-// Every create/edit payload now carries the four x-fleetent extension fields at their
+// Every create/edit payload carries the three server-level x-fleetent fields at their
 // defaults (like auth_config, the form always submits them). Spread into the existing
 // exact-match expectations so they stay honest without re-listing the defaults each time.
 const XFLEETENT_DEFAULTS = {
   degrade_mode: 'degrade',
   file_root: '',
   file_isolation: 'on',
-  approval_rules: [],
 }
 
 const fieldSchemaHandler = http.get(`${API_BASE_URL}/admin/mcp/field-schema`, () => HttpResponse.json(FIELD_SCHEMA))
@@ -414,7 +412,7 @@ describe('mcp page form', () => {
     })
   })
 
-  it('submits x-fleetent extension fields including a nested approval rule', async () => {
+  it('submits server-level x-fleetent fields and shows no approval-rules editor', async () => {
     mockBase('admin', [])
     const user = userEvent.setup({ delay: null })
     let captured: Record<string, unknown> | null = null
@@ -440,12 +438,8 @@ describe('mcp page form', () => {
     await user.click(await screen.findByRole('option', { name: 'Off' }))
     await user.type(screen.getByLabelText(/File root/), '/exchange/billing')
 
-    // nested approval rule: add a rule, name the tool, add one when-condition (arg + value)
-    await user.click(screen.getByRole('button', { name: 'Add approval rule' }))
-    await user.type(screen.getByLabelText('Approval rule tool name'), 'manage_email')
-    await user.click(screen.getByRole('button', { name: 'Add condition' }))
-    await user.type(screen.getByLabelText('Condition argument name'), 'operation')
-    await user.type(screen.getByLabelText('Allowed value'), 'send')
+    // approval rules are configured per-agent (agent MCP tab), not on the server form
+    expect(screen.queryByRole('button', { name: 'Add approval rule' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Create' }))
 
@@ -457,50 +451,9 @@ describe('mcp page form', () => {
         degrade_mode: 'strict',
         file_root: '/exchange/billing',
         file_isolation: 'off',
-        approval_rules: [{ tool: 'manage_email', when: { operation: ['send'] } }],
       })
     })
-  })
-
-  it('edits a server, round-tripping an existing approval rule back into the form', async () => {
-    const withRule: McpServerRecord = {
-      id: 'mailer',
-      transport: 'stdio',
-      auth_type: 'none',
-      auth_config: {},
-      command: 'npx mailer',
-      status: 'configured',
-      tool_count: 0,
-      agent_id: null,
-      degrade_mode: 'strict',
-      approval_rules: [{ tool: 'manage_email', when: { operation: ['send'] } }],
-    }
-    mockBase('admin', [withRule])
-    const user = userEvent.setup({ delay: null })
-    let captured: Record<string, unknown> | null = null
-    server.use(
-      fieldSchemaHandler,
-      http.put(`${API_BASE_URL}/admin/mcp/servers/mailer`, async ({ request }) => {
-        captured = (await request.json()) as Record<string, unknown>
-        return HttpResponse.json({ server_id: 'mailer', success: true })
-      })
-    )
-
-    renderPage()
-    await user.click(await screen.findByRole('button', { name: 'Actions for mailer' }))
-    await user.click(await screen.findByRole('menuitem', { name: 'Edit' }))
-    // the stored rule is rehydrated into the editor
-    expect(await screen.findByDisplayValue('manage_email')).toBeInTheDocument()
-    expect(screen.getByDisplayValue('operation')).toBeInTheDocument()
-    expect(screen.getByDisplayValue('send')).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: 'Save' }))
-    await waitFor(() => {
-      expect(captured).toMatchObject({
-        degrade_mode: 'strict',
-        approval_rules: [{ tool: 'manage_email', when: { operation: ['send'] } }],
-      })
-    })
+    expect('approval_rules' in (captured ?? {})).toBe(false)
   })
 })
 

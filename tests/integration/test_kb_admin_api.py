@@ -327,12 +327,12 @@ def test_connector_management_endpoints_are_retired(client):
     assert "/admin/kb/connectors/{connector_id}/sync" not in paths
 
 
-def test_platform_ingest_endpoints_are_retired_but_document_lifecycle_routes_remain(client):
+def test_document_lifecycle_routes_include_upload_proxy(client):
     paths = client.app.openapi()["paths"]
 
     assert "/admin/kb/{kb_id}/documents" in paths
     assert "get" in paths["/admin/kb/{kb_id}/documents"]
-    assert "post" not in paths["/admin/kb/{kb_id}/documents"]
+    assert "post" in paths["/admin/kb/{kb_id}/documents"]
     assert "/admin/kb/{kb_id}/documents/{document_id}/chunks" in paths
     assert "get" in paths["/admin/kb/{kb_id}/documents/{document_id}/chunks"]
     assert "/admin/kb/{kb_id}/documents/{document_id}" in paths
@@ -620,6 +620,99 @@ def test_delete_document_viewer_forbidden(client):
     assert r.status_code == 403
 
 
+def test_upload_document_proxies_to_kb_serve_and_writes_audit(client, monkeypatch):
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str, str, bytes, str]] = []
+
+        def upload_document(
+            self,
+            tenant_id: str,
+            kb_id: str,
+            *,
+            filename: str,
+            content: bytes,
+            content_type: str,
+        ) -> dict[str, object]:
+            self.calls.append((tenant_id, kb_id, filename, content, content_type))
+            return {"job_id": "job-1"}
+
+    fake = FakeClient()
+    monkeypatch.setattr(api, "get_kb_serve_client", lambda: fake, raising=False)
+
+    token, user_id = _session_for("admin")
+    response = client.post(
+        "/admin/kb/support/documents",
+        headers=_hdr(token),
+        files={"file": ("../guide.md", b"hello world", "text/markdown")},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"job_id": "job-1"}
+    assert fake.calls == [("default", "support", "../guide.md", b"hello world", "text/markdown")]
+    assert any(
+        entry["actor_user_id"] == user_id
+        and entry["action"] == "doc_upload"
+        and entry["target_type"] == "kb"
+        and entry["target_id"] == "support"
+        and entry["detail"]["filename"] == "../guide.md"
+        for entry in audit.search_audit()
+    )
+
+
+def test_upload_document_viewer_forbidden_and_serve_errors_do_not_audit(client, monkeypatch):
+    class FakeClient:
+        def upload_document(
+            self,
+            tenant_id: str,
+            kb_id: str,
+            *,
+            filename: str,
+            content: bytes,
+            content_type: str,
+        ) -> dict[str, object]:
+            request = httpx.Request("POST", f"http://kb-serve.test/kb/{kb_id}/documents")
+            if kb_id == "missing":
+                response = httpx.Response(404, json={"detail": "kb not found"}, request=request)
+            else:
+                response = httpx.Response(
+                    413,
+                    json={"detail": "upload exceeds max_upload_bytes"},
+                    request=request,
+                )
+            raise httpx.HTTPStatusError("kb serve error", request=request, response=response)
+
+    monkeypatch.setattr(api, "get_kb_serve_client", lambda: FakeClient(), raising=False)
+
+    viewer_token, _ = _session_for("viewer")
+    viewer = client.post(
+        "/admin/kb/support/documents",
+        headers=_hdr(viewer_token),
+        files={"file": ("guide.md", b"hello world", "text/markdown")},
+    )
+    assert viewer.status_code == 403
+
+    admin_token, _ = _session_for("admin")
+    before = len(audit.search_audit())
+
+    too_large = client.post(
+        "/admin/kb/support/documents",
+        headers=_hdr(admin_token),
+        files={"file": ("guide.md", b"hello world", "text/markdown")},
+    )
+    assert too_large.status_code == 413
+    assert too_large.json()["detail"] == "upload exceeds max_upload_bytes"
+
+    missing = client.post(
+        "/admin/kb/missing/documents",
+        headers=_hdr(admin_token),
+        files={"file": ("guide.md", b"hello world", "text/markdown")},
+    )
+    assert missing.status_code == 404
+    assert missing.json()["detail"] == "kb not found"
+    assert len(audit.search_audit()) == before
+
+
 # --- binding matrix both directions -------------------------------------------
 
 
@@ -719,6 +812,28 @@ def test_kb_data_plane_routes_through_kb_serve_client(host_wired_client, monkeyp
             self.calls.append(("list_documents", (tenant_id, kb_id), {}))
             return [{"document_id": "doc-1", "filename": "sales.md", "chunks": 1}]
 
+        def upload_document(
+            self,
+            tenant_id: str,
+            kb_id: str,
+            *,
+            filename: str,
+            content: bytes,
+            content_type: str,
+        ):
+            self.calls.append(
+                (
+                    "upload_document",
+                    (tenant_id, kb_id),
+                    {
+                        "filename": filename,
+                        "content": content,
+                        "content_type": content_type,
+                    },
+                )
+            )
+            return {"job_id": "job-1"}
+
         def preview_document_chunks(self, tenant_id: str, kb_id: str, document_id: str):
             self.calls.append(("preview_document_chunks", (tenant_id, kb_id, document_id), {}))
             return [{"id": "chunk-1", "content": "hello", "section": "intro"}]
@@ -756,6 +871,14 @@ def test_kb_data_plane_routes_through_kb_serve_client(host_wired_client, monkeyp
         host_wired_client.get("/admin/kb/sales/documents", headers=_hdr(token)).status_code == 200
     )
     assert (
+        host_wired_client.post(
+            "/admin/kb/sales/documents",
+            headers=_hdr(token),
+            files={"file": ("guide.md", b"hello world", "text/markdown")},
+        ).status_code
+        == 200
+    )
+    assert (
         host_wired_client.get(
             "/admin/kb/sales/documents/doc-1/chunks", headers=_hdr(token)
         ).status_code
@@ -787,6 +910,7 @@ def test_kb_data_plane_routes_through_kb_serve_client(host_wired_client, monkeyp
         "create_knowledge_base",
         "update_knowledge_base",
         "list_documents",
+        "upload_document",
         "preview_document_chunks",
         "delete_document",
         "run_evaluation",

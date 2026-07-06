@@ -16,13 +16,9 @@ from fleetent.db import SQLiteDatabase, create_database
 from fleetent.observability.performance import PerformanceQuery, get_performance_summary
 from fleetent.observability.traces import TraceEvent, TraceQuery, query_trace_events
 from fleetent.observability.usage import UsageQuery, get_usage_summary
-from fleetent.structured_logging import _redact_value
+from fleetent.structured_logging import redact_text, redact_value
 
 _MAX_TEXT_LENGTH = 2048
-_SECRET_WORD_RE = re.compile(
-    r"\b(token|secret|password|api[_-]?key|authorization|credential)[\s:=_-]+([^\s,;]+)",
-    re.IGNORECASE,
-)
 # Catches compound env-var names that contain a secret word as a substring but have no word
 # boundary before it (e.g. ANTHROPIC_API_KEY, MYAPP_SECRET_KEY, FLEETENT_TUI_TOKEN).
 # Only redacts values that look token-like (≥8 non-whitespace chars without = in the value).
@@ -303,7 +299,7 @@ def _connector_settings(
 
 
 def _event_json(event: TraceEvent) -> str:
-    payload = _truncate(_redact_value(event.payload))
+    payload = _truncate(redact_value(event.payload))
     return (
         json.dumps(
             {
@@ -327,7 +323,7 @@ def _write_json(archive: zipfile.ZipFile, name: str, payload: object) -> str:
     archive.writestr(
         name,
         json.dumps(
-            _truncate(_redact_value(payload)), ensure_ascii=False, sort_keys=True, default=str
+            _truncate(redact_value(payload)), ensure_ascii=False, sort_keys=True, default=str
         ),
     )
     return name
@@ -404,10 +400,10 @@ def _safe_dataclass(value: Any) -> object:
 
 
 def _sanitize(value: str) -> str:
-    redacted = _SECRET_WORD_RE.sub(r"\1 [REDACTED]", value)
+    redacted = redact_text(value)
     redacted = _ENV_SECRET_KEY_RE.sub(r"\1=[REDACTED]", redacted)
     redacted = redacted.replace("secret [REDACTED] excluded", "secret file excluded")
-    return str(_redact_value(redacted))
+    return str(redact_value(redacted))
 
 
 def _truncate(value: Any) -> Any:

@@ -17,7 +17,7 @@ Auth mirrors user_admin_api: reads allow viewer+admin, writes require admin.
 from typing import Any, NoReturn, cast
 
 import httpx
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from fleetent import audit_log, auth, user_store
@@ -28,6 +28,7 @@ from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.knowledge_base_management import (
     kb_observation as kb_observation_agg,
 )
+from fleetent.platform.knowledge_base_management.auth import resolve_service_key_ref
 from fleetent.platform.knowledge_base_management.kb_serve_client import KBServeClient
 
 router = APIRouter(prefix="/admin/kb")
@@ -149,6 +150,14 @@ def get_kb_serve_client() -> KBServeClient:
         raise HTTPException(status_code=503, detail="kb serve url is not configured")
     if not settings.service_key_ref.strip():
         raise HTTPException(status_code=503, detail="kb serve service key is not configured")
+    try:
+        resolve_service_key_ref(settings.service_key_ref)
+    except (ValueError, OSError) as exc:
+        # Fail here with a clear 503 instead of a 500 from deep inside a request
+        # (e.g. the ref points at an env var the platform process started without).
+        raise HTTPException(
+            status_code=503, detail="kb serve service key cannot be resolved"
+        ) from exc
     return KBServeClient(settings)
 
 
@@ -353,6 +362,34 @@ def list_documents(
         return kb_list_documents(tenant_id, kb_id)
     except httpx.HTTPStatusError as exc:
         _raise_as_http_exception(exc)
+
+
+@router.post("/{kb_id}/documents")
+async def upload_document(
+    kb_id: str,
+    file: UploadFile = File(...),
+    tenant_id: str = _DEFAULT_TENANT,
+    authorization: str | None = Header(None),
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    try:
+        result = get_kb_serve_client().upload_document(
+            tenant_id,
+            kb_id,
+            filename=file.filename or "upload.bin",
+            content=await file.read(),
+            content_type=file.content_type or "application/octet-stream",
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_as_http_exception(exc)
+    audit_log.write_audit(
+        user.id,
+        "doc_upload",
+        "kb",
+        kb_id,
+        detail={"filename": file.filename or "upload.bin"},
+    )
+    return result
 
 
 @router.get("/{kb_id}/documents/{document_id}/chunks")
