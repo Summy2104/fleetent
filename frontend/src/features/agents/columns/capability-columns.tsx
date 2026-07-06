@@ -1,6 +1,7 @@
 import type { ColumnDef } from '@tanstack/react-table'
 
 import { Badge } from '@/components/base/badge'
+import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import type { AgentSkillBinding } from '@/features/agents/api'
 import type { McpServerRecord } from '@/features/connectors/api'
@@ -16,10 +17,12 @@ export function buildMcpColumns({
   t,
   canWrite,
   onToggle,
+  onConfigureApproval,
 }: {
   t: Translate
   canWrite: boolean
   onToggle: (serverId: string, bound: boolean) => void
+  onConfigureApproval: (serverId: string) => void
 }): ColumnDef<McpServerRow, unknown>[] {
   return [
     {
@@ -49,6 +52,26 @@ export function buildMcpColumns({
       cell: ({ row }) => (
         <span className="block text-right text-muted-foreground text-sm tabular-nums">{row.original.tool_count}</span>
       ),
+    },
+    {
+      id: 'approval',
+      header: '',
+      enableSorting: false,
+      enableHiding: false,
+      cell: ({ row }) =>
+        // Approval rules attach to a binding, so the entry only shows for bound servers.
+        row.original.bound ? (
+          <div className="flex justify-end">
+            <Button
+              disabled={!canWrite}
+              onClick={() => onConfigureApproval(row.original.id)}
+              size="sm"
+              variant="outline"
+            >
+              {t('agents.configureApproval')}
+            </Button>
+          </div>
+        ) : null,
     },
     {
       id: 'toggle',

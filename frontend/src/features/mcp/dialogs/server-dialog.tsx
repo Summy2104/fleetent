@@ -22,9 +22,7 @@ import {
   useMcpFieldSchemaQuery,
   useUpdateMcpServerMutation,
 } from '@/features/connectors/api'
-import { ApprovalRulesEditor } from '@/features/mcp/dialogs/approval-rules-editor'
 import {
-  type ApprovalRuleForm,
   buildServerPayload,
   canSubmitServer,
   type ServerFormFields,
@@ -90,7 +88,6 @@ export function ServerDialog({
   const [degradeMode, setDegradeMode] = useState('degrade')
   const [fileRoot, setFileRoot] = useState('')
   const [fileIsolation, setFileIsolation] = useState('on')
-  const [approvalRules, setApprovalRules] = useState<ApprovalRuleForm[]>([])
 
   useEffect(() => {
     if (open) {
@@ -117,7 +114,6 @@ export function ServerDialog({
       setDegradeMode(f.degradeMode)
       setFileRoot(f.fileRoot)
       setFileIsolation(f.fileIsolation)
-      setApprovalRules(f.approvalRules)
     }
   }, [open, editing])
 
@@ -144,7 +140,6 @@ export function ServerDialog({
     degradeMode,
     fileRoot,
     fileIsolation,
-    approvalRules,
   }
 
   const submit = async (): Promise<void> => {
@@ -456,12 +451,6 @@ export function ServerDialog({
               value={fileRoot}
             />
             <FieldPathHint fieldKey="file_root" id={id} schema={fieldSchema.data} />
-          </div>
-
-          <div className="grid gap-2">
-            <Label>{t('mcp.approvalRulesLabel')}</Label>
-            <FieldPathHint fieldKey="approval_rules" id={id} schema={fieldSchema.data} />
-            <ApprovalRulesEditor onChange={setApprovalRules} value={approvalRules} />
           </div>
 
           {transport === 'stdio' ? (

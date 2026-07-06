@@ -486,8 +486,10 @@ def _mcp_servers_for_agent(agent: agent_store.Agent) -> list[McpServerSettings]:
                 degrade_mode=row.get("degrade_mode") or "degrade",
                 file_root=row.get("file_root") or "",
                 file_isolation=row.get("file_isolation") or "on",
+                # approval_rules are per-agent binding config, not server-definition config.
                 approval_rules=[
-                    McpApprovalRule(**rule) for rule in (row.get("approval_rules") or [])
+                    McpApprovalRule(**rule)
+                    for rule in agent_store.get_agent_mcp_approval_rules(agent.id, server_id)
                 ],
             )
         )

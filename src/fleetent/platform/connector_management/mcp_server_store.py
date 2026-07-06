@@ -15,7 +15,7 @@ from fleetent.db import SQLiteDatabase, create_database
 
 _COLS = (
     "agent_id, server_id, transport, url, auth_type, auth_config, command, args, env, "
-    "headers, enabled, degrade_mode, file_root, file_isolation, approval_rules, created_at"
+    "headers, enabled, degrade_mode, file_root, file_isolation, created_at"
 )
 _LEGACY_COLS = (
     "agent_id, server_id, transport, url, auth_type, api_key_env, command, args, env, "
@@ -35,11 +35,10 @@ _EDITABLE = (
     "degrade_mode",
     "file_root",
     "file_isolation",
-    "approval_rules",
 )
 
 # Columns serialized as JSON on write and json.loads-ed back in _decode.
-_JSON_COLS = ("args", "env", "headers", "auth_config", "approval_rules")
+_JSON_COLS = ("args", "env", "headers", "auth_config")
 
 
 def _database() -> SQLiteDatabase:
@@ -65,7 +64,6 @@ def add_mcp_server(
     degrade_mode: str = "degrade",
     file_root: str = "",
     file_isolation: str = "on",
-    approval_rules: list[dict[str, Any]] | None = None,
 ) -> None:
     now = _now()
     with _database().transaction() as conn:
@@ -74,10 +72,10 @@ def add_mcp_server(
             INSERT INTO mcp_servers
                 (agent_id, server_id, transport, url, auth_type, auth_config,
                  command, args, env, headers, enabled,
-                 degrade_mode, file_root, file_isolation, approval_rules, created_at)
+                 degrade_mode, file_root, file_isolation, created_at)
             VALUES (:agent_id, :server_id, :transport, :url, :auth_type, :auth_config,
                     :command, :args, :env, :headers, :enabled,
-                    :degrade_mode, :file_root, :file_isolation, :approval_rules, :created_at)
+                    :degrade_mode, :file_root, :file_isolation, :created_at)
             """,
             {
                 "agent_id": agent_id,
@@ -94,7 +92,6 @@ def add_mcp_server(
                 "degrade_mode": degrade_mode,
                 "file_root": file_root,
                 "file_isolation": file_isolation,
-                "approval_rules": json.dumps(approval_rules or []),
                 "created_at": now,
             },
         )
@@ -177,7 +174,6 @@ def _as_server_config(row: dict[str, Any]) -> dict[str, Any]:
         "degrade_mode": row["degrade_mode"],
         "file_root": row["file_root"],
         "file_isolation": row["file_isolation"],
-        "approval_rules": row["approval_rules"],
     }
 
 
@@ -206,5 +202,4 @@ def _decode(row: dict[str, Any]) -> dict[str, Any]:
     out["degrade_mode"] = out.get("degrade_mode") or "degrade"
     out["file_root"] = out.get("file_root") or ""
     out["file_isolation"] = out.get("file_isolation") or "on"
-    out["approval_rules"] = json.loads(out["approval_rules"]) if out.get("approval_rules") else []
     return out

@@ -63,20 +63,21 @@ export const MCP_AUTH_FORM_FIELDS = {
   api_key_per_user: ['header_style', 'credential_input'],
 } as const
 
-// A per-server approval rule (agent.yaml `x-fleetent.approval_rules`). `when: null`/absent
+// A per-agent-binding approval rule (agent.yaml `x-fleetent.approval_rules`). `when: null`/absent
 // means every call to `tool` needs approval; a `when` map narrows it to calls whose args
-// match (each listed arg's value must be in its allowed list).
+// match (each listed arg's value must be in its allowed list). Configured per agent<->server
+// binding (see features/agents), not on the server definition.
 export type McpApprovalRule = {
   tool: string
   when?: Record<string, string[]> | null
 }
 
-// fleetent extension fields carried under each server's `x-fleetent` block in agent.yaml.
+// Server-level fleetent extension fields carried under each server's `x-fleetent` block.
+// approval_rules is NOT here — it is per-agent binding config, not a server-definition field.
 export type McpFleetentExtensions = {
   degrade_mode?: string
   file_root?: string
   file_isolation?: string
-  approval_rules?: McpApprovalRule[]
 }
 
 export type McpServerRecord = {
