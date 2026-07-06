@@ -339,6 +339,53 @@ async def test_bounded_parallel_execution(isolated_schedule_db, monkeypatch):
     await asyncio.gather(*dispatched)
 
 
+# ── 4.1b per-fire watchdog (cron-hardening F6.3) ──────────────────────────────
+
+
+async def test_fire_watchdog_cancels_hung_run_and_releases_slot(isolated_schedule_db, monkeypatch):
+    async def _hangs_forever(row, connectors=None, history_retention=None):
+        await asyncio.Event().wait()  # never set — simulates a stuck fire
+
+    monkeypatch.setattr(cs, "_fire", _hangs_forever)
+
+    task = _mk_interval_task(60, next_run=_NOW - timedelta(seconds=1))
+
+    sched = cs.CronScheduler(settings=SchedulingSettings(fire_timeout_seconds=0.05))
+    for t in store.list_tasks():
+        sched._register(t)
+    dispatched = await sched._tick(now=_NOW)
+
+    # Must complete (the watchdog cancels the hung run) rather than hang forever.
+    await asyncio.wait_for(asyncio.gather(*dispatched), timeout=2.0)
+
+    assert task["id"] not in sched._inflight  # in-flight slot released
+    assert sched._sem._value == sched._max_parallel  # concurrency slot released
+
+    runs = store.list_runs(task["id"])
+    assert len(runs) == 1
+    assert runs[0]["status"] == "error"
+    assert "timed out" in (runs[0]["agent_error"] or "").lower()
+
+
+async def test_fire_watchdog_disabled_when_timeout_is_zero(isolated_schedule_db, monkeypatch):
+    async def _slow_but_finite(row, connectors=None, history_retention=None):
+        await asyncio.sleep(0.15)
+
+    monkeypatch.setattr(cs, "_fire", _slow_but_finite)
+
+    task = _mk_interval_task(60, next_run=_NOW - timedelta(seconds=1))
+
+    sched = cs.CronScheduler(settings=SchedulingSettings(fire_timeout_seconds=0))
+    for t in store.list_tasks():
+        sched._register(t)
+    dispatched = await sched._tick(now=_NOW)
+    await asyncio.wait_for(asyncio.gather(*dispatched), timeout=2.0)
+
+    # No watchdog-recorded timeout — the stub _fire itself writes no history, so any
+    # row here would only come from the watchdog wrapper firing (it must not).
+    assert store.list_runs(task["id"]) == []
+
+
 # ── 4.2 tick loop lifecycle ──────────────────────────────────────────────────
 
 

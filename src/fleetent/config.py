@@ -420,6 +420,10 @@ class SchedulingSettings(BaseModel):
     # Backflow PR sweep runs more often than inbound sync: backing up an agent's edit to a
     # branch is safety-critical, so prefer a short interval.
     skill_backflow_pr_sweep_interval_seconds: int = 120
+    # Per-fire watchdog (cron-hardening F6.3): a fire that never returns would otherwise
+    # permanently occupy its in-flight slot and one of the bounded concurrency slots.
+    # 0 disables the watchdog (unbounded fire duration, prior behavior).
+    fire_timeout_seconds: float = 900.0
 
 
 class WebhookSourceSettings(BaseModel):

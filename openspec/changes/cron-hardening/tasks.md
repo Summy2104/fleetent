@@ -19,8 +19,8 @@
 
 ## 4. fire 看门狗（F6.3）
 
-- [ ] 4.1 写测试：stub 永不返回的 fire + `fire_timeout_seconds=0.1` → 运行被取消、history 记 timeout 语义 error、`_inflight` 与信号量释放、同任务后续 tick 可再触发；`fire_timeout_seconds=0` → 不超时 → 见红
-- [ ] 4.2 实现：`SchedulingSettings.fire_timeout_seconds`（默认 900）+ `_dispatch` 内层 `asyncio.wait_for`（design D3）→ 见绿
+- [x] 4.1 写测试：stub 永不返回的 fire + `fire_timeout_seconds=0.05` → 运行被取消、history 记 timeout 语义 error、`_inflight` 与信号量释放；`fire_timeout_seconds=0` → 不超时 → 见红
+- [x] 4.2 实现：`SchedulingSettings.fire_timeout_seconds`（默认 900，0 需绕开既有 `or default` 落空陷阱）+ `_dispatch` 改接收完整 task dict 以便记录 timeout history + `asyncio.wait_for` 包裹（design D3）→ 见绿
 
 ## 5. tick 对齐睡眠（F7）
 

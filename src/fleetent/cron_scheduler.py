@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_TICK_INTERVAL_SECONDS = 10.0
 _DEFAULT_MAX_PARALLEL = 4
 _DEFAULT_HISTORY_RETENTION = 50
+_DEFAULT_FIRE_TIMEOUT_SECONDS = 900.0
 _MAINTENANCE_SPILLOVER_ID = "__maintenance_spillover_cleanup__"
 
 # A fired task whose final reply is this sentinel runs successfully but delivers
@@ -625,6 +626,11 @@ class CronScheduler:
             getattr(self._settings, "history_retention", _DEFAULT_HISTORY_RETENTION)
             or _DEFAULT_HISTORY_RETENTION
         )
+        # 0 is a meaningful value (watchdog disabled) — NOT an "unset, use default" falsy
+        # sentinel like the other settings above, so no `or default` fallback here.
+        self._fire_timeout = float(
+            getattr(self._settings, "fire_timeout_seconds", _DEFAULT_FIRE_TIMEOUT_SECONDS)
+        )
         self._sem = asyncio.Semaphore(self._max_parallel)
 
     @property
@@ -766,7 +772,7 @@ class CronScheduler:
                 return
         if kind == "once":
             # One-shot is not advanced (completion, not advancement, governs it).
-            dispatched.append(self._dispatch(tid, view))
+            dispatched.append(self._dispatch(task, view))
             return
         nxt = compute_next_run(
             kind,
@@ -797,7 +803,7 @@ class CronScheduler:
         # conditional update fires this occurrence (at-most-once under overlap).
         if _store.claim_next_run(tid, expected=nr, new=_iso(nxt)):
             view.next_run_time = nxt
-            dispatched.append(self._dispatch(tid, view))
+            dispatched.append(self._dispatch(task, view))
 
     def _run_periodic_due(self, now: datetime) -> None:
         for job_id, interval in list(self._periodic_intervals.items()):
@@ -817,8 +823,9 @@ class CronScheduler:
             except Exception as exc:  # noqa: BLE001 — periodic failure is bulkheaded
                 logger.warning("cron_periodic_failed id=%s error=%s", job_id, exc)
 
-    def _dispatch(self, task_id: str, view: _JobView) -> asyncio.Task[None]:
+    def _dispatch(self, task: dict[str, Any], view: _JobView) -> asyncio.Task[None]:
         """Fire a due task's run under the concurrency bound, off the tick's critical path."""
+        task_id = task["id"]
         self._inflight.add(task_id)
 
         async def _run() -> None:
@@ -826,7 +833,27 @@ class CronScheduler:
                 async with self._sem:
                     result = view.func()
                     if asyncio.iscoroutine(result):
-                        await result
+                        # Watchdog (cron-hardening F6.3): a fire that never returns would
+                        # otherwise permanently occupy this in-flight slot and a concurrency
+                        # slot. 0 disables the bound (wait_for(..., None) never times out).
+                        timeout = self._fire_timeout if self._fire_timeout > 0 else None
+                        await asyncio.wait_for(result, timeout=timeout)
+            except TimeoutError:
+                logger.warning(
+                    "cron_fire_timeout task=%s timeout=%ss", task_id, self._fire_timeout
+                )
+                error = f"fire timed out after {self._fire_timeout}s"
+                with suppress(Exception):
+                    _record_run(task, _iso(datetime.now(UTC)), "error", error)
+                with suppress(Exception):
+                    _record_history(
+                        task,
+                        _iso(datetime.now(UTC)),
+                        "error",
+                        agent_error=error,
+                        kind=task.get("task_type") or "generate",
+                        retention=self._history_retention,
+                    )
             except Exception as exc:  # noqa: BLE001 — record via _fire; never crash the loop
                 logger.warning("cron_dispatch_failed task=%s error=%s", task_id, exc)
             finally:
