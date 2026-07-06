@@ -42,14 +42,18 @@ flowchart TD
     REPLY -->|"action"| ACT["agent 经自己的工具自发完成动作<br/>调度器不广播回复"]
 ```
 
-定时任务失败处理（重试 / 兜底为规划项，当前只记录 `last_status` / `last_error`）：
+定时任务失败处理（配置化重试/兜底仍是规划项；once 的默认策略与失败告警已实现）：
 
 ```mermaid
 flowchart TD
     TRIGGER[任务触发] --> EXEC1["runtime.loop 执行"]
     EXEC1 -->|"成功"| LOG_OK["run state: last_status=ok"]
     EXEC1 -->|"失败"| LOG_ERR["run state: last_status=error + last_error"]
-    LOG_ERR -.->|"规划"| RETRY["按配置重试"]
+    LOG_ERR --> ALERT["best-effort 告警到可解析投递目标<br/>（recurring 仅失败 streak 首次告警）"]
+    LOG_ERR --> KIND{schedule_kind}
+    KIND -->|"once"| CLOSE["终结：enabled=0<br/>不再自动重试（run_now 可手动重试）"]
+    KIND -->|"cron / interval"| NEXT["按既定网格等待下次触发<br/>（无自动重试，同一次失败不补跑）"]
+    LOG_ERR -.->|"规划"| RETRY["可配置重试策略（幂等 execution_id）"]
     RETRY -.->|"耗尽"| DL["fallback_channel / dead_letter.jsonl"]
 ```
 
@@ -133,7 +137,11 @@ def extract_message(template: str | None, payload: Any) -> str:
 
 ### 定时任务
 
-- ✅ **三种触发模式**：`cron`（标准五字段表达式 + IANA 时区，默认 UTC）、`once`（ISO-8601 绝对时间或 `+30m` 相对时间；成功执行后标记 `completed` 不再触发）、`interval`（固定间隔秒数）
+- ✅ **三种触发模式**：`cron`（标准五字段表达式 + IANA 时区，默认 UTC）、`once`（ISO-8601 绝对时间或 `+30m` 相对时间；naive 绝对时间按**任务时区**解释为本地钟面时间，不按宿主机系统时区、不预先换算为 UTC）、`interval`（固定间隔秒数，按调度网格 `前一计划时刻 + interval` 推进，不因运行耗时或写回时机漂移）
+
+- ✅ **once 终结策略**：无论成功还是失败，`once` **只触发一次**——成功标记 `completed`；失败同样终结（`enabled=0`，保留 `last_status=error`/`last_error`），绝不因未被推进而在后续 tick 被反复热触发。需要重试时用 `schedule(action="run_now")` 手动重跑
+
+- ✅ **失败主动告警**：一次触发失败（agent 执行报错、投递失败、或 `generate` 型产出非静默回复却没有可解析的投递目标）时，调度器 best-effort 向该任务可解析的投递目标发一条 `⚠️ 定时任务 <name> 执行失败: <error>`；告警本身失败只记日志不影响触发结果；recurring 任务连续失败只在失败 streak 的首次告警，避免刷屏
 
 - ✅ **任务分型 + 投递契约**（typed-scheduled-task-delivery）：按「正文内容是否需要触发时刻才知道的信息」分三型
   - `notify`：内容固定的纯通知——创建对话中 agent 把用户糙文案**优化定稿、确认后冻结**进 `notify_text`；触发时调度器**原样直发，不跑 agent**（无 LLM 成本/延迟/改写风险）
@@ -150,7 +158,8 @@ def extract_message(template: str | None, payload: Any) -> str:
   - 显式目标：创建时给 `notify_platform` + `notify_target`（`target_type` user=DM / channel=频道）——**二者须成对提供**，只给一个会被 create 拒绝并提示缺失的参数（不再静默忽略回落 origin）
   - 未指定：回落创建任务时的会话上下文（`origin`，含原平台/频道/线程）
   - 静默模式：`deliver.mode=none` 或回复恰为 `[SILENT]` 哨兵时成功但不投递（适合「只在有变化时报警」的巡检任务）
-  - **create 回执明示/警示最终投递目标**：显式目标写成 `platform:target(target_type)`；回落 origin 写明「投递回创建会话」；**既无显式目标又无 origin**（generate 型）时回执追加 ⚠️ 警示——不阻断创建，只做可见性提示（该场景的 fire 期兜底见下）
+  - 无可解析目标（既无 `origin` 又无显式 `deliver`）且回复非静默时记为**失败**（`error: no_delivery_target`）——广播型任务的产出无处可去不算成功；唯一例外是显式 `deliver.mode=none`（有意不投递，仍记 `ok`）
+  - **create 回执明示/警示最终投递目标**：显式目标写成 `platform:target(target_type)`；回落 origin 写明「投递回创建会话」；**既无显式目标又无 origin**（generate 型）时回执追加 ⚠️ 警示——不阻断创建，只做可见性提示（该场景 fire 时即触发上一条的 `no_delivery_target` 失败）
 
 - ✅ **fired run 不含 `schedule` 工具**：定时触发的运行（无论 `generate` 还是 `action`）工具集中不出现 `schedule`——被 prompt 注入或误操作也无法在触发的这次运行里创建/修改/删除定时任务，任务管理仍是交互式会话的能力
 
@@ -264,17 +273,27 @@ def extract_message(template: str | None, payload: Any) -> str:
 - When：agent 重启
 - Then：错过的触发在宽限窗口内合并补发一次；超过 3600s 的一次性任务跳过不补发
 
-**场景 11：half-set 投递参数被拒**
+**场景 11：一次性任务失败终结**
+- Given：用户对话"30 分钟后提醒我开会"，agent 执行时报错（如 LLM 网关故障）
+- When：到点触发失败
+- Then：任务状态变为 `enabled=0`、`last_status=error`（保留 `last_error`），不再自动重试；用户可用 `schedule(action=run_now)` 手动重跑
+
+**场景 12：失败告警**
+- Given：一个 recurring 任务某次触发失败
+- When：其投递目标可解析
+- Then：该目标收到一条 ⚠️ 失败告警；若下一次触发仍失败（连续失败），不重复告警；若之后成功一次再失败，则重新告警
+
+**场景 13：half-set 投递参数被拒**
 - Given：用户只说了"发到 C123"（只给 `notify_target`，未给 `notify_platform`）
 - When：agent 尝试创建任务
 - Then：创建被拒，工具返回明确指出缺失 `notify_platform` 的错误，不静默回落到创建频道
 
-**场景 12：无目标 generate 任务的创建期警示**
+**场景 14：无目标 generate 任务的创建期警示**
 - Given：一个 `generate` 任务从非 IM 上下文创建（无法捕获 `origin`）、也未指定 `notify_platform`/`notify_target`
 - When：创建完成
 - Then：任务仍创建成功，但回执含 ⚠️ 警示——说明触发产出的内容将无法送达；该任务真正触发时会记 `error`（`no_delivery_target`）并触发失败告警
 
-**场景 13：fired run 无法自我增殖**
+**场景 15：fired run 无法自我增殖**
 - Given：一个 `action` 任务的 message 诱导 agent 在触发时再创建一个新的定时任务
 - When：任务触发
 - Then：该次运行的工具集中没有 `schedule` 工具，无法创建新任务；用户在交互式会话中创建/管理任务不受影响

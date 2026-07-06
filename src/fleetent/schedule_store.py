@@ -167,25 +167,39 @@ def set_enabled(task_id: str, enabled: bool) -> bool:
     return result.rowcount > 0
 
 
+_UNSET = object()
+
+
 def update_run_state(
     task_id: str,
     *,
-    last_run_at: str | None = None,
-    last_status: str | None = None,
-    last_error: str | None = None,
-    next_run_at: str | None = None,
+    last_run_at: str | None = _UNSET,  # type: ignore[assignment]
+    last_status: str | None = _UNSET,  # type: ignore[assignment]
+    last_error: str | None = _UNSET,  # type: ignore[assignment]
+    next_run_at: str | None = _UNSET,  # type: ignore[assignment]
 ) -> None:
-    """Write back observability/runtime-state columns after a fire."""
+    """Write back observability/runtime-state columns after a fire (field-selective).
+
+    Only columns the caller explicitly passes are updated (PATCH semantics) — an omitted
+    keyword leaves that column untouched. This is load-bearing: the poll engine calls this
+    from two independent call sites (post-fire run-state writeback, and next_run_at backfill
+    at registration) that must never clobber each other's column (fix-cron-store-and-once
+    F1 — a prior unconditional 4-column UPDATE wiped next_run_at on every fire, forcing a
+    stale-grid recompute on the next tick and cumulative interval drift).
+    """
+    columns = {
+        "last_run_at": last_run_at,
+        "last_status": last_status,
+        "last_error": last_error,
+        "next_run_at": next_run_at,
+    }
+    provided = {k: v for k, v in columns.items() if v is not _UNSET}
+    if not provided:
+        return
+    set_clause = ", ".join(f"{col} = :{col}" for col in provided)
     _database().execute(
-        "UPDATE scheduled_tasks SET last_run_at = :last_run_at, last_status = :last_status, "
-        "last_error = :last_error, next_run_at = :next_run_at WHERE id = :id",
-        {
-            "id": task_id,
-            "last_run_at": last_run_at,
-            "last_status": last_status,
-            "last_error": last_error,
-            "next_run_at": next_run_at,
-        },
+        f"UPDATE scheduled_tasks SET {set_clause} WHERE id = :id",
+        {"id": task_id, **provided},
     )
 
 

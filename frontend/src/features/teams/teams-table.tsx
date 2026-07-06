@@ -7,6 +7,7 @@ import { SetApproverDialog } from '@/features/teams/dialogs/team-dialogs'
 import { useTeamUsersQuery } from '@/features/teams/shared'
 import { type TeamListItem, useTeamsQuery, useTenantsQuery } from '@/features/tenancy/api'
 import { useT } from '@/i18n'
+import { labelWithId } from '@/lib/labels'
 
 export function TeamsTable({
   canWrite,
@@ -31,13 +32,26 @@ export function TeamsTable({
       if (!id) return t('teams.unassigned')
       return userList.find((user) => user.id === id)?.name ?? id
     }
+    // Cell resolvers show "name (id)"; the approver filter still keys off `userName`.
+    const approverLabel = (id: string | null): string =>
+      id ? labelWithId(userList.find((user) => user.id === id)?.name, id) : t('teams.unassigned')
+    const tenantLabel = (id: string): string => labelWithId(tenantList.find((tenant) => tenant.id === id)?.name, id)
     const tenantOptions = tenantList.map((tenant) => ({ label: tenant.name, value: tenant.id }))
-    // Approver filter matches the resolved name the cell renders, so options mirror `userName`.
+    // Approver filter matches the resolved name the accessor renders, so options mirror `userName`.
     const approverOptions = [
       { label: t('teams.unassigned'), value: t('teams.unassigned') },
       ...userList.map((user) => ({ label: user.name, value: user.name })),
     ]
-    return buildTeamColumns({ approverOptions, canWrite, onSetApprover: setApproverTeam, t, tenantOptions, userName })
+    return buildTeamColumns({
+      approverLabel,
+      approverOptions,
+      canWrite,
+      onSetApprover: setApproverTeam,
+      t,
+      tenantLabel,
+      tenantOptions,
+      userName,
+    })
   }, [canWrite, t, userList, tenantList])
 
   return (

@@ -99,6 +99,8 @@ describe('teams page', () => {
 
     expect(await screen.findByText('Teams')).toBeInTheDocument()
     expect(await screen.findByText('Team A')).toBeInTheDocument()
+    // The tenant column resolves tenant_id to "name (id)".
+    expect(screen.getByRole('row', { name: /Team A/ })).toHaveTextContent('Tenant A (tenant-a)')
 
     // Create a team via the dialog.
     await user.click(screen.getByRole('button', { name: 'Create team' }))
@@ -115,7 +117,7 @@ describe('teams page', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Save approver' }))
 
     await waitFor(() => {
-      expect(screen.getByRole('row', { name: /Team A/ })).toHaveTextContent('Bob')
+      expect(screen.getByRole('row', { name: /Team A/ })).toHaveTextContent('Bob (user-2)')
     })
   })
 

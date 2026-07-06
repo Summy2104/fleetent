@@ -16,7 +16,9 @@ import {
   useStatsExportMutation,
   useUserRequestsQuery,
 } from '@/features/stats/api'
+import { useUsersQuery } from '@/features/users/api'
 import { useT } from '@/i18n'
+import { labelWithId } from '@/lib/labels'
 
 const WINDOWS = ['1h', '24h', '7d', '30d'] as const
 
@@ -93,6 +95,7 @@ function StatsDashboard({
   const compare = useCompareAgentsQuery(agentNames, 'calls')
   const tools = useAgentToolsQuery(agentName)
   const perUser = usePerUserStatsQuery(agentName, 'calls')
+  const users = useUsersQuery()
   const [selectedUser, setSelectedUser] = useState<string | null>(null)
   const [selectedRequest, setSelectedRequest] = useState<string | null>(null)
   const [selectedSession, setSelectedSession] = useState<string | null>(null)
@@ -152,7 +155,9 @@ function StatsDashboard({
               <div className="rounded-lg border border-border bg-card p-4" key={row.user_id}>
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0 space-y-1">
-                    <p className="font-mono font-semibold text-foreground text-sm">{row.user_id}</p>
+                    <p className="font-mono font-semibold text-foreground text-sm">
+                      {labelWithId(users.data?.find((user) => user.id === row.user_id)?.name, row.user_id)}
+                    </p>
                     {Object.entries(row)
                       .filter(([key]) => key !== 'user_id')
                       .map(([key, value]) => (

@@ -11,13 +11,19 @@ export function buildTeamColumns({
   t,
   canWrite,
   userName,
+  approverLabel,
+  tenantLabel,
   tenantOptions,
   approverOptions,
   onSetApprover,
 }: {
   t: Translate
   canWrite: boolean
+  // Name-only resolver; drives the approver filter's accessor/options so the
+  // select values stay in sync. The cells below render the richer "name (id)".
   userName: (id: string | null) => string
+  approverLabel: (id: string | null) => string
+  tenantLabel: (id: string) => string
   tenantOptions: ColumnFilterOption[]
   approverOptions: ColumnFilterOption[]
   onSetApprover: (team: TeamListItem) => void
@@ -41,14 +47,18 @@ export function buildTeamColumns({
       accessorKey: 'tenant_id',
       header: t('teams.colTenant'),
       meta: { title: t('teams.colTenant'), filter: { type: 'select', options: tenantOptions } },
-      cell: ({ row }) => <span className="font-mono text-muted-foreground text-sm">{row.original.tenant_id}</span>,
+      cell: ({ row }) => (
+        <span className="font-mono text-muted-foreground text-sm">{tenantLabel(row.original.tenant_id)}</span>
+      ),
     },
     {
       id: 'approver',
       accessorFn: (team) => userName(team.approver_user_id),
       header: t('teams.colApprover'),
       meta: { title: t('teams.colApprover'), filter: { type: 'select', options: approverOptions } },
-      cell: ({ row }) => <span className="text-foreground text-sm">{userName(row.original.approver_user_id)}</span>,
+      cell: ({ row }) => (
+        <span className="text-foreground text-sm">{approverLabel(row.original.approver_user_id)}</span>
+      ),
     },
   ]
 

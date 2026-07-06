@@ -58,6 +58,19 @@ describe('admin routes', () => {
     expect(loginBody).toEqual({ email: 'admin@example.com', password: 's3cret' })
   })
 
+  it('reveals the password in plain text when the show-password toggle is clicked', async () => {
+    renderRoutes('/login')
+
+    const password = await screen.findByLabelText('Password')
+    expect(password).toHaveAttribute('type', 'password')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Show password' }))
+    expect(password).toHaveAttribute('type', 'text')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Hide password' }))
+    expect(password).toHaveAttribute('type', 'password')
+  })
+
   it('forces a password change when the session requires a reset', async () => {
     server.use(http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([])))
 
@@ -84,6 +97,25 @@ describe('admin routes', () => {
     // The gate now also requires a matching confirmation before the submit enables.
     await userEvent.type(screen.getByLabelText('Confirm new password'), 's3cret-new')
     await userEvent.click(screen.getByRole('button', { name: 'Set password & continue' }))
+
+    expect((await screen.findAllByRole('heading', { name: 'Agents' }))[0]).toBeInTheDocument()
+  })
+
+  it('lets the admin submit the forced password change by pressing Enter', async () => {
+    server.use(
+      http.post('http://fleetent.test/admin/change-password', async ({ request }) => {
+        const body = (await request.json()) as { new_password: string }
+        expect(body.new_password).toBe('s3cret-new')
+        return HttpResponse.json({ status: 'password_changed' })
+      }),
+      http.get('http://fleetent.test/admin/agents', () => HttpResponse.json([]))
+    )
+
+    renderRoutes('/agents', 'session-token', true)
+
+    await userEvent.type(await screen.findByLabelText('New password'), 's3cret-new')
+    // Trailing {Enter} submits the surrounding <form> without clicking the button.
+    await userEvent.type(screen.getByLabelText('Confirm new password'), 's3cret-new{Enter}')
 
     expect((await screen.findAllByRole('heading', { name: 'Agents' }))[0]).toBeInTheDocument()
   })

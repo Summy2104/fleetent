@@ -57,6 +57,8 @@ describe('webhooks page', () => {
 
     expect(await screen.findByText('github-ci')).toBeInTheDocument()
     expect(screen.getByText('docs-agent')).toBeInTheDocument()
+    // The user column resolves the bound user_id to "name (id)".
+    expect(screen.getByText('Alice (user-a)')).toBeInTheDocument()
   })
 
   it('creates a webhook source, requires agent and user, and shows the copyable webhook URL', async () => {
