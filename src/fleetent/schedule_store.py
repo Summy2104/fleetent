@@ -54,7 +54,7 @@ def create(
     schedule_kind: str = "cron",
     run_at: str | None = None,
     interval_seconds: int | None = None,
-    anchor: str | None = None,
+    anchor: str | None = None,  # vestigial: column is written but never read (no anchoring logic)
     origin: dict[str, Any] | None = None,
     deliver: dict[str, Any] | None = None,
     task_type: str = "generate",

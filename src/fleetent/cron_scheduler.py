@@ -1131,15 +1131,3 @@ async def run_task_now(task_id: str) -> bool:
         return False
     await _fire(task)
     return True
-
-
-def _parse_cron(expr: str) -> dict[str, str]:
-    """Convert a 5-field cron expression to APScheduler keyword args."""
-    minute, hour, day, month, day_of_week = expr.split()
-    return {
-        "minute": minute,
-        "hour": hour,
-        "day": day,
-        "month": month,
-        "day_of_week": day_of_week,
-    }

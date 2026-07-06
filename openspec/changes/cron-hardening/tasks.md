@@ -34,6 +34,6 @@
 
 ## 7. 死代码与收尾
 
-- [ ] 7.1 删除 `_parse_cron` 及其孤儿测试断言；`anchor` 列 docstring 标注 vestigial（design D6）
-- [ ] 7.2 更新 `docs/capabilities/scheduling.md`：misfire 宽限、看门狗、session 参数、tick 对齐
+- [x] 7.1 删除 `_parse_cron` 及其孤儿测试断言；`anchor` 参数加行内注释标注 vestigial（design D6）
+- [x] 7.2 更新 `docs/capabilities/scheduling.md`：misfire 宽限分级（顺带修正沿用已久的「3600s coalesce」旧描述）、tick 逐行容错、禁用告警、看门狗、tick 对齐睡眠、session 参数六个现状小节 + 场景 16-19
 - [ ] 7.3 change 收尾：`make test-pr` + `make test-integration-ci` 全绿（无新增失败）
