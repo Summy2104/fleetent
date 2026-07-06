@@ -1,6 +1,7 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 
 import { DataTable } from '@/components/base/data-table'
+import { AgentApprovalRulesDialog } from '@/features/agents/agent-approval-rules-dialog'
 import { useAgentMcpQuery, useBindAgentMcpMutation, useUnbindAgentMcpMutation } from '@/features/agents/api'
 import { buildMcpColumns, type McpServerRow } from '@/features/agents/columns/capability-columns'
 import { useMcpServersQuery } from '@/features/connectors/api'
@@ -16,6 +17,7 @@ export function McpServersTab({ agentName, canWrite }: { agentName: string; canW
   const boundMcp = useAgentMcpQuery(agentName)
   const bindMcp = useBindAgentMcpMutation(agentName).mutateAsync
   const unbindMcp = useUnbindAgentMcpMutation(agentName).mutateAsync
+  const [approvalServerId, setApprovalServerId] = useState<string | null>(null)
 
   const boundSet = useMemo(() => new Set(boundMcp.data ?? []), [boundMcp.data])
   const rows = useMemo<McpServerRow[]>(
@@ -28,18 +30,32 @@ export function McpServersTab({ agentName, canWrite }: { agentName: string; canW
     },
     [bindMcp, unbindMcp]
   )
-  const columns = useMemo(() => buildMcpColumns({ t, canWrite, onToggle }), [t, canWrite, onToggle])
+  const columns = useMemo(
+    () => buildMcpColumns({ t, canWrite, onToggle, onConfigureApproval: setApprovalServerId }),
+    [t, canWrite, onToggle]
+  )
 
   return (
-    <DataTable
-      columns={columns}
-      data={rows}
-      emptyState={<div className="py-10 text-center text-muted-foreground text-sm">{t('agents.noMcpServers')}</div>}
-      enableColumnVisibility
-      enableGlobalFilter
-      getRowId={(row) => row.id}
-      isLoading={servers.isPending}
-      title={t('agents.mcpServers')}
-    />
+    <>
+      <DataTable
+        columns={columns}
+        data={rows}
+        emptyState={
+          <div className="py-10 text-center text-muted-foreground text-sm">{t('agents.noMcpServers')}</div>
+        }
+        enableColumnVisibility
+        enableGlobalFilter
+        getRowId={(row) => row.id}
+        isLoading={servers.isPending}
+        title={t('agents.mcpServers')}
+      />
+      <AgentApprovalRulesDialog
+        agentName={agentName}
+        onOpenChange={(open) => {
+          if (!open) setApprovalServerId(null)
+        }}
+        serverId={approvalServerId}
+      />
+    </>
   )
 }

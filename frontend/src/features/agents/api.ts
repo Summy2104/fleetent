@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
+import type { McpApprovalRule } from '@/features/connectors/api'
 import { useAdminApi } from '@/lib/api-client'
 
 export type AgentRuntime = {
@@ -305,6 +306,37 @@ export function useUnbindAgentMcpMutation(name: string) {
       api.delete<{ agent: string; bound: boolean; server_id: string }>(`/admin/agents/${name}/mcp/${serverId}`),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: agentMcpKey(name) })
+    },
+  })
+}
+
+function agentMcpApprovalKey(name: string | null, serverId: string | null) {
+  return [...agentMcpKey(name), serverId, 'approval-rules']
+}
+
+export function useAgentMcpApprovalRulesQuery(name: string | null, serverId: string | null) {
+  const api = useAdminApi()
+
+  return useQuery({
+    enabled: Boolean(name) && Boolean(serverId),
+    queryKey: agentMcpApprovalKey(name, serverId),
+    queryFn: () =>
+      api.get<McpApprovalRule[]>(`/admin/agents/${name}/mcp/${serverId}/approval-rules`),
+  })
+}
+
+export function useSetAgentMcpApprovalRulesMutation(name: string, serverId: string) {
+  const api = useAdminApi()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (approvalRules: McpApprovalRule[]) =>
+      api.put<{ agent: string; server_id: string; approval_rules: McpApprovalRule[] }>(
+        `/admin/agents/${name}/mcp/${serverId}/approval-rules`,
+        { approval_rules: approvalRules }
+      ),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: agentMcpApprovalKey(name, serverId) })
     },
   })
 }

@@ -1,21 +1,27 @@
+import { useId } from 'react'
 import { Plus, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import type { ApprovalRuleForm } from '@/features/mcp/dialogs/server-dialog-logic'
+import type { ApprovalRuleForm } from '@/features/mcp/approval-rules'
 import { useT } from '@/i18n'
 
 // Nested editor for a server's approval_rules. A rule = a tool name + optional when-conditions
 // (arg name + allowed values). No conditions on a rule means "every call to this tool needs
 // approval". Purely controlled: all state lives in the parent form via value/onChange.
+// `toolOptions` (the server's live tool list) seed the tool-name combobox as suggestions;
+// the field stays free-text so an unreachable server or a not-yet-existing tool can still be typed.
 export function ApprovalRulesEditor({
   value,
   onChange,
+  toolOptions = [],
 }: {
   value: ApprovalRuleForm[]
   onChange: (next: ApprovalRuleForm[]) => void
+  toolOptions?: string[]
 }): JSX.Element {
   const t = useT()
+  const toolListId = useId()
 
   const patchRule = (index: number, patch: Partial<ApprovalRuleForm>): void =>
     onChange(value.map((rule, i) => (i === index ? { ...rule, ...patch } : rule)))
@@ -28,6 +34,11 @@ export function ApprovalRulesEditor({
   return (
     <div className="space-y-2">
       <p className="text-muted-foreground text-xs">{t('mcp.approvalRulesHelp')}</p>
+      <datalist id={toolListId}>
+        {toolOptions.map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
       {value.map((rule, ruleIndex) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: controlled rows added/removed by index
         <div className="space-y-2 rounded-md border p-3" key={ruleIndex}>
@@ -35,6 +46,7 @@ export function ApprovalRulesEditor({
             <Input
               aria-label={t('mcp.approvalToolAria')}
               className="flex-1"
+              list={toolListId}
               onChange={(event) => patchRule(ruleIndex, { tool: event.target.value })}
               placeholder={t('mcp.approvalToolPlaceholder')}
               value={rule.tool}
