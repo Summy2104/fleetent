@@ -96,12 +96,16 @@ _OUTBOUND_DELIVERY_TOOLS = frozenset({"send_im_message", "send_file"})
 
 
 def _filter_outbound_tools(
-    schemas: list[dict[str, Any]], *, suppress: bool
+    schemas: list[dict[str, Any]], *, suppress: bool, exclude: frozenset[str] = frozenset()
 ) -> list[dict[str, Any]]:
-    """Drop the builtin outbound delivery tools from ``schemas`` when ``suppress`` is True."""
-    if not suppress:
+    """Drop the builtin outbound delivery tools (when ``suppress``) and any tool named in
+    ``exclude`` (cron-delivery-governance: fired runs exclude ``schedule`` so a triggered
+    run cannot create/modify scheduled tasks — self-replication guard) from ``schemas``.
+    """
+    names_to_drop = exclude | (_OUTBOUND_DELIVERY_TOOLS if suppress else frozenset())
+    if not names_to_drop:
         return schemas
-    return [s for s in schemas if s["function"]["name"] not in _OUTBOUND_DELIVERY_TOOLS]
+    return [s for s in schemas if s["function"]["name"] not in names_to_drop]
 
 
 ReplyFunc = Callable[[str], Coroutine[Any, Any, None]]
@@ -1831,6 +1835,7 @@ async def run(
     skill_user_access: dict[str, list[str]] | None = None,
     emit_delivery_trailer: bool = True,
     suppress_outbound_tools: bool = False,
+    exclude_tools: frozenset[str] = frozenset(),
     hot_mcp_servers: list[str] | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
@@ -1899,6 +1904,7 @@ async def run(
                 skill_user_access=skill_user_access,
                 emit_delivery_trailer=emit_delivery_trailer,
                 suppress_outbound_tools=suppress_outbound_tools,
+                exclude_tools=exclude_tools,
                 hot_mcp_servers=hot_mcp_servers,
             )
     finally:
@@ -1942,6 +1948,7 @@ async def _run_inner(
     skill_user_access: dict[str, list[str]] | None = None,
     emit_delivery_trailer: bool = True,
     suppress_outbound_tools: bool = False,
+    exclude_tools: frozenset[str] = frozenset(),
     hot_mcp_servers: list[str] | None = None,
 ) -> str:
     # Image-bearing messages route to the vision model (D6); raises here if
@@ -1968,7 +1975,11 @@ async def _run_inner(
 
     # generate-fires-exclude-outbound-tools: when delivery is the platform's job (a generate
     # cron fire), drop the builtin outbound tools so the model cannot self-deliver.
-    schemas = _filter_outbound_tools(schemas, suppress=suppress_outbound_tools)
+    # cron-delivery-governance: exclude_tools additionally drops named tools (e.g. `schedule`
+    # for any fired run) regardless of the outbound-suppression toggle.
+    schemas = _filter_outbound_tools(
+        schemas, suppress=suppress_outbound_tools, exclude=exclude_tools
+    )
 
     # SB3 D1: the single code-execution enablement point — drop run_code from this
     # agent's schema when the (mode, features) pair disables it (alongside the

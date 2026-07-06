@@ -155,10 +155,13 @@ def extract_message(template: str | None, payload: Any) -> str:
   - 按型校验：如 `notify` 缺 `notify_text`/目标时创建被拒并给出可改正的提示
 
 - ✅ **主动投递**（generate 型）：触发后的回复经 `outbound` 主动投递
-  - 显式目标：创建时给 `notify_platform` + `notify_target`（`target_type` user=DM / channel=频道）
+  - 显式目标：创建时给 `notify_platform` + `notify_target`（`target_type` user=DM / channel=频道）——**二者须成对提供**，只给一个会被 create 拒绝并提示缺失的参数（不再静默忽略回落 origin）
   - 未指定：回落创建任务时的会话上下文（`origin`，含原平台/频道/线程）
   - 静默模式：`deliver.mode=none` 或回复恰为 `[SILENT]` 哨兵时成功但不投递（适合「只在有变化时报警」的巡检任务）
   - 无可解析目标（既无 `origin` 又无显式 `deliver`）且回复非静默时记为**失败**（`error: no_delivery_target`）——广播型任务的产出无处可去不算成功；唯一例外是显式 `deliver.mode=none`（有意不投递，仍记 `ok`）
+  - **create 回执明示/警示最终投递目标**：显式目标写成 `platform:target(target_type)`；回落 origin 写明「投递回创建会话」；**既无显式目标又无 origin**（generate 型）时回执追加 ⚠️ 警示——不阻断创建，只做可见性提示（该场景 fire 时即触发上一条的 `no_delivery_target` 失败）
+
+- ✅ **fired run 不含 `schedule` 工具**：定时触发的运行（无论 `generate` 还是 `action`）工具集中不出现 `schedule`——被 prompt 注入或误操作也无法在触发的这次运行里创建/修改/删除定时任务，任务管理仍是交互式会话的能力
 
 - ✅ **触发期校验**：到点时从 store 重读任务行——已删除或已禁用的行绝不执行（绕过 facade 的写入者也拦得住）；owner 被拉黑或不存在时跳过执行
 
@@ -279,6 +282,21 @@ def extract_message(template: str | None, payload: Any) -> str:
 - Given：一个 recurring 任务某次触发失败
 - When：其投递目标可解析
 - Then：该目标收到一条 ⚠️ 失败告警；若下一次触发仍失败（连续失败），不重复告警；若之后成功一次再失败，则重新告警
+
+**场景 13：half-set 投递参数被拒**
+- Given：用户只说了"发到 C123"（只给 `notify_target`，未给 `notify_platform`）
+- When：agent 尝试创建任务
+- Then：创建被拒，工具返回明确指出缺失 `notify_platform` 的错误，不静默回落到创建频道
+
+**场景 14：无目标 generate 任务的创建期警示**
+- Given：一个 `generate` 任务从非 IM 上下文创建（无法捕获 `origin`）、也未指定 `notify_platform`/`notify_target`
+- When：创建完成
+- Then：任务仍创建成功，但回执含 ⚠️ 警示——说明触发产出的内容将无法送达；该任务真正触发时会记 `error`（`no_delivery_target`）并触发失败告警
+
+**场景 15：fired run 无法自我增殖**
+- Given：一个 `action` 任务的 message 诱导 agent 在触发时再创建一个新的定时任务
+- When：任务触发
+- Then：该次运行的工具集中没有 `schedule` 工具，无法创建新任务；用户在交互式会话中创建/管理任务不受影响
 
 ### 规划中（v1.0）
 
