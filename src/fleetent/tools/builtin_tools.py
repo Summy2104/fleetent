@@ -947,6 +947,12 @@ async def schedule(
         "action=到点跑 agent 用自身工具行动，调度器不广播回复",
     ] = "generate",
     notify_text: Annotated[str, "notify 类型的固定文案（task_type=notify 时必填）"] = "",
+    session: Annotated[
+        str,
+        "跨触发的会话绑定：留空=每次触发独立、互不可见（默认，适合无状态任务）；"
+        "指定一个字符串（如 'cron/daily-counter'）=历次触发累积同一会话上下文"
+        "（适合计数器、连续对比等需要记忆的任务）",
+    ] = "",
     tool_context: ToolContext | None = None,
 ) -> str:
     """Manage scheduled tasks. ``action`` is one of create/list/remove/run_now/pause/resume.
@@ -1016,6 +1022,7 @@ async def schedule(
                 deliver=deliver,
                 task_type=task_type,
                 notify_text=notify_text or None,
+                session_id=session or None,
             )
         except ValueError as exc:
             # Per-type validation (e.g. notify without notify_text/target) → clean text,

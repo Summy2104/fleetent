@@ -170,12 +170,23 @@ def extract_message(template: str | None, payload: Any) -> str:
   - fail-closed 语义：recheck 异常时拒绝执行，而非忽略异常继续运行
   - cron 触发路径因此不 import `user_store`，也不打开 management 库（`decouple-cron-principal-recheck`，2026-06-16 归档）
 
-- ✅ **宕机错过处理**：停机期间错过的触发在 3600s 宽限窗口内合并补发一次（coalesce）；过期更久的一次性任务跳过不补发；`max_instances=1` 防止慢执行与下次触发重叠
+- ✅ **宕机错过处理（自研 tick-poll 引擎，非 APScheduler 内建 misfire）**：`interval` 快进到未来第一个未过期时刻，至多补跑一次，不逐槽回放；`cron` 额外设**宽限上界** `min(半周期, 2h)`（clamp 下界 2min）——迟到在宽限内补跑一次，超过宽限则不补跑、记一条 `missed` run-history 行并快进到下一次未来时刻（宕机三天不会把三天前的 daily digest 当新内容广播）；过期更久的 `once` 任务标记 `completed` 不补发
+  - 引擎结构：持久化 `next_run_at` + 内存 tick loop（默认 10s 扫描周期，睡眠对齐最早到期时刻，见下）+ claim-before-execute 的 at-most-once 语义；不是 APScheduler 的调度引擎本身，`CronTrigger` 仅复用其纯 cron 数学
+  - **tick 对齐睡眠**：不固定睡满一个 tick 周期——睡眠时长取 `min(tick_interval, 距最早到期时间)`（下界 0.5s 防忙轮询），到期任务的触发延迟从「至多一个 tick」收敛到亚秒级
+  - **单进程内并发保护**：`asyncio.Semaphore` 有界并发（默认 4）+ 逐任务 `_inflight` 标记防重入；单进程模型下不需要跨进程文件锁
+
+- ✅ **tick 逐行容错**：单个任务行的解码失败（如 `origin`/`deliver` 列的 JSON 损坏）或处理期异常（如 `cron_expr` 事后被改坏）只记 warning 跳过该行，绝不让一行坏数据瘫痪整个 tick、影响其余到期任务
+
+- ✅ **boot 禁用坏行必告警**：启动注册阶段一个任务因数据问题（如无法解析的 `run_at`）被自动禁用时，best-effort 向其可解析的投递目标发一条禁用告警，不再纯静默禁用
+
+- ✅ **单次触发看门狗**：每次触发套 `scheduling.fire_timeout_seconds`（默认 900 秒，0=关闭）超时保护——卡死不返回的触发会被取消，记一条 timeout 语义的 `error` 历史行，并释放其占用的并发槽与 in-flight 标记，不会让卡死的一次运行拖垮整个调度器
 
 - ✅ **任务持久化与恢复**：`scheduled_tasks` 存该 agent 的 `agent_state.db`（嵌入式 Y 维护，非 Alembic、不在管理库），由 **agent 进程**的 `CronScheduler` 在 boot 时恢复调度（平台 managed 侧不触发用户定时任务，只跑自身维护）
 
 - ✅ **全局调度配置**：`platform.yaml` 中只保存 `scheduling.enabled` 和 `scheduling.default_timezone`
   - 旧 `config/cron.yaml` 不再读取；文件存在时启动失败并提示通过 `schedule` 工具创建任务
+
+- ✅ **跨触发会话绑定可配置**：`schedule` 工具的 `session` 参数——留空（默认）每次触发独立、互不可见；指定一个字符串则历次触发累积同一会话上下文（计数器、连续对比等场景）
 
 - **无 admin CLI**：任务住 per-agent 库，platform CLI 不跨界管理（agent-owned 契约）；查看/管理一律对话完成
 
@@ -297,6 +308,26 @@ def extract_message(template: str | None, payload: Any) -> str:
 - Given：一个 `action` 任务的 message 诱导 agent 在触发时再创建一个新的定时任务
 - When：任务触发
 - Then：该次运行的工具集中没有 `schedule` 工具，无法创建新任务；用户在交互式会话中创建/管理任务不受影响
+
+**场景 16：宕机超宽限的 cron 任务不补发陈旧内容**
+- Given：一个每日定时任务，agent 停机 3 天后重启
+- When：调度器恢复
+- Then：不触发该次陈旧的触发（迟到远超其 2 小时宽限上界），记一条 `missed` 历史行，`next_run_at` 快进到下一个未来时刻
+
+**场景 17：一行坏数据不瘫痪调度器**
+- Given：某任务行的 `origin` 列因外部改动变成非法 JSON，同时存在其他正常到期任务
+- When：tick 运行
+- Then：坏行被跳过并记 warning，其余到期任务照常触发，后续 tick 不受影响
+
+**场景 18：卡死的触发被看门狗回收**
+- Given：一次触发的 agent 运行卡死不返回
+- When：超过 `fire_timeout_seconds`（默认 900 秒）
+- Then：该次运行被取消，记一条 timeout 语义的失败历史行；该任务与其他任务的后续触发不受影响
+
+**场景 19：定时任务跨触发累积上下文**
+- Given：一个任务以 `schedule(action=create, session="cron/counter", ...)` 创建
+- When：该任务先后触发两次
+- Then：第二次触发能读取到第一次触发写入的历史上下文（如累计计数）；未指定 `session` 时两次触发互不可见（默认行为不变）
 
 ### 规划中（v1.0）
 

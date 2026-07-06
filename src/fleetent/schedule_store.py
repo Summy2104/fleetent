@@ -13,6 +13,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fleetent.db import SQLiteDatabase
+from fleetent.structured_logging import get_logger
+
+logger = get_logger("schedule_store")
 
 _state_db: SQLiteDatabase | None = None
 
@@ -51,7 +54,7 @@ def create(
     schedule_kind: str = "cron",
     run_at: str | None = None,
     interval_seconds: int | None = None,
-    anchor: str | None = None,
+    anchor: str | None = None,  # vestigial: column is written but never read (no anchoring logic)
     origin: dict[str, Any] | None = None,
     deliver: dict[str, Any] | None = None,
     task_type: str = "generate",
@@ -140,12 +143,23 @@ def create(
 
 
 def list_tasks(include_disabled: bool = False) -> list[dict[str, Any]]:
-    """Return tasks as dicts. By default only enabled tasks (the scheduler load set)."""
+    """Return tasks as dicts. By default only enabled tasks (the scheduler load set).
+
+    A single row with corrupt JSON columns (origin/deliver) is skipped and logged
+    rather than raising for the whole table (cron-hardening F6.1) — one bad row
+    (a hand-edit, a partial write) must never wedge the tick loop for every task.
+    """
     sql = "SELECT * FROM scheduled_tasks"
     if not include_disabled:
         sql += " WHERE enabled = 1"
     rows = _database().execute(sql).fetchall()
-    return [_decode(dict(row)) for row in rows]
+    tasks = []
+    for row in rows:
+        try:
+            tasks.append(_decode(dict(row)))
+        except Exception as exc:  # noqa: BLE001 — one corrupt row must not break the table
+            logger.warn("schedule_store_row_decode_failed", id=row["id"], exception=exc)
+    return tasks
 
 
 def get(task_id: str) -> dict[str, Any] | None:

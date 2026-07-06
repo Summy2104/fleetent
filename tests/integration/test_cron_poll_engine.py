@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 import fleetent.cron_scheduler as cs
 import fleetent.schedule_store as store
 from fleetent.config import SchedulingSettings
@@ -25,6 +27,21 @@ def _mk_interval_task(seconds: int = 60, next_run: datetime | None = None) -> di
         source="tool",
         schedule_kind="interval",
         interval_seconds=seconds,
+    )
+    if next_run is not None:
+        store.update_run_state(task["id"], next_run_at=_iso(next_run))
+    return store.get(task["id"])
+
+
+def _mk_cron_task(cron_expr: str = "0 12 * * *", next_run: datetime | None = None) -> dict:
+    task = store.create(
+        name="t",
+        timezone="UTC",
+        user_id="u-1",
+        message="hi",
+        source="tool",
+        schedule_kind="cron",
+        cron_expr=cron_expr,
     )
     if next_run is not None:
         store.update_run_state(task["id"], next_run_at=_iso(next_run))
@@ -147,6 +164,151 @@ async def test_stale_interval_fast_forwards_single_fire(isolated_schedule_db, mo
     assert datetime.fromisoformat(store.get(task["id"])["next_run_at"]) > _NOW
 
 
+# ── 3.5 misfire grace: cron gets an upper bound, interval never does (cron-hardening F5) ──
+
+
+async def test_cron_within_grace_still_fires(isolated_schedule_db, monkeypatch):
+    """A daily cron (24h period, grace = min(12h, 2h) = 2h) that is only 40 minutes
+    late still fires — well within its misfire grace window."""
+    fired: list[str] = []
+
+    async def _fake_fire(row, connectors=None, history_retention=None):
+        fired.append(row["id"])
+
+    monkeypatch.setattr(cs, "_fire", _fake_fire)
+
+    task = _mk_cron_task("0 12 * * *", next_run=_NOW - timedelta(minutes=40))
+
+    sched = cs.CronScheduler(settings=SchedulingSettings())
+    for t in store.list_tasks():
+        sched._register(t)
+    dispatched = await sched._tick(now=_NOW)
+    await asyncio.gather(*dispatched)
+
+    assert fired == [task["id"]]
+    assert store.list_runs(task["id"]) == []  # no "missed" row — this is a normal fire
+
+
+async def test_cron_beyond_grace_is_missed_not_fired(isolated_schedule_db, monkeypatch):
+    """A daily cron missed by 3 days (>> its 2h grace cap) must NOT fire a stale
+    occurrence — it fast-forwards and records a `missed` history row instead."""
+    fired: list[str] = []
+
+    async def _fake_fire(row, connectors=None, history_retention=None):
+        fired.append(row["id"])
+
+    monkeypatch.setattr(cs, "_fire", _fake_fire)
+
+    task = _mk_cron_task("0 12 * * *", next_run=_NOW - timedelta(days=3))
+
+    sched = cs.CronScheduler(settings=SchedulingSettings())
+    for t in store.list_tasks():
+        sched._register(t)
+    dispatched = await sched._tick(now=_NOW)
+    await asyncio.gather(*dispatched)
+
+    assert fired == []  # not dispatched
+    assert datetime.fromisoformat(store.get(task["id"])["next_run_at"]) > _NOW  # fast-forwarded
+
+    runs = store.list_runs(task["id"])
+    assert len(runs) == 1
+    assert runs[0]["status"] == "missed"
+
+
+async def test_interval_beyond_2h_still_fires_no_grace_cap(isolated_schedule_db, monkeypatch):
+    """Interval tasks have no staleness upper bound — a fixed-period task's single
+    catch-up fire is always current-value content, unlike a stale cron digest."""
+    fired: list[str] = []
+
+    async def _fake_fire(row, connectors=None, history_retention=None):
+        fired.append(row["id"])
+
+    monkeypatch.setattr(cs, "_fire", _fake_fire)
+
+    task = _mk_interval_task(60, next_run=_NOW - timedelta(days=3))
+
+    sched = cs.CronScheduler(settings=SchedulingSettings())
+    for t in store.list_tasks():
+        sched._register(t)
+    dispatched = await sched._tick(now=_NOW)
+    await asyncio.gather(*dispatched)
+
+    assert fired == [task["id"]]
+
+
+# ── 3.6 tick per-row fault isolation (cron-hardening F6.1) ───────────────────
+
+
+async def test_list_tasks_skips_row_with_corrupt_json_column(isolated_schedule_db):
+    """A single row with malformed origin/deliver JSON must not make list_tasks()
+    raise for the whole table — it is skipped (logged), other rows still decode."""
+    good = _mk_interval_task(60, next_run=_NOW - timedelta(seconds=1))
+    bad = _mk_interval_task(60, next_run=_NOW - timedelta(seconds=1))
+    isolated_schedule_db.execute(
+        "UPDATE scheduled_tasks SET origin = :bad WHERE id = :id",
+        {"bad": "{not valid json", "id": bad["id"]},
+    )
+
+    tasks = store.list_tasks()
+
+    ids = {t["id"] for t in tasks}
+    assert good["id"] in ids
+    assert bad["id"] not in ids
+
+
+async def test_tick_survives_one_row_with_corrupt_origin_json(isolated_schedule_db, monkeypatch):
+    """With list_tasks() resilient, a corrupt row simply never reaches the tick —
+    the other due task still fires normally, and a subsequent tick is unaffected."""
+    fired: list[str] = []
+
+    async def _fake_fire(row, connectors=None, history_retention=None):
+        fired.append(row["id"])
+
+    monkeypatch.setattr(cs, "_fire", _fake_fire)
+
+    good = _mk_interval_task(60, next_run=_NOW - timedelta(seconds=1))
+    bad = _mk_interval_task(60, next_run=_NOW - timedelta(seconds=1))
+    isolated_schedule_db.execute(
+        "UPDATE scheduled_tasks SET origin = :bad WHERE id = :id",
+        {"bad": "{not valid json", "id": bad["id"]},
+    )
+
+    sched = cs.CronScheduler(settings=SchedulingSettings())
+    dispatched = await sched._tick(now=_NOW)
+    await asyncio.gather(*dispatched)
+
+    assert fired == [good["id"]]
+
+    # A second tick still works normally — the bad row does not wedge the loop.
+    dispatched2 = await sched._tick(now=_NOW + timedelta(seconds=61))
+    await asyncio.gather(*dispatched2)
+    assert good["id"] in fired
+
+
+async def test_tick_survives_malformed_cron_expr_mid_loop(isolated_schedule_db, monkeypatch):
+    """A row whose cron_expr became unparseable after creation (e.g. hand-edited)
+    must not raise out of _tick and starve tasks later in the same iteration."""
+    fired: list[str] = []
+
+    async def _fake_fire(row, connectors=None, history_retention=None):
+        fired.append(row["id"])
+
+    monkeypatch.setattr(cs, "_fire", _fake_fire)
+
+    broken = _mk_cron_task("0 12 * * *", next_run=_NOW - timedelta(seconds=1))
+    isolated_schedule_db.execute(
+        "UPDATE scheduled_tasks SET cron_expr = :bad WHERE id = :id",
+        {"bad": "not a cron expr", "id": broken["id"]},
+    )
+    good = _mk_interval_task(60, next_run=_NOW - timedelta(seconds=1))
+
+    sched = cs.CronScheduler(settings=SchedulingSettings())
+    dispatched = await sched._tick(now=_NOW)
+    await asyncio.gather(*dispatched)
+
+    assert fired == [good["id"]]
+
+
 # ── 4.1 bounded parallel execution ───────────────────────────────────────────
 
 
@@ -179,6 +341,53 @@ async def test_bounded_parallel_execution(isolated_schedule_db, monkeypatch):
     await asyncio.gather(*dispatched)
 
 
+# ── 4.1b per-fire watchdog (cron-hardening F6.3) ──────────────────────────────
+
+
+async def test_fire_watchdog_cancels_hung_run_and_releases_slot(isolated_schedule_db, monkeypatch):
+    async def _hangs_forever(row, connectors=None, history_retention=None):
+        await asyncio.Event().wait()  # never set — simulates a stuck fire
+
+    monkeypatch.setattr(cs, "_fire", _hangs_forever)
+
+    task = _mk_interval_task(60, next_run=_NOW - timedelta(seconds=1))
+
+    sched = cs.CronScheduler(settings=SchedulingSettings(fire_timeout_seconds=0.05))
+    for t in store.list_tasks():
+        sched._register(t)
+    dispatched = await sched._tick(now=_NOW)
+
+    # Must complete (the watchdog cancels the hung run) rather than hang forever.
+    await asyncio.wait_for(asyncio.gather(*dispatched), timeout=2.0)
+
+    assert task["id"] not in sched._inflight  # in-flight slot released
+    assert sched._sem._value == sched._max_parallel  # concurrency slot released
+
+    runs = store.list_runs(task["id"])
+    assert len(runs) == 1
+    assert runs[0]["status"] == "error"
+    assert "timed out" in (runs[0]["agent_error"] or "").lower()
+
+
+async def test_fire_watchdog_disabled_when_timeout_is_zero(isolated_schedule_db, monkeypatch):
+    async def _slow_but_finite(row, connectors=None, history_retention=None):
+        await asyncio.sleep(0.15)
+
+    monkeypatch.setattr(cs, "_fire", _slow_but_finite)
+
+    task = _mk_interval_task(60, next_run=_NOW - timedelta(seconds=1))
+
+    sched = cs.CronScheduler(settings=SchedulingSettings(fire_timeout_seconds=0))
+    for t in store.list_tasks():
+        sched._register(t)
+    dispatched = await sched._tick(now=_NOW)
+    await asyncio.wait_for(asyncio.gather(*dispatched), timeout=2.0)
+
+    # No watchdog-recorded timeout — the stub _fire itself writes no history, so any
+    # row here would only come from the watchdog wrapper firing (it must not).
+    assert store.list_runs(task["id"]) == []
+
+
 # ── 4.2 tick loop lifecycle ──────────────────────────────────────────────────
 
 
@@ -196,6 +405,39 @@ async def test_disabled_scheduling_does_not_start_tick(isolated_schedule_db):
     sched = cs.CronScheduler(settings=SchedulingSettings(enabled=False))
     await sched.start()
     assert not sched.running
+
+
+# ── 4.3 tick-aligned sleep (cron-hardening F7) ────────────────────────────────
+
+
+def test_next_sleep_duration_aligns_to_earliest_due_task(isolated_schedule_db):
+    sched = cs.CronScheduler(settings=SchedulingSettings(tick_interval_seconds=10))
+    task = _mk_interval_task(60, next_run=_NOW + timedelta(seconds=3))
+    sched._register(store.get(task["id"]))
+
+    assert sched._next_sleep_duration(_NOW) == pytest.approx(3.0, abs=0.01)
+
+
+def test_next_sleep_duration_falls_back_to_tick_interval_with_no_jobs(isolated_schedule_db):
+    sched = cs.CronScheduler(settings=SchedulingSettings(tick_interval_seconds=10))
+
+    assert sched._next_sleep_duration(_NOW) == 10.0
+
+
+def test_next_sleep_duration_never_below_half_second(isolated_schedule_db):
+    sched = cs.CronScheduler(settings=SchedulingSettings(tick_interval_seconds=10))
+    task = _mk_interval_task(60, next_run=_NOW - timedelta(seconds=5))  # already overdue
+    sched._register(store.get(task["id"]))
+
+    assert sched._next_sleep_duration(_NOW) == 0.5
+
+
+def test_next_sleep_duration_never_exceeds_tick_interval(isolated_schedule_db):
+    sched = cs.CronScheduler(settings=SchedulingSettings(tick_interval_seconds=10))
+    task = _mk_interval_task(60, next_run=_NOW + timedelta(minutes=5))
+    sched._register(store.get(task["id"]))
+
+    assert sched._next_sleep_duration(_NOW) == 10.0
 
 
 # ── 5. through-path: real store + real _fire, only _agent_run stubbed ────────

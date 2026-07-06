@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_TICK_INTERVAL_SECONDS = 10.0
 _DEFAULT_MAX_PARALLEL = 4
 _DEFAULT_HISTORY_RETENTION = 50
+_DEFAULT_FIRE_TIMEOUT_SECONDS = 900.0
 _MAINTENANCE_SPILLOVER_ID = "__maintenance_spillover_cleanup__"
 
 # A fired task whose final reply is this sentinel runs successfully but delivers
@@ -145,6 +146,34 @@ def compute_next_run(
         prev = now if base is None else max(base, now)
         return cast("datetime | None", trigger.get_next_fire_time(prev, now))
     raise ValueError(f"invalid schedule kind: {kind!r} (cron/once/interval)")
+
+
+_MISFIRE_GRACE_MIN = timedelta(minutes=2)
+_MISFIRE_GRACE_MAX = timedelta(hours=2)
+
+
+def cron_misfire_grace(cron_expr: str, tz: str) -> timedelta:
+    """Bound how late a ``cron`` occurrence may fire before it is treated as missed
+    (cron-hardening F5) — half the schedule's period, clamped to [2min, 2h].
+
+    Only `cron` tasks get an upper bound: a fast-forwarded `interval` occurrence's
+    content is inherently current (a status check, a poll), while a stale `cron`
+    digest re-anchored after a multi-day outage would broadcast day-old content as
+    if it were fresh — vixie-cron's timeDiff classification and hermes-agent's
+    `_compute_grace_seconds` draw the same distinction.
+    """
+    from apscheduler.triggers.cron import CronTrigger  # type: ignore[import-untyped]
+
+    trigger = CronTrigger.from_crontab(cron_expr, timezone=_as_tzinfo(tz))
+    now = datetime.now(UTC)
+    first = trigger.get_next_fire_time(None, now)
+    if first is None:
+        return _MISFIRE_GRACE_MIN
+    second = trigger.get_next_fire_time(first, first)
+    if second is None:
+        return _MISFIRE_GRACE_MIN
+    half_period = (second - first) / 2
+    return max(_MISFIRE_GRACE_MIN, min(half_period, _MISFIRE_GRACE_MAX))
 
 
 # Fire-time creator recheck, injection-decoupled from the platform management DB
@@ -597,6 +626,11 @@ class CronScheduler:
             getattr(self._settings, "history_retention", _DEFAULT_HISTORY_RETENTION)
             or _DEFAULT_HISTORY_RETENTION
         )
+        # 0 is a meaningful value (watchdog disabled) — NOT an "unset, use default" falsy
+        # sentinel like the other settings above, so no `or default` fallback here.
+        self._fire_timeout = float(
+            getattr(self._settings, "fire_timeout_seconds", _DEFAULT_FIRE_TIMEOUT_SECONDS)
+        )
         self._sem = asyncio.Semaphore(self._max_parallel)
 
     @property
@@ -622,6 +656,20 @@ class CronScheduler:
                 if task_id:
                     with suppress(Exception):
                         _store.set_enabled(task_id, False)
+                    # Disabling must not be purely silent (cron-hardening F6.2): best-effort
+                    # tell the owner via the task's resolvable target — never blocks boot.
+                    name = task.get("name") or task_id
+                    connectors = self._connectors_resolver() if self._connectors_resolver else None
+                    try:
+                        await _deliver(
+                            task,
+                            f"⚠️ 定时任务 {name} 已因数据问题被停用: {exc}",
+                            connectors or {},
+                        )
+                    except Exception as alert_exc:  # noqa: BLE001 — alerting is best-effort
+                        logger.warning(
+                            "cron_disable_alert_failed task=%s error=%s", task_id, alert_exc
+                        )
         self._register_maintenance_jobs()
         self._running = True
         self._tick_task = asyncio.create_task(self._run_tick_loop())
@@ -674,9 +722,24 @@ class CronScheduler:
             except Exception as exc:  # noqa: BLE001 — a bad tick must not kill the loop
                 logger.warning("cron_tick_failed error=%s", exc)
             try:
-                await asyncio.sleep(self._tick_interval)
+                await asyncio.sleep(self._next_sleep_duration(datetime.now(UTC)))
             except asyncio.CancelledError:
                 raise
+
+    def _next_sleep_duration(self, now: datetime) -> float:
+        """Sleep just long enough to reach the earliest known due time (cron-hardening
+        F7), instead of always waiting a full `tick_interval` — clamped to
+        `[0.5s, tick_interval]` so a due (or overdue) task fires within ~0.5s rather
+        than up to a full tick late, without busy-looping when something is overdue.
+        """
+        earliest = min(
+            (v.next_run_time for v in self._jobs.values() if v.next_run_time is not None),
+            default=None,
+        )
+        if earliest is None:
+            return self._tick_interval
+        remaining = (earliest - now).total_seconds()
+        return max(0.5, min(self._tick_interval, remaining))
 
     async def _tick(self, now: datetime | None = None) -> list[asyncio.Task[None]]:
         """Run one poll iteration: fire all due tasks, advancing recurring ones first.
@@ -686,49 +749,76 @@ class CronScheduler:
         now = now or datetime.now(UTC)
         dispatched: list[asyncio.Task[None]] = []
         for task in _store.list_tasks():
-            tid = task["id"]
-            if tid in self._inflight:
-                continue
-            kind = task.get("schedule_kind") or "cron"
-            tz = task.get("timezone") or self._settings.default_timezone
-            nr = task.get("next_run_at")
-            if not nr:
-                # No next_run_at yet (freshly created, legacy row): schedule a future
-                # occurrence; never fire immediately on backfill.
-                with suppress(Exception):
-                    self._register(task)
-                continue
-            nrt = _parse_iso(nr)
-            if nrt is None or nrt > now:
-                continue
-            view = self._jobs.get(tid)
-            if view is None:
-                with suppress(Exception):
-                    self._register(task)
-                view = self._jobs.get(tid)
-                if view is None:
-                    continue
-            if kind == "once":
-                # One-shot is not advanced (completion, not advancement, governs it).
-                dispatched.append(self._dispatch(tid, view))
-                continue
-            nxt = compute_next_run(
-                kind,
-                cron_expr=task.get("cron_expr"),
-                interval_seconds=task.get("interval_seconds"),
-                base=nrt,
-                now=now,
-                tz=tz,
-            )
-            if nxt is None:
-                continue
-            # Advance BEFORE executing, atomically: only the caller that wins the
-            # conditional update fires this occurrence (at-most-once under overlap).
-            if _store.claim_next_run(tid, expected=nr, new=_iso(nxt)):
-                view.next_run_time = nxt
-                dispatched.append(self._dispatch(tid, view))
+            # Bulkhead per task (cron-hardening F6.1): a row that raises anywhere in its
+            # own processing (e.g. a cron_expr that became unparseable after creation)
+            # must not starve every other due task later in this same tick.
+            try:
+                self._process_due_task(task, now, dispatched)
+            except Exception as exc:  # noqa: BLE001 — one bad task is a data problem, not an outage
+                logger.warning("cron_tick_row_failed task=%s error=%s", task.get("id"), exc)
         self._run_periodic_due(now)
         return dispatched
+
+    def _process_due_task(
+        self, task: dict[str, Any], now: datetime, dispatched: list[asyncio.Task[None]]
+    ) -> None:
+        """Evaluate and, if due, dispatch a single task — the per-row body of `_tick`."""
+        tid = task["id"]
+        if tid in self._inflight:
+            return
+        kind = task.get("schedule_kind") or "cron"
+        tz = task.get("timezone") or self._settings.default_timezone
+        nr = task.get("next_run_at")
+        if not nr:
+            # No next_run_at yet (freshly created, legacy row): schedule a future
+            # occurrence; never fire immediately on backfill.
+            with suppress(Exception):
+                self._register(task)
+            return
+        nrt = _parse_iso(nr)
+        if nrt is None or nrt > now:
+            return
+        view = self._jobs.get(tid)
+        if view is None:
+            with suppress(Exception):
+                self._register(task)
+            view = self._jobs.get(tid)
+            if view is None:
+                return
+        if kind == "once":
+            # One-shot is not advanced (completion, not advancement, governs it).
+            dispatched.append(self._dispatch(task, view))
+            return
+        nxt = compute_next_run(
+            kind,
+            cron_expr=task.get("cron_expr"),
+            interval_seconds=task.get("interval_seconds"),
+            base=nrt,
+            now=now,
+            tz=tz,
+        )
+        if nxt is None:
+            return
+        # Misfire grace (cron-hardening F5): a cron occurrence stale beyond half its
+        # period (clamped [2min, 2h]) is not fired — its content would be a day-old
+        # digest masquerading as fresh. Only cron gets an upper bound; interval's
+        # single catch-up fire is always current-value content (unchanged below).
+        if kind == "cron" and (now - nrt) > cron_misfire_grace(task.get("cron_expr") or "", tz):
+            if _store.claim_next_run(tid, expected=nr, new=_iso(nxt)):
+                view.next_run_time = nxt
+                _record_history(
+                    task,
+                    _iso(now),
+                    "missed",
+                    kind=task.get("task_type") or "generate",
+                    retention=self._history_retention,
+                )
+            return
+        # Advance BEFORE executing, atomically: only the caller that wins the
+        # conditional update fires this occurrence (at-most-once under overlap).
+        if _store.claim_next_run(tid, expected=nr, new=_iso(nxt)):
+            view.next_run_time = nxt
+            dispatched.append(self._dispatch(task, view))
 
     def _run_periodic_due(self, now: datetime) -> None:
         for job_id, interval in list(self._periodic_intervals.items()):
@@ -748,16 +838,39 @@ class CronScheduler:
             except Exception as exc:  # noqa: BLE001 — periodic failure is bulkheaded
                 logger.warning("cron_periodic_failed id=%s error=%s", job_id, exc)
 
-    def _dispatch(self, task_id: str, view: _JobView) -> asyncio.Task[None]:
+    def _dispatch(self, task: dict[str, Any], view: _JobView) -> asyncio.Task[None]:
         """Fire a due task's run under the concurrency bound, off the tick's critical path."""
+        task_id = task["id"]
         self._inflight.add(task_id)
+
+        started = datetime.now(UTC)
 
         async def _run() -> None:
             try:
                 async with self._sem:
                     result = view.func()
                     if asyncio.iscoroutine(result):
-                        await result
+                        # Watchdog (cron-hardening F6.3): a fire that never returns would
+                        # otherwise permanently occupy this in-flight slot and a concurrency
+                        # slot. 0 disables the bound (wait_for(..., None) never times out).
+                        timeout = self._fire_timeout if self._fire_timeout > 0 else None
+                        await asyncio.wait_for(result, timeout=timeout)
+            except TimeoutError:
+                elapsed_ms = int((datetime.now(UTC) - started).total_seconds() * 1000)
+                logger.warning("cron_fire_timeout task=%s timeout=%ss", task_id, self._fire_timeout)
+                error = f"fire timed out after {self._fire_timeout}s (ran {elapsed_ms}ms)"
+                with suppress(Exception):
+                    _record_run(task, _iso(datetime.now(UTC)), "error", error)
+                with suppress(Exception):
+                    _record_history(
+                        task,
+                        _iso(datetime.now(UTC)),
+                        "error",
+                        agent_error=error,
+                        kind=task.get("task_type") or "generate",
+                        duration_ms=elapsed_ms,
+                        retention=self._history_retention,
+                    )
             except Exception as exc:  # noqa: BLE001 — record via _fire; never crash the loop
                 logger.warning("cron_dispatch_failed task=%s error=%s", task_id, exc)
             finally:
@@ -1020,15 +1133,3 @@ async def run_task_now(task_id: str) -> bool:
         return False
     await _fire(task)
     return True
-
-
-def _parse_cron(expr: str) -> dict[str, str]:
-    """Convert a 5-field cron expression to APScheduler keyword args."""
-    minute, hour, day, month, day_of_week = expr.split()
-    return {
-        "minute": minute,
-        "hour": hour,
-        "day": day,
-        "month": month,
-        "day_of_week": day_of_week,
-    }

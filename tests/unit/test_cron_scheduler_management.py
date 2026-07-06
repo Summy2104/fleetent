@@ -246,13 +246,3 @@ def test_module_facade_functions_cover_scheduler_and_store_paths(
     assert cron_scheduler.list_tasks(include_disabled=True) == [
         {"id": "x", "include_disabled": True}
     ]
-
-
-def test_parse_cron_splits_expression() -> None:
-    assert cron_scheduler._parse_cron("*/5 9 * * 1-5") == {  # noqa: SLF001
-        "minute": "*/5",
-        "hour": "9",
-        "day": "*",
-        "month": "*",
-        "day_of_week": "1-5",
-    }
