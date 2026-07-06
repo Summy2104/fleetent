@@ -843,6 +843,8 @@ class CronScheduler:
         task_id = task["id"]
         self._inflight.add(task_id)
 
+        started = datetime.now(UTC)
+
         async def _run() -> None:
             try:
                 async with self._sem:
@@ -854,8 +856,9 @@ class CronScheduler:
                         timeout = self._fire_timeout if self._fire_timeout > 0 else None
                         await asyncio.wait_for(result, timeout=timeout)
             except TimeoutError:
+                elapsed_ms = int((datetime.now(UTC) - started).total_seconds() * 1000)
                 logger.warning("cron_fire_timeout task=%s timeout=%ss", task_id, self._fire_timeout)
-                error = f"fire timed out after {self._fire_timeout}s"
+                error = f"fire timed out after {self._fire_timeout}s (ran {elapsed_ms}ms)"
                 with suppress(Exception):
                     _record_run(task, _iso(datetime.now(UTC)), "error", error)
                 with suppress(Exception):
@@ -865,6 +868,7 @@ class CronScheduler:
                         "error",
                         agent_error=error,
                         kind=task.get("task_type") or "generate",
+                        duration_ms=elapsed_ms,
                         retention=self._history_retention,
                     )
             except Exception as exc:  # noqa: BLE001 — record via _fire; never crash the loop
