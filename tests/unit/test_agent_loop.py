@@ -732,7 +732,12 @@ async def test_run_allowed_tools_filters_schemas(mock_client, monkeypatch):
 
 
 async def test_run_allowed_tools_supports_wildcard(mock_client, monkeypatch):
-    """allowed_tools patterns support fnmatch wildcards."""
+    """allowed_tools patterns support fnmatch wildcards.
+
+    deferred-tool-loading: MCP tools are deferred by default, so to assert they reach
+    the LLM's tools= here they are also pinned hot via hot_mcp_servers. This keeps the
+    test focused on the allowed_tools wildcard admitting them to the tool surface.
+    """
     all_schemas = [
         {"type": "function", "function": {"name": "filesystem__read_file", "description": ""}},
         {"type": "function", "function": {"name": "filesystem__write_file", "description": ""}},
@@ -744,11 +749,100 @@ async def test_run_allowed_tools_supports_wildcard(mock_client, monkeypatch):
     await al.run(
         [{"role": "user", "content": "hi"}],
         allowed_tools=["filesystem__*"],
+        hot_mcp_servers=["filesystem__*"],
     )
 
     sent_tools = mock_client.chat.completions.create.call_args[1]["tools"]
     sent_names = [s["function"]["name"] for s in sent_tools]
     assert sent_names == ["filesystem__read_file", "filesystem__write_file"]
+
+
+async def test_run_mcp_tools_deferred_by_default(mock_client, monkeypatch):
+    """deferred-tool-loading: with no hot_mcp_servers, MCP tools are kept out of tools=
+    and surfaced only in the injected deferred-tool catalog."""
+    all_schemas = [
+        {
+            "type": "function",
+            "function": {"name": "filesystem__read_file", "description": "Read a file."},
+        },
+        {"type": "function", "function": {"name": "shell", "description": "Run a shell cmd."}},
+    ]
+    monkeypatch.setattr(al, "get_schemas", lambda: all_schemas)
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+
+    await al.run([{"role": "user", "content": "hi"}], allowed_tools=["*", "shell"])
+
+    call = mock_client.chat.completions.create.call_args[1]
+    sent_names = [s["function"]["name"] for s in call["tools"]]
+    # builtin stays hot; MCP tool is deferred (absent from tools=)
+    assert "shell" in sent_names
+    assert "filesystem__read_file" not in sent_names
+    # the deferred MCP tool is advertised in an injected system/context message instead
+    blob = " ".join(str(m.get("content", "")) for m in call["messages"])
+    assert "filesystem__read_file" in blob
+    assert "deferred-tools" in blob
+
+
+async def test_tool_search_activates_deferred_tool_next_turn(mock_client, monkeypatch):
+    """deferred-tool-loading end-to-end: turn 1 the model calls tool_search to fetch a
+    deferred MCP tool; turn 2 that tool is present in tools= and callable."""
+    ts_schema = {
+        "type": "function",
+        "function": {"name": "tool_search", "description": "Load deferred tools.",
+                     "parameters": {"type": "object", "properties": {}}},
+    }
+    fs_schema = {
+        "type": "function",
+        "function": {"name": "filesystem__read_file", "description": "Read a file."},
+    }
+    monkeypatch.setattr(al, "get_schemas", lambda: [ts_schema, fs_schema])
+    # The mock_client fixture stubs dispatch; restore the real one so tool_search actually
+    # runs and records the activation on tool_context.activated_tools.
+    from fleetent.tools import builtin_tools  # noqa: F401 — ensure tool_search is registered
+    from fleetent.tools.registry import dispatch as real_dispatch
+
+    monkeypatch.setattr(al, "dispatch", real_dispatch)
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[
+            _tool_resp("tool_search", '{"query": "select:filesystem__read_file"}'),
+            _text_resp("done"),
+        ]
+    )
+
+    await al.run([{"role": "user", "content": "read it"}], allowed_tools=["*"])
+
+    calls = mock_client.chat.completions.create.call_args_list
+    turn1_names = [s["function"]["name"] for s in calls[0][1]["tools"]]
+    turn2_names = [s["function"]["name"] for s in calls[1][1]["tools"]]
+    # turn 1: only hot tool_search is offered, the MCP tool is deferred
+    assert "tool_search" in turn1_names
+    assert "filesystem__read_file" not in turn1_names
+    # turn 2: tool_search activated the MCP tool, now resident in tools=
+    assert "filesystem__read_file" in turn2_names
+
+
+async def test_hot_mcp_servers_keeps_server_resident(mock_client, monkeypatch):
+    """deferred-tool-loading: hot_mcp_servers pins matching MCP tools hot; other MCP
+    servers stay deferred."""
+    schemas = [
+        {"type": "function", "function": {"name": "crm__create_lead", "description": "Lead."}},
+        {"type": "function", "function": {"name": "jira__get_issue", "description": "Issue."}},
+    ]
+    monkeypatch.setattr(al, "get_schemas", lambda: schemas)
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+
+    await al.run(
+        [{"role": "user", "content": "hi"}],
+        allowed_tools=["*"],
+        hot_mcp_servers=["crm__*"],
+    )
+
+    call = mock_client.chat.completions.create.call_args[1]
+    sent_names = [s["function"]["name"] for s in call["tools"]]
+    assert "crm__create_lead" in sent_names  # pinned hot
+    assert "jira__get_issue" not in sent_names  # other server deferred
+    blob = " ".join(str(m.get("content", "")) for m in call["messages"])
+    assert "jira__get_issue" in blob  # deferred jira tool advertised in the catalog
 
 
 # ── fallback helpers ──────────────────────────────────────────────────────────

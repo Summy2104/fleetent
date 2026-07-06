@@ -28,6 +28,7 @@ def _agent_file(**overrides: Any) -> Any:
         tenant_id="tenant-1",
         system_prompt="prompt",
         allowed_tools=["shell"],
+        hot_mcp_servers=[],
         plugins=["github"],
         features={"code_execution": True},
         allowed_skills=["triage"],
