@@ -234,6 +234,79 @@ async def test_interval_beyond_2h_still_fires_no_grace_cap(isolated_schedule_db,
     assert fired == [task["id"]]
 
 
+# ── 3.6 tick per-row fault isolation (cron-hardening F6.1) ───────────────────
+
+
+async def test_list_tasks_skips_row_with_corrupt_json_column(isolated_schedule_db):
+    """A single row with malformed origin/deliver JSON must not make list_tasks()
+    raise for the whole table — it is skipped (logged), other rows still decode."""
+    good = _mk_interval_task(60, next_run=_NOW - timedelta(seconds=1))
+    bad = _mk_interval_task(60, next_run=_NOW - timedelta(seconds=1))
+    isolated_schedule_db.execute(
+        "UPDATE scheduled_tasks SET origin = :bad WHERE id = :id",
+        {"bad": "{not valid json", "id": bad["id"]},
+    )
+
+    tasks = store.list_tasks()
+
+    ids = {t["id"] for t in tasks}
+    assert good["id"] in ids
+    assert bad["id"] not in ids
+
+
+async def test_tick_survives_one_row_with_corrupt_origin_json(isolated_schedule_db, monkeypatch):
+    """With list_tasks() resilient, a corrupt row simply never reaches the tick —
+    the other due task still fires normally, and a subsequent tick is unaffected."""
+    fired: list[str] = []
+
+    async def _fake_fire(row, connectors=None, history_retention=None):
+        fired.append(row["id"])
+
+    monkeypatch.setattr(cs, "_fire", _fake_fire)
+
+    good = _mk_interval_task(60, next_run=_NOW - timedelta(seconds=1))
+    bad = _mk_interval_task(60, next_run=_NOW - timedelta(seconds=1))
+    isolated_schedule_db.execute(
+        "UPDATE scheduled_tasks SET origin = :bad WHERE id = :id",
+        {"bad": "{not valid json", "id": bad["id"]},
+    )
+
+    sched = cs.CronScheduler(settings=SchedulingSettings())
+    dispatched = await sched._tick(now=_NOW)
+    await asyncio.gather(*dispatched)
+
+    assert fired == [good["id"]]
+
+    # A second tick still works normally — the bad row does not wedge the loop.
+    dispatched2 = await sched._tick(now=_NOW + timedelta(seconds=61))
+    await asyncio.gather(*dispatched2)
+    assert good["id"] in fired
+
+
+async def test_tick_survives_malformed_cron_expr_mid_loop(isolated_schedule_db, monkeypatch):
+    """A row whose cron_expr became unparseable after creation (e.g. hand-edited)
+    must not raise out of _tick and starve tasks later in the same iteration."""
+    fired: list[str] = []
+
+    async def _fake_fire(row, connectors=None, history_retention=None):
+        fired.append(row["id"])
+
+    monkeypatch.setattr(cs, "_fire", _fake_fire)
+
+    broken = _mk_cron_task("0 12 * * *", next_run=_NOW - timedelta(seconds=1))
+    isolated_schedule_db.execute(
+        "UPDATE scheduled_tasks SET cron_expr = :bad WHERE id = :id",
+        {"bad": "not a cron expr", "id": broken["id"]},
+    )
+    good = _mk_interval_task(60, next_run=_NOW - timedelta(seconds=1))
+
+    sched = cs.CronScheduler(settings=SchedulingSettings())
+    dispatched = await sched._tick(now=_NOW)
+    await asyncio.gather(*dispatched)
+
+    assert fired == [good["id"]]
+
+
 # ── 4.1 bounded parallel execution ───────────────────────────────────────────
 
 

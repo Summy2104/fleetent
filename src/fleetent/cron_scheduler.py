@@ -714,64 +714,76 @@ class CronScheduler:
         now = now or datetime.now(UTC)
         dispatched: list[asyncio.Task[None]] = []
         for task in _store.list_tasks():
-            tid = task["id"]
-            if tid in self._inflight:
-                continue
-            kind = task.get("schedule_kind") or "cron"
-            tz = task.get("timezone") or self._settings.default_timezone
-            nr = task.get("next_run_at")
-            if not nr:
-                # No next_run_at yet (freshly created, legacy row): schedule a future
-                # occurrence; never fire immediately on backfill.
-                with suppress(Exception):
-                    self._register(task)
-                continue
-            nrt = _parse_iso(nr)
-            if nrt is None or nrt > now:
-                continue
-            view = self._jobs.get(tid)
-            if view is None:
-                with suppress(Exception):
-                    self._register(task)
-                view = self._jobs.get(tid)
-                if view is None:
-                    continue
-            if kind == "once":
-                # One-shot is not advanced (completion, not advancement, governs it).
-                dispatched.append(self._dispatch(tid, view))
-                continue
-            nxt = compute_next_run(
-                kind,
-                cron_expr=task.get("cron_expr"),
-                interval_seconds=task.get("interval_seconds"),
-                base=nrt,
-                now=now,
-                tz=tz,
-            )
-            if nxt is None:
-                continue
-            # Misfire grace (cron-hardening F5): a cron occurrence stale beyond half its
-            # period (clamped [2min, 2h]) is not fired — its content would be a day-old
-            # digest masquerading as fresh. Only cron gets an upper bound; interval's
-            # single catch-up fire is always current-value content (unchanged below).
-            if kind == "cron" and (now - nrt) > cron_misfire_grace(task.get("cron_expr") or "", tz):
-                if _store.claim_next_run(tid, expected=nr, new=_iso(nxt)):
-                    view.next_run_time = nxt
-                    _record_history(
-                        task,
-                        _iso(now),
-                        "missed",
-                        kind=task.get("task_type") or "generate",
-                        retention=self._history_retention,
-                    )
-                continue
-            # Advance BEFORE executing, atomically: only the caller that wins the
-            # conditional update fires this occurrence (at-most-once under overlap).
-            if _store.claim_next_run(tid, expected=nr, new=_iso(nxt)):
-                view.next_run_time = nxt
-                dispatched.append(self._dispatch(tid, view))
+            # Bulkhead per task (cron-hardening F6.1): a row that raises anywhere in its
+            # own processing (e.g. a cron_expr that became unparseable after creation)
+            # must not starve every other due task later in this same tick.
+            try:
+                self._process_due_task(task, now, dispatched)
+            except Exception as exc:  # noqa: BLE001 — one bad task is a data problem, not an outage
+                logger.warning("cron_tick_row_failed task=%s error=%s", task.get("id"), exc)
         self._run_periodic_due(now)
         return dispatched
+
+    def _process_due_task(
+        self, task: dict[str, Any], now: datetime, dispatched: list[asyncio.Task[None]]
+    ) -> None:
+        """Evaluate and, if due, dispatch a single task — the per-row body of `_tick`."""
+        tid = task["id"]
+        if tid in self._inflight:
+            return
+        kind = task.get("schedule_kind") or "cron"
+        tz = task.get("timezone") or self._settings.default_timezone
+        nr = task.get("next_run_at")
+        if not nr:
+            # No next_run_at yet (freshly created, legacy row): schedule a future
+            # occurrence; never fire immediately on backfill.
+            with suppress(Exception):
+                self._register(task)
+            return
+        nrt = _parse_iso(nr)
+        if nrt is None or nrt > now:
+            return
+        view = self._jobs.get(tid)
+        if view is None:
+            with suppress(Exception):
+                self._register(task)
+            view = self._jobs.get(tid)
+            if view is None:
+                return
+        if kind == "once":
+            # One-shot is not advanced (completion, not advancement, governs it).
+            dispatched.append(self._dispatch(tid, view))
+            return
+        nxt = compute_next_run(
+            kind,
+            cron_expr=task.get("cron_expr"),
+            interval_seconds=task.get("interval_seconds"),
+            base=nrt,
+            now=now,
+            tz=tz,
+        )
+        if nxt is None:
+            return
+        # Misfire grace (cron-hardening F5): a cron occurrence stale beyond half its
+        # period (clamped [2min, 2h]) is not fired — its content would be a day-old
+        # digest masquerading as fresh. Only cron gets an upper bound; interval's
+        # single catch-up fire is always current-value content (unchanged below).
+        if kind == "cron" and (now - nrt) > cron_misfire_grace(task.get("cron_expr") or "", tz):
+            if _store.claim_next_run(tid, expected=nr, new=_iso(nxt)):
+                view.next_run_time = nxt
+                _record_history(
+                    task,
+                    _iso(now),
+                    "missed",
+                    kind=task.get("task_type") or "generate",
+                    retention=self._history_retention,
+                )
+            return
+        # Advance BEFORE executing, atomically: only the caller that wins the
+        # conditional update fires this occurrence (at-most-once under overlap).
+        if _store.claim_next_run(tid, expected=nr, new=_iso(nxt)):
+            view.next_run_time = nxt
+            dispatched.append(self._dispatch(tid, view))
 
     def _run_periodic_due(self, now: datetime) -> None:
         for job_id, interval in list(self._periodic_intervals.items()):

@@ -9,8 +9,8 @@
 
 ## 2. tick per-row 容错（F6.1）
 
-- [ ] 2.1 写测试：store 中一行 origin 为非法 JSON + 一行正常到期任务 → tick 正常触发正常行、坏行记 warning 跳过、后续 tick 不受影响 → 见红（当前 list_tasks 整批抛错）
-- [ ] 2.2 实现：`list_tasks`/`_decode` 逐行容错 + `_tick` 遍历 per-row try/except（design D2）→ 见绿
+- [x] 2.1 写测试：store 中一行 origin 为非法 JSON + 一行正常到期任务 → tick 正常触发正常行、坏行记 warning 跳过、后续 tick 不受影响；另加一行坏 cron_expr（合法 JSON 但表达式在 `compute_next_run` 处炸）验证 `_tick` 自身的 per-row 隔离 → 见红（当前 list_tasks 整批抛错 / compute_next_run 抛错终止整个 tick）
+- [x] 2.2 实现：`list_tasks` 逐行 try/except 容错（跳坏行记 warning）；`_tick` 抽出 `_process_due_task` 并在调用处套 try/except（design D2）→ 见绿
 
 ## 3. 禁用必告警（F6.2）
 

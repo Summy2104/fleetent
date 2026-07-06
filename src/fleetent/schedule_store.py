@@ -7,12 +7,15 @@ traces, reflection, memory, and approvals. No platform imports.
 """
 
 import json
+import logging
 import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
 from fleetent.db import SQLiteDatabase
+
+logger = logging.getLogger(__name__)
 
 _state_db: SQLiteDatabase | None = None
 
@@ -140,12 +143,23 @@ def create(
 
 
 def list_tasks(include_disabled: bool = False) -> list[dict[str, Any]]:
-    """Return tasks as dicts. By default only enabled tasks (the scheduler load set)."""
+    """Return tasks as dicts. By default only enabled tasks (the scheduler load set).
+
+    A single row with corrupt JSON columns (origin/deliver) is skipped and logged
+    rather than raising for the whole table (cron-hardening F6.1) — one bad row
+    (a hand-edit, a partial write) must never wedge the tick loop for every task.
+    """
     sql = "SELECT * FROM scheduled_tasks"
     if not include_disabled:
         sql += " WHERE enabled = 1"
     rows = _database().execute(sql).fetchall()
-    return [_decode(dict(row)) for row in rows]
+    tasks = []
+    for row in rows:
+        try:
+            tasks.append(_decode(dict(row)))
+        except Exception as exc:  # noqa: BLE001 — one corrupt row must not break the table
+            logger.warning("schedule_store_row_decode_failed id=%s error=%s", row["id"], exc)
+    return tasks
 
 
 def get(task_id: str) -> dict[str, Any] | None:
