@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import uuid
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
@@ -32,14 +31,10 @@ from fleetent.knowledge_base.connectors.google_drive import (
     plan_google_drive_sync,
     sync_google_drive,
 )
-from fleetent.structured_logging import _redact_value
+from fleetent.structured_logging import redact_text, redact_value
 
 ConnectorType = Literal["google_drive", "confluence"]
 ConnectorSettings = KnowledgeConfigSnapshot | KnowledgeBaseSettings | object
-_SECRET_WORD_RE = re.compile(
-    r"\b(token|secret|password|api[_-]?key|authorization|credential)[\s:=_-]+([^\s,;]+)",
-    re.IGNORECASE,
-)
 
 
 @dataclass(frozen=True)
@@ -167,9 +162,9 @@ async def check_connector(
                 sleep=_no_sleep,
             )
     except (GoogleDriveAuthError, ConfluenceAuthError) as exc:
-        return ConnectorCheckResult(connector_id, "auth_failed", _sanitize_text(str(exc)))
+        return ConnectorCheckResult(connector_id, "auth_failed", redact_text(str(exc)))
     except Exception as exc:
-        return ConnectorCheckResult(connector_id, "scope_unreachable", _sanitize_text(str(exc)))
+        return ConnectorCheckResult(connector_id, "scope_unreachable", redact_text(str(exc)))
     return ConnectorCheckResult(connector_id, "ok", "connector is reachable")
 
 
@@ -198,10 +193,10 @@ async def run_connector_sync(
             env=env,
         )
     except (GoogleDriveAuthError, ConfluenceAuthError) as exc:
-        result = ConnectorSyncResult(connector_id, "auth_failed", {}, _sanitize_text(str(exc)))
+        result = ConnectorSyncResult(connector_id, "auth_failed", {}, redact_text(str(exc)))
     except Exception as exc:
         status = "dry_run_failed" if dry_run else "sync_failed"
-        result = ConnectorSyncResult(connector_id, status, {}, _sanitize_text(str(exc)))
+        result = ConnectorSyncResult(connector_id, status, {}, redact_text(str(exc)))
     _record_definition_status(definition, result, started_at=started_at)
     return result
 
@@ -314,11 +309,11 @@ def record_connector_status(
             "last_started_at": started.isoformat(),
             "last_finished_at": finished.isoformat(),
             "last_summary_json": json.dumps(
-                _redact_value(summary),
+                redact_value(summary),
                 ensure_ascii=False,
                 sort_keys=True,
             ),
-            "last_error": _sanitize_text(error) if error else None,
+            "last_error": redact_text(error) if error else None,
             "updated_at": finished.isoformat(),
         },
     )
@@ -338,11 +333,11 @@ def record_connector_status(
             "kb_id": kb_id,
             "status": status,
             "summary_json": json.dumps(
-                _redact_value(summary),
+                redact_value(summary),
                 ensure_ascii=False,
                 sort_keys=True,
             ),
-            "error": _sanitize_text(error) if error else None,
+            "error": redact_text(error) if error else None,
             "started_at": started.isoformat(),
             "finished_at": finished.isoformat(),
         },
@@ -809,11 +804,6 @@ def _load_summary(raw: str) -> dict[str, object]:
 
 def _parse_datetime(value: object) -> datetime | None:
     return datetime.fromisoformat(str(value)) if value is not None else None
-
-
-def _sanitize_text(value: str) -> str:
-    redacted = _SECRET_WORD_RE.sub(r"\1 [REDACTED]", value)
-    return str(_redact_value(redacted))
 
 
 async def _no_sleep(seconds: float) -> None:
